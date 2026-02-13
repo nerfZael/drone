@@ -6083,9 +6083,23 @@ export default function DroneHubApp() {
                         {currentDrone.group && <GroupBadge group={currentDrone.group} />}
                       </div>
                       {String(currentDrone.repoPath ?? '').trim() ? (
-                        <div className="text-[10px] text-[var(--muted)] truncate flex items-center gap-1.5 font-mono mt-0.5" title={currentDrone.repoPath}>
+                        <div className="text-[10px] text-[var(--muted)] flex items-center gap-1.5 mt-0.5 min-w-0" title={currentDrone.repoPath}>
                           <IconFolder className="flex-shrink-0 opacity-40 w-3 h-3" />
-                          {currentDrone.repoPath}
+                          <UiMenuSelect
+                            variant="toolbar"
+                            value={String(currentDrone.repoPath ?? '').trim()}
+                            onValueChange={() => {
+                              // Read-only: existing drones cannot change repo attachment.
+                            }}
+                            entries={createRepoMenuEntries}
+                            disabled
+                            title={currentDrone.repoPath}
+                            triggerLabel={currentDrone.repoPath}
+                            triggerClassName="min-w-0 max-w-[620px] h-[18px] pl-1.5 pr-1 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[10px] font-mono text-[var(--muted)]"
+                            triggerLabelClassName="font-mono text-[10px] text-[var(--muted)]"
+                            panelClassName="right-auto w-[720px] max-w-[calc(100vw-3rem)]"
+                            chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60 flex-shrink-0" />}
+                          />
                         </div>
                       ) : (
                         <div className="text-[10px] text-[var(--muted-dim)] truncate flex items-center gap-1.5 mt-0.5" title="No repo attached">
