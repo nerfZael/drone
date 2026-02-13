@@ -588,6 +588,14 @@ function IconTrash({ className }: { className?: string }) {
   );
 }
 
+function IconPencil({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M11.013 1.427a1.75 1.75 0 012.474 0l1.086 1.086a1.75 1.75 0 010 2.474l-8.94 8.94a.75.75 0 01-.318.19l-3.5 1a.75.75 0 01-.927-.927l1-3.5a.75.75 0 01.19-.318l8.935-8.945zM12.073 2.487L3.5 11.06l-.64 2.24 2.24-.64 8.573-8.573-1.6-1.6z" />
+    </svg>
+  );
+}
+
 function IconCopy({ className }: { className?: string }) {
   return (
     <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
@@ -694,6 +702,18 @@ export default function DroneHubApp() {
   );
   const registeredRepoPathSet = React.useMemo(() => new Set(registeredRepoPaths), [registeredRepoPaths]);
 
+  const { value: groupsResp } = usePoll<{ ok: true; groups: Array<{ name: string }> }>(() => fetchJson('/api/groups'), 5000, []);
+  const registryGroupNames = React.useMemo(() => {
+    const out = new Set<string>();
+    for (const g of groupsResp?.groups ?? []) {
+      const name = String((g as any)?.name ?? '').trim();
+      if (!name) continue;
+      if (isUngroupedGroupName(name)) continue;
+      out.add(name);
+    }
+    return Array.from(out.values()).sort((a, b) => a.localeCompare(b));
+  }, [groupsResp]);
+
   const [activeRepoPath, setActiveRepoPath] = React.useState<string>(() => readLocalStorageItem('droneHub.activeRepoPath') || '');
   usePersistedLocalStorageItem('droneHub.activeRepoPath', activeRepoPath || '');
 
@@ -748,6 +768,11 @@ export default function DroneHubApp() {
 
   const groups = React.useMemo(() => {
     const m = new Map<string, DroneSummary[]>();
+    for (const rawName of registryGroupNames) {
+      const g = String(rawName ?? '').trim();
+      if (!g || isUngroupedGroupName(g)) continue;
+      if (!m.has(g)) m.set(g, []);
+    }
     for (const d of dronesFilteredByRepo) {
       const raw = (d.group ?? '').trim();
       const g = !raw || isUngroupedGroupName(raw) ? 'Ungrouped' : raw;
@@ -765,7 +790,7 @@ export default function DroneHubApp() {
       return a.group.localeCompare(b.group);
     });
     return out;
-  }, [dronesFilteredByRepo]);
+  }, [dronesFilteredByRepo, registryGroupNames]);
   const hasUngroupedGroup = React.useMemo(
     () => groups.some((g) => isUngroupedGroupName(g.group)),
     [groups],
@@ -838,6 +863,11 @@ export default function DroneHubApp() {
   }, [activeRepoPath, sidebarDrones]);
   const sidebarGroups = React.useMemo(() => {
     const m = new Map<string, DroneSummary[]>();
+    for (const rawName of registryGroupNames) {
+      const g = String(rawName ?? '').trim();
+      if (!g || isUngroupedGroupName(g)) continue;
+      if (!m.has(g)) m.set(g, []);
+    }
     for (const d of sidebarDronesFilteredByRepo) {
       const raw = (d.group ?? '').trim();
       const g = !raw || isUngroupedGroupName(raw) ? 'Ungrouped' : raw;
@@ -855,7 +885,7 @@ export default function DroneHubApp() {
       return a.group.localeCompare(b.group);
     });
     return out;
-  }, [sidebarDronesFilteredByRepo]);
+  }, [sidebarDronesFilteredByRepo, registryGroupNames]);
   const sidebarHasUngroupedGroup = React.useMemo(
     () => sidebarGroups.some((g) => isUngroupedGroupName(g.group)),
     [sidebarGroups],
@@ -1686,6 +1716,10 @@ export default function DroneHubApp() {
   const [deletingDrones, setDeletingDrones] = React.useState<Record<string, boolean>>({});
   const [renamingDrones, setRenamingDrones] = React.useState<Record<string, boolean>>({});
   const [deletingGroups, setDeletingGroups] = React.useState<Record<string, boolean>>({});
+  const [renamingGroups, setRenamingGroups] = React.useState<Record<string, boolean>>({});
+  const [createGroupDraft, setCreateGroupDraft] = React.useState('');
+  const [createGroupError, setCreateGroupError] = React.useState<string | null>(null);
+  const [creatingGroup, setCreatingGroup] = React.useState(false);
   const [deletingRepos, setDeletingRepos] = React.useState<Record<string, boolean>>({});
   const [openingTerminal, setOpeningTerminal] = React.useState<{ mode: 'ssh' | 'agent' } | null>(null);
   const [openingEditor, setOpeningEditor] = React.useState<{ editor: 'code' | 'cursor' } | null>(null);
@@ -2284,6 +2318,86 @@ export default function DroneHubApp() {
     } catch (e: any) {
       console.error('[DroneHub] draft auto-rename skipped', { name: currentName, error: e?.message ?? String(e) });
       showNameSuggestionFailureToast(e);
+    }
+  }
+
+  async function createGroupFromDraft(): Promise<void> {
+    const name = String(createGroupDraft ?? '').trim();
+    if (creatingGroup) return;
+    if (!name) {
+      setCreateGroupError('Group name is required.');
+      return;
+    }
+    if (isUngroupedGroupName(name)) {
+      setCreateGroupError('"Ungrouped" is reserved.');
+      return;
+    }
+    setCreatingGroup(true);
+    setCreateGroupError(null);
+    try {
+      await requestJson<{ ok: true; name: string }>('/api/groups', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      setCreateGroupDraft('');
+    } catch (e: any) {
+      const msg = String(e?.message ?? e ?? '').trim();
+      setCreateGroupError(msg || 'Failed to create group.');
+    } finally {
+      setCreatingGroup(false);
+    }
+  }
+
+  async function renameGroup(groupRaw: string): Promise<void> {
+    const group = String(groupRaw ?? '').trim();
+    if (!group) return;
+    if (isUngroupedGroupName(group)) return;
+    if (renamingGroups[group]) return;
+
+    const next = window.prompt(`Rename group "${group}" to:`, group);
+    const newName = String(next ?? '').trim();
+    if (!newName) return;
+    if (newName === group) return;
+    if (isUngroupedGroupName(newName)) {
+      window.alert('"Ungrouped" is reserved.');
+      return;
+    }
+
+    setRenamingGroups((prev) => ({ ...prev, [group]: true }));
+    try {
+      await requestJson<{ ok: true; oldName: string; newName: string; renamed: boolean }>(`/api/groups/${encodeURIComponent(group)}/rename`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ newName }),
+      });
+
+      // Keep per-group UI state aligned after rename.
+      setCollapsedGroups((prev) => {
+        if (!(group in prev)) return prev;
+        const next = { ...prev };
+        const wasCollapsed = Boolean(next[group]);
+        delete next[group];
+        next[newName] = wasCollapsed;
+        return next;
+      });
+      setDeletingGroups((prev) => {
+        if (!(group in prev)) return prev;
+        const next = { ...prev };
+        delete next[group];
+        return next;
+      });
+    } catch (e: any) {
+      const msg = String(e?.message ?? e ?? '').trim();
+      console.error('[DroneHub] rename group failed', { group, newName, error: e });
+      window.alert(msg || 'Rename failed.');
+    } finally {
+      setRenamingGroups((prev) => {
+        if (!prev[group]) return prev;
+        const next = { ...prev };
+        delete next[group];
+        return next;
+      });
     }
   }
 
@@ -4266,10 +4380,46 @@ export default function DroneHubApp() {
                 onDragLeave={onUngroupedDragLeave}
                 onDrop={onUngroupedDrop}
               >
+                <div className="px-1">
+                  <form
+                    className="flex items-center gap-1.5"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void createGroupFromDraft();
+                    }}
+                  >
+                    <input
+                      value={createGroupDraft}
+                      onChange={(e) => {
+                        setCreateGroupDraft(e.target.value);
+                        if (createGroupError) setCreateGroupError(null);
+                      }}
+                      placeholder="New group"
+                      className="flex-1 min-w-0 px-2 py-1.5 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.18)] text-[11px] text-[var(--fg-secondary)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-muted)]"
+                    />
+                    <button
+                      type="submit"
+                      disabled={creatingGroup}
+                      aria-busy={creatingGroup}
+                      className={`inline-flex items-center justify-center w-8 h-8 rounded border transition-all ${
+                        creatingGroup
+                          ? 'opacity-60 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
+                          : 'bg-[rgba(167,139,250,.08)] border-[rgba(167,139,250,.18)] text-[var(--accent)] hover:bg-[rgba(167,139,250,.12)]'
+                      }`}
+                      title="Create group"
+                      aria-label="Create group"
+                    >
+                      {creatingGroup ? <IconSpinner className="opacity-90" /> : <IconPlus className="opacity-90" />}
+                    </button>
+                  </form>
+                  {createGroupError && <div className="px-0.5 pt-1 text-[10px] text-[var(--red)]">{createGroupError}</div>}
+                </div>
                 {sidebarGroups.map(({ group, items }) => {
                   const collapsed = !!collapsedGroups[group];
                   const isDeletingGroup = Boolean(deletingGroups[group]);
+                  const isRenamingGroup = Boolean(renamingGroups[group]);
                   const isDropTarget = dragOverGroup === group;
+                  const canRenameGroup = !isUngroupedGroupName(group);
                   return (
                     <div
                       key={group}
@@ -4304,23 +4454,41 @@ export default function DroneHubApp() {
                             {group}
                           </span>
                         </button>
-                        <div className="flex items-center justify-end flex-shrink-0 min-w-[116px]">
+                        <div className="flex items-center justify-end flex-shrink-0 min-w-[148px]">
                           <div className="relative w-full flex justify-end">
                             <div
                               className={`flex items-center gap-2 text-[10px] font-mono text-[var(--muted-dim)] transition-opacity duration-150 ${
-                                isDeletingGroup ? 'opacity-0 pointer-events-none' : 'group-hover/group-header:opacity-0 group-hover/group-header:pointer-events-none'
+                                isDeletingGroup || isRenamingGroup
+                                  ? 'opacity-0 pointer-events-none'
+                                  : 'group-hover/group-header:opacity-0 group-hover/group-header:pointer-events-none'
                               }`}
                             >
                               <span>
                                 {items.length} drone{items.length !== 1 ? 's' : ''}
                               </span>
                             </div>
+                            {canRenameGroup && (
+                              <button
+                                onClick={() => void renameGroup(group)}
+                                disabled={isDeletingGroup || isRenamingGroup}
+                                aria-busy={isRenamingGroup}
+                                className={`absolute right-8 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
+                                  isDeletingGroup || isRenamingGroup
+                                    ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
+                                    : 'opacity-0 pointer-events-none group-hover/group-header:opacity-100 group-hover/group-header:pointer-events-auto bg-[rgba(167,139,250,.08)] border-[rgba(167,139,250,.18)] text-[var(--accent)] hover:bg-[rgba(167,139,250,.12)]'
+                                }`}
+                                title={isRenamingGroup ? `Renaming group "${group}"…` : `Rename group "${group}"`}
+                                aria-label={isRenamingGroup ? `Renaming group "${group}"` : `Rename group "${group}"`}
+                              >
+                                {isRenamingGroup ? <IconSpinner className="opacity-90" /> : <IconPencil className="opacity-90" />}
+                              </button>
+                            )}
                             <button
                               onClick={() => deleteGroup(group, items.length)}
-                              disabled={isDeletingGroup}
+                              disabled={isDeletingGroup || isRenamingGroup}
                               aria-busy={isDeletingGroup}
                               className={`absolute right-0 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
-                                isDeletingGroup
+                                isDeletingGroup || isRenamingGroup
                                   ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
                                   : 'opacity-0 pointer-events-none group-hover/group-header:opacity-100 group-hover/group-header:pointer-events-auto bg-[var(--red-subtle)] border-[rgba(255,90,90,.2)] text-[var(--red)] hover:bg-[rgba(255,90,90,.15)]'
                               }`}
