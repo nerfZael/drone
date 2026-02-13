@@ -2169,14 +2169,20 @@ async function enqueuePrompt(opts: {
         : agent.id === 'opencode'
           ? Boolean(String((chat as any)?.openCodeSessionId ?? '').trim())
           : true;
-  const defer = agent.kind === 'builtin'
-    ? shouldDeferQueuedTranscriptPrompt({
-        agentId: agent.id,
-        sessionKnown,
-        priorPendingPrompts: priorPending.map((p: any) => ({ id: String(p?.id ?? '').trim(), state: String(p?.state ?? '') })).filter((p: any) => p.id),
-        transcriptDoneIds,
-      })
-    : false;
+  // Preserve prompt ordering: if earlier prompts are still hub-queued, queue this prompt too.
+  const hasPriorQueued = priorPending.some((p: any) => String(p?.state ?? '') === 'queued');
+  const defer =
+    hasPriorQueued ||
+    (agent.kind === 'builtin'
+      ? shouldDeferQueuedTranscriptPrompt({
+          agentId: agent.id,
+          sessionKnown,
+          priorPendingPrompts: priorPending
+            .map((p: any) => ({ id: String(p?.id ?? '').trim(), state: String(p?.state ?? '') }))
+            .filter((p: any) => p.id),
+          transcriptDoneIds,
+        })
+      : false);
 
   await pushPendingPrompt({
     droneName: opts.droneName,
