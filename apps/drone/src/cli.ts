@@ -566,6 +566,11 @@ chmod +x /dvm-data/drone/daemon.js
     await waitForHealth(hostPort, token);
 
     await updateRegistry((reg) => {
+      const at = new Date().toISOString();
+      if (group) {
+        (reg as any).groups = (reg as any).groups ?? {};
+        if (!(reg as any).groups[group]) (reg as any).groups[group] = { name: group, createdAt: at, updatedAt: at };
+      }
       reg.drones[name] = {
         name,
         group,
@@ -574,7 +579,7 @@ chmod +x /dvm-data/drone/daemon.js
         containerPort,
         token,
         repoPath,
-        createdAt: new Date().toISOString(),
+        createdAt: at,
       };
     });
 
@@ -608,6 +613,11 @@ importCommand
     }
 
     await updateRegistry((reg) => {
+      const at = new Date().toISOString();
+      if (group) {
+        (reg as any).groups = (reg as any).groups ?? {};
+        if (!(reg as any).groups[group]) (reg as any).groups[group] = { name: group, createdAt: at, updatedAt: at };
+      }
       reg.drones[String(name)] = {
         name: String(name),
         group,
@@ -616,7 +626,7 @@ importCommand
         containerPort,
         token,
         repoPath,
-        createdAt: new Date().toISOString(),
+        createdAt: at,
       };
     });
 
@@ -837,6 +847,11 @@ program
   .action(async () => {
     const reg = await loadRegistry();
     const byGroup = new Map<string, string[]>();
+    for (const g of Object.keys((reg as any).groups ?? {})) {
+      const name = String(g ?? '').trim();
+      if (!name) continue;
+      if (!byGroup.has(name)) byGroup.set(name, []);
+    }
     const ungrouped: string[] = [];
     for (const d of Object.values(reg.drones)) {
       const g = String(d.group ?? '').trim();
@@ -881,6 +896,9 @@ program
     if (!group) throw new Error('invalid group (must be non-empty)');
 
     const prev = await updateRegistry((reg) => {
+      const at = new Date().toISOString();
+      (reg as any).groups = (reg as any).groups ?? {};
+      if (!(reg as any).groups[group]) (reg as any).groups[group] = { name: group, createdAt: at, updatedAt: at };
       const d = reg.drones[String(name)];
       if (!d) throw new Error(`unknown drone: ${String(name)} (not in registry)`);
       const prev = String(d.group ?? '').trim() || null;
