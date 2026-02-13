@@ -6,7 +6,7 @@ import { IconBot, IconUser, TypingDots } from './icons';
 
 export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({ item, nowMs }: { item: PendingPrompt; nowMs: number }) {
   const isFailed = item.state === 'failed';
-  const isQueued = item.state === 'queued';
+  const badgeLabel = isFailed ? 'Failed' : item.state === 'queued' ? 'Queued' : 'Pending';
   return (
     <div className="animate-fade-in opacity-90">
       <div className="flex justify-end mb-3">
@@ -20,7 +20,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
               }`}
               style={{ fontFamily: 'var(--display)' }}
             >
-              {isFailed ? 'Failed' : isQueued ? 'Queued' : 'Pending'}
+              {badgeLabel}
             </span>
             <span className="text-[9px] leading-none text-[var(--muted-dim)] font-mono" title={new Date(item.at).toLocaleString()}>
               {timeAgo(item.at, nowMs)}
