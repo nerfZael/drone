@@ -3004,7 +3004,7 @@ export default function DroneHubApp() {
     }
   }
 
-  const [repoOp, setRepoOp] = React.useState<null | { kind: 'pull' | 'reseed' | 'attach' }>(null);
+  const [repoOp, setRepoOp] = React.useState<null | { kind: 'pull' | 'reseed' }>(null);
   const [repoOpError, setRepoOpError] = React.useState<string | null>(null);
   const [repoOpErrorMeta, setRepoOpErrorMeta] = React.useState<RepoOpErrorMeta | null>(null);
 
@@ -3022,25 +3022,6 @@ export default function DroneHubApp() {
       data = null;
     }
     return { ok: r.ok, status: r.status, data };
-  }
-
-  async function attachRepo(repoPath: string) {
-    if (!currentDrone) return;
-    const name = String(currentDrone.name ?? '').trim();
-    const p = String(repoPath ?? '').trim();
-    if (!name || !p) return;
-    setRepoOpError(null);
-    setRepoOpErrorMeta(null);
-    setRepoOp({ kind: 'attach' });
-    try {
-      const url = `/api/drones/${encodeURIComponent(name)}/repo/attach`;
-      const r = await postJson(url, { repoPath: p });
-      if (!r.ok) throw new Error(String(r.data?.error ?? 'Repo attach failed.'));
-    } catch (e: any) {
-      setRepoOpError(e?.message ?? String(e));
-    } finally {
-      setRepoOp(null);
-    }
   }
 
   async function pullRepoChanges() {
@@ -6269,48 +6250,28 @@ export default function DroneHubApp() {
                     )}
                   </div>
                 )}
-                {/* Repo selector / attach */}
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                    Repo
-                  </span>
-                  <UiMenuSelect
-                    variant="toolbar"
-                    value={currentDroneRepoAttached ? currentDroneRepoPath : chatHeaderRepoPath}
-                    onValueChange={(next) => {
-                      if (currentDroneRepoAttached) return;
-                      setChatHeaderRepoPath(next);
-                      if (String(next ?? '').trim()) void attachRepo(next);
-                    }}
-                    entries={createRepoMenuEntries}
-                    disabled={
-                      currentDroneRepoAttached ||
-                      Boolean(repoOp) ||
-                      currentDrone.hubPhase === 'starting' ||
-                      currentDrone.hubPhase === 'seeding'
-                    }
-                    triggerClassName="min-w-[220px] max-w-[420px]"
-                    panelClassName="w-[720px] max-w-[calc(100vw-3rem)]"
-                    menuClassName="max-h-[240px] overflow-y-auto"
-                    title={
-                      currentDroneRepoAttached
-                        ? (currentDroneRepoPath || 'No repo')
-                        : (chatHeaderRepoPath || 'No repo')
-                    }
-                    triggerLabel={
-                      currentDroneRepoAttached
-                        ? (currentDroneRepoPath || 'No repo')
-                        : (chatHeaderRepoPath || 'No repo')
-                    }
-                    triggerLabelClassName={(currentDroneRepoAttached ? currentDroneRepoPath : chatHeaderRepoPath) ? 'font-mono text-[11px]' : undefined}
-                    chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
-                  />
-                  {!currentDroneRepoAttached && repoOp?.kind === 'attach' ? (
-                    <span className="text-[10px] text-[var(--muted-dim)]" title="Attaching repo to drone">
-                      Attaching…
+                {/* Repo (read-only for repo-attached drones only) */}
+                {currentDroneRepoAttached && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+                      Repo
                     </span>
-                  ) : null}
-                </div>
+                    <UiMenuSelect
+                      variant="toolbar"
+                      value={currentDroneRepoPath}
+                      onValueChange={() => {}}
+                      entries={createRepoMenuEntries}
+                      disabled={true}
+                      triggerClassName="min-w-[220px] max-w-[420px]"
+                      panelClassName="w-[720px] max-w-[calc(100vw-3rem)]"
+                      menuClassName="max-h-[240px] overflow-y-auto"
+                      title={currentDroneRepoPath || 'No repo'}
+                      triggerLabel={currentDroneRepoPath || 'No repo'}
+                      triggerLabelClassName={currentDroneRepoPath ? 'font-mono text-[11px]' : undefined}
+                      chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
+                    />
+                  </div>
+                )}
                 {/* View mode */}
                 {chatUiMode === 'cli' ? (
                   <button onClick={() => setOutputView(outputView === 'screen' ? 'log' : 'screen')} className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]" style={{ fontFamily: 'var(--display)' }} title={outputView === 'screen' ? 'Click for raw log view' : 'Click for screen capture view'}>{outputView === 'screen' ? 'Screen' : 'Log'}</button>
