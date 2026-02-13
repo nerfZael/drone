@@ -35,6 +35,23 @@ export type DroneRegistry = {
     }
   >;
   /**
+   * Host-side group registry.
+   *
+   * Groups are UI organization metadata and should exist independently from drones.
+   * This allows:
+   * - creating empty groups (even when there are 0 drones)
+   * - keeping groups around after the last drone is deleted
+   * - renaming groups in one place
+   */
+  groups?: Record<
+    string,
+    {
+      name: string;
+      createdAt: string;
+      updatedAt?: string;
+    }
+  >;
+  /**
    * Hub-side, short-lived entries for drones that are being provisioned.
    * These are stored in the same registry file so the Hub UI can show
    * "starting" states without relying on browser storage.
