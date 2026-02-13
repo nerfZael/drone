@@ -1,0 +1,38 @@
+{
+  "name": "looped",
+  "version": "0.1.0",
+  "description": "Minimal harness wrapper for agentic CLIs",
+  "bin": "dist/cli.js",
+  "main": "dist/cli.js",
+  "type": "commonjs",
+  "files": [
+    "dist/**",
+    "README.md"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "postbuild": "node scripts/postbuild.cjs",
+    "clean": "rimraf dist",
+    "dev": "ts-node src/cli.ts",
+    "lint": "eslint \"src/**/*.ts\"",
+    "format": "prettier --write ."
+  },
+  "dependencies": {
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.4",
+    "@typescript-eslint/eslint-plugin": "^8.8.1",
+    "@typescript-eslint/parser": "^8.8.1",
+    "eslint": "^9.12.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.3.3",
+    "rimraf": "^6.0.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.3"
+  }
+}
