@@ -12,6 +12,12 @@ bun install
 
 # build dvm
 bun --filter dvm run build
+
+# install `dvm` into your shell PATH
+npm link ./apps/dvm
+
+# verify
+dvm --help
 ```
 
 ## Usage

@@ -12,6 +12,12 @@ bun install
 
 # build looped
 bun --filter looped run build
+
+# install `looped` into your shell PATH
+npm link ./apps/looped
+
+# verify
+looped --help
 ```
 
 ## Goal

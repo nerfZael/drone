@@ -16,12 +16,14 @@ bun install
 bun --filter drone-hub run build
 ```
 
+`drone-hub` is a web app and does not install a standalone shell command.
+
 ## Run (recommended)
 
 From the monorepo root (after building `apps/drone`):
 
 ```bash
-node apps/drone/dist/cli.js hub
+drone hub
 ```
 
 That starts:
