@@ -175,7 +175,7 @@ function DiffBlock({ state }: { state: DiffState | undefined }) {
   return (
     <div className="rdv-wrapper px-2 py-2">
       {parsed.map((file, fileIndex) => (
-        <Diff key={`${file.oldPath}-${file.newPath}-${fileIndex}`} viewType="split" diffType={file.type} hunks={file.hunks}>
+        <Diff key={`${file.oldPath}-${file.newPath}-${fileIndex}`} viewType="unified" diffType={file.type} hunks={file.hunks}>
           {(hunks) => hunks.map((hunk, hunkIndex) => <Hunk key={`${fileIndex}-${hunkIndex}`} hunk={hunk} />)}
         </Diff>
       ))}
