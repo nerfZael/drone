@@ -4210,8 +4210,38 @@ export default function DroneHubApp() {
               >
                 No drones registered
               </div>
-              <div className="text-[var(--muted-dim)] text-[10px] mt-2">
-                Run <code className="px-1.5 py-0.5 rounded bg-[rgba(167,139,250,.06)] border border-[rgba(167,139,250,.08)] text-[#C4B5FD] text-[10px]">drone create &lt;name&gt;</code> to create one
+              <div className="mt-4 mx-auto max-w-[240px] flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={openDraftChatComposer}
+                  className="w-full inline-flex items-center gap-2 h-[30px] px-3 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[11px] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] transition-all"
+                  title="Create new drone (A)"
+                  aria-label="Create new drone"
+                >
+                  <IconPlus className="opacity-80" />
+                  <span className="font-semibold tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+                    Create new drone
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={openCreateModal}
+                  className="w-full inline-flex items-center gap-2 h-[30px] px-3 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[11px] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] transition-all"
+                  title="Create multiple drones (S)"
+                  aria-label="Create multiple drones"
+                >
+                  <IconPlusDouble className="opacity-80" />
+                  <span className="font-semibold tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+                    Create multiple drones
+                  </span>
+                </button>
+              </div>
+              <div className="text-[var(--muted-dim)] text-[10px] mt-4">
+                Or run{' '}
+                <code className="px-1.5 py-0.5 rounded bg-[rgba(167,139,250,.06)] border border-[rgba(167,139,250,.08)] text-[#C4B5FD] text-[10px]">
+                  drone create &lt;name&gt;
+                </code>{' '}
+                in your terminal.
               </div>
             </div>
           )}
@@ -6017,11 +6047,47 @@ export default function DroneHubApp() {
               />
             </div>
           ) : !currentDrone ? (
-            <EmptyState
-              icon={<IconDrone className="w-8 h-8 text-[var(--muted-dim)]" />}
-              title="Select a drone"
-              description="Choose a drone from the sidebar to view its session output."
-            />
+            !dronesLoading && sidebarDrones.length === 0 && !dronesError ? (
+              <EmptyState
+                icon={<IconDrone className="w-8 h-8 text-[var(--muted-dim)]" />}
+                title="No drones yet"
+                description="Create your first drone to get started."
+                actions={
+                  <div className="flex flex-col gap-2">
+                    <button
+                      type="button"
+                      onClick={openDraftChatComposer}
+                      className="w-full inline-flex items-center gap-2 h-[32px] px-3 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[11px] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] transition-all"
+                      title="Create new drone (A)"
+                      aria-label="Create new drone"
+                    >
+                      <IconPlus className="opacity-80" />
+                      <span className="font-semibold tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+                        Create new drone
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={openCreateModal}
+                      className="w-full inline-flex items-center gap-2 h-[32px] px-3 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[11px] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] transition-all"
+                      title="Create multiple drones (S)"
+                      aria-label="Create multiple drones"
+                    >
+                      <IconPlusDouble className="opacity-80" />
+                      <span className="font-semibold tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+                        Create multiple drones
+                      </span>
+                    </button>
+                  </div>
+                }
+              />
+            ) : (
+              <EmptyState
+                icon={<IconDrone className="w-8 h-8 text-[var(--muted-dim)]" />}
+                title="Select a drone"
+                description="Choose a drone from the sidebar to view its session output."
+              />
+            )
           ) : (
           <>
             {/* Header — spans full width (chat + right panel) */}
