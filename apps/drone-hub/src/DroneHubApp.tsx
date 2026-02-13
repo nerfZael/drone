@@ -147,6 +147,8 @@ type StartupSeedState = {
 };
 
 type DraftChatState = {
+  // If set, this is the (optimistic) name of the drone being created for this draft chat.
+  droneName: string;
   prompt: PendingPrompt | null;
 };
 
@@ -647,6 +649,22 @@ function SkeletonLine({ w }: { w: string }) {
   return <div className="h-2.5 rounded bg-[var(--border-subtle)] animate-pulse" style={{ width: w }} />;
 }
 
+function droneChatQueueKey(droneNameRaw: string, chatNameRaw: string): string {
+  const droneName = String(droneNameRaw ?? '').trim();
+  const chatName = String(chatNameRaw ?? '').trim() || 'default';
+  return `${droneName}::${chatName}`;
+}
+
+function parseDroneChatQueueKey(key: string): { droneName: string; chatName: string } | null {
+  const raw = String(key ?? '');
+  const idx = raw.indexOf('::');
+  if (idx < 0) return null;
+  const droneName = raw.slice(0, idx).trim();
+  const chatName = raw.slice(idx + 2).trim() || 'default';
+  if (!droneName) return null;
+  return { droneName, chatName };
+}
+
 /* ------------------------------------------------------------------ */
 /*  Sub-components                                                    */
 /* ------------------------------------------------------------------ */
@@ -807,6 +825,14 @@ export default function DroneHubApp() {
   const [draftCreateError, setDraftCreateError] = React.useState<string | null>(null);
   const [draftCreating, setDraftCreating] = React.useState(false);
   const [draftAutoRenaming, setDraftAutoRenaming] = React.useState(false);
+  // Local-only prompt queue used while drones are provisioning (hubPhase starting/seeding).
+  // Key format: `${droneName}::${chatName}`
+  const [queuedPromptsByDroneChat, setQueuedPromptsByDroneChat] = React.useState<Record<string, PendingPrompt[]>>({});
+  const queuedPromptsByDroneChatRef = React.useRef<Record<string, PendingPrompt[]>>({});
+  React.useEffect(() => {
+    queuedPromptsByDroneChatRef.current = queuedPromptsByDroneChat;
+  }, [queuedPromptsByDroneChat]);
+  const flushingQueuedKeysRef = React.useRef<Set<string>>(new Set());
   const [draftNameSuggesting, setDraftNameSuggesting] = React.useState(false);
   const [draftSuggestedName, setDraftSuggestedName] = React.useState('');
   const [draftNameSuggestionError, setDraftNameSuggestionError] = React.useState<string | null>(null);
@@ -1842,7 +1868,7 @@ export default function DroneHubApp() {
     setDraftNameSuggestionError(null);
     setDraftNameSuggesting(false);
     draftNameSuggestSeqRef.current = 0;
-    setDraftChat({ prompt: null });
+    setDraftChat({ droneName: '', prompt: null });
     setSelectedDrone(null);
     setSelectedDroneNames([]);
     selectionAnchorRef.current = null;
@@ -2880,6 +2906,7 @@ export default function DroneHubApp() {
     if (!prompt) return false;
     const tempName = uniqueDraftDroneName('untitled');
     setDraftChat({
+      droneName: tempName,
       prompt: {
         id: `draft-${makeId()}`,
         at: new Date().toISOString(),
@@ -2897,7 +2924,8 @@ export default function DroneHubApp() {
     setDraftCreateOpen(false);
     const ok = await createDroneFromDraft({ prompt, name: tempName, group: '', autoRename: true });
     if (!ok) {
-      setDraftChat({ prompt: null });
+      clearQueuedPromptsForDrone(tempName);
+      setDraftChat({ droneName: '', prompt: null });
       setDraftCreateName('');
       setDraftCreateGroup('');
       return false;
@@ -2964,6 +2992,7 @@ export default function DroneHubApp() {
       setDraftChat((prev) => {
         if (!prev?.prompt) return prev;
         return {
+          droneName: prev.droneName,
           prompt: {
             ...prev.prompt,
             id: promptId,
@@ -2986,20 +3015,19 @@ export default function DroneHubApp() {
       return true;
     } catch (e: any) {
       const err = e?.message ?? String(e);
-      {
-        setStartupSeedByDrone((prev) => {
-          if (!prev[name]) return prev;
-          const next = { ...prev };
-          delete next[name];
-          return next;
-        });
-        if (preferredSelectedDroneRef.current === name) {
-          preferredSelectedDroneRef.current = null;
-          preferredSelectedDroneHoldUntilRef.current = 0;
-        }
-        setSelectedDrone((prev) => (prev === name ? null : prev));
-        setSelectedDroneNames((prev) => prev.filter((n) => n !== name));
+      clearQueuedPromptsForDrone(name);
+      setStartupSeedByDrone((prev) => {
+        if (!prev[name]) return prev;
+        const next = { ...prev };
+        delete next[name];
+        return next;
+      });
+      if (preferredSelectedDroneRef.current === name) {
+        preferredSelectedDroneRef.current = null;
+        preferredSelectedDroneHoldUntilRef.current = 0;
       }
+      setSelectedDrone((prev) => (prev === name ? null : prev));
+      setSelectedDroneNames((prev) => prev.filter((n) => n !== name));
       setDraftCreateError(err);
       return false;
     } finally {
@@ -3192,14 +3220,79 @@ export default function DroneHubApp() {
     setOptimisticPendingPrompts([]);
   }, [selectedDrone, selectedChat]);
 
+  function enqueueQueuedPrompt(droneNameRaw: string, chatNameRaw: string, promptRaw: string): PendingPrompt | null {
+    const droneName = String(droneNameRaw ?? '').trim();
+    const chatName = String(chatNameRaw ?? '').trim() || 'default';
+    const prompt = String(promptRaw ?? '').trim();
+    if (!droneName || !prompt) return null;
+    const item: PendingPrompt = {
+      id: `queued-${makeId()}`,
+      at: new Date().toISOString(),
+      prompt,
+      state: 'queued',
+    };
+    const key = droneChatQueueKey(droneName, chatName);
+    setQueuedPromptsByDroneChat((prev) => {
+      const cur = prev[key] ?? [];
+      return { ...prev, [key]: [...cur, item] };
+    });
+    return item;
+  }
+
+  function patchQueuedPrompt(key: string, id: string, patch: Partial<PendingPrompt>) {
+    setQueuedPromptsByDroneChat((prev) => {
+      const cur = prev[key];
+      if (!cur || cur.length === 0) return prev;
+      const idx = cur.findIndex((p) => p.id === id);
+      if (idx < 0) return prev;
+      const nextArr = cur.slice();
+      nextArr[idx] = { ...nextArr[idx], ...patch, updatedAt: new Date().toISOString() };
+      return { ...prev, [key]: nextArr };
+    });
+  }
+
+  function removeQueuedPrompt(key: string, id: string) {
+    setQueuedPromptsByDroneChat((prev) => {
+      const cur = prev[key];
+      if (!cur || cur.length === 0) return prev;
+      const nextArr = cur.filter((p) => p.id !== id);
+      if (nextArr.length === cur.length) return prev;
+      if (nextArr.length === 0) {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      }
+      return { ...prev, [key]: nextArr };
+    });
+  }
+
+  function clearQueuedPromptsForDrone(droneNameRaw: string) {
+    const droneName = String(droneNameRaw ?? '').trim();
+    if (!droneName) return;
+    setQueuedPromptsByDroneChat((prev) => {
+      let changed = false;
+      const next: Record<string, PendingPrompt[]> = {};
+      for (const [k, v] of Object.entries(prev)) {
+        const parsed = parseDroneChatQueueKey(k);
+        if (parsed && parsed.droneName === droneName) {
+          changed = true;
+          continue;
+        }
+        next[k] = v;
+      }
+      return changed ? next : prev;
+    });
+  }
+
   async function sendPromptText(promptRaw: string): Promise<boolean> {
     if (!currentDrone) return false;
-    if (currentDrone.hubPhase === 'starting' || currentDrone.hubPhase === 'seeding') {
-      setPromptError(`"${currentDrone.name}" is still provisioning. Try again in a moment.`);
-      return false;
-    }
     const prompt = String(promptRaw || '').trim();
     if (!prompt) return false;
+    if (currentDrone.hubPhase === 'starting' || currentDrone.hubPhase === 'seeding') {
+      enqueueQueuedPrompt(currentDrone.name, selectedChat || 'default', prompt);
+      setPromptError(null);
+      return true;
+    }
     setSendingPromptCount((c) => c + 1);
     setPromptError(null);
     try {
@@ -3258,6 +3351,66 @@ export default function DroneHubApp() {
   const chatUiMode = chatUiModeForAgent(chatInfo?.agent ?? startupAgentForSelectedDrone ?? null);
   const nowMs = useNowMs(1000, chatUiMode === 'transcript');
 
+  React.useEffect(() => {
+    const keys = Object.keys(queuedPromptsByDroneChat);
+    if (keys.length === 0) return;
+
+    for (const key of keys) {
+      const parsed = parseDroneChatQueueKey(key);
+      if (!parsed) continue;
+      const drone = drones.find((d) => d.name === parsed.droneName) ?? null;
+      if (!drone) continue;
+      if (drone.hubPhase === 'starting' || drone.hubPhase === 'seeding' || drone.hubPhase === 'error') continue;
+      if (flushingQueuedKeysRef.current.has(key)) continue;
+      flushingQueuedKeysRef.current.add(key);
+
+      void (async () => {
+        while (true) {
+          const latest = queuedPromptsByDroneChatRef.current[key] ?? [];
+          const head = latest[0] ?? null;
+          if (!head) return;
+          // Preserve strict FIFO ordering: if the head failed (or is mid-send), don't send later items.
+          if (head.state !== 'queued') return;
+
+          patchQueuedPrompt(key, head.id, { state: 'sending', error: undefined });
+          try {
+            const data = await requestJson<{ ok: true; accepted: true; promptId: string }>(
+              `/api/drones/${encodeURIComponent(parsed.droneName)}/chats/${encodeURIComponent(parsed.chatName)}/prompt`,
+              {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ prompt: head.prompt }),
+              },
+            );
+
+            const id = String((data as any)?.promptId ?? '').trim();
+            removeQueuedPrompt(key, head.id);
+
+            // If the flushed prompt is for the currently visible chat, mirror the optimistic UX.
+            const selectedKeyMatches =
+              parsed.droneName === String(selectedDrone ?? '').trim() &&
+              parsed.chatName === (String(selectedChat ?? '').trim() || 'default');
+            if (selectedKeyMatches) {
+              if (chatUiMode === 'cli') bumpCliTyping();
+              if (chatUiMode === 'transcript' && id) {
+                setOptimisticPendingPrompts((prev) => {
+                  if (prev.some((p) => p.id === id)) return prev;
+                  return [...prev, { id, at: new Date().toISOString(), prompt: head.prompt, state: 'sending' }];
+                });
+              }
+            }
+          } catch (e: any) {
+            const errText = e?.message ?? String(e);
+            patchQueuedPrompt(key, head.id, { state: 'failed', error: errText });
+            return;
+          }
+        }
+      })().finally(() => {
+        flushingQueuedKeysRef.current.delete(key);
+      });
+    }
+  }, [chatUiMode, drones, queuedPromptsByDroneChat, selectedChat, selectedDrone]);
+
   const { value: pendingResp } = usePoll<{ ok: true; pending: PendingPrompt[] }>(
     async () => {
       if (chatUiMode !== 'transcript') return { ok: true, pending: [] };
@@ -3312,20 +3465,33 @@ export default function DroneHubApp() {
     };
   }, [chatUiMode, selectedDroneSummary, startupSeedByDrone]);
 
+  const localQueuedPromptsForSelected = React.useMemo((): PendingPrompt[] => {
+    if (!selectedDrone) return [];
+    const key = droneChatQueueKey(selectedDrone, selectedChat || 'default');
+    return queuedPromptsByDroneChat[key] ?? [];
+  }, [queuedPromptsByDroneChat, selectedChat, selectedDrone]);
+
   const visiblePendingPromptsWithStartup = React.useMemo(() => {
-    if (!startupPendingPrompt) return visiblePendingPrompts;
-    const startupPrompt = String(startupPendingPrompt.prompt ?? '').trim();
-    if (
-      visiblePendingPrompts.some((p) => {
-        if (p.id === startupPendingPrompt.id) return true;
-        const prompt = String(p?.prompt ?? '').trim();
-        return Boolean(startupPrompt) && Boolean(prompt) && prompt === startupPrompt;
-      })
-    ) {
-      return visiblePendingPrompts;
-    }
-    return [startupPendingPrompt, ...visiblePendingPrompts];
-  }, [startupPendingPrompt, visiblePendingPrompts]);
+    const base = (() => {
+      if (!startupPendingPrompt) return visiblePendingPrompts;
+      const startupPrompt = String(startupPendingPrompt.prompt ?? '').trim();
+      if (
+        visiblePendingPrompts.some((p) => {
+          if (p.id === startupPendingPrompt.id) return true;
+          const prompt = String(p?.prompt ?? '').trim();
+          return Boolean(startupPrompt) && Boolean(prompt) && prompt === startupPrompt;
+        })
+      ) {
+        return visiblePendingPrompts;
+      }
+      return [startupPendingPrompt, ...visiblePendingPrompts];
+    })();
+
+    if (chatUiMode !== 'transcript' || localQueuedPromptsForSelected.length === 0) return base;
+    const ids = new Set(base.map((p) => p.id));
+    const extra = localQueuedPromptsForSelected.filter((p) => !ids.has(p.id));
+    return extra.length > 0 ? [...base, ...extra] : base;
+  }, [chatUiMode, localQueuedPromptsForSelected, startupPendingPrompt, visiblePendingPrompts]);
 
   const selectedIsResponding = React.useMemo(() => {
     if (selectedDrone) {
@@ -6092,7 +6258,7 @@ export default function DroneHubApp() {
                         </div>
                         <div className="text-[10px] text-[var(--muted)] mt-0.5">
                           {draftChat.prompt
-                            ? 'Creating your drone and sending the first message.'
+                            ? 'Creating your drone. Any new messages you send will queue and auto-send when it’s ready.'
                             : 'Send your first message to create a new drone instantly.'}
                         </div>
                       </div>
@@ -6101,6 +6267,7 @@ export default function DroneHubApp() {
                       <button
                         type="button"
                         onClick={() => {
+                          if (draftChat?.droneName) clearQueuedPromptsForDrone(draftChat.droneName);
                           setDraftChat(null);
                           setDraftCreateOpen(false);
                           setDraftCreateError(null);
@@ -6188,6 +6355,9 @@ export default function DroneHubApp() {
                   <div className="px-5 py-5">
                     <div className="mx-auto max-w-[980px] space-y-5">
                       <PendingTranscriptTurn item={draftChat.prompt} nowMs={nowMs} />
+                      {(queuedPromptsByDroneChat[droneChatQueueKey(draftChat.droneName, 'default')] ?? []).map((p) => (
+                        <PendingTranscriptTurn key={`draft-queued-${p.id}`} item={p} nowMs={nowMs} />
+                      ))}
                     </div>
                   </div>
                 ) : (
@@ -6204,14 +6374,20 @@ export default function DroneHubApp() {
                 promptError={draftCreateError}
                 sending={draftCreating || draftAutoRenaming}
                 waiting={Boolean(draftChat.prompt)}
-                disabled={draftCreating || draftAutoRenaming || Boolean(draftChat.prompt)}
                 autoFocus={!draftCreating && !draftAutoRenaming && !draftChat.prompt}
                 modeHint={
                   spawnAgentConfig.kind === 'builtin'
                     ? `${spawnAgentLabel} · ${spawnModelForSeed ?? 'default model'} · create on send`
                     : `${spawnAgentLabel} · custom agent · create on send`
                 }
-                onSend={startDraftPrompt}
+                onSend={async (prompt) => {
+                  if (!draftChat.prompt) return await startDraftPrompt(prompt);
+                  const name = String(draftChat.droneName ?? '').trim();
+                  if (!name) return false;
+                  enqueueQueuedPrompt(name, 'default', prompt);
+                  setDraftCreateError(null);
+                  return true;
+                }}
               />
             </div>
           ) : !currentDrone ? (
@@ -6742,7 +6918,6 @@ export default function DroneHubApp() {
               promptError={promptError}
               sending={sendingPrompt}
               waiting={chatUiMode === 'transcript' && visiblePendingPromptsWithStartup.some((p) => p.state !== 'failed')}
-              disabled={currentDrone.hubPhase === 'starting' || currentDrone.hubPhase === 'seeding'}
               modeHint={
                 chatUiMode === 'transcript'
                   ? `${effectiveChatInfo?.agent ? (effectiveChatInfo.agent.kind === 'builtin' ? effectiveChatInfo.agent.id : 'custom') : '…'} agent`

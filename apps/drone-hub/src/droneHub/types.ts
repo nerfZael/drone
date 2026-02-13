@@ -139,7 +139,8 @@ export type PendingPrompt = {
   id: string;
   at: string;
   prompt: string;
-  state: 'sending' | 'sent' | 'failed';
+  // `queued` is a local-only UI state used when a drone is still provisioning.
+  state: 'queued' | 'sending' | 'sent' | 'failed';
   error?: string;
   updatedAt?: string;
 };
