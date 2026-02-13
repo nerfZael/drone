@@ -1654,6 +1654,7 @@ export default function DroneHubApp() {
   const [createMode, setCreateMode] = React.useState<'create' | 'clone'>('create');
   const [cloneSourceName, setCloneSourceName] = React.useState<string | null>(null);
   const [cloneIncludeChats, setCloneIncludeChats] = React.useState(true);
+  const [cloneSourceRepoAttached, setCloneSourceRepoAttached] = React.useState(false);
   const [createError, setCreateError] = React.useState<string | null>(null);
   const [createName, setCreateName] = React.useState('');
   const [createGroup, setCreateGroup] = React.useState('');
@@ -1790,6 +1791,7 @@ export default function DroneHubApp() {
     }
     setCreateMode('create');
     setCloneSourceName(null);
+    setCloneSourceRepoAttached(false);
     setCreateRepoPath(normalizeCreateRepoPath(activeRepoPath || ''));
     setCreateInitialMessage('');
     setCreateMessageSuffixRows(['']);
@@ -1829,11 +1831,9 @@ export default function DroneHubApp() {
       setCloneSourceName(source.name);
       setCreateName(suggestCloneName(source.name));
       setCreateGroup(source.group ?? '');
-      setCreateRepoPath(
-        normalizeCreateRepoPath(
-          source && (source.repoAttached ?? Boolean(String(source.repoPath ?? '').trim())) ? source.repoPath : '',
-        ),
-      );
+      const repoAttached = Boolean(source?.repoAttached ?? Boolean(String(source?.repoPath ?? '').trim()));
+      setCloneSourceRepoAttached(repoAttached);
+      setCreateRepoPath(repoAttached ? String(source?.repoPath ?? '').trim() : '');
       setCreateInitialMessage('');
       setCreateMessageSuffixRows(['']);
       setCloneIncludeChats(true);
@@ -1852,11 +1852,14 @@ export default function DroneHubApp() {
   }, [createNameRows]);
 
   React.useEffect(() => {
+    // Only constrain create-mode selection to registered repos.
+    // In clone mode, repo attachment is read-only and should reflect the source drone as-is.
+    if (createMode !== 'create') return;
     setCreateRepoPath((prev) => {
       const next = normalizeCreateRepoPath(prev);
       return next === prev ? prev : next;
     });
-  }, [normalizeCreateRepoPath]);
+  }, [createMode, normalizeCreateRepoPath]);
 
   const terminalOptions = React.useMemo(
     () => [
@@ -2749,6 +2752,7 @@ export default function DroneHubApp() {
       setCreateOpen(false);
       setCreateMode('create');
       setCloneSourceName(null);
+      setCloneSourceRepoAttached(false);
       setCreateName('');
       setCreateGroup('');
       setCreateRepoPath('');
@@ -4665,53 +4669,61 @@ export default function DroneHubApp() {
                   </div>
                 </div>
 
-                <div className="mb-4">
-                  <div className="text-[10px] font-semibold text-[var(--muted-dim)] mb-1.5 tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
-                    Repo path for created drones (optional)
+                {(createMode !== 'clone' || cloneSourceRepoAttached) && (
+                  <div className="mb-4">
+                    <div className="text-[10px] font-semibold text-[var(--muted-dim)] mb-1.5 tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+                      {createMode === 'clone' ? 'Repo attached to source drone' : 'Repo path for created drones (optional)'}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <UiMenuSelect
+                        variant="form"
+                        value={createRepoPath}
+                        onValueChange={setCreateRepoPath}
+                        entries={createRepoMenuEntries}
+                        open={createRepoMenuOpen}
+                        onOpenChange={setCreateRepoMenuOpen}
+                        disabled={creating || (createMode === 'clone' && cloneSourceRepoAttached)}
+                        triggerClassName="flex-1"
+                        panelClassName="right-auto w-[720px] max-w-[calc(100vw-3rem)]"
+                        title={createRepoPath || 'No repo'}
+                        triggerLabel={createRepoPath || 'No repo'}
+                        triggerLabelClassName={createRepoPath ? 'font-mono text-[12px]' : undefined}
+                        chevron={(open) => <IconChevron down={!open} className="text-[var(--muted-dim)] opacity-70 flex-shrink-0" />}
+                        menuClassName="max-h-[220px] overflow-y-auto"
+                      />
+                      {createMode === 'create' && (
+                        <button
+                          type="button"
+                          onClick={() => setCreateRepoPath('')}
+                          className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)]"
+                          style={{ fontFamily: 'var(--display)' }}
+                          title="Clear repo path"
+                          disabled={creating}
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                    {createMode === 'clone' ? (
+                      <span className="text-[10px] text-[var(--muted-dim)] block mt-1">
+                        Read-only: existing drones keep their current repo attachment.
+                      </span>
+                    ) : registeredRepoPaths.length === 0 ? (
+                      <span className="text-[10px] text-[var(--muted-dim)] block mt-1">
+                        No repos registered yet. Add one from the Repos menu in the sidebar.
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-[var(--muted-dim)] block mt-1">
+                        Choose a registered repo, or leave this set to No repo.
+                      </span>
+                    )}
+                    {createMode === 'create' && String(activeRepoPath ?? '').trim() && !String(createRepoPath ?? '').trim() && (
+                      <span className="text-[10px] text-[var(--muted-dim)] block mt-1">
+                        Tip: you have an active repo selected in the sidebar. Click it again to unselect.
+                      </span>
+                    )}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <UiMenuSelect
-                      variant="form"
-                      value={createRepoPath}
-                      onValueChange={setCreateRepoPath}
-                      entries={createRepoMenuEntries}
-                      open={createRepoMenuOpen}
-                      onOpenChange={setCreateRepoMenuOpen}
-                      disabled={creating}
-                      triggerClassName="flex-1"
-                      panelClassName="right-auto w-[720px] max-w-[calc(100vw-3rem)]"
-                      title={createRepoPath || 'No repo'}
-                      triggerLabel={createRepoPath || 'No repo'}
-                      triggerLabelClassName={createRepoPath ? 'font-mono text-[12px]' : undefined}
-                      chevron={(open) => <IconChevron down={!open} className="text-[var(--muted-dim)] opacity-70 flex-shrink-0" />}
-                      menuClassName="max-h-[220px] overflow-y-auto"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setCreateRepoPath('')}
-                      className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)]"
-                      style={{ fontFamily: 'var(--display)' }}
-                      title="Clear repo path"
-                      disabled={creating}
-                    >
-                      Clear
-                    </button>
-                  </div>
-                  {registeredRepoPaths.length === 0 ? (
-                    <span className="text-[10px] text-[var(--muted-dim)] block mt-1">
-                      No repos registered yet. Add one from the Repos menu in the sidebar.
-                    </span>
-                  ) : (
-                    <span className="text-[10px] text-[var(--muted-dim)] block mt-1">
-                      Choose a registered repo, or leave this set to No repo.
-                    </span>
-                  )}
-                  {createMode === 'create' && String(activeRepoPath ?? '').trim() && !String(createRepoPath ?? '').trim() && (
-                    <span className="text-[10px] text-[var(--muted-dim)] block mt-1">
-                      Tip: you have an active repo selected in the sidebar. Click it again to unselect.
-                    </span>
-                  )}
-                </div>
+                )}
 
                 {createMode === 'clone' && (
                   <div className="mb-4">
