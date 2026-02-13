@@ -20,19 +20,21 @@ A Bun + Turborepo monorepo for running and managing **agent-enabled “drone” 
 - **Node.js** \(>= 18\) for the built CLIs
 - **Docker** (local daemon)
 
-## Quickstart (build + run)
+## Installation
 
-From repo root:
+From the repo root:
 
 ```bash
-# install dependencies for all workspaces
+# install workspace dependencies
 bun install
 
 # build all apps (outputs to apps/*/dist)
 bun run build
 ```
 
-Run the CLIs from their built output:
+## Quickstart (run)
+
+After installation:
 
 ```bash
 # dvm

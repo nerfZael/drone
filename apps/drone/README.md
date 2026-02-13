@@ -14,6 +14,21 @@ This repo’s `drone` implementation uses **`dvm` for container/session manageme
 - **Host CLI**: `apps/drone/dist/cli.js` (command: `drone`)
 - **Daemon (inside container)**: `apps/drone/dist/daemon.js` (runs an HTTP server)
 
+## Installation
+
+From the monorepo root:
+
+```bash
+# install dependencies (one-time per repo clone)
+bun install
+
+# build dvm first (drone shells out to dvm)
+bun --filter dvm run build
+
+# build drone CLI + daemon
+bun --filter drone run build
+```
+
 ## Security
 
 The daemon is essentially remote code execution. It uses a **single Bearer token** per drone:
