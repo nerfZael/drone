@@ -3334,6 +3334,21 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
   try {
     const regAny: any = await loadRegistry();
     enqueueProvisioningForAllPending(regAny);
+    // Best-effort: ensure any existing group names are persisted as group entries.
+    // This prevents groups from "disappearing" once the last drone is deleted.
+    try {
+      await updateRegistry((regLatest: any) => {
+        const at = nowIso();
+        for (const d of Object.values(regLatest?.drones ?? {}) as any[]) {
+          ensureGroupRegistered(regLatest, d?.group ?? null, at);
+        }
+        for (const d of Object.values(regLatest?.pending ?? {}) as any[]) {
+          ensureGroupRegistered(regLatest, d?.group ?? null, at);
+        }
+      });
+    } catch {
+      // ignore (best-effort)
+    }
   } catch {
     // ignore (best-effort)
   }
