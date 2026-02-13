@@ -2936,46 +2936,43 @@ export default function DroneHubApp() {
     selectionAnchorRef.current = name;
     setSelectedChat('default');
     try {
-      const resp = await queueDrones([
-        {
-          name,
-          ...(group ? { group } : {}),
-          seedChat: 'default',
-          ...(seedAgent ? { seedAgent } : {}),
-          ...(seedModel ? { seedModel } : {}),
-          ...(prompt ? { seedPrompt: prompt } : {}),
-        },
-      ]);
-      const accepted = new Set((resp?.accepted ?? []).map((x) => String(x?.name ?? '').trim()).filter(Boolean));
-      const rejected = Array.isArray(resp?.rejected) ? resp.rejected : [];
-      if (!accepted.has(name)) {
-        const err = String(rejected.find((x: any) => String(x?.name ?? '').trim() === name)?.error ?? 'Failed to queue drone.');
-        setStartupSeedByDrone((prev) => {
-          if (!prev[name]) return prev;
-          const next = { ...prev };
-          delete next[name];
-          return next;
-        });
-        if (preferredSelectedDroneRef.current === name) {
-          preferredSelectedDroneRef.current = null;
-          preferredSelectedDroneHoldUntilRef.current = 0;
-        }
-        setSelectedDrone((prev) => (prev === name ? null : prev));
-        setSelectedDroneNames((prev) => prev.filter((n) => n !== name));
-        setDraftCreateError(err);
-        return false;
+      const data = await requestJson<{
+        ok: true;
+        accepted: true;
+        name: string;
+        chat: string;
+        promptId: string;
+        created?: boolean;
+        phase?: string;
+      }>(`/api/drones/${encodeURIComponent(name)}/chats/${encodeURIComponent('default')}/prompt`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          prompt,
+          createIfMissing: true,
+          create: group ? { group } : undefined,
+          seedAgent: seedAgent ?? undefined,
+          seedModel: seedModel ?? undefined,
+        }),
+      });
+      const promptId = String((data as any)?.promptId ?? '').trim();
+      if (!promptId) {
+        throw new Error('missing promptId');
       }
 
+      // Keep the draft row id aligned with the server/daemon prompt id for better debuggability.
       setDraftChat((prev) => {
         if (!prev?.prompt) return prev;
         return {
           prompt: {
             ...prev.prompt,
+            id: promptId,
             state: 'sent',
             updatedAt: new Date().toISOString(),
           },
         };
       });
+
       if (opts?.autoRename) {
         setDraftAutoRenaming(true);
         void suggestAndRenameDraftDrone(name, prompt).finally(() => setDraftAutoRenaming(false));
@@ -2988,19 +2985,22 @@ export default function DroneHubApp() {
       setDraftNameSuggesting(false);
       return true;
     } catch (e: any) {
-      setStartupSeedByDrone((prev) => {
-        if (!prev[name]) return prev;
-        const next = { ...prev };
-        delete next[name];
-        return next;
-      });
-      if (preferredSelectedDroneRef.current === name) {
-        preferredSelectedDroneRef.current = null;
-        preferredSelectedDroneHoldUntilRef.current = 0;
+      const err = e?.message ?? String(e);
+      {
+        setStartupSeedByDrone((prev) => {
+          if (!prev[name]) return prev;
+          const next = { ...prev };
+          delete next[name];
+          return next;
+        });
+        if (preferredSelectedDroneRef.current === name) {
+          preferredSelectedDroneRef.current = null;
+          preferredSelectedDroneHoldUntilRef.current = 0;
+        }
+        setSelectedDrone((prev) => (prev === name ? null : prev));
+        setSelectedDroneNames((prev) => prev.filter((n) => n !== name));
       }
-      setSelectedDrone((prev) => (prev === name ? null : prev));
-      setSelectedDroneNames((prev) => prev.filter((n) => n !== name));
-      setDraftCreateError(e?.message ?? String(e));
+      setDraftCreateError(err);
       return false;
     } finally {
       setDraftCreating(false);

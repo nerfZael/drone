@@ -70,6 +70,11 @@ export type DroneRegistry = {
       message?: string;
       error?: string;
       seed?: {
+        /**
+         * Optional id to use for the initial seed prompt job in the drone daemon.
+         * When present, this makes the first-turn prompt id stable across create/send flows.
+         */
+        promptId?: string;
         chatName: string;
         model?: string;
         prompt?: string;
