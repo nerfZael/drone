@@ -139,7 +139,7 @@ export type PendingPrompt = {
   id: string;
   at: string;
   prompt: string;
-  state: 'sending' | 'sent' | 'failed';
+  state: 'queued' | 'sending' | 'sent' | 'failed';
   error?: string;
   updatedAt?: string;
 };

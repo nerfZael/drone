@@ -36,6 +36,7 @@ import {
   terminalPrompt as droneTerminalPrompt,
 } from '../host/api';
 import { jobsPlanFromAgentMessage, suggestDroneNameFromMessage } from './jobsFromMessage';
+import { shouldDeferQueuedTranscriptPrompt } from './pendingPromptEnqueue';
 import {
   cleanupQuarantineWorktree,
   deleteHostRefBestEffort,
@@ -1670,12 +1671,13 @@ function looksLikeMissingContainerError(msg: string): boolean {
   );
 }
 
-type PendingPromptState = 'sending' | 'sent' | 'failed';
+type PendingPromptState = 'queued' | 'sending' | 'sent' | 'failed';
 
 type PendingPrompt = {
   id: string;
   at: string;
   prompt: string;
+  cwd?: string | null;
   state: PendingPromptState;
   error?: string;
   updatedAt?: string;
@@ -1698,7 +1700,11 @@ async function readPendingPrompts(opts: { droneName: string; chatName: string })
       id: String(p?.id ?? '').trim(),
       at: String(p?.at ?? '').trim(),
       prompt: String(p?.prompt ?? ''),
-      state: p?.state === 'sent' || p?.state === 'failed' || p?.state === 'sending' ? (p.state as PendingPromptState) : 'sending',
+      cwd: typeof p?.cwd === 'string' ? String(p.cwd) : p?.cwd === null ? null : undefined,
+      state:
+        p?.state === 'sent' || p?.state === 'failed' || p?.state === 'sending' || p?.state === 'queued'
+          ? (p.state as PendingPromptState)
+          : 'sending',
       error: typeof p?.error === 'string' ? p.error : undefined,
       updatedAt: typeof p?.updatedAt === 'string' ? p.updatedAt : undefined,
     }))
@@ -1747,6 +1753,148 @@ async function updatePendingPrompt(opts: {
   });
 }
 
+// Hub-side pump for `pendingPrompts` entries that are persisted but not yet enqueued
+// into the drone daemon (state: 'queued'). This is used to preserve session continuity
+// for agents where the continuation/session id is only known after the first turn.
+const PENDING_PROMPT_PUMP_TASKS = new Map<string, Promise<void>>();
+const PENDING_PROMPT_PUMP_QUEUE: Array<{ droneName: string; chatName: string }> = [];
+const PENDING_PROMPT_PUMP_QUEUED = new Set<string>();
+let PENDING_PROMPT_PUMP_ACTIVE = 0;
+let PENDING_PROMPT_PUMP_PUMPING = false;
+
+function pendingPromptPumpConcurrencyLimit(): number {
+  const raw = String(process.env.DRONE_HUB_PENDING_PROMPT_PUMP_CONCURRENCY ?? '').trim();
+  const n = raw ? Number(raw) : NaN;
+  if (Number.isFinite(n) && n >= 1) return Math.max(1, Math.min(16, Math.floor(n)));
+  return 6;
+}
+
+async function pumpQueuedPendingPromptsForChat(opts: { droneName: string; chatName: string }): Promise<void> {
+  const droneName = String(opts.droneName ?? '').trim();
+  const chatName = String(opts.chatName ?? '').trim() || 'default';
+  if (!droneName) return;
+
+  // Avoid unbounded loops if state keeps changing due to concurrent requests.
+  for (let attempts = 0; attempts < 50; attempts++) {
+    const { d, chat } = await getChatEntry({ droneName, chatName });
+    const agent = inferChatAgent(chat);
+    if (!agent || agent.kind !== 'builtin') return;
+
+    const entry: any = chat;
+    const pendingList: any[] = Array.isArray(entry?.pendingPrompts) ? entry.pendingPrompts : [];
+    if (pendingList.length === 0) return;
+
+    const turns: any[] = Array.isArray(entry?.turns) ? entry.turns : [];
+    const transcriptDoneIds = new Set(turns.map((t: any) => String(t?.id ?? '').trim()).filter(Boolean));
+
+    const idx = pendingList.findIndex((p: any) => String(p?.state ?? '') === 'queued' && String(p?.id ?? '').trim());
+    if (idx === -1) return;
+
+    const p = pendingList[idx] ?? {};
+    const id = String(p?.id ?? '').trim();
+    const prompt = String(p?.prompt ?? '');
+    const cwd = typeof p?.cwd === 'string' ? String(p.cwd) : null;
+    if (!id || !prompt.trim()) {
+      // Mark invalid entries as failed so they don't block forever.
+      await updatePendingPrompt({ droneName, chatName, id, patch: { state: 'failed', error: 'invalid queued prompt' } }).catch(() => {});
+      continue;
+    }
+
+    const sessionKnown =
+      agent.id === 'codex'
+        ? Boolean(String(entry?.codexThreadId ?? '').trim())
+        : agent.id === 'opencode'
+          ? Boolean(String(entry?.openCodeSessionId ?? '').trim())
+          : true;
+    const prior = pendingList
+      .slice(0, idx)
+      .map((x: any) => ({ id: String(x?.id ?? '').trim(), state: String(x?.state ?? '') }))
+      .filter((x: any) => x.id);
+    const defer = shouldDeferQueuedTranscriptPrompt({
+      agentId: agent.id,
+      sessionKnown,
+      priorPendingPrompts: prior,
+      transcriptDoneIds,
+    });
+    if (defer) return;
+
+    // Transition queued -> sending before we attempt any daemon work.
+    await updatePendingPrompt({ droneName, chatName, id, patch: { state: 'sending', error: undefined } });
+
+    try {
+      const enqueueTimeoutMs = defaultPromptEnqueueTimeoutMs();
+      const r: any = await withTimeout(
+        sendPromptToChat({ id, droneName, chatName, prompt, cwd, waitForDaemonMs: undefined }),
+        enqueueTimeoutMs,
+        `queued prompt enqueue failed for ${droneName}/${chatName}`,
+      );
+      if (r?.turnOk === false) {
+        await updatePendingPrompt({
+          droneName,
+          chatName,
+          id,
+          patch: { state: 'failed', error: String(r?.error ?? 'failed') },
+        });
+      } else {
+        await updatePendingPrompt({ droneName, chatName, id, patch: { state: 'sent' } });
+        // Best-effort: reconcile soon after enqueue to keep UI fresh.
+        enqueueReconcile(droneName, chatName);
+      }
+    } catch (e: any) {
+      await updatePendingPrompt({
+        droneName,
+        chatName,
+        id,
+        patch: { state: 'failed', error: e?.message ?? String(e) },
+      });
+    }
+  }
+}
+
+function pumpPendingPromptQueue() {
+  if (PENDING_PROMPT_PUMP_PUMPING) return;
+  PENDING_PROMPT_PUMP_PUMPING = true;
+  try {
+    const limit = pendingPromptPumpConcurrencyLimit();
+    while (PENDING_PROMPT_PUMP_ACTIVE < limit && PENDING_PROMPT_PUMP_QUEUE.length > 0) {
+      const next = PENDING_PROMPT_PUMP_QUEUE.shift();
+      if (!next) break;
+      const droneName = String(next.droneName ?? '').trim();
+      const chatName = String(next.chatName ?? '').trim() || 'default';
+      if (!droneName) continue;
+      const key = `${droneName}:${chatName}`;
+      PENDING_PROMPT_PUMP_QUEUED.delete(key);
+      if (PENDING_PROMPT_PUMP_TASKS.has(key)) continue;
+      PENDING_PROMPT_PUMP_ACTIVE += 1;
+      const p = pumpQueuedPendingPromptsForChat({ droneName, chatName })
+        .catch(() => {
+          // ignore (best-effort)
+        })
+        .finally(() => {
+          PENDING_PROMPT_PUMP_ACTIVE -= 1;
+          PENDING_PROMPT_PUMP_TASKS.delete(key);
+          pumpPendingPromptQueue();
+        });
+      PENDING_PROMPT_PUMP_TASKS.set(key, p);
+      void p;
+    }
+  } finally {
+    PENDING_PROMPT_PUMP_PUMPING = false;
+  }
+}
+
+function enqueuePendingPromptPump(droneName: string, chatName: string) {
+  const dn = String(droneName ?? '').trim();
+  const cn = String(chatName ?? '').trim() || 'default';
+  if (!dn) return;
+  const key = `${dn}:${cn}`;
+  if (PENDING_PROMPT_PUMP_TASKS.has(key)) return;
+  if (PENDING_PROMPT_PUMP_QUEUED.has(key)) return;
+  PENDING_PROMPT_PUMP_QUEUED.add(key);
+  PENDING_PROMPT_PUMP_QUEUE.push({ droneName: dn, chatName: cn });
+  pumpPendingPromptQueue();
+}
+
 function anyActivePendingPromptsForDrone(d: any): boolean {
   const chats = d?.chats && typeof d.chats === 'object' ? Object.values(d.chats) : [];
   for (const c of chats as any[]) {
@@ -1772,6 +1920,9 @@ function chatHasReconcilablePendingPrompts(entry: any): boolean {
   for (const p of pending) {
     const st = String(p?.state ?? '');
     if (st === 'failed') continue;
+    // `queued` entries haven't been enqueued into the daemon yet, so there's nothing
+    // to reconcile from daemon → transcript for them.
+    if (st === 'queued') continue;
     const id = String(p?.id ?? '').trim();
     if (!id) continue;
     if (!doneIds.has(id)) return true;
@@ -1808,6 +1959,7 @@ async function reconcileChatFromDaemon(opts: { droneName: string; chatName: stri
     const id = String(p?.id ?? '').trim();
     const state = String(p?.state ?? '');
     if (!id) continue;
+    if (state === 'queued') continue;
 
     // If already in transcript, nothing to do.
     if (transcriptIds.has(id)) {
@@ -1984,6 +2136,10 @@ async function reconcileChatFromDaemon(opts: { droneName: string; chatName: stri
       regLatest.drones = regLatest.drones ?? {};
       regLatest.drones[opts.droneName] = dLatest;
     });
+
+    // Best-effort: session ids may have been established (codexThreadId/openCodeSessionId)
+    // or a prior prompt may have completed/failed, unblocking queued follow-ups.
+    enqueuePendingPromptPump(opts.droneName, opts.chatName);
   }
 }
 
@@ -2000,11 +2156,39 @@ async function enqueuePrompt(opts: {
 
   // Make sure chat exists before we write pending state.
   await ensureChatEntry({ droneName: opts.droneName, chatName });
+  const { chat } = await getChatEntry({ droneName: opts.droneName, chatName });
+  const agent = inferChatAgent(chat);
+  const turns: any[] = Array.isArray((chat as any)?.turns) ? (chat as any).turns : [];
+  const transcriptDoneIds = new Set(turns.map((t: any) => String(t?.id ?? '').trim()).filter(Boolean));
+  const priorPending: any[] = Array.isArray((chat as any)?.pendingPrompts) ? (chat as any).pendingPrompts : [];
+  const sessionKnown =
+    agent.kind !== 'builtin'
+      ? true
+      : agent.id === 'codex'
+        ? Boolean(String((chat as any)?.codexThreadId ?? '').trim())
+        : agent.id === 'opencode'
+          ? Boolean(String((chat as any)?.openCodeSessionId ?? '').trim())
+          : true;
+  const defer = agent.kind === 'builtin'
+    ? shouldDeferQueuedTranscriptPrompt({
+        agentId: agent.id,
+        sessionKnown,
+        priorPendingPrompts: priorPending.map((p: any) => ({ id: String(p?.id ?? '').trim(), state: String(p?.state ?? '') })).filter((p: any) => p.id),
+        transcriptDoneIds,
+      })
+    : false;
+
   await pushPendingPrompt({
     droneName: opts.droneName,
     chatName,
-    pending: { id, at, prompt: opts.prompt, state: 'sending', updatedAt: at },
+    pending: { id, at, prompt: opts.prompt, cwd: opts.cwd ?? null, state: defer ? 'queued' : 'sending', updatedAt: at },
   });
+
+  if (defer) {
+    // Persisted as queued; a reconcile/update that establishes session id will pump it.
+    enqueuePendingPromptPump(opts.droneName, chatName);
+    return { id };
+  }
 
   try {
     const enqueueTimeoutMs = Math.max(
@@ -2045,6 +2229,8 @@ async function enqueuePrompt(opts: {
     });
   }
 
+  // Best-effort: if there are any deferred follow-ups, try to enqueue now.
+  enqueuePendingPromptPump(opts.droneName, chatName);
   return { id };
 }
 
@@ -3298,6 +3484,23 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
   try {
     const regAny: any = await loadRegistry();
     enqueueProvisioningForAllPending(regAny);
+    // Best-effort: resume any hub-queued prompts after hub restarts.
+    // These are prompts persisted in the registry but not yet enqueued into the daemon
+    // (e.g. Codex/OpenCode follow-ups waiting for session ids to be discovered).
+    try {
+      const drones = regAny?.drones && typeof regAny.drones === 'object' ? Object.entries(regAny.drones) : [];
+      for (const [droneName, d] of drones as any[]) {
+        const chats = d?.chats && typeof d.chats === 'object' ? Object.entries(d.chats) : [];
+        for (const [chatName, entry] of chats as any[]) {
+          const pending = Array.isArray((entry as any)?.pendingPrompts) ? (entry as any).pendingPrompts : [];
+          if (pending.some((p: any) => String(p?.state ?? '') === 'queued')) {
+            enqueuePendingPromptPump(String(droneName), String(chatName));
+          }
+        }
+      }
+    } catch {
+      // ignore (best-effort)
+    }
   } catch {
     // ignore (best-effort)
   }

@@ -144,7 +144,14 @@ export type DroneRegistry = {
             id: string;
             at: string;
             prompt: string;
-            state: 'sending' | 'sent' | 'failed';
+            /**
+             * - queued: persisted in registry but not yet enqueued into the drone daemon
+             * - sending: hub is attempting to enqueue into the daemon
+             * - sent: enqueued into daemon (queued/running/done will reconcile later)
+             * - failed: hub/daemon enqueue or run failure
+             */
+            state: 'queued' | 'sending' | 'sent' | 'failed';
+            cwd?: string | null;
             error?: string;
             updatedAt?: string;
           }>;
