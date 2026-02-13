@@ -741,6 +741,23 @@ export default function DroneHubApp() {
     if (!exists) setActiveRepoPath('');
   }, [repos, activeRepoPath]);
 
+  const [chatHeaderRepoPath, setChatHeaderRepoPath] = React.useState<string>(() => {
+    const saved = String(readLocalStorageItem('droneHub.chatHeaderRepoPath') ?? '').trim();
+    if (saved) return saved;
+    const fallback = String(activeRepoPath ?? '').trim();
+    return fallback || '';
+  });
+  usePersistedLocalStorageItem('droneHub.chatHeaderRepoPath', chatHeaderRepoPath || '');
+
+  React.useEffect(() => {
+    // If a previously-saved repo path was removed from the registry, drop back to "No repo".
+    setChatHeaderRepoPath((prev) => {
+      const p = String(prev ?? '').trim();
+      if (!p) return '';
+      return registeredRepoPathSet.has(p) ? p : '';
+    });
+  }, [registeredRepoPathSet]);
+
   const [sidebarReposCollapsed, setSidebarReposCollapsed] = React.useState<boolean>(() => readLocalStorageItem(SIDEBAR_REPOS_COLLAPSED_STORAGE_KEY) === '1');
   usePersistedLocalStorageItem(SIDEBAR_REPOS_COLLAPSED_STORAGE_KEY, sidebarReposCollapsed ? '1' : '0');
 
@@ -2939,6 +2956,7 @@ export default function DroneHubApp() {
     const nameRaw = String(opts?.name ?? draftCreateName ?? '');
     const name = nameRaw.trim();
     const group = String(opts?.group ?? draftCreateGroup ?? '').trim();
+    const repoPath = String(chatHeaderRepoPath ?? '').trim();
     if (!prompt) {
       setDraftCreateError('Send a first message before creating a drone.');
       return false;
@@ -2978,7 +2996,10 @@ export default function DroneHubApp() {
         body: JSON.stringify({
           prompt,
           createIfMissing: true,
-          create: group ? { group } : undefined,
+          create: {
+            ...(group ? { group } : {}),
+            ...(repoPath ? { repoPath } : {}),
+          },
           seedAgent: seedAgent ?? undefined,
           seedModel: seedModel ?? undefined,
         }),
@@ -3848,6 +3869,8 @@ export default function DroneHubApp() {
   }, [sessionText]);
 
   const currentDrone = selectedDrone ? drones.find((d) => d.name === selectedDrone) ?? null : null;
+  const currentDroneRepoAttached = Boolean(currentDrone?.repoAttached ?? Boolean(String(currentDrone?.repoPath ?? '').trim()));
+  const currentDroneRepoPath = String(currentDrone?.repoPath ?? '').trim();
   React.useEffect(() => {
     const pending = draftChat?.prompt ?? null;
     const prompt = String(pending?.prompt ?? '').trim();
@@ -6347,6 +6370,25 @@ export default function DroneHubApp() {
                         </button>
                       </div>
                     )}
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+                        Repo
+                      </span>
+                      <UiMenuSelect
+                        variant="toolbar"
+                        value={chatHeaderRepoPath}
+                        onValueChange={setChatHeaderRepoPath}
+                        entries={createRepoMenuEntries}
+                        disabled={draftCreating || draftAutoRenaming || Boolean(draftChat.prompt)}
+                        triggerClassName="min-w-[220px] max-w-[420px]"
+                        panelClassName="w-[720px] max-w-[calc(100vw-3rem)]"
+                        menuClassName="max-h-[240px] overflow-y-auto"
+                        title={chatHeaderRepoPath || 'No repo'}
+                        triggerLabel={chatHeaderRepoPath || 'No repo'}
+                        triggerLabelClassName={chatHeaderRepoPath ? 'font-mono text-[11px]' : undefined}
+                        chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -6618,6 +6660,28 @@ export default function DroneHubApp() {
                         {chatModelsSource}
                       </span>
                     )}
+                  </div>
+                )}
+                {/* Repo (read-only for repo-attached drones only) */}
+                {currentDroneRepoAttached && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+                      Repo
+                    </span>
+                    <UiMenuSelect
+                      variant="toolbar"
+                      value={currentDroneRepoPath}
+                      onValueChange={() => {}}
+                      entries={createRepoMenuEntries}
+                      disabled={true}
+                      triggerClassName="min-w-[220px] max-w-[420px]"
+                      panelClassName="w-[720px] max-w-[calc(100vw-3rem)]"
+                      menuClassName="max-h-[240px] overflow-y-auto"
+                      title={currentDroneRepoPath || 'No repo'}
+                      triggerLabel={currentDroneRepoPath || 'No repo'}
+                      triggerLabelClassName={currentDroneRepoPath ? 'font-mono text-[11px]' : undefined}
+                      chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
+                    />
                   </div>
                 )}
                 {/* View mode */}
