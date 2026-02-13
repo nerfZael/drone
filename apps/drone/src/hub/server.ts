@@ -4747,6 +4747,86 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         }
       }
 
+      // POST /api/drones/:name/repo/attach
+      // Attach a host repo to an existing drone (seed /work/repo and update registry metadata).
+      if (
+        method === 'POST' &&
+        parts.length === 5 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'repo' &&
+        parts[4] === 'attach'
+      ) {
+        const droneName = decodeURIComponent(parts[2]);
+        const d = await resolveDroneOrRespond(res, droneName);
+        if (!d) return;
+
+        const alreadyAttached = Boolean(String(d?.repo?.dest ?? '').trim()) || Boolean(String(d?.repo?.seededAt ?? '').trim());
+        if (alreadyAttached) {
+          json(res, 400, { ok: false, error: 'drone already has a repo attached' });
+          return;
+        }
+
+        let body: any = null;
+        try {
+          body = await readJsonBody(req);
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          return;
+        }
+        const repoPathRaw = String(body?.repoPath ?? '').trim();
+        if (!repoPathRaw) {
+          json(res, 400, { ok: false, error: 'missing repoPath' });
+          return;
+        }
+
+        await setDroneHubMeta(droneName, { phase: 'seeding', message: 'Seeding repo…' });
+        try {
+          const repoRoot = await gitTopLevel(repoPathRaw);
+          const baseRef = await gitCurrentBranchOrSha(repoRoot);
+          await dvmRepoSeed({
+            container: droneName,
+            hostPath: repoRoot,
+            dest: '/work/repo',
+            baseRef: 'HEAD',
+            branch: 'dvm/work',
+            clean: true,
+            timeoutMs: defaultRepoSeedTimeoutMs(),
+          });
+          await updateRegistry((reg2: any) => {
+            const dd = reg2?.drones?.[droneName];
+            if (!dd) return;
+            dd.repoPath = repoRoot;
+            dd.cwd = '/work/repo';
+            dd.repo = dd.repo ?? {};
+            dd.repo.dest = '/work/repo';
+            dd.repo.branch = 'dvm/work';
+            dd.repo.baseRef = baseRef;
+            dd.repo.seededAt = nowIso();
+            dd.repo.lastSeedError = null;
+            dd.repo.lastPullError = null;
+            reg2.drones = reg2.drones ?? {};
+            reg2.drones[droneName] = dd;
+          });
+          await setDroneHubMeta(droneName, null);
+          json(res, 200, { ok: true, name: droneName, repoRoot, baseRef });
+          return;
+        } catch (e: any) {
+          const msg = e?.message ?? String(e);
+          await updateRegistry((reg2: any) => {
+            const dd = reg2?.drones?.[droneName];
+            if (!dd) return;
+            dd.repo = dd.repo ?? {};
+            dd.repo.lastSeedError = msg;
+            reg2.drones = reg2.drones ?? {};
+            reg2.drones[droneName] = dd;
+          });
+          await setDroneHubMeta(droneName, { phase: 'error', message: `Repo seed failed: ${msg}` });
+          json(res, 500, { ok: false, error: msg });
+          return;
+        }
+      }
+
       // POST /api/drones/:name/repo/reseed
       // Re-seed the container repo from the host repo (offline, no bind mount).
       if (
