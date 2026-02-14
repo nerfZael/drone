@@ -36,6 +36,7 @@ import {
   terminalPrompt as droneTerminalPrompt,
 } from '../host/api';
 import { jobsPlanFromAgentMessage, suggestDroneNameFromMessage } from './jobsFromMessage';
+import { tldrFromAgentMessage } from './tldrFromMessage';
 import {
   cleanupQuarantineWorktree,
   deleteHostRefBestEffort,
@@ -3726,6 +3727,64 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           } catch (e: any) {
             json(res, 500, { ok: false, error: e?.message ?? String(e) });
           }
+          return;
+        }
+      }
+
+      // POST /api/tldr/from-message
+      // Summarizes an agent response in chat context (short Markdown TLDR).
+      if (method === 'POST' && pathname === '/api/tldr/from-message') {
+        let body: any = null;
+        try {
+          body = await readJsonBody(req);
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          return;
+        }
+
+        const response = String(body?.response ?? '').trim();
+        const prompt = typeof body?.prompt === 'string' ? body.prompt : '';
+        const context = Array.isArray(body?.context) ? body.context : [];
+        if (!response) {
+          json(res, 400, { ok: false, error: 'missing response' });
+          return;
+        }
+
+        let selectedProvider: LlmProviderId | null = null;
+        try {
+          const { provider } = await resolveEffectiveLlmProvider();
+          selectedProvider = provider;
+          const resolved = await resolveEffectiveProviderApiKeySettings(provider);
+          if (!resolved.apiKey) {
+            json(res, 412, {
+              ok: false,
+              error: `Missing ${providerDisplayName(provider)} API key. Configure it in Settings.`,
+            });
+            return;
+          }
+          const tldr = await tldrFromAgentMessage(
+            {
+              prompt,
+              response,
+              context: context
+                .map((t: any) => ({
+                  turn: typeof t?.turn === 'number' ? t.turn : Number(t?.turn ?? 0) || 0,
+                  prompt: String(t?.prompt ?? ''),
+                  response: String(t?.response ?? ''),
+                }))
+                .filter((t: any) => typeof t?.response === 'string'),
+            },
+            { provider, apiKey: resolved.apiKey },
+          );
+          json(res, 200, { ok: true, tldr });
+          return;
+        } catch (e: any) {
+          hubLog('error', 'tldr/from-message request failed', {
+            provider: selectedProvider,
+            model: String(process.env.DRONE_HUB_TLDR_MODEL ?? '').trim() || null,
+            error: e?.message ?? String(e),
+          });
+          json(res, 500, { ok: false, error: e?.message ?? String(e) });
           return;
         }
       }

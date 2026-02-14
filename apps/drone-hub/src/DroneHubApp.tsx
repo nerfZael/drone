@@ -64,6 +64,12 @@ type ChatModelOption = {
   isCurrent?: boolean;
 };
 
+type TldrState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'ready'; summary: string }
+  | { status: 'error'; error: string };
+
 const PORT_PREVIEW_STORAGE_KEY = 'droneHub.portPreviewByDrone';
 const PREVIEW_URL_STORAGE_KEY = 'droneHub.previewUrlByDrone';
 const FS_EXPLORER_VIEW_STORAGE_KEY = 'droneHub.fsExplorerView';
@@ -953,6 +959,15 @@ export default function DroneHubApp() {
   const chatEndRef = React.useRef<HTMLDivElement | null>(null);
   const [optimisticPendingPrompts, setOptimisticPendingPrompts] = React.useState<PendingPrompt[]>([]);
   const [parsingJobsByTurn, setParsingJobsByTurn] = React.useState<Record<number, boolean>>({});
+
+  const [tldrByMessageId, setTldrByMessageId] = React.useState<Record<string, TldrState>>({});
+  const tldrByMessageIdRef = React.useRef<Record<string, TldrState>>({});
+  const [showTldrByMessageId, setShowTldrByMessageId] = React.useState<Record<string, boolean>>({});
+  const showTldrByMessageIdRef = React.useRef<Record<string, boolean>>({});
+  const [hoveredAgentMessageId, setHoveredAgentMessageId] = React.useState<string | null>(null);
+  const hoveredAgentMessageIdRef = React.useRef<string | null>(null);
+  const chatUiModeRef = React.useRef<'transcript' | 'cli'>('transcript');
+
   const [jobsModal, setJobsModal] = React.useState<
     null | {
       turn: number;
@@ -996,6 +1011,18 @@ export default function DroneHubApp() {
   React.useEffect(() => {
     transcriptErrorRef.current = transcriptError;
   }, [transcriptError]);
+
+  React.useEffect(() => {
+    tldrByMessageIdRef.current = tldrByMessageId;
+  }, [tldrByMessageId]);
+
+  React.useEffect(() => {
+    showTldrByMessageIdRef.current = showTldrByMessageId;
+  }, [showTldrByMessageId]);
+
+  React.useEffect(() => {
+    hoveredAgentMessageIdRef.current = hoveredAgentMessageId;
+  }, [hoveredAgentMessageId]);
 
   React.useEffect(() => {
     const ids = droneIdentityByNameRef.current;
@@ -1274,6 +1301,97 @@ export default function DroneHubApp() {
     if (!el) return;
     el.scrollTop = el.scrollHeight;
   }, [hubLogs?.text, hubLogsExpanded, hubLogsPinnedToBottom]);
+
+  const transcriptMessageId = React.useCallback((t: TranscriptItem): string => {
+    const explicit = typeof t?.id === 'string' ? t.id.trim() : '';
+    if (explicit) return explicit;
+    const session = String(t?.session ?? '').trim() || 'session';
+    const turn = String(t?.turn ?? '');
+    const iso = String(t?.completedAt ?? t?.at ?? '').trim() || 'at';
+    return `${session}:${turn}:${iso}`;
+  }, []);
+
+  const cleanedAgentTextForTldr = React.useCallback((t: TranscriptItem): string => {
+    return stripAnsi(t.ok ? t.output : t.error || 'failed');
+  }, []);
+
+  const cleanedPromptTextForTldr = React.useCallback((t: TranscriptItem): string => {
+    return stripAnsi(t.prompt ?? '');
+  }, []);
+
+  const requestTldrForAgentMessage = React.useCallback(
+    async (target: TranscriptItem) => {
+      const messageId = transcriptMessageId(target);
+      const existing = tldrByMessageIdRef.current?.[messageId] ?? null;
+      if (existing?.status === 'loading' || existing?.status === 'ready') return;
+
+      const clip = (s: string, max: number) => {
+        const text = String(s ?? '').trim();
+        if (!text) return '';
+        return text.length > max ? `${text.slice(0, max).trimEnd()}…` : text;
+      };
+
+      const list = transcriptsRef.current ?? [];
+      let idx = list.findIndex((x) => transcriptMessageId(x) === messageId);
+      if (idx < 0) idx = list.findIndex((x) => x.session === target.session && x.turn === target.turn);
+      const end = idx >= 0 ? idx + 1 : list.length;
+      const start = Math.max(0, end - 3);
+      const slice = list.length > 0 ? list.slice(start, end) : [target];
+
+      const context = slice.map((t) => ({
+        turn: t.turn,
+        prompt: clip(cleanedPromptTextForTldr(t), 2200),
+        response: clip(cleanedAgentTextForTldr(t), 5200),
+      }));
+
+      setTldrByMessageId((prev) => ({ ...prev, [messageId]: { status: 'loading' } }));
+      try {
+        const data = await requestJson<{ ok: true; tldr: string }>(`/api/tldr/from-message`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            prompt: clip(cleanedPromptTextForTldr(target), 6000),
+            response: clip(cleanedAgentTextForTldr(target), 14_000),
+            context,
+          }),
+        });
+        const tldr = String((data as any)?.tldr ?? '').trim();
+        if (!tldr) throw new Error('Empty TLDR response.');
+        setTldrByMessageId((prev) => ({ ...prev, [messageId]: { status: 'ready', summary: tldr } }));
+      } catch (e: any) {
+        setTldrByMessageId((prev) => ({ ...prev, [messageId]: { status: 'error', error: e?.message ?? String(e) } }));
+      }
+    },
+    [cleanedAgentTextForTldr, cleanedPromptTextForTldr, transcriptMessageId],
+  );
+
+  const toggleTldrForAgentMessage = React.useCallback(
+    (target: TranscriptItem) => {
+      const messageId = transcriptMessageId(target);
+      const cur = Boolean(showTldrByMessageIdRef.current?.[messageId]);
+      const next = !cur;
+      setShowTldrByMessageId((prev) => ({ ...prev, [messageId]: next }));
+      if (next) void requestTldrForAgentMessage(target);
+    },
+    [requestTldrForAgentMessage, transcriptMessageId],
+  );
+
+  const handleAgentMessageHover = React.useCallback(
+    (t: TranscriptItem | null) => {
+      setHoveredAgentMessageId(t ? transcriptMessageId(t) : null);
+    },
+    [transcriptMessageId],
+  );
+
+  const toggleTldrFromShortcut = React.useCallback(() => {
+    if (chatUiModeRef.current !== 'transcript') return;
+    const list = transcriptsRef.current ?? [];
+    if (list.length === 0) return;
+    const hoveredId = hoveredAgentMessageIdRef.current;
+    const target = hoveredId ? list.find((t) => transcriptMessageId(t) === hoveredId) ?? null : null;
+    const chosen = target ?? list[list.length - 1];
+    toggleTldrForAgentMessage(chosen);
+  }, [toggleTldrForAgentMessage, transcriptMessageId]);
 
   const parseJobsFromAgentMessage = React.useCallback(async (opts: { turn: number; message: string }) => {
     const message = String(opts.message ?? '').trim();
@@ -1911,6 +2029,11 @@ export default function DroneHubApp() {
 
       // Letter shortcuts only apply for plain key presses.
       if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+      if (key === 'w') {
+        e.preventDefault();
+        toggleTldrFromShortcut();
+        return;
+      }
       if (key === 'a') {
         e.preventDefault();
         openDraftChatComposer();
@@ -1923,7 +2046,7 @@ export default function DroneHubApp() {
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [openCreateModal, openDraftChatComposer]);
+  }, [openCreateModal, openDraftChatComposer, toggleTldrFromShortcut]);
 
   React.useEffect(() => {
     if (!createOpen) {
@@ -3143,6 +3266,10 @@ export default function DroneHubApp() {
       : null;
   const chatUiMode = chatUiModeForAgent(chatInfo?.agent ?? startupAgentForSelectedDrone ?? null);
   const nowMs = useNowMs(1000, chatUiMode === 'transcript');
+
+  React.useEffect(() => {
+    chatUiModeRef.current = chatUiMode;
+  }, [chatUiMode]);
 
   const { value: pendingResp } = usePoll<{ ok: true; pending: PendingPrompt[] }>(
     async () => {
@@ -6422,15 +6549,23 @@ export default function DroneHubApp() {
                     <TranscriptSkeleton />
                   ) : (transcripts && transcripts.length > 0) || visiblePendingPromptsWithStartup.length > 0 ? (
                     <div className="max-w-[900px] mx-auto px-6 py-5 flex flex-col gap-6">
-                      {(transcripts ?? []).map((t) => (
-                        <TranscriptTurn
-                          key={`${t.turn}-${t.at}`}
-                          item={t}
-                          nowMs={nowMs}
-                          parsingJobs={Boolean(parsingJobsByTurn[t.turn])}
-                          onCreateJobs={parseJobsFromAgentMessage}
-                        />
-                      ))}
+                      {(transcripts ?? []).map((t) => {
+                        const messageId = transcriptMessageId(t);
+                        return (
+                          <TranscriptTurn
+                            key={`${t.turn}-${t.at}`}
+                            item={t}
+                            nowMs={nowMs}
+                            parsingJobs={Boolean(parsingJobsByTurn[t.turn])}
+                            onCreateJobs={parseJobsFromAgentMessage}
+                            messageId={messageId}
+                            tldr={tldrByMessageId[messageId] ?? null}
+                            showTldr={Boolean(showTldrByMessageId[messageId])}
+                            onToggleTldr={toggleTldrForAgentMessage}
+                            onHoverAgentMessage={handleAgentMessageHover}
+                          />
+                        );
+                      })}
                       {visiblePendingPromptsWithStartup.map((p) => (
                         <PendingTranscriptTurn key={`pending-${p.id}`} item={p} nowMs={nowMs} />
                       ))}
