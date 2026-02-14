@@ -2242,12 +2242,21 @@ async function pushPendingPrompt(opts: { droneName: string; chatName: string; pe
 
 async function updatePendingPrompt(opts: {
   droneName: string;
+  droneId?: string;
   chatName: string;
   id: string;
   patch: Partial<Pick<PendingPrompt, 'state' | 'error' | 'updatedAt'>>;
 }): Promise<void> {
   await updateRegistry((regAny: any) => {
-    const d = regAny?.drones?.[opts.droneName];
+    let droneKey = String(opts.droneName ?? '').trim();
+    let d = regAny?.drones?.[droneKey];
+    if (opts.droneId) {
+      const found = findDroneEntryByIdentity(regAny, opts.droneId);
+      if (found) {
+        droneKey = found.key;
+        d = found.entry;
+      }
+    }
     if (!d) return;
     const chatName = opts.chatName || 'default';
     const entry = d?.chats?.[chatName];
@@ -2260,7 +2269,7 @@ async function updatePendingPrompt(opts: {
     d.chats = d.chats ?? {};
     d.chats[chatName] = entry;
     regAny.drones = regAny.drones ?? {};
-    regAny.drones[opts.droneName] = d;
+    regAny.drones[droneKey] = d;
   });
 }
 
@@ -2689,8 +2698,9 @@ async function enqueuePrompt(opts: {
 
   // Make sure chat exists before we write pending state.
   await ensureChatEntry({ droneName: opts.droneName, chatName });
-  const { chat } = await getChatEntry({ droneName: opts.droneName, chatName });
+  const { d, chat } = await getChatEntry({ droneName: opts.droneName, chatName });
   const agent = inferChatAgent(chat);
+  const droneId = normalizeDroneIdentity((d as any)?.id);
   const turns: any[] = Array.isArray((chat as any)?.turns) ? (chat as any).turns : [];
   const transcriptDoneIds = new Set(turns.map((t: any) => String(t?.id ?? '').trim()).filter(Boolean));
   const priorPending: any[] = Array.isArray((chat as any)?.pendingPrompts) ? (chat as any).pendingPrompts : [];
@@ -2753,16 +2763,18 @@ async function enqueuePrompt(opts: {
     if (r?.turnOk === false) {
       await updatePendingPrompt({
         droneName: opts.droneName,
+        ...(droneId ? { droneId } : {}),
         chatName,
         id,
         patch: { state: 'failed', error: String(r?.error ?? 'failed') },
       });
     } else {
-      await updatePendingPrompt({ droneName: opts.droneName, chatName, id, patch: { state: 'sent' } });
+      await updatePendingPrompt({ droneName: opts.droneName, ...(droneId ? { droneId } : {}), chatName, id, patch: { state: 'sent' } });
     }
   } catch (e: any) {
     await updatePendingPrompt({
       droneName: opts.droneName,
+      ...(droneId ? { droneId } : {}),
       chatName,
       id,
       patch: { state: 'failed', error: e?.message ?? String(e) },

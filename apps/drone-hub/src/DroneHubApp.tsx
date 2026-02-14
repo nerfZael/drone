@@ -799,13 +799,9 @@ function GroupMultiChatColumn({
   const { value: pendingResp } = usePoll<{ ok: true; pending: PendingPrompt[] }>(
     async () => {
       if (drone.hubPhase === 'starting' || drone.hubPhase === 'seeding') return { ok: true, pending: [] };
-      try {
-        return await fetchJson<{ ok: true; pending: PendingPrompt[] }>(
-          `/api/drones/${encodeURIComponent(drone.name)}/chats/${encodeURIComponent(chatName)}/pending`,
-        );
-      } catch {
-        return { ok: true, pending: [] };
-      }
+      return await fetchJson<{ ok: true; pending: PendingPrompt[] }>(
+        `/api/drones/${encodeURIComponent(drone.name)}/chats/${encodeURIComponent(chatName)}/pending`,
+      );
     },
     1000,
     [chatName, drone.hubPhase, drone.name],
@@ -3933,13 +3929,9 @@ export default function DroneHubApp() {
       if (!selectedDrone || !selectedChat) return { ok: true, pending: [] };
       const d = drones.find((x) => x.name === selectedDrone) ?? null;
       if (d?.hubPhase === 'starting' || d?.hubPhase === 'seeding') return { ok: true, pending: [] };
-      try {
-        return await fetchJson<{ ok: true; pending: PendingPrompt[] }>(
-          `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(selectedChat || 'default')}/pending`,
-        );
-      } catch {
-        return { ok: true, pending: [] };
-      }
+      return await fetchJson<{ ok: true; pending: PendingPrompt[] }>(
+        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(selectedChat || 'default')}/pending`,
+      );
     },
     1000,
     [chatUiMode, drones, selectedDrone, selectedChat],
