@@ -2257,7 +2257,7 @@ export default function DroneHubApp() {
     return cleaned.slice(0, 48).replace(/-+$/g, '');
   }
 
-  function uniqueDraftDroneName(baseRaw: string, opts?: { exclude?: string }): string {
+  function uniqueDraftDroneName(baseRaw: string, opts?: { exclude?: string; extraTaken?: Iterable<string> }): string {
     const exclude = String(opts?.exclude ?? '').trim().toLowerCase();
     const taken = new Set<string>();
     for (const d of drones) {
@@ -2269,6 +2269,13 @@ export default function DroneHubApp() {
       const name = String(nameRaw ?? '').trim().toLowerCase();
       if (!name || name === exclude) continue;
       taken.add(name);
+    }
+    if (opts?.extraTaken) {
+      for (const raw of opts.extraTaken) {
+        const name = String(raw ?? '').trim().toLowerCase();
+        if (!name || name === exclude) continue;
+        taken.add(name);
+      }
     }
     const base = normalizeDraftDroneName(baseRaw) || 'untitled';
     if (!taken.has(base)) return base;
@@ -2776,12 +2783,34 @@ export default function DroneHubApp() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ message: prompt }),
       });
-      const suggested = uniqueDraftDroneName(String(data?.name ?? '').trim(), { exclude: currentName });
-      if (!suggested || suggested === currentName) return;
+      const initialSuggested = uniqueDraftDroneName(String(data?.name ?? '').trim(), { exclude: currentName });
+      if (!initialSuggested || initialSuggested === currentName) return;
+      let suggested = initialSuggested;
+      const attemptedNames = new Set<string>();
       for (let attempt = 0; attempt < 16; attempt += 1) {
+        attemptedNames.add(suggested.toLowerCase());
         const renamed = await renameDroneTo(currentName, suggested);
         if (renamed.ok) return;
         const msg = String(renamed.error ?? '').toLowerCase();
+        const nameConflict =
+          msg.includes('already exists') || msg.includes('cannot rename to') || msg.includes('pending drone already exists');
+        if (nameConflict) {
+          suggested = uniqueDraftDroneName(initialSuggested, {
+            exclude: currentName,
+            extraTaken: attemptedNames,
+          });
+          if (!suggested || suggested === currentName || attemptedNames.has(suggested.toLowerCase())) {
+            console.warn('[DroneHub] draft auto-rename exhausted unique name candidates', {
+              name: currentName,
+              suggested: initialSuggested,
+              attempt: attempt + 1,
+              error: renamed.error,
+            });
+            return;
+          }
+          await new Promise<void>((resolve) => window.setTimeout(resolve, 120));
+          continue;
+        }
         const retriable =
           msg.includes('still starting') ||
           msg.includes('unknown drone') ||
@@ -2801,7 +2830,7 @@ export default function DroneHubApp() {
       }
       console.warn('[DroneHub] draft auto-rename timed out waiting for drone startup', {
         name: currentName,
-        suggested,
+        suggested: initialSuggested,
       });
     } catch (e: any) {
       console.error('[DroneHub] draft auto-rename skipped', { name: currentName, error: e?.message ?? String(e) });

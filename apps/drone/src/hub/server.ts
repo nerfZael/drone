@@ -2430,7 +2430,23 @@ async function reconcileChatFromDaemon(opts: { droneName: string; chatName: stri
       // eslint-disable-next-line no-await-in-loop
       jobResp = await dronePromptGet(client, id);
     } catch {
-      // If the daemon doesn't know about it yet, leave as-is.
+      // If this has stayed "sending" well past enqueue timeout, mark it failed so it
+      // doesn't remain stuck forever after hub restarts or daemon outages.
+      if (state === 'sending') {
+        const tsRaw = String(p?.updatedAt ?? p?.at ?? '').trim();
+        const tsMs = tsRaw ? Date.parse(tsRaw) : NaN;
+        const ageMs = Number.isFinite(tsMs) ? Date.now() - tsMs : 0;
+        const staleAfterMs = Math.max(defaultPromptEnqueueTimeoutMs(), 180_000);
+        if (ageMs >= staleAfterMs) {
+          pendingList[i] = {
+            ...p,
+            state: 'failed',
+            error: 'prompt enqueue timed out (hub restart or daemon unavailable)',
+            updatedAt: nowIso(),
+          };
+          changed = true;
+        }
+      }
       continue;
     }
     const job = jobResp?.job ?? null;
@@ -3029,11 +3045,22 @@ async function provisionDroneFromPending(name: string) {
   const prompt = String(seed.prompt ?? '').trim();
   const seedAgent = parseSeedAgent(seed.agent);
   const seedModel = normalizeChatModel(seed.model);
+  const seedPromptIdRaw = typeof (seed as any).promptId === 'string' ? String((seed as any).promptId).trim() : '';
+  const seedPromptId =
+    prompt && seedPromptIdRaw && isSafePromptId(seedPromptIdRaw)
+      ? seedPromptIdRaw
+      : prompt
+        ? crypto.randomBytes(9).toString('hex')
+        : undefined;
 
   if (!seedAgent && !seedModel && !prompt) return;
 
   // Mark hub state on the real drone entry so the UI can show progress during seeding.
-  await setDroneHubMeta(name, { phase: 'seeding', message: prompt ? 'Seeding initial message…' : 'Configuring agent…' });
+  await setDroneHubMeta(name, {
+    phase: 'seeding',
+    message: prompt ? 'Seeding initial message…' : 'Configuring agent…',
+    ...(seedPromptId ? { promptId: seedPromptId } : {}),
+  });
   try {
     if (seedAgent || seedModel) {
       await ensureChatEntry({ droneName: name, chatName });
@@ -3049,8 +3076,6 @@ async function provisionDroneFromPending(name: string) {
       // Use the same pending-prompt mechanism as normal chat sends so the UI can show
       // the user's seed message immediately, then replace it with the final transcript turn.
       const cwd = typeof seed.cwd === 'string' ? seed.cwd : null;
-      const seedPromptIdRaw = typeof (seed as any).promptId === 'string' ? String((seed as any).promptId).trim() : '';
-      const seedPromptId = seedPromptIdRaw && isSafePromptId(seedPromptIdRaw) ? seedPromptIdRaw : undefined;
       // Initial seed prompts can race daemon startup on cold containers; allow longer readiness wait.
       const seedPromptWaitMs = Math.max(defaultDaemonReadyTimeoutMs(), 120_000);
       await enqueuePrompt({ id: seedPromptId, droneName: name, chatName, prompt, cwd, waitForDaemonMs: seedPromptWaitMs });
@@ -5112,70 +5137,93 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
 
         // Reconcile seeding prompt completion (restart-resumable).
         // If a seed prompt finished in the drone daemon, clear hub.seeding (or surface error).
-        let hubMetaChanged = false;
+        const hubPatches: Array<{ name: string; hub: any | null }> = [];
         for (const d of Object.values(regAny.drones ?? {}) as any[]) {
           const hub = d?.hub;
           if (!hub || String(hub?.phase ?? '') !== 'seeding') continue;
-          const promptId = String(hub?.promptId ?? '').trim();
-          if (!promptId) continue;
-          const token = typeof d.token === 'string' ? d.token : '';
-          const hostPort =
-            typeof d.hostPort === 'number' && Number.isFinite(d.hostPort)
-              ? d.hostPort
-              : await resolveHostPort(d.name, d.containerPort);
-          if (!hostPort || !token) continue;
-          try {
-            // eslint-disable-next-line no-await-in-loop
-            const r: any = await dronePromptGet(makeClient(hostPort, token), promptId);
-            const job = r?.job ?? null;
-            const st = String(job?.state ?? '').trim();
-            if (st === 'done') {
-              delete d.hub;
-              hubMetaChanged = true;
-            } else if (st === 'failed') {
-              d.hub = { phase: 'error', message: String(job?.error ?? 'Seed failed'), updatedAt: nowIso() };
-              hubMetaChanged = true;
+          const name = String(d?.name ?? '').trim();
+          if (!name) continue;
+          let changedForDrone = false;
+          let nextHub: any = hub;
+          let promptId = String(nextHub?.promptId ?? '').trim();
+
+          if (!promptId) {
+            const chats = d?.chats && typeof d.chats === 'object' ? Object.values(d.chats) : [];
+            for (const entry of chats as any[]) {
+              const pending = Array.isArray(entry?.pendingPrompts) ? entry.pendingPrompts : [];
+              const candidate = pending.find((p: any) => {
+                const id = String(p?.id ?? '').trim();
+                const st = String(p?.state ?? '').trim();
+                return Boolean(id) && st !== 'failed';
+              });
+              const id = String(candidate?.id ?? '').trim();
+              if (!id) continue;
+              promptId = id;
+              nextHub = { ...nextHub, promptId };
+              changedForDrone = true;
+              break;
             }
-          } catch {
-            // ignore; keep seeding
+            // Back-compat: clear stale "seeding" markers with no active pending work.
+            if (!promptId && !anyActivePendingPromptsForDrone(d)) {
+              nextHub = null;
+              changedForDrone = true;
+            }
+          }
+
+          if (nextHub && promptId) {
+            const token = typeof d.token === 'string' ? d.token : '';
+            const hostPort =
+              typeof d.hostPort === 'number' && Number.isFinite(d.hostPort)
+                ? d.hostPort
+                : await resolveHostPort(d.name, d.containerPort);
+            if (hostPort && token) {
+              try {
+                // eslint-disable-next-line no-await-in-loop
+                const r: any = await dronePromptGet(makeClient(hostPort, token), promptId);
+                const job = r?.job ?? null;
+                const st = String(job?.state ?? '').trim();
+                if (st === 'done') {
+                  nextHub = null;
+                  changedForDrone = true;
+                } else if (st === 'failed') {
+                  nextHub = { phase: 'error', message: String(job?.error ?? 'Seed failed'), updatedAt: nowIso() };
+                  changedForDrone = true;
+                }
+              } catch {
+                // ignore; keep seeding
+              }
+            }
+          }
+
+          if (changedForDrone) {
+            if (nextHub == null) {
+              delete d.hub;
+            } else {
+              d.hub = nextHub;
+            }
+            hubPatches.push({ name, hub: nextHub ?? null });
           }
         }
-        const hubPatches: Array<{ name: string; hub: any | null }> = [];
-        if (hubMetaChanged) {
+        if (hubPatches.length > 0) {
           // NOTE: Apply patches under a lock to avoid clobbering concurrent registry writers.
-          for (const d of Object.values(regAny.drones ?? {}) as any[]) {
-            const hub = d?.hub;
-            if (!hub || String(hub?.phase ?? '') !== 'seeding') continue;
-            const promptId = String(hub?.promptId ?? '').trim();
-            if (!promptId) continue;
-            // Only patch drones where we already cleared/updated hub during the loop above.
-            // (Those changes were made in-place on `regAny`.)
-            if (!d.hub) {
-              hubPatches.push({ name: String(d?.name ?? '').trim(), hub: null });
-            } else if (String(d?.hub?.phase ?? '') === 'error') {
-              hubPatches.push({ name: String(d?.name ?? '').trim(), hub: d.hub });
-            }
-          }
-          if (hubPatches.length > 0) {
-            try {
-              await updateRegistry((regLatest: any) => {
-                for (const p of hubPatches) {
-                  const n = String(p?.name ?? '').trim();
-                  if (!n) continue;
-                  const d = regLatest?.drones?.[n];
-                  if (!d) continue;
-                  if (p.hub == null) {
-                    delete d.hub;
-                  } else {
-                    d.hub = p.hub;
-                  }
-                  regLatest.drones = regLatest.drones ?? {};
-                  regLatest.drones[n] = d;
+          try {
+            await updateRegistry((regLatest: any) => {
+              for (const p of hubPatches) {
+                const n = String(p?.name ?? '').trim();
+                if (!n) continue;
+                const d = regLatest?.drones?.[n];
+                if (!d) continue;
+                if (p.hub == null) {
+                  delete d.hub;
+                } else {
+                  d.hub = p.hub;
                 }
-              });
-            } catch {
-              // ignore
-            }
+                regLatest.drones = regLatest.drones ?? {};
+                regLatest.drones[n] = d;
+              }
+            });
+          } catch {
+            // ignore
           }
         }
 
