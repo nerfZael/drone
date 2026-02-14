@@ -29,6 +29,7 @@ import {
 import { DroneTerminalDock } from './droneHub/terminal';
 import { requestJson } from './droneHub/http';
 import { TypingDots } from './droneHub/overview/icons';
+import { usePaneReadiness } from './droneHub/panes/usePaneReadiness';
 import { cn } from './ui/cn';
 import { dropdownMenuItemBaseClass, dropdownPanelBaseClass, useDropdownDismiss } from './ui/dropdown';
 import { UiMenuSelect } from './ui/menuSelect';
@@ -453,6 +454,9 @@ function usePoll<T>(fn: () => Promise<T>, intervalMs: number, deps: any[] = []) 
   React.useEffect(() => {
     let mounted = true;
     let timer: any = null;
+    setValue(null);
+    setError(null);
+    setLoading(true);
     const tick = async () => {
       try {
         const v = await fn();
@@ -3933,7 +3937,25 @@ export default function DroneHubApp() {
     fsPollIntervalMs,
     [currentDrone?.name, currentFsPath, fsRefreshNonce],
   );
+  const fsPayloadError =
+    fsResp && (fsResp as any).ok === false ? String((fsResp as any)?.error ?? 'filesystem request failed') : null;
+  const fsErrorCombined = fsError ?? fsPayloadError;
   const fsEntries = fsResp && (fsResp as any).ok === true ? (((fsResp as any).entries as DroneFsEntry[]) ?? []) : [];
+
+  const filesPane = usePaneReadiness({
+    hubPhase: currentDrone?.hubPhase,
+    resetKey: `${currentDrone?.name ?? ''}\u0000files`,
+    timeoutMs: 18_000,
+  });
+  const fsOkForCurrentDrone = Boolean(
+    currentDrone &&
+      (fsResp as any)?.ok === true &&
+      String((fsResp as any)?.name ?? '').trim() === String(currentDrone.name ?? '').trim(),
+  );
+  React.useEffect(() => {
+    if (fsOkForCurrentDrone) filesPane.markReady();
+  }, [fsOkForCurrentDrone, filesPane.markReady]);
+  const fsErrorUi = filesPane.suppressErrors ? null : fsErrorCombined;
 
   const portsPollIntervalMs = currentDrone ? 5000 : 60000;
   const {
@@ -3949,6 +3971,24 @@ export default function DroneHubApp() {
     [currentDrone?.name],
   );
   const ports = portsResp && (portsResp as any).ok === true ? ((portsResp as any).ports as DronePortMapping[]) : null;
+  const portsPayloadError =
+    portsResp && (portsResp as any).ok === false ? String((portsResp as any)?.error ?? 'ports request failed') : null;
+  const portsErrorCombined = portsError ?? portsPayloadError;
+
+  const portsPane = usePaneReadiness({
+    hubPhase: currentDrone?.hubPhase,
+    resetKey: `${currentDrone?.name ?? ''}\u0000ports`,
+    timeoutMs: 18_000,
+  });
+  const portsOkForCurrentDrone = Boolean(
+    currentDrone &&
+      (portsResp as any)?.ok === true &&
+      String((portsResp as any)?.name ?? '').trim() === String(currentDrone.name ?? '').trim(),
+  );
+  React.useEffect(() => {
+    if (portsOkForCurrentDrone) portsPane.markReady();
+  }, [portsOkForCurrentDrone, portsPane.markReady]);
+  const portsErrorUi = portsPane.suppressErrors ? null : portsErrorCombined;
   const portRows = React.useMemo(
     () =>
       normalizePortRows(
@@ -4346,6 +4386,7 @@ export default function DroneHubApp() {
   ): React.ReactNode {
     const disabled = drone.hubPhase === 'starting' || drone.hubPhase === 'seeding';
     const chatName = selectedChat || 'default';
+    const isCurrent = Boolean(currentDrone && String(currentDrone.name) === String(drone.name));
     const contentByTab: Record<RightPanelTab, React.ReactNode> = {
       terminal: (
         <DroneTerminalDock
@@ -4354,6 +4395,8 @@ export default function DroneHubApp() {
           chatName={chatName}
           defaultCwd={defaultFsPathForCurrentDrone}
           disabled={disabled}
+          hubPhase={drone.hubPhase}
+          hubMessage={drone.hubMessage}
         />
       ),
       files: (
@@ -4364,7 +4407,17 @@ export default function DroneHubApp() {
           homePath={defaultFsPathForCurrentDrone}
           entries={fsEntries}
           loading={fsLoading}
-          error={fsError}
+          error={isCurrent ? fsErrorUi : fsError}
+          startup={
+            isCurrent
+              ? {
+                  waiting: filesPane.waiting,
+                  timedOut: filesPane.timedOut,
+                  hubPhase: drone.hubPhase,
+                  hubMessage: drone.hubMessage,
+                }
+              : null
+          }
           viewMode={fsExplorerView}
           onSetViewMode={setFsExplorerView}
           onOpenPath={setCurrentFsPath}
@@ -4377,7 +4430,17 @@ export default function DroneHubApp() {
           selectedPort={selectedPreviewPort}
           portReachabilityByHostPort={currentPortReachability}
           portsLoading={portsLoading}
-          portsError={portsError}
+          portsError={isCurrent ? portsErrorUi : portsError}
+          startup={
+            isCurrent
+              ? {
+                  waiting: portsPane.waiting,
+                  timedOut: portsPane.timedOut,
+                  hubPhase: drone.hubPhase,
+                  hubMessage: drone.hubMessage,
+                }
+              : null
+          }
           defaultPreviewUrl={selectedPreviewDefaultUrl}
           previewUrlOverride={selectedPreviewUrlOverride}
           onSetPreviewUrlOverride={setSelectedPreviewUrlOverride}
@@ -4394,7 +4457,7 @@ export default function DroneHubApp() {
           portReachabilityByHostPort={currentPortReachability}
           onSelectPort={setSelectedPreviewPort}
           portsLoading={portsLoading}
-          portsError={portsError}
+          portsError={isCurrent ? portsErrorUi : portsError}
         />
       ),
       changes: (
@@ -4404,6 +4467,8 @@ export default function DroneHubApp() {
           repoAttached={drone.repoAttached ?? Boolean(String(drone.repoPath ?? '').trim())}
           repoPath={drone.repoPath}
           disabled={disabled}
+          hubPhase={drone.hubPhase}
+          hubMessage={drone.hubMessage}
         />
       ),
     };

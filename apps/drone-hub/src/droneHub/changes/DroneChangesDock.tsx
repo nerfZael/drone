@@ -2,6 +2,7 @@ import React from 'react';
 import { Diff, Hunk, parseDiff } from 'react-diff-view';
 import 'react-diff-view/style/index.css';
 import { requestJson } from '../http';
+import { provisioningLabel, usePaneReadiness } from '../panes/usePaneReadiness';
 import type { RepoChangeEntry, RepoChangesPayload, RepoDiffPayload, RepoPullChangesPayload, RepoPullDiffPayload } from '../types';
 
 type ChangesViewMode = 'stacked' | 'split';
@@ -232,16 +233,26 @@ export function DroneChangesDock({
   repoAttached,
   repoPath,
   disabled,
+  hubPhase,
+  hubMessage,
 }: {
   droneName: string;
   repoAttached: boolean;
   repoPath: string;
   disabled: boolean;
+  hubPhase?: 'starting' | 'seeding' | 'error' | null;
+  hubMessage?: string | null;
 }) {
   const [refreshNonce, setRefreshNonce] = React.useState(0);
   const [changes, setChanges] = React.useState<Extract<RepoChangesPayload, { ok: true }> | null>(null);
   const [changesLoading, setChangesLoading] = React.useState(false);
   const [changesError, setChangesError] = React.useState<string | null>(null);
+
+  const startup = usePaneReadiness({
+    hubPhase,
+    resetKey: `${droneName}\u0000changes`,
+    timeoutMs: 18_000,
+  });
 
   const [pullChanges, setPullChanges] = React.useState<Extract<RepoPullChangesPayload, { ok: true }> | null>(null);
   const [pullLoading, setPullLoading] = React.useState(false);
@@ -319,6 +330,7 @@ export function DroneChangesDock({
         if (!mounted) return;
         setChanges(data);
         setChangesError(null);
+        startup.markReady();
       } catch (e: any) {
         if (!mounted) return;
         setChangesError(e?.message ?? String(e));
@@ -703,7 +715,9 @@ export function DroneChangesDock({
         {!repoAttached ? (
           <span>No repo attached.</span>
         ) : disabled ? (
-          <span>Repo is unavailable while this drone is provisioning.</span>
+          <span title={String(hubMessage ?? '').trim() || undefined}>
+            {startup.timedOut ? 'Still provisioning… repo not ready yet.' : 'Provisioning… waiting for repo.'}
+          </span>
         ) : listLoading && ((dataMode === 'working-tree' && !changes) || (dataMode === 'pull-preview' && !pullChanges)) ? (
           <span>{dataMode === 'pull-preview' ? 'Loading pull preview…' : 'Loading changes...'}</span>
         ) : listError ? (
@@ -752,7 +766,26 @@ export function DroneChangesDock({
       {!repoAttached ? (
         <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--muted)]">Attach a repo to see source-control changes.</div>
       ) : disabled ? (
-        <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--muted)]">Changes view is disabled while provisioning is in progress.</div>
+        <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--muted)]">
+          <div className="rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3">
+            <div className="text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+              {provisioningLabel(hubPhase)}
+            </div>
+            <div className="mt-1">
+              {startup.timedOut
+                ? 'Still waiting for the repository to become available.'
+                : 'Waiting for repository…'}
+            </div>
+            {String(hubMessage ?? '').trim() ? (
+              <div className="mt-1 text-[10px] text-[var(--muted-dim)]">{String(hubMessage ?? '').trim()}</div>
+            ) : null}
+            {startup.timedOut ? (
+              <div className="mt-2 text-[10px] text-[var(--muted-dim)]">
+                If this persists, check the drone status/error details in the sidebar.
+              </div>
+            ) : null}
+          </div>
+        </div>
       ) : listError ? (
         <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--red)]">{listError}</div>
       ) : entries.length === 0 && !listLoading ? (

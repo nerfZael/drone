@@ -89,6 +89,7 @@ export function DroneFilesDock({
   entries,
   loading,
   error,
+  startup,
   viewMode,
   onSetViewMode,
   onOpenPath,
@@ -100,6 +101,7 @@ export function DroneFilesDock({
   entries: DroneFsEntry[];
   loading: boolean;
   error: string | null;
+  startup?: { waiting: boolean; timedOut: boolean; hubPhase?: 'starting' | 'seeding' | 'error' | null; hubMessage?: string | null } | null;
   viewMode: 'list' | 'thumb';
   onSetViewMode: (next: 'list' | 'thumb') => void;
   onOpenPath: (nextPath: string) => void;
@@ -163,6 +165,13 @@ export function DroneFilesDock({
     setOpenedImage(entry);
     setOpenedImageFailed(false);
   }, []);
+
+  const showStartupPlaceholder = Boolean(startup?.waiting) && !openedImage && !error && entries.length === 0;
+  const startupLabel = startup?.hubPhase === 'seeding' ? 'Seeding' : 'Starting';
+  const startupDetail = String(startup?.hubMessage ?? '').trim();
+  const startupText = startup?.timedOut
+    ? 'Still waiting for the filesystem to come online. If this keeps happening, the drone may be stuck provisioning.'
+    : 'Waiting for filesystem…';
 
   return (
     <div className="w-full h-full min-h-0 bg-[var(--panel-alt)] overflow-hidden flex flex-col relative">
@@ -281,8 +290,24 @@ export function DroneFilesDock({
             {error}
           </div>
         )}
-        {!error && !openedImage && loading && entries.length === 0 && <div className="text-[12px] text-[var(--muted)]">Loading files...</div>}
-        {!error && !openedImage && !loading && entries.length === 0 && <div className="text-[12px] text-[var(--muted)]">Directory is empty.</div>}
+        {showStartupPlaceholder ? (
+          <div className="px-3 py-3 rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[12px] text-[var(--muted)]">
+            <div className="text-[11px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+              {startupLabel}
+            </div>
+            <div className="mt-1">{startupText}</div>
+            {startupDetail ? <div className="mt-1 text-[11px] text-[var(--muted-dim)]">{startupDetail}</div> : null}
+          </div>
+        ) : (
+          <>
+            {!error && !openedImage && loading && entries.length === 0 && (
+              <div className="text-[12px] text-[var(--muted)]">Loading files...</div>
+            )}
+            {!error && !openedImage && !loading && entries.length === 0 && (
+              <div className="text-[12px] text-[var(--muted)]">Directory is empty.</div>
+            )}
+          </>
+        )}
 
         {!error && openedImage && (
           <div className="h-full min-h-0 flex flex-col gap-2">

@@ -7,6 +7,7 @@ export function DronePreviewDock({
   portReachabilityByHostPort,
   portsLoading,
   portsError,
+  startup,
   defaultPreviewUrl,
   previewUrlOverride,
   onSetPreviewUrlOverride,
@@ -15,6 +16,7 @@ export function DronePreviewDock({
   portReachabilityByHostPort: PortReachabilityByHostPort;
   portsLoading: boolean;
   portsError: string | null;
+  startup?: { waiting: boolean; timedOut: boolean; hubPhase?: 'starting' | 'seeding' | 'error' | null; hubMessage?: string | null } | null;
   defaultPreviewUrl: string | null;
   previewUrlOverride: string | null;
   onSetPreviewUrlOverride: (nextUrl: string | null) => void;
@@ -34,6 +36,9 @@ export function DronePreviewDock({
   const [urlError, setUrlError] = React.useState<string | null>(null);
   const usingCustomUrl = Boolean(previewUrlOverride);
   const shouldShowOfflineState = Boolean(!usingCustomUrl && selectedPort && selectedReachability === 'down');
+  const showStartupPlaceholder = Boolean(startup?.waiting) && !usingCustomUrl && !selectedUrl;
+  const startupLabel = startup?.hubPhase === 'seeding' ? 'Seeding' : 'Starting';
+  const startupDetail = String(startup?.hubMessage ?? '').trim();
 
   React.useEffect(() => {
     setIframeLoadFailed(false);
@@ -75,7 +80,9 @@ export function DronePreviewDock({
               {selectedPort.containerPort}→{selectedPort.hostPort}
             </div>
           ) : (
-            <div className="text-[10px] text-[var(--muted-dim)]">{usingCustomUrl ? 'custom URL' : portsLoading ? 'loading' : 'none selected'}</div>
+            <div className="text-[10px] text-[var(--muted-dim)]">
+              {usingCustomUrl ? 'custom URL' : showStartupPlaceholder ? startupLabel.toLowerCase() : portsLoading ? 'loading' : 'none selected'}
+            </div>
           )}
           {selectedOpenUrl && (
             <>
@@ -147,11 +154,25 @@ export function DronePreviewDock({
 
         {!selectedUrl ? (
           <div className="flex-1 min-h-0 w-full border-y border-[var(--border-subtle)] bg-[rgba(0,0,0,.1)] text-[11px] text-[var(--muted-dim)] flex items-center justify-center text-center px-4">
-            {portsError
-              ? `Ports error: ${portsError}`
-              : portsLoading
-                ? 'Loading mapped ports...'
-                : 'Select a mapped port to open it here.'}
+            {showStartupPlaceholder ? (
+              <div className="max-w-[340px]">
+                <div className="text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+                  {startupLabel}
+                </div>
+                <div className="mt-1">
+                  {startup?.timedOut
+                    ? 'Still waiting for mapped ports. If this persists, the drone may be stuck provisioning.'
+                    : 'Connecting… waiting for mapped ports.'}
+                </div>
+                {startupDetail ? <div className="mt-1 text-[10px] text-[var(--muted-dim)]">{startupDetail}</div> : null}
+              </div>
+            ) : portsError ? (
+              `Ports error: ${portsError}`
+            ) : portsLoading ? (
+              'Loading mapped ports...'
+            ) : (
+              'Select a mapped port to open it here.'
+            )}
           </div>
         ) : shouldShowOfflineState ? (
           <div className="flex-1 min-h-0 w-full border-y border-[var(--border-subtle)] bg-[rgba(0,0,0,.1)] text-[11px] text-[var(--muted-dim)] flex items-center justify-center text-center px-4">
