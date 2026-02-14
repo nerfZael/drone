@@ -7091,7 +7091,9 @@ export default function DroneHubApp() {
                 )}
               </div>
               <ChatInput
-                resetKey={`draft:${draftChat.prompt?.id ?? ''}:${spawnAgentKey}`}
+                // Don't clear the user's draft prompt when they change the agent selector.
+                // The draft composer should only reset when the draft prompt "instance" changes.
+                resetKey={`draft:${draftChat.prompt?.id ?? ''}`}
                 droneName="new drone"
                 promptError={draftCreateError}
                 sending={draftCreating || draftAutoRenaming}
