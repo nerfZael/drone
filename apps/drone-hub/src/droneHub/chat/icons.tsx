@@ -42,6 +42,16 @@ export function IconJobs({ className }: { className?: string }) {
   );
 }
 
+export function IconTldr({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M3 2.5A1.5 1.5 0 014.5 1h7A1.5 1.5 0 0113 2.5v7A1.5 1.5 0 0111.5 11h-7A1.5 1.5 0 013 9.5v-7zm1.5-.5a.5.5 0 00-.5.5v7a.5.5 0 00.5.5h7a.5.5 0 00.5-.5v-7a.5.5 0 00-.5-.5h-7z" />
+      <path d="M5 4.5a.5.5 0 000 1h6a.5.5 0 000-1H5zM5 6.75a.5.5 0 000 1h5a.5.5 0 000-1H5zM5 9a.5.5 0 000 1h3.5a.5.5 0 000-1H5z" />
+      <path d="M12.1 12.15a.65.65 0 01.78-.46l1.08.27-.7.87a.65.65 0 00-.13.36l-.05 1.12-.95-.61a.65.65 0 00-.38-.1l-1.12.07.36-.96a.65.65 0 00.02-.38l-.32-1.07 1.03.33a.65.65 0 00.38-.02z" />
+    </svg>
+  );
+}
+
 export function IconSpinner({ className }: { className?: string }) {
   return (
     <svg

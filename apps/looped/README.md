@@ -2,6 +2,24 @@
 
 `looped` is a minimal harness wrapper for agentic CLIs.
 
+## Installation
+
+From the monorepo root:
+
+```bash
+# install dependencies (one-time per repo clone)
+bun install
+
+# build looped
+bun --filter looped run build
+
+# install `looped` into your shell PATH
+npm link ./apps/looped
+
+# verify
+looped --help
+```
+
 ## Goal
 
 Run an agentic CLI with a prompt, then run it again and again in a loop.

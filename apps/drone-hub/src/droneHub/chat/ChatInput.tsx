@@ -3,7 +3,6 @@ import React from 'react';
 export function ChatInput({
   resetKey,
   droneName,
-  modeHint,
   promptError,
   sending,
   waiting,
@@ -13,7 +12,6 @@ export function ChatInput({
 }: {
   resetKey: string;
   droneName: string;
-  modeHint: string;
   promptError: string | null;
   sending: boolean;
   waiting: boolean;
@@ -53,7 +51,7 @@ export function ChatInput({
   };
 
   return (
-    <div className="flex-shrink-0 px-5 pt-2 pb-5 bg-transparent">
+    <div data-onboarding-id="chat.input" className="flex-shrink-0 px-5 pt-2 pb-5 bg-transparent">
       <div className="max-w-[900px] mx-auto">
         {promptError && (
           <div className="mb-2 text-[11px] text-[var(--red)] px-1" title={promptError}>
@@ -96,12 +94,6 @@ export function ChatInput({
             >
               {sending ? 'Sending…' : waiting ? 'Waiting…' : 'Send'}
             </button>
-          </div>
-          <div
-            className="px-4 pb-2 text-[10px] text-[var(--muted-dim)] tracking-wide uppercase"
-            style={{ fontFamily: 'var(--display)' }}
-          >
-            {modeHint}
           </div>
         </div>
       </div>

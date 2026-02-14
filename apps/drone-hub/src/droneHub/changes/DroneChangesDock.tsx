@@ -2,10 +2,12 @@ import React from 'react';
 import { Diff, Hunk, parseDiff } from 'react-diff-view';
 import 'react-diff-view/style/index.css';
 import { requestJson } from '../http';
-import type { RepoChangeEntry, RepoChangesPayload, RepoDiffPayload } from '../types';
+import { provisioningLabel, usePaneReadiness } from '../panes/usePaneReadiness';
+import type { RepoChangeEntry, RepoChangesPayload, RepoDiffPayload, RepoPullChangesPayload, RepoPullDiffPayload } from '../types';
 
 type ChangesViewMode = 'stacked' | 'split';
 type DiffKind = 'staged' | 'unstaged';
+type ChangesDataMode = 'working-tree' | 'pull-preview';
 
 type DiffState =
   | { status: 'loading' }
@@ -22,6 +24,13 @@ type ExplorerNode = {
 };
 
 const CHANGES_VIEW_STORAGE_KEY = 'droneHub.changesViewMode';
+const CHANGES_DATA_MODE_STORAGE_KEY = 'droneHub.changesDataMode';
+
+function shortSha(sha: string | null | undefined): string {
+  const s = String(sha ?? '').trim();
+  if (!s) return '-';
+  return s.length > 10 ? s.slice(0, 10) : s;
+}
 
 function hasStaged(entry: RepoChangeEntry | null): boolean {
   if (!entry) return false;
@@ -175,7 +184,7 @@ function DiffBlock({ state }: { state: DiffState | undefined }) {
   return (
     <div className="rdv-wrapper px-2 py-2">
       {parsed.map((file, fileIndex) => (
-        <Diff key={`${file.oldPath}-${file.newPath}-${fileIndex}`} viewType="split" diffType={file.type} hunks={file.hunks}>
+        <Diff key={`${file.oldPath}-${file.newPath}-${fileIndex}`} viewType="unified" diffType={file.type} hunks={file.hunks}>
           {(hunks) => hunks.map((hunk, hunkIndex) => <Hunk key={`${fileIndex}-${hunkIndex}`} hunk={hunk} />)}
         </Diff>
       ))}
@@ -224,16 +233,39 @@ export function DroneChangesDock({
   repoAttached,
   repoPath,
   disabled,
+  hubPhase,
+  hubMessage,
 }: {
   droneName: string;
   repoAttached: boolean;
   repoPath: string;
   disabled: boolean;
+  hubPhase?: 'starting' | 'seeding' | 'error' | null;
+  hubMessage?: string | null;
 }) {
   const [refreshNonce, setRefreshNonce] = React.useState(0);
   const [changes, setChanges] = React.useState<Extract<RepoChangesPayload, { ok: true }> | null>(null);
   const [changesLoading, setChangesLoading] = React.useState(false);
   const [changesError, setChangesError] = React.useState<string | null>(null);
+
+  const startup = usePaneReadiness({
+    hubPhase,
+    resetKey: `${droneName}\u0000changes`,
+    timeoutMs: 18_000,
+  });
+
+  const [pullChanges, setPullChanges] = React.useState<Extract<RepoPullChangesPayload, { ok: true }> | null>(null);
+  const [pullLoading, setPullLoading] = React.useState(false);
+  const [pullError, setPullError] = React.useState<string | null>(null);
+
+  const [dataMode, setDataMode] = React.useState<ChangesDataMode>(() => {
+    try {
+      const raw = localStorage.getItem(CHANGES_DATA_MODE_STORAGE_KEY);
+      return raw === 'pull-preview' ? 'pull-preview' : 'working-tree';
+    } catch {
+      return 'working-tree';
+    }
+  });
 
   const [viewMode, setViewMode] = React.useState<ChangesViewMode>(() => {
     try {
@@ -248,6 +280,7 @@ export function DroneChangesDock({
   const [splitKind, setSplitKind] = React.useState<DiffKind>('unstaged');
   const [stackedPreferredKind, setStackedPreferredKind] = React.useState<DiffKind>('unstaged');
   const [expandedDirs, setExpandedDirs] = React.useState<Record<string, boolean>>({});
+  const [expandedPullFiles, setExpandedPullFiles] = React.useState<Record<string, boolean>>({});
 
   const [diffByKey, setDiffByKey] = React.useState<Record<string, DiffState>>({});
   const inflightRef = React.useRef<Set<string>>(new Set());
@@ -269,7 +302,15 @@ export function DroneChangesDock({
   }, [viewMode]);
 
   React.useEffect(() => {
-    if (!repoAttached || disabled) {
+    try {
+      localStorage.setItem(CHANGES_DATA_MODE_STORAGE_KEY, dataMode);
+    } catch {
+      // ignore
+    }
+  }, [dataMode]);
+
+  React.useEffect(() => {
+    if (!repoAttached || disabled || dataMode !== 'working-tree') {
       setChanges(null);
       setChangesError(null);
       setChangesLoading(false);
@@ -289,6 +330,7 @@ export function DroneChangesDock({
         if (!mounted) return;
         setChanges(data);
         setChangesError(null);
+        startup.markReady();
       } catch (e: any) {
         if (!mounted) return;
         setChangesError(e?.message ?? String(e));
@@ -306,12 +348,79 @@ export function DroneChangesDock({
       mounted = false;
       if (timer) clearInterval(timer);
     };
-  }, [disabled, droneName, refreshNonce, repoAttached]);
+  }, [dataMode, disabled, droneName, refreshNonce, repoAttached]);
 
-  const entries = changes?.entries ?? [];
+  React.useEffect(() => {
+    if (!repoAttached || disabled || dataMode !== 'pull-preview') {
+      setPullChanges(null);
+      setPullError(null);
+      setPullLoading(false);
+      return;
+    }
+
+    let mounted = true;
+    let timer: any = null;
+
+    const load = async (silent: boolean) => {
+      if (!mounted) return;
+      if (!silent) setPullLoading(true);
+      try {
+        const data = await requestJson<Extract<RepoPullChangesPayload, { ok: true }>>(
+          `/api/drones/${encodeURIComponent(droneName)}/repo/pull/changes`,
+        );
+        if (!mounted) return;
+        setPullChanges(data);
+        setPullError(null);
+      } catch (e: any) {
+        if (!mounted) return;
+        setPullError(e?.message ?? String(e));
+      } finally {
+        if (mounted && !silent) setPullLoading(false);
+      }
+    };
+
+    void load(false);
+    timer = setInterval(() => {
+      void load(true);
+    }, 10000);
+
+    return () => {
+      mounted = false;
+      if (timer) clearInterval(timer);
+    };
+  }, [dataMode, disabled, droneName, refreshNonce, repoAttached]);
+
+  const pullEntriesAsWorkingEntries: RepoChangeEntry[] = React.useMemo(() => {
+    const list = pullChanges?.entries ?? [];
+    return list.map((e) => ({
+      path: e.path,
+      originalPath: e.originalPath,
+      code: `${String(e.statusChar ?? '?').charAt(0)}.`,
+      stagedChar: String(e.statusChar ?? '?').charAt(0),
+      unstagedChar: '.',
+      stagedType: e.statusType ?? 'unknown',
+      unstagedType: null,
+      isUntracked: false,
+      isIgnored: false,
+      isConflicted: e.statusType === 'unmerged',
+    }));
+  }, [pullChanges?.entries]);
+
+  const entries = dataMode === 'pull-preview' ? pullEntriesAsWorkingEntries : (changes?.entries ?? []);
+  const listLoading = dataMode === 'pull-preview' ? pullLoading : changesLoading;
+  const listError = dataMode === 'pull-preview' ? pullError : changesError;
+
   const entriesSignature = React.useMemo(
-    () => entries.map((e) => `${e.path}\u0000${e.code}\u0000${e.originalPath ?? ''}`).join('\n'),
-    [entries],
+    () =>
+      dataMode === 'pull-preview'
+        ? [
+            'pull',
+            pullChanges?.baseSha ?? '',
+            pullChanges?.headSha ?? '',
+            entries.map((e) => `${e.path}\u0000${e.code}\u0000${e.originalPath ?? ''}`).join('\n'),
+          ].join('\n')
+        : entries.map((e) => `${e.path}\u0000${e.code}\u0000${e.originalPath ?? ''}`).join('\n'),
+    [dataMode, entries, pullChanges?.baseSha, pullChanges?.headSha],
   );
 
   React.useEffect(() => {
@@ -325,7 +434,8 @@ export function DroneChangesDock({
   React.useEffect(() => {
     setDiffByKey({});
     inflightRef.current.clear();
-  }, [entriesSignature]);
+    setExpandedPullFiles({});
+  }, [dataMode, entriesSignature]);
 
   const selectedEntry = React.useMemo(
     () => (selectedPath ? entries.find((e) => e.path === selectedPath) ?? null : null),
@@ -333,11 +443,12 @@ export function DroneChangesDock({
   );
 
   React.useEffect(() => {
+    if (dataMode === 'pull-preview') return;
     setSplitKind((prev) => {
       const next = effectiveKindForEntry(selectedEntry, prev);
       return next ?? defaultKindForEntry(selectedEntry);
     });
-  }, [selectedEntry]);
+  }, [dataMode, selectedEntry]);
 
   const explorerTree = React.useMemo(() => buildExplorerTree(entries), [entries]);
 
@@ -366,7 +477,7 @@ export function DroneChangesDock({
 
   const loadDiff = React.useCallback(
     async (path: string, kind: DiffKind) => {
-      const key = diffKey(path, kind);
+      const key = `wt\u0000${diffKey(path, kind)}`;
       if (inflightRef.current.has(key)) return;
       const cur = diffByKey[key];
       if (cur && (cur.status === 'loading' || cur.status === 'loaded')) return;
@@ -399,24 +510,74 @@ export function DroneChangesDock({
     [diffByKey, droneName],
   );
 
+  const loadPullDiff = React.useCallback(
+    async (filePath: string) => {
+      const baseSha = String(pullChanges?.baseSha ?? '').trim().toLowerCase();
+      const headSha = String(pullChanges?.headSha ?? '').trim().toLowerCase();
+      const key = `pull\u0000${baseSha}\u0000${headSha}\u0000${filePath}`;
+      if (inflightRef.current.has(key)) return;
+      const cur = diffByKey[key];
+      if (cur && (cur.status === 'loading' || cur.status === 'loaded')) return;
+
+      inflightRef.current.add(key);
+      setDiffByKey((prev) => ({ ...prev, [key]: { status: 'loading' } }));
+      try {
+        const data = await requestJson<Extract<RepoPullDiffPayload, { ok: true }>>(
+          `/api/drones/${encodeURIComponent(droneName)}/repo/pull/diff?path=${encodeURIComponent(filePath)}&base=${encodeURIComponent(
+            baseSha,
+          )}&head=${encodeURIComponent(headSha)}`,
+        );
+        if (!mountedRef.current) return;
+        setDiffByKey((prev) => ({
+          ...prev,
+          [key]: {
+            status: 'loaded',
+            text: typeof data.diff === 'string' ? data.diff : '',
+            truncated: Boolean(data.truncated),
+          },
+        }));
+      } catch (e: any) {
+        if (!mountedRef.current) return;
+        setDiffByKey((prev) => ({
+          ...prev,
+          [key]: { status: 'error', error: e?.message ?? String(e) },
+        }));
+      } finally {
+        inflightRef.current.delete(key);
+      }
+    },
+    [diffByKey, droneName, pullChanges?.baseSha, pullChanges?.headSha],
+  );
+
   const splitShownKind = effectiveKindForEntry(selectedEntry, splitKind);
 
   React.useEffect(() => {
+    if (dataMode !== 'working-tree') return;
     if (!repoAttached || disabled) return;
     if (!selectedEntry || !splitShownKind) return;
     void loadDiff(selectedEntry.path, splitShownKind);
-  }, [disabled, loadDiff, repoAttached, selectedEntry, splitShownKind]);
+  }, [dataMode, disabled, loadDiff, repoAttached, selectedEntry, splitShownKind]);
 
   React.useEffect(() => {
+    if (dataMode !== 'working-tree') return;
     if (!repoAttached || disabled || viewMode !== 'stacked') return;
     for (const entry of entries) {
       const k = effectiveKindForEntry(entry, stackedPreferredKind);
       if (!k) continue;
       void loadDiff(entry.path, k);
     }
-  }, [disabled, entries, loadDiff, repoAttached, stackedPreferredKind, viewMode]);
+  }, [dataMode, disabled, entries, loadDiff, repoAttached, stackedPreferredKind, viewMode]);
+
+  React.useEffect(() => {
+    if (dataMode !== 'pull-preview') return;
+    if (!repoAttached || disabled) return;
+    if (!selectedEntry) return;
+    void loadPullDiff(selectedEntry.path);
+  }, [dataMode, disabled, loadPullDiff, repoAttached, selectedEntry]);
 
   const counts = changes?.counts;
+  const pullBase = pullChanges?.baseSha ?? null;
+  const pullHead = pullChanges?.headSha ?? null;
 
   function renderExplorer(nodes: ExplorerNode[], depth: number): React.ReactNode {
     return nodes.map((node) => {
@@ -452,7 +613,7 @@ export function DroneChangesDock({
           type="button"
           onClick={() => {
             setSelectedPath(entry.path);
-            setSplitKind(defaultKindForEntry(entry));
+            if (dataMode === 'working-tree') setSplitKind(defaultKindForEntry(entry));
           }}
           className={`w-full text-left h-7 px-2 rounded border transition-colors flex items-center gap-1.5 ${
             active
@@ -478,7 +639,41 @@ export function DroneChangesDock({
         <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.12em] uppercase" style={{ fontFamily: 'var(--display)' }}>
           Changes
         </div>
-        <div className="inline-flex items-center gap-1">
+        <div data-onboarding-id="changes.viewMode" className="inline-flex items-center gap-1">
+          {repoAttached && !disabled ? (
+            <>
+              <span className="text-[9px] uppercase tracking-wide text-[var(--muted-dim)] mr-1" style={{ fontFamily: 'var(--display)' }}>
+                Mode
+              </span>
+              <button
+                type="button"
+                onClick={() => setDataMode('working-tree')}
+                className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
+                  dataMode === 'working-tree'
+                    ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                    : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
+                }`}
+                style={{ fontFamily: 'var(--display)' }}
+                title="Working tree changes inside the drone (staged/unstaged)"
+              >
+                Working
+              </button>
+              <button
+                type="button"
+                onClick={() => setDataMode('pull-preview')}
+                className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
+                  dataMode === 'pull-preview'
+                    ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                    : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
+                }`}
+                style={{ fontFamily: 'var(--display)' }}
+                title="Pull preview: committed diff from base to drone HEAD (what a pull would merge)"
+              >
+                Pull
+              </button>
+              <span className="mx-1 text-[var(--border-subtle)]">|</span>
+            </>
+          ) : null}
           <button
             type="button"
             onClick={() => setViewMode('stacked')}
@@ -490,7 +685,7 @@ export function DroneChangesDock({
             style={{ fontFamily: 'var(--display)' }}
             title="PR-style stacked view"
           >
-            PR View
+            Stacked
           </button>
           <button
             type="button"
@@ -503,7 +698,7 @@ export function DroneChangesDock({
             style={{ fontFamily: 'var(--display)' }}
             title="Explorer + focused diff view"
           >
-            Split View
+            Explorer
           </button>
           <button
             type="button"
@@ -520,26 +715,48 @@ export function DroneChangesDock({
         {!repoAttached ? (
           <span>No repo attached.</span>
         ) : disabled ? (
-          <span>Repo is unavailable while this drone is provisioning.</span>
-        ) : changesLoading && !changes ? (
-          <span>Loading changes...</span>
-        ) : changesError ? (
-          <span className="text-[var(--red)]">{changesError}</span>
+          <span title={String(hubMessage ?? '').trim() || undefined}>
+            {startup.timedOut ? 'Still provisioning… repo not ready yet.' : 'Provisioning… waiting for repo.'}
+          </span>
+        ) : listLoading && ((dataMode === 'working-tree' && !changes) || (dataMode === 'pull-preview' && !pullChanges)) ? (
+          <span>{dataMode === 'pull-preview' ? 'Loading pull preview…' : 'Loading changes...'}</span>
+        ) : listError ? (
+          <span className="text-[var(--red)]">{listError}</span>
         ) : (
           <>
-            <span className="truncate" title={changes?.repoRoot || repoPath || '-'}>
-              {changes?.repoRoot || repoPath || '-'}
-            </span>
-            <span className="text-[var(--muted-dim)]">\u2022</span>
-            <span>{counts?.changed ?? 0} changed</span>
-            <span>{counts?.staged ?? 0} staged</span>
-            <span>{counts?.unstaged ?? 0} unstaged</span>
-            {changes?.branch.head && (
+            {dataMode === 'pull-preview' ? (
               <>
-                <span className="text-[var(--muted-dim)]">\u2022</span>
-                <span className="font-mono" title={changes.branch.head}>
-                  {changes.branch.head}
+                <span className="truncate" title={pullChanges?.repoRoot || repoPath || '-'}>
+                  {pullChanges?.repoRoot || repoPath || '-'}
                 </span>
+                <span className="text-[var(--muted-dim)]">\u2022</span>
+                <span>{pullChanges?.counts.changed ?? 0} files</span>
+                <span className="text-[var(--muted-dim)]">\u2022</span>
+                <span className="font-mono" title={pullBase ?? ''}>
+                  base {shortSha(pullBase)}
+                </span>
+                <span className="text-[var(--muted-dim)]">\u2192</span>
+                <span className="font-mono" title={pullHead ?? ''}>
+                  head {shortSha(pullHead)}
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="truncate" title={changes?.repoRoot || repoPath || '-'}>
+                  {changes?.repoRoot || repoPath || '-'}
+                </span>
+                <span className="text-[var(--muted-dim)]">\u2022</span>
+                <span>{counts?.changed ?? 0} changed</span>
+                <span>{counts?.staged ?? 0} staged</span>
+                <span>{counts?.unstaged ?? 0} unstaged</span>
+                {changes?.branch.head && (
+                  <>
+                    <span className="text-[var(--muted-dim)]">\u2022</span>
+                    <span className="font-mono" title={changes.branch.head}>
+                      {changes.branch.head}
+                    </span>
+                  </>
+                )}
               </>
             )}
           </>
@@ -549,65 +766,129 @@ export function DroneChangesDock({
       {!repoAttached ? (
         <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--muted)]">Attach a repo to see source-control changes.</div>
       ) : disabled ? (
-        <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--muted)]">Changes view is disabled while provisioning is in progress.</div>
-      ) : changesError ? (
-        <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--red)]">{changesError}</div>
-      ) : entries.length === 0 && !changesLoading ? (
-        <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--muted)]">Working tree is clean.</div>
+        <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--muted)]">
+          <div className="rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3">
+            <div className="text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+              {provisioningLabel(hubPhase)}
+            </div>
+            <div className="mt-1">
+              {startup.timedOut
+                ? 'Still waiting for the repository to become available.'
+                : 'Waiting for repository…'}
+            </div>
+            {String(hubMessage ?? '').trim() ? (
+              <div className="mt-1 text-[10px] text-[var(--muted-dim)]">{String(hubMessage ?? '').trim()}</div>
+            ) : null}
+            {startup.timedOut ? (
+              <div className="mt-2 text-[10px] text-[var(--muted-dim)]">
+                If this persists, check the drone status/error details in the sidebar.
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : listError ? (
+        <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--red)]">{listError}</div>
+      ) : entries.length === 0 && !listLoading ? (
+        <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--muted)]">
+          {dataMode === 'pull-preview' ? 'No pull changes to preview.' : 'Working tree is clean.'}
+        </div>
       ) : viewMode === 'stacked' ? (
         <div className="flex-1 min-h-0 overflow-auto">
-          <div className="sticky top-0 z-10 px-2.5 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/95 backdrop-blur flex items-center gap-1">
-            <span className="text-[10px] text-[var(--muted)] mr-1">Prefer:</span>
-            <button
-              type="button"
-              onClick={() => setStackedPreferredKind('unstaged')}
-              className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
-                stackedPreferredKind === 'unstaged'
-                  ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                  : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
-              }`}
-              style={{ fontFamily: 'var(--display)' }}
-            >
-              Unstaged
-            </button>
-            <button
-              type="button"
-              onClick={() => setStackedPreferredKind('staged')}
-              className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
-                stackedPreferredKind === 'staged'
-                  ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                  : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
-              }`}
-              style={{ fontFamily: 'var(--display)' }}
-            >
-              Staged
-            </button>
-          </div>
+          {dataMode === 'working-tree' ? (
+            <>
+              <div className="sticky top-0 z-10 px-2.5 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/95 backdrop-blur flex items-center gap-1">
+                <span className="text-[10px] text-[var(--muted)] mr-1">Prefer:</span>
+                <button
+                  type="button"
+                  onClick={() => setStackedPreferredKind('unstaged')}
+                  className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
+                    stackedPreferredKind === 'unstaged'
+                      ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                      : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
+                  }`}
+                  style={{ fontFamily: 'var(--display)' }}
+                >
+                  Unstaged
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStackedPreferredKind('staged')}
+                  className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
+                    stackedPreferredKind === 'staged'
+                      ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                      : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
+                  }`}
+                  style={{ fontFamily: 'var(--display)' }}
+                >
+                  Staged
+                </button>
+              </div>
 
-          <div className="px-2 py-2 flex flex-col gap-2">
-            {entries.map((entry) => {
-              const k = effectiveKindForEntry(entry, stackedPreferredKind);
-              if (!k) return null;
-              const state = diffByKey[diffKey(entry.path, k)];
-              const fallback = k !== stackedPreferredKind;
-              return (
-                <section key={`stacked:${entry.path}`} className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] overflow-hidden">
-                  <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/70 flex items-center gap-2">
-                    <span className={`inline-flex items-center justify-center min-w-[32px] h-5 rounded border text-[10px] font-mono ${badgeTone(entry)}`}>
-                      {statusCharLabel(entry.stagedChar)}{statusCharLabel(entry.unstagedChar)}
-                    </span>
-                    <span className="text-[11px] text-[var(--fg-secondary)] font-mono truncate flex-1" title={entry.path}>
-                      {entry.path}
-                    </span>
-                    <span className="text-[9px] uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
-                      {k}{fallback ? ' (fallback)' : ''}
-                    </span>
-                  </div>
-                  <DiffBlock state={state} />
-                </section>
-              );
-            })}
-          </div>
+              <div className="px-2 py-2 flex flex-col gap-2">
+                {entries.map((entry) => {
+                  const k = effectiveKindForEntry(entry, stackedPreferredKind);
+                  if (!k) return null;
+                  const state = diffByKey[`wt\u0000${diffKey(entry.path, k)}`];
+                  const fallback = k !== stackedPreferredKind;
+                  return (
+                    <section key={`stacked:${entry.path}`} className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] overflow-hidden">
+                      <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/70 flex items-center gap-2">
+                        <span className={`inline-flex items-center justify-center min-w-[32px] h-5 rounded border text-[10px] font-mono ${badgeTone(entry)}`}>
+                          {statusCharLabel(entry.stagedChar)}{statusCharLabel(entry.unstagedChar)}
+                        </span>
+                        <span className="text-[11px] text-[var(--fg-secondary)] font-mono truncate flex-1" title={entry.path}>
+                          {entry.path}
+                        </span>
+                        <span className="text-[9px] uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+                          {k}{fallback ? ' (fallback)' : ''}
+                        </span>
+                      </div>
+                      <DiffBlock state={state} />
+                    </section>
+                  );
+                })}
+              </div>
+            </>
+          ) : (
+            <div className="px-2 py-2 flex flex-col gap-2">
+              {entries.map((entry) => {
+                const open = expandedPullFiles[entry.path] === true;
+                const key = `pull\u0000${String(pullChanges?.baseSha ?? '').trim().toLowerCase()}\u0000${String(
+                  pullChanges?.headSha ?? '',
+                )
+                  .trim()
+                  .toLowerCase()}\u0000${entry.path}`;
+                const state = diffByKey[key];
+                return (
+                  <section key={`pull:${entry.path}`} className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] overflow-hidden">
+                    <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/70 flex items-center gap-2">
+                      <span className={`inline-flex items-center justify-center min-w-[32px] h-5 rounded border text-[10px] font-mono ${badgeTone(entry)}`}>
+                        {statusCharLabel(entry.stagedChar)}{statusCharLabel(entry.unstagedChar)}
+                      </span>
+                      <span className="text-[11px] text-[var(--fg-secondary)] font-mono truncate flex-1" title={entry.path}>
+                        {entry.path}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setExpandedPullFiles((prev) => {
+                            const next = { ...prev, [entry.path]: !open };
+                            return next;
+                          });
+                          if (!open) void loadPullDiff(entry.path);
+                        }}
+                        className="h-6 px-2 rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[9px] font-semibold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+                        title={open ? 'Hide diff' : 'Show diff'}
+                      >
+                        {open ? 'Hide' : 'Show'}
+                      </button>
+                    </div>
+                    {open ? <DiffBlock state={state} /> : null}
+                  </section>
+                );
+              })}
+            </div>
+          )}
         </div>
       ) : (
         <div className="flex-1 min-h-0 overflow-hidden flex">
@@ -620,42 +901,62 @@ export function DroneChangesDock({
               <div className="min-w-0 text-[10px] text-[var(--muted)] font-mono truncate">
                 {selectedEntry ? selectedEntry.path : 'No file selected'}
               </div>
-              <div className="inline-flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => setSplitKind('unstaged')}
-                  disabled={!hasUnstaged(selectedEntry)}
-                  className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
-                    splitShownKind === 'unstaged'
-                      ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                      : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:opacity-40 disabled:cursor-not-allowed'
-                  }`}
-                  style={{ fontFamily: 'var(--display)' }}
-                  title="Unstaged diff"
-                >
-                  Unstaged
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSplitKind('staged')}
-                  disabled={!hasStaged(selectedEntry)}
-                  className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
-                    splitShownKind === 'staged'
-                      ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                      : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:opacity-40 disabled:cursor-not-allowed'
-                  }`}
-                  style={{ fontFamily: 'var(--display)' }}
-                  title="Staged diff"
-                >
-                  Staged
-                </button>
-              </div>
+              {dataMode === 'working-tree' ? (
+                <div className="inline-flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setSplitKind('unstaged')}
+                    disabled={!hasUnstaged(selectedEntry)}
+                    className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
+                      splitShownKind === 'unstaged'
+                        ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                        : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:opacity-40 disabled:cursor-not-allowed'
+                    }`}
+                    style={{ fontFamily: 'var(--display)' }}
+                    title="Unstaged diff"
+                  >
+                    Unstaged
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSplitKind('staged')}
+                    disabled={!hasStaged(selectedEntry)}
+                    className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
+                      splitShownKind === 'staged'
+                        ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                        : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:opacity-40 disabled:cursor-not-allowed'
+                    }`}
+                    style={{ fontFamily: 'var(--display)' }}
+                    title="Staged diff"
+                  >
+                    Staged
+                  </button>
+                </div>
+              ) : (
+                <div className="text-[9px] text-[var(--muted-dim)] font-mono whitespace-nowrap">
+                  {shortSha(pullBase)}..{shortSha(pullHead)}
+                </div>
+              )}
             </div>
 
-            {!selectedEntry || !splitShownKind ? (
+            {dataMode === 'working-tree' ? (
+              !selectedEntry || !splitShownKind ? (
+                <div className="px-3 py-3 text-[11px] text-[var(--muted)]">Select a changed file to inspect its diff.</div>
+              ) : (
+                <DiffBlock state={diffByKey[`wt\u0000${diffKey(selectedEntry.path, splitShownKind)}`]} />
+              )
+            ) : !selectedEntry ? (
               <div className="px-3 py-3 text-[11px] text-[var(--muted)]">Select a changed file to inspect its diff.</div>
             ) : (
-              <DiffBlock state={diffByKey[diffKey(selectedEntry.path, splitShownKind)]} />
+              <DiffBlock
+                state={
+                  diffByKey[
+                    `pull\u0000${String(pullChanges?.baseSha ?? '').trim().toLowerCase()}\u0000${String(pullChanges?.headSha ?? '')
+                      .trim()
+                      .toLowerCase()}\u0000${selectedEntry.path}`
+                  ]
+                }
+              />
             )}
           </div>
         </div>
