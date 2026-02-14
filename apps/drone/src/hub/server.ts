@@ -655,6 +655,203 @@ async function droneRepoDiffForPath(opts: {
   };
 }
 
+type RepoPullChangeType =
+  | 'added'
+  | 'modified'
+  | 'deleted'
+  | 'renamed'
+  | 'copied'
+  | 'type-changed'
+  | 'unmerged'
+  | 'untracked'
+  | 'ignored'
+  | 'unknown'
+  | null;
+
+type RepoPullChangeEntry = {
+  path: string;
+  originalPath: string | null;
+  statusChar: string;
+  statusType: RepoPullChangeType;
+};
+
+function nameStatusCharToType(chRaw: string): RepoPullChangeType {
+  const ch = String(chRaw ?? '.').charAt(0);
+  switch (ch) {
+    case 'A':
+      return 'added';
+    case 'M':
+      return 'modified';
+    case 'D':
+      return 'deleted';
+    case 'R':
+      return 'renamed';
+    case 'C':
+      return 'copied';
+    case 'T':
+      return 'type-changed';
+    case 'U':
+      return 'unmerged';
+    default:
+      return ch ? 'unknown' : null;
+  }
+}
+
+function parseGitNameStatusZ(raw: string): RepoPullChangeEntry[] {
+  const tokens = String(raw ?? '')
+    .split('\0')
+    .filter((t) => t.length > 0);
+
+  const out: RepoPullChangeEntry[] = [];
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i];
+    const tab = token.indexOf('\t');
+    if (tab <= 0) continue;
+    const statusRaw = token.slice(0, tab);
+    const statusChar = statusRaw.charAt(0) || '?';
+    const pathA = token.slice(tab + 1);
+    if (!pathA) continue;
+
+    if (statusChar === 'R' || statusChar === 'C') {
+      const pathB = tokens[i + 1] ?? '';
+      i += 1;
+      const newPath = pathB || pathA;
+      out.push({
+        path: newPath,
+        originalPath: pathA,
+        statusChar,
+        statusType: nameStatusCharToType(statusChar),
+      });
+      continue;
+    }
+
+    out.push({
+      path: pathA,
+      originalPath: null,
+      statusChar,
+      statusType: nameStatusCharToType(statusChar),
+    });
+  }
+
+  out.sort((a, b) => {
+    const p = a.path.localeCompare(b.path);
+    if (p !== 0) return p;
+    return String(a.originalPath ?? '').localeCompare(String(b.originalPath ?? ''));
+  });
+  return out;
+}
+
+async function droneRepoBaseSha(opts: { container: string; repoPathInContainer: string }): Promise<string | null> {
+  const repoPathInContainer = normalizeContainerPath(opts.repoPathInContainer);
+  const r = await runGitInDroneOrThrow({
+    container: opts.container,
+    repoPathInContainer,
+    args: ['config', '--get', 'dvm.baseSha'],
+    okCodes: [0, 1],
+  });
+  const sha = String(r.stdout ?? '').trim().toLowerCase();
+  if (!sha) return null;
+  return /^[0-9a-f]{40}$/.test(sha) ? sha : null;
+}
+
+async function droneRepoPullChangesSummary(opts: {
+  container: string;
+  repoPathInContainer: string;
+}): Promise<{ repoRoot: string; baseSha: string; headSha: string; entries: RepoPullChangeEntry[] }> {
+  const repoPathInContainer = normalizeContainerPath(opts.repoPathInContainer);
+  const repoRootRaw = await runGitInDroneOrThrow({
+    container: opts.container,
+    repoPathInContainer,
+    args: ['rev-parse', '--show-toplevel'],
+  });
+  const repoRoot = String(repoRootRaw.stdout ?? '').trim() || repoPathInContainer;
+
+  const baseSha = await droneRepoBaseSha({ container: opts.container, repoPathInContainer });
+  if (!baseSha) {
+    throw new Error('missing dvm.baseSha (reseed may be required)');
+  }
+
+  const headRaw = await runGitInDroneOrThrow({
+    container: opts.container,
+    repoPathInContainer,
+    args: ['rev-parse', 'HEAD'],
+  });
+  const headSha = String(headRaw.stdout ?? '').trim().toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(headSha)) throw new Error('failed to resolve HEAD sha');
+
+  const nameStatus = await runGitInDroneOrThrow({
+    container: opts.container,
+    repoPathInContainer,
+    args: ['diff', '--name-status', '-z', `${baseSha}..${headSha}`],
+  });
+  const entries = parseGitNameStatusZ(nameStatus.stdout);
+  return { repoRoot, baseSha, headSha, entries };
+}
+
+async function droneRepoPullDiffForPath(opts: {
+  container: string;
+  repoPathInContainer: string;
+  filePath: string;
+  baseSha?: string;
+  headSha?: string;
+  contextLines?: number;
+  maxChars?: number;
+}): Promise<{ repoRoot: string; baseSha: string; headSha: string; path: string; diff: string; truncated: boolean }> {
+  const repoPathInContainer = normalizeContainerPath(opts.repoPathInContainer);
+  const requestedPath = String(opts.filePath ?? '').trim();
+  if (!requestedPath) throw new Error('missing file path');
+  if (requestedPath.includes('\0')) throw new Error('invalid file path');
+
+  const repoRootRaw = await runGitInDroneOrThrow({
+    container: opts.container,
+    repoPathInContainer,
+    args: ['rev-parse', '--show-toplevel'],
+  });
+  const repoRoot = String(repoRootRaw.stdout ?? '').trim() || repoPathInContainer;
+
+  const baseSha =
+    typeof opts.baseSha === 'string' && /^[0-9a-f]{40}$/.test(opts.baseSha.trim().toLowerCase())
+      ? opts.baseSha.trim().toLowerCase()
+      : (await droneRepoBaseSha({ container: opts.container, repoPathInContainer }));
+  if (!baseSha) throw new Error('missing dvm.baseSha (reseed may be required)');
+
+  const headSha =
+    typeof opts.headSha === 'string' && /^[0-9a-f]{40}$/.test(opts.headSha.trim().toLowerCase())
+      ? opts.headSha.trim().toLowerCase()
+      : String(
+          (
+            await runGitInDroneOrThrow({
+              container: opts.container,
+              repoPathInContainer,
+              args: ['rev-parse', 'HEAD'],
+            })
+          ).stdout ?? '',
+        )
+          .trim()
+          .toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(headSha)) throw new Error('failed to resolve HEAD sha');
+
+  const contextLines =
+    typeof opts.contextLines === 'number' && Number.isFinite(opts.contextLines) && opts.contextLines >= 0
+      ? Math.floor(opts.contextLines)
+      : 3;
+  const maxChars =
+    typeof opts.maxChars === 'number' && Number.isFinite(opts.maxChars) && opts.maxChars > 0 ? Math.floor(opts.maxChars) : 350_000;
+
+  const diffRaw = await runGitInDroneOrThrow({
+    container: opts.container,
+    repoPathInContainer,
+    args: ['diff', '--no-color', '--no-ext-diff', `-U${contextLines}`, `${baseSha}..${headSha}`, '--', requestedPath],
+  });
+  let diffText = diffRaw.stdout ?? '';
+  let truncated = false;
+  if (diffText.length > maxChars) {
+    truncated = true;
+    diffText = `${diffText.slice(0, maxChars)}\n\n@@ truncated @@\n`;
+  }
+  return { repoRoot, baseSha, headSha, path: requestedPath, diff: diffText, truncated };
+}
+
 function buildDockerExecShellCommand(containerName: string, cwdRaw: string): string {
   const cwd = normalizeContainerPath(cwdRaw);
   const shellBody = [
@@ -5224,6 +5421,114 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         } catch (e: any) {
           const msg = e?.message ?? String(e);
           json(res, 500, { ok: false, error: msg });
+          return;
+        }
+      }
+
+      // GET /api/drones/:name/repo/pull/changes
+      // "PR perspective": committed delta between dvm.baseSha..HEAD in the container repo.
+      if (
+        method === 'GET' &&
+        parts.length === 6 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'repo' &&
+        parts[4] === 'pull' &&
+        parts[5] === 'changes'
+      ) {
+        const droneName = decodeURIComponent(parts[2]);
+        const d = await resolveDroneOrRespond(res, droneName);
+        if (!d) return;
+        const repoAttached = Boolean(String(d?.repo?.dest ?? '').trim()) || Boolean(String(d?.repo?.seededAt ?? '').trim());
+        if (!repoAttached) {
+          json(res, 400, { ok: false, error: 'drone has no repo attached' });
+          return;
+        }
+        const repoPathInContainer = droneRepoPathInContainer(d);
+        try {
+          const summary = await droneRepoPullChangesSummary({
+            container: droneName,
+            repoPathInContainer,
+          });
+          json(res, 200, {
+            ok: true,
+            name: droneName,
+            repoRoot: summary.repoRoot,
+            baseSha: summary.baseSha,
+            headSha: summary.headSha,
+            counts: { changed: summary.entries.length },
+            entries: summary.entries,
+          });
+          return;
+        } catch (e: any) {
+          const msg = e?.message ?? String(e);
+          const missingBase = /missing dvm\.baseSha/i.test(msg);
+          json(res, missingBase ? 409 : 500, {
+            ok: false,
+            error: missingBase ? 'Drone repo is missing its base SHA. Re-seed the drone to enable pull preview.' : msg,
+            ...(missingBase ? { code: 'missing_base' } : {}),
+          });
+          return;
+        }
+      }
+
+      // GET /api/drones/:name/repo/pull/diff?path=<repo-relative>&base=<sha>&head=<sha>
+      // Unified diff for a single file between base..head (defaults to base=dvm.baseSha and head=HEAD).
+      if (
+        method === 'GET' &&
+        parts.length === 6 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'repo' &&
+        parts[4] === 'pull' &&
+        parts[5] === 'diff'
+      ) {
+        const droneName = decodeURIComponent(parts[2]);
+        const d = await resolveDroneOrRespond(res, droneName);
+        if (!d) return;
+        const repoAttached = Boolean(String(d?.repo?.dest ?? '').trim()) || Boolean(String(d?.repo?.seededAt ?? '').trim());
+        if (!repoAttached) {
+          json(res, 400, { ok: false, error: 'drone has no repo attached' });
+          return;
+        }
+        const repoPathInContainer = droneRepoPathInContainer(d);
+
+        const filePath = String(u.searchParams.get('path') ?? '').trim();
+        if (!filePath) {
+          json(res, 400, { ok: false, error: 'missing diff path' });
+          return;
+        }
+        const baseSha = String(u.searchParams.get('base') ?? '').trim().toLowerCase();
+        const headSha = String(u.searchParams.get('head') ?? '').trim().toLowerCase();
+
+        try {
+          const diff = await droneRepoPullDiffForPath({
+            container: droneName,
+            repoPathInContainer,
+            filePath,
+            baseSha: /^[0-9a-f]{40}$/.test(baseSha) ? baseSha : undefined,
+            headSha: /^[0-9a-f]{40}$/.test(headSha) ? headSha : undefined,
+            contextLines: 3,
+          });
+          json(res, 200, {
+            ok: true,
+            name: droneName,
+            repoRoot: diff.repoRoot,
+            baseSha: diff.baseSha,
+            headSha: diff.headSha,
+            path: diff.path,
+            diff: diff.diff,
+            truncated: diff.truncated,
+          });
+          return;
+        } catch (e: any) {
+          const msg = e?.message ?? String(e);
+          const missingBase = /missing dvm\.baseSha/i.test(msg);
+          json(res, missingBase ? 409 : 500, {
+            ok: false,
+            error: missingBase ? 'Drone repo is missing its base SHA. Re-seed the drone to enable pull preview.' : msg,
+            ...(missingBase ? { code: 'missing_base' } : {}),
+          });
           return;
         }
       }
