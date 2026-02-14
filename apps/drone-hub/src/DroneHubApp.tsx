@@ -78,6 +78,11 @@ const RIGHT_PANEL_DEFAULT_WIDTH_PX = 460;
 const RIGHT_PANEL_MIN_WIDTH_PX = 360;
 const RIGHT_PANEL_MAX_WIDTH_VIEWPORT_RATIO = 0.7;
 const SIDEBAR_REPOS_COLLAPSED_STORAGE_KEY = 'droneHub.sidebarReposCollapsed';
+const ONBOARDING_STORAGE_PREFIX = 'droneHub.onboarding.';
+const ONBOARDING_DISMISSED_AT_STORAGE_KEY = `${ONBOARDING_STORAGE_PREFIX}dismissedAt`;
+const ONBOARDING_COMPLETED_AT_STORAGE_KEY = `${ONBOARDING_STORAGE_PREFIX}completedAt`;
+const ONBOARDING_VERSION_STORAGE_KEY = `${ONBOARDING_STORAGE_PREFIX}version`;
+const ONBOARDING_VERSION = '1';
 const HUB_LOGS_TAIL_LINES = 600;
 const HUB_LOGS_MAX_BYTES = 200_000;
 const STARTUP_SEED_MISSING_GRACE_MS = 30_000;
@@ -264,6 +269,28 @@ function readLocalStorageItem(key: string): string | null {
     return localStorage.getItem(key);
   } catch {
     return null;
+  }
+}
+
+function removeLocalStorageItem(key: string): void {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // ignore
+  }
+}
+
+function clearLocalStorageKeysByPrefix(prefix: string): void {
+  try {
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+      if (k.startsWith(prefix)) keys.push(k);
+    }
+    for (const k of keys) removeLocalStorageItem(k);
+  } catch {
+    // ignore
   }
 }
 
@@ -709,6 +736,111 @@ export default function DroneHubApp() {
   const [appView, setAppView] = React.useState<AppView>(() => (readLocalStorageItem('droneHub.appView') === 'settings' ? 'settings' : 'workspace'));
   usePersistedLocalStorageItem('droneHub.appView', appView);
 
+  const onboardingSteps = React.useMemo(
+    () =>
+      [
+        {
+          id: 'welcome',
+          title: 'Welcome to Drone Hub',
+          body: (
+            <div className="space-y-2">
+              <p>Drone Hub is your control room for running and interacting with drones.</p>
+              <p className="text-[var(--muted)]">This quick tour highlights the core workflow. You can replay it anytime from Settings.</p>
+            </div>
+          ),
+        },
+        {
+          id: 'create',
+          title: 'Create drones fast',
+          body: (
+            <div className="space-y-2">
+              <p>Use the “Create” action to spawn one or many drones from detected jobs.</p>
+              <p className="text-[var(--muted)]">Tip: you can also start a brand new chat to create an untitled drone instantly.</p>
+            </div>
+          ),
+        },
+        {
+          id: 'inspect',
+          title: 'Inspect output & files',
+          body: (
+            <div className="space-y-2">
+              <p>Follow the transcript/output, browse files, and use the terminal dock for interactive debugging.</p>
+              <p className="text-[var(--muted)]">The right panel tabs keep everything in one place.</p>
+            </div>
+          ),
+        },
+        {
+          id: 'settings',
+          title: 'Configure providers',
+          body: (
+            <div className="space-y-2">
+              <p>Set up your OpenAI/Gemini keys and select a default provider in Settings.</p>
+              <p className="text-[var(--muted)]">You can always return to Settings from the header.</p>
+            </div>
+          ),
+        },
+      ] as const,
+    [],
+  );
+  const onboardingTotal = onboardingSteps.length;
+
+  const [onboardingOpen, setOnboardingOpen] = React.useState(false);
+  const [onboardingStepIndex, setOnboardingStepIndex] = React.useState(0);
+  const [onboardingAutoStarted, setOnboardingAutoStarted] = React.useState(false);
+
+  const closeOnboarding = React.useCallback(
+    (reason: 'dismiss' | 'complete') => {
+      setOnboardingOpen(false);
+      const now = new Date().toISOString();
+      if (reason === 'complete') writeLocalStorageItem(ONBOARDING_COMPLETED_AT_STORAGE_KEY, now);
+      else writeLocalStorageItem(ONBOARDING_DISMISSED_AT_STORAGE_KEY, now);
+      writeLocalStorageItem(ONBOARDING_VERSION_STORAGE_KEY, ONBOARDING_VERSION);
+    },
+    [],
+  );
+
+  const replayOnboarding = React.useCallback(() => {
+    clearLocalStorageKeysByPrefix(ONBOARDING_STORAGE_PREFIX);
+    setOnboardingStepIndex(0);
+    setOnboardingOpen(true);
+    setOnboardingAutoStarted(true);
+    setAppView('workspace');
+  }, [setAppView]);
+
+  React.useEffect(() => {
+    if (appView !== 'workspace') return;
+    if (onboardingAutoStarted) return;
+    const version = readLocalStorageItem(ONBOARDING_VERSION_STORAGE_KEY);
+    const dismissedAt = readLocalStorageItem(ONBOARDING_DISMISSED_AT_STORAGE_KEY);
+    const completedAt = readLocalStorageItem(ONBOARDING_COMPLETED_AT_STORAGE_KEY);
+    if (version === ONBOARDING_VERSION && (dismissedAt || completedAt)) return;
+    setOnboardingStepIndex(0);
+    setOnboardingOpen(true);
+    setOnboardingAutoStarted(true);
+  }, [appView, onboardingAutoStarted]);
+
+  React.useEffect(() => {
+    if (!onboardingOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeOnboarding('dismiss');
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [closeOnboarding, onboardingOpen]);
+
+  const safeOnboardingStepIndex = Math.max(0, Math.min(onboardingStepIndex, onboardingTotal - 1));
+  const safeOnboardingStep = onboardingSteps[safeOnboardingStepIndex];
+  const onboardingIsFirst = safeOnboardingStepIndex <= 0;
+  const onboardingIsLast = safeOnboardingStepIndex >= onboardingTotal - 1;
+
+  const goPrevOnboardingStep = React.useCallback(() => {
+    setOnboardingStepIndex((i) => Math.max(0, i - 1));
+  }, []);
+
+  const goNextOnboardingStep = React.useCallback(() => {
+    setOnboardingStepIndex((i) => Math.min(onboardingTotal - 1, i + 1));
+  }, [onboardingTotal]);
+
   const [viewMode, setViewMode] = React.useState<'grouped' | 'flat'>(() => (readLocalStorageItem('droneHub.viewMode') === 'flat' ? 'flat' : 'grouped'));
 
   const [collapsedGroups, setCollapsedGroups] = React.useState<Record<string, boolean>>(() => {
@@ -727,7 +859,7 @@ export default function DroneHubApp() {
   const [terminalEmulator, setTerminalEmulator] = React.useState<string>(() => readLocalStorageItem('droneHub.terminalEmulator') || 'auto');
   usePersistedLocalStorageItem('droneHub.viewMode', viewMode);
   usePersistedLocalStorageItem('droneHub.collapsedGroups', JSON.stringify(collapsedGroups));
-  usePersistedLocalStorageItem('droneHub autoDelete', autoDelete ? '1' : '0');
+  usePersistedLocalStorageItem('droneHub.autoDelete', autoDelete ? '1' : '0');
   usePersistedLocalStorageItem('droneHub.terminalEmulator', terminalEmulator);
 
   const dronesFilteredByRepo = React.useMemo(() => {
@@ -5483,6 +5615,84 @@ export default function DroneHubApp() {
         </div>
       )}
 
+      {/* ── Onboarding tour ── */}
+      {onboardingOpen && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-[rgba(0,0,0,.65)] backdrop-blur-sm px-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Onboarding tour"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) closeOnboarding('dismiss');
+          }}
+        >
+          <div className="w-full max-w-[560px] rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-alt)] shadow-[0_24px_80px_rgba(0,0,0,.55)] overflow-hidden animate-slide-up relative">
+            <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-[var(--accent)] via-[rgba(167,139,250,.55)] to-transparent opacity-70" />
+            <div className="px-5 py-4 border-b border-[var(--border)] flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--muted-dim)] font-semibold" style={{ fontFamily: 'var(--display)' }}>
+                  Onboarding
+                </div>
+                <h2 className="text-[16px] font-semibold text-[var(--fg)] mt-1" style={{ fontFamily: 'var(--display)' }}>
+                  {safeOnboardingStep?.title ?? 'Tour'}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => closeOnboarding('dismiss')}
+                className="inline-flex items-center justify-center w-8 h-8 rounded-md text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] border border-transparent hover:border-[var(--border-subtle)] transition-colors"
+                title="Dismiss"
+                aria-label="Dismiss"
+              >
+                ×
+              </button>
+            </div>
+            <div className="px-5 py-4 text-[13px] text-[var(--fg-secondary)] leading-relaxed">
+              {safeOnboardingStep?.body ?? null}
+            </div>
+            <div className="px-5 py-4 border-t border-[var(--border)] bg-[rgba(0,0,0,.10)] flex items-center justify-between gap-2">
+              <div className="text-[11px] text-[var(--muted-dim)]">
+                Step {safeOnboardingStepIndex + 1} of {onboardingTotal}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={goPrevOnboardingStep}
+                  disabled={onboardingIsFirst}
+                  className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+                    onboardingIsFirst
+                      ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                      : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                  }`}
+                  style={{ fontFamily: 'var(--display)' }}
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  onClick={() => closeOnboarding('dismiss')}
+                  className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+                  style={{ fontFamily: 'var(--display)' }}
+                >
+                  Skip
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onboardingIsLast) closeOnboarding('complete');
+                    else goNextOnboardingStep();
+                  }}
+                  className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110"
+                  style={{ fontFamily: 'var(--display)' }}
+                >
+                  {onboardingIsLast ? 'Finish' : 'Next'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Content area (header + body row) ── */}
       <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden bg-[var(--panel)]">
         {appView === 'settings' ? (
@@ -5861,6 +6071,43 @@ export default function DroneHubApp() {
                         </div>
                       </>
                     )}
+                  </div>
+
+                  <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
+                    <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+                      Onboarding
+                    </div>
+                    <div className="text-[11px] text-[var(--muted-dim)] leading-relaxed">
+                      Reset the onboarding dismissal state and replay the tour from step 1.
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const ok = window.confirm('Replay onboarding from the beginning? This will clear onboarding state.');
+                          if (!ok) return;
+                          replayOnboarding();
+                        }}
+                        className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110"
+                        style={{ fontFamily: 'var(--display)' }}
+                        title="Reset onboarding and replay"
+                      >
+                        Replay onboarding
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const ok = window.confirm('Clear onboarding state?');
+                          if (!ok) return;
+                          clearLocalStorageKeysByPrefix(ONBOARDING_STORAGE_PREFIX);
+                        }}
+                        className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+                        style={{ fontFamily: 'var(--display)' }}
+                        title="Clear onboarding keys without opening the tour"
+                      >
+                        Reset only
+                      </button>
+                    </div>
                   </div>
 
                   <div className="flex items-center">
