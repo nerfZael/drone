@@ -3,7 +3,6 @@ import React from 'react';
 export function ChatInput({
   resetKey,
   droneName,
-  modeHint,
   promptError,
   sending,
   waiting,
@@ -13,7 +12,6 @@ export function ChatInput({
 }: {
   resetKey: string;
   droneName: string;
-  modeHint: string;
   promptError: string | null;
   sending: boolean;
   waiting: boolean;
@@ -96,12 +94,6 @@ export function ChatInput({
             >
               {sending ? 'Sending…' : waiting ? 'Waiting…' : 'Send'}
             </button>
-          </div>
-          <div
-            className="px-4 pb-2 text-[10px] text-[var(--muted-dim)] tracking-wide uppercase"
-            style={{ fontFamily: 'var(--display)' }}
-          >
-            {modeHint}
           </div>
         </div>
       </div>

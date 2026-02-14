@@ -6483,11 +6483,6 @@ export default function DroneHubApp() {
                 sending={draftCreating || draftAutoRenaming}
                 waiting={Boolean(draftChat.prompt)}
                 autoFocus={!draftCreating && !draftAutoRenaming && !draftChat.prompt}
-                modeHint={
-                  spawnAgentConfig.kind === 'builtin'
-                    ? `${spawnAgentLabel} · ${spawnModelForSeed ?? 'default model'} · create on send`
-                    : `${spawnAgentLabel} · custom agent · create on send`
-                }
                 onSend={async (prompt) => {
                   if (!draftChat.prompt) return await startDraftPrompt(prompt);
                   const name = String(draftChat.droneName ?? '').trim();
@@ -7050,11 +7045,6 @@ export default function DroneHubApp() {
               promptError={promptError}
               sending={sendingPrompt}
               waiting={chatUiMode === 'transcript' && visiblePendingPromptsWithStartup.some((p) => p.state !== 'failed')}
-              modeHint={
-                chatUiMode === 'transcript'
-                  ? `${effectiveChatInfo?.agent ? (effectiveChatInfo.agent.kind === 'builtin' ? effectiveChatInfo.agent.id : 'custom') : '…'} agent`
-                  : `tmux: ${effectiveChatInfo?.sessionName ?? '…'} · cli`
-              }
               onSend={async (prompt) => {
                 try {
                   return await sendPromptText(prompt);
