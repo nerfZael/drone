@@ -6008,11 +6008,6 @@ export default function DroneHubApp() {
                 waiting={Boolean(draftChat.prompt)}
                 disabled={draftCreating || draftAutoRenaming || Boolean(draftChat.prompt)}
                 autoFocus={!draftCreating && !draftAutoRenaming && !draftChat.prompt}
-                modeHint={
-                  spawnAgentConfig.kind === 'builtin'
-                    ? `${spawnAgentLabel} · ${spawnModelForSeed ?? 'default model'} · create on send`
-                    : `${spawnAgentLabel} · custom agent · create on send`
-                }
                 onSend={startDraftPrompt}
               />
             </div>
@@ -6509,11 +6504,6 @@ export default function DroneHubApp() {
               sending={sendingPrompt}
               waiting={chatUiMode === 'transcript' && visiblePendingPromptsWithStartup.some((p) => p.state !== 'failed')}
               disabled={currentDrone.hubPhase === 'starting' || currentDrone.hubPhase === 'seeding'}
-              modeHint={
-                chatUiMode === 'transcript'
-                  ? `${effectiveChatInfo?.agent ? (effectiveChatInfo.agent.kind === 'builtin' ? effectiveChatInfo.agent.id : 'custom') : '…'} agent`
-                  : `tmux: ${effectiveChatInfo?.sessionName ?? '…'} · cli`
-              }
               onSend={async (prompt) => {
                 try {
                   return await sendPromptText(prompt);
