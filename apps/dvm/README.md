@@ -265,6 +265,7 @@ dvm session attach <name> my-session
 ### Repo workflows (offline "local PR" flow)
 
 These commands help you work on a host git repo **inside a container without bind-mounting the repo**, then export changes back to the host for review/merge.
+When seeding, `dvm` now keeps the host repo's preferred git remote as container `origin` so tools like `gh pr create` can run inside the container.
 
 ```bash
 # Seed the container from your current host repo (creates a git bundle, copies it in, clones it)

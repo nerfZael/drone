@@ -303,6 +303,23 @@ async function hostCurrentBranchOrSha(hostRepoPath: string): Promise<string> {
   return (await runLocal('git', ['-C', hostRepoPath, 'rev-parse', 'HEAD'])).trim();
 }
 
+async function hostBestRemoteUrl(hostRepoPath: string): Promise<string | null> {
+  // Prefer origin for predictable behavior.
+  const origin = (await runLocal('git', ['-C', hostRepoPath, 'remote', 'get-url', 'origin']).catch(() => '')).trim();
+  if (origin) return origin;
+
+  // Fall back to the first configured remote.
+  const remotes = (await runLocal('git', ['-C', hostRepoPath, 'remote']).catch(() => ''))
+    .split('\n')
+    .map((r) => r.trim())
+    .filter(Boolean);
+  const first = remotes[0];
+  if (!first) return null;
+
+  const fallback = (await runLocal('git', ['-C', hostRepoPath, 'remote', 'get-url', first]).catch(() => '')).trim();
+  return fallback || null;
+}
+
 async function loadRepoStateForHostPath(hostRepoPath: string): Promise<{
   gitRoot: string;
   statePath: string;
@@ -1489,6 +1506,7 @@ repoCommand
       await runLocal('git', ['-C', hostRepoPath, 'rev-parse', '--is-inside-work-tree']);
       const baseSha = (await runLocal('git', ['-C', hostRepoPath, 'rev-parse', String(options.baseRef || 'HEAD')])).trim();
       const baseBranchForHost = await hostCurrentBranchOrSha(hostRepoPath);
+      const hostRemoteUrl = await hostBestRemoteUrl(hostRepoPath);
 
       // Create a temporary git bundle (single file, no build artifacts).
       tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), `dvm-bundle-${safeSlug(containerName)}-`));
@@ -1513,6 +1531,9 @@ repoCommand
       const branchCmd = branch
         ? `cd ${JSON.stringify(dest)} && git checkout ${options.forceBranch ? '-B' : '-b'} ${JSON.stringify(branch)}`
         : '';
+      const remoteCmd = hostRemoteUrl
+        ? `cd ${JSON.stringify(dest)} && git remote set-url origin ${JSON.stringify(hostRemoteUrl)}`
+        : '';
 
       const cloneScript = [
         'set -euo pipefail',
@@ -1523,6 +1544,8 @@ repoCommand
         `git clone ${JSON.stringify(bundlePathInContainer)} ${JSON.stringify(dest)}`,
         // Record base SHA in git config (untracked; cannot accidentally be committed).
         `cd ${JSON.stringify(dest)} && git config dvm.baseSha ${JSON.stringify(baseSha)}`,
+        // Preserve host remote so PR tooling can work directly inside the container repo.
+        remoteCmd,
         // Back-compat cleanup: remove old tracked marker if present.
         `rm -f ${JSON.stringify(path.posix.join(dest, '.dvm-base-sha'))} || true`,
         branchCmd,
@@ -1534,6 +1557,7 @@ repoCommand
 
       console.log(chalk.green(`Seeded ${containerName}:${dest}`));
       console.log(chalk.gray(`Base SHA: ${baseSha}`));
+      if (hostRemoteUrl) console.log(chalk.gray(`Origin: ${hostRemoteUrl}`));
       if (branch) console.log(chalk.gray(`Branch: ${branch}`));
 
       // Save per-host-repo defaults for `dvm repo sync/pull`.
