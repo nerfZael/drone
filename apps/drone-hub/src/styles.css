@@ -456,7 +456,7 @@ select:disabled optgroup {
   margin-bottom: 10px;
 }
 
-/* Keep split diffs readable in narrow panes. */
+/* Keep diffs readable in narrow panes. */
 .dh-changes-dock .rdv-wrapper .diff table {
   width: 100%;
   table-layout: fixed;

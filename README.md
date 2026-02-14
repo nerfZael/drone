@@ -20,39 +20,52 @@ A Bun + Turborepo monorepo for running and managing **agent-enabled “drone” 
 - **Node.js** \(>= 18\) for the built CLIs
 - **Docker** (local daemon)
 
-## Quickstart (build + run)
+## Installation
 
-From repo root:
+From the repo root:
 
 ```bash
-# install dependencies for all workspaces
+# install workspace dependencies
 bun install
 
 # build all apps (outputs to apps/*/dist)
 bun run build
+
+# install CLI commands into your shell PATH
+npm link ./apps/dvm
+npm link ./apps/drone
+npm link ./apps/looped
 ```
 
-Run the CLIs from their built output:
+If the commands are not found, ensure your npm global bin is on `PATH`:
+
+```bash
+export PATH="$(npm prefix -g)/bin:$PATH"
+```
+
+## Quickstart (run)
+
+After installation:
 
 ```bash
 # dvm
-node apps/dvm/dist/cli.js --help
+dvm --help
 
 # drone
-node apps/drone/dist/cli.js --help
+drone --help
 
 # looped
-node apps/looped/dist/cli.js --help
+looped --help
 ```
 
 Typical flow:
 
 ```bash
 # create a drone container + start its daemon + register it locally
-node apps/drone/dist/cli.js create <name>
+drone create <name>
 
 # start the Hub UI/API (detached)
-node apps/drone/dist/cli.js hub
+drone hub
 ```
 
 Drone Hub UI-only development (Vite dev server):
