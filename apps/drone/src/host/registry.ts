@@ -59,6 +59,11 @@ export type DroneRegistry = {
   pending?: Record<
     string,
     {
+      /**
+       * Stable identity for this startup workflow.
+       * Unlike `name`, this does not change if the drone is renamed.
+       */
+      id?: string;
       name: string;
       group?: string;
       repoPath: string;
@@ -88,6 +93,11 @@ export type DroneRegistry = {
   drones: Record<
     string,
     {
+      /**
+       * Stable identity for this drone.
+       * The key/name may change via rename, but this id should remain constant.
+       */
+      id?: string;
       name: string;
       /**
        * Optional group name for organizing drones in the Hub UI.

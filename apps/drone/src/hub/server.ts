@@ -1341,6 +1341,63 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+function normalizeDroneIdentity(raw: unknown): string {
+  const id = typeof raw === 'string' ? raw.trim() : '';
+  if (!id) return '';
+  if (id.length > 128) return '';
+  return id;
+}
+
+function makeDroneIdentity(): string {
+  return crypto.randomUUID();
+}
+
+function findDroneEntryByIdentity(regAny: any, droneId: string): { key: string; entry: any } | null {
+  const byId = normalizeDroneIdentity(droneId);
+  if (!byId) return null;
+  for (const [key, entry] of Object.entries(regAny?.drones ?? {})) {
+    if (normalizeDroneIdentity((entry as any)?.id) === byId) {
+      return { key: String(key), entry };
+    }
+  }
+  return null;
+}
+
+async function resolveDroneNameByIdentity(droneId: string): Promise<string | null> {
+  const regAny: any = await loadRegistry();
+  const found = findDroneEntryByIdentity(regAny, droneId);
+  if (!found) return null;
+  const entryName = String(found.entry?.name ?? '').trim();
+  if (entryName) return entryName;
+  const keyName = String(found.key ?? '').trim();
+  return keyName || null;
+}
+
+async function setDroneHubMetaByIdentity(
+  opts: {
+    droneId: string;
+    hub: null | { phase: 'starting' | 'seeding' | 'error'; message?: string; promptId?: string };
+  }
+) {
+  await updateRegistry((regAny: any) => {
+    const found = findDroneEntryByIdentity(regAny, opts.droneId);
+    if (!found) return;
+    const d: any = found.entry;
+    if (!opts.hub) {
+      delete d.hub;
+    } else {
+      d.hub = {
+        phase: opts.hub.phase,
+        message: opts.hub.message,
+        updatedAt: nowIso(),
+        ...(opts.hub.promptId ? { promptId: opts.hub.promptId } : {}),
+      };
+    }
+    regAny.drones = regAny.drones ?? {};
+    regAny.drones[found.key] = d;
+  });
+}
+
 function normalizeChatName(raw: any): string {
   return String(raw ?? 'default').trim() || 'default';
 }
@@ -2819,6 +2876,7 @@ async function createOrEnqueuePromptUnified(opts: {
     if (regAny?.drones?.[droneName]) return { kind: 'exists' as const };
     regAny.pending = regAny.pending ?? {};
     const existing = regAny.pending[droneName] ?? null;
+    const pendingDroneId = existing ? normalizeDroneIdentity(existing?.id) : makeDroneIdentity();
     const existingSeed = existing?.seed ?? null;
     const existingPrompt = existingSeed ? String(existingSeed.prompt ?? '').trim() : '';
     const existingId = existingSeed ? String(existingSeed.promptId ?? '').trim() : '';
@@ -2838,8 +2896,12 @@ async function createOrEnqueuePromptUnified(opts: {
     };
 
     if (existing) {
+      if (!pendingDroneId) {
+        return { kind: 'error' as const, status: 500, error: 'missing pending drone identity' };
+      }
       regAny.pending[droneName] = {
         ...existing,
+        id: pendingDroneId,
         ...(group ? { group } : {}),
         ...(repoPath ? { repoPath } : {}),
         ...(containerPort != null ? { containerPort } : {}),
@@ -2851,6 +2913,7 @@ async function createOrEnqueuePromptUnified(opts: {
     }
 
     regAny.pending[droneName] = {
+      id: makeDroneIdentity(),
       name: droneName,
       group: group ?? undefined,
       repoPath,
@@ -2907,6 +2970,11 @@ async function provisionDroneFromPending(name: string) {
   const regAny: any = await loadRegistry();
   const pending = regAny?.pending?.[name];
   if (!pending) return;
+  const pendingDroneId = normalizeDroneIdentity(pending?.id);
+  if (!pendingDroneId) {
+    await updatePendingDrone(name, { phase: 'error', message: 'Failed to start', error: 'missing pending drone identity' });
+    return;
+  }
   if (regAny?.drones?.[name]) {
     // Drone already exists; clear pending to avoid duplicates.
     await updateRegistry((regLatest: any) => {
@@ -2926,7 +2994,7 @@ async function provisionDroneFromPending(name: string) {
 
   const droneCli = resolveDroneCliPath();
   const repoArg = repoPath ? repoPath : '-';
-  const args: string[] = [droneCli, 'create', name, '--repo', repoArg];
+  const args: string[] = [droneCli, 'create', name, '--repo', repoArg, '--drone-id', pendingDroneId];
   if (group) args.push('--group', group);
   if (!build) args.push('--no-build');
   if (containerPort != null) args.push('--container-port', String(containerPort));
@@ -2939,7 +3007,7 @@ async function provisionDroneFromPending(name: string) {
     // try to import it into the registry and continue.
     if (/already exists/i.test(errText)) {
       await updatePendingDrone(name, { phase: 'creating', message: 'Container exists; importing…' });
-      const impArgs: string[] = [droneCli, 'import', name, '--repo', repoArg];
+      const impArgs: string[] = [droneCli, 'import', name, '--repo', repoArg, '--drone-id', pendingDroneId];
       if (group) impArgs.push('--group', group);
       if (containerPort != null) impArgs.push('--container-port', String(containerPort));
       if (!repoPath) impArgs.push('--cwd', NON_REPO_HOME_CWD, '--mkdir');
@@ -2959,13 +3027,18 @@ async function provisionDroneFromPending(name: string) {
   // If this drone is repo-attached, seed the container with the host repo before we enqueue any seed prompt.
   // This uses dvm's offline repo workflow (no host bind mount).
   if (repoPath) {
-    await setDroneHubMeta(name, { phase: 'seeding', message: 'Seeding repo…' });
+    await setDroneHubMetaByIdentity({
+      droneId: pendingDroneId,
+      hub: { phase: 'seeding', message: 'Seeding repo…' },
+    });
     try {
       const repoRoot = await gitTopLevel(repoPath);
       const baseRef = await gitCurrentBranchOrSha(repoRoot);
+      const repoSeedTarget = await resolveDroneNameByIdentity(pendingDroneId);
+      if (!repoSeedTarget) throw new Error('drone disappeared during repo seed');
 
       await dvmRepoSeed({
-        container: name,
+        container: repoSeedTarget,
         hostPath: repoRoot,
         dest: '/work/repo',
         baseRef: 'HEAD',
@@ -2976,8 +3049,9 @@ async function provisionDroneFromPending(name: string) {
 
       // Persist canonical repo root + baseRef for future pulls.
       await updateRegistry((reg2: any) => {
-        const d = reg2?.drones?.[name];
-        if (!d) return;
+        const found = findDroneEntryByIdentity(reg2, pendingDroneId);
+        if (!found) return;
+        const d = found.entry;
         d.repoPath = repoRoot;
         // Default repo-attached drones to operate inside the container repo.
         d.cwd = '/work/repo';
@@ -2987,13 +3061,16 @@ async function provisionDroneFromPending(name: string) {
         d.repo.baseRef = baseRef;
         d.repo.seededAt = nowIso();
         reg2.drones = reg2.drones ?? {};
-        reg2.drones[name] = d;
+        reg2.drones[found.key] = d;
       });
 
-      await setDroneHubMeta(name, null);
+      await setDroneHubMetaByIdentity({ droneId: pendingDroneId, hub: null });
     } catch (e: any) {
       const msg = e?.message ?? String(e);
-      await setDroneHubMeta(name, { phase: 'error', message: `Repo seed failed: ${msg}` });
+      await setDroneHubMetaByIdentity({
+        droneId: pendingDroneId,
+        hub: { phase: 'error', message: `Repo seed failed: ${msg}` },
+      });
       return;
     }
   }
@@ -3012,9 +3089,11 @@ async function provisionDroneFromPending(name: string) {
     try {
       await updateRegistry((reg3Any: any) => {
         const src = reg3Any?.drones?.[cloneFrom];
-        const dst = reg3Any?.drones?.[name];
+        const dstFound = findDroneEntryByIdentity(reg3Any, pendingDroneId);
+        if (!dstFound) return;
+        const dst = dstFound.entry;
         const srcChats = src?.chats && typeof src.chats === 'object' ? src.chats : null;
-        if (!src || !dst || !srcChats) return;
+        if (!src || !srcChats) return;
         const cloned: any = {};
         for (const [chatName, entryRaw] of Object.entries(srcChats)) {
           const entry: any = entryRaw ?? {};
@@ -3032,7 +3111,7 @@ async function provisionDroneFromPending(name: string) {
         dst.chats = dst.chats ?? {};
         dst.chats = { ...dst.chats, ...cloned };
         reg3Any.drones = reg3Any.drones ?? {};
-        reg3Any.drones[name] = dst;
+        reg3Any.drones[dstFound.key] = dst;
       });
     } catch {
       // ignore (best-effort)
@@ -3056,16 +3135,21 @@ async function provisionDroneFromPending(name: string) {
   if (!seedAgent && !seedModel && !prompt) return;
 
   // Mark hub state on the real drone entry so the UI can show progress during seeding.
-  await setDroneHubMeta(name, {
-    phase: 'seeding',
-    message: prompt ? 'Seeding initial message…' : 'Configuring agent…',
-    ...(seedPromptId ? { promptId: seedPromptId } : {}),
+  await setDroneHubMetaByIdentity({
+    droneId: pendingDroneId,
+    hub: {
+      phase: 'seeding',
+      message: prompt ? 'Seeding initial message…' : 'Configuring agent…',
+      ...(seedPromptId ? { promptId: seedPromptId } : {}),
+    },
   });
   try {
+    const configTargetName = await resolveDroneNameByIdentity(pendingDroneId);
+    if (!configTargetName) throw new Error('drone disappeared during startup');
     if (seedAgent || seedModel) {
-      await ensureChatEntry({ droneName: name, chatName });
+      await ensureChatEntry({ droneName: configTargetName, chatName });
       await setChatAgentConfig({
-        droneName: name,
+        droneName: configTargetName,
         chatName,
         ...(seedAgent ? { agent: seedAgent } : {}),
         setModel: true,
@@ -3078,14 +3162,19 @@ async function provisionDroneFromPending(name: string) {
       const cwd = typeof seed.cwd === 'string' ? seed.cwd : null;
       // Initial seed prompts can race daemon startup on cold containers; allow longer readiness wait.
       const seedPromptWaitMs = Math.max(defaultDaemonReadyTimeoutMs(), 120_000);
-      await enqueuePrompt({ id: seedPromptId, droneName: name, chatName, prompt, cwd, waitForDaemonMs: seedPromptWaitMs });
+      const enqueueTargetName = await resolveDroneNameByIdentity(pendingDroneId);
+      if (!enqueueTargetName) throw new Error('drone disappeared before seed enqueue');
+      await enqueuePrompt({ id: seedPromptId, droneName: enqueueTargetName, chatName, prompt, cwd, waitForDaemonMs: seedPromptWaitMs });
       // Once the prompt is enqueued, switch from "seeding" to the normal busy/pending-prompt UI.
-      await setDroneHubMeta(name, null);
+      await setDroneHubMetaByIdentity({ droneId: pendingDroneId, hub: null });
       return;
     }
-    await setDroneHubMeta(name, null);
+    await setDroneHubMetaByIdentity({ droneId: pendingDroneId, hub: null });
   } catch (e: any) {
-    await setDroneHubMeta(name, { phase: 'error', message: e?.message ?? String(e) });
+    await setDroneHubMetaByIdentity({
+      droneId: pendingDroneId,
+      hub: { phase: 'error', message: e?.message ?? String(e) },
+    });
   }
 }
 
@@ -3489,6 +3578,9 @@ async function renameDroneByName(opts: {
       if (regDrones?.[newName]) throw new Error(`drone already exists in registry: ${newName}`);
       delete regAny.drones[oldKey];
       if (oldName !== oldKey) delete regAny.drones[oldName];
+      const curId = normalizeDroneIdentity(cur?.id);
+      if (!curId) throw new Error(`missing drone identity during rename: ${oldName}`);
+      cur.id = curId;
       cur.name = newName;
       if (typeof hostPort === 'number' && Number.isFinite(hostPort)) cur.hostPort = hostPort;
       regAny.drones[newName] = cur;
@@ -4936,6 +5028,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             const at = nowIso();
             ensureGroupRegistered(regAny, group ?? null, at);
             regAny.pending[name] = {
+              id: makeDroneIdentity(),
               name,
               group: group ?? undefined,
               repoPath,
@@ -5068,6 +5161,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                 const at = nowIso();
                 ensureGroupRegistered(regAny, group ?? null, at);
                 regAny.pending[name] = {
+                  id: makeDroneIdentity(),
                   name,
                   group: group ?? undefined,
                   repoPath,
@@ -5293,6 +5387,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           // They can still be creating the container, so reflect the actual phase to avoid confusion.
           const hubPhase: any = phase === 'error' ? 'error' : phase === 'seeding' ? 'seeding' : 'starting';
           return {
+            id: normalizeDroneIdentity(p?.id) || null,
             name: String(p?.name ?? ''),
             group: typeof p?.group === 'string' && p.group.trim() ? p.group.trim() : null,
             createdAt: String(p?.createdAt ?? nowIso()),
@@ -5339,6 +5434,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             }
 
             return {
+              id: normalizeDroneIdentity(d?.id) || null,
               name: d.name,
               group: d.group ?? null,
               createdAt: d.createdAt,

@@ -39,6 +39,7 @@ type CreateCommandOptions = {
   cwd?: string;
   mkdir?: boolean;
   repo?: string;
+  droneId?: string;
 };
 
 type ParsedCreateOptions = {
@@ -47,6 +48,7 @@ type ParsedCreateOptions = {
   cwd?: string;
   mkdir: boolean;
   repoPath: string;
+  droneId?: string;
 };
 
 function addCreateOptions(command: Command): Command {
@@ -55,11 +57,19 @@ function addCreateOptions(command: Command): Command {
     .option('--container-port <port>', 'Daemon port inside container', '7777')
     .option('--cwd <path>', 'Default working directory inside container (used by agent/run/proc-start when --cwd omitted)')
     .option('--mkdir', 'Create --cwd inside the container (mkdir -p)', false)
+    .option('--drone-id <id>', 'Stable drone identity (internal; advanced use)')
     .option(
       '--repo <path>',
       'Host repo path associated with this drone (Hub metadata only). Use "-" for no repo.',
       process.cwd()
     );
+}
+
+function normalizeDroneIdentity(raw: unknown): string | undefined {
+  const id = typeof raw === 'string' ? raw.trim() : '';
+  if (!id) return undefined;
+  if (id.length > 128) throw new Error('invalid --drone-id');
+  return id;
 }
 
 function parseCreateOptions(options: CreateCommandOptions): ParsedCreateOptions {
@@ -71,7 +81,8 @@ function parseCreateOptions(options: CreateCommandOptions): ParsedCreateOptions 
   const containerPort = Number(options.containerPort);
   if (!Number.isFinite(containerPort) || containerPort <= 0) throw new Error('invalid --container-port');
   const cwd = normalizeContainerCwd(options.cwd);
-  return { group, containerPort, cwd, mkdir: Boolean(options.mkdir), repoPath };
+  const droneId = normalizeDroneIdentity(options.droneId);
+  return { group, containerPort, cwd, mkdir: Boolean(options.mkdir), repoPath, droneId };
 }
 
 function isValidDroneNameDashCase(name: string): boolean {
@@ -496,7 +507,7 @@ const createCommand = addCreateOptions(
 createCommand
   .option('--no-build', 'Skip checking daemon build output')
   .action(async (name, options) => {
-    const { repoPath, group, containerPort, cwd, mkdir } = parseCreateOptions(options);
+    const { repoPath, group, containerPort, cwd, mkdir, droneId } = parseCreateOptions(options);
 
     if (options.build) await ensureDaemonBuilt(repoPath);
 
@@ -567,11 +578,13 @@ chmod +x /dvm-data/drone/daemon.js
 
     await updateRegistry((reg) => {
       const at = new Date().toISOString();
+      const stableId = droneId ?? crypto.randomUUID();
       if (group) {
         (reg as any).groups = (reg as any).groups ?? {};
         if (!(reg as any).groups[group]) (reg as any).groups[group] = { name: group, createdAt: at, updatedAt: at };
       }
       reg.drones[name] = {
+        id: stableId,
         name,
         group,
         cwd,
@@ -596,7 +609,7 @@ const importCommand = addCreateOptions(
 
 importCommand
   .action(async (name, options) => {
-    const { repoPath, group, containerPort, cwd, mkdir } = parseCreateOptions(options);
+    const { repoPath, group, containerPort, cwd, mkdir, droneId } = parseCreateOptions(options);
 
     const hostPort = await resolveHostPort(String(name), containerPort);
     const token = await readTokenFromContainer(String(name));
@@ -614,11 +627,15 @@ importCommand
 
     await updateRegistry((reg) => {
       const at = new Date().toISOString();
+      const existingId =
+        typeof (reg as any)?.drones?.[String(name)]?.id === 'string' ? String((reg as any).drones[String(name)].id).trim() : '';
+      const stableId = (droneId ?? existingId) || crypto.randomUUID();
       if (group) {
         (reg as any).groups = (reg as any).groups ?? {};
         if (!(reg as any).groups[group]) (reg as any).groups[group] = { name: group, createdAt: at, updatedAt: at };
       }
       reg.drones[String(name)] = {
+        id: stableId,
         name: String(name),
         group,
         cwd,
@@ -707,6 +724,9 @@ program
         if (!cur) throw new Error(`drone disappeared from registry during rename: ${oldName}`);
         if (reg2?.drones?.[newName]) throw new Error(`drone already exists in registry: ${newName}`);
         delete reg2.drones[oldName];
+        const curId = normalizeDroneIdentity(cur?.id);
+        if (!curId) throw new Error(`missing drone identity during rename: ${oldName}`);
+        cur.id = curId;
         cur.name = newName;
         if (typeof hostPort === 'number' && Number.isFinite(hostPort)) cur.hostPort = hostPort;
         reg2.drones[newName] = cur;
