@@ -396,6 +396,16 @@ select:disabled optgroup {
   outline-offset: 2px;
 }
 
+/* ──────────────────────────────────────────────────────────
+   Guided onboarding: target glow
+   ────────────────────────────────────────────────────────── */
+
+[data-onboarding-active="true"] {
+  outline: 2px solid rgba(167, 139, 250, .55);
+  outline-offset: 2px;
+  transition: outline-color .2s ease, outline-offset .2s ease;
+}
+
 /* Gradient border effect for cards */
 .dh-gradient-border {
   position: relative;

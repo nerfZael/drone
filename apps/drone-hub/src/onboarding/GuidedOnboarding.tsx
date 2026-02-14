@@ -31,21 +31,50 @@ function getTargetEl(selector: string): HTMLElement | null {
   }
 }
 
-function getFocusable(root: HTMLElement): HTMLElement[] {
-  const nodes = Array.from(
-    root.querySelectorAll<HTMLElement>(
-      'button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])',
-    ),
-  );
-  return nodes.filter((n) => {
-    if (n.hasAttribute('disabled')) return false;
-    const style = window.getComputedStyle(n);
-    if (style.visibility === 'hidden' || style.display === 'none') return false;
-    return true;
-  });
+function rectCenter(r: DOMRect): { x: number; y: number } {
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
 }
 
-function computeTooltipPosition(opts: {
+function anchorOnRectEdge(opts: {
+  rect: DOMRect;
+  toward: { x: number; y: number };
+  inset?: number;
+}): { x: number; y: number } {
+  const inset = opts.inset ?? 8;
+  const c = rectCenter(opts.rect);
+  const dx = opts.toward.x - c.x;
+  const dy = opts.toward.y - c.y;
+  const r = opts.rect;
+
+  if (Math.abs(dx) > Math.abs(dy)) {
+    const x = dx >= 0 ? r.right : r.left;
+    const y = clamp(opts.toward.y, r.top + inset, r.bottom - inset);
+    return { x, y };
+  }
+  const y = dy >= 0 ? r.bottom : r.top;
+  const x = clamp(opts.toward.x, r.left + inset, r.right - inset);
+  return { x, y };
+}
+
+function connectorPath(opts: { from: { x: number; y: number }; to: { x: number; y: number } }): string {
+  const x1 = opts.from.x;
+  const y1 = opts.from.y;
+  const x2 = opts.to.x;
+  const y2 = opts.to.y;
+  const vx = x2 - x1;
+  const vy = y2 - y1;
+  const len = Math.hypot(vx, vy) || 1;
+  const midX = (x1 + x2) / 2;
+  const midY = (y1 + y2) / 2;
+  const px = -vy / len;
+  const py = vx / len;
+  const bend = Math.min(56, Math.max(18, len * 0.18));
+  const cx = midX + px * bend;
+  const cy = midY + py * bend;
+  return `M ${x1.toFixed(1)} ${y1.toFixed(1)} Q ${cx.toFixed(1)} ${cy.toFixed(1)} ${x2.toFixed(1)} ${y2.toFixed(1)}`;
+}
+
+function computeCalloutPosition(opts: {
   targetRect: DOMRect | null;
   tooltipRect: DOMRect | null;
 }): { left: number; top: number; maxWidth: number; mode: 'anchored' | 'centered' } {
@@ -62,16 +91,39 @@ function computeTooltipPosition(opts: {
     };
   }
 
-  const belowTop = t.bottom + 12;
-  const aboveTop = t.top - tip.height - 12;
-  const canFitBelow = belowTop + tip.height + margin <= window.innerHeight;
-  const canFitAbove = aboveTop >= margin;
+  const gap = 12;
+  const candidates: Array<{ left: number; top: number }> = [
+    // bottom
+    { left: t.left + t.width / 2 - tip.width / 2, top: t.bottom + gap },
+    // top
+    { left: t.left + t.width / 2 - tip.width / 2, top: t.top - tip.height - gap },
+    // right
+    { left: t.right + gap, top: t.top + t.height / 2 - tip.height / 2 },
+    // left
+    { left: t.left - tip.width - gap, top: t.top + t.height / 2 - tip.height / 2 },
+  ];
 
-  const top = canFitBelow ? belowTop : canFitAbove ? aboveTop : clamp(belowTop, margin, window.innerHeight - tip.height - margin);
-  const idealLeft = t.left + t.width / 2 - tip.width / 2;
-  const left = clamp(idealLeft, margin, window.innerWidth - tip.width - margin);
+  const scoreCandidate = (raw: { left: number; top: number }) => {
+    const left = clamp(raw.left, margin, window.innerWidth - tip.width - margin);
+    const top = clamp(raw.top, margin, window.innerHeight - tip.height - margin);
+    const penalty = Math.abs(left - raw.left) + Math.abs(top - raw.top);
+    const placed = { left, top, right: left + tip.width, bottom: top + tip.height };
+    const overlapX = Math.max(0, Math.min(placed.right, t.right) - Math.max(placed.left, t.left));
+    const overlapY = Math.max(0, Math.min(placed.bottom, t.bottom) - Math.max(placed.top, t.top));
+    const overlapArea = overlapX * overlapY;
+    return { left, top, penalty, overlapArea };
+  };
 
-  return { left: Math.round(left), top: Math.round(top), maxWidth, mode: 'anchored' };
+  let best = scoreCandidate(candidates[0]!);
+  for (let i = 1; i < candidates.length; i += 1) {
+    const cur = scoreCandidate(candidates[i]!);
+    // Prefer lower overlap, then lower penalty.
+    if (cur.overlapArea < best.overlapArea || (cur.overlapArea === best.overlapArea && cur.penalty < best.penalty)) {
+      best = cur;
+    }
+  }
+
+  return { left: Math.round(best.left), top: Math.round(best.top), maxWidth, mode: 'anchored' };
 }
 
 export function GuidedOnboarding({ steps = GUIDED_ONBOARDING_STEPS }: { steps?: GuidedOnboardingStep[] }) {
@@ -107,6 +159,7 @@ export function GuidedOnboarding({ steps = GUIDED_ONBOARDING_STEPS }: { steps?: 
   const tooltipRef = React.useRef<HTMLDivElement | null>(null);
   const [tooltipRect, setTooltipRect] = React.useState<DOMRect | null>(null);
   const [targetRect, setTargetRect] = React.useState<DOMRect | null>(null);
+  const activeTargetRef = React.useRef<HTMLElement | null>(null);
 
   const eligibleIndex = React.useCallback(
     (preferExistingTarget: boolean): number | null => {
@@ -223,7 +276,11 @@ export function GuidedOnboarding({ steps = GUIDED_ONBOARDING_STEPS }: { steps?: 
     if (!open) return;
     const el = tooltipRef.current;
     if (!el) return;
-    setTooltipRect(el.getBoundingClientRect());
+    const measure = () => setTooltipRect(el.getBoundingClientRect());
+    measure();
+    const ro = new ResizeObserver(() => measure());
+    ro.observe(el);
+    return () => ro.disconnect();
   }, [open, stepIndex]);
 
   // Track target rect and keep tooltip positioned on scroll/resize/layout changes.
@@ -234,6 +291,16 @@ export function GuidedOnboarding({ steps = GUIDED_ONBOARDING_STEPS }: { steps?: 
     const update = () => {
       if (cancelled) return;
       const el = getTargetEl(step.selector);
+      if (activeTargetRef.current && activeTargetRef.current !== el) {
+        activeTargetRef.current.removeAttribute('data-onboarding-active');
+        activeTargetRef.current.removeAttribute('data-onboarding-active-step');
+        activeTargetRef.current = null;
+      }
+      if (el && activeTargetRef.current !== el) {
+        el.setAttribute('data-onboarding-active', 'true');
+        el.setAttribute('data-onboarding-active-step', step.id);
+        activeTargetRef.current = el;
+      }
       setTargetRect(el ? el.getBoundingClientRect() : null);
     };
 
@@ -250,6 +317,11 @@ export function GuidedOnboarding({ steps = GUIDED_ONBOARDING_STEPS }: { steps?: 
       window.removeEventListener('resize', onScrollOrResize);
       window.removeEventListener('scroll', onScrollOrResize, true);
       mo.disconnect();
+      if (activeTargetRef.current) {
+        activeTargetRef.current.removeAttribute('data-onboarding-active');
+        activeTargetRef.current.removeAttribute('data-onboarding-active-step');
+        activeTargetRef.current = null;
+      }
     };
   }, [open, step]);
 
@@ -265,71 +337,76 @@ export function GuidedOnboarding({ steps = GUIDED_ONBOARDING_STEPS }: { steps?: 
     }
   }, [open, stepIndex, step]);
 
-  // Focus management + keyboard controls.
+  // Non-modal keyboard shortcut: Esc dismiss (avoid stealing keys while typing).
   React.useEffect(() => {
     if (!open) return;
-    const root = tooltipRef.current;
-    if (!root) return;
-
-    const focusables = getFocusable(root);
-    (focusables[0] ?? root).focus();
-
     const onKeyDown = (e: KeyboardEvent) => {
       if (!open) return;
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        dismissCurrent();
-        return;
-      }
-      if (e.key === 'ArrowRight') {
-        e.preventDefault();
-        goNext();
-        return;
-      }
-      if (e.key === 'ArrowLeft') {
-        e.preventDefault();
-        goBack();
-        return;
-      }
-      if (e.key !== 'Tab') return;
-
-      const el = tooltipRef.current;
-      if (!el) return;
-      const items = getFocusable(el);
-      if (items.length === 0) return;
-      const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      const idx = active ? items.indexOf(active) : -1;
-      const next = e.shiftKey ? (idx <= 0 ? items.length - 1 : idx - 1) : idx >= items.length - 1 ? 0 : idx + 1;
-      e.preventDefault();
-      items[next]?.focus();
+      if (e.key !== 'Escape') return;
+      const t = e.target instanceof HTMLElement ? e.target : null;
+      const tag = t?.tagName?.toLowerCase();
+      const isTyping =
+        tag === 'input' || tag === 'textarea' || tag === 'select' || Boolean(t?.isContentEditable);
+      if (isTyping) return;
+      dismissCurrent();
     };
-
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [dismissCurrent, goBack, goNext, open, stepIndex]);
+  }, [dismissCurrent, open]);
 
   if (!open || stepIndex == null || !step || steps.length === 0) return null;
 
-  const pos = computeTooltipPosition({ targetRect, tooltipRect });
+  const pos = computeCalloutPosition({ targetRect, tooltipRect });
   const stepNumber = stepIndex + 1;
   const isLast = stepIndex >= steps.length - 1;
 
-  return createPortal(
-    <div className="fixed inset-0 z-[1000]">
-      {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/60" aria-hidden="true" />
+  const connector =
+    targetRect && tooltipRect && pos.mode === 'anchored'
+      ? (() => {
+          const tCenter = rectCenter(targetRect);
+          const tipCenter = rectCenter(tooltipRect);
+          const from = anchorOnRectEdge({ rect: tooltipRect, toward: tCenter, inset: 10 });
+          const to = anchorOnRectEdge({ rect: targetRect, toward: tipCenter, inset: 8 });
+          return { from, to, d: connectorPath({ from, to }) };
+        })()
+      : null;
 
-      {/* Highlight */}
+  return createPortal(
+    <div className="fixed inset-0 z-[1000] pointer-events-none">
+      {/* Connector line */}
+      {connector ? (
+        <svg className="absolute inset-0" width="100%" height="100%" preserveAspectRatio="none" aria-hidden="true">
+          <path
+            d={connector.d}
+            fill="none"
+            stroke="rgba(167, 139, 250, .70)"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            style={{ filter: 'drop-shadow(0 0 10px rgba(167, 139, 250, .22))' }}
+          />
+          <circle
+            cx={connector.to.x}
+            cy={connector.to.y}
+            r={3.2}
+            fill="rgba(167, 139, 250, .90)"
+            style={{ filter: 'drop-shadow(0 0 10px rgba(167, 139, 250, .28))' }}
+          />
+        </svg>
+      ) : null}
+
+      {/* Target glow (non-blocking) */}
       {targetRect ? (
         <div
           aria-hidden="true"
-          className="absolute pointer-events-none rounded-lg border border-[var(--accent-muted)]/80"
+          className="absolute pointer-events-none rounded-lg"
           style={{
             left: Math.max(0, Math.round(targetRect.left) - 6),
             top: Math.max(0, Math.round(targetRect.top) - 6),
             width: Math.round(targetRect.width) + 12,
             height: Math.round(targetRect.height) + 12,
-            boxShadow: '0 0 0 9999px rgba(0,0,0,0.55)',
+            border: '1px solid rgba(167, 139, 250, .55)',
+            boxShadow: '0 0 0 1px rgba(167, 139, 250, .15), 0 0 26px rgba(167, 139, 250, .14)',
+            background: 'rgba(167, 139, 250, .03)',
           }}
         />
       ) : null}
@@ -337,12 +414,10 @@ export function GuidedOnboarding({ steps = GUIDED_ONBOARDING_STEPS }: { steps?: 
       {/* Tooltip */}
       <div
         ref={tooltipRef}
-        role="dialog"
-        aria-modal="true"
+        role="region"
         aria-labelledby={stepLabelId}
         aria-describedby={stepBodyId}
-        tabIndex={-1}
-        className="absolute animate-slide-up outline-none"
+        className="absolute animate-slide-up pointer-events-auto"
         style={{
           left: pos.left,
           top: pos.top,
@@ -419,9 +494,7 @@ export function GuidedOnboarding({ steps = GUIDED_ONBOARDING_STEPS }: { steps?: 
             <span>
               Step {stepNumber} / {steps.length}
             </span>
-            <span className="hidden sm:inline">
-              Keys: Esc dismiss · ←/→ navigate · Tab cycles
-            </span>
+            <span className="hidden sm:inline">Tip: you can keep using the UI while this is open.</span>
           </div>
         </div>
       </div>
