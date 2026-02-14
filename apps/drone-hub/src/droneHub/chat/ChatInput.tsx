@@ -51,7 +51,7 @@ export function ChatInput({
   };
 
   return (
-    <div className="flex-shrink-0 px-5 pt-2 pb-5 bg-transparent">
+    <div data-onboarding-id="chat.input" className="flex-shrink-0 px-5 pt-2 pb-5 bg-transparent">
       <div className="max-w-[900px] mx-auto">
         {promptError && (
           <div className="mb-2 text-[11px] text-[var(--red)] px-1" title={promptError}>
