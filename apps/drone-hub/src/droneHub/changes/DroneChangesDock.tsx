@@ -639,7 +639,7 @@ export function DroneChangesDock({
         <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.12em] uppercase" style={{ fontFamily: 'var(--display)' }}>
           Changes
         </div>
-        <div className="inline-flex items-center gap-1">
+        <div data-onboarding-id="changes.viewMode" className="inline-flex items-center gap-1">
           {repoAttached && !disabled ? (
             <>
               <span className="text-[9px] uppercase tracking-wide text-[var(--muted-dim)] mr-1" style={{ fontFamily: 'var(--display)' }}>

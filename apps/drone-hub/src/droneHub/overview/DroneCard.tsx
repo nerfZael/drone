@@ -57,6 +57,7 @@ export function DroneCard({
   };
   return (
     <div
+      data-onboarding-id="sidebar.droneCard"
       role="button"
       tabIndex={0}
       draggable={Boolean(draggable)}
@@ -137,6 +138,7 @@ export function DroneCard({
           </div>
           {hasActions && (
             <div
+              data-onboarding-id="sidebar.droneCard.actions"
               className={`absolute right-0 flex items-center gap-1 transition-all ${
                 actionsDisabled
                   ? 'opacity-100 pointer-events-auto'

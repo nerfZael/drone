@@ -29,6 +29,7 @@ import {
 import { DroneTerminalDock } from './droneHub/terminal';
 import { requestJson } from './droneHub/http';
 import { TypingDots } from './droneHub/overview/icons';
+import { GuidedOnboarding } from './onboarding/GuidedOnboarding';
 import { usePaneReadiness } from './droneHub/panes/usePaneReadiness';
 import { cn } from './ui/cn';
 import { dropdownMenuItemBaseClass, dropdownPanelBaseClass, useDropdownDismiss } from './ui/dropdown';
@@ -6636,7 +6637,7 @@ export default function DroneHubApp() {
               {/* Tier 2: Toolbar */}
               <div className="px-5 pb-2.5 flex items-center gap-2 flex-wrap">
                 {/* Agent selector */}
-                <div className="flex items-center gap-1.5">
+                <div data-onboarding-id="chat.toolbar.agent" className="flex items-center gap-1.5">
                   <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>Agent</span>
                   <UiMenuSelect
                     variant="toolbar"
@@ -6661,7 +6662,7 @@ export default function DroneHubApp() {
                   />
                 </div>
                 {modelControlEnabled && (
-                  <div className="flex items-center gap-1.5">
+                  <div data-onboarding-id="chat.toolbar.model" className="flex items-center gap-1.5">
                     <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>Model</span>
                     {availableChatModels.length > 0 ? (
                       <UiMenuSelect
@@ -6902,6 +6903,7 @@ export default function DroneHubApp() {
                               key={tab}
                               type="button"
                               onClick={() => setRightPanelTab(tab)}
+                              data-onboarding-id={tab === 'changes' ? 'rightPanel.tab.changes' : undefined}
                               className={`px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase transition-all ${
                                 active
                                   ? 'bg-[var(--accent-subtle)] text-[var(--accent)] border border-[var(--accent-muted)]'
@@ -6937,6 +6939,7 @@ export default function DroneHubApp() {
                 <button
                   type="button"
                   onClick={() => setRightPanelOpen((v) => !v)}
+                  data-onboarding-id="rightPanel.toggle"
                   className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ml-1 ${
                     rightPanelOpen
                       ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
@@ -7101,6 +7104,7 @@ export default function DroneHubApp() {
                                 key={`top-pane-${tab}`}
                                 type="button"
                                 onClick={() => setRightPanelTab(tab)}
+                                data-onboarding-id={tab === 'changes' ? 'rightPanel.tab.changes' : undefined}
                                 className={`px-1.5 py-0.5 rounded text-[9px] font-semibold tracking-wide uppercase whitespace-nowrap transition-all ${
                                   active
                                     ? 'bg-[var(--accent-subtle)] text-[var(--accent)] border border-[var(--accent-muted)]'
@@ -7133,6 +7137,7 @@ export default function DroneHubApp() {
                                 key={`bottom-pane-${tab}`}
                                 type="button"
                                 onClick={() => setRightPanelBottomTab(tab)}
+                                data-onboarding-id={tab === 'changes' ? 'rightPanel.tab.changes' : undefined}
                                 className={`px-1.5 py-0.5 rounded text-[9px] font-semibold tracking-wide uppercase whitespace-nowrap transition-all ${
                                   active
                                     ? 'bg-[var(--accent-subtle)] text-[var(--accent)] border border-[var(--accent-muted)]'
@@ -7162,6 +7167,7 @@ export default function DroneHubApp() {
           </>
         )}
       </div>
+      <GuidedOnboarding />
     </div>
   );
 }
