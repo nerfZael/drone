@@ -522,8 +522,10 @@ function looksLikeBundleMissingPrerequisiteError(message: string): boolean {
   return /lacks these prerequisite commits|missing prerequisite commits|repository lacks.*prerequisite/i.test(raw);
 }
 
+const NON_REPO_HOME_CWD = '/dvm-data/home';
+
 function defaultDroneHomeCwd(drone: any): string {
-  return isRepoAttachedDrone(drone) ? '/work/repo' : '/dvm-data/home';
+  return isRepoAttachedDrone(drone) ? '/work/repo' : NON_REPO_HOME_CWD;
 }
 
 function droneRepoPathInContainer(drone: any): string {
@@ -1446,7 +1448,8 @@ async function sendPromptToChat(opts: {
     const modelArg = chatModel ? ` --model ${bashQuote(chatModel)}` : '';
     const script = [
       'set -euo pipefail',
-      `cd ${bashQuote(cwd)}`,
+      `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
+      `cd ${bashQuote(cwd)} 2>/dev/null || cd /dvm-data || cd /`,
       `agent${modelArg} --resume ${bashQuote(chatId)} -f --approve-mcps --print ${bashQuote(opts.prompt)}`,
     ].join('\n');
     await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'cursor', script });
@@ -1459,7 +1462,8 @@ async function sendPromptToChat(opts: {
     if (!existingThreadId) {
       const script = [
         'set -euo pipefail',
-        `cd ${bashQuote(cwd)}`,
+        `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
+        `cd ${bashQuote(cwd)} 2>/dev/null || cd /dvm-data || cd /`,
         `codex --ask-for-approval never exec${modelArg} --skip-git-repo-check --sandbox danger-full-access --json --color never ${bashQuote(opts.prompt)}`,
       ].join('\n');
       await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'codex', script });
@@ -1468,7 +1472,8 @@ async function sendPromptToChat(opts: {
 
     const script = [
       'set -euo pipefail',
-      `cd ${bashQuote(cwd)}`,
+      `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
+      `cd ${bashQuote(cwd)} 2>/dev/null || cd /dvm-data || cd /`,
       `codex --ask-for-approval never exec${modelArg} --skip-git-repo-check --sandbox danger-full-access --json --color never resume ${bashQuote(existingThreadId)} ${bashQuote(opts.prompt)}`,
     ].join('\n');
     await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'codex', script });
@@ -1488,7 +1493,8 @@ async function sendPromptToChat(opts: {
     const modelArg = chatModel && supportsModel ? ` --model ${bashQuote(chatModel)}` : '';
     const script = [
       'set -euo pipefail',
-      `cd ${bashQuote(cwd)}`,
+      `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
+      `cd ${bashQuote(cwd)} 2>/dev/null || cd /dvm-data || cd /`,
       `claude --print --dangerously-skip-permissions --output-format text${modelArg} --session-id ${bashQuote(claudeSessionId)} ${bashQuote(opts.prompt)}`,
     ].join('\n');
     await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'claude', script });
@@ -1511,7 +1517,8 @@ async function sendPromptToChat(opts: {
     const resumeArg = openCodeSessionId ? ` --session ${bashQuote(openCodeSessionId)}` : '';
     const script = [
       'set -euo pipefail',
-      `cd ${bashQuote(cwd)}`,
+      `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
+      `cd ${bashQuote(cwd)} 2>/dev/null || cd /dvm-data || cd /`,
       `opencode run --format default --title ${bashQuote(title)}${modelArg}${resumeArg} ${bashQuote(opts.prompt)}`,
     ].join('\n');
     await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'opencode', script });
@@ -2505,6 +2512,7 @@ async function provisionDroneFromPending(name: string) {
   if (group) args.push('--group', group);
   if (!build) args.push('--no-build');
   if (containerPort != null) args.push('--container-port', String(containerPort));
+  if (!repoPath) args.push('--cwd', NON_REPO_HOME_CWD, '--mkdir');
 
   const r = await runNodeCli(args);
   if (r.code !== 0) {
@@ -2513,9 +2521,10 @@ async function provisionDroneFromPending(name: string) {
     // try to import it into the registry and continue.
     if (/already exists/i.test(errText)) {
       await updatePendingDrone(name, { phase: 'creating', message: 'Container exists; importing…' });
-      const impArgs: string[] = [droneCli, 'import', name, '--repo', repoPath];
+      const impArgs: string[] = [droneCli, 'import', name, '--repo', repoArg];
       if (group) impArgs.push('--group', group);
       if (containerPort != null) impArgs.push('--container-port', String(containerPort));
+      if (!repoPath) impArgs.push('--cwd', NON_REPO_HOME_CWD, '--mkdir');
       const imp = await runNodeCli(impArgs);
       if (imp.code !== 0) {
         const impErr = (imp.stderr || imp.stdout || `drone import failed (exit ${imp.code})`).trim();
@@ -4897,6 +4906,10 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const script = [
           'set -euo pipefail',
           `target=${bashQuote(targetPath)}`,
+          // Defensive bootstrap: the Hub defaults non-repo drones to `/dvm-data/home`,
+          // but early explorer requests can arrive before that directory exists.
+          't="${target%/}"; [ -z "$t" ] && t="/"',
+          `if [ "$t" = ${bashQuote(NON_REPO_HOME_CWD)} ]; then mkdir -p ${bashQuote(NON_REPO_HOME_CWD)} 2>/dev/null || true; fi`,
           'if [ ! -d "$target" ]; then',
           '  echo "__ERR__\tnot-dir"',
           '  exit 3',
