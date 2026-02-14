@@ -217,6 +217,18 @@ export async function dvmScript(container: string, scriptPath: string, args: str
   if (r.code !== 0) throw new Error(r.stderr || r.stdout || `dvm script ${container} ${scriptPath} failed`);
 }
 
+export async function dvmCopyToContainer(
+  container: string,
+  srcPath: string,
+  destPath: string,
+  opts?: { clean?: boolean; timeoutMs?: number }
+): Promise<void> {
+  const argv = ['copy', container, srcPath, destPath];
+  if (opts?.clean) argv.push('--clean');
+  const r = await runDvm(argv, { timeoutMs: opts?.timeoutMs });
+  if (r.code !== 0) throw new Error(r.stderr || r.stdout || `dvm copy ${container} ${srcPath} ${destPath} failed`);
+}
+
 function parseRepoExportPath(stdout: string): string | null {
   // dvm prints: "Exported <format> -> <path>"
   const lines = String(stdout || '')

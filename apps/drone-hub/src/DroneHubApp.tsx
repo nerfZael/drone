@@ -10,6 +10,7 @@ import {
 } from './domain';
 import {
   ChatInput,
+  type ChatSendPayload,
   ChatTabs,
   CollapsibleOutput,
   EmptyState,
@@ -3047,8 +3048,13 @@ export default function DroneHubApp() {
     }
   }
 
-  async function startDraftPrompt(promptRaw: string): Promise<boolean> {
-    const prompt = String(promptRaw ?? '').trim();
+  async function startDraftPrompt(payload: ChatSendPayload): Promise<boolean> {
+    const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
+    if (attachments.length > 0) {
+      setDraftCreateError('Image attachments are only supported after the drone is created.');
+      return false;
+    }
+    const prompt = String(payload?.prompt ?? '').trim();
     if (!prompt) return false;
     const tempName = uniqueDraftDroneName('untitled');
     setDraftChat({
@@ -3068,6 +3074,7 @@ export default function DroneHubApp() {
     setDraftNameSuggestionError(null);
     setDraftAutoRenaming(false);
     setDraftCreateOpen(false);
+
     const ok = await createDroneFromDraft({ prompt, name: tempName, group: '', autoRename: true });
     if (!ok) {
       clearQueuedPromptsForDrone(tempName);
@@ -3434,11 +3441,17 @@ export default function DroneHubApp() {
     });
   }
 
-  async function sendPromptText(promptRaw: string): Promise<boolean> {
+  async function sendPromptText(payload: ChatSendPayload): Promise<boolean> {
     if (!currentDrone) return false;
-    const prompt = String(promptRaw || '').trim();
-    if (!prompt) return false;
+    const prompt = String(payload?.prompt ?? '').trim();
+    const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
+    if (!prompt && attachments.length === 0) return false;
+    const optimisticPrompt = prompt || (attachments.length === 1 ? '[image attachment]' : `[${attachments.length} image attachments]`);
     if (currentDrone.hubPhase === 'starting' || currentDrone.hubPhase === 'seeding') {
+      if (attachments.length > 0) {
+        setPromptError(`"${currentDrone.name}" is still provisioning. Image attachments can be sent once it is ready.`);
+        return false;
+      }
       enqueueQueuedPrompt(currentDrone.name, selectedChat || 'default', prompt);
       setPromptError(null);
       return true;
@@ -3451,7 +3464,7 @@ export default function DroneHubApp() {
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ prompt }),
+          body: JSON.stringify({ prompt, attachments }),
         },
       );
       if (chatUiMode === 'cli') bumpCliTyping();
@@ -3459,7 +3472,7 @@ export default function DroneHubApp() {
       if (chatUiMode === 'transcript' && id) {
         setOptimisticPendingPrompts((prev) => {
           if (prev.some((p) => p.id === id)) return prev;
-          return [...prev, { id, at: new Date().toISOString(), prompt, state: 'sending' }];
+          return [...prev, { id, at: new Date().toISOString(), prompt: optimisticPrompt, state: 'sending' }];
         });
       }
       return true;
@@ -6649,10 +6662,18 @@ export default function DroneHubApp() {
                 sending={draftCreating || draftAutoRenaming}
                 waiting={Boolean(draftChat.prompt)}
                 autoFocus={!draftCreating && !draftAutoRenaming && !draftChat.prompt}
-                onSend={async (prompt) => {
-                  if (!draftChat.prompt) return await startDraftPrompt(prompt);
+                attachmentsEnabled={false}
+                onSend={async (payload) => {
+                  if (!draftChat.prompt) return await startDraftPrompt(payload);
                   const name = String(draftChat.droneName ?? '').trim();
                   if (!name) return false;
+                  const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
+                  if (attachments.length > 0) {
+                    setDraftCreateError('Image attachments are only supported after the drone is created.');
+                    return false;
+                  }
+                  const prompt = String(payload?.prompt ?? '').trim();
+                  if (!prompt) return false;
                   enqueueQueuedPrompt(name, 'default', prompt);
                   setDraftCreateError(null);
                   return true;
@@ -7219,9 +7240,9 @@ export default function DroneHubApp() {
               promptError={promptError}
               sending={sendingPrompt}
               waiting={chatUiMode === 'transcript' && visiblePendingPromptsWithStartup.some((p) => p.state !== 'failed')}
-              onSend={async (prompt) => {
+              onSend={async (payload) => {
                 try {
-                  return await sendPromptText(prompt);
+                  return await sendPromptText(payload);
                 } catch {
                   return false;
                 }
