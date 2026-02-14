@@ -1,5 +1,6 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
+import { GUIDED_ONBOARDING_REPLAY_EVENT } from './control';
 import { GUIDED_ONBOARDING_STEPS } from './steps';
 import {
   dismissOnboardingStep,
@@ -87,6 +88,21 @@ export function GuidedOnboarding({ steps = GUIDED_ONBOARDING_STEPS }: { steps?: 
   const step = stepIndex != null ? steps[stepIndex] ?? null : null;
   const stepLabelId = step ? `onboarding-title-${step.id}` : undefined;
   const stepBodyId = step ? `onboarding-body-${step.id}` : undefined;
+
+  // Explicit replay trigger from Settings (clear + open step 0 deterministically).
+  React.useEffect(() => {
+    const onReplay = () => {
+      if (!steps || steps.length === 0) return;
+      // The request cleared storage; refresh local state so eligibility is correct.
+      const next = readOnboardingDismissals();
+      dismissalsRef.current = next;
+      setDismissals(next);
+      setStepIndex(0);
+      setOpen(true);
+    };
+    window.addEventListener(GUIDED_ONBOARDING_REPLAY_EVENT, onReplay as EventListener);
+    return () => window.removeEventListener(GUIDED_ONBOARDING_REPLAY_EVENT, onReplay as EventListener);
+  }, [steps]);
 
   const tooltipRef = React.useRef<HTMLDivElement | null>(null);
   const [tooltipRect, setTooltipRect] = React.useState<DOMRect | null>(null);
