@@ -10,6 +10,7 @@ import {
 } from './domain';
 import {
   ChatInput,
+  type ChatSendPayload,
   ChatTabs,
   CollapsibleOutput,
   EmptyState,
@@ -844,10 +845,16 @@ function GroupMultiChatColumn({
   }, [chatName, columnWidthPx, loading, scrollColumnToBottom, transcripts?.length, visiblePendingPrompts.length]);
 
   const sendPrompt = React.useCallback(
-    async (promptRaw: string): Promise<boolean> => {
-      const prompt = String(promptRaw ?? '').trim();
-      if (!prompt) return false;
+    async (payload: ChatSendPayload): Promise<boolean> => {
+      const prompt = String(payload?.prompt ?? '').trim();
+      const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
+      if (!prompt && attachments.length === 0) return false;
+      const optimisticPrompt = prompt || (attachments.length === 1 ? '[image attachment]' : `[${attachments.length} image attachments]`);
       if (drone.hubPhase === 'starting' || drone.hubPhase === 'seeding') {
+        if (attachments.length > 0) {
+          setPromptError(`"${drone.name}" is still starting. Image attachments can be sent once it is ready.`);
+          return false;
+        }
         setPromptError(`"${drone.name}" is still starting.`);
         return false;
       }
@@ -859,14 +866,14 @@ function GroupMultiChatColumn({
           {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ prompt }),
+            body: JSON.stringify({ prompt, attachments }),
           },
         );
         const id = String((data as any)?.promptId ?? '').trim();
         if (id) {
           setOptimisticPendingPrompts((prev) => {
             if (prev.some((p) => p.id === id)) return prev;
-            return [...prev, { id, at: new Date().toISOString(), prompt, state: 'sending' }];
+            return [...prev, { id, at: new Date().toISOString(), prompt: optimisticPrompt, state: 'sending' }];
           });
         }
         requestAnimationFrame(() => scrollColumnToBottom());
@@ -880,6 +887,8 @@ function GroupMultiChatColumn({
     },
     [chatName, drone.hubPhase, drone.name, scrollColumnToBottom],
   );
+  const noopToggleTldr = React.useCallback((_item: TranscriptItem) => {}, []);
+  const noopHoverAgentMessage = React.useCallback((_item: TranscriptItem | null) => {}, []);
 
   return (
     <section
@@ -927,15 +936,23 @@ function GroupMultiChatColumn({
           </div>
         ) : (transcripts && transcripts.length > 0) || visiblePendingPrompts.length > 0 ? (
           <div className="space-y-5">
-            {(transcripts ?? []).map((item) => (
-              <TranscriptTurn
-                key={`${drone.name}:${item.turn}:${item.at}`}
-                item={item}
-                nowMs={nowMs}
-                parsingJobs={false}
-                onCreateJobs={onCreateJobs}
-              />
-            ))}
+            {(transcripts ?? []).map((item) => {
+              const messageId = `${drone.name}:${item.turn}:${item.at}`;
+              return (
+                <TranscriptTurn
+                  key={messageId}
+                  item={item}
+                  nowMs={nowMs}
+                  parsingJobs={false}
+                  onCreateJobs={onCreateJobs}
+                  messageId={messageId}
+                  tldr={null}
+                  showTldr={false}
+                  onToggleTldr={noopToggleTldr}
+                  onHoverAgentMessage={noopHoverAgentMessage}
+                />
+              );
+            })}
             {visiblePendingPrompts.map((item) => (
               <PendingTranscriptTurn key={`${drone.name}:pending:${item.id}`} item={item} nowMs={nowMs} />
             ))}
@@ -3345,8 +3362,13 @@ export default function DroneHubApp() {
     }
   }
 
-  async function startDraftPrompt(promptRaw: string): Promise<boolean> {
-    const prompt = String(promptRaw ?? '').trim();
+  async function startDraftPrompt(payload: ChatSendPayload): Promise<boolean> {
+    const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
+    if (attachments.length > 0) {
+      setDraftCreateError('Image attachments are only supported after the drone is created.');
+      return false;
+    }
+    const prompt = String(payload?.prompt ?? '').trim();
     if (!prompt) return false;
     const tempName = uniqueDraftDroneName('untitled');
     setDraftChat({
@@ -3366,6 +3388,7 @@ export default function DroneHubApp() {
     setDraftNameSuggestionError(null);
     setDraftAutoRenaming(false);
     setDraftCreateOpen(false);
+
     const ok = await createDroneFromDraft({ prompt, name: tempName, group: '', autoRename: true });
     if (!ok) {
       clearQueuedPromptsForDrone(tempName);
@@ -3732,11 +3755,17 @@ export default function DroneHubApp() {
     });
   }
 
-  async function sendPromptText(promptRaw: string): Promise<boolean> {
+  async function sendPromptText(payload: ChatSendPayload): Promise<boolean> {
     if (!currentDrone) return false;
-    const prompt = String(promptRaw || '').trim();
-    if (!prompt) return false;
+    const prompt = String(payload?.prompt ?? '').trim();
+    const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
+    if (!prompt && attachments.length === 0) return false;
+    const optimisticPrompt = prompt || (attachments.length === 1 ? '[image attachment]' : `[${attachments.length} image attachments]`);
     if (currentDrone.hubPhase === 'starting' || currentDrone.hubPhase === 'seeding') {
+      if (attachments.length > 0) {
+        setPromptError(`"${currentDrone.name}" is still provisioning. Image attachments can be sent once it is ready.`);
+        return false;
+      }
       enqueueQueuedPrompt(currentDrone.name, selectedChat || 'default', prompt);
       setPromptError(null);
       return true;
@@ -3749,7 +3778,7 @@ export default function DroneHubApp() {
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ prompt }),
+          body: JSON.stringify({ prompt, attachments }),
         },
       );
       if (chatUiMode === 'cli') bumpCliTyping();
@@ -3757,7 +3786,7 @@ export default function DroneHubApp() {
       if (chatUiMode === 'transcript' && id) {
         setOptimisticPendingPrompts((prev) => {
           if (prev.some((p) => p.id === id)) return prev;
-          return [...prev, { id, at: new Date().toISOString(), prompt, state: 'sending' }];
+          return [...prev, { id, at: new Date().toISOString(), prompt: optimisticPrompt, state: 'sending' }];
         });
       }
       return true;
@@ -4317,9 +4346,10 @@ export default function DroneHubApp() {
   }, [selectedGroupMultiChat]);
 
   const sendGroupBroadcastPrompt = React.useCallback(
-    async (promptRaw: string): Promise<boolean> => {
-      const prompt = String(promptRaw ?? '').trim();
-      if (!prompt) return false;
+    async (payload: ChatSendPayload): Promise<boolean> => {
+      const prompt = String(payload?.prompt ?? '').trim();
+      const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
+      if (!prompt && attachments.length === 0) return false;
       const targets = selectedGroupMultiChatData?.items ?? [];
       if (targets.length === 0) {
         setGroupBroadcastPromptError('No drones available in this group.');
@@ -4341,7 +4371,7 @@ export default function DroneHubApp() {
               {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ prompt }),
+                body: JSON.stringify({ prompt, attachments }),
               },
             );
             return d.name;
@@ -7040,10 +7070,18 @@ export default function DroneHubApp() {
                 sending={draftCreating || draftAutoRenaming}
                 waiting={Boolean(draftChat.prompt)}
                 autoFocus={!draftCreating && !draftAutoRenaming && !draftChat.prompt}
-                onSend={async (prompt) => {
-                  if (!draftChat.prompt) return await startDraftPrompt(prompt);
+                attachmentsEnabled={false}
+                onSend={async (payload: ChatSendPayload) => {
+                  if (!draftChat.prompt) return await startDraftPrompt(payload);
                   const name = String(draftChat.droneName ?? '').trim();
                   if (!name) return false;
+                  const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
+                  if (attachments.length > 0) {
+                    setDraftCreateError('Image attachments are only supported after the drone is created.');
+                    return false;
+                  }
+                  const prompt = String(payload?.prompt ?? '').trim();
+                  if (!prompt) return false;
                   enqueueQueuedPrompt(name, 'default', prompt);
                   setDraftCreateError(null);
                   return true;
@@ -7733,9 +7771,9 @@ export default function DroneHubApp() {
               promptError={promptError}
               sending={sendingPrompt}
               waiting={chatUiMode === 'transcript' && visiblePendingPromptsWithStartup.some((p) => p.state !== 'failed')}
-              onSend={async (prompt) => {
+              onSend={async (payload: ChatSendPayload) => {
                 try {
-                  return await sendPromptText(prompt);
+                  return await sendPromptText(payload);
                 } catch {
                   return false;
                 }

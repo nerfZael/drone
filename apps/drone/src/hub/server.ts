@@ -14,6 +14,7 @@ import { loadRegistry, updateRegistry } from '../host/registry';
 import {
   dvmExec,
   dvmLs,
+  dvmCopyToContainer,
   dvmPorts,
   dvmRepoHeadSha,
   dvmRepoExport,
@@ -872,6 +873,181 @@ function buildDockerExecShellCommand(containerName: string, cwdRaw: string): str
 const IMAGE_FILE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico', 'avif', 'tif', 'tiff']);
 const FS_THUMB_MAX_BYTES = 8 * 1024 * 1024;
 
+const CHAT_ATTACHMENTS_MAX_IMAGES = 8;
+const CHAT_ATTACHMENTS_MAX_BYTES_EACH = 6 * 1024 * 1024;
+const CHAT_ATTACHMENTS_MAX_BYTES_TOTAL = 20 * 1024 * 1024;
+
+type ChatImageAttachmentInput = {
+  name?: unknown;
+  mime?: unknown;
+  size?: unknown;
+  dataBase64?: unknown;
+};
+
+type ChatImageAttachment = {
+  name: string;
+  mime: string;
+  size: number;
+  dataBase64: string;
+  fileName: string;
+};
+
+function base64DecodedByteLength(b64Raw: string): number {
+  const b64 = String(b64Raw ?? '').replace(/\s+/g, '');
+  if (!b64) return 0;
+  const len = b64.length;
+  // Each 4 chars -> 3 bytes, minus padding.
+  let padding = 0;
+  if (b64.endsWith('==')) padding = 2;
+  else if (b64.endsWith('=')) padding = 1;
+  const n = Math.floor((len * 3) / 4) - padding;
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function extForImageMime(mimeRaw: string): string {
+  const mime = String(mimeRaw ?? '').trim().toLowerCase();
+  switch (mime) {
+    case 'image/png':
+      return 'png';
+    case 'image/jpg':
+    case 'image/jpeg':
+      return 'jpg';
+    case 'image/gif':
+      return 'gif';
+    case 'image/webp':
+      return 'webp';
+    case 'image/bmp':
+      return 'bmp';
+    case 'image/svg+xml':
+      return 'svg';
+    case 'image/avif':
+      return 'avif';
+    case 'image/tif':
+    case 'image/tiff':
+      return 'tiff';
+    default:
+      return 'png';
+  }
+}
+
+function sanitizeAttachmentFileName(nameRaw: string, fallbackBase: string, ext: string): string {
+  const base = path.posix.basename(String(nameRaw ?? '').trim()).replace(/[\0\r\n\t]/g, '');
+  const withoutPath = base.replace(/[\/\\]+/g, '');
+  const safeBase = withoutPath
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^[-.]+|[-.]+$/g, '')
+    .slice(0, 80);
+  const baseName = safeBase || fallbackBase;
+  const lower = baseName.toLowerCase();
+  const hasExt = /\.[a-z0-9]{1,6}$/.test(lower);
+  const file = hasExt ? baseName : `${baseName}.${ext || 'png'}`;
+  // Final guard: no leading dots, no empties.
+  const cleaned = file.replace(/^\.+/g, '').slice(0, 96);
+  return cleaned || `${fallbackBase}.${ext || 'png'}`;
+}
+
+function normalizeChatImageAttachments(raw: unknown): ChatImageAttachment[] {
+  if (raw == null) return [];
+  if (!Array.isArray(raw)) throw new Error('attachments must be an array');
+
+  const out: ChatImageAttachment[] = [];
+  let total = 0;
+
+  for (let i = 0; i < raw.length; i++) {
+    const item = raw[i] as ChatImageAttachmentInput;
+    if (!item || typeof item !== 'object') continue;
+
+    const mime = String(item.mime ?? '').trim().toLowerCase();
+    if (!mime.startsWith('image/')) throw new Error('only image attachments are supported');
+
+    const dataBase64 = String(item.dataBase64 ?? '').replace(/\s+/g, '');
+    if (!dataBase64) throw new Error('attachment is missing dataBase64');
+
+    // Basic sanity: avoid absurd payloads (and obvious non-base64).
+    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(dataBase64.slice(0, Math.min(4096, dataBase64.length)))) {
+      throw new Error('attachment dataBase64 looks invalid');
+    }
+
+    const sizeFromB64 = base64DecodedByteLength(dataBase64);
+    const declared = Number(item.size);
+    const size = Number.isFinite(declared) && declared > 0 ? Math.floor(declared) : sizeFromB64;
+    const effectiveSize = sizeFromB64 > 0 ? sizeFromB64 : size;
+    if (!effectiveSize || effectiveSize <= 0) throw new Error('attachment size is invalid');
+    if (effectiveSize > CHAT_ATTACHMENTS_MAX_BYTES_EACH) {
+      throw new Error(`attachment too large (${effectiveSize} bytes, max ${CHAT_ATTACHMENTS_MAX_BYTES_EACH})`);
+    }
+    if (out.length >= CHAT_ATTACHMENTS_MAX_IMAGES) {
+      throw new Error(`too many attachments (max ${CHAT_ATTACHMENTS_MAX_IMAGES})`);
+    }
+    total += effectiveSize;
+    if (total > CHAT_ATTACHMENTS_MAX_BYTES_TOTAL) {
+      throw new Error(`attachments too large in total (max ${CHAT_ATTACHMENTS_MAX_BYTES_TOTAL} bytes)`);
+    }
+
+    const ext = extForImageMime(mime);
+    const fallbackBase = `image-${out.length + 1}`;
+    const name = String(item.name ?? '').trim() || `${fallbackBase}.${ext}`;
+    const fileName = sanitizeAttachmentFileName(name, fallbackBase, ext);
+
+    out.push({ name, mime, size: effectiveSize, dataBase64, fileName });
+  }
+
+  return out;
+}
+
+function promptWithImageAttachments(promptRaw: string, files: Array<{ name: string; mime: string; size: number; path: string }>): string {
+  const prompt = String(promptRaw ?? '').trim();
+  if (!files || files.length === 0) return prompt;
+  const header = files.length === 1 ? 'Image attachment:' : 'Image attachments:';
+  const lines = files.map((f, i) => `${i + 1}. ${f.name} (${f.mime}, ${f.size} bytes): ${f.path}`);
+  const block = `${header}\n${lines.join('\n')}`;
+  return prompt ? `${prompt}\n\n${block}` : block;
+}
+
+async function copyChatAttachmentsToContainer(opts: {
+  containerName: string;
+  containerDir: string;
+  attachments: ChatImageAttachment[];
+}): Promise<void> {
+  const list = Array.isArray(opts.attachments) ? opts.attachments : [];
+  if (list.length === 0) return;
+
+  const containerDir = normalizeContainerPath(opts.containerDir);
+  if (!containerDir || containerDir === '/') throw new Error('invalid attachments directory');
+
+  // Write files locally, then `dvm copy` them into the container.
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), `drone-hub-attachments-${process.pid}-`));
+  try {
+    for (const a of list) {
+      const filePath = path.join(tmpRoot, a.fileName);
+      const buf = Buffer.from(String(a.dataBase64 ?? ''), 'base64');
+      if (!buf || buf.length === 0) throw new Error('attachment decode failed');
+      await fs.writeFile(filePath, buf, { mode: 0o600 });
+    }
+
+    // Ensure destination directory exists and is private-ish.
+    await dvmExec(opts.containerName, 'bash', [
+      '-lc',
+      `set -euo pipefail; umask 077; mkdir -p ${bashQuote(containerDir)}; chmod 700 ${bashQuote(containerDir)} 2>/dev/null || true`,
+    ]);
+
+    await dvmCopyToContainer(opts.containerName, tmpRoot, containerDir);
+
+    // Best-effort harden perms (some images run as root; chmod may fail under weird FS).
+    await dvmExec(opts.containerName, 'bash', [
+      '-lc',
+      `chmod 700 ${bashQuote(containerDir)} 2>/dev/null || true; chmod 600 ${bashQuote(containerDir)}/* 2>/dev/null || true`,
+    ]).catch(() => null);
+  } finally {
+    try {
+      await fs.rm(tmpRoot, { recursive: true, force: true });
+    } catch {
+      // ignore
+    }
+  }
+}
+
 type ContainerFsEntry = {
   name: string;
   path: string;
@@ -1620,6 +1796,7 @@ async function sendPromptToChat(opts: {
   droneName: string;
   chatName: string;
   prompt: string;
+  attachments?: ChatImageAttachment[];
   cwd?: string | null;
   waitForDaemonMs?: number;
 }) {
@@ -1641,6 +1818,24 @@ async function sendPromptToChat(opts: {
   const defaultCwd = typeof d.cwd === 'string' && d.cwd.trim() ? d.cwd.trim() : '/dvm-data';
   const cwd = cwdRaw ? normalizeContainerPath(cwdRaw) : normalizeContainerPath(defaultCwd);
 
+  const attachments = Array.isArray(opts.attachments) ? opts.attachments : [];
+  const promptId = String(opts.id ?? '').trim() || crypto.randomBytes(9).toString('hex');
+  const attachmentsDir =
+    attachments.length > 0 ? normalizeContainerPath(`/dvm-data/drone-hub/attachments/${normalizedChat}/${promptId}`) : '';
+  const attachmentsForPrompt =
+    attachments.length > 0
+      ? attachments.map((a) => ({
+          name: a.name,
+          mime: a.mime,
+          size: a.size,
+          path: path.posix.join(attachmentsDir, a.fileName),
+        }))
+      : [];
+  const effectivePrompt = promptWithImageAttachments(opts.prompt, attachmentsForPrompt);
+  if (attachments.length > 0) {
+    await copyChatAttachmentsToContainer({ containerName: d.name, containerDir: attachmentsDir, attachments });
+  }
+
   if (agent.kind === 'builtin' && agent.id === 'cursor') {
     const chatId = await ensureCursorChatId({ droneName: opts.droneName, containerName: d.name, chatName: normalizedChat });
     const modelArg = chatModel ? ` --model ${bashQuote(chatModel)}` : '';
@@ -1648,7 +1843,7 @@ async function sendPromptToChat(opts: {
       'set -euo pipefail',
       `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
       `cd ${bashQuote(cwd)} 2>/dev/null || cd /dvm-data || cd /`,
-      `agent${modelArg} --resume ${bashQuote(chatId)} -f --approve-mcps --print ${bashQuote(opts.prompt)}`,
+      `agent${modelArg} --resume ${bashQuote(chatId)} -f --approve-mcps --print ${bashQuote(effectivePrompt)}`,
     ].join('\n');
     await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'cursor', script });
     return { ok: true as const, agent, mode: 'transcript' as const, chat: normalizedChat, turnOk: true as const };
@@ -1662,7 +1857,7 @@ async function sendPromptToChat(opts: {
         'set -euo pipefail',
         `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
         `cd ${bashQuote(cwd)} 2>/dev/null || cd /dvm-data || cd /`,
-        `codex --ask-for-approval never exec${modelArg} --skip-git-repo-check --sandbox danger-full-access --json --color never ${bashQuote(opts.prompt)}`,
+        `codex --ask-for-approval never exec${modelArg} --skip-git-repo-check --sandbox danger-full-access --json --color never ${bashQuote(effectivePrompt)}`,
       ].join('\n');
       await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'codex', script });
       return { ok: true as const, agent, mode: 'transcript' as const, chat: normalizedChat, codexThreadId: null, turnOk: true as const };
@@ -1672,7 +1867,7 @@ async function sendPromptToChat(opts: {
       'set -euo pipefail',
       `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
       `cd ${bashQuote(cwd)} 2>/dev/null || cd /dvm-data || cd /`,
-      `codex --ask-for-approval never exec${modelArg} --skip-git-repo-check --sandbox danger-full-access --json --color never resume ${bashQuote(existingThreadId)} ${bashQuote(opts.prompt)}`,
+      `codex --ask-for-approval never exec${modelArg} --skip-git-repo-check --sandbox danger-full-access --json --color never resume ${bashQuote(existingThreadId)} ${bashQuote(effectivePrompt)}`,
     ].join('\n');
     await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'codex', script });
     return {
@@ -1693,7 +1888,7 @@ async function sendPromptToChat(opts: {
       'set -euo pipefail',
       `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
       `cd ${bashQuote(cwd)} 2>/dev/null || cd /dvm-data || cd /`,
-      `claude --print --dangerously-skip-permissions --output-format text${modelArg} --session-id ${bashQuote(claudeSessionId)} ${bashQuote(opts.prompt)}`,
+      `claude --print --dangerously-skip-permissions --output-format text${modelArg} --session-id ${bashQuote(claudeSessionId)} ${bashQuote(effectivePrompt)}`,
     ].join('\n');
     await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'claude', script });
     return {
@@ -1717,7 +1912,7 @@ async function sendPromptToChat(opts: {
       'set -euo pipefail',
       `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
       `cd ${bashQuote(cwd)} 2>/dev/null || cd /dvm-data || cd /`,
-      `opencode run --format default --title ${bashQuote(title)}${modelArg}${resumeArg} ${bashQuote(opts.prompt)}`,
+      `opencode run --format default --title ${bashQuote(title)}${modelArg}${resumeArg} ${bashQuote(effectivePrompt)}`,
     ].join('\n');
     await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'opencode', script });
     return {
@@ -1738,7 +1933,7 @@ async function sendPromptToChat(opts: {
     command: tmuxCmd,
     cwd,
   });
-  await dvmSessionType(d.name, sessionName, { text: opts.prompt });
+  await dvmSessionType(d.name, sessionName, { text: effectivePrompt });
   await sleepMs(60);
   await dvmSessionType(d.name, sessionName, { keys: ['C-m'] });
   return { ok: true as const, agent, mode: 'cli' as const, chat: normalizedChat, sessionName, turnOk: true as const };
@@ -2407,6 +2602,7 @@ async function enqueuePrompt(opts: {
   droneName: string;
   chatName: string;
   prompt: string;
+  attachments?: ChatImageAttachment[];
   cwd?: string | null;
   waitForDaemonMs?: number;
 }): Promise<{ id: string }> {
@@ -2474,6 +2670,7 @@ async function enqueuePrompt(opts: {
         droneName: opts.droneName,
         chatName,
         prompt: opts.prompt,
+        attachments: Array.isArray(opts.attachments) ? opts.attachments : [],
         cwd: opts.cwd ?? null,
         waitForDaemonMs: opts.waitForDaemonMs,
       }),
@@ -2516,6 +2713,7 @@ async function createOrEnqueuePromptUnified(opts: {
   droneName: string;
   chatName: string;
   prompt: string;
+  attachments?: ChatImageAttachment[];
   cwd?: string | null;
   createIfMissing?: boolean;
   create?: UnifiedPromptCreateOpts | null;
@@ -2529,6 +2727,7 @@ async function createOrEnqueuePromptUnified(opts: {
   const droneName = String(opts.droneName ?? '').trim();
   const chatName = normalizeChatName(String(opts.chatName ?? '').trim() || 'default');
   const prompt = String(opts.prompt ?? '').trim();
+  const attachments = Array.isArray(opts.attachments) ? opts.attachments : [];
   const preferredIdRaw = typeof opts.id === 'string' ? opts.id.trim() : '';
   if (preferredIdRaw && !isSafePromptId(preferredIdRaw)) {
     return { kind: 'error', status: 400, error: 'invalid promptId' };
@@ -2545,6 +2744,7 @@ async function createOrEnqueuePromptUnified(opts: {
       droneName,
       chatName,
       prompt,
+      attachments,
       cwd: opts.cwd ?? null,
     });
     return { kind: 'enqueued', id: r.id };
@@ -2593,6 +2793,9 @@ async function createOrEnqueuePromptUnified(opts: {
   const containerPort = containerPortRaw == null ? null : Number(containerPortRaw);
   if (containerPort != null && (!Number.isFinite(containerPort) || containerPort <= 0 || Math.floor(containerPort) !== containerPort)) {
     return { kind: 'error', status: 400, error: 'invalid containerPort' };
+  }
+  if (attachments.length > 0) {
+    return { kind: 'error', status: 409, error: 'image attachments are only supported after the drone is created' };
   }
 
   const upsert = await updateRegistry((regAny: any) => {
@@ -2652,6 +2855,7 @@ async function createOrEnqueuePromptUnified(opts: {
       droneName,
       chatName,
       prompt,
+      attachments,
       cwd: opts.cwd ?? null,
     });
     return { kind: 'enqueued', id: r.id };
@@ -6962,10 +7166,20 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           return;
         }
 
-        const prompt = String(body?.prompt ?? '').trim();
-        if (!prompt) {
+        let prompt = String(body?.prompt ?? '').trim();
+        let attachments: ChatImageAttachment[] = [];
+        try {
+          attachments = normalizeChatImageAttachments(body?.attachments);
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          return;
+        }
+        if (!prompt && attachments.length === 0) {
           json(res, 400, { ok: false, error: 'missing prompt' });
           return;
+        }
+        if (!prompt && attachments.length > 0) {
+          prompt = attachments.length === 1 ? '[image attachment]' : `[${attachments.length} image attachments]`;
         }
 
         try {
@@ -6995,6 +7209,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             droneName,
             chatName: chat,
             prompt,
+            attachments,
             cwd: typeof body?.cwd === 'string' ? body.cwd : null,
             createIfMissing,
             create,
