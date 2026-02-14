@@ -2,7 +2,13 @@ import React from 'react';
 import { stripAnsi, timeAgo } from '../../domain';
 import type { TranscriptItem } from '../types';
 import { CollapsibleMarkdown } from './CollapsibleMarkdown';
-import { IconBot, IconJobs, IconSpinner, IconUser } from './icons';
+import { IconBot, IconJobs, IconSpinner, IconTldr, IconUser } from './icons';
+
+type TldrState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'ready'; summary: string }
+  | { status: 'error'; error: string };
 
 export const TranscriptTurn = React.memo(
   function TranscriptTurn({
@@ -10,15 +16,37 @@ export const TranscriptTurn = React.memo(
     nowMs,
     parsingJobs,
     onCreateJobs,
+    messageId,
+    tldr,
+    showTldr,
+    onToggleTldr,
+    onHoverAgentMessage,
   }: {
     item: TranscriptItem;
     nowMs: number;
     parsingJobs: boolean;
     onCreateJobs: (opts: { turn: number; message: string }) => void;
+    messageId: string;
+    tldr: TldrState | null;
+    showTldr: boolean;
+    onToggleTldr: (item: TranscriptItem) => void;
+    onHoverAgentMessage: (item: TranscriptItem | null) => void;
   }) {
     const cleaned = item.ok ? stripAnsi(item.output) : stripAnsi(item.error || 'failed');
     const promptIso = item.promptAt || item.at;
     const agentIso = item.completedAt || item.at;
+    const tldrStatus = tldr?.status ?? 'idle';
+    const tldrLoading = tldrStatus === 'loading';
+    const tldrError = tldr && tldr.status === 'error' ? tldr.error : '';
+    const tldrSummary = tldr && tldr.status === 'ready' ? tldr.summary : '';
+    const showingTldr = Boolean(showTldr);
+    const displayedText = showingTldr
+      ? tldrStatus === 'ready'
+        ? tldrSummary
+        : tldrStatus === 'error'
+          ? `TLDR failed: ${tldrError || 'unknown error'}`
+          : 'Generating TLDR…'
+      : cleaned;
     return (
       <div className="animate-fade-in">
         {/* User message */}
@@ -71,30 +99,56 @@ export const TranscriptTurn = React.memo(
                   ? 'bg-[var(--accent-subtle)] border-[rgba(167,139,250,.12)]'
                   : 'bg-[var(--red-subtle)] border-[rgba(255,90,90,.2)]'
               }`}
+              onMouseEnter={() => onHoverAgentMessage(item)}
+              onMouseLeave={() => onHoverAgentMessage(null)}
+              data-message-id={messageId}
             >
               <CollapsibleMarkdown
-                text={cleaned}
+                text={displayedText}
                 fadeTo={item.ok ? 'var(--accent-subtle)' : 'var(--red-subtle)'}
-                className={item.ok ? 'dh-markdown--muted' : 'dh-markdown--error'}
+                className={showingTldr ? 'dh-markdown--muted' : item.ok ? 'dh-markdown--muted' : 'dh-markdown--error'}
                 preserveLeadParagraph
               />
 
-              {item.ok && (
+              <div className="absolute bottom-2 right-2 flex items-center gap-1">
                 <button
                   type="button"
-                  onClick={() => onCreateJobs({ turn: item.turn, message: cleaned })}
-                  disabled={parsingJobs}
-                  className={`absolute bottom-2 right-2 inline-flex items-center justify-center w-7 h-7 rounded border transition-opacity ${
-                    parsingJobs ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                  onClick={() => onToggleTldr(item)}
+                  disabled={false}
+                  className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-opacity ${
+                    tldrLoading ? 'opacity-100 cursor-wait' : 'opacity-0 group-hover:opacity-100'
                   } ${
-                    parsingJobs ? 'cursor-wait' : ''
-                  } bg-[rgba(0,0,0,.15)] border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[rgba(0,0,0,.25)]`}
-                  title="Create jobs from this agent message"
-                  aria-label="Create jobs from this agent message"
+                    showingTldr ? 'text-[var(--accent)] border-[var(--accent-muted)] bg-[rgba(0,0,0,.25)]' : 'text-[var(--muted)] border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)]'
+                  } hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[rgba(0,0,0,.25)]`}
+                  title={
+                    tldrStatus === 'error'
+                      ? `TLDR failed: ${tldrError || 'unknown error'}`
+                      : showingTldr
+                        ? 'Show original (W)'
+                        : 'Generate/show TLDR (W)'
+                  }
+                  aria-label="Toggle TLDR"
                 >
-                  {parsingJobs ? <IconSpinner className="w-3.5 h-3.5 text-[var(--accent)]" /> : <IconJobs className="w-3.5 h-3.5 opacity-90" />}
+                  {tldrLoading ? <IconSpinner className="w-3.5 h-3.5 text-[var(--accent)]" /> : <IconTldr className="w-3.5 h-3.5 opacity-90" />}
                 </button>
-              )}
+
+                {item.ok && (
+                  <button
+                    type="button"
+                    onClick={() => onCreateJobs({ turn: item.turn, message: cleaned })}
+                    disabled={parsingJobs}
+                    className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-opacity ${
+                      parsingJobs ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                    } ${
+                      parsingJobs ? 'cursor-wait' : ''
+                    } bg-[rgba(0,0,0,.15)] border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[rgba(0,0,0,.25)]`}
+                    title="Create jobs from this agent message"
+                    aria-label="Create jobs from this agent message"
+                  >
+                    {parsingJobs ? <IconSpinner className="w-3.5 h-3.5 text-[var(--accent)]" /> : <IconJobs className="w-3.5 h-3.5 opacity-90" />}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -112,5 +166,12 @@ export const TranscriptTurn = React.memo(
     (a.item.error ?? '') === (b.item.error ?? '') &&
     a.nowMs === b.nowMs &&
     a.parsingJobs === b.parsingJobs &&
-    a.onCreateJobs === b.onCreateJobs,
+    a.onCreateJobs === b.onCreateJobs &&
+    a.messageId === b.messageId &&
+    a.showTldr === b.showTldr &&
+    (a.tldr?.status ?? 'idle') === (b.tldr?.status ?? 'idle') &&
+    ((a.tldr && a.tldr.status === 'ready' ? a.tldr.summary : '') === (b.tldr && b.tldr.status === 'ready' ? b.tldr.summary : '')) &&
+    ((a.tldr && a.tldr.status === 'error' ? a.tldr.error : '') === (b.tldr && b.tldr.status === 'error' ? b.tldr.error : '')) &&
+    a.onToggleTldr === b.onToggleTldr &&
+    a.onHoverAgentMessage === b.onHoverAgentMessage,
 );
