@@ -1999,6 +1999,8 @@ export default function DroneHubApp() {
   }, [activeRepoPath, createMode, creating, normalizeCreateRepoPath]);
 
   const openDraftChatComposer = React.useCallback(() => {
+    const activeRepo = String(activeRepoPath ?? '').trim();
+    if (activeRepo) setChatHeaderRepoPath(activeRepo);
     setAppView('workspace');
     setCreateOpen(false);
     setCreateError(null);
@@ -2017,7 +2019,7 @@ export default function DroneHubApp() {
     preferredSelectedDroneRef.current = null;
     preferredSelectedDroneHoldUntilRef.current = 0;
     setSelectedChat('default');
-  }, []);
+  }, [activeRepoPath]);
 
   const openCloneModal = React.useCallback(
     (source: DroneSummary) => {
