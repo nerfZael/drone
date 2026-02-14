@@ -478,7 +478,7 @@ export function DroneChangesDock({
         <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.12em] uppercase" style={{ fontFamily: 'var(--display)' }}>
           Changes
         </div>
-        <div className="inline-flex items-center gap-1">
+        <div data-onboarding-id="changes.viewMode" className="inline-flex items-center gap-1">
           <button
             type="button"
             onClick={() => setViewMode('stacked')}
