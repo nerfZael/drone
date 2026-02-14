@@ -2792,7 +2792,7 @@ export default function DroneHubApp() {
       const attemptedNames = new Set<string>();
       for (let attempt = 0; attempt < 16; attempt += 1) {
         attemptedNames.add(suggested.toLowerCase());
-        const renamed = await renameDroneTo(currentName, suggested, { migrateVolumeName: true });
+        const renamed = await renameDroneTo(currentName, suggested);
         if (renamed.ok) return;
         const msg = String(renamed.error ?? '').toLowerCase();
         const nameConflict =
