@@ -6,22 +6,22 @@ const CHAT_INPUT_TEXTAREA_MAX_HEIGHT_PX = 160;
 export function ChatInput({
   resetKey,
   droneName,
-  modeHint,
   promptError,
   sending,
   waiting,
   disabled,
   autoFocus,
+  modeHint = '',
   onSend,
 }: {
   resetKey: string;
   droneName: string;
-  modeHint: string;
   promptError: string | null;
   sending: boolean;
   waiting: boolean;
   disabled?: boolean;
   autoFocus?: boolean;
+  modeHint?: string;
   onSend: (prompt: string) => Promise<boolean>;
 }) {
   const [draft, setDraft] = React.useState('');
@@ -71,7 +71,7 @@ export function ChatInput({
   };
 
   return (
-    <div className="flex-shrink-0 px-5 pt-1.5 pb-3 bg-transparent">
+    <div data-onboarding-id="chat.input" className="flex-shrink-0 px-5 pt-2 pb-5 bg-transparent">
       <div className="max-w-[900px] mx-auto">
         {promptError && (
           <div className="mb-2 text-[11px] text-[var(--red)] px-1" title={promptError}>
