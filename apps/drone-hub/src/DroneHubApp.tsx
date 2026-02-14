@@ -10,6 +10,7 @@ import {
 } from './domain';
 import {
   ChatInput,
+  type ChatSendPayload,
   ChatTabs,
   CollapsibleOutput,
   EmptyState,
@@ -2761,8 +2762,8 @@ export default function DroneHubApp() {
     }
   }
 
-  async function startDraftPrompt(promptRaw: string): Promise<boolean> {
-    const prompt = String(promptRaw ?? '').trim();
+  async function startDraftPrompt(payload: ChatSendPayload): Promise<boolean> {
+    const prompt = String(payload?.prompt ?? '').trim();
     if (!prompt) return false;
     const tempName = uniqueDraftDroneName('untitled');
     setDraftChat({
@@ -2781,6 +2782,13 @@ export default function DroneHubApp() {
     setDraftNameSuggestionError(null);
     setDraftAutoRenaming(false);
     setDraftCreateOpen(false);
+    // Attachments require an existing container to write files into; disable for draft create.
+    if (Array.isArray(payload?.attachments) && payload.attachments.length > 0) {
+      setDraftChat({ prompt: null });
+      setDraftCreateError('Image attachments are only supported after the drone is created.');
+      return false;
+    }
+
     const ok = await createDroneFromDraft({ prompt, name: tempName, group: '', autoRename: true });
     if (!ok) {
       setDraftChat({ prompt: null });
@@ -3078,14 +3086,15 @@ export default function DroneHubApp() {
     setOptimisticPendingPrompts([]);
   }, [selectedDrone, selectedChat]);
 
-  async function sendPromptText(promptRaw: string): Promise<boolean> {
+  async function sendPromptText(payload: ChatSendPayload): Promise<boolean> {
     if (!currentDrone) return false;
     if (currentDrone.hubPhase === 'starting' || currentDrone.hubPhase === 'seeding') {
       setPromptError(`"${currentDrone.name}" is still provisioning. Try again in a moment.`);
       return false;
     }
-    const prompt = String(promptRaw || '').trim();
-    if (!prompt) return false;
+    const prompt = String(payload?.prompt ?? '').trim();
+    const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
+    if (!prompt && attachments.length === 0) return false;
     setSendingPromptCount((c) => c + 1);
     setPromptError(null);
     try {
@@ -3094,7 +3103,7 @@ export default function DroneHubApp() {
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ prompt }),
+          body: JSON.stringify({ prompt, attachments }),
         },
       );
       if (chatUiMode === 'cli') bumpCliTyping();
@@ -6008,6 +6017,7 @@ export default function DroneHubApp() {
                 waiting={Boolean(draftChat.prompt)}
                 disabled={draftCreating || draftAutoRenaming || Boolean(draftChat.prompt)}
                 autoFocus={!draftCreating && !draftAutoRenaming && !draftChat.prompt}
+                attachmentsEnabled={false}
                 modeHint={
                   spawnAgentConfig.kind === 'builtin'
                     ? `${spawnAgentLabel} · ${spawnModelForSeed ?? 'default model'} · create on send`
@@ -6514,9 +6524,9 @@ export default function DroneHubApp() {
                   ? `${effectiveChatInfo?.agent ? (effectiveChatInfo.agent.kind === 'builtin' ? effectiveChatInfo.agent.id : 'custom') : '…'} agent`
                   : `tmux: ${effectiveChatInfo?.sessionName ?? '…'} · cli`
               }
-              onSend={async (prompt) => {
+              onSend={async (payload) => {
                 try {
-                  return await sendPromptText(prompt);
+                  return await sendPromptText(payload);
                 } catch {
                   return false;
                 }
