@@ -2711,7 +2711,7 @@ export default function DroneHubApp() {
   async function renameDroneTo(
     nameRaw: string,
     newNameRaw: string,
-    opts?: { showAlert?: boolean },
+    opts?: { showAlert?: boolean; migrateVolumeName?: boolean },
   ): Promise<{ ok: true } | { ok: false; error: string }> {
     const name = String(nameRaw ?? '').trim();
     const newName = String(newNameRaw ?? '').trim();
@@ -2735,7 +2735,10 @@ export default function DroneHubApp() {
       await requestJson<{ ok: true; oldName: string; newName: string }>(`/api/drones/${encodeURIComponent(name)}/rename`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ newName }),
+        body: JSON.stringify({
+          newName,
+          ...(opts?.migrateVolumeName ? { migrateVolumeName: true } : {}),
+        }),
       });
       {
         const ids = droneIdentityByNameRef.current;
@@ -2789,7 +2792,7 @@ export default function DroneHubApp() {
       const attemptedNames = new Set<string>();
       for (let attempt = 0; attempt < 16; attempt += 1) {
         attemptedNames.add(suggested.toLowerCase());
-        const renamed = await renameDroneTo(currentName, suggested);
+        const renamed = await renameDroneTo(currentName, suggested, { migrateVolumeName: true });
         if (renamed.ok) return;
         const msg = String(renamed.error ?? '').toLowerCase();
         const nameConflict =
@@ -3401,7 +3404,8 @@ export default function DroneHubApp() {
     }
     const prompt = String(payload?.prompt ?? '').trim();
     if (!prompt) return false;
-    const tempName = uniqueDraftDroneName('untitled');
+    const draftSeed = `untitled-${Date.now().toString(36).slice(-6)}`;
+    const tempName = uniqueDraftDroneName(draftSeed);
     setDraftChat({
       droneName: tempName,
       prompt: {

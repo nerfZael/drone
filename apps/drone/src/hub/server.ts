@@ -3627,6 +3627,39 @@ function makeClient(hostPort: number, token: string) {
   return { baseUrl: `http://127.0.0.1:${hostPort}`, token };
 }
 
+function looksLikeUnauthorizedDaemonError(raw: unknown): boolean {
+  const msg = String(raw ?? '')
+    .trim()
+    .toLowerCase();
+  if (!msg) return false;
+  return msg === 'unauthorized' || msg.includes(' 401') || msg.startsWith('401 ') || msg.includes('forbidden');
+}
+
+async function readDroneTokenFromContainer(containerName: string): Promise<string> {
+  const r = await dvmExec(containerName, 'bash', ['-lc', 'cat /dvm-data/drone/token 2>/dev/null || true']);
+  return String(r.stdout ?? '').trim();
+}
+
+async function refreshRegistryTokenFromContainer(opts: { droneName: string; droneId?: string | null }): Promise<string | null> {
+  const droneName = String(opts.droneName ?? '').trim();
+  if (!droneName) return null;
+  const token = await readDroneTokenFromContainer(droneName);
+  if (!token) return null;
+  const normalizedId = normalizeDroneIdentity(opts.droneId);
+  await updateRegistry((regAny: any) => {
+    const found = normalizedId ? findDroneEntryByIdentity(regAny, normalizedId) : null;
+    const key = found?.key ?? droneName;
+    const entry = found?.entry ?? regAny?.drones?.[droneName];
+    if (!key || !entry) return;
+    const current = typeof entry.token === 'string' ? String(entry.token) : '';
+    if (current === token) return;
+    entry.token = token;
+    regAny.drones = regAny.drones ?? {};
+    regAny.drones[key] = entry;
+  });
+  return token;
+}
+
 function resolveHubAgentCommand(): string {
   // CLI-agnostic by design: this is just a command run inside tmux.
   // Override via env for other CLIs (e.g. "my-agent --foo").
@@ -5419,13 +5452,34 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             let statusOk = false;
             let status: any = null;
             let statusError: string | null = null;
+            const droneId = normalizeDroneIdentity(d?.id);
             const token = typeof d.token === 'string' ? d.token : '';
             if (hostPort && token) {
               try {
                 status = await droneStatus(makeClient(hostPort, token));
                 statusOk = true;
               } catch (e: any) {
-                statusError = e?.message ?? String(e);
+                const firstErr = e?.message ?? String(e);
+                if (looksLikeUnauthorizedDaemonError(firstErr)) {
+                  try {
+                    const refreshedToken = await refreshRegistryTokenFromContainer({ droneName: d.name, droneId });
+                    if (refreshedToken && refreshedToken !== token) {
+                      status = await droneStatus(makeClient(hostPort, refreshedToken));
+                      statusOk = true;
+                      statusError = null;
+                      hubLog('warn', 'refreshed stale drone token after unauthorized status', {
+                        droneName: d.name,
+                        hadId: Boolean(droneId),
+                      });
+                    } else {
+                      statusError = firstErr;
+                    }
+                  } catch (e2: any) {
+                    statusError = e2?.message ?? String(e2);
+                  }
+                } else {
+                  statusError = firstErr;
+                }
               }
             } else if (!hostPort) {
               statusError = 'no host port mapped (container likely stopped)';
