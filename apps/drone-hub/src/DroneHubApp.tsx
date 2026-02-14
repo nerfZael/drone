@@ -77,6 +77,10 @@ const RIGHT_PANEL_BOTTOM_TAB_STORAGE_KEY = 'droneHub.rightPanelBottomTab';
 const RIGHT_PANEL_DEFAULT_WIDTH_PX = 460;
 const RIGHT_PANEL_MIN_WIDTH_PX = 360;
 const RIGHT_PANEL_MAX_WIDTH_VIEWPORT_RATIO = 0.7;
+const GROUP_MULTI_CHAT_COLUMN_WIDTH_STORAGE_KEY = 'droneHub.groupMultiChatColumnWidth';
+const GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX = 420;
+const GROUP_MULTI_CHAT_COLUMN_WIDTH_MIN_PX = 300;
+const GROUP_MULTI_CHAT_COLUMN_WIDTH_MAX_PX = 640;
 const SIDEBAR_REPOS_COLLAPSED_STORAGE_KEY = 'droneHub.sidebarReposCollapsed';
 const HUB_LOGS_TAIL_LINES = 600;
 const HUB_LOGS_MAX_BYTES = 200_000;
@@ -180,6 +184,11 @@ function clampRightPanelWidthPx(width: number, viewportWidth: number = viewportW
   return Math.min(rightPanelMaxWidthPx(viewportWidth), Math.max(RIGHT_PANEL_MIN_WIDTH_PX, Math.round(safe)));
 }
 
+function clampGroupMultiChatColumnWidthPx(width: number): number {
+  const safe = Number.isFinite(width) ? width : GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX;
+  return Math.min(GROUP_MULTI_CHAT_COLUMN_WIDTH_MAX_PX, Math.max(GROUP_MULTI_CHAT_COLUMN_WIDTH_MIN_PX, Math.round(safe)));
+}
+
 function parseRightPanelTab(raw: string | null | undefined, fallback: RightPanelTab): RightPanelTab {
   if (raw && RIGHT_PANEL_TABS.includes(raw as RightPanelTab)) return raw as RightPanelTab;
   return fallback;
@@ -228,6 +237,13 @@ function compareDronesByNewestFirst(a: DroneSummary, b: DroneSummary): number {
   if (aMs != null && bMs == null) return -1;
   if (aMs != null && bMs != null && aMs !== bMs) return bMs - aMs;
   return a.name.localeCompare(b.name);
+}
+
+function resolveChatNameForDrone(drone: DroneSummary, preferredChat: string): string {
+  const chats = Array.isArray(drone.chats) ? drone.chats : [];
+  if (preferredChat && chats.includes(preferredChat)) return preferredChat;
+  if (chats.includes('default')) return 'default';
+  return chats[0] || 'default';
 }
 
 function parseRepoPullConflict(message: string, meta?: Partial<RepoOpErrorMeta> | null): RepoPullConflict {
@@ -588,6 +604,16 @@ function IconTrash({ className }: { className?: string }) {
   );
 }
 
+function IconColumns({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" aria-hidden="true">
+      <rect x="1.5" y="2.5" width="4.5" height="11" rx="1" />
+      <rect x="5.75" y="2.5" width="4.5" height="11" rx="1" />
+      <rect x="10" y="2.5" width="4.5" height="11" rx="1" />
+    </svg>
+  );
+}
+
 function IconCopy({ className }: { className?: string }) {
   return (
     <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
@@ -642,6 +668,266 @@ function SkeletonLine({ w }: { w: string }) {
 /* ------------------------------------------------------------------ */
 /*  Sub-components                                                    */
 /* ------------------------------------------------------------------ */
+
+function GroupMultiChatColumn({
+  drone,
+  preferredChat,
+  nowMs,
+  onOpenDrone,
+  onCreateJobs,
+  columnWidthPx,
+}: {
+  drone: DroneSummary;
+  preferredChat: string;
+  nowMs: number;
+  onOpenDrone: () => void;
+  onCreateJobs: (opts: { turn: number; message: string }) => void;
+  columnWidthPx: number;
+}) {
+  const chatName = React.useMemo(() => resolveChatNameForDrone(drone, preferredChat), [drone, preferredChat]);
+  const [transcripts, setTranscripts] = React.useState<TranscriptItem[] | null>(null);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [promptError, setPromptError] = React.useState<string | null>(null);
+  const [sendingPromptCount, setSendingPromptCount] = React.useState(0);
+  const sendingPrompt = sendingPromptCount > 0;
+  const [optimisticPendingPrompts, setOptimisticPendingPrompts] = React.useState<PendingPrompt[]>([]);
+  const columnScrollRef = React.useRef<HTMLDivElement | null>(null);
+
+  const scrollColumnToBottom = React.useCallback(() => {
+    const el = columnScrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, []);
+
+  React.useEffect(() => {
+    let mounted = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let busy = false;
+
+    setTranscripts(null);
+    setError(null);
+    setLoading(true);
+
+    const load = async () => {
+      if (busy) return;
+      const isStarting = drone.hubPhase === 'starting' || drone.hubPhase === 'seeding';
+      if (isStarting) {
+        if (mounted) {
+          setTranscripts([]);
+          setError(null);
+          setLoading(false);
+        }
+        return;
+      }
+      busy = true;
+      try {
+        const data = await fetchJson<{ ok: true; transcripts: TranscriptItem[] }>(
+          `/api/drones/${encodeURIComponent(drone.name)}/chats/${encodeURIComponent(chatName)}/transcript?turn=all`,
+        );
+        if (!mounted) return;
+        setTranscripts(data.transcripts ?? []);
+        setError(null);
+      } catch (err: any) {
+        if (!mounted) return;
+        if (isNotFoundError(err)) {
+          setTranscripts([]);
+          setError(null);
+        } else {
+          setError(err?.message ?? String(err));
+        }
+      } finally {
+        busy = false;
+        if (mounted) setLoading(false);
+      }
+    };
+
+    const loop = async () => {
+      await load();
+      if (!mounted) return;
+      timer = setTimeout(() => {
+        void loop();
+      }, 4000);
+    };
+
+    void loop();
+    return () => {
+      mounted = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [chatName, drone.hubPhase, drone.name]);
+
+  const { value: pendingResp } = usePoll<{ ok: true; pending: PendingPrompt[] }>(
+    async () => {
+      if (drone.hubPhase === 'starting' || drone.hubPhase === 'seeding') return { ok: true, pending: [] };
+      try {
+        return await fetchJson<{ ok: true; pending: PendingPrompt[] }>(
+          `/api/drones/${encodeURIComponent(drone.name)}/chats/${encodeURIComponent(chatName)}/pending`,
+        );
+      } catch {
+        return { ok: true, pending: [] };
+      }
+    },
+    1000,
+    [chatName, drone.hubPhase, drone.name],
+  );
+
+  const pendingPrompts = React.useMemo(() => {
+    const server = Array.isArray(pendingResp?.pending) ? pendingResp.pending : [];
+    const byId = new Map<string, PendingPrompt>();
+    for (const p of server) {
+      if (p?.id) byId.set(p.id, p);
+    }
+    for (const p of optimisticPendingPrompts) {
+      if (p?.id && !byId.has(p.id)) byId.set(p.id, p);
+    }
+    return Array.from(byId.values()).slice(-60);
+  }, [optimisticPendingPrompts, pendingResp]);
+
+  const visiblePendingPrompts = React.useMemo(() => {
+    const ts = Array.isArray(transcripts) ? transcripts : [];
+    const ids = new Set(ts.map((t) => String((t as any)?.id ?? '')).filter(Boolean));
+    return pendingPrompts.filter((p) => p.state === 'failed' || !ids.has(p.id));
+  }, [pendingPrompts, transcripts]);
+
+  const waitingForAgent = React.useMemo(() => {
+    if (sendingPrompt) return true;
+    return visiblePendingPrompts.some((p) => p.state !== 'failed');
+  }, [sendingPrompt, visiblePendingPrompts]);
+
+  React.useEffect(() => {
+    setOptimisticPendingPrompts([]);
+  }, [chatName, drone.name]);
+
+  React.useEffect(() => {
+    if (loading) return;
+    const id = requestAnimationFrame(() => scrollColumnToBottom());
+    return () => cancelAnimationFrame(id);
+  }, [chatName, columnWidthPx, loading, scrollColumnToBottom, transcripts?.length, visiblePendingPrompts.length]);
+
+  const sendPrompt = React.useCallback(
+    async (promptRaw: string): Promise<boolean> => {
+      const prompt = String(promptRaw ?? '').trim();
+      if (!prompt) return false;
+      if (drone.hubPhase === 'starting' || drone.hubPhase === 'seeding') {
+        setPromptError(`"${drone.name}" is still starting.`);
+        return false;
+      }
+      setSendingPromptCount((c) => c + 1);
+      setPromptError(null);
+      try {
+        const data = await requestJson<{ ok: true; accepted: true; promptId: string }>(
+          `/api/drones/${encodeURIComponent(drone.name)}/chats/${encodeURIComponent(chatName)}/prompt`,
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ prompt }),
+          },
+        );
+        const id = String((data as any)?.promptId ?? '').trim();
+        if (id) {
+          setOptimisticPendingPrompts((prev) => {
+            if (prev.some((p) => p.id === id)) return prev;
+            return [...prev, { id, at: new Date().toISOString(), prompt, state: 'sending' }];
+          });
+        }
+        requestAnimationFrame(() => scrollColumnToBottom());
+        return true;
+      } catch (err: any) {
+        setPromptError(err?.message ?? String(err));
+        return false;
+      } finally {
+        setSendingPromptCount((c) => Math.max(0, c - 1));
+      }
+    },
+    [chatName, drone.hubPhase, drone.name, scrollColumnToBottom],
+  );
+
+  return (
+    <section
+      className="flex-none h-full rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-alt)] overflow-hidden flex flex-col"
+      style={{ width: columnWidthPx, minWidth: columnWidthPx }}
+    >
+      <div className="flex-shrink-0 px-3 py-2.5 border-b border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]">
+        <div className="min-w-0">
+          <div className="flex items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={onOpenDrone}
+              className="text-left text-[12px] font-semibold text-[var(--fg-secondary)] hover:text-[var(--accent)] transition-colors truncate min-w-0"
+              style={{ fontFamily: 'var(--display)' }}
+              title={`Open ${drone.name}`}
+            >
+              {drone.name}
+            </button>
+            <div className="flex items-center flex-shrink-0 ml-2">
+              {waitingForAgent ? (
+                <span className="inline-flex items-center" title="Agent responding">
+                  <TypingDots color="var(--yellow)" />
+                </span>
+              ) : (
+                <StatusBadge
+                  ok={drone.statusOk}
+                  error={drone.statusError}
+                  hubPhase={drone.hubPhase}
+                  hubMessage={drone.hubMessage}
+                />
+              )}
+            </div>
+          </div>
+          <div className="text-[10px] text-[var(--muted-dim)] font-mono mt-0.5">
+            chat: {chatName}
+          </div>
+        </div>
+      </div>
+      <div ref={columnScrollRef} className="flex-1 min-h-0 overflow-auto px-3 py-3">
+        {loading && !transcripts ? (
+          <TranscriptSkeleton />
+        ) : error ? (
+          <div className="rounded border border-[rgba(255,90,90,.24)] bg-[var(--red-subtle)] px-3 py-2 text-[11px] text-[var(--red)]">
+            {error}
+          </div>
+        ) : (transcripts && transcripts.length > 0) || visiblePendingPrompts.length > 0 ? (
+          <div className="space-y-5">
+            {(transcripts ?? []).map((item) => (
+              <TranscriptTurn
+                key={`${drone.name}:${item.turn}:${item.at}`}
+                item={item}
+                nowMs={nowMs}
+                parsingJobs={false}
+                onCreateJobs={onCreateJobs}
+              />
+            ))}
+            {visiblePendingPrompts.map((item) => (
+              <PendingTranscriptTurn key={`${drone.name}:pending:${item.id}`} item={item} nowMs={nowMs} />
+            ))}
+          </div>
+        ) : (
+          <EmptyState
+            icon={<IconChat className="w-7 h-7 text-[var(--muted)]" />}
+            title={drone.hubPhase === 'starting' || drone.hubPhase === 'seeding' ? 'Drone is starting' : 'No messages yet'}
+            description={
+              drone.hubPhase === 'starting' || drone.hubPhase === 'seeding'
+                ? `Waiting for ${drone.name} to become ready.`
+                : `Open ${drone.name} and send a prompt to populate this chat.`
+            }
+          />
+        )}
+      </div>
+      <ChatInput
+        resetKey={`group:${drone.name}:${chatName}`}
+        droneName={drone.name}
+        promptError={promptError}
+        sending={sendingPrompt}
+        waiting={waitingForAgent}
+        disabled={sendingPrompt || drone.hubPhase === 'starting' || drone.hubPhase === 'seeding'}
+        autoFocus={false}
+        modeHint=""
+        onSend={sendPrompt}
+      />
+    </section>
+  );
+}
 
 /* ------------------------------------------------------------------ */
 /*  Main app                                                          */
@@ -773,6 +1059,17 @@ export default function DroneHubApp() {
 
   const [selectedDrone, setSelectedDrone] = React.useState<string | null>(null);
   const [selectedDroneNames, setSelectedDroneNames] = React.useState<string[]>([]);
+  const [selectedGroupMultiChat, setSelectedGroupMultiChat] = React.useState<string | null>(null);
+  const [groupBroadcastPromptError, setGroupBroadcastPromptError] = React.useState<string | null>(null);
+  const [groupBroadcastSendingCount, setGroupBroadcastSendingCount] = React.useState(0);
+  const groupBroadcastSending = groupBroadcastSendingCount > 0;
+  const [groupBroadcastExpanded, setGroupBroadcastExpanded] = React.useState(false);
+  const [groupMultiChatColumnWidth, setGroupMultiChatColumnWidth] = React.useState<number>(() => {
+    const saved = Number(readLocalStorageItem(GROUP_MULTI_CHAT_COLUMN_WIDTH_STORAGE_KEY));
+    if (Number.isFinite(saved) && saved > 0) return clampGroupMultiChatColumnWidthPx(saved);
+    return GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX;
+  });
+  usePersistedLocalStorageItem(GROUP_MULTI_CHAT_COLUMN_WIDTH_STORAGE_KEY, String(groupMultiChatColumnWidth));
   const [selectedChat, setSelectedChat] = React.useState<string>('default');
   const [startupSeedByDrone, setStartupSeedByDrone] = React.useState<Record<string, StartupSeedState>>({});
   const [draftChat, setDraftChat] = React.useState<DraftChatState | null>(null);
@@ -2356,6 +2653,7 @@ export default function DroneHubApp() {
       const name = String(droneName ?? '').trim();
       if (!name) return;
       setAppView('workspace');
+      setSelectedGroupMultiChat(null);
       setDraftChat(null);
       setDraftCreateOpen(false);
       setDraftCreateError(null);
@@ -3568,6 +3866,76 @@ export default function DroneHubApp() {
   }, [sessionText]);
 
   const currentDrone = selectedDrone ? drones.find((d) => d.name === selectedDrone) ?? null : null;
+  const selectedGroupMultiChatData = React.useMemo(
+    () => (selectedGroupMultiChat ? sidebarGroups.find((g) => g.group === selectedGroupMultiChat) ?? null : null),
+    [selectedGroupMultiChat, sidebarGroups],
+  );
+  React.useEffect(() => {
+    if (!selectedGroupMultiChat) return;
+    if (selectedGroupMultiChatData) return;
+    setSelectedGroupMultiChat(null);
+  }, [selectedGroupMultiChat, selectedGroupMultiChatData]);
+  React.useEffect(() => {
+    setGroupBroadcastPromptError(null);
+  }, [selectedGroupMultiChat]);
+  React.useEffect(() => {
+    setGroupBroadcastExpanded(false);
+  }, [selectedGroupMultiChat]);
+
+  const sendGroupBroadcastPrompt = React.useCallback(
+    async (promptRaw: string): Promise<boolean> => {
+      const prompt = String(promptRaw ?? '').trim();
+      if (!prompt) return false;
+      const targets = selectedGroupMultiChatData?.items ?? [];
+      if (targets.length === 0) {
+        setGroupBroadcastPromptError('No drones available in this group.');
+        return false;
+      }
+
+      setGroupBroadcastSendingCount((c) => c + 1);
+      setGroupBroadcastPromptError(null);
+      try {
+        const preferredChat = selectedChat || 'default';
+        const results = await Promise.allSettled(
+          targets.map(async (d) => {
+            if (d.hubPhase === 'starting' || d.hubPhase === 'seeding') {
+              throw new Error(`"${d.name}" is still starting.`);
+            }
+            const chatName = resolveChatNameForDrone(d, preferredChat);
+            await requestJson<{ ok: true; accepted: true; promptId: string }>(
+              `/api/drones/${encodeURIComponent(d.name)}/chats/${encodeURIComponent(chatName)}/prompt`,
+              {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ prompt }),
+              },
+            );
+            return d.name;
+          }),
+        );
+
+        const failed: string[] = [];
+        for (let i = 0; i < results.length; i += 1) {
+          if (results[i].status === 'rejected') failed.push(targets[i].name);
+        }
+        if (failed.length === 0) return true;
+        if (failed.length === targets.length) {
+          setGroupBroadcastPromptError(`Failed to send to all ${targets.length} drones.`);
+          return false;
+        }
+        const preview = failed.slice(0, 3).join(', ');
+        const more = failed.length > 3 ? ` +${failed.length - 3} more` : '';
+        setGroupBroadcastPromptError(`Sent to ${targets.length - failed.length}/${targets.length}. Failed: ${preview}${more}.`);
+        return true;
+      } catch (err: any) {
+        setGroupBroadcastPromptError(err?.message ?? String(err));
+        return false;
+      } finally {
+        setGroupBroadcastSendingCount((c) => Math.max(0, c - 1));
+      }
+    },
+    [selectedChat, selectedGroupMultiChatData],
+  );
   React.useEffect(() => {
     const pending = draftChat?.prompt ?? null;
     const prompt = String(pending?.prompt ?? '').trim();
@@ -4304,18 +4672,32 @@ export default function DroneHubApp() {
                             {group}
                           </span>
                         </button>
-                        <div className="flex items-center justify-end flex-shrink-0 min-w-[116px]">
+                        <div className="flex items-center justify-end flex-shrink-0 min-w-[148px]">
                           <div className="relative w-full flex justify-end">
-                            <div
-                              className={`flex items-center gap-2 text-[10px] font-mono text-[var(--muted-dim)] transition-opacity duration-150 ${
-                                isDeletingGroup ? 'opacity-0 pointer-events-none' : 'group-hover/group-header:opacity-0 group-hover/group-header:pointer-events-none'
-                              }`}
-                            >
-                              <span>
-                                {items.length} drone{items.length !== 1 ? 's' : ''}
-                              </span>
-                            </div>
                             <button
+                              type="button"
+                              onClick={() => {
+                                setAppView('workspace');
+                                setDraftChat(null);
+                                setDraftCreateOpen(false);
+                                setDraftCreateError(null);
+                                setSelectedGroupMultiChat(group);
+                              }}
+                              disabled={isDeletingGroup}
+                              className={`absolute right-8 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
+                                isDeletingGroup
+                                  ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
+                                  : selectedGroupMultiChat === group
+                                    ? 'opacity-100 pointer-events-auto bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
+                                    : 'opacity-0 pointer-events-none group-hover/group-header:opacity-100 group-hover/group-header:pointer-events-auto bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
+                              }`}
+                              title={`Open "${group}" multi-chat`}
+                              aria-label={`Open "${group}" multi-chat`}
+                            >
+                              <IconColumns className="opacity-90" />
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => deleteGroup(group, items.length)}
                               disabled={isDeletingGroup}
                               aria-busy={isDeletingGroup}
@@ -6016,7 +6398,130 @@ export default function DroneHubApp() {
                 onSend={startDraftPrompt}
               />
             </div>
-          ) : !currentDrone ? (
+        ) : selectedGroupMultiChatData ? (
+          <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
+            <div className="flex-shrink-0 bg-[var(--panel-alt)] border-b border-[var(--border)] px-5 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--muted-dim)] font-semibold" style={{ fontFamily: 'var(--display)' }}>
+                    Group Multi-Chat
+                  </div>
+                  <div className="mt-1 text-[15px] font-semibold text-[var(--fg)] truncate" style={{ fontFamily: 'var(--display)' }}>
+                    {selectedGroupMultiChatData.group}
+                  </div>
+                  <div className="text-[11px] text-[var(--muted)] mt-1">
+                    One column per drone. Open any column title to jump into its full chat + panel view.
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <div className="inline-flex items-center gap-2 h-7 px-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]">
+                    <span className="text-[9px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+                      Width
+                    </span>
+                    <input
+                      type="range"
+                      min={GROUP_MULTI_CHAT_COLUMN_WIDTH_MIN_PX}
+                      max={GROUP_MULTI_CHAT_COLUMN_WIDTH_MAX_PX}
+                      step={10}
+                      value={groupMultiChatColumnWidth}
+                      onChange={(e) => setGroupMultiChatColumnWidth(clampGroupMultiChatColumnWidthPx(Number(e.target.value)))}
+                      className="w-[92px] accent-[var(--accent)]"
+                      title="Adjust width for all columns"
+                      aria-label="Adjust width for all group multi-chat columns"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setGroupMultiChatColumnWidth(GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX)}
+                      disabled={groupMultiChatColumnWidth === GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX}
+                      className={`inline-flex items-center h-5 px-1.5 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
+                        groupMultiChatColumnWidth === GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX
+                          ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] opacity-40 cursor-not-allowed'
+                          : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                      }`}
+                      style={{ fontFamily: 'var(--display)' }}
+                      title="Reset column width"
+                    >
+                      Reset
+                    </button>
+                  </div>
+                  <span className="inline-flex items-center h-7 px-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[10px] font-mono text-[var(--muted-dim)]">
+                    {selectedGroupMultiChatData.items.length} drone{selectedGroupMultiChatData.items.length !== 1 ? 's' : ''}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setGroupBroadcastExpanded((v) => !v)}
+                    className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border text-[10px] font-semibold tracking-wide uppercase transition-all ${
+                      groupBroadcastExpanded
+                        ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] shadow-[0_0_0_1px_rgba(167,139,250,.15)]'
+                        : 'border-[var(--accent-muted)] bg-[rgba(167,139,250,.08)] text-[var(--accent)] hover:bg-[var(--accent-subtle)] hover:shadow-[var(--glow-accent)]'
+                    }`}
+                    style={{ fontFamily: 'var(--display)' }}
+                    title={groupBroadcastExpanded ? 'Hide broadcast composer' : 'Broadcast a message to all drones'}
+                    aria-expanded={groupBroadcastExpanded}
+                  >
+                    <IconChat className={groupBroadcastExpanded ? 'opacity-90' : 'opacity-80'} />
+                    Broadcast
+                    <IconChevron down={groupBroadcastExpanded} className="opacity-80" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedGroupMultiChat(null)}
+                    className="inline-flex items-center h-7 px-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-all"
+                    style={{ fontFamily: 'var(--display)' }}
+                    title="Exit group multi-chat view"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div
+              className={`flex-shrink-0 overflow-hidden border-b border-[var(--border)] bg-[rgba(255,255,255,.01)] transition-[max-height,opacity,padding] duration-200 ease-out ${
+                groupBroadcastExpanded ? 'max-h-[220px] opacity-100 px-3' : 'max-h-0 opacity-0 px-3 pointer-events-none'
+              }`}
+              aria-hidden={!groupBroadcastExpanded}
+            >
+              <ChatInput
+                resetKey={`group-broadcast:${selectedGroupMultiChatData.group}:${selectedChat || 'default'}`}
+                droneName="all drones"
+                promptError={groupBroadcastPromptError}
+                sending={groupBroadcastSending}
+                waiting={false}
+                disabled={groupBroadcastSending || selectedGroupMultiChatData.items.length === 0}
+                autoFocus={false}
+                modeHint=""
+                onSend={sendGroupBroadcastPrompt}
+              />
+            </div>
+            <div className="flex-1 min-h-0 overflow-hidden px-4 py-4">
+              {selectedGroupMultiChatData.items.length === 0 ? (
+                <div className="h-full overflow-auto">
+                  <EmptyState
+                    icon={<IconDrone className="w-8 h-8 text-[var(--muted-dim)]" />}
+                    title="No drones in this group"
+                    description="Add drones to this group from the sidebar drag-and-drop controls."
+                  />
+                </div>
+              ) : (
+                <div className="h-full min-h-0 overflow-x-auto overflow-y-hidden pb-2">
+                  <div className="h-full min-h-0 w-max flex gap-3 items-stretch pr-4">
+                    {selectedGroupMultiChatData.items.map((d) => (
+                      <GroupMultiChatColumn
+                        key={`group-chat:${selectedGroupMultiChatData.group}:${d.name}`}
+                        drone={d}
+                        preferredChat={selectedChat || 'default'}
+                        nowMs={nowMs}
+                        onOpenDrone={() => selectDroneCard(d.name)}
+                        onCreateJobs={parseJobsFromAgentMessage}
+                        columnWidthPx={groupMultiChatColumnWidth}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : !currentDrone ? (
             <EmptyState
               icon={<IconDrone className="w-8 h-8 text-[var(--muted-dim)]" />}
               title="Select a drone"

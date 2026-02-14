@@ -1,5 +1,8 @@
 import React from 'react';
 
+const CHAT_INPUT_TEXTAREA_MIN_HEIGHT_PX = 36;
+const CHAT_INPUT_TEXTAREA_MAX_HEIGHT_PX = 160;
+
 export function ChatInput({
   resetKey,
   droneName,
@@ -23,6 +26,17 @@ export function ChatInput({
 }) {
   const [draft, setDraft] = React.useState('');
   const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
+  const resizeTextarea = React.useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const next = Math.min(
+      CHAT_INPUT_TEXTAREA_MAX_HEIGHT_PX,
+      Math.max(CHAT_INPUT_TEXTAREA_MIN_HEIGHT_PX, el.scrollHeight),
+    );
+    el.style.height = `${next}px`;
+    el.style.overflowY = el.scrollHeight > CHAT_INPUT_TEXTAREA_MAX_HEIGHT_PX ? 'auto' : 'hidden';
+  }, []);
 
   React.useEffect(() => {
     setDraft('');
@@ -35,9 +49,13 @@ export function ChatInput({
     });
     return () => cancelAnimationFrame(id);
   }, [autoFocus, resetKey]);
+  React.useEffect(() => {
+    resizeTextarea();
+  }, [draft, resetKey, resizeTextarea]);
 
   const trimmed = draft.trim();
   const sendDisabled = Boolean(disabled) || !trimmed;
+  const hasModeHint = modeHint.trim().length > 0;
 
   const sendNow = () => {
     const prompt = draft.trim();
@@ -53,7 +71,7 @@ export function ChatInput({
   };
 
   return (
-    <div className="flex-shrink-0 px-5 pt-2 pb-5 bg-transparent">
+    <div className="flex-shrink-0 px-5 pt-1.5 pb-3 bg-transparent">
       <div className="max-w-[900px] mx-auto">
         {promptError && (
           <div className="mb-2 text-[11px] text-[var(--red)] px-1" title={promptError}>
@@ -64,7 +82,7 @@ export function ChatInput({
           {/* Top accent line */}
           <div className="absolute top-0 left-4 right-4 h-px bg-gradient-to-r from-transparent via-[var(--user-muted)] to-transparent opacity-25" />
 
-          <div className="flex items-end gap-3 p-3">
+          <div className="flex items-end gap-2.5 p-2.5">
             <textarea
               ref={textareaRef}
               value={draft}
@@ -76,9 +94,10 @@ export function ChatInput({
                   sendNow();
                 }
               }}
-              rows={2}
-              placeholder={`Message ${droneName}…`}
-              className="flex-1 min-h-[44px] max-h-40 resize-none rounded-md border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] px-3.5 py-2.5 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--user-muted)] transition-colors"
+              rows={1}
+              placeholder="Message..."
+              className="flex-1 resize-none rounded-md border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] px-3 py-2 text-[13px] leading-[1.35] text-[var(--fg)] placeholder:text-[11px] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--user-muted)] transition-colors"
+              style={{ minHeight: CHAT_INPUT_TEXTAREA_MIN_HEIGHT_PX }}
               disabled={Boolean(disabled)}
               autoFocus={Boolean(autoFocus)}
             />
@@ -86,7 +105,7 @@ export function ChatInput({
               type="button"
               onClick={() => sendNow()}
               disabled={sendDisabled}
-              className={`self-stretch inline-flex items-center justify-center min-h-[44px] min-w-[88px] px-5 rounded-md text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+              className={`inline-flex items-center justify-center h-9 min-w-[80px] px-4 rounded-md text-[11px] font-semibold tracking-wide uppercase border transition-all ${
                 sendDisabled
                   ? 'opacity-40 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
                   : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
@@ -97,12 +116,14 @@ export function ChatInput({
               {sending ? 'Sending…' : waiting ? 'Waiting…' : 'Send'}
             </button>
           </div>
-          <div
-            className="px-4 pb-2 text-[10px] text-[var(--muted-dim)] tracking-wide uppercase"
-            style={{ fontFamily: 'var(--display)' }}
-          >
-            {modeHint}
-          </div>
+          {hasModeHint && (
+            <div
+              className="px-4 pb-2 text-[10px] text-[var(--muted-dim)] tracking-wide uppercase"
+              style={{ fontFamily: 'var(--display)' }}
+            >
+              {modeHint}
+            </div>
+          )}
         </div>
       </div>
     </div>
