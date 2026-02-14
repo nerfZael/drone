@@ -3846,6 +3846,7 @@ export default function DroneHubApp() {
     () => (selectedDrone ? drones.find((x) => x.name === selectedDrone) ?? null : null),
     [drones, selectedDrone],
   );
+  const selectedDroneHubPhase = selectedDroneSummary?.hubPhase ?? null;
   const startupSeedForSelectedDrone = React.useMemo(
     () => (selectedDrone ? startupSeedByDrone[selectedDrone] ?? null : null),
     [selectedDrone, startupSeedByDrone],
@@ -3927,14 +3928,13 @@ export default function DroneHubApp() {
     async () => {
       if (chatUiMode !== 'transcript') return { ok: true, pending: [] };
       if (!selectedDrone || !selectedChat) return { ok: true, pending: [] };
-      const d = drones.find((x) => x.name === selectedDrone) ?? null;
-      if (d?.hubPhase === 'starting' || d?.hubPhase === 'seeding') return { ok: true, pending: [] };
+      if (selectedDroneHubPhase === 'starting' || selectedDroneHubPhase === 'seeding') return { ok: true, pending: [] };
       return await fetchJson<{ ok: true; pending: PendingPrompt[] }>(
         `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(selectedChat || 'default')}/pending`,
       );
     },
     1000,
-    [chatUiMode, drones, selectedDrone, selectedChat],
+    [chatUiMode, selectedDrone, selectedChat, selectedDroneHubPhase],
   );
 
   const pendingPrompts: PendingPrompt[] = React.useMemo(() => {
@@ -4182,16 +4182,7 @@ export default function DroneHubApp() {
     let busy = false;
     const load = async () => {
       if (!selectedDrone || !selectedChat || busy) return;
-      const summary = drones.find((x) => x.name === selectedDrone) ?? null;
-        if (summary?.hubPhase === 'starting' || summary?.hubPhase === 'seeding') return;
-      // Avoid 404 spam: don't poll transcript until the chat exists.
-      const chatExists = Boolean(summary && Array.isArray(summary.chats) && summary.chats.includes(selectedChat));
-      if (!chatExists) {
-        if (mounted) {
-          setTranscripts([]);
-          setTranscriptError(null);
-          setLoadingTranscript(false);
-        }
+      if (selectedDroneHubPhase === 'starting' || selectedDroneHubPhase === 'seeding') {
         return;
       }
       busy = true;
@@ -4224,7 +4215,7 @@ export default function DroneHubApp() {
       mounted = false;
       if (timer) clearInterval(timer);
     };
-  }, [chatUiMode, drones, selectedDrone, selectedChat]);
+  }, [chatUiMode, selectedDrone, selectedChat, selectedDroneHubPhase]);
 
   // Auto-scroll on new transcript turns.
   React.useEffect(() => {
