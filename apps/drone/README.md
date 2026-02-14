@@ -14,6 +14,29 @@ This repo’s `drone` implementation uses **`dvm` for container/session manageme
 - **Host CLI**: `apps/drone/dist/cli.js` (command: `drone`)
 - **Daemon (inside container)**: `apps/drone/dist/daemon.js` (runs an HTTP server)
 
+## Installation
+
+From the monorepo root:
+
+```bash
+# install dependencies (one-time per repo clone)
+bun install
+
+# build dvm first (drone shells out to dvm)
+bun --filter dvm run build
+
+# build drone CLI + daemon
+bun --filter drone run build
+
+# install both commands into your shell PATH
+npm link ./apps/dvm
+npm link ./apps/drone
+
+# verify
+dvm --help
+drone --help
+```
+
 ## Security
 
 The daemon is essentially remote code execution. It uses a **single Bearer token** per drone:
@@ -58,109 +81,109 @@ From repo root:
 ```bash
 # Build the CLI + daemon.
 # Note: `drone` shells out to `dvm` (see "dvm discovery" below), so you'll also need apps/dvm built.
-cd apps/drone && bun run build
+bun --filter drone run build
 
 # create container + start daemon + save registry entry
-node apps/drone/dist/cli.js create drone-test4 --group dev --repo "$PWD" --container-port 7777
+drone create drone-test4 --group dev --repo "$PWD" --container-port 7777
 
 # Set a default working directory inside the container (and create it):
-node apps/drone/dist/cli.js create drone-test4 --group dev --repo "$PWD" --container-port 7777 --cwd /dvm-data/work --mkdir
+drone create drone-test4 --group dev --repo "$PWD" --container-port 7777 --cwd /dvm-data/work --mkdir
 
 # if a container/daemon already exists, register it into local registry
 # (reads token from /dvm-data/drone/token, then checks /v1/health)
-node apps/drone/dist/cli.js import drone-test4 --group dev --container-port 7777 --repo "$PWD"
+drone import drone-test4 --group dev --container-port 7777 --repo "$PWD"
 
 # list groups (and ungrouped drones)
-node apps/drone/dist/cli.js groups
+drone groups
 
 # reassign a drone into a different group
-node apps/drone/dist/cli.js group-set drone-test4 staging
+drone group-set drone-test4 staging
 # (alias: set-group)
 
 # clear a group assignment (move back to "Ungrouped" in the Hub)
-node apps/drone/dist/cli.js group-clear drone-test4
+drone group-clear drone-test4
 # (alias: ungroup)
 
 # register a host repo in the registry (for the Hub UI)
-node apps/drone/dist/cli.js repo "$PWD"
+drone repo "$PWD"
 
 # list and query
-node apps/drone/dist/cli.js ps
-node apps/drone/dist/cli.js ps --group dev
-node apps/drone/dist/cli.js ps --ungrouped
-node apps/drone/dist/cli.js status drone-test4
+drone ps
+drone ps --group dev
+drone ps --ungrouped
+drone status drone-test4
 
 # start an interactive process in the container (requires `--` for the command)
-node apps/drone/dist/cli.js proc-start drone-test4 --session drone-main --force -- bash
+drone proc-start drone-test4 --session drone-main --force -- bash
 
 # run a one-shot command and stream output (proc-start + follow)
-node apps/drone/dist/cli.js run drone-test4 --session drone-main --force --until "DONE" --timeout-ms 600000 -- bash -lc 'echo hello; echo DONE'
+drone run drone-test4 --session drone-main --force --until "DONE" --timeout-ms 600000 -- bash -lc 'echo hello; echo DONE'
 
 # Cursor Agent: persistent multi-turn (recommended)
 #
 # This stores a chatId in the drone registry file and uses `agent --resume <chatId>` for each turn.
-node apps/drone/dist/cli.js agent drone-test4 "Summarize the repo."
-node apps/drone/dist/cli.js agent drone-test4 "Now propose 3 small PR ideas."
+drone agent drone-test4 "Summarize the repo."
+drone agent drone-test4 "Now propose 3 small PR ideas."
 
 # You can also supply prompts via a file or stdin (helps avoid shell quoting issues):
-node apps/drone/dist/cli.js agent drone-test4 --prompt-file ./prompt.txt
-cat ./prompt.txt | node apps/drone/dist/cli.js agent drone-test4 --prompt-stdin
+drone agent drone-test4 --prompt-file ./prompt.txt
+cat ./prompt.txt | drone agent drone-test4 --prompt-stdin
 
 # Cursor Agent: one-shot (niche)
 #
 # No persisted history; this is mainly useful for scripted/isolated prompts.
-node apps/drone/dist/cli.js agent-once drone-test4 "What is 2+3?"
+drone agent-once drone-test4 "What is 2+3?"
 
 # send text input, then follow output
-node apps/drone/dist/cli.js send drone-test4 "echo DRONE_OK"
+drone send drone-test4 "echo DRONE_OK"
 # (use --no-enter to type without pressing Enter)
-node apps/drone/dist/cli.js follow drone-test4 --until "DRONE_OK" --timeout-ms 30000
+drone follow drone-test4 --until "DRONE_OK" --timeout-ms 30000
 
 # send key chords (space-separated)
-node apps/drone/dist/cli.js keys drone-test4 ctrl+c
+drone keys drone-test4 ctrl+c
 
 # read output as JSON chunks (manual polling)
-node apps/drone/dist/cli.js output drone-test4 --since 0 --max 65536
+drone output drone-test4 --since 0 --max 65536
 
 # stop the tmux session running the process
-node apps/drone/dist/cli.js proc-stop drone-test4 --session drone-main
+drone proc-stop drone-test4 --session drone-main
 
 # inspect/reset persisted agent chats (host-side)
-node apps/drone/dist/cli.js agent-chats drone-test4
-node apps/drone/dist/cli.js agent-chats drone-test4 --chat default
-node apps/drone/dist/cli.js agent-chats drone-test4 --chat default --turn last
-node apps/drone/dist/cli.js agent-chats drone-test4 --chat default --turn all
-node apps/drone/dist/cli.js agent-reset drone-test4 --chat default
+drone agent-chats drone-test4
+drone agent-chats drone-test4 --chat default
+drone agent-chats drone-test4 --chat default --turn last
+drone agent-chats drone-test4 --chat default --turn all
+drone agent-reset drone-test4 --chat default
 
 # run an arbitrary command inside the drone container (no need to call dvm directly)
-node apps/drone/dist/cli.js exec drone-test4 -- ls -la /dvm-data/drone
+drone exec drone-test4 -- ls -la /dvm-data/drone
 
 # remove a single drone/container (also removes from registry)
-node apps/drone/dist/cli.js rm drone-test4
+drone rm drone-test4
 # keep container persistence volume
-node apps/drone/dist/cli.js rm drone-test4 --keep-volume
+drone rm drone-test4 --keep-volume
 
 # fast rename (container + drone registry entry)
-node apps/drone/dist/cli.js rename drone-test4 drone-test4-new
+drone rename drone-test4 drone-test4-new
 
 # optional: also migrate persistence volume name to dvm-<new>-data (slower)
-node apps/drone/dist/cli.js rename drone-test4 drone-test4-new --migrate-volume-name
+drone rename drone-test4 drone-test4-new --migrate-volume-name
 
 # remove all drones/containers
 # - dry-run unless --apply
 # - default targets are drones listed in the drone registry file
 # - --orphans also scans running containers and includes ones that look like drones
-node apps/drone/dist/cli.js purge --orphans
-node apps/drone/dist/cli.js purge --orphans --apply
-node apps/drone/dist/cli.js purge --orphans --apply --keep-volume
+drone purge --orphans
+drone purge --orphans --apply
+drone purge --orphans --apply --keep-volume
 
 # start the local Drone Hub (detached by default)
-node apps/drone/dist/cli.js hub
+drone hub
 
 # explicitly manage the detached Hub
-node apps/drone/dist/cli.js hub start --port 5174 --api-port 0 --host 127.0.0.1
-node apps/drone/dist/cli.js hub stop
-node apps/drone/dist/cli.js hub restart
+drone hub start --port 5174 --api-port 0 --host 127.0.0.1
+drone hub stop
+drone hub restart
 ```
 
 ### Drone Hub grouping

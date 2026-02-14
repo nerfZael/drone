@@ -4,9 +4,20 @@ A CLI tool for easily spinning up Docker containers that act as isolated "machin
 
 ## Installation
 
+From the monorepo root:
+
 ```bash
+# install dependencies (one-time per repo clone)
 bun install
-bun run build
+
+# build dvm
+bun --filter dvm run build
+
+# install `dvm` into your shell PATH
+npm link ./apps/dvm
+
+# verify
+dvm --help
 ```
 
 ## Usage

@@ -112,6 +112,40 @@ export type RepoDiffPayload =
     }
   | { ok: false; error: string };
 
+export type RepoPullChangeEntry = {
+  path: string;
+  originalPath: string | null;
+  statusChar: string;
+  statusType: RepoChangeType;
+};
+
+export type RepoPullChangesPayload =
+  | {
+      ok: true;
+      name: string;
+      repoRoot: string;
+      baseSha: string;
+      headSha: string;
+      counts: {
+        changed: number;
+      };
+      entries: RepoPullChangeEntry[];
+    }
+  | { ok: false; error: string; code?: string };
+
+export type RepoPullDiffPayload =
+  | {
+      ok: true;
+      name: string;
+      repoRoot: string;
+      baseSha: string;
+      headSha: string;
+      path: string;
+      diff: string;
+      truncated: boolean;
+    }
+  | { ok: false; error: string; code?: string };
+
 export type TranscriptItem = {
   turn: number;
   at: string;
@@ -139,7 +173,8 @@ export type PendingPrompt = {
   id: string;
   at: string;
   prompt: string;
-  state: 'sending' | 'sent' | 'failed';
+  // `queued` is a local-only UI state used when a drone is still provisioning.
+  state: 'queued' | 'sending' | 'sent' | 'failed';
   error?: string;
   updatedAt?: string;
 };
