@@ -11,7 +11,7 @@ export function ChatTabs({
 }) {
   if (chats.length <= 1) return null;
   return (
-    <div className="flex items-center gap-0.5 overflow-x-auto py-1 no-scrollbar">
+    <div data-onboarding-id="chat.toolbar.chats" className="flex items-center gap-0.5 overflow-x-auto py-1 no-scrollbar">
       {chats.map((c) => {
         const active = c === selected;
         return (
