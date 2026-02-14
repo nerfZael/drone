@@ -30,6 +30,7 @@ import { DroneTerminalDock } from './droneHub/terminal';
 import { requestJson } from './droneHub/http';
 import { TypingDots } from './droneHub/overview/icons';
 import { GuidedOnboarding } from './onboarding/GuidedOnboarding';
+import { requestGuidedOnboardingReplay, resetGuidedOnboardingDismissals } from './onboarding/control';
 import { usePaneReadiness } from './droneHub/panes/usePaneReadiness';
 import { cn } from './ui/cn';
 import { dropdownMenuItemBaseClass, dropdownPanelBaseClass, useDropdownDismiss } from './ui/dropdown';
@@ -793,7 +794,7 @@ export default function DroneHubApp() {
   const [terminalEmulator, setTerminalEmulator] = React.useState<string>(() => readLocalStorageItem('droneHub.terminalEmulator') || 'auto');
   usePersistedLocalStorageItem('droneHub.viewMode', viewMode);
   usePersistedLocalStorageItem('droneHub.collapsedGroups', JSON.stringify(collapsedGroups));
-  usePersistedLocalStorageItem('droneHub autoDelete', autoDelete ? '1' : '0');
+  usePersistedLocalStorageItem('droneHub.autoDelete', autoDelete ? '1' : '0');
   usePersistedLocalStorageItem('droneHub.terminalEmulator', terminalEmulator);
 
   const dronesFilteredByRepo = React.useMemo(() => {
@@ -6441,6 +6442,44 @@ export default function DroneHubApp() {
                         </div>
                       </>
                     )}
+                  </div>
+
+                  <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
+                    <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+                      Onboarding
+                    </div>
+                    <div className="text-[11px] text-[var(--muted-dim)] leading-relaxed">
+                      Clear onboarding dismissal state and replay the guided tips from step 1.
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const ok = window.confirm('Replay onboarding from the beginning? This will clear onboarding dismissal state.');
+                          if (!ok) return;
+                          setAppView('workspace');
+                          requestGuidedOnboardingReplay();
+                        }}
+                        className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110"
+                        style={{ fontFamily: 'var(--display)' }}
+                        title="Reset onboarding and replay guided tips"
+                      >
+                        Replay onboarding
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const ok = window.confirm('Clear onboarding state?');
+                          if (!ok) return;
+                          resetGuidedOnboardingDismissals();
+                        }}
+                        className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+                        style={{ fontFamily: 'var(--display)' }}
+                        title="Clear onboarding dismissals without opening tips"
+                      >
+                        Reset only
+                      </button>
+                    </div>
                   </div>
 
                   <div className="flex items-center">
