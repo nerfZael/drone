@@ -1,6 +1,16 @@
 import React from 'react';
 
-export function EmptyState({ icon, title, description }: { icon: React.ReactNode; title: string; description: string }) {
+export function EmptyState({
+  icon,
+  title,
+  description,
+  actions,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+  actions?: React.ReactNode;
+}) {
   return (
     <div className="flex flex-col items-center justify-center h-full text-center px-8">
       <div className="w-16 h-16 rounded-lg bg-[rgba(255,255,255,.02)] border border-[var(--border-subtle)] flex items-center justify-center mb-5 relative">
@@ -16,6 +26,7 @@ export function EmptyState({ icon, title, description }: { icon: React.ReactNode
         {title}
       </h3>
       <p className="text-sm text-[var(--muted)] max-w-[320px] leading-relaxed">{description}</p>
+      {actions ? <div className="mt-5 w-full max-w-[340px]">{actions}</div> : null}
     </div>
   );
 }

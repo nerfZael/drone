@@ -30,6 +30,8 @@ import {
 import { DroneTerminalDock } from './droneHub/terminal';
 import { requestJson } from './droneHub/http';
 import { TypingDots } from './droneHub/overview/icons';
+import { GuidedOnboarding } from './onboarding/GuidedOnboarding';
+import { usePaneReadiness } from './droneHub/panes/usePaneReadiness';
 import { cn } from './ui/cn';
 import { dropdownMenuItemBaseClass, dropdownPanelBaseClass, useDropdownDismiss } from './ui/dropdown';
 import { UiMenuSelect } from './ui/menuSelect';
@@ -64,6 +66,12 @@ type ChatModelOption = {
   isDefault?: boolean;
   isCurrent?: boolean;
 };
+
+type TldrState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'ready'; summary: string }
+  | { status: 'error'; error: string };
 
 const PORT_PREVIEW_STORAGE_KEY = 'droneHub.portPreviewByDrone';
 const PREVIEW_URL_STORAGE_KEY = 'droneHub.previewUrlByDrone';
@@ -148,6 +156,8 @@ type StartupSeedState = {
 };
 
 type DraftChatState = {
+  // If set, this is the (optimistic) name of the drone being created for this draft chat.
+  droneName: string;
   prompt: PendingPrompt | null;
 };
 
@@ -452,6 +462,9 @@ function usePoll<T>(fn: () => Promise<T>, intervalMs: number, deps: any[] = []) 
   React.useEffect(() => {
     let mounted = true;
     let timer: any = null;
+    setValue(null);
+    setError(null);
+    setLoading(true);
     const tick = async () => {
       try {
         const v = await fn();
@@ -589,6 +602,14 @@ function IconTrash({ className }: { className?: string }) {
   );
 }
 
+function IconPencil({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M11.013 1.427a1.75 1.75 0 012.474 0l1.086 1.086a1.75 1.75 0 010 2.474l-8.94 8.94a.75.75 0 01-.318.19l-3.5 1a.75.75 0 01-.927-.927l1-3.5a.75.75 0 01.19-.318l8.935-8.945zM12.073 2.487L3.5 11.06l-.64 2.24 2.24-.64 8.573-8.573-1.6-1.6z" />
+    </svg>
+  );
+}
+
 function IconCopy({ className }: { className?: string }) {
   return (
     <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
@@ -638,6 +659,22 @@ function IconCursorApp({ className }: { className?: string }) {
 
 function SkeletonLine({ w }: { w: string }) {
   return <div className="h-2.5 rounded bg-[var(--border-subtle)] animate-pulse" style={{ width: w }} />;
+}
+
+function droneChatQueueKey(droneNameRaw: string, chatNameRaw: string): string {
+  const droneName = String(droneNameRaw ?? '').trim();
+  const chatName = String(chatNameRaw ?? '').trim() || 'default';
+  return `${droneName}::${chatName}`;
+}
+
+function parseDroneChatQueueKey(key: string): { droneName: string; chatName: string } | null {
+  const raw = String(key ?? '');
+  const idx = raw.indexOf('::');
+  if (idx < 0) return null;
+  const droneName = raw.slice(0, idx).trim();
+  const chatName = raw.slice(idx + 2).trim() || 'default';
+  if (!droneName) return null;
+  return { droneName, chatName };
 }
 
 /* ------------------------------------------------------------------ */
@@ -695,6 +732,18 @@ export default function DroneHubApp() {
   );
   const registeredRepoPathSet = React.useMemo(() => new Set(registeredRepoPaths), [registeredRepoPaths]);
 
+  const { value: groupsResp } = usePoll<{ ok: true; groups: Array<{ name: string }> }>(() => fetchJson('/api/groups'), 5000, []);
+  const registryGroupNames = React.useMemo(() => {
+    const out = new Set<string>();
+    for (const g of groupsResp?.groups ?? []) {
+      const name = String((g as any)?.name ?? '').trim();
+      if (!name) continue;
+      if (isUngroupedGroupName(name)) continue;
+      out.add(name);
+    }
+    return Array.from(out.values()).sort((a, b) => a.localeCompare(b));
+  }, [groupsResp]);
+
   const [activeRepoPath, setActiveRepoPath] = React.useState<string>(() => readLocalStorageItem('droneHub.activeRepoPath') || '');
   usePersistedLocalStorageItem('droneHub.activeRepoPath', activeRepoPath || '');
 
@@ -703,6 +752,23 @@ export default function DroneHubApp() {
     const exists = repos.some((r) => String(r?.path ?? '').trim() === activeRepoPath);
     if (!exists) setActiveRepoPath('');
   }, [repos, activeRepoPath]);
+
+  const [chatHeaderRepoPath, setChatHeaderRepoPath] = React.useState<string>(() => {
+    const saved = String(readLocalStorageItem('droneHub.chatHeaderRepoPath') ?? '').trim();
+    if (saved) return saved;
+    const fallback = String(activeRepoPath ?? '').trim();
+    return fallback || '';
+  });
+  usePersistedLocalStorageItem('droneHub.chatHeaderRepoPath', chatHeaderRepoPath || '');
+
+  React.useEffect(() => {
+    // If a previously-saved repo path was removed from the registry, drop back to "No repo".
+    setChatHeaderRepoPath((prev) => {
+      const p = String(prev ?? '').trim();
+      if (!p) return '';
+      return registeredRepoPathSet.has(p) ? p : '';
+    });
+  }, [registeredRepoPathSet]);
 
   const [sidebarReposCollapsed, setSidebarReposCollapsed] = React.useState<boolean>(() => readLocalStorageItem(SIDEBAR_REPOS_COLLAPSED_STORAGE_KEY) === '1');
   usePersistedLocalStorageItem(SIDEBAR_REPOS_COLLAPSED_STORAGE_KEY, sidebarReposCollapsed ? '1' : '0');
@@ -749,6 +815,11 @@ export default function DroneHubApp() {
 
   const groups = React.useMemo(() => {
     const m = new Map<string, DroneSummary[]>();
+    for (const rawName of registryGroupNames) {
+      const g = String(rawName ?? '').trim();
+      if (!g || isUngroupedGroupName(g)) continue;
+      if (!m.has(g)) m.set(g, []);
+    }
     for (const d of dronesFilteredByRepo) {
       const raw = (d.group ?? '').trim();
       const g = !raw || isUngroupedGroupName(raw) ? 'Ungrouped' : raw;
@@ -766,7 +837,7 @@ export default function DroneHubApp() {
       return a.group.localeCompare(b.group);
     });
     return out;
-  }, [dronesFilteredByRepo]);
+  }, [dronesFilteredByRepo, registryGroupNames]);
   const hasUngroupedGroup = React.useMemo(
     () => groups.some((g) => isUngroupedGroupName(g.group)),
     [groups],
@@ -783,6 +854,14 @@ export default function DroneHubApp() {
   const [draftCreateError, setDraftCreateError] = React.useState<string | null>(null);
   const [draftCreating, setDraftCreating] = React.useState(false);
   const [draftAutoRenaming, setDraftAutoRenaming] = React.useState(false);
+  // Local-only prompt queue used while drones are provisioning (hubPhase starting/seeding).
+  // Key format: `${droneName}::${chatName}`
+  const [queuedPromptsByDroneChat, setQueuedPromptsByDroneChat] = React.useState<Record<string, PendingPrompt[]>>({});
+  const queuedPromptsByDroneChatRef = React.useRef<Record<string, PendingPrompt[]>>({});
+  React.useEffect(() => {
+    queuedPromptsByDroneChatRef.current = queuedPromptsByDroneChat;
+  }, [queuedPromptsByDroneChat]);
+  const flushingQueuedKeysRef = React.useRef<Set<string>>(new Set());
   const [draftNameSuggesting, setDraftNameSuggesting] = React.useState(false);
   const [draftSuggestedName, setDraftSuggestedName] = React.useState('');
   const [draftNameSuggestionError, setDraftNameSuggestionError] = React.useState<string | null>(null);
@@ -839,6 +918,11 @@ export default function DroneHubApp() {
   }, [activeRepoPath, sidebarDrones]);
   const sidebarGroups = React.useMemo(() => {
     const m = new Map<string, DroneSummary[]>();
+    for (const rawName of registryGroupNames) {
+      const g = String(rawName ?? '').trim();
+      if (!g || isUngroupedGroupName(g)) continue;
+      if (!m.has(g)) m.set(g, []);
+    }
     for (const d of sidebarDronesFilteredByRepo) {
       const raw = (d.group ?? '').trim();
       const g = !raw || isUngroupedGroupName(raw) ? 'Ungrouped' : raw;
@@ -856,7 +940,7 @@ export default function DroneHubApp() {
       return a.group.localeCompare(b.group);
     });
     return out;
-  }, [sidebarDronesFilteredByRepo]);
+  }, [sidebarDronesFilteredByRepo, registryGroupNames]);
   const sidebarHasUngroupedGroup = React.useMemo(
     () => sidebarGroups.some((g) => isUngroupedGroupName(g.group)),
     [sidebarGroups],
@@ -954,6 +1038,15 @@ export default function DroneHubApp() {
   const chatEndRef = React.useRef<HTMLDivElement | null>(null);
   const [optimisticPendingPrompts, setOptimisticPendingPrompts] = React.useState<PendingPrompt[]>([]);
   const [parsingJobsByTurn, setParsingJobsByTurn] = React.useState<Record<number, boolean>>({});
+
+  const [tldrByMessageId, setTldrByMessageId] = React.useState<Record<string, TldrState>>({});
+  const tldrByMessageIdRef = React.useRef<Record<string, TldrState>>({});
+  const [showTldrByMessageId, setShowTldrByMessageId] = React.useState<Record<string, boolean>>({});
+  const showTldrByMessageIdRef = React.useRef<Record<string, boolean>>({});
+  const [hoveredAgentMessageId, setHoveredAgentMessageId] = React.useState<string | null>(null);
+  const hoveredAgentMessageIdRef = React.useRef<string | null>(null);
+  const chatUiModeRef = React.useRef<'transcript' | 'cli'>('transcript');
+
   const [jobsModal, setJobsModal] = React.useState<
     null | {
       turn: number;
@@ -997,6 +1090,18 @@ export default function DroneHubApp() {
   React.useEffect(() => {
     transcriptErrorRef.current = transcriptError;
   }, [transcriptError]);
+
+  React.useEffect(() => {
+    tldrByMessageIdRef.current = tldrByMessageId;
+  }, [tldrByMessageId]);
+
+  React.useEffect(() => {
+    showTldrByMessageIdRef.current = showTldrByMessageId;
+  }, [showTldrByMessageId]);
+
+  React.useEffect(() => {
+    hoveredAgentMessageIdRef.current = hoveredAgentMessageId;
+  }, [hoveredAgentMessageId]);
 
   React.useEffect(() => {
     const ids = droneIdentityByNameRef.current;
@@ -1275,6 +1380,97 @@ export default function DroneHubApp() {
     if (!el) return;
     el.scrollTop = el.scrollHeight;
   }, [hubLogs?.text, hubLogsExpanded, hubLogsPinnedToBottom]);
+
+  const transcriptMessageId = React.useCallback((t: TranscriptItem): string => {
+    const explicit = typeof t?.id === 'string' ? t.id.trim() : '';
+    if (explicit) return explicit;
+    const session = String(t?.session ?? '').trim() || 'session';
+    const turn = String(t?.turn ?? '');
+    const iso = String(t?.completedAt ?? t?.at ?? '').trim() || 'at';
+    return `${session}:${turn}:${iso}`;
+  }, []);
+
+  const cleanedAgentTextForTldr = React.useCallback((t: TranscriptItem): string => {
+    return stripAnsi(t.ok ? t.output : t.error || 'failed');
+  }, []);
+
+  const cleanedPromptTextForTldr = React.useCallback((t: TranscriptItem): string => {
+    return stripAnsi(t.prompt ?? '');
+  }, []);
+
+  const requestTldrForAgentMessage = React.useCallback(
+    async (target: TranscriptItem) => {
+      const messageId = transcriptMessageId(target);
+      const existing = tldrByMessageIdRef.current?.[messageId] ?? null;
+      if (existing?.status === 'loading' || existing?.status === 'ready') return;
+
+      const clip = (s: string, max: number) => {
+        const text = String(s ?? '').trim();
+        if (!text) return '';
+        return text.length > max ? `${text.slice(0, max).trimEnd()}…` : text;
+      };
+
+      const list = transcriptsRef.current ?? [];
+      let idx = list.findIndex((x) => transcriptMessageId(x) === messageId);
+      if (idx < 0) idx = list.findIndex((x) => x.session === target.session && x.turn === target.turn);
+      const end = idx >= 0 ? idx + 1 : list.length;
+      const start = Math.max(0, end - 3);
+      const slice = list.length > 0 ? list.slice(start, end) : [target];
+
+      const context = slice.map((t) => ({
+        turn: t.turn,
+        prompt: clip(cleanedPromptTextForTldr(t), 2200),
+        response: clip(cleanedAgentTextForTldr(t), 5200),
+      }));
+
+      setTldrByMessageId((prev) => ({ ...prev, [messageId]: { status: 'loading' } }));
+      try {
+        const data = await requestJson<{ ok: true; tldr: string }>(`/api/tldr/from-message`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            prompt: clip(cleanedPromptTextForTldr(target), 6000),
+            response: clip(cleanedAgentTextForTldr(target), 14_000),
+            context,
+          }),
+        });
+        const tldr = String((data as any)?.tldr ?? '').trim();
+        if (!tldr) throw new Error('Empty TLDR response.');
+        setTldrByMessageId((prev) => ({ ...prev, [messageId]: { status: 'ready', summary: tldr } }));
+      } catch (e: any) {
+        setTldrByMessageId((prev) => ({ ...prev, [messageId]: { status: 'error', error: e?.message ?? String(e) } }));
+      }
+    },
+    [cleanedAgentTextForTldr, cleanedPromptTextForTldr, transcriptMessageId],
+  );
+
+  const toggleTldrForAgentMessage = React.useCallback(
+    (target: TranscriptItem) => {
+      const messageId = transcriptMessageId(target);
+      const cur = Boolean(showTldrByMessageIdRef.current?.[messageId]);
+      const next = !cur;
+      setShowTldrByMessageId((prev) => ({ ...prev, [messageId]: next }));
+      if (next) void requestTldrForAgentMessage(target);
+    },
+    [requestTldrForAgentMessage, transcriptMessageId],
+  );
+
+  const handleAgentMessageHover = React.useCallback(
+    (t: TranscriptItem | null) => {
+      setHoveredAgentMessageId(t ? transcriptMessageId(t) : null);
+    },
+    [transcriptMessageId],
+  );
+
+  const toggleTldrFromShortcut = React.useCallback(() => {
+    if (chatUiModeRef.current !== 'transcript') return;
+    const list = transcriptsRef.current ?? [];
+    if (list.length === 0) return;
+    const hoveredId = hoveredAgentMessageIdRef.current;
+    const target = hoveredId ? list.find((t) => transcriptMessageId(t) === hoveredId) ?? null : null;
+    const chosen = target ?? list[list.length - 1];
+    toggleTldrForAgentMessage(chosen);
+  }, [toggleTldrForAgentMessage, transcriptMessageId]);
 
   const parseJobsFromAgentMessage = React.useCallback(async (opts: { turn: number; message: string }) => {
     const message = String(opts.message ?? '').trim();
@@ -1687,6 +1883,10 @@ export default function DroneHubApp() {
   const [deletingDrones, setDeletingDrones] = React.useState<Record<string, boolean>>({});
   const [renamingDrones, setRenamingDrones] = React.useState<Record<string, boolean>>({});
   const [deletingGroups, setDeletingGroups] = React.useState<Record<string, boolean>>({});
+  const [renamingGroups, setRenamingGroups] = React.useState<Record<string, boolean>>({});
+  const [createGroupDraft, setCreateGroupDraft] = React.useState('');
+  const [createGroupError, setCreateGroupError] = React.useState<string | null>(null);
+  const [creatingGroup, setCreatingGroup] = React.useState(false);
   const [deletingRepos, setDeletingRepos] = React.useState<Record<string, boolean>>({});
   const [openingTerminal, setOpeningTerminal] = React.useState<{ mode: 'ssh' | 'agent' } | null>(null);
   const [openingEditor, setOpeningEditor] = React.useState<{ editor: 'code' | 'cursor' } | null>(null);
@@ -1809,7 +2009,7 @@ export default function DroneHubApp() {
     setDraftNameSuggestionError(null);
     setDraftNameSuggesting(false);
     draftNameSuggestSeqRef.current = 0;
-    setDraftChat({ prompt: null });
+    setDraftChat({ droneName: '', prompt: null });
     setSelectedDrone(null);
     setSelectedDroneNames([]);
     selectionAnchorRef.current = null;
@@ -1912,6 +2112,11 @@ export default function DroneHubApp() {
 
       // Letter shortcuts only apply for plain key presses.
       if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+      if (key === 'w') {
+        e.preventDefault();
+        toggleTldrFromShortcut();
+        return;
+      }
       if (key === 'a') {
         e.preventDefault();
         openDraftChatComposer();
@@ -1924,7 +2129,7 @@ export default function DroneHubApp() {
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [openCreateModal, openDraftChatComposer]);
+  }, [openCreateModal, openDraftChatComposer, toggleTldrFromShortcut]);
 
   React.useEffect(() => {
     if (!createOpen) {
@@ -2285,6 +2490,86 @@ export default function DroneHubApp() {
     } catch (e: any) {
       console.error('[DroneHub] draft auto-rename skipped', { name: currentName, error: e?.message ?? String(e) });
       showNameSuggestionFailureToast(e);
+    }
+  }
+
+  async function createGroupFromDraft(): Promise<void> {
+    const name = String(createGroupDraft ?? '').trim();
+    if (creatingGroup) return;
+    if (!name) {
+      setCreateGroupError('Group name is required.');
+      return;
+    }
+    if (isUngroupedGroupName(name)) {
+      setCreateGroupError('"Ungrouped" is reserved.');
+      return;
+    }
+    setCreatingGroup(true);
+    setCreateGroupError(null);
+    try {
+      await requestJson<{ ok: true; name: string }>('/api/groups', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      setCreateGroupDraft('');
+    } catch (e: any) {
+      const msg = String(e?.message ?? e ?? '').trim();
+      setCreateGroupError(msg || 'Failed to create group.');
+    } finally {
+      setCreatingGroup(false);
+    }
+  }
+
+  async function renameGroup(groupRaw: string): Promise<void> {
+    const group = String(groupRaw ?? '').trim();
+    if (!group) return;
+    if (isUngroupedGroupName(group)) return;
+    if (renamingGroups[group]) return;
+
+    const next = window.prompt(`Rename group "${group}" to:`, group);
+    const newName = String(next ?? '').trim();
+    if (!newName) return;
+    if (newName === group) return;
+    if (isUngroupedGroupName(newName)) {
+      window.alert('"Ungrouped" is reserved.');
+      return;
+    }
+
+    setRenamingGroups((prev) => ({ ...prev, [group]: true }));
+    try {
+      await requestJson<{ ok: true; oldName: string; newName: string; renamed: boolean }>(`/api/groups/${encodeURIComponent(group)}/rename`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ newName }),
+      });
+
+      // Keep per-group UI state aligned after rename.
+      setCollapsedGroups((prev) => {
+        if (!(group in prev)) return prev;
+        const next = { ...prev };
+        const wasCollapsed = Boolean(next[group]);
+        delete next[group];
+        next[newName] = wasCollapsed;
+        return next;
+      });
+      setDeletingGroups((prev) => {
+        if (!(group in prev)) return prev;
+        const next = { ...prev };
+        delete next[group];
+        return next;
+      });
+    } catch (e: any) {
+      const msg = String(e?.message ?? e ?? '').trim();
+      console.error('[DroneHub] rename group failed', { group, newName, error: e });
+      window.alert(msg || 'Rename failed.');
+    } finally {
+      setRenamingGroups((prev) => {
+        if (!prev[group]) return prev;
+        const next = { ...prev };
+        delete next[group];
+        return next;
+      });
     }
   }
 
@@ -2763,10 +3048,16 @@ export default function DroneHubApp() {
   }
 
   async function startDraftPrompt(payload: ChatSendPayload): Promise<boolean> {
+    const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
+    if (attachments.length > 0) {
+      setDraftCreateError('Image attachments are only supported after the drone is created.');
+      return false;
+    }
     const prompt = String(payload?.prompt ?? '').trim();
     if (!prompt) return false;
     const tempName = uniqueDraftDroneName('untitled');
     setDraftChat({
+      droneName: tempName,
       prompt: {
         id: `draft-${makeId()}`,
         at: new Date().toISOString(),
@@ -2782,16 +3073,11 @@ export default function DroneHubApp() {
     setDraftNameSuggestionError(null);
     setDraftAutoRenaming(false);
     setDraftCreateOpen(false);
-    // Attachments require an existing container to write files into; disable for draft create.
-    if (Array.isArray(payload?.attachments) && payload.attachments.length > 0) {
-      setDraftChat({ prompt: null });
-      setDraftCreateError('Image attachments are only supported after the drone is created.');
-      return false;
-    }
 
     const ok = await createDroneFromDraft({ prompt, name: tempName, group: '', autoRename: true });
     if (!ok) {
-      setDraftChat({ prompt: null });
+      clearQueuedPromptsForDrone(tempName);
+      setDraftChat({ droneName: '', prompt: null });
       setDraftCreateName('');
       setDraftCreateGroup('');
       return false;
@@ -2805,6 +3091,7 @@ export default function DroneHubApp() {
     const nameRaw = String(opts?.name ?? draftCreateName ?? '');
     const name = nameRaw.trim();
     const group = String(opts?.group ?? draftCreateGroup ?? '').trim();
+    const repoPath = String(chatHeaderRepoPath ?? '').trim();
     if (!prompt) {
       setDraftCreateError('Send a first message before creating a drone.');
       return false;
@@ -2830,46 +3117,47 @@ export default function DroneHubApp() {
     selectionAnchorRef.current = name;
     setSelectedChat('default');
     try {
-      const resp = await queueDrones([
-        {
-          name,
-          ...(group ? { group } : {}),
-          seedChat: 'default',
-          ...(seedAgent ? { seedAgent } : {}),
-          ...(seedModel ? { seedModel } : {}),
-          ...(prompt ? { seedPrompt: prompt } : {}),
-        },
-      ]);
-      const accepted = new Set((resp?.accepted ?? []).map((x) => String(x?.name ?? '').trim()).filter(Boolean));
-      const rejected = Array.isArray(resp?.rejected) ? resp.rejected : [];
-      if (!accepted.has(name)) {
-        const err = String(rejected.find((x: any) => String(x?.name ?? '').trim() === name)?.error ?? 'Failed to queue drone.');
-        setStartupSeedByDrone((prev) => {
-          if (!prev[name]) return prev;
-          const next = { ...prev };
-          delete next[name];
-          return next;
-        });
-        if (preferredSelectedDroneRef.current === name) {
-          preferredSelectedDroneRef.current = null;
-          preferredSelectedDroneHoldUntilRef.current = 0;
-        }
-        setSelectedDrone((prev) => (prev === name ? null : prev));
-        setSelectedDroneNames((prev) => prev.filter((n) => n !== name));
-        setDraftCreateError(err);
-        return false;
+      const data = await requestJson<{
+        ok: true;
+        accepted: true;
+        name: string;
+        chat: string;
+        promptId: string;
+        created?: boolean;
+        phase?: string;
+      }>(`/api/drones/${encodeURIComponent(name)}/chats/${encodeURIComponent('default')}/prompt`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          prompt,
+          createIfMissing: true,
+          create: {
+            ...(group ? { group } : {}),
+            ...(repoPath ? { repoPath } : {}),
+          },
+          seedAgent: seedAgent ?? undefined,
+          seedModel: seedModel ?? undefined,
+        }),
+      });
+      const promptId = String((data as any)?.promptId ?? '').trim();
+      if (!promptId) {
+        throw new Error('missing promptId');
       }
 
+      // Keep the draft row id aligned with the server/daemon prompt id for better debuggability.
       setDraftChat((prev) => {
         if (!prev?.prompt) return prev;
         return {
+          droneName: prev.droneName,
           prompt: {
             ...prev.prompt,
+            id: promptId,
             state: 'sent',
             updatedAt: new Date().toISOString(),
           },
         };
       });
+
       if (opts?.autoRename) {
         setDraftAutoRenaming(true);
         void suggestAndRenameDraftDrone(name, prompt).finally(() => setDraftAutoRenaming(false));
@@ -2882,6 +3170,8 @@ export default function DroneHubApp() {
       setDraftNameSuggesting(false);
       return true;
     } catch (e: any) {
+      const err = e?.message ?? String(e);
+      clearQueuedPromptsForDrone(name);
       setStartupSeedByDrone((prev) => {
         if (!prev[name]) return prev;
         const next = { ...prev };
@@ -2894,7 +3184,7 @@ export default function DroneHubApp() {
       }
       setSelectedDrone((prev) => (prev === name ? null : prev));
       setSelectedDroneNames((prev) => prev.filter((n) => n !== name));
-      setDraftCreateError(e?.message ?? String(e));
+      setDraftCreateError(err);
       return false;
     } finally {
       setDraftCreating(false);
@@ -3086,15 +3376,85 @@ export default function DroneHubApp() {
     setOptimisticPendingPrompts([]);
   }, [selectedDrone, selectedChat]);
 
+  function enqueueQueuedPrompt(droneNameRaw: string, chatNameRaw: string, promptRaw: string): PendingPrompt | null {
+    const droneName = String(droneNameRaw ?? '').trim();
+    const chatName = String(chatNameRaw ?? '').trim() || 'default';
+    const prompt = String(promptRaw ?? '').trim();
+    if (!droneName || !prompt) return null;
+    const item: PendingPrompt = {
+      id: `queued-${makeId()}`,
+      at: new Date().toISOString(),
+      prompt,
+      state: 'queued',
+    };
+    const key = droneChatQueueKey(droneName, chatName);
+    setQueuedPromptsByDroneChat((prev) => {
+      const cur = prev[key] ?? [];
+      return { ...prev, [key]: [...cur, item] };
+    });
+    return item;
+  }
+
+  function patchQueuedPrompt(key: string, id: string, patch: Partial<PendingPrompt>) {
+    setQueuedPromptsByDroneChat((prev) => {
+      const cur = prev[key];
+      if (!cur || cur.length === 0) return prev;
+      const idx = cur.findIndex((p) => p.id === id);
+      if (idx < 0) return prev;
+      const nextArr = cur.slice();
+      nextArr[idx] = { ...nextArr[idx], ...patch, updatedAt: new Date().toISOString() };
+      return { ...prev, [key]: nextArr };
+    });
+  }
+
+  function removeQueuedPrompt(key: string, id: string) {
+    setQueuedPromptsByDroneChat((prev) => {
+      const cur = prev[key];
+      if (!cur || cur.length === 0) return prev;
+      const nextArr = cur.filter((p) => p.id !== id);
+      if (nextArr.length === cur.length) return prev;
+      if (nextArr.length === 0) {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      }
+      return { ...prev, [key]: nextArr };
+    });
+  }
+
+  function clearQueuedPromptsForDrone(droneNameRaw: string) {
+    const droneName = String(droneNameRaw ?? '').trim();
+    if (!droneName) return;
+    setQueuedPromptsByDroneChat((prev) => {
+      let changed = false;
+      const next: Record<string, PendingPrompt[]> = {};
+      for (const [k, v] of Object.entries(prev)) {
+        const parsed = parseDroneChatQueueKey(k);
+        if (parsed && parsed.droneName === droneName) {
+          changed = true;
+          continue;
+        }
+        next[k] = v;
+      }
+      return changed ? next : prev;
+    });
+  }
+
   async function sendPromptText(payload: ChatSendPayload): Promise<boolean> {
     if (!currentDrone) return false;
-    if (currentDrone.hubPhase === 'starting' || currentDrone.hubPhase === 'seeding') {
-      setPromptError(`"${currentDrone.name}" is still provisioning. Try again in a moment.`);
-      return false;
-    }
     const prompt = String(payload?.prompt ?? '').trim();
     const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
     if (!prompt && attachments.length === 0) return false;
+    const optimisticPrompt = prompt || (attachments.length === 1 ? '[image attachment]' : `[${attachments.length} image attachments]`);
+    if (currentDrone.hubPhase === 'starting' || currentDrone.hubPhase === 'seeding') {
+      if (attachments.length > 0) {
+        setPromptError(`"${currentDrone.name}" is still provisioning. Image attachments can be sent once it is ready.`);
+        return false;
+      }
+      enqueueQueuedPrompt(currentDrone.name, selectedChat || 'default', prompt);
+      setPromptError(null);
+      return true;
+    }
     setSendingPromptCount((c) => c + 1);
     setPromptError(null);
     try {
@@ -3111,7 +3471,7 @@ export default function DroneHubApp() {
       if (chatUiMode === 'transcript' && id) {
         setOptimisticPendingPrompts((prev) => {
           if (prev.some((p) => p.id === id)) return prev;
-          return [...prev, { id, at: new Date().toISOString(), prompt, state: 'sending' }];
+          return [...prev, { id, at: new Date().toISOString(), prompt: optimisticPrompt, state: 'sending' }];
         });
       }
       return true;
@@ -3152,6 +3512,70 @@ export default function DroneHubApp() {
       : null;
   const chatUiMode = chatUiModeForAgent(chatInfo?.agent ?? startupAgentForSelectedDrone ?? null);
   const nowMs = useNowMs(1000, chatUiMode === 'transcript');
+
+  React.useEffect(() => {
+    chatUiModeRef.current = chatUiMode;
+  }, [chatUiMode]);
+
+  React.useEffect(() => {
+    const keys = Object.keys(queuedPromptsByDroneChat);
+    if (keys.length === 0) return;
+
+    for (const key of keys) {
+      const parsed = parseDroneChatQueueKey(key);
+      if (!parsed) continue;
+      const drone = drones.find((d) => d.name === parsed.droneName) ?? null;
+      if (!drone) continue;
+      if (drone.hubPhase === 'starting' || drone.hubPhase === 'seeding' || drone.hubPhase === 'error') continue;
+      if (flushingQueuedKeysRef.current.has(key)) continue;
+      flushingQueuedKeysRef.current.add(key);
+
+      void (async () => {
+        while (true) {
+          const latest = queuedPromptsByDroneChatRef.current[key] ?? [];
+          const head = latest[0] ?? null;
+          if (!head) return;
+          // Preserve strict FIFO ordering: if the head failed (or is mid-send), don't send later items.
+          if (head.state !== 'queued') return;
+
+          patchQueuedPrompt(key, head.id, { state: 'sending', error: undefined });
+          try {
+            const data = await requestJson<{ ok: true; accepted: true; promptId: string }>(
+              `/api/drones/${encodeURIComponent(parsed.droneName)}/chats/${encodeURIComponent(parsed.chatName)}/prompt`,
+              {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ prompt: head.prompt }),
+              },
+            );
+
+            const id = String((data as any)?.promptId ?? '').trim();
+            removeQueuedPrompt(key, head.id);
+
+            // If the flushed prompt is for the currently visible chat, mirror the optimistic UX.
+            const selectedKeyMatches =
+              parsed.droneName === String(selectedDrone ?? '').trim() &&
+              parsed.chatName === (String(selectedChat ?? '').trim() || 'default');
+            if (selectedKeyMatches) {
+              if (chatUiMode === 'cli') bumpCliTyping();
+              if (chatUiMode === 'transcript' && id) {
+                setOptimisticPendingPrompts((prev) => {
+                  if (prev.some((p) => p.id === id)) return prev;
+                  return [...prev, { id, at: new Date().toISOString(), prompt: head.prompt, state: 'sending' }];
+                });
+              }
+            }
+          } catch (e: any) {
+            const errText = e?.message ?? String(e);
+            patchQueuedPrompt(key, head.id, { state: 'failed', error: errText });
+            return;
+          }
+        }
+      })().finally(() => {
+        flushingQueuedKeysRef.current.delete(key);
+      });
+    }
+  }, [chatUiMode, drones, queuedPromptsByDroneChat, selectedChat, selectedDrone]);
 
   const { value: pendingResp } = usePoll<{ ok: true; pending: PendingPrompt[] }>(
     async () => {
@@ -3207,20 +3631,33 @@ export default function DroneHubApp() {
     };
   }, [chatUiMode, selectedDroneSummary, startupSeedByDrone]);
 
+  const localQueuedPromptsForSelected = React.useMemo((): PendingPrompt[] => {
+    if (!selectedDrone) return [];
+    const key = droneChatQueueKey(selectedDrone, selectedChat || 'default');
+    return queuedPromptsByDroneChat[key] ?? [];
+  }, [queuedPromptsByDroneChat, selectedChat, selectedDrone]);
+
   const visiblePendingPromptsWithStartup = React.useMemo(() => {
-    if (!startupPendingPrompt) return visiblePendingPrompts;
-    const startupPrompt = String(startupPendingPrompt.prompt ?? '').trim();
-    if (
-      visiblePendingPrompts.some((p) => {
-        if (p.id === startupPendingPrompt.id) return true;
-        const prompt = String(p?.prompt ?? '').trim();
-        return Boolean(startupPrompt) && Boolean(prompt) && prompt === startupPrompt;
-      })
-    ) {
-      return visiblePendingPrompts;
-    }
-    return [startupPendingPrompt, ...visiblePendingPrompts];
-  }, [startupPendingPrompt, visiblePendingPrompts]);
+    const base = (() => {
+      if (!startupPendingPrompt) return visiblePendingPrompts;
+      const startupPrompt = String(startupPendingPrompt.prompt ?? '').trim();
+      if (
+        visiblePendingPrompts.some((p) => {
+          if (p.id === startupPendingPrompt.id) return true;
+          const prompt = String(p?.prompt ?? '').trim();
+          return Boolean(startupPrompt) && Boolean(prompt) && prompt === startupPrompt;
+        })
+      ) {
+        return visiblePendingPrompts;
+      }
+      return [startupPendingPrompt, ...visiblePendingPrompts];
+    })();
+
+    if (chatUiMode !== 'transcript' || localQueuedPromptsForSelected.length === 0) return base;
+    const ids = new Set(base.map((p) => p.id));
+    const extra = localQueuedPromptsForSelected.filter((p) => !ids.has(p.id));
+    return extra.length > 0 ? [...base, ...extra] : base;
+  }, [chatUiMode, localQueuedPromptsForSelected, startupPendingPrompt, visiblePendingPrompts]);
 
   const selectedIsResponding = React.useMemo(() => {
     if (selectedDrone) {
@@ -3577,6 +4014,8 @@ export default function DroneHubApp() {
   }, [sessionText]);
 
   const currentDrone = selectedDrone ? drones.find((d) => d.name === selectedDrone) ?? null : null;
+  const currentDroneRepoAttached = Boolean(currentDrone?.repoAttached ?? Boolean(String(currentDrone?.repoPath ?? '').trim()));
+  const currentDroneRepoPath = String(currentDrone?.repoPath ?? '').trim();
   React.useEffect(() => {
     const pending = draftChat?.prompt ?? null;
     const prompt = String(pending?.prompt ?? '').trim();
@@ -3639,7 +4078,25 @@ export default function DroneHubApp() {
     fsPollIntervalMs,
     [currentDrone?.name, currentFsPath, fsRefreshNonce],
   );
+  const fsPayloadError =
+    fsResp && (fsResp as any).ok === false ? String((fsResp as any)?.error ?? 'filesystem request failed') : null;
+  const fsErrorCombined = fsError ?? fsPayloadError;
   const fsEntries = fsResp && (fsResp as any).ok === true ? (((fsResp as any).entries as DroneFsEntry[]) ?? []) : [];
+
+  const filesPane = usePaneReadiness({
+    hubPhase: currentDrone?.hubPhase,
+    resetKey: `${currentDrone?.name ?? ''}\u0000files`,
+    timeoutMs: 18_000,
+  });
+  const fsOkForCurrentDrone = Boolean(
+    currentDrone &&
+      (fsResp as any)?.ok === true &&
+      String((fsResp as any)?.name ?? '').trim() === String(currentDrone.name ?? '').trim(),
+  );
+  React.useEffect(() => {
+    if (fsOkForCurrentDrone) filesPane.markReady();
+  }, [fsOkForCurrentDrone, filesPane.markReady]);
+  const fsErrorUi = filesPane.suppressErrors ? null : fsErrorCombined;
 
   const portsPollIntervalMs = currentDrone ? 5000 : 60000;
   const {
@@ -3655,6 +4112,24 @@ export default function DroneHubApp() {
     [currentDrone?.name],
   );
   const ports = portsResp && (portsResp as any).ok === true ? ((portsResp as any).ports as DronePortMapping[]) : null;
+  const portsPayloadError =
+    portsResp && (portsResp as any).ok === false ? String((portsResp as any)?.error ?? 'ports request failed') : null;
+  const portsErrorCombined = portsError ?? portsPayloadError;
+
+  const portsPane = usePaneReadiness({
+    hubPhase: currentDrone?.hubPhase,
+    resetKey: `${currentDrone?.name ?? ''}\u0000ports`,
+    timeoutMs: 18_000,
+  });
+  const portsOkForCurrentDrone = Boolean(
+    currentDrone &&
+      (portsResp as any)?.ok === true &&
+      String((portsResp as any)?.name ?? '').trim() === String(currentDrone.name ?? '').trim(),
+  );
+  React.useEffect(() => {
+    if (portsOkForCurrentDrone) portsPane.markReady();
+  }, [portsOkForCurrentDrone, portsPane.markReady]);
+  const portsErrorUi = portsPane.suppressErrors ? null : portsErrorCombined;
   const portRows = React.useMemo(
     () =>
       normalizePortRows(
@@ -4052,6 +4527,7 @@ export default function DroneHubApp() {
   ): React.ReactNode {
     const disabled = drone.hubPhase === 'starting' || drone.hubPhase === 'seeding';
     const chatName = selectedChat || 'default';
+    const isCurrent = Boolean(currentDrone && String(currentDrone.name) === String(drone.name));
     const contentByTab: Record<RightPanelTab, React.ReactNode> = {
       terminal: (
         <DroneTerminalDock
@@ -4060,6 +4536,8 @@ export default function DroneHubApp() {
           chatName={chatName}
           defaultCwd={defaultFsPathForCurrentDrone}
           disabled={disabled}
+          hubPhase={drone.hubPhase}
+          hubMessage={drone.hubMessage}
         />
       ),
       files: (
@@ -4070,7 +4548,17 @@ export default function DroneHubApp() {
           homePath={defaultFsPathForCurrentDrone}
           entries={fsEntries}
           loading={fsLoading}
-          error={fsError}
+          error={isCurrent ? fsErrorUi : fsError}
+          startup={
+            isCurrent
+              ? {
+                  waiting: filesPane.waiting,
+                  timedOut: filesPane.timedOut,
+                  hubPhase: drone.hubPhase,
+                  hubMessage: drone.hubMessage,
+                }
+              : null
+          }
           viewMode={fsExplorerView}
           onSetViewMode={setFsExplorerView}
           onOpenPath={setCurrentFsPath}
@@ -4083,7 +4571,17 @@ export default function DroneHubApp() {
           selectedPort={selectedPreviewPort}
           portReachabilityByHostPort={currentPortReachability}
           portsLoading={portsLoading}
-          portsError={portsError}
+          portsError={isCurrent ? portsErrorUi : portsError}
+          startup={
+            isCurrent
+              ? {
+                  waiting: portsPane.waiting,
+                  timedOut: portsPane.timedOut,
+                  hubPhase: drone.hubPhase,
+                  hubMessage: drone.hubMessage,
+                }
+              : null
+          }
           defaultPreviewUrl={selectedPreviewDefaultUrl}
           previewUrlOverride={selectedPreviewUrlOverride}
           onSetPreviewUrlOverride={setSelectedPreviewUrlOverride}
@@ -4100,7 +4598,7 @@ export default function DroneHubApp() {
           portReachabilityByHostPort={currentPortReachability}
           onSelectPort={setSelectedPreviewPort}
           portsLoading={portsLoading}
-          portsError={portsError}
+          portsError={isCurrent ? portsErrorUi : portsError}
         />
       ),
       changes: (
@@ -4110,6 +4608,8 @@ export default function DroneHubApp() {
           repoAttached={drone.repoAttached ?? Boolean(String(drone.repoPath ?? '').trim())}
           repoPath={drone.repoPath}
           disabled={disabled}
+          hubPhase={drone.hubPhase}
+          hubMessage={drone.hubMessage}
         />
       ),
     };
@@ -4219,8 +4719,38 @@ export default function DroneHubApp() {
               >
                 No drones registered
               </div>
-              <div className="text-[var(--muted-dim)] text-[10px] mt-2">
-                Run <code className="px-1.5 py-0.5 rounded bg-[rgba(167,139,250,.06)] border border-[rgba(167,139,250,.08)] text-[#C4B5FD] text-[10px]">drone create &lt;name&gt;</code> to create one
+              <div className="mt-4 mx-auto max-w-[240px] flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={openDraftChatComposer}
+                  className="w-full inline-flex items-center gap-2 h-[30px] px-3 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[11px] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] transition-all"
+                  title="Create new drone (A)"
+                  aria-label="Create new drone"
+                >
+                  <IconPlus className="opacity-80" />
+                  <span className="font-semibold tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+                    Create new drone
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={openCreateModal}
+                  className="w-full inline-flex items-center gap-2 h-[30px] px-3 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[11px] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] transition-all"
+                  title="Create multiple drones (S)"
+                  aria-label="Create multiple drones"
+                >
+                  <IconPlusDouble className="opacity-80" />
+                  <span className="font-semibold tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+                    Create multiple drones
+                  </span>
+                </button>
+              </div>
+              <div className="text-[var(--muted-dim)] text-[10px] mt-4">
+                Or run{' '}
+                <code className="px-1.5 py-0.5 rounded bg-[rgba(167,139,250,.06)] border border-[rgba(167,139,250,.08)] text-[#C4B5FD] text-[10px]">
+                  drone create &lt;name&gt;
+                </code>{' '}
+                in your terminal.
               </div>
             </div>
           )}
@@ -4275,10 +4805,46 @@ export default function DroneHubApp() {
                 onDragLeave={onUngroupedDragLeave}
                 onDrop={onUngroupedDrop}
               >
+                <div className="px-1">
+                  <form
+                    className="flex items-center gap-1.5"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void createGroupFromDraft();
+                    }}
+                  >
+                    <input
+                      value={createGroupDraft}
+                      onChange={(e) => {
+                        setCreateGroupDraft(e.target.value);
+                        if (createGroupError) setCreateGroupError(null);
+                      }}
+                      placeholder="New group"
+                      className="flex-1 min-w-0 px-2 py-1.5 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.18)] text-[11px] text-[var(--fg-secondary)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-muted)]"
+                    />
+                    <button
+                      type="submit"
+                      disabled={creatingGroup}
+                      aria-busy={creatingGroup}
+                      className={`inline-flex items-center justify-center w-8 h-8 rounded border transition-all ${
+                        creatingGroup
+                          ? 'opacity-60 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
+                          : 'bg-[rgba(167,139,250,.08)] border-[rgba(167,139,250,.18)] text-[var(--accent)] hover:bg-[rgba(167,139,250,.12)]'
+                      }`}
+                      title="Create group"
+                      aria-label="Create group"
+                    >
+                      {creatingGroup ? <IconSpinner className="opacity-90" /> : <IconPlus className="opacity-90" />}
+                    </button>
+                  </form>
+                  {createGroupError && <div className="px-0.5 pt-1 text-[10px] text-[var(--red)]">{createGroupError}</div>}
+                </div>
                 {sidebarGroups.map(({ group, items }) => {
                   const collapsed = !!collapsedGroups[group];
                   const isDeletingGroup = Boolean(deletingGroups[group]);
+                  const isRenamingGroup = Boolean(renamingGroups[group]);
                   const isDropTarget = dragOverGroup === group;
+                  const canRenameGroup = !isUngroupedGroupName(group);
                   return (
                     <div
                       key={group}
@@ -4313,23 +4879,41 @@ export default function DroneHubApp() {
                             {group}
                           </span>
                         </button>
-                        <div className="flex items-center justify-end flex-shrink-0 min-w-[116px]">
+                        <div className="flex items-center justify-end flex-shrink-0 min-w-[148px]">
                           <div className="relative w-full flex justify-end">
                             <div
                               className={`flex items-center gap-2 text-[10px] font-mono text-[var(--muted-dim)] transition-opacity duration-150 ${
-                                isDeletingGroup ? 'opacity-0 pointer-events-none' : 'group-hover/group-header:opacity-0 group-hover/group-header:pointer-events-none'
+                                isDeletingGroup || isRenamingGroup
+                                  ? 'opacity-0 pointer-events-none'
+                                  : 'group-hover/group-header:opacity-0 group-hover/group-header:pointer-events-none'
                               }`}
                             >
                               <span>
                                 {items.length} drone{items.length !== 1 ? 's' : ''}
                               </span>
                             </div>
+                            {canRenameGroup && (
+                              <button
+                                onClick={() => void renameGroup(group)}
+                                disabled={isDeletingGroup || isRenamingGroup}
+                                aria-busy={isRenamingGroup}
+                                className={`absolute right-8 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
+                                  isDeletingGroup || isRenamingGroup
+                                    ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
+                                    : 'opacity-0 pointer-events-none group-hover/group-header:opacity-100 group-hover/group-header:pointer-events-auto bg-[rgba(167,139,250,.08)] border-[rgba(167,139,250,.18)] text-[var(--accent)] hover:bg-[rgba(167,139,250,.12)]'
+                                }`}
+                                title={isRenamingGroup ? `Renaming group "${group}"…` : `Rename group "${group}"`}
+                                aria-label={isRenamingGroup ? `Renaming group "${group}"` : `Rename group "${group}"`}
+                              >
+                                {isRenamingGroup ? <IconSpinner className="opacity-90" /> : <IconPencil className="opacity-90" />}
+                              </button>
+                            )}
                             <button
                               onClick={() => deleteGroup(group, items.length)}
-                              disabled={isDeletingGroup}
+                              disabled={isDeletingGroup || isRenamingGroup}
                               aria-busy={isDeletingGroup}
                               className={`absolute right-0 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
-                                isDeletingGroup
+                                isDeletingGroup || isRenamingGroup
                                   ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
                                   : 'opacity-0 pointer-events-none group-hover/group-header:opacity-100 group-hover/group-header:pointer-events-auto bg-[var(--red-subtle)] border-[rgba(255,90,90,.2)] text-[var(--red)] hover:bg-[rgba(255,90,90,.15)]'
                               }`}
@@ -5903,7 +6487,7 @@ export default function DroneHubApp() {
                         </div>
                         <div className="text-[10px] text-[var(--muted)] mt-0.5">
                           {draftChat.prompt
-                            ? 'Creating your drone and sending the first message.'
+                            ? 'Creating your drone. Any new messages you send will queue and auto-send when it’s ready.'
                             : 'Send your first message to create a new drone instantly.'}
                         </div>
                       </div>
@@ -5912,6 +6496,7 @@ export default function DroneHubApp() {
                       <button
                         type="button"
                         onClick={() => {
+                          if (draftChat?.droneName) clearQueuedPromptsForDrone(draftChat.droneName);
                           setDraftChat(null);
                           setDraftCreateOpen(false);
                           setDraftCreateError(null);
@@ -5991,6 +6576,25 @@ export default function DroneHubApp() {
                         </button>
                       </div>
                     )}
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+                        Repo
+                      </span>
+                      <UiMenuSelect
+                        variant="toolbar"
+                        value={chatHeaderRepoPath}
+                        onValueChange={setChatHeaderRepoPath}
+                        entries={createRepoMenuEntries}
+                        disabled={draftCreating || draftAutoRenaming || Boolean(draftChat.prompt)}
+                        triggerClassName="min-w-[220px] max-w-[420px]"
+                        panelClassName="w-[720px] max-w-[calc(100vw-3rem)]"
+                        menuClassName="max-h-[240px] overflow-y-auto"
+                        title={chatHeaderRepoPath || 'No repo'}
+                        triggerLabel={chatHeaderRepoPath || 'No repo'}
+                        triggerLabelClassName={chatHeaderRepoPath ? 'font-mono text-[11px]' : undefined}
+                        chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -5999,6 +6603,9 @@ export default function DroneHubApp() {
                   <div className="px-5 py-5">
                     <div className="mx-auto max-w-[980px] space-y-5">
                       <PendingTranscriptTurn item={draftChat.prompt} nowMs={nowMs} />
+                      {(queuedPromptsByDroneChat[droneChatQueueKey(draftChat.droneName, 'default')] ?? []).map((p) => (
+                        <PendingTranscriptTurn key={`draft-queued-${p.id}`} item={p} nowMs={nowMs} />
+                      ))}
                     </div>
                   </div>
                 ) : (
@@ -6015,23 +6622,67 @@ export default function DroneHubApp() {
                 promptError={draftCreateError}
                 sending={draftCreating || draftAutoRenaming}
                 waiting={Boolean(draftChat.prompt)}
-                disabled={draftCreating || draftAutoRenaming || Boolean(draftChat.prompt)}
                 autoFocus={!draftCreating && !draftAutoRenaming && !draftChat.prompt}
                 attachmentsEnabled={false}
-                modeHint={
-                  spawnAgentConfig.kind === 'builtin'
-                    ? `${spawnAgentLabel} · ${spawnModelForSeed ?? 'default model'} · create on send`
-                    : `${spawnAgentLabel} · custom agent · create on send`
-                }
-                onSend={startDraftPrompt}
+                onSend={async (payload) => {
+                  if (!draftChat.prompt) return await startDraftPrompt(payload);
+                  const name = String(draftChat.droneName ?? '').trim();
+                  if (!name) return false;
+                  const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
+                  if (attachments.length > 0) {
+                    setDraftCreateError('Image attachments are only supported after the drone is created.');
+                    return false;
+                  }
+                  const prompt = String(payload?.prompt ?? '').trim();
+                  if (!prompt) return false;
+                  enqueueQueuedPrompt(name, 'default', prompt);
+                  setDraftCreateError(null);
+                  return true;
+                }}
               />
             </div>
           ) : !currentDrone ? (
-            <EmptyState
-              icon={<IconDrone className="w-8 h-8 text-[var(--muted-dim)]" />}
-              title="Select a drone"
-              description="Choose a drone from the sidebar to view its session output."
-            />
+            !dronesLoading && sidebarDrones.length === 0 && !dronesError ? (
+              <EmptyState
+                icon={<IconDrone className="w-8 h-8 text-[var(--muted-dim)]" />}
+                title="No drones yet"
+                description="Create your first drone to get started."
+                actions={
+                  <div className="flex flex-col gap-2">
+                    <button
+                      type="button"
+                      onClick={openDraftChatComposer}
+                      className="w-full inline-flex items-center gap-2 h-[32px] px-3 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[11px] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] transition-all"
+                      title="Create new drone (A)"
+                      aria-label="Create new drone"
+                    >
+                      <IconPlus className="opacity-80" />
+                      <span className="font-semibold tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+                        Create new drone
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={openCreateModal}
+                      className="w-full inline-flex items-center gap-2 h-[32px] px-3 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[11px] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] transition-all"
+                      title="Create multiple drones (S)"
+                      aria-label="Create multiple drones"
+                    >
+                      <IconPlusDouble className="opacity-80" />
+                      <span className="font-semibold tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+                        Create multiple drones
+                      </span>
+                    </button>
+                  </div>
+                }
+              />
+            ) : (
+              <EmptyState
+                icon={<IconDrone className="w-8 h-8 text-[var(--muted-dim)]" />}
+                title="Select a drone"
+                description="Choose a drone from the sidebar to view its session output."
+              />
+            )
           ) : (
           <>
             {/* Header — spans full width (chat + right panel) */}
@@ -6129,7 +6780,7 @@ export default function DroneHubApp() {
               {/* Tier 2: Toolbar */}
               <div className="px-5 pb-2.5 flex items-center gap-2 flex-wrap">
                 {/* Agent selector */}
-                <div className="flex items-center gap-1.5">
+                <div data-onboarding-id="chat.toolbar.agent" className="flex items-center gap-1.5">
                   <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>Agent</span>
                   <UiMenuSelect
                     variant="toolbar"
@@ -6154,7 +6805,7 @@ export default function DroneHubApp() {
                   />
                 </div>
                 {modelControlEnabled && (
-                  <div className="flex items-center gap-1.5">
+                  <div data-onboarding-id="chat.toolbar.model" className="flex items-center gap-1.5">
                     <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>Model</span>
                     {availableChatModels.length > 0 ? (
                       <UiMenuSelect
@@ -6218,6 +6869,28 @@ export default function DroneHubApp() {
                         {chatModelsSource}
                       </span>
                     )}
+                  </div>
+                )}
+                {/* Repo (read-only for repo-attached drones only) */}
+                {currentDroneRepoAttached && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+                      Repo
+                    </span>
+                    <UiMenuSelect
+                      variant="toolbar"
+                      value={currentDroneRepoPath}
+                      onValueChange={() => {}}
+                      entries={createRepoMenuEntries}
+                      disabled={true}
+                      triggerClassName="min-w-[220px] max-w-[420px]"
+                      panelClassName="w-[720px] max-w-[calc(100vw-3rem)]"
+                      menuClassName="max-h-[240px] overflow-y-auto"
+                      title={currentDroneRepoPath || 'No repo'}
+                      triggerLabel={currentDroneRepoPath || 'No repo'}
+                      triggerLabelClassName={currentDroneRepoPath ? 'font-mono text-[11px]' : undefined}
+                      chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
+                    />
                   </div>
                 )}
                 {/* View mode */}
@@ -6373,6 +7046,7 @@ export default function DroneHubApp() {
                               key={tab}
                               type="button"
                               onClick={() => setRightPanelTab(tab)}
+                              data-onboarding-id={tab === 'changes' ? 'rightPanel.tab.changes' : undefined}
                               className={`px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase transition-all ${
                                 active
                                   ? 'bg-[var(--accent-subtle)] text-[var(--accent)] border border-[var(--accent-muted)]'
@@ -6408,6 +7082,7 @@ export default function DroneHubApp() {
                 <button
                   type="button"
                   onClick={() => setRightPanelOpen((v) => !v)}
+                  data-onboarding-id="rightPanel.toggle"
                   className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ml-1 ${
                     rightPanelOpen
                       ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
@@ -6432,15 +7107,23 @@ export default function DroneHubApp() {
                     <TranscriptSkeleton />
                   ) : (transcripts && transcripts.length > 0) || visiblePendingPromptsWithStartup.length > 0 ? (
                     <div className="max-w-[900px] mx-auto px-6 py-5 flex flex-col gap-6">
-                      {(transcripts ?? []).map((t) => (
-                        <TranscriptTurn
-                          key={`${t.turn}-${t.at}`}
-                          item={t}
-                          nowMs={nowMs}
-                          parsingJobs={Boolean(parsingJobsByTurn[t.turn])}
-                          onCreateJobs={parseJobsFromAgentMessage}
-                        />
-                      ))}
+                      {(transcripts ?? []).map((t) => {
+                        const messageId = transcriptMessageId(t);
+                        return (
+                          <TranscriptTurn
+                            key={`${t.turn}-${t.at}`}
+                            item={t}
+                            nowMs={nowMs}
+                            parsingJobs={Boolean(parsingJobsByTurn[t.turn])}
+                            onCreateJobs={parseJobsFromAgentMessage}
+                            messageId={messageId}
+                            tldr={tldrByMessageId[messageId] ?? null}
+                            showTldr={Boolean(showTldrByMessageId[messageId])}
+                            onToggleTldr={toggleTldrForAgentMessage}
+                            onHoverAgentMessage={handleAgentMessageHover}
+                          />
+                        );
+                      })}
                       {visiblePendingPromptsWithStartup.map((p) => (
                         <PendingTranscriptTurn key={`pending-${p.id}`} item={p} nowMs={nowMs} />
                       ))}
@@ -6518,12 +7201,6 @@ export default function DroneHubApp() {
               promptError={promptError}
               sending={sendingPrompt}
               waiting={chatUiMode === 'transcript' && visiblePendingPromptsWithStartup.some((p) => p.state !== 'failed')}
-              disabled={currentDrone.hubPhase === 'starting' || currentDrone.hubPhase === 'seeding'}
-              modeHint={
-                chatUiMode === 'transcript'
-                  ? `${effectiveChatInfo?.agent ? (effectiveChatInfo.agent.kind === 'builtin' ? effectiveChatInfo.agent.id : 'custom') : '…'} agent`
-                  : `tmux: ${effectiveChatInfo?.sessionName ?? '…'} · cli`
-              }
               onSend={async (payload) => {
                 try {
                   return await sendPromptText(payload);
@@ -6573,6 +7250,7 @@ export default function DroneHubApp() {
                                 key={`top-pane-${tab}`}
                                 type="button"
                                 onClick={() => setRightPanelTab(tab)}
+                                data-onboarding-id={tab === 'changes' ? 'rightPanel.tab.changes' : undefined}
                                 className={`px-1.5 py-0.5 rounded text-[9px] font-semibold tracking-wide uppercase whitespace-nowrap transition-all ${
                                   active
                                     ? 'bg-[var(--accent-subtle)] text-[var(--accent)] border border-[var(--accent-muted)]'
@@ -6605,6 +7283,7 @@ export default function DroneHubApp() {
                                 key={`bottom-pane-${tab}`}
                                 type="button"
                                 onClick={() => setRightPanelBottomTab(tab)}
+                                data-onboarding-id={tab === 'changes' ? 'rightPanel.tab.changes' : undefined}
                                 className={`px-1.5 py-0.5 rounded text-[9px] font-semibold tracking-wide uppercase whitespace-nowrap transition-all ${
                                   active
                                     ? 'bg-[var(--accent-subtle)] text-[var(--accent)] border border-[var(--accent-muted)]'
@@ -6634,6 +7313,7 @@ export default function DroneHubApp() {
           </>
         )}
       </div>
+      <GuidedOnboarding />
     </div>
   );
 }

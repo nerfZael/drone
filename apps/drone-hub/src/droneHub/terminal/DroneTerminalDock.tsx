@@ -4,6 +4,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { requestJson } from '../http';
+import { provisioningLabel, usePaneReadiness } from '../panes/usePaneReadiness';
 
 const TERMINAL_INITIAL_TAIL_LINES = 40;
 const TERMINAL_MAX_BYTES = 200_000;
@@ -55,11 +56,15 @@ export function DroneTerminalDock({
   chatName,
   defaultCwd,
   disabled,
+  hubPhase,
+  hubMessage,
 }: {
   droneName: string;
   chatName: string;
   defaultCwd: string;
   disabled: boolean;
+  hubPhase?: 'starting' | 'seeding' | 'error' | null;
+  hubMessage?: string | null;
 }) {
   const normalizedCwd = React.useMemo(() => normalizeContainerPathInput(defaultCwd), [defaultCwd]);
   const [sessionName, setSessionName] = React.useState<string>('');
@@ -86,6 +91,12 @@ export function DroneTerminalDock({
   const dockRootRef = React.useRef<HTMLDivElement | null>(null);
   const wsRef = React.useRef<WebSocket | null>(null);
   const wsReconnectTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const startup = usePaneReadiness({
+    hubPhase,
+    resetKey: `${droneName}\u0000terminal`,
+    timeoutMs: 18_000,
+  });
 
   function isImmediateInput(data: string): boolean {
     return /[\r\n\t\u0003\u0004\u001b]/.test(data);
@@ -636,6 +647,28 @@ export function DroneTerminalDock({
       )}
 
       <div className="flex-1 min-h-0 bg-[#101216] relative pt-1 pl-1">
+        {disabled && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center text-center px-6">
+            <div className="max-w-[360px] rounded-md border border-[var(--border-subtle)] bg-[rgba(0,0,0,.35)] backdrop-blur px-4 py-3">
+              <div className="text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+                {provisioningLabel(hubPhase)}
+              </div>
+              <div className="mt-1 text-[12px] text-[var(--muted)]">
+                {startup.timedOut
+                  ? 'Still waiting for the terminal to become available.'
+                  : 'Connecting terminal…'}
+              </div>
+              {String(hubMessage ?? '').trim() ? (
+                <div className="mt-1 text-[11px] text-[var(--muted-dim)]">{String(hubMessage ?? '').trim()}</div>
+              ) : null}
+              {startup.timedOut ? (
+                <div className="mt-2 text-[11px] text-[var(--muted-dim)]">
+                  If this persists, check the drone status/error details in the sidebar.
+                </div>
+              ) : null}
+            </div>
+          </div>
+        )}
         <div
           ref={terminalHostRef}
           className="w-full h-full min-h-0 overflow-hidden"

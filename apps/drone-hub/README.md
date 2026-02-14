@@ -4,12 +4,26 @@
 
 It expects a Hub API at `/api` (usually provided by `apps/drone`).
 
+## Installation
+
+From the monorepo root:
+
+```bash
+# install dependencies (one-time per repo clone)
+bun install
+
+# build the UI bundle
+bun --filter drone-hub run build
+```
+
+`drone-hub` is a web app and does not install a standalone shell command.
+
 ## Run (recommended)
 
 From the monorepo root (after building `apps/drone`):
 
 ```bash
-node apps/drone/dist/cli.js hub
+drone hub
 ```
 
 That starts:
@@ -31,4 +45,3 @@ bun --filter drone-hub run dev -- --port 5174 --strictPort
 ```bash
 bun --filter drone-hub run build
 ```
-

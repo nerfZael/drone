@@ -35,6 +35,23 @@ export type DroneRegistry = {
     }
   >;
   /**
+   * Host-side group registry.
+   *
+   * Groups are UI organization metadata and should exist independently from drones.
+   * This allows:
+   * - creating empty groups (even when there are 0 drones)
+   * - keeping groups around after the last drone is deleted
+   * - renaming groups in one place
+   */
+  groups?: Record<
+    string,
+    {
+      name: string;
+      createdAt: string;
+      updatedAt?: string;
+    }
+  >;
+  /**
    * Hub-side, short-lived entries for drones that are being provisioned.
    * These are stored in the same registry file so the Hub UI can show
    * "starting" states without relying on browser storage.
@@ -53,6 +70,11 @@ export type DroneRegistry = {
       message?: string;
       error?: string;
       seed?: {
+        /**
+         * Optional id to use for the initial seed prompt job in the drone daemon.
+         * When present, this makes the first-turn prompt id stable across create/send flows.
+         */
+        promptId?: string;
         chatName: string;
         model?: string;
         prompt?: string;
@@ -144,7 +166,14 @@ export type DroneRegistry = {
             id: string;
             at: string;
             prompt: string;
-            state: 'sending' | 'sent' | 'failed';
+            /**
+             * - queued: persisted in registry but not yet enqueued into the drone daemon
+             * - sending: hub is attempting to enqueue into the daemon
+             * - sent: enqueued into daemon (queued/running/done will reconcile later)
+             * - failed: hub/daemon enqueue or run failure
+             */
+            state: 'queued' | 'sending' | 'sent' | 'failed';
+            cwd?: string | null;
             error?: string;
             updatedAt?: string;
           }>;

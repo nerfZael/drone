@@ -64,7 +64,6 @@ async function fileToBase64(file: File): Promise<string> {
 export function ChatInput({
   resetKey,
   droneName,
-  modeHint,
   promptError,
   sending,
   waiting,
@@ -75,7 +74,6 @@ export function ChatInput({
 }: {
   resetKey: string;
   droneName: string;
-  modeHint: string;
   promptError: string | null;
   sending: boolean;
   waiting: boolean;
@@ -237,6 +235,7 @@ export function ChatInput({
 
   return (
     <div
+      data-onboarding-id="chat.input"
       className="flex-shrink-0 px-5 pt-2 pb-5 bg-transparent"
       onDragEnter={(e) => {
         if (!attachmentsOn) return;
@@ -407,17 +406,6 @@ export function ChatInput({
             >
               {sending ? 'Sending…' : waiting ? 'Waiting…' : 'Send'}
             </button>
-          </div>
-          <div
-            className="px-4 pb-2 text-[10px] text-[var(--muted-dim)] tracking-wide uppercase"
-            style={{ fontFamily: 'var(--display)' }}
-          >
-            {modeHint}
-            {attachmentsOn ? (
-              <span className="ml-2 opacity-70" title="Paste or drag & drop images to attach.">
-                · paste / drag images
-              </span>
-            ) : null}
           </div>
         </div>
       </div>
