@@ -17,7 +17,8 @@
     "dvm": "bun --filter dvm run dev --",
     "drone": "bun --filter drone run dev --",
     "drone-hub": "bun --filter drone-hub run dev",
-    "looped": "bun run --cwd apps/looped dev --"
+    "looped": "bun run --cwd apps/looped dev --",
+    "regression": "bun run build && bun run smoke && bun run test"
   },
   "devDependencies": {
     "turbo": "^2.0.0"

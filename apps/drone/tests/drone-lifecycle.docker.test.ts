@@ -293,9 +293,12 @@ describe('drone docker lifecycle regression', () => {
         const registryPath = path.join(xdgDataHome, 'drone', 'registry.json');
         const registryRaw = fs.readFileSync(registryPath, 'utf8');
         const registry = JSON.parse(registryRaw) as any;
-        const entry = registry?.drones?.[droneName];
-        if (!entry) throw new Error(`Expected registry entry for ${droneName}`);
-        delete registry.drones[droneName];
+        const byName = Object.entries(registry?.drones ?? {}).find(
+          ([, value]) => String((value as any)?.name ?? '').trim() === droneName
+        ) as [string, any] | undefined;
+        if (!byName) throw new Error(`Expected registry entry for ${droneName}`);
+        const [entryKey, entry] = byName;
+        delete registry.drones[entryKey];
         registry.drones[`legacy-key-${droneName}`] = entry;
         fs.writeFileSync(registryPath, JSON.stringify(registry, null, 2), 'utf8');
 
@@ -307,6 +310,7 @@ describe('drone docker lifecycle regression', () => {
         const base = `http://127.0.0.1:${hub.port}`;
         const success = await fetch(`${base}/api/drones/${encodeURIComponent(droneName)}/rename`, {
           method: 'POST',
+          signal: AbortSignal.timeout(30_000),
           headers: {
             authorization: `Bearer ${apiToken}`,
             'content-type': 'application/json',
@@ -322,6 +326,7 @@ describe('drone docker lifecycle regression', () => {
         // Old name should now fail (404 unknown drone).
         const missing = await fetch(`${base}/api/drones/${encodeURIComponent(droneName)}/rename`, {
           method: 'POST',
+          signal: AbortSignal.timeout(30_000),
           headers: {
             authorization: `Bearer ${apiToken}`,
             'content-type': 'application/json',

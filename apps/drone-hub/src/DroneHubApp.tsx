@@ -33,6 +33,59 @@ import { TypingDots } from './droneHub/overview/icons';
 import { GuidedOnboarding } from './onboarding/GuidedOnboarding';
 import { requestGuidedOnboardingReplay, resetGuidedOnboardingDismissals } from './onboarding/control';
 import { usePaneReadiness } from './droneHub/panes/usePaneReadiness';
+import {
+  IconChat,
+  IconChevron,
+  IconColumns,
+  IconCopy,
+  IconCursorApp,
+  IconDrone,
+  IconFolder,
+  IconList,
+  IconPencil,
+  IconPlus,
+  IconPlusDouble,
+  IconSettings,
+  IconSpinner,
+  IconTrash,
+  IconVsCode,
+  SkeletonLine,
+} from './droneHub/app/icons';
+import { GroupMultiChatColumn } from './droneHub/app/GroupMultiChatColumn';
+import { RightPanel, type RightPanelTabId } from './droneHub/app/RightPanel';
+import { SettingsView } from './droneHub/app/SettingsView';
+import { useHubLogs } from './droneHub/app/use-hub-logs';
+import { useLlmSettings } from './droneHub/app/use-llm-settings';
+import {
+  fetchJson,
+  isNotFoundError,
+  probeLocalhostPort,
+  readLocalStorageItem,
+  useNowMs,
+  usePersistedLocalStorageItem,
+  usePoll,
+} from './droneHub/app/hooks';
+import {
+  buildContainerPreviewUrl,
+  compareDronesByNewestFirst,
+  droneChatQueueKey,
+  droneHomePath,
+  isDroneStartingOrSeeding,
+  makeId,
+  normalizeContainerPathInput,
+  normalizePortRows,
+  normalizePreviewUrl,
+  parseDroneChatQueueKey,
+  parseIsoTimestampMs,
+  parseRepoPullConflict,
+  readPortPreviewByDrone,
+  readPreviewUrlByDrone,
+  resolveChatNameForDrone,
+  rewriteLoopbackUrlToContainerPreview,
+  sameReachabilityMap,
+  type RepoOpErrorMeta,
+  type RepoPullConflict,
+} from './droneHub/app/helpers';
 import { cn } from './ui/cn';
 import { dropdownMenuItemBaseClass, dropdownPanelBaseClass, useDropdownDismiss } from './ui/dropdown';
 import { UiMenuSelect } from './ui/menuSelect';
@@ -95,7 +148,7 @@ const SIDEBAR_REPOS_COLLAPSED_STORAGE_KEY = 'droneHub.sidebarReposCollapsed';
 const HUB_LOGS_TAIL_LINES = 600;
 const HUB_LOGS_MAX_BYTES = 200_000;
 const STARTUP_SEED_MISSING_GRACE_MS = 30_000;
-type RightPanelTab = 'terminal' | 'files' | 'preview' | 'links' | 'changes';
+type RightPanelTab = RightPanelTabId;
 const RIGHT_PANEL_TABS: RightPanelTab[] = ['terminal', 'files', 'preview', 'links', 'changes'];
 const RIGHT_PANEL_TAB_LABELS: Record<RightPanelTab, string> = {
   terminal: 'Terminal',
@@ -103,18 +156,6 @@ const RIGHT_PANEL_TAB_LABELS: Record<RightPanelTab, string> = {
   preview: 'Browser',
   links: 'Links',
   changes: 'Changes',
-};
-
-type RepoOpErrorMeta = {
-  code: string | null;
-  patchName: string | null;
-  conflictFiles: string[];
-};
-
-type RepoPullConflict = {
-  isConflict: boolean;
-  patchName: string | null;
-  files: string[];
 };
 
 type DroneErrorModalState = {
@@ -137,34 +178,6 @@ function isUntitledLikeDroneName(raw: string): boolean {
   return /^\d+$/.test(rest) || /^[a-z0-9]{4,18}(?:-\d+)?$/.test(rest);
 }
 type AppView = 'workspace' | 'settings';
-type LlmProviderId = 'openai' | 'gemini';
-type ApiKeySettingsResponse = {
-  ok: true;
-  hasKey: boolean;
-  source: 'settings' | 'environment' | null;
-  keyHint: string | null;
-  updatedAt: string | null;
-};
-type LlmSettingsResponse = {
-  ok: true;
-  provider: {
-    selected: LlmProviderId;
-    source: 'settings' | 'environment' | 'default';
-  };
-  openai: Omit<ApiKeySettingsResponse, 'ok'>;
-  gemini: Omit<ApiKeySettingsResponse, 'ok'>;
-};
-type HubLogsResponse = {
-  ok: true;
-  logPath: string;
-  text: string;
-  truncated: boolean;
-  fileSize: number;
-  bytesRead: number;
-  updatedAt: string | null;
-  maxBytes: number;
-  tailLines: number;
-};
 
 type StartupSeedState = {
   droneName: string;
@@ -185,16 +198,6 @@ type DraftChatState = {
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
 /* ------------------------------------------------------------------ */
-
-function makeId(): string {
-  try {
-    const c: any = (globalThis as any).crypto;
-    if (c && typeof c.randomUUID === 'function') return String(c.randomUUID());
-  } catch {
-    // ignore
-  }
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
 
 function viewportWidthPx(): number {
   if (typeof window !== 'undefined' && Number.isFinite(window.innerWidth) && window.innerWidth > 0) {
@@ -222,781 +225,9 @@ function parseRightPanelTab(raw: string | null | undefined, fallback: RightPanel
   return fallback;
 }
 
-function parseConflictFilesFromMessage(message: string): string[] {
-  const text = String(message ?? '');
-  const out = new Set<string>();
-
-  const patchFailedRe = /patch failed:\s+(.+?):\d+/gi;
-  let m: RegExpExecArray | null = null;
-  while ((m = patchFailedRe.exec(text))) {
-    const file = String(m[1] ?? '').trim();
-    if (file) out.add(file);
-  }
-
-  const mergeConflictRe = /CONFLICT\s+\([^)]+\):\s+.*\s+in\s+(.+)$/gim;
-  while ((m = mergeConflictRe.exec(text))) {
-    const file = String(m[1] ?? '').trim();
-    if (file) out.add(file);
-  }
-
-  const doesNotApplyRe = /error:\s+(.+?):\s+patch does not apply$/gim;
-  while ((m = doesNotApplyRe.exec(text))) {
-    const file = String(m[1] ?? '').trim();
-    if (file) out.add(file);
-  }
-
-  return Array.from(out).sort((a, b) => a.localeCompare(b));
-}
-
-function parseIsoTimestampMs(raw: string | null | undefined): number | null {
-  const ms = Date.parse(String(raw ?? '').trim());
-  return Number.isFinite(ms) ? ms : null;
-}
-
 function isStartupSeedFresh(seed: StartupSeedState | null | undefined, nowMs: number = Date.now()): boolean {
   const atMs = parseIsoTimestampMs(seed?.at);
   return atMs != null && nowMs - atMs < STARTUP_SEED_MISSING_GRACE_MS;
-}
-
-function compareDronesByNewestFirst(a: DroneSummary, b: DroneSummary): number {
-  const aMs = parseIsoTimestampMs(a.createdAt);
-  const bMs = parseIsoTimestampMs(b.createdAt);
-  if (aMs == null && bMs != null) return 1;
-  if (aMs != null && bMs == null) return -1;
-  if (aMs != null && bMs != null && aMs !== bMs) return bMs - aMs;
-  return a.name.localeCompare(b.name);
-}
-
-function resolveChatNameForDrone(drone: DroneSummary, preferredChat: string): string {
-  const chats = Array.isArray(drone.chats) ? drone.chats : [];
-  if (preferredChat && chats.includes(preferredChat)) return preferredChat;
-  if (chats.includes('default')) return 'default';
-  return chats[0] || 'default';
-}
-
-function parseRepoPullConflict(message: string, meta?: Partial<RepoOpErrorMeta> | null): RepoPullConflict {
-  const text = String(message ?? '');
-  const patchFromMeta = String(meta?.patchName ?? '').trim();
-  const patchFromMessage =
-    text.match(/while applying\s+([^\n:]+\.patch)/i)?.[1] ??
-    text.match(/Failed applying patch\s+([^\n:]+\.patch)/i)?.[1] ??
-    null;
-  const patchName = patchFromMeta || (patchFromMessage ? String(patchFromMessage).trim() : null);
-  const rawConflictFiles = Array.isArray(meta?.conflictFiles) ? meta.conflictFiles : [];
-  const filesFromMeta = rawConflictFiles.map((f) => String(f ?? '').trim()).filter(Boolean);
-  const filesFromMessage = parseConflictFilesFromMessage(text);
-  const files = Array.from(new Set([...filesFromMeta, ...filesFromMessage])).sort((a, b) => a.localeCompare(b));
-  const code = String(meta?.code ?? '').trim().toLowerCase();
-  const isConflict =
-    code === 'patch_apply_conflict' ||
-    code === 'host_conflicts_ready' ||
-    files.length > 0 ||
-    /patch apply conflict|patch does not apply|failed applying patch|could not apply|CONFLICT/i.test(text);
-  return { isConflict, patchName: patchName || null, files };
-}
-
-function writeLocalStorageItem(key: string, value: string): void {
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    // ignore
-  }
-}
-
-function readLocalStorageItem(key: string): string | null {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function usePersistedLocalStorageItem(key: string, value: string): void {
-  React.useEffect(() => {
-    writeLocalStorageItem(key, value);
-  }, [key, value]);
-}
-
-function normalizePortRows(
-  ports: DronePortMapping[] | null | undefined,
-  hostPort: number | null,
-  containerPort: number | null,
-): DronePortMapping[] {
-  const raw = Array.isArray(ports) && ports.length > 0 ? ports : hostPort && containerPort ? [{ hostPort, containerPort }] : [];
-  const seen = new Set<string>();
-  const uniq: DronePortMapping[] = [];
-  for (const p of raw) {
-    const hp = Number((p as any)?.hostPort);
-    const cp = Number((p as any)?.containerPort);
-    if (!Number.isFinite(hp) || !Number.isFinite(cp)) continue;
-    const key = `${cp}:${hp}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    uniq.push({ hostPort: hp, containerPort: cp });
-  }
-  uniq.sort((a, b) => a.containerPort - b.containerPort || a.hostPort - b.hostPort);
-  return uniq;
-}
-
-function readPortPreviewByDrone(): PortPreviewByDrone {
-  const raw = readLocalStorageItem(PORT_PREVIEW_STORAGE_KEY);
-  if (!raw) return {};
-  try {
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return {};
-    const out: PortPreviewByDrone = {};
-    for (const [droneName, value] of Object.entries(parsed as Record<string, any>)) {
-      const name = String(droneName ?? '').trim();
-      const hp = Number((value as any)?.hostPort);
-      const cp = Number((value as any)?.containerPort);
-      if (!name || !Number.isFinite(hp) || !Number.isFinite(cp)) continue;
-      out[name] = { hostPort: hp, containerPort: cp };
-    }
-    return out;
-  } catch {
-    return {};
-  }
-}
-
-function normalizePreviewUrl(raw: string): string | null {
-  const trimmed = String(raw ?? '').trim();
-  if (!trimmed) return null;
-  if (trimmed.startsWith('/')) return trimmed;
-  const withScheme = /^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(trimmed) ? trimmed : `http://${trimmed}`;
-  try {
-    const url = new URL(withScheme);
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
-    return url.toString();
-  } catch {
-    return null;
-  }
-}
-
-function normalizeContainerPathInput(raw: string): string {
-  const trimmed = String(raw ?? '').trim();
-  if (!trimmed) return '/';
-  return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
-}
-
-function maybeExtractApiKey(raw: string, provider: LlmProviderId): string {
-  const text = String(raw ?? '');
-  const envName = provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY';
-  const lines = text.split(/\r?\n/);
-  for (const rawLine of lines) {
-    const line = String(rawLine ?? '').trim();
-    if (!line) continue;
-    const m = line.match(new RegExp(`^(?:export\\s+)?${envName}\\s*=\\s*(.*)$`, 'i'));
-    if (!m) continue;
-    let value = String(m[1] ?? '').trim();
-    if (!value) return '';
-    if (
-      (value.startsWith('"') && value.endsWith('"') && value.length >= 2) ||
-      (value.startsWith("'") && value.endsWith("'") && value.length >= 2)
-    ) {
-      value = value.slice(1, -1);
-    } else {
-      // Support `.env` style trailing comments for unquoted values.
-      value = value.replace(/\s+#.*$/, '').trim();
-    }
-    return value;
-  }
-  return text;
-}
-
-function droneHomePath(drone: Pick<DroneSummary, 'repoAttached' | 'repoPath'> | null | undefined): string {
-  const repoAttached = Boolean(drone?.repoAttached ?? Boolean(String(drone?.repoPath ?? '').trim()));
-  return repoAttached ? '/work/repo' : '/dvm-data/home';
-}
-
-function readPreviewUrlByDrone(): PreviewUrlByDrone {
-  const raw = readLocalStorageItem(PREVIEW_URL_STORAGE_KEY);
-  if (!raw) return {};
-  try {
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return {};
-    const out: PreviewUrlByDrone = {};
-    for (const [droneId, value] of Object.entries(parsed as Record<string, any>)) {
-      const name = String(droneId ?? '').trim();
-      const normalized = normalizePreviewUrl(String(value ?? ''));
-      if (!name || !normalized) continue;
-      out[name] = normalized;
-    }
-    return out;
-  } catch {
-    return {};
-  }
-}
-
-function buildContainerPreviewUrl(droneId: string, containerPort: number): string {
-  const dn = encodeURIComponent(String(droneId ?? '').trim());
-  const cp = encodeURIComponent(String(containerPort ?? ''));
-  return `/api/drones/${dn}/preview/${cp}/`;
-}
-
-function rewriteLoopbackUrlToContainerPreview(
-  rawUrl: string,
-  droneId: string,
-  portRows: DronePortMapping[],
-): string | null {
-  try {
-    const u = new URL(String(rawUrl));
-    const host = String(u.hostname ?? '').toLowerCase();
-    if (host !== 'localhost' && host !== '127.0.0.1' && host !== '::1') return null;
-    const loopbackPort = Number(u.port);
-    if (!Number.isFinite(loopbackPort) || loopbackPort <= 0 || Math.floor(loopbackPort) !== loopbackPort) return null;
-    const mapped = portRows.find((p) => p.containerPort === loopbackPort) ?? portRows.find((p) => p.hostPort === loopbackPort);
-    const containerPort = mapped?.containerPort ?? loopbackPort;
-    const base = `/api/drones/${encodeURIComponent(String(droneId ?? '').trim())}/preview/${containerPort}`;
-    const path = u.pathname && u.pathname.startsWith('/') ? u.pathname : '/';
-    return `${base}${path}${u.search || ''}${u.hash || ''}`;
-  } catch {
-    return null;
-  }
-}
-
-function sameReachabilityMap(a: PortReachabilityByHostPort, b: PortReachabilityByHostPort): boolean {
-  const aKeys = Object.keys(a);
-  const bKeys = Object.keys(b);
-  if (aKeys.length !== bKeys.length) return false;
-  for (const k of aKeys) {
-    if (a[k] !== b[k]) return false;
-  }
-  return true;
-}
-
-async function probeLocalhostPort(hostPort: number): Promise<boolean> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), PORT_STATUS_TIMEOUT_MS);
-  const url = `http://localhost:${hostPort}`;
-  try {
-    await fetch(url, {
-      method: 'GET',
-      mode: 'no-cors',
-      cache: 'no-store',
-      redirect: 'follow',
-      signal: controller.signal,
-    });
-    return true;
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-/* ------------------------------------------------------------------ */
-/*  Data hooks                                                        */
-/* ------------------------------------------------------------------ */
-
-function usePoll<T>(fn: () => Promise<T>, intervalMs: number, deps: any[] = []) {
-  const [value, setValue] = React.useState<T | null>(null);
-  const [error, setError] = React.useState<string | null>(null);
-  const [loading, setLoading] = React.useState(true);
-  React.useEffect(() => {
-    let mounted = true;
-    let timer: any = null;
-    setValue(null);
-    setError(null);
-    setLoading(true);
-    const tick = async () => {
-      try {
-        const v = await fn();
-        if (!mounted) return;
-        setValue(v);
-        setError(null);
-      } catch (e: any) {
-        if (!mounted) return;
-        setError(e?.message ?? String(e));
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    };
-    tick();
-    timer = setInterval(tick, intervalMs);
-    return () => {
-      mounted = false;
-      if (timer) clearInterval(timer);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
-  return { value, error, loading };
-}
-
-function useNowMs(intervalMs: number, enabled: boolean): number {
-  const [now, setNow] = React.useState(() => Date.now());
-  React.useEffect(() => {
-    if (!enabled) return;
-    const ms = Math.max(250, Math.floor(intervalMs || 1000));
-    const t = setInterval(() => setNow(Date.now()), ms);
-    return () => clearInterval(t);
-  }, [enabled, intervalMs]);
-  return now;
-}
-
-async function fetchJson<T>(url: string): Promise<T> {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
-  return (await r.json()) as T;
-}
-
-function isNotFoundError(err: any): boolean {
-  const msg = String(err?.message ?? err ?? '').trim();
-  return /^404\b/.test(msg);
-}
-
-/* ------------------------------------------------------------------ */
-/*  Tiny SVG icons (inline to avoid deps)                             */
-/* ------------------------------------------------------------------ */
-
-function IconDrone({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="5" y="5" width="6" height="6" rx="1" />
-      <line x1="2" y1="2" x2="5" y2="5" />
-      <line x1="14" y1="2" x2="11" y2="5" />
-      <line x1="2" y1="14" x2="5" y2="11" />
-      <line x1="14" y1="14" x2="11" y2="11" />
-      <circle cx="2" cy="2" r="1" fill="currentColor" stroke="none" />
-      <circle cx="14" cy="2" r="1" fill="currentColor" stroke="none" />
-      <circle cx="2" cy="14" r="1" fill="currentColor" stroke="none" />
-      <circle cx="14" cy="14" r="1" fill="currentColor" stroke="none" />
-    </svg>
-  );
-}
-
-function IconChat({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-      <path d="M1.5 2A1.5 1.5 0 000 3.5v8A1.5 1.5 0 001.5 13H3v2.5l4-2.5h7.5A1.5 1.5 0 0016 11.5v-8A1.5 1.5 0 0014.5 2h-13z" />
-    </svg>
-  );
-}
-
-function IconChevron({ down, className }: { down?: boolean; className?: string }) {
-  return (
-    <svg
-      className={`transition-transform duration-150 ${down ? 'rotate-0' : '-rotate-90'} ${className ?? ''}`}
-      width="12"
-      height="12"
-      viewBox="0 0 16 16"
-      fill="currentColor"
-    >
-      <path d="M4.427 7.427l3.396 3.396a.25.25 0 00.354 0l3.396-3.396A.25.25 0 0011.396 7H4.604a.25.25 0 00-.177.427z" />
-    </svg>
-  );
-}
-
-function IconFolder({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-      <path d="M1.75 1A1.75 1.75 0 000 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0016 13.25v-8.5A1.75 1.75 0 0014.25 3H7.5a.25.25 0 01-.2-.1l-.9-1.2c-.33-.44-.85-.7-1.4-.7h-3.25z" />
-    </svg>
-  );
-}
-
-function IconList({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-      <path d="M3 4.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM4.5 3.5a.5.5 0 000 1h9a.5.5 0 000-1h-9zM3 8a.75.75 0 11-1.5 0A.75.75 0 013 8zm1.5-.5a.5.5 0 000 1h9a.5.5 0 000-1h-9zM3 11.75a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM4.5 11a.5.5 0 000 1h9a.5.5 0 000-1h-9z" />
-    </svg>
-  );
-}
-
-function IconSettings({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M6.8 1.03a1.2 1.2 0 012.4 0l.1.81a5.9 5.9 0 011.36.57l.68-.46a1.2 1.2 0 011.53.15l1.4 1.4a1.2 1.2 0 01.15 1.53l-.46.68c.23.43.42.89.56 1.36l.81.1a1.2 1.2 0 010 2.4l-.81.1a5.9 5.9 0 01-.56 1.36l.46.68a1.2 1.2 0 01-.15 1.53l-1.4 1.4a1.2 1.2 0 01-1.53.15l-.68-.46c-.43.23-.89.42-1.36.56l-.1.81a1.2 1.2 0 01-2.4 0l-.1-.81a5.9 5.9 0 01-1.36-.56l-.68.46a1.2 1.2 0 01-1.53-.15l-1.4-1.4a1.2 1.2 0 01-.15-1.53l.46-.68a5.9 5.9 0 01-.56-1.36l-.81-.1a1.2 1.2 0 010-2.4l.81-.1a5.9 5.9 0 01.56-1.36l-.46-.68a1.2 1.2 0 01.15-1.53l1.4-1.4a1.2 1.2 0 011.53-.15l.68.46c.43-.23.89-.42 1.36-.57l.1-.81zM8 5.75a2.25 2.25 0 100 4.5 2.25 2.25 0 000-4.5z" />
-    </svg>
-  );
-}
-
-function IconPlus({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M8 1.75a.75.75 0 01.75.75v4.75h4.75a.75.75 0 010 1.5H8.75v4.75a.75.75 0 01-1.5 0V8.75H2.5a.75.75 0 010-1.5h4.75V2.5A.75.75 0 018 1.75z" />
-    </svg>
-  );
-}
-
-function IconPlusDouble({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M5 2.25a.75.75 0 01.75.75v2.5h2.5a.75.75 0 010 1.5h-2.5v2.5a.75.75 0 01-1.5 0V7h-2.5a.75.75 0 010-1.5h2.5V3A.75.75 0 015 2.25z" />
-      <path d="M11 6.25a.75.75 0 01.75.75v2h2a.75.75 0 010 1.5h-2v2a.75.75 0 01-1.5 0v-2h-2a.75.75 0 010-1.5h2V7A.75.75 0 0111 6.25z" />
-    </svg>
-  );
-}
-
-function IconTrash({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M6.5 1.5a.5.5 0 00-.5.5v1H3a.5.5 0 000 1h.5v9.25c0 .966.784 1.75 1.75 1.75h5.5A1.75 1.75 0 0012.5 13.25V4H13a.5.5 0 000-1h-3V2a.5.5 0 00-.5-.5h-3zM7 3V2.5h2V3H7zM5 4h6v9.25a.75.75 0 01-.75.75h-4.5a.75.75 0 01-.75-.75V4z" />
-    </svg>
-  );
-}
-
-function IconColumns({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" aria-hidden="true">
-      <rect x="1.5" y="2.5" width="4.5" height="11" rx="1" />
-      <rect x="5.75" y="2.5" width="4.5" height="11" rx="1" />
-      <rect x="10" y="2.5" width="4.5" height="11" rx="1" />
-    </svg>
-  );
-}
-
-function IconPencil({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M11.013 1.427a1.75 1.75 0 012.474 0l1.086 1.086a1.75 1.75 0 010 2.474l-8.94 8.94a.75.75 0 01-.318.19l-3.5 1a.75.75 0 01-.927-.927l1-3.5a.75.75 0 01.19-.318l8.935-8.945zM12.073 2.487L3.5 11.06l-.64 2.24 2.24-.64 8.573-8.573-1.6-1.6z" />
-    </svg>
-  );
-}
-
-function IconCopy({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M5 1.75A1.75 1.75 0 016.75 0h6.5C14.216 0 15 .784 15 1.75v6.5A1.75 1.75 0 0113.25 10h-6.5A1.75 1.75 0 015 8.25v-6.5zm1.75-.75a.75.75 0 00-.75.75v6.5c0 .414.336.75.75.75h6.5a.75.75 0 00.75-.75v-6.5a.75.75 0 00-.75-.75h-6.5z" />
-      <path d="M1 5.75C1 4.784 1.784 4 2.75 4h1a.5.5 0 010 1h-1a.75.75 0 00-.75.75v6.5c0 .414.336.75.75.75h6.5a.75.75 0 00.75-.75v-1a.5.5 0 011 0v1A1.75 1.75 0 019.25 14.5h-6.5A1.75 1.75 0 011 12.75v-7z" />
-    </svg>
-  );
-}
-
-function IconSpinner({ className }: { className?: string }) {
-  return (
-    <svg
-      className={`animate-spin ${className ?? ''}`}
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden="true"
-    >
-      <circle className="opacity-25" cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" />
-      <path
-        className="opacity-75"
-        d="M21 12a9 9 0 00-9-9"
-        stroke="currentColor"
-        strokeWidth="3"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function IconVsCode({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M11.8 1.6a1 1 0 011.2.2l1.2 1.2a1 1 0 01.3.7v8.6a1 1 0 01-.3.7l-1.2 1.2a1 1 0 01-1.2.2L6.4 11.7 3.9 14.2a1 1 0 01-1.4 0l-1-1a1 1 0 010-1.4L3.6 9.7 1.5 7.6a1 1 0 010-1.4l1-1a1 1 0 011.4 0L6.4 7.3 11.8 1.6zM6.4 8.7L4.9 10.2l1.5 1.5 4.2 2.8V2.9L6.4 8.7z" />
-    </svg>
-  );
-}
-
-function IconCursorApp({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M3.2 1.4a.75.75 0 011.02-.24l9.6 5.6a.75.75 0 01-.05 1.33l-3.63 1.66 1.67 3.62a.75.75 0 01-1.02.98l-1.73-.79-1.6-.72-1.66 3.63a.75.75 0 01-1.33.05L1.16 4.22a.75.75 0 01.24-1.02L3.2 1.4zm.12 1.93l2.67 9.9 1.14-2.5a.75.75 0 011.01-.36l2.5 1.14-.9-1.95a.75.75 0 01.36-1.01l2.5-1.14-9.9-2.67z" />
-    </svg>
-  );
-}
-
-function SkeletonLine({ w }: { w: string }) {
-  return <div className="h-2.5 rounded bg-[var(--border-subtle)] animate-pulse" style={{ width: w }} />;
-}
-
-function droneChatQueueKey(droneIdRaw: string, chatNameRaw: string): string {
-  const droneId = String(droneIdRaw ?? '').trim();
-  const chatName = String(chatNameRaw ?? '').trim() || 'default';
-  return `${droneId}::${chatName}`;
-}
-
-function parseDroneChatQueueKey(key: string): { droneId: string; chatName: string } | null {
-  const raw = String(key ?? '');
-  const idx = raw.indexOf('::');
-  if (idx < 0) return null;
-  const droneId = raw.slice(0, idx).trim();
-  const chatName = raw.slice(idx + 2).trim() || 'default';
-  if (!droneId) return null;
-  return { droneId, chatName };
-}
-
-/* ------------------------------------------------------------------ */
-/*  Sub-components                                                    */
-/* ------------------------------------------------------------------ */
-
-function GroupMultiChatColumn({
-  drone,
-  droneLabel,
-  preferredChat,
-  nowMs,
-  onOpenDrone,
-  onCreateJobs,
-  columnWidthPx,
-}: {
-  drone: DroneSummary;
-  droneLabel?: string;
-  preferredChat: string;
-  nowMs: number;
-  onOpenDrone: () => void;
-  onCreateJobs: (opts: { turn: number; message: string }) => void;
-  columnWidthPx: number;
-}) {
-  const shownName = String(droneLabel ?? drone.name).trim() || drone.name;
-  const chatName = React.useMemo(() => resolveChatNameForDrone(drone, preferredChat), [drone, preferredChat]);
-  const [transcripts, setTranscripts] = React.useState<TranscriptItem[] | null>(null);
-  const [loading, setLoading] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
-  const [promptError, setPromptError] = React.useState<string | null>(null);
-  const [sendingPromptCount, setSendingPromptCount] = React.useState(0);
-  const sendingPrompt = sendingPromptCount > 0;
-  const [optimisticPendingPrompts, setOptimisticPendingPrompts] = React.useState<PendingPrompt[]>([]);
-  const columnScrollRef = React.useRef<HTMLDivElement | null>(null);
-
-  const scrollColumnToBottom = React.useCallback(() => {
-    const el = columnScrollRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }, []);
-
-  React.useEffect(() => {
-    let mounted = true;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    let busy = false;
-
-    setTranscripts(null);
-    setError(null);
-    setLoading(true);
-
-    const load = async () => {
-      if (busy) return;
-      const isStarting = drone.hubPhase === 'starting' || drone.hubPhase === 'seeding';
-      if (isStarting) {
-        if (mounted) {
-          setTranscripts([]);
-          setError(null);
-          setLoading(false);
-        }
-        return;
-      }
-      busy = true;
-      try {
-        const data = await fetchJson<{ ok: true; transcripts: TranscriptItem[] }>(
-          `/api/drones/${encodeURIComponent(drone.id)}/chats/${encodeURIComponent(chatName)}/transcript?turn=all`,
-        );
-        if (!mounted) return;
-        setTranscripts(data.transcripts ?? []);
-        setError(null);
-      } catch (err: any) {
-        if (!mounted) return;
-        if (isNotFoundError(err)) {
-          setTranscripts([]);
-          setError(null);
-        } else {
-          setError(err?.message ?? String(err));
-        }
-      } finally {
-        busy = false;
-        if (mounted) setLoading(false);
-      }
-    };
-
-    const loop = async () => {
-      await load();
-      if (!mounted) return;
-      timer = setTimeout(() => {
-        void loop();
-      }, 4000);
-    };
-
-    void loop();
-    return () => {
-      mounted = false;
-      if (timer) clearTimeout(timer);
-    };
-  }, [chatName, drone.hubPhase, drone.id]);
-
-  const { value: pendingResp } = usePoll<{ ok: true; pending: PendingPrompt[] }>(
-    async () => {
-      if (drone.hubPhase === 'starting' || drone.hubPhase === 'seeding') return { ok: true, pending: [] };
-      return await fetchJson<{ ok: true; pending: PendingPrompt[] }>(
-        `/api/drones/${encodeURIComponent(drone.id)}/chats/${encodeURIComponent(chatName)}/pending`,
-      );
-    },
-    1000,
-    [chatName, drone.hubPhase, drone.id],
-  );
-
-  const pendingPrompts = React.useMemo(() => {
-    const server = Array.isArray(pendingResp?.pending) ? pendingResp.pending : [];
-    const byId = new Map<string, PendingPrompt>();
-    for (const p of server) {
-      if (p?.id) byId.set(p.id, p);
-    }
-    for (const p of optimisticPendingPrompts) {
-      if (p?.id && !byId.has(p.id)) byId.set(p.id, p);
-    }
-    return Array.from(byId.values()).slice(-60);
-  }, [optimisticPendingPrompts, pendingResp]);
-
-  const visiblePendingPrompts = React.useMemo(() => {
-    const ts = Array.isArray(transcripts) ? transcripts : [];
-    const ids = new Set(ts.map((t) => String((t as any)?.id ?? '')).filter(Boolean));
-    return pendingPrompts.filter((p) => p.state === 'failed' || !ids.has(p.id));
-  }, [pendingPrompts, transcripts]);
-
-  const waitingForAgent = React.useMemo(() => {
-    if (sendingPrompt) return true;
-    return visiblePendingPrompts.some((p) => p.state !== 'failed');
-  }, [sendingPrompt, visiblePendingPrompts]);
-
-  React.useEffect(() => {
-    setOptimisticPendingPrompts([]);
-  }, [chatName, drone.id]);
-
-  React.useEffect(() => {
-    if (loading) return;
-    const id = requestAnimationFrame(() => scrollColumnToBottom());
-    return () => cancelAnimationFrame(id);
-  }, [chatName, columnWidthPx, loading, scrollColumnToBottom, transcripts?.length, visiblePendingPrompts.length]);
-
-  const sendPrompt = React.useCallback(
-    async (payload: ChatSendPayload): Promise<boolean> => {
-      const prompt = String(payload?.prompt ?? '').trim();
-      const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
-      if (!prompt && attachments.length === 0) return false;
-      const optimisticPrompt = prompt || (attachments.length === 1 ? '[image attachment]' : `[${attachments.length} image attachments]`);
-      if (drone.hubPhase === 'starting' || drone.hubPhase === 'seeding') {
-        if (attachments.length > 0) {
-          setPromptError(`"${shownName}" is still starting. Image attachments can be sent once it is ready.`);
-          return false;
-        }
-        setPromptError(`"${shownName}" is still starting.`);
-        return false;
-      }
-      setSendingPromptCount((c) => c + 1);
-      setPromptError(null);
-      try {
-        const data = await requestJson<{ ok: true; accepted: true; promptId: string }>(
-          `/api/drones/${encodeURIComponent(drone.id)}/chats/${encodeURIComponent(chatName)}/prompt`,
-          {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ prompt, attachments }),
-          },
-        );
-        const id = String((data as any)?.promptId ?? '').trim();
-        if (id) {
-          setOptimisticPendingPrompts((prev) => {
-            if (prev.some((p) => p.id === id)) return prev;
-            return [...prev, { id, at: new Date().toISOString(), prompt: optimisticPrompt, state: 'sending' }];
-          });
-        }
-        requestAnimationFrame(() => scrollColumnToBottom());
-        return true;
-      } catch (err: any) {
-        setPromptError(err?.message ?? String(err));
-        return false;
-      } finally {
-        setSendingPromptCount((c) => Math.max(0, c - 1));
-      }
-    },
-    [chatName, drone.hubPhase, drone.id, scrollColumnToBottom, shownName],
-  );
-  const noopToggleTldr = React.useCallback((_item: TranscriptItem) => {}, []);
-  const noopHoverAgentMessage = React.useCallback((_item: TranscriptItem | null) => {}, []);
-
-  return (
-    <section
-      className="flex-none h-full rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-alt)] overflow-hidden flex flex-col"
-      style={{ width: columnWidthPx, minWidth: columnWidthPx }}
-    >
-      <div className="flex-shrink-0 px-3 py-2.5 border-b border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]">
-        <div className="min-w-0">
-          <div className="flex items-center justify-between gap-2">
-            <button
-              type="button"
-              onClick={onOpenDrone}
-              className="text-left text-[12px] font-semibold text-[var(--fg-secondary)] hover:text-[var(--accent)] transition-colors truncate min-w-0"
-              style={{ fontFamily: 'var(--display)' }}
-              title={`Open ${shownName}`}
-            >
-              {shownName}
-            </button>
-            <div className="flex items-center flex-shrink-0 ml-2">
-              {waitingForAgent ? (
-                <span className="inline-flex items-center" title="Agent responding">
-                  <TypingDots color="var(--yellow)" />
-                </span>
-              ) : (
-                <StatusBadge
-                  ok={drone.statusOk}
-                  error={drone.statusError}
-                  hubPhase={drone.hubPhase}
-                  hubMessage={drone.hubMessage}
-                />
-              )}
-            </div>
-          </div>
-          <div className="text-[10px] text-[var(--muted-dim)] font-mono mt-0.5">
-            chat: {chatName}
-          </div>
-        </div>
-      </div>
-      <div ref={columnScrollRef} className="flex-1 min-h-0 overflow-auto px-3 py-3">
-        {loading && !transcripts ? (
-          <TranscriptSkeleton />
-        ) : error ? (
-          <div className="rounded border border-[rgba(255,90,90,.24)] bg-[var(--red-subtle)] px-3 py-2 text-[11px] text-[var(--red)]">
-            {error}
-          </div>
-        ) : (transcripts && transcripts.length > 0) || visiblePendingPrompts.length > 0 ? (
-          <div className="space-y-5">
-            {(transcripts ?? []).map((item) => {
-              const messageId = `${drone.id}:${item.turn}:${item.at}`;
-              return (
-                <TranscriptTurn
-                  key={messageId}
-                  item={item}
-                  nowMs={nowMs}
-                  parsingJobs={false}
-                  onCreateJobs={onCreateJobs}
-                  messageId={messageId}
-                  tldr={null}
-                  showTldr={false}
-                  onToggleTldr={noopToggleTldr}
-                  onHoverAgentMessage={noopHoverAgentMessage}
-                />
-              );
-            })}
-            {visiblePendingPrompts.map((item) => (
-              <PendingTranscriptTurn key={`${drone.id}:pending:${item.id}`} item={item} nowMs={nowMs} />
-            ))}
-          </div>
-        ) : (
-          <EmptyState
-            icon={<IconChat className="w-7 h-7 text-[var(--muted)]" />}
-            title={drone.hubPhase === 'starting' || drone.hubPhase === 'seeding' ? 'Drone is starting' : 'No messages yet'}
-            description={
-              drone.hubPhase === 'starting' || drone.hubPhase === 'seeding'
-                ? `Waiting for ${shownName} to become ready.`
-                : `Open ${shownName} and send a prompt to populate this chat.`
-            }
-          />
-        )}
-      </div>
-      <ChatInput
-        resetKey={`group:${drone.id}:${chatName}`}
-        droneName={drone.name}
-        promptError={promptError}
-        sending={sendingPrompt}
-        waiting={waitingForAgent}
-        disabled={sendingPrompt || drone.hubPhase === 'starting' || drone.hubPhase === 'seeding'}
-        autoFocus={false}
-        modeHint=""
-        onSend={sendPrompt}
-      />
-    </section>
-  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -1303,27 +534,15 @@ export default function DroneHubApp() {
   const preferredSelectedDroneRef = React.useRef<string | null>(null);
   const preferredSelectedDroneHoldUntilRef = React.useRef<number>(0);
   const droneIdentityByNameRef = React.useRef<Record<string, string>>({});
-  const [llmSettings, setLlmSettings] = React.useState<LlmSettingsResponse | null>(null);
-  const [llmSettingsLoading, setLlmSettingsLoading] = React.useState(false);
-  const [llmSettingsError, setLlmSettingsError] = React.useState<string | null>(null);
-  const [llmProviderDraft, setLlmProviderDraft] = React.useState<LlmProviderId>('openai');
-  const [savingLlmProvider, setSavingLlmProvider] = React.useState(false);
-  const [showGeminiKey, setShowGeminiKey] = React.useState(false);
-  const [geminiSettingsDraft, setGeminiSettingsDraft] = React.useState('');
-  const [savingGeminiSettings, setSavingGeminiSettings] = React.useState(false);
-  const [clearingGeminiSettings, setClearingGeminiSettings] = React.useState(false);
-  const [openAiSettingsDraft, setOpenAiSettingsDraft] = React.useState('');
-  const [savingOpenAiSettings, setSavingOpenAiSettings] = React.useState(false);
-  const [clearingOpenAiSettings, setClearingOpenAiSettings] = React.useState(false);
-  const [showOpenAiKey, setShowOpenAiKey] = React.useState(false);
-  const [llmSettingsNotice, setLlmSettingsNotice] = React.useState<string | null>(null);
-  const [hubLogs, setHubLogs] = React.useState<HubLogsResponse | null>(null);
-  const [hubLogsLoading, setHubLogsLoading] = React.useState(false);
-  const [hubLogsError, setHubLogsError] = React.useState<string | null>(null);
-  const [hubLogsNotice, setHubLogsNotice] = React.useState<string | null>(null);
-  const [hubLogsExpanded, setHubLogsExpanded] = React.useState(false);
-  const [hubLogsPinnedToBottom, setHubLogsPinnedToBottom] = React.useState(true);
-  const hubLogsTextareaRef = React.useRef<HTMLTextAreaElement | null>(null);
+  const llmSettingsState = useLlmSettings(requestJson);
+  const { llmSettings } = llmSettingsState;
+  const hubLogsState = useHubLogs({
+    appView,
+    requestJson,
+    copyText,
+    tailLines: HUB_LOGS_TAIL_LINES,
+    maxBytes: HUB_LOGS_MAX_BYTES,
+  });
 
   const [chatInfo, setChatInfo] = React.useState<ChatInfo | null>(null);
   const [chatInfoError, setChatInfoError] = React.useState<string | null>(null);
@@ -1560,164 +779,6 @@ export default function DroneHubApp() {
       body: JSON.stringify({ drones: list }),
     });
   }, []);
-
-  const loadLlmSettings = React.useCallback(async () => {
-    setLlmSettingsLoading(true);
-    setLlmSettingsError(null);
-    try {
-      const data = await requestJson<LlmSettingsResponse>('/api/settings/llm');
-      setLlmSettings(data);
-      setLlmProviderDraft(data.provider.selected);
-    } catch (e: any) {
-      setLlmSettingsError(e?.message ?? String(e));
-    } finally {
-      setLlmSettingsLoading(false);
-    }
-  }, []);
-
-  React.useEffect(() => {
-    void loadLlmSettings();
-  }, [loadLlmSettings]);
-
-  const updateProviderKeySettings = React.useCallback((provider: LlmProviderId, data: ApiKeySettingsResponse) => {
-    setLlmSettings((prev) => {
-      if (!prev) return prev;
-      const next = {
-        hasKey: data.hasKey,
-        source: data.source,
-        keyHint: data.keyHint,
-        updatedAt: data.updatedAt,
-      };
-      if (provider === 'openai') return { ...prev, openai: next };
-      return { ...prev, gemini: next };
-    });
-  }, []);
-
-  const mutateApiKeySettings = React.useCallback(
-    async (provider: LlmProviderId, action: 'save' | 'clear') => {
-      const providerLabel = provider === 'gemini' ? 'Gemini' : 'OpenAI';
-      const envKeyName = provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY';
-      const draft = provider === 'openai' ? openAiSettingsDraft : geminiSettingsDraft;
-      const apiKey = String(maybeExtractApiKey(draft, provider) ?? '').trim();
-      if (action === 'save') {
-        if (!apiKey) {
-          setLlmSettingsError(`${providerLabel} API key is required.`);
-          return;
-        }
-        if (apiKey !== draft) {
-          if (provider === 'openai') setOpenAiSettingsDraft(apiKey);
-          else setGeminiSettingsDraft(apiKey);
-        }
-      }
-      if (provider === 'openai') {
-        if (action === 'save') setSavingOpenAiSettings(true);
-        else setClearingOpenAiSettings(true);
-      } else if (action === 'save') {
-        setSavingGeminiSettings(true);
-      } else {
-        setClearingGeminiSettings(true);
-      }
-      setLlmSettingsError(null);
-      setLlmSettingsNotice(null);
-      try {
-        const data = await requestJson<ApiKeySettingsResponse>(`/api/settings/${provider}`, {
-          method: action === 'save' ? 'POST' : 'DELETE',
-          ...(action === 'save'
-            ? {
-                headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ apiKey }),
-              }
-            : {}),
-        });
-        updateProviderKeySettings(provider, data);
-        if (provider === 'openai') {
-          setOpenAiSettingsDraft('');
-          setShowOpenAiKey(false);
-        } else {
-          setGeminiSettingsDraft('');
-          setShowGeminiKey(false);
-        }
-        if (action === 'save') {
-          setLlmSettingsNotice(`Saved ${providerLabel} API key.`);
-        } else {
-          setLlmSettingsNotice(data.hasKey ? `Using environment ${envKeyName}.` : `Cleared stored ${providerLabel} API key.`);
-        }
-      } catch (e: any) {
-        setLlmSettingsError(e?.message ?? String(e));
-      } finally {
-        if (provider === 'openai') {
-          if (action === 'save') setSavingOpenAiSettings(false);
-          else setClearingOpenAiSettings(false);
-        } else if (action === 'save') {
-          setSavingGeminiSettings(false);
-        } else {
-          setClearingGeminiSettings(false);
-        }
-      }
-    },
-    [geminiSettingsDraft, openAiSettingsDraft, updateProviderKeySettings],
-  );
-
-  const saveLlmProviderSettings = React.useCallback(async () => {
-    setSavingLlmProvider(true);
-    setLlmSettingsError(null);
-    setLlmSettingsNotice(null);
-    try {
-      const data = await requestJson<LlmSettingsResponse>('/api/settings/llm', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ provider: llmProviderDraft }),
-      });
-      setLlmSettings((prev) => (prev ? { ...prev, provider: data.provider } : data));
-      setLlmProviderDraft(data.provider.selected);
-      setLlmSettingsNotice(`Using ${data.provider.selected === 'gemini' ? 'Gemini' : 'OpenAI'} for LLM calls.`);
-    } catch (e: any) {
-      setLlmSettingsError(e?.message ?? String(e));
-    } finally {
-      setSavingLlmProvider(false);
-    }
-  }, [llmProviderDraft]);
-
-  const loadHubLogs = React.useCallback(async () => {
-    setHubLogsLoading(true);
-    setHubLogsError(null);
-    setHubLogsNotice(null);
-    try {
-      const data = await requestJson<HubLogsResponse>(`/api/settings/hub/logs?tail=${HUB_LOGS_TAIL_LINES}&maxBytes=${HUB_LOGS_MAX_BYTES}`);
-      setHubLogs(data);
-    } catch (e: any) {
-      setHubLogsError(e?.message ?? String(e));
-    } finally {
-      setHubLogsLoading(false);
-    }
-  }, []);
-
-  React.useEffect(() => {
-    if (appView !== 'settings') return;
-    void loadHubLogs();
-  }, [appView, loadHubLogs]);
-
-  const copyHubLogs = React.useCallback(async () => {
-    const text = String(hubLogs?.text ?? '');
-    if (!text.trim()) return;
-    await copyText(text);
-    setHubLogsNotice('Copied hub logs.');
-  }, [hubLogs?.text]);
-
-  const handleHubLogsScroll = React.useCallback((e: React.UIEvent<HTMLTextAreaElement>) => {
-    const el = e.currentTarget;
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    const pinned = distanceFromBottom <= 8;
-    setHubLogsPinnedToBottom((prev) => (prev === pinned ? prev : pinned));
-  }, []);
-
-  React.useEffect(() => {
-    if (!hubLogsExpanded) return;
-    if (!hubLogsPinnedToBottom) return;
-    const el = hubLogsTextareaRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }, [hubLogs?.text, hubLogsExpanded, hubLogsPinnedToBottom]);
 
   const transcriptMessageId = React.useCallback((t: TranscriptItem): string => {
     const explicit = typeof t?.id === 'string' ? t.id.trim() : '';
@@ -2103,7 +1164,7 @@ export default function DroneHubApp() {
       return;
     }
     const summary = drones.find((d) => d.id === selectedDrone) ?? null;
-    if (summary?.hubPhase === 'starting' || summary?.hubPhase === 'seeding') {
+    if (isDroneStartingOrSeeding(summary?.hubPhase)) {
       setChatInfo(null);
       setChatInfoError(null);
       setLoadingChatInfo(false);
@@ -3790,7 +2851,7 @@ export default function DroneHubApp() {
     const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
     if (!prompt && attachments.length === 0) return false;
     const optimisticPrompt = prompt || (attachments.length === 1 ? '[image attachment]' : `[${attachments.length} image attachments]`);
-    if (currentDrone.hubPhase === 'starting' || currentDrone.hubPhase === 'seeding') {
+    if (isDroneStartingOrSeeding(currentDrone.hubPhase)) {
       if (attachments.length > 0) {
         setPromptError(`"${currentDroneLabel}" is still provisioning. Image attachments can be sent once it is ready.`);
         return false;
@@ -3851,7 +2912,7 @@ export default function DroneHubApp() {
   );
   const startupAgentForSelectedDrone =
     selectedDroneSummary &&
-    (selectedDroneSummary.hubPhase === 'starting' || selectedDroneSummary.hubPhase === 'seeding') &&
+    (isDroneStartingOrSeeding(selectedDroneSummary.hubPhase)) &&
     startupSeedForSelectedDrone?.agent
       ? startupSeedForSelectedDrone.agent
       : null;
@@ -3871,7 +2932,7 @@ export default function DroneHubApp() {
       if (!parsed) continue;
       const drone = drones.find((d) => d.id === parsed.droneId) ?? null;
       if (!drone) continue;
-      if (drone.hubPhase === 'starting' || drone.hubPhase === 'seeding' || drone.hubPhase === 'error') continue;
+      if (isDroneStartingOrSeeding(drone.hubPhase) || drone.hubPhase === 'error') continue;
       if (flushingQueuedKeysRef.current.has(key)) continue;
       flushingQueuedKeysRef.current.add(key);
 
@@ -3926,7 +2987,7 @@ export default function DroneHubApp() {
     async () => {
       if (chatUiMode !== 'transcript') return { ok: true, pending: [] };
       if (!selectedDrone || !selectedChat) return { ok: true, pending: [] };
-      if (selectedDroneHubPhase === 'starting' || selectedDroneHubPhase === 'seeding') return { ok: true, pending: [] };
+      if (isDroneStartingOrSeeding(selectedDroneHubPhase)) return { ok: true, pending: [] };
       return await fetchJson<{ ok: true; pending: PendingPrompt[] }>(
         `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(selectedChat || 'default')}/pending`,
       );
@@ -4080,7 +3141,7 @@ export default function DroneHubApp() {
           }
           continue;
         }
-        const isStarting = summary.hubPhase === 'starting' || summary.hubPhase === 'seeding';
+        const isStarting = isDroneStartingOrSeeding(summary.hubPhase);
         if (!isStarting && !summary.busy) {
           delete next[id];
           changed = true;
@@ -4180,7 +3241,7 @@ export default function DroneHubApp() {
     let busy = false;
     const load = async () => {
       if (!selectedDrone || !selectedChat || busy) return;
-      if (selectedDroneHubPhase === 'starting' || selectedDroneHubPhase === 'seeding') {
+      if (isDroneStartingOrSeeding(selectedDroneHubPhase)) {
         return;
       }
       busy = true;
@@ -4237,7 +3298,7 @@ export default function DroneHubApp() {
       if (!selectedDrone || !selectedChat || busy) return;
       busy = true;
       const d = drones.find((x) => x.name === selectedDrone) ?? null;
-      if (d?.hubPhase === 'starting' || d?.hubPhase === 'seeding') {
+      if (isDroneStartingOrSeeding(d?.hubPhase)) {
         if (mounted) {
           sessionOffsetRef.current = null;
           screenLoadedRef.current = false;
@@ -4379,7 +3440,7 @@ export default function DroneHubApp() {
         const preferredChat = selectedChat || 'default';
         const results = await Promise.allSettled(
           targets.map(async (d) => {
-            if (d.hubPhase === 'starting' || d.hubPhase === 'seeding') {
+            if (isDroneStartingOrSeeding(d.hubPhase)) {
               throw new Error(`"${d.name}" is still starting.`);
             }
             const chatName = resolveChatNameForDrone(d, preferredChat);
@@ -4542,8 +3603,12 @@ export default function DroneHubApp() {
       ),
     [ports, currentDrone?.hostPort, currentDrone?.containerPort],
   );
-  const [portPreviewByDrone, setPortPreviewByDrone] = React.useState<PortPreviewByDrone>(() => readPortPreviewByDrone());
-  const [previewUrlByDrone, setPreviewUrlByDrone] = React.useState<PreviewUrlByDrone>(() => readPreviewUrlByDrone());
+  const [portPreviewByDrone, setPortPreviewByDrone] = React.useState<PortPreviewByDrone>(() =>
+    readPortPreviewByDrone(readLocalStorageItem(PORT_PREVIEW_STORAGE_KEY)),
+  );
+  const [previewUrlByDrone, setPreviewUrlByDrone] = React.useState<PreviewUrlByDrone>(() =>
+    readPreviewUrlByDrone(readLocalStorageItem(PREVIEW_URL_STORAGE_KEY)),
+  );
   const [portReachabilityByDrone, setPortReachabilityByDrone] = React.useState<PortReachabilityByDrone>({});
   usePersistedLocalStorageItem(PORT_PREVIEW_STORAGE_KEY, JSON.stringify(portPreviewByDrone));
   usePersistedLocalStorageItem(PREVIEW_URL_STORAGE_KEY, JSON.stringify(previewUrlByDrone));
@@ -4682,7 +3747,7 @@ export default function DroneHubApp() {
       const checks = await Promise.all(
         portRows.map(async (p) => ({
           hostPort: p.hostPort,
-          state: (await probeLocalhostPort(p.hostPort)) ? ('up' as const) : ('down' as const),
+          state: (await probeLocalhostPort(p.hostPort, PORT_STATUS_TIMEOUT_MS)) ? ('up' as const) : ('down' as const),
         })),
       );
       if (!mounted) return;
@@ -4713,7 +3778,7 @@ export default function DroneHubApp() {
     return portReachabilityByDrone[droneName] ?? {};
   }, [currentDrone?.name, portReachabilityByDrone]);
   const startupSeedForCurrentDrone =
-    currentDrone && (currentDrone.hubPhase === 'starting' || currentDrone.hubPhase === 'seeding')
+    currentDrone && (isDroneStartingOrSeeding(currentDrone.hubPhase))
       ? startupSeedByDrone[currentDrone.name] ?? null
       : null;
   const effectiveChatInfo = chatInfo
@@ -4928,7 +3993,7 @@ export default function DroneHubApp() {
     tab: RightPanelTab,
     paneKey: 'top' | 'bottom' | 'single',
   ): React.ReactNode {
-    const disabled = drone.hubPhase === 'starting' || drone.hubPhase === 'seeding';
+    const disabled = isDroneStartingOrSeeding(drone.hubPhase);
     const chatName = selectedChat || 'default';
     const isCurrent = Boolean(currentDrone && String(currentDrone.id) === String(drone.id));
     const contentByTab: Record<RightPanelTab, React.ReactNode> = {
@@ -5190,7 +4255,7 @@ export default function DroneHubApp() {
                       statusHint={isOptimistic ? 'queued' : undefined}
                       selected={selectedDroneSet.has(d.id)}
                       busy={
-                        d.hubPhase === 'starting' || d.hubPhase === 'seeding'
+                        isDroneStartingOrSeeding(d.hubPhase)
                           ? false
                           : Boolean(d.busy) || (d.id === selectedDrone && selectedIsResponding)
                       }
@@ -5377,7 +4442,7 @@ export default function DroneHubApp() {
                                 statusHint={isOptimistic ? 'queued' : undefined}
                                 selected={selectedDroneSet.has(d.id)}
                                 busy={
-                                  d.hubPhase === 'starting' || d.hubPhase === 'seeding'
+                                  isDroneStartingOrSeeding(d.hubPhase)
                                     ? false
                                     : Boolean(d.busy) || (d.id === selectedDrone && selectedIsResponding)
                                 }
@@ -6515,435 +5580,20 @@ export default function DroneHubApp() {
       {/* ── Content area (header + body row) ── */}
       <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden bg-[var(--panel)]">
         {appView === 'settings' ? (
-          <div className="flex-1 overflow-y-auto">
-            <div className="max-w-[820px] mx-auto px-5 py-6 sm:py-8">
-              <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-alt)] overflow-hidden">
-                <div className="px-5 py-4 border-b border-[var(--border)] flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--muted-dim)] font-semibold" style={{ fontFamily: 'var(--display)' }}>
-                      Settings
-                    </div>
-                    <h1 className="text-[18px] font-semibold text-[var(--fg)] mt-1" style={{ fontFamily: 'var(--display)' }}>
-                      LLM providers
-                    </h1>
-                    <p className="text-[12px] text-[var(--muted)] mt-1">
-                      Configure OpenAI and Gemini API keys, then choose which provider powers job parsing and drone-name suggestions.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void loadLlmSettings();
-                      void loadHubLogs();
-                    }}
-                    disabled={
-                      hubLogsLoading ||
-                      llmSettingsLoading ||
-                      savingOpenAiSettings ||
-                      clearingOpenAiSettings ||
-                      savingGeminiSettings ||
-                      clearingGeminiSettings ||
-                      savingLlmProvider
-                    }
-                    className={`h-8 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
-                      hubLogsLoading ||
-                      llmSettingsLoading ||
-                      savingOpenAiSettings ||
-                      clearingOpenAiSettings ||
-                      savingGeminiSettings ||
-                      clearingGeminiSettings ||
-                      savingLlmProvider
-                        ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                        : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                    }`}
-                    style={{ fontFamily: 'var(--display)' }}
-                    title="Refresh settings and logs"
-                  >
-                    Refresh
-                  </button>
-                </div>
-
-                <div className="px-5 py-4 flex flex-col gap-4">
-                  {llmSettingsError && (
-                    <div className="rounded border border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
-                      {llmSettingsError}
-                    </div>
-                  )}
-                  {llmSettingsNotice && (
-                    <div className="rounded border border-[rgba(52,211,153,.2)] bg-[rgba(16,185,129,.08)] px-3 py-2 text-[12px] text-[#34d399]">
-                      {llmSettingsNotice}
-                    </div>
-                  )}
-
-                  <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3">
-                    {llmSettingsLoading && !llmSettings ? (
-                      <div className="text-[12px] text-[var(--muted-dim)]">Loading settings…</div>
-                    ) : (
-                      <div className="flex flex-col gap-1">
-                        <div className="text-[12px] text-[var(--fg-secondary)]">
-                          Active provider: {llmSettings?.provider.selected === 'gemini' ? 'Gemini' : 'OpenAI'}
-                        </div>
-                        <div className="text-[11px] text-[var(--muted-dim)]">
-                          Provider source:{' '}
-                          {llmSettings?.provider.source === 'settings'
-                            ? 'Settings'
-                            : llmSettings?.provider.source === 'environment'
-                              ? 'Environment variable'
-                              : 'Default'}
-                        </div>
-                        <div className="text-[11px] text-[var(--muted-dim)]">
-                          OpenAI: {llmSettings?.openai.hasKey ? `configured (${llmSettings.openai.keyHint ?? 'hidden'})` : 'not configured'} • Gemini:{' '}
-                          {llmSettings?.gemini.hasKey ? `configured (${llmSettings.gemini.keyHint ?? 'hidden'})` : 'not configured'}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3">
-                    <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase mb-2" style={{ fontFamily: 'var(--display)' }}>
-                      Active provider
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setLlmProviderDraft('openai')}
-                        disabled={savingLlmProvider || llmSettingsLoading}
-                        className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
-                          llmProviderDraft === 'openai'
-                            ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
-                            : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                        } ${savingLlmProvider || llmSettingsLoading ? 'opacity-40 cursor-not-allowed' : ''}`}
-                        style={{ fontFamily: 'var(--display)' }}
-                      >
-                        OpenAI
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setLlmProviderDraft('gemini')}
-                        disabled={savingLlmProvider || llmSettingsLoading}
-                        className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
-                          llmProviderDraft === 'gemini'
-                            ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
-                            : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                        } ${savingLlmProvider || llmSettingsLoading ? 'opacity-40 cursor-not-allowed' : ''}`}
-                        style={{ fontFamily: 'var(--display)' }}
-                      >
-                        Gemini
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void saveLlmProviderSettings()}
-                        disabled={savingLlmProvider || llmSettingsLoading || llmProviderDraft === (llmSettings?.provider.selected ?? 'openai')}
-                        className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
-                          savingLlmProvider || llmSettingsLoading || llmProviderDraft === (llmSettings?.provider.selected ?? 'openai')
-                            ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                            : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
-                        }`}
-                        style={{ fontFamily: 'var(--display)' }}
-                      >
-                        {savingLlmProvider ? 'Saving…' : 'Save provider'}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
-                      <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
-                        OpenAI API key
-                      </div>
-                      {llmSettings?.openai.hasKey ? (
-                        <div className="text-[11px] text-[var(--muted-dim)]">
-                          {llmSettings.openai.keyHint ?? 'hidden'}
-                          {llmSettings.openai.updatedAt ? ` • Updated ${new Date(llmSettings.openai.updatedAt).toLocaleString()}` : ''}
-                        </div>
-                      ) : (
-                        <div className="text-[11px] text-[var(--muted-dim)]">No OpenAI key configured.</div>
-                      )}
-                      <div className="flex items-center gap-2">
-                        <input
-                          value={openAiSettingsDraft}
-                          onChange={(e) => setOpenAiSettingsDraft(maybeExtractApiKey(e.target.value, 'openai'))}
-                          type="text"
-                          autoComplete="off"
-                          name="openai-api-key"
-                          spellCheck={false}
-                          style={(showOpenAiKey ? {} : ({ WebkitTextSecurity: 'disc' } as React.CSSProperties))}
-                          className="flex-1 h-9 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors font-mono"
-                          placeholder="sk-..."
-                          disabled={savingOpenAiSettings || clearingOpenAiSettings}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowOpenAiKey((v) => !v)}
-                          disabled={savingOpenAiSettings || clearingOpenAiSettings}
-                          className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
-                            savingOpenAiSettings || clearingOpenAiSettings
-                              ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                              : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                          }`}
-                          style={{ fontFamily: 'var(--display)' }}
-                        >
-                          {showOpenAiKey ? 'Hide' : 'Show'}
-                        </button>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => void mutateApiKeySettings('openai', 'save')}
-                          disabled={!openAiSettingsDraft.trim() || savingOpenAiSettings || clearingOpenAiSettings}
-                          className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
-                            !openAiSettingsDraft.trim() || savingOpenAiSettings || clearingOpenAiSettings
-                              ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                              : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
-                          }`}
-                          style={{ fontFamily: 'var(--display)' }}
-                        >
-                          {savingOpenAiSettings ? 'Saving…' : 'Save'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void mutateApiKeySettings('openai', 'clear')}
-                          disabled={clearingOpenAiSettings || savingOpenAiSettings || !llmSettings?.openai.hasKey}
-                          className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
-                            clearingOpenAiSettings || savingOpenAiSettings || !llmSettings?.openai.hasKey
-                              ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                              : 'bg-[var(--red-subtle)] border-[rgba(255,90,90,.28)] text-[var(--red)] hover:bg-[rgba(255,90,90,.18)]'
-                          }`}
-                          style={{ fontFamily: 'var(--display)' }}
-                        >
-                          {clearingOpenAiSettings ? 'Clearing…' : 'Clear'}
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
-                      <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
-                        Gemini API key
-                      </div>
-                      {llmSettings?.gemini.hasKey ? (
-                        <div className="text-[11px] text-[var(--muted-dim)]">
-                          {llmSettings.gemini.keyHint ?? 'hidden'}
-                          {llmSettings.gemini.updatedAt ? ` • Updated ${new Date(llmSettings.gemini.updatedAt).toLocaleString()}` : ''}
-                        </div>
-                      ) : (
-                        <div className="text-[11px] text-[var(--muted-dim)]">No Gemini key configured.</div>
-                      )}
-                      <div className="flex items-center gap-2">
-                        <input
-                          value={geminiSettingsDraft}
-                          onChange={(e) => setGeminiSettingsDraft(maybeExtractApiKey(e.target.value, 'gemini'))}
-                          type="text"
-                          autoComplete="off"
-                          name="gemini-api-key"
-                          spellCheck={false}
-                          style={(showGeminiKey ? {} : ({ WebkitTextSecurity: 'disc' } as React.CSSProperties))}
-                          className="flex-1 h-9 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors font-mono"
-                          placeholder="AIza..."
-                          disabled={savingGeminiSettings || clearingGeminiSettings}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowGeminiKey((v) => !v)}
-                          disabled={savingGeminiSettings || clearingGeminiSettings}
-                          className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
-                            savingGeminiSettings || clearingGeminiSettings
-                              ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                              : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                          }`}
-                          style={{ fontFamily: 'var(--display)' }}
-                        >
-                          {showGeminiKey ? 'Hide' : 'Show'}
-                        </button>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => void mutateApiKeySettings('gemini', 'save')}
-                          disabled={!geminiSettingsDraft.trim() || savingGeminiSettings || clearingGeminiSettings}
-                          className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
-                            !geminiSettingsDraft.trim() || savingGeminiSettings || clearingGeminiSettings
-                              ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                              : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
-                          }`}
-                          style={{ fontFamily: 'var(--display)' }}
-                        >
-                          {savingGeminiSettings ? 'Saving…' : 'Save'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void mutateApiKeySettings('gemini', 'clear')}
-                          disabled={clearingGeminiSettings || savingGeminiSettings || !llmSettings?.gemini.hasKey}
-                          className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
-                            clearingGeminiSettings || savingGeminiSettings || !llmSettings?.gemini.hasKey
-                              ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                              : 'bg-[var(--red-subtle)] border-[rgba(255,90,90,.28)] text-[var(--red)] hover:bg-[rgba(255,90,90,.18)]'
-                          }`}
-                          style={{ fontFamily: 'var(--display)' }}
-                        >
-                          {clearingGeminiSettings ? 'Clearing…' : 'Clear'}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
-                    <div
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => setHubLogsExpanded((v) => !v)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          setHubLogsExpanded((v) => !v);
-                        }
-                      }}
-                      className="flex items-center justify-between gap-2 rounded px-1 py-0.5 hover:bg-[var(--hover)] transition-colors cursor-pointer"
-                      aria-expanded={hubLogsExpanded}
-                      aria-label={hubLogsExpanded ? 'Collapse hub logs' : 'Expand hub logs'}
-                    >
-                      <div className="inline-flex items-center gap-2 min-w-0">
-                        <IconChevron down={hubLogsExpanded} className="text-[var(--muted-dim)] opacity-80" />
-                        <div>
-                          <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
-                            Hub logs
-                          </div>
-                          <div className="text-[11px] text-[var(--muted-dim)] mt-1">
-                            Recent output from the Drone Hub process log.
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void loadHubLogs();
-                          }}
-                          disabled={hubLogsLoading}
-                          className={`h-8 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
-                            hubLogsLoading
-                              ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                              : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                          }`}
-                          style={{ fontFamily: 'var(--display)' }}
-                          title="Refresh hub logs"
-                        >
-                          {hubLogsLoading ? 'Refreshing…' : 'Refresh'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void copyHubLogs();
-                          }}
-                          disabled={hubLogsLoading || !String(hubLogs?.text ?? '').trim()}
-                          className={`h-8 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all inline-flex items-center gap-1.5 ${
-                            hubLogsLoading || !String(hubLogs?.text ?? '').trim()
-                              ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                              : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                          }`}
-                          style={{ fontFamily: 'var(--display)' }}
-                          title="Copy hub logs"
-                        >
-                          <IconCopy className="opacity-80" />
-                          Copy
-                        </button>
-                      </div>
-                    </div>
-
-                    {hubLogsExpanded && (
-                      <>
-                        {hubLogsError && (
-                          <div className="rounded border border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
-                            {hubLogsError}
-                          </div>
-                        )}
-                        {hubLogsNotice && (
-                          <div className="rounded border border-[rgba(52,211,153,.2)] bg-[rgba(16,185,129,.08)] px-3 py-2 text-[12px] text-[#34d399]">
-                            {hubLogsNotice}
-                          </div>
-                        )}
-
-                        <div className="text-[11px] text-[var(--muted-dim)] leading-relaxed">
-                          {hubLogs?.logPath ? (
-                            <>
-                              <span className="font-mono text-[var(--fg-secondary)]">{hubLogs.logPath}</span>
-                              {hubLogs.updatedAt ? ` • Updated ${new Date(hubLogs.updatedAt).toLocaleString()}` : ''}
-                              {hubLogs.truncated ? ' • Tail view (truncated)' : ''}
-                            </>
-                          ) : (
-                            'No hub log file found yet.'
-                          )}
-                        </div>
-
-                        <textarea
-                          ref={hubLogsTextareaRef}
-                          readOnly
-                          value={hubLogs?.text ?? ''}
-                          onScroll={handleHubLogsScroll}
-                          placeholder={hubLogsLoading ? 'Loading logs…' : 'No hub logs available yet.'}
-                          className="w-full min-h-[220px] max-h-[55vh] rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-3 py-2 text-[12px] leading-relaxed text-[var(--fg-secondary)] font-mono resize-y focus:outline-none"
-                        />
-                        <div className="text-[10px] text-[var(--muted-dim)]">
-                          Showing up to {(hubLogs?.tailLines ?? HUB_LOGS_TAIL_LINES).toLocaleString()} lines and{' '}
-                          {(hubLogs?.maxBytes ?? HUB_LOGS_MAX_BYTES).toLocaleString()} bytes.
-                        </div>
-                      </>
-                    )}
-                  </div>
-
-                  <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
-                    <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
-                      Onboarding
-                    </div>
-                    <div className="text-[11px] text-[var(--muted-dim)] leading-relaxed">
-                      Clear onboarding dismissal state and replay the guided tips from step 1.
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const ok = window.confirm('Replay onboarding from the beginning? This will clear onboarding dismissal state.');
-                          if (!ok) return;
-                          setAppView('workspace');
-                          requestGuidedOnboardingReplay();
-                        }}
-                        className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110"
-                        style={{ fontFamily: 'var(--display)' }}
-                        title="Reset onboarding and replay guided tips"
-                      >
-                        Replay onboarding
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const ok = window.confirm('Clear onboarding state?');
-                          if (!ok) return;
-                          resetGuidedOnboardingDismissals();
-                        }}
-                        className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
-                        style={{ fontFamily: 'var(--display)' }}
-                        title="Clear onboarding dismissals without opening tips"
-                      >
-                        Reset only
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center">
-                    <button
-                      type="button"
-                      onClick={() => setAppView('workspace')}
-                      className="ml-auto h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
-                      style={{ fontFamily: 'var(--display)' }}
-                    >
-                      Back to drones
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+          <SettingsView
+            llm={llmSettingsState}
+            hubLogsState={hubLogsState}
+            hubLogsTailLines={HUB_LOGS_TAIL_LINES}
+            hubLogsMaxBytes={HUB_LOGS_MAX_BYTES}
+            onBackToWorkspace={() => setAppView('workspace')}
+            onReplayOnboarding={() => {
+              setAppView('workspace');
+              requestGuidedOnboardingReplay();
+            }}
+            onResetOnboarding={() => {
+              resetGuidedOnboardingDismissals();
+            }}
+          />
         ) : draftChat ? (
             <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
               <div className="flex-shrink-0 bg-[var(--panel-alt)] border-b border-[var(--border)] relative">
@@ -7307,7 +5957,7 @@ export default function DroneHubApp() {
                       </button>
                     )}
                     <div className={`w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0 border ${
-                      currentDrone.hubPhase === 'starting' || currentDrone.hubPhase === 'seeding'
+                      isDroneStartingOrSeeding(currentDrone.hubPhase)
                         ? 'bg-[var(--yellow-subtle)] border-[rgba(255,178,36,.15)]'
                         : currentDrone.statusOk
                           ? 'bg-[var(--accent-subtle)] border-[rgba(167,139,250,.15)] shadow-[0_0_12px_rgba(167,139,250,.08)]'
@@ -7315,7 +5965,7 @@ export default function DroneHubApp() {
                     }`}>
                       <IconDrone
                         className={
-                          currentDrone.hubPhase === 'starting' || currentDrone.hubPhase === 'seeding'
+                          isDroneStartingOrSeeding(currentDrone.hubPhase)
                             ? 'text-[var(--yellow)]'
                             : currentDrone.statusOk
                               ? 'text-[var(--accent)]'
@@ -7512,14 +6162,14 @@ export default function DroneHubApp() {
                 {/* Spacer */}
                 <div className="flex-1" />
                 {/* Primary actions */}
-                <button onClick={() => openDroneTerminal('ssh')} disabled={currentDrone.hubPhase === 'starting' || currentDrone.hubPhase === 'seeding' || openingTerminal?.mode === 'ssh' || openingTerminal?.mode === 'agent'} className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${openingTerminal ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]' : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'}`} style={{ fontFamily: 'var(--display)' }} title={`SSH into "${currentDroneLabel}"`}>SSH</button>
-                <button onClick={() => openDroneEditor('cursor')} disabled={currentDrone.hubPhase === 'starting' || currentDrone.hubPhase === 'seeding' || Boolean(openingEditor) || Boolean(openingTerminal)} className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${openingEditor || openingTerminal ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]' : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)]'}`} style={{ fontFamily: 'var(--display)' }} title={`Open Cursor attached to "${currentDroneLabel}"`}><IconCursorApp className="opacity-70" />Cursor</button>
+                <button onClick={() => openDroneTerminal('ssh')} disabled={isDroneStartingOrSeeding(currentDrone.hubPhase) || openingTerminal?.mode === 'ssh' || openingTerminal?.mode === 'agent'} className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${openingTerminal ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]' : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'}`} style={{ fontFamily: 'var(--display)' }} title={`SSH into "${currentDroneLabel}"`}>SSH</button>
+                <button onClick={() => openDroneEditor('cursor')} disabled={isDroneStartingOrSeeding(currentDrone.hubPhase) || Boolean(openingEditor) || Boolean(openingTerminal)} className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${openingEditor || openingTerminal ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]' : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)]'}`} style={{ fontFamily: 'var(--display)' }} title={`Open Cursor attached to "${currentDroneLabel}"`}><IconCursorApp className="opacity-70" />Cursor</button>
                 {(currentDrone.repoAttached ?? Boolean(String(currentDrone.repoPath ?? '').trim())) && (
                   <button
                     type="button"
                     onClick={() => void pullRepoChanges()}
-                    disabled={currentDrone.hubPhase === 'starting' || currentDrone.hubPhase === 'seeding' || Boolean(openingEditor) || Boolean(openingTerminal) || Boolean(repoOp)}
-                    className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${currentDrone.hubPhase === 'starting' || currentDrone.hubPhase === 'seeding' || Boolean(openingEditor) || Boolean(openingTerminal) || Boolean(repoOp) ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]' : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'}`}
+                    disabled={isDroneStartingOrSeeding(currentDrone.hubPhase) || Boolean(openingEditor) || Boolean(openingTerminal) || Boolean(repoOp)}
+                    className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${isDroneStartingOrSeeding(currentDrone.hubPhase) || Boolean(openingEditor) || Boolean(openingTerminal) || Boolean(repoOp) ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]' : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'}`}
                     style={{ fontFamily: 'var(--display)' }}
                     title="Pull repo changes from the drone container into your local repo"
                   >
@@ -7548,7 +6198,7 @@ export default function DroneHubApp() {
                             setHeaderOverflowOpen(false);
                             openDroneTerminal('agent');
                           }}
-                          disabled={currentDrone.hubPhase === 'starting' || currentDrone.hubPhase === 'seeding' || Boolean(openingTerminal)}
+                          disabled={isDroneStartingOrSeeding(currentDrone.hubPhase) || Boolean(openingTerminal)}
                           className={cn(dropdownMenuItemBaseClass, 'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed')}
                           role="menuitem"
                         >
@@ -7560,7 +6210,7 @@ export default function DroneHubApp() {
                             setHeaderOverflowOpen(false);
                             openDroneEditor('code');
                           }}
-                          disabled={currentDrone.hubPhase === 'starting' || currentDrone.hubPhase === 'seeding' || Boolean(openingEditor) || Boolean(openingTerminal)}
+                          disabled={isDroneStartingOrSeeding(currentDrone.hubPhase) || Boolean(openingEditor) || Boolean(openingTerminal)}
                           className={cn(dropdownMenuItemBaseClass, 'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed')}
                           role="menuitem"
                         >
@@ -7575,7 +6225,7 @@ export default function DroneHubApp() {
                                 setHeaderOverflowOpen(false);
                                 void reseedRepo();
                               }}
-                              disabled={currentDrone.hubPhase === 'starting' || currentDrone.hubPhase === 'seeding' || Boolean(openingEditor) || Boolean(openingTerminal) || Boolean(repoOp)}
+                              disabled={isDroneStartingOrSeeding(currentDrone.hubPhase) || Boolean(openingEditor) || Boolean(openingTerminal) || Boolean(repoOp)}
                               className={cn(dropdownMenuItemBaseClass, 'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed')}
                               role="menuitem"
                             >
@@ -7753,7 +6403,7 @@ export default function DroneHubApp() {
                   onScroll={(e) => updatePinned(e.currentTarget)}
                   className="h-full min-w-0 min-h-0 overflow-auto relative"
                 >
-                  {(currentDrone.hubPhase === 'starting' || currentDrone.hubPhase === 'seeding') && String(startupSeedForCurrentDrone?.prompt ?? '').trim() && (
+                  {(isDroneStartingOrSeeding(currentDrone.hubPhase)) && String(startupSeedForCurrentDrone?.prompt ?? '').trim() && (
                     <div className="max-w-[900px] mx-auto px-6 pt-2">
                       <div className="rounded-md border border-[rgba(148,163,184,.2)] bg-[var(--user-dim)] px-3 py-2 text-[12px] text-[var(--fg-secondary)] whitespace-pre-wrap">
                         {String(startupSeedForCurrentDrone?.prompt ?? '').trim()}
@@ -7819,101 +6469,23 @@ export default function DroneHubApp() {
 
             {/* Right panel content (tabs are in the header toolbar) */}
             {rightPanelOpen && (
-              <aside
-                className="relative flex-shrink-0 bg-[var(--panel-alt)] border-l border-[var(--border)] flex flex-col min-h-0 overflow-hidden"
-                style={{ width: rightPanelWidth, minWidth: RIGHT_PANEL_MIN_WIDTH_PX, maxWidth: rightPanelWidthMax }}
-              >
-                <div
-                  role="separator"
-                  aria-label="Resize right panel"
-                  aria-orientation="vertical"
-                  onMouseDown={startRightPanelResize}
-                  onDoubleClick={resetRightPanelWidth}
-                  className="absolute left-0 top-0 bottom-0 w-2 -translate-x-1/2 z-30 cursor-col-resize group"
-                  title="Drag to resize panel. Double-click to reset."
-                >
-                  <div
-                    className={`absolute left-1/2 top-0 h-full -translate-x-1/2 w-px transition-colors ${
-                      rightPanelResizing
-                        ? 'bg-[var(--accent)]'
-                        : 'bg-transparent group-hover:bg-[var(--accent-muted)]'
-                    }`}
-                  />
-                </div>
-                {rightPanelSplit ? (
-                  <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-                    <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-                      <div className="flex-shrink-0 px-2 py-1 border-b border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] flex items-center gap-2">
-                        <span className="text-[9px] font-semibold tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
-                          Top Pane
-                        </span>
-                        <div className="w-[2px] h-3.5 rounded-full bg-[var(--muted)] opacity-65 shadow-[0_0_0_1px_rgba(255,255,255,.05)]" />
-                        <div className="flex items-center gap-0.5 min-w-0 overflow-x-auto pr-1">
-                          {RIGHT_PANEL_TABS.map((tab) => {
-                            const active = rightPanelTab === tab;
-                            return (
-                              <button
-                                key={`top-pane-${tab}`}
-                                type="button"
-                                onClick={() => setRightPanelTab(tab)}
-                                data-onboarding-id={tab === 'changes' ? 'rightPanel.tab.changes' : undefined}
-                                className={`px-1.5 py-0.5 rounded text-[9px] font-semibold tracking-wide uppercase whitespace-nowrap transition-all ${
-                                  active
-                                    ? 'bg-[var(--accent-subtle)] text-[var(--accent)] border border-[var(--accent-muted)]'
-                                    : 'text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] border border-transparent'
-                                }`}
-                                style={{ fontFamily: 'var(--display)' }}
-                              >
-                                {RIGHT_PANEL_TAB_LABELS[tab]}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                      <div className="flex-1 min-h-0 overflow-hidden">
-                        {renderRightPanelTabContent(currentDrone, rightPanelTab, 'top')}
-                      </div>
-                    </div>
-                    <div className="h-px bg-[var(--border)]" />
-                    <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-                      <div className="flex-shrink-0 px-2 py-1 border-b border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] flex items-center gap-2">
-                        <span className="text-[9px] font-semibold tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
-                          Bottom Pane
-                        </span>
-                        <div className="w-[2px] h-3.5 rounded-full bg-[var(--muted)] opacity-65 shadow-[0_0_0_1px_rgba(255,255,255,.05)]" />
-                        <div className="flex items-center gap-0.5 min-w-0 overflow-x-auto pr-1">
-                          {RIGHT_PANEL_TABS.map((tab) => {
-                            const active = rightPanelBottomTab === tab;
-                            return (
-                              <button
-                                key={`bottom-pane-${tab}`}
-                                type="button"
-                                onClick={() => setRightPanelBottomTab(tab)}
-                                data-onboarding-id={tab === 'changes' ? 'rightPanel.tab.changes' : undefined}
-                                className={`px-1.5 py-0.5 rounded text-[9px] font-semibold tracking-wide uppercase whitespace-nowrap transition-all ${
-                                  active
-                                    ? 'bg-[var(--accent-subtle)] text-[var(--accent)] border border-[var(--accent-muted)]'
-                                    : 'text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] border border-transparent'
-                                }`}
-                                style={{ fontFamily: 'var(--display)' }}
-                              >
-                                {RIGHT_PANEL_TAB_LABELS[tab]}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                      <div className="flex-1 min-h-0 overflow-hidden">
-                        {renderRightPanelTabContent(currentDrone, rightPanelBottomTab, 'bottom')}
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex-1 min-h-0 overflow-hidden">
-                    {renderRightPanelTabContent(currentDrone, rightPanelTab, 'single')}
-                  </div>
-                )}
-              </aside>
+              <RightPanel
+                currentDrone={currentDrone}
+                rightPanelWidth={rightPanelWidth}
+                rightPanelWidthMax={rightPanelWidthMax}
+                rightPanelMinWidth={RIGHT_PANEL_MIN_WIDTH_PX}
+                rightPanelResizing={rightPanelResizing}
+                rightPanelSplit={rightPanelSplit}
+                rightPanelTab={rightPanelTab}
+                rightPanelBottomTab={rightPanelBottomTab}
+                rightPanelTabs={RIGHT_PANEL_TABS}
+                rightPanelTabLabels={RIGHT_PANEL_TAB_LABELS}
+                onRightPanelTabChange={setRightPanelTab}
+                onRightPanelBottomTabChange={setRightPanelBottomTab}
+                onStartResize={startRightPanelResize}
+                onResetWidth={resetRightPanelWidth}
+                renderTabContent={renderRightPanelTabContent}
+              />
             )}
             </div>
           </>

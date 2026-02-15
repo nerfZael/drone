@@ -7899,6 +7899,13 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
       json(res, 500, { ok: false, error: err?.message ?? String(err) });
     }
   });
+  const httpSockets = new Set<any>();
+  server.on('connection', (socket) => {
+    httpSockets.add(socket);
+    socket.on('close', () => {
+      httpSockets.delete(socket);
+    });
+  });
 
   server.on('upgrade', async (req, socket, head) => {
     try {
@@ -7983,6 +7990,14 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
     host,
     port: actualPort,
     close: async () => {
+      const waitWithTimeout = async (p: Promise<void>, timeoutMs: number): Promise<void> => {
+        await Promise.race([
+          p,
+          new Promise<void>((resolve) => {
+            setTimeout(() => resolve(), Math.max(1, Math.floor(timeoutMs)));
+          }),
+        ]);
+      };
       try {
         wss.clients.forEach((c: WebSocket) => {
           try {
@@ -7990,12 +8005,39 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           } catch {
             // ignore
           }
+          try {
+            c.terminate();
+          } catch {
+            // ignore
+          }
         });
       } catch {
         // ignore
       }
-      await new Promise<void>((resolve) => wss.close(() => resolve()));
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await waitWithTimeout(
+        new Promise<void>((resolve) => {
+          try {
+            wss.close(() => resolve());
+          } catch {
+            resolve();
+          }
+        }),
+        2_500
+      );
+      const serverClose = new Promise<void>((resolve) => server.close(() => resolve()));
+      try {
+        (server as any).closeIdleConnections?.();
+      } catch {
+        // ignore
+      }
+      for (const socket of httpSockets) {
+        try {
+          socket.destroy();
+        } catch {
+          // ignore
+        }
+      }
+      await waitWithTimeout(serverClose, 5_000);
     },
   };
 }
