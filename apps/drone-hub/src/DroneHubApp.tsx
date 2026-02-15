@@ -1,5 +1,4 @@
 import React from 'react';
-import { CreateDronesFromAgentMessageModal } from './CreateDronesFromAgentMessageModal';
 import {
   type ChatAgentConfig,
   type ChatInfo,
@@ -13,39 +12,13 @@ import {
   type ChatSendPayload,
   EmptyState,
 } from './droneHub/chat';
-import { DroneChangesDock } from './droneHub/changes';
-import { DroneFilesDock } from './droneHub/files';
-import {
-  DroneCard,
-  DroneLinksDock,
-  DronePreviewDock,
-} from './droneHub/overview';
-import { DroneTerminalDock } from './droneHub/terminal';
 import { requestJson } from './droneHub/http';
 import { GuidedOnboarding } from './onboarding/GuidedOnboarding';
 import { requestGuidedOnboardingReplay, resetGuidedOnboardingDismissals } from './onboarding/control';
 import { usePaneReadiness } from './droneHub/panes/usePaneReadiness';
-import {
-  IconChat,
-  IconChevron,
-  IconColumns,
-  IconCopy,
-  IconDrone,
-  IconFolder,
-  IconList,
-  IconPencil,
-  IconPlus,
-  IconPlusDouble,
-  IconSettings,
-  IconSpinner,
-  IconTrash,
-  IconVsCode,
-  SkeletonLine,
-} from './droneHub/app/icons';
 import { copyText } from './droneHub/app/clipboard';
 import {
   BUILTIN_AGENT_OPTIONS,
-  DRONE_DND_MIME,
   FS_EXPLORER_VIEW_STORAGE_KEY,
   GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX,
   GROUP_MULTI_CHAT_COLUMN_WIDTH_STORAGE_KEY,
@@ -55,31 +28,19 @@ import {
   PORT_STATUS_POLL_INTERVAL_MS,
   PORT_STATUS_TIMEOUT_MS,
   PREVIEW_URL_STORAGE_KEY,
-  RIGHT_PANEL_BOTTOM_TAB_STORAGE_KEY,
-  RIGHT_PANEL_DEFAULT_WIDTH_PX,
   RIGHT_PANEL_MIN_WIDTH_PX,
-  RIGHT_PANEL_SPLIT_STORAGE_KEY,
   RIGHT_PANEL_TAB_LABELS,
   RIGHT_PANEL_TABS,
-  RIGHT_PANEL_TOP_TAB_STORAGE_KEY,
-  RIGHT_PANEL_WIDTH_STORAGE_KEY,
   SIDEBAR_REPOS_COLLAPSED_STORAGE_KEY,
   STARTUP_SEED_MISSING_GRACE_MS,
   clampGroupMultiChatColumnWidthPx,
-  clampRightPanelWidthPx,
   isStartupSeedFresh,
-  parseRightPanelTab,
-  rightPanelMaxWidthPx,
-  viewportWidthPx,
   type RightPanelTab,
 } from './droneHub/app/app-config';
-import { DraftChatWorkspace } from './droneHub/app/DraftChatWorkspace';
-import { DroneErrorModal } from './droneHub/app/DroneErrorModal';
-import { GroupMultiChatWorkspace } from './droneHub/app/GroupMultiChatWorkspace';
-import { NoDroneSelectedState } from './droneHub/app/NoDroneSelectedState';
-import { ReposModal } from './droneHub/app/ReposModal';
-import { SelectedDroneWorkspace } from './droneHub/app/SelectedDroneWorkspace';
-import { SettingsView } from './droneHub/app/SettingsView';
+import { DroneSidebar } from './droneHub/app/DroneSidebar';
+import { DroneHubOverlays } from './droneHub/app/DroneHubOverlays';
+import { DroneHubWorkspaceContent } from './droneHub/app/DroneHubWorkspaceContent';
+import { RightPanelTabContent } from './droneHub/app/RightPanelTabContent';
 import type {
   AppView,
   ChatModelOption,
@@ -89,27 +50,34 @@ import type {
   TldrState,
 } from './droneHub/app/app-types';
 import { useHubLogs } from './droneHub/app/use-hub-logs';
+import { useCreateDroneRowsState } from './droneHub/app/use-create-drone-rows-state';
+import { useCreateDraftWorkflowState } from './droneHub/app/use-create-draft-workflow-store';
+import { useChatRuntimeOrchestration } from './droneHub/app/use-chat-runtime-orchestration';
+import { useDroneGroupDnd } from './droneHub/app/use-drone-group-dnd';
+import { useGroupManagement } from './droneHub/app/use-group-management';
+import { useJobsWorkflow } from './droneHub/app/use-jobs-workflow';
 import { useLlmSettings } from './droneHub/app/use-llm-settings';
+import { useQueuedPromptsState } from './droneHub/app/use-queued-prompts-state';
+import { useRightPanelLayout } from './droneHub/app/use-right-panel-layout';
+import { useSidebarViewModel } from './droneHub/app/use-sidebar-view-model';
+import { useWorkspaceActions } from './droneHub/app/use-workspace-actions';
 import {
   fetchJson,
   isNotFoundError,
   probeLocalhostPort,
   readLocalStorageItem,
-  useNowMs,
   usePersistedLocalStorageItem,
   usePoll,
 } from './droneHub/app/hooks';
 import {
   buildContainerPreviewUrl,
   compareDronesByNewestFirst,
-  droneChatQueueKey,
   droneHomePath,
   isDroneStartingOrSeeding,
   makeId,
   normalizeContainerPathInput,
   normalizePortRows,
   normalizePreviewUrl,
-  parseDroneChatQueueKey,
   parseRepoPullConflict,
   readPortPreviewByDrone,
   readPreviewUrlByDrone,
@@ -118,10 +86,9 @@ import {
   sameReachabilityMap,
   type RepoOpErrorMeta,
 } from './droneHub/app/helpers';
-import { droneNameHasWhitespace, isUntitledLikeDroneName, normalizeDraftDroneName } from './droneHub/app/name-helpers';
+import { droneNameHasWhitespace, normalizeDraftDroneName } from './droneHub/app/name-helpers';
 import { cn } from './ui/cn';
 import { useDropdownDismiss } from './ui/dropdown';
-import { UiMenuSelect } from './ui/menuSelect';
 import type {
   CustomAgentProfile,
   DroneFsEntry,
@@ -129,8 +96,6 @@ import type {
   DronePortMapping,
   DronePortsPayload,
   DroneSummary,
-  EditableJob,
-  JobSpec,
   PendingPrompt,
   PortPreviewByDrone,
   PortReachabilityByDrone,
@@ -293,11 +258,6 @@ export default function DroneHubApp() {
     });
     return out;
   }, [dronesFilteredByRepo, registryGroupNames]);
-  const hasUngroupedGroup = React.useMemo(
-    () => groups.some((g) => isUngroupedGroupName(g.group)),
-    [groups],
-  );
-
   // NOTE: selection is keyed by stable drone id (not display name).
   const [selectedDrone, setSelectedDrone] = React.useState<string | null>(null);
   const [selectedDroneIds, setSelectedDroneIds] = React.useState<string[]>([]);
@@ -316,122 +276,96 @@ export default function DroneHubApp() {
   // Keyed by drone id.
   const [startupSeedByDrone, setStartupSeedByDrone] = React.useState<Record<string, StartupSeedState>>({});
   const [draftChat, setDraftChat] = React.useState<DraftChatState | null>(null);
-  const [draftCreateOpen, setDraftCreateOpen] = React.useState(false);
-  const [draftCreateName, setDraftCreateName] = React.useState('');
-  const [draftCreateGroup, setDraftCreateGroup] = React.useState('');
-  const [draftCreateError, setDraftCreateError] = React.useState<string | null>(null);
-  const [draftCreating, setDraftCreating] = React.useState(false);
-  const [draftAutoRenaming, setDraftAutoRenaming] = React.useState(false);
-  // Local-only prompt queue used while drones are provisioning (hubPhase starting/seeding).
-  // Key format: `${droneId}::${chatName}`
-  const [queuedPromptsByDroneChat, setQueuedPromptsByDroneChat] = React.useState<Record<string, PendingPrompt[]>>({});
-  const queuedPromptsByDroneChatRef = React.useRef<Record<string, PendingPrompt[]>>({});
-  React.useEffect(() => {
-    queuedPromptsByDroneChatRef.current = queuedPromptsByDroneChat;
-  }, [queuedPromptsByDroneChat]);
-  const flushingQueuedKeysRef = React.useRef<Set<string>>(new Set());
-  const [draftNameSuggesting, setDraftNameSuggesting] = React.useState(false);
-  const [draftSuggestedName, setDraftSuggestedName] = React.useState('');
-  const [draftNameSuggestionError, setDraftNameSuggestionError] = React.useState<string | null>(null);
+  const {
+    createOpen,
+    creating,
+    createMode,
+    cloneSourceId,
+    cloneIncludeChats,
+    createError,
+    createGroup,
+    createRepoPath,
+    createInitialMessage,
+    createRepoMenuOpen,
+    draftCreateOpen,
+    draftCreateName,
+    draftCreateGroup,
+    draftCreateError,
+    draftCreating,
+    draftAutoRenaming,
+    draftNameSuggesting,
+    draftSuggestedName,
+    draftNameSuggestionError,
+    setCreateOpen,
+    setCreating,
+    setCreateMode,
+    setCloneSourceId,
+    setCloneIncludeChats,
+    setCreateError,
+    setCreateGroup,
+    setCreateRepoPath,
+    setCreateInitialMessage,
+    setCreateRepoMenuOpen,
+    setDraftCreateOpen,
+    setDraftCreateName,
+    setDraftCreateGroup,
+    setDraftCreateError,
+    setDraftCreating,
+    setDraftAutoRenaming,
+    setDraftNameSuggesting,
+    setDraftSuggestedName,
+    setDraftNameSuggestionError,
+  } = useCreateDraftWorkflowState();
+  const {
+    queuedPromptsByDroneChat,
+    queuedPromptsByDroneChatRef,
+    flushingQueuedKeysRef,
+    enqueueQueuedPrompt,
+    patchQueuedPrompt,
+    removeQueuedPrompt,
+  } = useQueuedPromptsState();
   const draftNameSuggestSeqRef = React.useRef(0);
   const draftCreateNameRef = React.useRef<HTMLInputElement | null>(null);
   const selectionAnchorRef = React.useRef<string | null>(null);
-  const selectedDroneSet = React.useMemo(() => new Set(selectedDroneIds), [selectedDroneIds]);
-  const orderedDroneIds = React.useMemo(() => {
-    if (viewMode === 'flat') {
-      return dronesFilteredByRepo
-        .slice()
-        .sort(compareDronesByNewestFirst)
-        .map((d) => d.id);
-    }
-    return groups.flatMap((g) => g.items.map((d) => d.id));
-  }, [dronesFilteredByRepo, groups, viewMode]);
-  const sidebarOptimisticDrones = React.useMemo(() => {
-    const known = new Set(drones.map((d) => d.id));
-    const nowMs = Date.now();
-    const out: DroneSummary[] = [];
-    for (const [id, seed] of Object.entries(startupSeedByDrone)) {
-      if (optimisticallyDeletedDrones[id]) continue;
-      if (known.has(id)) continue;
-      if (!isStartupSeedFresh(seed, nowMs)) continue;
-      const chatName = String(seed.chatName ?? 'default').trim() || 'default';
-      const name = String((seed as any)?.droneName ?? '').trim() || id;
-      out.push({
-        id,
-        name,
-        group: null,
-        createdAt: seed.at || new Date().toISOString(),
-        repoAttached: false,
-        repoPath: '',
-        containerPort: 0,
-        hostPort: null,
-        statusOk: true,
-        statusError: null,
-        chats: [chatName],
-        hubPhase: 'starting',
-        hubMessage: 'Queued',
-        busy: true,
-      });
-    }
-    out.sort(compareDronesByNewestFirst);
-    return out;
-  }, [drones, optimisticallyDeletedDrones, startupSeedByDrone]);
-  const sidebarOptimisticDroneIdSet = React.useMemo(() => new Set(sidebarOptimisticDrones.map((d) => d.id)), [sidebarOptimisticDrones]);
-  const sidebarDrones = React.useMemo(() => [...drones, ...sidebarOptimisticDrones], [drones, sidebarOptimisticDrones]);
-  const uiDroneName = React.useCallback((nameRaw: string): string => String(nameRaw ?? '').trim(), []);
-  const sidebarDronesFilteredByRepo = React.useMemo(() => {
-    const targetRepo = String(activeRepoPath ?? '').trim();
-    if (!targetRepo) return sidebarDrones;
-    return sidebarDrones.filter((d) => String(d?.repoPath ?? '').trim() === targetRepo);
-  }, [activeRepoPath, sidebarDrones]);
-  const sidebarGroups = React.useMemo(() => {
-    const m = new Map<string, DroneSummary[]>();
-    for (const rawName of registryGroupNames) {
-      const g = String(rawName ?? '').trim();
-      if (!g || isUngroupedGroupName(g)) continue;
-      if (!m.has(g)) m.set(g, []);
-    }
-    for (const d of sidebarDronesFilteredByRepo) {
-      const raw = (d.group ?? '').trim();
-      const g = !raw || isUngroupedGroupName(raw) ? 'Ungrouped' : raw;
-      const arr = m.get(g) ?? [];
-      arr.push(d);
-      m.set(g, arr);
-    }
-    const out = Array.from(m.entries()).map(([group, items]) => {
-      items.sort(compareDronesByNewestFirst);
-      return { group, items };
-    });
-    out.sort((a, b) => {
-      if (isUngroupedGroupName(a.group) && !isUngroupedGroupName(b.group)) return -1;
-      if (!isUngroupedGroupName(a.group) && isUngroupedGroupName(b.group)) return 1;
-      return a.group.localeCompare(b.group);
-    });
-    return out;
-  }, [sidebarDronesFilteredByRepo, registryGroupNames]);
-  const sidebarHasUngroupedGroup = React.useMemo(
-    () => sidebarGroups.some((g) => isUngroupedGroupName(g.group)),
-    [sidebarGroups],
-  );
+  const {
+    selectedDroneSet,
+    orderedDroneIds,
+    sidebarOptimisticDroneIdSet,
+    sidebarDrones,
+    uiDroneName,
+    sidebarDronesFilteredByRepo,
+    sidebarGroups,
+    sidebarHasUngroupedGroup,
+  } = useSidebarViewModel({
+    selectedDroneIds,
+    viewMode,
+    drones,
+    dronesFilteredByRepo,
+    groups,
+    startupSeedByDrone,
+    optimisticallyDeletedDrones,
+    activeRepoPath,
+    registryGroupNames,
+  });
 
   /* ── Layout state ── */
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false);
-  const [rightPanelOpen, setRightPanelOpen] = React.useState(true);
-  const [rightPanelWidth, setRightPanelWidth] = React.useState<number>(() => {
-    const saved = Number(readLocalStorageItem(RIGHT_PANEL_WIDTH_STORAGE_KEY));
-    if (Number.isFinite(saved) && saved > 0) return clampRightPanelWidthPx(saved);
-    return clampRightPanelWidthPx(RIGHT_PANEL_DEFAULT_WIDTH_PX);
-  });
-  const [rightPanelResizing, setRightPanelResizing] = React.useState(false);
-  const rightPanelResizeRef = React.useRef<{ startX: number; startWidth: number } | null>(null);
-  const [rightPanelTab, setRightPanelTab] = React.useState<RightPanelTab>(() => parseRightPanelTab(readLocalStorageItem(RIGHT_PANEL_TOP_TAB_STORAGE_KEY), 'files'));
-  const [rightPanelSplit, setRightPanelSplit] = React.useState<boolean>(() => {
-    const raw = readLocalStorageItem(RIGHT_PANEL_SPLIT_STORAGE_KEY);
-    return raw === null ? true : raw === '1';
-  });
-  const [rightPanelBottomTab, setRightPanelBottomTab] = React.useState<RightPanelTab>(() =>
-    parseRightPanelTab(readLocalStorageItem(RIGHT_PANEL_BOTTOM_TAB_STORAGE_KEY), 'terminal'),
-  );
+  const {
+    rightPanelOpen,
+    setRightPanelOpen,
+    rightPanelWidth,
+    rightPanelResizing,
+    rightPanelTab,
+    setRightPanelTab,
+    rightPanelSplit,
+    setRightPanelSplitMode,
+    rightPanelBottomTab,
+    setRightPanelBottomTab,
+    resetRightPanelWidth,
+    startRightPanelResize,
+    rightPanelWidthIsDefault,
+    rightPanelWidthMax,
+  } = useRightPanelLayout();
   const [reposModalOpen, setReposModalOpen] = React.useState(false);
   const [droneErrorModal, setDroneErrorModal] = React.useState<DroneErrorModalState | null>(null);
   const [clearingDroneError, setClearingDroneError] = React.useState(false);
@@ -493,7 +427,6 @@ export default function DroneHubApp() {
   const transcriptErrorRef = React.useRef<string | null>(null);
   const chatEndRef = React.useRef<HTMLDivElement | null>(null);
   const [optimisticPendingPrompts, setOptimisticPendingPrompts] = React.useState<PendingPrompt[]>([]);
-  const [parsingJobsByTurn, setParsingJobsByTurn] = React.useState<Record<number, boolean>>({});
 
   const [tldrByMessageId, setTldrByMessageId] = React.useState<Record<string, TldrState>>({});
   const tldrByMessageIdRef = React.useRef<Record<string, TldrState>>({});
@@ -502,42 +435,15 @@ export default function DroneHubApp() {
   const [hoveredAgentMessageId, setHoveredAgentMessageId] = React.useState<string | null>(null);
   const hoveredAgentMessageIdRef = React.useRef<string | null>(null);
   const chatUiModeRef = React.useRef<'transcript' | 'cli'>('transcript');
-
-  const [jobsModal, setJobsModal] = React.useState<
-    null | {
-      turn: number;
-      message: string;
-      jobs: EditableJob[];
-      group: string;
-      prefix: string;
-      agentKey: string;
-      sourceRepoPath: string;
-    }
-  >(null);
-  const [jobsModalError, setJobsModalError] = React.useState<string | null>(null);
-  const [spawningJobById, setSpawningJobById] = React.useState<Record<string, boolean>>({});
-  const [spawnedJobById, setSpawnedJobById] = React.useState<Record<string, boolean>>({});
-  const [spawnJobErrorById, setSpawnJobErrorById] = React.useState<Record<string, string>>({});
-  const [spawningAllJobs, setSpawningAllJobs] = React.useState(false);
-  const spawningAllJobsRef = React.useRef(false);
-  const [detailsOpenByJobId, setDetailsOpenByJobId] = React.useState<Record<string, boolean>>({});
   const prevChatItemsLenRef = React.useRef(0);
 
   const [sessionText, setSessionText] = React.useState<string>('');
-  const sessionTextRef = React.useRef<string>('');
-  const [sessionOffsetBytes, setSessionOffsetBytes] = React.useState<number | null>(null);
-  const sessionOffsetRef = React.useRef<number | null>(null);
   const [sessionError, setSessionError] = React.useState<string | null>(null);
   const [loadingSession, setLoadingSession] = React.useState(false);
   const [outputView, setOutputView] = React.useState<'screen' | 'log'>(() => (readLocalStorageItem('droneHub.outputView') === 'log' ? 'log' : 'screen'));
-  const screenLoadedRef = React.useRef(false);
   const [fsExplorerView, setFsExplorerView] = React.useState<'list' | 'thumb'>(() => (readLocalStorageItem(FS_EXPLORER_VIEW_STORAGE_KEY) === 'thumb' ? 'thumb' : 'list'));
   const [fsPathByDrone, setFsPathByDrone] = React.useState<Record<string, string>>({});
   const [fsRefreshNonce, setFsRefreshNonce] = React.useState(0);
-
-  React.useEffect(() => {
-    sessionTextRef.current = sessionText;
-  }, [sessionText]);
 
   React.useEffect(() => {
     transcriptsRef.current = transcripts;
@@ -571,25 +477,6 @@ export default function DroneHubApp() {
   usePersistedLocalStorageItem('droneHub.outputView', outputView);
   usePersistedLocalStorageItem(FS_EXPLORER_VIEW_STORAGE_KEY, fsExplorerView);
   usePersistedLocalStorageItem('droneHub.customAgents', JSON.stringify(customAgents));
-  usePersistedLocalStorageItem(RIGHT_PANEL_WIDTH_STORAGE_KEY, String(rightPanelWidth));
-  usePersistedLocalStorageItem(RIGHT_PANEL_SPLIT_STORAGE_KEY, rightPanelSplit ? '1' : '0');
-  usePersistedLocalStorageItem(RIGHT_PANEL_TOP_TAB_STORAGE_KEY, rightPanelTab);
-  usePersistedLocalStorageItem(RIGHT_PANEL_BOTTOM_TAB_STORAGE_KEY, rightPanelBottomTab);
-
-  React.useEffect(() => {
-    const onResize = () => {
-      setRightPanelWidth((prev) => clampRightPanelWidthPx(prev));
-    };
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
-
-  React.useEffect(() => {
-    return () => {
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-  }, []);
 
   const [spawnAgentKey, setSpawnAgentKey] = React.useState<string>(() => readLocalStorageItem('droneHub.spawnAgent') || 'builtin:cursor');
   usePersistedLocalStorageItem('droneHub.spawnAgent', spawnAgentKey);
@@ -686,6 +573,38 @@ export default function DroneHubApp() {
     });
   }, []);
 
+  const {
+    parsingJobsByTurn,
+    jobsModal,
+    jobsModalError,
+    spawningAllJobs,
+    spawningJobById,
+    spawnedJobById,
+    spawnJobErrorById,
+    detailsOpenByJobId,
+    parseJobsFromAgentMessage,
+    spawnOneFromJobsModal,
+    spawnAllFromJobsModal,
+    spawnJobFromModal,
+    closeJobsModal,
+    onChangeJobsGroup,
+    onClearJobsGroup,
+    onChangeJobsAgentKey,
+    onChangeJobsPrefix,
+    onClearJobsPrefix,
+    onUpdateJobsModalJob,
+    onToggleJobsModalDetails,
+  } = useJobsWorkflow({
+    drones,
+    selectedDrone,
+    spawnAgentKey,
+    setSpawnAgentKey,
+    spawnModelForSeed,
+    resolveAgentKeyToConfig,
+    queueDrones,
+    rememberStartupSeed,
+  });
+
   const transcriptMessageId = React.useCallback((t: TranscriptItem): string => {
     const explicit = typeof t?.id === 'string' ? t.id.trim() : '';
     if (explicit) return explicit;
@@ -776,291 +695,6 @@ export default function DroneHubApp() {
     const chosen = target ?? list[list.length - 1];
     toggleTldrForAgentMessage(chosen);
   }, [toggleTldrForAgentMessage, transcriptMessageId]);
-
-  const parseJobsFromAgentMessage = React.useCallback(async (opts: { turn: number; message: string }) => {
-    const message = String(opts.message ?? '').trim();
-    if (!message) return;
-    setParsingJobsByTurn((prev) => ({ ...prev, [opts.turn]: true }));
-    setJobsModalError(null);
-    try {
-      const data = await requestJson<{ ok: true; jobs: any[]; group?: any }>(`/api/jobs/from-message`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ message }),
-      });
-      const rawJobs = Array.isArray(data?.jobs) ? data.jobs : [];
-      const group = String(data?.group ?? '').trim() || 'jobs';
-      const jobs: EditableJob[] = rawJobs
-        .map((j: any, idx: number) => {
-          const name = String(j?.name ?? '').trim();
-          const title = String(j?.title ?? j?.description ?? '').trim();
-
-          const detailsFromServer =
-            typeof j?.details === 'string'
-              ? j.details
-              : Array.isArray(j?.details)
-                ? j.details.map((x: any) => String(x ?? '')).join('\n\n')
-                : '';
-          let details = String(detailsFromServer || '').trim();
-
-          if (!details) details = message;
-
-          if (!name) return null;
-          // Allow missing title (older servers); we still show the job and fall back in UI.
-          return { id: makeId(), name, title, details };
-        })
-        .filter(Boolean) as EditableJob[];
-      if (jobs.length === 0) throw new Error('No jobs were produced from that message.');
-      const src = drones.find((d) => d.id === selectedDrone) ?? null;
-      const sourceRepoPath = src && (src.repoAttached ?? Boolean(String(src.repoPath ?? '').trim())) ? src.repoPath : '';
-      setSpawnJobErrorById({});
-      setSpawnedJobById({});
-      setDetailsOpenByJobId({});
-      setJobsModal({
-        turn: opts.turn,
-        message,
-        jobs,
-        group,
-        prefix: '',
-        agentKey: spawnAgentKey || 'builtin:cursor',
-        sourceRepoPath,
-      });
-    } catch (e: any) {
-      setJobsModalError(e?.message ?? String(e));
-      setJobsModal(null);
-    } finally {
-      setParsingJobsByTurn((prev) => ({ ...prev, [opts.turn]: false }));
-    }
-  }, [drones, selectedDrone, spawnAgentKey]);
-
-  const spawnDroneForJob = React.useCallback(
-    async (job: EditableJob, group: string, prefix: string, agentKey: string, repoPathOverride?: string): Promise<boolean> => {
-    const nameRaw = String(job?.name ?? '');
-    const name = nameRaw.trim();
-    if (!name) return false;
-    if (name.length > 80 || /[\r\n]/.test(name)) {
-      setSpawnJobErrorById((prev) => ({ ...prev, [job.id]: 'Invalid drone name. Must be 1-80 chars and cannot contain newlines.' }));
-      return false;
-    }
-    setSpawningJobById((prev) => ({ ...prev, [job.id]: true }));
-    setSpawnJobErrorById((prev) => ({ ...prev, [job.id]: '' }));
-    try {
-      const groupName = String(group ?? '').trim();
-      const title = String(job?.title ?? '').trim();
-      const details = String(job?.details ?? '').trim();
-      const prefixText = String(prefix ?? '').trim();
-      const seedPrompt = [
-        prefixText || null,
-        `Job: ${name}`,
-        title ? `Title: ${title}` : null,
-        '',
-        details ? details : null,
-      ]
-        .filter((x) => typeof x === 'string' && x.trim().length > 0)
-        .join('\n');
-
-      const seedAgent = resolveAgentKeyToConfig(agentKey);
-      const seedModel = seedAgent.kind === 'builtin' ? spawnModelForSeed : null;
-      const repoPath = String(repoPathOverride ?? '').trim();
-
-      const resp = await queueDrones([
-        {
-          name,
-          build: false,
-          ...(groupName ? { group: groupName } : {}),
-          ...(repoPath ? { repoPath } : {}),
-          seedAgent,
-          ...(seedModel ? { seedModel } : {}),
-          seedChat: 'default',
-          ...(seedPrompt.trim() ? { seedPrompt } : {}),
-        },
-      ]);
-
-      const acceptedEntry =
-        (resp?.accepted ?? []).find((a) => String(a?.name ?? '').trim() === name) ?? null;
-      const rejected = (resp?.rejected ?? []).find((r) => String(r?.name ?? '').trim() === name) ?? null;
-      if (!acceptedEntry?.id) {
-        const msg = String(rejected?.error ?? 'Failed to queue drone.');
-        setSpawnJobErrorById((prev) => ({ ...prev, [job.id]: msg }));
-        return false;
-      }
-
-      rememberStartupSeed([{ id: String(acceptedEntry.id), name }], { agent: seedAgent, model: seedModel, prompt: seedPrompt, chatName: 'default' });
-      setSpawnedJobById((prev) => ({ ...prev, [job.id]: true }));
-      return true;
-    } catch (e: any) {
-      const msg = e?.message ?? String(e);
-      setSpawnJobErrorById((prev) => ({ ...prev, [job.id]: msg }));
-      return false;
-    } finally {
-      setSpawningJobById((prev) => ({ ...prev, [job.id]: false }));
-    }
-    },
-    [queueDrones, rememberStartupSeed, resolveAgentKeyToConfig, spawnModelForSeed],
-  );
-
-  const spawnAllDronesForJobs = React.useCallback(
-    async (
-      jobs: EditableJob[],
-      group: string,
-      prefix: string,
-      agentKey: string,
-      repoPathOverride?: string,
-    ): Promise<{ accepted: number; rejected: number }> => {
-      const alreadySpawned = new Set(Object.keys(spawnedJobById).filter((k) => spawnedJobById[k]));
-
-      const nameToJobIds = new Map<string, string[]>();
-      for (const j of jobs) {
-        const name = String(j?.name ?? '').trim();
-        if (!name) continue;
-        const ids = nameToJobIds.get(name) ?? [];
-        ids.push(j.id);
-        nameToJobIds.set(name, ids);
-      }
-
-      // Mark duplicates and invalid names so "spawn all" isn't silently skipping them.
-      const dupErrorsById: Record<string, string> = {};
-      for (const [name, ids] of nameToJobIds.entries()) {
-        if (ids.length <= 1) continue;
-        for (const id of ids) dupErrorsById[id] = `Duplicate name "${name}" in list.`;
-      }
-      if (Object.keys(dupErrorsById).length > 0) {
-        setSpawnJobErrorById((prev) => {
-          const next = { ...prev };
-          for (const [id, msg] of Object.entries(dupErrorsById)) {
-            next[id] = next[id] || msg;
-          }
-          return next;
-        });
-      }
-
-      const groupName = String(group ?? '').trim();
-      const prefixText = String(prefix ?? '').trim();
-      const seedAgent = resolveAgentKeyToConfig(agentKey);
-      const seedModel = seedAgent.kind === 'builtin' ? spawnModelForSeed : null;
-      const repoPath = String(repoPathOverride ?? '').trim();
-
-      const specs: DroneQueueSpec[] = [];
-      const nameToJobId = new Map<string, string>();
-      const nameToSeedPrompt = new Map<string, string>();
-      for (const j of jobs) {
-        const nameRaw = String(j?.name ?? '');
-        const name = nameRaw.trim();
-        if (!name) continue;
-        const ids = nameToJobIds.get(name) ?? [];
-        if (ids.length > 1) continue;
-        if (alreadySpawned.has(j.id)) continue;
-        if (droneNameHasWhitespace(nameRaw) || !isValidDroneNameDashCase(name)) {
-          setSpawnJobErrorById((prev) => ({ ...prev, [j.id]: 'Invalid drone name. Use dash-case (letters/numbers and single hyphens), no spaces, max 48 chars.' }));
-          continue;
-        }
-        nameToJobId.set(name, j.id);
-        const title = String(j?.title ?? '').trim();
-        const details = String(j?.details ?? '').trim();
-        const seedPrompt = [
-          prefixText || null,
-          `Job: ${name}`,
-          title ? `Title: ${title}` : null,
-          '',
-          details ? details : null,
-        ]
-          .filter((x) => typeof x === 'string' && x.trim().length > 0)
-          .join('\n');
-        nameToSeedPrompt.set(name, seedPrompt);
-
-        specs.push({
-          name,
-          build: false,
-          ...(groupName ? { group: groupName } : {}),
-          ...(repoPath ? { repoPath } : {}),
-          seedAgent,
-          ...(seedModel ? { seedModel } : {}),
-          seedChat: 'default',
-          ...(seedPrompt.trim() ? { seedPrompt } : {}),
-        });
-      }
-
-      if (specs.length === 0) return { accepted: 0, rejected: 0 };
-
-      const resp = await queueDrones(specs);
-      const acceptedNames = new Set((resp?.accepted ?? []).map((a) => String(a?.name ?? '').trim()).filter(Boolean));
-      const rejected = Array.isArray(resp?.rejected) ? resp.rejected : [];
-
-      // Apply per-name outcomes back onto per-job state.
-      for (const name of acceptedNames) {
-        const jobId = nameToJobId.get(name);
-        if (jobId) setSpawnedJobById((prev) => ({ ...prev, [jobId]: true }));
-      }
-      for (const r of rejected) {
-        const name = String((r as any)?.name ?? '').trim();
-        const msg = String((r as any)?.error ?? 'Failed to queue drone.');
-        if (!name) continue;
-        const jobId = nameToJobId.get(name);
-        if (jobId) setSpawnJobErrorById((prev) => ({ ...prev, [jobId]: msg }));
-      }
-
-      if (acceptedNames.size > 0) {
-        const acceptedList = Array.isArray(resp?.accepted) ? resp.accepted : [];
-        const idByName = new Map<string, string>();
-        for (const a of acceptedList) {
-          const id = String((a as any)?.id ?? '').trim();
-          const name = String((a as any)?.name ?? '').trim();
-          if (id && name) idByName.set(name, id);
-        }
-        for (const name of acceptedNames) {
-          const id = idByName.get(name) ?? '';
-          if (!id) continue;
-          rememberStartupSeed([{ id, name }], {
-            agent: seedAgent,
-            model: seedModel,
-            prompt: nameToSeedPrompt.get(name) || '',
-            chatName: 'default',
-          });
-        }
-      }
-      return { accepted: acceptedNames.size, rejected: rejected.length };
-    },
-    [queueDrones, rememberStartupSeed, resolveAgentKeyToConfig, spawnedJobById, spawnModelForSeed],
-  );
-
-  const spawnOneFromJobsModal = React.useCallback(
-    (jobId: string) => {
-      const cur = jobsModal;
-      if (!cur) return;
-      const job = cur.jobs.find((j) => j.id === jobId);
-      if (!job) return;
-
-      const name = String(job?.name ?? '').trim();
-      if (!name) return;
-
-      const dup = cur.jobs.filter((x) => String((x as any)?.name ?? '').trim() === name).length > 1;
-      if (dup) {
-        setSpawnJobErrorById((prev) => ({ ...prev, [jobId]: 'Duplicate name in list.' }));
-        return;
-      }
-
-      void spawnDroneForJob(job, cur.group, cur.prefix, cur.agentKey, cur.sourceRepoPath);
-    },
-    [jobsModal, spawnDroneForJob],
-  );
-
-  const spawnAllFromJobsModal = React.useCallback(() => {
-    const cur = jobsModal;
-    if (!cur) return;
-    if (spawningAllJobsRef.current) return;
-    spawningAllJobsRef.current = true;
-    void (async () => {
-      setSpawningAllJobs(true);
-      try {
-        const r = await spawnAllDronesForJobs(cur.jobs, cur.group, cur.prefix, cur.agentKey, cur.sourceRepoPath);
-        // If everything queued cleanly, close immediately (backend-driven).
-        if (r.accepted > 0 && r.rejected === 0) setJobsModal(null);
-      } finally {
-        setSpawningAllJobs(false);
-        spawningAllJobsRef.current = false;
-      }
-    })();
-  }, [jobsModal, spawnAllDronesForJobs]);
 
   React.useEffect(() => {
     if (!selectedDrone || !selectedChat) {
@@ -1166,59 +800,45 @@ export default function DroneHubApp() {
     };
   }, [chatModelDiscoveryAgentId, chatModelsRefreshNonce, selectedChat, selectedDrone]);
 
-  const [createOpen, setCreateOpen] = React.useState(false);
-  const [creating, setCreating] = React.useState(false);
-  const [createMode, setCreateMode] = React.useState<'create' | 'clone'>('create');
-  const [cloneSourceId, setCloneSourceId] = React.useState<string | null>(null);
-  const [cloneIncludeChats, setCloneIncludeChats] = React.useState(true);
-  const [createError, setCreateError] = React.useState<string | null>(null);
-  const [createName, setCreateName] = React.useState('');
-  const [createGroup, setCreateGroup] = React.useState('');
-  const [createRepoPath, setCreateRepoPath] = React.useState('');
-  const [createInitialMessage, setCreateInitialMessage] = React.useState('');
-  const [createMessageSuffixRows, setCreateMessageSuffixRows] = React.useState<string[]>(['']);
+  const {
+    createName,
+    setCreateName,
+    createNameRows,
+    createNameEntries,
+    createNameCounts,
+    createMessageSuffixRows,
+    setCreateMessageSuffixRows,
+    updateCreateNameRow,
+    appendCreateNameRow,
+    removeCreateNameRow,
+    updateCreateMessageSuffixRow,
+  } = useCreateDroneRowsState();
   const createNameRef = React.useRef<HTMLInputElement | null>(null);
-  const [createRepoMenuOpen, setCreateRepoMenuOpen] = React.useState(false);
-  const createNameRows = React.useMemo(() => {
-    const normalized = String(createName ?? '').replace(/\r\n/g, '\n');
-    const rows = normalized.split('\n');
-    return rows.length > 0 ? rows : [''];
-  }, [createName]);
-  const createNameEntries = React.useMemo(
-    () => createNameRows.map((row) => String(row ?? '').trim()).filter(Boolean),
-    [createNameRows],
-  );
-  const createNameCounts = React.useMemo(() => {
-    const out = new Map<string, number>();
-    for (const name of createNameEntries) {
-      out.set(name, (out.get(name) ?? 0) + 1);
-    }
-    return out;
-  }, [createNameEntries]);
-  const [groupMoveError, setGroupMoveError] = React.useState<string | null>(null);
-  const [movingDroneGroups, setMovingDroneGroups] = React.useState(false);
-  const [draggingDroneNames, setDraggingDroneNames] = React.useState<string[] | null>(null);
-  const [dragOverGroup, setDragOverGroup] = React.useState<string | null>(null);
-  const [dragOverUngrouped, setDragOverUngrouped] = React.useState(false);
   const [deletingDrones, setDeletingDrones] = React.useState<Record<string, boolean>>({});
   const [renamingDrones, setRenamingDrones] = React.useState<Record<string, boolean>>({});
-  const [deletingGroups, setDeletingGroups] = React.useState<Record<string, boolean>>({});
-  const [renamingGroups, setRenamingGroups] = React.useState<Record<string, boolean>>({});
-  const [createGroupDraft, setCreateGroupDraft] = React.useState('');
-  const [createGroupError, setCreateGroupError] = React.useState<string | null>(null);
-  const [creatingGroup, setCreatingGroup] = React.useState(false);
-  const [deletingRepos, setDeletingRepos] = React.useState<Record<string, boolean>>({});
-  const [openingTerminal, setOpeningTerminal] = React.useState<{ mode: 'ssh' | 'agent' } | null>(null);
-  const [openingEditor, setOpeningEditor] = React.useState<{ editor: 'code' | 'cursor' } | null>(null);
-  const [launchHint, setLaunchHint] = React.useState<
-    | {
-        context: 'terminal' | 'code' | 'cursor';
-        command?: string;
-        launcher?: string;
-        kind: 'copied';
-      }
-    | null
-  >(null);
+  const {
+    groupMoveError,
+    setGroupMoveError,
+    movingDroneGroups,
+    deletingGroups,
+    renamingGroups,
+    createGroupDraft,
+    setCreateGroupDraft,
+    createGroupError,
+    setCreateGroupError,
+    creatingGroup,
+    createGroupFromDraft,
+    renameGroup,
+    deleteGroup,
+    moveDronesToGroup,
+  } = useGroupManagement({
+    autoDelete,
+    drones,
+    polledDrones,
+    optimisticallyDeletedDrones,
+    setOptimisticallyDeletedDrones,
+    setCollapsedGroups,
+  });
   const [nameSuggestToast, setNameSuggestToast] = React.useState<null | { id: string; message: string }>(null);
   const [terminalMenuOpen, setTerminalMenuOpen] = React.useState(false);
   const terminalMenuRef = React.useRef<HTMLDivElement | null>(null);
@@ -1358,15 +978,6 @@ export default function DroneHubApp() {
     },
     [creating, deletingDrones, normalizeCreateRepoPath, renamingDrones, suggestCloneName],
   );
-
-  React.useEffect(() => {
-    setCreateMessageSuffixRows((prev) => {
-      const targetLen = Math.max(1, createNameRows.length);
-      if (prev.length === targetLen) return prev;
-      if (prev.length > targetLen) return prev.slice(0, targetLen);
-      return [...prev, ...Array.from({ length: targetLen - prev.length }, () => '')];
-    });
-  }, [createNameRows]);
 
   React.useEffect(() => {
     setCreateRepoPath((prev) => {
@@ -1597,42 +1208,13 @@ export default function DroneHubApp() {
         },
       );
       if (currentDrone?.id === droneId) {
-        setRepoOpError(null);
-        setRepoOpErrorMeta(null);
+        clearRepoOperationError();
       }
       if (opts?.closeModal !== false) closeDroneErrorModal();
     } catch (e: any) {
-      setRepoOpError(e?.message ?? String(e));
+      setRepoOperationError(e?.message ?? String(e));
     } finally {
       setClearingDroneError(false);
-    }
-  }
-
-  function githubUrlForRepo(r: RepoSummary): string | null {
-    if (r.github && r.github.owner && r.github.repo) return `https://github.com/${r.github.owner}/${r.github.repo}`;
-    return null;
-  }
-
-  async function deleteRepo(repoPath: string) {
-    const p = String(repoPath ?? '').trim();
-    if (!p) return;
-    if (shouldConfirmDelete()) {
-      const ok = window.confirm(`Remove repo "${p}" from the registry?`);
-      if (!ok) return;
-    }
-    setDeletingRepos((prev) => ({ ...prev, [p]: true }));
-    try {
-      await requestJson(`/api/repos?path=${encodeURIComponent(p)}`, { method: 'DELETE' });
-      if (activeRepoPath === p) setActiveRepoPath('');
-    } catch (e: any) {
-      console.error('[DroneHub] delete repo failed', { path: p, error: e });
-    } finally {
-      setDeletingRepos((prev) => {
-        if (!prev[p]) return prev;
-        const next = { ...prev };
-        delete next[p];
-        return next;
-      });
     }
   }
 
@@ -1776,150 +1358,6 @@ export default function DroneHubApp() {
     }
   }
 
-  async function createGroupFromDraft(): Promise<void> {
-    const name = String(createGroupDraft ?? '').trim();
-    if (creatingGroup) return;
-    if (!name) {
-      setCreateGroupError('Group name is required.');
-      return;
-    }
-    if (isUngroupedGroupName(name)) {
-      setCreateGroupError('"Ungrouped" is reserved.');
-      return;
-    }
-    setCreatingGroup(true);
-    setCreateGroupError(null);
-    try {
-      await requestJson<{ ok: true; name: string }>('/api/groups', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name }),
-      });
-      setCreateGroupDraft('');
-    } catch (e: any) {
-      const msg = String(e?.message ?? e ?? '').trim();
-      setCreateGroupError(msg || 'Failed to create group.');
-    } finally {
-      setCreatingGroup(false);
-    }
-  }
-
-  async function renameGroup(groupRaw: string): Promise<void> {
-    const group = String(groupRaw ?? '').trim();
-    if (!group) return;
-    if (isUngroupedGroupName(group)) return;
-    if (renamingGroups[group]) return;
-
-    const next = window.prompt(`Rename group "${group}" to:`, group);
-    const newName = String(next ?? '').trim();
-    if (!newName) return;
-    if (newName === group) return;
-    if (isUngroupedGroupName(newName)) {
-      window.alert('"Ungrouped" is reserved.');
-      return;
-    }
-
-    setRenamingGroups((prev) => ({ ...prev, [group]: true }));
-    try {
-      await requestJson<{ ok: true; oldName: string; newName: string; renamed: boolean }>(`/api/groups/${encodeURIComponent(group)}/rename`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ newName }),
-      });
-
-      // Keep per-group UI state aligned after rename.
-      setCollapsedGroups((prev) => {
-        if (!(group in prev)) return prev;
-        const next = { ...prev };
-        const wasCollapsed = Boolean(next[group]);
-        delete next[group];
-        next[newName] = wasCollapsed;
-        return next;
-      });
-      setDeletingGroups((prev) => {
-        if (!(group in prev)) return prev;
-        const next = { ...prev };
-        delete next[group];
-        return next;
-      });
-    } catch (e: any) {
-      const msg = String(e?.message ?? e ?? '').trim();
-      console.error('[DroneHub] rename group failed', { group, newName, error: e });
-      window.alert(msg || 'Rename failed.');
-    } finally {
-      setRenamingGroups((prev) => {
-        if (!prev[group]) return prev;
-        const next = { ...prev };
-        delete next[group];
-        return next;
-      });
-    }
-  }
-
-  async function deleteGroup(groupRaw: string, countHint?: number) {
-    const group = String(groupRaw ?? '').trim();
-    if (!group || deletingGroups[group]) return;
-    if (shouldConfirmDelete()) {
-      const n = typeof countHint === 'number' && Number.isFinite(countHint) ? countHint : null;
-      const ok = window.confirm(
-        `Are you sure you want to delete group "${group}"${n != null ? ` (${n} drone${n === 1 ? '' : 's'})` : ''}?\n\nThis will delete ALL drones inside the group (containers + registry entries).`
-      );
-      if (!ok) return;
-    }
-    const wantsUngrouped = isUngroupedGroupName(group);
-    const targetNames = Array.from(
-      new Set(
-        polledDrones
-          .filter((d) => {
-            const droneGroup = String(d?.group ?? '').trim();
-            if (wantsUngrouped) return !droneGroup || isUngroupedGroupName(droneGroup);
-            return droneGroup === group;
-          })
-          .map((d) => String(d?.id ?? '').trim())
-          .filter(Boolean),
-      ),
-    );
-    const preHidden = new Set(Object.keys(optimisticallyDeletedDrones).filter((name) => optimisticallyDeletedDrones[name]));
-    const addedByThisDelete = targetNames.filter((name) => !preHidden.has(name));
-    if (targetNames.length > 0) {
-      setOptimisticallyDeletedDrones((prev) => {
-        const next = { ...prev };
-        let changed = false;
-        for (const name of targetNames) {
-          if (next[name]) continue;
-          next[name] = true;
-          changed = true;
-        }
-        return changed ? next : prev;
-      });
-    }
-    setDeletingGroups((prev) => ({ ...prev, [group]: true }));
-    try {
-      await requestJson(`/api/groups/${encodeURIComponent(group)}`, { method: 'DELETE' });
-    } catch (e: any) {
-      console.error('[DroneHub] delete group failed', { group, error: e });
-      if (addedByThisDelete.length > 0) {
-        setOptimisticallyDeletedDrones((prev) => {
-          const next = { ...prev };
-          let changed = false;
-          for (const name of addedByThisDelete) {
-            if (!next[name]) continue;
-            delete next[name];
-            changed = true;
-          }
-          return changed ? next : prev;
-        });
-      }
-    } finally {
-      setDeletingGroups((prev) => {
-        if (!prev[group]) return prev;
-        const next = { ...prev };
-        delete next[group];
-        return next;
-      });
-    }
-  }
-
   const selectDroneCard = React.useCallback(
     (droneIdRaw: string, opts?: { toggle?: boolean; range?: boolean }) => {
       const id = String(droneIdRaw ?? '').trim();
@@ -1960,260 +1398,35 @@ export default function DroneHubApp() {
     [orderedDroneIds, selectedDrone],
   );
 
-  const parseDroneNamesFromDrag = React.useCallback(
-    (event: React.DragEvent<HTMLElement>): string[] => {
-      const out: string[] = [];
-      const add = (raw: any) => {
-        const name = String(raw ?? '').trim();
-        if (!name || out.includes(name)) return;
-        out.push(name);
-      };
-
-      try {
-        const jsonRaw = event.dataTransfer.getData(DRONE_DND_MIME);
-        if (jsonRaw) {
-          const parsed = JSON.parse(jsonRaw);
-          if (Array.isArray(parsed)) {
-            for (const n of parsed) add(n);
-          }
-        }
-      } catch {
-        // ignore malformed drag payload
-      }
-
-      if (out.length === 0) {
-        const plain = String(event.dataTransfer.getData('text/plain') ?? '');
-        if (plain) {
-          for (const line of plain.split('\n')) add(line);
-        }
-      }
-
-      if (out.length === 0 && Array.isArray(draggingDroneNames)) {
-        for (const n of draggingDroneNames) add(n);
-      }
-      return out;
-    },
-    [draggingDroneNames],
-  );
-
-  const moveDronesToGroup = React.useCallback(
-    async (targetGroupLabel: string, rawDroneNames: string[]) => {
-      const target = String(targetGroupLabel ?? '').trim();
-      if (!target) return;
-      const targetGroup = isUngroupedGroupName(target) ? null : target;
-      const byId = new Map(drones.map((d) => [d.id, d]));
-      const requested = Array.from(new Set(rawDroneNames.map((n) => String(n ?? '').trim()).filter(Boolean)));
-      if (requested.length === 0) return;
-
-      const movable = requested.filter((name) => {
-        const d = byId.get(name);
-        if (!d) return false;
-        const currentRaw = String(d.group ?? '').trim();
-        const currentGroup = !currentRaw || isUngroupedGroupName(currentRaw) ? 'Ungrouped' : currentRaw;
-        return currentGroup !== target;
-      });
-      if (movable.length === 0) return;
-
-      setGroupMoveError(null);
-      setMovingDroneGroups(true);
-      try {
-        const resp = await requestJson<{
-          ok: true;
-          moved: Array<{ id: string; name: string; previousGroup: string | null; group: string | null }>;
-          rejected: Array<{ id: string; name: string; error: string }>;
-        }>(`/api/drones/group-set`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ droneIds: movable, group: targetGroup }),
-        });
-        const rejected = Array.isArray(resp?.rejected) ? resp.rejected : [];
-        if (rejected.length > 0) {
-          const msg = rejected
-            .slice(0, 3)
-            .map((r) => `${String(r?.name ?? r?.id ?? 'unknown')}: ${String(r?.error ?? 'failed')}`)
-            .join(', ');
-          setGroupMoveError(rejected.length > 3 ? `Some drones could not be moved (${msg}, +${rejected.length - 3} more).` : `Some drones could not be moved (${msg}).`);
-        }
-      } catch (e: any) {
-        const msg = e?.message ?? String(e);
-        if (isNotFoundError(e)) {
-          setGroupMoveError('Hub API is missing group-move support. Restart the hub after rebuilding/updating `drone`.');
-        } else {
-          setGroupMoveError(msg);
-        }
-        console.error('[DroneHub] move drones between groups failed', { targetGroup: targetGroup ?? null, drones: movable, error: e });
-      } finally {
-        setMovingDroneGroups(false);
-      }
-    },
-    [drones],
-  );
-
-  const onDroneDragStart = React.useCallback(
-    (droneName: string, event: React.DragEvent<HTMLDivElement>) => {
-      if (movingDroneGroups) {
-        event.preventDefault();
-        return;
-      }
-      const name = String(droneName ?? '').trim();
-      if (!name) return;
-      const names =
-        selectedDroneSet.has(name) && selectedDroneIds.length > 0
-          ? selectedDroneIds.slice()
-          : [name];
+  const {
+    draggingDroneNames,
+    dragOverGroup,
+    dragOverUngrouped,
+    onDroneDragStart,
+    onDroneDragEnd,
+    onGroupDragOver,
+    onGroupDragLeave,
+    onGroupDrop,
+    onUngroupedDragOver,
+    onUngroupedDragLeave,
+    onUngroupedDrop,
+    resetGroupDndState,
+  } = useDroneGroupDnd({
+    movingDroneGroups,
+    hasUngroupedGroup: sidebarHasUngroupedGroup,
+    selectedDroneIds,
+    selectedDroneSet,
+    selectionAnchorRef,
+    setSelectedDrone,
+    setSelectedDroneIds,
+    onPrepareDragStart: () => {
       setDraftChat(null);
-      setSelectedDrone(name);
-      if (!selectedDroneSet.has(name)) setSelectedDroneIds([name]);
-      selectionAnchorRef.current = name;
-      setDraggingDroneNames(names);
-      setDragOverGroup(null);
-      setDragOverUngrouped(false);
+    },
+    onClearGroupMoveError: () => {
       setGroupMoveError(null);
-      event.dataTransfer.effectAllowed = 'move';
-      try {
-        event.dataTransfer.setData(DRONE_DND_MIME, JSON.stringify(names));
-      } catch {
-        // ignore
-      }
-      try {
-        event.dataTransfer.setData('text/plain', names.join('\n'));
-      } catch {
-        // ignore
-      }
     },
-    [movingDroneGroups, selectedDroneIds, selectedDroneSet],
-  );
-
-  const onDroneDragEnd = React.useCallback(() => {
-    setDraggingDroneNames(null);
-    setDragOverGroup(null);
-    setDragOverUngrouped(false);
-  }, []);
-
-  const onGroupDragOver = React.useCallback(
-    (group: string, event: React.DragEvent<HTMLDivElement>) => {
-      const names = draggingDroneNames && draggingDroneNames.length > 0 ? draggingDroneNames : parseDroneNamesFromDrag(event);
-      if (names.length === 0) return;
-      event.stopPropagation();
-      event.preventDefault();
-      event.dataTransfer.dropEffect = 'move';
-      setDragOverUngrouped(false);
-      if (dragOverGroup !== group) setDragOverGroup(group);
-    },
-    [dragOverGroup, draggingDroneNames, parseDroneNamesFromDrag],
-  );
-
-  const onGroupDragLeave = React.useCallback((group: string, event: React.DragEvent<HTMLDivElement>) => {
-    const related = event.relatedTarget;
-    if (related instanceof Node && event.currentTarget.contains(related)) return;
-    setDragOverGroup((prev) => (prev === group ? null : prev));
-  }, []);
-
-  const onGroupDrop = React.useCallback(
-    (group: string, event: React.DragEvent<HTMLDivElement>) => {
-      event.preventDefault();
-      event.stopPropagation();
-      setDragOverGroup(null);
-      setDragOverUngrouped(false);
-      const names = parseDroneNamesFromDrag(event);
-      setDraggingDroneNames(null);
-      if (names.length === 0) return;
-      void moveDronesToGroup(group, names);
-    },
-    [moveDronesToGroup, parseDroneNamesFromDrag],
-  );
-
-  const onUngroupedDragOver = React.useCallback(
-    (event: React.DragEvent<HTMLDivElement>) => {
-      if (hasUngroupedGroup) return;
-      const names = draggingDroneNames && draggingDroneNames.length > 0 ? draggingDroneNames : parseDroneNamesFromDrag(event);
-      if (names.length === 0) return;
-      event.preventDefault();
-      event.dataTransfer.dropEffect = 'move';
-      if (dragOverGroup !== null) setDragOverGroup(null);
-      if (!dragOverUngrouped) setDragOverUngrouped(true);
-    },
-    [dragOverGroup, dragOverUngrouped, draggingDroneNames, hasUngroupedGroup, parseDroneNamesFromDrag],
-  );
-
-  const onUngroupedDragLeave = React.useCallback((event: React.DragEvent<HTMLDivElement>) => {
-    const related = event.relatedTarget;
-    if (related instanceof Node && event.currentTarget.contains(related)) return;
-    setDragOverUngrouped(false);
-  }, []);
-
-  const onUngroupedDrop = React.useCallback(
-    (event: React.DragEvent<HTMLDivElement>) => {
-      if (hasUngroupedGroup) return;
-      event.preventDefault();
-      setDragOverGroup(null);
-      setDragOverUngrouped(false);
-      const names = parseDroneNamesFromDrag(event);
-      setDraggingDroneNames(null);
-      if (names.length === 0) return;
-      void moveDronesToGroup('Ungrouped', names);
-    },
-    [hasUngroupedGroup, moveDronesToGroup, parseDroneNamesFromDrag],
-  );
-
-  async function openDroneTerminal(mode: 'ssh' | 'agent') {
-    if (!currentDrone) return;
-    setOpeningTerminal({ mode });
-    try {
-      const qs = new URLSearchParams();
-      qs.set('mode', mode);
-      qs.set('chat', selectedChat || 'default');
-      qs.set('cwd', droneHomePath(currentDrone));
-      if (terminalEmulator && terminalEmulator !== 'auto') qs.set('terminal', terminalEmulator);
-      const url = `/api/drones/${encodeURIComponent(currentDrone.id)}/open-terminal?${qs.toString()}`;
-      const r = await fetch(url, { method: 'POST' });
-      const text = await r.text();
-      let data: any = null;
-      try {
-        data = text ? JSON.parse(text) : null;
-      } catch {
-        // ignore
-      }
-
-      const cmd = String(data?.manualCommand ?? data?.command ?? '');
-      const launcher = typeof data?.launcher === 'string' ? data.launcher : undefined;
-      if (!r.ok) {
-        const msg = data?.error ?? `${r.status} ${r.statusText}`;
-        if (cmd) {
-          try {
-            await navigator.clipboard.writeText(cmd);
-            setLaunchHint({ context: 'terminal', command: cmd, launcher, kind: 'copied' });
-            setTimeout(() => setLaunchHint(null), 12_000);
-          } catch {
-            // ignore
-          }
-        }
-        console.error('[DroneHub] open terminal failed', {
-          mode,
-          drone: currentDrone.name,
-          terminal: terminalEmulator,
-          status: r.status,
-          statusText: r.statusText,
-          msg,
-          command: cmd || null,
-          launcher: launcher || null,
-        });
-        return;
-      }
-
-      // Success: terminal was (supposedly) opened. Don't auto-copy.
-      // No UI hint on success (avoid noisy "Opened terminal" message).
-    } catch (e: any) {
-      console.error('[DroneHub] open terminal request errored', {
-        mode,
-        drone: currentDrone?.name ?? null,
-        terminal: terminalEmulator,
-        error: e,
-      });
-    } finally {
-      setOpeningTerminal(null);
-    }
-  }
+    moveDronesToGroup,
+  });
 
   async function createDrone() {
     const rowSpecs = createNameRows.map((nameRaw, idx) => ({
@@ -2463,303 +1676,8 @@ export default function DroneHubApp() {
     }
   }
 
-  function updateCreateNameRow(index: number, value: string) {
-    const rows = createNameRows.slice();
-    if (index < 0 || index >= rows.length) return;
-    rows[index] = value;
-    setCreateName(rows.join('\n'));
-  }
-
-  function appendCreateNameRow() {
-    const rows = createNameRows.slice();
-    rows.push('');
-    setCreateName(rows.join('\n'));
-    setCreateMessageSuffixRows((prev) => [...prev, '']);
-  }
-
-  function removeCreateNameRow(index: number) {
-    const rows = createNameRows.slice();
-    if (index < 0 || index >= rows.length) return;
-    if (rows.length <= 1) {
-      setCreateName('');
-      setCreateMessageSuffixRows(['']);
-      return;
-    }
-    rows.splice(index, 1);
-    setCreateName(rows.join('\n'));
-    setCreateMessageSuffixRows((prev) => {
-      const next = prev.slice();
-      next.splice(index, 1);
-      return next.length > 0 ? next : [''];
-    });
-  }
-
-  function updateCreateMessageSuffixRow(index: number, value: string) {
-    setCreateMessageSuffixRows((prev) => {
-      if (index < 0 || index >= prev.length) return prev;
-      const next = prev.slice();
-      next[index] = value;
-      return next;
-    });
-  }
-
-  async function openDroneEditor(editor: 'code' | 'cursor') {
-    if (!currentDrone) return;
-    setOpeningEditor({ editor });
-    try {
-      const qs = new URLSearchParams();
-      qs.set('editor', editor);
-      qs.set('cwd', droneHomePath(currentDrone));
-      const url = `/api/drones/${encodeURIComponent(currentDrone.id)}/open-editor?${qs.toString()}`;
-      const r = await fetch(url, { method: 'POST' });
-      const text = await r.text();
-      let data: any = null;
-      try {
-        data = text ? JSON.parse(text) : null;
-      } catch {
-        // ignore
-      }
-
-      const cmd = String(data?.manualCommand ?? data?.command ?? '');
-      const launcher = typeof data?.launcher === 'string' ? data.launcher : undefined;
-      if (!r.ok) {
-        const msg = data?.error ?? `${r.status} ${r.statusText}`;
-        if (cmd) {
-          try {
-            await navigator.clipboard.writeText(cmd);
-            setLaunchHint({ context: editor, command: cmd, launcher, kind: 'copied' });
-            setTimeout(() => setLaunchHint(null), 12_000);
-          } catch {
-            // ignore
-          }
-        }
-        console.error('[DroneHub] open editor failed', {
-          editor,
-          drone: currentDrone.name,
-          status: r.status,
-          statusText: r.statusText,
-          msg,
-          command: cmd || null,
-          launcher: launcher || null,
-        });
-        return;
-      }
-    } catch (e: any) {
-      console.error('[DroneHub] open editor request errored', {
-        editor,
-        drone: currentDrone?.name ?? null,
-        error: e,
-      });
-    } finally {
-      setOpeningEditor(null);
-    }
-  }
-
-  const [repoOp, setRepoOp] = React.useState<null | { kind: 'pull' | 'reseed' }>(null);
-  const [repoOpError, setRepoOpError] = React.useState<string | null>(null);
-  const [repoOpErrorMeta, setRepoOpErrorMeta] = React.useState<RepoOpErrorMeta | null>(null);
-
-  async function postJson(url: string, body: any): Promise<{ ok: boolean; status: number; data: any }> {
-    const r = await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body ?? {}),
-    });
-    const text = await r.text();
-    let data: any = null;
-    try {
-      data = text ? JSON.parse(text) : null;
-    } catch {
-      data = null;
-    }
-    return { ok: r.ok, status: r.status, data };
-  }
-
-  async function pullRepoChanges() {
-    if (!currentDrone) return;
-    const droneId = String(currentDrone.id ?? '').trim();
-    if (!droneId) return;
-    setRepoOpError(null);
-    setRepoOpErrorMeta(null);
-    setRepoOp({ kind: 'pull' });
-    try {
-      const url = `/api/drones/${encodeURIComponent(droneId)}/repo/pull`;
-      const throwRepoPullError = (data: any, fallback: string): never => {
-        const message = String(data?.error ?? fallback);
-        const code = String(data?.code ?? '').trim();
-        const patchName = String(data?.patchName ?? '').trim();
-        const conflictFiles = Array.isArray(data?.conflictFiles)
-          ? data.conflictFiles.map((f: any) => String(f ?? '').trim()).filter(Boolean)
-          : [];
-        setRepoOpErrorMeta({
-          code: code || null,
-          patchName: patchName || null,
-          conflictFiles,
-        });
-        throw new Error(message);
-      };
-      const response = await postJson(url, {});
-      if (!response.ok) throwRepoPullError(response.data, 'Repo pull failed.');
-    } catch (e: any) {
-      setRepoOpError(e?.message ?? String(e));
-    } finally {
-      setRepoOp(null);
-    }
-  }
-
-  async function reseedRepo() {
-    if (!currentDrone) return;
-    const droneId = String(currentDrone.id ?? '').trim();
-    if (!droneId) return;
-    setRepoOpError(null);
-    setRepoOpErrorMeta(null);
-    setRepoOp({ kind: 'reseed' });
-    try {
-      const url = `/api/drones/${encodeURIComponent(droneId)}/repo/reseed`;
-      const r = await postJson(url, {});
-      if (!r.ok) throw new Error(String(r.data?.error ?? 'Repo reseed failed.'));
-    } catch (e: any) {
-      setRepoOpError(e?.message ?? String(e));
-    } finally {
-      setRepoOp(null);
-    }
-  }
-
-  const [sendingPromptCount, setSendingPromptCount] = React.useState(0);
-  const sendingPrompt = sendingPromptCount > 0;
-  const [promptError, setPromptError] = React.useState<string | null>(null);
-  const [cliTyping, setCliTyping] = React.useState(false);
-  const cliTypingTimerRef = React.useRef<any>(null);
-
-  function bumpCliTyping() {
-    setCliTyping(true);
-    if (cliTypingTimerRef.current) clearTimeout(cliTypingTimerRef.current);
-    cliTypingTimerRef.current = setTimeout(() => setCliTyping(false), 1400);
-  }
-
-  React.useEffect(() => {
-    return () => {
-      if (cliTypingTimerRef.current) clearTimeout(cliTypingTimerRef.current);
-    };
-  }, []);
-
-  React.useEffect(() => {
-    // Clear any local optimistic entries when switching chats/drones.
-    setOptimisticPendingPrompts([]);
-  }, [selectedDrone, selectedChat]);
-
-  function enqueueQueuedPrompt(droneIdRaw: string, chatNameRaw: string, promptRaw: string): PendingPrompt | null {
-    const droneId = String(droneIdRaw ?? '').trim();
-    const chatName = String(chatNameRaw ?? '').trim() || 'default';
-    const prompt = String(promptRaw ?? '').trim();
-    if (!droneId || !prompt) return null;
-    const item: PendingPrompt = {
-      id: `queued-${makeId()}`,
-      at: new Date().toISOString(),
-      prompt,
-      state: 'queued',
-    };
-    const key = droneChatQueueKey(droneId, chatName);
-    setQueuedPromptsByDroneChat((prev) => {
-      const cur = prev[key] ?? [];
-      return { ...prev, [key]: [...cur, item] };
-    });
-    return item;
-  }
-
-  function patchQueuedPrompt(key: string, id: string, patch: Partial<PendingPrompt>) {
-    setQueuedPromptsByDroneChat((prev) => {
-      const cur = prev[key];
-      if (!cur || cur.length === 0) return prev;
-      const idx = cur.findIndex((p) => p.id === id);
-      if (idx < 0) return prev;
-      const nextArr = cur.slice();
-      nextArr[idx] = { ...nextArr[idx], ...patch, updatedAt: new Date().toISOString() };
-      return { ...prev, [key]: nextArr };
-    });
-  }
-
-  function removeQueuedPrompt(key: string, id: string) {
-    setQueuedPromptsByDroneChat((prev) => {
-      const cur = prev[key];
-      if (!cur || cur.length === 0) return prev;
-      const nextArr = cur.filter((p) => p.id !== id);
-      if (nextArr.length === cur.length) return prev;
-      if (nextArr.length === 0) {
-        const next = { ...prev };
-        delete next[key];
-        return next;
-      }
-      return { ...prev, [key]: nextArr };
-    });
-  }
-
-  function clearQueuedPromptsForDrone(droneIdRaw: string) {
-    const droneId = String(droneIdRaw ?? '').trim();
-    if (!droneId) return;
-    setQueuedPromptsByDroneChat((prev) => {
-      let changed = false;
-      const next: Record<string, PendingPrompt[]> = {};
-      for (const [k, v] of Object.entries(prev)) {
-        const parsed = parseDroneChatQueueKey(k);
-        if (parsed && parsed.droneId === droneId) {
-          changed = true;
-          continue;
-        }
-        next[k] = v;
-      }
-      return changed ? next : prev;
-    });
-  }
-
-  async function sendPromptText(payload: ChatSendPayload): Promise<boolean> {
-    if (!currentDrone) return false;
-    const prompt = String(payload?.prompt ?? '').trim();
-    const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
-    if (!prompt && attachments.length === 0) return false;
-    const optimisticPrompt = prompt || (attachments.length === 1 ? '[image attachment]' : `[${attachments.length} image attachments]`);
-    if (isDroneStartingOrSeeding(currentDrone.hubPhase)) {
-      if (attachments.length > 0) {
-        setPromptError(`"${currentDroneLabel}" is still provisioning. Image attachments can be sent once it is ready.`);
-        return false;
-      }
-      enqueueQueuedPrompt(currentDrone.id, selectedChat || 'default', prompt);
-      setPromptError(null);
-      return true;
-    }
-    setSendingPromptCount((c) => c + 1);
-    setPromptError(null);
-    try {
-      const data = await requestJson<{ ok: true; accepted: true; promptId: string }>(
-        `/api/drones/${encodeURIComponent(currentDrone.id)}/chats/${encodeURIComponent(selectedChat || 'default')}/prompt`,
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ prompt, attachments }),
-        },
-      );
-      if (chatUiMode === 'cli') bumpCliTyping();
-      const id = String((data as any)?.promptId ?? '').trim();
-      if (chatUiMode === 'transcript' && id) {
-        setOptimisticPendingPrompts((prev) => {
-          if (prev.some((p) => p.id === id)) return prev;
-          return [...prev, { id, at: new Date().toISOString(), prompt: optimisticPrompt, state: 'sending' }];
-        });
-      }
-      return true;
-    } catch (e: any) {
-      const errText = e?.message ?? String(e);
-      setPromptError(errText);
-      return false;
-    } finally {
-      setSendingPromptCount((c) => Math.max(0, c - 1));
-    }
-  }
-
-  function chatUiModeForAgent(agent: ChatAgentConfig | null | undefined): 'transcript' | 'cli' {
-    if (!agent) return 'transcript';
-    return agent.kind === 'builtin' ? 'transcript' : 'cli';
-  }
+  const currentDrone = selectedDrone ? drones.find((d) => d.id === selectedDrone) ?? null : null;
+  const currentDroneLabel = currentDrone ? uiDroneName(currentDrone.name) : '';
 
   const selectedDroneIdentity = React.useMemo(() => {
     if (!selectedDrone) return '';
@@ -2768,172 +1686,39 @@ export default function DroneHubApp() {
     return ids[selectedDrone];
   }, [selectedDrone]);
 
-  const selectedDroneSummary = React.useMemo(
-    () => (selectedDrone ? drones.find((x) => x.id === selectedDrone) ?? null : null),
-    [drones, selectedDrone],
-  );
-  const selectedDroneHubPhase = selectedDroneSummary?.hubPhase ?? null;
-  const startupSeedForSelectedDrone = React.useMemo(
-    () => (selectedDrone ? startupSeedByDrone[selectedDrone] ?? null : null),
-    [selectedDrone, startupSeedByDrone],
-  );
-  const startupAgentForSelectedDrone =
-    selectedDroneSummary &&
-    (isDroneStartingOrSeeding(selectedDroneSummary.hubPhase)) &&
-    startupSeedForSelectedDrone?.agent
-      ? startupSeedForSelectedDrone.agent
-      : null;
-  const chatUiMode = chatUiModeForAgent(chatInfo?.agent ?? startupAgentForSelectedDrone ?? null);
-  const nowMs = useNowMs(1000, chatUiMode === 'transcript');
+  const { chatUiMode, nowMs, promptError, selectedIsResponding, sendPromptText, sendingPrompt, visiblePendingPromptsWithStartup } =
+    useChatRuntimeOrchestration({
+      chatInfo,
+      currentDrone,
+      currentDroneLabel,
+      drones,
+      outputView,
+      optimisticPendingPrompts,
+      queuedPromptsByDroneChat,
+      queuedPromptsByDroneChatRef,
+      flushingQueuedKeysRef,
+      selectedChat,
+      selectedDrone,
+      selectedDroneIdentity,
+      startupSeedByDrone,
+      transcriptError,
+      transcripts,
+      setLoadingSession,
+      setLoadingTranscript,
+      setOptimisticPendingPrompts,
+      setSessionError,
+      setSessionText,
+      setTranscriptError,
+      setTranscripts,
+      enqueueQueuedPrompt,
+      patchQueuedPrompt,
+      removeQueuedPrompt,
+      requestJson,
+    });
 
   React.useEffect(() => {
     chatUiModeRef.current = chatUiMode;
   }, [chatUiMode]);
-
-  React.useEffect(() => {
-    const keys = Object.keys(queuedPromptsByDroneChat);
-    if (keys.length === 0) return;
-
-    for (const key of keys) {
-      const parsed = parseDroneChatQueueKey(key);
-      if (!parsed) continue;
-      const drone = drones.find((d) => d.id === parsed.droneId) ?? null;
-      if (!drone) continue;
-      if (isDroneStartingOrSeeding(drone.hubPhase) || drone.hubPhase === 'error') continue;
-      if (flushingQueuedKeysRef.current.has(key)) continue;
-      flushingQueuedKeysRef.current.add(key);
-
-      void (async () => {
-        while (true) {
-          const latest = queuedPromptsByDroneChatRef.current[key] ?? [];
-          const head = latest[0] ?? null;
-          if (!head) return;
-          // Preserve strict FIFO ordering: if the head failed (or is mid-send), don't send later items.
-          if (head.state !== 'queued') return;
-
-          patchQueuedPrompt(key, head.id, { state: 'sending', error: undefined });
-          try {
-            const data = await requestJson<{ ok: true; accepted: true; promptId: string }>(
-              `/api/drones/${encodeURIComponent(parsed.droneId)}/chats/${encodeURIComponent(parsed.chatName)}/prompt`,
-              {
-                method: 'POST',
-                headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ prompt: head.prompt }),
-              },
-            );
-
-            const id = String((data as any)?.promptId ?? '').trim();
-            removeQueuedPrompt(key, head.id);
-
-            // If the flushed prompt is for the currently visible chat, mirror the optimistic UX.
-            const selectedKeyMatches =
-              parsed.droneId === String(selectedDrone ?? '').trim() &&
-              parsed.chatName === (String(selectedChat ?? '').trim() || 'default');
-            if (selectedKeyMatches) {
-              if (chatUiMode === 'cli') bumpCliTyping();
-              if (chatUiMode === 'transcript' && id) {
-                setOptimisticPendingPrompts((prev) => {
-                  if (prev.some((p) => p.id === id)) return prev;
-                  return [...prev, { id, at: new Date().toISOString(), prompt: head.prompt, state: 'sending' }];
-                });
-              }
-            }
-          } catch (e: any) {
-            const errText = e?.message ?? String(e);
-            patchQueuedPrompt(key, head.id, { state: 'failed', error: errText });
-            return;
-          }
-        }
-      })().finally(() => {
-        flushingQueuedKeysRef.current.delete(key);
-      });
-    }
-  }, [chatUiMode, drones, queuedPromptsByDroneChat, selectedChat, selectedDrone]);
-
-  const { value: pendingResp } = usePoll<{ ok: true; pending: PendingPrompt[] }>(
-    async () => {
-      if (chatUiMode !== 'transcript') return { ok: true, pending: [] };
-      if (!selectedDrone || !selectedChat) return { ok: true, pending: [] };
-      if (isDroneStartingOrSeeding(selectedDroneHubPhase)) return { ok: true, pending: [] };
-      return await fetchJson<{ ok: true; pending: PendingPrompt[] }>(
-        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(selectedChat || 'default')}/pending`,
-      );
-    },
-    1000,
-    [chatUiMode, selectedDrone, selectedChat, selectedDroneHubPhase],
-  );
-
-  const pendingPrompts: PendingPrompt[] = React.useMemo(() => {
-    const server = Array.isArray(pendingResp?.pending) ? pendingResp.pending : [];
-    const byId = new Map<string, PendingPrompt>();
-    for (const p of server) {
-      if (p?.id) byId.set(p.id, p);
-    }
-    for (const p of optimisticPendingPrompts) {
-      if (p?.id && !byId.has(p.id)) byId.set(p.id, p);
-    }
-    return Array.from(byId.values()).slice(-60);
-  }, [optimisticPendingPrompts, pendingResp]);
-
-  const visiblePendingPrompts = React.useMemo(() => {
-    if (chatUiMode !== 'transcript') return [];
-    const ts = Array.isArray(transcripts) ? transcripts : [];
-    const ids = new Set(ts.map((t) => String((t as any)?.id ?? '')).filter(Boolean));
-    return pendingPrompts.filter((p) => p.state === 'failed' || !ids.has(p.id));
-  }, [chatUiMode, pendingPrompts, transcripts]);
-
-  const startupPendingPrompt = React.useMemo((): PendingPrompt | null => {
-    if (chatUiMode !== 'transcript') return null;
-    if (!selectedDroneSummary) return null;
-    if (selectedDroneSummary.hubPhase !== 'starting' && selectedDroneSummary.hubPhase !== 'seeding') return null;
-    const seed = selectedDroneSummary.id ? startupSeedByDrone[selectedDroneSummary.id] : null;
-    if (!seed) return null;
-    const prompt = String(seed.prompt ?? '').trim();
-    if (!prompt) return null;
-    return {
-      id: `seed-${selectedDroneSummary.id}-${seed.chatName}`,
-      at: seed.at || new Date().toISOString(),
-      prompt,
-      state: 'sending',
-      updatedAt: seed.at || undefined,
-    };
-  }, [chatUiMode, selectedDroneSummary, startupSeedByDrone]);
-
-  const localQueuedPromptsForSelected = React.useMemo((): PendingPrompt[] => {
-    if (!selectedDrone) return [];
-    const key = droneChatQueueKey(selectedDrone, selectedChat || 'default');
-    return queuedPromptsByDroneChat[key] ?? [];
-  }, [queuedPromptsByDroneChat, selectedChat, selectedDrone]);
-
-  const visiblePendingPromptsWithStartup = React.useMemo(() => {
-    const base = (() => {
-      if (!startupPendingPrompt) return visiblePendingPrompts;
-      const startupPrompt = String(startupPendingPrompt.prompt ?? '').trim();
-      if (
-        visiblePendingPrompts.some((p) => {
-          if (p.id === startupPendingPrompt.id) return true;
-          const prompt = String(p?.prompt ?? '').trim();
-          return Boolean(startupPrompt) && Boolean(prompt) && prompt === startupPrompt;
-        })
-      ) {
-        return visiblePendingPrompts;
-      }
-      return [startupPendingPrompt, ...visiblePendingPrompts];
-    })();
-
-    if (chatUiMode !== 'transcript' || localQueuedPromptsForSelected.length === 0) return base;
-    const ids = new Set(base.map((p) => p.id));
-    const extra = localQueuedPromptsForSelected.filter((p) => !ids.has(p.id));
-    return extra.length > 0 ? [...base, ...extra] : base;
-  }, [chatUiMode, localQueuedPromptsForSelected, startupPendingPrompt, visiblePendingPrompts]);
-
-  const selectedIsResponding = React.useMemo(() => {
-    if (selectedDrone) {
-      if (sendingPrompt) return true; // request in flight
-      if (chatUiMode === 'cli' && cliTyping) return true; // best-effort signal for custom agents
-    }
-    return visiblePendingPromptsWithStartup.some((p) => p.state !== 'failed');
-  }, [chatUiMode, cliTyping, sendingPrompt, selectedDrone, visiblePendingPromptsWithStartup]);
 
   async function setChatAgent(agent: ChatAgentConfig) {
     if (!selectedDrone) return;
@@ -3033,9 +1818,7 @@ export default function DroneHubApp() {
     if (dronesFilteredByRepo.length === 0) {
       if (selectedDrone) setSelectedDrone(null);
       setSelectedDroneIds([]);
-      setDraggingDroneNames(null);
-      setDragOverGroup(null);
-      setDragOverUngrouped(false);
+      resetGroupDndState();
       setGroupMoveError(null);
       selectionAnchorRef.current = null;
       preferredSelectedDroneRef.current = null;
@@ -3073,22 +1856,15 @@ export default function DroneHubApp() {
       setSelectedDroneIds((prev) => (prev.length === 1 && prev[0] === first ? prev : [first]));
       selectionAnchorRef.current = first;
     }
-  }, [activeRepoPath, draftChat, dronesFilteredByRepo, selectedDrone, startupSeedByDrone]);
-
-  // Reset output buffer on effective selection/chat change.
-  // Use stable drone identity so in-place renames don't wipe the current chat/output pane.
-  React.useEffect(() => {
-    sessionOffsetRef.current = null;
-    screenLoadedRef.current = false;
-    setSessionOffsetBytes(null);
-    setSessionText('');
-    setSessionError(null);
-    setLoadingSession(false);
-    setTranscripts(null);
-    setTranscriptError(null);
-    setLoadingTranscript(false);
-    // pending prompts are chat-scoped and loaded in the chat selection effect
-  }, [outputView, selectedChat, selectedDroneIdentity]);
+  }, [
+    activeRepoPath,
+    draftChat,
+    dronesFilteredByRepo,
+    resetGroupDndState,
+    selectedDrone,
+    setGroupMoveError,
+    startupSeedByDrone,
+  ]);
 
   // Fall back if selected chat disappears.
   React.useEffect(() => {
@@ -3099,49 +1875,6 @@ export default function DroneHubApp() {
     if (selectedChat && chats.includes(selectedChat)) return;
     setSelectedChat(chats.includes('default') ? 'default' : chats[0]);
   }, [drones, selectedDrone, selectedChat]);
-
-  // Poll transcript (builtin agents).
-  React.useEffect(() => {
-    if (chatUiMode !== 'transcript') return;
-    let mounted = true;
-    let timer: any = null;
-    let busy = false;
-    const load = async () => {
-      if (!selectedDrone || !selectedChat || busy) return;
-      if (isDroneStartingOrSeeding(selectedDroneHubPhase)) {
-        return;
-      }
-      busy = true;
-      const initial = transcriptsRef.current === null && !transcriptErrorRef.current;
-      if (initial && mounted) setLoadingTranscript(true);
-      try {
-        const data = await fetchJson<{ ok: true; transcripts: TranscriptItem[] }>(
-          `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(selectedChat)}/transcript?turn=all`,
-        );
-        if (!mounted) return;
-        setTranscripts(data.transcripts ?? []);
-        setTranscriptError(null);
-      } catch (e: any) {
-        if (!mounted) return;
-        if (isNotFoundError(e)) {
-          // Treat 404 as "no transcript yet" to avoid a scary error state for brand new chats.
-          setTranscripts([]);
-          setTranscriptError(null);
-        } else {
-          setTranscriptError(e?.message ?? String(e));
-        }
-      } finally {
-        if (mounted) setLoadingTranscript(false);
-        busy = false;
-      }
-    };
-    load();
-    timer = setInterval(load, 2000);
-    return () => {
-      mounted = false;
-      if (timer) clearInterval(timer);
-    };
-  }, [chatUiMode, selectedDrone, selectedChat, selectedDroneHubPhase]);
 
   // Auto-scroll on new transcript turns.
   React.useEffect(() => {
@@ -3155,105 +1888,6 @@ export default function DroneHubApp() {
     }
   }, [chatUiMode, transcripts, visiblePendingPromptsWithStartup.length]);
 
-  // Poll session output.
-  React.useEffect(() => {
-    if (chatUiMode !== 'cli') return;
-    let mounted = true;
-    let timer: any = null;
-    let busy = false;
-    const load = async () => {
-      if (!selectedDrone || !selectedChat || busy) return;
-      busy = true;
-      const d = drones.find((x) => x.name === selectedDrone) ?? null;
-      if (isDroneStartingOrSeeding(d?.hubPhase)) {
-        if (mounted) {
-          sessionOffsetRef.current = null;
-          screenLoadedRef.current = false;
-          setSessionOffsetBytes(null);
-          setSessionText('');
-          setSessionError(null);
-          setLoadingSession(false);
-        }
-        busy = false;
-        return;
-      }
-      const chatExists = Boolean(d && Array.isArray(d.chats) && d.chats.includes(selectedChat));
-      if (!chatExists) {
-        if (mounted) {
-          sessionOffsetRef.current = null;
-          screenLoadedRef.current = false;
-          setSessionOffsetBytes(null);
-          setSessionText('');
-          setSessionError(null);
-          setLoadingSession(false);
-        }
-        busy = false;
-        return;
-      }
-      const initial = outputView === 'log' ? sessionOffsetRef.current == null : !screenLoadedRef.current;
-      if (initial && mounted) setLoadingSession(true);
-      try {
-        const qs = new URLSearchParams();
-        if (outputView === 'screen') {
-          qs.set('view', 'screen');
-          qs.set('tail', '2000');
-          const data = await fetchJson<{ ok: true; text: string }>(
-            `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(selectedChat)}/output?${qs.toString()}`,
-          );
-          if (!mounted) return;
-          const nextText = typeof data?.text === 'string' ? data.text : '';
-          const nextPlain = stripAnsi(nextText);
-          if (sessionTextRef.current && nextPlain !== sessionTextRef.current) bumpCliTyping();
-          screenLoadedRef.current = true;
-          sessionOffsetRef.current = null;
-          setSessionOffsetBytes(null);
-          setSessionError(null);
-          setSessionText((prev) => (prev === nextPlain ? prev : nextPlain));
-        } else {
-          if (initial) {
-            qs.set('tail', '200');
-          } else {
-            qs.set('since', String(sessionOffsetRef.current));
-            qs.set('maxBytes', '200000');
-          }
-          const data = await fetchJson<{ ok: true; offsetBytes: number; text: string }>(
-            `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(selectedChat)}/output?${qs.toString()}`,
-          );
-          if (!mounted) return;
-          const nextOffset =
-            typeof data?.offsetBytes === 'number' && Number.isFinite(data.offsetBytes)
-              ? data.offsetBytes
-              : sessionOffsetRef.current ?? 0;
-          const chunk = typeof data?.text === 'string' ? data.text : '';
-          const chunkPlain = chunk ? stripAnsi(chunk) : '';
-          sessionOffsetRef.current = nextOffset;
-          setSessionOffsetBytes(nextOffset);
-          setSessionError(null);
-          if (initial) {
-            setSessionText(chunkPlain);
-          } else if (chunkPlain) {
-            bumpCliTyping();
-            setSessionText((prev) => {
-              const next = prev + chunkPlain;
-              return next.length > 800_000 ? next.slice(-800_000) : next;
-            });
-          }
-        }
-      } catch (e: any) {
-        if (!mounted) return;
-        setSessionError(e?.message ?? String(e));
-      } finally {
-        if (mounted) setLoadingSession(false);
-        busy = false;
-      }
-    };
-    load();
-    timer = setInterval(load, 1000);
-    return () => {
-      mounted = false;
-      if (timer) clearInterval(timer);
-    };
-  }, [chatUiMode, drones, selectedDrone, selectedChat, outputView]);
 
   // Auto-scroll on new output.
   React.useEffect(() => {
@@ -3272,8 +1906,31 @@ export default function DroneHubApp() {
     }
   }, [sessionText]);
 
-  const currentDrone = selectedDrone ? drones.find((d) => d.id === selectedDrone) ?? null : null;
-  const currentDroneLabel = currentDrone ? uiDroneName(currentDrone.name) : '';
+  const {
+    deletingRepos,
+    openingTerminal,
+    openingEditor,
+    launchHint,
+    repoOp,
+    repoOpError,
+    repoOpErrorMeta,
+    clearRepoOperationError,
+    setRepoOperationError,
+    githubUrlForRepo,
+    deleteRepo,
+    openDroneTerminal,
+    openDroneEditor,
+    pullRepoChanges,
+    reseedRepo,
+  } = useWorkspaceActions({
+    autoDelete,
+    currentDrone,
+    selectedChat,
+    terminalEmulator,
+    activeRepoPath,
+    setActiveRepoPath,
+    requestJson,
+  });
   const selectedGroupMultiChatData = React.useMemo(
     () => (selectedGroupMultiChat ? sidebarGroups.find((g) => g.group === selectedGroupMultiChat) ?? null : null),
     [selectedGroupMultiChat, sidebarGroups],
@@ -3646,7 +2303,7 @@ export default function DroneHubApp() {
   }, [currentDrone?.name, portReachabilityByDrone]);
   const startupSeedForCurrentDrone =
     currentDrone && (isDroneStartingOrSeeding(currentDrone.hubPhase))
-      ? startupSeedByDrone[currentDrone.name] ?? null
+      ? startupSeedByDrone[currentDrone.id] ?? null
       : null;
   const effectiveChatInfo = chatInfo
     ? chatInfo
@@ -3767,9 +2424,6 @@ export default function DroneHubApp() {
     if (currentAgent.kind === 'custom') return `Custom: ${currentAgent.label}`;
     return currentAgentKey;
   })();
-  const rightPanelDefaultWidth = clampRightPanelWidthPx(RIGHT_PANEL_DEFAULT_WIDTH_PX);
-  const rightPanelWidthIsDefault = Math.abs(rightPanelWidth - rightPanelDefaultWidth) <= 1;
-  const rightPanelWidthMax = rightPanelMaxWidthPx(viewportWidthPx());
 
   function pickAgentValue(v: string) {
     if (v === '__add_custom__') {
@@ -3808,1617 +2462,503 @@ export default function DroneHubApp() {
     });
   }
 
-  function setRightPanelSplitMode(next: boolean) {
-    setRightPanelSplit((prev) => {
-      if (prev === next) return prev;
-      if (next && rightPanelBottomTab === rightPanelTab) {
-        const fallback = RIGHT_PANEL_TABS.find((tab) => tab !== rightPanelTab) ?? rightPanelTab;
-        setRightPanelBottomTab(fallback);
-      }
-      return next;
-    });
-  }
-
-  const resetRightPanelWidth = React.useCallback(() => {
-    setRightPanelWidth(clampRightPanelWidthPx(RIGHT_PANEL_DEFAULT_WIDTH_PX));
-  }, []);
-
-  const startRightPanelResize = React.useCallback(
-    (event: React.MouseEvent<HTMLDivElement>) => {
-      if (!rightPanelOpen) return;
-      event.preventDefault();
-      event.stopPropagation();
-      rightPanelResizeRef.current = { startX: event.clientX, startWidth: rightPanelWidth };
-      setRightPanelResizing(true);
-      document.body.style.cursor = 'col-resize';
-      document.body.style.userSelect = 'none';
-
-      const onMouseMove = (moveEvent: MouseEvent) => {
-        const state = rightPanelResizeRef.current;
-        if (!state) return;
-        const delta = state.startX - moveEvent.clientX;
-        setRightPanelWidth(clampRightPanelWidthPx(state.startWidth + delta));
-      };
-
-      const onMouseUp = () => {
-        rightPanelResizeRef.current = null;
-        setRightPanelResizing(false);
-        document.body.style.cursor = '';
-        document.body.style.userSelect = '';
-        window.removeEventListener('mousemove', onMouseMove);
-        window.removeEventListener('mouseup', onMouseUp);
-      };
-
-      window.addEventListener('mousemove', onMouseMove);
-      window.addEventListener('mouseup', onMouseUp);
-    },
-    [rightPanelOpen, rightPanelWidth],
+  const renderRightPanelTabContent = React.useCallback(
+    (drone: DroneSummary, tab: RightPanelTab, paneKey: 'top' | 'bottom' | 'single'): React.ReactNode => (
+      <RightPanelTabContent
+        drone={drone}
+        tab={tab}
+        paneKey={paneKey}
+        selectedChat={selectedChat}
+        currentDroneId={currentDrone?.id ?? null}
+        defaultFsPathForCurrentDrone={defaultFsPathForCurrentDrone}
+        uiDroneName={uiDroneName}
+        currentFsPath={currentFsPath}
+        fsEntries={fsEntries}
+        fsLoading={fsLoading}
+        fsError={fsError}
+        fsErrorUi={fsErrorUi}
+        filesPane={filesPane}
+        fsExplorerView={fsExplorerView}
+        setFsExplorerView={setFsExplorerView}
+        setCurrentFsPath={setCurrentFsPath}
+        refreshFsList={refreshFsList}
+        selectedPreviewPort={selectedPreviewPort}
+        currentPortReachability={currentPortReachability}
+        portsLoading={portsLoading}
+        portsError={portsError}
+        portsErrorUi={portsErrorUi}
+        portsPane={portsPane}
+        selectedPreviewDefaultUrl={selectedPreviewDefaultUrl}
+        selectedPreviewUrlOverride={selectedPreviewUrlOverride}
+        setSelectedPreviewUrlOverride={setSelectedPreviewUrlOverride}
+        agentLabel={agentLabel}
+        portRows={portRows}
+        setSelectedPreviewPort={setSelectedPreviewPort}
+      />
+    ),
+    [
+      agentLabel,
+      currentDrone?.id,
+      currentFsPath,
+      currentPortReachability,
+      defaultFsPathForCurrentDrone,
+      filesPane,
+      fsEntries,
+      fsError,
+      fsErrorUi,
+      fsExplorerView,
+      fsLoading,
+      portRows,
+      portsError,
+      portsErrorUi,
+      portsLoading,
+      portsPane,
+      refreshFsList,
+      selectedChat,
+      selectedPreviewDefaultUrl,
+      selectedPreviewPort,
+      selectedPreviewUrlOverride,
+      setCurrentFsPath,
+      setFsExplorerView,
+      setSelectedPreviewPort,
+      setSelectedPreviewUrlOverride,
+      uiDroneName,
+    ],
   );
 
-  function renderRightPanelTabContent(
-    drone: DroneSummary,
-    tab: RightPanelTab,
-    paneKey: 'top' | 'bottom' | 'single',
-  ): React.ReactNode {
-    const disabled = isDroneStartingOrSeeding(drone.hubPhase);
-    const chatName = selectedChat || 'default';
-    const isCurrent = Boolean(currentDrone && String(currentDrone.id) === String(drone.id));
-    const contentByTab: Record<RightPanelTab, React.ReactNode> = {
-      terminal: (
-        <DroneTerminalDock
-          key={`${paneKey}-terminal`}
-          droneId={drone.id}
-          droneName={drone.name}
-          chatName={chatName}
-          defaultCwd={defaultFsPathForCurrentDrone}
-          disabled={disabled}
-          hubPhase={drone.hubPhase}
-          hubMessage={drone.hubMessage}
-        />
-      ),
-      files: (
-        <DroneFilesDock
-          key={`${paneKey}-files`}
-          droneId={drone.id}
-          droneName={drone.name}
-          droneLabel={uiDroneName(drone.name)}
-          path={currentFsPath}
-          homePath={defaultFsPathForCurrentDrone}
-          entries={fsEntries}
-          loading={fsLoading}
-          error={isCurrent ? fsErrorUi : fsError}
-          startup={
-            isCurrent
-              ? {
-                  waiting: filesPane.waiting,
-                  timedOut: filesPane.timedOut,
-                  hubPhase: drone.hubPhase,
-                  hubMessage: drone.hubMessage,
-                }
-              : null
-          }
-          viewMode={fsExplorerView}
-          onSetViewMode={setFsExplorerView}
-          onOpenPath={setCurrentFsPath}
-          onRefresh={refreshFsList}
-        />
-      ),
-      preview: (
-        <DronePreviewDock
-          key={`${paneKey}-preview`}
-          selectedPort={selectedPreviewPort}
-          portReachabilityByHostPort={currentPortReachability}
-          portsLoading={portsLoading}
-          portsError={isCurrent ? portsErrorUi : portsError}
-          startup={
-            isCurrent
-              ? {
-                  waiting: portsPane.waiting,
-                  timedOut: portsPane.timedOut,
-                  hubPhase: drone.hubPhase,
-                  hubMessage: drone.hubMessage,
-                }
-              : null
-          }
-          defaultPreviewUrl={selectedPreviewDefaultUrl}
-          previewUrlOverride={selectedPreviewUrlOverride}
-          onSetPreviewUrlOverride={setSelectedPreviewUrlOverride}
-        />
-      ),
-      links: (
-        <DroneLinksDock
-          key={`${paneKey}-links`}
-          droneId={drone.id}
-          droneName={drone.name}
-          agentLabel={agentLabel}
-          chatName={chatName}
-          portRows={portRows}
-          selectedPort={selectedPreviewPort}
-          portReachabilityByHostPort={currentPortReachability}
-          onSelectPort={setSelectedPreviewPort}
-          portsLoading={portsLoading}
-          portsError={isCurrent ? portsErrorUi : portsError}
-        />
-      ),
-      changes: (
-        <DroneChangesDock
-          key={`${paneKey}-changes`}
-          droneId={drone.id}
-          droneName={drone.name}
-          repoAttached={drone.repoAttached ?? Boolean(String(drone.repoPath ?? '').trim())}
-          repoPath={drone.repoPath}
-          disabled={disabled}
-          hubPhase={drone.hubPhase}
-          hubMessage={drone.hubMessage}
-        />
-      ),
-    };
-    return contentByTab[tab];
-  }
+  const handleAddCustomAgent = React.useCallback(() => {
+    const label = newCustomAgentLabel.trim();
+    const command = newCustomAgentCommand.trim();
+    if (!label) {
+      setCustomAgentError('Name is required.');
+      return;
+    }
+    if (!command) {
+      setCustomAgentError('Command is required.');
+      return;
+    }
+    const base = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'custom';
+    const rand = Math.random().toString(16).slice(2, 8);
+    const id = `${base}-${rand}`;
+    setCustomAgents((prev) => [{ id, label, command }, ...prev]);
+    setCustomAgentError(null);
+    setNewCustomAgentLabel('');
+    setNewCustomAgentCommand('');
+    setCustomAgentModalOpen(false);
+  }, [newCustomAgentCommand, newCustomAgentLabel]);
 
   return (
     <div className="flex h-screen overflow-hidden fixed inset-0">
-      {/* ── Sidebar ── */}
-      <aside
-        className="bg-[var(--panel-alt)] border-r border-[var(--border)] flex flex-col min-h-0 relative dh-dot-grid flex-shrink-0 overflow-hidden transition-[width] duration-200 ease-out"
-        style={{ width: sidebarCollapsed ? 0 : 280 }}
-      >
-        {/* Sidebar header */}
-        <div className="flex-shrink-0 px-3 py-3 border-b border-[var(--border)] relative">
-          {/* Accent bar at top of sidebar */}
-          <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-[var(--accent)] via-[var(--accent-muted)] to-transparent opacity-40" />
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 min-w-0">
-              <span
-                className="font-semibold text-[13px] text-[var(--fg)] whitespace-nowrap"
-                style={{ fontFamily: 'var(--display)' }}
-              >
-                Drone Hub
-              </span>
-              {selectedDroneIds.length > 1 && (
-                <span className="text-[10px] text-[var(--accent)] whitespace-nowrap" title={`${selectedDroneIds.length} drones selected`}>
-                  {selectedDroneIds.length} selected
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-1 flex-shrink-0">
-              <button
-                type="button"
-                onClick={openDraftChatComposer}
-                className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
-                  draftChat
-                    ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                    : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
-                }`}
-                title="Create drone (A)"
-                aria-label="Create drone"
-              >
-                <IconPlus className="opacity-80" />
-              </button>
-              <button
-                type="button"
-                onClick={openCreateModal}
-                className="inline-flex items-center justify-center w-7 h-7 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] transition-all"
-                title="Create multiple drones (S)"
-                aria-label="Create multiple drones"
-              >
-                <IconPlusDouble className="opacity-80" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setAppView(appView === 'settings' ? 'workspace' : 'settings')}
-                className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
-                  appView === 'settings'
-                    ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                    : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
-                }`}
-                title={appView === 'settings' ? 'Back to workspace' : 'Open settings'}
-                aria-label={appView === 'settings' ? 'Back to workspace' : 'Open settings'}
-              >
-                <IconSettings className="opacity-80" />
-              </button>
-              <button
-                onClick={() => setViewMode(viewMode === 'grouped' ? 'flat' : 'grouped')}
-                className="inline-flex items-center gap-1 px-1.5 py-1 rounded text-[10px] font-semibold text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)] border border-transparent hover:border-[var(--border-subtle)] transition-all"
-                title={viewMode === 'grouped' ? 'Switch to flat list' : 'Switch to grouped folders'}
-              >
-                <IconList className="opacity-60" />
-                {viewMode === 'grouped' ? 'Grp' : 'Flat'}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Drone list */}
-        <div className="flex-1 min-h-0 overflow-y-auto px-2 py-2">
-          {dronesError && (
-            <div className="mx-2 mb-2 p-3 rounded border border-[rgba(255,90,90,.15)] bg-[var(--red-subtle)] text-xs text-[var(--red)]">
-              Failed to load drones: {dronesError}
-            </div>
-          )}
-          {groupMoveError && (
-            <div className="mx-2 mb-2 p-2 rounded border border-[rgba(255,90,90,.15)] bg-[var(--red-subtle)] text-[11px] text-[var(--red)]">
-              Group move failed: {groupMoveError}
-            </div>
-          )}
-          {dronesLoading && sidebarDronesFilteredByRepo.length === 0 && !dronesError && (
-            <div className="px-3 py-3 flex flex-col gap-4">
-              {[1, 2, 3].map((i) => (
-                <div key={i} className="flex flex-col gap-2 opacity-30">
-                  <SkeletonLine w="65%" />
-                  <SkeletonLine w="40%" />
-                </div>
-              ))}
-            </div>
-          )}
-          {!dronesLoading && sidebarDrones.length === 0 && !dronesError && (
-            <div className="px-3 py-10 text-center">
-              <div
-                className="text-[var(--muted-dim)] text-[11px] tracking-wide uppercase"
-                style={{ fontFamily: 'var(--display)' }}
-              >
-                No drones registered
-              </div>
-              <div className="mt-4 mx-auto max-w-[240px] flex flex-col gap-2">
-                <button
-                  type="button"
-                  onClick={openDraftChatComposer}
-                  className="w-full inline-flex items-center gap-2 h-[30px] px-3 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[11px] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] transition-all"
-                  title="Create new drone (A)"
-                  aria-label="Create new drone"
-                >
-                  <IconPlus className="opacity-80" />
-                  <span className="font-semibold tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                    Create new drone
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={openCreateModal}
-                  className="w-full inline-flex items-center gap-2 h-[30px] px-3 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[11px] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] transition-all"
-                  title="Create multiple drones (S)"
-                  aria-label="Create multiple drones"
-                >
-                  <IconPlusDouble className="opacity-80" />
-                  <span className="font-semibold tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                    Create multiple drones
-                  </span>
-                </button>
-              </div>
-              <div className="text-[var(--muted-dim)] text-[10px] mt-4">
-                Or run{' '}
-                <code className="px-1.5 py-0.5 rounded bg-[rgba(167,139,250,.06)] border border-[rgba(167,139,250,.08)] text-[#C4B5FD] text-[10px]">
-                  drone create &lt;name&gt;
-                </code>{' '}
-                in your terminal.
-              </div>
-            </div>
-          )}
-          {!dronesLoading && sidebarDrones.length > 0 && sidebarDronesFilteredByRepo.length === 0 && activeRepoPath && !dronesError && (
-            <div className="px-3 py-10 text-center">
-              <div
-                className="text-[var(--muted-dim)] text-[11px] tracking-wide uppercase"
-                style={{ fontFamily: 'var(--display)' }}
-              >
-                No drones for selected repo
-              </div>
-              <div className="text-[var(--muted-dim)] text-[10px] mt-2 font-mono truncate" title={activeRepoPath}>
-                {activeRepoPath}
-              </div>
-            </div>
-          )}
-          <div className="flex flex-col gap-0.5 select-none">
-            {viewMode === 'flat' ? (
-              sidebarDronesFilteredByRepo
-                .slice()
-                .sort(compareDronesByNewestFirst)
-                .map((d) => {
-                  const isOptimistic = sidebarOptimisticDroneIdSet.has(d.id);
-                  return (
-                    <DroneCard
-                      key={d.id}
-                      drone={d}
-                      displayName={uiDroneName(d.name)}
-                      statusHint={isOptimistic ? 'queued' : undefined}
-                      selected={selectedDroneSet.has(d.id)}
-                      busy={
-                        isDroneStartingOrSeeding(d.hubPhase)
-                          ? false
-                          : Boolean(d.busy) || (d.id === selectedDrone && selectedIsResponding)
-                      }
-                      onClick={(opts) => selectDroneCard(d.id, opts)}
-                      onClone={() => openCloneModal(d)}
-                      onRename={() => renameDrone(d.id)}
-                      onDelete={() => deleteDrone(d.id)}
-                      onErrorClick={openDroneErrorModal}
-                      cloneDisabled={isOptimistic || Boolean(deletingDrones[d.id]) || Boolean(renamingDrones[d.id])}
-                      renameDisabled={isOptimistic || Boolean(deletingDrones[d.id]) || Boolean(renamingDrones[d.id])}
-                      renameBusy={Boolean(renamingDrones[d.id])}
-                      deleteDisabled={isOptimistic || Boolean(deletingDrones[d.id]) || Boolean(renamingDrones[d.id])}
-                      deleteBusy={Boolean(deletingDrones[d.id])}
-                    />
-                  );
-                })
-            ) : (
-              <div
-                className="flex flex-col gap-1.5"
-                onDragOver={onUngroupedDragOver}
-                onDragLeave={onUngroupedDragLeave}
-                onDrop={onUngroupedDrop}
-              >
-                <div className="px-1">
-                  <form
-                    className="flex items-center gap-1.5"
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      void createGroupFromDraft();
-                    }}
-                  >
-                    <input
-                      value={createGroupDraft}
-                      onChange={(e) => {
-                        setCreateGroupDraft(e.target.value);
-                        if (createGroupError) setCreateGroupError(null);
-                      }}
-                      placeholder="New group"
-                      className="flex-1 min-w-0 px-2 py-1.5 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.18)] text-[11px] text-[var(--fg-secondary)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-muted)]"
-                    />
-                    <button
-                      type="submit"
-                      disabled={creatingGroup}
-                      aria-busy={creatingGroup}
-                      className={`inline-flex items-center justify-center w-8 h-8 rounded border transition-all ${
-                        creatingGroup
-                          ? 'opacity-60 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                          : 'bg-[rgba(167,139,250,.08)] border-[rgba(167,139,250,.18)] text-[var(--accent)] hover:bg-[rgba(167,139,250,.12)]'
-                      }`}
-                      title="Create group"
-                      aria-label="Create group"
-                    >
-                      {creatingGroup ? <IconSpinner className="opacity-90" /> : <IconPlus className="opacity-90" />}
-                    </button>
-                  </form>
-                  {createGroupError && <div className="px-0.5 pt-1 text-[10px] text-[var(--red)]">{createGroupError}</div>}
-                </div>
-                {sidebarGroups.map(({ group, items }) => {
-                  const collapsed = !!collapsedGroups[group];
-                  const isDeletingGroup = Boolean(deletingGroups[group]);
-                  const isRenamingGroup = Boolean(renamingGroups[group]);
-                  const isDropTarget = dragOverGroup === group;
-                  const canRenameGroup = !isUngroupedGroupName(group);
-                  return (
-                    <div
-                      key={group}
-                      className={`rounded-md border bg-[rgba(0,0,0,.15)] overflow-hidden transition-colors ${
-                        isDropTarget ? 'border-[var(--accent-muted)] ring-1 ring-[var(--accent-muted)]' : 'border-[var(--border-subtle)]'
-                      }`}
-                      onDragOver={(event) => onGroupDragOver(group, event)}
-                      onDragLeave={(event) => onGroupDragLeave(group, event)}
-                      onDrop={(event) => onGroupDrop(group, event)}
-                    >
-                      <div
-                        className={`group/group-header w-full px-3 py-2 flex items-center justify-between gap-2 border-b border-[var(--border-subtle)] transition-colors ${
-                          isDropTarget ? 'bg-[var(--accent-subtle)]' : 'hover:bg-[var(--hover)]'
-                        }`}
-                      >
-                        <button
-                          onClick={() =>
-                            setCollapsedGroups((prev) => ({
-                              ...prev,
-                              [group]: !prev[group],
-                            }))
-                          }
-                          className="flex items-center gap-2 min-w-0 text-left flex-1"
-                          title={collapsed ? 'Expand group' : 'Collapse group'}
-                        >
-                          <IconChevron down={!collapsed} className="text-[var(--muted-dim)]" />
-                          <IconFolder className="text-[var(--muted-dim)] opacity-50" />
-                          <span
-                            className="text-[11px] font-semibold text-[var(--fg-secondary)] truncate tracking-wide uppercase"
-                            style={{ fontFamily: 'var(--display)' }}
-                          >
-                            {group}
-                          </span>
-                        </button>
-                        <div className="flex items-center justify-end flex-shrink-0 min-w-[148px]">
-                          <div className="relative w-full flex justify-end">
-                            <div
-                              className={`flex items-center gap-2 text-[10px] font-mono text-[var(--muted-dim)] transition-opacity duration-150 ${
-                                isDeletingGroup || isRenamingGroup
-                                  ? 'opacity-0 pointer-events-none'
-                                  : 'group-hover/group-header:opacity-0 group-hover/group-header:pointer-events-none'
-                              }`}
-                            >
-                              <span>
-                                {items.length} drone{items.length !== 1 ? 's' : ''}
-                              </span>
-                            </div>
-                            {canRenameGroup && (
-                              <button
-                                onClick={() => void renameGroup(group)}
-                                disabled={isDeletingGroup || isRenamingGroup}
-                                aria-busy={isRenamingGroup}
-                                className={`absolute right-8 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
-                                  isDeletingGroup || isRenamingGroup
-                                    ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                                    : 'opacity-0 pointer-events-none group-hover/group-header:opacity-100 group-hover/group-header:pointer-events-auto bg-[rgba(167,139,250,.08)] border-[rgba(167,139,250,.18)] text-[var(--accent)] hover:bg-[rgba(167,139,250,.12)]'
-                                }`}
-                                title={isRenamingGroup ? `Renaming group "${group}"…` : `Rename group "${group}"`}
-                                aria-label={isRenamingGroup ? `Renaming group "${group}"` : `Rename group "${group}"`}
-                              >
-                                {isRenamingGroup ? <IconSpinner className="opacity-90" /> : <IconPencil className="opacity-90" />}
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setAppView('workspace');
-                                setDraftChat(null);
-                                setDraftCreateOpen(false);
-                                setDraftCreateError(null);
-                                setSelectedGroupMultiChat(group);
-                              }}
-                              disabled={isDeletingGroup}
-                              className={`absolute right-16 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
-                                isDeletingGroup
-                                  ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                                  : selectedGroupMultiChat === group
-                                    ? 'opacity-100 pointer-events-auto bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
-                                    : 'opacity-0 pointer-events-none group-hover/group-header:opacity-100 group-hover/group-header:pointer-events-auto bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
-                              }`}
-                              title={`Open "${group}" multi-chat`}
-                              aria-label={`Open "${group}" multi-chat`}
-                            >
-                              <IconColumns className="opacity-90" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => deleteGroup(group, items.length)}
-                              disabled={isDeletingGroup || isRenamingGroup}
-                              aria-busy={isDeletingGroup}
-                              className={`absolute right-0 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
-                                isDeletingGroup || isRenamingGroup
-                                  ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                                  : 'opacity-0 pointer-events-none group-hover/group-header:opacity-100 group-hover/group-header:pointer-events-auto bg-[var(--red-subtle)] border-[rgba(255,90,90,.2)] text-[var(--red)] hover:bg-[rgba(255,90,90,.15)]'
-                              }`}
-                              title={
-                                isDeletingGroup
-                                  ? `Deleting group "${group}"…`
-                                  : `Delete group "${group}" (and all drones inside)`
-                              }
-                              aria-label={
-                                isDeletingGroup
-                                  ? `Deleting group "${group}"`
-                                  : `Delete group "${group}" (and all drones inside)`
-                              }
-                            >
-                              {isDeletingGroup ? <IconSpinner className="opacity-90" /> : <IconTrash className="opacity-90" />}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                      {!collapsed && (
-                        <div className="px-1.5 py-1.5 flex flex-col gap-0.5">
-                          {items.map((d) => {
-                            const isOptimistic = sidebarOptimisticDroneIdSet.has(d.id);
-                            return (
-                              <DroneCard
-                                key={d.id}
-                                drone={d}
-                                displayName={uiDroneName(d.name)}
-                                statusHint={isOptimistic ? 'queued' : undefined}
-                                selected={selectedDroneSet.has(d.id)}
-                                busy={
-                                  isDroneStartingOrSeeding(d.hubPhase)
-                                    ? false
-                                    : Boolean(d.busy) || (d.id === selectedDrone && selectedIsResponding)
-                                }
-                                showGroup={false}
-                                onClick={(opts) => selectDroneCard(d.id, opts)}
-                                draggable={!movingDroneGroups && !isOptimistic}
-                                onDragStart={(event) => onDroneDragStart(d.id, event)}
-                                onDragEnd={onDroneDragEnd}
-                                onClone={() => openCloneModal(d)}
-                                onRename={() => renameDrone(d.id)}
-                                onDelete={() => deleteDrone(d.id)}
-                                onErrorClick={openDroneErrorModal}
-                                cloneDisabled={isOptimistic || Boolean(deletingDrones[d.id]) || Boolean(renamingDrones[d.id])}
-                                renameDisabled={isOptimistic || Boolean(deletingDrones[d.id]) || Boolean(renamingDrones[d.id])}
-                                renameBusy={Boolean(renamingDrones[d.id])}
-                                deleteDisabled={isOptimistic || Boolean(deletingDrones[d.id]) || Boolean(renamingDrones[d.id])}
-                                deleteBusy={Boolean(deletingDrones[d.id])}
-                              />
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-                {!sidebarHasUngroupedGroup && draggingDroneNames && draggingDroneNames.length > 0 && (
-                  <div
-                    className={`rounded-md border border-dashed px-3 py-2 text-[10px] font-semibold tracking-wide uppercase transition-colors ${
-                      dragOverUngrouped
-                        ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                        : 'border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                    }`}
-                    style={{ fontFamily: 'var(--display)' }}
-                  >
-                    Drop here to move to Ungrouped
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Sidebar repos list */}
-        <div className="flex-shrink-0 border-t border-[var(--border)] bg-[rgba(0,0,0,.12)]">
-          <div className="px-2.5 py-1.5 flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => setSidebarReposCollapsed((v) => !v)}
-              className="flex-1 min-w-0 inline-flex items-center gap-2 px-1.5 py-1 rounded text-left text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)] transition-all"
-              style={{ fontFamily: 'var(--display)' }}
-              title={sidebarReposCollapsed ? 'Expand repos list' : 'Collapse repos list'}
-              aria-label={sidebarReposCollapsed ? 'Expand repos list' : 'Collapse repos list'}
-            >
-              <IconChevron down={!sidebarReposCollapsed} className="opacity-70" />
-              <IconFolder className="opacity-60 w-3 h-3" />
-              <span className="truncate">Repos {repos.length > 0 ? repos.length : ''}</span>
-              {activeRepoPath ? (
-                <span className="ml-auto px-1.5 py-0.5 rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[9px] text-[var(--accent)]">
-                  Filtered
-                </span>
-              ) : null}
-            </button>
-            <button
-              type="button"
-              onClick={() => setReposModalOpen(true)}
-              className="inline-flex items-center justify-center w-7 h-7 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-all"
-              title={`Manage repos (${repos.length})`}
-              aria-label="Manage repos"
-            >
-              <IconSettings className="opacity-70" />
-            </button>
-          </div>
-          {!sidebarReposCollapsed && (
-            <div className="max-h-[190px] overflow-y-auto px-2 pb-2 flex flex-col gap-0.5">
-              <button
-                type="button"
-                onClick={() => setActiveRepoPath('')}
-                className={`w-full text-left px-2.5 py-2 rounded border transition-all ${
-                  !activeRepoPath
-                    ? 'bg-[var(--selected)] border-[var(--accent-muted)]'
-                    : 'border-transparent hover:border-[var(--border-subtle)] hover:bg-[var(--hover)]'
-                }`}
-                title="Show drones from all repos"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[11px] text-[var(--fg-secondary)]">All repos</span>
-                  <span className="text-[10px] font-mono text-[var(--muted-dim)]">{drones.length}</span>
-                </div>
-              </button>
-              {repos
-                .slice()
-                .sort((a, b) => a.path.localeCompare(b.path))
-                .map((r) => {
-                  const p = String(r.path ?? '').trim();
-                  if (!p) return null;
-                  const selected = p === activeRepoPath;
-                  const base = r.github
-                    ? `${r.github.owner}/${r.github.repo}`
-                    : p.split(/[\\/]/).filter(Boolean).pop() || p;
-                  const droneCount = droneCountByRepoPath.get(p) ?? 0;
-                  return (
-                    <button
-                      key={p}
-                      type="button"
-                      onClick={() => setActiveRepoPath((prev) => (prev === p ? '' : p))}
-                      className={`w-full text-left px-2.5 py-2 rounded border transition-all ${
-                        selected
-                          ? 'bg-[var(--selected)] border-[var(--accent-muted)] shadow-[0_0_8px_rgba(167,139,250,.06)]'
-                          : 'border-transparent hover:border-[var(--border-subtle)] hover:bg-[var(--hover)]'
-                      }`}
-                      title={p}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <div className="text-[11px] text-[var(--fg-secondary)] truncate">{base}</div>
-                          <div className="text-[10px] text-[var(--muted-dim)] truncate font-mono mt-0.5">{p}</div>
-                        </div>
-                        <span className="text-[10px] font-mono text-[var(--muted-dim)] mt-0.5">{droneCount}</span>
-                      </div>
-                    </button>
-                  );
-                })}
-              {!reposLoading && repos.length === 0 && !reposError && (
-                <div className="px-2.5 py-3 text-[10px] text-[var(--muted-dim)]">
-                  No repos registered yet.
-                </div>
-              )}
-              {reposError && (
-                <div className="px-2.5 py-3 text-[10px] text-[var(--red)]">
-                  Failed to load repos.
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Sidebar footer */}
-        <div className="flex-shrink-0 px-3 py-2.5 border-t border-[var(--border)] flex items-center justify-between gap-2">
-          <label className="flex items-center gap-2 select-none cursor-pointer group">
-            <input
-              type="checkbox"
-              className="accent-[var(--accent)] w-3.5 h-3.5"
-              checked={autoDelete}
-              onChange={(e) => setAutoDelete(e.target.checked)}
-            />
-            <span className="text-[10px] text-[var(--muted-dim)] group-hover:text-[var(--muted)] transition-colors" title="When enabled, deletes won't ask for confirmation.">
-              Auto-delete
-            </span>
-          </label>
-          <button
-            type="button"
-            onClick={() => setSidebarCollapsed(true)}
-            className="inline-flex items-center justify-center w-7 h-7 rounded text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)] transition-all"
-            title="Collapse sidebar"
-            aria-label="Collapse sidebar"
-          >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 3L6 8l5 5" /><line x1="3" y1="3" x2="3" y2="13" /></svg>
-          </button>
-        </div>
-      </aside>
-
-      {/* Sidebar expand button (shown when collapsed) */}
-      {sidebarCollapsed && (
-        <div className="flex-shrink-0 w-10 bg-[var(--panel-alt)] border-r border-[var(--border)] flex flex-col items-center pt-3 gap-2">
-          <button
-            type="button"
-            onClick={() => setSidebarCollapsed(false)}
-            className="inline-flex items-center justify-center w-7 h-7 rounded text-[var(--muted-dim)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-all"
-            title="Expand sidebar"
-            aria-label="Expand sidebar"
-          >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3l5 5-5 5" /><line x1="13" y1="3" x2="13" y2="13" /></svg>
-          </button>
-          <button
-            type="button"
-            onClick={() => { setSidebarCollapsed(false); openDraftChatComposer(); }}
-            className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
-              draftChat
-                ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                : 'border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
-            }`}
-            title="Create drone (A)"
-            aria-label="Create drone"
-          >
-            <IconPlus className="opacity-80" />
-          </button>
-          <button
-            type="button"
-            onClick={() => { setSidebarCollapsed(false); openCreateModal(); }}
-            className="inline-flex items-center justify-center w-7 h-7 rounded border border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] transition-all"
-            title="Create multiple drones (S)"
-            aria-label="Create multiple drones"
-          >
-            <IconPlusDouble className="opacity-80" />
-          </button>
-        </div>
-      )}
-
-      {createOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(0,0,0,.55)] backdrop-blur-sm px-4"
-          role="dialog"
-          aria-modal="true"
-        >
-          <div className="w-full max-w-[760px] rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-alt)] shadow-[0_24px_80px_rgba(0,0,0,.35)] overflow-hidden animate-slide-up relative">
-            <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-[var(--accent)] via-[var(--accent-muted)] to-transparent opacity-40" />
-            <form
-              onKeyDown={(e) => {
-                if (e.key !== 'Enter') return;
-
-                // Submit only on Ctrl+Enter (or Cmd+Enter).
-                if (e.ctrlKey || e.metaKey) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  if (creating) return;
-                  void createDrone();
-                  return;
-                }
-
-                // Prevent accidental submits on plain Enter.
-                // Allow normal Enter behavior in textarea/select.
-                const t = e.target as unknown;
-                if (t instanceof HTMLTextAreaElement) return;
-                if (t instanceof HTMLSelectElement) return;
-                e.preventDefault();
-                e.stopPropagation();
-              }}
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (creating) return;
-                void createDrone();
-              }}
-            >
-              <div className="px-5 py-4 border-b border-[var(--border)] flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="font-semibold text-sm text-[var(--fg)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                    {createMode === 'clone' ? 'Clone drones' : 'Create drones'}
-                  </div>
-                  <div className="text-[10px] text-[var(--muted)] mt-0.5 font-mono">
-                    {createNameEntries.length} drone{createNameEntries.length === 1 ? '' : 's'} ready
-                  </div>
-                  {createMode === 'clone' && cloneSourceId && (
-                    <div
-                      className="text-[10px] text-[var(--muted)] mt-1 truncate font-mono"
-                      title={`Source: ${String(drones.find((d) => d.id === cloneSourceId)?.name ?? cloneSourceId)}`}
-                    >
-                      source: {String(drones.find((d) => d.id === cloneSourceId)?.name ?? cloneSourceId)}
-                    </div>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="submit"
-                    disabled={creating || createNameEntries.length === 0}
-                    className={`h-8 px-4 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
-                      creating || createNameEntries.length === 0
-                        ? 'opacity-70 cursor-wait bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
-                        : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
-                    }`}
-                    style={{ fontFamily: 'var(--display)' }}
-                    title={createMode === 'clone' ? 'Clone all drones in this list' : 'Create all drones in this list'}
-                  >
-                    {creating ? (
-                      <span className="inline-flex items-center gap-2">
-                        <IconSpinner className="w-3.5 h-3.5" />
-                        {createMode === 'clone' ? 'Cloning…' : 'Creating…'}
-                      </span>
-                    ) : (
-                      createMode === 'clone' ? 'Clone all' : 'Create all'
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (creating) return;
-                      setCreateOpen(false);
-                    }}
-                    className="inline-flex items-center justify-center w-7 h-7 rounded border border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] transition-colors"
-                    title="Close"
-                    aria-label="Close"
-                  >
-                    ×
-                  </button>
-                </div>
-              </div>
-              <div className="px-5 py-4 max-h-[70vh] overflow-auto">
-                {createError && (
-                  <div className="mb-4 p-3 rounded border border-[rgba(255,90,90,.15)] bg-[var(--red-subtle)] text-xs text-[var(--red)] whitespace-pre-wrap">
-                    {createError}
-                  </div>
-                )}
-                <div className="mb-4">
-                  <div className="text-[10px] font-semibold text-[var(--muted-dim)] mb-1.5 tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
-                    Group for created drones
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      value={createGroup}
-                      onChange={(e) => setCreateGroup(e.target.value)}
-                      className="flex-1 h-9 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors"
-                      placeholder="e.g. auth, billing, frontend"
-                      disabled={creating}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setCreateGroup('')}
-                      className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)]"
-                      style={{ fontFamily: 'var(--display)' }}
-                      title="Clear group"
-                      disabled={creating}
-                    >
-                      Clear
-                    </button>
-                  </div>
-                </div>
-
-                <div className="mb-4">
-                  <div className="text-[10px] font-semibold text-[var(--muted-dim)] mb-1.5 tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
-                    Repo path for created drones (optional)
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <UiMenuSelect
-                      variant="form"
-                      value={createRepoPath}
-                      onValueChange={setCreateRepoPath}
-                      entries={createRepoMenuEntries}
-                      open={createRepoMenuOpen}
-                      onOpenChange={setCreateRepoMenuOpen}
-                      disabled={creating}
-                      triggerClassName="flex-1"
-                      panelClassName="right-auto w-[720px] max-w-[calc(100vw-3rem)]"
-                      title={createRepoPath || 'No repo'}
-                      triggerLabel={createRepoPath || 'No repo'}
-                      triggerLabelClassName={createRepoPath ? 'font-mono text-[12px]' : undefined}
-                      chevron={(open) => <IconChevron down={!open} className="text-[var(--muted-dim)] opacity-70 flex-shrink-0" />}
-                      menuClassName="max-h-[220px] overflow-y-auto"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setCreateRepoPath('')}
-                      className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)]"
-                      style={{ fontFamily: 'var(--display)' }}
-                      title="Clear repo path"
-                      disabled={creating}
-                    >
-                      Clear
-                    </button>
-                  </div>
-                  {registeredRepoPaths.length === 0 ? (
-                    <span className="text-[10px] text-[var(--muted-dim)] block mt-1">
-                      No repos registered yet. Add one from the Repos menu in the sidebar.
-                    </span>
-                  ) : (
-                    <span className="text-[10px] text-[var(--muted-dim)] block mt-1">
-                      Choose a registered repo, or leave this set to No repo.
-                    </span>
-                  )}
-                  {createMode === 'create' && String(activeRepoPath ?? '').trim() && !String(createRepoPath ?? '').trim() && (
-                    <span className="text-[10px] text-[var(--muted-dim)] block mt-1">
-                      Tip: you have an active repo selected in the sidebar. Click it again to unselect.
-                    </span>
-                  )}
-                </div>
-
-                {createMode === 'clone' && (
-                  <div className="mb-4">
-                    <label className="flex items-center gap-2 select-none">
-                      <input
-                        type="checkbox"
-                        className="accent-[var(--accent)]"
-                        checked={cloneIncludeChats}
-                        onChange={(e) => setCloneIncludeChats(e.target.checked)}
-                        disabled={creating}
-                      />
-                      <span className="text-[11px] text-[var(--muted)]">Include chats (copy transcript history)</span>
-                    </label>
-                  </div>
-                )}
-
-                <div className="mb-4">
-                  <div className="text-[10px] font-semibold text-[var(--muted-dim)] mb-1.5 tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
-                    Agent for created drones
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <UiMenuSelect
-                      variant="form"
-                      value={spawnAgentKey}
-                      onValueChange={setSpawnAgentKey}
-                      entries={spawnAgentMenuEntries}
-                      disabled={creating || (createMode === 'clone' && cloneIncludeChats)}
-                      triggerClassName="flex-1"
-                      panelClassName="right-auto w-[460px] max-w-[calc(100vw-3rem)]"
-                      title="Choose which agent implementation to use for the default chat in all created drones."
-                      chevron={(open) => <IconChevron down={!open} className="text-[var(--muted-dim)] opacity-70 flex-shrink-0" />}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setCustomAgentModalOpen(true)}
-                      disabled={creating || (createMode === 'clone' && cloneIncludeChats)}
-                      className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
-                        creating || (createMode === 'clone' && cloneIncludeChats)
-                          ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                          : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)] hover:border-[var(--border)]'
-                      }`}
-                      style={{ fontFamily: 'var(--display)' }}
-                      title="Manage saved custom agents"
-                    >
-                      Custom…
-                    </button>
-                  </div>
-                  <span className="text-[10px] text-[var(--muted-dim)] block mt-1">
-                    {createMode === 'clone' && cloneIncludeChats
-                      ? 'When cloning chats, agents are copied from the source chats.'
-                      : 'Used for the default chat. You can change per-chat later.'}
-                  </span>
-                </div>
-
-                <div className="mb-4">
-                  <div className="text-[10px] font-semibold text-[var(--muted-dim)] mb-1.5 tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
-                    Model for created drones (optional)
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      value={spawnModel}
-                      onChange={(e) => setSpawnModel(e.target.value)}
-                      className={`h-9 flex-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-3 text-[13px] font-mono text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none ${
-                        creating || (createMode === 'clone' && cloneIncludeChats) || spawnAgentConfig.kind !== 'builtin'
-                          ? 'opacity-50 cursor-not-allowed'
-                          : ''
-                      }`}
-                      placeholder="Default model"
-                      disabled={creating || (createMode === 'clone' && cloneIncludeChats) || spawnAgentConfig.kind !== 'builtin'}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setSpawnModel('')}
-                      disabled={creating || (createMode === 'clone' && cloneIncludeChats) || spawnAgentConfig.kind !== 'builtin' || !spawnModel.trim()}
-                      className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
-                        creating || (createMode === 'clone' && cloneIncludeChats) || spawnAgentConfig.kind !== 'builtin' || !spawnModel.trim()
-                          ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                          : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)] hover:border-[var(--border)]'
-                      }`}
-                      style={{ fontFamily: 'var(--display)' }}
-                    >
-                      Clear
-                    </button>
-                  </div>
-                  <span className="text-[10px] text-[var(--muted-dim)] block mt-1">
-                    {createMode === 'clone' && cloneIncludeChats
-                      ? 'When cloning chats, model settings are copied from the source chats.'
-                      : spawnAgentConfig.kind === 'builtin'
-                        ? 'Leave empty to use each agent’s default model.'
-                        : 'Custom agents manage model selection in their own CLI.'}
-                  </span>
-                </div>
-
-                <div className="mb-4">
-                  <div className="mb-1 flex items-center justify-between gap-2">
-                    <div className="text-[11px] font-semibold text-[var(--muted)]">
-                      Initial message (sent to every created drone before any per-drone suffix)
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setCreateInitialMessage('')}
-                      className="text-[11px] font-semibold text-[var(--accent)] hover:text-[var(--fg)] hover:underline underline-offset-2 transition-colors disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
-                      title="Clear initial message"
-                      disabled={creating}
-                    >
-                      Clear
-                    </button>
-                  </div>
-                  <textarea
-                    value={createInitialMessage}
-                    onChange={(e) => setCreateInitialMessage(e.target.value)}
-                    rows={2}
-                    className="w-full min-h-[56px] resize-y rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-3 py-2 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none"
-                    placeholder="If provided, it will be sent once each drone is ready."
-                    disabled={creating}
-                  />
-                </div>
-
-                <div className="mb-2 flex items-center justify-between gap-3">
-                  <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
-                    Drones to create
-                  </div>
-                  <button
-                    type="button"
-                    onClick={appendCreateNameRow}
-                    disabled={creating}
-                    className="h-8 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)]"
-                    style={{ fontFamily: 'var(--display)' }}
-                    title="Add another drone"
-                  >
-                    Add drone
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-1 gap-3">
-                  {createNameRows.map((nameRaw, idx) => {
-                    const rawName = String(nameRaw ?? '');
-                    const name = rawName.trim();
-                    const messageSuffix = String(createMessageSuffixRows[idx] ?? '');
-                    const invalidName = Boolean(rawName) && (droneNameHasWhitespace(rawName) || !isValidDroneNameDashCase(name));
-                    const dupName = Boolean(name) && (createNameCounts.get(name) ?? 0) > 1;
-                    return (
-                      <div key={`create-row-${idx}`} className="rounded-xl border border-[var(--border-subtle)] bg-[var(--panel-alt)] px-4 py-3">
-                        <div className="flex items-start gap-3">
-                          <div className="min-w-0 flex-1">
-                            <label className="flex flex-col gap-1">
-                              <span className="text-[10px] font-semibold text-[var(--muted-dim)]">Drone name (dash-case)</span>
-                              <input
-                                ref={idx === 0 ? createNameRef : null}
-                                autoFocus={idx === 0}
-                                value={nameRaw}
-                                onChange={(e) => updateCreateNameRow(idx, e.target.value)}
-                                className={`w-full h-9 rounded-lg border bg-[var(--panel-raised)] px-3 text-[13px] font-mono text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none ${
-                                  invalidName || dupName ? 'border-[rgba(248,81,73,.35)]' : 'border-[var(--border-subtle)]'
-                                }`}
-                                placeholder="e.g. split-server-app"
-                                disabled={creating}
-                              />
-                              {(invalidName || dupName) && (
-                                <span className="text-[10px] text-[var(--red)]">
-                                  {dupName ? 'Duplicate name in list.' : 'Invalid name. Use dash-case with no spaces, max 48 chars.'}
-                                </span>
-                              )}
-                            </label>
-                            <label className="flex flex-col gap-1 mt-2">
-                              <span className="text-[10px] font-semibold text-[var(--muted-dim)]">
-                                Per-drone message suffix (optional)
-                              </span>
-                              <textarea
-                                value={messageSuffix}
-                                onChange={(e) => updateCreateMessageSuffixRow(idx, e.target.value)}
-                                rows={2}
-                                className="w-full min-h-[56px] resize-y rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-3 py-2 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none"
-                                placeholder="Appended after the initial message for this drone."
-                                disabled={creating}
-                              />
-                            </label>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => removeCreateNameRow(idx)}
-                            disabled={creating || createNameRows.length <= 1}
-                            className={`flex-shrink-0 h-8 px-3 rounded-lg text-[12px] font-semibold border transition-colors ${
-                              creating || createNameRows.length <= 1
-                                ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                                : 'bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                            }`}
-                            title={createNameRows.length <= 1 ? 'At least one row is required' : 'Remove row'}
-                          >
-                            <span className="inline-flex items-center gap-1.5">
-                              <IconTrash className="w-3.5 h-3.5 opacity-90" />
-                              Remove
-                            </span>
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-                {createNameEntries.length === 0 && (
-                  <div className="mt-2 text-[11px] text-[var(--muted-dim)]">Add at least one valid drone name.</div>
-                )}
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {draftCreateOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(0,0,0,.55)] backdrop-blur-sm px-4"
-          role="dialog"
-          aria-modal="true"
-        >
-          <div className="w-full max-w-[420px] rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-alt)] shadow-[0_24px_80px_rgba(0,0,0,.35)] overflow-hidden animate-slide-up relative">
-            <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-[var(--accent)] via-[var(--accent-muted)] to-transparent opacity-40" />
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (draftCreating) return;
-                void createDroneFromDraft();
-              }}
-            >
-              <div className="px-5 py-4 border-b border-[var(--border)] flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="font-semibold text-sm text-[var(--fg)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                    Name this drone
-                  </div>
-                  <div className="text-[10px] text-[var(--muted)] mt-0.5">
-                    Press Enter to create and continue.
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (draftCreating) return;
-                    setDraftCreateOpen(false);
-                  }}
-                  className="inline-flex items-center justify-center w-8 h-8 rounded-md text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] border border-transparent hover:border-[var(--border-subtle)] transition-colors"
-                  title="Close"
-                  aria-label="Close"
-                >
-                  ×
-                </button>
-              </div>
-              <div className="px-5 py-4">
-                {draftCreateError && (
-                  <div className="mb-3 p-2 rounded border border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] text-[11px] text-[var(--red)] whitespace-pre-wrap">
-                    {draftCreateError}
-                  </div>
-                )}
-                <div className="flex flex-col gap-3">
-                  <label className="flex flex-col gap-1">
-                    <span className="text-[11px] font-semibold text-[var(--muted)]">Drone name (dash-case)</span>
-                    <input
-                      ref={draftCreateNameRef}
-                      autoFocus
-                      value={draftCreateName}
-                      onChange={(e) => setDraftCreateName(e.target.value)}
-                      className="h-9 rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-3 text-[13px] font-mono text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none"
-                      placeholder="e.g. auth-bugfix"
-                      disabled={draftCreating}
-                    />
-                    {draftNameSuggesting && (
-                      <span
-                        className="inline-flex items-center gap-2 self-start rounded-md border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 py-1 text-[10px] font-semibold tracking-wide uppercase text-[var(--accent)]"
-                        style={{ fontFamily: 'var(--display)' }}
-                      >
-                        <IconSpinner className="w-3.5 h-3.5 text-[var(--accent)]" />
-                        Generating name suggestion
-                      </span>
-                    )}
-                    {!draftNameSuggesting && draftSuggestedName && (
-                      <div className="flex items-center justify-between gap-2 text-[10px]">
-                        <span className="text-[var(--muted-dim)] truncate" title={draftSuggestedName}>
-                          Suggested: <span className="font-mono text-[var(--fg-secondary)]">{draftSuggestedName}</span>
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setDraftCreateName(draftSuggestedName)}
-                          disabled={draftCreating || draftCreateName.trim() === draftSuggestedName}
-                          className={`h-6 px-2 rounded border font-semibold tracking-wide uppercase transition-all ${
-                            draftCreating || draftCreateName.trim() === draftSuggestedName
-                              ? 'opacity-50 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                              : 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)] hover:brightness-110'
-                          }`}
-                          style={{ fontFamily: 'var(--display)' }}
-                        >
-                          {draftCreateName.trim() === draftSuggestedName ? 'Applied' : 'Use suggestion'}
-                        </button>
-                      </div>
-                    )}
-                    {!draftNameSuggesting && draftNameSuggestionError && (
-                      <span className="text-[10px] text-[var(--muted-dim)]" title={draftNameSuggestionError}>
-                        Name suggestion unavailable.
-                      </span>
-                    )}
-                  </label>
-                  <label className="flex flex-col gap-1">
-                    <span className="text-[11px] font-semibold text-[var(--muted)]">Group (optional)</span>
-                    <input
-                      value={draftCreateGroup}
-                      onChange={(e) => setDraftCreateGroup(e.target.value)}
-                      className="h-9 rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none"
-                      placeholder="e.g. auth, backend, infra"
-                      disabled={draftCreating}
-                    />
-                  </label>
-                </div>
-              </div>
-              <div className="px-5 py-4 border-t border-[var(--border)] bg-[var(--panel-alt)] flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setDraftCreateOpen(false)}
-                  disabled={draftCreating}
-                  className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
-                    draftCreating
-                      ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                      : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                  }`}
-                  style={{ fontFamily: 'var(--display)' }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={draftCreating || !draftCreateName.trim()}
-                  className={`h-9 px-4 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
-                    draftCreating || !draftCreateName.trim()
-                      ? 'opacity-50 cursor-not-allowed bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
-                      : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
-                  }`}
-                  style={{ fontFamily: 'var(--display)' }}
-                >
-                  {draftCreating ? 'Creating…' : 'Create drone'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {customAgentModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(0,0,0,.55)] backdrop-blur-sm px-4" role="dialog" aria-modal="true">
-          <div className="w-full max-w-[640px] rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-alt)] shadow-[0_24px_80px_rgba(0,0,0,.35)] overflow-hidden animate-slide-up relative">
-            <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-[var(--accent)] via-[var(--accent-muted)] to-transparent opacity-40" />
-            <div className="px-5 py-4 border-b border-[var(--border)] flex items-center justify-between gap-3">
-              <div className="font-semibold text-sm text-[var(--fg)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>Custom agents</div>
-              <button
-                type="button"
-                onClick={() => setCustomAgentModalOpen(false)}
-                className="inline-flex items-center justify-center w-8 h-8 rounded-md text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] border border-transparent hover:border-[var(--border-subtle)] transition-colors"
-                title="Close"
-                aria-label="Close"
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="px-5 py-4">
-              {customAgentError && (
-                <div className="mb-3 p-3 rounded-lg bg-[var(--red-subtle)] border border-[rgba(248,81,73,.2)] text-xs text-[var(--red)]">
-                  {customAgentError}
-                </div>
-              )}
-
-              {customAgents.length > 0 && (
-                <div className="mb-4">
-                  <div className="text-[11px] font-semibold text-[var(--muted)] mb-2">Saved</div>
-                  <div className="flex flex-col gap-2">
-                    {customAgents.map((a) => (
-                      <div
-                        key={a.id}
-                        className="flex items-center justify-between gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-alt)] px-3 py-2"
-                      >
-                        <div className="min-w-0">
-                          <div className="text-[12px] font-semibold text-[var(--fg-secondary)] truncate">{a.label}</div>
-                          <div className="text-[11px] text-[var(--muted-dim)] truncate font-mono" title={a.command}>
-                            {a.command}
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setCustomAgents((prev) => prev.filter((x) => x.id !== a.id))}
-                          className="inline-flex items-center justify-center w-7 h-7 rounded-md border bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--red)] hover:border-[rgba(248,81,73,.35)] hover:bg-[var(--red-subtle)] transition-colors"
-                          title={`Delete custom agent "${a.label}"`}
-                          aria-label={`Delete custom agent "${a.label}"`}
-                        >
-                          <IconTrash className="opacity-80" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 gap-3">
-                <label className="flex flex-col gap-1">
-                  <span className="text-[11px] font-semibold text-[var(--muted)]">Name</span>
-                  <input
-                    value={newCustomAgentLabel}
-                    onChange={(e) => setNewCustomAgentLabel(e.target.value)}
-                    className="h-9 rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-muted)]"
-                    placeholder="e.g. My Agent CLI"
-                  />
-                </label>
-                <label className="flex flex-col gap-1">
-                  <span className="text-[11px] font-semibold text-[var(--muted)]">Command (runs inside tmux in the drone)</span>
-                  <input
-                    value={newCustomAgentCommand}
-                    onChange={(e) => setNewCustomAgentCommand(e.target.value)}
-                    className="h-9 rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-muted)] font-mono"
-                    placeholder="e.g. agent --approve-mcps  (or: codex)"
-                  />
-                </label>
-                <div className="text-[10px] text-[var(--muted-dim)]">
-                  Custom agents always use CLI mode (full tmux output). Built-in Cursor, Codex, Claude Code, and OpenCode use transcript mode by default.
-                </div>
-              </div>
-            </div>
-
-            <div className="px-5 py-4 border-t border-[var(--border)] bg-[var(--panel-alt)] flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setCustomAgentModalOpen(false)}
-                className="h-9 px-3 rounded-lg text-[12px] font-semibold border transition-colors bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
-              >
-                Close
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const label = newCustomAgentLabel.trim();
-                  const command = newCustomAgentCommand.trim();
-                  if (!label) {
-                    setCustomAgentError('Name is required.');
-                    return;
-                  }
-                  if (!command) {
-                    setCustomAgentError('Command is required.');
-                    return;
-                  }
-                  const base = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'custom';
-                  const rand = Math.random().toString(16).slice(2, 8);
-                  const id = `${base}-${rand}`;
-                  setCustomAgents((prev) => [{ id, label, command }, ...prev]);
-                  setCustomAgentError(null);
-                  setNewCustomAgentLabel('');
-                  setNewCustomAgentCommand('');
-                  setCustomAgentModalOpen(false);
-                }}
-                disabled={!newCustomAgentLabel.trim() || !newCustomAgentCommand.trim()}
-                className={`h-9 px-4 rounded-lg text-[12px] font-semibold border transition-colors ${
-                  !newCustomAgentLabel.trim() || !newCustomAgentCommand.trim()
-                    ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                    : 'bg-[var(--accent)] border-[var(--accent-muted)] text-[white] hover:brightness-110'
-                }`}
-              >
-                Add
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {nameSuggestToast && (
-        <div
-          className={`fixed right-4 z-50 max-w-[420px] rounded-lg border border-[rgba(255,90,90,.2)] bg-[var(--panel-alt)] shadow-[0_16px_48px_rgba(0,0,0,.3)] px-4 py-3 animate-slide-up ${
-            jobsModalError && !jobsModal ? 'bottom-[98px]' : 'bottom-4'
-          }`}
-        >
-          <div className="flex items-start gap-3">
-            <div className="min-w-0 flex-1">
-              <div className="text-[10px] font-semibold text-[var(--red)] mb-1 tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                Name suggestion failed
-              </div>
-              <div className="text-[11px] text-[var(--muted)] whitespace-pre-wrap">{nameSuggestToast.message}</div>
-            </div>
-            <button
-              type="button"
-              onClick={() => setNameSuggestToast(null)}
-              className="inline-flex items-center justify-center w-6 h-6 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:border-[var(--border)] transition-all"
-              title="Dismiss"
-              aria-label="Dismiss"
-            >
-              ×
-            </button>
-          </div>
-        </div>
-      )}
-
-      {jobsModalError && !jobsModal && (
-        <div className="fixed bottom-4 right-4 z-50 max-w-[420px] rounded-lg border border-[rgba(255,90,90,.2)] bg-[var(--panel-alt)] shadow-[0_16px_48px_rgba(0,0,0,.3)] px-4 py-3 animate-slide-up">
-          <div className="text-[10px] font-semibold text-[var(--red)] mb-1 tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>Failed to create jobs</div>
-          <div className="text-[11px] text-[var(--muted)] whitespace-pre-wrap">{jobsModalError}</div>
-        </div>
-      )}
-
-      <CreateDronesFromAgentMessageModal
-        jobsModal={jobsModal}
-        builtinAgentOptions={BUILTIN_AGENT_OPTIONS}
-        customAgents={customAgents}
-        spawningAllJobs={spawningAllJobs}
-        spawningJobById={spawningJobById}
-        spawnedJobById={spawnedJobById}
-        spawnJobErrorById={spawnJobErrorById}
-        detailsOpenByJobId={detailsOpenByJobId}
-        isValidDroneName={isValidDroneNameDashCase}
-        onClose={() => {
-          setJobsModal(null);
+      <DroneSidebar
+        sidebarCollapsed={sidebarCollapsed}
+        selectedDroneIds={selectedDroneIds}
+        draftChat={draftChat}
+        appView={appView}
+        viewMode={viewMode}
+        dronesError={dronesError}
+        groupMoveError={groupMoveError}
+        dronesLoading={dronesLoading}
+        sidebarDronesFilteredByRepo={sidebarDronesFilteredByRepo}
+        sidebarDrones={sidebarDrones}
+        activeRepoPath={activeRepoPath}
+        sidebarOptimisticDroneIdSet={sidebarOptimisticDroneIdSet}
+        selectedDroneSet={selectedDroneSet}
+        selectedDrone={selectedDrone}
+        selectedIsResponding={selectedIsResponding}
+        deletingDrones={deletingDrones}
+        renamingDrones={renamingDrones}
+        movingDroneGroups={movingDroneGroups}
+        createGroupDraft={createGroupDraft}
+        createGroupError={createGroupError}
+        creatingGroup={creatingGroup}
+        sidebarGroups={sidebarGroups}
+        collapsedGroups={collapsedGroups}
+        deletingGroups={deletingGroups}
+        renamingGroups={renamingGroups}
+        dragOverGroup={dragOverGroup}
+        selectedGroupMultiChat={selectedGroupMultiChat}
+        sidebarHasUngroupedGroup={sidebarHasUngroupedGroup}
+        draggingDroneNames={draggingDroneNames}
+        dragOverUngrouped={dragOverUngrouped}
+        sidebarReposCollapsed={sidebarReposCollapsed}
+        repos={repos}
+        reposLoading={reposLoading}
+        reposError={reposError}
+        dronesCount={drones.length}
+        droneCountByRepoPath={droneCountByRepoPath}
+        autoDelete={autoDelete}
+        uiDroneName={uiDroneName}
+        onOpenDraftChatComposer={openDraftChatComposer}
+        onOpenCreateModal={openCreateModal}
+        onToggleSettingsView={() => setAppView(appView === 'settings' ? 'workspace' : 'settings')}
+        onToggleViewMode={() => setViewMode(viewMode === 'grouped' ? 'flat' : 'grouped')}
+        onSelectDroneCard={selectDroneCard}
+        onOpenCloneModal={openCloneModal}
+        onRenameDrone={renameDrone}
+        onDeleteDrone={deleteDrone}
+        onOpenDroneErrorModal={openDroneErrorModal}
+        onUngroupedDragOver={onUngroupedDragOver}
+        onUngroupedDragLeave={onUngroupedDragLeave}
+        onUngroupedDrop={onUngroupedDrop}
+        onCreateGroupFromDraft={() => {
+          void createGroupFromDraft();
         }}
-        onSpawnAll={spawnAllFromJobsModal}
-        onSpawnOne={spawnOneFromJobsModal}
-        onSpawnJob={(job, group, prefix, agentKey) => void spawnDroneForJob(job, group, prefix, agentKey, jobsModal?.sourceRepoPath)}
-        onOpenCustomAgents={() => setCustomAgentModalOpen(true)}
-        onChangeGroup={(value) => setJobsModal((cur) => (cur ? { ...cur, group: value } : cur))}
-        onClearGroup={() => setJobsModal((cur) => (cur ? { ...cur, group: '' } : cur))}
-        onChangeAgentKey={(value) => {
-          setSpawnAgentKey(value);
-          setJobsModal((cur) => (cur ? { ...cur, agentKey: value } : cur));
+        onCreateGroupDraftChange={(value) => {
+          setCreateGroupDraft(value);
+          if (createGroupError) setCreateGroupError(null);
         }}
-        onChangePrefix={(value) => setJobsModal((cur) => (cur ? { ...cur, prefix: value } : cur))}
-        onClearPrefix={() => setJobsModal((cur) => (cur ? { ...cur, prefix: '' } : cur))}
-        onUpdateJob={(jobId, patch) =>
-          setJobsModal((cur) =>
-            !cur
-              ? cur
-              : {
-                  ...cur,
-                  jobs: cur.jobs.map((x) => (x.id === jobId ? { ...x, ...patch } : x)),
-                },
-          )
-        }
-        onToggleDetails={(jobId) =>
-          setDetailsOpenByJobId((prev) => ({
+        onGroupDragOver={onGroupDragOver}
+        onGroupDragLeave={onGroupDragLeave}
+        onGroupDrop={onGroupDrop}
+        onToggleGroupCollapsed={(group) =>
+          setCollapsedGroups((prev) => ({
             ...prev,
-            [jobId]: !Boolean(prev[jobId]),
+            [group]: !prev[group],
           }))
+        }
+        onRenameGroup={(group) => {
+          void renameGroup(group);
+        }}
+        onOpenGroupMultiChat={(group) => {
+          setAppView('workspace');
+          setDraftChat(null);
+          setDraftCreateOpen(false);
+          setDraftCreateError(null);
+          setSelectedGroupMultiChat(group);
+        }}
+        onDeleteGroup={(group, count) => {
+          void deleteGroup(group, count);
+        }}
+        onDroneDragStart={onDroneDragStart}
+        onDroneDragEnd={onDroneDragEnd}
+        onToggleSidebarReposCollapsed={() => setSidebarReposCollapsed((v) => !v)}
+        onOpenReposModal={() => setReposModalOpen(true)}
+        onClearActiveRepoPath={() => setActiveRepoPath('')}
+        onToggleActiveRepoPath={(path) => setActiveRepoPath((prev) => (prev === path ? '' : path))}
+        onAutoDeleteChange={setAutoDelete}
+        onSetSidebarCollapsed={setSidebarCollapsed}
+      />
+      <DroneHubOverlays
+        createDronesModalProps={{
+          open: createOpen,
+          creating,
+          createMode,
+          cloneSourceId,
+          createNameEntries,
+          drones,
+          createError,
+          createGroup,
+          onCreateGroupChange: setCreateGroup,
+          onClearCreateGroup: () => setCreateGroup(''),
+          createRepoPath,
+          onCreateRepoPathChange: setCreateRepoPath,
+          onClearCreateRepoPath: () => setCreateRepoPath(''),
+          createRepoMenuEntries,
+          createRepoMenuOpen,
+          onCreateRepoMenuOpenChange: setCreateRepoMenuOpen,
+          registeredRepoPaths,
+          activeRepoPath,
+          cloneIncludeChats,
+          onCloneIncludeChatsChange: setCloneIncludeChats,
+          spawnAgentKey,
+          onSpawnAgentKeyChange: setSpawnAgentKey,
+          spawnAgentMenuEntries,
+          onOpenCustomAgentModal: () => setCustomAgentModalOpen(true),
+          spawnModel,
+          onSpawnModelChange: setSpawnModel,
+          onClearSpawnModel: () => setSpawnModel(''),
+          spawnAgentConfig,
+          createInitialMessage,
+          onCreateInitialMessageChange: setCreateInitialMessage,
+          onClearCreateInitialMessage: () => setCreateInitialMessage(''),
+          createNameRows,
+          createMessageSuffixRows,
+          createNameCounts,
+          onAppendCreateNameRow: appendCreateNameRow,
+          onUpdateCreateNameRow: updateCreateNameRow,
+          onUpdateCreateMessageSuffixRow: updateCreateMessageSuffixRow,
+          onRemoveCreateNameRow: removeCreateNameRow,
+          createNameRef,
+          onSubmitCreate: () => {
+            void createDrone();
+          },
+          onRequestClose: () => {
+            setCreateOpen(false);
+          },
+        }}
+        draftCreateDroneModalProps={{
+          open: draftCreateOpen,
+          draftCreating,
+          draftCreateError,
+          draftCreateName,
+          onDraftCreateNameChange: setDraftCreateName,
+          draftCreateNameRef,
+          draftNameSuggesting,
+          draftSuggestedName,
+          onUseSuggestedName: () => setDraftCreateName(draftSuggestedName),
+          draftNameSuggestionError,
+          draftCreateGroup,
+          onDraftCreateGroupChange: setDraftCreateGroup,
+          onSubmit: () => {
+            void createDroneFromDraft();
+          },
+          onRequestClose: () => setDraftCreateOpen(false),
+        }}
+        customAgentsModalProps={{
+          open: customAgentModalOpen,
+          customAgentError,
+          customAgents,
+          newCustomAgentLabel,
+          onNewCustomAgentLabelChange: setNewCustomAgentLabel,
+          newCustomAgentCommand,
+          onNewCustomAgentCommandChange: setNewCustomAgentCommand,
+          onDeleteCustomAgent: (id) => setCustomAgents((prev) => prev.filter((x) => x.id !== id)),
+          onAddCustomAgent: handleAddCustomAgent,
+          onRequestClose: () => setCustomAgentModalOpen(false),
+        }}
+        hubTransientToastsProps={{
+          nameSuggestToast,
+          jobsModalError,
+          jobsModalOpen: Boolean(jobsModal),
+          onDismissNameSuggestToast: () => setNameSuggestToast(null),
+        }}
+        createFromAgentMessageModalProps={{
+          jobsModal,
+          builtinAgentOptions: BUILTIN_AGENT_OPTIONS,
+          customAgents,
+          spawningAllJobs,
+          spawningJobById,
+          spawnedJobById,
+          spawnJobErrorById,
+          detailsOpenByJobId,
+          isValidDroneName: isValidDroneNameDashCase,
+          onClose: closeJobsModal,
+          onSpawnAll: spawnAllFromJobsModal,
+          onSpawnOne: spawnOneFromJobsModal,
+          onSpawnJob: spawnJobFromModal,
+          onOpenCustomAgents: () => setCustomAgentModalOpen(true),
+          onChangeGroup: onChangeJobsGroup,
+          onClearGroup: onClearJobsGroup,
+          onChangeAgentKey: onChangeJobsAgentKey,
+          onChangePrefix: onChangeJobsPrefix,
+          onClearPrefix: onClearJobsPrefix,
+          onUpdateJob: onUpdateJobsModalJob,
+          onToggleDetails: onToggleJobsModalDetails,
+        }}
+        reposModalProps={
+          reposModalOpen
+            ? {
+                repos,
+                reposError,
+                reposLoading,
+                activeRepoPath,
+                deletingRepos,
+                onClose: () => setReposModalOpen(false),
+                onToggleActiveRepoPath: (path) => setActiveRepoPath((prev) => (prev === path ? '' : path)),
+                onDeleteRepo: (path) => {
+                  void deleteRepo(path);
+                },
+                getGithubUrlForRepo: githubUrlForRepo,
+              }
+            : null
+        }
+        droneErrorModalProps={
+          droneErrorModal
+            ? {
+                droneErrorModal,
+                clearingDroneError,
+                onClose: closeDroneErrorModal,
+                onClearDroneHubError: (droneId) => {
+                  void clearDroneHubError(droneId);
+                },
+              }
+            : null
         }
       />
 
-      {/* ── Repos modal ── */}
-      {reposModalOpen && (
-        <ReposModal
-          repos={repos}
-          reposError={reposError}
-          reposLoading={reposLoading}
-          activeRepoPath={activeRepoPath}
-          deletingRepos={deletingRepos}
-          onClose={() => setReposModalOpen(false)}
-          onToggleActiveRepoPath={(path) => setActiveRepoPath((prev) => (prev === path ? '' : path))}
-          onDeleteRepo={(path) => {
-            void deleteRepo(path);
-          }}
-          getGithubUrlForRepo={githubUrlForRepo}
-        />
-      )}
-
-      {droneErrorModal && (
-        <DroneErrorModal
-          droneErrorModal={droneErrorModal}
-          clearingDroneError={clearingDroneError}
-          onClose={closeDroneErrorModal}
-          onClearDroneHubError={(droneId) => {
-            void clearDroneHubError(droneId);
-          }}
-        />
-      )}
-
-      {/* ── Content area (header + body row) ── */}
-      <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden bg-[var(--panel)]">
-        {appView === 'settings' ? (
-          <SettingsView
-            llm={llmSettingsState}
-            hubLogsState={hubLogsState}
-            hubLogsTailLines={HUB_LOGS_TAIL_LINES}
-            hubLogsMaxBytes={HUB_LOGS_MAX_BYTES}
-            onBackToWorkspace={() => setAppView('workspace')}
-            onReplayOnboarding={() => {
-              setAppView('workspace');
-              requestGuidedOnboardingReplay();
-            }}
-            onResetOnboarding={() => {
-              resetGuidedOnboardingDismissals();
-            }}
-          />
-        ) : draftChat ? (
-          <DraftChatWorkspace
-            draftChat={draftChat}
-            nowMs={nowMs}
-            spawnAgentKey={spawnAgentKey}
-            onSpawnAgentKeyChange={setSpawnAgentKey}
-            spawnAgentMenuEntries={spawnAgentMenuEntries}
-            draftCreating={draftCreating}
-            draftAutoRenaming={draftAutoRenaming}
-            onOpenCustomAgentModal={() => setCustomAgentModalOpen(true)}
-            spawnAgentConfig={spawnAgentConfig}
-            spawnModel={spawnModel}
-            onSpawnModelChange={setSpawnModel}
-            onClearSpawnModel={() => setSpawnModel('')}
-            chatHeaderRepoPath={chatHeaderRepoPath}
-            onChatHeaderRepoPathChange={setChatHeaderRepoPath}
-            createRepoMenuEntries={createRepoMenuEntries}
-            draftCreateError={draftCreateError}
-            queuedPromptsByDroneChat={queuedPromptsByDroneChat}
-            onCancel={() => {
-              setDraftChat(null);
-              setDraftCreateOpen(false);
-              setDraftCreateError(null);
-              setDraftAutoRenaming(false);
-            }}
-            onStartDraftPrompt={startDraftPrompt}
-            onEnqueueQueuedPrompt={enqueueQueuedPrompt}
-            onSetDraftCreateError={setDraftCreateError}
-          />
-        ) : selectedGroupMultiChatData ? (
-          <GroupMultiChatWorkspace
-            selectedGroupMultiChatData={selectedGroupMultiChatData}
-            selectedChat={selectedChat}
-            groupMultiChatColumnWidth={groupMultiChatColumnWidth}
-            onGroupMultiChatColumnWidthChange={setGroupMultiChatColumnWidth}
-            groupBroadcastExpanded={groupBroadcastExpanded}
-            onToggleGroupBroadcastExpanded={() => setGroupBroadcastExpanded((v) => !v)}
-            onClose={() => setSelectedGroupMultiChat(null)}
-            groupBroadcastPromptError={groupBroadcastPromptError}
-            groupBroadcastSending={groupBroadcastSending}
-            onSendGroupBroadcastPrompt={sendGroupBroadcastPrompt}
-            nowMs={nowMs}
-            uiDroneName={uiDroneName}
-            onSelectDroneCard={selectDroneCard}
-            onParseJobsFromAgentMessage={parseJobsFromAgentMessage}
-          />
-        ) : !currentDrone ? (
-          <NoDroneSelectedState
-            dronesLoading={dronesLoading}
-            sidebarDroneCount={sidebarDrones.length}
-            dronesError={dronesError}
-            onOpenDraftChatComposer={openDraftChatComposer}
-            onOpenCreateModal={openCreateModal}
-          />
-        ) : (
-          <SelectedDroneWorkspace
-            currentDrone={currentDrone}
-            currentDroneLabel={currentDroneLabel}
-            sidebarCollapsed={sidebarCollapsed}
-            setSidebarCollapsed={setSidebarCollapsed}
-            showRespondingAsStatusInHeader={showRespondingAsStatusInHeader}
-            chatUiMode={chatUiMode}
-            loadingSession={loadingSession}
-            sessionError={sessionError}
-            loadingTranscript={loadingTranscript}
-            transcriptError={transcriptError}
-            chatInfoError={chatInfoError}
-            loadingChatInfo={loadingChatInfo}
-            repoOpError={repoOpError}
-            repoOpErrorMeta={repoOpErrorMeta}
-            openDroneErrorModal={openDroneErrorModal}
-            launchHint={launchHint}
-            currentAgentKey={currentAgentKey}
-            pickAgentValue={pickAgentValue}
-            toolbarAgentMenuEntries={toolbarAgentMenuEntries}
-            agentMenuOpen={agentMenuOpen}
-            setAgentMenuOpen={setAgentMenuOpen}
-            setTerminalMenuOpen={setTerminalMenuOpen}
-            setHeaderOverflowOpen={setHeaderOverflowOpen}
-            agentDisabled={agentDisabled}
-            agentLabel={agentLabel}
-            modelControlEnabled={modelControlEnabled}
-            availableChatModels={availableChatModels}
-            currentModel={currentModel}
-            setChatModel={setChatModel}
-            setChatInfoError={setChatInfoError}
-            modelMenuEntries={modelMenuEntries}
-            modelDisabled={modelDisabled}
-            modelLabel={modelLabel}
-            manualChatModelInput={manualChatModelInput}
-            setManualChatModelInput={setManualChatModelInput}
-            applyManualChatModel={applyManualChatModel}
-            setChatModelsRefreshNonce={setChatModelsRefreshNonce}
-            loadingChatModels={loadingChatModels}
-            chatModelsError={chatModelsError}
-            chatModelsDiscoveredAt={chatModelsDiscoveredAt}
-            chatModelsSource={chatModelsSource}
-            currentDroneRepoAttached={currentDroneRepoAttached}
-            currentDroneRepoPath={currentDroneRepoPath}
-            createRepoMenuEntries={createRepoMenuEntries}
-            outputView={outputView}
-            setOutputView={setOutputView}
-            selectedChat={selectedChat}
-            setSelectedChat={setSelectedChat}
-            openDroneTerminal={openDroneTerminal}
-            openingTerminal={openingTerminal}
-            openDroneEditor={openDroneEditor}
-            openingEditor={openingEditor}
-            pullRepoChanges={pullRepoChanges}
-            repoOp={repoOp}
-            headerOverflowRef={headerOverflowRef}
-            headerOverflowOpen={headerOverflowOpen}
-            reseedRepo={reseedRepo}
-            terminalMenuRef={terminalMenuRef}
-            terminalMenuOpen={terminalMenuOpen}
-            terminalLabel={terminalLabel}
-            terminalOptions={terminalOptions}
-            terminalEmulator={terminalEmulator}
-            setTerminalEmulator={setTerminalEmulator}
-            rightPanelOpen={rightPanelOpen}
-            setRightPanelOpen={setRightPanelOpen}
-            setRightPanelSplitMode={setRightPanelSplitMode}
-            rightPanelSplit={rightPanelSplit}
-            rightPanelTabs={RIGHT_PANEL_TABS}
-            rightPanelTab={rightPanelTab}
-            setRightPanelTab={setRightPanelTab}
-            rightPanelTabLabels={RIGHT_PANEL_TAB_LABELS}
-            resetRightPanelWidth={resetRightPanelWidth}
-            rightPanelWidthIsDefault={rightPanelWidthIsDefault}
-            transcripts={transcripts}
-            visiblePendingPromptsWithStartup={visiblePendingPromptsWithStartup}
-            transcriptMessageId={transcriptMessageId}
-            nowMs={nowMs}
-            parsingJobsByTurn={parsingJobsByTurn}
-            parseJobsFromAgentMessage={parseJobsFromAgentMessage}
-            tldrByMessageId={tldrByMessageId}
-            showTldrByMessageId={showTldrByMessageId}
-            toggleTldrForAgentMessage={toggleTldrForAgentMessage}
-            handleAgentMessageHover={handleAgentMessageHover}
-            chatEndRef={chatEndRef}
-            outputScrollRef={outputScrollRef}
-            updatePinned={updatePinned}
-            startupSeedForCurrentDrone={startupSeedForCurrentDrone}
-            sessionText={sessionText}
-            pinnedToBottom={pinnedToBottom}
-            selectedDroneIdentity={selectedDroneIdentity}
-            promptError={promptError}
-            sendingPrompt={sendingPrompt}
-            sendPromptText={sendPromptText}
-            rightPanelWidth={rightPanelWidth}
-            rightPanelWidthMax={rightPanelWidthMax}
-            rightPanelMinWidth={RIGHT_PANEL_MIN_WIDTH_PX}
-            rightPanelResizing={rightPanelResizing}
-            rightPanelBottomTab={rightPanelBottomTab}
-            setRightPanelBottomTab={setRightPanelBottomTab}
-            startRightPanelResize={startRightPanelResize}
-            renderRightPanelTabContent={renderRightPanelTabContent}
-          />
-        )}
-      </div>
+      <DroneHubWorkspaceContent
+        appView={appView}
+        settingsViewProps={{
+          llm: llmSettingsState,
+          hubLogsState,
+          hubLogsTailLines: HUB_LOGS_TAIL_LINES,
+          hubLogsMaxBytes: HUB_LOGS_MAX_BYTES,
+          onBackToWorkspace: () => setAppView('workspace'),
+          onReplayOnboarding: () => {
+            setAppView('workspace');
+            requestGuidedOnboardingReplay();
+          },
+          onResetOnboarding: () => {
+            resetGuidedOnboardingDismissals();
+          },
+        }}
+        draftChatWorkspaceProps={
+          draftChat
+            ? {
+                draftChat,
+                nowMs,
+                spawnAgentKey,
+                onSpawnAgentKeyChange: setSpawnAgentKey,
+                spawnAgentMenuEntries,
+                draftCreating,
+                draftAutoRenaming,
+                onOpenCustomAgentModal: () => setCustomAgentModalOpen(true),
+                spawnAgentConfig,
+                spawnModel,
+                onSpawnModelChange: setSpawnModel,
+                onClearSpawnModel: () => setSpawnModel(''),
+                chatHeaderRepoPath,
+                onChatHeaderRepoPathChange: setChatHeaderRepoPath,
+                createRepoMenuEntries,
+                draftCreateError,
+                queuedPromptsByDroneChat,
+                onCancel: () => {
+                  setDraftChat(null);
+                  setDraftCreateOpen(false);
+                  setDraftCreateError(null);
+                  setDraftAutoRenaming(false);
+                },
+                onStartDraftPrompt: startDraftPrompt,
+                onEnqueueQueuedPrompt: enqueueQueuedPrompt,
+                onSetDraftCreateError: setDraftCreateError,
+              }
+            : null
+        }
+        groupMultiChatWorkspaceProps={
+          selectedGroupMultiChatData
+            ? {
+                selectedGroupMultiChatData,
+                selectedChat,
+                groupMultiChatColumnWidth,
+                onGroupMultiChatColumnWidthChange: setGroupMultiChatColumnWidth,
+                groupBroadcastExpanded,
+                onToggleGroupBroadcastExpanded: () => setGroupBroadcastExpanded((v) => !v),
+                onClose: () => setSelectedGroupMultiChat(null),
+                groupBroadcastPromptError,
+                groupBroadcastSending,
+                onSendGroupBroadcastPrompt: sendGroupBroadcastPrompt,
+                nowMs,
+                uiDroneName,
+                onSelectDroneCard: selectDroneCard,
+                onParseJobsFromAgentMessage: parseJobsFromAgentMessage,
+              }
+            : null
+        }
+        noDroneSelectedStateProps={{
+          dronesLoading,
+          sidebarDroneCount: sidebarDrones.length,
+          dronesError,
+          onOpenDraftChatComposer: openDraftChatComposer,
+          onOpenCreateModal: openCreateModal,
+        }}
+        selectedDroneWorkspaceProps={
+          currentDrone
+            ? {
+                currentDrone,
+                currentDroneLabel,
+                sidebarCollapsed,
+                setSidebarCollapsed,
+                showRespondingAsStatusInHeader,
+                chatUiMode,
+                loadingSession,
+                sessionError,
+                loadingTranscript,
+                transcriptError,
+                chatInfoError,
+                loadingChatInfo,
+                repoOpError,
+                repoOpErrorMeta,
+                openDroneErrorModal,
+                launchHint,
+                currentAgentKey,
+                pickAgentValue,
+                toolbarAgentMenuEntries,
+                agentMenuOpen,
+                setAgentMenuOpen,
+                setTerminalMenuOpen,
+                setHeaderOverflowOpen,
+                agentDisabled,
+                agentLabel,
+                modelControlEnabled,
+                availableChatModels,
+                currentModel,
+                setChatModel,
+                setChatInfoError,
+                modelMenuEntries,
+                modelDisabled,
+                modelLabel,
+                manualChatModelInput,
+                setManualChatModelInput,
+                applyManualChatModel,
+                setChatModelsRefreshNonce,
+                loadingChatModels,
+                chatModelsError,
+                chatModelsDiscoveredAt,
+                chatModelsSource,
+                currentDroneRepoAttached,
+                currentDroneRepoPath,
+                createRepoMenuEntries,
+                outputView,
+                setOutputView,
+                selectedChat,
+                setSelectedChat,
+                openDroneTerminal,
+                openingTerminal,
+                openDroneEditor,
+                openingEditor,
+                pullRepoChanges,
+                repoOp,
+                headerOverflowRef,
+                headerOverflowOpen,
+                reseedRepo,
+                terminalMenuRef,
+                terminalMenuOpen,
+                terminalLabel,
+                terminalOptions,
+                terminalEmulator,
+                setTerminalEmulator,
+                rightPanelOpen,
+                setRightPanelOpen,
+                setRightPanelSplitMode,
+                rightPanelSplit,
+                rightPanelTabs: RIGHT_PANEL_TABS,
+                rightPanelTab,
+                setRightPanelTab,
+                rightPanelTabLabels: RIGHT_PANEL_TAB_LABELS,
+                resetRightPanelWidth,
+                rightPanelWidthIsDefault,
+                transcripts,
+                visiblePendingPromptsWithStartup,
+                transcriptMessageId,
+                nowMs,
+                parsingJobsByTurn,
+                parseJobsFromAgentMessage,
+                tldrByMessageId,
+                showTldrByMessageId,
+                toggleTldrForAgentMessage,
+                handleAgentMessageHover,
+                chatEndRef,
+                outputScrollRef,
+                updatePinned,
+                startupSeedForCurrentDrone,
+                sessionText,
+                pinnedToBottom,
+                selectedDroneIdentity,
+                promptError,
+                sendingPrompt,
+                sendPromptText,
+                rightPanelWidth,
+                rightPanelWidthMax,
+                rightPanelMinWidth: RIGHT_PANEL_MIN_WIDTH_PX,
+                rightPanelResizing,
+                rightPanelBottomTab,
+                setRightPanelBottomTab,
+                startRightPanelResize,
+                renderRightPanelTabContent,
+              }
+            : null
+        }
+      />
       <GuidedOnboarding />
     </div>
   );
