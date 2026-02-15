@@ -11,12 +11,7 @@ import {
 import {
   ChatInput,
   type ChatSendPayload,
-  ChatTabs,
-  CollapsibleOutput,
   EmptyState,
-  PendingTranscriptTurn,
-  TranscriptSkeleton,
-  TranscriptTurn,
 } from './droneHub/chat';
 import { DroneChangesDock } from './droneHub/changes';
 import { DroneFilesDock } from './droneHub/files';
@@ -24,12 +19,9 @@ import {
   DroneCard,
   DroneLinksDock,
   DronePreviewDock,
-  GroupBadge,
-  StatusBadge,
 } from './droneHub/overview';
 import { DroneTerminalDock } from './droneHub/terminal';
 import { requestJson } from './droneHub/http';
-import { TypingDots } from './droneHub/overview/icons';
 import { GuidedOnboarding } from './onboarding/GuidedOnboarding';
 import { requestGuidedOnboardingReplay, resetGuidedOnboardingDismissals } from './onboarding/control';
 import { usePaneReadiness } from './droneHub/panes/usePaneReadiness';
@@ -38,7 +30,6 @@ import {
   IconChevron,
   IconColumns,
   IconCopy,
-  IconCursorApp,
   IconDrone,
   IconFolder,
   IconList,
@@ -51,9 +42,52 @@ import {
   IconVsCode,
   SkeletonLine,
 } from './droneHub/app/icons';
-import { GroupMultiChatColumn } from './droneHub/app/GroupMultiChatColumn';
-import { RightPanel, type RightPanelTabId } from './droneHub/app/RightPanel';
+import { copyText } from './droneHub/app/clipboard';
+import {
+  BUILTIN_AGENT_OPTIONS,
+  DRONE_DND_MIME,
+  FS_EXPLORER_VIEW_STORAGE_KEY,
+  GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX,
+  GROUP_MULTI_CHAT_COLUMN_WIDTH_STORAGE_KEY,
+  HUB_LOGS_MAX_BYTES,
+  HUB_LOGS_TAIL_LINES,
+  PORT_PREVIEW_STORAGE_KEY,
+  PORT_STATUS_POLL_INTERVAL_MS,
+  PORT_STATUS_TIMEOUT_MS,
+  PREVIEW_URL_STORAGE_KEY,
+  RIGHT_PANEL_BOTTOM_TAB_STORAGE_KEY,
+  RIGHT_PANEL_DEFAULT_WIDTH_PX,
+  RIGHT_PANEL_MIN_WIDTH_PX,
+  RIGHT_PANEL_SPLIT_STORAGE_KEY,
+  RIGHT_PANEL_TAB_LABELS,
+  RIGHT_PANEL_TABS,
+  RIGHT_PANEL_TOP_TAB_STORAGE_KEY,
+  RIGHT_PANEL_WIDTH_STORAGE_KEY,
+  SIDEBAR_REPOS_COLLAPSED_STORAGE_KEY,
+  STARTUP_SEED_MISSING_GRACE_MS,
+  clampGroupMultiChatColumnWidthPx,
+  clampRightPanelWidthPx,
+  isStartupSeedFresh,
+  parseRightPanelTab,
+  rightPanelMaxWidthPx,
+  viewportWidthPx,
+  type RightPanelTab,
+} from './droneHub/app/app-config';
+import { DraftChatWorkspace } from './droneHub/app/DraftChatWorkspace';
+import { DroneErrorModal } from './droneHub/app/DroneErrorModal';
+import { GroupMultiChatWorkspace } from './droneHub/app/GroupMultiChatWorkspace';
+import { NoDroneSelectedState } from './droneHub/app/NoDroneSelectedState';
+import { ReposModal } from './droneHub/app/ReposModal';
+import { SelectedDroneWorkspace } from './droneHub/app/SelectedDroneWorkspace';
 import { SettingsView } from './droneHub/app/SettingsView';
+import type {
+  AppView,
+  ChatModelOption,
+  DraftChatState,
+  DroneErrorModalState,
+  StartupSeedState,
+  TldrState,
+} from './droneHub/app/app-types';
 import { useHubLogs } from './droneHub/app/use-hub-logs';
 import { useLlmSettings } from './droneHub/app/use-llm-settings';
 import {
@@ -76,7 +110,6 @@ import {
   normalizePortRows,
   normalizePreviewUrl,
   parseDroneChatQueueKey,
-  parseIsoTimestampMs,
   parseRepoPullConflict,
   readPortPreviewByDrone,
   readPreviewUrlByDrone,
@@ -84,10 +117,10 @@ import {
   rewriteLoopbackUrlToContainerPreview,
   sameReachabilityMap,
   type RepoOpErrorMeta,
-  type RepoPullConflict,
 } from './droneHub/app/helpers';
+import { droneNameHasWhitespace, isUntitledLikeDroneName, normalizeDraftDroneName } from './droneHub/app/name-helpers';
 import { cn } from './ui/cn';
-import { dropdownMenuItemBaseClass, dropdownPanelBaseClass, useDropdownDismiss } from './ui/dropdown';
+import { useDropdownDismiss } from './ui/dropdown';
 import { UiMenuSelect } from './ui/menuSelect';
 import type {
   CustomAgentProfile,
@@ -106,133 +139,6 @@ import type {
   RepoSummary,
   TranscriptItem,
 } from './droneHub/types';
-
-const BUILTIN_AGENT_OPTIONS: Array<{ key: string; label: string; agent: ChatAgentConfig }> = [
-  { key: 'builtin:cursor', label: 'Cursor Agent', agent: { kind: 'builtin', id: 'cursor' } },
-  { key: 'builtin:codex', label: 'Codex', agent: { kind: 'builtin', id: 'codex' } },
-  { key: 'builtin:claude', label: 'Claude Code', agent: { kind: 'builtin', id: 'claude' } },
-  { key: 'builtin:opencode', label: 'OpenCode', agent: { kind: 'builtin', id: 'opencode' } },
-];
-
-type ChatModelOption = {
-  id: string;
-  label: string;
-  isDefault?: boolean;
-  isCurrent?: boolean;
-};
-
-type TldrState =
-  | { status: 'idle' }
-  | { status: 'loading' }
-  | { status: 'ready'; summary: string }
-  | { status: 'error'; error: string };
-
-const PORT_PREVIEW_STORAGE_KEY = 'droneHub.portPreviewByDrone';
-const PREVIEW_URL_STORAGE_KEY = 'droneHub.previewUrlByDrone';
-const FS_EXPLORER_VIEW_STORAGE_KEY = 'droneHub.fsExplorerView';
-const PORT_STATUS_POLL_INTERVAL_MS = 15_000;
-const PORT_STATUS_TIMEOUT_MS = 1_800;
-const DRONE_DND_MIME = 'application/x-drone-ids+json';
-const RIGHT_PANEL_WIDTH_STORAGE_KEY = 'droneHub.rightPanelWidth';
-const RIGHT_PANEL_SPLIT_STORAGE_KEY = 'droneHub.rightPanelSplit';
-const RIGHT_PANEL_TOP_TAB_STORAGE_KEY = 'droneHub.rightPanelTopTab';
-const RIGHT_PANEL_BOTTOM_TAB_STORAGE_KEY = 'droneHub.rightPanelBottomTab';
-const RIGHT_PANEL_DEFAULT_WIDTH_PX = 460;
-const RIGHT_PANEL_MIN_WIDTH_PX = 360;
-const RIGHT_PANEL_MAX_WIDTH_VIEWPORT_RATIO = 0.7;
-const GROUP_MULTI_CHAT_COLUMN_WIDTH_STORAGE_KEY = 'droneHub.groupMultiChatColumnWidth';
-const GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX = 420;
-const GROUP_MULTI_CHAT_COLUMN_WIDTH_MIN_PX = 300;
-const GROUP_MULTI_CHAT_COLUMN_WIDTH_MAX_PX = 640;
-const SIDEBAR_REPOS_COLLAPSED_STORAGE_KEY = 'droneHub.sidebarReposCollapsed';
-const HUB_LOGS_TAIL_LINES = 600;
-const HUB_LOGS_MAX_BYTES = 200_000;
-const STARTUP_SEED_MISSING_GRACE_MS = 30_000;
-type RightPanelTab = RightPanelTabId;
-const RIGHT_PANEL_TABS: RightPanelTab[] = ['terminal', 'files', 'preview', 'links', 'changes'];
-const RIGHT_PANEL_TAB_LABELS: Record<RightPanelTab, string> = {
-  terminal: 'Terminal',
-  files: 'Files',
-  preview: 'Browser',
-  links: 'Links',
-  changes: 'Changes',
-};
-
-type DroneErrorModalState = {
-  droneId: string;
-  droneName: string;
-  message: string;
-  conflict: RepoPullConflict;
-};
-
-function isUntitledLikeDroneName(raw: string): boolean {
-  const s = String(raw ?? '').trim().toLowerCase();
-  if (!s) return false;
-  if (s === 'untitled') return true;
-  if (!s.startsWith('untitled-')) return false;
-  const rest = s.slice('untitled-'.length);
-  if (!rest) return false;
-  // `uniqueDraftDroneName()` can create:
-  // - untitled-2, untitled-3, ...
-  // - untitled-<base36>, untitled-<base36>-2, ...
-  return /^\d+$/.test(rest) || /^[a-z0-9]{4,18}(?:-\d+)?$/.test(rest);
-}
-type AppView = 'workspace' | 'settings';
-
-type StartupSeedState = {
-  droneName: string;
-  chatName: string;
-  agent: ChatAgentConfig | null;
-  model: string | null;
-  prompt: string;
-  at: string;
-};
-
-type DraftChatState = {
-  // If set, this is the (optimistic) id/name of the drone being created for this draft chat.
-  droneId: string;
-  droneName: string;
-  prompt: PendingPrompt | null;
-};
-
-/* ------------------------------------------------------------------ */
-/*  Helpers                                                           */
-/* ------------------------------------------------------------------ */
-
-function viewportWidthPx(): number {
-  if (typeof window !== 'undefined' && Number.isFinite(window.innerWidth) && window.innerWidth > 0) {
-    return window.innerWidth;
-  }
-  return 1440;
-}
-
-function rightPanelMaxWidthPx(viewportWidth: number): number {
-  return Math.max(RIGHT_PANEL_MIN_WIDTH_PX, Math.floor(viewportWidth * RIGHT_PANEL_MAX_WIDTH_VIEWPORT_RATIO));
-}
-
-function clampRightPanelWidthPx(width: number, viewportWidth: number = viewportWidthPx()): number {
-  const safe = Number.isFinite(width) ? width : RIGHT_PANEL_DEFAULT_WIDTH_PX;
-  return Math.min(rightPanelMaxWidthPx(viewportWidth), Math.max(RIGHT_PANEL_MIN_WIDTH_PX, Math.round(safe)));
-}
-
-function clampGroupMultiChatColumnWidthPx(width: number): number {
-  const safe = Number.isFinite(width) ? width : GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX;
-  return Math.min(GROUP_MULTI_CHAT_COLUMN_WIDTH_MAX_PX, Math.max(GROUP_MULTI_CHAT_COLUMN_WIDTH_MIN_PX, Math.round(safe)));
-}
-
-function parseRightPanelTab(raw: string | null | undefined, fallback: RightPanelTab): RightPanelTab {
-  if (raw && RIGHT_PANEL_TABS.includes(raw as RightPanelTab)) return raw as RightPanelTab;
-  return fallback;
-}
-
-function isStartupSeedFresh(seed: StartupSeedState | null | undefined, nowMs: number = Date.now()): boolean {
-  const atMs = parseIsoTimestampMs(seed?.at);
-  return atMs != null && nowMs - atMs < STARTUP_SEED_MISSING_GRACE_MS;
-}
-
-/* ------------------------------------------------------------------ */
-/*  Main app                                                          */
-/* ------------------------------------------------------------------ */
 
 export default function DroneHubApp() {
   const { value: dronesResp, error: dronesError, loading: dronesLoading } = usePoll<{ ok: true; drones: DroneSummary[] }>(
@@ -1348,15 +1254,6 @@ export default function DroneHubApp() {
     [drones],
   );
 
-  function normalizeDraftDroneName(input: string): string {
-    const cleaned = String(input ?? '')
-      .toLowerCase()
-      .replace(/[^a-z0-9-]+/g, '-')
-      .replace(/-+/g, '-')
-      .replace(/^-+|-+$/g, '');
-    return cleaned.slice(0, 48).replace(/-+$/g, '');
-  }
-
   function uniqueDraftDroneName(baseRaw: string, opts?: { exclude?: string; extraTaken?: Iterable<string> }): string {
     const exclude = String(opts?.exclude ?? '').trim().toLowerCase();
     const taken = new Set<string>();
@@ -1389,11 +1286,6 @@ export default function DroneHubApp() {
       i += 1;
     }
     return `untitled-${Date.now().toString(36).slice(-6)}`;
-  }
-
-  function droneNameHasWhitespace(input: string): boolean {
-    // Display names can contain spaces; only reject characters that break ids/paths/payloads.
-    return /[\r\n\t]/.test(String(input ?? ''));
   }
 
   const openCreateModal = React.useCallback(() => {
@@ -1713,31 +1605,6 @@ export default function DroneHubApp() {
       setRepoOpError(e?.message ?? String(e));
     } finally {
       setClearingDroneError(false);
-    }
-  }
-
-  async function copyText(text: string) {
-    const t = String(text ?? '');
-    if (!t) return;
-    try {
-      await navigator.clipboard.writeText(t);
-      return;
-    } catch {
-      // ignore; fall back below
-    }
-    try {
-      const ta = document.createElement('textarea');
-      ta.value = t;
-      ta.style.position = 'fixed';
-      ta.style.left = '-9999px';
-      ta.style.top = '0';
-      document.body.appendChild(ta);
-      ta.focus();
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-    } catch {
-      // ignore
     }
   }
 
@@ -5349,232 +5216,30 @@ export default function DroneHubApp() {
 
       {/* ── Repos modal ── */}
       {reposModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(0,0,0,.55)] backdrop-blur-sm px-4"
-          role="dialog"
-          aria-modal="true"
-        >
-          <div className="w-full max-w-[560px] rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-alt)] shadow-[0_24px_80px_rgba(0,0,0,.35)] overflow-hidden animate-slide-up relative">
-            <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-[var(--accent)] via-[var(--accent-muted)] to-transparent opacity-40" />
-            <div className="px-5 py-4 border-b border-[var(--border)] flex items-center justify-between gap-3">
-              <div
-                className="font-semibold text-sm text-[var(--fg)] tracking-wide uppercase"
-                style={{ fontFamily: 'var(--display)' }}
-              >
-                Repos ({repos.length})
-              </div>
-              <button
-                type="button"
-                onClick={() => setReposModalOpen(false)}
-                className="inline-flex items-center justify-center w-7 h-7 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:border-[var(--border)] transition-all"
-                title="Close"
-                aria-label="Close"
-              >
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 4l8 8M12 4l-8 8" /></svg>
-              </button>
-            </div>
-            <div className="max-h-[420px] overflow-y-auto">
-              {reposError && (
-                <div className="mx-4 mt-3 p-2 rounded border border-[rgba(255,90,90,.15)] bg-[var(--red-subtle)] text-[11px] text-[var(--red)]">
-                  Failed to load repos: {reposError}
-                </div>
-              )}
-              {!reposLoading && repos.length === 0 && !reposError && (
-                <div className="px-5 py-10 text-center">
-                  <div className="text-[var(--muted-dim)] text-[11px]">
-                    No repos registered. Run <code className="px-1.5 py-0.5 rounded bg-[rgba(167,139,250,.06)] border border-[rgba(167,139,250,.08)] text-[#C4B5FD] text-[10px]">drone repo</code> to add one.
-                  </div>
-                </div>
-              )}
-              {repos.length > 0 && (
-                <div className="px-3 py-3 flex flex-col gap-0.5 select-none">
-                  {repos
-                    .slice()
-                    .sort((a, b) => a.path.localeCompare(b.path))
-                    .map((r) => {
-                      const githubUrl = githubUrlForRepo(r);
-                      const base = r.github ? `${r.github.owner}/${r.github.repo}` : r.path.split(/[\\/]/).filter(Boolean).pop() || r.path;
-                      const selected = String(r.path) === String(activeRepoPath);
-                      return (
-                        <div
-                          key={r.path}
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => {
-                            const p = String(r.path ?? '').trim();
-                            if (!p) return;
-                            setActiveRepoPath((prev) => (prev === p ? '' : p));
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                              e.preventDefault();
-                              const p = String(r.path ?? '').trim();
-                              if (!p) return;
-                              setActiveRepoPath((prev) => (prev === p ? '' : p));
-                            }
-                          }}
-                          className={`group/repo px-3 py-2.5 rounded border transition-all flex items-start justify-between gap-2 ${
-                            selected
-                              ? 'bg-[var(--selected)] border-[var(--accent-muted)] shadow-[0_0_8px_rgba(167,139,250,.06)]'
-                              : 'border-transparent hover:border-[var(--border-subtle)] hover:bg-[var(--hover)]'
-                          }`}
-                          title={r.path}
-                        >
-                          <div className="min-w-0">
-                            {githubUrl ? (
-                              <a
-                                href={githubUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                onClick={(e) => { e.stopPropagation(); }}
-                                className="text-[12px] text-[var(--fg-secondary)] truncate hover:underline"
-                                title={githubUrl}
-                              >
-                                {base}
-                              </a>
-                            ) : (
-                              <div className="text-[12px] text-[var(--fg-secondary)] truncate">{base}</div>
-                            )}
-                            <div className="text-[10px] text-[var(--muted-dim)] truncate font-mono mt-0.5">{r.path}</div>
-                          </div>
-                          <div className="flex items-center gap-1 flex-shrink-0">
-                            {githubUrl && (
-                              <button
-                                type="button"
-                                onClick={(e) => { e.preventDefault(); e.stopPropagation(); void copyText(githubUrl); }}
-                                className="opacity-0 pointer-events-none group-hover/repo:opacity-100 group-hover/repo:pointer-events-auto inline-flex items-center justify-center w-7 h-7 rounded-md text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] border border-transparent hover:border-[var(--border-subtle)] transition-colors"
-                                title="Copy GitHub URL"
-                                aria-label="Copy GitHub URL"
-                              >
-                                <IconCopy className="opacity-80" />
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              disabled={Boolean(deletingRepos[r.path])}
-                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); void deleteRepo(r.path); }}
-                              className={`opacity-0 pointer-events-none group-hover/repo:opacity-100 group-hover/repo:pointer-events-auto inline-flex items-center justify-center w-7 h-7 rounded-md border transition-colors ${
-                                deletingRepos[r.path]
-                                  ? 'opacity-60 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                                  : 'bg-[var(--red-subtle)] border-[rgba(248,81,73,.25)] text-[var(--red)] hover:bg-[rgba(248,81,73,.16)]'
-                              }`}
-                              title="Remove repo"
-                              aria-label="Remove repo"
-                            >
-                              {deletingRepos[r.path] ? <IconSpinner className="opacity-90" /> : <IconTrash className="opacity-90" />}
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+        <ReposModal
+          repos={repos}
+          reposError={reposError}
+          reposLoading={reposLoading}
+          activeRepoPath={activeRepoPath}
+          deletingRepos={deletingRepos}
+          onClose={() => setReposModalOpen(false)}
+          onToggleActiveRepoPath={(path) => setActiveRepoPath((prev) => (prev === path ? '' : path))}
+          onDeleteRepo={(path) => {
+            void deleteRepo(path);
+          }}
+          getGithubUrlForRepo={githubUrlForRepo}
+        />
       )}
 
       {droneErrorModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(0,0,0,.55)] backdrop-blur-sm px-4"
-          role="dialog"
-          aria-modal="true"
-          aria-label={`Error details for ${droneErrorModal.droneName}`}
-        >
-          <div className="w-full max-w-[720px] rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-alt)] shadow-[0_24px_80px_rgba(0,0,0,.35)] overflow-hidden animate-slide-up relative">
-            <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-[var(--red)] via-[rgba(255,140,140,.7)] to-transparent opacity-60" />
-            <div className="px-5 py-4 border-b border-[var(--border)] flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="font-semibold text-sm text-[var(--fg)] tracking-wide uppercase truncate" style={{ fontFamily: 'var(--display)' }}>
-                  Drone error
-                </div>
-                <div className="text-[10px] text-[var(--muted)] mt-1 truncate font-mono" title={droneErrorModal.droneName}>
-                  {droneErrorModal.droneName}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={closeDroneErrorModal}
-                className="inline-flex items-center justify-center w-8 h-8 rounded-md text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] border border-transparent hover:border-[var(--border-subtle)] transition-colors"
-                title="Close"
-                aria-label="Close"
-              >
-                ×
-              </button>
-            </div>
-            <div className="px-5 py-4">
-              {droneErrorModal.conflict.isConflict && (
-                <div className="mb-3 p-3 rounded border border-[rgba(255,90,90,.18)] bg-[rgba(255,90,90,.08)]">
-                  <div className="text-[10px] font-semibold text-[var(--red)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
-                    Pull conflict detected
-                  </div>
-                  {droneErrorModal.conflict.patchName && (
-                    <div className="mt-1 text-[11px] text-[var(--muted)] font-mono truncate" title={droneErrorModal.conflict.patchName}>
-                      patch: {droneErrorModal.conflict.patchName}
-                    </div>
-                  )}
-                  {droneErrorModal.conflict.files.length > 0 && (
-                    <div className="mt-2">
-                      <div className="text-[10px] text-[var(--muted-dim)] mb-1">Files</div>
-                      <div className="max-h-20 overflow-y-auto rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.18)] p-2 font-mono text-[10px] text-[var(--fg-secondary)]">
-                        {droneErrorModal.conflict.files.map((file) => (
-                          <div key={file} className="truncate" title={file}>{file}</div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  <div className="mt-2 text-[10px] text-[var(--muted-dim)] leading-relaxed">
-                    Conflict markers: <span className="font-mono text-[var(--fg-secondary)]">&lt;&lt;&lt;&lt;&lt;&lt;&lt; ours</span> is your host branch, and{' '}
-                    <span className="font-mono text-[var(--fg-secondary)]">&gt;&gt;&gt;&gt;&gt;&gt;&gt; theirs</span> is the pulled drone patch.
-                  </div>
-                </div>
-              )}
-              <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase mb-2" style={{ fontFamily: 'var(--display)' }}>
-                Full message
-              </div>
-              <textarea
-                readOnly
-                value={droneErrorModal.message}
-                className="w-full min-h-[220px] max-h-[55vh] rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-3 py-2 text-[12px] leading-relaxed text-[var(--fg-secondary)] font-mono resize-y focus:outline-none"
-              />
-            </div>
-            <div className="px-5 py-4 border-t border-[var(--border)] bg-[rgba(0,0,0,.1)] flex items-center justify-between gap-2">
-              <button
-                type="button"
-                onClick={() => void clearDroneHubError(droneErrorModal.droneId)}
-                disabled={clearingDroneError}
-                className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
-                  clearingDroneError
-                    ? 'opacity-50 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                    : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                }`}
-                style={{ fontFamily: 'var(--display)' }}
-                title="Clear this drone error badge"
-              >
-                {clearingDroneError ? 'Clearing...' : 'Clear error'}
-              </button>
-              <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => void copyText(droneErrorModal.message)}
-                className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] transition-all inline-flex items-center gap-1.5"
-                style={{ fontFamily: 'var(--display)' }}
-              >
-                <IconCopy className="opacity-70" />
-                Copy
-              </button>
-              <button
-                type="button"
-                onClick={closeDroneErrorModal}
-                className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] transition-all"
-                style={{ fontFamily: 'var(--display)' }}
-              >
-                Close
-              </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <DroneErrorModal
+          droneErrorModal={droneErrorModal}
+          clearingDroneError={clearingDroneError}
+          onClose={closeDroneErrorModal}
+          onClearDroneHubError={(droneId) => {
+            void clearDroneHubError(droneId);
+          }}
+        />
       )}
 
       {/* ── Content area (header + body row) ── */}
@@ -5595,900 +5260,163 @@ export default function DroneHubApp() {
             }}
           />
         ) : draftChat ? (
-            <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
-              <div className="flex-shrink-0 bg-[var(--panel-alt)] border-b border-[var(--border)] relative">
-                <div className="px-5 py-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0 border bg-[var(--yellow-subtle)] border-[rgba(255,178,36,.15)]">
-                        <IconChat className="text-[var(--yellow)]" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2.5">
-                          <span className="font-semibold text-sm tracking-tight" style={{ fontFamily: 'var(--display)' }}>
-                            New chat
-                          </span>
-                        </div>
-                        <div className="text-[10px] text-[var(--muted)] mt-0.5">
-                          {draftChat.prompt
-                            ? 'Creating your drone. Any new messages you send will queue and auto-send when it’s ready.'
-                            : 'Send your first message to create a new drone instantly.'}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setDraftChat(null);
-                          setDraftCreateOpen(false);
-                          setDraftCreateError(null);
-                          setDraftAutoRenaming(false);
-                        }}
-                        className="inline-flex items-center justify-center h-7 px-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-all text-[10px] font-semibold tracking-wide uppercase"
-                        style={{ fontFamily: 'var(--display)' }}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                  <div className="mt-2 flex items-center gap-2 flex-wrap">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                        Agent
-                      </span>
-                      <UiMenuSelect
-                        variant="toolbar"
-                        value={spawnAgentKey}
-                        onValueChange={setSpawnAgentKey}
-                        entries={spawnAgentMenuEntries}
-                        disabled={draftCreating || draftAutoRenaming || Boolean(draftChat.prompt)}
-                        triggerClassName="min-w-[170px] max-w-[240px]"
-                        panelClassName="w-[320px]"
-                        title="Choose agent for this new drone."
-                        chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setCustomAgentModalOpen(true)}
-                        disabled={draftCreating || draftAutoRenaming || Boolean(draftChat.prompt)}
-                        className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
-                          draftCreating || draftAutoRenaming || Boolean(draftChat.prompt)
-                            ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
-                            : 'bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
-                        }`}
-                        style={{ fontFamily: 'var(--display)' }}
-                        title="Manage custom agents"
-                      >
-                        Custom
-                      </button>
-                    </div>
-                    {spawnAgentConfig.kind === 'builtin' && (
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                          Model
-                        </span>
-                        <input
-                          value={spawnModel}
-                          onChange={(e) => setSpawnModel(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Escape') e.currentTarget.blur();
-                          }}
-                          disabled={draftCreating || draftAutoRenaming || Boolean(draftChat.prompt)}
-                          placeholder="Default model"
-                          className={`h-[28px] w-[170px] rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[11px] text-[var(--muted)] placeholder:text-[var(--muted-dim)] focus:outline-none transition-all font-mono ${
-                            draftCreating || draftAutoRenaming || Boolean(draftChat.prompt)
-                              ? 'opacity-40 cursor-not-allowed'
-                              : 'hover:text-[var(--fg-secondary)] hover:border-[var(--border)]'
-                          }`}
-                          title="Set default model for this new drone chat."
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setSpawnModel('')}
-                          disabled={draftCreating || draftAutoRenaming || Boolean(draftChat.prompt) || !spawnModel.trim()}
-                          className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
-                            draftCreating || draftAutoRenaming || Boolean(draftChat.prompt) || !spawnModel.trim()
-                              ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
-                              : 'bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
-                          }`}
-                          style={{ fontFamily: 'var(--display)' }}
-                          title="Clear model override"
-                        >
-                          Clear
-                        </button>
-                      </div>
-                    )}
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                        Repo
-                      </span>
-                      <UiMenuSelect
-                        variant="toolbar"
-                        value={chatHeaderRepoPath}
-                        onValueChange={setChatHeaderRepoPath}
-                        entries={createRepoMenuEntries}
-                        disabled={draftCreating || draftAutoRenaming || Boolean(draftChat.prompt)}
-                        triggerClassName="min-w-[220px] max-w-[420px]"
-                        panelClassName="w-[720px] max-w-[calc(100vw-3rem)]"
-                        menuClassName="max-h-[240px] overflow-y-auto"
-                        title={chatHeaderRepoPath || 'No repo'}
-                        triggerLabel={chatHeaderRepoPath || 'No repo'}
-                        triggerLabelClassName={chatHeaderRepoPath ? 'font-mono text-[11px]' : undefined}
-                        chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div className="flex-1 min-h-0 overflow-auto">
-                {draftChat.prompt ? (
-                  <div className="px-5 py-5">
-                    <div className="mx-auto max-w-[980px] space-y-5">
-                      <PendingTranscriptTurn item={draftChat.prompt} nowMs={nowMs} />
-                      {(
-                        draftChat.droneId
-                          ? (queuedPromptsByDroneChat[droneChatQueueKey(draftChat.droneId, 'default')] ?? [])
-                          : []
-                      ).map((p) => (
-                        <PendingTranscriptTurn key={`draft-queued-${p.id}`} item={p} nowMs={nowMs} />
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <EmptyState
-                    icon={<IconChat className="w-8 h-8 text-[var(--muted)]" />}
-                    title="Start with a message"
-                    description="Sending creates a new untitled drone immediately, then auto-renames it."
-                  />
-                )}
-              </div>
-              <ChatInput
-                // Don't clear the user's draft prompt when they change the agent selector.
-                // The draft composer should only reset when the draft prompt "instance" changes.
-                resetKey={`draft:${draftChat.prompt?.id ?? ''}`}
-                droneName="new drone"
-                promptError={draftCreateError}
-                sending={draftCreating || draftAutoRenaming}
-                waiting={Boolean(draftChat.prompt)}
-                autoFocus={!draftCreating && !draftAutoRenaming && !draftChat.prompt}
-                attachmentsEnabled={false}
-                onSend={async (payload: ChatSendPayload) => {
-                  if (!draftChat.prompt) return await startDraftPrompt(payload);
-                  const droneId = String(draftChat.droneId ?? '').trim();
-                  if (!droneId) {
-                    setDraftCreateError('Drone is still being created. Please wait a moment.');
-                    return false;
-                  }
-                  const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
-                  if (attachments.length > 0) {
-                    setDraftCreateError('Image attachments are only supported after the drone is created.');
-                    return false;
-                  }
-                  const prompt = String(payload?.prompt ?? '').trim();
-                  if (!prompt) return false;
-                  enqueueQueuedPrompt(droneId, 'default', prompt);
-                  setDraftCreateError(null);
-                  return true;
-                }}
-              />
-            </div>
+          <DraftChatWorkspace
+            draftChat={draftChat}
+            nowMs={nowMs}
+            spawnAgentKey={spawnAgentKey}
+            onSpawnAgentKeyChange={setSpawnAgentKey}
+            spawnAgentMenuEntries={spawnAgentMenuEntries}
+            draftCreating={draftCreating}
+            draftAutoRenaming={draftAutoRenaming}
+            onOpenCustomAgentModal={() => setCustomAgentModalOpen(true)}
+            spawnAgentConfig={spawnAgentConfig}
+            spawnModel={spawnModel}
+            onSpawnModelChange={setSpawnModel}
+            onClearSpawnModel={() => setSpawnModel('')}
+            chatHeaderRepoPath={chatHeaderRepoPath}
+            onChatHeaderRepoPathChange={setChatHeaderRepoPath}
+            createRepoMenuEntries={createRepoMenuEntries}
+            draftCreateError={draftCreateError}
+            queuedPromptsByDroneChat={queuedPromptsByDroneChat}
+            onCancel={() => {
+              setDraftChat(null);
+              setDraftCreateOpen(false);
+              setDraftCreateError(null);
+              setDraftAutoRenaming(false);
+            }}
+            onStartDraftPrompt={startDraftPrompt}
+            onEnqueueQueuedPrompt={enqueueQueuedPrompt}
+            onSetDraftCreateError={setDraftCreateError}
+          />
         ) : selectedGroupMultiChatData ? (
-          <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
-            <div className="flex-shrink-0 bg-[var(--panel-alt)] border-b border-[var(--border)] px-5 py-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--muted-dim)] font-semibold" style={{ fontFamily: 'var(--display)' }}>
-                    Group Multi-Chat
-                  </div>
-                  <div className="mt-1 text-[15px] font-semibold text-[var(--fg)] truncate" style={{ fontFamily: 'var(--display)' }}>
-                    {selectedGroupMultiChatData.group}
-                  </div>
-                  <div className="text-[11px] text-[var(--muted)] mt-1">
-                    One column per drone. Open any column title to jump into its full chat + panel view.
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <div className="inline-flex items-center gap-2 h-7 px-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]">
-                    <span className="text-[9px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
-                      Width
-                    </span>
-                    <input
-                      type="range"
-                      min={GROUP_MULTI_CHAT_COLUMN_WIDTH_MIN_PX}
-                      max={GROUP_MULTI_CHAT_COLUMN_WIDTH_MAX_PX}
-                      step={10}
-                      value={groupMultiChatColumnWidth}
-                      onChange={(e) => setGroupMultiChatColumnWidth(clampGroupMultiChatColumnWidthPx(Number(e.target.value)))}
-                      className="w-[92px] accent-[var(--accent)]"
-                      title="Adjust width for all columns"
-                      aria-label="Adjust width for all group multi-chat columns"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setGroupMultiChatColumnWidth(GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX)}
-                      disabled={groupMultiChatColumnWidth === GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX}
-                      className={`inline-flex items-center h-5 px-1.5 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
-                        groupMultiChatColumnWidth === GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX
-                          ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] opacity-40 cursor-not-allowed'
-                          : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
-                      }`}
-                      style={{ fontFamily: 'var(--display)' }}
-                      title="Reset column width"
-                    >
-                      Reset
-                    </button>
-                  </div>
-                  <span className="inline-flex items-center h-7 px-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[10px] font-mono text-[var(--muted-dim)]">
-                    {selectedGroupMultiChatData.items.length} drone{selectedGroupMultiChatData.items.length !== 1 ? 's' : ''}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setGroupBroadcastExpanded((v) => !v)}
-                    className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border text-[10px] font-semibold tracking-wide uppercase transition-all ${
-                      groupBroadcastExpanded
-                        ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] shadow-[0_0_0_1px_rgba(167,139,250,.15)]'
-                        : 'border-[var(--accent-muted)] bg-[rgba(167,139,250,.08)] text-[var(--accent)] hover:bg-[var(--accent-subtle)] hover:shadow-[var(--glow-accent)]'
-                    }`}
-                    style={{ fontFamily: 'var(--display)' }}
-                    title={groupBroadcastExpanded ? 'Hide broadcast composer' : 'Broadcast a message to all drones'}
-                    aria-expanded={groupBroadcastExpanded}
-                  >
-                    <IconChat className={groupBroadcastExpanded ? 'opacity-90' : 'opacity-80'} />
-                    Broadcast
-                    <IconChevron down={groupBroadcastExpanded} className="opacity-80" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedGroupMultiChat(null)}
-                    className="inline-flex items-center h-7 px-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-all"
-                    style={{ fontFamily: 'var(--display)' }}
-                    title="Exit group multi-chat view"
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-            </div>
-            <div
-              className={`flex-shrink-0 overflow-hidden border-b border-[var(--border)] bg-[rgba(255,255,255,.01)] transition-[max-height,opacity,padding] duration-200 ease-out ${
-                groupBroadcastExpanded ? 'max-h-[220px] opacity-100 px-3' : 'max-h-0 opacity-0 px-3 pointer-events-none'
-              }`}
-              aria-hidden={!groupBroadcastExpanded}
-            >
-              <ChatInput
-                resetKey={`group-broadcast:${selectedGroupMultiChatData.group}:${selectedChat || 'default'}`}
-                droneName="all drones"
-                promptError={groupBroadcastPromptError}
-                sending={groupBroadcastSending}
-                waiting={false}
-                disabled={groupBroadcastSending || selectedGroupMultiChatData.items.length === 0}
-                autoFocus={false}
-                modeHint=""
-                onSend={sendGroupBroadcastPrompt}
-              />
-            </div>
-            <div className="flex-1 min-h-0 overflow-hidden px-4 py-4">
-              {selectedGroupMultiChatData.items.length === 0 ? (
-                <div className="h-full overflow-auto">
-                  <EmptyState
-                    icon={<IconDrone className="w-8 h-8 text-[var(--muted-dim)]" />}
-                    title="No drones in this group"
-                    description="Add drones to this group from the sidebar drag-and-drop controls."
-                  />
-                </div>
-              ) : (
-                <div className="h-full min-h-0 overflow-x-auto overflow-y-hidden pb-2">
-                  <div className="h-full min-h-0 w-max flex gap-3 items-stretch pr-4">
-                    {selectedGroupMultiChatData.items.map((d) => (
-                      <GroupMultiChatColumn
-                        key={`group-chat:${selectedGroupMultiChatData.group}:${d.id}`}
-                        drone={d}
-                        droneLabel={uiDroneName(d.name)}
-                        preferredChat={selectedChat || 'default'}
-                        nowMs={nowMs}
-                        onOpenDrone={() => selectDroneCard(d.id)}
-                        onCreateJobs={parseJobsFromAgentMessage}
-                        columnWidthPx={groupMultiChatColumnWidth}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
+          <GroupMultiChatWorkspace
+            selectedGroupMultiChatData={selectedGroupMultiChatData}
+            selectedChat={selectedChat}
+            groupMultiChatColumnWidth={groupMultiChatColumnWidth}
+            onGroupMultiChatColumnWidthChange={setGroupMultiChatColumnWidth}
+            groupBroadcastExpanded={groupBroadcastExpanded}
+            onToggleGroupBroadcastExpanded={() => setGroupBroadcastExpanded((v) => !v)}
+            onClose={() => setSelectedGroupMultiChat(null)}
+            groupBroadcastPromptError={groupBroadcastPromptError}
+            groupBroadcastSending={groupBroadcastSending}
+            onSendGroupBroadcastPrompt={sendGroupBroadcastPrompt}
+            nowMs={nowMs}
+            uiDroneName={uiDroneName}
+            onSelectDroneCard={selectDroneCard}
+            onParseJobsFromAgentMessage={parseJobsFromAgentMessage}
+          />
         ) : !currentDrone ? (
-            !dronesLoading && sidebarDrones.length === 0 && !dronesError ? (
-              <EmptyState
-                icon={<IconDrone className="w-8 h-8 text-[var(--muted-dim)]" />}
-                title="No drones yet"
-                description="Create your first drone to get started."
-                actions={
-                  <div className="flex flex-col gap-2">
-                    <button
-                      type="button"
-                      onClick={openDraftChatComposer}
-                      className="w-full inline-flex items-center gap-2 h-[32px] px-3 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[11px] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] transition-all"
-                      title="Create new drone (A)"
-                      aria-label="Create new drone"
-                    >
-                      <IconPlus className="opacity-80" />
-                      <span className="font-semibold tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                        Create new drone
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={openCreateModal}
-                      className="w-full inline-flex items-center gap-2 h-[32px] px-3 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[11px] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] transition-all"
-                      title="Create multiple drones (S)"
-                      aria-label="Create multiple drones"
-                    >
-                      <IconPlusDouble className="opacity-80" />
-                      <span className="font-semibold tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                        Create multiple drones
-                      </span>
-                    </button>
-                  </div>
-                }
-              />
-            ) : (
-              <EmptyState
-                icon={<IconDrone className="w-8 h-8 text-[var(--muted-dim)]" />}
-                title="Select a drone"
-                description="Choose a drone from the sidebar to view its session output."
-              />
-            )
-          ) : (
-          <>
-            {/* Header — spans full width (chat + right panel) */}
-            <div className="flex-shrink-0 bg-[var(--panel-alt)] border-b border-[var(--border)] relative">
-              <div className="px-5 py-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-3 min-w-0">
-                    {sidebarCollapsed && (
-                      <button
-                        type="button"
-                        onClick={() => setSidebarCollapsed(false)}
-                        className="inline-flex items-center justify-center w-7 h-7 rounded text-[var(--muted-dim)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-all flex-shrink-0 mr-1"
-                        title="Expand sidebar"
-                      >
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3l5 5-5 5" /><line x1="13" y1="3" x2="13" y2="13" /></svg>
-                      </button>
-                    )}
-                    <div className={`w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0 border ${
-                      isDroneStartingOrSeeding(currentDrone.hubPhase)
-                        ? 'bg-[var(--yellow-subtle)] border-[rgba(255,178,36,.15)]'
-                        : currentDrone.statusOk
-                          ? 'bg-[var(--accent-subtle)] border-[rgba(167,139,250,.15)] shadow-[0_0_12px_rgba(167,139,250,.08)]'
-                          : 'bg-[var(--red-subtle)] border-[rgba(255,90,90,.15)]'
-                    }`}>
-                      <IconDrone
-                        className={
-                          isDroneStartingOrSeeding(currentDrone.hubPhase)
-                            ? 'text-[var(--yellow)]'
-                            : currentDrone.statusOk
-                              ? 'text-[var(--accent)]'
-                              : 'text-[var(--red)]'
-                        }
-                      />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2.5">
-                        <span className="font-semibold text-sm tracking-tight" style={{ fontFamily: 'var(--display)' }}>
-                          {currentDroneLabel}
-                        </span>
-                        {showRespondingAsStatusInHeader ? (
-                          <span className="inline-flex items-center" title="Agent responding">
-                            <TypingDots color="var(--yellow)" />
-                          </span>
-                        ) : (
-                          <StatusBadge ok={currentDrone.statusOk} error={currentDrone.statusError} hubPhase={currentDrone.hubPhase} hubMessage={currentDrone.hubMessage} />
-                        )}
-                        {currentDrone.group && <GroupBadge group={currentDrone.group} />}
-                      </div>
-                      {String(currentDrone.repoPath ?? '').trim() ? (
-                        <div className="text-[10px] text-[var(--muted)] truncate flex items-center gap-1.5 font-mono mt-0.5" title={currentDrone.repoPath}>
-                          <IconFolder className="flex-shrink-0 opacity-40 w-3 h-3" />
-                          {currentDrone.repoPath}
-                        </div>
-                      ) : (
-                        <div className="text-[10px] text-[var(--muted-dim)] truncate flex items-center gap-1.5 mt-0.5" title="No repo attached">
-                          <IconFolder className="flex-shrink-0 opacity-30 w-3 h-3" />
-                          No repo attached
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  {/* Status indicators + right panel toggle */}
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {chatUiMode === 'cli' ? (
-                      <>
-                        {loadingSession && <span className="text-[11px] text-[var(--muted)] flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-[var(--yellow)] animate-pulse-dot" />Loading...</span>}
-                        {sessionError && !loadingSession && <span className="text-[11px] text-[var(--red)] flex items-center gap-1" title={sessionError}><span className="w-1.5 h-1.5 rounded-full bg-[var(--red)]" />Error</span>}
-                      </>
-                    ) : (
-                      <>
-                        {loadingTranscript && <span className="text-[11px] text-[var(--muted)] flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-[var(--yellow)] animate-pulse-dot" />Loading...</span>}
-                        {transcriptError && !loadingTranscript && <span className="text-[11px] text-[var(--red)] flex items-center gap-1" title={transcriptError}><span className="w-1.5 h-1.5 rounded-full bg-[var(--red)]" />Error</span>}
-                      </>
-                    )}
-                    {chatInfoError && !loadingChatInfo && <span className="text-[11px] text-[var(--red)] flex items-center gap-1" title={chatInfoError}><span className="w-1.5 h-1.5 rounded-full bg-[var(--red)]" />Agent error</span>}
-                    {repoOpError && (
-                      <button
-                        type="button"
-                        className="text-[11px] text-[var(--red)] inline-flex items-center gap-1 hover:underline focus:outline-none"
-                        title={repoOpError}
-                        onClick={() => openDroneErrorModal(currentDrone, repoOpError, repoOpErrorMeta)}
-                      >
-                        <span className="w-1.5 h-1.5 rounded-full bg-[var(--red)]" />
-                        Repo error
-                      </button>
-                    )}
-                    {launchHint?.kind === 'copied' && (
-                      <span className="hidden md:inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] font-mono" title={launchHint.launcher ? `Launched: ${launchHint.launcher}` : 'Paste the copied command into a terminal.'}>
-                        Command copied{launchHint.launcher ? ` • ${launchHint.launcher.split(' ')[0]}` : ''}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-              {/* Tier 2: Toolbar */}
-              <div className="px-5 pb-2.5 flex items-center gap-2 flex-wrap">
-                {/* Agent selector */}
-                <div data-onboarding-id="chat.toolbar.agent" className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>Agent</span>
-                  <UiMenuSelect
-                    variant="toolbar"
-                    value={currentAgentKey}
-                    onValueChange={pickAgentValue}
-                    entries={toolbarAgentMenuEntries}
-                    open={agentMenuOpen}
-                    onOpenChange={(open) => {
-                      if (open) {
-                        setTerminalMenuOpen(false);
-                        setHeaderOverflowOpen(false);
-                      }
-                      setAgentMenuOpen(open);
-                    }}
-                    disabled={agentDisabled}
-                    title="Choose agent implementation for this chat."
-                    triggerLabel={agentLabel}
-                    chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
-                    panelClassName="w-[260px]"
-                    header="Choose agent"
-                    headerStyle={{ fontFamily: 'var(--display)' }}
-                  />
-                </div>
-                {modelControlEnabled && (
-                  <div data-onboarding-id="chat.toolbar.model" className="flex items-center gap-1.5">
-                    <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>Model</span>
-                    {availableChatModels.length > 0 ? (
-                      <UiMenuSelect
-                        variant="toolbar"
-                        value={currentModel ?? ''}
-                        onValueChange={(next) => {
-                          void setChatModel(next || null).catch((err: any) => setChatInfoError(err?.message ?? String(err)));
-                        }}
-                        entries={modelMenuEntries}
-                        disabled={modelDisabled}
-                        triggerClassName="min-w-[170px] max-w-[240px]"
-                        title="Choose model for this chat."
-                        triggerLabel={modelLabel}
-                        chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
-                        panelClassName="w-[260px]"
-                      />
-                    ) : (
-                      <>
-                        <input
-                          value={manualChatModelInput}
-                          onChange={(e) => setManualChatModelInput(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key !== 'Enter') return;
-                            e.preventDefault();
-                            applyManualChatModel();
-                          }}
-                          disabled={modelDisabled}
-                          placeholder="Model id (optional)"
-                          className={`h-[28px] w-[170px] rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[11px] text-[var(--muted)] placeholder:text-[var(--muted-dim)] focus:outline-none transition-all ${modelDisabled ? 'opacity-40 cursor-not-allowed' : 'hover:text-[var(--fg-secondary)] hover:border-[var(--border)]'}`}
-                          title="Type a model id and press Enter."
-                        />
-                        <button
-                          type="button"
-                          onClick={applyManualChatModel}
-                          disabled={modelDisabled}
-                          className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${modelDisabled ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]' : 'bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'}`}
-                          style={{ fontFamily: 'var(--display)' }}
-                          title="Apply typed model for this chat"
-                        >
-                          Set
-                        </button>
-                      </>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => setChatModelsRefreshNonce((n) => n + 1)}
-                      disabled={modelDisabled || loadingChatModels}
-                      className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${modelDisabled || loadingChatModels ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]' : 'bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'}`}
-                      style={{ fontFamily: 'var(--display)' }}
-                      title="Refresh model list from the agent CLI in this drone"
-                    >
-                      {loadingChatModels ? 'Loading' : 'Refresh'}
-                    </button>
-                    {chatModelsError && (
-                      <span className="text-[10px] text-[var(--muted-dim)]" title={chatModelsError}>
-                        unavailable
-                      </span>
-                    )}
-                    {!chatModelsError && chatModelsDiscoveredAt && (
-                      <span className="text-[10px] text-[var(--muted-dim)]" title={chatModelsDiscoveredAt}>
-                        {chatModelsSource}
-                      </span>
-                    )}
-                  </div>
-                )}
-                {/* Repo (read-only for repo-attached drones only) */}
-                {currentDroneRepoAttached && (
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                      Repo
-                    </span>
-                    <UiMenuSelect
-                      variant="toolbar"
-                      value={currentDroneRepoPath}
-                      onValueChange={() => {}}
-                      entries={createRepoMenuEntries}
-                      disabled={true}
-                      triggerClassName="min-w-[220px] max-w-[420px]"
-                      panelClassName="w-[720px] max-w-[calc(100vw-3rem)]"
-                      menuClassName="max-h-[240px] overflow-y-auto"
-                      title={currentDroneRepoPath || 'No repo'}
-                      triggerLabel={currentDroneRepoPath || 'No repo'}
-                      triggerLabelClassName={currentDroneRepoPath ? 'font-mono text-[11px]' : undefined}
-                      chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
-                    />
-                  </div>
-                )}
-                {/* View mode */}
-                {chatUiMode === 'cli' ? (
-                  <button onClick={() => setOutputView(outputView === 'screen' ? 'log' : 'screen')} className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]" style={{ fontFamily: 'var(--display)' }} title={outputView === 'screen' ? 'Click for raw log view' : 'Click for screen capture view'}>{outputView === 'screen' ? 'Screen' : 'Log'}</button>
-                ) : null}
-                {/* Separator */}
-                <div className="w-px h-4 bg-[var(--border-subtle)]" />
-                {/* Chat tabs (inline) */}
-                {currentDrone.chats.length > 0 && (
-                  <ChatTabs chats={currentDrone.chats} selected={selectedChat} onSelect={setSelectedChat} />
-                )}
-                {/* Spacer */}
-                <div className="flex-1" />
-                {/* Primary actions */}
-                <button onClick={() => openDroneTerminal('ssh')} disabled={isDroneStartingOrSeeding(currentDrone.hubPhase) || openingTerminal?.mode === 'ssh' || openingTerminal?.mode === 'agent'} className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${openingTerminal ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]' : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'}`} style={{ fontFamily: 'var(--display)' }} title={`SSH into "${currentDroneLabel}"`}>SSH</button>
-                <button onClick={() => openDroneEditor('cursor')} disabled={isDroneStartingOrSeeding(currentDrone.hubPhase) || Boolean(openingEditor) || Boolean(openingTerminal)} className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${openingEditor || openingTerminal ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]' : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)]'}`} style={{ fontFamily: 'var(--display)' }} title={`Open Cursor attached to "${currentDroneLabel}"`}><IconCursorApp className="opacity-70" />Cursor</button>
-                {(currentDrone.repoAttached ?? Boolean(String(currentDrone.repoPath ?? '').trim())) && (
-                  <button
-                    type="button"
-                    onClick={() => void pullRepoChanges()}
-                    disabled={isDroneStartingOrSeeding(currentDrone.hubPhase) || Boolean(openingEditor) || Boolean(openingTerminal) || Boolean(repoOp)}
-                    className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${isDroneStartingOrSeeding(currentDrone.hubPhase) || Boolean(openingEditor) || Boolean(openingTerminal) || Boolean(repoOp) ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]' : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'}`}
-                    style={{ fontFamily: 'var(--display)' }}
-                    title="Pull repo changes from the drone container into your local repo"
-                  >
-                    {repoOp?.kind === 'pull' ? 'Pulling...' : 'Pull changes'}
-                  </button>
-                )}
-                {/* Overflow menu */}
-                <div ref={headerOverflowRef} className="relative">
-                  <button
-                    type="button"
-                    onClick={() => { setAgentMenuOpen(false); setTerminalMenuOpen(false); setHeaderOverflowOpen((v) => !v); }}
-                    className="inline-flex items-center justify-center w-7 h-7 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-all"
-                    title="More actions"
-                    aria-label="More actions"
-                    aria-haspopup="menu"
-                    aria-expanded={headerOverflowOpen}
-                  >
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><circle cx="4" cy="8" r="1.5" /><circle cx="8" cy="8" r="1.5" /><circle cx="12" cy="8" r="1.5" /></svg>
-                  </button>
-                  {headerOverflowOpen && (
-                    <div className={cn('absolute right-0 mt-2 w-[220px] z-50', dropdownPanelBaseClass)} role="menu">
-                      <div className="py-1">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setHeaderOverflowOpen(false);
-                            openDroneTerminal('agent');
-                          }}
-                          disabled={isDroneStartingOrSeeding(currentDrone.hubPhase) || Boolean(openingTerminal)}
-                          className={cn(dropdownMenuItemBaseClass, 'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed')}
-                          role="menuitem"
-                        >
-                          SSH + Agent session
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setHeaderOverflowOpen(false);
-                            openDroneEditor('code');
-                          }}
-                          disabled={isDroneStartingOrSeeding(currentDrone.hubPhase) || Boolean(openingEditor) || Boolean(openingTerminal)}
-                          className={cn(dropdownMenuItemBaseClass, 'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed')}
-                          role="menuitem"
-                        >
-                          Open VS Code
-                        </button>
-                        {(currentDrone.repoAttached ?? Boolean(String(currentDrone.repoPath ?? '').trim())) && (
-                          <>
-                            <div className="my-1 border-t border-[var(--border-subtle)]" />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setHeaderOverflowOpen(false);
-                                void reseedRepo();
-                              }}
-                              disabled={isDroneStartingOrSeeding(currentDrone.hubPhase) || Boolean(openingEditor) || Boolean(openingTerminal) || Boolean(repoOp)}
-                              className={cn(dropdownMenuItemBaseClass, 'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed')}
-                              role="menuitem"
-                            >
-                              Reseed repo
-                            </button>
-                          </>
-                        )}
-                        <div className="my-1 border-t border-[var(--border-subtle)]" />
-                        <div ref={terminalMenuRef} className="relative">
-                          <button
-                            type="button"
-                            onClick={() => setTerminalMenuOpen((v) => !v)}
-                            className={cn(dropdownMenuItemBaseClass, 'text-[var(--fg-secondary)] hover:bg-[var(--hover)] flex items-center justify-between')}
-                            role="menuitem"
-                          >
-                            <span>Terminal: {terminalLabel}</span>
-                            <IconChevron down={!terminalMenuOpen} className="text-[var(--muted-dim)] opacity-60" />
-                          </button>
-                          {terminalMenuOpen && (
-                            <div className="border-t border-[var(--border-subtle)]">
-                              {terminalOptions.map((opt) => {
-                                const active = opt.id === terminalEmulator;
-                                return (
-                                  <button key={opt.id} type="button" onClick={() => { setTerminalEmulator(opt.id); setTerminalMenuOpen(false); setHeaderOverflowOpen(false); }} className={`w-full text-left pl-6 pr-3 py-1.5 text-[11px] transition-colors ${active ? 'bg-[var(--accent-subtle)] text-[var(--accent)] font-semibold' : 'text-[var(--muted)] hover:bg-[var(--hover)]'}`} role="menuitem">{opt.label}</button>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                {/* Panel tabs (right side of toolbar) */}
-                {rightPanelOpen && (
-                  <>
-                    <div className="w-px h-4 bg-[var(--border-subtle)] ml-1" />
-                    <div
-                      className="inline-flex items-center rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] p-0.5"
-                      style={{ fontFamily: 'var(--display)' }}
-                      title="Choose right panel layout mode."
-                    >
-                      <button
-                        type="button"
-                        onClick={() => setRightPanelSplitMode(false)}
-                        className={`px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase transition-all border ${
-                          rightPanelSplit
-                            ? 'text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)] border-transparent'
-                            : 'bg-[var(--accent-subtle)] text-[var(--accent)] border-[var(--accent-muted)]'
-                        }`}
-                        title="Use one right panel pane"
-                      >
-                        Single
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setRightPanelSplitMode(true)}
-                        className={`px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase transition-all border ${
-                          rightPanelSplit
-                            ? 'bg-[var(--accent-subtle)] text-[var(--accent)] border-[var(--accent-muted)]'
-                            : 'text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)] border-transparent'
-                        }`}
-                        title="Split right panel into top and bottom panes"
-                      >
-                        Split
-                      </button>
-                    </div>
-                    {!rightPanelSplit && (
-                      <div className="flex items-center gap-0.5">
-                        {RIGHT_PANEL_TABS.map((tab) => {
-                          const active = rightPanelTab === tab;
-                          return (
-                            <button
-                              key={tab}
-                              type="button"
-                              onClick={() => setRightPanelTab(tab)}
-                              data-onboarding-id={tab === 'changes' ? 'rightPanel.tab.changes' : undefined}
-                              className={`px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase transition-all ${
-                                active
-                                  ? 'bg-[var(--accent-subtle)] text-[var(--accent)] border border-[var(--accent-muted)]'
-                                  : 'text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)] border border-transparent'
-                              }`}
-                              style={{ fontFamily: 'var(--display)' }}
-                            >
-                              {RIGHT_PANEL_TAB_LABELS[tab]}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </>
-                )}
-                {rightPanelOpen && (
-                  <button
-                    type="button"
-                    onClick={resetRightPanelWidth}
-                    disabled={rightPanelWidthIsDefault}
-                    className={`inline-flex items-center h-7 px-2 rounded border text-[10px] font-semibold tracking-wide uppercase transition-all ${
-                      rightPanelWidthIsDefault
-                        ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] opacity-40 cursor-not-allowed'
-                        : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
-                    }`}
-                    style={{ fontFamily: 'var(--display)' }}
-                    title="Reset right panel width"
-                    aria-label="Reset right panel width"
-                  >
-                    Reset size
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setRightPanelOpen((v) => !v)}
-                  data-onboarding-id="rightPanel.toggle"
-                  className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ml-1 ${
-                    rightPanelOpen
-                      ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                      : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
-                  }`}
-                  title={rightPanelOpen ? 'Hide panel' : 'Show panel'}
-                  aria-label="Toggle right panel"
-                >
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="12" height="12" rx="2" /><line x1="10" y1="2" x2="10" y2="14" /></svg>
-                </button>
-              </div>
-            </div>
-
-            {/* Body row: chat + right panel */}
-            <div className="flex-1 flex min-h-0">
-            {/* Chat area */}
-            <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden relative">
-              <div className="flex-1 min-h-0 relative">
-              {chatUiMode === 'transcript' ? (
-                <div className="h-full min-w-0 min-h-0 overflow-auto">
-                  {loadingTranscript && !transcripts && visiblePendingPromptsWithStartup.length === 0 ? (
-                    <TranscriptSkeleton />
-                  ) : (transcripts && transcripts.length > 0) || visiblePendingPromptsWithStartup.length > 0 ? (
-                    <div className="max-w-[900px] mx-auto px-6 py-5 flex flex-col gap-6">
-                      {(transcripts ?? []).map((t) => {
-                        const messageId = transcriptMessageId(t);
-                        return (
-                          <TranscriptTurn
-                            key={`${t.turn}-${t.at}`}
-                            item={t}
-                            nowMs={nowMs}
-                            parsingJobs={Boolean(parsingJobsByTurn[t.turn])}
-                            onCreateJobs={parseJobsFromAgentMessage}
-                            messageId={messageId}
-                            tldr={tldrByMessageId[messageId] ?? null}
-                            showTldr={Boolean(showTldrByMessageId[messageId])}
-                            onToggleTldr={toggleTldrForAgentMessage}
-                            onHoverAgentMessage={handleAgentMessageHover}
-                          />
-                        );
-                      })}
-                      {visiblePendingPromptsWithStartup.map((p) => (
-                        <PendingTranscriptTurn key={`pending-${p.id}`} item={p} nowMs={nowMs} />
-                      ))}
-                      <div ref={chatEndRef} />
-                    </div>
-                  ) : (
-                    <EmptyState
-                      icon={<IconChat className="w-8 h-8 text-[var(--muted)]" />}
-                      title="No messages yet"
-                      description={
-                        transcriptError
-                          ? `Error: ${transcriptError}`
-                          : `Send a prompt to ${currentDroneLabel} to see the conversation here.`
-                      }
-                    />
-                  )}
-                </div>
-              ) : (
-                <div
-                  ref={outputScrollRef}
-                  onScroll={(e) => updatePinned(e.currentTarget)}
-                  className="h-full min-w-0 min-h-0 overflow-auto relative"
-                >
-                  {(isDroneStartingOrSeeding(currentDrone.hubPhase)) && String(startupSeedForCurrentDrone?.prompt ?? '').trim() && (
-                    <div className="max-w-[900px] mx-auto px-6 pt-2">
-                      <div className="rounded-md border border-[rgba(148,163,184,.2)] bg-[var(--user-dim)] px-3 py-2 text-[12px] text-[var(--fg-secondary)] whitespace-pre-wrap">
-                        {String(startupSeedForCurrentDrone?.prompt ?? '').trim()}
-                      </div>
-                    </div>
-                  )}
-                  {loadingSession && !sessionText ? (
-                    <TranscriptSkeleton />
-                  ) : sessionText ? (
-                    <div className="max-w-[900px] mx-auto px-6 py-6">
-                      <div className="rounded-lg border border-[var(--border-subtle)] bg-[rgba(0,0,0,.1)] px-4 py-3">
-                        <CollapsibleOutput text={sessionText} ok={!sessionError} />
-                      </div>
-                    </div>
-                  ) : (
-                    <EmptyState
-                      icon={<IconChat className="w-8 h-8 text-[var(--muted)]" />}
-                      title="No output yet"
-                      description={
-                        sessionError ? `Error: ${sessionError}` : `Send a prompt to ${currentDroneLabel} to see the session output here.`
-                      }
-                    />
-                  )}
-
-                  {!pinnedToBottom && sessionText && (
-                    <div className="pointer-events-none sticky bottom-4 flex justify-center px-6">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const el = outputScrollRef.current;
-                          if (!el) return;
-                          el.scrollTop = el.scrollHeight;
-                          updatePinned(el);
-                        }}
-                        className="pointer-events-auto inline-flex items-center gap-2 px-3 py-1.5 rounded text-[10px] font-semibold tracking-wide uppercase border border-[var(--accent-muted)] bg-[var(--panel-raised)] text-[var(--accent)] hover:shadow-[var(--glow-accent)] shadow-[0_8px_24px_rgba(0,0,0,.25)] transition-all"
-                        style={{ fontFamily: 'var(--display)' }}
-                        title="Scroll to bottom"
-                      >
-                        New output ↓
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Chat input */}
-            <ChatInput
-              resetKey={`${selectedDroneIdentity}:${selectedChat ?? ''}`}
-              droneName={currentDrone.name}
-              promptError={promptError}
-              sending={sendingPrompt}
-              waiting={chatUiMode === 'transcript' && visiblePendingPromptsWithStartup.some((p) => p.state !== 'failed')}
-              onSend={async (payload: ChatSendPayload) => {
-                try {
-                  return await sendPromptText(payload);
-                } catch {
-                  return false;
-                }
-              }}
-            />
-            </div>
-
-            {/* Right panel content (tabs are in the header toolbar) */}
-            {rightPanelOpen && (
-              <RightPanel
-                currentDrone={currentDrone}
-                rightPanelWidth={rightPanelWidth}
-                rightPanelWidthMax={rightPanelWidthMax}
-                rightPanelMinWidth={RIGHT_PANEL_MIN_WIDTH_PX}
-                rightPanelResizing={rightPanelResizing}
-                rightPanelSplit={rightPanelSplit}
-                rightPanelTab={rightPanelTab}
-                rightPanelBottomTab={rightPanelBottomTab}
-                rightPanelTabs={RIGHT_PANEL_TABS}
-                rightPanelTabLabels={RIGHT_PANEL_TAB_LABELS}
-                onRightPanelTabChange={setRightPanelTab}
-                onRightPanelBottomTabChange={setRightPanelBottomTab}
-                onStartResize={startRightPanelResize}
-                onResetWidth={resetRightPanelWidth}
-                renderTabContent={renderRightPanelTabContent}
-              />
-            )}
-            </div>
-          </>
+          <NoDroneSelectedState
+            dronesLoading={dronesLoading}
+            sidebarDroneCount={sidebarDrones.length}
+            dronesError={dronesError}
+            onOpenDraftChatComposer={openDraftChatComposer}
+            onOpenCreateModal={openCreateModal}
+          />
+        ) : (
+          <SelectedDroneWorkspace
+            currentDrone={currentDrone}
+            currentDroneLabel={currentDroneLabel}
+            sidebarCollapsed={sidebarCollapsed}
+            setSidebarCollapsed={setSidebarCollapsed}
+            showRespondingAsStatusInHeader={showRespondingAsStatusInHeader}
+            chatUiMode={chatUiMode}
+            loadingSession={loadingSession}
+            sessionError={sessionError}
+            loadingTranscript={loadingTranscript}
+            transcriptError={transcriptError}
+            chatInfoError={chatInfoError}
+            loadingChatInfo={loadingChatInfo}
+            repoOpError={repoOpError}
+            repoOpErrorMeta={repoOpErrorMeta}
+            openDroneErrorModal={openDroneErrorModal}
+            launchHint={launchHint}
+            currentAgentKey={currentAgentKey}
+            pickAgentValue={pickAgentValue}
+            toolbarAgentMenuEntries={toolbarAgentMenuEntries}
+            agentMenuOpen={agentMenuOpen}
+            setAgentMenuOpen={setAgentMenuOpen}
+            setTerminalMenuOpen={setTerminalMenuOpen}
+            setHeaderOverflowOpen={setHeaderOverflowOpen}
+            agentDisabled={agentDisabled}
+            agentLabel={agentLabel}
+            modelControlEnabled={modelControlEnabled}
+            availableChatModels={availableChatModels}
+            currentModel={currentModel}
+            setChatModel={setChatModel}
+            setChatInfoError={setChatInfoError}
+            modelMenuEntries={modelMenuEntries}
+            modelDisabled={modelDisabled}
+            modelLabel={modelLabel}
+            manualChatModelInput={manualChatModelInput}
+            setManualChatModelInput={setManualChatModelInput}
+            applyManualChatModel={applyManualChatModel}
+            setChatModelsRefreshNonce={setChatModelsRefreshNonce}
+            loadingChatModels={loadingChatModels}
+            chatModelsError={chatModelsError}
+            chatModelsDiscoveredAt={chatModelsDiscoveredAt}
+            chatModelsSource={chatModelsSource}
+            currentDroneRepoAttached={currentDroneRepoAttached}
+            currentDroneRepoPath={currentDroneRepoPath}
+            createRepoMenuEntries={createRepoMenuEntries}
+            outputView={outputView}
+            setOutputView={setOutputView}
+            selectedChat={selectedChat}
+            setSelectedChat={setSelectedChat}
+            openDroneTerminal={openDroneTerminal}
+            openingTerminal={openingTerminal}
+            openDroneEditor={openDroneEditor}
+            openingEditor={openingEditor}
+            pullRepoChanges={pullRepoChanges}
+            repoOp={repoOp}
+            headerOverflowRef={headerOverflowRef}
+            headerOverflowOpen={headerOverflowOpen}
+            reseedRepo={reseedRepo}
+            terminalMenuRef={terminalMenuRef}
+            terminalMenuOpen={terminalMenuOpen}
+            terminalLabel={terminalLabel}
+            terminalOptions={terminalOptions}
+            terminalEmulator={terminalEmulator}
+            setTerminalEmulator={setTerminalEmulator}
+            rightPanelOpen={rightPanelOpen}
+            setRightPanelOpen={setRightPanelOpen}
+            setRightPanelSplitMode={setRightPanelSplitMode}
+            rightPanelSplit={rightPanelSplit}
+            rightPanelTabs={RIGHT_PANEL_TABS}
+            rightPanelTab={rightPanelTab}
+            setRightPanelTab={setRightPanelTab}
+            rightPanelTabLabels={RIGHT_PANEL_TAB_LABELS}
+            resetRightPanelWidth={resetRightPanelWidth}
+            rightPanelWidthIsDefault={rightPanelWidthIsDefault}
+            transcripts={transcripts}
+            visiblePendingPromptsWithStartup={visiblePendingPromptsWithStartup}
+            transcriptMessageId={transcriptMessageId}
+            nowMs={nowMs}
+            parsingJobsByTurn={parsingJobsByTurn}
+            parseJobsFromAgentMessage={parseJobsFromAgentMessage}
+            tldrByMessageId={tldrByMessageId}
+            showTldrByMessageId={showTldrByMessageId}
+            toggleTldrForAgentMessage={toggleTldrForAgentMessage}
+            handleAgentMessageHover={handleAgentMessageHover}
+            chatEndRef={chatEndRef}
+            outputScrollRef={outputScrollRef}
+            updatePinned={updatePinned}
+            startupSeedForCurrentDrone={startupSeedForCurrentDrone}
+            sessionText={sessionText}
+            pinnedToBottom={pinnedToBottom}
+            selectedDroneIdentity={selectedDroneIdentity}
+            promptError={promptError}
+            sendingPrompt={sendingPrompt}
+            sendPromptText={sendPromptText}
+            rightPanelWidth={rightPanelWidth}
+            rightPanelWidthMax={rightPanelWidthMax}
+            rightPanelMinWidth={RIGHT_PANEL_MIN_WIDTH_PX}
+            rightPanelResizing={rightPanelResizing}
+            rightPanelBottomTab={rightPanelBottomTab}
+            setRightPanelBottomTab={setRightPanelBottomTab}
+            startRightPanelResize={startRightPanelResize}
+            renderRightPanelTabContent={renderRightPanelTabContent}
+          />
         )}
       </div>
       <GuidedOnboarding />
