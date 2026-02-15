@@ -24,6 +24,7 @@ const TERMINAL_ERROR_BACKOFF_MAX_MS = 6000;
 
 type OpenTerminalResponse = {
   ok: true;
+  id: string;
   name: string;
   mode: 'shell' | 'agent';
   chat: string | null;
@@ -33,6 +34,7 @@ type OpenTerminalResponse = {
 
 type ReadTerminalOutputResponse = {
   ok: true;
+  id: string;
   name: string;
   sessionName: string;
   offsetBytes: number;
@@ -52,6 +54,7 @@ function normalizeContainerPathInput(raw: string): string {
 }
 
 export function DroneTerminalDock({
+  droneId,
   droneName,
   chatName,
   defaultCwd,
@@ -59,6 +62,7 @@ export function DroneTerminalDock({
   hubPhase,
   hubMessage,
 }: {
+  droneId: string;
   droneName: string;
   chatName: string;
   defaultCwd: string;
@@ -77,7 +81,7 @@ export function DroneTerminalDock({
   const terminalRef = React.useRef<Terminal | null>(null);
   const fitAddonRef = React.useRef<FitAddon | null>(null);
   const outputOffsetRef = React.useRef<number | null>(null);
-  const activeTargetRef = React.useRef<{ droneName: string; sessionName: string } | null>(null);
+  const activeTargetRef = React.useRef<{ droneId: string; sessionName: string } | null>(null);
   const inputBufferRef = React.useRef<string>('');
   const inputFlushTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const flushingInputRef = React.useRef<boolean>(false);
@@ -94,7 +98,7 @@ export function DroneTerminalDock({
 
   const startup = usePaneReadiness({
     hubPhase,
-    resetKey: `${droneName}\u0000terminal`,
+    resetKey: `${droneId}\u0000terminal`,
     timeoutMs: 18_000,
   });
 
@@ -152,7 +156,7 @@ export function DroneTerminalDock({
     flushingInputRef.current = true;
     try {
       await requestJson(
-        `/api/drones/${encodeURIComponent(target.droneName)}/terminal/${encodeURIComponent(target.sessionName)}/input`,
+        `/api/drones/${encodeURIComponent(target.droneId)}/terminal/${encodeURIComponent(target.sessionName)}/input`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -343,7 +347,7 @@ export function DroneTerminalDock({
       qs.set('mode', 'shell');
       qs.set('chat', chatName || 'default');
       qs.set('cwd', normalizedCwd);
-      const data = await requestJson<OpenTerminalResponse>(`/api/drones/${encodeURIComponent(droneName)}/terminal/open?${qs.toString()}`, {
+      const data = await requestJson<OpenTerminalResponse>(`/api/drones/${encodeURIComponent(droneId)}/terminal/open?${qs.toString()}`, {
         method: 'POST',
       });
       if (cancelled) return;
@@ -354,7 +358,7 @@ export function DroneTerminalDock({
       setSessionName(nextSession);
       outputOffsetRef.current = null;
       inputBufferRef.current = '';
-      activeTargetRef.current = { droneName, sessionName: nextSession };
+      activeTargetRef.current = { droneId, sessionName: nextSession };
       lastActivityAtRef.current = Date.now();
       emptyStreakRef.current = 0;
       errorStreakRef.current = 0;
@@ -383,7 +387,7 @@ export function DroneTerminalDock({
     return () => {
       cancelled = true;
     };
-  }, [droneName, chatName, normalizedCwd, disabled, queueInput]);
+  }, [droneId, chatName, normalizedCwd, disabled, queueInput]);
 
   React.useEffect(() => {
     const el = dockRootRef.current;
@@ -431,7 +435,7 @@ export function DroneTerminalDock({
       }
 
       let opened = false;
-      const ws = new WebSocket(buildTerminalStreamWsUrl(droneName, sessionName, since));
+      const ws = new WebSocket(buildTerminalStreamWsUrl(droneId, sessionName, since));
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -517,7 +521,7 @@ export function DroneTerminalDock({
         wsRef.current = null;
       }
     };
-  }, [droneName, sessionName, disabled, streamMode, queueInput, applyServerOutput]);
+  }, [droneId, sessionName, disabled, streamMode, queueInput, applyServerOutput]);
 
   React.useEffect(() => {
     if (!droneName || !sessionName || disabled || streamMode !== 'poll') return;
@@ -572,7 +576,7 @@ export function DroneTerminalDock({
           qs.set('maxBytes', String(TERMINAL_MAX_BYTES));
         }
         const data = await requestJson<ReadTerminalOutputResponse>(
-          `/api/drones/${encodeURIComponent(droneName)}/terminal/${encodeURIComponent(sessionName)}/output?${qs.toString()}`,
+          `/api/drones/${encodeURIComponent(droneId)}/terminal/${encodeURIComponent(sessionName)}/output?${qs.toString()}`,
         );
         if (!mounted) return;
         setError(null);
@@ -617,7 +621,7 @@ export function DroneTerminalDock({
         postInputPollTimerRef.current = null;
       }
     };
-  }, [droneName, sessionName, disabled, streamMode, applyServerOutput, queueInput]);
+  }, [droneId, sessionName, disabled, streamMode, applyServerOutput, queueInput]);
 
   React.useEffect(() => {
     return () => {

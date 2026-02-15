@@ -79,7 +79,7 @@ const PREVIEW_URL_STORAGE_KEY = 'droneHub.previewUrlByDrone';
 const FS_EXPLORER_VIEW_STORAGE_KEY = 'droneHub.fsExplorerView';
 const PORT_STATUS_POLL_INTERVAL_MS = 15_000;
 const PORT_STATUS_TIMEOUT_MS = 1_800;
-const DRONE_DND_MIME = 'application/x-drone-names+json';
+const DRONE_DND_MIME = 'application/x-drone-ids+json';
 const RIGHT_PANEL_WIDTH_STORAGE_KEY = 'droneHub.rightPanelWidth';
 const RIGHT_PANEL_SPLIT_STORAGE_KEY = 'droneHub.rightPanelSplit';
 const RIGHT_PANEL_TOP_TAB_STORAGE_KEY = 'droneHub.rightPanelTopTab';
@@ -118,10 +118,24 @@ type RepoPullConflict = {
 };
 
 type DroneErrorModalState = {
+  droneId: string;
   droneName: string;
   message: string;
   conflict: RepoPullConflict;
 };
+
+function isUntitledLikeDroneName(raw: string): boolean {
+  const s = String(raw ?? '').trim().toLowerCase();
+  if (!s) return false;
+  if (s === 'untitled') return true;
+  if (!s.startsWith('untitled-')) return false;
+  const rest = s.slice('untitled-'.length);
+  if (!rest) return false;
+  // `uniqueDraftDroneName()` can create:
+  // - untitled-2, untitled-3, ...
+  // - untitled-<base36>, untitled-<base36>-2, ...
+  return /^\d+$/.test(rest) || /^[a-z0-9]{4,18}(?:-\d+)?$/.test(rest);
+}
 type AppView = 'workspace' | 'settings';
 type LlmProviderId = 'openai' | 'gemini';
 type ApiKeySettingsResponse = {
@@ -153,6 +167,7 @@ type HubLogsResponse = {
 };
 
 type StartupSeedState = {
+  droneName: string;
   chatName: string;
   agent: ChatAgentConfig | null;
   model: string | null;
@@ -161,7 +176,8 @@ type StartupSeedState = {
 };
 
 type DraftChatState = {
-  // If set, this is the (optimistic) name of the drone being created for this draft chat.
+  // If set, this is the (optimistic) id/name of the drone being created for this draft chat.
+  droneId: string;
   droneName: string;
   prompt: PendingPrompt | null;
 };
@@ -399,8 +415,8 @@ function readPreviewUrlByDrone(): PreviewUrlByDrone {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return {};
     const out: PreviewUrlByDrone = {};
-    for (const [droneName, value] of Object.entries(parsed as Record<string, any>)) {
-      const name = String(droneName ?? '').trim();
+    for (const [droneId, value] of Object.entries(parsed as Record<string, any>)) {
+      const name = String(droneId ?? '').trim();
       const normalized = normalizePreviewUrl(String(value ?? ''));
       if (!name || !normalized) continue;
       out[name] = normalized;
@@ -411,15 +427,15 @@ function readPreviewUrlByDrone(): PreviewUrlByDrone {
   }
 }
 
-function buildContainerPreviewUrl(droneName: string, containerPort: number): string {
-  const dn = encodeURIComponent(String(droneName ?? '').trim());
+function buildContainerPreviewUrl(droneId: string, containerPort: number): string {
+  const dn = encodeURIComponent(String(droneId ?? '').trim());
   const cp = encodeURIComponent(String(containerPort ?? ''));
   return `/api/drones/${dn}/preview/${cp}/`;
 }
 
 function rewriteLoopbackUrlToContainerPreview(
   rawUrl: string,
-  droneName: string,
+  droneId: string,
   portRows: DronePortMapping[],
 ): string | null {
   try {
@@ -430,7 +446,7 @@ function rewriteLoopbackUrlToContainerPreview(
     if (!Number.isFinite(loopbackPort) || loopbackPort <= 0 || Math.floor(loopbackPort) !== loopbackPort) return null;
     const mapped = portRows.find((p) => p.containerPort === loopbackPort) ?? portRows.find((p) => p.hostPort === loopbackPort);
     const containerPort = mapped?.containerPort ?? loopbackPort;
-    const base = `/api/drones/${encodeURIComponent(String(droneName ?? '').trim())}/preview/${containerPort}`;
+    const base = `/api/drones/${encodeURIComponent(String(droneId ?? '').trim())}/preview/${containerPort}`;
     const path = u.pathname && u.pathname.startsWith('/') ? u.pathname : '/';
     return `${base}${path}${u.search || ''}${u.hash || ''}`;
   } catch {
@@ -688,20 +704,20 @@ function SkeletonLine({ w }: { w: string }) {
   return <div className="h-2.5 rounded bg-[var(--border-subtle)] animate-pulse" style={{ width: w }} />;
 }
 
-function droneChatQueueKey(droneNameRaw: string, chatNameRaw: string): string {
-  const droneName = String(droneNameRaw ?? '').trim();
+function droneChatQueueKey(droneIdRaw: string, chatNameRaw: string): string {
+  const droneId = String(droneIdRaw ?? '').trim();
   const chatName = String(chatNameRaw ?? '').trim() || 'default';
-  return `${droneName}::${chatName}`;
+  return `${droneId}::${chatName}`;
 }
 
-function parseDroneChatQueueKey(key: string): { droneName: string; chatName: string } | null {
+function parseDroneChatQueueKey(key: string): { droneId: string; chatName: string } | null {
   const raw = String(key ?? '');
   const idx = raw.indexOf('::');
   if (idx < 0) return null;
-  const droneName = raw.slice(0, idx).trim();
+  const droneId = raw.slice(0, idx).trim();
   const chatName = raw.slice(idx + 2).trim() || 'default';
-  if (!droneName) return null;
-  return { droneName, chatName };
+  if (!droneId) return null;
+  return { droneId, chatName };
 }
 
 /* ------------------------------------------------------------------ */
@@ -710,6 +726,7 @@ function parseDroneChatQueueKey(key: string): { droneName: string; chatName: str
 
 function GroupMultiChatColumn({
   drone,
+  droneLabel,
   preferredChat,
   nowMs,
   onOpenDrone,
@@ -717,12 +734,14 @@ function GroupMultiChatColumn({
   columnWidthPx,
 }: {
   drone: DroneSummary;
+  droneLabel?: string;
   preferredChat: string;
   nowMs: number;
   onOpenDrone: () => void;
   onCreateJobs: (opts: { turn: number; message: string }) => void;
   columnWidthPx: number;
 }) {
+  const shownName = String(droneLabel ?? drone.name).trim() || drone.name;
   const chatName = React.useMemo(() => resolveChatNameForDrone(drone, preferredChat), [drone, preferredChat]);
   const [transcripts, setTranscripts] = React.useState<TranscriptItem[] | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -762,7 +781,7 @@ function GroupMultiChatColumn({
       busy = true;
       try {
         const data = await fetchJson<{ ok: true; transcripts: TranscriptItem[] }>(
-          `/api/drones/${encodeURIComponent(drone.name)}/chats/${encodeURIComponent(chatName)}/transcript?turn=all`,
+          `/api/drones/${encodeURIComponent(drone.id)}/chats/${encodeURIComponent(chatName)}/transcript?turn=all`,
         );
         if (!mounted) return;
         setTranscripts(data.transcripts ?? []);
@@ -794,17 +813,17 @@ function GroupMultiChatColumn({
       mounted = false;
       if (timer) clearTimeout(timer);
     };
-  }, [chatName, drone.hubPhase, drone.name]);
+  }, [chatName, drone.hubPhase, drone.id]);
 
   const { value: pendingResp } = usePoll<{ ok: true; pending: PendingPrompt[] }>(
     async () => {
       if (drone.hubPhase === 'starting' || drone.hubPhase === 'seeding') return { ok: true, pending: [] };
       return await fetchJson<{ ok: true; pending: PendingPrompt[] }>(
-        `/api/drones/${encodeURIComponent(drone.name)}/chats/${encodeURIComponent(chatName)}/pending`,
+        `/api/drones/${encodeURIComponent(drone.id)}/chats/${encodeURIComponent(chatName)}/pending`,
       );
     },
     1000,
-    [chatName, drone.hubPhase, drone.name],
+    [chatName, drone.hubPhase, drone.id],
   );
 
   const pendingPrompts = React.useMemo(() => {
@@ -832,7 +851,7 @@ function GroupMultiChatColumn({
 
   React.useEffect(() => {
     setOptimisticPendingPrompts([]);
-  }, [chatName, drone.name]);
+  }, [chatName, drone.id]);
 
   React.useEffect(() => {
     if (loading) return;
@@ -848,17 +867,17 @@ function GroupMultiChatColumn({
       const optimisticPrompt = prompt || (attachments.length === 1 ? '[image attachment]' : `[${attachments.length} image attachments]`);
       if (drone.hubPhase === 'starting' || drone.hubPhase === 'seeding') {
         if (attachments.length > 0) {
-          setPromptError(`"${drone.name}" is still starting. Image attachments can be sent once it is ready.`);
+          setPromptError(`"${shownName}" is still starting. Image attachments can be sent once it is ready.`);
           return false;
         }
-        setPromptError(`"${drone.name}" is still starting.`);
+        setPromptError(`"${shownName}" is still starting.`);
         return false;
       }
       setSendingPromptCount((c) => c + 1);
       setPromptError(null);
       try {
         const data = await requestJson<{ ok: true; accepted: true; promptId: string }>(
-          `/api/drones/${encodeURIComponent(drone.name)}/chats/${encodeURIComponent(chatName)}/prompt`,
+          `/api/drones/${encodeURIComponent(drone.id)}/chats/${encodeURIComponent(chatName)}/prompt`,
           {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
@@ -881,7 +900,7 @@ function GroupMultiChatColumn({
         setSendingPromptCount((c) => Math.max(0, c - 1));
       }
     },
-    [chatName, drone.hubPhase, drone.name, scrollColumnToBottom],
+    [chatName, drone.hubPhase, drone.id, scrollColumnToBottom, shownName],
   );
   const noopToggleTldr = React.useCallback((_item: TranscriptItem) => {}, []);
   const noopHoverAgentMessage = React.useCallback((_item: TranscriptItem | null) => {}, []);
@@ -899,9 +918,9 @@ function GroupMultiChatColumn({
               onClick={onOpenDrone}
               className="text-left text-[12px] font-semibold text-[var(--fg-secondary)] hover:text-[var(--accent)] transition-colors truncate min-w-0"
               style={{ fontFamily: 'var(--display)' }}
-              title={`Open ${drone.name}`}
+              title={`Open ${shownName}`}
             >
-              {drone.name}
+              {shownName}
             </button>
             <div className="flex items-center flex-shrink-0 ml-2">
               {waitingForAgent ? (
@@ -933,7 +952,7 @@ function GroupMultiChatColumn({
         ) : (transcripts && transcripts.length > 0) || visiblePendingPrompts.length > 0 ? (
           <div className="space-y-5">
             {(transcripts ?? []).map((item) => {
-              const messageId = `${drone.name}:${item.turn}:${item.at}`;
+              const messageId = `${drone.id}:${item.turn}:${item.at}`;
               return (
                 <TranscriptTurn
                   key={messageId}
@@ -950,7 +969,7 @@ function GroupMultiChatColumn({
               );
             })}
             {visiblePendingPrompts.map((item) => (
-              <PendingTranscriptTurn key={`${drone.name}:pending:${item.id}`} item={item} nowMs={nowMs} />
+              <PendingTranscriptTurn key={`${drone.id}:pending:${item.id}`} item={item} nowMs={nowMs} />
             ))}
           </div>
         ) : (
@@ -959,14 +978,14 @@ function GroupMultiChatColumn({
             title={drone.hubPhase === 'starting' || drone.hubPhase === 'seeding' ? 'Drone is starting' : 'No messages yet'}
             description={
               drone.hubPhase === 'starting' || drone.hubPhase === 'seeding'
-                ? `Waiting for ${drone.name} to become ready.`
-                : `Open ${drone.name} and send a prompt to populate this chat.`
+                ? `Waiting for ${shownName} to become ready.`
+                : `Open ${shownName} and send a prompt to populate this chat.`
             }
           />
         )}
       </div>
       <ChatInput
-        resetKey={`group:${drone.name}:${chatName}`}
+        resetKey={`group:${drone.id}:${chatName}`}
         droneName={drone.name}
         promptError={promptError}
         sending={sendingPrompt}
@@ -995,17 +1014,17 @@ export default function DroneHubApp() {
   const drones = React.useMemo(() => {
     const hiddenNames = Object.keys(optimisticallyDeletedDrones);
     if (hiddenNames.length === 0) return polledDrones;
-    return polledDrones.filter((d) => !optimisticallyDeletedDrones[d.name]);
+    return polledDrones.filter((d) => !optimisticallyDeletedDrones[d.id]);
   }, [optimisticallyDeletedDrones, polledDrones]);
 
   React.useEffect(() => {
     if (Object.keys(optimisticallyDeletedDrones).length === 0) return;
-    const liveNames = new Set(polledDrones.map((d) => d.name));
+    const liveIds = new Set(polledDrones.map((d) => d.id));
     setOptimisticallyDeletedDrones((prev) => {
       const next: Record<string, boolean> = {};
       let changed = false;
       for (const name of Object.keys(prev)) {
-        if (liveNames.has(name)) {
+        if (liveIds.has(name)) {
           next[name] = true;
         } else {
           changed = true;
@@ -1142,8 +1161,9 @@ export default function DroneHubApp() {
     [groups],
   );
 
+  // NOTE: selection is keyed by stable drone id (not display name).
   const [selectedDrone, setSelectedDrone] = React.useState<string | null>(null);
-  const [selectedDroneNames, setSelectedDroneNames] = React.useState<string[]>([]);
+  const [selectedDroneIds, setSelectedDroneIds] = React.useState<string[]>([]);
   const [selectedGroupMultiChat, setSelectedGroupMultiChat] = React.useState<string | null>(null);
   const [groupBroadcastPromptError, setGroupBroadcastPromptError] = React.useState<string | null>(null);
   const [groupBroadcastSendingCount, setGroupBroadcastSendingCount] = React.useState(0);
@@ -1156,6 +1176,7 @@ export default function DroneHubApp() {
   });
   usePersistedLocalStorageItem(GROUP_MULTI_CHAT_COLUMN_WIDTH_STORAGE_KEY, String(groupMultiChatColumnWidth));
   const [selectedChat, setSelectedChat] = React.useState<string>('default');
+  // Keyed by drone id.
   const [startupSeedByDrone, setStartupSeedByDrone] = React.useState<Record<string, StartupSeedState>>({});
   const [draftChat, setDraftChat] = React.useState<DraftChatState | null>(null);
   const [draftCreateOpen, setDraftCreateOpen] = React.useState(false);
@@ -1165,7 +1186,7 @@ export default function DroneHubApp() {
   const [draftCreating, setDraftCreating] = React.useState(false);
   const [draftAutoRenaming, setDraftAutoRenaming] = React.useState(false);
   // Local-only prompt queue used while drones are provisioning (hubPhase starting/seeding).
-  // Key format: `${droneName}::${chatName}`
+  // Key format: `${droneId}::${chatName}`
   const [queuedPromptsByDroneChat, setQueuedPromptsByDroneChat] = React.useState<Record<string, PendingPrompt[]>>({});
   const queuedPromptsByDroneChatRef = React.useRef<Record<string, PendingPrompt[]>>({});
   React.useEffect(() => {
@@ -1178,26 +1199,28 @@ export default function DroneHubApp() {
   const draftNameSuggestSeqRef = React.useRef(0);
   const draftCreateNameRef = React.useRef<HTMLInputElement | null>(null);
   const selectionAnchorRef = React.useRef<string | null>(null);
-  const selectedDroneSet = React.useMemo(() => new Set(selectedDroneNames), [selectedDroneNames]);
-  const orderedDroneNames = React.useMemo(() => {
+  const selectedDroneSet = React.useMemo(() => new Set(selectedDroneIds), [selectedDroneIds]);
+  const orderedDroneIds = React.useMemo(() => {
     if (viewMode === 'flat') {
       return dronesFilteredByRepo
         .slice()
         .sort(compareDronesByNewestFirst)
-        .map((d) => d.name);
+        .map((d) => d.id);
     }
-    return groups.flatMap((g) => g.items.map((d) => d.name));
+    return groups.flatMap((g) => g.items.map((d) => d.id));
   }, [dronesFilteredByRepo, groups, viewMode]);
   const sidebarOptimisticDrones = React.useMemo(() => {
-    const known = new Set(drones.map((d) => d.name));
+    const known = new Set(drones.map((d) => d.id));
     const nowMs = Date.now();
     const out: DroneSummary[] = [];
-    for (const [name, seed] of Object.entries(startupSeedByDrone)) {
-      if (optimisticallyDeletedDrones[name]) continue;
-      if (known.has(name)) continue;
+    for (const [id, seed] of Object.entries(startupSeedByDrone)) {
+      if (optimisticallyDeletedDrones[id]) continue;
+      if (known.has(id)) continue;
       if (!isStartupSeedFresh(seed, nowMs)) continue;
       const chatName = String(seed.chatName ?? 'default').trim() || 'default';
+      const name = String((seed as any)?.droneName ?? '').trim() || id;
       out.push({
+        id,
         name,
         group: null,
         createdAt: seed.at || new Date().toISOString(),
@@ -1216,11 +1239,9 @@ export default function DroneHubApp() {
     out.sort(compareDronesByNewestFirst);
     return out;
   }, [drones, optimisticallyDeletedDrones, startupSeedByDrone]);
-  const sidebarOptimisticDroneNameSet = React.useMemo(
-    () => new Set(sidebarOptimisticDrones.map((d) => d.name)),
-    [sidebarOptimisticDrones],
-  );
+  const sidebarOptimisticDroneIdSet = React.useMemo(() => new Set(sidebarOptimisticDrones.map((d) => d.id)), [sidebarOptimisticDrones]);
   const sidebarDrones = React.useMemo(() => [...drones, ...sidebarOptimisticDrones], [drones, sidebarOptimisticDrones]);
+  const uiDroneName = React.useCallback((nameRaw: string): string => String(nameRaw ?? '').trim(), []);
   const sidebarDronesFilteredByRepo = React.useMemo(() => {
     const targetRepo = String(activeRepoPath ?? '').trim();
     if (!targetRepo) return sidebarDrones;
@@ -1482,9 +1503,15 @@ export default function DroneHubApp() {
   }, [spawnModel]);
   const spawnModelForSeed = spawnAgentConfig.kind === 'builtin' ? spawnModelValue : null;
 
-  const rememberStartupSeed = React.useCallback((names: string[], opts: { agent: ChatAgentConfig | null; model?: string | null; prompt: string; chatName?: string }) => {
-    const uniqueNames = Array.from(new Set(names.map((x) => String(x ?? '').trim()).filter(Boolean)));
-    if (uniqueNames.length === 0) return;
+  const rememberStartupSeed = React.useCallback((drones: Array<{ id: string; name: string }>, opts: { agent: ChatAgentConfig | null; model?: string | null; prompt: string; chatName?: string }) => {
+    const unique = new Map<string, string>();
+    for (const d of drones) {
+      const id = String(d?.id ?? '').trim();
+      const name = String(d?.name ?? '').trim();
+      if (!id) continue;
+      if (!unique.has(id)) unique.set(id, name || id);
+    }
+    if (unique.size === 0) return;
     const prompt = String(opts.prompt ?? '').trim();
     const chatName = String(opts.chatName ?? 'default').trim() || 'default';
     const model = String(opts.model ?? '').trim() || null;
@@ -1492,8 +1519,9 @@ export default function DroneHubApp() {
     const at = new Date().toISOString();
     setStartupSeedByDrone((prev) => {
       const next = { ...prev };
-      for (const name of uniqueNames) {
-        next[name] = {
+      for (const [id, droneName] of unique.entries()) {
+        next[id] = {
+          droneName,
           chatName,
           agent: opts.agent ?? null,
           model,
@@ -1523,8 +1551,8 @@ export default function DroneHubApp() {
   const queueDrones = React.useCallback(async (list: DroneQueueSpec[]) => {
     return await requestJson<{
       ok: true;
-      accepted: Array<{ name: string; phase: 'starting' }>;
-      rejected: Array<{ name: string; error: string; status?: number }>;
+      accepted: Array<{ id: string; name: string; phase: 'starting' }>;
+      rejected: Array<{ id?: string; name: string; error: string; status?: number }>;
       total: number;
     }>(`/api/drones/batch`, {
       method: 'POST',
@@ -1816,7 +1844,7 @@ export default function DroneHubApp() {
         })
         .filter(Boolean) as EditableJob[];
       if (jobs.length === 0) throw new Error('No jobs were produced from that message.');
-      const src = drones.find((d) => d.name === selectedDrone) ?? null;
+      const src = drones.find((d) => d.id === selectedDrone) ?? null;
       const sourceRepoPath = src && (src.repoAttached ?? Boolean(String(src.repoPath ?? '').trim())) ? src.repoPath : '';
       setSpawnJobErrorById({});
       setSpawnedJobById({});
@@ -1843,8 +1871,8 @@ export default function DroneHubApp() {
     const nameRaw = String(job?.name ?? '');
     const name = nameRaw.trim();
     if (!name) return false;
-    if (droneNameHasWhitespace(nameRaw) || !isValidDroneNameDashCase(name)) {
-      setSpawnJobErrorById((prev) => ({ ...prev, [job.id]: 'Invalid drone name. Use dash-case (letters/numbers and single hyphens), no spaces, max 48 chars.' }));
+    if (name.length > 80 || /[\r\n]/.test(name)) {
+      setSpawnJobErrorById((prev) => ({ ...prev, [job.id]: 'Invalid drone name. Must be 1-80 chars and cannot contain newlines.' }));
       return false;
     }
     setSpawningJobById((prev) => ({ ...prev, [job.id]: true }));
@@ -1881,15 +1909,16 @@ export default function DroneHubApp() {
         },
       ]);
 
-      const accepted = new Set((resp?.accepted ?? []).map((a) => String(a?.name ?? '').trim()).filter(Boolean));
+      const acceptedEntry =
+        (resp?.accepted ?? []).find((a) => String(a?.name ?? '').trim() === name) ?? null;
       const rejected = (resp?.rejected ?? []).find((r) => String(r?.name ?? '').trim() === name) ?? null;
-      if (!accepted.has(name)) {
+      if (!acceptedEntry?.id) {
         const msg = String(rejected?.error ?? 'Failed to queue drone.');
         setSpawnJobErrorById((prev) => ({ ...prev, [job.id]: msg }));
         return false;
       }
 
-      rememberStartupSeed([name], { agent: seedAgent, model: seedModel, prompt: seedPrompt, chatName: 'default' });
+      rememberStartupSeed([{ id: String(acceptedEntry.id), name }], { agent: seedAgent, model: seedModel, prompt: seedPrompt, chatName: 'default' });
       setSpawnedJobById((prev) => ({ ...prev, [job.id]: true }));
       return true;
     } catch (e: any) {
@@ -2004,8 +2033,22 @@ export default function DroneHubApp() {
       }
 
       if (acceptedNames.size > 0) {
+        const acceptedList = Array.isArray(resp?.accepted) ? resp.accepted : [];
+        const idByName = new Map<string, string>();
+        for (const a of acceptedList) {
+          const id = String((a as any)?.id ?? '').trim();
+          const name = String((a as any)?.name ?? '').trim();
+          if (id && name) idByName.set(name, id);
+        }
         for (const name of acceptedNames) {
-          rememberStartupSeed([name], { agent: seedAgent, model: seedModel, prompt: nameToSeedPrompt.get(name) || '', chatName: 'default' });
+          const id = idByName.get(name) ?? '';
+          if (!id) continue;
+          rememberStartupSeed([{ id, name }], {
+            agent: seedAgent,
+            model: seedModel,
+            prompt: nameToSeedPrompt.get(name) || '',
+            chatName: 'default',
+          });
         }
       }
       return { accepted: acceptedNames.size, rejected: rejected.length };
@@ -2059,7 +2102,7 @@ export default function DroneHubApp() {
       setLoadingChatInfo(false);
       return;
     }
-    const summary = drones.find((d) => d.name === selectedDrone) ?? null;
+    const summary = drones.find((d) => d.id === selectedDrone) ?? null;
     if (summary?.hubPhase === 'starting' || summary?.hubPhase === 'seeding') {
       setChatInfo(null);
       setChatInfoError(null);
@@ -2159,7 +2202,7 @@ export default function DroneHubApp() {
   const [createOpen, setCreateOpen] = React.useState(false);
   const [creating, setCreating] = React.useState(false);
   const [createMode, setCreateMode] = React.useState<'create' | 'clone'>('create');
-  const [cloneSourceName, setCloneSourceName] = React.useState<string | null>(null);
+  const [cloneSourceId, setCloneSourceId] = React.useState<string | null>(null);
   const [cloneIncludeChats, setCloneIncludeChats] = React.useState(true);
   const [createError, setCreateError] = React.useState<string | null>(null);
   const [createName, setCreateName] = React.useState('');
@@ -2288,7 +2331,8 @@ export default function DroneHubApp() {
   }
 
   function droneNameHasWhitespace(input: string): boolean {
-    return /\s/.test(String(input ?? ''));
+    // Display names can contain spaces; only reject characters that break ids/paths/payloads.
+    return /[\r\n\t]/.test(String(input ?? ''));
   }
 
   const openCreateModal = React.useCallback(() => {
@@ -2307,7 +2351,7 @@ export default function DroneHubApp() {
       setCloneIncludeChats(true);
     }
     setCreateMode('create');
-    setCloneSourceName(null);
+    setCloneSourceId(null);
     setCreateRepoPath(normalizeCreateRepoPath(activeRepoPath || ''));
     setCreateInitialMessage('');
     setCreateMessageSuffixRows(['']);
@@ -2328,9 +2372,9 @@ export default function DroneHubApp() {
     setDraftNameSuggestionError(null);
     setDraftNameSuggesting(false);
     draftNameSuggestSeqRef.current = 0;
-    setDraftChat({ droneName: '', prompt: null });
+    setDraftChat({ droneId: '', droneName: '', prompt: null });
     setSelectedDrone(null);
-    setSelectedDroneNames([]);
+    setSelectedDroneIds([]);
     selectionAnchorRef.current = null;
     preferredSelectedDroneRef.current = null;
     preferredSelectedDroneHoldUntilRef.current = 0;
@@ -2339,14 +2383,14 @@ export default function DroneHubApp() {
 
   const openCloneModal = React.useCallback(
     (source: DroneSummary) => {
-      if (creating || deletingDrones[source.name] || renamingDrones[source.name]) return;
+      if (creating || deletingDrones[source.id] || renamingDrones[source.id]) return;
       setAppView('workspace');
       setDraftChat(null);
       setDraftCreateOpen(false);
       setDraftCreateError(null);
       setCreateError(null);
       setCreateMode('clone');
-      setCloneSourceName(source.name);
+      setCloneSourceId(source.id);
       setCreateName(suggestCloneName(source.name));
       setCreateGroup(source.group ?? '');
       setCreateRepoPath(
@@ -2573,31 +2617,33 @@ export default function DroneHubApp() {
     setDroneErrorModal(null);
   }
 
-  function openDroneErrorModal(drone: Pick<DroneSummary, 'name'>, message: string, meta?: Partial<RepoOpErrorMeta> | null) {
+  function openDroneErrorModal(drone: Pick<DroneSummary, 'id' | 'name'>, message: string, meta?: Partial<RepoOpErrorMeta> | null) {
+    const droneId = String((drone as any)?.id ?? '').trim();
     const droneName = String(drone?.name ?? '').trim();
     const text = String(message ?? '').trim();
-    if (!droneName || !text) return;
+    if (!droneId || !droneName || !text) return;
     setDroneErrorModal({
+      droneId,
       droneName,
       message: text,
       conflict: parseRepoPullConflict(text, meta),
     });
   }
 
-  async function clearDroneHubError(droneNameRaw: string, opts?: { closeModal?: boolean }) {
-    const droneName = String(droneNameRaw ?? '').trim();
-    if (!droneName) return;
+  async function clearDroneHubError(droneIdRaw: string, opts?: { closeModal?: boolean }) {
+    const droneId = String(droneIdRaw ?? '').trim();
+    if (!droneId) return;
     setClearingDroneError(true);
     try {
-      await requestJson<{ ok: true; name: string; cleared: boolean }>(
-        `/api/drones/${encodeURIComponent(droneName)}/hub/error/clear`,
+      await requestJson<{ ok: true; id: string; name: string; cleared: boolean }>(
+        `/api/drones/${encodeURIComponent(droneId)}/hub/error/clear`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: '{}',
         },
       );
-      if (currentDrone?.name === droneName) {
+      if (currentDrone?.id === droneId) {
         setRepoOpError(null);
         setRepoOpErrorMeta(null);
       }
@@ -2662,73 +2708,73 @@ export default function DroneHubApp() {
     }
   }
 
-  async function deleteDrone(nameRaw: string) {
-    const name = String(nameRaw ?? '').trim();
-    if (!name) return;
-    if (deletingDrones[name] || renamingDrones[name] || optimisticallyDeletedDrones[name]) return;
+  async function deleteDrone(droneIdRaw: string) {
+    const droneId = String(droneIdRaw ?? '').trim();
+    if (!droneId) return;
+    const droneName = String(drones.find((d) => d.id === droneId)?.name ?? '').trim() || droneId;
+    if (deletingDrones[droneId] || renamingDrones[droneId] || optimisticallyDeletedDrones[droneId]) return;
     if (shouldConfirmDelete()) {
       const ok = window.confirm(
-        `Are you sure you want to delete drone "${name}"?\n\nThis will remove the container and remove it from your registry.`
+        `Are you sure you want to delete drone "${droneName}"?\n\nThis will remove the container and remove it from your registry.`
       );
       if (!ok) return;
     }
-    setOptimisticallyDeletedDrones((prev) => ({ ...prev, [name]: true }));
-    setDeletingDrones((prev) => ({ ...prev, [name]: true }));
+    setOptimisticallyDeletedDrones((prev) => ({ ...prev, [droneId]: true }));
+    setDeletingDrones((prev) => ({ ...prev, [droneId]: true }));
     try {
-      await requestJson(`/api/drones/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      await requestJson(`/api/drones/${encodeURIComponent(droneId)}`, { method: 'DELETE' });
     } catch (e: any) {
-      console.error('[DroneHub] delete drone failed', { name, error: e });
+      console.error('[DroneHub] delete drone failed', { id: droneId, error: e });
       setOptimisticallyDeletedDrones((prev) => {
-        if (!prev[name]) return prev;
+        if (!prev[droneId]) return prev;
         const next = { ...prev };
-        delete next[name];
+        delete next[droneId];
         return next;
       });
     } finally {
       setDeletingDrones((prev) => {
-        if (!prev[name]) return prev;
+        if (!prev[droneId]) return prev;
         const next = { ...prev };
-        delete next[name];
+        delete next[droneId];
         return next;
       });
     }
   }
 
-  async function renameDrone(nameRaw: string) {
-    const name = String(nameRaw ?? '').trim();
-    if (!name) return;
-    if (deletingDrones[name] || renamingDrones[name]) return;
-    const suggested = String(window.prompt(`Rename drone "${name}" to:`, name) ?? '').trim();
-    if (!suggested || suggested === name) return;
-    const renamed = await renameDroneTo(name, suggested, { showAlert: true });
+  async function renameDrone(droneIdRaw: string) {
+    const droneId = String(droneIdRaw ?? '').trim();
+    if (!droneId) return;
+    if (deletingDrones[droneId] || renamingDrones[droneId]) return;
+    const currentName = String(drones.find((d) => d.id === droneId)?.name ?? '').trim() || droneId;
+    const suggested = String(window.prompt(`Rename drone "${currentName}" to:`, currentName) ?? '').trim();
+    if (!suggested || suggested === currentName) return;
+    const renamed = await renameDroneTo(droneId, suggested, { showAlert: true });
     if (!renamed.ok) return;
   }
 
   async function renameDroneTo(
-    nameRaw: string,
+    droneIdRaw: string,
     newNameRaw: string,
     opts?: { showAlert?: boolean; migrateVolumeName?: boolean },
   ): Promise<{ ok: true } | { ok: false; error: string }> {
-    const name = String(nameRaw ?? '').trim();
+    const droneId = String(droneIdRaw ?? '').trim();
     const newName = String(newNameRaw ?? '').trim();
-    if (!name || !newName || newName === name) return { ok: false, error: 'no-op rename' };
-    if (deletingDrones[name] || renamingDrones[name]) return { ok: false, error: 'rename busy' };
-    if (!isValidDroneNameDashCase(newName)) {
-      if (opts?.showAlert) {
-        window.alert('Invalid drone name. Use dash-case (letters/numbers and single hyphens), max 48 chars.');
-      }
+    const current = drones.find((d) => d.id === droneId) ?? null;
+    const currentName = String(current?.name ?? '').trim() || droneId;
+    if (!droneId || !newName || newName === currentName) return { ok: false, error: 'no-op rename' };
+    if (deletingDrones[droneId] || renamingDrones[droneId]) return { ok: false, error: 'rename busy' };
+    if (newName.length > 80 || /[\r\n]/.test(newName)) {
+      if (opts?.showAlert) window.alert('Invalid drone name. Must be 1-80 chars and cannot contain newlines.');
       return { ok: false, error: 'invalid new name' };
     }
-    if (drones.some((d) => d.name === newName && d.name !== name)) {
-      if (opts?.showAlert) {
-        window.alert(`A drone named "${newName}" already exists.`);
-      }
+    if (drones.some((d) => d.name === newName && d.id !== droneId)) {
+      if (opts?.showAlert) window.alert(`A drone named "${newName}" already exists.`);
       return { ok: false, error: 'name already exists' };
     }
 
-    setRenamingDrones((prev) => ({ ...prev, [name]: true }));
+    setRenamingDrones((prev) => ({ ...prev, [droneId]: true }));
     try {
-      await requestJson<{ ok: true; oldName: string; newName: string }>(`/api/drones/${encodeURIComponent(name)}/rename`, {
+      await requestJson<{ ok: true; id: string; oldName: string; newName: string }>(`/api/drones/${encodeURIComponent(droneId)}/rename`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -2736,103 +2782,68 @@ export default function DroneHubApp() {
           ...(opts?.migrateVolumeName ? { migrateVolumeName: true } : {}),
         }),
       });
-      {
-        const ids = droneIdentityByNameRef.current;
-        const existingId = ids[name] || makeId();
-        ids[newName] = ids[newName] || existingId;
-        delete ids[name];
-      }
-      if (selectedDrone === name || preferredSelectedDroneRef.current === name) {
-        preferredSelectedDroneRef.current = newName;
-        preferredSelectedDroneHoldUntilRef.current = Date.now() + STARTUP_SEED_MISSING_GRACE_MS;
-      }
-      if (selectionAnchorRef.current === name) selectionAnchorRef.current = newName;
       setStartupSeedByDrone((prev) => {
-        if (!prev[name]) return prev;
-        const next = { ...prev };
-        const seed = next[name];
-        delete next[name];
-        if (!next[newName]) next[newName] = seed;
-        return next;
+        const existing = prev[droneId];
+        if (!existing) return prev;
+        if (existing.droneName === newName) return prev;
+        return { ...prev, [droneId]: { ...existing, droneName: newName } };
       });
       return { ok: true };
     } catch (e: any) {
-      console.error('[DroneHub] rename drone failed', { name, newName, error: e });
+      console.error('[DroneHub] rename drone failed', { id: droneId, newName, error: e });
       if (opts?.showAlert) {
         window.alert(`Rename failed: ${e?.message ?? String(e)}`);
       }
       return { ok: false, error: e?.message ?? String(e) };
     } finally {
       setRenamingDrones((prev) => {
-        if (!prev[name]) return prev;
+        if (!prev[droneId]) return prev;
         const next = { ...prev };
-        delete next[name];
+        delete next[droneId];
         return next;
       });
     }
   }
 
-  async function suggestAndRenameDraftDrone(nameRaw: string, promptRaw: string): Promise<void> {
-    const currentName = String(nameRaw ?? '').trim();
+  async function suggestAndRenameDraftDrone(droneIdRaw: string, promptRaw: string): Promise<void> {
+    const droneId = String(droneIdRaw ?? '').trim();
     const prompt = String(promptRaw ?? '').trim();
-    if (!currentName || !prompt) return;
+    if (!droneId || !prompt) return;
     try {
       const data = await requestJson<{ ok: true; name: string }>('/api/drones/name-from-message', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ message: prompt }),
       });
-      const initialSuggested = uniqueDraftDroneName(String(data?.name ?? '').trim(), { exclude: currentName });
-      if (!initialSuggested || initialSuggested === currentName) return;
-      let suggested = initialSuggested;
-      const attemptedNames = new Set<string>();
-      for (let attempt = 0; attempt < 16; attempt += 1) {
-        attemptedNames.add(suggested.toLowerCase());
-        const renamed = await renameDroneTo(currentName, suggested);
+      const base = String((data as any)?.name ?? '').trim();
+      if (!base) return;
+
+      const currentName = String(drones.find((d) => d.id === droneId)?.name ?? '').trim();
+      if (currentName && base === currentName) return;
+
+      const makeCandidate = (n: number) => {
+        const suffix = n <= 1 ? '' : ` (${n})`;
+        const raw = `${base}${suffix}`.trim();
+        if (!raw) return '';
+        if (raw.length > 80) return raw.slice(0, 80).trim();
+        return raw;
+      };
+
+      for (let attempt = 1; attempt <= 6; attempt += 1) {
+        const candidate = makeCandidate(attempt);
+        if (!candidate) return;
+        if (candidate.length > 80 || /[\r\n]/.test(candidate)) return;
+        const renamed = await renameDroneTo(droneId, candidate);
         if (renamed.ok) return;
         const msg = String(renamed.error ?? '').toLowerCase();
-        const nameConflict =
-          msg.includes('already exists') || msg.includes('cannot rename to') || msg.includes('pending drone already exists');
-        if (nameConflict) {
-          suggested = uniqueDraftDroneName(initialSuggested, {
-            exclude: currentName,
-            extraTaken: attemptedNames,
-          });
-          if (!suggested || suggested === currentName || attemptedNames.has(suggested.toLowerCase())) {
-            console.warn('[DroneHub] draft auto-rename exhausted unique name candidates', {
-              name: currentName,
-              suggested: initialSuggested,
-              attempt: attempt + 1,
-              error: renamed.error,
-            });
-            return;
-          }
-          await new Promise<void>((resolve) => window.setTimeout(resolve, 120));
-          continue;
-        }
-        const retriable =
-          msg.includes('still starting') ||
-          msg.includes('unknown drone') ||
-          msg.includes('rename busy') ||
-          msg.includes('is still provisioning');
-        if (!retriable) {
-          console.warn('[DroneHub] draft auto-rename aborted', {
-            name: currentName,
-            suggested,
-            attempt: attempt + 1,
-            error: renamed.error,
-          });
-          return;
-        }
-        const delayMs = Math.min(1800, 200 + attempt * 120);
-        await new Promise<void>((resolve) => window.setTimeout(resolve, delayMs));
+        const nameConflict = msg.includes('already exists') || msg.includes('pending') || msg.includes('cannot rename');
+        if (nameConflict) continue;
+        const retriable = msg.includes('still starting') || msg.includes('unknown drone') || msg.includes('rename busy');
+        if (!retriable) return;
+        await new Promise<void>((resolve) => window.setTimeout(resolve, Math.min(1800, 240 + attempt * 140)));
       }
-      console.warn('[DroneHub] draft auto-rename timed out waiting for drone startup', {
-        name: currentName,
-        suggested: initialSuggested,
-      });
     } catch (e: any) {
-      console.error('[DroneHub] draft auto-rename skipped', { name: currentName, error: e?.message ?? String(e) });
+      console.error('[DroneHub] draft auto-rename skipped', { id: droneId, error: e?.message ?? String(e) });
       showNameSuggestionFailureToast(e);
     }
   }
@@ -2936,7 +2947,7 @@ export default function DroneHubApp() {
             if (wantsUngrouped) return !droneGroup || isUngroupedGroupName(droneGroup);
             return droneGroup === group;
           })
-          .map((d) => String(d?.name ?? '').trim())
+          .map((d) => String(d?.id ?? '').trim())
           .filter(Boolean),
       ),
     );
@@ -2982,43 +2993,43 @@ export default function DroneHubApp() {
   }
 
   const selectDroneCard = React.useCallback(
-    (droneName: string, opts?: { toggle?: boolean; range?: boolean }) => {
-      const name = String(droneName ?? '').trim();
-      if (!name) return;
+    (droneIdRaw: string, opts?: { toggle?: boolean; range?: boolean }) => {
+      const id = String(droneIdRaw ?? '').trim();
+      if (!id) return;
       setAppView('workspace');
       setSelectedGroupMultiChat(null);
       setDraftChat(null);
       setDraftCreateOpen(false);
       setDraftCreateError(null);
-      if (opts?.range && orderedDroneNames.length > 0) {
+      if (opts?.range && orderedDroneIds.length > 0) {
         const anchor =
-          (selectionAnchorRef.current && orderedDroneNames.includes(selectionAnchorRef.current) && selectionAnchorRef.current) ||
-          (selectedDrone && orderedDroneNames.includes(selectedDrone) ? selectedDrone : name);
-        const anchorIdx = orderedDroneNames.indexOf(anchor);
-        const selectedIdx = orderedDroneNames.indexOf(name);
+          (selectionAnchorRef.current && orderedDroneIds.includes(selectionAnchorRef.current) && selectionAnchorRef.current) ||
+          (selectedDrone && orderedDroneIds.includes(selectedDrone) ? selectedDrone : id);
+        const anchorIdx = orderedDroneIds.indexOf(anchor);
+        const selectedIdx = orderedDroneIds.indexOf(id);
         if (anchorIdx >= 0 && selectedIdx >= 0) {
           const start = Math.min(anchorIdx, selectedIdx);
           const end = Math.max(anchorIdx, selectedIdx);
-          setSelectedDroneNames(orderedDroneNames.slice(start, end + 1));
-          setSelectedDrone(name);
+          setSelectedDroneIds(orderedDroneIds.slice(start, end + 1));
+          setSelectedDrone(id);
           selectionAnchorRef.current = anchor;
           scrollChatToBottom();
           return;
         }
       }
       if (opts?.toggle) {
-        setSelectedDroneNames((prev) => (prev.includes(name) ? prev : [...prev, name]));
-        setSelectedDrone(name);
-        selectionAnchorRef.current = name;
+        setSelectedDroneIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+        setSelectedDrone(id);
+        selectionAnchorRef.current = id;
         scrollChatToBottom();
         return;
       }
-      setSelectedDroneNames([name]);
-      setSelectedDrone(name);
-      selectionAnchorRef.current = name;
+      setSelectedDroneIds([id]);
+      setSelectedDrone(id);
+      selectionAnchorRef.current = id;
       scrollChatToBottom();
     },
-    [orderedDroneNames, selectedDrone],
+    [orderedDroneIds, selectedDrone],
   );
 
   const parseDroneNamesFromDrag = React.useCallback(
@@ -3062,12 +3073,12 @@ export default function DroneHubApp() {
       const target = String(targetGroupLabel ?? '').trim();
       if (!target) return;
       const targetGroup = isUngroupedGroupName(target) ? null : target;
-      const byName = new Map(drones.map((d) => [d.name, d]));
+      const byId = new Map(drones.map((d) => [d.id, d]));
       const requested = Array.from(new Set(rawDroneNames.map((n) => String(n ?? '').trim()).filter(Boolean)));
       if (requested.length === 0) return;
 
       const movable = requested.filter((name) => {
-        const d = byName.get(name);
+        const d = byId.get(name);
         if (!d) return false;
         const currentRaw = String(d.group ?? '').trim();
         const currentGroup = !currentRaw || isUngroupedGroupName(currentRaw) ? 'Ungrouped' : currentRaw;
@@ -3080,18 +3091,18 @@ export default function DroneHubApp() {
       try {
         const resp = await requestJson<{
           ok: true;
-          moved: Array<{ name: string; previousGroup: string | null; group: string | null }>;
-          rejected: Array<{ name: string; error: string }>;
+          moved: Array<{ id: string; name: string; previousGroup: string | null; group: string | null }>;
+          rejected: Array<{ id: string; name: string; error: string }>;
         }>(`/api/drones/group-set`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ drones: movable, group: targetGroup }),
+          body: JSON.stringify({ droneIds: movable, group: targetGroup }),
         });
         const rejected = Array.isArray(resp?.rejected) ? resp.rejected : [];
         if (rejected.length > 0) {
           const msg = rejected
             .slice(0, 3)
-            .map((r) => `${String(r?.name ?? 'unknown')}: ${String(r?.error ?? 'failed')}`)
+            .map((r) => `${String(r?.name ?? r?.id ?? 'unknown')}: ${String(r?.error ?? 'failed')}`)
             .join(', ');
           setGroupMoveError(rejected.length > 3 ? `Some drones could not be moved (${msg}, +${rejected.length - 3} more).` : `Some drones could not be moved (${msg}).`);
         }
@@ -3119,12 +3130,12 @@ export default function DroneHubApp() {
       const name = String(droneName ?? '').trim();
       if (!name) return;
       const names =
-        selectedDroneSet.has(name) && selectedDroneNames.length > 0
-          ? selectedDroneNames.slice()
+        selectedDroneSet.has(name) && selectedDroneIds.length > 0
+          ? selectedDroneIds.slice()
           : [name];
       setDraftChat(null);
       setSelectedDrone(name);
-      if (!selectedDroneSet.has(name)) setSelectedDroneNames([name]);
+      if (!selectedDroneSet.has(name)) setSelectedDroneIds([name]);
       selectionAnchorRef.current = name;
       setDraggingDroneNames(names);
       setDragOverGroup(null);
@@ -3142,7 +3153,7 @@ export default function DroneHubApp() {
         // ignore
       }
     },
-    [movingDroneGroups, selectedDroneNames, selectedDroneSet],
+    [movingDroneGroups, selectedDroneIds, selectedDroneSet],
   );
 
   const onDroneDragEnd = React.useCallback(() => {
@@ -3226,7 +3237,7 @@ export default function DroneHubApp() {
       qs.set('chat', selectedChat || 'default');
       qs.set('cwd', droneHomePath(currentDrone));
       if (terminalEmulator && terminalEmulator !== 'auto') qs.set('terminal', terminalEmulator);
-      const url = `/api/drones/${encodeURIComponent(currentDrone.name)}/open-terminal?${qs.toString()}`;
+      const url = `/api/drones/${encodeURIComponent(currentDrone.id)}/open-terminal?${qs.toString()}`;
       const r = await fetch(url, { method: 'POST' });
       const text = await r.text();
       let data: any = null;
@@ -3287,7 +3298,7 @@ export default function DroneHubApp() {
     const group = createGroup.trim();
     const repoPath = createRepoPath.trim();
     const seedPrompt = createInitialMessage.trim();
-    const isClone = createMode === 'clone' && Boolean(cloneSourceName);
+    const isClone = createMode === 'clone' && Boolean(cloneSourceId);
     // If we're cloning chats, preserve the source chat agent config(s) by not seeding a new default agent.
     const seedAgent = isClone && cloneIncludeChats ? null : resolveAgentKeyToConfig(spawnAgentKey);
     const seedModel = isClone && cloneIncludeChats ? null : spawnModelForSeed;
@@ -3329,7 +3340,7 @@ export default function DroneHubApp() {
             name,
             ...(group ? { group } : {}),
             ...(repoPath ? { repoPath } : {}),
-            ...(isClone && cloneSourceName ? { cloneFrom: cloneSourceName, cloneChats: Boolean(cloneIncludeChats) } : {}),
+            ...(isClone && cloneSourceId ? { cloneFrom: cloneSourceId, cloneChats: Boolean(cloneIncludeChats) } : {}),
             seedChat: 'default',
             ...(seedAgent ? { seedAgent } : {}),
             ...(seedModel ? { seedModel } : {}),
@@ -3338,20 +3349,30 @@ export default function DroneHubApp() {
         }),
       );
 
-      const acceptedNames = new Set((resp?.accepted ?? []).map((a) => String(a?.name ?? '').trim()).filter(Boolean));
+      const acceptedList = Array.isArray(resp?.accepted) ? resp.accepted : [];
+      const acceptedByName = new Map<string, { id: string; name: string }>();
+      const acceptedNames = new Set<string>();
+      for (const a of acceptedList) {
+        const id = String((a as any)?.id ?? '').trim();
+        const name = String((a as any)?.name ?? '').trim();
+        if (!id || !name) continue;
+        acceptedByName.set(name, { id, name });
+        acceptedNames.add(name);
+      }
       const rejected = Array.isArray(resp?.rejected) ? resp.rejected : [];
 
-      if (acceptedNames.size > 0) {
-        rememberStartupSeed(Array.from(acceptedNames), { agent: seedAgent, model: seedModel, prompt: seedPrompt, chatName: 'default' });
+      if (acceptedByName.size > 0) {
+        rememberStartupSeed(Array.from(acceptedByName.values()), { agent: seedAgent, model: seedModel, prompt: seedPrompt, chatName: 'default' });
       }
 
-      const firstAccepted = names.find((n) => acceptedNames.has(n)) ?? null;
-      if (firstAccepted) {
-        preferredSelectedDroneRef.current = firstAccepted;
+      const firstAccepted = acceptedList.length > 0 ? acceptedList[0] : null;
+      const firstAcceptedId = String((firstAccepted as any)?.id ?? '').trim();
+      if (firstAcceptedId) {
+        preferredSelectedDroneRef.current = firstAcceptedId;
         preferredSelectedDroneHoldUntilRef.current = Date.now() + STARTUP_SEED_MISSING_GRACE_MS;
-        setSelectedDrone(firstAccepted);
-        setSelectedDroneNames([firstAccepted]);
-        selectionAnchorRef.current = firstAccepted;
+        setSelectedDrone(firstAcceptedId);
+        setSelectedDroneIds([firstAcceptedId]);
+        selectionAnchorRef.current = firstAcceptedId;
       }
 
       if (rejected.length > 0) {
@@ -3379,7 +3400,7 @@ export default function DroneHubApp() {
 
       setCreateOpen(false);
       setCreateMode('create');
-      setCloneSourceName(null);
+      setCloneSourceId(null);
       setCreateName('');
       setCreateGroup('');
       setCreateRepoPath('');
@@ -3400,10 +3421,9 @@ export default function DroneHubApp() {
     }
     const prompt = String(payload?.prompt ?? '').trim();
     if (!prompt) return false;
-    const draftSeed = `untitled-${Date.now().toString(36).slice(-6)}`;
-    const tempName = uniqueDraftDroneName(draftSeed);
     setDraftChat({
-      droneName: tempName,
+      droneId: '',
+      droneName: '',
       prompt: {
         id: `draft-${makeId()}`,
         at: new Date().toISOString(),
@@ -3420,15 +3440,7 @@ export default function DroneHubApp() {
     setDraftAutoRenaming(false);
     setDraftCreateOpen(false);
 
-    const ok = await createDroneFromDraft({ prompt, name: tempName, group: '', autoRename: true });
-    if (!ok) {
-      clearQueuedPromptsForDrone(tempName);
-      setDraftChat({ droneName: '', prompt: null });
-      setDraftCreateName('');
-      setDraftCreateGroup('');
-      return false;
-    }
-    return true;
+    return await createDroneFromDraft({ prompt, group: '', autoRename: true });
   }
 
   async function createDroneFromDraft(opts?: { prompt?: string; name?: string; group?: string; autoRename?: boolean }): Promise<boolean> {
@@ -3442,12 +3454,12 @@ export default function DroneHubApp() {
       setDraftCreateError('Send a first message before creating a drone.');
       return false;
     }
-    if (!name) {
-      setDraftCreateError('Drone name is required.');
+    if (name && (name.length > 80 || /[\r\n]/.test(name))) {
+      setDraftCreateError('Invalid name. Must be 1-80 chars and cannot contain newlines.');
       return false;
     }
-    if (droneNameHasWhitespace(nameRaw) || !isValidDroneNameDashCase(name)) {
-      setDraftCreateError('Invalid name. Use dash-case (letters/numbers and single hyphens), no spaces, max 48 chars.');
+    if (name && drones.some((d) => d.name === name)) {
+      setDraftCreateError(`A drone named "${name}" already exists.`);
       return false;
     }
 
@@ -3455,49 +3467,40 @@ export default function DroneHubApp() {
     setDraftCreateError(null);
     const seedAgent = resolveAgentKeyToConfig(spawnAgentKey);
     const seedModel = spawnModelForSeed;
-    rememberStartupSeed([name], { agent: seedAgent, model: seedModel, prompt, chatName: 'default' });
-    preferredSelectedDroneRef.current = name;
-    preferredSelectedDroneHoldUntilRef.current = Date.now() + STARTUP_SEED_MISSING_GRACE_MS;
-    setSelectedDrone(name);
-    setSelectedDroneNames([name]);
-    selectionAnchorRef.current = name;
-    setSelectedChat('default');
     try {
-      const data = await requestJson<{
-        ok: true;
-        accepted: true;
-        name: string;
-        chat: string;
-        promptId: string;
-        created?: boolean;
-        phase?: string;
-      }>(`/api/drones/${encodeURIComponent(name)}/chats/${encodeURIComponent('default')}/prompt`, {
+      const body: any = {
+        ...(name ? { name } : {}),
+        ...(group ? { group } : {}),
+        ...(repoPath ? { repoPath } : {}),
+        seedChat: 'default',
+        ...(seedAgent ? { seedAgent } : {}),
+        ...(seedModel ? { seedModel } : {}),
+        ...(prompt ? { seedPrompt: prompt } : {}),
+      };
+      const data = await requestJson<{ ok: true; id: string; name: string; phase: 'starting' }>(`/api/drones`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          prompt,
-          createIfMissing: true,
-          create: {
-            ...(group ? { group } : {}),
-            ...(repoPath ? { repoPath } : {}),
-          },
-          seedAgent: seedAgent ?? undefined,
-          seedModel: seedModel ?? undefined,
-        }),
+        body: JSON.stringify(body),
       });
-      const promptId = String((data as any)?.promptId ?? '').trim();
-      if (!promptId) {
-        throw new Error('missing promptId');
-      }
+      const droneId = String((data as any)?.id ?? '').trim();
+      const createdName = String((data as any)?.name ?? name ?? '').trim() || droneId;
+      if (!droneId) throw new Error('create drone did not return an id');
 
-      // Keep the draft row id aligned with the server/daemon prompt id for better debuggability.
+      rememberStartupSeed([{ id: droneId, name: createdName }], { agent: seedAgent, model: seedModel, prompt, chatName: 'default' });
+      preferredSelectedDroneRef.current = droneId;
+      preferredSelectedDroneHoldUntilRef.current = Date.now() + STARTUP_SEED_MISSING_GRACE_MS;
+      setSelectedDrone(droneId);
+      setSelectedDroneIds([droneId]);
+      selectionAnchorRef.current = droneId;
+      setSelectedChat('default');
+
       setDraftChat((prev) => {
         if (!prev?.prompt) return prev;
         return {
-          droneName: prev.droneName,
+          droneId,
+          droneName: createdName,
           prompt: {
             ...prev.prompt,
-            id: promptId,
             state: 'sent',
             updatedAt: new Date().toISOString(),
           },
@@ -3506,8 +3509,9 @@ export default function DroneHubApp() {
 
       if (opts?.autoRename) {
         setDraftAutoRenaming(true);
-        void suggestAndRenameDraftDrone(name, prompt).finally(() => setDraftAutoRenaming(false));
+        void suggestAndRenameDraftDrone(droneId, prompt).finally(() => setDraftAutoRenaming(false));
       }
+
       setDraftCreateOpen(false);
       setDraftCreateName('');
       setDraftCreateGroup('');
@@ -3517,19 +3521,13 @@ export default function DroneHubApp() {
       return true;
     } catch (e: any) {
       const err = e?.message ?? String(e);
-      clearQueuedPromptsForDrone(name);
-      setStartupSeedByDrone((prev) => {
-        if (!prev[name]) return prev;
-        const next = { ...prev };
-        delete next[name];
-        return next;
+      setDraftChat((prev) => {
+        if (!prev?.prompt) return prev;
+        return {
+          ...(prev ?? { droneId: '', droneName: '' }),
+          prompt: { ...prev.prompt, state: 'failed', error: err, updatedAt: new Date().toISOString() },
+        };
       });
-      if (preferredSelectedDroneRef.current === name) {
-        preferredSelectedDroneRef.current = null;
-        preferredSelectedDroneHoldUntilRef.current = 0;
-      }
-      setSelectedDrone((prev) => (prev === name ? null : prev));
-      setSelectedDroneNames((prev) => prev.filter((n) => n !== name));
       setDraftCreateError(err);
       return false;
     } finally {
@@ -3584,7 +3582,7 @@ export default function DroneHubApp() {
       const qs = new URLSearchParams();
       qs.set('editor', editor);
       qs.set('cwd', droneHomePath(currentDrone));
-      const url = `/api/drones/${encodeURIComponent(currentDrone.name)}/open-editor?${qs.toString()}`;
+      const url = `/api/drones/${encodeURIComponent(currentDrone.id)}/open-editor?${qs.toString()}`;
       const r = await fetch(url, { method: 'POST' });
       const text = await r.text();
       let data: any = null;
@@ -3651,13 +3649,13 @@ export default function DroneHubApp() {
 
   async function pullRepoChanges() {
     if (!currentDrone) return;
-    const name = String(currentDrone.name ?? '').trim();
-    if (!name) return;
+    const droneId = String(currentDrone.id ?? '').trim();
+    if (!droneId) return;
     setRepoOpError(null);
     setRepoOpErrorMeta(null);
     setRepoOp({ kind: 'pull' });
     try {
-      const url = `/api/drones/${encodeURIComponent(name)}/repo/pull`;
+      const url = `/api/drones/${encodeURIComponent(droneId)}/repo/pull`;
       const throwRepoPullError = (data: any, fallback: string): never => {
         const message = String(data?.error ?? fallback);
         const code = String(data?.code ?? '').trim();
@@ -3683,13 +3681,13 @@ export default function DroneHubApp() {
 
   async function reseedRepo() {
     if (!currentDrone) return;
-    const name = String(currentDrone.name ?? '').trim();
-    if (!name) return;
+    const droneId = String(currentDrone.id ?? '').trim();
+    if (!droneId) return;
     setRepoOpError(null);
     setRepoOpErrorMeta(null);
     setRepoOp({ kind: 'reseed' });
     try {
-      const url = `/api/drones/${encodeURIComponent(name)}/repo/reseed`;
+      const url = `/api/drones/${encodeURIComponent(droneId)}/repo/reseed`;
       const r = await postJson(url, {});
       if (!r.ok) throw new Error(String(r.data?.error ?? 'Repo reseed failed.'));
     } catch (e: any) {
@@ -3722,18 +3720,18 @@ export default function DroneHubApp() {
     setOptimisticPendingPrompts([]);
   }, [selectedDrone, selectedChat]);
 
-  function enqueueQueuedPrompt(droneNameRaw: string, chatNameRaw: string, promptRaw: string): PendingPrompt | null {
-    const droneName = String(droneNameRaw ?? '').trim();
+  function enqueueQueuedPrompt(droneIdRaw: string, chatNameRaw: string, promptRaw: string): PendingPrompt | null {
+    const droneId = String(droneIdRaw ?? '').trim();
     const chatName = String(chatNameRaw ?? '').trim() || 'default';
     const prompt = String(promptRaw ?? '').trim();
-    if (!droneName || !prompt) return null;
+    if (!droneId || !prompt) return null;
     const item: PendingPrompt = {
       id: `queued-${makeId()}`,
       at: new Date().toISOString(),
       prompt,
       state: 'queued',
     };
-    const key = droneChatQueueKey(droneName, chatName);
+    const key = droneChatQueueKey(droneId, chatName);
     setQueuedPromptsByDroneChat((prev) => {
       const cur = prev[key] ?? [];
       return { ...prev, [key]: [...cur, item] };
@@ -3768,15 +3766,15 @@ export default function DroneHubApp() {
     });
   }
 
-  function clearQueuedPromptsForDrone(droneNameRaw: string) {
-    const droneName = String(droneNameRaw ?? '').trim();
-    if (!droneName) return;
+  function clearQueuedPromptsForDrone(droneIdRaw: string) {
+    const droneId = String(droneIdRaw ?? '').trim();
+    if (!droneId) return;
     setQueuedPromptsByDroneChat((prev) => {
       let changed = false;
       const next: Record<string, PendingPrompt[]> = {};
       for (const [k, v] of Object.entries(prev)) {
         const parsed = parseDroneChatQueueKey(k);
-        if (parsed && parsed.droneName === droneName) {
+        if (parsed && parsed.droneId === droneId) {
           changed = true;
           continue;
         }
@@ -3794,10 +3792,10 @@ export default function DroneHubApp() {
     const optimisticPrompt = prompt || (attachments.length === 1 ? '[image attachment]' : `[${attachments.length} image attachments]`);
     if (currentDrone.hubPhase === 'starting' || currentDrone.hubPhase === 'seeding') {
       if (attachments.length > 0) {
-        setPromptError(`"${currentDrone.name}" is still provisioning. Image attachments can be sent once it is ready.`);
+        setPromptError(`"${currentDroneLabel}" is still provisioning. Image attachments can be sent once it is ready.`);
         return false;
       }
-      enqueueQueuedPrompt(currentDrone.name, selectedChat || 'default', prompt);
+      enqueueQueuedPrompt(currentDrone.id, selectedChat || 'default', prompt);
       setPromptError(null);
       return true;
     }
@@ -3805,7 +3803,7 @@ export default function DroneHubApp() {
     setPromptError(null);
     try {
       const data = await requestJson<{ ok: true; accepted: true; promptId: string }>(
-        `/api/drones/${encodeURIComponent(currentDrone.name)}/chats/${encodeURIComponent(selectedChat || 'default')}/prompt`,
+        `/api/drones/${encodeURIComponent(currentDrone.id)}/chats/${encodeURIComponent(selectedChat || 'default')}/prompt`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -3843,7 +3841,7 @@ export default function DroneHubApp() {
   }, [selectedDrone]);
 
   const selectedDroneSummary = React.useMemo(
-    () => (selectedDrone ? drones.find((x) => x.name === selectedDrone) ?? null : null),
+    () => (selectedDrone ? drones.find((x) => x.id === selectedDrone) ?? null : null),
     [drones, selectedDrone],
   );
   const selectedDroneHubPhase = selectedDroneSummary?.hubPhase ?? null;
@@ -3871,7 +3869,7 @@ export default function DroneHubApp() {
     for (const key of keys) {
       const parsed = parseDroneChatQueueKey(key);
       if (!parsed) continue;
-      const drone = drones.find((d) => d.name === parsed.droneName) ?? null;
+      const drone = drones.find((d) => d.id === parsed.droneId) ?? null;
       if (!drone) continue;
       if (drone.hubPhase === 'starting' || drone.hubPhase === 'seeding' || drone.hubPhase === 'error') continue;
       if (flushingQueuedKeysRef.current.has(key)) continue;
@@ -3888,7 +3886,7 @@ export default function DroneHubApp() {
           patchQueuedPrompt(key, head.id, { state: 'sending', error: undefined });
           try {
             const data = await requestJson<{ ok: true; accepted: true; promptId: string }>(
-              `/api/drones/${encodeURIComponent(parsed.droneName)}/chats/${encodeURIComponent(parsed.chatName)}/prompt`,
+              `/api/drones/${encodeURIComponent(parsed.droneId)}/chats/${encodeURIComponent(parsed.chatName)}/prompt`,
               {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
@@ -3901,7 +3899,7 @@ export default function DroneHubApp() {
 
             // If the flushed prompt is for the currently visible chat, mirror the optimistic UX.
             const selectedKeyMatches =
-              parsed.droneName === String(selectedDrone ?? '').trim() &&
+              parsed.droneId === String(selectedDrone ?? '').trim() &&
               parsed.chatName === (String(selectedChat ?? '').trim() || 'default');
             if (selectedKeyMatches) {
               if (chatUiMode === 'cli') bumpCliTyping();
@@ -3960,12 +3958,12 @@ export default function DroneHubApp() {
     if (chatUiMode !== 'transcript') return null;
     if (!selectedDroneSummary) return null;
     if (selectedDroneSummary.hubPhase !== 'starting' && selectedDroneSummary.hubPhase !== 'seeding') return null;
-    const seed = selectedDroneSummary.name ? startupSeedByDrone[selectedDroneSummary.name] : null;
+    const seed = selectedDroneSummary.id ? startupSeedByDrone[selectedDroneSummary.id] : null;
     if (!seed) return null;
     const prompt = String(seed.prompt ?? '').trim();
     if (!prompt) return null;
     return {
-      id: `seed-${selectedDroneSummary.name}-${seed.chatName}`,
+      id: `seed-${selectedDroneSummary.id}-${seed.chatName}`,
       at: seed.at || new Date().toISOString(),
       prompt,
       state: 'sending',
@@ -4056,13 +4054,13 @@ export default function DroneHubApp() {
   }
 
   React.useEffect(() => {
-    const valid = new Set(sidebarDronesFilteredByRepo.map((d) => d.name));
-    setSelectedDroneNames((prev) => {
-      const next = prev.filter((name) => valid.has(name));
+    const valid = new Set(sidebarDronesFilteredByRepo.map((d) => d.id));
+    setSelectedDroneIds((prev) => {
+      const next = prev.filter((id) => valid.has(id));
       if (selectedDrone && valid.has(selectedDrone) && !next.includes(selectedDrone)) {
         next.push(selectedDrone);
       }
-      if (next.length === prev.length && next.every((name, idx) => name === prev[idx])) return prev;
+      if (next.length === prev.length && next.every((id, idx) => id === prev[idx])) return prev;
       return next;
     });
   }, [selectedDrone, sidebarDronesFilteredByRepo]);
@@ -4071,20 +4069,20 @@ export default function DroneHubApp() {
     setStartupSeedByDrone((prev) => {
       const next = { ...prev };
       let changed = false;
-      const byName = new Map(drones.map((d) => [d.name, d]));
+      const byId = new Map(drones.map((d) => [d.id, d]));
       const nowMs = Date.now();
-      for (const [name, seed] of Object.entries(next)) {
-        const summary = byName.get(name);
+      for (const [id, seed] of Object.entries(next)) {
+        const summary = byId.get(id);
         if (!summary) {
           if (!isStartupSeedFresh(seed, nowMs)) {
-            delete next[name];
+            delete next[id];
             changed = true;
           }
           continue;
         }
         const isStarting = summary.hubPhase === 'starting' || summary.hubPhase === 'seeding';
         if (!isStarting && !summary.busy) {
-          delete next[name];
+          delete next[id];
           changed = true;
         }
       }
@@ -4097,7 +4095,7 @@ export default function DroneHubApp() {
     if (draftChat) {
       if (!draftChat.prompt) {
         if (selectedDrone) setSelectedDrone(null);
-        setSelectedDroneNames((prev) => (prev.length === 0 ? prev : []));
+        setSelectedDroneIds((prev) => (prev.length === 0 ? prev : []));
         selectionAnchorRef.current = null;
         preferredSelectedDroneRef.current = null;
         preferredSelectedDroneHoldUntilRef.current = 0;
@@ -4106,7 +4104,7 @@ export default function DroneHubApp() {
     }
     if (dronesFilteredByRepo.length === 0) {
       if (selectedDrone) setSelectedDrone(null);
-      setSelectedDroneNames([]);
+      setSelectedDroneIds([]);
       setDraggingDroneNames(null);
       setDragOverGroup(null);
       setDragOverUngrouped(false);
@@ -4118,11 +4116,11 @@ export default function DroneHubApp() {
     }
     const preferred = preferredSelectedDroneRef.current;
     if (preferred) {
-      const preferredExists = dronesFilteredByRepo.some((d) => d.name === preferred);
+      const preferredExists = dronesFilteredByRepo.some((d) => d.id === preferred);
       if (preferredExists) {
         if (selectedDrone !== preferred) {
           setSelectedDrone(preferred);
-          setSelectedDroneNames((prev) => (prev.length === 1 && prev[0] === preferred ? prev : [preferred]));
+          setSelectedDroneIds((prev) => (prev.length === 1 && prev[0] === preferred ? prev : [preferred]));
           selectionAnchorRef.current = preferred;
           return;
         }
@@ -4136,15 +4134,15 @@ export default function DroneHubApp() {
       if (!holdActive && !isStartupSeedFresh(seed)) {
         preferredSelectedDroneRef.current = null;
         preferredSelectedDroneHoldUntilRef.current = 0;
-      } else if (!selectedDrone || !dronesFilteredByRepo.some((d) => d.name === selectedDrone)) {
+      } else if (!selectedDrone || !dronesFilteredByRepo.some((d) => d.id === selectedDrone)) {
         // Keep current state while waiting for preferred startup/rename to appear.
         return;
       }
     }
-    if (!selectedDrone || !dronesFilteredByRepo.some((d) => d.name === selectedDrone)) {
-      const first = dronesFilteredByRepo[0].name;
+    if (!selectedDrone || !dronesFilteredByRepo.some((d) => d.id === selectedDrone)) {
+      const first = dronesFilteredByRepo[0].id;
       setSelectedDrone(first);
-      setSelectedDroneNames((prev) => (prev.length === 1 && prev[0] === first ? prev : [first]));
+      setSelectedDroneIds((prev) => (prev.length === 1 && prev[0] === first ? prev : [first]));
       selectionAnchorRef.current = first;
     }
   }, [activeRepoPath, draftChat, dronesFilteredByRepo, selectedDrone, startupSeedByDrone]);
@@ -4167,7 +4165,7 @@ export default function DroneHubApp() {
   // Fall back if selected chat disappears.
   React.useEffect(() => {
     if (!selectedDrone) return;
-    const d = drones.find((x) => x.name === selectedDrone);
+    const d = drones.find((x) => x.id === selectedDrone);
     const chats = d?.chats ?? [];
     if (chats.length === 0) return;
     if (selectedChat && chats.includes(selectedChat)) return;
@@ -4346,7 +4344,8 @@ export default function DroneHubApp() {
     }
   }, [sessionText]);
 
-  const currentDrone = selectedDrone ? drones.find((d) => d.name === selectedDrone) ?? null : null;
+  const currentDrone = selectedDrone ? drones.find((d) => d.id === selectedDrone) ?? null : null;
+  const currentDroneLabel = currentDrone ? uiDroneName(currentDrone.name) : '';
   const selectedGroupMultiChatData = React.useMemo(
     () => (selectedGroupMultiChat ? sidebarGroups.find((g) => g.group === selectedGroupMultiChat) ?? null : null),
     [selectedGroupMultiChat, sidebarGroups],
@@ -4385,7 +4384,7 @@ export default function DroneHubApp() {
             }
             const chatName = resolveChatNameForDrone(d, preferredChat);
             await requestJson<{ ok: true; accepted: true; promptId: string }>(
-              `/api/drones/${encodeURIComponent(d.name)}/chats/${encodeURIComponent(chatName)}/prompt`,
+              `/api/drones/${encodeURIComponent(d.id)}/chats/${encodeURIComponent(chatName)}/prompt`,
               {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
@@ -4449,22 +4448,22 @@ export default function DroneHubApp() {
     return droneHomePath(currentDrone);
   }, [currentDrone?.name, currentDrone?.repoAttached, currentDrone?.repoPath]);
   const currentFsPath = React.useMemo(() => {
-    const droneName = String(currentDrone?.name ?? '').trim();
-    if (!droneName) return '/dvm-data/home';
-    const saved = fsPathByDrone[droneName];
+    const droneId = String(currentDrone?.id ?? '').trim();
+    if (!droneId) return '/dvm-data/home';
+    const saved = fsPathByDrone[droneId];
     return normalizeContainerPathInput(saved || defaultFsPathForCurrentDrone);
-  }, [currentDrone?.name, defaultFsPathForCurrentDrone, fsPathByDrone]);
+  }, [currentDrone?.id, defaultFsPathForCurrentDrone, fsPathByDrone]);
   const setCurrentFsPath = React.useCallback(
     (nextPath: string) => {
-      const droneName = String(currentDrone?.name ?? '').trim();
-      if (!droneName) return;
+      const droneId = String(currentDrone?.id ?? '').trim();
+      if (!droneId) return;
       const normalized = normalizeContainerPathInput(nextPath);
       setFsPathByDrone((prev) => {
-        if ((prev[droneName] ?? '') === normalized) return prev;
-        return { ...prev, [droneName]: normalized };
+        if ((prev[droneId] ?? '') === normalized) return prev;
+        return { ...prev, [droneId]: normalized };
       });
     },
-    [currentDrone?.name],
+    [currentDrone?.id],
   );
   const refreshFsList = React.useCallback(() => {
     setFsRefreshNonce((n) => n + 1);
@@ -4477,10 +4476,10 @@ export default function DroneHubApp() {
   } = usePoll<DroneFsListPayload>(
     () =>
       currentDrone
-        ? requestJson(`/api/drones/${encodeURIComponent(currentDrone.name)}/fs/list?path=${encodeURIComponent(currentFsPath)}`)
-        : Promise.resolve({ ok: true, name: '', path: '/', entries: [] }),
+        ? requestJson(`/api/drones/${encodeURIComponent(currentDrone.id)}/fs/list?path=${encodeURIComponent(currentFsPath)}`)
+        : Promise.resolve({ ok: true, id: '', name: '', path: '/', entries: [] }),
     fsPollIntervalMs,
-    [currentDrone?.name, currentFsPath, fsRefreshNonce],
+    [currentDrone?.id, currentFsPath, fsRefreshNonce],
   );
   const fsPayloadError =
     fsResp && (fsResp as any).ok === false ? String((fsResp as any)?.error ?? 'filesystem request failed') : null;
@@ -4489,13 +4488,13 @@ export default function DroneHubApp() {
 
   const filesPane = usePaneReadiness({
     hubPhase: currentDrone?.hubPhase,
-    resetKey: `${currentDrone?.name ?? ''}\u0000files`,
+    resetKey: `${currentDrone?.id ?? ''}\u0000files`,
     timeoutMs: 18_000,
   });
   const fsOkForCurrentDrone = Boolean(
     currentDrone &&
       (fsResp as any)?.ok === true &&
-      String((fsResp as any)?.name ?? '').trim() === String(currentDrone.name ?? '').trim(),
+      String((fsResp as any)?.id ?? '').trim() === String(currentDrone.id ?? '').trim(),
   );
   React.useEffect(() => {
     if (fsOkForCurrentDrone) filesPane.markReady();
@@ -4510,10 +4509,10 @@ export default function DroneHubApp() {
   } = usePoll<DronePortsPayload>(
     () =>
       currentDrone
-        ? fetchJson(`/api/drones/${encodeURIComponent(currentDrone.name)}/ports`)
-        : Promise.resolve({ ok: true, name: '', ports: [] }),
+        ? fetchJson(`/api/drones/${encodeURIComponent(currentDrone.id)}/ports`)
+        : Promise.resolve({ ok: true, id: '', name: '', ports: [] }),
     portsPollIntervalMs,
-    [currentDrone?.name],
+    [currentDrone?.id],
   );
   const ports = portsResp && (portsResp as any).ok === true ? ((portsResp as any).ports as DronePortMapping[]) : null;
   const portsPayloadError =
@@ -4522,13 +4521,13 @@ export default function DroneHubApp() {
 
   const portsPane = usePaneReadiness({
     hubPhase: currentDrone?.hubPhase,
-    resetKey: `${currentDrone?.name ?? ''}\u0000ports`,
+    resetKey: `${currentDrone?.id ?? ''}\u0000ports`,
     timeoutMs: 18_000,
   });
   const portsOkForCurrentDrone = Boolean(
     currentDrone &&
       (portsResp as any)?.ok === true &&
-      String((portsResp as any)?.name ?? '').trim() === String(currentDrone.name ?? '').trim(),
+      String((portsResp as any)?.id ?? '').trim() === String(currentDrone.id ?? '').trim(),
   );
   React.useEffect(() => {
     if (portsOkForCurrentDrone) portsPane.markReady();
@@ -4931,11 +4930,12 @@ export default function DroneHubApp() {
   ): React.ReactNode {
     const disabled = drone.hubPhase === 'starting' || drone.hubPhase === 'seeding';
     const chatName = selectedChat || 'default';
-    const isCurrent = Boolean(currentDrone && String(currentDrone.name) === String(drone.name));
+    const isCurrent = Boolean(currentDrone && String(currentDrone.id) === String(drone.id));
     const contentByTab: Record<RightPanelTab, React.ReactNode> = {
       terminal: (
         <DroneTerminalDock
           key={`${paneKey}-terminal`}
+          droneId={drone.id}
           droneName={drone.name}
           chatName={chatName}
           defaultCwd={defaultFsPathForCurrentDrone}
@@ -4947,7 +4947,9 @@ export default function DroneHubApp() {
       files: (
         <DroneFilesDock
           key={`${paneKey}-files`}
+          droneId={drone.id}
           droneName={drone.name}
+          droneLabel={uiDroneName(drone.name)}
           path={currentFsPath}
           homePath={defaultFsPathForCurrentDrone}
           entries={fsEntries}
@@ -4994,6 +4996,7 @@ export default function DroneHubApp() {
       links: (
         <DroneLinksDock
           key={`${paneKey}-links`}
+          droneId={drone.id}
           droneName={drone.name}
           agentLabel={agentLabel}
           chatName={chatName}
@@ -5008,6 +5011,7 @@ export default function DroneHubApp() {
       changes: (
         <DroneChangesDock
           key={`${paneKey}-changes`}
+          droneId={drone.id}
           droneName={drone.name}
           repoAttached={drone.repoAttached ?? Boolean(String(drone.repoPath ?? '').trim())}
           repoPath={drone.repoPath}
@@ -5039,9 +5043,9 @@ export default function DroneHubApp() {
               >
                 Drone Hub
               </span>
-              {selectedDroneNames.length > 1 && (
-                <span className="text-[10px] text-[var(--accent)] whitespace-nowrap" title={`${selectedDroneNames.length} drones selected`}>
-                  {selectedDroneNames.length} selected
+              {selectedDroneIds.length > 1 && (
+                <span className="text-[10px] text-[var(--accent)] whitespace-nowrap" title={`${selectedDroneIds.length} drones selected`}>
+                  {selectedDroneIds.length} selected
                 </span>
               )}
             </div>
@@ -5177,28 +5181,29 @@ export default function DroneHubApp() {
                 .slice()
                 .sort(compareDronesByNewestFirst)
                 .map((d) => {
-                  const isOptimistic = sidebarOptimisticDroneNameSet.has(d.name);
+                  const isOptimistic = sidebarOptimisticDroneIdSet.has(d.id);
                   return (
                     <DroneCard
-                      key={d.name}
+                      key={d.id}
                       drone={d}
+                      displayName={uiDroneName(d.name)}
                       statusHint={isOptimistic ? 'queued' : undefined}
-                      selected={selectedDroneSet.has(d.name)}
+                      selected={selectedDroneSet.has(d.id)}
                       busy={
                         d.hubPhase === 'starting' || d.hubPhase === 'seeding'
                           ? false
-                          : Boolean(d.busy) || (d.name === selectedDrone && selectedIsResponding)
+                          : Boolean(d.busy) || (d.id === selectedDrone && selectedIsResponding)
                       }
-                      onClick={(opts) => selectDroneCard(d.name, opts)}
+                      onClick={(opts) => selectDroneCard(d.id, opts)}
                       onClone={() => openCloneModal(d)}
-                      onRename={() => renameDrone(d.name)}
-                      onDelete={() => deleteDrone(d.name)}
+                      onRename={() => renameDrone(d.id)}
+                      onDelete={() => deleteDrone(d.id)}
                       onErrorClick={openDroneErrorModal}
-                      cloneDisabled={isOptimistic || Boolean(deletingDrones[d.name]) || Boolean(renamingDrones[d.name])}
-                      renameDisabled={isOptimistic || Boolean(deletingDrones[d.name]) || Boolean(renamingDrones[d.name])}
-                      renameBusy={Boolean(renamingDrones[d.name])}
-                      deleteDisabled={isOptimistic || Boolean(deletingDrones[d.name]) || Boolean(renamingDrones[d.name])}
-                      deleteBusy={Boolean(deletingDrones[d.name])}
+                      cloneDisabled={isOptimistic || Boolean(deletingDrones[d.id]) || Boolean(renamingDrones[d.id])}
+                      renameDisabled={isOptimistic || Boolean(deletingDrones[d.id]) || Boolean(renamingDrones[d.id])}
+                      renameBusy={Boolean(renamingDrones[d.id])}
+                      deleteDisabled={isOptimistic || Boolean(deletingDrones[d.id]) || Boolean(renamingDrones[d.id])}
+                      deleteBusy={Boolean(deletingDrones[d.id])}
                     />
                   );
                 })
@@ -5363,32 +5368,33 @@ export default function DroneHubApp() {
                       {!collapsed && (
                         <div className="px-1.5 py-1.5 flex flex-col gap-0.5">
                           {items.map((d) => {
-                            const isOptimistic = sidebarOptimisticDroneNameSet.has(d.name);
+                            const isOptimistic = sidebarOptimisticDroneIdSet.has(d.id);
                             return (
                               <DroneCard
-                                key={d.name}
+                                key={d.id}
                                 drone={d}
+                                displayName={uiDroneName(d.name)}
                                 statusHint={isOptimistic ? 'queued' : undefined}
-                                selected={selectedDroneSet.has(d.name)}
+                                selected={selectedDroneSet.has(d.id)}
                                 busy={
                                   d.hubPhase === 'starting' || d.hubPhase === 'seeding'
                                     ? false
-                                    : Boolean(d.busy) || (d.name === selectedDrone && selectedIsResponding)
+                                    : Boolean(d.busy) || (d.id === selectedDrone && selectedIsResponding)
                                 }
                                 showGroup={false}
-                                onClick={(opts) => selectDroneCard(d.name, opts)}
+                                onClick={(opts) => selectDroneCard(d.id, opts)}
                                 draggable={!movingDroneGroups && !isOptimistic}
-                                onDragStart={(event) => onDroneDragStart(d.name, event)}
+                                onDragStart={(event) => onDroneDragStart(d.id, event)}
                                 onDragEnd={onDroneDragEnd}
                                 onClone={() => openCloneModal(d)}
-                                onRename={() => renameDrone(d.name)}
-                                onDelete={() => deleteDrone(d.name)}
+                                onRename={() => renameDrone(d.id)}
+                                onDelete={() => deleteDrone(d.id)}
                                 onErrorClick={openDroneErrorModal}
-                                cloneDisabled={isOptimistic || Boolean(deletingDrones[d.name]) || Boolean(renamingDrones[d.name])}
-                                renameDisabled={isOptimistic || Boolean(deletingDrones[d.name]) || Boolean(renamingDrones[d.name])}
-                                renameBusy={Boolean(renamingDrones[d.name])}
-                                deleteDisabled={isOptimistic || Boolean(deletingDrones[d.name]) || Boolean(renamingDrones[d.name])}
-                                deleteBusy={Boolean(deletingDrones[d.name])}
+                                cloneDisabled={isOptimistic || Boolean(deletingDrones[d.id]) || Boolean(renamingDrones[d.id])}
+                                renameDisabled={isOptimistic || Boolean(deletingDrones[d.id]) || Boolean(renamingDrones[d.id])}
+                                renameBusy={Boolean(renamingDrones[d.id])}
+                                deleteDisabled={isOptimistic || Boolean(deletingDrones[d.id]) || Boolean(renamingDrones[d.id])}
+                                deleteBusy={Boolean(deletingDrones[d.id])}
                               />
                             );
                           })}
@@ -5613,9 +5619,12 @@ export default function DroneHubApp() {
                   <div className="text-[10px] text-[var(--muted)] mt-0.5 font-mono">
                     {createNameEntries.length} drone{createNameEntries.length === 1 ? '' : 's'} ready
                   </div>
-                  {createMode === 'clone' && cloneSourceName && (
-                    <div className="text-[10px] text-[var(--muted)] mt-1 truncate font-mono" title={`Source: ${cloneSourceName}`}>
-                      source: {cloneSourceName}
+                  {createMode === 'clone' && cloneSourceId && (
+                    <div
+                      className="text-[10px] text-[var(--muted)] mt-1 truncate font-mono"
+                      title={`Source: ${String(drones.find((d) => d.id === cloneSourceId)?.name ?? cloneSourceId)}`}
+                    >
+                      source: {String(drones.find((d) => d.id === cloneSourceId)?.name ?? cloneSourceId)}
                     </div>
                   )}
                 </div>
@@ -6467,7 +6476,7 @@ export default function DroneHubApp() {
             <div className="px-5 py-4 border-t border-[var(--border)] bg-[rgba(0,0,0,.1)] flex items-center justify-between gap-2">
               <button
                 type="button"
-                onClick={() => void clearDroneHubError(droneErrorModal.droneName)}
+                onClick={() => void clearDroneHubError(droneErrorModal.droneId)}
                 disabled={clearingDroneError}
                 className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
                   clearingDroneError
@@ -6961,7 +6970,6 @@ export default function DroneHubApp() {
                       <button
                         type="button"
                         onClick={() => {
-                          if (draftChat?.droneName) clearQueuedPromptsForDrone(draftChat.droneName);
                           setDraftChat(null);
                           setDraftCreateOpen(false);
                           setDraftCreateError(null);
@@ -7068,7 +7076,11 @@ export default function DroneHubApp() {
                   <div className="px-5 py-5">
                     <div className="mx-auto max-w-[980px] space-y-5">
                       <PendingTranscriptTurn item={draftChat.prompt} nowMs={nowMs} />
-                      {(queuedPromptsByDroneChat[droneChatQueueKey(draftChat.droneName, 'default')] ?? []).map((p) => (
+                      {(
+                        draftChat.droneId
+                          ? (queuedPromptsByDroneChat[droneChatQueueKey(draftChat.droneId, 'default')] ?? [])
+                          : []
+                      ).map((p) => (
                         <PendingTranscriptTurn key={`draft-queued-${p.id}`} item={p} nowMs={nowMs} />
                       ))}
                     </div>
@@ -7093,8 +7105,11 @@ export default function DroneHubApp() {
                 attachmentsEnabled={false}
                 onSend={async (payload: ChatSendPayload) => {
                   if (!draftChat.prompt) return await startDraftPrompt(payload);
-                  const name = String(draftChat.droneName ?? '').trim();
-                  if (!name) return false;
+                  const droneId = String(draftChat.droneId ?? '').trim();
+                  if (!droneId) {
+                    setDraftCreateError('Drone is still being created. Please wait a moment.');
+                    return false;
+                  }
                   const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
                   if (attachments.length > 0) {
                     setDraftCreateError('Image attachments are only supported after the drone is created.');
@@ -7102,7 +7117,7 @@ export default function DroneHubApp() {
                   }
                   const prompt = String(payload?.prompt ?? '').trim();
                   if (!prompt) return false;
-                  enqueueQueuedPrompt(name, 'default', prompt);
+                  enqueueQueuedPrompt(droneId, 'default', prompt);
                   setDraftCreateError(null);
                   return true;
                 }}
@@ -7217,11 +7232,12 @@ export default function DroneHubApp() {
                   <div className="h-full min-h-0 w-max flex gap-3 items-stretch pr-4">
                     {selectedGroupMultiChatData.items.map((d) => (
                       <GroupMultiChatColumn
-                        key={`group-chat:${selectedGroupMultiChatData.group}:${d.name}`}
+                        key={`group-chat:${selectedGroupMultiChatData.group}:${d.id}`}
                         drone={d}
+                        droneLabel={uiDroneName(d.name)}
                         preferredChat={selectedChat || 'default'}
                         nowMs={nowMs}
-                        onOpenDrone={() => selectDroneCard(d.name)}
+                        onOpenDrone={() => selectDroneCard(d.id)}
                         onCreateJobs={parseJobsFromAgentMessage}
                         columnWidthPx={groupMultiChatColumnWidth}
                       />
@@ -7310,7 +7326,7 @@ export default function DroneHubApp() {
                     <div className="min-w-0">
                       <div className="flex items-center gap-2.5">
                         <span className="font-semibold text-sm tracking-tight" style={{ fontFamily: 'var(--display)' }}>
-                          {currentDrone.name}
+                          {currentDroneLabel}
                         </span>
                         {showRespondingAsStatusInHeader ? (
                           <span className="inline-flex items-center" title="Agent responding">
@@ -7496,8 +7512,8 @@ export default function DroneHubApp() {
                 {/* Spacer */}
                 <div className="flex-1" />
                 {/* Primary actions */}
-                <button onClick={() => openDroneTerminal('ssh')} disabled={currentDrone.hubPhase === 'starting' || currentDrone.hubPhase === 'seeding' || openingTerminal?.mode === 'ssh' || openingTerminal?.mode === 'agent'} className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${openingTerminal ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]' : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'}`} style={{ fontFamily: 'var(--display)' }} title={`SSH into "${currentDrone.name}"`}>SSH</button>
-                <button onClick={() => openDroneEditor('cursor')} disabled={currentDrone.hubPhase === 'starting' || currentDrone.hubPhase === 'seeding' || Boolean(openingEditor) || Boolean(openingTerminal)} className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${openingEditor || openingTerminal ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]' : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)]'}`} style={{ fontFamily: 'var(--display)' }} title={`Open Cursor attached to "${currentDrone.name}"`}><IconCursorApp className="opacity-70" />Cursor</button>
+                <button onClick={() => openDroneTerminal('ssh')} disabled={currentDrone.hubPhase === 'starting' || currentDrone.hubPhase === 'seeding' || openingTerminal?.mode === 'ssh' || openingTerminal?.mode === 'agent'} className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${openingTerminal ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]' : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'}`} style={{ fontFamily: 'var(--display)' }} title={`SSH into "${currentDroneLabel}"`}>SSH</button>
+                <button onClick={() => openDroneEditor('cursor')} disabled={currentDrone.hubPhase === 'starting' || currentDrone.hubPhase === 'seeding' || Boolean(openingEditor) || Boolean(openingTerminal)} className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${openingEditor || openingTerminal ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]' : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)]'}`} style={{ fontFamily: 'var(--display)' }} title={`Open Cursor attached to "${currentDroneLabel}"`}><IconCursorApp className="opacity-70" />Cursor</button>
                 {(currentDrone.repoAttached ?? Boolean(String(currentDrone.repoPath ?? '').trim())) && (
                   <button
                     type="button"
@@ -7726,7 +7742,7 @@ export default function DroneHubApp() {
                       description={
                         transcriptError
                           ? `Error: ${transcriptError}`
-                          : `Send a prompt to ${currentDrone.name} to see the conversation here.`
+                          : `Send a prompt to ${currentDroneLabel} to see the conversation here.`
                       }
                     />
                   )}
@@ -7757,7 +7773,7 @@ export default function DroneHubApp() {
                       icon={<IconChat className="w-8 h-8 text-[var(--muted)]" />}
                       title="No output yet"
                       description={
-                        sessionError ? `Error: ${sessionError}` : `Send a prompt to ${currentDrone.name} to see the session output here.`
+                        sessionError ? `Error: ${sessionError}` : `Send a prompt to ${currentDroneLabel} to see the session output here.`
                       }
                     />
                   )}

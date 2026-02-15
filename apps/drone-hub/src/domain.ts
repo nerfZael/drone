@@ -15,6 +15,10 @@ export function isValidDroneNameDashCase(name: string): boolean {
   const s = String(name ?? '').trim();
   if (!s) return false;
   if (s.length > 48) return false;
+  // Conservative: docker-ish, URL-ish, and consistent with the hub UI.
+  // - lower-case letters/numbers
+  // - single hyphens between segments
+  // - no leading/trailing hyphen
   return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(s);
 }
 

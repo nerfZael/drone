@@ -6,6 +6,7 @@ import { StatusBadge } from './StatusBadge';
 
 export function DroneCard({
   drone,
+  displayName,
   selected,
   busy,
   onClick,
@@ -24,6 +25,7 @@ export function DroneCard({
   statusHint,
 }: {
   drone: DroneSummary;
+  displayName?: string;
   selected: boolean;
   busy?: boolean;
   onClick: (opts?: { toggle?: boolean; range?: boolean }) => void;
@@ -42,6 +44,7 @@ export function DroneCard({
   statusHint?: string;
   showGroup?: boolean;
 }) {
+  const shownName = String(displayName ?? drone.name).trim() || drone.name;
   const canClone = typeof onClone === 'function';
   const canRename = typeof onRename === 'function';
   const canDelete = typeof onDelete === 'function';
@@ -85,9 +88,9 @@ export function DroneCard({
       <div className="flex-1 min-w-0 flex items-center gap-1.5">
         <span
           className={`flex-1 min-w-0 truncate text-[12.5px] ${selected ? 'font-semibold text-[var(--fg)]' : 'text-[var(--fg-secondary)]'}`}
-          title={`${drone.name} · created ${timeAgo(drone.createdAt)}`}
+          title={`${shownName}${shownName !== drone.name ? ` (${drone.name})` : ''} · created ${timeAgo(drone.createdAt)}`}
         >
-          {drone.name}
+          {shownName}
         </span>
         {statusHint ? (
           <span
@@ -112,7 +115,7 @@ export function DroneCard({
             onPointerDown={stopCardSelection}
             className="flex-shrink-0 ml-2 text-[10px] text-[var(--red)] truncate max-w-[80px] hover:underline focus:outline-none"
             title="View full error details"
-            aria-label={`View error details for ${drone.name}`}
+            aria-label={`View error details for ${shownName}`}
           >
             error
           </button>
@@ -157,8 +160,8 @@ export function DroneCard({
                       ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
                       : 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)] hover:shadow-[var(--glow-accent)]'
                   }`}
-                  title={`Clone "${drone.name}"`}
-                  aria-label={`Clone "${drone.name}"`}
+                  title={`Clone "${shownName}"`}
+                  aria-label={`Clone "${shownName}"`}
                 >
                   <IconClone className="opacity-90" />
                 </button>
@@ -176,8 +179,8 @@ export function DroneCard({
                       ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
                       : 'bg-[rgba(80,130,255,.12)] border-[rgba(90,140,255,.25)] text-[rgb(124,170,255)] hover:bg-[rgba(80,130,255,.18)]'
                   }`}
-                  title={renameDisabled ? `Renaming "${drone.name}"…` : `Rename "${drone.name}"`}
-                  aria-label={renameDisabled ? `Renaming "${drone.name}"` : `Rename "${drone.name}"`}
+                  title={renameDisabled ? `Renaming "${shownName}"…` : `Rename "${shownName}"`}
+                  aria-label={renameDisabled ? `Renaming "${shownName}"` : `Rename "${shownName}"`}
                 >
                   {renameBusy ? <IconSpinner className="opacity-90" /> : <IconRename className="opacity-90" />}
                 </button>
@@ -195,8 +198,8 @@ export function DroneCard({
                       ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
                       : 'bg-[var(--red-subtle)] border-[rgba(255,90,90,.2)] text-[var(--red)] hover:bg-[rgba(255,77,77,.15)]'
                   }`}
-                  title={deleteDisabled ? `Deleting "${drone.name}"…` : `Delete "${drone.name}"`}
-                  aria-label={deleteDisabled ? `Deleting "${drone.name}"` : `Delete "${drone.name}"`}
+                  title={deleteDisabled ? `Deleting "${shownName}"…` : `Delete "${shownName}"`}
+                  aria-label={deleteDisabled ? `Deleting "${shownName}"` : `Delete "${shownName}"`}
                 >
                   {deleteBusy ? <IconSpinner className="opacity-90" /> : <IconTrash className="opacity-90" />}
                 </button>

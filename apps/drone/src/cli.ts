@@ -8,7 +8,7 @@ import net from 'node:net';
 import path from 'node:path';
 
 import { health, procStart, procStop, readOutput, sendInput, sendKeys, status } from './host/api';
-import { dvmCreate, dvmExec, dvmLs, dvmPorts, dvmRemove, dvmRename, dvmScript, dvmSessionStart } from './host/dvm';
+import { dvmCreate, dvmExec, dvmLs, dvmPorts, dvmRemove, dvmScript, dvmSessionStart } from './host/dvm';
 import { droneRootPath } from './host/paths';
 import { loadRegistry, updateRegistry } from './host/registry';
 import { startDroneHubApiServer } from './hub/server';
@@ -72,6 +72,41 @@ function normalizeDroneIdentity(raw: unknown): string | undefined {
   return id;
 }
 
+function stableContainerNameFromDroneId(droneId: string): string {
+  const id = String(droneId ?? '').trim();
+  if (!id) throw new Error('missing drone id for container name');
+  const uuid = parseUuid(id);
+  if (uuid) return `drone-${uuid.toLowerCase()}`;
+  const hex = crypto.createHash('sha256').update(id, 'utf8').digest('hex').slice(0, 32);
+  return `drone-${hex}`;
+}
+
+function resolveDroneFromRegistry(reg: Awaited<ReturnType<typeof loadRegistry>>, nameRaw: string): { key: string; drone: any; containerName: string } {
+  const name = String(nameRaw ?? '').trim();
+  if (!name) throw new Error('missing drone name');
+  const byKey = (reg as any)?.drones?.[name] ?? null;
+  if (byKey) {
+    const containerName = String(byKey?.containerName ?? byKey?.name ?? name).trim() || name;
+    return { key: name, drone: byKey, containerName };
+  }
+  const entries = Object.entries((reg as any)?.drones ?? {});
+  const byValueName = entries.find(([, v]) => String((v as any)?.name ?? '').trim() === name) ?? null;
+  if (byValueName) {
+    const key = String(byValueName[0]);
+    const drone = byValueName[1] as any;
+    const containerName = String(drone?.containerName ?? drone?.name ?? key).trim() || key;
+    return { key, drone, containerName };
+  }
+  const byContainer = entries.find(([, v]) => String((v as any)?.containerName ?? '').trim() === name) ?? null;
+  if (byContainer) {
+    const key = String(byContainer[0]);
+    const drone = byContainer[1] as any;
+    const containerName = String(drone?.containerName ?? drone?.name ?? key).trim() || key;
+    return { key, drone, containerName };
+  }
+  throw new Error(`unknown drone: ${name} (not in registry)`);
+}
+
 function parseCreateOptions(options: CreateCommandOptions): ParsedCreateOptions {
   const repoArg = String(options.repo ?? '').trim();
   const repoPath =
@@ -85,10 +120,24 @@ function parseCreateOptions(options: CreateCommandOptions): ParsedCreateOptions 
   return { group, containerPort, cwd, mkdir: Boolean(options.mkdir), repoPath, droneId };
 }
 
-function isValidDroneNameDashCase(name: string): boolean {
-  const n = String(name ?? '').trim();
-  if (!n || n.length > 48) return false;
-  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(n);
+const DRONE_DISPLAY_NAME_MAX_LEN = 80;
+function normalizeDroneDisplayName(raw: any): string {
+  const s = String(raw ?? '').trim();
+  if (!s) throw new Error('missing drone name');
+  if (s.length > DRONE_DISPLAY_NAME_MAX_LEN) throw new Error(`invalid drone name (max ${DRONE_DISPLAY_NAME_MAX_LEN} chars)`);
+  if (/[\r\n]/.test(s)) throw new Error('invalid drone name (no newlines)');
+  return s;
+}
+function registryHasDisplayName(reg: Awaited<ReturnType<typeof loadRegistry>>, nameRaw: string): boolean {
+  const name = String(nameRaw ?? '').trim();
+  if (!name) return false;
+  for (const d of Object.values((reg as any)?.drones ?? {}) as any[]) {
+    if (String(d?.name ?? '').trim() === name) return true;
+  }
+  for (const d of Object.values((reg as any)?.pending ?? {}) as any[]) {
+    if (String(d?.name ?? '').trim() === name) return true;
+  }
+  return false;
 }
 
 async function readAllStdin(): Promise<string> {
@@ -121,6 +170,11 @@ function parseChatId(text: string): string | null {
   return m ? m[0] : null;
 }
 
+function parseUuid(text: string): string | null {
+  const m = String(text).match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  return m ? m[0] : null;
+}
+
 async function createCursorAgentChatId(containerName: string): Promise<string> {
   const r = await dvmExec(containerName, 'bash', ['-lc', 'agent create-chat']);
   if (r.code !== 0) throw new Error(r.stderr || r.stdout || 'agent create-chat failed');
@@ -131,17 +185,15 @@ async function createCursorAgentChatId(containerName: string): Promise<string> {
 
 async function ensureChatId(opts: { droneName: string; chatName: string; model?: string; reset?: boolean }): Promise<string> {
   const reg = await loadRegistry();
-  const d = reg.drones[opts.droneName];
-  if (!d) throw new Error(`unknown drone: ${opts.droneName} (not in registry)`);
+  const { key, drone: d, containerName } = resolveDroneFromRegistry(reg, opts.droneName);
 
   d.chats = d.chats ?? {};
   const existing = d.chats[opts.chatName];
   if (existing && !opts.reset && typeof existing.chatId === 'string' && existing.chatId.trim()) return existing.chatId;
 
-  const createdId = await createCursorAgentChatId(d.name);
+  const createdId = await createCursorAgentChatId(containerName);
   return await updateRegistry((reg2) => {
-    const d2 = reg2.drones[opts.droneName];
-    if (!d2) throw new Error(`unknown drone: ${opts.droneName} (not in registry)`);
+    const { key: key2, drone: d2 } = resolveDroneFromRegistry(reg2 as any, key);
     d2.chats = d2.chats ?? {};
     const cur = d2.chats[opts.chatName];
     const curId = cur && typeof (cur as any).chatId === 'string' ? String((cur as any).chatId).trim() : '';
@@ -152,7 +204,7 @@ async function ensureChatId(opts: { droneName: string; chatName: string; model?:
       createdAt: new Date().toISOString(),
       ...(opts.model ? { model: opts.model } : {}),
     } as any;
-    reg2.drones[opts.droneName] = d2 as any;
+    (reg2 as any).drones[key2] = d2 as any;
     return createdId;
   });
 }
@@ -165,8 +217,7 @@ async function recordChatTurn(opts: {
   logPath: string;
 }): Promise<void> {
   await updateRegistry((reg) => {
-    const d = reg.drones[opts.droneName];
-    if (!d) throw new Error(`unknown drone: ${opts.droneName} (not in registry)`);
+    const { key, drone: d } = resolveDroneFromRegistry(reg as any, opts.droneName);
     d.chats = d.chats ?? {};
     d.chats[opts.chatName] = d.chats[opts.chatName] ?? { chatId: '', createdAt: new Date().toISOString() };
     const entry: any = d.chats[opts.chatName];
@@ -178,7 +229,7 @@ async function recordChatTurn(opts: {
       logPath: opts.logPath,
     });
     d.chats[opts.chatName] = entry;
-    reg.drones[opts.droneName] = d;
+    (reg as any).drones[key] = d;
   });
 }
 
@@ -452,11 +503,10 @@ async function withDroneClient<T>(
   fn: (ctx: { drone: DroneRegistryEntry; hostPort: number; client: DroneClient }) => Promise<T>
 ): Promise<T> {
   const reg = await loadRegistry();
-  const d = reg.drones[name];
-  if (!d) throw new Error(`unknown drone: ${name} (not in registry)`);
-  const hostPort = await resolveHostPort(d.name, d.containerPort);
-  const client = makeClient(hostPort, d.token);
-  return await fn({ drone: d, hostPort, client });
+  const { drone, containerName } = resolveDroneFromRegistry(reg, name);
+  const hostPort = await resolveHostPort(containerName, Number((drone as any)?.containerPort ?? 7777));
+  const client = makeClient(hostPort, (drone as any).token);
+  return await fn({ drone: drone as any, hostPort, client });
 }
 
 async function waitForHealth(hostPort: number, token: string, timeoutMs = 15_000) {
@@ -501,7 +551,7 @@ program.name('drone').description('Manage per-container drone daemons via dvm');
 const createCommand = addCreateOptions(
   program
     .command('create')
-    .argument('<name>', 'Container name (one drone per container)')
+    .argument('<name>', 'Drone display name (dash-case; used for CLI/UI lookups)')
 );
 
 createCommand
@@ -512,6 +562,9 @@ createCommand
     if (options.build) await ensureDaemonBuilt(repoPath);
 
     const token = crypto.randomBytes(32).toString('base64url');
+    const stableId = droneId ?? crypto.randomUUID();
+    const containerName = stableContainerNameFromDroneId(stableId);
+    const displayName = normalizeDroneDisplayName(name);
 
     // Pick truly free host ports (dvm's auto-allocation only checks Docker ports, not host processes).
     const hostPortDaemon = await getFreeTcpPort();
@@ -521,18 +574,18 @@ createCommand
     const hostPort3001 = await getFreeTcpPort();
     const hostPort5173 = await getFreeTcpPort();
     const hostPort5174 = await getFreeTcpPort();
-    await dvmCreate(name, [
+    await dvmCreate(containerName, [
       '--ports',
       `${hostPortDaemon}:${containerPort},${hostPortRdp}:3389,${hostPortNoVnc}:6080,${hostPort3000}:3000,${hostPort3001}:3001,${hostPort5173}:5173,${hostPort5174}:5174`,
     ]);
 
-    const hostPort = await resolveHostPort(name, containerPort);
+    const hostPort = await resolveHostPort(containerName, containerPort);
 
     if (cwd) {
       const ensureCmd = mkdir
         ? `mkdir -p ${bashQuote(cwd)}`
         : `test -d ${bashQuote(cwd)} || (echo "cwd does not exist: ${cwd} (pass --mkdir to create)" 1>&2; exit 1)`;
-      const ensured = await dvmExec(name, 'bash', ['-lc', ensureCmd]);
+      const ensured = await dvmExec(containerName, 'bash', ['-lc', ensureCmd]);
       if (ensured.code !== 0) {
         throw new Error(ensured.stderr || ensured.stdout || `failed ensuring --cwd: ${cwd}`);
       }
@@ -540,7 +593,7 @@ createCommand
 
     // Persist token inside container too (so daemon can read it).
     const writeTokenCmd = `mkdir -p /dvm-data/drone && umask 077 && printf %s '${token}' > /dvm-data/drone/token`;
-    const wr = await dvmExec(name, 'bash', ['-lc', writeTokenCmd]);
+    const wr = await dvmExec(containerName, 'bash', ['-lc', writeTokenCmd]);
     if (wr.code !== 0) throw new Error(wr.stderr || wr.stdout || 'failed writing token in container');
 
     // Install daemon JS into the container persistence volume (no bind mount required).
@@ -558,16 +611,16 @@ chmod +x /dvm-data/drone/daemon.js
 
     const tmpDir = droneRootPath('tmp');
     await fs.mkdir(tmpDir, { recursive: true });
-    const tmpScriptPath = path.join(tmpDir, `install-daemon-${name}-${Date.now()}.sh`);
+    const tmpScriptPath = path.join(tmpDir, `install-daemon-${stableId}-${Date.now()}.sh`);
     await fs.writeFile(tmpScriptPath, installScript, { mode: 0o700 });
     try {
-      await dvmScript(name, tmpScriptPath);
+      await dvmScript(containerName, tmpScriptPath);
     } finally {
       await fs.rm(tmpScriptPath, { force: true });
     }
 
     await dvmSessionStart(
-      name,
+      containerName,
       'drone-daemon',
       'bash',
       ['-lc', `node /dvm-data/drone/daemon.js --host 0.0.0.0 --port ${containerPort} --data-dir /dvm-data/drone --token-file /dvm-data/drone/token`],
@@ -578,14 +631,15 @@ chmod +x /dvm-data/drone/daemon.js
 
     await updateRegistry((reg) => {
       const at = new Date().toISOString();
-      const stableId = droneId ?? crypto.randomUUID();
+      if (registryHasDisplayName(reg, displayName)) throw new Error(`drone already exists: ${displayName}`);
       if (group) {
         (reg as any).groups = (reg as any).groups ?? {};
         if (!(reg as any).groups[group]) (reg as any).groups[group] = { name: group, createdAt: at, updatedAt: at };
       }
-      reg.drones[name] = {
+      reg.drones[stableId] = {
         id: stableId,
-        name,
+        name: displayName,
+        containerName,
         group,
         cwd,
         hostPort,
@@ -597,29 +651,46 @@ chmod +x /dvm-data/drone/daemon.js
     });
 
     // eslint-disable-next-line no-console
-    console.log(JSON.stringify({ ok: true, name, hostPort, containerPort, ...(cwd ? { cwd } : {}) }, null, 2));
+    console.log(
+      JSON.stringify({ ok: true, id: stableId, name: displayName, containerName, hostPort, containerPort, ...(cwd ? { cwd } : {}) }, null, 2)
+    );
   });
 
 const importCommand = addCreateOptions(
   program
     .command('import')
     .description('Register an already-running drone container into the local registry')
-    .argument('<name>', 'Drone/container name')
+    .argument('<name>', 'Drone display name (registry key)')
 );
 
 importCommand
+  .option('--container <name>', 'Existing container name to import (defaults to derived from --drone-id when provided)')
   .action(async (name, options) => {
     const { repoPath, group, containerPort, cwd, mkdir, droneId } = parseCreateOptions(options);
 
-    const hostPort = await resolveHostPort(String(name), containerPort);
-    const token = await readTokenFromContainer(String(name));
+    const displayName = normalizeDroneDisplayName(name);
+
+    const regSnap = await loadRegistry();
+    let existingId = '';
+    try {
+      const resolved = resolveDroneFromRegistry(regSnap, displayName);
+      existingId = typeof (resolved.drone as any)?.id === 'string' ? String((resolved.drone as any).id).trim() : '';
+    } catch {
+      existingId = '';
+    }
+    const stableId = (droneId ?? existingId) || crypto.randomUUID();
+    const derivedContainerName = stableContainerNameFromDroneId(stableId);
+    const containerName = String((options as any)?.container ?? '').trim() || derivedContainerName;
+
+    const hostPort = await resolveHostPort(containerName, containerPort);
+    const token = await readTokenFromContainer(containerName);
     await waitForHealth(hostPort, token);
 
     if (cwd) {
       const ensureCmd = mkdir
         ? `mkdir -p ${bashQuote(cwd)}`
         : `test -d ${bashQuote(cwd)} || (echo "cwd does not exist: ${cwd} (pass --mkdir to create)" 1>&2; exit 1)`;
-      const ensured = await dvmExec(String(name), 'bash', ['-lc', ensureCmd]);
+      const ensured = await dvmExec(containerName, 'bash', ['-lc', ensureCmd]);
       if (ensured.code !== 0) {
         throw new Error(ensured.stderr || ensured.stdout || `failed ensuring --cwd: ${cwd}`);
       }
@@ -627,16 +698,20 @@ importCommand
 
     await updateRegistry((reg) => {
       const at = new Date().toISOString();
-      const existingId =
-        typeof (reg as any)?.drones?.[String(name)]?.id === 'string' ? String((reg as any).drones[String(name)].id).trim() : '';
-      const stableId = (droneId ?? existingId) || crypto.randomUUID();
+      // Enforce unique display names (unless this is updating the same id).
+      for (const [k, v] of Object.entries((reg as any)?.drones ?? {})) {
+        if (String((v as any)?.name ?? '').trim() === displayName && String(k) !== String(stableId)) {
+          throw new Error(`drone already exists: ${displayName}`);
+        }
+      }
       if (group) {
         (reg as any).groups = (reg as any).groups ?? {};
         if (!(reg as any).groups[group]) (reg as any).groups[group] = { name: group, createdAt: at, updatedAt: at };
       }
-      reg.drones[String(name)] = {
+      reg.drones[stableId] = {
         id: stableId,
-        name: String(name),
+        name: displayName,
+        containerName,
         group,
         cwd,
         hostPort,
@@ -648,22 +723,36 @@ importCommand
     });
 
     // eslint-disable-next-line no-console
-    console.log(JSON.stringify({ ok: true, name: String(name), hostPort, containerPort, ...(cwd ? { cwd } : {}) }, null, 2));
+    console.log(
+      JSON.stringify({ ok: true, id: stableId, name: displayName, containerName, hostPort, containerPort, ...(cwd ? { cwd } : {}) }, null, 2)
+    );
   });
 
 program
   .command('rm')
   .alias('remove')
   .description('Remove a drone: delete container + remove from registry')
-  .argument('<name>', 'Drone/container name')
+  .argument('<name>', 'Drone display name (or container name for legacy)')
   .option('--keep-volume', 'Keep the dvm persistence volume (dvm-<name>-data)', false)
   .option('--forget', 'Remove from registry even if container removal fails', true)
   .action(async (name, options) => {
-    const hadEntry = Boolean((await loadRegistry()).drones[String(name)]);
+    const regSnap = await loadRegistry();
+    const nameStr = String(name ?? '').trim();
+    let containerName = nameStr;
+    let resolvedKey: string | null = null;
+    try {
+      const resolved = resolveDroneFromRegistry(regSnap, nameStr);
+      resolvedKey = resolved.key;
+      containerName = resolved.containerName;
+    } catch {
+      // Not in registry; treat as raw container name.
+      containerName = nameStr;
+    }
+    const hadEntry = Boolean(resolvedKey);
 
     let removeErr: string | null = null;
     try {
-      await dvmRemove(String(name), { keepVolume: Boolean(options.keepVolume) });
+      await dvmRemove(containerName, { keepVolume: Boolean(options.keepVolume) });
     } catch (err: any) {
       removeErr = err?.message ?? String(err);
     }
@@ -671,8 +760,9 @@ program
     let removedRegistry = false;
     if (options.forget) {
       removedRegistry = await updateRegistry((reg) => {
-        if (reg.drones[String(name)]) {
-          delete reg.drones[String(name)];
+        const key = resolvedKey ? String(resolvedKey) : '';
+        if (key && (reg as any)?.drones?.[key]) {
+          delete (reg as any).drones[key];
           return true;
         }
         return false;
@@ -682,22 +772,27 @@ program
     if (removeErr) throw new Error(removeErr);
 
     // eslint-disable-next-line no-console
-    console.log(JSON.stringify({ ok: true, name: String(name), removedRegistry: removedRegistry || hadEntry }, null, 2));
+    console.log(
+      JSON.stringify(
+        { ok: true, id: resolvedKey, name: nameStr, containerName, removedRegistry: removedRegistry || hadEntry },
+        null,
+        2
+      )
+    );
   });
 
 program
   .command('rename')
-  .description('Rename a drone/container quickly and migrate host registry metadata')
-  .argument('<oldName>', 'Existing drone/container name')
-  .argument('<newName>', 'New drone/container name')
-  .option('--start', 'Start the renamed container even if old one was stopped')
-  .option('--no-start', 'Do not start the renamed container even if old one was running')
-  .option('--migrate-volume-name', 'Also migrate persistence volume name to dvm-<new>-data (slower)', false)
+  .description('Rename a drone display name (container name stays stable)')
+  .argument('<oldName>', 'Existing drone name (display name)')
+  .argument('<newName>', 'New drone name (display name)')
+  // Back-compat flags (ignored): container renames are no longer the default.
+  .option('--start', '(deprecated/ignored) Start the container after rename (container rename no longer happens)', false)
+  .option('--no-start', '(deprecated/ignored) Do not start the container after rename (container rename no longer happens)', undefined)
+  .option('--migrate-volume-name', '(deprecated/ignored) Migrate persistence volume name', false)
   .action(async (oldNameRaw, newNameRaw, options) => {
-    const oldName = String(oldNameRaw ?? '').trim();
-    const newName = String(newNameRaw ?? '').trim();
-    if (!isValidDroneNameDashCase(oldName)) throw new Error(`invalid old drone name: ${oldName}`);
-    if (!isValidDroneNameDashCase(newName)) throw new Error(`invalid new drone name: ${newName}`);
+    const oldName = normalizeDroneDisplayName(oldNameRaw);
+    const newName = normalizeDroneDisplayName(newNameRaw);
     if (oldName === newName) {
       // eslint-disable-next-line no-console
       console.log(JSON.stringify({ ok: true, oldName, newName, renamed: false, reason: 'same-name' }, null, 2));
@@ -705,54 +800,39 @@ program
     }
 
     const reg = await loadRegistry();
-    const oldEntry = reg.drones[oldName];
-    if (!oldEntry) throw new Error(`unknown drone: ${oldName} (not in registry)`);
-    if (reg.drones[newName]) throw new Error(`drone already exists: ${newName}`);
-    if ((reg as any)?.pending?.[newName]) throw new Error(`cannot rename to ${newName}: pending drone already exists`);
-
-    const startMode = options.start === false ? 'never' : options.start === true ? 'always' : 'preserve';
-    await dvmRename(oldEntry.name, newName, {
-      startMode,
-      migrateVolumeName: Boolean(options.migrateVolumeName),
-    });
-    const sourceContainerName = String(oldEntry.name ?? oldName).trim() || oldName;
-    const hostPort = (await resolveHostPort(newName, oldEntry.containerPort).catch(() => null)) ?? oldEntry.hostPort;
-
-    try {
-      await updateRegistry((reg2: any) => {
-        const cur = reg2?.drones?.[oldName];
-        if (!cur) throw new Error(`drone disappeared from registry during rename: ${oldName}`);
-        if (reg2?.drones?.[newName]) throw new Error(`drone already exists in registry: ${newName}`);
-        delete reg2.drones[oldName];
-        const curId = normalizeDroneIdentity(cur?.id);
-        if (!curId) throw new Error(`missing drone identity during rename: ${oldName}`);
-        cur.id = curId;
-        cur.name = newName;
-        if (typeof hostPort === 'number' && Number.isFinite(hostPort)) cur.hostPort = hostPort;
-        reg2.drones[newName] = cur;
-
-        // Keep queued clone workflows coherent if they referenced the old name.
-        if (reg2?.pending && typeof reg2.pending === 'object') {
-          for (const p of Object.values(reg2.pending) as any[]) {
-            if (String(p?.cloneFrom ?? '').trim() === oldName) {
-              p.cloneFrom = newName;
-            }
-          }
-        }
-      });
-    } catch (e: any) {
-      // Keep CLI semantics aligned with Hub endpoint behavior:
-      // if registry update fails after Docker rename, attempt rollback.
-      try {
-        await dvmRename(newName, sourceContainerName, { startMode: 'preserve', migrateVolumeName: false });
-      } catch {
-        // ignore rollback failure; throw original error below
+    const { key: oldKey, drone: oldEntry, containerName } = resolveDroneFromRegistry(reg, oldName);
+    for (const [k, v] of Object.entries((reg as any)?.drones ?? {})) {
+      if (String((v as any)?.name ?? '').trim() === newName && String(k) !== String(oldKey)) {
+        throw new Error(`drone already exists: ${newName}`);
       }
-      throw e;
     }
 
+    await updateRegistry((reg2: any) => {
+      const cur = reg2?.drones?.[oldKey] ?? null;
+      if (!cur) throw new Error(`drone disappeared from registry during rename: ${oldName}`);
+      const curId = normalizeDroneIdentity(cur?.id) ?? crypto.randomUUID();
+      cur.id = curId;
+      cur.name = newName;
+      cur.containerName = String(cur?.containerName ?? containerName).trim() || containerName;
+      reg2.drones[oldKey] = cur;
+    });
+
     // eslint-disable-next-line no-console
-    console.log(JSON.stringify({ ok: true, oldName, newName, hostPort, containerPort: oldEntry.containerPort }, null, 2));
+    console.log(
+      JSON.stringify(
+        {
+          ok: true,
+          id: oldKey,
+          oldName,
+          newName,
+          containerName,
+          hostPort: (oldEntry as any)?.hostPort ?? null,
+          containerPort: Number((oldEntry as any)?.containerPort ?? 7777),
+        },
+        null,
+        2
+      )
+    );
   });
 
 program
@@ -763,12 +843,16 @@ program
   .option('--keep-volume', 'Keep dvm persistence volumes', false)
   .action(async (options) => {
     const reg = await loadRegistry();
-    const inRegistry = Object.keys(reg.drones);
+    const registryEntries = Object.entries((reg as any)?.drones ?? {}) as Array<[string, any]>;
+    const inRegistryContainers = registryEntries
+      .map(([key, d]) => String(d?.containerName ?? d?.name ?? key).trim())
+      .filter(Boolean);
+    const inRegistryContainerSet = new Set(inRegistryContainers);
 
     let orphans: string[] = [];
     if (options.orphans) {
       const all = await dvmLs();
-      const candidates = all.filter((n) => !reg.drones[n]);
+      const candidates = all.filter((n) => !inRegistryContainerSet.has(String(n)));
       const found: string[] = [];
       for (const c of candidates) {
         try {
@@ -780,7 +864,7 @@ program
       orphans = found;
     }
 
-    const targets = [...new Set([...inRegistry, ...orphans])].sort();
+    const targets = [...new Set([...inRegistryContainers, ...orphans])].sort();
     if (targets.length === 0) {
       // eslint-disable-next-line no-console
       console.log(JSON.stringify({ ok: true, removed: 0, targets: [] }, null, 2));
@@ -814,11 +898,22 @@ program
       } catch (err: any) {
         errors.push({ name: t, error: err?.message ?? String(err) });
       }
-      if (reg.drones[t]) delete reg.drones[t];
+      // Remove any registry entries that reference this container.
+      for (const [key, d] of Object.entries((reg as any)?.drones ?? {})) {
+        const c = String((d as any)?.containerName ?? (d as any)?.name ?? key).trim();
+        if (c && c === t) {
+          delete (reg as any).drones[key];
+        }
+      }
     }
     await updateRegistry((regLatest) => {
       for (const t of targets) {
-        if (regLatest.drones[t]) delete regLatest.drones[t];
+        for (const [key, d] of Object.entries((regLatest as any)?.drones ?? {})) {
+          const c = String((d as any)?.containerName ?? (d as any)?.name ?? key).trim();
+          if (c && c === t) {
+            delete (regLatest as any).drones[key];
+          }
+        }
       }
     });
 
@@ -850,9 +945,18 @@ program
       }
 
       try {
-        const hostPort = await resolveHostPort(d.name, d.containerPort);
+        const containerName = String((d as any)?.containerName ?? (d as any)?.name ?? '').trim() || String((d as any)?.name ?? '');
+        const hostPort = await resolveHostPort(containerName, d.containerPort);
         const s = await status(makeClient(hostPort, d.token));
-        out.push({ name: d.name, group: d.group ?? null, hostPort, containerPort: d.containerPort, ok: true, status: s });
+        out.push({
+          name: d.name,
+          containerName,
+          group: d.group ?? null,
+          hostPort,
+          containerPort: d.containerPort,
+          ok: true,
+          status: s,
+        });
       } catch (err: any) {
         out.push({ name: d.name, group: d.group ?? null, ok: false, error: err?.message ?? String(err) });
       }
@@ -909,7 +1013,7 @@ program
   .command('group-set')
   .alias('set-group')
   .description('Assign (or reassign) a drone to a group')
-  .argument('<name>', 'Drone/container name')
+  .argument('<name>', 'Drone display name')
   .argument('<group>', 'Group name')
   .action(async (name, groupRaw) => {
     const group = String(groupRaw ?? '').trim();
@@ -919,11 +1023,10 @@ program
       const at = new Date().toISOString();
       (reg as any).groups = (reg as any).groups ?? {};
       if (!(reg as any).groups[group]) (reg as any).groups[group] = { name: group, createdAt: at, updatedAt: at };
-      const d = reg.drones[String(name)];
-      if (!d) throw new Error(`unknown drone: ${String(name)} (not in registry)`);
+      const { key, drone: d } = resolveDroneFromRegistry(reg as any, String(name));
       const prev = String(d.group ?? '').trim() || null;
       d.group = group;
-      reg.drones[String(name)] = d;
+      (reg as any).drones[key] = d;
       return prev;
     });
 
@@ -935,14 +1038,13 @@ program
   .command('group-clear')
   .alias('ungroup')
   .description('Clear a drone group assignment')
-  .argument('<name>', 'Drone/container name')
+  .argument('<name>', 'Drone display name')
   .action(async (name) => {
     const prev = await updateRegistry((reg) => {
-      const d = reg.drones[String(name)];
-      if (!d) throw new Error(`unknown drone: ${String(name)} (not in registry)`);
+      const { key, drone: d } = resolveDroneFromRegistry(reg as any, String(name));
       const prev = String(d.group ?? '').trim() || null;
       delete (d as any).group;
-      reg.drones[String(name)] = d;
+      (reg as any).drones[key] = d;
       return prev;
     });
 
@@ -1417,13 +1519,12 @@ program
 program
   .command('agent-chats')
   .description('Inspect persisted Cursor Agent chats, turns, and transcripts')
-  .argument('<name>', 'Drone/container name')
+  .argument('<name>', 'Drone display name')
   .option('--chat <name>', 'Chat name (if omitted: list all chats)')
   .option('--turn <n>', 'Turn number (1-based), or: last|all (requires --chat)')
   .action(async (name, options) => {
     const reg = await loadRegistry();
-    const d = reg.drones[String(name)];
-    if (!d) throw new Error(`unknown drone: ${name} (not in registry)`);
+    const { drone: d, containerName } = resolveDroneFromRegistry(reg, String(name));
 
     const chats = d.chats ?? {};
     const chatOpt = options?.chat ? String(options.chat) : '';
@@ -1486,7 +1587,7 @@ program
         const logPath = String((t as any)?.logPath ?? '');
         process.stdout.write(`--- OUTPUT (${logPath || 'missing logPath'}) ---\n`);
         if (!logPath) throw new Error('missing logPath for legacy turn');
-        const r = await dvmExec(d.name, 'bash', [
+        const r = await dvmExec(containerName, 'bash', [
           '-lc',
           `cat ${bashQuote(logPath)} 2>/dev/null || (echo "missing log: ${logPath}" 1>&2; exit 1)`,
         ]);
@@ -1501,16 +1602,15 @@ program
 program
   .command('agent-reset')
   .description('Forget a persisted Cursor Agent chatId (host-side)')
-  .argument('<name>', 'Drone/container name')
+  .argument('<name>', 'Drone display name')
   .option('--chat <name>', 'Chat name to reset', 'default')
   .action(async (name, options) => {
     const chatName = String(options.chat || 'default');
     const had = await updateRegistry((reg) => {
-      const d = reg.drones[String(name)];
-      if (!d) throw new Error(`unknown drone: ${name} (not in registry)`);
+      const { key, drone: d } = resolveDroneFromRegistry(reg as any, String(name));
       const had = Boolean(d.chats?.[chatName]);
       if (d.chats) delete d.chats[chatName];
-      reg.drones[String(name)] = d;
+      (reg as any).drones[key] = d;
       return had;
     });
     // eslint-disable-next-line no-console
@@ -1520,17 +1620,16 @@ program
 program
   .command('exec')
   .description('Run a command inside the drone container (wrapper around dvm exec)')
-  .argument('<name>', 'Drone/container name')
+  .argument('<name>', 'Drone display name')
   .action(async (name) => {
     const reg = await loadRegistry();
-    const d = reg.drones[String(name)];
-    if (!d) throw new Error(`unknown drone: ${name} (not in registry)`);
+    const { containerName } = resolveDroneFromRegistry(reg, String(name));
     const idx = process.argv.indexOf('--');
     if (idx === -1) throw new Error('usage: drone exec <name> -- <cmd> [args...]');
     const parts = process.argv.slice(idx + 1);
     if (parts.length === 0) throw new Error('missing cmd');
     const [cmd, ...args] = parts;
-    const r = await dvmExec(d.name, cmd, args);
+    const r = await dvmExec(containerName, cmd, args);
     if (r.stdout) process.stdout.write(r.stdout);
     if (r.stderr) process.stderr.write(r.stderr);
     if (r.code !== 0) process.exitCode = r.code;

@@ -2,6 +2,7 @@ import React from 'react';
 import type { DronePortMapping, PortReachabilityByHostPort } from '../types';
 
 export function DroneLinksDock({
+  droneId,
   droneName,
   agentLabel,
   chatName,
@@ -12,6 +13,7 @@ export function DroneLinksDock({
   portsLoading,
   portsError,
 }: {
+  droneId: string;
   droneName: string;
   agentLabel: string;
   chatName: string;

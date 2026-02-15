@@ -1,8 +1,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { droneRootPath } from './paths';
 
-export type DroneRegistry = {
+type DroneRegistryV1 = {
   version: 1;
   /**
    * Hub/user settings persisted on the host machine.
@@ -100,6 +101,13 @@ export type DroneRegistry = {
       id?: string;
       name: string;
       /**
+       * Stable internal container name.
+       *
+       * - This should NOT change when the drone is renamed in the UI/registry.
+       * - When absent (older registries), treat `name` (or the registry key) as the container name.
+       */
+      containerName?: string;
+      /**
        * Optional group name for organizing drones in the Hub UI.
        * This is host-side metadata (stored in the host drone registry file).
        */
@@ -189,6 +197,61 @@ export type DroneRegistry = {
           }>;
         }
       >;
+    }
+  >;
+  /**
+   * Legacy rename alias map (old name -> new name).
+   * Deprecated: v2 uses stable ids for addressing, so aliases are not needed.
+   */
+  nameAliases?: Record<string, { to: string; at?: string }>;
+};
+
+export type DroneRegistry = {
+  version: 2;
+  /**
+   * Hub/user settings persisted on the host machine.
+   */
+  settings?: DroneRegistryV1['settings'];
+  repos?: DroneRegistryV1['repos'];
+  groups?: DroneRegistryV1['groups'];
+  /**
+   * Hub-side, short-lived entries for drones that are being provisioned.
+   *
+   * Keyed by stable drone id.
+   */
+  pending?: Record<
+    string,
+    Omit<NonNullable<DroneRegistryV1['pending']>[string], 'id'> & {
+      id: string;
+      /**
+       * User-visible mutable name (can change over time).
+       * All addressing should use `id`.
+       */
+      name: string;
+      /**
+       * Stable internal container name.
+       */
+      containerName?: string;
+    }
+  >;
+  /**
+   * Persistent drones.
+   *
+   * Keyed by stable drone id.
+   */
+  drones: Record<
+    string,
+    Omit<DroneRegistryV1['drones'][string], 'id' | 'name'> & {
+      id: string;
+      /**
+       * User-visible mutable name (can change over time).
+       * All addressing should use `id`.
+       */
+      name: string;
+      /**
+       * Stable internal container name (does not change on rename).
+       */
+      containerName: string;
     }
   >;
 };
@@ -282,11 +345,110 @@ export async function loadRegistry(): Promise<DroneRegistry> {
   const p = registryPath();
   try {
     const raw = await fs.readFile(p, 'utf8');
-    const parsed = JSON.parse(raw) as DroneRegistry;
-    if (parsed?.version !== 1 || !parsed.drones) throw new Error('bad registry');
-    return parsed;
+    const parsedAny = JSON.parse(raw) as any;
+
+    // v2 registry: keyed by id.
+    if (parsedAny?.version === 2 && parsedAny?.drones && typeof parsedAny.drones === 'object' && !Array.isArray(parsedAny.drones)) {
+      const parsed = parsedAny as DroneRegistry;
+      // Back-compat: ensure id/containerName exist and match key.
+      for (const [key, entryAny] of Object.entries(parsed.drones ?? {})) {
+        const entry = entryAny as any;
+        if (!entry || typeof entry !== 'object') continue;
+        const id = typeof entry.id === 'string' && entry.id.trim() ? entry.id.trim() : String(key);
+        entry.id = id;
+        const name = typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim() : 'Untitled';
+        entry.name = name;
+        const containerName =
+          typeof entry.containerName === 'string' && entry.containerName.trim()
+            ? entry.containerName.trim()
+            : typeof entry.id === 'string' && entry.id.trim()
+              ? `drone-${entry.id}`
+              : 'drone-unknown';
+        entry.containerName = containerName;
+        (parsed.drones as any)[key] = entry;
+      }
+      for (const [key, entryAny] of Object.entries(parsed.pending ?? {})) {
+        const entry = entryAny as any;
+        if (!entry || typeof entry !== 'object') continue;
+        const id = typeof entry.id === 'string' && entry.id.trim() ? entry.id.trim() : String(key);
+        entry.id = id;
+        const name = typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim() : 'Untitled';
+        entry.name = name;
+        const containerName =
+          typeof entry.containerName === 'string' && entry.containerName.trim()
+            ? entry.containerName.trim()
+            : typeof entry.id === 'string' && entry.id.trim()
+              ? `drone-${entry.id}`
+              : undefined;
+        if (containerName) entry.containerName = containerName;
+        (parsed.pending as any)[key] = entry;
+      }
+      return parsed;
+    }
+
+    // v1 registry: keyed by display name. Migrate to v2 keyed by id.
+    if (parsedAny?.version === 1 && parsedAny?.drones && typeof parsedAny.drones === 'object' && !Array.isArray(parsedAny.drones)) {
+      const v1 = parsedAny as DroneRegistryV1;
+      const out: DroneRegistry = {
+        version: 2,
+        settings: v1.settings,
+        repos: v1.repos,
+        groups: v1.groups,
+        drones: {},
+        pending: {},
+      };
+
+      const usedIds = new Set<string>();
+      const ensureUniqueId = (idRaw: string): string => {
+        let id = String(idRaw ?? '').trim();
+        if (!id) id = crypto.randomUUID();
+        if (!usedIds.has(id)) {
+          usedIds.add(id);
+          return id;
+        }
+        // Extremely unlikely unless registry was manually edited; regenerate.
+        while (usedIds.has(id)) id = crypto.randomUUID();
+        usedIds.add(id);
+        return id;
+      };
+
+      for (const [legacyKey, entryAny] of Object.entries(v1.drones ?? {})) {
+        const entry = entryAny as any;
+        if (!entry || typeof entry !== 'object') continue;
+        const id = ensureUniqueId(typeof entry.id === 'string' ? entry.id : '');
+        const name =
+          typeof entry.name === 'string' && entry.name.trim()
+            ? entry.name.trim()
+            : String(legacyKey);
+        const containerName =
+          typeof entry.containerName === 'string' && entry.containerName.trim()
+            ? entry.containerName.trim()
+            : name;
+        out.drones[id] = { ...entry, id, name, containerName };
+      }
+
+      for (const [legacyKey, entryAny] of Object.entries(v1.pending ?? {})) {
+        const entry = entryAny as any;
+        if (!entry || typeof entry !== 'object') continue;
+        const id = ensureUniqueId(typeof entry.id === 'string' ? entry.id : '');
+        const name =
+          typeof entry.name === 'string' && entry.name.trim()
+            ? entry.name.trim()
+            : String(legacyKey);
+        const containerName =
+          typeof entry.containerName === 'string' && entry.containerName.trim()
+            ? entry.containerName.trim()
+            : name;
+        (out.pending as any)[id] = { ...entry, id, name, containerName };
+      }
+
+      // NOTE: We do NOT write here; the next updateRegistry/save will persist.
+      return out;
+    }
+
+    throw new Error('bad registry');
   } catch {
-    return { version: 1, drones: {} };
+    return { version: 2, drones: {}, pending: {} };
   }
 }
 

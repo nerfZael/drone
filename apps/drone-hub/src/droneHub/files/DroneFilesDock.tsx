@@ -83,7 +83,9 @@ function IconFile({ className }: { className?: string }) {
 }
 
 export function DroneFilesDock({
+  droneId,
   droneName,
+  droneLabel,
   path,
   homePath,
   entries,
@@ -95,7 +97,9 @@ export function DroneFilesDock({
   onOpenPath,
   onRefresh,
 }: {
+  droneId: string;
   droneName: string;
+  droneLabel?: string;
   path: string;
   homePath: string;
   entries: DroneFsEntry[];
@@ -107,6 +111,7 @@ export function DroneFilesDock({
   onOpenPath: (nextPath: string) => void;
   onRefresh: () => void;
 }) {
+  const shownName = String(droneLabel ?? droneName).trim() || droneName;
   const normalizedPath = normalizeContainerPathInput(path);
   const normalizedHomePath = normalizeContainerPathInput(homePath);
   const [pathInput, setPathInput] = React.useState(normalizedPath);
@@ -120,12 +125,12 @@ export function DroneFilesDock({
 
   React.useEffect(() => {
     setThumbFailedByPath({});
-  }, [droneName, normalizedPath]);
+  }, [droneId, normalizedPath]);
 
   React.useEffect(() => {
     setOpenedImage(null);
     setOpenedImageFailed(false);
-  }, [droneName, normalizedPath]);
+  }, [droneId, normalizedPath]);
 
   React.useEffect(() => {
     if (!openedImage) return;
@@ -237,7 +242,7 @@ export function DroneFilesDock({
               }
             }}
             className="flex-1 min-w-0 h-7 rounded-md border border-[var(--border-subtle)] bg-[var(--panel-alt)] px-2 text-[11px] text-[var(--fg-secondary)] focus:outline-none"
-            title={`Container path for ${droneName}`}
+            title={`Container path for ${shownName}`}
           />
           <button
             type="button"
@@ -339,7 +344,7 @@ export function DroneFilesDock({
                 </div>
               ) : (
                 <img
-                  src={`/api/drones/${encodeURIComponent(droneName)}/fs/thumb?path=${encodeURIComponent(openedImage.path)}`}
+                  src={`/api/drones/${encodeURIComponent(droneId)}/fs/thumb?path=${encodeURIComponent(openedImage.path)}`}
                   alt={openedImage.name}
                   className="w-full h-full object-contain bg-[var(--panel-alt)]"
                   onLoad={() => setOpenedImageFailed(false)}
@@ -421,7 +426,7 @@ export function DroneFilesDock({
                       <IconFolder className="w-6 h-6 text-[var(--muted)] opacity-80" />
                     ) : canThumb ? (
                       <img
-                        src={`/api/drones/${encodeURIComponent(droneName)}/fs/thumb?path=${encodeURIComponent(entry.path)}`}
+                        src={`/api/drones/${encodeURIComponent(droneId)}/fs/thumb?path=${encodeURIComponent(entry.path)}`}
                         alt={entry.name}
                         loading="lazy"
                         className="w-full h-full object-cover"

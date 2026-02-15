@@ -229,6 +229,7 @@ function IconFile() {
 }
 
 export function DroneChangesDock({
+  droneId,
   droneName,
   repoAttached,
   repoPath,
@@ -236,6 +237,7 @@ export function DroneChangesDock({
   hubPhase,
   hubMessage,
 }: {
+  droneId: string;
   droneName: string;
   repoAttached: boolean;
   repoPath: string;
@@ -250,7 +252,7 @@ export function DroneChangesDock({
 
   const startup = usePaneReadiness({
     hubPhase,
-    resetKey: `${droneName}\u0000changes`,
+    resetKey: `${droneId}\u0000changes`,
     timeoutMs: 18_000,
   });
 
@@ -325,7 +327,7 @@ export function DroneChangesDock({
       if (!silent) setChangesLoading(true);
       try {
         const data = await requestJson<Extract<RepoChangesPayload, { ok: true }>>(
-          `/api/drones/${encodeURIComponent(droneName)}/repo/changes`,
+          `/api/drones/${encodeURIComponent(droneId)}/repo/changes`,
         );
         if (!mounted) return;
         setChanges(data);
@@ -366,7 +368,7 @@ export function DroneChangesDock({
       if (!silent) setPullLoading(true);
       try {
         const data = await requestJson<Extract<RepoPullChangesPayload, { ok: true }>>(
-          `/api/drones/${encodeURIComponent(droneName)}/repo/pull/changes`,
+          `/api/drones/${encodeURIComponent(droneId)}/repo/pull/changes`,
         );
         if (!mounted) return;
         setPullChanges(data);
@@ -486,7 +488,7 @@ export function DroneChangesDock({
       setDiffByKey((prev) => ({ ...prev, [key]: { status: 'loading' } }));
       try {
         const data = await requestJson<Extract<RepoDiffPayload, { ok: true }>>(
-          `/api/drones/${encodeURIComponent(droneName)}/repo/diff?path=${encodeURIComponent(path)}&kind=${kind}`,
+          `/api/drones/${encodeURIComponent(droneId)}/repo/diff?path=${encodeURIComponent(path)}&kind=${kind}`,
         );
         if (!mountedRef.current) return;
         setDiffByKey((prev) => ({
@@ -523,7 +525,7 @@ export function DroneChangesDock({
       setDiffByKey((prev) => ({ ...prev, [key]: { status: 'loading' } }));
       try {
         const data = await requestJson<Extract<RepoPullDiffPayload, { ok: true }>>(
-          `/api/drones/${encodeURIComponent(droneName)}/repo/pull/diff?path=${encodeURIComponent(filePath)}&base=${encodeURIComponent(
+          `/api/drones/${encodeURIComponent(droneId)}/repo/pull/diff?path=${encodeURIComponent(filePath)}&base=${encodeURIComponent(
             baseSha,
           )}&head=${encodeURIComponent(headSha)}`,
         );

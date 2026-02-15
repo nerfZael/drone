@@ -1,4 +1,5 @@
 export type DroneSummary = {
+  id: string;
   name: string;
   group: string | null;
   createdAt: string;
@@ -31,8 +32,8 @@ export type PortReachabilityByHostPort = Record<string, PortReachability>;
 export type PortReachabilityByDrone = Record<string, PortReachabilityByHostPort>;
 
 export type DronePortsPayload =
-  | { ok: true; name: string; ports: DronePortMapping[] }
-  | { ok: false; error: string; name?: string };
+  | { ok: true; id: string; name: string; ports: DronePortMapping[] }
+  | { ok: false; error: string; id?: string; name?: string };
 
 export type DroneFsEntry = {
   name: string;
@@ -45,8 +46,8 @@ export type DroneFsEntry = {
 };
 
 export type DroneFsListPayload =
-  | { ok: true; name: string; path: string; entries: DroneFsEntry[] }
-  | { ok: false; error: string; name?: string; path?: string };
+  | { ok: true; id: string; name: string; path: string; entries: DroneFsEntry[] }
+  | { ok: false; error: string; id?: string; name?: string; path?: string };
 
 export type RepoChangeType =
   | 'added'
@@ -85,6 +86,7 @@ export type RepoChangeEntry = {
 export type RepoChangesPayload =
   | {
       ok: true;
+      id: string;
       name: string;
       repoRoot: string;
       branch: RepoBranchSummary;
@@ -102,6 +104,7 @@ export type RepoChangesPayload =
 export type RepoDiffPayload =
   | {
       ok: true;
+      id: string;
       name: string;
       repoRoot: string;
       path: string;
@@ -122,6 +125,7 @@ export type RepoPullChangeEntry = {
 export type RepoPullChangesPayload =
   | {
       ok: true;
+      id: string;
       name: string;
       repoRoot: string;
       baseSha: string;
@@ -136,6 +140,7 @@ export type RepoPullChangesPayload =
 export type RepoPullDiffPayload =
   | {
       ok: true;
+      id: string;
       name: string;
       repoRoot: string;
       baseSha: string;
@@ -161,7 +166,7 @@ export type TranscriptItem = {
 };
 
 export type JobSpec = {
-  // Must be dash-case; becomes the drone name.
+  // Display name for the drone (mutable; ids are the stable identifier).
   name: string;
   title: string;
   details: string;
