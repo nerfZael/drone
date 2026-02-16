@@ -13,7 +13,7 @@ export function StatusBadge({
   hubPhase?: DroneSummary['hubPhase'];
   hubMessage?: DroneSummary['hubMessage'];
 }) {
-  if (hubPhase === 'starting' || hubPhase === 'seeding') {
+  if (hubPhase === 'creating' || hubPhase === 'starting' || hubPhase === 'seeding') {
     const label = hubPhase === 'seeding' ? 'Seeding' : 'Starting';
     const title = String(hubMessage ?? label);
     return (

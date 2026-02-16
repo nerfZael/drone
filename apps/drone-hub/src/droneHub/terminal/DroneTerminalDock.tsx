@@ -67,7 +67,7 @@ export function DroneTerminalDock({
   chatName: string;
   defaultCwd: string;
   disabled: boolean;
-  hubPhase?: 'starting' | 'seeding' | 'error' | null;
+  hubPhase?: 'creating' | 'starting' | 'seeding' | 'error' | null;
   hubMessage?: string | null;
 }) {
   const normalizedCwd = React.useMemo(() => normalizeContainerPathInput(defaultCwd), [defaultCwd]);

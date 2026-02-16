@@ -242,7 +242,7 @@ export function DroneChangesDock({
   repoAttached: boolean;
   repoPath: string;
   disabled: boolean;
-  hubPhase?: 'starting' | 'seeding' | 'error' | null;
+  hubPhase?: 'creating' | 'starting' | 'seeding' | 'error' | null;
   hubMessage?: string | null;
 }) {
   const [refreshNonce, setRefreshNonce] = React.useState(0);

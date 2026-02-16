@@ -48,7 +48,9 @@ export function useChatConfigState({
     () => (selectedDrone ? drones.find((d) => d.id === selectedDrone) ?? null : null),
     [drones, selectedDrone],
   );
+  const hasSelectedDroneSummary = selectedDroneSummary !== null;
   const selectedDroneHubPhase = selectedDroneSummary?.hubPhase ?? null;
+  const selectedDroneProvisioning = isDroneStartingOrSeeding(selectedDroneHubPhase);
   const selectedDroneHasChatList = Array.isArray(selectedDroneSummary?.chats);
   const selectedDroneChatsKey = React.useMemo(() => {
     if (!Array.isArray(selectedDroneSummary?.chats)) return '';
@@ -66,7 +68,13 @@ export function useChatConfigState({
       setLoadingChatInfo(false);
       return;
     }
-    if (isDroneStartingOrSeeding(selectedDroneHubPhase)) {
+    if (!hasSelectedDroneSummary) {
+      setChatInfo(null);
+      setChatInfoError(null);
+      setLoadingChatInfo(false);
+      return;
+    }
+    if (selectedDroneProvisioning) {
       setChatInfo(null);
       setChatInfoError(null);
       setLoadingChatInfo(false);
@@ -109,7 +117,9 @@ export function useChatConfigState({
   }, [
     selectedDrone,
     selectedChat,
+    hasSelectedDroneSummary,
     selectedDroneHubPhase,
+    selectedDroneProvisioning,
     selectedDroneHasChatList,
     selectedDroneChatsKey,
   ]);
@@ -119,7 +129,13 @@ export function useChatConfigState({
   }, [chatInfo?.model, selectedDrone, selectedChat]);
 
   React.useEffect(() => {
-    if (!selectedDrone || !selectedChat || !chatModelDiscoveryAgentId) {
+    if (
+      !selectedDrone ||
+      !selectedChat ||
+      !chatModelDiscoveryAgentId ||
+      !hasSelectedDroneSummary ||
+      selectedDroneProvisioning
+    ) {
       setChatModels([]);
       setChatModelsSource('none');
       setChatModelsDiscoveredAt(null);
@@ -175,7 +191,15 @@ export function useChatConfigState({
     return () => {
       mounted = false;
     };
-  }, [chatModelDiscoveryAgentId, chatModelsRefreshNonce, selectedChat, selectedDrone]);
+  }, [
+    chatModelDiscoveryAgentId,
+    chatModelsRefreshNonce,
+    selectedChat,
+    selectedDrone,
+    hasSelectedDroneSummary,
+    selectedDroneHubPhase,
+    selectedDroneProvisioning,
+  ]);
 
   const setChatAgent = React.useCallback(
     async (agent: ChatAgentConfig) => {

@@ -901,7 +901,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       ? `builtin:${currentAgent.id}`
       : `custom:${currentAgent.id}`;
   const currentDroneBusy =
-    currentDrone && currentDrone.hubPhase !== 'starting' && currentDrone.hubPhase !== 'seeding'
+    currentDrone && !isDroneStartingOrSeeding(currentDrone.hubPhase)
       ? Boolean(currentDrone.busy) || selectedIsResponding
       : false;
   const showRespondingAsStatusInHeader =
@@ -911,8 +911,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     loadingChatInfo ||
     Boolean(openingTerminal) ||
     Boolean(openingEditor) ||
-    currentDrone?.hubPhase === 'starting' ||
-    currentDrone?.hubPhase === 'seeding';
+    isDroneStartingOrSeeding(currentDrone?.hubPhase);
   const modelControlEnabled = currentAgent.kind === 'builtin';
   const modelDisabled = agentDisabled || !modelControlEnabled;
   const {

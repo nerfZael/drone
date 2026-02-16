@@ -4,7 +4,7 @@ import type { DroneSummary } from '../types';
 export type HubPhase = DroneSummary['hubPhase'];
 
 export function isProvisioningPhase(hubPhase: HubPhase | undefined): boolean {
-  return hubPhase === 'starting' || hubPhase === 'seeding';
+  return hubPhase === 'creating' || hubPhase === 'starting' || hubPhase === 'seeding';
 }
 
 export function provisioningLabel(hubPhase: HubPhase | undefined): string {

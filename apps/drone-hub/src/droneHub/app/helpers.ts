@@ -29,7 +29,7 @@ export function makeId(): string {
 }
 
 export function isDroneStartingOrSeeding(hubPhase: string | null | undefined): boolean {
-  return hubPhase === 'starting' || hubPhase === 'seeding';
+  return hubPhase === 'creating' || hubPhase === 'starting' || hubPhase === 'seeding';
 }
 
 export function parseConflictFilesFromMessage(message: string): string[] {

@@ -121,6 +121,7 @@ export function useChatRuntimeOrchestration({
     () => (selectedDrone ? drones.find((x) => x.id === selectedDrone) ?? null : null),
     [drones, selectedDrone],
   );
+  const hasSelectedDroneSummary = selectedDroneSummary !== null;
   const selectedDroneHubPhase = selectedDroneSummary?.hubPhase ?? null;
   const startupSeedForSelectedDrone = React.useMemo(
     () => (selectedDrone ? startupSeedByDrone[selectedDrone] ?? null : null),
@@ -288,13 +289,14 @@ export function useChatRuntimeOrchestration({
     async () => {
       if (chatUiMode !== 'transcript') return { ok: true, pending: [] };
       if (!selectedDrone || !selectedChat) return { ok: true, pending: [] };
+      if (!hasSelectedDroneSummary) return { ok: true, pending: [] };
       if (isDroneStartingOrSeeding(selectedDroneHubPhase)) return { ok: true, pending: [] };
       return await fetchJson<{ ok: true; pending: PendingPrompt[] }>(
         `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(selectedChat || 'default')}/pending`,
       );
     },
     1000,
-    [chatUiMode, selectedDrone, selectedChat, selectedDroneHubPhase],
+    [chatUiMode, selectedDrone, selectedChat, hasSelectedDroneSummary, selectedDroneHubPhase],
   );
 
   const pendingPrompts: PendingPrompt[] = React.useMemo(() => {
@@ -319,7 +321,7 @@ export function useChatRuntimeOrchestration({
   const startupPendingPrompt = React.useMemo((): PendingPrompt | null => {
     if (chatUiMode !== 'transcript') return null;
     if (!selectedDroneSummary) return null;
-    if (selectedDroneSummary.hubPhase !== 'starting' && selectedDroneSummary.hubPhase !== 'seeding') return null;
+    if (!isDroneStartingOrSeeding(selectedDroneSummary.hubPhase)) return null;
     const seed = selectedDroneSummary.id ? startupSeedByDrone[selectedDroneSummary.id] : null;
     if (!seed) return null;
     const prompt = String(seed.prompt ?? '').trim();
@@ -371,6 +373,7 @@ export function useChatRuntimeOrchestration({
 
   React.useEffect(() => {
     if (chatUiMode !== 'transcript') return;
+    if (!hasSelectedDroneSummary) return;
     let mounted = true;
     let timer: any = null;
     let busy = false;
@@ -407,7 +410,16 @@ export function useChatRuntimeOrchestration({
       mounted = false;
       if (timer) clearInterval(timer);
     };
-  }, [chatUiMode, selectedDrone, selectedChat, selectedDroneHubPhase, setLoadingTranscript, setTranscriptError, setTranscripts]);
+  }, [
+    chatUiMode,
+    selectedDrone,
+    selectedChat,
+    hasSelectedDroneSummary,
+    selectedDroneHubPhase,
+    setLoadingTranscript,
+    setTranscriptError,
+    setTranscripts,
+  ]);
 
   React.useEffect(() => {
     if (chatUiMode !== 'cli') return;

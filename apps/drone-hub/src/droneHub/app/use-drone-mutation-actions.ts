@@ -1,6 +1,7 @@
 import React from 'react';
 import type { StartupSeedState } from './app-types';
 import type { DroneSummary } from '../types';
+import { isDroneStartingOrSeeding } from './helpers';
 
 type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
 
@@ -49,6 +50,9 @@ export function useDroneMutationActions({
       if (!droneId || !newName || newName === currentName) {
         return { ok: false, error: 'no-op rename' };
       }
+      if (!current || isDroneStartingOrSeeding(current.hubPhase)) {
+        return { ok: false, error: `drone "${droneId}" is still starting` };
+      }
       if (deletingDrones[droneId] || renamingDrones[droneId]) {
         return { ok: false, error: 'rename busy' };
       }
@@ -84,11 +88,14 @@ export function useDroneMutationActions({
         });
         return { ok: true };
       } catch (e: any) {
-        console.error('[DroneHub] rename drone failed', { id: droneId, newName, error: e });
-        if (opts?.showAlert) {
-          window.alert(`Rename failed: ${e?.message ?? String(e)}`);
+        const msg = e?.message ?? String(e);
+        if (!/still starting/i.test(msg)) {
+          console.error('[DroneHub] rename drone failed', { id: droneId, newName, error: e });
         }
-        return { ok: false, error: e?.message ?? String(e) };
+        if (opts?.showAlert) {
+          window.alert(`Rename failed: ${msg}`);
+        }
+        return { ok: false, error: msg };
       } finally {
         setRenamingDrones((prev) => {
           if (!prev[droneId]) return prev;
@@ -206,8 +213,6 @@ export function useDroneMutationActions({
             msg.includes('cannot rename');
           if (nameConflict) continue;
           const retriable =
-            msg.includes('still starting') ||
-            msg.includes('unknown drone') ||
             msg.includes('rename busy');
           if (!retriable) return;
           await new Promise<void>((resolve) =>

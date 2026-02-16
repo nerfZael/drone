@@ -16,7 +16,7 @@ export function DronePreviewDock({
   portReachabilityByHostPort: PortReachabilityByHostPort;
   portsLoading: boolean;
   portsError: string | null;
-  startup?: { waiting: boolean; timedOut: boolean; hubPhase?: 'starting' | 'seeding' | 'error' | null; hubMessage?: string | null } | null;
+  startup?: { waiting: boolean; timedOut: boolean; hubPhase?: 'creating' | 'starting' | 'seeding' | 'error' | null; hubMessage?: string | null } | null;
   defaultPreviewUrl: string | null;
   previewUrlOverride: string | null;
   onSetPreviewUrlOverride: (nextUrl: string | null) => void;

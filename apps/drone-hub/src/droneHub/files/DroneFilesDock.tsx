@@ -105,7 +105,7 @@ export function DroneFilesDock({
   entries: DroneFsEntry[];
   loading: boolean;
   error: string | null;
-  startup?: { waiting: boolean; timedOut: boolean; hubPhase?: 'starting' | 'seeding' | 'error' | null; hubMessage?: string | null } | null;
+  startup?: { waiting: boolean; timedOut: boolean; hubPhase?: 'creating' | 'starting' | 'seeding' | 'error' | null; hubMessage?: string | null } | null;
   viewMode: 'list' | 'thumb';
   onSetViewMode: (next: 'list' | 'thumb') => void;
   onOpenPath: (nextPath: string) => void;

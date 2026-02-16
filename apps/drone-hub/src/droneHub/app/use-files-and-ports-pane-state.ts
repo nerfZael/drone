@@ -19,6 +19,7 @@ import {
 import {
   buildContainerPreviewUrl,
   droneHomePath,
+  isDroneStartingOrSeeding,
   normalizeContainerPathInput,
   normalizePortRows,
   normalizePreviewUrl,
@@ -80,11 +81,11 @@ export function useFilesAndPortsPaneState({ currentDrone, requestJson }: UseFile
     loading: fsLoading,
   } = usePoll<DroneFsListPayload>(
     () =>
-      currentDrone
+      currentDrone && !isDroneStartingOrSeeding(currentDrone.hubPhase)
         ? requestJson(`/api/drones/${encodeURIComponent(currentDrone.id)}/fs/list?path=${encodeURIComponent(currentFsPath)}`)
         : Promise.resolve({ ok: true, id: '', name: '', path: '/', entries: [] }),
     fsPollIntervalMs,
-    [currentDrone?.id, currentFsPath, fsRefreshNonce],
+    [currentDrone?.id, currentDrone?.hubPhase, currentFsPath, fsRefreshNonce],
   );
   const fsPayloadError =
     fsResp && (fsResp as any).ok === false ? String((fsResp as any)?.error ?? 'filesystem request failed') : null;
@@ -114,11 +115,11 @@ export function useFilesAndPortsPaneState({ currentDrone, requestJson }: UseFile
     loading: portsLoading,
   } = usePoll<DronePortsPayload>(
     () =>
-      currentDrone
+      currentDrone && !isDroneStartingOrSeeding(currentDrone.hubPhase)
         ? fetchJson(`/api/drones/${encodeURIComponent(currentDrone.id)}/ports`)
         : Promise.resolve({ ok: true, id: '', name: '', ports: [] }),
     portsPollIntervalMs,
-    [currentDrone?.id],
+    [currentDrone?.id, currentDrone?.hubPhase],
   );
   const ports =
     portsResp && (portsResp as any).ok === true ? ((portsResp as any).ports as DronePortMapping[]) : null;
