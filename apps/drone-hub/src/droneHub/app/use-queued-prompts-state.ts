@@ -1,19 +1,21 @@
 import React from 'react';
+import { create } from 'zustand';
+import { useShallow } from 'zustand/react/shallow';
 import type { PendingPrompt } from '../types';
 import { droneChatQueueKey, makeId, parseDroneChatQueueKey } from './helpers';
 
-export function useQueuedPromptsState() {
-  // Local-only prompt queue used while drones are provisioning (hubPhase starting/seeding).
-  // Key format: `${droneId}::${chatName}`
-  const [queuedPromptsByDroneChat, setQueuedPromptsByDroneChat] = React.useState<Record<string, PendingPrompt[]>>({});
-  const queuedPromptsByDroneChatRef = React.useRef<Record<string, PendingPrompt[]>>({});
-  const flushingQueuedKeysRef = React.useRef<Set<string>>(new Set());
+type QueuedPromptsState = {
+  queuedPromptsByDroneChat: Record<string, PendingPrompt[]>;
+  enqueueQueuedPrompt: (droneIdRaw: string, chatNameRaw: string, promptRaw: string) => PendingPrompt | null;
+  patchQueuedPrompt: (key: string, id: string, patch: Partial<PendingPrompt>) => void;
+  removeQueuedPrompt: (key: string, id: string) => void;
+  clearQueuedPromptsForDrone: (droneIdRaw: string) => void;
+  getQueuedPromptsForKey: (key: string) => PendingPrompt[];
+};
 
-  React.useEffect(() => {
-    queuedPromptsByDroneChatRef.current = queuedPromptsByDroneChat;
-  }, [queuedPromptsByDroneChat]);
-
-  const enqueueQueuedPrompt = React.useCallback((droneIdRaw: string, chatNameRaw: string, promptRaw: string): PendingPrompt | null => {
+const useQueuedPromptsStore = create<QueuedPromptsState>((set, get) => ({
+  queuedPromptsByDroneChat: {},
+  enqueueQueuedPrompt: (droneIdRaw, chatNameRaw, promptRaw) => {
     const droneId = String(droneIdRaw ?? '').trim();
     const chatName = String(chatNameRaw ?? '').trim() || 'default';
     const prompt = String(promptRaw ?? '').trim();
@@ -25,47 +27,50 @@ export function useQueuedPromptsState() {
       state: 'queued',
     };
     const key = droneChatQueueKey(droneId, chatName);
-    setQueuedPromptsByDroneChat((prev) => {
-      const cur = prev[key] ?? [];
-      return { ...prev, [key]: [...cur, item] };
+    set((prev) => {
+      const cur = prev.queuedPromptsByDroneChat[key] ?? [];
+      return {
+        queuedPromptsByDroneChat: { ...prev.queuedPromptsByDroneChat, [key]: [...cur, item] },
+      };
     });
     return item;
-  }, []);
-
-  const patchQueuedPrompt = React.useCallback((key: string, id: string, patch: Partial<PendingPrompt>) => {
-    setQueuedPromptsByDroneChat((prev) => {
-      const cur = prev[key];
+  },
+  patchQueuedPrompt: (key, id, patch) => {
+    set((prev) => {
+      const cur = prev.queuedPromptsByDroneChat[key];
       if (!cur || cur.length === 0) return prev;
       const idx = cur.findIndex((p) => p.id === id);
       if (idx < 0) return prev;
       const nextArr = cur.slice();
       nextArr[idx] = { ...nextArr[idx], ...patch, updatedAt: new Date().toISOString() };
-      return { ...prev, [key]: nextArr };
+      return {
+        queuedPromptsByDroneChat: { ...prev.queuedPromptsByDroneChat, [key]: nextArr },
+      };
     });
-  }, []);
-
-  const removeQueuedPrompt = React.useCallback((key: string, id: string) => {
-    setQueuedPromptsByDroneChat((prev) => {
-      const cur = prev[key];
+  },
+  removeQueuedPrompt: (key, id) => {
+    set((prev) => {
+      const cur = prev.queuedPromptsByDroneChat[key];
       if (!cur || cur.length === 0) return prev;
       const nextArr = cur.filter((p) => p.id !== id);
       if (nextArr.length === cur.length) return prev;
       if (nextArr.length === 0) {
-        const next = { ...prev };
+        const next = { ...prev.queuedPromptsByDroneChat };
         delete next[key];
-        return next;
+        return { queuedPromptsByDroneChat: next };
       }
-      return { ...prev, [key]: nextArr };
+      return {
+        queuedPromptsByDroneChat: { ...prev.queuedPromptsByDroneChat, [key]: nextArr },
+      };
     });
-  }, []);
-
-  const clearQueuedPromptsForDrone = React.useCallback((droneIdRaw: string) => {
+  },
+  clearQueuedPromptsForDrone: (droneIdRaw) => {
     const droneId = String(droneIdRaw ?? '').trim();
     if (!droneId) return;
-    setQueuedPromptsByDroneChat((prev) => {
+    set((prev) => {
       let changed = false;
       const next: Record<string, PendingPrompt[]> = {};
-      for (const [k, v] of Object.entries(prev)) {
+      for (const [k, v] of Object.entries(prev.queuedPromptsByDroneChat)) {
         const parsed = parseDroneChatQueueKey(k);
         if (parsed && parsed.droneId === droneId) {
           changed = true;
@@ -73,17 +78,44 @@ export function useQueuedPromptsState() {
         }
         next[k] = v;
       }
-      return changed ? next : prev;
+      if (!changed) return prev;
+      return { queuedPromptsByDroneChat: next };
     });
-  }, []);
+  },
+  getQueuedPromptsForKey: (key) => {
+    const k = String(key ?? '').trim();
+    if (!k) return [];
+    return get().queuedPromptsByDroneChat[k] ?? [];
+  },
+}));
+
+export function useQueuedPromptsState() {
+  const {
+    queuedPromptsByDroneChat,
+    enqueueQueuedPrompt,
+    patchQueuedPrompt,
+    removeQueuedPrompt,
+    clearQueuedPromptsForDrone,
+    getQueuedPromptsForKey,
+  } = useQueuedPromptsStore(
+    useShallow((s) => ({
+      queuedPromptsByDroneChat: s.queuedPromptsByDroneChat,
+      enqueueQueuedPrompt: s.enqueueQueuedPrompt,
+      patchQueuedPrompt: s.patchQueuedPrompt,
+      removeQueuedPrompt: s.removeQueuedPrompt,
+      clearQueuedPromptsForDrone: s.clearQueuedPromptsForDrone,
+      getQueuedPromptsForKey: s.getQueuedPromptsForKey,
+    })),
+  );
+  const flushingQueuedKeysRef = React.useRef<Set<string>>(new Set());
 
   return {
     queuedPromptsByDroneChat,
-    queuedPromptsByDroneChatRef,
     flushingQueuedKeysRef,
     enqueueQueuedPrompt,
     patchQueuedPrompt,
     removeQueuedPrompt,
     clearQueuedPromptsForDrone,
+    getQueuedPromptsForKey,
   };
 }

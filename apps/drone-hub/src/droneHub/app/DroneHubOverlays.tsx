@@ -7,7 +7,7 @@ import { DroneErrorModal } from './DroneErrorModal';
 import { HubTransientToasts } from './HubTransientToasts';
 import { ReposModal } from './ReposModal';
 
-type DroneHubOverlaysProps = {
+export type DroneHubOverlaysProps = {
   createDronesModalProps: React.ComponentProps<typeof CreateDronesModal>;
   draftCreateDroneModalProps: React.ComponentProps<typeof DraftCreateDroneModal>;
   customAgentsModalProps: React.ComponentProps<typeof CustomAgentsModal>;

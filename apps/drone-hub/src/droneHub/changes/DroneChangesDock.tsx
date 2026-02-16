@@ -350,7 +350,7 @@ export function DroneChangesDock({
       mounted = false;
       if (timer) clearInterval(timer);
     };
-  }, [dataMode, disabled, droneName, refreshNonce, repoAttached]);
+  }, [dataMode, disabled, droneId, refreshNonce, repoAttached, startup.markReady]);
 
   React.useEffect(() => {
     if (!repoAttached || disabled || dataMode !== 'pull-preview') {
@@ -390,7 +390,7 @@ export function DroneChangesDock({
       mounted = false;
       if (timer) clearInterval(timer);
     };
-  }, [dataMode, disabled, droneName, refreshNonce, repoAttached]);
+  }, [dataMode, disabled, droneId, refreshNonce, repoAttached]);
 
   const pullEntriesAsWorkingEntries: RepoChangeEntry[] = React.useMemo(() => {
     const list = pullChanges?.entries ?? [];
@@ -509,7 +509,7 @@ export function DroneChangesDock({
         inflightRef.current.delete(key);
       }
     },
-    [diffByKey, droneName],
+    [diffByKey, droneId, requestJson],
   );
 
   const loadPullDiff = React.useCallback(
@@ -548,7 +548,7 @@ export function DroneChangesDock({
         inflightRef.current.delete(key);
       }
     },
-    [diffByKey, droneName, pullChanges?.baseSha, pullChanges?.headSha],
+    [diffByKey, droneId, pullChanges?.baseSha, pullChanges?.headSha, requestJson],
   );
 
   const splitShownKind = effectiveKindForEntry(selectedEntry, splitKind);

@@ -6,7 +6,7 @@ import { SelectedDroneWorkspace } from './SelectedDroneWorkspace';
 import { SettingsView } from './SettingsView';
 import type { AppView } from './app-types';
 
-type DroneHubWorkspaceContentProps = {
+export type DroneHubWorkspaceContentProps = {
   appView: AppView;
   settingsViewProps: React.ComponentProps<typeof SettingsView>;
   draftChatWorkspaceProps: React.ComponentProps<typeof DraftChatWorkspace> | null;

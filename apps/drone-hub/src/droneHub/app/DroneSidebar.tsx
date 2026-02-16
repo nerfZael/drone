@@ -1,18 +1,17 @@
 import React from 'react';
-import { useShallow } from 'zustand/react/shallow';
 import { isUngroupedGroupName } from '../../domain';
 import { DroneCard } from '../overview';
 import type { DroneSummary, RepoSummary } from '../types';
 import { compareDronesByNewestFirst, isDroneStartingOrSeeding } from './helpers';
 import { IconChevron, IconColumns, IconFolder, IconList, IconPencil, IconPlus, IconPlusDouble, IconSettings, IconSpinner, IconTrash, SkeletonLine } from './icons';
-import { useDroneHubUiStore } from './use-drone-hub-ui-store';
+import { useDroneSidebarUiState } from './use-drone-hub-ui-store';
 
 type SidebarGroup = {
   group: string;
   items: DroneSummary[];
 };
 
-type DroneSidebarProps = {
+export type DroneSidebarProps = {
   dronesError: string | null | undefined;
   groupMoveError: string | null;
   dronesLoading: boolean;
@@ -134,26 +133,7 @@ export function DroneSidebar({
     setActiveRepoPath,
     setAutoDelete,
     setSidebarCollapsed,
-  } = useDroneHubUiStore(
-    useShallow((s) => ({
-      sidebarCollapsed: s.sidebarCollapsed,
-      selectedDroneIds: s.selectedDroneIds,
-      draftChat: s.draftChat,
-      appView: s.appView,
-      viewMode: s.viewMode,
-      activeRepoPath: s.activeRepoPath,
-      selectedDrone: s.selectedDrone,
-      selectedGroupMultiChat: s.selectedGroupMultiChat,
-      sidebarReposCollapsed: s.sidebarReposCollapsed,
-      autoDelete: s.autoDelete,
-      setAppView: s.setAppView,
-      setViewMode: s.setViewMode,
-      setSidebarReposCollapsed: s.setSidebarReposCollapsed,
-      setActiveRepoPath: s.setActiveRepoPath,
-      setAutoDelete: s.setAutoDelete,
-      setSidebarCollapsed: s.setSidebarCollapsed,
-    })),
-  );
+  } = useDroneSidebarUiState();
 
   return (
     <>

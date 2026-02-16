@@ -17,7 +17,7 @@ type UseChatRuntimeOrchestrationArgs = {
   outputView: 'screen' | 'log';
   optimisticPendingPrompts: PendingPrompt[];
   queuedPromptsByDroneChat: Record<string, PendingPrompt[]>;
-  queuedPromptsByDroneChatRef: React.MutableRefObject<Record<string, PendingPrompt[]>>;
+  getQueuedPromptsForKey: (key: string) => PendingPrompt[];
   flushingQueuedKeysRef: React.MutableRefObject<Set<string>>;
   selectedChat: string;
   selectedDrone: string | null;
@@ -51,7 +51,7 @@ export function useChatRuntimeOrchestration({
   outputView,
   optimisticPendingPrompts,
   queuedPromptsByDroneChat,
-  queuedPromptsByDroneChatRef,
+  getQueuedPromptsForKey,
   flushingQueuedKeysRef,
   selectedChat,
   selectedDrone,
@@ -231,7 +231,7 @@ export function useChatRuntimeOrchestration({
 
       void (async () => {
         while (true) {
-          const latest = queuedPromptsByDroneChatRef.current[key] ?? [];
+          const latest = getQueuedPromptsForKey(key);
           const head = latest[0] ?? null;
           if (!head) return;
           // Preserve strict FIFO ordering: if the head failed (or is mid-send), don't send later items.
@@ -277,7 +277,7 @@ export function useChatRuntimeOrchestration({
     flushingQueuedKeysRef,
     patchQueuedPrompt,
     queuedPromptsByDroneChat,
-    queuedPromptsByDroneChatRef,
+    getQueuedPromptsForKey,
     removeQueuedPrompt,
     requestJson,
     selectedChat,

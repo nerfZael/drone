@@ -54,7 +54,7 @@ export function useSidebarViewModel({
       if (known.has(id)) continue;
       if (!isStartupSeedFresh(seed, nowMs)) continue;
       const chatName = String(seed.chatName ?? 'default').trim() || 'default';
-      const name = String((seed as any)?.droneName ?? '').trim() || id;
+      const name = String(seed.droneName ?? '').trim() || id;
       out.push({
         id,
         name,
@@ -128,7 +128,6 @@ export function useSidebarViewModel({
   return {
     selectedDroneSet,
     orderedDroneIds,
-    sidebarOptimisticDrones,
     sidebarOptimisticDroneIdSet,
     sidebarDrones,
     uiDroneName,

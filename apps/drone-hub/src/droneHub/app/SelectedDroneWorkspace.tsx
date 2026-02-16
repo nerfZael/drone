@@ -1,5 +1,4 @@
 import React from 'react';
-import { useShallow } from 'zustand/react/shallow';
 import {
   ChatInput,
   type ChatSendPayload,
@@ -22,7 +21,7 @@ import { isDroneStartingOrSeeding } from './helpers';
 import { cn } from '../../ui/cn';
 import { dropdownMenuItemBaseClass, dropdownPanelBaseClass } from '../../ui/dropdown';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
-import { useDroneHubUiStore } from './use-drone-hub-ui-store';
+import { useSelectedDroneWorkspaceUiState } from './use-drone-hub-ui-store';
 
 type LaunchHint =
   | {
@@ -227,24 +226,7 @@ export function SelectedDroneWorkspace({
     setOutputView,
     setSelectedChat,
     setTerminalEmulator,
-  } = useDroneHubUiStore(
-    useShallow((s) => ({
-      sidebarCollapsed: s.sidebarCollapsed,
-      agentMenuOpen: s.agentMenuOpen,
-      terminalMenuOpen: s.terminalMenuOpen,
-      headerOverflowOpen: s.headerOverflowOpen,
-      outputView: s.outputView,
-      selectedChat: s.selectedChat,
-      terminalEmulator: s.terminalEmulator,
-      setSidebarCollapsed: s.setSidebarCollapsed,
-      setAgentMenuOpen: s.setAgentMenuOpen,
-      setTerminalMenuOpen: s.setTerminalMenuOpen,
-      setHeaderOverflowOpen: s.setHeaderOverflowOpen,
-      setOutputView: s.setOutputView,
-      setSelectedChat: s.setSelectedChat,
-      setTerminalEmulator: s.setTerminalEmulator,
-    })),
-  );
+  } = useSelectedDroneWorkspaceUiState();
 
   return (
     <>
