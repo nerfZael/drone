@@ -6,7 +6,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { URL } from 'node:url';
 
-import dotenv from 'dotenv';
 import { RawData, WebSocket, WebSocketServer } from 'ws';
 
 import { droneRootPath } from '../host/paths';
@@ -54,206 +53,26 @@ import {
   isRepoPatchApplyError,
   quarantineWorktreePath,
 } from './repoOps';
+import { isHubApiAuthorized, isHubApiAuthorizedForWebSocket, rejectWebSocketUpgrade } from './hubAuth';
+import { bashQuote, encodeRemotePath, hexEncodeUtf8, normalizeContainerPath, parseBoolParam, shellQuoteIfNeeded } from './hubFormat';
+import { readJsonBody, withCors } from './hubHttp';
+import {
+  clearStoredProviderApiKey,
+  hubLog,
+  loadHubEnv,
+  parseLlmProvider,
+  providerDisplayName,
+  providerKeySettingsResponse,
+  resolveEffectiveLlmProvider,
+  resolveEffectiveProviderApiKeySettings,
+  resolveLlmSettingsResponse,
+  upsertStoredLlmProvider,
+  upsertStoredProviderApiKey,
+  type LlmProviderId,
+} from './hubSettings';
 
 const HUB_API_LOADED_AT = new Date().toISOString();
 const HUB_API_BUILD_ID = crypto.randomBytes(6).toString('hex');
-
-let HUB_ENV_LOADED = false;
-function loadHubEnv() {
-  if (HUB_ENV_LOADED) return;
-  HUB_ENV_LOADED = true;
-
-  // Load .env files if present. This makes local dev ergonomics nicer.
-  // It does NOT override already-exported environment variables.
-  //
-  // Compiled layout:
-  //   apps/drone/dist/hub/server.js -> __dirname = apps/drone/dist/hub
-  const appRoot = path.resolve(__dirname, '..', '..'); // apps/drone/
-  const repoRoot = path.resolve(appRoot, '..', '..'); // repo root
-
-  const candidates = [
-    path.join(appRoot, '.env.local'),
-    path.join(appRoot, '.env'),
-    path.join(repoRoot, '.env.local'),
-    path.join(repoRoot, '.env'),
-  ];
-
-  for (const p of candidates) {
-    try {
-      dotenv.config({ path: p, override: false });
-    } catch {
-      // ignore
-    }
-  }
-}
-
-type LlmProviderId = 'openai' | 'gemini';
-type ApiKeySettingsSource = 'settings' | 'environment' | null;
-type EffectiveProviderApiKeySettings = {
-  apiKey: string | null;
-  source: ApiKeySettingsSource;
-  updatedAt: string | null;
-};
-type LlmProviderSource = 'settings' | 'environment' | 'default';
-type EffectiveLlmProvider = {
-  provider: LlmProviderId;
-  source: LlmProviderSource;
-};
-
-function parseLlmProvider(raw: unknown): LlmProviderId | null {
-  const s = String(raw ?? '')
-    .trim()
-    .toLowerCase();
-  if (s === 'openai' || s === 'gemini') return s;
-  return null;
-}
-
-function normalizeApiKey(raw: unknown): string {
-  return typeof raw === 'string' ? raw.trim() : '';
-}
-
-function apiKeyHint(apiKey: string | null): string | null {
-  const key = normalizeApiKey(apiKey);
-  if (!key) return null;
-  if (key.length <= 8) return `${key.slice(0, 2)}...${key.slice(-2)}`;
-  return `${key.slice(0, 4)}...${key.slice(-4)}`;
-}
-
-function providerApiKeyEnvVar(provider: LlmProviderId): 'OPENAI_API_KEY' | 'GEMINI_API_KEY' {
-  return provider === 'openai' ? 'OPENAI_API_KEY' : 'GEMINI_API_KEY';
-}
-
-function providerDisplayName(provider: LlmProviderId): string {
-  return provider === 'openai' ? 'OpenAI' : 'Gemini';
-}
-
-function hubLog(level: 'info' | 'warn' | 'error', message: string, meta?: Record<string, unknown>) {
-  const at = new Date().toISOString();
-  const payload = meta && Object.keys(meta).length > 0 ? { at, ...meta } : { at };
-  if (level === 'error') {
-    console.error(`[DroneHub] ${message}`, payload);
-    return;
-  }
-  if (level === 'warn') {
-    console.warn(`[DroneHub] ${message}`, payload);
-    return;
-  }
-  console.log(`[DroneHub] ${message}`, payload);
-}
-
-async function getStoredProviderApiKey(provider: LlmProviderId): Promise<{ apiKey: string; updatedAt: string | null } | null> {
-  const reg = await loadRegistry();
-  const block = provider === 'openai' ? reg.settings?.openai : reg.settings?.gemini;
-  const apiKey = normalizeApiKey(block?.apiKey);
-  if (!apiKey) return null;
-  const updatedAtRaw = block?.updatedAt;
-  const updatedAt = typeof updatedAtRaw === 'string' && updatedAtRaw.trim() ? updatedAtRaw : null;
-  return { apiKey, updatedAt };
-}
-
-async function upsertStoredProviderApiKey(provider: LlmProviderId, apiKeyRaw: string): Promise<void> {
-  const apiKey = normalizeApiKey(apiKeyRaw);
-  if (!apiKey) throw new Error('API key is required.');
-  const updatedAt = new Date().toISOString();
-  await updateRegistry((reg) => {
-    reg.settings ??= {};
-    if (provider === 'openai') reg.settings.openai = { apiKey, updatedAt };
-    else reg.settings.gemini = { apiKey, updatedAt };
-  });
-}
-
-async function clearStoredProviderApiKey(provider: LlmProviderId): Promise<void> {
-  await updateRegistry((reg) => {
-    if (!reg.settings) return;
-    if (provider === 'openai') {
-      if (!reg.settings.openai) return;
-      delete reg.settings.openai;
-    } else {
-      if (!reg.settings.gemini) return;
-      delete reg.settings.gemini;
-    }
-    if (Object.keys(reg.settings).length === 0) delete reg.settings;
-  });
-}
-
-async function resolveEffectiveProviderApiKeySettings(provider: LlmProviderId): Promise<EffectiveProviderApiKeySettings> {
-  const stored = await getStoredProviderApiKey(provider);
-  if (stored) {
-    return {
-      apiKey: stored.apiKey,
-      source: 'settings',
-      updatedAt: stored.updatedAt,
-    };
-  }
-  const envVar = providerApiKeyEnvVar(provider);
-  const envApiKey = normalizeApiKey(process.env[envVar]);
-  if (envApiKey) {
-    return {
-      apiKey: envApiKey,
-      source: 'environment',
-      updatedAt: null,
-    };
-  }
-  return {
-    apiKey: null,
-    source: null,
-    updatedAt: null,
-  };
-}
-
-async function getStoredLlmProvider(): Promise<LlmProviderId | null> {
-  const reg = await loadRegistry();
-  return parseLlmProvider(reg.settings?.llm?.provider);
-}
-
-async function upsertStoredLlmProvider(provider: LlmProviderId): Promise<void> {
-  const updatedAt = new Date().toISOString();
-  await updateRegistry((reg) => {
-    reg.settings ??= {};
-    reg.settings.llm = { provider, updatedAt };
-  });
-}
-
-async function resolveEffectiveLlmProvider(): Promise<EffectiveLlmProvider> {
-  const stored = await getStoredLlmProvider();
-  if (stored) return { provider: stored, source: 'settings' };
-  const env = parseLlmProvider(process.env.DRONE_HUB_LLM_PROVIDER);
-  if (env) return { provider: env, source: 'environment' };
-  return { provider: 'openai', source: 'default' };
-}
-
-function providerKeySettingsResponse(settings: EffectiveProviderApiKeySettings): {
-  hasKey: boolean;
-  source: ApiKeySettingsSource;
-  keyHint: string | null;
-  updatedAt: string | null;
-} {
-  return {
-    hasKey: Boolean(settings.apiKey),
-    source: settings.source,
-    keyHint: apiKeyHint(settings.apiKey),
-    updatedAt: settings.source === 'settings' ? settings.updatedAt : null,
-  };
-}
-
-async function resolveLlmSettingsResponse(): Promise<{
-  ok: true;
-  provider: { selected: LlmProviderId; source: LlmProviderSource };
-  openai: { hasKey: boolean; source: ApiKeySettingsSource; keyHint: string | null; updatedAt: string | null };
-  gemini: { hasKey: boolean; source: ApiKeySettingsSource; keyHint: string | null; updatedAt: string | null };
-}> {
-  const [provider, openai, gemini] = await Promise.all([
-    resolveEffectiveLlmProvider(),
-    resolveEffectiveProviderApiKeySettings('openai'),
-    resolveEffectiveProviderApiKeySettings('gemini'),
-  ]);
-  return {
-    ok: true,
-    provider: { selected: provider.provider, source: provider.source },
-    openai: providerKeySettingsResponse(openai),
-    gemini: providerKeySettingsResponse(gemini),
-  };
-}
 
 const HUB_SETTINGS_LOG_DEFAULT_TAIL_LINES = 600;
 const HUB_SETTINGS_LOG_MAX_TAIL_LINES = 5000;
@@ -454,132 +273,6 @@ async function resolveDroneOrRejectUpgrade(socket: any, droneRef: string): Promi
       rejectWebSocketUpgrade(socket, 404, 'Not Found');
     },
   );
-}
-
-async function readJsonBody(req: http.IncomingMessage): Promise<any> {
-  const chunks: Buffer[] = [];
-  await new Promise<void>((resolve, reject) => {
-    req.on('data', (d) => chunks.push(Buffer.isBuffer(d) ? d : Buffer.from(String(d))));
-    req.on('end', () => resolve());
-    req.on('error', reject);
-  });
-  const raw = Buffer.concat(chunks).toString('utf8').trim();
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    throw new Error('invalid JSON body');
-  }
-}
-
-function appendVaryHeader(res: http.ServerResponse, value: string) {
-  const current = String(res.getHeader('vary') ?? '')
-    .split(',')
-    .map((v) => v.trim().toLowerCase())
-    .filter(Boolean);
-  if (!current.includes(value.toLowerCase())) {
-    const next = [...current, value.toLowerCase()];
-    res.setHeader('vary', next.join(', '));
-  }
-}
-
-function normalizeOrigin(raw: string): string | null {
-  try {
-    const u = new URL(String(raw));
-    const proto = String(u.protocol || '').toLowerCase();
-    if (proto !== 'http:' && proto !== 'https:') return null;
-    return `${u.protocol}//${u.host}`.toLowerCase();
-  } catch {
-    return null;
-  }
-}
-
-function withCors(req: http.IncomingMessage, res: http.ServerResponse, allowedOrigins: Set<string>): boolean {
-  const originRaw = typeof req.headers.origin === 'string' ? req.headers.origin : '';
-  if (!originRaw) return true;
-
-  appendVaryHeader(res, 'origin');
-  const origin = normalizeOrigin(originRaw);
-  if (!origin || !allowedOrigins.has(origin)) return false;
-
-  res.setHeader('access-control-allow-origin', origin);
-  res.setHeader('access-control-allow-methods', 'GET,POST,DELETE,OPTIONS');
-  res.setHeader('access-control-allow-headers', 'content-type,authorization');
-  return true;
-}
-
-function isHubApiAuthorized(req: http.IncomingMessage, apiToken: string): boolean {
-  const auth = typeof req.headers.authorization === 'string' ? req.headers.authorization : '';
-  const expected = `Bearer ${apiToken}`;
-  const a = Buffer.from(auth, 'utf8');
-  const b = Buffer.from(expected, 'utf8');
-  if (a.length !== b.length) return false;
-  return crypto.timingSafeEqual(a, b);
-}
-
-function isHubApiToken(raw: string, apiToken: string): boolean {
-  const a = Buffer.from(String(raw ?? ''), 'utf8');
-  const b = Buffer.from(String(apiToken ?? ''), 'utf8');
-  if (a.length !== b.length) return false;
-  return crypto.timingSafeEqual(a, b);
-}
-
-function isHubApiAuthorizedForWebSocket(req: http.IncomingMessage, u: URL, apiToken: string): boolean {
-  if (isHubApiAuthorized(req, apiToken)) return true;
-  const token = String(u.searchParams.get('token') ?? '');
-  if (!token) return false;
-  return isHubApiToken(token, apiToken);
-}
-
-function rejectWebSocketUpgrade(socket: any, statusCode: number, statusText: string): void {
-  try {
-    socket.write(`HTTP/1.1 ${statusCode} ${statusText}\r\nConnection: close\r\n\r\n`);
-  } catch {
-    // ignore
-  }
-  try {
-    socket.destroy();
-  } catch {
-    // ignore
-  }
-}
-
-function bashQuote(s: string): string {
-  return `'${String(s).replace(/'/g, `'\\''`)}'`;
-}
-
-function shellQuoteIfNeeded(s: string): string {
-  const v = String(s);
-  // Conservative "safe" set: avoid quoting common path-ish tokens.
-  // If anything looks weird, fall back to full bash quoting.
-  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(v)) return v;
-  return bashQuote(v);
-}
-
-function normalizeContainerPath(raw: string): string {
-  const s = String(raw || '').trim();
-  if (!s) return '/';
-  return s.startsWith('/') ? s : `/${s}`;
-}
-
-function encodeRemotePath(p: string): string {
-  // Keep "/" separators while escaping segments.
-  return p
-    .split('/')
-    .map((seg) => encodeURIComponent(seg))
-    .join('/');
-}
-
-function hexEncodeUtf8(s: string): string {
-  return Buffer.from(String(s ?? ''), 'utf8').toString('hex');
-}
-
-function parseBoolParam(raw: string | null, defaultValue: boolean): boolean {
-  if (raw == null) return defaultValue;
-  const v = String(raw).trim().toLowerCase();
-  if (v === '1' || v === 'true' || v === 'yes' || v === 'y' || v === 'on') return true;
-  if (v === '0' || v === 'false' || v === 'no' || v === 'n' || v === 'off') return false;
-  return defaultValue;
 }
 
 function isRepoAttachedDrone(drone: any): boolean {
