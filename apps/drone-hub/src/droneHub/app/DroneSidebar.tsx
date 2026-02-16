@@ -1,10 +1,11 @@
 import React from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { isUngroupedGroupName } from '../../domain';
 import { DroneCard } from '../overview';
 import type { DroneSummary, RepoSummary } from '../types';
 import { compareDronesByNewestFirst, isDroneStartingOrSeeding } from './helpers';
 import { IconChevron, IconColumns, IconFolder, IconList, IconPencil, IconPlus, IconPlusDouble, IconSettings, IconSpinner, IconTrash, SkeletonLine } from './icons';
-import type { AppView, DraftChatState } from './app-types';
+import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 
 type SidebarGroup = {
   group: string;
@@ -12,20 +13,13 @@ type SidebarGroup = {
 };
 
 type DroneSidebarProps = {
-  sidebarCollapsed: boolean;
-  selectedDroneIds: string[];
-  draftChat: DraftChatState | null;
-  appView: AppView;
-  viewMode: 'grouped' | 'flat';
   dronesError: string | null | undefined;
   groupMoveError: string | null;
   dronesLoading: boolean;
   sidebarDronesFilteredByRepo: DroneSummary[];
   sidebarDrones: DroneSummary[];
-  activeRepoPath: string;
   sidebarOptimisticDroneIdSet: Set<string>;
   selectedDroneSet: Set<string>;
-  selectedDrone: string | null;
   selectedIsResponding: boolean;
   deletingDrones: Record<string, boolean>;
   renamingDrones: Record<string, boolean>;
@@ -38,22 +32,17 @@ type DroneSidebarProps = {
   deletingGroups: Record<string, boolean>;
   renamingGroups: Record<string, boolean>;
   dragOverGroup: string | null;
-  selectedGroupMultiChat: string | null;
   sidebarHasUngroupedGroup: boolean;
   draggingDroneNames: string[] | null;
   dragOverUngrouped: boolean;
-  sidebarReposCollapsed: boolean;
   repos: RepoSummary[];
   reposLoading: boolean;
   reposError: string | null | undefined;
   dronesCount: number;
   droneCountByRepoPath: Map<string, number>;
-  autoDelete: boolean;
   uiDroneName: (nameRaw: string) => string;
   onOpenDraftChatComposer: () => void;
   onOpenCreateModal: () => void;
-  onToggleSettingsView: () => void;
-  onToggleViewMode: () => void;
   onSelectDroneCard: (droneId: string, opts?: { toggle?: boolean; range?: boolean }) => void;
   onOpenCloneModal: (drone: DroneSummary) => void;
   onRenameDrone: (droneId: string) => void;
@@ -73,29 +62,17 @@ type DroneSidebarProps = {
   onDeleteGroup: (group: string, count: number) => void;
   onDroneDragStart: (droneId: string, event: React.DragEvent<HTMLDivElement>) => void;
   onDroneDragEnd: () => void;
-  onToggleSidebarReposCollapsed: () => void;
   onOpenReposModal: () => void;
-  onClearActiveRepoPath: () => void;
-  onToggleActiveRepoPath: (path: string) => void;
-  onAutoDeleteChange: (checked: boolean) => void;
-  onSetSidebarCollapsed: (collapsed: boolean) => void;
 };
 
 export function DroneSidebar({
-  sidebarCollapsed,
-  selectedDroneIds,
-  draftChat,
-  appView,
-  viewMode,
   dronesError,
   groupMoveError,
   dronesLoading,
   sidebarDronesFilteredByRepo,
   sidebarDrones,
-  activeRepoPath,
   sidebarOptimisticDroneIdSet,
   selectedDroneSet,
-  selectedDrone,
   selectedIsResponding,
   deletingDrones,
   renamingDrones,
@@ -108,22 +85,17 @@ export function DroneSidebar({
   deletingGroups,
   renamingGroups,
   dragOverGroup,
-  selectedGroupMultiChat,
   sidebarHasUngroupedGroup,
   draggingDroneNames,
   dragOverUngrouped,
-  sidebarReposCollapsed,
   repos,
   reposLoading,
   reposError,
   dronesCount,
   droneCountByRepoPath,
-  autoDelete,
   uiDroneName,
   onOpenDraftChatComposer,
   onOpenCreateModal,
-  onToggleSettingsView,
-  onToggleViewMode,
   onSelectDroneCard,
   onOpenCloneModal,
   onRenameDrone,
@@ -143,13 +115,46 @@ export function DroneSidebar({
   onDeleteGroup,
   onDroneDragStart,
   onDroneDragEnd,
-  onToggleSidebarReposCollapsed,
   onOpenReposModal,
-  onClearActiveRepoPath,
-  onToggleActiveRepoPath,
-  onAutoDeleteChange,
-  onSetSidebarCollapsed,
 }: DroneSidebarProps) {
+  const {
+    sidebarCollapsed,
+    selectedDroneIds,
+    draftChat,
+    appView,
+    viewMode,
+    activeRepoPath,
+    selectedDrone,
+    selectedGroupMultiChat,
+    sidebarReposCollapsed,
+    autoDelete,
+    setAppView,
+    setViewMode,
+    setSidebarReposCollapsed,
+    setActiveRepoPath,
+    setAutoDelete,
+    setSidebarCollapsed,
+  } = useDroneHubUiStore(
+    useShallow((s) => ({
+      sidebarCollapsed: s.sidebarCollapsed,
+      selectedDroneIds: s.selectedDroneIds,
+      draftChat: s.draftChat,
+      appView: s.appView,
+      viewMode: s.viewMode,
+      activeRepoPath: s.activeRepoPath,
+      selectedDrone: s.selectedDrone,
+      selectedGroupMultiChat: s.selectedGroupMultiChat,
+      sidebarReposCollapsed: s.sidebarReposCollapsed,
+      autoDelete: s.autoDelete,
+      setAppView: s.setAppView,
+      setViewMode: s.setViewMode,
+      setSidebarReposCollapsed: s.setSidebarReposCollapsed,
+      setActiveRepoPath: s.setActiveRepoPath,
+      setAutoDelete: s.setAutoDelete,
+      setSidebarCollapsed: s.setSidebarCollapsed,
+    })),
+  );
+
   return (
     <>
       <aside
@@ -197,7 +202,7 @@ export function DroneSidebar({
               </button>
               <button
                 type="button"
-                onClick={onToggleSettingsView}
+                onClick={() => setAppView((prev) => (prev === 'settings' ? 'workspace' : 'settings'))}
                 className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
                   appView === 'settings'
                     ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
@@ -209,7 +214,7 @@ export function DroneSidebar({
                 <IconSettings className="opacity-80" />
               </button>
               <button
-                onClick={onToggleViewMode}
+                onClick={() => setViewMode((prev) => (prev === 'grouped' ? 'flat' : 'grouped'))}
                 className="inline-flex items-center gap-1 px-1.5 py-1 rounded text-[10px] font-semibold text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)] border border-transparent hover:border-[var(--border-subtle)] transition-all"
                 title={viewMode === 'grouped' ? 'Switch to flat list' : 'Switch to grouped folders'}
               >
@@ -532,7 +537,7 @@ export function DroneSidebar({
           <div className="px-2.5 py-1.5 flex items-center gap-1.5">
             <button
               type="button"
-              onClick={onToggleSidebarReposCollapsed}
+              onClick={() => setSidebarReposCollapsed((prev) => !prev)}
               className="flex-1 min-w-0 inline-flex items-center gap-2 px-1.5 py-1 rounded text-left text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)] transition-all"
               style={{ fontFamily: 'var(--display)' }}
               title={sidebarReposCollapsed ? 'Expand repos list' : 'Collapse repos list'}
@@ -561,7 +566,7 @@ export function DroneSidebar({
             <div className="max-h-[190px] overflow-y-auto px-2 pb-2 flex flex-col gap-0.5">
               <button
                 type="button"
-                onClick={onClearActiveRepoPath}
+                onClick={() => setActiveRepoPath('')}
                 className={`w-full text-left px-2.5 py-2 rounded border transition-all ${
                   !activeRepoPath
                     ? 'bg-[var(--selected)] border-[var(--accent-muted)]'
@@ -589,7 +594,7 @@ export function DroneSidebar({
                     <button
                       key={p}
                       type="button"
-                      onClick={() => onToggleActiveRepoPath(p)}
+                      onClick={() => setActiveRepoPath((prev) => (prev === p ? '' : p))}
                       className={`w-full text-left px-2.5 py-2 rounded border transition-all ${
                         selected
                           ? 'bg-[var(--selected)] border-[var(--accent-muted)] shadow-[0_0_8px_rgba(167,139,250,.06)]'
@@ -627,7 +632,7 @@ export function DroneSidebar({
               type="checkbox"
               className="accent-[var(--accent)] w-3.5 h-3.5"
               checked={autoDelete}
-              onChange={(e) => onAutoDeleteChange(e.target.checked)}
+              onChange={(e) => setAutoDelete(e.target.checked)}
             />
             <span className="text-[10px] text-[var(--muted-dim)] group-hover:text-[var(--muted)] transition-colors" title="When enabled, deletes won't ask for confirmation.">
               Auto-delete
@@ -635,7 +640,7 @@ export function DroneSidebar({
           </label>
           <button
             type="button"
-            onClick={() => onSetSidebarCollapsed(true)}
+            onClick={() => setSidebarCollapsed(true)}
             className="inline-flex items-center justify-center w-7 h-7 rounded text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)] transition-all"
             title="Collapse sidebar"
             aria-label="Collapse sidebar"
@@ -649,7 +654,7 @@ export function DroneSidebar({
         <div className="flex-shrink-0 w-10 bg-[var(--panel-alt)] border-r border-[var(--border)] flex flex-col items-center pt-3 gap-2">
           <button
             type="button"
-            onClick={() => onSetSidebarCollapsed(false)}
+            onClick={() => setSidebarCollapsed(false)}
             className="inline-flex items-center justify-center w-7 h-7 rounded text-[var(--muted-dim)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-all"
             title="Expand sidebar"
             aria-label="Expand sidebar"
@@ -658,7 +663,7 @@ export function DroneSidebar({
           </button>
           <button
             type="button"
-            onClick={() => { onSetSidebarCollapsed(false); onOpenDraftChatComposer(); }}
+            onClick={() => { setSidebarCollapsed(false); onOpenDraftChatComposer(); }}
             className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
               draftChat
                 ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
@@ -671,7 +676,7 @@ export function DroneSidebar({
           </button>
           <button
             type="button"
-            onClick={() => { onSetSidebarCollapsed(false); onOpenCreateModal(); }}
+            onClick={() => { setSidebarCollapsed(false); onOpenCreateModal(); }}
             className="inline-flex items-center justify-center w-7 h-7 rounded border border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] transition-all"
             title="Create multiple drones (S)"
             aria-label="Create multiple drones"

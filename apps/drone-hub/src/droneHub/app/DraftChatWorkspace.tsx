@@ -1,4 +1,5 @@
 import React from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { ChatInput, type ChatSendPayload, EmptyState, PendingTranscriptTurn } from '../chat';
 import { droneChatQueueKey } from './helpers';
 import { IconChat, IconChevron } from './icons';
@@ -6,22 +7,15 @@ import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
 import type { ChatAgentConfig } from '../../domain';
 import type { PendingPrompt } from '../types';
 import type { DraftChatState } from './app-types';
+import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 
 type DraftChatWorkspaceProps = {
   draftChat: DraftChatState;
   nowMs: number;
-  spawnAgentKey: string;
-  onSpawnAgentKeyChange: (value: string) => void;
   spawnAgentMenuEntries: UiMenuSelectEntry[];
   draftCreating: boolean;
   draftAutoRenaming: boolean;
-  onOpenCustomAgentModal: () => void;
   spawnAgentConfig: ChatAgentConfig;
-  spawnModel: string;
-  onSpawnModelChange: (value: string) => void;
-  onClearSpawnModel: () => void;
-  chatHeaderRepoPath: string;
-  onChatHeaderRepoPathChange: (value: string) => void;
   createRepoMenuEntries: UiMenuSelectEntry[];
   draftCreateError: string | null;
   queuedPromptsByDroneChat: Record<string, PendingPrompt[]>;
@@ -34,18 +28,10 @@ type DraftChatWorkspaceProps = {
 export function DraftChatWorkspace({
   draftChat,
   nowMs,
-  spawnAgentKey,
-  onSpawnAgentKeyChange,
   spawnAgentMenuEntries,
   draftCreating,
   draftAutoRenaming,
-  onOpenCustomAgentModal,
   spawnAgentConfig,
-  spawnModel,
-  onSpawnModelChange,
-  onClearSpawnModel,
-  chatHeaderRepoPath,
-  onChatHeaderRepoPathChange,
   createRepoMenuEntries,
   draftCreateError,
   queuedPromptsByDroneChat,
@@ -54,6 +40,26 @@ export function DraftChatWorkspace({
   onEnqueueQueuedPrompt,
   onSetDraftCreateError,
 }: DraftChatWorkspaceProps) {
+  const {
+    spawnAgentKey,
+    spawnModel,
+    chatHeaderRepoPath,
+    setSpawnAgentKey,
+    setSpawnModel,
+    setChatHeaderRepoPath,
+    setCustomAgentModalOpen,
+  } = useDroneHubUiStore(
+    useShallow((s) => ({
+      spawnAgentKey: s.spawnAgentKey,
+      spawnModel: s.spawnModel,
+      chatHeaderRepoPath: s.chatHeaderRepoPath,
+      setSpawnAgentKey: s.setSpawnAgentKey,
+      setSpawnModel: s.setSpawnModel,
+      setChatHeaderRepoPath: s.setChatHeaderRepoPath,
+      setCustomAgentModalOpen: s.setCustomAgentModalOpen,
+    })),
+  );
+
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
       <div className="flex-shrink-0 bg-[var(--panel-alt)] border-b border-[var(--border)] relative">
@@ -95,7 +101,7 @@ export function DraftChatWorkspace({
               <UiMenuSelect
                 variant="toolbar"
                 value={spawnAgentKey}
-                onValueChange={onSpawnAgentKeyChange}
+                onValueChange={setSpawnAgentKey}
                 entries={spawnAgentMenuEntries}
                 disabled={draftCreating || draftAutoRenaming || Boolean(draftChat.prompt)}
                 triggerClassName="min-w-[170px] max-w-[240px]"
@@ -105,7 +111,7 @@ export function DraftChatWorkspace({
               />
               <button
                 type="button"
-                onClick={onOpenCustomAgentModal}
+                onClick={() => setCustomAgentModalOpen(true)}
                 disabled={draftCreating || draftAutoRenaming || Boolean(draftChat.prompt)}
                 className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
                   draftCreating || draftAutoRenaming || Boolean(draftChat.prompt)
@@ -125,7 +131,7 @@ export function DraftChatWorkspace({
                 </span>
                 <input
                   value={spawnModel}
-                  onChange={(e) => onSpawnModelChange(e.target.value)}
+                  onChange={(e) => setSpawnModel(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Escape') e.currentTarget.blur();
                   }}
@@ -140,7 +146,7 @@ export function DraftChatWorkspace({
                 />
                 <button
                   type="button"
-                  onClick={onClearSpawnModel}
+                  onClick={() => setSpawnModel('')}
                   disabled={draftCreating || draftAutoRenaming || Boolean(draftChat.prompt) || !spawnModel.trim()}
                   className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
                     draftCreating || draftAutoRenaming || Boolean(draftChat.prompt) || !spawnModel.trim()
@@ -161,7 +167,7 @@ export function DraftChatWorkspace({
               <UiMenuSelect
                 variant="toolbar"
                 value={chatHeaderRepoPath}
-                onValueChange={onChatHeaderRepoPathChange}
+                onValueChange={setChatHeaderRepoPath}
                 entries={createRepoMenuEntries}
                 disabled={draftCreating || draftAutoRenaming || Boolean(draftChat.prompt)}
                 triggerClassName="min-w-[220px] max-w-[420px]"

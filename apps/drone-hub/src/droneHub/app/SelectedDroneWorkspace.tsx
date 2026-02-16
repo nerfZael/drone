@@ -1,4 +1,5 @@
 import React from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import {
   ChatInput,
   type ChatSendPayload,
@@ -21,6 +22,7 @@ import { isDroneStartingOrSeeding } from './helpers';
 import { cn } from '../../ui/cn';
 import { dropdownMenuItemBaseClass, dropdownPanelBaseClass } from '../../ui/dropdown';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
+import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 
 type LaunchHint =
   | {
@@ -34,8 +36,6 @@ type LaunchHint =
 type SelectedDroneWorkspaceProps = {
   currentDrone: DroneSummary;
   currentDroneLabel: string;
-  sidebarCollapsed: boolean;
-  setSidebarCollapsed: React.Dispatch<React.SetStateAction<boolean>>;
   showRespondingAsStatusInHeader: boolean;
   chatUiMode: 'transcript' | 'cli';
   loadingSession: boolean;
@@ -51,10 +51,6 @@ type SelectedDroneWorkspaceProps = {
   currentAgentKey: string;
   pickAgentValue: (next: string) => void;
   toolbarAgentMenuEntries: UiMenuSelectEntry[];
-  agentMenuOpen: boolean;
-  setAgentMenuOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  setTerminalMenuOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  setHeaderOverflowOpen: React.Dispatch<React.SetStateAction<boolean>>;
   agentDisabled: boolean;
   agentLabel: string;
   modelControlEnabled: boolean;
@@ -76,10 +72,6 @@ type SelectedDroneWorkspaceProps = {
   currentDroneRepoAttached: boolean;
   currentDroneRepoPath: string;
   createRepoMenuEntries: UiMenuSelectEntry[];
-  outputView: 'screen' | 'log';
-  setOutputView: React.Dispatch<React.SetStateAction<'screen' | 'log'>>;
-  selectedChat: string;
-  setSelectedChat: React.Dispatch<React.SetStateAction<string>>;
   openDroneTerminal: (mode: 'ssh' | 'agent') => void;
   openingTerminal: { mode: 'ssh' | 'agent' } | null;
   openDroneEditor: (editor: 'code' | 'cursor') => void;
@@ -87,14 +79,10 @@ type SelectedDroneWorkspaceProps = {
   pullRepoChanges: () => Promise<void>;
   repoOp: { kind: 'pull' | 'reseed' } | null;
   headerOverflowRef: React.RefObject<HTMLDivElement | null>;
-  headerOverflowOpen: boolean;
   reseedRepo: () => Promise<void>;
   terminalMenuRef: React.RefObject<HTMLDivElement | null>;
-  terminalMenuOpen: boolean;
   terminalLabel: string;
   terminalOptions: Array<{ id: string; label: string }>;
-  terminalEmulator: string;
-  setTerminalEmulator: React.Dispatch<React.SetStateAction<string>>;
   rightPanelOpen: boolean;
   setRightPanelOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setRightPanelSplitMode: (next: boolean) => void;
@@ -138,8 +126,6 @@ type SelectedDroneWorkspaceProps = {
 export function SelectedDroneWorkspace({
   currentDrone,
   currentDroneLabel,
-  sidebarCollapsed,
-  setSidebarCollapsed,
   showRespondingAsStatusInHeader,
   chatUiMode,
   loadingSession,
@@ -155,10 +141,6 @@ export function SelectedDroneWorkspace({
   currentAgentKey,
   pickAgentValue,
   toolbarAgentMenuEntries,
-  agentMenuOpen,
-  setAgentMenuOpen,
-  setTerminalMenuOpen,
-  setHeaderOverflowOpen,
   agentDisabled,
   agentLabel,
   modelControlEnabled,
@@ -180,10 +162,6 @@ export function SelectedDroneWorkspace({
   currentDroneRepoAttached,
   currentDroneRepoPath,
   createRepoMenuEntries,
-  outputView,
-  setOutputView,
-  selectedChat,
-  setSelectedChat,
   openDroneTerminal,
   openingTerminal,
   openDroneEditor,
@@ -191,14 +169,10 @@ export function SelectedDroneWorkspace({
   pullRepoChanges,
   repoOp,
   headerOverflowRef,
-  headerOverflowOpen,
   reseedRepo,
   terminalMenuRef,
-  terminalMenuOpen,
   terminalLabel,
   terminalOptions,
-  terminalEmulator,
-  setTerminalEmulator,
   rightPanelOpen,
   setRightPanelOpen,
   setRightPanelSplitMode,
@@ -238,6 +212,40 @@ export function SelectedDroneWorkspace({
   startRightPanelResize,
   renderRightPanelTabContent,
 }: SelectedDroneWorkspaceProps) {
+  const {
+    sidebarCollapsed,
+    agentMenuOpen,
+    terminalMenuOpen,
+    headerOverflowOpen,
+    outputView,
+    selectedChat,
+    terminalEmulator,
+    setSidebarCollapsed,
+    setAgentMenuOpen,
+    setTerminalMenuOpen,
+    setHeaderOverflowOpen,
+    setOutputView,
+    setSelectedChat,
+    setTerminalEmulator,
+  } = useDroneHubUiStore(
+    useShallow((s) => ({
+      sidebarCollapsed: s.sidebarCollapsed,
+      agentMenuOpen: s.agentMenuOpen,
+      terminalMenuOpen: s.terminalMenuOpen,
+      headerOverflowOpen: s.headerOverflowOpen,
+      outputView: s.outputView,
+      selectedChat: s.selectedChat,
+      terminalEmulator: s.terminalEmulator,
+      setSidebarCollapsed: s.setSidebarCollapsed,
+      setAgentMenuOpen: s.setAgentMenuOpen,
+      setTerminalMenuOpen: s.setTerminalMenuOpen,
+      setHeaderOverflowOpen: s.setHeaderOverflowOpen,
+      setOutputView: s.setOutputView,
+      setSelectedChat: s.setSelectedChat,
+      setTerminalEmulator: s.setTerminalEmulator,
+    })),
+  );
+
   return (
     <>
       {/* Header — spans full width (chat + right panel) */}

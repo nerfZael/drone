@@ -1,4 +1,5 @@
 import React from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { ChatInput, type ChatSendPayload, EmptyState } from '../chat';
 import { GroupMultiChatColumn } from './GroupMultiChatColumn';
 import {
@@ -9,6 +10,7 @@ import {
 } from './app-config';
 import { IconChat, IconChevron, IconDrone } from './icons';
 import type { DroneSummary } from '../types';
+import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 
 type GroupMultiChatData = {
   group: string;
@@ -17,12 +19,6 @@ type GroupMultiChatData = {
 
 type GroupMultiChatWorkspaceProps = {
   selectedGroupMultiChatData: GroupMultiChatData;
-  selectedChat: string | null;
-  groupMultiChatColumnWidth: number;
-  onGroupMultiChatColumnWidthChange: (width: number) => void;
-  groupBroadcastExpanded: boolean;
-  onToggleGroupBroadcastExpanded: () => void;
-  onClose: () => void;
   groupBroadcastPromptError: string | null;
   groupBroadcastSending: boolean;
   onSendGroupBroadcastPrompt: (payload: ChatSendPayload) => Promise<boolean>;
@@ -34,12 +30,6 @@ type GroupMultiChatWorkspaceProps = {
 
 export function GroupMultiChatWorkspace({
   selectedGroupMultiChatData,
-  selectedChat,
-  groupMultiChatColumnWidth,
-  onGroupMultiChatColumnWidthChange,
-  groupBroadcastExpanded,
-  onToggleGroupBroadcastExpanded,
-  onClose,
   groupBroadcastPromptError,
   groupBroadcastSending,
   onSendGroupBroadcastPrompt,
@@ -48,6 +38,24 @@ export function GroupMultiChatWorkspace({
   onSelectDroneCard,
   onParseJobsFromAgentMessage,
 }: GroupMultiChatWorkspaceProps) {
+  const {
+    selectedChat,
+    groupMultiChatColumnWidth,
+    groupBroadcastExpanded,
+    setGroupMultiChatColumnWidth,
+    setGroupBroadcastExpanded,
+    setSelectedGroupMultiChat,
+  } = useDroneHubUiStore(
+    useShallow((s) => ({
+      selectedChat: s.selectedChat,
+      groupMultiChatColumnWidth: s.groupMultiChatColumnWidth,
+      groupBroadcastExpanded: s.groupBroadcastExpanded,
+      setGroupMultiChatColumnWidth: s.setGroupMultiChatColumnWidth,
+      setGroupBroadcastExpanded: s.setGroupBroadcastExpanded,
+      setSelectedGroupMultiChat: s.setSelectedGroupMultiChat,
+    })),
+  );
+
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
       <div className="flex-shrink-0 bg-[var(--panel-alt)] border-b border-[var(--border)] px-5 py-3">
@@ -74,14 +82,14 @@ export function GroupMultiChatWorkspace({
                 max={GROUP_MULTI_CHAT_COLUMN_WIDTH_MAX_PX}
                 step={10}
                 value={groupMultiChatColumnWidth}
-                onChange={(e) => onGroupMultiChatColumnWidthChange(clampGroupMultiChatColumnWidthPx(Number(e.target.value)))}
+                onChange={(e) => setGroupMultiChatColumnWidth(clampGroupMultiChatColumnWidthPx(Number(e.target.value)))}
                 className="w-[92px] accent-[var(--accent)]"
                 title="Adjust width for all columns"
                 aria-label="Adjust width for all group multi-chat columns"
               />
               <button
                 type="button"
-                onClick={() => onGroupMultiChatColumnWidthChange(GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX)}
+                onClick={() => setGroupMultiChatColumnWidth(GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX)}
                 disabled={groupMultiChatColumnWidth === GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX}
                 className={`inline-flex items-center h-5 px-1.5 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
                   groupMultiChatColumnWidth === GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX
@@ -99,7 +107,7 @@ export function GroupMultiChatWorkspace({
             </span>
             <button
               type="button"
-              onClick={onToggleGroupBroadcastExpanded}
+              onClick={() => setGroupBroadcastExpanded((v) => !v)}
               className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border text-[10px] font-semibold tracking-wide uppercase transition-all ${
                 groupBroadcastExpanded
                   ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] shadow-[0_0_0_1px_rgba(167,139,250,.15)]'
@@ -115,7 +123,7 @@ export function GroupMultiChatWorkspace({
             </button>
             <button
               type="button"
-              onClick={onClose}
+              onClick={() => setSelectedGroupMultiChat(null)}
               className="inline-flex items-center h-7 px-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-all"
               style={{ fontFamily: 'var(--display)' }}
               title="Exit group multi-chat view"
