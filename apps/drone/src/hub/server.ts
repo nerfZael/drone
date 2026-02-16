@@ -2286,6 +2286,15 @@ function looksLikeMissingContainerError(msg: string): boolean {
   );
 }
 
+function looksLikeRepoUnavailableError(msg: string): boolean {
+  const s = String(msg ?? '').toLowerCase();
+  return (
+    s.includes('not a git repository') ||
+    s.includes('cannot change to') ||
+    s.includes('unable to read current working directory')
+  );
+}
+
 type PendingPromptState = 'queued' | 'sending' | 'sent' | 'failed';
 
 type PendingPrompt = {
@@ -5778,7 +5787,16 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           return;
         } catch (e: any) {
           const msg = e?.message ?? String(e);
-          json(res, 500, { ok: false, error: msg });
+          const missingContainer = looksLikeMissingContainerError(msg);
+          const repoUnavailable = looksLikeRepoUnavailableError(msg);
+          const status = missingContainer ? 404 : repoUnavailable ? 409 : 500;
+          json(res, status, {
+            ok: false,
+            error: repoUnavailable ? 'repository is not ready yet' : msg,
+            ...(repoUnavailable ? { code: 'repo_unavailable' } : {}),
+            id: droneId,
+            name: droneName,
+          });
           return;
         }
       }
@@ -5844,7 +5862,16 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           return;
         } catch (e: any) {
           const msg = e?.message ?? String(e);
-          json(res, 500, { ok: false, error: msg });
+          const missingContainer = looksLikeMissingContainerError(msg);
+          const repoUnavailable = looksLikeRepoUnavailableError(msg);
+          const status = missingContainer ? 404 : repoUnavailable ? 409 : 500;
+          json(res, status, {
+            ok: false,
+            error: repoUnavailable ? 'repository is not ready yet' : msg,
+            ...(repoUnavailable ? { code: 'repo_unavailable' } : {}),
+            id: droneId,
+            name: droneName,
+          });
           return;
         }
       }

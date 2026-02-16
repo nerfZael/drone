@@ -132,7 +132,7 @@ export function useDroneSelectionState({
     }
     if (dronesFilteredByRepo.length === 0) {
       if (selectedDrone) setSelectedDrone(null);
-      setSelectedDroneIds([]);
+      setSelectedDroneIds((prev) => (prev.length === 0 ? prev : []));
       resetGroupDndState();
       setGroupMoveError(null);
       selectionAnchorRef.current = null;

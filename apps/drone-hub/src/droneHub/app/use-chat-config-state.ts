@@ -44,6 +44,21 @@ export function useChatConfigState({
     | 'opencode'
     | null = chatInfo?.agent?.kind === 'builtin' ? chatInfo.agent.id : null;
 
+  const selectedDroneSummary = React.useMemo(
+    () => (selectedDrone ? drones.find((d) => d.id === selectedDrone) ?? null : null),
+    [drones, selectedDrone],
+  );
+  const selectedDroneHubPhase = selectedDroneSummary?.hubPhase ?? null;
+  const selectedDroneHasChatList = Array.isArray(selectedDroneSummary?.chats);
+  const selectedDroneChatsKey = React.useMemo(() => {
+    if (!Array.isArray(selectedDroneSummary?.chats)) return '';
+    const normalized = selectedDroneSummary.chats
+      .map((chat) => String(chat ?? '').trim())
+      .filter(Boolean);
+    if (normalized.length === 0) return '';
+    return Array.from(new Set(normalized)).sort().join('\u0000');
+  }, [selectedDroneSummary?.chats]);
+
   React.useEffect(() => {
     if (!selectedDrone || !selectedChat) {
       setChatInfo(null);
@@ -51,15 +66,17 @@ export function useChatConfigState({
       setLoadingChatInfo(false);
       return;
     }
-    const summary = drones.find((d) => d.id === selectedDrone) ?? null;
-    if (isDroneStartingOrSeeding(summary?.hubPhase)) {
+    if (isDroneStartingOrSeeding(selectedDroneHubPhase)) {
       setChatInfo(null);
       setChatInfoError(null);
       setLoadingChatInfo(false);
       return;
     }
     // Avoid 404 spam: don't fetch chat info until the chat exists on this drone.
-    if (summary && Array.isArray(summary.chats) && !summary.chats.includes(selectedChat)) {
+    if (
+      selectedDroneHasChatList &&
+      !selectedDroneChatsKey.split('\u0000').includes(selectedChat)
+    ) {
       setChatInfo(null);
       setChatInfoError(null);
       setLoadingChatInfo(false);
@@ -89,7 +106,13 @@ export function useChatConfigState({
     return () => {
       mounted = false;
     };
-  }, [drones, selectedDrone, selectedChat]);
+  }, [
+    selectedDrone,
+    selectedChat,
+    selectedDroneHubPhase,
+    selectedDroneHasChatList,
+    selectedDroneChatsKey,
+  ]);
 
   React.useEffect(() => {
     setManualChatModelInput(chatInfo?.model ?? '');

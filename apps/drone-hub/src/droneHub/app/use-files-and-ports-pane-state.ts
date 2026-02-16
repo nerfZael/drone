@@ -13,7 +13,6 @@ import type {
 } from '../types';
 import {
   PORT_PREVIEW_STORAGE_KEY,
-  PORT_STATUS_POLL_INTERVAL_MS,
   PORT_STATUS_TIMEOUT_MS,
   PREVIEW_URL_STORAGE_KEY,
 } from './app-config';
@@ -321,7 +320,15 @@ export function useFilesAndPortsPaneState({ currentDrone, requestJson }: UseFile
     const droneName = String(currentDrone?.name ?? '').trim();
     if (!droneName || portRows.length === 0) return;
     let mounted = true;
-    let timer: any = null;
+    const probeTargets =
+      selectedPreviewPort &&
+      portRows.some(
+        (p) =>
+          p.hostPort === selectedPreviewPort.hostPort &&
+          p.containerPort === selectedPreviewPort.containerPort,
+      )
+        ? [selectedPreviewPort]
+        : [];
 
     const warmStatuses = () => {
       setPortReachabilityByDrone((prev) => {
@@ -338,7 +345,7 @@ export function useFilesAndPortsPaneState({ currentDrone, requestJson }: UseFile
 
     const probe = async () => {
       const checks = await Promise.all(
-        portRows.map(async (p) => ({
+        probeTargets.map(async (p) => ({
           hostPort: p.hostPort,
           state: (await probeLocalhostPort(p.hostPort, PORT_STATUS_TIMEOUT_MS))
             ? ('up' as const)
@@ -348,24 +355,33 @@ export function useFilesAndPortsPaneState({ currentDrone, requestJson }: UseFile
       if (!mounted) return;
       setPortReachabilityByDrone((prev) => {
         const current = prev[droneName] ?? {};
+        const checksByHostPort = new Map<string, 'up' | 'down'>(
+          checks.map((c) => [String(c.hostPort), c.state]),
+        );
         const nextForDrone: PortReachabilityByHostPort = {};
-        for (const c of checks) nextForDrone[String(c.hostPort)] = c.state;
+        for (const p of portRows) {
+          const key = String(p.hostPort);
+          nextForDrone[key] = checksByHostPort.get(key) ?? current[key] ?? 'checking';
+        }
         if (sameReachabilityMap(current, nextForDrone)) return prev;
         return { ...prev, [droneName]: nextForDrone };
       });
     };
 
     warmStatuses();
+    if (probeTargets.length === 0) return;
     void probe();
-    timer = setInterval(() => {
-      void probe();
-    }, PORT_STATUS_POLL_INTERVAL_MS);
 
     return () => {
       mounted = false;
-      if (timer) clearInterval(timer);
     };
-  }, [currentDrone?.name, portRowsSignature]);
+  }, [
+    currentDrone?.name,
+    portRows,
+    portRowsSignature,
+    selectedPreviewPort?.containerPort,
+    selectedPreviewPort?.hostPort,
+  ]);
 
   const currentPortReachability = React.useMemo(() => {
     const droneName = String(currentDrone?.name ?? '').trim();
