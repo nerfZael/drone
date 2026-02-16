@@ -258,6 +258,7 @@ export async function droneRepoBaseSha(opts: { container: string; repoPathInCont
 export async function droneRepoPullChangesSummary(opts: {
   container: string;
   repoPathInContainer: string;
+  baseSha?: string;
 }): Promise<{ repoRoot: string; baseSha: string; headSha: string; entries: RepoPullChangeEntry[] }> {
   const repoPathInContainer = normalizeContainerPath(opts.repoPathInContainer);
   const repoRootRaw = await runGitInDroneOrThrow({
@@ -267,7 +268,11 @@ export async function droneRepoPullChangesSummary(opts: {
   });
   const repoRoot = String(repoRootRaw.stdout ?? '').trim() || repoPathInContainer;
 
-  const baseSha = await droneRepoBaseSha({ container: opts.container, repoPathInContainer });
+  const overrideBaseSha =
+    typeof opts.baseSha === 'string' && /^[0-9a-f]{40}$/.test(opts.baseSha.trim().toLowerCase())
+      ? opts.baseSha.trim().toLowerCase()
+      : null;
+  const baseSha = overrideBaseSha ?? (await droneRepoBaseSha({ container: opts.container, repoPathInContainer }));
   if (!baseSha) {
     throw new Error('missing dvm.baseSha (reseed may be required)');
   }

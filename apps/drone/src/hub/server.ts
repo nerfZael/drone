@@ -5294,11 +5294,30 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           return;
         }
         const repoPathInContainer = droneRepoPathInContainer(d);
+        const repoPathRaw = String(d?.repoPath ?? '').trim();
+        let pullPreviewBaseSha: string | undefined;
+        const lastPullAny = d?.repo?.lastPull && typeof d.repo.lastPull === 'object' ? d.repo.lastPull : null;
+        const lastPullMode = String((lastPullAny as any)?.mode ?? '').trim().toLowerCase();
+        const lastExportedHeadSha = String((lastPullAny as any)?.exportedHeadSha ?? '').trim().toLowerCase();
+        if (lastPullMode === 'host-conflicts-ready' && /^[0-9a-f]{40}$/.test(lastExportedHeadSha) && repoPathRaw) {
+          try {
+            const repoRoot = await gitTopLevel(repoPathRaw);
+            const clean = await gitIsClean(repoRoot);
+            if (clean) {
+              // Match pull behavior: once host conflicts are fully resolved and committed,
+              // preview from the last exported drone head so counts align with the next pull.
+              pullPreviewBaseSha = lastExportedHeadSha;
+            }
+          } catch {
+            // ignore and fall back to repo-configured dvm.baseSha
+          }
+        }
         try {
           const summary = await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: d }, async ({ containerName }) => {
             return await droneRepoPullChangesSummary({
               container: containerName,
               repoPathInContainer,
+              baseSha: pullPreviewBaseSha,
             });
           });
           json(res, 200, {
