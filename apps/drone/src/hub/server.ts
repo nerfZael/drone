@@ -79,6 +79,21 @@ const HUB_SETTINGS_LOG_MAX_TAIL_LINES = 5000;
 const HUB_SETTINGS_LOG_DEFAULT_MAX_BYTES = 200_000;
 const HUB_SETTINGS_LOG_MAX_BYTES = 1_000_000;
 
+function normalizeOrigin(raw: string): string | null {
+  try {
+    const u = new URL(String(raw));
+    const proto = String(u.protocol || '').toLowerCase();
+    if (proto !== 'http:' && proto !== 'https:') return null;
+    return `${u.protocol}//${u.host}`.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function normalizeApiKey(raw: unknown): string {
+  return typeof raw === 'string' ? raw.trim() : '';
+}
+
 async function readHubLogTail(opts: {
   tailLines: number;
   maxBytes: number;
@@ -473,34 +488,68 @@ function parseGitNameStatusZ(raw: string): RepoPullChangeEntry[] {
     .filter((t) => t.length > 0);
 
   const out: RepoPullChangeEntry[] = [];
+  const statusTokenPattern = /^[A-Z][0-9]*$/;
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i];
+    if (!token) continue;
     const tab = token.indexOf('\t');
-    if (tab <= 0) continue;
-    const statusRaw = token.slice(0, tab);
-    const statusChar = statusRaw.charAt(0) || '?';
-    const pathA = token.slice(tab + 1);
-    if (!pathA) continue;
+    if (tab > 0) {
+      // Back-compat for tab-delimited output variants.
+      const statusRaw = token.slice(0, tab);
+      const statusChar = statusRaw.charAt(0) || '?';
+      const pathA = token.slice(tab + 1);
+      if (!pathA) continue;
 
-    if (statusChar === 'R' || statusChar === 'C') {
-      const pathB = tokens[i + 1] ?? '';
-      i += 1;
-      const newPath = pathB || pathA;
+      if (statusChar === 'R' || statusChar === 'C') {
+        const pathB = tokens[i + 1] ?? '';
+        i += 1;
+        const newPath = pathB || pathA;
+        out.push({
+          path: newPath,
+          originalPath: pathA,
+          statusChar,
+          statusType: nameStatusCharToType(statusChar),
+        });
+        continue;
+      }
+
       out.push({
-        path: newPath,
-        originalPath: pathA,
+        path: pathA,
+        originalPath: null,
         statusChar,
         statusType: nameStatusCharToType(statusChar),
       });
       continue;
     }
 
-    out.push({
-      path: pathA,
-      originalPath: null,
-      statusChar,
-      statusType: nameStatusCharToType(statusChar),
-    });
+    // Canonical `git diff --name-status -z` format is status + NUL + path (+ NUL + path for R/C).
+    if (!statusTokenPattern.test(token)) continue;
+    const statusChar = token.charAt(0) || '?';
+    if (statusChar === 'R' || statusChar === 'C') {
+      const oldPath = tokens[i + 1] ?? '';
+      const newPath = tokens[i + 2] ?? '';
+      if (oldPath || newPath) {
+        out.push({
+          path: newPath || oldPath,
+          originalPath: oldPath || null,
+          statusChar,
+          statusType: nameStatusCharToType(statusChar),
+        });
+      }
+      i += 2;
+      continue;
+    }
+
+    const pathA = tokens[i + 1] ?? '';
+    if (pathA) {
+      out.push({
+        path: pathA,
+        originalPath: null,
+        statusChar,
+        statusType: nameStatusCharToType(statusChar),
+      });
+    }
+    i += 1;
   }
 
   out.sort((a, b) => {
