@@ -60,6 +60,12 @@ export type RepoDiffResult = {
   fromUntracked: boolean;
 };
 
+export type RepoNameStatusEntry = {
+  path: string;
+  originalPath: string | null;
+  statusChar: string;
+};
+
 export type RepoPatchApplyErrorKind = 'patch_apply_conflict' | 'patch_apply_failed';
 
 export class RepoPatchApplyError extends Error {
@@ -162,6 +168,73 @@ function parseAheadBehind(raw: string): { ahead: number; behind: number } {
     ahead: Number.parseInt(m[1], 10) || 0,
     behind: Number.parseInt(m[2], 10) || 0,
   };
+}
+
+function parseGitNameStatusZ(raw: string): RepoNameStatusEntry[] {
+  const tokens = String(raw ?? '')
+    .split('\0')
+    .filter((t) => t.length > 0);
+  const out: RepoNameStatusEntry[] = [];
+  const statusTokenPattern = /^[A-Z][0-9]*$/;
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i];
+    if (!token) continue;
+    const tab = token.indexOf('\t');
+    if (tab > 0) {
+      const statusRaw = token.slice(0, tab);
+      const statusChar = statusRaw.charAt(0) || '?';
+      const pathA = token.slice(tab + 1);
+      if (!pathA) continue;
+      if (statusChar === 'R' || statusChar === 'C') {
+        const pathB = tokens[i + 1] ?? '';
+        i += 1;
+        out.push({
+          path: pathB || pathA,
+          originalPath: pathA,
+          statusChar,
+        });
+        continue;
+      }
+      out.push({
+        path: pathA,
+        originalPath: null,
+        statusChar,
+      });
+      continue;
+    }
+
+    if (!statusTokenPattern.test(token)) continue;
+    const statusChar = token.charAt(0) || '?';
+    if (statusChar === 'R' || statusChar === 'C') {
+      const oldPath = tokens[i + 1] ?? '';
+      const newPath = tokens[i + 2] ?? '';
+      if (oldPath || newPath) {
+        out.push({
+          path: newPath || oldPath,
+          originalPath: oldPath || null,
+          statusChar,
+        });
+      }
+      i += 2;
+      continue;
+    }
+    const pathA = tokens[i + 1] ?? '';
+    if (pathA) {
+      out.push({
+        path: pathA,
+        originalPath: null,
+        statusChar,
+      });
+    }
+    i += 1;
+  }
+
+  out.sort((a, b) => {
+    const p = a.path.localeCompare(b.path);
+    if (p !== 0) return p;
+    return String(a.originalPath ?? '').localeCompare(String(b.originalPath ?? ''));
+  });
+  return out;
 }
 
 function pushRepoChangeEntry(list: RepoChangeEntry[], opts: { path: string; originalPath?: string | null; stagedChar: string; unstagedChar: string; forceConflicted?: boolean }) {
@@ -425,6 +498,42 @@ export async function gitRepoDiffForPath(opts: {
     truncated,
     fromUntracked,
   };
+}
+
+export async function gitMergePreviewNameStatusEntries(opts: {
+  repoRoot: string;
+  oursRef: string;
+  theirsRef: string;
+}): Promise<RepoNameStatusEntry[]> {
+  const repoRoot = String(opts.repoRoot ?? '').trim();
+  const oursRef = String(opts.oursRef ?? '').trim();
+  const theirsRef = String(opts.theirsRef ?? '').trim();
+  if (!repoRoot) throw new Error('missing repoRoot');
+  if (!oursRef) throw new Error('missing oursRef');
+  if (!theirsRef) throw new Error('missing theirsRef');
+
+  const merge = await runLocal('git', ['-C', repoRoot, 'merge-tree', '--write-tree', oursRef, theirsRef]);
+  const firstLine = String(merge.stdout ?? '')
+    .split('\n')
+    .map((l) => l.trim())
+    .find((l) => /^[0-9a-f]{40}$/i.test(l));
+  if (!firstLine) {
+    const details = `${String(merge.stderr ?? '')}\n${String(merge.stdout ?? '')}`.trim();
+    throw new Error(`Failed to compute merge preview tree.${details ? `\n\n${details}` : ''}`);
+  }
+
+  const raw = await runLocalOrThrow('git', [
+    '-C',
+    repoRoot,
+    'diff',
+    '--name-status',
+    '-z',
+    '--find-renames',
+    '--find-copies',
+    oursRef,
+    firstLine,
+  ]);
+  return parseGitNameStatusZ(raw);
 }
 
 export async function gitStashPush(repoRoot: string, message: string): Promise<{ created: boolean; stashRef?: string }> {

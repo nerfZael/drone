@@ -43,6 +43,7 @@ import {
   deleteHostRefBestEffort,
   gitCurrentBranchOrSha,
   gitIsClean,
+  gitMergePreviewNameStatusEntries,
   gitRepoChangesSummary,
   importBundleHeadToHostRef,
   mergeBranchIntoMainWorkingTreeNoCommit,
@@ -60,7 +61,9 @@ import {
   droneRepoDiffForPath,
   droneRepoPullChangesSummary,
   droneRepoPullDiffForPath,
+  nameStatusCharToType,
   runGitInDroneOrThrow,
+  type RepoPullChangeEntry,
 } from './drone-repo';
 import {
   clearStoredProviderApiKey,
@@ -969,6 +972,8 @@ const chatModelDiscoveryCache = new Map<
   }
 >();
 const cliModelFlagSupportCache = new Map<string, { atMs: number; supported: boolean }>();
+const PULL_PREVIEW_HOST_MERGE_CACHE_TTL_MS = 25_000;
+const pullPreviewHostMergeCache = new Map<string, { atMs: number; entries: RepoPullChangeEntry[] }>();
 
 function normalizeChatModel(raw: any): string | null {
   if (raw == null) return null;
@@ -5320,6 +5325,93 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
               baseSha: pullPreviewBaseSha,
             });
           });
+          let entriesForPreview: RepoPullChangeEntry[] = summary.entries;
+          if (repoPathRaw && summary.entries.length > 0) {
+            try {
+              const repoRoot = await gitTopLevel(repoPathRaw);
+              const hostSummary = await gitRepoChangesSummary(repoRoot);
+              const hostHeadSha = String(hostSummary.branch.oid ?? '').trim().toLowerCase();
+              if (/^[0-9a-f]{40}$/.test(hostHeadSha)) {
+                const cacheKey = [droneId, repoRoot, hostHeadSha, summary.baseSha, summary.headSha].join('\u0000');
+                const now = Date.now();
+                const cached = pullPreviewHostMergeCache.get(cacheKey);
+                if (cached && now - cached.atMs < PULL_PREVIEW_HOST_MERGE_CACHE_TTL_MS) {
+                  entriesForPreview = cached.entries;
+                } else {
+                  let exportPath = '';
+                  let importRefName = '';
+                  try {
+                    const patchesOutRoot = droneRootPath('repo-exports');
+                    await fs.mkdir(patchesOutRoot, { recursive: true });
+                    const safeDroneRefSeg =
+                      String(droneName ?? '')
+                        .toLowerCase()
+                        .replace(/[^a-z0-9_.-]+/g, '-')
+                        .replace(/^-+|-+$/g, '') || 'drone';
+                    const importRunId = `${Date.now().toString(36)}-${crypto.randomBytes(4).toString('hex')}`;
+                    importRefName = `refs/drone/imports/${safeDroneRefSeg}/preview-${importRunId}`;
+                    try {
+                      const exported = await withLockedDroneContainer(
+                        { requestedDroneName: droneName, droneEntry: d },
+                        async ({ containerName }) => {
+                          return await dvmRepoExport({
+                            container: containerName,
+                            repoPathInContainer,
+                            outDir: patchesOutRoot,
+                            format: 'bundle',
+                            base: summary.baseSha,
+                          });
+                        },
+                      );
+                      exportPath = exported.exportedPath;
+                    } catch (e: any) {
+                      const msg = e?.message ?? String(e);
+                      if (looksLikeEmptyBundleExportError(msg)) {
+                        entriesForPreview = [];
+                      } else {
+                        throw e;
+                      }
+                    }
+
+                    if (exportPath) {
+                      await importBundleHeadToHostRef({ repoRoot, bundlePath: exportPath, refName: importRefName });
+                      const mergedNameStatus = await gitMergePreviewNameStatusEntries({
+                        repoRoot,
+                        oursRef: 'HEAD',
+                        theirsRef: importRefName,
+                      });
+                      entriesForPreview = mergedNameStatus.map((entry) => ({
+                        path: entry.path,
+                        originalPath: entry.originalPath,
+                        statusChar: entry.statusChar,
+                        statusType: nameStatusCharToType(entry.statusChar),
+                      }));
+                    }
+
+                    if (pullPreviewHostMergeCache.size > 200) pullPreviewHostMergeCache.clear();
+                    pullPreviewHostMergeCache.set(cacheKey, { atMs: now, entries: entriesForPreview });
+                  } finally {
+                    if (exportPath) {
+                      try {
+                        await fs.rm(exportPath, { recursive: true, force: true });
+                      } catch {
+                        // ignore
+                      }
+                    }
+                    if (importRefName) {
+                      await deleteHostRefBestEffort({ repoRoot, refName: importRefName });
+                    }
+                  }
+                }
+              }
+            } catch (e: any) {
+              hubLog('warn', 'Pull preview host-merge calculation failed; using container-range fallback', {
+                droneName,
+                repoPathRaw,
+                error: e?.message ?? String(e),
+              });
+            }
+          }
           json(res, 200, {
             ok: true,
             id: droneId,
@@ -5327,8 +5419,8 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             repoRoot: summary.repoRoot,
             baseSha: summary.baseSha,
             headSha: summary.headSha,
-            counts: { changed: summary.entries.length },
-            entries: summary.entries,
+            counts: { changed: entriesForPreview.length },
+            entries: entriesForPreview,
           });
           return;
         } catch (e: any) {

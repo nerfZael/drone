@@ -135,14 +135,14 @@ type RepoPullChangeType =
   | 'unknown'
   | null;
 
-type RepoPullChangeEntry = {
+export type RepoPullChangeEntry = {
   path: string;
   originalPath: string | null;
   statusChar: string;
   statusType: RepoPullChangeType;
 };
 
-function nameStatusCharToType(chRaw: string): RepoPullChangeType {
+export function nameStatusCharToType(chRaw: string): RepoPullChangeType {
   const ch = String(chRaw ?? '.').charAt(0);
   switch (ch) {
     case 'A':
@@ -164,7 +164,7 @@ function nameStatusCharToType(chRaw: string): RepoPullChangeType {
   }
 }
 
-function parseGitNameStatusZ(raw: string): RepoPullChangeEntry[] {
+export function parseGitNameStatusZ(raw: string): RepoPullChangeEntry[] {
   const tokens = String(raw ?? '')
     .split('\0')
     .filter((t) => t.length > 0);
