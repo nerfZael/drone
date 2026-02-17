@@ -456,11 +456,6 @@ export function SelectedDroneWorkspace({
                   unavailable
                 </span>
               )}
-              {!chatModelsError && chatModelsDiscoveredAt && (
-                <span className="text-[10px] text-[var(--muted-dim)]" title={chatModelsDiscoveredAt}>
-                  {chatModelsSource}
-                </span>
-              )}
             </div>
           )}
           {/* Repo (read-only for repo-attached drones only) */}

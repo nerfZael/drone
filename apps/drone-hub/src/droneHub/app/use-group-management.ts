@@ -25,39 +25,8 @@ export function useGroupManagement({
   const [movingDroneGroups, setMovingDroneGroups] = React.useState(false);
   const [deletingGroups, setDeletingGroups] = React.useState<Record<string, boolean>>({});
   const [renamingGroups, setRenamingGroups] = React.useState<Record<string, boolean>>({});
-  const [createGroupDraft, setCreateGroupDraft] = React.useState('');
-  const [createGroupError, setCreateGroupError] = React.useState<string | null>(null);
-  const [creatingGroup, setCreatingGroup] = React.useState(false);
 
   const shouldConfirmDelete = React.useCallback(() => !autoDelete, [autoDelete]);
-
-  const createGroupFromDraft = React.useCallback(async (): Promise<void> => {
-    const name = String(createGroupDraft ?? '').trim();
-    if (creatingGroup) return;
-    if (!name) {
-      setCreateGroupError('Group name is required.');
-      return;
-    }
-    if (isUngroupedGroupName(name)) {
-      setCreateGroupError('"Ungrouped" is reserved.');
-      return;
-    }
-    setCreatingGroup(true);
-    setCreateGroupError(null);
-    try {
-      await requestJson<{ ok: true; name: string }>('/api/groups', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name }),
-      });
-      setCreateGroupDraft('');
-    } catch (e: any) {
-      const msg = String(e?.message ?? e ?? '').trim();
-      setCreateGroupError(msg || 'Failed to create group.');
-    } finally {
-      setCreatingGroup(false);
-    }
-  }, [createGroupDraft, creatingGroup]);
 
   const renameGroup = React.useCallback(
     async (groupRaw: string): Promise<void> => {
@@ -261,12 +230,6 @@ export function useGroupManagement({
     movingDroneGroups,
     deletingGroups,
     renamingGroups,
-    createGroupDraft,
-    setCreateGroupDraft,
-    createGroupError,
-    setCreateGroupError,
-    creatingGroup,
-    createGroupFromDraft,
     renameGroup,
     deleteGroup,
     moveDronesToGroup,

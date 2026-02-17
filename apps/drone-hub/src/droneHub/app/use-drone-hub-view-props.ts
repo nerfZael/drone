@@ -17,9 +17,6 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     renamingDrones,
     settingBaseImages,
     movingDroneGroups,
-    createGroupDraft,
-    createGroupError,
-    creatingGroup,
     sidebarGroups,
     collapsedGroups,
     deletingGroups,
@@ -45,9 +42,6 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     onUngroupedDragOver,
     onUngroupedDragLeave,
     onUngroupedDrop,
-    createGroupFromDraft,
-    setCreateGroupDraft,
-    setCreateGroupError,
     onGroupDragOver,
     onGroupDragLeave,
     onGroupDrop,
@@ -78,9 +72,6 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
       renamingDrones,
       settingBaseImages,
       movingDroneGroups,
-      createGroupDraft,
-      createGroupError,
-      creatingGroup,
       sidebarGroups,
       collapsedGroups,
       deletingGroups,
@@ -108,13 +99,6 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
       onUngroupedDragOver,
       onUngroupedDragLeave,
       onUngroupedDrop,
-      onCreateGroupFromDraft: () => {
-        void createGroupFromDraft();
-      },
-      onCreateGroupDraftChange: (value) => {
-        setCreateGroupDraft(value);
-        if (createGroupError) setCreateGroupError(null);
-      },
       onGroupDragOver,
       onGroupDragLeave,
       onGroupDrop,
