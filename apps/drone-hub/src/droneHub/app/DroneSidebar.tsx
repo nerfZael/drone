@@ -23,9 +23,6 @@ export type DroneSidebarProps = {
   deletingDrones: Record<string, boolean>;
   renamingDrones: Record<string, boolean>;
   movingDroneGroups: boolean;
-  createGroupDraft: string;
-  createGroupError: string | null;
-  creatingGroup: boolean;
   sidebarGroups: SidebarGroup[];
   collapsedGroups: Record<string, boolean>;
   deletingGroups: Record<string, boolean>;
@@ -50,8 +47,6 @@ export type DroneSidebarProps = {
   onUngroupedDragOver: (event: React.DragEvent<HTMLDivElement>) => void;
   onUngroupedDragLeave: (event: React.DragEvent<HTMLDivElement>) => void;
   onUngroupedDrop: (event: React.DragEvent<HTMLDivElement>) => void;
-  onCreateGroupFromDraft: () => void;
-  onCreateGroupDraftChange: (value: string) => void;
   onGroupDragOver: (group: string, event: React.DragEvent<HTMLDivElement>) => void;
   onGroupDragLeave: (group: string, event: React.DragEvent<HTMLDivElement>) => void;
   onGroupDrop: (group: string, event: React.DragEvent<HTMLDivElement>) => void;
@@ -76,9 +71,6 @@ export function DroneSidebar({
   deletingDrones,
   renamingDrones,
   movingDroneGroups,
-  createGroupDraft,
-  createGroupError,
-  creatingGroup,
   sidebarGroups,
   collapsedGroups,
   deletingGroups,
@@ -103,8 +95,6 @@ export function DroneSidebar({
   onUngroupedDragOver,
   onUngroupedDragLeave,
   onUngroupedDrop,
-  onCreateGroupFromDraft,
-  onCreateGroupDraftChange,
   onGroupDragOver,
   onGroupDragLeave,
   onGroupDrop,
@@ -321,37 +311,6 @@ export function DroneSidebar({
                 onDragLeave={onUngroupedDragLeave}
                 onDrop={onUngroupedDrop}
               >
-                <div className="px-1">
-                  <form
-                    className="flex items-center gap-1.5"
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      onCreateGroupFromDraft();
-                    }}
-                  >
-                    <input
-                      value={createGroupDraft}
-                      onChange={(e) => onCreateGroupDraftChange(e.target.value)}
-                      placeholder="New group"
-                      className="flex-1 min-w-0 px-2 py-1.5 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.18)] text-[11px] text-[var(--fg-secondary)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-muted)]"
-                    />
-                    <button
-                      type="submit"
-                      disabled={creatingGroup}
-                      aria-busy={creatingGroup}
-                      className={`inline-flex items-center justify-center w-8 h-8 rounded border transition-all ${
-                        creatingGroup
-                          ? 'opacity-60 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                          : 'bg-[rgba(167,139,250,.08)] border-[rgba(167,139,250,.18)] text-[var(--accent)] hover:bg-[rgba(167,139,250,.12)]'
-                      }`}
-                      title="Create group"
-                      aria-label="Create group"
-                    >
-                      {creatingGroup ? <IconSpinner className="opacity-90" /> : <IconPlus className="opacity-90" />}
-                    </button>
-                  </form>
-                  {createGroupError && <div className="px-0.5 pt-1 text-[10px] text-[var(--red)]">{createGroupError}</div>}
-                </div>
                 {sidebarGroups.map(({ group, items }) => {
                   const collapsed = !!collapsedGroups[group];
                   const isDeletingGroup = Boolean(deletingGroups[group]);
