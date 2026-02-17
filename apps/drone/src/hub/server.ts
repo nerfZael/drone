@@ -43,6 +43,8 @@ import {
   deleteHostRefBestEffort,
   gitCurrentBranchOrSha,
   gitIsClean,
+  gitIsAncestor,
+  gitMergeBase,
   gitMergePreviewNameStatusEntries,
   gitRepoChangesSummary,
   importBundleHeadToHostRef,
@@ -5318,13 +5320,51 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           }
         }
         try {
-          const summary = await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: d }, async ({ containerName }) => {
+          let summary = await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: d }, async ({ containerName }) => {
             return await droneRepoPullChangesSummary({
               container: containerName,
               repoPathInContainer,
               baseSha: pullPreviewBaseSha,
             });
           });
+          if (repoPathRaw) {
+            try {
+              const lastPullAny = d?.repo?.lastPull && typeof d.repo.lastPull === 'object' ? d.repo.lastPull : null;
+              const lastPullMode = String((lastPullAny as any)?.mode ?? '').trim().toLowerCase();
+              const lastExportedHeadSha = String((lastPullAny as any)?.exportedHeadSha ?? '').trim().toLowerCase();
+              if (
+                lastPullMode === 'bundle-merge-no-commit' &&
+                /^[0-9a-f]{40}$/.test(lastExportedHeadSha) &&
+                summary.baseSha === lastExportedHeadSha &&
+                /^[0-9a-f]{40}$/.test(summary.headSha)
+              ) {
+                const repoRoot = await gitTopLevel(repoPathRaw);
+                const hostSummary = await gitRepoChangesSummary(repoRoot);
+                const hostHeadSha = String(hostSummary.branch.oid ?? '').trim().toLowerCase();
+                if (/^[0-9a-f]{40}$/.test(hostHeadSha)) {
+                  const hostContainsLastExport = await gitIsAncestor(repoRoot, lastExportedHeadSha, 'HEAD');
+                  if (!hostContainsLastExport) {
+                    const recoveryBaseSha = await gitMergeBase(repoRoot, 'HEAD', lastExportedHeadSha);
+                    if (recoveryBaseSha && recoveryBaseSha !== summary.baseSha) {
+                      summary = await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: d }, async ({ containerName }) => {
+                        return await droneRepoPullChangesSummary({
+                          container: containerName,
+                          repoPathInContainer,
+                          baseSha: recoveryBaseSha,
+                        });
+                      });
+                    }
+                  }
+                }
+              }
+            } catch (e: any) {
+              hubLog('warn', 'Pull preview recovery-base calculation failed; using container base', {
+                droneName,
+                repoPathRaw,
+                error: e?.message ?? String(e),
+              });
+            }
+          }
           let entriesForPreview: RepoPullChangeEntry[] = summary.entries;
           if (repoPathRaw && summary.entries.length > 0) {
             try {
@@ -5651,6 +5691,24 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                 prePullBaseAdvanced = true;
               } catch (e: any) {
                 prePullBaseAdvanceError = e?.message ?? String(e);
+              }
+            } else if (lastMode === 'bundle-merge-no-commit' && /^[0-9a-f]{40}$/.test(lastExportedHeadSha)) {
+              try {
+                const hostContainsLastExport = await gitIsAncestor(repoRoot, lastExportedHeadSha, 'HEAD');
+                if (!hostContainsLastExport) {
+                  const recoveryBaseSha = await gitMergeBase(repoRoot, 'HEAD', lastExportedHeadSha);
+                  if (recoveryBaseSha && recoveryBaseSha !== lastExportedHeadSha) {
+                    prePullBaseSha = recoveryBaseSha;
+                    try {
+                      await dvmRepoSetBaseSha({ container: containerName, repoPathInContainer, baseSha: recoveryBaseSha });
+                      prePullBaseAdvanced = true;
+                    } catch (e: any) {
+                      prePullBaseAdvanceError = e?.message ?? String(e);
+                    }
+                  }
+                }
+              } catch (e: any) {
+                if (!prePullBaseAdvanceError) prePullBaseAdvanceError = e?.message ?? String(e);
               }
             }
           }

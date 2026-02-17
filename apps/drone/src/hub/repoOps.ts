@@ -397,6 +397,28 @@ export async function gitCurrentBranchOrSha(repoRoot: string): Promise<string> {
   return (await runLocalOrThrow('git', ['-C', repoRoot, 'rev-parse', 'HEAD'])).trim();
 }
 
+export async function gitMergeBase(repoRoot: string, leftRef: string, rightRef: string): Promise<string | null> {
+  const root = String(repoRoot ?? '').trim();
+  const left = String(leftRef ?? '').trim();
+  const right = String(rightRef ?? '').trim();
+  if (!root || !left || !right) return null;
+  const r = await runLocal('git', ['-C', root, 'merge-base', left, right]);
+  if (r.code !== 0) return null;
+  const sha = String(r.stdout ?? '').trim().toLowerCase();
+  return /^[0-9a-f]{40}$/.test(sha) ? sha : null;
+}
+
+export async function gitIsAncestor(repoRoot: string, ancestorRef: string, descendantRef: string): Promise<boolean> {
+  const root = String(repoRoot ?? '').trim();
+  const anc = String(ancestorRef ?? '').trim();
+  const desc = String(descendantRef ?? '').trim();
+  if (!root || !anc || !desc) return false;
+  const r = await runLocal('git', ['-C', root, 'merge-base', '--is-ancestor', anc, desc]);
+  if (r.code === 0) return true;
+  if (r.code === 1) return false;
+  return false;
+}
+
 export async function gitIsClean(repoRoot: string): Promise<boolean> {
   const out = (await runLocalOrThrow('git', ['-C', repoRoot, 'status', '--porcelain'])).trim();
   return !out;
