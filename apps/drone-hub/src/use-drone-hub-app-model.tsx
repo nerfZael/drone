@@ -482,8 +482,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const {
     deletingDrones,
     renamingDrones,
+    settingBaseImages,
     deleteDrone,
     renameDrone,
+    setDroneBaseImage,
     renameDroneTo,
     suggestAndRenameDraftDrone,
   } = useDroneMutationActions({
@@ -1041,6 +1043,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     selectedIsResponding,
     deletingDrones,
     renamingDrones,
+    settingBaseImages,
     movingDroneGroups,
     createGroupDraft,
     createGroupError,
@@ -1064,6 +1067,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     selectDroneCard,
     openCloneModal,
     renameDrone,
+    setDroneBaseImage,
     deleteDrone,
     openDroneErrorModal,
     onUngroupedDragOver,

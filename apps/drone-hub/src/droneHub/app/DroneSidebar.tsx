@@ -22,6 +22,7 @@ export type DroneSidebarProps = {
   selectedIsResponding: boolean;
   deletingDrones: Record<string, boolean>;
   renamingDrones: Record<string, boolean>;
+  settingBaseImages: Record<string, boolean>;
   movingDroneGroups: boolean;
   createGroupDraft: string;
   createGroupError: string | null;
@@ -45,6 +46,7 @@ export type DroneSidebarProps = {
   onSelectDroneCard: (droneId: string, opts?: { toggle?: boolean; range?: boolean }) => void;
   onOpenCloneModal: (drone: DroneSummary) => void;
   onRenameDrone: (droneId: string) => void;
+  onSetDroneBaseImage: (droneId: string) => void;
   onDeleteDrone: (droneId: string) => void;
   onOpenDroneErrorModal: (drone: DroneSummary, message: string) => void;
   onUngroupedDragOver: (event: React.DragEvent<HTMLDivElement>) => void;
@@ -75,6 +77,7 @@ export function DroneSidebar({
   selectedIsResponding,
   deletingDrones,
   renamingDrones,
+  settingBaseImages,
   movingDroneGroups,
   createGroupDraft,
   createGroupError,
@@ -98,6 +101,7 @@ export function DroneSidebar({
   onSelectDroneCard,
   onOpenCloneModal,
   onRenameDrone,
+  onSetDroneBaseImage,
   onDeleteDrone,
   onOpenDroneErrorModal,
   onUngroupedDragOver,
@@ -304,12 +308,21 @@ export function DroneSidebar({
                       onClick={(opts) => onSelectDroneCard(d.id, opts)}
                       onClone={() => onOpenCloneModal(d)}
                       onRename={() => onRenameDrone(d.id)}
+                      onSetBaseImage={() => onSetDroneBaseImage(d.id)}
                       onDelete={() => onDeleteDrone(d.id)}
                       onErrorClick={onOpenDroneErrorModal}
-                      cloneDisabled={isOptimistic || Boolean(deletingDrones[d.id]) || Boolean(renamingDrones[d.id])}
-                      renameDisabled={isOptimistic || Boolean(deletingDrones[d.id]) || Boolean(renamingDrones[d.id])}
+                      cloneDisabled={isOptimistic || Boolean(deletingDrones[d.id]) || Boolean(renamingDrones[d.id]) || Boolean(settingBaseImages[d.id])}
+                      renameDisabled={isOptimistic || Boolean(deletingDrones[d.id]) || Boolean(renamingDrones[d.id]) || Boolean(settingBaseImages[d.id])}
                       renameBusy={Boolean(renamingDrones[d.id])}
-                      deleteDisabled={isOptimistic || Boolean(deletingDrones[d.id]) || Boolean(renamingDrones[d.id])}
+                      setBaseImageDisabled={
+                        isOptimistic ||
+                        Boolean(deletingDrones[d.id]) ||
+                        Boolean(renamingDrones[d.id]) ||
+                        Boolean(settingBaseImages[d.id]) ||
+                        isDroneStartingOrSeeding(d.hubPhase)
+                      }
+                      setBaseImageBusy={Boolean(settingBaseImages[d.id])}
+                      deleteDisabled={isOptimistic || Boolean(deletingDrones[d.id]) || Boolean(renamingDrones[d.id]) || Boolean(settingBaseImages[d.id])}
                       deleteBusy={Boolean(deletingDrones[d.id])}
                     />
                   );
@@ -481,12 +494,21 @@ export function DroneSidebar({
                                 onDragEnd={onDroneDragEnd}
                                 onClone={() => onOpenCloneModal(d)}
                                 onRename={() => onRenameDrone(d.id)}
+                                onSetBaseImage={() => onSetDroneBaseImage(d.id)}
                                 onDelete={() => onDeleteDrone(d.id)}
                                 onErrorClick={onOpenDroneErrorModal}
-                                cloneDisabled={isOptimistic || Boolean(deletingDrones[d.id]) || Boolean(renamingDrones[d.id])}
-                                renameDisabled={isOptimistic || Boolean(deletingDrones[d.id]) || Boolean(renamingDrones[d.id])}
+                                cloneDisabled={isOptimistic || Boolean(deletingDrones[d.id]) || Boolean(renamingDrones[d.id]) || Boolean(settingBaseImages[d.id])}
+                                renameDisabled={isOptimistic || Boolean(deletingDrones[d.id]) || Boolean(renamingDrones[d.id]) || Boolean(settingBaseImages[d.id])}
                                 renameBusy={Boolean(renamingDrones[d.id])}
-                                deleteDisabled={isOptimistic || Boolean(deletingDrones[d.id]) || Boolean(renamingDrones[d.id])}
+                                setBaseImageDisabled={
+                                  isOptimistic ||
+                                  Boolean(deletingDrones[d.id]) ||
+                                  Boolean(renamingDrones[d.id]) ||
+                                  Boolean(settingBaseImages[d.id]) ||
+                                  isDroneStartingOrSeeding(d.hubPhase)
+                                }
+                                setBaseImageBusy={Boolean(settingBaseImages[d.id])}
+                                deleteDisabled={isOptimistic || Boolean(deletingDrones[d.id]) || Boolean(renamingDrones[d.id]) || Boolean(settingBaseImages[d.id])}
                                 deleteBusy={Boolean(deletingDrones[d.id])}
                               />
                             );

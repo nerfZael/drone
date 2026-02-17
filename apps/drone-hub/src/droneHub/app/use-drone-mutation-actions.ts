@@ -34,6 +34,9 @@ export function useDroneMutationActions({
   const [renamingDrones, setRenamingDrones] = React.useState<Record<string, boolean>>(
     {},
   );
+  const [settingBaseImages, setSettingBaseImages] = React.useState<Record<string, boolean>>(
+    {},
+  );
 
   const shouldConfirmDelete = React.useCallback((): boolean => !autoDelete, [autoDelete]);
 
@@ -53,7 +56,7 @@ export function useDroneMutationActions({
       if (!current || isDroneStartingOrSeeding(current.hubPhase)) {
         return { ok: false, error: `drone "${droneId}" is still starting` };
       }
-      if (deletingDrones[droneId] || renamingDrones[droneId]) {
+      if (deletingDrones[droneId] || renamingDrones[droneId] || settingBaseImages[droneId]) {
         return { ok: false, error: 'rename busy' };
       }
       if (newName.length > 80 || /[\r\n]/.test(newName)) {
@@ -105,7 +108,7 @@ export function useDroneMutationActions({
         });
       }
     },
-    [deletingDrones, drones, renamingDrones, requestJson, setStartupSeedByDrone],
+    [deletingDrones, drones, renamingDrones, requestJson, setStartupSeedByDrone, settingBaseImages],
   );
 
   const deleteDrone = React.useCallback(
@@ -116,6 +119,7 @@ export function useDroneMutationActions({
       if (
         deletingDrones[droneId] ||
         renamingDrones[droneId] ||
+        settingBaseImages[droneId] ||
         optimisticallyDeletedDrones[droneId]
       ) {
         return;
@@ -152,6 +156,7 @@ export function useDroneMutationActions({
       drones,
       optimisticallyDeletedDrones,
       renamingDrones,
+      settingBaseImages,
       requestJson,
       setOptimisticallyDeletedDrones,
       shouldConfirmDelete,
@@ -162,14 +167,61 @@ export function useDroneMutationActions({
     async (droneIdRaw: string) => {
       const droneId = String(droneIdRaw ?? '').trim();
       if (!droneId) return;
-      if (deletingDrones[droneId] || renamingDrones[droneId]) return;
+      if (deletingDrones[droneId] || renamingDrones[droneId] || settingBaseImages[droneId]) return;
       const currentName = String(drones.find((d) => d.id === droneId)?.name ?? '').trim() || droneId;
       const suggested = String(window.prompt(`Rename drone "${currentName}" to:`, currentName) ?? '').trim();
       if (!suggested || suggested === currentName) return;
       const renamed = await renameDroneTo(droneId, suggested, { showAlert: true });
       if (!renamed.ok) return;
     },
-    [deletingDrones, drones, renamingDrones, renameDroneTo],
+    [deletingDrones, drones, renamingDrones, renameDroneTo, settingBaseImages],
+  );
+
+  const setDroneBaseImage = React.useCallback(
+    async (droneIdRaw: string): Promise<void> => {
+      const droneId = String(droneIdRaw ?? '').trim();
+      if (!droneId) return;
+      const current = drones.find((d) => d.id === droneId) ?? null;
+      const droneName = String(current?.name ?? '').trim() || droneId;
+      if (!current || isDroneStartingOrSeeding(current.hubPhase)) {
+        window.alert(`Drone "${droneName}" is still starting.`);
+        return;
+      }
+      if (
+        deletingDrones[droneId] ||
+        renamingDrones[droneId] ||
+        settingBaseImages[droneId] ||
+        optimisticallyDeletedDrones[droneId]
+      ) {
+        return;
+      }
+      const ok = window.confirm(
+        `Set "${droneName}" as the base image for new containers?\n\nThis will commit the current drone container into a new Docker image and update your DVM base config (same as: dvm base set).\n\nContinue?`,
+      );
+      if (!ok) return;
+
+      setSettingBaseImages((prev) => ({ ...prev, [droneId]: true }));
+      try {
+        const r = await requestJson<{ ok: true; id: string; name: string; containerName: string; baseImage?: string | null }>(
+          `/api/drones/${encodeURIComponent(droneId)}/base-image`,
+          { method: 'POST' },
+        );
+        const img = String((r as any)?.baseImage ?? '').trim();
+        window.alert(img ? `Base image set: ${img}` : 'Base image set.');
+      } catch (e: any) {
+        const msg = e?.message ?? String(e);
+        console.error('[DroneHub] set base image failed', { id: droneId, error: e });
+        window.alert(`Set base image failed: ${msg}`);
+      } finally {
+        setSettingBaseImages((prev) => {
+          if (!prev[droneId]) return prev;
+          const next = { ...prev };
+          delete next[droneId];
+          return next;
+        });
+      }
+    },
+    [deletingDrones, drones, optimisticallyDeletedDrones, renamingDrones, requestJson, settingBaseImages],
   );
 
   const suggestAndRenameDraftDrone = React.useCallback(
@@ -233,8 +285,10 @@ export function useDroneMutationActions({
   return {
     deletingDrones,
     renamingDrones,
+    settingBaseImages,
     deleteDrone,
     renameDrone,
+    setDroneBaseImage,
     renameDroneTo,
     suggestAndRenameDraftDrone,
   };
