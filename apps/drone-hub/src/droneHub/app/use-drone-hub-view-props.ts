@@ -15,6 +15,7 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     selectedIsResponding,
     deletingDrones,
     renamingDrones,
+    settingBaseImages,
     movingDroneGroups,
     createGroupDraft,
     createGroupError,
@@ -38,6 +39,7 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     selectDroneCard,
     openCloneModal,
     renameDrone,
+    setDroneBaseImage,
     deleteDrone,
     openDroneErrorModal,
     onUngroupedDragOver,
@@ -74,6 +76,7 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
       selectedIsResponding,
       deletingDrones,
       renamingDrones,
+      settingBaseImages,
       movingDroneGroups,
       createGroupDraft,
       createGroupError,
@@ -97,6 +100,9 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
       onSelectDroneCard: selectDroneCard,
       onOpenCloneModal: openCloneModal,
       onRenameDrone: renameDrone,
+      onSetDroneBaseImage: (droneId) => {
+        void setDroneBaseImage(droneId);
+      },
       onDeleteDrone: deleteDrone,
       onOpenDroneErrorModal: openDroneErrorModal,
       onUngroupedDragOver,

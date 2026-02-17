@@ -11,6 +11,7 @@ import { RawData, WebSocket, WebSocketServer } from 'ws';
 import { droneRootPath } from '../host/paths';
 import { loadRegistry, updateRegistry } from '../host/registry';
 import {
+  dvmBaseSet,
   dvmExec,
   dvmLs,
   dvmPorts,
@@ -6087,6 +6088,33 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
 
         json(res, 200, renamed);
         return;
+      }
+
+      // POST /api/drones/:id/base-image
+      // Sets the given drone's container as the DVM base image (same as: `dvm base set <container>`).
+      if (method === 'POST' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'drones' && parts[3] === 'base-image') {
+        const droneRef = decodeURIComponent(parts[2]);
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        const droneId = resolved.id;
+        const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+
+        try {
+          const out = await withLockedDroneContainer(
+            { requestedDroneName: droneName, droneEntry: resolved.drone },
+            async ({ containerName }) => {
+              const r = await dvmBaseSet(containerName, { timeoutMs: 10 * 60 * 1000 });
+              return { containerName, baseImage: r.baseImage };
+            },
+          );
+          json(res, 200, { ok: true, id: droneId, name: droneName, containerName: out.containerName, baseImage: out.baseImage });
+          return;
+        } catch (e: any) {
+          const msg = e?.message ?? String(e);
+          const status = /not found/i.test(msg) ? 404 : 500;
+          json(res, status, { ok: false, error: msg });
+          return;
+        }
       }
 
       // DELETE /api/drones/:id?keepVolume=0|1&forget=0|1

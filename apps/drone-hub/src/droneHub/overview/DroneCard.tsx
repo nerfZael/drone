@@ -1,7 +1,7 @@
 import React from 'react';
 import { timeAgo } from '../../domain';
 import type { DroneSummary } from '../types';
-import { IconClone, IconRename, IconSpinner, IconTrash, TypingDots } from './icons';
+import { IconBaseImage, IconClone, IconRename, IconSpinner, IconTrash, TypingDots } from './icons';
 import { StatusBadge } from './StatusBadge';
 
 export function DroneCard({
@@ -15,11 +15,14 @@ export function DroneCard({
   draggable,
   onClone,
   onRename,
+  onSetBaseImage,
   onDelete,
   onErrorClick,
   cloneDisabled,
   renameDisabled,
   renameBusy,
+  setBaseImageDisabled,
+  setBaseImageBusy,
   deleteDisabled,
   deleteBusy,
   statusHint,
@@ -34,11 +37,14 @@ export function DroneCard({
   draggable?: boolean;
   onClone?: () => void;
   onRename?: () => void;
+  onSetBaseImage?: () => void;
   onDelete?: () => void;
   onErrorClick?: (drone: DroneSummary, message: string) => void;
   cloneDisabled?: boolean;
   renameDisabled?: boolean;
   renameBusy?: boolean;
+  setBaseImageDisabled?: boolean;
+  setBaseImageBusy?: boolean;
   deleteDisabled?: boolean;
   deleteBusy?: boolean;
   statusHint?: string;
@@ -47,9 +53,14 @@ export function DroneCard({
   const shownName = String(displayName ?? drone.name).trim() || drone.name;
   const canClone = typeof onClone === 'function';
   const canRename = typeof onRename === 'function';
+  const canSetBaseImage = typeof onSetBaseImage === 'function';
   const canDelete = typeof onDelete === 'function';
-  const hasActions = canClone || canRename || canDelete;
-  const actionsDisabled = Boolean(cloneDisabled) || Boolean(renameDisabled) || Boolean(deleteDisabled);
+  const hasActions = canClone || canRename || canSetBaseImage || canDelete;
+  const actionsDisabled =
+    Boolean(cloneDisabled) ||
+    Boolean(renameDisabled) ||
+    Boolean(setBaseImageDisabled) ||
+    Boolean(deleteDisabled);
   const showRespondingAsStatus = Boolean(busy) && Boolean(drone.statusOk) && drone.hubPhase !== 'error';
   const errText = String(drone.hubMessage ?? drone.statusError ?? '').trim();
   const showInlineError = drone.hubPhase === 'error' && Boolean(errText);
@@ -183,6 +194,25 @@ export function DroneCard({
                   aria-label={renameDisabled ? `Renaming "${shownName}"` : `Rename "${shownName}"`}
                 >
                   {renameBusy ? <IconSpinner className="opacity-90" /> : <IconRename className="opacity-90" />}
+                </button>
+              )}
+              {canSetBaseImage && (
+                <button
+                  type="button"
+                  onClick={(e) => { stopCardSelection(e); onSetBaseImage?.(); }}
+                  onMouseDown={stopCardSelection}
+                  onPointerDown={stopCardSelection}
+                  disabled={Boolean(setBaseImageDisabled)}
+                  aria-busy={Boolean(setBaseImageBusy)}
+                  className={`inline-flex items-center justify-center w-6 h-6 rounded border transition-all ${
+                    setBaseImageDisabled
+                      ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
+                      : 'bg-[rgba(250,204,21,.10)] border-[rgba(250,204,21,.22)] text-[rgb(253,224,71)] hover:bg-[rgba(250,204,21,.14)]'
+                  }`}
+                  title={setBaseImageBusy ? `Setting base image from "${shownName}"…` : `Set "${shownName}" as base image`}
+                  aria-label={setBaseImageBusy ? `Setting base image from "${shownName}"` : `Set "${shownName}" as base image`}
+                >
+                  {setBaseImageBusy ? <IconSpinner className="opacity-90" /> : <IconBaseImage className="opacity-90" />}
                 </button>
               )}
               {canDelete && (

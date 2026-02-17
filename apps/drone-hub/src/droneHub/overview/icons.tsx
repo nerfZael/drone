@@ -71,6 +71,16 @@ export function IconRename({ className }: { className?: string }) {
   );
 }
 
+export function IconBaseImage({ className }: { className?: string }) {
+  // "Base image" / "set as base" icon: star inside a frame.
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M3.25 2A1.75 1.75 0 001.5 3.75v8.5c0 .966.784 1.75 1.75 1.75h9.5A1.75 1.75 0 0014.5 12.25v-8.5A1.75 1.75 0 0012.75 2h-9.5zM2.5 3.75a.75.75 0 01.75-.75h9.5a.75.75 0 01.75.75v8.5a.75.75 0 01-.75.75h-9.5a.75.75 0 01-.75-.75v-8.5z" />
+      <path d="M8 4.3l1.02 2.07 2.28.33-1.65 1.61.39 2.27L8 9.52 5.96 10.58l.39-2.27L4.7 6.7l2.28-.33L8 4.3z" />
+    </svg>
+  );
+}
+
 export function IconSpinner({ className }: { className?: string }) {
   return (
     <svg

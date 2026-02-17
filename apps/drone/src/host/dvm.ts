@@ -327,3 +327,23 @@ export async function dvmRepoSetBaseSha(opts: { container: string; repoPathInCon
     throw new Error(`dvm.baseSha verification failed in ${opts.container}: expected ${baseSha}, got ${configured ?? '(none)'}`);
   }
 }
+
+function parseBaseImageFromBaseSetOutput(stdout: string): string | null {
+  const lines = String(stdout ?? '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  for (const line of lines.slice().reverse()) {
+    const m = line.match(/^Base image:\s*(.+?)\s*$/i);
+    if (m?.[1]) return m[1].trim();
+  }
+  return null;
+}
+
+export async function dvmBaseSet(container: string, opts?: { timeoutMs?: number }): Promise<{ baseImage: string | null; stdout: string }> {
+  const name = String(container ?? '').trim();
+  if (!name) throw new Error('missing container name');
+  const r = await runDvm(['base', 'set', name], { timeoutMs: opts?.timeoutMs });
+  if (r.code !== 0) throw new Error(r.stderr || r.stdout || `dvm base set ${name} failed`);
+  return { baseImage: parseBaseImageFromBaseSetOutput(r.stdout), stdout: r.stdout };
+}
