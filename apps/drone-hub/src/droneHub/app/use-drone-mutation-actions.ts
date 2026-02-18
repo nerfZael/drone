@@ -37,6 +37,10 @@ export function useDroneMutationActions({
   const [settingBaseImages, setSettingBaseImages] = React.useState<Record<string, boolean>>(
     {},
   );
+  const dronesRef = React.useRef(drones);
+  React.useEffect(() => {
+    dronesRef.current = drones;
+  }, [drones]);
 
   const shouldConfirmDelete = React.useCallback((): boolean => !autoDelete, [autoDelete]);
 
@@ -48,7 +52,8 @@ export function useDroneMutationActions({
     ): Promise<{ ok: true } | { ok: false; error: string }> => {
       const droneId = String(droneIdRaw ?? '').trim();
       const newName = String(newNameRaw ?? '').trim();
-      const current = drones.find((d) => d.id === droneId) ?? null;
+      const currentDrones = dronesRef.current;
+      const current = currentDrones.find((d) => d.id === droneId) ?? null;
       const currentName = String(current?.name ?? '').trim() || droneId;
       if (!droneId || !newName || newName === currentName) {
         return { ok: false, error: 'no-op rename' };
@@ -65,7 +70,7 @@ export function useDroneMutationActions({
         }
         return { ok: false, error: 'invalid new name' };
       }
-      if (drones.some((d) => d.name === newName && d.id !== droneId)) {
+      if (currentDrones.some((d) => d.name === newName && d.id !== droneId)) {
         if (opts?.showAlert) window.alert(`A drone named "${newName}" already exists.`);
         return { ok: false, error: 'name already exists' };
       }
@@ -108,7 +113,7 @@ export function useDroneMutationActions({
         });
       }
     },
-    [deletingDrones, drones, renamingDrones, requestJson, setStartupSeedByDrone, settingBaseImages],
+    [deletingDrones, renamingDrones, requestJson, setStartupSeedByDrone, settingBaseImages],
   );
 
   const deleteDrone = React.useCallback(
@@ -241,7 +246,7 @@ export function useDroneMutationActions({
         const base = String((data as any)?.name ?? '').trim();
         if (!base) return;
 
-        const currentName = String(drones.find((d) => d.id === droneId)?.name ?? '').trim();
+        const currentName = String(dronesRef.current.find((d) => d.id === droneId)?.name ?? '').trim();
         if (currentName && base === currentName) return;
 
         const makeCandidate = (n: number) => {
@@ -252,8 +257,9 @@ export function useDroneMutationActions({
           return raw;
         };
 
-        for (let attempt = 1; attempt <= 6; attempt += 1) {
-          const candidate = makeCandidate(attempt);
+        let conflictSuffix = 1;
+        for (let attempt = 1; attempt <= 20; attempt += 1) {
+          const candidate = makeCandidate(conflictSuffix);
           if (!candidate) return;
           if (candidate.length > 80 || /[\r\n]/.test(candidate)) return;
           const renamed = await renameDroneTo(droneId, candidate);
@@ -263,12 +269,17 @@ export function useDroneMutationActions({
             msg.includes('already exists') ||
             msg.includes('pending') ||
             msg.includes('cannot rename');
-          if (nameConflict) continue;
+          if (nameConflict) {
+            conflictSuffix += 1;
+            continue;
+          }
           const retriable =
-            msg.includes('rename busy');
+            msg.includes('rename busy') ||
+            msg.includes('still starting') ||
+            msg.includes('unknown drone');
           if (!retriable) return;
           await new Promise<void>((resolve) =>
-            window.setTimeout(resolve, Math.min(1800, 240 + attempt * 140)),
+            window.setTimeout(resolve, Math.min(3000, 250 + attempt * 250)),
           );
         }
       } catch (e: any) {
@@ -279,7 +290,7 @@ export function useDroneMutationActions({
         onNameSuggestionFailure(e);
       }
     },
-    [drones, onNameSuggestionFailure, renameDroneTo, requestJson],
+    [onNameSuggestionFailure, renameDroneTo, requestJson],
   );
 
   return {
