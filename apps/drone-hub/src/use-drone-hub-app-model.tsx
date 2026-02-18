@@ -29,6 +29,7 @@ import { useDroneGroupDnd } from './droneHub/app/use-drone-group-dnd';
 import { useDroneErrorModalActions } from './droneHub/app/use-drone-error-modal-actions';
 import { useDroneMutationActions } from './droneHub/app/use-drone-mutation-actions';
 import { useFilesAndPortsPaneState } from './droneHub/app/use-files-and-ports-pane-state';
+import { useFileEditorState } from './droneHub/app/use-file-editor-state';
 import { useGroupBroadcast } from './droneHub/app/use-group-broadcast';
 import { useGroupManagement } from './droneHub/app/use-group-management';
 import { useJobsWorkflow } from './droneHub/app/use-jobs-workflow';
@@ -873,6 +874,23 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     portRows,
     setSelectedPreviewPort,
   } = useFilesAndPortsPaneState({ currentDrone, requestJson });
+  const {
+    openedFile: openedEditorFile,
+    loading: openedEditorFileLoading,
+    saving: openedEditorFileSaving,
+    error: openedEditorFileError,
+    content: openedEditorFileContent,
+    dirty: openedEditorFileDirty,
+    mtimeMs: openedEditorFileMtimeMs,
+    openEditorFile,
+    closeEditorFile,
+    setOpenedFileContent,
+    saveOpenedFile,
+  } = useFileEditorState({
+    currentDrone,
+    requestJson,
+    onRefreshFsList: refreshFsList,
+  });
   const startupSeedForCurrentDrone =
     currentDrone && (isDroneStartingOrSeeding(currentDrone.hubPhase))
       ? startupSeedByDrone[currentDrone.id] ?? null
@@ -973,6 +991,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         agentLabel={agentLabel}
         portRows={portRows}
         setSelectedPreviewPort={setSelectedPreviewPort}
+        onOpenFileInEditor={(entry) => {
+          if (entry.kind !== 'file' || entry.isImage) return;
+          openEditorFile({ path: entry.path, name: entry.name });
+        }}
       />
     ),
     [
@@ -1002,6 +1024,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setSelectedPreviewPort,
       setSelectedPreviewUrlOverride,
       uiDroneName,
+      openEditorFile,
     ],
   );
 
@@ -1289,6 +1312,17 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     promptError,
     sendingPrompt,
     sendPromptText,
+    openedEditorFilePath: openedEditorFile?.path ?? null,
+    openedEditorFileName: openedEditorFile?.name ?? null,
+    openedEditorFileLoading,
+    openedEditorFileSaving,
+    openedEditorFileError,
+    openedEditorFileContent,
+    openedEditorFileDirty,
+    openedEditorFileMtimeMs,
+    onOpenedEditorFileContentChange: setOpenedFileContent,
+    onSaveOpenedEditorFile: saveOpenedFile,
+    onCloseOpenedEditorFile: closeEditorFile,
     rightPanelWidth,
     rightPanelWidthMax,
     rightPanelMinWidth: RIGHT_PANEL_MIN_WIDTH_PX,

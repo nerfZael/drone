@@ -1,4 +1,5 @@
 import React from 'react';
+import Editor from '@monaco-editor/react';
 import {
   ChatInput,
   type ChatSendPayload,
@@ -22,6 +23,38 @@ import { cn } from '../../ui/cn';
 import { dropdownMenuItemBaseClass, dropdownPanelBaseClass } from '../../ui/dropdown';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
 import { useSelectedDroneWorkspaceUiState } from './use-drone-hub-ui-store';
+
+function editorLanguageForPath(filePath: string): string {
+  const lower = String(filePath ?? '').trim().toLowerCase();
+  const seg = lower.split('/').pop() ?? lower;
+  if (seg === 'dockerfile') return 'dockerfile';
+  if (seg === 'makefile') return 'makefile';
+  if (seg.endsWith('.ts')) return 'typescript';
+  if (seg.endsWith('.tsx')) return 'typescript';
+  if (seg.endsWith('.js')) return 'javascript';
+  if (seg.endsWith('.jsx')) return 'javascript';
+  if (seg.endsWith('.json')) return 'json';
+  if (seg.endsWith('.md')) return 'markdown';
+  if (seg.endsWith('.py')) return 'python';
+  if (seg.endsWith('.go')) return 'go';
+  if (seg.endsWith('.rs')) return 'rust';
+  if (seg.endsWith('.sh') || seg.endsWith('.bash') || seg.endsWith('.zsh')) return 'shell';
+  if (seg.endsWith('.yml') || seg.endsWith('.yaml')) return 'yaml';
+  if (seg.endsWith('.xml')) return 'xml';
+  if (seg.endsWith('.html') || seg.endsWith('.htm')) return 'html';
+  if (seg.endsWith('.css')) return 'css';
+  if (seg.endsWith('.scss')) return 'scss';
+  return 'plaintext';
+}
+
+function formatEditorMtime(mtimeMs: number | null): string {
+  if (typeof mtimeMs !== 'number' || !Number.isFinite(mtimeMs) || mtimeMs <= 0) return 'Unknown';
+  try {
+    return new Date(mtimeMs).toLocaleString();
+  } catch {
+    return 'Unknown';
+  }
+}
 
 type LaunchHint =
   | {
@@ -112,6 +145,17 @@ type SelectedDroneWorkspaceProps = {
   promptError: string | null;
   sendingPrompt: boolean;
   sendPromptText: (payload: ChatSendPayload) => Promise<boolean>;
+  openedEditorFilePath: string | null;
+  openedEditorFileName: string | null;
+  openedEditorFileLoading: boolean;
+  openedEditorFileSaving: boolean;
+  openedEditorFileError: string | null;
+  openedEditorFileContent: string;
+  openedEditorFileDirty: boolean;
+  openedEditorFileMtimeMs: number | null;
+  onOpenedEditorFileContentChange: (next: string) => void;
+  onSaveOpenedEditorFile: (contentOverride?: string) => Promise<boolean>;
+  onCloseOpenedEditorFile: () => void;
   rightPanelWidth: number;
   rightPanelWidthMax: number;
   rightPanelMinWidth: number;
@@ -202,6 +246,17 @@ export function SelectedDroneWorkspace({
   promptError,
   sendingPrompt,
   sendPromptText,
+  openedEditorFilePath,
+  openedEditorFileName,
+  openedEditorFileLoading,
+  openedEditorFileSaving,
+  openedEditorFileError,
+  openedEditorFileContent,
+  openedEditorFileDirty,
+  openedEditorFileMtimeMs,
+  onOpenedEditorFileContentChange,
+  onSaveOpenedEditorFile,
+  onCloseOpenedEditorFile,
   rightPanelWidth,
   rightPanelWidthMax,
   rightPanelMinWidth,
@@ -747,7 +802,86 @@ export function SelectedDroneWorkspace({
         {/* Chat area */}
         <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden relative">
           <div className="flex-1 min-h-0 relative">
-            {chatUiMode === 'transcript' ? (
+            {openedEditorFilePath ? (
+              <div className="h-full min-w-0 min-h-0 flex flex-col">
+                <div className="px-4 py-2 border-b border-[var(--border-subtle)] bg-[var(--panel-alt)] flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-[10px] text-[var(--muted-dim)] uppercase tracking-wide" style={{ fontFamily: 'var(--display)' }}>
+                      {openedEditorFileName ? `Editing ${openedEditorFileName}` : 'Editing file'}
+                    </div>
+                    <div className="text-[12px] text-[var(--fg-secondary)] font-mono truncate" title={openedEditorFilePath}>
+                      {openedEditorFilePath}
+                    </div>
+                    <div className="text-[10px] text-[var(--muted)]">
+                      {openedEditorFileSaving
+                        ? 'Saving...'
+                        : openedEditorFileDirty
+                          ? 'Unsaved changes'
+                          : `Saved • ${formatEditorMtime(openedEditorFileMtimeMs)}`}
+                    </div>
+                  </div>
+                  <div className="inline-flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void onSaveOpenedEditorFile();
+                      }}
+                      disabled={openedEditorFileLoading || openedEditorFileSaving || !openedEditorFileDirty}
+                      className={`h-7 px-2.5 rounded border text-[10px] font-semibold tracking-wide uppercase transition-colors ${
+                        openedEditorFileLoading || openedEditorFileSaving || !openedEditorFileDirty
+                          ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] opacity-50 cursor-not-allowed'
+                          : 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:shadow-[var(--glow-accent)]'
+                      }`}
+                      style={{ fontFamily: 'var(--display)' }}
+                      title="Save file (Ctrl/Cmd+S)"
+                    >
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onCloseOpenedEditorFile}
+                      className="h-7 px-2.5 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-colors"
+                      style={{ fontFamily: 'var(--display)' }}
+                      title="Close file editor"
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+                {openedEditorFileError ? (
+                  <div className="mx-4 mt-3 rounded border border-[rgba(255,90,90,.24)] bg-[var(--red-subtle)] px-3 py-2 text-[11px] text-[var(--red)]">
+                    {openedEditorFileError}
+                  </div>
+                ) : null}
+                <div className="flex-1 min-h-0 border-t border-[var(--border-subtle)]">
+                  {openedEditorFileLoading ? (
+                    <div className="h-full w-full flex items-center justify-center text-[12px] text-[var(--muted)]">Loading file...</div>
+                  ) : (
+                    <Editor
+                      path={openedEditorFilePath}
+                      language={editorLanguageForPath(openedEditorFilePath)}
+                      value={openedEditorFileContent}
+                      onChange={(next) => onOpenedEditorFileContentChange(next ?? '')}
+                      onMount={(editor, monaco) => {
+                        editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+                          void onSaveOpenedEditorFile(editor.getValue());
+                        });
+                      }}
+                      theme="vs-dark"
+                      options={{
+                        readOnly: openedEditorFileSaving,
+                        fontSize: 12,
+                        minimap: { enabled: false },
+                        wordWrap: 'on',
+                        scrollBeyondLastLine: false,
+                        automaticLayout: true,
+                        padding: { top: 12, bottom: 12 },
+                      }}
+                    />
+                  )}
+                </div>
+              </div>
+            ) : chatUiMode === 'transcript' ? (
               <div className="h-full min-w-0 min-h-0 overflow-auto">
                 {loadingTranscript && !transcripts && visiblePendingPromptsWithStartup.length === 0 ? (
                   <TranscriptSkeleton />
@@ -834,21 +968,22 @@ export function SelectedDroneWorkspace({
             )}
           </div>
 
-          {/* Chat input */}
-          <ChatInput
-            resetKey={`${selectedDroneIdentity}:${selectedChat ?? ''}`}
-            droneName={currentDrone.name}
-            promptError={promptError}
-            sending={sendingPrompt}
-            waiting={chatUiMode === 'transcript' && visiblePendingPromptsWithStartup.some((p) => p.state !== 'failed')}
-            onSend={async (payload: ChatSendPayload) => {
-              try {
-                return await sendPromptText(payload);
-              } catch {
-                return false;
-              }
-            }}
-          />
+          {!openedEditorFilePath && (
+            <ChatInput
+              resetKey={`${selectedDroneIdentity}:${selectedChat ?? ''}`}
+              droneName={currentDrone.name}
+              promptError={promptError}
+              sending={sendingPrompt}
+              waiting={chatUiMode === 'transcript' && visiblePendingPromptsWithStartup.some((p) => p.state !== 'failed')}
+              onSend={async (payload: ChatSendPayload) => {
+                try {
+                  return await sendPromptText(payload);
+                } catch {
+                  return false;
+                }
+              }}
+            />
+          )}
         </div>
 
         {/* Right panel content (tabs are in the header toolbar) */}

@@ -49,6 +49,29 @@ export type DroneFsListPayload =
   | { ok: true; id: string; name: string; path: string; entries: DroneFsEntry[] }
   | { ok: false; error: string; id?: string; name?: string; path?: string };
 
+export type DroneFsReadPayload =
+  | {
+      ok: true;
+      id: string;
+      name: string;
+      path: string;
+      content: string;
+      size: number;
+      mtimeMs: number | null;
+    }
+  | { ok: false; error: string; id?: string; name?: string; path?: string };
+
+export type DroneFsWritePayload =
+  | {
+      ok: true;
+      id: string;
+      name: string;
+      path: string;
+      size: number;
+      mtimeMs: number | null;
+    }
+  | { ok: false; error: string; id?: string; name?: string; path?: string };
+
 export type RepoChangeType =
   | 'added'
   | 'modified'

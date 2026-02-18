@@ -47,6 +47,7 @@ type RightPanelTabContentProps = {
   agentLabel: string;
   portRows: DronePortMapping[];
   setSelectedPreviewPort: (port: DronePortMapping | null) => void;
+  onOpenFileInEditor: (entry: DroneFsEntry) => void;
 };
 
 export function RightPanelTabContent({
@@ -79,6 +80,7 @@ export function RightPanelTabContent({
   agentLabel,
   portRows,
   setSelectedPreviewPort,
+  onOpenFileInEditor,
 }: RightPanelTabContentProps) {
   const disabled = isDroneStartingOrSeeding(drone.hubPhase);
   const chatName = selectedChat || 'default';
@@ -125,6 +127,7 @@ export function RightPanelTabContent({
           onSetViewMode={setFsExplorerView}
           onOpenPath={setCurrentFsPath}
           onRefresh={refreshFsList}
+          onOpenFile={onOpenFileInEditor}
         />
       );
 

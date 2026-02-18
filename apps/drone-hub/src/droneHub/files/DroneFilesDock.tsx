@@ -95,6 +95,7 @@ export function DroneFilesDock({
   viewMode,
   onSetViewMode,
   onOpenPath,
+  onOpenFile,
   onRefresh,
 }: {
   droneId: string;
@@ -109,6 +110,7 @@ export function DroneFilesDock({
   viewMode: 'list' | 'thumb';
   onSetViewMode: (next: 'list' | 'thumb') => void;
   onOpenPath: (nextPath: string) => void;
+  onOpenFile: (entry: DroneFsEntry) => void;
   onRefresh: () => void;
 }) {
   const shownName = String(droneLabel ?? droneName).trim() || droneName;
@@ -365,8 +367,9 @@ export function DroneFilesDock({
             <div className="divide-y divide-[var(--border-subtle)]">
               {entries.map((entry) => {
                 const isDir = entry.kind === 'directory';
+                const isRegularFile = entry.kind === 'file';
                 const isImageFile = entry.kind === 'file' && entry.isImage;
-                const canOpenEntry = isDir || isImageFile;
+                const canOpenEntry = isDir || isRegularFile;
                 const modifiedText = formatLocalDateShort(entry.mtimeMs);
                 const modifiedTitle = formatLocalDateTime(entry.mtimeMs);
                 const typeText = isDir ? 'dir' : entry.isImage ? 'image' : entry.ext ? entry.ext : 'file';
@@ -379,6 +382,7 @@ export function DroneFilesDock({
                     onDoubleClick={() => {
                       if (isDir) onOpenPath(entry.path);
                       else if (isImageFile) openImagePreview(entry);
+                      else if (isRegularFile) onOpenFile(entry);
                     }}
                     role={canOpenEntry ? 'button' : undefined}
                     tabIndex={canOpenEntry ? 0 : -1}
@@ -388,9 +392,18 @@ export function DroneFilesDock({
                         e.preventDefault();
                         if (isDir) onOpenPath(entry.path);
                         else if (isImageFile) openImagePreview(entry);
+                        else if (isRegularFile) onOpenFile(entry);
                       }
                     }}
-                    title={isDir ? `Double-click to open: ${entry.path}` : isImageFile ? `Double-click to preview: ${entry.path}` : entry.path}
+                    title={
+                      isDir
+                        ? `Double-click to open: ${entry.path}`
+                        : isImageFile
+                          ? `Double-click to preview: ${entry.path}`
+                          : isRegularFile
+                            ? `Double-click to edit: ${entry.path}`
+                            : entry.path
+                    }
                   >
                     <span className="min-w-0 flex items-center gap-1.5">
                       {isDir ? (
@@ -416,9 +429,10 @@ export function DroneFilesDock({
           <div className="grid grid-cols-2 xl:grid-cols-3 gap-2">
             {entries.map((entry) => {
               const isDir = entry.kind === 'directory';
+              const isRegularFile = entry.kind === 'file';
               const isImageFile = entry.kind === 'file' && entry.isImage;
               const canThumb = isImageFile && !thumbFailedByPath[entry.path];
-              const canOpenEntry = isDir || isImageFile;
+              const canOpenEntry = isDir || isRegularFile;
               const content = (
                 <>
                   <div className="w-full h-20 rounded-md border border-[var(--border-subtle)] bg-[var(--panel-alt)] overflow-hidden flex items-center justify-center">
@@ -456,16 +470,24 @@ export function DroneFilesDock({
                   onDoubleClick={() => {
                     if (isDir) onOpenPath(entry.path);
                     else if (isImageFile) openImagePreview(entry);
+                    else if (isRegularFile) onOpenFile(entry);
                   }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
                       if (isDir) onOpenPath(entry.path);
                       else if (isImageFile) openImagePreview(entry);
+                      else if (isRegularFile) onOpenFile(entry);
                     }
                   }}
                   className="text-left p-2 rounded-md border border-[var(--border-subtle)] bg-[var(--panel)] hover:bg-[var(--hover)] select-none"
-                  title={isDir ? `Double-click to open: ${entry.path}` : `Double-click to preview: ${entry.path}`}
+                  title={
+                    isDir
+                      ? `Double-click to open: ${entry.path}`
+                      : isImageFile
+                        ? `Double-click to preview: ${entry.path}`
+                        : `Double-click to edit: ${entry.path}`
+                  }
                 >
                   {content}
                 </button>

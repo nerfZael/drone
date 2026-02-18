@@ -353,6 +353,7 @@ function buildDockerExecShellCommand(containerName: string, cwdRaw: string): str
 
 const IMAGE_FILE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico', 'avif', 'tif', 'tiff']);
 const FS_THUMB_MAX_BYTES = 8 * 1024 * 1024;
+const FS_EDITOR_MAX_BYTES = 512 * 1024;
 
 type ContainerFsEntry = {
   name: string;
@@ -402,6 +403,36 @@ function guessImageMimeType(rawPathOrName: string): string {
     default:
       return 'application/octet-stream';
   }
+}
+
+function isLikelyTextMimeType(rawMimeType: string): boolean {
+  const mime = String(rawMimeType ?? '').trim().toLowerCase();
+  if (!mime) return true;
+  if (mime.startsWith('text/')) return true;
+  if (mime === 'application/json') return true;
+  if (mime === 'application/xml') return true;
+  if (mime === 'application/yaml') return true;
+  if (mime === 'application/x-yaml') return true;
+  if (mime === 'application/x-sh') return true;
+  if (mime === 'application/x-shellscript') return true;
+  if (mime === 'application/javascript') return true;
+  if (mime === 'application/x-javascript') return true;
+  if (mime === 'application/typescript') return true;
+  if (mime === 'application/x-typescript') return true;
+  if (mime === 'application/sql') return true;
+  return false;
+}
+
+function bufferLooksBinary(buf: Buffer): boolean {
+  if (!buf || buf.length === 0) return false;
+  if (buf.includes(0)) return true;
+  let suspicious = 0;
+  for (const byte of buf.values()) {
+    if ((byte >= 0 && byte <= 8) || byte === 11 || byte === 12 || (byte >= 14 && byte <= 31)) {
+      suspicious += 1;
+    }
+  }
+  return suspicious / buf.length > 0.08;
 }
 
 function parseContainerFsListOutput(text: string): { resolvedPath: string; entries: ContainerFsEntry[] } {
@@ -4792,6 +4823,221 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
 
       // GET /api/drones/:id/fs/thumb?path=/...
       // Returns image bytes for thumbnail rendering.
+      // GET /api/drones/:id/fs/file?path=/...
+      // Reads UTF-8 text file content for editor usage.
+      if (method === 'GET' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'drones' && parts[3] === 'fs' && parts[4] === 'file') {
+        const droneRef = decodeURIComponent(parts[2]);
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        const droneId = resolved.id;
+        const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+
+        const targetPath = normalizeContainerPath(u.searchParams.get('path') ?? '');
+        if (!targetPath || targetPath === '/') {
+          json(res, 400, { ok: false, error: 'missing file path' });
+          return;
+        }
+
+        const script = [
+          'set -euo pipefail',
+          `target=${bashQuote(targetPath)}`,
+          `max=${String(FS_EDITOR_MAX_BYTES)}`,
+          'if [ ! -f "$target" ]; then',
+          '  echo "__ERR__\tnot-file"',
+          '  exit 3',
+          'fi',
+          'size=$(wc -c < "$target" | tr -d "[:space:]")',
+          'if [ -z "$size" ]; then size=0; fi',
+          'if [ "$size" -gt "$max" ]; then',
+          '  printf "__ERR__\ttoo-large\t%s\n" "$size"',
+          '  exit 4',
+          'fi',
+          'mtime=$(stat -c %Y -- "$target" 2>/dev/null || echo 0)',
+          'mime=""',
+          'if command -v file >/dev/null 2>&1; then',
+          '  mime=$(file -Lb --mime-type -- "$target" 2>/dev/null || true)',
+          'fi',
+          'printf "__META__\t%s\t%s\t%s\n" "$mime" "$size" "$mtime"',
+          'base64 < "$target" | tr -d "\\n"',
+        ].join('\n');
+
+        try {
+          const r = await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: resolved.drone }, async ({ containerName }) => {
+            return await dvmExec(containerName, 'bash', ['-lc', script]);
+          });
+          const stdout = String(r.stdout ?? '');
+          if (r.code !== 0) {
+            if (stdout.includes('__ERR__\tnot-file')) {
+              json(res, 404, { ok: false, error: `file not found: ${targetPath}`, id: droneId, name: droneName, path: targetPath });
+              return;
+            }
+            const large = stdout.match(/__ERR__\ttoo-large\t(\d+)/);
+            if (large) {
+              json(res, 413, { ok: false, error: `file too large (${large[1]} bytes, max ${FS_EDITOR_MAX_BYTES})`, id: droneId, name: droneName, path: targetPath });
+              return;
+            }
+            json(res, 500, { ok: false, error: (r.stderr || r.stdout || 'failed reading file').trim(), id: droneId, name: droneName, path: targetPath });
+            return;
+          }
+
+          const firstNl = stdout.indexOf('\n');
+          if (firstNl < 0) {
+            json(res, 500, { ok: false, error: 'file response malformed', id: droneId, name: droneName, path: targetPath });
+            return;
+          }
+          const metaLine = stdout.slice(0, firstNl);
+          const b64 = stdout.slice(firstNl + 1).trim();
+          const meta = metaLine.split('\t');
+          if (meta.length < 4 || meta[0] !== '__META__') {
+            json(res, 500, { ok: false, error: 'file metadata missing', id: droneId, name: droneName, path: targetPath });
+            return;
+          }
+
+          const mimeRaw = String(meta[1] ?? '').trim().toLowerCase();
+          const sizeNum = Number(meta[2] ?? 0);
+          const mtimeSec = Number(meta[3] ?? 0);
+
+          let buf: Buffer;
+          try {
+            buf = Buffer.from(b64, 'base64');
+          } catch {
+            json(res, 500, { ok: false, error: 'failed decoding file bytes', id: droneId, name: droneName, path: targetPath });
+            return;
+          }
+
+          if (!isLikelyTextMimeType(mimeRaw) || bufferLooksBinary(buf)) {
+            json(res, 415, { ok: false, error: 'file is not a UTF-8 text file', id: droneId, name: droneName, path: targetPath });
+            return;
+          }
+
+          json(res, 200, {
+            ok: true,
+            id: droneId,
+            name: droneName,
+            path: targetPath,
+            content: buf.toString('utf8'),
+            size: Number.isFinite(sizeNum) ? Math.max(0, Math.floor(sizeNum)) : 0,
+            mtimeMs: Number.isFinite(mtimeSec) ? Math.max(0, Math.floor(mtimeSec * 1000)) : null,
+          });
+          return;
+        } catch (e: any) {
+          const msg = e?.message ?? String(e);
+          const code = looksLikeMissingContainerError(msg) ? 404 : 500;
+          json(res, code, { ok: false, error: msg, id: droneId, name: droneName, path: targetPath });
+          return;
+        }
+      }
+
+      // POST /api/drones/:id/fs/file
+      // Writes UTF-8 text file content for editor usage.
+      if (method === 'POST' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'drones' && parts[3] === 'fs' && parts[4] === 'file') {
+        const droneRef = decodeURIComponent(parts[2]);
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        const droneId = resolved.id;
+        const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+
+        let body: any = null;
+        try {
+          body = await readJsonBody(req);
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          return;
+        }
+
+        const targetPath = normalizeContainerPath(body?.path ?? '');
+        if (!targetPath || targetPath === '/') {
+          json(res, 400, { ok: false, error: 'missing file path' });
+          return;
+        }
+        if (typeof body?.content !== 'string') {
+          json(res, 400, { ok: false, error: 'content must be a string' });
+          return;
+        }
+        const content = String(body?.content ?? '');
+        const nextBytes = Buffer.byteLength(content, 'utf8');
+        if (nextBytes > FS_EDITOR_MAX_BYTES) {
+          json(res, 413, { ok: false, error: `file too large (${nextBytes} bytes, max ${FS_EDITOR_MAX_BYTES})` });
+          return;
+        }
+        const contentBase64 = Buffer.from(content, 'utf8').toString('base64');
+
+        try {
+          const result = await withLockedDroneContainer(
+            { requestedDroneName: droneName, droneEntry: resolved.drone },
+            async ({ containerName }) => {
+              const preflightScript = [
+                'set -euo pipefail',
+                `target=${bashQuote(targetPath)}`,
+                'if [ ! -f "$target" ]; then',
+                '  echo "__ERR__\tnot-file"',
+                '  exit 3',
+                'fi',
+                'echo "__OK__"',
+              ].join('\n');
+
+              const preflight = await dvmExec(containerName, 'bash', ['-lc', preflightScript]);
+              if (preflight.code !== 0) {
+                const out = `${preflight.stdout || ''}\n${preflight.stderr || ''}`;
+                if (/\bnot-file\b/i.test(out)) {
+                  const err = new Error(`file not found: ${targetPath}`) as Error & { statusCode?: number };
+                  err.statusCode = 404;
+                  throw err;
+                }
+                throw new Error((preflight.stderr || preflight.stdout || 'failed checking file before save').trim());
+              }
+
+              const writeScript = [
+                'set -euo pipefail',
+                `target=${bashQuote(targetPath)}`,
+                `data=${bashQuote(contentBase64)}`,
+                'printf "%s" "$data" | base64 -d > "$target"',
+              ].join('\n');
+              const writeOut = await dvmExec(containerName, 'bash', ['-lc', writeScript]);
+              if (writeOut.code !== 0) {
+                throw new Error((writeOut.stderr || writeOut.stdout || 'failed writing file').trim());
+              }
+
+              const statScript = [
+                'set -euo pipefail',
+                `target=${bashQuote(targetPath)}`,
+                'size=$(stat -c %s -- "$target" 2>/dev/null || echo 0)',
+                'mtime=$(stat -c %Y -- "$target" 2>/dev/null || echo 0)',
+                'printf "__META__\t%s\t%s\n" "$size" "$mtime"',
+              ].join('\n');
+              const statOut = await dvmExec(containerName, 'bash', ['-lc', statScript]);
+              if (statOut.code !== 0) {
+                throw new Error((statOut.stderr || statOut.stdout || 'failed reading saved file metadata').trim());
+              }
+              const line = String(statOut.stdout ?? '').trim();
+              const parts = line.split('\t');
+              const sizeNum = Number(parts[1] ?? 0);
+              const mtimeSec = Number(parts[2] ?? 0);
+              return {
+                size: Number.isFinite(sizeNum) ? Math.max(0, Math.floor(sizeNum)) : 0,
+                mtimeMs: Number.isFinite(mtimeSec) ? Math.max(0, Math.floor(mtimeSec * 1000)) : null,
+              };
+            },
+          );
+
+          json(res, 200, {
+            ok: true,
+            id: droneId,
+            name: droneName,
+            path: targetPath,
+            size: result.size,
+            mtimeMs: result.mtimeMs,
+          });
+          return;
+        } catch (e: any) {
+          const msg = e?.message ?? String(e);
+          const explicitStatus = Number((e as any)?.statusCode ?? 0);
+          const code = explicitStatus > 0 ? explicitStatus : looksLikeMissingContainerError(msg) ? 404 : 500;
+          json(res, code, { ok: false, error: msg, id: droneId, name: droneName, path: targetPath });
+          return;
+        }
+      }
+
       if (method === 'GET' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'drones' && parts[3] === 'fs' && parts[4] === 'thumb') {
         const droneRef = decodeURIComponent(parts[2]);
         const resolved = await resolveDroneOrRespond(res, droneRef);
