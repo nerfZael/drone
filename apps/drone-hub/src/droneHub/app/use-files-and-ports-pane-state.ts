@@ -17,7 +17,6 @@ import {
   PREVIEW_URL_STORAGE_KEY,
 } from './app-config';
 import {
-  buildContainerPreviewUrl,
   droneHomePath,
   isDroneStartingOrSeeding,
   normalizeContainerPathInput,
@@ -25,6 +24,7 @@ import {
   normalizePreviewUrl,
   readPortPreviewByDrone,
   readPreviewUrlByDrone,
+  rewriteContainerPreviewUrlToHostLoopback,
   rewriteLoopbackUrlToContainerPreview,
   sameReachabilityMap,
 } from './helpers';
@@ -236,13 +236,10 @@ export function useFilesAndPortsPaneState({ currentDrone, requestJson }: UseFile
 
   const selectedPreviewDefaultUrl = React.useMemo(
     () =>
-      selectedPreviewPort && currentDrone?.name
-        ? buildContainerPreviewUrl(
-            currentDrone.name,
-            selectedPreviewPort.containerPort,
-          )
+      selectedPreviewPort
+        ? `http://localhost:${selectedPreviewPort.hostPort}/`
         : null,
-    [currentDrone?.name, selectedPreviewPort],
+    [selectedPreviewPort],
   );
 
   const selectedPreviewUrlOverride = React.useMemo(() => {
@@ -268,9 +265,13 @@ export function useFilesAndPortsPaneState({ currentDrone, requestJson }: UseFile
           droneName,
           portRows,
         );
+        const rewrittenLegacyPreview = rewriteContainerPreviewUrlToHostLoopback(
+          normalized,
+          portRows,
+        );
         const finalUrl =
-          normalizePreviewUrl(rewritten || normalized) ??
-          (rewritten || normalized);
+          normalizePreviewUrl(rewritten || rewrittenLegacyPreview || normalized) ??
+          (rewritten || rewrittenLegacyPreview || normalized);
         const defaultUrl = selectedPreviewDefaultUrl
           ? normalizePreviewUrl(selectedPreviewDefaultUrl) ??
             selectedPreviewDefaultUrl
@@ -298,8 +299,14 @@ export function useFilesAndPortsPaneState({ currentDrone, requestJson }: UseFile
       droneName,
       portRows,
     );
-    if (!rewritten) return;
-    const rewrittenNormalized = normalizePreviewUrl(rewritten) ?? rewritten;
+    const rewrittenLegacyPreview = rewriteContainerPreviewUrlToHostLoopback(
+      currentOverride,
+      portRows,
+    );
+    if (!rewritten && !rewrittenLegacyPreview) return;
+    const rewrittenValue = rewritten || rewrittenLegacyPreview;
+    if (!rewrittenValue) return;
+    const rewrittenNormalized = normalizePreviewUrl(rewrittenValue) ?? rewrittenValue;
     const defaultUrl = selectedPreviewDefaultUrl
       ? normalizePreviewUrl(selectedPreviewDefaultUrl) ?? selectedPreviewDefaultUrl
       : null;

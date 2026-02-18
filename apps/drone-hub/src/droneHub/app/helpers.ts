@@ -216,7 +216,7 @@ export function buildContainerPreviewUrl(droneId: string, containerPort: number)
 
 export function rewriteLoopbackUrlToContainerPreview(
   rawUrl: string,
-  droneId: string,
+  _droneId: string,
   portRows: DronePortMapping[],
 ): string | null {
   try {
@@ -226,10 +226,30 @@ export function rewriteLoopbackUrlToContainerPreview(
     const loopbackPort = Number(u.port);
     if (!Number.isFinite(loopbackPort) || loopbackPort <= 0 || Math.floor(loopbackPort) !== loopbackPort) return null;
     const mapped = portRows.find((p) => p.containerPort === loopbackPort) ?? portRows.find((p) => p.hostPort === loopbackPort);
-    const containerPort = mapped?.containerPort ?? loopbackPort;
-    const base = `/api/drones/${encodeURIComponent(String(droneId ?? '').trim())}/preview/${containerPort}`;
+    const hostPort = mapped?.hostPort ?? loopbackPort;
     const path = u.pathname && u.pathname.startsWith('/') ? u.pathname : '/';
-    return `${base}${path}${u.search || ''}${u.hash || ''}`;
+    return `http://localhost:${hostPort}${path}${u.search || ''}${u.hash || ''}`;
+  } catch {
+    return null;
+  }
+}
+
+export function rewriteContainerPreviewUrlToHostLoopback(
+  rawUrl: string,
+  portRows: DronePortMapping[],
+): string | null {
+  try {
+    const raw = String(rawUrl ?? '').trim();
+    if (!raw) return null;
+    const parsed = raw.startsWith('/') ? new URL(raw, 'http://local.preview') : new URL(raw);
+    const m = parsed.pathname.match(/^\/api\/drones\/[^/]+\/preview\/(\d+)(\/.*)?$/);
+    if (!m) return null;
+    const previewPort = Number(m[1]);
+    if (!Number.isFinite(previewPort) || previewPort <= 0 || Math.floor(previewPort) !== previewPort) return null;
+    const mapped = portRows.find((p) => p.containerPort === previewPort) ?? portRows.find((p) => p.hostPort === previewPort);
+    const hostPort = mapped?.hostPort ?? previewPort;
+    const tailPath = m[2] && m[2].length > 0 ? m[2] : '/';
+    return `http://localhost:${hostPort}${tailPath}${parsed.search || ''}${parsed.hash || ''}`;
   } catch {
     return null;
   }
