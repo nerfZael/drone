@@ -24,7 +24,7 @@ export type RepoSummary = {
 
 export type DronePortMapping = { hostPort: number; containerPort: number };
 export type DroneTerminalMode = 'shell' | 'agent';
-export type PortPreviewSelection = { hostPort: number; containerPort: number };
+export type PortPreviewSelection = { containerPort: number };
 export type PortPreviewByDrone = Record<string, PortPreviewSelection>;
 export type PreviewUrlByDrone = Record<string, string>;
 export type PortReachability = 'checking' | 'up' | 'down';

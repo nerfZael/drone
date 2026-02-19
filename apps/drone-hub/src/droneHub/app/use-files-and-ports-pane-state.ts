@@ -25,7 +25,7 @@ import {
   readPortPreviewByDrone,
   readPreviewUrlByDrone,
   rewriteContainerPreviewUrlToHostLoopback,
-  rewriteLoopbackUrlToContainerPreview,
+  rewriteLoopbackUrlToHostLoopback,
   sameReachabilityMap,
 } from './helpers';
 import {
@@ -177,20 +177,12 @@ export function useFilesAndPortsPaneState({ currentDrone, requestJson }: UseFile
   );
 
   const selectedPreviewPort = React.useMemo(() => {
-    const droneName = String(currentDrone?.name ?? '').trim();
-    if (!droneName) return null;
-    const saved = portPreviewByDrone[droneName];
+    const droneId = String(currentDrone?.id ?? '').trim();
+    if (!droneId) return null;
+    const saved = portPreviewByDrone[droneId];
     if (!saved) return null;
-    return (
-      portRows.find(
-        (p) =>
-          p.containerPort === saved.containerPort && p.hostPort === saved.hostPort,
-      ) ??
-      portRows.find((p) => p.containerPort === saved.containerPort) ??
-      portRows.find((p) => p.hostPort === saved.hostPort) ??
-      null
-    );
-  }, [currentDrone?.name, portPreviewByDrone, portRows]);
+    return portRows.find((p) => p.containerPort === saved.containerPort) ?? null;
+  }, [currentDrone?.id, portPreviewByDrone, portRows]);
   const portRowsSignature = React.useMemo(
     () => portRows.map((p) => `${p.containerPort}:${p.hostPort}`).join(','),
     [portRows],
@@ -198,40 +190,33 @@ export function useFilesAndPortsPaneState({ currentDrone, requestJson }: UseFile
 
   const setSelectedPreviewPort = React.useCallback(
     (port: DronePortMapping | null) => {
-      const droneName = String(currentDrone?.name ?? '').trim();
-      if (!droneName) return;
+      const droneId = String(currentDrone?.id ?? '').trim();
+      if (!droneId) return;
       if (port) {
         // Selecting a port should make preview follow that port URL.
         setPreviewUrlByDrone((prev) => {
-          if (!prev[droneName]) return prev;
+          if (!prev[droneId]) return prev;
           const next = { ...prev };
-          delete next[droneName];
+          delete next[droneId];
           return next;
         });
       }
       setPortPreviewByDrone((prev) => {
         const next = { ...prev };
         if (!port) {
-          if (!next[droneName]) return prev;
-          delete next[droneName];
+          if (!next[droneId]) return prev;
+          delete next[droneId];
           return next;
         }
-        const prevSel = next[droneName];
-        if (
-          prevSel &&
-          prevSel.hostPort === port.hostPort &&
-          prevSel.containerPort === port.containerPort
-        ) {
+        const prevSel = next[droneId];
+        if (prevSel && prevSel.containerPort === port.containerPort) {
           return prev;
         }
-        next[droneName] = {
-          hostPort: port.hostPort,
-          containerPort: port.containerPort,
-        };
+        next[droneId] = { containerPort: port.containerPort };
         return next;
       });
     },
-    [currentDrone?.name],
+    [currentDrone?.id],
   );
 
   const selectedPreviewDefaultUrl = React.useMemo(
@@ -243,26 +228,25 @@ export function useFilesAndPortsPaneState({ currentDrone, requestJson }: UseFile
   );
 
   const selectedPreviewUrlOverride = React.useMemo(() => {
-    const droneName = String(currentDrone?.name ?? '').trim();
-    if (!droneName) return null;
-    return previewUrlByDrone[droneName] ?? null;
-  }, [currentDrone?.name, previewUrlByDrone]);
+    const droneId = String(currentDrone?.id ?? '').trim();
+    if (!droneId) return null;
+    return previewUrlByDrone[droneId] ?? null;
+  }, [currentDrone?.id, previewUrlByDrone]);
 
   const setSelectedPreviewUrlOverride = React.useCallback(
     (nextUrl: string | null) => {
-      const droneName = String(currentDrone?.name ?? '').trim();
-      if (!droneName) return;
+      const droneId = String(currentDrone?.id ?? '').trim();
+      if (!droneId) return;
       setPreviewUrlByDrone((prev) => {
         const next = { ...prev };
         const normalized = nextUrl ? normalizePreviewUrl(nextUrl) : null;
         if (!normalized) {
-          if (!next[droneName]) return prev;
-          delete next[droneName];
+          if (!next[droneId]) return prev;
+          delete next[droneId];
           return next;
         }
-        const rewritten = rewriteLoopbackUrlToContainerPreview(
+        const rewritten = rewriteLoopbackUrlToHostLoopback(
           normalized,
-          droneName,
           portRows,
         );
         const rewrittenLegacyPreview = rewriteContainerPreviewUrlToHostLoopback(
@@ -277,26 +261,25 @@ export function useFilesAndPortsPaneState({ currentDrone, requestJson }: UseFile
             selectedPreviewDefaultUrl
           : null;
         if (defaultUrl && finalUrl === defaultUrl) {
-          if (!next[droneName]) return prev;
-          delete next[droneName];
+          if (!next[droneId]) return prev;
+          delete next[droneId];
           return next;
         }
-        if (next[droneName] === finalUrl) return prev;
-        next[droneName] = finalUrl;
+        if (next[droneId] === finalUrl) return prev;
+        next[droneId] = finalUrl;
         return next;
       });
     },
-    [currentDrone?.name, portRows, selectedPreviewDefaultUrl],
+    [currentDrone?.id, portRows, selectedPreviewDefaultUrl],
   );
 
   React.useEffect(() => {
-    const droneName = String(currentDrone?.name ?? '').trim();
-    if (!droneName) return;
-    const currentOverride = previewUrlByDrone[droneName];
+    const droneId = String(currentDrone?.id ?? '').trim();
+    if (!droneId) return;
+    const currentOverride = previewUrlByDrone[droneId];
     if (!currentOverride) return;
-    const rewritten = rewriteLoopbackUrlToContainerPreview(
+    const rewritten = rewriteLoopbackUrlToHostLoopback(
       currentOverride,
-      droneName,
       portRows,
     );
     const rewrittenLegacyPreview = rewriteContainerPreviewUrlToHostLoopback(
@@ -313,20 +296,20 @@ export function useFilesAndPortsPaneState({ currentDrone, requestJson }: UseFile
     const nextValue =
       defaultUrl && rewrittenNormalized === defaultUrl ? null : rewrittenNormalized;
     setPreviewUrlByDrone((prev) => {
-      if (prev[droneName] !== currentOverride) return prev;
+      if (prev[droneId] !== currentOverride) return prev;
       const next = { ...prev };
       if (!nextValue) {
-        delete next[droneName];
+        delete next[droneId];
       } else {
-        next[droneName] = nextValue;
+        next[droneId] = nextValue;
       }
       return next;
     });
-  }, [currentDrone?.name, portRows, previewUrlByDrone, selectedPreviewDefaultUrl]);
+  }, [currentDrone?.id, portRows, previewUrlByDrone, selectedPreviewDefaultUrl]);
 
   React.useEffect(() => {
-    const droneName = String(currentDrone?.name ?? '').trim();
-    if (!droneName || portRows.length === 0) return;
+    const droneId = String(currentDrone?.id ?? '').trim();
+    if (!droneId || portRows.length === 0) return;
     let mounted = true;
     const probeTargets =
       selectedPreviewPort &&
@@ -340,14 +323,14 @@ export function useFilesAndPortsPaneState({ currentDrone, requestJson }: UseFile
 
     const warmStatuses = () => {
       setPortReachabilityByDrone((prev) => {
-        const current = prev[droneName] ?? {};
+        const current = prev[droneId] ?? {};
         const nextForDrone: PortReachabilityByHostPort = {};
         for (const p of portRows) {
           const key = String(p.hostPort);
           nextForDrone[key] = current[key] ?? 'checking';
         }
         if (sameReachabilityMap(current, nextForDrone)) return prev;
-        return { ...prev, [droneName]: nextForDrone };
+        return { ...prev, [droneId]: nextForDrone };
       });
     };
 
@@ -362,7 +345,7 @@ export function useFilesAndPortsPaneState({ currentDrone, requestJson }: UseFile
       );
       if (!mounted) return;
       setPortReachabilityByDrone((prev) => {
-        const current = prev[droneName] ?? {};
+        const current = prev[droneId] ?? {};
         const checksByHostPort = new Map<string, 'up' | 'down'>(
           checks.map((c) => [String(c.hostPort), c.state]),
         );
@@ -372,7 +355,7 @@ export function useFilesAndPortsPaneState({ currentDrone, requestJson }: UseFile
           nextForDrone[key] = checksByHostPort.get(key) ?? current[key] ?? 'checking';
         }
         if (sameReachabilityMap(current, nextForDrone)) return prev;
-        return { ...prev, [droneName]: nextForDrone };
+        return { ...prev, [droneId]: nextForDrone };
       });
     };
 
@@ -384,7 +367,7 @@ export function useFilesAndPortsPaneState({ currentDrone, requestJson }: UseFile
       mounted = false;
     };
   }, [
-    currentDrone?.name,
+    currentDrone?.id,
     portRows,
     portRowsSignature,
     selectedPreviewPort?.containerPort,
@@ -392,10 +375,10 @@ export function useFilesAndPortsPaneState({ currentDrone, requestJson }: UseFile
   ]);
 
   const currentPortReachability = React.useMemo(() => {
-    const droneName = String(currentDrone?.name ?? '').trim();
-    if (!droneName) return {};
-    return portReachabilityByDrone[droneName] ?? {};
-  }, [currentDrone?.name, portReachabilityByDrone]);
+    const droneId = String(currentDrone?.id ?? '').trim();
+    if (!droneId) return {};
+    return portReachabilityByDrone[droneId] ?? {};
+  }, [currentDrone?.id, portReachabilityByDrone]);
 
   return {
     defaultFsPathForCurrentDrone,

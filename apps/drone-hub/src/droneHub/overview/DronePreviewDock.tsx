@@ -22,10 +22,7 @@ export function DronePreviewDock({
   onSetPreviewUrlOverride: (nextUrl: string | null) => void;
 }) {
   const selectedUrl = previewUrlOverride || defaultPreviewUrl;
-  const selectedOpenUrl = React.useMemo(() => {
-    if (selectedPort) return `http://localhost:${selectedPort.hostPort}`;
-    return selectedUrl;
-  }, [selectedPort, selectedUrl]);
+  const selectedOpenUrl = selectedUrl;
   const displayedSelectedUrl = React.useMemo(() => displayUrlForPreviewInput(selectedUrl), [selectedUrl]);
   const defaultDisplayUrl = React.useMemo(() => displayUrlForPreviewInput(defaultPreviewUrl), [defaultPreviewUrl]);
   const selectedReachability = selectedPort

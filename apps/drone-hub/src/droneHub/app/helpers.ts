@@ -179,10 +179,9 @@ export function readPortPreviewByDrone(raw: string | null | undefined): PortPrev
     const out: PortPreviewByDrone = {};
     for (const [droneName, value] of Object.entries(parsed as Record<string, any>)) {
       const name = String(droneName ?? '').trim();
-      const hp = Number((value as any)?.hostPort);
-      const cp = Number((value as any)?.containerPort);
-      if (!name || !Number.isFinite(hp) || !Number.isFinite(cp)) continue;
-      out[name] = { hostPort: hp, containerPort: cp };
+      const cp = Number((value as any)?.containerPort ?? value);
+      if (!name || !Number.isFinite(cp)) continue;
+      out[name] = { containerPort: cp };
     }
     return out;
   } catch {
@@ -208,15 +207,8 @@ export function readPreviewUrlByDrone(raw: string | null | undefined): PreviewUr
   }
 }
 
-export function buildContainerPreviewUrl(droneId: string, containerPort: number): string {
-  const dn = encodeURIComponent(String(droneId ?? '').trim());
-  const cp = encodeURIComponent(String(containerPort ?? ''));
-  return `/api/drones/${dn}/preview/${cp}/`;
-}
-
-export function rewriteLoopbackUrlToContainerPreview(
+export function rewriteLoopbackUrlToHostLoopback(
   rawUrl: string,
-  _droneId: string,
   portRows: DronePortMapping[],
 ): string | null {
   try {
@@ -225,7 +217,9 @@ export function rewriteLoopbackUrlToContainerPreview(
     if (host !== 'localhost' && host !== '127.0.0.1' && host !== '::1') return null;
     const loopbackPort = Number(u.port);
     if (!Number.isFinite(loopbackPort) || loopbackPort <= 0 || Math.floor(loopbackPort) !== loopbackPort) return null;
-    const mapped = portRows.find((p) => p.containerPort === loopbackPort) ?? portRows.find((p) => p.hostPort === loopbackPort);
+    const mapped =
+      portRows.find((p) => p.containerPort === loopbackPort) ??
+      portRows.find((p) => p.hostPort === loopbackPort);
     const hostPort = mapped?.hostPort ?? loopbackPort;
     const path = u.pathname && u.pathname.startsWith('/') ? u.pathname : '/';
     return `http://localhost:${hostPort}${path}${u.search || ''}${u.hash || ''}`;
@@ -242,11 +236,13 @@ export function rewriteContainerPreviewUrlToHostLoopback(
     const raw = String(rawUrl ?? '').trim();
     if (!raw) return null;
     const parsed = raw.startsWith('/') ? new URL(raw, 'http://local.preview') : new URL(raw);
-    const m = parsed.pathname.match(/^\/api\/drones\/[^/]+\/preview\/(\d+)(\/.*)?$/);
+    const m = parsed.pathname.match(/^\/api\/drones\/[^/]+\/preview(?:-open)?\/(\d+)(\/.*)?$/);
     if (!m) return null;
     const previewPort = Number(m[1]);
     if (!Number.isFinite(previewPort) || previewPort <= 0 || Math.floor(previewPort) !== previewPort) return null;
-    const mapped = portRows.find((p) => p.containerPort === previewPort) ?? portRows.find((p) => p.hostPort === previewPort);
+    const mapped =
+      portRows.find((p) => p.containerPort === previewPort) ??
+      portRows.find((p) => p.hostPort === previewPort);
     const hostPort = mapped?.hostPort ?? previewPort;
     const tailPath = m[2] && m[2].length > 0 ? m[2] : '/';
     return `http://localhost:${hostPort}${tailPath}${parsed.search || ''}${parsed.hash || ''}`;
