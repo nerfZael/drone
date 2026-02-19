@@ -219,8 +219,9 @@ function DiffBlock({ state }: { state: DiffState | undefined }) {
       return [];
     }
   })();
+  const hasRenderableHunks = parsed.some((file) => Array.isArray(file.hunks) && file.hunks.length > 0);
 
-  if (parsed.length === 0) {
+  if (parsed.length === 0 || !hasRenderableHunks) {
     return <pre className="m-0 p-3 text-[11px] leading-5 text-[var(--fg-secondary)] whitespace-pre-wrap break-words">{state.text}</pre>;
   }
 
