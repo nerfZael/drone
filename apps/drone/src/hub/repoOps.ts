@@ -502,7 +502,12 @@ export async function gitRepoDiffForPath(opts: {
       const msg = (r.stderr || r.stdout || 'git diff --no-index failed').trim();
       throw new Error(msg);
     }
-    diffText = r.stdout;
+    const noIndexStdout = String(r.stdout ?? '');
+    const noIndexStderr = String(r.stderr ?? '').trim();
+    if (!noIndexStdout && noIndexStderr) {
+      throw new Error(noIndexStderr);
+    }
+    diffText = noIndexStdout;
   } else {
     diffText = await runLocalOrThrow('git', ['-C', repoRoot, 'diff', '--no-color', '--no-ext-diff', contextFlag, '--', targetPath]);
   }
