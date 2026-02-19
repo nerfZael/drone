@@ -212,9 +212,15 @@ function DiffBlock({ state }: { state: DiffState | undefined }) {
     );
   }
 
+  const rawText = state.text;
+  const binaryDiffPattern = /(^|\n)(Binary files .* differ|GIT binary patch)(\n|$)/;
+  if (binaryDiffPattern.test(rawText)) {
+    return <pre className="m-0 p-3 text-[11px] leading-5 text-[var(--fg-secondary)] whitespace-pre-wrap break-words">{rawText}</pre>;
+  }
+
   const parsed = (() => {
     try {
-      return parseDiff(state.text);
+      return parseDiff(rawText);
     } catch {
       return [];
     }
@@ -222,7 +228,7 @@ function DiffBlock({ state }: { state: DiffState | undefined }) {
   const hasRenderableHunks = parsed.some((file) => Array.isArray(file.hunks) && file.hunks.length > 0);
 
   if (parsed.length === 0 || !hasRenderableHunks) {
-    return <pre className="m-0 p-3 text-[11px] leading-5 text-[var(--fg-secondary)] whitespace-pre-wrap break-words">{state.text}</pre>;
+    return <pre className="m-0 p-3 text-[11px] leading-5 text-[var(--fg-secondary)] whitespace-pre-wrap break-words">{rawText}</pre>;
   }
 
   return (
@@ -481,7 +487,7 @@ export function DroneChangesDock({
     setDiffByKey({});
     inflightRef.current.clear();
     setExpandedPullFiles({});
-  }, [dataMode, entriesSignature]);
+  }, [dataMode, entriesSignature, refreshNonce]);
 
   const selectedEntry = React.useMemo(
     () => (selectedPath ? entries.find((e) => e.path === selectedPath) ?? null : null),
