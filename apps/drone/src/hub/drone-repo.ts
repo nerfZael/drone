@@ -101,8 +101,13 @@ export async function droneRepoDiffForPath(opts: {
           args: ['diff', '--no-color', '--no-ext-diff', '--no-index', contextFlag, '/dev/null', requestedPath],
           okCodes: [0, 1],
         });
-        diffText = noIndex.stdout;
-        fromUntracked = Boolean(diffText);
+        const noIndexStdout = String(noIndex.stdout ?? '');
+        const noIndexStderr = String(noIndex.stderr ?? '').trim();
+        if (!noIndexStdout && noIndexStderr) {
+          throw new Error(noIndexStderr);
+        }
+        diffText = noIndexStdout;
+        fromUntracked = Boolean(noIndexStdout);
       }
     }
   }
@@ -357,4 +362,3 @@ export async function droneRepoPullDiffForPath(opts: {
   }
   return { repoRoot, baseSha, headSha, path: requestedPath, diff: diffText, truncated };
 }
-

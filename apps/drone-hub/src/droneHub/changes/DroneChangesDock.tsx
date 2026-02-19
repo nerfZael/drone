@@ -60,8 +60,47 @@ function effectiveKindForEntry(entry: RepoChangeEntry | null, preferred: DiffKin
 }
 
 function statusCharLabel(ch: string): string {
-  if (!ch || ch === '.') return '\u00b7';
+  if (!ch || ch === '.') return '-';
   return ch;
+}
+
+function statusCharMeaning(chRaw: string): string {
+  const ch = String(chRaw ?? '.').charAt(0) || '.';
+  switch (ch) {
+    case '.':
+      return 'no change';
+    case 'M':
+      return 'modified';
+    case 'A':
+      return 'added';
+    case 'D':
+      return 'deleted';
+    case 'R':
+      return 'renamed';
+    case 'C':
+      return 'copied';
+    case 'T':
+      return 'type changed';
+    case 'U':
+      return 'unmerged';
+    case '?':
+      return 'untracked';
+    case '!':
+      return 'ignored';
+    default:
+      return 'unknown';
+  }
+}
+
+function statusBadgeTitle(entry: RepoChangeEntry, mode: ChangesDataMode): string {
+  if (mode === 'pull-preview') {
+    return `Pull preview status: ${statusCharLabel(entry.stagedChar)} (${statusCharMeaning(entry.stagedChar)})`;
+  }
+  return [
+    'Git status badge [staged][unstaged]',
+    `staged: ${statusCharLabel(entry.stagedChar)} (${statusCharMeaning(entry.stagedChar)})`,
+    `unstaged: ${statusCharLabel(entry.unstagedChar)} (${statusCharMeaning(entry.unstagedChar)})`,
+  ].join(' | ');
 }
 
 function badgeTone(entry: RepoChangeEntry): string {
@@ -166,7 +205,11 @@ function DiffBlock({ state }: { state: DiffState | undefined }) {
   }
 
   if (!state.text) {
-    return <div className="px-3 py-3 text-[11px] text-[var(--muted)]">No diff output for this selection.</div>;
+    return (
+      <div className="px-3 py-3 text-[11px] text-[var(--muted)]">
+        No diff output for this selection. The file may be empty, non-text, or no longer present.
+      </div>
+    );
   }
 
   const parsed = (() => {
@@ -627,13 +670,19 @@ export function DroneChangesDock({
         >
           <span className="text-[var(--muted-dim)]"><IconFile /></span>
           <span className="text-[11px] text-[var(--fg-secondary)] truncate flex-1">{node.name}</span>
-          <span className={`inline-flex items-center justify-center min-w-[30px] h-4 rounded border text-[9px] font-mono ${badgeTone(entry)}`}>
-            {statusCharLabel(entry.stagedChar)}{statusCharLabel(entry.unstagedChar)}
+          <span
+            className={`inline-flex items-center justify-center min-w-[30px] h-4 rounded border text-[9px] font-mono ${badgeTone(entry)}`}
+            title={statusBadgeTitle(entry, dataMode)}
+          >
+            {statusCharLabel(entry.stagedChar)}
+            {statusCharLabel(entry.unstagedChar)}
           </span>
         </button>
       );
     });
   }
+
+  const statusLegendTitle = "Status badge uses [staged][unstaged]. '-' means no change and '?' means untracked.";
 
   return (
     <div className="w-full h-full min-h-0 bg-[var(--panel-alt)] overflow-hidden flex flex-col relative dh-changes-dock">
@@ -751,6 +800,10 @@ export function DroneChangesDock({
                 <span>{counts?.changed ?? 0} changed</span>
                 <span>{counts?.staged ?? 0} staged</span>
                 <span>{counts?.unstaged ?? 0} unstaged</span>
+                <span className="text-[var(--muted-dim)]">\u2022</span>
+                <span className="font-mono text-[9px]" title={statusLegendTitle}>
+                  [S][U]
+                </span>
                 {changes?.branch.head && (
                   <>
                     <span className="text-[var(--muted-dim)]">\u2022</span>
@@ -835,8 +888,12 @@ export function DroneChangesDock({
                   return (
                     <section key={`stacked:${entry.path}`} className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] overflow-hidden">
                       <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/70 flex items-center gap-2">
-                        <span className={`inline-flex items-center justify-center min-w-[32px] h-5 rounded border text-[10px] font-mono ${badgeTone(entry)}`}>
-                          {statusCharLabel(entry.stagedChar)}{statusCharLabel(entry.unstagedChar)}
+                        <span
+                          className={`inline-flex items-center justify-center min-w-[32px] h-5 rounded border text-[10px] font-mono ${badgeTone(entry)}`}
+                          title={statusBadgeTitle(entry, dataMode)}
+                        >
+                          {statusCharLabel(entry.stagedChar)}
+                          {statusCharLabel(entry.unstagedChar)}
                         </span>
                         <span className="text-[11px] text-[var(--fg-secondary)] font-mono truncate flex-1" title={entry.path}>
                           {entry.path}
@@ -864,8 +921,12 @@ export function DroneChangesDock({
                 return (
                   <section key={`pull:${entry.path}`} className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] overflow-hidden">
                     <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/70 flex items-center gap-2">
-                      <span className={`inline-flex items-center justify-center min-w-[32px] h-5 rounded border text-[10px] font-mono ${badgeTone(entry)}`}>
-                        {statusCharLabel(entry.stagedChar)}{statusCharLabel(entry.unstagedChar)}
+                      <span
+                        className={`inline-flex items-center justify-center min-w-[32px] h-5 rounded border text-[10px] font-mono ${badgeTone(entry)}`}
+                        title={statusBadgeTitle(entry, dataMode)}
+                      >
+                        {statusCharLabel(entry.stagedChar)}
+                        {statusCharLabel(entry.unstagedChar)}
                       </span>
                       <span className="text-[11px] text-[var(--fg-secondary)] font-mono truncate flex-1" title={entry.path}>
                         {entry.path}

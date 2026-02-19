@@ -55,12 +55,10 @@ export function DroneCard({
   const canRename = typeof onRename === 'function';
   const canSetBaseImage = typeof onSetBaseImage === 'function';
   const canDelete = typeof onDelete === 'function';
+  const actionCount = Number(canClone) + Number(canRename) + Number(canSetBaseImage) + Number(canDelete);
   const hasActions = canClone || canRename || canSetBaseImage || canDelete;
-  const actionsDisabled =
-    Boolean(cloneDisabled) ||
-    Boolean(renameDisabled) ||
-    Boolean(setBaseImageDisabled) ||
-    Boolean(deleteDisabled);
+  const actionsReservedWidthPx = actionCount > 0 ? actionCount * 24 + Math.max(0, actionCount - 1) * 4 : 0;
+  const pinActionsVisible = Boolean(renameBusy) || Boolean(setBaseImageBusy) || Boolean(deleteBusy);
   const showRespondingAsStatus = Boolean(busy) && Boolean(drone.statusOk) && drone.hubPhase !== 'error';
   const errText = String(drone.hubMessage ?? drone.statusError ?? '').trim();
   const showInlineError = drone.hubPhase === 'error' && Boolean(errText);
@@ -134,12 +132,15 @@ export function DroneCard({
           <span className="flex-shrink-0 ml-2 text-[10px] text-[var(--red)] truncate max-w-[80px]" title={errText}>error</span>
         )
       ) : (
-        <div className="relative flex items-center justify-end flex-shrink-0 ml-2">
+        <div
+          className="relative flex items-center justify-end flex-shrink-0 ml-2"
+          style={hasActions ? { minWidth: actionsReservedWidthPx } : undefined}
+        >
           <div
             className={
               hasActions
                 ? `transition-opacity duration-150 ${
-                    actionsDisabled ? 'opacity-0 pointer-events-none' : 'group-hover/drone:opacity-0 group-hover/drone:pointer-events-none'
+                    pinActionsVisible ? 'opacity-0 pointer-events-none' : 'group-hover/drone:opacity-0 group-hover/drone:pointer-events-none'
                   }`
                 : ''
             }
@@ -154,7 +155,7 @@ export function DroneCard({
             <div
               data-onboarding-id="sidebar.droneCard.actions"
               className={`absolute right-0 flex items-center gap-1 transition-all ${
-                actionsDisabled
+                pinActionsVisible
                   ? 'opacity-100 pointer-events-auto'
                   : 'opacity-0 pointer-events-none group-hover/drone:opacity-100 group-hover/drone:pointer-events-auto'
               }`}
