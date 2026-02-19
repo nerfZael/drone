@@ -55,7 +55,9 @@ export function DroneCard({
   const canRename = typeof onRename === 'function';
   const canSetBaseImage = typeof onSetBaseImage === 'function';
   const canDelete = typeof onDelete === 'function';
+  const actionCount = Number(canClone) + Number(canRename) + Number(canSetBaseImage) + Number(canDelete);
   const hasActions = canClone || canRename || canSetBaseImage || canDelete;
+  const actionsReservedWidthPx = actionCount > 0 ? actionCount * 24 + Math.max(0, actionCount - 1) * 4 : 0;
   const pinActionsVisible = Boolean(renameBusy) || Boolean(setBaseImageBusy) || Boolean(deleteBusy);
   const showRespondingAsStatus = Boolean(busy) && Boolean(drone.statusOk) && drone.hubPhase !== 'error';
   const errText = String(drone.hubMessage ?? drone.statusError ?? '').trim();
@@ -130,7 +132,10 @@ export function DroneCard({
           <span className="flex-shrink-0 ml-2 text-[10px] text-[var(--red)] truncate max-w-[80px]" title={errText}>error</span>
         )
       ) : (
-        <div className="relative flex items-center justify-end flex-shrink-0 ml-2">
+        <div
+          className="relative flex items-center justify-end flex-shrink-0 ml-2"
+          style={hasActions ? { minWidth: actionsReservedWidthPx } : undefined}
+        >
           <div
             className={
               hasActions
