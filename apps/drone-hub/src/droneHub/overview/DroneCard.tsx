@@ -56,11 +56,7 @@ export function DroneCard({
   const canSetBaseImage = typeof onSetBaseImage === 'function';
   const canDelete = typeof onDelete === 'function';
   const hasActions = canClone || canRename || canSetBaseImage || canDelete;
-  const actionsDisabled =
-    Boolean(cloneDisabled) ||
-    Boolean(renameDisabled) ||
-    Boolean(setBaseImageDisabled) ||
-    Boolean(deleteDisabled);
+  const pinActionsVisible = Boolean(renameBusy) || Boolean(setBaseImageBusy) || Boolean(deleteBusy);
   const showRespondingAsStatus = Boolean(busy) && Boolean(drone.statusOk) && drone.hubPhase !== 'error';
   const errText = String(drone.hubMessage ?? drone.statusError ?? '').trim();
   const showInlineError = drone.hubPhase === 'error' && Boolean(errText);
@@ -139,7 +135,7 @@ export function DroneCard({
             className={
               hasActions
                 ? `transition-opacity duration-150 ${
-                    actionsDisabled ? 'opacity-0 pointer-events-none' : 'group-hover/drone:opacity-0 group-hover/drone:pointer-events-none'
+                    pinActionsVisible ? 'opacity-0 pointer-events-none' : 'group-hover/drone:opacity-0 group-hover/drone:pointer-events-none'
                   }`
                 : ''
             }
@@ -154,7 +150,7 @@ export function DroneCard({
             <div
               data-onboarding-id="sidebar.droneCard.actions"
               className={`absolute right-0 flex items-center gap-1 transition-all ${
-                actionsDisabled
+                pinActionsVisible
                   ? 'opacity-100 pointer-events-auto'
                   : 'opacity-0 pointer-events-none group-hover/drone:opacity-100 group-hover/drone:pointer-events-auto'
               }`}
