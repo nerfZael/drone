@@ -87,7 +87,9 @@ export async function droneRepoDiffForPath(opts: {
     });
     diffText = unstaged.stdout;
 
-    if (!diffText) {
+    // `dvm exec` can produce a trailing newline even when command output is otherwise empty.
+    // Treat whitespace-only output as empty so untracked fallback still runs.
+    if (!String(diffText ?? '').trim()) {
       const tracked = await runGitInDroneOrThrow({
         container: opts.container,
         repoPathInContainer,
@@ -95,19 +97,33 @@ export async function droneRepoDiffForPath(opts: {
         okCodes: [0, 1],
       });
       if (tracked.code !== 0) {
-        const noIndex = await runGitInDroneOrThrow({
+        const noIndex = await runGitInDrone({
           container: opts.container,
           repoPathInContainer,
           args: ['diff', '--no-color', '--no-ext-diff', '--no-index', contextFlag, '/dev/null', requestedPath],
-          okCodes: [0, 1],
         });
+        if (noIndex.code !== 0 && noIndex.code !== 1) {
+          const msg = (noIndex.stderr || noIndex.stdout || 'git diff --no-index failed').trim();
+          throw new Error(msg);
+        }
+
         const noIndexStdout = String(noIndex.stdout ?? '');
         const noIndexStderr = String(noIndex.stderr ?? '').trim();
-        if (!noIndexStdout && noIndexStderr) {
+        let extracted = noIndexStdout;
+
+        // dvm wraps non-zero command output into stderr as:
+        // "Error: Command failed ...\n\n<original output>"
+        // For git --no-index, exit code 1 means "different", not failure.
+        if (!extracted && noIndex.code === 1 && noIndexStderr) {
+          const at = noIndexStderr.indexOf('diff --git ');
+          if (at >= 0) extracted = noIndexStderr.slice(at);
+        }
+
+        if (!extracted && noIndexStderr) {
           throw new Error(noIndexStderr);
         }
-        diffText = noIndexStdout;
-        fromUntracked = Boolean(noIndexStdout);
+        diffText = extracted;
+        fromUntracked = Boolean(String(extracted ?? '').trim());
       }
     }
   }
