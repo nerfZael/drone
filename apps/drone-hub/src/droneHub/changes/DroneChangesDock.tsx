@@ -12,7 +12,7 @@ type ChangesDataMode = 'working-tree' | 'pull-preview';
 type DiffState =
   | { status: 'loading' }
   | { status: 'error'; error: string }
-  | { status: 'loaded'; text: string; truncated: boolean };
+  | { status: 'loaded'; text: string; truncated: boolean; fromUntracked: boolean };
 
 type ExplorerNode = {
   kind: 'dir' | 'file';
@@ -335,6 +335,7 @@ export function DroneChangesDock({
   const [expandedPullFiles, setExpandedPullFiles] = React.useState<Record<string, boolean>>({});
 
   const [diffByKey, setDiffByKey] = React.useState<Record<string, DiffState>>({});
+  const diffByKeyRef = React.useRef<Record<string, DiffState>>({});
   const inflightRef = React.useRef<Set<string>>(new Set());
   const mountedRef = React.useRef(true);
 
@@ -484,7 +485,12 @@ export function DroneChangesDock({
   }, [entriesSignature]);
 
   React.useEffect(() => {
+    diffByKeyRef.current = diffByKey;
+  }, [diffByKey]);
+
+  React.useEffect(() => {
     setDiffByKey({});
+    diffByKeyRef.current = {};
     inflightRef.current.clear();
     setExpandedPullFiles({});
   }, [dataMode, entriesSignature, refreshNonce]);
@@ -528,11 +534,16 @@ export function DroneChangesDock({
   }, [explorerTree, selectedPath]);
 
   const loadDiff = React.useCallback(
-    async (path: string, kind: DiffKind) => {
+    async (path: string, kind: DiffKind, retryEmptyUntracked = false) => {
       const key = `wt\u0000${diffKey(path, kind)}`;
       if (inflightRef.current.has(key)) return;
-      const cur = diffByKey[key];
-      if (cur && (cur.status === 'loading' || cur.status === 'loaded')) return;
+      const cur = diffByKeyRef.current[key];
+      if (cur?.status === 'loading') return;
+      if (cur?.status === 'loaded') {
+        const shouldRetryEmptyUntracked =
+          retryEmptyUntracked && kind === 'unstaged' && cur.fromUntracked && !String(cur.text ?? '').trim();
+        if (!shouldRetryEmptyUntracked) return;
+      }
 
       inflightRef.current.add(key);
       setDiffByKey((prev) => ({ ...prev, [key]: { status: 'loading' } }));
@@ -547,6 +558,7 @@ export function DroneChangesDock({
             status: 'loaded',
             text: typeof data.diff === 'string' ? data.diff : '',
             truncated: Boolean(data.truncated),
+            fromUntracked: Boolean(data.fromUntracked),
           },
         }));
       } catch (e: any) {
@@ -559,7 +571,7 @@ export function DroneChangesDock({
         inflightRef.current.delete(key);
       }
     },
-    [diffByKey, droneId, requestJson],
+    [droneId],
   );
 
   const loadPullDiff = React.useCallback(
@@ -568,7 +580,7 @@ export function DroneChangesDock({
       const headSha = String(pullChanges?.headSha ?? '').trim().toLowerCase();
       const key = `pull\u0000${baseSha}\u0000${headSha}\u0000${filePath}`;
       if (inflightRef.current.has(key)) return;
-      const cur = diffByKey[key];
+      const cur = diffByKeyRef.current[key];
       if (cur && (cur.status === 'loading' || cur.status === 'loaded')) return;
 
       inflightRef.current.add(key);
@@ -586,6 +598,7 @@ export function DroneChangesDock({
             status: 'loaded',
             text: typeof data.diff === 'string' ? data.diff : '',
             truncated: Boolean(data.truncated),
+            fromUntracked: false,
           },
         }));
       } catch (e: any) {
@@ -598,7 +611,7 @@ export function DroneChangesDock({
         inflightRef.current.delete(key);
       }
     },
-    [diffByKey, droneId, pullChanges?.baseSha, pullChanges?.headSha, requestJson],
+    [droneId, pullChanges?.baseSha, pullChanges?.headSha],
   );
 
   const splitShownKind = effectiveKindForEntry(selectedEntry, splitKind);
@@ -607,7 +620,7 @@ export function DroneChangesDock({
     if (dataMode !== 'working-tree') return;
     if (!repoAttached || disabled) return;
     if (!selectedEntry || !splitShownKind) return;
-    void loadDiff(selectedEntry.path, splitShownKind);
+    void loadDiff(selectedEntry.path, splitShownKind, true);
   }, [dataMode, disabled, loadDiff, repoAttached, selectedEntry, splitShownKind]);
 
   React.useEffect(() => {
@@ -616,7 +629,7 @@ export function DroneChangesDock({
     for (const entry of entries) {
       const k = effectiveKindForEntry(entry, stackedPreferredKind);
       if (!k) continue;
-      void loadDiff(entry.path, k);
+      void loadDiff(entry.path, k, true);
     }
   }, [dataMode, disabled, entries, loadDiff, repoAttached, stackedPreferredKind, viewMode]);
 
