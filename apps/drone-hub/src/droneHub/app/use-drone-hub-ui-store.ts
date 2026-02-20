@@ -27,8 +27,10 @@ type NameSuggestToast = null | { id: string; message: string };
 type ViewMode = 'grouped' | 'flat';
 type FsExplorerView = 'list' | 'thumb';
 type OutputView = 'screen' | 'log';
-const CHAT_INPUT_DRAFT_MAX_CHARS = 20_000;
-const CHAT_INPUT_DRAFT_MAX_KEYS = 300;
+const CHAT_INPUT_DRAFT_MAX_CHARS = 4_000;
+const CHAT_INPUT_DRAFT_MAX_KEYS = 80;
+const CHAT_INPUT_DRAFTS_STORAGE_KEY = 'droneHub.chatInputDrafts';
+const CHAT_INPUT_DRAFTS_PERSIST_DEBOUNCE_MS = 300;
 
 type DroneHubUiState = {
   activeRepoPath: string;
@@ -123,7 +125,6 @@ type DroneHubUiPersistedState = Pick<
   | 'groupMultiChatColumnWidth'
   | 'outputView'
   | 'fsExplorerView'
-  | 'chatInputDrafts'
   | 'spawnAgentKey'
   | 'spawnModel'
   | 'customAgents'
@@ -209,6 +210,53 @@ function normalizeChatInputDrafts(value: unknown): Record<string, string> {
   return out;
 }
 
+let pendingChatInputDraftsPersist: Record<string, string> | null = null;
+let pendingChatInputDraftsTimer: ReturnType<typeof setTimeout> | null = null;
+
+function readPersistedChatInputDrafts(): Record<string, string> {
+  const directRaw = readLocalStorageItem(CHAT_INPUT_DRAFTS_STORAGE_KEY);
+  if (directRaw) {
+    try {
+      return normalizeChatInputDrafts(JSON.parse(directRaw));
+    } catch {
+      // ignore
+    }
+  }
+
+  // Migration fallback for drafts briefly persisted inside the broader `droneHub.ui` state.
+  const uiStateRaw = readLocalStorageItem('droneHub.ui');
+  if (!uiStateRaw) return {};
+  try {
+    const parsed = JSON.parse(uiStateRaw) as { state?: { chatInputDrafts?: unknown } } | null;
+    return normalizeChatInputDrafts(parsed?.state?.chatInputDrafts ?? null);
+  } catch {
+    return {};
+  }
+}
+
+function writePersistedChatInputDrafts(value: Record<string, string>): void {
+  try {
+    if (Object.keys(value).length === 0) {
+      localStorage.removeItem(CHAT_INPUT_DRAFTS_STORAGE_KEY);
+      return;
+    }
+    localStorage.setItem(CHAT_INPUT_DRAFTS_STORAGE_KEY, JSON.stringify(value));
+  } catch {
+    // ignore
+  }
+}
+
+function schedulePersistChatInputDrafts(value: Record<string, string>): void {
+  pendingChatInputDraftsPersist = { ...value };
+  if (pendingChatInputDraftsTimer) return;
+  pendingChatInputDraftsTimer = setTimeout(() => {
+    pendingChatInputDraftsTimer = null;
+    const snapshot = pendingChatInputDraftsPersist;
+    pendingChatInputDraftsPersist = null;
+    writePersistedChatInputDrafts(snapshot ?? {});
+  }, CHAT_INPUT_DRAFTS_PERSIST_DEBOUNCE_MS);
+}
+
 function readLegacyPersistedDefaults(): DroneHubUiPersistedState {
   const savedWidth = Number(readLocalStorageItem(GROUP_MULTI_CHAT_COLUMN_WIDTH_STORAGE_KEY));
   return {
@@ -227,7 +275,6 @@ function readLegacyPersistedDefaults(): DroneHubUiPersistedState {
         : GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX,
     outputView: normalizeOutputView(readLocalStorageItem('droneHub.outputView')),
     fsExplorerView: normalizeFsExplorerView(readLocalStorageItem(FS_EXPLORER_VIEW_STORAGE_KEY)),
-    chatInputDrafts: {},
     spawnAgentKey: readLocalStorageItem('droneHub.spawnAgent') || 'builtin:cursor',
     spawnModel: readLocalStorageItem('droneHub.spawnModel') || '',
     customAgents: readCustomAgents(),
@@ -236,6 +283,7 @@ function readLegacyPersistedDefaults(): DroneHubUiPersistedState {
 }
 
 const legacyDefaults = readLegacyPersistedDefaults();
+const initialChatInputDrafts = readPersistedChatInputDrafts();
 
 export const useDroneHubUiStore = create<DroneHubUiState>()(
   persist(
@@ -255,7 +303,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       groupBroadcastExpanded: false,
       groupMultiChatColumnWidth: legacyDefaults.groupMultiChatColumnWidth,
       selectedChat: 'default',
-      chatInputDrafts: {},
+      chatInputDrafts: initialChatInputDrafts,
       draftChat: null,
       sidebarCollapsed: false,
       reposModalOpen: false,
@@ -302,6 +350,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
             if (!Object.prototype.hasOwnProperty.call(s.chatInputDrafts, draftKey)) return s;
             const trimmed = { ...s.chatInputDrafts };
             delete trimmed[draftKey];
+            schedulePersistChatInputDrafts(trimmed);
             return { chatInputDrafts: trimmed };
           }
           if (s.chatInputDrafts[draftKey] === nextText) return s;
@@ -313,6 +362,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
               delete merged[oldKey];
             }
           }
+          schedulePersistChatInputDrafts(merged);
           return { chatInputDrafts: merged };
         }),
       setDraftChat: (next) => set((s) => ({ draftChat: resolveNext(s.draftChat, next) })),
@@ -363,7 +413,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         groupMultiChatColumnWidth: state.groupMultiChatColumnWidth,
         outputView: state.outputView,
         fsExplorerView: state.fsExplorerView,
-        chatInputDrafts: state.chatInputDrafts,
         spawnAgentKey: state.spawnAgentKey,
         spawnModel: state.spawnModel,
         customAgents: state.customAgents,
@@ -383,7 +432,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           ),
           outputView: normalizeOutputView(persisted.outputView ?? currentState.outputView),
           fsExplorerView: normalizeFsExplorerView(persisted.fsExplorerView ?? currentState.fsExplorerView),
-          chatInputDrafts: normalizeChatInputDrafts(persisted.chatInputDrafts ?? currentState.chatInputDrafts),
           customAgents: sanitizeCustomAgents(persisted.customAgents ?? currentState.customAgents),
           shortcutBindings: sanitizeShortcutBindings(persisted.shortcutBindings ?? currentState.shortcutBindings),
         };

@@ -46,7 +46,6 @@ export function GroupMultiChatWorkspace({
     selectedChat,
     groupMultiChatColumnWidth,
     groupBroadcastExpanded,
-    chatInputDrafts,
     setGroupMultiChatColumnWidth,
     setGroupBroadcastExpanded,
     setSelectedGroupMultiChat,
@@ -56,7 +55,6 @@ export function GroupMultiChatWorkspace({
       selectedChat: s.selectedChat,
       groupMultiChatColumnWidth: s.groupMultiChatColumnWidth,
       groupBroadcastExpanded: s.groupBroadcastExpanded,
-      chatInputDrafts: s.chatInputDrafts,
       setGroupMultiChatColumnWidth: s.setGroupMultiChatColumnWidth,
       setGroupBroadcastExpanded: s.setGroupBroadcastExpanded,
       setSelectedGroupMultiChat: s.setSelectedGroupMultiChat,
@@ -67,7 +65,7 @@ export function GroupMultiChatWorkspace({
     () => `group-broadcast:${selectedGroupMultiChatData.group}:${selectedChat || 'default'}`,
     [selectedGroupMultiChatData.group, selectedChat],
   );
-  const broadcastDraftValue = chatInputDrafts[broadcastDraftKey] ?? '';
+  const broadcastDraftValue = useDroneHubUiStore((s) => s.chatInputDrafts[broadcastDraftKey] ?? '');
 
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
