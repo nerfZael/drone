@@ -47,6 +47,18 @@ function shortSha(sha: string | null | undefined): string {
   return s.length > 10 ? s.slice(0, 10) : s;
 }
 
+function normalizeRef(raw: string | null | undefined): string | null {
+  const text = String(raw ?? '').trim();
+  return text || null;
+}
+
+function shortRefName(raw: string | null | undefined, maxLen: number = 32): string {
+  const text = normalizeRef(raw);
+  if (!text) return '-';
+  if (text.length <= maxLen) return text;
+  return `${text.slice(0, maxLen - 1)}…`;
+}
+
 function hasStaged(entry: RepoChangeEntry | null): boolean {
   if (!entry) return false;
   return entry.stagedType !== null;
@@ -877,6 +889,15 @@ export function DroneChangesDock({
   const counts = changes?.counts;
   const pullBase = dataMode === 'pull-request' ? (pullRequestChanges?.pullRequest.baseSha ?? null) : (pullChanges?.baseSha ?? null);
   const pullHead = dataMode === 'pull-request' ? (pullRequestChanges?.pullRequest.headSha ?? null) : (pullChanges?.headSha ?? null);
+  const pullHostBranch = normalizeRef(pullChanges?.branchContext?.hostCurrent);
+  const pullDroneCurrentBranch = normalizeRef(pullChanges?.branchContext?.droneCurrent);
+  const pullDroneConfiguredBranch = normalizeRef(pullChanges?.branchContext?.droneConfigured);
+  const pullDroneFromRef = normalizeRef(pullChanges?.branchContext?.droneFromRef);
+  const pullDroneBranch = pullDroneCurrentBranch ?? pullDroneConfiguredBranch;
+  const pullDroneBranchTitle =
+    pullDroneCurrentBranch && pullDroneConfiguredBranch && pullDroneCurrentBranch !== pullDroneConfiguredBranch
+      ? `Current: ${pullDroneCurrentBranch} | configured: ${pullDroneConfiguredBranch}`
+      : pullDroneCurrentBranch ?? pullDroneConfiguredBranch ?? undefined;
   const refreshed = refreshTimeLabel(lastRefreshedByMode[dataMode] ?? null);
 
   function renderExplorer(nodes: ExplorerNode[], depth: number): React.ReactNode {
@@ -1057,6 +1078,9 @@ export function DroneChangesDock({
                   {pullChanges?.repoRoot || repoPath || '-'}
                 </span>
                 <MetaChip label="files" value={pullChanges?.counts.changed ?? 0} />
+                <MetaChip label="host" value={shortRefName(pullHostBranch)} title={pullHostBranch ?? ''} mono />
+                <MetaChip label="drone" value={shortRefName(pullDroneBranch)} title={pullDroneBranchTitle} mono />
+                {pullDroneFromRef ? <MetaChip label="from" value={shortRefName(pullDroneFromRef)} title={pullDroneFromRef} mono /> : null}
                 <MetaChip label="base" value={shortSha(pullBase)} title={pullBase ?? ''} mono />
                 <MetaChip label="head" value={shortSha(pullHead)} title={pullHead ?? ''} mono />
               </>

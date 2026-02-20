@@ -280,7 +280,7 @@ export async function droneRepoPullChangesSummary(opts: {
   container: string;
   repoPathInContainer: string;
   baseSha?: string;
-}): Promise<{ repoRoot: string; baseSha: string; headSha: string; entries: RepoPullChangeEntry[] }> {
+}): Promise<{ repoRoot: string; baseSha: string; headSha: string; branchHead: string | null; entries: RepoPullChangeEntry[] }> {
   const repoPathInContainer = normalizeContainerPath(opts.repoPathInContainer);
   const repoRootRaw = await runGitInDroneOrThrow({
     container: opts.container,
@@ -305,6 +305,13 @@ export async function droneRepoPullChangesSummary(opts: {
   });
   const headSha = String(headRaw.stdout ?? '').trim().toLowerCase();
   if (!/^[0-9a-f]{40}$/.test(headSha)) throw new Error('failed to resolve HEAD sha');
+  const branchRaw = await runGitInDroneOrThrow({
+    container: opts.container,
+    repoPathInContainer,
+    args: ['symbolic-ref', '--quiet', '--short', 'HEAD'],
+    okCodes: [0, 1],
+  });
+  const branchHead = branchRaw.code === 0 ? String(branchRaw.stdout ?? '').trim() || null : null;
 
   const nameStatus = await runGitInDroneOrThrow({
     container: opts.container,
@@ -312,7 +319,7 @@ export async function droneRepoPullChangesSummary(opts: {
     args: ['diff', '--name-status', '-z', `${baseSha}..${headSha}`],
   });
   const entries = parseGitNameStatusZ(nameStatus.stdout);
-  return { repoRoot, baseSha, headSha, entries };
+  return { repoRoot, baseSha, headSha, branchHead, entries };
 }
 
 export async function droneRepoPullDiffForPath(opts: {
