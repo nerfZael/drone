@@ -38,7 +38,7 @@ import { useDeleteActionSettings } from './droneHub/app/use-delete-action-settin
 import { useQueuedPromptsState } from './droneHub/app/use-queued-prompts-state';
 import { useRightPanelLayout } from './droneHub/app/use-right-panel-layout';
 import { useDroneSelectionState } from './droneHub/app/use-drone-selection-state';
-import { useSidebarViewModel } from './droneHub/app/use-sidebar-view-model';
+import { SIDEBAR_VISIBLE_MULTI_CHAT_GROUP, useSidebarViewModel } from './droneHub/app/use-sidebar-view-model';
 import { useChatConfigState } from './droneHub/app/use-chat-config-state';
 import { useDroneHubAppModelUiState } from './droneHub/app/use-drone-hub-ui-store';
 import { useDroneHubRuntimeState } from './droneHub/app/use-drone-hub-runtime-store';
@@ -225,12 +225,14 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     sidebarDrones,
     uiDroneName,
     sidebarDronesFilteredByRepo,
+    sidebarVisibleDrones,
     sidebarGroups,
     sidebarHasUngroupedGroup,
   } = useSidebarViewModel({
     selectedDroneIds,
     viewMode,
     sidebarGroupingMode,
+    collapsedGroups,
     drones,
     startupSeedByDrone,
     optimisticallyDeletedDrones,
@@ -588,6 +590,21 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [setAppView, setDraftChat, setDraftCreateError, setDraftCreateOpen, setSelectedGroupMultiChat],
   );
+  const openSidebarVisibleMultiChat = React.useCallback(() => {
+    if (sidebarVisibleDrones.length === 0) return;
+    setAppView('workspace');
+    setDraftChat(null);
+    setDraftCreateOpen(false);
+    setDraftCreateError(null);
+    setSelectedGroupMultiChat(SIDEBAR_VISIBLE_MULTI_CHAT_GROUP);
+  }, [
+    setAppView,
+    setDraftChat,
+    setDraftCreateError,
+    setDraftCreateOpen,
+    setSelectedGroupMultiChat,
+    sidebarVisibleDrones.length,
+  ]);
 
   const terminalOptions = React.useMemo(
     () => [
@@ -840,6 +857,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   } = useGroupBroadcast({
     selectedGroupMultiChat,
     sidebarGroups,
+    sidebarVisibleDrones,
     selectedChat,
     requestJson,
     setSelectedGroupMultiChat,
@@ -1115,6 +1133,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     groupMoveError,
     dronesLoading,
     sidebarDronesFilteredByRepo,
+    sidebarVisibleDrones,
     sidebarDrones,
     sidebarOptimisticDroneIdSet,
     selectedDroneSet,
@@ -1155,6 +1174,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setCollapsedGroups,
     renameGroup,
     openGroupMultiChat,
+    openSidebarVisibleMultiChat,
     deleteGroup,
     onDroneDragStart,
     onDroneDragEnd,

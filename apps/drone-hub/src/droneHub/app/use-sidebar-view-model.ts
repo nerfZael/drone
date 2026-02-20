@@ -12,10 +12,13 @@ export type SidebarGroup = {
   items: DroneSummary[];
 };
 
+export const SIDEBAR_VISIBLE_MULTI_CHAT_GROUP = '__sidebar-visible-drones__';
+
 type UseSidebarViewModelArgs = {
   selectedDroneIds: string[];
   viewMode: 'grouped' | 'flat';
   sidebarGroupingMode: 'groups' | 'repos';
+  collapsedGroups: Record<string, boolean>;
   drones: DroneSummary[];
   startupSeedByDrone: Record<string, StartupSeedState>;
   optimisticallyDeletedDrones: Record<string, boolean>;
@@ -34,6 +37,7 @@ export function useSidebarViewModel({
   selectedDroneIds,
   viewMode,
   sidebarGroupingMode,
+  collapsedGroups,
   drones,
   startupSeedByDrone,
   optimisticallyDeletedDrones,
@@ -157,6 +161,18 @@ export function useSidebarViewModel({
     return sidebarGroups.flatMap((g) => g.items.map((d) => d.id));
   }, [sidebarDronesFilteredByRepo, sidebarGroups, viewMode]);
 
+  const sidebarVisibleDrones = React.useMemo(() => {
+    if (viewMode === 'flat') {
+      return sidebarDronesFilteredByRepo.slice().sort(compareDronesByNewestFirst);
+    }
+    const visible: DroneSummary[] = [];
+    for (const group of sidebarGroups) {
+      if (collapsedGroups[group.group]) continue;
+      visible.push(...group.items);
+    }
+    return visible;
+  }, [collapsedGroups, sidebarDronesFilteredByRepo, sidebarGroups, viewMode]);
+
   const sidebarHasUngroupedGroup = React.useMemo(
     () => sidebarGroups.some((g) => isUngroupedGroupName(g.label)),
     [sidebarGroups],
@@ -169,6 +185,7 @@ export function useSidebarViewModel({
     sidebarDrones,
     uiDroneName,
     sidebarDronesFilteredByRepo,
+    sidebarVisibleDrones,
     sidebarGroups,
     sidebarHasUngroupedGroup,
   };

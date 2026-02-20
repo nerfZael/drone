@@ -9,6 +9,7 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     groupMoveError,
     dronesLoading,
     sidebarDronesFilteredByRepo,
+    sidebarVisibleDrones,
     sidebarDrones,
     sidebarOptimisticDroneIdSet,
     selectedDroneSet,
@@ -49,6 +50,7 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     setCollapsedGroups,
     renameGroup,
     openGroupMultiChat,
+    openSidebarVisibleMultiChat,
     deleteGroup,
     onDroneDragStart,
     onDroneDragEnd,
@@ -61,6 +63,7 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
       groupMoveError,
       dronesLoading,
       sidebarDronesFilteredByRepo,
+      sidebarVisibleDrones,
       sidebarDrones,
       sidebarOptimisticDroneIdSet,
       selectedDroneSet,
@@ -110,6 +113,9 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
       },
       onOpenGroupMultiChat: (group) => {
         openGroupMultiChat(group);
+      },
+      onOpenVisibleMultiChat: () => {
+        openSidebarVisibleMultiChat();
       },
       onDeleteGroup: (group, count) => {
         void deleteGroup(group, count);

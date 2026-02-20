@@ -1,13 +1,15 @@
 import React from 'react';
 import type { ChatSendPayload } from '../chat';
+import type { DroneSummary } from '../types';
 import { isDroneStartingOrSeeding, resolveChatNameForDrone } from './helpers';
-import type { SidebarGroup } from './use-sidebar-view-model';
+import { SIDEBAR_VISIBLE_MULTI_CHAT_GROUP, type SidebarGroup } from './use-sidebar-view-model';
 
 type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
 
 type UseGroupBroadcastArgs = {
   selectedGroupMultiChat: string | null;
   sidebarGroups: SidebarGroup[];
+  sidebarVisibleDrones: DroneSummary[];
   selectedChat: string;
   requestJson: RequestJsonFn;
   setSelectedGroupMultiChat: React.Dispatch<React.SetStateAction<string | null>>;
@@ -17,6 +19,7 @@ type UseGroupBroadcastArgs = {
 export function useGroupBroadcast({
   selectedGroupMultiChat,
   sidebarGroups,
+  sidebarVisibleDrones,
   selectedChat,
   requestJson,
   setSelectedGroupMultiChat,
@@ -29,11 +32,19 @@ export function useGroupBroadcast({
   const groupBroadcastSending = groupBroadcastSendingCount > 0;
 
   const selectedGroupMultiChatData = React.useMemo(
-    () =>
-      selectedGroupMultiChat
-        ? sidebarGroups.find((g) => g.group === selectedGroupMultiChat) ?? null
-        : null,
-    [selectedGroupMultiChat, sidebarGroups],
+    () => {
+      if (!selectedGroupMultiChat) return null;
+      if (selectedGroupMultiChat === SIDEBAR_VISIBLE_MULTI_CHAT_GROUP) {
+        return {
+          group: SIDEBAR_VISIBLE_MULTI_CHAT_GROUP,
+          label: 'Visible in Sidebar',
+          kind: 'group' as const,
+          items: sidebarVisibleDrones,
+        };
+      }
+      return sidebarGroups.find((g) => g.group === selectedGroupMultiChat) ?? null;
+    },
+    [selectedGroupMultiChat, sidebarGroups, sidebarVisibleDrones],
   );
 
   React.useEffect(() => {
