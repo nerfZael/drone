@@ -45,6 +45,7 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     onGroupDragOver,
     onGroupDragLeave,
     onGroupDrop,
+    createGroupAndMove,
     setCollapsedGroups,
     renameGroup,
     setAppView,
@@ -102,6 +103,7 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
       onGroupDragOver,
       onGroupDragLeave,
       onGroupDrop,
+      onCreateGroupAndMove: createGroupAndMove,
       onToggleGroupCollapsed: (group) =>
         setCollapsedGroups((prev: Record<string, boolean>) => ({
           ...prev,

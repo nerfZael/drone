@@ -2,6 +2,7 @@ import React from 'react';
 import { isUngroupedGroupName } from '../../domain';
 import { DroneCard } from '../overview';
 import type { DroneSummary, RepoSummary } from '../types';
+import { DRONE_DND_MIME } from './app-config';
 import { compareDronesByNewestFirst, isDroneStartingOrSeeding } from './helpers';
 import { IconChevron, IconColumns, IconFolder, IconList, IconPencil, IconPlus, IconPlusDouble, IconSettings, IconSpinner, IconTrash, SkeletonLine } from './icons';
 import { useDroneSidebarUiState } from './use-drone-hub-ui-store';
@@ -52,6 +53,10 @@ export type DroneSidebarProps = {
   onGroupDragOver: (group: string, event: React.DragEvent<HTMLDivElement>) => void;
   onGroupDragLeave: (group: string, event: React.DragEvent<HTMLDivElement>) => void;
   onGroupDrop: (group: string, event: React.DragEvent<HTMLDivElement>) => void;
+  onCreateGroupAndMove: (
+    group: string,
+    droneIds: string[],
+  ) => Promise<{ ok: boolean; error: string | null }>;
   onToggleGroupCollapsed: (group: string) => void;
   onRenameGroup: (group: string) => void;
   onOpenGroupMultiChat: (group: string) => void;
@@ -102,6 +107,7 @@ export function DroneSidebar({
   onGroupDragOver,
   onGroupDragLeave,
   onGroupDrop,
+  onCreateGroupAndMove,
   onToggleGroupCollapsed,
   onRenameGroup,
   onOpenGroupMultiChat,
@@ -128,6 +134,131 @@ export function DroneSidebar({
     setAutoDelete,
     setSidebarCollapsed,
   } = useDroneSidebarUiState();
+  const [dragOverCreateGroup, setDragOverCreateGroup] = React.useState(false);
+  const [createGroupTargetDroneIds, setCreateGroupTargetDroneIds] = React.useState<string[] | null>(null);
+  const [createGroupName, setCreateGroupName] = React.useState('');
+  const [createGroupInlineError, setCreateGroupInlineError] = React.useState<string | null>(null);
+  const [creatingGroupMove, setCreatingGroupMove] = React.useState(false);
+  const createGroupInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  React.useEffect(() => {
+    if (!createGroupTargetDroneIds || createGroupTargetDroneIds.length === 0) return;
+    const id = window.requestAnimationFrame(() => {
+      createGroupInputRef.current?.focus();
+      createGroupInputRef.current?.select();
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [createGroupTargetDroneIds]);
+
+  const parseDraggedDroneIds = React.useCallback(
+    (event: React.DragEvent<HTMLDivElement>): string[] => {
+      const out: string[] = [];
+      const add = (raw: unknown) => {
+        const id = String(raw ?? '').trim();
+        if (!id || out.includes(id)) return;
+        out.push(id);
+      };
+
+      try {
+        const jsonRaw = event.dataTransfer.getData(DRONE_DND_MIME);
+        if (jsonRaw) {
+          const parsed = JSON.parse(jsonRaw);
+          if (Array.isArray(parsed)) {
+            for (const id of parsed) add(id);
+          }
+        }
+      } catch {
+        // Ignore malformed drag payload.
+      }
+
+      if (out.length === 0) {
+        const plain = String(event.dataTransfer.getData('text/plain') ?? '');
+        if (plain) {
+          for (const line of plain.split('\n')) add(line);
+        }
+      }
+
+      if (out.length === 0 && Array.isArray(draggingDroneNames)) {
+        for (const id of draggingDroneNames) add(id);
+      }
+
+      return out;
+    },
+    [draggingDroneNames],
+  );
+
+  const closeCreateGroupInline = React.useCallback(() => {
+    if (creatingGroupMove) return;
+    setCreateGroupTargetDroneIds(null);
+    setCreateGroupName('');
+    setCreateGroupInlineError(null);
+  }, [creatingGroupMove]);
+
+  const onCreateGroupDragOver = React.useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      const ids = parseDraggedDroneIds(event);
+      if (ids.length === 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = 'move';
+      if (!dragOverCreateGroup) setDragOverCreateGroup(true);
+    },
+    [dragOverCreateGroup, parseDraggedDroneIds],
+  );
+
+  const onCreateGroupDragLeave = React.useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    const related = event.relatedTarget;
+    if (related instanceof Node && event.currentTarget.contains(related)) return;
+    setDragOverCreateGroup(false);
+  }, []);
+
+  const onCreateGroupDrop = React.useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setDragOverCreateGroup(false);
+      const ids = parseDraggedDroneIds(event);
+      if (ids.length === 0) return;
+      setCreateGroupTargetDroneIds(ids);
+      setCreateGroupInlineError(null);
+    },
+    [parseDraggedDroneIds],
+  );
+
+  const onSubmitCreateGroupInline = React.useCallback(
+    async (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      if (creatingGroupMove) return;
+      const ids = createGroupTargetDroneIds ?? [];
+      const group = String(createGroupName ?? '').trim();
+      if (!group) {
+        setCreateGroupInlineError('Group name is required.');
+        return;
+      }
+      if (ids.length === 0) {
+        setCreateGroupInlineError('No drones selected for group move.');
+        return;
+      }
+
+      setCreatingGroupMove(true);
+      setCreateGroupInlineError(null);
+      try {
+        const result = await onCreateGroupAndMove(group, ids);
+        if (!result.ok) {
+          setCreateGroupInlineError(result.error || 'Failed to create group.');
+          return;
+        }
+        setCreateGroupTargetDroneIds(null);
+        setCreateGroupName('');
+      } catch (error: any) {
+        const msg = String(error?.message ?? error ?? '').trim();
+        setCreateGroupInlineError(msg || 'Failed to create group.');
+      } finally {
+        setCreatingGroupMove(false);
+      }
+    },
+    [createGroupName, createGroupTargetDroneIds, creatingGroupMove, onCreateGroupAndMove],
+  );
 
   return (
     <>
@@ -318,12 +449,13 @@ export function DroneSidebar({
                   );
                 })
             ) : (
-              <div
-                className="flex flex-col gap-1.5"
-                onDragOver={onUngroupedDragOver}
-                onDragLeave={onUngroupedDragLeave}
-                onDrop={onUngroupedDrop}
-              >
+              <>
+                <div
+                  className="flex flex-col gap-1.5"
+                  onDragOver={onUngroupedDragOver}
+                  onDragLeave={onUngroupedDragLeave}
+                  onDrop={onUngroupedDrop}
+                >
                 {sidebarGroups.map(({ group, items }) => {
                   const collapsed = !!collapsedGroups[group];
                   const isDeletingGroup = Boolean(deletingGroups[group]);
@@ -489,7 +621,75 @@ export function DroneSidebar({
                     Drop here to move to Ungrouped
                   </div>
                 )}
-              </div>
+                </div>
+                {((draggingDroneNames && draggingDroneNames.length > 0) ||
+                  (createGroupTargetDroneIds && createGroupTargetDroneIds.length > 0)) && (
+                  <div
+                    className={`mt-1 rounded-md border border-dashed px-3 py-2 transition-colors ${
+                      dragOverCreateGroup || (createGroupTargetDroneIds && createGroupTargetDroneIds.length > 0)
+                        ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)]'
+                        : 'border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)]'
+                    }`}
+                    onDragOver={onCreateGroupDragOver}
+                    onDragLeave={onCreateGroupDragLeave}
+                    onDrop={onCreateGroupDrop}
+                  >
+                    <div
+                      className="text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]"
+                      style={{ fontFamily: 'var(--display)' }}
+                    >
+                      {createGroupTargetDroneIds && createGroupTargetDroneIds.length > 0
+                        ? `Create new group (${createGroupTargetDroneIds.length} drone${createGroupTargetDroneIds.length === 1 ? '' : 's'})`
+                        : 'Drop here to create a new group'}
+                    </div>
+                    {createGroupTargetDroneIds && createGroupTargetDroneIds.length > 0 && (
+                      <form className="mt-2 flex flex-col gap-2" onSubmit={onSubmitCreateGroupInline}>
+                        <input
+                          ref={createGroupInputRef}
+                          value={createGroupName}
+                          onChange={(event) => setCreateGroupName(event.target.value)}
+                          disabled={creatingGroupMove}
+                          maxLength={64}
+                          placeholder="Group name"
+                          className="w-full rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-2 py-1.5 text-[11px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
+                        />
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="submit"
+                            disabled={creatingGroupMove}
+                            className={`inline-flex h-7 items-center rounded px-2 text-[10px] font-semibold tracking-wide uppercase transition-all ${
+                              creatingGroupMove
+                                ? 'cursor-not-allowed border border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                                : 'border border-[var(--accent-muted)] bg-[rgba(167,139,250,.12)] text-[var(--accent)] hover:bg-[rgba(167,139,250,.18)]'
+                            }`}
+                            style={{ fontFamily: 'var(--display)' }}
+                          >
+                            {creatingGroupMove ? 'Creating…' : 'Create & move'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={closeCreateGroupInline}
+                            disabled={creatingGroupMove}
+                            className={`inline-flex h-7 items-center rounded px-2 text-[10px] font-semibold tracking-wide uppercase transition-all ${
+                              creatingGroupMove
+                                ? 'cursor-not-allowed border border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                                : 'border border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
+                            }`}
+                            style={{ fontFamily: 'var(--display)' }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                        {createGroupInlineError && (
+                          <div className="text-[10px] text-[var(--red)]">
+                            {createGroupInlineError}
+                          </div>
+                        )}
+                      </form>
+                    )}
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>

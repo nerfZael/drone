@@ -456,6 +456,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     renameGroup,
     deleteGroup,
     moveDronesToGroup,
+    createGroupAndMove,
   } = useGroupManagement({
     autoDelete,
     drones,
@@ -1090,6 +1091,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     onGroupDragOver,
     onGroupDragLeave,
     onGroupDrop,
+    createGroupAndMove,
     setCollapsedGroups,
     renameGroup,
     setAppView,
