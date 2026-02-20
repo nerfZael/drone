@@ -4,7 +4,7 @@ import { DroneCard } from '../overview';
 import type { DroneSummary, RepoSummary } from '../types';
 import { DRONE_DND_MIME } from './app-config';
 import { compareDronesByNewestFirst, isDroneStartingOrSeeding } from './helpers';
-import { IconAutoMinimize, IconChevron, IconColumns, IconFolder, IconList, IconPencil, IconPlus, IconPlusDouble, IconSettings, IconSpinner, IconTrash, SkeletonLine } from './icons';
+import { IconAutoMinimize, IconChevron, IconColumns, IconFolder, IconList, IconPencil, IconPlus, IconPlusDouble, IconSettings, IconSidebarCollapse, IconSidebarExpand, IconSpinner, IconTrash, SkeletonLine } from './icons';
 import { useDroneSidebarUiState } from './use-drone-hub-ui-store';
 
 type SidebarGroup = {
@@ -17,6 +17,43 @@ const SIDEBAR_COLLAPSED_RAIL_WIDTH_PX = 40;
 const AUTO_MINIMIZE_COLLAPSE_DELAY_MS = 90;
 const AUTO_MINIMIZE_EXPAND_DELAY_MS = 120;
 const AUTO_MINIMIZE_REOPEN_GUARD_MS = 220;
+
+type SidebarIconButtonProps = {
+  title: string;
+  ariaLabel?: string;
+  onClick: () => void;
+  className: string;
+  children: React.ReactNode;
+  ariaPressed?: boolean;
+  disabled?: boolean;
+  tabIndex?: number;
+};
+
+function SidebarIconButton({
+  title,
+  ariaLabel,
+  onClick,
+  className,
+  children,
+  ariaPressed,
+  disabled,
+  tabIndex,
+}: SidebarIconButtonProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center justify-center w-7 h-7 rounded transition-all ${className}`}
+      title={title}
+      aria-label={ariaLabel ?? title}
+      aria-pressed={ariaPressed}
+      disabled={disabled}
+      tabIndex={tabIndex}
+    >
+      {children}
+    </button>
+  );
+}
 
 export type DroneSidebarProps = {
   dronesError: string | null | undefined;
@@ -298,15 +335,21 @@ export function DroneSidebar({
     [createGroupName, createGroupTargetDroneIds, creatingGroupMove, onCreateGroupAndMove],
   );
 
+  const collapseSidebarWithGuard = React.useCallback(() => {
+    clearCollapseTimer();
+    clearExpandTimer();
+    lastAutoCollapsedAtRef.current = Date.now();
+    setSidebarCollapsed(true);
+  }, [clearCollapseTimer, clearExpandTimer, setSidebarCollapsed]);
+
   const queueAutoCollapse = React.useCallback(() => {
     if (!sidebarAutoMinimize || sidebarCollapsed) return;
     clearCollapseTimer();
     collapseTimerRef.current = window.setTimeout(() => {
       collapseTimerRef.current = null;
-      lastAutoCollapsedAtRef.current = Date.now();
-      setSidebarCollapsed(true);
+      collapseSidebarWithGuard();
     }, AUTO_MINIMIZE_COLLAPSE_DELAY_MS);
-  }, [clearCollapseTimer, setSidebarCollapsed, sidebarAutoMinimize, sidebarCollapsed]);
+  }, [clearCollapseTimer, collapseSidebarWithGuard, sidebarAutoMinimize, sidebarCollapsed]);
 
   const queueAutoExpand = React.useCallback(() => {
     if (!sidebarAutoMinimize || !sidebarCollapsed) return;
@@ -345,6 +388,8 @@ export function DroneSidebar({
     },
     [clearExpandTimer],
   );
+
+  const collapsedRailInteractive = sidebarCollapsed;
 
   return (
     <>
@@ -890,11 +935,10 @@ export function DroneSidebar({
             </label>
           </div>
           <div className="flex items-center gap-1">
-            <button
-              type="button"
+            <SidebarIconButton
               onClick={() => setSidebarAutoMinimize((prev) => !prev)}
               aria-pressed={sidebarAutoMinimize}
-              className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
+              className={`border ${
                 sidebarAutoMinimize
                   ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                   : 'border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] hover:bg-[var(--hover)]'
@@ -904,23 +948,22 @@ export function DroneSidebar({
                   ? 'Disable auto-minimize sidebar'
                   : 'Enable auto-minimize sidebar'
               }
-              aria-label={
+              ariaLabel={
                 sidebarAutoMinimize
                   ? 'Disable auto-minimize sidebar'
                   : 'Enable auto-minimize sidebar'
               }
             >
               <IconAutoMinimize className="opacity-90" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setSidebarCollapsed(true)}
-              className="inline-flex items-center justify-center w-7 h-7 rounded text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)] transition-all"
+            </SidebarIconButton>
+            <SidebarIconButton
+              onClick={collapseSidebarWithGuard}
+              className="text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)]"
               title="Collapse sidebar"
-              aria-label="Collapse sidebar"
+              ariaLabel="Collapse sidebar"
             >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 3L6 8l5 5" /><line x1="3" y1="3" x2="3" y2="13" /></svg>
-            </button>
+              <IconSidebarCollapse />
+            </SidebarIconButton>
           </div>
         </div>
       </aside>
@@ -936,37 +979,40 @@ export function DroneSidebar({
         onPointerLeave={onCollapsedRailPointerLeave}
         aria-hidden={!sidebarCollapsed}
       >
-        <button
-          type="button"
+        <SidebarIconButton
           onClick={() => setSidebarCollapsed(false)}
-          className="inline-flex items-center justify-center w-7 h-7 rounded text-[var(--muted-dim)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-all"
+          className="text-[var(--muted-dim)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)]"
           title="Expand sidebar"
-          aria-label="Expand sidebar"
+          ariaLabel="Expand sidebar"
+          disabled={!collapsedRailInteractive}
+          tabIndex={collapsedRailInteractive ? 0 : -1}
         >
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3l5 5-5 5" /><line x1="13" y1="3" x2="13" y2="13" /></svg>
-        </button>
-        <button
-          type="button"
+          <IconSidebarExpand />
+        </SidebarIconButton>
+        <SidebarIconButton
           onClick={() => { setSidebarCollapsed(false); onOpenDraftChatComposer(); }}
-          className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
+          className={`border ${
             draftChat
               ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
               : 'border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
           }`}
           title="Create drone (A)"
-          aria-label="Create drone"
+          ariaLabel="Create drone"
+          disabled={!collapsedRailInteractive}
+          tabIndex={collapsedRailInteractive ? 0 : -1}
         >
           <IconPlus className="opacity-80" />
-        </button>
-        <button
-          type="button"
+        </SidebarIconButton>
+        <SidebarIconButton
           onClick={() => { setSidebarCollapsed(false); onOpenCreateModal(); }}
-          className="inline-flex items-center justify-center w-7 h-7 rounded border border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] transition-all"
+          className="border border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]"
           title="Create multiple drones (S)"
-          aria-label="Create multiple drones"
+          ariaLabel="Create multiple drones"
+          disabled={!collapsedRailInteractive}
+          tabIndex={collapsedRailInteractive ? 0 : -1}
         >
           <IconPlusDouble className="opacity-80" />
-        </button>
+        </SidebarIconButton>
       </div>
     </>
   );

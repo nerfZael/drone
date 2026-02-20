@@ -23,7 +23,7 @@ import type {
   RepoPullRequestsPayload,
   TranscriptItem,
 } from '../types';
-import { IconChat, IconChevron, IconCursorApp, IconDrone, IconFolder } from './icons';
+import { IconChat, IconChevron, IconCursorApp, IconDrone, IconFolder, IconSidebarExpand } from './icons';
 import { RightPanel } from './RightPanel';
 import type { RightPanelTab } from './app-config';
 import type { StartupSeedState, TldrState } from './app-types';
@@ -586,10 +586,7 @@ export function SelectedDroneWorkspace({
                   className="inline-flex items-center justify-center w-7 h-7 rounded text-[var(--muted-dim)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-all flex-shrink-0 mr-1"
                   title="Expand sidebar"
                 >
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M5 3l5 5-5 5" />
-                    <line x1="13" y1="3" x2="13" y2="13" />
-                  </svg>
+                  <IconSidebarExpand />
                 </button>
               )}
               <div
