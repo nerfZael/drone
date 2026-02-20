@@ -348,7 +348,17 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   }, [spawnModel]);
   const spawnModelForSeed = spawnAgentConfig.kind === 'builtin' ? spawnModelValue : null;
 
-  const rememberStartupSeed = React.useCallback((drones: Array<{ id: string; name: string }>, opts: { agent: ChatAgentConfig | null; model?: string | null; prompt: string; chatName?: string }) => {
+  const rememberStartupSeed = React.useCallback((
+    drones: Array<{ id: string; name: string }>,
+    opts: {
+      agent: ChatAgentConfig | null;
+      model?: string | null;
+      prompt: string;
+      chatName?: string;
+      group?: string | null;
+      repoPath?: string | null;
+    },
+  ) => {
     const unique = new Map<string, string>();
     for (const d of drones) {
       const id = String(d?.id ?? '').trim();
@@ -360,6 +370,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     const prompt = String(opts.prompt ?? '').trim();
     const chatName = String(opts.chatName ?? 'default').trim() || 'default';
     const model = String(opts.model ?? '').trim() || null;
+    const group = String(opts.group ?? '').trim() || null;
+    const repoPath = String(opts.repoPath ?? '').trim() || null;
     if (!prompt && !opts.agent && !model) return;
     const at = new Date().toISOString();
     setStartupSeedByDrone((prev) => {
@@ -371,6 +383,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           agent: opts.agent ?? null,
           model,
           prompt,
+          group,
+          repoPath,
           at,
         };
       }

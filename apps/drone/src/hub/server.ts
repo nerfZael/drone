@@ -5246,7 +5246,11 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
 
             const hubPhase = typeof d?.hub?.phase === 'string' ? String(d.hub.phase) : null;
             const hubMessage = typeof d?.hub?.message === 'string' ? String(d.hub.message) : null;
-            const repoAttached = Boolean(String(d?.repo?.dest ?? '').trim()) || Boolean(String(d?.repo?.seededAt ?? '').trim());
+            const repoPath = String(d?.repoPath ?? '').trim();
+            const repoAttached =
+              Boolean(repoPath) ||
+              Boolean(String(d?.repo?.dest ?? '').trim()) ||
+              Boolean(String(d?.repo?.seededAt ?? '').trim());
 
             let statusOk = false;
             let status: any = null;
@@ -5292,7 +5296,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
               group: d.group ?? null,
               createdAt: d.createdAt,
               repoAttached,
-              repoPath: repoAttached ? String(d.repoPath ?? '') : '',
+              repoPath: repoAttached ? repoPath : '',
               containerPort: d.containerPort,
               hostPort: hostPort ?? null,
               statusOk,

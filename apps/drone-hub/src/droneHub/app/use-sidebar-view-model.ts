@@ -52,13 +52,15 @@ export function useSidebarViewModel({
       if (!isStartupSeedFresh(seed, nowMs)) continue;
       const chatName = String(seed.chatName ?? 'default').trim() || 'default';
       const name = String(seed.droneName ?? '').trim() || id;
+      const group = String(seed.group ?? '').trim() || null;
+      const repoPath = String(seed.repoPath ?? '').trim();
       out.push({
         id,
         name,
-        group: null,
+        group,
         createdAt: seed.at || new Date().toISOString(),
-        repoAttached: false,
-        repoPath: '',
+        repoAttached: Boolean(repoPath),
+        repoPath,
         containerPort: 0,
         hostPort: null,
         statusOk: true,

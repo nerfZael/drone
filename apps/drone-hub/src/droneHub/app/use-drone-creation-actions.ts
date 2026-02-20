@@ -36,7 +36,14 @@ type UseDroneCreationActionsArgs = {
   suggestAndRenameDraftDrone: (droneId: string, prompt: string) => Promise<void>;
   rememberStartupSeed: (
     drones: Array<{ id: string; name: string }>,
-    opts: { agent: ChatAgentConfig | null; model?: string | null; prompt: string; chatName?: string },
+    opts: {
+      agent: ChatAgentConfig | null;
+      model?: string | null;
+      prompt: string;
+      chatName?: string;
+      group?: string | null;
+      repoPath?: string | null;
+    },
   ) => void;
   isValidDroneName: (name: string) => boolean;
   hasWhitespaceInNameRaw: (nameRaw: string) => boolean;
@@ -210,6 +217,8 @@ export function useDroneCreationActions({
           model: seedModel,
           prompt: seedPrompt,
           chatName: 'default',
+          group,
+          repoPath,
         });
       }
 
@@ -347,6 +356,8 @@ export function useDroneCreationActions({
           model: seedModel,
           prompt,
           chatName: 'default',
+          group,
+          repoPath,
         });
         preferredSelectedDroneRef.current = droneId;
         preferredSelectedDroneHoldUntilRef.current = Date.now() + startupSeedMissingGraceMs;
