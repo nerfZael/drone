@@ -42,7 +42,14 @@ type UseJobsWorkflowArgs = {
   }>;
   rememberStartupSeed: (
     drones: Array<{ id: string; name: string }>,
-    opts: { agent: ChatAgentConfig | null; model?: string | null; prompt: string; chatName?: string },
+    opts: {
+      agent: ChatAgentConfig | null;
+      model?: string | null;
+      prompt: string;
+      chatName?: string;
+      group?: string | null;
+      repoPath?: string | null;
+    },
   ) => void;
 };
 
@@ -178,6 +185,8 @@ export function useJobsWorkflow({
           model: seedModel,
           prompt: seedPrompt,
           chatName: 'default',
+          group: groupName || null,
+          repoPath: repoPath || null,
         });
         setSpawnedJobById((prev) => ({ ...prev, [job.id]: true }));
         return true;
@@ -304,6 +313,8 @@ export function useJobsWorkflow({
             model: seedModel,
             prompt: nameToSeedPrompt.get(name) || '',
             chatName: 'default',
+            group: groupName || null,
+            repoPath: repoPath || null,
           });
         }
       }

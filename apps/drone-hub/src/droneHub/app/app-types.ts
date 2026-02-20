@@ -23,6 +23,8 @@ export type StartupSeedState = {
   agent: ChatAgentConfig | null;
   model: string | null;
   prompt: string;
+  group: string | null;
+  repoPath: string | null;
   at: string;
 };
 
