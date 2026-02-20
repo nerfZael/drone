@@ -25,6 +25,7 @@ type Updater<T> = T | ((prev: T) => T);
 
 type NameSuggestToast = null | { id: string; message: string };
 type ViewMode = 'grouped' | 'flat';
+type SidebarGroupingMode = 'groups' | 'repos';
 type FsExplorerView = 'list' | 'thumb';
 type OutputView = 'screen' | 'log';
 
@@ -33,6 +34,7 @@ type DroneHubUiState = {
   chatHeaderRepoPath: string;
   sidebarReposCollapsed: boolean;
   sidebarAutoMinimize: boolean;
+  sidebarGroupingMode: SidebarGroupingMode;
   appView: AppView;
   viewMode: ViewMode;
   collapsedGroups: Record<string, boolean>;
@@ -67,6 +69,7 @@ type DroneHubUiState = {
   setChatHeaderRepoPath: (next: Updater<string>) => void;
   setSidebarReposCollapsed: (next: Updater<boolean>) => void;
   setSidebarAutoMinimize: (next: Updater<boolean>) => void;
+  setSidebarGroupingMode: (next: Updater<SidebarGroupingMode>) => void;
   setAppView: (next: Updater<AppView>) => void;
   setViewMode: (next: Updater<ViewMode>) => void;
   setCollapsedGroups: (next: Updater<Record<string, boolean>>) => void;
@@ -111,6 +114,7 @@ type DroneHubUiPersistedState = Pick<
   | 'chatHeaderRepoPath'
   | 'sidebarReposCollapsed'
   | 'sidebarAutoMinimize'
+  | 'sidebarGroupingMode'
   | 'appView'
   | 'viewMode'
   | 'collapsedGroups'
@@ -176,6 +180,10 @@ function normalizeViewMode(value: unknown): ViewMode {
   return value === 'flat' ? 'flat' : 'grouped';
 }
 
+function normalizeSidebarGroupingMode(value: unknown): SidebarGroupingMode {
+  return value === 'repos' ? 'repos' : 'groups';
+}
+
 function normalizeOutputView(value: unknown): OutputView {
   return value === 'log' ? 'log' : 'screen';
 }
@@ -195,6 +203,7 @@ function readLegacyPersistedDefaults(): DroneHubUiPersistedState {
     chatHeaderRepoPath: String(readLocalStorageItem('droneHub.chatHeaderRepoPath') ?? '').trim(),
     sidebarReposCollapsed: readLocalStorageItem(SIDEBAR_REPOS_COLLAPSED_STORAGE_KEY) === '1',
     sidebarAutoMinimize: readLocalStorageItem(SIDEBAR_AUTO_MINIMIZE_STORAGE_KEY) === '1',
+    sidebarGroupingMode: normalizeSidebarGroupingMode(readLocalStorageItem('droneHub.sidebarGroupingMode')),
     appView: normalizeAppView(readLocalStorageItem('droneHub.appView')),
     viewMode: normalizeViewMode(readLocalStorageItem('droneHub.viewMode')),
     collapsedGroups: readLegacyCollapsedGroups(),
@@ -222,6 +231,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       chatHeaderRepoPath: legacyDefaults.chatHeaderRepoPath,
       sidebarReposCollapsed: legacyDefaults.sidebarReposCollapsed,
       sidebarAutoMinimize: legacyDefaults.sidebarAutoMinimize,
+      sidebarGroupingMode: legacyDefaults.sidebarGroupingMode,
       appView: legacyDefaults.appView,
       viewMode: legacyDefaults.viewMode,
       collapsedGroups: legacyDefaults.collapsedGroups,
@@ -256,6 +266,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       setChatHeaderRepoPath: (next) => set((s) => ({ chatHeaderRepoPath: resolveNext(s.chatHeaderRepoPath, next) })),
       setSidebarReposCollapsed: (next) => set((s) => ({ sidebarReposCollapsed: resolveNext(s.sidebarReposCollapsed, next) })),
       setSidebarAutoMinimize: (next) => set((s) => ({ sidebarAutoMinimize: resolveNext(s.sidebarAutoMinimize, next) })),
+      setSidebarGroupingMode: (next) => set((s) => ({ sidebarGroupingMode: resolveNext(s.sidebarGroupingMode, next) })),
       setAppView: (next) => set((s) => ({ appView: resolveNext(s.appView, next) })),
       setViewMode: (next) => set((s) => ({ viewMode: resolveNext(s.viewMode, next) })),
       setCollapsedGroups: (next) => set((s) => ({ collapsedGroups: resolveNext(s.collapsedGroups, next) })),
@@ -310,6 +321,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         chatHeaderRepoPath: state.chatHeaderRepoPath,
         sidebarReposCollapsed: state.sidebarReposCollapsed,
         sidebarAutoMinimize: state.sidebarAutoMinimize,
+        sidebarGroupingMode: state.sidebarGroupingMode,
         appView: state.appView,
         viewMode: state.viewMode,
         collapsedGroups: state.collapsedGroups,
@@ -330,6 +342,9 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           ...persisted,
           appView: normalizeAppView(persisted.appView ?? currentState.appView),
           sidebarAutoMinimize: normalizeBoolean(persisted.sidebarAutoMinimize ?? currentState.sidebarAutoMinimize),
+          sidebarGroupingMode: normalizeSidebarGroupingMode(
+            persisted.sidebarGroupingMode ?? currentState.sidebarGroupingMode,
+          ),
           viewMode: normalizeViewMode(persisted.viewMode ?? currentState.viewMode),
           collapsedGroups: normalizeCollapsedGroups(persisted.collapsedGroups ?? currentState.collapsedGroups),
           groupMultiChatColumnWidth: clampGroupMultiChatColumnWidthPx(
@@ -352,6 +367,7 @@ export function useDroneHubAppModelUiState() {
       chatHeaderRepoPath: s.chatHeaderRepoPath,
       appView: s.appView,
       viewMode: s.viewMode,
+      sidebarGroupingMode: s.sidebarGroupingMode,
       collapsedGroups: s.collapsedGroups,
       autoDelete: s.autoDelete,
       terminalEmulator: s.terminalEmulator,
@@ -379,6 +395,7 @@ export function useDroneHubAppModelUiState() {
       setActiveRepoPath: s.setActiveRepoPath,
       setChatHeaderRepoPath: s.setChatHeaderRepoPath,
       setAppView: s.setAppView,
+      setSidebarGroupingMode: s.setSidebarGroupingMode,
       setCollapsedGroups: s.setCollapsedGroups,
       setSelectedDrone: s.setSelectedDrone,
       setSelectedDroneIds: s.setSelectedDroneIds,
@@ -421,11 +438,13 @@ export function useDroneSidebarUiState() {
       selectedGroupMultiChat: s.selectedGroupMultiChat,
       sidebarReposCollapsed: s.sidebarReposCollapsed,
       sidebarAutoMinimize: s.sidebarAutoMinimize,
+      sidebarGroupingMode: s.sidebarGroupingMode,
       autoDelete: s.autoDelete,
       setAppView: s.setAppView,
       setViewMode: s.setViewMode,
       setSidebarReposCollapsed: s.setSidebarReposCollapsed,
       setSidebarAutoMinimize: s.setSidebarAutoMinimize,
+      setSidebarGroupingMode: s.setSidebarGroupingMode,
       setActiveRepoPath: s.setActiveRepoPath,
       setAutoDelete: s.setAutoDelete,
       setSidebarCollapsed: s.setSidebarCollapsed,

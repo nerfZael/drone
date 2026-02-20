@@ -94,6 +94,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     chatHeaderRepoPath,
     appView,
     viewMode,
+    sidebarGroupingMode,
     collapsedGroups,
     autoDelete,
     terminalEmulator,
@@ -227,9 +228,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   } = useSidebarViewModel({
     selectedDroneIds,
     viewMode,
+    sidebarGroupingMode,
     drones,
-    dronesFilteredByRepo,
-    groups,
     startupSeedByDrone,
     optimisticallyDeletedDrones,
     activeRepoPath,

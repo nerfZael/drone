@@ -1,12 +1,7 @@
 import React from 'react';
 import type { ChatSendPayload } from '../chat';
-import type { DroneSummary } from '../types';
 import { isDroneStartingOrSeeding, resolveChatNameForDrone } from './helpers';
-
-type SidebarGroup = {
-  group: string;
-  items: DroneSummary[];
-};
+import type { SidebarGroup } from './use-sidebar-view-model';
 
 type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
 
@@ -120,4 +115,3 @@ export function useGroupBroadcast({
     sendGroupBroadcastPrompt,
   };
 }
-
