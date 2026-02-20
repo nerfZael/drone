@@ -79,7 +79,7 @@ const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   openCreateModal: { key: 's', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openCreateModalAlt: { key: 'n', mod: true, ctrl: false, meta: false, alt: false, shift: true },
   toggleTldr: { key: 'w', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  openHoveredGroupMultiChat: { key: 'm', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  openHoveredGroupMultiChat: { key: 'd', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openChangesTab: { key: 'c', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openBrowserTab: { key: 'b', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openFilesTab: { key: 'f', mod: false, ctrl: false, meta: false, alt: false, shift: false },
