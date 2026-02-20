@@ -252,6 +252,7 @@ code, pre {
   color: var(--fg);
   word-break: break-word;
 }
+.dh-markdown--agent { color: var(--fg); }
 .dh-markdown--muted { color: var(--fg-secondary); }
 .dh-markdown--error { color: var(--red); }
 .dh-markdown--user { color: var(--fg-secondary); }
@@ -264,11 +265,15 @@ code, pre {
 .dh-markdown > :first-child { margin-top: 0; }
 .dh-markdown > :last-child { margin-bottom: 0; }
 
-.dh-markdown p { margin: .25rem 0; }
+.dh-markdown p { margin: .35rem 0; }
+.dh-markdown p + p { margin-top: .8rem; }
 .dh-markdown strong,
 .dh-markdown b {
-  font-weight: 500;
-  color: inherit;
+  font-weight: 700;
+}
+.dh-markdown--muted strong,
+.dh-markdown--muted b {
+  color: var(--fg);
 }
 .dh-markdown h1,
 .dh-markdown h2,
@@ -284,19 +289,23 @@ code, pre {
 .dh-markdown h3 { font-size: .95rem; }
 
 .dh-markdown a {
-  color: var(--accent);
-  text-decoration: none;
-  border-bottom: 1px solid rgba(167,139,250,.2);
-  transition: border-color .15s;
+  color: #c4b5fd;
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 2px;
+  text-decoration-color: rgba(196, 181, 253, .45);
+  border-bottom: 0;
+  transition: color .15s, text-decoration-color .15s;
 }
 .dh-markdown a:hover {
-  color: var(--fg);
-  border-bottom-color: var(--accent);
+  color: #ddd6fe;
+  text-decoration-color: rgba(221, 214, 254, .8);
 }
 
 .dh-markdown ul,
-.dh-markdown ol { margin: .35rem 0 .35rem 1.2rem; padding: 0; }
-.dh-markdown li { margin: .15rem 0; }
+.dh-markdown ol { margin: .55rem 0 .55rem 1.25rem; padding: 0; }
+.dh-markdown li { margin: .3rem 0; }
+.dh-markdown li > p { margin: .2rem 0; }
 
 .dh-markdown blockquote {
   margin: .5rem 0;
@@ -314,11 +323,11 @@ code, pre {
 .dh-markdown code {
   font-family: var(--code);
   font-size: 12px;
-  background: rgba(167, 139, 250, .06);
-  border: 1px solid rgba(167, 139, 250, .08);
-  padding: .1rem .4rem;
+  background: rgba(196, 181, 253, .12);
+  border: 1px solid rgba(196, 181, 253, .24);
+  padding: .15rem .42rem;
   border-radius: 4px;
-  color: #C4B5FD;
+  color: #ddd6fe;
 }
 
 .dh-markdown pre {
