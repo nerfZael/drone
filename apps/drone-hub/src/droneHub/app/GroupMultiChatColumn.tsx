@@ -13,7 +13,9 @@ import { IconSpinner, IconTrash, TypingDots } from '../overview/icons';
 import type { DroneSummary, PendingPrompt, TranscriptItem } from '../types';
 import { IconChat } from './icons';
 import { fetchJson, isNotFoundError, usePoll } from './hooks';
-import { isDroneStartingOrSeeding, resolveChatNameForDrone } from './helpers';
+import { droneHomePath, isDroneStartingOrSeeding, resolveChatNameForDrone } from './helpers';
+import { openDroneTabFromLastPreview, resolveDroneOpenTabUrl } from './quick-actions';
+import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 
 export type GroupMultiChatColumnProps = {
   drone: DroneSummary;
@@ -47,7 +49,13 @@ export function GroupMultiChatColumn({
   const [sendingPromptCount, setSendingPromptCount] = React.useState(0);
   const sendingPrompt = sendingPromptCount > 0;
   const [optimisticPendingPrompts, setOptimisticPendingPrompts] = React.useState<PendingPrompt[]>([]);
+  const [quickActionBusy, setQuickActionBusy] = React.useState<null | 'ssh' | 'pull'>(null);
+  const [quickActionError, setQuickActionError] = React.useState<string | null>(null);
   const columnScrollRef = React.useRef<HTMLDivElement | null>(null);
+  const terminalEmulator = useDroneHubUiStore((s) => s.terminalEmulator);
+  const repoAttached = Boolean(drone.repoAttached ?? Boolean(String(drone.repoPath ?? '').trim()));
+  const quickOpenTabUrl = resolveDroneOpenTabUrl(drone);
+  const disabledByProvisioning = isDroneStartingOrSeeding(drone.hubPhase);
 
   const scrollColumnToBottom = React.useCallback(() => {
     const el = columnScrollRef.current;
@@ -200,6 +208,67 @@ export function GroupMultiChatColumn({
     [chatName, drone.hubPhase, drone.id, scrollColumnToBottom, shownName],
   );
 
+  const openSshTerminal = React.useCallback(async () => {
+    if (disabledByProvisioning || quickActionBusy) return;
+    setQuickActionBusy('ssh');
+    setQuickActionError(null);
+    try {
+      const qs = new URLSearchParams();
+      qs.set('mode', 'ssh');
+      qs.set('chat', chatName || 'default');
+      qs.set('cwd', droneHomePath(drone));
+      if (terminalEmulator && terminalEmulator !== 'auto') qs.set('terminal', terminalEmulator);
+      const r = await fetch(`/api/drones/${encodeURIComponent(drone.id)}/open-terminal?${qs.toString()}`, { method: 'POST' });
+      if (!r.ok) {
+        const text = await r.text();
+        let parsed: any = null;
+        try {
+          parsed = text ? JSON.parse(text) : null;
+        } catch {
+          parsed = null;
+        }
+        setQuickActionError(String(parsed?.error ?? `${r.status} ${r.statusText}`));
+      }
+    } catch (err: any) {
+      setQuickActionError(err?.message ?? String(err));
+    } finally {
+      setQuickActionBusy(null);
+    }
+  }, [chatName, disabledByProvisioning, drone, quickActionBusy, terminalEmulator]);
+
+  const pullRepoChanges = React.useCallback(async () => {
+    if (disabledByProvisioning || quickActionBusy || !repoAttached) return;
+    setQuickActionBusy('pull');
+    setQuickActionError(null);
+    try {
+      const r = await fetch(`/api/drones/${encodeURIComponent(drone.id)}/repo/pull`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      if (!r.ok) {
+        const text = await r.text();
+        let parsed: any = null;
+        try {
+          parsed = text ? JSON.parse(text) : null;
+        } catch {
+          parsed = null;
+        }
+        setQuickActionError(String(parsed?.error ?? `${r.status} ${r.statusText}`));
+      }
+    } catch (err: any) {
+      setQuickActionError(err?.message ?? String(err));
+    } finally {
+      setQuickActionBusy(null);
+    }
+  }, [disabledByProvisioning, drone.id, quickActionBusy, repoAttached]);
+
+  const openBrowserTab = React.useCallback(() => {
+    if (disabledByProvisioning) return;
+    const ok = openDroneTabFromLastPreview(drone);
+    if (!ok) setQuickActionError('No preview URL available yet.');
+  }, [disabledByProvisioning, drone]);
+
   const noopToggleTldr = React.useCallback((_item: TranscriptItem) => {}, []);
   const noopHoverAgentMessage = React.useCallback((_item: TranscriptItem | null) => {}, []);
 
@@ -254,6 +323,57 @@ export function GroupMultiChatColumn({
             </div>
           </div>
           <div className="text-[10px] text-[var(--muted-dim)] font-mono mt-0.5">chat: {chatName}</div>
+          <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+            <button
+              type="button"
+              onClick={() => {
+                void openSshTerminal();
+              }}
+              disabled={disabledByProvisioning || Boolean(quickActionBusy)}
+              className={`inline-flex items-center h-5 px-1.5 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
+                disabledByProvisioning || Boolean(quickActionBusy)
+                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                  : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+              }`}
+              style={{ fontFamily: 'var(--display)' }}
+              title={`SSH into "${shownName}"`}
+            >
+              {quickActionBusy === 'ssh' ? 'Opening...' : 'SSH'}
+            </button>
+            <button
+              type="button"
+              onClick={openBrowserTab}
+              disabled={disabledByProvisioning || !quickOpenTabUrl}
+              className={`inline-flex items-center h-5 px-1.5 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
+                disabledByProvisioning || !quickOpenTabUrl
+                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                  : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)]'
+              }`}
+              style={{ fontFamily: 'var(--display)' }}
+              title={quickOpenTabUrl ? `Open ${quickOpenTabUrl} in a new browser tab` : 'No preview URL available yet'}
+            >
+              Open tab
+            </button>
+            {repoAttached ? (
+              <button
+                type="button"
+                onClick={() => {
+                  void pullRepoChanges();
+                }}
+                disabled={disabledByProvisioning || Boolean(quickActionBusy)}
+                className={`inline-flex items-center h-5 px-1.5 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
+                  disabledByProvisioning || Boolean(quickActionBusy)
+                    ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                    : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                }`}
+                style={{ fontFamily: 'var(--display)' }}
+                title="Pull repo changes from this drone into the local repo"
+              >
+                {quickActionBusy === 'pull' ? 'Pulling...' : 'Pull'}
+              </button>
+            ) : null}
+          </div>
+          {quickActionError ? <div className="mt-1 text-[10px] text-[var(--red)] truncate" title={quickActionError}>{quickActionError}</div> : null}
         </div>
       </div>
       <div ref={columnScrollRef} className="flex-1 min-h-0 overflow-auto px-3 py-3">

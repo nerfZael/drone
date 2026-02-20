@@ -2,6 +2,7 @@ import React from 'react';
 import { DroneChangesDock } from '../changes';
 import { DroneFilesDock } from '../files';
 import { DroneLinksDock, DronePreviewDock } from '../overview';
+import { DronePullRequestsDock } from '../pullRequests';
 import { DroneTerminalDock } from '../terminal';
 import type {
   DroneFsEntry,
@@ -176,6 +177,20 @@ export function RightPanelTabContent({
       return (
         <DroneChangesDock
           key={`${paneKey}-changes`}
+          droneId={drone.id}
+          droneName={drone.name}
+          repoAttached={drone.repoAttached ?? Boolean(String(drone.repoPath ?? '').trim())}
+          repoPath={drone.repoPath}
+          disabled={disabled}
+          hubPhase={drone.hubPhase}
+          hubMessage={drone.hubMessage}
+        />
+      );
+
+    case 'prs':
+      return (
+        <DronePullRequestsDock
+          key={`${paneKey}-prs`}
           droneId={drone.id}
           droneName={drone.name}
           repoAttached={drone.repoAttached ?? Boolean(String(drone.repoPath ?? '').trim())}

@@ -74,6 +74,14 @@ import {
   type RepoPullChangeEntry,
 } from './drone-repo';
 import {
+  closeGithubPullRequestForRepoRoot,
+  isGithubPullRequestError,
+  listGithubPullRequestsForRepoRoot,
+  mergeGithubPullRequestForRepoRoot,
+  normalizeGithubPullRequestListState,
+  normalizeGithubPullRequestMergeMethod,
+} from './github-pull-requests';
+import {
   clearStoredProviderApiKey,
   hubLog,
   loadHubEnv,
@@ -838,6 +846,28 @@ const chatModelDiscoveryCache = new Map<
 const cliModelFlagSupportCache = new Map<string, { atMs: number; supported: boolean }>();
 const PULL_PREVIEW_HOST_MERGE_CACHE_TTL_MS = 25_000;
 const pullPreviewHostMergeCache = new Map<string, { atMs: number; entries: RepoPullChangeEntry[] }>();
+const GITHUB_PULL_REQUEST_LIST_CACHE_TTL_MS = 12_000;
+const githubPullRequestListCache = new Map<
+  string,
+  {
+    atMs: number;
+    payload: {
+      repoRoot: string;
+      state: 'open' | 'closed' | 'all';
+      github: { owner: string; repo: string };
+      count: number;
+      pullRequests: any[];
+    };
+  }
+>();
+
+function clearGithubPullRequestListCache(repoRootRaw: string): void {
+  const repoRoot = String(repoRootRaw ?? '').trim();
+  if (!repoRoot) return;
+  for (const key of githubPullRequestListCache.keys()) {
+    if (key.startsWith(`${repoRoot}\u0000`)) githubPullRequestListCache.delete(key);
+  }
+}
 
 function normalizeChatModel(raw: any): string | null {
   if (raw == null) return null;
@@ -5615,6 +5645,225 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             error: missingBase ? 'Drone repo is missing its base SHA. Re-seed the drone to enable pull preview.' : msg,
             ...(missingBase ? { code: 'missing_base' } : {}),
           });
+          return;
+        }
+      }
+
+      // GET /api/drones/:name/repo/pull-requests?state=open|closed|all
+      // Lists pull requests for the host repo's GitHub remote.
+      if (
+        method === 'GET' &&
+        parts.length === 6 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'repo' &&
+        parts[4] === 'pull-requests'
+      ) {
+        const droneRef = decodeURIComponent(parts[2]);
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        const d = resolved.drone;
+        const droneId = resolved.id;
+        const droneName = String(d?.name ?? droneRef).trim() || droneRef;
+        const repoAttached = Boolean(String(d?.repo?.dest ?? '').trim()) || Boolean(String(d?.repo?.seededAt ?? '').trim());
+        if (!repoAttached) {
+          json(res, 400, { ok: false, error: 'drone has no repo attached' });
+          return;
+        }
+        const repoPathRaw = String(d?.repoPath ?? '').trim();
+        if (!repoPathRaw) {
+          json(res, 409, { ok: false, error: 'host repo path is unavailable for this drone', code: 'repo_path_missing', id: droneId, name: droneName });
+          return;
+        }
+        const state = normalizeGithubPullRequestListState(u.searchParams.get('state'), 'open');
+
+        try {
+          const repoRoot = await gitTopLevel(repoPathRaw);
+          const cacheKey = `${repoRoot}\u0000${state}`;
+          const now = Date.now();
+          const cached = githubPullRequestListCache.get(cacheKey);
+          let payload =
+            cached && now - cached.atMs < GITHUB_PULL_REQUEST_LIST_CACHE_TTL_MS
+              ? cached.payload
+              : null;
+
+          if (!payload) {
+            const listed = await listGithubPullRequestsForRepoRoot({ repoRoot, state });
+            payload = {
+              repoRoot,
+              state,
+              github: listed.repo,
+              count: listed.pullRequests.length,
+              pullRequests: listed.pullRequests,
+            };
+            if (githubPullRequestListCache.size > 400) githubPullRequestListCache.clear();
+            githubPullRequestListCache.set(cacheKey, { atMs: now, payload });
+          }
+
+          json(res, 200, {
+            ok: true,
+            id: droneId,
+            name: droneName,
+            ...payload,
+          });
+          return;
+        } catch (e: any) {
+          if (isGithubPullRequestError(e)) {
+            json(res, e.statusCode, {
+              ok: false,
+              error: e.message,
+              ...(e.code ? { code: e.code } : {}),
+              id: droneId,
+              name: droneName,
+            });
+            return;
+          }
+          const msg = e?.message ?? String(e);
+          json(res, 500, { ok: false, error: msg, id: droneId, name: droneName });
+          return;
+        }
+      }
+
+      // POST /api/drones/:name/repo/pull-requests/:number/merge
+      // Merges a pull request on GitHub.
+      if (
+        method === 'POST' &&
+        parts.length === 7 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'repo' &&
+        parts[4] === 'pull-requests' &&
+        parts[6] === 'merge'
+      ) {
+        const droneRef = decodeURIComponent(parts[2]);
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        const d = resolved.drone;
+        const droneId = resolved.id;
+        const droneName = String(d?.name ?? droneRef).trim() || droneRef;
+        const repoAttached = Boolean(String(d?.repo?.dest ?? '').trim()) || Boolean(String(d?.repo?.seededAt ?? '').trim());
+        if (!repoAttached) {
+          json(res, 400, { ok: false, error: 'drone has no repo attached' });
+          return;
+        }
+        const repoPathRaw = String(d?.repoPath ?? '').trim();
+        if (!repoPathRaw) {
+          json(res, 409, { ok: false, error: 'host repo path is unavailable for this drone', code: 'repo_path_missing', id: droneId, name: droneName });
+          return;
+        }
+
+        const pullNumber = Number.parseInt(String(parts[5] ?? '').trim(), 10);
+        if (!Number.isFinite(pullNumber) || pullNumber <= 0 || Math.floor(pullNumber) !== pullNumber) {
+          json(res, 400, { ok: false, error: 'invalid pull request number', code: 'invalid_pull_number', id: droneId, name: droneName });
+          return;
+        }
+
+        let body: any = null;
+        try {
+          body = await readJsonBody(req);
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e), id: droneId, name: droneName });
+          return;
+        }
+        const mergeMethod = normalizeGithubPullRequestMergeMethod(body?.method, 'merge');
+
+        try {
+          const repoRoot = await gitTopLevel(repoPathRaw);
+          const merged = await mergeGithubPullRequestForRepoRoot({ repoRoot, pullNumber, method: mergeMethod });
+          clearGithubPullRequestListCache(repoRoot);
+          json(res, 200, {
+            ok: true,
+            id: droneId,
+            name: droneName,
+            repoRoot,
+            github: merged.repo,
+            number: merged.number,
+            merged: merged.merged,
+            message: merged.message,
+            sha: merged.sha,
+            method: mergeMethod,
+          });
+          return;
+        } catch (e: any) {
+          if (isGithubPullRequestError(e)) {
+            json(res, e.statusCode, {
+              ok: false,
+              error: e.message,
+              ...(e.code ? { code: e.code } : {}),
+              id: droneId,
+              name: droneName,
+            });
+            return;
+          }
+          const msg = e?.message ?? String(e);
+          json(res, 500, { ok: false, error: msg, id: droneId, name: droneName });
+          return;
+        }
+      }
+
+      // POST /api/drones/:name/repo/pull-requests/:number/close
+      // Closes a pull request on GitHub without merging.
+      if (
+        method === 'POST' &&
+        parts.length === 7 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'repo' &&
+        parts[4] === 'pull-requests' &&
+        parts[6] === 'close'
+      ) {
+        const droneRef = decodeURIComponent(parts[2]);
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        const d = resolved.drone;
+        const droneId = resolved.id;
+        const droneName = String(d?.name ?? droneRef).trim() || droneRef;
+        const repoAttached = Boolean(String(d?.repo?.dest ?? '').trim()) || Boolean(String(d?.repo?.seededAt ?? '').trim());
+        if (!repoAttached) {
+          json(res, 400, { ok: false, error: 'drone has no repo attached' });
+          return;
+        }
+        const repoPathRaw = String(d?.repoPath ?? '').trim();
+        if (!repoPathRaw) {
+          json(res, 409, { ok: false, error: 'host repo path is unavailable for this drone', code: 'repo_path_missing', id: droneId, name: droneName });
+          return;
+        }
+
+        const pullNumber = Number.parseInt(String(parts[5] ?? '').trim(), 10);
+        if (!Number.isFinite(pullNumber) || pullNumber <= 0 || Math.floor(pullNumber) !== pullNumber) {
+          json(res, 400, { ok: false, error: 'invalid pull request number', code: 'invalid_pull_number', id: droneId, name: droneName });
+          return;
+        }
+
+        try {
+          const repoRoot = await gitTopLevel(repoPathRaw);
+          const closed = await closeGithubPullRequestForRepoRoot({ repoRoot, pullNumber });
+          clearGithubPullRequestListCache(repoRoot);
+          json(res, 200, {
+            ok: true,
+            id: droneId,
+            name: droneName,
+            repoRoot,
+            github: closed.repo,
+            number: closed.number,
+            state: closed.state,
+            title: closed.title,
+            htmlUrl: closed.htmlUrl,
+          });
+          return;
+        } catch (e: any) {
+          if (isGithubPullRequestError(e)) {
+            json(res, e.statusCode, {
+              ok: false,
+              error: e.message,
+              ...(e.code ? { code: e.code } : {}),
+              id: droneId,
+              name: droneName,
+            });
+            return;
+          }
+          const msg = e?.message ?? String(e);
+          json(res, 500, { ok: false, error: msg, id: droneId, name: droneName });
           return;
         }
       }

@@ -174,6 +174,70 @@ export type RepoPullDiffPayload =
     }
   | { ok: false; error: string; code?: string };
 
+export type RepoPullRequestState = 'open' | 'closed' | string;
+export type RepoPullRequestMergeMethod = 'merge' | 'squash' | 'rebase';
+
+export type RepoPullRequestSummary = {
+  number: number;
+  title: string;
+  state: RepoPullRequestState;
+  draft: boolean;
+  htmlUrl: string;
+  createdAt: string;
+  updatedAt: string;
+  authorLogin: string | null;
+  authorAvatarUrl: string | null;
+  headRefName: string;
+  headLabel: string;
+  baseRefName: string;
+  isCrossRepository: boolean;
+  checksState: 'success' | 'failing' | 'pending' | 'unknown';
+  reviewState: 'approved' | 'changes_requested' | 'review_required' | 'unknown';
+  hasMergeConflicts: boolean;
+};
+
+export type RepoPullRequestsPayload =
+  | {
+      ok: true;
+      id: string;
+      name: string;
+      repoRoot: string;
+      state: 'open' | 'closed' | 'all';
+      github: { owner: string; repo: string };
+      count: number;
+      pullRequests: RepoPullRequestSummary[];
+    }
+  | { ok: false; error: string; code?: string };
+
+export type RepoPullRequestMergePayload =
+  | {
+      ok: true;
+      id: string;
+      name: string;
+      repoRoot: string;
+      github: { owner: string; repo: string };
+      number: number;
+      merged: boolean;
+      message: string;
+      sha: string | null;
+      method: RepoPullRequestMergeMethod;
+    }
+  | { ok: false; error: string; code?: string };
+
+export type RepoPullRequestClosePayload =
+  | {
+      ok: true;
+      id: string;
+      name: string;
+      repoRoot: string;
+      github: { owner: string; repo: string };
+      number: number;
+      state: RepoPullRequestState;
+      title: string;
+      htmlUrl: string | null;
+    }
+  | { ok: false; error: string; code?: string };
+
 export type TranscriptItem = {
   turn: number;
   at: string;
