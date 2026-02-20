@@ -539,6 +539,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setDraftCreateName,
       setDraftCreateGroup,
       setDraftCreateError,
+      setDraftCreating,
       setDraftAutoRenaming,
       setDraftNameSuggestionError,
       setDraftNameSuggesting,

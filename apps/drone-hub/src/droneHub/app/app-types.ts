@@ -31,6 +31,8 @@ export type DraftChatState = {
   droneId: string;
   droneName: string;
   prompt: PendingPrompt | null;
+  // Changes each time the draft composer is opened so input autofocus can re-trigger.
+  focusKey?: string;
 };
 
 export type DroneErrorModalState = {

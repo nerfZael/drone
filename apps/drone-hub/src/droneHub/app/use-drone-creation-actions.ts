@@ -24,7 +24,7 @@ type UseDroneCreationActionsArgs = {
   cloneIncludeChats: boolean;
   spawnAgentKey: string;
   spawnModelForSeed: string | null;
-  draftChat: { droneId: string; droneName: string; prompt: any | null } | null;
+  draftChat: { droneId: string; droneName: string; prompt: any | null; focusKey?: string } | null;
   draftCreateName: string;
   draftCreateGroup: string;
   draftCreateRepoPath: string;
@@ -353,6 +353,7 @@ export function useDroneCreationActions({
         setDraftChat((prev: any) => {
           if (!prev?.prompt) return prev;
           return {
+            ...(prev ?? { focusKey: undefined }),
             droneId,
             droneName: createdName,
             prompt: {
@@ -438,6 +439,7 @@ export function useDroneCreationActions({
       setDraftChat({
         droneId: '',
         droneName: '',
+        focusKey: draftChat?.focusKey,
         prompt: {
           id: `draft-${makeId()}`,
           at: new Date().toISOString(),

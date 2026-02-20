@@ -85,6 +85,21 @@ export function chatInputDraftKeyForDroneChat(droneIdRaw: string, chatNameRaw: s
   return `drone:${droneId}:chat:${chatName}`;
 }
 
+export function newDraftChatFocusKey(nowMs: number = Date.now(), randomSeed: number = Math.random()): string {
+  const ms = Number.isFinite(nowMs) && nowMs > 0 ? Math.floor(nowMs) : Date.now();
+  const rnd = Number.isFinite(randomSeed) && randomSeed >= 0 ? randomSeed : Math.random();
+  return `draft-open-${ms.toString(36)}-${rnd.toString(36).slice(2, 8)}`;
+}
+
+export function draftChatInputResetKey(draftChat: {
+  focusKey?: string | null;
+  prompt?: { id?: string | null } | null;
+}): string {
+  const focusKey = String(draftChat?.focusKey ?? '').trim();
+  const promptId = String(draftChat?.prompt?.id ?? '').trim();
+  return `draft:${focusKey}:${promptId}`;
+}
+
 export function parseRepoPullConflict(message: string, meta?: Partial<RepoOpErrorMeta> | null): RepoPullConflict {
   const text = String(message ?? '');
   const patchFromMeta = String(meta?.patchName ?? '').trim();

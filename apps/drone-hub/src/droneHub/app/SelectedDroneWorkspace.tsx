@@ -580,6 +580,21 @@ export function SelectedDroneWorkspace({
   );
   const chatDraftValue = useDroneHubUiStore((s) => s.chatInputDrafts[chatDraftKey] ?? '');
   const setChatInputDraft = useDroneHubUiStore((s) => s.setChatInputDraft);
+  const shouldAutoFocusInput = React.useMemo(() => {
+    if (openedEditorFilePath) return false;
+    if (chatUiMode === 'transcript') {
+      return !loadingTranscript && (transcripts?.length ?? 0) === 0 && visiblePendingPromptsWithStartup.length === 0;
+    }
+    return !loadingSession && !sessionText.trim();
+  }, [
+    chatUiMode,
+    loadingSession,
+    loadingTranscript,
+    openedEditorFilePath,
+    sessionText,
+    transcripts,
+    visiblePendingPromptsWithStartup.length,
+  ]);
 
   const openPullRequestsTab = React.useCallback(() => {
     setRightPanelOpen(true);
@@ -1309,6 +1324,7 @@ export function SelectedDroneWorkspace({
               promptError={promptError}
               sending={sendingPrompt}
               waiting={chatUiMode === 'transcript' && visiblePendingPromptsWithStartup.some((p) => p.state !== 'failed')}
+              autoFocus={shouldAutoFocusInput}
               onSend={async (payload: ChatSendPayload) => {
                 try {
                   return await sendPromptText(payload);

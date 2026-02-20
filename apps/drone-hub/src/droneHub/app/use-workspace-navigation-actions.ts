@@ -1,6 +1,7 @@
 import React from 'react';
 import type { DraftChatState } from './app-types';
 import type { DroneSummary } from '../types';
+import { newDraftChatFocusKey } from './helpers';
 
 type UseWorkspaceNavigationActionsArgs = {
   creating: boolean;
@@ -21,6 +22,7 @@ type UseWorkspaceNavigationActionsArgs = {
   setDraftCreateName: React.Dispatch<React.SetStateAction<string>>;
   setDraftCreateGroup: React.Dispatch<React.SetStateAction<string>>;
   setDraftCreateError: React.Dispatch<React.SetStateAction<string | null>>;
+  setDraftCreating: React.Dispatch<React.SetStateAction<boolean>>;
   setDraftAutoRenaming: React.Dispatch<React.SetStateAction<boolean>>;
   setDraftNameSuggestionError: React.Dispatch<React.SetStateAction<string | null>>;
   setDraftNameSuggesting: React.Dispatch<React.SetStateAction<boolean>>;
@@ -63,6 +65,7 @@ export function useWorkspaceNavigationActions({
   setDraftCreateName,
   setDraftCreateGroup,
   setDraftCreateError,
+  setDraftCreating,
   setDraftAutoRenaming,
   setDraftNameSuggestionError,
   setDraftNameSuggesting,
@@ -139,11 +142,12 @@ export function useWorkspaceNavigationActions({
     setDraftCreateName('');
     setDraftCreateGroup(nextGroup);
     setDraftCreateError(null);
+    setDraftCreating(false);
     setDraftAutoRenaming(false);
     setDraftNameSuggestionError(null);
     setDraftNameSuggesting(false);
     resetDraftNameSuggestSeq();
-    setDraftChat({ droneId: '', droneName: '', prompt: null });
+    setDraftChat({ droneId: '', droneName: '', prompt: null, focusKey: newDraftChatFocusKey() });
     setSelectedDrone(null);
     setSelectedDroneIds([]);
     selectionAnchorRef.current = null;
@@ -166,6 +170,7 @@ export function useWorkspaceNavigationActions({
     setDraftCreateError,
     setDraftCreateGroup,
     setDraftCreateName,
+    setDraftCreating,
     setDraftCreateOpen,
     setDraftNameSuggestionError,
     setDraftNameSuggesting,

@@ -1,7 +1,7 @@
 import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { ChatInput, type ChatSendPayload, EmptyState, PendingTranscriptTurn } from '../chat';
-import { droneChatQueueKey } from './helpers';
+import { draftChatInputResetKey, droneChatQueueKey } from './helpers';
 import { IconChat, IconChevron } from './icons';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
 import type { ChatAgentConfig } from '../../domain';
@@ -240,7 +240,7 @@ export function DraftChatWorkspace({
       </div>
       <ChatInput
         // Keep the draft prompt if only the selected agent changes.
-        resetKey={`draft:${draftChat.prompt?.id ?? ''}`}
+        resetKey={draftChatInputResetKey(draftChat)}
         droneName="new drone"
         promptError={draftCreateError}
         sending={draftCreating || draftAutoRenaming}
