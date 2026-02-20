@@ -96,10 +96,13 @@ export function useSidebarViewModel({
 
   const sidebarGroups = React.useMemo(() => {
     const m = new Map<string, DroneSummary[]>();
-    for (const rawName of registryGroupNames) {
-      const g = String(rawName ?? '').trim();
-      if (!g || isUngroupedGroupName(g)) continue;
-      if (!m.has(g)) m.set(g, []);
+    const hasRepoFilter = Boolean(String(activeRepoPath ?? '').trim());
+    if (!hasRepoFilter) {
+      for (const rawName of registryGroupNames) {
+        const g = String(rawName ?? '').trim();
+        if (!g || isUngroupedGroupName(g)) continue;
+        if (!m.has(g)) m.set(g, []);
+      }
     }
     for (const d of sidebarDronesFilteredByRepo) {
       const raw = (d.group ?? '').trim();
@@ -118,7 +121,7 @@ export function useSidebarViewModel({
       return a.group.localeCompare(b.group);
     });
     return out;
-  }, [registryGroupNames, sidebarDronesFilteredByRepo]);
+  }, [activeRepoPath, registryGroupNames, sidebarDronesFilteredByRepo]);
 
   const sidebarHasUngroupedGroup = React.useMemo(
     () => sidebarGroups.some((g) => isUngroupedGroupName(g.group)),
