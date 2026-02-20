@@ -291,6 +291,30 @@ function readLegacyPersistedDefaults(): DroneHubUiPersistedState {
   };
 }
 
+function migratePersistedUiState(
+  persistedState: unknown,
+  version: number,
+): Partial<DroneHubUiPersistedState> {
+  const base =
+    persistedState && typeof persistedState === 'object'
+      ? { ...(persistedState as Partial<DroneHubUiPersistedState>) }
+      : {};
+  if (version >= 2) return base;
+
+  const migratedBindings = sanitizeShortcutBindings(base.shortcutBindings);
+  if (!migratedBindings.openPullRequestsTab) {
+    const defaultBindings = cloneDefaultShortcutBindings();
+    migratedBindings.openPullRequestsTab = defaultBindings.openPullRequestsTab
+      ? { ...defaultBindings.openPullRequestsTab }
+      : null;
+  }
+
+  return {
+    ...base,
+    shortcutBindings: migratedBindings,
+  };
+}
+
 const legacyDefaults = readLegacyPersistedDefaults();
 const initialChatInputDrafts = readPersistedChatInputDrafts();
 
@@ -409,8 +433,9 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
     }),
     {
       name: 'droneHub.ui',
-      version: 1,
+      version: 2,
       storage: createJSONStorage(() => localStorage),
+      migrate: (persistedState, version) => migratePersistedUiState(persistedState, version),
       partialize: (state): DroneHubUiPersistedState => ({
         activeRepoPath: state.activeRepoPath,
         chatHeaderRepoPath: state.chatHeaderRepoPath,
