@@ -1,5 +1,6 @@
 import React from 'react';
 import { DRONE_DND_MIME } from './app-config';
+import type { MoveDronesToGroupResult } from './use-group-management';
 
 type UseDroneGroupDndArgs = {
   movingDroneGroups: boolean;
@@ -11,7 +12,7 @@ type UseDroneGroupDndArgs = {
   setSelectedDroneIds: React.Dispatch<React.SetStateAction<string[]>>;
   onPrepareDragStart: () => void;
   onClearGroupMoveError: () => void;
-  moveDronesToGroup: (targetGroupLabel: string, rawDroneNames: string[]) => Promise<void>;
+  moveDronesToGroup: (targetGroupLabel: string, rawDroneNames: string[]) => Promise<MoveDronesToGroupResult>;
 };
 
 export function useDroneGroupDnd({

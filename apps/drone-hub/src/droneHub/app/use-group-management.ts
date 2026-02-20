@@ -13,6 +13,11 @@ type UseGroupManagementArgs = {
   setCollapsedGroups: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
 };
 
+export type MoveDronesToGroupResult = {
+  ok: boolean;
+  error: string | null;
+};
+
 export function useGroupManagement({
   autoDelete,
   drones,
@@ -164,11 +169,11 @@ export function useGroupManagement({
   const moveDronesToGroup = React.useCallback(
     async (targetGroupLabel: string, rawDroneNames: string[]) => {
       const target = String(targetGroupLabel ?? '').trim();
-      if (!target) return;
+      if (!target) return { ok: true, error: null } as MoveDronesToGroupResult;
       const targetGroup = isUngroupedGroupName(target) ? null : target;
       const byId = new Map(drones.map((d) => [d.id, d]));
       const requested = Array.from(new Set(rawDroneNames.map((n) => String(n ?? '').trim()).filter(Boolean)));
-      if (requested.length === 0) return;
+      if (requested.length === 0) return { ok: true, error: null } as MoveDronesToGroupResult;
 
       const movable = requested.filter((name) => {
         const d = byId.get(name);
@@ -177,7 +182,7 @@ export function useGroupManagement({
         const currentGroup = !currentRaw || isUngroupedGroupName(currentRaw) ? 'Ungrouped' : currentRaw;
         return currentGroup !== target;
       });
-      if (movable.length === 0) return;
+      if (movable.length === 0) return { ok: true, error: null } as MoveDronesToGroupResult;
 
       setGroupMoveError(null);
       setMovingDroneGroups(true);
@@ -203,25 +208,67 @@ export function useGroupManagement({
               : `Some drones could not be moved (${msg}).`,
           );
         }
+        return { ok: true, error: null } as MoveDronesToGroupResult;
       } catch (e: any) {
         const msg = e?.message ?? String(e);
+        let errorMessage = String(msg ?? 'move failed');
         if (isNotFoundError(e)) {
-          setGroupMoveError(
-            'Hub API is missing group-move support. Restart the hub after rebuilding/updating `drone`.',
-          );
+          errorMessage = 'Hub API is missing group-move support. Restart the hub after rebuilding/updating `drone`.';
+          setGroupMoveError(errorMessage);
         } else {
-          setGroupMoveError(msg);
+          setGroupMoveError(errorMessage);
         }
         console.error('[DroneHub] move drones between groups failed', {
           targetGroup: targetGroup ?? null,
           drones: movable,
           error: e,
         });
+        return { ok: false, error: errorMessage } as MoveDronesToGroupResult;
       } finally {
         setMovingDroneGroups(false);
       }
     },
     [drones],
+  );
+
+  const createGroupAndMove = React.useCallback(
+    async (targetGroupLabel: string, rawDroneNames: string[]) => {
+      const target = String(targetGroupLabel ?? '').trim();
+      if (!target) {
+        const msg = 'Group name is required.';
+        setGroupMoveError(msg);
+        return { ok: false, error: msg } as MoveDronesToGroupResult;
+      }
+      if (isUngroupedGroupName(target)) {
+        const msg = '"Ungrouped" is reserved.';
+        setGroupMoveError(msg);
+        return { ok: false, error: msg } as MoveDronesToGroupResult;
+      }
+      const requested = Array.from(new Set(rawDroneNames.map((n) => String(n ?? '').trim()).filter(Boolean)));
+      if (requested.length === 0) {
+        const msg = 'No drones selected for group move.';
+        setGroupMoveError(msg);
+        return { ok: false, error: msg } as MoveDronesToGroupResult;
+      }
+
+      setGroupMoveError(null);
+      try {
+        await requestJson<{ ok: true; name: string; createdAt: string }>(`/api/groups`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ name: target }),
+        });
+      } catch (e: any) {
+        const msg = String(e?.message ?? e ?? '').trim();
+        if (!/group already exists/i.test(msg)) {
+          setGroupMoveError(msg || 'Create group failed.');
+          return { ok: false, error: msg || 'Create group failed.' } as MoveDronesToGroupResult;
+        }
+      }
+
+      return await moveDronesToGroup(target, requested);
+    },
+    [moveDronesToGroup],
   );
 
   return {
@@ -233,5 +280,6 @@ export function useGroupManagement({
     renameGroup,
     deleteGroup,
     moveDronesToGroup,
+    createGroupAndMove,
   };
 }
