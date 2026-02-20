@@ -4,7 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, test } from 'bun:test';
 import {
+  gitPullHostBranchBeforeCreate,
   deleteHostRefBestEffort,
+  HostRepoPullBeforeCreateError,
   importBundleHeadToHostRef,
   mergeBranchIntoMainWorkingTreeNoCommit,
   RepoPatchApplyError,
@@ -59,6 +61,75 @@ function writeAndCommit(repoRoot: string, relPath: string, content: string, mess
 }
 
 describe('repoOps git-native pull helpers', () => {
+  test('gitPullHostBranchBeforeCreate fast-forwards current tracked host branch', async () => {
+    const remoteRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-repo-ops-remote-'));
+    const { repoRoot: sourceRepo, cleanup: cleanupSource } = mkRepo();
+    const hostClone = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-repo-ops-host-'));
+    try {
+      runOrThrow('git', ['init', '--bare'], remoteRoot);
+      runOrThrow('git', ['remote', 'add', 'origin', remoteRoot], sourceRepo);
+      writeAndCommit(sourceRepo, 'base.txt', 'base\n', 'init');
+      runOrThrow('git', ['push', '-u', 'origin', 'main'], sourceRepo);
+
+      runOrThrow('git', ['clone', '-b', 'main', remoteRoot, hostClone]);
+      const hostHeadBefore = runOrThrow('git', ['rev-parse', 'HEAD'], hostClone).trim();
+
+      writeAndCommit(sourceRepo, 'base.txt', 'base\nnext\n', 'update upstream');
+      const sourceHeadAfter = runOrThrow('git', ['rev-parse', 'HEAD'], sourceRepo).trim();
+      runOrThrow('git', ['push', 'origin', 'main'], sourceRepo);
+
+      const pulled = await gitPullHostBranchBeforeCreate(hostClone);
+      expect(pulled.repoRoot).toBe(hostClone);
+      expect(pulled.branch).toBe('main');
+      expect(pulled.upstream).toBe('origin/main');
+      expect(pulled.beforeSha).toBe(hostHeadBefore.toLowerCase());
+      expect(pulled.afterSha).toBe(sourceHeadAfter.toLowerCase());
+      expect(pulled.changed).toBe(true);
+
+      const hostHeadAfter = runOrThrow('git', ['rev-parse', 'HEAD'], hostClone).trim();
+      expect(hostHeadAfter).toBe(sourceHeadAfter);
+    } finally {
+      cleanupSource();
+      fs.rmSync(remoteRoot, { recursive: true, force: true });
+      fs.rmSync(hostClone, { recursive: true, force: true });
+    }
+  });
+
+  test('gitPullHostBranchBeforeCreate rejects branches without upstream tracking', async () => {
+    const { repoRoot, cleanup } = mkRepo();
+    try {
+      writeAndCommit(repoRoot, 'base.txt', 'base\n', 'init');
+      let err: unknown = null;
+      try {
+        await gitPullHostBranchBeforeCreate(repoRoot);
+      } catch (e) {
+        err = e;
+      }
+      expect(err).toBeInstanceOf(HostRepoPullBeforeCreateError);
+      expect((err as HostRepoPullBeforeCreateError).code).toBe('missing_upstream');
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('gitPullHostBranchBeforeCreate rejects detached HEAD state', async () => {
+    const { repoRoot, cleanup } = mkRepo();
+    try {
+      writeAndCommit(repoRoot, 'base.txt', 'base\n', 'init');
+      runOrThrow('git', ['checkout', '--detach', 'HEAD'], repoRoot);
+      let err: unknown = null;
+      try {
+        await gitPullHostBranchBeforeCreate(repoRoot);
+      } catch (e) {
+        err = e;
+      }
+      expect(err).toBeInstanceOf(HostRepoPullBeforeCreateError);
+      expect((err as HostRepoPullBeforeCreateError).code).toBe('detached_head');
+    } finally {
+      cleanup();
+    }
+  });
+
   test('imports bundle HEAD into a temporary host ref and supports cleanup', async () => {
     const { repoRoot, cleanup } = mkRepo();
     try {

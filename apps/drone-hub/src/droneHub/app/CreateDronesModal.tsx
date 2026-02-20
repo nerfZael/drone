@@ -25,6 +25,8 @@ type CreateDronesModalProps = {
   onCreateRepoMenuOpenChange: (open: boolean) => void;
   registeredRepoPaths: string[];
   activeRepoPath: string;
+  pullHostBranchBeforeCreate: boolean;
+  onPullHostBranchBeforeCreateChange: (checked: boolean) => void;
   cloneIncludeChats: boolean;
   onCloneIncludeChatsChange: (checked: boolean) => void;
   spawnAgentKey: string;
@@ -69,6 +71,8 @@ export function CreateDronesModal({
   onCreateRepoMenuOpenChange,
   registeredRepoPaths,
   activeRepoPath,
+  pullHostBranchBeforeCreate,
+  onPullHostBranchBeforeCreateChange,
   cloneIncludeChats,
   onCloneIncludeChatsChange,
   spawnAgentKey,
@@ -256,6 +260,16 @@ export function CreateDronesModal({
                   Tip: you have an active repo selected in the sidebar. Click it again to unselect.
                 </span>
               )}
+              <label className="mt-2 inline-flex items-center gap-2 select-none cursor-pointer" title="Before creating a repo-attached drone, run a host git pull --ff-only on the current branch.">
+                <input
+                  type="checkbox"
+                  className="accent-[var(--accent)]"
+                  checked={pullHostBranchBeforeCreate}
+                  onChange={(e) => onPullHostBranchBeforeCreateChange(e.target.checked)}
+                  disabled={creating}
+                />
+                <span className="text-[11px] text-[var(--muted)]">Pull host branch before create</span>
+              </label>
             </div>
 
             {createMode === 'clone' && (

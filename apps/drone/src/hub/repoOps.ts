@@ -397,6 +397,104 @@ export async function gitCurrentBranchOrSha(repoRoot: string): Promise<string> {
   return (await runLocalOrThrow('git', ['-C', repoRoot, 'rev-parse', 'HEAD'])).trim();
 }
 
+export type HostRepoPullBeforeCreateErrorCode =
+  | 'not_repo'
+  | 'detached_head'
+  | 'missing_upstream'
+  | 'pull_non_fast_forward'
+  | 'pull_failed';
+
+export class HostRepoPullBeforeCreateError extends Error {
+  code: HostRepoPullBeforeCreateErrorCode;
+  details: string;
+
+  constructor(code: HostRepoPullBeforeCreateErrorCode, message: string, details?: string) {
+    super(message);
+    this.name = 'HostRepoPullBeforeCreateError';
+    this.code = code;
+    this.details = String(details ?? '').trim();
+  }
+}
+
+export function isHostRepoPullBeforeCreateError(err: unknown): err is HostRepoPullBeforeCreateError {
+  return err instanceof HostRepoPullBeforeCreateError;
+}
+
+export async function gitPullHostBranchBeforeCreate(repoPathRaw: string): Promise<{
+  repoRoot: string;
+  branch: string;
+  upstream: string;
+  beforeSha: string | null;
+  afterSha: string | null;
+  changed: boolean;
+}> {
+  const repoPath = String(repoPathRaw ?? '').trim();
+  if (!repoPath) {
+    throw new HostRepoPullBeforeCreateError('not_repo', 'missing repo path');
+  }
+
+  let repoRoot = '';
+  try {
+    repoRoot = await gitTopLevel(repoPath);
+  } catch (e: any) {
+    throw new HostRepoPullBeforeCreateError('not_repo', `path is not a git repository: ${repoPath}`, e?.message ?? String(e));
+  }
+
+  const status = await gitRepoChangesSummary(repoRoot);
+  const branch = String(status.branch.head ?? '').trim();
+  if (!branch) {
+    throw new HostRepoPullBeforeCreateError(
+      'detached_head',
+      'host repo is in detached HEAD; checkout a branch or disable pull-before-create',
+    );
+  }
+
+  const upstream = String(status.branch.upstream ?? '').trim();
+  if (!upstream) {
+    throw new HostRepoPullBeforeCreateError(
+      'missing_upstream',
+      `branch "${branch}" has no upstream tracking branch; set one or disable pull-before-create`,
+    );
+  }
+
+  const beforeSha =
+    /^[0-9a-f]{40}$/i.test(String(status.branch.oid ?? '').trim()) ? String(status.branch.oid ?? '').trim().toLowerCase() : null;
+
+  const pull = await runLocal('git', ['-C', repoRoot, 'pull', '--ff-only', '--no-rebase']);
+  if (pull.code !== 0) {
+    const details = `${String(pull.stderr ?? '')}\n${String(pull.stdout ?? '')}`.trim();
+    const nonFastForward =
+      /not possible to fast-forward|divergent branches|non-fast-forward|fatal:\s+need to specify how to reconcile divergent branches/i.test(
+        details,
+      );
+    throw new HostRepoPullBeforeCreateError(
+      nonFastForward ? 'pull_non_fast_forward' : 'pull_failed',
+      nonFastForward
+        ? `branch "${branch}" cannot fast-forward from "${upstream}"; rebase/merge manually or disable pull-before-create`
+        : `git pull --ff-only failed for branch "${branch}"`,
+      details,
+    );
+  }
+
+  let afterSha: string | null = null;
+  try {
+    const raw = await runLocalOrThrow('git', ['-C', repoRoot, 'rev-parse', 'HEAD']);
+    const parsed = String(raw ?? '').trim().toLowerCase();
+    afterSha = /^[0-9a-f]{40}$/.test(parsed) ? parsed : null;
+  } catch {
+    afterSha = null;
+  }
+
+  return {
+    repoRoot,
+    branch,
+    upstream,
+    beforeSha,
+    afterSha,
+    changed: Boolean(beforeSha && afterSha && beforeSha !== afterSha),
+  };
+}
+
 export async function gitMergeBase(repoRoot: string, leftRef: string, rightRef: string): Promise<string | null> {
   const root = String(repoRoot ?? '').trim();
   const left = String(leftRef ?? '').trim();

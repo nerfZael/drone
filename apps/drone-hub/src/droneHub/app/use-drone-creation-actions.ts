@@ -19,6 +19,7 @@ type UseDroneCreationActionsArgs = {
   createGroup: string;
   createRepoPath: string;
   createInitialMessage: string;
+  pullHostBranchBeforeCreate: boolean;
   createMode: 'create' | 'clone';
   cloneSourceId: string | null;
   cloneIncludeChats: boolean;
@@ -74,6 +75,7 @@ export function useDroneCreationActions({
   createGroup,
   createRepoPath,
   createInitialMessage,
+  pullHostBranchBeforeCreate,
   createMode,
   cloneSourceId,
   cloneIncludeChats,
@@ -178,6 +180,7 @@ export function useDroneCreationActions({
             name,
             ...(group ? { group } : {}),
             ...(repoPath ? { repoPath } : {}),
+            pullHostBranchBeforeCreate,
             ...(isClone && cloneSourceId
               ? { cloneFrom: cloneSourceId, cloneChats: Boolean(cloneIncludeChats) }
               : {}),
@@ -265,6 +268,7 @@ export function useDroneCreationActions({
     createMode,
     createNameRows,
     createRepoPath,
+    pullHostBranchBeforeCreate,
     hasWhitespaceInNameRaw,
     isValidDroneName,
     preferredSelectedDroneHoldUntilRef,
@@ -320,6 +324,7 @@ export function useDroneCreationActions({
           ...(name ? { name } : {}),
           ...(group ? { group } : {}),
           ...(repoPath ? { repoPath } : {}),
+          pullHostBranchBeforeCreate,
           seedChat: 'default',
           ...(seedAgent ? { seedAgent } : {}),
           ...(seedModel ? { seedModel } : {}),
@@ -401,6 +406,7 @@ export function useDroneCreationActions({
       draftCreateGroup,
       draftCreateName,
       drones,
+      pullHostBranchBeforeCreate,
       preferredSelectedDroneHoldUntilRef,
       preferredSelectedDroneRef,
       rememberStartupSeed,

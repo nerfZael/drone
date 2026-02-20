@@ -61,6 +61,7 @@ type DroneHubUiState = {
   fsExplorerView: FsExplorerView;
   spawnAgentKey: string;
   spawnModel: string;
+  pullHostBranchBeforeCreate: boolean;
   customAgents: CustomAgentProfile[];
   customAgentModalOpen: boolean;
   newCustomAgentLabel: string;
@@ -97,6 +98,7 @@ type DroneHubUiState = {
   setFsExplorerView: (next: Updater<FsExplorerView>) => void;
   setSpawnAgentKey: (next: Updater<string>) => void;
   setSpawnModel: (next: Updater<string>) => void;
+  setPullHostBranchBeforeCreate: (next: Updater<boolean>) => void;
   setCustomAgents: (next: Updater<CustomAgentProfile[]>) => void;
   setCustomAgentModalOpen: (next: Updater<boolean>) => void;
   setNewCustomAgentLabel: (next: Updater<string>) => void;
@@ -131,6 +133,7 @@ type DroneHubUiPersistedState = Pick<
   | 'fsExplorerView'
   | 'spawnAgentKey'
   | 'spawnModel'
+  | 'pullHostBranchBeforeCreate'
   | 'customAgents'
   | 'shortcutBindings'
 >;
@@ -286,6 +289,7 @@ function readLegacyPersistedDefaults(): DroneHubUiPersistedState {
     fsExplorerView: normalizeFsExplorerView(readLocalStorageItem(FS_EXPLORER_VIEW_STORAGE_KEY)),
     spawnAgentKey: readLocalStorageItem('droneHub.spawnAgent') || 'builtin:cursor',
     spawnModel: readLocalStorageItem('droneHub.spawnModel') || '',
+    pullHostBranchBeforeCreate: true,
     customAgents: readCustomAgents(),
     shortcutBindings: cloneDefaultShortcutBindings(),
   };
@@ -348,6 +352,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       fsExplorerView: legacyDefaults.fsExplorerView,
       spawnAgentKey: legacyDefaults.spawnAgentKey,
       spawnModel: legacyDefaults.spawnModel,
+      pullHostBranchBeforeCreate: legacyDefaults.pullHostBranchBeforeCreate,
       customAgents: legacyDefaults.customAgents,
       customAgentModalOpen: false,
       newCustomAgentLabel: '',
@@ -410,6 +415,8 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       setFsExplorerView: (next) => set((s) => ({ fsExplorerView: resolveNext(s.fsExplorerView, next) })),
       setSpawnAgentKey: (next) => set((s) => ({ spawnAgentKey: resolveNext(s.spawnAgentKey, next) })),
       setSpawnModel: (next) => set((s) => ({ spawnModel: resolveNext(s.spawnModel, next) })),
+      setPullHostBranchBeforeCreate: (next) =>
+        set((s) => ({ pullHostBranchBeforeCreate: resolveNext(s.pullHostBranchBeforeCreate, next) })),
       setCustomAgents: (next) => set((s) => ({ customAgents: resolveNext(s.customAgents, next) })),
       setCustomAgentModalOpen: (next) => set((s) => ({ customAgentModalOpen: resolveNext(s.customAgentModalOpen, next) })),
       setNewCustomAgentLabel: (next) => set((s) => ({ newCustomAgentLabel: resolveNext(s.newCustomAgentLabel, next) })),
@@ -452,6 +459,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         fsExplorerView: state.fsExplorerView,
         spawnAgentKey: state.spawnAgentKey,
         spawnModel: state.spawnModel,
+        pullHostBranchBeforeCreate: state.pullHostBranchBeforeCreate,
         customAgents: state.customAgents,
         shortcutBindings: state.shortcutBindings,
       }),
@@ -472,6 +480,9 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           ),
           outputView: normalizeOutputView(persisted.outputView ?? currentState.outputView),
           fsExplorerView: normalizeFsExplorerView(persisted.fsExplorerView ?? currentState.fsExplorerView),
+          pullHostBranchBeforeCreate: normalizeBoolean(
+            persisted.pullHostBranchBeforeCreate ?? currentState.pullHostBranchBeforeCreate,
+          ),
           customAgents: sanitizeCustomAgents(persisted.customAgents ?? currentState.customAgents),
           shortcutBindings: sanitizeShortcutBindings(persisted.shortcutBindings ?? currentState.shortcutBindings),
         };
@@ -504,6 +515,7 @@ export function useDroneHubAppModelUiState() {
       fsExplorerView: s.fsExplorerView,
       spawnAgentKey: s.spawnAgentKey,
       spawnModel: s.spawnModel,
+      pullHostBranchBeforeCreate: s.pullHostBranchBeforeCreate,
       customAgents: s.customAgents,
       customAgentModalOpen: s.customAgentModalOpen,
       newCustomAgentLabel: s.newCustomAgentLabel,
@@ -531,6 +543,7 @@ export function useDroneHubAppModelUiState() {
       setFsExplorerView: s.setFsExplorerView,
       setSpawnAgentKey: s.setSpawnAgentKey,
       setSpawnModel: s.setSpawnModel,
+      setPullHostBranchBeforeCreate: s.setPullHostBranchBeforeCreate,
       setCustomAgents: s.setCustomAgents,
       setCustomAgentModalOpen: s.setCustomAgentModalOpen,
       setNewCustomAgentLabel: s.setNewCustomAgentLabel,

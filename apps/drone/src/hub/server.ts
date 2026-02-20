@@ -44,12 +44,14 @@ import {
   cleanupQuarantineWorktree,
   deleteHostRefBestEffort,
   gitCurrentBranchOrSha,
+  gitPullHostBranchBeforeCreate,
   gitIsClean,
   gitIsAncestor,
   gitMergeBase,
   gitMergePreviewNameStatusEntries,
   gitRepoChangesSummary,
   importBundleHeadToHostRef,
+  isHostRepoPullBeforeCreateError,
   mergeBranchIntoMainWorkingTreeNoCommit,
   gitStashPop,
   gitStashPush,
@@ -130,6 +132,46 @@ function normalizeOrigin(raw: string): string | null {
 
 function normalizeApiKey(raw: unknown): string {
   return typeof raw === 'string' ? raw.trim() : '';
+}
+
+function parsePullHostBranchBeforeCreate(raw: unknown): boolean {
+  if (typeof raw === 'boolean') return raw;
+  if (raw == null) return true;
+  if (typeof raw === 'number') return raw !== 0;
+  const value = String(raw).trim().toLowerCase();
+  if (!value) return true;
+  if (value === '0' || value === 'false' || value === 'no' || value === 'off') return false;
+  if (value === '1' || value === 'true' || value === 'yes' || value === 'on') return true;
+  return true;
+}
+
+function formatPullHostBranchBeforeCreateError(error: unknown): {
+  status: number;
+  message: string;
+  reason: string;
+} {
+  if (isHostRepoPullBeforeCreateError(error)) {
+    switch (error.code) {
+      case 'not_repo':
+      case 'detached_head':
+      case 'missing_upstream':
+      case 'pull_non_fast_forward':
+      case 'pull_failed':
+        return {
+          status: 409,
+          message: error.message,
+          reason: error.code,
+        };
+      default:
+        break;
+    }
+  }
+  const fallback = String((error as any)?.message ?? error ?? '').trim();
+  return {
+    status: 500,
+    message: fallback || 'failed to pull host branch before create',
+    reason: 'unknown',
+  };
 }
 
 async function readHubLogTail(opts: {
@@ -4690,7 +4732,8 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const groupRaw = typeof body?.group === 'string' ? body.group.trim() : '';
         const group = groupRaw ? groupRaw : null;
         const repoRaw = typeof body?.repoPath === 'string' ? body.repoPath.trim() : '';
-        const repoPath = repoRaw ? repoRaw : '';
+        let repoPath = repoRaw ? repoRaw : '';
+        const pullHostBranchBeforeCreate = parsePullHostBranchBeforeCreate(body?.pullHostBranchBeforeCreate);
         const build = body?.build === true;
         const containerPortRaw = body?.containerPort;
         const containerPort =
@@ -4741,6 +4784,21 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         if (cloneFrom && !cloneFromId) {
           json(res, 404, { ok: false, error: `unknown cloneFrom drone: ${cloneFrom}` });
           return;
+        }
+        if (repoPath && pullHostBranchBeforeCreate) {
+          try {
+            const pulled = await gitPullHostBranchBeforeCreate(repoPath);
+            repoPath = pulled.repoRoot;
+          } catch (e: any) {
+            const pullError = formatPullHostBranchBeforeCreateError(e);
+            json(res, pullError.status, {
+              ok: false,
+              error: `Failed to pull host branch before creating drone: ${pullError.message}`,
+              code: 'host_branch_pull_before_create_failed',
+              reason: pullError.reason,
+            });
+            return;
+          }
         }
         const droneId = makeDroneIdentity();
         const pendingWrite: { ok: boolean; status?: number; error?: string } = await updateRegistry((regAny: any) => {
@@ -4804,6 +4862,58 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           return;
         }
 
+        const defaultPullHostBranchBeforeCreate = parsePullHostBranchBeforeCreate(body?.pullHostBranchBeforeCreate);
+        const preflightByIndex: Array<{
+          repoPath: string;
+          pullError: string | null;
+          pullStatus?: number;
+        }> = Array.from({ length: list.length }, () => ({
+          repoPath: '',
+          pullError: null,
+        }));
+        const pullByRepoPath = new Map<
+          string,
+          Promise<{
+            repoRoot: string;
+          }>
+        >();
+        for (const [index, raw] of list.entries()) {
+          const repoRaw = typeof raw?.repoPath === 'string' ? raw.repoPath.trim() : '';
+          const repoPath = repoRaw ? repoRaw : '';
+          const hasPullOverride = Boolean(raw) && Object.prototype.hasOwnProperty.call(raw, 'pullHostBranchBeforeCreate');
+          const shouldPullHostBranchBeforeCreate = hasPullOverride
+            ? parsePullHostBranchBeforeCreate(raw?.pullHostBranchBeforeCreate)
+            : defaultPullHostBranchBeforeCreate;
+
+          if (!repoPath || !shouldPullHostBranchBeforeCreate) {
+            preflightByIndex[index] = {
+              repoPath,
+              pullError: null,
+            };
+            continue;
+          }
+
+          let pullPromise = pullByRepoPath.get(repoPath);
+          if (!pullPromise) {
+            pullPromise = gitPullHostBranchBeforeCreate(repoPath);
+            pullByRepoPath.set(repoPath, pullPromise);
+          }
+          try {
+            const pulled = await pullPromise;
+            preflightByIndex[index] = {
+              repoPath: pulled.repoRoot,
+              pullError: null,
+            };
+          } catch (e: any) {
+            const pullError = formatPullHostBranchBeforeCreateError(e);
+            preflightByIndex[index] = {
+              repoPath,
+              pullError: `Failed to pull host branch before creating drone: ${pullError.message}`,
+              pullStatus: pullError.status,
+            };
+          }
+        }
+
         let accepted: Array<{ id: string; name: string; phase: 'starting' }> = [];
         let rejected: Array<{ name: string; error: string; status?: number }> = [];
         try {
@@ -4813,7 +4923,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             const rejected: Array<{ name: string; error: string; status?: number }> = [];
             const seenInRequest = new Set<string>();
 
-            for (const raw of list) {
+            for (const [index, raw] of list.entries()) {
               let name = '';
               try {
                 name = normalizeDroneDisplayName(raw?.name);
@@ -4832,10 +4942,19 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                 continue;
               }
 
+              const preflight = preflightByIndex[index] ?? { repoPath: '', pullError: null, pullStatus: undefined };
+              if (preflight.pullError) {
+                rejected.push({
+                  name,
+                  error: preflight.pullError,
+                  status: preflight.pullStatus ?? 409,
+                });
+                continue;
+              }
+
               const groupRaw = typeof raw?.group === 'string' ? raw.group.trim() : '';
               const group = groupRaw ? groupRaw : null;
-              const repoRaw = typeof raw?.repoPath === 'string' ? raw.repoPath.trim() : '';
-              const repoPath = repoRaw ? repoRaw : '';
+              const repoPath = preflight.repoPath;
               const build = raw?.build === true;
               const containerPortRaw = raw?.containerPort;
               const containerPort = containerPortRaw == null ? null : Number(containerPortRaw);
