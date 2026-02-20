@@ -145,6 +145,13 @@ export type RepoPullChangeEntry = {
   statusType: RepoChangeType;
 };
 
+export type RepoPullBranchContext = {
+  hostCurrent: string | null;
+  droneCurrent: string | null;
+  droneConfigured: string | null;
+  droneFromRef: string | null;
+};
+
 export type RepoPullChangesPayload =
   | {
       ok: true;
@@ -153,6 +160,7 @@ export type RepoPullChangesPayload =
       repoRoot: string;
       baseSha: string;
       headSha: string;
+      branchContext: RepoPullBranchContext;
       counts: {
         changed: number;
       };
