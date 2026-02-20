@@ -10,6 +10,14 @@ import {
   SIDEBAR_REPOS_COLLAPSED_STORAGE_KEY,
   clampGroupMultiChatColumnWidthPx,
 } from './app-config';
+import {
+  cloneDefaultShortcutBindings,
+  sanitizeSingleShortcutBinding,
+  sanitizeShortcutBindings,
+  type ShortcutActionId,
+  type ShortcutBinding,
+  type ShortcutBindingMap,
+} from './shortcuts';
 import { readLocalStorageItem } from './hooks';
 import type { CustomAgentProfile } from '../types';
 
@@ -52,6 +60,7 @@ type DroneHubUiState = {
   newCustomAgentCommand: string;
   customAgentError: string | null;
   nameSuggestToast: NameSuggestToast;
+  shortcutBindings: ShortcutBindingMap;
   terminalMenuOpen: boolean;
   agentMenuOpen: boolean;
   setActiveRepoPath: (next: Updater<string>) => void;
@@ -85,6 +94,9 @@ type DroneHubUiState = {
   setNewCustomAgentCommand: (next: Updater<string>) => void;
   setCustomAgentError: (next: Updater<string | null>) => void;
   setNameSuggestToast: (next: Updater<NameSuggestToast>) => void;
+  setShortcutBindings: (next: Updater<ShortcutBindingMap>) => void;
+  setShortcutBinding: (id: ShortcutActionId, binding: ShortcutBinding | null) => void;
+  resetShortcutBindings: () => void;
   setTerminalMenuOpen: (next: Updater<boolean>) => void;
   setAgentMenuOpen: (next: Updater<boolean>) => void;
 };
@@ -110,6 +122,7 @@ type DroneHubUiPersistedState = Pick<
   | 'spawnAgentKey'
   | 'spawnModel'
   | 'customAgents'
+  | 'shortcutBindings'
 >;
 
 function readCustomAgents(): CustomAgentProfile[] {
@@ -196,6 +209,7 @@ function readLegacyPersistedDefaults(): DroneHubUiPersistedState {
     spawnAgentKey: readLocalStorageItem('droneHub.spawnAgent') || 'builtin:cursor',
     spawnModel: readLocalStorageItem('droneHub.spawnModel') || '',
     customAgents: readCustomAgents(),
+    shortcutBindings: cloneDefaultShortcutBindings(),
   };
 }
 
@@ -235,6 +249,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       newCustomAgentCommand: '',
       customAgentError: null,
       nameSuggestToast: null,
+      shortcutBindings: cloneDefaultShortcutBindings(),
       terminalMenuOpen: false,
       agentMenuOpen: false,
       setActiveRepoPath: (next) => set((s) => ({ activeRepoPath: resolveNext(s.activeRepoPath, next) })),
@@ -271,6 +286,18 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       setNewCustomAgentCommand: (next) => set((s) => ({ newCustomAgentCommand: resolveNext(s.newCustomAgentCommand, next) })),
       setCustomAgentError: (next) => set((s) => ({ customAgentError: resolveNext(s.customAgentError, next) })),
       setNameSuggestToast: (next) => set((s) => ({ nameSuggestToast: resolveNext(s.nameSuggestToast, next) })),
+      setShortcutBindings: (next) =>
+        set((s) => ({
+          shortcutBindings: sanitizeShortcutBindings(resolveNext(s.shortcutBindings, next)),
+        })),
+      setShortcutBinding: (id, binding) =>
+        set((s) => ({
+          shortcutBindings: {
+            ...s.shortcutBindings,
+            [id]: sanitizeSingleShortcutBinding(binding, s.shortcutBindings[id]),
+          },
+        })),
+      resetShortcutBindings: () => set({ shortcutBindings: cloneDefaultShortcutBindings() }),
       setTerminalMenuOpen: (next) => set((s) => ({ terminalMenuOpen: resolveNext(s.terminalMenuOpen, next) })),
       setAgentMenuOpen: (next) => set((s) => ({ agentMenuOpen: resolveNext(s.agentMenuOpen, next) })),
     }),
@@ -294,6 +321,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         spawnAgentKey: state.spawnAgentKey,
         spawnModel: state.spawnModel,
         customAgents: state.customAgents,
+        shortcutBindings: state.shortcutBindings,
       }),
       merge: (persistedState, currentState) => {
         const persisted = (persistedState as Partial<DroneHubUiPersistedState>) ?? {};
@@ -310,6 +338,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           outputView: normalizeOutputView(persisted.outputView ?? currentState.outputView),
           fsExplorerView: normalizeFsExplorerView(persisted.fsExplorerView ?? currentState.fsExplorerView),
           customAgents: sanitizeCustomAgents(persisted.customAgents ?? currentState.customAgents),
+          shortcutBindings: sanitizeShortcutBindings(persisted.shortcutBindings ?? currentState.shortcutBindings),
         };
       },
     },
@@ -345,6 +374,7 @@ export function useDroneHubAppModelUiState() {
       newCustomAgentCommand: s.newCustomAgentCommand,
       customAgentError: s.customAgentError,
       nameSuggestToast: s.nameSuggestToast,
+      shortcutBindings: s.shortcutBindings,
       terminalMenuOpen: s.terminalMenuOpen,
       setActiveRepoPath: s.setActiveRepoPath,
       setChatHeaderRepoPath: s.setChatHeaderRepoPath,
@@ -370,6 +400,9 @@ export function useDroneHubAppModelUiState() {
       setNewCustomAgentCommand: s.setNewCustomAgentCommand,
       setCustomAgentError: s.setCustomAgentError,
       setNameSuggestToast: s.setNameSuggestToast,
+      setShortcutBindings: s.setShortcutBindings,
+      setShortcutBinding: s.setShortcutBinding,
+      resetShortcutBindings: s.resetShortcutBindings,
       setTerminalMenuOpen: s.setTerminalMenuOpen,
     })),
   );
