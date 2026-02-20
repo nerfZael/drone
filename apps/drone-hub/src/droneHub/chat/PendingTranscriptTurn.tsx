@@ -4,13 +4,21 @@ import type { PendingPrompt } from '../types';
 import { CollapsibleMarkdown } from './CollapsibleMarkdown';
 import { IconBot, IconUser, TypingDots } from './icons';
 
-export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({ item, nowMs }: { item: PendingPrompt; nowMs: number }) {
+export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
+  item,
+  nowMs,
+  showRoleIcons = true,
+}: {
+  item: PendingPrompt;
+  nowMs: number;
+  showRoleIcons?: boolean;
+}) {
   const isFailed = item.state === 'failed';
   const badgeLabel = isFailed ? 'Failed' : item.state === 'queued' ? 'Queued' : 'Pending';
   return (
     <div className="animate-fade-in opacity-90">
       <div className="flex justify-end mb-3">
-        <div className="max-w-[85%] min-w-[120px]">
+        <div className={`${showRoleIcons ? 'max-w-[85%]' : 'max-w-full'} min-w-[120px]`}>
           <div className="flex items-center justify-end gap-2 mb-1.5">
             <span
               className={`text-[9px] font-semibold tracking-wide uppercase px-1.5 py-0.5 rounded border ${
@@ -36,16 +44,20 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
             <CollapsibleMarkdown text={item.prompt} fadeTo="var(--user-dim)" className="dh-markdown--user" />
           </div>
         </div>
-        <div className="flex-shrink-0 w-7 h-7 rounded bg-[var(--user-subtle)] border border-[rgba(148,163,184,.15)] flex items-center justify-center mt-6 ml-3">
-          <IconUser className="text-[var(--user)] w-3.5 h-3.5" />
-        </div>
+        {showRoleIcons && (
+          <div className="flex-shrink-0 w-7 h-7 rounded bg-[var(--user-subtle)] border border-[rgba(148,163,184,.15)] flex items-center justify-center mt-6 ml-3">
+            <IconUser className="text-[var(--user)] w-3.5 h-3.5" />
+          </div>
+        )}
       </div>
 
-      <div className="flex gap-3">
-        <div className="flex-shrink-0 w-7 h-7 rounded bg-[var(--accent-subtle)] border border-[rgba(167,139,250,.15)] flex items-center justify-center mt-6">
-          <IconBot className="text-[var(--accent)] w-3.5 h-3.5" />
-        </div>
-        <div className="max-w-[85%] min-w-[120px]">
+      <div className={showRoleIcons ? 'flex gap-3' : 'flex'}>
+        {showRoleIcons && (
+          <div className="flex-shrink-0 w-7 h-7 rounded bg-[var(--accent-subtle)] border border-[rgba(167,139,250,.15)] flex items-center justify-center mt-6">
+            <IconBot className="text-[var(--accent)] w-3.5 h-3.5" />
+          </div>
+        )}
+        <div className={`${showRoleIcons ? 'max-w-[85%]' : 'max-w-full'} min-w-[120px]`}>
           <div className="flex items-center justify-between mb-1.5">
             <span
               className="text-[10px] font-semibold text-[var(--accent)] tracking-wide uppercase"

@@ -255,11 +255,12 @@ export function GroupMultiChatColumn({
                   showTldr={false}
                   onToggleTldr={noopToggleTldr}
                   onHoverAgentMessage={noopHoverAgentMessage}
+                  showRoleIcons={false}
                 />
               );
             })}
             {visiblePendingPrompts.map((item) => (
-              <PendingTranscriptTurn key={`${drone.id}:pending:${item.id}`} item={item} nowMs={nowMs} />
+              <PendingTranscriptTurn key={`${drone.id}:pending:${item.id}`} item={item} nowMs={nowMs} showRoleIcons={false} />
             ))}
           </div>
         ) : (
