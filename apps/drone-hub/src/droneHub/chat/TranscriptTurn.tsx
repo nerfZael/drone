@@ -21,6 +21,7 @@ export const TranscriptTurn = React.memo(
     showTldr,
     onToggleTldr,
     onHoverAgentMessage,
+    showRoleIcons = true,
   }: {
     item: TranscriptItem;
     nowMs: number;
@@ -31,6 +32,7 @@ export const TranscriptTurn = React.memo(
     showTldr: boolean;
     onToggleTldr: (item: TranscriptItem) => void;
     onHoverAgentMessage: (item: TranscriptItem | null) => void;
+    showRoleIcons?: boolean;
   }) {
     const cleaned = item.ok ? stripAnsi(item.output) : stripAnsi(item.error || 'failed');
     const promptIso = item.promptAt || item.at;
@@ -51,7 +53,7 @@ export const TranscriptTurn = React.memo(
       <div className="animate-fade-in">
         {/* User message */}
         <div className="flex justify-end mb-3">
-          <div className="max-w-[85%] min-w-[120px]">
+          <div className={`${showRoleIcons ? 'max-w-[85%]' : 'max-w-full'} min-w-[120px]`}>
             <div className="flex items-center justify-end gap-2 mb-1.5">
               <span className="text-[9px] leading-none text-[var(--muted-dim)] font-mono"
                 title={new Date(promptIso).toLocaleString()}
@@ -69,17 +71,21 @@ export const TranscriptTurn = React.memo(
               <CollapsibleMarkdown text={item.prompt} fadeTo="var(--user-dim)" className="dh-markdown--user" />
             </div>
           </div>
-          <div className="flex-shrink-0 w-7 h-7 rounded bg-[var(--user-subtle)] border border-[rgba(148,163,184,.15)] flex items-center justify-center mt-6 ml-3">
-            <IconUser className="text-[var(--user)] w-3.5 h-3.5" />
-          </div>
+          {showRoleIcons && (
+            <div className="flex-shrink-0 w-7 h-7 rounded bg-[var(--user-subtle)] border border-[rgba(148,163,184,.15)] flex items-center justify-center mt-6 ml-3">
+              <IconUser className="text-[var(--user)] w-3.5 h-3.5" />
+            </div>
+          )}
         </div>
 
         {/* Agent response */}
-        <div className="flex gap-3">
-          <div className="flex-shrink-0 w-7 h-7 rounded bg-[var(--accent-subtle)] border border-[rgba(167,139,250,.15)] flex items-center justify-center mt-6">
-            <IconBot className="text-[var(--accent)] w-3.5 h-3.5" />
-          </div>
-          <div className="max-w-[85%] min-w-[120px]">
+        <div className={showRoleIcons ? 'flex gap-3' : 'flex'}>
+          {showRoleIcons && (
+            <div className="flex-shrink-0 w-7 h-7 rounded bg-[var(--accent-subtle)] border border-[rgba(167,139,250,.15)] flex items-center justify-center mt-6">
+              <IconBot className="text-[var(--accent)] w-3.5 h-3.5" />
+            </div>
+          )}
+          <div className={`${showRoleIcons ? 'max-w-[85%]' : 'max-w-full'} min-w-[120px]`}>
             <div className="flex items-center justify-between mb-1.5">
               <span
                 className="text-[10px] font-semibold text-[var(--accent)] tracking-wide uppercase"
@@ -173,5 +179,6 @@ export const TranscriptTurn = React.memo(
     ((a.tldr && a.tldr.status === 'ready' ? a.tldr.summary : '') === (b.tldr && b.tldr.status === 'ready' ? b.tldr.summary : '')) &&
     ((a.tldr && a.tldr.status === 'error' ? a.tldr.error : '') === (b.tldr && b.tldr.status === 'error' ? b.tldr.error : '')) &&
     a.onToggleTldr === b.onToggleTldr &&
-    a.onHoverAgentMessage === b.onHoverAgentMessage,
+    a.onHoverAgentMessage === b.onHoverAgentMessage &&
+    (a.showRoleIcons ?? true) === (b.showRoleIcons ?? true),
 );
