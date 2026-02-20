@@ -269,6 +269,32 @@ async function getFreeTcpPort(): Promise<number> {
   return addr.port;
 }
 
+async function getUniqueFreeTcpPorts(count: number): Promise<number[]> {
+  const ports: number[] = [];
+  const seen = new Set<number>();
+  const maxAttempts = Math.max(20, count * 12);
+  for (let i = 0; i < maxAttempts && ports.length < count; i++) {
+    const p = await getFreeTcpPort();
+    if (seen.has(p)) continue;
+    seen.add(p);
+    ports.push(p);
+  }
+  if (ports.length !== count) {
+    throw new Error(`failed to allocate ${count} unique host ports`);
+  }
+  return ports;
+}
+
+function isPortAllocationConflictError(err: unknown): boolean {
+  const msg = String((err as any)?.message ?? err ?? '').toLowerCase();
+  return (
+    msg.includes('port is already allocated') ||
+    msg.includes('address already in use') ||
+    (msg.includes('bind for') && msg.includes('failed')) ||
+    (msg.includes('failed to set up container networking') && msg.includes('bind'))
+  );
+}
+
 type HubState = {
   version: 1;
   pid: number;
@@ -566,20 +592,30 @@ createCommand
     const containerName = stableContainerNameFromDroneId(stableId);
     const displayName = normalizeDroneDisplayName(name);
 
-    // Pick truly free host ports (dvm's auto-allocation only checks Docker ports, not host processes).
-    const hostPortDaemon = await getFreeTcpPort();
-    const hostPortRdp = await getFreeTcpPort();
-    const hostPortNoVnc = await getFreeTcpPort();
-    const hostPort3000 = await getFreeTcpPort();
-    const hostPort3001 = await getFreeTcpPort();
-    const hostPort5173 = await getFreeTcpPort();
-    const hostPort5174 = await getFreeTcpPort();
-    await dvmCreate(containerName, [
-      '--ports',
-      `${hostPortDaemon}:${containerPort},${hostPortRdp}:3389,${hostPortNoVnc}:6080,${hostPort3000}:3000,${hostPort3001}:3001,${hostPort5173}:5173,${hostPort5174}:5174`,
-    ]);
-
-    const hostPort = await resolveHostPort(containerName, containerPort);
+    let hostPort = 0;
+    const createAttempts = 5;
+    for (let attempt = 1; attempt <= createAttempts; attempt++) {
+      try {
+        // Pick truly free host ports (dvm's auto-allocation only checks Docker ports, not host processes).
+        const [hostPortDaemon, hostPortRdp, hostPortNoVnc, hostPort3000, hostPort3001, hostPort5173, hostPort5174] =
+          await getUniqueFreeTcpPorts(7);
+        await dvmCreate(containerName, [
+          '--ports',
+          `${hostPortDaemon}:${containerPort},${hostPortRdp}:3389,${hostPortNoVnc}:6080,${hostPort3000}:3000,${hostPort3001}:3001,${hostPort5173}:5173,${hostPort5174}:5174`,
+        ]);
+        hostPort = await resolveHostPort(containerName, containerPort);
+        break;
+      } catch (err) {
+        if (!isPortAllocationConflictError(err) || attempt === createAttempts) throw err;
+        try {
+          await dvmRemove(containerName);
+        } catch {
+          // ignore best-effort cleanup between retries
+        }
+        await sleep(125 * attempt);
+      }
+    }
+    if (!hostPort) throw new Error(`failed creating ${containerName}: no daemon host port mapped`);
 
     if (cwd) {
       const ensureCmd = mkdir
