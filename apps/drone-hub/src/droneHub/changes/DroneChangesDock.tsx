@@ -97,7 +97,7 @@ function statusBadgeTitle(entry: RepoChangeEntry, mode: ChangesDataMode): string
     return `Pull preview status: ${statusCharLabel(entry.stagedChar)} (${statusCharMeaning(entry.stagedChar)})`;
   }
   return [
-    'Git status badge [staged][unstaged]',
+    'Git status badge S/U (staged/unstaged)',
     `staged: ${statusCharLabel(entry.stagedChar)} (${statusCharMeaning(entry.stagedChar)})`,
     `unstaged: ${statusCharLabel(entry.unstagedChar)} (${statusCharMeaning(entry.unstagedChar)})`,
   ].join(' | ');
@@ -275,6 +275,30 @@ function IconFile() {
     <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
       <path d="M3.75 0A1.75 1.75 0 002 1.75v12.5C2 15.216 2.784 16 3.75 16h8.5A1.75 1.75 0 0014 14.25V5.5a.75.75 0 00-.22-.53L9.03.22A.75.75 0 008.5 0H3.75zm4 .75v3A1.75 1.75 0 009.5 5.5h3v8.75a.25.25 0 01-.25.25h-8.5a.25.25 0 01-.25-.25V1.75a.25.25 0 01.25-.25h4z" />
     </svg>
+  );
+}
+
+function MetaChip({
+  label,
+  value,
+  title,
+  mono = false,
+}: {
+  label: string;
+  value: React.ReactNode;
+  title?: string;
+  mono?: boolean;
+}) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-1.5 py-[1px] text-[10px] ${
+        mono ? 'font-mono' : ''
+      }`}
+      title={title}
+    >
+      <span className="uppercase tracking-[0.08em] text-[var(--muted-dim)]">{label}</span>
+      <span className="text-[var(--fg-secondary)]">{value}</span>
+    </span>
   );
 }
 
@@ -702,7 +726,7 @@ export function DroneChangesDock({
     });
   }
 
-  const statusLegendTitle = "Status badge uses [staged][unstaged]. '-' means no change and '?' means untracked.";
+  const statusLegendTitle = "Status badge uses S/U (staged/unstaged). '-' means no change and '?' means untracked.";
 
   return (
     <div className="w-full h-full min-h-0 bg-[var(--panel-alt)] overflow-hidden flex flex-col relative dh-changes-dock">
@@ -782,7 +806,7 @@ export function DroneChangesDock({
         </div>
       </div>
 
-      <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] text-[10px] text-[var(--muted)] flex items-center gap-2 min-h-[30px] overflow-x-auto whitespace-nowrap">
+      <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] text-[10px] text-[var(--muted)] flex items-center gap-1.5 min-h-[30px] overflow-x-auto whitespace-nowrap">
         {!repoAttached ? (
           <span>No repo attached.</span>
         ) : disabled ? (
@@ -797,40 +821,32 @@ export function DroneChangesDock({
           <>
             {dataMode === 'pull-preview' ? (
               <>
-                <span className="truncate" title={pullChanges?.repoRoot || repoPath || '-'}>
+                <span className="truncate max-w-[44ch]" title={pullChanges?.repoRoot || repoPath || '-'}>
                   {pullChanges?.repoRoot || repoPath || '-'}
                 </span>
-                <span className="text-[var(--muted-dim)]">\u2022</span>
-                <span>{pullChanges?.counts.changed ?? 0} files</span>
-                <span className="text-[var(--muted-dim)]">\u2022</span>
-                <span className="font-mono" title={pullBase ?? ''}>
-                  base {shortSha(pullBase)}
-                </span>
-                <span className="text-[var(--muted-dim)]">\u2192</span>
-                <span className="font-mono" title={pullHead ?? ''}>
-                  head {shortSha(pullHead)}
-                </span>
+                <MetaChip label="files" value={pullChanges?.counts.changed ?? 0} />
+                <MetaChip label="base" value={shortSha(pullBase)} title={pullBase ?? ''} mono />
+                <MetaChip label="head" value={shortSha(pullHead)} title={pullHead ?? ''} mono />
               </>
             ) : (
               <>
-                <span className="truncate" title={changes?.repoRoot || repoPath || '-'}>
+                <span className="truncate max-w-[44ch]" title={changes?.repoRoot || repoPath || '-'}>
                   {changes?.repoRoot || repoPath || '-'}
                 </span>
-                <span className="text-[var(--muted-dim)]">\u2022</span>
-                <span>{counts?.changed ?? 0} changed</span>
-                <span>{counts?.staged ?? 0} staged</span>
-                <span>{counts?.unstaged ?? 0} unstaged</span>
-                <span className="text-[var(--muted-dim)]">\u2022</span>
-                <span className="font-mono text-[9px]" title={statusLegendTitle}>
-                  [S][U]
-                </span>
+                <MetaChip label="changed" value={counts?.changed ?? 0} />
+                <MetaChip label="staged" value={counts?.staged ?? 0} />
+                <MetaChip label="unstaged" value={counts?.unstaged ?? 0} />
+                <MetaChip label="status" value="S/U" title={statusLegendTitle} mono />
                 {changes?.branch.head && (
-                  <>
-                    <span className="text-[var(--muted-dim)]">\u2022</span>
-                    <span className="font-mono" title={changes.branch.head}>
+                  <span
+                    className="inline-flex items-center gap-1 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-1.5 py-[1px] text-[10px]"
+                    title={changes.branch.head}
+                  >
+                    <span className="uppercase tracking-[0.08em] text-[var(--muted-dim)]">branch</span>
+                    <span className="font-mono text-[var(--fg-secondary)] truncate max-w-[28ch]">
                       {changes.branch.head}
                     </span>
-                  </>
+                  </span>
                 )}
               </>
             )}
