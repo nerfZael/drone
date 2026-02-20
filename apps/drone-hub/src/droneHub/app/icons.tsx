@@ -97,6 +97,34 @@ export function IconColumns({ className }: { className?: string }) {
   );
 }
 
+export function IconAutoMinimize({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="1.5" y="2.25" width="13" height="11.5" rx="1.25" />
+      <line x1="5.5" y1="2.25" x2="5.5" y2="13.75" />
+      <path d="M10.75 6L8 8l2.75 2" />
+    </svg>
+  );
+}
+
+export function IconSidebarCollapse({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M11 3L6 8l5 5" />
+      <line x1="3" y1="3" x2="3" y2="13" />
+    </svg>
+  );
+}
+
+export function IconSidebarExpand({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M5 3l5 5-5 5" />
+      <line x1="13" y1="3" x2="13" y2="13" />
+    </svg>
+  );
+}
+
 export function IconPencil({ className }: { className?: string }) {
   return (
     <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
