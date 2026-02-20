@@ -59,6 +59,8 @@ export function DroneCard({
   const hasActions = canClone || canRename || canSetBaseImage || canDelete;
   const actionsReservedWidthPx = actionCount > 0 ? actionCount * 24 + Math.max(0, actionCount - 1) * 4 : 0;
   const pinActionsVisible = Boolean(renameBusy) || Boolean(setBaseImageBusy) || Boolean(deleteBusy);
+  const [isHovered, setIsHovered] = React.useState(false);
+  const reserveActionsSpace = hasActions && (pinActionsVisible || isHovered);
   const showRespondingAsStatus = Boolean(busy) && Boolean(drone.statusOk) && drone.hubPhase !== 'error';
   const errText = String(drone.hubMessage ?? drone.statusError ?? '').trim();
   const showInlineError = drone.hubPhase === 'error' && Boolean(errText);
@@ -75,6 +77,8 @@ export function DroneCard({
       draggable={Boolean(draggable)}
       onDragStart={(e) => onDragStart?.(e)}
       onDragEnd={() => onDragEnd?.()}
+      onPointerEnter={() => setIsHovered(true)}
+      onPointerLeave={() => setIsHovered(false)}
       onClick={(e) => onClick({ toggle: e.metaKey || e.ctrlKey, range: e.shiftKey })}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -134,7 +138,7 @@ export function DroneCard({
       ) : (
         <div
           className="relative flex items-center justify-end flex-shrink-0 ml-2"
-          style={hasActions ? { minWidth: actionsReservedWidthPx } : undefined}
+          style={reserveActionsSpace ? { minWidth: actionsReservedWidthPx } : undefined}
         >
           <div
             className={

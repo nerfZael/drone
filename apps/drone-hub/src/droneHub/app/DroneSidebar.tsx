@@ -595,6 +595,7 @@ export function DroneSidebar({
                   const isRenamingGroup = Boolean(renamingGroups[group]);
                   const isDropTarget = dragOverGroup === group;
                   const canRenameGroup = !isUngroupedGroupName(group);
+                  const pinGroupActionsVisible = isDeletingGroup || isRenamingGroup || selectedGroupMultiChat === group;
                   return (
                     <div
                       key={group}
@@ -624,7 +625,11 @@ export function DroneSidebar({
                             {group}
                           </span>
                         </button>
-                        <div className="flex items-center justify-end flex-shrink-0 min-w-[148px]">
+                        <div
+                          className={`flex items-center justify-end flex-shrink-0 transition-[min-width] duration-150 ${
+                            pinGroupActionsVisible ? 'min-w-[148px]' : 'min-w-[92px] group-hover/group-header:min-w-[148px]'
+                          }`}
+                        >
                           <div className="relative w-full flex justify-end">
                             <div
                               className={`flex items-center gap-2 text-[10px] font-mono text-[var(--muted-dim)] transition-opacity duration-150 ${
