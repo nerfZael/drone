@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { shouldDeferQueuedTranscriptPrompt } from '../src/hub/pendingPromptEnqueue';
+import { shouldDeferQueuedTranscriptPrompt, stalePendingPromptState } from '../src/hub/pendingPromptEnqueue';
 
 describe('shouldDeferQueuedTranscriptPrompt', () => {
   test('does not defer for cursor/claude', () => {
@@ -73,3 +73,60 @@ describe('shouldDeferQueuedTranscriptPrompt', () => {
   });
 });
 
+describe('stalePendingPromptState', () => {
+  test('marks sending stale after enqueue timeout floor', () => {
+    const nowMs = Date.now();
+    const enqueueTimeoutMs = 180_000;
+    const staleAt = new Date(nowMs - enqueueTimeoutMs - 5_000).toISOString();
+    expect(
+      stalePendingPromptState({
+        state: 'sending',
+        updatedAt: staleAt,
+        enqueueTimeoutMs,
+        nowMs,
+      }),
+    ).toBe('sending');
+  });
+
+  test('uses longer timeout before marking sent stale', () => {
+    const nowMs = Date.now();
+    const enqueueTimeoutMs = 180_000;
+    const freshEnough = new Date(nowMs - 5 * 60_000).toISOString();
+    const stale = new Date(nowMs - 11 * 60_000).toISOString();
+    expect(
+      stalePendingPromptState({
+        state: 'sent',
+        updatedAt: freshEnough,
+        enqueueTimeoutMs,
+        nowMs,
+      }),
+    ).toBeNull();
+    expect(
+      stalePendingPromptState({
+        state: 'sent',
+        updatedAt: stale,
+        enqueueTimeoutMs,
+        nowMs,
+      }),
+    ).toBe('sent');
+  });
+
+  test('returns null for invalid timestamp or non-active states', () => {
+    expect(
+      stalePendingPromptState({
+        state: 'failed',
+        updatedAt: '2020-01-01T00:00:00.000Z',
+        enqueueTimeoutMs: 180_000,
+        nowMs: Date.now(),
+      }),
+    ).toBeNull();
+    expect(
+      stalePendingPromptState({
+        state: 'sending',
+        updatedAt: 'not-a-date',
+        enqueueTimeoutMs: 180_000,
+        nowMs: Date.now(),
+      }),
+    ).toBeNull();
+  });
+});

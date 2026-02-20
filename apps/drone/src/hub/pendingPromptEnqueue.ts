@@ -7,6 +7,44 @@ export type PendingPromptLike = {
   state: PendingPromptState | string;
 };
 
+type PendingPromptStalenessOpts = {
+  state: PendingPromptState | string;
+  updatedAt?: string | null;
+  at?: string | null;
+  enqueueTimeoutMs: number;
+  nowMs?: number;
+};
+
+const MIN_SENDING_STALE_MS = 180_000;
+const MIN_SENT_STALE_MS = 10 * 60_000;
+
+function parseTimestampMs(raw: string | null | undefined): number | null {
+  const s = String(raw ?? '').trim();
+  if (!s) return null;
+  const ms = Date.parse(s);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/**
+ * Returns the stale pending state when a prompt has been waiting too long to
+ * reconcile from daemon job status lookups.
+ */
+export function stalePendingPromptState(opts: PendingPromptStalenessOpts): 'sending' | 'sent' | null {
+  const state = String(opts.state ?? '').trim();
+  if (state !== 'sending' && state !== 'sent') return null;
+  const tsMs = parseTimestampMs(opts.updatedAt ?? opts.at);
+  if (!Number.isFinite(tsMs)) return null;
+  const nowMs = typeof opts.nowMs === 'number' && Number.isFinite(opts.nowMs) ? opts.nowMs : Date.now();
+  const ageMs = nowMs - Number(tsMs);
+  if (!Number.isFinite(ageMs) || ageMs < 0) return null;
+  const enqueueTimeoutMs = Number.isFinite(opts.enqueueTimeoutMs) ? Math.max(1, Math.floor(opts.enqueueTimeoutMs)) : MIN_SENDING_STALE_MS;
+  const staleAfterMs =
+    state === 'sending'
+      ? Math.max(enqueueTimeoutMs, MIN_SENDING_STALE_MS)
+      : Math.max(enqueueTimeoutMs * 2, MIN_SENT_STALE_MS);
+  return ageMs >= staleAfterMs ? state : null;
+}
+
 /**
  * For agents whose continuation/session identifier is only discoverable after the first turn
  * completes (notably Codex thread ids and OpenCode session ids), we must avoid enqueuing
@@ -38,4 +76,3 @@ export function shouldDeferQueuedTranscriptPrompt(opts: {
   }
   return false;
 }
-

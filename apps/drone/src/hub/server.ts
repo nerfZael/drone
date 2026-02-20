@@ -39,7 +39,7 @@ import {
 } from '../host/api';
 import { jobsPlanFromAgentMessage, suggestDroneNameFromMessage } from './jobs-from-message';
 import { tldrFromAgentMessage } from './tldr-from-message';
-import { shouldDeferQueuedTranscriptPrompt } from './pendingPromptEnqueue';
+import { shouldDeferQueuedTranscriptPrompt, stalePendingPromptState } from './pendingPromptEnqueue';
 import {
   cleanupQuarantineWorktree,
   deleteHostRefBestEffort,
@@ -1944,22 +1944,25 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
       // eslint-disable-next-line no-await-in-loop
       jobResp = await dronePromptGet(client, id);
     } catch {
-      // If this has stayed "sending" well past enqueue timeout, mark it failed so it
-      // doesn't remain stuck forever after hub restarts or daemon outages.
-      if (state === 'sending') {
-        const tsRaw = String(p?.updatedAt ?? p?.at ?? '').trim();
-        const tsMs = tsRaw ? Date.parse(tsRaw) : NaN;
-        const ageMs = Number.isFinite(tsMs) ? Date.now() - tsMs : 0;
-        const staleAfterMs = Math.max(defaultPromptEnqueueTimeoutMs(), 180_000);
-        if (ageMs >= staleAfterMs) {
-          pendingList[i] = {
-            ...p,
-            state: 'failed',
-            error: 'prompt enqueue timed out (hub restart or daemon unavailable)',
-            updatedAt: nowIso(),
-          };
-          changed = true;
-        }
+      // If daemon job lookups keep failing for too long, fail stale pending rows so
+      // they do not block queued follow-up prompts indefinitely.
+      const staleState = stalePendingPromptState({
+        state,
+        updatedAt: typeof p?.updatedAt === 'string' ? p.updatedAt : null,
+        at: typeof p?.at === 'string' ? p.at : null,
+        enqueueTimeoutMs: defaultPromptEnqueueTimeoutMs(),
+      });
+      if (staleState === 'sending' || staleState === 'sent') {
+        pendingList[i] = {
+          ...p,
+          state: 'failed',
+          error:
+            staleState === 'sending'
+              ? 'prompt enqueue timed out (hub restart or daemon unavailable)'
+              : 'prompt status unavailable for too long (daemon unavailable or restarted)',
+          updatedAt: nowIso(),
+        };
+        changed = true;
       }
       continue;
     }
