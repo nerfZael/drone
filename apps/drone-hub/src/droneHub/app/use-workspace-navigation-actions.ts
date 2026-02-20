@@ -39,6 +39,11 @@ type UseWorkspaceNavigationActionsArgs = {
   resetDraftNameSuggestSeq: () => void;
 };
 
+type OpenDraftChatComposerOptions = {
+  repoPath?: string | null;
+  group?: string | null;
+};
+
 export function useWorkspaceNavigationActions({
   creating,
   createMode,
@@ -117,15 +122,22 @@ export function useWorkspaceNavigationActions({
     setDraftCreateOpen,
   ]);
 
-  const openDraftChatComposer = React.useCallback(() => {
+  const openDraftChatComposer = React.useCallback((opts?: OpenDraftChatComposerOptions) => {
+    const hasRepoOverride = Boolean(opts) && Object.prototype.hasOwnProperty.call(opts, 'repoPath');
+    const hasGroupOverride = Boolean(opts) && Object.prototype.hasOwnProperty.call(opts, 'group');
     const activeRepo = String(activeRepoPath ?? '').trim();
-    if (activeRepo) setChatHeaderRepoPath(activeRepo);
+    const nextGroup = hasGroupOverride ? String(opts?.group ?? '').trim() : '';
+    if (hasRepoOverride) {
+      setChatHeaderRepoPath(normalizeCreateRepoPath(String(opts?.repoPath ?? '')));
+    } else if (activeRepo) {
+      setChatHeaderRepoPath(normalizeCreateRepoPath(activeRepo));
+    }
     setAppView('workspace');
     setCreateOpen(false);
     setCreateError(null);
     setDraftCreateOpen(false);
     setDraftCreateName('');
-    setDraftCreateGroup('');
+    setDraftCreateGroup(nextGroup);
     setDraftCreateError(null);
     setDraftAutoRenaming(false);
     setDraftNameSuggestionError(null);
@@ -140,6 +152,7 @@ export function useWorkspaceNavigationActions({
     setSelectedChat('default');
   }, [
     activeRepoPath,
+    normalizeCreateRepoPath,
     preferredSelectedDroneHoldUntilRef,
     preferredSelectedDroneRef,
     resetDraftNameSuggestSeq,

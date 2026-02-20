@@ -3,6 +3,7 @@ import type { DroneSummary, PendingPrompt, TranscriptItem } from '../types';
 import type { DraftChatState, DroneErrorModalState, StartupSeedState } from './app-types';
 import type { RightPanelTab } from './app-config';
 import { isStartupSeedFresh } from './app-config';
+import { isUngroupedGroupName } from '../../domain';
 import type { ShortcutActionId, ShortcutBindingMap } from './shortcuts';
 import { SHORTCUT_DEFINITIONS, isShortcutMatch } from './shortcuts';
 import { isDroneStartingOrSeeding } from './helpers';
@@ -33,7 +34,7 @@ type UseDroneHubLifecycleEffectsArgs = {
   droneErrorModal: DroneErrorModalState | null;
   setDroneErrorModal: Setter<DroneErrorModalState | null>;
   openCreateModal: () => void;
-  openDraftChatComposer: () => void;
+  openDraftChatComposer: (opts?: { repoPath?: string | null; group?: string | null }) => void;
   openGroupMultiChat: (group: string) => void;
   toggleTldrFromShortcut: () => void;
   createOpen: boolean;
@@ -175,13 +176,44 @@ export function useDroneHubLifecycleEffects({
       return group || null;
     };
 
+    const getHoveredSidebarCreateContext = (): {
+      kind: 'repo' | 'group';
+      repoPath: string;
+      groupName: string;
+    } | null => {
+      const hovered = document.querySelector<HTMLElement>('[data-drone-sidebar-group]:hover');
+      if (!hovered) return null;
+      const kindRaw = String(hovered.dataset.droneSidebarGroupKind ?? '').trim().toLowerCase();
+      const kind: 'repo' | 'group' = kindRaw === 'repo' ? 'repo' : 'group';
+      return {
+        kind,
+        repoPath: String(hovered.dataset.droneSidebarRepoPath ?? '').trim(),
+        groupName: String(hovered.dataset.droneSidebarGroupName ?? '').trim(),
+      };
+    };
+
     const shortcutActionHandlers: Record<ShortcutActionId, () => boolean> = {
       toggleTldr: () => {
         toggleTldrFromShortcut();
         return true;
       },
       createDraftDrone: () => {
-        openDraftChatComposer();
+        const hovered = getHoveredSidebarCreateContext();
+        if (!hovered) {
+          openDraftChatComposer();
+          return true;
+        }
+        if (hovered.kind === 'repo') {
+          // Explicitly pass empty path for the virtual "ungrouped repo" bucket.
+          openDraftChatComposer({ repoPath: hovered.repoPath, group: '' });
+          return true;
+        }
+        const group = isUngroupedGroupName(hovered.groupName) ? '' : hovered.groupName;
+        if (hovered.repoPath) {
+          openDraftChatComposer({ repoPath: hovered.repoPath, group });
+        } else {
+          openDraftChatComposer({ group });
+        }
         return true;
       },
       openCreateModal: () => {
