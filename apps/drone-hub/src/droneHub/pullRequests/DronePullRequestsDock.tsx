@@ -11,6 +11,23 @@ import type {
 
 const PR_MERGE_METHOD_STORAGE_KEY = 'droneHub.prMergeMethod';
 
+type PullRequestListDiagnostics = {
+  repoRoot: string | null;
+  origin: string | null;
+  github: { owner: string; repo: string } | null;
+};
+
+function normalizePullRequestListDiagnostics(raw: any): PullRequestListDiagnostics | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const repoRoot = String(raw?.repoRoot ?? '').trim() || null;
+  const origin = String(raw?.origin ?? '').trim() || null;
+  const owner = String(raw?.github?.owner ?? '').trim();
+  const repo = String(raw?.github?.repo ?? '').trim();
+  const github = owner && repo ? { owner, repo } : null;
+  if (!repoRoot && !origin && !github) return null;
+  return { repoRoot, origin, github };
+}
+
 function formatTimestamp(iso: string): string {
   const text = String(iso ?? '').trim();
   if (!text) return '-';
@@ -132,6 +149,8 @@ export function DronePullRequestsDock({
   const [listData, setListData] = React.useState<Extract<RepoPullRequestsPayload, { ok: true }> | null>(null);
   const [listLoading, setListLoading] = React.useState(false);
   const [listError, setListError] = React.useState<string | null>(null);
+  const [listErrorCode, setListErrorCode] = React.useState<string | null>(null);
+  const [listErrorDiagnostics, setListErrorDiagnostics] = React.useState<PullRequestListDiagnostics | null>(null);
   const [actionError, setActionError] = React.useState<string | null>(null);
   const [actionNotice, setActionNotice] = React.useState<string | null>(null);
   const [busyByPullNumber, setBusyByPullNumber] = React.useState<Record<number, 'merge' | 'close'>>({});
@@ -168,6 +187,8 @@ export function DronePullRequestsDock({
     if (!repoAttached || disabled) {
       setListData(null);
       setListError(null);
+      setListErrorCode(null);
+      setListErrorDiagnostics(null);
       setListLoading(false);
       return;
     }
@@ -185,13 +206,20 @@ export function DronePullRequestsDock({
         if (!mounted) return;
         setListData(data);
         setListError(null);
+        setListErrorCode(null);
+        setListErrorDiagnostics(null);
         startup.markReady();
       } catch (e: any) {
         if (!mounted) return;
         if (startup.suppressErrors) {
           setListError(null);
+          setListErrorCode(null);
+          setListErrorDiagnostics(null);
         } else {
           setListError(e?.message ?? String(e));
+          const code = String(e?.data?.code ?? '').trim();
+          setListErrorCode(code || null);
+          setListErrorDiagnostics(normalizePullRequestListDiagnostics(e?.data?.diagnostics));
         }
       } finally {
         if (mounted && !silent) setListLoading(false);
@@ -360,7 +388,29 @@ export function DronePullRequestsDock({
           </div>
         </div>
       ) : listError ? (
-        <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--red)]">{listError}</div>
+        <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--red)]">
+          <div>{listError}</div>
+          {listErrorCode ? (
+            <div className="mt-1 text-[10px] text-[var(--muted-dim)] font-mono">
+              code: {listErrorCode}
+            </div>
+          ) : null}
+          {listErrorDiagnostics?.repoRoot ? (
+            <div className="mt-1 text-[10px] text-[var(--muted-dim)] font-mono break-all">
+              repo: {listErrorDiagnostics.repoRoot}
+            </div>
+          ) : null}
+          {listErrorDiagnostics?.origin ? (
+            <div className="mt-1 text-[10px] text-[var(--muted-dim)] font-mono break-all">
+              origin: {listErrorDiagnostics.origin}
+            </div>
+          ) : null}
+          {listErrorDiagnostics?.github ? (
+            <div className="mt-1 text-[10px] text-[var(--muted-dim)] font-mono">
+              github: {listErrorDiagnostics.github.owner}/{listErrorDiagnostics.github.repo}
+            </div>
+          ) : null}
+        </div>
       ) : pullRequests.length === 0 && !listLoading ? (
         <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--muted)]">No open pull requests.</div>
       ) : (
