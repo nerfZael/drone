@@ -28,6 +28,7 @@ export const GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX = 420;
 export const GROUP_MULTI_CHAT_COLUMN_WIDTH_MIN_PX = 300;
 export const GROUP_MULTI_CHAT_COLUMN_WIDTH_MAX_PX = 640;
 export const SIDEBAR_REPOS_COLLAPSED_STORAGE_KEY = 'droneHub.sidebarReposCollapsed';
+export const SIDEBAR_AUTO_MINIMIZE_STORAGE_KEY = 'droneHub.sidebarAutoMinimize';
 export const HUB_LOGS_TAIL_LINES = 600;
 export const HUB_LOGS_MAX_BYTES = 200_000;
 export const STARTUP_SEED_MISSING_GRACE_MS = 30_000;
