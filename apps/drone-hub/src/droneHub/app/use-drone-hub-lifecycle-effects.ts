@@ -36,6 +36,7 @@ type UseDroneHubLifecycleEffectsArgs = {
   openCreateModal: () => void;
   openDraftChatComposer: (opts?: { repoPath?: string | null; group?: string | null }) => void;
   openGroupMultiChat: (group: string) => void;
+  openSidebarVisibleMultiChat: () => void;
   toggleTldrFromShortcut: () => void;
   createOpen: boolean;
   setCreateRepoMenuOpen: Setter<boolean>;
@@ -94,6 +95,7 @@ export function useDroneHubLifecycleEffects({
   openCreateModal,
   openDraftChatComposer,
   openGroupMultiChat,
+  openSidebarVisibleMultiChat,
   toggleTldrFromShortcut,
   createOpen,
   setCreateRepoMenuOpen,
@@ -176,6 +178,8 @@ export function useDroneHubLifecycleEffects({
       return group || null;
     };
 
+    const isSidebarHovered = (): boolean => Boolean(document.querySelector('[data-drone-sidebar-root]:hover'));
+
     const getHoveredSidebarCreateContext = (): {
       kind: 'repo' | 'group';
       repoPath: string;
@@ -226,8 +230,12 @@ export function useDroneHubLifecycleEffects({
       },
       openHoveredGroupMultiChat: () => {
         const group = getHoveredSidebarGroup();
-        if (!group) return false;
-        openGroupMultiChat(group);
+        if (group) {
+          openGroupMultiChat(group);
+          return true;
+        }
+        if (!isSidebarHovered()) return false;
+        openSidebarVisibleMultiChat();
         return true;
       },
       openPullRequestsTab: () => {
@@ -279,6 +287,7 @@ export function useDroneHubLifecycleEffects({
     openCreateModal,
     openDraftChatComposer,
     openGroupMultiChat,
+    openSidebarVisibleMultiChat,
     rightPanelSplit,
     setRightPanelBottomTab,
     setRightPanelOpen,

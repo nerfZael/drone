@@ -879,6 +879,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     openCreateModal,
     openDraftChatComposer,
     openGroupMultiChat,
+    openSidebarVisibleMultiChat,
     toggleTldrFromShortcut,
     createOpen,
     setCreateRepoMenuOpen,

@@ -399,6 +399,7 @@ export function DroneSidebar({
   return (
     <>
       <aside
+        data-drone-sidebar-root="true"
         className="bg-[var(--panel-alt)] border-r border-[var(--border)] flex flex-col min-h-0 relative dh-dot-grid flex-shrink-0 overflow-hidden transition-[width] duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)] [will-change:width]"
         style={{ width: sidebarCollapsed ? 0 : SIDEBAR_EXPANDED_WIDTH_PX }}
         onPointerEnter={onSidebarPointerEnter}
@@ -1030,6 +1031,7 @@ export function DroneSidebar({
       </aside>
 
       <div
+        data-drone-sidebar-root="true"
         className={`flex-shrink-0 bg-[var(--panel-alt)] border-r flex flex-col items-center pt-3 gap-2 overflow-hidden transition-[width,opacity,border-color] duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
           sidebarCollapsed
             ? 'opacity-100 border-[var(--border)]'
