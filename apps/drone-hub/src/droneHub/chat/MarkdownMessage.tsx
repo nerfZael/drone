@@ -1,6 +1,5 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
-import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
 
 export function MarkdownMessage({
@@ -13,7 +12,7 @@ export function MarkdownMessage({
   return (
     <div className={`dh-markdown ${className ?? ''}`}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkBreaks]}
+        remarkPlugins={[remarkGfm]}
         components={{
           a: ({ href, children, ...props }) => {
             return (

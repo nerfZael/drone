@@ -112,7 +112,7 @@ export const TranscriptTurn = React.memo(
               <CollapsibleMarkdown
                 text={displayedText}
                 fadeTo={item.ok ? 'var(--accent-subtle)' : 'var(--red-subtle)'}
-                className={showingTldr ? 'dh-markdown--muted' : item.ok ? 'dh-markdown--muted' : 'dh-markdown--error'}
+                className={showingTldr ? 'dh-markdown--muted' : item.ok ? 'dh-markdown--agent' : 'dh-markdown--error'}
                 preserveLeadParagraph
               />
 
