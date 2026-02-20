@@ -4,13 +4,19 @@ import { DroneCard } from '../overview';
 import type { DroneSummary, RepoSummary } from '../types';
 import { DRONE_DND_MIME } from './app-config';
 import { compareDronesByNewestFirst, isDroneStartingOrSeeding } from './helpers';
-import { IconChevron, IconColumns, IconFolder, IconList, IconPencil, IconPlus, IconPlusDouble, IconSettings, IconSpinner, IconTrash, SkeletonLine } from './icons';
+import { IconAutoMinimize, IconChevron, IconColumns, IconFolder, IconList, IconPencil, IconPlus, IconPlusDouble, IconSettings, IconSpinner, IconTrash, SkeletonLine } from './icons';
 import { useDroneSidebarUiState } from './use-drone-hub-ui-store';
 
 type SidebarGroup = {
   group: string;
   items: DroneSummary[];
 };
+
+const SIDEBAR_EXPANDED_WIDTH_PX = 280;
+const SIDEBAR_COLLAPSED_RAIL_WIDTH_PX = 40;
+const AUTO_MINIMIZE_COLLAPSE_DELAY_MS = 90;
+const AUTO_MINIMIZE_EXPAND_DELAY_MS = 120;
+const AUTO_MINIMIZE_REOPEN_GUARD_MS = 220;
 
 export type DroneSidebarProps = {
   dronesError: string | null | undefined;
@@ -142,6 +148,36 @@ export function DroneSidebar({
   const [createGroupInlineError, setCreateGroupInlineError] = React.useState<string | null>(null);
   const [creatingGroupMove, setCreatingGroupMove] = React.useState(false);
   const createGroupInputRef = React.useRef<HTMLInputElement | null>(null);
+  const collapseTimerRef = React.useRef<number | null>(null);
+  const expandTimerRef = React.useRef<number | null>(null);
+  const lastAutoCollapsedAtRef = React.useRef<number>(0);
+
+  const clearCollapseTimer = React.useCallback(() => {
+    if (collapseTimerRef.current === null) return;
+    window.clearTimeout(collapseTimerRef.current);
+    collapseTimerRef.current = null;
+  }, []);
+
+  const clearExpandTimer = React.useCallback(() => {
+    if (expandTimerRef.current === null) return;
+    window.clearTimeout(expandTimerRef.current);
+    expandTimerRef.current = null;
+  }, []);
+
+  React.useEffect(
+    () => () => {
+      clearCollapseTimer();
+      clearExpandTimer();
+    },
+    [clearCollapseTimer, clearExpandTimer],
+  );
+
+  React.useEffect(() => {
+    if (sidebarAutoMinimize) return;
+    clearCollapseTimer();
+    clearExpandTimer();
+    lastAutoCollapsedAtRef.current = 0;
+  }, [clearCollapseTimer, clearExpandTimer, sidebarAutoMinimize]);
 
   React.useEffect(() => {
     if (!createGroupTargetDroneIds || createGroupTargetDroneIds.length === 0) return;
@@ -262,24 +298,61 @@ export function DroneSidebar({
     [createGroupName, createGroupTargetDroneIds, creatingGroupMove, onCreateGroupAndMove],
   );
 
-  const onSidebarMouseLeave = React.useCallback(() => {
-    if (sidebarAutoMinimize && !sidebarCollapsed) {
+  const queueAutoCollapse = React.useCallback(() => {
+    if (!sidebarAutoMinimize || sidebarCollapsed) return;
+    clearCollapseTimer();
+    collapseTimerRef.current = window.setTimeout(() => {
+      collapseTimerRef.current = null;
+      lastAutoCollapsedAtRef.current = Date.now();
       setSidebarCollapsed(true);
-    }
-  }, [sidebarAutoMinimize, sidebarCollapsed, setSidebarCollapsed]);
+    }, AUTO_MINIMIZE_COLLAPSE_DELAY_MS);
+  }, [clearCollapseTimer, setSidebarCollapsed, sidebarAutoMinimize, sidebarCollapsed]);
 
-  const onCollapsedRailMouseEnter = React.useCallback(() => {
-    if (sidebarAutoMinimize && sidebarCollapsed) {
+  const queueAutoExpand = React.useCallback(() => {
+    if (!sidebarAutoMinimize || !sidebarCollapsed) return;
+    if (Date.now() - lastAutoCollapsedAtRef.current < AUTO_MINIMIZE_REOPEN_GUARD_MS) return;
+    clearExpandTimer();
+    expandTimerRef.current = window.setTimeout(() => {
+      expandTimerRef.current = null;
       setSidebarCollapsed(false);
-    }
-  }, [sidebarAutoMinimize, sidebarCollapsed, setSidebarCollapsed]);
+    }, AUTO_MINIMIZE_EXPAND_DELAY_MS);
+  }, [clearExpandTimer, setSidebarCollapsed, sidebarAutoMinimize, sidebarCollapsed]);
+
+  const onSidebarPointerEnter = React.useCallback(() => {
+    clearCollapseTimer();
+    clearExpandTimer();
+  }, [clearCollapseTimer, clearExpandTimer]);
+
+  const onSidebarPointerLeave = React.useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      const related = event.relatedTarget;
+      if (related instanceof Node && event.currentTarget.contains(related)) return;
+      queueAutoCollapse();
+    },
+    [queueAutoCollapse],
+  );
+
+  const onCollapsedRailPointerEnter = React.useCallback(() => {
+    clearCollapseTimer();
+    queueAutoExpand();
+  }, [clearCollapseTimer, queueAutoExpand]);
+
+  const onCollapsedRailPointerLeave = React.useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      const related = event.relatedTarget;
+      if (related instanceof Node && event.currentTarget.contains(related)) return;
+      clearExpandTimer();
+    },
+    [clearExpandTimer],
+  );
 
   return (
     <>
       <aside
-        className="bg-[var(--panel-alt)] border-r border-[var(--border)] flex flex-col min-h-0 relative dh-dot-grid flex-shrink-0 overflow-hidden transition-[width,opacity] duration-200 ease-in-out"
-        style={{ width: sidebarCollapsed ? 0 : 280, opacity: sidebarCollapsed ? 0 : 1 }}
-        onMouseLeave={onSidebarMouseLeave}
+        className="bg-[var(--panel-alt)] border-r border-[var(--border)] flex flex-col min-h-0 relative dh-dot-grid flex-shrink-0 overflow-hidden transition-[width] duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)] [will-change:width]"
+        style={{ width: sidebarCollapsed ? 0 : SIDEBAR_EXPANDED_WIDTH_PX }}
+        onPointerEnter={onSidebarPointerEnter}
+        onPointerLeave={onSidebarPointerLeave}
       >
         <div className="flex-shrink-0 px-3 py-3 border-b border-[var(--border)] relative">
           <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-[var(--accent)] via-[var(--accent-muted)] to-transparent opacity-40" />
@@ -815,68 +888,86 @@ export function DroneSidebar({
                 Auto-delete
               </span>
             </label>
-            <label className="flex items-center gap-2 select-none cursor-pointer group">
-              <input
-                type="checkbox"
-                className="accent-[var(--accent)] w-3.5 h-3.5"
-                checked={sidebarAutoMinimize}
-                onChange={(e) => setSidebarAutoMinimize(e.target.checked)}
-              />
-              <span className="text-[10px] text-[var(--muted-dim)] group-hover:text-[var(--muted)] transition-colors" title="When enabled, the sidebar collapses after mouse leave and expands on hover.">
-                Auto-minimize
-              </span>
-            </label>
           </div>
-          <button
-            type="button"
-            onClick={() => setSidebarCollapsed(true)}
-            className="inline-flex items-center justify-center w-7 h-7 rounded text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)] transition-all"
-            title="Collapse sidebar"
-            aria-label="Collapse sidebar"
-          >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 3L6 8l5 5" /><line x1="3" y1="3" x2="3" y2="13" /></svg>
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setSidebarAutoMinimize((prev) => !prev)}
+              aria-pressed={sidebarAutoMinimize}
+              className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
+                sidebarAutoMinimize
+                  ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                  : 'border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] hover:bg-[var(--hover)]'
+              }`}
+              title={
+                sidebarAutoMinimize
+                  ? 'Disable auto-minimize sidebar'
+                  : 'Enable auto-minimize sidebar'
+              }
+              aria-label={
+                sidebarAutoMinimize
+                  ? 'Disable auto-minimize sidebar'
+                  : 'Enable auto-minimize sidebar'
+              }
+            >
+              <IconAutoMinimize className="opacity-90" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setSidebarCollapsed(true)}
+              className="inline-flex items-center justify-center w-7 h-7 rounded text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)] transition-all"
+              title="Collapse sidebar"
+              aria-label="Collapse sidebar"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 3L6 8l5 5" /><line x1="3" y1="3" x2="3" y2="13" /></svg>
+            </button>
+          </div>
         </div>
       </aside>
 
-      {sidebarCollapsed && (
-        <div
-          className="flex-shrink-0 w-10 bg-[var(--panel-alt)] border-r border-[var(--border)] flex flex-col items-center pt-3 gap-2"
-          onMouseEnter={onCollapsedRailMouseEnter}
+      <div
+        className={`flex-shrink-0 bg-[var(--panel-alt)] border-r flex flex-col items-center pt-3 gap-2 overflow-hidden transition-[width,opacity,border-color] duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
+          sidebarCollapsed
+            ? 'opacity-100 border-[var(--border)]'
+            : 'opacity-0 border-transparent pointer-events-none'
+        }`}
+        style={{ width: sidebarCollapsed ? SIDEBAR_COLLAPSED_RAIL_WIDTH_PX : 0 }}
+        onPointerEnter={onCollapsedRailPointerEnter}
+        onPointerLeave={onCollapsedRailPointerLeave}
+        aria-hidden={!sidebarCollapsed}
+      >
+        <button
+          type="button"
+          onClick={() => setSidebarCollapsed(false)}
+          className="inline-flex items-center justify-center w-7 h-7 rounded text-[var(--muted-dim)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-all"
+          title="Expand sidebar"
+          aria-label="Expand sidebar"
         >
-          <button
-            type="button"
-            onClick={() => setSidebarCollapsed(false)}
-            className="inline-flex items-center justify-center w-7 h-7 rounded text-[var(--muted-dim)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-all"
-            title="Expand sidebar"
-            aria-label="Expand sidebar"
-          >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3l5 5-5 5" /><line x1="13" y1="3" x2="13" y2="13" /></svg>
-          </button>
-          <button
-            type="button"
-            onClick={() => { setSidebarCollapsed(false); onOpenDraftChatComposer(); }}
-            className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
-              draftChat
-                ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                : 'border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
-            }`}
-            title="Create drone (A)"
-            aria-label="Create drone"
-          >
-            <IconPlus className="opacity-80" />
-          </button>
-          <button
-            type="button"
-            onClick={() => { setSidebarCollapsed(false); onOpenCreateModal(); }}
-            className="inline-flex items-center justify-center w-7 h-7 rounded border border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] transition-all"
-            title="Create multiple drones (S)"
-            aria-label="Create multiple drones"
-          >
-            <IconPlusDouble className="opacity-80" />
-          </button>
-        </div>
-      )}
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3l5 5-5 5" /><line x1="13" y1="3" x2="13" y2="13" /></svg>
+        </button>
+        <button
+          type="button"
+          onClick={() => { setSidebarCollapsed(false); onOpenDraftChatComposer(); }}
+          className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
+            draftChat
+              ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+              : 'border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
+          }`}
+          title="Create drone (A)"
+          aria-label="Create drone"
+        >
+          <IconPlus className="opacity-80" />
+        </button>
+        <button
+          type="button"
+          onClick={() => { setSidebarCollapsed(false); onOpenCreateModal(); }}
+          className="inline-flex items-center justify-center w-7 h-7 rounded border border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] transition-all"
+          title="Create multiple drones (S)"
+          aria-label="Create multiple drones"
+        >
+          <IconPlusDouble className="opacity-80" />
+        </button>
+      </div>
     </>
   );
 }
