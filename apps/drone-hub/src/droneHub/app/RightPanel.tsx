@@ -63,7 +63,7 @@ export function RightPanel({
       </div>
       {rightPanelSplit ? (
         <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-          <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+          <div className="flex-1 min-h-0 overflow-hidden flex flex-col" data-right-panel-pane="top">
             <div className="flex-shrink-0 px-2 py-1 border-b border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] flex items-center gap-2">
               <span className="text-[9px] font-semibold tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
                 Top Pane
@@ -94,7 +94,7 @@ export function RightPanel({
             <div className="flex-1 min-h-0 overflow-hidden">{renderTabContent(currentDrone, rightPanelTab, 'top')}</div>
           </div>
           <div className="h-px bg-[var(--border)]" />
-          <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+          <div className="flex-1 min-h-0 overflow-hidden flex flex-col" data-right-panel-pane="bottom">
             <div className="flex-shrink-0 px-2 py-1 border-b border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] flex items-center gap-2">
               <span className="text-[9px] font-semibold tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
                 Bottom Pane
