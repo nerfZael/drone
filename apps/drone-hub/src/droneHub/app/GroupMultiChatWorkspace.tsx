@@ -46,19 +46,28 @@ export function GroupMultiChatWorkspace({
     selectedChat,
     groupMultiChatColumnWidth,
     groupBroadcastExpanded,
+    chatInputDrafts,
     setGroupMultiChatColumnWidth,
     setGroupBroadcastExpanded,
     setSelectedGroupMultiChat,
+    setChatInputDraft,
   } = useDroneHubUiStore(
     useShallow((s) => ({
       selectedChat: s.selectedChat,
       groupMultiChatColumnWidth: s.groupMultiChatColumnWidth,
       groupBroadcastExpanded: s.groupBroadcastExpanded,
+      chatInputDrafts: s.chatInputDrafts,
       setGroupMultiChatColumnWidth: s.setGroupMultiChatColumnWidth,
       setGroupBroadcastExpanded: s.setGroupBroadcastExpanded,
       setSelectedGroupMultiChat: s.setSelectedGroupMultiChat,
+      setChatInputDraft: s.setChatInputDraft,
     })),
   );
+  const broadcastDraftKey = React.useMemo(
+    () => `group-broadcast:${selectedGroupMultiChatData.group}:${selectedChat || 'default'}`,
+    [selectedGroupMultiChatData.group, selectedChat],
+  );
+  const broadcastDraftValue = chatInputDrafts[broadcastDraftKey] ?? '';
 
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
@@ -146,6 +155,8 @@ export function GroupMultiChatWorkspace({
         <ChatInput
           resetKey={`group-broadcast:${selectedGroupMultiChatData.group}:${selectedChat || 'default'}`}
           droneName="all drones"
+          draftValue={broadcastDraftValue}
+          onDraftValueChange={(next) => setChatInputDraft(broadcastDraftKey, next)}
           promptError={groupBroadcastPromptError}
           sending={groupBroadcastSending}
           waiting={false}
