@@ -48,18 +48,22 @@ export function DraftChatWorkspace({
     spawnAgentKey,
     spawnModel,
     chatHeaderRepoPath,
+    pullHostBranchBeforeCreate,
     setSpawnAgentKey,
     setSpawnModel,
     setChatHeaderRepoPath,
+    setPullHostBranchBeforeCreate,
     setCustomAgentModalOpen,
   } = useDroneHubUiStore(
     useShallow((s) => ({
       spawnAgentKey: s.spawnAgentKey,
       spawnModel: s.spawnModel,
       chatHeaderRepoPath: s.chatHeaderRepoPath,
+      pullHostBranchBeforeCreate: s.pullHostBranchBeforeCreate,
       setSpawnAgentKey: s.setSpawnAgentKey,
       setSpawnModel: s.setSpawnModel,
       setChatHeaderRepoPath: s.setChatHeaderRepoPath,
+      setPullHostBranchBeforeCreate: s.setPullHostBranchBeforeCreate,
       setCustomAgentModalOpen: s.setCustomAgentModalOpen,
     })),
   );
@@ -217,6 +221,24 @@ export function DraftChatWorkspace({
                 Clear
               </button>
             </div>
+            <label
+              className={`inline-flex items-center gap-1.5 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
+                draftCreating || draftAutoRenaming || Boolean(draftChat.prompt)
+                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
+                  : 'bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] cursor-pointer'
+              }`}
+              style={{ fontFamily: 'var(--display)' }}
+              title="Before creating a repo-attached drone, run a host git pull --ff-only on the current branch."
+            >
+              <input
+                type="checkbox"
+                checked={pullHostBranchBeforeCreate}
+                onChange={(e) => setPullHostBranchBeforeCreate(e.target.checked)}
+                disabled={draftCreating || draftAutoRenaming || Boolean(draftChat.prompt)}
+                className="h-3.5 w-3.5 accent-[var(--accent)]"
+              />
+              Pull host branch
+            </label>
           </div>
         </div>
       </div>

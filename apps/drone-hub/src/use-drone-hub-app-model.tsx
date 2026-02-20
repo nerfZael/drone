@@ -111,6 +111,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     fsExplorerView,
     spawnAgentKey,
     spawnModel,
+    pullHostBranchBeforeCreate,
     customAgents,
     customAgentModalOpen,
     newCustomAgentLabel,
@@ -136,6 +137,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setFsExplorerView,
     setSpawnAgentKey,
     setSpawnModel,
+    setPullHostBranchBeforeCreate,
     setCustomAgents,
     setCustomAgentModalOpen,
     setNewCustomAgentLabel,
@@ -400,9 +402,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     }>(`/api/drones/batch`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ drones: list }),
+      body: JSON.stringify({ drones: list, pullHostBranchBeforeCreate }),
     });
-  }, []);
+  }, [pullHostBranchBeforeCreate, requestJson]);
 
   const {
     parsingJobsByTurn,
@@ -685,6 +687,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       createGroup,
       createRepoPath,
       createInitialMessage,
+      pullHostBranchBeforeCreate,
       createMode,
       cloneSourceId,
       cloneIncludeChats,
@@ -1160,6 +1163,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setCreateRepoMenuOpen,
     registeredRepoPaths,
     activeRepoPath,
+    pullHostBranchBeforeCreate,
+    setPullHostBranchBeforeCreate,
     cloneIncludeChats,
     setCloneIncludeChats,
     spawnAgentKey,
