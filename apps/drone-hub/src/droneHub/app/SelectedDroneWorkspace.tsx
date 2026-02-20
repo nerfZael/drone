@@ -28,12 +28,12 @@ import { RightPanel } from './RightPanel';
 import type { RightPanelTab } from './app-config';
 import type { StartupSeedState, TldrState } from './app-types';
 import type { RepoOpErrorMeta } from './helpers';
-import { isDroneStartingOrSeeding } from './helpers';
+import { chatInputDraftKeyForDroneChat, isDroneStartingOrSeeding, resolveChatNameForDrone } from './helpers';
 import { openDroneTabFromLastPreview, resolveDroneOpenTabUrl } from './quick-actions';
 import { cn } from '../../ui/cn';
 import { dropdownMenuItemBaseClass, dropdownPanelBaseClass } from '../../ui/dropdown';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
-import { useSelectedDroneWorkspaceUiState } from './use-drone-hub-ui-store';
+import { useDroneHubUiStore, useSelectedDroneWorkspaceUiState } from './use-drone-hub-ui-store';
 
 function editorLanguageForPath(filePath: string): string {
   const lower = String(filePath ?? '').trim().toLowerCase();
@@ -564,6 +564,16 @@ export function SelectedDroneWorkspace({
     setSelectedChat,
     setTerminalEmulator,
   } = useSelectedDroneWorkspaceUiState();
+  const activeChatName = React.useMemo(
+    () => resolveChatNameForDrone(currentDrone, selectedChat),
+    [currentDrone, selectedChat],
+  );
+  const chatDraftKey = React.useMemo(
+    () => chatInputDraftKeyForDroneChat(currentDrone.id, activeChatName),
+    [activeChatName, currentDrone.id],
+  );
+  const chatDraftValue = useDroneHubUiStore((s) => s.chatInputDrafts[chatDraftKey] ?? '');
+  const setChatInputDraft = useDroneHubUiStore((s) => s.setChatInputDraft);
 
   const openPullRequestsTab = React.useCallback(() => {
     setRightPanelOpen(true);
@@ -1281,6 +1291,8 @@ export function SelectedDroneWorkspace({
             <ChatInput
               resetKey={`${selectedDroneIdentity}:${selectedChat ?? ''}`}
               droneName={currentDrone.name}
+              draftValue={chatDraftValue}
+              onDraftValueChange={(next) => setChatInputDraft(chatDraftKey, next)}
               promptError={promptError}
               sending={sendingPrompt}
               waiting={chatUiMode === 'transcript' && visiblePendingPromptsWithStartup.some((p) => p.state !== 'failed')}

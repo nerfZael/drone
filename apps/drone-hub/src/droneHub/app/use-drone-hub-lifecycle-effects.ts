@@ -391,7 +391,7 @@ export function useDroneHubLifecycleEffects({
     if (len > 0 && len !== prevChatItemsLenRef.current) {
       prevChatItemsLenRef.current = len;
       requestAnimationFrame(() => {
-        chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        chatEndRef.current?.scrollIntoView({ behavior: 'auto' });
       });
     }
   }, [chatUiMode, chatEndRef, prevChatItemsLenRef, transcripts, visiblePendingPromptsWithStartup.length]);

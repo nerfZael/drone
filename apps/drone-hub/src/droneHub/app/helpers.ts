@@ -79,6 +79,12 @@ export function resolveChatNameForDrone(drone: DroneSummary, preferredChat: stri
   return chats[0] || 'default';
 }
 
+export function chatInputDraftKeyForDroneChat(droneIdRaw: string, chatNameRaw: string): string {
+  const droneId = String(droneIdRaw ?? '').trim() || 'unknown';
+  const chatName = String(chatNameRaw ?? '').trim() || 'default';
+  return `drone:${droneId}:chat:${chatName}`;
+}
+
 export function parseRepoPullConflict(message: string, meta?: Partial<RepoOpErrorMeta> | null): RepoPullConflict {
   const text = String(message ?? '');
   const patchFromMeta = String(meta?.patchName ?? '').trim();
