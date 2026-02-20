@@ -13,7 +13,7 @@ import { IconSpinner, IconTrash, TypingDots } from '../overview/icons';
 import type { DroneSummary, PendingPrompt, TranscriptItem } from '../types';
 import { IconChat } from './icons';
 import { fetchJson, isNotFoundError, usePoll } from './hooks';
-import { droneHomePath, isDroneStartingOrSeeding, resolveChatNameForDrone } from './helpers';
+import { chatInputDraftKeyForDroneChat, droneHomePath, isDroneStartingOrSeeding, resolveChatNameForDrone } from './helpers';
 import { openDroneTabFromLastPreview, resolveDroneOpenTabUrl } from './quick-actions';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 
@@ -52,6 +52,9 @@ export function GroupMultiChatColumn({
   const [quickActionBusy, setQuickActionBusy] = React.useState<null | 'ssh' | 'pull'>(null);
   const [quickActionError, setQuickActionError] = React.useState<string | null>(null);
   const columnScrollRef = React.useRef<HTMLDivElement | null>(null);
+  const draftKey = React.useMemo(() => chatInputDraftKeyForDroneChat(drone.id, chatName), [drone.id, chatName]);
+  const draftValue = useDroneHubUiStore((s) => s.chatInputDrafts[draftKey] ?? '');
+  const setChatInputDraft = useDroneHubUiStore((s) => s.setChatInputDraft);
   const terminalEmulator = useDroneHubUiStore((s) => s.terminalEmulator);
   const repoAttached = Boolean(drone.repoAttached ?? Boolean(String(drone.repoPath ?? '').trim()));
   const quickOpenTabUrl = resolveDroneOpenTabUrl(drone);
@@ -423,6 +426,8 @@ export function GroupMultiChatColumn({
       <ChatInput
         resetKey={`group:${drone.id}:${chatName}`}
         droneName={drone.name}
+        draftValue={draftValue}
+        onDraftValueChange={(next) => setChatInputDraft(draftKey, next)}
         promptError={promptError}
         sending={sendingPrompt}
         waiting={waitingForAgent}

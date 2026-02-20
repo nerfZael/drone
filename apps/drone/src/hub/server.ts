@@ -1639,6 +1639,14 @@ function isSafePromptId(raw: string): boolean {
   return /^[A-Za-z0-9._-]+$/.test(s);
 }
 
+function promptJobTmuxSessionName(promptIdRaw: string): string {
+  // Keep this aligned with daemon.ts `promptSessionName`.
+  const cleaned = String(promptIdRaw ?? '')
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .slice(0, 48);
+  return `drone-prompt-${cleaned || 'job'}`;
+}
+
 async function readPendingPrompts(opts: { droneId: string; chatName: string }): Promise<PendingPrompt[]> {
   const regAny: any = await loadRegistry();
   const droneId = normalizeDroneIdentity(opts.droneId);
@@ -8124,6 +8132,117 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           await reconcileChatFromDaemon({ droneId, chatName });
           const list = await readPendingPrompts({ droneId, chatName });
           json(res, 200, { ok: true, id: droneId, name: droneName, chat: chatName, pending: list });
+          return;
+        } catch (e: any) {
+          const msg = e?.message ?? String(e);
+          const code = /still starting/i.test(msg) ? 409 : /unknown drone/i.test(msg) ? 404 : 500;
+          json(res, code, { ok: false, error: msg });
+          return;
+        }
+      }
+
+      // POST /api/drones/:id/chats/:chat/pending/:promptId/unstick
+      if (
+        method === 'POST' &&
+        parts.length === 8 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'chats' &&
+        parts[5] === 'pending' &&
+        parts[7] === 'unstick'
+      ) {
+        const droneRef = decodeURIComponent(parts[2]);
+        const chatName = normalizeChatName(decodeURIComponent(parts[4]));
+        const promptId = String(decodeURIComponent(parts[6] ?? '')).trim();
+        if (!isSafePromptId(promptId)) {
+          json(res, 400, { ok: false, error: 'invalid promptId' });
+          return;
+        }
+        try {
+          const resolved = await resolveDroneOrRespond(res, droneRef);
+          if (!resolved) return;
+          const droneId = resolved.id;
+          const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+
+          await reconcileChatFromDaemon({ droneId, chatName });
+          const pendingBefore = await readPendingPrompts({ droneId, chatName });
+          const pendingItemBefore = pendingBefore.find((p) => p.id === promptId) ?? null;
+          const regBefore: any = await loadRegistry();
+          const turnsBefore: any[] = Array.isArray(regBefore?.drones?.[droneId]?.chats?.[chatName]?.turns)
+            ? regBefore.drones[droneId].chats[chatName].turns
+            : [];
+          const alreadyRecovered = turnsBefore.some((t: any) => String(t?.id ?? '').trim() === promptId);
+          if (!pendingItemBefore && alreadyRecovered) {
+            json(res, 200, {
+              ok: true,
+              id: droneId,
+              name: droneName,
+              chat: chatName,
+              promptId,
+              recovered: true,
+              pendingState: null,
+              alreadyRecovered: true,
+            });
+            return;
+          }
+          if (!pendingItemBefore) {
+            json(res, 404, { ok: false, error: `unknown pending prompt: ${promptId}` });
+            return;
+          }
+
+          const sessionName = promptJobTmuxSessionName(promptId);
+          await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: resolved.drone }, async ({ containerName }) => {
+            const script = `tmux kill-session -t ${bashQuote(sessionName)} 2>/dev/null || true`;
+            await dvmExec(containerName, 'bash', ['-lc', script]);
+          });
+
+          let jobState: string | null = null;
+          const regAfterKill: any = await loadRegistry();
+          const dAfterKill = regAfterKill?.drones?.[droneId] ?? null;
+          const token = typeof dAfterKill?.token === 'string' ? String(dAfterKill.token).trim() : '';
+          const containerName =
+            String(dAfterKill?.containerName ?? dAfterKill?.name ?? droneId).trim() || droneId;
+          const hostPort =
+            typeof dAfterKill?.hostPort === 'number' && Number.isFinite(dAfterKill.hostPort)
+              ? dAfterKill.hostPort
+              : await resolveHostPort(containerName, dAfterKill?.containerPort);
+          if (token && hostPort) {
+            const client = makeClient(hostPort, token);
+            for (let attempt = 0; attempt < 10; attempt++) {
+              try {
+                // eslint-disable-next-line no-await-in-loop
+                const r: any = await dronePromptGet(client, promptId);
+                const nextState = String(r?.job?.state ?? '').trim();
+                if (nextState) jobState = nextState;
+                if (nextState && nextState !== 'queued' && nextState !== 'running') break;
+              } catch {
+                // keep best-effort behavior; reconcile below will handle stale rows.
+              }
+              // eslint-disable-next-line no-await-in-loop
+              await sleepMs(250);
+            }
+          }
+
+          await reconcileChatFromDaemon({ droneId, chatName });
+          const pendingAfter = await readPendingPrompts({ droneId, chatName });
+          const pendingItemAfter = pendingAfter.find((p) => p.id === promptId) ?? null;
+          const regAfter: any = await loadRegistry();
+          const turnsAfter: any[] = Array.isArray(regAfter?.drones?.[droneId]?.chats?.[chatName]?.turns)
+            ? regAfter.drones[droneId].chats[chatName].turns
+            : [];
+          const recovered = turnsAfter.some((t: any) => String(t?.id ?? '').trim() === promptId);
+
+          json(res, 200, {
+            ok: true,
+            id: droneId,
+            name: droneName,
+            chat: chatName,
+            promptId,
+            sessionName,
+            recovered,
+            pendingState: pendingItemAfter?.state ?? null,
+            jobState,
+          });
           return;
         } catch (e: any) {
           const msg = e?.message ?? String(e);

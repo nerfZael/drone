@@ -3,6 +3,8 @@ export type ShortcutActionId =
   | 'openCreateModal'
   | 'openCreateModalAlt'
   | 'toggleTldr'
+  | 'openHoveredGroupMultiChat'
+  | 'openPullRequestsTab'
   | 'openChangesTab'
   | 'openBrowserTab'
   | 'openFilesTab'
@@ -47,6 +49,16 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     description: 'Shows or hides TLDR cards in transcript view.',
   },
   {
+    id: 'openHoveredGroupMultiChat',
+    label: 'Open hovered group multi-chat',
+    description: 'Opens multi-chat for the group currently under your mouse in the sidebar.',
+  },
+  {
+    id: 'openPullRequestsTab',
+    label: 'Open PRs tab',
+    description: 'Opens the right-panel PRs tab (top pane by default, hovered bottom pane in split mode).',
+  },
+  {
     id: 'openChangesTab',
     label: 'Open Changes tab',
     description: 'Opens the right-panel Changes tab (top pane by default, hovered bottom pane in split mode).',
@@ -73,6 +85,8 @@ const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   openCreateModal: { key: 's', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openCreateModalAlt: { key: 'n', mod: true, ctrl: false, meta: false, alt: false, shift: true },
   toggleTldr: { key: 'w', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  openHoveredGroupMultiChat: { key: 'd', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  openPullRequestsTab: { key: 'r', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openChangesTab: { key: 'c', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openBrowserTab: { key: 'b', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openFilesTab: { key: 'f', mod: false, ctrl: false, meta: false, alt: false, shift: false },
@@ -130,6 +144,8 @@ export function cloneDefaultShortcutBindings(): ShortcutBindingMap {
     openCreateModal: { ...DEFAULT_SHORTCUT_BINDINGS.openCreateModal! },
     openCreateModalAlt: { ...DEFAULT_SHORTCUT_BINDINGS.openCreateModalAlt! },
     toggleTldr: { ...DEFAULT_SHORTCUT_BINDINGS.toggleTldr! },
+    openHoveredGroupMultiChat: { ...DEFAULT_SHORTCUT_BINDINGS.openHoveredGroupMultiChat! },
+    openPullRequestsTab: { ...DEFAULT_SHORTCUT_BINDINGS.openPullRequestsTab! },
     openChangesTab: { ...DEFAULT_SHORTCUT_BINDINGS.openChangesTab! },
     openBrowserTab: { ...DEFAULT_SHORTCUT_BINDINGS.openBrowserTab! },
     openFilesTab: { ...DEFAULT_SHORTCUT_BINDINGS.openFilesTab! },

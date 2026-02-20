@@ -596,9 +596,11 @@ export function DroneSidebar({
                   const isRenamingGroup = Boolean(renamingGroups[group]);
                   const isDropTarget = !isVirtualGroup && dragOverGroup === group;
                   const canRenameGroup = !isVirtualGroup && !isUngroupedGroupName(groupLabel);
+                  const pinGroupActionsVisible = isDeletingGroup || isRenamingGroup || selectedGroupMultiChat === group;
                   return (
                     <div
                       key={group}
+                      data-drone-sidebar-group={group}
                       className={`rounded-md border bg-[rgba(0,0,0,.15)] overflow-hidden transition-colors ${
                         isDropTarget ? 'border-[var(--accent-muted)] ring-1 ring-[var(--accent-muted)]' : 'border-[var(--border-subtle)]'
                       }`}
@@ -625,7 +627,11 @@ export function DroneSidebar({
                             {groupLabel}
                           </span>
                         </button>
-                        <div className="flex items-center justify-end flex-shrink-0 min-w-[148px]">
+                        <div
+                          className={`flex items-center justify-end flex-shrink-0 transition-[min-width] duration-150 ${
+                            pinGroupActionsVisible ? 'min-w-[148px]' : 'min-w-[92px] group-hover/group-header:min-w-[148px]'
+                          }`}
+                        >
                           <div className="relative w-full flex justify-end">
                             <div
                               className={`flex items-center gap-2 text-[10px] font-mono text-[var(--muted-dim)] transition-opacity duration-150 ${

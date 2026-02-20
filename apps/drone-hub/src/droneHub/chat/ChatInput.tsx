@@ -67,6 +67,8 @@ async function fileToBase64(file: File): Promise<string> {
 export function ChatInput({
   resetKey,
   droneName,
+  draftValue,
+  onDraftValueChange,
   promptError,
   sending,
   waiting,
@@ -78,6 +80,8 @@ export function ChatInput({
 }: {
   resetKey: string;
   droneName: string;
+  draftValue?: string;
+  onDraftValueChange?: (next: string) => void;
   promptError: string | null;
   sending: boolean;
   waiting: boolean;
@@ -87,17 +91,36 @@ export function ChatInput({
   attachmentsEnabled?: boolean;
   onSend: (payload: ChatSendPayload) => Promise<boolean>;
 }) {
-  const [draft, setDraft] = React.useState('');
+  const [uncontrolledDraft, setUncontrolledDraft] = React.useState('');
   const [attachments, setAttachments] = React.useState<DraftImageAttachment[]>([]);
   const [attachmentError, setAttachmentError] = React.useState<string | null>(null);
   const [dragActive, setDragActive] = React.useState(false);
   const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+  const controlledDraftEnabled = typeof draftValue === 'string' && typeof onDraftValueChange === 'function';
+  const draft = controlledDraftEnabled ? draftValue : uncontrolledDraft;
+  const draftRef = React.useRef(draft);
 
   const attachmentsOn = attachmentsEnabled !== false;
   const MAX_IMAGES = 8;
   const MAX_BYTES_EACH = 6 * 1024 * 1024;
   const MAX_BYTES_TOTAL = 20 * 1024 * 1024;
+
+  React.useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
+
+  const setDraft = React.useCallback(
+    (next: React.SetStateAction<string>) => {
+      const resolved = typeof next === 'function' ? (next as (prev: string) => string)(draftRef.current) : next;
+      if (controlledDraftEnabled) {
+        onDraftValueChange?.(resolved);
+        return;
+      }
+      setUncontrolledDraft(resolved);
+    },
+    [controlledDraftEnabled, onDraftValueChange],
+  );
 
   const resizeTextarea = React.useCallback(() => {
     const el = textareaRef.current;
@@ -112,7 +135,7 @@ export function ChatInput({
   }, []);
 
   React.useEffect(() => {
-    setDraft('');
+    if (!controlledDraftEnabled) setUncontrolledDraft('');
     setAttachmentError(null);
     // Revoke any preview object URLs.
     setAttachments((prev) => {
@@ -125,7 +148,7 @@ export function ChatInput({
       }
       return [];
     });
-  }, [resetKey]);
+  }, [controlledDraftEnabled, resetKey]);
 
   React.useEffect(() => {
     if (!autoFocus) return;
