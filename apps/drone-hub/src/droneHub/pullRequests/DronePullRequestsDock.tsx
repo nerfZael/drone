@@ -18,6 +18,12 @@ type PullRequestListDiagnostics = {
   github: { owner: string; repo: string } | null;
 };
 
+type BulkActionState = {
+  kind: 'merge' | 'close';
+  total: number;
+  done: number;
+};
+
 function normalizePullRequestListDiagnostics(raw: any): PullRequestListDiagnostics | null {
   if (!raw || typeof raw !== 'object') return null;
   const repoRoot = String(raw?.repoRoot ?? '').trim() || null;
@@ -100,6 +106,18 @@ function pullRequestStatusBadges(pr: RepoPullRequestSummary): Array<{ key: strin
       label: 'Approved',
       className: 'border-[rgba(74,222,128,.35)] bg-[var(--green-subtle)] text-[var(--green)]',
     });
+  } else if (pr.reviewState === 'changes_requested') {
+    out.push({
+      key: 'changes_requested',
+      label: 'Changes requested',
+      className: 'border-[rgba(255,90,90,.35)] bg-[var(--red-subtle)] text-[var(--red)]',
+    });
+  } else if (pr.reviewState === 'review_required') {
+    out.push({
+      key: 'review_required',
+      label: 'Review required',
+      className: 'border-[rgba(255,178,36,.35)] bg-[var(--yellow-subtle)] text-[var(--yellow)]',
+    });
   }
   if (pr.hasMergeConflicts) {
     out.push({
@@ -109,6 +127,19 @@ function pullRequestStatusBadges(pr: RepoPullRequestSummary): Array<{ key: strin
     });
   }
   return out;
+}
+
+function mergeBlockedReason(pr: RepoPullRequestSummary): string | null {
+  if (pr.hasMergeConflicts) return 'merge conflicts detected';
+  if (pr.draft) return 'pull request is in draft state';
+  if (pr.reviewState === 'changes_requested') return 'review has changes requested';
+  return null;
+}
+
+function forceMergeReason(pr: RepoPullRequestSummary): string | null {
+  if (pr.checksState === 'failing') return 'checks are failing';
+  if (pr.checksState === 'pending') return 'checks are still pending';
+  return null;
 }
 
 function PullRequestStatusBadgeStrip({ pullRequest }: { pullRequest: RepoPullRequestSummary }) {
@@ -157,6 +188,7 @@ export function DronePullRequestsDock({
   const [actionError, setActionError] = React.useState<string | null>(null);
   const [actionNotice, setActionNotice] = React.useState<string | null>(null);
   const [busyByPullNumber, setBusyByPullNumber] = React.useState<Record<number, 'merge' | 'close'>>({});
+  const [bulkAction, setBulkAction] = React.useState<BulkActionState | null>(null);
   const [mergeMethod, setMergeMethod] = React.useState<RepoPullRequestMergeMethod>(() => {
     try {
       const raw = localStorage.getItem(PR_MERGE_METHOD_STORAGE_KEY);
@@ -241,26 +273,55 @@ export function DronePullRequestsDock({
   }, [disabled, droneId, refreshNonce, repoAttached, startup.markReady, startup.suppressErrors]);
 
   const pullRequests = listData?.pullRequests ?? [];
+  const anyBusy = bulkAction != null || Object.keys(busyByPullNumber).length > 0;
+  const mergeablePullRequests = React.useMemo(() => pullRequests.filter((pr) => !mergeBlockedReason(pr)), [pullRequests]);
+  const blockedMergeCount = Math.max(0, pullRequests.length - mergeablePullRequests.length);
+  const blockedConflictCount = React.useMemo(() => pullRequests.filter((pr) => pr.hasMergeConflicts).length, [pullRequests]);
+  const blockedPolicyCount = Math.max(0, blockedMergeCount - blockedConflictCount);
+
+  const requestMergePullRequest = React.useCallback(
+    async (pullNumber: number) =>
+      requestJson<Extract<RepoPullRequestMergePayload, { ok: true }>>(
+        `/api/drones/${encodeURIComponent(droneId)}/repo/pull-requests/${pullNumber}/merge`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ method: mergeMethod }),
+        },
+      ),
+    [droneId, mergeMethod],
+  );
+
+  const requestClosePullRequest = React.useCallback(
+    async (pullNumber: number) =>
+      requestJson<Extract<RepoPullRequestClosePayload, { ok: true }>>(
+        `/api/drones/${encodeURIComponent(droneId)}/repo/pull-requests/${pullNumber}/close`,
+        { method: 'POST' },
+      ),
+    [droneId],
+  );
 
   const mergePullRequest = React.useCallback(
     async (pr: RepoPullRequestSummary) => {
       const pullNumber = Number(pr?.number);
       if (!Number.isFinite(pullNumber) || pullNumber <= 0) return;
+      const blockedReason = mergeBlockedReason(pr);
+      if (blockedReason) {
+        setActionError(`Cannot merge PR #${pullNumber}: ${blockedReason}.`);
+        return;
+      }
+      const forceReason = forceMergeReason(pr);
+      if (bulkAction) return;
       if (busyByPullNumber[pullNumber]) return;
-      if (!window.confirm(`Merge PR #${pullNumber} into ${pr.baseRefName || 'base'} using "${mergeMethod}"?`)) return;
+      const verb = forceReason ? 'Force merge' : 'Merge';
+      const why = forceReason ? ` (${forceReason})` : '';
+      if (!window.confirm(`${verb} PR #${pullNumber} into ${pr.baseRefName || 'base'} using "${mergeMethod}"?${why}`)) return;
 
       setActionError(null);
       setActionNotice(null);
       setBusyByPullNumber((prev) => ({ ...prev, [pullNumber]: 'merge' }));
       try {
-        const merged = await requestJson<Extract<RepoPullRequestMergePayload, { ok: true }>>(
-          `/api/drones/${encodeURIComponent(droneId)}/repo/pull-requests/${pullNumber}/merge`,
-          {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ method: mergeMethod }),
-          },
-        );
+        const merged = await requestMergePullRequest(pullNumber);
         setActionNotice(merged.message || `Merged PR #${pullNumber}.`);
         setRefreshNonce((n) => n + 1);
       } catch (e: any) {
@@ -273,13 +334,14 @@ export function DronePullRequestsDock({
         });
       }
     },
-    [busyByPullNumber, droneId, mergeMethod],
+    [bulkAction, busyByPullNumber, mergeMethod, requestMergePullRequest],
   );
 
   const closePullRequest = React.useCallback(
     async (pr: RepoPullRequestSummary) => {
       const pullNumber = Number(pr?.number);
       if (!Number.isFinite(pullNumber) || pullNumber <= 0) return;
+      if (bulkAction) return;
       if (busyByPullNumber[pullNumber]) return;
       if (!window.confirm(`Close PR #${pullNumber} without merging?`)) return;
 
@@ -287,10 +349,7 @@ export function DronePullRequestsDock({
       setActionNotice(null);
       setBusyByPullNumber((prev) => ({ ...prev, [pullNumber]: 'close' }));
       try {
-        const closed = await requestJson<Extract<RepoPullRequestClosePayload, { ok: true }>>(
-          `/api/drones/${encodeURIComponent(droneId)}/repo/pull-requests/${pullNumber}/close`,
-          { method: 'POST' },
-        );
+        const closed = await requestClosePullRequest(pullNumber);
         setActionNotice(`Closed PR #${closed.number}.`);
         setRefreshNonce((n) => n + 1);
       } catch (e: any) {
@@ -303,8 +362,121 @@ export function DronePullRequestsDock({
         });
       }
     },
-    [busyByPullNumber, droneId],
+    [bulkAction, busyByPullNumber, requestClosePullRequest],
   );
+
+  const mergeAllPullRequests = React.useCallback(async () => {
+    if (anyBusy) return;
+    const queue = mergeablePullRequests
+      .map((pr) => Number(pr?.number))
+      .filter((n) => Number.isFinite(n) && n > 0)
+      .map((n) => Math.floor(n));
+    if (queue.length === 0) {
+      setActionError('No mergeable PRs: all open PRs are blocked (conflicts, draft state, or changes requested).');
+      return;
+    }
+    const skipLabel =
+      blockedMergeCount > 0
+        ? ` (${blockedMergeCount} blocked will be skipped${blockedConflictCount > 0 || blockedPolicyCount > 0 ? `: ${blockedConflictCount} conflicts, ${blockedPolicyCount} policy` : ''})`
+        : '';
+    if (!window.confirm(`Merge ${queue.length} mergeable open PRs using "${mergeMethod}"?${skipLabel}`)) return;
+
+    setActionError(null);
+    setActionNotice(null);
+    setBulkAction({ kind: 'merge', total: queue.length, done: 0 });
+
+    let successCount = 0;
+    const failures: string[] = [];
+
+    for (let i = 0; i < queue.length; i += 1) {
+      const pullNumber = queue[i];
+      setBusyByPullNumber((prev) => ({ ...prev, [pullNumber]: 'merge' }));
+      try {
+        await requestMergePullRequest(pullNumber);
+        successCount += 1;
+      } catch (e: any) {
+        const msg = String(e?.message ?? e ?? 'merge failed').trim() || 'merge failed';
+        failures.push(`#${pullNumber}: ${msg}`);
+      } finally {
+        setBusyByPullNumber((prev) => {
+          const next = { ...prev };
+          delete next[pullNumber];
+          return next;
+        });
+        setBulkAction((prev) => (prev ? { ...prev, done: i + 1 } : prev));
+      }
+    }
+
+    setBulkAction(null);
+    setRefreshNonce((n) => n + 1);
+
+    if (failures.length === 0) {
+      const skipped =
+        blockedMergeCount > 0
+          ? ` Skipped ${blockedMergeCount} blocked (${blockedConflictCount} conflicts, ${blockedPolicyCount} policy).`
+          : '';
+      setActionNotice(`Merged ${successCount} pull requests.${skipped}`);
+      return;
+    }
+    const skipped =
+      blockedMergeCount > 0
+        ? ` Skipped ${blockedMergeCount} blocked (${blockedConflictCount} conflicts, ${blockedPolicyCount} policy).`
+        : '';
+    setActionNotice(`Merged ${successCount} of ${queue.length} pull requests.${skipped}`);
+    setActionError(`Bulk merge finished with ${failures.length} failure(s): ${failures.slice(0, 3).join(' | ')}`);
+  }, [anyBusy, blockedConflictCount, blockedMergeCount, blockedPolicyCount, mergeMethod, mergeablePullRequests, requestMergePullRequest]);
+
+  const closeAllPullRequests = React.useCallback(async () => {
+    if (anyBusy) return;
+    const queue = pullRequests
+      .map((pr) => Number(pr?.number))
+      .filter((n) => Number.isFinite(n) && n > 0)
+      .map((n) => Math.floor(n));
+    if (queue.length === 0) return;
+    if (!window.confirm(`Close all ${queue.length} open PRs without merging?`)) return;
+
+    setActionError(null);
+    setActionNotice(null);
+    setBulkAction({ kind: 'close', total: queue.length, done: 0 });
+
+    let successCount = 0;
+    const failures: string[] = [];
+
+    for (let i = 0; i < queue.length; i += 1) {
+      const pullNumber = queue[i];
+      setBusyByPullNumber((prev) => ({ ...prev, [pullNumber]: 'close' }));
+      try {
+        await requestClosePullRequest(pullNumber);
+        successCount += 1;
+      } catch (e: any) {
+        const msg = String(e?.message ?? e ?? 'close failed').trim() || 'close failed';
+        failures.push(`#${pullNumber}: ${msg}`);
+      } finally {
+        setBusyByPullNumber((prev) => {
+          const next = { ...prev };
+          delete next[pullNumber];
+          return next;
+        });
+        setBulkAction((prev) => (prev ? { ...prev, done: i + 1 } : prev));
+      }
+    }
+
+    setBulkAction(null);
+    setRefreshNonce((n) => n + 1);
+
+    if (failures.length === 0) {
+      setActionNotice(`Closed ${successCount} pull requests.`);
+      return;
+    }
+    setActionNotice(`Closed ${successCount} of ${queue.length} pull requests.`);
+    setActionError(`Bulk close finished with ${failures.length} failure(s): ${failures.slice(0, 3).join(' | ')}`);
+  }, [anyBusy, pullRequests, requestClosePullRequest]);
+
+  const bulkActionLabel = React.useMemo(() => {
+    if (!bulkAction) return null;
+    const verb = bulkAction.kind === 'merge' ? 'Merging' : 'Closing';
+    return `${verb} ${bulkAction.done}/${bulkAction.total}…`;
+  }, [bulkAction]);
 
   const openPullRequestInChanges = React.useCallback(
     (pr: RepoPullRequestSummary) => {
@@ -340,6 +512,36 @@ export function DronePullRequestsDock({
             <option value="squash">squash</option>
             <option value="rebase">rebase</option>
           </select>
+          <button
+            type="button"
+            onClick={() => {
+              void mergeAllPullRequests();
+            }}
+            disabled={!repoAttached || disabled || mergeablePullRequests.length === 0 || anyBusy || Boolean(listError)}
+            className="h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase border-[rgba(74,222,128,.35)] bg-[var(--green-subtle)] text-[var(--green)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
+            style={{ fontFamily: 'var(--display)' }}
+            title={
+              mergeablePullRequests.length > 0
+                ? `Merge all mergeable PRs with "${mergeMethod}"${
+                    blockedMergeCount > 0 ? ` (${blockedMergeCount} blocked skipped: ${blockedConflictCount} conflicts, ${blockedPolicyCount} policy)` : ''
+                  }`
+                : 'No mergeable PRs (all blocked)'
+            }
+          >
+            {bulkAction?.kind === 'merge' ? `Merging ${bulkAction.done}/${bulkAction.total}` : 'Merge All'}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              void closeAllPullRequests();
+            }}
+            disabled={!repoAttached || disabled || pullRequests.length === 0 || anyBusy || Boolean(listError)}
+            className="h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase border-[rgba(255,90,90,.35)] bg-[var(--red-subtle)] text-[var(--red)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
+            style={{ fontFamily: 'var(--display)' }}
+            title="Close all open PRs without merging"
+          >
+            {bulkAction?.kind === 'close' ? `Closing ${bulkAction.done}/${bulkAction.total}` : 'Close All'}
+          </button>
           <button
             type="button"
             onClick={() => setRefreshNonce((n) => n + 1)}
@@ -380,6 +582,11 @@ export function DronePullRequestsDock({
       ) : null}
       {actionError ? (
         <div className="px-3 py-2 border-b border-[var(--border-subtle)] text-[10px] text-[var(--red)] bg-[var(--red-subtle)]">{actionError}</div>
+      ) : null}
+      {bulkActionLabel ? (
+        <div className="px-3 py-2 border-b border-[var(--border-subtle)] text-[10px] text-[var(--muted)] bg-[rgba(255,255,255,.02)]">
+          {bulkActionLabel}
+        </div>
       ) : null}
 
       {!repoAttached ? (
@@ -430,6 +637,8 @@ export function DronePullRequestsDock({
         <div className="flex-1 min-h-0 overflow-auto px-2 py-2 flex flex-col gap-2">
           {pullRequests.map((pr) => {
             const busy = busyByPullNumber[pr.number] ?? null;
+            const blockedReason = mergeBlockedReason(pr);
+            const forceReason = blockedReason ? null : forceMergeReason(pr);
             return (
               <section key={`pr:${pr.number}`} className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] overflow-hidden">
                 <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/70 flex items-start gap-2">
@@ -464,31 +673,48 @@ export function DronePullRequestsDock({
                       ) : null}
                     </div>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void mergePullRequest(pr);
-                      }}
-                      disabled={Boolean(busy)}
-                      className="h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase border-[rgba(74,222,128,.35)] bg-[var(--green-subtle)] text-[var(--green)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
-                      style={{ fontFamily: 'var(--display)' }}
-                      title={`Merge with "${mergeMethod}"`}
-                    >
-                      {busy === 'merge' ? 'Merging...' : 'Merge'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void closePullRequest(pr);
-                      }}
-                      disabled={Boolean(busy)}
-                      className="h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase border-[rgba(255,90,90,.35)] bg-[var(--red-subtle)] text-[var(--red)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
-                      style={{ fontFamily: 'var(--display)' }}
-                      title="Close pull request without merging"
-                    >
-                      {busy === 'close' ? 'Closing...' : 'Close'}
-                    </button>
+                  <div className="flex flex-col items-end gap-1">
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void mergePullRequest(pr);
+                        }}
+                        disabled={Boolean(busy) || anyBusy || Boolean(blockedReason)}
+                        className="h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase border-[rgba(74,222,128,.35)] bg-[var(--green-subtle)] text-[var(--green)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
+                        style={{ fontFamily: 'var(--display)' }}
+                        title={
+                          blockedReason
+                            ? `Cannot merge: ${blockedReason}`
+                            : forceReason
+                              ? `Force merge: ${forceReason}`
+                              : `Merge with "${mergeMethod}"`
+                        }
+                      >
+                        {busy === 'merge' ? 'Merging...' : blockedReason ? 'Blocked' : forceReason ? 'Force Merge' : 'Merge'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void closePullRequest(pr);
+                        }}
+                        disabled={Boolean(busy) || anyBusy}
+                        className="h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase border-[rgba(255,90,90,.35)] bg-[var(--red-subtle)] text-[var(--red)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
+                        style={{ fontFamily: 'var(--display)' }}
+                        title="Close pull request without merging"
+                      >
+                        {busy === 'close' ? 'Closing...' : 'Close'}
+                      </button>
+                    </div>
+                    {blockedReason ? (
+                      <div className="text-[9px] text-[var(--red)] whitespace-nowrap" title={blockedReason}>
+                        Merge blocked: {blockedReason}
+                      </div>
+                    ) : forceReason ? (
+                      <div className="text-[9px] text-[var(--yellow)] whitespace-nowrap" title={forceReason}>
+                        Force merge: {forceReason}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               </section>
