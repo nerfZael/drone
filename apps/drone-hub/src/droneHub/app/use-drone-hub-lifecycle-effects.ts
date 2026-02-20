@@ -194,6 +194,10 @@ export function useDroneHubLifecycleEffects({
         openGroupMultiChat(group);
         return true;
       }
+      if (actionId === 'openPullRequestsTab') {
+        openRightPanelTabFromShortcut('prs');
+        return true;
+      }
       if (actionId === 'openChangesTab') {
         openRightPanelTabFromShortcut('changes');
         return true;

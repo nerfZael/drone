@@ -4,6 +4,7 @@ export type ShortcutActionId =
   | 'openCreateModalAlt'
   | 'toggleTldr'
   | 'openHoveredGroupMultiChat'
+  | 'openPullRequestsTab'
   | 'openChangesTab'
   | 'openBrowserTab'
   | 'openFilesTab'
@@ -53,6 +54,11 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     description: 'Opens multi-chat for the group currently under your mouse in the sidebar.',
   },
   {
+    id: 'openPullRequestsTab',
+    label: 'Open PRs tab',
+    description: 'Opens the right-panel PRs tab (top pane by default, hovered bottom pane in split mode).',
+  },
+  {
     id: 'openChangesTab',
     label: 'Open Changes tab',
     description: 'Opens the right-panel Changes tab (top pane by default, hovered bottom pane in split mode).',
@@ -80,6 +86,7 @@ const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   openCreateModalAlt: { key: 'n', mod: true, ctrl: false, meta: false, alt: false, shift: true },
   toggleTldr: { key: 'w', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openHoveredGroupMultiChat: { key: 'd', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  openPullRequestsTab: { key: 'r', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openChangesTab: { key: 'c', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openBrowserTab: { key: 'b', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openFilesTab: { key: 'f', mod: false, ctrl: false, meta: false, alt: false, shift: false },
@@ -138,6 +145,7 @@ export function cloneDefaultShortcutBindings(): ShortcutBindingMap {
     openCreateModalAlt: { ...DEFAULT_SHORTCUT_BINDINGS.openCreateModalAlt! },
     toggleTldr: { ...DEFAULT_SHORTCUT_BINDINGS.toggleTldr! },
     openHoveredGroupMultiChat: { ...DEFAULT_SHORTCUT_BINDINGS.openHoveredGroupMultiChat! },
+    openPullRequestsTab: { ...DEFAULT_SHORTCUT_BINDINGS.openPullRequestsTab! },
     openChangesTab: { ...DEFAULT_SHORTCUT_BINDINGS.openChangesTab! },
     openBrowserTab: { ...DEFAULT_SHORTCUT_BINDINGS.openBrowserTab! },
     openFilesTab: { ...DEFAULT_SHORTCUT_BINDINGS.openFilesTab! },
