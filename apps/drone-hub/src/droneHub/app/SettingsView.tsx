@@ -3,10 +3,24 @@ import { IconChevron, IconCopy } from './icons';
 import { ShortcutSettingsSection } from './ShortcutSettingsSection';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 import type { UseHubLogsResult } from './use-hub-logs';
+import type { UseDeleteActionSettingsResult } from './use-delete-action-settings';
 import type { UseLlmSettingsResult } from './use-llm-settings';
+
+const ARCHIVE_RETENTION_OPTIONS: Array<{ value: '1h' | '8h' | '1d' | '1w'; label: string }> = [
+  { value: '1h', label: '1 hour' },
+  { value: '8h', label: '8 hours' },
+  { value: '1d', label: '1 day' },
+  { value: '1w', label: '1 week' },
+];
+
+const ARCHIVE_RUNTIME_POLICY_OPTIONS: Array<{ value: 'keep-running' | 'stop'; label: string }> = [
+  { value: 'keep-running', label: 'Keep running in background' },
+  { value: 'stop', label: 'Stop container on archive' },
+];
 
 type SettingsViewProps = {
   llm: UseLlmSettingsResult;
+  deleteAction: UseDeleteActionSettingsResult;
   hubLogsState: UseHubLogsResult;
   hubLogsTailLines: number;
   hubLogsMaxBytes: number;
@@ -17,6 +31,7 @@ type SettingsViewProps = {
 
 export function SettingsView({
   llm,
+  deleteAction,
   hubLogsState,
   hubLogsTailLines,
   hubLogsMaxBytes,
@@ -48,6 +63,30 @@ export function SettingsView({
     saveLlmProviderSettings,
     mutateApiKeySettings,
   } = llm;
+  const {
+    deleteSettings,
+    deleteSettingsLoading,
+    deleteSettingsError,
+    deleteSettingsNotice,
+    deleteModeDraft,
+    archiveRetentionDraft,
+    archiveRuntimePolicyDraft,
+    savingDeleteSettings,
+    archivedDrones,
+    archivedDronesLoading,
+    archivedDronesError,
+    archiveNotice,
+    restoringArchivedById,
+    deletingArchivedById,
+    setDeleteModeDraft,
+    setArchiveRetentionDraft,
+    setArchiveRuntimePolicyDraft,
+    loadDeleteSettings,
+    loadArchivedDrones,
+    saveDeleteSettings,
+    restoreArchivedDrone,
+    permanentlyDeleteArchivedDrone,
+  } = deleteAction;
 
   const {
     hubLogs,
@@ -67,11 +106,19 @@ export function SettingsView({
   const settingsBusy =
     hubLogsLoading ||
     llmSettingsLoading ||
+    deleteSettingsLoading ||
     savingOpenAiSettings ||
     clearingOpenAiSettings ||
     savingGeminiSettings ||
     clearingGeminiSettings ||
-    savingLlmProvider;
+    savingLlmProvider ||
+    savingDeleteSettings;
+  const activeDeleteMode = deleteSettings?.deleteAction.mode ?? 'permanent';
+  const deleteSettingsDirty =
+    deleteModeDraft !== activeDeleteMode ||
+    archiveRetentionDraft !== (deleteSettings?.deleteAction.archiveRetention ?? '1d') ||
+    archiveRuntimePolicyDraft !== (deleteSettings?.deleteAction.archiveRuntimePolicy ?? 'keep-running');
+  const archivedRows = archivedDrones?.archived ?? [];
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -93,6 +140,8 @@ export function SettingsView({
               type="button"
               onClick={() => {
                 void loadLlmSettings();
+                void loadDeleteSettings();
+                void loadArchivedDrones();
                 void loadHubLogs();
               }}
               disabled={settingsBusy}
@@ -329,6 +378,217 @@ export function SettingsView({
                   </button>
                 </div>
               </div>
+            </div>
+
+            <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
+              <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+                Trash behavior
+              </div>
+              <div className="text-[11px] text-[var(--muted-dim)] leading-relaxed">
+                Choose whether the trash button permanently deletes drones now or archives them first.
+              </div>
+              <div className="text-[11px] text-[var(--muted-dim)]">
+                Active mode: <span className="text-[var(--fg-secondary)]">{activeDeleteMode === 'archive' ? 'Archive' : 'Permanent delete'}</span>
+              </div>
+              {deleteSettingsError && (
+                <div className="rounded border border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
+                  {deleteSettingsError}
+                </div>
+              )}
+              {deleteSettingsNotice && (
+                <div className="rounded border border-[rgba(52,211,153,.2)] bg-[rgba(16,185,129,.08)] px-3 py-2 text-[12px] text-[#34d399]">
+                  {deleteSettingsNotice}
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDeleteModeDraft('permanent')}
+                  disabled={savingDeleteSettings || deleteSettingsLoading}
+                  className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+                    deleteModeDraft === 'permanent'
+                      ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
+                      : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                  } ${savingDeleteSettings || deleteSettingsLoading ? 'opacity-40 cursor-not-allowed' : ''}`}
+                  style={{ fontFamily: 'var(--display)' }}
+                >
+                  Permanent delete
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDeleteModeDraft('archive')}
+                  disabled={savingDeleteSettings || deleteSettingsLoading}
+                  className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+                    deleteModeDraft === 'archive'
+                      ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
+                      : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                  } ${savingDeleteSettings || deleteSettingsLoading ? 'opacity-40 cursor-not-allowed' : ''}`}
+                  style={{ fontFamily: 'var(--display)' }}
+                >
+                  Archive first
+                </button>
+              </div>
+
+              {deleteModeDraft === 'archive' && (
+                <div className="flex flex-col gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="text-[11px] text-[var(--muted-dim)]">Runtime while archived:</div>
+                    <select
+                      value={archiveRuntimePolicyDraft}
+                      onChange={(e) => setArchiveRuntimePolicyDraft(e.target.value as 'keep-running' | 'stop')}
+                      disabled={savingDeleteSettings || deleteSettingsLoading}
+                      className="h-9 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] px-2 text-[12px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
+                    >
+                      {ARCHIVE_RUNTIME_POLICY_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="text-[11px] text-[var(--muted-dim)]">Auto-delete archived drones after:</div>
+                    <select
+                      value={archiveRetentionDraft}
+                      onChange={(e) => setArchiveRetentionDraft(e.target.value as '1h' | '8h' | '1d' | '1w')}
+                      disabled={savingDeleteSettings || deleteSettingsLoading}
+                      className="h-9 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] px-2 text-[12px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
+                    >
+                      {ARCHIVE_RETENTION_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void saveDeleteSettings()}
+                  disabled={!deleteSettingsDirty || savingDeleteSettings || deleteSettingsLoading}
+                  className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+                    !deleteSettingsDirty || savingDeleteSettings || deleteSettingsLoading
+                      ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                      : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
+                  }`}
+                  style={{ fontFamily: 'var(--display)' }}
+                >
+                  {savingDeleteSettings ? 'Saving…' : 'Save delete behavior'}
+                </button>
+              </div>
+            </div>
+
+            <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+                    Archive
+                  </div>
+                  <div className="text-[11px] text-[var(--muted-dim)] mt-1">
+                    Review archived drones, restore them, or permanently delete them now.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void loadArchivedDrones()}
+                  disabled={archivedDronesLoading}
+                  className={`h-8 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+                    archivedDronesLoading
+                      ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                      : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                  }`}
+                  style={{ fontFamily: 'var(--display)' }}
+                >
+                  {archivedDronesLoading ? 'Refreshing…' : 'Refresh'}
+                </button>
+              </div>
+
+              {archivedDronesError && (
+                <div className="rounded border border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
+                  {archivedDronesError}
+                </div>
+              )}
+              {archiveNotice && (
+                <div className="rounded border border-[rgba(52,211,153,.2)] bg-[rgba(16,185,129,.08)] px-3 py-2 text-[12px] text-[#34d399]">
+                  {archiveNotice}
+                </div>
+              )}
+
+              {archivedDronesLoading && !archivedDrones ? (
+                <div className="text-[12px] text-[var(--muted-dim)]">Loading archive…</div>
+              ) : archivedRows.length === 0 ? (
+                <div className="text-[11px] text-[var(--muted-dim)]">No archived drones.</div>
+              ) : (
+                <div className="overflow-x-auto rounded border border-[var(--border-subtle)]">
+                  <table className="w-full min-w-[620px] text-left">
+                    <thead className="bg-[rgba(255,255,255,.02)]">
+                      <tr>
+                        <th className="px-3 py-2 text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-semibold">Drone</th>
+                        <th className="px-3 py-2 text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-semibold">Archived</th>
+                        <th className="px-3 py-2 text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-semibold">Deletes</th>
+                        <th className="px-3 py-2 text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-semibold">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {archivedRows.map((row) => {
+                        const restoring = Boolean(restoringArchivedById[row.id]);
+                        const deleting = Boolean(deletingArchivedById[row.id]);
+                        return (
+                          <tr key={row.id} className="border-t border-[var(--border-subtle)]">
+                            <td className="px-3 py-2 align-top">
+                              <div className="text-[12px] text-[var(--fg-secondary)]">{row.name}</div>
+                              <div className="text-[10px] text-[var(--muted-dim)] font-mono mt-0.5">{row.id}</div>
+                            </td>
+                            <td className="px-3 py-2 align-top text-[11px] text-[var(--muted-dim)]">
+                              {new Date(row.archivedAt).toLocaleString()}
+                            </td>
+                            <td className="px-3 py-2 align-top text-[11px] text-[var(--muted-dim)]">
+                              {new Date(row.deleteAt).toLocaleString()}
+                              <div className="text-[10px] mt-0.5">
+                                {row.archiveRuntimePolicy === 'stop' ? 'Stopped on archive' : 'Still running'}
+                              </div>
+                            </td>
+                            <td className="px-3 py-2 align-top">
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => void restoreArchivedDrone(row.id)}
+                                  disabled={restoring || deleting}
+                                  className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
+                                    restoring || deleting
+                                      ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                                      : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                                  }`}
+                                  style={{ fontFamily: 'var(--display)' }}
+                                >
+                                  {restoring ? 'Restoring…' : 'Restore'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void permanentlyDeleteArchivedDrone(row.id)}
+                                  disabled={restoring || deleting}
+                                  className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
+                                    restoring || deleting
+                                      ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                                      : 'bg-[var(--red-subtle)] border-[rgba(255,90,90,.28)] text-[var(--red)] hover:bg-[rgba(255,90,90,.18)]'
+                                  }`}
+                                  style={{ fontFamily: 'var(--display)' }}
+                                >
+                                  {deleting ? 'Deleting…' : 'Delete now'}
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
 
             <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">

@@ -59,6 +59,28 @@ export type EffectiveLlmProvider = {
   provider: LlmProviderId;
   source: LlmProviderSource;
 };
+export type DroneDeleteMode = 'permanent' | 'archive';
+export type ArchiveRetentionId = '1h' | '8h' | '1d' | '1w';
+export type ArchiveRuntimePolicy = 'keep-running' | 'stop';
+export type DeleteActionSettingsSource = 'settings' | 'default';
+export type EffectiveDeleteActionSettings = {
+  mode: DroneDeleteMode;
+  modeSource: DeleteActionSettingsSource;
+  archiveRetention: ArchiveRetentionId;
+  archiveRetentionSource: DeleteActionSettingsSource;
+  archiveRuntimePolicy: ArchiveRuntimePolicy;
+  archiveRuntimePolicySource: DeleteActionSettingsSource;
+};
+
+const ARCHIVE_RETENTION_MS_MAP: Record<ArchiveRetentionId, number> = {
+  '1h': 60 * 60 * 1000,
+  '8h': 8 * 60 * 60 * 1000,
+  '1d': 24 * 60 * 60 * 1000,
+  '1w': 7 * 24 * 60 * 60 * 1000,
+};
+const DEFAULT_DRONE_DELETE_MODE: DroneDeleteMode = 'permanent';
+const DEFAULT_ARCHIVE_RETENTION: ArchiveRetentionId = '1d';
+const DEFAULT_ARCHIVE_RUNTIME_POLICY: ArchiveRuntimePolicy = 'keep-running';
 
 export function parseLlmProvider(raw: unknown): LlmProviderId | null {
   const s = String(raw ?? '')
@@ -66,6 +88,34 @@ export function parseLlmProvider(raw: unknown): LlmProviderId | null {
     .toLowerCase();
   if (s === 'openai' || s === 'gemini') return s;
   return null;
+}
+
+export function parseDroneDeleteMode(raw: unknown): DroneDeleteMode | null {
+  const s = String(raw ?? '')
+    .trim()
+    .toLowerCase();
+  if (s === 'permanent' || s === 'archive') return s;
+  return null;
+}
+
+export function parseArchiveRetentionId(raw: unknown): ArchiveRetentionId | null {
+  const s = String(raw ?? '')
+    .trim()
+    .toLowerCase();
+  if (s === '1h' || s === '8h' || s === '1d' || s === '1w') return s;
+  return null;
+}
+
+export function parseArchiveRuntimePolicy(raw: unknown): ArchiveRuntimePolicy | null {
+  const s = String(raw ?? '')
+    .trim()
+    .toLowerCase();
+  if (s === 'keep-running' || s === 'stop') return s;
+  return null;
+}
+
+export function archiveRetentionMs(retention: ArchiveRetentionId): number {
+  return ARCHIVE_RETENTION_MS_MAP[retention];
 }
 
 function normalizeApiKey(raw: unknown): string {
@@ -201,3 +251,79 @@ export async function resolveLlmSettingsResponse(): Promise<{
   };
 }
 
+async function getStoredDeleteActionSettings(): Promise<{
+  mode: DroneDeleteMode | null;
+  archiveRetention: ArchiveRetentionId | null;
+  archiveRuntimePolicy: ArchiveRuntimePolicy | null;
+}> {
+  const reg = await loadRegistry();
+  const mode = parseDroneDeleteMode(reg.settings?.deleteAction?.mode);
+  const archiveRetention = parseArchiveRetentionId(reg.settings?.deleteAction?.archiveRetention);
+  const archiveRuntimePolicy = parseArchiveRuntimePolicy(reg.settings?.deleteAction?.archiveRuntimePolicy);
+  return { mode, archiveRetention, archiveRuntimePolicy };
+}
+
+export async function upsertStoredDeleteActionSettings(opts: {
+  mode?: DroneDeleteMode;
+  archiveRetention?: ArchiveRetentionId;
+  archiveRuntimePolicy?: ArchiveRuntimePolicy;
+}): Promise<void> {
+  const mode = opts.mode ? parseDroneDeleteMode(opts.mode) : null;
+  const archiveRetention = opts.archiveRetention ? parseArchiveRetentionId(opts.archiveRetention) : null;
+  const archiveRuntimePolicy = opts.archiveRuntimePolicy ? parseArchiveRuntimePolicy(opts.archiveRuntimePolicy) : null;
+  if (opts.mode != null && !mode) throw new Error('invalid delete mode');
+  if (opts.archiveRetention != null && !archiveRetention) throw new Error('invalid archive retention');
+  if (opts.archiveRuntimePolicy != null && !archiveRuntimePolicy) throw new Error('invalid archive runtime policy');
+
+  const updatedAt = new Date().toISOString();
+  await updateRegistry((reg) => {
+    reg.settings ??= {};
+    const prev = reg.settings.deleteAction ?? {};
+    reg.settings.deleteAction = {
+      mode: mode ?? parseDroneDeleteMode(prev.mode) ?? DEFAULT_DRONE_DELETE_MODE,
+      archiveRetention: archiveRetention ?? parseArchiveRetentionId(prev.archiveRetention) ?? DEFAULT_ARCHIVE_RETENTION,
+      archiveRuntimePolicy:
+        archiveRuntimePolicy ?? parseArchiveRuntimePolicy(prev.archiveRuntimePolicy) ?? DEFAULT_ARCHIVE_RUNTIME_POLICY,
+      updatedAt,
+    };
+  });
+}
+
+export async function resolveEffectiveDeleteActionSettings(): Promise<EffectiveDeleteActionSettings> {
+  const stored = await getStoredDeleteActionSettings();
+  return {
+    mode: stored.mode ?? DEFAULT_DRONE_DELETE_MODE,
+    modeSource: stored.mode ? 'settings' : 'default',
+    archiveRetention: stored.archiveRetention ?? DEFAULT_ARCHIVE_RETENTION,
+    archiveRetentionSource: stored.archiveRetention ? 'settings' : 'default',
+    archiveRuntimePolicy: stored.archiveRuntimePolicy ?? DEFAULT_ARCHIVE_RUNTIME_POLICY,
+    archiveRuntimePolicySource: stored.archiveRuntimePolicy ? 'settings' : 'default',
+  };
+}
+
+export async function resolveDeleteActionSettingsResponse(): Promise<{
+  ok: true;
+  deleteAction: {
+    mode: DroneDeleteMode;
+    modeSource: DeleteActionSettingsSource;
+    archiveRetention: ArchiveRetentionId;
+    archiveRetentionSource: DeleteActionSettingsSource;
+    archiveRetentionMs: number;
+    archiveRuntimePolicy: ArchiveRuntimePolicy;
+    archiveRuntimePolicySource: DeleteActionSettingsSource;
+  };
+}> {
+  const settings = await resolveEffectiveDeleteActionSettings();
+  return {
+    ok: true,
+    deleteAction: {
+      mode: settings.mode,
+      modeSource: settings.modeSource,
+      archiveRetention: settings.archiveRetention,
+      archiveRetentionSource: settings.archiveRetentionSource,
+      archiveRetentionMs: archiveRetentionMs(settings.archiveRetention),
+      archiveRuntimePolicy: settings.archiveRuntimePolicy,
+      archiveRuntimePolicySource: settings.archiveRuntimePolicySource,
+    },
+  };
+}

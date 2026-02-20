@@ -22,6 +22,8 @@ import {
   dvmRemove,
   dvmRename,
   dvmScript,
+  dvmStart,
+  dvmStop,
   dvmSessionRead,
   dvmSessionStart,
   dvmSessionType,
@@ -83,17 +85,26 @@ import {
   normalizeGithubPullRequestMergeMethod,
 } from './github-pull-requests';
 import {
+  archiveRetentionMs,
   clearStoredProviderApiKey,
   hubLog,
   loadHubEnv,
+  parseArchiveRetentionId,
+  parseArchiveRuntimePolicy,
+  parseDroneDeleteMode,
   parseLlmProvider,
   providerDisplayName,
   providerKeySettingsResponse,
+  resolveDeleteActionSettingsResponse,
+  resolveEffectiveDeleteActionSettings,
   resolveEffectiveLlmProvider,
   resolveEffectiveProviderApiKeySettings,
   resolveLlmSettingsResponse,
+  upsertStoredDeleteActionSettings,
   upsertStoredLlmProvider,
   upsertStoredProviderApiKey,
+  type ArchiveRetentionId,
+  type ArchiveRuntimePolicy,
   type LlmProviderId,
 } from './hub-settings';
 
@@ -1581,6 +1592,20 @@ function looksLikeMissingContainerError(msg: string): boolean {
   );
 }
 
+function looksLikeContainerNotRunningError(msg: string): boolean {
+  const s = String(msg ?? '').toLowerCase();
+  return (
+    s.includes('is not running') ||
+    s.includes('already stopped') ||
+    s.includes('cannot stop') && s.includes('not running')
+  );
+}
+
+function looksLikeContainerAlreadyRunningError(msg: string): boolean {
+  const s = String(msg ?? '').toLowerCase();
+  return s.includes('already running') || (s.includes('cannot start') && s.includes('running'));
+}
+
 function looksLikeRepoUnavailableError(msg: string): boolean {
   const s = String(msg ?? '').toLowerCase();
   return (
@@ -2738,16 +2763,12 @@ async function spawnTerminalWithBash(
   };
 }
 
-async function removeDroneById(opts: { id: string; keepVolume: boolean; forget: boolean }) {
-  const droneId = normalizeDroneIdentity(opts.id);
-  if (!droneId) return { hadEntry: false, removedRegistry: false, removeErr: `invalid drone id: ${String(opts.id ?? '')}` };
-
-  const regSnapshot: any = await loadRegistry();
-  const droneEntry = regSnapshot?.drones?.[droneId] ?? null;
-  const hadEntry = Boolean(droneEntry);
-  const repoPathRaw = String(droneEntry?.repoPath ?? '').trim();
-  const containerName = String(droneEntry?.containerName ?? droneEntry?.name ?? `drone-${droneId}`).trim() || `drone-${droneId}`;
-
+async function removeDroneContainerAndCleanup(opts: {
+  droneId: string;
+  containerName: string;
+  repoPathRaw: string;
+  keepVolume: boolean;
+}): Promise<{ containerGone: boolean; removeErr: string | null }> {
   let removeErr: string | null = null;
   let containerGone = false;
 
@@ -2758,7 +2779,7 @@ async function removeDroneById(opts: { id: string; keepVolume: boolean; forget: 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
       // eslint-disable-next-line no-await-in-loop
-      await dvmRemove(containerName, { keepVolume: opts.keepVolume });
+      await dvmRemove(opts.containerName, { keepVolume: opts.keepVolume });
       containerGone = true;
       removeErr = null;
       break;
@@ -2773,7 +2794,7 @@ async function removeDroneById(opts: { id: string; keepVolume: boolean; forget: 
 
       // Best-effort: if the remove errored but the container is actually gone, also treat as success.
       // eslint-disable-next-line no-await-in-loop
-      const exists = await dvmContainerExists(containerName);
+      const exists = await dvmContainerExists(opts.containerName);
       if (!exists) {
         containerGone = true;
         removeErr = null;
@@ -2788,16 +2809,36 @@ async function removeDroneById(opts: { id: string; keepVolume: boolean; forget: 
     }
   }
 
-  if (containerGone && hadEntry && repoPathRaw) {
+  if (containerGone && opts.repoPathRaw) {
     try {
-      const repoRoot = await gitTopLevel(repoPathRaw);
-      const quarantineBranch = `quarantine/${droneId}`;
-      const wt = quarantineWorktreePath(repoRoot, droneId);
+      const repoRoot = await gitTopLevel(opts.repoPathRaw);
+      const quarantineBranch = `quarantine/${opts.droneId}`;
+      const wt = quarantineWorktreePath(repoRoot, opts.droneId);
       await cleanupQuarantineWorktree({ repoRoot, worktreePath: wt, branch: quarantineBranch });
     } catch {
       // Ignore quarantine cleanup failures during delete.
     }
   }
+
+  return { containerGone, removeErr };
+}
+
+async function removeDroneById(opts: { id: string; keepVolume: boolean; forget: boolean }) {
+  const droneId = normalizeDroneIdentity(opts.id);
+  if (!droneId) return { hadEntry: false, removedRegistry: false, removeErr: `invalid drone id: ${String(opts.id ?? '')}` };
+
+  const regSnapshot: any = await loadRegistry();
+  const droneEntry = regSnapshot?.drones?.[droneId] ?? null;
+  const hadEntry = Boolean(droneEntry);
+  const repoPathRaw = String(droneEntry?.repoPath ?? '').trim();
+  const containerName = String(droneEntry?.containerName ?? droneEntry?.name ?? `drone-${droneId}`).trim() || `drone-${droneId}`;
+
+  const { containerGone, removeErr } = await removeDroneContainerAndCleanup({
+    droneId,
+    containerName,
+    repoPathRaw,
+    keepVolume: opts.keepVolume,
+  });
 
   let removedRegistry = false;
   // Only forget registry metadata once the container is actually gone.
@@ -2813,6 +2854,354 @@ async function removeDroneById(opts: { id: string; keepVolume: boolean; forget: 
   }
 
   return { hadEntry, removedRegistry, removeErr };
+}
+
+const DEFAULT_ARCHIVE_RETENTION: ArchiveRetentionId = '1d';
+const DEFAULT_ARCHIVE_RUNTIME_POLICY: ArchiveRuntimePolicy = 'keep-running';
+
+function normalizeArchiveRetention(raw: unknown): ArchiveRetentionId {
+  return parseArchiveRetentionId(raw) ?? DEFAULT_ARCHIVE_RETENTION;
+}
+
+function normalizeArchiveRuntimePolicy(raw: unknown): ArchiveRuntimePolicy {
+  return parseArchiveRuntimePolicy(raw) ?? DEFAULT_ARCHIVE_RUNTIME_POLICY;
+}
+
+function parseIsoToMs(raw: unknown): number | null {
+  const text = typeof raw === 'string' ? raw.trim() : '';
+  if (!text) return null;
+  const ms = Date.parse(text);
+  if (!Number.isFinite(ms)) return null;
+  return ms;
+}
+
+function resolveArchiveDeleteAtIso(archivedEntry: any): string {
+  const explicit = String(archivedEntry?.deleteAt ?? '').trim();
+  if (explicit && Number.isFinite(Date.parse(explicit))) return explicit;
+  const archivedAtMs = parseIsoToMs(archivedEntry?.archivedAt) ?? Date.now();
+  const retention = normalizeArchiveRetention(archivedEntry?.archiveRetention);
+  return new Date(archivedAtMs + archiveRetentionMs(retention)).toISOString();
+}
+
+function allocateRestoredDroneName(regAny: any, preferredRaw: unknown): string {
+  const preferred = String(preferredRaw ?? '').trim();
+  const fallback = preferred || allocateUntitledDisplayName(regAny);
+  if (!droneDisplayNameExists(regAny, fallback)) return fallback;
+
+  const maxBaseLen = Math.max(8, DRONE_DISPLAY_NAME_MAX_LEN - 8);
+  const base = fallback.length > maxBaseLen ? fallback.slice(0, maxBaseLen).trim() : fallback;
+  for (let i = 2; i <= 999; i += 1) {
+    const candidate = `${base} (${i})`;
+    if (candidate.length > DRONE_DISPLAY_NAME_MAX_LEN) continue;
+    if (!droneDisplayNameExists(regAny, candidate)) return candidate;
+  }
+  return allocateUntitledDisplayName(regAny);
+}
+
+async function archiveDroneById(opts: {
+  id: string;
+  archiveRetention: ArchiveRetentionId;
+  archiveRuntimePolicy: ArchiveRuntimePolicy;
+}): Promise<{
+  hadEntry: boolean;
+  archived: boolean;
+  id: string;
+  name: string;
+  archiveRetention: ArchiveRetentionId;
+  archiveRuntimePolicy: ArchiveRuntimePolicy;
+  archivedAt: string | null;
+  deleteAt: string | null;
+}> {
+  const droneId = normalizeDroneIdentity(opts.id);
+  if (!droneId) {
+    return {
+      hadEntry: false,
+      archived: false,
+      id: String(opts.id ?? ''),
+      name: String(opts.id ?? ''),
+      archiveRetention: normalizeArchiveRetention(opts.archiveRetention),
+      archiveRuntimePolicy: normalizeArchiveRuntimePolicy(opts.archiveRuntimePolicy),
+      archivedAt: null,
+      deleteAt: null,
+    };
+  }
+  const retention = normalizeArchiveRetention(opts.archiveRetention);
+  const runtimePolicy = normalizeArchiveRuntimePolicy(opts.archiveRuntimePolicy);
+  return await updateRegistry((regAny: any) => {
+    const droneEntry = regAny?.drones?.[droneId];
+    if (!droneEntry) {
+      return {
+        hadEntry: false,
+        archived: false,
+        id: droneId,
+        name: droneId,
+        archiveRetention: retention,
+        archiveRuntimePolicy: runtimePolicy,
+        archivedAt: null,
+        deleteAt: null,
+      };
+    }
+
+    const now = nowIso();
+    const deleteAt = new Date(Date.now() + archiveRetentionMs(retention)).toISOString();
+    const name = String(droneEntry?.name ?? '').trim() || droneId;
+    const containerName = String(droneEntry?.containerName ?? droneEntry?.name ?? `drone-${droneId}`).trim() || `drone-${droneId}`;
+    const archivedEntry = {
+      ...droneEntry,
+      id: droneId,
+      name,
+      containerName,
+      archivedAt: now,
+      deleteAt,
+      archiveRetention: retention,
+      archiveRuntimePolicy: runtimePolicy,
+    };
+
+    regAny.archived = regAny.archived ?? {};
+    regAny.archived[droneId] = archivedEntry;
+    if (regAny?.drones?.[droneId]) delete regAny.drones[droneId];
+    if (regAny?.pending?.[droneId]) delete regAny.pending[droneId];
+
+    return {
+      hadEntry: true,
+      archived: true,
+      id: droneId,
+      name,
+      archiveRetention: retention,
+      archiveRuntimePolicy: runtimePolicy,
+      archivedAt: now,
+      deleteAt,
+    };
+  });
+}
+
+async function restoreArchivedDroneById(opts: { id: string }): Promise<{
+  hadEntry: boolean;
+  restored: boolean;
+  id: string;
+  name: string;
+  renamed: boolean;
+  error: string | null;
+}> {
+  const droneId = normalizeDroneIdentity(opts.id);
+  if (!droneId) {
+    return {
+      hadEntry: false,
+      restored: false,
+      id: String(opts.id ?? ''),
+      name: String(opts.id ?? ''),
+      renamed: false,
+      error: `invalid drone id: ${String(opts.id ?? '')}`,
+    };
+  }
+
+  const regSnapshot: any = await loadRegistry();
+  const archivedEntry = regSnapshot?.archived?.[droneId] ?? null;
+  if (!archivedEntry) {
+    return {
+      hadEntry: false,
+      restored: false,
+      id: droneId,
+      name: droneId,
+      renamed: false,
+      error: `unknown archived drone: ${droneId}`,
+    };
+  }
+
+  const containerName = String(archivedEntry?.containerName ?? archivedEntry?.name ?? `drone-${droneId}`).trim() || `drone-${droneId}`;
+  const archiveRuntimePolicy = normalizeArchiveRuntimePolicy(archivedEntry?.archiveRuntimePolicy);
+  const containerExists = await dvmContainerExists(containerName);
+  if (!containerExists) {
+    return {
+      hadEntry: true,
+      restored: false,
+      id: droneId,
+      name: String(archivedEntry?.name ?? '').trim() || droneId,
+      renamed: false,
+      error: `container "${containerName}" no longer exists`,
+    };
+  }
+
+  if (archiveRuntimePolicy === 'stop') {
+    try {
+      await dvmStart(containerName);
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      if (!looksLikeContainerAlreadyRunningError(msg)) {
+        return {
+          hadEntry: true,
+          restored: false,
+          id: droneId,
+          name: String(archivedEntry?.name ?? '').trim() || droneId,
+          renamed: false,
+          error: `failed to start archived drone container "${containerName}": ${msg}`,
+        };
+      }
+    }
+  }
+
+  return await updateRegistry((regAny: any) => {
+    const latest = regAny?.archived?.[droneId];
+    if (!latest) {
+      return {
+        hadEntry: false,
+        restored: false,
+        id: droneId,
+        name: droneId,
+        renamed: false,
+        error: `unknown archived drone: ${droneId}`,
+      };
+    }
+
+    const previousName = String(latest?.name ?? '').trim() || droneId;
+    const restoredName = allocateRestoredDroneName(regAny, previousName);
+    const restoredEntry: any = {
+      ...latest,
+      id: droneId,
+      name: restoredName,
+      containerName,
+    };
+    delete restoredEntry.archivedAt;
+    delete restoredEntry.deleteAt;
+    delete restoredEntry.archiveRetention;
+    delete restoredEntry.archiveRuntimePolicy;
+
+    regAny.drones = regAny.drones ?? {};
+    regAny.drones[droneId] = restoredEntry;
+    if (regAny?.archived?.[droneId]) delete regAny.archived[droneId];
+    if (regAny?.pending?.[droneId]) delete regAny.pending[droneId];
+    if (Object.keys(regAny?.archived ?? {}).length === 0) delete regAny.archived;
+
+    return {
+      hadEntry: true,
+      restored: true,
+      id: droneId,
+      name: restoredName,
+      renamed: restoredName !== previousName,
+      error: null,
+    };
+  });
+}
+
+async function removeArchivedDroneById(opts: { id: string; keepVolume: boolean }): Promise<{
+  hadEntry: boolean;
+  removedArchive: boolean;
+  id: string;
+  name: string;
+  removeErr: string | null;
+}> {
+  const droneId = normalizeDroneIdentity(opts.id);
+  if (!droneId) {
+    return {
+      hadEntry: false,
+      removedArchive: false,
+      id: String(opts.id ?? ''),
+      name: String(opts.id ?? ''),
+      removeErr: `invalid drone id: ${String(opts.id ?? '')}`,
+    };
+  }
+
+  const regSnapshot: any = await loadRegistry();
+  const archivedEntry = regSnapshot?.archived?.[droneId] ?? null;
+  const hadEntry = Boolean(archivedEntry);
+  const name = String(archivedEntry?.name ?? '').trim() || droneId;
+  if (!archivedEntry) {
+    return {
+      hadEntry: false,
+      removedArchive: false,
+      id: droneId,
+      name,
+      removeErr: `unknown archived drone: ${droneId}`,
+    };
+  }
+
+  const repoPathRaw = String(archivedEntry?.repoPath ?? '').trim();
+  const containerName = String(archivedEntry?.containerName ?? archivedEntry?.name ?? `drone-${droneId}`).trim() || `drone-${droneId}`;
+  const { containerGone, removeErr } = await removeDroneContainerAndCleanup({
+    droneId,
+    containerName,
+    repoPathRaw,
+    keepVolume: opts.keepVolume,
+  });
+
+  let removedArchive = false;
+  if (containerGone) {
+    removedArchive = await updateRegistry((regAny: any) => {
+      if (!regAny?.archived?.[droneId]) return false;
+      delete regAny.archived[droneId];
+      if (Object.keys(regAny.archived).length === 0) delete regAny.archived;
+      return true;
+    });
+  }
+
+  return { hadEntry, removedArchive, id: droneId, name, removeErr };
+}
+
+let ARCHIVE_CLEANUP_TASK: Promise<void> | null = null;
+const ARCHIVE_CLEANUP_INTERVAL_MS = 5 * 60_000;
+const ARCHIVE_CLEANUP_MAX_DELETES_PER_RUN = 25;
+let ARCHIVE_CLEANUP_INTERVAL: ReturnType<typeof setInterval> | null = null;
+
+function triggerArchiveCleanup(reason: string) {
+  void cleanupExpiredArchivedDrones({ reason }).catch((e: any) => {
+    hubLog('warn', 'archive cleanup failed', {
+      reason,
+      error: e?.message ?? String(e),
+    });
+  });
+}
+
+async function cleanupExpiredArchivedDrones(opts?: { maxDeletes?: number; reason?: string }): Promise<void> {
+  if (ARCHIVE_CLEANUP_TASK) {
+    await ARCHIVE_CLEANUP_TASK;
+    return;
+  }
+  const maxDeletes =
+    typeof opts?.maxDeletes === 'number' && Number.isFinite(opts.maxDeletes)
+      ? Math.max(1, Math.floor(opts.maxDeletes))
+      : ARCHIVE_CLEANUP_MAX_DELETES_PER_RUN;
+
+  ARCHIVE_CLEANUP_TASK = (async () => {
+    const regAny: any = await loadRegistry();
+    const nowMs = Date.now();
+    const expiredIds = (Object.entries(regAny?.archived ?? {}) as Array<[string, any]>)
+      .map(([id, entry]) => {
+        const parsedId = normalizeDroneIdentity(id);
+        if (!parsedId) return null;
+        const deleteAtIso = resolveArchiveDeleteAtIso(entry);
+        const deleteAtMs = parseIsoToMs(deleteAtIso);
+        if (deleteAtMs == null || deleteAtMs > nowMs) return null;
+        return parsedId;
+      })
+      .filter((id): id is string => Boolean(id))
+      .slice(0, maxDeletes);
+
+    for (const droneId of expiredIds) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const r = await removeArchivedDroneById({ id: droneId, keepVolume: false });
+        if (r.removeErr) {
+          hubLog('warn', 'archive TTL delete failed', {
+            id: droneId,
+            error: r.removeErr,
+            reason: opts?.reason ?? null,
+          });
+        } else {
+          hubLog('info', 'archive TTL deleted drone', { id: droneId, reason: opts?.reason ?? null });
+        }
+      } catch (e: any) {
+        hubLog('warn', 'archive TTL delete failed (exception)', {
+          id: droneId,
+          error: e?.message ?? String(e),
+          reason: opts?.reason ?? null,
+        });
+      }
+    }
+  })().finally(() => {
+    ARCHIVE_CLEANUP_TASK = null;
+  });
+
+  await ARCHIVE_CLEANUP_TASK;
 }
 
 async function renameDroneByName(opts: {
@@ -3573,6 +3962,18 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
     // ignore (best-effort)
   }
 
+  if (!ARCHIVE_CLEANUP_INTERVAL) {
+    ARCHIVE_CLEANUP_INTERVAL = setInterval(() => {
+      triggerArchiveCleanup('interval');
+    }, ARCHIVE_CLEANUP_INTERVAL_MS);
+    try {
+      (ARCHIVE_CLEANUP_INTERVAL as any).unref?.();
+    } catch {
+      // ignore
+    }
+  }
+  triggerArchiveCleanup('startup');
+
   type TerminalWebSocketContext = {
     droneName: string;
     sessionName: string;
@@ -3973,6 +4374,45 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           }
           await upsertStoredLlmProvider(provider);
           json(res, 200, await resolveLlmSettingsResponse());
+          return;
+        }
+      }
+
+      if (pathname === '/api/settings/delete-action') {
+        if (method === 'GET') {
+          json(res, 200, await resolveDeleteActionSettingsResponse());
+          return;
+        }
+
+        if (method === 'POST') {
+          let body: any = null;
+          try {
+            body = await readJsonBody(req);
+          } catch (e: any) {
+            json(res, 400, { ok: false, error: e?.message ?? String(e) });
+            return;
+          }
+          const mode = parseDroneDeleteMode(body?.mode);
+          const archiveRetention = parseArchiveRetentionId(body?.archiveRetention);
+          const archiveRuntimePolicy = parseArchiveRuntimePolicy(body?.archiveRuntimePolicy);
+          if (!mode) {
+            json(res, 400, { ok: false, error: 'mode must be permanent or archive' });
+            return;
+          }
+          if (body?.archiveRetention != null && !archiveRetention) {
+            json(res, 400, { ok: false, error: 'archiveRetention must be one of: 1h, 8h, 1d, 1w' });
+            return;
+          }
+          if (body?.archiveRuntimePolicy != null && !archiveRuntimePolicy) {
+            json(res, 400, { ok: false, error: 'archiveRuntimePolicy must be one of: keep-running, stop' });
+            return;
+          }
+          await upsertStoredDeleteActionSettings({
+            mode,
+            archiveRetention: archiveRetention ?? undefined,
+            archiveRuntimePolicy: archiveRuntimePolicy ?? undefined,
+          });
+          json(res, 200, await resolveDeleteActionSettingsResponse());
           return;
         }
       }
@@ -4464,6 +4904,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
 
       // GET /api/drones
       if (method === 'GET' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'drones') {
+        triggerArchiveCleanup('api:drones');
         const regAny: any = await loadRegistry();
 
         // Best-effort: if the Hub restarted while drones were pending, resume provisioning.
@@ -6694,6 +7135,176 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         return;
       }
 
+      // POST /api/drones/:id/archive
+      if (method === 'POST' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'drones' && parts[3] === 'archive') {
+        const droneRef = decodeURIComponent(parts[2]);
+        const regAnySnapshot: any = await loadRegistry();
+        const found = findDroneIdByRef(regAnySnapshot, droneRef);
+        if (!found) {
+          json(res, 404, { ok: false, error: `unknown drone: ${droneRef}` });
+          return;
+        }
+        const droneId = normalizeDroneIdentity(found.id) || found.id;
+        const snapshotDrone =
+          found.kind === 'pending' && !regAnySnapshot?.drones?.[droneId]
+            ? regAnySnapshot?.pending?.[droneId]
+            : regAnySnapshot?.drones?.[droneId];
+        const droneName = String(snapshotDrone?.name ?? droneRef).trim() || droneRef;
+        const deleteSettings = await resolveEffectiveDeleteActionSettings();
+        const archiveRetention = deleteSettings.archiveRetention;
+        const archiveRuntimePolicy = deleteSettings.archiveRuntimePolicy;
+
+        const pendingResult = await updateRegistry((regAny: any) => {
+          if (regAny?.drones?.[droneId]) return { kind: 'real' as const };
+          if (regAny?.pending?.[droneId]) {
+            delete regAny.pending[droneId];
+            return { kind: 'pending' as const };
+          }
+          return { kind: 'none' as const };
+        });
+        if (pendingResult.kind === 'pending') {
+          dequeueProvisioning(droneId);
+          json(res, 200, {
+            ok: true,
+            id: droneId,
+            name: droneName,
+            archived: false,
+            removedPending: true,
+            archiveRetention,
+            archiveRuntimePolicy,
+            archivedAt: null,
+            deleteAt: null,
+          });
+          return;
+        }
+        if (pendingResult.kind === 'none') {
+          json(res, 404, { ok: false, error: `unknown drone: ${droneRef}` });
+          return;
+        }
+
+        if (archiveRuntimePolicy === 'stop') {
+          const containerName = String(snapshotDrone?.containerName ?? snapshotDrone?.name ?? `drone-${droneId}`).trim() || `drone-${droneId}`;
+          try {
+            await dvmStop(containerName);
+          } catch (e: any) {
+            const msg = e?.message ?? String(e);
+            if (!looksLikeContainerNotRunningError(msg) && !looksLikeMissingContainerError(msg)) {
+              json(res, 500, {
+                ok: false,
+                error: `failed to stop drone container "${containerName}" before archive: ${msg}`,
+              });
+              return;
+            }
+          }
+        }
+
+        const r = await archiveDroneById({ id: droneId, archiveRetention, archiveRuntimePolicy });
+        if (!r.hadEntry || !r.archived) {
+          json(res, 404, { ok: false, error: `unknown drone: ${droneRef}` });
+          return;
+        }
+        json(res, 200, {
+          ok: true,
+          id: r.id,
+          name: r.name,
+          archived: r.archived,
+          archiveRetention: r.archiveRetention,
+          archiveRuntimePolicy: r.archiveRuntimePolicy,
+          archivedAt: r.archivedAt,
+          deleteAt: r.deleteAt,
+        });
+        return;
+      }
+
+      // GET /api/archive/drones
+      if (method === 'GET' && parts.length === 3 && parts[0] === 'api' && parts[1] === 'archive' && parts[2] === 'drones') {
+        triggerArchiveCleanup('api:archive-drones');
+        const regAny: any = await loadRegistry();
+        const nowMs = Date.now();
+        const archived = (Object.entries(regAny?.archived ?? {}) as Array<[string, any]>)
+          .map(([id, entry]) => {
+            const droneId = normalizeDroneIdentity(id);
+            if (!droneId) return null;
+            const archivedAt = String(entry?.archivedAt ?? '').trim() || String(entry?.createdAt ?? nowIso());
+            const deleteAt = resolveArchiveDeleteAtIso(entry);
+            const deleteAtMs = parseIsoToMs(deleteAt);
+            if (deleteAtMs != null && deleteAtMs <= nowMs) return null;
+            const retention = normalizeArchiveRetention(entry?.archiveRetention);
+            const runtimePolicy = normalizeArchiveRuntimePolicy(entry?.archiveRuntimePolicy);
+            return {
+              id: droneId,
+              name: String(entry?.name ?? '').trim() || droneId,
+              group: typeof entry?.group === 'string' && entry.group.trim() ? String(entry.group).trim() : null,
+              createdAt: String(entry?.createdAt ?? '').trim() || null,
+              archivedAt,
+              deleteAt,
+              deleteInMs: deleteAtMs == null ? null : Math.max(0, deleteAtMs - nowMs),
+              archiveRetention: retention,
+              archiveRetentionMs: archiveRetentionMs(retention),
+              archiveRuntimePolicy: runtimePolicy,
+              containerName: String(entry?.containerName ?? '').trim() || `drone-${droneId}`,
+              repoPath: String(entry?.repoPath ?? '').trim() || '',
+            };
+          })
+          .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+          .sort((a, b) => {
+            const ams = parseIsoToMs(a.archivedAt) ?? 0;
+            const bms = parseIsoToMs(b.archivedAt) ?? 0;
+            return bms - ams;
+          });
+        json(res, 200, { ok: true, archived, total: archived.length, now: new Date(nowMs).toISOString() });
+        return;
+      }
+
+      // POST /api/archive/drones/:id/restore
+      if (method === 'POST' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'archive' && parts[2] === 'drones' && parts[4] === 'restore') {
+        const archivedDroneRef = decodeURIComponent(parts[3]);
+        const droneId = normalizeDroneIdentity(archivedDroneRef);
+        if (!droneId) {
+          json(res, 400, { ok: false, error: `invalid drone id: ${archivedDroneRef}` });
+          return;
+        }
+        const r = await restoreArchivedDroneById({ id: droneId });
+        if (!r.hadEntry) {
+          json(res, 404, { ok: false, error: r.error ?? `unknown archived drone: ${droneId}` });
+          return;
+        }
+        if (!r.restored) {
+          json(res, 409, { ok: false, id: r.id, name: r.name, error: r.error ?? 'restore failed' });
+          return;
+        }
+        json(res, 200, { ok: true, id: r.id, name: r.name, renamed: r.renamed });
+        return;
+      }
+
+      // DELETE /api/archive/drones/:id?keepVolume=0|1
+      if (method === 'DELETE' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'archive' && parts[2] === 'drones') {
+        const archivedDroneRef = decodeURIComponent(parts[3]);
+        const droneId = normalizeDroneIdentity(archivedDroneRef);
+        if (!droneId) {
+          json(res, 400, { ok: false, error: `invalid drone id: ${archivedDroneRef}` });
+          return;
+        }
+        const keepVolume = parseBoolParam(u.searchParams.get('keepVolume'), false);
+        const r = await removeArchivedDroneById({ id: droneId, keepVolume });
+        if (!r.hadEntry) {
+          json(res, 404, { ok: false, error: r.removeErr ?? `unknown archived drone: ${droneId}` });
+          return;
+        }
+        if (r.removeErr) {
+          json(res, 500, {
+            ok: false,
+            id: r.id,
+            name: r.name,
+            error: r.removeErr,
+            removedArchive: r.removedArchive,
+          });
+          return;
+        }
+        json(res, 200, { ok: true, id: r.id, name: r.name, removedArchive: r.removedArchive });
+        return;
+      }
+
       // GET /api/groups
       // Groups are host-side metadata in the registry file and persist even if empty.
       if (method === 'GET' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'groups') {
@@ -8012,6 +8623,14 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         }
       }
       await waitWithTimeout(serverClose, 5_000);
+      if (ARCHIVE_CLEANUP_INTERVAL) {
+        try {
+          clearInterval(ARCHIVE_CLEANUP_INTERVAL);
+        } catch {
+          // ignore
+        }
+        ARCHIVE_CLEANUP_INTERVAL = null;
+      }
     },
   };
 }
