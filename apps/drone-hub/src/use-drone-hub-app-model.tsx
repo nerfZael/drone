@@ -1230,6 +1230,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     sendGroupBroadcastPrompt,
     uiDroneName,
     selectDroneCard,
+    deleteDrone,
+    deletingDrones,
     parseJobsFromAgentMessage,
     dronesLoading,
     sidebarDrones,

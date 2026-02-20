@@ -9,7 +9,7 @@ import {
 } from '../chat';
 import { requestJson } from '../http';
 import { StatusBadge } from '../overview';
-import { TypingDots } from '../overview/icons';
+import { IconSpinner, IconTrash, TypingDots } from '../overview/icons';
 import type { DroneSummary, PendingPrompt, TranscriptItem } from '../types';
 import { IconChat } from './icons';
 import { fetchJson, isNotFoundError, usePoll } from './hooks';
@@ -21,6 +21,8 @@ export type GroupMultiChatColumnProps = {
   preferredChat: string;
   nowMs: number;
   onOpenDrone: () => void;
+  onDeleteDrone: () => void;
+  deleteBusy?: boolean;
   onCreateJobs: (opts: { turn: number; message: string }) => void;
   columnWidthPx: number;
 };
@@ -31,6 +33,8 @@ export function GroupMultiChatColumn({
   preferredChat,
   nowMs,
   onOpenDrone,
+  onDeleteDrone,
+  deleteBusy = false,
   onCreateJobs,
   columnWidthPx,
 }: GroupMultiChatColumnProps) {
@@ -204,24 +208,27 @@ export function GroupMultiChatColumn({
       className="flex-none h-full rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-alt)] overflow-hidden flex flex-col"
       style={{ width: columnWidthPx, minWidth: columnWidthPx }}
     >
-      <div className="flex-shrink-0 px-3 py-2.5 border-b border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]">
+      <div className="group/column-header flex-shrink-0 px-3 py-2.5 border-b border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]">
         <div className="min-w-0">
-          <div className="flex items-center justify-between gap-2">
-            <button
-              type="button"
-              onClick={onOpenDrone}
-              className="text-left text-[12px] font-semibold text-[var(--fg-secondary)] hover:text-[var(--accent)] transition-colors truncate min-w-0"
-              style={{ fontFamily: 'var(--display)' }}
-              title={`Open ${shownName}`}
-            >
-              {shownName}
-            </button>
-            <div className="flex items-center flex-shrink-0 ml-2">
+          <div className="flex items-center gap-2">
+            <div className="min-w-0 flex-1 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onOpenDrone}
+                className="min-w-0 flex-1 block text-left text-[12px] font-semibold text-[var(--fg-secondary)] hover:text-[var(--accent)] transition-colors truncate"
+                style={{ fontFamily: 'var(--display)' }}
+                title={`Open ${shownName}`}
+              >
+                {shownName}
+              </button>
               {waitingForAgent ? (
-                <span className="inline-flex items-center" title="Agent responding">
+                <span className="inline-flex items-center flex-shrink-0" title="Agent responding">
                   <TypingDots color="var(--yellow)" />
                 </span>
-              ) : (
+              ) : null}
+            </div>
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              {waitingForAgent ? null : (
                 <StatusBadge
                   ok={drone.statusOk}
                   error={drone.statusError}
@@ -229,6 +236,21 @@ export function GroupMultiChatColumn({
                   hubMessage={drone.hubMessage}
                 />
               )}
+              <button
+                type="button"
+                onClick={onDeleteDrone}
+                disabled={deleteBusy}
+                aria-busy={deleteBusy}
+                className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
+                  deleteBusy
+                    ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
+                    : 'opacity-0 pointer-events-none group-hover/column-header:opacity-100 group-hover/column-header:pointer-events-auto bg-[var(--red-subtle)] border-[rgba(255,90,90,.2)] text-[var(--red)] hover:bg-[rgba(255,90,90,.15)]'
+                }`}
+                title={deleteBusy ? `Deleting "${shownName}"…` : `Delete "${shownName}"`}
+                aria-label={deleteBusy ? `Deleting "${shownName}"` : `Delete "${shownName}"`}
+              >
+                {deleteBusy ? <IconSpinner className="opacity-90" /> : <IconTrash className="opacity-90" />}
+              </button>
             </div>
           </div>
           <div className="text-[10px] text-[var(--muted-dim)] font-mono mt-0.5">chat: {chatName}</div>
