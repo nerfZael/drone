@@ -15,8 +15,10 @@ export async function requestJson<T>(url: string, init?: RequestInit): Promise<T
             .map((e: any) => `${e?.name ?? 'unknown'}: ${e?.error ?? 'failed'}`)
             .join(', ')}`
         : `${r.status} ${r.statusText}`);
-    throw new Error(msg);
+    const err = new Error(msg) as Error & { status?: number; data?: any };
+    err.status = r.status;
+    err.data = data;
+    throw err;
   }
   return data as T;
 }
-

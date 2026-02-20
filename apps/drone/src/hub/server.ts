@@ -75,6 +75,7 @@ import {
 } from './drone-repo';
 import {
   closeGithubPullRequestForRepoRoot,
+  inspectGithubRepoForRepoRoot,
   isGithubPullRequestError,
   listGithubPullRequestsForRepoRoot,
   mergeGithubPullRequestForRepoRoot,
@@ -5677,8 +5678,9 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         }
         const state = normalizeGithubPullRequestListState(u.searchParams.get('state'), 'open');
 
+        let repoRoot = '';
         try {
-          const repoRoot = await gitTopLevel(repoPathRaw);
+          repoRoot = await gitTopLevel(repoPathRaw);
           const cacheKey = `${repoRoot}\u0000${state}`;
           const now = Date.now();
           const cached = githubPullRequestListCache.get(cacheKey);
@@ -5708,18 +5710,46 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           });
           return;
         } catch (e: any) {
+          let diagnostics: {
+            repoRoot: string | null;
+            origin: string | null;
+            github: { owner: string; repo: string } | null;
+          } | null = null;
+          if (repoRoot) {
+            try {
+              const debug = await inspectGithubRepoForRepoRoot(repoRoot);
+              diagnostics = {
+                repoRoot,
+                origin: debug.remoteUrl ? String(debug.remoteUrl).trim() : null,
+                github: debug.parsedRepo ?? null,
+              };
+            } catch {
+              diagnostics = {
+                repoRoot,
+                origin: null,
+                github: null,
+              };
+            }
+          }
           if (isGithubPullRequestError(e)) {
             json(res, e.statusCode, {
               ok: false,
               error: e.message,
               ...(e.code ? { code: e.code } : {}),
+              ...(diagnostics ? { diagnostics } : {}),
               id: droneId,
               name: droneName,
             });
             return;
           }
           const msg = e?.message ?? String(e);
-          json(res, 500, { ok: false, error: msg, id: droneId, name: droneName });
+          json(res, 500, {
+            ok: false,
+            error: msg,
+            ...(diagnostics ? { diagnostics } : {}),
+            id: droneId,
+            name: droneName,
+          });
           return;
         }
       }
