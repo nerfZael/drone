@@ -591,6 +591,19 @@ export function DroneSidebar({
                 {sidebarGroups.map(({ group, label, kind, items }) => {
                   const groupLabel = String(label ?? group).trim() || group;
                   const isVirtualGroup = kind === 'repo';
+                  const uniqueRepoPaths = Array.from(
+                    new Set(
+                      items
+                        .map((item) => String(item?.repoPath ?? '').trim())
+                        .filter(Boolean),
+                    ),
+                  );
+                  const hoveredRepoPath = isVirtualGroup
+                    ? group.startsWith('repo:') && group !== 'repo:ungrouped'
+                      ? group.slice('repo:'.length)
+                      : ''
+                    : String(activeRepoPath ?? '').trim() || (uniqueRepoPaths.length === 1 ? uniqueRepoPaths[0] : '');
+                  const hoveredGroupName = isVirtualGroup ? '' : groupLabel;
                   const collapsed = !!collapsedGroups[group];
                   const isDeletingGroup = Boolean(deletingGroups[group]);
                   const isRenamingGroup = Boolean(renamingGroups[group]);
@@ -601,6 +614,9 @@ export function DroneSidebar({
                     <div
                       key={group}
                       data-drone-sidebar-group={group}
+                      data-drone-sidebar-group-kind={kind}
+                      data-drone-sidebar-group-name={hoveredGroupName || undefined}
+                      data-drone-sidebar-repo-path={hoveredRepoPath || undefined}
                       className={`rounded-md border bg-[rgba(0,0,0,.15)] overflow-hidden transition-colors ${
                         isDropTarget ? 'border-[var(--accent-muted)] ring-1 ring-[var(--accent-muted)]' : 'border-[var(--border-subtle)]'
                       }`}

@@ -27,7 +27,7 @@ type UseDroneCreationActionsArgs = {
   draftChat: { droneId: string; droneName: string; prompt: any | null } | null;
   draftCreateName: string;
   draftCreateGroup: string;
-  chatHeaderRepoPath: string;
+  draftCreateRepoPath: string;
   startupSeedMissingGraceMs: number;
   resolveAgentKeyToConfig: (key: string) => ChatAgentConfig;
   queueDrones: (list: any[]) => Promise<QueueDronesResponse>;
@@ -82,7 +82,7 @@ export function useDroneCreationActions({
   draftChat,
   draftCreateName,
   draftCreateGroup,
-  chatHeaderRepoPath,
+  draftCreateRepoPath,
   startupSeedMissingGraceMs,
   resolveAgentKeyToConfig,
   queueDrones,
@@ -297,7 +297,7 @@ export function useDroneCreationActions({
       const nameRaw = String(opts?.name ?? draftCreateName ?? '');
       const name = nameRaw.trim();
       const group = String(opts?.group ?? draftCreateGroup ?? '').trim();
-      const repoPath = String(chatHeaderRepoPath ?? '').trim();
+      const repoPath = String(draftCreateRepoPath ?? '').trim();
       if (!prompt) {
         setDraftCreateError('Send a first message before creating a drone.');
         return false;
@@ -396,7 +396,7 @@ export function useDroneCreationActions({
       }
     },
     [
-      chatHeaderRepoPath,
+      draftCreateRepoPath,
       draftChat?.prompt,
       draftCreateGroup,
       draftCreateName,
@@ -447,21 +447,19 @@ export function useDroneCreationActions({
       });
       setDraftCreateError(null);
       setDraftCreateName('');
-      setDraftCreateGroup('');
       setDraftSuggestedName('');
       setDraftNameSuggesting(false);
       setDraftNameSuggestionError(null);
       setDraftAutoRenaming(false);
       setDraftCreateOpen(false);
 
-      return await createDroneFromDraft({ prompt, group: '', autoRename: true });
+      return await createDroneFromDraft({ prompt, autoRename: true });
     },
     [
       createDroneFromDraft,
       setDraftAutoRenaming,
       setDraftChat,
       setDraftCreateError,
-      setDraftCreateGroup,
       setDraftCreateName,
       setDraftCreateOpen,
       setDraftNameSuggestionError,
@@ -476,4 +474,3 @@ export function useDroneCreationActions({
     startDraftPrompt,
   };
 }
-

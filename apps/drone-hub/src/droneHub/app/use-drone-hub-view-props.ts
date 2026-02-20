@@ -376,10 +376,12 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     draftAutoRenaming,
     spawnAgentConfig,
     createRepoMenuEntries,
+    draftCreateGroup,
     draftCreateError,
     queuedPromptsByDroneChat,
     setDraftChat,
     setDraftCreateOpen,
+    setDraftCreateGroup,
     setDraftAutoRenaming,
     startDraftPrompt,
     enqueueQueuedPrompt,
@@ -523,6 +525,7 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
             draftAutoRenaming,
             spawnAgentConfig,
             createRepoMenuEntries,
+            draftCreateGroup,
             draftCreateError,
             queuedPromptsByDroneChat,
             onCancel: () => {
@@ -533,6 +536,7 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
             },
             onStartDraftPrompt: startDraftPrompt,
             onEnqueueQueuedPrompt: enqueueQueuedPrompt,
+            onDraftCreateGroupChange: setDraftCreateGroup,
             onSetDraftCreateError: setDraftCreateError,
           }
         : null,
