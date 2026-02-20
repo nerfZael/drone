@@ -56,6 +56,9 @@ export function useDroneSelectionState({
     (droneIdRaw: string, opts?: { toggle?: boolean; range?: boolean }) => {
       const id = String(droneIdRaw ?? '').trim();
       if (!id) return;
+      // Manual card selection should always override any temporary preferred auto-selection.
+      preferredSelectedDroneRef.current = null;
+      preferredSelectedDroneHoldUntilRef.current = 0;
       setAppView('workspace');
       setSelectedGroupMultiChat(null);
       setDraftChat(null);
@@ -93,6 +96,8 @@ export function useDroneSelectionState({
     },
     [
       orderedDroneIds,
+      preferredSelectedDroneHoldUntilRef,
+      preferredSelectedDroneRef,
       scrollChatToBottom,
       selectedDrone,
       selectionAnchorRef,
