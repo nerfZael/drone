@@ -4,17 +4,37 @@ import type { PendingPrompt } from '../types';
 import { CollapsibleMarkdown } from './CollapsibleMarkdown';
 import { IconBot, IconUser, TypingDots } from './icons';
 
+const MANUAL_UNSTICK_STALE_MS = 2 * 60_000;
+
+function parseTimeMs(raw: string | undefined): number | null {
+  const ms = Date.parse(String(raw ?? ''));
+  return Number.isFinite(ms) ? ms : null;
+}
+
 export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   item,
   nowMs,
   showRoleIcons = true,
+  onRequestUnstick,
+  unstickBusy = false,
+  unstickError = null,
 }: {
   item: PendingPrompt;
   nowMs: number;
   showRoleIcons?: boolean;
+  onRequestUnstick?: (promptId: string) => Promise<void> | void;
+  unstickBusy?: boolean;
+  unstickError?: string | null;
 }) {
   const isFailed = item.state === 'failed';
   const badgeLabel = isFailed ? 'Failed' : item.state === 'queued' ? 'Queued' : 'Pending';
+  const activeAtMs = parseTimeMs(item.updatedAt ?? item.at);
+  const ageMs = activeAtMs == null ? 0 : Math.max(0, nowMs - activeAtMs);
+  const canRequestUnstick =
+    !isFailed &&
+    (item.state === 'sending' || item.state === 'sent') &&
+    ageMs >= MANUAL_UNSTICK_STALE_MS &&
+    Boolean(onRequestUnstick);
   return (
     <div className="animate-fade-in opacity-90">
       <div className="flex justify-end mb-3">
@@ -79,16 +99,42 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
                 {stripAnsi(item.error || 'failed to send')}
               </div>
             ) : (
-              <div className="text-[12.5px] leading-[1.6] text-[var(--muted)] flex items-center gap-2">
-                <TypingDots color="var(--accent)" />
-                {item.state === 'queued'
-                  ? 'Queued…'
-                  : item.state === 'sending'
-                    ? 'Sending…'
-                    : item.state === 'sent'
-                      ? 'Waiting…'
-                      : 'Typing…'}
-              </div>
+              <>
+                <div className="text-[12.5px] leading-[1.6] text-[var(--muted)] flex items-center gap-2">
+                  <TypingDots color="var(--accent)" />
+                  {item.state === 'queued'
+                    ? 'Queued…'
+                    : item.state === 'sending'
+                      ? 'Sending…'
+                      : item.state === 'sent'
+                        ? 'Waiting…'
+                        : 'Typing…'}
+                </div>
+                {canRequestUnstick ? (
+                  <div className="mt-2 pt-2 border-t border-[var(--border-subtle)] flex items-center justify-between gap-2">
+                    <span className="text-[10px] text-[var(--muted-dim)]">Still waiting for agent completion.</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void onRequestUnstick?.(item.id);
+                      }}
+                      disabled={unstickBusy}
+                      className={`inline-flex items-center h-5 px-1.5 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
+                        unstickBusy
+                          ? 'opacity-50 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)]'
+                          : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                      }`}
+                      style={{ fontFamily: 'var(--display)' }}
+                      title="Force-finalize this stuck prompt"
+                    >
+                      {unstickBusy ? 'Unsticking...' : 'Unstick'}
+                    </button>
+                  </div>
+                ) : null}
+                {unstickError ? (
+                  <div className="mt-2 text-[10px] text-[var(--red)] whitespace-pre-wrap">{stripAnsi(unstickError)}</div>
+                ) : null}
+              </>
             )}
           </div>
         </div>

@@ -427,6 +427,9 @@ type SelectedDroneWorkspaceProps = {
   promptError: string | null;
   sendingPrompt: boolean;
   sendPromptText: (payload: ChatSendPayload) => Promise<boolean>;
+  requestUnstickPendingPrompt: (promptId: string) => Promise<void>;
+  unstickingPendingPromptById: Record<string, true>;
+  unstickPendingPromptErrorById: Record<string, string>;
   openedEditorFilePath: string | null;
   openedEditorFileName: string | null;
   openedEditorFileLoading: boolean;
@@ -528,6 +531,9 @@ export function SelectedDroneWorkspace({
   promptError,
   sendingPrompt,
   sendPromptText,
+  requestUnstickPendingPrompt,
+  unstickingPendingPromptById,
+  unstickPendingPromptErrorById,
   openedEditorFilePath,
   openedEditorFileName,
   openedEditorFileLoading,
@@ -1224,7 +1230,14 @@ export function SelectedDroneWorkspace({
                       );
                     })}
                     {visiblePendingPromptsWithStartup.map((p) => (
-                      <PendingTranscriptTurn key={`pending-${p.id}`} item={p} nowMs={nowMs} />
+                      <PendingTranscriptTurn
+                        key={`pending-${p.id}`}
+                        item={p}
+                        nowMs={nowMs}
+                        onRequestUnstick={requestUnstickPendingPrompt}
+                        unstickBusy={Boolean(unstickingPendingPromptById[p.id])}
+                        unstickError={unstickPendingPromptErrorById[p.id] ?? null}
+                      />
                     ))}
                     <div ref={chatEndRef as React.RefObject<HTMLDivElement>} />
                   </div>
