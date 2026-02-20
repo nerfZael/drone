@@ -252,7 +252,7 @@ code, pre {
   color: var(--fg);
   word-break: break-word;
 }
-.dh-markdown--agent { color: var(--fg); }
+.dh-markdown--agent { color: var(--fg-secondary); }
 .dh-markdown--muted { color: var(--fg-secondary); }
 .dh-markdown--error { color: var(--red); }
 .dh-markdown--user { color: var(--fg-secondary); }
@@ -275,6 +275,10 @@ code, pre {
 .dh-markdown--muted b {
   color: var(--fg);
 }
+.dh-markdown--agent strong,
+.dh-markdown--agent b {
+  color: var(--fg);
+}
 .dh-markdown h1,
 .dh-markdown h2,
 .dh-markdown h3 {
@@ -289,17 +293,17 @@ code, pre {
 .dh-markdown h3 { font-size: .95rem; }
 
 .dh-markdown a {
-  color: #c4b5fd;
+  color: #b9a7f6;
   text-decoration: underline;
   text-decoration-thickness: 1.5px;
   text-underline-offset: 2px;
-  text-decoration-color: rgba(196, 181, 253, .45);
+  text-decoration-color: rgba(185, 167, 246, .35);
   border-bottom: 0;
   transition: color .15s, text-decoration-color .15s;
 }
 .dh-markdown a:hover {
-  color: #ddd6fe;
-  text-decoration-color: rgba(221, 214, 254, .8);
+  color: #cbbdf9;
+  text-decoration-color: rgba(203, 189, 249, .62);
 }
 
 .dh-markdown ul,
@@ -323,11 +327,11 @@ code, pre {
 .dh-markdown code {
   font-family: var(--code);
   font-size: 12px;
-  background: rgba(196, 181, 253, .12);
-  border: 1px solid rgba(196, 181, 253, .24);
+  background: rgba(196, 181, 253, .09);
+  border: 1px solid rgba(196, 181, 253, .16);
   padding: .15rem .42rem;
   border-radius: 4px;
-  color: #ddd6fe;
+  color: #d4c9fa;
 }
 
 .dh-markdown pre {
