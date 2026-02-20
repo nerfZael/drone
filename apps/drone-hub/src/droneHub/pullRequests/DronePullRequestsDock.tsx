@@ -320,7 +320,7 @@ export function DronePullRequestsDock({
         ) : listLoading && !listData ? (
           <span>Loading pull requests...</span>
         ) : listError ? (
-          <span className="text-[var(--red)]">{listError}</span>
+          <span className="text-[var(--red)]">Error loading pull requests.</span>
         ) : (
           <>
             <span className="truncate max-w-[36ch]" title={listData?.repoRoot || repoPath || '-'}>
