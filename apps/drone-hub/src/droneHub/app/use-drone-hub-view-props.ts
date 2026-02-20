@@ -395,6 +395,8 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     sendGroupBroadcastPrompt,
     uiDroneName,
     selectDroneCard,
+    deleteDrone,
+    deletingDrones,
     parseJobsFromAgentMessage,
     dronesLoading,
     sidebarDrones,
@@ -544,6 +546,8 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
             nowMs,
             uiDroneName,
             onSelectDroneCard: selectDroneCard,
+            onDeleteDrone: deleteDrone,
+            deletingDrones,
             onParseJobsFromAgentMessage: parseJobsFromAgentMessage,
           }
         : null,
