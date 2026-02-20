@@ -1,7 +1,10 @@
 import React from 'react';
 import type { DroneSummary, PendingPrompt, TranscriptItem } from '../types';
 import type { DraftChatState, DroneErrorModalState, StartupSeedState } from './app-types';
+import type { RightPanelTab } from './app-config';
 import { isStartupSeedFresh } from './app-config';
+import type { ShortcutActionId, ShortcutBindingMap } from './shortcuts';
+import { SHORTCUT_DEFINITIONS, isShortcutMatch } from './shortcuts';
 import { isDroneStartingOrSeeding } from './helpers';
 import { useDropdownDismiss } from '../../ui/dropdown';
 
@@ -47,6 +50,11 @@ type UseDroneHubLifecycleEffectsArgs = {
   setDraftSuggestedName: Setter<string>;
   setDraftNameSuggestionError: Setter<string | null>;
   draftNameSuggestSeqRef: React.MutableRefObject<number>;
+  rightPanelSplit: boolean;
+  setRightPanelOpen: Setter<boolean>;
+  setRightPanelTab: Setter<RightPanelTab>;
+  setRightPanelBottomTab: Setter<RightPanelTab>;
+  shortcutBindings: ShortcutBindingMap;
   llmSettings: LlmSettingsLike;
   requestJson: RequestJson;
   showNameSuggestionFailureToast: (error: unknown) => void;
@@ -99,6 +107,11 @@ export function useDroneHubLifecycleEffects({
   setDraftSuggestedName,
   setDraftNameSuggestionError,
   draftNameSuggestSeqRef,
+  rightPanelSplit,
+  setRightPanelOpen,
+  setRightPanelTab,
+  setRightPanelBottomTab,
+  shortcutBindings,
   llmSettings,
   requestJson,
   showNameSuggestionFailureToast,
@@ -141,6 +154,51 @@ export function useDroneHubLifecycleEffects({
   }, [droneErrorModal, setDroneErrorModal]);
 
   React.useEffect(() => {
+    const openRightPanelTabFromShortcut = (tab: RightPanelTab) => {
+      if (!currentDrone) return;
+      setRightPanelOpen(true);
+      if (rightPanelSplit) {
+        const bottomPaneHovered = Boolean(document.querySelector('[data-right-panel-pane="bottom"]:hover'));
+        if (bottomPaneHovered) {
+          setRightPanelBottomTab(tab);
+          return;
+        }
+      }
+      setRightPanelTab(tab);
+    };
+
+    const runShortcutAction = (actionId: ShortcutActionId): boolean => {
+      if (actionId === 'toggleTldr') {
+        toggleTldrFromShortcut();
+        return true;
+      }
+      if (actionId === 'createDraftDrone') {
+        openDraftChatComposer();
+        return true;
+      }
+      if (actionId === 'openCreateModal' || actionId === 'openCreateModalAlt') {
+        openCreateModal();
+        return true;
+      }
+      if (actionId === 'openChangesTab') {
+        openRightPanelTabFromShortcut('changes');
+        return true;
+      }
+      if (actionId === 'openBrowserTab') {
+        openRightPanelTabFromShortcut('preview');
+        return true;
+      }
+      if (actionId === 'openFilesTab') {
+        openRightPanelTabFromShortcut('files');
+        return true;
+      }
+      if (actionId === 'openTerminalTab') {
+        openRightPanelTabFromShortcut('terminal');
+        return true;
+      }
+      return false;
+    };
+
     const isEditableTarget = (target: EventTarget | null): boolean => {
       if (!(target instanceof HTMLElement)) return false;
       const tag = target.tagName;
@@ -148,34 +206,30 @@ export function useDroneHubLifecycleEffects({
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
-      const key = e.key.toLowerCase();
+      if (e.defaultPrevented) return;
       if (isEditableTarget(e.target)) return;
+      if (e.repeat) return;
+      if (e.target instanceof HTMLElement && e.target.closest('[data-shortcut-capture="true"]')) return;
 
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && key === 'n') {
-        e.preventDefault();
-        openCreateModal();
-        return;
-      }
-
-      if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
-      if (key === 'w') {
-        e.preventDefault();
-        toggleTldrFromShortcut();
-        return;
-      }
-      if (key === 'a') {
-        e.preventDefault();
-        openDraftChatComposer();
-        return;
-      }
-      if (key === 's') {
-        e.preventDefault();
-        openCreateModal();
-      }
+      const matched = SHORTCUT_DEFINITIONS.find((def) => isShortcutMatch(shortcutBindings[def.id], e)) ?? null;
+      if (!matched) return;
+      const handled = runShortcutAction(matched.id);
+      if (!handled) return;
+      e.preventDefault();
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [openCreateModal, openDraftChatComposer, toggleTldrFromShortcut]);
+  }, [
+    currentDrone,
+    openCreateModal,
+    openDraftChatComposer,
+    rightPanelSplit,
+    setRightPanelBottomTab,
+    setRightPanelOpen,
+    setRightPanelTab,
+    shortcutBindings,
+    toggleTldrFromShortcut,
+  ]);
 
   React.useEffect(() => {
     if (!createOpen) {

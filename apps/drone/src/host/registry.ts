@@ -9,6 +9,12 @@ type DroneRegistryV1 = {
    * Hub/user settings persisted on the host machine.
    */
   settings?: {
+    deleteAction?: {
+      mode?: 'permanent' | 'archive';
+      archiveRetention?: '1h' | '8h' | '1d' | '1w';
+      archiveRuntimePolicy?: 'keep-running' | 'stop';
+      updatedAt?: string;
+    };
     llm?: {
       provider?: 'openai' | 'gemini';
       updatedAt?: string;
@@ -89,6 +95,15 @@ type DroneRegistryV1 = {
           | { kind: 'builtin'; id: 'cursor' | 'codex' | 'claude' | 'opencode' }
           | { kind: 'custom'; id: string; label: string; command: string };
       };
+    }
+  >;
+  archived?: Record<
+    string,
+    DroneRegistryV1['drones'][string] & {
+      archivedAt: string;
+      deleteAt: string;
+      archiveRetention: '1h' | '8h' | '1d' | '1w';
+      archiveRuntimePolicy?: 'keep-running' | 'stop';
     }
   >;
   drones: Record<
@@ -214,6 +229,7 @@ export type DroneRegistry = {
   settings?: DroneRegistryV1['settings'];
   repos?: DroneRegistryV1['repos'];
   groups?: DroneRegistryV1['groups'];
+  archived?: Record<string, DroneRegistryArchivedEntry>;
   /**
    * Hub-side, short-lived entries for drones that are being provisioned.
    *
@@ -239,21 +255,27 @@ export type DroneRegistry = {
    *
    * Keyed by stable drone id.
    */
-  drones: Record<
-    string,
-    Omit<DroneRegistryV1['drones'][string], 'id' | 'name'> & {
-      id: string;
-      /**
-       * User-visible mutable name (can change over time).
-       * All addressing should use `id`.
-       */
-      name: string;
-      /**
-       * Stable internal container name (does not change on rename).
-       */
-      containerName: string;
-    }
-  >;
+  drones: Record<string, DroneRegistryDroneEntry>;
+};
+
+type DroneRegistryDroneEntry = Omit<DroneRegistryV1['drones'][string], 'id' | 'name'> & {
+  id: string;
+  /**
+   * User-visible mutable name (can change over time).
+   * All addressing should use `id`.
+   */
+  name: string;
+  /**
+   * Stable internal container name (does not change on rename).
+   */
+  containerName: string;
+};
+
+type DroneRegistryArchivedEntry = DroneRegistryDroneEntry & {
+  archivedAt: string;
+  deleteAt: string;
+  archiveRetention: '1h' | '8h' | '1d' | '1w';
+  archiveRuntimePolicy?: 'keep-running' | 'stop';
 };
 
 export function registryPath(): string {
@@ -383,6 +405,22 @@ export async function loadRegistry(): Promise<DroneRegistry> {
         if (containerName) entry.containerName = containerName;
         (parsed.pending as any)[key] = entry;
       }
+      for (const [key, entryAny] of Object.entries(parsed.archived ?? {})) {
+        const entry = entryAny as any;
+        if (!entry || typeof entry !== 'object') continue;
+        const id = typeof entry.id === 'string' && entry.id.trim() ? entry.id.trim() : String(key);
+        entry.id = id;
+        const name = typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim() : 'Untitled';
+        entry.name = name;
+        const containerName =
+          typeof entry.containerName === 'string' && entry.containerName.trim()
+            ? entry.containerName.trim()
+            : typeof entry.id === 'string' && entry.id.trim()
+              ? `drone-${entry.id}`
+              : 'drone-unknown';
+        entry.containerName = containerName;
+        (parsed.archived as any)[key] = entry;
+      }
       return parsed;
     }
 
@@ -394,6 +432,7 @@ export async function loadRegistry(): Promise<DroneRegistry> {
         settings: v1.settings,
         repos: v1.repos,
         groups: v1.groups,
+        archived: {},
         drones: {},
         pending: {},
       };
@@ -440,6 +479,21 @@ export async function loadRegistry(): Promise<DroneRegistry> {
             ? entry.containerName.trim()
             : name;
         (out.pending as any)[id] = { ...entry, id, name, containerName };
+      }
+
+      for (const [legacyKey, entryAny] of Object.entries(v1.archived ?? {})) {
+        const entry = entryAny as any;
+        if (!entry || typeof entry !== 'object') continue;
+        const id = ensureUniqueId(typeof entry.id === 'string' ? entry.id : '');
+        const name =
+          typeof entry.name === 'string' && entry.name.trim()
+            ? entry.name.trim()
+            : String(legacyKey);
+        const containerName =
+          typeof entry.containerName === 'string' && entry.containerName.trim()
+            ? entry.containerName.trim()
+            : name;
+        (out.archived as any)[id] = { ...entry, id, name, containerName };
       }
 
       // NOTE: We do NOT write here; the next updateRegistry/save will persist.

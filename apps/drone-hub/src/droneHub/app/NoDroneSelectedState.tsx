@@ -29,7 +29,7 @@ export function NoDroneSelectedState({
               type="button"
               onClick={onOpenDraftChatComposer}
               className="w-full inline-flex items-center gap-2 h-[32px] px-3 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[11px] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] transition-all"
-              title="Create new drone (A)"
+              title="Create new drone"
               aria-label="Create new drone"
             >
               <IconPlus className="opacity-80" />
@@ -41,7 +41,7 @@ export function NoDroneSelectedState({
               type="button"
               onClick={onOpenCreateModal}
               className="w-full inline-flex items-center gap-2 h-[32px] px-3 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[11px] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] transition-all"
-              title="Create multiple drones (S)"
+              title="Create multiple drones"
               aria-label="Create multiple drones"
             >
               <IconPlusDouble className="opacity-80" />

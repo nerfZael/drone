@@ -10,6 +10,11 @@ export type GithubRepoRef = {
   repo: string;
 };
 
+export type GithubRepoResolutionDebug = {
+  remoteUrl: string | null;
+  parsedRepo: GithubRepoRef | null;
+};
+
 export type GithubPullRequestSummary = {
   number: number;
   title: string;
@@ -131,6 +136,16 @@ async function resolveGithubRepoForRepoRoot(repoRoot: string): Promise<GithubRep
     );
   }
   return github;
+}
+
+export async function inspectGithubRepoForRepoRoot(repoRootRaw: string): Promise<GithubRepoResolutionDebug> {
+  const repoRoot = String(repoRootRaw ?? '').trim();
+  if (!repoRoot) return { remoteUrl: null, parsedRepo: null };
+  const remoteUrl = await gitBestRemoteUrl(repoRoot);
+  return {
+    remoteUrl,
+    parsedRepo: parseGithubSlug(remoteUrl),
+  };
 }
 
 const GITHUB_TOKEN_ENV_KEYS = ['DRONE_HUB_GITHUB_TOKEN', 'GITHUB_TOKEN', 'GH_TOKEN'] as const;
