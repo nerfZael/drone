@@ -12,6 +12,7 @@ import { droneRootPath } from '../host/paths';
 import { loadRegistry, updateRegistry } from '../host/registry';
 import {
   dvmBaseSet,
+  dvmCopyToContainer,
   dvmExec,
   dvmLs,
   dvmPorts,
@@ -19,6 +20,7 @@ import {
   dvmRepoExport,
   dvmRepoSeed,
   dvmRepoSetBaseSha,
+  run as runHostCommand,
   dvmRemove,
   dvmRename,
   dvmScript,
@@ -74,6 +76,7 @@ import {
   droneRepoPullChangesSummary,
   droneRepoPullDiffForPath,
   nameStatusCharToType,
+  runGitInDrone,
   runGitInDroneOrThrow,
   type RepoPullChangeEntry,
 } from './drone-repo';
@@ -385,6 +388,100 @@ function looksLikeEmptyBundleExportError(message: string): boolean {
 function looksLikeBundleMissingPrerequisiteError(message: string): boolean {
   const raw = String(message ?? '');
   return /lacks these prerequisite commits|missing prerequisite commits|repository lacks.*prerequisite/i.test(raw);
+}
+
+function parseShaFromText(raw: string): string | null {
+  const m = String(raw ?? '').match(/\b[0-9a-f]{40}\b/i);
+  return m ? m[0].toLowerCase() : null;
+}
+
+function parseMergeConflictFilesFromText(text: string): string[] {
+  const raw = String(text ?? '');
+  const out = new Set<string>();
+  let m: RegExpExecArray | null = null;
+
+  const patchFailedRe = /patch failed:\s+(.+?):\d+/gi;
+  while ((m = patchFailedRe.exec(raw))) {
+    const file = String(m[1] ?? '').trim();
+    if (file) out.add(file);
+  }
+
+  const mergeConflictRe = /CONFLICT\s+\([^)]+\):\s+.*\s+in\s+(.+)$/gim;
+  while ((m = mergeConflictRe.exec(raw))) {
+    const file = String(m[1] ?? '').trim();
+    if (file) out.add(file);
+  }
+
+  const doesNotApplyRe = /error:\s+(.+?):\s+patch does not apply$/gim;
+  while ((m = doesNotApplyRe.exec(raw))) {
+    const file = String(m[1] ?? '').trim();
+    if (file) out.add(file);
+  }
+
+  return Array.from(out).sort((a, b) => a.localeCompare(b));
+}
+
+async function droneUnmergedFiles(opts: { containerName: string; repoPathInContainer: string }): Promise<string[]> {
+  const r = await runGitInDrone({
+    container: opts.containerName,
+    repoPathInContainer: opts.repoPathInContainer,
+    args: ['diff', '--name-only', '--diff-filter=U'],
+  });
+  if (r.code !== 0) return [];
+  return String(r.stdout ?? '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+}
+
+async function importBundleHeadToDroneRef(opts: {
+  containerName: string;
+  repoPathInContainer: string;
+  hostBundlePath: string;
+  containerBundlePath: string;
+  refName: string;
+}): Promise<string> {
+  const repoPathInContainer = normalizeContainerPath(opts.repoPathInContainer || '/work/repo');
+  const hostBundlePath = String(opts.hostBundlePath ?? '').trim();
+  const containerBundlePath = normalizeContainerPath(opts.containerBundlePath || '/tmp/drone-hub/repo-import.bundle');
+  const refName = String(opts.refName ?? '').trim();
+  if (!hostBundlePath) throw new Error('missing host bundle path');
+  if (!refName) throw new Error('missing drone import ref');
+
+  const mkOutDir = await dvmExec(opts.containerName, 'bash', [
+    '-lc',
+    ['set -euo pipefail', `mkdir -p ${JSON.stringify(path.posix.dirname(containerBundlePath))}`].join('\n'),
+  ]);
+  if (mkOutDir.code !== 0) {
+    const details = `${String(mkOutDir.stderr ?? '')}\n${String(mkOutDir.stdout ?? '')}`.trim();
+    throw new Error(`Failed preparing bundle import path in container.${details ? `\n\n${details}` : ''}`);
+  }
+
+  await dvmCopyToContainer(opts.containerName, hostBundlePath, containerBundlePath);
+
+  const fetch = await dvmExec(opts.containerName, 'git', [
+    '-C',
+    repoPathInContainer,
+    'fetch',
+    '--no-tags',
+    '--force',
+    containerBundlePath,
+    `HEAD:${refName}`,
+  ]);
+  if (fetch.code !== 0) {
+    const details = `${String(fetch.stderr ?? '')}\n${String(fetch.stdout ?? '')}`.trim();
+    throw new Error(`Failed importing host bundle into drone ref ${refName}.${details ? `\n\n${details}` : ''}`);
+  }
+
+  const rev = await dvmExec(opts.containerName, 'git', ['-C', repoPathInContainer, 'rev-parse', refName]);
+  if (rev.code !== 0) {
+    const details = `${String(rev.stderr ?? '')}\n${String(rev.stdout ?? '')}`.trim();
+    throw new Error(`Failed resolving imported drone ref ${refName}.${details ? `\n\n${details}` : ''}`);
+  }
+  const sha = parseShaFromText(rev.stdout);
+  if (!sha) throw new Error(`Failed parsing imported drone ref SHA for ${refName}.`);
+  return sha;
 }
 
 const NON_REPO_HOME_CWD = '/dvm-data/home';
@@ -5152,27 +5249,47 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           }
         }
 
-        // Auto-clear stale "repo pull conflict" hub errors once no merge conflicts remain.
-        // This keeps the sidebar/header badge in sync after users finish conflict resolution.
-        const autoClearedConflictErrors = new Set<string>();
-        for (const d of Object.values(regAny.drones ?? {}) as any[]) {
-          const name = String(d?.name ?? '').trim();
-          if (!name) continue;
+        // Auto-clear stale repo conflict hub errors once no merge conflicts remain.
+        // Pull conflict state is resolved in the host repo; push conflict state is resolved in the drone repo.
+        const autoClearedConflictErrors = new Map<string, 'pull' | 'push'>();
+        for (const [droneIdRaw, d] of Object.entries(regAny.drones ?? {}) as any[]) {
+          const droneId = normalizeDroneIdentity(droneIdRaw);
+          if (!droneId) continue;
           if (String(d?.hub?.phase ?? '').trim().toLowerCase() !== 'error') continue;
           const lastPullMode = String(d?.repo?.lastPull?.mode ?? '').trim().toLowerCase();
-          if (lastPullMode !== 'host-conflicts-ready') continue;
-          const repoPathRaw = String(d?.repoPath ?? '').trim();
-          if (!repoPathRaw) continue;
+          const lastPushMode = String(d?.repo?.lastPush?.mode ?? '').trim().toLowerCase();
+          const conflictMode: 'pull' | 'push' | null =
+            lastPushMode === 'drone-conflicts-ready' ? 'push' : lastPullMode === 'host-conflicts-ready' ? 'pull' : null;
+          if (!conflictMode) continue;
+
           try {
-            // eslint-disable-next-line no-await-in-loop
-            const repoRoot = await gitTopLevel(repoPathRaw);
-            // eslint-disable-next-line no-await-in-loop
-            const changes = await gitRepoChangesSummary(repoRoot);
-            if (Number(changes?.counts?.conflicted ?? 0) === 0) {
+            let resolved = false;
+            if (conflictMode === 'pull') {
+              const repoPathRaw = String(d?.repoPath ?? '').trim();
+              if (!repoPathRaw) continue;
+              // eslint-disable-next-line no-await-in-loop
+              const repoRoot = await gitTopLevel(repoPathRaw);
+              // eslint-disable-next-line no-await-in-loop
+              const changes = await gitRepoChangesSummary(repoRoot);
+              resolved = Number(changes?.counts?.conflicted ?? 0) === 0;
+            } else {
+              const name = String(d?.name ?? '').trim() || droneId;
+              const repoPathInContainer = droneRepoPathInContainer(d);
+              const unmerged = await withLockedDroneContainer(
+                { requestedDroneName: name, droneEntry: d },
+                async ({ containerName }) => {
+                  return await droneUnmergedFiles({ containerName, repoPathInContainer });
+                },
+              );
+              resolved = unmerged.length === 0;
+            }
+
+            if (resolved) {
               delete d.hub;
               d.repo = d.repo ?? {};
-              d.repo.lastPullError = null;
-              autoClearedConflictErrors.add(name);
+              if (conflictMode === 'pull') d.repo.lastPullError = null;
+              else d.repo.lastPushError = null;
+              autoClearedConflictErrors.set(droneId, conflictMode);
             }
           } catch {
             // ignore; keep current hub error until we can verify repo state
@@ -5180,18 +5297,19 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         }
         if (autoClearedConflictErrors.size > 0) {
           try {
-            const names = Array.from(autoClearedConflictErrors);
+            const cleared = Array.from(autoClearedConflictErrors.entries());
             await updateRegistry((regLatest: any) => {
-              for (const rawName of names) {
-                const name = String(rawName ?? '').trim();
-                if (!name) continue;
-                const d = regLatest?.drones?.[name];
+              for (const [rawDroneId, conflictMode] of cleared) {
+                const droneId = normalizeDroneIdentity(rawDroneId);
+                if (!droneId) continue;
+                const d = regLatest?.drones?.[droneId];
                 if (!d) continue;
                 if (String(d?.hub?.phase ?? '').trim().toLowerCase() === 'error') delete d.hub;
                 d.repo = d.repo ?? {};
-                if (typeof d.repo.lastPullError === 'string') d.repo.lastPullError = null;
+                if (conflictMode === 'pull' && typeof d.repo.lastPullError === 'string') d.repo.lastPullError = null;
+                if (conflictMode === 'push' && typeof d.repo.lastPushError === 'string') d.repo.lastPushError = null;
                 regLatest.drones = regLatest.drones ?? {};
-                regLatest.drones[name] = d;
+                regLatest.drones[droneId] = d;
               }
             });
           } catch {
@@ -6624,6 +6742,333 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           await setDroneHubMetaByIdentity({ droneId, hub: { phase: 'error', message: `Repo seed failed: ${msg}` } });
           json(res, 500, { ok: false, error: msg });
           return;
+        }
+      }
+
+      // POST /api/drones/:id/repo/push
+      // Merge the host branch into the drone repo branch as a normal commit.
+      // On conflict, leave the drone repo in merge-conflict state for manual/agent resolution.
+      if (
+        method === 'POST' &&
+        parts.length === 5 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'repo' &&
+        parts[4] === 'push'
+      ) {
+        const droneRef = decodeURIComponent(parts[2]);
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        const droneId = resolved.id;
+        const d = resolved.drone;
+        const droneName = String(d?.name ?? droneRef).trim() || droneRef;
+        const repoPathRaw = String(d?.repoPath ?? '').trim();
+        if (!repoPathRaw) {
+          json(res, 400, { ok: false, error: 'drone has no repo attached' });
+          return;
+        }
+
+        await setDroneHubMetaByIdentity({ droneId, hub: { phase: 'seeding', message: 'Pulling host changes into drone…' } });
+
+        let repoRoot = '';
+        let fromRef = '';
+        let fromRefSha = '';
+        let importRefName = '';
+        let importRefSha = '';
+        let mergeCommitSha = '';
+        let hostBundlePath = '';
+        let containerBundlePath = '';
+        let baseAdvanced = false;
+        let baseAdvanceError: string | null = null;
+        const repoPathInContainer = String(d?.repo?.dest ?? '/work/repo').trim() || '/work/repo';
+        const safeDroneRefSeg =
+          String(droneName ?? '')
+            .toLowerCase()
+            .replace(/[^a-z0-9_.-]+/g, '-')
+            .replace(/^-+|-+$/g, '') || 'drone';
+        const importRunId = `${Date.now().toString(36)}-${crypto.randomBytes(4).toString('hex')}`;
+        importRefName = `refs/drone/imports/host/${safeDroneRefSeg}/${importRunId}`;
+        containerBundlePath = normalizeContainerPath(`/tmp/drone-hub/imports/${safeDroneRefSeg}-${importRunId}.bundle`);
+
+        try {
+          repoRoot = await gitTopLevel(repoPathRaw);
+          fromRef = await gitCurrentBranchOrSha(repoRoot);
+
+          const hostRefSha = await runHostCommand('git', ['-C', repoRoot, 'rev-parse', fromRef]);
+          if (hostRefSha.code !== 0) {
+            const details = `${String(hostRefSha.stderr ?? '')}\n${String(hostRefSha.stdout ?? '')}`.trim();
+            throw new Error(`Failed resolving host ref ${fromRef}.${details ? `\n\n${details}` : ''}`);
+          }
+          fromRefSha = parseShaFromText(hostRefSha.stdout) ?? '';
+          if (!/^[0-9a-f]{40}$/.test(fromRefSha)) {
+            throw new Error(`Could not parse host ref SHA for ${fromRef}.`);
+          }
+
+          const bundlesRoot = droneRootPath('repo-imports');
+          await fs.mkdir(bundlesRoot, { recursive: true });
+          hostBundlePath = path.join(bundlesRoot, `${safeDroneRefSeg}-${importRunId}.bundle`);
+
+          const bundle = await runHostCommand('git', ['-C', repoRoot, 'bundle', 'create', hostBundlePath, fromRef]);
+          if (bundle.code !== 0) {
+            const details = `${String(bundle.stderr ?? '')}\n${String(bundle.stdout ?? '')}`.trim();
+            throw new Error(`Failed creating host bundle from ${fromRef}.${details ? `\n\n${details}` : ''}`);
+          }
+
+          const mergeResult = await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: d }, async ({ containerName }) => {
+            const cleanStatus = await runGitInDroneOrThrow({
+              container: containerName,
+              repoPathInContainer,
+              args: ['status', '--porcelain'],
+            });
+            if (String(cleanStatus.stdout ?? '').trim()) {
+              return {
+                ok: false as const,
+                looksLikeConflict: false,
+                code: 'drone_repo_dirty' as const,
+                details: 'Drone repo has local changes. Commit or stash them before pulling host changes.',
+                conflictFiles: [] as string[],
+              };
+            }
+
+            importRefSha = await importBundleHeadToDroneRef({
+              containerName,
+              repoPathInContainer,
+              hostBundlePath,
+              containerBundlePath,
+              refName: importRefName,
+            });
+
+            const merge = await runGitInDrone({
+              container: containerName,
+              repoPathInContainer,
+              args: ['merge', '--no-ff', importRefName],
+            });
+
+            if (merge.code === 0) {
+              const head = await runGitInDroneOrThrow({
+                container: containerName,
+                repoPathInContainer,
+                args: ['rev-parse', 'HEAD'],
+              });
+              mergeCommitSha = parseShaFromText(head.stdout) ?? '';
+              try {
+                await dvmRepoSetBaseSha({ container: containerName, repoPathInContainer, baseSha: fromRefSha });
+                baseAdvanced = true;
+              } catch (e: any) {
+                baseAdvanceError = e?.message ?? String(e);
+              }
+              return {
+                ok: true as const,
+              };
+            }
+
+            const combined = `${String(merge.stderr ?? '')}\n${String(merge.stdout ?? '')}`.trim();
+            const conflictFiles = Array.from(
+              new Set([
+                ...parseMergeConflictFilesFromText(combined),
+                ...(await droneUnmergedFiles({ containerName, repoPathInContainer })),
+              ]),
+            ).sort((a, b) => a.localeCompare(b));
+            const looksLikeConflict =
+              conflictFiles.length > 0 || /CONFLICT|Automatic merge failed|Merge conflict/i.test(combined);
+            const details = (merge.stderr || merge.stdout || `git merge failed (exit ${merge.code})`).trim();
+
+            if (!looksLikeConflict) {
+              try {
+                await runGitInDrone({
+                  container: containerName,
+                  repoPathInContainer,
+                  args: ['merge', '--abort'],
+                });
+              } catch {
+                // ignore cleanup failure
+              }
+            }
+
+            return {
+              ok: false as const,
+              looksLikeConflict,
+              code: null,
+              details,
+              conflictFiles,
+            };
+          });
+
+          if (mergeResult.ok) {
+            await updateRegistry((reg2: any) => {
+              const dd = reg2?.drones?.[droneId];
+              if (!dd) return;
+              dd.repo = dd.repo ?? {};
+              dd.repo.baseRef = fromRef;
+              dd.repo.lastPushAt = nowIso();
+              dd.repo.lastPushError = null;
+              dd.repo.lastPush = {
+                mode: 'host-merge-commit',
+                hostRef: fromRef,
+                hostRefSha: fromRefSha || null,
+                importedRef: importRefName || null,
+                importedRefSha: importRefSha || null,
+                mergeCommitSha: mergeCommitSha || null,
+                baseAdvanced,
+                baseAdvanceError,
+              };
+              reg2.drones = reg2.drones ?? {};
+              reg2.drones[droneId] = dd;
+            });
+            await setDroneHubMetaByIdentity({ droneId, hub: null });
+            json(res, 200, {
+              ok: true,
+              name: droneName,
+              mode: 'host-merge-commit',
+              repoRoot,
+              hostRef: fromRef,
+              hostRefSha: fromRefSha || null,
+              importedRef: importRefName,
+              importedRefSha: importRefSha || null,
+              mergeCommitSha: mergeCommitSha || null,
+              baseAdvanced,
+              baseAdvanceError,
+            });
+            return;
+          }
+
+          if (mergeResult.code === 'drone_repo_dirty') {
+            await setDroneHubMetaByIdentity({ droneId, hub: null });
+            json(res, 409, {
+              ok: false,
+              error: mergeResult.details,
+              code: mergeResult.code,
+            });
+            return;
+          }
+
+          if (mergeResult.looksLikeConflict) {
+            const guidance = [
+              'Conflicts were left in the drone repo as a normal Git merge conflict state.',
+              'Conflict marker mapping: <<<<<<< ours is the current drone branch; >>>>>>> theirs is the pulled host branch.',
+              'Resolve conflicts inside the drone, then stage and commit to finish the merge.',
+            ].join(' ');
+            const fullMsg = `${mergeResult.details}\n\n${guidance}`;
+            hubLog('warn', 'Repo push produced drone merge conflicts', {
+              droneName,
+              repoRoot,
+              fromRef,
+              importRefName,
+            });
+            await updateRegistry((reg2: any) => {
+              const dd = reg2?.drones?.[droneId];
+              if (!dd) return;
+              dd.repo = dd.repo ?? {};
+              dd.repo.lastPushAt = nowIso();
+              dd.repo.lastPushError = fullMsg;
+              dd.repo.lastPush = {
+                mode: 'drone-conflicts-ready',
+                hostRef: fromRef,
+                hostRefSha: fromRefSha || null,
+                importedRef: importRefName || null,
+                importedRefSha: importRefSha || null,
+                mergeCommitSha: null,
+                baseAdvanced,
+                baseAdvanceError,
+              };
+              reg2.drones = reg2.drones ?? {};
+              reg2.drones[droneId] = dd;
+            });
+            await setDroneHubMetaByIdentity({
+              droneId,
+              hub: {
+                phase: 'error',
+                message: 'Repo push conflict: resolve conflicts in drone repo',
+              },
+            });
+            json(res, 409, {
+              ok: false,
+              error: fullMsg,
+              code: 'drone_conflicts_ready',
+              patchName: importRefName || null,
+              conflictFiles: mergeResult.conflictFiles,
+              importedRef: importRefName || null,
+              importedRefSha: importRefSha || null,
+              hostRef: fromRef,
+              hostRefSha: fromRefSha || null,
+            });
+            return;
+          }
+
+          throw new Error(mergeResult.details || 'Repo push failed.');
+        } catch (e: any) {
+          const msg = e?.message ?? String(e);
+          hubLog('error', 'Repo push failed', {
+            droneName,
+            repoRoot,
+            fromRef,
+            importRefName,
+            error: msg,
+          });
+          await updateRegistry((reg2: any) => {
+            const dd = reg2?.drones?.[droneId];
+            if (!dd) return;
+            dd.repo = dd.repo ?? {};
+            dd.repo.lastPushAt = nowIso();
+            dd.repo.lastPushError = msg;
+            dd.repo.lastPush = {
+              mode: 'push-failed',
+              hostRef: fromRef || null,
+              hostRefSha: fromRefSha || null,
+              importedRef: importRefName || null,
+              importedRefSha: importRefSha || null,
+              mergeCommitSha: null,
+              baseAdvanced,
+              baseAdvanceError,
+            };
+            reg2.drones = reg2.drones ?? {};
+            reg2.drones[droneId] = dd;
+          });
+          await setDroneHubMetaByIdentity({ droneId, hub: { phase: 'error', message: `Repo push failed: ${msg}` } });
+          json(res, 500, {
+            ok: false,
+            error: msg,
+            code: null,
+            patchName: null,
+            conflictFiles: [],
+          });
+          return;
+        } finally {
+          if (hostBundlePath) {
+            try {
+              await fs.rm(hostBundlePath, { recursive: true, force: true });
+            } catch (e: any) {
+              hubLog('warn', 'Repo push host bundle cleanup failed', {
+                droneName,
+                hostBundlePath,
+                error: e?.message ?? String(e),
+              });
+            }
+          }
+
+          if (importRefName || containerBundlePath) {
+            try {
+              await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: d }, async ({ containerName }) => {
+                if (importRefName) {
+                  await runGitInDrone({
+                    container: containerName,
+                    repoPathInContainer,
+                    args: ['update-ref', '-d', importRefName],
+                  });
+                }
+                if (containerBundlePath) {
+                  await dvmExec(containerName, 'bash', ['-lc', `rm -f ${JSON.stringify(containerBundlePath)} || true`]);
+                }
+              });
+            } catch (e: any) {
+              hubLog('warn', 'Repo push drone cleanup failed', {
+                droneName,
+                importRefName,
+                containerBundlePath,
+                error: e?.message ?? String(e),
+              });
+            }
+          }
         }
       }
 

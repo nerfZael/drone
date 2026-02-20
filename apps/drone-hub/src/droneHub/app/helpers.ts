@@ -116,6 +116,7 @@ export function parseRepoPullConflict(message: string, meta?: Partial<RepoOpErro
   const isConflict =
     code === 'patch_apply_conflict' ||
     code === 'host_conflicts_ready' ||
+    code === 'drone_conflicts_ready' ||
     files.length > 0 ||
     /patch apply conflict|patch does not apply|failed applying patch|could not apply|CONFLICT/i.test(text);
   return { isConflict, patchName: patchName || null, files };

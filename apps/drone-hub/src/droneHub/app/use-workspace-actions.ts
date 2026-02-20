@@ -12,7 +12,7 @@ type LaunchHint =
     }
   | null;
 
-type RepoOpState = null | { kind: 'pull' | 'reseed' };
+type RepoOpState = null | { kind: 'pull' | 'push' | 'reseed' };
 
 type RequestJson = <T>(url: string, init?: RequestInit) => Promise<T>;
 
@@ -249,6 +249,41 @@ export function useWorkspaceActions({
     }
   }, [clearRepoOperationError, currentDrone, postJson, setRepoOperationError]);
 
+  const pushRepoChanges = React.useCallback(async () => {
+    if (!currentDrone) return;
+    const droneId = String(currentDrone.id ?? '').trim();
+    if (!droneId) return;
+    const confirmed = window.confirm(
+      'Pull current host branch changes into this drone branch? A clean merge creates a merge commit in the drone repo.',
+    );
+    if (!confirmed) return;
+    clearRepoOperationError();
+    setRepoOp({ kind: 'push' });
+    try {
+      const url = `/api/drones/${encodeURIComponent(droneId)}/repo/push`;
+      const throwRepoPushError = (data: any, fallback: string): never => {
+        const message = String(data?.error ?? fallback);
+        const code = String(data?.code ?? '').trim();
+        const patchName = String(data?.patchName ?? '').trim();
+        const conflictFiles = Array.isArray(data?.conflictFiles)
+          ? data.conflictFiles.map((f: any) => String(f ?? '').trim()).filter(Boolean)
+          : [];
+        setRepoOperationError(message, {
+          code: code || null,
+          patchName: patchName || null,
+          conflictFiles,
+        });
+        throw new Error(message);
+      };
+      const response = await postJson(url, {});
+      if (!response.ok) throwRepoPushError(response.data, 'Repo push failed.');
+    } catch (e: any) {
+      setRepoOperationError(e?.message ?? String(e));
+    } finally {
+      setRepoOp(null);
+    }
+  }, [clearRepoOperationError, currentDrone, postJson, setRepoOperationError]);
+
   const reseedRepo = React.useCallback(async () => {
     if (!currentDrone) return;
     const droneId = String(currentDrone.id ?? '').trim();
@@ -281,6 +316,7 @@ export function useWorkspaceActions({
     openDroneTerminal,
     openDroneEditor,
     pullRepoChanges,
+    pushRepoChanges,
     reseedRepo,
   };
 }

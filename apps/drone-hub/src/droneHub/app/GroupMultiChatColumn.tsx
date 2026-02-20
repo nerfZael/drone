@@ -49,7 +49,7 @@ export function GroupMultiChatColumn({
   const [sendingPromptCount, setSendingPromptCount] = React.useState(0);
   const sendingPrompt = sendingPromptCount > 0;
   const [optimisticPendingPrompts, setOptimisticPendingPrompts] = React.useState<PendingPrompt[]>([]);
-  const [quickActionBusy, setQuickActionBusy] = React.useState<null | 'ssh' | 'pull'>(null);
+  const [quickActionBusy, setQuickActionBusy] = React.useState<null | 'ssh' | 'pull' | 'push'>(null);
   const [quickActionError, setQuickActionError] = React.useState<string | null>(null);
   const columnScrollRef = React.useRef<HTMLDivElement | null>(null);
   const draftKey = React.useMemo(() => chatInputDraftKeyForDroneChat(drone.id, chatName), [drone.id, chatName]);
@@ -266,6 +266,37 @@ export function GroupMultiChatColumn({
     }
   }, [disabledByProvisioning, drone.id, quickActionBusy, repoAttached]);
 
+  const pushRepoChanges = React.useCallback(async () => {
+    if (disabledByProvisioning || quickActionBusy || !repoAttached) return;
+    const confirmed = window.confirm(
+      'Pull current host branch changes into this drone branch? A clean merge creates a merge commit in the drone repo.',
+    );
+    if (!confirmed) return;
+    setQuickActionBusy('push');
+    setQuickActionError(null);
+    try {
+      const r = await fetch(`/api/drones/${encodeURIComponent(drone.id)}/repo/push`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      if (!r.ok) {
+        const text = await r.text();
+        let parsed: any = null;
+        try {
+          parsed = text ? JSON.parse(text) : null;
+        } catch {
+          parsed = null;
+        }
+        setQuickActionError(String(parsed?.error ?? `${r.status} ${r.statusText}`));
+      }
+    } catch (err: any) {
+      setQuickActionError(err?.message ?? String(err));
+    } finally {
+      setQuickActionBusy(null);
+    }
+  }, [disabledByProvisioning, drone.id, quickActionBusy, repoAttached]);
+
   const openBrowserTab = React.useCallback(async () => {
     if (disabledByProvisioning) return;
     setQuickActionError(null);
@@ -361,22 +392,40 @@ export function GroupMultiChatColumn({
               Open tab
             </button>
             {repoAttached ? (
-              <button
-                type="button"
-                onClick={() => {
-                  void pullRepoChanges();
-                }}
-                disabled={disabledByProvisioning || Boolean(quickActionBusy)}
-                className={`inline-flex items-center h-5 px-1.5 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
-                  disabledByProvisioning || Boolean(quickActionBusy)
-                    ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                    : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
-                }`}
-                style={{ fontFamily: 'var(--display)' }}
-                title="Apply repo changes from this drone into the local repo"
-              >
-                {quickActionBusy === 'pull' ? 'Applying...' : 'Apply'}
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void pullRepoChanges();
+                  }}
+                  disabled={disabledByProvisioning || Boolean(quickActionBusy)}
+                  className={`inline-flex items-center h-5 px-1.5 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
+                    disabledByProvisioning || Boolean(quickActionBusy)
+                      ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                      : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                  }`}
+                  style={{ fontFamily: 'var(--display)' }}
+                  title="Apply repo changes from this drone into the local repo"
+                >
+                  {quickActionBusy === 'pull' ? 'Applying...' : 'Apply'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void pushRepoChanges();
+                  }}
+                  disabled={disabledByProvisioning || Boolean(quickActionBusy)}
+                  className={`inline-flex items-center h-5 px-1.5 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
+                    disabledByProvisioning || Boolean(quickActionBusy)
+                      ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                      : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                  }`}
+                  style={{ fontFamily: 'var(--display)' }}
+                  title="Merge current host branch commits into this drone branch"
+                >
+                  {quickActionBusy === 'push' ? 'Pulling...' : 'Pull host'}
+                </button>
+              </>
             ) : null}
           </div>
           {quickActionError ? <div className="mt-1 text-[10px] text-[var(--red)] truncate" title={quickActionError}>{quickActionError}</div> : null}

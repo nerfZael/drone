@@ -812,6 +812,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     openDroneTerminal,
     openDroneEditor,
     pullRepoChanges,
+    pushRepoChanges,
     reseedRepo,
   } = useWorkspaceActions({
     autoDelete,
@@ -1342,6 +1343,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     openDroneEditor,
     openingEditor,
     pullRepoChanges,
+    pushRepoChanges,
     repoOp,
     headerOverflowRef,
     reseedRepo,

@@ -391,7 +391,8 @@ type SelectedDroneWorkspaceProps = {
   openDroneEditor: (editor: 'code' | 'cursor') => void;
   openingEditor: { editor: 'code' | 'cursor' } | null;
   pullRepoChanges: () => Promise<void>;
-  repoOp: { kind: 'pull' | 'reseed' } | null;
+  pushRepoChanges: () => Promise<void>;
+  repoOp: { kind: 'pull' | 'push' | 'reseed' } | null;
   headerOverflowRef: React.RefObject<HTMLDivElement | null>;
   reseedRepo: () => Promise<void>;
   terminalMenuRef: React.RefObject<HTMLDivElement | null>;
@@ -495,6 +496,7 @@ export function SelectedDroneWorkspace({
   openDroneEditor,
   openingEditor,
   pullRepoChanges,
+  pushRepoChanges,
   repoOp,
   headerOverflowRef,
   reseedRepo,
@@ -921,20 +923,36 @@ export function SelectedDroneWorkspace({
             Cursor
           </button>
           {(currentDrone.repoAttached ?? Boolean(String(currentDrone.repoPath ?? '').trim())) && (
-            <button
-              type="button"
-              onClick={() => void pullRepoChanges()}
-              disabled={isDroneStartingOrSeeding(currentDrone.hubPhase) || Boolean(openingEditor) || Boolean(openingTerminal) || Boolean(repoOp)}
-              className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
-                isDroneStartingOrSeeding(currentDrone.hubPhase) || Boolean(openingEditor) || Boolean(openingTerminal) || Boolean(repoOp)
-                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                  : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
-              }`}
-              style={{ fontFamily: 'var(--display)' }}
-              title="Apply repo changes from the drone container into the local repo"
-            >
-              {repoOp?.kind === 'pull' ? 'Applying...' : 'Apply changes'}
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => void pullRepoChanges()}
+                disabled={isDroneStartingOrSeeding(currentDrone.hubPhase) || Boolean(openingEditor) || Boolean(openingTerminal) || Boolean(repoOp)}
+                className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
+                  isDroneStartingOrSeeding(currentDrone.hubPhase) || Boolean(openingEditor) || Boolean(openingTerminal) || Boolean(repoOp)
+                    ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                    : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                }`}
+                style={{ fontFamily: 'var(--display)' }}
+                title="Apply repo changes from the drone container into the local repo"
+              >
+                {repoOp?.kind === 'pull' ? 'Applying...' : 'Apply changes'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void pushRepoChanges()}
+                disabled={isDroneStartingOrSeeding(currentDrone.hubPhase) || Boolean(openingEditor) || Boolean(openingTerminal) || Boolean(repoOp)}
+                className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
+                  isDroneStartingOrSeeding(currentDrone.hubPhase) || Boolean(openingEditor) || Boolean(openingTerminal) || Boolean(repoOp)
+                    ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                    : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                }`}
+                style={{ fontFamily: 'var(--display)' }}
+                title="Merge the current host branch into this drone branch"
+              >
+                {repoOp?.kind === 'push' ? 'Pulling host…' : 'Pull host changes'}
+              </button>
+            </>
           )}
           {/* Overflow menu */}
           <div ref={headerOverflowRef as React.RefObject<HTMLDivElement>} className="relative">
