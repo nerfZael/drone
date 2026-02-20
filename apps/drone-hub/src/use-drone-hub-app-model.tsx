@@ -559,6 +559,19 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       },
     });
 
+  const openGroupMultiChat = React.useCallback(
+    (groupRaw: string) => {
+      const group = String(groupRaw ?? '').trim();
+      if (!group) return;
+      setAppView('workspace');
+      setDraftChat(null);
+      setDraftCreateOpen(false);
+      setDraftCreateError(null);
+      setSelectedGroupMultiChat(group);
+    },
+    [setAppView, setDraftChat, setDraftCreateError, setDraftCreateOpen, setSelectedGroupMultiChat],
+  );
+
   const terminalOptions = React.useMemo(
     () => [
       { id: 'auto', label: 'Auto' },
@@ -818,6 +831,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setDroneErrorModal,
     openCreateModal,
     openDraftChatComposer,
+    openGroupMultiChat,
     toggleTldrFromShortcut,
     createOpen,
     setCreateRepoMenuOpen,
@@ -1111,11 +1125,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     createGroupAndMove,
     setCollapsedGroups,
     renameGroup,
-    setAppView,
-    setDraftChat,
-    setDraftCreateOpen,
-    setDraftCreateError,
-    setSelectedGroupMultiChat,
+    openGroupMultiChat,
     deleteGroup,
     onDroneDragStart,
     onDroneDragEnd,
