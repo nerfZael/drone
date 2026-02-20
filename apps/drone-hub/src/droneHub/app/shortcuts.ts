@@ -160,7 +160,11 @@ export function sanitizeShortcutBindings(value: unknown): ShortcutBindingMap {
   const out: ShortcutBindingMap = { ...defaults };
   for (const def of SHORTCUT_DEFINITIONS) {
     const candidate = raw[def.id];
-    out[def.id] = candidate == null ? null : sanitizeShortcutBinding(candidate, defaults[def.id]);
+    if (candidate === undefined) {
+      out[def.id] = defaults[def.id];
+      continue;
+    }
+    out[def.id] = candidate === null ? null : sanitizeShortcutBinding(candidate, defaults[def.id]);
   }
   return out;
 }
