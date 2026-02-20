@@ -34,6 +34,7 @@ import { useGroupBroadcast } from './droneHub/app/use-group-broadcast';
 import { useGroupManagement } from './droneHub/app/use-group-management';
 import { useJobsWorkflow } from './droneHub/app/use-jobs-workflow';
 import { useLlmSettings } from './droneHub/app/use-llm-settings';
+import { useDeleteActionSettings } from './droneHub/app/use-delete-action-settings';
 import { useQueuedPromptsState } from './droneHub/app/use-queued-prompts-state';
 import { useRightPanelLayout } from './droneHub/app/use-right-panel-layout';
 import { useDroneSelectionState } from './droneHub/app/use-drone-selection-state';
@@ -256,6 +257,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const preferredSelectedDroneHoldUntilRef = React.useRef<number>(0);
   const droneIdentityByNameRef = React.useRef<Record<string, string>>({});
   const llmSettingsState = useLlmSettings(requestJson);
+  const deleteActionSettingsState = useDeleteActionSettings(requestJson);
   const { llmSettings } = llmSettingsState;
   const hubLogsState = useHubLogs({
     appView,
@@ -487,6 +489,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   } = useDroneMutationActions({
     drones,
     autoDelete,
+    deleteMode: deleteActionSettingsState.deleteSettings?.deleteAction.mode ?? 'permanent',
     requestJson,
     optimisticallyDeletedDrones,
     setOptimisticallyDeletedDrones,
@@ -1205,6 +1208,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const workspaceContentProps: DroneHubWorkspaceContentProps = useDroneHubWorkspaceContentProps({
     appView,
     llmSettingsState,
+    deleteActionSettingsState,
     hubLogsState,
     hubLogsTailLines: HUB_LOGS_TAIL_LINES,
     hubLogsMaxBytes: HUB_LOGS_MAX_BYTES,

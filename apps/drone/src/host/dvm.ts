@@ -140,6 +140,16 @@ export async function dvmRemove(container: string, opts?: { keepVolume?: boolean
   if (r.code !== 0) throw new Error(r.stderr || r.stdout || `dvm rm ${container} failed`);
 }
 
+export async function dvmStop(container: string): Promise<void> {
+  const r = await runDvm(['stop', container]);
+  if (r.code !== 0) throw new Error(r.stderr || r.stdout || `dvm stop ${container} failed`);
+}
+
+export async function dvmStart(container: string): Promise<void> {
+  const r = await runDvm(['start', container]);
+  if (r.code !== 0) throw new Error(r.stderr || r.stdout || `dvm start ${container} failed`);
+}
+
 export async function dvmRename(
   oldName: string,
   newName: string,

@@ -811,8 +811,8 @@ export function DroneSidebar({
                 checked={autoDelete}
                 onChange={(e) => setAutoDelete(e.target.checked)}
               />
-              <span className="text-[10px] text-[var(--muted-dim)] group-hover:text-[var(--muted)] transition-colors" title="When enabled, deletes won't ask for confirmation.">
-                Auto-delete
+              <span className="text-[10px] text-[var(--muted-dim)] group-hover:text-[var(--muted)] transition-colors" title="When enabled, delete/archive actions won't ask for confirmation.">
+                Skip delete confirm
               </span>
             </label>
             <label className="flex items-center gap-2 select-none cursor-pointer group">
