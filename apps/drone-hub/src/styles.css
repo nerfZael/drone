@@ -265,8 +265,8 @@ code, pre {
 .dh-markdown > :first-child { margin-top: 0; }
 .dh-markdown > :last-child { margin-bottom: 0; }
 
-.dh-markdown p { margin: .35rem 0; }
-.dh-markdown p + p { margin-top: .8rem; }
+.dh-markdown p { margin: .42rem 0; }
+.dh-markdown p + p { margin-top: 1rem; }
 .dh-markdown strong,
 .dh-markdown b {
   font-weight: 700;
@@ -282,11 +282,12 @@ code, pre {
 .dh-markdown h1,
 .dh-markdown h2,
 .dh-markdown h3 {
-  margin: .5rem 0 .3rem;
+  margin: .95rem 0 .45rem;
   font-family: var(--display);
   font-weight: 600;
   color: var(--fg);
   letter-spacing: 0.01em;
+  line-height: 1.35;
 }
 .dh-markdown h1 { font-size: 1.05rem; }
 .dh-markdown h2 { font-size: 1rem; }
@@ -305,23 +306,79 @@ code, pre {
   color: #cbbdf9;
   text-decoration-color: rgba(203, 189, 249, .62);
 }
+.dh-markdown a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+  color: #d7cbfb;
+  text-decoration-color: rgba(215, 203, 251, .9);
+}
 
 .dh-markdown ul,
-.dh-markdown ol { margin: .55rem 0 .55rem 1.25rem; padding: 0; }
-.dh-markdown li { margin: .3rem 0; }
+.dh-markdown ol { margin: .72rem 0 .78rem 1.35rem; padding: 0; }
+.dh-markdown ul ul,
+.dh-markdown ul ol,
+.dh-markdown ol ul,
+.dh-markdown ol ol { margin: .34rem 0 .34rem 1.1rem; }
+.dh-markdown li { margin: .36rem 0; padding-left: .12rem; }
+.dh-markdown li::marker { color: #a995ef; }
+.dh-markdown ol > li::marker {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
 .dh-markdown li > p { margin: .2rem 0; }
 
 .dh-markdown blockquote {
-  margin: .5rem 0;
-  padding-left: .75rem;
-  border-left: 2px solid var(--accent-muted);
+  margin: .9rem 0;
+  padding: .65rem .85rem .75rem;
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--accent-muted);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .02);
   color: var(--fg-secondary);
+}
+.dh-markdown blockquote > :first-child { margin-top: 0; }
+.dh-markdown blockquote > :last-child { margin-bottom: 0; }
+.dh-markdown-callout-label {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: .45rem;
+  padding: .1rem .48rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, .03);
+  color: var(--fg);
+  font-family: var(--display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+.dh-markdown blockquote[data-callout='note'] {
+  border-left-color: var(--accent-muted);
+  background: rgba(167, 139, 250, .08);
+}
+.dh-markdown blockquote[data-callout='tip'] {
+  border-left-color: var(--green);
+  background: rgba(74, 222, 128, .08);
+}
+.dh-markdown blockquote[data-callout='important'] {
+  border-left-color: var(--accent);
+  background: rgba(167, 139, 250, .11);
+}
+.dh-markdown blockquote[data-callout='warning'] {
+  border-left-color: var(--yellow);
+  background: rgba(255, 178, 36, .1);
+}
+.dh-markdown blockquote[data-callout='caution'] {
+  border-left-color: var(--red);
+  background: rgba(255, 90, 90, .1);
 }
 
 .dh-markdown hr {
   border: 0;
   border-top: 1px solid var(--border-subtle);
-  margin: .6rem 0;
+  margin: .9rem 0;
 }
 
 .dh-markdown code {
@@ -343,7 +400,7 @@ code, pre {
   padding: 12px 14px;
   border-radius: 8px;
   overflow: auto;
-  margin: .5rem 0;
+  margin: .9rem 0;
 }
 .dh-markdown pre code {
   background: transparent;
@@ -360,7 +417,7 @@ code, pre {
   border-collapse: separate;
   border-spacing: 0;
   font-size: 12px;
-  margin: .5rem 0;
+  margin: .9rem 0;
 }
 .dh-markdown th,
 .dh-markdown td {
@@ -375,6 +432,12 @@ code, pre {
   letter-spacing: .05em;
   text-transform: uppercase;
   background: rgba(255,255,255,.02);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dh-markdown a {
+    transition: none;
+  }
 }
 
 /* ──────────────────────────────────────────────────────────
