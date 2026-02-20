@@ -160,8 +160,11 @@ async function startPromptJob(job: PromptJob): Promise<void> {
     .filter(Boolean)
     .join('\n');
 
-  const shell = ['bash', '-lc', script];
-  await startSession({ session: job.session, cmd: shell[0], args: shell.slice(1) });
+  // Avoid passing long `bash -lc "<script>"` payloads to tmux; very large prompts
+  // can exceed command length limits before the job even starts.
+  const scriptPath = path.join(path.dirname(job.stdoutPath), `${job.id}.run.sh`);
+  await fs.writeFile(scriptPath, `${script}\n`, { encoding: 'utf8', mode: 0o700 });
+  await startSession({ session: job.session, cmd: 'bash', args: [scriptPath] });
 }
 
 async function finalizePromptJob(job: PromptJob): Promise<PromptJob> {
@@ -914,4 +917,3 @@ main().catch((err) => {
   console.error(err);
   process.exit(1);
 });
-
