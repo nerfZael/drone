@@ -77,6 +77,7 @@ import {
   closeGithubPullRequestForRepoRoot,
   inspectGithubRepoForRepoRoot,
   isGithubPullRequestError,
+  listGithubPullRequestChangesForRepoRoot,
   listGithubPullRequestsForRepoRoot,
   mergeGithubPullRequestForRepoRoot,
   normalizeGithubPullRequestListState,
@@ -5654,7 +5655,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
       // Lists pull requests for the host repo's GitHub remote.
       if (
         method === 'GET' &&
-        parts.length === 6 &&
+        parts.length === 5 &&
         parts[0] === 'api' &&
         parts[1] === 'drones' &&
         parts[3] === 'repo' &&
@@ -5750,6 +5751,70 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             id: droneId,
             name: droneName,
           });
+          return;
+        }
+      }
+
+      // GET /api/drones/:name/repo/pull-requests/:number/changes
+      // Lists exact GitHub PR file changes/diffs for a specific PR number.
+      if (
+        method === 'GET' &&
+        parts.length === 7 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'repo' &&
+        parts[4] === 'pull-requests' &&
+        parts[6] === 'changes'
+      ) {
+        const droneRef = decodeURIComponent(parts[2]);
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        const d = resolved.drone;
+        const droneId = resolved.id;
+        const droneName = String(d?.name ?? droneRef).trim() || droneRef;
+        const repoAttached = Boolean(String(d?.repo?.dest ?? '').trim()) || Boolean(String(d?.repo?.seededAt ?? '').trim());
+        if (!repoAttached) {
+          json(res, 400, { ok: false, error: 'drone has no repo attached' });
+          return;
+        }
+        const repoPathRaw = String(d?.repoPath ?? '').trim();
+        if (!repoPathRaw) {
+          json(res, 409, { ok: false, error: 'host repo path is unavailable for this drone', code: 'repo_path_missing', id: droneId, name: droneName });
+          return;
+        }
+        const pullNumber = Number.parseInt(String(parts[5] ?? '').trim(), 10);
+        if (!Number.isFinite(pullNumber) || pullNumber <= 0 || Math.floor(pullNumber) !== pullNumber) {
+          json(res, 400, { ok: false, error: 'invalid pull request number', code: 'invalid_pull_number', id: droneId, name: droneName });
+          return;
+        }
+
+        try {
+          const repoRoot = await gitTopLevel(repoPathRaw);
+          const pr = await listGithubPullRequestChangesForRepoRoot({ repoRoot, pullNumber });
+          json(res, 200, {
+            ok: true,
+            id: droneId,
+            name: droneName,
+            repoRoot,
+            github: pr.repo,
+            pullRequest: pr.pullRequest,
+            counts: pr.counts,
+            entries: pr.entries,
+          });
+          return;
+        } catch (e: any) {
+          if (isGithubPullRequestError(e)) {
+            json(res, e.statusCode, {
+              ok: false,
+              error: e.message,
+              ...(e.code ? { code: e.code } : {}),
+              id: droneId,
+              name: droneName,
+            });
+            return;
+          }
+          const msg = e?.message ?? String(e);
+          json(res, 500, { ok: false, error: msg, id: droneId, name: droneName });
           return;
         }
       }

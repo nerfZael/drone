@@ -34,6 +34,40 @@ export type GithubPullRequestSummary = {
   hasMergeConflicts: boolean;
 };
 
+type GithubPullRequestFileStatusType = 'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'type-changed' | 'unmerged' | 'unknown';
+
+export type GithubPullRequestFileChange = {
+  path: string;
+  originalPath: string | null;
+  statusChar: string;
+  statusType: GithubPullRequestFileStatusType;
+  additions: number;
+  deletions: number;
+  changes: number;
+  patch: string | null;
+  truncated: boolean;
+  isBinary: boolean;
+};
+
+export type GithubPullRequestChanges = {
+  repo: GithubRepoRef;
+  pullRequest: {
+    number: number;
+    title: string;
+    htmlUrl: string | null;
+    baseRefName: string;
+    headRefName: string;
+    baseSha: string;
+    headSha: string;
+  };
+  counts: {
+    changed: number;
+    additions: number;
+    deletions: number;
+  };
+  entries: GithubPullRequestFileChange[];
+};
+
 export class GithubPullRequestError extends Error {
   statusCode: number;
   code: string | null;
@@ -393,6 +427,50 @@ function mapGithubPullRequestFromGraphql(raw: any, owner: string): GithubPullReq
   };
 }
 
+function mapGithubFileStatus(raw: unknown): { statusChar: string; statusType: GithubPullRequestFileStatusType } {
+  const status = String(raw ?? '').trim().toLowerCase();
+  switch (status) {
+    case 'added':
+      return { statusChar: 'A', statusType: 'added' };
+    case 'removed':
+      return { statusChar: 'D', statusType: 'deleted' };
+    case 'modified':
+      return { statusChar: 'M', statusType: 'modified' };
+    case 'renamed':
+      return { statusChar: 'R', statusType: 'renamed' };
+    case 'copied':
+      return { statusChar: 'C', statusType: 'copied' };
+    case 'changed':
+      return { statusChar: 'T', statusType: 'type-changed' };
+    case 'unchanged':
+      return { statusChar: '.', statusType: 'unknown' };
+    default:
+      return { statusChar: '?', statusType: 'unknown' };
+  }
+}
+
+function buildGithubPullRequestUnifiedDiff(raw: any): { patch: string | null; truncated: boolean; isBinary: boolean } {
+  const status = String(raw?.status ?? '').trim().toLowerCase();
+  const filePath = String(raw?.filename ?? '').trim();
+  const previousPath = String(raw?.previous_filename ?? '').trim();
+  const patchBody = typeof raw?.patch === 'string' ? String(raw.patch) : '';
+  const hasPatch = Boolean(patchBody.trim());
+  const isBinary = !hasPatch;
+  const truncated = !hasPatch && Number(raw?.changes ?? 0) > 0;
+  if (!filePath || !hasPatch) return { patch: null, truncated, isBinary };
+
+  const fromPath = previousPath || filePath;
+  const oldLabel = status === 'added' ? '/dev/null' : `a/${fromPath}`;
+  const newLabel = status === 'removed' ? '/dev/null' : `b/${filePath}`;
+  const header = [`diff --git a/${fromPath} b/${filePath}`, `--- ${oldLabel}`, `+++ ${newLabel}`].join('\n');
+  const normalizedBody = patchBody.endsWith('\n') ? patchBody : `${patchBody}\n`;
+  return {
+    patch: `${header}\n${normalizedBody}`,
+    truncated,
+    isBinary,
+  };
+}
+
 function assertValidPullNumber(pullNumberRaw: number): number {
   const pullNumber = Number(pullNumberRaw);
   if (!Number.isFinite(pullNumber) || pullNumber <= 0 || Math.floor(pullNumber) !== pullNumber) {
@@ -522,6 +600,94 @@ export async function listGithubPullRequestsForRepoRoot(opts: {
   }
 
   return { repo, pullRequests };
+}
+
+async function listGithubPullRequestFiles(opts: {
+  repo: GithubRepoRef;
+  pullNumber: number;
+  token: string | null;
+}): Promise<any[]> {
+  const out: any[] = [];
+  for (let page = 1; page <= 20; page += 1) {
+    const rows = await githubApiRequest<any[]>({
+      path: `/repos/${encodeURIComponent(opts.repo.owner)}/${encodeURIComponent(opts.repo.repo)}/pulls/${opts.pullNumber}/files?per_page=100&page=${page}`,
+      method: 'GET',
+      token: opts.token,
+    });
+    const list = Array.isArray(rows) ? rows : [];
+    if (list.length === 0) break;
+    out.push(...list);
+    if (list.length < 100) break;
+  }
+  return out;
+}
+
+export async function listGithubPullRequestChangesForRepoRoot(opts: {
+  repoRoot: string;
+  pullNumber: number;
+}): Promise<GithubPullRequestChanges> {
+  const repoRoot = String(opts.repoRoot ?? '').trim();
+  if (!repoRoot) throw new GithubPullRequestError('missing repo root', { statusCode: 400 });
+  const pullNumber = assertValidPullNumber(opts.pullNumber);
+  const repo = await resolveGithubRepoForRepoRoot(repoRoot);
+  const token = await resolveGithubToken();
+
+  const pull = await githubApiRequest<{
+    number?: number;
+    title?: string;
+    html_url?: string | null;
+    base?: { ref?: string; sha?: string };
+    head?: { ref?: string; sha?: string };
+  }>({
+    method: 'GET',
+    path: `/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/pulls/${pullNumber}`,
+    token,
+  });
+
+  const files = await listGithubPullRequestFiles({ repo, pullNumber, token });
+  const entries: GithubPullRequestFileChange[] = files
+    .map((row) => {
+      const pathText = String(row?.filename ?? '').trim();
+      if (!pathText) return null;
+      const originalPathRaw = String(row?.previous_filename ?? '').trim();
+      const status = mapGithubFileStatus(row?.status);
+      const patch = buildGithubPullRequestUnifiedDiff(row);
+      return {
+        path: pathText,
+        originalPath: originalPathRaw || null,
+        statusChar: status.statusChar,
+        statusType: status.statusType,
+        additions: Math.max(0, Math.floor(Number(row?.additions ?? 0) || 0)),
+        deletions: Math.max(0, Math.floor(Number(row?.deletions ?? 0) || 0)),
+        changes: Math.max(0, Math.floor(Number(row?.changes ?? 0) || 0)),
+        patch: patch.patch,
+        truncated: patch.truncated,
+        isBinary: patch.isBinary,
+      };
+    })
+    .filter((row): row is GithubPullRequestFileChange => row != null);
+
+  const additions = entries.reduce((sum, row) => sum + Math.max(0, Number(row.additions) || 0), 0);
+  const deletions = entries.reduce((sum, row) => sum + Math.max(0, Number(row.deletions) || 0), 0);
+
+  return {
+    repo,
+    pullRequest: {
+      number: pullNumber,
+      title: String(pull?.title ?? '').trim() || `PR #${pullNumber}`,
+      htmlUrl: pull?.html_url ? String(pull.html_url).trim() : null,
+      baseRefName: String(pull?.base?.ref ?? '').trim(),
+      headRefName: String(pull?.head?.ref ?? '').trim(),
+      baseSha: String(pull?.base?.sha ?? '').trim().toLowerCase(),
+      headSha: String(pull?.head?.sha ?? '').trim().toLowerCase(),
+    },
+    counts: {
+      changed: entries.length,
+      additions,
+      deletions,
+    },
+    entries,
+  };
 }
 
 export async function mergeGithubPullRequestForRepoRoot(opts: {

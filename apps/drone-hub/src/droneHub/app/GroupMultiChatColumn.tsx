@@ -370,9 +370,9 @@ export function GroupMultiChatColumn({
                     : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
-                title="Pull repo changes from this drone into the local repo"
+                title="Apply repo changes from this drone into the local repo"
               >
-                {quickActionBusy === 'pull' ? 'Pulling...' : 'Pull'}
+                {quickActionBusy === 'pull' ? 'Applying...' : 'Apply'}
               </button>
             ) : null}
           </div>

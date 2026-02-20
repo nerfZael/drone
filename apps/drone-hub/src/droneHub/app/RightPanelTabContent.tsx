@@ -7,6 +7,7 @@ import { DroneTerminalDock } from '../terminal';
 import type {
   DroneFsEntry,
   DronePortMapping,
+  RepoPullRequestSummary,
   DroneSummary,
   PortReachabilityByHostPort,
 } from '../types';
@@ -49,6 +50,7 @@ type RightPanelTabContentProps = {
   portRows: DronePortMapping[];
   setSelectedPreviewPort: (port: DronePortMapping | null) => void;
   onOpenFileInEditor: (entry: DroneFsEntry) => void;
+  onOpenPullRequestInChanges: (paneKey: 'top' | 'bottom' | 'single', pullRequest: RepoPullRequestSummary) => void;
 };
 
 export function RightPanelTabContent({
@@ -82,6 +84,7 @@ export function RightPanelTabContent({
   portRows,
   setSelectedPreviewPort,
   onOpenFileInEditor,
+  onOpenPullRequestInChanges,
 }: RightPanelTabContentProps) {
   const disabled = isDroneStartingOrSeeding(drone.hubPhase);
   const chatName = selectedChat || 'default';
@@ -198,6 +201,7 @@ export function RightPanelTabContent({
           disabled={disabled}
           hubPhase={drone.hubPhase}
           hubMessage={drone.hubMessage}
+          onOpenPullRequestInChanges={(pullRequest) => onOpenPullRequestInChanges(paneKey, pullRequest)}
         />
       );
 

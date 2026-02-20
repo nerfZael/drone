@@ -8,6 +8,7 @@ import type {
   RepoPullRequestSummary,
   RepoPullRequestsPayload,
 } from '../types';
+import { requestChangesPullRequest } from '../changes/navigation';
 
 const PR_MERGE_METHOD_STORAGE_KEY = 'droneHub.prMergeMethod';
 
@@ -136,6 +137,7 @@ export function DronePullRequestsDock({
   disabled,
   hubPhase,
   hubMessage,
+  onOpenPullRequestInChanges,
 }: {
   droneId: string;
   droneName: string;
@@ -144,6 +146,7 @@ export function DronePullRequestsDock({
   disabled: boolean;
   hubPhase?: 'creating' | 'starting' | 'seeding' | 'error' | null;
   hubMessage?: string | null;
+  onOpenPullRequestInChanges?: (pullRequest: RepoPullRequestSummary) => void;
 }) {
   const [refreshNonce, setRefreshNonce] = React.useState(0);
   const [listData, setListData] = React.useState<Extract<RepoPullRequestsPayload, { ok: true }> | null>(null);
@@ -303,6 +306,16 @@ export function DronePullRequestsDock({
     [busyByPullNumber, droneId],
   );
 
+  const openPullRequestInChanges = React.useCallback(
+    (pr: RepoPullRequestSummary) => {
+      const pullNumber = Number(pr?.number);
+      if (!Number.isFinite(pullNumber) || pullNumber <= 0) return;
+      requestChangesPullRequest({ droneId, pullNumber: Math.floor(pullNumber) });
+      onOpenPullRequestInChanges?.(pr);
+    },
+    [droneId, onOpenPullRequestInChanges],
+  );
+
   return (
     <div className="w-full h-full min-h-0 bg-[var(--panel-alt)] overflow-hidden flex flex-col relative">
       <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] flex items-center justify-between gap-2">
@@ -430,21 +443,14 @@ export function DronePullRequestsDock({
                     #{pr.number}
                   </a>
                   <div className="min-w-0 flex-1">
-                    {pr.htmlUrl ? (
-                      <a
-                        href={pr.htmlUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="block text-[11px] text-[var(--fg-secondary)] hover:text-[var(--fg)] hover:underline truncate"
-                        title={pr.title}
-                      >
-                        {pr.title}
-                      </a>
-                    ) : (
-                      <div className="text-[11px] text-[var(--fg-secondary)] truncate" title={pr.title}>
-                        {pr.title}
-                      </div>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => openPullRequestInChanges(pr)}
+                      className="block w-full text-left text-[12px] text-[var(--fg-secondary)] hover:text-[var(--fg)] hover:underline truncate"
+                      title={`Open in Changes tab (PR mode): ${pr.title}`}
+                    >
+                      {pr.title}
+                    </button>
                     <div className="mt-1 flex items-center gap-1.5 flex-wrap">
                       <MetaChip label="author" value={pr.authorLogin || '-'} />
                       <MetaChip label="base" value={shortBranchName(pr.baseRefName)} title={pr.baseRefName} mono />

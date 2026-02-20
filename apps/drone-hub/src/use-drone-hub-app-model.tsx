@@ -996,6 +996,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           if (entry.kind !== 'file' || entry.isImage) return;
           openEditorFile({ path: entry.path, name: entry.name });
         }}
+        onOpenPullRequestInChanges={(pane, _pullRequest) => {
+          setRightPanelOpen(true);
+          if (pane === 'bottom') setRightPanelBottomTab('changes');
+          else setRightPanelTab('changes');
+        }}
       />
     ),
     [
@@ -1022,6 +1027,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       selectedPreviewUrlOverride,
       setCurrentFsPath,
       setFsExplorerView,
+      setRightPanelBottomTab,
+      setRightPanelOpen,
+      setRightPanelTab,
       setSelectedPreviewPort,
       setSelectedPreviewUrlOverride,
       uiDroneName,

@@ -3,16 +3,32 @@ import { Diff, Hunk, parseDiff } from 'react-diff-view';
 import 'react-diff-view/style/index.css';
 import { requestJson } from '../http';
 import { provisioningLabel, usePaneReadiness } from '../panes/usePaneReadiness';
-import type { RepoChangeEntry, RepoChangesPayload, RepoDiffPayload, RepoPullChangesPayload, RepoPullDiffPayload } from '../types';
+import type {
+  RepoChangeEntry,
+  RepoChangesPayload,
+  RepoDiffPayload,
+  RepoPullChangesPayload,
+  RepoPullDiffPayload,
+  RepoPullRequestChangeEntry,
+  RepoPullRequestChangesPayload,
+} from '../types';
+import {
+  CHANGES_DATA_MODE_STORAGE_KEY,
+  CHANGES_OPEN_PULL_REQUEST_EVENT,
+  type ChangesOpenPullRequestDetail,
+  selectedPullRequestForDrone,
+} from './navigation';
 
 type ChangesViewMode = 'stacked' | 'split';
 type DiffKind = 'staged' | 'unstaged';
-type ChangesDataMode = 'working-tree' | 'pull-preview';
+type ChangesDataMode = 'working-tree' | 'pull-preview' | 'pull-request';
+type DiffNoTextReason = 'binary' | 'truncated' | 'empty' | 'unavailable';
+type LastRefreshedByMode = Record<ChangesDataMode, number | null>;
 
 type DiffState =
   | { status: 'loading' }
   | { status: 'error'; error: string }
-  | { status: 'loaded'; text: string; truncated: boolean; fromUntracked: boolean };
+  | { status: 'loaded'; text: string; truncated: boolean; fromUntracked: boolean; isBinary: boolean; noTextReason: DiffNoTextReason | null };
 
 type ExplorerNode = {
   kind: 'dir' | 'file';
@@ -24,7 +40,6 @@ type ExplorerNode = {
 };
 
 const CHANGES_VIEW_STORAGE_KEY = 'droneHub.changesViewMode';
-const CHANGES_DATA_MODE_STORAGE_KEY = 'droneHub.changesDataMode';
 
 function shortSha(sha: string | null | undefined): string {
   const s = String(sha ?? '').trim();
@@ -93,8 +108,8 @@ function statusCharMeaning(chRaw: string): string {
 }
 
 function statusBadgeTitle(entry: RepoChangeEntry, mode: ChangesDataMode): string {
-  if (mode === 'pull-preview') {
-    return `Pull preview status: ${statusCharLabel(entry.stagedChar)} (${statusCharMeaning(entry.stagedChar)})`;
+  if (mode !== 'working-tree') {
+    return `Change status: ${statusCharLabel(entry.stagedChar)} (${statusCharMeaning(entry.stagedChar)})`;
   }
   return [
     'Git status badge S/U (staged/unstaged)',
@@ -196,6 +211,29 @@ function buildExplorerTree(entries: RepoChangeEntry[]): ExplorerNode[] {
   return toNodes(root);
 }
 
+function pullRequestNoTextReason(entry: RepoPullRequestChangeEntry): DiffNoTextReason | null {
+  const patchText = typeof entry.patch === 'string' ? entry.patch : '';
+  if (patchText.length > 0) return null;
+  if (entry.isBinary) return 'binary';
+  if (entry.truncated) return 'truncated';
+  const changes = Math.max(0, Number(entry.changes) || 0);
+  const additions = Math.max(0, Number(entry.additions) || 0);
+  const deletions = Math.max(0, Number(entry.deletions) || 0);
+  if (changes === 0 && additions === 0 && deletions === 0) return 'empty';
+  return 'unavailable';
+}
+
+function refreshTimeLabel(epochMs: number | null): { text: string; title: string | undefined } {
+  if (!Number.isFinite(Number(epochMs)) || !epochMs || epochMs <= 0) {
+    return { text: 'Not loaded', title: undefined };
+  }
+  const d = new Date(epochMs);
+  return {
+    text: d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+    title: d.toLocaleString(),
+  };
+}
+
 function DiffBlock({ state }: { state: DiffState | undefined }) {
   if (!state || state.status === 'loading') {
     return <div className="px-3 py-3 text-[11px] text-[var(--muted)]">Loading diff...</div>;
@@ -205,17 +243,34 @@ function DiffBlock({ state }: { state: DiffState | undefined }) {
   }
 
   if (!state.text) {
+    const emptyMessage =
+      state.noTextReason === 'binary'
+        ? 'No textual diff: this file is binary.'
+        : state.noTextReason === 'truncated'
+          ? 'No textual diff: GitHub truncated this file patch.'
+          : state.noTextReason === 'empty'
+            ? 'No textual diff: this file has no line-level changes.'
+            : state.noTextReason === 'unavailable'
+              ? 'No textual diff: GitHub did not provide a patch for this file.'
+              : 'No diff output for this selection. The file may be empty, non-text, or no longer present.';
     return (
       <div className="px-3 py-3 text-[11px] text-[var(--muted)]">
-        No diff output for this selection. The file may be empty, non-text, or no longer present.
+        {emptyMessage}
       </div>
     );
   }
 
   const rawText = state.text;
   const binaryDiffPattern = /(^|\n)(Binary files .* differ|GIT binary patch)(\n|$)/;
-  if (binaryDiffPattern.test(rawText)) {
-    return <pre className="m-0 p-3 text-[11px] leading-5 text-[var(--fg-secondary)] whitespace-pre-wrap break-words">{rawText}</pre>;
+  if (state.isBinary || binaryDiffPattern.test(rawText)) {
+    return (
+      <div>
+        <div className="px-3 py-2 text-[10px] text-[var(--muted)] border-b border-[var(--border-subtle)]">
+          Binary file diff.
+        </div>
+        <pre className="m-0 p-3 text-[11px] leading-5 text-[var(--fg-secondary)] whitespace-pre-wrap break-words">{rawText}</pre>
+      </div>
+    );
   }
 
   const parsed = (() => {
@@ -333,11 +388,20 @@ export function DroneChangesDock({
   const [pullChanges, setPullChanges] = React.useState<Extract<RepoPullChangesPayload, { ok: true }> | null>(null);
   const [pullLoading, setPullLoading] = React.useState(false);
   const [pullError, setPullError] = React.useState<string | null>(null);
+  const [pullRequestNumber, setPullRequestNumber] = React.useState<number | null>(() => selectedPullRequestForDrone(droneId));
+  const [pullRequestChanges, setPullRequestChanges] = React.useState<Extract<RepoPullRequestChangesPayload, { ok: true }> | null>(null);
+  const [pullRequestLoading, setPullRequestLoading] = React.useState(false);
+  const [pullRequestError, setPullRequestError] = React.useState<string | null>(null);
+  const [lastRefreshedByMode, setLastRefreshedByMode] = React.useState<LastRefreshedByMode>({
+    'working-tree': null,
+    'pull-preview': null,
+    'pull-request': null,
+  });
 
   const [dataMode, setDataMode] = React.useState<ChangesDataMode>(() => {
     try {
       const raw = localStorage.getItem(CHANGES_DATA_MODE_STORAGE_KEY);
-      return raw === 'pull-preview' ? 'pull-preview' : 'working-tree';
+      return raw === 'pull-preview' || raw === 'pull-request' ? raw : 'working-tree';
     } catch {
       return 'working-tree';
     }
@@ -362,6 +426,10 @@ export function DroneChangesDock({
   const diffByKeyRef = React.useRef<Record<string, DiffState>>({});
   const inflightRef = React.useRef<Set<string>>(new Set());
   const mountedRef = React.useRef(true);
+  const markModeRefreshed = React.useCallback((mode: ChangesDataMode) => {
+    const now = Date.now();
+    setLastRefreshedByMode((prev) => ({ ...prev, [mode]: now }));
+  }, []);
 
   React.useEffect(() => {
     mountedRef.current = true;
@@ -387,6 +455,30 @@ export function DroneChangesDock({
   }, [dataMode]);
 
   React.useEffect(() => {
+    const onOpenPullRequest = (event: Event) => {
+      const detail = (event as CustomEvent<ChangesOpenPullRequestDetail>).detail;
+      if (!detail || String(detail.droneId ?? '').trim() !== String(droneId ?? '').trim()) return;
+      const pullNumber = Number(detail.pullNumber);
+      if (!Number.isFinite(pullNumber) || pullNumber <= 0) return;
+      setPullRequestNumber(Math.floor(pullNumber));
+      setDataMode('pull-request');
+      setRefreshNonce((n) => n + 1);
+    };
+    window.addEventListener(CHANGES_OPEN_PULL_REQUEST_EVENT, onOpenPullRequest as EventListener);
+    return () => window.removeEventListener(CHANGES_OPEN_PULL_REQUEST_EVENT, onOpenPullRequest as EventListener);
+  }, [droneId]);
+
+  React.useEffect(() => {
+    setPullRequestNumber(selectedPullRequestForDrone(droneId));
+  }, [droneId]);
+
+  React.useEffect(() => {
+    if (dataMode !== 'pull-request') return;
+    if (pullRequestNumber && pullRequestNumber > 0) return;
+    setDataMode('pull-preview');
+  }, [dataMode, pullRequestNumber]);
+
+  React.useEffect(() => {
     if (!repoAttached || disabled || dataMode !== 'working-tree') {
       setChanges(null);
       setChangesError(null);
@@ -407,6 +499,7 @@ export function DroneChangesDock({
         if (!mounted) return;
         setChanges(data);
         setChangesError(null);
+        markModeRefreshed('working-tree');
         startup.markReady();
       } catch (e: any) {
         if (!mounted) return;
@@ -425,7 +518,7 @@ export function DroneChangesDock({
       mounted = false;
       if (timer) clearInterval(timer);
     };
-  }, [dataMode, disabled, droneId, refreshNonce, repoAttached, startup.markReady]);
+  }, [dataMode, disabled, droneId, markModeRefreshed, refreshNonce, repoAttached, startup.markReady]);
 
   React.useEffect(() => {
     if (!repoAttached || disabled || dataMode !== 'pull-preview') {
@@ -448,6 +541,7 @@ export function DroneChangesDock({
         if (!mounted) return;
         setPullChanges(data);
         setPullError(null);
+        markModeRefreshed('pull-preview');
       } catch (e: any) {
         if (!mounted) return;
         setPullError(e?.message ?? String(e));
@@ -465,7 +559,51 @@ export function DroneChangesDock({
       mounted = false;
       if (timer) clearInterval(timer);
     };
-  }, [dataMode, disabled, droneId, refreshNonce, repoAttached]);
+  }, [dataMode, disabled, droneId, markModeRefreshed, refreshNonce, repoAttached]);
+
+  React.useEffect(() => {
+    if (!repoAttached || disabled || dataMode !== 'pull-request' || !pullRequestNumber) {
+      setPullRequestChanges(null);
+      setPullRequestError(null);
+      setPullRequestLoading(false);
+      return;
+    }
+    setPullRequestChanges((prev) => (prev && prev.pullRequest.number === pullRequestNumber ? prev : null));
+
+    let mounted = true;
+    const activePullNumber = pullRequestNumber;
+
+    const load = async (silent: boolean) => {
+      if (!mounted) return;
+      if (!silent) setPullRequestLoading(true);
+      try {
+        const data = await requestJson<Extract<RepoPullRequestChangesPayload, { ok: true }>>(
+          `/api/drones/${encodeURIComponent(droneId)}/repo/pull-requests/${activePullNumber}/changes`,
+        );
+        if (!mounted) return;
+        setPullRequestChanges(data);
+        setPullRequestError(null);
+        markModeRefreshed('pull-request');
+      } catch (e: any) {
+        if (!mounted) return;
+        const status = Number(e?.status ?? 0);
+        if (status === 404) {
+          setPullRequestChanges(null);
+          setPullRequestError(`PR #${activePullNumber} was not found on GitHub (it may have been deleted or is inaccessible).`);
+          return;
+        }
+        setPullRequestError(e?.message ?? String(e));
+      } finally {
+        if (mounted && !silent) setPullRequestLoading(false);
+      }
+    };
+
+    void load(false);
+
+    return () => {
+      mounted = false;
+    };
+  }, [dataMode, disabled, droneId, markModeRefreshed, pullRequestNumber, refreshNonce, repoAttached]);
 
   const pullEntriesAsWorkingEntries: RepoChangeEntry[] = React.useMemo(() => {
     const list = pullChanges?.entries ?? [];
@@ -483,21 +621,52 @@ export function DroneChangesDock({
     }));
   }, [pullChanges?.entries]);
 
-  const entries = dataMode === 'pull-preview' ? pullEntriesAsWorkingEntries : (changes?.entries ?? []);
-  const listLoading = dataMode === 'pull-preview' ? pullLoading : changesLoading;
-  const listError = dataMode === 'pull-preview' ? pullError : changesError;
+  const pullRequestEntriesAsWorkingEntries: RepoChangeEntry[] = React.useMemo(() => {
+    const list = pullRequestChanges?.entries ?? [];
+    return list.map((e) => ({
+      path: e.path,
+      originalPath: e.originalPath,
+      code: `${String(e.statusChar ?? '?').charAt(0)}.`,
+      stagedChar: String(e.statusChar ?? '?').charAt(0),
+      unstagedChar: '.',
+      stagedType: e.statusType ?? 'unknown',
+      unstagedType: null,
+      isUntracked: false,
+      isIgnored: false,
+      isConflicted: e.statusType === 'unmerged',
+    }));
+  }, [pullRequestChanges?.entries]);
+
+  const entries =
+    dataMode === 'working-tree'
+      ? (changes?.entries ?? [])
+      : dataMode === 'pull-request'
+        ? pullRequestEntriesAsWorkingEntries
+        : pullEntriesAsWorkingEntries;
+  const listLoading =
+    dataMode === 'working-tree' ? changesLoading : dataMode === 'pull-request' ? pullRequestLoading : pullLoading;
+  const listError =
+    dataMode === 'working-tree' ? changesError : dataMode === 'pull-request' ? pullRequestError : pullError;
 
   const entriesSignature = React.useMemo(
     () =>
-      dataMode === 'pull-preview'
-        ? [
-            'pull',
-            pullChanges?.baseSha ?? '',
-            pullChanges?.headSha ?? '',
-            entries.map((e) => `${e.path}\u0000${e.code}\u0000${e.originalPath ?? ''}`).join('\n'),
-          ].join('\n')
-        : entries.map((e) => `${e.path}\u0000${e.code}\u0000${e.originalPath ?? ''}`).join('\n'),
-    [dataMode, entries, pullChanges?.baseSha, pullChanges?.headSha],
+      dataMode === 'working-tree'
+        ? entries.map((e) => `${e.path}\u0000${e.code}\u0000${e.originalPath ?? ''}`).join('\n')
+        : dataMode === 'pull-request'
+          ? [
+              'pull-request',
+              String(pullRequestChanges?.pullRequest.number ?? ''),
+              pullRequestChanges?.pullRequest.baseSha ?? '',
+              pullRequestChanges?.pullRequest.headSha ?? '',
+              entries.map((e) => `${e.path}\u0000${e.code}\u0000${e.originalPath ?? ''}`).join('\n'),
+            ].join('\n')
+          : [
+              'pull-preview',
+              pullChanges?.baseSha ?? '',
+              pullChanges?.headSha ?? '',
+              entries.map((e) => `${e.path}\u0000${e.code}\u0000${e.originalPath ?? ''}`).join('\n'),
+            ].join('\n'),
+    [dataMode, entries, pullChanges?.baseSha, pullChanges?.headSha, pullRequestChanges?.pullRequest.baseSha, pullRequestChanges?.pullRequest.headSha, pullRequestChanges?.pullRequest.number],
   );
 
   React.useEffect(() => {
@@ -525,7 +694,7 @@ export function DroneChangesDock({
   );
 
   React.useEffect(() => {
-    if (dataMode === 'pull-preview') return;
+    if (dataMode !== 'working-tree') return;
     setSplitKind((prev) => {
       const next = effectiveKindForEntry(selectedEntry, prev);
       return next ?? defaultKindForEntry(selectedEntry);
@@ -583,6 +752,8 @@ export function DroneChangesDock({
             text: typeof data.diff === 'string' ? data.diff : '',
             truncated: Boolean(data.truncated),
             fromUntracked: Boolean(data.fromUntracked),
+            isBinary: false,
+            noTextReason: null,
           },
         }));
       } catch (e: any) {
@@ -623,6 +794,8 @@ export function DroneChangesDock({
             text: typeof data.diff === 'string' ? data.diff : '',
             truncated: Boolean(data.truncated),
             fromUntracked: false,
+            isBinary: false,
+            noTextReason: null,
           },
         }));
       } catch (e: any) {
@@ -637,6 +810,43 @@ export function DroneChangesDock({
     },
     [droneId, pullChanges?.baseSha, pullChanges?.headSha],
   );
+
+  React.useEffect(() => {
+    if (dataMode !== 'pull-request') return;
+    const prNumber = Number(pullRequestChanges?.pullRequest.number);
+    if (!Number.isFinite(prNumber) || prNumber <= 0) return;
+    const list = pullRequestChanges?.entries ?? [];
+    setDiffByKey((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const entry of list) {
+        const key = `pr\u0000${Math.floor(prNumber)}\u0000${entry.path}`;
+        const text = typeof entry.patch === 'string' ? entry.patch : '';
+        const value: DiffState = {
+          status: 'loaded',
+          text,
+          truncated: Boolean(entry.truncated),
+          fromUntracked: false,
+          isBinary: Boolean(entry.isBinary),
+          noTextReason: pullRequestNoTextReason(entry),
+        };
+        const cur = next[key];
+        if (
+          cur &&
+          cur.status === 'loaded' &&
+          cur.text === value.text &&
+          cur.truncated === value.truncated &&
+          cur.isBinary === value.isBinary &&
+          cur.noTextReason === value.noTextReason
+        ) {
+          continue;
+        }
+        next[key] = value;
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [dataMode, pullRequestChanges?.entries, pullRequestChanges?.pullRequest.number]);
 
   const splitShownKind = effectiveKindForEntry(selectedEntry, splitKind);
 
@@ -665,8 +875,9 @@ export function DroneChangesDock({
   }, [dataMode, disabled, loadPullDiff, repoAttached, selectedEntry]);
 
   const counts = changes?.counts;
-  const pullBase = pullChanges?.baseSha ?? null;
-  const pullHead = pullChanges?.headSha ?? null;
+  const pullBase = dataMode === 'pull-request' ? (pullRequestChanges?.pullRequest.baseSha ?? null) : (pullChanges?.baseSha ?? null);
+  const pullHead = dataMode === 'pull-request' ? (pullRequestChanges?.pullRequest.headSha ?? null) : (pullChanges?.headSha ?? null);
+  const refreshed = refreshTimeLabel(lastRefreshedByMode[dataMode] ?? null);
 
   function renderExplorer(nodes: ExplorerNode[], depth: number): React.ReactNode {
     return nodes.map((node) => {
@@ -762,9 +973,26 @@ export function DroneChangesDock({
                     : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
-                title="Pull preview: committed diff from base to drone HEAD (what a pull would merge)"
+                title="Apply preview: committed diff from base to drone HEAD (what applying changes would merge)"
               >
-                Pull
+                Apply
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!pullRequestNumber) return;
+                  setDataMode('pull-request');
+                }}
+                disabled={!pullRequestNumber}
+                className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
+                  dataMode === 'pull-request'
+                    ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                    : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:opacity-40 disabled:cursor-not-allowed'
+                }`}
+                style={{ fontFamily: 'var(--display)' }}
+                title={pullRequestNumber ? `Exact GitHub PR #${pullRequestNumber} diff` : 'Click a PR title in the PRs tab to set PR mode'}
+              >
+                PR
               </button>
               <span className="mx-1 text-[var(--border-subtle)]">|</span>
             </>
@@ -795,6 +1023,9 @@ export function DroneChangesDock({
           >
             Explorer
           </button>
+          <span className="ml-1 text-[9px] text-[var(--muted-dim)] font-mono tabular-nums" title={refreshed.title}>
+            Updated {refreshed.text}
+          </span>
           <button
             type="button"
             onClick={() => setRefreshNonce((n) => n + 1)}
@@ -813,8 +1044,9 @@ export function DroneChangesDock({
           <span title={String(hubMessage ?? '').trim() || undefined}>
             {startup.timedOut ? 'Still provisioning… repo not ready yet.' : 'Provisioning… waiting for repo.'}
           </span>
-        ) : listLoading && ((dataMode === 'working-tree' && !changes) || (dataMode === 'pull-preview' && !pullChanges)) ? (
-          <span>{dataMode === 'pull-preview' ? 'Loading pull preview…' : 'Loading changes...'}</span>
+        ) : listLoading &&
+          ((dataMode === 'working-tree' && !changes) || (dataMode === 'pull-preview' && !pullChanges) || (dataMode === 'pull-request' && !pullRequestChanges)) ? (
+          <span>{dataMode === 'pull-request' ? 'Loading pull request…' : dataMode === 'pull-preview' ? 'Loading apply preview…' : 'Loading changes...'}</span>
         ) : listError ? (
           <span className="text-[var(--red)]">{listError}</span>
         ) : (
@@ -825,6 +1057,23 @@ export function DroneChangesDock({
                   {pullChanges?.repoRoot || repoPath || '-'}
                 </span>
                 <MetaChip label="files" value={pullChanges?.counts.changed ?? 0} />
+                <MetaChip label="base" value={shortSha(pullBase)} title={pullBase ?? ''} mono />
+                <MetaChip label="head" value={shortSha(pullHead)} title={pullHead ?? ''} mono />
+              </>
+            ) : dataMode === 'pull-request' ? (
+              <>
+                <span className="truncate max-w-[38ch]" title={pullRequestChanges?.repoRoot || repoPath || '-'}>
+                  {pullRequestChanges?.repoRoot || repoPath || '-'}
+                </span>
+                <MetaChip
+                  label="pr"
+                  value={`#${pullRequestChanges?.pullRequest.number ?? pullRequestNumber ?? '-'}`}
+                  title={pullRequestChanges?.pullRequest.title || undefined}
+                  mono
+                />
+                <MetaChip label="files" value={pullRequestChanges?.counts.changed ?? 0} />
+                <MetaChip label="+" value={pullRequestChanges?.counts.additions ?? 0} mono />
+                <MetaChip label="-" value={pullRequestChanges?.counts.deletions ?? 0} mono />
                 <MetaChip label="base" value={shortSha(pullBase)} title={pullBase ?? ''} mono />
                 <MetaChip label="head" value={shortSha(pullHead)} title={pullHead ?? ''} mono />
               </>
@@ -881,7 +1130,13 @@ export function DroneChangesDock({
         <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--red)]">{listError}</div>
       ) : entries.length === 0 && !listLoading ? (
         <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--muted)]">
-          {dataMode === 'pull-preview' ? 'No pull changes to preview.' : 'Working tree is clean.'}
+          {dataMode === 'pull-request'
+            ? pullRequestNumber
+              ? `No file changes found for PR #${pullRequestNumber}.`
+              : 'No pull request selected.'
+            : dataMode === 'pull-preview'
+              ? 'No apply changes to preview.'
+              : 'Working tree is clean.'}
         </div>
       ) : viewMode === 'stacked' ? (
         <div className="flex-1 min-h-0 overflow-auto">
@@ -948,14 +1203,17 @@ export function DroneChangesDock({
             <div className="px-2 py-2 flex flex-col gap-2">
               {entries.map((entry) => {
                 const open = expandedPullFiles[entry.path] === true;
-                const key = `pull\u0000${String(pullChanges?.baseSha ?? '').trim().toLowerCase()}\u0000${String(
-                  pullChanges?.headSha ?? '',
-                )
-                  .trim()
-                  .toLowerCase()}\u0000${entry.path}`;
+                const key =
+                  dataMode === 'pull-request'
+                    ? `pr\u0000${Math.max(1, Math.floor(Number(pullRequestChanges?.pullRequest.number ?? pullRequestNumber ?? 0)))}\u0000${entry.path}`
+                    : `pull\u0000${String(pullChanges?.baseSha ?? '').trim().toLowerCase()}\u0000${String(
+                        pullChanges?.headSha ?? '',
+                      )
+                        .trim()
+                        .toLowerCase()}\u0000${entry.path}`;
                 const state = diffByKey[key];
                 return (
-                  <section key={`pull:${entry.path}`} className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] overflow-hidden">
+                  <section key={`${dataMode === 'pull-request' ? 'pr' : 'apply'}:${entry.path}`} className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] overflow-hidden">
                     <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/70 flex items-center gap-2">
                       <span
                         className={`inline-flex items-center justify-center min-w-[32px] h-5 rounded border text-[10px] font-mono ${badgeTone(entry)}`}
@@ -974,7 +1232,7 @@ export function DroneChangesDock({
                             const next = { ...prev, [entry.path]: !open };
                             return next;
                           });
-                          if (!open) void loadPullDiff(entry.path);
+                          if (!open && dataMode === 'pull-preview') void loadPullDiff(entry.path);
                         }}
                         className="h-6 px-2 rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[9px] font-semibold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
                         title={open ? 'Hide diff' : 'Show diff'}
@@ -1033,7 +1291,9 @@ export function DroneChangesDock({
                 </div>
               ) : (
                 <div className="text-[9px] text-[var(--muted-dim)] font-mono whitespace-nowrap">
-                  {shortSha(pullBase)}..{shortSha(pullHead)}
+                  {dataMode === 'pull-request'
+                    ? `PR #${pullRequestChanges?.pullRequest.number ?? pullRequestNumber ?? '-'} ${shortSha(pullBase)}..${shortSha(pullHead)}`
+                    : `${shortSha(pullBase)}..${shortSha(pullHead)}`}
                 </div>
               )}
             </div>
@@ -1049,11 +1309,15 @@ export function DroneChangesDock({
             ) : (
               <DiffBlock
                 state={
-                  diffByKey[
-                    `pull\u0000${String(pullChanges?.baseSha ?? '').trim().toLowerCase()}\u0000${String(pullChanges?.headSha ?? '')
-                      .trim()
-                      .toLowerCase()}\u0000${selectedEntry.path}`
-                  ]
+                  dataMode === 'pull-request'
+                    ? diffByKey[
+                        `pr\u0000${Math.max(1, Math.floor(Number(pullRequestChanges?.pullRequest.number ?? pullRequestNumber ?? 0)))}\u0000${selectedEntry.path}`
+                      ]
+                    : diffByKey[
+                        `pull\u0000${String(pullChanges?.baseSha ?? '').trim().toLowerCase()}\u0000${String(pullChanges?.headSha ?? '')
+                          .trim()
+                          .toLowerCase()}\u0000${selectedEntry.path}`
+                      ]
                 }
               />
             )}

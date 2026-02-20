@@ -903,9 +903,9 @@ export function SelectedDroneWorkspace({
                   : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
               }`}
               style={{ fontFamily: 'var(--display)' }}
-              title="Pull repo changes from the drone container into your local repo"
+              title="Apply repo changes from the drone container into the local repo"
             >
-              {repoOp?.kind === 'pull' ? 'Pulling...' : 'Pull changes'}
+              {repoOp?.kind === 'pull' ? 'Applying...' : 'Apply changes'}
             </button>
           )}
           {/* Overflow menu */}

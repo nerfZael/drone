@@ -174,6 +174,44 @@ export type RepoPullDiffPayload =
     }
   | { ok: false; error: string; code?: string };
 
+export type RepoPullRequestChangeEntry = {
+  path: string;
+  originalPath: string | null;
+  statusChar: string;
+  statusType: RepoChangeType;
+  additions: number;
+  deletions: number;
+  changes: number;
+  patch: string | null;
+  truncated: boolean;
+  isBinary: boolean;
+};
+
+export type RepoPullRequestChangesPayload =
+  | {
+      ok: true;
+      id: string;
+      name: string;
+      repoRoot: string;
+      github: { owner: string; repo: string };
+      pullRequest: {
+        number: number;
+        title: string;
+        htmlUrl: string | null;
+        baseRefName: string;
+        headRefName: string;
+        baseSha: string;
+        headSha: string;
+      };
+      counts: {
+        changed: number;
+        additions: number;
+        deletions: number;
+      };
+      entries: RepoPullRequestChangeEntry[];
+    }
+  | { ok: false; error: string; code?: string };
+
 export type RepoPullRequestState = 'open' | 'closed' | string;
 export type RepoPullRequestMergeMethod = 'merge' | 'squash' | 'rebase';
 
