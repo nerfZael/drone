@@ -57,10 +57,27 @@ export function DroneCard({
   const canDelete = typeof onDelete === 'function';
   const actionCount = Number(canClone) + Number(canRename) + Number(canSetBaseImage) + Number(canDelete);
   const hasActions = canClone || canRename || canSetBaseImage || canDelete;
-  const actionsReservedWidthPx = actionCount > 0 ? actionCount * 24 + Math.max(0, actionCount - 1) * 4 : 0;
   const pinActionsVisible = Boolean(renameBusy) || Boolean(setBaseImageBusy) || Boolean(deleteBusy);
-  const [isHovered, setIsHovered] = React.useState(false);
-  const reserveActionsSpace = hasActions && (pinActionsVisible || isHovered);
+  const actionReserveWidthClass =
+    actionCount >= 4
+      ? 'min-w-[108px]'
+      : actionCount === 3
+        ? 'min-w-[80px]'
+        : actionCount === 2
+          ? 'min-w-[52px]'
+          : actionCount === 1
+            ? 'min-w-[24px]'
+            : '';
+  const actionReserveHoverWidthClass =
+    actionCount >= 4
+      ? 'group-hover/drone:min-w-[108px]'
+      : actionCount === 3
+        ? 'group-hover/drone:min-w-[80px]'
+        : actionCount === 2
+          ? 'group-hover/drone:min-w-[52px]'
+          : actionCount === 1
+            ? 'group-hover/drone:min-w-[24px]'
+            : '';
   const showRespondingAsStatus = Boolean(busy) && Boolean(drone.statusOk) && drone.hubPhase !== 'error';
   const errText = String(drone.hubMessage ?? drone.statusError ?? '').trim();
   const showInlineError = drone.hubPhase === 'error' && Boolean(errText);
@@ -77,8 +94,6 @@ export function DroneCard({
       draggable={Boolean(draggable)}
       onDragStart={(e) => onDragStart?.(e)}
       onDragEnd={() => onDragEnd?.()}
-      onPointerEnter={() => setIsHovered(true)}
-      onPointerLeave={() => setIsHovered(false)}
       onClick={(e) => onClick({ toggle: e.metaKey || e.ctrlKey, range: e.shiftKey })}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -137,8 +152,9 @@ export function DroneCard({
         )
       ) : (
         <div
-          className="relative flex items-center justify-end flex-shrink-0 ml-2"
-          style={reserveActionsSpace ? { minWidth: actionsReservedWidthPx } : undefined}
+          className={`relative flex items-center justify-end flex-shrink-0 ml-2 transition-[min-width] duration-150 ${
+            hasActions ? (pinActionsVisible ? actionReserveWidthClass : actionReserveHoverWidthClass) : ''
+          }`}
         >
           <div
             className={

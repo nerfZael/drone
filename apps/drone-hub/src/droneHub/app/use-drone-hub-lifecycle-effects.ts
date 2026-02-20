@@ -175,47 +175,52 @@ export function useDroneHubLifecycleEffects({
       return group || null;
     };
 
-    const runShortcutAction = (actionId: ShortcutActionId): boolean => {
-      if (actionId === 'toggleTldr') {
+    const shortcutActionHandlers: Record<ShortcutActionId, () => boolean> = {
+      toggleTldr: () => {
         toggleTldrFromShortcut();
         return true;
-      }
-      if (actionId === 'createDraftDrone') {
+      },
+      createDraftDrone: () => {
         openDraftChatComposer();
         return true;
-      }
-      if (actionId === 'openCreateModal' || actionId === 'openCreateModalAlt') {
+      },
+      openCreateModal: () => {
         openCreateModal();
         return true;
-      }
-      if (actionId === 'openHoveredGroupMultiChat') {
+      },
+      openCreateModalAlt: () => {
+        openCreateModal();
+        return true;
+      },
+      openHoveredGroupMultiChat: () => {
         const group = getHoveredSidebarGroup();
         if (!group) return false;
         openGroupMultiChat(group);
         return true;
-      }
-      if (actionId === 'openPullRequestsTab') {
+      },
+      openPullRequestsTab: () => {
         openRightPanelTabFromShortcut('prs');
         return true;
-      }
-      if (actionId === 'openChangesTab') {
+      },
+      openChangesTab: () => {
         openRightPanelTabFromShortcut('changes');
         return true;
-      }
-      if (actionId === 'openBrowserTab') {
+      },
+      openBrowserTab: () => {
         openRightPanelTabFromShortcut('preview');
         return true;
-      }
-      if (actionId === 'openFilesTab') {
+      },
+      openFilesTab: () => {
         openRightPanelTabFromShortcut('files');
         return true;
-      }
-      if (actionId === 'openTerminalTab') {
+      },
+      openTerminalTab: () => {
         openRightPanelTabFromShortcut('terminal');
         return true;
-      }
-      return false;
+      },
     };
+
+    const runShortcutAction = (actionId: ShortcutActionId): boolean => shortcutActionHandlers[actionId]();
 
     const isEditableTarget = (target: EventTarget | null): boolean => {
       if (!(target instanceof HTMLElement)) return false;
