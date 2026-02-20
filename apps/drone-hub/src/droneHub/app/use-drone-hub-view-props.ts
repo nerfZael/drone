@@ -48,11 +48,7 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     createGroupAndMove,
     setCollapsedGroups,
     renameGroup,
-    setAppView,
-    setDraftChat,
-    setDraftCreateOpen,
-    setDraftCreateError,
-    setSelectedGroupMultiChat,
+    openGroupMultiChat,
     deleteGroup,
     onDroneDragStart,
     onDroneDragEnd,
@@ -113,11 +109,7 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
         void renameGroup(group);
       },
       onOpenGroupMultiChat: (group) => {
-        setAppView('workspace');
-        setDraftChat(null);
-        setDraftCreateOpen(false);
-        setDraftCreateError(null);
-        setSelectedGroupMultiChat(group);
+        openGroupMultiChat(group);
       },
       onDeleteGroup: (group, count) => {
         void deleteGroup(group, count);

@@ -599,6 +599,7 @@ export function DroneSidebar({
                   return (
                     <div
                       key={group}
+                      data-drone-sidebar-group={group}
                       className={`rounded-md border bg-[rgba(0,0,0,.15)] overflow-hidden transition-colors ${
                         isDropTarget ? 'border-[var(--accent-muted)] ring-1 ring-[var(--accent-muted)]' : 'border-[var(--border-subtle)]'
                       }`}

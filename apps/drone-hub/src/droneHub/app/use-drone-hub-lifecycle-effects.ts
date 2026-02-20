@@ -34,6 +34,7 @@ type UseDroneHubLifecycleEffectsArgs = {
   setDroneErrorModal: Setter<DroneErrorModalState | null>;
   openCreateModal: () => void;
   openDraftChatComposer: () => void;
+  openGroupMultiChat: (group: string) => void;
   toggleTldrFromShortcut: () => void;
   createOpen: boolean;
   setCreateRepoMenuOpen: Setter<boolean>;
@@ -91,6 +92,7 @@ export function useDroneHubLifecycleEffects({
   setDroneErrorModal,
   openCreateModal,
   openDraftChatComposer,
+  openGroupMultiChat,
   toggleTldrFromShortcut,
   createOpen,
   setCreateRepoMenuOpen,
@@ -167,6 +169,12 @@ export function useDroneHubLifecycleEffects({
       setRightPanelTab(tab);
     };
 
+    const getHoveredSidebarGroup = (): string | null => {
+      const hovered = document.querySelector<HTMLElement>('[data-drone-sidebar-group]:hover');
+      const group = String(hovered?.dataset.droneSidebarGroup ?? '').trim();
+      return group || null;
+    };
+
     const runShortcutAction = (actionId: ShortcutActionId): boolean => {
       if (actionId === 'toggleTldr') {
         toggleTldrFromShortcut();
@@ -178,6 +186,16 @@ export function useDroneHubLifecycleEffects({
       }
       if (actionId === 'openCreateModal' || actionId === 'openCreateModalAlt') {
         openCreateModal();
+        return true;
+      }
+      if (actionId === 'openHoveredGroupMultiChat') {
+        const group = getHoveredSidebarGroup();
+        if (!group) return false;
+        openGroupMultiChat(group);
+        return true;
+      }
+      if (actionId === 'openPullRequestsTab') {
+        openRightPanelTabFromShortcut('prs');
         return true;
       }
       if (actionId === 'openChangesTab') {
@@ -223,6 +241,7 @@ export function useDroneHubLifecycleEffects({
     currentDrone,
     openCreateModal,
     openDraftChatComposer,
+    openGroupMultiChat,
     rightPanelSplit,
     setRightPanelBottomTab,
     setRightPanelOpen,
