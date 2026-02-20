@@ -945,22 +945,19 @@ export function DroneSidebar({
             </label>
           </div>
           <div className="flex items-center gap-1">
-            <button
-              type="button"
+            <SidebarIconButton
               onClick={() => setSidebarGroupingMode((prev) => (prev === 'groups' ? 'repos' : 'groups'))}
               aria-pressed={isRepoGroupingMode}
-              className={`inline-flex items-center gap-1 h-7 px-2 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
+              className={`border ${
                 isRepoGroupingMode
                   ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                  : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] hover:bg-[var(--hover)]'
+                  : 'border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] hover:bg-[var(--hover)]'
               }`}
-              style={{ fontFamily: 'var(--display)' }}
               title={isRepoGroupingMode ? 'Show real groups in sidebar' : 'Show repos as virtual groups'}
-              aria-label={isRepoGroupingMode ? 'Show real groups in sidebar' : 'Show repos as virtual groups'}
+              ariaLabel={isRepoGroupingMode ? 'Show real groups in sidebar' : 'Show repos as virtual groups'}
             >
-              <IconFolder className="w-3 h-3 opacity-80" />
-              Repo groups
-            </button>
+              <IconFolder className="opacity-90" />
+            </SidebarIconButton>
             <SidebarIconButton
               onClick={() => setSidebarAutoMinimize((prev) => !prev)}
               aria-pressed={sidebarAutoMinimize}
