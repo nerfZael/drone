@@ -43,7 +43,7 @@ export function DroneErrorModal({ droneErrorModal, clearingDroneError, onClose, 
           {droneErrorModal.conflict.isConflict && (
             <div className="mb-3 p-3 rounded border border-[rgba(255,90,90,.18)] bg-[rgba(255,90,90,.08)]">
               <div className="text-[10px] font-semibold text-[var(--red)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
-                Pull conflict detected
+                Repo conflict detected
               </div>
               {droneErrorModal.conflict.patchName && (
                 <div className="mt-1 text-[11px] text-[var(--muted)] font-mono truncate" title={droneErrorModal.conflict.patchName}>
@@ -63,8 +63,8 @@ export function DroneErrorModal({ droneErrorModal, clearingDroneError, onClose, 
                 </div>
               )}
               <div className="mt-2 text-[10px] text-[var(--muted-dim)] leading-relaxed">
-                Conflict markers: <span className="font-mono text-[var(--fg-secondary)]">&lt;&lt;&lt;&lt;&lt;&lt;&lt; ours</span> is your host branch, and{' '}
-                <span className="font-mono text-[var(--fg-secondary)]">&gt;&gt;&gt;&gt;&gt;&gt;&gt; theirs</span> is the pulled drone patch.
+                Conflict markers: <span className="font-mono text-[var(--fg-secondary)]">&lt;&lt;&lt;&lt;&lt;&lt;&lt; ours</span> is the current branch in the target
+                repo, and <span className="font-mono text-[var(--fg-secondary)]">&gt;&gt;&gt;&gt;&gt;&gt;&gt; theirs</span> is the incoming branch being merged.
               </div>
             </div>
           )}

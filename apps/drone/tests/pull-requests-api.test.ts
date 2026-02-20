@@ -72,4 +72,16 @@ describe('pull requests api route matching', () => {
     expect(data?.ok).toBe(false);
     expect(data?.error).toBe('drone has no repo attached');
   });
+
+  test('POST /repo/push is matched (does not fall through to 404)', async () => {
+    const droneId = 'drone-pr-route';
+    const { r, data } = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/repo/push`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    });
+    expect(r.status).toBe(400);
+    expect(data?.ok).toBe(false);
+    expect(data?.error).toBe('drone has no repo attached');
+  });
 });
