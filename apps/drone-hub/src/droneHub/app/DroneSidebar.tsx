@@ -6,7 +6,7 @@ import { DRONE_DND_MIME } from './app-config';
 import { compareDronesByNewestFirst, isDroneStartingOrSeeding } from './helpers';
 import { IconAutoMinimize, IconChevron, IconColumns, IconFolder, IconList, IconPencil, IconPlus, IconPlusDouble, IconSettings, IconSidebarCollapse, IconSidebarExpand, IconSpinner, IconTrash, SkeletonLine } from './icons';
 import { useDroneSidebarUiState } from './use-drone-hub-ui-store';
-import type { SidebarGroup } from './use-sidebar-view-model';
+import { SIDEBAR_VISIBLE_MULTI_CHAT_GROUP, type SidebarGroup } from './use-sidebar-view-model';
 
 const SIDEBAR_EXPANDED_WIDTH_PX = 280;
 const SIDEBAR_COLLAPSED_RAIL_WIDTH_PX = 40;
@@ -56,6 +56,7 @@ export type DroneSidebarProps = {
   groupMoveError: string | null;
   dronesLoading: boolean;
   sidebarDronesFilteredByRepo: DroneSummary[];
+  sidebarVisibleDrones: DroneSummary[];
   sidebarDrones: DroneSummary[];
   sidebarOptimisticDroneIdSet: Set<string>;
   selectedDroneSet: Set<string>;
@@ -99,6 +100,7 @@ export type DroneSidebarProps = {
   onToggleGroupCollapsed: (group: string) => void;
   onRenameGroup: (group: string) => void;
   onOpenGroupMultiChat: (group: string) => void;
+  onOpenVisibleMultiChat: () => void;
   onDeleteGroup: (group: string, count: number) => void;
   onDroneDragStart: (droneId: string, event: React.DragEvent<HTMLDivElement>) => void;
   onDroneDragEnd: () => void;
@@ -110,6 +112,7 @@ export function DroneSidebar({
   groupMoveError,
   dronesLoading,
   sidebarDronesFilteredByRepo,
+  sidebarVisibleDrones,
   sidebarDrones,
   sidebarOptimisticDroneIdSet,
   selectedDroneSet,
@@ -150,6 +153,7 @@ export function DroneSidebar({
   onToggleGroupCollapsed,
   onRenameGroup,
   onOpenGroupMultiChat,
+  onOpenVisibleMultiChat,
   onDeleteGroup,
   onDroneDragStart,
   onDroneDragEnd,
@@ -389,10 +393,13 @@ export function DroneSidebar({
 
   const collapsedRailInteractive = sidebarCollapsed;
   const isRepoGroupingMode = sidebarGroupingMode === 'repos';
+  const sidebarVisibleDroneCount = sidebarVisibleDrones.length;
+  const sidebarVisibleMultiChatActive = selectedGroupMultiChat === SIDEBAR_VISIBLE_MULTI_CHAT_GROUP;
 
   return (
     <>
       <aside
+        data-drone-sidebar-root="true"
         className="bg-[var(--panel-alt)] border-r border-[var(--border)] flex flex-col min-h-0 relative dh-dot-grid flex-shrink-0 overflow-hidden transition-[width] duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)] [will-change:width]"
         style={{ width: sidebarCollapsed ? 0 : SIDEBAR_EXPANDED_WIDTH_PX }}
         onPointerEnter={onSidebarPointerEnter}
@@ -436,6 +443,22 @@ export function DroneSidebar({
                 aria-label="Create multiple drones"
               >
                 <IconPlusDouble className="opacity-80" />
+              </button>
+              <button
+                type="button"
+                onClick={onOpenVisibleMultiChat}
+                disabled={sidebarVisibleDroneCount === 0}
+                className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
+                  sidebarVisibleDroneCount === 0
+                    ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] opacity-50 cursor-not-allowed'
+                    : sidebarVisibleMultiChatActive
+                      ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                      : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
+                }`}
+                title={`Open multi-chat for ${sidebarVisibleDroneCount} visible drone${sidebarVisibleDroneCount === 1 ? '' : 's'}`}
+                aria-label={`Open multi-chat for ${sidebarVisibleDroneCount} visible drone${sidebarVisibleDroneCount === 1 ? '' : 's'}`}
+              >
+                <IconColumns className="opacity-80" />
               </button>
               <button
                 type="button"
@@ -1020,6 +1043,7 @@ export function DroneSidebar({
       </aside>
 
       <div
+        data-drone-sidebar-root="true"
         className={`flex-shrink-0 bg-[var(--panel-alt)] border-r flex flex-col items-center pt-3 gap-2 overflow-hidden transition-[width,opacity,border-color] duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
           sidebarCollapsed
             ? 'opacity-100 border-[var(--border)]'
@@ -1063,6 +1087,22 @@ export function DroneSidebar({
           tabIndex={collapsedRailInteractive ? 0 : -1}
         >
           <IconPlusDouble className="opacity-80" />
+        </SidebarIconButton>
+        <SidebarIconButton
+          onClick={() => { setSidebarCollapsed(false); onOpenVisibleMultiChat(); }}
+          className={`border ${
+            sidebarVisibleDroneCount === 0
+              ? 'border-[var(--border-subtle)] text-[var(--muted-dim)] opacity-50 cursor-not-allowed'
+              : sidebarVisibleMultiChatActive
+                ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                : 'border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
+          }`}
+          title={`Open multi-chat for ${sidebarVisibleDroneCount} visible drone${sidebarVisibleDroneCount === 1 ? '' : 's'}`}
+          ariaLabel={`Open multi-chat for ${sidebarVisibleDroneCount} visible drone${sidebarVisibleDroneCount === 1 ? '' : 's'}`}
+          disabled={!collapsedRailInteractive || sidebarVisibleDroneCount === 0}
+          tabIndex={collapsedRailInteractive && sidebarVisibleDroneCount > 0 ? 0 : -1}
+        >
+          <IconColumns className="opacity-80" />
         </SidebarIconButton>
       </div>
     </>

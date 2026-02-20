@@ -51,7 +51,7 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   {
     id: 'openHoveredGroupMultiChat',
     label: 'Open hovered group multi-chat',
-    description: 'Opens multi-chat for the group currently under your mouse in the sidebar.',
+    description: 'Opens multi-chat for the hovered sidebar group, or all visible sidebar drones when hovering sidebar background.',
   },
   {
     id: 'openPullRequestsTab',
