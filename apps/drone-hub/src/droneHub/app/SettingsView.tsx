@@ -1,5 +1,6 @@
 import React from 'react';
 import { IconChevron, IconCopy } from './icons';
+import { ShortcutSettingsSection } from './ShortcutSettingsSection';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 import type { UseHubLogsResult } from './use-hub-logs';
 import type { UseLlmSettingsResult } from './use-llm-settings';
@@ -452,6 +453,8 @@ export function SettingsView({
                 </span>
               </label>
             </div>
+
+            <ShortcutSettingsSection />
 
             <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
               <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>

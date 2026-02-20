@@ -306,7 +306,7 @@ export function DroneSidebar({
                     ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                     : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
                 }`}
-                title="Create drone (A)"
+                title="Create drone"
                 aria-label="Create drone"
               >
                 <IconPlus className="opacity-80" />
@@ -315,7 +315,7 @@ export function DroneSidebar({
                 type="button"
                 onClick={onOpenCreateModal}
                 className="inline-flex items-center justify-center w-7 h-7 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] transition-all"
-                title="Create multiple drones (S)"
+                title="Create multiple drones"
                 aria-label="Create multiple drones"
               >
                 <IconPlusDouble className="opacity-80" />
@@ -379,7 +379,7 @@ export function DroneSidebar({
                   type="button"
                   onClick={onOpenDraftChatComposer}
                   className="w-full inline-flex items-center gap-2 h-[30px] px-3 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[11px] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] transition-all"
-                  title="Create new drone (A)"
+                  title="Create new drone"
                   aria-label="Create new drone"
                 >
                   <IconPlus className="opacity-80" />
@@ -391,7 +391,7 @@ export function DroneSidebar({
                   type="button"
                   onClick={onOpenCreateModal}
                   className="w-full inline-flex items-center gap-2 h-[30px] px-3 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[11px] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] transition-all"
-                  title="Create multiple drones (S)"
+                  title="Create multiple drones"
                   aria-label="Create multiple drones"
                 >
                   <IconPlusDouble className="opacity-80" />
@@ -861,7 +861,7 @@ export function DroneSidebar({
                 ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                 : 'border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
             }`}
-            title="Create drone (A)"
+            title="Create drone"
             aria-label="Create drone"
           >
             <IconPlus className="opacity-80" />
@@ -870,7 +870,7 @@ export function DroneSidebar({
             type="button"
             onClick={() => { setSidebarCollapsed(false); onOpenCreateModal(); }}
             className="inline-flex items-center justify-center w-7 h-7 rounded border border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] transition-all"
-            title="Create multiple drones (S)"
+            title="Create multiple drones"
             aria-label="Create multiple drones"
           >
             <IconPlusDouble className="opacity-80" />
