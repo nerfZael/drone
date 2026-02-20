@@ -17,11 +17,13 @@ type DraftChatWorkspaceProps = {
   draftAutoRenaming: boolean;
   spawnAgentConfig: ChatAgentConfig;
   createRepoMenuEntries: UiMenuSelectEntry[];
+  draftCreateGroup: string;
   draftCreateError: string | null;
   queuedPromptsByDroneChat: Record<string, PendingPrompt[]>;
   onCancel: () => void;
   onStartDraftPrompt: (payload: ChatSendPayload) => Promise<boolean>;
   onEnqueueQueuedPrompt: (droneId: string, chatName: string, prompt: string) => void;
+  onDraftCreateGroupChange: (value: string) => void;
   onSetDraftCreateError: (error: string | null) => void;
 };
 
@@ -33,11 +35,13 @@ export function DraftChatWorkspace({
   draftAutoRenaming,
   spawnAgentConfig,
   createRepoMenuEntries,
+  draftCreateGroup,
   draftCreateError,
   queuedPromptsByDroneChat,
   onCancel,
   onStartDraftPrompt,
   onEnqueueQueuedPrompt,
+  onDraftCreateGroupChange,
   onSetDraftCreateError,
 }: DraftChatWorkspaceProps) {
   const {
@@ -178,6 +182,40 @@ export function DraftChatWorkspace({
                 triggerLabelClassName={chatHeaderRepoPath ? 'font-mono text-[11px]' : undefined}
                 chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
               />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+                Group
+              </span>
+              <input
+                value={draftCreateGroup}
+                onChange={(e) => onDraftCreateGroupChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') e.currentTarget.blur();
+                }}
+                disabled={draftCreating || draftAutoRenaming || Boolean(draftChat.prompt)}
+                placeholder="Optional group"
+                className={`h-[28px] w-[170px] rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[11px] text-[var(--muted)] placeholder:text-[var(--muted-dim)] focus:outline-none transition-all ${
+                  draftCreating || draftAutoRenaming || Boolean(draftChat.prompt)
+                    ? 'opacity-40 cursor-not-allowed'
+                    : 'hover:text-[var(--fg-secondary)] hover:border-[var(--border)]'
+                }`}
+                title="Set group for this new drone."
+              />
+              <button
+                type="button"
+                onClick={() => onDraftCreateGroupChange('')}
+                disabled={draftCreating || draftAutoRenaming || Boolean(draftChat.prompt) || !draftCreateGroup.trim()}
+                className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
+                  draftCreating || draftAutoRenaming || Boolean(draftChat.prompt) || !draftCreateGroup.trim()
+                    ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
+                    : 'bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                }`}
+                style={{ fontFamily: 'var(--display)' }}
+                title="Clear group"
+              >
+                Clear
+              </button>
             </div>
           </div>
         </div>
