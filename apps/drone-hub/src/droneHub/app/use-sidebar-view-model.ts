@@ -5,45 +5,42 @@ import { compareDronesByNewestFirst } from './helpers';
 import { isStartupSeedFresh } from './app-config';
 import type { StartupSeedState } from './app-types';
 
-type SidebarGroup = {
+export type SidebarGroup = {
   group: string;
+  label: string;
+  kind: 'group' | 'repo';
   items: DroneSummary[];
 };
 
 type UseSidebarViewModelArgs = {
   selectedDroneIds: string[];
   viewMode: 'grouped' | 'flat';
+  sidebarGroupingMode: 'groups' | 'repos';
   drones: DroneSummary[];
-  dronesFilteredByRepo: DroneSummary[];
-  groups: SidebarGroup[];
   startupSeedByDrone: Record<string, StartupSeedState>;
   optimisticallyDeletedDrones: Record<string, boolean>;
   activeRepoPath: string;
   registryGroupNames: string[];
 };
 
+function repoPathToLabel(repoPathRaw: string): string {
+  const repoPath = String(repoPathRaw ?? '').trim();
+  if (!repoPath) return 'Ungrouped';
+  const parts = repoPath.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] || repoPath;
+}
+
 export function useSidebarViewModel({
   selectedDroneIds,
   viewMode,
+  sidebarGroupingMode,
   drones,
-  dronesFilteredByRepo,
-  groups,
   startupSeedByDrone,
   optimisticallyDeletedDrones,
   activeRepoPath,
   registryGroupNames,
 }: UseSidebarViewModelArgs) {
   const selectedDroneSet = React.useMemo(() => new Set(selectedDroneIds), [selectedDroneIds]);
-
-  const orderedDroneIds = React.useMemo(() => {
-    if (viewMode === 'flat') {
-      return dronesFilteredByRepo
-        .slice()
-        .sort(compareDronesByNewestFirst)
-        .map((d) => d.id);
-    }
-    return groups.flatMap((g) => g.items.map((d) => d.id));
-  }, [dronesFilteredByRepo, groups, viewMode]);
 
   const sidebarOptimisticDrones = React.useMemo(() => {
     const known = new Set(drones.map((d) => d.id));
@@ -95,6 +92,31 @@ export function useSidebarViewModel({
   }, [activeRepoPath, sidebarDrones]);
 
   const sidebarGroups = React.useMemo(() => {
+    if (sidebarGroupingMode === 'repos') {
+      const byRepo = new Map<string, { group: string; label: string; kind: 'repo'; items: DroneSummary[] }>();
+      for (const d of sidebarDronesFilteredByRepo) {
+        const repoPath = String(d?.repoPath ?? '').trim();
+        const hasRepo = repoPath.length > 0;
+        const key = hasRepo ? `repo:${repoPath}` : 'repo:ungrouped';
+        const label = hasRepo ? repoPathToLabel(repoPath) : 'Ungrouped';
+        const existing = byRepo.get(key);
+        if (existing) {
+          existing.items.push(d);
+          continue;
+        }
+        byRepo.set(key, { group: key, label, kind: 'repo', items: [d] });
+      }
+
+      const out = Array.from(byRepo.values());
+      for (const g of out) g.items.sort(compareDronesByNewestFirst);
+      out.sort((a, b) => {
+        if (isUngroupedGroupName(a.label) && !isUngroupedGroupName(b.label)) return -1;
+        if (!isUngroupedGroupName(a.label) && isUngroupedGroupName(b.label)) return 1;
+        return a.label.localeCompare(b.label);
+      });
+      return out;
+    }
+
     const m = new Map<string, DroneSummary[]>();
     const hasRepoFilter = Boolean(String(activeRepoPath ?? '').trim());
     if (!hasRepoFilter) {
@@ -111,20 +133,30 @@ export function useSidebarViewModel({
       arr.push(d);
       m.set(g, arr);
     }
-    const out = Array.from(m.entries()).map(([group, items]) => {
+    const out = Array.from(m.entries()).map(([group, items]): SidebarGroup => {
       items.sort(compareDronesByNewestFirst);
-      return { group, items };
+      return { group, label: group, kind: 'group', items };
     });
     out.sort((a, b) => {
-      if (isUngroupedGroupName(a.group) && !isUngroupedGroupName(b.group)) return -1;
-      if (!isUngroupedGroupName(a.group) && isUngroupedGroupName(b.group)) return 1;
-      return a.group.localeCompare(b.group);
+      if (isUngroupedGroupName(a.label) && !isUngroupedGroupName(b.label)) return -1;
+      if (!isUngroupedGroupName(a.label) && isUngroupedGroupName(b.label)) return 1;
+      return a.label.localeCompare(b.label);
     });
     return out;
-  }, [activeRepoPath, registryGroupNames, sidebarDronesFilteredByRepo]);
+  }, [activeRepoPath, registryGroupNames, sidebarDronesFilteredByRepo, sidebarGroupingMode]);
+
+  const orderedDroneIds = React.useMemo(() => {
+    if (viewMode === 'flat') {
+      return sidebarDronesFilteredByRepo
+        .slice()
+        .sort(compareDronesByNewestFirst)
+        .map((d) => d.id);
+    }
+    return sidebarGroups.flatMap((g) => g.items.map((d) => d.id));
+  }, [sidebarDronesFilteredByRepo, sidebarGroups, viewMode]);
 
   const sidebarHasUngroupedGroup = React.useMemo(
-    () => sidebarGroups.some((g) => isUngroupedGroupName(g.group)),
+    () => sidebarGroups.some((g) => isUngroupedGroupName(g.label)),
     [sidebarGroups],
   );
 

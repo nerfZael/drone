@@ -14,6 +14,7 @@ import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 
 type GroupMultiChatData = {
   group: string;
+  label: string;
   items: DroneSummary[];
 };
 
@@ -61,6 +62,7 @@ export function GroupMultiChatWorkspace({
       setChatInputDraft: s.setChatInputDraft,
     })),
   );
+  const groupLabel = String(selectedGroupMultiChatData.label ?? selectedGroupMultiChatData.group).trim() || selectedGroupMultiChatData.group;
   const broadcastDraftKey = React.useMemo(
     () => `group-broadcast:${selectedGroupMultiChatData.group}:${selectedChat || 'default'}`,
     [selectedGroupMultiChatData.group, selectedChat],
@@ -76,7 +78,7 @@ export function GroupMultiChatWorkspace({
               Group Multi-Chat
             </div>
             <div className="mt-1 text-[15px] font-semibold text-[var(--fg)] truncate" style={{ fontFamily: 'var(--display)' }}>
-              {selectedGroupMultiChatData.group}
+              {groupLabel}
             </div>
             <div className="text-[11px] text-[var(--muted)] mt-1">
               One column per drone. Open any column title to jump into its full chat + panel view.
