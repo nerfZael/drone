@@ -120,20 +120,35 @@ export function DroneSidebar({
     selectedDrone,
     selectedGroupMultiChat,
     sidebarReposCollapsed,
+    sidebarAutoMinimize,
     autoDelete,
     setAppView,
     setViewMode,
     setSidebarReposCollapsed,
+    setSidebarAutoMinimize,
     setActiveRepoPath,
     setAutoDelete,
     setSidebarCollapsed,
   } = useDroneSidebarUiState();
 
+  const onSidebarMouseLeave = React.useCallback(() => {
+    if (sidebarAutoMinimize && !sidebarCollapsed) {
+      setSidebarCollapsed(true);
+    }
+  }, [sidebarAutoMinimize, sidebarCollapsed, setSidebarCollapsed]);
+
+  const onCollapsedRailMouseEnter = React.useCallback(() => {
+    if (sidebarAutoMinimize && sidebarCollapsed) {
+      setSidebarCollapsed(false);
+    }
+  }, [sidebarAutoMinimize, sidebarCollapsed, setSidebarCollapsed]);
+
   return (
     <>
       <aside
-        className="bg-[var(--panel-alt)] border-r border-[var(--border)] flex flex-col min-h-0 relative dh-dot-grid flex-shrink-0 overflow-hidden transition-[width] duration-200 ease-out"
-        style={{ width: sidebarCollapsed ? 0 : 280 }}
+        className="bg-[var(--panel-alt)] border-r border-[var(--border)] flex flex-col min-h-0 relative dh-dot-grid flex-shrink-0 overflow-hidden transition-[width,opacity] duration-200 ease-in-out"
+        style={{ width: sidebarCollapsed ? 0 : 280, opacity: sidebarCollapsed ? 0 : 1 }}
+        onMouseLeave={onSidebarMouseLeave}
       >
         <div className="flex-shrink-0 px-3 py-3 border-b border-[var(--border)] relative">
           <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-[var(--accent)] via-[var(--accent-muted)] to-transparent opacity-40" />
@@ -587,18 +602,31 @@ export function DroneSidebar({
           )}
         </div>
 
-        <div className="flex-shrink-0 px-3 py-2.5 border-t border-[var(--border)] flex items-center justify-between gap-2">
-          <label className="flex items-center gap-2 select-none cursor-pointer group">
-            <input
-              type="checkbox"
-              className="accent-[var(--accent)] w-3.5 h-3.5"
-              checked={autoDelete}
-              onChange={(e) => setAutoDelete(e.target.checked)}
-            />
-            <span className="text-[10px] text-[var(--muted-dim)] group-hover:text-[var(--muted)] transition-colors" title="When enabled, deletes won't ask for confirmation.">
-              Auto-delete
-            </span>
-          </label>
+        <div className="flex-shrink-0 px-3 py-2.5 border-t border-[var(--border)] flex items-start justify-between gap-2">
+          <div className="flex flex-col gap-1.5">
+            <label className="flex items-center gap-2 select-none cursor-pointer group">
+              <input
+                type="checkbox"
+                className="accent-[var(--accent)] w-3.5 h-3.5"
+                checked={autoDelete}
+                onChange={(e) => setAutoDelete(e.target.checked)}
+              />
+              <span className="text-[10px] text-[var(--muted-dim)] group-hover:text-[var(--muted)] transition-colors" title="When enabled, deletes won't ask for confirmation.">
+                Auto-delete
+              </span>
+            </label>
+            <label className="flex items-center gap-2 select-none cursor-pointer group">
+              <input
+                type="checkbox"
+                className="accent-[var(--accent)] w-3.5 h-3.5"
+                checked={sidebarAutoMinimize}
+                onChange={(e) => setSidebarAutoMinimize(e.target.checked)}
+              />
+              <span className="text-[10px] text-[var(--muted-dim)] group-hover:text-[var(--muted)] transition-colors" title="When enabled, the sidebar collapses after mouse leave and expands on hover.">
+                Auto-minimize
+              </span>
+            </label>
+          </div>
           <button
             type="button"
             onClick={() => setSidebarCollapsed(true)}
@@ -612,7 +640,10 @@ export function DroneSidebar({
       </aside>
 
       {sidebarCollapsed && (
-        <div className="flex-shrink-0 w-10 bg-[var(--panel-alt)] border-r border-[var(--border)] flex flex-col items-center pt-3 gap-2">
+        <div
+          className="flex-shrink-0 w-10 bg-[var(--panel-alt)] border-r border-[var(--border)] flex flex-col items-center pt-3 gap-2"
+          onMouseEnter={onCollapsedRailMouseEnter}
+        >
           <button
             type="button"
             onClick={() => setSidebarCollapsed(false)}
