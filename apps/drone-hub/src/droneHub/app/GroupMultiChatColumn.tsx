@@ -263,9 +263,10 @@ export function GroupMultiChatColumn({
     }
   }, [disabledByProvisioning, drone.id, quickActionBusy, repoAttached]);
 
-  const openBrowserTab = React.useCallback(() => {
+  const openBrowserTab = React.useCallback(async () => {
     if (disabledByProvisioning) return;
-    const ok = openDroneTabFromLastPreview(drone);
+    setQuickActionError(null);
+    const ok = await openDroneTabFromLastPreview(drone);
     if (!ok) setQuickActionError('No preview URL available yet.');
   }, [disabledByProvisioning, drone]);
 
@@ -342,7 +343,9 @@ export function GroupMultiChatColumn({
             </button>
             <button
               type="button"
-              onClick={openBrowserTab}
+              onClick={() => {
+                void openBrowserTab();
+              }}
               disabled={disabledByProvisioning || !quickOpenTabUrl}
               className={`inline-flex items-center h-5 px-1.5 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
                 disabledByProvisioning || !quickOpenTabUrl
