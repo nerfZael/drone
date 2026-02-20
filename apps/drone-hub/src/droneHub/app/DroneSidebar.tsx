@@ -565,7 +565,13 @@ export function DroneSidebar({
                       onDelete={() => onDeleteDrone(d.id)}
                       onErrorClick={onOpenDroneErrorModal}
                       cloneDisabled={isOptimistic || Boolean(deletingDrones[d.id]) || Boolean(renamingDrones[d.id]) || Boolean(settingBaseImages[d.id])}
-                      renameDisabled={isOptimistic || Boolean(deletingDrones[d.id]) || Boolean(renamingDrones[d.id]) || Boolean(settingBaseImages[d.id])}
+                      renameDisabled={
+                        isOptimistic ||
+                        Boolean(deletingDrones[d.id]) ||
+                        Boolean(renamingDrones[d.id]) ||
+                        Boolean(settingBaseImages[d.id]) ||
+                        isDroneStartingOrSeeding(d.hubPhase)
+                      }
                       renameBusy={Boolean(renamingDrones[d.id])}
                       setBaseImageDisabled={
                         isOptimistic ||
@@ -747,7 +753,13 @@ export function DroneSidebar({
                                 onDelete={() => onDeleteDrone(d.id)}
                                 onErrorClick={onOpenDroneErrorModal}
                                 cloneDisabled={isOptimistic || Boolean(deletingDrones[d.id]) || Boolean(renamingDrones[d.id]) || Boolean(settingBaseImages[d.id])}
-                                renameDisabled={isOptimistic || Boolean(deletingDrones[d.id]) || Boolean(renamingDrones[d.id]) || Boolean(settingBaseImages[d.id])}
+                                renameDisabled={
+                                  isOptimistic ||
+                                  Boolean(deletingDrones[d.id]) ||
+                                  Boolean(renamingDrones[d.id]) ||
+                                  Boolean(settingBaseImages[d.id]) ||
+                                  isDroneStartingOrSeeding(d.hubPhase)
+                                }
                                 renameBusy={Boolean(renamingDrones[d.id])}
                                 setBaseImageDisabled={
                                   isOptimistic ||

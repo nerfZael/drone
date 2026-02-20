@@ -62,6 +62,9 @@ export function useDroneMutationActions({
         return { ok: false, error: 'no-op rename' };
       }
       if (!current || isDroneStartingOrSeeding(current.hubPhase)) {
+        if (opts?.showAlert) {
+          window.alert(`Drone "${currentName}" is still starting.`);
+        }
         return { ok: false, error: `drone "${droneId}" is still starting` };
       }
       if (deletingDrones[droneId] || renamingDrones[droneId] || settingBaseImages[droneId]) {
