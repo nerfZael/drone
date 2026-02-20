@@ -5855,6 +5855,9 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         }
         const repoPathInContainer = droneRepoPathInContainer(d);
         const repoPathRaw = String(d?.repoPath ?? '').trim();
+        const configuredDroneBranch = String(d?.repo?.branch ?? '').trim() || null;
+        const droneFromRef = String(d?.repo?.baseRef ?? '').trim() || null;
+        let hostBranchHead: string | null = null;
         let pullPreviewBaseSha: string | undefined;
         const lastPullAny = d?.repo?.lastPull && typeof d.repo.lastPull === 'object' ? d.repo.lastPull : null;
         const lastPullMode = String((lastPullAny as any)?.mode ?? '').trim().toLowerCase();
@@ -5893,6 +5896,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
               ) {
                 const repoRoot = await gitTopLevel(repoPathRaw);
                 const hostSummary = await gitRepoChangesSummary(repoRoot);
+                hostBranchHead = String(hostSummary.branch.head ?? '').trim() || hostBranchHead;
                 const hostHeadSha = String(hostSummary.branch.oid ?? '').trim().toLowerCase();
                 if (/^[0-9a-f]{40}$/.test(hostHeadSha)) {
                   const hostContainsLastExport = await gitIsAncestor(repoRoot, lastExportedHeadSha, 'HEAD');
@@ -5923,6 +5927,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             try {
               const repoRoot = await gitTopLevel(repoPathRaw);
               const hostSummary = await gitRepoChangesSummary(repoRoot);
+              hostBranchHead = String(hostSummary.branch.head ?? '').trim() || hostBranchHead;
               const hostHeadSha = String(hostSummary.branch.oid ?? '').trim().toLowerCase();
               if (/^[0-9a-f]{40}$/.test(hostHeadSha)) {
                 const cacheKey = [droneId, repoRoot, hostHeadSha, summary.baseSha, summary.headSha].join('\u0000');
@@ -6005,6 +6010,15 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
               });
             }
           }
+          if (repoPathRaw && !hostBranchHead) {
+            try {
+              const repoRoot = await gitTopLevel(repoPathRaw);
+              const hostSummary = await gitRepoChangesSummary(repoRoot);
+              hostBranchHead = String(hostSummary.branch.head ?? '').trim() || null;
+            } catch {
+              // Ignore metadata-only failures.
+            }
+          }
           json(res, 200, {
             ok: true,
             id: droneId,
@@ -6014,6 +6028,12 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             headSha: summary.headSha,
             counts: { changed: entriesForPreview.length },
             entries: entriesForPreview,
+            branchContext: {
+              hostCurrent: hostBranchHead,
+              droneCurrent: summary.branchHead,
+              droneConfigured: configuredDroneBranch,
+              droneFromRef,
+            },
           });
           return;
         } catch (e: any) {
