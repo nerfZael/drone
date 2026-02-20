@@ -1,7 +1,6 @@
 import React from 'react';
 import { IconChevron, IconCopy } from './icons';
 import { ShortcutSettingsSection } from './ShortcutSettingsSection';
-import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 import type { UseHubLogsResult } from './use-hub-logs';
 import type { UseDeleteActionSettingsResult } from './use-delete-action-settings';
 import type { UseLlmSettingsResult } from './use-llm-settings';
@@ -100,9 +99,6 @@ export function SettingsView({
     copyHubLogs,
     handleHubLogsScroll,
   } = hubLogsState;
-  const sidebarAutoMinimize = useDroneHubUiStore((s) => s.sidebarAutoMinimize);
-  const setSidebarAutoMinimize = useDroneHubUiStore((s) => s.setSidebarAutoMinimize);
-
   const settingsBusy =
     hubLogsLoading ||
     llmSettingsLoading ||
@@ -692,26 +688,6 @@ export function SettingsView({
                   </div>
                 </>
               )}
-            </div>
-
-            <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
-              <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
-                Sidebar
-              </div>
-              <div className="text-[11px] text-[var(--muted-dim)] leading-relaxed">
-                Auto-minimize the drone list sidebar when the cursor leaves it, then expand again when you hover the left rail.
-              </div>
-              <label className="inline-flex items-center gap-2 w-fit select-none cursor-pointer group">
-                <input
-                  type="checkbox"
-                  className="accent-[var(--accent)] w-3.5 h-3.5"
-                  checked={sidebarAutoMinimize}
-                  onChange={(e) => setSidebarAutoMinimize(e.target.checked)}
-                />
-                <span className="text-[11px] text-[var(--muted-dim)] group-hover:text-[var(--muted)] transition-colors">
-                  Auto-minimize sidebar
-                </span>
-              </label>
             </div>
 
             <ShortcutSettingsSection />
