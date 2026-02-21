@@ -29,6 +29,7 @@ import { RightPanel } from './RightPanel';
 import type { RightPanelTab } from './app-config';
 import type { StartupSeedState, TldrState } from './app-types';
 import type { RepoOpErrorMeta } from './helpers';
+import { requestChangesPullRequest } from '../changes/navigation';
 import { chatInputDraftKeyForDroneChat, isDroneStartingOrSeeding, resolveChatNameForDrone } from './helpers';
 import { openDroneTabFromLastPreview, resolveDroneOpenTabUrl } from './quick-actions';
 import { cn } from '../../ui/cn';
@@ -66,6 +67,27 @@ function formatEditorMtime(mtimeMs: number | null): string {
   } catch {
     return 'Unknown';
   }
+}
+
+function parseGithubPullRequestHref(
+  hrefRaw: string,
+): { owner: string; repo: string; pullNumber: number } | null {
+  const href = String(hrefRaw ?? '').trim();
+  if (!href) return null;
+  let u: URL;
+  try {
+    u = new URL(href);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== 'https:' || String(u.hostname || '').toLowerCase() !== 'github.com') return null;
+  const m = /^\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:\/|$)/i.exec(String(u.pathname ?? '').trim());
+  if (!m) return null;
+  const owner = String(m[1] ?? '').trim().toLowerCase();
+  const repo = String(m[2] ?? '').trim().toLowerCase();
+  const pullNumber = Number(m[3]);
+  if (!owner || !repo || !Number.isFinite(pullNumber) || pullNumber <= 0) return null;
+  return { owner, repo, pullNumber: Math.floor(pullNumber) };
 }
 
 const PR_MERGE_METHOD_STORAGE_KEY = 'droneHub.prMergeMethod';
@@ -619,6 +641,7 @@ export function SelectedDroneWorkspace({
   const quickOpenTabDisabled = isDroneStartingOrSeeding(currentDrone.hubPhase) || !quickOpenTabUrl;
   const editorRef = React.useRef<any>(null);
   const [fileOpenToast, setFileOpenToast] = React.useState<{ id: number; message: string } | null>(null);
+  const repoIdentityCacheRef = React.useRef<{ droneId: string; owner: string; repo: string; atMs: number } | null>(null);
   const applyEditorCursorTarget = React.useCallback(() => {
     if (!openedEditorFilePath || !openedEditorFileTargetLine) return;
     const editor = editorRef.current;
@@ -655,6 +678,53 @@ export function SelectedDroneWorkspace({
     }, 4200);
     return () => window.clearTimeout(timeout);
   }, [openedEditorFileOpenFailureAt, openedEditorFileOpenFailureMessage]);
+
+  const tryOpenMarkdownPullRequestInChanges = React.useCallback(
+    async (href: string): Promise<boolean> => {
+      const parsed = parseGithubPullRequestHref(href);
+      if (!parsed) return false;
+      if (!(currentDrone.repoAttached ?? Boolean(String(currentDrone.repoPath ?? '').trim()))) return false;
+      if (isDroneStartingOrSeeding(currentDrone.hubPhase)) return false;
+
+      const cached = repoIdentityCacheRef.current;
+      let owner = '';
+      let repo = '';
+      if (
+        cached &&
+        cached.droneId === currentDrone.id &&
+        Date.now() - cached.atMs < 60_000
+      ) {
+        owner = cached.owner;
+        repo = cached.repo;
+      } else {
+        try {
+          const data = await requestJson<Extract<RepoPullRequestsPayload, { ok: true }>>(
+            `/api/drones/${encodeURIComponent(currentDrone.id)}/repo/pull-requests?state=open`,
+          );
+          owner = String(data?.github?.owner ?? '').trim().toLowerCase();
+          repo = String(data?.github?.repo ?? '').trim().toLowerCase();
+          if (owner && repo) {
+            repoIdentityCacheRef.current = {
+              droneId: currentDrone.id,
+              owner,
+              repo,
+              atMs: Date.now(),
+            };
+          }
+        } catch {
+          return false;
+        }
+      }
+
+      if (!owner || !repo) return false;
+      if (owner !== parsed.owner || repo !== parsed.repo) return false;
+      setRightPanelOpen(true);
+      setRightPanelTab('changes');
+      requestChangesPullRequest({ droneId: currentDrone.id, pullNumber: parsed.pullNumber });
+      return true;
+    },
+    [currentDrone.hubPhase, currentDrone.id, currentDrone.repoAttached, currentDrone.repoPath, setRightPanelOpen, setRightPanelTab],
+  );
 
   return (
     <>
@@ -1313,6 +1383,7 @@ export function SelectedDroneWorkspace({
                           onToggleTldr={toggleTldrForAgentMessage}
                           onHoverAgentMessage={handleAgentMessageHover}
                           onOpenFileReference={onOpenMarkdownFileReference}
+                          onOpenLink={tryOpenMarkdownPullRequestInChanges}
                         />
                       );
                     })}
@@ -1323,6 +1394,7 @@ export function SelectedDroneWorkspace({
                         nowMs={nowMs}
                         onRequestUnstick={requestUnstickPendingPrompt}
                         onOpenFileReference={onOpenMarkdownFileReference}
+                        onOpenLink={tryOpenMarkdownPullRequestInChanges}
                         unstickBusy={Boolean(unstickingPendingPromptById[p.id])}
                         unstickError={unstickPendingPromptErrorById[p.id] ?? null}
                       />

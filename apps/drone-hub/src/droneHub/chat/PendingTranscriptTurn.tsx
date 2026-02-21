@@ -18,6 +18,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   showRoleIcons = true,
   onRequestUnstick,
   onOpenFileReference,
+  onOpenLink,
   unstickBusy = false,
   unstickError = null,
 }: {
@@ -26,6 +27,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   showRoleIcons?: boolean;
   onRequestUnstick?: (promptId: string) => Promise<void> | void;
   onOpenFileReference?: (ref: MarkdownFileReference) => void;
+  onOpenLink?: (href: string) => Promise<boolean> | boolean;
   unstickBusy?: boolean;
   unstickError?: string | null;
 }) {
@@ -69,6 +71,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
               fadeTo="var(--user-dim)"
               className="dh-markdown--user"
               onOpenFileReference={onOpenFileReference}
+              onOpenLink={onOpenLink}
             />
           </div>
         </div>

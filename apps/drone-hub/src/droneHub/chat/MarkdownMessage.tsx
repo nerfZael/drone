@@ -151,10 +151,12 @@ export function MarkdownMessage({
   text,
   className,
   onOpenFileReference,
+  onOpenLink,
 }: {
   text: string;
   className?: string;
   onOpenFileReference?: (ref: MarkdownFileReference) => void;
+  onOpenLink?: (href: string) => Promise<boolean> | boolean;
 }) {
   return (
     <div className={`dh-markdown ${className ?? ''}`}>
@@ -162,8 +164,36 @@ export function MarkdownMessage({
         remarkPlugins={[remarkGfm]}
         components={{
           a: ({ href, children, ...props }) => {
+            const hrefText = typeof href === 'string' ? href : '';
             return (
-              <a href={href} target="_blank" rel="noreferrer" {...props}>
+              <a
+                href={hrefText}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(event) => {
+                  if (!onOpenLink || !hrefText) return;
+                  if (event.defaultPrevented) return;
+                  if (event.button !== 0) return;
+                  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                  event.preventDefault();
+                  const finish = (handled: boolean) => {
+                    if (!handled) window.open(hrefText, '_blank', 'noopener,noreferrer');
+                  };
+                  try {
+                    const out = onOpenLink(hrefText);
+                    if (out && typeof (out as Promise<boolean>).then === 'function') {
+                      void (out as Promise<boolean>)
+                        .then((handled) => finish(Boolean(handled)))
+                        .catch(() => finish(false));
+                    } else {
+                      finish(Boolean(out));
+                    }
+                  } catch {
+                    finish(false);
+                  }
+                }}
+                {...props}
+              >
                 {children}
               </a>
             );
