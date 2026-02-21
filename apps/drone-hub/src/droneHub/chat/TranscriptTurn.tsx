@@ -58,7 +58,7 @@ export const TranscriptTurn = React.memo(
       <div className="animate-fade-in">
         {/* User message */}
         <div className="flex justify-end mb-3">
-          <div className={`${showRoleIcons ? 'max-w-[95%]' : 'max-w-full'} min-w-[120px]`}>
+          <div className={`${showRoleIcons ? 'max-w-[85%]' : 'max-w-full'} min-w-[120px]`}>
             <div className="flex items-center justify-end gap-2 mb-1.5">
               <span className="text-[9px] leading-none text-[var(--muted-dim)] font-mono"
                 title={new Date(promptIso).toLocaleString()}
@@ -96,7 +96,7 @@ export const TranscriptTurn = React.memo(
               <IconBot className="text-[var(--accent)] w-3.5 h-3.5" />
             </div>
           )}
-          <div className={`${showRoleIcons ? 'max-w-[95%]' : 'max-w-full'} min-w-[120px]`}>
+          <div className={`${showRoleIcons ? 'max-w-[85%]' : 'max-w-full'} min-w-[120px]`}>
             <div className="flex items-center justify-between mb-1.5">
               <span
                 className="text-[10px] font-semibold text-[var(--accent)] tracking-wide uppercase"

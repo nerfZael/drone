@@ -1359,7 +1359,7 @@ export function SelectedDroneWorkspace({
                 {loadingTranscript && !transcripts && visiblePendingPromptsWithStartup.length === 0 ? (
                   <TranscriptSkeleton />
                 ) : (transcripts && transcripts.length > 0) || visiblePendingPromptsWithStartup.length > 0 ? (
-                  <div className="max-w-[900px] mx-auto px-6 py-5 flex flex-col gap-6">
+                  <div className="max-w-[1170px] mx-auto px-6 py-5 flex flex-col gap-6">
                     {(transcripts ?? []).map((t) => {
                       const messageId = transcriptMessageId(t);
                       return (
@@ -1408,7 +1408,7 @@ export function SelectedDroneWorkspace({
                 className="h-full min-w-0 min-h-0 overflow-auto relative"
               >
                 {isDroneStartingOrSeeding(currentDrone.hubPhase) && String(startupSeedForCurrentDrone?.prompt ?? '').trim() && (
-                  <div className="max-w-[900px] mx-auto px-6 pt-2">
+                  <div className="max-w-[1170px] mx-auto px-6 pt-2">
                     <div className="rounded-md border border-[rgba(148,163,184,.2)] bg-[var(--user-dim)] px-3 py-2 text-[12px] text-[var(--fg-secondary)] whitespace-pre-wrap">
                       {String(startupSeedForCurrentDrone?.prompt ?? '').trim()}
                     </div>
@@ -1417,7 +1417,7 @@ export function SelectedDroneWorkspace({
                 {loadingSession && !sessionText ? (
                   <TranscriptSkeleton />
                 ) : sessionText ? (
-                  <div className="max-w-[900px] mx-auto px-6 py-6">
+                  <div className="max-w-[1170px] mx-auto px-6 py-6">
                     <div className="rounded-lg border border-[var(--border-subtle)] bg-[rgba(0,0,0,.1)] px-4 py-3">
                       <CollapsibleOutput text={sessionText} ok={!sessionError} />
                     </div>
