@@ -898,6 +898,12 @@ export function DroneChangesDock({
     pullDroneCurrentBranch && pullDroneConfiguredBranch && pullDroneCurrentBranch !== pullDroneConfiguredBranch
       ? `Current: ${pullDroneCurrentBranch} | configured: ${pullDroneConfiguredBranch}`
       : pullDroneCurrentBranch ?? pullDroneConfiguredBranch ?? undefined;
+  const activePullRequestNumber =
+    dataMode === 'pull-request'
+      ? Math.max(1, Math.floor(Number(pullRequestChanges?.pullRequest.number ?? pullRequestNumber ?? 0))) || null
+      : null;
+  const activePullRequestTitleRaw = dataMode === 'pull-request' ? String(pullRequestChanges?.pullRequest.title ?? '').trim() : '';
+  const activePullRequestHtmlUrl = dataMode === 'pull-request' ? String(pullRequestChanges?.pullRequest.htmlUrl ?? '').trim() : '';
   const refreshed = refreshTimeLabel(lastRefreshedByMode[dataMode] ?? null);
 
   function renderExplorer(nodes: ExplorerNode[], depth: number): React.ReactNode {
@@ -1126,6 +1132,34 @@ export function DroneChangesDock({
           </>
         )}
       </div>
+      {dataMode === 'pull-request' && activePullRequestNumber ? (
+        <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] bg-[rgba(167,139,250,.06)] flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div
+              className="text-[9px] font-semibold tracking-[0.12em] uppercase text-[var(--muted-dim)]"
+              style={{ fontFamily: 'var(--display)' }}
+            >
+              Pull Request
+            </div>
+            <div className="mt-1 text-[13px] leading-snug font-semibold text-[var(--fg-secondary)] truncate" title={activePullRequestTitleRaw || undefined}>
+              <span className="font-mono text-[var(--accent)] mr-1.5">#{activePullRequestNumber}</span>
+              <span>{activePullRequestTitleRaw || 'Untitled pull request'}</span>
+            </div>
+          </div>
+          {activePullRequestHtmlUrl ? (
+            <a
+              className="shrink-0 inline-flex items-center h-6 px-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[9px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+              href={activePullRequestHtmlUrl}
+              target="_blank"
+              rel="noreferrer"
+              title="Open PR on GitHub"
+              style={{ fontFamily: 'var(--display)' }}
+            >
+              Open
+            </a>
+          ) : null}
+        </div>
+      ) : null}
 
       {!repoAttached ? (
         <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--muted)]">Attach a repo to see source-control changes.</div>
