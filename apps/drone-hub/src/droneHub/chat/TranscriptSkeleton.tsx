@@ -4,9 +4,13 @@ function SkeletonLine({ w }: { w: string }) {
   return <div className="h-2.5 rounded bg-[var(--border-subtle)] animate-pulse" style={{ width: w }} />;
 }
 
-export function TranscriptSkeleton() {
+export function TranscriptSkeleton({ message = 'Loading...' }: { message?: string }) {
   return (
     <div className="max-w-[1170px] mx-auto px-6 py-6 flex flex-col gap-8">
+      <div className="flex items-center gap-2 text-[11px] text-[var(--muted)]">
+        <span className="w-1.5 h-1.5 rounded-full bg-[var(--yellow)] animate-pulse-dot" />
+        {message}
+      </div>
       {[1, 2].map((i) => (
         <div key={i} className="flex flex-col gap-3 opacity-30">
           <SkeletonLine w="60px" />
