@@ -174,7 +174,12 @@ export function MarkdownMessage({
                   if (!onOpenLink || !hrefText) return;
                   if (event.defaultPrevented) return;
                   if (event.button !== 0) return;
-                  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                  if (event.metaKey || event.ctrlKey) {
+                    event.preventDefault();
+                    window.open(hrefText, '_blank', 'noopener,noreferrer');
+                    return;
+                  }
+                  if (event.shiftKey || event.altKey) return;
                   event.preventDefault();
                   const finish = (handled: boolean) => {
                     if (!handled) window.open(hrefText, '_blank', 'noopener,noreferrer');
