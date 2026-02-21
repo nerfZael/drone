@@ -148,9 +148,17 @@ export class ContainerManager {
        * Default: false (bind mounts are preserved; named volumes are not copied or reused).
        */
       reuseNamedVolumes?: boolean;
+      /**
+       * If true, copy dvm persistence volume data from source into the clone's
+       * newly-created persistence volume.
+       *
+       * Default: true.
+       */
+      copyPersistenceVolume?: boolean;
     }
   ): Promise<void> {
     const start = options?.start !== false;
+    const copyPersistenceVolume = options?.copyPersistenceVolume !== false;
 
     // Validate source exists and destination does not.
     const sourceExists = await this.docker.containerExists(sourceName);
@@ -216,16 +224,72 @@ export class ContainerManager {
       persistence: { enabled: true, path: persistencePath },
     };
 
-    // Create a "pure" clone: no in-container installs/provisioning.
-    await this.createContainer(config, start, { skipProvisioning: true });
-
-    // Connect to any additional networks (after start). Best-effort.
-    for (const net of sourceNetworks.slice(1)) {
-      try {
-        await this.docker.connectNetwork(net, newName);
-      } catch {
-        // ignore if connect fails
+    // When copying persistence data, create the clone stopped first so the
+    // restored volume snapshot is deterministic before startup.
+    const startAtCreate = copyPersistenceVolume ? false : start;
+    let clonedPersistenceVolumeName: string | null = null;
+    let containerCreated = false;
+    try {
+      // Create a "pure" clone: no in-container installs/provisioning.
+      await this.createContainer(config, startAtCreate, { skipProvisioning: true });
+      containerCreated = true;
+      if (copyPersistenceVolume) {
+        clonedPersistenceVolumeName = String(config.persistence?.volumeName || '').trim() || `dvm-${newName}-data`;
       }
+
+      if (copyPersistenceVolume && sourcePersistenceVolumeName) {
+        const hasSourcePersistenceVolume = await this.docker.volumeExists(sourcePersistenceVolumeName);
+        if (hasSourcePersistenceVolume) {
+          const clonedContainer = await this.docker.getContainer(newName);
+          if (!clonedContainer) {
+            throw new Error(`Cloned container ${newName} not found after create`);
+          }
+          const clonedInspect = await clonedContainer.inspect();
+          const clonedPersistence = this.resolvePersistenceFromInspect(clonedInspect);
+          clonedPersistenceVolumeName = clonedPersistence.volumeName || clonedPersistenceVolumeName;
+          if (!clonedPersistenceVolumeName) {
+            throw new Error(`Unable to resolve persistence volume for cloned container ${newName}`);
+          }
+
+          const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dvm-clone-volume-'));
+          const archivePath = path.join(tmpDir, 'volume.tar.gz');
+          try {
+            await this.docker.exportVolumeToTarGz(sourcePersistenceVolumeName, archivePath);
+            await this.docker.importVolumeFromTarGz(clonedPersistenceVolumeName, archivePath);
+          } finally {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+          }
+        }
+      }
+
+      if (copyPersistenceVolume && start) {
+        await this.docker.startContainer(newName);
+      }
+
+      // Connect to any additional networks (after start). Best-effort.
+      for (const net of sourceNetworks.slice(1)) {
+        try {
+          await this.docker.connectNetwork(net, newName);
+        } catch {
+          // ignore if connect fails
+        }
+      }
+    } catch (error) {
+      if (containerCreated) {
+        try {
+          await this.docker.removeContainer(newName, true);
+        } catch {
+          // ignore cleanup errors
+        }
+      }
+      if (clonedPersistenceVolumeName) {
+        try {
+          await this.docker.removeVolume(clonedPersistenceVolumeName, true);
+        } catch {
+          // ignore cleanup errors
+        }
+      }
+      throw error;
     }
   }
 
