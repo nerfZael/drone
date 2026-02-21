@@ -153,16 +153,22 @@ export function useChatRuntimeOrchestration({
   React.useEffect(() => {
     // Reset output buffer on effective selection/chat change.
     // Use stable drone identity so in-place renames don't wipe the current chat/output pane.
+    const shouldPrimeTranscriptLoading = chatUiMode === 'transcript' && Boolean(selectedDrone && selectedChat);
+    const shouldPrimeSessionLoading = chatUiMode === 'cli' && Boolean(selectedDrone && selectedChat);
     resetSessionOutputState();
+    setLoadingTranscript(shouldPrimeTranscriptLoading);
     setTranscripts(null);
     setTranscriptError(null);
-    setLoadingTranscript(false);
+    setLoadingSession(shouldPrimeSessionLoading);
     // pending prompts are chat-scoped and loaded in the chat selection effect
   }, [
+    chatUiMode,
     outputView,
     resetSessionOutputState,
+    selectedDrone,
     selectedChat,
     selectedDroneIdentity,
+    setLoadingSession,
     setLoadingTranscript,
     setTranscriptError,
     setTranscripts,
