@@ -48,12 +48,24 @@ export class ContainerManager {
     const labeledPath = String(labels[DockerClient.DVM_PERSISTENCE_PATH_LABEL_KEY] ?? '').trim();
     const mounts = Array.isArray(inspect?.Mounts) ? inspect.Mounts : [];
 
-    const matchedMount = mounts.find((m) => {
+    const volumeMounts = mounts.filter((m) => m && m.Type === 'volume');
+    let matchedMount = volumeMounts.find((m) => {
       if (!m || m.Type !== 'volume') return false;
       if (labeledVolume && m.Name === labeledVolume) return true;
       if (labeledPath && m.Destination === labeledPath) return true;
       return false;
     });
+    if (!matchedMount && !labeledVolume && !labeledPath) {
+      // Legacy containers may not carry persistence labels. In that case,
+      // infer persistence from conventional/default mounts.
+      matchedMount =
+        volumeMounts.find((m) => String(m?.Destination ?? '').trim() === '/dvm-data') ??
+        volumeMounts.find((m) => {
+          const name = String(m?.Name ?? '').trim();
+          return name.startsWith('dvm-') && name.endsWith('-data');
+        }) ??
+        volumeMounts[0];
+    }
 
     const volumeName = labeledVolume || (matchedMount?.Name ? String(matchedMount.Name).trim() : '');
     const mountPath = labeledPath || (matchedMount?.Destination ? String(matchedMount.Destination).trim() : '') || '/dvm-data';
