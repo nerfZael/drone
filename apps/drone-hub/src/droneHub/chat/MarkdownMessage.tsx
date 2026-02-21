@@ -151,19 +151,45 @@ export function MarkdownMessage({
   text,
   className,
   onOpenFileReference,
+  onOpenLink,
 }: {
   text: string;
   className?: string;
   onOpenFileReference?: (ref: MarkdownFileReference) => void;
+  onOpenLink?: (href: string) => boolean;
 }) {
+  const handleAnchorClick = React.useCallback(
+    (event: React.MouseEvent<HTMLAnchorElement>, hrefText: string) => {
+      if (!onOpenLink || !hrefText) return;
+      if (event.defaultPrevented) return;
+      if (event.button !== 0) return;
+      if (event.metaKey || event.ctrlKey) {
+        event.preventDefault();
+        window.open(hrefText, '_blank', 'noopener,noreferrer');
+        return;
+      }
+      if (event.shiftKey || event.altKey) return;
+      const handled = Boolean(onOpenLink(hrefText));
+      if (handled) event.preventDefault();
+    },
+    [onOpenLink],
+  );
+
   return (
     <div className={`dh-markdown ${className ?? ''}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
           a: ({ href, children, ...props }) => {
+            const hrefText = typeof href === 'string' ? href : '';
             return (
-              <a href={href} target="_blank" rel="noreferrer" {...props}>
+              <a
+                href={hrefText}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(event) => handleAnchorClick(event, hrefText)}
+                {...props}
+              >
                 {children}
               </a>
             );
@@ -181,6 +207,7 @@ export function MarkdownMessage({
                   target="_blank"
                   rel="noreferrer"
                   aria-label={`Open link ${href}`}
+                  onClick={(event) => handleAnchorClick(event, href)}
                 >
                   <code className={codeClassName} {...props}>
                     {raw}

@@ -14,6 +14,7 @@ import type { DroneSummary, PendingPrompt, TranscriptItem } from '../types';
 import { IconChat } from './icons';
 import { fetchJson, isNotFoundError, usePoll } from './hooks';
 import { chatInputDraftKeyForDroneChat, droneHomePath, isDroneStartingOrSeeding, resolveChatNameForDrone } from './helpers';
+import { parseIsoDateMs, type GroupMultiChatColumnRuntimeState } from './group-multi-chat-sort';
 import { openDroneTabFromLastPreview, resolveDroneOpenTabUrl } from './quick-actions';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 
@@ -27,6 +28,7 @@ export type GroupMultiChatColumnProps = {
   deleteBusy?: boolean;
   onCreateJobs: (opts: { turn: number; message: string }) => void;
   columnWidthPx: number;
+  onRuntimeStateChange?: (next: GroupMultiChatColumnRuntimeState) => void;
 };
 
 export function GroupMultiChatColumn({
@@ -39,6 +41,7 @@ export function GroupMultiChatColumn({
   deleteBusy = false,
   onCreateJobs,
   columnWidthPx,
+  onRuntimeStateChange,
 }: GroupMultiChatColumnProps) {
   const shownName = String(droneLabel ?? drone.name).trim() || drone.name;
   const chatName = React.useMemo(() => resolveChatNameForDrone(drone, preferredChat), [drone, preferredChat]);
@@ -48,6 +51,7 @@ export function GroupMultiChatColumn({
   const [promptError, setPromptError] = React.useState<string | null>(null);
   const [sendingPromptCount, setSendingPromptCount] = React.useState(0);
   const sendingPrompt = sendingPromptCount > 0;
+  const [localWaitingStartedAtMs, setLocalWaitingStartedAtMs] = React.useState<number | null>(null);
   const [optimisticPendingPrompts, setOptimisticPendingPrompts] = React.useState<PendingPrompt[]>([]);
   const [quickActionBusy, setQuickActionBusy] = React.useState<null | 'ssh' | 'pull' | 'push'>(null);
   const [quickActionError, setQuickActionError] = React.useState<string | null>(null);
@@ -157,9 +161,51 @@ export function GroupMultiChatColumn({
     return visiblePendingPrompts.some((p) => p.state !== 'failed');
   }, [sendingPrompt, visiblePendingPrompts]);
 
+  const waitingSinceMs = React.useMemo(() => {
+    let earliestPendingMs: number | null = null;
+    for (const pending of visiblePendingPrompts) {
+      if (pending.state === 'failed') continue;
+      const pendingMs = parseIsoDateMs(pending.at);
+      if (pendingMs == null) continue;
+      if (earliestPendingMs == null || pendingMs < earliestPendingMs) {
+        earliestPendingMs = pendingMs;
+      }
+    }
+    return earliestPendingMs ?? localWaitingStartedAtMs;
+  }, [localWaitingStartedAtMs, visiblePendingPrompts]);
+
+  const lastResponseAtMs = React.useMemo(() => {
+    if (!Array.isArray(transcripts) || transcripts.length === 0) return null;
+    let latestMs: number | null = null;
+    for (const item of transcripts) {
+      const itemMs = parseIsoDateMs(item.completedAt ?? item.at);
+      if (itemMs == null) continue;
+      if (latestMs == null || itemMs > latestMs) {
+        latestMs = itemMs;
+      }
+    }
+    return latestMs;
+  }, [transcripts]);
+
   React.useEffect(() => {
     setOptimisticPendingPrompts([]);
   }, [chatName, drone.id]);
+
+  React.useEffect(() => {
+    if (waitingForAgent) {
+      setLocalWaitingStartedAtMs((prev) => prev ?? Date.now());
+      return;
+    }
+    setLocalWaitingStartedAtMs(null);
+  }, [waitingForAgent]);
+
+  React.useEffect(() => {
+    onRuntimeStateChange?.({
+      waitingForAgent,
+      waitingSinceMs,
+      lastResponseAtMs,
+    });
+  }, [lastResponseAtMs, onRuntimeStateChange, waitingForAgent, waitingSinceMs]);
 
   React.useEffect(() => {
     if (loading) return;
@@ -244,20 +290,43 @@ export function GroupMultiChatColumn({
     setQuickActionBusy('pull');
     setQuickActionError(null);
     try {
-      const r = await fetch(`/api/drones/${encodeURIComponent(drone.id)}/repo/pull`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({}),
-      });
-      if (!r.ok) {
-        const text = await r.text();
+      const postPull = async (
+        body: any,
+      ): Promise<{ ok: boolean; status: number; statusText: string; data: any }> => {
+        const response = await fetch(`/api/drones/${encodeURIComponent(drone.id)}/repo/pull`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body ?? {}),
+        });
+        const text = await response.text();
         let parsed: any = null;
         try {
           parsed = text ? JSON.parse(text) : null;
         } catch {
           parsed = null;
         }
-        setQuickActionError(String(parsed?.error ?? `${r.status} ${r.statusText}`));
+        return { ok: response.ok, status: response.status, statusText: response.statusText, data: parsed };
+      };
+
+      const defaultAutoCommitMessage = 'chore(drone): snapshot working tree before apply changes';
+      let result = await postPull({});
+      const initialCode = String(result.data?.code ?? '').trim().toLowerCase();
+      if (!result.ok && initialCode === 'drone_dirty') {
+        const dirtyFileCount = Number(result.data?.dirtyFileCount);
+        const dirtyLabel =
+          Number.isFinite(dirtyFileCount) && dirtyFileCount > 0
+            ? `${Math.floor(dirtyFileCount)} file${dirtyFileCount === 1 ? '' : 's'}`
+            : 'one or more files';
+        const autoCommitMessage = String(result.data?.autoCommitMessage ?? '').trim() || defaultAutoCommitMessage;
+        const confirmed = window.confirm(
+          `This drone has uncommitted changes (${dirtyLabel}).\n\nPress OK to stage everything, create a placeholder commit, and continue Apply Changes.\n\nPress Cancel to stop.`,
+        );
+        if (!confirmed) return;
+        result = await postPull({ commitDirty: true, commitMessage: autoCommitMessage });
+      }
+
+      if (!result.ok) {
+        setQuickActionError(String(result.data?.error ?? `${result.status} ${result.statusText}`));
       }
     } catch (err: any) {
       setQuickActionError(err?.message ?? String(err));

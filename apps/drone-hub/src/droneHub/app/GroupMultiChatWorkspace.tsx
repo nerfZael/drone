@@ -8,6 +8,7 @@ import {
   GROUP_MULTI_CHAT_COLUMN_WIDTH_MIN_PX,
   clampGroupMultiChatColumnWidthPx,
 } from './app-config';
+import { sortGroupMultiChatDrones, type GroupMultiChatColumnRuntimeState } from './group-multi-chat-sort';
 import { IconChat, IconChevron, IconDrone } from './icons';
 import type { DroneSummary } from '../types';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
@@ -46,8 +47,10 @@ export function GroupMultiChatWorkspace({
   const {
     selectedChat,
     groupMultiChatColumnWidth,
+    groupMultiChatStatusSort,
     groupBroadcastExpanded,
     setGroupMultiChatColumnWidth,
+    setGroupMultiChatStatusSort,
     setGroupBroadcastExpanded,
     setSelectedGroupMultiChat,
     setChatInputDraft,
@@ -55,19 +58,62 @@ export function GroupMultiChatWorkspace({
     useShallow((s) => ({
       selectedChat: s.selectedChat,
       groupMultiChatColumnWidth: s.groupMultiChatColumnWidth,
+      groupMultiChatStatusSort: s.groupMultiChatStatusSort,
       groupBroadcastExpanded: s.groupBroadcastExpanded,
       setGroupMultiChatColumnWidth: s.setGroupMultiChatColumnWidth,
+      setGroupMultiChatStatusSort: s.setGroupMultiChatStatusSort,
       setGroupBroadcastExpanded: s.setGroupBroadcastExpanded,
       setSelectedGroupMultiChat: s.setSelectedGroupMultiChat,
       setChatInputDraft: s.setChatInputDraft,
     })),
   );
+  const [runtimeByDroneId, setRuntimeByDroneId] = React.useState<Record<string, GroupMultiChatColumnRuntimeState>>({});
   const groupLabel = String(selectedGroupMultiChatData.label ?? selectedGroupMultiChatData.group).trim() || selectedGroupMultiChatData.group;
   const broadcastDraftKey = React.useMemo(
     () => `group-broadcast:${selectedGroupMultiChatData.group}:${selectedChat || 'default'}`,
     [selectedGroupMultiChatData.group, selectedChat],
   );
   const broadcastDraftValue = useDroneHubUiStore((s) => s.chatInputDrafts[broadcastDraftKey] ?? '');
+  const orderedItems = React.useMemo(
+    () =>
+      sortGroupMultiChatDrones({
+        drones: selectedGroupMultiChatData.items,
+        runtimeByDroneId,
+        statusSortEnabled: groupMultiChatStatusSort,
+      }),
+    [groupMultiChatStatusSort, runtimeByDroneId, selectedGroupMultiChatData.items],
+  );
+
+  React.useEffect(() => {
+    const activeIds = new Set(selectedGroupMultiChatData.items.map((item) => item.id));
+    setRuntimeByDroneId((prev) => {
+      let changed = false;
+      const next: Record<string, GroupMultiChatColumnRuntimeState> = {};
+      for (const [id, state] of Object.entries(prev)) {
+        if (!activeIds.has(id)) {
+          changed = true;
+          continue;
+        }
+        next[id] = state;
+      }
+      return changed ? next : prev;
+    });
+  }, [selectedGroupMultiChatData.items]);
+
+  const onColumnRuntimeStateChange = React.useCallback((droneId: string, next: GroupMultiChatColumnRuntimeState) => {
+    setRuntimeByDroneId((prev) => {
+      const current = prev[droneId];
+      if (
+        current &&
+        current.waitingForAgent === next.waitingForAgent &&
+        current.waitingSinceMs === next.waitingSinceMs &&
+        current.lastResponseAtMs === next.lastResponseAtMs
+      ) {
+        return prev;
+      }
+      return { ...prev, [droneId]: next };
+    });
+  }, []);
 
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
@@ -118,6 +164,24 @@ export function GroupMultiChatWorkspace({
             <span className="inline-flex items-center h-7 px-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[10px] font-mono text-[var(--muted-dim)]">
               {selectedGroupMultiChatData.items.length} drone{selectedGroupMultiChatData.items.length !== 1 ? 's' : ''}
             </span>
+            <button
+              type="button"
+              onClick={() => setGroupMultiChatStatusSort((v) => !v)}
+              aria-pressed={groupMultiChatStatusSort}
+              className={`inline-flex items-center h-7 px-2 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
+                groupMultiChatStatusSort
+                  ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                  : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+              }`}
+              style={{ fontFamily: 'var(--display)' }}
+              title={
+                groupMultiChatStatusSort
+                  ? 'Disable status-based multi-chat ordering'
+                  : 'Enable status-based multi-chat ordering'
+              }
+            >
+              Status sort {groupMultiChatStatusSort ? 'on' : 'off'}
+            </button>
             <button
               type="button"
               onClick={() => setGroupBroadcastExpanded((v) => !v)}
@@ -178,7 +242,7 @@ export function GroupMultiChatWorkspace({
         ) : (
           <div className="h-full min-h-0 overflow-x-auto overflow-y-hidden pb-2">
             <div className="h-full min-h-0 w-max flex gap-3 items-stretch pr-4">
-              {selectedGroupMultiChatData.items.map((d) => (
+              {orderedItems.map((d) => (
                 <GroupMultiChatColumn
                   key={`group-chat:${selectedGroupMultiChatData.group}:${d.id}`}
                   drone={d}
@@ -190,6 +254,7 @@ export function GroupMultiChatWorkspace({
                   deleteBusy={Boolean(deletingDrones[d.id])}
                   onCreateJobs={onParseJobsFromAgentMessage}
                   columnWidthPx={groupMultiChatColumnWidth}
+                  onRuntimeStateChange={(next) => onColumnRuntimeStateChange(d.id, next)}
                 />
               ))}
             </div>

@@ -305,7 +305,7 @@ export function ChatInput({
         addFiles(e.dataTransfer?.files ?? null);
       }}
     >
-      <div className="max-w-[900px] mx-auto">
+      <div className="max-w-[1170px] mx-auto">
         {(promptError || attachmentError) && (
           <div className="mb-2 text-[11px] text-[var(--red)] px-1" title={promptError || attachmentError || undefined}>
             {promptError || attachmentError}

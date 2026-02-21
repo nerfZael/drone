@@ -29,6 +29,7 @@ import { RightPanel } from './RightPanel';
 import type { RightPanelTab } from './app-config';
 import type { StartupSeedState, TldrState } from './app-types';
 import type { RepoOpErrorMeta } from './helpers';
+import { requestChangesPullRequest } from '../changes/navigation';
 import { chatInputDraftKeyForDroneChat, isDroneStartingOrSeeding, resolveChatNameForDrone } from './helpers';
 import { openDroneTabFromLastPreview, resolveDroneOpenTabUrl } from './quick-actions';
 import { cn } from '../../ui/cn';
@@ -66,6 +67,27 @@ function formatEditorMtime(mtimeMs: number | null): string {
   } catch {
     return 'Unknown';
   }
+}
+
+function parseGithubPullRequestHref(
+  hrefRaw: string,
+): { owner: string; repo: string; pullNumber: number } | null {
+  const href = String(hrefRaw ?? '').trim();
+  if (!href) return null;
+  let u: URL;
+  try {
+    u = new URL(href);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== 'https:' || String(u.hostname || '').toLowerCase() !== 'github.com') return null;
+  const m = /^\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:\/|$)/i.exec(String(u.pathname ?? '').trim());
+  if (!m) return null;
+  const owner = String(m[1] ?? '').trim().toLowerCase();
+  const repo = String(m[2] ?? '').trim().toLowerCase();
+  const pullNumber = Number(m[3]);
+  if (!owner || !repo || !Number.isFinite(pullNumber) || pullNumber <= 0) return null;
+  return { owner, repo, pullNumber: Math.floor(pullNumber) };
 }
 
 const PR_MERGE_METHOD_STORAGE_KEY = 'droneHub.prMergeMethod';
@@ -619,6 +641,7 @@ export function SelectedDroneWorkspace({
   const quickOpenTabDisabled = isDroneStartingOrSeeding(currentDrone.hubPhase) || !quickOpenTabUrl;
   const editorRef = React.useRef<any>(null);
   const [fileOpenToast, setFileOpenToast] = React.useState<{ id: number; message: string } | null>(null);
+  const repoIdentityRef = React.useRef<{ owner: string; repo: string } | null>(null);
   const applyEditorCursorTarget = React.useCallback(() => {
     if (!openedEditorFilePath || !openedEditorFileTargetLine) return;
     const editor = editorRef.current;
@@ -655,6 +678,45 @@ export function SelectedDroneWorkspace({
     }, 4200);
     return () => window.clearTimeout(timeout);
   }, [openedEditorFileOpenFailureAt, openedEditorFileOpenFailureMessage]);
+
+  React.useEffect(() => {
+    repoIdentityRef.current = null;
+    if (!(currentDrone.repoAttached ?? Boolean(String(currentDrone.repoPath ?? '').trim()))) return;
+    if (isDroneStartingOrSeeding(currentDrone.hubPhase)) return;
+    let cancelled = false;
+    void requestJson<Extract<RepoPullRequestsPayload, { ok: true }>>(
+      `/api/drones/${encodeURIComponent(currentDrone.id)}/repo/pull-requests?state=open`,
+    )
+      .then((data) => {
+        if (cancelled) return;
+        const owner = String(data?.github?.owner ?? '').trim().toLowerCase();
+        const repo = String(data?.github?.repo ?? '').trim().toLowerCase();
+        if (!owner || !repo) return;
+        repoIdentityRef.current = { owner, repo };
+      })
+      .catch(() => {
+        // ignore; fallback behavior below is still safe
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentDrone.hubPhase, currentDrone.id, currentDrone.repoAttached, currentDrone.repoPath]);
+
+  const tryOpenMarkdownPullRequestInChanges = React.useCallback(
+    (href: string): boolean => {
+      const parsed = parseGithubPullRequestHref(href);
+      if (!parsed) return false;
+      if (!(currentDrone.repoAttached ?? Boolean(String(currentDrone.repoPath ?? '').trim()))) return false;
+      if (isDroneStartingOrSeeding(currentDrone.hubPhase)) return false;
+      const knownRepo = repoIdentityRef.current;
+      if (knownRepo && (knownRepo.owner !== parsed.owner || knownRepo.repo !== parsed.repo)) return false;
+      setRightPanelOpen(true);
+      setRightPanelTab('changes');
+      requestChangesPullRequest({ droneId: currentDrone.id, pullNumber: parsed.pullNumber });
+      return true;
+    },
+    [currentDrone.hubPhase, currentDrone.id, currentDrone.repoAttached, currentDrone.repoPath, setRightPanelOpen, setRightPanelTab],
+  );
 
   return (
     <>
@@ -1297,7 +1359,7 @@ export function SelectedDroneWorkspace({
                 {loadingTranscript && !transcripts && visiblePendingPromptsWithStartup.length === 0 ? (
                   <TranscriptSkeleton message="Loading chat messages..." />
                 ) : (transcripts && transcripts.length > 0) || visiblePendingPromptsWithStartup.length > 0 ? (
-                  <div className="max-w-[900px] mx-auto px-6 py-5 flex flex-col gap-6">
+                  <div className="max-w-[1170px] mx-auto px-6 py-5 flex flex-col gap-6">
                     {(transcripts ?? []).map((t) => {
                       const messageId = transcriptMessageId(t);
                       return (
@@ -1313,6 +1375,7 @@ export function SelectedDroneWorkspace({
                           onToggleTldr={toggleTldrForAgentMessage}
                           onHoverAgentMessage={handleAgentMessageHover}
                           onOpenFileReference={onOpenMarkdownFileReference}
+                          onOpenLink={tryOpenMarkdownPullRequestInChanges}
                         />
                       );
                     })}
@@ -1323,6 +1386,7 @@ export function SelectedDroneWorkspace({
                         nowMs={nowMs}
                         onRequestUnstick={requestUnstickPendingPrompt}
                         onOpenFileReference={onOpenMarkdownFileReference}
+                        onOpenLink={tryOpenMarkdownPullRequestInChanges}
                         unstickBusy={Boolean(unstickingPendingPromptById[p.id])}
                         unstickError={unstickPendingPromptErrorById[p.id] ?? null}
                       />
@@ -1344,7 +1408,7 @@ export function SelectedDroneWorkspace({
                 className="h-full min-w-0 min-h-0 overflow-auto relative"
               >
                 {isDroneStartingOrSeeding(currentDrone.hubPhase) && String(startupSeedForCurrentDrone?.prompt ?? '').trim() && (
-                  <div className="max-w-[900px] mx-auto px-6 pt-2">
+                  <div className="max-w-[1170px] mx-auto px-6 pt-2">
                     <div className="rounded-md border border-[rgba(148,163,184,.2)] bg-[var(--user-dim)] px-3 py-2 text-[12px] text-[var(--fg-secondary)] whitespace-pre-wrap">
                       {String(startupSeedForCurrentDrone?.prompt ?? '').trim()}
                     </div>
@@ -1353,7 +1417,7 @@ export function SelectedDroneWorkspace({
                 {loadingSession && !sessionText ? (
                   <TranscriptSkeleton message="Loading session output..." />
                 ) : sessionText ? (
-                  <div className="max-w-[900px] mx-auto px-6 py-6">
+                  <div className="max-w-[1170px] mx-auto px-6 py-6">
                     <div className="rounded-lg border border-[var(--border-subtle)] bg-[rgba(0,0,0,.1)] px-4 py-3">
                       <CollapsibleOutput text={sessionText} ok={!sessionError} />
                     </div>

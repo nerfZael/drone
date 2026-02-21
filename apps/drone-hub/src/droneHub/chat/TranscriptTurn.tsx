@@ -23,6 +23,7 @@ export const TranscriptTurn = React.memo(
     onToggleTldr,
     onHoverAgentMessage,
     onOpenFileReference,
+    onOpenLink,
     showRoleIcons = true,
   }: {
     item: TranscriptItem;
@@ -35,6 +36,7 @@ export const TranscriptTurn = React.memo(
     onToggleTldr: (item: TranscriptItem) => void;
     onHoverAgentMessage: (item: TranscriptItem | null) => void;
     onOpenFileReference?: (ref: MarkdownFileReference) => void;
+    onOpenLink?: (href: string) => boolean;
     showRoleIcons?: boolean;
   }) {
     const cleaned = item.ok ? stripAnsi(item.output) : stripAnsi(item.error || 'failed');
@@ -76,6 +78,7 @@ export const TranscriptTurn = React.memo(
                 fadeTo="var(--user-dim)"
                 className="dh-markdown--user"
                 onOpenFileReference={onOpenFileReference}
+                onOpenLink={onOpenLink}
               />
             </div>
           </div>
@@ -123,6 +126,7 @@ export const TranscriptTurn = React.memo(
                 className={showingTldr ? 'dh-markdown--muted' : item.ok ? 'dh-markdown--agent' : 'dh-markdown--error'}
                 preserveLeadParagraph
                 onOpenFileReference={onOpenFileReference}
+                onOpenLink={onOpenLink}
               />
 
               <div className="absolute bottom-2 right-2 flex items-center gap-1">
@@ -190,5 +194,6 @@ export const TranscriptTurn = React.memo(
     a.onToggleTldr === b.onToggleTldr &&
     a.onHoverAgentMessage === b.onHoverAgentMessage &&
     a.onOpenFileReference === b.onOpenFileReference &&
+    a.onOpenLink === b.onOpenLink &&
     (a.showRoleIcons ?? true) === (b.showRoleIcons ?? true),
 );

@@ -8,7 +8,7 @@ import net from 'node:net';
 import path from 'node:path';
 
 import { health, procStart, procStop, readOutput, sendInput, sendKeys, status } from './host/api';
-import { dvmCreate, dvmExec, dvmLs, dvmPorts, dvmRemove, dvmScript, dvmSessionStart } from './host/dvm';
+import { dvmClone, dvmCreate, dvmExec, dvmLs, dvmPorts, dvmRemove, dvmScript, dvmSessionStart } from './host/dvm';
 import { droneRootPath } from './host/paths';
 import { loadRegistry, updateRegistry } from './host/registry';
 import { startDroneHubApiServer } from './hub/server';
@@ -40,6 +40,7 @@ type CreateCommandOptions = {
   mkdir?: boolean;
   repo?: string;
   droneId?: string;
+  cloneContainer?: string;
 };
 
 type ParsedCreateOptions = {
@@ -49,6 +50,7 @@ type ParsedCreateOptions = {
   mkdir: boolean;
   repoPath: string;
   droneId?: string;
+  cloneContainer?: string;
 };
 
 function addCreateOptions(command: Command): Command {
@@ -58,6 +60,7 @@ function addCreateOptions(command: Command): Command {
     .option('--cwd <path>', 'Default working directory inside container (used by agent/run/proc-start when --cwd omitted)')
     .option('--mkdir', 'Create --cwd inside the container (mkdir -p)', false)
     .option('--drone-id <id>', 'Stable drone identity (internal; advanced use)')
+    .option('--clone-container <name>', 'Clone this existing container into the new drone container before provisioning')
     .option(
       '--repo <path>',
       'Host repo path associated with this drone (Hub metadata only). Use "-" for no repo.',
@@ -117,7 +120,9 @@ function parseCreateOptions(options: CreateCommandOptions): ParsedCreateOptions 
   if (!Number.isFinite(containerPort) || containerPort <= 0) throw new Error('invalid --container-port');
   const cwd = normalizeContainerCwd(options.cwd);
   const droneId = normalizeDroneIdentity(options.droneId);
-  return { group, containerPort, cwd, mkdir: Boolean(options.mkdir), repoPath, droneId };
+  const cloneContainerRaw = String(options.cloneContainer ?? '').trim();
+  const cloneContainer = cloneContainerRaw || undefined;
+  return { group, containerPort, cwd, mkdir: Boolean(options.mkdir), repoPath, droneId, cloneContainer };
 }
 
 const DRONE_DISPLAY_NAME_MAX_LEN = 80;
@@ -583,7 +588,7 @@ const createCommand = addCreateOptions(
 createCommand
   .option('--no-build', 'Skip checking daemon build output')
   .action(async (name, options) => {
-    const { repoPath, group, containerPort, cwd, mkdir, droneId } = parseCreateOptions(options);
+    const { repoPath, group, containerPort, cwd, mkdir, droneId, cloneContainer } = parseCreateOptions(options);
 
     if (options.build) await ensureDaemonBuilt(repoPath);
 
@@ -593,26 +598,34 @@ createCommand
     const displayName = normalizeDroneDisplayName(name);
 
     let hostPort = 0;
-    const createAttempts = 5;
-    for (let attempt = 1; attempt <= createAttempts; attempt++) {
-      try {
-        // Pick truly free host ports (dvm's auto-allocation only checks Docker ports, not host processes).
-        const [hostPortDaemon, hostPortRdp, hostPortNoVnc, hostPort3000, hostPort3001, hostPort5173, hostPort5174] =
-          await getUniqueFreeTcpPorts(7);
-        await dvmCreate(containerName, [
-          '--ports',
-          `${hostPortDaemon}:${containerPort},${hostPortRdp}:3389,${hostPortNoVnc}:6080,${hostPort3000}:3000,${hostPort3001}:3001,${hostPort5173}:5173,${hostPort5174}:5174`,
-        ]);
-        hostPort = await resolveHostPort(containerName, containerPort);
-        break;
-      } catch (err) {
-        if (!isPortAllocationConflictError(err) || attempt === createAttempts) throw err;
+    if (cloneContainer) {
+      await dvmClone(cloneContainer, containerName, {
+        start: true,
+        copyPersistenceVolume: true,
+      });
+      hostPort = await resolveHostPort(containerName, containerPort);
+    } else {
+      const createAttempts = 5;
+      for (let attempt = 1; attempt <= createAttempts; attempt++) {
         try {
-          await dvmRemove(containerName);
-        } catch {
-          // ignore best-effort cleanup between retries
+          // Pick truly free host ports (dvm's auto-allocation only checks Docker ports, not host processes).
+          const [hostPortDaemon, hostPortRdp, hostPortNoVnc, hostPort3000, hostPort3001, hostPort5173, hostPort5174] =
+            await getUniqueFreeTcpPorts(7);
+          await dvmCreate(containerName, [
+            '--ports',
+            `${hostPortDaemon}:${containerPort},${hostPortRdp}:3389,${hostPortNoVnc}:6080,${hostPort3000}:3000,${hostPort3001}:3001,${hostPort5173}:5173,${hostPort5174}:5174`,
+          ]);
+          hostPort = await resolveHostPort(containerName, containerPort);
+          break;
+        } catch (err) {
+          if (!isPortAllocationConflictError(err) || attempt === createAttempts) throw err;
+          try {
+            await dvmRemove(containerName);
+          } catch {
+            // ignore best-effort cleanup between retries
+          }
+          await sleep(125 * attempt);
         }
-        await sleep(125 * attempt);
       }
     }
     if (!hostPort) throw new Error(`failed creating ${containerName}: no daemon host port mapped`);
