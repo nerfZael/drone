@@ -7176,6 +7176,23 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           json(res, 400, { ok: false, error: 'drone has no repo attached' });
           return;
         }
+        let body: any = null;
+        try {
+          body = await readJsonBody(req);
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e), id: droneId, name: droneName });
+          return;
+        }
+        const commitDirtyRaw = (body as any)?.commitDirty;
+        const commitDirty =
+          commitDirtyRaw === true ||
+          commitDirtyRaw === 1 ||
+          String(commitDirtyRaw ?? '')
+            .trim()
+            .toLowerCase() === 'true';
+        const defaultAutoCommitMessage = 'chore(drone): snapshot working tree before apply changes';
+        const requestedAutoCommitMessage = String((body as any)?.commitMessage ?? '').trim();
+        const autoCommitMessage = requestedAutoCommitMessage || defaultAutoCommitMessage;
 
         await setDroneHubMetaByIdentity({ droneId, hub: { phase: 'seeding', message: 'Pulling repo changes…' } });
 
@@ -7197,6 +7214,9 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         let prePullBaseAdvanceError: string | null = null;
         let hostConflictState = false;
         let noChangesToPull = false;
+        let droneDirtyFileCount = 0;
+        let droneAutoCommitSha: string | null = null;
+        let droneAutoCommitMessage: string | null = null;
 
         const tryAdvanceContainerExportBase = async () => {
           if (!exportedHeadSha) return;
@@ -7222,6 +7242,72 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
               error: 'Host repo has local changes. Please stash or commit them before pulling changes.',
             });
             return;
+          }
+          const dronePrepare = await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: d }, async ({ containerName }) => {
+            const status = await runGitInDroneOrThrow({
+              container: containerName,
+              repoPathInContainer,
+              args: ['status', '--porcelain'],
+            });
+            const changedLines = String(status.stdout ?? '')
+              .split(/\r?\n/)
+              .map((line) => line.trimEnd())
+              .filter((line) => line.length > 0);
+            const dirtyFileCount = changedLines.length;
+            if (dirtyFileCount <= 0) {
+              return { dirtyFileCount: 0, autoCommitSha: null as string | null };
+            }
+            if (!commitDirty) {
+              return { dirtyFileCount, autoCommitSha: null as string | null };
+            }
+            await runGitInDroneOrThrow({
+              container: containerName,
+              repoPathInContainer,
+              args: ['add', '-A'],
+            });
+            const commit = await runGitInDrone({
+              container: containerName,
+              repoPathInContainer,
+              args: ['-c', 'user.name=Drone Hub', '-c', 'user.email=drone-hub@local', 'commit', '-m', autoCommitMessage],
+            });
+            if (commit.code !== 0) {
+              const details = `${String(commit.stderr ?? '')}\n${String(commit.stdout ?? '')}`.trim();
+              throw new Error(`Failed to create placeholder drone commit before apply.${details ? `\n\n${details}` : ''}`);
+            }
+            const headRaw = await runGitInDroneOrThrow({
+              container: containerName,
+              repoPathInContainer,
+              args: ['rev-parse', 'HEAD'],
+            });
+            const autoCommitSha = String(headRaw.stdout ?? '').trim().toLowerCase();
+            return { dirtyFileCount, autoCommitSha: /^[0-9a-f]{40}$/.test(autoCommitSha) ? autoCommitSha : null };
+          });
+          droneDirtyFileCount = Math.max(0, Number(dronePrepare.dirtyFileCount) || 0);
+          if (droneDirtyFileCount > 0 && !commitDirty) {
+            hubLog('warn', 'Repo pull blocked by uncommitted drone changes', {
+              droneName,
+              repoPathInContainer,
+              dirtyFileCount: droneDirtyFileCount,
+            });
+            await setDroneHubMetaByIdentity({ droneId, hub: null });
+            json(res, 409, {
+              ok: false,
+              error: 'Drone repo has uncommitted changes. Cancel apply or auto-commit all changes before continuing.',
+              code: 'drone_dirty',
+              dirtyFileCount: droneDirtyFileCount,
+              autoCommitMessage,
+            });
+            return;
+          }
+          if (droneDirtyFileCount > 0 && commitDirty) {
+            droneAutoCommitSha = dronePrepare.autoCommitSha;
+            droneAutoCommitMessage = autoCommitMessage;
+            hubLog('info', 'Repo pull auto-committed drone working tree', {
+              droneName,
+              repoPathInContainer,
+              dirtyFileCount: droneDirtyFileCount,
+              autoCommitSha: droneAutoCommitSha,
+            });
           }
           if (clean) {
             const lastPullAny = d?.repo?.lastPull && typeof d.repo.lastPull === 'object' ? d.repo.lastPull : null;
@@ -7309,6 +7395,9 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                 prePullBaseSha,
                 prePullBaseAdvanced,
                 prePullBaseAdvanceError,
+                droneDirtyFileCount,
+                droneAutoCommitSha,
+                droneAutoCommitMessage,
               };
               reg2.drones = reg2.drones ?? {};
               reg2.drones[droneId] = dd;
@@ -7331,6 +7420,9 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
               prePullBaseSha,
               prePullBaseAdvanced,
               prePullBaseAdvanceError,
+              droneDirtyFileCount,
+              droneAutoCommitSha,
+              droneAutoCommitMessage,
             });
             return;
           }
@@ -7436,6 +7528,9 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
               prePullBaseSha,
               prePullBaseAdvanced,
               prePullBaseAdvanceError,
+              droneDirtyFileCount,
+              droneAutoCommitSha,
+              droneAutoCommitMessage,
             };
             reg2.drones = reg2.drones ?? {};
             reg2.drones[droneId] = dd;
@@ -7462,6 +7557,9 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             prePullBaseSha,
             prePullBaseAdvanced,
             prePullBaseAdvanceError,
+            droneDirtyFileCount,
+            droneAutoCommitSha,
+            droneAutoCommitMessage,
           });
           return;
         } catch (e: any) {
