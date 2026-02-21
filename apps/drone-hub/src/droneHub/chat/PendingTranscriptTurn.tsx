@@ -27,7 +27,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   showRoleIcons?: boolean;
   onRequestUnstick?: (promptId: string) => Promise<void> | void;
   onOpenFileReference?: (ref: MarkdownFileReference) => void;
-  onOpenLink?: (href: string) => Promise<boolean> | boolean;
+  onOpenLink?: (href: string) => boolean;
   unstickBusy?: boolean;
   unstickError?: string | null;
 }) {

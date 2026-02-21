@@ -641,7 +641,7 @@ export function SelectedDroneWorkspace({
   const quickOpenTabDisabled = isDroneStartingOrSeeding(currentDrone.hubPhase) || !quickOpenTabUrl;
   const editorRef = React.useRef<any>(null);
   const [fileOpenToast, setFileOpenToast] = React.useState<{ id: number; message: string } | null>(null);
-  const repoIdentityCacheRef = React.useRef<{ droneId: string; owner: string; repo: string; atMs: number } | null>(null);
+  const repoIdentityRef = React.useRef<{ owner: string; repo: string } | null>(null);
   const applyEditorCursorTarget = React.useCallback(() => {
     if (!openedEditorFilePath || !openedEditorFileTargetLine) return;
     const editor = editorRef.current;
@@ -679,45 +679,37 @@ export function SelectedDroneWorkspace({
     return () => window.clearTimeout(timeout);
   }, [openedEditorFileOpenFailureAt, openedEditorFileOpenFailureMessage]);
 
+  React.useEffect(() => {
+    repoIdentityRef.current = null;
+    if (!(currentDrone.repoAttached ?? Boolean(String(currentDrone.repoPath ?? '').trim()))) return;
+    if (isDroneStartingOrSeeding(currentDrone.hubPhase)) return;
+    let cancelled = false;
+    void requestJson<Extract<RepoPullRequestsPayload, { ok: true }>>(
+      `/api/drones/${encodeURIComponent(currentDrone.id)}/repo/pull-requests?state=open`,
+    )
+      .then((data) => {
+        if (cancelled) return;
+        const owner = String(data?.github?.owner ?? '').trim().toLowerCase();
+        const repo = String(data?.github?.repo ?? '').trim().toLowerCase();
+        if (!owner || !repo) return;
+        repoIdentityRef.current = { owner, repo };
+      })
+      .catch(() => {
+        // ignore; fallback behavior below is still safe
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentDrone.hubPhase, currentDrone.id, currentDrone.repoAttached, currentDrone.repoPath]);
+
   const tryOpenMarkdownPullRequestInChanges = React.useCallback(
-    async (href: string): Promise<boolean> => {
+    (href: string): boolean => {
       const parsed = parseGithubPullRequestHref(href);
       if (!parsed) return false;
       if (!(currentDrone.repoAttached ?? Boolean(String(currentDrone.repoPath ?? '').trim()))) return false;
       if (isDroneStartingOrSeeding(currentDrone.hubPhase)) return false;
-
-      const cached = repoIdentityCacheRef.current;
-      let owner = '';
-      let repo = '';
-      if (
-        cached &&
-        cached.droneId === currentDrone.id &&
-        Date.now() - cached.atMs < 60_000
-      ) {
-        owner = cached.owner;
-        repo = cached.repo;
-      } else {
-        try {
-          const data = await requestJson<Extract<RepoPullRequestsPayload, { ok: true }>>(
-            `/api/drones/${encodeURIComponent(currentDrone.id)}/repo/pull-requests?state=open`,
-          );
-          owner = String(data?.github?.owner ?? '').trim().toLowerCase();
-          repo = String(data?.github?.repo ?? '').trim().toLowerCase();
-          if (owner && repo) {
-            repoIdentityCacheRef.current = {
-              droneId: currentDrone.id,
-              owner,
-              repo,
-              atMs: Date.now(),
-            };
-          }
-        } catch {
-          return false;
-        }
-      }
-
-      if (!owner || !repo) return false;
-      if (owner !== parsed.owner || repo !== parsed.repo) return false;
+      const knownRepo = repoIdentityRef.current;
+      if (knownRepo && (knownRepo.owner !== parsed.owner || knownRepo.repo !== parsed.repo)) return false;
       setRightPanelOpen(true);
       setRightPanelTab('changes');
       requestChangesPullRequest({ droneId: currentDrone.id, pullNumber: parsed.pullNumber });

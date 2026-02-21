@@ -36,7 +36,7 @@ export const TranscriptTurn = React.memo(
     onToggleTldr: (item: TranscriptItem) => void;
     onHoverAgentMessage: (item: TranscriptItem | null) => void;
     onOpenFileReference?: (ref: MarkdownFileReference) => void;
-    onOpenLink?: (href: string) => Promise<boolean> | boolean;
+    onOpenLink?: (href: string) => boolean;
     showRoleIcons?: boolean;
   }) {
     const cleaned = item.ok ? stripAnsi(item.output) : stripAnsi(item.error || 'failed');

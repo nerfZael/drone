@@ -156,7 +156,7 @@ export function MarkdownMessage({
   text: string;
   className?: string;
   onOpenFileReference?: (ref: MarkdownFileReference) => void;
-  onOpenLink?: (href: string) => Promise<boolean> | boolean;
+  onOpenLink?: (href: string) => boolean;
 }) {
   return (
     <div className={`dh-markdown ${className ?? ''}`}>
@@ -180,22 +180,8 @@ export function MarkdownMessage({
                     return;
                   }
                   if (event.shiftKey || event.altKey) return;
-                  event.preventDefault();
-                  const finish = (handled: boolean) => {
-                    if (!handled) window.open(hrefText, '_blank', 'noopener,noreferrer');
-                  };
-                  try {
-                    const out = onOpenLink(hrefText);
-                    if (out && typeof (out as Promise<boolean>).then === 'function') {
-                      void (out as Promise<boolean>)
-                        .then((handled) => finish(Boolean(handled)))
-                        .catch(() => finish(false));
-                    } else {
-                      finish(Boolean(out));
-                    }
-                  } catch {
-                    finish(false);
-                  }
+                  const handled = Boolean(onOpenLink(hrefText));
+                  if (handled) event.preventDefault();
                 }}
                 {...props}
               >
