@@ -7,6 +7,7 @@ export function CollapsibleMarkdown({
   className,
   fadeTo,
   onOpenFileReference,
+  onOpenLink,
   maxHeightPx = 240,
   collapseAfterLines = 40,
   preserveLeadParagraph = false,
@@ -15,6 +16,7 @@ export function CollapsibleMarkdown({
   className?: string;
   fadeTo: string;
   onOpenFileReference?: (ref: MarkdownFileReference) => void;
+  onOpenLink?: (href: string) => Promise<boolean> | boolean;
   maxHeightPx?: number;
   collapseAfterLines?: number;
   preserveLeadParagraph?: boolean;
@@ -46,14 +48,14 @@ export function CollapsibleMarkdown({
     <div className="relative">
       {isLong && leadSplit ? (
         <>
-          <MarkdownMessage text={leadSplit.lead} className={className} onOpenFileReference={onOpenFileReference} />
+          <MarkdownMessage text={leadSplit.lead} className={className} onOpenFileReference={onOpenFileReference} onOpenLink={onOpenLink} />
           <div className={`output-collapse ${collapsed ? 'collapsed' : ''}`} style={style}>
-            <MarkdownMessage text={leadSplit.rest} className={className} onOpenFileReference={onOpenFileReference} />
+            <MarkdownMessage text={leadSplit.rest} className={className} onOpenFileReference={onOpenFileReference} onOpenLink={onOpenLink} />
           </div>
         </>
       ) : (
         <div className={`output-collapse ${isLong && collapsed ? 'collapsed' : ''}`} style={style}>
-          <MarkdownMessage text={text} className={className} onOpenFileReference={onOpenFileReference} />
+          <MarkdownMessage text={text} className={className} onOpenFileReference={onOpenFileReference} onOpenLink={onOpenLink} />
         </div>
       )}
       {isLong && (
