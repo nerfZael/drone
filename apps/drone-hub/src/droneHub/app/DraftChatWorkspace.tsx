@@ -245,7 +245,7 @@ export function DraftChatWorkspace({
       <div className="flex-1 min-h-0 overflow-auto">
         {draftChat.prompt ? (
           <div className="px-5 py-5">
-            <div className="mx-auto max-w-[980px] space-y-5">
+            <div className="mx-auto max-w-[1275px] space-y-5">
               <PendingTranscriptTurn item={draftChat.prompt} nowMs={nowMs} />
               {(draftChat.droneId ? queuedPromptsByDroneChat[droneChatQueueKey(draftChat.droneId, 'default')] ?? [] : []).map((p) => (
                 <PendingTranscriptTurn key={`draft-queued-${p.id}`} item={p} nowMs={nowMs} />

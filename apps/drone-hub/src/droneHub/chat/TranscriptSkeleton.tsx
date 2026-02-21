@@ -6,7 +6,7 @@ function SkeletonLine({ w }: { w: string }) {
 
 export function TranscriptSkeleton() {
   return (
-    <div className="max-w-[900px] mx-auto px-6 py-6 flex flex-col gap-8">
+    <div className="max-w-[1170px] mx-auto px-6 py-6 flex flex-col gap-8">
       {[1, 2].map((i) => (
         <div key={i} className="flex flex-col gap-3 opacity-30">
           <SkeletonLine w="60px" />
