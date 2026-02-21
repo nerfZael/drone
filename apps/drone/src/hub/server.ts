@@ -1786,6 +1786,56 @@ function promptJobTmuxSessionName(promptIdRaw: string): string {
   return `drone-prompt-${cleaned || 'job'}`;
 }
 
+async function recoverStalePromptJobSession(opts: { droneId: string; droneEntry: any; promptId: string }): Promise<{ job: any | null; jobState: string | null }> {
+  const droneId = normalizeDroneIdentity(opts.droneId);
+  const promptId = String(opts.promptId ?? '').trim();
+  if (!droneId || !promptId || !isSafePromptId(promptId)) return { job: null, jobState: null };
+  const droneEntry = opts.droneEntry;
+  const requestedDroneName = String(droneEntry?.name ?? droneId).trim() || droneId;
+  const sessionName = promptJobTmuxSessionName(promptId);
+
+  try {
+    await withLockedDroneContainer({ requestedDroneName, droneEntry }, async ({ containerName }) => {
+      const script = `tmux kill-session -t ${bashQuote(sessionName)} 2>/dev/null || true`;
+      await dvmExec(containerName, 'bash', ['-lc', script]);
+    });
+  } catch {
+    // Keep best-effort behavior: reconciliation below can still fail stale rows.
+  }
+
+  const regAfterKill: any = await loadRegistry();
+  const dAfterKill = regAfterKill?.drones?.[droneId] ?? null;
+  const token = typeof dAfterKill?.token === 'string' ? String(dAfterKill.token).trim() : '';
+  const containerName = String(dAfterKill?.containerName ?? dAfterKill?.name ?? droneId).trim() || droneId;
+  const hostPort =
+    typeof dAfterKill?.hostPort === 'number' && Number.isFinite(dAfterKill.hostPort)
+      ? dAfterKill.hostPort
+      : await resolveHostPort(containerName, dAfterKill?.containerPort);
+  if (!token || !hostPort) return { job: null, jobState: null };
+
+  const client = makeClient(hostPort, token);
+  let job: any = null;
+  let jobState: string | null = null;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const r: any = await dronePromptGet(client, promptId);
+      const nextJob = r?.job ?? null;
+      const nextState = String(nextJob?.state ?? '').trim();
+      if (nextState) {
+        job = nextJob;
+        jobState = nextState;
+      }
+      if (nextState && nextState !== 'queued' && nextState !== 'running') break;
+    } catch {
+      // keep best-effort behavior
+    }
+    // eslint-disable-next-line no-await-in-loop
+    await sleepMs(250);
+  }
+  return { job, jobState };
+}
+
 async function readPendingPrompts(opts: { droneId: string; chatName: string }): Promise<PendingPrompt[]> {
   const regAny: any = await loadRegistry();
   const droneId = normalizeDroneIdentity(opts.droneId);
@@ -2114,13 +2164,41 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
       }
       continue;
     }
-    const job = jobResp?.job ?? null;
-    const jobState = String(job?.state ?? '').trim();
+    let job = jobResp?.job ?? null;
+    let jobState = String(job?.state ?? '').trim();
     if (jobState === 'queued' || jobState === 'running') {
       if (state !== 'sent') {
         pendingList[i] = { ...p, state: 'sent', updatedAt: nowIso() };
         changed = true;
+        continue;
       }
+      const staleState = stalePendingPromptState({
+        state,
+        updatedAt: typeof p?.updatedAt === 'string' ? p.updatedAt : null,
+        at: typeof p?.at === 'string' ? p.at : null,
+        enqueueTimeoutMs: defaultPromptEnqueueTimeoutMs(),
+      });
+      if (staleState !== 'sent') continue;
+
+      // Auto-recover stale "running forever" prompt jobs by closing the prompt tmux session.
+      // This mirrors manual unstick behavior so users do not need to unstick routine stalls.
+      const recovered = await recoverStalePromptJobSession({ droneId, droneEntry: d, promptId: id });
+      if (recovered.jobState && recovered.job) {
+        job = recovered.job;
+        jobState = recovered.jobState;
+      } else {
+        pendingList[i] = {
+          ...p,
+          state: 'failed',
+          error: `auto-finalized stale pending prompt; daemon job remained ${jobState || 'non-terminal'} until session recovery`,
+          updatedAt: nowIso(),
+        };
+        changed = true;
+        continue;
+      }
+    }
+
+    if (jobState === 'queued' || jobState === 'running') {
       continue;
     }
 

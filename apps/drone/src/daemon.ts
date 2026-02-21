@@ -260,6 +260,21 @@ async function tmux(args: string[]): Promise<{ stdout: string; stderr: string }>
 async function sessionExists(session: string): Promise<boolean> {
   try {
     await tmux(['has-session', '-t', session]);
+    try {
+      const pane = await tmux(['display-message', '-p', '-t', `${session}:0.0`, '#{pane_dead}']);
+      if (String(pane.stdout ?? '').trim() === '1') {
+        // A dead pane can keep the session object around (e.g. remain-on-exit),
+        // which would otherwise make prompt jobs look "running" forever.
+        try {
+          await killSession(session);
+        } catch {
+          // ignore (best-effort cleanup)
+        }
+        return false;
+      }
+    } catch {
+      // If pane status cannot be read, fall back to "session exists".
+    }
     return true;
   } catch {
     return false;
@@ -284,6 +299,12 @@ async function startSession(opts: {
   cmdArgs.push(opts.cmd, ...(opts.args ?? []));
 
   await tmux([...args, ...cmdArgs]);
+  try {
+    // Avoid "dead pane still has a session" states for daemon-managed jobs/processes.
+    await tmux(['set-window-option', '-t', `${opts.session}:0`, 'remain-on-exit', 'off']);
+  } catch {
+    // ignore (best-effort; older tmux variants may differ)
+  }
 }
 
 async function killSession(session: string): Promise<void> {
