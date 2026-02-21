@@ -313,6 +313,49 @@ code, pre {
   color: #d7cbfb;
   text-decoration-color: rgba(215, 203, 251, .9);
 }
+.dh-markdown a.dh-inline-code-link {
+  text-decoration: none;
+}
+.dh-markdown a.dh-inline-code-link code {
+  cursor: pointer;
+}
+.dh-markdown a.dh-inline-code-link:hover code {
+  border-color: rgba(196, 181, 253, .28);
+  background: rgba(196, 181, 253, .14);
+}
+.dh-markdown a.dh-inline-code-link:focus-visible {
+  outline: none;
+}
+.dh-markdown a.dh-inline-code-link:focus-visible code {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.dh-markdown button.dh-inline-code-file-link {
+  display: inline;
+  appearance: none;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  text-align: left;
+}
+.dh-markdown button.dh-inline-code-file-link code {
+  cursor: pointer;
+}
+.dh-markdown button.dh-inline-code-file-link:hover code {
+  border-color: rgba(196, 181, 253, .28);
+  background: rgba(196, 181, 253, .14);
+}
+.dh-markdown button.dh-inline-code-file-link:focus-visible {
+  outline: none;
+}
+.dh-markdown button.dh-inline-code-file-link:focus-visible code {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
 .dh-markdown ul,
 .dh-markdown ol { margin: .72rem 0 .78rem 1.35rem; padding: 0; }

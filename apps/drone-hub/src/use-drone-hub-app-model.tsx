@@ -53,6 +53,7 @@ import {
   useDroneHubOverlaysProps,
   useDroneHubWorkspaceContentProps,
 } from './droneHub/app/use-drone-hub-view-props';
+import type { MarkdownFileReference } from './droneHub/chat/MarkdownMessage';
 import {
   isDroneStartingOrSeeding,
   makeId,
@@ -951,6 +952,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     loading: openedEditorFileLoading,
     saving: openedEditorFileSaving,
     error: openedEditorFileError,
+    openFailure: openedEditorFileOpenFailure,
     content: openedEditorFileContent,
     dirty: openedEditorFileDirty,
     mtimeMs: openedEditorFileMtimeMs,
@@ -1030,6 +1032,29 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setNewCustomAgentCommand,
     setCustomAgentModalOpen,
   });
+  const openMarkdownFileReference = React.useCallback(
+    (ref: MarkdownFileReference) => {
+      let rawPath = String(ref.path ?? '').trim().replace(/\\/g, '/');
+      if (!rawPath) return;
+      if (rawPath.startsWith('./')) rawPath = rawPath.slice(2);
+      const normalized = rawPath.replace(/\/+/g, '/').replace(/^\/+/, '');
+      if (!normalized) return;
+      const containerPath =
+        rawPath.startsWith('/work/repo/') || rawPath === '/work/repo'
+          ? rawPath
+          : normalized.startsWith('work/repo/')
+            ? `/${normalized}`
+            : `/work/repo/${normalized}`;
+      const name = containerPath.split('/').filter(Boolean).pop() || containerPath;
+      openEditorFile({
+        path: containerPath,
+        name,
+        line: ref.line,
+        column: ref.column,
+      });
+    },
+    [openEditorFile],
+  );
 
   const renderRightPanelTabContent = React.useCallback(
     (drone: DroneSummary, tab: RightPanelTab, paneKey: 'top' | 'bottom' | 'single'): React.ReactNode => (
@@ -1402,14 +1427,20 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     requestUnstickPendingPrompt,
     unstickingPendingPromptById,
     unstickPendingPromptErrorById,
+    onOpenMarkdownFileReference: openMarkdownFileReference,
     openedEditorFilePath: openedEditorFile?.path ?? null,
     openedEditorFileName: openedEditorFile?.name ?? null,
     openedEditorFileLoading,
     openedEditorFileSaving,
     openedEditorFileError,
+    openedEditorFileOpenFailureMessage: openedEditorFileOpenFailure?.message ?? null,
+    openedEditorFileOpenFailureAt: openedEditorFileOpenFailure?.at ?? null,
     openedEditorFileContent,
     openedEditorFileDirty,
     openedEditorFileMtimeMs,
+    openedEditorFileTargetLine: openedEditorFile?.targetLine ?? null,
+    openedEditorFileTargetColumn: openedEditorFile?.targetColumn ?? null,
+    openedEditorFileNavigationSeq: openedEditorFile?.navigationSeq ?? 0,
     onOpenedEditorFileContentChange: setOpenedFileContent,
     onSaveOpenedEditorFile: saveOpenedFile,
     onCloseOpenedEditorFile: closeEditorFile,

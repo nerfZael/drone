@@ -3,6 +3,18 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 type CalloutKind = 'note' | 'tip' | 'important' | 'warning' | 'caution';
+const COMMON_FILE_BASENAMES = new Set([
+  'dockerfile',
+  'makefile',
+  'readme',
+  'readme.md',
+  'license',
+  'license.md',
+  'package.json',
+  'tsconfig.json',
+  '.gitignore',
+  'agents.md',
+]);
 
 const CALLOUT_LABEL: Record<CalloutKind, string> = {
   note: 'Note',
@@ -53,12 +65,96 @@ function stripLeadingCalloutMarker(node: React.ReactNode): React.ReactNode {
   return strip(node);
 }
 
+function parseInlineCodeLinkHref(raw: string): string | null {
+  const candidate = String(raw ?? '').trim();
+  if (!/^https?:\/\/\S+$/i.test(candidate)) return null;
+  try {
+    const url = new URL(candidate);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+export type MarkdownFileReference = {
+  raw: string;
+  path: string;
+  line: number | null;
+  column: number | null;
+};
+
+function isLikelyFilePath(raw: string): boolean {
+  const candidate = String(raw ?? '').trim();
+  if (!candidate || /\s/.test(candidate) || candidate.includes('\0')) return false;
+  if (candidate.startsWith('~')) return false;
+  if (/^https?:\/\//i.test(candidate)) return false;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(candidate)) return false;
+  const normalized = candidate.replace(/\\/g, '/');
+  const segs = normalized.split('/').filter(Boolean);
+  if (segs.some((seg) => seg === '..')) return false;
+  const base = (segs.length ? segs[segs.length - 1] : normalized).toLowerCase();
+  if (COMMON_FILE_BASENAMES.has(base)) return true;
+  if (normalized.includes('/')) return true;
+  if (/\.[a-z0-9_-]{1,12}$/i.test(base)) return true;
+  return false;
+}
+
+function parsePositiveInt(raw: string | undefined): number | null {
+  if (!raw) return null;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0) return null;
+  return n;
+}
+
+function normalizeFileRefPath(raw: string): string {
+  let next = String(raw ?? '').trim().replace(/\\/g, '/');
+  if (next.startsWith('./')) next = next.slice(2);
+  next = next.replace(/\/+/g, '/');
+  if (next.length > 1 && next.endsWith('/')) next = next.slice(0, -1);
+  return next;
+}
+
+function parseInlineCodeFileReference(raw: string): MarkdownFileReference | null {
+  const text = String(raw ?? '').trim();
+  if (!text) return null;
+  let pathToken = text;
+  let line: number | null = null;
+  let column: number | null = null;
+
+  const hashMatch = /^(.*)#L(\d+)(?:C(\d+))?$/i.exec(pathToken);
+  if (hashMatch) {
+    pathToken = String(hashMatch[1] ?? '').trim();
+    line = parsePositiveInt(hashMatch[2]);
+    column = parsePositiveInt(hashMatch[3]);
+  } else {
+    const lineSuffix = /:(\d+)(?::(\d+))?$/.exec(pathToken);
+    if (lineSuffix && typeof lineSuffix.index === 'number') {
+      const maybePath = pathToken.slice(0, lineSuffix.index).trim();
+      if (isLikelyFilePath(maybePath)) {
+        pathToken = maybePath;
+        line = parsePositiveInt(lineSuffix[1]);
+        column = parsePositiveInt(lineSuffix[2]);
+      }
+    }
+  }
+
+  if (!isLikelyFilePath(pathToken)) return null;
+  const normalizedPath = normalizeFileRefPath(pathToken);
+  if (!normalizedPath || normalizedPath === '/' || normalizedPath.includes('/../') || normalizedPath.startsWith('../') || normalizedPath.startsWith('/..')) {
+    return null;
+  }
+  return { raw: text, path: normalizedPath, line, column };
+}
+
 export function MarkdownMessage({
   text,
   className,
+  onOpenFileReference,
 }: {
   text: string;
   className?: string;
+  onOpenFileReference?: (ref: MarkdownFileReference) => void;
 }) {
   return (
     <div className={`dh-markdown ${className ?? ''}`}>
@@ -70,6 +166,52 @@ export function MarkdownMessage({
               <a href={href} target="_blank" rel="noreferrer" {...props}>
                 {children}
               </a>
+            );
+          },
+          code: ({ children, className: codeClassName, ...props }) => {
+            const raw = flattenText(children);
+            const hasLanguageClass = typeof codeClassName === 'string' && codeClassName.includes('language-');
+            const isInline = !hasLanguageClass && !raw.includes('\n');
+            const href = isInline ? parseInlineCodeLinkHref(raw) : null;
+            if (href) {
+              return (
+                <a
+                  className="dh-inline-code-link"
+                  href={href}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label={`Open link ${href}`}
+                >
+                  <code className={codeClassName} {...props}>
+                    {raw}
+                  </code>
+                </a>
+              );
+            }
+            const fileRef = isInline ? parseInlineCodeFileReference(raw) : null;
+            if (fileRef && onOpenFileReference) {
+              const targetDescription =
+                fileRef.line == null
+                  ? fileRef.path
+                  : `${fileRef.path}:${fileRef.line}${fileRef.column == null ? '' : `:${fileRef.column}`}`;
+              return (
+                <button
+                  type="button"
+                  className="dh-inline-code-file-link"
+                  onClick={() => onOpenFileReference(fileRef)}
+                  title={`Open ${targetDescription}`}
+                  aria-label={`Open file ${targetDescription}`}
+                >
+                  <code className={codeClassName} {...props}>
+                    {raw}
+                  </code>
+                </button>
+              );
+            }
+            return (
+              <code className={codeClassName} {...props}>
+                {children}
+              </code>
             );
           },
           blockquote: ({ children, ...props }) => {

@@ -2,6 +2,7 @@ import React from 'react';
 import { stripAnsi, timeAgo } from '../../domain';
 import type { PendingPrompt } from '../types';
 import { CollapsibleMarkdown } from './CollapsibleMarkdown';
+import type { MarkdownFileReference } from './MarkdownMessage';
 import { IconBot, IconUser, TypingDots } from './icons';
 
 const MANUAL_UNSTICK_STALE_MS = 2 * 60_000;
@@ -16,6 +17,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   nowMs,
   showRoleIcons = true,
   onRequestUnstick,
+  onOpenFileReference,
   unstickBusy = false,
   unstickError = null,
 }: {
@@ -23,6 +25,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   nowMs: number;
   showRoleIcons?: boolean;
   onRequestUnstick?: (promptId: string) => Promise<void> | void;
+  onOpenFileReference?: (ref: MarkdownFileReference) => void;
   unstickBusy?: boolean;
   unstickError?: string | null;
 }) {
@@ -61,7 +64,12 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
             </span>
           </div>
           <div className="bg-[var(--user-dim)] border border-[rgba(148,163,184,.14)] rounded-lg rounded-tr-sm px-4 py-3">
-            <CollapsibleMarkdown text={item.prompt} fadeTo="var(--user-dim)" className="dh-markdown--user" />
+            <CollapsibleMarkdown
+              text={item.prompt}
+              fadeTo="var(--user-dim)"
+              className="dh-markdown--user"
+              onOpenFileReference={onOpenFileReference}
+            />
           </div>
         </div>
         {showRoleIcons && (

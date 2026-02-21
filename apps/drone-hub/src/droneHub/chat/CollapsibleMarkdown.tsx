@@ -1,11 +1,12 @@
 import React from 'react';
-import { MarkdownMessage } from './MarkdownMessage';
+import { MarkdownMessage, type MarkdownFileReference } from './MarkdownMessage';
 import { IconChevron } from './icons';
 
 export function CollapsibleMarkdown({
   text,
   className,
   fadeTo,
+  onOpenFileReference,
   maxHeightPx = 240,
   collapseAfterLines = 40,
   preserveLeadParagraph = false,
@@ -13,6 +14,7 @@ export function CollapsibleMarkdown({
   text: string;
   className?: string;
   fadeTo: string;
+  onOpenFileReference?: (ref: MarkdownFileReference) => void;
   maxHeightPx?: number;
   collapseAfterLines?: number;
   preserveLeadParagraph?: boolean;
@@ -44,14 +46,14 @@ export function CollapsibleMarkdown({
     <div className="relative">
       {isLong && leadSplit ? (
         <>
-          <MarkdownMessage text={leadSplit.lead} className={className} />
+          <MarkdownMessage text={leadSplit.lead} className={className} onOpenFileReference={onOpenFileReference} />
           <div className={`output-collapse ${collapsed ? 'collapsed' : ''}`} style={style}>
-            <MarkdownMessage text={leadSplit.rest} className={className} />
+            <MarkdownMessage text={leadSplit.rest} className={className} onOpenFileReference={onOpenFileReference} />
           </div>
         </>
       ) : (
         <div className={`output-collapse ${isLong && collapsed ? 'collapsed' : ''}`} style={style}>
-          <MarkdownMessage text={text} className={className} />
+          <MarkdownMessage text={text} className={className} onOpenFileReference={onOpenFileReference} />
         </div>
       )}
       {isLong && (

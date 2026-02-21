@@ -10,6 +10,7 @@ import {
   TranscriptSkeleton,
   TranscriptTurn,
 } from '../chat';
+import type { MarkdownFileReference } from '../chat/MarkdownMessage';
 import { GroupBadge, StatusBadge } from '../overview';
 import { TypingDots } from '../overview/icons';
 import { requestJson } from '../http';
@@ -436,12 +437,18 @@ type SelectedDroneWorkspaceProps = {
   openedEditorFileLoading: boolean;
   openedEditorFileSaving: boolean;
   openedEditorFileError: string | null;
+  openedEditorFileOpenFailureMessage: string | null;
+  openedEditorFileOpenFailureAt: number | null;
   openedEditorFileContent: string;
   openedEditorFileDirty: boolean;
   openedEditorFileMtimeMs: number | null;
+  openedEditorFileTargetLine: number | null;
+  openedEditorFileTargetColumn: number | null;
+  openedEditorFileNavigationSeq: number;
   onOpenedEditorFileContentChange: (next: string) => void;
   onSaveOpenedEditorFile: (contentOverride?: string) => Promise<boolean>;
   onCloseOpenedEditorFile: () => void;
+  onOpenMarkdownFileReference: (ref: MarkdownFileReference) => void;
   rightPanelWidth: number;
   rightPanelWidthMax: number;
   rightPanelMinWidth: number;
@@ -541,12 +548,18 @@ export function SelectedDroneWorkspace({
   openedEditorFileLoading,
   openedEditorFileSaving,
   openedEditorFileError,
+  openedEditorFileOpenFailureMessage,
+  openedEditorFileOpenFailureAt,
   openedEditorFileContent,
   openedEditorFileDirty,
   openedEditorFileMtimeMs,
+  openedEditorFileTargetLine,
+  openedEditorFileTargetColumn,
+  openedEditorFileNavigationSeq,
   onOpenedEditorFileContentChange,
   onSaveOpenedEditorFile,
   onCloseOpenedEditorFile,
+  onOpenMarkdownFileReference,
   rightPanelWidth,
   rightPanelWidthMax,
   rightPanelMinWidth,
@@ -604,6 +617,44 @@ export function SelectedDroneWorkspace({
   }, [setRightPanelOpen, setRightPanelTab]);
   const quickOpenTabUrl = resolveDroneOpenTabUrl(currentDrone);
   const quickOpenTabDisabled = isDroneStartingOrSeeding(currentDrone.hubPhase) || !quickOpenTabUrl;
+  const editorRef = React.useRef<any>(null);
+  const [fileOpenToast, setFileOpenToast] = React.useState<{ id: number; message: string } | null>(null);
+  const applyEditorCursorTarget = React.useCallback(() => {
+    if (!openedEditorFilePath || !openedEditorFileTargetLine) return;
+    const editor = editorRef.current;
+    if (!editor) return;
+    const model = editor.getModel?.();
+    const maxLine = Number(model?.getLineCount?.() ?? openedEditorFileTargetLine);
+    const line = Math.min(Math.max(1, openedEditorFileTargetLine), Number.isFinite(maxLine) && maxLine > 0 ? maxLine : openedEditorFileTargetLine);
+    const requestedColumn = openedEditorFileTargetColumn ?? 1;
+    const maxColumn = Number(model?.getLineMaxColumn?.(line) ?? requestedColumn);
+    const column = Math.min(Math.max(1, requestedColumn), Number.isFinite(maxColumn) && maxColumn > 0 ? maxColumn : requestedColumn);
+    editor.setPosition?.({ lineNumber: line, column });
+    editor.revealPositionInCenter?.({ lineNumber: line, column });
+    editor.focus?.();
+  }, [openedEditorFilePath, openedEditorFileTargetColumn, openedEditorFileTargetLine]);
+
+  React.useEffect(() => {
+    if (openedEditorFileLoading || !openedEditorFilePath || !openedEditorFileTargetLine) return;
+    if (!openedEditorFileNavigationSeq) return;
+    applyEditorCursorTarget();
+  }, [
+    applyEditorCursorTarget,
+    openedEditorFileLoading,
+    openedEditorFileNavigationSeq,
+    openedEditorFilePath,
+    openedEditorFileTargetLine,
+  ]);
+
+  React.useEffect(() => {
+    if (!openedEditorFileOpenFailureMessage || !openedEditorFileOpenFailureAt) return;
+    const id = openedEditorFileOpenFailureAt;
+    setFileOpenToast({ id, message: openedEditorFileOpenFailureMessage });
+    const timeout = window.setTimeout(() => {
+      setFileOpenToast((prev) => (prev && prev.id === id ? null : prev));
+    }, 4200);
+    return () => window.clearTimeout(timeout);
+  }, [openedEditorFileOpenFailureAt, openedEditorFileOpenFailureMessage]);
 
   return (
     <>
@@ -1221,9 +1272,11 @@ export function SelectedDroneWorkspace({
                       value={openedEditorFileContent}
                       onChange={(next) => onOpenedEditorFileContentChange(next ?? '')}
                       onMount={(editor, monaco) => {
+                        editorRef.current = editor;
                         editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
                           void onSaveOpenedEditorFile(editor.getValue());
                         });
+                        applyEditorCursorTarget();
                       }}
                       theme="vs-dark"
                       options={{
@@ -1259,6 +1312,7 @@ export function SelectedDroneWorkspace({
                           showTldr={Boolean(showTldrByMessageId[messageId])}
                           onToggleTldr={toggleTldrForAgentMessage}
                           onHoverAgentMessage={handleAgentMessageHover}
+                          onOpenFileReference={onOpenMarkdownFileReference}
                         />
                       );
                     })}
@@ -1268,6 +1322,7 @@ export function SelectedDroneWorkspace({
                         item={p}
                         nowMs={nowMs}
                         onRequestUnstick={requestUnstickPendingPrompt}
+                        onOpenFileReference={onOpenMarkdownFileReference}
                         unstickBusy={Boolean(unstickingPendingPromptById[p.id])}
                         unstickError={unstickPendingPromptErrorById[p.id] ?? null}
                       />
@@ -1352,6 +1407,16 @@ export function SelectedDroneWorkspace({
               }}
             />
           )}
+          {fileOpenToast ? (
+            <div className="pointer-events-none absolute right-4 bottom-4 z-20">
+              <div className="max-w-[360px] rounded border border-[rgba(255,90,90,.3)] bg-[rgba(30,12,14,.95)] px-3 py-2 shadow-[0_10px_26px_rgba(0,0,0,.35)]">
+                <div className="text-[10px] font-semibold tracking-wide uppercase text-[var(--red)]" style={{ fontFamily: 'var(--display)' }}>
+                  Open file failed
+                </div>
+                <div className="mt-1 text-[11px] text-[var(--fg-secondary)] break-words">{fileOpenToast.message}</div>
+              </div>
+            </div>
+          ) : null}
         </div>
 
         {/* Right panel content (tabs are in the header toolbar) */}

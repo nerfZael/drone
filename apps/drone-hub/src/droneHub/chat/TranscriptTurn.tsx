@@ -2,6 +2,7 @@ import React from 'react';
 import { stripAnsi, timeAgo } from '../../domain';
 import type { TranscriptItem } from '../types';
 import { CollapsibleMarkdown } from './CollapsibleMarkdown';
+import type { MarkdownFileReference } from './MarkdownMessage';
 import { IconBot, IconJobs, IconSpinner, IconTldr, IconUser } from './icons';
 
 type TldrState =
@@ -21,6 +22,7 @@ export const TranscriptTurn = React.memo(
     showTldr,
     onToggleTldr,
     onHoverAgentMessage,
+    onOpenFileReference,
     showRoleIcons = true,
   }: {
     item: TranscriptItem;
@@ -32,6 +34,7 @@ export const TranscriptTurn = React.memo(
     showTldr: boolean;
     onToggleTldr: (item: TranscriptItem) => void;
     onHoverAgentMessage: (item: TranscriptItem | null) => void;
+    onOpenFileReference?: (ref: MarkdownFileReference) => void;
     showRoleIcons?: boolean;
   }) {
     const cleaned = item.ok ? stripAnsi(item.output) : stripAnsi(item.error || 'failed');
@@ -68,7 +71,12 @@ export const TranscriptTurn = React.memo(
               </span>
             </div>
             <div className="bg-[var(--user-dim)] border border-[rgba(148,163,184,.14)] rounded-lg rounded-tr-sm px-4 py-3">
-              <CollapsibleMarkdown text={item.prompt} fadeTo="var(--user-dim)" className="dh-markdown--user" />
+              <CollapsibleMarkdown
+                text={item.prompt}
+                fadeTo="var(--user-dim)"
+                className="dh-markdown--user"
+                onOpenFileReference={onOpenFileReference}
+              />
             </div>
           </div>
           {showRoleIcons && (
@@ -114,6 +122,7 @@ export const TranscriptTurn = React.memo(
                 fadeTo={item.ok ? 'var(--accent-subtle)' : 'var(--red-subtle)'}
                 className={showingTldr ? 'dh-markdown--muted' : item.ok ? 'dh-markdown--agent' : 'dh-markdown--error'}
                 preserveLeadParagraph
+                onOpenFileReference={onOpenFileReference}
               />
 
               <div className="absolute bottom-2 right-2 flex items-center gap-1">
@@ -180,5 +189,6 @@ export const TranscriptTurn = React.memo(
     ((a.tldr && a.tldr.status === 'error' ? a.tldr.error : '') === (b.tldr && b.tldr.status === 'error' ? b.tldr.error : '')) &&
     a.onToggleTldr === b.onToggleTldr &&
     a.onHoverAgentMessage === b.onHoverAgentMessage &&
+    a.onOpenFileReference === b.onOpenFileReference &&
     (a.showRoleIcons ?? true) === (b.showRoleIcons ?? true),
 );
