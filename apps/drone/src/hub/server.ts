@@ -8992,13 +8992,29 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           }
 
           await reconcileChatFromDaemon({ droneId, chatName });
-          const pendingAfter = await readPendingPrompts({ droneId, chatName });
-          const pendingItemAfter = pendingAfter.find((p) => p.id === promptId) ?? null;
+          let pendingAfter = await readPendingPrompts({ droneId, chatName });
+          let pendingItemAfter = pendingAfter.find((p) => p.id === promptId) ?? null;
           const regAfter: any = await loadRegistry();
           const turnsAfter: any[] = Array.isArray(regAfter?.drones?.[droneId]?.chats?.[chatName]?.turns)
             ? regAfter.drones[droneId].chats[chatName].turns
             : [];
           const recovered = turnsAfter.some((t: any) => String(t?.id ?? '').trim() === promptId);
+          let forceFinalized = false;
+          if (!recovered && pendingItemAfter && pendingItemAfter.state !== 'failed') {
+            const jobStateText = String(jobState ?? '').trim();
+            const reason = jobStateText
+              ? `manual unstick requested; daemon job state after session kill: ${jobStateText}`
+              : 'manual unstick requested; no completion recovered after session kill';
+            await updatePendingPrompt({
+              droneId,
+              chatName,
+              id: promptId,
+              patch: { state: 'failed', error: reason, updatedAt: nowIso() },
+            });
+            forceFinalized = true;
+            pendingAfter = await readPendingPrompts({ droneId, chatName });
+            pendingItemAfter = pendingAfter.find((p) => p.id === promptId) ?? null;
+          }
 
           json(res, 200, {
             ok: true,
@@ -9010,6 +9026,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             recovered,
             pendingState: pendingItemAfter?.state ?? null,
             jobState,
+            forceFinalized,
           });
           return;
         } catch (e: any) {
