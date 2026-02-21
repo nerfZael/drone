@@ -240,7 +240,22 @@ export function useWorkspaceActions({
         });
         throw new Error(message);
       };
-      const response = await postJson(url, {});
+      const defaultAutoCommitMessage = 'chore(drone): snapshot working tree before apply changes';
+      let response = await postJson(url, {});
+      const initialCode = String(response.data?.code ?? '').trim().toLowerCase();
+      if (!response.ok && initialCode === 'drone_dirty') {
+        const dirtyFileCount = Number(response.data?.dirtyFileCount);
+        const dirtyLabel =
+          Number.isFinite(dirtyFileCount) && dirtyFileCount > 0
+            ? `${Math.floor(dirtyFileCount)} file${dirtyFileCount === 1 ? '' : 's'}`
+            : 'one or more files';
+        const autoCommitMessage = String(response.data?.autoCommitMessage ?? '').trim() || defaultAutoCommitMessage;
+        const confirmed = window.confirm(
+          `This drone has uncommitted changes (${dirtyLabel}).\n\nPress OK to stage everything, create a placeholder commit, and continue Apply Changes.\n\nPress Cancel to stop.`,
+        );
+        if (!confirmed) return;
+        response = await postJson(url, { commitDirty: true, commitMessage: autoCommitMessage });
+      }
       if (!response.ok) throwRepoPullError(response.data, 'Repo pull failed.');
     } catch (e: any) {
       setRepoOperationError(e?.message ?? String(e));

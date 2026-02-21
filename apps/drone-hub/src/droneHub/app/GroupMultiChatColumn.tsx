@@ -244,20 +244,43 @@ export function GroupMultiChatColumn({
     setQuickActionBusy('pull');
     setQuickActionError(null);
     try {
-      const r = await fetch(`/api/drones/${encodeURIComponent(drone.id)}/repo/pull`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({}),
-      });
-      if (!r.ok) {
-        const text = await r.text();
+      const postPull = async (
+        body: any,
+      ): Promise<{ ok: boolean; status: number; statusText: string; data: any }> => {
+        const response = await fetch(`/api/drones/${encodeURIComponent(drone.id)}/repo/pull`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body ?? {}),
+        });
+        const text = await response.text();
         let parsed: any = null;
         try {
           parsed = text ? JSON.parse(text) : null;
         } catch {
           parsed = null;
         }
-        setQuickActionError(String(parsed?.error ?? `${r.status} ${r.statusText}`));
+        return { ok: response.ok, status: response.status, statusText: response.statusText, data: parsed };
+      };
+
+      const defaultAutoCommitMessage = 'chore(drone): snapshot working tree before apply changes';
+      let result = await postPull({});
+      const initialCode = String(result.data?.code ?? '').trim().toLowerCase();
+      if (!result.ok && initialCode === 'drone_dirty') {
+        const dirtyFileCount = Number(result.data?.dirtyFileCount);
+        const dirtyLabel =
+          Number.isFinite(dirtyFileCount) && dirtyFileCount > 0
+            ? `${Math.floor(dirtyFileCount)} file${dirtyFileCount === 1 ? '' : 's'}`
+            : 'one or more files';
+        const autoCommitMessage = String(result.data?.autoCommitMessage ?? '').trim() || defaultAutoCommitMessage;
+        const confirmed = window.confirm(
+          `This drone has uncommitted changes (${dirtyLabel}).\n\nPress OK to stage everything, create a placeholder commit, and continue Apply Changes.\n\nPress Cancel to stop.`,
+        );
+        if (!confirmed) return;
+        result = await postPull({ commitDirty: true, commitMessage: autoCommitMessage });
+      }
+
+      if (!result.ok) {
+        setQuickActionError(String(result.data?.error ?? `${result.status} ${result.statusText}`));
       }
     } catch (err: any) {
       setQuickActionError(err?.message ?? String(err));
