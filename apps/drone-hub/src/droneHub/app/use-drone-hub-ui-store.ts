@@ -49,6 +49,7 @@ type DroneHubUiState = {
   selectedGroupMultiChat: string | null;
   groupBroadcastExpanded: boolean;
   groupMultiChatColumnWidth: number;
+  groupMultiChatStatusSort: boolean;
   selectedChat: string;
   chatInputDrafts: Record<string, string>;
   draftChat: DraftChatState | null;
@@ -86,6 +87,7 @@ type DroneHubUiState = {
   setSelectedGroupMultiChat: (next: Updater<string | null>) => void;
   setGroupBroadcastExpanded: (next: Updater<boolean>) => void;
   setGroupMultiChatColumnWidth: (next: Updater<number>) => void;
+  setGroupMultiChatStatusSort: (next: Updater<boolean>) => void;
   setSelectedChat: (next: Updater<string>) => void;
   setChatInputDraft: (draftKey: string, next: string) => void;
   setDraftChat: (next: Updater<DraftChatState | null>) => void;
@@ -129,6 +131,7 @@ type DroneHubUiPersistedState = Pick<
   | 'autoDelete'
   | 'terminalEmulator'
   | 'groupMultiChatColumnWidth'
+  | 'groupMultiChatStatusSort'
   | 'outputView'
   | 'fsExplorerView'
   | 'spawnAgentKey'
@@ -285,6 +288,7 @@ function readLegacyPersistedDefaults(): DroneHubUiPersistedState {
       Number.isFinite(savedWidth) && savedWidth > 0
         ? clampGroupMultiChatColumnWidthPx(savedWidth)
         : GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX,
+    groupMultiChatStatusSort: false,
     outputView: normalizeOutputView(readLocalStorageItem('droneHub.outputView')),
     fsExplorerView: normalizeFsExplorerView(readLocalStorageItem(FS_EXPLORER_VIEW_STORAGE_KEY)),
     spawnAgentKey: readLocalStorageItem('droneHub.spawnAgent') || 'builtin:cursor',
@@ -340,6 +344,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       selectedGroupMultiChat: null,
       groupBroadcastExpanded: false,
       groupMultiChatColumnWidth: legacyDefaults.groupMultiChatColumnWidth,
+      groupMultiChatStatusSort: false,
       selectedChat: 'default',
       chatInputDrafts: initialChatInputDrafts,
       draftChat: null,
@@ -379,6 +384,10 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       setGroupMultiChatColumnWidth: (next) =>
         set((s) => ({
           groupMultiChatColumnWidth: clampGroupMultiChatColumnWidthPx(resolveNext(s.groupMultiChatColumnWidth, next)),
+        })),
+      setGroupMultiChatStatusSort: (next) =>
+        set((s) => ({
+          groupMultiChatStatusSort: resolveNext(s.groupMultiChatStatusSort, next),
         })),
       setSelectedChat: (next) => set((s) => ({ selectedChat: resolveNext(s.selectedChat, next) })),
       setChatInputDraft: (draftKeyRaw, nextRaw) =>
@@ -455,6 +464,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         autoDelete: state.autoDelete,
         terminalEmulator: state.terminalEmulator,
         groupMultiChatColumnWidth: state.groupMultiChatColumnWidth,
+        groupMultiChatStatusSort: state.groupMultiChatStatusSort,
         outputView: state.outputView,
         fsExplorerView: state.fsExplorerView,
         spawnAgentKey: state.spawnAgentKey,
@@ -477,6 +487,9 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           collapsedGroups: normalizeCollapsedGroups(persisted.collapsedGroups ?? currentState.collapsedGroups),
           groupMultiChatColumnWidth: clampGroupMultiChatColumnWidthPx(
             Number(persisted.groupMultiChatColumnWidth ?? currentState.groupMultiChatColumnWidth),
+          ),
+          groupMultiChatStatusSort: normalizeBoolean(
+            persisted.groupMultiChatStatusSort ?? currentState.groupMultiChatStatusSort,
           ),
           outputView: normalizeOutputView(persisted.outputView ?? currentState.outputView),
           fsExplorerView: normalizeFsExplorerView(persisted.fsExplorerView ?? currentState.fsExplorerView),
