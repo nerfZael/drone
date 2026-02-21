@@ -59,6 +59,39 @@ function shortRefName(raw: string | null | undefined, maxLen: number = 32): stri
   return `${text.slice(0, maxLen - 1)}…`;
 }
 
+function pullRequestStateBadge(
+  raw: string | null | undefined,
+): { label: string; title: string; className: string } | null {
+  const state = String(raw ?? '').trim().toLowerCase();
+  if (!state) return null;
+  if (state === 'open') {
+    return {
+      label: 'Open',
+      title: 'Pull request is open.',
+      className: 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]',
+    };
+  }
+  if (state === 'merged') {
+    return {
+      label: 'Merged',
+      title: 'Pull request has been merged.',
+      className: 'border-[rgba(74,222,128,.35)] bg-[var(--green-subtle)] text-[var(--green)]',
+    };
+  }
+  if (state === 'closed') {
+    return {
+      label: 'Closed',
+      title: 'Pull request was closed without merging.',
+      className: 'border-[rgba(255,90,90,.35)] bg-[var(--red-subtle)] text-[var(--red)]',
+    };
+  }
+  return {
+    label: state,
+    title: `Pull request state: ${state}`,
+    className: 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)]',
+  };
+}
+
 function hasStaged(entry: RepoChangeEntry | null): boolean {
   if (!entry) return false;
   return entry.stagedType !== null;
@@ -904,6 +937,7 @@ export function DroneChangesDock({
       : null;
   const activePullRequestTitleRaw = dataMode === 'pull-request' ? String(pullRequestChanges?.pullRequest.title ?? '').trim() : '';
   const activePullRequestHtmlUrl = dataMode === 'pull-request' ? String(pullRequestChanges?.pullRequest.htmlUrl ?? '').trim() : '';
+  const activePullRequestStatus = dataMode === 'pull-request' ? pullRequestStateBadge(pullRequestChanges?.pullRequest.state) : null;
   const refreshed = refreshTimeLabel(lastRefreshedByMode[dataMode] ?? null);
 
   function renderExplorer(nodes: ExplorerNode[], depth: number): React.ReactNode {
@@ -1101,6 +1135,14 @@ export function DroneChangesDock({
                   title={pullRequestChanges?.pullRequest.title || undefined}
                   mono
                 />
+                {activePullRequestStatus ? (
+                  <span
+                    className={`inline-flex items-center rounded border px-1.5 py-[1px] text-[10px] font-semibold uppercase tracking-wide ${activePullRequestStatus.className}`}
+                    title={activePullRequestStatus.title}
+                  >
+                    {activePullRequestStatus.label}
+                  </span>
+                ) : null}
                 <MetaChip label="files" value={pullRequestChanges?.counts.changed ?? 0} />
                 <MetaChip label="+" value={pullRequestChanges?.counts.additions ?? 0} mono />
                 <MetaChip label="-" value={pullRequestChanges?.counts.deletions ?? 0} mono />
@@ -1146,18 +1188,29 @@ export function DroneChangesDock({
               <span>{activePullRequestTitleRaw || 'Untitled pull request'}</span>
             </div>
           </div>
-          {activePullRequestHtmlUrl ? (
-            <a
-              className="shrink-0 inline-flex items-center h-6 px-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[9px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
-              href={activePullRequestHtmlUrl}
-              target="_blank"
-              rel="noreferrer"
-              title="Open PR on GitHub"
-              style={{ fontFamily: 'var(--display)' }}
-            >
-              Open
-            </a>
-          ) : null}
+          <div className="shrink-0 flex items-center gap-1.5">
+            {activePullRequestStatus ? (
+              <span
+                className={`inline-flex items-center h-6 px-2 rounded border text-[9px] font-semibold uppercase tracking-wide ${activePullRequestStatus.className}`}
+                title={activePullRequestStatus.title}
+                style={{ fontFamily: 'var(--display)' }}
+              >
+                {activePullRequestStatus.label}
+              </span>
+            ) : null}
+            {activePullRequestHtmlUrl ? (
+              <a
+                className="inline-flex items-center h-6 px-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[9px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+                href={activePullRequestHtmlUrl}
+                target="_blank"
+                rel="noreferrer"
+                title="Open PR on GitHub"
+                style={{ fontFamily: 'var(--display)' }}
+              >
+                Open
+              </a>
+            ) : null}
+          </div>
         </div>
       ) : null}
 

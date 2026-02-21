@@ -4,6 +4,7 @@ export type GithubPullRequestListState = 'open' | 'closed' | 'all';
 export type GithubPullRequestMergeMethod = 'merge' | 'squash' | 'rebase';
 export type GithubPullRequestChecksState = 'success' | 'failing' | 'pending' | 'unknown';
 export type GithubPullRequestReviewState = 'approved' | 'changes_requested' | 'review_required' | 'unknown';
+export type GithubPullRequestState = 'open' | 'merged' | 'closed';
 
 export type GithubRepoRef = {
   owner: string;
@@ -18,7 +19,7 @@ export type GithubRepoResolutionDebug = {
 export type GithubPullRequestSummary = {
   number: number;
   title: string;
-  state: string;
+  state: GithubPullRequestState;
   draft: boolean;
   htmlUrl: string;
   createdAt: string;
@@ -54,6 +55,7 @@ export type GithubPullRequestChanges = {
   pullRequest: {
     number: number;
     title: string;
+    state: GithubPullRequestState;
     htmlUrl: string | null;
     baseRefName: string;
     headRefName: string;
@@ -350,11 +352,23 @@ function reviewStateFromRaw(raw: unknown): GithubPullRequestReviewState {
   return 'unknown';
 }
 
+function normalizeGithubPullRequestState(
+  rawState: unknown,
+  opts?: { merged?: unknown; mergedAt?: unknown },
+): GithubPullRequestState {
+  if (Boolean(opts?.merged)) return 'merged';
+  if (String(opts?.mergedAt ?? '').trim()) return 'merged';
+  const state = String(rawState ?? '').trim().toLowerCase();
+  if (state === 'open') return 'open';
+  if (state === 'closed') return 'closed';
+  return 'open';
+}
+
 function mapGithubPullRequest(raw: any): GithubPullRequestSummary | null {
   const number = Number(raw?.number);
   if (!Number.isFinite(number) || number <= 0) return null;
   const title = String(raw?.title ?? '').trim() || `PR #${number}`;
-  const state = String(raw?.state ?? '').trim() || 'open';
+  const state = normalizeGithubPullRequestState(raw?.state, { merged: raw?.merged, mergedAt: raw?.merged_at });
   const htmlUrl = String(raw?.html_url ?? '').trim();
   const createdAt = String(raw?.created_at ?? '').trim();
   const updatedAt = String(raw?.updated_at ?? '').trim();
@@ -390,7 +404,7 @@ function mapGithubPullRequestFromGraphql(raw: any, owner: string): GithubPullReq
   const number = Number(raw?.number);
   if (!Number.isFinite(number) || number <= 0) return null;
   const title = String(raw?.title ?? '').trim() || `PR #${number}`;
-  const state = String(raw?.state ?? '').trim() || 'OPEN';
+  const state = normalizeGithubPullRequestState(raw?.state, { merged: raw?.merged });
   const htmlUrl = String(raw?.url ?? '').trim();
   const createdAt = String(raw?.createdAt ?? '').trim();
   const updatedAt = String(raw?.updatedAt ?? '').trim();
@@ -410,7 +424,7 @@ function mapGithubPullRequestFromGraphql(raw: any, owner: string): GithubPullReq
   return {
     number: Math.floor(number),
     title,
-    state: state.toLowerCase(),
+    state,
     draft: Boolean(raw?.isDraft),
     htmlUrl,
     createdAt,
@@ -508,6 +522,7 @@ async function listGithubPullRequestsViaGraphql(opts: {
               number
               title
               state
+              merged
               isDraft
               url
               createdAt
@@ -635,6 +650,9 @@ export async function listGithubPullRequestChangesForRepoRoot(opts: {
   const pull = await githubApiRequest<{
     number?: number;
     title?: string;
+    state?: string;
+    merged?: boolean;
+    merged_at?: string | null;
     html_url?: string | null;
     base?: { ref?: string; sha?: string };
     head?: { ref?: string; sha?: string };
@@ -675,6 +693,7 @@ export async function listGithubPullRequestChangesForRepoRoot(opts: {
     pullRequest: {
       number: pullNumber,
       title: String(pull?.title ?? '').trim() || `PR #${pullNumber}`,
+      state: normalizeGithubPullRequestState(pull?.state, { merged: pull?.merged, mergedAt: pull?.merged_at }),
       htmlUrl: pull?.html_url ? String(pull.html_url).trim() : null,
       baseRefName: String(pull?.base?.ref ?? '').trim(),
       headRefName: String(pull?.head?.ref ?? '').trim(),

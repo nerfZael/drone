@@ -205,6 +205,7 @@ export type RepoPullRequestChangesPayload =
       pullRequest: {
         number: number;
         title: string;
+        state: RepoPullRequestState;
         htmlUrl: string | null;
         baseRefName: string;
         headRefName: string;
@@ -220,7 +221,7 @@ export type RepoPullRequestChangesPayload =
     }
   | { ok: false; error: string; code?: string };
 
-export type RepoPullRequestState = 'open' | 'closed' | string;
+export type RepoPullRequestState = 'open' | 'merged' | 'closed' | string;
 export type RepoPullRequestMergeMethod = 'merge' | 'squash' | 'rebase';
 
 export type RepoPullRequestSummary = {
