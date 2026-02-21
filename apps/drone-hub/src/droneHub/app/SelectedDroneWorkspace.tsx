@@ -1295,7 +1295,7 @@ export function SelectedDroneWorkspace({
             ) : chatUiMode === 'transcript' ? (
               <div className="h-full min-w-0 min-h-0 overflow-auto">
                 {loadingTranscript && !transcripts && visiblePendingPromptsWithStartup.length === 0 ? (
-                  <TranscriptSkeleton />
+                  <TranscriptSkeleton message="Loading chat messages..." />
                 ) : (transcripts && transcripts.length > 0) || visiblePendingPromptsWithStartup.length > 0 ? (
                   <div className="max-w-[900px] mx-auto px-6 py-5 flex flex-col gap-6">
                     {(transcripts ?? []).map((t) => {
@@ -1351,7 +1351,7 @@ export function SelectedDroneWorkspace({
                   </div>
                 )}
                 {loadingSession && !sessionText ? (
-                  <TranscriptSkeleton />
+                  <TranscriptSkeleton message="Loading session output..." />
                 ) : sessionText ? (
                   <div className="max-w-[900px] mx-auto px-6 py-6">
                     <div className="rounded-lg border border-[var(--border-subtle)] bg-[rgba(0,0,0,.1)] px-4 py-3">
