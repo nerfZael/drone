@@ -16,7 +16,7 @@ export function CollapsibleMarkdown({
   className?: string;
   fadeTo: string;
   onOpenFileReference?: (ref: MarkdownFileReference) => void;
-  onOpenLink?: (href: string) => Promise<boolean> | boolean;
+  onOpenLink?: (href: string) => boolean;
   maxHeightPx?: number;
   collapseAfterLines?: number;
   preserveLeadParagraph?: boolean;
