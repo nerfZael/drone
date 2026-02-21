@@ -102,6 +102,19 @@ export async function dvmCreate(container: string, args: string[]): Promise<void
   if (r.code !== 0) throw new Error(r.stderr || r.stdout || `dvm create ${container} failed`);
 }
 
+export async function dvmClone(
+  source: string,
+  container: string,
+  opts?: { start?: boolean; reuseNamedVolumes?: boolean; copyPersistenceVolume?: boolean }
+): Promise<void> {
+  const argv = ['clone', source, container];
+  if (opts?.start === false) argv.push('--no-start');
+  if (opts?.reuseNamedVolumes) argv.push('--reuse-named-volumes');
+  if (opts?.copyPersistenceVolume === false) argv.push('--no-copy-persistence');
+  const r = await runDvm(argv);
+  if (r.code !== 0) throw new Error(r.stderr || r.stdout || `dvm clone ${source} ${container} failed`);
+}
+
 export function parseLsOutput(text: string): string[] {
   // dvm ls output format (human-friendly):
   // Name: <container>

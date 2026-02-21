@@ -2459,6 +2459,17 @@ async function provisionDroneFromPending(name: string) {
   const containerPort = typeof pending.containerPort === 'number' && Number.isFinite(pending.containerPort) ? pending.containerPort : null;
   const cloneFrom = typeof pending.cloneFrom === 'string' ? pending.cloneFrom.trim() : '';
   const cloneChats = pending.cloneChats !== false;
+  const cloneSource =
+    cloneFrom
+      ? findDroneEntryByIdentity(regAny, cloneFrom)
+      : null;
+  const cloneSourceContainerName = cloneSource
+    ? String((cloneSource.entry as any)?.containerName ?? (cloneSource.entry as any)?.name ?? cloneSource.key ?? '').trim()
+    : '';
+  if (cloneFrom && !cloneSourceContainerName) {
+    await updatePendingDrone(name, { phase: 'error', message: 'Failed to start', error: `clone source not found: ${cloneFrom}` });
+    return;
+  }
 
   await updatePendingDrone(name, { phase: 'creating', message: 'Creating container…' });
 
@@ -2469,6 +2480,7 @@ async function provisionDroneFromPending(name: string) {
   if (group) args.push('--group', group);
   if (!build) args.push('--no-build');
   if (containerPort != null) args.push('--container-port', String(containerPort));
+  if (cloneSourceContainerName) args.push('--clone-container', cloneSourceContainerName);
   if (!repoPath) args.push('--cwd', NON_REPO_HOME_CWD, '--mkdir');
 
   const r = await runNodeCli(args);
@@ -4833,14 +4845,6 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const pullHostBranchBeforeCreate = parsePullHostBranchBeforeCreate(body?.pullHostBranchBeforeCreate);
         const build = body?.build === true;
         const containerPortRaw = body?.containerPort;
-        const containerPort =
-          containerPortRaw == null
-            ? null
-            : Number(containerPortRaw);
-        if (containerPort != null && (!Number.isFinite(containerPort) || containerPort <= 0 || Math.floor(containerPort) !== containerPort)) {
-          json(res, 400, { ok: false, error: 'invalid containerPort' });
-          return;
-        }
 
         const droneCli = resolveDroneCliPath();
         if (!(await fileExists(droneCli))) {
@@ -4882,6 +4886,20 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           json(res, 404, { ok: false, error: `unknown cloneFrom drone: ${cloneFrom}` });
           return;
         }
+        const cloneFromEntry = cloneFromId ? findDroneEntryByIdentity(preRegAny, cloneFromId)?.entry : null;
+        const cloneFromContainerPortRaw = Number((cloneFromEntry as any)?.containerPort ?? NaN);
+        const cloneFromContainerPort =
+          Number.isFinite(cloneFromContainerPortRaw) && cloneFromContainerPortRaw > 0 && Math.floor(cloneFromContainerPortRaw) === cloneFromContainerPortRaw
+            ? cloneFromContainerPortRaw
+            : null;
+        const containerPort =
+          containerPortRaw == null
+            ? (cloneFromContainerPort ?? 7777)
+            : Number(containerPortRaw);
+        if (!Number.isFinite(containerPort) || containerPort <= 0 || Math.floor(containerPort) !== containerPort) {
+          json(res, 400, { ok: false, error: 'invalid containerPort' });
+          return;
+        }
         if (repoPath && pullHostBranchBeforeCreate) {
           try {
             const pulled = await gitPullHostBranchBeforeCreate(repoPath);
@@ -4908,7 +4926,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             name,
             group: group ?? undefined,
             repoPath,
-            containerPort: containerPort ?? 7777,
+            containerPort,
             build,
             createdAt: at,
             updatedAt: at,
@@ -5053,12 +5071,6 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
               const group = groupRaw ? groupRaw : null;
               const repoPath = preflight.repoPath;
               const build = raw?.build === true;
-              const containerPortRaw = raw?.containerPort;
-              const containerPort = containerPortRaw == null ? null : Number(containerPortRaw);
-              if (containerPort != null && (!Number.isFinite(containerPort) || containerPort <= 0 || Math.floor(containerPort) !== containerPort)) {
-                rejected.push({ name, error: 'invalid containerPort', status: 400 });
-                continue;
-              }
 
               const seedPrompt = String(raw?.seedPrompt ?? raw?.initialMessage ?? raw?.seed?.prompt ?? '').trim();
               const seedChatName = normalizeChatName(raw?.seedChat ?? raw?.seed?.chatName ?? raw?.seed?.chat ?? 'default');
@@ -5082,6 +5094,19 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                 rejected.push({ name, error: `unknown cloneFrom drone: ${cloneFrom}`, status: 404 });
                 continue;
               }
+              const cloneFromEntry = cloneFromId ? findDroneEntryByIdentity(regAny, cloneFromId)?.entry : null;
+              const cloneFromContainerPortRaw = Number((cloneFromEntry as any)?.containerPort ?? NaN);
+              const cloneFromContainerPort =
+                Number.isFinite(cloneFromContainerPortRaw) && cloneFromContainerPortRaw > 0 && Math.floor(cloneFromContainerPortRaw) === cloneFromContainerPortRaw
+                  ? cloneFromContainerPortRaw
+                  : null;
+
+              const containerPortRaw = raw?.containerPort;
+              const containerPort = containerPortRaw == null ? (cloneFromContainerPort ?? 7777) : Number(containerPortRaw);
+              if (!Number.isFinite(containerPort) || containerPort <= 0 || Math.floor(containerPort) !== containerPort) {
+                rejected.push({ name, error: 'invalid containerPort', status: 400 });
+                continue;
+              }
 
               const id = makeDroneIdentity();
               const at = nowIso();
@@ -5091,7 +5116,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                 name,
                 group: group ?? undefined,
                 repoPath,
-                containerPort: containerPort ?? 7777,
+                containerPort,
                 build,
                 createdAt: at,
                 updatedAt: at,

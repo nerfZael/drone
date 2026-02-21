@@ -811,15 +811,17 @@ program
 // Clone command
 program
   .command('clone')
-  .description('Clone an existing container into a new one (filesystem-only; volumes are not copied)')
+  .description('Clone an existing container into a new one (filesystem + dvm persistence volume)')
   .argument('<source>', 'Source container name')
   .argument('<name>', 'New container name')
   .option('--no-start', 'Do not start the cloned container')
+  .option('--no-copy-persistence', 'Do not copy dvm persistence volume contents from the source container')
   .option('--reuse-named-volumes', 'Also reuse named volumes from the source (besides dvm persistence)')
   .action(safeAction(async (source, name, options) => {
     console.log(chalk.blue(`Cloning container ${source} -> ${name}...`));
     await manager.cloneContainer(source, name, {
       start: options.start,
+      copyPersistenceVolume: Boolean(options.copyPersistence),
       reuseNamedVolumes: Boolean(options.reuseNamedVolumes),
     });
     console.log(chalk.green(`Container ${name} cloned successfully!`));
