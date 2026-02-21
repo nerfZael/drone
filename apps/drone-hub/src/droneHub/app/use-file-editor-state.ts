@@ -8,6 +8,9 @@ type OpenEditorFile = {
   droneId: string;
   path: string;
   name: string;
+  targetLine: number | null;
+  targetColumn: number | null;
+  navigationSeq: number;
 };
 
 type UseFileEditorStateArgs = {
@@ -25,6 +28,7 @@ export function useFileEditorState({
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [openFailure, setOpenFailure] = React.useState<{ message: string; at: number } | null>(null);
   const [content, setContent] = React.useState('');
   const [savedContent, setSavedContent] = React.useState('');
   const [mtimeMs, setMtimeMs] = React.useState<number | null>(null);
@@ -36,25 +40,52 @@ export function useFileEditorState({
     setLoading(false);
     setSaving(false);
     setError(null);
+    setOpenFailure(null);
     setContent('');
     setSavedContent('');
     contentRef.current = '';
     setMtimeMs(null);
   }, []);
 
+  const normalizePositiveInt = React.useCallback((raw: unknown): number | null => {
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return null;
+    const i = Math.floor(n);
+    if (i <= 0) return null;
+    return i;
+  }, []);
+
   const openEditorFile = React.useCallback(
-    (next: { path: string; name: string }) => {
+    (next: { path: string; name: string; line?: number | null; column?: number | null }) => {
       const droneId = String(currentDrone?.id ?? '').trim();
       if (!droneId) return;
       const nextPath = String(next.path ?? '').trim();
       if (!nextPath) return;
       const nextName = String(next.name ?? '').trim() || nextPath.split('/').filter(Boolean).pop() || nextPath;
+      const targetLine = normalizePositiveInt(next.line);
+      const targetColumn = normalizePositiveInt(next.column);
       setOpenedFile((prev) => {
-        if (prev && prev.droneId === droneId && prev.path === nextPath) return prev;
-        return { droneId, path: nextPath, name: nextName };
+        const nextNavigationSeq = (prev?.navigationSeq ?? 0) + 1;
+        if (prev && prev.droneId === droneId && prev.path === nextPath) {
+          return {
+            ...prev,
+            name: nextName,
+            targetLine,
+            targetColumn,
+            navigationSeq: nextNavigationSeq,
+          };
+        }
+        return {
+          droneId,
+          path: nextPath,
+          name: nextName,
+          targetLine,
+          targetColumn,
+          navigationSeq: nextNavigationSeq,
+        };
       });
     },
-    [currentDrone?.id],
+    [currentDrone?.id, normalizePositiveInt],
   );
 
   React.useEffect(() => {
@@ -75,6 +106,7 @@ export function useFileEditorState({
     setLoading(true);
     setSaving(false);
     setError(null);
+    setOpenFailure(null);
     setContent('');
     setSavedContent('');
     contentRef.current = '';
@@ -92,10 +124,13 @@ export function useFileEditorState({
         contentRef.current = nextContent;
         setMtimeMs(typeof data.mtimeMs === 'number' && Number.isFinite(data.mtimeMs) ? data.mtimeMs : null);
         setError(null);
+        setOpenFailure(null);
       })
       .catch((e: any) => {
         if (cancelled || requestSeqRef.current !== seq) return;
-        setError(e?.message ?? String(e));
+        const msg = e?.message ?? String(e);
+        setError(msg);
+        setOpenFailure({ message: msg, at: Date.now() });
         setContent('');
         setSavedContent('');
         contentRef.current = '';
@@ -162,6 +197,7 @@ export function useFileEditorState({
     loading,
     saving,
     error,
+    openFailure,
     content,
     dirty,
     mtimeMs,
