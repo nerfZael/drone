@@ -10,7 +10,10 @@ import type {
   RepoPullChangesPayload,
   RepoPullDiffPayload,
   RepoPullRequestChangeEntry,
+  RepoPullRequestClosePayload,
   RepoPullRequestChangesPayload,
+  RepoPullRequestMergeMethod,
+  RepoPullRequestMergePayload,
 } from '../types';
 import {
   CHANGES_DATA_MODE_STORAGE_KEY,
@@ -40,6 +43,7 @@ type ExplorerNode = {
 };
 
 const CHANGES_VIEW_STORAGE_KEY = 'droneHub.changesViewMode';
+const PR_MERGE_METHOD_STORAGE_KEY = 'droneHub.prMergeMethod';
 
 function shortSha(sha: string | null | undefined): string {
   const s = String(sha ?? '').trim();
@@ -57,6 +61,18 @@ function shortRefName(raw: string | null | undefined, maxLen: number = 32): stri
   if (!text) return '-';
   if (text.length <= maxLen) return text;
   return `${text.slice(0, maxLen - 1)}…`;
+}
+
+function changesPrMergeMethod(): RepoPullRequestMergeMethod {
+  try {
+    const raw = String(localStorage.getItem(PR_MERGE_METHOD_STORAGE_KEY) ?? '')
+      .trim()
+      .toLowerCase();
+    if (raw === 'squash' || raw === 'rebase' || raw === 'merge') return raw;
+  } catch {
+    // ignore
+  }
+  return 'merge';
 }
 
 function pullRequestStateBadge(
@@ -437,6 +453,9 @@ export function DroneChangesDock({
   const [pullRequestChanges, setPullRequestChanges] = React.useState<Extract<RepoPullRequestChangesPayload, { ok: true }> | null>(null);
   const [pullRequestLoading, setPullRequestLoading] = React.useState(false);
   const [pullRequestError, setPullRequestError] = React.useState<string | null>(null);
+  const [pullRequestActionBusy, setPullRequestActionBusy] = React.useState<'merge' | 'close' | null>(null);
+  const [pullRequestActionError, setPullRequestActionError] = React.useState<string | null>(null);
+  const [pullRequestActionNotice, setPullRequestActionNotice] = React.useState<string | null>(null);
   const [lastRefreshedByMode, setLastRefreshedByMode] = React.useState<LastRefreshedByMode>({
     'working-tree': null,
     'pull-preview': null,
@@ -522,6 +541,17 @@ export function DroneChangesDock({
     if (pullRequestNumber && pullRequestNumber > 0) return;
     setDataMode('pull-preview');
   }, [dataMode, pullRequestNumber]);
+
+  React.useEffect(() => {
+    setPullRequestActionError(null);
+    setPullRequestActionNotice(null);
+  }, [dataMode, pullRequestNumber]);
+
+  React.useEffect(() => {
+    if (!pullRequestActionNotice) return;
+    const timer = setTimeout(() => setPullRequestActionNotice(null), 4500);
+    return () => clearTimeout(timer);
+  }, [pullRequestActionNotice]);
 
   React.useEffect(() => {
     if (!repoAttached || disabled || dataMode !== 'working-tree') {
@@ -937,8 +967,85 @@ export function DroneChangesDock({
       : null;
   const activePullRequestTitleRaw = dataMode === 'pull-request' ? String(pullRequestChanges?.pullRequest.title ?? '').trim() : '';
   const activePullRequestHtmlUrl = dataMode === 'pull-request' ? String(pullRequestChanges?.pullRequest.htmlUrl ?? '').trim() : '';
+  const activePullRequestState = dataMode === 'pull-request' ? String(pullRequestChanges?.pullRequest.state ?? '').trim().toLowerCase() : '';
   const activePullRequestStatus = dataMode === 'pull-request' ? pullRequestStateBadge(pullRequestChanges?.pullRequest.state) : null;
+  const activePullRequestIsFinalState = activePullRequestState === 'merged' || activePullRequestState === 'closed';
+  const activePullRequestActionBlockedReason = !activePullRequestNumber
+    ? 'No pull request selected.'
+    : activePullRequestIsFinalState
+      ? `PR is already ${activePullRequestState}.`
+      : null;
   const refreshed = refreshTimeLabel(lastRefreshedByMode[dataMode] ?? null);
+
+  const mergeActivePullRequest = React.useCallback(async () => {
+    if (!activePullRequestNumber || pullRequestActionBusy || activePullRequestIsFinalState) return;
+    const mergeMethod = changesPrMergeMethod();
+    if (!window.confirm(`Merge PR #${activePullRequestNumber} using "${mergeMethod}"?`)) return;
+    setPullRequestActionError(null);
+    setPullRequestActionNotice(null);
+    setPullRequestActionBusy('merge');
+    try {
+      const merged = await requestJson<Extract<RepoPullRequestMergePayload, { ok: true }>>(
+        `/api/drones/${encodeURIComponent(droneId)}/repo/pull-requests/${activePullRequestNumber}/merge`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ method: mergeMethod }),
+        },
+      );
+      if (!mountedRef.current) return;
+      if (merged.merged) {
+        setPullRequestChanges((prev) =>
+          prev && prev.pullRequest.number === activePullRequestNumber
+            ? { ...prev, pullRequest: { ...prev.pullRequest, state: 'merged' } }
+            : prev,
+        );
+      }
+      setPullRequestActionNotice(merged.message || `Merged PR #${activePullRequestNumber}.`);
+      setRefreshNonce((n) => n + 1);
+    } catch (e: any) {
+      if (!mountedRef.current) return;
+      setPullRequestActionError(e?.message ?? String(e));
+    } finally {
+      if (mountedRef.current) setPullRequestActionBusy(null);
+    }
+  }, [activePullRequestIsFinalState, activePullRequestNumber, droneId, pullRequestActionBusy]);
+
+  const closeActivePullRequest = React.useCallback(async () => {
+    if (!activePullRequestNumber || pullRequestActionBusy || activePullRequestIsFinalState) return;
+    if (!window.confirm(`Close PR #${activePullRequestNumber} without merging?`)) return;
+    setPullRequestActionError(null);
+    setPullRequestActionNotice(null);
+    setPullRequestActionBusy('close');
+    try {
+      const closed = await requestJson<Extract<RepoPullRequestClosePayload, { ok: true }>>(
+        `/api/drones/${encodeURIComponent(droneId)}/repo/pull-requests/${activePullRequestNumber}/close`,
+        { method: 'POST' },
+      );
+      if (!mountedRef.current) return;
+      const state = String(closed.state ?? 'closed').trim().toLowerCase() || 'closed';
+      setPullRequestChanges((prev) =>
+        prev && prev.pullRequest.number === activePullRequestNumber
+          ? {
+              ...prev,
+              pullRequest: {
+                ...prev.pullRequest,
+                state,
+                title: String(closed.title ?? prev.pullRequest.title).trim() || prev.pullRequest.title,
+                htmlUrl: closed.htmlUrl ?? prev.pullRequest.htmlUrl,
+              },
+            }
+          : prev,
+      );
+      setPullRequestActionNotice(`Closed PR #${closed.number}.`);
+      setRefreshNonce((n) => n + 1);
+    } catch (e: any) {
+      if (!mountedRef.current) return;
+      setPullRequestActionError(e?.message ?? String(e));
+    } finally {
+      if (mountedRef.current) setPullRequestActionBusy(null);
+    }
+  }, [activePullRequestIsFinalState, activePullRequestNumber, droneId, pullRequestActionBusy]);
 
   function renderExplorer(nodes: ExplorerNode[], depth: number): React.ReactNode {
     return nodes.map((node) => {
@@ -1189,6 +1296,30 @@ export function DroneChangesDock({
             </div>
           </div>
           <div className="shrink-0 flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                void mergeActivePullRequest();
+              }}
+              disabled={Boolean(pullRequestActionBusy) || Boolean(activePullRequestActionBlockedReason)}
+              className="inline-flex items-center h-6 px-2 rounded border text-[9px] font-semibold uppercase tracking-wide border-[rgba(74,222,128,.35)] bg-[var(--green-subtle)] text-[var(--green)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
+              title={activePullRequestActionBlockedReason ?? 'Merge pull request'}
+              style={{ fontFamily: 'var(--display)' }}
+            >
+              {pullRequestActionBusy === 'merge' ? 'Merging...' : 'Merge'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                void closeActivePullRequest();
+              }}
+              disabled={Boolean(pullRequestActionBusy) || Boolean(activePullRequestActionBlockedReason)}
+              className="inline-flex items-center h-6 px-2 rounded border text-[9px] font-semibold uppercase tracking-wide border-[rgba(255,90,90,.35)] bg-[var(--red-subtle)] text-[var(--red)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
+              title={activePullRequestActionBlockedReason ?? 'Close pull request without merging'}
+              style={{ fontFamily: 'var(--display)' }}
+            >
+              {pullRequestActionBusy === 'close' ? 'Closing...' : 'Close'}
+            </button>
             {activePullRequestStatus ? (
               <span
                 className={`inline-flex items-center h-6 px-2 rounded border text-[9px] font-semibold uppercase tracking-wide ${activePullRequestStatus.className}`}
@@ -1212,6 +1343,12 @@ export function DroneChangesDock({
             ) : null}
           </div>
         </div>
+      ) : null}
+      {dataMode === 'pull-request' && pullRequestActionNotice ? (
+        <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] text-[10px] text-[var(--green)] bg-[var(--green-subtle)]">{pullRequestActionNotice}</div>
+      ) : null}
+      {dataMode === 'pull-request' && pullRequestActionError ? (
+        <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] text-[10px] text-[var(--red)] bg-[var(--red-subtle)]">{pullRequestActionError}</div>
       ) : null}
 
       {!repoAttached ? (
