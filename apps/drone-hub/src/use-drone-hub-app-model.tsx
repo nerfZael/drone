@@ -1250,6 +1250,26 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setSelectedDroneIds,
     ],
   );
+  const deleteCanvasDrones = React.useCallback(
+    async (droneIdsRaw: string[]): Promise<string[]> => {
+      const targetIds: string[] = [];
+      for (const raw of Array.isArray(droneIdsRaw) ? droneIdsRaw : []) {
+        const id = String(raw ?? '').trim();
+        if (!id || targetIds.includes(id)) continue;
+        if (!sidebarSelectableDroneIdSet.has(id)) continue;
+        targetIds.push(id);
+      }
+      if (targetIds.length === 0) return [];
+
+      const deletedIds: string[] = [];
+      for (const droneId of targetIds) {
+        const deleted = await deleteDrone(droneId);
+        if (deleted) deletedIds.push(droneId);
+      }
+      return deletedIds;
+    },
+    [deleteDrone, sidebarSelectableDroneIdSet],
+  );
   const canvasDraftRepoLabel = React.useMemo(() => {
     if (!currentDroneRepoAttached) return '';
     const repoPath = String(currentDroneRepoPath ?? '').trim();
@@ -1271,6 +1291,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         onActivateDroneFromCanvas={onActivateDroneFromCanvas}
         onSendCanvasPrompt={sendCanvasPrompt}
         onCreateCanvasDroneFromDraft={createCanvasDroneFromDraft}
+        onDeleteCanvasDrones={deleteCanvasDrones}
         currentDroneId={currentDrone?.id ?? null}
         defaultFsPathForCurrentDrone={defaultFsPathForCurrentDrone}
         uiDroneName={uiDroneName}
@@ -1313,6 +1334,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       currentFsPath,
       currentPortReachability,
       createCanvasDroneFromDraft,
+      deleteCanvasDrones,
       canvasDraftRepoLabel,
       defaultFsPathForCurrentDrone,
       droneNameById,
