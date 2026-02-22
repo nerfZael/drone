@@ -76,6 +76,7 @@ type UseDroneHubLifecycleEffectsArgs = {
   updatePinned: (el: HTMLDivElement | null) => void;
   currentDrone: DroneSummary | null;
   selectedDrone: string | null;
+  selectedChat: string;
   draftCreating: boolean;
   draftAutoRenaming: boolean;
   setDraftChat: Setter<DraftChatState | null>;
@@ -135,10 +136,13 @@ export function useDroneHubLifecycleEffects({
   updatePinned,
   currentDrone,
   selectedDrone,
+  selectedChat,
   draftCreating,
   draftAutoRenaming,
   setDraftChat,
 }: UseDroneHubLifecycleEffectsArgs) {
+  const transcriptScrollContextRef = React.useRef<string>('');
+  const outputScrollContextRef = React.useRef<string>('');
   useDropdownDismiss(terminalMenuRef, terminalMenuOpen, setTerminalMenuOpen);
   useDropdownDismiss(headerOverflowRef, headerOverflowOpen, setHeaderOverflowOpen);
 
@@ -454,6 +458,13 @@ export function useDroneHubLifecycleEffects({
 
   React.useEffect(() => {
     if (chatUiMode !== 'transcript') return;
+    const contextKey = `${selectedDrone ?? ''}\u0000${selectedChat ?? ''}`;
+    if (transcriptScrollContextRef.current !== contextKey) {
+      // Ignore the first render after context switch to avoid sampling stale transcript length.
+      transcriptScrollContextRef.current = contextKey;
+      prevChatItemsLenRef.current = -1;
+      return;
+    }
     const len = (transcripts?.length ?? 0) + visiblePendingPromptsWithStartup.length;
     if (len > 0 && len !== prevChatItemsLenRef.current) {
       prevChatItemsLenRef.current = len;
@@ -461,10 +472,25 @@ export function useDroneHubLifecycleEffects({
         chatEndRef.current?.scrollIntoView({ behavior: 'auto' });
       });
     }
-  }, [chatUiMode, chatEndRef, prevChatItemsLenRef, transcripts, visiblePendingPromptsWithStartup.length]);
+  }, [
+    chatUiMode,
+    chatEndRef,
+    prevChatItemsLenRef,
+    selectedChat,
+    selectedDrone,
+    transcripts,
+    visiblePendingPromptsWithStartup.length,
+  ]);
 
   React.useEffect(() => {
     if (chatUiMode !== 'cli') return;
+    const contextKey = `${selectedDrone ?? ''}\u0000${selectedChat ?? ''}`;
+    if (outputScrollContextRef.current !== contextKey) {
+      // Ignore the first render after context switch to avoid sampling stale output length.
+      outputScrollContextRef.current = contextKey;
+      prevOutputLenRef.current = -1;
+      return;
+    }
     const len = sessionText.length;
     if (len > 0 && len !== prevOutputLenRef.current) {
       prevOutputLenRef.current = len;
@@ -477,7 +503,7 @@ export function useDroneHubLifecycleEffects({
         });
       }
     }
-  }, [chatUiMode, outputScrollRef, pinnedToBottomRef, prevOutputLenRef, sessionText, updatePinned]);
+  }, [chatUiMode, outputScrollRef, pinnedToBottomRef, prevOutputLenRef, selectedChat, selectedDrone, sessionText, updatePinned]);
 
   React.useEffect(() => {
     const pending = draftChat?.prompt ?? null;
