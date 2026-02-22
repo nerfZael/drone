@@ -1249,6 +1249,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setSelectedDroneIds,
     ],
   );
+  const canvasDraftRepoLabel = React.useMemo(() => {
+    if (!currentDroneRepoAttached) return '';
+    const repoPath = String(currentDroneRepoPath ?? '').trim();
+    if (!repoPath) return '';
+    return repoPath.split(/[\\/]/).filter(Boolean).pop() || repoPath;
+  }, [currentDroneRepoAttached, currentDroneRepoPath]);
 
   const renderRightPanelTabContent = React.useCallback(
     (drone: DroneSummary, tab: RightPanelTab, paneKey: 'top' | 'bottom' | 'single'): React.ReactNode => (
@@ -1259,6 +1265,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         selectedChat={selectedChat}
         droneNameById={droneNameById}
         droneRepoById={droneRepoById}
+        draftRepoLabel={canvasDraftRepoLabel}
         droneStateById={droneStateById}
         onActivateDroneFromCanvas={onActivateDroneFromCanvas}
         onSendCanvasPrompt={sendCanvasPrompt}
@@ -1305,6 +1312,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       currentFsPath,
       currentPortReachability,
       createCanvasDroneFromDraft,
+      canvasDraftRepoLabel,
       defaultFsPathForCurrentDrone,
       droneNameById,
       droneRepoById,
