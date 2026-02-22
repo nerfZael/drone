@@ -14,7 +14,7 @@ import {
 } from './use-drone-canvas-store';
 
 const NODE_HEIGHT_PX = 54;
-const DROP_STACK_SPACING_Y_PX = 62;
+const DROP_STACK_SPACING_Y_PX = 48;
 const DRAG_MOVE_THRESHOLD_PX = 3;
 const DOT_GRID_BASE_SPACING_PX = 32;
 const DOT_GRID_RADIUS_PX = 1.05;
@@ -368,6 +368,11 @@ export function DroneCanvasDock({
       input.focus();
       const end = input.value.length;
       input.setSelectionRange(end, end);
+    });
+  }, []);
+  const focusViewport = React.useCallback(() => {
+    requestAnimationFrame(() => {
+      viewportRef.current?.focus({ preventScroll: true });
     });
   }, []);
 
@@ -797,7 +802,6 @@ export function DroneCanvasDock({
                     node.label;
                   replaceNodeId(draftNodeId, nextDroneId, nextLabel);
                   replacedDraftIds.set(draftNodeId, nextDroneId);
-                  onActivateDrone?.(nextDroneId);
                   return;
                 }
 
@@ -828,7 +832,14 @@ export function DroneCanvasDock({
         }
       }
 
-      if (replacedDraftIds.size > 0) {
+      const allDraftCreatesSucceeded =
+        draftNodeIds.length > 0 && replacedDraftIds.size === draftNodeIds.length;
+      const shouldClearSelectionAfterDraftCreate =
+        regularDroneIds.length === 0 && allDraftCreatesSucceeded;
+
+      if (shouldClearSelectionAfterDraftCreate) {
+        clearSelection();
+      } else if (replacedDraftIds.size > 0) {
         setSelectedDroneIds((prev) => {
           const remapped = prev.map((id) => replacedDraftIds.get(id) ?? id);
           return Array.from(new Set(remapped));
@@ -841,20 +852,25 @@ export function DroneCanvasDock({
       }
       if (regularSendSucceeded && regularSendError) errors.push(regularSendError);
       setMessageError(errors.length > 0 ? errors.join(' ') : null);
-      focusMessageInput();
+      if (shouldClearSelectionAfterDraftCreate) {
+        focusViewport();
+      } else {
+        focusMessageInput();
+      }
     } catch (err: any) {
       setMessageError(err?.message ?? String(err));
     } finally {
       setMessagePendingCount((prev) => Math.max(0, prev - 1));
     }
   }, [
+    clearSelection,
     draftPromptByNodeId,
     droneNameById,
     focusMessageInput,
+    focusViewport,
     messageSending,
     setDraftPromptForNode,
     nodesByDroneId,
-    onActivateDrone,
     onCreateCanvasDroneFromDraft,
     onSendCanvasPrompt,
     removeDraftNodeIfEmpty,
