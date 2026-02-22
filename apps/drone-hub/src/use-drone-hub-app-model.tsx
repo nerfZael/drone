@@ -1284,6 +1284,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         tab={tab}
         paneKey={paneKey}
         selectedChat={selectedChat}
+        orderedDroneIds={orderedDroneIds}
         droneNameById={droneNameById}
         droneRepoById={droneRepoById}
         draftRepoLabel={canvasDraftRepoLabel}
@@ -1341,6 +1342,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       droneRepoById,
       droneStateById,
       onActivateDroneFromCanvas,
+      orderedDroneIds,
       filesPane,
       fsEntries,
       fsError,

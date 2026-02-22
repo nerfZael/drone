@@ -25,6 +25,7 @@ type RightPanelTabContentProps = {
   tab: RightPanelTab;
   paneKey: 'top' | 'bottom' | 'single';
   selectedChat: string;
+  orderedDroneIds: string[];
   droneNameById: Record<string, string>;
   droneRepoById: Record<string, string>;
   draftRepoLabel: string;
@@ -83,6 +84,7 @@ export function RightPanelTabContent({
   tab,
   paneKey,
   selectedChat,
+  orderedDroneIds,
   droneNameById,
   droneRepoById,
   draftRepoLabel,
@@ -128,6 +130,7 @@ export function RightPanelTabContent({
       return (
         <DroneCanvasDock
           droneNameById={droneNameById}
+          sidebarOrderedDroneIds={orderedDroneIds}
           droneRepoById={droneRepoById}
           draftRepoLabel={draftRepoLabel}
           droneStateById={droneStateById}
