@@ -709,7 +709,7 @@ export function DroneCanvasDock({
                 onMouseDown={(event) => onNodeMouseDown(node.droneId, event)}
                 onClick={(event) => onNodeClick(node.droneId, event)}
                 aria-pressed={selected}
-                className={`absolute rounded-md border text-left px-2.5 shadow-[0_10px_20px_rgba(0,0,0,.28)] transition-all flex items-center gap-2 ${
+                className={`absolute rounded-md border text-left px-2.5 shadow-[0_10px_20px_rgba(0,0,0,.28)] transition-[border-color,background-color,box-shadow] duration-100 flex items-center gap-2 ${
                   dragging
                     ? 'border-[var(--accent)] bg-[var(--accent-subtle)]'
                     : selected
@@ -717,10 +717,12 @@ export function DroneCanvasDock({
                       : 'border-[var(--border)] bg-[rgba(16,18,23,.92)] hover:border-[var(--accent-muted)]'
                 }`}
                 style={{
-                  left: node.x,
-                  top: node.y,
+                  left: 0,
+                  top: 0,
                   width: nodeWidth,
                   height: NODE_HEIGHT_PX,
+                  transform: `translate3d(${node.x}px, ${node.y}px, 0)`,
+                  willChange: dragging ? 'transform' : undefined,
                 }}
               >
                 <span className="min-w-0 flex-1 whitespace-nowrap text-[12.5px] font-semibold text-[var(--fg-secondary)]">
