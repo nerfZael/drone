@@ -318,8 +318,10 @@ export function DroneCanvasDock({
   const [messageBarExpanded, setMessageBarExpanded] = React.useState(false);
   const [messageDraft, setMessageDraft] = React.useState('');
   const [messageError, setMessageError] = React.useState<string | null>(null);
-  const [messageSending, setMessageSending] = React.useState(false);
+  const [messagePendingCount, setMessagePendingCount] = React.useState(0);
   const messageInputRef = React.useRef<HTMLInputElement | null>(null);
+  const draftCreateInFlightRef = React.useRef<Set<string>>(new Set());
+  const messageSending = messagePendingCount > 0;
 
   const nodes = React.useMemo(
     () => nodeOrder.map((droneId) => nodesByDroneId[droneId]).filter(Boolean),
@@ -739,19 +741,21 @@ export function DroneCanvasDock({
   }, [removeDraftNodeIfEmpty, selectedDraftNodeId]);
 
   const sendCanvasPrompt = React.useCallback(async () => {
-    if (messageSending) return;
     if (selectedDroneIds.length === 0) return;
+    const regularDroneIds = selectedDroneIds.filter((id) => !isCanvasDraftNodeId(id));
+    const draftNodeIds = selectedDroneIds.filter((id) => isCanvasDraftNodeId(id));
+    // Keep regular-message sends single-flight to avoid accidental duplicate broadcasts.
+    if (messageSending && draftNodeIds.length === 0) return;
+
     const prompt = String(selectedMessageDraft ?? '').trim();
     if (!prompt) {
       if (selectedDraftNodeId) removeDraftNodeIfEmpty(selectedDraftNodeId);
       return;
     }
 
-    setMessageSending(true);
+    setMessagePendingCount((prev) => prev + 1);
     setMessageError(null);
     try {
-      const regularDroneIds = selectedDroneIds.filter((id) => !isCanvasDraftNodeId(id));
-      const draftNodeIds = selectedDroneIds.filter((id) => isCanvasDraftNodeId(id));
       const errors: string[] = [];
       const replacedDraftIds = new Map<string, string>();
       let regularSendSucceeded = false;
@@ -761,34 +765,51 @@ export function DroneCanvasDock({
         if (!onCreateCanvasDroneFromDraft) {
           errors.push('Draft creation is unavailable.');
         } else {
-          for (const draftNodeId of draftNodeIds) {
-            const node = nodesByDroneId[draftNodeId];
-            if (!node) continue;
-            const draftPrompt = String(draftPromptByNodeId[draftNodeId] ?? '').trim();
-            const promptForDraft = draftNodeIds.length === 1 ? draftPrompt || prompt : prompt;
-            if (!promptForDraft) {
-              removeDraftNodeIfEmpty(draftNodeId);
-              continue;
-            }
-            const result = await onCreateCanvasDroneFromDraft({
-              draftNodeId,
-              prompt: promptForDraft,
-              label: node.label,
-            });
-            if (result.ok && String(result.droneId ?? '').trim()) {
-              const nextDroneId = String(result.droneId ?? '').trim();
-              const nextLabel =
-                String(result.droneName ?? '').trim() ||
-                String(droneNameById[nextDroneId] ?? '').trim() ||
-                node.label;
-              replaceNodeId(draftNodeId, nextDroneId, nextLabel);
-              replacedDraftIds.set(draftNodeId, nextDroneId);
-              onActivateDrone?.(nextDroneId);
-              continue;
-            }
-            const fallback = `Failed to create "${node.label}".`;
-            errors.push(String(result.error ?? '').trim() || fallback);
-          }
+          await Promise.all(
+            draftNodeIds.map(async (draftNodeId) => {
+              const node = nodesByDroneId[draftNodeId];
+              if (!node) return;
+              if (draftCreateInFlightRef.current.has(draftNodeId)) {
+                errors.push(`"${node.label}" is still being created.`);
+                return;
+              }
+              const draftPrompt = String(draftPromptByNodeId[draftNodeId] ?? '').trim();
+              const promptForDraft = draftNodeIds.length === 1 ? draftPrompt || prompt : prompt;
+              if (!promptForDraft) {
+                removeDraftNodeIfEmpty(draftNodeId);
+                return;
+              }
+
+              // Clear immediately so Enter can be used right away for rapid draft spawning/sending.
+              setDraftPromptForNode(draftNodeId, '');
+              draftCreateInFlightRef.current.add(draftNodeId);
+              try {
+                const result = await onCreateCanvasDroneFromDraft({
+                  draftNodeId,
+                  prompt: promptForDraft,
+                  label: node.label,
+                });
+                if (result.ok && String(result.droneId ?? '').trim()) {
+                  const nextDroneId = String(result.droneId ?? '').trim();
+                  const nextLabel =
+                    String(result.droneName ?? '').trim() ||
+                    String(droneNameById[nextDroneId] ?? '').trim() ||
+                    node.label;
+                  replaceNodeId(draftNodeId, nextDroneId, nextLabel);
+                  replacedDraftIds.set(draftNodeId, nextDroneId);
+                  onActivateDrone?.(nextDroneId);
+                  return;
+                }
+
+                // Restore the prompt if creation failed and the draft still exists.
+                setDraftPromptForNode(draftNodeId, promptForDraft);
+                const fallback = `Failed to create "${node.label}".`;
+                errors.push(String(result.error ?? '').trim() || fallback);
+              } finally {
+                draftCreateInFlightRef.current.delete(draftNodeId);
+              }
+            }),
+          );
         }
       }
 
@@ -824,13 +845,14 @@ export function DroneCanvasDock({
     } catch (err: any) {
       setMessageError(err?.message ?? String(err));
     } finally {
-      setMessageSending(false);
+      setMessagePendingCount((prev) => Math.max(0, prev - 1));
     }
   }, [
     draftPromptByNodeId,
     droneNameById,
     focusMessageInput,
     messageSending,
+    setDraftPromptForNode,
     nodesByDroneId,
     onActivateDrone,
     onCreateCanvasDroneFromDraft,

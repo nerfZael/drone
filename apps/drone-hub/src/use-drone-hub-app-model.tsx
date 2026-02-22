@@ -1241,10 +1241,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         });
         preferredSelectedDroneRef.current = droneId;
         preferredSelectedDroneHoldUntilRef.current = Date.now() + STARTUP_SEED_MISSING_GRACE_MS;
-        setSelectedDrone(droneId);
-        setSelectedDroneIds([droneId]);
-        selectionAnchorRef.current = droneId;
-        setSelectedChat('default');
         void suggestAndRenameDraftDrone(droneId, prompt);
         return { ok: true, droneId, droneName, error: null };
       } catch (err: any) {
@@ -1262,10 +1258,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       pullHostBranchBeforeCreate,
       rememberStartupSeed,
       requestJson,
-      selectionAnchorRef,
-      setSelectedChat,
-      setSelectedDrone,
-      setSelectedDroneIds,
       suggestAndRenameDraftDrone,
     ],
   );
