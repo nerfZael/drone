@@ -25,6 +25,7 @@ type RightPanelTabContentProps = {
   tab: RightPanelTab;
   paneKey: 'top' | 'bottom' | 'single';
   selectedChat: string;
+  orderedDroneIds: string[];
   droneNameById: Record<string, string>;
   droneRepoById: Record<string, string>;
   draftRepoLabel: string;
@@ -48,6 +49,10 @@ type RightPanelTabContentProps = {
     prompt: string;
     label: string;
   }) => Promise<{ ok: boolean; droneId?: string; droneName?: string; error?: string | null }>;
+  onRenameCanvasDrone: (
+    droneId: string,
+    newName: string,
+  ) => Promise<{ ok: boolean; error?: string | null }>;
   onDeleteCanvasDrones: (droneIds: string[]) => Promise<string[]>;
   currentDroneId: string | null;
   defaultFsPathForCurrentDrone: string;
@@ -83,6 +88,7 @@ export function RightPanelTabContent({
   tab,
   paneKey,
   selectedChat,
+  orderedDroneIds,
   droneNameById,
   droneRepoById,
   draftRepoLabel,
@@ -90,6 +96,7 @@ export function RightPanelTabContent({
   onActivateDroneFromCanvas,
   onSendCanvasPrompt,
   onCreateCanvasDroneFromDraft,
+  onRenameCanvasDrone,
   onDeleteCanvasDrones,
   currentDroneId,
   defaultFsPathForCurrentDrone,
@@ -128,12 +135,15 @@ export function RightPanelTabContent({
       return (
         <DroneCanvasDock
           droneNameById={droneNameById}
+          sidebarOrderedDroneIds={orderedDroneIds}
+          sidebarSelectedDroneId={currentDroneId}
           droneRepoById={droneRepoById}
           draftRepoLabel={draftRepoLabel}
           droneStateById={droneStateById}
           onActivateDrone={onActivateDroneFromCanvas}
           onSendCanvasPrompt={onSendCanvasPrompt}
           onCreateCanvasDroneFromDraft={onCreateCanvasDroneFromDraft}
+          onRenameDrone={onRenameCanvasDrone}
           onDeleteDrones={onDeleteCanvasDrones}
         />
       );
