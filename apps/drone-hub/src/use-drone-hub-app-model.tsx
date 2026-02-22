@@ -682,31 +682,43 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const pinnedToBottomRef = React.useRef(true);
   const prevOutputLenRef = React.useRef(0);
 
-  function updatePinned(el: HTMLDivElement | null) {
+  const updatePinned = React.useCallback((el: HTMLDivElement | null) => {
     if (!el) return;
     const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
     const pinned = gap < 80;
     pinnedToBottomRef.current = pinned;
     setPinnedToBottom(pinned);
-  }
+  }, []);
 
-  function scrollChatToBottom() {
+  const scrollChatToBottom = React.useCallback(() => {
     // Force-follow on selection change so newly loaded content lands at the bottom.
     pinnedToBottomRef.current = true;
     setPinnedToBottom(true);
     prevOutputLenRef.current = -1;
     prevChatItemsLenRef.current = -1;
-    requestAnimationFrame(() => {
-      const transcriptEnd = chatEndRef.current;
-      if (transcriptEnd) {
-        transcriptEnd.scrollIntoView({ behavior: 'auto' });
-      }
-      const el = outputScrollRef.current;
-      if (!el) return;
-      el.scrollTop = el.scrollHeight;
-      updatePinned(el);
-    });
-  }
+    let triesRemaining = 4;
+    const attempt = () => {
+      requestAnimationFrame(() => {
+        let didScroll = false;
+        const transcriptEnd = chatEndRef.current;
+        if (transcriptEnd) {
+          transcriptEnd.scrollIntoView({ behavior: 'auto' });
+          didScroll = true;
+        }
+        const el = outputScrollRef.current;
+        if (el) {
+          el.scrollTop = el.scrollHeight;
+          updatePinned(el);
+          didScroll = true;
+        }
+        if (!didScroll && triesRemaining > 0) {
+          triesRemaining -= 1;
+          attempt();
+        }
+      });
+    };
+    attempt();
+  }, [updatePinned]);
 
   const {
     draggingDroneNames,
@@ -864,6 +876,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     removeQueuedPrompt,
     requestJson,
   });
+
+  React.useEffect(() => {
+    if (!selectedDrone) return;
+    scrollChatToBottom();
+  }, [scrollChatToBottom, selectedChat, selectedDrone]);
 
   const {
     deletingRepos,
