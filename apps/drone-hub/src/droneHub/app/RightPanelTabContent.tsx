@@ -42,6 +42,11 @@ type RightPanelTabContentProps = {
     droneIds: string[],
     prompt: string,
   ) => Promise<{ ok: boolean; error?: string | null }>;
+  onCreateCanvasDroneFromDraft: (payload: {
+    draftNodeId: string;
+    prompt: string;
+    label: string;
+  }) => Promise<{ ok: boolean; droneId?: string; droneName?: string; error?: string | null }>;
   currentDroneId: string | null;
   defaultFsPathForCurrentDrone: string;
   uiDroneName: (nameRaw: string) => string;
@@ -81,6 +86,7 @@ export function RightPanelTabContent({
   droneStateById,
   onActivateDroneFromCanvas,
   onSendCanvasPrompt,
+  onCreateCanvasDroneFromDraft,
   currentDroneId,
   defaultFsPathForCurrentDrone,
   uiDroneName,
@@ -122,6 +128,7 @@ export function RightPanelTabContent({
           droneStateById={droneStateById}
           onActivateDrone={onActivateDroneFromCanvas}
           onSendCanvasPrompt={onSendCanvasPrompt}
+          onCreateCanvasDroneFromDraft={onCreateCanvasDroneFromDraft}
         />
       );
 

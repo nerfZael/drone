@@ -5,6 +5,7 @@ const MIN_CANVAS_SCALE = 0.35;
 const MAX_CANVAS_SCALE = 2.6;
 const DRONE_CANVAS_STORAGE_KEY = 'droneHub.canvas';
 const CANVAS_PERSIST_DEBOUNCE_MS = 180;
+const DRAFT_CANVAS_NODE_PREFIX = 'draft:';
 
 type Updater<T> = T | ((prev: T) => T);
 
@@ -19,6 +20,7 @@ type DroneCanvasState = {
   nodesByDroneId: Record<string, DroneCanvasNode>;
   nodeOrder: string[];
   selectedDroneIds: string[];
+  draftPromptByNodeId: Record<string, string>;
   panX: number;
   panY: number;
   scale: number;
@@ -26,6 +28,8 @@ type DroneCanvasState = {
   moveNode: (droneId: string, x: number, y: number) => void;
   moveNodes: (nodes: Array<{ droneId: string; x: number; y: number }>) => void;
   removeNodes: (droneIds: string[]) => void;
+  replaceNodeId: (oldDroneId: string, newDroneId: string, label?: string | null) => void;
+  setDraftPromptForNode: (droneId: string, prompt: string) => void;
   syncNodeLabels: (droneNameById: Record<string, string>) => void;
   setSelectedDroneIds: (droneIds: Updater<string[]>) => void;
   toggleSelectedDroneId: (droneId: string) => void;
@@ -38,7 +42,7 @@ type DroneCanvasState = {
 
 type DroneCanvasPersistedState = Pick<
   DroneCanvasState,
-  'nodesByDroneId' | 'nodeOrder' | 'panX' | 'panY' | 'scale'
+  'nodesByDroneId' | 'nodeOrder' | 'draftPromptByNodeId' | 'panX' | 'panY' | 'scale'
 >;
 
 function roundCoord(value: number): number {
@@ -67,6 +71,11 @@ function normalizeSelection(
     out.push(id);
   }
   return out;
+}
+
+function isCanvasDraftNodeId(value: string): boolean {
+  const id = String(value ?? '').trim();
+  return id.startsWith(DRAFT_CANVAS_NODE_PREFIX);
 }
 
 function normalizeNodesByDroneId(value: unknown): Record<string, DroneCanvasNode> {
@@ -99,9 +108,22 @@ function normalizeNodeOrder(value: unknown, nodesByDroneId: Record<string, Drone
 function normalizePersistedState(value: unknown): DroneCanvasPersistedState {
   const raw = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
   const nodesByDroneId = normalizeNodesByDroneId(raw.nodesByDroneId);
+  const rawDraftPromptByNodeId =
+    raw.draftPromptByNodeId && typeof raw.draftPromptByNodeId === 'object' && !Array.isArray(raw.draftPromptByNodeId)
+      ? (raw.draftPromptByNodeId as Record<string, unknown>)
+      : {};
+  const draftPromptByNodeId: Record<string, string> = {};
+  for (const [rawId, rawPrompt] of Object.entries(rawDraftPromptByNodeId)) {
+    const id = String(rawId ?? '').trim();
+    if (!id || !nodesByDroneId[id] || !isCanvasDraftNodeId(id)) continue;
+    const prompt = String(rawPrompt ?? '');
+    if (!prompt) continue;
+    draftPromptByNodeId[id] = prompt;
+  }
   return {
     nodesByDroneId,
     nodeOrder: normalizeNodeOrder(raw.nodeOrder, nodesByDroneId),
+    draftPromptByNodeId,
     panX: roundCoord(Number(raw.panX ?? 32)),
     panY: roundCoord(Number(raw.panY ?? 32)),
     scale: clampCanvasScale(Number(raw.scale ?? 1)),
@@ -197,6 +219,7 @@ export const useDroneCanvasStore = create<DroneCanvasState>()(
       nodesByDroneId: {},
       nodeOrder: [],
       selectedDroneIds: [],
+      draftPromptByNodeId: {},
       panX: 32,
       panY: 32,
       scale: 1,
@@ -274,8 +297,14 @@ export const useDroneCanvasStore = create<DroneCanvasState>()(
           const removeSet = new Set(normalizeSelection(droneIds, state.nodesByDroneId));
           if (removeSet.size === 0) return state;
           const nextById: Record<string, DroneCanvasNode> = { ...state.nodesByDroneId };
+          const nextDraftPromptByNodeId = { ...state.draftPromptByNodeId };
+          let draftPromptChanged = false;
           for (const droneId of removeSet) {
             delete nextById[droneId];
+            if (Object.prototype.hasOwnProperty.call(nextDraftPromptByNodeId, droneId)) {
+              delete nextDraftPromptByNodeId[droneId];
+              draftPromptChanged = true;
+            }
           }
           const nextOrder = state.nodeOrder.filter((droneId) => !removeSet.has(droneId));
           const nextSelected = state.selectedDroneIds.filter((droneId) => !removeSet.has(droneId));
@@ -284,6 +313,53 @@ export const useDroneCanvasStore = create<DroneCanvasState>()(
             nodesByDroneId: nextById,
             nodeOrder: nextOrder,
             selectedDroneIds: nextSelected,
+            draftPromptByNodeId: draftPromptChanged ? nextDraftPromptByNodeId : state.draftPromptByNodeId,
+          };
+        }),
+      replaceNodeId: (oldDroneId, newDroneId, label) =>
+        set((state) => {
+          const oldId = String(oldDroneId ?? '').trim();
+          const nextId = String(newDroneId ?? '').trim();
+          if (!oldId || !nextId) return state;
+          const oldNode = state.nodesByDroneId[oldId];
+          if (!oldNode) return state;
+          const nextLabel = String(label ?? '').trim() || oldNode.label;
+          const nextNode: DroneCanvasNode = {
+            droneId: nextId,
+            label: nextLabel,
+            x: oldNode.x,
+            y: oldNode.y,
+          };
+          const nextById = { ...state.nodesByDroneId };
+          delete nextById[oldId];
+          nextById[nextId] = nextNode;
+          const rawOrder = state.nodeOrder.map((id) => (id === oldId ? nextId : id));
+          const nextOrder = normalizeNodeOrder(rawOrder, nextById);
+          const rawSelected = state.selectedDroneIds.map((id) => (id === oldId ? nextId : id));
+          const nextSelected = normalizeSelection(rawSelected, nextById);
+          const nextDraftPromptByNodeId = { ...state.draftPromptByNodeId };
+          delete nextDraftPromptByNodeId[oldId];
+          return {
+            ...state,
+            nodesByDroneId: nextById,
+            nodeOrder: nextOrder,
+            selectedDroneIds: nextSelected,
+            draftPromptByNodeId: nextDraftPromptByNodeId,
+          };
+        }),
+      setDraftPromptForNode: (droneId, prompt) =>
+        set((state) => {
+          const id = String(droneId ?? '').trim();
+          if (!id || !state.nodesByDroneId[id] || !isCanvasDraftNodeId(id)) return state;
+          const nextPrompt = String(prompt ?? '');
+          const prevPrompt = String(state.draftPromptByNodeId[id] ?? '');
+          if (prevPrompt === nextPrompt) return state;
+          const nextDraftPromptByNodeId = { ...state.draftPromptByNodeId };
+          if (nextPrompt) nextDraftPromptByNodeId[id] = nextPrompt;
+          else delete nextDraftPromptByNodeId[id];
+          return {
+            ...state,
+            draftPromptByNodeId: nextDraftPromptByNodeId,
           };
         }),
       syncNodeLabels: (droneNameById) =>
@@ -371,11 +447,12 @@ export const useDroneCanvasStore = create<DroneCanvasState>()(
     }),
     {
       name: DRONE_CANVAS_STORAGE_KEY,
-      version: 1,
+      version: 2,
       storage: createJSONStorage(() => canvasPersistStorage),
       partialize: (state): DroneCanvasPersistedState => ({
         nodesByDroneId: state.nodesByDroneId,
         nodeOrder: state.nodeOrder,
+        draftPromptByNodeId: state.draftPromptByNodeId,
         panX: state.panX,
         panY: state.panY,
         scale: state.scale,
@@ -393,3 +470,4 @@ export const useDroneCanvasStore = create<DroneCanvasState>()(
 );
 
 export { MIN_CANVAS_SCALE, MAX_CANVAS_SCALE, clampCanvasScale };
+export { DRAFT_CANVAS_NODE_PREFIX, isCanvasDraftNodeId };
