@@ -27,6 +27,7 @@ type RightPanelTabContentProps = {
   selectedChat: string;
   droneNameById: Record<string, string>;
   droneRepoById: Record<string, string>;
+  draftRepoLabel: string;
   droneStateById: Record<
     string,
     {
@@ -83,6 +84,7 @@ export function RightPanelTabContent({
   selectedChat,
   droneNameById,
   droneRepoById,
+  draftRepoLabel,
   droneStateById,
   onActivateDroneFromCanvas,
   onSendCanvasPrompt,
@@ -125,6 +127,7 @@ export function RightPanelTabContent({
         <DroneCanvasDock
           droneNameById={droneNameById}
           droneRepoById={droneRepoById}
+          draftRepoLabel={draftRepoLabel}
           droneStateById={droneStateById}
           onActivateDrone={onActivateDroneFromCanvas}
           onSendCanvasPrompt={onSendCanvasPrompt}

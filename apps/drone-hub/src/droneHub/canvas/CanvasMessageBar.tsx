@@ -13,6 +13,7 @@ type CanvasMessageBarProps = {
   onDraftChange: (next: string) => void;
   onSend: () => void;
   onInputBlur?: (event: React.FocusEvent<HTMLInputElement>) => void;
+  onRequestNewDraft?: () => void;
 };
 
 export function CanvasMessageBar({
@@ -28,6 +29,7 @@ export function CanvasMessageBar({
   onDraftChange,
   onSend,
   onInputBlur,
+  onRequestNewDraft,
 }: CanvasMessageBarProps) {
   if (selectedCount <= 0) return null;
   const fallbackLabel = selectedCount === 1 ? '1 drone' : `${selectedCount} drones`;
@@ -65,7 +67,11 @@ export function CanvasMessageBar({
                 if ((event.nativeEvent as any)?.isComposing) return;
                 if (event.key === 'Enter') {
                   event.preventDefault();
-                  onSend();
+                  if (draft.trim().length > 0) {
+                    onSend();
+                  } else {
+                    onRequestNewDraft?.();
+                  }
                 } else if (event.key === 'Escape') {
                   event.preventDefault();
                   onCollapse();
