@@ -1,5 +1,13 @@
 import React from 'react';
 
+function buildUnexpectedHtmlError(url: string): string {
+  const path = String(url ?? '').trim();
+  if (path.startsWith('/api/')) {
+    return `Expected JSON from ${path}, but received HTML. The Hub API is likely unreachable. Start via 'drone hub' or set DRONE_HUB_API_PORT for the Vite dev server.`;
+  }
+  return `Expected JSON from ${path || 'request'}, but received HTML.`;
+}
+
 export function usePoll<T>(fn: () => Promise<T>, intervalMs: number, deps: any[] = []) {
   const [value, setValue] = React.useState<T | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -57,8 +65,27 @@ export function useNowMs(intervalMs: number, enabled: boolean): number {
 
 export async function fetchJson<T>(url: string): Promise<T> {
   const r = await fetch(url);
-  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
-  return (await r.json()) as T;
+  const text = await r.text();
+  const contentType = String(r.headers.get('content-type') ?? '').toLowerCase();
+  const looksHtml = contentType.includes('text/html') || /^\s*</.test(text);
+  let data: any = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      if (looksHtml) throw new Error(buildUnexpectedHtmlError(url));
+      if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+      throw new Error(`Expected JSON from ${url}, but response was not valid JSON.`);
+    }
+  }
+  if (!r.ok) {
+    const message = data?.error ? String(data.error) : `${r.status} ${r.statusText}`;
+    throw new Error(message);
+  }
+  if (data == null) {
+    throw new Error(`Expected JSON from ${url}, but response body was empty.`);
+  }
+  return data as T;
 }
 
 export function isNotFoundError(err: any): boolean {
