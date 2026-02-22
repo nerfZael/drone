@@ -3,6 +3,7 @@ import type { StartupSeedState } from './app-types';
 import type { DroneSummary } from '../types';
 import { isDroneStartingOrSeeding } from './helpers';
 import type { DroneDeleteMode } from './settings-types';
+import { useDroneCanvasStore } from '../canvas/use-drone-canvas-store';
 
 type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
 
@@ -123,9 +124,9 @@ export function useDroneMutationActions({
   );
 
   const deleteDrone = React.useCallback(
-    async (droneIdRaw: string) => {
+    async (droneIdRaw: string): Promise<boolean> => {
       const droneId = String(droneIdRaw ?? '').trim();
-      if (!droneId) return;
+      if (!droneId) return false;
       const droneName = String(drones.find((d) => d.id === droneId)?.name ?? '').trim() || droneId;
       if (
         deletingDrones[droneId] ||
@@ -133,13 +134,13 @@ export function useDroneMutationActions({
         settingBaseImages[droneId] ||
         optimisticallyDeletedDrones[droneId]
       ) {
-        return;
+        return false;
       }
       if (shouldConfirmDelete()) {
         const ok = window.confirm(deleteMode === 'archive'
           ? `Archive drone "${droneName}"?\n\nThis removes it from the active list now. You can restore it from Settings > Archive before it auto-deletes.`
           : `Are you sure you want to delete drone "${droneName}"?\n\nThis will remove the container and remove it from your registry.`);
-        if (!ok) return;
+        if (!ok) return false;
       }
       setOptimisticallyDeletedDrones((prev) => ({ ...prev, [droneId]: true }));
       setDeletingDrones((prev) => ({ ...prev, [droneId]: true }));
@@ -149,6 +150,9 @@ export function useDroneMutationActions({
         } else {
           await requestJson(`/api/drones/${encodeURIComponent(droneId)}`, { method: 'DELETE' });
         }
+        // Keep canvas consistent with sidebar deletion/archive actions.
+        useDroneCanvasStore.getState().removeNodes([droneId]);
+        return true;
       } catch (e: any) {
         console.error('[DroneHub] delete drone failed', { id: droneId, error: e });
         setOptimisticallyDeletedDrones((prev) => {
@@ -157,6 +161,7 @@ export function useDroneMutationActions({
           delete next[droneId];
           return next;
         });
+        return false;
       } finally {
         setDeletingDrones((prev) => {
           if (!prev[droneId]) return prev;

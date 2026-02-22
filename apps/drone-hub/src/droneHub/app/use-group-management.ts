@@ -18,6 +18,12 @@ export type MoveDronesToGroupResult = {
   error: string | null;
 };
 
+type DeleteGroupOptions = {
+  kind?: 'group' | 'repo';
+  label?: string;
+  repoPath?: string | null;
+};
+
 export function useGroupManagement({
   autoDelete,
   drones,
@@ -92,29 +98,40 @@ export function useGroupManagement({
   );
 
   const deleteGroup = React.useCallback(
-    async (groupRaw: string, countHint?: number) => {
+    async (groupRaw: string, countHint?: number, opts?: DeleteGroupOptions) => {
       const group = String(groupRaw ?? '').trim();
       if (!group || deletingGroups[group]) return;
+      const targetKind = opts?.kind === 'repo' ? 'repo' : 'group';
+      const groupLabel = String(opts?.label ?? group).trim() || group;
+      const targetRepoPath = targetKind === 'repo' ? String(opts?.repoPath ?? '').trim() : '';
       if (shouldConfirmDelete()) {
         const n = typeof countHint === 'number' && Number.isFinite(countHint) ? countHint : null;
-        const ok = window.confirm(
-          `Are you sure you want to delete group "${group}"${n != null ? ` (${n} drone${n === 1 ? '' : 's'})` : ''}?\n\nThis will delete ALL drones inside the group (containers + registry entries).`,
-        );
+        const ok = window.confirm(targetKind === 'repo'
+          ? targetRepoPath
+            ? `Are you sure you want to delete repo group "${groupLabel}"${n != null ? ` (${n} drone${n === 1 ? '' : 's'})` : ''}?\n\nThis will delete ALL drones attached to:\n${targetRepoPath}`
+            : `Are you sure you want to delete ungrouped repo drones${n != null ? ` (${n} drone${n === 1 ? '' : 's'})` : ''}?\n\nThis will delete ALL drones not attached to a repo path.`
+          : `Are you sure you want to delete group "${group}"${n != null ? ` (${n} drone${n === 1 ? '' : 's'})` : ''}?\n\nThis will delete ALL drones inside the group (containers + registry entries).`);
         if (!ok) return;
       }
-      const wantsUngrouped = isUngroupedGroupName(group);
+      const wantsUngroupedGroup = targetKind === 'group' && isUngroupedGroupName(group);
       const targetNames = Array.from(
         new Set(
           polledDrones
             .filter((d) => {
+              if (targetKind === 'repo') {
+                const droneRepoPath = String(d?.repoPath ?? '').trim();
+                if (targetRepoPath) return droneRepoPath === targetRepoPath;
+                return !droneRepoPath;
+              }
               const droneGroup = String(d?.group ?? '').trim();
-              if (wantsUngrouped) return !droneGroup || isUngroupedGroupName(droneGroup);
+              if (wantsUngroupedGroup) return !droneGroup || isUngroupedGroupName(droneGroup);
               return droneGroup === group;
             })
             .map((d) => String(d?.id ?? '').trim())
             .filter(Boolean),
         ),
       );
+      if (targetKind === 'repo' && targetNames.length === 0) return;
       const preHidden = new Set(
         Object.keys(optimisticallyDeletedDrones).filter((name) => optimisticallyDeletedDrones[name]),
       );
@@ -133,7 +150,41 @@ export function useGroupManagement({
       }
       setDeletingGroups((prev) => ({ ...prev, [group]: true }));
       try {
-        await requestJson(`/api/groups/${encodeURIComponent(group)}`, { method: 'DELETE' });
+        if (targetKind === 'repo') {
+          const failed: string[] = [];
+          for (const id of targetNames) {
+            try {
+              await requestJson(`/api/drones/${encodeURIComponent(id)}`, { method: 'DELETE' });
+            } catch (e: any) {
+              console.error('[DroneHub] delete repo-group drone failed', {
+                group: groupLabel,
+                id,
+                error: e,
+              });
+              failed.push(id);
+            }
+          }
+          if (failed.length > 0) {
+            setOptimisticallyDeletedDrones((prev) => {
+              const nextMap = { ...prev };
+              let changed = false;
+              for (const id of failed) {
+                if (!nextMap[id]) continue;
+                delete nextMap[id];
+                changed = true;
+              }
+              return changed ? nextMap : prev;
+            });
+            const plural = failed.length === 1 ? '' : 's';
+            window.alert(
+              failed.length === targetNames.length
+                ? `Failed to delete ${failed.length} drone${plural} from "${groupLabel}".`
+                : `Deleted ${targetNames.length - failed.length} drone${targetNames.length - failed.length === 1 ? '' : 's'} from "${groupLabel}", but ${failed.length} failed.`,
+            );
+          }
+        } else {
+          await requestJson(`/api/groups/${encodeURIComponent(group)}`, { method: 'DELETE' });
+        }
       } catch (e: any) {
         console.error('[DroneHub] delete group failed', { group, error: e });
         if (addedByThisDelete.length > 0) {

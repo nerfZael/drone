@@ -101,7 +101,11 @@ export type DroneSidebarProps = {
   onRenameGroup: (group: string) => void;
   onOpenGroupMultiChat: (group: string) => void;
   onOpenVisibleMultiChat: () => void;
-  onDeleteGroup: (group: string, count: number) => void;
+  onDeleteGroup: (
+    group: string,
+    count: number,
+    opts?: { kind?: 'group' | 'repo'; label?: string; repoPath?: string | null },
+  ) => void;
   onDroneDragStart: (droneId: string, event: React.DragEvent<HTMLDivElement>) => void;
   onDroneDragEnd: () => void;
   onOpenReposModal: () => void;
@@ -675,6 +679,12 @@ export function DroneSidebar({
                   const isDropTarget = !isVirtualGroup && dragOverGroup === group;
                   const canRenameGroup = !isVirtualGroup && !isUngroupedGroupName(groupLabel);
                   const pinGroupActionsVisible = isDeletingGroup || isRenamingGroup || selectedGroupMultiChat === group;
+                  const actionsVisibleClass = pinGroupActionsVisible
+                    ? 'opacity-100 pointer-events-auto'
+                    : 'opacity-0 pointer-events-none group-hover/group-header:opacity-100 group-hover/group-header:pointer-events-auto';
+                  const countVisibleClass = pinGroupActionsVisible
+                    ? 'opacity-0 pointer-events-none'
+                    : 'opacity-100 group-hover/group-header:opacity-0 group-hover/group-header:pointer-events-none';
                   return (
                     <div
                       key={group}
@@ -713,78 +723,88 @@ export function DroneSidebar({
                         <div
                           data-group-drag-block="true"
                           className={`flex items-center justify-end flex-shrink-0 transition-[min-width] duration-150 ${
-                            pinGroupActionsVisible ? 'min-w-[148px]' : 'min-w-[92px] group-hover/group-header:min-w-[148px]'
+                            pinGroupActionsVisible
+                              ? canRenameGroup
+                                ? 'min-w-[148px]'
+                                : 'min-w-[118px]'
+                              : canRenameGroup
+                                ? 'min-w-[92px] group-hover/group-header:min-w-[148px]'
+                                : 'min-w-[72px] group-hover/group-header:min-w-[118px]'
                           }`}
                         >
-                          <div className="relative w-full flex justify-end">
+                          <div className="w-full flex items-center justify-end gap-2">
                             <div
-                              className={`flex items-center gap-2 text-[10px] font-mono text-[var(--muted-dim)] transition-opacity duration-150 ${
-                                isDeletingGroup || isRenamingGroup
-                                  ? 'opacity-0 pointer-events-none'
-                                  : 'group-hover/group-header:opacity-0 group-hover/group-header:pointer-events-none'
-                              }`}
+                              className={`text-[10px] font-mono text-[var(--muted-dim)] transition-opacity duration-150 ${countVisibleClass}`}
                             >
-                              <span>
-                                {items.length} drone{items.length !== 1 ? 's' : ''}
-                              </span>
+                              {items.length} drone{items.length !== 1 ? 's' : ''}
                             </div>
-                            {canRenameGroup && (
-                              <button
-                                onClick={() => onRenameGroup(group)}
-                                disabled={isDeletingGroup || isRenamingGroup}
-                                aria-busy={isRenamingGroup}
-                                className={`absolute right-8 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
-                                  isDeletingGroup || isRenamingGroup
-                                    ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                                    : 'opacity-0 pointer-events-none group-hover/group-header:opacity-100 group-hover/group-header:pointer-events-auto bg-[rgba(167,139,250,.08)] border-[rgba(167,139,250,.18)] text-[var(--accent)] hover:bg-[rgba(167,139,250,.12)]'
-                                }`}
-                                title={isRenamingGroup ? `Renaming group "${groupLabel}"…` : `Rename group "${groupLabel}"`}
-                                aria-label={isRenamingGroup ? `Renaming group "${groupLabel}"` : `Rename group "${groupLabel}"`}
-                              >
-                                {isRenamingGroup ? <IconSpinner className="opacity-90" /> : <IconPencil className="opacity-90" />}
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => onOpenGroupMultiChat(group)}
-                              disabled={isDeletingGroup}
-                              className={`absolute right-16 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
-                                isDeletingGroup
-                                  ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                                  : selectedGroupMultiChat === group
-                                    ? 'opacity-100 pointer-events-auto bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
-                                    : 'opacity-0 pointer-events-none group-hover/group-header:opacity-100 group-hover/group-header:pointer-events-auto bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
-                              }`}
-                              title={`Open "${groupLabel}" multi-chat`}
-                              aria-label={`Open "${groupLabel}" multi-chat`}
-                            >
-                              <IconColumns className="opacity-90" />
-                            </button>
-                            {!isVirtualGroup && (
+                            <div className={`flex items-center justify-end gap-1 ${actionsVisibleClass}`}>
+                              {canRenameGroup && (
+                                <button
+                                  onClick={() => onRenameGroup(group)}
+                                  disabled={isDeletingGroup || isRenamingGroup}
+                                  aria-busy={isRenamingGroup}
+                                  className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
+                                    isDeletingGroup || isRenamingGroup
+                                      ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
+                                      : 'bg-[rgba(167,139,250,.08)] border-[rgba(167,139,250,.18)] text-[var(--accent)] hover:bg-[rgba(167,139,250,.12)]'
+                                  }`}
+                                  title={isRenamingGroup ? `Renaming group "${groupLabel}"…` : `Rename group "${groupLabel}"`}
+                                  aria-label={isRenamingGroup ? `Renaming group "${groupLabel}"` : `Rename group "${groupLabel}"`}
+                                >
+                                  {isRenamingGroup ? <IconSpinner className="opacity-90" /> : <IconPencil className="opacity-90" />}
+                                </button>
+                              )}
                               <button
                                 type="button"
-                                onClick={() => onDeleteGroup(group, items.length)}
+                                onClick={() => onOpenGroupMultiChat(group)}
+                                disabled={isDeletingGroup}
+                                className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
+                                  isDeletingGroup
+                                    ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
+                                    : selectedGroupMultiChat === group
+                                      ? 'opacity-100 pointer-events-auto bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
+                                      : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
+                                }`}
+                                title={`Open "${groupLabel}" multi-chat`}
+                                aria-label={`Open "${groupLabel}" multi-chat`}
+                              >
+                                <IconColumns className="opacity-90" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  onDeleteGroup(group, items.length, {
+                                    kind,
+                                    label: groupLabel,
+                                    repoPath: isVirtualGroup ? hoveredRepoPath || null : null,
+                                  })
+                                }
                                 disabled={isDeletingGroup || isRenamingGroup}
                                 aria-busy={isDeletingGroup}
-                                className={`absolute right-0 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
+                                className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
                                   isDeletingGroup || isRenamingGroup
                                     ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                                    : 'opacity-0 pointer-events-none group-hover/group-header:opacity-100 group-hover/group-header:pointer-events-auto bg-[var(--red-subtle)] border-[rgba(255,90,90,.2)] text-[var(--red)] hover:bg-[rgba(255,90,90,.15)]'
+                                    : 'bg-[var(--red-subtle)] border-[rgba(255,90,90,.2)] text-[var(--red)] hover:bg-[rgba(255,90,90,.15)]'
                                 }`}
                                 title={
                                   isDeletingGroup
                                     ? `Deleting group "${groupLabel}"…`
-                                    : `Delete group "${groupLabel}" (and all drones inside)`
+                                    : isVirtualGroup
+                                      ? `Delete all drones in "${groupLabel}"`
+                                      : `Delete group "${groupLabel}" (and all drones inside)`
                                 }
                                 aria-label={
                                   isDeletingGroup
                                     ? `Deleting group "${groupLabel}"`
-                                    : `Delete group "${groupLabel}" (and all drones inside)`
+                                    : isVirtualGroup
+                                      ? `Delete all drones in "${groupLabel}"`
+                                      : `Delete group "${groupLabel}" (and all drones inside)`
                                 }
                               >
                                 {isDeletingGroup ? <IconSpinner className="opacity-90" /> : <IconTrash className="opacity-90" />}
                               </button>
-                            )}
+                            </div>
                           </div>
                         </div>
                       </div>

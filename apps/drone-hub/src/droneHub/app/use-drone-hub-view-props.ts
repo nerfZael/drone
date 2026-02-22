@@ -115,8 +115,8 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     onOpenVisibleMultiChat: () => {
       openSidebarVisibleMultiChat();
     },
-    onDeleteGroup: (group, count) => {
-      void deleteGroup(group, count);
+    onDeleteGroup: (group, count, opts) => {
+      void deleteGroup(group, count, opts);
     },
     onDroneDragStart,
     onDroneDragEnd,

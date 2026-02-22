@@ -209,6 +209,7 @@ export function DroneCanvasDock({
   onActivateDrone,
   onSendCanvasPrompt,
   onCreateCanvasDroneFromDraft,
+  onDeleteDrones,
 }: {
   droneNameById: Record<string, string>;
   droneRepoById: Record<string, string>;
@@ -224,6 +225,7 @@ export function DroneCanvasDock({
     prompt: string;
     label: string;
   }) => Promise<{ ok: boolean; droneId?: string; droneName?: string; error?: string | null }>;
+  onDeleteDrones?: (droneIds: string[]) => Promise<string[]>;
 }) {
   const {
     nodesByDroneId,
@@ -946,6 +948,43 @@ export function DroneCanvasDock({
       }
 
       if ((key === 'delete' || key === 'backspace') && selectedDroneIds.length > 0) {
+        const shiftDeleteOnly =
+          key === 'delete' && event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey;
+        if (shiftDeleteOnly) {
+          event.preventDefault();
+          event.stopPropagation();
+          setMessageError(null);
+
+          const draftNodeIds = selectedDroneIds.filter((id) => isCanvasDraftNodeId(id));
+          const regularDroneIds = selectedDroneIds.filter((id) => !isCanvasDraftNodeId(id));
+          if (draftNodeIds.length > 0) {
+            removeNodes(draftNodeIds);
+          }
+          if (regularDroneIds.length === 0) return;
+
+          if (!onDeleteDrones) {
+            removeNodes(regularDroneIds);
+            return;
+          }
+
+          void (async () => {
+            try {
+              const deletedDroneIds = await onDeleteDrones(regularDroneIds);
+              const deletedSet = new Set(
+                (Array.isArray(deletedDroneIds) ? deletedDroneIds : [])
+                  .map((id) => String(id ?? '').trim())
+                  .filter((id) => id && regularDroneIds.includes(id)),
+              );
+              if (deletedSet.size > 0) {
+                removeNodes(Array.from(deletedSet));
+              }
+            } catch (err: any) {
+              setMessageError(err?.message ?? String(err));
+            }
+          })();
+          return;
+        }
+
         event.preventDefault();
         event.stopPropagation();
         removeNodes(selectedDroneIds);
@@ -958,6 +997,7 @@ export function DroneCanvasDock({
       closeMessageBar,
       messageBarExpanded,
       nodeOrder,
+      onDeleteDrones,
       openMessageBar,
       createDraftNearViewportCenter,
       removeNodes,
@@ -1173,7 +1213,10 @@ export function DroneCanvasDock({
                 Ctrl-click toggles selection. Left drag draws a selection box.
               </div>
               <div className="mt-1 text-[11px] text-[var(--muted-dim)]">
-                Esc clears selection. Delete removes selected nodes. Ctrl/Cmd+A selects all nodes.
+                Esc clears selection. Delete removes selected nodes. Shift+Delete deletes selected drones.
+              </div>
+              <div className="mt-1 text-[11px] text-[var(--muted-dim)]">
+                Ctrl/Cmd+A selects all nodes.
               </div>
               <div className="mt-1 text-[11px] text-[var(--muted-dim)]">
                 Right-click drag pans. Mouse wheel zooms.
