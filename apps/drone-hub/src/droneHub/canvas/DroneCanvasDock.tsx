@@ -90,6 +90,15 @@ function parseDraggedDroneIds(event: React.DragEvent<HTMLElement>): string[] {
   return out;
 }
 
+function hasDroneDragPayload(event: React.DragEvent<HTMLElement>): boolean {
+  const transfer = event.dataTransfer;
+  if (!transfer) return false;
+  const types = Array.from(transfer.types ?? []);
+  if (types.includes(DRONE_DND_MIME)) return true;
+  if (types.includes('text/plain')) return true;
+  return parseDraggedDroneIds(event).length > 0;
+}
+
 function screenToWorldPoint(
   clientX: number,
   clientY: number,
@@ -523,8 +532,7 @@ export function DroneCanvasDock({
 
   const onDragOver = React.useCallback(
     (event: React.DragEvent<HTMLDivElement>) => {
-      const ids = parseDraggedDroneIds(event);
-      if (ids.length === 0) return;
+      if (!hasDroneDragPayload(event)) return;
       event.preventDefault();
       event.dataTransfer.dropEffect = 'move';
       if (!dragOverCanvas) setDragOverCanvas(true);
