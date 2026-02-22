@@ -5,6 +5,7 @@ const MIN_CANVAS_SCALE = 0.35;
 const MAX_CANVAS_SCALE = 2.6;
 const DRONE_CANVAS_STORAGE_KEY = 'droneHub.canvas';
 const CANVAS_PERSIST_DEBOUNCE_MS = 180;
+const CANVAS_PERSIST_MAX_STALE_MS = 900;
 const DRAFT_CANVAS_NODE_PREFIX = 'draft:';
 
 type Updater<T> = T | ((prev: T) => T);
@@ -168,6 +169,7 @@ function getBrowserLocalStorage(): Storage | null {
 const canvasPersistStorage: StateStorage = (() => {
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
   const pending = new Map<string, string>();
+  let lastFlushAt = Date.now();
 
   const flush = () => {
     flushTimer = null;
@@ -185,6 +187,7 @@ const canvasPersistStorage: StateStorage = (() => {
       }
     }
     pending.clear();
+    lastFlushAt = Date.now();
   };
 
   const scheduleFlush = () => {
@@ -195,7 +198,11 @@ const canvasPersistStorage: StateStorage = (() => {
   };
 
   if (typeof window !== 'undefined') {
+    const flushOnLifecycle = () => flush();
     window.addEventListener('beforeunload', flush);
+    window.addEventListener('pagehide', flushOnLifecycle);
+    window.addEventListener('error', flushOnLifecycle);
+    window.addEventListener('unhandledrejection', flushOnLifecycle);
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden') flush();
@@ -215,6 +222,10 @@ const canvasPersistStorage: StateStorage = (() => {
     },
     setItem: (name, value) => {
       pending.set(name, value);
+      if (Date.now() - lastFlushAt >= CANVAS_PERSIST_MAX_STALE_MS) {
+        flush();
+        return;
+      }
       scheduleFlush();
     },
     removeItem: (name) => {
