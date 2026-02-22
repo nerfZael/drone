@@ -1252,6 +1252,20 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       suggestAndRenameDraftDrone,
     ],
   );
+  const renameCanvasDrone = React.useCallback(
+    async (
+      droneIdRaw: string,
+      newNameRaw: string,
+    ): Promise<{ ok: boolean; error?: string | null }> => {
+      const droneId = String(droneIdRaw ?? '').trim();
+      const newName = String(newNameRaw ?? '').trim();
+      if (!droneId) return { ok: false, error: 'Missing drone id.' };
+      if (!sidebarSelectableDroneIdSet.has(droneId)) return { ok: false, error: 'Drone is unavailable.' };
+      const renamed = await renameDroneTo(droneId, newName);
+      return renamed.ok ? { ok: true, error: null } : { ok: false, error: renamed.error };
+    },
+    [renameDroneTo, sidebarSelectableDroneIdSet],
+  );
   const deleteCanvasDrones = React.useCallback(
     async (droneIdsRaw: string[]): Promise<string[]> => {
       const targetIds: string[] = [];
@@ -1294,6 +1308,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         onActivateDroneFromCanvas={onActivateDroneFromCanvas}
         onSendCanvasPrompt={sendCanvasPrompt}
         onCreateCanvasDroneFromDraft={createCanvasDroneFromDraft}
+        onRenameCanvasDrone={renameCanvasDrone}
         onDeleteCanvasDrones={deleteCanvasDrones}
         currentDroneId={currentDrone?.id ?? null}
         defaultFsPathForCurrentDrone={defaultFsPathForCurrentDrone}
@@ -1337,6 +1352,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       currentFsPath,
       currentPortReachability,
       createCanvasDroneFromDraft,
+      renameCanvasDrone,
       deleteCanvasDrones,
       canvasDraftRepoLabel,
       defaultFsPathForCurrentDrone,
