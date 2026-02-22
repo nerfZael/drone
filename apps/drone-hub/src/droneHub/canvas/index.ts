@@ -1,0 +1,1 @@
+export { DroneCanvasDock } from './DroneCanvasDock';

@@ -1,4 +1,5 @@
 import React from 'react';
+import { DroneCanvasDock } from '../canvas';
 import { DroneChangesDock } from '../changes';
 import { DroneFilesDock } from '../files';
 import { DroneLinksDock, DronePreviewDock } from '../overview';
@@ -24,6 +25,18 @@ type RightPanelTabContentProps = {
   tab: RightPanelTab;
   paneKey: 'top' | 'bottom' | 'single';
   selectedChat: string;
+  droneNameById: Record<string, string>;
+  droneStateById: Record<
+    string,
+    {
+      statusOk: boolean;
+      statusError: string | null;
+      hubPhase?: DroneSummary['hubPhase'];
+      hubMessage?: DroneSummary['hubMessage'];
+      busy: boolean;
+    }
+  >;
+  onActivateDroneFromCanvas: (droneId: string) => void;
   currentDroneId: string | null;
   defaultFsPathForCurrentDrone: string;
   uiDroneName: (nameRaw: string) => string;
@@ -58,6 +71,9 @@ export function RightPanelTabContent({
   tab,
   paneKey,
   selectedChat,
+  droneNameById,
+  droneStateById,
+  onActivateDroneFromCanvas,
   currentDroneId,
   defaultFsPathForCurrentDrone,
   uiDroneName,
@@ -91,6 +107,15 @@ export function RightPanelTabContent({
   const isCurrent = Boolean(currentDroneId && String(currentDroneId) === String(drone.id));
 
   switch (tab) {
+    case 'canvas':
+      return (
+        <DroneCanvasDock
+          droneNameById={droneNameById}
+          droneStateById={droneStateById}
+          onActivateDrone={onActivateDroneFromCanvas}
+        />
+      );
+
     case 'terminal':
       return (
         <DroneTerminalDock

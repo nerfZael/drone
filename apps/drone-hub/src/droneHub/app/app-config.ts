@@ -34,7 +34,15 @@ export const HUB_LOGS_MAX_BYTES = 200_000;
 export const STARTUP_SEED_MISSING_GRACE_MS = 30_000;
 
 export type RightPanelTab = RightPanelTabId;
-export const RIGHT_PANEL_TABS: RightPanelTab[] = ['terminal', 'files', 'preview', 'links', 'changes', 'prs'];
+export const RIGHT_PANEL_TABS: RightPanelTab[] = [
+  'terminal',
+  'files',
+  'preview',
+  'links',
+  'changes',
+  'prs',
+  'canvas',
+];
 export const RIGHT_PANEL_TAB_LABELS: Record<RightPanelTab, string> = {
   terminal: 'Terminal',
   files: 'Files',
@@ -42,6 +50,7 @@ export const RIGHT_PANEL_TAB_LABELS: Record<RightPanelTab, string> = {
   links: 'Links',
   changes: 'Changes',
   prs: 'PRs',
+  canvas: 'Canvas',
 };
 
 export function viewportWidthPx(): number {

@@ -1,7 +1,14 @@
 import React from 'react';
 import type { DroneSummary } from '../types';
 
-export type RightPanelTabId = 'terminal' | 'files' | 'preview' | 'links' | 'changes' | 'prs';
+export type RightPanelTabId =
+  | 'terminal'
+  | 'files'
+  | 'preview'
+  | 'links'
+  | 'changes'
+  | 'prs'
+  | 'canvas';
 export type RightPanelPaneId = 'single' | 'top' | 'bottom';
 
 export type RightPanelProps = {

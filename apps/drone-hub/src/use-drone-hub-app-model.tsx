@@ -240,6 +240,43 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     activeRepoPath,
     registryGroupNames,
   });
+  const droneNameById = React.useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const drone of drones) {
+      const id = String(drone?.id ?? '').trim();
+      if (!id) continue;
+      out[id] = uiDroneName(drone.name);
+    }
+    return out;
+  }, [drones, uiDroneName]);
+  const droneStateById = React.useMemo(() => {
+    const out: Record<
+      string,
+      {
+        statusOk: boolean;
+        statusError: string | null;
+        hubPhase?: DroneSummary['hubPhase'];
+        hubMessage?: DroneSummary['hubMessage'];
+        busy: boolean;
+      }
+    > = {};
+    for (const drone of drones) {
+      const id = String(drone?.id ?? '').trim();
+      if (!id) continue;
+      out[id] = {
+        statusOk: Boolean(drone.statusOk),
+        statusError: drone.statusError ?? null,
+        hubPhase: drone.hubPhase,
+        hubMessage: drone.hubMessage,
+        busy: Boolean(drone.busy),
+      };
+    }
+    return out;
+  }, [drones]);
+  const sidebarSelectableDroneIdSet = React.useMemo(
+    () => new Set(sidebarDronesFilteredByRepo.map((drone) => drone.id)),
+    [sidebarDronesFilteredByRepo],
+  );
 
   /* ── Layout state ── */
   const {
@@ -1055,6 +1092,14 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [openEditorFile],
   );
+  const onActivateDroneFromCanvas = React.useCallback(
+    (droneIdRaw: string) => {
+      const droneId = String(droneIdRaw ?? '').trim();
+      if (!droneId || !sidebarSelectableDroneIdSet.has(droneId)) return;
+      selectDroneCard(droneId);
+    },
+    [selectDroneCard, sidebarSelectableDroneIdSet],
+  );
 
   const renderRightPanelTabContent = React.useCallback(
     (drone: DroneSummary, tab: RightPanelTab, paneKey: 'top' | 'bottom' | 'single'): React.ReactNode => (
@@ -1063,6 +1108,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         tab={tab}
         paneKey={paneKey}
         selectedChat={selectedChat}
+        droneNameById={droneNameById}
+        droneStateById={droneStateById}
+        onActivateDroneFromCanvas={onActivateDroneFromCanvas}
         currentDroneId={currentDrone?.id ?? null}
         defaultFsPathForCurrentDrone={defaultFsPathForCurrentDrone}
         uiDroneName={uiDroneName}
@@ -1105,6 +1153,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       currentFsPath,
       currentPortReachability,
       defaultFsPathForCurrentDrone,
+      droneNameById,
+      droneStateById,
+      onActivateDroneFromCanvas,
       filesPane,
       fsEntries,
       fsError,
