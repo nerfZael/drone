@@ -970,6 +970,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     updatePinned,
     currentDrone,
     selectedDrone,
+    selectedChat,
     draftCreating,
     draftAutoRenaming,
     setDraftChat,
