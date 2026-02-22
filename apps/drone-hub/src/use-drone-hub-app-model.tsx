@@ -1177,6 +1177,78 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [drones, requestJson, selectedChat, uiDroneName],
   );
+  const createCanvasDroneFromDraft = React.useCallback(
+    async (payload: {
+      draftNodeId: string;
+      prompt: string;
+      label: string;
+    }): Promise<{ ok: boolean; droneId?: string; droneName?: string; error?: string | null }> => {
+      const prompt = String(payload?.prompt ?? '').trim();
+      if (!prompt) return { ok: false, error: 'Message is empty.' };
+
+      const repoPath = currentDroneRepoAttached ? String(currentDroneRepoPath ?? '').trim() : '';
+      const group = String(currentDrone?.group ?? '').trim();
+      const seedAgent = currentAgent ?? ({ kind: 'builtin', id: 'cursor' } as ChatAgentConfig);
+      const seedModel = seedAgent.kind === 'builtin' ? (currentModel ?? null) : null;
+
+      try {
+        const body: any = {
+          ...(group ? { group } : {}),
+          ...(repoPath ? { repoPath } : {}),
+          pullHostBranchBeforeCreate,
+          seedChat: 'default',
+          ...(seedAgent ? { seedAgent } : {}),
+          ...(seedModel ? { seedModel } : {}),
+          seedPrompt: prompt,
+        };
+        const data = await requestJson<{ ok: true; id: string; name: string; phase: 'starting' }>(
+          '/api/drones',
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(body),
+          },
+        );
+        const droneId = String((data as any)?.id ?? '').trim();
+        const droneName = String((data as any)?.name ?? '').trim() || droneId;
+        if (!droneId) return { ok: false, error: 'Failed creating drone: missing id.' };
+
+        rememberStartupSeed([{ id: droneId, name: droneName }], {
+          agent: seedAgent,
+          model: seedModel,
+          prompt,
+          chatName: 'default',
+          group,
+          repoPath,
+        });
+        preferredSelectedDroneRef.current = droneId;
+        preferredSelectedDroneHoldUntilRef.current = Date.now() + STARTUP_SEED_MISSING_GRACE_MS;
+        setSelectedDrone(droneId);
+        setSelectedDroneIds([droneId]);
+        selectionAnchorRef.current = droneId;
+        setSelectedChat('default');
+        return { ok: true, droneId, droneName, error: null };
+      } catch (err: any) {
+        return { ok: false, error: err?.message ?? String(err) };
+      }
+    },
+    [
+      currentAgent,
+      currentDrone?.group,
+      currentDroneRepoAttached,
+      currentDroneRepoPath,
+      currentModel,
+      preferredSelectedDroneHoldUntilRef,
+      preferredSelectedDroneRef,
+      pullHostBranchBeforeCreate,
+      rememberStartupSeed,
+      requestJson,
+      selectionAnchorRef,
+      setSelectedChat,
+      setSelectedDrone,
+      setSelectedDroneIds,
+    ],
+  );
 
   const renderRightPanelTabContent = React.useCallback(
     (drone: DroneSummary, tab: RightPanelTab, paneKey: 'top' | 'bottom' | 'single'): React.ReactNode => (
@@ -1190,6 +1262,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         droneStateById={droneStateById}
         onActivateDroneFromCanvas={onActivateDroneFromCanvas}
         onSendCanvasPrompt={sendCanvasPrompt}
+        onCreateCanvasDroneFromDraft={createCanvasDroneFromDraft}
         currentDroneId={currentDrone?.id ?? null}
         defaultFsPathForCurrentDrone={defaultFsPathForCurrentDrone}
         uiDroneName={uiDroneName}
@@ -1231,6 +1304,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       currentDrone?.id,
       currentFsPath,
       currentPortReachability,
+      createCanvasDroneFromDraft,
       defaultFsPathForCurrentDrone,
       droneNameById,
       droneRepoById,

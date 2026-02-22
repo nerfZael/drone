@@ -2,6 +2,7 @@ import React from 'react';
 
 type CanvasMessageBarProps = {
   selectedCount: number;
+  selectedLabel?: string | null;
   expanded: boolean;
   sending: boolean;
   draft: string;
@@ -11,10 +12,12 @@ type CanvasMessageBarProps = {
   onCollapse: () => void;
   onDraftChange: (next: string) => void;
   onSend: () => void;
+  onInputBlur?: (event: React.FocusEvent<HTMLInputElement>) => void;
 };
 
 export function CanvasMessageBar({
   selectedCount,
+  selectedLabel,
   expanded,
   sending,
   draft,
@@ -24,13 +27,16 @@ export function CanvasMessageBar({
   onCollapse,
   onDraftChange,
   onSend,
+  onInputBlur,
 }: CanvasMessageBarProps) {
   if (selectedCount <= 0) return null;
-  const targetLabel = selectedCount === 1 ? '1 drone' : `${selectedCount} drones`;
+  const fallbackLabel = selectedCount === 1 ? '1 drone' : `${selectedCount} drones`;
+  const targetLabel = String(selectedLabel ?? '').trim() || fallbackLabel;
   const sendDisabled = sending || draft.trim().length === 0;
 
   return (
     <div
+      data-canvas-message-bar="1"
       className="absolute left-1/2 bottom-3 z-20 -translate-x-1/2 w-[min(640px,calc(100%-1.5rem))]"
       onMouseDown={(event) => event.stopPropagation()}
     >
@@ -54,6 +60,7 @@ export function CanvasMessageBar({
               ref={inputRef}
               value={draft}
               onChange={(event) => onDraftChange(event.target.value)}
+              onBlur={onInputBlur}
               onKeyDown={(event) => {
                 if ((event.nativeEvent as any)?.isComposing) return;
                 if (event.key === 'Enter') {
