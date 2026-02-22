@@ -52,13 +52,8 @@ type PanDragState = {
 type MarqueeDragState = {
   startClientX: number;
   startClientY: number;
-  startWorldX: number;
-  startWorldY: number;
   additive: boolean;
   baseSelectedIds: string[];
-  panX: number;
-  panY: number;
-  scale: number;
   moved: boolean;
 };
 
@@ -315,12 +310,6 @@ export function DroneCanvasDock({
   const selectedMessageLabel = selectedDraftNodeId
     ? String(nodesByDroneId[selectedDraftNodeId]?.label ?? '').trim() || 'Untitled'
     : null;
-  const nodesRef = React.useRef(nodes);
-  const nodeWidthByDroneIdRef = React.useRef(nodeWidthByDroneId);
-
-  React.useEffect(() => {
-    nodesRef.current = nodes;
-  }, [nodes]);
 
   React.useEffect(() => {
     const known = new Set(nodeOrder);
@@ -329,10 +318,6 @@ export function DroneCanvasDock({
       delete nodeElementByDroneIdRef.current[key];
     }
   }, [nodeOrder]);
-
-  React.useEffect(() => {
-    nodeWidthByDroneIdRef.current = nodeWidthByDroneId;
-  }, [nodeWidthByDroneId]);
 
   const focusMessageInput = React.useCallback(() => {
     requestAnimationFrame(() => {
@@ -420,57 +405,27 @@ export function DroneCanvasDock({
       }
       if (!marqueeDrag.moved) return;
 
-      const world = screenToWorldPoint(
-        event.clientX,
-        event.clientY,
-        rect,
-        marqueeDrag.panX,
-        marqueeDrag.panY,
-        marqueeDrag.scale,
-      );
-      const minX = Math.min(marqueeDrag.startWorldX, world.x);
-      const minY = Math.min(marqueeDrag.startWorldY, world.y);
-      const width = Math.abs(world.x - marqueeDrag.startWorldX);
-      const height = Math.abs(world.y - marqueeDrag.startWorldY);
-
       const hits: string[] = [];
-      const screenMinX = rect.left + box.left;
-      const screenMinY = rect.top + box.top;
-      const screenWidth = box.width;
-      const screenHeight = box.height;
-      for (const node of nodesRef.current) {
-        const nodeEl = nodeElementByDroneIdRef.current[node.droneId];
-        if (nodeEl) {
-          const bounds = nodeEl.getBoundingClientRect();
-          if (
-            rectIntersects(
-              screenMinX,
-              screenMinY,
-              screenWidth,
-              screenHeight,
-              bounds.left,
-              bounds.top,
-              bounds.width,
-              bounds.height,
-            )
-          ) {
-            hits.push(node.droneId);
-            continue;
-          }
-        }
+      for (const nodeEl of Object.values(nodeElementByDroneIdRef.current)) {
+        if (!nodeEl) continue;
+        const droneId = String(nodeEl.dataset.droneId ?? '').trim();
+        if (!droneId) continue;
+        const bounds = nodeEl.getBoundingClientRect();
+        const localLeft = bounds.left - rect.left;
+        const localTop = bounds.top - rect.top;
         if (
           rectIntersects(
-            minX,
-            minY,
-            width,
-            height,
-            node.x,
-            node.y,
-            nodeWidthByDroneIdRef.current[node.droneId] ?? NODE_MIN_WIDTH_PX,
-            NODE_HEIGHT_PX,
+            box.left,
+            box.top,
+            box.width,
+            box.height,
+            localLeft,
+            localTop,
+            bounds.width,
+            bounds.height,
           )
         ) {
-          hits.push(node.droneId);
+          hits.push(droneId);
         }
       }
 
@@ -746,7 +701,6 @@ export function DroneCanvasDock({
       const viewport = viewportRef.current;
       if (!viewport) return;
       const rect = viewport.getBoundingClientRect();
-      const worldStart = screenToWorldPoint(event.clientX, event.clientY, rect, panX, panY, scale);
       const additive = event.ctrlKey || event.metaKey;
       if (!additive && selectedDroneIds.length > 0) {
         setSelectedDroneIds([]);
@@ -754,18 +708,13 @@ export function DroneCanvasDock({
       marqueeDragRef.current = {
         startClientX: event.clientX,
         startClientY: event.clientY,
-        startWorldX: worldStart.x,
-        startWorldY: worldStart.y,
         additive,
         baseSelectedIds: selectedDroneIds.slice(),
-        panX,
-        panY,
-        scale,
         moved: false,
       };
       setSelectionBox(buildSelectionBox(event.clientX, event.clientY, event.clientX, event.clientY, rect));
     },
-    [panX, panY, scale, selectedDroneIds, setSelectedDroneIds],
+    [panX, panY, selectedDroneIds, setSelectedDroneIds],
   );
 
   const onCanvasDoubleClick = React.useCallback(
@@ -1024,6 +973,7 @@ export function DroneCanvasDock({
                 key={node.droneId}
                 type="button"
                 data-canvas-node="1"
+                data-drone-id={node.droneId}
                 ref={(el) => {
                   if (el) nodeElementByDroneIdRef.current[node.droneId] = el;
                   else delete nodeElementByDroneIdRef.current[node.droneId];
