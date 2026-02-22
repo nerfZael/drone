@@ -57,6 +57,7 @@ import type { MarkdownFileReference } from './droneHub/chat/MarkdownMessage';
 import {
   isDroneStartingOrSeeding,
   makeId,
+  resolveChatNameForDrone,
 } from './droneHub/app/helpers';
 import { droneNameHasWhitespace } from './droneHub/app/name-helpers';
 import type { DroneSummary } from './droneHub/types';
@@ -1112,6 +1113,70 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [selectDroneCard, sidebarSelectableDroneIdSet],
   );
+  const sendCanvasPrompt = React.useCallback(
+    async (
+      droneIdsRaw: string[],
+      promptRaw: string,
+    ): Promise<{ ok: boolean; error?: string | null }> => {
+      const prompt = String(promptRaw ?? '').trim();
+      if (!prompt) return { ok: false, error: 'Message is empty.' };
+
+      const droneIds: string[] = [];
+      for (const raw of Array.isArray(droneIdsRaw) ? droneIdsRaw : []) {
+        const id = String(raw ?? '').trim();
+        if (!id || droneIds.includes(id)) continue;
+        droneIds.push(id);
+      }
+      if (droneIds.length === 0) return { ok: false, error: 'No drones selected.' };
+
+      const droneById = new Map<string, DroneSummary>();
+      for (const drone of drones) {
+        const id = String(drone?.id ?? '').trim();
+        if (!id) continue;
+        droneById.set(id, drone);
+      }
+      const preferredChat = selectedChat || 'default';
+      const targetNames = droneIds.map((id) => {
+        const drone = droneById.get(id);
+        return drone ? uiDroneName(drone.name) : id;
+      });
+
+      const results = await Promise.allSettled(
+        droneIds.map(async (droneId) => {
+          const drone = droneById.get(droneId);
+          if (!drone) throw new Error(`Drone "${droneId}" is unavailable.`);
+          if (isDroneStartingOrSeeding(drone.hubPhase)) {
+            throw new Error(`"${uiDroneName(drone.name)}" is still starting.`);
+          }
+          const chatName = resolveChatNameForDrone(drone, preferredChat);
+          await requestJson<{ ok: true; accepted: true; promptId: string }>(
+            `/api/drones/${encodeURIComponent(drone.id)}/chats/${encodeURIComponent(chatName)}/prompt`,
+            {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ prompt, attachments: [] }),
+            },
+          );
+        }),
+      );
+
+      const failed: string[] = [];
+      for (let i = 0; i < results.length; i += 1) {
+        if (results[i].status === 'rejected') failed.push(targetNames[i] ?? droneIds[i]);
+      }
+      if (failed.length === 0) return { ok: true, error: null };
+      if (failed.length === droneIds.length) {
+        return { ok: false, error: `Failed to send to all ${droneIds.length} drones.` };
+      }
+      const preview = failed.slice(0, 3).join(', ');
+      const more = failed.length > 3 ? ` +${failed.length - 3} more` : '';
+      return {
+        ok: true,
+        error: `Sent to ${droneIds.length - failed.length}/${droneIds.length}. Failed: ${preview}${more}.`,
+      };
+    },
+    [drones, requestJson, selectedChat, uiDroneName],
+  );
 
   const renderRightPanelTabContent = React.useCallback(
     (drone: DroneSummary, tab: RightPanelTab, paneKey: 'top' | 'bottom' | 'single'): React.ReactNode => (
@@ -1124,6 +1189,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         droneRepoById={droneRepoById}
         droneStateById={droneStateById}
         onActivateDroneFromCanvas={onActivateDroneFromCanvas}
+        onSendCanvasPrompt={sendCanvasPrompt}
         currentDroneId={currentDrone?.id ?? null}
         defaultFsPathForCurrentDrone={defaultFsPathForCurrentDrone}
         uiDroneName={uiDroneName}
@@ -1182,6 +1248,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       portsLoading,
       portsPane,
       refreshFsList,
+      sendCanvasPrompt,
       selectedChat,
       selectedPreviewDefaultUrl,
       selectedPreviewPort,

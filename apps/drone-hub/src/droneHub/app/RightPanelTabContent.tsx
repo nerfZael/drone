@@ -38,6 +38,10 @@ type RightPanelTabContentProps = {
     }
   >;
   onActivateDroneFromCanvas: (droneId: string) => void;
+  onSendCanvasPrompt: (
+    droneIds: string[],
+    prompt: string,
+  ) => Promise<{ ok: boolean; error?: string | null }>;
   currentDroneId: string | null;
   defaultFsPathForCurrentDrone: string;
   uiDroneName: (nameRaw: string) => string;
@@ -76,6 +80,7 @@ export function RightPanelTabContent({
   droneRepoById,
   droneStateById,
   onActivateDroneFromCanvas,
+  onSendCanvasPrompt,
   currentDroneId,
   defaultFsPathForCurrentDrone,
   uiDroneName,
@@ -116,6 +121,7 @@ export function RightPanelTabContent({
           droneRepoById={droneRepoById}
           droneStateById={droneStateById}
           onActivateDrone={onActivateDroneFromCanvas}
+          onSendCanvasPrompt={onSendCanvasPrompt}
         />
       );
 

@@ -74,6 +74,7 @@ export function ChatInput({
   waiting,
   disabled,
   autoFocus,
+  focusTargetId,
   modeHint = '',
   attachmentsEnabled,
   onSend,
@@ -87,6 +88,7 @@ export function ChatInput({
   waiting: boolean;
   disabled?: boolean;
   autoFocus?: boolean;
+  focusTargetId?: string;
   modeHint?: string;
   attachmentsEnabled?: boolean;
   onSend: (payload: ChatSendPayload) => Promise<boolean>;
@@ -409,6 +411,7 @@ export function ChatInput({
             )}
             <textarea
               ref={textareaRef}
+              data-chat-input-focus-id={focusTargetId || undefined}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onPaste={(e) => {

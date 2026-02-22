@@ -274,6 +274,27 @@ export function useDroneHubLifecycleEffects({
       if (e.repeat) return;
       if (e.target instanceof HTMLElement && e.target.closest('[data-shortcut-capture="true"]')) return;
 
+      if (
+        e.key === 'Tab' &&
+        !e.shiftKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey
+      ) {
+        const modalOpen = Boolean(document.querySelector('[role="dialog"][aria-modal="true"]'));
+        if (modalOpen) return;
+        const primaryInput = document.querySelector<HTMLTextAreaElement>(
+          '[data-chat-input-focus-id="primary-chat"]',
+        );
+        if (!primaryInput) return;
+        if (primaryInput.getClientRects().length === 0) return;
+        e.preventDefault();
+        primaryInput.focus();
+        const end = primaryInput.value.length;
+        primaryInput.setSelectionRange(end, end);
+        return;
+      }
+
       const matched = SHORTCUT_DEFINITIONS.find((def) => isShortcutMatch(shortcutBindings[def.id], e)) ?? null;
       if (!matched) return;
       const handled = runShortcutAction(matched.id);
