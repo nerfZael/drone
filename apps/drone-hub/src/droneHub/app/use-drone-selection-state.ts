@@ -153,6 +153,7 @@ export function useDroneSelectionState({
           setSelectedDrone(preferred);
           setSelectedDroneIds((prev) => (prev.length === 1 && prev[0] === preferred ? prev : [preferred]));
           selectionAnchorRef.current = preferred;
+          setSelectedChat('default');
           return;
         }
         preferredSelectedDroneRef.current = null;
