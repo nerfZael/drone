@@ -221,16 +221,19 @@ function renderNodeIndicator(state: DroneCanvasIndicatorState | null): React.Rea
 export function DroneCanvasDock({
   droneNameById,
   sidebarOrderedDroneIds,
+  sidebarSelectedDroneId,
   droneRepoById,
   draftRepoLabel,
   droneStateById,
   onActivateDrone,
   onSendCanvasPrompt,
   onCreateCanvasDroneFromDraft,
+  onRenameDrone,
   onDeleteDrones,
 }: {
   droneNameById: Record<string, string>;
   sidebarOrderedDroneIds: string[];
+  sidebarSelectedDroneId?: string | null;
   droneRepoById: Record<string, string>;
   draftRepoLabel?: string;
   droneStateById: Record<string, DroneCanvasIndicatorState>;
@@ -244,6 +247,10 @@ export function DroneCanvasDock({
     prompt: string;
     label: string;
   }) => Promise<{ ok: boolean; droneId?: string; droneName?: string; error?: string | null }>;
+  onRenameDrone?: (
+    droneId: string,
+    newName: string,
+  ) => Promise<{ ok: boolean; error?: string | null }>;
   onDeleteDrones?: (droneIds: string[]) => Promise<string[]>;
 }) {
   const {
@@ -298,11 +305,16 @@ export function DroneCanvasDock({
   const panDragRef = React.useRef<PanDragState | null>(null);
   const marqueeDragRef = React.useRef<MarqueeDragState | null>(null);
   const nodeElementByDroneIdRef = React.useRef<Record<string, HTMLButtonElement | null>>({});
+  const lastSyncedSidebarSelectionRef = React.useRef<string>('');
+  const inlineRenameInputRef = React.useRef<HTMLInputElement | null>(null);
   const suppressNodeClickRef = React.useRef(false);
   const [dragOverCanvas, setDragOverCanvas] = React.useState(false);
   const [draggingNodeId, setDraggingNodeId] = React.useState<string | null>(null);
   const [panning, setPanning] = React.useState(false);
   const [selectionBox, setSelectionBox] = React.useState<SelectionBox | null>(null);
+  const [inlineRenamingDroneId, setInlineRenamingDroneId] = React.useState<string | null>(null);
+  const [inlineRenameDraft, setInlineRenameDraft] = React.useState('');
+  const [inlineRenameBusy, setInlineRenameBusy] = React.useState(false);
   const [messageBarExpanded, setMessageBarExpanded] = React.useState(false);
   const [messageDraft, setMessageDraft] = React.useState('');
   const [messageError, setMessageError] = React.useState<string | null>(null);
@@ -356,6 +368,62 @@ export function DroneCanvasDock({
       input.setSelectionRange(end, end);
     });
   }, []);
+
+  const cancelInlineRename = React.useCallback(() => {
+    setInlineRenameBusy(false);
+    setInlineRenamingDroneId(null);
+    setInlineRenameDraft('');
+  }, []);
+
+  const beginInlineRename = React.useCallback(
+    (droneIdRaw: string) => {
+      const droneId = String(droneIdRaw ?? '').trim();
+      if (!droneId || isCanvasDraftNodeId(droneId)) return;
+      const node = nodesByDroneId[droneId];
+      if (!node) return;
+      setSelectedDroneIds([droneId]);
+      setInlineRenameBusy(false);
+      setInlineRenamingDroneId(droneId);
+      setInlineRenameDraft(String(node.label ?? droneId));
+      setMessageError(null);
+    },
+    [nodesByDroneId, setSelectedDroneIds],
+  );
+
+  const submitInlineRename = React.useCallback(async () => {
+    const droneId = String(inlineRenamingDroneId ?? '').trim();
+    if (!droneId) return;
+    if (!onRenameDrone) {
+      cancelInlineRename();
+      return;
+    }
+    const newName = String(inlineRenameDraft ?? '').trim();
+    const currentName = String(nodesByDroneId[droneId]?.label ?? '').trim();
+    if (!newName || newName === currentName) {
+      cancelInlineRename();
+      return;
+    }
+    setInlineRenameBusy(true);
+    try {
+      const result = await onRenameDrone(droneId, newName);
+      if (result.ok) {
+        cancelInlineRename();
+        return;
+      }
+      setMessageError(String(result.error ?? 'Rename failed.'));
+    } catch (err: any) {
+      setMessageError(err?.message ?? String(err));
+    } finally {
+      setInlineRenameBusy(false);
+    }
+  }, [
+    cancelInlineRename,
+    inlineRenameDraft,
+    inlineRenamingDroneId,
+    nodesByDroneId,
+    onRenameDrone,
+    setMessageError,
+  ]);
 
   const getDraftPlacement = React.useCallback(
     (anchorWorldX: number, anchorWorldY: number): { x: number; y: number } => {
@@ -475,6 +543,41 @@ export function DroneCanvasDock({
   React.useEffect(() => {
     syncNodeLabels(droneNameById);
   }, [droneNameById, syncNodeLabels]);
+
+  React.useEffect(() => {
+    const sidebarId = String(sidebarSelectedDroneId ?? '').trim();
+    if (!sidebarId) {
+      lastSyncedSidebarSelectionRef.current = '';
+      return;
+    }
+    if (lastSyncedSidebarSelectionRef.current === sidebarId) return;
+    if (!nodesByDroneId[sidebarId]) return;
+    lastSyncedSidebarSelectionRef.current = sidebarId;
+    if (selectedDroneIds.length === 1 && selectedDroneIds[0] === sidebarId) return;
+    setSelectedDroneIds([sidebarId]);
+  }, [nodesByDroneId, selectedDroneIds, setSelectedDroneIds, sidebarSelectedDroneId]);
+
+  React.useEffect(() => {
+    if (!inlineRenamingDroneId) return;
+    if (selectedDroneIds.length === 1 && selectedDroneIds[0] === inlineRenamingDroneId) return;
+    cancelInlineRename();
+  }, [cancelInlineRename, inlineRenamingDroneId, selectedDroneIds]);
+
+  React.useEffect(() => {
+    if (!inlineRenamingDroneId) return;
+    if (nodesByDroneId[inlineRenamingDroneId]) return;
+    cancelInlineRename();
+  }, [cancelInlineRename, inlineRenamingDroneId, nodesByDroneId]);
+
+  React.useEffect(() => {
+    if (!inlineRenamingDroneId) return;
+    requestAnimationFrame(() => {
+      const input = inlineRenameInputRef.current;
+      if (!input) return;
+      input.focus();
+      input.select();
+    });
+  }, [inlineRenamingDroneId]);
 
   React.useEffect(() => {
     const onWindowMouseMove = (event: MouseEvent) => {
@@ -742,6 +845,11 @@ export function DroneCanvasDock({
 
   const onNodeMouseDown = React.useCallback(
     (droneId: string, event: React.MouseEvent<HTMLButtonElement>) => {
+      if (inlineRenamingDroneId === droneId) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       if (event.button !== 0) return;
       if (event.ctrlKey || event.metaKey) return;
       event.preventDefault();
@@ -777,7 +885,7 @@ export function DroneCanvasDock({
       marqueeDragRef.current = null;
       setSelectionBox(null);
     },
-    [nodesByDroneId, scale, selectedDroneIds, setSelectedDroneIds],
+    [inlineRenamingDroneId, nodesByDroneId, scale, selectedDroneIds, setSelectedDroneIds],
   );
 
   const onNodeClick = React.useCallback(
@@ -797,6 +905,15 @@ export function DroneCanvasDock({
       }
     },
     [onActivateDrone, setSelectedDroneIds, toggleSelectedDroneId],
+  );
+
+  const onNodeDoubleClick = React.useCallback(
+    (droneId: string, event: React.MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      beginInlineRename(droneId);
+    },
+    [beginInlineRename],
   );
 
   const onCanvasMouseDown = React.useCallback(
@@ -895,12 +1012,17 @@ export function DroneCanvasDock({
       const rect = viewport.getBoundingClientRect();
       const origin = screenToWorldPoint(event.clientX, event.clientY, rect, panX, panY, scale);
       upsertNodes(
-        ids.map((droneId, idx) => ({
-          droneId,
-          label: String(droneNameById[droneId] ?? '').trim() || droneId,
-          x: origin.x,
-          y: origin.y + idx * DROP_STACK_SPACING_Y_PX,
-        })),
+        ids.map((droneId, idx) => {
+          const label = String(droneNameById[droneId] ?? '').trim() || droneId;
+          const width = getNodeWidthPx(label);
+          return {
+            droneId,
+            label,
+            // Keep the cursor at the center of the first dropped card.
+            x: origin.x - width / 2,
+            y: origin.y - NODE_HEIGHT_PX / 2 + idx * DROP_STACK_SPACING_Y_PX,
+          };
+        }),
       );
       setSelectedDroneIds(ids);
     },
@@ -1122,6 +1244,7 @@ export function DroneCanvasDock({
             const draftNode = isCanvasDraftNodeId(node.droneId);
             const selected = selectedDroneIdSet.has(node.droneId);
             const dragging = draggingNodeId === node.droneId;
+            const inlineEditing = inlineRenamingDroneId === node.droneId;
             const indicatorState = draftNode ? null : droneStateById[node.droneId] ?? null;
             const indicator = renderNodeIndicator(indicatorState);
             const nodeWidth = nodeWidthByDroneId[node.droneId] ?? NODE_MIN_WIDTH_PX;
@@ -1129,53 +1252,103 @@ export function DroneCanvasDock({
               ? String(draftRepoLabelByNodeId[node.droneId] ?? '').trim()
               : String(droneRepoById[node.droneId] ?? '').trim();
             return (
-              <button
-                key={node.droneId}
-                type="button"
-                data-canvas-node="1"
-                data-drone-id={node.droneId}
-                ref={(el) => {
-                  if (el) nodeElementByDroneIdRef.current[node.droneId] = el;
-                  else delete nodeElementByDroneIdRef.current[node.droneId];
-                }}
-                onMouseDown={(event) => onNodeMouseDown(node.droneId, event)}
-                onClick={(event) => onNodeClick(node.droneId, event)}
-                aria-pressed={selected}
-                className={`absolute relative overflow-visible rounded-md border text-left px-2.5 shadow-[0_10px_20px_rgba(0,0,0,.28)] transition-[border-color,background-color,box-shadow] duration-100 flex items-center ${
-                  dragging
-                    ? 'border-[var(--accent)] bg-[var(--accent-subtle)]'
-                    : selected
-                      ? 'border-[var(--accent-muted)] bg-[rgba(38,46,66,.95)]'
-                      : draftNode
-                        ? 'border-[rgba(138,152,184,.45)] bg-[rgba(16,18,23,.88)] hover:border-[rgba(138,152,184,.72)]'
-                        : 'border-[var(--border)] bg-[rgba(16,18,23,.92)] hover:border-[var(--accent-muted)]'
-                }`}
-                style={{
-                  left: 0,
-                  top: 0,
-                  width: nodeWidth,
-                  height: NODE_HEIGHT_PX,
-                  transform: `translate3d(${node.x}px, ${node.y}px, 0)`,
-                  willChange: dragging ? 'transform' : undefined,
-                }}
-              >
-                {indicator ? <span className="pointer-events-none absolute -top-2 -right-2 z-[2]">{indicator}</span> : null}
-                {draftNode ? (
-                  <span className="pointer-events-none absolute -top-2 left-2 z-[2] inline-flex items-center rounded-[4px] border border-[rgba(138,152,184,.4)] bg-[rgba(10,14,22,.96)] px-1.5 py-[1px] text-[8px] font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">
-                    Draft
+              <React.Fragment key={node.droneId}>
+                <button
+                  type="button"
+                  data-canvas-node="1"
+                  data-drone-id={node.droneId}
+                  ref={(el) => {
+                    if (el) nodeElementByDroneIdRef.current[node.droneId] = el;
+                    else delete nodeElementByDroneIdRef.current[node.droneId];
+                  }}
+                  onMouseDown={(event) => onNodeMouseDown(node.droneId, event)}
+                  onClick={(event) => onNodeClick(node.droneId, event)}
+                  onDoubleClick={(event) => onNodeDoubleClick(node.droneId, event)}
+                  aria-pressed={selected}
+                  className={`absolute relative overflow-visible rounded-md border text-left px-2.5 shadow-[0_10px_20px_rgba(0,0,0,.28)] transition-[border-color,background-color,box-shadow] duration-100 flex items-center ${
+                    dragging
+                      ? 'border-[var(--accent)] bg-[var(--accent-subtle)]'
+                      : selected || inlineEditing
+                        ? 'border-[var(--accent-muted)] bg-[rgba(38,46,66,.95)]'
+                        : draftNode
+                          ? 'border-[rgba(138,152,184,.45)] bg-[rgba(16,18,23,.88)] hover:border-[rgba(138,152,184,.72)]'
+                          : 'border-[var(--border)] bg-[rgba(16,18,23,.92)] hover:border-[var(--accent-muted)]'
+                  }`}
+                  style={{
+                    left: 0,
+                    top: 0,
+                    width: nodeWidth,
+                    height: NODE_HEIGHT_PX,
+                    transform: `translate3d(${node.x}px, ${node.y}px, 0)`,
+                    willChange: dragging ? 'transform' : undefined,
+                  }}
+                >
+                  {indicator ? (
+                    <span className="pointer-events-none absolute right-0 bottom-full mb-1 z-[2]">
+                      {indicator}
+                    </span>
+                  ) : null}
+                  {draftNode ? (
+                    <span className="pointer-events-none absolute -top-2 left-2 z-[2] inline-flex items-center rounded-[4px] border border-[rgba(138,152,184,.4)] bg-[rgba(10,14,22,.96)] px-1.5 py-[1px] text-[8px] font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">
+                      Draft
+                    </span>
+                  ) : null}
+                  {repoLabel ? (
+                    <span className="pointer-events-none absolute left-2 top-full mt-[1px] inline-flex max-w-[260px] rounded-[4px] border border-[var(--border-subtle)] bg-[rgba(10,14,22,.95)] px-1.5 py-[1px] text-[9px] font-mono text-[var(--muted-dim)] shadow-[0_6px_14px_rgba(0,0,0,.28)]">
+                      {repoLabel}
+                    </span>
+                  ) : null}
+                  <span className="min-w-0 flex-1">
+                    <span className="block whitespace-nowrap text-[12.5px] font-semibold text-[var(--fg-secondary)]">
+                      {node.label}
+                    </span>
                   </span>
+                </button>
+                {inlineEditing ? (
+                  <div
+                    data-canvas-node="1"
+                    className="absolute z-[4] rounded-md border border-[var(--accent)] bg-[rgba(16,18,23,.98)] px-2.5 shadow-[0_10px_24px_rgba(0,0,0,.45)] flex items-center"
+                    style={{
+                      left: 0,
+                      top: 0,
+                      width: nodeWidth,
+                      height: NODE_HEIGHT_PX,
+                      transform: `translate3d(${node.x}px, ${node.y}px, 0)`,
+                    }}
+                    onMouseDown={(event) => {
+                      event.stopPropagation();
+                    }}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                    }}
+                  >
+                    <input
+                      ref={inlineRenameInputRef}
+                      value={inlineRenameDraft}
+                      disabled={inlineRenameBusy}
+                      onChange={(event) => setInlineRenameDraft(event.target.value)}
+                      onBlur={() => {
+                        cancelInlineRename();
+                      }}
+                      onKeyDown={(event) => {
+                        if ((event.nativeEvent as any)?.isComposing) return;
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          void submitInlineRename();
+                          return;
+                        }
+                        if (event.key === 'Escape') {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          cancelInlineRename();
+                        }
+                      }}
+                      className="h-8 w-full rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[12.5px] font-semibold text-[var(--fg-secondary)] focus:outline-none focus:border-[var(--accent-muted)]"
+                    />
+                  </div>
                 ) : null}
-                {repoLabel ? (
-                  <span className="pointer-events-none absolute left-2 top-full mt-[1px] inline-flex max-w-[260px] rounded-[4px] border border-[var(--border-subtle)] bg-[rgba(10,14,22,.95)] px-1.5 py-[1px] text-[9px] font-mono text-[var(--muted-dim)] shadow-[0_6px_14px_rgba(0,0,0,.28)]">
-                    {repoLabel}
-                  </span>
-                ) : null}
-                <span className="min-w-0 flex-1">
-                  <span className="block whitespace-nowrap text-[12.5px] font-semibold text-[var(--fg-secondary)]">
-                    {node.label}
-                  </span>
-                </span>
-              </button>
+              </React.Fragment>
             );
           })}
         </div>
