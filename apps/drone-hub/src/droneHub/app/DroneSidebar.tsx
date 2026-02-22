@@ -391,6 +391,39 @@ export function DroneSidebar({
     [clearExpandTimer],
   );
 
+  const onGroupHeaderDragStart = React.useCallback(
+    (droneIds: string[], event: React.DragEvent<HTMLDivElement>) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest('[data-group-drag-block="true"]')) {
+        event.preventDefault();
+        return;
+      }
+      const ids = Array.from(
+        new Set(
+          droneIds
+            .map((raw) => String(raw ?? '').trim())
+            .filter(Boolean),
+        ),
+      );
+      if (ids.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      event.dataTransfer.effectAllowed = 'copyMove';
+      try {
+        event.dataTransfer.setData(DRONE_DND_MIME, JSON.stringify(ids));
+      } catch {
+        // Ignore drag payload assignment errors.
+      }
+      try {
+        event.dataTransfer.setData('text/plain', ids.join('\n'));
+      } catch {
+        // Ignore drag payload assignment errors.
+      }
+    },
+    [],
+  );
+
   const collapsedRailInteractive = sidebarCollapsed;
   const isRepoGroupingMode = sidebarGroupingMode === 'repos';
   const sidebarVisibleDroneCount = sidebarVisibleDrones.length;
@@ -656,7 +689,9 @@ export function DroneSidebar({
                       <div
                         className={`group/group-header w-full px-3 py-2 flex items-center justify-between gap-2 border-b border-[var(--border-subtle)] transition-colors ${
                           isDropTarget ? 'bg-[var(--accent-subtle)]' : 'hover:bg-[var(--hover)]'
-                        }`}
+                        } ${items.length > 0 ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                        draggable={items.length > 0}
+                        onDragStart={(event) => onGroupHeaderDragStart(items.map((item) => item.id), event)}
                       >
                         <button
                           onClick={() => onToggleGroupCollapsed(group)}
@@ -673,6 +708,7 @@ export function DroneSidebar({
                           </span>
                         </button>
                         <div
+                          data-group-drag-block="true"
                           className={`flex items-center justify-end flex-shrink-0 transition-[min-width] duration-150 ${
                             pinGroupActionsVisible ? 'min-w-[148px]' : 'min-w-[92px] group-hover/group-header:min-w-[148px]'
                           }`}
