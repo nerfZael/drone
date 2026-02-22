@@ -1,9 +1,10 @@
 import { create } from 'zustand';
-import { createJSONStorage, persist } from 'zustand/middleware';
+import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware';
 
 const MIN_CANVAS_SCALE = 0.35;
 const MAX_CANVAS_SCALE = 2.6;
 const DRONE_CANVAS_STORAGE_KEY = 'droneHub.canvas';
+const CANVAS_PERSIST_DEBOUNCE_MS = 180;
 
 type Updater<T> = T | ((prev: T) => T);
 
@@ -107,6 +108,89 @@ function normalizePersistedState(value: unknown): DroneCanvasPersistedState {
   };
 }
 
+function areStringArraysEqual(a: string[], b: string[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+function getBrowserLocalStorage(): Storage | null {
+  try {
+    if (typeof window === 'undefined') return null;
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+const canvasPersistStorage: StateStorage = (() => {
+  let flushTimer: ReturnType<typeof setTimeout> | null = null;
+  const pending = new Map<string, string>();
+
+  const flush = () => {
+    flushTimer = null;
+    if (pending.size === 0) return;
+    const storage = getBrowserLocalStorage();
+    if (!storage) {
+      pending.clear();
+      return;
+    }
+    for (const [name, value] of pending.entries()) {
+      try {
+        storage.setItem(name, value);
+      } catch {
+        // Ignore write errors (e.g. quota exceeded/private mode restrictions).
+      }
+    }
+    pending.clear();
+  };
+
+  const scheduleFlush = () => {
+    if (flushTimer !== null) {
+      clearTimeout(flushTimer);
+    }
+    flushTimer = setTimeout(flush, CANVAS_PERSIST_DEBOUNCE_MS);
+  };
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('beforeunload', flush);
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') flush();
+      });
+    }
+  }
+
+  return {
+    getItem: (name) => {
+      const storage = getBrowserLocalStorage();
+      if (!storage) return null;
+      try {
+        return storage.getItem(name);
+      } catch {
+        return null;
+      }
+    },
+    setItem: (name, value) => {
+      pending.set(name, value);
+      scheduleFlush();
+    },
+    removeItem: (name) => {
+      pending.delete(name);
+      const storage = getBrowserLocalStorage();
+      if (!storage) return;
+      try {
+        storage.removeItem(name);
+      } catch {
+        // Ignore remove errors.
+      }
+    },
+  };
+})();
+
 export const useDroneCanvasStore = create<DroneCanvasState>()(
   persist(
     (set) => ({
@@ -169,20 +253,20 @@ export const useDroneCanvasStore = create<DroneCanvasState>()(
       moveNodes: (nodes) =>
         set((state) => {
           if (!Array.isArray(nodes) || nodes.length === 0) return state;
-          let touched = false;
-          const nextById = { ...state.nodesByDroneId };
+          let nextById: Record<string, DroneCanvasNode> | null = null;
+          const sourceById = state.nodesByDroneId;
           for (const candidate of nodes) {
             const id = String(candidate?.droneId ?? '').trim();
             if (!id) continue;
-            const previous = nextById[id];
+            const previous = (nextById ?? sourceById)[id];
             if (!previous) continue;
             const nextX = roundCoord(candidate?.x ?? previous.x);
             const nextY = roundCoord(candidate?.y ?? previous.y);
             if (previous.x === nextX && previous.y === nextY) continue;
+            if (!nextById) nextById = { ...sourceById };
             nextById[id] = { ...previous, x: nextX, y: nextY };
-            touched = true;
           }
-          if (!touched) return state;
+          if (!nextById) return state;
           return { ...state, nodesByDroneId: nextById };
         }),
       removeNodes: (droneIds) =>
@@ -219,10 +303,14 @@ export const useDroneCanvasStore = create<DroneCanvasState>()(
           return { ...state, nodesByDroneId: nextById };
         }),
       setSelectedDroneIds: (next) =>
-        set((state) => ({
-          ...state,
-          selectedDroneIds: normalizeSelection(resolveNext(state.selectedDroneIds, next), state.nodesByDroneId),
-        })),
+        set((state) => {
+          const normalized = normalizeSelection(resolveNext(state.selectedDroneIds, next), state.nodesByDroneId);
+          if (areStringArraysEqual(state.selectedDroneIds, normalized)) return state;
+          return {
+            ...state,
+            selectedDroneIds: normalized,
+          };
+        }),
       toggleSelectedDroneId: (droneId) =>
         set((state) => {
           const id = String(droneId ?? '').trim();
@@ -238,35 +326,53 @@ export const useDroneCanvasStore = create<DroneCanvasState>()(
           return { ...state, selectedDroneIds: [] };
         }),
       setPan: (panX, panY) =>
-        set((state) => ({
-          ...state,
-          panX: roundCoord(panX),
-          panY: roundCoord(panY),
-        })),
+        set((state) => {
+          const nextPanX = roundCoord(panX);
+          const nextPanY = roundCoord(panY);
+          if (state.panX === nextPanX && state.panY === nextPanY) return state;
+          return {
+            ...state,
+            panX: nextPanX,
+            panY: nextPanY,
+          };
+        }),
       setScale: (scale) =>
-        set((state) => ({
-          ...state,
-          scale: clampCanvasScale(scale),
-        })),
+        set((state) => {
+          const nextScale = clampCanvasScale(scale);
+          if (state.scale === nextScale) return state;
+          return {
+            ...state,
+            scale: nextScale,
+          };
+        }),
       setViewport: (panX, panY, scale) =>
-        set((state) => ({
-          ...state,
-          panX: roundCoord(panX),
-          panY: roundCoord(panY),
-          scale: clampCanvasScale(scale),
-        })),
+        set((state) => {
+          const nextPanX = roundCoord(panX);
+          const nextPanY = roundCoord(panY);
+          const nextScale = clampCanvasScale(scale);
+          if (state.panX === nextPanX && state.panY === nextPanY && state.scale === nextScale) return state;
+          return {
+            ...state,
+            panX: nextPanX,
+            panY: nextPanY,
+            scale: nextScale,
+          };
+        }),
       resetViewport: () =>
-        set((state) => ({
-          ...state,
-          panX: 32,
-          panY: 32,
-          scale: 1,
-        })),
+        set((state) => {
+          if (state.panX === 32 && state.panY === 32 && state.scale === 1) return state;
+          return {
+            ...state,
+            panX: 32,
+            panY: 32,
+            scale: 1,
+          };
+        }),
     }),
     {
       name: DRONE_CANVAS_STORAGE_KEY,
       version: 1,
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() => canvasPersistStorage),
       partialize: (state): DroneCanvasPersistedState => ({
         nodesByDroneId: state.nodesByDroneId,
         nodeOrder: state.nodeOrder,

@@ -10,15 +10,19 @@ import {
   useDroneCanvasStore,
 } from './use-drone-canvas-store';
 
-const NODE_WIDTH_PX = 220;
-const NODE_HEIGHT_PX = 72;
+const NODE_HEIGHT_PX = 46;
 const DROP_SPACING_X_PX = 236;
-const DROP_SPACING_Y_PX = 82;
+const DROP_SPACING_Y_PX = 62;
 const DRAG_MOVE_THRESHOLD_PX = 3;
 const DOT_GRID_BASE_SPACING_PX = 32;
 const DOT_GRID_RADIUS_PX = 1.05;
 const DOT_GRID_MAX_OPACITY = 0.34;
 const DOT_GRID_MIN_OPACITY = 0.08;
+const NODE_MIN_WIDTH_PX = 128;
+const NODE_MAX_WIDTH_PX = 520;
+const NODE_TEXT_WIDTH_ESTIMATE_PX = 7.2;
+const NODE_HORIZONTAL_PADDING_PX = 26;
+const NODE_INDICATOR_SLOT_PX = 24;
 
 type SelectionBox = {
   left: number;
@@ -144,32 +148,29 @@ function rectIntersects(
   return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
 }
 
+function getNodeWidthPx(labelRaw: string): number {
+  const label = String(labelRaw ?? '').trim();
+  const estimated =
+    Math.ceil(label.length * NODE_TEXT_WIDTH_ESTIMATE_PX) +
+    NODE_HORIZONTAL_PADDING_PX +
+    NODE_INDICATOR_SLOT_PX;
+  return Math.max(NODE_MIN_WIDTH_PX, Math.min(NODE_MAX_WIDTH_PX, estimated));
+}
+
 function renderNodeIndicator(state: DroneCanvasIndicatorState | null): React.ReactNode {
   if (!state) return null;
 
   const isStarting = state.hubPhase === 'creating' || state.hubPhase === 'starting' || state.hubPhase === 'seeding';
-  if (isStarting) {
-    const label = state.hubPhase === 'seeding' ? 'Seeding' : 'Starting';
+  if (isStarting || (state.busy && state.statusOk && state.hubPhase !== 'error')) {
+    const title = isStarting
+      ? String(state.hubMessage ?? (state.hubPhase === 'seeding' ? 'Seeding' : 'Starting'))
+      : 'Active';
     return (
       <span
-        className="inline-flex items-center gap-1 rounded border border-[rgba(255,178,36,.3)] bg-[var(--yellow-subtle)] px-1.5 py-[1px] text-[9px] font-semibold uppercase tracking-wide text-[var(--yellow)]"
-        style={{ fontFamily: 'var(--display)' }}
-        title={String(state.hubMessage ?? label)}
-      >
-        {label}
-      </span>
-    );
-  }
-
-  if (state.busy && state.statusOk && state.hubPhase !== 'error') {
-    return (
-      <span
-        className="inline-flex items-center gap-1 rounded border border-[rgba(255,178,36,.3)] bg-[var(--yellow-subtle)] px-1.5 py-[1px] text-[9px] font-semibold uppercase tracking-wide text-[var(--yellow)]"
-        style={{ fontFamily: 'var(--display)' }}
-        title="Busy"
+        className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-[rgba(255,178,36,.35)] bg-[var(--yellow-subtle)] px-1.5 text-[var(--yellow)]"
+        title={title}
       >
         <TypingDots color="var(--yellow)" />
-        Busy
       </span>
     );
   }
@@ -178,12 +179,9 @@ function renderNodeIndicator(state: DroneCanvasIndicatorState | null): React.Rea
     const label = state.hubPhase === 'error' ? 'Error' : 'Offline';
     return (
       <span
-        className="inline-flex items-center gap-1 rounded border border-[rgba(255,90,90,.35)] bg-[var(--red-subtle)] px-1.5 py-[1px] text-[9px] font-semibold uppercase tracking-wide text-[var(--red)]"
-        style={{ fontFamily: 'var(--display)' }}
+        className="inline-flex h-2.5 w-2.5 rounded-full border border-[rgba(255,90,90,.5)] bg-[var(--red)] shadow-[0_0_0_2px_rgba(255,90,90,.14)]"
         title={String(state.hubMessage ?? state.statusError ?? label)}
-      >
-        {label}
-      </span>
+      />
     );
   }
 
@@ -250,11 +248,24 @@ export function DroneCanvasDock({
     () => nodeOrder.map((droneId) => nodesByDroneId[droneId]).filter(Boolean),
     [nodeOrder, nodesByDroneId],
   );
+  const nodeWidthByDroneId = React.useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const node of nodes) {
+      out[node.droneId] = getNodeWidthPx(node.label);
+    }
+    return out;
+  }, [nodes]);
+  const selectedDroneIdSet = React.useMemo(() => new Set(selectedDroneIds), [selectedDroneIds]);
   const nodesRef = React.useRef(nodes);
+  const nodeWidthByDroneIdRef = React.useRef(nodeWidthByDroneId);
 
   React.useEffect(() => {
     nodesRef.current = nodes;
   }, [nodes]);
+
+  React.useEffect(() => {
+    nodeWidthByDroneIdRef.current = nodeWidthByDroneId;
+  }, [nodeWidthByDroneId]);
 
   React.useEffect(() => {
     syncNodeLabels(droneNameById);
@@ -336,7 +347,7 @@ export function DroneCanvasDock({
             height,
             node.x,
             node.y,
-            NODE_WIDTH_PX,
+            nodeWidthByDroneIdRef.current[node.droneId] ?? NODE_MIN_WIDTH_PX,
             NODE_HEIGHT_PX,
           )
         ) {
@@ -685,10 +696,11 @@ export function DroneCanvasDock({
           }}
         >
           {nodes.map((node) => {
-            const selected = selectedDroneIds.includes(node.droneId);
+            const selected = selectedDroneIdSet.has(node.droneId);
             const dragging = draggingNodeId === node.droneId;
             const indicatorState = droneStateById[node.droneId] ?? null;
             const indicator = renderNodeIndicator(indicatorState);
+            const nodeWidth = nodeWidthByDroneId[node.droneId] ?? NODE_MIN_WIDTH_PX;
             return (
               <button
                 key={node.droneId}
@@ -697,7 +709,7 @@ export function DroneCanvasDock({
                 onMouseDown={(event) => onNodeMouseDown(node.droneId, event)}
                 onClick={(event) => onNodeClick(node.droneId, event)}
                 aria-pressed={selected}
-                className={`absolute rounded-md border text-left px-2.5 py-2 shadow-[0_10px_20px_rgba(0,0,0,.28)] transition-all ${
+                className={`absolute rounded-md border text-left px-2.5 shadow-[0_10px_20px_rgba(0,0,0,.28)] transition-all flex items-center gap-2 ${
                   dragging
                     ? 'border-[var(--accent)] bg-[var(--accent-subtle)]'
                     : selected
@@ -707,12 +719,14 @@ export function DroneCanvasDock({
                 style={{
                   left: node.x,
                   top: node.y,
-                  width: NODE_WIDTH_PX,
+                  width: nodeWidth,
                   height: NODE_HEIGHT_PX,
                 }}
               >
-                <div className="text-[12.5px] leading-[1.2] font-semibold text-[var(--fg-secondary)] break-words">{node.label}</div>
-                {indicator ? <div className="mt-1.5">{indicator}</div> : null}
+                <span className="min-w-0 flex-1 whitespace-nowrap text-[12.5px] font-semibold text-[var(--fg-secondary)]">
+                  {node.label}
+                </span>
+                {indicator ? <span className="flex-shrink-0">{indicator}</span> : null}
               </button>
             );
           })}
