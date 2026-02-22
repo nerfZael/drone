@@ -615,6 +615,9 @@ export function DroneSidebar({
                           : Boolean(d.busy) || (d.id === selectedDrone && selectedIsResponding)
                       }
                       onClick={(opts) => onSelectDroneCard(d.id, opts)}
+                      draggable={!movingDroneGroups && !isOptimistic}
+                      onDragStart={(event) => onDroneDragStart(d.id, event)}
+                      onDragEnd={onDroneDragEnd}
                       onClone={() => onOpenCloneModal(d)}
                       onRename={() => onRenameDrone(d.id)}
                       onSetBaseImage={() => onSetDroneBaseImage(d.id)}
@@ -803,7 +806,7 @@ export function DroneSidebar({
                                 }
                                 showGroup={false}
                                 onClick={(opts) => onSelectDroneCard(d.id, opts)}
-                                draggable={!isVirtualGroup && !movingDroneGroups && !isOptimistic}
+                                draggable={!movingDroneGroups && !isOptimistic}
                                 onDragStart={(event) => onDroneDragStart(d.id, event)}
                                 onDragEnd={onDroneDragEnd}
                                 onClone={() => onOpenCloneModal(d)}
