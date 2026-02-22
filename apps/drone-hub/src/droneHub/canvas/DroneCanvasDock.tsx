@@ -10,11 +10,15 @@ import {
   useDroneCanvasStore,
 } from './use-drone-canvas-store';
 
-const NODE_WIDTH_PX = 136;
-const NODE_HEIGHT_PX = 66;
-const DROP_SPACING_X_PX = 152;
+const NODE_WIDTH_PX = 220;
+const NODE_HEIGHT_PX = 72;
+const DROP_SPACING_X_PX = 236;
 const DROP_SPACING_Y_PX = 82;
 const DRAG_MOVE_THRESHOLD_PX = 3;
+const DOT_GRID_BASE_SPACING_PX = 32;
+const DOT_GRID_RADIUS_PX = 1.05;
+const DOT_GRID_MAX_OPACITY = 0.34;
+const DOT_GRID_MIN_OPACITY = 0.08;
 
 type SelectionBox = {
   left: number;
@@ -183,15 +187,7 @@ function renderNodeIndicator(state: DroneCanvasIndicatorState | null): React.Rea
     );
   }
 
-  return (
-    <span
-      className="inline-flex items-center gap-1 rounded border border-[rgba(74,222,128,.35)] bg-[var(--green-subtle)] px-1.5 py-[1px] text-[9px] font-semibold uppercase tracking-wide text-[var(--green)]"
-      style={{ fontFamily: 'var(--display)' }}
-      title="Ready"
-    >
-      Ready
-    </span>
-  );
+  return null;
 }
 
 export function DroneCanvasDock({
@@ -604,6 +600,10 @@ export function DroneCanvasDock({
       : selectionBox
         ? 'cursor-crosshair'
         : 'cursor-default';
+  const dotOpacity = Math.max(
+    DOT_GRID_MIN_OPACITY,
+    Math.min(DOT_GRID_MAX_OPACITY, DOT_GRID_MAX_OPACITY * Math.pow(scale, 1.2)),
+  );
 
   return (
     <div className="w-full h-full min-h-0 bg-[var(--panel-alt)] flex flex-col overflow-hidden">
@@ -671,8 +671,8 @@ export function DroneCanvasDock({
         <div
           className="absolute inset-0 pointer-events-none"
           style={{
-            backgroundImage: 'radial-gradient(circle, rgba(141, 161, 197, 0.35) 1.1px, transparent 1.1px)',
-            backgroundSize: `${24 * scale}px ${24 * scale}px`,
+            backgroundImage: `radial-gradient(circle, rgba(141, 161, 197, ${dotOpacity.toFixed(3)}) ${DOT_GRID_RADIUS_PX}px, transparent ${DOT_GRID_RADIUS_PX}px)`,
+            backgroundSize: `${DOT_GRID_BASE_SPACING_PX * scale}px ${DOT_GRID_BASE_SPACING_PX * scale}px`,
             backgroundPosition: `${panX}px ${panY}px`,
           }}
         />
@@ -688,6 +688,7 @@ export function DroneCanvasDock({
             const selected = selectedDroneIds.includes(node.droneId);
             const dragging = draggingNodeId === node.droneId;
             const indicatorState = droneStateById[node.droneId] ?? null;
+            const indicator = renderNodeIndicator(indicatorState);
             return (
               <button
                 key={node.droneId}
@@ -709,13 +710,9 @@ export function DroneCanvasDock({
                   width: NODE_WIDTH_PX,
                   height: NODE_HEIGHT_PX,
                 }}
-                title={node.label}
               >
-                <div className="text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
-                  Drone
-                </div>
-                <div className="mt-0.5 truncate text-[12px] font-semibold text-[var(--fg-secondary)]">{node.label}</div>
-                <div className="mt-1.5">{renderNodeIndicator(indicatorState)}</div>
+                <div className="text-[12.5px] leading-[1.2] font-semibold text-[var(--fg-secondary)] break-words">{node.label}</div>
+                {indicator ? <div className="mt-1.5">{indicator}</div> : null}
               </button>
             );
           })}
