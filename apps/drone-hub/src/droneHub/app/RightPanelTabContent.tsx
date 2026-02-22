@@ -26,6 +26,7 @@ type RightPanelTabContentProps = {
   paneKey: 'top' | 'bottom' | 'single';
   selectedChat: string;
   droneNameById: Record<string, string>;
+  droneRepoById: Record<string, string>;
   droneStateById: Record<
     string,
     {
@@ -72,6 +73,7 @@ export function RightPanelTabContent({
   paneKey,
   selectedChat,
   droneNameById,
+  droneRepoById,
   droneStateById,
   onActivateDroneFromCanvas,
   currentDroneId,
@@ -111,6 +113,7 @@ export function RightPanelTabContent({
       return (
         <DroneCanvasDock
           droneNameById={droneNameById}
+          droneRepoById={droneRepoById}
           droneStateById={droneStateById}
           onActivateDrone={onActivateDroneFromCanvas}
         />
