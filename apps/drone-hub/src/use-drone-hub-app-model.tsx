@@ -249,6 +249,18 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     }
     return out;
   }, [drones, uiDroneName]);
+  const droneRepoById = React.useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const drone of drones) {
+      const id = String(drone?.id ?? '').trim();
+      if (!id) continue;
+      const repoPath = String(drone?.repoPath ?? '').trim();
+      if (!repoPath) continue;
+      const repoLabel = repoPath.split(/[\\/]/).filter(Boolean).pop() || repoPath;
+      out[id] = repoLabel;
+    }
+    return out;
+  }, [drones]);
   const droneStateById = React.useMemo(() => {
     const out: Record<
       string,
@@ -1109,6 +1121,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         paneKey={paneKey}
         selectedChat={selectedChat}
         droneNameById={droneNameById}
+        droneRepoById={droneRepoById}
         droneStateById={droneStateById}
         onActivateDroneFromCanvas={onActivateDroneFromCanvas}
         currentDroneId={currentDrone?.id ?? null}
@@ -1154,6 +1167,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       currentPortReachability,
       defaultFsPathForCurrentDrone,
       droneNameById,
+      droneRepoById,
       droneStateById,
       onActivateDroneFromCanvas,
       filesPane,

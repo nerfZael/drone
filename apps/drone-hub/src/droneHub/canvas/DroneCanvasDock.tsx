@@ -10,19 +10,18 @@ import {
   useDroneCanvasStore,
 } from './use-drone-canvas-store';
 
-const NODE_HEIGHT_PX = 46;
+const NODE_HEIGHT_PX = 54;
 const DROP_SPACING_X_PX = 236;
-const DROP_SPACING_Y_PX = 62;
+const DROP_SPACING_Y_PX = 70;
 const DRAG_MOVE_THRESHOLD_PX = 3;
 const DOT_GRID_BASE_SPACING_PX = 32;
 const DOT_GRID_RADIUS_PX = 1.05;
 const DOT_GRID_MAX_OPACITY = 0.34;
 const DOT_GRID_MIN_OPACITY = 0.08;
-const NODE_MIN_WIDTH_PX = 128;
+const NODE_MIN_WIDTH_PX = 96;
 const NODE_MAX_WIDTH_PX = 520;
 const NODE_TEXT_WIDTH_ESTIMATE_PX = 7.2;
-const NODE_HORIZONTAL_PADDING_PX = 26;
-const NODE_INDICATOR_SLOT_PX = 24;
+const NODE_HORIZONTAL_PADDING_PX = 24;
 
 type SelectionBox = {
   left: number;
@@ -148,12 +147,14 @@ function rectIntersects(
   return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
 }
 
-function getNodeWidthPx(labelRaw: string): number {
+function getNodeWidthPx(labelRaw: string, repoRaw: string): number {
   const label = String(labelRaw ?? '').trim();
-  const estimated =
-    Math.ceil(label.length * NODE_TEXT_WIDTH_ESTIMATE_PX) +
-    NODE_HORIZONTAL_PADDING_PX +
-    NODE_INDICATOR_SLOT_PX;
+  const repo = String(repoRaw ?? '').trim();
+  const nameWidth = Math.ceil(label.length * NODE_TEXT_WIDTH_ESTIMATE_PX) + NODE_HORIZONTAL_PADDING_PX;
+  const repoWidth = repo
+    ? Math.ceil(repo.length * (NODE_TEXT_WIDTH_ESTIMATE_PX - 1.1)) + NODE_HORIZONTAL_PADDING_PX
+    : 0;
+  const estimated = Math.max(nameWidth, repoWidth);
   return Math.max(NODE_MIN_WIDTH_PX, Math.min(NODE_MAX_WIDTH_PX, estimated));
 }
 
@@ -162,13 +163,22 @@ function renderNodeIndicator(state: DroneCanvasIndicatorState | null): React.Rea
 
   const isStarting = state.hubPhase === 'creating' || state.hubPhase === 'starting' || state.hubPhase === 'seeding';
   if (isStarting || (state.busy && state.statusOk && state.hubPhase !== 'error')) {
-    const title = isStarting
-      ? String(state.hubMessage ?? (state.hubPhase === 'seeding' ? 'Seeding' : 'Starting'))
-      : 'Active';
+    if (isStarting) {
+      const label = state.hubPhase === 'seeding' ? 'Seeding' : 'Starting';
+      return (
+        <span
+          className="inline-flex items-center rounded-[4px] border border-[rgba(255,178,36,.35)] bg-[rgba(17,20,28,.96)] px-1.5 py-[1px] text-[8px] font-semibold uppercase tracking-[0.08em] text-[var(--yellow)] shadow-[0_4px_10px_rgba(0,0,0,.35)]"
+          style={{ fontFamily: 'var(--display)' }}
+          title={String(state.hubMessage ?? label)}
+        >
+          {label}
+        </span>
+      );
+    }
     return (
       <span
-        className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-[rgba(255,178,36,.35)] bg-[var(--yellow-subtle)] px-1.5 text-[var(--yellow)]"
-        title={title}
+        className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-[rgba(255,178,36,.35)] bg-[rgba(17,20,28,.96)] text-[var(--yellow)] shadow-[0_4px_10px_rgba(0,0,0,.35)]"
+        title="Active"
       >
         <TypingDots color="var(--yellow)" />
       </span>
@@ -179,9 +189,12 @@ function renderNodeIndicator(state: DroneCanvasIndicatorState | null): React.Rea
     const label = state.hubPhase === 'error' ? 'Error' : 'Offline';
     return (
       <span
-        className="inline-flex h-2.5 w-2.5 rounded-full border border-[rgba(255,90,90,.5)] bg-[var(--red)] shadow-[0_0_0_2px_rgba(255,90,90,.14)]"
+        className="inline-flex items-center rounded-[4px] border border-[rgba(255,90,90,.4)] bg-[rgba(18,12,14,.96)] px-1.5 py-[1px] text-[8px] font-semibold uppercase tracking-[0.08em] text-[var(--red)] shadow-[0_4px_10px_rgba(0,0,0,.35)]"
+        style={{ fontFamily: 'var(--display)' }}
         title={String(state.hubMessage ?? state.statusError ?? label)}
-      />
+      >
+        {state.hubPhase === 'error' ? 'Err' : 'Off'}
+      </span>
     );
   }
 
@@ -190,10 +203,12 @@ function renderNodeIndicator(state: DroneCanvasIndicatorState | null): React.Rea
 
 export function DroneCanvasDock({
   droneNameById,
+  droneRepoById,
   droneStateById,
   onActivateDrone,
 }: {
   droneNameById: Record<string, string>;
+  droneRepoById: Record<string, string>;
   droneStateById: Record<string, DroneCanvasIndicatorState>;
   onActivateDrone?: (droneId: string) => void;
 }) {
@@ -251,10 +266,11 @@ export function DroneCanvasDock({
   const nodeWidthByDroneId = React.useMemo(() => {
     const out: Record<string, number> = {};
     for (const node of nodes) {
-      out[node.droneId] = getNodeWidthPx(node.label);
+      const repoLabel = String(droneRepoById[node.droneId] ?? '').trim();
+      out[node.droneId] = getNodeWidthPx(node.label, repoLabel);
     }
     return out;
-  }, [nodes]);
+  }, [droneRepoById, nodes]);
   const selectedDroneIdSet = React.useMemo(() => new Set(selectedDroneIds), [selectedDroneIds]);
   const nodesRef = React.useRef(nodes);
   const nodeWidthByDroneIdRef = React.useRef(nodeWidthByDroneId);
@@ -701,6 +717,7 @@ export function DroneCanvasDock({
             const indicatorState = droneStateById[node.droneId] ?? null;
             const indicator = renderNodeIndicator(indicatorState);
             const nodeWidth = nodeWidthByDroneId[node.droneId] ?? NODE_MIN_WIDTH_PX;
+            const repoLabel = String(droneRepoById[node.droneId] ?? '').trim();
             return (
               <button
                 key={node.droneId}
@@ -709,7 +726,7 @@ export function DroneCanvasDock({
                 onMouseDown={(event) => onNodeMouseDown(node.droneId, event)}
                 onClick={(event) => onNodeClick(node.droneId, event)}
                 aria-pressed={selected}
-                className={`absolute rounded-md border text-left px-2.5 shadow-[0_10px_20px_rgba(0,0,0,.28)] transition-[border-color,background-color,box-shadow] duration-100 flex items-center gap-2 ${
+                className={`absolute relative overflow-visible rounded-md border text-left px-2.5 shadow-[0_10px_20px_rgba(0,0,0,.28)] transition-[border-color,background-color,box-shadow] duration-100 flex items-center ${
                   dragging
                     ? 'border-[var(--accent)] bg-[var(--accent-subtle)]'
                     : selected
@@ -725,10 +742,17 @@ export function DroneCanvasDock({
                   willChange: dragging ? 'transform' : undefined,
                 }}
               >
-                <span className="min-w-0 flex-1 whitespace-nowrap text-[12.5px] font-semibold text-[var(--fg-secondary)]">
-                  {node.label}
+                {indicator ? <span className="pointer-events-none absolute -top-2 -right-2 z-[2]">{indicator}</span> : null}
+                <span className="min-w-0 flex-1">
+                  <span className="block whitespace-nowrap text-[12.5px] font-semibold text-[var(--fg-secondary)]">
+                    {node.label}
+                  </span>
+                  {repoLabel ? (
+                    <span className="mt-1 inline-flex max-w-full rounded-[4px] border border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] px-1.5 py-[1px] text-[9px] font-mono text-[var(--muted-dim)]">
+                      {repoLabel}
+                    </span>
+                  ) : null}
                 </span>
-                {indicator ? <span className="flex-shrink-0">{indicator}</span> : null}
               </button>
             );
           })}
