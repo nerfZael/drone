@@ -963,15 +963,28 @@ export function DroneCanvasDock({
       if (event.button !== 0) return;
       event.preventDefault();
       event.stopPropagation();
+      if (inlineRenamingDroneId) return;
       const target = event.target;
       if (target instanceof HTMLElement && target.closest('[data-canvas-node="1"]')) return;
+      for (const nodeEl of Object.values(nodeElementByDroneIdRef.current)) {
+        if (!nodeEl) continue;
+        const bounds = nodeEl.getBoundingClientRect();
+        if (
+          event.clientX >= bounds.left &&
+          event.clientX <= bounds.right &&
+          event.clientY >= bounds.top &&
+          event.clientY <= bounds.bottom
+        ) {
+          return;
+        }
+      }
       const viewport = viewportRef.current;
       if (!viewport) return;
       const rect = viewport.getBoundingClientRect();
       const worldPoint = screenToWorldPoint(event.clientX, event.clientY, rect, panX, panY, scale);
       createDraftAtWorldPoint(worldPoint.x, worldPoint.y);
     },
-    [createDraftAtWorldPoint, panX, panY, scale],
+    [createDraftAtWorldPoint, inlineRenamingDroneId, panX, panY, scale],
   );
 
   const onWheel = React.useCallback(
@@ -1252,81 +1265,68 @@ export function DroneCanvasDock({
               ? String(draftRepoLabelByNodeId[node.droneId] ?? '').trim()
               : String(droneRepoById[node.droneId] ?? '').trim();
             return (
-              <React.Fragment key={node.droneId}>
-                <button
-                  type="button"
-                  data-canvas-node="1"
-                  data-drone-id={node.droneId}
-                  ref={(el) => {
-                    if (el) nodeElementByDroneIdRef.current[node.droneId] = el;
-                    else delete nodeElementByDroneIdRef.current[node.droneId];
-                  }}
-                  onMouseDown={(event) => onNodeMouseDown(node.droneId, event)}
-                  onClick={(event) => onNodeClick(node.droneId, event)}
-                  onDoubleClick={(event) => onNodeDoubleClick(node.droneId, event)}
-                  aria-pressed={selected}
-                  className={`absolute relative overflow-visible rounded-md border text-left px-2.5 shadow-[0_10px_20px_rgba(0,0,0,.28)] transition-[border-color,background-color,box-shadow] duration-100 flex items-center ${
-                    dragging
-                      ? 'border-[var(--accent)] bg-[var(--accent-subtle)]'
-                      : selected || inlineEditing
-                        ? 'border-[var(--accent-muted)] bg-[rgba(38,46,66,.95)]'
-                        : draftNode
-                          ? 'border-[rgba(138,152,184,.45)] bg-[rgba(16,18,23,.88)] hover:border-[rgba(138,152,184,.72)]'
-                          : 'border-[var(--border)] bg-[rgba(16,18,23,.92)] hover:border-[var(--accent-muted)]'
-                  }`}
-                  style={{
-                    left: 0,
-                    top: 0,
-                    width: nodeWidth,
-                    height: NODE_HEIGHT_PX,
-                    transform: `translate3d(${node.x}px, ${node.y}px, 0)`,
-                    willChange: dragging ? 'transform' : undefined,
-                  }}
-                >
-                  {indicator ? (
-                    <span className="pointer-events-none absolute right-0 bottom-full mb-1 z-[2]">
-                      {indicator}
-                    </span>
-                  ) : null}
-                  {draftNode ? (
-                    <span className="pointer-events-none absolute -top-2 left-2 z-[2] inline-flex items-center rounded-[4px] border border-[rgba(138,152,184,.4)] bg-[rgba(10,14,22,.96)] px-1.5 py-[1px] text-[8px] font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">
-                      Draft
-                    </span>
-                  ) : null}
-                  {repoLabel ? (
-                    <span className="pointer-events-none absolute left-2 top-full mt-[1px] inline-flex max-w-[260px] rounded-[4px] border border-[var(--border-subtle)] bg-[rgba(10,14,22,.95)] px-1.5 py-[1px] text-[9px] font-mono text-[var(--muted-dim)] shadow-[0_6px_14px_rgba(0,0,0,.28)]">
-                      {repoLabel}
-                    </span>
-                  ) : null}
-                  <span className="min-w-0 flex-1">
-                    <span className="block whitespace-nowrap text-[12.5px] font-semibold text-[var(--fg-secondary)]">
-                      {node.label}
-                    </span>
+              <button
+                key={node.droneId}
+                type="button"
+                data-canvas-node="1"
+                data-drone-id={node.droneId}
+                ref={(el) => {
+                  if (el) nodeElementByDroneIdRef.current[node.droneId] = el;
+                  else delete nodeElementByDroneIdRef.current[node.droneId];
+                }}
+                onMouseDown={(event) => onNodeMouseDown(node.droneId, event)}
+                onClick={(event) => onNodeClick(node.droneId, event)}
+                onDoubleClick={(event) => onNodeDoubleClick(node.droneId, event)}
+                aria-pressed={selected}
+                className={`absolute relative overflow-visible rounded-md border text-left px-2.5 shadow-[0_10px_20px_rgba(0,0,0,.28)] transition-[border-color,background-color,box-shadow] duration-100 flex items-center ${
+                  dragging
+                    ? 'border-[var(--accent)] bg-[var(--accent-subtle)]'
+                    : selected || inlineEditing
+                      ? 'border-[var(--accent-muted)] bg-[rgba(38,46,66,.95)]'
+                      : draftNode
+                        ? 'border-[rgba(138,152,184,.45)] bg-[rgba(16,18,23,.88)] hover:border-[rgba(138,152,184,.72)]'
+                        : 'border-[var(--border)] bg-[rgba(16,18,23,.92)] hover:border-[var(--accent-muted)]'
+                }`}
+                style={{
+                  left: 0,
+                  top: 0,
+                  width: nodeWidth,
+                  height: NODE_HEIGHT_PX,
+                  transform: `translate3d(${node.x}px, ${node.y}px, 0)`,
+                  willChange: dragging ? 'transform' : undefined,
+                }}
+              >
+                {indicator ? (
+                  <span className="pointer-events-none absolute right-0 bottom-full mb-1 z-[2]">
+                    {indicator}
                   </span>
-                </button>
-                {inlineEditing ? (
-                  <div
-                    data-canvas-node="1"
-                    className="absolute z-[4] rounded-md border border-[var(--accent)] bg-[rgba(16,18,23,.98)] px-2.5 shadow-[0_10px_24px_rgba(0,0,0,.45)] flex items-center"
-                    style={{
-                      left: 0,
-                      top: 0,
-                      width: nodeWidth,
-                      height: NODE_HEIGHT_PX,
-                      transform: `translate3d(${node.x}px, ${node.y}px, 0)`,
-                    }}
-                    onMouseDown={(event) => {
-                      event.stopPropagation();
-                    }}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                    }}
-                  >
+                ) : null}
+                {draftNode ? (
+                  <span className="pointer-events-none absolute -top-2 left-2 z-[2] inline-flex items-center rounded-[4px] border border-[rgba(138,152,184,.4)] bg-[rgba(10,14,22,.96)] px-1.5 py-[1px] text-[8px] font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">
+                    Draft
+                  </span>
+                ) : null}
+                {repoLabel ? (
+                  <span className="pointer-events-none absolute left-2 top-full mt-[1px] inline-flex max-w-[260px] rounded-[4px] border border-[var(--border-subtle)] bg-[rgba(10,14,22,.95)] px-1.5 py-[1px] text-[9px] font-mono text-[var(--muted-dim)] shadow-[0_6px_14px_rgba(0,0,0,.28)]">
+                    {repoLabel}
+                  </span>
+                ) : null}
+                <span className="min-w-0 flex-1">
+                  {inlineEditing ? (
                     <input
                       ref={inlineRenameInputRef}
                       value={inlineRenameDraft}
                       disabled={inlineRenameBusy}
                       onChange={(event) => setInlineRenameDraft(event.target.value)}
+                      onMouseDown={(event) => {
+                        event.stopPropagation();
+                      }}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                      }}
+                      onDoubleClick={(event) => {
+                        event.stopPropagation();
+                      }}
                       onBlur={() => {
                         cancelInlineRename();
                       }}
@@ -1346,9 +1346,13 @@ export function DroneCanvasDock({
                       }}
                       className="h-8 w-full rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[12.5px] font-semibold text-[var(--fg-secondary)] focus:outline-none focus:border-[var(--accent-muted)]"
                     />
-                  </div>
-                ) : null}
-              </React.Fragment>
+                  ) : (
+                    <span className="block whitespace-nowrap text-[12.5px] font-semibold text-[var(--fg-secondary)]">
+                      {node.label}
+                    </span>
+                  )}
+                </span>
+              </button>
             );
           })}
         </div>
