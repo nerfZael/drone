@@ -3,6 +3,7 @@ import { useShallow } from 'zustand/react/shallow';
 import type { DroneSummary } from '../types';
 import { DRONE_DND_MIME } from '../app/app-config';
 import { TypingDots } from '../overview/icons';
+import { CanvasMessageBar } from './CanvasMessageBar';
 import {
   MAX_CANVAS_SCALE,
   MIN_CANVAS_SCALE,
@@ -147,6 +148,12 @@ function rectIntersects(
   return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
 }
 
+function isEditableElement(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  return target.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+}
+
 function getNodeWidthPx(labelRaw: string, repoRaw: string): number {
   const label = String(labelRaw ?? '').trim();
   const repo = String(repoRaw ?? '').trim();
@@ -206,11 +213,16 @@ export function DroneCanvasDock({
   droneRepoById,
   droneStateById,
   onActivateDrone,
+  onSendCanvasPrompt,
 }: {
   droneNameById: Record<string, string>;
   droneRepoById: Record<string, string>;
   droneStateById: Record<string, DroneCanvasIndicatorState>;
   onActivateDrone?: (droneId: string) => void;
+  onSendCanvasPrompt?: (
+    droneIds: string[],
+    prompt: string,
+  ) => Promise<{ ok: boolean; error?: string | null }>;
 }) {
   const {
     nodesByDroneId,
@@ -258,6 +270,11 @@ export function DroneCanvasDock({
   const [draggingNodeId, setDraggingNodeId] = React.useState<string | null>(null);
   const [panning, setPanning] = React.useState(false);
   const [selectionBox, setSelectionBox] = React.useState<SelectionBox | null>(null);
+  const [messageBarExpanded, setMessageBarExpanded] = React.useState(false);
+  const [messageDraft, setMessageDraft] = React.useState('');
+  const [messageError, setMessageError] = React.useState<string | null>(null);
+  const [messageSending, setMessageSending] = React.useState(false);
+  const messageInputRef = React.useRef<HTMLInputElement | null>(null);
 
   const nodes = React.useMemo(
     () => nodeOrder.map((droneId) => nodesByDroneId[droneId]).filter(Boolean),
@@ -282,6 +299,23 @@ export function DroneCanvasDock({
   React.useEffect(() => {
     nodeWidthByDroneIdRef.current = nodeWidthByDroneId;
   }, [nodeWidthByDroneId]);
+
+  const focusMessageInput = React.useCallback(() => {
+    requestAnimationFrame(() => {
+      const input = messageInputRef.current;
+      if (!input) return;
+      input.focus();
+      const end = input.value.length;
+      input.setSelectionRange(end, end);
+    });
+  }, []);
+
+  React.useEffect(() => {
+    if (selectedDroneIds.length > 0) return;
+    setMessageBarExpanded(false);
+    setMessageDraft('');
+    setMessageError(null);
+  }, [selectedDroneIds.length]);
 
   React.useEffect(() => {
     syncNodeLabels(droneNameById);
@@ -437,6 +471,46 @@ export function DroneCanvasDock({
     const rect = viewport.getBoundingClientRect();
     applyZoomAt(scale / 1.14, rect.left + rect.width / 2, rect.top + rect.height / 2);
   }, [applyZoomAt, scale]);
+
+  const openMessageBar = React.useCallback(() => {
+    if (selectedDroneIds.length === 0) return;
+    setMessageBarExpanded(true);
+    setMessageError(null);
+    focusMessageInput();
+  }, [focusMessageInput, selectedDroneIds.length]);
+
+  const closeMessageBar = React.useCallback(() => {
+    setMessageBarExpanded(false);
+    setMessageError(null);
+  }, []);
+
+  const sendCanvasPrompt = React.useCallback(async () => {
+    if (messageSending) return;
+    const prompt = messageDraft.trim();
+    if (!prompt) return;
+    if (selectedDroneIds.length === 0) return;
+    if (!onSendCanvasPrompt) {
+      setMessageError('Canvas messaging is unavailable.');
+      return;
+    }
+
+    setMessageSending(true);
+    setMessageError(null);
+    try {
+      const result = await onSendCanvasPrompt(selectedDroneIds, prompt);
+      if (result.ok) {
+        setMessageDraft('');
+        setMessageError(result.error ?? null);
+        focusMessageInput();
+      } else {
+        setMessageError(result.error ?? 'Failed to send message.');
+      }
+    } catch (err: any) {
+      setMessageError(err?.message ?? String(err));
+    } finally {
+      setMessageSending(false);
+    }
+  }, [focusMessageInput, messageDraft, messageSending, onSendCanvasPrompt, selectedDroneIds]);
 
   const onNodeMouseDown = React.useCallback(
     (droneId: string, event: React.MouseEvent<HTMLButtonElement>) => {
@@ -594,6 +668,25 @@ export function DroneCanvasDock({
 
   const onViewportKeyDown = React.useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
+      const targetIsEditable = isEditableElement(event.target);
+      if (
+        event.key === 'Tab' &&
+        !event.shiftKey &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey &&
+        !targetIsEditable
+      ) {
+        if (selectedDroneIds.length > 0) {
+          event.preventDefault();
+          event.stopPropagation();
+          openMessageBar();
+        }
+        return;
+      }
+
+      if (targetIsEditable) return;
+
       const key = event.key.toLowerCase();
       const isPrimaryMod = event.ctrlKey || event.metaKey;
 
@@ -607,6 +700,10 @@ export function DroneCanvasDock({
       if (key === 'escape') {
         event.preventDefault();
         event.stopPropagation();
+        if (messageBarExpanded) {
+          closeMessageBar();
+          return;
+        }
         clearSelection();
         return;
       }
@@ -617,7 +714,16 @@ export function DroneCanvasDock({
         removeNodes(selectedDroneIds);
       }
     },
-    [clearSelection, nodeOrder, removeNodes, selectedDroneIds, setSelectedDroneIds],
+    [
+      clearSelection,
+      closeMessageBar,
+      messageBarExpanded,
+      nodeOrder,
+      openMessageBar,
+      removeNodes,
+      selectedDroneIds,
+      setSelectedDroneIds,
+    ],
   );
 
   const cursorClassName = panning
@@ -769,6 +875,24 @@ export function DroneCanvasDock({
             }}
           />
         ) : null}
+
+        <CanvasMessageBar
+          selectedCount={selectedDroneIds.length}
+          expanded={messageBarExpanded}
+          sending={messageSending}
+          draft={messageDraft}
+          error={messageError}
+          inputRef={messageInputRef}
+          onExpand={openMessageBar}
+          onCollapse={closeMessageBar}
+          onDraftChange={(next) => {
+            setMessageDraft(next);
+            if (messageError) setMessageError(null);
+          }}
+          onSend={() => {
+            void sendCanvasPrompt();
+          }}
+        />
 
         {nodes.length === 0 ? (
           <div className="absolute inset-0 grid place-items-center px-5 text-center pointer-events-none">

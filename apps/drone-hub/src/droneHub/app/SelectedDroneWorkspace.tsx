@@ -1456,6 +1456,7 @@ export function SelectedDroneWorkspace({
             <ChatInput
               resetKey={`${selectedDroneIdentity}:${selectedChat ?? ''}`}
               droneName={currentDrone.name}
+              focusTargetId="primary-chat"
               draftValue={chatDraftValue}
               onDraftValueChange={(next) => setChatInputDraft(chatDraftKey, next)}
               promptError={promptError}
