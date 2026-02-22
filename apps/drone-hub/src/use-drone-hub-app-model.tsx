@@ -1228,6 +1228,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         setSelectedDroneIds([droneId]);
         selectionAnchorRef.current = droneId;
         setSelectedChat('default');
+        void suggestAndRenameDraftDrone(droneId, prompt);
         return { ok: true, droneId, droneName, error: null };
       } catch (err: any) {
         return { ok: false, error: err?.message ?? String(err) };
@@ -1248,6 +1249,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setSelectedChat,
       setSelectedDrone,
       setSelectedDroneIds,
+      suggestAndRenameDraftDrone,
     ],
   );
   const deleteCanvasDrones = React.useCallback(
