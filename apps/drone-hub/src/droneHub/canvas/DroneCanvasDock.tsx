@@ -14,8 +14,7 @@ import {
 } from './use-drone-canvas-store';
 
 const NODE_HEIGHT_PX = 54;
-const DROP_SPACING_X_PX = 236;
-const DROP_SPACING_Y_PX = 70;
+const DROP_STACK_SPACING_Y_PX = 62;
 const DRAG_MOVE_THRESHOLD_PX = 3;
 const DOT_GRID_BASE_SPACING_PX = 32;
 const DOT_GRID_RADIUS_PX = 1.05;
@@ -93,6 +92,24 @@ function parseDraggedDroneIds(event: React.DragEvent<HTMLElement>): string[] {
   }
 
   return out;
+}
+
+function orderDraggedDroneIds(ids: string[], sidebarOrderedDroneIds: string[]): string[] {
+  if (!Array.isArray(ids) || ids.length <= 1) return ids;
+  const rankById = new Map<string, number>();
+  for (const [index, idRaw] of sidebarOrderedDroneIds.entries()) {
+    const id = String(idRaw ?? '').trim();
+    if (!id || rankById.has(id)) continue;
+    rankById.set(id, index);
+  }
+
+  return ids
+    .map((id, index) => ({ id, index, rank: rankById.get(id) ?? Number.POSITIVE_INFINITY }))
+    .sort((a, b) => {
+      if (a.rank !== b.rank) return a.rank - b.rank;
+      return a.index - b.index;
+    })
+    .map((item) => item.id);
 }
 
 function hasDroneDragPayload(event: React.DragEvent<HTMLElement>): boolean {
@@ -203,6 +220,7 @@ function renderNodeIndicator(state: DroneCanvasIndicatorState | null): React.Rea
 
 export function DroneCanvasDock({
   droneNameById,
+  sidebarOrderedDroneIds,
   droneRepoById,
   draftRepoLabel,
   droneStateById,
@@ -212,6 +230,7 @@ export function DroneCanvasDock({
   onDeleteDrones,
 }: {
   droneNameById: Record<string, string>;
+  sidebarOrderedDroneIds: string[];
   droneRepoById: Record<string, string>;
   draftRepoLabel?: string;
   droneStateById: Record<string, DroneCanvasIndicatorState>;
@@ -868,7 +887,8 @@ export function DroneCanvasDock({
     (event: React.DragEvent<HTMLDivElement>) => {
       event.preventDefault();
       setDragOverCanvas(false);
-      const ids = parseDraggedDroneIds(event);
+      const droppedIds = parseDraggedDroneIds(event);
+      const ids = orderDraggedDroneIds(droppedIds, sidebarOrderedDroneIds);
       if (ids.length === 0) return;
       const viewport = viewportRef.current;
       if (!viewport) return;
@@ -878,13 +898,13 @@ export function DroneCanvasDock({
         ids.map((droneId, idx) => ({
           droneId,
           label: String(droneNameById[droneId] ?? '').trim() || droneId,
-          x: origin.x + (idx % 3) * DROP_SPACING_X_PX,
-          y: origin.y + Math.floor(idx / 3) * DROP_SPACING_Y_PX,
+          x: origin.x,
+          y: origin.y + idx * DROP_STACK_SPACING_Y_PX,
         })),
       );
       setSelectedDroneIds(ids);
     },
-    [droneNameById, panX, panY, scale, setSelectedDroneIds, upsertNodes],
+    [droneNameById, panX, panY, scale, setSelectedDroneIds, sidebarOrderedDroneIds, upsertNodes],
   );
 
   const onMessageInputBlur = React.useCallback(
