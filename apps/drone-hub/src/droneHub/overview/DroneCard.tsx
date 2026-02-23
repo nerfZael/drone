@@ -26,6 +26,7 @@ export function DroneCard({
   deleteDisabled,
   deleteBusy,
   statusHint,
+  unreadAgentMessage,
 }: {
   drone: DroneSummary;
   displayName?: string;
@@ -48,6 +49,7 @@ export function DroneCard({
   deleteDisabled?: boolean;
   deleteBusy?: boolean;
   statusHint?: string;
+  unreadAgentMessage?: boolean;
   showGroup?: boolean;
 }) {
   const shownName = String(displayName ?? drone.name).trim() || drone.name;
@@ -79,6 +81,9 @@ export function DroneCard({
             ? 'group-hover/drone:min-w-[24px]'
             : '';
   const showRespondingAsStatus = Boolean(busy) && Boolean(drone.statusOk) && drone.hubPhase !== 'error';
+  const isStarting = drone.hubPhase === 'creating' || drone.hubPhase === 'starting' || drone.hubPhase === 'seeding';
+  const showUnreadIndicator =
+    Boolean(unreadAgentMessage) && !isStarting && !(Boolean(drone.busy) && Boolean(drone.statusOk) && drone.hubPhase !== 'error');
   const errText = String(drone.hubMessage ?? drone.statusError ?? '').trim();
   const showInlineError = drone.hubPhase === 'error' && Boolean(errText);
   const canOpenInlineError = showInlineError && typeof onErrorClick === 'function';
@@ -114,6 +119,13 @@ export function DroneCard({
 
       {/* Single row: name … status/actions */}
       <div className="flex-1 min-w-0 flex items-center gap-1.5">
+        {showUnreadIndicator ? (
+          <span
+            className="inline-flex h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--yellow)]"
+            title="Unread agent message"
+            aria-label="Unread agent message"
+          />
+        ) : null}
         <span
           className={`flex-1 min-w-0 truncate text-[12.5px] ${selected ? 'font-semibold text-[var(--fg)]' : 'text-[var(--fg-secondary)]'}`}
           title={`${shownName}${shownName !== drone.name ? ` (${drone.name})` : ''} · created ${timeAgo(drone.createdAt)}`}

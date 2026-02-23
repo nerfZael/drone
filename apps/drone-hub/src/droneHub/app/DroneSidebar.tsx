@@ -61,6 +61,7 @@ export type DroneSidebarProps = {
   sidebarOptimisticDroneIdSet: Set<string>;
   selectedDroneSet: Set<string>;
   selectedIsResponding: boolean;
+  unreadAgentMessageByDroneId: Record<string, boolean>;
   deletingDrones: Record<string, boolean>;
   renamingDrones: Record<string, boolean>;
   settingBaseImages: Record<string, boolean>;
@@ -121,6 +122,7 @@ export function DroneSidebar({
   sidebarOptimisticDroneIdSet,
   selectedDroneSet,
   selectedIsResponding,
+  unreadAgentMessageByDroneId,
   deletingDrones,
   renamingDrones,
   settingBaseImages,
@@ -618,6 +620,7 @@ export function DroneSidebar({
                           ? false
                           : Boolean(d.busy) || (d.id === selectedDrone && selectedIsResponding)
                       }
+                      unreadAgentMessage={unreadAgentMessageByDroneId[d.id] === true}
                       onClick={(opts) => onSelectDroneCard(d.id, opts)}
                       draggable={!movingDroneGroups && !isOptimistic}
                       onDragStart={(event) => onDroneDragStart(d.id, event)}
@@ -824,6 +827,7 @@ export function DroneSidebar({
                                     ? false
                                     : Boolean(d.busy) || (d.id === selectedDrone && selectedIsResponding)
                                 }
+                                unreadAgentMessage={unreadAgentMessageByDroneId[d.id] === true}
                                 showGroup={false}
                                 onClick={(opts) => onSelectDroneCard(d.id, opts)}
                                 draggable={!movingDroneGroups && !isOptimistic}
