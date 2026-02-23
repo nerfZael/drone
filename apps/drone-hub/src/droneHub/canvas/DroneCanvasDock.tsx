@@ -1156,6 +1156,15 @@ export function DroneCanvasDock({
     [removeDraftNodeIfEmpty, selectedDraftNodeId],
   );
 
+  const cancelActivePointerInteractions = React.useCallback(() => {
+    nodeDragRef.current = null;
+    panDragRef.current = null;
+    marqueeDragRef.current = null;
+    setDraggingNodeId(null);
+    setPanning(false);
+    setSelectionBox(null);
+  }, []);
+
   const onViewportKeyDown = React.useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
       const targetIsEditable = isEditableElement(event.target);
@@ -1212,6 +1221,7 @@ export function DroneCanvasDock({
         if (shiftDeleteOnly) {
           event.preventDefault();
           event.stopPropagation();
+          cancelActivePointerInteractions();
           setMessageError(null);
 
           const draftNodeIds = selectedDroneIds.filter((id) => isCanvasDraftNodeId(id));
@@ -1246,6 +1256,7 @@ export function DroneCanvasDock({
 
         event.preventDefault();
         event.stopPropagation();
+        cancelActivePointerInteractions();
         removeNodes(selectedDroneIds);
         setMessageDraft('');
         setMessageError(null);
@@ -1258,6 +1269,7 @@ export function DroneCanvasDock({
       nodeOrder,
       onDeleteDrones,
       openMessageBar,
+      cancelActivePointerInteractions,
       createDraftNearViewportCenter,
       removeNodes,
       selectedDroneIds,
