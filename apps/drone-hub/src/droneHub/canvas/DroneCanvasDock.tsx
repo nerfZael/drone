@@ -64,6 +64,7 @@ type DroneCanvasIndicatorState = {
   hubPhase?: DroneSummary['hubPhase'];
   hubMessage?: DroneSummary['hubMessage'];
   busy: boolean;
+  unreadAgentMessage: boolean;
 };
 
 function parseDraggedDroneIds(event: React.DragEvent<HTMLElement>): string[] {
@@ -209,6 +210,19 @@ function renderNodeIndicator(state: DroneCanvasIndicatorState | null): React.Rea
   }
 
   return null;
+}
+
+function renderNodeUnreadIndicator(state: DroneCanvasIndicatorState | null): React.ReactNode {
+  if (!state || !state.unreadAgentMessage) return null;
+  const isStarting = state.hubPhase === 'creating' || state.hubPhase === 'starting' || state.hubPhase === 'seeding';
+  if (isStarting || (state.busy && state.statusOk && state.hubPhase !== 'error')) return null;
+  return (
+    <span
+      className="inline-flex h-[8px] w-[8px] rounded-full border border-[rgba(124,170,255,.45)] bg-[rgb(124,170,255)] shadow-[0_0_0_1px_rgba(8,12,20,.9),0_0_10px_rgba(124,170,255,.35)]"
+      title="Unread agent message"
+      aria-label="Unread agent message"
+    />
+  );
 }
 
 export function DroneCanvasDock({
@@ -1488,6 +1502,7 @@ export function DroneCanvasDock({
             const inlineEditing = inlineRenamingDroneId === node.droneId;
             const indicatorState = draftNode ? null : droneStateById[node.droneId] ?? null;
             const indicator = renderNodeIndicator(indicatorState);
+            const unreadIndicator = renderNodeUnreadIndicator(indicatorState);
             const nodeWidth = nodeWidthByDroneId[node.droneId] ?? NODE_MIN_WIDTH_PX;
             const repoLabel = draftNode
               ? String(draftRepoLabelByNodeId[node.droneId] ?? '').trim()
@@ -1527,6 +1542,11 @@ export function DroneCanvasDock({
                 {indicator ? (
                   <span className="pointer-events-none absolute right-0 bottom-full mb-1 z-[2]">
                     {indicator}
+                  </span>
+                ) : null}
+                {unreadIndicator ? (
+                  <span className="pointer-events-none absolute left-0 bottom-full mb-1 z-[2]">
+                    {unreadIndicator}
                   </span>
                 ) : null}
                 {draftNode ? (

@@ -8,6 +8,7 @@ type Updater<T> = T | ((prev: T) => T);
 type DroneHubRuntimeState = {
   optimisticallyDeletedDrones: Record<string, boolean>;
   startupSeedByDrone: Record<string, StartupSeedState>;
+  unreadAgentMessageByDroneId: Record<string, boolean>;
   transcripts: TranscriptItem[] | null;
   transcriptError: string | null;
   loadingTranscript: boolean;
@@ -18,6 +19,7 @@ type DroneHubRuntimeState = {
   pinnedToBottom: boolean;
   setOptimisticallyDeletedDrones: (next: Updater<Record<string, boolean>>) => void;
   setStartupSeedByDrone: (next: Updater<Record<string, StartupSeedState>>) => void;
+  setUnreadAgentMessageByDroneId: (next: Updater<Record<string, boolean>>) => void;
   setTranscripts: (next: Updater<TranscriptItem[] | null>) => void;
   setTranscriptError: (next: Updater<string | null>) => void;
   setLoadingTranscript: (next: Updater<boolean>) => void;
@@ -35,6 +37,7 @@ function resolveNext<T>(prev: T, next: Updater<T>): T {
 export const useDroneHubRuntimeStore = create<DroneHubRuntimeState>((set) => ({
   optimisticallyDeletedDrones: {},
   startupSeedByDrone: {},
+  unreadAgentMessageByDroneId: {},
   transcripts: null,
   transcriptError: null,
   loadingTranscript: false,
@@ -50,6 +53,10 @@ export const useDroneHubRuntimeStore = create<DroneHubRuntimeState>((set) => ({
   setStartupSeedByDrone: (next) =>
     set((s) => ({
       startupSeedByDrone: resolveNext(s.startupSeedByDrone, next),
+    })),
+  setUnreadAgentMessageByDroneId: (next) =>
+    set((s) => ({
+      unreadAgentMessageByDroneId: resolveNext(s.unreadAgentMessageByDroneId, next),
     })),
   setTranscripts: (next) => set((s) => ({ transcripts: resolveNext(s.transcripts, next) })),
   setTranscriptError: (next) =>
@@ -73,6 +80,7 @@ export function useDroneHubRuntimeState() {
     useShallow((s) => ({
       optimisticallyDeletedDrones: s.optimisticallyDeletedDrones,
       startupSeedByDrone: s.startupSeedByDrone,
+      unreadAgentMessageByDroneId: s.unreadAgentMessageByDroneId,
       transcripts: s.transcripts,
       transcriptError: s.transcriptError,
       loadingTranscript: s.loadingTranscript,
@@ -83,6 +91,7 @@ export function useDroneHubRuntimeState() {
       pinnedToBottom: s.pinnedToBottom,
       setOptimisticallyDeletedDrones: s.setOptimisticallyDeletedDrones,
       setStartupSeedByDrone: s.setStartupSeedByDrone,
+      setUnreadAgentMessageByDroneId: s.setUnreadAgentMessageByDroneId,
       setTranscripts: s.setTranscripts,
       setTranscriptError: s.setTranscriptError,
       setLoadingTranscript: s.setLoadingTranscript,

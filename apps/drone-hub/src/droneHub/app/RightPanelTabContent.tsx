@@ -39,6 +39,7 @@ type RightPanelTabContentProps = {
       hubPhase?: DroneSummary['hubPhase'];
       hubMessage?: DroneSummary['hubMessage'];
       busy: boolean;
+      unreadAgentMessage: boolean;
     }
   >;
   onActivateDroneFromCanvas: (droneId: string) => void;
