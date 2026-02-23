@@ -9,6 +9,20 @@ import { fetchJson, isNotFoundError, useNowMs, usePoll } from './hooks';
 
 type RequestJson = <T>(url: string, init?: RequestInit) => Promise<T>;
 
+function optimisticAttachmentRefsFromPayload(raw: unknown): Array<{ name: string; mime: string; size: number }> {
+  const list = Array.isArray(raw) ? raw : [];
+  const out: Array<{ name: string; mime: string; size: number }> = [];
+  for (const item of list) {
+    if (!item || typeof item !== 'object') continue;
+    const name = String((item as any).name ?? '').trim();
+    const mime = String((item as any).mime ?? '').trim().toLowerCase();
+    const sizeNum = Number((item as any).size ?? 0);
+    if (!name || !mime.startsWith('image/') || !Number.isFinite(sizeNum) || sizeNum <= 0) continue;
+    out.push({ name, mime, size: Math.floor(sizeNum) });
+  }
+  return out.slice(0, 8);
+}
+
 type UseChatRuntimeOrchestrationArgs = {
   chatInfo: ChatInfo | null;
   currentDrone: DroneSummary | null;
@@ -104,11 +118,21 @@ export function useChatRuntimeOrchestration({
   }, []);
 
   const addOptimisticPendingPrompt = React.useCallback(
-    (id: string, prompt: string) => {
+    (id: string, prompt: string, attachmentsRaw?: unknown) => {
       if (!id) return;
+      const attachments = optimisticAttachmentRefsFromPayload(attachmentsRaw);
       setOptimisticPendingPrompts((prev) => {
         if (prev.some((p) => p.id === id)) return prev;
-        return [...prev, { id, at: new Date().toISOString(), prompt, state: 'sending' }];
+        return [
+          ...prev,
+          {
+            id,
+            at: new Date().toISOString(),
+            prompt,
+            ...(attachments.length > 0 ? { attachments } : {}),
+            state: 'sending',
+          },
+        ];
       });
     },
     [setOptimisticPendingPrompts],
@@ -206,7 +230,7 @@ export function useChatRuntimeOrchestration({
         );
         if (chatUiMode === 'cli') bumpCliTyping();
         const id = String((data as any)?.promptId ?? '').trim();
-        if (chatUiMode === 'transcript') addOptimisticPendingPrompt(id, optimisticPrompt);
+        if (chatUiMode === 'transcript') addOptimisticPendingPrompt(id, optimisticPrompt, attachments);
         return true;
       } catch (e: any) {
         setPromptError(e?.message ?? String(e));
@@ -309,7 +333,7 @@ export function useChatRuntimeOrchestration({
               parsed.chatName === (String(selectedChat ?? '').trim() || 'default');
             if (selectedKeyMatches) {
               if (chatUiMode === 'cli') bumpCliTyping();
-              if (chatUiMode === 'transcript') addOptimisticPendingPrompt(id, head.prompt);
+              if (chatUiMode === 'transcript') addOptimisticPendingPrompt(id, head.prompt, head.attachments);
             }
           } catch (e: any) {
             const errText = e?.message ?? String(e);

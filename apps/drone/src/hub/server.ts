@@ -65,10 +65,13 @@ import { isHubApiAuthorized, isHubApiAuthorizedForWebSocket, rejectWebSocketUpgr
 import { bashQuote, encodeRemotePath, hexEncodeUtf8, normalizeContainerPath, parseBoolParam, shellQuoteIfNeeded } from './hub-format';
 import { readJsonBody, withCors } from './hub-http';
 import {
+  buildChatAttachmentsDirectory,
+  buildChatImageAttachmentRefs,
   copyChatAttachmentsToContainer,
   normalizeChatImageAttachments,
   promptWithImageAttachments,
   type ChatImageAttachment,
+  type ChatImageAttachmentRef,
 } from './chat-attachments';
 import {
   droneRepoChangesSummary,
@@ -866,8 +869,8 @@ type DiscoveredModelOption = {
 };
 
 type TranscriptTurn =
-  | { at: string; prompt: string; session: string; logPath: string }
-  | { at: string; id?: string; prompt: string; ok: boolean; output: string; error?: string };
+  | { at: string; prompt: string; session: string; logPath: string; attachments?: ChatImageAttachmentRef[] }
+  | { at: string; id?: string; prompt: string; ok: boolean; output: string; error?: string; attachments?: ChatImageAttachmentRef[] };
 
 type PendingPhase = 'starting' | 'creating' | 'seeding' | 'error';
 
@@ -1405,6 +1408,7 @@ async function sendPromptToChat(opts: {
   chatName: string;
   prompt: string;
   attachments?: ChatImageAttachment[];
+  attachmentRefs?: ChatImageAttachmentRef[];
   cwd?: string | null;
   waitForDaemonMs?: number;
 }) {
@@ -1442,20 +1446,24 @@ async function sendPromptToChat(opts: {
     const cwd = cwdRaw ? normalizeContainerPath(cwdRaw) : normalizeContainerPath(defaultCwd);
 
     const attachments = Array.isArray(opts.attachments) ? opts.attachments : [];
+    const providedAttachmentRefs = normalizeChatImageAttachmentRefs(opts.attachmentRefs);
     const promptId = String(opts.id ?? '').trim() || crypto.randomBytes(9).toString('hex');
-    const attachmentsDir =
-      attachments.length > 0 ? normalizeContainerPath(`/dvm-data/drone-hub/attachments/${normalizedChat}/${promptId}`) : '';
     const attachmentsForPrompt =
-      attachments.length > 0
-        ? attachments.map((a) => ({
-            name: a.name,
-            mime: a.mime,
-            size: a.size,
-            path: path.posix.join(attachmentsDir, a.fileName),
-          }))
-        : [];
+      providedAttachmentRefs.length > 0
+        ? providedAttachmentRefs
+        : buildChatImageAttachmentRefs({
+            attachments,
+            cwd,
+            chatName: normalizedChat,
+            promptId,
+          });
     const effectivePrompt = promptWithImageAttachments(opts.prompt, attachmentsForPrompt);
     if (attachments.length > 0) {
+      const attachmentsDir = buildChatAttachmentsDirectory({
+        cwd,
+        chatName: normalizedChat,
+        promptId,
+      });
       await copyChatAttachmentsToContainer({ containerName, containerDir: attachmentsDir, attachments });
     }
 
@@ -1762,12 +1770,39 @@ type PendingPrompt = {
   at: string;
   prompt: string;
   cwd?: string | null;
+  attachments?: ChatImageAttachmentRef[];
   state: PendingPromptState;
   error?: string;
   updatedAt?: string;
 };
 
 // NOTE: Pending prompts are executed in the drone daemon (tmux-backed) and are restart-resumable.
+
+function normalizeChatImageAttachmentRefs(raw: unknown): ChatImageAttachmentRef[] {
+  const list = Array.isArray(raw) ? raw : [];
+  const out: ChatImageAttachmentRef[] = [];
+  for (const item of list) {
+    if (!item || typeof item !== 'object') continue;
+    const name = String((item as any).name ?? '').trim();
+    const mime = String((item as any).mime ?? '').trim().toLowerCase();
+    const sizeNum = Number((item as any).size ?? 0);
+    const fileName = String((item as any).fileName ?? '').trim();
+    const pathRaw = String((item as any).path ?? '').trim();
+    const relRaw = String((item as any).relativePath ?? '').trim();
+    if (!name || !mime.startsWith('image/')) continue;
+    if (!Number.isFinite(sizeNum) || sizeNum <= 0) continue;
+    if (!pathRaw || !pathRaw.startsWith('/')) continue;
+    out.push({
+      name,
+      mime,
+      size: Math.floor(sizeNum),
+      fileName: fileName || path.posix.basename(pathRaw),
+      path: normalizeContainerPath(pathRaw),
+      relativePath: relRaw || path.posix.basename(pathRaw),
+    });
+  }
+  return out.slice(0, 8);
+}
 
 function isSafePromptId(raw: string): boolean {
   const s = String(raw ?? '').trim();
@@ -1853,6 +1888,7 @@ async function readPendingPrompts(opts: { droneId: string; chatName: string }): 
       at: String(p?.at ?? '').trim(),
       prompt: String(p?.prompt ?? ''),
       cwd: typeof p?.cwd === 'string' ? String(p.cwd) : p?.cwd === null ? null : undefined,
+      attachments: normalizeChatImageAttachmentRefs(p?.attachments),
       state:
         p?.state === 'sent' || p?.state === 'failed' || p?.state === 'sending' || p?.state === 'queued'
           ? (p.state as PendingPromptState)
@@ -1988,7 +2024,15 @@ async function pumpQueuedPendingPromptsForChat(opts: { droneId: string; chatName
     try {
       const enqueueTimeoutMs = defaultPromptEnqueueTimeoutMs();
       const r: any = await withTimeout(
-        sendPromptToChat({ id, droneId, chatName, prompt, cwd, waitForDaemonMs: undefined }),
+        sendPromptToChat({
+          id,
+          droneId,
+          chatName,
+          prompt,
+          attachmentRefs: normalizeChatImageAttachmentRefs(p?.attachments),
+          cwd,
+          waitForDaemonMs: undefined,
+        }),
         enqueueTimeoutMs,
         `queued prompt enqueue failed for ${droneId}/${chatName}`,
       );
@@ -2124,6 +2168,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
     const p = pendingList[i] ?? {};
     const id = String(p?.id ?? '').trim();
     const state = String(p?.state ?? '');
+    const promptAttachments = normalizeChatImageAttachmentRefs((p as any)?.attachments);
     if (!id) continue;
     if (state === 'queued') continue;
 
@@ -2227,7 +2272,16 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           continue;
         }
         // Record transcript turn (success).
-        turns.push({ at: promptAt, promptAt, completedAt: finishedAt, id, prompt: String(p?.prompt ?? ''), ok: true, output });
+        turns.push({
+          at: promptAt,
+          promptAt,
+          completedAt: finishedAt,
+          id,
+          prompt: String(p?.prompt ?? ''),
+          ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
+          ok: true,
+          output,
+        });
         transcriptIds.add(id);
         pendingList[i] = { ...p, state: 'sent', updatedAt: nowIso() };
         changed = true;
@@ -2261,6 +2315,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
         completedAt: finishedAt,
         id,
         prompt: String(p?.prompt ?? ''),
+        ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
         ok: true,
         output: output || '(no output)',
       });
@@ -2296,6 +2351,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
             completedAt: finishedAt,
             id,
             prompt: String(p?.prompt ?? ''),
+            ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
             ok: true,
             output,
           });
@@ -2406,13 +2462,56 @@ async function enqueuePrompt(opts: {
         })
       : false);
 
+  const cwdRaw = typeof opts.cwd === 'string' ? opts.cwd : '';
+  const defaultCwd = typeof (d as any)?.cwd === 'string' && String((d as any).cwd).trim() ? String((d as any).cwd).trim() : '/dvm-data';
+  const cwd = cwdRaw ? normalizeContainerPath(cwdRaw) : normalizeContainerPath(defaultCwd);
+  const rawAttachments = Array.isArray(opts.attachments) ? opts.attachments : [];
+  const attachmentsForPending = buildChatImageAttachmentRefs({
+    attachments: rawAttachments,
+    cwd,
+    chatName,
+    promptId: id,
+  });
+
   await pushPendingPrompt({
     droneId,
     chatName,
-    pending: { id, at, prompt: opts.prompt, cwd: opts.cwd ?? null, state: defer ? 'queued' : 'sending', updatedAt: at },
+    pending: {
+      id,
+      at,
+      prompt: opts.prompt,
+      cwd: opts.cwd ?? null,
+      ...(attachmentsForPending.length > 0 ? { attachments: attachmentsForPending } : {}),
+      state: defer ? 'queued' : 'sending',
+      updatedAt: at,
+    },
   });
 
   if (defer) {
+    if (rawAttachments.length > 0 && attachmentsForPending.length > 0) {
+      const containerName = String((d as any)?.containerName ?? (d as any)?.name ?? droneId).trim() || droneId;
+      const attachmentsDir = buildChatAttachmentsDirectory({
+        cwd,
+        chatName,
+        promptId: id,
+      });
+      try {
+        await copyChatAttachmentsToContainer({
+          containerName,
+          containerDir: attachmentsDir,
+          attachments: rawAttachments,
+        });
+      } catch (e: any) {
+        const errText = e?.message ?? String(e);
+        await updatePendingPrompt({
+          droneId,
+          chatName,
+          id,
+          patch: { state: 'failed', error: `failed staging queued image attachments: ${errText}` },
+        });
+        throw new Error(`failed staging queued image attachments: ${errText}`);
+      }
+    }
     // Persisted as queued; a reconcile/update that establishes session id will pump it.
     enqueuePendingPromptPump(droneId, chatName);
     return { id };
@@ -2432,7 +2531,7 @@ async function enqueuePrompt(opts: {
         droneId,
         chatName,
         prompt: opts.prompt,
-        attachments: Array.isArray(opts.attachments) ? opts.attachments : [],
+        attachments: rawAttachments,
         cwd: opts.cwd ?? null,
         waitForDaemonMs: opts.waitForDaemonMs,
       }),
@@ -9467,6 +9566,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
               typeof t?.completedAt === 'string' && t.completedAt.trim() ? String(t.completedAt).trim() : undefined;
             const id = typeof t?.id === 'string' && t.id.trim() ? String(t.id).trim() : undefined;
             const prompt = String(t?.prompt ?? '');
+            const attachments = normalizeChatImageAttachmentRefs((t as any)?.attachments);
             if (typeof t?.ok === 'boolean') {
               const ok = Boolean(t.ok);
               const output = ok ? String(t.output ?? '') : '';
@@ -9478,6 +9578,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                 ...(completedAt ? { completedAt } : {}),
                 ...(id ? { id } : {}),
                 prompt,
+                ...(attachments.length > 0 ? { attachments } : {}),
                 session: '',
                 logPath: '',
                 ok,
@@ -9496,6 +9597,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                 ...(promptAt ? { promptAt } : {}),
                 ...(completedAt ? { completedAt } : {}),
                 prompt,
+                ...(attachments.length > 0 ? { attachments } : {}),
                 session,
                 logPath,
                 ok: false,
@@ -9513,6 +9615,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                 ...(promptAt ? { promptAt } : {}),
                 ...(completedAt ? { completedAt } : {}),
                 prompt,
+                ...(attachments.length > 0 ? { attachments } : {}),
                 session,
                 logPath,
                 ok: false,
@@ -9527,6 +9630,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
               ...(promptAt ? { promptAt } : {}),
               ...(completedAt ? { completedAt } : {}),
               prompt,
+              ...(attachments.length > 0 ? { attachments } : {}),
               session,
               logPath,
               ok: true,

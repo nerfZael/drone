@@ -2,6 +2,7 @@ import React from 'react';
 import { stripAnsi, timeAgo } from '../../domain';
 import type { PendingPrompt } from '../types';
 import { CollapsibleMarkdown } from './CollapsibleMarkdown';
+import { ImageAttachmentChips, isAttachmentOnlyPrompt, normalizeImageAttachmentRefs } from './ImageAttachmentChips';
 import type { MarkdownFileReference } from './MarkdownMessage';
 import { IconBot, IconUser, TypingDots } from './icons';
 
@@ -31,6 +32,8 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   unstickBusy?: boolean;
   unstickError?: string | null;
 }) {
+  const attachments = normalizeImageAttachmentRefs((item as any).attachments);
+  const promptText = isAttachmentOnlyPrompt(item.prompt, attachments) ? '' : item.prompt;
   const isFailed = item.state === 'failed';
   const badgeLabel = isFailed ? 'Failed' : item.state === 'queued' ? 'Queued' : 'Pending';
   const activeAtMs = parseTimeMs(item.updatedAt ?? item.at);
@@ -66,13 +69,16 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
             </span>
           </div>
           <div className="bg-[var(--user-dim)] border border-[rgba(148,163,184,.14)] rounded-lg rounded-tr-sm px-4 py-3">
-            <CollapsibleMarkdown
-              text={item.prompt}
-              fadeTo="var(--user-dim)"
-              className="dh-markdown--user"
-              onOpenFileReference={onOpenFileReference}
-              onOpenLink={onOpenLink}
-            />
+            {promptText ? (
+              <CollapsibleMarkdown
+                text={promptText}
+                fadeTo="var(--user-dim)"
+                className="dh-markdown--user"
+                onOpenFileReference={onOpenFileReference}
+                onOpenLink={onOpenLink}
+              />
+            ) : null}
+            <ImageAttachmentChips attachments={attachments} onOpenFileReference={onOpenFileReference} />
           </div>
         </div>
         {showRoleIcons && (

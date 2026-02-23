@@ -24,6 +24,28 @@ export type ChatImageAttachment = {
   fileName: string;
 };
 
+export type ChatImageAttachmentRef = {
+  name: string;
+  mime: string;
+  size: number;
+  fileName: string;
+  path: string;
+  relativePath: string;
+};
+
+const CHAT_ATTACHMENTS_DIR_NAME = '.drone-hub/attachments';
+
+function sanitizePathSegment(raw: string, fallback: string): string {
+  const cleaned = String(raw ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64);
+  return cleaned || fallback;
+}
+
 function base64DecodedByteLength(b64Raw: string): number {
   const b64 = String(b64Raw ?? '').replace(/\s+/g, '');
   if (!b64) return 0;
@@ -130,14 +152,55 @@ export function normalizeChatImageAttachments(raw: unknown): ChatImageAttachment
 
 export function promptWithImageAttachments(
   promptRaw: string,
-  files: Array<{ name: string; mime: string; size: number; path: string }>
+  files: Array<{ name: string; mime: string; size: number; path: string; relativePath?: string }>
 ): string {
   const prompt = String(promptRaw ?? '').trim();
   if (!files || files.length === 0) return prompt;
   const header = files.length === 1 ? 'Image attachment:' : 'Image attachments:';
-  const lines = files.map((f, i) => `${i + 1}. ${f.name} (${f.mime}, ${f.size} bytes): ${f.path}`);
+  const lines = files.map((f, i) => {
+    const absPath = String(f.path ?? '').trim();
+    const relPath = String(f.relativePath ?? '').trim();
+    const shownPath = relPath && relPath !== absPath ? `${relPath} (absolute: ${absPath})` : relPath || absPath;
+    return `${i + 1}. ${f.name} (${f.mime}, ${f.size} bytes): ${shownPath}`;
+  });
   const block = `${header}\n${lines.join('\n')}`;
   return prompt ? `${prompt}\n\n${block}` : block;
+}
+
+export function buildChatAttachmentsDirectory(opts: { cwd: string; chatName: string; promptId: string }): string {
+  const cwd = normalizeContainerPath(String(opts.cwd ?? '').trim() || '/dvm-data');
+  const chatSegment = sanitizePathSegment(opts.chatName, 'chat');
+  const promptSegment = sanitizePathSegment(opts.promptId, 'prompt');
+  return normalizeContainerPath(path.posix.join(cwd, CHAT_ATTACHMENTS_DIR_NAME, chatSegment, promptSegment));
+}
+
+export function buildChatImageAttachmentRefs(opts: {
+  attachments: ChatImageAttachment[];
+  cwd: string;
+  chatName: string;
+  promptId: string;
+}): ChatImageAttachmentRef[] {
+  const list = Array.isArray(opts.attachments) ? opts.attachments : [];
+  if (list.length === 0) return [];
+  const cwd = normalizeContainerPath(String(opts.cwd ?? '').trim() || '/dvm-data');
+  const dir = buildChatAttachmentsDirectory({
+    cwd,
+    chatName: opts.chatName,
+    promptId: opts.promptId,
+  });
+  return list.map((a) => {
+    const absPath = normalizeContainerPath(path.posix.join(dir, a.fileName));
+    const relPathRaw = path.posix.relative(cwd, absPath);
+    const relPath = relPathRaw && relPathRaw !== '.' && !relPathRaw.startsWith('../') ? relPathRaw : path.posix.basename(absPath);
+    return {
+      name: a.name,
+      mime: a.mime,
+      size: a.size,
+      fileName: a.fileName,
+      path: absPath,
+      relativePath: relPath,
+    };
+  });
 }
 
 export async function copyChatAttachmentsToContainer(opts: {
@@ -182,4 +245,3 @@ export async function copyChatAttachmentsToContainer(opts: {
     }
   }
 }
-

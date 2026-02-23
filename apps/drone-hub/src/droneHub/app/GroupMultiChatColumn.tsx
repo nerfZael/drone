@@ -18,6 +18,20 @@ import { parseIsoDateMs, type GroupMultiChatColumnRuntimeState } from './group-m
 import { openDroneTabFromLastPreview, resolveDroneOpenTabUrl } from './quick-actions';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 
+function optimisticAttachmentRefsFromPayload(raw: unknown): Array<{ name: string; mime: string; size: number }> {
+  const list = Array.isArray(raw) ? raw : [];
+  const out: Array<{ name: string; mime: string; size: number }> = [];
+  for (const item of list) {
+    if (!item || typeof item !== 'object') continue;
+    const name = String((item as any).name ?? '').trim();
+    const mime = String((item as any).mime ?? '').trim().toLowerCase();
+    const sizeNum = Number((item as any).size ?? 0);
+    if (!name || !mime.startsWith('image/') || !Number.isFinite(sizeNum) || sizeNum <= 0) continue;
+    out.push({ name, mime, size: Math.floor(sizeNum) });
+  }
+  return out.slice(0, 8);
+}
+
 export type GroupMultiChatColumnProps = {
   drone: DroneSummary;
   droneLabel?: string;
@@ -219,6 +233,7 @@ export function GroupMultiChatColumn({
       const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
       if (!prompt && attachments.length === 0) return false;
       const optimisticPrompt = prompt || (attachments.length === 1 ? '[image attachment]' : `[${attachments.length} image attachments]`);
+      const optimisticAttachments = optimisticAttachmentRefsFromPayload(attachments);
       if (isDroneStartingOrSeeding(drone.hubPhase)) {
         if (attachments.length > 0) {
           setPromptError(`\"${shownName}\" is still starting. Image attachments can be sent once it is ready.`);
@@ -242,7 +257,16 @@ export function GroupMultiChatColumn({
         if (id) {
           setOptimisticPendingPrompts((prev) => {
             if (prev.some((p) => p.id === id)) return prev;
-            return [...prev, { id, at: new Date().toISOString(), prompt: optimisticPrompt, state: 'sending' }];
+            return [
+              ...prev,
+              {
+                id,
+                at: new Date().toISOString(),
+                prompt: optimisticPrompt,
+                ...(optimisticAttachments.length > 0 ? { attachments: optimisticAttachments } : {}),
+                state: 'sending',
+              },
+            ];
           });
         }
         requestAnimationFrame(() => scrollColumnToBottom());
