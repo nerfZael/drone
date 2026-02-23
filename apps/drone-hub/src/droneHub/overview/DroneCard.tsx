@@ -131,28 +131,29 @@ export function DroneCard({
         ) : null}
       </div>
 
-      {showInlineError ? (
-        canOpenInlineError ? (
-          <button
-            type="button"
-            onClick={(e) => {
-              stopCardSelection(e);
-              onErrorClick?.(drone, errText);
-            }}
-            onMouseDown={stopCardSelection}
-            onPointerDown={stopCardSelection}
-            className="flex-shrink-0 ml-2 text-[10px] text-[var(--red)] truncate max-w-[80px] hover:underline focus:outline-none"
-            title="View full error details"
-            aria-label={`View error details for ${shownName}`}
-          >
-            error
-          </button>
-        ) : (
-          <span className="flex-shrink-0 ml-2 text-[10px] text-[var(--red)] truncate max-w-[80px]" title={errText}>error</span>
-        )
-      ) : (
+      <div className="flex-shrink-0 ml-2 flex items-center gap-1 min-w-0">
+        {showInlineError ? (
+          canOpenInlineError ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                stopCardSelection(e);
+                onErrorClick?.(drone, errText);
+              }}
+              onMouseDown={stopCardSelection}
+              onPointerDown={stopCardSelection}
+              className="text-[10px] text-[var(--red)] truncate max-w-[72px] hover:underline focus:outline-none"
+              title="View full error details"
+              aria-label={`View error details for ${shownName}`}
+            >
+              error
+            </button>
+          ) : (
+            <span className="text-[10px] text-[var(--red)] truncate max-w-[72px]" title={errText}>error</span>
+          )
+        ) : null}
         <div
-          className={`relative flex items-center justify-end flex-shrink-0 ml-2 transition-[min-width] duration-150 ${
+          className={`relative flex items-center justify-end transition-[min-width] duration-150 ${
             hasActions ? (pinActionsVisible ? actionReserveWidthClass : actionReserveHoverWidthClass) : ''
           }`}
         >
@@ -165,7 +166,7 @@ export function DroneCard({
                 : ''
             }
           >
-            {showRespondingAsStatus ? (
+            {showInlineError ? null : showRespondingAsStatus ? (
               <span className="inline-flex items-center" title="Agent responding"><TypingDots color="var(--yellow)" /></span>
             ) : (
               <StatusBadge ok={drone.statusOk} error={drone.statusError} hubPhase={drone.hubPhase} hubMessage={drone.hubMessage} />
@@ -258,7 +259,7 @@ export function DroneCard({
             </div>
           )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
