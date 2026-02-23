@@ -515,7 +515,9 @@ function buildDockerExecShellCommand(containerName: string, cwdRaw: string): str
 }
 
 const IMAGE_FILE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico', 'avif', 'tif', 'tiff']);
+const VIDEO_FILE_EXTENSIONS = new Set(['mp4', 'webm', 'mov', 'm4v', 'ogv', 'ogg', 'avi', 'mkv', 'wmv']);
 const FS_THUMB_MAX_BYTES = 8 * 1024 * 1024;
+const FS_MEDIA_MAX_BYTES = 96 * 1024 * 1024;
 const FS_EDITOR_MAX_BYTES = 512 * 1024;
 
 type ContainerFsEntry = {
@@ -526,6 +528,7 @@ type ContainerFsEntry = {
   mtimeMs: number | null;
   ext: string | null;
   isImage: boolean;
+  isVideo: boolean;
 };
 
 function extensionLower(rawPathOrName: string): string {
@@ -538,6 +541,11 @@ function extensionLower(rawPathOrName: string): string {
 function isLikelyImagePath(rawPathOrName: string): boolean {
   const ext = extensionLower(rawPathOrName);
   return ext ? IMAGE_FILE_EXTENSIONS.has(ext) : false;
+}
+
+function isLikelyVideoPath(rawPathOrName: string): boolean {
+  const ext = extensionLower(rawPathOrName);
+  return ext ? VIDEO_FILE_EXTENSIONS.has(ext) : false;
 }
 
 function guessImageMimeType(rawPathOrName: string): string {
@@ -563,6 +571,30 @@ function guessImageMimeType(rawPathOrName: string): string {
     case 'tif':
     case 'tiff':
       return 'image/tiff';
+    default:
+      return 'application/octet-stream';
+  }
+}
+
+function guessVideoMimeType(rawPathOrName: string): string {
+  const ext = extensionLower(rawPathOrName);
+  switch (ext) {
+    case 'mp4':
+    case 'm4v':
+      return 'video/mp4';
+    case 'webm':
+      return 'video/webm';
+    case 'mov':
+      return 'video/quicktime';
+    case 'ogv':
+    case 'ogg':
+      return 'video/ogg';
+    case 'avi':
+      return 'video/x-msvideo';
+    case 'mkv':
+      return 'video/x-matroska';
+    case 'wmv':
+      return 'video/x-ms-wmv';
     default:
       return 'application/octet-stream';
   }
@@ -628,6 +660,7 @@ function parseContainerFsListOutput(text: string): { resolvedPath: string; entri
       resolvedPath === '/' ? path.posix.join('/', name) : path.posix.join(resolvedPath.replace(/\/+$/g, ''), name);
     const ext = kind === 'file' ? extensionLower(name) || null : null;
     const isImage = kind === 'file' ? isLikelyImagePath(name) : false;
+    const isVideo = kind === 'file' ? isLikelyVideoPath(name) : false;
 
     entries.push({
       name,
@@ -637,6 +670,7 @@ function parseContainerFsListOutput(text: string): { resolvedPath: string; entri
       mtimeMs: Number.isFinite(mtimeSec) ? Math.max(0, Math.floor(mtimeSec * 1000)) : null,
       ext,
       isImage,
+      isVideo,
     });
   }
 
@@ -5751,7 +5785,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
       // GET /api/drones/:id/fs/thumb?path=/...
       // Returns image bytes for thumbnail rendering.
       // GET /api/drones/:id/fs/file?path=/...
-      // Reads UTF-8 text file content for editor usage.
+      // Reads file data for editor/preview usage (UTF-8 text content or binary metadata).
       if (method === 'GET' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'drones' && parts[3] === 'fs' && parts[4] === 'file') {
         const droneRef = decodeURIComponent(parts[2]);
         const resolved = await resolveDroneOrRespond(res, droneRef);
@@ -5895,8 +5929,32 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             return;
           }
 
-          if (!isLikelyTextMimeType(mimeRaw) || bufferLooksBinary(buf)) {
-            json(res, 415, { ok: false, error: 'file is not a UTF-8 text file', id: droneId, name: droneName, path: effectivePath });
+          const textLike = isLikelyTextMimeType(mimeRaw) && !bufferLooksBinary(buf);
+          if (!textLike) {
+            const inferredMime = mimeRaw.startsWith('image/')
+              ? mimeRaw
+              : mimeRaw.startsWith('video/')
+                ? mimeRaw
+                : isLikelyImagePath(effectivePath)
+                  ? guessImageMimeType(effectivePath)
+                  : isLikelyVideoPath(effectivePath)
+                    ? guessVideoMimeType(effectivePath)
+                    : mimeRaw || 'application/octet-stream';
+            const kind = inferredMime.startsWith('image/')
+              ? 'image'
+              : inferredMime.startsWith('video/')
+                ? 'video'
+                : 'binary';
+            json(res, 200, {
+              ok: true,
+              id: droneId,
+              name: droneName,
+              path: effectivePath,
+              kind,
+              mime: inferredMime,
+              size: Number.isFinite(sizeNum) ? Math.max(0, Math.floor(sizeNum)) : 0,
+              mtimeMs: Number.isFinite(mtimeSec) ? Math.max(0, Math.floor(mtimeSec * 1000)) : null,
+            });
             return;
           }
 
@@ -5905,6 +5963,8 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             id: droneId,
             name: droneName,
             path: effectivePath,
+            kind: 'text',
+            mime: mimeRaw || 'text/plain',
             content: buf.toString('utf8'),
             size: Number.isFinite(sizeNum) ? Math.max(0, Math.floor(sizeNum)) : 0,
             mtimeMs: Number.isFinite(mtimeSec) ? Math.max(0, Math.floor(mtimeSec * 1000)) : null,
@@ -6033,6 +6093,170 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           const explicitStatus = Number((e as any)?.statusCode ?? 0);
           const code = explicitStatus > 0 ? explicitStatus : looksLikeMissingContainerError(msg) ? 404 : 500;
           json(res, code, { ok: false, error: msg, id: droneId, name: droneName, path: targetPath });
+          return;
+        }
+      }
+
+      // GET /api/drones/:id/fs/media?path=/...
+      // Returns image/video bytes for preview rendering.
+      if (method === 'GET' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'drones' && parts[3] === 'fs' && parts[4] === 'media') {
+        const droneRef = decodeURIComponent(parts[2]);
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        const droneId = resolved.id;
+        const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+
+        const targetPath = normalizeContainerPath(u.searchParams.get('path') ?? '');
+        if (!targetPath || targetPath === '/') {
+          json(res, 400, { ok: false, error: 'missing file path' });
+          return;
+        }
+
+        const script = [
+          'set -euo pipefail',
+          `target=${bashQuote(targetPath)}`,
+          `max=${String(FS_MEDIA_MAX_BYTES)}`,
+          'if [ ! -f "$target" ]; then',
+          '  echo "__ERR__\tnot-file"',
+          '  exit 3',
+          'fi',
+          'size=$(wc -c < "$target" | tr -d "[:space:]")',
+          'if [ -z "$size" ]; then size=0; fi',
+          'if [ "$size" -gt "$max" ]; then',
+          '  printf "__ERR__\ttoo-large\t%s\n" "$size"',
+          '  exit 4',
+          'fi',
+          'mime=""',
+          'if command -v file >/dev/null 2>&1; then',
+          '  mime=$(file -Lb --mime-type -- "$target" 2>/dev/null || true)',
+          'fi',
+          'printf "__META__\t%s\t%s\n" "$mime" "$size"',
+          'base64 < "$target" | tr -d "\\n"',
+        ].join('\n');
+
+        try {
+          const r = await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: resolved.drone }, async ({ containerName }) => {
+            return await dvmExec(containerName, 'bash', ['-lc', script]);
+          });
+          const stdout = String(r.stdout ?? '');
+          const out = `${stdout}\n${String(r.stderr ?? '')}`;
+          if (r.code !== 0) {
+            if (/__ERR__\s+not-file\b/i.test(out)) {
+              json(res, 404, { ok: false, error: `file not found: ${targetPath}`, id: droneId, name: droneName, path: targetPath });
+              return;
+            }
+            const large = out.match(/__ERR__\s+too-large\s+(\d+)/i);
+            if (large) {
+              json(res, 413, { ok: false, error: `media too large (${large[1]} bytes, max ${FS_MEDIA_MAX_BYTES})`, id: droneId, name: droneName, path: targetPath });
+              return;
+            }
+            json(res, 500, { ok: false, error: 'failed reading media', id: droneId, name: droneName, path: targetPath });
+            return;
+          }
+
+          const firstNl = stdout.indexOf('\n');
+          if (firstNl < 0) {
+            json(res, 500, { ok: false, error: 'media response malformed', id: droneId, name: droneName, path: targetPath });
+            return;
+          }
+          const metaLine = stdout.slice(0, firstNl);
+          const b64 = stdout.slice(firstNl + 1).trim();
+          const meta = metaLine.split('\t');
+          if (meta.length < 3 || meta[0] !== '__META__') {
+            json(res, 500, { ok: false, error: 'media metadata missing', id: droneId, name: droneName, path: targetPath });
+            return;
+          }
+
+          const mimeRaw = String(meta[1] ?? '').trim().toLowerCase();
+          const mime = mimeRaw.startsWith('image/')
+            ? mimeRaw
+            : mimeRaw.startsWith('video/')
+              ? mimeRaw
+              : isLikelyImagePath(targetPath)
+                ? guessImageMimeType(targetPath)
+                : isLikelyVideoPath(targetPath)
+                  ? guessVideoMimeType(targetPath)
+                  : 'application/octet-stream';
+          if (!mime.startsWith('image/') && !mime.startsWith('video/')) {
+            json(res, 415, { ok: false, error: 'not an image or video file', id: droneId, name: droneName, path: targetPath });
+            return;
+          }
+
+          let buf: Buffer;
+          try {
+            buf = Buffer.from(b64, 'base64');
+          } catch {
+            json(res, 500, { ok: false, error: 'failed decoding media bytes', id: droneId, name: droneName, path: targetPath });
+            return;
+          }
+
+          const total = buf.length;
+          const rangeHeader = String(req.headers.range ?? '').trim();
+          if (rangeHeader.startsWith('bytes=')) {
+            const raw = rangeHeader.slice('bytes='.length).split(',')[0]?.trim() ?? '';
+            const m = /^(\d*)-(\d*)$/.exec(raw);
+            if (!m) {
+              res.statusCode = 416;
+              res.setHeader('content-range', `bytes */${total}`);
+              res.end();
+              return;
+            }
+            const startRaw = String(m[1] ?? '').trim();
+            const endRaw = String(m[2] ?? '').trim();
+            let start = startRaw ? Number(startRaw) : NaN;
+            let end = endRaw ? Number(endRaw) : NaN;
+            if (!Number.isFinite(start) && Number.isFinite(end)) {
+              const suffixLen = Math.floor(end);
+              if (suffixLen <= 0) {
+                res.statusCode = 416;
+                res.setHeader('content-range', `bytes */${total}`);
+                res.end();
+                return;
+              }
+              start = Math.max(0, total - suffixLen);
+              end = total - 1;
+            } else {
+              start = Number.isFinite(start) ? Math.floor(start) : 0;
+              end = Number.isFinite(end) ? Math.floor(end) : total - 1;
+            }
+            if (start < 0 || end < start || start >= total) {
+              res.statusCode = 416;
+              res.setHeader('content-range', `bytes */${total}`);
+              res.end();
+              return;
+            }
+            const safeEnd = Math.min(end, total - 1);
+            const chunk = buf.subarray(start, safeEnd + 1);
+            res.statusCode = 206;
+            res.setHeader('content-type', mime);
+            res.setHeader('cache-control', 'no-store');
+            res.setHeader('accept-ranges', 'bytes');
+            res.setHeader('content-range', `bytes ${start}-${safeEnd}/${total}`);
+            res.setHeader('content-length', String(chunk.length));
+            res.end(chunk);
+            return;
+          }
+
+          res.statusCode = 200;
+          res.setHeader('content-type', mime);
+          res.setHeader('cache-control', 'no-store');
+          res.setHeader('accept-ranges', 'bytes');
+          res.setHeader('content-length', String(total));
+          res.end(buf);
+          return;
+        } catch (e: any) {
+          const msg = e?.message ?? String(e);
+          if (/__ERR__\s+not-file\b/i.test(msg)) {
+            json(res, 404, { ok: false, error: `file not found: ${targetPath}`, id: droneId, name: droneName, path: targetPath });
+            return;
+          }
+          const large = msg.match(/__ERR__\s+too-large\s+(\d+)/i);
+          if (large) {
+            json(res, 413, { ok: false, error: `media too large (${large[1]} bytes, max ${FS_MEDIA_MAX_BYTES})`, id: droneId, name: droneName, path: targetPath });
+            return;
+          }
+          const code = looksLikeMissingContainerError(msg) ? 404 : 500;
+          json(res, code, { ok: false, error: code === 500 ? 'failed reading media' : msg, id: droneId, name: droneName, path: targetPath });
           return;
         }
       }

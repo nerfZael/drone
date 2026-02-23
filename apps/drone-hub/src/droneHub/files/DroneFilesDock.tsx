@@ -346,7 +346,7 @@ export function DroneFilesDock({
                 </div>
               ) : (
                 <img
-                  src={`/api/drones/${encodeURIComponent(droneId)}/fs/thumb?path=${encodeURIComponent(openedImage.path)}`}
+                  src={`/api/drones/${encodeURIComponent(droneId)}/fs/media?path=${encodeURIComponent(openedImage.path)}`}
                   alt={openedImage.name}
                   className="w-full h-full object-contain bg-[var(--panel-alt)]"
                   onLoad={() => setOpenedImageFailed(false)}
@@ -372,7 +372,7 @@ export function DroneFilesDock({
                 const canOpenEntry = isDir || isRegularFile;
                 const modifiedText = formatLocalDateShort(entry.mtimeMs);
                 const modifiedTitle = formatLocalDateTime(entry.mtimeMs);
-                const typeText = isDir ? 'dir' : entry.isImage ? 'image' : entry.ext ? entry.ext : 'file';
+                const typeText = isDir ? 'dir' : entry.isImage ? 'image' : entry.isVideo ? 'video' : entry.ext ? entry.ext : 'file';
                 return (
                   <div
                     key={entry.path}
@@ -401,7 +401,7 @@ export function DroneFilesDock({
                         : isImageFile
                           ? `Double-click to preview: ${entry.path}`
                           : isRegularFile
-                            ? `Double-click to edit: ${entry.path}`
+                            ? `Double-click to open: ${entry.path}`
                             : entry.path
                     }
                   >
@@ -486,7 +486,7 @@ export function DroneFilesDock({
                       ? `Double-click to open: ${entry.path}`
                       : isImageFile
                         ? `Double-click to preview: ${entry.path}`
-                        : `Double-click to edit: ${entry.path}`
+                        : `Double-click to open: ${entry.path}`
                   }
                 >
                   {content}

@@ -1,6 +1,7 @@
 import React from 'react';
 import { IconChevron, IconCopy } from './icons';
 import { ShortcutSettingsSection } from './ShortcutSettingsSection';
+import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 import type { UseHubLogsResult } from './use-hub-logs';
 import type { UseDeleteActionSettingsResult } from './use-delete-action-settings';
 import type { UseLlmSettingsResult } from './use-llm-settings';
@@ -99,6 +100,8 @@ export function SettingsView({
     copyHubLogs,
     handleHubLogsScroll,
   } = hubLogsState;
+  const transcriptInlineImages = useDroneHubUiStore((s) => s.transcriptInlineImages);
+  const setTranscriptInlineImages = useDroneHubUiStore((s) => s.setTranscriptInlineImages);
   const settingsBusy =
     hubLogsLoading ||
     llmSettingsLoading ||
@@ -691,6 +694,41 @@ export function SettingsView({
             </div>
 
             <ShortcutSettingsSection />
+
+            <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
+              <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+                Transcript
+              </div>
+              <div className="text-[11px] text-[var(--muted-dim)] leading-relaxed">
+                Show image links inline inside agent messages by default.
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTranscriptInlineImages(true)}
+                  className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
+                    transcriptInlineImages
+                      ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
+                      : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                  }`}
+                  style={{ fontFamily: 'var(--display)' }}
+                >
+                  Inline on
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTranscriptInlineImages(false)}
+                  className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
+                    !transcriptInlineImages
+                      ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
+                      : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                  }`}
+                  style={{ fontFamily: 'var(--display)' }}
+                >
+                  Inline off (default)
+                </button>
+              </div>
+            </div>
 
             <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
               <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>

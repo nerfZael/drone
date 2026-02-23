@@ -69,6 +69,21 @@ function formatEditorMtime(mtimeMs: number | null): string {
   }
 }
 
+function formatBytes(value: number | null | undefined): string {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return '-';
+  if (n < 1024) return `${Math.floor(n)} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let v = n / 1024;
+  let idx = 0;
+  while (v >= 1024 && idx < units.length - 1) {
+    v /= 1024;
+    idx += 1;
+  }
+  const precision = v >= 100 ? 0 : v >= 10 ? 1 : 2;
+  return `${v.toFixed(precision)} ${units[idx]}`;
+}
+
 function parseGithubPullRequestHref(
   hrefRaw: string,
 ): { owner: string; repo: string; pullNumber: number } | null {
@@ -461,6 +476,9 @@ type SelectedDroneWorkspaceProps = {
   openedEditorFileError: string | null;
   openedEditorFileOpenFailureMessage: string | null;
   openedEditorFileOpenFailureAt: number | null;
+  openedEditorFileKind: 'text' | 'image' | 'video' | 'binary';
+  openedEditorFileMime: string | null;
+  openedEditorFileSize: number;
   openedEditorFileContent: string;
   openedEditorFileDirty: boolean;
   openedEditorFileMtimeMs: number | null;
@@ -572,6 +590,9 @@ export function SelectedDroneWorkspace({
   openedEditorFileError,
   openedEditorFileOpenFailureMessage,
   openedEditorFileOpenFailureAt,
+  openedEditorFileKind,
+  openedEditorFileMime,
+  openedEditorFileSize,
   openedEditorFileContent,
   openedEditorFileDirty,
   openedEditorFileMtimeMs,
@@ -640,10 +661,16 @@ export function SelectedDroneWorkspace({
   const quickOpenTabUrl = resolveDroneOpenTabUrl(currentDrone);
   const quickOpenTabDisabled = isDroneStartingOrSeeding(currentDrone.hubPhase) || !quickOpenTabUrl;
   const editorRef = React.useRef<any>(null);
+  const openedEditorIsText = openedEditorFileKind === 'text';
+  const openedEditorMediaSrc = React.useMemo(() => {
+    if (!openedEditorFilePath) return '';
+    if (openedEditorFileKind !== 'image' && openedEditorFileKind !== 'video') return '';
+    return `/api/drones/${encodeURIComponent(currentDrone.id)}/fs/media?path=${encodeURIComponent(openedEditorFilePath)}`;
+  }, [currentDrone.id, openedEditorFileKind, openedEditorFilePath]);
   const [fileOpenToast, setFileOpenToast] = React.useState<{ id: number; message: string } | null>(null);
   const repoIdentityRef = React.useRef<{ owner: string; repo: string } | null>(null);
   const applyEditorCursorTarget = React.useCallback(() => {
-    if (!openedEditorFilePath || !openedEditorFileTargetLine) return;
+    if (!openedEditorIsText || !openedEditorFilePath || !openedEditorFileTargetLine) return;
     const editor = editorRef.current;
     if (!editor) return;
     const model = editor.getModel?.();
@@ -655,10 +682,10 @@ export function SelectedDroneWorkspace({
     editor.setPosition?.({ lineNumber: line, column });
     editor.revealPositionInCenter?.({ lineNumber: line, column });
     editor.focus?.();
-  }, [openedEditorFilePath, openedEditorFileTargetColumn, openedEditorFileTargetLine]);
+  }, [openedEditorFilePath, openedEditorFileTargetColumn, openedEditorFileTargetLine, openedEditorIsText]);
 
   React.useEffect(() => {
-    if (openedEditorFileLoading || !openedEditorFilePath || !openedEditorFileTargetLine) return;
+    if (!openedEditorIsText || openedEditorFileLoading || !openedEditorFilePath || !openedEditorFileTargetLine) return;
     if (!openedEditorFileNavigationSeq) return;
     applyEditorCursorTarget();
   }, [
@@ -667,6 +694,7 @@ export function SelectedDroneWorkspace({
     openedEditorFileNavigationSeq,
     openedEditorFilePath,
     openedEditorFileTargetLine,
+    openedEditorIsText,
   ]);
 
   React.useEffect(() => {
@@ -1284,30 +1312,34 @@ export function SelectedDroneWorkspace({
                       {openedEditorFilePath}
                     </div>
                     <div className="text-[10px] text-[var(--muted)]">
-                      {openedEditorFileSaving
-                        ? 'Saving...'
-                        : openedEditorFileDirty
-                          ? 'Unsaved changes'
-                          : `Saved • ${formatEditorMtime(openedEditorFileMtimeMs)}`}
+                      {openedEditorIsText
+                        ? openedEditorFileSaving
+                          ? 'Saving...'
+                          : openedEditorFileDirty
+                            ? 'Unsaved changes'
+                            : `Saved • ${formatEditorMtime(openedEditorFileMtimeMs)}`
+                        : `Preview${openedEditorFileMime ? ` • ${openedEditorFileMime}` : ''}${openedEditorFileSize > 0 ? ` • ${formatBytes(openedEditorFileSize)}` : ''}`}
                     </div>
                   </div>
                   <div className="inline-flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void onSaveOpenedEditorFile();
-                      }}
-                      disabled={openedEditorFileLoading || openedEditorFileSaving || !openedEditorFileDirty}
-                      className={`h-7 px-2.5 rounded border text-[10px] font-semibold tracking-wide uppercase transition-colors ${
-                        openedEditorFileLoading || openedEditorFileSaving || !openedEditorFileDirty
-                          ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] opacity-50 cursor-not-allowed'
-                          : 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:shadow-[var(--glow-accent)]'
-                      }`}
-                      style={{ fontFamily: 'var(--display)' }}
-                      title="Save file (Ctrl/Cmd+S)"
-                    >
-                      Save
-                    </button>
+                    {openedEditorIsText ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void onSaveOpenedEditorFile();
+                        }}
+                        disabled={openedEditorFileLoading || openedEditorFileSaving || !openedEditorFileDirty}
+                        className={`h-7 px-2.5 rounded border text-[10px] font-semibold tracking-wide uppercase transition-colors ${
+                          openedEditorFileLoading || openedEditorFileSaving || !openedEditorFileDirty
+                            ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] opacity-50 cursor-not-allowed'
+                            : 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:shadow-[var(--glow-accent)]'
+                        }`}
+                        style={{ fontFamily: 'var(--display)' }}
+                        title="Save file (Ctrl/Cmd+S)"
+                      >
+                        Save
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       onClick={onCloseOpenedEditorFile}
@@ -1327,6 +1359,32 @@ export function SelectedDroneWorkspace({
                 <div className="flex-1 min-h-0 border-t border-[var(--border-subtle)]">
                   {openedEditorFileLoading ? (
                     <div className="h-full w-full flex items-center justify-center text-[12px] text-[var(--muted)]">Loading file...</div>
+                  ) : openedEditorFileKind === 'image' && openedEditorMediaSrc ? (
+                    <div className="h-full w-full p-3 flex items-center justify-center">
+                      <img
+                        src={openedEditorMediaSrc}
+                        alt={openedEditorFileName ?? 'image preview'}
+                        className="max-w-full max-h-full object-contain rounded border border-[var(--border-subtle)] bg-[var(--panel-alt)]"
+                      />
+                    </div>
+                  ) : openedEditorFileKind === 'video' && openedEditorMediaSrc ? (
+                    <div className="h-full w-full p-3 flex items-center justify-center">
+                      <video
+                        src={openedEditorMediaSrc}
+                        controls
+                        className="max-w-full max-h-full rounded border border-[var(--border-subtle)] bg-[var(--panel-alt)]"
+                      />
+                    </div>
+                  ) : openedEditorFileKind === 'binary' ? (
+                    <div className="h-full w-full flex items-center justify-center px-6">
+                      <div className="max-w-[560px] rounded border border-[var(--border-subtle)] bg-[var(--panel-alt)] px-4 py-3 text-center">
+                        <div className="text-[12px] text-[var(--fg-secondary)]">Binary file preview is not available.</div>
+                        <div className="mt-1 text-[11px] text-[var(--muted)]">
+                          {openedEditorFileMime ? `${openedEditorFileMime} • ` : ''}
+                          {formatBytes(openedEditorFileSize)}
+                        </div>
+                      </div>
+                    </div>
                   ) : (
                     <Editor
                       path={openedEditorFilePath}
