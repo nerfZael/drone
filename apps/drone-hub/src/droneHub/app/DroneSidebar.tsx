@@ -1130,7 +1130,7 @@ export function DroneSidebar({
               ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
               : 'border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
           }`}
-          title="Create drone (A)"
+          title="Create drone"
           ariaLabel="Create drone"
           disabled={!collapsedRailInteractive}
           tabIndex={collapsedRailInteractive ? 0 : -1}

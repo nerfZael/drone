@@ -1,5 +1,6 @@
 export type ShortcutActionId =
   | 'createDraftDrone'
+  | 'markSelectedDronesUnread'
   | 'openCreateModal'
   | 'openCreateModalAlt'
   | 'toggleTldr'
@@ -33,6 +34,11 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     id: 'createDraftDrone',
     label: 'Create new drone',
     description: 'Opens the quick single-drone composer.',
+  },
+  {
+    id: 'markSelectedDronesUnread',
+    label: 'Mark selected drones unread',
+    description: 'Marks the selected drone(s) as unread so the canvas unread indicator is shown.',
   },
   {
     id: 'openCreateModal',
@@ -88,6 +94,7 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
 
 const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   createDraftDrone: { key: 'enter', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  markSelectedDronesUnread: { key: 'a', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openCreateModal: { key: 's', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openCreateModalAlt: { key: 'n', mod: true, ctrl: false, meta: false, alt: false, shift: true },
   toggleTldr: { key: 'w', mod: false, ctrl: false, meta: false, alt: false, shift: false },
@@ -156,6 +163,7 @@ export function sanitizeSingleShortcutBinding(value: unknown, fallback: Shortcut
 export function cloneDefaultShortcutBindings(): ShortcutBindingMap {
   return {
     createDraftDrone: { ...DEFAULT_SHORTCUT_BINDINGS.createDraftDrone! },
+    markSelectedDronesUnread: { ...DEFAULT_SHORTCUT_BINDINGS.markSelectedDronesUnread! },
     openCreateModal: { ...DEFAULT_SHORTCUT_BINDINGS.openCreateModal! },
     openCreateModalAlt: { ...DEFAULT_SHORTCUT_BINDINGS.openCreateModalAlt! },
     toggleTldr: { ...DEFAULT_SHORTCUT_BINDINGS.toggleTldr! },

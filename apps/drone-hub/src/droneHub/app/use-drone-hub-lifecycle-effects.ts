@@ -84,6 +84,7 @@ type UseDroneHubLifecycleEffectsArgs = {
   draftAutoRenaming: boolean;
   setDraftChat: Setter<DraftChatState | null>;
   onDeleteSelectedDroneFromInputShortcut: () => boolean;
+  onMarkSelectedDronesUnreadShortcut: () => boolean;
 };
 
 type TranscriptAutoScrollDecision = {
@@ -212,6 +213,7 @@ export function useDroneHubLifecycleEffects({
   draftAutoRenaming,
   setDraftChat,
   onDeleteSelectedDroneFromInputShortcut,
+  onMarkSelectedDronesUnreadShortcut,
 }: UseDroneHubLifecycleEffectsArgs) {
   const transcriptScrollContextRef = React.useRef<string>('');
   const outputScrollContextRef = React.useRef<string>('');
@@ -321,6 +323,7 @@ export function useDroneHubLifecycleEffects({
         }
         return true;
       },
+      markSelectedDronesUnread: () => onMarkSelectedDronesUnreadShortcut(),
       openCreateModal: () => {
         openCreateModal();
         return true;
@@ -452,6 +455,7 @@ export function useDroneHubLifecycleEffects({
     setRightPanelTab,
     shortcutBindings,
     onDeleteSelectedDroneFromInputShortcut,
+    onMarkSelectedDronesUnreadShortcut,
     toggleTldrFromShortcut,
   ]);
 
