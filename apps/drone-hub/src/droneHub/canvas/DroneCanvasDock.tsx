@@ -86,13 +86,6 @@ function parseDraggedDroneIds(event: React.DragEvent<HTMLElement>): string[] {
     // Ignore malformed drag payload.
   }
 
-  if (out.length === 0) {
-    const plain = String(event.dataTransfer.getData('text/plain') ?? '').trim();
-    if (plain) {
-      for (const line of plain.split('\n')) add(line);
-    }
-  }
-
   return out;
 }
 
@@ -118,9 +111,7 @@ function hasDroneDragPayload(event: React.DragEvent<HTMLElement>): boolean {
   const transfer = event.dataTransfer;
   if (!transfer) return false;
   const types = Array.from(transfer.types ?? []);
-  if (types.includes(DRONE_DND_MIME)) return true;
-  if (types.includes('text/plain')) return true;
-  return parseDraggedDroneIds(event).length > 0;
+  return types.includes(DRONE_DND_MIME);
 }
 
 function screenToWorldPoint(
@@ -475,10 +466,16 @@ export function DroneCanvasDock({
   ]);
 
   const getDraftPlacement = React.useCallback(
-    (anchorWorldX: number, anchorWorldY: number): { x: number; y: number } => {
+    (
+      anchorWorldX: number,
+      anchorWorldY: number,
+      options?: { avoidCollisions?: boolean },
+    ): { x: number; y: number } => {
       const draftWidth = getNodeWidthPx('Untitled');
       const baseX = anchorWorldX - draftWidth / 2;
       const baseY = anchorWorldY - NODE_HEIGHT_PX / 2;
+      const roundedBase = { x: Math.round(baseX * 10) / 10, y: Math.round(baseY * 10) / 10 };
+      if (options?.avoidCollisions === false) return roundedBase;
       const stepX = Math.max(38, Math.round(draftWidth * 0.36));
       const stepY = NODE_HEIGHT_PX + 16;
       const offsets: Array<{ x: number; y: number }> = [{ x: 0, y: 0 }];
@@ -519,15 +516,15 @@ export function DroneCanvasDock({
         const y = Math.round((baseY + offset.y * stepY) * 10) / 10;
         if (!collides(x, y)) return { x, y };
       }
-      return { x: Math.round(baseX * 10) / 10, y: Math.round(baseY * 10) / 10 };
+      return roundedBase;
     },
     [nodeWidthByDroneId, nodes],
   );
 
   const createDraftAtWorldPoint = React.useCallback(
-    (anchorWorldX: number, anchorWorldY: number) => {
+    (anchorWorldX: number, anchorWorldY: number, options?: { avoidCollisions?: boolean }) => {
       const draftNodeId = createDraftNodeId();
-      const placement = getDraftPlacement(anchorWorldX, anchorWorldY);
+      const placement = getDraftPlacement(anchorWorldX, anchorWorldY, options);
       upsertNodes([
         {
           droneId: draftNodeId,
@@ -1074,7 +1071,7 @@ export function DroneCanvasDock({
       if (!viewport) return;
       const rect = viewport.getBoundingClientRect();
       const worldPoint = screenToWorldPoint(event.clientX, event.clientY, rect, panX, panY, scale);
-      createDraftAtWorldPoint(worldPoint.x, worldPoint.y);
+      createDraftAtWorldPoint(worldPoint.x, worldPoint.y, { avoidCollisions: false });
     },
     [createDraftAtWorldPoint, inlineRenamingDroneId, panX, panY, scale],
   );
@@ -1107,6 +1104,7 @@ export function DroneCanvasDock({
 
   const onDrop = React.useCallback(
     (event: React.DragEvent<HTMLDivElement>) => {
+      if (!hasDroneDragPayload(event)) return;
       event.preventDefault();
       setDragOverCanvas(false);
       const droppedIds = parseDraggedDroneIds(event);
@@ -1548,6 +1546,10 @@ export function DroneCanvasDock({
                       disabled={inlineRenameBusy}
                       onChange={(event) => setInlineRenameDraft(event.target.value)}
                       onMouseDown={(event) => {
+                        event.stopPropagation();
+                      }}
+                      onDragStart={(event) => {
+                        event.preventDefault();
                         event.stopPropagation();
                       }}
                       onClick={(event) => {
