@@ -307,14 +307,34 @@ function migratePersistedUiState(
     persistedState && typeof persistedState === 'object'
       ? { ...(persistedState as Partial<DroneHubUiPersistedState>) }
       : {};
-  if (version >= 2) return base;
-
   const migratedBindings = sanitizeShortcutBindings(base.shortcutBindings);
-  if (!migratedBindings.openPullRequestsTab) {
+
+  if (version < 2 && !migratedBindings.openPullRequestsTab) {
     const defaultBindings = cloneDefaultShortcutBindings();
     migratedBindings.openPullRequestsTab = defaultBindings.openPullRequestsTab
       ? { ...defaultBindings.openPullRequestsTab }
       : null;
+  }
+
+  if (version < 3) {
+    const binding = migratedBindings.createDraftDrone;
+    const usesLegacyDefault =
+      binding?.key === 'a' &&
+      binding.mod === false &&
+      binding.ctrl === false &&
+      binding.meta === false &&
+      binding.alt === false &&
+      binding.shift === false;
+    if (usesLegacyDefault) {
+      migratedBindings.createDraftDrone = {
+        key: 'enter',
+        mod: false,
+        ctrl: false,
+        meta: false,
+        alt: false,
+        shift: false,
+      };
+    }
   }
 
   return {
@@ -449,7 +469,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
     }),
     {
       name: 'droneHub.ui',
-      version: 2,
+      version: 3,
       storage: createJSONStorage(() => localStorage),
       migrate: (persistedState, version) => migratePersistedUiState(persistedState, version),
       partialize: (state): DroneHubUiPersistedState => ({

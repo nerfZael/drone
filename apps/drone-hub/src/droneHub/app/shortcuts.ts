@@ -81,7 +81,7 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
 ];
 
 const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
-  createDraftDrone: { key: 'a', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  createDraftDrone: { key: 'enter', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openCreateModal: { key: 's', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openCreateModalAlt: { key: 'n', mod: true, ctrl: false, meta: false, alt: false, shift: true },
   toggleTldr: { key: 'w', mod: false, ctrl: false, meta: false, alt: false, shift: false },

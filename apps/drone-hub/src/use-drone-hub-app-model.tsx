@@ -935,6 +935,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   });
   const currentDroneRepoAttached = Boolean(currentDrone?.repoAttached ?? Boolean(String(currentDrone?.repoPath ?? '').trim()));
   const currentDroneRepoPath = String(currentDrone?.repoPath ?? '').trim();
+  const deleteSelectedDroneFromInputShortcut = React.useCallback((): boolean => {
+    const droneId = String(selectedDrone ?? '').trim();
+    if (!droneId) return false;
+    deleteDrone(droneId);
+    return true;
+  }, [deleteDrone, selectedDrone]);
   useDroneHubLifecycleEffects({
     normalizeCreateRepoPath,
     setCreateRepoPath,
@@ -966,7 +972,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setDraftSuggestedName,
     setDraftNameSuggestionError,
     draftNameSuggestSeqRef,
+    rightPanelOpen,
+    rightPanelTab,
     rightPanelSplit,
+    rightPanelBottomTab,
     setRightPanelOpen,
     setRightPanelTab,
     setRightPanelBottomTab,
@@ -993,6 +1002,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     draftCreating,
     draftAutoRenaming,
     setDraftChat,
+    onDeleteSelectedDroneFromInputShortcut: deleteSelectedDroneFromInputShortcut,
   });
   const currentGroup = currentDrone?.group ? groups.find((g) => g.group === currentDrone.group) ?? null : null;
   const {

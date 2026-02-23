@@ -1454,6 +1454,7 @@ export function DroneCanvasDock({
         ref={viewportRef}
         tabIndex={0}
         data-shortcut-capture="true"
+        data-drone-canvas-viewport="1"
         className={`relative flex-1 min-h-0 overflow-hidden select-none outline-none ${cursorClassName} ${dragOverCanvas ? 'ring-1 ring-inset ring-[var(--accent-muted)]' : ''}`}
         onKeyDown={onViewportKeyDown}
         onMouseDown={onCanvasMouseDown}
