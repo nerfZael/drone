@@ -379,6 +379,11 @@ export function useDroneHubLifecycleEffects({
       return Boolean(target.closest('button, a[href], summary, [role="button"], [role="menuitem"], [role="tab"]'));
     };
 
+    const isSidebarDroneCardTarget = (target: EventTarget | null): boolean => {
+      if (!(target instanceof HTMLElement)) return false;
+      return target.matches('[data-onboarding-id="sidebar.droneCard"]');
+    };
+
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
       const primaryChatInputTarget =
@@ -399,7 +404,7 @@ export function useDroneHubLifecycleEffects({
         }
       }
       if (isEditableTarget(e.target)) return;
-      if (e.key === 'Enter' && isInteractiveTarget(e.target)) return;
+      if (e.key === 'Enter' && isInteractiveTarget(e.target) && !isSidebarDroneCardTarget(e.target)) return;
       if (e.repeat) return;
       if (e.target instanceof HTMLElement && e.target.closest('[data-shortcut-capture="true"]')) return;
 
