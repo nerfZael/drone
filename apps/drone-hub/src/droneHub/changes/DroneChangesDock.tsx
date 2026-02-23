@@ -961,10 +961,18 @@ export function DroneChangesDock({
     pullDroneCurrentBranch && pullDroneConfiguredBranch && pullDroneCurrentBranch !== pullDroneConfiguredBranch
       ? `Current: ${pullDroneCurrentBranch} | configured: ${pullDroneConfiguredBranch}`
       : pullDroneCurrentBranch ?? pullDroneConfiguredBranch ?? undefined;
-  const activePullRequestNumber =
-    dataMode === 'pull-request'
-      ? Math.max(1, Math.floor(Number(pullRequestChanges?.pullRequest.number ?? pullRequestNumber ?? 0))) || null
-      : null;
+  const selectedPullRequestNumber =
+    dataMode === 'pull-request' ? Math.max(1, Math.floor(Number(pullRequestNumber ?? 0))) || null : null;
+  const loadedPullRequestNumber =
+    dataMode === 'pull-request' ? Math.max(1, Math.floor(Number(pullRequestChanges?.pullRequest.number ?? 0))) || null : null;
+  const hasLoadedActivePullRequest =
+    dataMode === 'pull-request' &&
+    Boolean(selectedPullRequestNumber) &&
+    Boolean(loadedPullRequestNumber) &&
+    selectedPullRequestNumber === loadedPullRequestNumber;
+  const activePullRequestNumber = hasLoadedActivePullRequest ? loadedPullRequestNumber : null;
+  const awaitingPullRequestDetails =
+    dataMode === 'pull-request' && Boolean(selectedPullRequestNumber) && !hasLoadedActivePullRequest && !pullRequestError;
   const activePullRequestTitleRaw = dataMode === 'pull-request' ? String(pullRequestChanges?.pullRequest.title ?? '').trim() : '';
   const activePullRequestHtmlUrl = dataMode === 'pull-request' ? String(pullRequestChanges?.pullRequest.htmlUrl ?? '').trim() : '';
   const activePullRequestState = dataMode === 'pull-request' ? String(pullRequestChanges?.pullRequest.state ?? '').trim().toLowerCase() : '';
@@ -1281,7 +1289,12 @@ export function DroneChangesDock({
           </>
         )}
       </div>
-      {dataMode === 'pull-request' && activePullRequestNumber ? (
+      {dataMode === 'pull-request' && awaitingPullRequestDetails ? (
+        <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[10px] text-[var(--muted)]">
+          Loading PR #{selectedPullRequestNumber} details...
+        </div>
+      ) : null}
+      {dataMode === 'pull-request' && hasLoadedActivePullRequest && activePullRequestNumber ? (
         <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] bg-[rgba(167,139,250,.06)] flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div
