@@ -30,6 +30,7 @@ export function normalizeImageAttachmentRefs(raw: unknown): ChatImageAttachmentR
     const name = String((item as any).name ?? '').trim();
     const mime = String((item as any).mime ?? '').trim().toLowerCase();
     const sizeNum = Number((item as any).size ?? 0);
+    const previewDataUrl = String((item as any).previewDataUrl ?? '').trim();
     if (!name || !mime.startsWith('image/') || !Number.isFinite(sizeNum) || sizeNum <= 0) continue;
     const path = normalizePath((item as any).path ?? '');
     const relativePath = normalizePath((item as any).relativePath ?? '');
@@ -39,6 +40,7 @@ export function normalizeImageAttachmentRefs(raw: unknown): ChatImageAttachmentR
       size: Math.floor(sizeNum),
       ...(path ? { path } : {}),
       ...(relativePath ? { relativePath } : {}),
+      ...(previewDataUrl ? { previewDataUrl } : {}),
     });
   }
   return out.slice(0, 8);
@@ -61,23 +63,50 @@ function toFileRef(pathRaw: string): MarkdownFileReference | null {
 
 export function ImageAttachmentChips({
   attachments,
+  droneId,
   onOpenFileReference,
 }: {
   attachments: ChatImageAttachmentRef[];
+  droneId?: string;
   onOpenFileReference?: (ref: MarkdownFileReference) => void;
 }) {
   if (attachments.length === 0) return null;
+  const [thumbFailedByKey, setThumbFailedByKey] = React.useState<Record<string, true>>({});
   return (
     <div className="mt-2 flex flex-wrap items-center gap-1.5">
       {attachments.map((a, idx) => {
+        const key = `${a.name}:${a.size}:${a.path ?? ''}:${a.relativePath ?? ''}:${idx}`;
+        const previewDataUrlRaw = String((a as any).previewDataUrl ?? '').trim();
+        const hasPreviewDataUrl = /^data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=]+$/i.test(previewDataUrlRaw);
+        const path = String(a.path ?? '').trim();
+        const thumbSrc = hasPreviewDataUrl
+          ? previewDataUrlRaw
+          : droneId && path
+            ? `/api/drones/${encodeURIComponent(droneId)}/fs/thumb?path=${encodeURIComponent(path)}`
+            : '';
+        const showThumb = Boolean(thumbSrc) && !thumbFailedByKey[key];
         const targetPath = String(a.path ?? a.relativePath ?? '').trim();
         const fileRef = toFileRef(targetPath);
         const fileLabel = String(a.relativePath ?? a.path ?? '').trim();
         return (
           <div
-            key={`${a.name}:${a.size}:${idx}`}
+            key={key}
             className="inline-flex max-w-full items-center gap-1.5 rounded border border-[rgba(148,163,184,.2)] bg-[rgba(255,255,255,.03)] px-2 py-1 text-[10px]"
           >
+            {showThumb ? (
+              <img
+                src={thumbSrc}
+                alt={a.name}
+                loading="lazy"
+                className="w-12 h-12 rounded object-cover border border-[rgba(148,163,184,.2)] bg-[rgba(0,0,0,.18)] flex-shrink-0"
+                onError={() =>
+                  setThumbFailedByKey((prev) => {
+                    if (prev[key]) return prev;
+                    return { ...prev, [key]: true };
+                  })
+                }
+              />
+            ) : null}
             <span className="truncate max-w-[220px]">{a.name}</span>
             <span className="text-[var(--muted-dim)]">{formatBytes(a.size)}</span>
             {fileRef && onOpenFileReference ? (

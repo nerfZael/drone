@@ -20,6 +20,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   onRequestUnstick,
   onOpenFileReference,
   onOpenLink,
+  droneId,
   unstickBusy = false,
   unstickError = null,
 }: {
@@ -29,6 +30,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   onRequestUnstick?: (promptId: string) => Promise<void> | void;
   onOpenFileReference?: (ref: MarkdownFileReference) => void;
   onOpenLink?: (href: string) => boolean;
+  droneId?: string;
   unstickBusy?: boolean;
   unstickError?: string | null;
 }) {
@@ -78,7 +80,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
                 onOpenLink={onOpenLink}
               />
             ) : null}
-            <ImageAttachmentChips attachments={attachments} onOpenFileReference={onOpenFileReference} />
+            <ImageAttachmentChips attachments={attachments} droneId={droneId} onOpenFileReference={onOpenFileReference} />
           </div>
         </div>
         {showRoleIcons && (

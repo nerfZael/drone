@@ -18,16 +18,21 @@ import { parseIsoDateMs, type GroupMultiChatColumnRuntimeState } from './group-m
 import { openDroneTabFromLastPreview, resolveDroneOpenTabUrl } from './quick-actions';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 
-function optimisticAttachmentRefsFromPayload(raw: unknown): Array<{ name: string; mime: string; size: number }> {
+function optimisticAttachmentRefsFromPayload(raw: unknown): Array<{ name: string; mime: string; size: number; previewDataUrl?: string }> {
   const list = Array.isArray(raw) ? raw : [];
-  const out: Array<{ name: string; mime: string; size: number }> = [];
+  const out: Array<{ name: string; mime: string; size: number; previewDataUrl?: string }> = [];
   for (const item of list) {
     if (!item || typeof item !== 'object') continue;
     const name = String((item as any).name ?? '').trim();
     const mime = String((item as any).mime ?? '').trim().toLowerCase();
     const sizeNum = Number((item as any).size ?? 0);
+    const dataBase64 = String((item as any).dataBase64 ?? '').trim();
     if (!name || !mime.startsWith('image/') || !Number.isFinite(sizeNum) || sizeNum <= 0) continue;
-    out.push({ name, mime, size: Math.floor(sizeNum) });
+    const previewDataUrl =
+      dataBase64 && /^[A-Za-z0-9+/]+={0,2}$/.test(dataBase64.slice(0, Math.min(4096, dataBase64.length)))
+        ? `data:${mime};base64,${dataBase64}`
+        : undefined;
+    out.push({ name, mime, size: Math.floor(sizeNum), ...(previewDataUrl ? { previewDataUrl } : {}) });
   }
   return out.slice(0, 8);
 }
@@ -545,12 +550,13 @@ export function GroupMultiChatColumn({
                   showTldr={false}
                   onToggleTldr={noopToggleTldr}
                   onHoverAgentMessage={noopHoverAgentMessage}
+                  droneId={drone.id}
                   showRoleIcons={false}
                 />
               );
             })}
             {visiblePendingPrompts.map((item) => (
-              <PendingTranscriptTurn key={`${drone.id}:pending:${item.id}`} item={item} nowMs={nowMs} showRoleIcons={false} />
+              <PendingTranscriptTurn key={`${drone.id}:pending:${item.id}`} item={item} nowMs={nowMs} droneId={drone.id} showRoleIcons={false} />
             ))}
           </div>
         ) : (
