@@ -610,12 +610,16 @@ export function DroneCanvasDock({
       lastSyncedSidebarSelectionRef.current = '';
       return;
     }
+    // Do not let cross-pane selection sync interrupt an in-progress canvas gesture.
+    if (draggingNodeId || panning || nodeDragRef.current || panDragRef.current || marqueeDragRef.current) {
+      return;
+    }
     if (lastSyncedSidebarSelectionRef.current === sidebarId) return;
     if (!nodesByDroneId[sidebarId]) return;
     lastSyncedSidebarSelectionRef.current = sidebarId;
     if (selectedDroneIds.length === 1 && selectedDroneIds[0] === sidebarId) return;
     setSelectedDroneIds([sidebarId]);
-  }, [nodesByDroneId, selectedDroneIds, setSelectedDroneIds, sidebarSelectedDroneId]);
+  }, [draggingNodeId, nodesByDroneId, panning, selectedDroneIds, selectionBox, setSelectedDroneIds, sidebarSelectedDroneId]);
 
   React.useEffect(() => {
     if (!inlineRenamingDroneId) return;
@@ -894,12 +898,7 @@ export function DroneCanvasDock({
 
       const allDraftCreatesSucceeded =
         draftNodeIds.length > 0 && replacedDraftIds.size === draftNodeIds.length;
-      const shouldClearSelectionAfterDraftCreate =
-        regularDroneIds.length === 0 && allDraftCreatesSucceeded;
-
-      if (shouldClearSelectionAfterDraftCreate) {
-        clearSelection();
-      } else if (replacedDraftIds.size > 0) {
+      if (replacedDraftIds.size > 0) {
         setSelectedDroneIds((prev) => {
           const remapped = prev.map((id) => replacedDraftIds.get(id) ?? id);
           return Array.from(new Set(remapped));
@@ -912,10 +911,15 @@ export function DroneCanvasDock({
       }
       if (regularSendSucceeded && regularSendError) errors.push(regularSendError);
       setMessageError(errors.length > 0 ? errors.join(' ') : null);
-      if (shouldClearSelectionAfterDraftCreate) {
-        focusViewport();
-      } else {
-        focusMessageInput();
+      const shouldFocusViewport = regularDroneIds.length === 0 && allDraftCreatesSucceeded;
+      const interactionActive =
+        draggingNodeId || panning || nodeDragRef.current || panDragRef.current || marqueeDragRef.current;
+      if (!interactionActive) {
+        if (shouldFocusViewport) {
+          focusViewport();
+        } else {
+          focusMessageInput();
+        }
       }
     } catch (err: any) {
       setMessageError(err?.message ?? String(err));
@@ -923,8 +927,8 @@ export function DroneCanvasDock({
       setMessagePendingCount((prev) => Math.max(0, prev - 1));
     }
   }, [
-    clearSelection,
     draftPromptByNodeId,
+    draggingNodeId,
     droneNameById,
     focusMessageInput,
     focusViewport,
@@ -938,6 +942,7 @@ export function DroneCanvasDock({
     onCreateCanvasDroneFromDraft,
     onSendCanvasPrompt,
     pullHostBranchBeforeCreate,
+    panning,
     removeDraftNodeIfEmpty,
     replaceNodeId,
     selectedDraftNodeId,
