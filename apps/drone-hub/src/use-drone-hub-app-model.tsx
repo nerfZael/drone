@@ -1679,6 +1679,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     sidebarOptimisticDroneIdSet,
     selectedDroneSet,
     selectedIsResponding,
+    unreadAgentMessageByDroneId,
     deletingDrones,
     renamingDrones,
     settingBaseImages,
