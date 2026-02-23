@@ -274,8 +274,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     }
     return out;
   }, [drones]);
-  const markDronesUnread = React.useCallback(
-    (droneIdsRaw: string[]): number => {
+  const markDronesUnread = React.useMemo(
+    () => (droneIdsRaw: string[]): number => {
       const targetIds: string[] = [];
       for (const raw of Array.isArray(droneIdsRaw) ? droneIdsRaw : []) {
         const id = String(raw ?? '').trim();
