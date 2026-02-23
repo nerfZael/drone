@@ -29,6 +29,7 @@ export function DronePreviewDock({
     ? (portReachabilityByHostPort[String(selectedPort.hostPort)] ?? 'checking')
     : 'checking';
   const [iframeLoadFailed, setIframeLoadFailed] = React.useState(false);
+  const [iframeRefreshNonce, setIframeRefreshNonce] = React.useState(0);
   const [urlInput, setUrlInput] = React.useState(displayedSelectedUrl);
   const [urlError, setUrlError] = React.useState<string | null>(null);
   const usingCustomUrl = Boolean(previewUrlOverride);
@@ -61,6 +62,12 @@ export function DronePreviewDock({
     onSetPreviewUrlOverride(normalized);
   }, [onSetPreviewUrlOverride, urlInput]);
 
+  const refreshPreview = React.useCallback(() => {
+    if (!selectedUrl) return;
+    setIframeLoadFailed(false);
+    setIframeRefreshNonce((n) => n + 1);
+  }, [selectedUrl]);
+
   return (
     <div className="w-full h-full min-h-0 bg-[var(--panel-alt)] overflow-hidden flex flex-col relative">
 
@@ -81,6 +88,20 @@ export function DronePreviewDock({
               {usingCustomUrl ? 'custom URL' : showStartupPlaceholder ? startupLabel.toLowerCase() : portsLoading ? 'loading' : 'none selected'}
             </div>
           )}
+          <button
+            type="button"
+            onClick={refreshPreview}
+            disabled={!selectedUrl}
+            className={`h-5 px-1.5 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
+              selectedUrl
+                ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] opacity-40 cursor-not-allowed'
+            }`}
+            style={{ fontFamily: 'var(--display)' }}
+            title={selectedUrl ? 'Reload browser preview' : 'No preview URL to reload'}
+          >
+            Refresh
+          </button>
           {selectedOpenUrl && (
             <>
               <div className="w-px h-3 bg-[var(--border-subtle)] opacity-80" />
@@ -182,7 +203,7 @@ export function DronePreviewDock({
         ) : (
           <div className="flex-1 min-h-0 w-full border-y border-[var(--border-subtle)] bg-white overflow-hidden">
             <iframe
-              key={selectedUrl}
+              key={`${selectedUrl}::${iframeRefreshNonce}`}
               title={selectedPort ? `Browser container:${selectedPort.containerPort}` : `Browser ${selectedUrl}`}
               src={selectedUrl}
               loading="lazy"
