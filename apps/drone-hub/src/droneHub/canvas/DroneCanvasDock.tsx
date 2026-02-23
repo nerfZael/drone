@@ -218,7 +218,7 @@ function renderNodeUnreadIndicator(state: DroneCanvasIndicatorState | null): Rea
   if (isStarting || (state.busy && state.statusOk && state.hubPhase !== 'error')) return null;
   return (
     <span
-      className="inline-flex h-[6px] w-[6px] rounded-full bg-[rgb(124,170,255)] shadow-[0_0_0_1px_rgba(8,12,20,.65)]"
+      className="inline-flex h-1.5 w-1.5 rounded-full bg-[var(--yellow)]"
       title="Unread agent message"
       aria-label="Unread agent message"
     />
@@ -1156,6 +1156,15 @@ export function DroneCanvasDock({
     [removeDraftNodeIfEmpty, selectedDraftNodeId],
   );
 
+  const cancelActivePointerInteractions = React.useCallback(() => {
+    nodeDragRef.current = null;
+    panDragRef.current = null;
+    marqueeDragRef.current = null;
+    setDraggingNodeId(null);
+    setPanning(false);
+    setSelectionBox(null);
+  }, []);
+
   const onViewportKeyDown = React.useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
       const targetIsEditable = isEditableElement(event.target);
@@ -1212,6 +1221,7 @@ export function DroneCanvasDock({
         if (shiftDeleteOnly) {
           event.preventDefault();
           event.stopPropagation();
+          cancelActivePointerInteractions();
           setMessageError(null);
 
           const draftNodeIds = selectedDroneIds.filter((id) => isCanvasDraftNodeId(id));
@@ -1246,6 +1256,7 @@ export function DroneCanvasDock({
 
         event.preventDefault();
         event.stopPropagation();
+        cancelActivePointerInteractions();
         removeNodes(selectedDroneIds);
         setMessageDraft('');
         setMessageError(null);
@@ -1258,6 +1269,7 @@ export function DroneCanvasDock({
       nodeOrder,
       onDeleteDrones,
       openMessageBar,
+      cancelActivePointerInteractions,
       createDraftNearViewportCenter,
       removeNodes,
       selectedDroneIds,
@@ -1545,7 +1557,7 @@ export function DroneCanvasDock({
                   </span>
                 ) : null}
                 {unreadIndicator ? (
-                  <span className="pointer-events-none absolute left-1 top-1 z-[2]">
+                  <span className="pointer-events-none absolute left-0 bottom-full mb-1 z-[2]">
                     {unreadIndicator}
                   </span>
                 ) : null}
