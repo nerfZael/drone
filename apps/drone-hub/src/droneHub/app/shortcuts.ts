@@ -6,6 +6,7 @@ export type ShortcutActionId =
   | 'openHoveredGroupMultiChat'
   | 'openPullRequestsTab'
   | 'openChangesTab'
+  | 'openCanvasTab'
   | 'openBrowserTab'
   | 'openFilesTab'
   | 'openTerminalTab';
@@ -64,6 +65,11 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     description: 'Opens the right-panel Changes tab (top pane by default, hovered bottom pane in split mode).',
   },
   {
+    id: 'openCanvasTab',
+    label: 'Open Canvas tab',
+    description: 'Opens the right-panel Canvas tab (top pane by default, hovered bottom pane in split mode).',
+  },
+  {
     id: 'openBrowserTab',
     label: 'Open Browser tab',
     description: 'Opens the right-panel Browser tab (top pane by default, hovered bottom pane in split mode).',
@@ -87,10 +93,19 @@ const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   toggleTldr: { key: 'w', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openHoveredGroupMultiChat: { key: 'd', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openPullRequestsTab: { key: 'r', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  openChangesTab: { key: 'c', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  openChangesTab: { key: 'x', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  openCanvasTab: { key: 'c', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openBrowserTab: { key: 'b', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openFilesTab: { key: 'f', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openTerminalTab: { key: 't', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+};
+const LEGACY_OPEN_CHANGES_TAB_BINDING: ShortcutBinding = {
+  key: 'c',
+  mod: false,
+  ctrl: false,
+  meta: false,
+  alt: false,
+  shift: false,
 };
 
 type KeyboardEventLike = Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey'>;
@@ -147,10 +162,23 @@ export function cloneDefaultShortcutBindings(): ShortcutBindingMap {
     openHoveredGroupMultiChat: { ...DEFAULT_SHORTCUT_BINDINGS.openHoveredGroupMultiChat! },
     openPullRequestsTab: { ...DEFAULT_SHORTCUT_BINDINGS.openPullRequestsTab! },
     openChangesTab: { ...DEFAULT_SHORTCUT_BINDINGS.openChangesTab! },
+    openCanvasTab: { ...DEFAULT_SHORTCUT_BINDINGS.openCanvasTab! },
     openBrowserTab: { ...DEFAULT_SHORTCUT_BINDINGS.openBrowserTab! },
     openFilesTab: { ...DEFAULT_SHORTCUT_BINDINGS.openFilesTab! },
     openTerminalTab: { ...DEFAULT_SHORTCUT_BINDINGS.openTerminalTab! },
   };
+}
+
+function isSameShortcutBinding(a: ShortcutBinding | null | undefined, b: ShortcutBinding | null | undefined): boolean {
+  if (!a || !b) return a === b;
+  return (
+    a.key === b.key &&
+    a.mod === b.mod &&
+    a.ctrl === b.ctrl &&
+    a.meta === b.meta &&
+    a.alt === b.alt &&
+    a.shift === b.shift
+  );
 }
 
 export function sanitizeShortcutBindings(value: unknown): ShortcutBindingMap {
@@ -165,6 +193,13 @@ export function sanitizeShortcutBindings(value: unknown): ShortcutBindingMap {
       continue;
     }
     out[def.id] = candidate === null ? null : sanitizeShortcutBinding(candidate, defaults[def.id]);
+  }
+  // Migrate users from the old default where Changes used C before Canvas had a dedicated shortcut.
+  if (
+    !Object.prototype.hasOwnProperty.call(raw, 'openCanvasTab') &&
+    isSameShortcutBinding(out.openChangesTab, LEGACY_OPEN_CHANGES_TAB_BINDING)
+  ) {
+    out.openChangesTab = { ...defaults.openChangesTab! };
   }
   return out;
 }

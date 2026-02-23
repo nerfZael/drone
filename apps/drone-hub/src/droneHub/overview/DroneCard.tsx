@@ -96,7 +96,7 @@ export function DroneCard({
       onDragEnd={() => onDragEnd?.()}
       onClick={(e) => onClick({ toggle: e.metaKey || e.ctrlKey, range: e.shiftKey })}
       onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
+        if (e.key === ' ') {
           e.preventDefault();
           onClick();
         }
@@ -105,7 +105,7 @@ export function DroneCard({
         selected
           ? 'bg-[var(--selected)] border-[var(--accent-muted)]'
           : 'border-transparent hover:bg-[var(--hover)] hover:border-[var(--border-subtle)]'
-      }`}
+      } focus:outline-none focus-visible:outline-none`}
     >
       {/* Accent edge for selected state */}
       {selected && (
