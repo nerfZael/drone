@@ -307,6 +307,7 @@ export type ChatImageAttachmentRef = {
   fileName?: string;
   path?: string;
   relativePath?: string;
+  previewDataUrl?: string;
 };
 
 export type JobSpec = {

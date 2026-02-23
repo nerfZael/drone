@@ -42,6 +42,7 @@ export const TranscriptTurn = React.memo(
     onHoverAgentMessage,
     onOpenFileReference,
     onOpenLink,
+    droneId,
     showRoleIcons = true,
   }: {
     item: TranscriptItem;
@@ -55,6 +56,7 @@ export const TranscriptTurn = React.memo(
     onHoverAgentMessage: (item: TranscriptItem | null) => void;
     onOpenFileReference?: (ref: MarkdownFileReference) => void;
     onOpenLink?: (href: string) => boolean;
+    droneId?: string;
     showRoleIcons?: boolean;
   }) {
     const attachments = normalizeImageAttachmentRefs((item as any).attachments);
@@ -102,7 +104,7 @@ export const TranscriptTurn = React.memo(
                   onOpenLink={onOpenLink}
                 />
               ) : null}
-              <ImageAttachmentChips attachments={attachments} onOpenFileReference={onOpenFileReference} />
+              <ImageAttachmentChips attachments={attachments} droneId={droneId} onOpenFileReference={onOpenFileReference} />
             </div>
           </div>
           {showRoleIcons && (
@@ -218,6 +220,7 @@ export const TranscriptTurn = React.memo(
     a.onHoverAgentMessage === b.onHoverAgentMessage &&
     a.onOpenFileReference === b.onOpenFileReference &&
     a.onOpenLink === b.onOpenLink &&
+    (a.droneId ?? '') === (b.droneId ?? '') &&
     sameAttachments((a.item as any).attachments, (b.item as any).attachments) &&
     (a.showRoleIcons ?? true) === (b.showRoleIcons ?? true),
 );

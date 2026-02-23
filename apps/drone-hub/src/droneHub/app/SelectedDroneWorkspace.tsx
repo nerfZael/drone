@@ -1376,6 +1376,7 @@ export function SelectedDroneWorkspace({
                           onHoverAgentMessage={handleAgentMessageHover}
                           onOpenFileReference={onOpenMarkdownFileReference}
                           onOpenLink={tryOpenMarkdownPullRequestInChanges}
+                          droneId={currentDrone.id}
                         />
                       );
                     })}
@@ -1387,6 +1388,7 @@ export function SelectedDroneWorkspace({
                         onRequestUnstick={requestUnstickPendingPrompt}
                         onOpenFileReference={onOpenMarkdownFileReference}
                         onOpenLink={tryOpenMarkdownPullRequestInChanges}
+                        droneId={currentDrone.id}
                         unstickBusy={Boolean(unstickingPendingPromptById[p.id])}
                         unstickError={unstickPendingPromptErrorById[p.id] ?? null}
                       />
