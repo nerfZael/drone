@@ -57,6 +57,7 @@ type DroneHubUiState = {
   outputView: OutputView;
   fsExplorerView: FsExplorerView;
   transcriptInlineImages: boolean;
+  transcriptInlineImageOverrides: Record<string, boolean>;
   spawnAgentKey: string;
   spawnModel: string;
   pullHostBranchBeforeCreate: boolean;
@@ -96,6 +97,7 @@ type DroneHubUiState = {
   setOutputView: (next: Updater<OutputView>) => void;
   setFsExplorerView: (next: Updater<FsExplorerView>) => void;
   setTranscriptInlineImages: (next: Updater<boolean>) => void;
+  setTranscriptInlineImageOverride: (messageId: string, next: boolean | null) => void;
   setSpawnAgentKey: (next: Updater<string>) => void;
   setSpawnModel: (next: Updater<string>) => void;
   setPullHostBranchBeforeCreate: (next: Updater<boolean>) => void;
@@ -278,6 +280,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       outputView: 'screen',
       fsExplorerView: 'list',
       transcriptInlineImages: false,
+      transcriptInlineImageOverrides: {},
       spawnAgentKey: 'builtin:cursor',
       spawnModel: '',
       pullHostBranchBeforeCreate: true,
@@ -347,6 +350,28 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       setFsExplorerView: (next) => set((s) => ({ fsExplorerView: resolveNext(s.fsExplorerView, next) })),
       setTranscriptInlineImages: (next) =>
         set((s) => ({ transcriptInlineImages: resolveNext(s.transcriptInlineImages, next) })),
+      setTranscriptInlineImageOverride: (messageIdRaw, next) =>
+        set((s) => {
+          const messageId = String(messageIdRaw ?? '').trim();
+          if (!messageId) return s;
+          const current = s.transcriptInlineImageOverrides;
+          if (next == null) {
+            if (!Object.prototype.hasOwnProperty.call(current, messageId)) return s;
+            const trimmed = { ...current };
+            delete trimmed[messageId];
+            return { transcriptInlineImageOverrides: trimmed };
+          }
+          const nextValue = Boolean(next);
+          if (current[messageId] === nextValue) return s;
+          const merged = { ...current, [messageId]: nextValue };
+          const keys = Object.keys(merged);
+          if (keys.length > 600) {
+            for (const oldKey of keys.slice(0, keys.length - 600)) {
+              delete merged[oldKey];
+            }
+          }
+          return { transcriptInlineImageOverrides: merged };
+        }),
       setSpawnAgentKey: (next) => set((s) => ({ spawnAgentKey: resolveNext(s.spawnAgentKey, next) })),
       setSpawnModel: (next) => set((s) => ({ spawnModel: resolveNext(s.spawnModel, next) })),
       setPullHostBranchBeforeCreate: (next) =>

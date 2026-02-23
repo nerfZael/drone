@@ -16,7 +16,8 @@ type TldrState =
 type InlineAgentImage = {
   id: string;
   src: string;
-  href: string;
+  linkHref: string | null;
+  fileRef: MarkdownFileReference | null;
   label: string;
 };
 
@@ -127,7 +128,8 @@ function collectInlineAgentImages(textRaw: string, droneIdRaw?: string): InlineA
       push({
         id: href,
         src: href,
-        href,
+        linkHref: href,
+        fileRef: null,
         label: imageHttpUrlLabel(parsed),
       });
     }
@@ -154,7 +156,8 @@ function collectInlineAgentImages(textRaw: string, droneIdRaw?: string): InlineA
       push({
         id: href,
         src: href,
-        href,
+        linkHref: href,
+        fileRef: null,
         label: imageHttpUrlLabel(parsed),
       });
       continue;
@@ -166,7 +169,8 @@ function collectInlineAgentImages(textRaw: string, droneIdRaw?: string): InlineA
     push({
       id: `${droneId}:${containerPath}`,
       src,
-      href: src,
+      linkHref: rawHref,
+      fileRef: { raw: rawHref, path: containerPath, line: null, column: null },
       label: inlineImageLabelFromPath(containerPath),
     });
   }
@@ -182,7 +186,8 @@ function collectInlineAgentImages(textRaw: string, droneIdRaw?: string): InlineA
     push({
       id: `${droneId}:${containerPath}`,
       src,
-      href: src,
+      linkHref: raw,
+      fileRef: { raw, path: containerPath, line: null, column: null },
       label: inlineImageLabelFromPath(containerPath),
     });
   }
@@ -238,6 +243,8 @@ export const TranscriptTurn = React.memo(
     showRoleIcons?: boolean;
   }) {
     const transcriptInlineImages = useDroneHubUiStore((s) => s.transcriptInlineImages);
+    const inlineImagesOverride = useDroneHubUiStore((s) => s.transcriptInlineImageOverrides[messageId]);
+    const setInlineImagesOverride = useDroneHubUiStore((s) => s.setTranscriptInlineImageOverride);
     const attachments = normalizeImageAttachmentRefs((item as any).attachments);
     const promptText = isAttachmentOnlyPrompt(item.prompt, attachments) ? '' : item.prompt;
     const cleaned = item.ok ? stripAnsi(item.output) : stripAnsi(item.error || 'failed');
@@ -256,14 +263,28 @@ export const TranscriptTurn = React.memo(
           : 'Generating TLDR…'
       : cleaned;
     const inlineImages = React.useMemo(() => collectInlineAgentImages(cleaned, droneId), [cleaned, droneId]);
-    const [showInlineImagesOverride, setShowInlineImagesOverride] = React.useState<boolean | null>(null);
     const [failedInlineImagesById, setFailedInlineImagesById] = React.useState<Record<string, true>>({});
     const showInlineImages = Boolean(
       inlineImages.length > 0 &&
-        (showInlineImagesOverride == null ? transcriptInlineImages : showInlineImagesOverride),
+        (typeof inlineImagesOverride === 'boolean' ? inlineImagesOverride : transcriptInlineImages),
+    );
+    const openInlineImageTarget = React.useCallback(
+      (image: InlineAgentImage) => {
+        if (image.fileRef && onOpenFileReference) {
+          onOpenFileReference(image.fileRef);
+          return;
+        }
+        const target = String(image.linkHref ?? image.src ?? '').trim();
+        if (!target) return;
+        if (onOpenLink) {
+          const handled = Boolean(onOpenLink(target));
+          if (handled) return;
+        }
+        window.open(target, '_blank', 'noopener,noreferrer');
+      },
+      [onOpenFileReference, onOpenLink],
     );
     React.useEffect(() => {
-      setShowInlineImagesOverride(null);
       setFailedInlineImagesById({});
     }, [messageId]);
     return (
@@ -345,18 +366,17 @@ export const TranscriptTurn = React.memo(
               />
               {showInlineImages && (
                 <div className="mt-3 pt-2 border-t border-[var(--border-subtle)]">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 items-start">
                     {inlineImages.map((image) => (
-                      <a
+                      <button
                         key={image.id}
-                        href={image.href}
-                        target="_blank"
-                        rel="noreferrer"
+                        type="button"
+                        onClick={() => openInlineImageTarget(image)}
                         className="block rounded-md border border-[var(--border-subtle)] bg-[rgba(0,0,0,.16)] hover:border-[var(--accent-muted)] transition-colors overflow-hidden"
-                        title={`Open ${image.label}`}
+                        title={`Open ${image.label} from message link`}
                       >
                         {failedInlineImagesById[image.id] ? (
-                          <div className="h-[120px] flex items-center justify-center text-[11px] text-[var(--muted)] px-3 text-center">
+                          <div className="min-h-[120px] flex items-center justify-center text-[11px] text-[var(--muted)] px-3 text-center">
                             Failed to load image.
                           </div>
                         ) : (
@@ -364,7 +384,7 @@ export const TranscriptTurn = React.memo(
                             src={image.src}
                             alt={image.label}
                             loading="lazy"
-                            className="w-full h-[120px] object-cover bg-[var(--panel)]"
+                            className="w-full h-auto max-h-[340px] object-contain bg-[var(--panel)]"
                             onError={() =>
                               setFailedInlineImagesById((prev) => ({
                                 ...prev,
@@ -374,7 +394,7 @@ export const TranscriptTurn = React.memo(
                           />
                         )}
                         <div className="px-2 py-1 text-[10px] text-[var(--muted-dim)] truncate">{image.label}</div>
-                      </a>
+                      </button>
                     ))}
                   </div>
                 </div>
@@ -385,10 +405,10 @@ export const TranscriptTurn = React.memo(
                   <button
                     type="button"
                     onClick={() =>
-                      setShowInlineImagesOverride((prev) => {
-                        const current = prev == null ? transcriptInlineImages : prev;
-                        return !current;
-                      })
+                      setInlineImagesOverride(
+                        messageId,
+                        !(typeof inlineImagesOverride === 'boolean' ? inlineImagesOverride : transcriptInlineImages),
+                      )
                     }
                     disabled={false}
                     className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-opacity ${
