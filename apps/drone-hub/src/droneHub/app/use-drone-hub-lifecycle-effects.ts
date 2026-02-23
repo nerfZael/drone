@@ -409,7 +409,16 @@ export function useDroneHubLifecycleEffects({
       if (isEditableTarget(e.target)) return;
       if (e.key === 'Enter' && isInteractiveTarget(e.target) && !isSidebarDroneCardTarget(e.target)) return;
       if (e.repeat) return;
-      if (e.target instanceof HTMLElement && e.target.closest('[data-shortcut-capture="true"]')) return;
+      const matched = SHORTCUT_DEFINITIONS.find((def) => isShortcutMatch(shortcutBindings[def.id], e)) ?? null;
+      if (e.target instanceof HTMLElement) {
+        const captureRoot = e.target.closest<HTMLElement>('[data-shortcut-capture="true"]');
+        if (captureRoot) {
+          const canvasCaptureRoot = captureRoot.closest('[data-drone-canvas-viewport="1"]');
+          const allowCanvasUnreadShortcut =
+            Boolean(canvasCaptureRoot) && matched?.id === 'markSelectedDronesUnread';
+          if (!allowCanvasUnreadShortcut) return;
+        }
+      }
 
       if (
         e.key === 'Tab' &&
@@ -432,7 +441,6 @@ export function useDroneHubLifecycleEffects({
         return;
       }
 
-      const matched = SHORTCUT_DEFINITIONS.find((def) => isShortcutMatch(shortcutBindings[def.id], e)) ?? null;
       if (!matched) return;
       const handled = runShortcutAction(matched.id, e);
       if (!handled) return;
