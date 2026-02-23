@@ -145,6 +145,7 @@ tmp/
 temp/
 
 .turbo/
+artifacts/
 
 
 AGENTS.md
