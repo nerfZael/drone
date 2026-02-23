@@ -3,19 +3,14 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { useShallow } from 'zustand/react/shallow';
 import {
-  RIGHT_PANEL_BOTTOM_TAB_STORAGE_KEY,
   RIGHT_PANEL_DEFAULT_WIDTH_PX,
-  RIGHT_PANEL_SPLIT_STORAGE_KEY,
   RIGHT_PANEL_TABS,
-  RIGHT_PANEL_TOP_TAB_STORAGE_KEY,
-  RIGHT_PANEL_WIDTH_STORAGE_KEY,
   clampRightPanelWidthPx,
   parseRightPanelTab,
   rightPanelMaxWidthPx,
   viewportWidthPx,
   type RightPanelTab,
 } from './app-config';
-import { readLocalStorageItem } from './hooks';
 
 type Updater<T> = T | ((prev: T) => T);
 
@@ -49,36 +44,15 @@ function resolveDistinctBottomTab(top: RightPanelTab, bottom: RightPanelTab): Ri
   return RIGHT_PANEL_TABS.find((tab) => tab !== top) ?? top;
 }
 
-function readLegacyPersistedDefaults(): RightPanelLayoutPersistedState {
-  const savedWidth = Number(readLocalStorageItem(RIGHT_PANEL_WIDTH_STORAGE_KEY));
-  const width =
-    Number.isFinite(savedWidth) && savedWidth > 0
-      ? clampRightPanelWidthPx(savedWidth)
-      : clampRightPanelWidthPx(RIGHT_PANEL_DEFAULT_WIDTH_PX);
-  const topTab = parseRightPanelTab(readLocalStorageItem(RIGHT_PANEL_TOP_TAB_STORAGE_KEY), 'files');
-  const splitRaw = readLocalStorageItem(RIGHT_PANEL_SPLIT_STORAGE_KEY);
-  const split = splitRaw === null ? true : splitRaw === '1';
-  const bottomTab = parseRightPanelTab(readLocalStorageItem(RIGHT_PANEL_BOTTOM_TAB_STORAGE_KEY), 'terminal');
-
-  return {
-    rightPanelWidth: width,
-    rightPanelTab: topTab,
-    rightPanelSplit: split,
-    rightPanelBottomTab: split ? resolveDistinctBottomTab(topTab, bottomTab) : bottomTab,
-  };
-}
-
-const legacyDefaults = readLegacyPersistedDefaults();
-
 const useRightPanelLayoutStore = create<RightPanelLayoutState>()(
   persist(
     (set) => ({
       rightPanelOpen: true,
-      rightPanelWidth: legacyDefaults.rightPanelWidth,
+      rightPanelWidth: clampRightPanelWidthPx(RIGHT_PANEL_DEFAULT_WIDTH_PX),
       rightPanelResizing: false,
-      rightPanelTab: legacyDefaults.rightPanelTab,
-      rightPanelSplit: legacyDefaults.rightPanelSplit,
-      rightPanelBottomTab: legacyDefaults.rightPanelBottomTab,
+      rightPanelTab: 'files',
+      rightPanelSplit: true,
+      rightPanelBottomTab: 'terminal',
       setRightPanelOpen: (next) => set((s) => ({ rightPanelOpen: resolveNext(s.rightPanelOpen, next) })),
       setRightPanelWidth: (next) =>
         set((s) => ({

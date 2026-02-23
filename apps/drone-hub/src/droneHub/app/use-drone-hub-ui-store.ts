@@ -3,11 +3,7 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import { useShallow } from 'zustand/react/shallow';
 import type { AppView, DraftChatState, DroneErrorModalState } from './app-types';
 import {
-  FS_EXPLORER_VIEW_STORAGE_KEY,
   GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX,
-  GROUP_MULTI_CHAT_COLUMN_WIDTH_STORAGE_KEY,
-  SIDEBAR_AUTO_MINIMIZE_STORAGE_KEY,
-  SIDEBAR_REPOS_COLLAPSED_STORAGE_KEY,
   clampGroupMultiChatColumnWidthPx,
 } from './app-config';
 import {
@@ -141,10 +137,6 @@ type DroneHubUiPersistedState = Pick<
   | 'shortcutBindings'
 >;
 
-function readCustomAgents(): CustomAgentProfile[] {
-  return sanitizeCustomAgents(readLocalStorageItem('droneHub.customAgents'));
-}
-
 function sanitizeCustomAgents(value: unknown): CustomAgentProfile[] {
   try {
     const parsed = typeof value === 'string' ? (value ? (JSON.parse(value) as any) : []) : value;
@@ -159,17 +151,6 @@ function sanitizeCustomAgents(value: unknown): CustomAgentProfile[] {
       : [];
   } catch {
     return [];
-  }
-}
-
-function readLegacyCollapsedGroups(): Record<string, boolean> {
-  const raw = readLocalStorageItem('droneHub.collapsedGroups');
-  if (!raw) return {};
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return normalizeCollapsedGroups(parsed);
-  } catch {
-    return {};
   }
 }
 
@@ -236,16 +217,7 @@ function readPersistedChatInputDrafts(): Record<string, string> {
       // ignore
     }
   }
-
-  // Migration fallback for drafts briefly persisted inside the broader `droneHub.ui` state.
-  const uiStateRaw = readLocalStorageItem('droneHub.ui');
-  if (!uiStateRaw) return {};
-  try {
-    const parsed = JSON.parse(uiStateRaw) as { state?: { chatInputDrafts?: unknown } } | null;
-    return normalizeChatInputDrafts(parsed?.state?.chatInputDrafts ?? null);
-  } catch {
-    return {};
-  }
+  return {};
 }
 
 function writePersistedChatInputDrafts(value: Record<string, string>): void {
@@ -271,99 +243,26 @@ function schedulePersistChatInputDrafts(value: Record<string, string>): void {
   }, CHAT_INPUT_DRAFTS_PERSIST_DEBOUNCE_MS);
 }
 
-function readLegacyPersistedDefaults(): DroneHubUiPersistedState {
-  const savedWidth = Number(readLocalStorageItem(GROUP_MULTI_CHAT_COLUMN_WIDTH_STORAGE_KEY));
-  return {
-    activeRepoPath: readLocalStorageItem('droneHub.activeRepoPath') || '',
-    chatHeaderRepoPath: String(readLocalStorageItem('droneHub.chatHeaderRepoPath') ?? '').trim(),
-    sidebarReposCollapsed: readLocalStorageItem(SIDEBAR_REPOS_COLLAPSED_STORAGE_KEY) === '1',
-    sidebarAutoMinimize: readLocalStorageItem(SIDEBAR_AUTO_MINIMIZE_STORAGE_KEY) === '1',
-    sidebarGroupingMode: normalizeSidebarGroupingMode(readLocalStorageItem('droneHub.sidebarGroupingMode')),
-    appView: normalizeAppView(readLocalStorageItem('droneHub.appView')),
-    viewMode: normalizeViewMode(readLocalStorageItem('droneHub.viewMode')),
-    collapsedGroups: readLegacyCollapsedGroups(),
-    autoDelete: readLocalStorageItem('droneHub.autoDelete') === '1',
-    terminalEmulator: readLocalStorageItem('droneHub.terminalEmulator') || 'auto',
-    groupMultiChatColumnWidth:
-      Number.isFinite(savedWidth) && savedWidth > 0
-        ? clampGroupMultiChatColumnWidthPx(savedWidth)
-        : GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX,
-    groupMultiChatStatusSort: false,
-    outputView: normalizeOutputView(readLocalStorageItem('droneHub.outputView')),
-    fsExplorerView: normalizeFsExplorerView(readLocalStorageItem(FS_EXPLORER_VIEW_STORAGE_KEY)),
-    spawnAgentKey: readLocalStorageItem('droneHub.spawnAgent') || 'builtin:cursor',
-    spawnModel: readLocalStorageItem('droneHub.spawnModel') || '',
-    pullHostBranchBeforeCreate: true,
-    customAgents: readCustomAgents(),
-    shortcutBindings: cloneDefaultShortcutBindings(),
-  };
-}
-
-function migratePersistedUiState(
-  persistedState: unknown,
-  version: number,
-): Partial<DroneHubUiPersistedState> {
-  const base =
-    persistedState && typeof persistedState === 'object'
-      ? { ...(persistedState as Partial<DroneHubUiPersistedState>) }
-      : {};
-  const migratedBindings = sanitizeShortcutBindings(base.shortcutBindings);
-
-  if (version < 2 && !migratedBindings.openPullRequestsTab) {
-    const defaultBindings = cloneDefaultShortcutBindings();
-    migratedBindings.openPullRequestsTab = defaultBindings.openPullRequestsTab
-      ? { ...defaultBindings.openPullRequestsTab }
-      : null;
-  }
-
-  if (version < 3) {
-    const binding = migratedBindings.createDraftDrone;
-    const usesLegacyDefault =
-      binding?.key === 'a' &&
-      binding.mod === false &&
-      binding.ctrl === false &&
-      binding.meta === false &&
-      binding.alt === false &&
-      binding.shift === false;
-    if (usesLegacyDefault) {
-      migratedBindings.createDraftDrone = {
-        key: 'enter',
-        mod: false,
-        ctrl: false,
-        meta: false,
-        alt: false,
-        shift: false,
-      };
-    }
-  }
-
-  return {
-    ...base,
-    shortcutBindings: migratedBindings,
-  };
-}
-
-const legacyDefaults = readLegacyPersistedDefaults();
 const initialChatInputDrafts = readPersistedChatInputDrafts();
 
 export const useDroneHubUiStore = create<DroneHubUiState>()(
   persist(
     (set) => ({
-      activeRepoPath: legacyDefaults.activeRepoPath,
-      chatHeaderRepoPath: legacyDefaults.chatHeaderRepoPath,
-      sidebarReposCollapsed: legacyDefaults.sidebarReposCollapsed,
-      sidebarAutoMinimize: legacyDefaults.sidebarAutoMinimize,
-      sidebarGroupingMode: legacyDefaults.sidebarGroupingMode,
-      appView: legacyDefaults.appView,
-      viewMode: legacyDefaults.viewMode,
-      collapsedGroups: legacyDefaults.collapsedGroups,
-      autoDelete: legacyDefaults.autoDelete,
-      terminalEmulator: legacyDefaults.terminalEmulator,
+      activeRepoPath: '',
+      chatHeaderRepoPath: '',
+      sidebarReposCollapsed: false,
+      sidebarAutoMinimize: false,
+      sidebarGroupingMode: 'groups',
+      appView: 'workspace',
+      viewMode: 'grouped',
+      collapsedGroups: {},
+      autoDelete: false,
+      terminalEmulator: 'auto',
       selectedDrone: null,
       selectedDroneIds: [],
       selectedGroupMultiChat: null,
       groupBroadcastExpanded: false,
-      groupMultiChatColumnWidth: legacyDefaults.groupMultiChatColumnWidth,
+      groupMultiChatColumnWidth: GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX,
       groupMultiChatStatusSort: false,
       selectedChat: 'default',
       chatInputDrafts: initialChatInputDrafts,
@@ -373,12 +272,12 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       droneErrorModal: null,
       clearingDroneError: false,
       headerOverflowOpen: false,
-      outputView: legacyDefaults.outputView,
-      fsExplorerView: legacyDefaults.fsExplorerView,
-      spawnAgentKey: legacyDefaults.spawnAgentKey,
-      spawnModel: legacyDefaults.spawnModel,
-      pullHostBranchBeforeCreate: legacyDefaults.pullHostBranchBeforeCreate,
-      customAgents: legacyDefaults.customAgents,
+      outputView: 'screen',
+      fsExplorerView: 'list',
+      spawnAgentKey: 'builtin:cursor',
+      spawnModel: '',
+      pullHostBranchBeforeCreate: true,
+      customAgents: [],
       customAgentModalOpen: false,
       newCustomAgentLabel: '',
       newCustomAgentCommand: '',
@@ -471,7 +370,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       name: 'droneHub.ui',
       version: 3,
       storage: createJSONStorage(() => localStorage),
-      migrate: (persistedState, version) => migratePersistedUiState(persistedState, version),
       partialize: (state): DroneHubUiPersistedState => ({
         activeRepoPath: state.activeRepoPath,
         chatHeaderRepoPath: state.chatHeaderRepoPath,
