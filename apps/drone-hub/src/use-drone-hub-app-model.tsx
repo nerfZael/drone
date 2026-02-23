@@ -1171,14 +1171,14 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       let rawPath = String(ref.path ?? '').trim().replace(/\\/g, '/');
       if (!rawPath) return;
       if (rawPath.startsWith('./')) rawPath = rawPath.slice(2);
-      const normalized = rawPath.replace(/\/+/g, '/').replace(/^\/+/, '');
-      if (!normalized) return;
-      const containerPath =
-        rawPath.startsWith('/work/repo/') || rawPath === '/work/repo'
-          ? rawPath
-          : normalized.startsWith('work/repo/')
-            ? `/${normalized}`
-            : `/work/repo/${normalized}`;
+      const collapsed = rawPath.replace(/\/+/g, '/');
+      const normalized = collapsed.replace(/^\/+/, '');
+      if (!collapsed || !normalized) return;
+      const containerPath = collapsed.startsWith('/')
+        ? collapsed
+        : normalized.startsWith('work/repo/')
+          ? `/${normalized}`
+          : `/work/repo/${normalized}`;
       const name = containerPath.split('/').filter(Boolean).pop() || containerPath;
       openEditorFile({
         path: containerPath,

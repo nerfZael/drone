@@ -2,6 +2,7 @@ import React from 'react';
 import { stripAnsi, timeAgo } from '../../domain';
 import type { TranscriptItem } from '../types';
 import { CollapsibleMarkdown } from './CollapsibleMarkdown';
+import { ImageAttachmentChips, isAttachmentOnlyPrompt, normalizeImageAttachmentRefs } from './ImageAttachmentChips';
 import type { MarkdownFileReference } from './MarkdownMessage';
 import { IconBot, IconJobs, IconSpinner, IconTldr, IconUser } from './icons';
 
@@ -10,6 +11,23 @@ type TldrState =
   | { status: 'loading' }
   | { status: 'ready'; summary: string }
   | { status: 'error'; error: string };
+
+function sameAttachments(aRaw: unknown, bRaw: unknown): boolean {
+  const a = normalizeImageAttachmentRefs(aRaw);
+  const b = normalizeImageAttachmentRefs(bRaw);
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const left = a[i];
+    const right = b[i];
+    if (!left || !right) return false;
+    if (left.name !== right.name) return false;
+    if (left.mime !== right.mime) return false;
+    if (left.size !== right.size) return false;
+    if (String(left.path ?? '') !== String(right.path ?? '')) return false;
+    if (String(left.relativePath ?? '') !== String(right.relativePath ?? '')) return false;
+  }
+  return true;
+}
 
 export const TranscriptTurn = React.memo(
   function TranscriptTurn({
@@ -39,6 +57,8 @@ export const TranscriptTurn = React.memo(
     onOpenLink?: (href: string) => boolean;
     showRoleIcons?: boolean;
   }) {
+    const attachments = normalizeImageAttachmentRefs((item as any).attachments);
+    const promptText = isAttachmentOnlyPrompt(item.prompt, attachments) ? '' : item.prompt;
     const cleaned = item.ok ? stripAnsi(item.output) : stripAnsi(item.error || 'failed');
     const promptIso = item.promptAt || item.at;
     const agentIso = item.completedAt || item.at;
@@ -73,13 +93,16 @@ export const TranscriptTurn = React.memo(
               </span>
             </div>
             <div className="bg-[var(--user-dim)] border border-[rgba(148,163,184,.14)] rounded-lg rounded-tr-sm px-4 py-3">
-              <CollapsibleMarkdown
-                text={item.prompt}
-                fadeTo="var(--user-dim)"
-                className="dh-markdown--user"
-                onOpenFileReference={onOpenFileReference}
-                onOpenLink={onOpenLink}
-              />
+              {promptText ? (
+                <CollapsibleMarkdown
+                  text={promptText}
+                  fadeTo="var(--user-dim)"
+                  className="dh-markdown--user"
+                  onOpenFileReference={onOpenFileReference}
+                  onOpenLink={onOpenLink}
+                />
+              ) : null}
+              <ImageAttachmentChips attachments={attachments} onOpenFileReference={onOpenFileReference} />
             </div>
           </div>
           {showRoleIcons && (
@@ -195,5 +218,6 @@ export const TranscriptTurn = React.memo(
     a.onHoverAgentMessage === b.onHoverAgentMessage &&
     a.onOpenFileReference === b.onOpenFileReference &&
     a.onOpenLink === b.onOpenLink &&
+    sameAttachments((a.item as any).attachments, (b.item as any).attachments) &&
     (a.showRoleIcons ?? true) === (b.showRoleIcons ?? true),
 );

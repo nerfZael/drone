@@ -292,11 +292,21 @@ export type TranscriptItem = {
   completedAt?: string;
   id?: string;
   prompt: string;
+  attachments?: ChatImageAttachmentRef[];
   session: string;
   logPath: string;
   ok: boolean;
   error?: string;
   output: string;
+};
+
+export type ChatImageAttachmentRef = {
+  name: string;
+  mime: string;
+  size: number;
+  fileName?: string;
+  path?: string;
+  relativePath?: string;
 };
 
 export type JobSpec = {
@@ -312,6 +322,7 @@ export type PendingPrompt = {
   id: string;
   at: string;
   prompt: string;
+  attachments?: ChatImageAttachmentRef[];
   // `queued` is a local-only UI state used when a drone is still provisioning.
   state: 'queued' | 'sending' | 'sent' | 'failed';
   error?: string;
