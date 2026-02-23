@@ -53,7 +53,10 @@ type UseDroneHubLifecycleEffectsArgs = {
   setDraftSuggestedName: Setter<string>;
   setDraftNameSuggestionError: Setter<string | null>;
   draftNameSuggestSeqRef: React.MutableRefObject<number>;
+  rightPanelOpen: boolean;
+  rightPanelTab: RightPanelTab;
   rightPanelSplit: boolean;
+  rightPanelBottomTab: RightPanelTab;
   setRightPanelOpen: Setter<boolean>;
   setRightPanelTab: Setter<RightPanelTab>;
   setRightPanelBottomTab: Setter<RightPanelTab>;
@@ -80,6 +83,7 @@ type UseDroneHubLifecycleEffectsArgs = {
   draftCreating: boolean;
   draftAutoRenaming: boolean;
   setDraftChat: Setter<DraftChatState | null>;
+  onDeleteSelectedDroneFromInputShortcut: () => boolean;
 };
 
 type TranscriptAutoScrollDecision = {
@@ -177,7 +181,10 @@ export function useDroneHubLifecycleEffects({
   setDraftSuggestedName,
   setDraftNameSuggestionError,
   draftNameSuggestSeqRef,
+  rightPanelOpen,
+  rightPanelTab,
   rightPanelSplit,
+  rightPanelBottomTab,
   setRightPanelOpen,
   setRightPanelTab,
   setRightPanelBottomTab,
@@ -204,6 +211,7 @@ export function useDroneHubLifecycleEffects({
   draftCreating,
   draftAutoRenaming,
   setDraftChat,
+  onDeleteSelectedDroneFromInputShortcut,
 }: UseDroneHubLifecycleEffectsArgs) {
   const transcriptScrollContextRef = React.useRef<string>('');
   const outputScrollContextRef = React.useRef<string>('');
@@ -264,12 +272,37 @@ export function useDroneHubLifecycleEffects({
       };
     };
 
-    const shortcutActionHandlers: Record<ShortcutActionId, () => boolean> = {
+    const isCanvasOpen = (): boolean => {
+      if (!rightPanelOpen) return false;
+      if (rightPanelTab === 'canvas') return true;
+      return rightPanelSplit && rightPanelBottomTab === 'canvas';
+    };
+
+    const focusCanvasAndCreateDraft = (): boolean => {
+      if (!isCanvasOpen()) return false;
+      const visibleViewports = Array.from(
+        document.querySelectorAll<HTMLElement>('[data-drone-canvas-viewport="1"]'),
+      ).filter((el) => el.getClientRects().length > 0);
+      if (visibleViewports.length === 0) return false;
+      const targetViewport = visibleViewports.find((el) => el.matches(':hover')) ?? visibleViewports[0];
+      targetViewport.focus({ preventScroll: true });
+      targetViewport.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Enter',
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      return true;
+    };
+
+    const shortcutActionHandlers: Record<ShortcutActionId, (event: KeyboardEvent) => boolean> = {
       toggleTldr: () => {
         toggleTldrFromShortcut();
         return true;
       },
-      createDraftDrone: () => {
+      createDraftDrone: (event) => {
+        if (event.key === 'Enter' && focusCanvasAndCreateDraft()) return true;
         const hovered = getHoveredSidebarCreateContext();
         if (!hovered) {
           openDraftChatComposer();
@@ -328,7 +361,8 @@ export function useDroneHubLifecycleEffects({
       },
     };
 
-    const runShortcutAction = (actionId: ShortcutActionId): boolean => shortcutActionHandlers[actionId]();
+    const runShortcutAction = (actionId: ShortcutActionId, event: KeyboardEvent): boolean =>
+      shortcutActionHandlers[actionId](event);
 
     const isEditableTarget = (target: EventTarget | null): boolean => {
       if (!(target instanceof HTMLElement)) return false;
@@ -336,9 +370,32 @@ export function useDroneHubLifecycleEffects({
       return target.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
     };
 
+    const isInteractiveTarget = (target: EventTarget | null): boolean => {
+      if (!(target instanceof HTMLElement)) return false;
+      return Boolean(target.closest('button, a[href], summary, [role="button"], [role="menuitem"], [role="tab"]'));
+    };
+
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
+      const primaryChatInputTarget =
+        e.target instanceof HTMLElement &&
+        e.target.getAttribute('data-chat-input-focus-id') === 'primary-chat';
+      const shiftDeleteInPrimaryChatInput =
+        e.key === 'Delete' &&
+        e.shiftKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        primaryChatInputTarget;
+      if (shiftDeleteInPrimaryChatInput) {
+        const handled = onDeleteSelectedDroneFromInputShortcut();
+        if (handled) {
+          e.preventDefault();
+          return;
+        }
+      }
       if (isEditableTarget(e.target)) return;
+      if (e.key === 'Enter' && isInteractiveTarget(e.target)) return;
       if (e.repeat) return;
       if (e.target instanceof HTMLElement && e.target.closest('[data-shortcut-capture="true"]')) return;
 
@@ -365,7 +422,7 @@ export function useDroneHubLifecycleEffects({
 
       const matched = SHORTCUT_DEFINITIONS.find((def) => isShortcutMatch(shortcutBindings[def.id], e)) ?? null;
       if (!matched) return;
-      const handled = runShortcutAction(matched.id);
+      const handled = runShortcutAction(matched.id, e);
       if (!handled) return;
       e.preventDefault();
     };
@@ -377,11 +434,15 @@ export function useDroneHubLifecycleEffects({
     openDraftChatComposer,
     openGroupMultiChat,
     openSidebarVisibleMultiChat,
+    rightPanelBottomTab,
+    rightPanelOpen,
     rightPanelSplit,
+    rightPanelTab,
     setRightPanelBottomTab,
     setRightPanelOpen,
     setRightPanelTab,
     shortcutBindings,
+    onDeleteSelectedDroneFromInputShortcut,
     toggleTldrFromShortcut,
   ]);
 
