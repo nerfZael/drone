@@ -389,17 +389,15 @@ export function useDroneHubLifecycleEffects({
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
-      const primaryChatInputTarget =
-        e.target instanceof HTMLElement &&
-        e.target.getAttribute('data-chat-input-focus-id') === 'primary-chat';
-      const shiftDeleteInPrimaryChatInput =
+      const captureRoot =
+        e.target instanceof HTMLElement ? e.target.closest<HTMLElement>('[data-shortcut-capture="true"]') : null;
+      const shiftDeleteOnly =
         e.key === 'Delete' &&
         e.shiftKey &&
         !e.ctrlKey &&
         !e.metaKey &&
-        !e.altKey &&
-        primaryChatInputTarget;
-      if (shiftDeleteInPrimaryChatInput) {
+        !e.altKey;
+      if (shiftDeleteOnly && !isEditableTarget(e.target) && !captureRoot) {
         const handled = onDeleteSelectedDroneFromInputShortcut();
         if (handled) {
           e.preventDefault();
@@ -410,14 +408,11 @@ export function useDroneHubLifecycleEffects({
       if (e.key === 'Enter' && isInteractiveTarget(e.target) && !isSidebarDroneCardTarget(e.target)) return;
       if (e.repeat) return;
       const matched = SHORTCUT_DEFINITIONS.find((def) => isShortcutMatch(shortcutBindings[def.id], e)) ?? null;
-      if (e.target instanceof HTMLElement) {
-        const captureRoot = e.target.closest<HTMLElement>('[data-shortcut-capture="true"]');
-        if (captureRoot) {
-          const canvasCaptureRoot = captureRoot.closest('[data-drone-canvas-viewport="1"]');
-          const allowCanvasUnreadShortcut =
-            Boolean(canvasCaptureRoot) && matched?.id === 'markSelectedDronesUnread';
-          if (!allowCanvasUnreadShortcut) return;
-        }
+      if (captureRoot) {
+        const canvasCaptureRoot = captureRoot.closest('[data-drone-canvas-viewport="1"]');
+        const allowCanvasUnreadShortcut =
+          Boolean(canvasCaptureRoot) && matched?.id === 'markSelectedDronesUnread';
+        if (!allowCanvasUnreadShortcut) return;
       }
 
       if (
