@@ -311,6 +311,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const headerOverflowRef = React.useRef<HTMLDivElement | null>(null);
   const preferredSelectedDroneRef = React.useRef<string | null>(null);
   const preferredSelectedDroneHoldUntilRef = React.useRef<number>(0);
+  const lastSyncedCanvasRepoContextRef = React.useRef<string>('');
+  const lastSyncedCanvasAgentModelContextRef = React.useRef<string>('');
   const droneIdentityByNameRef = React.useRef<Record<string, string>>({});
   const llmSettingsState = useLlmSettings(requestJson);
   const deleteActionSettingsState = useDeleteActionSettings(requestJson);
@@ -1056,6 +1058,60 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     currentAgent.kind === 'builtin'
       ? `builtin:${currentAgent.id}`
       : `custom:${currentAgent.id}`;
+  React.useEffect(() => {
+    const droneId = String(selectedDrone ?? '').trim();
+    const chatName = String(selectedChat ?? '').trim() || 'default';
+    if (!droneId) {
+      lastSyncedCanvasRepoContextRef.current = '';
+      return;
+    }
+    const contextKey = `${droneId}\u0000${chatName}`;
+    if (lastSyncedCanvasRepoContextRef.current === contextKey) return;
+    const nextRepoPath = normalizeCreateRepoPath(currentDroneRepoAttached ? currentDroneRepoPath : '');
+    setChatHeaderRepoPath((prev) => (prev === nextRepoPath ? prev : nextRepoPath));
+    lastSyncedCanvasRepoContextRef.current = contextKey;
+  }, [
+    currentDroneRepoAttached,
+    currentDroneRepoPath,
+    normalizeCreateRepoPath,
+    selectedChat,
+    selectedDrone,
+    setChatHeaderRepoPath,
+  ]);
+  React.useEffect(() => {
+    const droneId = String(selectedDrone ?? '').trim();
+    const chatName = String(selectedChat ?? '').trim() || 'default';
+    if (!droneId) {
+      lastSyncedCanvasAgentModelContextRef.current = '';
+      return;
+    }
+    const contextKey = `${droneId}\u0000${chatName}`;
+    if (lastSyncedCanvasAgentModelContextRef.current === contextKey) return;
+    const selectedDroneName = String(currentDrone?.name ?? '').trim();
+    const chatInfoDroneName = String(effectiveChatInfo?.name ?? '').trim();
+    const chatInfoChatName = String(effectiveChatInfo?.chat ?? '').trim() || 'default';
+    if (!effectiveChatInfo || !selectedDroneName || chatInfoDroneName !== selectedDroneName || chatInfoChatName !== chatName) {
+      return;
+    }
+    const nextAgentKey =
+      effectiveChatInfo.agent.kind === 'builtin'
+        ? `builtin:${effectiveChatInfo.agent.id}`
+        : `custom:${effectiveChatInfo.agent.id}`;
+    const nextModel =
+      effectiveChatInfo.agent.kind === 'builtin'
+        ? String(effectiveChatInfo.model ?? '')
+        : '';
+    setSpawnAgentKey((prev) => (prev === nextAgentKey ? prev : nextAgentKey));
+    setSpawnModel((prev) => (prev === nextModel ? prev : nextModel));
+    lastSyncedCanvasAgentModelContextRef.current = contextKey;
+  }, [
+    currentDrone?.name,
+    effectiveChatInfo,
+    selectedChat,
+    selectedDrone,
+    setSpawnAgentKey,
+    setSpawnModel,
+  ]);
   const currentDroneBusy =
     currentDrone && !isDroneStartingOrSeeding(currentDrone.hubPhase)
       ? Boolean(currentDrone.busy) || selectedIsResponding
