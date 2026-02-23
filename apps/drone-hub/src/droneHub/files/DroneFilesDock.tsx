@@ -120,6 +120,10 @@ export function DroneFilesDock({
   const [thumbFailedByPath, setThumbFailedByPath] = React.useState<Record<string, boolean>>({});
   const [openedImage, setOpenedImage] = React.useState<DroneFsEntry | null>(null);
   const [openedImageFailed, setOpenedImageFailed] = React.useState(false);
+  const [openedImageZoom, setOpenedImageZoom] = React.useState(1);
+  const [openedImagePan, setOpenedImagePan] = React.useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [openedImagePanning, setOpenedImagePanning] = React.useState(false);
+  const openedImagePanDragRef = React.useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null);
 
   React.useEffect(() => {
     setPathInput(normalizedPath);
@@ -132,7 +136,33 @@ export function DroneFilesDock({
   React.useEffect(() => {
     setOpenedImage(null);
     setOpenedImageFailed(false);
+    setOpenedImageZoom(1);
+    setOpenedImagePan({ x: 0, y: 0 });
+    setOpenedImagePanning(false);
+    openedImagePanDragRef.current = null;
   }, [droneId, normalizedPath]);
+
+  React.useEffect(() => {
+    if (!openedImagePanning) return;
+    const onMouseMove = (event: MouseEvent) => {
+      const drag = openedImagePanDragRef.current;
+      if (!drag) return;
+      setOpenedImagePan({
+        x: drag.baseX + (event.clientX - drag.startX),
+        y: drag.baseY + (event.clientY - drag.startY),
+      });
+    };
+    const onMouseUp = () => {
+      setOpenedImagePanning(false);
+      openedImagePanDragRef.current = null;
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, [openedImagePanning]);
 
   React.useEffect(() => {
     if (!openedImage) return;
@@ -171,6 +201,10 @@ export function DroneFilesDock({
     if (entry.kind !== 'file' || !entry.isImage) return;
     setOpenedImage(entry);
     setOpenedImageFailed(false);
+    setOpenedImageZoom(1);
+    setOpenedImagePan({ x: 0, y: 0 });
+    setOpenedImagePanning(false);
+    openedImagePanDragRef.current = null;
   }, []);
 
   const showStartupPlaceholder = Boolean(startup?.waiting) && !openedImage && !error && entries.length === 0;
@@ -345,13 +379,52 @@ export function DroneFilesDock({
                   Unable to load this image preview. Try refreshing the directory and opening it again.
                 </div>
               ) : (
-                <img
-                  src={`/api/drones/${encodeURIComponent(droneId)}/fs/media?path=${encodeURIComponent(openedImage.path)}`}
-                  alt={openedImage.name}
-                  className="w-full h-full object-contain bg-[var(--panel-alt)]"
-                  onLoad={() => setOpenedImageFailed(false)}
-                  onError={() => setOpenedImageFailed(true)}
-                />
+                <div
+                  className="w-full h-full flex items-center justify-center bg-[var(--panel-alt)] select-none"
+                  style={{ cursor: openedImageZoom > 1 ? (openedImagePanning ? 'grabbing' : 'grab') : 'default' }}
+                  onWheel={(event) => {
+                    event.preventDefault();
+                    const factor = event.deltaY < 0 ? 1.15 : 1 / 1.15;
+                    setOpenedImageZoom((prev) => {
+                      const next = Math.max(1, Math.min(8, prev * factor));
+                      if (next === 1 && prev !== 1) {
+                        setOpenedImagePan({ x: 0, y: 0 });
+                        setOpenedImagePanning(false);
+                        openedImagePanDragRef.current = null;
+                      }
+                      return next;
+                    });
+                  }}
+                  onMouseDown={(event) => {
+                    if (event.button !== 2) return;
+                    if (openedImageZoom <= 1) return;
+                    event.preventDefault();
+                    openedImagePanDragRef.current = {
+                      startX: event.clientX,
+                      startY: event.clientY,
+                      baseX: openedImagePan.x,
+                      baseY: openedImagePan.y,
+                    };
+                    setOpenedImagePanning(true);
+                  }}
+                  onContextMenu={(event) => {
+                    if (openedImageZoom > 1 || openedImagePanning) event.preventDefault();
+                  }}
+                >
+                  <img
+                    src={`/api/drones/${encodeURIComponent(droneId)}/fs/media?path=${encodeURIComponent(openedImage.path)}`}
+                    alt={openedImage.name}
+                    draggable={false}
+                    onDragStart={(event) => event.preventDefault()}
+                    className="w-full h-full object-contain bg-[var(--panel-alt)]"
+                    style={{
+                      transform: `translate(${openedImagePan.x}px, ${openedImagePan.y}px) scale(${openedImageZoom})`,
+                      transformOrigin: 'center center',
+                    }}
+                    onLoad={() => setOpenedImageFailed(false)}
+                    onError={() => setOpenedImageFailed(true)}
+                  />
+                </div>
               )}
             </div>
           </div>
