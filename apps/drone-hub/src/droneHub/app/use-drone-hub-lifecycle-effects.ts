@@ -347,6 +347,10 @@ export function useDroneHubLifecycleEffects({
         openRightPanelTabFromShortcut('changes');
         return true;
       },
+      openCanvasTab: () => {
+        openRightPanelTabFromShortcut('canvas');
+        return true;
+      },
       openBrowserTab: () => {
         openRightPanelTabFromShortcut('preview');
         return true;
