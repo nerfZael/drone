@@ -365,14 +365,14 @@ export const TranscriptTurn = React.memo(
                 onOpenLink={onOpenLink}
               />
               {showInlineImages && (
-                <div className="mt-3 pt-2 border-t border-[var(--border-subtle)]">
+                <div className="mt-2">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 items-start">
                     {inlineImages.map((image) => (
                       <button
                         key={image.id}
                         type="button"
                         onClick={() => openInlineImageTarget(image)}
-                        className="block rounded-md border border-[var(--border-subtle)] bg-[rgba(0,0,0,.16)] hover:border-[var(--accent-muted)] transition-colors overflow-hidden"
+                        className="block rounded-md bg-[rgba(0,0,0,.16)] overflow-hidden"
                         title={`Open ${image.label} from message link`}
                       >
                         {failedInlineImagesById[image.id] ? (
@@ -393,7 +393,6 @@ export const TranscriptTurn = React.memo(
                             }
                           />
                         )}
-                        <div className="px-2 py-1 text-[10px] text-[var(--muted-dim)] truncate">{image.label}</div>
                       </button>
                     ))}
                   </div>
