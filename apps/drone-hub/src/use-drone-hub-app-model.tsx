@@ -1200,20 +1200,41 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       draftNodeId: string;
       prompt: string;
       label: string;
+      overrides: {
+        agentKey: string;
+        model: string;
+        repoPath: string;
+        group: string;
+        pullHostBranchBeforeCreate: boolean;
+      };
     }): Promise<{ ok: boolean; droneId?: string; droneName?: string; error?: string | null }> => {
       const prompt = String(payload?.prompt ?? '').trim();
       if (!prompt) return { ok: false, error: 'Message is empty.' };
 
-      const repoPath = currentDroneRepoAttached ? String(currentDroneRepoPath ?? '').trim() : '';
-      const group = String(currentDrone?.group ?? '').trim();
-      const seedAgent = currentAgent ?? ({ kind: 'builtin', id: 'cursor' } as ChatAgentConfig);
-      const seedModel = seedAgent.kind === 'builtin' ? (currentModel ?? null) : null;
+      const overrides = payload?.overrides ?? {
+        agentKey: '',
+        model: '',
+        repoPath: '',
+        group: '',
+        pullHostBranchBeforeCreate: pullHostBranchBeforeCreate,
+      };
+      const seedAgentKey = String(overrides.agentKey ?? spawnAgentKey ?? '').trim() || 'builtin:cursor';
+      const seedAgent = resolveAgentKeyToConfig(seedAgentKey);
+      const seedModel =
+        seedAgent.kind === 'builtin'
+          ? String(overrides.model ?? spawnModel ?? '').trim() || null
+          : null;
+      const repoPath = String(overrides.repoPath ?? chatHeaderRepoPath ?? '').trim();
+      const group = String(overrides.group ?? draftCreateGroup ?? '').trim();
+      const shouldPullHostBranchBeforeCreate =
+        overrides.pullHostBranchBeforeCreate === true ||
+        (overrides.pullHostBranchBeforeCreate !== false && pullHostBranchBeforeCreate);
 
       try {
         const body: any = {
           ...(group ? { group } : {}),
           ...(repoPath ? { repoPath } : {}),
-          pullHostBranchBeforeCreate,
+          pullHostBranchBeforeCreate: shouldPullHostBranchBeforeCreate,
           seedChat: 'default',
           ...(seedAgent ? { seedAgent } : {}),
           ...(seedModel ? { seedModel } : {}),
@@ -1248,14 +1269,14 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       }
     },
     [
-      currentAgent,
-      currentDrone?.group,
-      currentDroneRepoAttached,
-      currentDroneRepoPath,
-      currentModel,
+      chatHeaderRepoPath,
+      draftCreateGroup,
+      pullHostBranchBeforeCreate,
+      resolveAgentKeyToConfig,
+      spawnAgentKey,
+      spawnModel,
       preferredSelectedDroneHoldUntilRef,
       preferredSelectedDroneRef,
-      pullHostBranchBeforeCreate,
       rememberStartupSeed,
       requestJson,
       suggestAndRenameDraftDrone,
@@ -1296,11 +1317,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     [deleteDrone, sidebarSelectableDroneIdSet],
   );
   const canvasDraftRepoLabel = React.useMemo(() => {
-    if (!currentDroneRepoAttached) return '';
-    const repoPath = String(currentDroneRepoPath ?? '').trim();
+    const repoPath = String(chatHeaderRepoPath ?? '').trim();
     if (!repoPath) return '';
     return repoPath.split(/[\\/]/).filter(Boolean).pop() || repoPath;
-  }, [currentDroneRepoAttached, currentDroneRepoPath]);
+  }, [chatHeaderRepoPath]);
 
   const renderRightPanelTabContent = React.useCallback(
     (drone: DroneSummary, tab: RightPanelTab, paneKey: 'top' | 'bottom' | 'single'): React.ReactNode => (
@@ -1319,6 +1339,20 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         onCreateCanvasDroneFromDraft={createCanvasDroneFromDraft}
         onRenameCanvasDrone={renameCanvasDrone}
         onDeleteCanvasDrones={deleteCanvasDrones}
+        canvasSpawnAgentMenuEntries={spawnAgentMenuEntries}
+        canvasSpawnAgentKey={spawnAgentKey}
+        onCanvasSpawnAgentKeyChange={setSpawnAgentKey}
+        onOpenCanvasCustomAgentModal={() => setCustomAgentModalOpen(true)}
+        canvasSpawnAgentConfig={spawnAgentConfig}
+        canvasSpawnModel={spawnModel}
+        onCanvasSpawnModelChange={setSpawnModel}
+        canvasCreateRepoMenuEntries={createRepoMenuEntries}
+        canvasCreateRepoPath={chatHeaderRepoPath}
+        onCanvasCreateRepoPathChange={setChatHeaderRepoPath}
+        canvasCreateGroup={draftCreateGroup}
+        onCanvasCreateGroupChange={setDraftCreateGroup}
+        canvasPullHostBranchBeforeCreate={pullHostBranchBeforeCreate}
+        onCanvasPullHostBranchBeforeCreateChange={setPullHostBranchBeforeCreate}
         currentDroneId={currentDrone?.id ?? null}
         defaultFsPathForCurrentDrone={defaultFsPathForCurrentDrone}
         uiDroneName={uiDroneName}
@@ -1383,10 +1417,24 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       portsPane,
       refreshFsList,
       sendCanvasPrompt,
+      createRepoMenuEntries,
+      chatHeaderRepoPath,
+      draftCreateGroup,
+      pullHostBranchBeforeCreate,
+      setChatHeaderRepoPath,
+      setCustomAgentModalOpen,
+      setDraftCreateGroup,
+      setPullHostBranchBeforeCreate,
+      setSpawnAgentKey,
+      setSpawnModel,
       selectedChat,
       selectedPreviewDefaultUrl,
       selectedPreviewPort,
       selectedPreviewUrlOverride,
+      spawnAgentConfig,
+      spawnAgentKey,
+      spawnAgentMenuEntries,
+      spawnModel,
       setCurrentFsPath,
       setFsExplorerView,
       setRightPanelBottomTab,

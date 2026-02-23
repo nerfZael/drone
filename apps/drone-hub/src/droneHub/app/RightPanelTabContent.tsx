@@ -5,6 +5,8 @@ import { DroneFilesDock } from '../files';
 import { DroneLinksDock, DronePreviewDock } from '../overview';
 import { DronePullRequestsDock } from '../pullRequests';
 import { DroneTerminalDock } from '../terminal';
+import type { ChatAgentConfig } from '../../domain';
+import type { UiMenuSelectEntry } from '../../ui/menuSelect';
 import type {
   DroneFsEntry,
   DronePortMapping,
@@ -48,12 +50,33 @@ type RightPanelTabContentProps = {
     draftNodeId: string;
     prompt: string;
     label: string;
+    overrides: {
+      agentKey: string;
+      model: string;
+      repoPath: string;
+      group: string;
+      pullHostBranchBeforeCreate: boolean;
+    };
   }) => Promise<{ ok: boolean; droneId?: string; droneName?: string; error?: string | null }>;
   onRenameCanvasDrone: (
     droneId: string,
     newName: string,
   ) => Promise<{ ok: boolean; error?: string | null }>;
   onDeleteCanvasDrones: (droneIds: string[]) => Promise<string[]>;
+  canvasSpawnAgentMenuEntries: UiMenuSelectEntry[];
+  canvasSpawnAgentKey: string;
+  onCanvasSpawnAgentKeyChange: (next: string) => void;
+  onOpenCanvasCustomAgentModal: () => void;
+  canvasSpawnAgentConfig: ChatAgentConfig;
+  canvasSpawnModel: string;
+  onCanvasSpawnModelChange: (next: string) => void;
+  canvasCreateRepoMenuEntries: UiMenuSelectEntry[];
+  canvasCreateRepoPath: string;
+  onCanvasCreateRepoPathChange: (next: string) => void;
+  canvasCreateGroup: string;
+  onCanvasCreateGroupChange: (next: string) => void;
+  canvasPullHostBranchBeforeCreate: boolean;
+  onCanvasPullHostBranchBeforeCreateChange: (next: boolean) => void;
   currentDroneId: string | null;
   defaultFsPathForCurrentDrone: string;
   uiDroneName: (nameRaw: string) => string;
@@ -98,6 +121,20 @@ export function RightPanelTabContent({
   onCreateCanvasDroneFromDraft,
   onRenameCanvasDrone,
   onDeleteCanvasDrones,
+  canvasSpawnAgentMenuEntries,
+  canvasSpawnAgentKey,
+  onCanvasSpawnAgentKeyChange,
+  onOpenCanvasCustomAgentModal,
+  canvasSpawnAgentConfig,
+  canvasSpawnModel,
+  onCanvasSpawnModelChange,
+  canvasCreateRepoMenuEntries,
+  canvasCreateRepoPath,
+  onCanvasCreateRepoPathChange,
+  canvasCreateGroup,
+  onCanvasCreateGroupChange,
+  canvasPullHostBranchBeforeCreate,
+  onCanvasPullHostBranchBeforeCreateChange,
   currentDroneId,
   defaultFsPathForCurrentDrone,
   uiDroneName,
@@ -145,6 +182,20 @@ export function RightPanelTabContent({
           onCreateCanvasDroneFromDraft={onCreateCanvasDroneFromDraft}
           onRenameDrone={onRenameCanvasDrone}
           onDeleteDrones={onDeleteCanvasDrones}
+          spawnAgentMenuEntries={canvasSpawnAgentMenuEntries}
+          spawnAgentKey={canvasSpawnAgentKey}
+          onSpawnAgentKeyChange={onCanvasSpawnAgentKeyChange}
+          onOpenCustomAgentModal={onOpenCanvasCustomAgentModal}
+          spawnAgentConfig={canvasSpawnAgentConfig}
+          spawnModel={canvasSpawnModel}
+          onSpawnModelChange={onCanvasSpawnModelChange}
+          createRepoMenuEntries={canvasCreateRepoMenuEntries}
+          createRepoPath={canvasCreateRepoPath}
+          onCreateRepoPathChange={onCanvasCreateRepoPathChange}
+          createGroup={canvasCreateGroup}
+          onCreateGroupChange={onCanvasCreateGroupChange}
+          pullHostBranchBeforeCreate={canvasPullHostBranchBeforeCreate}
+          onPullHostBranchBeforeCreateChange={onCanvasPullHostBranchBeforeCreateChange}
         />
       );
 

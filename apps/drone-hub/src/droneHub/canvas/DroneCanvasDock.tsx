@@ -1,5 +1,7 @@
 import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
+import type { ChatAgentConfig } from '../../domain';
+import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
 import type { DroneSummary } from '../types';
 import { DRONE_DND_MIME } from '../app/app-config';
 import { TypingDots } from '../overview/icons';
@@ -230,6 +232,20 @@ export function DroneCanvasDock({
   onCreateCanvasDroneFromDraft,
   onRenameDrone,
   onDeleteDrones,
+  spawnAgentMenuEntries,
+  spawnAgentKey,
+  onSpawnAgentKeyChange,
+  onOpenCustomAgentModal,
+  spawnAgentConfig,
+  spawnModel,
+  onSpawnModelChange,
+  createRepoMenuEntries,
+  createRepoPath,
+  onCreateRepoPathChange,
+  createGroup,
+  onCreateGroupChange,
+  pullHostBranchBeforeCreate,
+  onPullHostBranchBeforeCreateChange,
 }: {
   droneNameById: Record<string, string>;
   sidebarOrderedDroneIds: string[];
@@ -246,12 +262,33 @@ export function DroneCanvasDock({
     draftNodeId: string;
     prompt: string;
     label: string;
+    overrides: {
+      agentKey: string;
+      model: string;
+      repoPath: string;
+      group: string;
+      pullHostBranchBeforeCreate: boolean;
+    };
   }) => Promise<{ ok: boolean; droneId?: string; droneName?: string; error?: string | null }>;
   onRenameDrone?: (
     droneId: string,
     newName: string,
   ) => Promise<{ ok: boolean; error?: string | null }>;
   onDeleteDrones?: (droneIds: string[]) => Promise<string[]>;
+  spawnAgentMenuEntries: UiMenuSelectEntry[];
+  spawnAgentKey: string;
+  onSpawnAgentKeyChange: (next: string) => void;
+  onOpenCustomAgentModal: () => void;
+  spawnAgentConfig: ChatAgentConfig;
+  spawnModel: string;
+  onSpawnModelChange: (next: string) => void;
+  createRepoMenuEntries: UiMenuSelectEntry[];
+  createRepoPath: string;
+  onCreateRepoPathChange: (next: string) => void;
+  createGroup: string;
+  onCreateGroupChange: (next: string) => void;
+  pullHostBranchBeforeCreate: boolean;
+  onPullHostBranchBeforeCreateChange: (next: boolean) => void;
 }) {
   const {
     nodesByDroneId,
@@ -348,6 +385,11 @@ export function DroneCanvasDock({
   const selectedMessageLabel = selectedDraftNodeId
     ? String(nodesByDroneId[selectedDraftNodeId]?.label ?? '').trim() || 'Untitled'
     : null;
+  const controlsDisabled = messageSending;
+  const normalizedSpawnAgentKey = String(spawnAgentKey ?? '').trim();
+  const normalizedSpawnModel = String(spawnModel ?? '');
+  const normalizedCreateRepoPath = String(createRepoPath ?? '').trim();
+  const normalizedCreateGroup = String(createGroup ?? '');
   const normalizedDraftRepoLabel = React.useMemo(
     () => String(draftRepoLabel ?? '').trim(),
     [draftRepoLabel],
@@ -793,6 +835,13 @@ export function DroneCanvasDock({
                   draftNodeId,
                   prompt: promptForDraft,
                   label: node.label,
+                  overrides: {
+                    agentKey: normalizedSpawnAgentKey,
+                    model: normalizedSpawnModel,
+                    repoPath: normalizedCreateRepoPath,
+                    group: normalizedCreateGroup,
+                    pullHostBranchBeforeCreate: pullHostBranchBeforeCreate === true,
+                  },
                 });
                 if (result.ok && String(result.droneId ?? '').trim()) {
                   const nextDroneId = String(result.droneId ?? '').trim();
@@ -871,8 +920,13 @@ export function DroneCanvasDock({
     messageSending,
     setDraftPromptForNode,
     nodesByDroneId,
+    normalizedCreateGroup,
+    normalizedCreateRepoPath,
+    normalizedSpawnAgentKey,
+    normalizedSpawnModel,
     onCreateCanvasDroneFromDraft,
     onSendCanvasPrompt,
+    pullHostBranchBeforeCreate,
     removeDraftNodeIfEmpty,
     replaceNodeId,
     selectedDraftNodeId,
@@ -1213,11 +1267,148 @@ export function DroneCanvasDock({
 
   return (
     <div className="w-full h-full min-h-0 bg-[var(--panel-alt)] flex flex-col overflow-hidden">
-      <div className="px-3 py-2 border-b border-[var(--border-subtle)] flex items-center justify-between gap-2">
-        <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.12em] uppercase" style={{ fontFamily: 'var(--display)' }}>
-          Canvas
+      <div className="px-3 py-2 border-b border-[var(--border-subtle)] flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2 flex-wrap min-w-0">
+          <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.12em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+            Canvas
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+              Agent
+            </span>
+            <UiMenuSelect
+              variant="toolbar"
+              value={normalizedSpawnAgentKey}
+              onValueChange={onSpawnAgentKeyChange}
+              entries={spawnAgentMenuEntries}
+              disabled={controlsDisabled}
+              triggerClassName="min-w-[140px] max-w-[210px]"
+              panelClassName="w-[300px]"
+              title="Choose agent for canvas-created drones."
+            />
+            <button
+              type="button"
+              onClick={onOpenCustomAgentModal}
+              disabled={controlsDisabled}
+              className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
+                controlsDisabled
+                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
+                  : 'bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+              }`}
+              style={{ fontFamily: 'var(--display)' }}
+              title="Manage custom agents"
+            >
+              Custom
+            </button>
+          </div>
+          {spawnAgentConfig.kind === 'builtin' ? (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+                Model
+              </span>
+              <input
+                value={normalizedSpawnModel}
+                onChange={(event) => onSpawnModelChange(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') event.currentTarget.blur();
+                }}
+                disabled={controlsDisabled}
+                placeholder="Default model"
+                className={`h-[28px] w-[150px] rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[11px] text-[var(--muted)] placeholder:text-[var(--muted-dim)] focus:outline-none transition-all font-mono ${
+                  controlsDisabled
+                    ? 'opacity-40 cursor-not-allowed'
+                    : 'hover:text-[var(--fg-secondary)] hover:border-[var(--border)]'
+                }`}
+                title="Set default model for canvas-created drones."
+              />
+              <button
+                type="button"
+                onClick={() => onSpawnModelChange('')}
+                disabled={controlsDisabled || !normalizedSpawnModel.trim()}
+                className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
+                  controlsDisabled || !normalizedSpawnModel.trim()
+                    ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
+                    : 'bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                }`}
+                style={{ fontFamily: 'var(--display)' }}
+                title="Clear model override"
+              >
+                Clear
+              </button>
+            </div>
+          ) : null}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+              Repo
+            </span>
+            <UiMenuSelect
+              variant="toolbar"
+              value={normalizedCreateRepoPath}
+              onValueChange={onCreateRepoPathChange}
+              entries={createRepoMenuEntries}
+              disabled={controlsDisabled}
+              triggerClassName="min-w-[170px] max-w-[280px]"
+              panelClassName="w-[680px] max-w-[calc(100vw-3rem)]"
+              menuClassName="max-h-[220px] overflow-y-auto"
+              title={normalizedCreateRepoPath || 'No repo'}
+              triggerLabel={normalizedCreateRepoPath || 'No repo'}
+              triggerLabelClassName={normalizedCreateRepoPath ? 'font-mono text-[11px]' : undefined}
+            />
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+              Group
+            </span>
+            <input
+              value={normalizedCreateGroup}
+              onChange={(event) => onCreateGroupChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') event.currentTarget.blur();
+              }}
+              disabled={controlsDisabled}
+              placeholder="Optional group"
+              className={`h-[28px] w-[150px] rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[11px] text-[var(--muted)] placeholder:text-[var(--muted-dim)] focus:outline-none transition-all ${
+                controlsDisabled
+                  ? 'opacity-40 cursor-not-allowed'
+                  : 'hover:text-[var(--fg-secondary)] hover:border-[var(--border)]'
+              }`}
+              title="Set group for canvas-created drones."
+            />
+            <button
+              type="button"
+              onClick={() => onCreateGroupChange('')}
+              disabled={controlsDisabled || !normalizedCreateGroup.trim()}
+              className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
+                controlsDisabled || !normalizedCreateGroup.trim()
+                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
+                  : 'bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+              }`}
+              style={{ fontFamily: 'var(--display)' }}
+              title="Clear group"
+            >
+              Clear
+            </button>
+          </div>
+          <label
+            className={`inline-flex items-center gap-1.5 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
+              controlsDisabled
+                ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
+                : 'bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] cursor-pointer'
+            }`}
+            style={{ fontFamily: 'var(--display)' }}
+            title="Before creating a repo-attached drone, run a host git pull --ff-only on the current branch."
+          >
+            <input
+              type="checkbox"
+              checked={pullHostBranchBeforeCreate}
+              onChange={(event) => onPullHostBranchBeforeCreateChange(event.target.checked)}
+              disabled={controlsDisabled}
+              className="h-3.5 w-3.5 accent-[var(--accent)]"
+            />
+            Pull host branch
+          </label>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 ml-auto">
           <span className="px-2 text-[10px] font-mono text-[var(--muted-dim)]" title="Selected drones">
             {selectedDroneIds.length} sel
           </span>
