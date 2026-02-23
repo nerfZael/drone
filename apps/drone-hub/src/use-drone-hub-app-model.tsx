@@ -1168,6 +1168,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     saving: openedEditorFileSaving,
     error: openedEditorFileError,
     openFailure: openedEditorFileOpenFailure,
+    kind: openedEditorFileKind,
+    mime: openedEditorFileMime,
+    size: openedEditorFileSize,
     content: openedEditorFileContent,
     dirty: openedEditorFileDirty,
     mtimeMs: openedEditorFileMtimeMs,
@@ -1580,7 +1583,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         portRows={portRows}
         setSelectedPreviewPort={setSelectedPreviewPort}
         onOpenFileInEditor={(entry) => {
-          if (entry.kind !== 'file' || entry.isImage) return;
+          if (entry.kind !== 'file') return;
           openEditorFile({ path: entry.path, name: entry.name });
         }}
         onOpenPullRequestInChanges={(pane, _pullRequest) => {
@@ -1951,6 +1954,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     openedEditorFileError,
     openedEditorFileOpenFailureMessage: openedEditorFileOpenFailure?.message ?? null,
     openedEditorFileOpenFailureAt: openedEditorFileOpenFailure?.at ?? null,
+    openedEditorFileKind,
+    openedEditorFileMime,
+    openedEditorFileSize,
     openedEditorFileContent,
     openedEditorFileDirty,
     openedEditorFileMtimeMs,

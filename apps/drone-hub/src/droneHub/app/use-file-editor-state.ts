@@ -13,6 +13,8 @@ type OpenEditorFile = {
   navigationSeq: number;
 };
 
+type OpenedFileKind = 'text' | 'image' | 'video' | 'binary';
+
 type UseFileEditorStateArgs = {
   currentDrone: DroneSummary | null;
   requestJson: RequestJson;
@@ -29,6 +31,9 @@ export function useFileEditorState({
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [openFailure, setOpenFailure] = React.useState<{ message: string; at: number } | null>(null);
+  const [kind, setKind] = React.useState<OpenedFileKind>('text');
+  const [mime, setMime] = React.useState<string | null>(null);
+  const [size, setSize] = React.useState<number>(0);
   const [content, setContent] = React.useState('');
   const [savedContent, setSavedContent] = React.useState('');
   const [mtimeMs, setMtimeMs] = React.useState<number | null>(null);
@@ -41,6 +46,9 @@ export function useFileEditorState({
     setSaving(false);
     setError(null);
     setOpenFailure(null);
+    setKind('text');
+    setMime(null);
+    setSize(0);
     setContent('');
     setSavedContent('');
     contentRef.current = '';
@@ -107,6 +115,9 @@ export function useFileEditorState({
     setSaving(false);
     setError(null);
     setOpenFailure(null);
+    setKind('text');
+    setMime(null);
+    setSize(0);
     setContent('');
     setSavedContent('');
     contentRef.current = '';
@@ -118,7 +129,20 @@ export function useFileEditorState({
     )
       .then((data) => {
         if (cancelled || requestSeqRef.current !== seq) return;
-        const nextContent = typeof data.content === 'string' ? data.content : '';
+        const rawKind =
+          typeof (data as any).kind === 'string'
+            ? String((data as any).kind).trim().toLowerCase()
+            : typeof (data as any).content === 'string'
+              ? 'text'
+              : 'binary';
+        const nextKind: OpenedFileKind =
+          rawKind === 'text' || rawKind === 'image' || rawKind === 'video' ? rawKind : 'binary';
+        const nextMime = typeof (data as any).mime === 'string' ? String((data as any).mime).trim().toLowerCase() : '';
+        const nextSize = Number((data as any).size);
+        const nextContent = nextKind === 'text' && typeof (data as any).content === 'string' ? (data as any).content : '';
+        setKind(nextKind);
+        setMime(nextMime || null);
+        setSize(Number.isFinite(nextSize) && nextSize >= 0 ? Math.floor(nextSize) : 0);
         setContent(nextContent);
         setSavedContent(nextContent);
         contentRef.current = nextContent;
@@ -131,6 +155,9 @@ export function useFileEditorState({
         const msg = e?.message ?? String(e);
         setError(msg);
         setOpenFailure({ message: msg, at: Date.now() });
+        setKind('text');
+        setMime(null);
+        setSize(0);
         setContent('');
         setSavedContent('');
         contentRef.current = '';
@@ -148,11 +175,13 @@ export function useFileEditorState({
 
   const dirty = React.useMemo(() => {
     if (!openedFile) return false;
+    if (kind !== 'text') return false;
     return content !== savedContent;
-  }, [content, openedFile, savedContent]);
+  }, [content, kind, openedFile, savedContent]);
 
   const saveOpenedFile = React.useCallback(async (contentOverride?: string): Promise<boolean> => {
     if (!openedFile || loading || saving) return false;
+    if (kind !== 'text') return false;
     const textToSave = typeof contentOverride === 'string' ? contentOverride : contentRef.current;
     if (typeof contentOverride === 'string') {
       contentRef.current = contentOverride;
@@ -184,13 +213,14 @@ export function useFileEditorState({
     } finally {
       setSaving(false);
     }
-  }, [loading, onRefreshFsList, openedFile, requestJson, saving]);
+  }, [kind, loading, onRefreshFsList, openedFile, requestJson, saving]);
 
   const setOpenedFileContent = React.useCallback((next: string) => {
+    if (kind !== 'text') return;
     const nextText = typeof next === 'string' ? next : '';
     contentRef.current = nextText;
     setContent(nextText);
-  }, []);
+  }, [kind]);
 
   return {
     openedFile,
@@ -198,6 +228,9 @@ export function useFileEditorState({
     saving,
     error,
     openFailure,
+    kind,
+    mime,
+    size,
     content,
     dirty,
     mtimeMs,

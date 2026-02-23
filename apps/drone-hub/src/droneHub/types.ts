@@ -43,6 +43,7 @@ export type DroneFsEntry = {
   mtimeMs: number | null;
   ext: string | null;
   isImage: boolean;
+  isVideo: boolean;
 };
 
 export type DroneFsListPayload =
@@ -55,7 +56,19 @@ export type DroneFsReadPayload =
       id: string;
       name: string;
       path: string;
+      kind: 'text';
+      mime: string | null;
       content: string;
+      size: number;
+      mtimeMs: number | null;
+    }
+  | {
+      ok: true;
+      id: string;
+      name: string;
+      path: string;
+      kind: 'image' | 'video' | 'binary';
+      mime: string | null;
       size: number;
       mtimeMs: number | null;
     }

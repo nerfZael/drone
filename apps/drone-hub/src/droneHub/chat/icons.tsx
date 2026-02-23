@@ -52,6 +52,15 @@ export function IconTldr({ className }: { className?: string }) {
   );
 }
 
+export function IconImage({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M2.5 1A1.5 1.5 0 001 2.5v11A1.5 1.5 0 002.5 15h11a1.5 1.5 0 001.5-1.5v-11A1.5 1.5 0 0013.5 1h-11zM2 2.5a.5.5 0 01.5-.5h11a.5.5 0 01.5.5v7.1l-2.36-2.36a1 1 0 00-1.41 0L7.5 9.97 6.28 8.75a1 1 0 00-1.41 0L2 11.62V2.5zm0 10.53l3.57-3.57 1.22 1.22a1 1 0 001.41 0l2.73-2.73a.01.01 0 01.01 0L14 11.01v2.49a.5.5 0 01-.5.5h-11a.5.5 0 01-.5-.5v-.47z" />
+      <path d="M5.75 4.5a1.25 1.25 0 100 2.5 1.25 1.25 0 000-2.5z" />
+    </svg>
+  );
+}
+
 export function IconSpinner({ className }: { className?: string }) {
   return (
     <svg

@@ -56,6 +56,7 @@ type DroneHubUiState = {
   headerOverflowOpen: boolean;
   outputView: OutputView;
   fsExplorerView: FsExplorerView;
+  transcriptInlineImages: boolean;
   spawnAgentKey: string;
   spawnModel: string;
   pullHostBranchBeforeCreate: boolean;
@@ -94,6 +95,7 @@ type DroneHubUiState = {
   setHeaderOverflowOpen: (next: Updater<boolean>) => void;
   setOutputView: (next: Updater<OutputView>) => void;
   setFsExplorerView: (next: Updater<FsExplorerView>) => void;
+  setTranscriptInlineImages: (next: Updater<boolean>) => void;
   setSpawnAgentKey: (next: Updater<string>) => void;
   setSpawnModel: (next: Updater<string>) => void;
   setPullHostBranchBeforeCreate: (next: Updater<boolean>) => void;
@@ -130,6 +132,7 @@ type DroneHubUiPersistedState = Pick<
   | 'groupMultiChatStatusSort'
   | 'outputView'
   | 'fsExplorerView'
+  | 'transcriptInlineImages'
   | 'spawnAgentKey'
   | 'spawnModel'
   | 'pullHostBranchBeforeCreate'
@@ -274,6 +277,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       headerOverflowOpen: false,
       outputView: 'screen',
       fsExplorerView: 'list',
+      transcriptInlineImages: false,
       spawnAgentKey: 'builtin:cursor',
       spawnModel: '',
       pullHostBranchBeforeCreate: true,
@@ -341,6 +345,8 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       setHeaderOverflowOpen: (next) => set((s) => ({ headerOverflowOpen: resolveNext(s.headerOverflowOpen, next) })),
       setOutputView: (next) => set((s) => ({ outputView: resolveNext(s.outputView, next) })),
       setFsExplorerView: (next) => set((s) => ({ fsExplorerView: resolveNext(s.fsExplorerView, next) })),
+      setTranscriptInlineImages: (next) =>
+        set((s) => ({ transcriptInlineImages: resolveNext(s.transcriptInlineImages, next) })),
       setSpawnAgentKey: (next) => set((s) => ({ spawnAgentKey: resolveNext(s.spawnAgentKey, next) })),
       setSpawnModel: (next) => set((s) => ({ spawnModel: resolveNext(s.spawnModel, next) })),
       setPullHostBranchBeforeCreate: (next) =>
@@ -385,6 +391,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         groupMultiChatStatusSort: state.groupMultiChatStatusSort,
         outputView: state.outputView,
         fsExplorerView: state.fsExplorerView,
+        transcriptInlineImages: state.transcriptInlineImages,
         spawnAgentKey: state.spawnAgentKey,
         spawnModel: state.spawnModel,
         pullHostBranchBeforeCreate: state.pullHostBranchBeforeCreate,
@@ -411,6 +418,9 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           ),
           outputView: normalizeOutputView(persisted.outputView ?? currentState.outputView),
           fsExplorerView: normalizeFsExplorerView(persisted.fsExplorerView ?? currentState.fsExplorerView),
+          transcriptInlineImages: normalizeBoolean(
+            persisted.transcriptInlineImages ?? currentState.transcriptInlineImages,
+          ),
           pullHostBranchBeforeCreate: normalizeBoolean(
             persisted.pullHostBranchBeforeCreate ?? currentState.pullHostBranchBeforeCreate,
           ),

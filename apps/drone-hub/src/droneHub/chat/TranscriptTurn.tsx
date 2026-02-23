@@ -1,16 +1,194 @@
 import React from 'react';
 import { stripAnsi, timeAgo } from '../../domain';
 import type { TranscriptItem } from '../types';
+import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { CollapsibleMarkdown } from './CollapsibleMarkdown';
 import { ImageAttachmentChips, isAttachmentOnlyPrompt, normalizeImageAttachmentRefs } from './ImageAttachmentChips';
 import type { MarkdownFileReference } from './MarkdownMessage';
-import { IconBot, IconJobs, IconSpinner, IconTldr, IconUser } from './icons';
+import { IconBot, IconImage, IconJobs, IconSpinner, IconTldr, IconUser } from './icons';
 
 type TldrState =
   | { status: 'idle' }
   | { status: 'loading' }
   | { status: 'ready'; summary: string }
   | { status: 'error'; error: string };
+
+type InlineAgentImage = {
+  id: string;
+  src: string;
+  href: string;
+  label: string;
+};
+
+const IMAGE_EXTENSIONS = new Set([
+  'png',
+  'jpg',
+  'jpeg',
+  'gif',
+  'webp',
+  'bmp',
+  'svg',
+  'ico',
+  'avif',
+  'tif',
+  'tiff',
+]);
+
+function imagePathHasKnownExtension(rawPath: string): boolean {
+  const pathOnly = String(rawPath ?? '').split('?')[0].split('#')[0].trim();
+  if (!pathOnly) return false;
+  const decoded = (() => {
+    try {
+      return decodeURIComponent(pathOnly);
+    } catch {
+      return pathOnly;
+    }
+  })();
+  const lower = decoded.toLowerCase();
+  const slash = Math.max(lower.lastIndexOf('/'), lower.lastIndexOf('\\'));
+  const base = slash >= 0 ? lower.slice(slash + 1) : lower;
+  const dot = base.lastIndexOf('.');
+  if (dot <= 0 || dot === base.length - 1) return false;
+  const ext = base.slice(dot + 1);
+  return IMAGE_EXTENSIONS.has(ext);
+}
+
+function normalizeInlineImageFilePath(rawRef: string): string | null {
+  const trimmed = String(rawRef ?? '').trim();
+  if (!trimmed) return null;
+  if (trimmed.includes('\0')) return null;
+  if (/^https?:\/\//i.test(trimmed)) return null;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return null;
+  if (trimmed.startsWith('~')) return null;
+
+  let token = trimmed.replace(/\\/g, '/');
+  const hashMatch = /^(.*)#L\d+(?:C\d+)?$/i.exec(token);
+  if (hashMatch) token = String(hashMatch[1] ?? '').trim();
+  const lineSuffix = /:(\d+)(?::(\d+))?$/.exec(token);
+  if (lineSuffix && typeof lineSuffix.index === 'number') {
+    token = token.slice(0, lineSuffix.index).trim();
+  }
+
+  if (!token) return null;
+  if (token.startsWith('./')) token = token.slice(2);
+  token = token.replace(/\/+/g, '/');
+  if (!token) return null;
+  if (token.includes('/../') || token.startsWith('../') || token.endsWith('/..')) return null;
+  if (!imagePathHasKnownExtension(token)) return null;
+  if (token.startsWith('/')) return token;
+  if (token.startsWith('work/repo/')) return `/${token}`;
+  return `/work/repo/${token}`;
+}
+
+function inlineImageLabelFromPath(rawPath: string): string {
+  const pathOnly = String(rawPath ?? '').split('?')[0].split('#')[0].trim();
+  if (!pathOnly) return 'image';
+  const slash = Math.max(pathOnly.lastIndexOf('/'), pathOnly.lastIndexOf('\\'));
+  const base = slash >= 0 ? pathOnly.slice(slash + 1) : pathOnly;
+  return base || pathOnly;
+}
+
+function imageHttpUrlLabel(u: URL): string {
+  const fromPath = inlineImageLabelFromPath(u.pathname);
+  if (fromPath && fromPath !== '/') return fromPath;
+  return u.hostname || 'image';
+}
+
+function collectInlineAgentImages(textRaw: string, droneIdRaw?: string): InlineAgentImage[] {
+  const text = String(textRaw ?? '');
+  if (!text.trim()) return [];
+  const droneId = String(droneIdRaw ?? '').trim();
+  const out: InlineAgentImage[] = [];
+  const seen = new Set<string>();
+  const push = (entry: InlineAgentImage) => {
+    if (!entry.src || seen.has(entry.src)) return;
+    seen.add(entry.src);
+    out.push(entry);
+  };
+
+  const urlCandidatePatterns = [/https?:\/\/[^\s<>()]+(?:\([^\s<>()]*\)[^\s<>()]*)*/gi];
+  for (const pattern of urlCandidatePatterns) {
+    for (const match of text.matchAll(pattern)) {
+      const raw = String(match[0] ?? '').trim();
+      if (!raw) continue;
+      let parsed: URL;
+      try {
+        parsed = new URL(raw);
+      } catch {
+        continue;
+      }
+      const isImage =
+        imagePathHasKnownExtension(parsed.pathname) ||
+        imagePathHasKnownExtension(parsed.searchParams.get('path') ?? '') ||
+        imagePathHasKnownExtension(parsed.searchParams.get('file') ?? '') ||
+        imagePathHasKnownExtension(parsed.searchParams.get('url') ?? '');
+      if (!isImage) continue;
+      const href = parsed.toString();
+      push({
+        id: href,
+        src: href,
+        href,
+        label: imageHttpUrlLabel(parsed),
+      });
+    }
+  }
+
+  const markdownHrefRegex = /\[[^\]]*]\(([^)\s]+)\)/g;
+  for (const match of text.matchAll(markdownHrefRegex)) {
+    const rawHref = String(match[1] ?? '').trim().replace(/^<|>$/g, '');
+    if (!rawHref) continue;
+    if (/^https?:\/\//i.test(rawHref)) {
+      let parsed: URL;
+      try {
+        parsed = new URL(rawHref);
+      } catch {
+        continue;
+      }
+      const isImage =
+        imagePathHasKnownExtension(parsed.pathname) ||
+        imagePathHasKnownExtension(parsed.searchParams.get('path') ?? '') ||
+        imagePathHasKnownExtension(parsed.searchParams.get('file') ?? '') ||
+        imagePathHasKnownExtension(parsed.searchParams.get('url') ?? '');
+      if (!isImage) continue;
+      const href = parsed.toString();
+      push({
+        id: href,
+        src: href,
+        href,
+        label: imageHttpUrlLabel(parsed),
+      });
+      continue;
+    }
+    if (!droneId) continue;
+    const containerPath = normalizeInlineImageFilePath(rawHref);
+    if (!containerPath) continue;
+    const src = `/api/drones/${encodeURIComponent(droneId)}/fs/media?path=${encodeURIComponent(containerPath)}`;
+    push({
+      id: `${droneId}:${containerPath}`,
+      src,
+      href: src,
+      label: inlineImageLabelFromPath(containerPath),
+    });
+  }
+
+  const inlineCodeRegex = /`([^`\n]+)`/g;
+  for (const match of text.matchAll(inlineCodeRegex)) {
+    if (!droneId) continue;
+    const raw = String(match[1] ?? '').trim();
+    if (!raw) continue;
+    const containerPath = normalizeInlineImageFilePath(raw);
+    if (!containerPath) continue;
+    const src = `/api/drones/${encodeURIComponent(droneId)}/fs/media?path=${encodeURIComponent(containerPath)}`;
+    push({
+      id: `${droneId}:${containerPath}`,
+      src,
+      href: src,
+      label: inlineImageLabelFromPath(containerPath),
+    });
+  }
+
+  return out.slice(0, 8);
+}
 
 function sameAttachments(aRaw: unknown, bRaw: unknown): boolean {
   const a = normalizeImageAttachmentRefs(aRaw);
@@ -59,6 +237,7 @@ export const TranscriptTurn = React.memo(
     droneId?: string;
     showRoleIcons?: boolean;
   }) {
+    const transcriptInlineImages = useDroneHubUiStore((s) => s.transcriptInlineImages);
     const attachments = normalizeImageAttachmentRefs((item as any).attachments);
     const promptText = isAttachmentOnlyPrompt(item.prompt, attachments) ? '' : item.prompt;
     const cleaned = item.ok ? stripAnsi(item.output) : stripAnsi(item.error || 'failed');
@@ -76,6 +255,17 @@ export const TranscriptTurn = React.memo(
           ? `TLDR failed: ${tldrError || 'unknown error'}`
           : 'Generating TLDR…'
       : cleaned;
+    const inlineImages = React.useMemo(() => collectInlineAgentImages(cleaned, droneId), [cleaned, droneId]);
+    const [showInlineImagesOverride, setShowInlineImagesOverride] = React.useState<boolean | null>(null);
+    const [failedInlineImagesById, setFailedInlineImagesById] = React.useState<Record<string, true>>({});
+    const showInlineImages = Boolean(
+      inlineImages.length > 0 &&
+        (showInlineImagesOverride == null ? transcriptInlineImages : showInlineImagesOverride),
+    );
+    React.useEffect(() => {
+      setShowInlineImagesOverride(null);
+      setFailedInlineImagesById({});
+    }, [messageId]);
     return (
       <div className="animate-fade-in">
         {/* User message */}
@@ -153,8 +343,63 @@ export const TranscriptTurn = React.memo(
                 onOpenFileReference={onOpenFileReference}
                 onOpenLink={onOpenLink}
               />
+              {showInlineImages && (
+                <div className="mt-3 pt-2 border-t border-[var(--border-subtle)]">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {inlineImages.map((image) => (
+                      <a
+                        key={image.id}
+                        href={image.href}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="block rounded-md border border-[var(--border-subtle)] bg-[rgba(0,0,0,.16)] hover:border-[var(--accent-muted)] transition-colors overflow-hidden"
+                        title={`Open ${image.label}`}
+                      >
+                        {failedInlineImagesById[image.id] ? (
+                          <div className="h-[120px] flex items-center justify-center text-[11px] text-[var(--muted)] px-3 text-center">
+                            Failed to load image.
+                          </div>
+                        ) : (
+                          <img
+                            src={image.src}
+                            alt={image.label}
+                            loading="lazy"
+                            className="w-full h-[120px] object-cover bg-[var(--panel)]"
+                            onError={() =>
+                              setFailedInlineImagesById((prev) => ({
+                                ...prev,
+                                [image.id]: true,
+                              }))
+                            }
+                          />
+                        )}
+                        <div className="px-2 py-1 text-[10px] text-[var(--muted-dim)] truncate">{image.label}</div>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="absolute bottom-2 right-2 flex items-center gap-1">
+                {inlineImages.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setShowInlineImagesOverride((prev) => {
+                        const current = prev == null ? transcriptInlineImages : prev;
+                        return !current;
+                      })
+                    }
+                    disabled={false}
+                    className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-opacity ${
+                      showInlineImages ? 'text-[var(--accent)] border-[var(--accent-muted)] bg-[rgba(0,0,0,.25)]' : 'text-[var(--muted)] border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)]'
+                    } opacity-0 group-hover:opacity-100 hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[rgba(0,0,0,.25)]`}
+                    title={`${showInlineImages ? 'Hide' : 'Show'} inline images${transcriptInlineImages ? ' (global default on)' : ''}`}
+                    aria-label="Toggle inline images"
+                  >
+                    <IconImage className="w-3.5 h-3.5 opacity-90" />
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => onToggleTldr(item)}
