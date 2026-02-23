@@ -8060,7 +8060,14 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         try {
           body = await readJsonBody(req);
         } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          const msg = e?.message ?? String(e);
+          hubLog('warn', 'drone rename rejected: invalid request body', {
+            droneId,
+            droneRef,
+            oldName,
+            error: msg,
+          });
+          json(res, 400, { ok: false, error: msg });
           return;
         }
 
@@ -8068,10 +8075,23 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         try {
           newName = normalizeDroneDisplayName(body?.newName);
         } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          const msg = e?.message ?? String(e);
+          hubLog('warn', 'drone rename rejected: invalid target name', {
+            droneId,
+            droneRef,
+            oldName,
+            attemptedName: String(body?.newName ?? ''),
+            error: msg,
+          });
+          json(res, 400, { ok: false, error: msg });
           return;
         }
         if (oldName === newName) {
+          hubLog('info', 'drone rename no-op (same name)', {
+            droneId,
+            oldName,
+            newName,
+          });
           json(res, 200, { ok: true, id: droneId, oldName, newName, renamed: false, reason: 'same-name' });
           return;
         }
@@ -8094,10 +8114,24 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           return { ok: true, id: droneId, oldName, newName, renamed: true };
         });
         if (!(renamed as any).ok) {
-          json(res, (renamed as any).status ?? 500, { ok: false, error: (renamed as any).error ?? 'rename failed' });
+          const status = (renamed as any).status ?? 500;
+          const error = (renamed as any).error ?? 'rename failed';
+          hubLog('warn', 'drone rename failed', {
+            droneId,
+            oldName,
+            newName,
+            status,
+            error,
+          });
+          json(res, status, { ok: false, error });
           return;
         }
 
+        hubLog('info', 'drone renamed', {
+          droneId,
+          oldName,
+          newName,
+        });
         json(res, 200, renamed);
         return;
       }
