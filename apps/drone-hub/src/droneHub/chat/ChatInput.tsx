@@ -428,6 +428,10 @@ export function ChatInput({
               }}
               onKeyDown={(e) => {
                 if ((e.nativeEvent as any)?.isComposing) return;
+                if (e.key === 'Escape') {
+                  e.currentTarget.blur();
+                  return;
+                }
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
                   sendNow();
