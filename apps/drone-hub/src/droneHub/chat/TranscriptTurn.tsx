@@ -505,7 +505,6 @@ export const TranscriptTurn = React.memo(
     a.item.logPath === b.item.logPath &&
     a.item.output === b.item.output &&
     (a.item.error ?? '') === (b.item.error ?? '') &&
-    a.nowMs === b.nowMs &&
     a.parsingJobs === b.parsingJobs &&
     a.onCreateJobs === b.onCreateJobs &&
     a.messageId === b.messageId &&
