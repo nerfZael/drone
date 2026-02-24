@@ -182,6 +182,27 @@ export function MarkdownMessage({
         components={{
           a: ({ href, children, ...props }) => {
             const hrefText = typeof href === 'string' ? href : '';
+            const hrefFileRef = onOpenFileReference ? parseInlineCodeFileReference(hrefText) : null;
+            if (hrefFileRef && onOpenFileReference) {
+              const targetDescription =
+                hrefFileRef.line == null
+                  ? hrefFileRef.path
+                  : `${hrefFileRef.path}:${hrefFileRef.line}${hrefFileRef.column == null ? '' : `:${hrefFileRef.column}`}`;
+              return (
+                <a
+                  href={hrefText}
+                  title={`Open ${targetDescription}`}
+                  aria-label={`Open file ${targetDescription}`}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    onOpenFileReference(hrefFileRef);
+                  }}
+                  {...props}
+                >
+                  {children}
+                </a>
+              );
+            }
             return (
               <a
                 href={hrefText}

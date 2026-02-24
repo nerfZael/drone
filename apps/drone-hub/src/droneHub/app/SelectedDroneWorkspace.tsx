@@ -30,7 +30,7 @@ import type { RightPanelTab } from './app-config';
 import type { StartupSeedState, TldrState } from './app-types';
 import type { RepoOpErrorMeta } from './helpers';
 import { requestChangesPullRequest } from '../changes/navigation';
-import { chatInputDraftKeyForDroneChat, isDroneStartingOrSeeding, resolveChatNameForDrone } from './helpers';
+import { chatInputDraftKeyForDroneChat, droneHomePath, isDroneStartingOrSeeding, resolveChatNameForDrone } from './helpers';
 import { openDroneTabFromLastPreview, resolveDroneOpenTabUrl } from './quick-actions';
 import { cn } from '../../ui/cn';
 import { dropdownMenuItemBaseClass, dropdownPanelBaseClass } from '../../ui/dropdown';
@@ -1512,6 +1512,7 @@ export function SelectedDroneWorkspace({
                           onOpenFileReference={onOpenMarkdownFileReference}
                           onOpenLink={tryOpenMarkdownPullRequestInChanges}
                           droneId={currentDrone.id}
+                          droneHomePath={droneHomePath(currentDrone)}
                         />
                       );
                     })}
