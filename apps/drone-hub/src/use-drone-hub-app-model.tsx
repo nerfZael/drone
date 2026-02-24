@@ -321,6 +321,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     [setUnreadAgentMessageByDroneId],
   );
   React.useEffect(() => {
+    if (dronesLoading || dronesError) return;
     setUnreadAgentMessageByDroneId((prev) => {
       const prevEntries = Object.entries(prev);
       if (prevEntries.length === 0) return prev;
@@ -339,7 +340,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       }
       return changed ? next : prev;
     });
-  }, [setUnreadAgentMessageByDroneId, validDroneIdSet]);
+  }, [dronesError, dronesLoading, setUnreadAgentMessageByDroneId, validDroneIdSet]);
   const droneStateById = React.useMemo(() => {
     const out: Record<
       string,
