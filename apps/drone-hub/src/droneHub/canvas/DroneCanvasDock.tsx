@@ -417,11 +417,14 @@ export function DroneCanvasDock({
       input.setSelectionRange(end, end);
     });
   }, []);
+  const focusViewportElement = React.useCallback(() => {
+    viewportRef.current?.focus({ preventScroll: true });
+  }, []);
   const focusViewport = React.useCallback(() => {
     requestAnimationFrame(() => {
-      viewportRef.current?.focus({ preventScroll: true });
+      focusViewportElement();
     });
-  }, []);
+  }, [focusViewportElement]);
 
   const cancelInlineRename = React.useCallback(() => {
     setInlineRenameBusy(false);
@@ -959,6 +962,7 @@ export function DroneCanvasDock({
         return;
       }
       if (event.button !== 0) return;
+      focusViewportElement();
       if (event.ctrlKey || event.metaKey) return;
       event.preventDefault();
       event.stopPropagation();
@@ -993,12 +997,13 @@ export function DroneCanvasDock({
       marqueeDragRef.current = null;
       setSelectionBox(null);
     },
-    [inlineRenamingDroneId, nodesByDroneId, scale, selectedDroneIds, setSelectedDroneIds],
+    [focusViewportElement, inlineRenamingDroneId, nodesByDroneId, scale, selectedDroneIds, setSelectedDroneIds],
   );
 
   const onNodeClick = React.useCallback(
     (droneId: string, event: React.MouseEvent<HTMLButtonElement>) => {
       event.stopPropagation();
+      focusViewportElement();
       if (suppressNodeClickRef.current) {
         suppressNodeClickRef.current = false;
         return;
@@ -1012,7 +1017,7 @@ export function DroneCanvasDock({
         onActivateDrone?.(droneId);
       }
     },
-    [onActivateDrone, setSelectedDroneIds, toggleSelectedDroneId],
+    [focusViewportElement, onActivateDrone, setSelectedDroneIds, toggleSelectedDroneId],
   );
 
   const onNodeDoubleClick = React.useCallback(
