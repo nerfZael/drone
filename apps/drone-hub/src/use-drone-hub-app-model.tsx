@@ -56,6 +56,7 @@ import {
 } from './droneHub/app/use-drone-hub-view-props';
 import type { MarkdownFileReference } from './droneHub/chat/MarkdownMessage';
 import {
+  droneHomePath,
   isDroneStartingOrSeeding,
   makeId,
   resolveChatNameForDrone,
@@ -1313,11 +1314,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const collapsed = rawPath.replace(/\/+/g, '/');
       const normalized = collapsed.replace(/^\/+/, '');
       if (!collapsed || !normalized) return;
+      const basePath = droneHomePath(currentDrone).replace(/\/+$/, '') || '/work/repo';
       const containerPath = collapsed.startsWith('/')
         ? collapsed
-        : normalized.startsWith('work/repo/')
+        : normalized.startsWith('work/repo/') || normalized.startsWith('dvm-data/home/')
           ? `/${normalized}`
-          : `/work/repo/${normalized}`;
+          : `${basePath}/${normalized}`;
       const name = containerPath.split('/').filter(Boolean).pop() || containerPath;
       openEditorFile({
         path: containerPath,
@@ -1326,7 +1328,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         column: ref.column,
       });
     },
-    [openEditorFile],
+    [currentDrone, openEditorFile],
   );
   const onActivateDroneFromCanvas = React.useCallback(
     (droneIdRaw: string) => {

@@ -54,7 +54,16 @@ function imagePathHasKnownExtension(rawPath: string): boolean {
   return IMAGE_EXTENSIONS.has(ext);
 }
 
-function normalizeInlineImageFilePath(rawRef: string): string | null {
+function normalizeInlineImageBasePath(rawBase: string | undefined): string {
+  let base = String(rawBase ?? '').trim().replace(/\\/g, '/');
+  if (!base) return '/work/repo';
+  if (!base.startsWith('/')) base = `/${base.replace(/^\/+/, '')}`;
+  base = base.replace(/\/+/g, '/');
+  if (base.length > 1 && base.endsWith('/')) base = base.slice(0, -1);
+  return base || '/work/repo';
+}
+
+function normalizeInlineImageFilePath(rawRef: string, basePathRaw?: string): string | null {
   const trimmed = String(rawRef ?? '').trim();
   if (!trimmed) return null;
   if (trimmed.includes('\0')) return null;
@@ -76,9 +85,10 @@ function normalizeInlineImageFilePath(rawRef: string): string | null {
   if (!token) return null;
   if (token.includes('/../') || token.startsWith('../') || token.endsWith('/..')) return null;
   if (!imagePathHasKnownExtension(token)) return null;
+  const basePath = normalizeInlineImageBasePath(basePathRaw);
   if (token.startsWith('/')) return token;
-  if (token.startsWith('work/repo/')) return `/${token}`;
-  return `/work/repo/${token}`;
+  if (token.startsWith('work/repo/') || token.startsWith('dvm-data/home/')) return `/${token}`;
+  return `${basePath}/${token}`;
 }
 
 function inlineImageLabelFromPath(rawPath: string): string {
@@ -95,7 +105,7 @@ function imageHttpUrlLabel(u: URL): string {
   return u.hostname || 'image';
 }
 
-function collectInlineAgentImages(textRaw: string, droneIdRaw?: string): InlineAgentImage[] {
+function collectInlineAgentImages(textRaw: string, droneIdRaw?: string, basePathRaw?: string): InlineAgentImage[] {
   const text = String(textRaw ?? '');
   if (!text.trim()) return [];
   const droneId = String(droneIdRaw ?? '').trim();
@@ -163,7 +173,7 @@ function collectInlineAgentImages(textRaw: string, droneIdRaw?: string): InlineA
       continue;
     }
     if (!droneId) continue;
-    const containerPath = normalizeInlineImageFilePath(rawHref);
+    const containerPath = normalizeInlineImageFilePath(rawHref, basePathRaw);
     if (!containerPath) continue;
     const src = `/api/drones/${encodeURIComponent(droneId)}/fs/media?path=${encodeURIComponent(containerPath)}`;
     push({
@@ -180,7 +190,7 @@ function collectInlineAgentImages(textRaw: string, droneIdRaw?: string): InlineA
     if (!droneId) continue;
     const raw = String(match[1] ?? '').trim();
     if (!raw) continue;
-    const containerPath = normalizeInlineImageFilePath(raw);
+    const containerPath = normalizeInlineImageFilePath(raw, basePathRaw);
     if (!containerPath) continue;
     const src = `/api/drones/${encodeURIComponent(droneId)}/fs/media?path=${encodeURIComponent(containerPath)}`;
     push({
@@ -188,6 +198,24 @@ function collectInlineAgentImages(textRaw: string, droneIdRaw?: string): InlineA
       src,
       linkHref: raw,
       fileRef: { raw, path: containerPath, line: null, column: null },
+      label: inlineImageLabelFromPath(containerPath),
+    });
+  }
+
+  const bareImagePathRegex =
+    /(?:^|[\s"'(<[{])((?:\.{1,2}\/)?(?:[^\s"'`<>()[\]{}:]+\/)*[^\s"'`<>()[\]{}:]+\.(?:png|jpg|jpeg|gif|webp|bmp|svg|ico|avif|tif|tiff)(?:\?[^\s"'`<>()[\]{}]+)?(?:#[^\s"'`<>()[\]{}]+)?)/gi;
+  for (const match of text.matchAll(bareImagePathRegex)) {
+    if (!droneId) continue;
+    const rawPath = String(match[1] ?? '').trim();
+    if (!rawPath) continue;
+    const containerPath = normalizeInlineImageFilePath(rawPath, basePathRaw);
+    if (!containerPath) continue;
+    const src = `/api/drones/${encodeURIComponent(droneId)}/fs/media?path=${encodeURIComponent(containerPath)}`;
+    push({
+      id: `${droneId}:${containerPath}`,
+      src,
+      linkHref: rawPath,
+      fileRef: { raw: rawPath, path: containerPath, line: null, column: null },
       label: inlineImageLabelFromPath(containerPath),
     });
   }
@@ -226,6 +254,7 @@ export const TranscriptTurn = React.memo(
     onOpenFileReference,
     onOpenLink,
     droneId,
+    droneHomePath,
     showRoleIcons = true,
   }: {
     item: TranscriptItem;
@@ -240,6 +269,7 @@ export const TranscriptTurn = React.memo(
     onOpenFileReference?: (ref: MarkdownFileReference) => void;
     onOpenLink?: (href: string) => boolean;
     droneId?: string;
+    droneHomePath?: string;
     showRoleIcons?: boolean;
   }) {
     const transcriptInlineImages = useDroneHubUiStore((s) => s.transcriptInlineImages);
@@ -262,7 +292,10 @@ export const TranscriptTurn = React.memo(
           ? `TLDR failed: ${tldrError || 'unknown error'}`
           : 'Generating TLDR…'
       : cleaned;
-    const inlineImages = React.useMemo(() => collectInlineAgentImages(cleaned, droneId), [cleaned, droneId]);
+    const inlineImages = React.useMemo(
+      () => collectInlineAgentImages(cleaned, droneId, droneHomePath),
+      [cleaned, droneId, droneHomePath],
+    );
     const [failedInlineImagesById, setFailedInlineImagesById] = React.useState<Record<string, true>>({});
     const showInlineImages = Boolean(
       inlineImages.length > 0 &&
@@ -485,6 +518,7 @@ export const TranscriptTurn = React.memo(
     a.onOpenFileReference === b.onOpenFileReference &&
     a.onOpenLink === b.onOpenLink &&
     (a.droneId ?? '') === (b.droneId ?? '') &&
+    (a.droneHomePath ?? '') === (b.droneHomePath ?? '') &&
     sameAttachments((a.item as any).attachments, (b.item as any).attachments) &&
     (a.showRoleIcons ?? true) === (b.showRoleIcons ?? true),
 );
