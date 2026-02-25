@@ -1525,6 +1525,7 @@ export function SelectedDroneWorkspace({
                         onOpenFileReference={onOpenMarkdownFileReference}
                         onOpenLink={tryOpenMarkdownPullRequestInChanges}
                         droneId={currentDrone.id}
+                        droneHomePath={droneHomePath(currentDrone)}
                         unstickBusy={Boolean(unstickingPendingPromptById[p.id])}
                         unstickError={unstickPendingPromptErrorById[p.id] ?? null}
                       />
