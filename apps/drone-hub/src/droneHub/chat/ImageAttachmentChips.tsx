@@ -22,6 +22,36 @@ function normalizePath(raw: string): string {
   return s.replace(/\/+/g, '/');
 }
 
+function normalizeBasePath(raw: string | undefined): string {
+  let base = normalizePath(raw ?? '');
+  if (!base) return '/work/repo';
+  if (!base.startsWith('/')) base = `/${base}`;
+  if (base.length > 1 && base.endsWith('/')) base = base.slice(0, -1);
+  return base || '/work/repo';
+}
+
+function resolveAttachmentPath(relativePathRaw: string | undefined, droneHomePathRaw?: string): string {
+  const rel = normalizePath(relativePathRaw ?? '');
+  if (!rel || rel.startsWith('/')) return '';
+  if (rel.startsWith('../') || rel.endsWith('/..') || rel.includes('/../')) return '';
+  const base = normalizeBasePath(droneHomePathRaw);
+  return `${base}/${rel}`.replace(/\/+/g, '/');
+}
+
+function alternateHomePath(rawPath: string): string {
+  const p = normalizePath(rawPath);
+  if (!p.startsWith('/')) return '';
+  if (p === '/work/repo' || p.startsWith('/work/repo/')) {
+    const suffix = p.slice('/work/repo'.length);
+    return `/dvm-data/home${suffix}`;
+  }
+  if (p === '/dvm-data/home' || p.startsWith('/dvm-data/home/')) {
+    const suffix = p.slice('/dvm-data/home'.length);
+    return `/work/repo${suffix}`;
+  }
+  return '';
+}
+
 export function normalizeImageAttachmentRefs(raw: unknown): ChatImageAttachmentRef[] {
   const list = Array.isArray(raw) ? raw : [];
   const out: ChatImageAttachmentRef[] = [];
@@ -64,30 +94,43 @@ function toFileRef(pathRaw: string): MarkdownFileReference | null {
 export function ImageAttachmentChips({
   attachments,
   droneId,
+  droneHomePath,
   onOpenFileReference,
 }: {
   attachments: ChatImageAttachmentRef[];
   droneId?: string;
+  droneHomePath?: string;
   onOpenFileReference?: (ref: MarkdownFileReference) => void;
 }) {
   if (attachments.length === 0) return null;
-  const [thumbFailedByKey, setThumbFailedByKey] = React.useState<Record<string, true>>({});
+  const [thumbFailCountByKey, setThumbFailCountByKey] = React.useState<Record<string, number>>({});
   return (
     <div className="mt-2 flex flex-wrap items-center gap-1.5">
       {attachments.map((a, idx) => {
         const key = `${a.name}:${a.size}:${a.path ?? ''}:${a.relativePath ?? ''}:${idx}`;
         const previewDataUrlRaw = String((a as any).previewDataUrl ?? '').trim();
         const hasPreviewDataUrl = /^data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=]+$/i.test(previewDataUrlRaw);
-        const path = String(a.path ?? '').trim();
-        const thumbSrc = hasPreviewDataUrl
-          ? previewDataUrlRaw
-          : droneId && path
-            ? `/api/drones/${encodeURIComponent(droneId)}/fs/thumb?path=${encodeURIComponent(path)}`
-            : '';
-        const showThumb = Boolean(thumbSrc) && !thumbFailedByKey[key];
-        const targetPath = String(a.path ?? a.relativePath ?? '').trim();
+        const pathFromRelative = resolveAttachmentPath(a.relativePath, droneHomePath);
+        const absolutePath = normalizePath(a.path ?? '');
+        const path = pathFromRelative || absolutePath;
+        const altPath = alternateHomePath(path);
+        const srcCandidates: string[] = [];
+        if (hasPreviewDataUrl) srcCandidates.push(previewDataUrlRaw);
+        if (droneId && path) {
+          srcCandidates.push(`/api/drones/${encodeURIComponent(droneId)}/fs/thumb?path=${encodeURIComponent(path)}`);
+          srcCandidates.push(`/api/drones/${encodeURIComponent(droneId)}/fs/media?path=${encodeURIComponent(path)}`);
+          if (altPath && altPath !== path) {
+            srcCandidates.push(`/api/drones/${encodeURIComponent(droneId)}/fs/thumb?path=${encodeURIComponent(altPath)}`);
+            srcCandidates.push(`/api/drones/${encodeURIComponent(droneId)}/fs/media?path=${encodeURIComponent(altPath)}`);
+          }
+        }
+        const srcList = Array.from(new Set(srcCandidates.filter(Boolean)));
+        const failCount = Math.max(0, Math.floor(Number(thumbFailCountByKey[key] ?? 0)));
+        const thumbSrc = failCount < srcList.length ? srcList[failCount] : '';
+        const showThumb = Boolean(thumbSrc);
+        const targetPath = String(path || a.path || a.relativePath || '').trim();
         const fileRef = toFileRef(targetPath);
-        const fileLabel = String(a.relativePath ?? a.path ?? '').trim();
+        const fileLabel = String(a.relativePath ?? path ?? a.path ?? '').trim();
         return (
           <div
             key={key}
@@ -100,9 +143,10 @@ export function ImageAttachmentChips({
                 loading="lazy"
                 className="w-12 h-12 rounded object-cover border border-[rgba(148,163,184,.2)] bg-[rgba(0,0,0,.18)] flex-shrink-0"
                 onError={() =>
-                  setThumbFailedByKey((prev) => {
-                    if (prev[key]) return prev;
-                    return { ...prev, [key]: true };
+                  setThumbFailCountByKey((prev) => {
+                    const cur = Math.max(0, Math.floor(Number(prev[key] ?? 0)));
+                    if (cur >= srcList.length) return prev;
+                    return { ...prev, [key]: cur + 1 };
                   })
                 }
               />

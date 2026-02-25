@@ -21,6 +21,31 @@ type UseFileEditorStateArgs = {
   onRefreshFsList: () => void;
 };
 
+function normalizeContainerPath(raw: string): string {
+  const trimmed = String(raw ?? '').trim().replace(/\\/g, '/');
+  if (!trimmed) return '';
+  return trimmed.replace(/\/+/g, '/');
+}
+
+function mirrorDroneHomePath(rawPath: string): string {
+  const p = normalizeContainerPath(rawPath);
+  if (!p.startsWith('/')) return '';
+  if (p === '/work/repo' || p.startsWith('/work/repo/')) {
+    const suffix = p.slice('/work/repo'.length);
+    return `/dvm-data/home${suffix}`;
+  }
+  if (p === '/dvm-data/home' || p.startsWith('/dvm-data/home/')) {
+    const suffix = p.slice('/dvm-data/home'.length);
+    return `/work/repo${suffix}`;
+  }
+  return '';
+}
+
+function looksLikeFileNotFound(msgRaw: string): boolean {
+  const msg = String(msgRaw ?? '').toLowerCase();
+  return msg.includes('file not found') || msg.includes('no such file') || msg.includes('not-file');
+}
+
 export function useFileEditorState({
   currentDrone,
   requestJson,
@@ -151,17 +176,70 @@ export function useFileEditorState({
         setOpenFailure(null);
       })
       .catch((e: any) => {
-        if (cancelled || requestSeqRef.current !== seq) return;
-        const msg = e?.message ?? String(e);
-        setError(msg);
-        setOpenFailure({ message: msg, at: Date.now() });
-        setKind('text');
-        setMime(null);
-        setSize(0);
-        setContent('');
-        setSavedContent('');
-        contentRef.current = '';
-        setMtimeMs(null);
+        const firstMsg = e?.message ?? String(e);
+        const fallbackPath = mirrorDroneHomePath(filePath);
+        const shouldRetryFallback =
+          Boolean(fallbackPath) && fallbackPath !== filePath && looksLikeFileNotFound(firstMsg);
+        if (!shouldRetryFallback) {
+          if (cancelled || requestSeqRef.current !== seq) return;
+          setError(firstMsg);
+          setOpenFailure({ message: firstMsg, at: Date.now() });
+          setKind('text');
+          setMime(null);
+          setSize(0);
+          setContent('');
+          setSavedContent('');
+          contentRef.current = '';
+          setMtimeMs(null);
+          return;
+        }
+
+        void requestJson<Extract<DroneFsReadPayload, { ok: true }>>(
+          `/api/drones/${encodeURIComponent(droneId)}/fs/file?path=${encodeURIComponent(fallbackPath)}`,
+        )
+          .then((data) => {
+            if (cancelled || requestSeqRef.current !== seq) return;
+            const rawKind =
+              typeof (data as any).kind === 'string'
+                ? String((data as any).kind).trim().toLowerCase()
+                : typeof (data as any).content === 'string'
+                  ? 'text'
+                  : 'binary';
+            const nextKind: OpenedFileKind =
+              rawKind === 'text' || rawKind === 'image' || rawKind === 'video' ? rawKind : 'binary';
+            const nextMime = typeof (data as any).mime === 'string' ? String((data as any).mime).trim().toLowerCase() : '';
+            const nextSize = Number((data as any).size);
+            const nextContent = nextKind === 'text' && typeof (data as any).content === 'string' ? (data as any).content : '';
+            setKind(nextKind);
+            setMime(nextMime || null);
+            setSize(Number.isFinite(nextSize) && nextSize >= 0 ? Math.floor(nextSize) : 0);
+            setContent(nextContent);
+            setSavedContent(nextContent);
+            contentRef.current = nextContent;
+            setMtimeMs(typeof data.mtimeMs === 'number' && Number.isFinite(data.mtimeMs) ? data.mtimeMs : null);
+            setError(null);
+            setOpenFailure(null);
+            setOpenedFile((prev) => {
+              if (!prev) return prev;
+              if (prev.droneId !== droneId || prev.path !== filePath) return prev;
+              const fallbackName =
+                fallbackPath.split('/').filter(Boolean).pop() || prev.name || fallbackPath;
+              return { ...prev, path: fallbackPath, name: fallbackName };
+            });
+          })
+          .catch((fallbackErr: any) => {
+            if (cancelled || requestSeqRef.current !== seq) return;
+            const msg = fallbackErr?.message ?? firstMsg;
+            setError(msg);
+            setOpenFailure({ message: msg, at: Date.now() });
+            setKind('text');
+            setMime(null);
+            setSize(0);
+            setContent('');
+            setSavedContent('');
+            contentRef.current = '';
+            setMtimeMs(null);
+          });
       })
       .finally(() => {
         if (cancelled || requestSeqRef.current !== seq) return;
