@@ -551,12 +551,20 @@ export function GroupMultiChatColumn({
                   onToggleTldr={noopToggleTldr}
                   onHoverAgentMessage={noopHoverAgentMessage}
                   droneId={drone.id}
+                  droneHomePath={droneHomePath(drone)}
                   showRoleIcons={false}
                 />
               );
             })}
             {visiblePendingPrompts.map((item) => (
-              <PendingTranscriptTurn key={`${drone.id}:pending:${item.id}`} item={item} nowMs={nowMs} droneId={drone.id} showRoleIcons={false} />
+              <PendingTranscriptTurn
+                key={`${drone.id}:pending:${item.id}`}
+                item={item}
+                nowMs={nowMs}
+                droneId={drone.id}
+                droneHomePath={droneHomePath(drone)}
+                showRoleIcons={false}
+              />
             ))}
           </div>
         ) : (

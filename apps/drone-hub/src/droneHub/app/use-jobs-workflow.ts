@@ -417,6 +417,10 @@ export function useJobsWorkflow({
     }));
   }, []);
 
+  const dismissJobsModalError = React.useCallback(() => {
+    setJobsModalError(null);
+  }, []);
+
   return {
     parsingJobsByTurn,
     jobsModal,
@@ -438,5 +442,6 @@ export function useJobsWorkflow({
     onClearJobsPrefix,
     onUpdateJobsModalJob,
     onToggleJobsModalDetails,
+    dismissJobsModalError,
   };
 }

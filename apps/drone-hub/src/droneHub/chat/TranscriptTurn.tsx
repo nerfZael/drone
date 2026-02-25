@@ -348,7 +348,12 @@ export const TranscriptTurn = React.memo(
                   onOpenLink={onOpenLink}
                 />
               ) : null}
-              <ImageAttachmentChips attachments={attachments} droneId={droneId} onOpenFileReference={onOpenFileReference} />
+              <ImageAttachmentChips
+                attachments={attachments}
+                droneId={droneId}
+                droneHomePath={droneHomePath}
+                onOpenFileReference={onOpenFileReference}
+              />
             </div>
           </div>
           {showRoleIcons && (

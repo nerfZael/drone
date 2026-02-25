@@ -1525,6 +1525,7 @@ export function SelectedDroneWorkspace({
                         onOpenFileReference={onOpenMarkdownFileReference}
                         onOpenLink={tryOpenMarkdownPullRequestInChanges}
                         droneId={currentDrone.id}
+                        droneHomePath={droneHomePath(currentDrone)}
                         unstickBusy={Boolean(unstickingPendingPromptById[p.id])}
                         unstickError={unstickPendingPromptErrorById[p.id] ?? null}
                       />
@@ -1611,13 +1612,18 @@ export function SelectedDroneWorkspace({
             />
           )}
           {fileOpenToast ? (
-            <div className="pointer-events-none absolute right-4 bottom-4 z-20">
-              <div className="max-w-[360px] rounded border border-[rgba(255,90,90,.3)] bg-[rgba(30,12,14,.95)] px-3 py-2 shadow-[0_10px_26px_rgba(0,0,0,.35)]">
+            <div className="absolute right-4 bottom-4 z-20">
+              <button
+                type="button"
+                onClick={() => setFileOpenToast(null)}
+                title="Click to dismiss"
+                className="block max-w-[360px] text-left rounded border border-[rgba(255,90,90,.3)] bg-[rgba(30,12,14,.95)] px-3 py-2 shadow-[0_10px_26px_rgba(0,0,0,.35)] cursor-pointer"
+              >
                 <div className="text-[10px] font-semibold tracking-wide uppercase text-[var(--red)]" style={{ fontFamily: 'var(--display)' }}>
                   Open file failed
                 </div>
                 <div className="mt-1 text-[11px] text-[var(--fg-secondary)] break-words">{fileOpenToast.message}</div>
-              </div>
+              </button>
             </div>
           ) : null}
         </div>
