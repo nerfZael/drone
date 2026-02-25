@@ -260,7 +260,10 @@ export function useDroneMutationActions({
           },
         );
         const base = String((data as any)?.name ?? '').trim();
-        if (!base) return;
+        if (!base) {
+          onNameSuggestionFailure(new Error('Name suggestion returned an empty draft name.'));
+          return;
+        }
 
         const currentName = String(dronesRef.current.find((d) => d.id === droneId)?.name ?? '').trim();
         if (currentName && base === currentName) return;
@@ -273,14 +276,25 @@ export function useDroneMutationActions({
           return raw;
         };
 
+        const startedAtMs = Date.now();
+        const maxRetryMs = 5 * 60 * 1000;
         let conflictSuffix = 1;
-        for (let attempt = 1; attempt <= 20; attempt += 1) {
+        let lastError = '';
+        for (let attempt = 1; attempt <= 240; attempt += 1) {
           const candidate = makeCandidate(conflictSuffix);
-          if (!candidate) return;
-          if (candidate.length > 80 || /[\r\n]/.test(candidate)) return;
+          if (!candidate) {
+            onNameSuggestionFailure(new Error('Name suggestion produced an empty drone name candidate.'));
+            return;
+          }
+          if (candidate.length > 80 || /[\r\n]/.test(candidate)) {
+            onNameSuggestionFailure(new Error(`Name suggestion produced an invalid drone name: "${candidate}"`));
+            return;
+          }
           const renamed = await renameDroneTo(droneId, candidate);
           if (renamed.ok) return;
-          const msg = String(renamed.error ?? '').toLowerCase();
+          const errorMessage = String(renamed.error ?? '').trim();
+          lastError = errorMessage || 'rename failed';
+          const msg = errorMessage.toLowerCase();
           const nameConflict =
             msg.includes('already exists') ||
             msg.includes('pending') ||
@@ -293,11 +307,24 @@ export function useDroneMutationActions({
             msg.includes('rename busy') ||
             msg.includes('still starting') ||
             msg.includes('unknown drone');
-          if (!retriable) return;
-          await new Promise<void>((resolve) =>
-            window.setTimeout(resolve, Math.min(3000, 250 + attempt * 250)),
-          );
+          if (!retriable) {
+            onNameSuggestionFailure(new Error(`Draft auto-rename failed: ${errorMessage || 'unknown error'}`));
+            return;
+          }
+          const delayMs = Math.min(3000, 250 + attempt * 250);
+          if (Date.now() - startedAtMs + delayMs > maxRetryMs) break;
+          await new Promise<void>((resolve) => window.setTimeout(resolve, delayMs));
         }
+        const waitedMs = Date.now() - startedAtMs;
+        const timeoutMessage = lastError
+          ? `Draft auto-rename timed out after ${Math.round(waitedMs / 1000)}s (last error: ${lastError}).`
+          : `Draft auto-rename timed out after ${Math.round(waitedMs / 1000)}s.`;
+        console.warn('[DroneHub] draft auto-rename exhausted retries', {
+          id: droneId,
+          waitedMs,
+          lastError: lastError || null,
+        });
+        onNameSuggestionFailure(new Error(timeoutMessage));
       } catch (e: any) {
         console.error('[DroneHub] draft auto-rename skipped', {
           id: droneId,
