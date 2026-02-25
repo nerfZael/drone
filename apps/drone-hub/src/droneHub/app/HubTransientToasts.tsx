@@ -10,6 +10,7 @@ type HubTransientToastsProps = {
   jobsModalError: string | null;
   jobsModalOpen: boolean;
   onDismissNameSuggestToast: () => void;
+  onDismissJobsModalError: () => void;
 };
 
 export function HubTransientToasts({
@@ -17,14 +18,17 @@ export function HubTransientToasts({
   jobsModalError,
   jobsModalOpen,
   onDismissNameSuggestToast,
+  onDismissJobsModalError,
 }: HubTransientToastsProps) {
   return (
     <>
       {nameSuggestToast && (
         <div
+          onClick={onDismissNameSuggestToast}
+          title="Click to dismiss"
           className={`fixed right-4 z-50 max-w-[420px] rounded-lg border border-[rgba(255,90,90,.2)] bg-[var(--panel-alt)] shadow-[0_16px_48px_rgba(0,0,0,.3)] px-4 py-3 animate-slide-up ${
             jobsModalError && !jobsModalOpen ? 'bottom-[98px]' : 'bottom-4'
-          }`}
+          } cursor-pointer`}
         >
           <div className="flex items-start gap-3">
             <div className="min-w-0 flex-1">
@@ -47,7 +51,11 @@ export function HubTransientToasts({
       )}
 
       {jobsModalError && !jobsModalOpen && (
-        <div className="fixed bottom-4 right-4 z-50 max-w-[420px] rounded-lg border border-[rgba(255,90,90,.2)] bg-[var(--panel-alt)] shadow-[0_16px_48px_rgba(0,0,0,.3)] px-4 py-3 animate-slide-up">
+        <div
+          onClick={onDismissJobsModalError}
+          title="Click to dismiss"
+          className="fixed bottom-4 right-4 z-50 max-w-[420px] rounded-lg border border-[rgba(255,90,90,.2)] bg-[var(--panel-alt)] shadow-[0_16px_48px_rgba(0,0,0,.3)] px-4 py-3 animate-slide-up cursor-pointer"
+        >
           <div className="text-[10px] font-semibold text-[var(--red)] mb-1 tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>Failed to create jobs</div>
           <div className="text-[11px] text-[var(--muted)] whitespace-pre-wrap">{jobsModalError}</div>
         </div>
