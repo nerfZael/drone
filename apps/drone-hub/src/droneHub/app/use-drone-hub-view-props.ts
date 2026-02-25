@@ -210,6 +210,7 @@ export function useDroneHubOverlaysProps(args: any): DroneHubOverlaysProps {
     onClearJobsPrefix,
     onUpdateJobsModalJob,
     onToggleJobsModalDetails,
+    dismissJobsModalError,
     reposModalOpen,
     repos,
     reposError,
@@ -311,6 +312,7 @@ export function useDroneHubOverlaysProps(args: any): DroneHubOverlaysProps {
       jobsModalError,
       jobsModalOpen: Boolean(jobsModal),
       onDismissNameSuggestToast: () => setNameSuggestToast(null),
+      onDismissJobsModalError: dismissJobsModalError,
     },
     createFromAgentMessageModalProps: {
       jobsModal,

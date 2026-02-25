@@ -579,6 +579,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     onClearJobsPrefix,
     onUpdateJobsModalJob,
     onToggleJobsModalDetails,
+    dismissJobsModalError,
   } = useJobsWorkflow({
     drones,
     selectedDrone,
@@ -1812,6 +1813,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     onClearJobsPrefix,
     onUpdateJobsModalJob,
     onToggleJobsModalDetails,
+    dismissJobsModalError,
     reposModalOpen,
     repos,
     reposError,
