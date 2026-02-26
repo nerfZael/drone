@@ -326,6 +326,7 @@ export type ChatImageAttachmentRef = {
 
 export type ChatPromptAutomationMeta = {
   kind: 'prompt-loop';
+  stage?: 'run' | 'final-message';
   jobKey?: string;
   automationId?: string;
   automationLabel?: string;

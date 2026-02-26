@@ -22,22 +22,44 @@ type PromptLoopTranscriptRow = {
   fadeTo: string;
 };
 
+type PromptLoopSummaryEntry = {
+  rowKey: string;
+  atIso: string;
+  status: 'done' | 'failed' | 'pending';
+  statusLabel: string;
+  output: string;
+  outputClassName?: string;
+  fadeTo: string;
+};
+
 function normalizeRunIndex(item: PromptLoopPromptLike, fallback: number): number {
   const raw = Number(item.automation?.runIndex);
   if (Number.isFinite(raw) && raw > 0) return Math.floor(raw);
   return fallback;
 }
 
+function normalizeAutomationStage(meta: PromptLoopPromptLike['automation']): 'run' | 'final-message' {
+  const stage = String(meta?.stage ?? '').trim().toLowerCase();
+  if (stage === 'final-message') return 'final-message';
+  return 'run';
+}
+
+function isFinalMessageStage(meta: PromptLoopPromptLike['automation']): boolean {
+  return normalizeAutomationStage(meta) === 'final-message';
+}
+
 function resolvePromptText(runs: TranscriptItem[], pendingRuns: PendingPrompt[]): string {
-  const fromPrompt = String(runs[0]?.prompt ?? '').trim();
+  const primaryRuns = runs.filter((run) => !isFinalMessageStage(run.automation));
+  const primaryPendingRuns = pendingRuns.filter((run) => !isFinalMessageStage(run.automation));
+  const fromPrompt = String(primaryRuns[0]?.prompt ?? '').trim();
   if (fromPrompt) return fromPrompt;
-  const fromPendingPrompt = String(pendingRuns[0]?.prompt ?? '').trim();
+  const fromPendingPrompt = String(primaryPendingRuns[0]?.prompt ?? '').trim();
   if (fromPendingPrompt) return fromPendingPrompt;
-  for (const run of runs) {
+  for (const run of primaryRuns) {
     const preview = String(run.automation?.promptPreview ?? '').trim();
     if (preview) return preview;
   }
-  for (const run of pendingRuns) {
+  for (const run of primaryPendingRuns) {
     const preview = String(run.automation?.promptPreview ?? '').trim();
     if (preview) return preview;
   }
@@ -112,7 +134,9 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
   const promptDisplay = promptExpanded || !promptNeedsTruncate ? promptText : `${promptText.slice(0, PROMPT_PREVIEW_MAX_CHARS).trimEnd()}...`;
   const completedRows = React.useMemo(
     () =>
-      runs.map((item, idx): PromptLoopTranscriptRow => {
+      runs
+        .filter((item) => !isFinalMessageStage(item.automation))
+        .map((item, idx): PromptLoopTranscriptRow => {
         const rowNumber = idx + 1;
         const runIndex = normalizeRunIndex(item, rowNumber);
         const rowKey = rowKeyForRun(item, rowNumber);
@@ -127,12 +151,14 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
           outputClassName: item.ok ? 'dh-markdown--assistant' : undefined,
           fadeTo: 'rgba(0,0,0,.14)',
         };
-      }),
+        }),
     [runs],
   );
   const pendingRows = React.useMemo(
     () =>
-      pendingRuns.map((item, idx): PromptLoopTranscriptRow => {
+      pendingRuns
+        .filter((item) => !isFinalMessageStage(item.automation))
+        .map((item, idx): PromptLoopTranscriptRow => {
         const fallback = completedRows.length + idx + 1;
         const rowIndex = normalizeRunIndex(item, fallback);
         const rowKey = rowKeyForPendingRun(item, fallback);
@@ -146,10 +172,50 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
           outputClassName: item.state === 'failed' ? undefined : 'dh-markdown--assistant',
           fadeTo: item.state === 'failed' ? 'var(--red-subtle)' : 'rgba(29,43,66,.2)',
         };
-      }),
+        }),
     [completedRows.length, pendingRuns],
   );
   const runRows = React.useMemo(() => [...completedRows, ...pendingRows], [completedRows, pendingRows]);
+  const summaryCompletedEntries = React.useMemo(
+    () =>
+      runs
+        .filter((item) => isFinalMessageStage(item.automation))
+        .map((item, idx): PromptLoopSummaryEntry => {
+          const rowNumber = idx + 1;
+          const rowKey = rowKeyForRun(item, rowNumber);
+          const output = stripAnsi(item.ok ? item.output : item.error || 'failed');
+          return {
+            rowKey,
+            atIso: String(item.completedAt ?? item.at ?? ''),
+            status: item.ok ? 'done' : 'failed',
+            statusLabel: item.ok ? 'Done' : 'Failed',
+            output: output || (item.ok ? '(no output)' : 'failed'),
+            outputClassName: item.ok ? 'dh-markdown--assistant' : undefined,
+            fadeTo: item.ok ? 'rgba(29,43,66,.2)' : 'var(--red-subtle)',
+          };
+        }),
+    [runs],
+  );
+  const summaryPendingEntries = React.useMemo(
+    () =>
+      pendingRuns
+        .filter((item) => isFinalMessageStage(item.automation))
+        .map((item, idx): PromptLoopSummaryEntry => ({
+          rowKey: rowKeyForPendingRun(item, idx + 1),
+          atIso: String(item.updatedAt ?? item.at ?? ''),
+          status: item.state === 'failed' ? 'failed' : 'pending',
+          statusLabel: pendingRunStatusLabel(item.state),
+          output: pendingRunOutput(item),
+          outputClassName: item.state === 'failed' ? undefined : 'dh-markdown--assistant',
+          fadeTo: item.state === 'failed' ? 'var(--red-subtle)' : 'rgba(29,43,66,.2)',
+        })),
+    [pendingRuns],
+  );
+  const summaryEntries = React.useMemo(
+    () => [...summaryCompletedEntries, ...summaryPendingEntries],
+    [summaryCompletedEntries, summaryPendingEntries],
+  );
+  const latestSummary = summaryEntries.length > 0 ? summaryEntries[summaryEntries.length - 1] : null;
 
   React.useEffect(() => {
     if (!expandedRunKey) return;
@@ -157,7 +223,7 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
     setExpandedRunKey(null);
   }, [expandedRunKey, runRows]);
 
-  if (runRows.length === 0) return null;
+  if (runRows.length === 0 && !latestSummary) return null;
 
   return (
     <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-alt)] px-4 py-3">
@@ -189,69 +255,104 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
         </div>
       ) : null}
 
-      <div className="mt-3 overflow-x-auto rounded border border-[var(--border-subtle)]">
-        <table className="w-full min-w-[560px] text-left">
-          <thead className="bg-[rgba(255,255,255,.02)]">
-            <tr>
-              <th className="px-3 py-2 text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-semibold">Run</th>
-              <th className="px-3 py-2 text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-semibold">Status</th>
-              <th className="px-3 py-2 text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-semibold">Updated</th>
-              <th className="px-3 py-2 text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-semibold">Details</th>
-            </tr>
-          </thead>
-          <tbody>
-            {runRows.map((row) => {
-              const expanded = expandedRunKey === row.rowKey;
-              return (
-                <React.Fragment key={row.rowKey}>
-                  <tr className="border-t border-[var(--border-subtle)]">
-                    <td className="px-3 py-2 text-[12px] text-[var(--fg-secondary)] font-mono">#{row.runIndex}</td>
-                    <td className="px-3 py-2">
-                      <span
-                        className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[9px] tracking-wide uppercase ${
-                          row.status === 'done'
-                            ? 'border-[rgba(52,211,153,.25)] bg-[rgba(16,185,129,.08)] text-[#34d399]'
-                            : row.status === 'failed'
-                              ? 'border-[rgba(255,90,90,.28)] bg-[var(--red-subtle)] text-[var(--red)]'
-                              : 'border-[rgba(255,178,36,.35)] bg-[var(--yellow-subtle)] text-[var(--yellow)]'
-                        }`}
-                      >
-                        {row.statusLabel}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 text-[11px] text-[var(--muted-dim)]" title={new Date(row.atIso).toLocaleString()}>
-                      {timeAgo(row.atIso, nowMs)}
-                    </td>
-                    <td className="px-3 py-2">
-                      <button
-                        type="button"
-                        onClick={() => setExpandedRunKey((prev) => (prev === row.rowKey ? null : row.rowKey))}
-                        className="h-7 px-2 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
-                        style={{ fontFamily: 'var(--display)' }}
-                      >
-                        {expanded ? 'Hide' : 'Expand'}
-                      </button>
-                    </td>
-                  </tr>
-                  {expanded ? (
-                    <tr className="border-t border-[var(--border-subtle)] bg-[rgba(0,0,0,.14)]">
-                      <td className="px-3 py-3" colSpan={4}>
-                        <CollapsibleMarkdown
-                          text={row.output}
-                          fadeTo={row.fadeTo}
-                          className={row.outputClassName ?? ''}
-                          onOpenFileReference={onOpenFileReference}
-                          onOpenLink={onOpenLink}
-                        />
+      {runRows.length > 0 ? (
+        <div className="mt-3 overflow-x-auto rounded border border-[var(--border-subtle)]">
+          <table className="w-full min-w-[560px] text-left">
+            <thead className="bg-[rgba(255,255,255,.02)]">
+              <tr>
+                <th className="px-3 py-2 text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-semibold">Run</th>
+                <th className="px-3 py-2 text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-semibold">Status</th>
+                <th className="px-3 py-2 text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-semibold">Updated</th>
+                <th className="px-3 py-2 text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-semibold">Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              {runRows.map((row) => {
+                const expanded = expandedRunKey === row.rowKey;
+                return (
+                  <React.Fragment key={row.rowKey}>
+                    <tr className="border-t border-[var(--border-subtle)]">
+                      <td className="px-3 py-2 text-[12px] text-[var(--fg-secondary)] font-mono">#{row.runIndex}</td>
+                      <td className="px-3 py-2">
+                        <span
+                          className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[9px] tracking-wide uppercase ${
+                            row.status === 'done'
+                              ? 'border-[rgba(52,211,153,.25)] bg-[rgba(16,185,129,.08)] text-[#34d399]'
+                              : row.status === 'failed'
+                                ? 'border-[rgba(255,90,90,.28)] bg-[var(--red-subtle)] text-[var(--red)]'
+                                : 'border-[rgba(255,178,36,.35)] bg-[var(--yellow-subtle)] text-[var(--yellow)]'
+                          }`}
+                        >
+                          {row.statusLabel}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-[11px] text-[var(--muted-dim)]" title={new Date(row.atIso).toLocaleString()}>
+                        {timeAgo(row.atIso, nowMs)}
+                      </td>
+                      <td className="px-3 py-2">
+                        <button
+                          type="button"
+                          onClick={() => setExpandedRunKey((prev) => (prev === row.rowKey ? null : row.rowKey))}
+                          className="h-7 px-2 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+                          style={{ fontFamily: 'var(--display)' }}
+                        >
+                          {expanded ? 'Hide' : 'Expand'}
+                        </button>
                       </td>
                     </tr>
-                  ) : null}
-                </React.Fragment>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+                    {expanded ? (
+                      <tr className="border-t border-[var(--border-subtle)] bg-[rgba(0,0,0,.14)]">
+                        <td className="px-3 py-3" colSpan={4}>
+                          <CollapsibleMarkdown
+                            text={row.output}
+                            fadeTo={row.fadeTo}
+                            className={row.outputClassName ?? ''}
+                            onOpenFileReference={onOpenFileReference}
+                            onOpenLink={onOpenLink}
+                          />
+                        </td>
+                      </tr>
+                    ) : null}
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+
+      {latestSummary ? (
+        <div className="mt-3 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.14)] px-3 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-semibold">Final message response</div>
+            <div className="flex items-center gap-2">
+              <span
+                className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[9px] tracking-wide uppercase ${
+                  latestSummary.status === 'done'
+                    ? 'border-[rgba(52,211,153,.25)] bg-[rgba(16,185,129,.08)] text-[#34d399]'
+                    : latestSummary.status === 'failed'
+                      ? 'border-[rgba(255,90,90,.28)] bg-[var(--red-subtle)] text-[var(--red)]'
+                      : 'border-[rgba(255,178,36,.35)] bg-[var(--yellow-subtle)] text-[var(--yellow)]'
+                }`}
+              >
+                {latestSummary.statusLabel}
+              </span>
+              <span className="text-[10px] text-[var(--muted-dim)]" title={new Date(latestSummary.atIso).toLocaleString()}>
+                {timeAgo(latestSummary.atIso, nowMs)}
+              </span>
+            </div>
+          </div>
+          <div className="mt-2">
+            <CollapsibleMarkdown
+              text={latestSummary.output}
+              fadeTo={latestSummary.fadeTo}
+              className={latestSummary.outputClassName ?? ''}
+              onOpenFileReference={onOpenFileReference}
+              onOpenLink={onOpenLink}
+            />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 });

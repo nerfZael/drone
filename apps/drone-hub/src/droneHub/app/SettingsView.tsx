@@ -714,7 +714,7 @@ export function SettingsView({
                   <button
                     type="button"
                     onClick={() => {
-                      addAutomation({ label: '', prompt: '', runs: AUTOMATION_RUNS_DEFAULT });
+                      addAutomation({ label: '', prompt: '', onFailurePrompt: '', runs: AUTOMATION_RUNS_DEFAULT });
                     }}
                     className="h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:brightness-110"
                     style={{ fontFamily: 'var(--display)' }}
@@ -790,6 +790,15 @@ export function SettingsView({
                           onChange={(e) => updateAutomation(automation.id, { prompt: e.target.value })}
                           className="w-full min-h-[140px] rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-3 py-2 text-[12px] leading-relaxed text-[var(--fg-secondary)] resize-y focus:outline-none focus:border-[var(--accent-muted)]"
                           placeholder="Enter automation prompt..."
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[11px] text-[var(--muted-dim)]">Final message (optional)</label>
+                        <textarea
+                          value={automation.onFailurePrompt}
+                          onChange={(e) => updateAutomation(automation.id, { onFailurePrompt: e.target.value })}
+                          className="w-full min-h-[110px] rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-3 py-2 text-[12px] leading-relaxed text-[var(--fg-secondary)] resize-y focus:outline-none focus:border-[var(--accent-muted)]"
+                          placeholder="Optional message to send after automation runs finish, if at least one run succeeded (e.g. summarize what was fixed)."
                         />
                       </div>
                     </div>

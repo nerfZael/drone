@@ -17,6 +17,12 @@ describe('prompt automation api', () => {
   const prevXdg = process.env.XDG_DATA_HOME;
   let server: Awaited<ReturnType<typeof startDroneHubApiServer>> | null = null;
   let baseUrl = '';
+  let mockDaemon:
+    | {
+        port: number;
+        stop: () => void;
+      }
+    | null = null;
 
   const apiFetch = async (p: string, init?: RequestInit): Promise<ApiResponse> => {
     const r = await fetch(`${baseUrl}${p}`, {
@@ -48,12 +54,50 @@ describe('prompt automation api', () => {
   beforeAll(async () => {
     fs.mkdirSync(path.join(xdgDataHome, 'drone'), { recursive: true });
     process.env.XDG_DATA_HOME = xdgDataHome;
+    const jobs = new Map<string, any>();
+    const daemon = Bun.serve({
+      port: 0,
+      fetch(req) {
+        const u = new URL(req.url);
+        if (u.pathname === '/v1/status') {
+          return Response.json({ ok: true, status: 'ok' });
+        }
+        if (u.pathname === '/v1/health') {
+          return Response.json({ ok: true });
+        }
+        if (u.pathname === '/v1/prompts/enqueue' && req.method === 'POST') {
+          return req.json().then((body: any) => {
+            const id = String(body?.id ?? '').trim();
+            const now = new Date().toISOString();
+            jobs.set(id, {
+              id,
+              state: 'done',
+              startedAt: now,
+              finishedAt: now,
+              stdout: `mock-response:${id}`,
+              stderr: '',
+            });
+            return Response.json({ ok: true, accepted: true, id });
+          });
+        }
+        const promptMatch = /^\/v1\/prompts\/([^/]+)$/.exec(u.pathname);
+        if (promptMatch && req.method === 'GET') {
+          const id = decodeURIComponent(promptMatch[1] ?? '');
+          const job = jobs.get(id);
+          if (!job) return Response.json({ ok: false, error: 'not found' }, { status: 404 });
+          return Response.json({ ok: true, job });
+        }
+        return Response.json({ ok: false, error: 'not found' }, { status: 404 });
+      },
+    });
+    mockDaemon = { port: daemon.port, stop: () => daemon.stop(true) };
     server = await startDroneHubApiServer({ port: 0, apiToken: token });
     baseUrl = `http://${server.host}:${server.port}`;
   });
 
   afterAll(async () => {
     if (server) await server.close();
+    if (mockDaemon) mockDaemon.stop();
     if (prevXdg == null) delete process.env.XDG_DATA_HOME;
     else process.env.XDG_DATA_HOME = prevXdg;
     fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -186,5 +230,133 @@ describe('prompt automation api', () => {
     });
     expect(restarted.r.status).toBe(409);
     expect(String(restarted.data?.error ?? '')).toContain('stop is still in progress');
+  });
+
+  test('does not send final message when no automation run succeeds', async () => {
+    const droneId = 'drone-automation-final-message';
+    const now = new Date().toISOString();
+    await updateRegistry((reg: any) => {
+      reg.drones = reg.drones ?? {};
+      reg.drones[droneId] = {
+        id: droneId,
+        name: droneId,
+        hostPort: 1,
+        token: '',
+        containerPort: 7777,
+        repoPath: '',
+        createdAt: now,
+      };
+    });
+
+    const started = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        automationId: 'lint-fixes',
+        automationLabel: 'Lint Fixes',
+        prompt: 'fix lint errors',
+        onFailurePrompt: 'Summarize what failed and what to try next.',
+        runs: 1,
+      }),
+    });
+    expect(started.r.status).toBe(202);
+
+    await pollUntil(async () => {
+      const status = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
+      return status.data?.job?.running === false;
+    });
+
+    const pendingFinal = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    const rows = Array.isArray(pendingFinal.data?.pending) ? pendingFinal.data.pending : [];
+    const mainRows = rows.filter(
+      (p: any) =>
+        String(p?.automation?.kind ?? '') === 'prompt-loop' &&
+        String(p?.automation?.automationId ?? '') === 'lint-fixes' &&
+        String(p?.automation?.stage ?? '') !== 'final-message',
+    );
+    const finalRows = rows.filter(
+      (p: any) =>
+        String(p?.automation?.kind ?? '') === 'prompt-loop' &&
+        String(p?.automation?.automationId ?? '') === 'lint-fixes' &&
+        String(p?.automation?.stage ?? '') === 'final-message',
+    );
+    expect(mainRows.length).toBeGreaterThan(0);
+    expect(finalRows.length).toBe(0);
+  });
+
+  test('sends final message after runs finish when at least one run succeeds', async () => {
+    if (!mockDaemon) throw new Error('mock daemon not initialized');
+    const droneId = 'drone-automation-final-message-success';
+    const now = new Date().toISOString();
+    await updateRegistry((reg: any) => {
+      reg.drones = reg.drones ?? {};
+      reg.drones[droneId] = {
+        id: droneId,
+        name: droneId,
+        hostPort: mockDaemon?.port,
+        token: 'mock-token',
+        containerPort: 7777,
+        repoPath: '',
+        createdAt: now,
+        chats: {
+          default: {
+            createdAt: now,
+            agent: { kind: 'builtin', id: 'claude' },
+            turns: [],
+            pendingPrompts: [],
+          },
+        },
+      };
+    });
+
+    const started = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        automationId: 'review-fixes',
+        automationLabel: 'Review Fixes',
+        prompt: 'find issues and fix them',
+        onFailurePrompt: 'can you give me a summary of what was fixed?',
+        runs: 2,
+      }),
+    });
+    expect(started.r.status).toBe(202);
+
+    await pollUntil(async () => {
+      const status = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
+      return status.data?.job?.running === false;
+    }, 15_000);
+
+    await pollUntil(async () => {
+      const pending = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+      const rows = Array.isArray(pending.data?.pending) ? pending.data.pending : [];
+      return rows.some(
+        (p: any) =>
+          String(p?.automation?.kind ?? '') === 'prompt-loop' &&
+          String(p?.automation?.automationId ?? '') === 'review-fixes' &&
+          String(p?.automation?.stage ?? '') === 'final-message',
+      );
+    }, 15_000);
+
+    const pendingFinal = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    const rows = Array.isArray(pendingFinal.data?.pending) ? pendingFinal.data.pending : [];
+    const mainRows = rows.filter(
+      (p: any) =>
+        String(p?.automation?.kind ?? '') === 'prompt-loop' &&
+        String(p?.automation?.automationId ?? '') === 'review-fixes' &&
+        String(p?.automation?.stage ?? '') !== 'final-message',
+    );
+    const finalRows = rows.filter(
+      (p: any) =>
+        String(p?.automation?.kind ?? '') === 'prompt-loop' &&
+        String(p?.automation?.automationId ?? '') === 'review-fixes' &&
+        String(p?.automation?.stage ?? '') === 'final-message',
+    );
+    expect(mainRows.length).toBeGreaterThanOrEqual(2);
+    expect(finalRows.length).toBeGreaterThan(0);
+    const mainJobKey = String(mainRows[mainRows.length - 1]?.automation?.jobKey ?? '');
+    const finalJobKey = String(finalRows[finalRows.length - 1]?.automation?.jobKey ?? '');
+    expect(mainJobKey.length).toBeGreaterThan(0);
+    expect(finalJobKey).toBe(mainJobKey);
   });
 });

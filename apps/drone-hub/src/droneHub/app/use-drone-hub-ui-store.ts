@@ -20,6 +20,7 @@ import {
   createAutomationConfig,
   normalizeAutomationConfigs,
   normalizeAutomationLabel,
+  normalizeAutomationOnFailurePrompt,
   normalizeAutomationPrompt,
   normalizeAutomationRuns,
   type AutomationConfig,
@@ -393,11 +394,21 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
             ...(Object.prototype.hasOwnProperty.call(patch, 'prompt')
               ? { prompt: normalizeAutomationPrompt(patch.prompt) }
               : {}),
+            ...(Object.prototype.hasOwnProperty.call(patch, 'onFailurePrompt')
+              ? { onFailurePrompt: normalizeAutomationOnFailurePrompt(patch.onFailurePrompt) }
+              : {}),
             ...(Object.prototype.hasOwnProperty.call(patch, 'runs')
               ? { runs: normalizeAutomationRuns(patch.runs) }
               : {}),
           };
-          if (next.label === cur.label && next.prompt === cur.prompt && next.runs === cur.runs) return s;
+          if (
+            next.label === cur.label &&
+            next.prompt === cur.prompt &&
+            next.onFailurePrompt === cur.onFailurePrompt &&
+            next.runs === cur.runs
+          ) {
+            return s;
+          }
           const merged = s.automations.slice();
           merged[idx] = next;
           return { automations: merged };

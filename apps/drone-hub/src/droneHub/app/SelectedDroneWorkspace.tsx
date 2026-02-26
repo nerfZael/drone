@@ -821,6 +821,7 @@ export function SelectedDroneWorkspace({
     const automationId = String(automation.id ?? '').trim();
     const automationLabel = String(automation.label ?? '').trim() || 'Automation';
     const prompt = String(automation.prompt ?? '').trim();
+    const onFailurePrompt = String(automation.onFailurePrompt ?? '').trim();
     if (!prompt) {
       setPromptAutomationBusy(false);
       setPromptAutomationError(`"${automationLabel}" prompt is empty. Update it in Settings > Automation.`);
@@ -834,7 +835,7 @@ export function SelectedDroneWorkspace({
           {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ automationId, automationLabel, prompt, runs }),
+            body: JSON.stringify({ automationId, automationLabel, prompt, onFailurePrompt, runs }),
           },
         );
         setPromptAutomationJob(data.job);
@@ -875,6 +876,7 @@ export function SelectedDroneWorkspace({
     const actions = automations.map((automation, idx) => {
       const configLabel = String(automation.label ?? '').trim() || `Automation ${idx + 1}`;
       const configPrompt = String(automation.prompt ?? '').trim();
+      const configOnFailurePrompt = String(automation.onFailurePrompt ?? '').trim();
       const configRuns = clampPromptAutomationRuns(automation.runs);
       const active = running && runningAutomationId === automation.id;
       const blockedByOtherRunning = running && !active;
@@ -892,7 +894,9 @@ export function SelectedDroneWorkspace({
             : blockedByOtherRunning
               ? `Another automation is running: ${runningAutomationLabel}.`
               : configPrompt
-                ? `Run "${configLabel}" for ${configRuns} iterations, waiting for each response.`
+                ? configOnFailurePrompt
+                  ? `Run "${configLabel}" for ${configRuns} iterations, then send the final message if at least one run succeeds.`
+                  : `Run "${configLabel}" for ${configRuns} iterations, waiting for each response.`
                 : `Set a prompt for "${configLabel}" in Settings > Automation first.`,
         disabled: promptAutomationBusy || blockedByOtherRunning || (!active && (!supportedMode || configPrompt.length === 0)),
         active,
