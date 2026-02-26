@@ -350,6 +350,7 @@ export type PendingPrompt = {
   prompt: string;
   attachments?: ChatImageAttachmentRef[];
   automation?: ChatPromptAutomationMeta;
+  blockedByAutomation?: boolean;
   // `queued` is a local-only UI state used when a drone is still provisioning.
   state: 'queued' | 'sending' | 'sent' | 'failed';
   error?: string;

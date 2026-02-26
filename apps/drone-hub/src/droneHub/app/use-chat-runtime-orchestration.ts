@@ -6,6 +6,7 @@ import type { DroneSummary, PendingPrompt, TranscriptItem } from '../types';
 import type { StartupSeedState } from './app-types';
 import { droneChatQueueKey, isDroneStartingOrSeeding, parseDroneChatQueueKey } from './helpers';
 import { fetchJson, isNotFoundError, useNowMs, usePoll } from './hooks';
+import { beginRecordBusyKey, removeRecordKey } from './keyed-record-state';
 
 type RequestJson = <T>(url: string, init?: RequestInit) => Promise<T>;
 
@@ -94,6 +95,8 @@ export function useChatRuntimeOrchestration({
   const [promptError, setPromptError] = React.useState<string | null>(null);
   const [unstickingPendingPromptById, setUnstickingPendingPromptById] = React.useState<Record<string, true>>({});
   const [unstickPendingPromptErrorById, setUnstickPendingPromptErrorById] = React.useState<Record<string, string>>({});
+  const [cancellingPendingPromptById, setCancellingPendingPromptById] = React.useState<Record<string, true>>({});
+  const [cancelPendingPromptErrorById, setCancelPendingPromptErrorById] = React.useState<Record<string, string>>({});
   const [cliTyping, setCliTyping] = React.useState(false);
   const cliTypingTimerRef = React.useRef<any>(null);
   const sessionOffsetRef = React.useRef<number | null>(null);
@@ -148,6 +151,8 @@ export function useChatRuntimeOrchestration({
     setOptimisticPendingPrompts([]);
     setUnstickingPendingPromptById({});
     setUnstickPendingPromptErrorById({});
+    setCancellingPendingPromptById({});
+    setCancelPendingPromptErrorById({});
   }, [selectedDrone, selectedChat, setOptimisticPendingPrompts]);
 
   const selectedDroneSummary = React.useMemo(
@@ -261,18 +266,9 @@ export function useChatRuntimeOrchestration({
       const id = String(promptIdRaw ?? '').trim();
       if (!id || !selectedDrone || !selectedChat) return;
 
-      let shouldStart = false;
-      setUnstickingPendingPromptById((prev) => {
-        if (prev[id]) return prev;
-        shouldStart = true;
-        return { ...prev, [id]: true };
-      });
-      if (!shouldStart) return;
+      if (!beginRecordBusyKey(setUnstickingPendingPromptById, id)) return;
       setUnstickPendingPromptErrorById((prev) => {
-        if (!prev[id]) return prev;
-        const next = { ...prev };
-        delete next[id];
-        return next;
+        return removeRecordKey(prev, id);
       });
 
       try {
@@ -287,14 +283,61 @@ export function useChatRuntimeOrchestration({
         setUnstickPendingPromptErrorById((prev) => ({ ...prev, [id]: e?.message ?? String(e) }));
       } finally {
         setUnstickingPendingPromptById((prev) => {
-          if (!prev[id]) return prev;
-          const next = { ...prev };
-          delete next[id];
-          return next;
+          return removeRecordKey(prev, id);
         });
       }
     },
     [requestJson, selectedChat, selectedDrone, setOptimisticPendingPrompts],
+  );
+
+  const requestCancelPendingPrompt = React.useCallback(
+    async (promptIdRaw: string): Promise<void> => {
+      const id = String(promptIdRaw ?? '').trim();
+      if (!id || !selectedDrone) return;
+      const chatName = String(selectedChat ?? '').trim() || 'default';
+
+      if (!beginRecordBusyKey(setCancellingPendingPromptById, id)) return;
+      setCancelPendingPromptErrorById((prev) => {
+        return removeRecordKey(prev, id);
+      });
+
+      const key = droneChatQueueKey(selectedDrone, chatName);
+      const localQueued = (queuedPromptsByDroneChat[key] ?? []).some((item) => item.id === id && item.state === 'queued');
+      if (localQueued) {
+        removeQueuedPrompt(key, id);
+        setOptimisticPendingPrompts((prev) => prev.filter((p) => p.id !== id));
+        setCancellingPendingPromptById((prev) => {
+          return removeRecordKey(prev, id);
+        });
+        return;
+      }
+
+      try {
+        const data = await requestJson<{ ok: true; cancelled: boolean; alreadySubmitted: boolean }>(
+          `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(chatName)}/pending/${encodeURIComponent(id)}`,
+          { method: 'DELETE' },
+        );
+        if (data.cancelled) {
+          setOptimisticPendingPrompts((prev) => prev.filter((p) => p.id !== id));
+        } else if (data.alreadySubmitted) {
+          setCancelPendingPromptErrorById((prev) => ({ ...prev, [id]: 'Already submitted to agent.' }));
+        } else {
+          setCancelPendingPromptErrorById((prev) => ({ ...prev, [id]: 'Unable to cancel pending prompt.' }));
+        }
+      } catch (e: any) {
+        const status = Number((e as any)?.status ?? 0);
+        if (status === 404) {
+          setOptimisticPendingPrompts((prev) => prev.filter((p) => p.id !== id));
+        } else {
+          setCancelPendingPromptErrorById((prev) => ({ ...prev, [id]: e?.message ?? String(e) }));
+        }
+      } finally {
+        setCancellingPendingPromptById((prev) => {
+          return removeRecordKey(prev, id);
+        });
+      }
+    },
+    [queuedPromptsByDroneChat, removeQueuedPrompt, requestJson, selectedChat, selectedDrone, setOptimisticPendingPrompts],
   );
 
   React.useEffect(() => {
@@ -589,9 +632,12 @@ export function useChatRuntimeOrchestration({
   }, [chatUiMode, drones, outputView, resetSessionOutputState, selectedChat, selectedDrone, setLoadingSession, setSessionError, setSessionText, bumpCliTyping]);
 
   return {
+    cancelPendingPromptErrorById,
+    cancellingPendingPromptById,
     chatUiMode,
     nowMs,
     promptError,
+    requestCancelPendingPrompt,
     requestUnstickPendingPrompt,
     selectedIsResponding,
     sendPromptText,

@@ -18,10 +18,13 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   nowMs,
   showRoleIcons = true,
   onRequestUnstick,
+  onCancelQueued,
   onOpenFileReference,
   onOpenLink,
   droneId,
   droneHomePath,
+  cancelBusy = false,
+  cancelError = null,
   unstickBusy = false,
   unstickError = null,
 }: {
@@ -29,10 +32,13 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   nowMs: number;
   showRoleIcons?: boolean;
   onRequestUnstick?: (promptId: string) => Promise<void> | void;
+  onCancelQueued?: (promptId: string) => Promise<void> | void;
   onOpenFileReference?: (ref: MarkdownFileReference) => void;
   onOpenLink?: (href: string) => boolean;
   droneId?: string;
   droneHomePath?: string;
+  cancelBusy?: boolean;
+  cancelError?: string | null;
   unstickBusy?: boolean;
   unstickError?: string | null;
 }) {
@@ -47,8 +53,9 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
     (item.state === 'sending' || item.state === 'sent') &&
     ageMs >= MANUAL_UNSTICK_STALE_MS &&
     Boolean(onRequestUnstick);
+  const canCancelQueued = item.state === 'queued' && !item.automation && Boolean(onCancelQueued);
   return (
-    <div className="animate-fade-in opacity-90">
+    <div className="animate-fade-in opacity-90 group/pending-turn">
       <div className="flex justify-end mb-3">
         <div className={`${showRoleIcons ? 'max-w-[85%]' : 'max-w-full'} min-w-[120px]`}>
           <div className="flex items-center justify-end gap-2 mb-1.5">
@@ -65,6 +72,24 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
             <span className="text-[9px] leading-none text-[var(--muted-dim)] font-mono" title={new Date(item.at).toLocaleString()}>
               {timeAgo(item.at, nowMs)}
             </span>
+            {canCancelQueued ? (
+              <button
+                type="button"
+                onClick={() => {
+                  void onCancelQueued?.(item.id);
+                }}
+                disabled={cancelBusy}
+                className={`inline-flex items-center h-5 px-1.5 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
+                  cancelBusy
+                    ? 'opacity-100 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)]'
+                    : 'opacity-0 pointer-events-none group-hover/pending-turn:opacity-100 group-hover/pending-turn:pointer-events-auto bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--red)] hover:border-[rgba(255,90,90,.35)]'
+                }`}
+                style={{ fontFamily: 'var(--display)' }}
+                title="Cancel queued prompt"
+              >
+                {cancelBusy ? 'Canceling...' : 'Cancel'}
+              </button>
+            ) : null}
             <span
               className="text-[10px] font-semibold text-[var(--user-muted)] tracking-wide uppercase"
               style={{ fontFamily: 'var(--display)' }}
@@ -159,6 +184,9 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
                 ) : null}
                 {unstickError ? (
                   <div className="mt-2 text-[10px] text-[var(--red)] whitespace-pre-wrap">{stripAnsi(unstickError)}</div>
+                ) : null}
+                {cancelError ? (
+                  <div className="mt-2 text-[10px] text-[var(--red)] whitespace-pre-wrap">{stripAnsi(cancelError)}</div>
                 ) : null}
               </>
             )}

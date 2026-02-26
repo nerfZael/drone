@@ -89,6 +89,7 @@ export function ChatInput({
   attachmentsEnabled,
   automationActions,
   automationMenuLabel = 'Automations',
+  lockComposerWhileAutomationActive = true,
   onSend,
 }: {
   resetKey: string;
@@ -105,6 +106,7 @@ export function ChatInput({
   attachmentsEnabled?: boolean;
   automationActions?: ChatInputAutomationAction[];
   automationMenuLabel?: string;
+  lockComposerWhileAutomationActive?: boolean;
   onSend: (payload: ChatSendPayload) => Promise<boolean>;
 }) {
   const [uncontrolledDraft, setUncontrolledDraft] = React.useState('');
@@ -130,7 +132,8 @@ export function ChatInput({
     [availableAutomationActions],
   );
   const hasActiveAutomation = Boolean(activeAutomationAction);
-  const composerLocked = Boolean(disabled) || hasActiveAutomation;
+  const composerLocked =
+    Boolean(disabled) || (lockComposerWhileAutomationActive && hasActiveAutomation);
 
   const attachmentsOn = attachmentsEnabled !== false;
   const MAX_IMAGES = 8;

@@ -167,7 +167,7 @@ describe('prompt automation api', () => {
     expect(secondJobKey).not.toBe(firstJobKey);
   });
 
-  test('rejects restart while a stop is still in progress', async () => {
+  test('queues restart while a stop is still in progress', async () => {
     const droneId = 'drone-automation-stop-restart';
     const now = new Date().toISOString();
     await updateRegistry((reg: any) => {
@@ -228,8 +228,396 @@ describe('prompt automation api', () => {
         runs: 2,
       }),
     });
-    expect(restarted.r.status).toBe(409);
-    expect(String(restarted.data?.error ?? '')).toContain('stop is still in progress');
+    expect(restarted.r.status).toBe(202);
+    expect(restarted.data?.job?.running).toBe(false);
+    expect(Number(restarted.data?.job?.queuedCount ?? 0)).toBeGreaterThan(0);
+    const queuedItems = Array.isArray(restarted.data?.job?.queued) ? restarted.data.job.queued : [];
+    const queuedAutomationIds = queuedItems.map((item: any) => String(item?.automationId ?? '').trim());
+    expect(queuedAutomationIds).toContain('loop-2');
+  });
+
+  test('queues additional automation starts while one is running', async () => {
+    const droneId = 'drone-automation-queue-while-running';
+    const now = new Date().toISOString();
+    await updateRegistry((reg: any) => {
+      reg.drones = reg.drones ?? {};
+      reg.drones[droneId] = {
+        id: droneId,
+        name: droneId,
+        hostPort: 1,
+        token: '',
+        containerPort: 7777,
+        repoPath: '',
+        createdAt: now,
+        chats: {
+          default: {
+            createdAt: now,
+            agent: { kind: 'builtin', id: 'cursor' },
+            turns: [],
+            pendingPrompts: [
+              {
+                id: 'blocking-prompt',
+                at: now,
+                updatedAt: now,
+                prompt: 'still running',
+                state: 'sending',
+              },
+            ],
+          },
+        },
+      };
+    });
+
+    const first = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        automationId: 'loop-1',
+        automationLabel: 'Loop 1',
+        prompt: 'repeat',
+        runs: 2,
+      }),
+    });
+    expect(first.r.status).toBe(202);
+    expect(first.data?.job?.running).toBe(true);
+
+    const second = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        automationId: 'loop-2',
+        automationLabel: 'Loop 2',
+        prompt: 'repeat again',
+        runs: 2,
+      }),
+    });
+    expect(second.r.status).toBe(202);
+    expect(second.data?.job?.running).toBe(true);
+    expect(Number(second.data?.job?.queuedCount ?? 0)).toBeGreaterThan(0);
+    const queuedItems = Array.isArray(second.data?.job?.queued) ? second.data.job.queued : [];
+    const queuedAutomationIds = queuedItems.map((item: any) => String(item?.automationId ?? '').trim());
+    expect(queuedAutomationIds).toContain('loop-2');
+  });
+
+  test('queues manual prompts behind active automation for the same chat', async () => {
+    const droneId = 'drone-automation-queue-manual-prompts';
+    const now = new Date().toISOString();
+    await updateRegistry((reg: any) => {
+      reg.drones = reg.drones ?? {};
+      reg.drones[droneId] = {
+        id: droneId,
+        name: droneId,
+        hostPort: 1,
+        token: '',
+        containerPort: 7777,
+        repoPath: '',
+        createdAt: now,
+        chats: {
+          default: {
+            createdAt: now,
+            agent: { kind: 'builtin', id: 'cursor' },
+            turns: [],
+            pendingPrompts: [
+              {
+                id: 'blocking-prompt',
+                at: now,
+                updatedAt: now,
+                prompt: 'still running',
+                state: 'sending',
+              },
+            ],
+          },
+        },
+      };
+    });
+
+    const started = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        automationId: 'loop-1',
+        automationLabel: 'Loop 1',
+        prompt: 'repeat',
+        runs: 2,
+      }),
+    });
+    expect(started.r.status).toBe(202);
+    expect(started.data?.job?.running).toBe(true);
+
+    const sent = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/prompt`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'manual message while automation is active' }),
+    });
+    expect(sent.r.status).toBe(202);
+    const queuedPromptId = String(sent.data?.promptId ?? '').trim();
+    expect(queuedPromptId.length).toBeGreaterThan(0);
+
+    const pendingAfterSend = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    const rows = Array.isArray(pendingAfterSend.data?.pending) ? pendingAfterSend.data.pending : [];
+    const queuedManual = rows.find((p: any) => String(p?.id ?? '').trim() === queuedPromptId) ?? null;
+    expect(queuedManual).not.toBeNull();
+    expect(String(queuedManual?.state ?? '')).toBe('queued');
+    expect(Boolean(queuedManual?.blockedByAutomation)).toBe(true);
+  });
+
+  test('cancels queued manual prompts before they are submitted', async () => {
+    const droneId = 'drone-automation-cancel-queued-manual';
+    const now = new Date().toISOString();
+    await updateRegistry((reg: any) => {
+      reg.drones = reg.drones ?? {};
+      reg.drones[droneId] = {
+        id: droneId,
+        name: droneId,
+        hostPort: 1,
+        token: '',
+        containerPort: 7777,
+        repoPath: '',
+        createdAt: now,
+        chats: {
+          default: {
+            createdAt: now,
+            agent: { kind: 'builtin', id: 'cursor' },
+            turns: [],
+            pendingPrompts: [
+              {
+                id: 'blocking-prompt',
+                at: now,
+                updatedAt: now,
+                prompt: 'still running',
+                state: 'sending',
+              },
+            ],
+          },
+        },
+      };
+    });
+
+    const started = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        automationId: 'loop-1',
+        automationLabel: 'Loop 1',
+        prompt: 'repeat',
+        runs: 2,
+      }),
+    });
+    expect(started.r.status).toBe(202);
+
+    const sent = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/prompt`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'manual message queued behind automation' }),
+    });
+    expect(sent.r.status).toBe(202);
+    const queuedPromptId = String(sent.data?.promptId ?? '').trim();
+    expect(queuedPromptId.length).toBeGreaterThan(0);
+
+    const cancelled = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/pending/${encodeURIComponent(queuedPromptId)}`,
+      { method: 'DELETE' },
+    );
+    expect(cancelled.r.status).toBe(200);
+    expect(Boolean(cancelled.data?.cancelled)).toBe(true);
+    expect(Boolean(cancelled.data?.alreadySubmitted)).toBe(false);
+
+    const pendingAfter = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    const rows = Array.isArray(pendingAfter.data?.pending) ? pendingAfter.data.pending : [];
+    expect(rows.some((p: any) => String(p?.id ?? '').trim() === queuedPromptId)).toBe(false);
+  });
+
+  test('reports already submitted when queued prompt cancellation loses the race', async () => {
+    const droneId = 'drone-automation-cancel-queued-race';
+    const now = new Date().toISOString();
+    await updateRegistry((reg: any) => {
+      reg.drones = reg.drones ?? {};
+      reg.drones[droneId] = {
+        id: droneId,
+        name: droneId,
+        hostPort: 1,
+        token: '',
+        containerPort: 7777,
+        repoPath: '',
+        createdAt: now,
+        chats: {
+          default: {
+            createdAt: now,
+            agent: { kind: 'builtin', id: 'cursor' },
+            turns: [],
+            pendingPrompts: [
+              {
+                id: 'in-flight-prompt',
+                at: now,
+                updatedAt: now,
+                prompt: 'already sending',
+                state: 'sending',
+              },
+            ],
+          },
+        },
+      };
+    });
+
+    const cancelled = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending/in-flight-prompt`, {
+      method: 'DELETE',
+    });
+    expect(cancelled.r.status).toBe(200);
+    expect(Boolean(cancelled.data?.cancelled)).toBe(false);
+    expect(Boolean(cancelled.data?.alreadySubmitted)).toBe(true);
+    expect(String(cancelled.data?.pendingState ?? '')).toBe('sending');
+  });
+
+  test('cancels queued automation runs before they start', async () => {
+    const droneId = 'drone-automation-cancel-queued-run';
+    const now = new Date().toISOString();
+    await updateRegistry((reg: any) => {
+      reg.drones = reg.drones ?? {};
+      reg.drones[droneId] = {
+        id: droneId,
+        name: droneId,
+        hostPort: 1,
+        token: '',
+        containerPort: 7777,
+        repoPath: '',
+        createdAt: now,
+        chats: {
+          default: {
+            createdAt: now,
+            agent: { kind: 'builtin', id: 'cursor' },
+            turns: [],
+            pendingPrompts: [
+              {
+                id: 'blocking-prompt',
+                at: now,
+                updatedAt: now,
+                prompt: 'still running',
+                state: 'sending',
+              },
+            ],
+          },
+        },
+      };
+    });
+
+    const first = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        automationId: 'loop-1',
+        automationLabel: 'Loop 1',
+        prompt: 'repeat',
+        runs: 2,
+      }),
+    });
+    expect(first.r.status).toBe(202);
+    expect(first.data?.job?.running).toBe(true);
+
+    const second = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        automationId: 'loop-2',
+        automationLabel: 'Loop 2',
+        prompt: 'repeat again',
+        runs: 2,
+      }),
+    });
+    expect(second.r.status).toBe(202);
+    const queueId = String(second.data?.job?.queued?.[0]?.queueId ?? '').trim();
+    expect(queueId.length).toBeGreaterThan(0);
+
+    const cancelled = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/queued/${encodeURIComponent(queueId)}`,
+      { method: 'DELETE' },
+    );
+    expect(cancelled.r.status).toBe(200);
+    expect(Boolean(cancelled.data?.cancelled)).toBe(true);
+    expect(Boolean(cancelled.data?.alreadySubmitted)).toBe(false);
+    expect(Number(cancelled.data?.job?.queuedCount ?? 0)).toBe(0);
+  });
+
+  test('reports already submitted when queued automation cancellation loses the race', async () => {
+    if (!mockDaemon) throw new Error('mock daemon not initialized');
+    const droneId = 'drone-automation-cancel-queued-automation-race';
+    const now = new Date().toISOString();
+    await updateRegistry((reg: any) => {
+      reg.drones = reg.drones ?? {};
+      reg.drones[droneId] = {
+        id: droneId,
+        name: droneId,
+        hostPort: mockDaemon.port,
+        token: 'daemon-token',
+        containerPort: 7777,
+        repoPath: '',
+        createdAt: now,
+        chats: {
+          default: {
+            createdAt: now,
+            agent: { kind: 'builtin', id: 'cursor' },
+            turns: [],
+            pendingPrompts: [
+              {
+                id: 'blocking-prompt',
+                at: now,
+                updatedAt: now,
+                prompt: 'still running',
+                state: 'sending',
+              },
+            ],
+          },
+        },
+      };
+    });
+
+    const first = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        automationId: 'loop-1',
+        automationLabel: 'Loop 1',
+        prompt: 'repeat',
+        runs: 1,
+      }),
+    });
+    expect(first.r.status).toBe(202);
+
+    const second = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        automationId: 'loop-2',
+        automationLabel: 'Loop 2',
+        prompt: 'repeat again',
+        runs: 1,
+      }),
+    });
+    expect(second.r.status).toBe(202);
+    const queueId = String(second.data?.job?.queued?.[0]?.queueId ?? '').trim();
+    expect(queueId.length).toBeGreaterThan(0);
+
+    await updateRegistry((reg: any) => {
+      const chat = reg?.drones?.[droneId]?.chats?.default;
+      if (!chat) return;
+      chat.pendingPrompts = [];
+    });
+
+    await pollUntil(
+      async () => {
+        const status = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
+        return String(status.data?.job?.automationId ?? '').trim() === 'loop-2' && status.data?.job?.running === false;
+      },
+      20_000,
+      150,
+    );
+
+    const cancelled = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/queued/${encodeURIComponent(queueId)}`,
+      { method: 'DELETE' },
+    );
+    expect(cancelled.r.status).toBe(200);
+    expect(Boolean(cancelled.data?.cancelled)).toBe(false);
+    expect(Boolean(cancelled.data?.alreadySubmitted)).toBe(true);
   });
 
   test('does not send final message when no automation run succeeds', async () => {
