@@ -26,6 +26,10 @@ const NODE_MIN_WIDTH_PX = 96;
 const NODE_MAX_WIDTH_PX = 520;
 const NODE_TEXT_WIDTH_ESTIMATE_PX = 7.2;
 const NODE_HORIZONTAL_PADDING_PX = 24;
+const MIN_DRAFT_SPAWN_COUNT = 1;
+const MAX_DRAFT_SPAWN_COUNT = 24;
+const SPAWN_COLLISION_MARGIN_PX = 12;
+const SPAWN_OFFSET_RINGS = 7;
 
 type SelectionBox = {
   left: number;
@@ -171,6 +175,34 @@ function getNodeWidthPx(labelRaw: string): number {
   const nameWidth = Math.ceil(label.length * NODE_TEXT_WIDTH_ESTIMATE_PX) + NODE_HORIZONTAL_PADDING_PX;
   return Math.max(NODE_MIN_WIDTH_PX, Math.min(NODE_MAX_WIDTH_PX, nameWidth));
 }
+
+function clampDraftSpawnCount(valueRaw: number): number {
+  const value = Number.isFinite(valueRaw) ? Math.round(valueRaw) : MIN_DRAFT_SPAWN_COUNT;
+  return Math.max(MIN_DRAFT_SPAWN_COUNT, Math.min(MAX_DRAFT_SPAWN_COUNT, value));
+}
+
+function parseDraftSpawnCount(valueRaw: string): number | null {
+  const text = String(valueRaw ?? '').trim();
+  if (!text || !/^\d+$/.test(text)) return null;
+  return clampDraftSpawnCount(Number.parseInt(text, 10));
+}
+
+function buildSpawnOffsets(maxRings: number): Array<{ x: number; y: number }> {
+  const out: Array<{ x: number; y: number }> = [];
+  for (let ring = 1; ring <= maxRings; ring += 1) {
+    for (let dx = -ring; dx <= ring; dx += 1) {
+      out.push({ x: dx, y: -ring });
+      out.push({ x: dx, y: ring });
+    }
+    for (let dy = -ring + 1; dy <= ring - 1; dy += 1) {
+      out.push({ x: -ring, y: dy });
+      out.push({ x: ring, y: dy });
+    }
+  }
+  return out;
+}
+
+const SPAWN_OFFSETS = buildSpawnOffsets(SPAWN_OFFSET_RINGS);
 
 function renderNodeIndicator(state: DroneCanvasIndicatorState | null): React.ReactNode {
   if (!state) return null;
@@ -359,9 +391,10 @@ export function DroneCanvasDock({
   const [inlineRenameBusy, setInlineRenameBusy] = React.useState(false);
   const [messageBarExpanded, setMessageBarExpanded] = React.useState(false);
   const [messageDraft, setMessageDraft] = React.useState('');
+  const [draftSpawnCount, setDraftSpawnCount] = React.useState('1');
   const [messageError, setMessageError] = React.useState<string | null>(null);
   const [messagePendingCount, setMessagePendingCount] = React.useState(0);
-  const messageInputRef = React.useRef<HTMLInputElement | null>(null);
+  const messageInputRef = React.useRef<HTMLTextAreaElement | null>(null);
   const draftCreateInFlightRef = React.useRef<Set<string>>(new Set());
   const messageSending = messagePendingCount > 0;
 
@@ -818,39 +851,93 @@ export function DroneCanvasDock({
       return;
     }
 
+    const singleDraftSpawnCount =
+      draftNodeIds.length === 1 && selectedDraftNodeId && draftNodeIds[0] === selectedDraftNodeId
+        ? parseDraftSpawnCount(draftSpawnCount) ?? MIN_DRAFT_SPAWN_COUNT
+        : MIN_DRAFT_SPAWN_COUNT;
+
     setMessagePendingCount((prev) => prev + 1);
     setMessageError(null);
     try {
       const errors: string[] = [];
       const replacedDraftIds = new Map<string, string>();
+      const spawnedAdditionalIds: string[] = [];
+      const additionalNodesToUpsert: Array<{ droneId: string; label: string; x: number; y: number }> = [];
       let regularSendSucceeded = false;
       let regularSendError: string | null = null;
+      let draftCreateHadErrors = false;
+
+      const draftNodeIdSet = new Set(draftNodeIds);
+      const occupiedRects = nodes
+        .filter((node) => !draftNodeIdSet.has(node.droneId))
+        .map((node) => ({
+          x: node.x,
+          y: node.y,
+          width: nodeWidthByDroneId[node.droneId] ?? NODE_MIN_WIDTH_PX,
+          height: NODE_HEIGHT_PX,
+        }));
+      const claimPlacement = (
+        anchorX: number,
+        anchorY: number,
+        width: number,
+      ): { x: number; y: number } => {
+        const stepX = Math.max(48, Math.round(width * 0.72));
+        const stepY = NODE_HEIGHT_PX + 18;
+        for (const offset of SPAWN_OFFSETS) {
+          const candidateX = Math.round((anchorX + offset.x * stepX) * 10) / 10;
+          const candidateY = Math.round((anchorY + offset.y * stepY) * 10) / 10;
+          const collides = occupiedRects.some((rect) =>
+            rectIntersects(
+              candidateX - SPAWN_COLLISION_MARGIN_PX,
+              candidateY - SPAWN_COLLISION_MARGIN_PX,
+              width + SPAWN_COLLISION_MARGIN_PX * 2,
+              NODE_HEIGHT_PX + SPAWN_COLLISION_MARGIN_PX * 2,
+              rect.x,
+              rect.y,
+              rect.width,
+              rect.height,
+            ),
+          );
+          if (!collides) return { x: candidateX, y: candidateY };
+        }
+        return {
+          x: Math.round((anchorX + (occupiedRects.length + 1) * 14) * 10) / 10,
+          y: Math.round((anchorY + (occupiedRects.length + 1) * 10) * 10) / 10,
+        };
+      };
 
       if (draftNodeIds.length > 0) {
         if (!onCreateCanvasDroneFromDraft) {
           errors.push('Draft creation is unavailable.');
+          draftCreateHadErrors = true;
         } else {
-          await Promise.all(
-            draftNodeIds.map(async (draftNodeId) => {
-              const node = nodesByDroneId[draftNodeId];
-              if (!node) return;
-              if (draftCreateInFlightRef.current.has(draftNodeId)) {
-                errors.push(`"${node.label}" is still being created.`);
-                return;
-              }
-              const draftPrompt = String(draftPromptByNodeId[draftNodeId] ?? '').trim();
-              const promptForDraft = draftNodeIds.length === 1 ? draftPrompt || prompt : prompt;
-              if (!promptForDraft) {
-                removeDraftNodeIfEmpty(draftNodeId);
-                return;
-              }
+          for (const draftNodeId of draftNodeIds) {
+            const node = nodesByDroneId[draftNodeId];
+            if (!node) continue;
+            if (draftCreateInFlightRef.current.has(draftNodeId)) {
+              errors.push(`"${node.label}" is still being created.`);
+              draftCreateHadErrors = true;
+              continue;
+            }
+            const draftPrompt = String(draftPromptByNodeId[draftNodeId] ?? '').trim();
+            const promptForDraft = draftNodeIds.length === 1 ? draftPrompt || prompt : prompt;
+            if (!promptForDraft) {
+              removeDraftNodeIfEmpty(draftNodeId);
+              continue;
+            }
 
-              // Clear immediately so Enter can be used right away for rapid draft spawning/sending.
-              setDraftPromptForNode(draftNodeId, '');
-              draftCreateInFlightRef.current.add(draftNodeId);
-              try {
+            // Clear immediately so Enter can be used right away for rapid draft spawning/sending.
+            setDraftPromptForNode(draftNodeId, '');
+            draftCreateInFlightRef.current.add(draftNodeId);
+            try {
+              const spawnCountForDraft =
+                draftNodeIds.length === 1 && draftNodeId === selectedDraftNodeId
+                  ? singleDraftSpawnCount
+                  : MIN_DRAFT_SPAWN_COUNT;
+              const created: Array<{ droneId: string; droneName: string }> = [];
+              for (let spawnIdx = 0; spawnIdx < spawnCountForDraft; spawnIdx += 1) {
                 const result = await onCreateCanvasDroneFromDraft({
-                  draftNodeId,
+                  draftNodeId: spawnIdx === 0 ? draftNodeId : createDraftNodeId(),
                   prompt: promptForDraft,
                   label: node.label,
                   overrides: {
@@ -863,25 +950,69 @@ export function DroneCanvasDock({
                 });
                 if (result.ok && String(result.droneId ?? '').trim()) {
                   const nextDroneId = String(result.droneId ?? '').trim();
-                  const nextLabel =
-                    String(result.droneName ?? '').trim() ||
-                    String(droneNameById[nextDroneId] ?? '').trim() ||
-                    node.label;
-                  replaceNodeId(draftNodeId, nextDroneId, nextLabel);
-                  replacedDraftIds.set(draftNodeId, nextDroneId);
-                  return;
+                  const nextDroneName = String(result.droneName ?? '').trim() || nextDroneId;
+                  created.push({ droneId: nextDroneId, droneName: nextDroneName });
+                  continue;
                 }
+                draftCreateHadErrors = true;
+                const fallback =
+                  spawnCountForDraft > 1
+                    ? `Failed to create "${node.label}" (${spawnIdx + 1}/${spawnCountForDraft}).`
+                    : `Failed to create "${node.label}".`;
+                errors.push(String(result.error ?? '').trim() || fallback);
+              }
 
+              if (created.length === 0) {
                 // Restore the prompt if creation failed and the draft still exists.
                 setDraftPromptForNode(draftNodeId, promptForDraft);
-                const fallback = `Failed to create "${node.label}".`;
-                errors.push(String(result.error ?? '').trim() || fallback);
-              } finally {
-                draftCreateInFlightRef.current.delete(draftNodeId);
+                continue;
               }
-            }),
-          );
+
+              const first = created[0];
+              const firstLabel =
+                String(first.droneName ?? '').trim() ||
+                String(droneNameById[first.droneId] ?? '').trim() ||
+                node.label;
+              replaceNodeId(draftNodeId, first.droneId, firstLabel);
+              replacedDraftIds.set(draftNodeId, first.droneId);
+              occupiedRects.push({
+                x: node.x,
+                y: node.y,
+                width: getNodeWidthPx(firstLabel),
+                height: NODE_HEIGHT_PX,
+              });
+
+              for (let i = 1; i < created.length; i += 1) {
+                const spawned = created[i];
+                const label =
+                  String(spawned.droneName ?? '').trim() ||
+                  String(droneNameById[spawned.droneId] ?? '').trim() ||
+                  node.label;
+                const width = getNodeWidthPx(label);
+                const placement = claimPlacement(node.x, node.y, width);
+                additionalNodesToUpsert.push({
+                  droneId: spawned.droneId,
+                  label,
+                  x: placement.x,
+                  y: placement.y,
+                });
+                occupiedRects.push({
+                  x: placement.x,
+                  y: placement.y,
+                  width,
+                  height: NODE_HEIGHT_PX,
+                });
+                spawnedAdditionalIds.push(spawned.droneId);
+              }
+            } finally {
+              draftCreateInFlightRef.current.delete(draftNodeId);
+            }
+          }
         }
+      }
+
+      if (additionalNodesToUpsert.length > 0) {
+        upsertNodes(additionalNodesToUpsert);
       }
 
       if (regularDroneIds.length > 0) {
@@ -900,10 +1031,15 @@ export function DroneCanvasDock({
       }
 
       const allDraftCreatesSucceeded =
-        draftNodeIds.length > 0 && replacedDraftIds.size === draftNodeIds.length;
-      if (replacedDraftIds.size > 0) {
+        draftNodeIds.length > 0 &&
+        replacedDraftIds.size === draftNodeIds.length &&
+        !draftCreateHadErrors;
+      if (replacedDraftIds.size > 0 || spawnedAdditionalIds.length > 0) {
         setSelectedDroneIds((prev) => {
           const remapped = prev.map((id) => replacedDraftIds.get(id) ?? id);
+          for (const droneId of spawnedAdditionalIds) {
+            if (!remapped.includes(droneId)) remapped.push(droneId);
+          }
           return Array.from(new Set(remapped));
         });
       }
@@ -931,11 +1067,14 @@ export function DroneCanvasDock({
     }
   }, [
     draftPromptByNodeId,
+    draftSpawnCount,
     draggingNodeId,
     droneNameById,
     focusMessageInput,
     focusViewport,
     messageSending,
+    nodeWidthByDroneId,
+    nodes,
     setDraftPromptForNode,
     nodesByDroneId,
     normalizedCreateGroup,
@@ -952,6 +1091,7 @@ export function DroneCanvasDock({
     selectedDroneIds,
     selectedMessageDraft,
     setSelectedDroneIds,
+    upsertNodes,
   ]);
 
   const onNodeMouseDown = React.useCallback(
@@ -1157,13 +1297,31 @@ export function DroneCanvasDock({
   );
 
   const onMessageInputBlur = React.useCallback(
-    (event: React.FocusEvent<HTMLInputElement>) => {
+    (event: React.FocusEvent<HTMLElement>) => {
       const nextTarget = event.relatedTarget;
       if (nextTarget instanceof HTMLElement && nextTarget.closest('[data-canvas-message-bar="1"]')) return;
       if (!selectedDraftNodeId) return;
       removeDraftNodeIfEmpty(selectedDraftNodeId);
     },
     [removeDraftNodeIfEmpty, selectedDraftNodeId],
+  );
+
+  const onDraftSpawnCountChange = React.useCallback(
+    (nextRaw: string) => {
+      const digitsOnly = String(nextRaw ?? '').replace(/\D+/g, '').slice(0, 3);
+      setDraftSpawnCount(digitsOnly);
+      if (messageError) setMessageError(null);
+    },
+    [messageError],
+  );
+
+  const onDraftSpawnCountBlur = React.useCallback(
+    (event: React.FocusEvent<HTMLInputElement>) => {
+      const normalized = parseDraftSpawnCount(draftSpawnCount);
+      setDraftSpawnCount(String(normalized ?? MIN_DRAFT_SPAWN_COUNT));
+      onMessageInputBlur(event);
+    },
+    [draftSpawnCount, onMessageInputBlur],
   );
 
   const cancelActivePointerInteractions = React.useCallback(() => {
@@ -1649,10 +1807,14 @@ export function DroneCanvasDock({
           expanded={messageBarExpanded}
           sending={messageSending}
           draft={selectedMessageDraft}
+          spawnCountEnabled={Boolean(selectedDraftNodeId)}
+          spawnCount={draftSpawnCount}
           error={messageError}
           inputRef={messageInputRef}
           onExpand={openMessageBar}
           onCollapse={closeMessageBar}
+          onSpawnCountChange={onDraftSpawnCountChange}
+          onSpawnCountBlur={onDraftSpawnCountBlur}
           onDraftChange={(next) => {
             if (selectedDraftNodeId) {
               setDraftPromptForNode(selectedDraftNodeId, next);
