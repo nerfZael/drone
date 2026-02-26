@@ -15,6 +15,16 @@ export type ChatSendPayload = {
   attachments: ChatImageAttachmentPayload[];
 };
 
+export type ChatInputAutomationAction = {
+  id: string;
+  label: string;
+  onSelect: () => void;
+  title?: string;
+  disabled?: boolean;
+  active?: boolean;
+  statusText?: string;
+};
+
 type DraftImageAttachment = {
   id: string;
   file: File;
@@ -77,6 +87,8 @@ export function ChatInput({
   focusTargetId,
   modeHint = '',
   attachmentsEnabled,
+  automationActions,
+  automationMenuLabel = 'Automations',
   onSend,
 }: {
   resetKey: string;
@@ -91,17 +103,34 @@ export function ChatInput({
   focusTargetId?: string;
   modeHint?: string;
   attachmentsEnabled?: boolean;
+  automationActions?: ChatInputAutomationAction[];
+  automationMenuLabel?: string;
   onSend: (payload: ChatSendPayload) => Promise<boolean>;
 }) {
   const [uncontrolledDraft, setUncontrolledDraft] = React.useState('');
   const [attachments, setAttachments] = React.useState<DraftImageAttachment[]>([]);
   const [attachmentError, setAttachmentError] = React.useState<string | null>(null);
   const [dragActive, setDragActive] = React.useState(false);
+  const [automationMenuOpen, setAutomationMenuOpen] = React.useState(false);
   const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+  const automationMenuRef = React.useRef<HTMLDivElement | null>(null);
   const controlledDraftEnabled = typeof draftValue === 'string' && typeof onDraftValueChange === 'function';
   const draft = controlledDraftEnabled ? draftValue : uncontrolledDraft;
   const draftRef = React.useRef(draft);
+  const availableAutomationActions = React.useMemo(
+    () =>
+      (Array.isArray(automationActions) ? automationActions : []).filter(
+        (action) => String(action?.id ?? '').trim().length > 0 && String(action?.label ?? '').trim().length > 0,
+      ),
+    [automationActions],
+  );
+  const activeAutomationAction = React.useMemo(
+    () => availableAutomationActions.find((action) => Boolean(action?.active)) ?? null,
+    [availableAutomationActions],
+  );
+  const hasActiveAutomation = Boolean(activeAutomationAction);
+  const composerLocked = Boolean(disabled) || hasActiveAutomation;
 
   const attachmentsOn = attachmentsEnabled !== false;
   const MAX_IMAGES = 8;
@@ -139,6 +168,7 @@ export function ChatInput({
   React.useEffect(() => {
     if (!controlledDraftEnabled) setUncontrolledDraft('');
     setAttachmentError(null);
+    setAutomationMenuOpen(false);
     // Revoke any preview object URLs.
     setAttachments((prev) => {
       for (const a of prev) {
@@ -164,13 +194,28 @@ export function ChatInput({
     resizeTextarea();
   }, [draft, resetKey, resizeTextarea]);
 
+  React.useEffect(() => {
+    if (!automationMenuOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (automationMenuRef.current && automationMenuRef.current.contains(target)) return;
+      setAutomationMenuOpen(false);
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown);
+    };
+  }, [automationMenuOpen]);
+
   const trimmed = draft.trim();
-  const sendDisabled = Boolean(disabled) || (trimmed.length === 0 && attachments.length === 0);
+  const sendDisabled = composerLocked || (trimmed.length === 0 && attachments.length === 0);
+  const stopAutomationDisabled = Boolean(activeAutomationAction?.disabled);
   const hasModeHint = modeHint.trim().length > 0;
 
   function openPicker() {
     if (!attachmentsOn) return;
-    if (disabled || sending || waiting) return;
+    if (composerLocked || sending || waiting) return;
     fileInputRef.current?.click();
   }
 
@@ -287,12 +332,12 @@ export function ChatInput({
       className="flex-shrink-0 px-5 pt-2 pb-5 bg-transparent"
       onDragEnter={(e) => {
         if (!attachmentsOn) return;
-        if (disabled || sending || waiting) return;
+        if (composerLocked || sending || waiting) return;
         if (e.dataTransfer?.types?.includes?.('Files')) setDragActive(true);
       }}
       onDragOver={(e) => {
         if (!attachmentsOn) return;
-        if (disabled || sending || waiting) return;
+        if (composerLocked || sending || waiting) return;
         e.preventDefault();
       }}
       onDragLeave={() => {
@@ -301,7 +346,7 @@ export function ChatInput({
       }}
       onDrop={(e) => {
         if (!attachmentsOn) return;
-        if (disabled || sending || waiting) return;
+        if (composerLocked || sending || waiting) return;
         e.preventDefault();
         setDragActive(false);
         addFiles(e.dataTransfer?.files ?? null);
@@ -333,9 +378,9 @@ export function ChatInput({
                 <button
                   type="button"
                   onClick={() => openPicker()}
-                  disabled={Boolean(disabled) || sending || waiting}
+                  disabled={composerLocked || sending || waiting}
                   className={`text-[10px] font-semibold tracking-wide uppercase px-2 py-1 rounded border transition-all ${
-                    Boolean(disabled) || sending || waiting
+                    composerLocked || sending || waiting
                       ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                       : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
                   }`}
@@ -356,9 +401,9 @@ export function ChatInput({
                     <button
                       type="button"
                       onClick={() => removeAttachment(a.id)}
-                      disabled={Boolean(disabled) || sending || waiting}
+                      disabled={composerLocked || sending || waiting}
                       className={`absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full border text-[10px] font-bold flex items-center justify-center transition-all ${
-                        Boolean(disabled) || sending || waiting
+                        composerLocked || sending || waiting
                           ? 'opacity-40 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                           : 'bg-[var(--panel-raised)] border-[var(--border)] text-[var(--muted)] hover:text-[var(--red)] hover:border-[var(--red)]'
                       }`}
@@ -387,14 +432,14 @@ export function ChatInput({
                     // allow re-selecting same file
                     e.currentTarget.value = '';
                   }}
-                  disabled={Boolean(disabled) || sending || waiting}
+                  disabled={composerLocked || sending || waiting}
                 />
                 <button
                   type="button"
                   onClick={() => openPicker()}
-                  disabled={Boolean(disabled) || sending || waiting}
+                  disabled={composerLocked || sending || waiting}
                   className={`inline-flex items-center justify-center w-[44px] h-[44px] rounded-md border transition-all ${
-                    Boolean(disabled) || sending || waiting
+                    composerLocked || sending || waiting
                       ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                       : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)]'
                   }`}
@@ -416,7 +461,7 @@ export function ChatInput({
               onChange={(e) => setDraft(e.target.value)}
               onPaste={(e) => {
                 if (!attachmentsOn) return;
-                if (disabled || sending || waiting) return;
+                if (composerLocked || sending || waiting) return;
                 const items = Array.from(e.clipboardData?.items ?? []);
                 const files: File[] = [];
                 for (const it of items) {
@@ -441,10 +486,91 @@ export function ChatInput({
               placeholder="Message..."
               className="flex-1 resize-none rounded-md border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] px-3 py-2 text-[13px] leading-[1.35] text-[var(--fg)] placeholder:text-[11px] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--user-muted)] transition-colors"
               style={{ minHeight: CHAT_INPUT_TEXTAREA_MIN_HEIGHT_PX }}
-              disabled={Boolean(disabled)}
+              disabled={composerLocked}
               autoFocus={Boolean(autoFocus)}
               aria-label={`Message ${droneName}`}
             />
+            {activeAutomationAction && (
+              <button
+                type="button"
+                onClick={() => activeAutomationAction.onSelect()}
+                disabled={stopAutomationDisabled}
+                className={`inline-flex items-center justify-center h-9 px-3 rounded-md text-[10px] font-semibold tracking-wide uppercase border transition-all ${
+                  stopAutomationDisabled
+                    ? 'opacity-40 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
+                    : 'bg-[var(--red-subtle)] border-[rgba(255,90,90,.28)] text-[var(--red)] hover:bg-[rgba(255,90,90,.18)]'
+                }`}
+                style={{ fontFamily: 'var(--display)' }}
+                title={activeAutomationAction.title || `Stop ${activeAutomationAction.label.toLowerCase()}`}
+              >
+                Stop
+              </button>
+            )}
+            {availableAutomationActions.length > 0 && (
+              <div ref={automationMenuRef} className="relative flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setAutomationMenuOpen((open) => !open)}
+                  disabled={Boolean(disabled) && !hasActiveAutomation}
+                  className={`inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[10px] font-semibold tracking-wide uppercase border transition-all ${
+                    Boolean(disabled) && !hasActiveAutomation
+                      ? 'opacity-40 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
+                      : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                  }`}
+                  style={{ fontFamily: 'var(--display)' }}
+                  title={automationMenuLabel}
+                >
+                  {automationMenuLabel}
+                  <svg
+                    className={`transition-transform ${automationMenuOpen ? 'rotate-180' : ''}`}
+                    width="12"
+                    height="12"
+                    viewBox="0 0 16 16"
+                    fill="currentColor"
+                    aria-hidden="true"
+                  >
+                    <path d="M4.427 6.573a.25.25 0 01.177-.073h6.792a.25.25 0 01.177.427l-3.396 3.396a.25.25 0 01-.354 0L4.427 7a.25.25 0 010-.354z" />
+                  </svg>
+                </button>
+                {automationMenuOpen && (
+                  <div className="absolute right-0 bottom-full mb-2 w-[260px] rounded-md border border-[var(--border)] bg-[var(--panel-alt)] shadow-[0_16px_36px_rgba(0,0,0,.35)] z-30 overflow-hidden">
+                    <div className="px-2 py-1.5 text-[9px] uppercase tracking-[0.08em] text-[var(--muted-dim)] border-b border-[var(--border-subtle)]">
+                      Automations
+                    </div>
+                    <div className="p-1">
+                      {availableAutomationActions.map((action) => {
+                        const actionDisabled = (Boolean(disabled) && !Boolean(action.active)) || Boolean(action.disabled);
+                        return (
+                          <button
+                            key={action.id}
+                            type="button"
+                            onClick={() => {
+                              if (actionDisabled) return;
+                              setAutomationMenuOpen(false);
+                              action.onSelect();
+                            }}
+                            disabled={actionDisabled}
+                            className={`w-full text-left px-2 py-1.5 rounded text-[11px] border transition-all flex items-center justify-between gap-2 ${
+                              action.active
+                                ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                                : actionDisabled
+                                  ? 'opacity-40 cursor-not-allowed border-transparent text-[var(--muted-dim)]'
+                                  : 'border-transparent text-[var(--fg-secondary)] hover:border-[var(--border-subtle)] hover:bg-[var(--hover)]'
+                            }`}
+                            title={action.title}
+                          >
+                            <span className="truncate">{action.label}</span>
+                            {action.statusText ? (
+                              <span className="text-[10px] text-[var(--muted-dim)]">{action.statusText}</span>
+                            ) : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             <button
               type="button"
               onClick={() => sendNow()}

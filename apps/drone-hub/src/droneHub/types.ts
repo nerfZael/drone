@@ -306,6 +306,7 @@ export type TranscriptItem = {
   id?: string;
   prompt: string;
   attachments?: ChatImageAttachmentRef[];
+  automation?: ChatPromptAutomationMeta;
   session: string;
   logPath: string;
   ok: boolean;
@@ -323,6 +324,16 @@ export type ChatImageAttachmentRef = {
   previewDataUrl?: string;
 };
 
+export type ChatPromptAutomationMeta = {
+  kind: 'prompt-loop';
+  jobKey?: string;
+  automationId?: string;
+  automationLabel?: string;
+  runIndex?: number;
+  runsTotal?: number;
+  promptPreview?: string;
+};
+
 export type JobSpec = {
   // Display name for the drone (mutable; ids are the stable identifier).
   name: string;
@@ -337,6 +348,7 @@ export type PendingPrompt = {
   at: string;
   prompt: string;
   attachments?: ChatImageAttachmentRef[];
+  automation?: ChatPromptAutomationMeta;
   // `queued` is a local-only UI state used when a drone is still provisioning.
   state: 'queued' | 'sending' | 'sent' | 'failed';
   error?: string;

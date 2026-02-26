@@ -1,7 +1,9 @@
 import React from 'react';
 import Editor from '@monaco-editor/react';
 import {
+  PromptLoopTranscriptGroup,
   ChatInput,
+  type ChatInputAutomationAction,
   type ChatSendPayload,
   ChatTabs,
   CollapsibleOutput,
@@ -36,6 +38,11 @@ import { cn } from '../../ui/cn';
 import { dropdownMenuItemBaseClass, dropdownPanelBaseClass } from '../../ui/dropdown';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
 import { useDroneHubUiStore, useSelectedDroneWorkspaceUiState } from './use-drone-hub-ui-store';
+import {
+  AUTOMATION_RUNS_MAX,
+  AUTOMATION_RUNS_MIN,
+  type AutomationConfig,
+} from './automation-config';
 
 function editorLanguageForPath(filePath: string): string {
   const lower = String(filePath ?? '').trim().toLowerCase();
@@ -82,6 +89,137 @@ function formatBytes(value: number | null | undefined): string {
   }
   const precision = v >= 100 ? 0 : v >= 10 ? 1 : 2;
   return `${v.toFixed(precision)} ${units[idx]}`;
+}
+
+const PROMPT_AUTOMATION_STATUS_POLL_MS = 1200;
+
+function clampPromptAutomationRuns(value: unknown): number {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return AUTOMATION_RUNS_MIN;
+  return Math.min(AUTOMATION_RUNS_MAX, Math.max(AUTOMATION_RUNS_MIN, Math.round(num)));
+}
+
+type PromptAutomationJobStatus = 'idle' | 'running' | 'completed' | 'failed' | 'stopped';
+
+type PromptAutomationJobSnapshot = {
+  status: PromptAutomationJobStatus;
+  running: boolean;
+  automationId: string | null;
+  automationLabel: string | null;
+  runsTotal: number;
+  runsCompleted: number;
+  startedAt: string | null;
+  updatedAt: string | null;
+  lastPromptId: string | null;
+  error: string | null;
+};
+
+type PromptAutomationStatusResponse = {
+  ok: true;
+  automation: 'prompt-loop';
+  id: string;
+  name: string;
+  chat: string;
+  job: PromptAutomationJobSnapshot;
+};
+
+type TranscriptRenderBlock =
+  | { kind: 'turn'; key: string; item: TranscriptItem }
+  | { kind: 'prompt-loop-group'; key: string; identity: string; runs: TranscriptItem[] };
+
+type PendingPromptLoopGroup = {
+  key: string;
+  identity: string;
+  pendingRuns: PendingPrompt[];
+};
+
+function isPromptLoopAutomation(meta: TranscriptItem['automation'] | PendingPrompt['automation'] | undefined): boolean {
+  const kind = String(meta?.kind ?? '').trim().toLowerCase();
+  return kind === 'prompt-loop';
+}
+
+function promptLoopGroupIdentityFromMeta(
+  meta: TranscriptItem['automation'] | PendingPrompt['automation'],
+  promptSeedRaw: string,
+): string {
+  const jobKey = String(meta?.jobKey ?? '').trim();
+  if (jobKey) return `job:${jobKey}`;
+  const automationId = String(meta?.automationId ?? '').trim();
+  const runsTotal = Number(meta?.runsTotal);
+  const runsTotalToken = Number.isFinite(runsTotal) && runsTotal > 0 ? String(Math.floor(runsTotal)) : '';
+  const preview = String(meta?.promptPreview ?? '').trim();
+  const promptSeed = preview || promptSeedRaw;
+  return `fallback:${automationId}:${runsTotalToken}:${promptSeed.slice(0, 120)}`;
+}
+
+function promptLoopGroupIdentity(item: TranscriptItem): string {
+  return promptLoopGroupIdentityFromMeta(item.automation, String(item.prompt ?? '').trim());
+}
+
+function pendingPromptLoopGroupIdentity(item: PendingPrompt): string {
+  return promptLoopGroupIdentityFromMeta(item.automation, String(item.prompt ?? '').trim());
+}
+
+function buildTranscriptRenderBlocks(items: TranscriptItem[]): TranscriptRenderBlock[] {
+  const blocks: TranscriptRenderBlock[] = [];
+  for (let idx = 0; idx < items.length; ) {
+    const item = items[idx];
+    if (!isPromptLoopAutomation(item.automation)) {
+      blocks.push({
+        kind: 'turn',
+        key: `turn:${item.turn}:${item.at}:${idx}`,
+        item,
+      });
+      idx += 1;
+      continue;
+    }
+
+    const groupIdentity = promptLoopGroupIdentity(item);
+    const runs: TranscriptItem[] = [item];
+    idx += 1;
+    while (idx < items.length) {
+      const next = items[idx];
+      if (!isPromptLoopAutomation(next.automation)) break;
+      if (promptLoopGroupIdentity(next) !== groupIdentity) break;
+      runs.push(next);
+      idx += 1;
+    }
+    const first = runs[0];
+    blocks.push({
+      kind: 'prompt-loop-group',
+      key: `prompt-loop:${groupIdentity}:${first.turn}:${runs.length}`,
+      identity: groupIdentity,
+      runs,
+    });
+  }
+  return blocks;
+}
+
+function buildPendingPromptLoopGroups(items: PendingPrompt[]): {
+  groups: PendingPromptLoopGroup[];
+  plainPendingPrompts: PendingPrompt[];
+} {
+  const grouped = new Map<string, PendingPrompt[]>();
+  const plainPendingPrompts: PendingPrompt[] = [];
+  for (const item of items) {
+    if (!isPromptLoopAutomation(item.automation)) {
+      plainPendingPrompts.push(item);
+      continue;
+    }
+    const identity = pendingPromptLoopGroupIdentity(item);
+    const existing = grouped.get(identity);
+    if (existing) {
+      existing.push(item);
+      continue;
+    }
+    grouped.set(identity, [item]);
+  }
+  const groups = Array.from(grouped.entries()).map(([identity, pendingRuns], idx) => ({
+    key: `pending-prompt-loop:${identity}:${idx}`,
+    identity,
+    pendingRuns,
+  }));
+  return { groups, plainPendingPrompts };
 }
 
 function parseGithubPullRequestHref(
@@ -638,6 +776,199 @@ export function SelectedDroneWorkspace({
   );
   const chatDraftValue = useDroneHubUiStore((s) => s.chatInputDrafts[chatDraftKey] ?? '');
   const setChatInputDraft = useDroneHubUiStore((s) => s.setChatInputDraft);
+  const automations = useDroneHubUiStore((s) => s.automations);
+  const [promptAutomationJob, setPromptAutomationJob] = React.useState<PromptAutomationJobSnapshot | null>(null);
+  const [promptAutomationBusy, setPromptAutomationBusy] = React.useState(false);
+  const [promptAutomationError, setPromptAutomationError] = React.useState<string | null>(null);
+  const [promptAutomationStatusError, setPromptAutomationStatusError] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    let mounted = true;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const droneId = String(currentDrone.id ?? '').trim();
+    const chatName = String(selectedChat ?? '').trim() || 'default';
+    const load = async () => {
+      try {
+        const data = await requestJson<PromptAutomationStatusResponse>(
+          `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/automations/status`,
+        );
+        if (!mounted) return;
+        setPromptAutomationJob(data.job);
+        setPromptAutomationStatusError(null);
+      } catch (e: any) {
+        if (!mounted) return;
+        setPromptAutomationStatusError(e?.message ?? String(e));
+      }
+    };
+    void load();
+    timer = setInterval(() => {
+      void load();
+    }, PROMPT_AUTOMATION_STATUS_POLL_MS);
+    return () => {
+      mounted = false;
+      if (timer) clearInterval(timer);
+    };
+  }, [currentDrone.id, selectedChat]);
+  const startPromptAutomation = React.useCallback((automation: AutomationConfig) => {
+    if (promptAutomationBusy) return;
+    setPromptAutomationBusy(true);
+    setPromptAutomationError(null);
+    setPromptAutomationStatusError(null);
+    if (chatUiMode !== 'transcript') {
+      setPromptAutomationBusy(false);
+      setPromptAutomationError('Automation is only available in transcript mode (builtin agents).');
+      return;
+    }
+    const automationId = String(automation.id ?? '').trim();
+    const automationLabel = String(automation.label ?? '').trim() || 'Automation';
+    const prompt = String(automation.prompt ?? '').trim();
+    if (!prompt) {
+      setPromptAutomationBusy(false);
+      setPromptAutomationError(`"${automationLabel}" prompt is empty. Update it in Settings > Automation.`);
+      return;
+    }
+    const runs = clampPromptAutomationRuns(automation.runs);
+    void (async () => {
+      try {
+        const data = await requestJson<PromptAutomationStatusResponse>(
+          `/api/drones/${encodeURIComponent(currentDrone.id)}/chats/${encodeURIComponent(
+            String(selectedChat ?? '').trim() || 'default',
+          )}/automations/start`,
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ automationId, automationLabel, prompt, runs }),
+          },
+        );
+        setPromptAutomationJob(data.job);
+        setPromptAutomationStatusError(null);
+      } catch (e: any) {
+        setPromptAutomationError(e?.message ?? String(e));
+      } finally {
+        setPromptAutomationBusy(false);
+      }
+    })();
+  }, [chatUiMode, currentDrone.id, promptAutomationBusy, selectedChat]);
+  const stopPromptAutomation = React.useCallback(() => {
+    if (promptAutomationBusy) return;
+    setPromptAutomationBusy(true);
+    setPromptAutomationError(null);
+    setPromptAutomationStatusError(null);
+    void (async () => {
+      try {
+        const data = await requestJson<PromptAutomationStatusResponse>(
+          `/api/drones/${encodeURIComponent(currentDrone.id)}/chats/${encodeURIComponent(
+            String(selectedChat ?? '').trim() || 'default',
+          )}/automations/stop`,
+          { method: 'POST' },
+        );
+        setPromptAutomationJob(data.job);
+      } catch (e: any) {
+        setPromptAutomationError(e?.message ?? String(e));
+      } finally {
+        setPromptAutomationBusy(false);
+      }
+    })();
+  }, [currentDrone.id, promptAutomationBusy, selectedChat]);
+  const chatAutomationActions = React.useMemo<ChatInputAutomationAction[]>(() => {
+    const running = Boolean(promptAutomationJob?.running);
+    const runningAutomationId = String(promptAutomationJob?.automationId ?? '').trim();
+    const runningAutomationLabel = String(promptAutomationJob?.automationLabel ?? '').trim() || 'Automation';
+    const completedRuns = promptAutomationJob?.runsCompleted ?? 0;
+    const totalRuns = promptAutomationJob?.runsTotal ?? 0;
+    const supportedMode = chatUiMode === 'transcript';
+    const actions = automations.map((automation, idx) => {
+      const configLabel = String(automation.label ?? '').trim() || `Automation ${idx + 1}`;
+      const configPrompt = String(automation.prompt ?? '').trim();
+      const configRuns = clampPromptAutomationRuns(automation.runs);
+      const active = running && runningAutomationId === automation.id;
+      const blockedByOtherRunning = running && !active;
+      return {
+        id: `automation:${automation.id}`,
+        label: active ? `Stop ${configLabel}` : `Run ${configLabel}`,
+        onSelect: () => {
+          if (active) stopPromptAutomation();
+          else startPromptAutomation(automation);
+        },
+        title: active
+          ? `Stop "${configLabel}".`
+          : !supportedMode
+            ? 'Switch to a builtin agent (transcript mode) to run automations.'
+            : blockedByOtherRunning
+              ? `Another automation is running: ${runningAutomationLabel}.`
+              : configPrompt
+                ? `Run "${configLabel}" for ${configRuns} iterations, waiting for each response.`
+                : `Set a prompt for "${configLabel}" in Settings > Automation first.`,
+        disabled: promptAutomationBusy || blockedByOtherRunning || (!active && (!supportedMode || configPrompt.length === 0)),
+        active,
+        statusText: active ? `${completedRuns}/${totalRuns}` : `${configRuns} runs`,
+      } satisfies ChatInputAutomationAction;
+    });
+
+    const hasActiveAction = actions.some((action) => action.active);
+    if (!hasActiveAction && running) {
+      actions.push({
+        id: 'automation:active',
+        label: `Stop ${runningAutomationLabel}`,
+        onSelect: () => stopPromptAutomation(),
+        title: `Stop "${runningAutomationLabel}".`,
+        disabled: promptAutomationBusy,
+        active: true,
+        statusText: `${completedRuns}/${totalRuns}`,
+      });
+    }
+    return actions;
+  }, [automations, chatUiMode, promptAutomationBusy, promptAutomationJob, startPromptAutomation, stopPromptAutomation]);
+  const automationModeHint = React.useMemo(() => {
+    if (promptAutomationError) {
+      const msg = promptAutomationError.replace(/\s+/g, ' ').trim();
+      return `Automation error: ${msg.length > 120 ? `${msg.slice(0, 117)}...` : msg}`;
+    }
+    if (!promptAutomationJob) {
+      if (!promptAutomationStatusError) return '';
+      const msg = promptAutomationStatusError.replace(/\s+/g, ' ').trim();
+      return `Automation status unavailable: ${msg.length > 96 ? `${msg.slice(0, 93)}...` : msg}`;
+    }
+    const label = String(promptAutomationJob.automationLabel ?? '').trim() || 'Automation';
+    if (promptAutomationJob.running) {
+      return `${label} running ${promptAutomationJob.runsCompleted}/${promptAutomationJob.runsTotal}`;
+    }
+    if (promptAutomationJob.status === 'failed' && promptAutomationJob.error) {
+      const msg = promptAutomationJob.error.replace(/\s+/g, ' ').trim();
+      return `${label} failed: ${msg.length > 120 ? `${msg.slice(0, 117)}...` : msg}`;
+    }
+    if (promptAutomationJob.status === 'stopped') return `${label} stopped.`;
+    if (promptAutomationJob.status === 'completed' && promptAutomationJob.runsTotal > 0) {
+      return `${label} complete ${promptAutomationJob.runsCompleted}/${promptAutomationJob.runsTotal}`;
+    }
+    return '';
+  }, [promptAutomationError, promptAutomationJob, promptAutomationStatusError]);
+  const transcriptRenderBlocks = React.useMemo<TranscriptRenderBlock[]>(
+    () => buildTranscriptRenderBlocks(transcripts ?? []),
+    [transcripts],
+  );
+  const { pendingPromptLoopGroups, pendingPlainPrompts } = React.useMemo(
+    () => {
+      const built = buildPendingPromptLoopGroups(visiblePendingPromptsWithStartup);
+      return {
+        pendingPromptLoopGroups: built.groups,
+        pendingPlainPrompts: built.plainPendingPrompts,
+      };
+    },
+    [visiblePendingPromptsWithStartup],
+  );
+  const pendingPromptLoopByIdentity = React.useMemo(() => {
+    const out = new Map<string, PendingPrompt[]>();
+    for (const group of pendingPromptLoopGroups) out.set(group.identity, group.pendingRuns);
+    return out;
+  }, [pendingPromptLoopGroups]);
+  const pendingOnlyPromptLoopGroups = React.useMemo(() => {
+    const transcriptIdentities = new Set<string>();
+    for (const block of transcriptRenderBlocks) {
+      if (block.kind !== 'prompt-loop-group') continue;
+      transcriptIdentities.add(block.identity);
+    }
+    return pendingPromptLoopGroups.filter((group) => !transcriptIdentities.has(group.identity));
+  }, [pendingPromptLoopGroups, transcriptRenderBlocks]);
   const shouldAutoFocusInput = React.useMemo(() => {
     if (openedEditorFilePath) return false;
     if (chatUiMode === 'transcript') {
@@ -1495,14 +1826,26 @@ export function SelectedDroneWorkspace({
                   <TranscriptSkeleton message="Loading chat messages..." />
                 ) : (transcripts && transcripts.length > 0) || visiblePendingPromptsWithStartup.length > 0 ? (
                   <div className="max-w-[1170px] mx-auto px-6 py-5 flex flex-col gap-6">
-                    {(transcripts ?? []).map((t) => {
-                      const messageId = transcriptMessageId(t);
+                    {transcriptRenderBlocks.map((block) => {
+                      if (block.kind === 'prompt-loop-group') {
+                        return (
+                          <PromptLoopTranscriptGroup
+                            key={block.key}
+                            runs={block.runs}
+                            pendingRuns={pendingPromptLoopByIdentity.get(block.identity) ?? []}
+                            nowMs={nowMs}
+                            onOpenFileReference={onOpenMarkdownFileReference}
+                            onOpenLink={tryOpenMarkdownPullRequestInChanges}
+                          />
+                        );
+                      }
+                      const messageId = transcriptMessageId(block.item);
                       return (
                         <TranscriptTurn
-                          key={`${t.turn}-${t.at}`}
-                          item={t}
+                          key={block.key}
+                          item={block.item}
                           nowMs={nowMs}
-                          parsingJobs={Boolean(parsingJobsByTurn[t.turn])}
+                          parsingJobs={Boolean(parsingJobsByTurn[block.item.turn])}
                           onCreateJobs={parseJobsFromAgentMessage}
                           messageId={messageId}
                           tldr={tldrByMessageId[messageId] ?? null}
@@ -1516,7 +1859,17 @@ export function SelectedDroneWorkspace({
                         />
                       );
                     })}
-                    {visiblePendingPromptsWithStartup.map((p) => (
+                    {pendingOnlyPromptLoopGroups.map((group) => (
+                      <PromptLoopTranscriptGroup
+                        key={group.key}
+                        runs={[]}
+                        pendingRuns={group.pendingRuns}
+                        nowMs={nowMs}
+                        onOpenFileReference={onOpenMarkdownFileReference}
+                        onOpenLink={tryOpenMarkdownPullRequestInChanges}
+                      />
+                    ))}
+                    {pendingPlainPrompts.map((p) => (
                       <PendingTranscriptTurn
                         key={`pending-${p.id}`}
                         item={p}
@@ -1601,6 +1954,9 @@ export function SelectedDroneWorkspace({
               promptError={promptError}
               sending={sendingPrompt}
               waiting={chatUiMode === 'transcript' && visiblePendingPromptsWithStartup.some((p) => p.state !== 'failed')}
+              disabled={Boolean(promptAutomationJob?.running)}
+              modeHint={automationModeHint}
+              automationActions={chatAutomationActions}
               autoFocus={shouldAutoFocusInput}
               onSend={async (payload: ChatSendPayload) => {
                 try {

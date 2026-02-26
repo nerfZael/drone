@@ -16,6 +16,14 @@ import {
 } from './shortcuts';
 import { readLocalStorageItem } from './hooks';
 import type { CustomAgentProfile } from '../types';
+import {
+  createAutomationConfig,
+  normalizeAutomationConfigs,
+  normalizeAutomationLabel,
+  normalizeAutomationPrompt,
+  normalizeAutomationRuns,
+  type AutomationConfig,
+} from './automation-config';
 
 type Updater<T> = T | ((prev: T) => T);
 
@@ -57,6 +65,7 @@ type DroneHubUiState = {
   outputView: OutputView;
   fsExplorerView: FsExplorerView;
   transcriptInlineImages: boolean;
+  automations: AutomationConfig[];
   transcriptInlineImageOverrides: Record<string, boolean>;
   spawnAgentKey: string;
   spawnModel: string;
@@ -97,6 +106,11 @@ type DroneHubUiState = {
   setOutputView: (next: Updater<OutputView>) => void;
   setFsExplorerView: (next: Updater<FsExplorerView>) => void;
   setTranscriptInlineImages: (next: Updater<boolean>) => void;
+  setAutomations: (next: Updater<AutomationConfig[]>) => void;
+  addAutomation: (seed?: Partial<AutomationConfig>) => string;
+  updateAutomation: (id: string, patch: Partial<AutomationConfig>) => void;
+  removeAutomation: (id: string) => void;
+  clearAutomations: () => void;
   setTranscriptInlineImageOverride: (messageId: string, next: boolean | null) => void;
   setSpawnAgentKey: (next: Updater<string>) => void;
   setSpawnModel: (next: Updater<string>) => void;
@@ -135,6 +149,7 @@ type DroneHubUiPersistedState = Pick<
   | 'outputView'
   | 'fsExplorerView'
   | 'transcriptInlineImages'
+  | 'automations'
   | 'spawnAgentKey'
   | 'spawnModel'
   | 'pullHostBranchBeforeCreate'
@@ -280,6 +295,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       outputView: 'screen',
       fsExplorerView: 'list',
       transcriptInlineImages: false,
+      automations: [],
       transcriptInlineImageOverrides: {},
       spawnAgentKey: 'builtin:cursor',
       spawnModel: '',
@@ -350,6 +366,51 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       setFsExplorerView: (next) => set((s) => ({ fsExplorerView: resolveNext(s.fsExplorerView, next) })),
       setTranscriptInlineImages: (next) =>
         set((s) => ({ transcriptInlineImages: resolveNext(s.transcriptInlineImages, next) })),
+      setAutomations: (next) =>
+        set((s) => ({
+          automations: normalizeAutomationConfigs(resolveNext(s.automations, next)),
+        })),
+      addAutomation: (seed) => {
+        const created = createAutomationConfig(seed);
+        set((s) => {
+          if (s.automations.some((item) => item.id === created.id)) return s;
+          return { automations: normalizeAutomationConfigs([...s.automations, created]) };
+        });
+        return created.id;
+      },
+      updateAutomation: (idRaw, patch) =>
+        set((s) => {
+          const id = String(idRaw ?? '').trim();
+          if (!id) return s;
+          const idx = s.automations.findIndex((item) => item.id === id);
+          if (idx < 0) return s;
+          const cur = s.automations[idx];
+          const next: AutomationConfig = {
+            ...cur,
+            ...(Object.prototype.hasOwnProperty.call(patch, 'label')
+              ? { label: normalizeAutomationLabel(patch.label) }
+              : {}),
+            ...(Object.prototype.hasOwnProperty.call(patch, 'prompt')
+              ? { prompt: normalizeAutomationPrompt(patch.prompt) }
+              : {}),
+            ...(Object.prototype.hasOwnProperty.call(patch, 'runs')
+              ? { runs: normalizeAutomationRuns(patch.runs) }
+              : {}),
+          };
+          if (next.label === cur.label && next.prompt === cur.prompt && next.runs === cur.runs) return s;
+          const merged = s.automations.slice();
+          merged[idx] = next;
+          return { automations: merged };
+        }),
+      removeAutomation: (idRaw) =>
+        set((s) => {
+          const id = String(idRaw ?? '').trim();
+          if (!id) return s;
+          const next = s.automations.filter((item) => item.id !== id);
+          if (next.length === s.automations.length) return s;
+          return { automations: next };
+        }),
+      clearAutomations: () => set((s) => (s.automations.length ? { automations: [] } : s)),
       setTranscriptInlineImageOverride: (messageIdRaw, next) =>
         set((s) => {
           const messageId = String(messageIdRaw ?? '').trim();
@@ -399,7 +460,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
     }),
     {
       name: 'droneHub.ui',
-      version: 3,
+      version: 5,
       storage: createJSONStorage(() => localStorage),
       partialize: (state): DroneHubUiPersistedState => ({
         activeRepoPath: state.activeRepoPath,
@@ -417,6 +478,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         outputView: state.outputView,
         fsExplorerView: state.fsExplorerView,
         transcriptInlineImages: state.transcriptInlineImages,
+        automations: state.automations,
         spawnAgentKey: state.spawnAgentKey,
         spawnModel: state.spawnModel,
         pullHostBranchBeforeCreate: state.pullHostBranchBeforeCreate,
@@ -445,6 +507,9 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           fsExplorerView: normalizeFsExplorerView(persisted.fsExplorerView ?? currentState.fsExplorerView),
           transcriptInlineImages: normalizeBoolean(
             persisted.transcriptInlineImages ?? currentState.transcriptInlineImages,
+          ),
+          automations: normalizeAutomationConfigs(
+            (persisted as any).automations ?? currentState.automations,
           ),
           pullHostBranchBeforeCreate: normalizeBoolean(
             persisted.pullHostBranchBeforeCreate ?? currentState.pullHostBranchBeforeCreate,
