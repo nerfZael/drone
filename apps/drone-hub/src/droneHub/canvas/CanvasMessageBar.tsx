@@ -6,13 +6,17 @@ type CanvasMessageBarProps = {
   expanded: boolean;
   sending: boolean;
   draft: string;
+  spawnCountEnabled?: boolean;
+  spawnCount?: string;
   error: string | null;
-  inputRef: React.Ref<HTMLInputElement>;
+  inputRef: React.Ref<HTMLTextAreaElement>;
   onExpand: () => void;
   onCollapse: () => void;
   onDraftChange: (next: string) => void;
+  onSpawnCountChange?: (next: string) => void;
   onSend: () => void;
-  onInputBlur?: (event: React.FocusEvent<HTMLInputElement>) => void;
+  onInputBlur?: (event: React.FocusEvent<HTMLTextAreaElement>) => void;
+  onSpawnCountBlur?: (event: React.FocusEvent<HTMLInputElement>) => void;
   onRequestNewDraft?: () => void;
 };
 
@@ -22,13 +26,17 @@ export function CanvasMessageBar({
   expanded,
   sending,
   draft,
+  spawnCountEnabled = false,
+  spawnCount = '1',
   error,
   inputRef,
   onExpand,
   onCollapse,
   onDraftChange,
+  onSpawnCountChange,
   onSend,
   onInputBlur,
+  onSpawnCountBlur,
   onRequestNewDraft,
 }: CanvasMessageBarProps) {
   if (selectedCount <= 0) return null;
@@ -58,14 +66,48 @@ export function CanvasMessageBar({
             <span className="flex-shrink-0 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
               To {targetLabel}
             </span>
-            <input
+            {spawnCountEnabled ? (
+              <label className="flex items-center gap-1.5 flex-shrink-0">
+                <span
+                  className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]"
+                  style={{ fontFamily: 'var(--display)' }}
+                >
+                  Spawn
+                </span>
+                <input
+                  value={spawnCount}
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  onChange={(event) => onSpawnCountChange?.(event.target.value)}
+                  onBlur={onSpawnCountBlur}
+                  onKeyDown={(event) => {
+                    if ((event.nativeEvent as any)?.isComposing) return;
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      if (draft.trim().length > 0) {
+                        onSend();
+                      } else {
+                        onRequestNewDraft?.();
+                      }
+                    } else if (event.key === 'Escape') {
+                      event.preventDefault();
+                      onCollapse();
+                    }
+                  }}
+                  className="h-8 w-[70px] rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[12px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)]"
+                  title="Number of drones to create from this draft."
+                />
+              </label>
+            ) : null}
+            <textarea
               ref={inputRef}
               value={draft}
+              rows={1}
               onChange={(event) => onDraftChange(event.target.value)}
               onBlur={onInputBlur}
               onKeyDown={(event) => {
                 if ((event.nativeEvent as any)?.isComposing) return;
-                if (event.key === 'Enter') {
+                if (event.key === 'Enter' && !event.shiftKey) {
                   event.preventDefault();
                   if (draft.trim().length > 0) {
                     onSend();
@@ -78,7 +120,7 @@ export function CanvasMessageBar({
                 }
               }}
               placeholder={`Message ${targetLabel}...`}
-              className="h-8 flex-1 min-w-0 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2.5 text-[12px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)]"
+              className="h-8 min-h-8 max-h-24 flex-1 min-w-0 resize-none rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2.5 py-1.5 text-[12px] leading-[1.25rem] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)]"
             />
             <button
               type="button"
