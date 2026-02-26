@@ -42,13 +42,39 @@ describe('prompt automation api', () => {
     return { r, data };
   };
 
-  const pollUntil = async (fn: () => Promise<boolean>, timeoutMs: number = 10_000, intervalMs: number = 150): Promise<void> => {
+  const pollUntil = async (
+    fn: () => Promise<boolean>,
+    timeoutMs: number = 10_000,
+    intervalMs: number = 150,
+    label: string = 'condition',
+  ): Promise<void> => {
     const started = Date.now();
     while (Date.now() - started < timeoutMs) {
       if (await fn()) return;
       await new Promise((resolve) => setTimeout(resolve, intervalMs));
     }
-    throw new Error(`timed out after ${timeoutMs}ms`);
+    throw new Error(`timed out after ${timeoutMs}ms (${label})`);
+  };
+
+  const setPendingPromptState = async (opts: {
+    droneId: string;
+    chatName: string;
+    promptId: string;
+    state: string;
+  }) => {
+    await updateRegistry((reg: any) => {
+      const chat = reg?.drones?.[opts.droneId]?.chats?.[opts.chatName];
+      if (!chat) return;
+      const pending = Array.isArray(chat.pendingPrompts) ? chat.pendingPrompts : [];
+      const idx = pending.findIndex((p: any) => String(p?.id ?? '').trim() === opts.promptId);
+      if (idx < 0) return;
+      pending[idx] = {
+        ...pending[idx],
+        state: opts.state,
+        updatedAt: new Date().toISOString(),
+      };
+      chat.pendingPrompts = pending;
+    });
   };
 
   beforeAll(async () => {
@@ -619,6 +645,236 @@ describe('prompt automation api', () => {
     expect(Boolean(cancelled.data?.cancelled)).toBe(false);
     expect(Boolean(cancelled.data?.alreadySubmitted)).toBe(true);
   });
+
+  test('flushes manual prompts queued behind automation in FIFO order once lane is idle', async () => {
+    if (!mockDaemon) throw new Error('mock daemon not initialized');
+    const droneId = 'drone-automation-release-blocked-manual-fifo';
+    const now = new Date().toISOString();
+    await updateRegistry((reg: any) => {
+      reg.drones = reg.drones ?? {};
+      reg.drones[droneId] = {
+        id: droneId,
+        name: droneId,
+        hostPort: mockDaemon.port,
+        token: 'daemon-token',
+        containerPort: 7777,
+        repoPath: '',
+        createdAt: now,
+        chats: {
+          default: {
+            createdAt: now,
+            agent: { kind: 'builtin', id: 'cursor' },
+            turns: [],
+            pendingPrompts: [
+              {
+                id: 'blocking-prompt',
+                at: now,
+                updatedAt: now,
+                prompt: 'still running',
+                state: 'sending',
+              },
+            ],
+          },
+        },
+      };
+    });
+    const started = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        automationId: 'loop-1',
+        automationLabel: 'Loop 1',
+        prompt: 'automation run one',
+        runs: 1,
+      }),
+    });
+    expect(started.r.status).toBe(202);
+    expect(started.data?.job?.running).toBe(true);
+
+    const manualA = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/prompt`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'manual A queued behind automation' }),
+    });
+    expect(manualA.r.status).toBe(202);
+    const manualAId = String(manualA.data?.promptId ?? '').trim();
+    expect(manualAId.length).toBeGreaterThan(0);
+
+    const manualB = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/prompt`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'manual B queued behind automation' }),
+    });
+    expect(manualB.r.status).toBe(202);
+    const manualBId = String(manualB.data?.promptId ?? '').trim();
+    expect(manualBId.length).toBeGreaterThan(0);
+
+    const pendingWhileBlocked = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    const blockedRows = Array.isArray(pendingWhileBlocked.data?.pending) ? pendingWhileBlocked.data.pending : [];
+    const blockedA = blockedRows.find((p: any) => String(p?.id ?? '').trim() === manualAId);
+    const blockedB = blockedRows.find((p: any) => String(p?.id ?? '').trim() === manualBId);
+    expect(String(blockedA?.state ?? '')).toBe('queued');
+    expect(String(blockedB?.state ?? '')).toBe('queued');
+    expect(Boolean(blockedA?.blockedByAutomation)).toBe(true);
+    expect(Boolean(blockedB?.blockedByAutomation)).toBe(true);
+
+    await setPendingPromptState({ droneId, chatName: 'default', promptId: 'blocking-prompt', state: 'failed' });
+
+    await pollUntil(
+      async () => {
+        const status = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
+        return status.data?.job?.running === false && Number(status.data?.job?.queuedCount ?? 0) === 0;
+      },
+      20_000,
+      120,
+      'automation status idle',
+    );
+
+    await pollUntil(
+      async () => {
+        const pending = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+        const rows = Array.isArray(pending.data?.pending) ? pending.data.pending : [];
+        const rowA = rows.find((p: any) => String(p?.id ?? '').trim() === manualAId);
+        const rowB = rows.find((p: any) => String(p?.id ?? '').trim() === manualBId);
+        const stateA = String(rowA?.state ?? '');
+        const stateB = String(rowB?.state ?? '');
+        return stateA !== 'queued' && stateB !== 'queued';
+      },
+      20_000,
+      120,
+      'manual prompts released',
+    );
+
+    const pendingFinal = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    const finalRows = Array.isArray(pendingFinal.data?.pending) ? pendingFinal.data.pending : [];
+    const finalA = finalRows.find((p: any) => String(p?.id ?? '').trim() === manualAId);
+    const finalB = finalRows.find((p: any) => String(p?.id ?? '').trim() === manualBId);
+    const stateA = String(finalA?.state ?? '');
+    const stateB = String(finalB?.state ?? '');
+    expect(stateA !== 'queued').toBe(true);
+    expect(stateB !== 'queued').toBe(true);
+    const updatedA = String(finalA?.updatedAt ?? finalA?.at ?? '');
+    const updatedB = String(finalB?.updatedAt ?? finalB?.at ?? '');
+    expect(updatedA.length).toBeGreaterThan(0);
+    expect(updatedB.length).toBeGreaterThan(0);
+    expect(updatedA <= updatedB).toBe(true);
+  }, 30_000);
+
+  test('keeps manual prompts blocked until queued automations are fully drained', async () => {
+    if (!mockDaemon) throw new Error('mock daemon not initialized');
+    const droneId = 'drone-automation-release-after-queued-drain';
+    const now = new Date().toISOString();
+    await updateRegistry((reg: any) => {
+      reg.drones = reg.drones ?? {};
+      reg.drones[droneId] = {
+        id: droneId,
+        name: droneId,
+        hostPort: mockDaemon.port,
+        token: 'daemon-token',
+        containerPort: 7777,
+        repoPath: '',
+        createdAt: now,
+        chats: {
+          default: {
+            createdAt: now,
+            agent: { kind: 'builtin', id: 'cursor' },
+            turns: [],
+            pendingPrompts: [
+              {
+                id: 'blocking-prompt',
+                at: now,
+                updatedAt: now,
+                prompt: 'still running',
+                state: 'sending',
+              },
+            ],
+          },
+        },
+      };
+    });
+    const first = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        automationId: 'loop-1',
+        automationLabel: 'Loop 1',
+        prompt: 'automation run one',
+        runs: 1,
+      }),
+    });
+    expect(first.r.status).toBe(202);
+    expect(first.data?.job?.running).toBe(true);
+
+    const second = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        automationId: 'loop-2',
+        automationLabel: 'Loop 2',
+        prompt: 'automation run two',
+        runs: 1,
+      }),
+    });
+    expect(second.r.status).toBe(202);
+    expect(Number(second.data?.job?.queuedCount ?? 0)).toBeGreaterThan(0);
+
+    const manual = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/prompt`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'manual after queued automations' }),
+    });
+    expect(manual.r.status).toBe(202);
+    const manualId = String(manual.data?.promptId ?? '').trim();
+    expect(manualId.length).toBeGreaterThan(0);
+    const pendingBlocked = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    const pendingBlockedRows = Array.isArray(pendingBlocked.data?.pending) ? pendingBlocked.data.pending : [];
+    const blockedManual = pendingBlockedRows.find((p: any) => String(p?.id ?? '').trim() === manualId);
+    expect(String(blockedManual?.state ?? '')).toBe('queued');
+    expect(Boolean(blockedManual?.blockedByAutomation)).toBe(true);
+
+    await setPendingPromptState({ droneId, chatName: 'default', promptId: 'blocking-prompt', state: 'failed' });
+
+    await pollUntil(
+      async () => {
+        const status = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
+        return status.data?.job?.running === false && Number(status.data?.job?.queuedCount ?? 0) === 0;
+      },
+      20_000,
+      120,
+      'automation queue drained',
+    );
+
+    await pollUntil(
+      async () => {
+        const pending = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+        const rows = Array.isArray(pending.data?.pending) ? pending.data.pending : [];
+        const manual = rows.find((p: any) => String(p?.id ?? '').trim() === manualId);
+        return String(manual?.state ?? '') !== 'queued';
+      },
+      20_000,
+      120,
+      'manual released after queued automations',
+    );
+
+    const pendingFinal = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    const rows = Array.isArray(pendingFinal.data?.pending) ? pendingFinal.data.pending : [];
+    const loop2 = rows.find(
+      (p: any) =>
+        String(p?.automation?.kind ?? '') === 'prompt-loop' &&
+        String(p?.automation?.stage ?? '') === 'run' &&
+        String(p?.automation?.automationId ?? '') === 'loop-2',
+    );
+    const manualFinal = rows.find((p: any) => String(p?.id ?? '').trim() === manualId);
+    expect(loop2).toBeTruthy();
+    expect(manualFinal).toBeTruthy();
+    const manualState = String(manualFinal?.state ?? '');
+    expect(manualState !== 'queued').toBe(true);
+    const loop2UpdatedAt = String(loop2?.updatedAt ?? loop2?.at ?? '');
+    const manualUpdatedAt = String(manualFinal?.updatedAt ?? manualFinal?.at ?? '');
+    expect(loop2UpdatedAt.length).toBeGreaterThan(0);
+    expect(manualUpdatedAt.length).toBeGreaterThan(0);
+    expect(manualUpdatedAt >= loop2UpdatedAt).toBe(true);
+  }, 30_000);
 
   test('does not send final message when no automation run succeeds', async () => {
     const droneId = 'drone-automation-final-message';
