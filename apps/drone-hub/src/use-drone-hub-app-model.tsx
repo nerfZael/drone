@@ -956,9 +956,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   }, [selectedDrone]);
 
   const {
+    cancelPendingPromptErrorById,
+    cancellingPendingPromptById,
     chatUiMode,
     nowMs,
     promptError,
+    requestCancelPendingPrompt,
     requestUnstickPendingPrompt,
     selectedIsResponding,
     sendPromptText,
@@ -1948,7 +1951,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     promptError,
     sendingPrompt,
     sendPromptText,
+    requestCancelPendingPrompt,
     requestUnstickPendingPrompt,
+    cancellingPendingPromptById,
+    cancelPendingPromptErrorById,
     unstickingPendingPromptById,
     unstickPendingPromptErrorById,
     onOpenMarkdownFileReference: openMarkdownFileReference,

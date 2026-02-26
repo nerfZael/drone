@@ -3,7 +3,6 @@ import Editor from '@monaco-editor/react';
 import {
   PromptLoopTranscriptGroup,
   ChatInput,
-  type ChatInputAutomationAction,
   type ChatSendPayload,
   ChatTabs,
   CollapsibleOutput,
@@ -19,10 +18,6 @@ import { requestJson } from '../http';
 import type {
   DroneSummary,
   PendingPrompt,
-  RepoPullRequestClosePayload,
-  RepoPullRequestMergeMethod,
-  RepoPullRequestMergePayload,
-  RepoPullRequestSummary,
   RepoPullRequestsPayload,
   TranscriptItem,
 } from '../types';
@@ -38,11 +33,14 @@ import { cn } from '../../ui/cn';
 import { dropdownMenuItemBaseClass, dropdownPanelBaseClass } from '../../ui/dropdown';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
 import { useDroneHubUiStore, useSelectedDroneWorkspaceUiState } from './use-drone-hub-ui-store';
+import { usePromptAutomationState } from './use-prompt-automation-state';
+import { QueuedAutomationPanel } from './QueuedAutomationPanel';
+import { HeaderPullRequestShortcuts } from './HeaderPullRequestShortcuts';
 import {
-  AUTOMATION_RUNS_MAX,
-  AUTOMATION_RUNS_MIN,
-  type AutomationConfig,
-} from './automation-config';
+  buildPendingPromptLoopGroups,
+  buildTranscriptRenderBlocks,
+  type TranscriptRenderBlock,
+} from './prompt-loop-groups';
 
 function editorLanguageForPath(filePath: string): string {
   const lower = String(filePath ?? '').trim().toLowerCase();
@@ -91,137 +89,6 @@ function formatBytes(value: number | null | undefined): string {
   return `${v.toFixed(precision)} ${units[idx]}`;
 }
 
-const PROMPT_AUTOMATION_STATUS_POLL_MS = 1200;
-
-function clampPromptAutomationRuns(value: unknown): number {
-  const num = Number(value);
-  if (!Number.isFinite(num)) return AUTOMATION_RUNS_MIN;
-  return Math.min(AUTOMATION_RUNS_MAX, Math.max(AUTOMATION_RUNS_MIN, Math.round(num)));
-}
-
-type PromptAutomationJobStatus = 'idle' | 'running' | 'completed' | 'failed' | 'stopped';
-
-type PromptAutomationJobSnapshot = {
-  status: PromptAutomationJobStatus;
-  running: boolean;
-  automationId: string | null;
-  automationLabel: string | null;
-  runsTotal: number;
-  runsCompleted: number;
-  startedAt: string | null;
-  updatedAt: string | null;
-  lastPromptId: string | null;
-  error: string | null;
-};
-
-type PromptAutomationStatusResponse = {
-  ok: true;
-  automation: 'prompt-loop';
-  id: string;
-  name: string;
-  chat: string;
-  job: PromptAutomationJobSnapshot;
-};
-
-type TranscriptRenderBlock =
-  | { kind: 'turn'; key: string; item: TranscriptItem }
-  | { kind: 'prompt-loop-group'; key: string; identity: string; runs: TranscriptItem[] };
-
-type PendingPromptLoopGroup = {
-  key: string;
-  identity: string;
-  pendingRuns: PendingPrompt[];
-};
-
-function isPromptLoopAutomation(meta: TranscriptItem['automation'] | PendingPrompt['automation'] | undefined): boolean {
-  const kind = String(meta?.kind ?? '').trim().toLowerCase();
-  return kind === 'prompt-loop';
-}
-
-function promptLoopGroupIdentityFromMeta(
-  meta: TranscriptItem['automation'] | PendingPrompt['automation'],
-  promptSeedRaw: string,
-): string {
-  const jobKey = String(meta?.jobKey ?? '').trim();
-  if (jobKey) return `job:${jobKey}`;
-  const automationId = String(meta?.automationId ?? '').trim();
-  const runsTotal = Number(meta?.runsTotal);
-  const runsTotalToken = Number.isFinite(runsTotal) && runsTotal > 0 ? String(Math.floor(runsTotal)) : '';
-  const preview = String(meta?.promptPreview ?? '').trim();
-  const promptSeed = preview || promptSeedRaw;
-  return `fallback:${automationId}:${runsTotalToken}:${promptSeed.slice(0, 120)}`;
-}
-
-function promptLoopGroupIdentity(item: TranscriptItem): string {
-  return promptLoopGroupIdentityFromMeta(item.automation, String(item.prompt ?? '').trim());
-}
-
-function pendingPromptLoopGroupIdentity(item: PendingPrompt): string {
-  return promptLoopGroupIdentityFromMeta(item.automation, String(item.prompt ?? '').trim());
-}
-
-function buildTranscriptRenderBlocks(items: TranscriptItem[]): TranscriptRenderBlock[] {
-  const blocks: TranscriptRenderBlock[] = [];
-  for (let idx = 0; idx < items.length; ) {
-    const item = items[idx];
-    if (!isPromptLoopAutomation(item.automation)) {
-      blocks.push({
-        kind: 'turn',
-        key: `turn:${item.turn}:${item.at}:${idx}`,
-        item,
-      });
-      idx += 1;
-      continue;
-    }
-
-    const groupIdentity = promptLoopGroupIdentity(item);
-    const runs: TranscriptItem[] = [item];
-    idx += 1;
-    while (idx < items.length) {
-      const next = items[idx];
-      if (!isPromptLoopAutomation(next.automation)) break;
-      if (promptLoopGroupIdentity(next) !== groupIdentity) break;
-      runs.push(next);
-      idx += 1;
-    }
-    const first = runs[0];
-    blocks.push({
-      kind: 'prompt-loop-group',
-      key: `prompt-loop:${groupIdentity}:${first.turn}:${runs.length}`,
-      identity: groupIdentity,
-      runs,
-    });
-  }
-  return blocks;
-}
-
-function buildPendingPromptLoopGroups(items: PendingPrompt[]): {
-  groups: PendingPromptLoopGroup[];
-  plainPendingPrompts: PendingPrompt[];
-} {
-  const grouped = new Map<string, PendingPrompt[]>();
-  const plainPendingPrompts: PendingPrompt[] = [];
-  for (const item of items) {
-    if (!isPromptLoopAutomation(item.automation)) {
-      plainPendingPrompts.push(item);
-      continue;
-    }
-    const identity = pendingPromptLoopGroupIdentity(item);
-    const existing = grouped.get(identity);
-    if (existing) {
-      existing.push(item);
-      continue;
-    }
-    grouped.set(identity, [item]);
-  }
-  const groups = Array.from(grouped.entries()).map(([identity, pendingRuns], idx) => ({
-    key: `pending-prompt-loop:${identity}:${idx}`,
-    identity,
-    pendingRuns,
-  }));
-  return { groups, plainPendingPrompts };
-}
-
 function parseGithubPullRequestHref(
   hrefRaw: string,
 ): { owner: string; repo: string; pullNumber: number } | null {
@@ -241,277 +108,6 @@ function parseGithubPullRequestHref(
   const pullNumber = Number(m[3]);
   if (!owner || !repo || !Number.isFinite(pullNumber) || pullNumber <= 0) return null;
   return { owner, repo, pullNumber: Math.floor(pullNumber) };
-}
-
-const PR_MERGE_METHOD_STORAGE_KEY = 'droneHub.prMergeMethod';
-const HEADER_REPO_PR_CACHE_TTL_MS = 12_000;
-const headerRepoPullRequestSummaryCache = new Map<
-  string,
-  {
-    atMs: number;
-    payload: Extract<RepoPullRequestsPayload, { ok: true }>;
-  }
->();
-
-function headerPrMergeMethod(): RepoPullRequestMergeMethod {
-  try {
-    const raw = String(localStorage.getItem(PR_MERGE_METHOD_STORAGE_KEY) ?? '')
-      .trim()
-      .toLowerCase();
-    if (raw === 'squash' || raw === 'rebase' || raw === 'merge') return raw;
-  } catch {
-    // ignore
-  }
-  return 'merge';
-}
-
-function shortPrTitle(raw: string, maxLen: number = 34): string {
-  const text = String(raw ?? '').trim();
-  if (!text) return '-';
-  if (text.length <= maxLen) return text;
-  return `${text.slice(0, maxLen - 1)}...`;
-}
-
-function repoPullRequestStatusBadges(pr: RepoPullRequestSummary): Array<{ key: string; label: string; className: string }> {
-  const out: Array<{ key: string; label: string; className: string }> = [];
-  if (pr.draft) {
-    out.push({
-      key: 'draft',
-      label: 'Draft',
-      className: 'border-[rgba(255,178,36,.35)] bg-[var(--yellow-subtle)] text-[var(--yellow)]',
-    });
-  }
-  if (pr.checksState === 'failing') {
-    out.push({
-      key: 'checks_failing',
-      label: 'Checks failing',
-      className: 'border-[rgba(255,90,90,.35)] bg-[var(--red-subtle)] text-[var(--red)]',
-    });
-  } else if (pr.checksState === 'pending') {
-    out.push({
-      key: 'checks_pending',
-      label: 'Checks pending',
-      className: 'border-[rgba(255,178,36,.35)] bg-[var(--yellow-subtle)] text-[var(--yellow)]',
-    });
-  }
-  if (pr.reviewState === 'approved') {
-    out.push({
-      key: 'approved',
-      label: 'Approved',
-      className: 'border-[rgba(74,222,128,.35)] bg-[var(--green-subtle)] text-[var(--green)]',
-    });
-  }
-  if (pr.hasMergeConflicts) {
-    out.push({
-      key: 'merge_conflict',
-      label: 'Merge conflict',
-      className: 'border-[rgba(255,90,90,.35)] bg-[var(--red-subtle)] text-[var(--red)]',
-    });
-  }
-  return out;
-}
-
-function PullRequestStatusBadgeStrip({ pullRequest, limit = 4 }: { pullRequest: RepoPullRequestSummary; limit?: number }) {
-  const badges = repoPullRequestStatusBadges(pullRequest).slice(0, Math.max(1, Math.floor(limit)));
-  if (badges.length === 0) return null;
-  return (
-    <span className="inline-flex items-center gap-1 flex-wrap">
-      {badges.map((badge) => (
-        <span
-          key={`pr-badge-${pullRequest.number}-${badge.key}`}
-          className={`inline-flex items-center rounded border px-1 py-[1px] text-[9px] leading-none ${badge.className}`}
-          title={badge.label}
-        >
-          {badge.label}
-        </span>
-      ))}
-    </span>
-  );
-}
-
-function HeaderPullRequestShortcuts({
-  droneId,
-  repoPath,
-  repoAttached,
-  disabled,
-  onOpenPullRequestsTab,
-}: {
-  droneId: string;
-  repoPath: string;
-  repoAttached: boolean;
-  disabled: boolean;
-  onOpenPullRequestsTab: () => void;
-}) {
-  const [refreshNonce, setRefreshNonce] = React.useState(0);
-  const [pullRequestsData, setPullRequestsData] = React.useState<Extract<RepoPullRequestsPayload, { ok: true }> | null>(null);
-  const [loading, setLoading] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
-  const [busyAction, setBusyAction] = React.useState<{ kind: 'merge' | 'close'; prNumber: number } | null>(null);
-  const repoCacheKey = String(repoPath ?? '').trim();
-
-  React.useEffect(() => {
-    if (!repoAttached || disabled || !repoCacheKey) {
-      setPullRequestsData(null);
-      setLoading(false);
-      setError(null);
-      return;
-    }
-
-    let mounted = true;
-    let timer: any = null;
-
-    const load = async (silent: boolean) => {
-      if (!mounted) return;
-      const cached = headerRepoPullRequestSummaryCache.get(repoCacheKey);
-      if (cached && Date.now() - cached.atMs < HEADER_REPO_PR_CACHE_TTL_MS) {
-        setPullRequestsData(cached.payload);
-        setError(null);
-        if (!silent) setLoading(false);
-        return;
-      }
-      if (!silent) setLoading(true);
-      try {
-        const data = await requestJson<Extract<RepoPullRequestsPayload, { ok: true }>>(
-          `/api/drones/${encodeURIComponent(droneId)}/repo/pull-requests?state=open`,
-        );
-        if (!mounted) return;
-        headerRepoPullRequestSummaryCache.set(repoCacheKey, { atMs: Date.now(), payload: data });
-        setPullRequestsData(data);
-        setError(null);
-      } catch (e: any) {
-        if (!mounted) return;
-        setError(e?.message ?? String(e));
-      } finally {
-        if (mounted && !silent) setLoading(false);
-      }
-    };
-
-    void load(false);
-    timer = setInterval(() => {
-      void load(true);
-    }, 20_000);
-
-    return () => {
-      mounted = false;
-      if (timer) clearInterval(timer);
-    };
-  }, [disabled, droneId, refreshNonce, repoAttached, repoCacheKey]);
-
-  const count = Number(pullRequestsData?.count ?? 0);
-  const previewRows = (pullRequestsData?.pullRequests ?? []).slice(0, 2);
-  const firstPr = previewRows.length === 1 ? previewRows[0] : null;
-
-  const onQuickMerge = React.useCallback(async () => {
-    if (!firstPr) return;
-    const prNumber = Number(firstPr.number);
-    if (!Number.isFinite(prNumber) || prNumber <= 0) return;
-    if (busyAction) return;
-    const method = headerPrMergeMethod();
-    if (!window.confirm(`Merge PR #${prNumber} using "${method}"?`)) return;
-    setBusyAction({ kind: 'merge', prNumber });
-    setError(null);
-    try {
-      await requestJson<Extract<RepoPullRequestMergePayload, { ok: true }>>(
-        `/api/drones/${encodeURIComponent(droneId)}/repo/pull-requests/${prNumber}/merge`,
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ method }),
-        },
-      );
-      if (repoCacheKey) headerRepoPullRequestSummaryCache.delete(repoCacheKey);
-      setRefreshNonce((n) => n + 1);
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
-    } finally {
-      setBusyAction(null);
-    }
-  }, [busyAction, droneId, firstPr, repoCacheKey]);
-
-  const onQuickClose = React.useCallback(async () => {
-    if (!firstPr) return;
-    const prNumber = Number(firstPr.number);
-    if (!Number.isFinite(prNumber) || prNumber <= 0) return;
-    if (busyAction) return;
-    if (!window.confirm(`Close PR #${prNumber} without merging?`)) return;
-    setBusyAction({ kind: 'close', prNumber });
-    setError(null);
-    try {
-      await requestJson<Extract<RepoPullRequestClosePayload, { ok: true }>>(
-        `/api/drones/${encodeURIComponent(droneId)}/repo/pull-requests/${prNumber}/close`,
-        { method: 'POST' },
-      );
-      if (repoCacheKey) headerRepoPullRequestSummaryCache.delete(repoCacheKey);
-      setRefreshNonce((n) => n + 1);
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
-    } finally {
-      setBusyAction(null);
-    }
-  }, [busyAction, droneId, firstPr, repoCacheKey]);
-
-  if (!repoAttached || disabled || !repoCacheKey) return null;
-
-  return (
-    <div className="hidden xl:flex items-center gap-1.5 pl-1 border-l border-[var(--border-subtle)]">
-      <button
-        type="button"
-        onClick={onOpenPullRequestsTab}
-        className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
-          error
-            ? 'border-[rgba(255,90,90,.35)] bg-[var(--red-subtle)] text-[var(--red)]'
-            : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
-        }`}
-        style={{ fontFamily: 'var(--display)' }}
-        title={error ?? 'Open pull requests tab'}
-      >
-        PRs {loading && !pullRequestsData ? '...' : String(count)}
-      </button>
-      {previewRows.map((pr) => (
-        <button
-          key={`header-pr-${pr.number}`}
-          type="button"
-          onClick={onOpenPullRequestsTab}
-          className="inline-flex items-start gap-1.5 max-w-[280px] px-2 py-1 rounded text-[10px] border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:brightness-110 transition-all"
-          title={`#${pr.number} ${pr.title}`}
-        >
-          <span className="font-mono pt-[1px]">#{pr.number}</span>
-          <span className="min-w-0 flex-1 flex flex-col gap-0.5">
-            <span className="truncate">{shortPrTitle(pr.title)}</span>
-            <PullRequestStatusBadgeStrip pullRequest={pr} limit={3} />
-          </span>
-        </button>
-      ))}
-      {firstPr ? (
-        <>
-          <button
-            type="button"
-            onClick={() => {
-              void onQuickMerge();
-            }}
-            disabled={Boolean(busyAction)}
-            className="inline-flex items-center px-2 py-1 rounded text-[9px] font-semibold tracking-wide uppercase border border-[rgba(74,222,128,.35)] bg-[var(--green-subtle)] text-[var(--green)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed transition-all"
-            style={{ fontFamily: 'var(--display)' }}
-            title={`Quick merge #${firstPr.number}`}
-          >
-            {busyAction?.kind === 'merge' && busyAction.prNumber === firstPr.number ? 'Merging...' : 'Merge'}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              void onQuickClose();
-            }}
-            disabled={Boolean(busyAction)}
-            className="inline-flex items-center px-2 py-1 rounded text-[9px] font-semibold tracking-wide uppercase border border-[rgba(255,90,90,.35)] bg-[var(--red-subtle)] text-[var(--red)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed transition-all"
-            style={{ fontFamily: 'var(--display)' }}
-            title={`Quick close #${firstPr.number}`}
-          >
-            {busyAction?.kind === 'close' && busyAction.prNumber === firstPr.number ? 'Closing...' : 'Close'}
-          </button>
-        </>
-      ) : null}
-    </div>
-  );
 }
 
 type LaunchHint =
@@ -604,7 +200,10 @@ type SelectedDroneWorkspaceProps = {
   promptError: string | null;
   sendingPrompt: boolean;
   sendPromptText: (payload: ChatSendPayload) => Promise<boolean>;
+  requestCancelPendingPrompt: (promptId: string) => Promise<void>;
   requestUnstickPendingPrompt: (promptId: string) => Promise<void>;
+  cancellingPendingPromptById: Record<string, true>;
+  cancelPendingPromptErrorById: Record<string, string>;
   unstickingPendingPromptById: Record<string, true>;
   unstickPendingPromptErrorById: Record<string, string>;
   openedEditorFilePath: string | null;
@@ -718,7 +317,10 @@ export function SelectedDroneWorkspace({
   promptError,
   sendingPrompt,
   sendPromptText,
+  requestCancelPendingPrompt,
   requestUnstickPendingPrompt,
+  cancellingPendingPromptById,
+  cancelPendingPromptErrorById,
   unstickingPendingPromptById,
   unstickPendingPromptErrorById,
   openedEditorFilePath,
@@ -777,171 +379,19 @@ export function SelectedDroneWorkspace({
   const chatDraftValue = useDroneHubUiStore((s) => s.chatInputDrafts[chatDraftKey] ?? '');
   const setChatInputDraft = useDroneHubUiStore((s) => s.setChatInputDraft);
   const automations = useDroneHubUiStore((s) => s.automations);
-  const [promptAutomationJob, setPromptAutomationJob] = React.useState<PromptAutomationJobSnapshot | null>(null);
-  const [promptAutomationBusy, setPromptAutomationBusy] = React.useState(false);
-  const [promptAutomationError, setPromptAutomationError] = React.useState<string | null>(null);
-  const [promptAutomationStatusError, setPromptAutomationStatusError] = React.useState<string | null>(null);
-  React.useEffect(() => {
-    let mounted = true;
-    let timer: ReturnType<typeof setInterval> | null = null;
-    const droneId = String(currentDrone.id ?? '').trim();
-    const chatName = activeChatName;
-    const load = async () => {
-      try {
-        const data = await requestJson<PromptAutomationStatusResponse>(
-          `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/automations/status`,
-        );
-        if (!mounted) return;
-        setPromptAutomationJob(data.job);
-        setPromptAutomationStatusError(null);
-      } catch (e: any) {
-        if (!mounted) return;
-        setPromptAutomationStatusError(e?.message ?? String(e));
-      }
-    };
-    void load();
-    timer = setInterval(() => {
-      void load();
-    }, PROMPT_AUTOMATION_STATUS_POLL_MS);
-    return () => {
-      mounted = false;
-      if (timer) clearInterval(timer);
-    };
-  }, [activeChatName, currentDrone.id]);
-  const startPromptAutomation = React.useCallback((automation: AutomationConfig) => {
-    if (promptAutomationBusy) return;
-    setPromptAutomationBusy(true);
-    setPromptAutomationError(null);
-    setPromptAutomationStatusError(null);
-    if (chatUiMode !== 'transcript') {
-      setPromptAutomationBusy(false);
-      setPromptAutomationError('Automation is only available in transcript mode (builtin agents).');
-      return;
-    }
-    const automationId = String(automation.id ?? '').trim();
-    const automationLabel = String(automation.label ?? '').trim() || 'Automation';
-    const prompt = String(automation.prompt ?? '').trim();
-    const onFailurePrompt = String(automation.onFailurePrompt ?? '').trim();
-    if (!prompt) {
-      setPromptAutomationBusy(false);
-      setPromptAutomationError(`"${automationLabel}" prompt is empty. Update it in Settings > Automation.`);
-      return;
-    }
-    const runs = clampPromptAutomationRuns(automation.runs);
-    void (async () => {
-      try {
-        const data = await requestJson<PromptAutomationStatusResponse>(
-          `/api/drones/${encodeURIComponent(currentDrone.id)}/chats/${encodeURIComponent(activeChatName)}/automations/start`,
-          {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ automationId, automationLabel, prompt, onFailurePrompt, runs }),
-          },
-        );
-        setPromptAutomationJob(data.job);
-        setPromptAutomationStatusError(null);
-      } catch (e: any) {
-        setPromptAutomationError(e?.message ?? String(e));
-      } finally {
-        setPromptAutomationBusy(false);
-      }
-    })();
-  }, [activeChatName, chatUiMode, currentDrone.id, promptAutomationBusy]);
-  const stopPromptAutomation = React.useCallback(() => {
-    if (promptAutomationBusy) return;
-    setPromptAutomationBusy(true);
-    setPromptAutomationError(null);
-    setPromptAutomationStatusError(null);
-    void (async () => {
-      try {
-        const data = await requestJson<PromptAutomationStatusResponse>(
-          `/api/drones/${encodeURIComponent(currentDrone.id)}/chats/${encodeURIComponent(activeChatName)}/automations/stop`,
-          { method: 'POST' },
-        );
-        setPromptAutomationJob(data.job);
-      } catch (e: any) {
-        setPromptAutomationError(e?.message ?? String(e));
-      } finally {
-        setPromptAutomationBusy(false);
-      }
-    })();
-  }, [activeChatName, currentDrone.id, promptAutomationBusy]);
-  const chatAutomationActions = React.useMemo<ChatInputAutomationAction[]>(() => {
-    const running = Boolean(promptAutomationJob?.running);
-    const runningAutomationId = String(promptAutomationJob?.automationId ?? '').trim();
-    const runningAutomationLabel = String(promptAutomationJob?.automationLabel ?? '').trim() || 'Automation';
-    const completedRuns = promptAutomationJob?.runsCompleted ?? 0;
-    const totalRuns = promptAutomationJob?.runsTotal ?? 0;
-    const supportedMode = chatUiMode === 'transcript';
-    const actions = automations.map((automation, idx) => {
-      const configLabel = String(automation.label ?? '').trim() || `Automation ${idx + 1}`;
-      const configPrompt = String(automation.prompt ?? '').trim();
-      const configOnFailurePrompt = String(automation.onFailurePrompt ?? '').trim();
-      const configRuns = clampPromptAutomationRuns(automation.runs);
-      const active = running && runningAutomationId === automation.id;
-      const blockedByOtherRunning = running && !active;
-      return {
-        id: `automation:${automation.id}`,
-        label: active ? `Stop ${configLabel}` : `Run ${configLabel}`,
-        onSelect: () => {
-          if (active) stopPromptAutomation();
-          else startPromptAutomation(automation);
-        },
-        title: active
-          ? `Stop "${configLabel}".`
-          : !supportedMode
-            ? 'Switch to a builtin agent (transcript mode) to run automations.'
-            : blockedByOtherRunning
-              ? `Another automation is running: ${runningAutomationLabel}.`
-              : configPrompt
-                ? configOnFailurePrompt
-                  ? `Run "${configLabel}" for ${configRuns} iterations, then send the final message if at least one run succeeds.`
-                  : `Run "${configLabel}" for ${configRuns} iterations, waiting for each response.`
-                : `Set a prompt for "${configLabel}" in Settings > Automation first.`,
-        disabled: promptAutomationBusy || blockedByOtherRunning || (!active && (!supportedMode || configPrompt.length === 0)),
-        active,
-        statusText: active ? `${completedRuns}/${totalRuns}` : `${configRuns} runs`,
-      } satisfies ChatInputAutomationAction;
-    });
-
-    const hasActiveAction = actions.some((action) => action.active);
-    if (!hasActiveAction && running) {
-      actions.push({
-        id: 'automation:active',
-        label: `Stop ${runningAutomationLabel}`,
-        onSelect: () => stopPromptAutomation(),
-        title: `Stop "${runningAutomationLabel}".`,
-        disabled: promptAutomationBusy,
-        active: true,
-        statusText: `${completedRuns}/${totalRuns}`,
-      });
-    }
-    return actions;
-  }, [automations, chatUiMode, promptAutomationBusy, promptAutomationJob, startPromptAutomation, stopPromptAutomation]);
-  const automationModeHint = React.useMemo(() => {
-    if (promptAutomationError) {
-      const msg = promptAutomationError.replace(/\s+/g, ' ').trim();
-      return `Automation error: ${msg.length > 120 ? `${msg.slice(0, 117)}...` : msg}`;
-    }
-    if (!promptAutomationJob) {
-      if (!promptAutomationStatusError) return '';
-      const msg = promptAutomationStatusError.replace(/\s+/g, ' ').trim();
-      return `Automation status unavailable: ${msg.length > 96 ? `${msg.slice(0, 93)}...` : msg}`;
-    }
-    const label = String(promptAutomationJob.automationLabel ?? '').trim() || 'Automation';
-    if (promptAutomationJob.running) {
-      return `${label} running ${promptAutomationJob.runsCompleted}/${promptAutomationJob.runsTotal}`;
-    }
-    if (promptAutomationJob.status === 'failed' && promptAutomationJob.error) {
-      const msg = promptAutomationJob.error.replace(/\s+/g, ' ').trim();
-      return `${label} failed: ${msg.length > 120 ? `${msg.slice(0, 117)}...` : msg}`;
-    }
-    if (promptAutomationJob.status === 'stopped') return `${label} stopped.`;
-    if (promptAutomationJob.status === 'completed' && promptAutomationJob.runsTotal > 0) {
-      return `${label} complete ${promptAutomationJob.runsCompleted}/${promptAutomationJob.runsTotal}`;
-    }
-    return '';
-  }, [promptAutomationError, promptAutomationJob, promptAutomationStatusError]);
+  const {
+    automationModeHint,
+    cancelQueuedAutomationErrorById,
+    cancellingQueuedAutomationById,
+    cancelQueuedPromptAutomation,
+    chatAutomationActions,
+    queuedAutomationItems,
+  } = usePromptAutomationState({
+    droneId: currentDrone.id,
+    chatName: activeChatName,
+    chatUiMode,
+    automations,
+  });
   const transcriptRenderBlocks = React.useMemo<TranscriptRenderBlock[]>(
     () => buildTranscriptRenderBlocks(transcripts ?? []),
     [transcripts],
@@ -1874,11 +1324,14 @@ export function SelectedDroneWorkspace({
                         key={`pending-${p.id}`}
                         item={p}
                         nowMs={nowMs}
+                        onCancelQueued={requestCancelPendingPrompt}
                         onRequestUnstick={requestUnstickPendingPrompt}
                         onOpenFileReference={onOpenMarkdownFileReference}
                         onOpenLink={tryOpenMarkdownPullRequestInChanges}
                         droneId={currentDrone.id}
                         droneHomePath={droneHomePath(currentDrone)}
+                        cancelBusy={Boolean(cancellingPendingPromptById[p.id])}
+                        cancelError={cancelPendingPromptErrorById[p.id] ?? null}
                         unstickBusy={Boolean(unstickingPendingPromptById[p.id])}
                         unstickError={unstickPendingPromptErrorById[p.id] ?? null}
                       />
@@ -1945,27 +1398,35 @@ export function SelectedDroneWorkspace({
           </div>
 
           {!openedEditorFilePath && (
-            <ChatInput
-              resetKey={`${selectedDroneIdentity}:${selectedChat ?? ''}`}
-              droneName={currentDrone.name}
-              focusTargetId="primary-chat"
-              draftValue={chatDraftValue}
-              onDraftValueChange={(next) => setChatInputDraft(chatDraftKey, next)}
-              promptError={promptError}
-              sending={sendingPrompt}
-              waiting={chatUiMode === 'transcript' && visiblePendingPromptsWithStartup.some((p) => p.state !== 'failed')}
-              disabled={Boolean(promptAutomationJob?.running)}
-              modeHint={automationModeHint}
-              automationActions={chatAutomationActions}
-              autoFocus={shouldAutoFocusInput}
-              onSend={async (payload: ChatSendPayload) => {
-                try {
-                  return await sendPromptText(payload);
-                } catch {
-                  return false;
-                }
-              }}
-            />
+            <>
+              <QueuedAutomationPanel
+                items={queuedAutomationItems}
+                cancellingById={cancellingQueuedAutomationById}
+                cancelErrorById={cancelQueuedAutomationErrorById}
+                onCancel={cancelQueuedPromptAutomation}
+              />
+              <ChatInput
+                resetKey={`${selectedDroneIdentity}:${selectedChat ?? ''}`}
+                droneName={currentDrone.name}
+                focusTargetId="primary-chat"
+                draftValue={chatDraftValue}
+                onDraftValueChange={(next) => setChatInputDraft(chatDraftKey, next)}
+                promptError={promptError}
+                sending={sendingPrompt}
+                waiting={chatUiMode === 'transcript' && visiblePendingPromptsWithStartup.some((p) => p.state !== 'failed')}
+                modeHint={automationModeHint}
+                automationActions={chatAutomationActions}
+                lockComposerWhileAutomationActive={false}
+                autoFocus={shouldAutoFocusInput}
+                onSend={async (payload: ChatSendPayload) => {
+                  try {
+                    return await sendPromptText(payload);
+                  } catch {
+                    return false;
+                  }
+                }}
+              />
+            </>
           )}
           {fileOpenToast ? (
             <div className="absolute right-4 bottom-4 z-20">
