@@ -3,12 +3,14 @@ export const AUTOMATION_RUNS_MAX = 20;
 export const AUTOMATION_RUNS_DEFAULT = 5;
 export const AUTOMATION_LABEL_MAX_CHARS = 72;
 export const AUTOMATION_PROMPT_MAX_CHARS = 8_000;
+export const AUTOMATION_ON_FAILURE_PROMPT_MAX_CHARS = 8_000;
 export const AUTOMATION_MAX_ITEMS = 40;
 
 export type AutomationConfig = {
   id: string;
   label: string;
   prompt: string;
+  onFailurePrompt: string;
   runs: number;
 };
 
@@ -34,11 +36,16 @@ export function normalizeAutomationPrompt(value: unknown): string {
   return String(value ?? '').slice(0, AUTOMATION_PROMPT_MAX_CHARS);
 }
 
+export function normalizeAutomationOnFailurePrompt(value: unknown): string {
+  return String(value ?? '').slice(0, AUTOMATION_ON_FAILURE_PROMPT_MAX_CHARS);
+}
+
 export function createAutomationConfig(seed?: Partial<AutomationConfig>): AutomationConfig {
   return {
     id: String(seed?.id ?? '').trim() || makeAutomationId(),
     label: normalizeAutomationLabel(seed?.label ?? ''),
     prompt: normalizeAutomationPrompt(seed?.prompt ?? ''),
+    onFailurePrompt: normalizeAutomationOnFailurePrompt(seed?.onFailurePrompt ?? ''),
     runs: normalizeAutomationRuns(seed?.runs),
   };
 }

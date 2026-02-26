@@ -897,6 +897,7 @@ type ChatAgentConfig =
 
 type PromptAutomationMeta = {
   kind: 'prompt-loop';
+  stage?: 'run' | 'final-message';
   jobKey?: string;
   automationId?: string;
   automationLabel?: string;
@@ -997,6 +998,10 @@ function normalizePromptAutomationRuns(raw: unknown): number {
   return Math.max(PROMPT_AUTOMATION_RUNS_MIN, Math.min(PROMPT_AUTOMATION_RUNS_MAX, Math.round(n)));
 }
 
+function normalizePromptAutomationOnFailurePrompt(raw: unknown): string {
+  return String(raw ?? '').slice(0, PROMPT_AUTOMATION_ON_FAILURE_PROMPT_MAX_CHARS).trim();
+}
+
 function normalizeBuiltinAgentId(raw: any): BuiltinAgentId | null {
   const id = String(raw ?? '')
     .trim()
@@ -1072,6 +1077,7 @@ const PROMPT_AUTOMATION_RUNS_DEFAULT = 5;
 const PROMPT_AUTOMATION_WAIT_POLL_MS = 1000;
 const PROMPT_AUTOMATION_WAIT_FOR_IDLE_TIMEOUT_MS = 30 * 60_000;
 const PROMPT_AUTOMATION_WAIT_FOR_PROMPT_TIMEOUT_MS = 30 * 60_000;
+const PROMPT_AUTOMATION_ON_FAILURE_PROMPT_MAX_CHARS = 8_000;
 
 type PromptAutomationJobStatus = 'running' | 'completed' | 'failed' | 'stopped';
 
@@ -1083,6 +1089,7 @@ type PromptAutomationJobState = {
   automationId: string;
   automationLabel: string;
   prompt: string;
+  onFailurePrompt: string;
   runsTotal: number;
   runsCompleted: number;
   status: PromptAutomationJobStatus;
@@ -1887,6 +1894,8 @@ function normalizePromptAutomationMeta(raw: unknown): PromptAutomationMeta | und
   if (!raw || typeof raw !== 'object') return undefined;
   const kind = String((raw as any).kind ?? '').trim().toLowerCase();
   if (kind !== 'prompt-loop') return undefined;
+  const stageRaw = String((raw as any).stage ?? '').trim().toLowerCase();
+  const stage = stageRaw === 'final-message' ? 'final-message' : stageRaw === 'run' ? 'run' : undefined;
   const jobKeyRaw = String((raw as any).jobKey ?? '').trim();
   const automationIdRaw = String((raw as any).automationId ?? '').trim();
   const automationLabelRaw = String((raw as any).automationLabel ?? '').trim();
@@ -1897,6 +1906,7 @@ function normalizePromptAutomationMeta(raw: unknown): PromptAutomationMeta | und
   const runsTotal = Number.isFinite(runsTotalRaw) && runsTotalRaw > 0 ? Math.floor(runsTotalRaw) : undefined;
   return {
     kind: 'prompt-loop',
+    ...(stage ? { stage } : {}),
     ...(jobKeyRaw ? { jobKey: jobKeyRaw } : {}),
     ...(automationIdRaw ? { automationId: automationIdRaw } : {}),
     ...(automationLabelRaw ? { automationLabel: automationLabelRaw.slice(0, 120) } : {}),
@@ -2178,48 +2188,113 @@ async function waitForPromptAutomationPromptCompletion(opts: {
   throw new Error(`timed out waiting for prompt ${opts.promptId} completion`);
 }
 
+async function sendPromptAutomationFinalMessage(job: PromptAutomationJobState): Promise<void> {
+  const finalPrompt = String(job.onFailurePrompt ?? '').trim();
+  if (!finalPrompt) return;
+  const signal = job.abortController?.signal;
+  if (signal?.aborted) return;
+  const enqueued = await createOrEnqueuePromptUnified({
+    droneId: job.droneId,
+    chatName: job.chatName,
+    prompt: finalPrompt,
+    automation: {
+      kind: 'prompt-loop',
+      stage: 'final-message',
+      jobKey: job.executionKey,
+      automationId: job.automationId,
+      automationLabel: job.automationLabel,
+      runsTotal: job.runsTotal,
+      promptPreview: previewPromptAutomationPrompt(finalPrompt),
+    },
+  });
+  if (enqueued.kind === 'error') throw new Error(enqueued.error);
+  job.lastPromptId = enqueued.id;
+  job.updatedAt = nowIso();
+  await waitForPromptAutomationPromptCompletion({
+    droneId: job.droneId,
+    chatName: job.chatName,
+    promptId: enqueued.id,
+    timeoutMs: PROMPT_AUTOMATION_WAIT_FOR_PROMPT_TIMEOUT_MS,
+    signal: signal ?? new AbortController().signal,
+  });
+  job.updatedAt = nowIso();
+}
+
 async function runPromptAutomationJob(job: PromptAutomationJobState): Promise<void> {
+  let lastRunError = '';
+  let hadRunFailure = false;
   try {
     for (let runIdx = 0; runIdx < job.runsTotal; runIdx++) {
       const signal = job.abortController?.signal;
       if (signal?.aborted) throw new Error('automation stopped');
-      await waitForPromptAutomationChatIdle({
-        droneId: job.droneId,
-        chatName: job.chatName,
-        timeoutMs: PROMPT_AUTOMATION_WAIT_FOR_IDLE_TIMEOUT_MS,
-        signal: signal ?? new AbortController().signal,
-      });
+      try {
+        await waitForPromptAutomationChatIdle({
+          droneId: job.droneId,
+          chatName: job.chatName,
+          timeoutMs: PROMPT_AUTOMATION_WAIT_FOR_IDLE_TIMEOUT_MS,
+          signal: signal ?? new AbortController().signal,
+        });
 
-      const enqueued = await createOrEnqueuePromptUnified({
-        droneId: job.droneId,
-        chatName: job.chatName,
-        prompt: job.prompt,
-        automation: {
-          kind: 'prompt-loop',
-          jobKey: job.executionKey,
-          automationId: job.automationId,
-          automationLabel: job.automationLabel,
-          runIndex: runIdx + 1,
-          runsTotal: job.runsTotal,
-          promptPreview: previewPromptAutomationPrompt(job.prompt),
-        },
-      });
-      if (enqueued.kind === 'error') throw new Error(enqueued.error);
-      job.lastPromptId = enqueued.id;
-      job.updatedAt = nowIso();
+        const enqueued = await createOrEnqueuePromptUnified({
+          droneId: job.droneId,
+          chatName: job.chatName,
+          prompt: job.prompt,
+          automation: {
+            kind: 'prompt-loop',
+            stage: 'run',
+            jobKey: job.executionKey,
+            automationId: job.automationId,
+            automationLabel: job.automationLabel,
+            runIndex: runIdx + 1,
+            runsTotal: job.runsTotal,
+            promptPreview: previewPromptAutomationPrompt(job.prompt),
+          },
+        });
+        if (enqueued.kind === 'error') throw new Error(enqueued.error);
+        job.lastPromptId = enqueued.id;
+        job.updatedAt = nowIso();
 
-      await waitForPromptAutomationPromptCompletion({
-        droneId: job.droneId,
-        chatName: job.chatName,
-        promptId: enqueued.id,
-        timeoutMs: PROMPT_AUTOMATION_WAIT_FOR_PROMPT_TIMEOUT_MS,
-        signal: signal ?? new AbortController().signal,
-      });
-      job.runsCompleted = runIdx + 1;
-      job.updatedAt = nowIso();
+        await waitForPromptAutomationPromptCompletion({
+          droneId: job.droneId,
+          chatName: job.chatName,
+          promptId: enqueued.id,
+          timeoutMs: PROMPT_AUTOMATION_WAIT_FOR_PROMPT_TIMEOUT_MS,
+          signal: signal ?? new AbortController().signal,
+        });
+        job.runsCompleted += 1;
+        job.updatedAt = nowIso();
+      } catch (e: any) {
+        const msg = String(e?.message ?? e ?? '').trim();
+        if (job.abortController?.signal.aborted || /automation stopped/i.test(msg)) throw e;
+        hadRunFailure = true;
+        lastRunError = msg || 'automation run failed';
+        job.updatedAt = nowIso();
+      }
     }
-    job.status = 'completed';
-    job.error = null;
+
+    if (job.runsCompleted > 0 && job.onFailurePrompt) {
+      try {
+        await sendPromptAutomationFinalMessage(job);
+      } catch (followupError: any) {
+        const followupMsg = String(followupError?.message ?? followupError ?? '').trim() || 'failed sending final message';
+        if (!hadRunFailure) {
+          hadRunFailure = true;
+          lastRunError = `final message failed: ${followupMsg}`;
+        } else {
+          lastRunError = lastRunError
+            ? `${lastRunError}; final message failed: ${followupMsg}`
+            : `final message failed: ${followupMsg}`;
+        }
+      }
+    }
+
+    if (hadRunFailure) {
+      job.status = 'failed';
+      job.error = lastRunError || 'automation failed';
+    } else {
+      job.status = 'completed';
+      job.error = null;
+    }
     job.updatedAt = nowIso();
   } catch (e: any) {
     const msg = String(e?.message ?? e ?? '').trim();
@@ -2244,6 +2319,7 @@ async function startPromptAutomationJob(opts: {
   automationId: string;
   automationLabel: string;
   prompt: string;
+  onFailurePrompt?: string;
   runs: number;
 }): Promise<PromptAutomationJobState> {
   const droneId = normalizeDroneIdentity(opts.droneId);
@@ -2251,6 +2327,7 @@ async function startPromptAutomationJob(opts: {
   const automationId = String(opts.automationId ?? '').trim();
   const automationLabel = String(opts.automationLabel ?? '').trim() || automationId || 'Automation';
   const prompt = String(opts.prompt ?? '').trim();
+  const onFailurePrompt = normalizePromptAutomationOnFailurePrompt(opts.onFailurePrompt);
   const runs = normalizePromptAutomationRuns(opts.runs);
   if (!prompt) throw new Error('missing prompt');
   if (!automationId) throw new Error('missing automation id');
@@ -2280,6 +2357,7 @@ async function startPromptAutomationJob(opts: {
     automationId,
     automationLabel,
     prompt,
+    onFailurePrompt,
     runsTotal: runs,
     runsCompleted: 0,
     status: 'running',
@@ -9652,6 +9730,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const automationId = String(body?.automationId ?? '').trim();
         const automationLabel = String(body?.automationLabel ?? '').trim() || automationId || 'Automation';
         const prompt = String(body?.prompt ?? '').trim();
+        const onFailurePrompt = normalizePromptAutomationOnFailurePrompt(body?.onFailurePrompt);
         const runs = normalizePromptAutomationRuns(body?.runs);
         if (!automationId) {
           json(res, 400, { ok: false, error: 'missing automationId' });
@@ -9662,7 +9741,15 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           return;
         }
         try {
-          const job = await startPromptAutomationJob({ droneId, chatName, automationId, automationLabel, prompt, runs });
+          const job = await startPromptAutomationJob({
+            droneId,
+            chatName,
+            automationId,
+            automationLabel,
+            prompt,
+            onFailurePrompt,
+            runs,
+          });
           json(res, 202, {
             ok: true,
             automation: 'prompt-loop',
