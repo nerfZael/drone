@@ -785,7 +785,7 @@ export function SelectedDroneWorkspace({
     let mounted = true;
     let timer: ReturnType<typeof setInterval> | null = null;
     const droneId = String(currentDrone.id ?? '').trim();
-    const chatName = String(selectedChat ?? '').trim() || 'default';
+    const chatName = activeChatName;
     const load = async () => {
       try {
         const data = await requestJson<PromptAutomationStatusResponse>(
@@ -807,7 +807,7 @@ export function SelectedDroneWorkspace({
       mounted = false;
       if (timer) clearInterval(timer);
     };
-  }, [currentDrone.id, selectedChat]);
+  }, [activeChatName, currentDrone.id]);
   const startPromptAutomation = React.useCallback((automation: AutomationConfig) => {
     if (promptAutomationBusy) return;
     setPromptAutomationBusy(true);
@@ -830,9 +830,7 @@ export function SelectedDroneWorkspace({
     void (async () => {
       try {
         const data = await requestJson<PromptAutomationStatusResponse>(
-          `/api/drones/${encodeURIComponent(currentDrone.id)}/chats/${encodeURIComponent(
-            String(selectedChat ?? '').trim() || 'default',
-          )}/automations/start`,
+          `/api/drones/${encodeURIComponent(currentDrone.id)}/chats/${encodeURIComponent(activeChatName)}/automations/start`,
           {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
@@ -847,7 +845,7 @@ export function SelectedDroneWorkspace({
         setPromptAutomationBusy(false);
       }
     })();
-  }, [chatUiMode, currentDrone.id, promptAutomationBusy, selectedChat]);
+  }, [activeChatName, chatUiMode, currentDrone.id, promptAutomationBusy]);
   const stopPromptAutomation = React.useCallback(() => {
     if (promptAutomationBusy) return;
     setPromptAutomationBusy(true);
@@ -856,9 +854,7 @@ export function SelectedDroneWorkspace({
     void (async () => {
       try {
         const data = await requestJson<PromptAutomationStatusResponse>(
-          `/api/drones/${encodeURIComponent(currentDrone.id)}/chats/${encodeURIComponent(
-            String(selectedChat ?? '').trim() || 'default',
-          )}/automations/stop`,
+          `/api/drones/${encodeURIComponent(currentDrone.id)}/chats/${encodeURIComponent(activeChatName)}/automations/stop`,
           { method: 'POST' },
         );
         setPromptAutomationJob(data.job);
@@ -868,7 +864,7 @@ export function SelectedDroneWorkspace({
         setPromptAutomationBusy(false);
       }
     })();
-  }, [currentDrone.id, promptAutomationBusy, selectedChat]);
+  }, [activeChatName, currentDrone.id, promptAutomationBusy]);
   const chatAutomationActions = React.useMemo<ChatInputAutomationAction[]>(() => {
     const running = Boolean(promptAutomationJob?.running);
     const runningAutomationId = String(promptAutomationJob?.automationId ?? '').trim();

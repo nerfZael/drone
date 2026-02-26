@@ -1077,6 +1077,7 @@ type PromptAutomationJobStatus = 'running' | 'completed' | 'failed' | 'stopped';
 
 type PromptAutomationJobState = {
   key: string;
+  executionKey: string;
   droneId: string;
   chatName: string;
   automationId: string;
@@ -2063,6 +2064,12 @@ function promptAutomationJobKey(droneIdRaw: string, chatNameRaw: string): string
   return `${droneId}:${chatName}`;
 }
 
+function newPromptAutomationExecutionKey(mapKeyRaw: string): string {
+  const mapKey = String(mapKeyRaw ?? '').trim() || 'automation';
+  const nonce = crypto.randomBytes(6).toString('hex');
+  return `${mapKey}:${Date.now().toString(36)}:${nonce}`;
+}
+
 function promptAutomationJobResponse(job: PromptAutomationJobState | null) {
   if (!job) {
     return {
@@ -2189,7 +2196,7 @@ async function runPromptAutomationJob(job: PromptAutomationJobState): Promise<vo
         prompt: job.prompt,
         automation: {
           kind: 'prompt-loop',
-          jobKey: job.key,
+          jobKey: job.executionKey,
           automationId: job.automationId,
           automationLabel: job.automationLabel,
           runIndex: runIdx + 1,
@@ -2249,8 +2256,13 @@ async function startPromptAutomationJob(opts: {
   if (!automationId) throw new Error('missing automation id');
   const key = promptAutomationJobKey(droneId, chatName);
   const existing = PROMPT_AUTOMATION_JOBS.get(key) ?? null;
-  if (existing && existing.status === 'running') {
-    throw new Error('automation is already running for this chat');
+  if (existing) {
+    if (existing.status === 'running') {
+      throw new Error('automation is already running for this chat');
+    }
+    if (existing.task) {
+      throw new Error('automation stop is still in progress for this chat');
+    }
   }
 
   await ensureChatEntry({ droneId, chatName });
@@ -2262,6 +2274,7 @@ async function startPromptAutomationJob(opts: {
 
   const job: PromptAutomationJobState = {
     key,
+    executionKey: newPromptAutomationExecutionKey(key),
     droneId,
     chatName,
     automationId,
@@ -9662,7 +9675,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         } catch (e: any) {
           const msg = String(e?.message ?? e ?? '').trim();
           const code =
-            /already running/i.test(msg) || /requires a builtin/i.test(msg)
+            /already running/i.test(msg) || /requires a builtin/i.test(msg) || /stop is still in progress/i.test(msg)
               ? 409
               : /unknown drone/i.test(msg) || /unknown chat/i.test(msg)
                 ? 404
