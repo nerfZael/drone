@@ -2,6 +2,7 @@ import React from 'react';
 import Editor from '@monaco-editor/react';
 import {
   PromptLoopTranscriptGroup,
+  AutomationLaneStatusCard,
   ChatInput,
   type ChatSendPayload,
   ChatTabs,
@@ -34,7 +35,6 @@ import { dropdownMenuItemBaseClass, dropdownPanelBaseClass } from '../../ui/drop
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
 import { useDroneHubUiStore, useSelectedDroneWorkspaceUiState } from './use-drone-hub-ui-store';
 import { usePromptAutomationState } from './use-prompt-automation-state';
-import { QueuedAutomationPanel } from './QueuedAutomationPanel';
 import { HeaderPullRequestShortcuts } from './HeaderPullRequestShortcuts';
 import {
   buildPendingPromptLoopGroups,
@@ -87,6 +87,11 @@ function formatBytes(value: number | null | undefined): string {
   }
   const precision = v >= 100 ? 0 : v >= 10 ? 1 : 2;
   return `${v.toFixed(precision)} ${units[idx]}`;
+}
+
+function parseIsoMs(raw: string | null | undefined): number {
+  const ms = Date.parse(String(raw ?? ''));
+  return Number.isFinite(ms) ? ms : Number.MAX_SAFE_INTEGER;
 }
 
 function parseGithubPullRequestHref(
@@ -380,12 +385,15 @@ export function SelectedDroneWorkspace({
   const setChatInputDraft = useDroneHubUiStore((s) => s.setChatInputDraft);
   const automations = useDroneHubUiStore((s) => s.automations);
   const {
-    automationModeHint,
+    promptAutomationJob,
     cancelQueuedAutomationErrorById,
     cancellingQueuedAutomationById,
     cancelQueuedPromptAutomation,
     chatAutomationActions,
     queuedAutomationItems,
+    stopPromptAutomation,
+    stoppingPromptAutomationMode,
+    stopPromptAutomationError,
   } = usePromptAutomationState({
     droneId: currentDrone.id,
     chatName: activeChatName,
@@ -419,6 +427,135 @@ export function SelectedDroneWorkspace({
     }
     return pendingPromptLoopGroups.filter((group) => !transcriptIdentities.has(group.identity));
   }, [pendingPromptLoopGroups, transcriptRenderBlocks]);
+  const runningAutomationJobKey = String(promptAutomationJob?.running ? promptAutomationJob?.jobKey ?? '' : '').trim();
+  const runningAutomationIdentity = runningAutomationJobKey ? `job:${runningAutomationJobKey}` : '';
+  const runningAutomationProgressLabel = React.useMemo(() => {
+    if (!promptAutomationJob?.running) return '';
+    const completed = Math.max(0, Number(promptAutomationJob.runsCompleted ?? 0) || 0);
+    const total = Math.max(0, Number(promptAutomationJob.runsTotal ?? 0) || 0);
+    return `Running ${completed}/${total}`;
+  }, [promptAutomationJob]);
+  const runningAutomationHasRenderedGroup = React.useMemo(() => {
+    if (!promptAutomationJob?.running) return false;
+    if (!runningAutomationIdentity) return false;
+    for (const block of transcriptRenderBlocks) {
+      if (block.kind !== 'prompt-loop-group') continue;
+      if (block.identity === runningAutomationIdentity) return true;
+    }
+    for (const group of pendingPromptLoopGroups) {
+      if (group.identity === runningAutomationIdentity) return true;
+    }
+    return false;
+  }, [pendingPromptLoopGroups, promptAutomationJob, runningAutomationIdentity, transcriptRenderBlocks]);
+  const pendingTimelineBlocks = React.useMemo(() => {
+    const items: Array<
+      | { kind: 'prompt-loop-group'; key: string; identity: string; pendingRuns: PendingPrompt[]; sortMs: number; order: number }
+      | { kind: 'pending-prompt'; key: string; item: PendingPrompt; sortMs: number; order: number }
+      | { kind: 'queued-automation'; key: string; queueId: string; sortMs: number; order: number }
+      | { kind: 'running-automation'; key: string; sortMs: number; order: number }
+    > = [];
+    let order = 0;
+    for (const group of pendingOnlyPromptLoopGroups) {
+      const sortMs = group.pendingRuns.reduce((min, run) => {
+        const ms = parseIsoMs(run.updatedAt ?? run.at);
+        return ms < min ? ms : min;
+      }, Number.MAX_SAFE_INTEGER);
+      items.push({
+        kind: 'prompt-loop-group',
+        key: `pending-loop:${group.key}`,
+        identity: group.identity,
+        pendingRuns: group.pendingRuns,
+        sortMs,
+        order: order++,
+      });
+    }
+    for (const item of pendingPlainPrompts) {
+      items.push({
+        kind: 'pending-prompt',
+        key: `pending-prompt:${item.id}`,
+        item,
+        sortMs: parseIsoMs(item.updatedAt ?? item.at),
+        order: order++,
+      });
+    }
+    for (const queued of queuedAutomationItems) {
+      const queueId = String(queued.queueId ?? '').trim();
+      if (!queueId) continue;
+      items.push({
+        kind: 'queued-automation',
+        key: `queued-automation:${queueId}`,
+        queueId,
+        sortMs: parseIsoMs(queued.enqueuedAt),
+        order: order++,
+      });
+    }
+    if (promptAutomationJob?.running && !runningAutomationHasRenderedGroup) {
+      items.push({
+        kind: 'running-automation',
+        key: `running-automation:${runningAutomationJobKey || String(promptAutomationJob.automationId ?? 'active')}`,
+        sortMs: parseIsoMs(promptAutomationJob.startedAt ?? promptAutomationJob.updatedAt),
+        order: order++,
+      });
+    }
+    items.sort((a, b) => {
+      if (a.sortMs !== b.sortMs) return a.sortMs - b.sortMs;
+      return a.order - b.order;
+    });
+    return items;
+  }, [
+    pendingOnlyPromptLoopGroups,
+    pendingPlainPrompts,
+    promptAutomationJob,
+    queuedAutomationItems,
+    runningAutomationHasRenderedGroup,
+    runningAutomationJobKey,
+  ]);
+  const queuedAutomationById = React.useMemo(() => {
+    const out = new Map<string, (typeof queuedAutomationItems)[number]>();
+    for (const item of queuedAutomationItems) {
+      const id = String(item.queueId ?? '').trim();
+      if (!id) continue;
+      out.set(id, item);
+    }
+    return out;
+  }, [queuedAutomationItems]);
+  const runningPromptLoopHeaderActions = React.useMemo(() => {
+    if (!promptAutomationJob?.running) return null;
+    const stopAllBusy = stoppingPromptAutomationMode === 'all';
+    const stopRunsOnlyBusy = stoppingPromptAutomationMode === 'runs-only';
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => stopPromptAutomation({ mode: 'all', clearQueued: false })}
+          disabled={stopAllBusy || stopRunsOnlyBusy}
+          className={`inline-flex items-center h-6 px-2 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
+            stopAllBusy || stopRunsOnlyBusy
+              ? 'opacity-100 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)]'
+              : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--red)] hover:border-[rgba(255,90,90,.35)]'
+          }`}
+          style={{ fontFamily: 'var(--display)' }}
+          title="Stop remaining runs and skip final message"
+        >
+          {stopAllBusy ? 'Stopping...' : 'Stop all'}
+        </button>
+        <button
+          type="button"
+          onClick={() => stopPromptAutomation({ mode: 'runs-only', clearQueued: false })}
+          disabled={stopAllBusy || stopRunsOnlyBusy}
+          className={`inline-flex items-center h-6 px-2 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
+            stopAllBusy || stopRunsOnlyBusy
+              ? 'opacity-100 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)]'
+              : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--fg-secondary)] hover:border-[var(--border)]'
+          }`}
+          style={{ fontFamily: 'var(--display)' }}
+          title="Stop remaining runs and still send final message when possible"
+        >
+          {stopRunsOnlyBusy ? 'Stopping...' : 'Stop runs only'}
+        </button>
+      </div>
+    );
+  }, [promptAutomationJob, stopPromptAutomation, stoppingPromptAutomationMode]);
   const shouldAutoFocusInput = React.useMemo(() => {
     if (openedEditorFilePath) return false;
     if (chatUiMode === 'transcript') {
@@ -1278,11 +1415,16 @@ export function SelectedDroneWorkspace({
                   <div className="max-w-[1170px] mx-auto px-6 py-5 flex flex-col gap-6">
                     {transcriptRenderBlocks.map((block) => {
                       if (block.kind === 'prompt-loop-group') {
+                        const runningGroup = Boolean(promptAutomationJob?.running) && Boolean(runningAutomationIdentity) && block.identity === runningAutomationIdentity;
                         return (
                           <PromptLoopTranscriptGroup
                             key={block.key}
                             runs={block.runs}
                             pendingRuns={pendingPromptLoopByIdentity.get(block.identity) ?? []}
+                            headerBadgeLabel={runningGroup ? runningAutomationProgressLabel : undefined}
+                            headerBadgeTone={runningGroup ? 'running' : undefined}
+                            headerActions={runningGroup ? runningPromptLoopHeaderActions : undefined}
+                            headerError={runningGroup ? stopPromptAutomationError : null}
                             nowMs={nowMs}
                             onOpenFileReference={onOpenMarkdownFileReference}
                             onOpenLink={tryOpenMarkdownPullRequestInChanges}
@@ -1309,33 +1451,82 @@ export function SelectedDroneWorkspace({
                         />
                       );
                     })}
-                    {pendingOnlyPromptLoopGroups.map((group) => (
-                      <PromptLoopTranscriptGroup
-                        key={group.key}
-                        runs={[]}
-                        pendingRuns={group.pendingRuns}
-                        nowMs={nowMs}
-                        onOpenFileReference={onOpenMarkdownFileReference}
-                        onOpenLink={tryOpenMarkdownPullRequestInChanges}
-                      />
-                    ))}
-                    {pendingPlainPrompts.map((p) => (
-                      <PendingTranscriptTurn
-                        key={`pending-${p.id}`}
-                        item={p}
-                        nowMs={nowMs}
-                        onCancelQueued={requestCancelPendingPrompt}
-                        onRequestUnstick={requestUnstickPendingPrompt}
-                        onOpenFileReference={onOpenMarkdownFileReference}
-                        onOpenLink={tryOpenMarkdownPullRequestInChanges}
-                        droneId={currentDrone.id}
-                        droneHomePath={droneHomePath(currentDrone)}
-                        cancelBusy={Boolean(cancellingPendingPromptById[p.id])}
-                        cancelError={cancelPendingPromptErrorById[p.id] ?? null}
-                        unstickBusy={Boolean(unstickingPendingPromptById[p.id])}
-                        unstickError={unstickPendingPromptErrorById[p.id] ?? null}
-                      />
-                    ))}
+                    {pendingTimelineBlocks.map((item) => {
+                      if (item.kind === 'pending-prompt') {
+                        const p = item.item;
+                        return (
+                          <PendingTranscriptTurn
+                            key={item.key}
+                            item={p}
+                            nowMs={nowMs}
+                            onCancelQueued={requestCancelPendingPrompt}
+                            onRequestUnstick={requestUnstickPendingPrompt}
+                            onOpenFileReference={onOpenMarkdownFileReference}
+                            onOpenLink={tryOpenMarkdownPullRequestInChanges}
+                            droneId={currentDrone.id}
+                            droneHomePath={droneHomePath(currentDrone)}
+                            cancelBusy={Boolean(cancellingPendingPromptById[p.id])}
+                            cancelError={cancelPendingPromptErrorById[p.id] ?? null}
+                            unstickBusy={Boolean(unstickingPendingPromptById[p.id])}
+                            unstickError={unstickPendingPromptErrorById[p.id] ?? null}
+                          />
+                        );
+                      }
+                      if (item.kind === 'prompt-loop-group') {
+                        const runningGroup =
+                          Boolean(promptAutomationJob?.running) && Boolean(runningAutomationIdentity) && item.identity === runningAutomationIdentity;
+                        return (
+                          <PromptLoopTranscriptGroup
+                            key={item.key}
+                            runs={[]}
+                            pendingRuns={item.pendingRuns}
+                            headerBadgeLabel={runningGroup ? runningAutomationProgressLabel : undefined}
+                            headerBadgeTone={runningGroup ? 'running' : undefined}
+                            headerActions={runningGroup ? runningPromptLoopHeaderActions : undefined}
+                            headerError={runningGroup ? stopPromptAutomationError : null}
+                            nowMs={nowMs}
+                            onOpenFileReference={onOpenMarkdownFileReference}
+                            onOpenLink={tryOpenMarkdownPullRequestInChanges}
+                          />
+                        );
+                      }
+                      if (item.kind === 'queued-automation') {
+                        const queued = queuedAutomationById.get(item.queueId);
+                        if (!queued) return null;
+                        const queueId = String(queued.queueId ?? '').trim();
+                        return (
+                          <AutomationLaneStatusCard
+                            key={item.key}
+                            nowMs={nowMs}
+                            status="queued"
+                            automationLabel={String(queued.automationLabel ?? '').trim() || String(queued.automationId ?? '').trim() || 'Automation'}
+                            runsTotal={Number(queued.runsTotal ?? 0) || 0}
+                            atIso={queued.enqueuedAt}
+                            queueId={queueId}
+                            cancelBusy={Boolean(cancellingQueuedAutomationById[queueId])}
+                            cancelError={cancelQueuedAutomationErrorById[queueId] ?? null}
+                            onCancelQueued={cancelQueuedPromptAutomation}
+                          />
+                        );
+                      }
+                      if (!promptAutomationJob?.running) return null;
+                      return (
+                        <AutomationLaneStatusCard
+                          key={item.key}
+                          nowMs={nowMs}
+                          status="running"
+                          automationLabel={String(promptAutomationJob.automationLabel ?? '').trim() || 'Automation'}
+                          runsTotal={Number(promptAutomationJob.runsTotal ?? 0) || 0}
+                          runsCompleted={Number(promptAutomationJob.runsCompleted ?? 0) || 0}
+                          atIso={promptAutomationJob.startedAt ?? promptAutomationJob.updatedAt}
+                          stopAllBusy={stoppingPromptAutomationMode === 'all'}
+                          stopRunsOnlyBusy={stoppingPromptAutomationMode === 'runs-only'}
+                          stopError={stopPromptAutomationError}
+                          onStopAll={() => stopPromptAutomation({ mode: 'all', clearQueued: false })}
+                          onStopRunsOnly={() => stopPromptAutomation({ mode: 'runs-only', clearQueued: false })}
+                        />
+                      );
+                    })}
                     <div ref={chatEndRef as React.RefObject<HTMLDivElement>} />
                   </div>
                 ) : (
@@ -1399,12 +1590,6 @@ export function SelectedDroneWorkspace({
 
           {!openedEditorFilePath && (
             <>
-              <QueuedAutomationPanel
-                items={queuedAutomationItems}
-                cancellingById={cancellingQueuedAutomationById}
-                cancelErrorById={cancelQueuedAutomationErrorById}
-                onCancel={cancelQueuedPromptAutomation}
-              />
               <ChatInput
                 resetKey={`${selectedDroneIdentity}:${selectedChat ?? ''}`}
                 droneName={currentDrone.name}
@@ -1414,7 +1599,6 @@ export function SelectedDroneWorkspace({
                 promptError={promptError}
                 sending={sendingPrompt}
                 waiting={chatUiMode === 'transcript' && visiblePendingPromptsWithStartup.some((p) => p.state !== 'failed')}
-                modeHint={automationModeHint}
                 automationActions={chatAutomationActions}
                 lockComposerWhileAutomationActive={false}
                 autoFocus={shouldAutoFocusInput}
