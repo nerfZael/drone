@@ -1011,6 +1011,28 @@ function normalizePromptAutomationSleepBetweenRunsSeconds(raw: unknown): number 
   );
 }
 
+function normalizePromptAutomationSleepBetweenRunsSecondsFromBody(raw: unknown): number {
+  const body = raw && typeof raw === 'object' ? (raw as any) : {};
+  const directSecondsRaw = Number(body?.sleepBetweenRunsSeconds);
+  if (Number.isFinite(directSecondsRaw)) {
+    return normalizePromptAutomationSleepBetweenRunsSeconds(directSecondsRaw);
+  }
+
+  const amountRaw = Number(body?.sleepAmount);
+  if (!Number.isFinite(amountRaw)) return PROMPT_AUTOMATION_SLEEP_BETWEEN_RUNS_SECONDS_DEFAULT;
+  const amount = Math.max(0, Math.round(amountRaw));
+  const unitRaw = String(body?.sleepUnit ?? '').trim().toLowerCase();
+  const multiplier =
+    unitRaw === 'days'
+      ? 24 * 60 * 60
+      : unitRaw === 'hours'
+        ? 60 * 60
+        : unitRaw === 'minutes'
+          ? 60
+          : 1;
+  return normalizePromptAutomationSleepBetweenRunsSeconds(amount * multiplier);
+}
+
 function normalizePromptAutomationStopPhrase(raw: unknown): string {
   return String(raw ?? '').trim().slice(0, PROMPT_AUTOMATION_STOP_PHRASE_MAX_CHARS);
 }
@@ -2448,7 +2470,9 @@ async function readPromptAutomationTurnOutput(opts: {
     : [];
   const found = turns.find((t: any) => String(t?.id ?? '').trim() === opts.promptId) ?? null;
   if (!found) return '';
-  return String(found?.output ?? '');
+  const output = String(found?.output ?? '');
+  const error = String(found?.error ?? '');
+  return [output, error].filter(Boolean).join('\n');
 }
 
 function promptAutomationOutputContainsStopPhrase(opts: {
@@ -2460,8 +2484,10 @@ function promptAutomationOutputContainsStopPhrase(opts: {
   if (!phrase) return false;
   const output = String(opts.output ?? '');
   if (!output) return false;
-  if (opts.caseSensitive) return output.includes(phrase);
-  return output.toLowerCase().includes(phrase.toLowerCase());
+  const normalizedOutput = stripAnsiFromCliOutput(output);
+  if (opts.caseSensitive) return output.includes(phrase) || normalizedOutput.includes(phrase);
+  const lowerPhrase = phrase.toLowerCase();
+  return output.toLowerCase().includes(lowerPhrase) || normalizedOutput.toLowerCase().includes(lowerPhrase);
 }
 
 async function sendPromptAutomationFinalMessage(
@@ -3362,7 +3388,7 @@ async function enqueuePrompt(opts: {
   automation?: PromptAutomationMeta | null;
   cwd?: string | null;
   waitForDaemonMs?: number;
-}): Promise<{ id: string }> {
+}): Promise<{ id: string; pendingState: PendingPromptState; blockedByAutomation: boolean }> {
   const preferredIdRaw = typeof opts.id === 'string' ? opts.id.trim() : '';
   if (preferredIdRaw && !isSafePromptId(preferredIdRaw)) {
     throw new Error('invalid promptId');
@@ -3468,7 +3494,7 @@ async function enqueuePrompt(opts: {
     }
     // Persisted as queued; a reconcile/update that establishes session id will pump it.
     enqueuePendingPromptPump(droneId, chatName);
-    return { id };
+    return { id, pendingState: 'queued', blockedByAutomation };
   }
 
   try {
@@ -3513,7 +3539,7 @@ async function enqueuePrompt(opts: {
 
   // Best-effort: if there are any deferred follow-ups, try to enqueue now.
   enqueuePendingPromptPump(droneId, chatName);
-  return { id };
+  return { id, pendingState: 'sending', blockedByAutomation };
 }
 
 type UnifiedPromptCreateOpts = {
@@ -3532,7 +3558,7 @@ async function createOrEnqueuePromptUnified(opts: {
   automation?: PromptAutomationMeta | null;
   cwd?: string | null;
 }): Promise<
-  | { kind: 'enqueued'; id: string }
+  | { kind: 'enqueued'; id: string; pendingState: PendingPromptState; blockedByAutomation: boolean }
   | { kind: 'error'; status: number; error: string }
 > {
   const droneId = normalizeDroneIdentity(opts.droneId);
@@ -3559,7 +3585,12 @@ async function createOrEnqueuePromptUnified(opts: {
       automation: opts.automation,
       cwd: opts.cwd ?? null,
     });
-    return { kind: 'enqueued', id: r.id };
+    return {
+      kind: 'enqueued',
+      id: r.id,
+      pendingState: r.pendingState,
+      blockedByAutomation: r.blockedByAutomation,
+    };
   }
 
   // In v2, all addressing is by stable id; callers should create drones explicitly via POST /api/drones.
@@ -10246,7 +10277,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const prompt = String(body?.prompt ?? '').trim();
         const onFailurePrompt = normalizePromptAutomationOnFailurePrompt(body?.onFailurePrompt);
         const runs = normalizePromptAutomationRuns(body?.runs);
-        const sleepBetweenRunsSeconds = normalizePromptAutomationSleepBetweenRunsSeconds(body?.sleepBetweenRunsSeconds);
+        const sleepBetweenRunsSeconds = normalizePromptAutomationSleepBetweenRunsSecondsFromBody(body);
         const stopPhrase = normalizePromptAutomationStopPhrase(body?.stopPhrase);
         const stopPhraseCaseSensitive = normalizePromptAutomationStopPhraseCaseSensitive(body?.stopPhraseCaseSensitive);
         if (!automationId) {
@@ -10442,7 +10473,16 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             json(res, r.status, { ok: false, error: r.error });
             return;
           }
-          json(res, 202, { ok: true, accepted: true, id: droneId, name: droneName, chat, promptId: r.id });
+          json(res, 202, {
+            ok: true,
+            accepted: true,
+            id: droneId,
+            name: droneName,
+            chat,
+            promptId: r.id,
+            pendingState: r.pendingState,
+            blockedByAutomation: r.blockedByAutomation,
+          });
           return;
         } catch (e: any) {
           const msg = e?.message ?? String(e);

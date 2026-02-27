@@ -126,9 +126,14 @@ export function useChatRuntimeOrchestration({
   }, []);
 
   const addOptimisticPendingPrompt = React.useCallback(
-    (id: string, prompt: string, attachmentsRaw?: unknown) => {
+    (id: string, prompt: string, attachmentsRaw?: unknown, opts?: { state?: PendingPrompt['state']; blockedByAutomation?: boolean }) => {
       if (!id) return;
       const attachments = optimisticAttachmentRefsFromPayload(attachmentsRaw);
+      const nextStateRaw = String(opts?.state ?? '').trim();
+      const nextState: PendingPrompt['state'] =
+        nextStateRaw === 'queued' || nextStateRaw === 'sending' || nextStateRaw === 'sent' || nextStateRaw === 'failed'
+          ? nextStateRaw
+          : 'sending';
       setOptimisticPendingPrompts((prev) => {
         if (prev.some((p) => p.id === id)) return prev;
         return [
@@ -138,7 +143,8 @@ export function useChatRuntimeOrchestration({
             at: new Date().toISOString(),
             prompt,
             ...(attachments.length > 0 ? { attachments } : {}),
-            state: 'sending',
+            state: nextState,
+            ...(opts?.blockedByAutomation ? { blockedByAutomation: true } : {}),
           },
         ];
       });
@@ -230,7 +236,13 @@ export function useChatRuntimeOrchestration({
       setSendingPromptCount((c) => c + 1);
       setPromptError(null);
       try {
-        const data = await requestJson<{ ok: true; accepted: true; promptId: string }>(
+        const data = await requestJson<{
+          ok: true;
+          accepted: true;
+          promptId: string;
+          pendingState?: PendingPrompt['state'];
+          blockedByAutomation?: boolean;
+        }>(
           `/api/drones/${encodeURIComponent(currentDrone.id)}/chats/${encodeURIComponent(selectedChat || 'default')}/prompt`,
           {
             method: 'POST',
@@ -240,7 +252,12 @@ export function useChatRuntimeOrchestration({
         );
         if (chatUiMode === 'cli') bumpCliTyping();
         const id = String((data as any)?.promptId ?? '').trim();
-        if (chatUiMode === 'transcript') addOptimisticPendingPrompt(id, optimisticPrompt, attachments);
+        if (chatUiMode === 'transcript') {
+          addOptimisticPendingPrompt(id, optimisticPrompt, attachments, {
+            state: data?.pendingState,
+            blockedByAutomation: data?.blockedByAutomation === true,
+          });
+        }
         return true;
       } catch (e: any) {
         setPromptError(e?.message ?? String(e));
@@ -363,7 +380,13 @@ export function useChatRuntimeOrchestration({
 
           patchQueuedPrompt(key, head.id, { state: 'sending', error: undefined });
           try {
-            const data = await requestJson<{ ok: true; accepted: true; promptId: string }>(
+            const data = await requestJson<{
+              ok: true;
+              accepted: true;
+              promptId: string;
+              pendingState?: PendingPrompt['state'];
+              blockedByAutomation?: boolean;
+            }>(
               `/api/drones/${encodeURIComponent(parsed.droneId)}/chats/${encodeURIComponent(parsed.chatName)}/prompt`,
               {
                 method: 'POST',
@@ -381,7 +404,12 @@ export function useChatRuntimeOrchestration({
               parsed.chatName === (String(selectedChat ?? '').trim() || 'default');
             if (selectedKeyMatches) {
               if (chatUiMode === 'cli') bumpCliTyping();
-              if (chatUiMode === 'transcript') addOptimisticPendingPrompt(id, head.prompt, head.attachments);
+              if (chatUiMode === 'transcript') {
+                addOptimisticPendingPrompt(id, head.prompt, head.attachments, {
+                  state: data?.pendingState,
+                  blockedByAutomation: data?.blockedByAutomation === true,
+                });
+              }
             }
           } catch (e: any) {
             const errText = e?.message ?? String(e);

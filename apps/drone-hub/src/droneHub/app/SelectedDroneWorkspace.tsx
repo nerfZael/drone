@@ -41,79 +41,14 @@ import {
   buildTranscriptRenderBlocks,
   type TranscriptRenderBlock,
 } from './prompt-loop-groups';
-
-function editorLanguageForPath(filePath: string): string {
-  const lower = String(filePath ?? '').trim().toLowerCase();
-  const seg = lower.split('/').pop() ?? lower;
-  if (seg === 'dockerfile') return 'dockerfile';
-  if (seg === 'makefile') return 'makefile';
-  if (seg.endsWith('.ts')) return 'typescript';
-  if (seg.endsWith('.tsx')) return 'typescript';
-  if (seg.endsWith('.js')) return 'javascript';
-  if (seg.endsWith('.jsx')) return 'javascript';
-  if (seg.endsWith('.json')) return 'json';
-  if (seg.endsWith('.md')) return 'markdown';
-  if (seg.endsWith('.py')) return 'python';
-  if (seg.endsWith('.go')) return 'go';
-  if (seg.endsWith('.rs')) return 'rust';
-  if (seg.endsWith('.sh') || seg.endsWith('.bash') || seg.endsWith('.zsh')) return 'shell';
-  if (seg.endsWith('.yml') || seg.endsWith('.yaml')) return 'yaml';
-  if (seg.endsWith('.xml')) return 'xml';
-  if (seg.endsWith('.html') || seg.endsWith('.htm')) return 'html';
-  if (seg.endsWith('.css')) return 'css';
-  if (seg.endsWith('.scss')) return 'scss';
-  return 'plaintext';
-}
-
-function formatEditorMtime(mtimeMs: number | null): string {
-  if (typeof mtimeMs !== 'number' || !Number.isFinite(mtimeMs) || mtimeMs <= 0) return 'Unknown';
-  try {
-    return new Date(mtimeMs).toLocaleString();
-  } catch {
-    return 'Unknown';
-  }
-}
-
-function formatBytes(value: number | null | undefined): string {
-  const n = Number(value);
-  if (!Number.isFinite(n) || n < 0) return '-';
-  if (n < 1024) return `${Math.floor(n)} B`;
-  const units = ['KB', 'MB', 'GB', 'TB'];
-  let v = n / 1024;
-  let idx = 0;
-  while (v >= 1024 && idx < units.length - 1) {
-    v /= 1024;
-    idx += 1;
-  }
-  const precision = v >= 100 ? 0 : v >= 10 ? 1 : 2;
-  return `${v.toFixed(precision)} ${units[idx]}`;
-}
-
-function parseIsoMs(raw: string | null | undefined): number {
-  const ms = Date.parse(String(raw ?? ''));
-  return Number.isFinite(ms) ? ms : Number.MAX_SAFE_INTEGER;
-}
-
-function parseGithubPullRequestHref(
-  hrefRaw: string,
-): { owner: string; repo: string; pullNumber: number } | null {
-  const href = String(hrefRaw ?? '').trim();
-  if (!href) return null;
-  let u: URL;
-  try {
-    u = new URL(href);
-  } catch {
-    return null;
-  }
-  if (u.protocol !== 'https:' || String(u.hostname || '').toLowerCase() !== 'github.com') return null;
-  const m = /^\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:\/|$)/i.exec(String(u.pathname ?? '').trim());
-  if (!m) return null;
-  const owner = String(m[1] ?? '').trim().toLowerCase();
-  const repo = String(m[2] ?? '').trim().toLowerCase();
-  const pullNumber = Number(m[3]);
-  if (!owner || !repo || !Number.isFinite(pullNumber) || pullNumber <= 0) return null;
-  return { owner, repo, pullNumber: Math.floor(pullNumber) };
-}
+import { resolveRunningPromptLoopIdentity } from './prompt-loop-running-identity';
+import {
+  editorLanguageForPath,
+  formatBytes,
+  formatEditorMtime,
+  parseGithubPullRequestHref,
+  parseIsoMs,
+} from './selected-drone-workspace-utils';
 
 type LaunchHint =
   | {
@@ -428,25 +363,20 @@ export function SelectedDroneWorkspace({
     return pendingPromptLoopGroups.filter((group) => !transcriptIdentities.has(group.identity));
   }, [pendingPromptLoopGroups, transcriptRenderBlocks]);
   const runningAutomationJobKey = String(promptAutomationJob?.running ? promptAutomationJob?.jobKey ?? '' : '').trim();
-  const runningAutomationIdentity = runningAutomationJobKey ? `job:${runningAutomationJobKey}` : '';
+  const runningAutomationIdentity = React.useMemo(() => {
+    return resolveRunningPromptLoopIdentity({
+      job: promptAutomationJob,
+      transcriptRenderBlocks,
+      pendingPromptLoopGroups,
+    });
+  }, [pendingPromptLoopGroups, promptAutomationJob, transcriptRenderBlocks]);
   const runningAutomationProgressLabel = React.useMemo(() => {
     if (!promptAutomationJob?.running) return '';
     const completed = Math.max(0, Number(promptAutomationJob.runsCompleted ?? 0) || 0);
     const total = Math.max(0, Number(promptAutomationJob.runsTotal ?? 0) || 0);
     return `Running ${completed}/${total}`;
   }, [promptAutomationJob]);
-  const runningAutomationHasRenderedGroup = React.useMemo(() => {
-    if (!promptAutomationJob?.running) return false;
-    if (!runningAutomationIdentity) return false;
-    for (const block of transcriptRenderBlocks) {
-      if (block.kind !== 'prompt-loop-group') continue;
-      if (block.identity === runningAutomationIdentity) return true;
-    }
-    for (const group of pendingPromptLoopGroups) {
-      if (group.identity === runningAutomationIdentity) return true;
-    }
-    return false;
-  }, [pendingPromptLoopGroups, promptAutomationJob, runningAutomationIdentity, transcriptRenderBlocks]);
+  const runningAutomationHasRenderedGroup = Boolean(promptAutomationJob?.running && runningAutomationIdentity);
   const pendingTimelineBlocks = React.useMemo(() => {
     const items: Array<
       | { kind: 'prompt-loop-group'; key: string; identity: string; pendingRuns: PendingPrompt[]; sortMs: number; order: number }

@@ -37,6 +37,27 @@ function makeAutomationId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function sleepConfigFromLegacySeconds(rawSeconds: unknown): Pick<AutomationConfig, 'sleepAmount' | 'sleepUnit'> {
+  const secondsRaw = Number(rawSeconds);
+  if (!Number.isFinite(secondsRaw) || secondsRaw <= 0) {
+    return {
+      sleepAmount: AUTOMATION_SLEEP_AMOUNT_DEFAULT,
+      sleepUnit: AUTOMATION_SLEEP_UNIT_DEFAULT,
+    };
+  }
+  const seconds = Math.max(0, Math.round(secondsRaw));
+  if (seconds % (24 * 60 * 60) === 0) {
+    return { sleepAmount: normalizeAutomationSleepAmount(seconds / (24 * 60 * 60)), sleepUnit: 'days' };
+  }
+  if (seconds % (60 * 60) === 0) {
+    return { sleepAmount: normalizeAutomationSleepAmount(seconds / (60 * 60)), sleepUnit: 'hours' };
+  }
+  if (seconds % 60 === 0) {
+    return { sleepAmount: normalizeAutomationSleepAmount(seconds / 60), sleepUnit: 'minutes' };
+  }
+  return { sleepAmount: normalizeAutomationSleepAmount(seconds), sleepUnit: 'seconds' };
+}
+
 export function normalizeAutomationRuns(value: unknown): number {
   const n = Number(value);
   if (!Number.isFinite(n)) return AUTOMATION_RUNS_DEFAULT;
@@ -102,14 +123,22 @@ export function formatAutomationSleepInterval(seed: Pick<AutomationConfig, 'slee
 }
 
 export function createAutomationConfig(seed?: Partial<AutomationConfig>): AutomationConfig {
+  const hasSleepAmount = Boolean(seed && typeof seed === 'object' && Object.prototype.hasOwnProperty.call(seed, 'sleepAmount'));
+  const hasSleepUnit = Boolean(seed && typeof seed === 'object' && Object.prototype.hasOwnProperty.call(seed, 'sleepUnit'));
+  const legacySleep = sleepConfigFromLegacySeconds((seed as any)?.sleepBetweenRunsSeconds);
+  const sleepAmount = hasSleepAmount ? normalizeAutomationSleepAmount(seed?.sleepAmount) : legacySleep.sleepAmount;
+  const sleepUnit = hasSleepUnit
+    ? normalizeAutomationSleepUnit(seed?.sleepUnit ?? AUTOMATION_SLEEP_UNIT_DEFAULT)
+    : legacySleep.sleepUnit;
+
   return {
     id: String(seed?.id ?? '').trim() || makeAutomationId(),
     label: normalizeAutomationLabel(seed?.label ?? ''),
     prompt: normalizeAutomationPrompt(seed?.prompt ?? ''),
     onFailurePrompt: normalizeAutomationOnFailurePrompt(seed?.onFailurePrompt ?? ''),
     runs: normalizeAutomationRuns(seed?.runs),
-    sleepAmount: normalizeAutomationSleepAmount(seed?.sleepAmount),
-    sleepUnit: normalizeAutomationSleepUnit(seed?.sleepUnit ?? AUTOMATION_SLEEP_UNIT_DEFAULT),
+    sleepAmount,
+    sleepUnit,
     stopPhrase: normalizeAutomationStopPhrase(seed?.stopPhrase),
     stopPhraseCaseSensitive: normalizeAutomationStopPhraseCaseSensitive(
       seed?.stopPhraseCaseSensitive ?? AUTOMATION_STOP_PHRASE_CASE_SENSITIVE_DEFAULT,
