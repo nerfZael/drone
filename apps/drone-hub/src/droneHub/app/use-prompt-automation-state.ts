@@ -1,10 +1,18 @@
 import React from 'react';
 import type { ChatInputAutomationAction } from '../chat';
 import { requestJson } from '../http';
-import { AUTOMATION_RUNS_MAX, AUTOMATION_RUNS_MIN, type AutomationConfig } from './automation-config';
+import {
+  AUTOMATION_RUNS_MAX,
+  AUTOMATION_RUNS_MIN,
+  automationSleepSecondsFromConfig,
+  formatAutomationSleepInterval,
+  type AutomationConfig,
+} from './automation-config';
 import { beginRecordBusyKey, removeRecordKey } from './keyed-record-state';
 
 const PROMPT_AUTOMATION_STATUS_POLL_MS = 1200;
+const PROMPT_AUTOMATION_ERROR_HINT_MAX_CHARS = 120;
+const PROMPT_AUTOMATION_STATUS_HINT_MAX_CHARS = 96;
 
 function clampPromptAutomationRuns(value: unknown): number {
   const num = Number(value);
@@ -19,6 +27,9 @@ export type PromptAutomationQueuedSnapshot = {
   automationId: string;
   automationLabel: string;
   runsTotal: number;
+  sleepBetweenRunsSeconds?: number;
+  stopPhrase?: string;
+  stopPhraseCaseSensitive?: boolean;
   enqueuedAt: string;
 };
 
@@ -28,6 +39,12 @@ export type PromptAutomationJobSnapshot = {
   automationId: string | null;
   automationLabel: string | null;
   runsTotal: number;
+  sleepBetweenRunsSeconds?: number;
+  stopPhrase?: string;
+  stopPhraseCaseSensitive?: boolean;
+  finishedEarly?: boolean;
+  finishedEarlyReason?: string | null;
+  finishedEarlyRunIndex?: number | null;
   runsCompleted: number;
   startedAt: string | null;
   updatedAt: string | null;
@@ -59,12 +76,120 @@ type UsePromptAutomationStateArgs = {
   automations: AutomationConfig[];
 };
 
+type PromptAutomationRuntimeConfig = {
+  automationId: string;
+  automationLabel: string;
+  prompt: string;
+  onFailurePrompt: string;
+  runs: number;
+  sleepBetweenRunsSeconds: number;
+  sleepBetweenRunsLabel: string;
+  sleepSuffix: string;
+  stopPhrase: string;
+  stopPhraseCaseSensitive: boolean;
+  stopPhraseSuffix: string;
+};
+
 function queuedItemsFromJob(job: PromptAutomationJobSnapshot | null): PromptAutomationQueuedSnapshot[] {
   return Array.isArray(job?.queued) ? job.queued : [];
 }
 
 function queuedCountFromJob(job: PromptAutomationJobSnapshot | null): number {
   return Math.max(0, Number(job?.queuedCount ?? queuedItemsFromJob(job).length) || 0);
+}
+
+function automationActionTitle(opts: {
+  active: boolean;
+  configLabel: string;
+  configRuns: number;
+  configPrompt: string;
+  configOnFailurePrompt: string;
+  laneBusy: boolean;
+  queueAfterText: string;
+  sleepSuffix: string;
+  stopPhraseSuffix: string;
+  supportedMode: boolean;
+}): string {
+  const {
+    active,
+    configLabel,
+    configRuns,
+    configPrompt,
+    configOnFailurePrompt,
+    laneBusy,
+    queueAfterText,
+    sleepSuffix,
+    stopPhraseSuffix,
+    supportedMode,
+  } = opts;
+
+  if (active) return `Stop "${configLabel}".`;
+  if (!supportedMode) return 'Switch to a builtin agent (transcript mode) to run automations.';
+  if (!configPrompt) return `Set a prompt for "${configLabel}" in Settings > Automation first.`;
+  if (laneBusy) return `Queue "${configLabel}" (${configRuns} runs${sleepSuffix}). It will run after ${queueAfterText}.`;
+  if (configOnFailurePrompt) {
+    return `Run "${configLabel}" for ${configRuns} iterations${sleepSuffix}${stopPhraseSuffix}, then send the final message if at least one run succeeds.`;
+  }
+  return `Run "${configLabel}" for ${configRuns} iterations${sleepSuffix}${stopPhraseSuffix}, waiting for each response.`;
+}
+
+function automationActionStatusText(opts: {
+  active: boolean;
+  completedRuns: number;
+  totalRuns: number;
+  queuedForAction: number;
+  laneBusy: boolean;
+  configRuns: number;
+}): string {
+  const { active, completedRuns, totalRuns, queuedForAction, laneBusy, configRuns } = opts;
+  if (active) return `${completedRuns}/${totalRuns}`;
+  if (queuedForAction > 0) return `${queuedForAction} queued`;
+  if (laneBusy) return `queue (${configRuns} runs)`;
+  return `${configRuns} runs`;
+}
+
+function promptAutomationApiPath(droneId: string, chatName: string, suffix: string): string {
+  return `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/automations/${suffix}`;
+}
+
+function normalizeHintMessage(message: unknown, maxChars: number): string {
+  const normalized = String(message ?? '').replace(/\s+/g, ' ').trim();
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxChars - 3))}...`;
+}
+
+function normalizePromptAutomationRuntimeConfig(
+  automation: AutomationConfig,
+  opts?: { fallbackLabel?: string },
+): PromptAutomationRuntimeConfig {
+  const fallbackLabel = String(opts?.fallbackLabel ?? '').trim() || 'Automation';
+  const automationId = String(automation.id ?? '').trim();
+  const automationLabel = String(automation.label ?? '').trim() || fallbackLabel;
+  const prompt = String(automation.prompt ?? '').trim();
+  const onFailurePrompt = String(automation.onFailurePrompt ?? '').trim();
+  const runs = clampPromptAutomationRuns(automation.runs);
+  const sleepBetweenRunsSeconds = automationSleepSecondsFromConfig(automation);
+  const sleepBetweenRunsLabel = formatAutomationSleepInterval(automation);
+  const sleepSuffix = sleepBetweenRunsSeconds > 0 ? ` with ${sleepBetweenRunsLabel.toLowerCase()} between runs` : '';
+  const stopPhrase = String(automation.stopPhrase ?? '').trim();
+  const stopPhraseCaseSensitive = Boolean(automation.stopPhraseCaseSensitive);
+  const stopPhraseSuffix = stopPhrase
+    ? `; stop early when output contains "${stopPhrase}"${stopPhraseCaseSensitive ? ' (case-sensitive)' : ''}`
+    : '';
+
+  return {
+    automationId,
+    automationLabel,
+    prompt,
+    onFailurePrompt,
+    runs,
+    sleepBetweenRunsSeconds,
+    sleepBetweenRunsLabel,
+    sleepSuffix,
+    stopPhrase,
+    stopPhraseCaseSensitive,
+    stopPhraseSuffix,
+  };
 }
 
 export function usePromptAutomationState({
@@ -91,7 +216,7 @@ export function usePromptAutomationState({
     const load = async () => {
       try {
         const data = await requestJson<PromptAutomationStatusResponse>(
-          `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/automations/status`,
+          promptAutomationApiPath(droneId, chatName, 'status'),
         );
         if (!mounted) return;
         setPromptAutomationJob(data.job);
@@ -112,7 +237,7 @@ export function usePromptAutomationState({
   }, [chatName, droneId]);
 
   const startPromptAutomation = React.useCallback(
-    (automation: AutomationConfig) => {
+    (automation: AutomationConfig, opts?: { runs?: unknown }) => {
       if (promptAutomationBusy) return;
       setPromptAutomationBusy(true);
       setPromptAutomationError(null);
@@ -122,24 +247,30 @@ export function usePromptAutomationState({
         setPromptAutomationError('Automation is only available in transcript mode (builtin agents).');
         return;
       }
-      const automationId = String(automation.id ?? '').trim();
-      const automationLabel = String(automation.label ?? '').trim() || 'Automation';
-      const prompt = String(automation.prompt ?? '').trim();
-      const onFailurePrompt = String(automation.onFailurePrompt ?? '').trim();
-      if (!prompt) {
+      const config = normalizePromptAutomationRuntimeConfig(automation);
+      if (!config.prompt) {
         setPromptAutomationBusy(false);
-        setPromptAutomationError(`"${automationLabel}" prompt is empty. Update it in Settings > Automation.`);
+        setPromptAutomationError(`"${config.automationLabel}" prompt is empty. Update it in Settings > Automation.`);
         return;
       }
-      const runs = clampPromptAutomationRuns(automation.runs);
+      const runs = clampPromptAutomationRuns(opts?.runs ?? config.runs);
       void (async () => {
         try {
           const data = await requestJson<PromptAutomationStatusResponse>(
-            `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/automations/start`,
+            promptAutomationApiPath(droneId, chatName, 'start'),
             {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ automationId, automationLabel, prompt, onFailurePrompt, runs }),
+              body: JSON.stringify({
+                automationId: config.automationId,
+                automationLabel: config.automationLabel,
+                prompt: config.prompt,
+                onFailurePrompt: config.onFailurePrompt,
+                runs,
+                sleepBetweenRunsSeconds: config.sleepBetweenRunsSeconds,
+                stopPhrase: config.stopPhrase,
+                stopPhraseCaseSensitive: config.stopPhraseCaseSensitive,
+              }),
             },
           );
           setPromptAutomationJob(data.job);
@@ -161,10 +292,7 @@ export function usePromptAutomationState({
     setPromptAutomationStatusError(null);
     void (async () => {
       try {
-        const data = await requestJson<PromptAutomationStatusResponse>(
-          `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/automations/stop`,
-          { method: 'POST' },
-        );
+        const data = await requestJson<PromptAutomationStatusResponse>(promptAutomationApiPath(droneId, chatName, 'stop'), { method: 'POST' });
         setPromptAutomationJob(data.job);
       } catch (e: any) {
         setPromptAutomationError(e?.message ?? String(e));
@@ -187,7 +315,7 @@ export function usePromptAutomationState({
       void (async () => {
         try {
           const data = await requestJson<PromptAutomationQueuedCancelResponse>(
-            `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/automations/queued/${encodeURIComponent(queueId)}`,
+            promptAutomationApiPath(droneId, chatName, `queued/${encodeURIComponent(queueId)}`),
             { method: 'DELETE' },
           );
           setPromptAutomationJob(data.job);
@@ -228,49 +356,57 @@ export function usePromptAutomationState({
       queuedByAutomationId.set(id, (queuedByAutomationId.get(id) ?? 0) + 1);
     }
     const supportedMode = chatUiMode === 'transcript';
-    const actions = automations.map((automation, idx) => {
-      const configLabel = String(automation.label ?? '').trim() || `Automation ${idx + 1}`;
-      const configPrompt = String(automation.prompt ?? '').trim();
-      const configOnFailurePrompt = String(automation.onFailurePrompt ?? '').trim();
-      const configRuns = clampPromptAutomationRuns(automation.runs);
-      const active = running && runningAutomationId === automation.id;
-      const queuedForAction = queuedByAutomationId.get(String(automation.id ?? '').trim()) ?? 0;
+    const actions: ChatInputAutomationAction[] = automations.map((automation, idx) => {
+      const config = normalizePromptAutomationRuntimeConfig(automation, { fallbackLabel: `Automation ${idx + 1}` });
+      const active = running && runningAutomationId === config.automationId;
+      const queuedForAction = queuedByAutomationId.get(config.automationId) ?? 0;
       return {
-        id: `automation:${automation.id}`,
-        label: active ? `Stop ${configLabel}` : laneBusy ? `Queue ${configLabel}` : `Run ${configLabel}`,
+        id: `automation:${config.automationId}`,
+        kind: 'automation',
+        label: active ? `Stop ${config.automationLabel}` : laneBusy ? `Queue ${config.automationLabel}` : `Run ${config.automationLabel}`,
         onSelect: () => {
           if (active) stopPromptAutomation();
           else startPromptAutomation(automation);
         },
-        title: active
-          ? `Stop "${configLabel}".`
-          : !supportedMode
-            ? 'Switch to a builtin agent (transcript mode) to run automations.'
-            : configPrompt
-                ? configOnFailurePrompt
-                  ? laneBusy
-                    ? `Queue "${configLabel}" (${configRuns} runs). It will run after ${queueAfterText}.`
-                    : `Run "${configLabel}" for ${configRuns} iterations, then send the final message if at least one run succeeds.`
-                  : laneBusy
-                    ? `Queue "${configLabel}" (${configRuns} runs). It will run after ${queueAfterText}.`
-                    : `Run "${configLabel}" for ${configRuns} iterations, waiting for each response.`
-                : `Set a prompt for "${configLabel}" in Settings > Automation first.`,
-        disabled: promptAutomationBusy || (!active && (!supportedMode || configPrompt.length === 0)),
+        onSelectWithRuns: active
+          ? undefined
+          : (runs) => {
+              startPromptAutomation(automation, { runs });
+            },
+        title: automationActionTitle({
+          active,
+          configLabel: config.automationLabel,
+          configRuns: config.runs,
+          configPrompt: config.prompt,
+          configOnFailurePrompt: config.onFailurePrompt,
+          laneBusy,
+          queueAfterText,
+          sleepSuffix: config.sleepSuffix,
+          stopPhraseSuffix: config.stopPhraseSuffix,
+          supportedMode,
+        }),
+        disabled: promptAutomationBusy || (!active && (!supportedMode || config.prompt.length === 0)),
         active,
-        statusText: active
-          ? `${completedRuns}/${totalRuns}`
-          : queuedForAction > 0
-            ? `${queuedForAction} queued`
-            : laneBusy
-              ? `queue (${configRuns} runs)`
-              : `${configRuns} runs`,
+        defaultRuns: config.runs,
+        minRuns: AUTOMATION_RUNS_MIN,
+        maxRuns: AUTOMATION_RUNS_MAX,
+        sleepBetweenRunsLabel: config.sleepBetweenRunsLabel,
+        statusText: automationActionStatusText({
+          active,
+          completedRuns,
+          totalRuns,
+          queuedForAction,
+          laneBusy,
+          configRuns: config.runs,
+        }),
       } satisfies ChatInputAutomationAction;
     });
 
     const hasActiveAction = actions.some((action) => action.active);
     if (!hasActiveAction && laneBusy) {
       actions.push({
-        id: 'automation:active',
+        id: 'automation-control:active',
+        kind: 'control',
         label: running ? `Stop ${runningAutomationLabel}` : 'Clear automation queue',
         onSelect: () => stopPromptAutomation(),
         title: running
@@ -286,13 +422,11 @@ export function usePromptAutomationState({
 
   const automationModeHint = React.useMemo(() => {
     if (promptAutomationError) {
-      const msg = promptAutomationError.replace(/\s+/g, ' ').trim();
-      return `Automation error: ${msg.length > 120 ? `${msg.slice(0, 117)}...` : msg}`;
+      return `Automation error: ${normalizeHintMessage(promptAutomationError, PROMPT_AUTOMATION_ERROR_HINT_MAX_CHARS)}`;
     }
     if (!promptAutomationJob) {
       if (!promptAutomationStatusError) return '';
-      const msg = promptAutomationStatusError.replace(/\s+/g, ' ').trim();
-      return `Automation status unavailable: ${msg.length > 96 ? `${msg.slice(0, 93)}...` : msg}`;
+      return `Automation status unavailable: ${normalizeHintMessage(promptAutomationStatusError, PROMPT_AUTOMATION_STATUS_HINT_MAX_CHARS)}`;
     }
     const queuedCount = queuedCountFromJob(promptAutomationJob);
     const label = String(promptAutomationJob.automationLabel ?? '').trim() || 'Automation';
@@ -305,10 +439,17 @@ export function usePromptAutomationState({
       return `Automation queue: ${queuedCount} waiting.`;
     }
     if (promptAutomationJob.status === 'failed' && promptAutomationJob.error) {
-      const msg = promptAutomationJob.error.replace(/\s+/g, ' ').trim();
-      return `${label} failed: ${msg.length > 120 ? `${msg.slice(0, 117)}...` : msg}`;
+      return `${label} failed: ${normalizeHintMessage(promptAutomationJob.error, PROMPT_AUTOMATION_ERROR_HINT_MAX_CHARS)}`;
     }
     if (promptAutomationJob.status === 'stopped') return `${label} stopped.`;
+    if (promptAutomationJob.finishedEarly) {
+      const run = Number(promptAutomationJob.finishedEarlyRunIndex ?? promptAutomationJob.runsCompleted) || promptAutomationJob.runsCompleted;
+      const stopPhrase = String(promptAutomationJob.stopPhrase ?? '').trim();
+      if (stopPhrase) {
+        return `${label} finished early at run ${run}/${promptAutomationJob.runsTotal} (matched stop phrase).`;
+      }
+      return `${label} finished early at run ${run}/${promptAutomationJob.runsTotal}.`;
+    }
     if (promptAutomationJob.status === 'completed' && promptAutomationJob.runsTotal > 0) {
       return `${label} complete ${promptAutomationJob.runsCompleted}/${promptAutomationJob.runsTotal}`;
     }

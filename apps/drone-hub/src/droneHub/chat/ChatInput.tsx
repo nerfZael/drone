@@ -1,4 +1,16 @@
 import React from 'react';
+import { AutomationRunnerPanel } from './AutomationRunnerPanel';
+import {
+  CHAT_INPUT_MAX_BYTES_EACH,
+  CHAT_INPUT_MAX_BYTES_TOTAL,
+  CHAT_INPUT_MAX_IMAGES,
+  fileToBase64,
+  formatBytes,
+  isLikelyImageFile,
+  makeDraftImageAttachmentId,
+  revokeDraftImagePreviewUrls,
+  type DraftImageAttachment,
+} from './chat-input-attachments';
 
 const CHAT_INPUT_TEXTAREA_MIN_HEIGHT_PX = 36;
 const CHAT_INPUT_TEXTAREA_MAX_HEIGHT_PX = 160;
@@ -17,62 +29,19 @@ export type ChatSendPayload = {
 
 export type ChatInputAutomationAction = {
   id: string;
+  kind?: 'automation' | 'control';
   label: string;
   onSelect: () => void;
+  onSelectWithRuns?: (runs: number) => void;
   title?: string;
   disabled?: boolean;
   active?: boolean;
   statusText?: string;
+  defaultRuns?: number;
+  minRuns?: number;
+  maxRuns?: number;
+  sleepBetweenRunsLabel?: string;
 };
-
-type DraftImageAttachment = {
-  id: string;
-  file: File;
-  name: string;
-  mime: string;
-  size: number;
-  previewUrl: string;
-};
-
-function makeId(): string {
-  // Non-crypto id; only used for React keys.
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function isLikelyImageFile(f: File): boolean {
-  const mime = String((f as any)?.type ?? '').trim().toLowerCase();
-  if (mime.startsWith('image/')) return true;
-  const name = String((f as any)?.name ?? '').trim().toLowerCase();
-  return /\.(png|jpe?g|gif|webp|bmp|svg|avif|tiff?)$/.test(name);
-}
-
-function formatBytes(n: number): string {
-  const num = Number(n);
-  if (!Number.isFinite(num) || num <= 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB'];
-  let i = 0;
-  let v = num;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i += 1;
-  }
-  const rounded = i === 0 ? String(Math.floor(v)) : v.toFixed(v >= 10 ? 1 : 2);
-  return `${rounded} ${units[i]}`;
-}
-
-async function fileToBase64(file: File): Promise<string> {
-  return await new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onerror = () => reject(r.error ?? new Error('Failed reading file'));
-    r.onload = () => {
-      const res = String(r.result ?? '');
-      // data:<mime>;base64,<data>
-      const comma = res.indexOf(',');
-      resolve(comma >= 0 ? res.slice(comma + 1) : res);
-    };
-    r.readAsDataURL(file);
-  });
-}
 
 export function ChatInput({
   resetKey,
@@ -113,10 +82,12 @@ export function ChatInput({
   const [attachments, setAttachments] = React.useState<DraftImageAttachment[]>([]);
   const [attachmentError, setAttachmentError] = React.useState<string | null>(null);
   const [dragActive, setDragActive] = React.useState(false);
-  const [automationMenuOpen, setAutomationMenuOpen] = React.useState(false);
+  const [automationPanelOpen, setAutomationPanelOpen] = React.useState(false);
+  const [selectedAutomationActionId, setSelectedAutomationActionId] = React.useState('');
+  const [automationRunsDraft, setAutomationRunsDraft] = React.useState('');
   const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
-  const automationMenuRef = React.useRef<HTMLDivElement | null>(null);
+  const automationPanelRef = React.useRef<HTMLDivElement | null>(null);
   const controlledDraftEnabled = typeof draftValue === 'string' && typeof onDraftValueChange === 'function';
   const draft = controlledDraftEnabled ? draftValue : uncontrolledDraft;
   const draftRef = React.useRef(draft);
@@ -134,12 +105,24 @@ export function ChatInput({
   const hasActiveAutomation = Boolean(activeAutomationAction);
   const composerLocked =
     Boolean(disabled) || (lockComposerWhileAutomationActive && hasActiveAutomation);
+  const visibleAutomationActions = React.useMemo(
+    () =>
+      availableAutomationActions.filter((action) => {
+        const kind = String(action.kind ?? '').trim().toLowerCase();
+        if (kind === 'control') return true;
+        return kind === '' || kind === 'automation';
+      }),
+    [availableAutomationActions],
+  );
+  const selectedAutomationAction = React.useMemo(
+    () =>
+      visibleAutomationActions.find((action) => action.id === selectedAutomationActionId) ??
+      visibleAutomationActions[0] ??
+      null,
+    [selectedAutomationActionId, visibleAutomationActions],
+  );
 
   const attachmentsOn = attachmentsEnabled !== false;
-  const MAX_IMAGES = 8;
-  const MAX_BYTES_EACH = 6 * 1024 * 1024;
-  const MAX_BYTES_TOTAL = 20 * 1024 * 1024;
-
   React.useEffect(() => {
     draftRef.current = draft;
   }, [draft]);
@@ -171,19 +154,33 @@ export function ChatInput({
   React.useEffect(() => {
     if (!controlledDraftEnabled) setUncontrolledDraft('');
     setAttachmentError(null);
-    setAutomationMenuOpen(false);
+    setAutomationPanelOpen(false);
+    setSelectedAutomationActionId('');
+    setAutomationRunsDraft('');
     // Revoke any preview object URLs.
     setAttachments((prev) => {
-      for (const a of prev) {
-        try {
-          URL.revokeObjectURL(a.previewUrl);
-        } catch {
-          // ignore
-        }
-      }
+      revokeDraftImagePreviewUrls(prev);
       return [];
     });
   }, [controlledDraftEnabled, resetKey]);
+
+  React.useEffect(() => {
+    if (visibleAutomationActions.length === 0) {
+      setSelectedAutomationActionId('');
+      return;
+    }
+    const existing = visibleAutomationActions.some((action) => action.id === selectedAutomationActionId);
+    if (existing) return;
+    setSelectedAutomationActionId(visibleAutomationActions[0].id);
+  }, [selectedAutomationActionId, visibleAutomationActions]);
+
+  React.useEffect(() => {
+    const action = selectedAutomationAction;
+    if (!action || typeof action.defaultRuns !== 'number') return;
+    const current = Number(automationRunsDraft);
+    if (Number.isFinite(current) && current > 0) return;
+    setAutomationRunsDraft(String(action.defaultRuns));
+  }, [automationRunsDraft, selectedAutomationAction]);
 
   React.useEffect(() => {
     if (!autoFocus) return;
@@ -198,22 +195,21 @@ export function ChatInput({
   }, [draft, resetKey, resizeTextarea]);
 
   React.useEffect(() => {
-    if (!automationMenuOpen) return;
+    if (!automationPanelOpen) return;
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target;
       if (!(target instanceof Node)) return;
-      if (automationMenuRef.current && automationMenuRef.current.contains(target)) return;
-      setAutomationMenuOpen(false);
+      if (automationPanelRef.current && automationPanelRef.current.contains(target)) return;
+      setAutomationPanelOpen(false);
     };
     window.addEventListener('pointerdown', onPointerDown);
     return () => {
       window.removeEventListener('pointerdown', onPointerDown);
     };
-  }, [automationMenuOpen]);
+  }, [automationPanelOpen]);
 
   const trimmed = draft.trim();
   const sendDisabled = composerLocked || (trimmed.length === 0 && attachments.length === 0);
-  const stopAutomationDisabled = Boolean(activeAutomationAction?.disabled);
   const hasModeHint = modeHint.trim().length > 0;
 
   function openPicker() {
@@ -229,11 +225,7 @@ export function ChatInput({
       if (idx < 0) return prev;
       const next = prev.slice();
       const [removed] = next.splice(idx, 1);
-      try {
-        if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
-      } catch {
-        // ignore
-      }
+      if (removed) revokeDraftImagePreviewUrls([removed]);
       return next;
     });
   }
@@ -260,23 +252,27 @@ export function ChatInput({
           setAttachmentError('One of the selected images is empty or unreadable.');
           continue;
         }
-        if (size > MAX_BYTES_EACH) {
-          setAttachmentError(`Image too large (${formatBytes(size)}). Max per image is ${formatBytes(MAX_BYTES_EACH)}.`);
+        if (size > CHAT_INPUT_MAX_BYTES_EACH) {
+          setAttachmentError(
+            `Image too large (${formatBytes(size)}). Max per image is ${formatBytes(CHAT_INPUT_MAX_BYTES_EACH)}.`,
+          );
           continue;
         }
-        if (next.length >= MAX_IMAGES) {
-          setAttachmentError(`Too many images. Max is ${MAX_IMAGES}.`);
+        if (next.length >= CHAT_INPUT_MAX_IMAGES) {
+          setAttachmentError(`Too many images. Max is ${CHAT_INPUT_MAX_IMAGES}.`);
           break;
         }
-        if (total + size > MAX_BYTES_TOTAL) {
-          setAttachmentError(`Attachments too large in total. Max total is ${formatBytes(MAX_BYTES_TOTAL)}.`);
+        if (total + size > CHAT_INPUT_MAX_BYTES_TOTAL) {
+          setAttachmentError(
+            `Attachments too large in total. Max total is ${formatBytes(CHAT_INPUT_MAX_BYTES_TOTAL)}.`,
+          );
           break;
         }
 
         const mime = String((f as any).type ?? '').trim() || 'application/octet-stream';
         const name = String((f as any).name ?? '').trim() || `image-${next.length + 1}`;
         const previewUrl = URL.createObjectURL(f);
-        next.push({ id: makeId(), file: f, name, mime, size: Math.floor(size), previewUrl });
+        next.push({ id: makeDraftImageAttachmentId(), file: f, name, mime, size: Math.floor(size), previewUrl });
         total += size;
       }
 
@@ -318,16 +314,38 @@ export function ChatInput({
         setAttachments((cur) => (cur.length === 0 ? snapshotAttachments : cur));
       } else {
         // Sent: revoke preview URLs for the snapshot attachments.
-        for (const a of snapshotAttachments) {
-          try {
-            URL.revokeObjectURL(a.previewUrl);
-          } catch {
-            // ignore
-          }
-        }
+        revokeDraftImagePreviewUrls(snapshotAttachments);
       }
     })();
   };
+
+  const selectedAutomationActionDisabled = React.useMemo(() => {
+    if (!selectedAutomationAction) return true;
+    return (Boolean(disabled) && !Boolean(selectedAutomationAction.active)) || Boolean(selectedAutomationAction.disabled);
+  }, [disabled, selectedAutomationAction]);
+
+  const selectedAutomationRuns = React.useMemo(() => {
+    const action = selectedAutomationAction;
+    if (!action || !action.onSelectWithRuns) return null;
+    const min = typeof action.minRuns === 'number' ? Math.max(1, Math.round(action.minRuns)) : 1;
+    const maxRaw = typeof action.maxRuns === 'number' ? Math.round(action.maxRuns) : min;
+    const max = Math.max(min, maxRaw);
+    const fallback = typeof action.defaultRuns === 'number' ? Math.max(min, Math.min(max, Math.round(action.defaultRuns))) : min;
+    const parsed = Number(automationRunsDraft);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.max(min, Math.min(max, Math.round(parsed)));
+  }, [automationRunsDraft, selectedAutomationAction]);
+
+  const triggerSelectedAutomationAction = React.useCallback(() => {
+    const action = selectedAutomationAction;
+    if (!action) return;
+    if (selectedAutomationActionDisabled) return;
+    if (action.onSelectWithRuns) {
+      action.onSelectWithRuns(selectedAutomationRuns ?? action.defaultRuns ?? 1);
+      return;
+    }
+    action.onSelect();
+  }, [selectedAutomationAction, selectedAutomationActionDisabled, selectedAutomationRuns]);
 
   return (
     <div
@@ -362,6 +380,7 @@ export function ChatInput({
           </div>
         )}
         <div
+          ref={automationPanelRef}
           className={`relative rounded-lg border bg-[var(--panel-alt)] shadow-[0_0_40px_rgba(0,0,0,.2),0_0_80px_rgba(0,0,0,.1)] ${
             dragActive ? 'border-[var(--accent)]' : 'border-[var(--border)]'
           }`}
@@ -493,27 +512,11 @@ export function ChatInput({
               autoFocus={Boolean(autoFocus)}
               aria-label={`Message ${droneName}`}
             />
-            {activeAutomationAction && (
-              <button
-                type="button"
-                onClick={() => activeAutomationAction.onSelect()}
-                disabled={stopAutomationDisabled}
-                className={`inline-flex items-center justify-center h-9 px-3 rounded-md text-[10px] font-semibold tracking-wide uppercase border transition-all ${
-                  stopAutomationDisabled
-                    ? 'opacity-40 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                    : 'bg-[var(--red-subtle)] border-[rgba(255,90,90,.28)] text-[var(--red)] hover:bg-[rgba(255,90,90,.18)]'
-                }`}
-                style={{ fontFamily: 'var(--display)' }}
-                title={activeAutomationAction.title || `Stop ${activeAutomationAction.label.toLowerCase()}`}
-              >
-                Stop
-              </button>
-            )}
             {availableAutomationActions.length > 0 && (
-              <div ref={automationMenuRef} className="relative flex-shrink-0">
+              <div className="relative flex-shrink-0">
                 <button
                   type="button"
-                  onClick={() => setAutomationMenuOpen((open) => !open)}
+                  onClick={() => setAutomationPanelOpen((open) => !open)}
                   disabled={Boolean(disabled) && !hasActiveAutomation}
                   className={`inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[10px] font-semibold tracking-wide uppercase border transition-all ${
                     Boolean(disabled) && !hasActiveAutomation
@@ -525,7 +528,7 @@ export function ChatInput({
                 >
                   {automationMenuLabel}
                   <svg
-                    className={`transition-transform ${automationMenuOpen ? 'rotate-180' : ''}`}
+                    className={`transition-transform ${automationPanelOpen ? 'rotate-180' : ''}`}
                     width="12"
                     height="12"
                     viewBox="0 0 16 16"
@@ -535,43 +538,6 @@ export function ChatInput({
                     <path d="M4.427 6.573a.25.25 0 01.177-.073h6.792a.25.25 0 01.177.427l-3.396 3.396a.25.25 0 01-.354 0L4.427 7a.25.25 0 010-.354z" />
                   </svg>
                 </button>
-                {automationMenuOpen && (
-                  <div className="absolute right-0 bottom-full mb-2 w-[260px] rounded-md border border-[var(--border)] bg-[var(--panel-alt)] shadow-[0_16px_36px_rgba(0,0,0,.35)] z-30 overflow-hidden">
-                    <div className="px-2 py-1.5 text-[9px] uppercase tracking-[0.08em] text-[var(--muted-dim)] border-b border-[var(--border-subtle)]">
-                      Automations
-                    </div>
-                    <div className="p-1">
-                      {availableAutomationActions.map((action) => {
-                        const actionDisabled = (Boolean(disabled) && !Boolean(action.active)) || Boolean(action.disabled);
-                        return (
-                          <button
-                            key={action.id}
-                            type="button"
-                            onClick={() => {
-                              if (actionDisabled) return;
-                              setAutomationMenuOpen(false);
-                              action.onSelect();
-                            }}
-                            disabled={actionDisabled}
-                            className={`w-full text-left px-2 py-1.5 rounded text-[11px] border transition-all flex items-center justify-between gap-2 ${
-                              action.active
-                                ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                                : actionDisabled
-                                  ? 'opacity-40 cursor-not-allowed border-transparent text-[var(--muted-dim)]'
-                                  : 'border-transparent text-[var(--fg-secondary)] hover:border-[var(--border-subtle)] hover:bg-[var(--hover)]'
-                            }`}
-                            title={action.title}
-                          >
-                            <span className="truncate">{action.label}</span>
-                            {action.statusText ? (
-                              <span className="text-[10px] text-[var(--muted-dim)]">{action.statusText}</span>
-                            ) : null}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
               </div>
             )}
             <button
@@ -589,6 +555,25 @@ export function ChatInput({
               {sending ? 'Sending...' : waiting ? 'Waiting...' : 'Send'}
             </button>
           </div>
+          <AutomationRunnerPanel
+            open={automationPanelOpen}
+            actions={visibleAutomationActions}
+            selectedAction={selectedAutomationAction}
+            selectedActionId={selectedAutomationAction?.id ?? ''}
+            onSelectActionId={(nextId) => {
+              setSelectedAutomationActionId(nextId);
+              const nextAction = visibleAutomationActions.find((action) => action.id === nextId) ?? null;
+              if (nextAction && typeof nextAction.defaultRuns === 'number') {
+                setAutomationRunsDraft(String(nextAction.defaultRuns));
+              }
+            }}
+            runsDraft={automationRunsDraft}
+            onRunsDraftChange={setAutomationRunsDraft}
+            selectedRuns={selectedAutomationRuns}
+            selectedActionDisabled={selectedAutomationActionDisabled}
+            controlsDisabled={Boolean(disabled) && !hasActiveAutomation}
+            onTriggerAction={triggerSelectedAutomationAction}
+          />
           {hasModeHint && (
             <div
               className="px-4 pb-2 text-[10px] text-[var(--muted-dim)] tracking-wide uppercase"

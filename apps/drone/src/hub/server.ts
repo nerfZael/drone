@@ -903,6 +903,10 @@ type PromptAutomationMeta = {
   automationLabel?: string;
   runIndex?: number;
   runsTotal?: number;
+  sleepBetweenRunsSeconds?: number;
+  stopPhrase?: string;
+  stopPhraseCaseSensitive?: boolean;
+  stopMatchedRunIndex?: number;
   promptPreview?: string;
 };
 
@@ -998,6 +1002,23 @@ function normalizePromptAutomationRuns(raw: unknown): number {
   return Math.max(PROMPT_AUTOMATION_RUNS_MIN, Math.min(PROMPT_AUTOMATION_RUNS_MAX, Math.round(n)));
 }
 
+function normalizePromptAutomationSleepBetweenRunsSeconds(raw: unknown): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return PROMPT_AUTOMATION_SLEEP_BETWEEN_RUNS_SECONDS_DEFAULT;
+  return Math.max(
+    PROMPT_AUTOMATION_SLEEP_BETWEEN_RUNS_SECONDS_MIN,
+    Math.min(PROMPT_AUTOMATION_SLEEP_BETWEEN_RUNS_SECONDS_MAX, Math.round(n)),
+  );
+}
+
+function normalizePromptAutomationStopPhrase(raw: unknown): string {
+  return String(raw ?? '').trim().slice(0, PROMPT_AUTOMATION_STOP_PHRASE_MAX_CHARS);
+}
+
+function normalizePromptAutomationStopPhraseCaseSensitive(raw: unknown): boolean {
+  return raw === true;
+}
+
 function normalizePromptAutomationOnFailurePrompt(raw: unknown): string {
   return String(raw ?? '').slice(0, PROMPT_AUTOMATION_ON_FAILURE_PROMPT_MAX_CHARS).trim();
 }
@@ -1074,10 +1095,15 @@ const githubPullRequestListCache = new Map<
 const PROMPT_AUTOMATION_RUNS_MIN = 1;
 const PROMPT_AUTOMATION_RUNS_MAX = 20;
 const PROMPT_AUTOMATION_RUNS_DEFAULT = 5;
+const PROMPT_AUTOMATION_SLEEP_BETWEEN_RUNS_SECONDS_MIN = 0;
+const PROMPT_AUTOMATION_SLEEP_BETWEEN_RUNS_SECONDS_MAX = 10 * 365 * 24 * 60 * 60;
+const PROMPT_AUTOMATION_SLEEP_BETWEEN_RUNS_SECONDS_DEFAULT = 0;
+const PROMPT_AUTOMATION_STOP_PHRASE_MAX_CHARS = 320;
 const PROMPT_AUTOMATION_WAIT_POLL_MS = 1000;
 const PROMPT_AUTOMATION_WAIT_FOR_IDLE_TIMEOUT_MS = 30 * 60_000;
 const PROMPT_AUTOMATION_WAIT_FOR_PROMPT_TIMEOUT_MS = 30 * 60_000;
 const PROMPT_AUTOMATION_ON_FAILURE_PROMPT_MAX_CHARS = 8_000;
+const PROMPT_AUTOMATION_INTER_RUN_SLEEP_CHUNK_MS = 5_000;
 
 type PromptAutomationJobStatus = 'running' | 'completed' | 'failed' | 'stopped';
 
@@ -1092,7 +1118,13 @@ type PromptAutomationJobState = {
   prompt: string;
   onFailurePrompt: string;
   runsTotal: number;
+  sleepBetweenRunsSeconds: number;
+  stopPhrase: string;
+  stopPhraseCaseSensitive: boolean;
   runsCompleted: number;
+  finishedEarly: boolean;
+  finishedEarlyReason: string | null;
+  finishedEarlyRunIndex: number | null;
   status: PromptAutomationJobStatus;
   startedAt: string;
   updatedAt: string;
@@ -1109,6 +1141,9 @@ type PromptAutomationQueueEntry = {
   prompt: string;
   onFailurePrompt: string;
   runsTotal: number;
+  sleepBetweenRunsSeconds: number;
+  stopPhrase: string;
+  stopPhraseCaseSensitive: boolean;
   enqueuedAt: string;
 };
 
@@ -1928,9 +1963,19 @@ function normalizePromptAutomationMeta(raw: unknown): PromptAutomationMeta | und
   const automationLabelRaw = String((raw as any).automationLabel ?? '').trim();
   const runIndexRaw = Number((raw as any).runIndex);
   const runsTotalRaw = Number((raw as any).runsTotal);
+  const sleepBetweenRunsSecondsRaw = Number((raw as any).sleepBetweenRunsSeconds);
+  const stopPhraseRaw = String((raw as any).stopPhrase ?? '').trim();
+  const stopPhraseCaseSensitive = (raw as any)?.stopPhraseCaseSensitive === true;
+  const stopMatchedRunIndexRaw = Number((raw as any).stopMatchedRunIndex);
   const promptPreviewRaw = String((raw as any).promptPreview ?? '').trim();
   const runIndex = Number.isFinite(runIndexRaw) && runIndexRaw > 0 ? Math.floor(runIndexRaw) : undefined;
   const runsTotal = Number.isFinite(runsTotalRaw) && runsTotalRaw > 0 ? Math.floor(runsTotalRaw) : undefined;
+  const sleepBetweenRunsSeconds =
+    Number.isFinite(sleepBetweenRunsSecondsRaw) && sleepBetweenRunsSecondsRaw >= 0
+      ? Math.floor(sleepBetweenRunsSecondsRaw)
+      : undefined;
+  const stopMatchedRunIndex =
+    Number.isFinite(stopMatchedRunIndexRaw) && stopMatchedRunIndexRaw > 0 ? Math.floor(stopMatchedRunIndexRaw) : undefined;
   return {
     kind: 'prompt-loop',
     ...(stage ? { stage } : {}),
@@ -1939,6 +1984,10 @@ function normalizePromptAutomationMeta(raw: unknown): PromptAutomationMeta | und
     ...(automationLabelRaw ? { automationLabel: automationLabelRaw.slice(0, 120) } : {}),
     ...(typeof runIndex === 'number' ? { runIndex } : {}),
     ...(typeof runsTotal === 'number' ? { runsTotal } : {}),
+    ...(typeof sleepBetweenRunsSeconds === 'number' ? { sleepBetweenRunsSeconds } : {}),
+    ...(stopPhraseRaw ? { stopPhrase: stopPhraseRaw.slice(0, PROMPT_AUTOMATION_STOP_PHRASE_MAX_CHARS) } : {}),
+    ...(stopPhraseCaseSensitive ? { stopPhraseCaseSensitive: true } : {}),
+    ...(typeof stopMatchedRunIndex === 'number' ? { stopMatchedRunIndex } : {}),
     ...(promptPreviewRaw ? { promptPreview: promptPreviewRaw.slice(0, 600) } : {}),
   };
 }
@@ -2228,12 +2277,15 @@ function promptAutomationJobResponse(lane: PromptAutomationLaneState | null) {
   const baseJob = runningJob ?? lane?.lastJob ?? null;
   const queued = Array.isArray(lane?.queued)
     ? lane.queued.map((item) => ({
-        queueId: item.queueId,
-        automationId: item.automationId,
-        automationLabel: item.automationLabel,
-        runsTotal: item.runsTotal,
-        enqueuedAt: item.enqueuedAt,
-      }))
+      queueId: item.queueId,
+      automationId: item.automationId,
+      automationLabel: item.automationLabel,
+      runsTotal: item.runsTotal,
+      sleepBetweenRunsSeconds: item.sleepBetweenRunsSeconds,
+      stopPhrase: item.stopPhrase,
+      stopPhraseCaseSensitive: item.stopPhraseCaseSensitive,
+      enqueuedAt: item.enqueuedAt,
+    }))
     : [];
   if (!baseJob) {
     return {
@@ -2242,6 +2294,12 @@ function promptAutomationJobResponse(lane: PromptAutomationLaneState | null) {
       automationId: null,
       automationLabel: null,
       runsTotal: 0,
+      sleepBetweenRunsSeconds: 0,
+      stopPhrase: '',
+      stopPhraseCaseSensitive: false,
+      finishedEarly: false,
+      finishedEarlyReason: null,
+      finishedEarlyRunIndex: null,
       runsCompleted: 0,
       startedAt: null,
       updatedAt: lane?.updatedAt ?? null,
@@ -2257,6 +2315,12 @@ function promptAutomationJobResponse(lane: PromptAutomationLaneState | null) {
     automationId: baseJob.automationId,
     automationLabel: baseJob.automationLabel,
     runsTotal: baseJob.runsTotal,
+    sleepBetweenRunsSeconds: baseJob.sleepBetweenRunsSeconds,
+    stopPhrase: baseJob.stopPhrase,
+    stopPhraseCaseSensitive: baseJob.stopPhraseCaseSensitive,
+    finishedEarly: baseJob.finishedEarly,
+    finishedEarlyReason: baseJob.finishedEarlyReason,
+    finishedEarlyRunIndex: baseJob.finishedEarlyRunIndex,
     runsCompleted: baseJob.runsCompleted,
     startedAt: baseJob.startedAt,
     updatedAt: baseJob.updatedAt,
@@ -2354,6 +2418,48 @@ async function waitForPromptAutomationPromptCompletion(opts: {
   throw new Error(`timed out waiting for prompt ${opts.promptId} completion`);
 }
 
+async function waitForPromptAutomationInterRunSleep(opts: {
+  sleepBetweenRunsSeconds: number;
+  signal: AbortSignal;
+}): Promise<void> {
+  const sleepSeconds = normalizePromptAutomationSleepBetweenRunsSeconds(opts.sleepBetweenRunsSeconds);
+  if (sleepSeconds <= 0) return;
+  let remainingMs = sleepSeconds * 1000;
+  while (remainingMs > 0) {
+    if (opts.signal.aborted) throw new Error('automation stopped');
+    const chunkMs = Math.min(PROMPT_AUTOMATION_INTER_RUN_SLEEP_CHUNK_MS, remainingMs);
+    await sleepMs(chunkMs);
+    remainingMs -= chunkMs;
+  }
+}
+
+async function readPromptAutomationTurnOutput(opts: {
+  droneId: string;
+  chatName: string;
+  promptId: string;
+}): Promise<string> {
+  const regAny: any = await loadRegistry();
+  const turns = Array.isArray(regAny?.drones?.[opts.droneId]?.chats?.[opts.chatName]?.turns)
+    ? regAny.drones[opts.droneId].chats[opts.chatName].turns
+    : [];
+  const found = turns.find((t: any) => String(t?.id ?? '').trim() === opts.promptId) ?? null;
+  if (!found) return '';
+  return String(found?.output ?? '');
+}
+
+function promptAutomationOutputContainsStopPhrase(opts: {
+  output: string;
+  stopPhrase: string;
+  caseSensitive: boolean;
+}): boolean {
+  const phrase = normalizePromptAutomationStopPhrase(opts.stopPhrase);
+  if (!phrase) return false;
+  const output = String(opts.output ?? '');
+  if (!output) return false;
+  if (opts.caseSensitive) return output.includes(phrase);
+  return output.toLowerCase().includes(phrase.toLowerCase());
+}
+
 async function sendPromptAutomationFinalMessage(job: PromptAutomationJobState): Promise<void> {
   const finalPrompt = String(job.onFailurePrompt ?? '').trim();
   if (!finalPrompt) return;
@@ -2370,6 +2476,10 @@ async function sendPromptAutomationFinalMessage(job: PromptAutomationJobState): 
       automationId: job.automationId,
       automationLabel: job.automationLabel,
       runsTotal: job.runsTotal,
+      sleepBetweenRunsSeconds: job.sleepBetweenRunsSeconds,
+      ...(job.stopPhrase ? { stopPhrase: job.stopPhrase } : {}),
+      ...(job.stopPhraseCaseSensitive ? { stopPhraseCaseSensitive: true } : {}),
+      ...(typeof job.finishedEarlyRunIndex === 'number' ? { stopMatchedRunIndex: job.finishedEarlyRunIndex } : {}),
       promptPreview: previewPromptAutomationPrompt(finalPrompt),
     },
   });
@@ -2413,6 +2523,9 @@ async function runPromptAutomationJob(job: PromptAutomationJobState): Promise<vo
             automationLabel: job.automationLabel,
             runIndex: runIdx + 1,
             runsTotal: job.runsTotal,
+            sleepBetweenRunsSeconds: job.sleepBetweenRunsSeconds,
+            ...(job.stopPhrase ? { stopPhrase: job.stopPhrase } : {}),
+            ...(job.stopPhraseCaseSensitive ? { stopPhraseCaseSensitive: true } : {}),
             promptPreview: previewPromptAutomationPrompt(job.prompt),
           },
         });
@@ -2429,11 +2542,48 @@ async function runPromptAutomationJob(job: PromptAutomationJobState): Promise<vo
         });
         job.runsCompleted += 1;
         job.updatedAt = nowIso();
+
+        if (job.stopPhrase) {
+          let output = '';
+          try {
+            output = await readPromptAutomationTurnOutput({
+              droneId: job.droneId,
+              chatName: job.chatName,
+              promptId: enqueued.id,
+            });
+          } catch {
+            output = '';
+          }
+          if (
+            promptAutomationOutputContainsStopPhrase({
+              output,
+              stopPhrase: job.stopPhrase,
+              caseSensitive: job.stopPhraseCaseSensitive,
+            })
+          ) {
+            job.finishedEarly = true;
+            job.finishedEarlyReason = 'stop-phrase';
+            job.finishedEarlyRunIndex = job.runsCompleted;
+            job.runsTotal = job.runsCompleted;
+            job.updatedAt = nowIso();
+            break;
+          }
+        }
       } catch (e: any) {
         const msg = String(e?.message ?? e ?? '').trim();
         if (job.abortController?.signal.aborted || /automation stopped/i.test(msg)) throw e;
         hadRunFailure = true;
         lastRunError = msg || 'automation run failed';
+        job.updatedAt = nowIso();
+      }
+
+      if (job.finishedEarly) break;
+      if (runIdx < job.runsTotal - 1 && job.sleepBetweenRunsSeconds > 0) {
+        const waitSignal = job.abortController?.signal ?? new AbortController().signal;
+        await waitForPromptAutomationInterRunSleep({
+          sleepBetweenRunsSeconds: job.sleepBetweenRunsSeconds,
+          signal: waitSignal,
+        });
         job.updatedAt = nowIso();
       }
     }
@@ -2485,6 +2635,9 @@ type PromptAutomationJobConfig = {
   prompt: string;
   onFailurePrompt: string;
   runsTotal: number;
+  sleepBetweenRunsSeconds: number;
+  stopPhrase: string;
+  stopPhraseCaseSensitive: boolean;
 };
 
 function queuePromptAutomationLaneJob(lane: PromptAutomationLaneState, cfg: PromptAutomationJobConfig): void {
@@ -2495,6 +2648,9 @@ function queuePromptAutomationLaneJob(lane: PromptAutomationLaneState, cfg: Prom
     prompt: cfg.prompt,
     onFailurePrompt: cfg.onFailurePrompt,
     runsTotal: cfg.runsTotal,
+    sleepBetweenRunsSeconds: cfg.sleepBetweenRunsSeconds,
+    stopPhrase: cfg.stopPhrase,
+    stopPhraseCaseSensitive: cfg.stopPhraseCaseSensitive,
     enqueuedAt: nowIso(),
   });
   lane.updatedAt = nowIso();
@@ -2516,7 +2672,13 @@ function startPromptAutomationLaneJob(
     prompt: cfg.prompt,
     onFailurePrompt: cfg.onFailurePrompt,
     runsTotal: cfg.runsTotal,
+    sleepBetweenRunsSeconds: cfg.sleepBetweenRunsSeconds,
+    stopPhrase: cfg.stopPhrase,
+    stopPhraseCaseSensitive: cfg.stopPhraseCaseSensitive,
     runsCompleted: 0,
+    finishedEarly: false,
+    finishedEarlyReason: null,
+    finishedEarlyRunIndex: null,
     status: 'running',
     startedAt: nowIso(),
     updatedAt: nowIso(),
@@ -2542,6 +2704,9 @@ function startPromptAutomationLaneJob(
         prompt: next.prompt,
         onFailurePrompt: next.onFailurePrompt,
         runsTotal: next.runsTotal,
+        sleepBetweenRunsSeconds: next.sleepBetweenRunsSeconds,
+        stopPhrase: next.stopPhrase,
+        stopPhraseCaseSensitive: next.stopPhraseCaseSensitive,
       }, { queuedFromId: next.queueId });
       return;
     }
@@ -2560,6 +2725,9 @@ async function startPromptAutomationJob(opts: {
   prompt: string;
   onFailurePrompt?: string;
   runs: number;
+  sleepBetweenRunsSeconds?: number;
+  stopPhrase?: string;
+  stopPhraseCaseSensitive?: boolean;
 }): Promise<PromptAutomationLaneState> {
   const droneId = normalizeDroneIdentity(opts.droneId);
   const chatName = normalizeChatName(opts.chatName);
@@ -2568,6 +2736,9 @@ async function startPromptAutomationJob(opts: {
   const prompt = String(opts.prompt ?? '').trim();
   const onFailurePrompt = normalizePromptAutomationOnFailurePrompt(opts.onFailurePrompt);
   const runs = normalizePromptAutomationRuns(opts.runs);
+  const sleepBetweenRunsSeconds = normalizePromptAutomationSleepBetweenRunsSeconds(opts.sleepBetweenRunsSeconds);
+  const stopPhrase = normalizePromptAutomationStopPhrase(opts.stopPhrase);
+  const stopPhraseCaseSensitive = normalizePromptAutomationStopPhraseCaseSensitive(opts.stopPhraseCaseSensitive);
   if (!prompt) throw new Error('missing prompt');
   if (!automationId) throw new Error('missing automation id');
 
@@ -2585,6 +2756,9 @@ async function startPromptAutomationJob(opts: {
     prompt,
     onFailurePrompt,
     runsTotal: runs,
+    sleepBetweenRunsSeconds,
+    stopPhrase,
+    stopPhraseCaseSensitive,
   };
   if (lane.runningJob) {
     queuePromptAutomationLaneJob(lane, cfg);
@@ -10019,6 +10193,9 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const prompt = String(body?.prompt ?? '').trim();
         const onFailurePrompt = normalizePromptAutomationOnFailurePrompt(body?.onFailurePrompt);
         const runs = normalizePromptAutomationRuns(body?.runs);
+        const sleepBetweenRunsSeconds = normalizePromptAutomationSleepBetweenRunsSeconds(body?.sleepBetweenRunsSeconds);
+        const stopPhrase = normalizePromptAutomationStopPhrase(body?.stopPhrase);
+        const stopPhraseCaseSensitive = normalizePromptAutomationStopPhraseCaseSensitive(body?.stopPhraseCaseSensitive);
         if (!automationId) {
           json(res, 400, { ok: false, error: 'missing automationId' });
           return;
@@ -10036,6 +10213,9 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             prompt,
             onFailurePrompt,
             runs,
+            sleepBetweenRunsSeconds,
+            stopPhrase,
+            stopPhraseCaseSensitive,
           });
           json(res, 202, {
             ok: true,

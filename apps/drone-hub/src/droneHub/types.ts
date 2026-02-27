@@ -332,6 +332,10 @@ export type ChatPromptAutomationMeta = {
   automationLabel?: string;
   runIndex?: number;
   runsTotal?: number;
+  sleepBetweenRunsSeconds?: number;
+  stopPhrase?: string;
+  stopPhraseCaseSensitive?: boolean;
+  stopMatchedRunIndex?: number;
   promptPreview?: string;
 };
 
