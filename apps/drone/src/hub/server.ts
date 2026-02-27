@@ -1106,6 +1106,7 @@ const PROMPT_AUTOMATION_ON_FAILURE_PROMPT_MAX_CHARS = 8_000;
 const PROMPT_AUTOMATION_INTER_RUN_SLEEP_CHUNK_MS = 5_000;
 
 type PromptAutomationJobStatus = 'running' | 'completed' | 'failed' | 'stopped';
+type PromptAutomationStopMode = 'all' | 'runs-only';
 
 type PromptAutomationJobState = {
   key: string;
@@ -1130,6 +1131,7 @@ type PromptAutomationJobState = {
   updatedAt: string;
   lastPromptId: string | null;
   error: string | null;
+  stopMode: PromptAutomationStopMode | null;
   abortController: AbortController | null;
   task: Promise<void> | null;
 };
@@ -2291,6 +2293,7 @@ function promptAutomationJobResponse(lane: PromptAutomationLaneState | null) {
     return {
       status: 'idle' as const,
       running: false,
+      jobKey: null,
       automationId: null,
       automationLabel: null,
       runsTotal: 0,
@@ -2312,6 +2315,7 @@ function promptAutomationJobResponse(lane: PromptAutomationLaneState | null) {
   return {
     status: baseJob.status,
     running: Boolean(runningJob && runningJob.status === 'running'),
+    jobKey: baseJob.executionKey,
     automationId: baseJob.automationId,
     automationLabel: baseJob.automationLabel,
     runsTotal: baseJob.runsTotal,
@@ -2460,11 +2464,17 @@ function promptAutomationOutputContainsStopPhrase(opts: {
   return output.toLowerCase().includes(phrase.toLowerCase());
 }
 
-async function sendPromptAutomationFinalMessage(job: PromptAutomationJobState): Promise<void> {
+async function sendPromptAutomationFinalMessage(
+  job: PromptAutomationJobState,
+  opts?: { ignoreAbortSignal?: boolean },
+): Promise<void> {
   const finalPrompt = String(job.onFailurePrompt ?? '').trim();
   if (!finalPrompt) return;
-  const signal = job.abortController?.signal;
-  if (signal?.aborted) return;
+  const ignoreAbortSignal = opts?.ignoreAbortSignal === true;
+  const signal = ignoreAbortSignal
+    ? null
+    : job.abortController?.signal;
+  if (!ignoreAbortSignal && signal?.aborted) return;
   const enqueued = await createOrEnqueuePromptUnified({
     droneId: job.droneId,
     chatName: job.chatName,
@@ -2615,6 +2625,30 @@ async function runPromptAutomationJob(job: PromptAutomationJobState): Promise<vo
   } catch (e: any) {
     const msg = String(e?.message ?? e ?? '').trim();
     if (job.abortController?.signal.aborted || /automation stopped/i.test(msg)) {
+      const stopMode = job.stopMode === 'runs-only' ? 'runs-only' : 'all';
+      if (stopMode === 'runs-only') {
+        let finalMessageError = '';
+        if (job.runsCompleted > 0 && job.onFailurePrompt) {
+          try {
+            await sendPromptAutomationFinalMessage(job, { ignoreAbortSignal: true });
+          } catch (followupError: any) {
+            finalMessageError =
+              String(followupError?.message ?? followupError ?? '').trim() || 'final message failed';
+          }
+        }
+        job.finishedEarly = true;
+        if (!job.finishedEarlyReason) job.finishedEarlyReason = 'manual-stop-runs-only';
+        if (job.runsCompleted > 0) job.finishedEarlyRunIndex = job.runsCompleted;
+        if (finalMessageError) {
+          job.status = 'failed';
+          job.error = `final message failed: ${finalMessageError}`;
+        } else {
+          job.status = 'stopped';
+          job.error = null;
+        }
+        job.updatedAt = nowIso();
+        return;
+      }
       job.status = 'stopped';
       job.error = null;
       job.updatedAt = nowIso();
@@ -2624,6 +2658,7 @@ async function runPromptAutomationJob(job: PromptAutomationJobState): Promise<vo
     job.error = msg || 'automation failed';
     job.updatedAt = nowIso();
   } finally {
+    job.stopMode = null;
     job.abortController = null;
     job.task = null;
   }
@@ -2684,6 +2719,7 @@ function startPromptAutomationLaneJob(
     updatedAt: nowIso(),
     lastPromptId: null,
     error: null,
+    stopMode: null,
     abortController: new AbortController(),
     task: null,
   };
@@ -2768,14 +2804,22 @@ async function startPromptAutomationJob(opts: {
   return lane;
 }
 
-function stopPromptAutomationJob(opts: { droneId: string; chatName: string }): PromptAutomationLaneState | null {
+function stopPromptAutomationJob(opts: {
+  droneId: string;
+  chatName: string;
+  stopMode?: PromptAutomationStopMode;
+  clearQueued?: boolean;
+}): PromptAutomationLaneState | null {
   const lane = getPromptAutomationLane(opts.droneId, opts.chatName);
   if (!lane) return null;
-  if (lane.queued.length > 0) {
+  const stopMode: PromptAutomationStopMode = opts.stopMode === 'runs-only' ? 'runs-only' : 'all';
+  const clearQueued = opts.clearQueued !== false;
+  if (clearQueued && lane.queued.length > 0) {
     lane.queued = [];
   }
   const running = lane.runningJob;
   if (running && running.status === 'running') {
+    running.stopMode = stopMode;
     running.abortController?.abort();
     running.status = 'stopped';
     running.error = null;
@@ -2829,6 +2873,7 @@ function cancelQueuedPromptAutomationRun(opts: {
 const PENDING_PROMPT_PUMP_TASKS = new Map<string, Promise<void>>();
 const PENDING_PROMPT_PUMP_QUEUE: Array<{ droneId: string; chatName: string }> = [];
 const PENDING_PROMPT_PUMP_QUEUED = new Set<string>();
+const PENDING_PROMPT_PUMP_RETRY = new Set<string>();
 let PENDING_PROMPT_PUMP_ACTIVE = 0;
 let PENDING_PROMPT_PUMP_PUMPING = false;
 
@@ -2964,6 +3009,9 @@ function pumpPendingPromptQueue() {
         .finally(() => {
           PENDING_PROMPT_PUMP_ACTIVE -= 1;
           PENDING_PROMPT_PUMP_TASKS.delete(key);
+          if (PENDING_PROMPT_PUMP_RETRY.delete(key)) {
+            enqueuePendingPromptPump(droneId, chatName);
+          }
           pumpPendingPromptQueue();
         });
       PENDING_PROMPT_PUMP_TASKS.set(key, p);
@@ -2979,7 +3027,12 @@ function enqueuePendingPromptPump(droneIdRaw: string, chatName: string) {
   const cn = String(chatName ?? '').trim() || 'default';
   if (!dn) return;
   const key = `${dn}:${cn}`;
-  if (PENDING_PROMPT_PUMP_TASKS.has(key)) return;
+  if (PENDING_PROMPT_PUMP_TASKS.has(key)) {
+    // Preserve edge-trigger requests that arrive while a pump task is active.
+    // Without this, an unblock signal can be lost during the task's teardown window.
+    PENDING_PROMPT_PUMP_RETRY.add(key);
+    return;
+  }
   if (PENDING_PROMPT_PUMP_QUEUED.has(key)) return;
   PENDING_PROMPT_PUMP_QUEUED.add(key);
   PENDING_PROMPT_PUMP_QUEUE.push({ droneId: dn, chatName: cn });
@@ -10253,11 +10306,20 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
       ) {
         const droneRef = decodeURIComponent(parts[2]);
         const chatName = normalizeChatName(decodeURIComponent(parts[4]));
+        let body: any = {};
+        try {
+          body = await readJsonBody(req);
+        } catch {
+          body = {};
+        }
+        const stopModeRaw = String(body?.stopMode ?? body?.mode ?? '').trim().toLowerCase();
+        const stopMode: PromptAutomationStopMode = stopModeRaw === 'runs-only' ? 'runs-only' : 'all';
+        const clearQueued = body?.clearQueued === false ? false : true;
         const resolved = await resolveDroneOrRespond(res, droneRef);
         if (!resolved) return;
         const droneId = resolved.id;
         const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
-        const lane = stopPromptAutomationJob({ droneId, chatName });
+        const lane = stopPromptAutomationJob({ droneId, chatName, stopMode, clearQueued });
         json(res, 200, {
           ok: true,
           automation: 'prompt-loop',

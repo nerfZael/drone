@@ -1066,6 +1066,110 @@ describe('prompt automation api', () => {
     expect(runRows.length).toBeGreaterThanOrEqual(2);
   });
 
+  test('stop runs-only still sends final message when at least one run completed', async () => {
+    if (!mockDaemon) throw new Error('mock daemon not initialized');
+    const droneId = 'drone-automation-stop-runs-only-final-message';
+    const now = new Date().toISOString();
+    await updateRegistry((reg: any) => {
+      reg.drones = reg.drones ?? {};
+      reg.drones[droneId] = {
+        id: droneId,
+        name: droneId,
+        hostPort: mockDaemon.port,
+        token: 'mock-token',
+        containerPort: 7777,
+        repoPath: '',
+        createdAt: now,
+        chats: {
+          default: {
+            createdAt: now,
+            agent: { kind: 'builtin', id: 'claude' },
+            turns: [],
+            pendingPrompts: [],
+          },
+        },
+      };
+    });
+
+    const started = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        automationId: 'runs-only-stopper',
+        automationLabel: 'Runs Only Stopper',
+        prompt: 'do work',
+        onFailurePrompt: 'summarize what happened',
+        runs: 3,
+        sleepBetweenRunsSeconds: 120,
+      }),
+    });
+    expect(started.r.status).toBe(202);
+
+    await pollUntil(
+      async () => {
+        const status = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
+        return status.data?.job?.running === true && Number(status.data?.job?.runsCompleted ?? 0) >= 1;
+      },
+      15_000,
+      120,
+      'first automation run completed',
+    );
+
+    const stopped = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/stop`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ stopMode: 'runs-only', clearQueued: false }),
+    });
+    expect(stopped.r.status).toBe(200);
+
+    await pollUntil(
+      async () => {
+        const status = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
+        return status.data?.job?.running === false;
+      },
+      15_000,
+      120,
+      'automation stopped',
+    );
+
+    await pollUntil(
+      async () => {
+        const pending = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+        const rows = Array.isArray(pending.data?.pending) ? pending.data.pending : [];
+        return rows.some(
+          (p: any) =>
+            String(p?.automation?.kind ?? '') === 'prompt-loop' &&
+            String(p?.automation?.automationId ?? '') === 'runs-only-stopper' &&
+            String(p?.automation?.stage ?? '') === 'final-message',
+        );
+      },
+      15_000,
+      120,
+      'final message enqueued',
+    );
+
+    const pendingFinal = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    const rows = Array.isArray(pendingFinal.data?.pending) ? pendingFinal.data.pending : [];
+    const runRows = rows.filter(
+      (p: any) =>
+        String(p?.automation?.kind ?? '') === 'prompt-loop' &&
+        String(p?.automation?.automationId ?? '') === 'runs-only-stopper' &&
+        String(p?.automation?.stage ?? '') !== 'final-message',
+    );
+    const finalRows = rows.filter(
+      (p: any) =>
+        String(p?.automation?.kind ?? '') === 'prompt-loop' &&
+        String(p?.automation?.automationId ?? '') === 'runs-only-stopper' &&
+        String(p?.automation?.stage ?? '') === 'final-message',
+    );
+    expect(runRows.length).toBeGreaterThanOrEqual(1);
+    expect(finalRows.length).toBeGreaterThan(0);
+    const runJobKey = String(runRows[runRows.length - 1]?.automation?.jobKey ?? '');
+    const finalJobKey = String(finalRows[finalRows.length - 1]?.automation?.jobKey ?? '');
+    expect(runJobKey.length).toBeGreaterThan(0);
+    expect(finalJobKey).toBe(runJobKey);
+  }, 30_000);
+
   test('does not send final message when no automation run succeeds', async () => {
     const droneId = 'drone-automation-final-message';
     const now = new Date().toISOString();

@@ -21,6 +21,7 @@ function clampPromptAutomationRuns(value: unknown): number {
 }
 
 type PromptAutomationJobStatus = 'idle' | 'running' | 'completed' | 'failed' | 'stopped';
+export type PromptAutomationStopMode = 'all' | 'runs-only';
 
 export type PromptAutomationQueuedSnapshot = {
   queueId: string;
@@ -36,6 +37,7 @@ export type PromptAutomationQueuedSnapshot = {
 export type PromptAutomationJobSnapshot = {
   status: PromptAutomationJobStatus;
   running: boolean;
+  jobKey: string | null;
   automationId: string | null;
   automationLabel: string | null;
   runsTotal: number;
@@ -68,6 +70,8 @@ type PromptAutomationQueuedCancelResponse = PromptAutomationStatusResponse & {
   cancelled: boolean;
   alreadySubmitted: boolean;
 };
+
+type PromptAutomationStopResponse = PromptAutomationStatusResponse;
 
 type UsePromptAutomationStateArgs = {
   droneId: string;
@@ -202,12 +206,17 @@ export function usePromptAutomationState({
   const [promptAutomationBusy, setPromptAutomationBusy] = React.useState(false);
   const [promptAutomationError, setPromptAutomationError] = React.useState<string | null>(null);
   const [promptAutomationStatusError, setPromptAutomationStatusError] = React.useState<string | null>(null);
+  const [stoppingPromptAutomationMode, setStoppingPromptAutomationMode] =
+    React.useState<PromptAutomationStopMode | null>(null);
+  const [stopPromptAutomationError, setStopPromptAutomationError] = React.useState<string | null>(null);
   const [cancellingQueuedAutomationById, setCancellingQueuedAutomationById] = React.useState<Record<string, true>>({});
   const [cancelQueuedAutomationErrorById, setCancelQueuedAutomationErrorById] = React.useState<Record<string, string>>({});
 
   React.useEffect(() => {
     setCancellingQueuedAutomationById({});
     setCancelQueuedAutomationErrorById({});
+    setStoppingPromptAutomationMode(null);
+    setStopPromptAutomationError(null);
   }, [chatName, droneId]);
 
   React.useEffect(() => {
@@ -242,6 +251,7 @@ export function usePromptAutomationState({
       setPromptAutomationBusy(true);
       setPromptAutomationError(null);
       setPromptAutomationStatusError(null);
+      setStopPromptAutomationError(null);
       if (chatUiMode !== 'transcript') {
         setPromptAutomationBusy(false);
         setPromptAutomationError('Automation is only available in transcript mode (builtin agents).');
@@ -285,22 +295,37 @@ export function usePromptAutomationState({
     [chatName, chatUiMode, droneId, promptAutomationBusy],
   );
 
-  const stopPromptAutomation = React.useCallback(() => {
-    if (promptAutomationBusy) return;
-    setPromptAutomationBusy(true);
-    setPromptAutomationError(null);
-    setPromptAutomationStatusError(null);
-    void (async () => {
-      try {
-        const data = await requestJson<PromptAutomationStatusResponse>(promptAutomationApiPath(droneId, chatName, 'stop'), { method: 'POST' });
-        setPromptAutomationJob(data.job);
-      } catch (e: any) {
-        setPromptAutomationError(e?.message ?? String(e));
-      } finally {
-        setPromptAutomationBusy(false);
-      }
-    })();
-  }, [chatName, droneId, promptAutomationBusy]);
+  const stopPromptAutomation = React.useCallback(
+    (opts?: { mode?: PromptAutomationStopMode; clearQueued?: boolean }) => {
+      if (stoppingPromptAutomationMode) return;
+      const mode: PromptAutomationStopMode = opts?.mode === 'runs-only' ? 'runs-only' : 'all';
+      setStoppingPromptAutomationMode(mode);
+      setPromptAutomationError(null);
+      setPromptAutomationStatusError(null);
+      setStopPromptAutomationError(null);
+      void (async () => {
+        try {
+          const data = await requestJson<PromptAutomationStopResponse>(
+            promptAutomationApiPath(droneId, chatName, 'stop'),
+            {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                stopMode: mode,
+                ...(typeof opts?.clearQueued === 'boolean' ? { clearQueued: opts.clearQueued } : {}),
+              }),
+            },
+          );
+          setPromptAutomationJob(data.job);
+        } catch (e: any) {
+          setStopPromptAutomationError(e?.message ?? String(e));
+        } finally {
+          setStoppingPromptAutomationMode(null);
+        }
+      })();
+    },
+    [chatName, droneId, stoppingPromptAutomationMode],
+  );
 
   const cancelQueuedPromptAutomation = React.useCallback(
     (queueIdRaw: string) => {
@@ -339,7 +364,6 @@ export function usePromptAutomationState({
 
   const chatAutomationActions = React.useMemo<ChatInputAutomationAction[]>(() => {
     const running = Boolean(promptAutomationJob?.running);
-    const runningAutomationId = String(promptAutomationJob?.automationId ?? '').trim();
     const runningAutomationLabel = String(promptAutomationJob?.automationLabel ?? '').trim() || 'Automation';
     const completedRuns = promptAutomationJob?.runsCompleted ?? 0;
     const totalRuns = promptAutomationJob?.runsTotal ?? 0;
@@ -358,23 +382,19 @@ export function usePromptAutomationState({
     const supportedMode = chatUiMode === 'transcript';
     const actions: ChatInputAutomationAction[] = automations.map((automation, idx) => {
       const config = normalizePromptAutomationRuntimeConfig(automation, { fallbackLabel: `Automation ${idx + 1}` });
-      const active = running && runningAutomationId === config.automationId;
       const queuedForAction = queuedByAutomationId.get(config.automationId) ?? 0;
       return {
         id: `automation:${config.automationId}`,
         kind: 'automation',
-        label: active ? `Stop ${config.automationLabel}` : laneBusy ? `Queue ${config.automationLabel}` : `Run ${config.automationLabel}`,
+        label: laneBusy ? `Queue ${config.automationLabel}` : `Run ${config.automationLabel}`,
         onSelect: () => {
-          if (active) stopPromptAutomation();
-          else startPromptAutomation(automation);
+          startPromptAutomation(automation);
         },
-        onSelectWithRuns: active
-          ? undefined
-          : (runs) => {
-              startPromptAutomation(automation, { runs });
-            },
+        onSelectWithRuns: (runs) => {
+          startPromptAutomation(automation, { runs });
+        },
         title: automationActionTitle({
-          active,
+          active: false,
           configLabel: config.automationLabel,
           configRuns: config.runs,
           configPrompt: config.prompt,
@@ -385,14 +405,14 @@ export function usePromptAutomationState({
           stopPhraseSuffix: config.stopPhraseSuffix,
           supportedMode,
         }),
-        disabled: promptAutomationBusy || (!active && (!supportedMode || config.prompt.length === 0)),
-        active,
+        disabled: promptAutomationBusy || Boolean(stoppingPromptAutomationMode) || !supportedMode || config.prompt.length === 0,
+        active: false,
         defaultRuns: config.runs,
         minRuns: AUTOMATION_RUNS_MIN,
         maxRuns: AUTOMATION_RUNS_MAX,
         sleepBetweenRunsLabel: config.sleepBetweenRunsLabel,
         statusText: automationActionStatusText({
-          active,
+          active: false,
           completedRuns,
           totalRuns,
           queuedForAction,
@@ -401,24 +421,8 @@ export function usePromptAutomationState({
         }),
       } satisfies ChatInputAutomationAction;
     });
-
-    const hasActiveAction = actions.some((action) => action.active);
-    if (!hasActiveAction && laneBusy) {
-      actions.push({
-        id: 'automation-control:active',
-        kind: 'control',
-        label: running ? `Stop ${runningAutomationLabel}` : 'Clear automation queue',
-        onSelect: () => stopPromptAutomation(),
-        title: running
-          ? `Stop "${runningAutomationLabel}" and clear queued automations.`
-          : 'Clear queued automations.',
-        disabled: promptAutomationBusy,
-        active: true,
-        statusText: running ? `${completedRuns}/${totalRuns}` : `${queuedTotal} queued`,
-      });
-    }
     return actions;
-  }, [automations, chatUiMode, promptAutomationBusy, promptAutomationJob, startPromptAutomation, stopPromptAutomation]);
+  }, [automations, chatUiMode, promptAutomationBusy, promptAutomationJob, startPromptAutomation, stoppingPromptAutomationMode]);
 
   const automationModeHint = React.useMemo(() => {
     if (promptAutomationError) {
@@ -462,11 +466,15 @@ export function usePromptAutomationState({
   );
 
   return {
+    promptAutomationJob,
     automationModeHint,
     cancelQueuedAutomationErrorById,
     cancellingQueuedAutomationById,
     cancelQueuedPromptAutomation,
     chatAutomationActions,
     queuedAutomationItems,
+    stopPromptAutomation,
+    stoppingPromptAutomationMode,
+    stopPromptAutomationError,
   };
 }

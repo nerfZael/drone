@@ -119,12 +119,20 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
   nowMs,
   onOpenFileReference,
   onOpenLink,
+  headerBadgeLabel,
+  headerBadgeTone = 'running',
+  headerActions,
+  headerError,
 }: {
   runs: TranscriptItem[];
   pendingRuns?: PendingPrompt[];
   nowMs: number;
   onOpenFileReference?: (ref: MarkdownFileReference) => void;
   onOpenLink?: (href: string) => boolean;
+  headerBadgeLabel?: string;
+  headerBadgeTone?: 'running' | 'queued' | 'failed';
+  headerActions?: React.ReactNode;
+  headerError?: string | null;
 }) {
   const [promptExpanded, setPromptExpanded] = React.useState(false);
   const [expandedRunKey, setExpandedRunKey] = React.useState<string | null>(null);
@@ -236,7 +244,26 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
             {automationLabel} runs ({runRows.length})
           </div>
         </div>
+        {(headerBadgeLabel || headerActions) ? (
+          <div className="flex items-center gap-2">
+            {headerBadgeLabel ? (
+              <span
+                className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[9px] tracking-wide uppercase ${
+                  headerBadgeTone === 'failed'
+                    ? 'border-[rgba(255,90,90,.28)] bg-[var(--red-subtle)] text-[var(--red)]'
+                    : headerBadgeTone === 'queued'
+                      ? 'border-[rgba(96,165,250,.35)] bg-[rgba(59,130,246,.12)] text-[#60a5fa]'
+                      : 'border-[rgba(255,178,36,.35)] bg-[var(--yellow-subtle)] text-[var(--yellow)]'
+                }`}
+              >
+                {headerBadgeLabel}
+              </span>
+            ) : null}
+            {headerActions}
+          </div>
+        ) : null}
       </div>
+      {headerError ? <div className="mt-2 text-[10px] text-[var(--red)] whitespace-pre-wrap">{headerError}</div> : null}
 
       {promptText ? (
         <div className="mt-3 rounded border border-[rgba(148,163,184,.16)] bg-[var(--user-dim)] px-3 py-2">
