@@ -17,12 +17,10 @@ import {
 import { readLocalStorageItem } from './hooks';
 import type { CustomAgentProfile } from '../types';
 import {
+  automationConfigsEqual,
   createAutomationConfig,
   normalizeAutomationConfigs,
-  normalizeAutomationLabel,
-  normalizeAutomationOnFailurePrompt,
-  normalizeAutomationPrompt,
-  normalizeAutomationRuns,
+  patchAutomationConfig,
   type AutomationConfig,
 } from './automation-config';
 
@@ -386,29 +384,8 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           const idx = s.automations.findIndex((item) => item.id === id);
           if (idx < 0) return s;
           const cur = s.automations[idx];
-          const next: AutomationConfig = {
-            ...cur,
-            ...(Object.prototype.hasOwnProperty.call(patch, 'label')
-              ? { label: normalizeAutomationLabel(patch.label) }
-              : {}),
-            ...(Object.prototype.hasOwnProperty.call(patch, 'prompt')
-              ? { prompt: normalizeAutomationPrompt(patch.prompt) }
-              : {}),
-            ...(Object.prototype.hasOwnProperty.call(patch, 'onFailurePrompt')
-              ? { onFailurePrompt: normalizeAutomationOnFailurePrompt(patch.onFailurePrompt) }
-              : {}),
-            ...(Object.prototype.hasOwnProperty.call(patch, 'runs')
-              ? { runs: normalizeAutomationRuns(patch.runs) }
-              : {}),
-          };
-          if (
-            next.label === cur.label &&
-            next.prompt === cur.prompt &&
-            next.onFailurePrompt === cur.onFailurePrompt &&
-            next.runs === cur.runs
-          ) {
-            return s;
-          }
+          const next = patchAutomationConfig(cur, patch);
+          if (automationConfigsEqual(next, cur)) return s;
           const merged = s.automations.slice();
           merged[idx] = next;
           return { automations: merged };

@@ -1,8 +1,8 @@
 import React from 'react';
 import { IconChevron, IconCopy } from './icons';
 import { ShortcutSettingsSection } from './ShortcutSettingsSection';
+import { AutomationSettingsSection } from './AutomationSettingsSection';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
-import { AUTOMATION_RUNS_DEFAULT, AUTOMATION_RUNS_MAX, AUTOMATION_RUNS_MIN } from './automation-config';
 import type { UseHubLogsResult } from './use-hub-logs';
 import type { UseDeleteActionSettingsResult } from './use-delete-action-settings';
 import type { UseLlmSettingsResult } from './use-llm-settings';
@@ -103,11 +103,6 @@ export function SettingsView({
   } = hubLogsState;
   const transcriptInlineImages = useDroneHubUiStore((s) => s.transcriptInlineImages);
   const setTranscriptInlineImages = useDroneHubUiStore((s) => s.setTranscriptInlineImages);
-  const automations = useDroneHubUiStore((s) => s.automations);
-  const addAutomation = useDroneHubUiStore((s) => s.addAutomation);
-  const updateAutomation = useDroneHubUiStore((s) => s.updateAutomation);
-  const removeAutomation = useDroneHubUiStore((s) => s.removeAutomation);
-  const clearAutomations = useDroneHubUiStore((s) => s.clearAutomations);
   const settingsBusy =
     hubLogsLoading ||
     llmSettingsLoading ||
@@ -700,112 +695,7 @@ export function SettingsView({
             </div>
 
             <ShortcutSettingsSection />
-
-            <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
-              <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
-                Automation
-              </div>
-              <div className="text-[11px] text-[var(--muted-dim)] leading-relaxed">
-                Create reusable automation jobs. Each job runs its prompt repeatedly from chat.
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-[10px] text-[var(--muted-dim)]">Runs are clamped to {AUTOMATION_RUNS_MIN}-{AUTOMATION_RUNS_MAX}.</div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      addAutomation({ label: '', prompt: '', onFailurePrompt: '', runs: AUTOMATION_RUNS_DEFAULT });
-                    }}
-                    className="h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:brightness-110"
-                    style={{ fontFamily: 'var(--display)' }}
-                    title="Add automation job"
-                  >
-                    Add automation
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => clearAutomations()}
-                    disabled={automations.length === 0}
-                    className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
-                      automations.length === 0
-                        ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                        : 'bg-[var(--red-subtle)] border-[rgba(255,90,90,.28)] text-[var(--red)] hover:bg-[rgba(255,90,90,.18)]'
-                    }`}
-                    style={{ fontFamily: 'var(--display)' }}
-                    title="Delete all automation jobs"
-                  >
-                    Delete all
-                  </button>
-                </div>
-              </div>
-
-              {automations.length === 0 ? (
-                <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.16)] px-3 py-3 text-[11px] text-[var(--muted-dim)]">
-                  No automation jobs yet. Create one, then run it from the chat automation button.
-                </div>
-              ) : (
-                <div className="flex flex-col gap-3">
-                  {automations.map((automation, idx) => (
-                    <div key={automation.id} className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.16)] px-3 py-3 flex flex-col gap-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
-                          Automation #{idx + 1}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => removeAutomation(automation.id)}
-                          className="h-7 px-2 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all bg-[var(--red-subtle)] border-[rgba(255,90,90,.28)] text-[var(--red)] hover:bg-[rgba(255,90,90,.18)]"
-                          style={{ fontFamily: 'var(--display)' }}
-                          title="Delete this automation"
-                        >
-                          Delete
-                        </button>
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-[120px_1fr] gap-2 items-center">
-                        <label className="text-[11px] text-[var(--muted-dim)]">Label</label>
-                        <input
-                          type="text"
-                          value={automation.label}
-                          onChange={(e) => updateAutomation(automation.id, { label: e.target.value })}
-                          className="w-full h-9 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-2 text-[12px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
-                          placeholder="e.g. Review and fix wins"
-                        />
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-[120px_1fr] gap-2 items-center">
-                        <label className="text-[11px] text-[var(--muted-dim)]">Runs per click</label>
-                        <input
-                          type="number"
-                          min={AUTOMATION_RUNS_MIN}
-                          max={AUTOMATION_RUNS_MAX}
-                          step={1}
-                          value={automation.runs}
-                          onChange={(e) => updateAutomation(automation.id, { runs: Number(e.target.value) })}
-                          className="w-full sm:w-[140px] h-9 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-2 text-[12px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
-                        />
-                      </div>
-                      <div className="flex flex-col gap-1">
-                        <label className="text-[11px] text-[var(--muted-dim)]">Prompt</label>
-                        <textarea
-                          value={automation.prompt}
-                          onChange={(e) => updateAutomation(automation.id, { prompt: e.target.value })}
-                          className="w-full min-h-[140px] rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-3 py-2 text-[12px] leading-relaxed text-[var(--fg-secondary)] resize-y focus:outline-none focus:border-[var(--accent-muted)]"
-                          placeholder="Enter automation prompt..."
-                        />
-                      </div>
-                      <div className="flex flex-col gap-1">
-                        <label className="text-[11px] text-[var(--muted-dim)]">Final message (optional)</label>
-                        <textarea
-                          value={automation.onFailurePrompt}
-                          onChange={(e) => updateAutomation(automation.id, { onFailurePrompt: e.target.value })}
-                          className="w-full min-h-[110px] rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-3 py-2 text-[12px] leading-relaxed text-[var(--fg-secondary)] resize-y focus:outline-none focus:border-[var(--accent-muted)]"
-                          placeholder="Optional message to send after automation runs finish, if at least one run succeeded (e.g. summarize what was fixed)."
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            <AutomationSettingsSection />
 
             <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
               <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>

@@ -325,6 +325,68 @@ describe('prompt automation api', () => {
     expect(queuedAutomationIds).toContain('loop-2');
   });
 
+  test('persists sleepBetweenRunsSeconds for running and queued automation jobs', async () => {
+    const droneId = 'drone-automation-sleep-between-runs';
+    const now = new Date().toISOString();
+    await updateRegistry((reg: any) => {
+      reg.drones = reg.drones ?? {};
+      reg.drones[droneId] = {
+        id: droneId,
+        name: droneId,
+        hostPort: 1,
+        token: '',
+        containerPort: 7777,
+        repoPath: '',
+        createdAt: now,
+        chats: {
+          default: {
+            createdAt: now,
+            agent: { kind: 'builtin', id: 'cursor' },
+            turns: [],
+            pendingPrompts: [
+              {
+                id: 'blocking-prompt',
+                at: now,
+                updatedAt: now,
+                prompt: 'still running',
+                state: 'sending',
+              },
+            ],
+          },
+        },
+      };
+    });
+
+    const first = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        automationId: 'loop-1',
+        automationLabel: 'Loop 1',
+        prompt: 'repeat',
+        runs: 2,
+        sleepBetweenRunsSeconds: 90,
+      }),
+    });
+    expect(first.r.status).toBe(202);
+    expect(Number(first.data?.job?.sleepBetweenRunsSeconds ?? -1)).toBe(90);
+
+    const second = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        automationId: 'loop-2',
+        automationLabel: 'Loop 2',
+        prompt: 'repeat again',
+        runs: 2,
+        sleepBetweenRunsSeconds: 180,
+      }),
+    });
+    expect(second.r.status).toBe(202);
+    const queuedSleep = Number(second.data?.job?.queued?.[0]?.sleepBetweenRunsSeconds ?? -1);
+    expect(queuedSleep).toBe(180);
+  });
+
   test('queues manual prompts behind active automation for the same chat', async () => {
     const droneId = 'drone-automation-queue-manual-prompts';
     const now = new Date().toISOString();
@@ -875,6 +937,134 @@ describe('prompt automation api', () => {
     expect(manualUpdatedAt.length).toBeGreaterThan(0);
     expect(manualUpdatedAt >= loop2UpdatedAt).toBe(true);
   }, 30_000);
+
+  test('finishes early when stop phrase is matched (case-insensitive) and still sends final message', async () => {
+    if (!mockDaemon) throw new Error('mock daemon not initialized');
+    const droneId = 'drone-automation-stop-phrase-match';
+    const now = new Date().toISOString();
+    await updateRegistry((reg: any) => {
+      reg.drones = reg.drones ?? {};
+      reg.drones[droneId] = {
+        id: droneId,
+        name: droneId,
+        hostPort: mockDaemon.port,
+        token: 'mock-token',
+        containerPort: 7777,
+        repoPath: '',
+        createdAt: now,
+        chats: {
+          default: {
+            createdAt: now,
+            agent: { kind: 'builtin', id: 'claude' },
+            turns: [],
+            pendingPrompts: [],
+          },
+        },
+      };
+    });
+
+    const started = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        automationId: 'stopper',
+        automationLabel: 'Stopper',
+        prompt: 'do work',
+        onFailurePrompt: 'summarize the changes',
+        runs: 5,
+        stopPhrase: 'MOCK-RESPONSE',
+        stopPhraseCaseSensitive: false,
+      }),
+    });
+    expect(started.r.status).toBe(202);
+
+    await pollUntil(async () => {
+      const status = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
+      return status.data?.job?.running === false;
+    }, 15_000);
+
+    const statusAfter = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
+    expect(Boolean(statusAfter.data?.job?.finishedEarly)).toBe(true);
+    expect(Number(statusAfter.data?.job?.runsCompleted ?? 0)).toBe(1);
+    expect(Number(statusAfter.data?.job?.runsTotal ?? 0)).toBe(1);
+
+    const pendingFinal = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    const rows = Array.isArray(pendingFinal.data?.pending) ? pendingFinal.data.pending : [];
+    const runRows = rows.filter(
+      (p: any) =>
+        String(p?.automation?.kind ?? '') === 'prompt-loop' &&
+        String(p?.automation?.automationId ?? '') === 'stopper' &&
+        String(p?.automation?.stage ?? '') !== 'final-message',
+    );
+    const finalRows = rows.filter(
+      (p: any) =>
+        String(p?.automation?.kind ?? '') === 'prompt-loop' &&
+        String(p?.automation?.automationId ?? '') === 'stopper' &&
+        String(p?.automation?.stage ?? '') === 'final-message',
+    );
+    expect(runRows.length).toBe(1);
+    expect(finalRows.length).toBeGreaterThan(0);
+    const finalMatchedRun = Number(finalRows[finalRows.length - 1]?.automation?.stopMatchedRunIndex ?? 0);
+    expect(finalMatchedRun).toBe(1);
+  });
+
+  test('does not finish early when stop phrase case does not match in case-sensitive mode', async () => {
+    if (!mockDaemon) throw new Error('mock daemon not initialized');
+    const droneId = 'drone-automation-stop-phrase-case-sensitive';
+    const now = new Date().toISOString();
+    await updateRegistry((reg: any) => {
+      reg.drones = reg.drones ?? {};
+      reg.drones[droneId] = {
+        id: droneId,
+        name: droneId,
+        hostPort: mockDaemon.port,
+        token: 'mock-token',
+        containerPort: 7777,
+        repoPath: '',
+        createdAt: now,
+        chats: {
+          default: {
+            createdAt: now,
+            agent: { kind: 'builtin', id: 'claude' },
+            turns: [],
+            pendingPrompts: [],
+          },
+        },
+      };
+    });
+
+    const started = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        automationId: 'strict-stopper',
+        automationLabel: 'Strict Stopper',
+        prompt: 'do work',
+        runs: 2,
+        stopPhrase: 'MOCK-RESPONSE',
+        stopPhraseCaseSensitive: true,
+      }),
+    });
+    expect(started.r.status).toBe(202);
+
+    await pollUntil(async () => {
+      const status = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
+      return status.data?.job?.running === false;
+    }, 15_000);
+
+    const statusAfter = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
+    expect(Boolean(statusAfter.data?.job?.finishedEarly)).toBe(false);
+
+    const pendingFinal = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    const rows = Array.isArray(pendingFinal.data?.pending) ? pendingFinal.data.pending : [];
+    const runRows = rows.filter(
+      (p: any) =>
+        String(p?.automation?.kind ?? '') === 'prompt-loop' &&
+        String(p?.automation?.automationId ?? '') === 'strict-stopper' &&
+        String(p?.automation?.stage ?? '') !== 'final-message',
+    );
+    expect(runRows.length).toBeGreaterThanOrEqual(2);
+  });
 
   test('does not send final message when no automation run succeeds', async () => {
     const droneId = 'drone-automation-final-message';
