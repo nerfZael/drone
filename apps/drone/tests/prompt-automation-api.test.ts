@@ -325,6 +325,116 @@ describe('prompt automation api', () => {
     expect(queuedAutomationIds).toContain('loop-2');
   });
 
+  test('stop endpoint honors clearQueued across stop modes', async () => {
+    const cases: Array<{
+      mode: 'all' | 'runs-only';
+      clearQueued: boolean;
+      expectQueueCleared: boolean;
+    }> = [
+      { mode: 'all', clearQueued: true, expectQueueCleared: true },
+      { mode: 'all', clearQueued: false, expectQueueCleared: false },
+      { mode: 'runs-only', clearQueued: true, expectQueueCleared: true },
+      { mode: 'runs-only', clearQueued: false, expectQueueCleared: false },
+    ];
+
+    for (const c of cases) {
+      const droneId = `drone-automation-stop-mode-${c.mode}-clear-${c.clearQueued ? 'true' : 'false'}`;
+      const now = new Date().toISOString();
+      await updateRegistry((reg: any) => {
+        reg.drones = reg.drones ?? {};
+        reg.drones[droneId] = {
+          id: droneId,
+          name: droneId,
+          hostPort: 1,
+          token: '',
+          containerPort: 7777,
+          repoPath: '',
+          createdAt: now,
+          chats: {
+            default: {
+              createdAt: now,
+              agent: { kind: 'builtin', id: 'cursor' },
+              turns: [],
+              pendingPrompts: [
+                {
+                  id: 'blocking-prompt',
+                  at: now,
+                  updatedAt: now,
+                  prompt: 'still running',
+                  state: 'sending',
+                },
+              ],
+            },
+          },
+        };
+      });
+
+      const first = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          automationId: 'loop-1',
+          automationLabel: 'Loop 1',
+          prompt: 'repeat',
+          runs: 2,
+        }),
+      });
+      expect(first.r.status).toBe(202);
+      expect(first.data?.job?.running).toBe(true);
+
+      const second = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          automationId: 'loop-2',
+          automationLabel: 'Loop 2',
+          prompt: 'repeat again',
+          runs: 2,
+        }),
+      });
+      expect(second.r.status).toBe(202);
+      expect(Number(second.data?.job?.queuedCount ?? 0)).toBeGreaterThan(0);
+
+      const stopped = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/stop`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ stopMode: c.mode, clearQueued: c.clearQueued }),
+      });
+      expect(stopped.r.status).toBe(200);
+      if (c.expectQueueCleared) {
+        expect(Number(stopped.data?.job?.queuedCount ?? -1)).toBe(0);
+      }
+
+      if (c.expectQueueCleared) {
+        await pollUntil(
+          async () => {
+            const status = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
+            return status.data?.job?.running === false && Number(status.data?.job?.queuedCount ?? 0) === 0;
+          },
+          15_000,
+          120,
+          `stop mode ${c.mode} clearQueued=${c.clearQueued} lane idle`,
+        );
+      } else {
+        await pollUntil(
+          async () => {
+            const status = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
+            return status.data?.job?.running === true && String(status.data?.job?.automationId ?? '').trim() === 'loop-2';
+          },
+          15_000,
+          120,
+          `stop mode ${c.mode} clearQueued=${c.clearQueued} next automation started`,
+        );
+      }
+
+      await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/stop`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ stopMode: 'all', clearQueued: true }),
+      });
+    }
+  }, 45_000);
+
   test('persists sleepBetweenRunsSeconds for running and queued automation jobs', async () => {
     const droneId = 'drone-automation-sleep-between-runs';
     const now = new Date().toISOString();
@@ -448,6 +558,93 @@ describe('prompt automation api', () => {
     expect(String(queuedManual?.state ?? '')).toBe('queued');
     expect(Boolean(queuedManual?.blockedByAutomation)).toBe(true);
   });
+
+  test('automation queueing is isolated per chat on the same drone', async () => {
+    if (!mockDaemon) throw new Error('mock daemon not initialized');
+    const droneId = 'drone-automation-chat-isolation';
+    const now = new Date().toISOString();
+    await updateRegistry((reg: any) => {
+      reg.drones = reg.drones ?? {};
+      reg.drones[droneId] = {
+        id: droneId,
+        name: droneId,
+        hostPort: mockDaemon.port,
+        token: 'mock-token',
+        containerPort: 7777,
+        repoPath: '',
+        createdAt: now,
+        chats: {
+          default: {
+            createdAt: now,
+            agent: { kind: 'builtin', id: 'claude' },
+            turns: [],
+            pendingPrompts: [
+              {
+                id: 'blocking-prompt',
+                at: now,
+                updatedAt: now,
+                prompt: 'still running',
+                state: 'sending',
+              },
+            ],
+          },
+          review: {
+            createdAt: now,
+            agent: { kind: 'builtin', id: 'claude' },
+            turns: [],
+            pendingPrompts: [],
+          },
+        },
+      };
+    });
+
+    const started = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        automationId: 'loop-1',
+        automationLabel: 'Loop 1',
+        prompt: 'repeat',
+        runs: 2,
+      }),
+    });
+    expect(started.r.status).toBe(202);
+    expect(started.data?.job?.running).toBe(true);
+
+    const sent = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/review/prompt`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'review chat prompt while default automation is active' }),
+    });
+    expect(sent.r.status).toBe(202);
+    const reviewPromptId = String(sent.data?.promptId ?? '').trim();
+    expect(reviewPromptId.length).toBeGreaterThan(0);
+
+    await pollUntil(
+      async () => {
+        const pending = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/review/pending`);
+        const rows = Array.isArray(pending.data?.pending) ? pending.data.pending : [];
+        const row = rows.find((p: any) => String(p?.id ?? '').trim() === reviewPromptId) ?? null;
+        if (!row) return false;
+        if (Boolean(row?.blockedByAutomation)) return false;
+        return String(row?.state ?? '') !== 'queued';
+      },
+      15_000,
+      120,
+      'review chat prompt is not blocked by default chat automation',
+    );
+
+    const defaultStatus = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
+    expect(defaultStatus.r.status).toBe(200);
+    expect(defaultStatus.data?.job?.running).toBe(true);
+    expect(String(defaultStatus.data?.job?.automationId ?? '').trim()).toBe('loop-1');
+
+    await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/stop`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ stopMode: 'all', clearQueued: true }),
+    });
+  }, 30_000);
 
   test('cancels queued manual prompts before they are submitted', async () => {
     const droneId = 'drone-automation-cancel-queued-manual';
@@ -1168,6 +1365,80 @@ describe('prompt automation api', () => {
     const finalJobKey = String(finalRows[finalRows.length - 1]?.automation?.jobKey ?? '');
     expect(runJobKey.length).toBeGreaterThan(0);
     expect(finalJobKey).toBe(runJobKey);
+  }, 30_000);
+
+  test('stop runs-only does not send final message before any run succeeds', async () => {
+    const droneId = 'drone-automation-stop-runs-only-zero-success';
+    const now = new Date().toISOString();
+    await updateRegistry((reg: any) => {
+      reg.drones = reg.drones ?? {};
+      reg.drones[droneId] = {
+        id: droneId,
+        name: droneId,
+        hostPort: 1,
+        token: '',
+        containerPort: 7777,
+        repoPath: '',
+        createdAt: now,
+        chats: {
+          default: {
+            createdAt: now,
+            agent: { kind: 'builtin', id: 'cursor' },
+            turns: [],
+            pendingPrompts: [
+              {
+                id: 'blocking-prompt',
+                at: now,
+                updatedAt: now,
+                prompt: 'still running',
+                state: 'sending',
+              },
+            ],
+          },
+        },
+      };
+    });
+
+    const started = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        automationId: 'runs-only-zero',
+        automationLabel: 'Runs Only Zero',
+        prompt: 'do work',
+        onFailurePrompt: 'summarize what happened',
+        runs: 3,
+      }),
+    });
+    expect(started.r.status).toBe(202);
+    expect(started.data?.job?.running).toBe(true);
+
+    const stopped = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/stop`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ stopMode: 'runs-only', clearQueued: true }),
+    });
+    expect(stopped.r.status).toBe(200);
+
+    await pollUntil(
+      async () => {
+        const status = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
+        return status.data?.job?.running === false && Number(status.data?.job?.runsCompleted ?? -1) === 0;
+      },
+      15_000,
+      120,
+      'runs-only stopped before any run completed',
+    );
+
+    const pendingFinal = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    const rows = Array.isArray(pendingFinal.data?.pending) ? pendingFinal.data.pending : [];
+    const finalRows = rows.filter(
+      (p: any) =>
+        String(p?.automation?.kind ?? '') === 'prompt-loop' &&
+        String(p?.automation?.automationId ?? '') === 'runs-only-zero' &&
+        String(p?.automation?.stage ?? '') === 'final-message',
+    );
+    expect(finalRows.length).toBe(0);
   }, 30_000);
 
   test('does not send final message when no automation run succeeds', async () => {
