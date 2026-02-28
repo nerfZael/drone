@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { shouldDeferQueuedTranscriptPrompt, stalePendingPromptState } from '../src/hub/pendingPromptEnqueue';
+import { hasActivePriorPendingPrompt, shouldDeferQueuedTranscriptPrompt, stalePendingPromptState } from '../src/hub/pendingPromptEnqueue';
 
 describe('shouldDeferQueuedTranscriptPrompt', () => {
   test('does not defer for cursor/claude', () => {
@@ -68,6 +68,34 @@ describe('shouldDeferQueuedTranscriptPrompt', () => {
         agentId: 'opencode',
         sessionKnown: false,
         priorPendingPrompts: [{ id: 'p1', state: 'queued' }],
+      }),
+    ).toBe(false);
+  });
+});
+
+describe('hasActivePriorPendingPrompt', () => {
+  test('returns true for queued/sending/sent rows that are not done', () => {
+    expect(
+      hasActivePriorPendingPrompt({
+        priorPendingPrompts: [
+          { id: 'q', state: 'queued' },
+          { id: 's', state: 'sending' },
+          { id: 't', state: 'sent' },
+        ],
+      }),
+    ).toBe(true);
+  });
+
+  test('ignores failed rows and transcript-completed rows', () => {
+    expect(
+      hasActivePriorPendingPrompt({
+        priorPendingPrompts: [{ id: 'f', state: 'failed' }],
+      }),
+    ).toBe(false);
+    expect(
+      hasActivePriorPendingPrompt({
+        priorPendingPrompts: [{ id: 'done', state: 'sent' }],
+        transcriptDoneIds: new Set(['done']),
       }),
     ).toBe(false);
   });

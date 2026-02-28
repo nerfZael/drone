@@ -7,6 +7,26 @@ export type PendingPromptLike = {
   state: PendingPromptState | string;
 };
 
+/**
+ * Returns true when there is any earlier pending prompt that is still active
+ * (not failed and not yet present in the transcript).
+ */
+export function hasActivePriorPendingPrompt(opts: {
+  priorPendingPrompts: PendingPromptLike[];
+  transcriptDoneIds?: Set<string>;
+}): boolean {
+  const done = opts.transcriptDoneIds ?? new Set<string>();
+  for (const p of opts.priorPendingPrompts ?? []) {
+    const id = String(p?.id ?? '').trim();
+    if (!id) continue;
+    if (done.has(id)) continue;
+    const st = String(p?.state ?? '').trim();
+    if (st === 'failed') continue;
+    return true;
+  }
+  return false;
+}
+
 type PendingPromptStalenessOpts = {
   state: PendingPromptState | string;
   updatedAt?: string | null;

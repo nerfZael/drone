@@ -250,7 +250,7 @@ export function GroupMultiChatColumn({
       setSendingPromptCount((c) => c + 1);
       setPromptError(null);
       try {
-        const data = await requestJson<{ ok: true; accepted: true; promptId: string }>(
+        const data = await requestJson<{ ok: true; accepted: true; promptId: string; pendingState?: PendingPrompt['state'] }>(
           `/api/drones/${encodeURIComponent(drone.id)}/chats/${encodeURIComponent(chatName)}/prompt`,
           {
             method: 'POST',
@@ -259,6 +259,11 @@ export function GroupMultiChatColumn({
           },
         );
         const id = String((data as any)?.promptId ?? '').trim();
+        const pendingStateRaw = String(data?.pendingState ?? '').trim();
+        const pendingState: PendingPrompt['state'] =
+          pendingStateRaw === 'queued' || pendingStateRaw === 'sending' || pendingStateRaw === 'sent' || pendingStateRaw === 'failed'
+            ? pendingStateRaw
+            : 'sending';
         if (id) {
           setOptimisticPendingPrompts((prev) => {
             if (prev.some((p) => p.id === id)) return prev;
@@ -269,7 +274,7 @@ export function GroupMultiChatColumn({
                 at: new Date().toISOString(),
                 prompt: optimisticPrompt,
                 ...(optimisticAttachments.length > 0 ? { attachments: optimisticAttachments } : {}),
-                state: 'sending',
+                state: pendingState,
               },
             ];
           });
