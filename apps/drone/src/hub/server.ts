@@ -41,7 +41,7 @@ import {
 } from '../host/api';
 import { jobsPlanFromAgentMessage, suggestDroneNameFromMessage } from './jobs-from-message';
 import { tldrFromAgentMessage } from './tldr-from-message';
-import { shouldDeferQueuedTranscriptPrompt, stalePendingPromptState } from './pendingPromptEnqueue';
+import { hasActivePriorPendingPrompt, shouldDeferQueuedTranscriptPrompt, stalePendingPromptState } from './pendingPromptEnqueue';
 import {
   cleanupQuarantineWorktree,
   deleteHostRefBestEffort,
@@ -3420,7 +3420,17 @@ async function enqueuePrompt(opts: {
   // Unified FIFO: once an automation is active/queued for this chat, later manual prompts
   // are accepted but held behind automation completion.
   const blockedByAutomation = automationLaneBusy && !isAutomationPrompt;
-  // Preserve prompt ordering: if earlier prompts are still hub-queued, queue this prompt too.
+  // Preserve prompt ordering: for non-automation prompts, once any earlier prompt is still active
+  // (queued/sending/sent and not yet in transcript), queue this prompt behind it.
+  const hasPriorActive = !isAutomationPrompt
+    ? hasActivePriorPendingPrompt({
+        priorPendingPrompts: priorPending
+          .map((p: any) => ({ id: String(p?.id ?? '').trim(), state: String(p?.state ?? '') }))
+          .filter((p: any) => p.id),
+        transcriptDoneIds,
+      })
+    : false;
+  // Preserve prompt ordering for queued rows as a fallback for automation prompts.
   const hasPriorQueued = priorPending.some((p: any) => {
     if (String(p?.state ?? '') !== 'queued') return false;
     if (isAutomationPrompt) return !Boolean((p as any)?.blockedByAutomation);
@@ -3428,6 +3438,7 @@ async function enqueuePrompt(opts: {
   });
   const defer =
     blockedByAutomation ||
+    hasPriorActive ||
     hasPriorQueued ||
     (agent.kind === 'builtin'
       ? shouldDeferQueuedTranscriptPrompt({
