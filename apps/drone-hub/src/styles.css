@@ -605,3 +605,61 @@ select:disabled optgroup {
   overflow-wrap: anywhere;
   word-break: break-word;
 }
+
+.dh-changes-dock .rdv-wrapper .diff .token.comment,
+.dh-changes-dock .rdv-wrapper .diff .token.prolog,
+.dh-changes-dock .rdv-wrapper .diff .token.doctype,
+.dh-changes-dock .rdv-wrapper .diff .token.cdata {
+  color: #7d8597;
+}
+
+.dh-changes-dock .rdv-wrapper .diff .token.punctuation {
+  color: #c9d1d9;
+}
+
+.dh-changes-dock .rdv-wrapper .diff .token.property,
+.dh-changes-dock .rdv-wrapper .diff .token.tag,
+.dh-changes-dock .rdv-wrapper .diff .token.constant,
+.dh-changes-dock .rdv-wrapper .diff .token.symbol,
+.dh-changes-dock .rdv-wrapper .diff .token.deleted {
+  color: #ff7b72;
+}
+
+.dh-changes-dock .rdv-wrapper .diff .token.boolean,
+.dh-changes-dock .rdv-wrapper .diff .token.number {
+  color: #79c0ff;
+}
+
+.dh-changes-dock .rdv-wrapper .diff .token.selector,
+.dh-changes-dock .rdv-wrapper .diff .token.attr-name,
+.dh-changes-dock .rdv-wrapper .diff .token.string,
+.dh-changes-dock .rdv-wrapper .diff .token.char,
+.dh-changes-dock .rdv-wrapper .diff .token.builtin,
+.dh-changes-dock .rdv-wrapper .diff .token.inserted {
+  color: #a5d6ff;
+}
+
+.dh-changes-dock .rdv-wrapper .diff .token.operator,
+.dh-changes-dock .rdv-wrapper .diff .token.entity,
+.dh-changes-dock .rdv-wrapper .diff .token.url,
+.dh-changes-dock .rdv-wrapper .diff .language-css .token.string,
+.dh-changes-dock .rdv-wrapper .diff .style .token.string {
+  color: #d2a8ff;
+}
+
+.dh-changes-dock .rdv-wrapper .diff .token.atrule,
+.dh-changes-dock .rdv-wrapper .diff .token.attr-value,
+.dh-changes-dock .rdv-wrapper .diff .token.keyword {
+  color: #ffab70;
+}
+
+.dh-changes-dock .rdv-wrapper .diff .token.function,
+.dh-changes-dock .rdv-wrapper .diff .token.class-name {
+  color: #d2a8ff;
+}
+
+.dh-changes-dock .rdv-wrapper .diff .token.regex,
+.dh-changes-dock .rdv-wrapper .diff .token.important,
+.dh-changes-dock .rdv-wrapper .diff .token.variable {
+  color: #ffa657;
+}
