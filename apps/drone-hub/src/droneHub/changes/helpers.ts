@@ -4,7 +4,8 @@ import type {
   RepoPullRequestChangeEntry,
   RepoPullRequestMergeMethod,
 } from '../types';
-import type { DiffNoTextReason } from './DiffBlock';
+import type { DiffNoTextReason } from './types';
+import { readChangesStorage } from './storage';
 
 export type DiffKind = 'staged' | 'unstaged';
 export type ChangesDataMode = 'working-tree' | 'pull-preview' | 'pull-request';
@@ -39,14 +40,8 @@ export function shortRefName(raw: string | null | undefined, maxLen: number = 32
 }
 
 export function changesPrMergeMethod(): RepoPullRequestMergeMethod {
-  try {
-    const raw = String(localStorage.getItem(PR_MERGE_METHOD_STORAGE_KEY) ?? '')
-      .trim()
-      .toLowerCase();
-    if (raw === 'squash' || raw === 'rebase' || raw === 'merge') return raw;
-  } catch {
-    // ignore
-  }
+  const raw = String(readChangesStorage(PR_MERGE_METHOD_STORAGE_KEY) ?? '').trim().toLowerCase();
+  if (raw === 'squash' || raw === 'rebase' || raw === 'merge') return raw;
   return 'merge';
 }
 

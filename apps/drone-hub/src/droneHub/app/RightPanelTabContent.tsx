@@ -290,7 +290,6 @@ export function RightPanelTabContent({
         <DroneChangesDock
           key={`${paneKey}-changes`}
           droneId={drone.id}
-          droneName={drone.name}
           repoAttached={drone.repoAttached ?? Boolean(String(drone.repoPath ?? '').trim())}
           repoPath={drone.repoPath}
           disabled={disabled}

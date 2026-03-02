@@ -7,10 +7,8 @@ import type {
   RepoDiffPayload,
   RepoPullChangesPayload,
   RepoPullDiffPayload,
-  RepoPullRequestChangeEntry,
   RepoPullRequestClosePayload,
   RepoPullRequestChangesPayload,
-  RepoPullRequestMergeMethod,
   RepoPullRequestMergePayload,
 } from '../types';
 import {
@@ -19,7 +17,9 @@ import {
   type ChangesOpenPullRequestDetail,
   selectedPullRequestForDrone,
 } from './navigation';
-import { DiffBlock, type DiffState, type DiffViewType } from './DiffBlock';
+import { DiffBlock } from './DiffBlock';
+import type { DiffState, DiffViewType } from './types';
+import { CHANGES_DIFF_VIEW_STORAGE_KEY, CHANGES_VIEW_STORAGE_KEY, readChangesStorage, writeChangesStorage } from './storage';
 import {
   badgeTone,
   buildExplorerTree,
@@ -46,9 +46,6 @@ import {
 
 type ChangesViewMode = 'stacked' | 'split';
 type LastRefreshedByMode = Record<ChangesDataMode, number | null>;
-
-const CHANGES_VIEW_STORAGE_KEY = 'droneHub.changesViewMode';
-const CHANGES_DIFF_VIEW_STORAGE_KEY = 'droneHub.changesDiffViewType';
 
 function IconChevron({ open }: { open: boolean }) {
   return (
@@ -107,7 +104,6 @@ function MetaChip({
 
 export function DroneChangesDock({
   droneId,
-  droneName,
   repoAttached,
   repoPath,
   disabled,
@@ -115,7 +111,6 @@ export function DroneChangesDock({
   hubMessage,
 }: {
   droneId: string;
-  droneName: string;
   repoAttached: boolean;
   repoPath: string;
   disabled: boolean;
@@ -150,29 +145,17 @@ export function DroneChangesDock({
   });
 
   const [dataMode, setDataMode] = React.useState<ChangesDataMode>(() => {
-    try {
-      const raw = localStorage.getItem(CHANGES_DATA_MODE_STORAGE_KEY);
-      return raw === 'pull-preview' || raw === 'pull-request' ? raw : 'working-tree';
-    } catch {
-      return 'working-tree';
-    }
+    const raw = readChangesStorage(CHANGES_DATA_MODE_STORAGE_KEY);
+    return raw === 'pull-preview' || raw === 'pull-request' ? raw : 'working-tree';
   });
 
   const [viewMode, setViewMode] = React.useState<ChangesViewMode>(() => {
-    try {
-      const raw = localStorage.getItem(CHANGES_VIEW_STORAGE_KEY);
-      return raw === 'split' ? 'split' : 'stacked';
-    } catch {
-      return 'stacked';
-    }
+    const raw = readChangesStorage(CHANGES_VIEW_STORAGE_KEY);
+    return raw === 'split' ? 'split' : 'stacked';
   });
   const [diffViewType, setDiffViewType] = React.useState<DiffViewType>(() => {
-    try {
-      const raw = localStorage.getItem(CHANGES_DIFF_VIEW_STORAGE_KEY);
-      return raw === 'split' ? 'split' : 'unified';
-    } catch {
-      return 'unified';
-    }
+    const raw = readChangesStorage(CHANGES_DIFF_VIEW_STORAGE_KEY);
+    return raw === 'split' ? 'split' : 'unified';
   });
 
   const [selectedPath, setSelectedPath] = React.useState<string | null>(null);
@@ -198,26 +181,14 @@ export function DroneChangesDock({
   }, []);
 
   React.useEffect(() => {
-    try {
-      localStorage.setItem(CHANGES_VIEW_STORAGE_KEY, viewMode);
-    } catch {
-      // ignore
-    }
+    writeChangesStorage(CHANGES_VIEW_STORAGE_KEY, viewMode);
   }, [viewMode]);
   React.useEffect(() => {
-    try {
-      localStorage.setItem(CHANGES_DIFF_VIEW_STORAGE_KEY, diffViewType);
-    } catch {
-      // ignore
-    }
+    writeChangesStorage(CHANGES_DIFF_VIEW_STORAGE_KEY, diffViewType);
   }, [diffViewType]);
 
   React.useEffect(() => {
-    try {
-      localStorage.setItem(CHANGES_DATA_MODE_STORAGE_KEY, dataMode);
-    } catch {
-      // ignore
-    }
+    writeChangesStorage(CHANGES_DATA_MODE_STORAGE_KEY, dataMode);
   }, [dataMode]);
 
   React.useEffect(() => {
