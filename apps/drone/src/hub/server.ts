@@ -1126,6 +1126,7 @@ const PROMPT_AUTOMATION_WAIT_FOR_IDLE_TIMEOUT_MS = 30 * 60_000;
 const PROMPT_AUTOMATION_WAIT_FOR_PROMPT_TIMEOUT_MS = 30 * 60_000;
 const PROMPT_AUTOMATION_ON_FAILURE_PROMPT_MAX_CHARS = 8_000;
 const PROMPT_AUTOMATION_INTER_RUN_SLEEP_CHUNK_MS = 5_000;
+const PROMPT_AUTOMATION_COMPLETION_STALL_RECOVERY_GRACE_MS = 15_000;
 
 type PromptAutomationJobStatus = 'running' | 'completed' | 'failed' | 'stopped';
 type PromptAutomationStopMode = 'all' | 'runs-only';
@@ -2296,6 +2297,16 @@ function promptAutomationLaneBusy(
   return lane.queued.length > 0;
 }
 
+function anyBusyPromptAutomationLaneForDrone(droneIdRaw: string): boolean {
+  const droneId = normalizeDroneIdentity(droneIdRaw);
+  if (!droneId) return false;
+  for (const lane of PROMPT_AUTOMATION_LANES.values()) {
+    if (lane.droneId !== droneId) continue;
+    if (promptAutomationLaneBusy(lane, { includeQueued: true })) return true;
+  }
+  return false;
+}
+
 function promptAutomationJobResponse(lane: PromptAutomationLaneState | null) {
   const runningJob = lane?.runningJob ?? null;
   const baseJob = runningJob ?? lane?.lastJob ?? null;
@@ -2354,6 +2365,53 @@ function promptAutomationJobResponse(lane: PromptAutomationLaneState | null) {
     error: baseJob.error,
     queuedCount: queued.length,
     queued,
+  };
+}
+
+function parsePromptAutomationIsoMs(raw: string | null | undefined): number {
+  const ms = Date.parse(String(raw ?? '').trim());
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function readPromptAutomationFinalMessageSnapshot(regAny: any, job: PromptAutomationJobState): {
+  hasFinalTranscriptTurn: boolean;
+  pendingFinalState: string;
+  pendingFinalUpdatedAt: string | null;
+} {
+  const turns = Array.isArray(regAny?.drones?.[job.droneId]?.chats?.[job.chatName]?.turns)
+    ? regAny.drones[job.droneId].chats[job.chatName].turns
+    : [];
+  const pending = Array.isArray(regAny?.drones?.[job.droneId]?.chats?.[job.chatName]?.pendingPrompts)
+    ? regAny.drones[job.droneId].chats[job.chatName].pendingPrompts
+    : [];
+  const jobKey = String(job.executionKey ?? '').trim();
+  const hasFinalTranscriptTurn = turns.some((turn: any) => {
+    const automation = normalizePromptAutomationMeta((turn as any)?.automation);
+    if (!automation) return false;
+    return (
+      String(automation.kind ?? '').trim() === 'prompt-loop' &&
+      String(automation.stage ?? '').trim() === 'final-message' &&
+      String(automation.jobKey ?? '').trim() === jobKey
+    );
+  });
+  const pendingFinal = pending.find((item: any) => {
+    const automation = normalizePromptAutomationMeta((item as any)?.automation);
+    if (!automation) return false;
+    return (
+      String(automation.kind ?? '').trim() === 'prompt-loop' &&
+      String(automation.stage ?? '').trim() === 'final-message' &&
+      String(automation.jobKey ?? '').trim() === jobKey
+    );
+  });
+  return {
+    hasFinalTranscriptTurn,
+    pendingFinalState: String((pendingFinal as any)?.state ?? '').trim().toLowerCase(),
+    pendingFinalUpdatedAt:
+      typeof (pendingFinal as any)?.updatedAt === 'string'
+        ? String((pendingFinal as any).updatedAt).trim() || null
+        : typeof (pendingFinal as any)?.at === 'string'
+          ? String((pendingFinal as any).at).trim() || null
+          : null,
   };
 }
 
@@ -2717,6 +2775,111 @@ function queuePromptAutomationLaneJob(lane: PromptAutomationLaneState, cfg: Prom
   lane.updatedAt = nowIso();
 }
 
+function finalizePromptAutomationLaneJob(lane: PromptAutomationLaneState, job: PromptAutomationJobState): void {
+  if (lane.runningJob !== job) return;
+  lane.runningJob = null;
+  lane.lastJob = job;
+  lane.updatedAt = nowIso();
+  const next = lane.queued.shift() ?? null;
+  if (next) {
+    lane.updatedAt = nowIso();
+    startPromptAutomationLaneJob(
+      lane,
+      {
+        automationId: next.automationId,
+        automationLabel: next.automationLabel,
+        prompt: next.prompt,
+        onFailurePrompt: next.onFailurePrompt,
+        runsTotal: next.runsTotal,
+        sleepBetweenRunsSeconds: next.sleepBetweenRunsSeconds,
+        stopPhrase: next.stopPhrase,
+        stopPhraseCaseSensitive: next.stopPhraseCaseSensitive,
+      },
+      { queuedFromId: next.queueId },
+    );
+    return;
+  }
+  // Lane is now idle; release any prompts that were intentionally queued behind automation.
+  enqueuePendingPromptPump(lane.droneId, lane.chatName);
+}
+
+async function recoverStalledPromptAutomationLane(
+  lane: PromptAutomationLaneState | null | undefined,
+): Promise<void> {
+  if (!lane || !lane.runningJob) return;
+  const job = lane.runningJob;
+  if (job.status !== 'running') return;
+  if (job.runsTotal <= 0 || job.runsCompleted < job.runsTotal) return;
+
+  const updatedMs = parsePromptAutomationIsoMs(job.updatedAt || job.startedAt);
+  if (!updatedMs) return;
+  const ageMs = Date.now() - updatedMs;
+  if (ageMs < PROMPT_AUTOMATION_COMPLETION_STALL_RECOVERY_GRACE_MS) return;
+
+  const finalPrompt = String(job.onFailurePrompt ?? '').trim();
+  if (!finalPrompt) {
+    job.status = 'completed';
+    job.error = null;
+    job.updatedAt = nowIso();
+    finalizePromptAutomationLaneJob(lane, job);
+    return;
+  }
+
+  const regAny: any = await loadRegistry().catch(() => null);
+  if (!regAny || typeof regAny !== 'object') return;
+  const finalSnapshot = readPromptAutomationFinalMessageSnapshot(regAny, job);
+
+  if (finalSnapshot.hasFinalTranscriptTurn) {
+    job.status = 'completed';
+    job.error = null;
+    job.updatedAt = nowIso();
+    finalizePromptAutomationLaneJob(lane, job);
+    return;
+  }
+
+  if (finalSnapshot.pendingFinalState === 'failed') {
+    job.status = 'failed';
+    job.error = 'final message failed';
+    job.updatedAt = nowIso();
+    finalizePromptAutomationLaneJob(lane, job);
+    return;
+  }
+
+  if (!finalSnapshot.pendingFinalState) {
+    job.status = 'failed';
+    job.error = 'final message was not enqueued after automation runs completed';
+    job.updatedAt = nowIso();
+    finalizePromptAutomationLaneJob(lane, job);
+    return;
+  }
+
+  if (finalSnapshot.pendingFinalState === 'queued') {
+    const queuedUpdatedMs = parsePromptAutomationIsoMs(finalSnapshot.pendingFinalUpdatedAt);
+    const queuedAgeMs = queuedUpdatedMs > 0 ? Date.now() - queuedUpdatedMs : 0;
+    const queuedStaleAfterMs = Math.max(defaultPromptEnqueueTimeoutMs() * 2, 5 * 60_000);
+    if (queuedUpdatedMs > 0 && queuedAgeMs >= queuedStaleAfterMs) {
+      job.status = 'failed';
+      job.error = 'final message remained queued for too long';
+      job.updatedAt = nowIso();
+      finalizePromptAutomationLaneJob(lane, job);
+    }
+    return;
+  }
+
+  const staleFinalState = stalePendingPromptState({
+    state: finalSnapshot.pendingFinalState,
+    updatedAt: finalSnapshot.pendingFinalUpdatedAt,
+    at: finalSnapshot.pendingFinalUpdatedAt,
+    enqueueTimeoutMs: defaultPromptEnqueueTimeoutMs(),
+  });
+  if (staleFinalState === 'sending' || staleFinalState === 'sent') {
+    job.status = 'failed';
+    job.error = 'final message stalled before transcript reconciliation';
+    job.updatedAt = nowIso();
+    finalizePromptAutomationLaneJob(lane, job);
+  }
+}
+
 function startPromptAutomationLaneJob(
   lane: PromptAutomationLaneState,
   cfg: PromptAutomationJobConfig,
@@ -2752,28 +2915,7 @@ function startPromptAutomationLaneJob(
   lane.runningJob = job;
   lane.updatedAt = nowIso();
   job.task = runPromptAutomationJob(job).finally(() => {
-    if (lane.runningJob === job) {
-      lane.runningJob = null;
-      lane.lastJob = job;
-      lane.updatedAt = nowIso();
-    }
-    const next = lane.queued.shift() ?? null;
-    if (next) {
-      lane.updatedAt = nowIso();
-      startPromptAutomationLaneJob(lane, {
-        automationId: next.automationId,
-        automationLabel: next.automationLabel,
-        prompt: next.prompt,
-        onFailurePrompt: next.onFailurePrompt,
-        runsTotal: next.runsTotal,
-        sleepBetweenRunsSeconds: next.sleepBetweenRunsSeconds,
-        stopPhrase: next.stopPhrase,
-        stopPhraseCaseSensitive: next.stopPhraseCaseSensitive,
-      }, { queuedFromId: next.queueId });
-      return;
-    }
-    // Lane is now idle; release any prompts that were intentionally queued behind automation.
-    enqueuePendingPromptPump(lane.droneId, lane.chatName);
+    finalizePromptAutomationLaneJob(lane, job);
   });
   void job.task;
   return job;
@@ -6623,7 +6765,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
               chats: Object.keys(d.chats ?? {}),
               hubPhase,
               hubMessage,
-              busy: anyActivePendingPromptsForDrone(d),
+              busy: anyActivePendingPromptsForDrone(d) || anyBusyPromptAutomationLaneForDrone(droneId),
             };
           })
         );
@@ -10248,7 +10390,9 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         if (!resolved) return;
         const droneId = resolved.id;
         const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
-        const lane = getPromptAutomationLane(droneId, chatName);
+        let lane = getPromptAutomationLane(droneId, chatName);
+        await recoverStalledPromptAutomationLane(lane);
+        lane = getPromptAutomationLane(droneId, chatName);
         json(res, 200, {
           ok: true,
           automation: 'prompt-loop',
