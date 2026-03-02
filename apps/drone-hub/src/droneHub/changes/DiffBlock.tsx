@@ -1,11 +1,12 @@
 import React from 'react';
 import { Diff, Hunk, markEdits, parseDiff, tokenize } from 'react-diff-view';
-import type { FileData, HunkTokens } from 'react-diff-view';
+import type { FileData, HunkTokens, RenderGutter } from 'react-diff-view';
 import 'react-diff-view/style/index.css';
 import refractor from 'refractor';
 import { diffLanguageForPath } from '../code-languages';
 
 export type DiffNoTextReason = 'binary' | 'truncated' | 'empty' | 'unavailable';
+export type DiffViewType = 'unified' | 'split';
 
 export type DiffState =
   | { status: 'loading' }
@@ -38,7 +39,15 @@ function tokenizeDiffFile(file: FileData, fallbackPath: string | null | undefine
   }
 }
 
-export function DiffBlock({ state, filePath }: { state: DiffState | undefined; filePath?: string | null }) {
+export function DiffBlock({
+  state,
+  filePath,
+  viewType = 'unified',
+}: {
+  state: DiffState | undefined;
+  filePath?: string | null;
+  viewType?: DiffViewType;
+}) {
   if (!state || state.status === 'loading') {
     return <div className="px-3 py-3 text-[11px] text-[var(--muted)]">Loading diff...</div>;
   }
@@ -94,15 +103,31 @@ export function DiffBlock({ state, filePath }: { state: DiffState | undefined; f
     return <pre className="m-0 p-3 text-[11px] leading-5 text-[var(--fg-secondary)] whitespace-pre-wrap break-words">{rawText}</pre>;
   }
 
+  const renderGutter = React.useCallback<RenderGutter>(({ change, side, renderDefault, wrapInAnchor }) => {
+    const marker =
+      change.type === 'insert' ? (side === 'new' ? '+' : '') : change.type === 'delete' ? (side === 'old' ? '-' : '') : '';
+    const markerClassName =
+      marker === '+' ? 'dh-diff-gutter-sign-insert' : marker === '-' ? 'dh-diff-gutter-sign-delete' : 'dh-diff-gutter-sign-neutral';
+    return wrapInAnchor(
+      <span className="dh-diff-gutter-content">
+        <span className={`dh-diff-gutter-sign ${markerClassName}`} aria-hidden="true">
+          {marker}
+        </span>
+        <span className="dh-diff-gutter-line">{renderDefault()}</span>
+      </span>,
+    );
+  }, []);
+
   return (
     <div className="rdv-wrapper px-2 py-2">
       {parsed.map((file, fileIndex) => (
         <Diff
           key={`${file.oldPath}-${file.newPath}-${fileIndex}`}
-          viewType="unified"
+          viewType={viewType}
           diffType={file.type}
           hunks={file.hunks}
           tokens={tokensByFile[fileIndex] ?? null}
+          renderGutter={renderGutter}
         >
           {(hunks) => hunks.map((hunk, hunkIndex) => <Hunk key={`${fileIndex}-${hunkIndex}`} hunk={hunk} />)}
         </Diff>

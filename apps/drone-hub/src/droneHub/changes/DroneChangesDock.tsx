@@ -19,7 +19,7 @@ import {
   type ChangesOpenPullRequestDetail,
   selectedPullRequestForDrone,
 } from './navigation';
-import { DiffBlock, type DiffState } from './DiffBlock';
+import { DiffBlock, type DiffState, type DiffViewType } from './DiffBlock';
 import {
   badgeTone,
   buildExplorerTree,
@@ -48,6 +48,7 @@ type ChangesViewMode = 'stacked' | 'split';
 type LastRefreshedByMode = Record<ChangesDataMode, number | null>;
 
 const CHANGES_VIEW_STORAGE_KEY = 'droneHub.changesViewMode';
+const CHANGES_DIFF_VIEW_STORAGE_KEY = 'droneHub.changesDiffViewType';
 
 function IconChevron({ open }: { open: boolean }) {
   return (
@@ -165,6 +166,14 @@ export function DroneChangesDock({
       return 'stacked';
     }
   });
+  const [diffViewType, setDiffViewType] = React.useState<DiffViewType>(() => {
+    try {
+      const raw = localStorage.getItem(CHANGES_DIFF_VIEW_STORAGE_KEY);
+      return raw === 'split' ? 'split' : 'unified';
+    } catch {
+      return 'unified';
+    }
+  });
 
   const [selectedPath, setSelectedPath] = React.useState<string | null>(null);
   const [splitKind, setSplitKind] = React.useState<DiffKind>('unstaged');
@@ -195,6 +204,13 @@ export function DroneChangesDock({
       // ignore
     }
   }, [viewMode]);
+  React.useEffect(() => {
+    try {
+      localStorage.setItem(CHANGES_DIFF_VIEW_STORAGE_KEY, diffViewType);
+    } catch {
+      // ignore
+    }
+  }, [diffViewType]);
 
   React.useEffect(() => {
     try {
@@ -861,6 +877,36 @@ export function DroneChangesDock({
           >
             Explorer
           </button>
+          <span className="mx-1 text-[var(--border-subtle)]">|</span>
+          <span className="text-[9px] uppercase tracking-wide text-[var(--muted-dim)] mr-1" style={{ fontFamily: 'var(--display)' }}>
+            Diff
+          </span>
+          <button
+            type="button"
+            onClick={() => setDiffViewType('unified')}
+            className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
+              diffViewType === 'unified'
+                ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
+            }`}
+            style={{ fontFamily: 'var(--display)' }}
+            title="Unified diff view"
+          >
+            Unified
+          </button>
+          <button
+            type="button"
+            onClick={() => setDiffViewType('split')}
+            className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
+              diffViewType === 'split'
+                ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
+            }`}
+            style={{ fontFamily: 'var(--display)' }}
+            title="Side-by-side diff view"
+          >
+            Side-by-side
+          </button>
           <span className="ml-1 text-[9px] text-[var(--muted-dim)] font-mono tabular-nums" title={refreshed.title}>
             Updated {refreshed.text}
           </span>
@@ -1116,7 +1162,7 @@ export function DroneChangesDock({
                           {k}{fallback ? ' (fallback)' : ''}
                         </span>
                       </div>
-                      <DiffBlock state={state} filePath={entry.path} />
+                      <DiffBlock state={state} filePath={entry.path} viewType={diffViewType} />
                     </section>
                   );
                 })}
@@ -1163,7 +1209,7 @@ export function DroneChangesDock({
                         {open ? 'Hide' : 'Show'}
                       </button>
                     </div>
-                    {open ? <DiffBlock state={state} filePath={entry.path} /> : null}
+                    {open ? <DiffBlock state={state} filePath={entry.path} viewType={diffViewType} /> : null}
                   </section>
                 );
               })}
@@ -1221,7 +1267,11 @@ export function DroneChangesDock({
               !selectedEntry || !splitShownKind ? (
                 <div className="px-3 py-3 text-[11px] text-[var(--muted)]">Select a changed file to inspect its diff.</div>
               ) : (
-                <DiffBlock state={diffByKey[`wt\u0000${diffKey(selectedEntry.path, splitShownKind)}`]} filePath={selectedEntry.path} />
+                <DiffBlock
+                  state={diffByKey[`wt\u0000${diffKey(selectedEntry.path, splitShownKind)}`]}
+                  filePath={selectedEntry.path}
+                  viewType={diffViewType}
+                />
               )
             ) : !selectedEntry ? (
               <div className="px-3 py-3 text-[11px] text-[var(--muted)]">Select a changed file to inspect its diff.</div>
@@ -1239,6 +1289,7 @@ export function DroneChangesDock({
                       ]
                 }
                 filePath={selectedEntry.path}
+                viewType={diffViewType}
               />
             )}
           </div>
