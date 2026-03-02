@@ -596,6 +596,38 @@ select:disabled optgroup {
   min-width: 0;
 }
 
+.dh-changes-dock .rdv-wrapper .diff .diff-gutter .dh-diff-gutter-content {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45ch;
+  width: 100%;
+}
+
+.dh-changes-dock .rdv-wrapper .diff .diff-gutter .dh-diff-gutter-sign {
+  width: 1ch;
+  text-align: center;
+  font-weight: 700;
+  opacity: 0.95;
+}
+
+.dh-changes-dock .rdv-wrapper .diff .diff-gutter .dh-diff-gutter-sign-insert {
+  color: var(--green);
+}
+
+.dh-changes-dock .rdv-wrapper .diff .diff-gutter .dh-diff-gutter-sign-delete {
+  color: var(--red);
+}
+
+.dh-changes-dock .rdv-wrapper .diff .diff-gutter .dh-diff-gutter-sign-neutral {
+  color: transparent;
+}
+
+.dh-changes-dock .rdv-wrapper .diff .diff-gutter .dh-diff-gutter-line {
+  min-width: 2ch;
+  text-align: right;
+}
+
 .dh-changes-dock .rdv-wrapper .diff .diff-code,
 .dh-changes-dock .rdv-wrapper .diff .diff-code pre,
 .dh-changes-dock .rdv-wrapper .diff .diff-code-edit,
