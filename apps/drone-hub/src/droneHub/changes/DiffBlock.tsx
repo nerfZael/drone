@@ -4,14 +4,7 @@ import type { FileData, HunkTokens, RenderGutter } from 'react-diff-view';
 import 'react-diff-view/style/index.css';
 import refractor from 'refractor';
 import { diffLanguageForPath } from '../code-languages';
-
-export type DiffNoTextReason = 'binary' | 'truncated' | 'empty' | 'unavailable';
-export type DiffViewType = 'unified' | 'split';
-
-export type DiffState =
-  | { status: 'loading' }
-  | { status: 'error'; error: string }
-  | { status: 'loaded'; text: string; truncated: boolean; fromUntracked: boolean; isBinary: boolean; noTextReason: DiffNoTextReason | null };
+import type { DiffState, DiffViewType } from './types';
 
 function normalizeDiffFilePath(rawPath: string | null | undefined): string | null {
   const path = String(rawPath ?? '').trim();
@@ -38,6 +31,21 @@ function tokenizeDiffFile(file: FileData, fallbackPath: string | null | undefine
     return null;
   }
 }
+
+const renderDiffGutter: RenderGutter = ({ change, side, renderDefault, wrapInAnchor }) => {
+  const marker =
+    change.type === 'insert' ? (side === 'new' ? '+' : '') : change.type === 'delete' ? (side === 'old' ? '-' : '') : '';
+  const markerClassName =
+    marker === '+' ? 'dh-diff-gutter-sign-insert' : marker === '-' ? 'dh-diff-gutter-sign-delete' : 'dh-diff-gutter-sign-neutral';
+  return wrapInAnchor(
+    <span className="dh-diff-gutter-content">
+      <span className={`dh-diff-gutter-sign ${markerClassName}`} aria-hidden="true">
+        {marker}
+      </span>
+      <span className="dh-diff-gutter-line">{renderDefault()}</span>
+    </span>,
+  );
+};
 
 export function DiffBlock({
   state,
@@ -103,21 +111,6 @@ export function DiffBlock({
     return <pre className="m-0 p-3 text-[11px] leading-5 text-[var(--fg-secondary)] whitespace-pre-wrap break-words">{rawText}</pre>;
   }
 
-  const renderGutter = React.useCallback<RenderGutter>(({ change, side, renderDefault, wrapInAnchor }) => {
-    const marker =
-      change.type === 'insert' ? (side === 'new' ? '+' : '') : change.type === 'delete' ? (side === 'old' ? '-' : '') : '';
-    const markerClassName =
-      marker === '+' ? 'dh-diff-gutter-sign-insert' : marker === '-' ? 'dh-diff-gutter-sign-delete' : 'dh-diff-gutter-sign-neutral';
-    return wrapInAnchor(
-      <span className="dh-diff-gutter-content">
-        <span className={`dh-diff-gutter-sign ${markerClassName}`} aria-hidden="true">
-          {marker}
-        </span>
-        <span className="dh-diff-gutter-line">{renderDefault()}</span>
-      </span>,
-    );
-  }, []);
-
   return (
     <div className="rdv-wrapper px-2 py-2">
       {parsed.map((file, fileIndex) => (
@@ -127,7 +120,7 @@ export function DiffBlock({
           diffType={file.type}
           hunks={file.hunks}
           tokens={tokensByFile[fileIndex] ?? null}
-          renderGutter={renderGutter}
+          renderGutter={renderDiffGutter}
         >
           {(hunks) => hunks.map((hunk, hunkIndex) => <Hunk key={`${fileIndex}-${hunkIndex}`} hunk={hunk} />)}
         </Diff>
