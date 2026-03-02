@@ -1,25 +1,4 @@
-export function editorLanguageForPath(filePath: string): string {
-  const lower = String(filePath ?? '').trim().toLowerCase();
-  const seg = lower.split('/').pop() ?? lower;
-  if (seg === 'dockerfile') return 'dockerfile';
-  if (seg === 'makefile') return 'makefile';
-  if (seg.endsWith('.ts')) return 'typescript';
-  if (seg.endsWith('.tsx')) return 'typescript';
-  if (seg.endsWith('.js')) return 'javascript';
-  if (seg.endsWith('.jsx')) return 'javascript';
-  if (seg.endsWith('.json')) return 'json';
-  if (seg.endsWith('.md')) return 'markdown';
-  if (seg.endsWith('.py')) return 'python';
-  if (seg.endsWith('.go')) return 'go';
-  if (seg.endsWith('.rs')) return 'rust';
-  if (seg.endsWith('.sh') || seg.endsWith('.bash') || seg.endsWith('.zsh')) return 'shell';
-  if (seg.endsWith('.yml') || seg.endsWith('.yaml')) return 'yaml';
-  if (seg.endsWith('.xml')) return 'xml';
-  if (seg.endsWith('.html') || seg.endsWith('.htm')) return 'html';
-  if (seg.endsWith('.css')) return 'css';
-  if (seg.endsWith('.scss')) return 'scss';
-  return 'plaintext';
-}
+export { editorLanguageForPath } from '../code-languages';
 
 export function formatEditorMtime(mtimeMs: number | null): string {
   if (typeof mtimeMs !== 'number' || !Number.isFinite(mtimeMs) || mtimeMs <= 0) return 'Unknown';

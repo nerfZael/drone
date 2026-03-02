@@ -1,6 +1,4 @@
 import React from 'react';
-import { Diff, Hunk, parseDiff } from 'react-diff-view';
-import 'react-diff-view/style/index.css';
 import { requestJson } from '../http';
 import { provisioningLabel, usePaneReadiness } from '../panes/usePaneReadiness';
 import type {
@@ -21,347 +19,35 @@ import {
   type ChangesOpenPullRequestDetail,
   selectedPullRequestForDrone,
 } from './navigation';
+import { DiffBlock, type DiffState } from './DiffBlock';
+import {
+  badgeTone,
+  buildExplorerTree,
+  changesPrMergeMethod,
+  defaultKindForEntry,
+  diffKey,
+  effectiveKindForEntry,
+  hasStaged,
+  hasUnstaged,
+  normalizeRef,
+  parentDirPaths,
+  pullRequestNoTextReason,
+  pullRequestStateBadge,
+  refreshTimeLabel,
+  shortRefName,
+  shortSha,
+  statusBadgeTitle,
+  statusCharLabel,
+  toWorkingEntriesFromPull,
+  type ChangesDataMode,
+  type DiffKind,
+  type ExplorerNode,
+} from './helpers';
 
 type ChangesViewMode = 'stacked' | 'split';
-type DiffKind = 'staged' | 'unstaged';
-type ChangesDataMode = 'working-tree' | 'pull-preview' | 'pull-request';
-type DiffNoTextReason = 'binary' | 'truncated' | 'empty' | 'unavailable';
 type LastRefreshedByMode = Record<ChangesDataMode, number | null>;
 
-type DiffState =
-  | { status: 'loading' }
-  | { status: 'error'; error: string }
-  | { status: 'loaded'; text: string; truncated: boolean; fromUntracked: boolean; isBinary: boolean; noTextReason: DiffNoTextReason | null };
-
-type ExplorerNode = {
-  kind: 'dir' | 'file';
-  name: string;
-  path: string;
-  count: number;
-  entry?: RepoChangeEntry;
-  children?: ExplorerNode[];
-};
-
 const CHANGES_VIEW_STORAGE_KEY = 'droneHub.changesViewMode';
-const PR_MERGE_METHOD_STORAGE_KEY = 'droneHub.prMergeMethod';
-
-function shortSha(sha: string | null | undefined): string {
-  const s = String(sha ?? '').trim();
-  if (!s) return '-';
-  return s.length > 10 ? s.slice(0, 10) : s;
-}
-
-function normalizeRef(raw: string | null | undefined): string | null {
-  const text = String(raw ?? '').trim();
-  return text || null;
-}
-
-function shortRefName(raw: string | null | undefined, maxLen: number = 32): string {
-  const text = normalizeRef(raw);
-  if (!text) return '-';
-  if (text.length <= maxLen) return text;
-  return `${text.slice(0, maxLen - 1)}…`;
-}
-
-function changesPrMergeMethod(): RepoPullRequestMergeMethod {
-  try {
-    const raw = String(localStorage.getItem(PR_MERGE_METHOD_STORAGE_KEY) ?? '')
-      .trim()
-      .toLowerCase();
-    if (raw === 'squash' || raw === 'rebase' || raw === 'merge') return raw;
-  } catch {
-    // ignore
-  }
-  return 'merge';
-}
-
-function pullRequestStateBadge(
-  raw: string | null | undefined,
-): { label: string; title: string; className: string } | null {
-  const state = String(raw ?? '').trim().toLowerCase();
-  if (!state) return null;
-  if (state === 'open') {
-    return {
-      label: 'Open',
-      title: 'Pull request is open.',
-      className: 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]',
-    };
-  }
-  if (state === 'merged') {
-    return {
-      label: 'Merged',
-      title: 'Pull request has been merged.',
-      className: 'border-[rgba(74,222,128,.35)] bg-[var(--green-subtle)] text-[var(--green)]',
-    };
-  }
-  if (state === 'closed') {
-    return {
-      label: 'Closed',
-      title: 'Pull request was closed without merging.',
-      className: 'border-[rgba(255,90,90,.35)] bg-[var(--red-subtle)] text-[var(--red)]',
-    };
-  }
-  return {
-    label: state,
-    title: `Pull request state: ${state}`,
-    className: 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)]',
-  };
-}
-
-function hasStaged(entry: RepoChangeEntry | null): boolean {
-  if (!entry) return false;
-  return entry.stagedType !== null;
-}
-
-function hasUnstaged(entry: RepoChangeEntry | null): boolean {
-  if (!entry) return false;
-  return entry.unstagedType !== null || entry.isUntracked;
-}
-
-function defaultKindForEntry(entry: RepoChangeEntry | null): DiffKind {
-  if (!entry) return 'unstaged';
-  return hasUnstaged(entry) ? 'unstaged' : 'staged';
-}
-
-function effectiveKindForEntry(entry: RepoChangeEntry | null, preferred: DiffKind): DiffKind | null {
-  if (!entry) return null;
-  if (preferred === 'unstaged') {
-    if (hasUnstaged(entry)) return 'unstaged';
-    if (hasStaged(entry)) return 'staged';
-    return null;
-  }
-  if (hasStaged(entry)) return 'staged';
-  if (hasUnstaged(entry)) return 'unstaged';
-  return null;
-}
-
-function statusCharLabel(ch: string): string {
-  if (!ch || ch === '.') return '-';
-  return ch;
-}
-
-function statusCharMeaning(chRaw: string): string {
-  const ch = String(chRaw ?? '.').charAt(0) || '.';
-  switch (ch) {
-    case '.':
-      return 'no change';
-    case 'M':
-      return 'modified';
-    case 'A':
-      return 'added';
-    case 'D':
-      return 'deleted';
-    case 'R':
-      return 'renamed';
-    case 'C':
-      return 'copied';
-    case 'T':
-      return 'type changed';
-    case 'U':
-      return 'unmerged';
-    case '?':
-      return 'untracked';
-    case '!':
-      return 'ignored';
-    default:
-      return 'unknown';
-  }
-}
-
-function statusBadgeTitle(entry: RepoChangeEntry, mode: ChangesDataMode): string {
-  if (mode !== 'working-tree') {
-    return `Change status: ${statusCharLabel(entry.stagedChar)} (${statusCharMeaning(entry.stagedChar)})`;
-  }
-  return [
-    'Git status badge S/U (staged/unstaged)',
-    `staged: ${statusCharLabel(entry.stagedChar)} (${statusCharMeaning(entry.stagedChar)})`,
-    `unstaged: ${statusCharLabel(entry.unstagedChar)} (${statusCharMeaning(entry.unstagedChar)})`,
-  ].join(' | ');
-}
-
-function badgeTone(entry: RepoChangeEntry): string {
-  if (entry.isConflicted) return 'text-[var(--red)] bg-[var(--red-subtle)] border-[rgba(255,90,90,.35)]';
-  if (entry.isUntracked) return 'text-[var(--green)] bg-[var(--green-subtle)] border-[rgba(74,222,128,.35)]';
-  if (entry.stagedType === 'deleted' || entry.unstagedType === 'deleted') {
-    return 'text-[var(--red)] bg-[var(--red-subtle)] border-[rgba(255,90,90,.35)]';
-  }
-  if (entry.stagedType === 'modified' || entry.unstagedType === 'modified') {
-    return 'text-[var(--yellow)] bg-[var(--yellow-subtle)] border-[rgba(255,178,36,.3)]';
-  }
-  return 'text-[var(--accent)] bg-[var(--accent-subtle)] border-[var(--accent-muted)]';
-}
-
-function diffKey(path: string, kind: DiffKind): string {
-  return `${kind}\u0000${path}`;
-}
-
-function parentDirPaths(filePath: string): string[] {
-  const segs = String(filePath ?? '').split('/').filter(Boolean);
-  const out: string[] = [];
-  let cur = '';
-  for (let i = 0; i < segs.length - 1; i += 1) {
-    cur = cur ? `${cur}/${segs[i]}` : segs[i];
-    out.push(cur);
-  }
-  return out;
-}
-
-function lastPathSegment(filePath: string): string {
-  const segs = String(filePath ?? '').split('/').filter(Boolean);
-  return segs.length > 0 ? segs[segs.length - 1] : String(filePath ?? '');
-}
-
-function buildExplorerTree(entries: RepoChangeEntry[]): ExplorerNode[] {
-  type DirBuilder = {
-    name: string;
-    path: string;
-    dirs: Map<string, DirBuilder>;
-    files: RepoChangeEntry[];
-  };
-
-  const root: DirBuilder = { name: '', path: '', dirs: new Map(), files: [] };
-
-  for (const entry of entries) {
-    const pathText = String(entry.path ?? '').trim();
-    if (!pathText) continue;
-    const segs = pathText.split('/').filter(Boolean);
-    if (segs.length === 0) continue;
-    let cur = root;
-    for (let i = 0; i < segs.length - 1; i += 1) {
-      const seg = segs[i];
-      const nextPath = cur.path ? `${cur.path}/${seg}` : seg;
-      let child = cur.dirs.get(seg);
-      if (!child) {
-        child = { name: seg, path: nextPath, dirs: new Map(), files: [] };
-        cur.dirs.set(seg, child);
-      }
-      cur = child;
-    }
-    cur.files.push(entry);
-  }
-
-  function toNodes(dir: DirBuilder): ExplorerNode[] {
-    const dirNodes = Array.from(dir.dirs.values())
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .map((child) => {
-        const children = toNodes(child);
-        const count = children.reduce((sum, c) => sum + c.count, 0);
-        return {
-          kind: 'dir' as const,
-          name: child.name,
-          path: child.path,
-          count,
-          children,
-        };
-      });
-
-    const fileNodes = dir.files
-      .slice()
-      .sort((a, b) => a.path.localeCompare(b.path))
-      .map((entry) => ({
-        kind: 'file' as const,
-        name: lastPathSegment(entry.path),
-        path: entry.path,
-        count: 1,
-        entry,
-      }));
-
-    return [...dirNodes, ...fileNodes];
-  }
-
-  return toNodes(root);
-}
-
-function pullRequestNoTextReason(entry: RepoPullRequestChangeEntry): DiffNoTextReason | null {
-  const patchText = typeof entry.patch === 'string' ? entry.patch : '';
-  if (patchText.length > 0) return null;
-  if (entry.isBinary) return 'binary';
-  if (entry.truncated) return 'truncated';
-  const changes = Math.max(0, Number(entry.changes) || 0);
-  const additions = Math.max(0, Number(entry.additions) || 0);
-  const deletions = Math.max(0, Number(entry.deletions) || 0);
-  if (changes === 0 && additions === 0 && deletions === 0) return 'empty';
-  return 'unavailable';
-}
-
-function refreshTimeLabel(epochMs: number | null): { text: string; title: string | undefined } {
-  if (!Number.isFinite(Number(epochMs)) || !epochMs || epochMs <= 0) {
-    return { text: 'Not loaded', title: undefined };
-  }
-  const d = new Date(epochMs);
-  return {
-    text: d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-    title: d.toLocaleString(),
-  };
-}
-
-function DiffBlock({ state }: { state: DiffState | undefined }) {
-  if (!state || state.status === 'loading') {
-    return <div className="px-3 py-3 text-[11px] text-[var(--muted)]">Loading diff...</div>;
-  }
-  if (state.status === 'error') {
-    return <div className="px-3 py-3 text-[11px] text-[var(--red)]">{state.error}</div>;
-  }
-
-  if (!state.text) {
-    const emptyMessage =
-      state.noTextReason === 'binary'
-        ? 'No textual diff: this file is binary.'
-        : state.noTextReason === 'truncated'
-          ? 'No textual diff: GitHub truncated this file patch.'
-          : state.noTextReason === 'empty'
-            ? 'No textual diff: this file has no line-level changes.'
-            : state.noTextReason === 'unavailable'
-              ? 'No textual diff: GitHub did not provide a patch for this file.'
-              : 'No diff output for this selection. The file may be empty, non-text, or no longer present.';
-    return (
-      <div className="px-3 py-3 text-[11px] text-[var(--muted)]">
-        {emptyMessage}
-      </div>
-    );
-  }
-
-  const rawText = state.text;
-  const binaryDiffPattern = /(^|\n)(Binary files .* differ|GIT binary patch)(\n|$)/;
-  if (state.isBinary || binaryDiffPattern.test(rawText)) {
-    return (
-      <div>
-        <div className="px-3 py-2 text-[10px] text-[var(--muted)] border-b border-[var(--border-subtle)]">
-          Binary file diff.
-        </div>
-        <pre className="m-0 p-3 text-[11px] leading-5 text-[var(--fg-secondary)] whitespace-pre-wrap break-words">{rawText}</pre>
-      </div>
-    );
-  }
-
-  const parsed = (() => {
-    try {
-      return parseDiff(rawText);
-    } catch {
-      return [];
-    }
-  })();
-  const hasRenderableHunks = parsed.some((file) => Array.isArray(file.hunks) && file.hunks.length > 0);
-
-  if (parsed.length === 0 || !hasRenderableHunks) {
-    return <pre className="m-0 p-3 text-[11px] leading-5 text-[var(--fg-secondary)] whitespace-pre-wrap break-words">{rawText}</pre>;
-  }
-
-  return (
-    <div className="rdv-wrapper px-2 py-2">
-      {parsed.map((file, fileIndex) => (
-        <Diff key={`${file.oldPath}-${file.newPath}-${fileIndex}`} viewType="unified" diffType={file.type} hunks={file.hunks}>
-          {(hunks) => hunks.map((hunk, hunkIndex) => <Hunk key={`${fileIndex}-${hunkIndex}`} hunk={hunk} />)}
-        </Diff>
-      ))}
-      {state.truncated && (
-        <div className="mt-2 px-2 py-1 rounded border border-[var(--yellow)]/30 bg-[var(--yellow-subtle)] text-[10px] text-[var(--yellow)]">
-          Diff output is truncated.
-        </div>
-      )}
-    </div>
-  );
-}
 
 function IconChevron({ open }: { open: boolean }) {
   return (
@@ -681,35 +367,11 @@ export function DroneChangesDock({
   }, [dataMode, disabled, droneId, markModeRefreshed, pullRequestNumber, refreshNonce, repoAttached]);
 
   const pullEntriesAsWorkingEntries: RepoChangeEntry[] = React.useMemo(() => {
-    const list = pullChanges?.entries ?? [];
-    return list.map((e) => ({
-      path: e.path,
-      originalPath: e.originalPath,
-      code: `${String(e.statusChar ?? '?').charAt(0)}.`,
-      stagedChar: String(e.statusChar ?? '?').charAt(0),
-      unstagedChar: '.',
-      stagedType: e.statusType ?? 'unknown',
-      unstagedType: null,
-      isUntracked: false,
-      isIgnored: false,
-      isConflicted: e.statusType === 'unmerged',
-    }));
+    return toWorkingEntriesFromPull(pullChanges?.entries ?? []);
   }, [pullChanges?.entries]);
 
   const pullRequestEntriesAsWorkingEntries: RepoChangeEntry[] = React.useMemo(() => {
-    const list = pullRequestChanges?.entries ?? [];
-    return list.map((e) => ({
-      path: e.path,
-      originalPath: e.originalPath,
-      code: `${String(e.statusChar ?? '?').charAt(0)}.`,
-      stagedChar: String(e.statusChar ?? '?').charAt(0),
-      unstagedChar: '.',
-      stagedType: e.statusType ?? 'unknown',
-      unstagedType: null,
-      isUntracked: false,
-      isIgnored: false,
-      isConflicted: e.statusType === 'unmerged',
-    }));
+    return toWorkingEntriesFromPull(pullRequestChanges?.entries ?? []);
   }, [pullRequestChanges?.entries]);
 
   const entries =
@@ -1454,7 +1116,7 @@ export function DroneChangesDock({
                           {k}{fallback ? ' (fallback)' : ''}
                         </span>
                       </div>
-                      <DiffBlock state={state} />
+                      <DiffBlock state={state} filePath={entry.path} />
                     </section>
                   );
                 })}
@@ -1501,7 +1163,7 @@ export function DroneChangesDock({
                         {open ? 'Hide' : 'Show'}
                       </button>
                     </div>
-                    {open ? <DiffBlock state={state} /> : null}
+                    {open ? <DiffBlock state={state} filePath={entry.path} /> : null}
                   </section>
                 );
               })}
@@ -1510,10 +1172,6 @@ export function DroneChangesDock({
         </div>
       ) : (
         <div className="flex-1 min-h-0 overflow-hidden flex">
-          <div className="w-[clamp(160px,24%,260px)] shrink-0 border-r border-[var(--border-subtle)] overflow-auto px-1.5 py-1">
-            {renderExplorer(explorerTree, 0)}
-          </div>
-
           <div className="flex-1 min-w-0 min-h-0 overflow-auto bg-[rgba(0,0,0,.12)]">
             <div className="sticky top-0 z-10 px-2.5 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/95 backdrop-blur flex items-center justify-between gap-2">
               <div className="min-w-0 text-[10px] text-[var(--muted)] font-mono truncate">
@@ -1563,7 +1221,7 @@ export function DroneChangesDock({
               !selectedEntry || !splitShownKind ? (
                 <div className="px-3 py-3 text-[11px] text-[var(--muted)]">Select a changed file to inspect its diff.</div>
               ) : (
-                <DiffBlock state={diffByKey[`wt\u0000${diffKey(selectedEntry.path, splitShownKind)}`]} />
+                <DiffBlock state={diffByKey[`wt\u0000${diffKey(selectedEntry.path, splitShownKind)}`]} filePath={selectedEntry.path} />
               )
             ) : !selectedEntry ? (
               <div className="px-3 py-3 text-[11px] text-[var(--muted)]">Select a changed file to inspect its diff.</div>
@@ -1580,8 +1238,13 @@ export function DroneChangesDock({
                           .toLowerCase()}\u0000${selectedEntry.path}`
                       ]
                 }
+                filePath={selectedEntry.path}
               />
             )}
+          </div>
+
+          <div className="w-[clamp(160px,24%,260px)] shrink-0 border-l border-[var(--border-subtle)] overflow-auto px-1.5 py-1">
+            {renderExplorer(explorerTree, 0)}
           </div>
         </div>
       )}
