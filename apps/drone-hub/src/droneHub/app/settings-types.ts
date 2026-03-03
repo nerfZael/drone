@@ -46,6 +46,17 @@ export type DeleteActionSettingsResponse = {
   };
 };
 
+export type FilesystemSettingsResponse = {
+  ok: true;
+  filesystem: {
+    uploadMaxBytes: number;
+    uploadMaxBytesSource: 'settings' | 'default';
+    minUploadMaxBytes: number;
+    maxUploadMaxBytes: number;
+    defaultUploadMaxBytes: number;
+  };
+};
+
 export type ArchivedDroneSummary = {
   id: string;
   name: string;

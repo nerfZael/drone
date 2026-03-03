@@ -71,6 +71,11 @@ export type EffectiveDeleteActionSettings = {
   archiveRuntimePolicy: ArchiveRuntimePolicy;
   archiveRuntimePolicySource: DeleteActionSettingsSource;
 };
+export type FilesystemSettingsSource = 'settings' | 'default';
+export type EffectiveFilesystemSettings = {
+  uploadMaxBytes: number;
+  uploadMaxBytesSource: FilesystemSettingsSource;
+};
 
 const ARCHIVE_RETENTION_MS_MAP: Record<ArchiveRetentionId, number> = {
   '1h': 60 * 60 * 1000,
@@ -81,6 +86,9 @@ const ARCHIVE_RETENTION_MS_MAP: Record<ArchiveRetentionId, number> = {
 const DEFAULT_DRONE_DELETE_MODE: DroneDeleteMode = 'permanent';
 const DEFAULT_ARCHIVE_RETENTION: ArchiveRetentionId = '1d';
 const DEFAULT_ARCHIVE_RUNTIME_POLICY: ArchiveRuntimePolicy = 'keep-running';
+export const FILESYSTEM_UPLOAD_MAX_BYTES_MIN = 1 * 1024 * 1024;
+export const FILESYSTEM_UPLOAD_MAX_BYTES_MAX = 8 * 1024 * 1024 * 1024;
+export const FILESYSTEM_UPLOAD_MAX_BYTES_DEFAULT = 2 * 1024 * 1024 * 1024;
 
 export function parseLlmProvider(raw: unknown): LlmProviderId | null {
   const s = String(raw ?? '')
@@ -116,6 +124,14 @@ export function parseArchiveRuntimePolicy(raw: unknown): ArchiveRuntimePolicy | 
 
 export function archiveRetentionMs(retention: ArchiveRetentionId): number {
   return ARCHIVE_RETENTION_MS_MAP[retention];
+}
+
+export function parseFilesystemUploadMaxBytes(raw: unknown): number | null {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return null;
+  const i = Math.floor(n);
+  if (i < FILESYSTEM_UPLOAD_MAX_BYTES_MIN || i > FILESYSTEM_UPLOAD_MAX_BYTES_MAX) return null;
+  return i;
 }
 
 function normalizeApiKey(raw: unknown): string {
@@ -324,6 +340,72 @@ export async function resolveDeleteActionSettingsResponse(): Promise<{
       archiveRetentionMs: archiveRetentionMs(settings.archiveRetention),
       archiveRuntimePolicy: settings.archiveRuntimePolicy,
       archiveRuntimePolicySource: settings.archiveRuntimePolicySource,
+    },
+  };
+}
+
+async function getStoredFilesystemSettings(): Promise<{ uploadMaxBytes: number | null }> {
+  const reg = await loadRegistry();
+  const uploadMaxBytes = parseFilesystemUploadMaxBytes(reg.settings?.filesystem?.uploadMaxBytes);
+  return { uploadMaxBytes };
+}
+
+export async function upsertStoredFilesystemSettings(opts: {
+  uploadMaxBytes?: number;
+}): Promise<void> {
+  const uploadMaxBytes = opts.uploadMaxBytes != null ? parseFilesystemUploadMaxBytes(opts.uploadMaxBytes) : null;
+  if (opts.uploadMaxBytes != null && !uploadMaxBytes) {
+    throw new Error(
+      `uploadMaxBytes must be between ${FILESYSTEM_UPLOAD_MAX_BYTES_MIN} and ${FILESYSTEM_UPLOAD_MAX_BYTES_MAX}`,
+    );
+  }
+  const updatedAt = new Date().toISOString();
+  await updateRegistry((reg) => {
+    reg.settings ??= {};
+    const prev = reg.settings.filesystem ?? {};
+    const nextUploadMaxBytes =
+      uploadMaxBytes ??
+      parseFilesystemUploadMaxBytes(prev.uploadMaxBytes) ??
+      FILESYSTEM_UPLOAD_MAX_BYTES_DEFAULT;
+    if (nextUploadMaxBytes === FILESYSTEM_UPLOAD_MAX_BYTES_DEFAULT) {
+      delete reg.settings.filesystem;
+      if (Object.keys(reg.settings).length === 0) delete reg.settings;
+      return;
+    }
+    reg.settings.filesystem = {
+      uploadMaxBytes: nextUploadMaxBytes,
+      updatedAt,
+    };
+  });
+}
+
+export async function resolveEffectiveFilesystemSettings(): Promise<EffectiveFilesystemSettings> {
+  const stored = await getStoredFilesystemSettings();
+  return {
+    uploadMaxBytes: stored.uploadMaxBytes ?? FILESYSTEM_UPLOAD_MAX_BYTES_DEFAULT,
+    uploadMaxBytesSource: stored.uploadMaxBytes ? 'settings' : 'default',
+  };
+}
+
+export async function resolveFilesystemSettingsResponse(): Promise<{
+  ok: true;
+  filesystem: {
+    uploadMaxBytes: number;
+    uploadMaxBytesSource: FilesystemSettingsSource;
+    minUploadMaxBytes: number;
+    maxUploadMaxBytes: number;
+    defaultUploadMaxBytes: number;
+  };
+}> {
+  const settings = await resolveEffectiveFilesystemSettings();
+  return {
+    ok: true,
+    filesystem: {
+      uploadMaxBytes: settings.uploadMaxBytes,
+      uploadMaxBytesSource: settings.uploadMaxBytesSource,
+      minUploadMaxBytes: FILESYSTEM_UPLOAD_MAX_BYTES_MIN,
+      maxUploadMaxBytes: FILESYSTEM_UPLOAD_MAX_BYTES_MAX,
+      defaultUploadMaxBytes: FILESYSTEM_UPLOAD_MAX_BYTES_DEFAULT,
     },
   };
 }

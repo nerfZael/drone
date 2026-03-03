@@ -27,6 +27,10 @@ type DroneRegistryV1 = {
       apiKey?: string;
       updatedAt?: string;
     };
+    filesystem?: {
+      uploadMaxBytes?: number;
+      updatedAt?: string;
+    };
   };
   /**
    * Host-side list of repositories the user has "registered" with `drone repo`.

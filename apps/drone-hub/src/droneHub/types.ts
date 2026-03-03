@@ -85,6 +85,17 @@ export type DroneFsWritePayload =
     }
   | { ok: false; error: string; id?: string; name?: string; path?: string };
 
+export type DroneFsUploadPayload =
+  | {
+      ok: true;
+      id: string;
+      name: string;
+      path: string;
+      size: number;
+      mtimeMs: number | null;
+    }
+  | { ok: false; error: string; id?: string; name?: string; path?: string };
+
 export type RepoChangeType =
   | 'added'
   | 'modified'

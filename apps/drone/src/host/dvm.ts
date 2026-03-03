@@ -252,6 +252,18 @@ export async function dvmCopyToContainer(
   if (r.code !== 0) throw new Error(r.stderr || r.stdout || `dvm copy ${container} ${srcPath} ${destPath} failed`);
 }
 
+export async function dvmCopyFromContainer(
+  container: string,
+  srcPath: string,
+  destPath: string,
+  opts?: { clean?: boolean; timeoutMs?: number }
+): Promise<void> {
+  const argv = ['download', container, srcPath, destPath];
+  if (opts?.clean) argv.push('--clean');
+  const r = await runDvm(argv, { timeoutMs: opts?.timeoutMs });
+  if (r.code !== 0) throw new Error(r.stderr || r.stdout || `dvm download ${container} ${srcPath} ${destPath} failed`);
+}
+
 function parseRepoExportPath(stdout: string): string | null {
   // dvm prints: "Exported <format> -> <path>"
   const lines = String(stdout || '')
