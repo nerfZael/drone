@@ -19,14 +19,23 @@ import {
 } from './navigation';
 import { DiffBlock } from './DiffBlock';
 import type { DiffState, DiffViewType } from './types';
-import { CHANGES_DIFF_VIEW_STORAGE_KEY, CHANGES_VIEW_STORAGE_KEY, readChangesStorage, writeChangesStorage } from './storage';
+import {
+  CHANGES_DIFF_VIEW_STORAGE_KEY,
+  CHANGES_EXPLORER_WIDTH_STORAGE_KEY,
+  CHANGES_VIEW_STORAGE_KEY,
+  readChangesStorage,
+  removeChangesStorage,
+  writeChangesStorage,
+} from './storage';
 import {
   badgeTone,
   buildExplorerTree,
   changesPrMergeMethod,
   defaultKindForEntry,
+  estimateExplorerSidebarWidth,
   diffKey,
   effectiveKindForEntry,
+  flattenVisibleExplorerRows,
   hasStaged,
   hasUnstaged,
   normalizeRef,
@@ -34,6 +43,7 @@ import {
   pullRequestNoTextReason,
   pullRequestStateBadge,
   refreshTimeLabel,
+  resolveExplorerSidebarWidthBounds,
   shortRefName,
   shortSha,
   statusBadgeTitle,
@@ -46,6 +56,16 @@ import {
 
 type ChangesViewMode = 'stacked' | 'split';
 type LastRefreshedByMode = Record<ChangesDataMode, number | null>;
+const EXPLORER_SIDEBAR_MIN_WIDTH_PX = 180;
+const EXPLORER_SIDEBAR_DEFAULT_WIDTH_PX = 240;
+const EXPLORER_SIDEBAR_MAX_WIDTH_PX = 360;
+const EXPLORER_SIDEBAR_MAX_RATIO = 0.36;
+const CHANGES_DIFF_MIN_WIDTH_PX = 420;
+const EXPLORER_WIDTH_UPDATE_THRESHOLD_PX = 8;
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
 
 function IconChevron({ open }: { open: boolean }) {
   return (
@@ -163,6 +183,28 @@ export function DroneChangesDock({
   const [stackedPreferredKind, setStackedPreferredKind] = React.useState<DiffKind>('unstaged');
   const [expandedDirs, setExpandedDirs] = React.useState<Record<string, boolean>>({});
   const [expandedPullFiles, setExpandedPullFiles] = React.useState<Record<string, boolean>>({});
+  const splitLayoutRef = React.useRef<HTMLDivElement | null>(null);
+  const [explorerManualWidthPx, setExplorerManualWidthPx] = React.useState<number | null>(() => {
+    const raw = Number(readChangesStorage(CHANGES_EXPLORER_WIDTH_STORAGE_KEY));
+    if (!Number.isFinite(raw) || raw < 120) return null;
+    return Math.floor(raw);
+  });
+  const [explorerWidthPx, setExplorerWidthPx] = React.useState(EXPLORER_SIDEBAR_DEFAULT_WIDTH_PX);
+  const [explorerResizing, setExplorerResizing] = React.useState(false);
+  const explorerDragRef = React.useRef<{ pointerId: number; startX: number; startWidth: number; liveWidth: number } | null>(
+    null,
+  );
+  const explorerResizeBodyStyleRef = React.useRef<{ cursor: string; userSelect: string } | null>(null);
+  const explorerWidthOptions = React.useMemo(
+    () => ({
+      minWidthPx: EXPLORER_SIDEBAR_MIN_WIDTH_PX,
+      maxWidthPx: EXPLORER_SIDEBAR_MAX_WIDTH_PX,
+      maxWidthRatio: EXPLORER_SIDEBAR_MAX_RATIO,
+      minDiffWidthPx: CHANGES_DIFF_MIN_WIDTH_PX,
+      fallbackWidthPx: EXPLORER_SIDEBAR_DEFAULT_WIDTH_PX,
+    }),
+    [],
+  );
 
   const [diffByKey, setDiffByKey] = React.useState<Record<string, DiffState>>({});
   const diffByKeyRef = React.useRef<Record<string, DiffState>>({});
@@ -190,6 +232,13 @@ export function DroneChangesDock({
   React.useEffect(() => {
     writeChangesStorage(CHANGES_DATA_MODE_STORAGE_KEY, dataMode);
   }, [dataMode]);
+  React.useEffect(() => {
+    if (explorerManualWidthPx === null) {
+      removeChangesStorage(CHANGES_EXPLORER_WIDTH_STORAGE_KEY);
+      return;
+    }
+    writeChangesStorage(CHANGES_EXPLORER_WIDTH_STORAGE_KEY, String(Math.floor(explorerManualWidthPx)));
+  }, [explorerManualWidthPx]);
 
   React.useEffect(() => {
     const onOpenPullRequest = (event: Event) => {
@@ -449,6 +498,146 @@ export function DroneChangesDock({
       return changed ? next : prev;
     });
   }, [explorerTree, selectedPath]);
+
+  const recomputeExplorerWidth = React.useCallback(() => {
+    if (viewMode !== 'split') return;
+    if (explorerDragRef.current) return;
+    const splitWidth = splitLayoutRef.current?.clientWidth ?? 0;
+    if (splitWidth <= 0) return;
+    const bounds = resolveExplorerSidebarWidthBounds(splitWidth, explorerWidthOptions);
+    const rows = flattenVisibleExplorerRows(explorerTree, expandedDirs);
+    const autoWidth = estimateExplorerSidebarWidth(rows, splitWidth, explorerWidthOptions);
+    const nextWidth =
+      explorerManualWidthPx === null
+        ? autoWidth
+        : clampNumber(explorerManualWidthPx, bounds.minWidthPx, bounds.maxWidthPx);
+    setExplorerWidthPx((prev) => {
+      const outOfBounds = prev < bounds.minWidthPx || prev > bounds.maxWidthPx;
+      if (outOfBounds || Math.abs(prev - nextWidth) >= EXPLORER_WIDTH_UPDATE_THRESHOLD_PX) return nextWidth;
+      return prev;
+    });
+  }, [expandedDirs, explorerManualWidthPx, explorerTree, explorerWidthOptions, viewMode]);
+
+  const restoreResizeBodyStyles = React.useCallback(() => {
+    const styles = explorerResizeBodyStyleRef.current;
+    if (!styles) return;
+    document.body.style.cursor = styles.cursor;
+    document.body.style.userSelect = styles.userSelect;
+    explorerResizeBodyStyleRef.current = null;
+  }, []);
+
+  const finishExplorerResize = React.useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const drag = explorerDragRef.current;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      const finalWidth = Math.floor(drag.liveWidth);
+      explorerDragRef.current = null;
+      setExplorerResizing(false);
+      setExplorerWidthPx(finalWidth);
+      setExplorerManualWidthPx(finalWidth);
+      restoreResizeBodyStyles();
+    },
+    [restoreResizeBodyStyles],
+  );
+
+  const startExplorerResize = React.useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0) return;
+      if (viewMode !== 'split') return;
+      const splitWidth = splitLayoutRef.current?.clientWidth ?? 0;
+      if (splitWidth <= 0) return;
+      const bounds = resolveExplorerSidebarWidthBounds(splitWidth, explorerWidthOptions);
+      const startWidth = clampNumber(explorerWidthPx, bounds.minWidthPx, bounds.maxWidthPx);
+      event.preventDefault();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      explorerDragRef.current = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startWidth,
+        liveWidth: startWidth,
+      };
+      explorerResizeBodyStyleRef.current = {
+        cursor: document.body.style.cursor,
+        userSelect: document.body.style.userSelect,
+      };
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      setExplorerResizing(true);
+    },
+    [explorerWidthOptions, explorerWidthPx, viewMode],
+  );
+
+  const moveExplorerResize = React.useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const drag = explorerDragRef.current;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      const splitWidth = splitLayoutRef.current?.clientWidth ?? 0;
+      if (splitWidth <= 0) return;
+      const bounds = resolveExplorerSidebarWidthBounds(splitWidth, explorerWidthOptions);
+      const delta = drag.startX - event.clientX;
+      const nextWidth = clampNumber(drag.startWidth + delta, bounds.minWidthPx, bounds.maxWidthPx);
+      drag.liveWidth = nextWidth;
+      setExplorerWidthPx(nextWidth);
+    },
+    [explorerWidthOptions],
+  );
+
+  const resetExplorerWidthPreference = React.useCallback(() => {
+    setExplorerManualWidthPx(null);
+  }, []);
+
+  React.useEffect(() => {
+    recomputeExplorerWidth();
+  }, [recomputeExplorerWidth]);
+
+  React.useEffect(() => {
+    if (viewMode !== 'split') return;
+    const splitEl = splitLayoutRef.current;
+    if (!splitEl) return;
+
+    let raf = 0;
+    const schedule = () => {
+      if (raf) cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        recomputeExplorerWidth();
+      });
+    };
+
+    schedule();
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', schedule);
+      return () => {
+        if (raf) cancelAnimationFrame(raf);
+        window.removeEventListener('resize', schedule);
+      };
+    }
+
+    const observer = new ResizeObserver(() => {
+      schedule();
+    });
+    observer.observe(splitEl);
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      observer.disconnect();
+    };
+  }, [recomputeExplorerWidth, viewMode]);
+
+  React.useEffect(() => {
+    if (viewMode === 'split') return;
+    explorerDragRef.current = null;
+    setExplorerResizing(false);
+    restoreResizeBodyStyles();
+  }, [restoreResizeBodyStyles, viewMode]);
+
+  React.useEffect(() => {
+    return () => {
+      restoreResizeBodyStyles();
+    };
+  }, [restoreResizeBodyStyles]);
 
   const loadDiff = React.useCallback(
     async (path: string, kind: DiffKind, retryEmptyUntracked = false) => {
@@ -1188,7 +1377,7 @@ export function DroneChangesDock({
           )}
         </div>
       ) : (
-        <div className="flex-1 min-h-0 overflow-hidden flex">
+        <div ref={splitLayoutRef} className="flex-1 min-h-0 overflow-hidden flex">
           <div className="flex-1 min-w-0 min-h-0 overflow-auto bg-[rgba(0,0,0,.12)]">
             <div className="sticky top-0 z-10 px-2.5 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/95 backdrop-blur flex items-center justify-between gap-2">
               <div className="min-w-0 text-[10px] text-[var(--muted)] font-mono truncate">
@@ -1265,7 +1454,37 @@ export function DroneChangesDock({
             )}
           </div>
 
-          <div className="w-[clamp(160px,24%,260px)] shrink-0 border-l border-[var(--border-subtle)] overflow-auto px-1.5 py-1">
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            className={`group relative w-2 shrink-0 cursor-col-resize touch-none ${
+              explorerResizing ? 'bg-[var(--accent-subtle)]' : 'bg-transparent hover:bg-[var(--hover)]'
+            }`}
+            title="Drag to resize explorer. Double-click to reset to auto width."
+            onPointerDown={startExplorerResize}
+            onPointerMove={moveExplorerResize}
+            onPointerUp={finishExplorerResize}
+            onPointerCancel={finishExplorerResize}
+            onLostPointerCapture={finishExplorerResize}
+            onDoubleClick={resetExplorerWidthPreference}
+          >
+            <span
+              className={`pointer-events-none absolute inset-y-0 left-1/2 -translate-x-1/2 w-px ${
+                explorerResizing ? 'bg-[var(--accent)]' : 'bg-[var(--border-subtle)] group-hover:bg-[var(--accent-muted)]'
+              }`}
+            />
+          </div>
+
+          <div
+            className={`shrink-0 border-l border-[var(--border-subtle)] overflow-auto px-1.5 py-1 ${
+              explorerResizing ? '' : 'transition-[width] duration-150 ease-out'
+            }`}
+            style={{
+              width: `${explorerWidthPx}px`,
+              minWidth: `${explorerWidthPx}px`,
+              maxWidth: `${explorerWidthPx}px`,
+            }}
+          >
             {renderExplorer(explorerTree, 0)}
           </div>
         </div>
