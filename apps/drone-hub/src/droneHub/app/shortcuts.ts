@@ -1,8 +1,8 @@
 export type ShortcutActionId =
   | 'createDraftDrone'
   | 'markSelectedDronesUnread'
-  | 'openCreateModal'
-  | 'openCreateModalAlt'
+  | 'toggleSidebarCollapsed'
+  | 'toggleRightPanelWidth'
   | 'toggleTldr'
   | 'openHoveredGroupMultiChat'
   | 'openPullRequestsTab'
@@ -41,14 +41,14 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     description: 'Marks the selected drone(s) as unread so the canvas unread indicator is shown.',
   },
   {
-    id: 'openCreateModal',
-    label: 'Create multiple drones',
-    description: 'Opens the create drones modal.',
+    id: 'toggleSidebarCollapsed',
+    label: 'Toggle drone sidebar minimized',
+    description: 'Toggles the left drone sidebar between minimized and expanded.',
   },
   {
-    id: 'openCreateModalAlt',
-    label: 'Create multiple drones (alternate)',
-    description: 'Secondary shortcut for opening the create drones modal.',
+    id: 'toggleRightPanelWidth',
+    label: 'Toggle side panel width',
+    description: 'Cycles the right panel width between full, two-thirds, and one-third of workspace width.',
   },
   {
     id: 'toggleTldr',
@@ -94,25 +94,17 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
 
 const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   createDraftDrone: { key: 'enter', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  markSelectedDronesUnread: { key: 'a', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  openCreateModal: { key: 's', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  openCreateModalAlt: { key: 'n', mod: true, ctrl: false, meta: false, alt: false, shift: true },
+  markSelectedDronesUnread: { key: 'q', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  toggleSidebarCollapsed: { key: 'a', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  toggleRightPanelWidth: { key: 's', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleTldr: { key: 'w', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openHoveredGroupMultiChat: { key: 'd', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openPullRequestsTab: { key: 'r', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  openChangesTab: { key: 'x', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  openCanvasTab: { key: 'c', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  openChangesTab: { key: 'c', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  openCanvasTab: { key: 'x', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openBrowserTab: { key: 'b', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openFilesTab: { key: 'f', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openTerminalTab: { key: 't', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-};
-const LEGACY_OPEN_CHANGES_TAB_BINDING: ShortcutBinding = {
-  key: 'c',
-  mod: false,
-  ctrl: false,
-  meta: false,
-  alt: false,
-  shift: false,
 };
 
 type KeyboardEventLike = Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey'>;
@@ -164,8 +156,8 @@ export function cloneDefaultShortcutBindings(): ShortcutBindingMap {
   return {
     createDraftDrone: { ...DEFAULT_SHORTCUT_BINDINGS.createDraftDrone! },
     markSelectedDronesUnread: { ...DEFAULT_SHORTCUT_BINDINGS.markSelectedDronesUnread! },
-    openCreateModal: { ...DEFAULT_SHORTCUT_BINDINGS.openCreateModal! },
-    openCreateModalAlt: { ...DEFAULT_SHORTCUT_BINDINGS.openCreateModalAlt! },
+    toggleSidebarCollapsed: { ...DEFAULT_SHORTCUT_BINDINGS.toggleSidebarCollapsed! },
+    toggleRightPanelWidth: { ...DEFAULT_SHORTCUT_BINDINGS.toggleRightPanelWidth! },
     toggleTldr: { ...DEFAULT_SHORTCUT_BINDINGS.toggleTldr! },
     openHoveredGroupMultiChat: { ...DEFAULT_SHORTCUT_BINDINGS.openHoveredGroupMultiChat! },
     openPullRequestsTab: { ...DEFAULT_SHORTCUT_BINDINGS.openPullRequestsTab! },
@@ -175,18 +167,6 @@ export function cloneDefaultShortcutBindings(): ShortcutBindingMap {
     openFilesTab: { ...DEFAULT_SHORTCUT_BINDINGS.openFilesTab! },
     openTerminalTab: { ...DEFAULT_SHORTCUT_BINDINGS.openTerminalTab! },
   };
-}
-
-function isSameShortcutBinding(a: ShortcutBinding | null | undefined, b: ShortcutBinding | null | undefined): boolean {
-  if (!a || !b) return a === b;
-  return (
-    a.key === b.key &&
-    a.mod === b.mod &&
-    a.ctrl === b.ctrl &&
-    a.meta === b.meta &&
-    a.alt === b.alt &&
-    a.shift === b.shift
-  );
 }
 
 export function sanitizeShortcutBindings(value: unknown): ShortcutBindingMap {
@@ -201,13 +181,6 @@ export function sanitizeShortcutBindings(value: unknown): ShortcutBindingMap {
       continue;
     }
     out[def.id] = candidate === null ? null : sanitizeShortcutBinding(candidate, defaults[def.id]);
-  }
-  // Migrate users from the old default where Changes used C before Canvas had a dedicated shortcut.
-  if (
-    !Object.prototype.hasOwnProperty.call(raw, 'openCanvasTab') &&
-    isSameShortcutBinding(out.openChangesTab, LEGACY_OPEN_CHANGES_TAB_BINDING)
-  ) {
-    out.openChangesTab = { ...defaults.openChangesTab! };
   }
   return out;
 }

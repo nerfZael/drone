@@ -36,6 +36,7 @@ import { useGroupManagement } from './droneHub/app/use-group-management';
 import { useJobsWorkflow } from './droneHub/app/use-jobs-workflow';
 import { useLlmSettings } from './droneHub/app/use-llm-settings';
 import { useDeleteActionSettings } from './droneHub/app/use-delete-action-settings';
+import { useFilesystemSettings } from './droneHub/app/use-filesystem-settings';
 import { useQueuedPromptsState } from './droneHub/app/use-queued-prompts-state';
 import { useRightPanelLayout } from './droneHub/app/use-right-panel-layout';
 import { useDroneSelectionState } from './droneHub/app/use-drone-selection-state';
@@ -136,6 +137,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setGroupBroadcastExpanded,
     setSelectedChat,
     setDraftChat,
+    setSidebarCollapsed,
     setReposModalOpen,
     setDroneErrorModal,
     setClearingDroneError,
@@ -378,6 +380,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     rightPanelOpen,
     setRightPanelOpen,
     rightPanelWidth,
+    setRightPanelWidth,
     rightPanelResizing,
     rightPanelTab,
     setRightPanelTab,
@@ -399,6 +402,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const droneIdentityByNameRef = React.useRef<Record<string, string>>({});
   const llmSettingsState = useLlmSettings(requestJson);
   const deleteActionSettingsState = useDeleteActionSettings(requestJson);
+  const filesystemSettingsState = useFilesystemSettings(requestJson);
   const { llmSettings } = llmSettingsState;
   const hubLogsState = useHubLogs({
     appView,
@@ -1092,7 +1096,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setHeaderOverflowOpen,
     droneErrorModal,
     setDroneErrorModal,
-    openCreateModal,
     openDraftChatComposer,
     openGroupMultiChat,
     openSidebarVisibleMultiChat,
@@ -1117,8 +1120,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     rightPanelSplit,
     rightPanelBottomTab,
     setRightPanelOpen,
+    rightPanelWidth,
+    rightPanelWidthMax,
+    setRightPanelWidth,
     setRightPanelTab,
     setRightPanelBottomTab,
+    setSidebarCollapsed,
     shortcutBindings,
     llmSettings,
     requestJson,
@@ -1837,6 +1844,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     appView,
     llmSettingsState,
     deleteActionSettingsState,
+    filesystemSettingsState,
     hubLogsState,
     hubLogsTailLines: HUB_LOGS_TAIL_LINES,
     hubLogsMaxBytes: HUB_LOGS_MAX_BYTES,

@@ -2,9 +2,11 @@ import React from 'react';
 import { IconChevron, IconCopy } from './icons';
 import { ShortcutSettingsSection } from './ShortcutSettingsSection';
 import { AutomationSettingsSection } from './AutomationSettingsSection';
+import { bytesToMaxMiB, bytesToMinMiB, bytesToNearestMiB, miBToBytes } from './filesystem-size-utils';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 import type { UseHubLogsResult } from './use-hub-logs';
 import type { UseDeleteActionSettingsResult } from './use-delete-action-settings';
+import type { UseFilesystemSettingsResult } from './use-filesystem-settings';
 import type { UseLlmSettingsResult } from './use-llm-settings';
 
 const ARCHIVE_RETENTION_OPTIONS: Array<{ value: '1h' | '8h' | '1d' | '1w'; label: string }> = [
@@ -22,6 +24,7 @@ const ARCHIVE_RUNTIME_POLICY_OPTIONS: Array<{ value: 'keep-running' | 'stop'; la
 type SettingsViewProps = {
   llm: UseLlmSettingsResult;
   deleteAction: UseDeleteActionSettingsResult;
+  filesystem: UseFilesystemSettingsResult;
   hubLogsState: UseHubLogsResult;
   hubLogsTailLines: number;
   hubLogsMaxBytes: number;
@@ -33,6 +36,7 @@ type SettingsViewProps = {
 export function SettingsView({
   llm,
   deleteAction,
+  filesystem,
   hubLogsState,
   hubLogsTailLines,
   hubLogsMaxBytes,
@@ -88,6 +92,17 @@ export function SettingsView({
     restoreArchivedDrone,
     permanentlyDeleteArchivedDrone,
   } = deleteAction;
+  const {
+    filesystemSettings,
+    filesystemSettingsLoading,
+    filesystemSettingsError,
+    filesystemSettingsNotice,
+    uploadMaxMiBDraft,
+    savingFilesystemSettings,
+    setUploadMaxMiBDraft,
+    loadFilesystemSettings,
+    saveFilesystemSettings,
+  } = filesystem;
 
   const {
     hubLogs,
@@ -107,18 +122,32 @@ export function SettingsView({
     hubLogsLoading ||
     llmSettingsLoading ||
     deleteSettingsLoading ||
+    filesystemSettingsLoading ||
     savingOpenAiSettings ||
     clearingOpenAiSettings ||
     savingGeminiSettings ||
     clearingGeminiSettings ||
     savingLlmProvider ||
-    savingDeleteSettings;
+    savingDeleteSettings ||
+    savingFilesystemSettings;
   const activeDeleteMode = deleteSettings?.deleteAction.mode ?? 'permanent';
   const deleteSettingsDirty =
     deleteModeDraft !== activeDeleteMode ||
     archiveRetentionDraft !== (deleteSettings?.deleteAction.archiveRetention ?? '1d') ||
     archiveRuntimePolicyDraft !== (deleteSettings?.deleteAction.archiveRuntimePolicy ?? 'keep-running');
   const archivedRows = archivedDrones?.archived ?? [];
+  const currentUploadMaxBytes = filesystemSettings?.filesystem.uploadMaxBytes ?? null;
+  const draftUploadMaxMiB = Number(uploadMaxMiBDraft);
+  const draftUploadMaxBytes =
+    Number.isFinite(draftUploadMaxMiB) && draftUploadMaxMiB > 0 ? miBToBytes(draftUploadMaxMiB) : null;
+  const filesystemDirty =
+    currentUploadMaxBytes != null && draftUploadMaxBytes != null && draftUploadMaxBytes !== currentUploadMaxBytes;
+  const filesystemMinMiB =
+    filesystemSettings != null ? bytesToMinMiB(filesystemSettings.filesystem.minUploadMaxBytes) : 1;
+  const filesystemMaxMiB =
+    filesystemSettings != null ? bytesToMaxMiB(filesystemSettings.filesystem.maxUploadMaxBytes, filesystemMinMiB) : 8192;
+  const filesystemDefaultMiB =
+    filesystemSettings != null ? bytesToNearestMiB(filesystemSettings.filesystem.defaultUploadMaxBytes) : 2048;
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -141,6 +170,7 @@ export function SettingsView({
               onClick={() => {
                 void loadLlmSettings();
                 void loadDeleteSettings();
+                void loadFilesystemSettings();
                 void loadArchivedDrones();
                 void loadHubLogs();
               }}
@@ -378,6 +408,81 @@ export function SettingsView({
                   </button>
                 </div>
               </div>
+            </div>
+
+            <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
+              <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+                Filesystem uploads
+              </div>
+              <div className="text-[11px] text-[var(--muted-dim)] leading-relaxed">
+                Configure the max size for a single uploaded file. Oversized uploads show an error and point users back to this setting.
+              </div>
+              {filesystemSettingsError && (
+                <div className="rounded border border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
+                  {filesystemSettingsError}
+                </div>
+              )}
+              {filesystemSettingsNotice && (
+                <div className="rounded border border-[rgba(52,211,153,.2)] bg-[rgba(16,185,129,.08)] px-3 py-2 text-[12px] text-[#34d399]">
+                  {filesystemSettingsNotice}
+                </div>
+              )}
+              {filesystemSettingsLoading && !filesystemSettings ? (
+                <div className="text-[12px] text-[var(--muted-dim)]">Loading filesystem settings…</div>
+              ) : (
+                <>
+                  <div className="text-[11px] text-[var(--muted-dim)]">
+                    Current limit:{' '}
+                    <span className="text-[var(--fg-secondary)]">
+                      {filesystemSettings ? `${bytesToNearestMiB(filesystemSettings.filesystem.uploadMaxBytes).toLocaleString()} MiB` : '-'}
+                    </span>{' '}
+                    ({filesystemSettings?.filesystem.uploadMaxBytesSource === 'settings' ? 'from settings' : 'default'})
+                  </div>
+                  <div className="flex flex-wrap items-end gap-2">
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-semibold">Max file size (MiB)</span>
+                      <input
+                        value={uploadMaxMiBDraft}
+                        onChange={(e) => setUploadMaxMiBDraft(e.target.value.replace(/[^\d]/g, ''))}
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        className="h-9 w-40 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors"
+                        placeholder={String(filesystemDefaultMiB)}
+                        disabled={filesystemSettingsLoading || savingFilesystemSettings}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setUploadMaxMiBDraft(String(filesystemDefaultMiB))}
+                      disabled={filesystemSettingsLoading || savingFilesystemSettings}
+                      className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+                        filesystemSettingsLoading || savingFilesystemSettings
+                          ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                          : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                      }`}
+                      style={{ fontFamily: 'var(--display)' }}
+                    >
+                      Use default
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void saveFilesystemSettings()}
+                      disabled={!filesystemDirty || filesystemSettingsLoading || savingFilesystemSettings}
+                      className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+                        !filesystemDirty || filesystemSettingsLoading || savingFilesystemSettings
+                          ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                          : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
+                      }`}
+                      style={{ fontFamily: 'var(--display)' }}
+                    >
+                      {savingFilesystemSettings ? 'Saving…' : 'Save upload limit'}
+                    </button>
+                  </div>
+                  <div className="text-[10px] text-[var(--muted-dim)]">
+                    Allowed range: {filesystemMinMiB.toLocaleString()} to {filesystemMaxMiB.toLocaleString()} MiB.
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">

@@ -44,6 +44,17 @@ function resolveDistinctBottomTab(top: RightPanelTab, bottom: RightPanelTab): Ri
   return RIGHT_PANEL_TABS.find((tab) => tab !== top) ?? top;
 }
 
+const WORKSPACE_ROOT_SELECTOR = '[data-drone-workspace-root="1"]';
+
+function readWorkspaceWidthPx(): number {
+  if (typeof document !== 'undefined') {
+    const workspaceRoot = document.querySelector<HTMLElement>(WORKSPACE_ROOT_SELECTOR);
+    const measured = Math.floor(workspaceRoot?.getBoundingClientRect().width ?? 0);
+    if (measured > 0) return measured;
+  }
+  return viewportWidthPx();
+}
+
 const useRightPanelLayoutStore = create<RightPanelLayoutState>()(
   persist(
     (set) => ({
@@ -125,12 +136,11 @@ export function useRightPanelLayout() {
     rightPanelSplit,
     rightPanelBottomTab,
     setRightPanelOpen,
-    setRightPanelWidth,
+    setRightPanelWidth: setRightPanelWidthStore,
     setRightPanelResizing,
     setRightPanelTab,
     setRightPanelSplitMode,
     setRightPanelBottomTab,
-    resetRightPanelWidth,
   } = useRightPanelLayoutStore(
     useShallow((s) => ({
       rightPanelOpen: s.rightPanelOpen,
@@ -145,18 +155,49 @@ export function useRightPanelLayout() {
       setRightPanelTab: s.setRightPanelTab,
       setRightPanelSplitMode: s.setRightPanelSplitMode,
       setRightPanelBottomTab: s.setRightPanelBottomTab,
-      resetRightPanelWidth: s.resetRightPanelWidth,
     })),
   );
   const rightPanelResizeRef = React.useRef<{ startX: number; startWidth: number } | null>(null);
+  const [workspaceWidth, setWorkspaceWidth] = React.useState<number>(() => rightPanelMaxWidthPx(readWorkspaceWidthPx()));
+
+  const setRightPanelWidth = React.useCallback(
+    (next: Updater<number>) => {
+      setRightPanelWidthStore((prev) => clampRightPanelWidthPx(resolveNext(prev, next), workspaceWidth));
+    },
+    [setRightPanelWidthStore, workspaceWidth],
+  );
+
+  const resetRightPanelWidth = React.useCallback(() => {
+    setRightPanelWidth(RIGHT_PANEL_DEFAULT_WIDTH_PX);
+  }, [setRightPanelWidth]);
 
   React.useEffect(() => {
-    const onResize = () => {
-      setRightPanelWidth((prev) => clampRightPanelWidthPx(prev));
+    const updateWorkspaceWidth = () => {
+      const nextWidth = rightPanelMaxWidthPx(readWorkspaceWidthPx());
+      setWorkspaceWidth((prevWidth) => (Math.abs(prevWidth - nextWidth) <= 1 ? prevWidth : nextWidth));
     };
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
+    const raf = requestAnimationFrame(updateWorkspaceWidth);
+    updateWorkspaceWidth();
+
+    let observer: ResizeObserver | null = null;
+    const workspaceRoot = document.querySelector<HTMLElement>(WORKSPACE_ROOT_SELECTOR);
+    if (workspaceRoot && typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(() => {
+        updateWorkspaceWidth();
+      });
+      observer.observe(workspaceRoot);
+    }
+    window.addEventListener('resize', updateWorkspaceWidth);
+    return () => {
+      cancelAnimationFrame(raf);
+      observer?.disconnect();
+      window.removeEventListener('resize', updateWorkspaceWidth);
+    };
   }, []);
+
+  React.useEffect(() => {
+    setRightPanelWidthStore((prev) => clampRightPanelWidthPx(prev, workspaceWidth));
+  }, [setRightPanelWidthStore, workspaceWidth]);
 
   React.useEffect(() => {
     return () => {
@@ -179,7 +220,7 @@ export function useRightPanelLayout() {
         const state = rightPanelResizeRef.current;
         if (!state) return;
         const delta = state.startX - moveEvent.clientX;
-        setRightPanelWidth(clampRightPanelWidthPx(state.startWidth + delta));
+        setRightPanelWidth(state.startWidth + delta);
       };
 
       const onMouseUp = () => {
@@ -194,17 +235,18 @@ export function useRightPanelLayout() {
       window.addEventListener('mousemove', onMouseMove);
       window.addEventListener('mouseup', onMouseUp);
     },
-    [rightPanelOpen, rightPanelWidth],
+    [rightPanelOpen, rightPanelWidth, setRightPanelWidth, setRightPanelResizing],
   );
 
-  const rightPanelDefaultWidth = clampRightPanelWidthPx(RIGHT_PANEL_DEFAULT_WIDTH_PX);
+  const rightPanelDefaultWidth = clampRightPanelWidthPx(RIGHT_PANEL_DEFAULT_WIDTH_PX, workspaceWidth);
   const rightPanelWidthIsDefault = Math.abs(rightPanelWidth - rightPanelDefaultWidth) <= 1;
-  const rightPanelWidthMax = rightPanelMaxWidthPx(viewportWidthPx());
+  const rightPanelWidthMax = rightPanelMaxWidthPx(workspaceWidth);
 
   return {
     rightPanelOpen,
     setRightPanelOpen,
     rightPanelWidth,
+    setRightPanelWidth,
     rightPanelResizing,
     rightPanelTab,
     setRightPanelTab,

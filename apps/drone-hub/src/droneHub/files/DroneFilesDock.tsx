@@ -1,5 +1,6 @@
 import React from 'react';
-import type { DroneFsEntry } from '../types';
+import { requestJson } from '../http';
+import type { DroneFsEntry, DroneFsUploadPayload } from '../types';
 
 function normalizeContainerPathInput(raw: string): string {
   const trimmed = String(raw ?? '').trim();
@@ -50,6 +51,10 @@ function formatLocalDateShort(ms: number | null | undefined): string {
   }
 }
 
+function hasFileDragPayload(event: React.DragEvent<HTMLElement>): boolean {
+  return Array.from(event.dataTransfer?.types ?? []).includes('Files');
+}
+
 function IconFolder({ className }: { className?: string }) {
   return (
     <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
@@ -78,6 +83,14 @@ function IconFile({ className }: { className?: string }) {
   return (
     <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
       <path d="M3.75 0A1.75 1.75 0 002 1.75v12.5C2 15.216 2.784 16 3.75 16h8.5A1.75 1.75 0 0014 14.25V5.5a.75.75 0 00-.22-.53L9.03.22A.75.75 0 008.5 0H3.75zm4 .75v3A1.75 1.75 0 009.5 5.5h3v8.75a.25.25 0 01-.25.25h-8.5a.25.25 0 01-.25-.25V1.75a.25.25 0 01.25-.25h4zm1.5 1.06L11.94 4H9.5a.25.25 0 01-.25-.25V1.81z" />
+    </svg>
+  );
+}
+
+function IconDownload({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M8.75 1.5a.75.75 0 00-1.5 0v6.19L5.53 5.97a.75.75 0 10-1.06 1.06l3 3a.75.75 0 001.06 0l3-3a.75.75 0 00-1.06-1.06L8.75 7.69V1.5zM2 10.75A1.75 1.75 0 013.75 9h8.5A1.75 1.75 0 0114 10.75v1.5A1.75 1.75 0 0112.25 14h-8.5A1.75 1.75 0 012 12.25v-1.5zm1.75-.25a.25.25 0 00-.25.25v1.5c0 .138.112.25.25.25h8.5a.25.25 0 00.25-.25v-1.5a.25.25 0 00-.25-.25h-8.5z" />
     </svg>
   );
 }
@@ -124,6 +137,12 @@ export function DroneFilesDock({
   const [openedImagePan, setOpenedImagePan] = React.useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [openedImagePanning, setOpenedImagePanning] = React.useState(false);
   const openedImagePanDragRef = React.useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null);
+  const dragDepthRef = React.useRef(0);
+  const uploadRunRef = React.useRef(0);
+  const [dragActive, setDragActive] = React.useState(false);
+  const [uploading, setUploading] = React.useState(false);
+  const [uploadStatus, setUploadStatus] = React.useState<string | null>(null);
+  const [uploadError, setUploadError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     setPathInput(normalizedPath);
@@ -141,6 +160,22 @@ export function DroneFilesDock({
     setOpenedImagePanning(false);
     openedImagePanDragRef.current = null;
   }, [droneId, normalizedPath]);
+
+  React.useEffect(() => {
+    uploadRunRef.current += 1;
+    dragDepthRef.current = 0;
+    setDragActive(false);
+    setUploading(false);
+    setUploadError(null);
+    setUploadStatus(null);
+  }, [droneId, normalizedPath]);
+
+  React.useEffect(
+    () => () => {
+      uploadRunRef.current += 1;
+    },
+    [],
+  );
 
   React.useEffect(() => {
     if (!openedImagePanning) return;
@@ -207,6 +242,163 @@ export function DroneFilesDock({
     openedImagePanDragRef.current = null;
   }, []);
 
+  const uploadFilesToCurrentPath = React.useCallback(
+    async (dropped: FileList | File[] | null | undefined) => {
+      const files = Array.from(dropped ?? []);
+      if (files.length === 0) return;
+      const runId = uploadRunRef.current + 1;
+      uploadRunRef.current = runId;
+      setUploadError(null);
+      setUploading(true);
+      setUploadStatus(`Uploading ${files.length} file${files.length === 1 ? '' : 's'}...`);
+
+      let uploaded = 0;
+      const failures: string[] = [];
+      for (const file of files) {
+        try {
+          await requestJson<Extract<DroneFsUploadPayload, { ok: true }>>(
+            `/api/drones/${encodeURIComponent(droneId)}/fs/upload?path=${encodeURIComponent(normalizedPath)}&name=${encodeURIComponent(file.name)}`,
+            {
+              method: 'POST',
+              headers: { 'content-type': 'application/octet-stream' },
+              body: file,
+            },
+          );
+          uploaded += 1;
+          if (uploadRunRef.current === runId) {
+            setUploadStatus(`Uploading ${uploaded}/${files.length}...`);
+          }
+        } catch (e: any) {
+          const status = Number(e?.status ?? 0);
+          let reason = String(e?.message ?? e ?? '').trim() || 'upload failed';
+          if (status === 413 && !/settings/i.test(reason)) {
+            reason = `${reason} Increase "Upload max file size" in Settings.`;
+          }
+          failures.push(`${file.name}: ${reason}`);
+        }
+      }
+
+      if (uploadRunRef.current !== runId) return;
+      setUploading(false);
+      if (uploaded > 0) onRefresh();
+      if (failures.length === 0) {
+        setUploadError(null);
+        setUploadStatus(`Uploaded ${uploaded} file${uploaded === 1 ? '' : 's'} to ${normalizedPath}.`);
+        return;
+      }
+
+      const failureText =
+        failures.length === 1
+          ? failures[0]
+          : `${failures.length} uploads failed: ${failures.slice(0, 3).join(' • ')}${failures.length > 3 ? ' • ...' : ''}`;
+      setUploadError(failureText);
+      setUploadStatus(uploaded > 0 ? `Uploaded ${uploaded}/${files.length}.` : null);
+    },
+    [droneId, normalizedPath, onRefresh],
+  );
+
+  const onPanelDragEnter = React.useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      if (!hasFileDragPayload(event)) return;
+      event.preventDefault();
+      dragDepthRef.current += 1;
+      if (!dragActive) setDragActive(true);
+    },
+    [dragActive],
+  );
+
+  const onPanelDragOver = React.useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    if (!hasFileDragPayload(event)) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+  }, []);
+
+  const onPanelDragLeave = React.useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    if (!dragActive) return;
+    event.preventDefault();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setDragActive(false);
+  }, [dragActive]);
+
+  const onPanelDrop = React.useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      if (!hasFileDragPayload(event) && (event.dataTransfer?.files?.length ?? 0) <= 0) return;
+      event.preventDefault();
+      dragDepthRef.current = 0;
+      setDragActive(false);
+      if (uploading) return;
+      void uploadFilesToCurrentPath(event.dataTransfer?.files ?? null);
+    },
+    [uploadFilesToCurrentPath, uploading],
+  );
+
+  const downloadEntry = React.useCallback(
+    (entry: DroneFsEntry) => {
+      if (entry.kind !== 'file' && entry.kind !== 'directory') return;
+      const href = `/api/drones/${encodeURIComponent(droneId)}/fs/download?path=${encodeURIComponent(entry.path)}`;
+      const link = document.createElement('a');
+      link.href = href;
+      link.rel = 'noopener';
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    },
+    [droneId],
+  );
+  const canOpenEntry = React.useCallback((entry: DroneFsEntry): boolean => entry.kind === 'directory' || entry.kind === 'file', []);
+  const openEntry = React.useCallback(
+    (entry: DroneFsEntry) => {
+      if (entry.kind === 'directory') {
+        onOpenPath(entry.path);
+        return;
+      }
+      if (entry.kind !== 'file') return;
+      if (entry.isImage) {
+        openImagePreview(entry);
+        return;
+      }
+      onOpenFile(entry);
+    },
+    [onOpenFile, onOpenPath, openImagePreview],
+  );
+  const entryOpenTitle = React.useCallback((entry: DroneFsEntry): string => {
+    if (entry.kind === 'directory') return `Double-click to open: ${entry.path}`;
+    if (entry.kind === 'file' && entry.isImage) return `Double-click to preview: ${entry.path}`;
+    if (entry.kind === 'file') return `Double-click to open: ${entry.path}`;
+    return entry.path;
+  }, []);
+  const onEntryKeyDown = React.useCallback(
+    (event: React.KeyboardEvent<HTMLElement>, entry: DroneFsEntry) => {
+      if (!canOpenEntry(entry)) return;
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        openEntry(entry);
+      }
+    },
+    [canOpenEntry, openEntry],
+  );
+  const renderDownloadButton = React.useCallback(
+    (entry: DroneFsEntry, className: string) => {
+      if (entry.kind !== 'directory' && entry.kind !== 'file') return null;
+      return (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            downloadEntry(entry);
+          }}
+          className={className}
+          title={`Download ${entry.kind === 'directory' ? 'directory' : 'file'}`}
+        >
+          <IconDownload className="opacity-80" />
+        </button>
+      );
+    },
+    [downloadEntry],
+  );
+
   const showStartupPlaceholder = Boolean(startup?.waiting) && !openedImage && !error && entries.length === 0;
   const startupLabel = startup?.hubPhase === 'seeding' ? 'Seeding' : 'Starting';
   const startupDetail = String(startup?.hubMessage ?? '').trim();
@@ -215,7 +407,15 @@ export function DroneFilesDock({
     : 'Waiting for filesystem…';
 
   return (
-    <div className="w-full h-full min-h-0 bg-[var(--panel-alt)] overflow-hidden flex flex-col relative">
+    <div
+      className={`w-full h-full min-h-0 bg-[var(--panel-alt)] overflow-hidden flex flex-col relative ${
+        dragActive ? 'ring-1 ring-inset ring-[var(--accent-muted)]' : ''
+      }`}
+      onDragEnter={onPanelDragEnter}
+      onDragOver={onPanelDragOver}
+      onDragLeave={onPanelDragLeave}
+      onDrop={onPanelDrop}
+    >
       <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] flex items-center justify-between gap-2">
         <div className="text-[11px] font-semibold text-[var(--muted-dim)] tracking-[0.12em] uppercase" style={{ fontFamily: 'var(--display)' }}>Files</div>
         <div className="inline-flex items-center gap-0.5">
@@ -326,6 +526,16 @@ export function DroneFilesDock({
       </div>
 
       <div className="flex-1 min-h-0 overflow-auto px-2.5 py-2">
+        {uploadStatus && (
+          <div className="mb-2 p-2 rounded-md bg-[rgba(66,153,225,.12)] border border-[rgba(66,153,225,.28)] text-[12px] text-[var(--fg-secondary)]">
+            {uploadStatus}
+          </div>
+        )}
+        {uploadError && (
+          <div className="mb-2 p-2 rounded-md bg-[var(--red-subtle)] border border-[rgba(248,81,73,.2)] text-[12px] text-[var(--red)]">
+            {uploadError}
+          </div>
+        )}
         {error && (
           <div className="mb-2 p-2 rounded-md bg-[var(--red-subtle)] border border-[rgba(248,81,73,.2)] text-[12px] text-[var(--red)]">
             {error}
@@ -432,51 +642,30 @@ export function DroneFilesDock({
 
         {!error && !openedImage && entries.length > 0 && viewMode === 'list' && (
           <div className="flex flex-col">
-            <div className="grid grid-cols-[1fr_70px_100px] gap-2 px-2 py-1.5 text-[10px] uppercase tracking-wide text-[var(--muted-dim)] border-b border-[var(--border-subtle)]">
+            <div className="grid grid-cols-[1fr_70px_100px_34px] gap-2 px-2 py-1.5 text-[10px] uppercase tracking-wide text-[var(--muted-dim)] border-b border-[var(--border-subtle)]">
               <span>Name</span>
               <span className="text-right">Size</span>
               <span className="text-right">Modified</span>
+              <span />
             </div>
             <div className="divide-y divide-[var(--border-subtle)]">
               {entries.map((entry) => {
                 const isDir = entry.kind === 'directory';
-                const isRegularFile = entry.kind === 'file';
-                const isImageFile = entry.kind === 'file' && entry.isImage;
-                const canOpenEntry = isDir || isRegularFile;
                 const modifiedText = formatLocalDateShort(entry.mtimeMs);
                 const modifiedTitle = formatLocalDateTime(entry.mtimeMs);
                 const typeText = isDir ? 'dir' : entry.isImage ? 'image' : entry.isVideo ? 'video' : entry.ext ? entry.ext : 'file';
+                const openable = canOpenEntry(entry);
                 return (
                   <div
                     key={entry.path}
-                    className={`grid grid-cols-[1fr_70px_100px] gap-2 px-2 py-1.5 text-[11px] leading-5 select-none ${
-                      canOpenEntry ? 'hover:bg-[var(--hover)] cursor-pointer' : ''
+                    className={`group grid grid-cols-[1fr_70px_100px_34px] gap-2 px-2 py-1.5 text-[11px] leading-5 select-none ${
+                      openable ? 'hover:bg-[var(--hover)] cursor-pointer' : ''
                     }`}
-                    onDoubleClick={() => {
-                      if (isDir) onOpenPath(entry.path);
-                      else if (isImageFile) openImagePreview(entry);
-                      else if (isRegularFile) onOpenFile(entry);
-                    }}
-                    role={canOpenEntry ? 'button' : undefined}
-                    tabIndex={canOpenEntry ? 0 : -1}
-                    onKeyDown={(e) => {
-                      if (!canOpenEntry) return;
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        if (isDir) onOpenPath(entry.path);
-                        else if (isImageFile) openImagePreview(entry);
-                        else if (isRegularFile) onOpenFile(entry);
-                      }
-                    }}
-                    title={
-                      isDir
-                        ? `Double-click to open: ${entry.path}`
-                        : isImageFile
-                          ? `Double-click to preview: ${entry.path}`
-                          : isRegularFile
-                            ? `Double-click to open: ${entry.path}`
-                            : entry.path
-                    }
+                    onDoubleClick={() => openEntry(entry)}
+                    role={openable ? 'button' : undefined}
+                    tabIndex={openable ? 0 : -1}
+                    onKeyDown={(e) => onEntryKeyDown(e, entry)}
+                    title={entryOpenTitle(entry)}
                   >
                     <span className="min-w-0 flex items-center gap-1.5">
                       {isDir ? (
@@ -491,6 +680,12 @@ export function DroneFilesDock({
                     <span className="text-right tabular-nums text-[var(--muted-dim)] whitespace-nowrap overflow-hidden text-ellipsis" title={modifiedTitle}>
                       {modifiedText}
                     </span>
+                    <span className="flex items-center justify-end">
+                      {renderDownloadButton(
+                        entry,
+                        'w-6 h-6 rounded border border-[var(--border-subtle)] bg-[var(--panel)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity flex items-center justify-center',
+                      )}
+                    </span>
                   </div>
                 );
               })}
@@ -503,9 +698,9 @@ export function DroneFilesDock({
             {entries.map((entry) => {
               const isDir = entry.kind === 'directory';
               const isRegularFile = entry.kind === 'file';
-              const isImageFile = entry.kind === 'file' && entry.isImage;
+              const isImageFile = isRegularFile && entry.isImage;
               const canThumb = isImageFile && !thumbFailedByPath[entry.path];
-              const canOpenEntry = isDir || isRegularFile;
+              const openable = canOpenEntry(entry);
               const content = (
                 <>
                   <div className="w-full h-20 rounded-md border border-[var(--border-subtle)] bg-[var(--panel-alt)] overflow-hidden flex items-center justify-center">
@@ -536,46 +731,47 @@ export function DroneFilesDock({
                   </div>
                 </>
               );
-              return canOpenEntry ? (
-                <button
-                  key={entry.path}
-                  type="button"
-                  onDoubleClick={() => {
-                    if (isDir) onOpenPath(entry.path);
-                    else if (isImageFile) openImagePreview(entry);
-                    else if (isRegularFile) onOpenFile(entry);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      if (isDir) onOpenPath(entry.path);
-                      else if (isImageFile) openImagePreview(entry);
-                      else if (isRegularFile) onOpenFile(entry);
-                    }
-                  }}
-                  className="text-left p-2 rounded-md border border-[var(--border-subtle)] bg-[var(--panel)] hover:bg-[var(--hover)] select-none"
-                  title={
-                    isDir
-                      ? `Double-click to open: ${entry.path}`
-                      : isImageFile
-                        ? `Double-click to preview: ${entry.path}`
-                        : `Double-click to open: ${entry.path}`
-                  }
-                >
-                  {content}
-                </button>
-              ) : (
-                <div key={entry.path} className="p-2 rounded-md border border-[var(--border-subtle)] bg-[var(--panel)] select-none" title={entry.path}>
-                  {content}
+              return (
+                <div key={entry.path} className="relative group">
+                  {openable ? (
+                    <button
+                      type="button"
+                      onDoubleClick={() => openEntry(entry)}
+                      onKeyDown={(e) => onEntryKeyDown(e, entry)}
+                      className="w-full text-left p-2 pr-8 rounded-md border border-[var(--border-subtle)] bg-[var(--panel)] hover:bg-[var(--hover)] select-none"
+                      title={entryOpenTitle(entry)}
+                    >
+                      {content}
+                    </button>
+                  ) : (
+                    <div className="p-2 rounded-md border border-[var(--border-subtle)] bg-[var(--panel)] select-none" title={entry.path}>
+                      {content}
+                    </div>
+                  )}
+                  {renderDownloadButton(
+                    entry,
+                    'absolute top-2 right-2 w-6 h-6 rounded border border-[var(--border-subtle)] bg-[var(--panel)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity flex items-center justify-center',
+                  )}
                 </div>
               );
             })}
           </div>
         )}
       </div>
+      {dragActive && (
+        <div className="pointer-events-none absolute inset-0 z-30 px-3 py-3">
+          <div className="w-full h-full rounded-md border-2 border-dashed border-[var(--accent-muted)] bg-[rgba(18,23,34,.55)] flex items-center justify-center text-center px-4">
+            <div className="text-[12px] text-[var(--fg-secondary)]">
+              Drop files to upload into
+              <div className="mt-1 font-mono text-[11px] text-[var(--accent)] break-all">{normalizedPath}</div>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="px-2.5 py-1.5 border-t border-[var(--border-subtle)] text-[10px] text-[var(--muted-dim)] tabular-nums">
         {entries.length} item{entries.length !== 1 ? 's' : ''}
         {loading ? ' • refreshing…' : ''}
+        {uploading ? ' • uploading…' : ''}
       </div>
     </div>
   );

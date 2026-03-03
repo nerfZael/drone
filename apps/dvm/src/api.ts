@@ -58,6 +58,10 @@ export type DvmCopyToContainerOptions = {
   clean?: boolean;
 };
 
+export type DvmCopyFromContainerOptions = {
+  clean?: boolean;
+};
+
 export type DvmRepoSeedOptions = {
   containerName: string;
   hostRepoPath: string;
@@ -535,6 +539,20 @@ export class DvmApi {
     }
 
     await this.manager.docker.copyToContainer(containerName, absSrc, target);
+  }
+
+  async copyFromContainer(
+    containerName: string,
+    srcPath: string,
+    destPath: string,
+    options: DvmCopyFromContainerOptions = {}
+  ): Promise<void> {
+    const source = String(srcPath);
+    const absDest = path.resolve(String(destPath));
+    if (options.clean) {
+      await fs.promises.rm(absDest, { recursive: true, force: true });
+    }
+    await this.manager.docker.copyFromContainer(containerName, source, absDest);
   }
 
   private async ensureContainerExistsOrCreate(

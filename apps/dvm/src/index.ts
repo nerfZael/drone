@@ -1,6 +1,7 @@
 export { createDvmApi, DvmApi } from './api';
 export type {
   DvmCloneContainerOptions,
+  DvmCopyFromContainerOptions,
   DvmCopyToContainerOptions,
   DvmCreateContainerOptions,
   DvmRenameContainerOptions,

@@ -24,7 +24,7 @@ export function DroneHubWorkspaceContent({
   selectedDroneWorkspaceProps,
 }: DroneHubWorkspaceContentProps) {
   return (
-    <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden bg-[var(--panel)]">
+    <div data-drone-workspace-root="1" className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden bg-[var(--panel)]">
       {appView === 'settings' ? (
         <SettingsView {...settingsViewProps} />
       ) : draftChatWorkspaceProps ? (

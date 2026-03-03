@@ -179,6 +179,15 @@ export async function dvmCopyToContainer(
   await withTimeout(dvm.copyToContainer(container, srcPath, destPath, { clean: Boolean(opts?.clean) }), opts?.timeoutMs);
 }
 
+export async function dvmCopyFromContainer(
+  container: string,
+  srcPath: string,
+  destPath: string,
+  opts?: { clean?: boolean; timeoutMs?: number }
+): Promise<void> {
+  await withTimeout(dvm.copyFromContainer(container, srcPath, destPath, { clean: Boolean(opts?.clean) }), opts?.timeoutMs);
+}
+
 function parseShaFromOutput(text: string): string | null {
   const m = String(text || '').match(/\b[0-9a-f]{40}\b/i);
   if (!m) return null;

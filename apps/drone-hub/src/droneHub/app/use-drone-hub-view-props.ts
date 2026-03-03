@@ -370,6 +370,7 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     appView,
     llmSettingsState,
     deleteActionSettingsState,
+    filesystemSettingsState,
     hubLogsState,
     hubLogsTailLines,
     hubLogsMaxBytes,
@@ -525,6 +526,7 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     settingsViewProps: {
       llm: llmSettingsState,
       deleteAction: deleteActionSettingsState,
+      filesystem: filesystemSettingsState,
       hubLogsState,
       hubLogsTailLines,
       hubLogsMaxBytes,
