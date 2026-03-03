@@ -6034,6 +6034,11 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           json(res, 400, { ok: false, error: 'missing message' });
           return;
         }
+        const sourceRaw = typeof body?.source === 'string' ? body.source.trim() : '';
+        const source = sourceRaw ? sourceRaw.slice(0, 64) : null;
+        const requestedDroneIdRaw = normalizeDroneIdentity(String(body?.droneId ?? '').trim());
+        const requestedDroneId = requestedDroneIdRaw ? requestedDroneIdRaw : null;
+        const messageLength = message.length;
 
         let selectedProvider: LlmProviderId | null = null;
         try {
@@ -6041,6 +6046,14 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           selectedProvider = provider;
           const resolved = await resolveEffectiveProviderApiKeySettings(provider);
           if (!resolved.apiKey) {
+            if (source || requestedDroneId) {
+              hubLog('warn', 'name-from-message rejected: missing provider key', {
+                provider,
+                source,
+                requestedDroneId,
+                messageLength,
+              });
+            }
             json(res, 412, {
               ok: false,
               error: `Missing ${providerDisplayName(provider)} API key. Configure it in Settings.`,
@@ -6048,11 +6061,23 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             return;
           }
           const name = await suggestDroneNameFromMessage(message, { provider, apiKey: resolved.apiKey });
+          if (source || requestedDroneId) {
+            hubLog('info', 'name-from-message suggested', {
+              provider,
+              source,
+              requestedDroneId,
+              suggestedName: name,
+              messageLength,
+            });
+          }
           json(res, 200, { ok: true, name });
           return;
         } catch (e: any) {
           hubLog('error', 'name-from-message request failed', {
             provider: selectedProvider,
+            source,
+            requestedDroneId,
+            messageLength,
             model: String(process.env.DRONE_HUB_DRONE_NAME_MODEL ?? '').trim() || null,
             error: e?.message ?? String(e),
           });
@@ -9406,21 +9431,49 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           newName = normalizeDroneDisplayName(body?.newName);
         } catch (e: any) {
           const msg = e?.message ?? String(e);
+          const sourceRaw = typeof body?.source === 'string' ? body.source.trim() : '';
+          const source = sourceRaw ? sourceRaw.slice(0, 64) : null;
+          const attemptRaw = Number(body?.attempt);
+          const attempt = Number.isFinite(attemptRaw) && attemptRaw > 0 ? Math.floor(attemptRaw) : null;
+          const suggestedBaseRaw = typeof body?.suggestedBase === 'string' ? body.suggestedBase.trim() : '';
+          const suggestedBase = suggestedBaseRaw ? suggestedBaseRaw.slice(0, DRONE_DISPLAY_NAME_MAX_LEN) : null;
           hubLog('warn', 'drone rename rejected: invalid target name', {
             droneId,
             droneRef,
             oldName,
             attemptedName: String(body?.newName ?? ''),
+            source,
+            attempt,
+            suggestedBase,
             error: msg,
           });
           json(res, 400, { ok: false, error: msg });
           return;
+        }
+        const sourceRaw = typeof body?.source === 'string' ? body.source.trim() : '';
+        const source = sourceRaw ? sourceRaw.slice(0, 64) : null;
+        const attemptRaw = Number(body?.attempt);
+        const attempt = Number.isFinite(attemptRaw) && attemptRaw > 0 ? Math.floor(attemptRaw) : null;
+        const suggestedBaseRaw = typeof body?.suggestedBase === 'string' ? body.suggestedBase.trim() : '';
+        const suggestedBase = suggestedBaseRaw ? suggestedBaseRaw.slice(0, DRONE_DISPLAY_NAME_MAX_LEN) : null;
+        if (source || attempt != null || suggestedBase) {
+          hubLog('info', 'drone rename requested', {
+            droneId,
+            oldName,
+            newName,
+            source,
+            attempt,
+            suggestedBase,
+          });
         }
         if (oldName === newName) {
           hubLog('info', 'drone rename no-op (same name)', {
             droneId,
             oldName,
             newName,
+            source,
+            attempt,
+            suggestedBase,
           });
           json(res, 200, { ok: true, id: droneId, oldName, newName, renamed: false, reason: 'same-name' });
           return;
@@ -9450,6 +9503,9 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             droneId,
             oldName,
             newName,
+            source,
+            attempt,
+            suggestedBase,
             status,
             error,
           });
@@ -9461,6 +9517,9 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           droneId,
           oldName,
           newName,
+          source,
+          attempt,
+          suggestedBase,
         });
         json(res, 200, renamed);
         return;

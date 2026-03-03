@@ -52,7 +52,13 @@ export function useDroneMutationActions({
     async (
       droneIdRaw: string,
       newNameRaw: string,
-      opts?: { showAlert?: boolean; migrateVolumeName?: boolean },
+      opts?: {
+        showAlert?: boolean;
+        migrateVolumeName?: boolean;
+        source?: string;
+        attempt?: number;
+        suggestedBase?: string;
+      },
     ): Promise<{ ok: true } | { ok: false; error: string }> => {
       const droneId = String(droneIdRaw ?? '').trim();
       const newName = String(newNameRaw ?? '').trim();
@@ -92,6 +98,15 @@ export function useDroneMutationActions({
             body: JSON.stringify({
               newName,
               ...(opts?.migrateVolumeName ? { migrateVolumeName: true } : {}),
+              ...(typeof opts?.source === 'string' && opts.source.trim()
+                ? { source: opts.source.trim().slice(0, 64) }
+                : {}),
+              ...(typeof opts?.attempt === 'number' && Number.isFinite(opts.attempt) && opts.attempt > 0
+                ? { attempt: Math.floor(opts.attempt) }
+                : {}),
+              ...(typeof opts?.suggestedBase === 'string' && opts.suggestedBase.trim()
+                ? { suggestedBase: opts.suggestedBase.trim().slice(0, 80) }
+                : {}),
             }),
           },
         );
@@ -256,7 +271,11 @@ export function useDroneMutationActions({
           {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ message: prompt }),
+            body: JSON.stringify({
+              message: prompt,
+              source: 'draft-auto-rename',
+              droneId,
+            }),
           },
         );
         const base = String((data as any)?.name ?? '').trim();
@@ -290,7 +309,11 @@ export function useDroneMutationActions({
             onNameSuggestionFailure(new Error(`Name suggestion produced an invalid drone name: "${candidate}"`));
             return;
           }
-          const renamed = await renameDroneTo(droneId, candidate);
+          const renamed = await renameDroneTo(droneId, candidate, {
+            source: 'draft-auto-rename',
+            attempt,
+            suggestedBase: base,
+          });
           if (renamed.ok) return;
           const errorMessage = String(renamed.error ?? '').trim();
           lastError = errorMessage || 'rename failed';
