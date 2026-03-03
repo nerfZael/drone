@@ -3,6 +3,7 @@ import type { DroneSummary, PendingPrompt, TranscriptItem } from '../types';
 import type { DraftChatState, DroneErrorModalState, StartupSeedState } from './app-types';
 import type { RightPanelTab } from './app-config';
 import { isStartupSeedFresh } from './app-config';
+import { resolveNextRightPanelShortcutWidth } from './right-panel-shortcut-width';
 import { isUngroupedGroupName } from '../../domain';
 import type { ShortcutActionId, ShortcutBindingMap } from './shortcuts';
 import { SHORTCUT_DEFINITIONS, isShortcutMatch } from './shortcuts';
@@ -62,7 +63,6 @@ type UseDroneHubLifecycleEffectsArgs = {
   setRightPanelWidth: Setter<number>;
   setRightPanelTab: Setter<RightPanelTab>;
   setRightPanelBottomTab: Setter<RightPanelTab>;
-  resetRightPanelWidth: () => void;
   setSidebarCollapsed: Setter<boolean>;
   shortcutBindings: ShortcutBindingMap;
   llmSettings: LlmSettingsLike;
@@ -195,7 +195,6 @@ export function useDroneHubLifecycleEffects({
   setRightPanelWidth,
   setRightPanelTab,
   setRightPanelBottomTab,
-  resetRightPanelWidth,
   setSidebarCollapsed,
   shortcutBindings,
   llmSettings,
@@ -338,12 +337,8 @@ export function useDroneHubLifecycleEffects({
       },
       toggleRightPanelWidth: () => {
         setRightPanelOpen(true);
-        const rightPanelExpanded = Math.abs(rightPanelWidth - rightPanelWidthMax) <= 1;
-        if (rightPanelExpanded) {
-          resetRightPanelWidth();
-        } else {
-          setRightPanelWidth(rightPanelWidthMax);
-        }
+        const nextWidth = resolveNextRightPanelShortcutWidth(rightPanelWidth, rightPanelWidthMax);
+        setRightPanelWidth(nextWidth);
         return true;
       },
       openHoveredGroupMultiChat: () => {
@@ -472,7 +467,6 @@ export function useDroneHubLifecycleEffects({
     rightPanelTab,
     rightPanelWidth,
     rightPanelWidthMax,
-    resetRightPanelWidth,
     setRightPanelBottomTab,
     setRightPanelOpen,
     setRightPanelTab,

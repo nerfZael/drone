@@ -1123,7 +1123,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setRightPanelWidth,
     setRightPanelTab,
     setRightPanelBottomTab,
-    resetRightPanelWidth,
     setSidebarCollapsed,
     shortcutBindings,
     llmSettings,
