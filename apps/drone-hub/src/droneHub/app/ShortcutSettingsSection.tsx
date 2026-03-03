@@ -104,7 +104,7 @@ export function ShortcutSettingsSection() {
             setCapturingActionId(null);
             resetShortcutBindings();
           }}
-          className="h-8 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+          className="inline-flex items-center justify-center whitespace-nowrap shrink-0 h-8 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
           style={{ fontFamily: 'var(--display)' }}
           title="Reset all shortcuts to defaults"
         >

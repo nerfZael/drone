@@ -23,6 +23,7 @@ export const RIGHT_PANEL_BOTTOM_TAB_STORAGE_KEY = 'droneHub.rightPanelBottomTab'
 export const RIGHT_PANEL_DEFAULT_WIDTH_PX = 460;
 export const RIGHT_PANEL_MIN_WIDTH_PX = 360;
 export const RIGHT_PANEL_MAX_WIDTH_VIEWPORT_RATIO = 0.7;
+export const RIGHT_PANEL_MAX_WIDTH_RESERVED_PX = 320;
 export const GROUP_MULTI_CHAT_COLUMN_WIDTH_STORAGE_KEY = 'droneHub.groupMultiChatColumnWidth';
 export const GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX = 420;
 export const GROUP_MULTI_CHAT_COLUMN_WIDTH_MIN_PX = 300;
@@ -61,7 +62,9 @@ export function viewportWidthPx(): number {
 }
 
 export function rightPanelMaxWidthPx(viewportWidth: number): number {
-  return Math.max(RIGHT_PANEL_MIN_WIDTH_PX, Math.floor(viewportWidth * RIGHT_PANEL_MAX_WIDTH_VIEWPORT_RATIO));
+  const byRatio = Math.floor(viewportWidth * RIGHT_PANEL_MAX_WIDTH_VIEWPORT_RATIO);
+  const byAvailableWorkspace = Math.floor(viewportWidth - RIGHT_PANEL_MAX_WIDTH_RESERVED_PX);
+  return Math.max(RIGHT_PANEL_MIN_WIDTH_PX, Math.max(byRatio, byAvailableWorkspace));
 }
 
 export function clampRightPanelWidthPx(width: number, viewportWidth: number = viewportWidthPx()): number {
