@@ -101,6 +101,7 @@ export function CanvasMessageBar({
             ) : null}
             <textarea
               ref={inputRef}
+              data-canvas-message-input="1"
               value={draft}
               rows={1}
               onChange={(event) => onDraftChange(event.target.value)}

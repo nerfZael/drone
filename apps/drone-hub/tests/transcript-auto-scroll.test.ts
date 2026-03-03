@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { computeTranscriptAutoScrollDecision } from '../src/droneHub/app/use-drone-hub-lifecycle-effects';
+import { computeTranscriptAutoScrollDecision } from '../src/droneHub/app/lifecycle-effect-helpers';
 
 describe('transcript auto-scroll decision', () => {
   test('resets tracking on context switch without scrolling', () => {
