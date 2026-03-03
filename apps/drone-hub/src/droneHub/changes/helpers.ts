@@ -210,16 +210,29 @@ export function buildExplorerTree(entries: RepoChangeEntry[]): ExplorerNode[] {
     cur.files.push(entry);
   }
 
+  function collapseDirChain(start: DirBuilder): { dir: DirBuilder; name: string } {
+    const names: string[] = [start.name];
+    let cur = start;
+    while (cur.files.length === 0 && cur.dirs.size === 1) {
+      const first = cur.dirs.values().next();
+      if (first.done) break;
+      cur = first.value;
+      names.push(cur.name);
+    }
+    return { dir: cur, name: names.join('/') };
+  }
+
   function toNodes(dir: DirBuilder): ExplorerNode[] {
     const dirNodes = Array.from(dir.dirs.values())
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((child) => {
-        const children = toNodes(child);
+        const collapsed = collapseDirChain(child);
+        const children = toNodes(collapsed.dir);
         const count = children.reduce((sum, c) => sum + c.count, 0);
         return {
           kind: 'dir' as const,
-          name: child.name,
-          path: child.path,
+          name: collapsed.name,
+          path: collapsed.dir.path,
           count,
           children,
         };
