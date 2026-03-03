@@ -4,8 +4,20 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { startDroneHubApiServer } from '../src/hub/server';
 import { updateRegistry } from '../src/host/registry';
+import { getSocketListenSupport } from './socket-listen-support';
 
-describe('groups api (decoupled from drone count)', () => {
+const listenSupport = getSocketListenSupport();
+if (!listenSupport.ok && process.env.CI) {
+  throw new Error(`groups api tests require local socket binding support: ${listenSupport.detail}`);
+}
+if (!listenSupport.ok) {
+  // eslint-disable-next-line no-console
+  console.warn(`Skipping groups api tests: ${listenSupport.detail}`);
+}
+
+const describeSocketSuite = listenSupport.ok ? describe : describe.skip;
+
+describeSocketSuite('groups api (decoupled from drone count)', () => {
   const token = 'test-token';
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-groups-api-'));
   const xdgDataHome = path.join(tempRoot, 'xdg-data');
@@ -121,4 +133,3 @@ describe('groups api (decoupled from drone count)', () => {
     expect(persist2?.totalCount).toBe(0);
   });
 });
-

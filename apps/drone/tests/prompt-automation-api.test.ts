@@ -4,13 +4,25 @@ import path from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import { startDroneHubApiServer } from '../src/hub/server';
 import { updateRegistry } from '../src/host/registry';
+import { getSocketListenSupport } from './socket-listen-support';
 
 type ApiResponse = {
   r: Response;
   data: any;
 };
 
-describe('prompt automation api', () => {
+const listenSupport = getSocketListenSupport();
+if (!listenSupport.ok && process.env.CI) {
+  throw new Error(`prompt automation api tests require local socket binding support: ${listenSupport.detail}`);
+}
+if (!listenSupport.ok) {
+  // eslint-disable-next-line no-console
+  console.warn(`Skipping prompt automation api tests: ${listenSupport.detail}`);
+}
+
+const describeSocketSuite = listenSupport.ok ? describe : describe.skip;
+
+describeSocketSuite('prompt automation api', () => {
   const token = 'test-token';
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-prompt-automation-api-'));
   const xdgDataHome = path.join(tempRoot, 'xdg-data');
