@@ -1,4 +1,6 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { droneRootPath } from './paths';
 
@@ -283,6 +285,11 @@ export function registryPath(): string {
   return droneRootPath('registry.json');
 }
 
+function legacyRegistryPath(): string {
+  const home = process.env.HOME?.trim() || os.homedir();
+  return path.join(home, '.drone', 'registry.json');
+}
+
 function registryLockPath(): string {
   // Simple cross-process lockfile next to the registry.
   // NOTE: This is a dev tool; a lockfile is sufficient and avoids native deps.
@@ -364,27 +371,186 @@ async function acquireRegistryLock(opts?: { timeoutMs?: number; staleAfterMs?: n
   };
 }
 
-export async function loadRegistry(): Promise<DroneRegistry> {
-  const p = registryPath();
-  try {
-    const raw = await fs.readFile(p, 'utf8');
-    const parsedAny = JSON.parse(raw) as any;
+function countRecordEntries(value: unknown): number {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return 0;
+  return Object.keys(value).length;
+}
 
-    if (parsedAny?.version === 2 && parsedAny?.drones && typeof parsedAny.drones === 'object' && !Array.isArray(parsedAny.drones)) {
-      return parsedAny as DroneRegistry;
+function hasMeaningfulRegistryData(reg: DroneRegistry): boolean {
+  if (countRecordEntries(reg.drones) > 0) return true;
+  if (countRecordEntries(reg.pending) > 0) return true;
+  if (countRecordEntries(reg.archived) > 0) return true;
+  if (countRecordEntries(reg.repos) > 0) return true;
+  if (countRecordEntries(reg.groups) > 0) return true;
+  if (countRecordEntries(reg.settings) > 0) return true;
+  return false;
+}
+
+function normalizeV2Registry(input: DroneRegistry): DroneRegistry {
+  for (const [key, entryAny] of Object.entries(input.drones ?? {})) {
+    const entry = entryAny as any;
+    if (!entry || typeof entry !== 'object') continue;
+    const id = typeof entry.id === 'string' && entry.id.trim() ? entry.id.trim() : String(key);
+    entry.id = id;
+    const name = typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim() : 'Untitled';
+    entry.name = name;
+    const containerName =
+      typeof entry.containerName === 'string' && entry.containerName.trim()
+        ? entry.containerName.trim()
+        : typeof entry.id === 'string' && entry.id.trim()
+          ? `drone-${entry.id}`
+          : 'drone-unknown';
+    entry.containerName = containerName;
+    (input.drones as any)[key] = entry;
+  }
+  for (const [key, entryAny] of Object.entries(input.pending ?? {})) {
+    const entry = entryAny as any;
+    if (!entry || typeof entry !== 'object') continue;
+    const id = typeof entry.id === 'string' && entry.id.trim() ? entry.id.trim() : String(key);
+    entry.id = id;
+    const name = typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim() : 'Untitled';
+    entry.name = name;
+    const containerName =
+      typeof entry.containerName === 'string' && entry.containerName.trim()
+        ? entry.containerName.trim()
+        : typeof entry.id === 'string' && entry.id.trim()
+          ? `drone-${entry.id}`
+          : undefined;
+    if (containerName) entry.containerName = containerName;
+    (input.pending as any)[key] = entry;
+  }
+  for (const [key, entryAny] of Object.entries(input.archived ?? {})) {
+    const entry = entryAny as any;
+    if (!entry || typeof entry !== 'object') continue;
+    const id = typeof entry.id === 'string' && entry.id.trim() ? entry.id.trim() : String(key);
+    entry.id = id;
+    const name = typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim() : 'Untitled';
+    entry.name = name;
+    const containerName =
+      typeof entry.containerName === 'string' && entry.containerName.trim()
+        ? entry.containerName.trim()
+        : typeof entry.id === 'string' && entry.id.trim()
+          ? `drone-${entry.id}`
+          : 'drone-unknown';
+    entry.containerName = containerName;
+    (input.archived as any)[key] = entry;
+  }
+  return input;
+}
+
+function migrateV1ToV2(v1: DroneRegistryV1): DroneRegistry {
+  const out: DroneRegistry = {
+    version: 2,
+    settings: v1.settings,
+    repos: v1.repos,
+    groups: v1.groups,
+    archived: {},
+    drones: {},
+    pending: {},
+  };
+
+  const usedIds = new Set<string>();
+  const ensureUniqueId = (idRaw: string): string => {
+    let id = String(idRaw ?? '').trim();
+    if (!id) id = crypto.randomUUID();
+    if (!usedIds.has(id)) {
+      usedIds.add(id);
+      return id;
     }
+    while (usedIds.has(id)) id = crypto.randomUUID();
+    usedIds.add(id);
+    return id;
+  };
 
-    throw new Error('bad registry');
+  for (const [legacyKey, entryAny] of Object.entries(v1.drones ?? {})) {
+    const entry = entryAny as any;
+    if (!entry || typeof entry !== 'object') continue;
+    const id = ensureUniqueId(typeof entry.id === 'string' ? entry.id : '');
+    const name = typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim() : String(legacyKey);
+    const containerName =
+      typeof entry.containerName === 'string' && entry.containerName.trim() ? entry.containerName.trim() : name;
+    out.drones[id] = { ...entry, id, name, containerName };
+  }
+
+  for (const [legacyKey, entryAny] of Object.entries(v1.pending ?? {})) {
+    const entry = entryAny as any;
+    if (!entry || typeof entry !== 'object') continue;
+    const id = ensureUniqueId(typeof entry.id === 'string' ? entry.id : '');
+    const name = typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim() : String(legacyKey);
+    const containerName =
+      typeof entry.containerName === 'string' && entry.containerName.trim() ? entry.containerName.trim() : name;
+    (out.pending as any)[id] = { ...entry, id, name, containerName };
+  }
+
+  for (const [legacyKey, entryAny] of Object.entries(v1.archived ?? {})) {
+    const entry = entryAny as any;
+    if (!entry || typeof entry !== 'object') continue;
+    const id = ensureUniqueId(typeof entry.id === 'string' ? entry.id : '');
+    const name = typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim() : String(legacyKey);
+    const containerName =
+      typeof entry.containerName === 'string' && entry.containerName.trim() ? entry.containerName.trim() : name;
+    (out.archived as any)[id] = { ...entry, id, name, containerName };
+  }
+
+  return out;
+}
+
+function parseRegistry(raw: string): DroneRegistry | null {
+  try {
+    const parsedAny = JSON.parse(raw) as any;
+    if (parsedAny?.version === 2 && parsedAny?.drones && typeof parsedAny.drones === 'object' && !Array.isArray(parsedAny.drones)) {
+      return normalizeV2Registry(parsedAny as DroneRegistry);
+    }
+    if (parsedAny?.version === 1 && parsedAny?.drones && typeof parsedAny.drones === 'object' && !Array.isArray(parsedAny.drones)) {
+      return migrateV1ToV2(parsedAny as DroneRegistryV1);
+    }
+    return null;
   } catch {
-    return { version: 2, drones: {}, pending: {} };
+    return null;
   }
 }
 
-export async function saveRegistry(reg: DroneRegistry): Promise<void> {
-  const p = registryPath();
+async function readRegistryFromPath(p: string): Promise<DroneRegistry | null> {
+  try {
+    const raw = await fs.readFile(p, 'utf8');
+    return parseRegistry(raw);
+  } catch {
+    return null;
+  }
+}
+
+async function saveRegistryAtPath(p: string, reg: DroneRegistry): Promise<void> {
   await fs.mkdir(path.dirname(p), { recursive: true });
   await fs.writeFile(p, JSON.stringify(reg, null, 2), 'utf8');
   await setPrivateFileModeBestEffort(p);
+}
+
+export async function loadRegistry(): Promise<DroneRegistry> {
+  const preferredPath = registryPath();
+  const legacyPath = legacyRegistryPath();
+
+  const preferred = await readRegistryFromPath(preferredPath);
+  const legacy = preferredPath === legacyPath ? null : await readRegistryFromPath(legacyPath);
+
+  if (preferred && legacy && !hasMeaningfulRegistryData(preferred) && hasMeaningfulRegistryData(legacy)) {
+    // Auto-heal upgrades where an empty preferred registry was created while legacy still had data.
+    await saveRegistryAtPath(preferredPath, legacy).catch(() => {});
+    return legacy;
+  }
+
+  if (preferred) return preferred;
+
+  if (legacy) {
+    // One-time migration into the new preferred location.
+    await saveRegistryAtPath(preferredPath, legacy).catch(() => {});
+    return legacy;
+  }
+
+  return { version: 2, drones: {}, pending: {} };
+}
+
+export async function saveRegistry(reg: DroneRegistry): Promise<void> {
+  await saveRegistryAtPath(registryPath(), reg);
 }
 
 async function setPrivateFileModeBestEffort(p: string): Promise<void> {
