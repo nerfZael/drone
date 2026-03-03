@@ -1,4 +1,3 @@
-import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
@@ -15,18 +14,8 @@ function preferredDvmRootDir(): string {
   return path.join(dataHome, 'dvm');
 }
 
-function legacyDvmRootDir(): string {
-  return path.join(os.homedir(), '.dvm');
-}
-
 export function dvmRootDir(): string {
-  const preferred = preferredDvmRootDir();
-  if (fs.existsSync(preferred)) return preferred;
-
-  const legacy = legacyDvmRootDir();
-  if (fs.existsSync(legacy)) return legacy;
-
-  return preferred;
+  return preferredDvmRootDir();
 }
 
 export function dvmRootPath(...parts: string[]): string {

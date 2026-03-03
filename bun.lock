@@ -1,5 +1,6 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "drone-monorepo",
@@ -17,6 +18,7 @@
         "ai": "^6.0.77",
         "commander": "^12.1.0",
         "dotenv": "^17.2.4",
+        "dvm": "workspace:*",
         "ws": "^8.19.0",
         "zod": "^4.3.6",
       },

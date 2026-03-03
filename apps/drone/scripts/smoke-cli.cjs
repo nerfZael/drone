@@ -53,7 +53,6 @@ function main() {
   const daemonJs = path.join(appRoot, 'dist', 'daemon.js');
   const dronePathsModPath = path.join(appRoot, 'dist', 'host', 'paths.js');
   const registryModPath = path.join(appRoot, 'dist', 'host', 'registry.js');
-  const hostDvmModPath = path.join(appRoot, 'dist', 'host', 'dvm.js');
 
   assert(fs.existsSync(droneCli), `missing build artifact: ${droneCli}`);
   assert(fs.existsSync(daemonJs), `missing build artifact: ${daemonJs}`);
@@ -72,29 +71,16 @@ function main() {
 
   const dronePaths = require(dronePathsModPath);
   const registry = require(registryModPath);
-  const hostDvm = require(hostDvmModPath);
 
   const droneRoot = dronePaths.droneRootDir();
   const preferred = expectedPreferredRoot();
-  const legacy = path.join(os.homedir(), '.drone');
   assert(path.isAbsolute(droneRoot), `droneRootDir() should be absolute, got: ${droneRoot}`);
-  assert(droneRoot === preferred || droneRoot === legacy, `unexpected droneRootDir(): ${droneRoot}`);
+  assert(droneRoot === preferred, `unexpected droneRootDir(): ${droneRoot}`);
   assert(dronePaths.droneRootPath('registry.json').startsWith(droneRoot), 'droneRootPath() should be rooted in droneRootDir()');
 
   const registryPath = registry.registryPath();
   assert(path.isAbsolute(registryPath), `registryPath() should be absolute, got: ${registryPath}`);
   assert(registryPath.startsWith(droneRoot), `registryPath() should be under drone root, got: ${registryPath}`);
-
-  const parsedPorts = hostDvm.parsePortsOutput('7777:7777\n3389:3389\nnot-a-port\n');
-  assert(Array.isArray(parsedPorts) && parsedPorts.length === 2, 'parsePortsOutput() should parse two valid ports');
-  const parsedLs = hostDvm.parseLsOutput('Name: alpha\nName: beta\nName: alpha\n');
-  assert(Array.isArray(parsedLs) && parsedLs.length === 2, 'parseLsOutput() should deduplicate names');
-
-  const prevDvmCliPath = process.env.DVM_CLI_PATH;
-  process.env.DVM_CLI_PATH = '/tmp/override-dvm-cli.js';
-  assert(hostDvm.resolveDvmCliPath() === '/tmp/override-dvm-cli.js', 'resolveDvmCliPath() env override failed');
-  if (typeof prevDvmCliPath === 'string') process.env.DVM_CLI_PATH = prevDvmCliPath;
-  else delete process.env.DVM_CLI_PATH;
 
   console.log('Drone smoke checks passed');
 }

@@ -1,4 +1,3 @@
-import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -15,18 +14,8 @@ function preferredDroneRootDir(): string {
   return path.join(dataHome, 'drone');
 }
 
-function legacyDroneRootDir(): string {
-  return path.join(os.homedir(), '.drone');
-}
-
 export function droneRootDir(): string {
-  const preferred = preferredDroneRootDir();
-  if (fsSync.existsSync(preferred)) return preferred;
-
-  const legacy = legacyDroneRootDir();
-  if (fsSync.existsSync(legacy)) return legacy;
-
-  return preferred;
+  return preferredDroneRootDir();
 }
 
 export function droneRootPath(...parts: string[]): string {

@@ -98,7 +98,6 @@ describe('drone docker lifecycle regression', () => {
       const env = {
         ...process.env,
         XDG_DATA_HOME: xdgDataHome,
-        DVM_CLI_PATH: dvmCli,
         NO_COLOR: '1',
       };
 
@@ -193,7 +192,6 @@ describe('drone docker lifecycle regression', () => {
       const env = {
         ...process.env,
         XDG_DATA_HOME: xdgDataHome,
-        DVM_CLI_PATH: dvmCli,
         NO_COLOR: '1',
       };
       const registryDir = path.join(xdgDataHome, 'drone');
@@ -271,12 +269,10 @@ describe('drone docker lifecycle regression', () => {
       const env = {
         ...process.env,
         XDG_DATA_HOME: xdgDataHome,
-        DVM_CLI_PATH: dvmCli,
         NO_COLOR: '1',
       };
 
       const prevXdgDataHome = process.env.XDG_DATA_HOME;
-      const prevDvmCliPath = process.env.DVM_CLI_PATH;
       const prevNoColor = process.env.NO_COLOR;
       let hub: { port: number; close: () => Promise<void> } | null = null;
       const apiToken = `test-token-${testId}`;
@@ -288,7 +284,7 @@ describe('drone docker lifecycle regression', () => {
           { cwd: appRoot, env, timeoutMs: 240_000 }
         );
 
-        // Simulate a legacy/drifted registry key where entry.name remains correct
+        // Simulate a drifted registry key where entry.name remains correct
         // but the object key no longer matches.
         const registryPath = path.join(xdgDataHome, 'drone', 'registry.json');
         const registryRaw = fs.readFileSync(registryPath, 'utf8');
@@ -303,7 +299,6 @@ describe('drone docker lifecycle regression', () => {
         fs.writeFileSync(registryPath, JSON.stringify(registry, null, 2), 'utf8');
 
         process.env.XDG_DATA_HOME = xdgDataHome;
-        process.env.DVM_CLI_PATH = dvmCli;
         process.env.NO_COLOR = '1';
         hub = await startDroneHubApiServer({ port: 0, host: '127.0.0.1', apiToken });
 
@@ -344,8 +339,6 @@ describe('drone docker lifecycle regression', () => {
         }
         if (prevXdgDataHome == null) delete process.env.XDG_DATA_HOME;
         else process.env.XDG_DATA_HOME = prevXdgDataHome;
-        if (prevDvmCliPath == null) delete process.env.DVM_CLI_PATH;
-        else process.env.DVM_CLI_PATH = prevDvmCliPath;
         if (prevNoColor == null) delete process.env.NO_COLOR;
         else process.env.NO_COLOR = prevNoColor;
 

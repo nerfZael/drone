@@ -46,6 +46,12 @@ export interface ContainerDetails {
   volumes: string[];
 }
 
+export interface ExecCommandResult {
+  code: number;
+  stdout: string;
+  stderr: string;
+}
+
 export class DockerClient {
   private docker: Docker;
 
@@ -348,7 +354,11 @@ export class DockerClient {
     await container.rename({ name: newName });
   }
 
-  async execCommand(name: string, command: string[]): Promise<string> {
+  async execCommandDetailed(
+    name: string,
+    command: string[],
+    options?: { timeoutMs?: number }
+  ): Promise<ExecCommandResult> {
     const container = await this.getContainer(name);
     if (!container) {
       throw new Error(`Container ${name} not found`);
@@ -365,19 +375,51 @@ export class DockerClient {
       Tty: false,
     });
 
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       let stdoutText = '';
       let stderrText = '';
+      let done = false;
+      let timeout: ReturnType<typeof setTimeout> | null = null;
+      let streamRef: NodeJS.ReadWriteStream | null = null;
+
+      const finish = (res: ExecCommandResult) => {
+        if (done) return;
+        done = true;
+        if (timeout) clearTimeout(timeout);
+        resolve(res);
+      };
+
+      const timeoutMs =
+        typeof options?.timeoutMs === 'number' && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+          ? Math.floor(options.timeoutMs)
+          : 0;
+      if (timeoutMs > 0) {
+        timeout = setTimeout(() => {
+          try {
+            const s: any = streamRef;
+            if (s && typeof s.destroy === 'function') s.destroy();
+          } catch {
+            // ignore
+          }
+          finish({
+            code: 124,
+            stdout: stdoutText,
+            stderr: `${stderrText}${stderrText.trim() ? '\n\n' : ''}Timed out after ${Math.round(timeoutMs / 1000)}s`,
+          });
+        }, timeoutMs);
+      }
+
       exec.start({ hijack: true, stdin: false }, (err: Error | null, stream?: NodeJS.ReadWriteStream) => {
         if (err) {
-          reject(err);
+          finish({ code: 127, stdout: stdoutText, stderr: `${stderrText}${err.message}` });
           return;
         }
 
         if (!stream) {
-          reject(new Error('No stream available'));
+          finish({ code: 127, stdout: stdoutText, stderr: `${stderrText}No stream available` });
           return;
         }
+        streamRef = stream;
 
         const stdout = new PassThrough();
         const stderr = new PassThrough();
@@ -394,28 +436,37 @@ export class DockerClient {
         (this.docker.modem as any).demuxStream(stream, stdout, stderr);
 
         stream.on('end', async () => {
+          if (done) return;
           try {
             const info = await exec.inspect();
             const code = info.ExitCode;
-            if (typeof code === 'number' && code !== 0) {
-              const cmd = command.map((c) => JSON.stringify(c)).join(' ');
-              const combined = `${stdoutText}${stderrText}`.trim();
-              const suffix = combined ? `\n\n${combined}` : '';
-              reject(new Error(`Command failed (exit ${code}): ${cmd}${suffix}`));
-              return;
-            }
-            // Keep legacy behavior: return combined output (stdout + stderr).
-            resolve(`${stdoutText}${stderrText}`);
+            finish({ code: typeof code === 'number' ? code : 1, stdout: stdoutText, stderr: stderrText });
           } catch (inspectErr: any) {
-            reject(inspectErr);
+            finish({
+              code: 1,
+              stdout: stdoutText,
+              stderr: `${stderrText}${inspectErr?.message ?? String(inspectErr)}`,
+            });
           }
         });
 
         stream.on('error', (err: Error) => {
-          reject(err);
+          finish({ code: 1, stdout: stdoutText, stderr: `${stderrText}${err.message}` });
         });
       });
     });
+  }
+
+  async execCommand(name: string, command: string[]): Promise<string> {
+    const out = await this.execCommandDetailed(name, command);
+    if (out.code !== 0) {
+      const cmd = command.map((c) => JSON.stringify(c)).join(' ');
+      const combined = `${out.stdout}${out.stderr}`.trim();
+      const suffix = combined ? `\n\n${combined}` : '';
+      throw new Error(`Command failed (exit ${out.code}): ${cmd}${suffix}`);
+    }
+    // Preserve prior semantics: return combined output (stdout + stderr).
+    return `${out.stdout}${out.stderr}`;
   }
 
   async execInteractive(name: string, command: string[] = ['/bin/bash']): Promise<void> {

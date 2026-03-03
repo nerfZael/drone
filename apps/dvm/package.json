@@ -3,7 +3,12 @@
   "version": "0.1.0",
   "description": "CLI tool for managing Docker containers as isolated VMs",
   "bin": "dist/cli.js",
-  "main": "dist/cli.js",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./cli": "./dist/cli.js"
+  },
   "type": "commonjs",
   "files": [
     "dist/**",

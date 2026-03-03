@@ -482,18 +482,13 @@ async function repoExportFromContainer(options: {
   await manager.startContainer(containerName);
   await manager.ensureGit(containerName);
 
-  // Determine base ref (explicit, or from repo marker).
+  // Determine base ref (explicit, or from git config).
   let base = options.base ? String(options.base) : '';
   if (!base) {
-    // Prefer git config (untracked). Fall back to legacy repo-root marker if it exists.
     const readBase = await manager.docker.execCommand(containerName, [
       'bash',
       '-lc',
-      [
-        `cd ${JSON.stringify(repoPath)}`,
-        `git config --get dvm.baseSha 2>/dev/null || true`,
-        `if [ -z "$(git config --get dvm.baseSha 2>/dev/null || true)" ] && [ -f .dvm-base-sha ]; then cat .dvm-base-sha; fi`,
-      ].join('\n'),
+      [`cd ${JSON.stringify(repoPath)}`, `git config --get dvm.baseSha 2>/dev/null || true`].join('\n'),
     ]);
     base = readBase
       .split('\n')
@@ -894,7 +889,6 @@ program
   .command('list')
   .alias('ls')
   .description('List DVM containers (running and stopped)')
-  // Back-compat: `--all` used to be required to show stopped containers.
   .option('-a, --all', 'Show all containers (including stopped) (default)', false)
   .option('--running-only', 'Only show running containers', false)
   .action(safeAction(async (options) => {
@@ -1029,8 +1023,6 @@ program
   .description('Remove a container completely (including its dvm persistence volume)')
   .argument('<name>', 'Container name')
   .option('--keep-volume', 'Keep the persistence volume attached to this container')
-  // Back-compat: this flag used to be required to remove the volume; now it is the default.
-  .option('--clean', 'Remove the dvm persistence volume (deprecated; now default)')
   .action(safeAction(async (name, options) => {
     console.log(chalk.blue(`Removing container ${name}...`));
     const removeVolume = !options.keepVolume;
@@ -1548,8 +1540,6 @@ repoCommand
         `cd ${JSON.stringify(dest)} && git config dvm.baseSha ${JSON.stringify(baseSha)}`,
         // Preserve host remote so PR tooling can work directly inside the container repo.
         remoteCmd,
-        // Back-compat cleanup: remove old tracked marker if present.
-        `rm -f ${JSON.stringify(path.posix.join(dest, '.dvm-base-sha'))} || true`,
         branchCmd,
       ]
         .filter(Boolean)

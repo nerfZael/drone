@@ -1,8 +1,10 @@
 import { spawn } from 'node:child_process';
-import fs from 'node:fs';
-import path from 'node:path';
+import { createDvmApi } from 'dvm';
+import type { DvmCreateContainerOptions } from 'dvm';
 
 export type RunResult = { code: number; stdout: string; stderr: string };
+
+const dvm = createDvmApi();
 
 export async function run(
   cmd: string,
@@ -63,43 +65,36 @@ export async function run(
   });
 }
 
-function defaultDvmCliPath(): string {
-  // When developing inside this monorepo, `drone` can invoke the local dvm build.
-  // dist/host -> dist -> drone -> apps -> dvm/dist/cli.js
-  return path.resolve(__dirname, '../../../dvm/dist/cli.js');
-}
+async function withTimeout<T>(promise: Promise<T>, timeoutMs?: number): Promise<T> {
+  const ms =
+    typeof timeoutMs === 'number' && Number.isFinite(timeoutMs) && timeoutMs > 0
+      ? Math.floor(timeoutMs)
+      : 0;
+  if (!ms) return await promise;
 
-export function resolveDvmCliPath(): string {
-  return process.env.DVM_CLI_PATH ?? defaultDvmCliPath();
-}
-
-async function runDvm(args: string[], opts?: { timeoutMs?: number }): Promise<RunResult> {
-  const dvmCli = resolveDvmCliPath();
-  if (!fs.existsSync(dvmCli)) {
-    return { code: 127, stdout: '', stderr: `dvm CLI not found at ${dvmCli} (set DVM_CLI_PATH or build apps/dvm)` };
-  }
-  return await run('node', [dvmCli, ...args], { timeoutMs: opts?.timeoutMs });
-}
-
-export function parsePortsOutput(text: string): Array<{ hostPort: number; containerPort: number }> {
-  const ports: Array<{ hostPort: number; containerPort: number }> = [];
-  for (const line of text.split('\n')) {
-    const m = line.match(/^\s*(\d+):(\d+)\s*$/);
-    if (!m) continue;
-    ports.push({ hostPort: Number(m[1]), containerPort: Number(m[2]) });
-  }
-  return ports.filter((p) => Number.isFinite(p.hostPort) && Number.isFinite(p.containerPort));
+  return await new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Timed out after ${Math.round(ms / 1000)}s`));
+    }, ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
 }
 
 export async function dvmPorts(container: string): Promise<Array<{ hostPort: number; containerPort: number }>> {
-  const r = await runDvm(['ports', container]);
-  if (r.code !== 0) throw new Error(r.stderr || r.stdout || `dvm ports ${container} failed`);
-  return parsePortsOutput(r.stdout);
+  return await dvm.getContainerPorts(container);
 }
 
-export async function dvmCreate(container: string, args: string[]): Promise<void> {
-  const r = await runDvm(['create', container, ...args]);
-  if (r.code !== 0) throw new Error(r.stderr || r.stdout || `dvm create ${container} failed`);
+export async function dvmCreate(container: string, opts: DvmCreateContainerOptions): Promise<void> {
+  await dvm.createContainer(container, opts);
 }
 
 export async function dvmClone(
@@ -107,34 +102,11 @@ export async function dvmClone(
   container: string,
   opts?: { start?: boolean; reuseNamedVolumes?: boolean; copyPersistenceVolume?: boolean }
 ): Promise<void> {
-  const argv = ['clone', source, container];
-  if (opts?.start === false) argv.push('--no-start');
-  if (opts?.reuseNamedVolumes) argv.push('--reuse-named-volumes');
-  if (opts?.copyPersistenceVolume === false) argv.push('--no-copy-persistence');
-  const r = await runDvm(argv);
-  if (r.code !== 0) throw new Error(r.stderr || r.stdout || `dvm clone ${source} ${container} failed`);
-}
-
-export function parseLsOutput(text: string): string[] {
-  // dvm ls output format (human-friendly):
-  // Name: <container>
-  //   Image: ...
-  //   Status: ...
-  //   Ports: ...
-  const names: string[] = [];
-  for (const line of text.split('\n')) {
-    const m = line.match(/^\s*Name:\s*(.+?)\s*$/);
-    if (!m) continue;
-    const name = m[1].trim();
-    if (name) names.push(name);
-  }
-  return [...new Set(names)];
+  await dvm.cloneContainer(source, container, opts);
 }
 
 export async function dvmLs(): Promise<string[]> {
-  const r = await runDvm(['ls']);
-  if (r.code !== 0) throw new Error(r.stderr || r.stdout || 'dvm ls failed');
-  return parseLsOutput(r.stdout);
+  return await dvm.listContainerNames({ all: true });
 }
 
 export async function dvmExec(
@@ -143,24 +115,19 @@ export async function dvmExec(
   args: string[] = [],
   opts?: { timeoutMs?: number }
 ): Promise<RunResult> {
-  return await runDvm(['exec', container, '--', cmd, ...args], { timeoutMs: opts?.timeoutMs });
+  return await dvm.exec(container, cmd, args, { timeoutMs: opts?.timeoutMs });
 }
 
 export async function dvmRemove(container: string, opts?: { keepVolume?: boolean }): Promise<void> {
-  const argv = ['rm', container];
-  if (opts?.keepVolume) argv.push('--keep-volume');
-  const r = await runDvm(argv);
-  if (r.code !== 0) throw new Error(r.stderr || r.stdout || `dvm rm ${container} failed`);
+  await dvm.removeContainer(container, opts);
 }
 
 export async function dvmStop(container: string): Promise<void> {
-  const r = await runDvm(['stop', container]);
-  if (r.code !== 0) throw new Error(r.stderr || r.stdout || `dvm stop ${container} failed`);
+  await dvm.stopContainer(container);
 }
 
 export async function dvmStart(container: string): Promise<void> {
-  const r = await runDvm(['start', container]);
-  if (r.code !== 0) throw new Error(r.stderr || r.stdout || `dvm start ${container} failed`);
+  await dvm.startContainer(container);
 }
 
 export async function dvmRename(
@@ -168,40 +135,21 @@ export async function dvmRename(
   newName: string,
   opts?: { startMode?: 'preserve' | 'always' | 'never'; migrateVolumeName?: boolean }
 ): Promise<void> {
-  const argv = ['rename', oldName, newName];
-  if (opts?.migrateVolumeName) argv.push('--migrate-volume-name');
-  const startMode = opts?.startMode ?? 'preserve';
-  if (startMode === 'always') argv.push('--start');
-  if (startMode === 'never') argv.push('--no-start');
-  const r = await runDvm(argv);
-  if (r.code !== 0) throw new Error(r.stderr || r.stdout || `dvm rename ${oldName} ${newName} failed`);
+  await dvm.renameContainer(oldName, newName, opts);
 }
 
-export async function dvmSessionStart(container: string, session: string, cmd: string, args: string[] = [], reuse = true): Promise<void> {
-  const argv = ['session', 'start', container, session];
-  if (reuse) argv.push('--reuse');
-  argv.push('--', cmd, ...args);
-  const r = await runDvm(argv);
-  if (r.code !== 0) throw new Error(r.stderr || r.stdout || `dvm session start ${container} ${session} failed`);
-}
-
-export async function dvmSessionSend(container: string, session: string, text: string): Promise<void> {
-  // Use `--` so text beginning with "-" isn't parsed as an option.
-  const argv = ['session', 'send', container, session, '--', text];
-  const r = await runDvm(argv);
-  if (r.code !== 0) throw new Error(r.stderr || r.stdout || `dvm session send ${container} ${session} failed`);
+export async function dvmSessionStart(
+  container: string,
+  session: string,
+  cmd: string,
+  args: string[] = [],
+  reuse = true
+): Promise<void> {
+  await dvm.sessionStart(container, session, cmd, args, { reuse });
 }
 
 export async function dvmSessionType(container: string, session: string, opts: { text?: string; keys?: string[] }): Promise<void> {
-  const argv = ['session', 'type', container, session];
-  const keys = Array.isArray(opts.keys) ? opts.keys.map(String).filter(Boolean) : [];
-  for (const k of keys) argv.push('--key', k);
-  if (typeof opts.text === 'string') {
-    // Use `--` so text beginning with "-" isn't parsed as an option.
-    argv.push('--', opts.text);
-  }
-  const r = await runDvm(argv);
-  if (r.code !== 0) throw new Error(r.stderr || r.stdout || `dvm session type ${container} ${session} failed`);
+  await dvm.sessionType(container, session, opts);
 }
 
 export async function dvmSessionRead(opts: {
@@ -211,33 +159,15 @@ export async function dvmSessionRead(opts: {
   maxBytes?: number;
   tailLines?: number;
 }): Promise<{ offsetBytes: number; text: string }> {
-  const argv = ['session', 'read', opts.container, opts.session, '--json'];
-  if (typeof opts.since === 'number' && Number.isFinite(opts.since) && opts.since >= 0) {
-    argv.push('--since', String(Math.floor(opts.since)));
-    if (typeof opts.maxBytes === 'number' && Number.isFinite(opts.maxBytes) && opts.maxBytes > 0) {
-      argv.push('--max-bytes', String(Math.floor(opts.maxBytes)));
-    }
-  } else if (typeof opts.tailLines === 'number' && Number.isFinite(opts.tailLines) && opts.tailLines > 0) {
-    argv.push('--tail', String(Math.floor(opts.tailLines)));
-  }
-  const r = await runDvm(argv);
-  if (r.code !== 0) throw new Error(r.stderr || r.stdout || `dvm session read ${opts.container} ${opts.session} failed`);
-  try {
-    const parsed = JSON.parse((r.stdout || '').trim()) as { offsetBytes?: any; text?: any };
-    const offsetBytes = Number(parsed?.offsetBytes ?? 0);
-    const text = typeof parsed?.text === 'string' ? parsed.text : '';
-    return { offsetBytes: Number.isFinite(offsetBytes) && offsetBytes >= 0 ? offsetBytes : 0, text };
-  } catch {
-    // Fallback: treat as plain text and report end offset as 0 (unknown).
-    return { offsetBytes: 0, text: r.stdout || '' };
-  }
+  return await dvm.sessionRead(opts.container, opts.session, {
+    since: opts.since,
+    maxBytes: opts.maxBytes,
+    tailLines: opts.tailLines,
+  });
 }
 
 export async function dvmScript(container: string, scriptPath: string, args: string[] = []): Promise<void> {
-  const argv = ['script', container, scriptPath];
-  if (args.length > 0) argv.push('--', ...args);
-  const r = await runDvm(argv);
-  if (r.code !== 0) throw new Error(r.stderr || r.stdout || `dvm script ${container} ${scriptPath} failed`);
+  await dvm.runScript(container, scriptPath, args);
 }
 
 export async function dvmCopyToContainer(
@@ -246,23 +176,7 @@ export async function dvmCopyToContainer(
   destPath: string,
   opts?: { clean?: boolean; timeoutMs?: number }
 ): Promise<void> {
-  const argv = ['copy', container, srcPath, destPath];
-  if (opts?.clean) argv.push('--clean');
-  const r = await runDvm(argv, { timeoutMs: opts?.timeoutMs });
-  if (r.code !== 0) throw new Error(r.stderr || r.stdout || `dvm copy ${container} ${srcPath} ${destPath} failed`);
-}
-
-function parseRepoExportPath(stdout: string): string | null {
-  // dvm prints: "Exported <format> -> <path>"
-  const lines = String(stdout || '')
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean);
-  for (const l of lines.slice().reverse()) {
-    const m = l.match(/^Exported\s+\w+\s+->\s+(.+)\s*$/);
-    if (m && m[1]) return m[1].trim();
-  }
-  return null;
+  await withTimeout(dvm.copyToContainer(container, srcPath, destPath, { clean: Boolean(opts?.clean) }), opts?.timeoutMs);
 }
 
 function parseShaFromOutput(text: string): string | null {
@@ -280,13 +194,17 @@ export async function dvmRepoSeed(opts: {
   clean?: boolean;
   timeoutMs?: number;
 }): Promise<void> {
-  const argv = ['repo', 'seed', opts.container, '--path', opts.hostPath];
-  if (opts.dest) argv.push('--dest', opts.dest);
-  if (opts.baseRef) argv.push('--base-ref', opts.baseRef);
-  if (opts.branch) argv.push('--branch', opts.branch);
-  if (opts.clean) argv.push('--clean');
-  const r = await runDvm(argv, { timeoutMs: opts.timeoutMs });
-  if (r.code !== 0) throw new Error(r.stderr || r.stdout || `dvm repo seed ${opts.container} failed`);
+  await withTimeout(
+    dvm.repoSeed({
+      containerName: opts.container,
+      hostRepoPath: opts.hostPath,
+      destinationPath: opts.dest,
+      baseRef: opts.baseRef,
+      branch: opts.branch,
+      clean: opts.clean,
+    }),
+    opts.timeoutMs
+  );
 }
 
 export async function dvmRepoExport(opts: {
@@ -295,36 +213,20 @@ export async function dvmRepoExport(opts: {
   outDir: string;
   format?: 'patches' | 'bundle' | 'diff';
   base?: string;
-}): Promise<{ exportedPath: string; stdout: string }> {
-  const format = opts.format ?? 'patches';
-  const argv = [
-    'repo',
-    'export',
-    opts.container,
-    '--repo',
-    opts.repoPathInContainer ?? '/work/repo',
-    '--out',
-    opts.outDir,
-    '--format',
-    format,
-  ];
-  if (opts.base) argv.push('--base', opts.base);
-  const r = await runDvm(argv);
-  if (r.code !== 0) throw new Error(r.stderr || r.stdout || `dvm repo export ${opts.container} failed`);
-  const exportedPath = parseRepoExportPath(r.stdout) ?? '';
-  if (!exportedPath) {
-    throw new Error(`dvm repo export did not report an output path:\n\n${r.stdout || '(no stdout)'}`);
-  }
-  return { exportedPath, stdout: r.stdout };
+}): Promise<{ exportedPath: string }> {
+  const out = await dvm.repoExport({
+    containerName: opts.container,
+    repoPathInContainer: opts.repoPathInContainer,
+    outRoot: opts.outDir,
+    format: opts.format,
+    base: opts.base,
+  });
+  return { exportedPath: out.exportedPath };
 }
 
 export async function dvmRepoHeadSha(opts: { container: string; repoPathInContainer?: string }): Promise<string> {
   const repoPath = opts.repoPathInContainer ?? '/work/repo';
-  const script = [
-    'set -euo pipefail',
-    `cd ${JSON.stringify(repoPath)}`,
-    'git rev-parse HEAD',
-  ].join('\n');
+  const script = ['set -euo pipefail', `cd ${JSON.stringify(repoPath)}`, 'git rev-parse HEAD'].join('\n');
   const r = await dvmExec(opts.container, 'bash', ['-lc', script]);
   if (r.code !== 0) throw new Error(r.stderr || r.stdout || `failed to read repo HEAD in ${opts.container}`);
   const sha = parseShaFromOutput(r.stdout);
@@ -336,13 +238,7 @@ export async function dvmRepoSetBaseSha(opts: { container: string; repoPathInCon
   const repoPath = opts.repoPathInContainer ?? '/work/repo';
   const baseSha = String(opts.baseSha ?? '').trim().toLowerCase();
   if (!/^[0-9a-f]{40}$/.test(baseSha)) throw new Error(`invalid base SHA: ${opts.baseSha ?? '(empty)'}`);
-  const script = [
-    'set -euo pipefail',
-    `cd ${JSON.stringify(repoPath)}`,
-    `git config dvm.baseSha ${JSON.stringify(baseSha)}`,
-    `rm -f ${JSON.stringify(path.posix.join(repoPath, '.dvm-base-sha'))} || true`,
-    'git config --get dvm.baseSha',
-  ].join('\n');
+  const script = ['set -euo pipefail', `cd ${JSON.stringify(repoPath)}`, `git config dvm.baseSha ${JSON.stringify(baseSha)}`, 'git config --get dvm.baseSha'].join('\n');
   const r = await dvmExec(opts.container, 'bash', ['-lc', script]);
   if (r.code !== 0) throw new Error(r.stderr || r.stdout || `failed to set dvm.baseSha in ${opts.container}`);
   const configured = parseShaFromOutput(r.stdout);
@@ -351,22 +247,9 @@ export async function dvmRepoSetBaseSha(opts: { container: string; repoPathInCon
   }
 }
 
-function parseBaseImageFromBaseSetOutput(stdout: string): string | null {
-  const lines = String(stdout ?? '')
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean);
-  for (const line of lines.slice().reverse()) {
-    const m = line.match(/^Base image:\s*(.+?)\s*$/i);
-    if (m?.[1]) return m[1].trim();
-  }
-  return null;
-}
-
-export async function dvmBaseSet(container: string, opts?: { timeoutMs?: number }): Promise<{ baseImage: string | null; stdout: string }> {
+export async function dvmBaseSet(container: string, opts?: { timeoutMs?: number }): Promise<{ baseImage: string }> {
   const name = String(container ?? '').trim();
   if (!name) throw new Error('missing container name');
-  const r = await runDvm(['base', 'set', name], { timeoutMs: opts?.timeoutMs });
-  if (r.code !== 0) throw new Error(r.stderr || r.stdout || `dvm base set ${name} failed`);
-  return { baseImage: parseBaseImageFromBaseSetOutput(r.stdout), stdout: r.stdout };
+  const out = await withTimeout(dvm.setBaseImage(name), opts?.timeoutMs);
+  return { baseImage: out.baseImage };
 }
