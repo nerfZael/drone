@@ -205,6 +205,7 @@ export function useRightPanelLayout() {
     rightPanelOpen,
     setRightPanelOpen,
     rightPanelWidth,
+    setRightPanelWidth,
     rightPanelResizing,
     rightPanelTab,
     setRightPanelTab,

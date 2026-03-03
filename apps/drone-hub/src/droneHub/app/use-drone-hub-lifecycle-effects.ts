@@ -33,7 +33,6 @@ type UseDroneHubLifecycleEffectsArgs = {
   setHeaderOverflowOpen: Setter<boolean>;
   droneErrorModal: DroneErrorModalState | null;
   setDroneErrorModal: Setter<DroneErrorModalState | null>;
-  openCreateModal: () => void;
   openDraftChatComposer: (opts?: { repoPath?: string | null; group?: string | null }) => void;
   openGroupMultiChat: (group: string) => void;
   openSidebarVisibleMultiChat: () => void;
@@ -58,8 +57,13 @@ type UseDroneHubLifecycleEffectsArgs = {
   rightPanelSplit: boolean;
   rightPanelBottomTab: RightPanelTab;
   setRightPanelOpen: Setter<boolean>;
+  rightPanelWidth: number;
+  rightPanelWidthMax: number;
+  setRightPanelWidth: Setter<number>;
   setRightPanelTab: Setter<RightPanelTab>;
   setRightPanelBottomTab: Setter<RightPanelTab>;
+  resetRightPanelWidth: () => void;
+  setSidebarCollapsed: Setter<boolean>;
   shortcutBindings: ShortcutBindingMap;
   llmSettings: LlmSettingsLike;
   requestJson: RequestJson;
@@ -162,7 +166,6 @@ export function useDroneHubLifecycleEffects({
   setHeaderOverflowOpen,
   droneErrorModal,
   setDroneErrorModal,
-  openCreateModal,
   openDraftChatComposer,
   openGroupMultiChat,
   openSidebarVisibleMultiChat,
@@ -187,8 +190,13 @@ export function useDroneHubLifecycleEffects({
   rightPanelSplit,
   rightPanelBottomTab,
   setRightPanelOpen,
+  rightPanelWidth,
+  rightPanelWidthMax,
+  setRightPanelWidth,
   setRightPanelTab,
   setRightPanelBottomTab,
+  resetRightPanelWidth,
+  setSidebarCollapsed,
   shortcutBindings,
   llmSettings,
   requestJson,
@@ -324,12 +332,18 @@ export function useDroneHubLifecycleEffects({
         return true;
       },
       markSelectedDronesUnread: () => onMarkSelectedDronesUnreadShortcut(),
-      openCreateModal: () => {
-        openCreateModal();
+      toggleSidebarCollapsed: () => {
+        setSidebarCollapsed((prev) => !prev);
         return true;
       },
-      openCreateModalAlt: () => {
-        openCreateModal();
+      toggleRightPanelWidth: () => {
+        setRightPanelOpen(true);
+        const rightPanelExpanded = Math.abs(rightPanelWidth - rightPanelWidthMax) <= 1;
+        if (rightPanelExpanded) {
+          resetRightPanelWidth();
+        } else {
+          setRightPanelWidth(rightPanelWidthMax);
+        }
         return true;
       },
       openHoveredGroupMultiChat: () => {
@@ -449,7 +463,6 @@ export function useDroneHubLifecycleEffects({
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [
     currentDrone,
-    openCreateModal,
     openDraftChatComposer,
     openGroupMultiChat,
     openSidebarVisibleMultiChat,
@@ -457,9 +470,14 @@ export function useDroneHubLifecycleEffects({
     rightPanelOpen,
     rightPanelSplit,
     rightPanelTab,
+    rightPanelWidth,
+    rightPanelWidthMax,
+    resetRightPanelWidth,
     setRightPanelBottomTab,
     setRightPanelOpen,
     setRightPanelTab,
+    setRightPanelWidth,
+    setSidebarCollapsed,
     shortcutBindings,
     onDeleteSelectedDroneFromInputShortcut,
     onMarkSelectedDronesUnreadShortcut,
