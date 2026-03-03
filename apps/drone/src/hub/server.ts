@@ -31,7 +31,6 @@ import {
   dvmSessionRead,
   dvmSessionStart,
   dvmSessionType,
-  resolveDvmCliPath,
 } from '../host/dvm';
 import {
   promptEnqueue as dronePromptEnqueue,
@@ -962,16 +961,9 @@ function listAllKnownGroups(regAny: any): string[] {
   return Array.from(out.values()).sort((a, b) => a.localeCompare(b));
 }
 
-function buildDvmCommand(args: string[]): string {
-  const nodePath = process.execPath;
-  const dvmCli = resolveDvmCliPath();
-  return `${bashQuote(nodePath)} ${bashQuote(dvmCli)} ${args.map(bashQuote).join(' ')}`;
-}
-
-function buildDvmManualCommand(args: string[]): string {
-  const nodePath = process.execPath;
-  const dvmCli = resolveDvmCliPath();
-  return `${shellQuoteIfNeeded(nodePath)} ${shellQuoteIfNeeded(dvmCli)} ${args.map(shellQuoteIfNeeded).join(' ')}`;
+function buildDockerExecTmuxAttachCommand(containerName: string, sessionName: string): string {
+  const args = ['docker', 'exec', '-it', containerName, 'tmux', 'attach', '-t', sessionName];
+  return args.map(shellQuoteIfNeeded).join(' ');
 }
 
 function sanitizeTmuxSessionName(raw: string): string {
@@ -1118,9 +1110,18 @@ type DiscoveredModelOption = {
   isCurrent?: boolean;
 };
 
-type TranscriptTurn =
-  | { at: string; prompt: string; session: string; logPath: string; attachments?: ChatImageAttachmentRef[]; automation?: PromptAutomationMeta }
-  | { at: string; id?: string; prompt: string; ok: boolean; output: string; error?: string; attachments?: ChatImageAttachmentRef[]; automation?: PromptAutomationMeta };
+type TranscriptTurn = {
+  at: string;
+  id?: string;
+  prompt: string;
+  ok: boolean;
+  output: string;
+  error?: string;
+  promptAt?: string;
+  completedAt?: string;
+  attachments?: ChatImageAttachmentRef[];
+  automation?: PromptAutomationMeta;
+};
 
 type PendingPhase = 'starting' | 'creating' | 'seeding' | 'error';
 
@@ -5128,13 +5129,6 @@ function inferChatAgent(entry: any): ChatAgentConfig {
     const command = String((agent as any).command ?? '').trim() || resolveHubAgentCommand();
     return { kind: 'custom', id: id || 'custom', label, command };
   }
-  if (typeof entry?.claudeSessionId === 'string' && entry.claudeSessionId.trim()) return { kind: 'builtin', id: 'claude' };
-  if (typeof entry?.openCodeSessionId === 'string' && entry.openCodeSessionId.trim()) return { kind: 'builtin', id: 'opencode' };
-  // Back-compat: if a Codex thread exists, this is a builtin Codex transcript chat.
-  if (typeof entry?.codexThreadId === 'string' && entry.codexThreadId.trim()) return { kind: 'builtin', id: 'codex' };
-  // Back-compat: if a legacy Cursor `chatId` exists, treat as builtin cursor transcript chat.
-  if (typeof entry?.chatId === 'string' && entry.chatId.trim()) return { kind: 'builtin', id: 'cursor' };
-  // Default unknown/missing metadata to builtin Cursor transcript mode.
   return { kind: 'builtin', id: 'cursor' };
 }
 
@@ -6234,12 +6228,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           const plan = await jobsPlanFromAgentMessage(message, { provider, apiKey: resolved.apiKey });
           const group = typeof plan?.group === 'string' ? plan.group : 'jobs';
           const jobs = Array.isArray(plan?.jobs) ? plan.jobs : [];
-          // Back-compat: include `description` for older clients (maps to title).
-          json(res, 200, {
-            ok: true,
-            group,
-            jobs: jobs.map((j: any) => ({ ...j, description: j?.title ?? j?.description ?? '' })),
-          });
+          json(res, 200, { ok: true, group, jobs });
           return;
         } catch (e: any) {
           json(res, 500, { ok: false, error: e?.message ?? String(e) });
@@ -6323,29 +6312,16 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const regAny: any = await loadRegistry();
         const raw = regAny?.repos ?? null;
         const list: any[] = [];
-        if (raw && typeof raw === 'object') {
-          if (Array.isArray(raw)) {
-            for (const r of raw) {
-              const p = typeof (r as any)?.path === 'string' ? String((r as any).path).trim() : '';
-              if (!p) continue;
-              list.push({
-                path: p,
-                addedAt: typeof (r as any)?.addedAt === 'string' ? String((r as any).addedAt) : null,
-                remoteUrl: typeof (r as any)?.remoteUrl === 'string' ? String((r as any).remoteUrl) : null,
-                github: (r as any)?.github ?? null,
-              });
-            }
-          } else {
-            for (const v of Object.values(raw)) {
-              const p = typeof (v as any)?.path === 'string' ? String((v as any).path).trim() : '';
-              if (!p) continue;
-              list.push({
-                path: p,
-                addedAt: typeof (v as any)?.addedAt === 'string' ? String((v as any).addedAt) : null,
-                remoteUrl: typeof (v as any)?.remoteUrl === 'string' ? String((v as any).remoteUrl) : null,
-                github: (v as any)?.github ?? null,
-              });
-            }
+        if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+          for (const v of Object.values(raw)) {
+            const p = typeof (v as any)?.path === 'string' ? String((v as any).path).trim() : '';
+            if (!p) continue;
+            list.push({
+              path: p,
+              addedAt: typeof (v as any)?.addedAt === 'string' ? String((v as any).addedAt) : null,
+              remoteUrl: typeof (v as any)?.remoteUrl === 'string' ? String((v as any).remoteUrl) : null,
+              github: (v as any)?.github ?? null,
+            });
           }
         }
         list.sort((a, b) => String(a.path).localeCompare(String(b.path)));
@@ -6368,13 +6344,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
 
         const removed = await updateRegistry((regAny: any) => {
           const raw = regAny?.repos ?? null;
-          if (!raw || typeof raw !== 'object') return false;
-          if (Array.isArray(raw)) {
-            // Back-compat: list form (filter in place).
-            const before = raw.length;
-            regAny.repos = raw.filter((r: any) => String(r?.path ?? '').trim() !== target);
-            return before !== regAny.repos.length;
-          }
+          if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
           // Map form: key is repo root (preferred).
           let did = false;
           if (raw[target]) {
@@ -6779,11 +6749,6 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
               nextHub = { ...nextHub, promptId };
               changedForDrone = true;
               break;
-            }
-            // Back-compat: clear stale "seeding" markers with no active pending work.
-            if (!promptId && !anyActivePendingPromptsForDrone(d)) {
-              nextHub = null;
-              changedForDrone = true;
             }
           }
 
@@ -10607,59 +10572,29 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const cwd = normalizeContainerPath(u.searchParams.get('cwd') ?? defaultCwd);
         const manualSshCmd = buildDockerExecShellCommand(containerName, cwd);
         const sshCmd = manualSshCmd;
-        const agentShell = `set -e; ${agentSessionEnv}; mkdir -p ${bashQuote(cwd)} 2>/dev/null || true; cd ${bashQuote(cwd)} 2>/dev/null || cd /dvm-data; exec ${agentCmd}`;
-        const agentStartCmd = buildDvmCommand([
-          'session',
-          'start',
-          containerName,
-          sessionName,
-          '--reuse',
-          '--',
-          'bash',
-          '-lc',
-          agentShell,
-        ]);
-        const agentAttachCmd = buildDvmCommand(['session', 'attach', containerName, sessionName]);
-        const tmuxTuneCmds = [
-          // Disable status line (green bar) and "freeze-on-exit".
-          // IMPORTANT: use `--` so dvm exec doesn't parse tmux flags like -g/-t.
-          buildDvmCommand(['exec', containerName, '--', 'tmux', 'set-option', '-g', 'status', 'off']),
-          buildDvmCommand(['exec', containerName, '--', 'tmux', 'set-window-option', '-g', 'remain-on-exit', 'off']),
-          // Improve color fidelity inside tmux.
-          buildDvmCommand(['exec', containerName, '--', 'tmux', 'set-option', '-g', 'default-terminal', 'xterm-256color']),
-          buildDvmCommand([
-            'exec',
-            containerName,
-            '--',
-            'tmux',
-            'set-option',
-            '-ga',
-            'terminal-overrides',
-            ',xterm-256color:Tc,screen-256color:Tc,screen:Tc,xterm-kitty:Tc',
-          ]),
-          // Newer tmux supports terminal-features/terminal-overrides RGB; best-effort.
-          buildDvmCommand([
-            'exec',
-            containerName,
-            '--',
-            'tmux',
-            'set-option',
-            '-ga',
-            'terminal-features',
-            ',xterm-256color:RGB,screen-256color:RGB,xterm-kitty:RGB',
-          ]),
-        ];
-        const manualAgentCmd = `${buildDvmManualCommand([
-          'session',
-          'start',
-          containerName,
-          sessionName,
-          '--reuse',
-          '--',
-          'bash',
-          '-lc',
-          `set -e; ${agentSessionEnv}; mkdir -p ${bashQuote(cwd)} 2>/dev/null || true; cd ${bashQuote(cwd)} 2>/dev/null || cd /dvm-data; exec ${agentCmd}`,
-        ])} && ${tmuxTuneCmds.map((c) => `${c} || true`).join(' && ')} && ${buildDvmManualCommand(['session', 'attach', containerName, sessionName])}`;
+        const agentAttachCmd = buildDockerExecTmuxAttachCommand(containerName, sessionName);
+        let agentPrepError: string | null = null;
+        if (mode === 'agent') {
+          const agentShell = `set -e; ${agentSessionEnv}; mkdir -p ${bashQuote(cwd)} 2>/dev/null || true; cd ${bashQuote(cwd)} 2>/dev/null || cd /dvm-data; exec ${agentCmd}`;
+          try {
+            await dvmSessionStart(containerName, sessionName, 'bash', ['-lc', agentShell], true);
+            const tmuxTuneCommands = [
+              ['set-option', '-g', 'status', 'off'],
+              ['set-window-option', '-g', 'remain-on-exit', 'off'],
+              ['set-option', '-g', 'default-terminal', 'xterm-256color'],
+              ['set-option', '-ga', 'terminal-overrides', ',xterm-256color:Tc,screen-256color:Tc,screen:Tc,xterm-kitty:Tc'],
+              ['set-option', '-ga', 'terminal-features', ',xterm-256color:RGB,screen-256color:RGB,xterm-kitty:RGB'],
+            ];
+            for (const tmuxArgs of tmuxTuneCommands) {
+              // Best-effort: ignore tuning failures and continue.
+              // eslint-disable-next-line no-await-in-loop
+              await dvmExec(containerName, 'tmux', tmuxArgs);
+            }
+          } catch (e: any) {
+            agentPrepError = e?.message ?? String(e);
+          }
+        }
+        const manualAgentCmd = `${agentAttachCmd} || ${manualSshCmd}`;
 
         const manualCommand = mode === 'ssh' ? manualSshCmd : manualAgentCmd;
         const command =
@@ -10677,12 +10612,8 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             : [
                 'set +e',
                 markerSnippet,
-                // Start (or reuse) a tmux-backed session that runs the Agent CLI, then attach to it.
-                // This is more reliable than trying to attach to transient `drone agent` sessions.
-                `echo "Starting Agent session (${sessionName})..."`,
-                `${agentStartCmd} || true`,
-                // Tune tmux for better UX/colors even when reusing the session.
-                ...tmuxTuneCmds.map((c) => `${c} || true`),
+                `echo "Attaching Agent session (${sessionName})..."`,
+                agentPrepError ? `echo ${bashQuote(`Warning: failed to prepare Agent session: ${agentPrepError}`)}` : '',
                 `${agentAttachCmd} || true`,
                 'echo',
                 'echo "If attach failed, you can run manually:"',
@@ -10695,7 +10626,9 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                 'echo "Exited with code $code"',
                 // Keep the terminal open after detach/exit.
                 'exec bash',
-              ].join('; ');
+              ]
+                .filter(Boolean)
+                .join('; ');
 
         const launched = await spawnTerminalWithBash(command, { terminal, markerPath });
         if (!launched.ok) {
@@ -11428,14 +11361,8 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           name: droneName,
           chat: chatName,
           agent,
-          // Back-compat: older clients expect these fields.
-          chatId: (c as any).chatId ?? null,
-          codexThreadId: (c as any).codexThreadId ?? null,
-          claudeSessionId: (c as any).claudeSessionId ?? null,
-          openCodeSessionId: (c as any).openCodeSessionId ?? null,
           model: (c as any).model ?? null,
           turns: (c as any).turns ?? [],
-          // New: tmux session is the continuation mechanism.
           sessionName: hubChatSessionName(chatName || 'default'),
           createdAt: c.createdAt,
         });
@@ -11545,7 +11472,6 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             json(res, 404, { ok: false, error: `unknown drone: ${droneId}` });
             return;
           }
-          const containerName = String((d as any)?.containerName ?? (d as any)?.name ?? droneId).trim() || droneId;
           const c = d.chats?.[chatName];
           if (!c) {
             json(res, 404, { ok: false, error: `unknown chat: ${chatName}` });
@@ -11592,78 +11518,20 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             const prompt = String(t?.prompt ?? '');
             const attachments = normalizeChatImageAttachmentRefs((t as any)?.attachments);
             const automation = normalizePromptAutomationMeta((t as any)?.automation);
-            if (typeof t?.ok === 'boolean') {
-              const ok = Boolean(t.ok);
-              const output = ok ? String(t.output ?? '') : '';
-              const error = ok ? undefined : String(t.error ?? 'failed');
-              transcripts.push({
-                turn: i + 1,
-                at,
-                ...(promptAt ? { promptAt } : {}),
-                ...(completedAt ? { completedAt } : {}),
-                ...(id ? { id } : {}),
-                prompt,
-                ...(attachments.length > 0 ? { attachments } : {}),
-                ...(automation ? { automation } : {}),
-                session: '',
-                logPath: '',
-                ok,
-                ...(ok ? { output } : { output: '', error }),
-              });
-              continue;
-            }
-
-            // Legacy turns referenced logPath. Best-effort read.
-            const logPath = String(t?.logPath ?? '');
-            const session = String(t?.session ?? '');
-            if (!logPath) {
-              transcripts.push({
-                turn: i + 1,
-                at,
-                ...(promptAt ? { promptAt } : {}),
-                ...(completedAt ? { completedAt } : {}),
-                prompt,
-                ...(attachments.length > 0 ? { attachments } : {}),
-                ...(automation ? { automation } : {}),
-                session,
-                logPath,
-                ok: false,
-                error: 'missing logPath',
-                output: '',
-              });
-              continue;
-            }
-            const cmd = `cat ${bashQuote(logPath)} 2>/dev/null || (echo "missing log: ${logPath}" 1>&2; exit 1)`;
-            const r = await dvmExec(containerName, 'bash', ['-lc', cmd]);
-            if (r.code !== 0) {
-              transcripts.push({
-                turn: i + 1,
-                at,
-                ...(promptAt ? { promptAt } : {}),
-                ...(completedAt ? { completedAt } : {}),
-                prompt,
-                ...(attachments.length > 0 ? { attachments } : {}),
-                ...(automation ? { automation } : {}),
-                session,
-                logPath,
-                ok: false,
-                error: (r.stderr || r.stdout || 'failed reading log').trim(),
-                output: '',
-              });
-              continue;
-            }
+            const ok = Boolean(t?.ok);
+            const output = ok ? String(t?.output ?? '') : '';
+            const error = ok ? undefined : String(t?.error ?? 'failed');
             transcripts.push({
               turn: i + 1,
               at,
               ...(promptAt ? { promptAt } : {}),
               ...(completedAt ? { completedAt } : {}),
+              ...(id ? { id } : {}),
               prompt,
               ...(attachments.length > 0 ? { attachments } : {}),
               ...(automation ? { automation } : {}),
-              session,
-              logPath,
-              ok: true,
-              output: String(r.stdout ?? '').trimEnd(),
+              ok,
+              ...(ok ? { output } : { output: '', error }),
             });
           }
 
@@ -11815,7 +11683,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             resolve();
           }
         }),
-        2_500
+        1_000
       );
       const serverClose = new Promise<void>((resolve) => server.close(() => resolve()));
       try {
@@ -11830,7 +11698,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           // ignore
         }
       }
-      await waitWithTimeout(serverClose, 5_000);
+      await waitWithTimeout(serverClose, 3_000);
       if (ARCHIVE_CLEANUP_INTERVAL) {
         try {
           clearInterval(ARCHIVE_CLEANUP_INTERVAL);

@@ -195,35 +195,6 @@ export function parseGitNameStatusZ(raw: string): RepoPullChangeEntry[] {
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i];
     if (!token) continue;
-    const tab = token.indexOf('\t');
-    if (tab > 0) {
-      // Back-compat for tab-delimited output variants.
-      const statusRaw = token.slice(0, tab);
-      const statusChar = statusRaw.charAt(0) || '?';
-      const pathA = token.slice(tab + 1);
-      if (!pathA) continue;
-
-      if (statusChar === 'R' || statusChar === 'C') {
-        const pathB = tokens[i + 1] ?? '';
-        i += 1;
-        const newPath = pathB || pathA;
-        out.push({
-          path: newPath,
-          originalPath: pathA,
-          statusChar,
-          statusType: nameStatusCharToType(statusChar),
-        });
-        continue;
-      }
-
-      out.push({
-        path: pathA,
-        originalPath: null,
-        statusChar,
-        statusType: nameStatusCharToType(statusChar),
-      });
-      continue;
-    }
 
     // Canonical `git diff --name-status -z` format is status + NUL + path (+ NUL + path for R/C).
     if (!statusTokenPattern.test(token)) continue;

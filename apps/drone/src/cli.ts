@@ -22,6 +22,25 @@ function bashQuote(s: string): string {
   return `'${String(s).replace(/'/g, `'\\''`)}'`;
 }
 
+function escapeRegExp(text: string): string {
+  return String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function parseDoneMarkerFromCapturedOutput(
+  capturedRaw: string,
+  markerPrefix: string
+): { output: string; exitCode: number | null } {
+  const captured = String(capturedRaw ?? '');
+  const markerLine = new RegExp(`^${escapeRegExp(markerPrefix)}(\\d+)\\s*$`, 'gm');
+  let exitCode: number | null = null;
+  for (const m of captured.matchAll(markerLine)) {
+    const n = Number(m[1]);
+    if (Number.isFinite(n) && n >= 0) exitCode = Math.floor(n);
+  }
+  const output = captured.replace(markerLine, '').trimEnd();
+  return { output, exitCode };
+}
+
 function normalizeContainerCwd(raw: any): string | undefined {
   const s = raw == null ? '' : String(raw).trim();
   if (!s) return undefined;
@@ -218,8 +237,11 @@ async function recordChatTurn(opts: {
   droneName: string;
   chatName: string;
   prompt: string;
-  session: string;
-  logPath: string;
+  ok: boolean;
+  output: string;
+  error?: string;
+  promptAt?: string;
+  completedAt?: string;
 }): Promise<void> {
   await updateRegistry((reg) => {
     const { key, drone: d } = resolveDroneFromRegistry(reg as any, opts.droneName);
@@ -227,11 +249,15 @@ async function recordChatTurn(opts: {
     d.chats[opts.chatName] = d.chats[opts.chatName] ?? { chatId: '', createdAt: new Date().toISOString() };
     const entry: any = d.chats[opts.chatName];
     entry.turns = Array.isArray(entry.turns) ? entry.turns : [];
+    const completedAt = String(opts.completedAt ?? new Date().toISOString());
     entry.turns.push({
-      at: new Date().toISOString(),
+      at: completedAt,
       prompt: opts.prompt,
-      session: opts.session,
-      logPath: opts.logPath,
+      ok: Boolean(opts.ok),
+      output: String(opts.output ?? ''),
+      ...(opts.error ? { error: String(opts.error) } : {}),
+      ...(opts.promptAt ? { promptAt: String(opts.promptAt) } : {}),
+      ...(opts.completedAt ? { completedAt: String(opts.completedAt) } : {}),
     });
     d.chats[opts.chatName] = entry;
     (reg as any).drones[key] = d;
@@ -243,22 +269,27 @@ async function followOutput(opts: {
   since: number;
   until?: string;
   timeoutMs: number;
-}): Promise<void> {
-  await withDroneClient(opts.name, async ({ client }) => {
+}): Promise<string> {
+  return await withDroneClient(opts.name, async ({ client }) => {
     let offset = opts.since;
     const until = opts.until ? new RegExp(opts.until) : null;
     const start = Date.now();
+    let captured = '';
 
     // eslint-disable-next-line no-constant-condition
     while (true) {
       const resp = await readOutput(client, { since: offset, max: 65536 });
       const chunk = String(resp.chunk ?? '');
-      if (chunk) process.stdout.write(chunk);
+      if (chunk) {
+        process.stdout.write(chunk);
+        captured += chunk;
+      }
       offset = Number(resp.nextOffset ?? offset);
       if (until && until.test(chunk)) break;
       if (Date.now() - start > opts.timeoutMs) throw new Error('follow timeout');
       await sleep(300);
     }
+    return captured;
   });
 }
 
@@ -611,10 +642,17 @@ createCommand
           // Pick truly free host ports (dvm's auto-allocation only checks Docker ports, not host processes).
           const [hostPortDaemon, hostPortRdp, hostPortNoVnc, hostPort3000, hostPort3001, hostPort5173, hostPort5174] =
             await getUniqueFreeTcpPorts(7);
-          await dvmCreate(containerName, [
-            '--ports',
-            `${hostPortDaemon}:${containerPort},${hostPortRdp}:3389,${hostPortNoVnc}:6080,${hostPort3000}:3000,${hostPort3001}:3001,${hostPort5173}:5173,${hostPort5174}:5174`,
-          ]);
+          await dvmCreate(containerName, {
+            ports: [
+              { hostPort: hostPortDaemon, containerPort },
+              { hostPort: hostPortRdp, containerPort: 3389 },
+              { hostPort: hostPortNoVnc, containerPort: 6080 },
+              { hostPort: hostPort3000, containerPort: 3000 },
+              { hostPort: hostPort3001, containerPort: 3001 },
+              { hostPort: hostPort5173, containerPort: 5173 },
+              { hostPort: hostPort5174, containerPort: 5174 },
+            ],
+          });
           hostPort = await resolveHostPort(containerName, containerPort);
           break;
         } catch (err) {
@@ -781,7 +819,7 @@ program
   .command('rm')
   .alias('remove')
   .description('Remove a drone: delete container + remove from registry')
-  .argument('<name>', 'Drone display name (or container name for legacy)')
+  .argument('<name>', 'Drone display name')
   .option('--keep-volume', 'Keep the dvm persistence volume (dvm-<name>-data)', false)
   .option('--forget', 'Remove from registry even if container removal fails', true)
   .action(async (name, options) => {
@@ -835,11 +873,7 @@ program
   .description('Rename a drone display name (container name stays stable)')
   .argument('<oldName>', 'Existing drone name (display name)')
   .argument('<newName>', 'New drone name (display name)')
-  // Back-compat flags (ignored): container renames are no longer the default.
-  .option('--start', '(deprecated/ignored) Start the container after rename (container rename no longer happens)', false)
-  .option('--no-start', '(deprecated/ignored) Do not start the container after rename (container rename no longer happens)', undefined)
-  .option('--migrate-volume-name', '(deprecated/ignored) Migrate persistence volume name', false)
-  .action(async (oldNameRaw, newNameRaw, options) => {
+  .action(async (oldNameRaw, newNameRaw) => {
     const oldName = normalizeDroneDisplayName(oldNameRaw);
     const newName = normalizeDroneDisplayName(newNameRaw);
     if (oldName === newName) {
@@ -1489,36 +1523,45 @@ program
       const model = options.model ? String(options.model) : undefined;
       const chatId = await ensureChatId({ droneName: String(name), chatName, model, reset: Boolean(options.new) });
 
-      const doneMarker = `DRONE_AGENT_DONE_${crypto.randomBytes(8).toString('hex')}`;
+      const doneMarkerPrefix = `DRONE_AGENT_DONE_${crypto.randomBytes(8).toString('hex')}:`;
       const modelArg = model ? ` --model ${bashQuote(model)}` : '';
-      const script = `set -euo pipefail; agent${modelArg} --resume ${bashQuote(chatId)} -f --approve-mcps --print ${bashQuote(
-        prompt
-      )}; echo ${bashQuote(doneMarker)}`;
+      const script = [
+        'set -uo pipefail',
+        `agent${modelArg} --resume ${bashQuote(chatId)} -f --approve-mcps --print ${bashQuote(prompt)}`,
+        'code=$?',
+        `echo ${bashQuote(doneMarkerPrefix)}"$code"`,
+        'exit "$code"',
+      ].join('; ');
 
       const effectiveCwd = options.cwd ? String(options.cwd) : drone.cwd;
-      const started = await procStart(client, {
+      const promptAt = new Date().toISOString();
+      await procStart(client, {
         cmd: 'bash',
         args: ['-lc', script],
         cwd: effectiveCwd,
         session: options.session,
         force: !!options.force,
       });
-      if (started?.process?.logPath && started?.process?.session) {
-        await recordChatTurn({
-          droneName: String(name),
-          chatName,
-          prompt,
-          session: String(started.process.session),
-          logPath: String(started.process.logPath),
-        });
-      }
-
-      await followOutput({
+      const captured = await followOutput({
         name,
         since: 0,
-        until: doneMarker,
+        until: doneMarkerPrefix,
         timeoutMs: Number(options.timeoutMs),
       });
+      const parsed = parseDoneMarkerFromCapturedOutput(captured, doneMarkerPrefix);
+      const ok = parsed.exitCode === 0;
+      const completedAt = new Date().toISOString();
+      await recordChatTurn({
+        droneName: String(name),
+        chatName,
+        prompt,
+        ok,
+        output: parsed.output,
+        ...(ok ? {} : { error: `agent exited with code ${parsed.exitCode ?? 'unknown'}` }),
+        promptAt,
+        completedAt,
+      });
+      if (!ok) throw new Error(`agent exited with code ${parsed.exitCode ?? 'unknown'}`);
     });
   });
 
@@ -1542,10 +1585,16 @@ program
         promptStdin: Boolean(options.promptStdin),
       });
 
-      const doneMarker = `DRONE_AGENT_ONCE_DONE_${crypto.randomBytes(8).toString('hex')}`;
+      const doneMarkerPrefix = `DRONE_AGENT_ONCE_DONE_${crypto.randomBytes(8).toString('hex')}:`;
       const model = options.model ? String(options.model) : undefined;
       const modelArg = model ? ` --model ${bashQuote(model)}` : '';
-      const script = `set -euo pipefail; agent${modelArg} -f --approve-mcps --print ${bashQuote(prompt)}; echo ${bashQuote(doneMarker)}`;
+      const script = [
+        'set -uo pipefail',
+        `agent${modelArg} -f --approve-mcps --print ${bashQuote(prompt)}`,
+        'code=$?',
+        `echo ${bashQuote(doneMarkerPrefix)}"$code"`,
+        'exit "$code"',
+      ].join('; ');
 
       const effectiveCwd = options.cwd ? String(options.cwd) : drone.cwd;
       await procStart(client, {
@@ -1556,12 +1605,14 @@ program
         force: !!options.force,
       });
 
-      await followOutput({
+      const captured = await followOutput({
         name,
         since: 0,
-        until: doneMarker,
+        until: doneMarkerPrefix,
         timeoutMs: Number(options.timeoutMs),
       });
+      const parsed = parseDoneMarkerFromCapturedOutput(captured, doneMarkerPrefix);
+      if (parsed.exitCode !== 0) throw new Error(`agent-once exited with code ${parsed.exitCode ?? 'unknown'}`);
     });
   });
 
@@ -1573,7 +1624,7 @@ program
   .option('--turn <n>', 'Turn number (1-based), or: last|all (requires --chat)')
   .action(async (name, options) => {
     const reg = await loadRegistry();
-    const { drone: d, containerName } = resolveDroneFromRegistry(reg, String(name));
+    const { drone: d } = resolveDroneFromRegistry(reg, String(name));
 
     const chats = d.chats ?? {};
     const chatOpt = options?.chat ? String(options.chat) : '';
@@ -1591,14 +1642,14 @@ program
     if (!c) throw new Error(`unknown chat: ${chatName}`);
     const turns = c.turns ?? [];
 
-    // If --turn omitted: show turn metadata (prompt + logPath).
+    // If --turn omitted: show turn metadata.
     if (!turnOpt) {
       // eslint-disable-next-line no-console
       console.log(JSON.stringify({ ok: true, name: String(name), chat: chatName, chatId: c.chatId, turns }, null, 2));
       return;
     }
 
-    // If --turn provided: print transcript(s) by reading each turn's logPath inside the container.
+    // If --turn provided: print transcript(s) from stored turn output.
     if (turns.length === 0) throw new Error(`no stored turns for chat: ${chatName}`);
 
     const sel = String(turnOpt).trim().toLowerCase();
@@ -1616,33 +1667,17 @@ program
       const t = turns[i];
       const at = String((t as any)?.at ?? '');
       const prompt = String((t as any)?.prompt ?? '');
-      const session = typeof (t as any)?.session === 'string' ? String((t as any).session) : '';
-      process.stdout.write(
-        `=== drone:${String(name)} chat:${chatName} turn:${i + 1}/${turns.length} at:${at}${session ? ` session:${session}` : ''}\n`,
-      );
+      process.stdout.write(`=== drone:${String(name)} chat:${chatName} turn:${i + 1}/${turns.length} at:${at}\n`);
       process.stdout.write(`--- PROMPT ---\n${prompt}\n`);
 
-      if (typeof (t as any)?.ok === 'boolean') {
-        const ok = Boolean((t as any).ok);
-        const out = String((t as any)?.output ?? '');
-        const err = String((t as any)?.error ?? '');
-        process.stdout.write(`--- OUTPUT (${ok ? 'ok' : 'error'}) ---\n`);
-        if (ok) {
-          process.stdout.write(out);
-        } else {
-          process.stderr.write(err || out || 'failed');
-        }
+      const ok = Boolean((t as any)?.ok);
+      const out = String((t as any)?.output ?? '');
+      const err = String((t as any)?.error ?? '');
+      process.stdout.write(`--- OUTPUT (${ok ? 'ok' : 'error'}) ---\n`);
+      if (ok) {
+        process.stdout.write(out);
       } else {
-        const logPath = String((t as any)?.logPath ?? '');
-        process.stdout.write(`--- OUTPUT (${logPath || 'missing logPath'}) ---\n`);
-        if (!logPath) throw new Error('missing logPath for legacy turn');
-        const r = await dvmExec(containerName, 'bash', [
-          '-lc',
-          `cat ${bashQuote(logPath)} 2>/dev/null || (echo "missing log: ${logPath}" 1>&2; exit 1)`,
-        ]);
-        if (r.stdout) process.stdout.write(r.stdout);
-        if (r.stderr) process.stderr.write(r.stderr);
-        if (r.code !== 0) throw new Error(r.stderr || r.stdout || `failed reading log: ${logPath}`);
+        process.stderr.write(err || out || 'failed');
       }
       process.stdout.write(`\n=== END turn:${i + 1} ===\n`);
     }

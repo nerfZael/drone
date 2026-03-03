@@ -22,7 +22,7 @@ From the monorepo root:
 # install dependencies (one-time per repo clone)
 bun install
 
-# build dvm first (drone shells out to dvm)
+# build dvm first (drone imports dvm as a workspace library)
 bun --filter dvm run build
 
 # build drone CLI + daemon
@@ -80,7 +80,7 @@ From repo root:
 
 ```bash
 # Build the CLI + daemon.
-# Note: `drone` shells out to `dvm` (see "dvm discovery" below), so you'll also need apps/dvm built.
+# Note: `drone` imports `dvm` as a workspace library, so you'll also need apps/dvm built.
 bun --filter drone run build
 
 # create container + start daemon + save registry entry
@@ -190,14 +190,6 @@ drone hub restart
 
 The Drone Hub sidebar shows drones **grouped into folder-like sections by default** (using each drone’s `group` in the drone registry file). You can toggle to a **flat list** using the switch in the sidebar header.
 
-## `dvm` discovery
+## `dvm` integration
 
-By default, `drone` runs `dvm` by executing the monorepo build:
-
-- `node apps/dvm/dist/cli.js ...`
-
-If you want `drone` to use a different `dvm` entrypoint, set:
-
-```bash
-export DVM_CLI_PATH=/path/to/dvm/cli.js
-```
+`drone` calls `dvm` directly as a TypeScript library (workspace dependency), while `dvm` CLI remains available for manual operations.
