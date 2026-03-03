@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,6 +13,7 @@ import { droneRootPath } from '../host/paths';
 import { loadRegistry, updateRegistry } from '../host/registry';
 import {
   dvmBaseSet,
+  dvmCopyFromContainer,
   dvmCopyToContainer,
   dvmExec,
   dvmLs,
@@ -96,20 +98,26 @@ import {
 import {
   archiveRetentionMs,
   clearStoredProviderApiKey,
+  FILESYSTEM_UPLOAD_MAX_BYTES_MAX,
+  FILESYSTEM_UPLOAD_MAX_BYTES_MIN,
   hubLog,
   loadHubEnv,
   parseArchiveRetentionId,
   parseArchiveRuntimePolicy,
+  parseFilesystemUploadMaxBytes,
   parseDroneDeleteMode,
   parseLlmProvider,
   providerDisplayName,
   providerKeySettingsResponse,
   resolveDeleteActionSettingsResponse,
+  resolveEffectiveFilesystemSettings,
   resolveEffectiveDeleteActionSettings,
   resolveEffectiveLlmProvider,
+  resolveFilesystemSettingsResponse,
   resolveEffectiveProviderApiKeySettings,
   resolveLlmSettingsResponse,
   upsertStoredDeleteActionSettings,
+  upsertStoredFilesystemSettings,
   upsertStoredLlmProvider,
   upsertStoredProviderApiKey,
   type ArchiveRetentionId,
@@ -374,6 +382,199 @@ async function resolveDroneOrRejectUpgrade(socket: any, droneRef: string): Promi
       rejectWebSocketUpgrade(socket, 404, 'Not Found');
     },
   );
+}
+
+async function handleFsUploadRoute(opts: {
+  req: http.IncomingMessage;
+  res: http.ServerResponse;
+  u: URL;
+  resolved: ResolvedDrone;
+  droneRef: string;
+}): Promise<void> {
+  const { req, res, u, resolved, droneRef } = opts;
+  const droneId = resolved.id;
+  const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+  const fail = (statusCode: number, message: string) => {
+    const err = new Error(message) as Error & { statusCode?: number };
+    err.statusCode = statusCode;
+    return err;
+  };
+  const { uploadMaxBytes: fsUploadMaxBytes } = await resolveEffectiveFilesystemSettings();
+  const headerValue = (name: string): string => {
+    const raw = req.headers[name.toLowerCase()];
+    if (Array.isArray(raw)) return String(raw[0] ?? '').trim();
+    return String(raw ?? '').trim();
+  };
+  const failFileTooLarge = (sizeBytes: number) =>
+    fail(413, `file too large (${sizeBytes} bytes, max ${fsUploadMaxBytes}). Increase "Upload max file size" in Settings.`);
+  const normalizeUploadFileName = (raw: string): string =>
+    path.posix
+      .basename(raw)
+      .replace(/[\0\r\n\t]/g, '')
+      .replace(/[\/\\]+/g, '')
+      .trim();
+  const decodeUploadNameHeader = (): string => {
+    const encoded = headerValue('x-upload-name');
+    if (!encoded) return '';
+    try {
+      return decodeURIComponent(encoded);
+    } catch {
+      throw fail(400, 'invalid x-upload-name header');
+    }
+  };
+  const writeUploadStreamToTmpPath = async (tmpPath: string): Promise<void> => {
+    const fh = await fs.open(tmpPath, 'w');
+    try {
+      let total = 0;
+      for await (const chunkRaw of req) {
+        const chunk = Buffer.isBuffer(chunkRaw) ? chunkRaw : Buffer.from(chunkRaw as any);
+        total += chunk.length;
+        if (total > fsUploadMaxBytes) throw failFileTooLarge(total);
+        await fh.write(chunk);
+      }
+      await fh.sync();
+    } finally {
+      await fh.close();
+    }
+  };
+  const copyTmpFileToContainerAndReadMeta = async (opts: {
+    tmpPath: string;
+    targetDir: string;
+    fileName: string;
+  }): Promise<{
+    path: string;
+    size: number;
+    mtimeMs: number | null;
+  }> => {
+    const { tmpPath, targetDir, fileName } = opts;
+    return await withLockedDroneContainer(
+      { requestedDroneName: droneName, droneEntry: resolved.drone },
+      async ({ containerName }) => {
+        const preflightScript = [
+          'set -euo pipefail',
+          `target_dir=${bashQuote(targetDir)}`,
+          'if [ ! -d "$target_dir" ]; then',
+          '  echo "__ERR__\tnot-dir"',
+          '  exit 3',
+          'fi',
+        ].join('\n');
+        const preflight = await dvmExec(containerName, 'bash', ['-lc', preflightScript]);
+        if (preflight.code !== 0) {
+          const out = `${String(preflight.stdout ?? '')}\n${String(preflight.stderr ?? '')}`;
+          if (/\bnot-dir\b/i.test(out)) throw fail(404, `path is not a directory: ${targetDir}`);
+          throw new Error((preflight.stderr || preflight.stdout || 'failed checking upload path').trim());
+        }
+
+        await dvmCopyToContainer(containerName, tmpPath, targetDir);
+
+        const targetPath = normalizeContainerPath(path.posix.join(targetDir, fileName));
+        const statScript = [
+          'set -euo pipefail',
+          `target=${bashQuote(targetPath)}`,
+          'if [ ! -f "$target" ]; then',
+          '  echo "__ERR__\tnot-file"',
+          '  exit 3',
+          'fi',
+          'size=$(stat -c %s -- "$target" 2>/dev/null || echo 0)',
+          'mtime=$(stat -c %Y -- "$target" 2>/dev/null || echo 0)',
+          'printf "__META__\t%s\t%s\n" "$size" "$mtime"',
+        ].join('\n');
+        const statOut = await dvmExec(containerName, 'bash', ['-lc', statScript]);
+        if (statOut.code !== 0) {
+          const out = `${String(statOut.stdout ?? '')}\n${String(statOut.stderr ?? '')}`;
+          if (/\bnot-file\b/i.test(out)) throw fail(404, `uploaded file not found: ${targetPath}`);
+          throw new Error((statOut.stderr || statOut.stdout || 'failed reading uploaded file metadata').trim());
+        }
+        const line = String(statOut.stdout ?? '').trim();
+        const parts = line.split('\t');
+        const sizeNum = Number(parts[1] ?? 0);
+        const mtimeSec = Number(parts[2] ?? 0);
+        return {
+          path: targetPath,
+          size: Number.isFinite(sizeNum) ? Math.max(0, Math.floor(sizeNum)) : 0,
+          mtimeMs: Number.isFinite(mtimeSec) ? Math.max(0, Math.floor(mtimeSec * 1000)) : null,
+        };
+      },
+    );
+  };
+  const respondUploadSuccess = (result: { path: string; size: number; mtimeMs: number | null }) => {
+    json(res, 200, {
+      ok: true,
+      id: droneId,
+      name: droneName,
+      path: result.path,
+      size: result.size,
+      mtimeMs: result.mtimeMs,
+    });
+  };
+
+  const contentType = headerValue('content-type').toLowerCase();
+  const isJsonUpload = contentType.includes('application/json');
+  let targetDir = normalizeContainerPath(u.searchParams.get('path') ?? '');
+  let fileNameRaw = String(u.searchParams.get('name') ?? '').trim();
+
+  const tmpDir = path.join(
+    os.tmpdir(),
+    `drone-hub-fs-upload-${process.pid}-${Date.now()}-${crypto.randomBytes(6).toString('hex')}`,
+  );
+
+  try {
+    if (isJsonUpload) {
+      let body: any = null;
+      try {
+        body = await readJsonBody(req);
+      } catch (e: any) {
+        throw fail(400, e?.message ?? String(e));
+      }
+      if (!targetDir) targetDir = normalizeContainerPath(body?.path ?? '');
+      if (!fileNameRaw) fileNameRaw = String(body?.name ?? '').trim();
+      if (typeof body?.dataBase64 !== 'string') throw fail(400, 'dataBase64 must be a string');
+      const dataBase64 = String(body?.dataBase64 ?? '').replace(/\s+/g, '');
+      if (dataBase64.length > 0 && (!/^[A-Za-z0-9+/=]+$/.test(dataBase64) || dataBase64.length % 4 !== 0)) {
+        throw fail(400, 'invalid base64 payload');
+      }
+      let bytes: Buffer;
+      try {
+        bytes = Buffer.from(dataBase64, 'base64');
+      } catch {
+        throw fail(400, 'invalid base64 payload');
+      }
+      if (bytes.length > fsUploadMaxBytes) throw failFileTooLarge(bytes.length);
+      const fileName = normalizeUploadFileName(fileNameRaw);
+      if (!targetDir) throw fail(400, 'missing directory path');
+      if (!fileName || fileName === '.' || fileName === '..') throw fail(400, 'invalid file name');
+      const tmpPath = path.join(tmpDir, fileName);
+      await fs.mkdir(tmpDir, { recursive: true });
+      await fs.writeFile(tmpPath, bytes);
+      const result = await copyTmpFileToContainerAndReadMeta({ tmpPath, targetDir, fileName });
+      respondUploadSuccess(result);
+      return;
+    }
+
+    if (!targetDir) targetDir = normalizeContainerPath(headerValue('x-upload-path'));
+    if (!fileNameRaw) fileNameRaw = decodeUploadNameHeader();
+    const fileName = normalizeUploadFileName(fileNameRaw);
+    if (!targetDir) throw fail(400, 'missing directory path');
+    if (!fileName || fileName === '.' || fileName === '..') throw fail(400, 'invalid file name');
+    const tmpPath = path.join(tmpDir, fileName);
+    await fs.mkdir(tmpDir, { recursive: true });
+    await writeUploadStreamToTmpPath(tmpPath);
+    const result = await copyTmpFileToContainerAndReadMeta({ tmpPath, targetDir, fileName });
+    respondUploadSuccess(result);
+    return;
+  } catch (e: any) {
+    const msg = e?.message ?? String(e);
+    const explicitStatus = Number((e as any)?.statusCode ?? 0);
+    const code = explicitStatus > 0 ? explicitStatus : looksLikeMissingContainerError(msg) ? 404 : 500;
+    json(res, code, { ok: false, error: msg, id: droneId, name: droneName, path: targetDir || undefined });
+    return;
+  } finally {
+    try {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup failures
+    }
+  }
 }
 
 function isRepoAttachedDrone(drone: any): boolean {
@@ -5897,6 +6098,34 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         }
       }
 
+      if (pathname === '/api/settings/filesystem') {
+        if (method === 'GET') {
+          json(res, 200, await resolveFilesystemSettingsResponse());
+          return;
+        }
+
+        if (method === 'POST') {
+          let body: any = null;
+          try {
+            body = await readJsonBody(req);
+          } catch (e: any) {
+            json(res, 400, { ok: false, error: e?.message ?? String(e) });
+            return;
+          }
+          const uploadMaxBytes = parseFilesystemUploadMaxBytes(body?.uploadMaxBytes);
+          if (!uploadMaxBytes) {
+            json(res, 400, {
+              ok: false,
+              error: `uploadMaxBytes must be an integer between ${FILESYSTEM_UPLOAD_MAX_BYTES_MIN} and ${FILESYSTEM_UPLOAD_MAX_BYTES_MAX}`,
+            });
+            return;
+          }
+          await upsertStoredFilesystemSettings({ uploadMaxBytes });
+          json(res, 200, await resolveFilesystemSettingsResponse());
+          return;
+        }
+      }
+
       if (pathname === '/api/settings/hub/logs') {
         if (method === 'GET') {
           const maxBytes = clampIntParam(
@@ -7198,6 +7427,121 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           const msg = e?.message ?? String(e);
           const explicitStatus = Number((e as any)?.statusCode ?? 0);
           const code = explicitStatus > 0 ? explicitStatus : looksLikeMissingContainerError(msg) ? 404 : 500;
+          json(res, code, { ok: false, error: msg, id: droneId, name: droneName, path: targetPath });
+          return;
+        }
+      }
+
+      // POST /api/drones/:id/fs/upload
+      // Writes one uploaded file into a target directory inside the container.
+      if (method === 'POST' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'drones' && parts[3] === 'fs' && parts[4] === 'upload') {
+        const droneRef = decodeURIComponent(parts[2]);
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        await handleFsUploadRoute({ req, res, u, resolved, droneRef });
+        return;
+      }
+
+      // GET /api/drones/:id/fs/download?path=/...
+      // Downloads one file or directory (directory is returned as .tar.gz).
+      if (method === 'GET' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'drones' && parts[3] === 'fs' && parts[4] === 'download') {
+        const droneRef = decodeURIComponent(parts[2]);
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        const droneId = resolved.id;
+        const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+        const targetPath = normalizeContainerPath(u.searchParams.get('path') ?? '');
+        if (!targetPath || targetPath === '/') {
+          json(res, 400, { ok: false, error: 'missing path' });
+          return;
+        }
+
+        const targetBaseName = path.posix.basename(targetPath.replace(/\/+$/g, '')) || 'download';
+        const safeBaseName = targetBaseName
+          .replace(/[\0\r\n\t]/g, '')
+          .replace(/[\/\\]+/g, '')
+          .trim() || 'download';
+        const tmpDir = path.join(
+          os.tmpdir(),
+          `drone-hub-fs-download-${process.pid}-${Date.now()}-${crypto.randomBytes(6).toString('hex')}`,
+        );
+        const hostExtractDir = path.join(tmpDir, 'extract');
+
+        const cleanup = async () => {
+          try {
+            await fs.rm(tmpDir, { recursive: true, force: true });
+          } catch {
+            // ignore cleanup failures
+          }
+        };
+
+        try {
+          await fs.mkdir(hostExtractDir, { recursive: true });
+          await withLockedDroneContainer(
+            { requestedDroneName: droneName, droneEntry: resolved.drone },
+            async ({ containerName }) => {
+              await dvmCopyFromContainer(containerName, targetPath, hostExtractDir);
+            },
+          );
+
+          const copiedPath = path.join(hostExtractDir, safeBaseName);
+          const copiedStat = await fs.stat(copiedPath);
+
+          let downloadPath = copiedPath;
+          let downloadName = safeBaseName;
+          let contentType = 'application/octet-stream';
+          if (copiedStat.isDirectory()) {
+            downloadName = `${safeBaseName}.tar.gz`;
+            downloadPath = path.join(tmpDir, downloadName);
+            const tar = await runHostCommand('tar', ['-czf', downloadPath, '-C', hostExtractDir, safeBaseName]);
+            if (tar.code !== 0) {
+              throw new Error((tar.stderr || tar.stdout || 'failed creating directory archive').trim());
+            }
+            contentType = 'application/gzip';
+          }
+
+          const outStat = await fs.stat(downloadPath);
+          const safeDownloadName = downloadName
+            .replace(/["\\]/g, '_')
+            .replace(/[\r\n\t]/g, '')
+            .trim() || 'download';
+          const contentDisposition = `attachment; filename="${safeDownloadName}"; filename*=UTF-8''${encodeURIComponent(safeDownloadName)}`;
+
+          res.statusCode = 200;
+          res.setHeader('content-type', contentType);
+          res.setHeader('content-disposition', contentDisposition);
+          res.setHeader('content-length', String(outStat.size));
+          res.setHeader('cache-control', 'no-store');
+
+          let cleaned = false;
+          const cleanupOnce = () => {
+            if (cleaned) return;
+            cleaned = true;
+            void cleanup();
+          };
+          const stream = createReadStream(downloadPath);
+          stream.once('error', (err) => {
+            cleanupOnce();
+            if (!res.headersSent) {
+              json(res, 500, { ok: false, error: err?.message ?? String(err), id: droneId, name: droneName, path: targetPath });
+              return;
+            }
+            try {
+              res.destroy(err as Error);
+            } catch {
+              // ignore destroy failure
+            }
+          });
+          stream.once('end', cleanupOnce);
+          res.once('close', cleanupOnce);
+          stream.pipe(res);
+          return;
+        } catch (e: any) {
+          await cleanup();
+          const msg = e?.message ?? String(e);
+          const explicitStatus = Number((e as any)?.statusCode ?? 0);
+          const missingPath = /no such file|cannot stat|could not find|not found|lstat/i.test(msg);
+          const code = explicitStatus > 0 ? explicitStatus : missingPath || looksLikeMissingContainerError(msg) ? 404 : 500;
           json(res, code, { ok: false, error: msg, id: droneId, name: droneName, path: targetPath });
           return;
         }
