@@ -48,7 +48,7 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   {
     id: 'toggleRightPanelWidth',
     label: 'Toggle side panel width',
-    description: 'Toggles the right panel between default width and expanded width.',
+    description: 'Cycles the right panel width between full, two-thirds, and one-third of workspace width.',
   },
   {
     id: 'toggleTldr',
