@@ -4,6 +4,8 @@ import type { ChatAgentConfig } from '../../domain';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
 import type { DroneSummary } from '../types';
 import { DRONE_DND_MIME } from '../app/app-config';
+import { isShortcutMatch } from '../app/shortcuts';
+import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { TypingDots } from '../overview/icons';
 import { CanvasMessageBar } from './CanvasMessageBar';
 import {
@@ -431,6 +433,12 @@ export function DroneCanvasDock({
   const normalizedDraftRepoLabel = React.useMemo(
     () => String(draftRepoLabel ?? '').trim(),
     [draftRepoLabel],
+  );
+  const { createDraftShortcutBinding, focusPrimaryChatInputShortcutBinding } = useDroneHubUiStore(
+    useShallow((s) => ({
+      createDraftShortcutBinding: s.shortcutBindings.createDraftDrone,
+      focusPrimaryChatInputShortcutBinding: s.shortcutBindings.focusPrimaryChatInput,
+    })),
   );
 
   React.useEffect(() => {
@@ -926,7 +934,7 @@ export function DroneCanvasDock({
               continue;
             }
 
-            // Clear immediately so Enter can be used right away for rapid draft spawning/sending.
+            // Clear immediately so the create shortcut can be used right away for rapid draft spawning/sending.
             setDraftPromptForNode(draftNodeId, '');
             draftCreateInFlightRef.current.add(draftNodeId);
             try {
@@ -1336,14 +1344,16 @@ export function DroneCanvasDock({
   const onViewportKeyDown = React.useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
       const targetIsEditable = isEditableElement(event.target);
-      if (
-        event.key === 'Tab' &&
-        !event.shiftKey &&
-        !event.ctrlKey &&
-        !event.metaKey &&
-        !event.altKey &&
-        !targetIsEditable
-      ) {
+      if (targetIsEditable) return;
+
+      if (isShortcutMatch(createDraftShortcutBinding, event.nativeEvent)) {
+        event.preventDefault();
+        event.stopPropagation();
+        createDraftNearViewportCenter();
+        return;
+      }
+
+      if (isShortcutMatch(focusPrimaryChatInputShortcutBinding, event.nativeEvent)) {
         if (selectedDroneIds.length > 0) {
           event.preventDefault();
           event.stopPropagation();
@@ -1352,18 +1362,8 @@ export function DroneCanvasDock({
         return;
       }
 
-      if (targetIsEditable) return;
-
       const key = event.key.toLowerCase();
       const isPrimaryMod = event.ctrlKey || event.metaKey;
-      const hasNoModifiers = !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey;
-
-      if (hasNoModifiers && key === 'enter') {
-        event.preventDefault();
-        event.stopPropagation();
-        createDraftNearViewportCenter();
-        return;
-      }
 
       if (isPrimaryMod && !event.altKey && !event.shiftKey && key === 'a') {
         event.preventDefault();
@@ -1433,12 +1433,14 @@ export function DroneCanvasDock({
     [
       clearSelection,
       closeMessageBar,
+      createDraftShortcutBinding,
       messageBarExpanded,
       nodeOrder,
       onDeleteDrones,
       openMessageBar,
       cancelActivePointerInteractions,
       createDraftNearViewportCenter,
+      focusPrimaryChatInputShortcutBinding,
       removeNodes,
       selectedDroneIds,
       setSelectedDroneIds,

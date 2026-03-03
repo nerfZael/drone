@@ -224,6 +224,27 @@ function normalizeChatInputDrafts(value: unknown): Record<string, string> {
   return out;
 }
 
+function migrateLegacyShortcutBindings(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const raw = value as Record<string, unknown>;
+  if (Object.prototype.hasOwnProperty.call(raw, 'focusPrimaryChatInput')) return value;
+  const createDraftRaw = raw.createDraftDrone;
+  if (!createDraftRaw || typeof createDraftRaw !== 'object' || Array.isArray(createDraftRaw)) return value;
+  const binding = createDraftRaw as Record<string, unknown>;
+  const key = String(binding.key ?? '').trim().toLowerCase();
+  const mod = binding.mod === true;
+  const ctrl = binding.ctrl === true;
+  const meta = binding.meta === true;
+  const alt = binding.alt === true;
+  const shift = binding.shift === true;
+  const isLegacyDefaultCreateShortcut = key === 'enter' && !mod && !ctrl && !meta && !alt && !shift;
+  if (!isLegacyDefaultCreateShortcut) return value;
+  return {
+    ...raw,
+    createDraftDrone: { key: 'tab', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  };
+}
+
 let pendingChatInputDraftsPersist: Record<string, string> | null = null;
 let pendingChatInputDraftsTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -475,6 +496,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       }),
       merge: (persistedState, currentState) => {
         const persisted = (persistedState as Partial<DroneHubUiPersistedState>) ?? {};
+        const migratedShortcutBindings = migrateLegacyShortcutBindings(persisted.shortcutBindings);
         return {
           ...currentState,
           ...persisted,
@@ -503,7 +525,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
             persisted.pullHostBranchBeforeCreate ?? currentState.pullHostBranchBeforeCreate,
           ),
           customAgents: sanitizeCustomAgents(persisted.customAgents ?? currentState.customAgents),
-          shortcutBindings: sanitizeShortcutBindings(persisted.shortcutBindings ?? currentState.shortcutBindings),
+          shortcutBindings: sanitizeShortcutBindings(migratedShortcutBindings ?? currentState.shortcutBindings),
         };
       },
     },
