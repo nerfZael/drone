@@ -287,7 +287,7 @@ export function useDroneHubLifecycleEffects({
       return rightPanelSplit && rightPanelBottomTab === 'canvas';
     };
 
-    const focusCanvasAndCreateDraft = (): boolean => {
+    const focusCanvasAndCreateDraft = (event: KeyboardEvent): boolean => {
       if (!isCanvasOpen()) return false;
       const visibleViewports = Array.from(
         document.querySelectorAll<HTMLElement>('[data-drone-canvas-viewport="1"]'),
@@ -297,7 +297,11 @@ export function useDroneHubLifecycleEffects({
       targetViewport.focus({ preventScroll: true });
       targetViewport.dispatchEvent(
         new KeyboardEvent('keydown', {
-          key: 'Enter',
+          key: event.key,
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+          altKey: event.altKey,
+          shiftKey: event.shiftKey,
           bubbles: true,
           cancelable: true,
         }),
@@ -311,7 +315,7 @@ export function useDroneHubLifecycleEffects({
         return true;
       },
       createDraftDrone: (event) => {
-        if (event.key === 'Enter' && focusCanvasAndCreateDraft()) return true;
+        if (focusCanvasAndCreateDraft(event)) return true;
         const hovered = getHoveredSidebarCreateContext();
         if (!hovered) {
           openDraftChatComposer();
@@ -328,6 +332,19 @@ export function useDroneHubLifecycleEffects({
         } else {
           openDraftChatComposer({ group });
         }
+        return true;
+      },
+      focusPrimaryChatInput: () => {
+        const modalOpen = Boolean(document.querySelector('[role="dialog"][aria-modal="true"]'));
+        if (modalOpen) return false;
+        const primaryInput = document.querySelector<HTMLTextAreaElement>(
+          '[data-chat-input-focus-id="primary-chat"]',
+        );
+        if (!primaryInput) return false;
+        if (primaryInput.getClientRects().length === 0) return false;
+        primaryInput.focus();
+        const end = primaryInput.value.length;
+        primaryInput.setSelectionRange(end, end);
         return true;
       },
       markSelectedDronesUnread: () => onMarkSelectedDronesUnreadShortcut(),
@@ -426,27 +443,6 @@ export function useDroneHubLifecycleEffects({
       if (captureRoot) {
         const insideCanvasViewport = Boolean(captureRoot.closest('[data-drone-canvas-viewport="1"]'));
         if (!insideCanvasViewport) return;
-      }
-
-      if (
-        e.key === 'Tab' &&
-        !e.shiftKey &&
-        !e.ctrlKey &&
-        !e.metaKey &&
-        !e.altKey
-      ) {
-        const modalOpen = Boolean(document.querySelector('[role="dialog"][aria-modal="true"]'));
-        if (modalOpen) return;
-        const primaryInput = document.querySelector<HTMLTextAreaElement>(
-          '[data-chat-input-focus-id="primary-chat"]',
-        );
-        if (!primaryInput) return;
-        if (primaryInput.getClientRects().length === 0) return;
-        e.preventDefault();
-        primaryInput.focus();
-        const end = primaryInput.value.length;
-        primaryInput.setSelectionRange(end, end);
-        return;
       }
 
       if (!matched) return;

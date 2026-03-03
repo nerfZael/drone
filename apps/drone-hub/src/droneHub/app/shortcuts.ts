@@ -1,5 +1,6 @@
 export type ShortcutActionId =
   | 'createDraftDrone'
+  | 'focusPrimaryChatInput'
   | 'markSelectedDronesUnread'
   | 'toggleSidebarCollapsed'
   | 'toggleRightPanelWidth'
@@ -34,6 +35,11 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     id: 'createDraftDrone',
     label: 'Create new drone',
     description: 'Opens the quick single-drone composer.',
+  },
+  {
+    id: 'focusPrimaryChatInput',
+    label: 'Focus chat input',
+    description: 'Focuses the primary chat input.',
   },
   {
     id: 'markSelectedDronesUnread',
@@ -93,7 +99,8 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
 ];
 
 const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
-  createDraftDrone: { key: 'enter', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  createDraftDrone: { key: 'tab', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  focusPrimaryChatInput: { key: 'enter', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   markSelectedDronesUnread: { key: 'q', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleSidebarCollapsed: { key: 'a', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleRightPanelWidth: { key: 's', mod: false, ctrl: false, meta: false, alt: false, shift: false },
@@ -155,6 +162,7 @@ export function sanitizeSingleShortcutBinding(value: unknown, fallback: Shortcut
 export function cloneDefaultShortcutBindings(): ShortcutBindingMap {
   return {
     createDraftDrone: { ...DEFAULT_SHORTCUT_BINDINGS.createDraftDrone! },
+    focusPrimaryChatInput: { ...DEFAULT_SHORTCUT_BINDINGS.focusPrimaryChatInput! },
     markSelectedDronesUnread: { ...DEFAULT_SHORTCUT_BINDINGS.markSelectedDronesUnread! },
     toggleSidebarCollapsed: { ...DEFAULT_SHORTCUT_BINDINGS.toggleSidebarCollapsed! },
     toggleRightPanelWidth: { ...DEFAULT_SHORTCUT_BINDINGS.toggleRightPanelWidth! },
