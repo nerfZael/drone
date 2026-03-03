@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { buildExplorerTree } from '../src/droneHub/changes/helpers';
+import {
+  buildExplorerTree,
+  estimateExplorerSidebarWidth,
+  flattenVisibleExplorerRows,
+  resolveExplorerSidebarWidthBounds,
+} from '../src/droneHub/changes/helpers';
 import type { RepoChangeEntry } from '../src/droneHub/types';
 
 function change(path: string): RepoChangeEntry {
@@ -59,5 +64,56 @@ describe('changes explorer tree', () => {
     const top = tree[0];
     if (top.kind !== 'dir' || !top.children) throw new Error('expected top-level directory node');
     expect(top.children.map((node) => node.name)).toEqual(['c', 'd']);
+  });
+
+  test('flattens only visible rows based on expanded directories', () => {
+    const tree = buildExplorerTree([change('src/deep/a/alpha.ts'), change('src/deep/b/bravo.ts'), change('top.ts')]);
+    const rows = flattenVisibleExplorerRows(tree, { 'src/deep': false });
+    expect(rows.map((row) => `${row.kind}:${row.depth}:${row.name}`)).toEqual(['dir:0:src/deep', 'file:0:top.ts']);
+  });
+
+  test('estimates width and respects ratio + diff-pane constraints', () => {
+    const rows = [
+      { kind: 'file' as const, depth: 0, name: 'very-long-file-name-that-needs-room.ts', count: 1 },
+      { kind: 'dir' as const, depth: 2, name: 'nested/deep/path', count: 4 },
+    ];
+    const constrained = estimateExplorerSidebarWidth(rows, 700, {
+      minWidthPx: 180,
+      maxWidthPx: 360,
+      maxWidthRatio: 0.36,
+      minDiffWidthPx: 420,
+    });
+    // 700px panel => max by ratio = 252 and max by min-diff = 280, so hard max is 252.
+    expect(constrained).toBeLessThanOrEqual(252);
+    expect(constrained).toBeGreaterThanOrEqual(180);
+
+    const veryNarrow = estimateExplorerSidebarWidth(rows, 520, {
+      minWidthPx: 180,
+      maxWidthPx: 360,
+      maxWidthRatio: 0.36,
+      minDiffWidthPx: 420,
+    });
+    // 520px panel leaves only 100px by diff budget, and function keeps a hard floor of 120.
+    expect(veryNarrow).toBe(120);
+  });
+
+  test('resolves manual width bounds from ratio and diff constraints', () => {
+    expect(
+      resolveExplorerSidebarWidthBounds(700, {
+        minWidthPx: 180,
+        maxWidthPx: 360,
+        maxWidthRatio: 0.36,
+        minDiffWidthPx: 420,
+      }),
+    ).toEqual({ minWidthPx: 180, maxWidthPx: 252 });
+
+    expect(
+      resolveExplorerSidebarWidthBounds(520, {
+        minWidthPx: 180,
+        maxWidthPx: 360,
+        maxWidthRatio: 0.36,
+        minDiffWidthPx: 420,
+      }),
+    ).toEqual({ minWidthPx: 120, maxWidthPx: 120 });
   });
 });

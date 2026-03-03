@@ -19,6 +19,22 @@ export type ExplorerNode = {
   children?: ExplorerNode[];
 };
 
+export type ExplorerVisibleRow = {
+  kind: 'dir' | 'file';
+  depth: number;
+  name: string;
+  count: number;
+};
+
+export type ExplorerSidebarWidthOptions = {
+  minWidthPx?: number;
+  maxWidthPx?: number;
+  maxWidthRatio?: number;
+  minDiffWidthPx?: number;
+  avgCharWidthPx?: number;
+  fallbackWidthPx?: number;
+};
+
 const PR_MERGE_METHOD_STORAGE_KEY = 'droneHub.prMergeMethod';
 
 export function shortSha(sha: string | null | undefined): string {
@@ -253,6 +269,86 @@ export function buildExplorerTree(entries: RepoChangeEntry[]): ExplorerNode[] {
   }
 
   return toNodes(root);
+}
+
+export function flattenVisibleExplorerRows(
+  nodes: ExplorerNode[],
+  expandedDirs: Record<string, boolean>,
+  depth: number = 0,
+): ExplorerVisibleRow[] {
+  const rows: ExplorerVisibleRow[] = [];
+  for (const node of nodes) {
+    rows.push({
+      kind: node.kind,
+      depth,
+      name: node.name,
+      count: node.count,
+    });
+    if (node.kind === 'dir' && expandedDirs[node.path] !== false && node.children && node.children.length > 0) {
+      rows.push(...flattenVisibleExplorerRows(node.children, expandedDirs, depth + 1));
+    }
+  }
+  return rows;
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+export function estimateExplorerSidebarWidth(
+  rows: ExplorerVisibleRow[],
+  panelWidthPx: number,
+  opts: ExplorerSidebarWidthOptions = {},
+): number {
+  const bounds = resolveExplorerSidebarWidthBounds(panelWidthPx, opts);
+  const minWidthPx = Math.max(120, Math.floor(opts.minWidthPx ?? 180));
+  const avgCharWidthPx = clampNumber(Number(opts.avgCharWidthPx ?? 6.7), 4, 12);
+  const fallbackWidthPx = Math.floor(opts.fallbackWidthPx ?? 240);
+
+  const desiredWidth = Math.max(
+    fallbackWidthPx,
+    rows.reduce((max, row) => {
+      const leftPadding = 8 + row.depth * 14;
+      const textWidth = Math.ceil(row.name.length * avgCharWidthPx);
+      const dirCountWidth = Math.max(10, String(Math.max(0, row.count)).length * 6);
+      // Account for icon/gaps and right-side metadata chip/counter.
+      const staticWidth =
+        row.kind === 'dir'
+          ? 12 + 6 + 12 + 6 + 6 + 8 + dirCountWidth
+          : 12 + 6 + 6 + 8 + 34;
+      return Math.max(max, leftPadding + staticWidth + textWidth);
+    }, 0),
+  );
+
+  return clampNumber(desiredWidth, bounds.minWidthPx, bounds.maxWidthPx);
+}
+
+export function resolveExplorerSidebarWidthBounds(
+  panelWidthPx: number,
+  opts: ExplorerSidebarWidthOptions = {},
+): { minWidthPx: number; maxWidthPx: number } {
+  const minWidthPx = Math.max(120, Math.floor(opts.minWidthPx ?? 180));
+  const maxWidthPx = Math.max(minWidthPx, Math.floor(opts.maxWidthPx ?? 360));
+  const maxWidthRatio = clampNumber(Number(opts.maxWidthRatio ?? 0.36), 0.1, 0.9);
+  const minDiffWidthPx = Math.max(240, Math.floor(opts.minDiffWidthPx ?? 420));
+  const panelWidth = Math.max(0, Math.floor(panelWidthPx));
+
+  if (panelWidth <= 0) {
+    return { minWidthPx, maxWidthPx };
+  }
+
+  const maxByRatio = Math.floor(panelWidth * maxWidthRatio);
+  const maxByDiff = panelWidth - minDiffWidthPx;
+  const hardMax = Math.min(maxWidthPx, maxByRatio, maxByDiff);
+  if (hardMax <= 0) {
+    const forced = Math.max(120, Math.min(minWidthPx, panelWidth));
+    return { minWidthPx: forced, maxWidthPx: forced };
+  }
+  if (hardMax < minWidthPx) {
+    const forced = Math.max(120, hardMax);
+    return { minWidthPx: forced, maxWidthPx: forced };
+  }
+  return { minWidthPx, maxWidthPx: hardMax };
 }
 
 export function pullRequestNoTextReason(entry: RepoPullRequestChangeEntry): DiffNoTextReason | null {
