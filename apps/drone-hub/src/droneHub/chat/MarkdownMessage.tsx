@@ -1,5 +1,6 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
 
 type CalloutKind = 'note' | 'tip' | 'important' | 'warning' | 'caution';
@@ -178,7 +179,7 @@ export function MarkdownMessage({
   return (
     <div className={`dh-markdown ${className ?? ''}`}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkBreaks]}
         components={{
           a: ({ href, children, ...props }) => {
             const hrefText = typeof href === 'string' ? href : '';

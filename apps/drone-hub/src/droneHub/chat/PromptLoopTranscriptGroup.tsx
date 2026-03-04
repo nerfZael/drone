@@ -164,7 +164,7 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
           status: item.ok ? 'done' : 'failed',
           statusLabel: item.ok ? 'Done' : 'Failed',
           output: output || (item.ok ? '(no output)' : 'failed'),
-          outputClassName: item.ok ? 'dh-markdown--assistant' : undefined,
+          outputClassName: item.ok ? 'dh-markdown--agent' : undefined,
           fadeTo: 'rgba(0,0,0,.14)',
         };
         }),
@@ -185,7 +185,7 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
           status: item.state === 'failed' ? 'failed' : 'pending',
           statusLabel: pendingRunStatusLabel(item.state),
           output: pendingRunOutput(item),
-          outputClassName: item.state === 'failed' ? undefined : 'dh-markdown--assistant',
+          outputClassName: item.state === 'failed' ? undefined : 'dh-markdown--agent',
           fadeTo: item.state === 'failed' ? 'var(--red-subtle)' : 'rgba(29,43,66,.2)',
         };
         }),
@@ -210,7 +210,7 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
             status: item.ok ? 'done' : 'failed',
             statusLabel: item.ok ? 'Done' : 'Failed',
             output: output || (item.ok ? '(no output)' : 'failed'),
-            outputClassName: item.ok ? 'dh-markdown--assistant' : undefined,
+            outputClassName: item.ok ? 'dh-markdown--agent' : undefined,
             fadeTo: item.ok ? 'rgba(29,43,66,.2)' : 'var(--red-subtle)',
           };
         }),
@@ -226,7 +226,7 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
           status: item.state === 'failed' ? 'failed' : 'pending',
           statusLabel: pendingRunStatusLabel(item.state),
           output: pendingRunOutput(item),
-          outputClassName: item.state === 'failed' ? undefined : 'dh-markdown--assistant',
+          outputClassName: item.state === 'failed' ? undefined : 'dh-markdown--agent',
           fadeTo: item.state === 'failed' ? 'var(--red-subtle)' : 'rgba(29,43,66,.2)',
         })),
     [pendingRuns],
