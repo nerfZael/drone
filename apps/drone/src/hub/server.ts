@@ -3671,17 +3671,26 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           continue;
         }
       }
+      const exitCode =
+        typeof job?.exitCode === 'number' && Number.isFinite(job.exitCode)
+          ? Math.floor(job.exitCode)
+          : null;
       let errText =
         String(job?.error ?? '').trim() ||
         String(job?.stderr ?? '').trim() ||
         String(job?.stdout ?? '').trim() ||
-        'failed';
+        '';
       if (agent.id === 'codex') {
         errText = formatCodexJobFailure(
           String(job?.stdout ?? ''),
           String(job?.stderr ?? ''),
           errText,
         );
+      }
+      if (!errText || errText === 'failed') {
+        errText = exitCode != null ? `prompt command failed (exit ${exitCode})` : 'prompt command failed';
+      } else if (exitCode != null && errText.length < 220 && !/\bexit\s*\d+\b/i.test(errText)) {
+        errText = `${errText} (exit ${exitCode})`;
       }
       pendingList[i] = { ...p, state: 'failed', error: errText, updatedAt: nowIso() };
       changed = true;

@@ -7,9 +7,7 @@ export function DroneLinksDock({
   agentLabel,
   chatName,
   portRows,
-  selectedPort,
   portReachabilityByHostPort,
-  onSelectPort,
   portsLoading,
   portsError,
 }: {
@@ -18,13 +16,10 @@ export function DroneLinksDock({
   agentLabel: string;
   chatName: string;
   portRows: DronePortMapping[];
-  selectedPort: DronePortMapping | null;
   portReachabilityByHostPort: PortReachabilityByHostPort;
-  onSelectPort: (port: DronePortMapping | null) => void;
   portsLoading: boolean;
   portsError: string | null;
 }) {
-  const selectedKey = selectedPort ? `${selectedPort.containerPort}:${selectedPort.hostPort}` : '';
   const upCount = React.useMemo(
     () => portRows.filter((p) => (portReachabilityByHostPort[String(p.hostPort)] ?? 'checking') === 'up').length,
     [portRows, portReachabilityByHostPort],
@@ -62,9 +57,7 @@ export function DroneLinksDock({
         {!portsError && portRows.length > 0 && (
           <div className="max-h-[164px] overflow-auto pr-1 flex flex-col gap-1.5">
             {portRows.map((p) => {
-              const url = `http://localhost:${p.hostPort}`;
-              const portKey = `${p.containerPort}:${p.hostPort}`;
-              const selected = selectedKey === portKey;
+              const routedUrl = `http://localhost:${p.hostPort}`;
               const reachability = portReachabilityByHostPort[String(p.hostPort)] ?? 'checking';
               const isReachable = reachability === 'up';
               return (
@@ -80,28 +73,15 @@ export function DroneLinksDock({
                     )}
                     {p.containerPort}→{p.hostPort}
                   </span>
-                  <div className="min-w-0 flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => onSelectPort(selected ? null : p)}
-                      className={`px-2 py-0.5 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
-                        selected
-                          ? 'bg-[var(--accent-subtle)] text-[var(--accent)] border-[var(--accent-muted)] shadow-[0_0_8px_rgba(167,139,250,.1)]'
-                          : 'bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] border-[var(--border-subtle)] hover:text-[var(--muted)] hover:border-[var(--border)]'
-                      }`}
-                      style={{ fontFamily: 'var(--display)' }}
-                      title={selected ? `Hide browser for container:${p.containerPort}` : `Open browser for container:${p.containerPort}`}
-                    >
-                      {selected ? 'Active' : 'Browser'}
-                    </button>
+                  <div className="min-w-0 flex items-center gap-1.5 font-mono text-[10px]">
                     <a
-                      href={url}
+                      href={routedUrl}
                       target="_blank"
                       rel="noreferrer"
                       className="min-w-0 truncate text-[var(--accent)] hover:text-[var(--fg)] tabular-nums font-mono text-[10px] transition-colors"
-                      title={`Open ${url}`}
+                      title={`Open container:${p.containerPort} via ${routedUrl}`}
                     >
-                      :{p.hostPort}
+                      :{p.containerPort}
                     </a>
                   </div>
                 </div>
