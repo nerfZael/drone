@@ -32,6 +32,14 @@ type PromptLoopSummaryEntry = {
   fadeTo: string;
 };
 
+function normalizeFailureHint(raw: string): string {
+  const text = stripAnsi(String(raw ?? '')).replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+  const maxChars = 140;
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, Math.max(0, maxChars - 3))}...`;
+}
+
 function normalizeRunIndex(item: PromptLoopPromptLike, fallback: number): number {
   const raw = Number(item.automation?.runIndex);
   if (Number.isFinite(raw) && raw > 0) return Math.floor(raw);
@@ -183,7 +191,11 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
         }),
     [completedRows.length, pendingRuns],
   );
-  const runRows = React.useMemo(() => [...completedRows, ...pendingRows], [completedRows, pendingRows]);
+  const runRows = React.useMemo(() => {
+    const combined = [...completedRows, ...pendingRows].map((row, idx) => ({ row, idx }));
+    combined.sort((a, b) => (a.row.runIndex - b.row.runIndex) || (a.idx - b.idx));
+    return combined.map((x) => x.row);
+  }, [completedRows, pendingRows]);
   const summaryCompletedEntries = React.useMemo(
     () =>
       runs
@@ -312,6 +324,11 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
                         >
                           {row.statusLabel}
                         </span>
+                        {row.status === 'failed' ? (
+                          <div className="mt-1 text-[10px] text-[var(--red)] max-w-[340px]" title={stripAnsi(row.output)}>
+                            {normalizeFailureHint(row.output) || 'Failed.'}
+                          </div>
+                        ) : null}
                       </td>
                       <td className="px-3 py-2 text-[11px] text-[var(--muted-dim)]" title={new Date(row.atIso).toLocaleString()}>
                         {timeAgo(row.atIso, nowMs)}
