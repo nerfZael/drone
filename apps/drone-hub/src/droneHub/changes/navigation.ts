@@ -1,6 +1,6 @@
-export const CHANGES_DATA_MODE_STORAGE_KEY = 'droneHub.changesDataMode';
 export const CHANGES_OPEN_PULL_REQUEST_EVENT = 'droneHub:changes:openPullRequest';
 const CHANGES_PULL_REQUEST_SELECTION_STORAGE_KEY = 'droneHub.changesPullRequestSelectionByDrone';
+const CHANGES_PENDING_PULL_REQUEST_OPEN_STORAGE_KEY = 'droneHub.changesPendingPullRequestOpenByDrone';
 
 export type ChangesOpenPullRequestDetail = {
   droneId: string;
@@ -34,6 +34,47 @@ function writePullRequestSelectionByDrone(next: Record<string, number>): void {
   }
 }
 
+function readPendingPullRequestOpenByDrone(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(CHANGES_PENDING_PULL_REQUEST_OPEN_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return {};
+    const out: Record<string, number> = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      const droneId = String(k ?? '').trim();
+      const pullNumber = Number(v);
+      if (!droneId || !Number.isFinite(pullNumber) || pullNumber <= 0) continue;
+      out[droneId] = Math.floor(pullNumber);
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function writePendingPullRequestOpenByDrone(next: Record<string, number>): void {
+  try {
+    localStorage.setItem(CHANGES_PENDING_PULL_REQUEST_OPEN_STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    // ignore
+  }
+}
+
+function setPendingPullRequestOpenForDrone(droneIdRaw: string, pullNumberRaw: number | null): void {
+  const droneId = String(droneIdRaw ?? '').trim();
+  if (!droneId) return;
+  const next = readPendingPullRequestOpenByDrone();
+  const pullNumber = Number(pullNumberRaw);
+  if (!Number.isFinite(pullNumber) || pullNumber <= 0) {
+    delete next[droneId];
+    writePendingPullRequestOpenByDrone(next);
+    return;
+  }
+  next[droneId] = Math.floor(pullNumber);
+  writePendingPullRequestOpenByDrone(next);
+}
+
 function setSelectedPullRequestForDrone(droneIdRaw: string, pullNumberRaw: number | null): void {
   const droneId = String(droneIdRaw ?? '').trim();
   if (!droneId) return;
@@ -61,23 +102,39 @@ export function clearSelectedPullRequestForDrone(droneIdRaw: string): void {
   setSelectedPullRequestForDrone(droneIdRaw, null);
 }
 
+export function requestedPullRequestForDrone(droneIdRaw: string): number | null {
+  const droneId = String(droneIdRaw ?? '').trim();
+  if (!droneId) return null;
+  const map = readPendingPullRequestOpenByDrone();
+  const value = Number(map[droneId]);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  return Math.floor(value);
+}
+
+export function consumeRequestedPullRequestForDrone(droneIdRaw: string): number | null {
+  const droneId = String(droneIdRaw ?? '').trim();
+  if (!droneId) return null;
+  const map = readPendingPullRequestOpenByDrone();
+  const value = Number(map[droneId]);
+  delete map[droneId];
+  writePendingPullRequestOpenByDrone(map);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  return Math.floor(value);
+}
+
 export function requestChangesPullRequest(detail: ChangesOpenPullRequestDetail): void {
   const droneId = String(detail.droneId ?? '').trim();
   const pullNumber = Number(detail.pullNumber);
   if (!droneId || !Number.isFinite(pullNumber) || pullNumber <= 0) return;
-
-  try {
-    localStorage.setItem(CHANGES_DATA_MODE_STORAGE_KEY, 'pull-request');
-  } catch {
-    // ignore
-  }
-  setSelectedPullRequestForDrone(droneId, pullNumber);
+  const normalizedPullNumber = Math.floor(pullNumber);
+  setSelectedPullRequestForDrone(droneId, normalizedPullNumber);
+  setPendingPullRequestOpenForDrone(droneId, normalizedPullNumber);
 
   if (typeof window === 'undefined') return;
   try {
     window.dispatchEvent(
       new CustomEvent<ChangesOpenPullRequestDetail>(CHANGES_OPEN_PULL_REQUEST_EVENT, {
-        detail: { droneId, pullNumber: Math.floor(pullNumber) },
+        detail: { droneId, pullNumber: normalizedPullNumber },
       }),
     );
   } catch {

@@ -12,15 +12,17 @@ import type {
   RepoPullRequestMergePayload,
 } from '../types';
 import {
-  CHANGES_DATA_MODE_STORAGE_KEY,
   CHANGES_OPEN_PULL_REQUEST_EVENT,
   type ChangesOpenPullRequestDetail,
+  consumeRequestedPullRequestForDrone,
+  requestedPullRequestForDrone,
   selectedPullRequestForDrone,
 } from './navigation';
 import { DiffBlock } from './DiffBlock';
 import type { DiffState, DiffViewType } from './types';
 import {
   CHANGES_DIFF_VIEW_STORAGE_KEY,
+  CHANGES_EXPLORER_ZOOM_STORAGE_KEY,
   CHANGES_EXPLORER_WIDTH_STORAGE_KEY,
   CHANGES_VIEW_STORAGE_KEY,
   readChangesStorage,
@@ -62,17 +64,25 @@ const EXPLORER_SIDEBAR_MAX_WIDTH_PX = 360;
 const EXPLORER_SIDEBAR_MAX_RATIO = 0.36;
 const CHANGES_DIFF_MIN_WIDTH_PX = 420;
 const EXPLORER_WIDTH_UPDATE_THRESHOLD_PX = 8;
+const EXPLORER_ZOOM_MIN = 0.9;
+const EXPLORER_ZOOM_DEFAULT = 1;
+const EXPLORER_ZOOM_MAX = 1.4;
+const EXPLORER_ZOOM_STEP = 0.1;
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-function IconChevron({ open }: { open: boolean }) {
+function clampExplorerZoom(value: number): number {
+  return Math.round(clampNumber(value, EXPLORER_ZOOM_MIN, EXPLORER_ZOOM_MAX) * 100) / 100;
+}
+
+function IconChevron({ open, size = 12 }: { open: boolean; size?: number }) {
   return (
     <svg
       className={`transition-transform duration-150 ${open ? 'rotate-90' : ''}`}
-      width="12"
-      height="12"
+      width={size}
+      height={size}
       viewBox="0 0 16 16"
       fill="currentColor"
       aria-hidden="true"
@@ -82,17 +92,17 @@ function IconChevron({ open }: { open: boolean }) {
   );
 }
 
-function IconFolder() {
+function IconFolder({ size = 12 }: { size?: number }) {
   return (
-    <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
       <path d="M1.75 1A1.75 1.75 0 000 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0016 13.25v-8.5A1.75 1.75 0 0014.25 3H7.5a.25.25 0 01-.2-.1l-.9-1.2c-.33-.44-.85-.7-1.4-.7h-3.25z" />
     </svg>
   );
 }
 
-function IconFile() {
+function IconFile({ size = 12 }: { size?: number }) {
   return (
-    <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
       <path d="M3.75 0A1.75 1.75 0 002 1.75v12.5C2 15.216 2.784 16 3.75 16h8.5A1.75 1.75 0 0014 14.25V5.5a.75.75 0 00-.22-.53L9.03.22A.75.75 0 008.5 0H3.75zm4 .75v3A1.75 1.75 0 009.5 5.5h3v8.75a.25.25 0 01-.25.25h-8.5a.25.25 0 01-.25-.25V1.75a.25.25 0 01.25-.25h4z" />
     </svg>
   );
@@ -151,7 +161,10 @@ export function DroneChangesDock({
   const [pullChanges, setPullChanges] = React.useState<Extract<RepoPullChangesPayload, { ok: true }> | null>(null);
   const [pullLoading, setPullLoading] = React.useState(false);
   const [pullError, setPullError] = React.useState<string | null>(null);
-  const [pullRequestNumber, setPullRequestNumber] = React.useState<number | null>(() => selectedPullRequestForDrone(droneId));
+  const initialRequestedPullNumberRef = React.useRef<number | null>(requestedPullRequestForDrone(droneId));
+  const [pullRequestNumber, setPullRequestNumber] = React.useState<number | null>(
+    () => initialRequestedPullNumberRef.current ?? selectedPullRequestForDrone(droneId),
+  );
   const [pullRequestChanges, setPullRequestChanges] = React.useState<Extract<RepoPullRequestChangesPayload, { ok: true }> | null>(null);
   const [pullRequestLoading, setPullRequestLoading] = React.useState(false);
   const [pullRequestError, setPullRequestError] = React.useState<string | null>(null);
@@ -164,10 +177,9 @@ export function DroneChangesDock({
     'pull-request': null,
   });
 
-  const [dataMode, setDataMode] = React.useState<ChangesDataMode>(() => {
-    const raw = readChangesStorage(CHANGES_DATA_MODE_STORAGE_KEY);
-    return raw === 'pull-preview' || raw === 'pull-request' ? raw : 'working-tree';
-  });
+  const [dataMode, setDataMode] = React.useState<ChangesDataMode>(() =>
+    initialRequestedPullNumberRef.current && initialRequestedPullNumberRef.current > 0 ? 'pull-request' : 'working-tree',
+  );
 
   const [viewMode, setViewMode] = React.useState<ChangesViewMode>(() => {
     const raw = readChangesStorage(CHANGES_VIEW_STORAGE_KEY);
@@ -188,6 +200,11 @@ export function DroneChangesDock({
     const raw = Number(readChangesStorage(CHANGES_EXPLORER_WIDTH_STORAGE_KEY));
     if (!Number.isFinite(raw) || raw < 120) return null;
     return Math.floor(raw);
+  });
+  const [explorerZoom, setExplorerZoom] = React.useState<number>(() => {
+    const raw = Number(readChangesStorage(CHANGES_EXPLORER_ZOOM_STORAGE_KEY));
+    if (!Number.isFinite(raw)) return EXPLORER_ZOOM_DEFAULT;
+    return clampExplorerZoom(raw);
   });
   const [explorerWidthPx, setExplorerWidthPx] = React.useState(EXPLORER_SIDEBAR_DEFAULT_WIDTH_PX);
   const [explorerResizing, setExplorerResizing] = React.useState(false);
@@ -210,6 +227,15 @@ export function DroneChangesDock({
   const diffByKeyRef = React.useRef<Record<string, DiffState>>({});
   const inflightRef = React.useRef<Set<string>>(new Set());
   const mountedRef = React.useRef(true);
+  const explorerZoomPercent = Math.round(explorerZoom * 100);
+  const explorerRowHeightPx = Math.max(28, Math.round(28 * explorerZoom));
+  const explorerIconSizePx = Math.max(12, Math.round(12 * explorerZoom));
+  const explorerTextSizePx = Math.max(11, Math.round(11 * explorerZoom * 10) / 10);
+  const explorerMetaTextSizePx = Math.max(9, Math.round(9 * explorerZoom * 10) / 10);
+  const explorerIndentBasePx = Math.max(8, Math.round(8 * explorerZoom));
+  const explorerIndentStepPx = Math.max(14, Math.round(14 * explorerZoom));
+  const explorerBadgeMinWidthPx = Math.max(30, Math.round(30 * explorerZoom));
+  const explorerBadgeHeightPx = Math.max(16, Math.round(16 * explorerZoom));
   const markModeRefreshed = React.useCallback((mode: ChangesDataMode) => {
     const now = Date.now();
     setLastRefreshedByMode((prev) => ({ ...prev, [mode]: now }));
@@ -230,15 +256,15 @@ export function DroneChangesDock({
   }, [diffViewType]);
 
   React.useEffect(() => {
-    writeChangesStorage(CHANGES_DATA_MODE_STORAGE_KEY, dataMode);
-  }, [dataMode]);
-  React.useEffect(() => {
     if (explorerManualWidthPx === null) {
       removeChangesStorage(CHANGES_EXPLORER_WIDTH_STORAGE_KEY);
       return;
     }
     writeChangesStorage(CHANGES_EXPLORER_WIDTH_STORAGE_KEY, String(Math.floor(explorerManualWidthPx)));
   }, [explorerManualWidthPx]);
+  React.useEffect(() => {
+    writeChangesStorage(CHANGES_EXPLORER_ZOOM_STORAGE_KEY, String(explorerZoom));
+  }, [explorerZoom]);
 
   React.useEffect(() => {
     const onOpenPullRequest = (event: Event) => {
@@ -246,7 +272,9 @@ export function DroneChangesDock({
       if (!detail || String(detail.droneId ?? '').trim() !== String(droneId ?? '').trim()) return;
       const pullNumber = Number(detail.pullNumber);
       if (!Number.isFinite(pullNumber) || pullNumber <= 0) return;
-      setPullRequestNumber(Math.floor(pullNumber));
+      const normalizedPullNumber = Math.floor(pullNumber);
+      consumeRequestedPullRequestForDrone(droneId);
+      setPullRequestNumber(normalizedPullNumber);
       setDataMode('pull-request');
       setRefreshNonce((n) => n + 1);
     };
@@ -255,13 +283,21 @@ export function DroneChangesDock({
   }, [droneId]);
 
   React.useEffect(() => {
+    const requestedPullNumber = consumeRequestedPullRequestForDrone(droneId);
+    if (requestedPullNumber && requestedPullNumber > 0) {
+      setPullRequestNumber(requestedPullNumber);
+      setDataMode('pull-request');
+      setRefreshNonce((n) => n + 1);
+      return;
+    }
     setPullRequestNumber(selectedPullRequestForDrone(droneId));
+    setDataMode('working-tree');
   }, [droneId]);
 
   React.useEffect(() => {
     if (dataMode !== 'pull-request') return;
     if (pullRequestNumber && pullRequestNumber > 0) return;
-    setDataMode('pull-preview');
+    setDataMode('working-tree');
   }, [dataMode, pullRequestNumber]);
 
   React.useEffect(() => {
@@ -506,7 +542,11 @@ export function DroneChangesDock({
     if (splitWidth <= 0) return;
     const bounds = resolveExplorerSidebarWidthBounds(splitWidth, explorerWidthOptions);
     const rows = flattenVisibleExplorerRows(explorerTree, expandedDirs);
-    const autoWidth = estimateExplorerSidebarWidth(rows, splitWidth, explorerWidthOptions);
+    const autoWidth = clampNumber(
+      Math.floor(estimateExplorerSidebarWidth(rows, splitWidth, explorerWidthOptions) * explorerZoom),
+      bounds.minWidthPx,
+      bounds.maxWidthPx,
+    );
     const nextWidth =
       explorerManualWidthPx === null
         ? autoWidth
@@ -516,7 +556,7 @@ export function DroneChangesDock({
       if (outOfBounds || Math.abs(prev - nextWidth) >= EXPLORER_WIDTH_UPDATE_THRESHOLD_PX) return nextWidth;
       return prev;
     });
-  }, [expandedDirs, explorerManualWidthPx, explorerTree, explorerWidthOptions, viewMode]);
+  }, [expandedDirs, explorerManualWidthPx, explorerTree, explorerWidthOptions, explorerZoom, viewMode]);
 
   const restoreResizeBodyStyles = React.useCallback(() => {
     const styles = explorerResizeBodyStyleRef.current;
@@ -587,6 +627,18 @@ export function DroneChangesDock({
 
   const resetExplorerWidthPreference = React.useCallback(() => {
     setExplorerManualWidthPx(null);
+  }, []);
+
+  const decreaseExplorerZoom = React.useCallback(() => {
+    setExplorerZoom((prev) => clampExplorerZoom(prev - EXPLORER_ZOOM_STEP));
+  }, []);
+
+  const increaseExplorerZoom = React.useCallback(() => {
+    setExplorerZoom((prev) => clampExplorerZoom(prev + EXPLORER_ZOOM_STEP));
+  }, []);
+
+  const resetExplorerZoom = React.useCallback(() => {
+    setExplorerZoom(EXPLORER_ZOOM_DEFAULT);
   }, []);
 
   React.useEffect(() => {
@@ -904,14 +956,22 @@ export function DroneChangesDock({
               onClick={() => {
                 setExpandedDirs((prev) => ({ ...prev, [node.path]: !open }));
               }}
-              className="w-full text-left h-7 px-2 rounded border border-transparent hover:bg-[var(--hover)] flex items-center gap-1.5"
-              style={{ paddingLeft: `${8 + depth * 14}px` }}
+              className="w-full text-left px-2 rounded border border-transparent hover:bg-[var(--hover)] flex items-center gap-1.5"
+              style={{
+                paddingLeft: `${explorerIndentBasePx + depth * explorerIndentStepPx}px`,
+                height: `${explorerRowHeightPx}px`,
+                minHeight: `${explorerRowHeightPx}px`,
+              }}
               title={node.path}
             >
-              <span className="text-[var(--muted-dim)]"><IconChevron open={open} /></span>
-              <span className="text-[var(--muted)]"><IconFolder /></span>
-              <span className="text-[11px] text-[var(--fg-secondary)] truncate flex-1">{node.name}</span>
-              <span className="text-[9px] text-[var(--muted-dim)] tabular-nums">{node.count}</span>
+              <span className="text-[var(--muted-dim)]"><IconChevron open={open} size={explorerIconSizePx} /></span>
+              <span className="text-[var(--muted)]"><IconFolder size={explorerIconSizePx} /></span>
+              <span className="text-[var(--fg-secondary)] truncate flex-1" style={{ fontSize: `${explorerTextSizePx}px` }}>
+                {node.name}
+              </span>
+              <span className="text-[var(--muted-dim)] tabular-nums" style={{ fontSize: `${explorerMetaTextSizePx}px` }}>
+                {node.count}
+              </span>
             </button>
             {open && node.children && node.children.length > 0 ? renderExplorer(node.children, depth + 1) : null}
           </React.Fragment>
@@ -929,18 +989,29 @@ export function DroneChangesDock({
             setSelectedPath(entry.path);
             if (dataMode === 'working-tree') setSplitKind(defaultKindForEntry(entry));
           }}
-          className={`w-full text-left h-7 px-2 rounded border transition-colors flex items-center gap-1.5 ${
+          className={`w-full text-left px-2 rounded border transition-colors flex items-center gap-1.5 ${
             active
               ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)]'
               : 'border-transparent hover:bg-[var(--hover)]'
           }`}
-          style={{ paddingLeft: `${8 + depth * 14}px` }}
+          style={{
+            paddingLeft: `${explorerIndentBasePx + depth * explorerIndentStepPx}px`,
+            height: `${explorerRowHeightPx}px`,
+            minHeight: `${explorerRowHeightPx}px`,
+          }}
           title={entry.path}
         >
-          <span className="text-[var(--muted-dim)]"><IconFile /></span>
-          <span className="text-[11px] text-[var(--fg-secondary)] truncate flex-1">{node.name}</span>
+          <span className="text-[var(--muted-dim)]"><IconFile size={explorerIconSizePx} /></span>
+          <span className="text-[var(--fg-secondary)] truncate flex-1" style={{ fontSize: `${explorerTextSizePx}px` }}>
+            {node.name}
+          </span>
           <span
-            className={`inline-flex items-center justify-center min-w-[30px] h-4 rounded border text-[9px] font-mono ${badgeTone(entry)}`}
+            className={`inline-flex items-center justify-center rounded border font-mono ${badgeTone(entry)}`}
+            style={{
+              minWidth: `${explorerBadgeMinWidthPx}px`,
+              height: `${explorerBadgeHeightPx}px`,
+              fontSize: `${explorerMetaTextSizePx}px`,
+            }}
             title={statusBadgeTitle(entry, dataMode)}
           >
             {statusCharLabel(entry.stagedChar)}
@@ -1476,7 +1547,7 @@ export function DroneChangesDock({
           </div>
 
           <div
-            className={`shrink-0 border-l border-[var(--border-subtle)] overflow-auto px-1.5 py-1 ${
+            className={`shrink-0 border-l border-[var(--border-subtle)] overflow-hidden flex flex-col ${
               explorerResizing ? '' : 'transition-[width] duration-150 ease-out'
             }`}
             style={{
@@ -1485,7 +1556,43 @@ export function DroneChangesDock({
               maxWidth: `${explorerWidthPx}px`,
             }}
           >
-            {renderExplorer(explorerTree, 0)}
+            <div className="shrink-0 px-1.5 py-1 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/80 flex items-center justify-between gap-1">
+              <span className="text-[9px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+                Zoom {explorerZoomPercent}%
+              </span>
+              <div className="inline-flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={decreaseExplorerZoom}
+                  disabled={explorerZoom <= EXPLORER_ZOOM_MIN}
+                  className="w-6 h-6 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[11px] font-bold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Decrease explorer zoom"
+                >
+                  -
+                </button>
+                <button
+                  type="button"
+                  onClick={increaseExplorerZoom}
+                  disabled={explorerZoom >= EXPLORER_ZOOM_MAX}
+                  className="w-6 h-6 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[11px] font-bold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Increase explorer zoom"
+                >
+                  +
+                </button>
+                <button
+                  type="button"
+                  onClick={resetExplorerZoom}
+                  disabled={Math.abs(explorerZoom - EXPLORER_ZOOM_DEFAULT) < 0.001}
+                  className="h-6 px-1.5 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[9px] font-semibold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Reset explorer zoom"
+                >
+                  100%
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 min-h-0 overflow-auto px-1.5 py-1">
+              {renderExplorer(explorerTree, 0)}
+            </div>
           </div>
         </div>
       )}
