@@ -43,6 +43,8 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   unstickBusy?: boolean;
   unstickError?: string | null;
 }) {
+  const [copiedToastRole, setCopiedToastRole] = React.useState<'user' | 'agent' | null>(null);
+  const copiedToastTimerRef = React.useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const attachments = normalizeImageAttachmentRefs((item as any).attachments);
   const promptText = isAttachmentOnlyPrompt(item.prompt, attachments) ? '' : item.prompt;
   const isFailed = item.state === 'failed';
@@ -64,6 +66,26 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
       : item.state === 'sent'
         ? 'Waiting…'
         : 'Typing…';
+  const showCopiedToast = React.useCallback((role: 'user' | 'agent') => {
+    setCopiedToastRole(role);
+    if (copiedToastTimerRef.current != null) window.clearTimeout(copiedToastTimerRef.current);
+    copiedToastTimerRef.current = window.setTimeout(() => {
+      setCopiedToastRole((prev) => (prev === role ? null : prev));
+      copiedToastTimerRef.current = null;
+    }, 1200);
+  }, []);
+  React.useEffect(
+    () => () => {
+      if (copiedToastTimerRef.current != null) {
+        window.clearTimeout(copiedToastTimerRef.current);
+        copiedToastTimerRef.current = null;
+      }
+    },
+    [],
+  );
+  React.useEffect(() => {
+    setCopiedToastRole(null);
+  }, [item.id, item.state, item.updatedAt]);
   return (
     <div className="animate-fade-in opacity-90 group/pending-turn">
       <div className="flex justify-end mb-3">
@@ -111,11 +133,23 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
             </span>
           </div>
           <div className="bg-[var(--user-dim)] border border-[rgba(148,163,184,.14)] rounded-lg rounded-tr-sm px-4 py-3 relative group">
+            {copiedToastRole === 'user' ? (
+              <div
+                role="status"
+                aria-live="polite"
+                className="absolute top-2 right-10 z-20 pointer-events-none rounded border border-[rgba(148,163,184,.28)] bg-[rgba(0,0,0,.42)] px-2 py-0.5 text-[9px] uppercase tracking-wide text-[var(--fg-secondary)]"
+                style={{ fontFamily: 'var(--display)' }}
+              >
+                Copied
+              </div>
+            ) : null}
             {userCopyText.length > 0 ? (
               <button
                 type="button"
-                onClick={() => void copyText(userCopyText)}
-                className="absolute top-2 right-2 inline-flex items-center justify-center w-7 h-7 rounded border transition-opacity pointer-events-none opacity-0 group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto bg-[rgba(0,0,0,.15)] border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--user)] hover:border-[var(--user-muted)] hover:bg-[rgba(0,0,0,.25)]"
+                onClick={() => {
+                  void copyText(userCopyText).then(() => showCopiedToast('user'));
+                }}
+                className="absolute top-2 right-2 z-10 inline-flex items-center justify-center w-7 h-7 rounded border transition-opacity pointer-events-none opacity-0 group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto bg-[rgba(0,0,0,.15)] border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--user)] hover:border-[var(--user-muted)] hover:bg-[rgba(0,0,0,.25)]"
                 title="Copy user message"
                 aria-label="Copy user message"
               >
@@ -170,11 +204,23 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
                 isFailed ? 'bg-[var(--red-subtle)] border-[rgba(255,90,90,.2)]' : 'bg-[var(--accent-subtle)] border-[rgba(167,139,250,.12)]'
               }`}
             >
+              {copiedToastRole === 'agent' ? (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  className="absolute top-2 right-10 z-20 pointer-events-none rounded border border-[rgba(148,163,184,.28)] bg-[rgba(0,0,0,.42)] px-2 py-0.5 text-[9px] uppercase tracking-wide text-[var(--fg-secondary)]"
+                  style={{ fontFamily: 'var(--display)' }}
+                >
+                  Copied
+                </div>
+              ) : null}
               {agentCopyText.length > 0 ? (
                 <button
                   type="button"
-                  onClick={() => void copyText(agentCopyText)}
-                  className="absolute top-2 right-2 inline-flex items-center justify-center w-7 h-7 rounded border transition-opacity pointer-events-none opacity-0 group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto bg-[rgba(0,0,0,.15)] border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[rgba(0,0,0,.25)]"
+                  onClick={() => {
+                    void copyText(agentCopyText).then(() => showCopiedToast('agent'));
+                  }}
+                  className="absolute top-2 right-2 z-10 inline-flex items-center justify-center w-7 h-7 rounded border transition-opacity pointer-events-none opacity-0 group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto bg-[rgba(0,0,0,.15)] border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[rgba(0,0,0,.25)]"
                   title="Copy agent message"
                   aria-label="Copy agent message"
                 >
