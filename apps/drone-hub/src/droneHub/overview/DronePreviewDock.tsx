@@ -4,6 +4,7 @@ import { displayUrlForPreviewInput, normalizePreviewUrl } from './helpers';
 
 export function DronePreviewDock({
   selectedPort,
+  portRows,
   portReachabilityByHostPort,
   portsLoading,
   portsError,
@@ -13,6 +14,7 @@ export function DronePreviewDock({
   onSetPreviewUrlOverride,
 }: {
   selectedPort: DronePortMapping | null;
+  portRows: DronePortMapping[];
   portReachabilityByHostPort: PortReachabilityByHostPort;
   portsLoading: boolean;
   portsError: string | null;
@@ -23,8 +25,8 @@ export function DronePreviewDock({
 }) {
   const selectedUrl = previewUrlOverride || defaultPreviewUrl;
   const selectedOpenUrl = selectedUrl;
-  const displayedSelectedUrl = React.useMemo(() => displayUrlForPreviewInput(selectedUrl), [selectedUrl]);
-  const defaultDisplayUrl = React.useMemo(() => displayUrlForPreviewInput(defaultPreviewUrl), [defaultPreviewUrl]);
+  const displayedSelectedUrl = React.useMemo(() => displayUrlForPreviewInput(selectedUrl, portRows), [selectedUrl, portRows]);
+  const defaultDisplayUrl = React.useMemo(() => displayUrlForPreviewInput(defaultPreviewUrl, portRows), [defaultPreviewUrl, portRows]);
   const selectedReachability = selectedPort
     ? (portReachabilityByHostPort[String(selectedPort.hostPort)] ?? 'checking')
     : 'checking';
@@ -81,7 +83,7 @@ export function DronePreviewDock({
         <div className="min-w-0 flex items-center gap-2">
           {selectedPort ? (
             <div className="min-w-0 truncate text-[10px] text-[var(--muted-dim)] font-mono" title={`Browser container:${selectedPort.containerPort}`}>
-              {selectedPort.containerPort}→{selectedPort.hostPort}
+              :{selectedPort.containerPort}
             </div>
           ) : (
             <div className="text-[10px] text-[var(--muted-dim)]">

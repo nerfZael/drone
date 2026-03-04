@@ -1173,7 +1173,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     selectedPreviewUrlOverride,
     setSelectedPreviewUrlOverride,
     portRows,
-    setSelectedPreviewPort,
   } = useFilesAndPortsPaneState({ currentDrone, requestJson });
   const {
     openedFile: openedEditorFile,
@@ -1595,7 +1594,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         setSelectedPreviewUrlOverride={setSelectedPreviewUrlOverride}
         agentLabel={agentLabel}
         portRows={portRows}
-        setSelectedPreviewPort={setSelectedPreviewPort}
         onOpenFileInEditor={(entry) => {
           if (entry.kind !== 'file') return;
           openEditorFile({ path: entry.path, name: entry.name });
@@ -1658,7 +1656,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setRightPanelBottomTab,
       setRightPanelOpen,
       setRightPanelTab,
-      setSelectedPreviewPort,
       setSelectedPreviewUrlOverride,
       uiDroneName,
       openEditorFile,
