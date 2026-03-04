@@ -359,11 +359,18 @@ code, pre {
 
 .dh-markdown ul,
 .dh-markdown ol { margin: .72rem 0 .78rem 1.35rem; padding: 0; }
+.dh-markdown ul { list-style: disc; }
+.dh-markdown ol { list-style: decimal; }
 .dh-markdown ul ul,
 .dh-markdown ul ol,
 .dh-markdown ol ul,
 .dh-markdown ol ol { margin: .34rem 0 .34rem 1.1rem; }
+.dh-markdown ul ul { list-style: circle; }
+.dh-markdown ul ul ul { list-style: square; }
+.dh-markdown ol ol { list-style: lower-alpha; }
+.dh-markdown ol ol ol { list-style: lower-roman; }
 .dh-markdown li { margin: .36rem 0; padding-left: .12rem; }
+.dh-markdown li.task-list-item { list-style: none; padding-left: 0; }
 .dh-markdown li::marker { color: #a995ef; }
 .dh-markdown ol > li::marker {
   font-weight: 600;
