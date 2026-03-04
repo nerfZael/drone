@@ -281,7 +281,10 @@ code, pre {
 }
 .dh-markdown h1,
 .dh-markdown h2,
-.dh-markdown h3 {
+.dh-markdown h3,
+.dh-markdown h4,
+.dh-markdown h5,
+.dh-markdown h6 {
   margin: .95rem 0 .45rem;
   font-family: var(--display);
   font-weight: 600;
@@ -292,6 +295,13 @@ code, pre {
 .dh-markdown h1 { font-size: 1.05rem; }
 .dh-markdown h2 { font-size: 1rem; }
 .dh-markdown h3 { font-size: .95rem; }
+.dh-markdown h4 { font-size: .91rem; }
+.dh-markdown h5 { font-size: .87rem; }
+.dh-markdown h6 {
+  font-size: .82rem;
+  color: var(--muted);
+  letter-spacing: .04em;
+}
 
 .dh-markdown a {
   color: #b9a7f6;
@@ -371,12 +381,30 @@ code, pre {
 .dh-markdown ol ol ol { list-style: lower-roman; }
 .dh-markdown li { margin: .36rem 0; padding-left: .12rem; }
 .dh-markdown li.task-list-item { list-style: none; padding-left: 0; }
+.dh-markdown ul.contains-task-list,
+.dh-markdown ol.contains-task-list { margin-left: 0; }
+.dh-markdown li.task-list-item input[type='checkbox'] {
+  margin: 0 .45rem 0 0;
+  transform: translateY(1px);
+  accent-color: var(--accent-muted);
+}
 .dh-markdown li::marker { color: #a995ef; }
 .dh-markdown ol > li::marker {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 .dh-markdown li > p { margin: .2rem 0; }
+
+.dh-markdown img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: .72rem 0;
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, .02);
+}
+.dh-markdown p > img:only-child { margin: .2rem 0; }
 
 .dh-markdown blockquote {
   margin: .9rem 0;
