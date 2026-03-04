@@ -2,10 +2,11 @@ import React from 'react';
 import { stripAnsi, timeAgo } from '../../domain';
 import type { TranscriptItem } from '../types';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
+import { copyText } from '../app/clipboard';
 import { CollapsibleMarkdown } from './CollapsibleMarkdown';
 import { ImageAttachmentChips, isAttachmentOnlyPrompt, normalizeImageAttachmentRefs } from './ImageAttachmentChips';
 import type { MarkdownFileReference } from './MarkdownMessage';
-import { IconBot, IconImage, IconJobs, IconSpinner, IconTldr, IconUser } from './icons';
+import { IconBot, IconCopy, IconImage, IconJobs, IconSpinner, IconTldr, IconUser } from './icons';
 
 type TldrState =
   | { status: 'idle' }
@@ -320,6 +321,9 @@ export const TranscriptTurn = React.memo(
     React.useEffect(() => {
       setFailedInlineImagesById({});
     }, [messageId]);
+
+    const userCopyText = String(promptText ?? '');
+    const agentCopyText = String(cleaned ?? '');
     return (
       <div className="animate-fade-in">
         {/* User message */}
@@ -338,7 +342,18 @@ export const TranscriptTurn = React.memo(
                 You
               </span>
             </div>
-            <div className="bg-[var(--user-dim)] border border-[rgba(148,163,184,.14)] rounded-lg rounded-tr-sm px-4 py-3">
+            <div className="bg-[var(--user-dim)] border border-[rgba(148,163,184,.14)] rounded-lg rounded-tr-sm px-4 py-3 relative group">
+              {userCopyText.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => void copyText(userCopyText)}
+                  className="absolute top-2 right-2 inline-flex items-center justify-center w-7 h-7 rounded border transition-opacity pointer-events-none opacity-0 group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto bg-[rgba(0,0,0,.15)] border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--user)] hover:border-[var(--user-muted)] hover:bg-[rgba(0,0,0,.25)]"
+                  title="Copy user message"
+                  aria-label="Copy user message"
+                >
+                  <IconCopy className="w-3.5 h-3.5 opacity-90" />
+                </button>
+              ) : null}
               {promptText ? (
                 <CollapsibleMarkdown
                   text={promptText}
@@ -394,6 +409,17 @@ export const TranscriptTurn = React.memo(
               onMouseLeave={() => onHoverAgentMessage(null)}
               data-message-id={messageId}
             >
+              {agentCopyText.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => void copyText(agentCopyText)}
+                  className="absolute top-2 right-2 inline-flex items-center justify-center w-7 h-7 rounded border transition-opacity pointer-events-none opacity-0 group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto bg-[rgba(0,0,0,.15)] border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[rgba(0,0,0,.25)]"
+                  title="Copy agent message"
+                  aria-label="Copy agent message"
+                >
+                  <IconCopy className="w-3.5 h-3.5 opacity-90" />
+                </button>
+              ) : null}
               <CollapsibleMarkdown
                 text={displayedText}
                 fadeTo={item.ok ? 'var(--accent-subtle)' : 'var(--red-subtle)'}
