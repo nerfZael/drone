@@ -392,6 +392,7 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     setDraftCreateGroup,
     setDraftAutoRenaming,
     startDraftPrompt,
+    startDraftAutomation,
     enqueueQueuedPrompt,
     setDraftCreateError,
     selectedGroupMultiChatData,
@@ -556,6 +557,7 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
             setDraftAutoRenaming(false);
           },
           onStartDraftPrompt: startDraftPrompt,
+          onStartDraftAutomation: startDraftAutomation,
           onEnqueueQueuedPrompt: enqueueQueuedPrompt,
           onDraftCreateGroupChange: setDraftCreateGroup,
           onSetDraftCreateError: setDraftCreateError,

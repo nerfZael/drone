@@ -1,6 +1,6 @@
 import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { ChatInput, type ChatSendPayload, EmptyState, PendingTranscriptTurn } from '../chat';
+import { ChatInput, type ChatInputAutomationAction, type ChatSendPayload, EmptyState, PendingTranscriptTurn } from '../chat';
 import { draftChatInputResetKey, droneChatQueueKey } from './helpers';
 import { IconChat, IconChevron } from './icons';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
@@ -8,6 +8,13 @@ import type { ChatAgentConfig } from '../../domain';
 import type { PendingPrompt } from '../types';
 import type { DraftChatState } from './app-types';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
+import {
+  AUTOMATION_RUNS_MAX,
+  AUTOMATION_RUNS_MIN,
+  automationSleepSecondsFromConfig,
+  formatAutomationSleepInterval,
+} from './automation-config';
+import type { DraftAutomationStartInput } from './use-drone-creation-actions';
 
 type DraftChatWorkspaceProps = {
   draftChat: DraftChatState;
@@ -22,6 +29,7 @@ type DraftChatWorkspaceProps = {
   queuedPromptsByDroneChat: Record<string, PendingPrompt[]>;
   onCancel: () => void;
   onStartDraftPrompt: (payload: ChatSendPayload) => Promise<boolean>;
+  onStartDraftAutomation: (automation: DraftAutomationStartInput) => Promise<boolean>;
   onEnqueueQueuedPrompt: (droneId: string, chatName: string, prompt: string) => void;
   onDraftCreateGroupChange: (value: string) => void;
   onSetDraftCreateError: (error: string | null) => void;
@@ -40,6 +48,7 @@ export function DraftChatWorkspace({
   queuedPromptsByDroneChat,
   onCancel,
   onStartDraftPrompt,
+  onStartDraftAutomation,
   onEnqueueQueuedPrompt,
   onDraftCreateGroupChange,
   onSetDraftCreateError,
@@ -49,6 +58,7 @@ export function DraftChatWorkspace({
     spawnModel,
     chatHeaderRepoPath,
     pullHostBranchBeforeCreate,
+    automations,
     setSpawnAgentKey,
     setSpawnModel,
     setChatHeaderRepoPath,
@@ -60,6 +70,7 @@ export function DraftChatWorkspace({
       spawnModel: s.spawnModel,
       chatHeaderRepoPath: s.chatHeaderRepoPath,
       pullHostBranchBeforeCreate: s.pullHostBranchBeforeCreate,
+      automations: s.automations,
       setSpawnAgentKey: s.setSpawnAgentKey,
       setSpawnModel: s.setSpawnModel,
       setChatHeaderRepoPath: s.setChatHeaderRepoPath,
@@ -67,6 +78,75 @@ export function DraftChatWorkspace({
       setCustomAgentModalOpen: s.setCustomAgentModalOpen,
     })),
   );
+  const draftAutomationActions = React.useMemo<ChatInputAutomationAction[]>(() => {
+    const controlsLocked = draftCreating || draftAutoRenaming || Boolean(draftChat.prompt);
+    const supportsDraftAutomation = spawnAgentConfig.kind === 'builtin';
+    const actions: ChatInputAutomationAction[] = [];
+    for (const [idx, automation] of (Array.isArray(automations) ? automations : []).entries()) {
+      const automationId = String(automation?.id ?? '').trim();
+      if (!automationId) continue;
+      const automationLabel = String(automation?.label ?? '').trim() || `Automation ${idx + 1}`;
+      const prompt = String(automation?.prompt ?? '').trim();
+      const onFailurePrompt = String(automation?.onFailurePrompt ?? '').trim();
+      const runsRaw = Number(automation?.runs);
+      const runs = Number.isFinite(runsRaw)
+        ? Math.max(AUTOMATION_RUNS_MIN, Math.min(AUTOMATION_RUNS_MAX, Math.round(runsRaw)))
+        : AUTOMATION_RUNS_MIN;
+      const sleepBetweenRunsSeconds = automationSleepSecondsFromConfig(automation);
+      const sleepBetweenRunsLabel = formatAutomationSleepInterval(automation);
+      const stopPhrase = String(automation?.stopPhrase ?? '').trim();
+      const stopPhraseCaseSensitive = Boolean(automation?.stopPhraseCaseSensitive);
+      const title = !supportsDraftAutomation
+        ? 'Automations require a builtin transcript agent.'
+        : !prompt
+          ? `Set a prompt for "${automationLabel}" in Settings > Automation first.`
+          : `Create a new drone and run "${automationLabel}" for ${runs} ${
+              runs === 1 ? 'run' : 'runs'
+            }${sleepBetweenRunsSeconds > 0 ? ` (${sleepBetweenRunsLabel.toLowerCase()} between runs)` : ''}.`;
+      actions.push({
+        id: `draft-automation:${automationId}`,
+        kind: 'automation',
+        label: `Run ${automationLabel}`,
+        onSelect: () => {
+          void onStartDraftAutomation({
+            automationId,
+            automationLabel,
+            prompt,
+            onFailurePrompt,
+            runs,
+            sleepBetweenRunsSeconds,
+            stopPhrase,
+            stopPhraseCaseSensitive,
+          });
+        },
+        onSelectWithRuns: (selectedRuns) => {
+          const normalizedRuns = Math.max(
+            AUTOMATION_RUNS_MIN,
+            Math.min(AUTOMATION_RUNS_MAX, Math.round(Number(selectedRuns) || runs)),
+          );
+          void onStartDraftAutomation({
+            automationId,
+            automationLabel,
+            prompt,
+            onFailurePrompt,
+            runs: normalizedRuns,
+            sleepBetweenRunsSeconds,
+            stopPhrase,
+            stopPhraseCaseSensitive,
+          });
+        },
+        title,
+        disabled: controlsLocked || !supportsDraftAutomation || !prompt,
+        active: false,
+        defaultRuns: runs,
+        minRuns: AUTOMATION_RUNS_MIN,
+        maxRuns: AUTOMATION_RUNS_MAX,
+        sleepBetweenRunsLabel,
+        statusText: `${runs} ${runs === 1 ? 'run' : 'runs'}`,
+      });
+    }
+    return actions;
+  }, [automations, draftAutoRenaming, draftChat.prompt, draftCreating, onStartDraftAutomation, spawnAgentConfig.kind]);
 
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
@@ -269,6 +349,7 @@ export function DraftChatWorkspace({
         waiting={Boolean(draftChat.prompt)}
         autoFocus={!draftCreating && !draftAutoRenaming && !draftChat.prompt}
         attachmentsEnabled={false}
+        automationActions={draftAutomationActions}
         onSend={async (payload: ChatSendPayload) => {
           if (!draftChat.prompt) return await onStartDraftPrompt(payload);
           const droneId = String(draftChat.droneId ?? '').trim();
