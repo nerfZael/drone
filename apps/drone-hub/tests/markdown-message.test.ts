@@ -61,4 +61,21 @@ describe('MarkdownMessage', () => {
     expect(html).toContain('target="_blank"');
     expect(html).toContain('rel="noreferrer"');
   });
+
+  test('nests loose bullet lines directly under numbered items', () => {
+    const html = renderMarkdown(
+      [
+        '1. `Source`',
+        '- `none`',
+        '- `host-current`',
+        '- `host-local-ref`',
+        '- `remote-ref`',
+        '- `remote-default`',
+      ].join('\n'),
+    );
+    expect(html).toContain('<ol>');
+    expect(html).toContain('<ul>');
+    expect(html).not.toContain('</ol><ul>');
+    expect(html).toMatch(/<li>[\s\S]*Source[\s\S]*<ul>/);
+  });
 });

@@ -148,6 +148,43 @@ function parseInlineCodeFileReference(raw: string): MarkdownFileReference | null
   return { raw: text, path: normalizedPath, line, column };
 }
 
+function normalizeLooseNestedBullets(rawText: string): string {
+  const text = String(rawText ?? '');
+  if (!text.includes('\n')) return text;
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  let changed = false;
+
+  for (let i = 0; i < lines.length - 1; i++) {
+    const parent = /^(\s*)\d+[.)]\s+.+$/.exec(lines[i] ?? '');
+    if (!parent) continue;
+    const parentIndent = String(parent[1] ?? '').length;
+    const next = /^(\s*)[-+*]\s+.+$/.exec(lines[i + 1] ?? '');
+    if (!next) continue;
+    const nextIndent = String(next[1] ?? '').length;
+    if (nextIndent > parentIndent) continue;
+
+    for (let j = i + 1; j < lines.length; j++) {
+      const line = lines[j] ?? '';
+      if (!line.trim()) continue;
+      const bullet = /^(\s*)[-+*]\s+.+$/.exec(line);
+      if (bullet) {
+        const bulletIndent = String(bullet[1] ?? '').length;
+        if (bulletIndent <= parentIndent) {
+          lines[j] = `${' '.repeat(parentIndent + 3)}${line.trimStart()}`;
+          changed = true;
+        }
+        continue;
+      }
+      const ordered = /^(\s*)\d+[.)]\s+.+$/.exec(line);
+      const lineIndent = (line.match(/^\s*/)?.[0].length ?? 0);
+      if (ordered && String(ordered[1] ?? '').length <= parentIndent) break;
+      if (lineIndent <= parentIndent) break;
+    }
+  }
+
+  return changed ? lines.join('\n') : text;
+}
+
 export function MarkdownMessage({
   text,
   className,
@@ -175,6 +212,7 @@ export function MarkdownMessage({
     },
     [onOpenLink],
   );
+  const normalizedText = React.useMemo(() => normalizeLooseNestedBullets(text), [text]);
 
   return (
     <div className={`dh-markdown ${className ?? ''}`}>
@@ -279,7 +317,7 @@ export function MarkdownMessage({
           },
         }}
       >
-        {text}
+        {normalizedText}
       </ReactMarkdown>
     </div>
   );
