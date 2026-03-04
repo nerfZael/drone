@@ -5,12 +5,19 @@ import { BaseConfigManager } from '../config/base';
 
 describe('BaseConfigManager', () => {
   const originalXdgDataHome = process.env.XDG_DATA_HOME;
+  const originalHome = process.env.HOME;
   let tempRoot = '';
+  let tempHome = '';
+  let tempXdgDataHome = '';
 
   beforeEach(() => {
     tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dvm-base-config-'));
-    process.env.XDG_DATA_HOME = tempRoot;
-    fs.mkdirSync(path.join(tempRoot, 'dvm'), { recursive: true });
+    tempHome = path.join(tempRoot, 'home');
+    tempXdgDataHome = path.join(tempRoot, 'xdg-data');
+    process.env.HOME = tempHome;
+    process.env.XDG_DATA_HOME = tempXdgDataHome;
+    fs.mkdirSync(path.join(tempHome, '.dvm'), { recursive: true });
+    fs.mkdirSync(path.join(tempXdgDataHome, 'dvm'), { recursive: true });
   });
 
   afterEach(() => {
@@ -18,6 +25,11 @@ describe('BaseConfigManager', () => {
       delete process.env.XDG_DATA_HOME;
     } else {
       process.env.XDG_DATA_HOME = originalXdgDataHome;
+    }
+    if (originalHome == null) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
     }
     if (tempRoot) fs.rmSync(tempRoot, { recursive: true, force: true });
   });
