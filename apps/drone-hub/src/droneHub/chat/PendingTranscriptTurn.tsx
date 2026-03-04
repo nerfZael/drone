@@ -1,10 +1,11 @@
 import React from 'react';
 import { stripAnsi, timeAgo } from '../../domain';
 import type { PendingPrompt } from '../types';
+import { copyText } from '../app/clipboard';
 import { CollapsibleMarkdown } from './CollapsibleMarkdown';
 import { ImageAttachmentChips, isAttachmentOnlyPrompt, normalizeImageAttachmentRefs } from './ImageAttachmentChips';
 import type { MarkdownFileReference } from './MarkdownMessage';
-import { IconBot, IconUser, TypingDots } from './icons';
+import { IconBot, IconCopy, IconUser, TypingDots } from './icons';
 
 const MANUAL_UNSTICK_STALE_MS = 2 * 60_000;
 
@@ -55,6 +56,14 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
     Boolean(onRequestUnstick);
   const canCancelQueued = item.state === 'queued' && !item.automation && Boolean(onCancelQueued);
   const showAgentPendingBubble = !(item.state === 'queued' && !isFailed);
+  const userCopyText = String(promptText ?? '');
+  const agentCopyText = isFailed
+    ? stripAnsi(item.error || 'failed to send')
+    : item.state === 'sending'
+      ? 'Sending…'
+      : item.state === 'sent'
+        ? 'Waiting…'
+        : 'Typing…';
   return (
     <div className="animate-fade-in opacity-90 group/pending-turn">
       <div className="flex justify-end mb-3">
@@ -101,7 +110,18 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
               You
             </span>
           </div>
-          <div className="bg-[var(--user-dim)] border border-[rgba(148,163,184,.14)] rounded-lg rounded-tr-sm px-4 py-3">
+          <div className="bg-[var(--user-dim)] border border-[rgba(148,163,184,.14)] rounded-lg rounded-tr-sm px-4 py-3 relative group">
+            {userCopyText.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => void copyText(userCopyText)}
+                className="absolute top-2 right-2 inline-flex items-center justify-center w-7 h-7 rounded border transition-opacity pointer-events-none opacity-0 group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto bg-[rgba(0,0,0,.15)] border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--user)] hover:border-[var(--user-muted)] hover:bg-[rgba(0,0,0,.25)]"
+                title="Copy user message"
+                aria-label="Copy user message"
+              >
+                <IconCopy className="w-3.5 h-3.5 opacity-90" />
+              </button>
+            ) : null}
             {promptText ? (
               <CollapsibleMarkdown
                 text={promptText}
@@ -146,10 +166,21 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
               </span>
             </div>
             <div
-              className={`border rounded-lg rounded-tl-sm px-4 py-3 ${
+              className={`border rounded-lg rounded-tl-sm px-4 py-3 relative group ${
                 isFailed ? 'bg-[var(--red-subtle)] border-[rgba(255,90,90,.2)]' : 'bg-[var(--accent-subtle)] border-[rgba(167,139,250,.12)]'
               }`}
             >
+              {agentCopyText.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => void copyText(agentCopyText)}
+                  className="absolute top-2 right-2 inline-flex items-center justify-center w-7 h-7 rounded border transition-opacity pointer-events-none opacity-0 group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto bg-[rgba(0,0,0,.15)] border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[rgba(0,0,0,.25)]"
+                  title="Copy agent message"
+                  aria-label="Copy agent message"
+                >
+                  <IconCopy className="w-3.5 h-3.5 opacity-90" />
+                </button>
+              ) : null}
               {isFailed ? (
                 <div className="text-[12.5px] leading-[1.6] text-[var(--red)] whitespace-pre-wrap">
                   {stripAnsi(item.error || 'failed to send')}
