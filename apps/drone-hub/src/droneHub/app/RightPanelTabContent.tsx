@@ -102,7 +102,6 @@ type RightPanelTabContentProps = {
   setSelectedPreviewUrlOverride: (nextUrl: string | null) => void;
   agentLabel: string;
   portRows: DronePortMapping[];
-  setSelectedPreviewPort: (port: DronePortMapping | null) => void;
   onOpenFileInEditor: (entry: DroneFsEntry) => void;
   onOpenPullRequestInChanges: (paneKey: 'top' | 'bottom' | 'single', pullRequest: RepoPullRequestSummary) => void;
 };
@@ -160,7 +159,6 @@ export function RightPanelTabContent({
   setSelectedPreviewUrlOverride,
   agentLabel,
   portRows,
-  setSelectedPreviewPort,
   onOpenFileInEditor,
   onOpenPullRequestInChanges,
 }: RightPanelTabContentProps) {
@@ -249,6 +247,7 @@ export function RightPanelTabContent({
         <DronePreviewDock
           key={`${paneKey}-preview`}
           selectedPort={selectedPreviewPort}
+          portRows={portRows}
           portReachabilityByHostPort={currentPortReachability}
           portsLoading={portsLoading}
           portsError={isCurrent ? portsErrorUi : portsError}
@@ -277,9 +276,7 @@ export function RightPanelTabContent({
           agentLabel={agentLabel}
           chatName={chatName}
           portRows={portRows}
-          selectedPort={selectedPreviewPort}
           portReachabilityByHostPort={currentPortReachability}
-          onSelectPort={setSelectedPreviewPort}
           portsLoading={portsLoading}
           portsError={isCurrent ? portsErrorUi : portsError}
         />

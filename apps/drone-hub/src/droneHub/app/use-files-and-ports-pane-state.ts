@@ -178,11 +178,19 @@ export function useFilesAndPortsPaneState({ currentDrone, requestJson }: UseFile
 
   const selectedPreviewPort = React.useMemo(() => {
     const droneId = String(currentDrone?.id ?? '').trim();
-    if (!droneId) return null;
+    if (!droneId || portRows.length === 0) return null;
     const saved = portPreviewByDrone[droneId];
-    if (!saved) return null;
-    return portRows.find((p) => p.containerPort === saved.containerPort) ?? null;
-  }, [currentDrone?.id, portPreviewByDrone, portRows]);
+    if (saved) {
+      const savedPort = portRows.find((p) => p.containerPort === saved.containerPort) ?? null;
+      if (savedPort) return savedPort;
+    }
+    const defaultContainerPort = Number(currentDrone?.containerPort);
+    if (Number.isFinite(defaultContainerPort) && defaultContainerPort > 0) {
+      const droneDefault = portRows.find((p) => p.containerPort === Math.floor(defaultContainerPort)) ?? null;
+      if (droneDefault) return droneDefault;
+    }
+    return portRows[0] ?? null;
+  }, [currentDrone?.containerPort, currentDrone?.id, portPreviewByDrone, portRows]);
   const portRowsSignature = React.useMemo(
     () => portRows.map((p) => `${p.containerPort}:${p.hostPort}`).join(','),
     [portRows],
@@ -311,15 +319,7 @@ export function useFilesAndPortsPaneState({ currentDrone, requestJson }: UseFile
     const droneId = String(currentDrone?.id ?? '').trim();
     if (!droneId || portRows.length === 0) return;
     let mounted = true;
-    const probeTargets =
-      selectedPreviewPort &&
-      portRows.some(
-        (p) =>
-          p.hostPort === selectedPreviewPort.hostPort &&
-          p.containerPort === selectedPreviewPort.containerPort,
-      )
-        ? [selectedPreviewPort]
-        : [];
+    const probeTargets = [...portRows];
 
     const warmStatuses = () => {
       setPortReachabilityByDrone((prev) => {
@@ -360,7 +360,6 @@ export function useFilesAndPortsPaneState({ currentDrone, requestJson }: UseFile
     };
 
     warmStatuses();
-    if (probeTargets.length === 0) return;
     void probe();
 
     return () => {
@@ -370,8 +369,6 @@ export function useFilesAndPortsPaneState({ currentDrone, requestJson }: UseFile
     currentDrone?.id,
     portRows,
     portRowsSignature,
-    selectedPreviewPort?.containerPort,
-    selectedPreviewPort?.hostPort,
   ]);
 
   const currentPortReachability = React.useMemo(() => {
@@ -403,4 +400,3 @@ export function useFilesAndPortsPaneState({ currentDrone, requestJson }: UseFile
     setSelectedPreviewPort,
   };
 }
-
