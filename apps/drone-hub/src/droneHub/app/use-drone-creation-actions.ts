@@ -12,6 +12,17 @@ type QueueDronesResponse = {
   total: number;
 };
 
+export type DraftAutomationStartInput = {
+  automationId: string;
+  automationLabel?: string;
+  prompt: string;
+  onFailurePrompt?: string;
+  runs?: number;
+  sleepBetweenRunsSeconds?: number;
+  stopPhrase?: string;
+  stopPhraseCaseSensitive?: boolean;
+};
+
 type UseDroneCreationActionsArgs = {
   drones: Array<{ id: string; name: string }>;
   createNameRows: string[];
@@ -74,6 +85,28 @@ type UseDroneCreationActionsArgs = {
   preferredSelectedDroneRef: React.MutableRefObject<string | null>;
   preferredSelectedDroneHoldUntilRef: React.MutableRefObject<number>;
 };
+
+const DRAFT_AUTOMATION_START_MAX_ATTEMPTS = 8;
+
+function draftAutomationStartRetryDelayMs(attempt: number): number {
+  const step = Math.max(1, attempt + 1);
+  return Math.min(2000, 300 * step);
+}
+
+function shouldRetryDraftAutomationStart(error: unknown): boolean {
+  const status = Number((error as any)?.status ?? 0);
+  const message = String((error as any)?.message ?? error ?? '').trim().toLowerCase();
+  if (status === 409 && /requires a builtin/i.test(message)) return false;
+  if (status === 404 && (/unknown drone|unknown chat/.test(message) || !message)) return true;
+  if (status === 409 && /still starting|starting|seeding|busy/.test(message)) return true;
+  return false;
+}
+
+async function waitMs(ms: number): Promise<void> {
+  await new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
 
 export function useDroneCreationActions({
   drones,
@@ -304,15 +337,41 @@ export function useDroneCreationActions({
   ]);
 
   const createDroneFromDraft = React.useCallback(
-    async (opts?: { prompt?: string; name?: string; group?: string; autoRename?: boolean }): Promise<boolean> => {
+    async (opts?: {
+      prompt?: string;
+      name?: string;
+      group?: string;
+      autoRename?: boolean;
+      autoRenamePrompt?: string;
+      automationStart?: DraftAutomationStartInput;
+    }): Promise<boolean> => {
       const pending = draftChat?.prompt ?? null;
       const prompt = String(opts?.prompt ?? pending?.prompt ?? '').trim();
+      const automationStartRaw = opts?.automationStart ?? null;
+      const automationId = String(automationStartRaw?.automationId ?? '').trim();
+      const automationLabel = String(automationStartRaw?.automationLabel ?? '').trim() || automationId || 'Automation';
+      const automationPrompt = String(automationStartRaw?.prompt ?? '').trim();
+      const automationOnFailurePrompt = String(automationStartRaw?.onFailurePrompt ?? '').trim();
+      const automationRunsRaw = Number(automationStartRaw?.runs);
+      const automationRuns = Number.isFinite(automationRunsRaw)
+        ? Math.max(1, Math.round(automationRunsRaw))
+        : 1;
+      const automationSleepRaw = Number(automationStartRaw?.sleepBetweenRunsSeconds);
+      const automationSleepBetweenRunsSeconds = Number.isFinite(automationSleepRaw)
+        ? Math.max(0, Math.round(automationSleepRaw))
+        : 0;
+      const automationStopPhrase = String(automationStartRaw?.stopPhrase ?? '').trim();
+      const automationStopPhraseCaseSensitive = Boolean(automationStartRaw?.stopPhraseCaseSensitive);
       const nameRaw = String(opts?.name ?? draftCreateName ?? '');
       const name = nameRaw.trim();
       const group = String(opts?.group ?? draftCreateGroup ?? '').trim();
       const repoPath = String(draftCreateRepoPath ?? '').trim();
-      if (!prompt) {
-        setDraftCreateError('Send a first message before creating a drone.');
+      if (!prompt && !automationPrompt) {
+        setDraftCreateError('Send a first message or run an automation before creating a drone.');
+        return false;
+      }
+      if (!prompt && automationPrompt && !automationId) {
+        setDraftCreateError('Automation id is required.');
         return false;
       }
       if (name && (name.length > 80 || /[\r\n]/.test(name))) {
@@ -324,10 +383,16 @@ export function useDroneCreationActions({
         return false;
       }
 
+      const seedAgent = resolveAgentKeyToConfig(spawnAgentKey);
+      if (automationPrompt && automationId && seedAgent.kind !== 'builtin') {
+        setDraftCreateError('Automations require a builtin transcript agent.');
+        return false;
+      }
       setDraftCreating(true);
       setDraftCreateError(null);
-      const seedAgent = resolveAgentKeyToConfig(spawnAgentKey);
       const seedModel = spawnModelForSeed;
+      let createdDrone = false;
+      let postCreateError: string | null = null;
       try {
         const body: any = {
           ...(name ? { name } : {}),
@@ -350,6 +415,7 @@ export function useDroneCreationActions({
         const droneId = String((data as any)?.id ?? '').trim();
         const createdName = String((data as any)?.name ?? name ?? '').trim() || droneId;
         if (!droneId) throw new Error('create drone did not return an id');
+        createdDrone = true;
 
         rememberStartupSeed([{ id: droneId, name: createdName }], {
           agent: seedAgent,
@@ -380,20 +446,63 @@ export function useDroneCreationActions({
           };
         });
 
+        if (automationPrompt && automationId) {
+          const startBody = {
+            automationId,
+            automationLabel,
+            prompt: automationPrompt,
+            onFailurePrompt: automationOnFailurePrompt,
+            runs: automationRuns,
+            sleepBetweenRunsSeconds: automationSleepBetweenRunsSeconds,
+            stopPhrase: automationStopPhrase,
+            stopPhraseCaseSensitive: automationStopPhraseCaseSensitive,
+          };
+          let lastError: unknown = null;
+          for (let attempt = 0; attempt < DRAFT_AUTOMATION_START_MAX_ATTEMPTS; attempt += 1) {
+            try {
+              await requestJson(
+                `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent('default')}/automations/start`,
+                {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify(startBody),
+                },
+              );
+              lastError = null;
+              break;
+            } catch (e: any) {
+              lastError = e;
+              if (attempt >= DRAFT_AUTOMATION_START_MAX_ATTEMPTS - 1 || !shouldRetryDraftAutomationStart(e)) break;
+              await waitMs(draftAutomationStartRetryDelayMs(attempt));
+            }
+          }
+          if (lastError) {
+            const automationErr = String((lastError as any)?.message ?? lastError ?? 'failed to start automation').trim();
+            postCreateError = `Drone created, but failed to start automation: ${automationErr}`;
+          }
+        }
+
         if (opts?.autoRename) {
-          setDraftAutoRenaming(true);
-          void suggestAndRenameDraftDrone(droneId, prompt).finally(() => setDraftAutoRenaming(false));
+          const renameSourcePrompt = String(opts.autoRenamePrompt ?? prompt ?? '').trim();
+          if (renameSourcePrompt) {
+            setDraftAutoRenaming(true);
+            void suggestAndRenameDraftDrone(droneId, renameSourcePrompt).finally(() => setDraftAutoRenaming(false));
+          }
         }
 
         setDraftCreateOpen(false);
         setDraftCreateName('');
         setDraftCreateGroup('');
-        setDraftCreateError(null);
+        setDraftCreateError(postCreateError);
         setDraftNameSuggestionError(null);
         setDraftNameSuggesting(false);
         return true;
       } catch (e: any) {
         const err = e?.message ?? String(e);
+        if (createdDrone) {
+          setDraftCreateError(`Drone created, but setup was incomplete: ${err}`);
+          return true;
+        }
         setDraftChat((prev: any) => {
           if (!prev?.prompt) return prev;
           return {
@@ -487,9 +596,88 @@ export function useDroneCreationActions({
     ],
   );
 
+  const startDraftAutomation = React.useCallback(
+    async (automation: DraftAutomationStartInput): Promise<boolean> => {
+      const automationId = String(automation?.automationId ?? '').trim();
+      const prompt = String(automation?.prompt ?? '').trim();
+      const automationLabel = String(automation?.automationLabel ?? '').trim() || automationId || 'Automation';
+      const runsRaw = Number(automation?.runs);
+      const runs = Number.isFinite(runsRaw) ? Math.max(1, Math.round(runsRaw)) : 1;
+      const onFailurePrompt = String(automation?.onFailurePrompt ?? '').trim();
+      const sleepRaw = Number(automation?.sleepBetweenRunsSeconds);
+      const sleepBetweenRunsSeconds = Number.isFinite(sleepRaw) ? Math.max(0, Math.round(sleepRaw)) : 0;
+      const stopPhrase = String(automation?.stopPhrase ?? '').trim();
+      const stopPhraseCaseSensitive = Boolean(automation?.stopPhraseCaseSensitive);
+      if (!automationId) {
+        setDraftCreateError('Automation id is required.');
+        return false;
+      }
+      if (!prompt) {
+        setDraftCreateError(`Set a prompt for "${automationLabel}" in Settings > Automation first.`);
+        return false;
+      }
+
+      setDraftChat({
+        droneId: '',
+        droneName: '',
+        focusKey: draftChat?.focusKey,
+        prompt: {
+          id: `draft-automation-${makeId()}`,
+          at: new Date().toISOString(),
+          prompt: `Run ${automationLabel} (${runs} ${runs === 1 ? 'run' : 'runs'})`,
+          automation: {
+            kind: 'prompt-loop',
+            stage: 'run',
+            automationId,
+            automationLabel,
+            runsTotal: runs,
+            promptPreview: prompt.slice(0, 160),
+          },
+          state: 'sending',
+        },
+      });
+      setDraftCreateError(null);
+      setDraftCreateName('');
+      setDraftSuggestedName('');
+      setDraftNameSuggesting(false);
+      setDraftNameSuggestionError(null);
+      setDraftAutoRenaming(false);
+      setDraftCreateOpen(false);
+
+      return await createDroneFromDraft({
+        prompt: '',
+        autoRename: true,
+        autoRenamePrompt: prompt,
+        automationStart: {
+          automationId,
+          automationLabel,
+          prompt,
+          onFailurePrompt,
+          runs,
+          sleepBetweenRunsSeconds,
+          stopPhrase,
+          stopPhraseCaseSensitive,
+        },
+      });
+    },
+    [
+      createDroneFromDraft,
+      draftChat?.focusKey,
+      setDraftAutoRenaming,
+      setDraftChat,
+      setDraftCreateError,
+      setDraftCreateName,
+      setDraftCreateOpen,
+      setDraftNameSuggestionError,
+      setDraftNameSuggesting,
+      setDraftSuggestedName,
+    ],
+  );
+
   return {
     createDrone,
     createDroneFromDraft,
     startDraftPrompt,
+    startDraftAutomation,
   };
 }
