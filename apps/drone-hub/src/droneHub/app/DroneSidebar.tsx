@@ -455,6 +455,7 @@ export function DroneSidebar({
     (d: DroneSummary, opts?: { showGroup?: boolean }) => {
       const isOptimistic = sidebarOptimisticDroneIdSet.has(d.id);
       const chats = getSidebarDroneChats(d);
+      const hasOnlyDefaultChat = chats.length === 1 && chats[0] === 'default';
       const showGroup = opts?.showGroup;
       return (
         <div key={d.id} className="flex flex-col gap-0.5">
@@ -472,7 +473,18 @@ export function DroneSidebar({
             showGroup={showGroup}
             onClick={(rowOpts) => onSelectDroneCard(d.id, rowOpts)}
             draggable={!movingDroneGroups && !isOptimistic}
-            onDragStart={(event) => onDroneDragStart(d.id, event)}
+            onDragStart={(event) => {
+              onDroneDragStart(d.id, event);
+              if (!hasOnlyDefaultChat) return;
+              const nodeId = createCanvasChatNodeId(d.id, 'default');
+              if (!nodeId) return;
+              const payload = [{ nodeId, droneId: d.id, chatName: 'default' }];
+              try {
+                event.dataTransfer.setData(DRONE_CHAT_DND_MIME, JSON.stringify(payload));
+              } catch {
+                // Ignore drag payload assignment errors.
+              }
+            }}
             onDragEnd={onDroneDragEnd}
             onClone={() => onOpenCloneModal(d)}
             onRename={() => onRenameDrone(d.id)}
@@ -509,51 +521,53 @@ export function DroneSidebar({
             }
             deleteBusy={Boolean(deletingDrones[d.id])}
           />
-          <div className="ml-5 mr-1 flex flex-col gap-0.5">
-            {chats.map((chatName) => {
-              const chatNodeId = createCanvasChatNodeId(d.id, chatName);
-              if (!chatNodeId) return null;
-              const selected = selectedDrone === d.id && activeChatName === chatName;
-              const unread = unreadAgentMessageByDroneId[d.id] === true && chatName === 'default';
-              return (
-                <button
-                  key={`${d.id}:${chatName}`}
-                  type="button"
-                  draggable={!movingDroneGroups && !isOptimistic}
-                  onDragStart={(event) => {
-                    event.stopPropagation();
-                    event.dataTransfer.effectAllowed = 'copyMove';
-                    const payload = [{ droneId: d.id, chatName }];
-                    try {
-                      event.dataTransfer.setData(DRONE_CHAT_DND_MIME, JSON.stringify(payload));
-                    } catch {
-                      // Ignore drag payload assignment errors.
-                    }
-                    try {
-                      event.dataTransfer.setData('text/plain', `${uiDroneName(d.name)} / ${chatName}`);
-                    } catch {
-                      // Ignore drag payload assignment errors.
-                    }
-                  }}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onSelectDroneChat(d.id, chatName);
-                  }}
-                  className={`w-full h-7 rounded border px-2 text-left text-[11px] transition-all flex items-center gap-1.5 ${
-                    selected
-                      ? 'border-[var(--accent-muted)] bg-[var(--selected)] text-[var(--fg)]'
-                      : 'border-transparent text-[var(--muted)] hover:border-[var(--border-subtle)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                  }`}
-                  title={`${uiDroneName(d.name)} / ${chatName}`}
-                >
-                  {unread ? <span className="h-1.5 w-1.5 rounded-full bg-[var(--yellow)] flex-shrink-0" /> : <span className="h-1.5 w-1.5 flex-shrink-0" />}
-                  <span className="truncate font-mono">
-                    {chatName}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+          {!hasOnlyDefaultChat ? (
+            <div className="ml-5 mr-1 flex flex-col gap-0.5">
+              {chats.map((chatName) => {
+                const chatNodeId = createCanvasChatNodeId(d.id, chatName);
+                if (!chatNodeId) return null;
+                const selected = selectedDrone === d.id && activeChatName === chatName;
+                const unread = unreadAgentMessageByDroneId[d.id] === true && chatName === 'default';
+                return (
+                  <button
+                    key={`${d.id}:${chatName}`}
+                    type="button"
+                    draggable={!movingDroneGroups && !isOptimistic}
+                    onDragStart={(event) => {
+                      event.stopPropagation();
+                      event.dataTransfer.effectAllowed = 'copyMove';
+                      const payload = [{ droneId: d.id, chatName }];
+                      try {
+                        event.dataTransfer.setData(DRONE_CHAT_DND_MIME, JSON.stringify(payload));
+                      } catch {
+                        // Ignore drag payload assignment errors.
+                      }
+                      try {
+                        event.dataTransfer.setData('text/plain', `${uiDroneName(d.name)} / ${chatName}`);
+                      } catch {
+                        // Ignore drag payload assignment errors.
+                      }
+                    }}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onSelectDroneChat(d.id, chatName);
+                    }}
+                    className={`w-full h-7 rounded border px-2 text-left text-[11px] transition-all flex items-center gap-1.5 ${
+                      selected
+                        ? 'border-[var(--accent-muted)] bg-[var(--selected)] text-[var(--fg)]'
+                        : 'border-transparent text-[var(--muted)] hover:border-[var(--border-subtle)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                    }`}
+                    title={`${uiDroneName(d.name)} / ${chatName}`}
+                  >
+                    {unread ? <span className="h-1.5 w-1.5 rounded-full bg-[var(--yellow)] flex-shrink-0" /> : <span className="h-1.5 w-1.5 flex-shrink-0" />}
+                    <span className="truncate font-mono">
+                      {chatName}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
         </div>
       );
     },

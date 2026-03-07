@@ -312,6 +312,26 @@ export function SelectedDroneWorkspace({
     () => resolveChatNameForDrone(currentDrone, selectedChat),
     [currentDrone, selectedChat],
   );
+  const openChatErrorDetails = React.useCallback(() => {
+    const message = String(chatInfoError ?? '').trim();
+    if (!message) return;
+    openDroneErrorModal(currentDrone, message, null);
+  }, [chatInfoError, currentDrone, openDroneErrorModal]);
+  const reportChatMutationError = React.useCallback(
+    (action: string, error: unknown) => {
+      const status = Number((error as any)?.status ?? 0);
+      const reason = String((error as any)?.message ?? error ?? '').trim() || 'Unknown error.';
+      const statusLabel = Number.isFinite(status) && status > 0 ? ` [HTTP ${status}]` : '';
+      const missingEndpointHint =
+        status === 404 && /^404\b/i.test(reason)
+          ? ' (chat management endpoint may be unavailable; restart hub on latest build)'
+          : '';
+      const message = `${action} failed${statusLabel}: ${reason}${missingEndpointHint}`;
+      setChatInfoError(message);
+      openDroneErrorModal(currentDrone, message, null);
+    },
+    [currentDrone, openDroneErrorModal, setChatInfoError],
+  );
   const chatDraftKey = React.useMemo(
     () => chatInputDraftKeyForDroneChat(currentDrone.id, activeChatName),
     [activeChatName, currentDrone.id],
@@ -680,11 +700,11 @@ export function SelectedDroneWorkspace({
       setPendingChatSelection(chatName);
       setChatInfoError(null);
     } catch (e: any) {
-      setChatInfoError(e?.message ?? String(e));
+      reportChatMutationError('Create chat', e);
     } finally {
       setChatMutationBusy(null);
     }
-  }, [activeChatName, availableChats.length, currentDrone.id, setChatInfoError]);
+  }, [activeChatName, availableChats.length, currentDrone.id, reportChatMutationError, setChatInfoError]);
 
   const renameActiveChat = React.useCallback(async () => {
     if (activeChatName === 'default') {
@@ -708,11 +728,11 @@ export function SelectedDroneWorkspace({
       setPendingChatSelection(newName);
       setChatInfoError(null);
     } catch (e: any) {
-      setChatInfoError(e?.message ?? String(e));
+      reportChatMutationError('Rename chat', e);
     } finally {
       setChatMutationBusy(null);
     }
-  }, [activeChatName, currentDrone.id, setChatInfoError]);
+  }, [activeChatName, currentDrone.id, reportChatMutationError, setChatInfoError]);
 
   const deleteActiveChat = React.useCallback(async () => {
     if (activeChatName === 'default') {
@@ -730,11 +750,11 @@ export function SelectedDroneWorkspace({
       setPendingChatSelection('default');
       setChatInfoError(null);
     } catch (e: any) {
-      setChatInfoError(e?.message ?? String(e));
+      reportChatMutationError('Delete chat', e);
     } finally {
       setChatMutationBusy(null);
     }
-  }, [activeChatName, currentDrone.id, setChatInfoError, setSelectedChat]);
+  }, [activeChatName, currentDrone.id, reportChatMutationError, setChatInfoError, setSelectedChat]);
 
   return (
     <>
@@ -833,10 +853,15 @@ export function SelectedDroneWorkspace({
                 </>
               )}
               {chatInfoError && !loadingChatInfo && (
-                <span className="text-[11px] text-[var(--red)] flex items-center gap-1" title={chatInfoError}>
+                <button
+                  type="button"
+                  onClick={openChatErrorDetails}
+                  className="text-[11px] text-[var(--red)] inline-flex items-center gap-1 hover:underline focus:outline-none"
+                  title={chatInfoError}
+                >
                   <span className="w-1.5 h-1.5 rounded-full bg-[var(--red)]" />
-                  Agent error
-                </span>
+                  Chat error
+                </button>
               )}
               {repoOpError && (
                 <button
