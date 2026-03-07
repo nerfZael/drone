@@ -11445,6 +11445,19 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             d.chats = d.chats ?? {};
             if (d.chats[chatName]) throw new Error(`chat already exists: ${chatName}`);
             const createdAt = nowIso();
+            if (copyFrom && !d.chats[copyFrom]) {
+              // Older drones may still rely on the implicit UI fallback for "default"
+              // and have no materialized chat entries yet. Backfill that default entry
+              // so creating a second chat from it does not fail with 404.
+              if (copyFrom === 'default' && Object.keys(d.chats).length === 0) {
+                d.chats.default = {
+                  createdAt,
+                  agent: { kind: 'builtin', id: 'cursor' },
+                };
+              } else {
+                throw new Error(`unknown chat: ${copyFrom}`);
+              }
+            }
             let entry: any = {
               createdAt,
               agent: { kind: 'builtin', id: 'cursor' },

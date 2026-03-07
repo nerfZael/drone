@@ -11,6 +11,7 @@ import { health, procStart, procStop, readOutput, sendInput, sendKeys, status } 
 import { dvmClone, dvmCreate, dvmExec, dvmLs, dvmPorts, dvmRemove, dvmScript, dvmSessionStart } from './host/dvm';
 import { droneRootPath } from './host/paths';
 import { loadRegistry, updateRegistry } from './host/registry';
+import { parseHubRunnerProcessesFromPsOutput, selectHubRunnerPidsToStop } from './hub/orphan-hub-runners';
 import { startDroneHubApiServer } from './hub/server';
 
 function sleep(ms: number) {
@@ -424,6 +425,68 @@ async function waitForPidExit(pid: number, timeoutMs: number): Promise<boolean> 
     await sleep(80);
   }
   return !pidIsRunning(pid);
+}
+
+async function readCommandStdout(command: string, args: string[]): Promise<string> {
+  return await new Promise<string>((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => {
+      stdout += String(chunk ?? '');
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += String(chunk ?? '');
+    });
+    child.once('error', reject);
+    child.once('close', (code) => {
+      if (code === 0) {
+        resolve(stdout);
+        return;
+      }
+      reject(new Error(stderr.trim() || `${command} exited with code ${code ?? 'unknown'}`));
+    });
+  });
+}
+
+async function findRecoverableHubRunnerPids(preferredUiPort: number): Promise<number[]> {
+  if (process.platform === 'win32') return [];
+  try {
+    const psOutput = await readCommandStdout('ps', ['-eo', 'pid=,args=']);
+    const matches = parseHubRunnerProcessesFromPsOutput(psOutput, {
+      cliPath: __filename,
+      selfPid: process.pid,
+    });
+    return selectHubRunnerPidsToStop(matches, preferredUiPort);
+  } catch {
+    return [];
+  }
+}
+
+async function stopHubProcess(pid: number): Promise<void> {
+  try {
+    process.kill(-pid, 'SIGTERM');
+  } catch {
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch {
+      // ignore
+    }
+  }
+
+  const exited = await waitForPidExit(pid, 8_000);
+  if (!exited) {
+    try {
+      process.kill(-pid, 'SIGKILL');
+    } catch {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {
+        // ignore
+      }
+    }
+    await waitForPidExit(pid, 2_000);
+  }
 }
 
 async function runGit(
@@ -1331,7 +1394,22 @@ async function hubStart(options: any) {
 
 async function hubStop() {
   const cur = await readHubState();
+  const fallbackUiPort = cur?.uiPort ?? 5174;
   if (!cur) {
+    const recoveredPids = await findRecoverableHubRunnerPids(fallbackUiPort);
+    if (recoveredPids.length > 0) {
+      for (const pid of recoveredPids) {
+        await stopHubProcess(pid);
+      }
+      try {
+        await fs.rm(hubStatePath(), { force: true });
+      } catch {
+        // ignore
+      }
+      // eslint-disable-next-line no-console
+      console.log(JSON.stringify({ ok: true, stopped: true, recovered: true, pids: recoveredPids }, null, 2));
+      return;
+    }
     // eslint-disable-next-line no-console
     console.log(JSON.stringify({ ok: true, stopped: false, reason: 'not running' }, null, 2));
     return;
@@ -1344,35 +1422,21 @@ async function hubStop() {
     } catch {
       // ignore
     }
+    const recoveredPids = await findRecoverableHubRunnerPids(fallbackUiPort);
+    if (recoveredPids.length > 0) {
+      for (const recoveredPid of recoveredPids) {
+        await stopHubProcess(recoveredPid);
+      }
+      // eslint-disable-next-line no-console
+      console.log(JSON.stringify({ ok: true, stopped: true, recovered: true, pids: recoveredPids }, null, 2));
+      return;
+    }
     // eslint-disable-next-line no-console
     console.log(JSON.stringify({ ok: true, stopped: false, reason: 'stale state file', previousPid: pid }, null, 2));
     return;
   }
 
-  // Prefer killing the whole process group (hub + Vite child).
-  try {
-    process.kill(-pid, 'SIGTERM');
-  } catch {
-    try {
-      process.kill(pid, 'SIGTERM');
-    } catch {
-      // ignore
-    }
-  }
-
-  const exited = await waitForPidExit(pid, 8_000);
-  if (!exited) {
-    try {
-      process.kill(-pid, 'SIGKILL');
-    } catch {
-      try {
-        process.kill(pid, 'SIGKILL');
-      } catch {
-        // ignore
-      }
-    }
-    await waitForPidExit(pid, 2_000);
-  }
+  await stopHubProcess(pid);
 
   try {
     await fs.rm(hubStatePath(), { force: true });

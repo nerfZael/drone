@@ -101,6 +101,37 @@ describeSocketSuite('chat management api', () => {
     expect((listed.data?.chats ?? []).includes('review')).toBe(true);
   });
 
+  test('creates a chat from the implicit default on legacy drones without chats', async () => {
+    const droneId = 'drone-chat-legacy-default';
+    const now = new Date().toISOString();
+    await updateRegistry((reg: any) => {
+      reg.drones = reg.drones ?? {};
+      reg.drones[droneId] = {
+        id: droneId,
+        name: droneId,
+        hostPort: 1,
+        token: 'mock-token',
+        containerPort: 7777,
+        repoPath: '',
+        createdAt: now,
+      };
+    });
+
+    const created = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'review', copyFromChat: 'default' }),
+    });
+    expect(created.r.status).toBe(201);
+    expect(created.data?.ok).toBe(true);
+    expect(created.data?.chat).toBe('review');
+
+    const listed = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats`);
+    expect(listed.r.status).toBe(200);
+    expect((listed.data?.chats ?? []).includes('default')).toBe(true);
+    expect((listed.data?.chats ?? []).includes('review')).toBe(true);
+  });
+
   test('renames and deletes chats with default protections', async () => {
     const droneId = 'drone-chat-rename-delete';
     await seedDrone(droneId);
