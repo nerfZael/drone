@@ -35,6 +35,7 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     openDraftChatComposer,
     openCreateModal,
     selectDroneCard,
+    selectDroneChat,
     openCloneModal,
     renameDrone,
     setDroneBaseImage,
@@ -89,6 +90,9 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     onOpenDraftChatComposer: openDraftChatComposer,
     onOpenCreateModal: openCreateModal,
     onSelectDroneCard: selectDroneCard,
+    onSelectDroneChat: (droneId, chatName) => {
+      selectDroneChat(droneId, chatName);
+    },
     onOpenCloneModal: openCloneModal,
     onRenameDrone: renameDrone,
     onSetDroneBaseImage: (droneId) => {

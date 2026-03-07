@@ -634,6 +634,108 @@ export function SelectedDroneWorkspace({
     [currentDrone.hubPhase, currentDrone.id, currentDrone.repoAttached, currentDrone.repoPath, setRightPanelOpen, setRightPanelTab],
   );
 
+  const availableChats = React.useMemo(() => {
+    const list = Array.isArray(currentDrone.chats) ? currentDrone.chats : [];
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const raw of list) {
+      const name = String(raw ?? '').trim();
+      if (!name || seen.has(name)) continue;
+      seen.add(name);
+      out.push(name);
+    }
+    return out;
+  }, [currentDrone.chats]);
+  const [chatMutationBusy, setChatMutationBusy] = React.useState<null | 'create' | 'rename' | 'delete'>(null);
+  const [pendingChatSelection, setPendingChatSelection] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    setPendingChatSelection(null);
+  }, [currentDrone.id]);
+
+  React.useEffect(() => {
+    const pending = String(pendingChatSelection ?? '').trim();
+    if (!pending) return;
+    if (!availableChats.includes(pending)) return;
+    setSelectedChat(pending);
+    setPendingChatSelection(null);
+  }, [availableChats, pendingChatSelection, setSelectedChat]);
+
+  const createChat = React.useCallback(async () => {
+    const seed = `chat-${Math.max(1, availableChats.length + 1)}`;
+    const raw = window.prompt('New chat name', seed);
+    if (raw == null) return;
+    const chatName = String(raw ?? '').trim();
+    if (!chatName) {
+      setChatInfoError('Chat name is required.');
+      return;
+    }
+    setChatMutationBusy('create');
+    try {
+      await requestJson<{ ok: true }>(`/api/drones/${encodeURIComponent(currentDrone.id)}/chats`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: chatName, copyFromChat: activeChatName }),
+      });
+      setPendingChatSelection(chatName);
+      setChatInfoError(null);
+    } catch (e: any) {
+      setChatInfoError(e?.message ?? String(e));
+    } finally {
+      setChatMutationBusy(null);
+    }
+  }, [activeChatName, availableChats.length, currentDrone.id, setChatInfoError]);
+
+  const renameActiveChat = React.useCallback(async () => {
+    if (activeChatName === 'default') {
+      setChatInfoError('Default chat cannot be renamed.');
+      return;
+    }
+    const raw = window.prompt('Rename chat', activeChatName);
+    if (raw == null) return;
+    const newName = String(raw ?? '').trim();
+    if (!newName || newName === activeChatName) return;
+    setChatMutationBusy('rename');
+    try {
+      await requestJson<{ ok: true }>(
+        `/api/drones/${encodeURIComponent(currentDrone.id)}/chats/${encodeURIComponent(activeChatName)}/rename`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ newName }),
+        },
+      );
+      setPendingChatSelection(newName);
+      setChatInfoError(null);
+    } catch (e: any) {
+      setChatInfoError(e?.message ?? String(e));
+    } finally {
+      setChatMutationBusy(null);
+    }
+  }, [activeChatName, currentDrone.id, setChatInfoError]);
+
+  const deleteActiveChat = React.useCallback(async () => {
+    if (activeChatName === 'default') {
+      setChatInfoError('Default chat cannot be deleted.');
+      return;
+    }
+    if (!window.confirm(`Delete chat "${activeChatName}"?`)) return;
+    setChatMutationBusy('delete');
+    try {
+      await requestJson<{ ok: true }>(
+        `/api/drones/${encodeURIComponent(currentDrone.id)}/chats/${encodeURIComponent(activeChatName)}`,
+        { method: 'DELETE' },
+      );
+      setSelectedChat('default');
+      setPendingChatSelection('default');
+      setChatInfoError(null);
+    } catch (e: any) {
+      setChatInfoError(e?.message ?? String(e));
+    } finally {
+      setChatMutationBusy(null);
+    }
+  }, [activeChatName, currentDrone.id, setChatInfoError, setSelectedChat]);
+
   return (
     <>
       {/* Header — spans full width (chat + right panel) */}
@@ -903,8 +1005,52 @@ export function SelectedDroneWorkspace({
           ) : null}
           {/* Separator */}
           <div className="w-px h-4 bg-[var(--border-subtle)]" />
-          {/* Chat tabs (inline) */}
-          {currentDrone.chats.length > 0 && <ChatTabs chats={currentDrone.chats} selected={selectedChat} onSelect={setSelectedChat} />}
+          {/* Chat tabs + management */}
+          <div className="flex items-center gap-1.5 min-w-0">
+            {availableChats.length > 0 && <ChatTabs chats={availableChats} selected={selectedChat} onSelect={setSelectedChat} />}
+            <button
+              type="button"
+              onClick={() => void createChat()}
+              disabled={Boolean(chatMutationBusy)}
+              className={`inline-flex items-center h-6 px-2 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
+                chatMutationBusy
+                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                  : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+              }`}
+              style={{ fontFamily: 'var(--display)' }}
+              title="Create a new chat on this drone"
+            >
+              {chatMutationBusy === 'create' ? 'Creating...' : 'New'}
+            </button>
+            <button
+              type="button"
+              onClick={() => void renameActiveChat()}
+              disabled={Boolean(chatMutationBusy) || activeChatName === 'default'}
+              className={`inline-flex items-center h-6 px-2 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
+                chatMutationBusy || activeChatName === 'default'
+                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                  : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+              }`}
+              style={{ fontFamily: 'var(--display)' }}
+              title={activeChatName === 'default' ? 'Default chat cannot be renamed' : 'Rename selected chat'}
+            >
+              Rename
+            </button>
+            <button
+              type="button"
+              onClick={() => void deleteActiveChat()}
+              disabled={Boolean(chatMutationBusy) || activeChatName === 'default'}
+              className={`inline-flex items-center h-6 px-2 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
+                chatMutationBusy || activeChatName === 'default'
+                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                  : 'bg-[rgba(255,255,255,.02)] border-[rgba(255,90,90,.25)] text-[var(--muted-dim)] hover:text-[var(--red)] hover:border-[rgba(255,90,90,.45)]'
+              }`}
+              style={{ fontFamily: 'var(--display)' }}
+              title={activeChatName === 'default' ? 'Default chat cannot be deleted' : 'Delete selected chat'}
+            >
+              {chatMutationBusy === 'delete' ? 'Deleting...' : 'Delete'}
+            </button>
+          </div>
           {/* Spacer */}
           <div className="flex-1" />
           {/* Primary actions */}

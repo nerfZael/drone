@@ -611,6 +611,7 @@ export function useDroneSidebarUiState() {
       viewMode: s.viewMode,
       activeRepoPath: s.activeRepoPath,
       selectedDrone: s.selectedDrone,
+      selectedChat: s.selectedChat,
       selectedGroupMultiChat: s.selectedGroupMultiChat,
       sidebarReposCollapsed: s.sidebarReposCollapsed,
       sidebarAutoMinimize: s.sidebarAutoMinimize,

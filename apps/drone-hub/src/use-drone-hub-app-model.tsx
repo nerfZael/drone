@@ -15,6 +15,7 @@ import {
   RIGHT_PANEL_TAB_LABELS,
   RIGHT_PANEL_TABS,
   STARTUP_SEED_MISSING_GRACE_MS,
+  createCanvasChatNodeId,
   type RightPanelTab,
 } from './droneHub/app/app-config';
 import type { DroneSidebarProps } from './droneHub/app/DroneSidebar';
@@ -839,7 +840,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     moveDronesToGroup,
   });
-  const { selectDroneCard: selectDroneCardBase } = useDroneSelectionState({
+  const { selectDroneCard: selectDroneCardBase, selectDroneChat: selectDroneChatBase } = useDroneSelectionState({
     orderedDroneIds,
     selectedDrone,
     selectedDroneIds,
@@ -870,6 +871,14 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       selectDroneCardBase(droneIdRaw, opts);
     },
     [clearDronesUnread, selectDroneCardBase],
+  );
+  const selectDroneChat = React.useCallback(
+    (droneIdRaw: string, chatNameRaw: string) => {
+      const droneId = String(droneIdRaw ?? '').trim();
+      if (droneId) clearDronesUnread([droneId]);
+      selectDroneChatBase(droneIdRaw, chatNameRaw);
+    },
+    [clearDronesUnread, selectDroneChatBase],
   );
   const { createDrone, createDroneFromDraft, startDraftPrompt, startDraftAutomation } =
     useDroneCreationActions({
@@ -1340,29 +1349,32 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [currentDrone, openEditorFile],
   );
-  const onActivateDroneFromCanvas = React.useCallback(
-    (droneIdRaw: string) => {
+  const onActivateChatFromCanvas = React.useCallback(
+    (droneIdRaw: string, chatNameRaw: string) => {
       const droneId = String(droneIdRaw ?? '').trim();
       if (!droneId || !sidebarSelectableDroneIdSet.has(droneId)) return;
-      selectDroneCard(droneId);
+      const chatName = String(chatNameRaw ?? '').trim() || 'default';
+      selectDroneChat(droneId, chatName);
     },
-    [selectDroneCard, sidebarSelectableDroneIdSet],
+    [selectDroneChat, sidebarSelectableDroneIdSet],
   );
   const sendCanvasPrompt = React.useCallback(
     async (
-      droneIdsRaw: string[],
+      targetsRaw: Array<{ droneId: string; chatName: string }>,
       promptRaw: string,
     ): Promise<{ ok: boolean; error?: string | null }> => {
       const prompt = String(promptRaw ?? '').trim();
       if (!prompt) return { ok: false, error: 'Message is empty.' };
 
-      const droneIds: string[] = [];
-      for (const raw of Array.isArray(droneIdsRaw) ? droneIdsRaw : []) {
-        const id = String(raw ?? '').trim();
-        if (!id || droneIds.includes(id)) continue;
-        droneIds.push(id);
+      const targets: Array<{ droneId: string; chatName: string }> = [];
+      for (const raw of Array.isArray(targetsRaw) ? targetsRaw : []) {
+        const droneId = String(raw?.droneId ?? '').trim();
+        if (!droneId) continue;
+        const chatName = String(raw?.chatName ?? '').trim() || 'default';
+        if (targets.some((x) => x.droneId === droneId && x.chatName === chatName)) continue;
+        targets.push({ droneId, chatName });
       }
-      if (droneIds.length === 0) return { ok: false, error: 'No drones selected.' };
+      if (targets.length === 0) return { ok: false, error: 'No chats selected.' };
 
       const droneById = new Map<string, DroneSummary>();
       for (const drone of drones) {
@@ -1370,22 +1382,22 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         if (!id) continue;
         droneById.set(id, drone);
       }
-      const preferredChat = selectedChat || 'default';
-      const targetNames = droneIds.map((id) => {
-        const drone = droneById.get(id);
-        return drone ? uiDroneName(drone.name) : id;
+      const targetNames = targets.map(({ droneId, chatName }) => {
+        const drone = droneById.get(droneId);
+        const droneLabel = drone ? uiDroneName(drone.name) : droneId;
+        return `${droneLabel} / ${chatName}`;
       });
 
       const results = await Promise.allSettled(
-        droneIds.map(async (droneId) => {
+        targets.map(async ({ droneId, chatName }) => {
           const drone = droneById.get(droneId);
           if (!drone) throw new Error(`Drone "${droneId}" is unavailable.`);
           if (isDroneStartingOrSeeding(drone.hubPhase)) {
             throw new Error(`"${uiDroneName(drone.name)}" is still starting.`);
           }
-          const chatName = resolveChatNameForDrone(drone, preferredChat);
+          const resolvedChat = resolveChatNameForDrone(drone, chatName);
           await requestJson<{ ok: true; accepted: true; promptId: string }>(
-            `/api/drones/${encodeURIComponent(drone.id)}/chats/${encodeURIComponent(chatName)}/prompt`,
+            `/api/drones/${encodeURIComponent(drone.id)}/chats/${encodeURIComponent(resolvedChat)}/prompt`,
             {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
@@ -1397,20 +1409,20 @@ export function useDroneHubAppModel(): DroneHubAppModel {
 
       const failed: string[] = [];
       for (let i = 0; i < results.length; i += 1) {
-        if (results[i].status === 'rejected') failed.push(targetNames[i] ?? droneIds[i]);
+        if (results[i].status === 'rejected') failed.push(targetNames[i] ?? targets[i]?.droneId ?? 'unknown');
       }
       if (failed.length === 0) return { ok: true, error: null };
-      if (failed.length === droneIds.length) {
-        return { ok: false, error: `Failed to send to all ${droneIds.length} drones.` };
+      if (failed.length === targets.length) {
+        return { ok: false, error: `Failed to send to all ${targets.length} chats.` };
       }
       const preview = failed.slice(0, 3).join(', ');
       const more = failed.length > 3 ? ` +${failed.length - 3} more` : '';
       return {
         ok: true,
-        error: `Sent to ${droneIds.length - failed.length}/${droneIds.length}. Failed: ${preview}${more}.`,
+        error: `Sent to ${targets.length - failed.length}/${targets.length}. Failed: ${preview}${more}.`,
       };
     },
-    [drones, requestJson, selectedChat, uiDroneName],
+    [drones, requestJson, uiDroneName],
   );
   const createCanvasDroneFromDraft = React.useCallback(
     async (payload: {
@@ -1499,45 +1511,130 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       suggestAndRenameDraftDrone,
     ],
   );
-  const renameCanvasDrone = React.useCallback(
+  const renameCanvasChat = React.useCallback(
     async (
       droneIdRaw: string,
+      chatNameRaw: string,
       newNameRaw: string,
-    ): Promise<{ ok: boolean; error?: string | null }> => {
+    ): Promise<{ ok: boolean; chatName?: string; error?: string | null }> => {
       const droneId = String(droneIdRaw ?? '').trim();
+      const chatName = String(chatNameRaw ?? '').trim() || 'default';
       const newName = String(newNameRaw ?? '').trim();
       if (!droneId) return { ok: false, error: 'Missing drone id.' };
+      if (!chatName) return { ok: false, error: 'Missing chat name.' };
       if (!sidebarSelectableDroneIdSet.has(droneId)) return { ok: false, error: 'Drone is unavailable.' };
-      const renamed = await renameDroneTo(droneId, newName);
-      return renamed.ok ? { ok: true, error: null } : { ok: false, error: renamed.error };
-    },
-    [renameDroneTo, sidebarSelectableDroneIdSet],
-  );
-  const deleteCanvasDrones = React.useCallback(
-    async (droneIdsRaw: string[]): Promise<string[]> => {
-      const targetIds: string[] = [];
-      for (const raw of Array.isArray(droneIdsRaw) ? droneIdsRaw : []) {
-        const id = String(raw ?? '').trim();
-        if (!id || targetIds.includes(id)) continue;
-        if (!sidebarSelectableDroneIdSet.has(id)) continue;
-        targetIds.push(id);
-      }
-      if (targetIds.length === 0) return [];
 
-      const deletedIds: string[] = [];
-      for (const droneId of targetIds) {
-        const deleted = await deleteDrone(droneId);
-        if (deleted) deletedIds.push(droneId);
+      const drone = drones.find((item) => item.id === droneId) ?? null;
+      const chats = Array.isArray(drone?.chats) && drone!.chats.length > 0 ? drone!.chats : ['default'];
+      if (!chats.includes(chatName)) return { ok: false, error: `Chat "${chatName}" is unavailable.` };
+      if (chatName === 'default') return { ok: false, error: 'Default chat cannot be renamed.' };
+      if (!newName) return { ok: false, error: 'New chat name is required.' };
+      if (newName === chatName) return { ok: true, chatName, error: null };
+
+      try {
+        await requestJson<{ ok: true; chat: string }>(
+          `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/rename`,
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ newName }),
+          },
+        );
+        if (selectedDrone === droneId && selectedChat === chatName) {
+          setSelectedChat(newName);
+        }
+        return { ok: true, chatName: newName, error: null };
+      } catch (err: any) {
+        return { ok: false, error: err?.message ?? String(err) };
       }
-      return deletedIds;
     },
-    [deleteDrone, sidebarSelectableDroneIdSet],
+    [drones, requestJson, selectedChat, selectedDrone, setSelectedChat, sidebarSelectableDroneIdSet],
+  );
+  const deleteCanvasChat = React.useCallback(
+    async (
+      droneIdRaw: string,
+      chatNameRaw: string,
+    ): Promise<{ ok: boolean; deletedDrone?: boolean; error?: string | null }> => {
+      const droneId = String(droneIdRaw ?? '').trim();
+      const chatName = String(chatNameRaw ?? '').trim() || 'default';
+      if (!droneId) return { ok: false, error: 'Missing drone id.' };
+      if (!sidebarSelectableDroneIdSet.has(droneId)) return { ok: false, error: 'Drone is unavailable.' };
+
+      const drone = drones.find((item) => item.id === droneId) ?? null;
+      const chats = Array.isArray(drone?.chats) && drone!.chats.length > 0 ? drone!.chats : ['default'];
+      if (!chats.includes(chatName)) return { ok: false, error: `Chat "${chatName}" is unavailable.` };
+
+      if (chats.length <= 1) {
+        const deletedDrone = await deleteDrone(droneId);
+        return deletedDrone
+          ? { ok: true, deletedDrone: true, error: null }
+          : { ok: false, deletedDrone: false, error: autoDelete ? 'Failed to delete drone.' : '' };
+      }
+      if (chatName === 'default') {
+        return { ok: false, error: 'Default chat cannot be deleted while other chats exist.' };
+      }
+
+      if (!autoDelete) {
+        const droneLabel = drone ? uiDroneName(drone.name) : droneId;
+        const confirmed = window.confirm(`Delete chat "${chatName}" from "${droneLabel}"?`);
+        if (!confirmed) return { ok: false, error: '' };
+      }
+
+      try {
+        await requestJson<{ ok: true; deletedChat: string }>(
+          `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}`,
+          { method: 'DELETE' },
+        );
+        if (selectedDrone === droneId && selectedChat === chatName) {
+          const remaining = chats.filter((chat) => chat !== chatName);
+          const fallbackChat = remaining.includes('default') ? 'default' : remaining[0] ?? 'default';
+          setSelectedChat(fallbackChat);
+        }
+        return { ok: true, deletedDrone: false, error: null };
+      } catch (err: any) {
+        return { ok: false, deletedDrone: false, error: err?.message ?? String(err) };
+      }
+    },
+    [
+      autoDelete,
+      deleteDrone,
+      drones,
+      requestJson,
+      selectedChat,
+      selectedDrone,
+      setSelectedChat,
+      sidebarSelectableDroneIdSet,
+      uiDroneName,
+    ],
   );
   const canvasDraftRepoLabel = React.useMemo(() => {
     const repoPath = String(chatHeaderRepoPath ?? '').trim();
     if (!repoPath) return '';
     return repoPath.split(/[\\/]/).filter(Boolean).pop() || repoPath;
   }, [chatHeaderRepoPath]);
+  const orderedCanvasChatNodeIds = React.useMemo(() => {
+    const droneById = new Map(drones.map((drone) => [drone.id, drone] as const));
+    const out: string[] = [];
+    for (const droneId of orderedDroneIds) {
+      const drone = droneById.get(droneId);
+      if (!drone) continue;
+      const chats = Array.isArray(drone.chats) && drone.chats.length > 0 ? drone.chats : ['default'];
+      for (const chatNameRaw of chats) {
+        const chatName = String(chatNameRaw ?? '').trim();
+        if (!chatName) continue;
+        const nodeId = createCanvasChatNodeId(droneId, chatName);
+        if (!nodeId || out.includes(nodeId)) continue;
+        out.push(nodeId);
+      }
+    }
+    return out;
+  }, [drones, orderedDroneIds]);
+  const selectedCanvasChatNodeId = React.useMemo(() => {
+    const droneId = String(selectedDrone ?? '').trim();
+    if (!droneId) return null;
+    const chatName = String(selectedChat ?? '').trim() || 'default';
+    return createCanvasChatNodeId(droneId, chatName);
+  }, [selectedChat, selectedDrone]);
 
   const renderRightPanelTabContent = React.useCallback(
     (drone: DroneSummary, tab: RightPanelTab, paneKey: 'top' | 'bottom' | 'single'): React.ReactNode => (
@@ -1546,16 +1643,16 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         tab={tab}
         paneKey={paneKey}
         selectedChat={selectedChat}
-        orderedDroneIds={orderedDroneIds}
+        orderedCanvasChatNodeIds={orderedCanvasChatNodeIds}
         droneNameById={droneNameById}
         droneRepoById={droneRepoById}
         draftRepoLabel={canvasDraftRepoLabel}
         droneStateById={droneStateById}
-        onActivateDroneFromCanvas={onActivateDroneFromCanvas}
+        onActivateChatFromCanvas={onActivateChatFromCanvas}
         onSendCanvasPrompt={sendCanvasPrompt}
         onCreateCanvasDroneFromDraft={createCanvasDroneFromDraft}
-        onRenameCanvasDrone={renameCanvasDrone}
-        onDeleteCanvasDrones={deleteCanvasDrones}
+        onRenameCanvasChat={renameCanvasChat}
+        onDeleteCanvasChat={deleteCanvasChat}
         canvasSpawnAgentMenuEntries={spawnAgentMenuEntries}
         canvasSpawnAgentKey={spawnAgentKey}
         onCanvasSpawnAgentKeyChange={setSpawnAgentKey}
@@ -1571,6 +1668,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         canvasPullHostBranchBeforeCreate={pullHostBranchBeforeCreate}
         onCanvasPullHostBranchBeforeCreateChange={setPullHostBranchBeforeCreate}
         currentDroneId={currentDrone?.id ?? null}
+        currentCanvasChatNodeId={selectedCanvasChatNodeId}
         defaultFsPathForCurrentDrone={defaultFsPathForCurrentDrone}
         uiDroneName={uiDroneName}
         currentFsPath={currentFsPath}
@@ -1611,15 +1709,15 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       currentFsPath,
       currentPortReachability,
       createCanvasDroneFromDraft,
-      renameCanvasDrone,
-      deleteCanvasDrones,
+      renameCanvasChat,
+      deleteCanvasChat,
       canvasDraftRepoLabel,
       defaultFsPathForCurrentDrone,
       droneNameById,
       droneRepoById,
       droneStateById,
-      onActivateDroneFromCanvas,
-      orderedDroneIds,
+      onActivateChatFromCanvas,
+      orderedCanvasChatNodeIds,
       filesPane,
       fsEntries,
       fsError,
@@ -1644,6 +1742,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setSpawnAgentKey,
       setSpawnModel,
       selectedChat,
+      selectedCanvasChatNodeId,
       selectedPreviewDefaultUrl,
       selectedPreviewPort,
       selectedPreviewUrlOverride,
@@ -1715,6 +1814,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     openDraftChatComposer,
     openCreateModal,
     selectDroneCard,
+    selectDroneChat,
     openCloneModal,
     renameDrone,
     setDroneBaseImage,

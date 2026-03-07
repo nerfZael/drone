@@ -40,7 +40,7 @@ export function CanvasMessageBar({
   onRequestNewDraft,
 }: CanvasMessageBarProps) {
   if (selectedCount <= 0) return null;
-  const fallbackLabel = selectedCount === 1 ? '1 drone' : `${selectedCount} drones`;
+  const fallbackLabel = selectedCount === 1 ? '1 chat' : `${selectedCount} chats`;
   const targetLabel = String(selectedLabel ?? '').trim() || fallbackLabel;
   const sendDisabled = sending || draft.trim().length === 0;
 
