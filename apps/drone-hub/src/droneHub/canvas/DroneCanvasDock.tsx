@@ -3,11 +3,23 @@ import { useShallow } from 'zustand/react/shallow';
 import type { ChatAgentConfig } from '../../domain';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
 import type { DroneSummary } from '../types';
-import { DRONE_DND_MIME } from '../app/app-config';
+import {
+  DRONE_CHAT_DND_MIME,
+  createCanvasChatNodeId,
+  parseCanvasChatNodeId,
+} from '../app/app-config';
 import { isShortcutMatch } from '../app/shortcuts';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { TypingDots } from '../overview/icons';
 import { CanvasMessageBar } from './CanvasMessageBar';
+import {
+  buildChatCountByDroneId,
+  collectUniqueChatTargets,
+  getChatNodeActionFlags,
+  orderChatNodeIdsBySidebar,
+  parseDraggedChatPayload,
+  sortChatNodeIdsForDestructiveDelete,
+} from './chat-node-utils';
 import {
   DRAFT_CANVAS_NODE_PREFIX,
   MAX_CANVAS_SCALE,
@@ -73,52 +85,15 @@ type DroneCanvasIndicatorState = {
   unreadAgentMessage: boolean;
 };
 
-function parseDraggedDroneIds(event: React.DragEvent<HTMLElement>): string[] {
-  const out: string[] = [];
-  const add = (raw: unknown) => {
-    const id = String(raw ?? '').trim();
-    if (!id || out.includes(id)) return;
-    out.push(id);
-  };
-
-  try {
-    const jsonRaw = event.dataTransfer.getData(DRONE_DND_MIME);
-    if (jsonRaw) {
-      const parsed = JSON.parse(jsonRaw);
-      if (Array.isArray(parsed)) {
-        for (const value of parsed) add(value);
-      }
-    }
-  } catch {
-    // Ignore malformed drag payload.
-  }
-
-  return out;
+function parseDraggedChatNodeIds(event: React.DragEvent<HTMLElement>): string[] {
+  return parseDraggedChatPayload(event.dataTransfer.getData(DRONE_CHAT_DND_MIME));
 }
 
-function orderDraggedDroneIds(ids: string[], sidebarOrderedDroneIds: string[]): string[] {
-  if (!Array.isArray(ids) || ids.length <= 1) return ids;
-  const rankById = new Map<string, number>();
-  for (const [index, idRaw] of sidebarOrderedDroneIds.entries()) {
-    const id = String(idRaw ?? '').trim();
-    if (!id || rankById.has(id)) continue;
-    rankById.set(id, index);
-  }
-
-  return ids
-    .map((id, index) => ({ id, index, rank: rankById.get(id) ?? Number.POSITIVE_INFINITY }))
-    .sort((a, b) => {
-      if (a.rank !== b.rank) return a.rank - b.rank;
-      return a.index - b.index;
-    })
-    .map((item) => item.id);
-}
-
-function hasDroneDragPayload(event: React.DragEvent<HTMLElement>): boolean {
+function hasChatDragPayload(event: React.DragEvent<HTMLElement>): boolean {
   const transfer = event.dataTransfer;
   if (!transfer) return false;
   const types = Array.from(transfer.types ?? []);
-  return types.includes(DRONE_DND_MIME);
+  return types.includes(DRONE_CHAT_DND_MIME);
 }
 
 function screenToWorldPoint(
@@ -261,16 +236,16 @@ function renderNodeUnreadIndicator(state: DroneCanvasIndicatorState | null): Rea
 
 export function DroneCanvasDock({
   droneNameById,
-  sidebarOrderedDroneIds,
-  sidebarSelectedDroneId,
+  sidebarOrderedChatNodeIds,
+  sidebarSelectedChatNodeId,
   droneRepoById,
   draftRepoLabel,
   droneStateById,
-  onActivateDrone,
+  onActivateChat,
   onSendCanvasPrompt,
   onCreateCanvasDroneFromDraft,
-  onRenameDrone,
-  onDeleteDrones,
+  onRenameChat,
+  onDeleteChat,
   spawnAgentMenuEntries,
   spawnAgentKey,
   onSpawnAgentKeyChange,
@@ -287,14 +262,14 @@ export function DroneCanvasDock({
   onPullHostBranchBeforeCreateChange,
 }: {
   droneNameById: Record<string, string>;
-  sidebarOrderedDroneIds: string[];
-  sidebarSelectedDroneId?: string | null;
+  sidebarOrderedChatNodeIds: string[];
+  sidebarSelectedChatNodeId?: string | null;
   droneRepoById: Record<string, string>;
   draftRepoLabel?: string;
   droneStateById: Record<string, DroneCanvasIndicatorState>;
-  onActivateDrone?: (droneId: string) => void;
+  onActivateChat?: (droneId: string, chatName: string) => void;
   onSendCanvasPrompt?: (
-    droneIds: string[],
+    targets: Array<{ droneId: string; chatName: string }>,
     prompt: string,
   ) => Promise<{ ok: boolean; error?: string | null }>;
   onCreateCanvasDroneFromDraft?: (payload: {
@@ -309,11 +284,15 @@ export function DroneCanvasDock({
       pullHostBranchBeforeCreate: boolean;
     };
   }) => Promise<{ ok: boolean; droneId?: string; droneName?: string; error?: string | null }>;
-  onRenameDrone?: (
+  onRenameChat?: (
     droneId: string,
+    chatName: string,
     newName: string,
-  ) => Promise<{ ok: boolean; error?: string | null }>;
-  onDeleteDrones?: (droneIds: string[]) => Promise<string[]>;
+  ) => Promise<{ ok: boolean; chatName?: string; error?: string | null }>;
+  onDeleteChat?: (
+    droneId: string,
+    chatName: string,
+  ) => Promise<{ ok: boolean; deletedDrone?: boolean; error?: string | null }>;
   spawnAgentMenuEntries: UiMenuSelectEntry[];
   spawnAgentKey: string;
   onSpawnAgentKeyChange: (next: string) => void;
@@ -391,6 +370,7 @@ export function DroneCanvasDock({
   const [inlineRenamingDroneId, setInlineRenamingDroneId] = React.useState<string | null>(null);
   const [inlineRenameDraft, setInlineRenameDraft] = React.useState('');
   const [inlineRenameBusy, setInlineRenameBusy] = React.useState(false);
+  const [deletingChatNodeById, setDeletingChatNodeById] = React.useState<Record<string, boolean>>({});
   const [messageBarExpanded, setMessageBarExpanded] = React.useState(false);
   const [messageDraft, setMessageDraft] = React.useState('');
   const [draftSpawnCount, setDraftSpawnCount] = React.useState('1');
@@ -421,10 +401,23 @@ export function DroneCanvasDock({
   const selectedDraftPrompt = selectedDraftNodeId
     ? String(draftPromptByNodeId[selectedDraftNodeId] ?? '')
     : '';
+  const chatCountByDroneId = React.useMemo(
+    () => buildChatCountByDroneId(sidebarOrderedChatNodeIds),
+    [sidebarOrderedChatNodeIds],
+  );
   const selectedMessageDraft = selectedDraftNodeId ? selectedDraftPrompt : messageDraft;
-  const selectedMessageLabel = selectedDraftNodeId
-    ? String(nodesByDroneId[selectedDraftNodeId]?.label ?? '').trim() || 'Untitled'
-    : null;
+  const selectedMessageLabel = React.useMemo(() => {
+    if (selectedDroneIds.length !== 1) return null;
+    const selectedNodeId = String(selectedDroneIds[0] ?? '').trim();
+    if (!selectedNodeId) return null;
+    if (isCanvasDraftNodeId(selectedNodeId)) {
+      return String(nodesByDroneId[selectedNodeId]?.label ?? '').trim() || 'Untitled';
+    }
+    const chatRef = parseCanvasChatNodeId(selectedNodeId);
+    if (!chatRef) return null;
+    const droneLabel = String(droneNameById[chatRef.droneId] ?? '').trim() || chatRef.droneId;
+    return `${droneLabel} / ${chatRef.chatName}`;
+  }, [droneNameById, nodesByDroneId, selectedDroneIds]);
   const controlsDisabled = messageSending;
   const normalizedSpawnAgentKey = String(spawnAgentKey ?? '').trim();
   const normalizedSpawnModel = String(spawnModel ?? '');
@@ -476,7 +469,12 @@ export function DroneCanvasDock({
   const beginInlineRename = React.useCallback(
     (droneIdRaw: string) => {
       const droneId = String(droneIdRaw ?? '').trim();
-      if (!droneId || isCanvasDraftNodeId(droneId)) return;
+      if (!droneId) return;
+      if (!isCanvasDraftNodeId(droneId)) {
+        const chatRef = parseCanvasChatNodeId(droneId);
+        if (!chatRef) return;
+        if (chatRef.chatName === 'default') return;
+      }
       const node = nodesByDroneId[droneId];
       if (!node) return;
       setSelectedDroneIds([droneId]);
@@ -491,20 +489,44 @@ export function DroneCanvasDock({
   const submitInlineRename = React.useCallback(async () => {
     const droneId = String(inlineRenamingDroneId ?? '').trim();
     if (!droneId) return;
-    if (!onRenameDrone) {
-      cancelInlineRename();
-      return;
-    }
     const newName = String(inlineRenameDraft ?? '').trim();
     const currentName = String(nodesByDroneId[droneId]?.label ?? '').trim();
     if (!newName || newName === currentName) {
       cancelInlineRename();
       return;
     }
+    if (isCanvasDraftNodeId(droneId)) {
+      const node = nodesByDroneId[droneId];
+      if (!node) {
+        cancelInlineRename();
+        return;
+      }
+      upsertNodes([{ droneId, label: newName, x: node.x, y: node.y }]);
+      cancelInlineRename();
+      return;
+    }
+    const chatRef = parseCanvasChatNodeId(droneId);
+    if (!chatRef) {
+      cancelInlineRename();
+      return;
+    }
+    if (!onRenameChat) {
+      setMessageError('Chat rename is unavailable.');
+      cancelInlineRename();
+      return;
+    }
     setInlineRenameBusy(true);
     try {
-      const result = await onRenameDrone(droneId, newName);
+      const result = await onRenameChat(chatRef.droneId, chatRef.chatName, newName);
       if (result.ok) {
+        const nextChatName = String(result.chatName ?? newName).trim() || newName;
+        const nextNodeId = createCanvasChatNodeId(chatRef.droneId, nextChatName);
+        if (nextNodeId && nextNodeId !== droneId) {
+          replaceNodeId(droneId, nextNodeId, nextChatName);
+        } else {
+          const node = nodesByDroneId[droneId];
+          if (node) upsertNodes([{ droneId, label: nextChatName, x: node.x, y: node.y }]);
+        }
         cancelInlineRename();
         return;
       }
@@ -519,9 +541,59 @@ export function DroneCanvasDock({
     inlineRenameDraft,
     inlineRenamingDroneId,
     nodesByDroneId,
-    onRenameDrone,
+    onRenameChat,
+    replaceNodeId,
     setMessageError,
+    upsertNodes,
   ]);
+
+  const deleteChatNode = React.useCallback(
+    async (nodeIdRaw: string) => {
+      const nodeId = String(nodeIdRaw ?? '').trim();
+      if (!nodeId || isCanvasDraftNodeId(nodeId)) {
+        removeNodes([nodeId]);
+        return;
+      }
+      const chatRef = parseCanvasChatNodeId(nodeId);
+      if (!chatRef) {
+        removeNodes([nodeId]);
+        return;
+      }
+      if (!onDeleteChat) {
+        setMessageError('Chat deletion is unavailable.');
+        return;
+      }
+      setDeletingChatNodeById((prev) => ({ ...prev, [nodeId]: true }));
+      setMessageError(null);
+      try {
+        const result = await onDeleteChat(chatRef.droneId, chatRef.chatName);
+        if (!result.ok) {
+          const errorText = String(result.error ?? '').trim();
+          if (errorText) setMessageError(errorText);
+          return;
+        }
+        if (result.deletedDrone) {
+          const toRemove = nodeOrder.filter((candidateId) => {
+            const ref = parseCanvasChatNodeId(candidateId);
+            return Boolean(ref && ref.droneId === chatRef.droneId);
+          });
+          if (toRemove.length > 0) removeNodes(toRemove);
+          return;
+        }
+        removeNodes([nodeId]);
+      } catch (err: any) {
+        setMessageError(err?.message ?? String(err));
+      } finally {
+        setDeletingChatNodeById((prev) => {
+          if (!prev[nodeId]) return prev;
+          const next = { ...prev };
+          delete next[nodeId];
+          return next;
+        });
+      }
+    },
+    [nodeOrder, onDeleteChat, removeNodes],
+  );
 
   const getDraftPlacement = React.useCallback(
     (
@@ -645,11 +717,39 @@ export function DroneCanvasDock({
   }, [selectedDroneIds.length]);
 
   React.useEffect(() => {
+    const legacyNodeIds = nodeOrder.filter(
+      (nodeId) => !isCanvasDraftNodeId(nodeId) && !parseCanvasChatNodeId(nodeId),
+    );
+    if (legacyNodeIds.length === 0) return;
+    for (const legacyNodeId of legacyNodeIds) {
+      const replacementNodeId = createCanvasChatNodeId(legacyNodeId, 'default');
+      if (!replacementNodeId) {
+        removeNodes([legacyNodeId]);
+        continue;
+      }
+      replaceNodeId(legacyNodeId, replacementNodeId, 'default');
+    }
+  }, [nodeOrder, removeNodes, replaceNodeId]);
+
+  React.useEffect(() => {
+    const updates: Array<{ droneId: string; label: string; x: number; y: number }> = [];
+    for (const node of nodes) {
+      if (isCanvasDraftNodeId(node.droneId)) continue;
+      const chatRef = parseCanvasChatNodeId(node.droneId);
+      if (!chatRef) continue;
+      if (node.label === chatRef.chatName) continue;
+      updates.push({ droneId: node.droneId, label: chatRef.chatName, x: node.x, y: node.y });
+    }
+    if (updates.length === 0) return;
+    upsertNodes(updates);
+  }, [nodes, upsertNodes]);
+
+  React.useEffect(() => {
     syncNodeLabels(droneNameById);
   }, [droneNameById, syncNodeLabels]);
 
   React.useEffect(() => {
-    const sidebarId = String(sidebarSelectedDroneId ?? '').trim();
+    const sidebarId = String(sidebarSelectedChatNodeId ?? '').trim();
     if (!sidebarId) {
       lastSyncedSidebarSelectionRef.current = '';
       return;
@@ -663,7 +763,15 @@ export function DroneCanvasDock({
     lastSyncedSidebarSelectionRef.current = sidebarId;
     if (selectedDroneIds.length === 1 && selectedDroneIds[0] === sidebarId) return;
     setSelectedDroneIds([sidebarId]);
-  }, [draggingNodeId, nodesByDroneId, panning, selectedDroneIds, selectionBox, setSelectedDroneIds, sidebarSelectedDroneId]);
+  }, [
+    draggingNodeId,
+    nodesByDroneId,
+    panning,
+    selectedDroneIds,
+    selectionBox,
+    setSelectedDroneIds,
+    sidebarSelectedChatNodeId,
+  ]);
 
   React.useEffect(() => {
     if (!inlineRenamingDroneId) return;
@@ -848,8 +956,9 @@ export function DroneCanvasDock({
 
   const sendCanvasPrompt = React.useCallback(async () => {
     if (selectedDroneIds.length === 0) return;
-    const regularDroneIds = selectedDroneIds.filter((id) => !isCanvasDraftNodeId(id));
+    const regularNodeIds = selectedDroneIds.filter((id) => !isCanvasDraftNodeId(id));
     const draftNodeIds = selectedDroneIds.filter((id) => isCanvasDraftNodeId(id));
+    const regularTargets = collectUniqueChatTargets(regularNodeIds);
     // Keep regular-message sends single-flight to avoid accidental duplicate broadcasts.
     if (messageSending && draftNodeIds.length === 0) return;
 
@@ -942,7 +1051,7 @@ export function DroneCanvasDock({
                 draftNodeIds.length === 1 && draftNodeId === selectedDraftNodeId
                   ? singleDraftSpawnCount
                   : MIN_DRAFT_SPAWN_COUNT;
-              const created: Array<{ droneId: string; droneName: string }> = [];
+              const created: Array<{ nodeId: string; droneId: string; droneName: string; chatName: string }> = [];
               for (let spawnIdx = 0; spawnIdx < spawnCountForDraft; spawnIdx += 1) {
                 const result = await onCreateCanvasDroneFromDraft({
                   draftNodeId: spawnIdx === 0 ? draftNodeId : createDraftNodeId(),
@@ -959,7 +1068,14 @@ export function DroneCanvasDock({
                 if (result.ok && String(result.droneId ?? '').trim()) {
                   const nextDroneId = String(result.droneId ?? '').trim();
                   const nextDroneName = String(result.droneName ?? '').trim() || nextDroneId;
-                  created.push({ droneId: nextDroneId, droneName: nextDroneName });
+                  const chatName = 'default';
+                  const nodeId = createCanvasChatNodeId(nextDroneId, chatName);
+                  if (!nodeId) {
+                    draftCreateHadErrors = true;
+                    errors.push(`Failed to create card for "${nextDroneName}".`);
+                    continue;
+                  }
+                  created.push({ nodeId, droneId: nextDroneId, droneName: nextDroneName, chatName });
                   continue;
                 }
                 draftCreateHadErrors = true;
@@ -977,12 +1093,9 @@ export function DroneCanvasDock({
               }
 
               const first = created[0];
-              const firstLabel =
-                String(first.droneName ?? '').trim() ||
-                String(droneNameById[first.droneId] ?? '').trim() ||
-                node.label;
-              replaceNodeId(draftNodeId, first.droneId, firstLabel);
-              replacedDraftIds.set(draftNodeId, first.droneId);
+              const firstLabel = first.chatName;
+              replaceNodeId(draftNodeId, first.nodeId, firstLabel);
+              replacedDraftIds.set(draftNodeId, first.nodeId);
               occupiedRects.push({
                 x: node.x,
                 y: node.y,
@@ -992,14 +1105,11 @@ export function DroneCanvasDock({
 
               for (let i = 1; i < created.length; i += 1) {
                 const spawned = created[i];
-                const label =
-                  String(spawned.droneName ?? '').trim() ||
-                  String(droneNameById[spawned.droneId] ?? '').trim() ||
-                  node.label;
+                const label = spawned.chatName;
                 const width = getNodeWidthPx(label);
                 const placement = claimPlacement(node.x, node.y, width);
                 additionalNodesToUpsert.push({
-                  droneId: spawned.droneId,
+                  droneId: spawned.nodeId,
                   label,
                   x: placement.x,
                   y: placement.y,
@@ -1010,7 +1120,7 @@ export function DroneCanvasDock({
                   width,
                   height: NODE_HEIGHT_PX,
                 });
-                spawnedAdditionalIds.push(spawned.droneId);
+                spawnedAdditionalIds.push(spawned.nodeId);
               }
             } finally {
               draftCreateInFlightRef.current.delete(draftNodeId);
@@ -1023,11 +1133,11 @@ export function DroneCanvasDock({
         upsertNodes(additionalNodesToUpsert);
       }
 
-      if (regularDroneIds.length > 0) {
+      if (regularTargets.length > 0) {
         if (!onSendCanvasPrompt) {
           errors.push('Canvas messaging is unavailable.');
         } else {
-          const result = await onSendCanvasPrompt(regularDroneIds, prompt);
+          const result = await onSendCanvasPrompt(regularTargets, prompt);
           regularSendSucceeded = result.ok;
           regularSendError = result.error ?? null;
           if (!result.ok && regularSendError) {
@@ -1058,7 +1168,7 @@ export function DroneCanvasDock({
       }
       if (regularSendSucceeded && regularSendError) errors.push(regularSendError);
       setMessageError(errors.length > 0 ? errors.join(' ') : null);
-      const shouldFocusViewport = regularDroneIds.length === 0 && allDraftCreatesSucceeded;
+      const shouldFocusViewport = regularTargets.length === 0 && allDraftCreatesSucceeded;
       const interactionActive =
         draggingNodeId || panning || nodeDragRef.current || panDragRef.current || marqueeDragRef.current;
       if (!interactionActive) {
@@ -1077,7 +1187,6 @@ export function DroneCanvasDock({
     draftPromptByNodeId,
     draftSpawnCount,
     draggingNodeId,
-    droneNameById,
     focusMessageInput,
     focusViewport,
     messageSending,
@@ -1162,10 +1271,12 @@ export function DroneCanvasDock({
       }
       setSelectedDroneIds([droneId]);
       if (!isCanvasDraftNodeId(droneId)) {
-        onActivateDrone?.(droneId);
+        const chatRef = parseCanvasChatNodeId(droneId);
+        if (!chatRef) return;
+        onActivateChat?.(chatRef.droneId, chatRef.chatName);
       }
     },
-    [focusViewportElement, onActivateDrone, setSelectedDroneIds, toggleSelectedDroneId],
+    [focusViewportElement, onActivateChat, setSelectedDroneIds, toggleSelectedDroneId],
   );
 
   const onNodeDoubleClick = React.useCallback(
@@ -1260,7 +1371,7 @@ export function DroneCanvasDock({
 
   const onDragOver = React.useCallback(
     (event: React.DragEvent<HTMLDivElement>) => {
-      if (!hasDroneDragPayload(event)) return;
+      if (!hasChatDragPayload(event)) return;
       event.preventDefault();
       event.dataTransfer.dropEffect = 'move';
       if (!dragOverCanvas) setDragOverCanvas(true);
@@ -1276,22 +1387,23 @@ export function DroneCanvasDock({
 
   const onDrop = React.useCallback(
     (event: React.DragEvent<HTMLDivElement>) => {
-      if (!hasDroneDragPayload(event)) return;
+      if (!hasChatDragPayload(event)) return;
       event.preventDefault();
       setDragOverCanvas(false);
-      const droppedIds = parseDraggedDroneIds(event);
-      const ids = orderDraggedDroneIds(droppedIds, sidebarOrderedDroneIds);
+      const droppedIds = parseDraggedChatNodeIds(event);
+      const ids = orderChatNodeIdsBySidebar(droppedIds, sidebarOrderedChatNodeIds);
       if (ids.length === 0) return;
       const viewport = viewportRef.current;
       if (!viewport) return;
       const rect = viewport.getBoundingClientRect();
       const origin = screenToWorldPoint(event.clientX, event.clientY, rect, panX, panY, scale);
       upsertNodes(
-        ids.map((droneId, idx) => {
-          const label = String(droneNameById[droneId] ?? '').trim() || droneId;
+        ids.map((nodeId, idx) => {
+          const chatRef = parseCanvasChatNodeId(nodeId);
+          const label = String(chatRef?.chatName ?? '').trim() || 'default';
           const width = getNodeWidthPx(label);
           return {
-            droneId,
+            droneId: nodeId,
             label,
             // Keep the cursor at the center of the first dropped card.
             x: origin.x - width / 2,
@@ -1301,7 +1413,7 @@ export function DroneCanvasDock({
       );
       setSelectedDroneIds(ids);
     },
-    [droneNameById, panX, panY, scale, setSelectedDroneIds, sidebarOrderedDroneIds, upsertNodes],
+    [panX, panY, scale, setSelectedDroneIds, sidebarOrderedChatNodeIds, upsertNodes],
   );
 
   const onMessageInputBlur = React.useCallback(
@@ -1391,34 +1503,23 @@ export function DroneCanvasDock({
           event.stopPropagation();
           cancelActivePointerInteractions();
           setMessageError(null);
+          setMessageDraft('');
 
           const draftNodeIds = selectedDroneIds.filter((id) => isCanvasDraftNodeId(id));
-          const regularDroneIds = selectedDroneIds.filter((id) => !isCanvasDraftNodeId(id));
           if (draftNodeIds.length > 0) {
             removeNodes(draftNodeIds);
           }
-          if (regularDroneIds.length === 0) return;
 
-          if (!onDeleteDrones) {
-            removeNodes(regularDroneIds);
-            return;
-          }
-
-          void (async () => {
-            try {
-              const deletedDroneIds = await onDeleteDrones(regularDroneIds);
-              const deletedSet = new Set(
-                (Array.isArray(deletedDroneIds) ? deletedDroneIds : [])
-                  .map((id) => String(id ?? '').trim())
-                  .filter((id) => id && regularDroneIds.includes(id)),
-              );
-              if (deletedSet.size > 0) {
-                removeNodes(Array.from(deletedSet));
+          const chatNodeIds = sortChatNodeIdsForDestructiveDelete(
+            selectedDroneIds.filter((id) => !isCanvasDraftNodeId(id)),
+          );
+          if (chatNodeIds.length > 0) {
+            void (async () => {
+              for (const nodeId of chatNodeIds) {
+                await deleteChatNode(nodeId);
               }
-            } catch (err: any) {
-              setMessageError(err?.message ?? String(err));
-            }
-          })();
+            })();
+          }
           return;
         }
 
@@ -1436,9 +1537,9 @@ export function DroneCanvasDock({
       createDraftShortcutBinding,
       messageBarExpanded,
       nodeOrder,
-      onDeleteDrones,
       openMessageBar,
       cancelActivePointerInteractions,
+      deleteChatNode,
       createDraftNearViewportCenter,
       focusPrimaryChatInputShortcutBinding,
       removeNodes,
@@ -1603,7 +1704,7 @@ export function DroneCanvasDock({
           </label>
         </div>
         <div className="flex items-center gap-1 ml-auto">
-          <span className="px-2 text-[10px] font-mono text-[var(--muted-dim)]" title="Selected drones">
+          <span className="px-2 text-[10px] font-mono text-[var(--muted-dim)]" title="Selected chats">
             {selectedDroneIds.length} sel
           </span>
           <button
@@ -1679,16 +1780,28 @@ export function DroneCanvasDock({
         >
           {nodes.map((node) => {
             const draftNode = isCanvasDraftNodeId(node.droneId);
+            const chatRef = draftNode ? null : parseCanvasChatNodeId(node.droneId);
+            const chatDroneId = chatRef?.droneId ?? null;
             const selected = selectedDroneIdSet.has(node.droneId);
             const dragging = draggingNodeId === node.droneId;
             const inlineEditing = inlineRenamingDroneId === node.droneId;
-            const indicatorState = draftNode ? null : droneStateById[node.droneId] ?? null;
+            const deletingChat = Boolean(deletingChatNodeById[node.droneId]);
+            const indicatorState = draftNode || !chatDroneId ? null : droneStateById[chatDroneId] ?? null;
             const indicator = renderNodeIndicator(indicatorState);
             const unreadIndicator = renderNodeUnreadIndicator(indicatorState);
             const nodeWidth = nodeWidthByDroneId[node.droneId] ?? NODE_MIN_WIDTH_PX;
             const repoLabel = draftNode
               ? String(draftRepoLabelByNodeId[node.droneId] ?? '').trim()
-              : String(droneRepoById[node.droneId] ?? '').trim();
+              : chatDroneId
+                ? String(droneRepoById[chatDroneId] ?? '').trim()
+                : '';
+            const chatDroneLabel = chatDroneId
+              ? String(droneNameById[chatDroneId] ?? '').trim() || chatDroneId
+              : '';
+            const { renameDisabled, deleteDisabled } = getChatNodeActionFlags(
+              chatRef,
+              chatCountByDroneId,
+            );
             return (
               <button
                 key={node.droneId}
@@ -1703,7 +1816,7 @@ export function DroneCanvasDock({
                 onClick={(event) => onNodeClick(node.droneId, event)}
                 onDoubleClick={(event) => onNodeDoubleClick(node.droneId, event)}
                 aria-pressed={selected}
-                className={`absolute relative overflow-visible rounded-md border text-left px-2.5 shadow-[0_10px_20px_rgba(0,0,0,.28)] transition-[border-color,background-color,box-shadow] duration-100 flex items-center ${
+                className={`group/canvas-node absolute relative overflow-visible rounded-md border text-left px-2.5 shadow-[0_10px_20px_rgba(0,0,0,.28)] transition-[border-color,background-color,box-shadow] duration-100 flex items-center ${
                   dragging
                     ? 'border-[var(--accent)] bg-[var(--accent-subtle)]'
                     : selected || inlineEditing
@@ -1739,6 +1852,66 @@ export function DroneCanvasDock({
                 {repoLabel ? (
                   <span className="pointer-events-none absolute left-2 top-full mt-[1px] inline-flex max-w-[260px] rounded-[4px] border border-[var(--border-subtle)] bg-[rgba(10,14,22,.95)] px-1.5 py-[1px] text-[9px] font-mono text-[var(--muted-dim)] shadow-[0_6px_14px_rgba(0,0,0,.28)]">
                     {repoLabel}
+                  </span>
+                ) : null}
+                {!draftNode && chatRef && !inlineEditing ? (
+                  <span
+                    className={`absolute right-1.5 top-1.5 z-[3] flex items-center gap-1 transition-opacity ${
+                      selected || deletingChat
+                        ? 'opacity-100'
+                        : 'opacity-0 pointer-events-none group-hover/canvas-node:opacity-100 group-hover/canvas-node:pointer-events-auto'
+                    }`}
+                  >
+                    <span
+                      role="button"
+                      aria-disabled={inlineRenameBusy || deletingChat || renameDisabled}
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                      }}
+                      onClick={(event) => {
+                        if (inlineRenameBusy || deletingChat || renameDisabled) return;
+                        event.preventDefault();
+                        event.stopPropagation();
+                        beginInlineRename(node.droneId);
+                      }}
+                      title={renameDisabled ? 'Default chat cannot be renamed' : 'Rename chat'}
+                      className={`h-5 rounded border px-1.5 text-[9px] font-semibold uppercase tracking-wide ${
+                        inlineRenameBusy || deletingChat || renameDisabled
+                          ? 'cursor-not-allowed border-[var(--border-subtle)] text-[var(--muted-dim)] opacity-60'
+                          : 'cursor-pointer border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] bg-[rgba(10,14,22,.92)]'
+                      }`}
+                    >
+                      Ren
+                    </span>
+                    <span
+                      role="button"
+                      aria-disabled={inlineRenameBusy || deletingChat || deleteDisabled}
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                      }}
+                      onClick={(event) => {
+                        if (inlineRenameBusy || deletingChat || deleteDisabled) return;
+                        event.preventDefault();
+                        event.stopPropagation();
+                        void deleteChatNode(node.droneId);
+                      }}
+                      title={
+                        deleteDisabled
+                          ? 'Delete other chats first, or delete this drone from the drone row actions'
+                          : chatRef?.chatName === 'default'
+                            ? 'Delete drone (only remaining chat)'
+                            : 'Delete chat'
+                      }
+                      className={`h-5 rounded border px-1.5 text-[9px] font-semibold uppercase tracking-wide ${
+                        inlineRenameBusy || deletingChat || deleteDisabled
+                          ? 'cursor-not-allowed border-[rgba(255,90,90,.25)] text-[var(--red)] opacity-60'
+                          : 'cursor-pointer border-[rgba(255,90,90,.25)] text-[var(--red)] hover:bg-[rgba(255,90,90,.12)] bg-[rgba(10,14,22,.92)]'
+                      }`}
+                    >
+                      {deletingChat ? '...' : 'Del'}
+                    </span>
                   </span>
                 ) : null}
                 <span className="min-w-0 flex-1">
@@ -1781,8 +1954,15 @@ export function DroneCanvasDock({
                       className="h-8 w-full rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[12.5px] font-semibold text-[var(--fg-secondary)] focus:outline-none focus:border-[var(--accent-muted)]"
                     />
                   ) : (
-                    <span className="block whitespace-nowrap text-[12.5px] font-semibold text-[var(--fg-secondary)]">
-                      {node.label}
+                    <span className="block">
+                      <span className="block whitespace-nowrap text-[12.5px] font-semibold text-[var(--fg-secondary)]">
+                        {node.label}
+                      </span>
+                      {!draftNode && chatDroneLabel ? (
+                        <span className="block whitespace-nowrap text-[10px] text-[var(--muted-dim)]">
+                          {chatDroneLabel}
+                        </span>
+                      ) : null}
                     </span>
                   )}
                 </span>
@@ -1839,7 +2019,7 @@ export function DroneCanvasDock({
                 Drone Canvas
               </div>
               <div className="mt-1 text-[12px] text-[var(--muted)]">
-                Drag one or more drones from the sidebar and drop them here.
+                Drag one or more chats from the sidebar and drop them here.
               </div>
               <div className="mt-1 text-[11px] text-[var(--muted-dim)]">
                 Double-click to create an untitled draft card.
@@ -1848,7 +2028,7 @@ export function DroneCanvasDock({
                 Ctrl-click toggles selection. Left drag draws a selection box.
               </div>
               <div className="mt-1 text-[11px] text-[var(--muted-dim)]">
-                Esc clears selection. Delete removes selected nodes. Shift+Delete deletes selected drones.
+                Esc clears selection. Delete removes selected cards. Shift+Delete deletes selected chats.
               </div>
               <div className="mt-1 text-[11px] text-[var(--muted-dim)]">
                 Ctrl/Cmd+A selects all nodes.

@@ -1,0 +1,147 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { startDroneHubApiServer } from '../src/hub/server';
+import { updateRegistry } from '../src/host/registry';
+import { getSocketListenSupport } from './socket-listen-support';
+
+const listenSupport = getSocketListenSupport();
+if (!listenSupport.ok && process.env.CI) {
+  throw new Error(`chat management api tests require local socket binding support: ${listenSupport.detail}`);
+}
+if (!listenSupport.ok) {
+  // eslint-disable-next-line no-console
+  console.warn(`Skipping chat management api tests: ${listenSupport.detail}`);
+}
+
+const describeSocketSuite = listenSupport.ok ? describe : describe.skip;
+
+describeSocketSuite('chat management api', () => {
+  const token = 'test-token';
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-chat-management-api-'));
+  const xdgDataHome = path.join(tempRoot, 'xdg-data');
+  const prevXdg = process.env.XDG_DATA_HOME;
+  let server: Awaited<ReturnType<typeof startDroneHubApiServer>> | null = null;
+  let baseUrl = '';
+
+  const apiFetch = async (p: string, init?: RequestInit) => {
+    const r = await fetch(`${baseUrl}${p}`, {
+      ...init,
+      headers: {
+        ...(init?.headers ?? {}),
+        authorization: `Bearer ${token}`,
+      },
+    });
+    const text = await r.text();
+    let data: any = null;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      // ignore
+    }
+    return { r, data };
+  };
+
+  const seedDrone = async (id: string) => {
+    const now = new Date().toISOString();
+    await updateRegistry((reg: any) => {
+      reg.drones = reg.drones ?? {};
+      reg.drones[id] = {
+        id,
+        name: id,
+        hostPort: 1,
+        token: 'mock-token',
+        containerPort: 7777,
+        repoPath: '',
+        createdAt: now,
+        chats: {
+          default: {
+            createdAt: now,
+            agent: { kind: 'builtin', id: 'cursor' },
+            turns: [],
+            pendingPrompts: [],
+          },
+        },
+      };
+    });
+  };
+
+  beforeAll(async () => {
+    fs.mkdirSync(path.join(xdgDataHome, 'drone'), { recursive: true });
+    process.env.XDG_DATA_HOME = xdgDataHome;
+    server = await startDroneHubApiServer({ port: 0, apiToken: token });
+    baseUrl = `http://${server.host}:${server.port}`;
+  });
+
+  afterAll(async () => {
+    if (server) await server.close();
+    if (prevXdg == null) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = prevXdg;
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  });
+
+  test('creates and lists chats for a drone', async () => {
+    const droneId = 'drone-chat-create';
+    await seedDrone(droneId);
+
+    const created = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'review' }),
+    });
+    expect(created.r.status).toBe(201);
+    expect(created.data?.ok).toBe(true);
+    expect(created.data?.chat).toBe('review');
+
+    const listed = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats`);
+    expect(listed.r.status).toBe(200);
+    expect(Array.isArray(listed.data?.chats)).toBe(true);
+    expect((listed.data?.chats ?? []).includes('default')).toBe(true);
+    expect((listed.data?.chats ?? []).includes('review')).toBe(true);
+  });
+
+  test('renames and deletes chats with default protections', async () => {
+    const droneId = 'drone-chat-rename-delete';
+    await seedDrone(droneId);
+
+    const created = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'review' }),
+    });
+    expect(created.r.status).toBe(201);
+
+    const renamed = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/review/rename`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ newName: 'qa' }),
+    });
+    expect(renamed.r.status).toBe(200);
+    expect(renamed.data?.chat).toBe('qa');
+
+    const oldMissing = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/review`);
+    expect(oldMissing.r.status).toBe(404);
+
+    const renamedInfo = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/qa`);
+    expect(renamedInfo.r.status).toBe(200);
+    expect(renamedInfo.data?.chat).toBe('qa');
+
+    const deleteDefault = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default`, {
+      method: 'DELETE',
+    });
+    expect(deleteDefault.r.status).toBe(400);
+    expect(String(deleteDefault.data?.error ?? '')).toContain('default');
+
+    const deleted = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/qa`, {
+      method: 'DELETE',
+    });
+    expect(deleted.r.status).toBe(200);
+    expect(deleted.data?.deletedChat).toBe('qa');
+
+    const listed = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats`);
+    expect(listed.r.status).toBe(200);
+    expect((listed.data?.chats ?? []).includes('default')).toBe(true);
+    expect((listed.data?.chats ?? []).includes('qa')).toBe(false);
+  });
+});

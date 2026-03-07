@@ -111,6 +111,17 @@ export function useDroneSelectionState({
     ],
   );
 
+  const selectDroneChat = React.useCallback(
+    (droneIdRaw: string, chatNameRaw: string) => {
+      const droneId = String(droneIdRaw ?? '').trim();
+      if (!droneId) return;
+      const chatName = String(chatNameRaw ?? '').trim() || 'default';
+      selectDroneCard(droneId);
+      setSelectedChat(chatName);
+    },
+    [selectDroneCard, setSelectedChat],
+  );
+
   React.useEffect(() => {
     const valid = new Set(dronesFilteredByRepo.map((d) => d.id));
     setSelectedDroneIds((prev) => {
@@ -198,5 +209,5 @@ export function useDroneSelectionState({
     setSelectedChat(chats.includes('default') ? 'default' : chats[0]);
   }, [drones, selectedDrone, selectedChat, setSelectedChat]);
 
-  return { selectDroneCard };
+  return { selectDroneCard, selectDroneChat };
 }

@@ -27,7 +27,7 @@ type RightPanelTabContentProps = {
   tab: RightPanelTab;
   paneKey: 'top' | 'bottom' | 'single';
   selectedChat: string;
-  orderedDroneIds: string[];
+  orderedCanvasChatNodeIds: string[];
   droneNameById: Record<string, string>;
   droneRepoById: Record<string, string>;
   draftRepoLabel: string;
@@ -42,9 +42,9 @@ type RightPanelTabContentProps = {
       unreadAgentMessage: boolean;
     }
   >;
-  onActivateDroneFromCanvas: (droneId: string) => void;
+  onActivateChatFromCanvas: (droneId: string, chatName: string) => void;
   onSendCanvasPrompt: (
-    droneIds: string[],
+    targets: Array<{ droneId: string; chatName: string }>,
     prompt: string,
   ) => Promise<{ ok: boolean; error?: string | null }>;
   onCreateCanvasDroneFromDraft: (payload: {
@@ -59,11 +59,15 @@ type RightPanelTabContentProps = {
       pullHostBranchBeforeCreate: boolean;
     };
   }) => Promise<{ ok: boolean; droneId?: string; droneName?: string; error?: string | null }>;
-  onRenameCanvasDrone: (
+  onRenameCanvasChat: (
     droneId: string,
+    chatName: string,
     newName: string,
-  ) => Promise<{ ok: boolean; error?: string | null }>;
-  onDeleteCanvasDrones: (droneIds: string[]) => Promise<string[]>;
+  ) => Promise<{ ok: boolean; chatName?: string; error?: string | null }>;
+  onDeleteCanvasChat: (
+    droneId: string,
+    chatName: string,
+  ) => Promise<{ ok: boolean; deletedDrone?: boolean; error?: string | null }>;
   canvasSpawnAgentMenuEntries: UiMenuSelectEntry[];
   canvasSpawnAgentKey: string;
   onCanvasSpawnAgentKeyChange: (next: string) => void;
@@ -79,6 +83,7 @@ type RightPanelTabContentProps = {
   canvasPullHostBranchBeforeCreate: boolean;
   onCanvasPullHostBranchBeforeCreateChange: (next: boolean) => void;
   currentDroneId: string | null;
+  currentCanvasChatNodeId: string | null;
   defaultFsPathForCurrentDrone: string;
   uiDroneName: (nameRaw: string) => string;
   currentFsPath: string;
@@ -111,16 +116,16 @@ export function RightPanelTabContent({
   tab,
   paneKey,
   selectedChat,
-  orderedDroneIds,
+  orderedCanvasChatNodeIds,
   droneNameById,
   droneRepoById,
   draftRepoLabel,
   droneStateById,
-  onActivateDroneFromCanvas,
+  onActivateChatFromCanvas,
   onSendCanvasPrompt,
   onCreateCanvasDroneFromDraft,
-  onRenameCanvasDrone,
-  onDeleteCanvasDrones,
+  onRenameCanvasChat,
+  onDeleteCanvasChat,
   canvasSpawnAgentMenuEntries,
   canvasSpawnAgentKey,
   onCanvasSpawnAgentKeyChange,
@@ -136,6 +141,7 @@ export function RightPanelTabContent({
   canvasPullHostBranchBeforeCreate,
   onCanvasPullHostBranchBeforeCreateChange,
   currentDroneId,
+  currentCanvasChatNodeId,
   defaultFsPathForCurrentDrone,
   uiDroneName,
   currentFsPath,
@@ -171,16 +177,16 @@ export function RightPanelTabContent({
       return (
         <DroneCanvasDock
           droneNameById={droneNameById}
-          sidebarOrderedDroneIds={orderedDroneIds}
-          sidebarSelectedDroneId={currentDroneId}
+          sidebarOrderedChatNodeIds={orderedCanvasChatNodeIds}
+          sidebarSelectedChatNodeId={currentCanvasChatNodeId}
           droneRepoById={droneRepoById}
           draftRepoLabel={draftRepoLabel}
           droneStateById={droneStateById}
-          onActivateDrone={onActivateDroneFromCanvas}
+          onActivateChat={onActivateChatFromCanvas}
           onSendCanvasPrompt={onSendCanvasPrompt}
           onCreateCanvasDroneFromDraft={onCreateCanvasDroneFromDraft}
-          onRenameDrone={onRenameCanvasDrone}
-          onDeleteDrones={onDeleteCanvasDrones}
+          onRenameChat={onRenameCanvasChat}
+          onDeleteChat={onDeleteCanvasChat}
           spawnAgentMenuEntries={canvasSpawnAgentMenuEntries}
           spawnAgentKey={canvasSpawnAgentKey}
           onSpawnAgentKeyChange={onCanvasSpawnAgentKeyChange}

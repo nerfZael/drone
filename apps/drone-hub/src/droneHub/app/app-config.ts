@@ -16,6 +16,7 @@ export const FS_EXPLORER_VIEW_STORAGE_KEY = 'droneHub.fsExplorerView';
 export const PORT_STATUS_POLL_INTERVAL_MS = 15_000;
 export const PORT_STATUS_TIMEOUT_MS = 1_800;
 export const DRONE_DND_MIME = 'application/x-drone-ids+json';
+export const DRONE_CHAT_DND_MIME = 'application/x-drone-chat-refs+json';
 export const RIGHT_PANEL_WIDTH_STORAGE_KEY = 'droneHub.rightPanelWidth';
 export const RIGHT_PANEL_SPLIT_STORAGE_KEY = 'droneHub.rightPanelSplit';
 export const RIGHT_PANEL_TOP_TAB_STORAGE_KEY = 'droneHub.rightPanelTopTab';
@@ -78,6 +79,39 @@ export function clampGroupMultiChatColumnWidthPx(width: number): number {
 export function parseRightPanelTab(raw: string | null | undefined, fallback: RightPanelTab): RightPanelTab {
   if (raw && RIGHT_PANEL_TABS.includes(raw as RightPanelTab)) return raw as RightPanelTab;
   return fallback;
+}
+
+const CANVAS_CHAT_NODE_PREFIX = 'chat:';
+const CANVAS_CHAT_NODE_SEPARATOR = '::';
+
+export type CanvasChatRef = {
+  droneId: string;
+  chatName: string;
+};
+
+export function createCanvasChatNodeId(droneIdRaw: string, chatNameRaw: string): string {
+  const droneId = String(droneIdRaw ?? '').trim();
+  const chatName = String(chatNameRaw ?? '').trim() || 'default';
+  if (!droneId) return '';
+  return `${CANVAS_CHAT_NODE_PREFIX}${encodeURIComponent(droneId)}${CANVAS_CHAT_NODE_SEPARATOR}${encodeURIComponent(chatName)}`;
+}
+
+export function parseCanvasChatNodeId(nodeIdRaw: string): CanvasChatRef | null {
+  const nodeId = String(nodeIdRaw ?? '').trim();
+  if (!nodeId.startsWith(CANVAS_CHAT_NODE_PREFIX)) return null;
+  const body = nodeId.slice(CANVAS_CHAT_NODE_PREFIX.length);
+  const separatorIdx = body.indexOf(CANVAS_CHAT_NODE_SEPARATOR);
+  if (separatorIdx <= 0 || separatorIdx >= body.length - CANVAS_CHAT_NODE_SEPARATOR.length) return null;
+  const encodedDroneId = body.slice(0, separatorIdx);
+  const encodedChatName = body.slice(separatorIdx + CANVAS_CHAT_NODE_SEPARATOR.length);
+  try {
+    const droneId = decodeURIComponent(encodedDroneId).trim();
+    const chatName = decodeURIComponent(encodedChatName).trim() || 'default';
+    if (!droneId) return null;
+    return { droneId, chatName };
+  } catch {
+    return null;
+  }
 }
 
 export function isStartupSeedFresh(seed: StartupSeedState | null | undefined, nowMs: number = Date.now()): boolean {

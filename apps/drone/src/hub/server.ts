@@ -1198,6 +1198,17 @@ function normalizeChatName(raw: any): string {
   return String(raw ?? 'default').trim() || 'default';
 }
 
+const CHAT_NAME_MAX_LEN = 64;
+
+function parseChatNameForMutation(raw: any, fieldName = 'chat name'): string {
+  const text = String(raw ?? '').trim();
+  if (!text) throw new Error(`missing ${fieldName}`);
+  if (text.length > CHAT_NAME_MAX_LEN) throw new Error(`${fieldName} is too long (max ${CHAT_NAME_MAX_LEN} chars)`);
+  if (/[\r\n\t]/.test(text)) throw new Error(`${fieldName} contains invalid whitespace`);
+  if (/[\\/]/.test(text)) throw new Error(`${fieldName} cannot include / or \\`);
+  return text;
+}
+
 function normalizePromptAutomationRuns(raw: unknown): number {
   const n = Number(raw);
   if (!Number.isFinite(n)) return PROMPT_AUTOMATION_RUNS_DEFAULT;
@@ -3407,6 +3418,68 @@ function enqueuePendingPromptPump(droneIdRaw: string, chatName: string) {
   PENDING_PROMPT_PUMP_QUEUED.add(key);
   PENDING_PROMPT_PUMP_QUEUE.push({ droneId: dn, chatName: cn });
   pumpPendingPromptQueue();
+}
+
+function droneChatMapKey(droneIdRaw: string, chatNameRaw: string): string {
+  const droneId = normalizeDroneIdentity(droneIdRaw);
+  if (!droneId) return '';
+  const chatName = normalizeChatName(chatNameRaw);
+  return `${droneId}:${chatName}`;
+}
+
+function clearInMemoryChatStateForDelete(opts: { droneId: string; chatName: string }) {
+  const key = droneChatMapKey(opts.droneId, opts.chatName);
+  if (!key) return;
+
+  PROMPT_AUTOMATION_LANES.delete(key);
+
+  RECONCILE_QUEUED.delete(key);
+  for (let i = RECONCILE_QUEUE.length - 1; i >= 0; i -= 1) {
+    const item = RECONCILE_QUEUE[i];
+    if (droneChatMapKey(String(item?.droneName ?? ''), String(item?.chatName ?? '')) !== key) continue;
+    RECONCILE_QUEUE.splice(i, 1);
+  }
+
+  PENDING_PROMPT_PUMP_QUEUED.delete(key);
+  for (let i = PENDING_PROMPT_PUMP_QUEUE.length - 1; i >= 0; i -= 1) {
+    const item = PENDING_PROMPT_PUMP_QUEUE[i];
+    if (droneChatMapKey(String(item?.droneId ?? ''), String(item?.chatName ?? '')) !== key) continue;
+    PENDING_PROMPT_PUMP_QUEUE.splice(i, 1);
+  }
+}
+
+function migrateInMemoryChatStateForRename(opts: { droneId: string; fromChatName: string; toChatName: string }) {
+  const fromKey = droneChatMapKey(opts.droneId, opts.fromChatName);
+  const toKey = droneChatMapKey(opts.droneId, opts.toChatName);
+  if (!fromKey || !toKey || fromKey === toKey) return;
+
+  const lane = PROMPT_AUTOMATION_LANES.get(fromKey);
+  if (lane) {
+    PROMPT_AUTOMATION_LANES.delete(fromKey);
+    lane.key = toKey;
+    lane.chatName = normalizeChatName(opts.toChatName);
+    if (lane.runningJob) {
+      lane.runningJob.key = toKey;
+      lane.runningJob.chatName = lane.chatName;
+    }
+    if (lane.lastJob) {
+      lane.lastJob.key = toKey;
+      lane.lastJob.chatName = lane.chatName;
+    }
+    PROMPT_AUTOMATION_LANES.set(toKey, lane);
+  }
+
+  if (RECONCILE_QUEUED.delete(fromKey)) RECONCILE_QUEUED.add(toKey);
+  for (const item of RECONCILE_QUEUE) {
+    if (droneChatMapKey(String(item?.droneName ?? ''), String(item?.chatName ?? '')) !== fromKey) continue;
+    item.chatName = normalizeChatName(opts.toChatName);
+  }
+
+  if (PENDING_PROMPT_PUMP_QUEUED.delete(fromKey)) PENDING_PROMPT_PUMP_QUEUED.add(toKey);
+  for (const item of PENDING_PROMPT_PUMP_QUEUE) {
+    if (droneChatMapKey(String(item?.droneId ?? ''), String(item?.chatName ?? '')) !== fromKey) continue;
+    item.chatName = normalizeChatName(opts.toChatName);
+  }
 }
 
 function anyActivePendingPromptsForDrone(d: any): boolean {
@@ -11333,6 +11406,200 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         } catch (e: any) {
           const msg = e?.message ?? String(e);
           const code = /unknown drone/i.test(msg) ? 404 : /unknown chat/i.test(msg) ? 404 : /still starting/i.test(msg) ? 409 : 500;
+          json(res, code, { ok: false, error: msg });
+          return;
+        }
+      }
+
+      // POST /api/drones/:id/chats
+      // Create a new chat entry on a drone.
+      if (method === 'POST' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'drones' && parts[3] === 'chats') {
+        const droneRef = decodeURIComponent(parts[2]);
+        let body: any = null;
+        try {
+          body = await readJsonBody(req);
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          return;
+        }
+
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        const droneId = resolved.id;
+        const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+
+        let chatName = '';
+        try {
+          chatName = parseChatNameForMutation(body?.name ?? body?.chatName ?? body?.chat, 'chat name');
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          return;
+        }
+        const copyFromRaw = String(body?.copyFrom ?? body?.copyFromChat ?? body?.fromChat ?? '').trim();
+        const copyFrom = copyFromRaw ? normalizeChatName(copyFromRaw) : '';
+
+        try {
+          const chats = await updateRegistry((regAny: any) => {
+            const d = regAny?.drones?.[droneId];
+            if (!d) throw new Error(`unknown drone: ${droneId}`);
+            d.chats = d.chats ?? {};
+            if (d.chats[chatName]) throw new Error(`chat already exists: ${chatName}`);
+            const createdAt = nowIso();
+            let entry: any = {
+              createdAt,
+              agent: { kind: 'builtin', id: 'cursor' },
+            };
+            if (copyFrom) {
+              const source = d.chats?.[copyFrom];
+              if (!source) throw new Error(`unknown chat: ${copyFrom}`);
+              entry = {
+                createdAt,
+                agent: inferChatAgent(source),
+                ...(normalizeChatModel(source?.model) ? { model: normalizeChatModel(source?.model) } : {}),
+              };
+            }
+            d.chats[chatName] = entry;
+            regAny.drones = regAny.drones ?? {};
+            regAny.drones[droneId] = d;
+            return Object.keys(d.chats ?? {});
+          });
+
+          json(res, 201, {
+            ok: true,
+            id: droneId,
+            name: droneName,
+            chat: chatName,
+            chats,
+          });
+          return;
+        } catch (e: any) {
+          const msg = e?.message ?? String(e);
+          const code = /unknown drone|unknown chat/i.test(msg) ? 404 : /already exists/i.test(msg) ? 409 : /missing /i.test(msg) ? 400 : 500;
+          json(res, code, { ok: false, error: msg });
+          return;
+        }
+      }
+
+      // POST /api/drones/:id/chats/:chat/rename
+      if (
+        method === 'POST' &&
+        parts.length === 6 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'chats' &&
+        parts[5] === 'rename'
+      ) {
+        const droneRef = decodeURIComponent(parts[2]);
+        const chatName = normalizeChatName(decodeURIComponent(parts[4]));
+        let body: any = null;
+        try {
+          body = await readJsonBody(req);
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          return;
+        }
+
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        const droneId = resolved.id;
+        const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+
+        let newChatName = '';
+        try {
+          newChatName = parseChatNameForMutation(body?.newName ?? body?.name, 'new chat name');
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          return;
+        }
+        if (chatName === 'default') {
+          json(res, 400, { ok: false, error: 'cannot rename default chat' });
+          return;
+        }
+
+        try {
+          const chats = await updateRegistry((regAny: any) => {
+            const d = regAny?.drones?.[droneId];
+            if (!d) throw new Error(`unknown drone: ${droneId}`);
+            d.chats = d.chats ?? {};
+            const current = d.chats?.[chatName];
+            if (!current) throw new Error(`unknown chat: ${chatName}`);
+            if (newChatName !== chatName && d.chats?.[newChatName]) throw new Error(`chat already exists: ${newChatName}`);
+            if (newChatName !== chatName) {
+              d.chats[newChatName] = current;
+              delete d.chats[chatName];
+            }
+            regAny.drones = regAny.drones ?? {};
+            regAny.drones[droneId] = d;
+            return Object.keys(d.chats ?? {});
+          });
+
+          if (newChatName !== chatName) {
+            migrateInMemoryChatStateForRename({
+              droneId,
+              fromChatName: chatName,
+              toChatName: newChatName,
+            });
+          }
+
+          json(res, 200, {
+            ok: true,
+            id: droneId,
+            name: droneName,
+            oldChat: chatName,
+            chat: newChatName,
+            chats,
+          });
+          return;
+        } catch (e: any) {
+          const msg = e?.message ?? String(e);
+          const code = /unknown drone|unknown chat/i.test(msg) ? 404 : /already exists/i.test(msg) ? 409 : /cannot rename|missing /i.test(msg) ? 400 : 500;
+          json(res, code, { ok: false, error: msg });
+          return;
+        }
+      }
+
+      // DELETE /api/drones/:id/chats/:chat
+      if (method === 'DELETE' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'drones' && parts[3] === 'chats') {
+        const droneRef = decodeURIComponent(parts[2]);
+        const chatName = normalizeChatName(decodeURIComponent(parts[4]));
+        if (chatName === 'default') {
+          json(res, 400, { ok: false, error: 'cannot delete default chat' });
+          return;
+        }
+
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        const droneId = resolved.id;
+        const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+
+        try {
+          const chats = await updateRegistry((regAny: any) => {
+            const d = regAny?.drones?.[droneId];
+            if (!d) throw new Error(`unknown drone: ${droneId}`);
+            d.chats = d.chats ?? {};
+            if (!d.chats?.[chatName]) throw new Error(`unknown chat: ${chatName}`);
+            delete d.chats[chatName];
+            if (Object.keys(d.chats).length === 0) {
+              d.chats.default = { createdAt: nowIso(), agent: { kind: 'builtin', id: 'cursor' } };
+            }
+            regAny.drones = regAny.drones ?? {};
+            regAny.drones[droneId] = d;
+            return Object.keys(d.chats ?? {});
+          });
+
+          clearInMemoryChatStateForDelete({ droneId, chatName });
+
+          json(res, 200, {
+            ok: true,
+            id: droneId,
+            name: droneName,
+            deletedChat: chatName,
+            chats,
+          });
+          return;
+        } catch (e: any) {
+          const msg = e?.message ?? String(e);
+          const code = /unknown drone|unknown chat/i.test(msg) ? 404 : /cannot delete|missing /i.test(msg) ? 400 : 500;
           json(res, code, { ok: false, error: msg });
           return;
         }

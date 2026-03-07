@@ -2,6 +2,7 @@ import React from 'react';
 import type { StartupSeedState } from './app-types';
 import type { DroneSummary } from '../types';
 import { isDroneStartingOrSeeding } from './helpers';
+import { parseCanvasChatNodeId } from './app-config';
 import type { DroneDeleteMode } from './settings-types';
 import { useDroneCanvasStore } from '../canvas/use-drone-canvas-store';
 
@@ -166,7 +167,16 @@ export function useDroneMutationActions({
           await requestJson(`/api/drones/${encodeURIComponent(droneId)}`, { method: 'DELETE' });
         }
         // Keep canvas consistent with sidebar deletion/archive actions.
-        useDroneCanvasStore.getState().removeNodes([droneId]);
+        const canvasState = useDroneCanvasStore.getState();
+        const canvasNodeIds = Object.keys(canvasState.nodesByDroneId ?? {});
+        const nodeIdsToRemove = canvasNodeIds.filter((nodeId) => {
+          if (nodeId === droneId) return true;
+          const ref = parseCanvasChatNodeId(nodeId);
+          return Boolean(ref && ref.droneId === droneId);
+        });
+        if (nodeIdsToRemove.length > 0) {
+          canvasState.removeNodes(nodeIdsToRemove);
+        }
         return true;
       } catch (e: any) {
         console.error('[DroneHub] delete drone failed', { id: droneId, error: e });

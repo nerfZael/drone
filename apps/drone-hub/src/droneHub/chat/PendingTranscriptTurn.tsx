@@ -44,7 +44,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   unstickError?: string | null;
 }) {
   const [copiedToastRole, setCopiedToastRole] = React.useState<'user' | 'agent' | null>(null);
-  const copiedToastTimerRef = React.useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const copiedToastTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const attachments = normalizeImageAttachmentRefs((item as any).attachments);
   const promptText = isAttachmentOnlyPrompt(item.prompt, attachments) ? '' : item.prompt;
   const isFailed = item.state === 'failed';
@@ -68,8 +68,8 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
         : 'Typing…';
   const showCopiedToast = React.useCallback((role: 'user' | 'agent') => {
     setCopiedToastRole(role);
-    if (copiedToastTimerRef.current != null) window.clearTimeout(copiedToastTimerRef.current);
-    copiedToastTimerRef.current = window.setTimeout(() => {
+    if (copiedToastTimerRef.current != null) clearTimeout(copiedToastTimerRef.current);
+    copiedToastTimerRef.current = setTimeout(() => {
       setCopiedToastRole((prev) => (prev === role ? null : prev));
       copiedToastTimerRef.current = null;
     }, 1200);
@@ -77,7 +77,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   React.useEffect(
     () => () => {
       if (copiedToastTimerRef.current != null) {
-        window.clearTimeout(copiedToastTimerRef.current);
+        clearTimeout(copiedToastTimerRef.current);
         copiedToastTimerRef.current = null;
       }
     },
