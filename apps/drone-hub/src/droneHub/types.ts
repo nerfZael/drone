@@ -10,6 +10,7 @@ export type DroneSummary = {
   statusOk: boolean;
   statusError: string | null;
   chats: string[];
+  busyChats?: string[];
   hubPhase?: 'creating' | 'starting' | 'seeding' | 'error' | null;
   hubMessage?: string | null;
   busy?: boolean;

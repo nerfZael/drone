@@ -13,9 +13,7 @@ import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { TypingDots } from '../overview/icons';
 import { CanvasMessageBar } from './CanvasMessageBar';
 import {
-  buildChatCountByDroneId,
   collectUniqueChatTargets,
-  getChatNodeActionFlags,
   orderChatNodeIdsBySidebar,
   parseDraggedChatPayload,
   sortChatNodeIdsForDestructiveDelete,
@@ -37,8 +35,9 @@ const DOT_GRID_RADIUS_PX = 1.05;
 const DOT_GRID_MAX_OPACITY = 0.34;
 const DOT_GRID_MIN_OPACITY = 0.08;
 const NODE_MIN_WIDTH_PX = 96;
-const NODE_MAX_WIDTH_PX = 520;
-const NODE_TEXT_WIDTH_ESTIMATE_PX = 7.2;
+const NODE_MAX_WIDTH_PX = 560;
+const NODE_PRIMARY_TEXT_WIDTH_ESTIMATE_PX = 7.2;
+const NODE_SECONDARY_TEXT_WIDTH_ESTIMATE_PX = 5.8;
 const NODE_HORIZONTAL_PADDING_PX = 24;
 const MIN_DRAFT_SPAWN_COUNT = 1;
 const MAX_DRAFT_SPAWN_COUNT = 24;
@@ -147,10 +146,16 @@ function createDraftNodeId(): string {
   return `${DRAFT_CANVAS_NODE_PREFIX}${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function getNodeWidthPx(labelRaw: string): number {
-  const label = String(labelRaw ?? '').trim();
-  const nameWidth = Math.ceil(label.length * NODE_TEXT_WIDTH_ESTIMATE_PX) + NODE_HORIZONTAL_PADDING_PX;
-  return Math.max(NODE_MIN_WIDTH_PX, Math.min(NODE_MAX_WIDTH_PX, nameWidth));
+function getNodeWidthPx(labelRaw: string, secondaryLabelRaw?: string): number {
+  const primaryLabel = String(labelRaw ?? '').trim();
+  const secondaryLabel = String(secondaryLabelRaw ?? '').trim();
+  const primaryWidth = Math.ceil(primaryLabel.length * NODE_PRIMARY_TEXT_WIDTH_ESTIMATE_PX);
+  const secondaryWidth = Math.ceil(secondaryLabel.length * NODE_SECONDARY_TEXT_WIDTH_ESTIMATE_PX);
+  const contentWidth = Math.max(primaryWidth, secondaryWidth);
+  return Math.max(
+    NODE_MIN_WIDTH_PX,
+    Math.min(NODE_MAX_WIDTH_PX, contentWidth + NODE_HORIZONTAL_PADDING_PX),
+  );
 }
 
 function clampDraftSpawnCount(valueRaw: number): number {
@@ -240,7 +245,7 @@ export function DroneCanvasDock({
   sidebarSelectedChatNodeId,
   droneRepoById,
   draftRepoLabel,
-  droneStateById,
+  chatNodeStateById,
   onActivateChat,
   onSendCanvasPrompt,
   onCreateCanvasDroneFromDraft,
@@ -266,7 +271,7 @@ export function DroneCanvasDock({
   sidebarSelectedChatNodeId?: string | null;
   droneRepoById: Record<string, string>;
   draftRepoLabel?: string;
-  droneStateById: Record<string, DroneCanvasIndicatorState>;
+  chatNodeStateById: Record<string, DroneCanvasIndicatorState>;
   onActivateChat?: (droneId: string, chatName: string) => void;
   onSendCanvasPrompt?: (
     targets: Array<{ droneId: string; chatName: string }>,
@@ -387,10 +392,18 @@ export function DroneCanvasDock({
   const nodeWidthByDroneId = React.useMemo(() => {
     const out: Record<string, number> = {};
     for (const node of nodes) {
-      out[node.droneId] = getNodeWidthPx(node.label);
+      if (isCanvasDraftNodeId(node.droneId)) {
+        out[node.droneId] = getNodeWidthPx(node.label);
+        continue;
+      }
+      const chatRef = parseCanvasChatNodeId(node.droneId);
+      const chatDroneLabel = chatRef
+        ? String(droneNameById[chatRef.droneId] ?? '').trim() || chatRef.droneId
+        : '';
+      out[node.droneId] = getNodeWidthPx(node.label, chatDroneLabel);
     }
     return out;
-  }, [nodes]);
+  }, [droneNameById, nodes]);
   const selectedDroneIdSet = React.useMemo(() => new Set(selectedDroneIds), [selectedDroneIds]);
   const selectedDraftNodeId = React.useMemo(() => {
     if (selectedDroneIds.length !== 1) return null;
@@ -401,10 +414,6 @@ export function DroneCanvasDock({
   const selectedDraftPrompt = selectedDraftNodeId
     ? String(draftPromptByNodeId[selectedDraftNodeId] ?? '')
     : '';
-  const chatCountByDroneId = React.useMemo(
-    () => buildChatCountByDroneId(sidebarOrderedChatNodeIds),
-    [sidebarOrderedChatNodeIds],
-  );
   const selectedMessageDraft = selectedDraftNodeId ? selectedDraftPrompt : messageDraft;
   const selectedMessageLabel = React.useMemo(() => {
     if (selectedDroneIds.length !== 1) return null;
@@ -1785,8 +1794,7 @@ export function DroneCanvasDock({
             const selected = selectedDroneIdSet.has(node.droneId);
             const dragging = draggingNodeId === node.droneId;
             const inlineEditing = inlineRenamingDroneId === node.droneId;
-            const deletingChat = Boolean(deletingChatNodeById[node.droneId]);
-            const indicatorState = draftNode || !chatDroneId ? null : droneStateById[chatDroneId] ?? null;
+            const indicatorState = draftNode ? null : chatNodeStateById[node.droneId] ?? null;
             const indicator = renderNodeIndicator(indicatorState);
             const unreadIndicator = renderNodeUnreadIndicator(indicatorState);
             const nodeWidth = nodeWidthByDroneId[node.droneId] ?? NODE_MIN_WIDTH_PX;
@@ -1798,10 +1806,6 @@ export function DroneCanvasDock({
             const chatDroneLabel = chatDroneId
               ? String(droneNameById[chatDroneId] ?? '').trim() || chatDroneId
               : '';
-            const { renameDisabled, deleteDisabled } = getChatNodeActionFlags(
-              chatRef,
-              chatCountByDroneId,
-            );
             return (
               <button
                 key={node.droneId}
@@ -1854,66 +1858,6 @@ export function DroneCanvasDock({
                     {repoLabel}
                   </span>
                 ) : null}
-                {!draftNode && chatRef && !inlineEditing ? (
-                  <span
-                    className={`absolute right-1.5 top-1.5 z-[3] flex items-center gap-1 transition-opacity ${
-                      selected || deletingChat
-                        ? 'opacity-100'
-                        : 'opacity-0 pointer-events-none group-hover/canvas-node:opacity-100 group-hover/canvas-node:pointer-events-auto'
-                    }`}
-                  >
-                    <span
-                      role="button"
-                      aria-disabled={inlineRenameBusy || deletingChat || renameDisabled}
-                      onMouseDown={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                      }}
-                      onClick={(event) => {
-                        if (inlineRenameBusy || deletingChat || renameDisabled) return;
-                        event.preventDefault();
-                        event.stopPropagation();
-                        beginInlineRename(node.droneId);
-                      }}
-                      title={renameDisabled ? 'Default chat cannot be renamed' : 'Rename chat'}
-                      className={`h-5 rounded border px-1.5 text-[9px] font-semibold uppercase tracking-wide ${
-                        inlineRenameBusy || deletingChat || renameDisabled
-                          ? 'cursor-not-allowed border-[var(--border-subtle)] text-[var(--muted-dim)] opacity-60'
-                          : 'cursor-pointer border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] bg-[rgba(10,14,22,.92)]'
-                      }`}
-                    >
-                      Ren
-                    </span>
-                    <span
-                      role="button"
-                      aria-disabled={inlineRenameBusy || deletingChat || deleteDisabled}
-                      onMouseDown={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                      }}
-                      onClick={(event) => {
-                        if (inlineRenameBusy || deletingChat || deleteDisabled) return;
-                        event.preventDefault();
-                        event.stopPropagation();
-                        void deleteChatNode(node.droneId);
-                      }}
-                      title={
-                        deleteDisabled
-                          ? 'Delete other chats first, or delete this drone from the drone row actions'
-                          : chatRef?.chatName === 'default'
-                            ? 'Delete drone (only remaining chat)'
-                            : 'Delete chat'
-                      }
-                      className={`h-5 rounded border px-1.5 text-[9px] font-semibold uppercase tracking-wide ${
-                        inlineRenameBusy || deletingChat || deleteDisabled
-                          ? 'cursor-not-allowed border-[rgba(255,90,90,.25)] text-[var(--red)] opacity-60'
-                          : 'cursor-pointer border-[rgba(255,90,90,.25)] text-[var(--red)] hover:bg-[rgba(255,90,90,.12)] bg-[rgba(10,14,22,.92)]'
-                      }`}
-                    >
-                      {deletingChat ? '...' : 'Del'}
-                    </span>
-                  </span>
-                ) : null}
                 <span className="min-w-0 flex-1">
                   {inlineEditing ? (
                     <input
@@ -1955,11 +1899,11 @@ export function DroneCanvasDock({
                     />
                   ) : (
                     <span className="block">
-                      <span className="block whitespace-nowrap text-[12.5px] font-semibold text-[var(--fg-secondary)]">
+                      <span className="block truncate text-[12.5px] font-semibold text-[var(--fg-secondary)]">
                         {node.label}
                       </span>
                       {!draftNode && chatDroneLabel ? (
-                        <span className="block whitespace-nowrap text-[10px] text-[var(--muted-dim)]">
+                        <span className="block truncate text-[10px] text-[var(--muted-dim)]">
                           {chatDroneLabel}
                         </span>
                       ) : null}

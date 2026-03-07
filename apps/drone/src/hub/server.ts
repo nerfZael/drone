@@ -3482,21 +3482,33 @@ function migrateInMemoryChatStateForRename(opts: { droneId: string; fromChatName
   }
 }
 
-function anyActivePendingPromptsForDrone(d: any): boolean {
-  const chats = d?.chats && typeof d.chats === 'object' ? Object.values(d.chats) : [];
-  for (const c of chats as any[]) {
-    const pending = Array.isArray(c?.pendingPrompts) ? c.pendingPrompts : [];
-    if (pending.length === 0) continue;
-    const turns = Array.isArray(c?.turns) ? c.turns : [];
-    const doneIds = new Set(turns.map((t: any) => String(t?.id ?? '').trim()).filter(Boolean));
-    for (const p of pending) {
-      const st = String(p?.state ?? '');
-      if (st === 'failed') continue;
-      const id = String(p?.id ?? '').trim();
-      if (!id || !doneIds.has(id)) return true;
-    }
+function chatHasActivePendingPromptsForSummary(entry: any): boolean {
+  const pending = Array.isArray(entry?.pendingPrompts) ? entry.pendingPrompts : [];
+  if (pending.length === 0) return false;
+  const turns = Array.isArray(entry?.turns) ? entry.turns : [];
+  const doneIds = new Set(turns.map((t: any) => String(t?.id ?? '').trim()).filter(Boolean));
+  for (const p of pending) {
+    const st = String(p?.state ?? '').trim();
+    if (st === 'failed') continue;
+    const id = String(p?.id ?? '').trim();
+    if (!id || !doneIds.has(id)) return true;
   }
   return false;
+}
+
+function busyChatNamesForDrone(d: any, droneIdRaw: string): string[] {
+  const droneId = normalizeDroneIdentity(droneIdRaw);
+  if (!droneId) return [];
+  const chats = d?.chats && typeof d.chats === 'object' ? Object.entries(d.chats) : [];
+  const out: string[] = [];
+  for (const [chatNameRaw, entry] of chats as Array<[string, any]>) {
+    const chatName = normalizeChatName(chatNameRaw);
+    if (!chatName || out.includes(chatName)) continue;
+    const hasPending = chatHasActivePendingPromptsForSummary(entry);
+    const automationBusy = promptAutomationLaneBusy(getPromptAutomationLane(droneId, chatName), { includeQueued: true });
+    if (hasPending || automationBusy) out.push(chatName);
+  }
+  return out;
 }
 
 function chatHasReconcilablePendingPrompts(entry: any): boolean {
@@ -6991,6 +7003,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             status: null,
             statusError: phase === 'error' ? (err ?? message ?? 'failed') : null,
             chats: [],
+            busyChats: [],
             hubPhase,
             hubMessage: phase === 'error' ? (err ?? message ?? null) : message,
             busy: false,
@@ -7017,6 +7030,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             let status: any = null;
             let statusError: string | null = null;
             const droneId = normalizeDroneIdentity(d?.id);
+            const busyChats = droneId ? busyChatNamesForDrone(d, droneId) : [];
             const token = typeof d.token === 'string' ? d.token : '';
             if (hostPort && token) {
               try {
@@ -7064,9 +7078,10 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
               status,
               statusError,
               chats: Object.keys(d.chats ?? {}),
+              busyChats,
               hubPhase,
               hubMessage,
-              busy: anyActivePendingPromptsForDrone(d) || anyBusyPromptAutomationLaneForDrone(droneId),
+              busy: busyChats.length > 0,
             };
           })
         );

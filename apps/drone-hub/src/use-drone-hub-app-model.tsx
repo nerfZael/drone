@@ -345,32 +345,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       return changed ? next : prev;
     });
   }, [dronesError, dronesLoading, setUnreadAgentMessageByDroneId, validDroneIdSet]);
-  const droneStateById = React.useMemo(() => {
-    const out: Record<
-      string,
-      {
-        statusOk: boolean;
-        statusError: string | null;
-        hubPhase?: DroneSummary['hubPhase'];
-        hubMessage?: DroneSummary['hubMessage'];
-        busy: boolean;
-        unreadAgentMessage: boolean;
-      }
-    > = {};
-    for (const drone of drones) {
-      const id = String(drone?.id ?? '').trim();
-      if (!id) continue;
-      out[id] = {
-        statusOk: Boolean(drone.statusOk),
-        statusError: drone.statusError ?? null,
-        hubPhase: drone.hubPhase,
-        hubMessage: drone.hubMessage,
-        busy: Boolean(drone.busy),
-        unreadAgentMessage: unreadAgentMessageByDroneId[id] === true,
-      };
-    }
-    return out;
-  }, [drones, unreadAgentMessageByDroneId]);
   const sidebarSelectableDroneIdSet = React.useMemo(
     () => new Set(sidebarDronesFilteredByRepo.map((drone) => drone.id)),
     [sidebarDronesFilteredByRepo],
@@ -1285,6 +1259,54 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     currentDrone && !isDroneStartingOrSeeding(currentDrone.hubPhase)
       ? Boolean(currentDrone.busy) || selectedIsResponding
       : false;
+  const busyChatNodeIdSet = React.useMemo(() => {
+    const out = new Set<string>();
+    for (const drone of drones) {
+      const droneId = String(drone?.id ?? '').trim();
+      if (!droneId) continue;
+      const rawBusyChats = Array.isArray(drone?.busyChats) ? drone.busyChats : [];
+      for (const rawChatName of rawBusyChats) {
+        const chatName = String(rawChatName ?? '').trim() || 'default';
+        const nodeId = createCanvasChatNodeId(droneId, chatName);
+        if (nodeId) out.add(nodeId);
+      }
+    }
+    const selectedNodeId = createCanvasChatNodeId(String(selectedDrone ?? '').trim(), String(selectedChat ?? '').trim() || 'default');
+    if (selectedNodeId && selectedIsResponding) out.add(selectedNodeId);
+    return out;
+  }, [drones, selectedChat, selectedDrone, selectedIsResponding]);
+  const chatNodeStateById = React.useMemo(() => {
+    const out: Record<
+      string,
+      {
+        statusOk: boolean;
+        statusError: string | null;
+        hubPhase?: DroneSummary['hubPhase'];
+        hubMessage?: DroneSummary['hubMessage'];
+        busy: boolean;
+        unreadAgentMessage: boolean;
+      }
+    > = {};
+    for (const drone of drones) {
+      const droneId = String(drone?.id ?? '').trim();
+      if (!droneId) continue;
+      const chats = Array.isArray(drone?.chats) && drone.chats.length > 0 ? drone.chats : ['default'];
+      for (const rawChatName of chats) {
+        const chatName = String(rawChatName ?? '').trim() || 'default';
+        const nodeId = createCanvasChatNodeId(droneId, chatName);
+        if (!nodeId) continue;
+        out[nodeId] = {
+          statusOk: Boolean(drone.statusOk),
+          statusError: drone.statusError ?? null,
+          hubPhase: drone.hubPhase,
+          hubMessage: drone.hubMessage,
+          busy: busyChatNodeIdSet.has(nodeId),
+          unreadAgentMessage: unreadAgentMessageByDroneId[droneId] === true && chatName === 'default',
+        };
+      }
+    }
+    return out;
+  }, [busyChatNodeIdSet, drones, unreadAgentMessageByDroneId]);
   const showRespondingAsStatusInHeader =
     Boolean(currentDroneBusy) && Boolean(currentDrone?.statusOk) && currentDrone?.hubPhase !== 'error';
   const currentCustomAgentMissing = currentAgent.kind === 'custom' && !customAgents.some((a) => a.id === currentAgent.id);
@@ -1647,7 +1669,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         droneNameById={droneNameById}
         droneRepoById={droneRepoById}
         draftRepoLabel={canvasDraftRepoLabel}
-        droneStateById={droneStateById}
+        chatNodeStateById={chatNodeStateById}
         onActivateChatFromCanvas={onActivateChatFromCanvas}
         onSendCanvasPrompt={sendCanvasPrompt}
         onCreateCanvasDroneFromDraft={createCanvasDroneFromDraft}
@@ -1715,7 +1737,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       defaultFsPathForCurrentDrone,
       droneNameById,
       droneRepoById,
-      droneStateById,
+      chatNodeStateById,
       onActivateChatFromCanvas,
       orderedCanvasChatNodeIds,
       filesPane,
@@ -1791,7 +1813,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     sidebarDrones,
     sidebarOptimisticDroneIdSet,
     selectedDroneSet,
-    selectedIsResponding,
+    busyChatNodeIdSet,
     unreadAgentMessageByDroneId,
     deletingDrones,
     renamingDrones,

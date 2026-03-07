@@ -3,6 +3,32 @@ import type { StartupSeedState } from './app-types';
 import { isStartupSeedFresh } from './app-config';
 import type { DroneSummary } from '../types';
 
+function normalizedDroneChats(drone: DroneSummary | null | undefined): string[] {
+  const list = Array.isArray(drone?.chats) ? drone.chats : [];
+  const out: string[] = [];
+  for (const raw of list) {
+    const chat = String(raw ?? '').trim();
+    if (!chat || out.includes(chat)) continue;
+    out.push(chat);
+  }
+  return out;
+}
+
+export function resolveSelectedChatForDrone(args: {
+  droneId: string;
+  drones: DroneSummary[];
+  lastSelectedChatByDrone: Record<string, string>;
+}): string {
+  const droneId = String(args.droneId ?? '').trim();
+  if (!droneId) return 'default';
+  const drone = args.drones.find((item) => item.id === droneId) ?? null;
+  const chats = normalizedDroneChats(drone);
+  const remembered = String(args.lastSelectedChatByDrone[droneId] ?? '').trim();
+  if (remembered && chats.includes(remembered)) return remembered;
+  if (chats.includes('default')) return 'default';
+  return chats[0] ?? 'default';
+}
+
 type UseDroneSelectionStateArgs = {
   orderedDroneIds: string[];
   selectedDrone: string | null;
@@ -52,10 +78,29 @@ export function useDroneSelectionState({
   setSelectedGroupMultiChat,
   setSelectedChat,
 }: UseDroneSelectionStateArgs) {
+  const lastSelectedChatByDroneRef = React.useRef<Record<string, string>>({});
+  const resolveChatForDrone = React.useCallback(
+    (droneIdRaw: string) =>
+      resolveSelectedChatForDrone({
+        droneId: droneIdRaw,
+        drones,
+        lastSelectedChatByDrone: lastSelectedChatByDroneRef.current,
+      }),
+    [drones],
+  );
+
+  React.useEffect(() => {
+    const droneId = String(selectedDrone ?? '').trim();
+    const chatName = String(selectedChat ?? '').trim() || 'default';
+    if (!droneId) return;
+    lastSelectedChatByDroneRef.current[droneId] = chatName;
+  }, [selectedChat, selectedDrone]);
+
   const selectDroneCard = React.useCallback(
     (droneIdRaw: string, opts?: { toggle?: boolean; range?: boolean }) => {
       const id = String(droneIdRaw ?? '').trim();
       if (!id) return;
+      const nextChat = resolveChatForDrone(id);
       // Manual card selection should always override any temporary preferred auto-selection.
       preferredSelectedDroneRef.current = null;
       preferredSelectedDroneHoldUntilRef.current = 0;
@@ -78,6 +123,7 @@ export function useDroneSelectionState({
           setSelectedDroneIds(orderedDroneIds.slice(start, end + 1));
           setSelectedDrone(id);
           selectionAnchorRef.current = anchor;
+          setSelectedChat(nextChat);
           scrollChatToBottom();
           return;
         }
@@ -86,18 +132,21 @@ export function useDroneSelectionState({
         setSelectedDroneIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
         setSelectedDrone(id);
         selectionAnchorRef.current = id;
+        setSelectedChat(nextChat);
         scrollChatToBottom();
         return;
       }
       setSelectedDroneIds([id]);
       setSelectedDrone(id);
       selectionAnchorRef.current = id;
+      setSelectedChat(nextChat);
       scrollChatToBottom();
     },
     [
       orderedDroneIds,
       preferredSelectedDroneHoldUntilRef,
       preferredSelectedDroneRef,
+      resolveChatForDrone,
       scrollChatToBottom,
       selectedDrone,
       selectionAnchorRef,
@@ -105,6 +154,7 @@ export function useDroneSelectionState({
       setDraftChat,
       setDraftCreateError,
       setDraftCreateOpen,
+      setSelectedChat,
       setSelectedDrone,
       setSelectedDroneIds,
       setSelectedGroupMultiChat,
@@ -164,7 +214,7 @@ export function useDroneSelectionState({
           setSelectedDrone(preferred);
           setSelectedDroneIds((prev) => (prev.length === 1 && prev[0] === preferred ? prev : [preferred]));
           selectionAnchorRef.current = preferred;
-          setSelectedChat('default');
+          setSelectedChat(resolveChatForDrone(preferred));
           return;
         }
         preferredSelectedDroneRef.current = null;
@@ -184,12 +234,14 @@ export function useDroneSelectionState({
       setSelectedDrone(first);
       setSelectedDroneIds((prev) => (prev.length === 1 && prev[0] === first ? prev : [first]));
       selectionAnchorRef.current = first;
+      setSelectedChat(resolveChatForDrone(first));
     }
   }, [
     draftChat,
     dronesFilteredByRepo,
     preferredSelectedDroneHoldUntilRef,
     preferredSelectedDroneRef,
+    resolveChatForDrone,
     resetGroupDndState,
     selectedDrone,
     selectionAnchorRef,

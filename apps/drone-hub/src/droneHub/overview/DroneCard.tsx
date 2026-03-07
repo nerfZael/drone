@@ -83,7 +83,7 @@ export function DroneCard({
   const showRespondingAsStatus = Boolean(busy) && Boolean(drone.statusOk) && drone.hubPhase !== 'error';
   const isStarting = drone.hubPhase === 'creating' || drone.hubPhase === 'starting' || drone.hubPhase === 'seeding';
   const showUnreadIndicator =
-    Boolean(unreadAgentMessage) && !isStarting && !(Boolean(drone.busy) && Boolean(drone.statusOk) && drone.hubPhase !== 'error');
+    Boolean(unreadAgentMessage) && !isStarting && !showRespondingAsStatus;
   const errText = String(drone.hubMessage ?? drone.statusError ?? '').trim();
   const showInlineError = drone.hubPhase === 'error' && Boolean(errText);
   const canOpenInlineError = showInlineError && typeof onErrorClick === 'function';

@@ -31,7 +31,7 @@ type RightPanelTabContentProps = {
   droneNameById: Record<string, string>;
   droneRepoById: Record<string, string>;
   draftRepoLabel: string;
-  droneStateById: Record<
+  chatNodeStateById: Record<
     string,
     {
       statusOk: boolean;
@@ -120,7 +120,7 @@ export function RightPanelTabContent({
   droneNameById,
   droneRepoById,
   draftRepoLabel,
-  droneStateById,
+  chatNodeStateById,
   onActivateChatFromCanvas,
   onSendCanvasPrompt,
   onCreateCanvasDroneFromDraft,
@@ -181,7 +181,7 @@ export function RightPanelTabContent({
           sidebarSelectedChatNodeId={currentCanvasChatNodeId}
           droneRepoById={droneRepoById}
           draftRepoLabel={draftRepoLabel}
-          droneStateById={droneStateById}
+          chatNodeStateById={chatNodeStateById}
           onActivateChat={onActivateChatFromCanvas}
           onSendCanvasPrompt={onSendCanvasPrompt}
           onCreateCanvasDroneFromDraft={onCreateCanvasDroneFromDraft}
