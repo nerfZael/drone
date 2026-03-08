@@ -230,11 +230,12 @@ export function DroneChangesDock({
   const explorerZoomPercent = Math.round(explorerZoom * 100);
   const explorerRowHeightPx = Math.max(28, Math.round(28 * explorerZoom));
   const explorerIconSizePx = Math.max(12, Math.round(12 * explorerZoom));
+  const explorerLeadingSlotPx = Math.max(explorerIconSizePx, Math.round(12 * explorerZoom));
   const explorerTextSizePx = Math.max(11, Math.round(11 * explorerZoom * 10) / 10);
   const explorerMetaTextSizePx = Math.max(9, Math.round(9 * explorerZoom * 10) / 10);
-  const explorerIndentBasePx = Math.max(8, Math.round(8 * explorerZoom));
-  const explorerIndentStepPx = Math.max(14, Math.round(14 * explorerZoom));
-  const explorerBadgeMinWidthPx = Math.max(30, Math.round(30 * explorerZoom));
+  const explorerIndentBasePx = Math.max(6, Math.round(6 * explorerZoom));
+  const explorerIndentStepPx = Math.max(9, Math.round(9 * explorerZoom));
+  const explorerBadgeMinWidthPx = Math.max(22, Math.round(22 * explorerZoom));
   const explorerBadgeHeightPx = Math.max(16, Math.round(16 * explorerZoom));
   const markModeRefreshed = React.useCallback((mode: ChangesDataMode) => {
     const now = Date.now();
@@ -947,32 +948,51 @@ export function DroneChangesDock({
 
   function renderExplorer(nodes: ExplorerNode[], depth: number): React.ReactNode {
     return nodes.map((node) => {
+      const indentPx = explorerIndentBasePx + depth * explorerIndentStepPx;
       if (node.kind === 'dir') {
         const open = expandedDirs[node.path] !== false;
         return (
           <React.Fragment key={`dir:${node.path}`}>
-            <button
-              type="button"
-              onClick={() => {
-                setExpandedDirs((prev) => ({ ...prev, [node.path]: !open }));
-              }}
-              className="w-full text-left px-2 rounded border border-transparent hover:bg-[var(--hover)] flex items-center gap-1.5"
-              style={{
-                paddingLeft: `${explorerIndentBasePx + depth * explorerIndentStepPx}px`,
-                height: `${explorerRowHeightPx}px`,
-                minHeight: `${explorerRowHeightPx}px`,
-              }}
-              title={node.path}
-            >
-              <span className="text-[var(--muted-dim)]"><IconChevron open={open} size={explorerIconSizePx} /></span>
-              <span className="text-[var(--muted)]"><IconFolder size={explorerIconSizePx} /></span>
-              <span className="text-[var(--fg-secondary)] truncate flex-1" style={{ fontSize: `${explorerTextSizePx}px` }}>
-                {node.name}
+            <div className="w-full relative" style={{ paddingLeft: `${indentPx}px` }}>
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute inline-flex items-center justify-center text-[var(--muted-dim)]"
+                style={{
+                  left: `${Math.max(0, indentPx - explorerLeadingSlotPx)}px`,
+                  top: '50%',
+                  width: `${explorerLeadingSlotPx}px`,
+                  height: `${explorerLeadingSlotPx}px`,
+                  transform: 'translateY(-50%)',
+                }}
+              >
+                <IconChevron open={open} size={explorerIconSizePx} />
               </span>
-              <span className="text-[var(--muted-dim)] tabular-nums" style={{ fontSize: `${explorerMetaTextSizePx}px` }}>
-                {node.count}
-              </span>
-            </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setExpandedDirs((prev) => ({ ...prev, [node.path]: !open }));
+                }}
+                className="w-full text-left px-1 rounded border border-transparent hover:bg-[var(--hover)] flex items-center gap-0.5"
+                style={{
+                  height: `${explorerRowHeightPx}px`,
+                  minHeight: `${explorerRowHeightPx}px`,
+                }}
+                title={node.path}
+              >
+                <span
+                  className="inline-flex items-center justify-center flex-shrink-0 text-[var(--muted)]"
+                  style={{ width: `${explorerLeadingSlotPx}px`, height: `${explorerLeadingSlotPx}px` }}
+                >
+                  <IconFolder size={explorerIconSizePx} />
+                </span>
+                <span className="text-[var(--fg-secondary)] truncate flex-1" style={{ fontSize: `${explorerTextSizePx}px` }}>
+                  {node.name}
+                </span>
+                <span className="text-[var(--muted-dim)] tabular-nums" style={{ fontSize: `${explorerMetaTextSizePx}px` }}>
+                  {node.count}
+                </span>
+              </button>
+            </div>
             {open && node.children && node.children.length > 0 ? renderExplorer(node.children, depth + 1) : null}
           </React.Fragment>
         );
@@ -982,42 +1002,47 @@ export function DroneChangesDock({
       if (!entry) return null;
       const active = entry.path === selectedPath;
       return (
-        <button
-          key={`file:${entry.path}`}
-          type="button"
-          onClick={() => {
-            setSelectedPath(entry.path);
-            if (dataMode === 'working-tree') setSplitKind(defaultKindForEntry(entry));
-          }}
-          className={`w-full text-left px-2 rounded border transition-colors flex items-center gap-1.5 ${
-            active
-              ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)]'
-              : 'border-transparent hover:bg-[var(--hover)]'
-          }`}
-          style={{
-            paddingLeft: `${explorerIndentBasePx + depth * explorerIndentStepPx}px`,
-            height: `${explorerRowHeightPx}px`,
-            minHeight: `${explorerRowHeightPx}px`,
-          }}
-          title={entry.path}
-        >
-          <span className="text-[var(--muted-dim)]"><IconFile size={explorerIconSizePx} /></span>
-          <span className="text-[var(--fg-secondary)] truncate flex-1" style={{ fontSize: `${explorerTextSizePx}px` }}>
-            {node.name}
-          </span>
-          <span
-            className={`inline-flex items-center justify-center rounded border font-mono ${badgeTone(entry)}`}
-            style={{
-              minWidth: `${explorerBadgeMinWidthPx}px`,
-              height: `${explorerBadgeHeightPx}px`,
-              fontSize: `${explorerMetaTextSizePx}px`,
+        <div key={`file:${entry.path}`} className="w-full" style={{ paddingLeft: `${indentPx}px` }}>
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedPath(entry.path);
+              if (dataMode === 'working-tree') setSplitKind(defaultKindForEntry(entry));
             }}
-            title={statusBadgeTitle(entry, dataMode)}
+            className={`w-full text-left px-1 rounded border transition-colors flex items-center gap-0.5 ${
+              active
+                ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)]'
+                : 'border-transparent hover:bg-[var(--hover)]'
+            }`}
+            style={{
+              height: `${explorerRowHeightPx}px`,
+              minHeight: `${explorerRowHeightPx}px`,
+            }}
+            title={entry.path}
           >
-            {statusCharLabel(entry.stagedChar)}
-            {statusCharLabel(entry.unstagedChar)}
-          </span>
-        </button>
+            <span
+              className="inline-flex items-center justify-center flex-shrink-0 text-[var(--muted-dim)]"
+              style={{ width: `${explorerLeadingSlotPx}px`, height: `${explorerLeadingSlotPx}px` }}
+            >
+              <IconFile size={explorerIconSizePx} />
+            </span>
+            <span className="text-[var(--fg-secondary)] truncate flex-1" style={{ fontSize: `${explorerTextSizePx}px` }}>
+              {node.name}
+            </span>
+            <span
+              className={`inline-flex items-center justify-center rounded border font-mono ${badgeTone(entry)}`}
+              style={{
+                minWidth: `${explorerBadgeMinWidthPx}px`,
+                height: `${explorerBadgeHeightPx}px`,
+                fontSize: `${explorerMetaTextSizePx}px`,
+              }}
+              title={statusBadgeTitle(entry, dataMode)}
+            >
+              {statusCharLabel(entry.stagedChar)}
+              {statusCharLabel(entry.unstagedChar)}
+            </span>
+          </button>
+        </div>
       );
     });
   }

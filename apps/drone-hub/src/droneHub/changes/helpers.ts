@@ -308,14 +308,14 @@ export function estimateExplorerSidebarWidth(
   const desiredWidth = Math.max(
     fallbackWidthPx,
     rows.reduce((max, row) => {
-      const leftPadding = 8 + row.depth * 14;
+      const leftPadding = 6 + row.depth * 9;
       const textWidth = Math.ceil(row.name.length * avgCharWidthPx);
       const dirCountWidth = Math.max(10, String(Math.max(0, row.count)).length * 6);
       // Account for icon/gaps and right-side metadata chip/counter.
       const staticWidth =
         row.kind === 'dir'
-          ? 12 + 6 + 12 + 6 + 6 + 8 + dirCountWidth
-          : 12 + 6 + 6 + 8 + 34;
+          ? 12 + 2 + 2 + 4 + dirCountWidth
+          : 12 + 2 + 2 + 4 + 22;
       return Math.max(max, leftPadding + staticWidth + textWidth);
     }, 0),
   );
