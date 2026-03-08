@@ -1,6 +1,6 @@
 import React from 'react';
 import { requestJson } from '../http';
-import { IconChevron, IconFile, IconFolder } from '../icons';
+import { IconChevron, IconFolder, iconForFilePath } from '../icons';
 import { provisioningLabel, usePaneReadiness } from '../panes/usePaneReadiness';
 import type {
   RepoChangeEntry,
@@ -971,6 +971,7 @@ export function DroneChangesDock({
       const entry = node.entry ?? null;
       if (!entry) return null;
       const active = entry.path === selectedPath;
+      const FileIcon = iconForFilePath(entry.path);
       return (
         <div key={`file:${entry.path}`} className="w-full" style={{ paddingLeft: `${indentPx}px` }}>
           <button
@@ -994,7 +995,7 @@ export function DroneChangesDock({
               className="inline-flex items-center justify-center flex-shrink-0 text-[var(--muted-dim)]"
               style={{ width: `${explorerLeadingSlotPx}px`, height: `${explorerLeadingSlotPx}px` }}
             >
-              <IconFile size={explorerIconSizePx} />
+              <FileIcon size={explorerIconSizePx} />
             </span>
             <span className="text-[var(--fg-secondary)] truncate flex-1" style={{ fontSize: `${explorerTextSizePx}px` }}>
               {node.name}
