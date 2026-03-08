@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, test } from 'bun:test';
+import { resetDroneRootDirForTests } from '../src/host/paths';
 import { loadRegistry, updateRegistry } from '../src/host/registry';
 import { pruneMissingRegistryDrones } from '../src/hub/stale-registry-prune';
 
@@ -16,8 +17,13 @@ async function withTempHomes<T>(
 
   const prevHome = process.env.HOME;
   const prevXdg = process.env.XDG_DATA_HOME;
+  const prevDroneDataDir = process.env.DRONE_DATA_DIR;
+  const droneDataDir = path.join(xdgDataHome, 'drone');
   process.env.HOME = homeDir;
   process.env.XDG_DATA_HOME = xdgDataHome;
+  process.env.DRONE_DATA_DIR = droneDataDir;
+  fs.mkdirSync(droneDataDir, { recursive: true });
+  resetDroneRootDirForTests();
 
   try {
     return await fn({ tempRoot, homeDir, xdgDataHome });
@@ -26,6 +32,9 @@ async function withTempHomes<T>(
     else process.env.HOME = prevHome;
     if (prevXdg == null) delete process.env.XDG_DATA_HOME;
     else process.env.XDG_DATA_HOME = prevXdg;
+    if (prevDroneDataDir == null) delete process.env.DRONE_DATA_DIR;
+    else process.env.DRONE_DATA_DIR = prevDroneDataDir;
+    resetDroneRootDirForTests();
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
 }

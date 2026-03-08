@@ -4,6 +4,7 @@ import path from 'node:path';
 import cp from 'node:child_process';
 import { describe, expect, test } from 'bun:test';
 import { startDroneHubApiServer } from '../src/hub/server';
+import { resetDroneRootDirForTests } from '../src/host/paths';
 
 function run(
   cmd: string,
@@ -93,11 +94,17 @@ describe('drone docker lifecycle regression', () => {
       const renamedDroneName = `${droneName}-renamed`;
       const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-regression-'));
       const xdgDataHome = path.join(tempRoot, 'xdg-data');
+      const droneDataDir = path.join(tempRoot, 'data', 'drone');
+      const dvmDataDir = path.join(tempRoot, 'data', 'dvm');
       fs.mkdirSync(xdgDataHome, { recursive: true });
       fs.mkdirSync(path.join(xdgDataHome, 'drone'), { recursive: true });
+      fs.mkdirSync(droneDataDir, { recursive: true });
+      fs.mkdirSync(dvmDataDir, { recursive: true });
       const env = {
         ...process.env,
         XDG_DATA_HOME: xdgDataHome,
+        DRONE_DATA_DIR: droneDataDir,
+        DVM_DATA_DIR: dvmDataDir,
         NO_COLOR: '1',
       };
 
@@ -187,14 +194,20 @@ describe('drone docker lifecycle regression', () => {
       const renamedDroneName = `${droneName}-renamed`;
       const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-regression-rb-'));
       const xdgDataHome = path.join(tempRoot, 'xdg-data');
+      const droneDataDir = path.join(tempRoot, 'data', 'drone');
+      const dvmDataDir = path.join(tempRoot, 'data', 'dvm');
       fs.mkdirSync(xdgDataHome, { recursive: true });
       fs.mkdirSync(path.join(xdgDataHome, 'drone'), { recursive: true });
+      fs.mkdirSync(droneDataDir, { recursive: true });
+      fs.mkdirSync(dvmDataDir, { recursive: true });
       const env = {
         ...process.env,
         XDG_DATA_HOME: xdgDataHome,
+        DRONE_DATA_DIR: droneDataDir,
+        DVM_DATA_DIR: dvmDataDir,
         NO_COLOR: '1',
       };
-      const registryDir = path.join(xdgDataHome, 'drone');
+      const registryDir = droneDataDir;
 
       try {
         runOrThrow(
@@ -264,15 +277,23 @@ describe('drone docker lifecycle regression', () => {
       const renamedDroneName = `${droneName}-renamed`;
       const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-regression-hub-rn-'));
       const xdgDataHome = path.join(tempRoot, 'xdg-data');
+      const droneDataDir = path.join(tempRoot, 'data', 'drone');
+      const dvmDataDir = path.join(tempRoot, 'data', 'dvm');
       fs.mkdirSync(xdgDataHome, { recursive: true });
       fs.mkdirSync(path.join(xdgDataHome, 'drone'), { recursive: true });
+      fs.mkdirSync(droneDataDir, { recursive: true });
+      fs.mkdirSync(dvmDataDir, { recursive: true });
       const env = {
         ...process.env,
         XDG_DATA_HOME: xdgDataHome,
+        DRONE_DATA_DIR: droneDataDir,
+        DVM_DATA_DIR: dvmDataDir,
         NO_COLOR: '1',
       };
 
       const prevXdgDataHome = process.env.XDG_DATA_HOME;
+      const prevDroneDataDir = process.env.DRONE_DATA_DIR;
+      const prevDvmDataDir = process.env.DVM_DATA_DIR;
       const prevNoColor = process.env.NO_COLOR;
       let hub: { port: number; close: () => Promise<void> } | null = null;
       const apiToken = `test-token-${testId}`;
@@ -286,7 +307,7 @@ describe('drone docker lifecycle regression', () => {
 
         // Simulate a drifted registry key where entry.name remains correct
         // but the object key no longer matches.
-        const registryPath = path.join(xdgDataHome, 'drone', 'registry.json');
+        const registryPath = path.join(droneDataDir, 'registry.json');
         const registryRaw = fs.readFileSync(registryPath, 'utf8');
         const registry = JSON.parse(registryRaw) as any;
         const byName = Object.entries(registry?.drones ?? {}).find(
@@ -299,7 +320,10 @@ describe('drone docker lifecycle regression', () => {
         fs.writeFileSync(registryPath, JSON.stringify(registry, null, 2), 'utf8');
 
         process.env.XDG_DATA_HOME = xdgDataHome;
+        process.env.DRONE_DATA_DIR = droneDataDir;
+        process.env.DVM_DATA_DIR = dvmDataDir;
         process.env.NO_COLOR = '1';
+        resetDroneRootDirForTests();
         hub = await startDroneHubApiServer({ port: 0, host: '127.0.0.1', apiToken });
 
         const base = `http://127.0.0.1:${hub.port}`;
@@ -339,8 +363,13 @@ describe('drone docker lifecycle regression', () => {
         }
         if (prevXdgDataHome == null) delete process.env.XDG_DATA_HOME;
         else process.env.XDG_DATA_HOME = prevXdgDataHome;
+        if (prevDroneDataDir == null) delete process.env.DRONE_DATA_DIR;
+        else process.env.DRONE_DATA_DIR = prevDroneDataDir;
+        if (prevDvmDataDir == null) delete process.env.DVM_DATA_DIR;
+        else process.env.DVM_DATA_DIR = prevDvmDataDir;
         if (prevNoColor == null) delete process.env.NO_COLOR;
         else process.env.NO_COLOR = prevNoColor;
+        resetDroneRootDirForTests();
 
         runNoThrow('node', [droneCli, 'rm', renamedDroneName, '--keep-volume'], { cwd: appRoot, env, timeoutMs: 30_000 });
         runNoThrow('node', [droneCli, 'rm', droneName, '--keep-volume'], { cwd: appRoot, env, timeoutMs: 30_000 });

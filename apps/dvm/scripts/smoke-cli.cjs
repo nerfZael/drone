@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
@@ -35,16 +34,11 @@ function run(cmd, args, opts = {}) {
   return { stdout, stderr };
 }
 
-function expectedPreferredRoot() {
-  if (process.platform === 'win32') {
-    const appData = String(process.env.APPDATA || '').trim() || path.join(os.homedir(), 'AppData', 'Roaming');
-    return path.join(appData, 'dvm');
-  }
-  if (process.platform === 'darwin') {
-    return path.join(os.homedir(), 'Library', 'Application Support', 'dvm');
-  }
-  const xdg = String(process.env.XDG_DATA_HOME || '').trim();
-  return path.join(xdg || path.join(os.homedir(), '.local', 'share'), 'dvm');
+function expectedPreferredRoot(appRoot) {
+  const explicit = String(process.env.DVM_DATA_DIR || '').trim();
+  if (explicit) return path.resolve(explicit);
+  const repoRoot = path.resolve(appRoot, '..', '..');
+  return path.join(repoRoot, 'data', 'dvm');
 }
 
 function main() {
@@ -74,10 +68,9 @@ function main() {
   const configLoader = require(configLoaderModPath);
 
   const dvmRoot = dvmPaths.dvmRootDir();
-  const dvmPreferred = expectedPreferredRoot();
-  const dvmLegacy = path.join(os.homedir(), '.dvm');
+  const dvmPreferred = expectedPreferredRoot(appRoot);
   assert(path.isAbsolute(dvmRoot), `dvmRootDir() should be absolute, got: ${dvmRoot}`);
-  assert(dvmRoot === dvmPreferred || dvmRoot === dvmLegacy, `unexpected dvmRootDir(): ${dvmRoot}`);
+  assert(dvmRoot === dvmPreferred, `unexpected dvmRootDir(): ${dvmRoot}`);
   assert(dvmPaths.dvmRootPath('repo').startsWith(dvmRoot), 'dvmRootPath() should be rooted in dvmRootDir()');
 
   const normalized = configLoader.ConfigLoader.normalizeConfig({

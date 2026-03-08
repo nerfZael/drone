@@ -88,8 +88,10 @@ describe('dvm docker lifecycle regression', () => {
 
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dvm-regression-'));
     const xdgDataHome = path.join(tempRoot, 'xdg-data');
+    const dvmDataDir = path.join(tempRoot, 'data', 'dvm');
     fs.mkdirSync(xdgDataHome, { recursive: true });
-    const env = { ...process.env, XDG_DATA_HOME: xdgDataHome, NO_COLOR: '1' };
+    fs.mkdirSync(dvmDataDir, { recursive: true });
+    const env = { ...process.env, XDG_DATA_HOME: xdgDataHome, DVM_DATA_DIR: dvmDataDir, NO_COLOR: '1' };
 
     const uploadSrc = path.join(tempRoot, 'upload.txt');
     const uploadDestDir = '/tmp/upload-target';
