@@ -28,10 +28,12 @@ async function withTempHomes<T>(fn: (ctx: { tempRoot: string; homeDir: string; x
 }
 
 describe('registry migration fallback', () => {
-  test('restores legacy populated registry when preferred registry is empty', async () => {
+  test('restores legacy populated registry when preferred registry is empty and removes the legacy live file', async () => {
     await withTempHomes(async ({ homeDir, xdgDataHome }) => {
       const legacyDir = path.join(homeDir, '.drone');
       const preferredDir = path.join(xdgDataHome, 'drone');
+      const legacyPath = path.join(legacyDir, 'registry.json');
+      const preferredPath = path.join(preferredDir, 'registry.json');
       fs.mkdirSync(legacyDir, { recursive: true });
       fs.mkdirSync(preferredDir, { recursive: true });
 
@@ -50,23 +52,26 @@ describe('registry migration fallback', () => {
         },
         pending: {},
       };
-      fs.writeFileSync(path.join(legacyDir, 'registry.json'), JSON.stringify(legacyRegistry, null, 2), 'utf8');
-      fs.writeFileSync(path.join(preferredDir, 'registry.json'), JSON.stringify({ version: 2, drones: {}, pending: {} }, null, 2), 'utf8');
+      fs.writeFileSync(legacyPath, JSON.stringify(legacyRegistry, null, 2), 'utf8');
+      fs.writeFileSync(preferredPath, JSON.stringify({ version: 2, drones: {}, pending: {} }, null, 2), 'utf8');
 
       const loaded = await loadRegistry();
       expect(Object.keys(loaded.drones)).toHaveLength(1);
       expect(loaded.drones['drone-1']?.name).toBe('alpha');
 
-      const migrated = JSON.parse(fs.readFileSync(path.join(preferredDir, 'registry.json'), 'utf8'));
+      const migrated = JSON.parse(fs.readFileSync(preferredPath, 'utf8'));
       expect(Object.keys(migrated?.drones ?? {})).toHaveLength(1);
       expect(migrated?.drones?.['drone-1']?.name).toBe('alpha');
+      expect(fs.existsSync(legacyPath)).toBe(false);
     });
   });
 
-  test('migrates legacy v1 registry into v2 and writes preferred file', async () => {
+  test('migrates legacy v1 registry into v2, writes preferred file, and removes the legacy live file', async () => {
     await withTempHomes(async ({ homeDir, xdgDataHome }) => {
       const legacyDir = path.join(homeDir, '.drone');
       const preferredDir = path.join(xdgDataHome, 'drone');
+      const legacyPath = path.join(legacyDir, 'registry.json');
+      const preferredPath = path.join(preferredDir, 'registry.json');
       fs.mkdirSync(legacyDir, { recursive: true });
       fs.mkdirSync(preferredDir, { recursive: true });
 
@@ -82,7 +87,7 @@ describe('registry migration fallback', () => {
           },
         },
       };
-      fs.writeFileSync(path.join(legacyDir, 'registry.json'), JSON.stringify(v1Registry, null, 2), 'utf8');
+      fs.writeFileSync(legacyPath, JSON.stringify(v1Registry, null, 2), 'utf8');
 
       const loaded = await loadRegistry();
       expect(loaded.version).toBe(2);
@@ -91,9 +96,77 @@ describe('registry migration fallback', () => {
       expect(String(first?.name ?? '')).toBe('alpha');
       expect(String(first?.id ?? '')).not.toHaveLength(0);
 
-      const migrated = JSON.parse(fs.readFileSync(path.join(preferredDir, 'registry.json'), 'utf8'));
+      const migrated = JSON.parse(fs.readFileSync(preferredPath, 'utf8'));
       expect(migrated?.version).toBe(2);
       expect(Object.keys(migrated?.drones ?? {})).toHaveLength(1);
+      expect(fs.existsSync(legacyPath)).toBe(false);
+    });
+  });
+
+  test('ignores legacy as a live source once preferred exists and archives divergent legacy data', async () => {
+    await withTempHomes(async ({ homeDir, xdgDataHome }) => {
+      const legacyDir = path.join(homeDir, '.drone');
+      const preferredDir = path.join(xdgDataHome, 'drone');
+      const legacyPath = path.join(legacyDir, 'registry.json');
+      const preferredPath = path.join(preferredDir, 'registry.json');
+      fs.mkdirSync(legacyDir, { recursive: true });
+      fs.mkdirSync(preferredDir, { recursive: true });
+
+      fs.writeFileSync(
+        preferredPath,
+        JSON.stringify(
+          {
+            version: 2,
+            drones: {
+              preferred: {
+                id: 'preferred',
+                name: 'preferred',
+                containerName: 'drone-preferred',
+                containerPort: 7777,
+                token: 'token',
+                repoPath: '/tmp/preferred',
+                createdAt: '2026-03-03T00:00:00.000Z',
+              },
+            },
+            pending: {},
+          },
+          null,
+          2,
+        ),
+        'utf8',
+      );
+      fs.writeFileSync(
+        legacyPath,
+        JSON.stringify(
+          {
+            version: 2,
+            drones: {
+              legacy: {
+                id: 'legacy',
+                name: 'legacy',
+                containerName: 'drone-legacy',
+                containerPort: 7777,
+                token: 'token',
+                repoPath: '/tmp/legacy',
+                createdAt: '2026-03-03T00:00:00.000Z',
+              },
+            },
+            pending: {},
+          },
+          null,
+          2,
+        ),
+        'utf8',
+      );
+
+      const loaded = await loadRegistry();
+      expect(Object.keys(loaded.drones)).toEqual(['preferred']);
+      expect(fs.existsSync(legacyPath)).toBe(false);
+
+      const legacyBackups = fs
+        .readdirSync(legacyDir)
+        .filter((name) => /^registry\.migrated-.*\.json$/.test(name));
+      expect(legacyBackups.length).toBe(1);
     });
   });
 });

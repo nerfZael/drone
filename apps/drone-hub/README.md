@@ -40,6 +40,8 @@ export DRONE_HUB_API_PORT=8787
 bun --filter drone-hub run dev -- --port 5174 --strictPort
 ```
 
+The default `drone hub` API port is also `8787`. Pass `--api-port 0` only if you explicitly want an ephemeral port.
+
 ## Build
 
 ```bash

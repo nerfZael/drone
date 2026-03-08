@@ -11,6 +11,7 @@ import { health, procStart, procStop, readOutput, sendInput, sendKeys, status } 
 import { dvmClone, dvmCreate, dvmExec, dvmLs, dvmPorts, dvmRemove, dvmScript, dvmSessionStart } from './host/dvm';
 import { droneRootPath } from './host/paths';
 import { loadRegistry, updateRegistry } from './host/registry';
+import { resolveDetachedCliLaunchSpec } from './hub/hub-launch';
 import { parseHubRunnerProcessesFromPsOutput, selectHubRunnerPidsToStop } from './hub/orphan-hub-runners';
 import { startDroneHubApiServer } from './hub/server';
 
@@ -305,6 +306,8 @@ async function getFreeTcpPort(): Promise<number> {
   if (!addr || typeof addr === 'string') throw new Error('failed to allocate port');
   return addr.port;
 }
+
+const DEFAULT_HUB_API_PORT = 8787;
 
 async function getUniqueFreeTcpPorts(count: number): Promise<number[]> {
   const ports: number[] = [];
@@ -1346,9 +1349,10 @@ async function hubStart(options: any) {
   const logPath = hubLogPath();
   const logHandle = await fs.open(logPath, 'a');
   try {
+    const launch = resolveDetachedCliLaunchSpec({ cliFilename: __filename });
     const child = spawn(
-      process.execPath,
-      [__filename, 'hub', 'run', '--port', String(uiPort), '--api-port', String(apiPortRaw), '--host', apiHost],
+      launch.command,
+      [...launch.args, 'hub', 'run', '--port', String(uiPort), '--api-port', String(apiPortRaw), '--host', apiHost],
       { detached: true, stdio: ['ignore', logHandle.fd, logHandle.fd], env: { ...process.env, DRONE_HUB_DAEMON: '1' } }
     );
     child.unref();
@@ -1452,7 +1456,7 @@ const hub = program.command('hub').description('Manage the local Drone Hub (deta
 hub.command('start')
   .description('Start the hub in detached mode')
   .option('--port <port>', 'UI port (Vite dev server)', '5174')
-  .option('--api-port <port>', 'Hub API port (0 = auto)', '0')
+  .option('--api-port <port>', `Hub API port (${DEFAULT_HUB_API_PORT} by default; pass 0 for auto)`, String(DEFAULT_HUB_API_PORT))
   .option('--host <host>', 'Bind host for Hub API server', '127.0.0.1')
   .action(async (options) => {
     await hubStart(options);
@@ -1465,7 +1469,7 @@ hub.command('stop')
 hub.command('restart')
   .description('Restart the detached hub')
   .option('--port <port>', 'UI port (Vite dev server)', '5174')
-  .option('--api-port <port>', 'Hub API port (0 = auto)', '0')
+  .option('--api-port <port>', `Hub API port (${DEFAULT_HUB_API_PORT} by default; pass 0 for auto)`, String(DEFAULT_HUB_API_PORT))
   .option('--host <host>', 'Bind host for Hub API server', '127.0.0.1')
   .action(async (options) => {
     await hubStop();
@@ -1474,14 +1478,14 @@ hub.command('restart')
 hub.command('run')
   .description('Run the hub in the current process (internal)')
   .option('--port <port>', 'UI port (Vite dev server)', '5174')
-  .option('--api-port <port>', 'Hub API port (0 = auto)', '0')
+  .option('--api-port <port>', `Hub API port (${DEFAULT_HUB_API_PORT} by default; pass 0 for auto)`, String(DEFAULT_HUB_API_PORT))
   .option('--host <host>', 'Bind host for Hub API server', '127.0.0.1')
   .action(async (options) => {
     await hubRun(options);
   });
 hub.action(async () => {
   // `drone hub` defaults to detached start.
-  await hubStart({ port: 5174, apiPort: 0, host: '127.0.0.1' });
+  await hubStart({ port: 5174, apiPort: DEFAULT_HUB_API_PORT, host: '127.0.0.1' });
 });
 
 program

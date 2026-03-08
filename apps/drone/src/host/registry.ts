@@ -525,32 +525,93 @@ async function saveRegistryAtPath(p: string, reg: DroneRegistry): Promise<void> 
   await setPrivateFileModeBestEffort(p);
 }
 
-export async function loadRegistry(): Promise<DroneRegistry> {
+function registriesEqual(a: DroneRegistry, b: DroneRegistry): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+async function removePathBestEffort(p: string): Promise<void> {
+  try {
+    await fs.rm(p, { force: true });
+  } catch {
+    // ignore
+  }
+}
+
+async function archiveLegacyRegistryBestEffort(legacyPath: string): Promise<void> {
+  const dir = path.dirname(legacyPath);
+  const ts = new Date().toISOString().replace(/[:.]/g, '-');
+  const backupPath = path.join(dir, `registry.migrated-${ts}.json`);
+  try {
+    await fs.rename(legacyPath, backupPath);
+    await setPrivateFileModeBestEffort(backupPath);
+  } catch {
+    // If we cannot move it aside, leave it in place; loadRegistry() will still ignore it.
+  }
+}
+
+async function consolidateRegistryPaths(): Promise<DroneRegistry | null> {
   const preferredPath = registryPath();
   const legacyPath = legacyRegistryPath();
 
   const preferred = await readRegistryFromPath(preferredPath);
-  const legacy = preferredPath === legacyPath ? null : await readRegistryFromPath(legacyPath);
+  if (preferredPath === legacyPath) return preferred;
 
-  if (preferred && legacy && !hasMeaningfulRegistryData(preferred) && hasMeaningfulRegistryData(legacy)) {
-    // Auto-heal upgrades where an empty preferred registry was created while legacy still had data.
-    await saveRegistryAtPath(preferredPath, legacy).catch(() => {});
+  const legacy = await readRegistryFromPath(legacyPath);
+  if (!legacy) return preferred;
+
+  if (!preferred) {
+    try {
+      await saveRegistryAtPath(preferredPath, legacy);
+      await removePathBestEffort(legacyPath);
+    } catch {
+      // If migration fails, keep reading the legacy registry so state is still available.
+    }
     return legacy;
   }
 
-  if (preferred) return preferred;
-
-  if (legacy) {
-    // One-time migration into the new preferred location.
-    await saveRegistryAtPath(preferredPath, legacy).catch(() => {});
-    return legacy;
+  if (!hasMeaningfulRegistryData(preferred) && hasMeaningfulRegistryData(legacy)) {
+    try {
+      await saveRegistryAtPath(preferredPath, legacy);
+      await removePathBestEffort(legacyPath);
+      return legacy;
+    } catch {
+      return legacy;
+    }
   }
+
+  if (registriesEqual(preferred, legacy)) {
+    await removePathBestEffort(legacyPath);
+    return preferred;
+  }
+
+  if (hasMeaningfulRegistryData(legacy)) {
+    await archiveLegacyRegistryBestEffort(legacyPath);
+  } else {
+    await removePathBestEffort(legacyPath);
+  }
+
+  return preferred;
+}
+
+export async function loadRegistry(): Promise<DroneRegistry> {
+  const consolidated = await consolidateRegistryPaths();
+  if (consolidated) return consolidated;
 
   return { version: 2, drones: {}, pending: {} };
 }
 
 export async function saveRegistry(reg: DroneRegistry): Promise<void> {
   await saveRegistryAtPath(registryPath(), reg);
+  const legacyPath = legacyRegistryPath();
+  if (legacyPath !== registryPath()) {
+    const legacy = await readRegistryFromPath(legacyPath);
+    if (!legacy) return;
+    if (registriesEqual(reg, legacy) || !hasMeaningfulRegistryData(legacy)) {
+      await removePathBestEffort(legacyPath);
+      return;
+    }
+    await archiveLegacyRegistryBestEffort(legacyPath);
+  }
 }
 
 async function setPrivateFileModeBestEffort(p: string): Promise<void> {

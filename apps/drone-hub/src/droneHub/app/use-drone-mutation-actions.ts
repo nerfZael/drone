@@ -179,6 +179,7 @@ export function useDroneMutationActions({
         }
         return true;
       } catch (e: any) {
+        const msg = e?.message ?? String(e);
         console.error('[DroneHub] delete drone failed', { id: droneId, error: e });
         setOptimisticallyDeletedDrones((prev) => {
           if (!prev[droneId]) return prev;
@@ -186,6 +187,7 @@ export function useDroneMutationActions({
           delete next[droneId];
           return next;
         });
+        window.alert(`${deleteMode === 'archive' ? 'Archive' : 'Delete'} failed: ${msg}`);
         return false;
       } finally {
         setDeletingDrones((prev) => {
