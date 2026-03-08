@@ -1,5 +1,6 @@
 import React from 'react';
 import { requestJson } from '../http';
+import { IconFile, IconFolder, IconList } from '../icons';
 import type { DroneFsEntry, DroneFsUploadPayload } from '../types';
 
 function normalizeContainerPathInput(raw: string): string {
@@ -55,34 +56,10 @@ function hasFileDragPayload(event: React.DragEvent<HTMLElement>): boolean {
   return Array.from(event.dataTransfer?.types ?? []).includes('Files');
 }
 
-function IconFolder({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-      <path d="M1.75 1A1.75 1.75 0 000 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0016 13.25v-8.5A1.75 1.75 0 0014.25 3H7.5a.25.25 0 01-.2-.1l-.9-1.2c-.33-.44-.85-.7-1.4-.7h-3.25z" />
-    </svg>
-  );
-}
-
-function IconList({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-      <path d="M3 4.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM4.5 3.5a.5.5 0 000 1h9a.5.5 0 000-1h-9zM3 8a.75.75 0 11-1.5 0A.75.75 0 013 8zm1.5-.5a.5.5 0 000 1h9a.5.5 0 000-1h-9zM3 11.75a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM4.5 11a.5.5 0 000 1h9a.5.5 0 000-1h-9z" />
-    </svg>
-  );
-}
-
 function IconGrid({ className }: { className?: string }) {
   return (
     <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
       <path d="M1 1.75C1 .784 1.784 0 2.75 0h2.5C6.216 0 7 .784 7 1.75v2.5C7 5.216 6.216 6 5.25 6h-2.5A1.75 1.75 0 011 4.25v-2.5zM2.75 1A.75.75 0 002 1.75v2.5c0 .414.336.75.75.75h2.5A.75.75 0 006 4.25v-2.5A.75.75 0 005.25 1h-2.5zM9 1.75C9 .784 9.784 0 10.75 0h2.5C14.216 0 15 .784 15 1.75v2.5c0 .966-.784 1.75-1.75 1.75h-2.5A1.75 1.75 0 019 4.25v-2.5zM10.75 1a.75.75 0 00-.75.75v2.5c0 .414.336.75.75.75h2.5a.75.75 0 00.75-.75v-2.5a.75.75 0 00-.75-.75h-2.5zM1 10.75C1 9.784 1.784 9 2.75 9h2.5C6.216 9 7 9.784 7 10.75v2.5C7 14.216 6.216 15 5.25 15h-2.5A1.75 1.75 0 011 13.25v-2.5zM2.75 10a.75.75 0 00-.75.75v2.5c0 .414.336.75.75.75h2.5a.75.75 0 00.75-.75v-2.5a.75.75 0 00-.75-.75h-2.5zM9 10.75C9 9.784 9.784 9 10.75 9h2.5c.966 0 1.75.784 1.75 1.75v2.5c0 .966-.784 1.75-1.75 1.75h-2.5A1.75 1.75 0 019 13.25v-2.5zM10.75 10a.75.75 0 00-.75.75v2.5c0 .414.336.75.75.75h2.5a.75.75 0 00.75-.75v-2.5a.75.75 0 00-.75-.75h-2.5z" />
-    </svg>
-  );
-}
-
-function IconFile({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M3.75 0A1.75 1.75 0 002 1.75v12.5C2 15.216 2.784 16 3.75 16h8.5A1.75 1.75 0 0014 14.25V5.5a.75.75 0 00-.22-.53L9.03.22A.75.75 0 008.5 0H3.75zm4 .75v3A1.75 1.75 0 009.5 5.5h3v8.75a.25.25 0 01-.25.25h-8.5a.25.25 0 01-.25-.25V1.75a.25.25 0 01.25-.25h4zm1.5 1.06L11.94 4H9.5a.25.25 0 01-.25-.25V1.81z" />
     </svg>
   );
 }

@@ -1,5 +1,6 @@
 import React from 'react';
 import { requestJson } from '../http';
+import { IconChevron, IconFile, IconFolder } from '../icons';
 import { provisioningLabel, usePaneReadiness } from '../panes/usePaneReadiness';
 import type {
   RepoChangeEntry,
@@ -75,37 +76,6 @@ function clampNumber(value: number, min: number, max: number): number {
 
 function clampExplorerZoom(value: number): number {
   return Math.round(clampNumber(value, EXPLORER_ZOOM_MIN, EXPLORER_ZOOM_MAX) * 100) / 100;
-}
-
-function IconChevron({ open, size = 12 }: { open: boolean; size?: number }) {
-  return (
-    <svg
-      className={`transition-transform duration-150 ${open ? 'rotate-90' : ''}`}
-      width={size}
-      height={size}
-      viewBox="0 0 16 16"
-      fill="currentColor"
-      aria-hidden="true"
-    >
-      <path d="M6.2 3.5l4.5 4.5-4.5 4.5" />
-    </svg>
-  );
-}
-
-function IconFolder({ size = 12 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M1.75 1A1.75 1.75 0 000 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0016 13.25v-8.5A1.75 1.75 0 0014.25 3H7.5a.25.25 0 01-.2-.1l-.9-1.2c-.33-.44-.85-.7-1.4-.7h-3.25z" />
-    </svg>
-  );
-}
-
-function IconFile({ size = 12 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M3.75 0A1.75 1.75 0 002 1.75v12.5C2 15.216 2.784 16 3.75 16h8.5A1.75 1.75 0 0014 14.25V5.5a.75.75 0 00-.22-.53L9.03.22A.75.75 0 008.5 0H3.75zm4 .75v3A1.75 1.75 0 009.5 5.5h3v8.75a.25.25 0 01-.25.25h-8.5a.25.25 0 01-.25-.25V1.75a.25.25 0 01.25-.25h4z" />
-    </svg>
-  );
 }
 
 function MetaChip({
@@ -965,7 +935,7 @@ export function DroneChangesDock({
                   transform: 'translateY(-50%)',
                 }}
               >
-                <IconChevron open={open} size={explorerIconSizePx} />
+                <IconChevron down={open} size={explorerIconSizePx} />
               </span>
               <button
                 type="button"

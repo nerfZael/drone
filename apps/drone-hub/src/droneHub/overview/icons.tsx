@@ -1,58 +1,6 @@
 import React from 'react';
 
-export function IconDrone({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="5" y="5" width="6" height="6" rx="1" />
-      <line x1="2" y1="2" x2="5" y2="5" />
-      <line x1="14" y1="2" x2="11" y2="5" />
-      <line x1="2" y1="14" x2="5" y2="11" />
-      <line x1="14" y1="14" x2="11" y2="11" />
-      <circle cx="2" cy="2" r="1" fill="currentColor" stroke="none" />
-      <circle cx="14" cy="2" r="1" fill="currentColor" stroke="none" />
-      <circle cx="2" cy="14" r="1" fill="currentColor" stroke="none" />
-      <circle cx="14" cy="14" r="1" fill="currentColor" stroke="none" />
-    </svg>
-  );
-}
-
-export function IconChat({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-      <path d="M1.5 2A1.5 1.5 0 000 3.5v8A1.5 1.5 0 001.5 13H3v2.5l4-2.5h7.5A1.5 1.5 0 0016 11.5v-8A1.5 1.5 0 0014.5 2h-13z" />
-    </svg>
-  );
-}
-
-export function IconChevron({ down, className }: { down?: boolean; className?: string }) {
-  return (
-    <svg
-      className={`transition-transform duration-150 ${down ? 'rotate-0' : '-rotate-90'} ${className ?? ''}`}
-      width="12"
-      height="12"
-      viewBox="0 0 16 16"
-      fill="currentColor"
-    >
-      <path d="M4.427 7.427l3.396 3.396a.25.25 0 00.354 0l3.396-3.396A.25.25 0 0011.396 7H4.604a.25.25 0 00-.177.427z" />
-    </svg>
-  );
-}
-
-export function IconFolder({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-      <path d="M1.75 1A1.75 1.75 0 000 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0016 13.25v-8.5A1.75 1.75 0 0014.25 3H7.5a.25.25 0 01-.2-.1l-.9-1.2c-.33-.44-.85-.7-1.4-.7h-3.25z" />
-    </svg>
-  );
-}
-
-export function IconTrash({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M6.5 1.5a.5.5 0 00-.5.5v1H3a.5.5 0 000 1h.5v9.25c0 .966.784 1.75 1.75 1.75h5.5A1.75 1.75 0 0012.5 13.25V4H13a.5.5 0 000-1h-3V2a.5.5 0 00-.5-.5h-3zM7 3V2.5h2V3H7zM5 4h6v9.25a.75.75 0 01-.75.75h-4.5a.75.75 0 01-.75-.75V4z" />
-    </svg>
-  );
-}
+export { IconChat, IconChevron, IconDrone, IconFolder, IconSpinner, IconTrash } from '../icons';
 
 export function IconClone({ className }: { className?: string }) {
   return (
@@ -77,28 +25,6 @@ export function IconBaseImage({ className }: { className?: string }) {
     <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
       <path d="M3.25 2A1.75 1.75 0 001.5 3.75v8.5c0 .966.784 1.75 1.75 1.75h9.5A1.75 1.75 0 0014.5 12.25v-8.5A1.75 1.75 0 0012.75 2h-9.5zM2.5 3.75a.75.75 0 01.75-.75h9.5a.75.75 0 01.75.75v8.5a.75.75 0 01-.75.75h-9.5a.75.75 0 01-.75-.75v-8.5z" />
       <path d="M8 4.3l1.02 2.07 2.28.33-1.65 1.61.39 2.27L8 9.52 5.96 10.58l.39-2.27L4.7 6.7l2.28-.33L8 4.3z" />
-    </svg>
-  );
-}
-
-export function IconSpinner({ className }: { className?: string }) {
-  return (
-    <svg
-      className={`animate-spin ${className ?? ''}`}
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden="true"
-    >
-      <circle className="opacity-25" cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" />
-      <path
-        className="opacity-75"
-        d="M21 12a9 9 0 00-9-9"
-        stroke="currentColor"
-        strokeWidth="3"
-        strokeLinecap="round"
-      />
     </svg>
   );
 }
