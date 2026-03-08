@@ -87,6 +87,140 @@ function FileBase({ className, size = 14, children }: IconProps & { children: Re
   );
 }
 
+function FileTile({
+  className,
+  size = 14,
+  bg,
+  fg = '#ffffff',
+  label,
+  labelSize = 5.4,
+}: IconProps & {
+  bg: string;
+  fg?: string;
+  label: string;
+  labelSize?: number;
+}) {
+  return (
+    <svg className={className} width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="1" y="1" width="14" height="14" rx="3.25" fill={bg} />
+      <rect x="1" y="1" width="14" height="14" rx="3.25" fill="#ffffff" opacity="0.06" />
+      <text
+        x="8"
+        y="9.3"
+        fill={fg}
+        fontFamily="ui-sans-serif, system-ui, sans-serif"
+        fontSize={labelSize}
+        fontWeight="700"
+        textAnchor="middle"
+      >
+        {label}
+      </text>
+    </svg>
+  );
+}
+
+function IconFileTs({ className, size = 14 }: IconProps) {
+  return <FileTile className={className} size={size} bg="#3178c6" label="TS" />;
+}
+
+function IconFileJs({ className, size = 14 }: IconProps) {
+  return <FileTile className={className} size={size} bg="#f7df1e" fg="#1f2328" label="JS" />;
+}
+
+function IconFileJson({ className, size = 14 }: IconProps) {
+  return <FileTile className={className} size={size} bg="#d6b444" fg="#2a2210" label="{}" labelSize={6.1} />;
+}
+
+function IconFileMarkdown({ className, size = 14 }: IconProps) {
+  return <FileTile className={className} size={size} bg="#2f80ed" label="MD" />;
+}
+
+function IconFileEnv({ className, size = 14 }: IconProps) {
+  return <FileTile className={className} size={size} bg="#3a8f5c" label="ENV" labelSize={4.1} />;
+}
+
+function IconFilePackageTile({ className, size = 14 }: IconProps) {
+  return <FileTile className={className} size={size} bg="#cb3837" label="PKG" labelSize={4.0} />;
+}
+
+function IconFileTestTile({ className, size = 14 }: IconProps) {
+  return <FileTile className={className} size={size} bg="#7a57d1" label="TEST" labelSize={3.35} />;
+}
+
+function IconFileImageTile({ className, size = 14 }: IconProps) {
+  return (
+    <svg className={className} width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="1" y="1" width="14" height="14" rx="3.25" fill="#1f9d8b" />
+      <circle cx="5.05" cy="5.35" r="1.15" fill="#ecfeff" />
+      <path d="M3.2 11.4l2.35-2.55a.78.78 0 011.14 0l1.05 1.13 1.18-1.5a.8.8 0 011.25 0l1.82 2.92H3.2z" fill="#ecfeff" />
+    </svg>
+  );
+}
+
+function IconFilePy({ className, size = 14 }: IconProps) {
+  return <FileTile className={className} size={size} bg="#3776ab" label="PY" />;
+}
+
+function IconFileGo({ className, size = 14 }: IconProps) {
+  return <FileTile className={className} size={size} bg="#00add8" fg="#083344" label="GO" />;
+}
+
+function IconFileRust({ className, size = 14 }: IconProps) {
+  return <FileTile className={className} size={size} bg="#7a4b2b" label="RS" />;
+}
+
+function IconFileHtml({ className, size = 14 }: IconProps) {
+  return <FileTile className={className} size={size} bg="#e34f26" label="</>" labelSize={4.5} />;
+}
+
+function IconFileCss({ className, size = 14 }: IconProps) {
+  return <FileTile className={className} size={size} bg="#1572b6" label="CSS" labelSize={4.2} />;
+}
+
+function IconFileShell({ className, size = 14 }: IconProps) {
+  return <FileTile className={className} size={size} bg="#2f855a" label="$>" labelSize={5.9} />;
+}
+
+function IconFileYaml({ className, size = 14 }: IconProps) {
+  return <FileTile className={className} size={size} bg="#805ad5" label="YML" labelSize={4.0} />;
+}
+
+function IconFileToml({ className, size = 14 }: IconProps) {
+  return <FileTile className={className} size={size} bg="#4a5568" label="TML" labelSize={4.0} />;
+}
+
+function IconFileDocker({ className, size = 14 }: IconProps) {
+  return <FileTile className={className} size={size} bg="#2496ed" label="DKR" labelSize={3.9} />;
+}
+
+function IconFileMake({ className, size = 14 }: IconProps) {
+  return <FileTile className={className} size={size} bg="#b7791f" label="MK" />;
+}
+
+function IconFileJava({ className, size = 14 }: IconProps) {
+  return <FileTile className={className} size={size} bg="#ea4335" label="JV" />;
+}
+
+function IconFilePhp({ className, size = 14 }: IconProps) {
+  return <FileTile className={className} size={size} bg="#777bb3" label="PHP" labelSize={4.0} />;
+}
+
+function IconFileRuby({ className, size = 14 }: IconProps) {
+  return <FileTile className={className} size={size} bg="#cc342d" label="RB" />;
+}
+
+function IconFileCSharp({ className, size = 14 }: IconProps) {
+  return <FileTile className={className} size={size} bg="#6b46c1" label="C#" />;
+}
+
+function IconFileC({ className, size = 14 }: IconProps) {
+  return <FileTile className={className} size={size} bg="#5c6bc0" label="C" labelSize={6.6} />;
+}
+
+function IconFileCpp({ className, size = 14 }: IconProps) {
+  return <FileTile className={className} size={size} bg="#3f51b5" label="C++" labelSize={3.8} />;
+}
+
 function IconFileCode({ className, size = 14 }: IconProps) {
   return (
     <FileBase className={className} size={size}>
@@ -205,19 +339,40 @@ export function iconForFilePath(path: string | null | undefined): FileIconCompon
     name === 'yarn.lock' ||
     name === 'cargo.lock'
   ) {
-    return IconFilePackage;
+    return IconFilePackageTile;
   }
 
-  if (name.includes('.test.') || name.includes('.spec.')) return IconFileTest;
-  if (name.startsWith('.env')) return IconFileData;
+  if (name === 'dockerfile' || name === 'docker-compose.yml' || name === 'docker-compose.yaml') return IconFileDocker;
+  if (name === 'makefile' || name === 'gnumakefile') return IconFileMake;
+  if (name === 'readme.md' || name === 'readme.mdx') return IconFileMarkdown;
+  if (name.includes('.test.') || name.includes('.spec.')) return IconFileTestTile;
+  if (name.startsWith('.env')) return IconFileEnv;
 
   const dot = name.lastIndexOf('.');
   const ext = dot >= 0 ? name.slice(dot + 1) : '';
 
-  if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico'].includes(ext)) return IconFileImage;
-  if (['md', 'mdx', 'txt', 'rst'].includes(ext)) return IconFileDoc;
-  if (['json', 'yaml', 'yml', 'toml', 'ini', 'xml', 'csv'].includes(ext)) return IconFileData;
-  if (['ts', 'tsx', 'js', 'jsx', 'cjs', 'mjs', 'py', 'rb', 'go', 'rs', 'java', 'c', 'cc', 'cpp', 'h', 'hpp', 'sh', 'bash', 'zsh', 'css', 'scss', 'sass', 'less', 'sql'].includes(ext)) {
+  if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico'].includes(ext)) return IconFileImageTile;
+  if (['md', 'mdx'].includes(ext)) return IconFileMarkdown;
+  if (ext === 'json') return IconFileJson;
+  if (['ts', 'tsx'].includes(ext)) return IconFileTs;
+  if (['js', 'jsx', 'cjs', 'mjs'].includes(ext)) return IconFileJs;
+  if (ext === 'py') return IconFilePy;
+  if (ext === 'go') return IconFileGo;
+  if (ext === 'rs') return IconFileRust;
+  if (['html', 'htm'].includes(ext)) return IconFileHtml;
+  if (['css', 'scss', 'sass', 'less'].includes(ext)) return IconFileCss;
+  if (['sh', 'bash', 'zsh', 'fish'].includes(ext)) return IconFileShell;
+  if (['yaml', 'yml'].includes(ext)) return IconFileYaml;
+  if (ext === 'toml') return IconFileToml;
+  if (ext === 'java') return IconFileJava;
+  if (ext === 'php') return IconFilePhp;
+  if (ext === 'rb') return IconFileRuby;
+  if (ext === 'cs') return IconFileCSharp;
+  if (['c', 'h'].includes(ext)) return IconFileC;
+  if (['cc', 'cpp', 'cxx', 'hpp', 'hh', 'hxx'].includes(ext)) return IconFileCpp;
+  if (['txt', 'rst', 'rtf'].includes(ext)) return IconFileDoc;
+  if (['ini', 'xml', 'csv'].includes(ext)) return IconFileData;
+  if (['sql'].includes(ext)) {
     return IconFileCode;
   }
 
