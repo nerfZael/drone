@@ -1,18 +1,6 @@
 import React from 'react';
 
-export function IconChevron({ down, className }: { down?: boolean; className?: string }) {
-  return (
-    <svg
-      className={`transition-transform duration-150 ${down ? 'rotate-0' : '-rotate-90'} ${className ?? ''}`}
-      width="12"
-      height="12"
-      viewBox="0 0 16 16"
-      fill="currentColor"
-    >
-      <path d="M4.427 7.427l3.396 3.396a.25.25 0 00.354 0l3.396-3.396A.25.25 0 0011.396 7H4.604a.25.25 0 00-.177.427z" />
-    </svg>
-  );
-}
+export { IconChevron, IconCopy, IconSpinner } from '../icons';
 
 export function IconUser({ className }: { className?: string }) {
   return (
@@ -57,37 +45,6 @@ export function IconImage({ className }: { className?: string }) {
     <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
       <path d="M2.5 1A1.5 1.5 0 001 2.5v11A1.5 1.5 0 002.5 15h11a1.5 1.5 0 001.5-1.5v-11A1.5 1.5 0 0013.5 1h-11zM2 2.5a.5.5 0 01.5-.5h11a.5.5 0 01.5.5v7.1l-2.36-2.36a1 1 0 00-1.41 0L7.5 9.97 6.28 8.75a1 1 0 00-1.41 0L2 11.62V2.5zm0 10.53l3.57-3.57 1.22 1.22a1 1 0 001.41 0l2.73-2.73a.01.01 0 01.01 0L14 11.01v2.49a.5.5 0 01-.5.5h-11a.5.5 0 01-.5-.5v-.47z" />
       <path d="M5.75 4.5a1.25 1.25 0 100 2.5 1.25 1.25 0 000-2.5z" />
-    </svg>
-  );
-}
-
-export function IconCopy({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M5 1.75A1.75 1.75 0 016.75 0h6.5C14.216 0 15 .784 15 1.75v6.5A1.75 1.75 0 0113.25 10h-6.5A1.75 1.75 0 015 8.25v-6.5zm1.75-.75a.75.75 0 00-.75.75v6.5c0 .414.336.75.75.75h6.5a.75.75 0 00.75-.75v-6.5a.75.75 0 00-.75-.75h-6.5z" />
-      <path d="M1 5.75C1 4.784 1.784 4 2.75 4h1a.5.5 0 010 1h-1a.75.75 0 00-.75.75v6.5c0 .414.336.75.75.75h6.5a.75.75 0 00.75-.75v-1a.5.5 0 011 0v1A1.75 1.75 0 019.25 14.5h-6.5A1.75 1.75 0 011 12.75v-7z" />
-    </svg>
-  );
-}
-
-export function IconSpinner({ className }: { className?: string }) {
-  return (
-    <svg
-      className={`animate-spin ${className ?? ''}`}
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden="true"
-    >
-      <circle className="opacity-25" cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" />
-      <path
-        className="opacity-75"
-        d="M21 12a9 9 0 00-9-9"
-        stroke="currentColor"
-        strokeWidth="3"
-        strokeLinecap="round"
-      />
     </svg>
   );
 }
