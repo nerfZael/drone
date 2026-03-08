@@ -32,6 +32,7 @@ type UseDroneCreationActionsArgs = {
   createInitialMessage: string;
   pullHostBranchBeforeCreate: boolean;
   createMode: 'create' | 'clone';
+  createRuntime: 'container' | 'host';
   cloneSourceId: string | null;
   cloneIncludeChats: boolean;
   spawnAgentKey: string;
@@ -64,6 +65,7 @@ type UseDroneCreationActionsArgs = {
   setCreateMessageSuffixRows: React.Dispatch<React.SetStateAction<string[]>>;
   setCreateOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setCreateMode: React.Dispatch<React.SetStateAction<'create' | 'clone'>>;
+  setCreateRuntime: React.Dispatch<React.SetStateAction<'container' | 'host'>>;
   setCloneSourceId: React.Dispatch<React.SetStateAction<string | null>>;
   setCreateGroup: React.Dispatch<React.SetStateAction<string>>;
   setCreateRepoPath: React.Dispatch<React.SetStateAction<string>>;
@@ -117,6 +119,7 @@ export function useDroneCreationActions({
   createInitialMessage,
   pullHostBranchBeforeCreate,
   createMode,
+  createRuntime,
   cloneSourceId,
   cloneIncludeChats,
   spawnAgentKey,
@@ -139,6 +142,7 @@ export function useDroneCreationActions({
   setCreateMessageSuffixRows,
   setCreateOpen,
   setCreateMode,
+  setCreateRuntime,
   setCloneSourceId,
   setCreateGroup,
   setCreateRepoPath,
@@ -172,6 +176,7 @@ export function useDroneCreationActions({
     const repoPath = createRepoPath.trim();
     const seedPrompt = createInitialMessage.trim();
     const isClone = createMode === 'clone' && Boolean(cloneSourceId);
+    const runtime = createMode === 'clone' ? 'container' : createRuntime;
     const seedAgent = isClone && cloneIncludeChats ? null : resolveAgentKeyToConfig(spawnAgentKey);
     const seedModel = isClone && cloneIncludeChats ? null : spawnModelForSeed;
     if (names.length === 0) {
@@ -218,6 +223,7 @@ export function useDroneCreationActions({
             .join('\n\n');
           return {
             name,
+            runtime,
             ...(group ? { group } : {}),
             ...(repoPath ? { repoPath } : {}),
             pullHostBranchBeforeCreate,
@@ -290,6 +296,7 @@ export function useDroneCreationActions({
 
       setCreateOpen(false);
       setCreateMode('create');
+      setCreateRuntime('container');
       setCloneSourceId(null);
       setCreateName('');
       setCreateGroup('');
@@ -308,6 +315,7 @@ export function useDroneCreationActions({
     createInitialMessage,
     createMessageSuffixRows,
     createMode,
+    createRuntime,
     createNameRows,
     createRepoPath,
     pullHostBranchBeforeCreate,
@@ -325,6 +333,7 @@ export function useDroneCreationActions({
     setCreateInitialMessage,
     setCreateMessageSuffixRows,
     setCreateMode,
+    setCreateRuntime,
     setCreateName,
     setCreateOpen,
     setCreateRepoPath,

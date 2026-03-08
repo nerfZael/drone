@@ -10,6 +10,8 @@ type CreateDronesModalProps = {
   open: boolean;
   creating: boolean;
   createMode: 'create' | 'clone';
+  createRuntime: 'container' | 'host';
+  onCreateRuntimeChange: (value: 'container' | 'host') => void;
   cloneSourceId: string | null;
   createNameEntries: string[];
   drones: DroneSummary[];
@@ -56,6 +58,8 @@ export function CreateDronesModal({
   open,
   creating,
   createMode,
+  createRuntime,
+  onCreateRuntimeChange,
   cloneSourceId,
   createNameEntries,
   drones,
@@ -189,6 +193,48 @@ export function CreateDronesModal({
                 {createError}
               </div>
             )}
+
+            <div className="mb-4">
+              <div className="text-[10px] font-semibold text-[var(--muted-dim)] mb-1.5 tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+                Runtime
+              </div>
+              <div className="inline-flex items-center rounded border border-[var(--border-subtle)] bg-[var(--panel-raised)] p-0.5">
+                <button
+                  type="button"
+                  onClick={() => onCreateRuntimeChange('container')}
+                  disabled={creating}
+                  className={`h-8 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+                    createRuntime === 'container'
+                      ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
+                      : 'bg-transparent border-transparent text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)]'
+                  } ${creating ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  style={{ fontFamily: 'var(--display)' }}
+                >
+                  Container
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onCreateRuntimeChange('host')}
+                  disabled={creating || createMode === 'clone'}
+                  className={`h-8 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+                    createRuntime === 'host'
+                      ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
+                      : 'bg-transparent border-transparent text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)]'
+                  } ${creating || createMode === 'clone' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  style={{ fontFamily: 'var(--display)' }}
+                >
+                  Host
+                </button>
+              </div>
+              <span className="text-[10px] text-[var(--muted-dim)] block mt-1">
+                {createMode === 'clone'
+                  ? 'Clone currently uses container runtime only.'
+                  : createRuntime === 'host'
+                    ? 'Host drones run directly on the host machine.'
+                    : 'Container drones run inside managed containers.'}
+              </span>
+            </div>
+
             <div className="mb-4">
               <div className="text-[10px] font-semibold text-[var(--muted-dim)] mb-1.5 tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
                 Group for created drones

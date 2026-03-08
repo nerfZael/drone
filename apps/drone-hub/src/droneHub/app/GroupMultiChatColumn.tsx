@@ -13,7 +13,13 @@ import { IconSpinner, IconTrash, TypingDots } from '../overview/icons';
 import type { DroneSummary, PendingPrompt, TranscriptItem } from '../types';
 import { IconChat } from './icons';
 import { fetchJson, isNotFoundError, usePoll } from './hooks';
-import { chatInputDraftKeyForDroneChat, droneHomePath, isDroneStartingOrSeeding, resolveChatNameForDrone } from './helpers';
+import {
+  chatInputDraftKeyForDroneChat,
+  droneHomePath,
+  isDroneStartingOrSeeding,
+  isHostRuntimeDrone,
+  resolveChatNameForDrone,
+} from './helpers';
 import { parseIsoDateMs, type GroupMultiChatColumnRuntimeState } from './group-multi-chat-sort';
 import { openDroneTabFromLastPreview, resolveDroneOpenTabUrl } from './quick-actions';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
@@ -79,7 +85,8 @@ export function GroupMultiChatColumn({
   const draftValue = useDroneHubUiStore((s) => s.chatInputDrafts[draftKey] ?? '');
   const setChatInputDraft = useDroneHubUiStore((s) => s.setChatInputDraft);
   const terminalEmulator = useDroneHubUiStore((s) => s.terminalEmulator);
-  const repoAttached = Boolean(drone.repoAttached ?? Boolean(String(drone.repoPath ?? '').trim()));
+  const hostRuntime = isHostRuntimeDrone(drone);
+  const repoAttached = !hostRuntime && Boolean(drone.repoAttached ?? Boolean(String(drone.repoPath ?? '').trim()));
   const quickOpenTabUrl = resolveDroneOpenTabUrl(drone);
   const disabledByProvisioning = isDroneStartingOrSeeding(drone.hubPhase);
 
@@ -299,7 +306,8 @@ export function GroupMultiChatColumn({
       const qs = new URLSearchParams();
       qs.set('mode', 'ssh');
       qs.set('chat', chatName || 'default');
-      qs.set('cwd', droneHomePath(drone));
+      const cwd = droneHomePath(drone);
+      if (cwd && !(hostRuntime && cwd === '/')) qs.set('cwd', cwd);
       if (terminalEmulator && terminalEmulator !== 'auto') qs.set('terminal', terminalEmulator);
       const r = await fetch(`/api/drones/${encodeURIComponent(drone.id)}/open-terminal?${qs.toString()}`, { method: 'POST' });
       if (!r.ok) {

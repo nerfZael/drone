@@ -52,6 +52,14 @@ export const RIGHT_PANEL_TAB_LABELS: Record<RightPanelTab, string> = {
   prs: 'PRs',
   canvas: 'Canvas',
 };
+export function rightPanelTabsForRuntime(runtimeRaw: unknown): RightPanelTab[] {
+  void runtimeRaw;
+  return [...RIGHT_PANEL_TABS];
+}
+export function repoUnavailableReasonForRuntime(runtimeRaw: unknown): string | null {
+  void runtimeRaw;
+  return null;
+}
 
 export function viewportWidthPx(): number {
   if (typeof window !== 'undefined' && Number.isFinite(window.innerWidth) && window.innerWidth > 0) {

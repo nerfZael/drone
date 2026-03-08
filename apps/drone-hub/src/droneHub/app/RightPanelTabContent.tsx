@@ -14,7 +14,7 @@ import type {
   DroneSummary,
   PortReachabilityByHostPort,
 } from '../types';
-import type { RightPanelTab } from './app-config';
+import { repoUnavailableReasonForRuntime, type RightPanelTab } from './app-config';
 import { isDroneStartingOrSeeding } from './helpers';
 
 type PaneReadinessState = {
@@ -169,6 +169,8 @@ export function RightPanelTabContent({
   onOpenPullRequestInChanges,
 }: RightPanelTabContentProps) {
   const disabled = isDroneStartingOrSeeding(drone.hubPhase);
+  const repoFeaturesEnabled = Boolean(drone.repoAttached ?? Boolean(String(drone.repoPath ?? '').trim()));
+  const repoUnavailableReason = repoUnavailableReasonForRuntime(drone.runtime);
   const chatName = selectedChat || 'default';
   const isCurrent = Boolean(currentDroneId && String(currentDroneId) === String(drone.id));
 
@@ -293,8 +295,9 @@ export function RightPanelTabContent({
         <DroneChangesDock
           key={`${paneKey}-changes`}
           droneId={drone.id}
-          repoAttached={drone.repoAttached ?? Boolean(String(drone.repoPath ?? '').trim())}
+          repoAttached={repoFeaturesEnabled}
           repoPath={drone.repoPath}
+          repoUnavailableReason={repoUnavailableReason}
           disabled={disabled}
           hubPhase={drone.hubPhase}
           hubMessage={drone.hubMessage}
@@ -307,8 +310,9 @@ export function RightPanelTabContent({
           key={`${paneKey}-prs`}
           droneId={drone.id}
           droneName={drone.name}
-          repoAttached={drone.repoAttached ?? Boolean(String(drone.repoPath ?? '').trim())}
+          repoAttached={repoFeaturesEnabled}
           repoPath={drone.repoPath}
+          repoUnavailableReason={repoUnavailableReason}
           disabled={disabled}
           hubPhase={drone.hubPhase}
           hubMessage={drone.hubMessage}

@@ -24,7 +24,7 @@ import type {
 } from '../types';
 import { IconChat, IconChevron, IconCursorApp, IconDrone, IconFolder, IconSidebarExpand } from './icons';
 import { RightPanel } from './RightPanel';
-import type { RightPanelTab } from './app-config';
+import { type RightPanelTab } from './app-config';
 import type { StartupSeedState, TldrState } from './app-types';
 import type { RepoOpErrorMeta } from './helpers';
 import { requestChangesPullRequest } from '../changes/navigation';
@@ -312,6 +312,7 @@ export function SelectedDroneWorkspace({
     () => resolveChatNameForDrone(currentDrone, selectedChat),
     [currentDrone, selectedChat],
   );
+  const hostRuntime = String(currentDrone.runtime ?? '').trim().toLowerCase() === 'host';
   const openChatErrorDetails = React.useCallback(() => {
     const message = String(chatInfoError ?? '').trim();
     if (!message) return;
@@ -617,7 +618,7 @@ export function SelectedDroneWorkspace({
 
   React.useEffect(() => {
     repoIdentityRef.current = null;
-    if (!(currentDrone.repoAttached ?? Boolean(String(currentDrone.repoPath ?? '').trim()))) return;
+    if (!currentDroneRepoAttached) return;
     if (isDroneStartingOrSeeding(currentDrone.hubPhase)) return;
     let cancelled = false;
     void requestJson<Extract<RepoPullRequestsPayload, { ok: true }>>(
@@ -636,13 +637,13 @@ export function SelectedDroneWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [currentDrone.hubPhase, currentDrone.id, currentDrone.repoAttached, currentDrone.repoPath]);
+  }, [currentDrone.hubPhase, currentDrone.id, currentDroneRepoAttached]);
 
   const tryOpenMarkdownPullRequestInChanges = React.useCallback(
     (href: string): boolean => {
       const parsed = parseGithubPullRequestHref(href);
       if (!parsed) return false;
-      if (!(currentDrone.repoAttached ?? Boolean(String(currentDrone.repoPath ?? '').trim()))) return false;
+      if (!currentDroneRepoAttached) return false;
       if (isDroneStartingOrSeeding(currentDrone.hubPhase)) return false;
       const knownRepo = repoIdentityRef.current;
       if (knownRepo && (knownRepo.owner !== parsed.owner || knownRepo.repo !== parsed.repo)) return false;
@@ -651,7 +652,7 @@ export function SelectedDroneWorkspace({
       requestChangesPullRequest({ droneId: currentDrone.id, pullNumber: parsed.pullNumber });
       return true;
     },
-    [currentDrone.hubPhase, currentDrone.id, currentDrone.repoAttached, currentDrone.repoPath, setRightPanelOpen, setRightPanelTab],
+    [currentDrone.hubPhase, currentDrone.id, currentDroneRepoAttached, setRightPanelOpen, setRightPanelTab],
   );
 
   const availableChats = React.useMemo(() => {
@@ -885,7 +886,7 @@ export function SelectedDroneWorkspace({
               <HeaderPullRequestShortcuts
                 droneId={currentDrone.id}
                 repoPath={currentDrone.repoPath}
-                repoAttached={currentDrone.repoAttached ?? Boolean(String(currentDrone.repoPath ?? '').trim())}
+                repoAttached={currentDroneRepoAttached}
                 disabled={isDroneStartingOrSeeding(currentDrone.hubPhase)}
                 onOpenPullRequestsTab={openPullRequestsTab}
               />
@@ -1122,7 +1123,7 @@ export function SelectedDroneWorkspace({
             <IconCursorApp className="opacity-70" />
             Cursor
           </button>
-          {(currentDrone.repoAttached ?? Boolean(String(currentDrone.repoPath ?? '').trim())) && (
+          {currentDroneRepoAttached && !hostRuntime && (
             <>
               <button
                 type="button"
@@ -1202,7 +1203,7 @@ export function SelectedDroneWorkspace({
                   >
                     Open VS Code
                   </button>
-                  {(currentDrone.repoAttached ?? Boolean(String(currentDrone.repoPath ?? '').trim())) && (
+                  {currentDroneRepoAttached && !hostRuntime && (
                     <>
                       <div className="my-1 border-t border-[var(--border-subtle)]" />
                       <button

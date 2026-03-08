@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 
 type CreateMode = 'create' | 'clone';
+type CreateRuntime = 'container' | 'host';
 
 type Updater<T> = T | ((prev: T) => T);
 
@@ -9,6 +10,7 @@ type CreateDraftWorkflowState = {
   createOpen: boolean;
   creating: boolean;
   createMode: CreateMode;
+  createRuntime: CreateRuntime;
   cloneSourceId: string | null;
   cloneIncludeChats: boolean;
   createError: string | null;
@@ -28,6 +30,7 @@ type CreateDraftWorkflowState = {
   setCreateOpen: (next: Updater<boolean>) => void;
   setCreating: (next: Updater<boolean>) => void;
   setCreateMode: (next: Updater<CreateMode>) => void;
+  setCreateRuntime: (next: Updater<CreateRuntime>) => void;
   setCloneSourceId: (next: Updater<string | null>) => void;
   setCloneIncludeChats: (next: Updater<boolean>) => void;
   setCreateError: (next: Updater<string | null>) => void;
@@ -54,6 +57,7 @@ const useCreateDraftWorkflowStore = create<CreateDraftWorkflowState>((set) => ({
   createOpen: false,
   creating: false,
   createMode: 'create',
+  createRuntime: 'container',
   cloneSourceId: null,
   cloneIncludeChats: true,
   createError: null,
@@ -73,6 +77,7 @@ const useCreateDraftWorkflowStore = create<CreateDraftWorkflowState>((set) => ({
   setCreateOpen: (next) => set((s) => ({ createOpen: resolveNext(s.createOpen, next) })),
   setCreating: (next) => set((s) => ({ creating: resolveNext(s.creating, next) })),
   setCreateMode: (next) => set((s) => ({ createMode: resolveNext(s.createMode, next) })),
+  setCreateRuntime: (next) => set((s) => ({ createRuntime: resolveNext(s.createRuntime, next) })),
   setCloneSourceId: (next) => set((s) => ({ cloneSourceId: resolveNext(s.cloneSourceId, next) })),
   setCloneIncludeChats: (next) => set((s) => ({ cloneIncludeChats: resolveNext(s.cloneIncludeChats, next) })),
   setCreateError: (next) => set((s) => ({ createError: resolveNext(s.createError, next) })),
@@ -98,6 +103,7 @@ export function useCreateDraftWorkflowState() {
       createOpen: s.createOpen,
       creating: s.creating,
       createMode: s.createMode,
+      createRuntime: s.createRuntime,
       cloneSourceId: s.cloneSourceId,
       cloneIncludeChats: s.cloneIncludeChats,
       createError: s.createError,
@@ -117,6 +123,7 @@ export function useCreateDraftWorkflowState() {
       setCreateOpen: s.setCreateOpen,
       setCreating: s.setCreating,
       setCreateMode: s.setCreateMode,
+      setCreateRuntime: s.setCreateRuntime,
       setCloneSourceId: s.setCloneSourceId,
       setCloneIncludeChats: s.setCloneIncludeChats,
       setCreateError: s.setCreateError,
