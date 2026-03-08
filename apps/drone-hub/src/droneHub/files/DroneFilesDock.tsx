@@ -1,6 +1,6 @@
 import React from 'react';
 import { requestJson } from '../http';
-import { IconFile, IconFolder, IconList } from '../icons';
+import { IconFolder, IconList, iconForFilePath } from '../icons';
 import type { DroneFsEntry, DroneFsUploadPayload } from '../types';
 
 function normalizeContainerPathInput(raw: string): string {
@@ -632,6 +632,7 @@ export function DroneFilesDock({
                 const modifiedTitle = formatLocalDateTime(entry.mtimeMs);
                 const typeText = isDir ? 'dir' : entry.isImage ? 'image' : entry.isVideo ? 'video' : entry.ext ? entry.ext : 'file';
                 const openable = canOpenEntry(entry);
+                const FileIcon = iconForFilePath(entry.path);
                 return (
                   <div
                     key={entry.path}
@@ -648,7 +649,7 @@ export function DroneFilesDock({
                       {isDir ? (
                         <IconFolder className="flex-shrink-0 text-[var(--muted)] opacity-80" />
                       ) : (
-                        <IconFile className="flex-shrink-0 text-[var(--muted)] opacity-80" />
+                        <FileIcon className="flex-shrink-0 text-[var(--muted)] opacity-80" />
                       )}
                       <span className="truncate text-[var(--fg-secondary)]">{entry.name}</span>
                       <span className="text-[11px] text-[var(--muted-dim)]">{typeText}</span>
@@ -677,6 +678,7 @@ export function DroneFilesDock({
               const isRegularFile = entry.kind === 'file';
               const isImageFile = isRegularFile && entry.isImage;
               const canThumb = isImageFile && !thumbFailedByPath[entry.path];
+              const FileIcon = iconForFilePath(entry.path);
               const openable = canOpenEntry(entry);
               const content = (
                 <>
@@ -697,7 +699,7 @@ export function DroneFilesDock({
                         }
                       />
                     ) : (
-                      <IconFile className="w-6 h-6 text-[var(--muted)] opacity-80" />
+                      <FileIcon className="w-6 h-6 text-[var(--muted)] opacity-80" />
                     )}
                   </div>
                   <div className="min-w-0 mt-1">

@@ -5,6 +5,8 @@ type IconProps = {
   size?: number;
 };
 
+type FileIconComponent = (props: IconProps) => React.JSX.Element;
+
 export function IconDrone({ className, size = 16 }: IconProps) {
   return (
     <svg
@@ -71,6 +73,60 @@ export function IconFile({ className, size = 14 }: IconProps) {
   );
 }
 
+function IconFileCode({ className, size = 14 }: IconProps) {
+  return (
+    <svg className={className} width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M3.75 0A1.75 1.75 0 002 1.75v12.5C2 15.216 2.784 16 3.75 16h8.5A1.75 1.75 0 0014 14.25V5.5a.75.75 0 00-.22-.53L9.03.22A.75.75 0 008.5 0H3.75zm4 .75v3A1.75 1.75 0 009.5 5.5h3v8.75a.25.25 0 01-.25.25h-8.5a.25.25 0 01-.25-.25V1.75a.25.25 0 01.25-.25h4zm1.5 1.06L11.94 4H9.5a.25.25 0 01-.25-.25V1.81z" />
+      <path d="M5.6 9.45L4.1 8.2l1.5-1.25.64.77-.57.48.57.48-.64.77zm4.8 0l-.64-.77.57-.48-.57-.48.64-.77 1.5 1.25-1.5 1.25zm-2.57 1.05H6.8l1.37-4.9H9.2l-1.37 4.9z" />
+    </svg>
+  );
+}
+
+function IconFileData({ className, size = 14 }: IconProps) {
+  return (
+    <svg className={className} width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M3.75 0A1.75 1.75 0 002 1.75v12.5C2 15.216 2.784 16 3.75 16h8.5A1.75 1.75 0 0014 14.25V5.5a.75.75 0 00-.22-.53L9.03.22A.75.75 0 008.5 0H3.75zm4 .75v3A1.75 1.75 0 009.5 5.5h3v8.75a.25.25 0 01-.25.25h-8.5a.25.25 0 01-.25-.25V1.75a.25.25 0 01.25-.25h4zm1.5 1.06L11.94 4H9.5a.25.25 0 01-.25-.25V1.81z" />
+      <path d="M5.55 10.9v-.87h-.8v-.9h.8V6.87h1.31l-.2.9h.95v.9h-1.15v1.36h1.02v.87H5.55zm3.15-.14c-.9 0-1.43-.59-1.43-1.5 0-.96.59-1.64 1.56-1.64.28 0 .56.05.72.12l-.12.91a1.12 1.12 0 00-.51-.12c-.36 0-.58.28-.58.66 0 .42.23.66.61.66.18 0 .38-.04.52-.11l.1.88a2.1 2.1 0 01-.87.14zm2.17.02c-.88 0-1.47-.51-1.47-1.54 0-.91.58-1.62 1.63-1.62.19 0 .4.03.55.07v.92a1.02 1.02 0 00-.43-.1c-.42 0-.66.29-.66.69 0 .42.23.66.64.66.16 0 .32-.03.45-.08l.09.87a2.32 2.32 0 01-.8.13z" />
+    </svg>
+  );
+}
+
+function IconFileDoc({ className, size = 14 }: IconProps) {
+  return (
+    <svg className={className} width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M3.75 0A1.75 1.75 0 002 1.75v12.5C2 15.216 2.784 16 3.75 16h8.5A1.75 1.75 0 0014 14.25V5.5a.75.75 0 00-.22-.53L9.03.22A.75.75 0 008.5 0H3.75zm4 .75v3A1.75 1.75 0 009.5 5.5h3v8.75a.25.25 0 01-.25.25h-8.5a.25.25 0 01-.25-.25V1.75a.25.25 0 01.25-.25h4zm1.5 1.06L11.94 4H9.5a.25.25 0 01-.25-.25V1.81z" />
+      <path d="M5 6.8h5.4v.85H5zm0 1.8h5.4v.85H5zm0 1.8h3.5v.85H5z" />
+    </svg>
+  );
+}
+
+function IconFileImage({ className, size = 14 }: IconProps) {
+  return (
+    <svg className={className} width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M3.75 0A1.75 1.75 0 002 1.75v12.5C2 15.216 2.784 16 3.75 16h8.5A1.75 1.75 0 0014 14.25V5.5a.75.75 0 00-.22-.53L9.03.22A.75.75 0 008.5 0H3.75zm4 .75v3A1.75 1.75 0 009.5 5.5h3v8.75a.25.25 0 01-.25.25h-8.5a.25.25 0 01-.25-.25V1.75a.25.25 0 01.25-.25h4zm1.5 1.06L11.94 4H9.5a.25.25 0 01-.25-.25V1.81z" />
+      <path d="M4.8 10.9v-.98l1.35-1.3a.7.7 0 011 0l.82.78 1.32-1.48a.7.7 0 011.05 0l1.06 1.22v1H4.8zm1.15-3.4a.8.8 0 101.6 0 .8.8 0 00-1.6 0z" />
+    </svg>
+  );
+}
+
+function IconFileTest({ className, size = 14 }: IconProps) {
+  return (
+    <svg className={className} width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M3.75 0A1.75 1.75 0 002 1.75v12.5C2 15.216 2.784 16 3.75 16h8.5A1.75 1.75 0 0014 14.25V5.5a.75.75 0 00-.22-.53L9.03.22A.75.75 0 008.5 0H3.75zm4 .75v3A1.75 1.75 0 009.5 5.5h3v8.75a.25.25 0 01-.25.25h-8.5a.25.25 0 01-.25-.25V1.75a.25.25 0 01.25-.25h4zm1.5 1.06L11.94 4H9.5a.25.25 0 01-.25-.25V1.81z" />
+      <path d="M6.9 10.55L5.15 8.8l.7-.7 1.05 1.04 2.3-2.3.7.7-3 3.01z" />
+    </svg>
+  );
+}
+
+function IconFilePackage({ className, size = 14 }: IconProps) {
+  return (
+    <svg className={className} width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M3.75 0A1.75 1.75 0 002 1.75v12.5C2 15.216 2.784 16 3.75 16h8.5A1.75 1.75 0 0014 14.25V5.5a.75.75 0 00-.22-.53L9.03.22A.75.75 0 008.5 0H3.75zm4 .75v3A1.75 1.75 0 009.5 5.5h3v8.75a.25.25 0 01-.25.25h-8.5a.25.25 0 01-.25-.25V1.75a.25.25 0 01.25-.25h4zm1.5 1.06L11.94 4H9.5a.25.25 0 01-.25-.25V1.81z" />
+      <path d="M5.25 8.95V7.6l2.6-1.3 2.9 1.3v1.35L7.85 10.4l-2.6-1.45zm1-.73l1.6.9 1.9-.93-1.92-.87-1.58.9zm1.1 2.98v-1.18l1 .56v1.15l-1-.53z" />
+    </svg>
+  );
+}
+
 export function IconList({ className, size = 14 }: IconProps) {
   return (
     <svg className={className} width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
@@ -110,4 +166,42 @@ export function IconSpinner({ className, size = 14 }: IconProps) {
       <path className="opacity-75" d="M21 12a9 9 0 00-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
     </svg>
   );
+}
+
+function fileNameFromPath(path: string | null | undefined): string {
+  const value = String(path ?? '').trim().toLowerCase();
+  if (!value) return '';
+  const segs = value.split('/').filter(Boolean);
+  return segs.length > 0 ? segs[segs.length - 1] : value;
+}
+
+export function iconForFilePath(path: string | null | undefined): FileIconComponent {
+  const name = fileNameFromPath(path);
+  if (!name) return IconFile;
+
+  if (
+    name === 'package.json' ||
+    name === 'package-lock.json' ||
+    name === 'bun.lock' ||
+    name === 'pnpm-lock.yaml' ||
+    name === 'yarn.lock' ||
+    name === 'cargo.lock'
+  ) {
+    return IconFilePackage;
+  }
+
+  if (name.includes('.test.') || name.includes('.spec.')) return IconFileTest;
+  if (name.startsWith('.env')) return IconFileData;
+
+  const dot = name.lastIndexOf('.');
+  const ext = dot >= 0 ? name.slice(dot + 1) : '';
+
+  if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico'].includes(ext)) return IconFileImage;
+  if (['md', 'mdx', 'txt', 'rst'].includes(ext)) return IconFileDoc;
+  if (['json', 'yaml', 'yml', 'toml', 'ini', 'xml', 'csv'].includes(ext)) return IconFileData;
+  if (['ts', 'tsx', 'js', 'jsx', 'cjs', 'mjs', 'py', 'rb', 'go', 'rs', 'java', 'c', 'cc', 'cpp', 'h', 'hpp', 'sh', 'bash', 'zsh', 'css', 'scss', 'sass', 'less', 'sql'].includes(ext)) {
+    return IconFileCode;
+  }
+
+  return IconFile;
 }
