@@ -73,57 +73,75 @@ export function IconFile({ className, size = 14 }: IconProps) {
   );
 }
 
+function FileBase({ className, size = 14, children }: IconProps & { children: React.ReactNode }) {
+  return (
+    <svg className={className} width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M3.75 0A1.75 1.75 0 002 1.75v12.5C2 15.216 2.784 16 3.75 16h8.5A1.75 1.75 0 0014 14.25V5.5a.75.75 0 00-.22-.53L9.03.22A.75.75 0 008.5 0H3.75zm4 .75v3A1.75 1.75 0 009.5 5.5h3v8.75a.25.25 0 01-.25.25h-8.5a.25.25 0 01-.25-.25V1.75a.25.25 0 01.25-.25h4zm1.5 1.06L11.94 4H9.5a.25.25 0 01-.25-.25V1.81z"
+        fill="currentColor"
+        opacity="0.36"
+      />
+      <path d="M9.25 1.81L11.94 4H9.5a.25.25 0 01-.25-.25V1.81z" fill="currentColor" opacity="0.7" />
+      {children}
+    </svg>
+  );
+}
+
 function IconFileCode({ className, size = 14 }: IconProps) {
   return (
-    <svg className={className} width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M3.75 0A1.75 1.75 0 002 1.75v12.5C2 15.216 2.784 16 3.75 16h8.5A1.75 1.75 0 0014 14.25V5.5a.75.75 0 00-.22-.53L9.03.22A.75.75 0 008.5 0H3.75zm4 .75v3A1.75 1.75 0 009.5 5.5h3v8.75a.25.25 0 01-.25.25h-8.5a.25.25 0 01-.25-.25V1.75a.25.25 0 01.25-.25h4zm1.5 1.06L11.94 4H9.5a.25.25 0 01-.25-.25V1.81z" />
-      <path d="M5.6 9.45L4.1 8.2l1.5-1.25.64.77-.57.48.57.48-.64.77zm4.8 0l-.64-.77.57-.48-.57-.48.64-.77 1.5 1.25-1.5 1.25zm-2.57 1.05H6.8l1.37-4.9H9.2l-1.37 4.9z" />
-    </svg>
+    <FileBase className={className} size={size}>
+      <path d="M6.15 10.25L4.55 8.6l1.6-1.65" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M9.85 6.95l1.6 1.65-1.6 1.65" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M8.85 6.2l-1.7 4.8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </FileBase>
   );
 }
 
 function IconFileData({ className, size = 14 }: IconProps) {
   return (
-    <svg className={className} width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M3.75 0A1.75 1.75 0 002 1.75v12.5C2 15.216 2.784 16 3.75 16h8.5A1.75 1.75 0 0014 14.25V5.5a.75.75 0 00-.22-.53L9.03.22A.75.75 0 008.5 0H3.75zm4 .75v3A1.75 1.75 0 009.5 5.5h3v8.75a.25.25 0 01-.25.25h-8.5a.25.25 0 01-.25-.25V1.75a.25.25 0 01.25-.25h4zm1.5 1.06L11.94 4H9.5a.25.25 0 01-.25-.25V1.81z" />
-      <path d="M5.55 10.9v-.87h-.8v-.9h.8V6.87h1.31l-.2.9h.95v.9h-1.15v1.36h1.02v.87H5.55zm3.15-.14c-.9 0-1.43-.59-1.43-1.5 0-.96.59-1.64 1.56-1.64.28 0 .56.05.72.12l-.12.91a1.12 1.12 0 00-.51-.12c-.36 0-.58.28-.58.66 0 .42.23.66.61.66.18 0 .38-.04.52-.11l.1.88a2.1 2.1 0 01-.87.14zm2.17.02c-.88 0-1.47-.51-1.47-1.54 0-.91.58-1.62 1.63-1.62.19 0 .4.03.55.07v.92a1.02 1.02 0 00-.43-.1c-.42 0-.66.29-.66.69 0 .42.23.66.64.66.16 0 .32-.03.45-.08l.09.87a2.32 2.32 0 01-.8.13z" />
-    </svg>
+    <FileBase className={className} size={size}>
+      <path d="M4.9 7.05h6.2" stroke="currentColor" strokeWidth="1.15" strokeLinecap="round" />
+      <circle cx="6.5" cy="7.05" r="1.1" fill="currentColor" />
+      <path d="M4.9 9.35h6.2" stroke="currentColor" strokeWidth="1.15" strokeLinecap="round" />
+      <circle cx="9.2" cy="9.35" r="1.1" fill="currentColor" />
+    </FileBase>
   );
 }
 
 function IconFileDoc({ className, size = 14 }: IconProps) {
   return (
-    <svg className={className} width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M3.75 0A1.75 1.75 0 002 1.75v12.5C2 15.216 2.784 16 3.75 16h8.5A1.75 1.75 0 0014 14.25V5.5a.75.75 0 00-.22-.53L9.03.22A.75.75 0 008.5 0H3.75zm4 .75v3A1.75 1.75 0 009.5 5.5h3v8.75a.25.25 0 01-.25.25h-8.5a.25.25 0 01-.25-.25V1.75a.25.25 0 01.25-.25h4zm1.5 1.06L11.94 4H9.5a.25.25 0 01-.25-.25V1.81z" />
-      <path d="M5 6.8h5.4v.85H5zm0 1.8h5.4v.85H5zm0 1.8h3.5v.85H5z" />
-    </svg>
+    <FileBase className={className} size={size}>
+      <path d="M5.1 6.55h5.2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+      <path d="M5.1 8.55h5.2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+      <path d="M5.1 10.55h3.25" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </FileBase>
   );
 }
 
 function IconFileImage({ className, size = 14 }: IconProps) {
   return (
-    <svg className={className} width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M3.75 0A1.75 1.75 0 002 1.75v12.5C2 15.216 2.784 16 3.75 16h8.5A1.75 1.75 0 0014 14.25V5.5a.75.75 0 00-.22-.53L9.03.22A.75.75 0 008.5 0H3.75zm4 .75v3A1.75 1.75 0 009.5 5.5h3v8.75a.25.25 0 01-.25.25h-8.5a.25.25 0 01-.25-.25V1.75a.25.25 0 01.25-.25h4zm1.5 1.06L11.94 4H9.5a.25.25 0 01-.25-.25V1.81z" />
-      <path d="M4.8 10.9v-.98l1.35-1.3a.7.7 0 011 0l.82.78 1.32-1.48a.7.7 0 011.05 0l1.06 1.22v1H4.8zm1.15-3.4a.8.8 0 101.6 0 .8.8 0 00-1.6 0z" />
-    </svg>
+    <FileBase className={className} size={size}>
+      <circle cx="6.05" cy="6.85" r="1.05" fill="currentColor" />
+      <path d="M4.85 10.55l1.75-1.85a.7.7 0 011.02 0l1.02 1.07 1.03-1.26a.72.72 0 011.11 0l1.02 1.24" stroke="currentColor" strokeWidth="1.15" strokeLinecap="round" strokeLinejoin="round" />
+    </FileBase>
   );
 }
 
 function IconFileTest({ className, size = 14 }: IconProps) {
   return (
-    <svg className={className} width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M3.75 0A1.75 1.75 0 002 1.75v12.5C2 15.216 2.784 16 3.75 16h8.5A1.75 1.75 0 0014 14.25V5.5a.75.75 0 00-.22-.53L9.03.22A.75.75 0 008.5 0H3.75zm4 .75v3A1.75 1.75 0 009.5 5.5h3v8.75a.25.25 0 01-.25.25h-8.5a.25.25 0 01-.25-.25V1.75a.25.25 0 01.25-.25h4zm1.5 1.06L11.94 4H9.5a.25.25 0 01-.25-.25V1.81z" />
-      <path d="M6.9 10.55L5.15 8.8l.7-.7 1.05 1.04 2.3-2.3.7.7-3 3.01z" />
-    </svg>
+    <FileBase className={className} size={size}>
+      <circle cx="8" cy="8.4" r="3.05" stroke="currentColor" strokeWidth="1.15" />
+      <path d="M6.65 8.4l.95.95 1.85-2.05" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
+    </FileBase>
   );
 }
 
 function IconFilePackage({ className, size = 14 }: IconProps) {
   return (
-    <svg className={className} width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M3.75 0A1.75 1.75 0 002 1.75v12.5C2 15.216 2.784 16 3.75 16h8.5A1.75 1.75 0 0014 14.25V5.5a.75.75 0 00-.22-.53L9.03.22A.75.75 0 008.5 0H3.75zm4 .75v3A1.75 1.75 0 009.5 5.5h3v8.75a.25.25 0 01-.25.25h-8.5a.25.25 0 01-.25-.25V1.75a.25.25 0 01.25-.25h4zm1.5 1.06L11.94 4H9.5a.25.25 0 01-.25-.25V1.81z" />
-      <path d="M5.25 8.95V7.6l2.6-1.3 2.9 1.3v1.35L7.85 10.4l-2.6-1.45zm1-.73l1.6.9 1.9-.93-1.92-.87-1.58.9zm1.1 2.98v-1.18l1 .56v1.15l-1-.53z" />
-    </svg>
+    <FileBase className={className} size={size}>
+      <path d="M5.25 7.55L8 6.1l2.75 1.45v3.2L8 12.2l-2.75-1.45v-3.2z" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round" />
+      <path d="M5.25 7.55L8 9l2.75-1.45M8 9v3.2" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round" />
+    </FileBase>
   );
 }
 
