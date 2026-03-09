@@ -8729,7 +8729,6 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
               container: containerName,
               repoPathInContainer,
               args: ['show', objectish],
-              okCodes: [0, 128],
             });
             if (file.code === 128) {
               return { repoRoot, source: '', exists: false };
