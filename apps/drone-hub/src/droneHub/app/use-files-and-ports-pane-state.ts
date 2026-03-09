@@ -24,6 +24,7 @@ import {
   normalizePreviewUrl,
   readPortPreviewByDrone,
   readPreviewUrlByDrone,
+  resolveDefaultPreviewPort,
   rewriteContainerPreviewUrlToHostLoopback,
   rewriteLoopbackUrlToHostLoopback,
   sameReachabilityMap,
@@ -185,12 +186,7 @@ export function useFilesAndPortsPaneState({ currentDrone, requestJson }: UseFile
       const savedPort = portRows.find((p) => p.containerPort === saved.containerPort) ?? null;
       if (savedPort) return savedPort;
     }
-    const defaultContainerPort = Number(currentDrone?.containerPort);
-    if (Number.isFinite(defaultContainerPort) && defaultContainerPort > 0) {
-      const droneDefault = portRows.find((p) => p.containerPort === Math.floor(defaultContainerPort)) ?? null;
-      if (droneDefault) return droneDefault;
-    }
-    return portRows[0] ?? null;
+    return resolveDefaultPreviewPort(portRows, currentDrone?.containerPort);
   }, [currentDrone?.containerPort, currentDrone?.id, portPreviewByDrone, portRows]);
   const portRowsSignature = React.useMemo(
     () => portRows.map((p) => `${p.containerPort}:${p.hostPort}`).join(','),

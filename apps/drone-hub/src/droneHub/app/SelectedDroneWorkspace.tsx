@@ -23,7 +23,7 @@ import type {
   TranscriptItem,
 } from '../types';
 import { IconChat, IconChevron, IconCursorApp, IconDrone, IconFolder, IconSidebarExpand } from './icons';
-import { RightPanel } from './RightPanel';
+import { RightPanel, type RightPanelPaneId } from './RightPanel';
 import { type RightPanelTab } from './app-config';
 import type { StartupSeedState, TldrState } from './app-types';
 import type { RepoOpErrorMeta } from './helpers';
@@ -174,6 +174,8 @@ type SelectedDroneWorkspaceProps = {
   setRightPanelBottomTab: React.Dispatch<React.SetStateAction<RightPanelTab>>;
   startRightPanelResize: React.MouseEventHandler<HTMLDivElement>;
   renderRightPanelTabContent: (drone: DroneSummary, tab: RightPanelTab, pane: 'single' | 'top' | 'bottom') => React.ReactNode;
+  activePreviewLockedByPane: Partial<Record<RightPanelPaneId, boolean>>;
+  renderPersistentPreviewContent: (drone: DroneSummary, tab: RightPanelTab, pane: RightPanelPaneId) => React.ReactNode;
 };
 
 export function SelectedDroneWorkspace({
@@ -291,6 +293,8 @@ export function SelectedDroneWorkspace({
   setRightPanelBottomTab,
   startRightPanelResize,
   renderRightPanelTabContent,
+  activePreviewLockedByPane,
+  renderPersistentPreviewContent,
 }: SelectedDroneWorkspaceProps) {
   const {
     sidebarCollapsed,
@@ -1760,6 +1764,8 @@ export function SelectedDroneWorkspace({
             onStartResize={startRightPanelResize}
             onResetWidth={resetRightPanelWidth}
             renderTabContent={renderRightPanelTabContent}
+            activePreviewLockedByPane={activePreviewLockedByPane}
+            renderPersistentPreviewContent={renderPersistentPreviewContent}
           />
         )}
       </div>

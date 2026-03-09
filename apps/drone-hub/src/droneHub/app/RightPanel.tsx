@@ -27,6 +27,12 @@ export type RightPanelProps = {
   onStartResize: React.MouseEventHandler<HTMLDivElement>;
   onResetWidth: () => void;
   renderTabContent: (drone: DroneSummary, tab: RightPanelTabId, pane: RightPanelPaneId) => React.ReactNode;
+  activePreviewLockedByPane: Partial<Record<RightPanelPaneId, boolean>>;
+  renderPersistentPreviewContent: (
+    drone: DroneSummary,
+    activeTab: RightPanelTabId,
+    pane: RightPanelPaneId,
+  ) => React.ReactNode;
 };
 
 export function RightPanel({
@@ -45,7 +51,24 @@ export function RightPanel({
   onStartResize,
   onResetWidth,
   renderTabContent,
+  activePreviewLockedByPane,
+  renderPersistentPreviewContent,
 }: RightPanelProps) {
+  const renderPaneContent = React.useCallback(
+    (activeTab: RightPanelTabId, pane: RightPanelPaneId) => {
+      const activePreviewLocked = Boolean(activePreviewLockedByPane[pane]);
+      return (
+        <div className="flex-1 min-h-0 overflow-hidden relative">
+          {renderPersistentPreviewContent(currentDrone, activeTab, pane)}
+          {!activePreviewLocked || activeTab !== 'preview' ? (
+            <div className="absolute inset-0 min-h-0 overflow-hidden">{renderTabContent(currentDrone, activeTab, pane)}</div>
+          ) : null}
+        </div>
+      );
+    },
+    [activePreviewLockedByPane, currentDrone, renderPersistentPreviewContent, renderTabContent],
+  );
+
   return (
     <aside
       className="relative flex-shrink-0 bg-[var(--panel-alt)] border-l border-[var(--border)] flex flex-col min-h-0 overflow-hidden"
@@ -98,7 +121,7 @@ export function RightPanel({
                 })}
               </div>
             </div>
-            <div className="flex-1 min-h-0 overflow-hidden">{renderTabContent(currentDrone, rightPanelTab, 'top')}</div>
+            {renderPaneContent(rightPanelTab, 'top')}
           </div>
           <div className="h-px bg-[var(--border)]" />
           <div className="flex-1 min-h-0 overflow-hidden flex flex-col" data-right-panel-pane="bottom">
@@ -129,11 +152,11 @@ export function RightPanel({
                 })}
               </div>
             </div>
-            <div className="flex-1 min-h-0 overflow-hidden">{renderTabContent(currentDrone, rightPanelBottomTab, 'bottom')}</div>
+            {renderPaneContent(rightPanelBottomTab, 'bottom')}
           </div>
         </div>
       ) : (
-        <div className="flex-1 min-h-0 overflow-hidden">{renderTabContent(currentDrone, rightPanelTab, 'single')}</div>
+        renderPaneContent(rightPanelTab, 'single')
       )}
     </aside>
   );
