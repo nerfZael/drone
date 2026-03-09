@@ -5,7 +5,7 @@ import { TypingDots } from '../overview/icons';
 import type { DroneSummary, RepoSummary } from '../types';
 import { DRONE_CHAT_DND_MIME, DRONE_DND_MIME, createCanvasChatNodeId } from './app-config';
 import { compareDronesByNewestFirst, isDroneStartingOrSeeding } from './helpers';
-import { IconAutoMinimize, IconChevron, IconColumns, IconFolder, IconList, IconPencil, IconPlus, IconPlusDouble, IconSettings, IconSidebarCollapse, IconSidebarExpand, IconSpinner, IconTrash, SkeletonLine } from './icons';
+import { IconAutoMinimize, IconChat, IconChevron, IconColumns, IconFolder, IconList, IconPencil, IconPlus, IconPlusDouble, IconSettings, IconSidebarCollapse, IconSidebarExpand, IconSpinner, IconTrash, SkeletonLine } from './icons';
 import { useDroneSidebarUiState } from './use-drone-hub-ui-store';
 import { SIDEBAR_VISIBLE_MULTI_CHAT_GROUP, type SidebarGroup } from './use-sidebar-view-model';
 
@@ -64,6 +64,21 @@ function getSidebarDroneChats(drone: DroneSummary): string[] {
   return out;
 }
 
+type DraftSidebarPlaceholder = {
+  name: string;
+  repoPath: string;
+  group: string | null;
+};
+
+const DRAFT_SIDEBAR_PLACEHOLDER_ID = '__draft-sidebar-placeholder__';
+
+function repoPathToLabel(repoPathRaw: string): string {
+  const repoPath = String(repoPathRaw ?? '').trim();
+  if (!repoPath) return 'Ungrouped';
+  const parts = repoPath.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] || repoPath;
+}
+
 export type DroneSidebarProps = {
   dronesError: string | null | undefined;
   groupMoveError: string | null;
@@ -93,6 +108,7 @@ export type DroneSidebarProps = {
   dronesCount: number;
   droneCountByRepoPath: Map<string, number>;
   uiDroneName: (nameRaw: string) => string;
+  draftSidebarPlaceholder: DraftSidebarPlaceholder | null;
   onOpenDraftChatComposer: () => void;
   onOpenCreateModal: () => void;
   onSelectDroneCard: (droneId: string, opts?: { toggle?: boolean; range?: boolean }) => void;
@@ -155,6 +171,7 @@ export function DroneSidebar({
   dronesCount,
   droneCountByRepoPath,
   uiDroneName,
+  draftSidebarPlaceholder,
   onOpenDraftChatComposer,
   onOpenCreateModal,
   onSelectDroneCard,
@@ -451,9 +468,95 @@ export function DroneSidebar({
   const sidebarVisibleDroneCount = sidebarVisibleDrones.length;
   const sidebarVisibleMultiChatActive = selectedGroupMultiChat === SIDEBAR_VISIBLE_MULTI_CHAT_GROUP;
   const activeChatName = String(selectedChat ?? '').trim() || 'default';
+  const visibleDraftSidebarPlaceholder = React.useMemo(() => {
+    if (!draftSidebarPlaceholder) return null;
+    const repoPath = String(draftSidebarPlaceholder.repoPath ?? '').trim();
+    const activeRepo = String(activeRepoPath ?? '').trim();
+    if (activeRepo && activeRepo !== repoPath) return null;
+    return {
+      ...draftSidebarPlaceholder,
+      repoPath,
+      group: String(draftSidebarPlaceholder.group ?? '').trim() || null,
+    };
+  }, [activeRepoPath, draftSidebarPlaceholder]);
+  const draftSidebarPlaceholderDrone = React.useMemo<DroneSummary | null>(() => {
+    if (!visibleDraftSidebarPlaceholder) return null;
+    return {
+      id: DRAFT_SIDEBAR_PLACEHOLDER_ID,
+      name: visibleDraftSidebarPlaceholder.name,
+      group: visibleDraftSidebarPlaceholder.group,
+      createdAt: new Date().toISOString(),
+      repoAttached: Boolean(visibleDraftSidebarPlaceholder.repoPath),
+      repoPath: visibleDraftSidebarPlaceholder.repoPath,
+      containerPort: 0,
+      hostPort: null,
+      statusOk: true,
+      statusError: null,
+      chats: ['default'],
+      hubPhase: null,
+      hubMessage: null,
+      busy: false,
+    };
+  }, [visibleDraftSidebarPlaceholder]);
+  const renderSidebarGroups = React.useMemo(() => {
+    if (!draftSidebarPlaceholderDrone) return sidebarGroups;
+    const placeholderGroup =
+      sidebarGroupingMode === 'repos'
+        ? {
+            group: draftSidebarPlaceholderDrone.repoPath
+              ? `repo:${draftSidebarPlaceholderDrone.repoPath}`
+              : 'repo:ungrouped',
+            label: draftSidebarPlaceholderDrone.repoPath
+              ? repoPathToLabel(draftSidebarPlaceholderDrone.repoPath)
+              : 'Ungrouped',
+            kind: 'repo' as const,
+          }
+        : {
+            group: String(draftSidebarPlaceholderDrone.group ?? '').trim() || 'Ungrouped',
+            label: String(draftSidebarPlaceholderDrone.group ?? '').trim() || 'Ungrouped',
+            kind: 'group' as const,
+          };
+    const next = sidebarGroups.map((group) =>
+      group.group === placeholderGroup.group
+        ? { ...group, items: [draftSidebarPlaceholderDrone, ...group.items] }
+        : group,
+    );
+    if (next.some((group) => group.group === placeholderGroup.group)) return next;
+    next.push({ ...placeholderGroup, items: [draftSidebarPlaceholderDrone] });
+    next.sort((a, b) => {
+      if (isUngroupedGroupName(a.label) && !isUngroupedGroupName(b.label)) return -1;
+      if (!isUngroupedGroupName(a.label) && isUngroupedGroupName(b.label)) return 1;
+      return a.label.localeCompare(b.label);
+    });
+    return next;
+  }, [draftSidebarPlaceholderDrone, sidebarGroups, sidebarGroupingMode]);
+  const flatSidebarDrones = React.useMemo(() => {
+    const items = sidebarDronesFilteredByRepo.slice().sort(compareDronesByNewestFirst);
+    return draftSidebarPlaceholderDrone ? [draftSidebarPlaceholderDrone, ...items] : items;
+  }, [draftSidebarPlaceholderDrone, sidebarDronesFilteredByRepo]);
 
   const renderDroneWithChats = React.useCallback(
     (d: DroneSummary, opts?: { showGroup?: boolean }) => {
+      if (d.id === DRAFT_SIDEBAR_PLACEHOLDER_ID) {
+        return (
+          <div key={d.id} className="w-full text-left px-3 h-8 flex items-center rounded-md border bg-[var(--selected)] border-[var(--accent-muted)] relative">
+            <div className="absolute left-0 top-1 bottom-1 w-[2px] rounded-full bg-[var(--accent)]" />
+            <div className="flex-1 min-w-0 flex items-center gap-1.5">
+              <IconChat className="text-[var(--yellow)] opacity-90 flex-shrink-0" />
+              <span className="flex-1 min-w-0 truncate text-[12.5px] font-semibold text-[var(--fg)]" title={`${d.name} · pending draft`}>
+                {d.name}
+              </span>
+              <span
+                className="flex-shrink-0 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-1 py-0.5 text-[9px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]"
+                style={{ fontFamily: 'var(--display)' }}
+                title="Draft"
+              >
+                draft
+              </span>
+            </div>
+          </div>
+        );
+      }
       const isOptimistic = sidebarOptimisticDroneIdSet.has(d.id);
       const chats = getSidebarDroneChats(d);
       const hasOnlyDefaultChat = chats.length === 1 && chats[0] === 'default';
@@ -718,7 +821,7 @@ export function DroneSidebar({
               ))}
             </div>
           )}
-          {!dronesLoading && sidebarDrones.length === 0 && !dronesError && (
+          {!dronesLoading && sidebarDrones.length === 0 && !visibleDraftSidebarPlaceholder && !dronesError && (
             <div className="px-3 py-10 text-center">
               <div
                 className="text-[var(--muted-dim)] text-[11px] tracking-wide uppercase"
@@ -761,7 +864,7 @@ export function DroneSidebar({
               </div>
             </div>
           )}
-          {!dronesLoading && sidebarDrones.length > 0 && sidebarDronesFilteredByRepo.length === 0 && activeRepoPath && !dronesError && (
+          {!dronesLoading && sidebarDrones.length > 0 && sidebarDronesFilteredByRepo.length === 0 && activeRepoPath && !visibleDraftSidebarPlaceholder && !dronesError && (
             <div className="px-3 py-10 text-center">
               <div
                 className="text-[var(--muted-dim)] text-[11px] tracking-wide uppercase"
@@ -776,10 +879,7 @@ export function DroneSidebar({
           )}
           <div className="flex flex-col gap-0.5 select-none">
             {viewMode === 'flat' ? (
-              sidebarDronesFilteredByRepo
-                .slice()
-                .sort(compareDronesByNewestFirst)
-                .map((d) => renderDroneWithChats(d))
+              flatSidebarDrones.map((d) => renderDroneWithChats(d))
             ) : (
               <>
                 <div
@@ -788,7 +888,10 @@ export function DroneSidebar({
                   onDragLeave={isRepoGroupingMode ? undefined : onUngroupedDragLeave}
                   onDrop={isRepoGroupingMode ? undefined : onUngroupedDrop}
                 >
-                {sidebarGroups.map(({ group, label, kind, items }) => {
+                {renderSidebarGroups.map(({ group, label, kind, items }) => {
+                  const actualItems = items.filter((item) => item.id !== DRAFT_SIDEBAR_PLACEHOLDER_ID);
+                  const hasPlaceholder = actualItems.length !== items.length;
+                  const placeholderOnly = hasPlaceholder && actualItems.length === 0;
                   const groupLabel = String(label ?? group).trim() || group;
                   const isVirtualGroup = kind === 'repo';
                   const uniqueRepoPaths = Array.from(
@@ -808,7 +911,7 @@ export function DroneSidebar({
                   const isDeletingGroup = Boolean(deletingGroups[group]);
                   const isRenamingGroup = Boolean(renamingGroups[group]);
                   const isDropTarget = !isVirtualGroup && dragOverGroup === group;
-                  const canRenameGroup = !isVirtualGroup && !isUngroupedGroupName(groupLabel);
+                  const canRenameGroup = !placeholderOnly && !isVirtualGroup && !isUngroupedGroupName(groupLabel);
                   const pinGroupActionsVisible = isDeletingGroup || isRenamingGroup || selectedGroupMultiChat === group;
                   const actionsVisibleClass = pinGroupActionsVisible
                     ? 'opacity-100 pointer-events-auto'
@@ -833,9 +936,9 @@ export function DroneSidebar({
                       <div
                         className={`group/group-header w-full px-3 py-2 flex items-center justify-between gap-2 border-b border-[var(--border-subtle)] transition-colors ${
                           isDropTarget ? 'bg-[var(--accent-subtle)]' : 'hover:bg-[var(--hover)]'
-                        } ${items.length > 0 ? 'cursor-grab active:cursor-grabbing' : ''}`}
-                        draggable={items.length > 0}
-                        onDragStart={(event) => onGroupHeaderDragStart(items.map((item) => item.id), event)}
+                        } ${actualItems.length > 0 ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                        draggable={actualItems.length > 0}
+                        onDragStart={(event) => onGroupHeaderDragStart(actualItems.map((item) => item.id), event)}
                       >
                         <button
                           onClick={() => onToggleGroupCollapsed(group)}
@@ -867,7 +970,7 @@ export function DroneSidebar({
                             <div
                               className={`text-[10px] font-mono text-[var(--muted-dim)] transition-opacity duration-150 ${countVisibleClass}`}
                             >
-                              {items.length} drone{items.length !== 1 ? 's' : ''}
+                              {actualItems.length} drone{actualItems.length !== 1 ? 's' : ''}
                             </div>
                             <div className={`flex items-center justify-end gap-1 ${actionsVisibleClass}`}>
                               {canRenameGroup && (
@@ -886,55 +989,59 @@ export function DroneSidebar({
                                   {isRenamingGroup ? <IconSpinner className="opacity-90" /> : <IconPencil className="opacity-90" />}
                                 </button>
                               )}
-                              <button
-                                type="button"
-                                onClick={() => onOpenGroupMultiChat(group)}
-                                disabled={isDeletingGroup}
-                                className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
-                                  isDeletingGroup
-                                    ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                                    : selectedGroupMultiChat === group
-                                      ? 'opacity-100 pointer-events-auto bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
-                                      : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
-                                }`}
-                                title={`Open "${groupLabel}" multi-chat`}
-                                aria-label={`Open "${groupLabel}" multi-chat`}
-                              >
-                                <IconColumns className="opacity-90" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  onDeleteGroup(group, items.length, {
-                                    kind,
-                                    label: groupLabel,
-                                    repoPath: isVirtualGroup ? hoveredRepoPath || null : null,
-                                  })
-                                }
-                                disabled={isDeletingGroup || isRenamingGroup}
-                                aria-busy={isDeletingGroup}
-                                className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
-                                  isDeletingGroup || isRenamingGroup
-                                    ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                                    : 'bg-[var(--red-subtle)] border-[rgba(255,90,90,.2)] text-[var(--red)] hover:bg-[rgba(255,90,90,.15)]'
-                                }`}
-                                title={
-                                  isDeletingGroup
-                                    ? `Deleting group "${groupLabel}"…`
-                                    : isVirtualGroup
-                                      ? `Delete all drones in "${groupLabel}"`
-                                      : `Delete group "${groupLabel}" (and all drones inside)`
-                                }
-                                aria-label={
-                                  isDeletingGroup
-                                    ? `Deleting group "${groupLabel}"`
-                                    : isVirtualGroup
-                                      ? `Delete all drones in "${groupLabel}"`
-                                      : `Delete group "${groupLabel}" (and all drones inside)`
-                                }
-                              >
-                                {isDeletingGroup ? <IconSpinner className="opacity-90" /> : <IconTrash className="opacity-90" />}
-                              </button>
+                              {!placeholderOnly && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => onOpenGroupMultiChat(group)}
+                                    disabled={isDeletingGroup}
+                                    className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
+                                      isDeletingGroup
+                                        ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
+                                        : selectedGroupMultiChat === group
+                                          ? 'opacity-100 pointer-events-auto bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
+                                          : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
+                                    }`}
+                                    title={`Open "${groupLabel}" multi-chat`}
+                                    aria-label={`Open "${groupLabel}" multi-chat`}
+                                  >
+                                    <IconColumns className="opacity-90" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      onDeleteGroup(group, actualItems.length, {
+                                        kind,
+                                        label: groupLabel,
+                                        repoPath: isVirtualGroup ? hoveredRepoPath || null : null,
+                                      })
+                                    }
+                                    disabled={isDeletingGroup || isRenamingGroup}
+                                    aria-busy={isDeletingGroup}
+                                    className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
+                                      isDeletingGroup || isRenamingGroup
+                                        ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
+                                        : 'bg-[var(--red-subtle)] border-[rgba(255,90,90,.2)] text-[var(--red)] hover:bg-[rgba(255,90,90,.15)]'
+                                    }`}
+                                    title={
+                                      isDeletingGroup
+                                        ? `Deleting group "${groupLabel}"…`
+                                        : isVirtualGroup
+                                          ? `Delete all drones in "${groupLabel}"`
+                                          : `Delete group "${groupLabel}" (and all drones inside)`
+                                    }
+                                    aria-label={
+                                      isDeletingGroup
+                                        ? `Deleting group "${groupLabel}"`
+                                        : isVirtualGroup
+                                          ? `Delete all drones in "${groupLabel}"`
+                                          : `Delete group "${groupLabel}" (and all drones inside)`
+                                    }
+                                  >
+                                    {isDeletingGroup ? <IconSpinner className="opacity-90" /> : <IconTrash className="opacity-90" />}
+                                  </button>
+                                </>
+                              )}
                             </div>
                           </div>
                         </div>
