@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  appendDiffExpansionRange,
   buildExplorerTree,
   entryPathExistsInCurrentTree,
   estimateExplorerSidebarWidth,
   flattenVisibleExplorerRows,
-  nextDiffContextLines,
   resolveExplorerSidebarWidthBounds,
 } from '../src/droneHub/changes/helpers';
 import type { RepoChangeEntry } from '../src/droneHub/types';
@@ -120,13 +120,21 @@ describe('changes explorer tree', () => {
   });
 });
 
-describe('changes diff context helpers', () => {
-  test('expands diff context in fixed steps up to full-file mode', () => {
-    expect(nextDiffContextLines(null)).toBe(20);
-    expect(nextDiffContextLines(3)).toBe(20);
-    expect(nextDiffContextLines(20)).toBe(80);
-    expect(nextDiffContextLines(80)).toBe(2000);
-    expect(nextDiffContextLines(2000)).toBeNull();
+describe('changes file actions', () => {
+  test('merges overlapping and adjacent expansion ranges', () => {
+    expect(
+      appendDiffExpansionRange(
+        [
+          { start: 10, end: 20 },
+          { start: 30, end: 40 },
+        ],
+        { start: 20, end: 30 },
+      ),
+    ).toEqual([{ start: 10, end: 40 }]);
+
+    expect(
+      appendDiffExpansionRange([{ start: 10, end: 20 }], { start: 12, end: 18 }),
+    ).toEqual([{ start: 10, end: 20 }]);
   });
 
   test('detects whether a changed path still exists for editor open actions', () => {

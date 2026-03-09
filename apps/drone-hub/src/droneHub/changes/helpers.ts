@@ -4,7 +4,7 @@ import type {
   RepoPullRequestChangeEntry,
   RepoPullRequestMergeMethod,
 } from '../types';
-import type { DiffNoTextReason } from './types';
+import type { DiffExpansionRange, DiffNoTextReason } from './types';
 import { readChangesStorage } from './storage';
 
 export type DiffKind = 'staged' | 'unstaged';
@@ -121,14 +121,29 @@ export function effectiveKindForEntry(entry: RepoChangeEntry | null, preferred: 
   return null;
 }
 
-export function nextDiffContextLines(current: number | null | undefined): number | null {
-  const hasCurrent = typeof current === 'number' && Number.isFinite(current);
-  const normalized = hasCurrent ? Math.max(0, Math.floor(current)) : 3;
-  const steps = [3, 20, 80, 2000];
-  for (const step of steps) {
-    if (step > normalized) return step;
+export function appendDiffExpansionRange(
+  ranges: DiffExpansionRange[],
+  incoming: DiffExpansionRange,
+): DiffExpansionRange[] {
+  const start = Math.max(1, Math.floor(Number(incoming.start ?? 0)));
+  const end = Math.max(start, Math.floor(Number(incoming.end ?? 0)));
+  if (end <= start) return ranges;
+
+  const sorted = [...ranges, { start, end }].sort((a, b) => (a.start === b.start ? a.end - b.end : a.start - b.start));
+  const merged: DiffExpansionRange[] = [];
+  for (const current of sorted) {
+    const previous = merged[merged.length - 1];
+    if (!previous) {
+      merged.push({ ...current });
+      continue;
+    }
+    if (current.start <= previous.end) {
+      previous.end = Math.max(previous.end, current.end);
+      continue;
+    }
+    merged.push({ ...current });
   }
-  return null;
+  return merged;
 }
 
 export function entryPathExistsInCurrentTree(entry: RepoChangeEntry | null, mode: ChangesDataMode): boolean {
