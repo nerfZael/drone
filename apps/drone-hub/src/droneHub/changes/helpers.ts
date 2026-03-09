@@ -121,6 +121,27 @@ export function effectiveKindForEntry(entry: RepoChangeEntry | null, preferred: 
   return null;
 }
 
+export function nextDiffContextLines(current: number | null | undefined): number | null {
+  const hasCurrent = typeof current === 'number' && Number.isFinite(current);
+  const normalized = hasCurrent ? Math.max(0, Math.floor(current)) : 3;
+  const steps = [3, 20, 80, 2000];
+  for (const step of steps) {
+    if (step > normalized) return step;
+  }
+  return null;
+}
+
+export function entryPathExistsInCurrentTree(entry: RepoChangeEntry | null, mode: ChangesDataMode): boolean {
+  if (!entry) return false;
+  if (mode !== 'working-tree') {
+    return entry.stagedType !== 'deleted';
+  }
+  if (entry.isUntracked) return true;
+  if (entry.unstagedType === 'deleted') return false;
+  if (entry.unstagedType !== null) return true;
+  return entry.stagedType !== 'deleted';
+}
+
 export function statusCharLabel(ch: string): string {
   if (!ch || ch === '.') return '-';
   return ch;

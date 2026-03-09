@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import {
   buildExplorerTree,
+  entryPathExistsInCurrentTree,
   estimateExplorerSidebarWidth,
   flattenVisibleExplorerRows,
+  nextDiffContextLines,
   resolveExplorerSidebarWidthBounds,
 } from '../src/droneHub/changes/helpers';
 import type { RepoChangeEntry } from '../src/droneHub/types';
@@ -115,5 +117,47 @@ describe('changes explorer tree', () => {
         minDiffWidthPx: 420,
       }),
     ).toEqual({ minWidthPx: 120, maxWidthPx: 120 });
+  });
+});
+
+describe('changes diff context helpers', () => {
+  test('expands diff context in fixed steps up to full-file mode', () => {
+    expect(nextDiffContextLines(null)).toBe(20);
+    expect(nextDiffContextLines(3)).toBe(20);
+    expect(nextDiffContextLines(20)).toBe(80);
+    expect(nextDiffContextLines(80)).toBe(2000);
+    expect(nextDiffContextLines(2000)).toBeNull();
+  });
+
+  test('detects whether a changed path still exists for editor open actions', () => {
+    const modified: RepoChangeEntry = {
+      ...change('src/app.ts'),
+      code: ' M',
+      unstagedChar: 'M',
+      unstagedType: 'modified',
+      isUntracked: false,
+    };
+    expect(entryPathExistsInCurrentTree(modified, 'working-tree')).toBe(true);
+
+    const deletedInWorkingTree: RepoChangeEntry = {
+      ...change('src/deleted.ts'),
+      code: ' D',
+      unstagedChar: 'D',
+      unstagedType: 'deleted',
+      isUntracked: false,
+    };
+    expect(entryPathExistsInCurrentTree(deletedInWorkingTree, 'working-tree')).toBe(false);
+
+    const deletedInPull: RepoChangeEntry = {
+      ...change('src/pr-deleted.ts'),
+      code: 'D',
+      stagedChar: 'D',
+      stagedType: 'deleted',
+      unstagedChar: '.',
+      unstagedType: null,
+      isUntracked: false,
+    };
+    expect(entryPathExistsInCurrentTree(deletedInPull, 'pull-preview')).toBe(false);
+    expect(entryPathExistsInCurrentTree(deletedInPull, 'pull-request')).toBe(false);
   });
 });

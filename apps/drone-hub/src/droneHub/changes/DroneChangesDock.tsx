@@ -1,6 +1,7 @@
 import React from 'react';
 import { requestJson } from '../http';
 import { IconChevron, IconFolder, iconForFilePath } from '../icons';
+import { IconPencil } from '../app/icons';
 import { provisioningLabel, usePaneReadiness } from '../panes/usePaneReadiness';
 import type {
   RepoChangeEntry,
@@ -35,12 +36,14 @@ import {
   buildExplorerTree,
   changesPrMergeMethod,
   defaultKindForEntry,
+  entryPathExistsInCurrentTree,
   estimateExplorerSidebarWidth,
   diffKey,
   effectiveKindForEntry,
   flattenVisibleExplorerRows,
   hasStaged,
   hasUnstaged,
+  nextDiffContextLines,
   normalizeRef,
   parentDirPaths,
   pullRequestNoTextReason,
@@ -109,6 +112,8 @@ export function DroneChangesDock({
   disabled,
   hubPhase,
   hubMessage,
+  onRevealFileInFiles,
+  onOpenFileInEditor,
 }: {
   droneId: string;
   repoAttached: boolean;
@@ -116,6 +121,8 @@ export function DroneChangesDock({
   disabled: boolean;
   hubPhase?: 'creating' | 'starting' | 'seeding' | 'error' | null;
   hubMessage?: string | null;
+  onRevealFileInFiles: (repoRelativePath: string) => void;
+  onOpenFileInEditor: (repoRelativePath: string) => void;
 }) {
   const [refreshNonce, setRefreshNonce] = React.useState(0);
   const [changes, setChanges] = React.useState<Extract<RepoChangesPayload, { ok: true }> | null>(null);
@@ -194,9 +201,13 @@ export function DroneChangesDock({
   );
 
   const [diffByKey, setDiffByKey] = React.useState<Record<string, DiffState>>({});
+  const [diffContextByKey, setDiffContextByKey] = React.useState<Record<string, number>>({});
   const diffByKeyRef = React.useRef<Record<string, DiffState>>({});
   const inflightRef = React.useRef<Set<string>>(new Set());
   const mountedRef = React.useRef(true);
+  const dockRootRef = React.useRef<HTMLDivElement | null>(null);
+  const [dockHovered, setDockHovered] = React.useState(false);
+  const [hoveredFilePath, setHoveredFilePath] = React.useState<string | null>(null);
   const explorerZoomPercent = Math.round(explorerZoom * 100);
   const explorerRowHeightPx = Math.max(28, Math.round(28 * explorerZoom));
   const explorerIconSizePx = Math.max(12, Math.round(12 * explorerZoom));
@@ -463,10 +474,18 @@ export function DroneChangesDock({
 
   React.useEffect(() => {
     setDiffByKey({});
+    setDiffContextByKey({});
     diffByKeyRef.current = {};
     inflightRef.current.clear();
     setExpandedPullFiles({});
+    setHoveredFilePath(null);
   }, [dataMode, entriesSignature, refreshNonce]);
+
+  React.useEffect(() => {
+    if (!hoveredFilePath) return;
+    if (entries.some((entry) => entry.path === hoveredFilePath)) return;
+    setHoveredFilePath(null);
+  }, [entries, hoveredFilePath]);
 
   const selectedEntry = React.useMemo(
     () => (selectedPath ? entries.find((e) => e.path === selectedPath) ?? null : null),
@@ -662,23 +681,38 @@ export function DroneChangesDock({
     };
   }, [restoreResizeBodyStyles]);
 
+  const workingDiffStateKey = React.useCallback((path: string, kind: DiffKind) => `wt\u0000${diffKey(path, kind)}`, []);
+  const pullPreviewDiffStateKey = React.useCallback(
+    (path: string, baseSha: string | null | undefined, headSha: string | null | undefined) =>
+      `pull\u0000${String(baseSha ?? '').trim().toLowerCase()}\u0000${String(headSha ?? '').trim().toLowerCase()}\u0000${path}`,
+    [],
+  );
+  const pullRequestDiffStateKey = React.useCallback(
+    (path: string, prNumber: number | null | undefined) => `pr\u0000${Math.max(1, Math.floor(Number(prNumber ?? 0)))}\u0000${path}`,
+    [],
+  );
+  const diffContextLinesForKey = React.useCallback((key: string) => {
+    const requested = diffContextByKey[key];
+    return Number.isFinite(requested) && requested >= 0 ? Math.floor(requested) : 3;
+  }, [diffContextByKey]);
+
   const loadDiff = React.useCallback(
-    async (path: string, kind: DiffKind, retryEmptyUntracked = false) => {
-      const key = `wt\u0000${diffKey(path, kind)}`;
+    async (path: string, kind: DiffKind, contextLines: number, retryEmptyUntracked = false, force = false) => {
+      const key = workingDiffStateKey(path, kind);
       if (inflightRef.current.has(key)) return;
       const cur = diffByKeyRef.current[key];
       if (cur?.status === 'loading') return;
       if (cur?.status === 'loaded') {
         const shouldRetryEmptyUntracked =
           retryEmptyUntracked && kind === 'unstaged' && cur.fromUntracked && !String(cur.text ?? '').trim();
-        if (!shouldRetryEmptyUntracked) return;
+        if (!force && cur.contextLines === contextLines && !shouldRetryEmptyUntracked) return;
       }
 
       inflightRef.current.add(key);
       setDiffByKey((prev) => ({ ...prev, [key]: { status: 'loading' } }));
       try {
         const data = await requestJson<Extract<RepoDiffPayload, { ok: true }>>(
-          `/api/drones/${encodeURIComponent(droneId)}/repo/diff?path=${encodeURIComponent(path)}&kind=${kind}`,
+          `/api/drones/${encodeURIComponent(droneId)}/repo/diff?path=${encodeURIComponent(path)}&kind=${kind}&contextLines=${contextLines}`,
         );
         if (!mountedRef.current) return;
         setDiffByKey((prev) => ({
@@ -690,6 +724,63 @@ export function DroneChangesDock({
             fromUntracked: Boolean(data.fromUntracked),
             isBinary: false,
             noTextReason: null,
+            contextLines,
+          },
+        }));
+      } catch (e: any) {
+        if (!mountedRef.current) return;
+        setDiffByKey((prev) => ({
+          ...prev,
+          [key]: { status: 'error', error: e?.message ?? String(e) },
+        }));
+      } finally {
+        inflightRef.current.delete(key);
+      }
+    },
+    [droneId, workingDiffStateKey],
+  );
+
+  const loadRangeDiff = React.useCallback(
+    async ({
+      filePath,
+      baseSha,
+      headSha,
+      stateKey,
+      contextLines,
+      force = false,
+    }: {
+      filePath: string;
+      baseSha: string | null | undefined;
+      headSha: string | null | undefined;
+      stateKey: string;
+      contextLines: number;
+      force?: boolean;
+    }) => {
+      const key = stateKey;
+      if (inflightRef.current.has(key)) return;
+      const cur = diffByKeyRef.current[key];
+      if (cur?.status === 'loading') return;
+      if (!force && cur?.status === 'loaded' && cur.contextLines === contextLines) return;
+
+      inflightRef.current.add(key);
+      setDiffByKey((prev) => ({ ...prev, [key]: { status: 'loading' } }));
+      try {
+        const data = await requestJson<Extract<RepoPullDiffPayload, { ok: true }>>(
+          `/api/drones/${encodeURIComponent(droneId)}/repo/pull/diff?path=${encodeURIComponent(filePath)}&base=${encodeURIComponent(
+            String(baseSha ?? '').trim().toLowerCase(),
+          )}&head=${encodeURIComponent(String(headSha ?? '').trim().toLowerCase())}&contextLines=${contextLines}`,
+        );
+        if (!mountedRef.current) return;
+        setDiffByKey((prev) => ({
+          ...prev,
+          [key]: {
+            status: 'loaded',
+            text: typeof data.diff === 'string' ? data.diff : '',
+            truncated: Boolean(data.truncated),
+            fromUntracked: false,
+            isBinary: false,
+            noTextReason: null,
+            contextLines,
           },
         }));
       } catch (e: any) {
@@ -703,48 +794,6 @@ export function DroneChangesDock({
       }
     },
     [droneId],
-  );
-
-  const loadPullDiff = React.useCallback(
-    async (filePath: string) => {
-      const baseSha = String(pullChanges?.baseSha ?? '').trim().toLowerCase();
-      const headSha = String(pullChanges?.headSha ?? '').trim().toLowerCase();
-      const key = `pull\u0000${baseSha}\u0000${headSha}\u0000${filePath}`;
-      if (inflightRef.current.has(key)) return;
-      const cur = diffByKeyRef.current[key];
-      if (cur && (cur.status === 'loading' || cur.status === 'loaded')) return;
-
-      inflightRef.current.add(key);
-      setDiffByKey((prev) => ({ ...prev, [key]: { status: 'loading' } }));
-      try {
-        const data = await requestJson<Extract<RepoPullDiffPayload, { ok: true }>>(
-          `/api/drones/${encodeURIComponent(droneId)}/repo/pull/diff?path=${encodeURIComponent(filePath)}&base=${encodeURIComponent(
-            baseSha,
-          )}&head=${encodeURIComponent(headSha)}`,
-        );
-        if (!mountedRef.current) return;
-        setDiffByKey((prev) => ({
-          ...prev,
-          [key]: {
-            status: 'loaded',
-            text: typeof data.diff === 'string' ? data.diff : '',
-            truncated: Boolean(data.truncated),
-            fromUntracked: false,
-            isBinary: false,
-            noTextReason: null,
-          },
-        }));
-      } catch (e: any) {
-        if (!mountedRef.current) return;
-        setDiffByKey((prev) => ({
-          ...prev,
-          [key]: { status: 'error', error: e?.message ?? String(e) },
-        }));
-      } finally {
-        inflightRef.current.delete(key);
-      }
-    },
-    [droneId, pullChanges?.baseSha, pullChanges?.headSha],
   );
 
   React.useEffect(() => {
@@ -765,6 +814,7 @@ export function DroneChangesDock({
           fromUntracked: false,
           isBinary: Boolean(entry.isBinary),
           noTextReason: pullRequestNoTextReason(entry),
+          contextLines: 3,
         };
         const cur = next[key];
         if (
@@ -790,8 +840,9 @@ export function DroneChangesDock({
     if (dataMode !== 'working-tree') return;
     if (!repoAttached || disabled) return;
     if (!selectedEntry || !splitShownKind) return;
-    void loadDiff(selectedEntry.path, splitShownKind, true);
-  }, [dataMode, disabled, loadDiff, repoAttached, selectedEntry, splitShownKind]);
+    const key = workingDiffStateKey(selectedEntry.path, splitShownKind);
+    void loadDiff(selectedEntry.path, splitShownKind, diffContextLinesForKey(key), true);
+  }, [dataMode, diffContextLinesForKey, disabled, loadDiff, repoAttached, selectedEntry, splitShownKind, workingDiffStateKey]);
 
   React.useEffect(() => {
     if (dataMode !== 'working-tree') return;
@@ -799,16 +850,24 @@ export function DroneChangesDock({
     for (const entry of entries) {
       const k = effectiveKindForEntry(entry, stackedPreferredKind);
       if (!k) continue;
-      void loadDiff(entry.path, k, true);
+      const key = workingDiffStateKey(entry.path, k);
+      void loadDiff(entry.path, k, diffContextLinesForKey(key), true);
     }
-  }, [dataMode, disabled, entries, loadDiff, repoAttached, stackedPreferredKind, viewMode]);
+  }, [dataMode, diffContextLinesForKey, disabled, entries, loadDiff, repoAttached, stackedPreferredKind, viewMode, workingDiffStateKey]);
 
   React.useEffect(() => {
     if (dataMode !== 'pull-preview') return;
     if (!repoAttached || disabled) return;
     if (!selectedEntry) return;
-    void loadPullDiff(selectedEntry.path);
-  }, [dataMode, disabled, loadPullDiff, repoAttached, selectedEntry]);
+    const key = pullPreviewDiffStateKey(selectedEntry.path, pullChanges?.baseSha, pullChanges?.headSha);
+    void loadRangeDiff({
+      filePath: selectedEntry.path,
+      baseSha: pullChanges?.baseSha,
+      headSha: pullChanges?.headSha,
+      stateKey: key,
+      contextLines: diffContextLinesForKey(key),
+    });
+  }, [dataMode, diffContextLinesForKey, disabled, loadRangeDiff, pullChanges?.baseSha, pullChanges?.headSha, pullPreviewDiffStateKey, repoAttached, selectedEntry]);
 
   const counts = changes?.counts;
   const pullBase = dataMode === 'pull-request' ? (pullRequestChanges?.pullRequest.baseSha ?? null) : (pullChanges?.baseSha ?? null);
@@ -916,6 +975,134 @@ export function DroneChangesDock({
     }
   }, [activePullRequestIsFinalState, activePullRequestNumber, droneId, pullRequestActionBusy]);
 
+  const openEntryInEditor = React.useCallback(
+    (entry: RepoChangeEntry | null) => {
+      if (!entry || !entryPathExistsInCurrentTree(entry, dataMode)) return;
+      onOpenFileInEditor(entry.path);
+    },
+    [dataMode, onOpenFileInEditor],
+  );
+
+  const revealEntryInFiles = React.useCallback(
+    (entry: RepoChangeEntry | null) => {
+      if (!entry) return;
+      onRevealFileInFiles(entry.path);
+    },
+    [onRevealFileInFiles],
+  );
+
+  const expandEntryDiffContext = React.useCallback(
+    (entry: RepoChangeEntry | null, kind?: DiffKind | null) => {
+      if (!entry) return;
+      if (dataMode === 'working-tree') {
+        const resolvedKind = kind ? effectiveKindForEntry(entry, kind) : effectiveKindForEntry(entry, stackedPreferredKind);
+        if (!resolvedKind) return;
+        const key = workingDiffStateKey(entry.path, resolvedKind);
+        const nextContextLines = nextDiffContextLines(diffContextLinesForKey(key));
+        if (!nextContextLines) return;
+        setDiffContextByKey((prev) => ({ ...prev, [key]: nextContextLines }));
+        void loadDiff(entry.path, resolvedKind, nextContextLines, true, true);
+        return;
+      }
+
+      const baseSha = dataMode === 'pull-request' ? pullRequestChanges?.pullRequest.baseSha : pullChanges?.baseSha;
+      const headSha = dataMode === 'pull-request' ? pullRequestChanges?.pullRequest.headSha : pullChanges?.headSha;
+      const stateKey =
+        dataMode === 'pull-request'
+          ? pullRequestDiffStateKey(entry.path, pullRequestChanges?.pullRequest.number ?? pullRequestNumber)
+          : pullPreviewDiffStateKey(entry.path, baseSha, headSha);
+      const nextContextLines = nextDiffContextLines(diffContextLinesForKey(stateKey));
+      if (!nextContextLines) return;
+      setDiffContextByKey((prev) => ({ ...prev, [stateKey]: nextContextLines }));
+      void loadRangeDiff({
+        filePath: entry.path,
+        baseSha,
+        headSha,
+        stateKey,
+        contextLines: nextContextLines,
+        force: true,
+      });
+    },
+    [
+      dataMode,
+      diffContextLinesForKey,
+      loadDiff,
+      loadRangeDiff,
+      pullChanges?.baseSha,
+      pullChanges?.headSha,
+      pullPreviewDiffStateKey,
+      pullRequestChanges?.pullRequest.baseSha,
+      pullRequestChanges?.pullRequest.headSha,
+      pullRequestChanges?.pullRequest.number,
+      pullRequestDiffStateKey,
+      pullRequestNumber,
+      stackedPreferredKind,
+      workingDiffStateKey,
+    ],
+  );
+
+  const hoveredEntry = React.useMemo(
+    () => (hoveredFilePath ? entries.find((entry) => entry.path === hoveredFilePath) ?? null : null),
+    [entries, hoveredFilePath],
+  );
+
+  React.useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.repeat) return;
+      if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+      const target = event.target;
+      if (target instanceof HTMLElement) {
+        const tag = target.tagName;
+        if (target.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      }
+      const targetEntry = hoveredEntry ?? (dockHovered ? selectedEntry : null);
+      if (!targetEntry) return;
+      const key = event.key.toLowerCase();
+      if (key === 'e') {
+        if (!entryPathExistsInCurrentTree(targetEntry, dataMode)) return;
+        openEntryInEditor(targetEntry);
+        event.preventDefault();
+        return;
+      }
+      if (key === 'g') {
+        revealEntryInFiles(targetEntry);
+        event.preventDefault();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [dataMode, dockHovered, hoveredEntry, openEntryInEditor, revealEntryInFiles, selectedEntry]);
+
+  function renderFileQuickActions(entry: RepoChangeEntry, alwaysVisible: boolean = false): React.ReactNode {
+    const canOpenInEditor = entryPathExistsInCurrentTree(entry, dataMode);
+    const buttonClassName = `inline-flex items-center justify-center w-6 h-6 rounded border transition-all ${
+      alwaysVisible
+        ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
+        : 'opacity-0 pointer-events-none group-hover/file:opacity-100 group-hover/file:pointer-events-auto border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
+    }`;
+    return (
+      <div className="shrink-0 inline-flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => revealEntryInFiles(entry)}
+          className={buttonClassName}
+          title="Reveal in Files tab (G)"
+        >
+          <IconFolder size={12} />
+        </button>
+        <button
+          type="button"
+          onClick={() => openEntryInEditor(entry)}
+          disabled={!canOpenInEditor}
+          className={`${buttonClassName} disabled:opacity-35 disabled:cursor-not-allowed`}
+          title={canOpenInEditor ? 'Open in editor (E)' : 'This path no longer exists in the current tree.'}
+        >
+          <IconPencil className="w-3 h-3" />
+        </button>
+      </div>
+    );
+  }
+
   function renderExplorer(nodes: ExplorerNode[], depth: number): React.ReactNode {
     return nodes.map((node) => {
       const indentPx = explorerIndentBasePx + depth * explorerIndentStepPx;
@@ -973,14 +1160,23 @@ export function DroneChangesDock({
       const active = entry.path === selectedPath;
       const FileIcon = iconForFilePath(entry.path);
       return (
-        <div key={`file:${entry.path}`} className="w-full" style={{ paddingLeft: `${indentPx}px` }}>
+        <div
+          key={`file:${entry.path}`}
+          className="w-full group/file"
+          style={{ paddingLeft: `${indentPx}px` }}
+          onMouseEnter={() => setHoveredFilePath(entry.path)}
+          onMouseLeave={() => {
+            setHoveredFilePath((prev) => (prev === entry.path ? null : prev));
+          }}
+        >
+          <div className="flex items-center gap-1">
           <button
             type="button"
             onClick={() => {
               setSelectedPath(entry.path);
               if (dataMode === 'working-tree') setSplitKind(defaultKindForEntry(entry));
             }}
-            className={`w-full text-left px-1 rounded border transition-colors flex items-center gap-0.5 ${
+            className={`flex-1 min-w-0 text-left px-1 rounded border transition-colors flex items-center gap-0.5 ${
               active
                 ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)]'
                 : 'border-transparent hover:bg-[var(--hover)]'
@@ -1013,6 +1209,8 @@ export function DroneChangesDock({
               {statusCharLabel(entry.unstagedChar)}
             </span>
           </button>
+            {renderFileQuickActions(entry, active || hoveredFilePath === entry.path)}
+          </div>
         </div>
       );
     });
@@ -1021,7 +1219,15 @@ export function DroneChangesDock({
   const statusLegendTitle = "Status badge uses S/U (staged/unstaged). '-' means no change and '?' means untracked.";
 
   return (
-    <div className="w-full h-full min-h-0 bg-[var(--panel-alt)] overflow-hidden flex flex-col relative dh-changes-dock">
+    <div
+      ref={dockRootRef}
+      className="w-full h-full min-h-0 bg-[var(--panel-alt)] overflow-hidden flex flex-col relative dh-changes-dock"
+      onMouseEnter={() => setDockHovered(true)}
+      onMouseLeave={() => {
+        setDockHovered(false);
+        setHoveredFilePath(null);
+      }}
+    >
       <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] flex items-center justify-between gap-2">
         <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.12em] uppercase" style={{ fontFamily: 'var(--display)' }}>
           Changes
@@ -1370,10 +1576,18 @@ export function DroneChangesDock({
                 {entries.map((entry) => {
                   const k = effectiveKindForEntry(entry, stackedPreferredKind);
                   if (!k) return null;
-                  const state = diffByKey[`wt\u0000${diffKey(entry.path, k)}`];
+                  const key = workingDiffStateKey(entry.path, k);
+                  const state = diffByKey[key];
                   const fallback = k !== stackedPreferredKind;
                   return (
-                    <section key={`stacked:${entry.path}`} className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] overflow-hidden">
+                    <section
+                      key={`stacked:${entry.path}`}
+                      className="group/file rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] overflow-hidden"
+                      onMouseEnter={() => setHoveredFilePath(entry.path)}
+                      onMouseLeave={() => {
+                        setHoveredFilePath((prev) => (prev === entry.path ? null : prev));
+                      }}
+                    >
                       <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/70 flex items-center gap-2">
                         <span
                           className={`inline-flex items-center justify-center min-w-[32px] h-5 rounded border text-[10px] font-mono ${badgeTone(entry)}`}
@@ -1385,11 +1599,18 @@ export function DroneChangesDock({
                         <span className="text-[11px] text-[var(--fg-secondary)] font-mono truncate flex-1" title={entry.path}>
                           {entry.path}
                         </span>
+                        {renderFileQuickActions(entry)}
                         <span className="text-[9px] uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
                           {k}{fallback ? ' (fallback)' : ''}
                         </span>
                       </div>
-                      <DiffBlock state={state} filePath={entry.path} viewType={diffViewType} />
+                      <DiffBlock
+                        state={state}
+                        filePath={entry.path}
+                        viewType={diffViewType}
+                        onExpandContext={() => expandEntryDiffContext(entry, k)}
+                        expandContextDisabled={state?.status === 'loading' || nextDiffContextLines(diffContextLinesForKey(key)) === null}
+                      />
                     </section>
                   );
                 })}
@@ -1401,15 +1622,18 @@ export function DroneChangesDock({
                 const open = expandedPullFiles[entry.path] === true;
                 const key =
                   dataMode === 'pull-request'
-                    ? `pr\u0000${Math.max(1, Math.floor(Number(pullRequestChanges?.pullRequest.number ?? pullRequestNumber ?? 0)))}\u0000${entry.path}`
-                    : `pull\u0000${String(pullChanges?.baseSha ?? '').trim().toLowerCase()}\u0000${String(
-                        pullChanges?.headSha ?? '',
-                      )
-                        .trim()
-                        .toLowerCase()}\u0000${entry.path}`;
+                    ? pullRequestDiffStateKey(entry.path, pullRequestChanges?.pullRequest.number ?? pullRequestNumber)
+                    : pullPreviewDiffStateKey(entry.path, pullChanges?.baseSha, pullChanges?.headSha);
                 const state = diffByKey[key];
                 return (
-                  <section key={`${dataMode === 'pull-request' ? 'pr' : 'apply'}:${entry.path}`} className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] overflow-hidden">
+                  <section
+                    key={`${dataMode === 'pull-request' ? 'pr' : 'apply'}:${entry.path}`}
+                    className="group/file rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] overflow-hidden"
+                    onMouseEnter={() => setHoveredFilePath(entry.path)}
+                    onMouseLeave={() => {
+                      setHoveredFilePath((prev) => (prev === entry.path ? null : prev));
+                    }}
+                  >
                     <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/70 flex items-center gap-2">
                       <span
                         className={`inline-flex items-center justify-center min-w-[32px] h-5 rounded border text-[10px] font-mono ${badgeTone(entry)}`}
@@ -1421,6 +1645,7 @@ export function DroneChangesDock({
                       <span className="text-[11px] text-[var(--fg-secondary)] font-mono truncate flex-1" title={entry.path}>
                         {entry.path}
                       </span>
+                      {renderFileQuickActions(entry)}
                       <button
                         type="button"
                         onClick={() => {
@@ -1428,7 +1653,15 @@ export function DroneChangesDock({
                             const next = { ...prev, [entry.path]: !open };
                             return next;
                           });
-                          if (!open && dataMode === 'pull-preview') void loadPullDiff(entry.path);
+                          if (!open && dataMode === 'pull-preview') {
+                            void loadRangeDiff({
+                              filePath: entry.path,
+                              baseSha: pullChanges?.baseSha,
+                              headSha: pullChanges?.headSha,
+                              stateKey: key,
+                              contextLines: diffContextLinesForKey(key),
+                            });
+                          }
                         }}
                         className="h-6 px-2 rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[9px] font-semibold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
                         title={open ? 'Hide diff' : 'Show diff'}
@@ -1436,7 +1669,15 @@ export function DroneChangesDock({
                         {open ? 'Hide' : 'Show'}
                       </button>
                     </div>
-                    {open ? <DiffBlock state={state} filePath={entry.path} viewType={diffViewType} /> : null}
+                    {open ? (
+                      <DiffBlock
+                        state={state}
+                        filePath={entry.path}
+                        viewType={diffViewType}
+                        onExpandContext={() => expandEntryDiffContext(entry)}
+                        expandContextDisabled={state?.status === 'loading' || nextDiffContextLines(diffContextLinesForKey(key)) === null}
+                      />
+                    ) : null}
                   </section>
                 );
               })}
@@ -1450,44 +1691,47 @@ export function DroneChangesDock({
               <div className="min-w-0 text-[10px] text-[var(--muted)] font-mono truncate">
                 {selectedEntry ? selectedEntry.path : 'No file selected'}
               </div>
-              {dataMode === 'working-tree' ? (
-                <div className="inline-flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => setSplitKind('unstaged')}
-                    disabled={!hasUnstaged(selectedEntry)}
-                    className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
-                      splitShownKind === 'unstaged'
-                        ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                        : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:opacity-40 disabled:cursor-not-allowed'
-                    }`}
-                    style={{ fontFamily: 'var(--display)' }}
-                    title="Unstaged diff"
-                  >
-                    Unstaged
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSplitKind('staged')}
-                    disabled={!hasStaged(selectedEntry)}
-                    className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
-                      splitShownKind === 'staged'
-                        ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                        : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:opacity-40 disabled:cursor-not-allowed'
-                    }`}
-                    style={{ fontFamily: 'var(--display)' }}
-                    title="Staged diff"
-                  >
-                    Staged
-                  </button>
-                </div>
-              ) : (
-                <div className="text-[9px] text-[var(--muted-dim)] font-mono whitespace-nowrap">
-                  {dataMode === 'pull-request'
-                    ? `PR #${pullRequestChanges?.pullRequest.number ?? pullRequestNumber ?? '-'} ${shortSha(pullBase)}..${shortSha(pullHead)}`
-                    : `${shortSha(pullBase)}..${shortSha(pullHead)}`}
-                </div>
-              )}
+              <div className="inline-flex items-center gap-1">
+                {selectedEntry ? renderFileQuickActions(selectedEntry, true) : null}
+                {dataMode === 'working-tree' ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setSplitKind('unstaged')}
+                      disabled={!hasUnstaged(selectedEntry)}
+                      className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
+                        splitShownKind === 'unstaged'
+                          ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                          : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:opacity-40 disabled:cursor-not-allowed'
+                      }`}
+                      style={{ fontFamily: 'var(--display)' }}
+                      title="Unstaged diff"
+                    >
+                      Unstaged
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSplitKind('staged')}
+                      disabled={!hasStaged(selectedEntry)}
+                      className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
+                        splitShownKind === 'staged'
+                          ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                          : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:opacity-40 disabled:cursor-not-allowed'
+                      }`}
+                      style={{ fontFamily: 'var(--display)' }}
+                      title="Staged diff"
+                    >
+                      Staged
+                    </button>
+                  </>
+                ) : (
+                  <div className="text-[9px] text-[var(--muted-dim)] font-mono whitespace-nowrap">
+                    {dataMode === 'pull-request'
+                      ? `PR #${pullRequestChanges?.pullRequest.number ?? pullRequestNumber ?? '-'} ${shortSha(pullBase)}..${shortSha(pullHead)}`
+                      : `${shortSha(pullBase)}..${shortSha(pullHead)}`}
+                  </div>
+                )}
+              </div>
             </div>
 
             {dataMode === 'working-tree' ? (
@@ -1495,9 +1739,14 @@ export function DroneChangesDock({
                 <div className="px-3 py-3 text-[11px] text-[var(--muted)]">Select a changed file to inspect its diff.</div>
               ) : (
                 <DiffBlock
-                  state={diffByKey[`wt\u0000${diffKey(selectedEntry.path, splitShownKind)}`]}
+                  state={diffByKey[workingDiffStateKey(selectedEntry.path, splitShownKind)]}
                   filePath={selectedEntry.path}
                   viewType={diffViewType}
+                  onExpandContext={() => expandEntryDiffContext(selectedEntry, splitShownKind)}
+                  expandContextDisabled={
+                    diffByKey[workingDiffStateKey(selectedEntry.path, splitShownKind)]?.status === 'loading' ||
+                    nextDiffContextLines(diffContextLinesForKey(workingDiffStateKey(selectedEntry.path, splitShownKind))) === null
+                  }
                 />
               )
             ) : !selectedEntry ? (
@@ -1506,17 +1755,21 @@ export function DroneChangesDock({
               <DiffBlock
                 state={
                   dataMode === 'pull-request'
-                    ? diffByKey[
-                        `pr\u0000${Math.max(1, Math.floor(Number(pullRequestChanges?.pullRequest.number ?? pullRequestNumber ?? 0)))}\u0000${selectedEntry.path}`
-                      ]
-                    : diffByKey[
-                        `pull\u0000${String(pullChanges?.baseSha ?? '').trim().toLowerCase()}\u0000${String(pullChanges?.headSha ?? '')
-                          .trim()
-                          .toLowerCase()}\u0000${selectedEntry.path}`
-                      ]
+                    ? diffByKey[pullRequestDiffStateKey(selectedEntry.path, pullRequestChanges?.pullRequest.number ?? pullRequestNumber)]
+                    : diffByKey[pullPreviewDiffStateKey(selectedEntry.path, pullChanges?.baseSha, pullChanges?.headSha)]
                 }
                 filePath={selectedEntry.path}
                 viewType={diffViewType}
+                onExpandContext={() => expandEntryDiffContext(selectedEntry)}
+                expandContextDisabled={
+                  (() => {
+                    const key =
+                      dataMode === 'pull-request'
+                        ? pullRequestDiffStateKey(selectedEntry.path, pullRequestChanges?.pullRequest.number ?? pullRequestNumber)
+                        : pullPreviewDiffStateKey(selectedEntry.path, pullChanges?.baseSha, pullChanges?.headSha);
+                    return diffByKey[key]?.status === 'loading' || nextDiffContextLines(diffContextLinesForKey(key)) === null;
+                  })()
+                }
               />
             )}
           </div>

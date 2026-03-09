@@ -51,10 +51,14 @@ export function DiffBlock({
   state,
   filePath,
   viewType = 'unified',
+  onExpandContext,
+  expandContextDisabled = false,
 }: {
   state: DiffState | undefined;
   filePath?: string | null;
   viewType?: DiffViewType;
+  onExpandContext?: (() => void) | null;
+  expandContextDisabled?: boolean;
 }) {
   if (!state || state.status === 'loading') {
     return <div className="px-3 py-3 text-[11px] text-[var(--muted)]">Loading diff...</div>;
@@ -106,6 +110,10 @@ export function DiffBlock({
     [parsed, filePath],
   );
   const hasRenderableHunks = parsed.some((file) => Array.isArray(file.hunks) && file.hunks.length > 0);
+  const canExpandContext =
+    Boolean(onExpandContext) &&
+    !state.truncated &&
+    parsed.some((file) => Array.isArray(file.hunks) && file.hunks.length > 0);
 
   if (parsed.length === 0 || !hasRenderableHunks) {
     return <pre className="m-0 p-3 text-[11px] leading-5 text-[var(--fg-secondary)] whitespace-pre-wrap break-words">{rawText}</pre>;
@@ -113,6 +121,19 @@ export function DiffBlock({
 
   return (
     <div className="rdv-wrapper px-2 py-2">
+      {canExpandContext ? (
+        <div className="mb-2 px-1 flex items-center justify-end">
+          <button
+            type="button"
+            onClick={() => onExpandContext?.()}
+            disabled={expandContextDisabled}
+            className="h-6 px-2 rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[9px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Show more unchanged lines around this diff"
+          >
+            {expandContextDisabled ? 'Loading...' : 'More context'}
+          </button>
+        </div>
+      ) : null}
       {parsed.map((file, fileIndex) => (
         <Diff
           key={`${file.oldPath}-${file.newPath}-${fileIndex}`}
