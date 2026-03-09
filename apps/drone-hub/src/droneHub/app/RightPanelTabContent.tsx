@@ -109,6 +109,8 @@ type RightPanelTabContentProps = {
   portRows: DronePortMapping[];
   onOpenFileInEditor: (entry: DroneFsEntry) => void;
   onOpenPullRequestInChanges: (paneKey: 'top' | 'bottom' | 'single', pullRequest: RepoPullRequestSummary) => void;
+  onRevealChangesFileInFiles: (paneKey: 'top' | 'bottom' | 'single', repoRelativePath: string) => void;
+  onOpenChangesFileInEditor: (repoRelativePath: string) => void;
 };
 
 export function RightPanelTabContent({
@@ -167,6 +169,8 @@ export function RightPanelTabContent({
   portRows,
   onOpenFileInEditor,
   onOpenPullRequestInChanges,
+  onRevealChangesFileInFiles,
+  onOpenChangesFileInEditor,
 }: RightPanelTabContentProps) {
   const disabled = isDroneStartingOrSeeding(drone.hubPhase);
   const repoFeaturesEnabled = Boolean(drone.repoAttached ?? Boolean(String(drone.repoPath ?? '').trim()));
@@ -301,6 +305,8 @@ export function RightPanelTabContent({
           disabled={disabled}
           hubPhase={drone.hubPhase}
           hubMessage={drone.hubMessage}
+          onRevealFileInFiles={(repoRelativePath) => onRevealChangesFileInFiles(paneKey, repoRelativePath)}
+          onOpenFileInEditor={onOpenChangesFileInEditor}
         />
       );
 

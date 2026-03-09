@@ -1559,6 +1559,7 @@ export function SelectedDroneWorkspace({
                           onOpenLink={tryOpenMarkdownPullRequestInChanges}
                           droneId={currentDrone.id}
                           droneHomePath={droneHomePath(currentDrone)}
+                          showRoleIcons={false}
                         />
                       );
                     })}
@@ -1570,6 +1571,7 @@ export function SelectedDroneWorkspace({
                             key={item.key}
                             item={p}
                             nowMs={nowMs}
+                            showRoleIcons={false}
                             onCancelQueued={requestCancelPendingPrompt}
                             onRequestUnstick={requestUnstickPendingPrompt}
                             onOpenFileReference={onOpenMarkdownFileReference}

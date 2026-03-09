@@ -121,6 +121,27 @@ export function effectiveKindForEntry(entry: RepoChangeEntry | null, preferred: 
   return null;
 }
 
+export function nextDiffContextLines(current: number | null | undefined): number | null {
+  const hasCurrent = typeof current === 'number' && Number.isFinite(current);
+  const normalized = hasCurrent ? Math.max(0, Math.floor(current)) : 3;
+  const steps = [3, 20, 80, 2000];
+  for (const step of steps) {
+    if (step > normalized) return step;
+  }
+  return null;
+}
+
+export function entryPathExistsInCurrentTree(entry: RepoChangeEntry | null, mode: ChangesDataMode): boolean {
+  if (!entry) return false;
+  if (mode !== 'working-tree') {
+    return entry.stagedType !== 'deleted';
+  }
+  if (entry.isUntracked) return true;
+  if (entry.unstagedType === 'deleted') return false;
+  if (entry.unstagedType !== null) return true;
+  return entry.stagedType !== 'deleted';
+}
+
 export function statusCharLabel(ch: string): string {
   if (!ch || ch === '.') return '-';
   return ch;
@@ -308,14 +329,14 @@ export function estimateExplorerSidebarWidth(
   const desiredWidth = Math.max(
     fallbackWidthPx,
     rows.reduce((max, row) => {
-      const leftPadding = 8 + row.depth * 14;
+      const leftPadding = 6 + row.depth * 9;
       const textWidth = Math.ceil(row.name.length * avgCharWidthPx);
       const dirCountWidth = Math.max(10, String(Math.max(0, row.count)).length * 6);
       // Account for icon/gaps and right-side metadata chip/counter.
       const staticWidth =
         row.kind === 'dir'
-          ? 12 + 6 + 12 + 6 + 6 + 8 + dirCountWidth
-          : 12 + 6 + 6 + 8 + 34;
+          ? 12 + 2 + 2 + 4 + dirCountWidth
+          : 12 + 2 + 2 + 4 + 22;
       return Math.max(max, leftPadding + staticWidth + textWidth);
     }, 0),
   );

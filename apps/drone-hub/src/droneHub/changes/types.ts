@@ -4,4 +4,12 @@ export type DiffViewType = 'unified' | 'split';
 export type DiffState =
   | { status: 'loading' }
   | { status: 'error'; error: string }
-  | { status: 'loaded'; text: string; truncated: boolean; fromUntracked: boolean; isBinary: boolean; noTextReason: DiffNoTextReason | null };
+  | {
+      status: 'loaded';
+      text: string;
+      truncated: boolean;
+      fromUntracked: boolean;
+      isBinary: boolean;
+      noTextReason: DiffNoTextReason | null;
+      contextLines: number;
+    };

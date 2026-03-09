@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { droneRootPath } from './paths';
+import { droneRootPath, legacyDroneRootDirs } from './paths';
 import { normalizeDroneRuntime, type DroneRuntime } from './runtime';
 
 type DroneRegistryV1 = {
@@ -299,6 +299,18 @@ function legacyRegistryPath(): string {
   return path.join(home, '.drone', 'registry.json');
 }
 
+function legacyRegistryPaths(): string[] {
+  const explicit = legacyRegistryPath();
+  const current = path.resolve(registryPath());
+  const candidates = [
+    ...legacyDroneRootDirs().map((dir) => path.join(dir, 'registry.json')),
+    explicit,
+  ]
+    .map((p) => path.resolve(p))
+    .filter((p) => p !== current);
+  return Array.from(new Set(candidates));
+}
+
 function registryLockPath(): string {
   // Simple cross-process lockfile next to the registry.
   // NOTE: This is a dev tool; a lockfile is sufficient and avoids native deps.
@@ -563,43 +575,41 @@ async function archiveLegacyRegistryBestEffort(legacyPath: string): Promise<void
 
 async function consolidateRegistryPaths(): Promise<DroneRegistry | null> {
   const preferredPath = registryPath();
-  const legacyPath = legacyRegistryPath();
-
   const preferred = await readRegistryFromPath(preferredPath);
-  if (preferredPath === legacyPath) return preferred;
+  for (const legacyPath of legacyRegistryPaths()) {
+    const legacy = await readRegistryFromPath(legacyPath);
+    if (!legacy) continue;
 
-  const legacy = await readRegistryFromPath(legacyPath);
-  if (!legacy) return preferred;
-
-  if (!preferred) {
-    try {
-      await saveRegistryAtPath(preferredPath, legacy);
-      await removePathBestEffort(legacyPath);
-    } catch {
-      // If migration fails, keep reading the legacy registry so state is still available.
-    }
-    return legacy;
-  }
-
-  if (!hasMeaningfulRegistryData(preferred) && hasMeaningfulRegistryData(legacy)) {
-    try {
-      await saveRegistryAtPath(preferredPath, legacy);
-      await removePathBestEffort(legacyPath);
-      return legacy;
-    } catch {
+    if (!preferred) {
+      try {
+        await saveRegistryAtPath(preferredPath, legacy);
+        await removePathBestEffort(legacyPath);
+      } catch {
+        // If migration fails, keep reading the legacy registry so state is still available.
+      }
       return legacy;
     }
-  }
 
-  if (registriesEqual(preferred, legacy)) {
-    await removePathBestEffort(legacyPath);
-    return preferred;
-  }
+    if (!hasMeaningfulRegistryData(preferred) && hasMeaningfulRegistryData(legacy)) {
+      try {
+        await saveRegistryAtPath(preferredPath, legacy);
+        await removePathBestEffort(legacyPath);
+        return legacy;
+      } catch {
+        return legacy;
+      }
+    }
 
-  if (hasMeaningfulRegistryData(legacy)) {
-    await archiveLegacyRegistryBestEffort(legacyPath);
-  } else {
-    await removePathBestEffort(legacyPath);
+    if (registriesEqual(preferred, legacy)) {
+      await removePathBestEffort(legacyPath);
+      continue;
+    }
+
+    if (hasMeaningfulRegistryData(legacy)) {
+      await archiveLegacyRegistryBestEffort(legacyPath);
+    } else {
+      await removePathBestEffort(legacyPath);
+    }
   }
 
   return preferred;
@@ -614,13 +624,12 @@ export async function loadRegistry(): Promise<DroneRegistry> {
 
 export async function saveRegistry(reg: DroneRegistry): Promise<void> {
   await saveRegistryAtPath(registryPath(), reg);
-  const legacyPath = legacyRegistryPath();
-  if (legacyPath !== registryPath()) {
+  for (const legacyPath of legacyRegistryPaths()) {
     const legacy = await readRegistryFromPath(legacyPath);
-    if (!legacy) return;
+    if (!legacy) continue;
     if (registriesEqual(reg, legacy) || !hasMeaningfulRegistryData(legacy)) {
       await removePathBestEffort(legacyPath);
-      return;
+      continue;
     }
     await archiveLegacyRegistryBestEffort(legacyPath);
   }

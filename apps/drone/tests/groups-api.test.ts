@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { startDroneHubApiServer } from '../src/hub/server';
+import { resetDroneRootDirForTests } from '../src/host/paths';
 import { updateRegistry } from '../src/host/registry';
 import { getSocketListenSupport } from './socket-listen-support';
 
@@ -24,6 +25,8 @@ describeSocketSuite('groups api (decoupled from drone count)', () => {
   let server: Awaited<ReturnType<typeof startDroneHubApiServer>> | null = null;
   let baseUrl = '';
   const prevXdg = process.env.XDG_DATA_HOME;
+  const prevDroneDataDir = process.env.DRONE_DATA_DIR;
+  const droneDataDir = path.join(tempRoot, 'data', 'drone');
 
   const apiFetch = async (p: string, init?: RequestInit) => {
     const r = await fetch(`${baseUrl}${p}`, {
@@ -45,7 +48,10 @@ describeSocketSuite('groups api (decoupled from drone count)', () => {
 
   beforeAll(async () => {
     fs.mkdirSync(path.join(xdgDataHome, 'drone'), { recursive: true });
+    fs.mkdirSync(droneDataDir, { recursive: true });
     process.env.XDG_DATA_HOME = xdgDataHome;
+    process.env.DRONE_DATA_DIR = droneDataDir;
+    resetDroneRootDirForTests();
     server = await startDroneHubApiServer({ port: 0, apiToken: token });
     baseUrl = `http://${server.host}:${server.port}`;
   });
@@ -54,6 +60,9 @@ describeSocketSuite('groups api (decoupled from drone count)', () => {
     if (server) await server.close();
     if (prevXdg == null) delete process.env.XDG_DATA_HOME;
     else process.env.XDG_DATA_HOME = prevXdg;
+    if (prevDroneDataDir == null) delete process.env.DRONE_DATA_DIR;
+    else process.env.DRONE_DATA_DIR = prevDroneDataDir;
+    resetDroneRootDirForTests();
     fs.rmSync(tempRoot, { recursive: true, force: true });
   });
 

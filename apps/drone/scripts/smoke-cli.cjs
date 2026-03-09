@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
@@ -35,16 +34,11 @@ function run(cmd, args, opts = {}) {
   return { stdout, stderr };
 }
 
-function expectedPreferredRoot() {
-  if (process.platform === 'win32') {
-    const appData = String(process.env.APPDATA || '').trim() || path.join(os.homedir(), 'AppData', 'Roaming');
-    return path.join(appData, 'drone');
-  }
-  if (process.platform === 'darwin') {
-    return path.join(os.homedir(), 'Library', 'Application Support', 'drone');
-  }
-  const xdg = String(process.env.XDG_DATA_HOME || '').trim();
-  return path.join(xdg || path.join(os.homedir(), '.local', 'share'), 'drone');
+function expectedPreferredRoot(appRoot) {
+  const explicit = String(process.env.DRONE_DATA_DIR || '').trim();
+  if (explicit) return path.resolve(explicit);
+  const repoRoot = path.resolve(appRoot, '..', '..');
+  return path.join(repoRoot, 'data', 'drone');
 }
 
 function main() {
@@ -73,7 +67,7 @@ function main() {
   const registry = require(registryModPath);
 
   const droneRoot = dronePaths.droneRootDir();
-  const preferred = expectedPreferredRoot();
+  const preferred = expectedPreferredRoot(appRoot);
   assert(path.isAbsolute(droneRoot), `droneRootDir() should be absolute, got: ${droneRoot}`);
   assert(droneRoot === preferred, `unexpected droneRootDir(): ${droneRoot}`);
   assert(dronePaths.droneRootPath('registry.json').startsWith(droneRoot), 'droneRootPath() should be rooted in droneRootDir()');

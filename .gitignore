@@ -143,6 +143,7 @@ coverage
 # Temporary folders
 tmp/
 temp/
+data/
 
 .turbo/
 artifacts/

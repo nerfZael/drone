@@ -61,6 +61,7 @@ import {
   droneHomePath,
   isDroneStartingOrSeeding,
   makeId,
+  normalizeContainerPathInput,
   resolveChatNameForDrone,
 } from './droneHub/app/helpers';
 import { droneNameHasWhitespace } from './droneHub/app/name-helpers';
@@ -1399,6 +1400,37 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [currentDrone, openEditorFile],
   );
+  const resolveCurrentDroneRepoFilePath = React.useCallback(
+    (repoRelativePathRaw: string): string | null => {
+      const relativePath = String(repoRelativePathRaw ?? '').trim().replace(/\\/g, '/').replace(/^\/+/, '');
+      if (!relativePath) return null;
+      const basePath = String(defaultFsPathForCurrentDrone ?? '').trim() || droneHomePath(currentDrone);
+      return normalizeContainerPathInput(`${basePath.replace(/\/+$/g, '')}/${relativePath}`);
+    },
+    [currentDrone, defaultFsPathForCurrentDrone],
+  );
+  const openChangesFileInEditor = React.useCallback(
+    (repoRelativePath: string) => {
+      const containerPath = resolveCurrentDroneRepoFilePath(repoRelativePath);
+      if (!containerPath) return;
+      const name = containerPath.split('/').filter(Boolean).pop() || containerPath;
+      openEditorFile({ path: containerPath, name });
+    },
+    [openEditorFile, resolveCurrentDroneRepoFilePath],
+  );
+  const revealChangesFileInFiles = React.useCallback(
+    (pane: 'top' | 'bottom' | 'single', repoRelativePath: string) => {
+      const containerPath = resolveCurrentDroneRepoFilePath(repoRelativePath);
+      if (!containerPath) return;
+      const slash = containerPath.lastIndexOf('/');
+      const parentPath = slash > 0 ? containerPath.slice(0, slash) : '/';
+      setCurrentFsPath(parentPath);
+      setRightPanelOpen(true);
+      if (pane === 'bottom') setRightPanelBottomTab('files');
+      else setRightPanelTab('files');
+    },
+    [resolveCurrentDroneRepoFilePath, setCurrentFsPath, setRightPanelBottomTab, setRightPanelOpen, setRightPanelTab],
+  );
   const onActivateChatFromCanvas = React.useCallback(
     (droneIdRaw: string, chatNameRaw: string) => {
       const droneId = String(droneIdRaw ?? '').trim();
@@ -1746,6 +1778,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           if (entry.kind !== 'file') return;
           openEditorFile({ path: entry.path, name: entry.name });
         }}
+        onRevealChangesFileInFiles={revealChangesFileInFiles}
+        onOpenChangesFileInEditor={openChangesFileInEditor}
         onOpenPullRequestInChanges={(pane, _pullRequest) => {
           setRightPanelOpen(true);
           if (pane === 'bottom') setRightPanelBottomTab('changes');
@@ -1779,6 +1813,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       portsErrorUi,
       portsLoading,
       portsPane,
+      revealChangesFileInFiles,
       refreshFsList,
       sendCanvasPrompt,
       createRepoMenuEntries,
@@ -1807,6 +1842,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setRightPanelTab,
       setSelectedPreviewUrlOverride,
       uiDroneName,
+      openChangesFileInEditor,
       openEditorFile,
     ],
   );
