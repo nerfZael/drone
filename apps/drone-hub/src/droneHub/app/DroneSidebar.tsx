@@ -499,7 +499,8 @@ export function DroneSidebar({
               isOptimistic ||
               Boolean(deletingDrones[d.id]) ||
               Boolean(renamingDrones[d.id]) ||
-              Boolean(settingBaseImages[d.id])
+              Boolean(settingBaseImages[d.id]) ||
+              String(d.runtime ?? 'container').trim().toLowerCase() === 'host'
             }
             renameDisabled={
               isOptimistic ||

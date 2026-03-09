@@ -1,5 +1,6 @@
 import { dvmLs } from '../host/dvm';
 import { updateRegistry } from '../host/registry';
+import { normalizeDroneRuntime } from '../host/runtime';
 
 export type PrunedRegistryDrone = {
   id: string;
@@ -34,8 +35,8 @@ export async function pruneMissingRegistryDrones(
       if (!droneEntry || typeof droneEntry !== 'object') continue;
 
       // Future host-mode drones should not be pruned based on missing containers.
-      const runtimeMode = String((droneEntry as any)?.runtimeMode ?? '').trim().toLowerCase();
-      if (runtimeMode === 'host') continue;
+      const runtime = normalizeDroneRuntime((droneEntry as any)?.runtime);
+      if (runtime === 'host') continue;
 
       const containerName = String(droneEntry?.containerName ?? '').trim();
       if (!containerName || existingContainers.has(containerName)) continue;

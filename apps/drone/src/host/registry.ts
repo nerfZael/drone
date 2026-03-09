@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { droneRootPath, legacyDroneRootDirs } from './paths';
+import { normalizeDroneRuntime, type DroneRuntime } from './runtime';
 
 type DroneRegistryV1 = {
   version: 1;
@@ -78,6 +79,7 @@ type DroneRegistryV1 = {
       id?: string;
       name: string;
       group?: string;
+      runtime?: DroneRuntime;
       repoPath: string;
       containerPort: number;
       build: boolean;
@@ -127,6 +129,13 @@ type DroneRegistryV1 = {
        * - When absent (older registries), treat `name` (or the registry key) as the container name.
        */
       containerName?: string;
+      /**
+       * Runtime kind for this drone.
+       *
+       * - container: default behavior (managed by dvm/docker)
+       * - host: daemon runs directly on host
+       */
+      runtime?: DroneRuntime;
       /**
        * Optional group name for organizing drones in the Hub UI.
        * This is host-side metadata (stored in the host drone registry file).
@@ -402,6 +411,7 @@ function normalizeV2Registry(input: DroneRegistry): DroneRegistry {
   for (const [key, entryAny] of Object.entries(input.drones ?? {})) {
     const entry = entryAny as any;
     if (!entry || typeof entry !== 'object') continue;
+    entry.runtime = normalizeDroneRuntime(entry.runtime);
     const id = typeof entry.id === 'string' && entry.id.trim() ? entry.id.trim() : String(key);
     entry.id = id;
     const name = typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim() : 'Untitled';
@@ -418,6 +428,7 @@ function normalizeV2Registry(input: DroneRegistry): DroneRegistry {
   for (const [key, entryAny] of Object.entries(input.pending ?? {})) {
     const entry = entryAny as any;
     if (!entry || typeof entry !== 'object') continue;
+    entry.runtime = normalizeDroneRuntime(entry.runtime);
     const id = typeof entry.id === 'string' && entry.id.trim() ? entry.id.trim() : String(key);
     entry.id = id;
     const name = typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim() : 'Untitled';
@@ -434,6 +445,7 @@ function normalizeV2Registry(input: DroneRegistry): DroneRegistry {
   for (const [key, entryAny] of Object.entries(input.archived ?? {})) {
     const entry = entryAny as any;
     if (!entry || typeof entry !== 'object') continue;
+    entry.runtime = normalizeDroneRuntime(entry.runtime);
     const id = typeof entry.id === 'string' && entry.id.trim() ? entry.id.trim() : String(key);
     entry.id = id;
     const name = typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim() : 'Untitled';
@@ -481,7 +493,7 @@ function migrateV1ToV2(v1: DroneRegistryV1): DroneRegistry {
     const name = typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim() : String(legacyKey);
     const containerName =
       typeof entry.containerName === 'string' && entry.containerName.trim() ? entry.containerName.trim() : name;
-    out.drones[id] = { ...entry, id, name, containerName };
+    out.drones[id] = { ...entry, id, name, containerName, runtime: normalizeDroneRuntime(entry.runtime) };
   }
 
   for (const [legacyKey, entryAny] of Object.entries(v1.pending ?? {})) {
@@ -491,7 +503,7 @@ function migrateV1ToV2(v1: DroneRegistryV1): DroneRegistry {
     const name = typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim() : String(legacyKey);
     const containerName =
       typeof entry.containerName === 'string' && entry.containerName.trim() ? entry.containerName.trim() : name;
-    (out.pending as any)[id] = { ...entry, id, name, containerName };
+    (out.pending as any)[id] = { ...entry, id, name, containerName, runtime: normalizeDroneRuntime(entry.runtime) };
   }
 
   for (const [legacyKey, entryAny] of Object.entries(v1.archived ?? {})) {
@@ -501,7 +513,7 @@ function migrateV1ToV2(v1: DroneRegistryV1): DroneRegistry {
     const name = typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim() : String(legacyKey);
     const containerName =
       typeof entry.containerName === 'string' && entry.containerName.trim() ? entry.containerName.trim() : name;
-    (out.archived as any)[id] = { ...entry, id, name, containerName };
+    (out.archived as any)[id] = { ...entry, id, name, containerName, runtime: normalizeDroneRuntime(entry.runtime) };
   }
 
   return out;

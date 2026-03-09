@@ -10,6 +10,8 @@ type CreateDronesModalProps = {
   open: boolean;
   creating: boolean;
   createMode: 'create' | 'clone';
+  createRuntime: 'container' | 'host';
+  onCreateRuntimeChange: (value: 'container' | 'host') => void;
   cloneSourceId: string | null;
   createNameEntries: string[];
   drones: DroneSummary[];
@@ -56,6 +58,8 @@ export function CreateDronesModal({
   open,
   creating,
   createMode,
+  createRuntime,
+  onCreateRuntimeChange,
   cloneSourceId,
   createNameEntries,
   drones,
@@ -103,6 +107,25 @@ export function CreateDronesModal({
     createMode === 'clone' && cloneSourceId
       ? String(drones.find((d) => d.id === cloneSourceId)?.name ?? cloneSourceId)
       : '';
+  const hostRuntimeSelected = createMode !== 'clone' && createRuntime === 'host';
+  const hostCustomAgentsUnsupported = hostRuntimeSelected;
+  const filteredSpawnAgentMenuEntries = React.useMemo(() => {
+    const out: UiMenuSelectEntry[] = [];
+    let pendingSeparator = false;
+    for (const entry of spawnAgentMenuEntries) {
+      if (entry.kind === 'separator') {
+        pendingSeparator = out.length > 0;
+        continue;
+      }
+      if (hostCustomAgentsUnsupported && entry.value.startsWith('custom:')) continue;
+      if (pendingSeparator) {
+        out.push({ kind: 'separator' });
+        pendingSeparator = false;
+      }
+      out.push(entry);
+    }
+    return out;
+  }, [hostCustomAgentsUnsupported, spawnAgentMenuEntries]);
 
   return (
     <div
@@ -189,6 +212,48 @@ export function CreateDronesModal({
                 {createError}
               </div>
             )}
+
+            <div className="mb-4">
+              <div className="text-[10px] font-semibold text-[var(--muted-dim)] mb-1.5 tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+                Runtime
+              </div>
+              <div className="inline-flex items-center rounded border border-[var(--border-subtle)] bg-[var(--panel-raised)] p-0.5">
+                <button
+                  type="button"
+                  onClick={() => onCreateRuntimeChange('container')}
+                  disabled={creating}
+                  className={`h-8 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+                    createRuntime === 'container'
+                      ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
+                      : 'bg-transparent border-transparent text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)]'
+                  } ${creating ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  style={{ fontFamily: 'var(--display)' }}
+                >
+                  Container
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onCreateRuntimeChange('host')}
+                  disabled={creating || createMode === 'clone'}
+                  className={`h-8 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+                    createRuntime === 'host'
+                      ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
+                      : 'bg-transparent border-transparent text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)]'
+                  } ${creating || createMode === 'clone' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  style={{ fontFamily: 'var(--display)' }}
+                >
+                  Host
+                </button>
+              </div>
+              <span className="text-[10px] text-[var(--muted-dim)] block mt-1">
+                {createMode === 'clone'
+                  ? 'Clone currently uses container runtime only.'
+                  : createRuntime === 'host'
+                    ? 'Host drones run directly on the host machine.'
+                    : 'Container drones run inside managed containers.'}
+              </span>
+            </div>
+
             <div className="mb-4">
               <div className="text-[10px] font-semibold text-[var(--muted-dim)] mb-1.5 tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
                 Group for created drones
@@ -296,7 +361,7 @@ export function CreateDronesModal({
                   variant="form"
                   value={spawnAgentKey}
                   onValueChange={onSpawnAgentKeyChange}
-                  entries={spawnAgentMenuEntries}
+                  entries={filteredSpawnAgentMenuEntries}
                   disabled={creating || (createMode === 'clone' && cloneIncludeChats)}
                   triggerClassName="flex-1"
                   panelClassName="right-auto w-[460px] max-w-[calc(100vw-3rem)]"
@@ -306,14 +371,14 @@ export function CreateDronesModal({
                 <button
                   type="button"
                   onClick={onOpenCustomAgentModal}
-                  disabled={creating || (createMode === 'clone' && cloneIncludeChats)}
+                  disabled={creating || (createMode === 'clone' && cloneIncludeChats) || hostCustomAgentsUnsupported}
                   className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
-                    creating || (createMode === 'clone' && cloneIncludeChats)
+                    creating || (createMode === 'clone' && cloneIncludeChats) || hostCustomAgentsUnsupported
                       ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                       : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)] hover:border-[var(--border)]'
                   }`}
                   style={{ fontFamily: 'var(--display)' }}
-                  title="Manage saved custom agents"
+                  title={hostCustomAgentsUnsupported ? 'Custom agents are not yet supported for host runtime.' : 'Manage saved custom agents'}
                 >
                   Custom…
                 </button>
@@ -321,7 +386,9 @@ export function CreateDronesModal({
               <span className="text-[10px] text-[var(--muted-dim)] block mt-1">
                 {createMode === 'clone' && cloneIncludeChats
                   ? 'When cloning chats, agents are copied from the source chats.'
-                  : 'Used for the default chat. You can change per-chat later.'}
+                  : hostCustomAgentsUnsupported
+                    ? 'Host runtime currently supports builtin agents only.'
+                    : 'Used for the default chat. You can change per-chat later.'}
               </span>
             </div>
 

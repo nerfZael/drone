@@ -1,7 +1,7 @@
 import React from 'react';
 import type { DroneSummary, RepoSummary } from '../types';
 import type { RepoOpErrorMeta } from './helpers';
-import { droneHomePath } from './helpers';
+import { droneHomePath, isHostRuntimeDrone } from './helpers';
 
 type LaunchHint =
   | {
@@ -96,7 +96,8 @@ export function useWorkspaceActions({
         const qs = new URLSearchParams();
         qs.set('mode', mode);
         qs.set('chat', selectedChat || 'default');
-        qs.set('cwd', droneHomePath(currentDrone));
+        const cwd = droneHomePath(currentDrone);
+        if (cwd && !(isHostRuntimeDrone(currentDrone) && cwd === '/')) qs.set('cwd', cwd);
         if (terminalEmulator && terminalEmulator !== 'auto') qs.set('terminal', terminalEmulator);
         const url = `/api/drones/${encodeURIComponent(currentDrone.id)}/open-terminal?${qs.toString()}`;
         const r = await fetch(url, { method: 'POST' });
@@ -154,7 +155,8 @@ export function useWorkspaceActions({
       try {
         const qs = new URLSearchParams();
         qs.set('editor', editor);
-        qs.set('cwd', droneHomePath(currentDrone));
+        const cwd = droneHomePath(currentDrone);
+        if (cwd && !(isHostRuntimeDrone(currentDrone) && cwd === '/')) qs.set('cwd', cwd);
         const url = `/api/drones/${encodeURIComponent(currentDrone.id)}/open-editor?${qs.toString()}`;
         const r = await fetch(url, { method: 'POST' });
         const text = await r.text();
@@ -268,10 +270,12 @@ export function useWorkspaceActions({
     if (!currentDrone) return;
     const droneId = String(currentDrone.id ?? '').trim();
     if (!droneId) return;
-    const confirmed = window.confirm(
-      'Pull current host branch changes into this drone branch? A clean merge creates a merge commit in the drone repo.',
-    );
-    if (!confirmed) return;
+    if (!isHostRuntimeDrone(currentDrone)) {
+      const confirmed = window.confirm(
+        'Pull current host branch changes into this drone branch? A clean merge creates a merge commit in the drone repo.',
+      );
+      if (!confirmed) return;
+    }
     clearRepoOperationError();
     setRepoOp({ kind: 'push' });
     try {

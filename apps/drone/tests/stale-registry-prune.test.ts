@@ -90,7 +90,7 @@ describe('pruneMissingRegistryDrones', () => {
         reg.drones.host = {
           id: 'host',
           name: 'host',
-          runtimeMode: 'host',
+          runtime: 'host',
           containerName: 'host-drone',
           containerPort: 7777,
           token: 'token-host',

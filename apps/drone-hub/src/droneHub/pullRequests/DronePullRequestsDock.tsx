@@ -165,6 +165,7 @@ export function DronePullRequestsDock({
   droneName,
   repoAttached,
   repoPath,
+  repoUnavailableReason,
   disabled,
   hubPhase,
   hubMessage,
@@ -174,6 +175,7 @@ export function DronePullRequestsDock({
   droneName: string;
   repoAttached: boolean;
   repoPath: string;
+  repoUnavailableReason?: string | null;
   disabled: boolean;
   hubPhase?: 'creating' | 'starting' | 'seeding' | 'error' | null;
   hubMessage?: string | null;
@@ -278,6 +280,7 @@ export function DronePullRequestsDock({
   const blockedMergeCount = Math.max(0, pullRequests.length - mergeablePullRequests.length);
   const blockedConflictCount = React.useMemo(() => pullRequests.filter((pr) => pr.hasMergeConflicts).length, [pullRequests]);
   const blockedPolicyCount = Math.max(0, blockedMergeCount - blockedConflictCount);
+  const unavailableReason = String(repoUnavailableReason ?? '').trim();
 
   const requestMergePullRequest = React.useCallback(
     async (pullNumber: number) =>
@@ -555,7 +558,9 @@ export function DronePullRequestsDock({
 
       <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] text-[10px] text-[var(--muted)] flex items-center gap-1.5 min-h-[30px] overflow-x-auto whitespace-nowrap">
         {!repoAttached ? (
-          <span>No repo attached.</span>
+          <span title={unavailableReason || 'No repo attached'}>
+            {unavailableReason || 'No repo attached.'}
+          </span>
         ) : disabled ? (
           <span title={String(hubMessage ?? '').trim() || undefined}>
             {startup.timedOut ? 'Still provisioning… repo not ready yet.' : 'Provisioning… waiting for repo.'}
@@ -590,7 +595,9 @@ export function DronePullRequestsDock({
       ) : null}
 
       {!repoAttached ? (
-        <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--muted)]">Attach a repo to manage pull requests.</div>
+        <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--muted)]">
+          {unavailableReason || 'Attach a repo to manage pull requests.'}
+        </div>
       ) : disabled ? (
         <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--muted)]">
           <div className="rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3">
