@@ -56,6 +56,42 @@ function dockerUsable(): { ok: boolean; detail: string } {
   return { ok: false, detail };
 }
 
+function tryReadBaseImageFromConfig(configPath: string): string | null {
+  try {
+    const raw = fs.readFileSync(configPath, 'utf8');
+    const parsed = JSON.parse(raw) as { image?: unknown };
+    const image = typeof parsed?.image === 'string' ? parsed.image.trim() : '';
+    return image || null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveReusableDvmBaseImage(appRoot: string): string | null {
+  const explicit = String(process.env.DRONE_TEST_DVM_BASE_IMAGE ?? '').trim();
+  if (explicit) return explicit;
+
+  const repoBaseConfig = path.resolve(appRoot, '..', '..', 'data', 'dvm', 'base.json');
+  const configured = tryReadBaseImageFromConfig(repoBaseConfig);
+  if (configured) return configured;
+
+  const listed = run('docker', ['images', '--format', '{{.Repository}}:{{.Tag}}'], { timeoutMs: 20_000 });
+  if (listed.code !== 0) return null;
+  for (const line of listed.stdout.split('\n')) {
+    const image = String(line).trim();
+    if (!image) continue;
+    if (/^dvm-base-.*:latest$/i.test(image)) return image;
+  }
+  return null;
+}
+
+function seedTempDvmBaseConfig(appRoot: string, dvmDataDir: string): void {
+  const image = resolveReusableDvmBaseImage(appRoot);
+  if (!image) return;
+  fs.mkdirSync(dvmDataDir, { recursive: true });
+  fs.writeFileSync(path.join(dvmDataDir, 'base.json'), `${JSON.stringify({ image }, null, 2)}\n`, 'utf8');
+}
+
 function ensureCliBuild(appRoot: string, dvmRoot: string): void {
   const droneCli = path.join(appRoot, 'dist', 'cli.js');
   const droneDaemon = path.join(appRoot, 'dist', 'daemon.js');
@@ -100,6 +136,7 @@ describe('drone docker lifecycle regression', () => {
       fs.mkdirSync(path.join(xdgDataHome, 'drone'), { recursive: true });
       fs.mkdirSync(droneDataDir, { recursive: true });
       fs.mkdirSync(dvmDataDir, { recursive: true });
+      seedTempDvmBaseConfig(appRoot, dvmDataDir);
       const env = {
         ...process.env,
         XDG_DATA_HOME: xdgDataHome,
@@ -200,6 +237,7 @@ describe('drone docker lifecycle regression', () => {
       fs.mkdirSync(path.join(xdgDataHome, 'drone'), { recursive: true });
       fs.mkdirSync(droneDataDir, { recursive: true });
       fs.mkdirSync(dvmDataDir, { recursive: true });
+      seedTempDvmBaseConfig(appRoot, dvmDataDir);
       const env = {
         ...process.env,
         XDG_DATA_HOME: xdgDataHome,
@@ -283,6 +321,7 @@ describe('drone docker lifecycle regression', () => {
       fs.mkdirSync(path.join(xdgDataHome, 'drone'), { recursive: true });
       fs.mkdirSync(droneDataDir, { recursive: true });
       fs.mkdirSync(dvmDataDir, { recursive: true });
+      seedTempDvmBaseConfig(appRoot, dvmDataDir);
       const env = {
         ...process.env,
         XDG_DATA_HOME: xdgDataHome,
