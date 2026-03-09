@@ -105,6 +105,8 @@ type RightPanelTabContentProps = {
   selectedPreviewDefaultUrl: string | null;
   selectedPreviewUrlOverride: string | null;
   setSelectedPreviewUrlOverride: (nextUrl: string | null) => void;
+  previewLocked: boolean;
+  onTogglePreviewLocked: () => void;
   agentLabel: string;
   portRows: DronePortMapping[];
   onOpenFileInEditor: (entry: DroneFsEntry) => void;
@@ -165,6 +167,8 @@ export function RightPanelTabContent({
   selectedPreviewDefaultUrl,
   selectedPreviewUrlOverride,
   setSelectedPreviewUrlOverride,
+  previewLocked,
+  onTogglePreviewLocked,
   agentLabel,
   portRows,
   onOpenFileInEditor,
@@ -276,6 +280,8 @@ export function RightPanelTabContent({
           defaultPreviewUrl={selectedPreviewDefaultUrl}
           previewUrlOverride={selectedPreviewUrlOverride}
           onSetPreviewUrlOverride={setSelectedPreviewUrlOverride}
+          locked={previewLocked}
+          onToggleLocked={onTogglePreviewLocked}
         />
       );
 

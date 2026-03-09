@@ -1,6 +1,11 @@
 import type { DroneSummary } from '../types';
 import { PORT_PREVIEW_STORAGE_KEY, PREVIEW_URL_STORAGE_KEY } from './app-config';
-import { normalizePreviewUrl, readPortPreviewByDrone, readPreviewUrlByDrone } from './helpers';
+import {
+  normalizePreviewUrl,
+  readPortPreviewByDrone,
+  readPreviewUrlByDrone,
+  resolveDefaultPreviewPort,
+} from './helpers';
 import { readLocalStorageItem } from './hooks';
 
 type DroneQuickTarget = Pick<DroneSummary, 'id' | 'containerPort' | 'hostPort'>;
@@ -107,12 +112,9 @@ async function resolveDroneOpenTabUrlLive(drone: DroneQuickTarget): Promise<stri
       const mapped = liveRows.find((row) => row.containerPort === preferredContainerPort);
       if (mapped) return localhostUrl(mapped.hostPort);
     }
-    const currentContainerPort = Number(drone?.containerPort);
-    if (Number.isFinite(currentContainerPort) && currentContainerPort > 0) {
-      const mapped = liveRows.find((row) => row.containerPort === Math.floor(currentContainerPort));
-      if (mapped) return localhostUrl(mapped.hostPort);
-    }
     if (prefs.overrideUrl && !parseProxyContainerPort(prefs.overrideUrl, droneId)) return prefs.overrideUrl;
+    const defaultPreviewPort = resolveDefaultPreviewPort(liveRows, Number(drone?.containerPort));
+    if (defaultPreviewPort) return localhostUrl(defaultPreviewPort.hostPort);
     return localhostUrl(liveRows[0].hostPort);
   }
 

@@ -12,6 +12,8 @@ export function DronePreviewDock({
   defaultPreviewUrl,
   previewUrlOverride,
   onSetPreviewUrlOverride,
+  locked,
+  onToggleLocked,
 }: {
   selectedPort: DronePortMapping | null;
   portRows: DronePortMapping[];
@@ -22,6 +24,8 @@ export function DronePreviewDock({
   defaultPreviewUrl: string | null;
   previewUrlOverride: string | null;
   onSetPreviewUrlOverride: (nextUrl: string | null) => void;
+  locked: boolean;
+  onToggleLocked: () => void;
 }) {
   const selectedUrl = previewUrlOverride || defaultPreviewUrl;
   const selectedOpenUrl = selectedUrl;
@@ -75,10 +79,30 @@ export function DronePreviewDock({
 
       <div className="px-3 py-2 border-b border-[var(--border-subtle)] flex items-center justify-between gap-2">
         <div
-          className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.12em] uppercase"
+          className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.12em] uppercase flex items-center gap-1.5"
           style={{ fontFamily: 'var(--display)' }}
         >
-          Browser
+          <span>Browser</span>
+          <button
+            type="button"
+            onClick={onToggleLocked}
+            aria-pressed={locked}
+            className={`inline-flex items-center justify-center h-5 w-5 rounded border transition-colors ${
+              locked
+                ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+            }`}
+            title={
+              locked
+                ? 'Unlock browser session. Unlocking lets the Browser tab follow the active drone again.'
+                : 'Lock browser session. While locked, the Browser tab keeps this live page mounted across tab and drone switches.'
+            }
+          >
+            <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d={locked ? 'M4.5 7.25V5.75a3.5 3.5 0 0 1 7 0v1.5' : 'M5.5 7.25V5.75a2.5 2.5 0 1 1 5 0v1.5'} />
+              <rect x="3.25" y="7.25" width="9.5" height="6" rx="1.5" />
+            </svg>
+          </button>
         </div>
         <div className="min-w-0 flex items-center gap-2">
           {selectedPort ? (
@@ -127,26 +151,34 @@ export function DronePreviewDock({
             <input
               type="text"
               value={urlInput}
+              readOnly={locked}
               onChange={(e) => {
+                if (locked) return;
                 setUrlInput(e.currentTarget.value);
                 if (urlError) setUrlError(null);
               }}
               onKeyDown={(e) => {
+                if (locked) return;
                 if (e.key === 'Enter') {
                   e.preventDefault();
                   savePreviewUrl();
                 }
               }}
               placeholder={defaultDisplayUrl || (selectedPort ? `http://localhost:${selectedPort.containerPort}/` : 'http://localhost:3000/')}
-              className="flex-1 min-w-0 h-7 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] px-2 text-[11px] text-[var(--fg-secondary)] font-mono focus:outline-none focus:border-[var(--accent-muted)] transition-colors"
-              title="Browser URL (saved per drone)"
+              className={`flex-1 min-w-0 h-7 rounded border px-2 text-[11px] text-[var(--fg-secondary)] font-mono transition-colors ${
+                locked
+                  ? 'border-[var(--accent-muted)] bg-[rgba(0,0,0,.22)] text-[var(--muted)] cursor-default'
+                  : 'border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] focus:outline-none focus:border-[var(--accent-muted)]'
+              }`}
+              title={locked ? 'Browser session is locked. Unlock to edit or save a new URL.' : 'Browser URL (saved per drone)'}
             />
             <button
               type="button"
               onClick={savePreviewUrl}
+              disabled={locked}
               className="h-7 px-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-colors"
               style={{ fontFamily: 'var(--display)' }}
-              title="Save browser URL for this drone"
+              title={locked ? 'Unlock the browser session to save a new URL.' : 'Save browser URL for this drone'}
             >
               Save
             </button>
@@ -157,14 +189,14 @@ export function DronePreviewDock({
                 setUrlError(null);
                 onSetPreviewUrlOverride(null);
               }}
-              disabled={!usingCustomUrl}
+              disabled={locked || !usingCustomUrl}
               className={`h-7 px-2 rounded border text-[10px] font-semibold tracking-wide uppercase transition-all ${
-                usingCustomUrl
+                !locked && usingCustomUrl
                   ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:brightness-110'
                   : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] opacity-40 cursor-not-allowed'
               }`}
               style={{ fontFamily: 'var(--display)' }}
-              title="Reset to selected port URL"
+              title={locked ? 'Unlock the browser session to change its saved URL.' : 'Reset to selected port URL'}
             >
               Port URL
             </button>

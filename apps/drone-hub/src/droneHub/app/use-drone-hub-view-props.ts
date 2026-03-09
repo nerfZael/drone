@@ -530,6 +530,8 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     setRightPanelBottomTab,
     startRightPanelResize,
     renderRightPanelTabContent,
+    activePreviewLockedByPane,
+    renderPersistentPreviewContent,
   } = args;
 
   return {
@@ -710,6 +712,8 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
           setRightPanelBottomTab,
           startRightPanelResize,
           renderRightPanelTabContent,
+          activePreviewLockedByPane,
+          renderPersistentPreviewContent,
         }
       : null,
   };

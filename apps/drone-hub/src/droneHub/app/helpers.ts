@@ -143,6 +143,32 @@ export function normalizePortRows(
   return uniq;
 }
 
+const COMMON_PREVIEW_CONTAINER_PORTS = [3000, 3001, 4173, 4174, 5173, 5174, 8000, 8001, 8080, 8081, 80];
+const NON_PREVIEW_CONTAINER_PORTS = new Set([3389, 6080, 7777]);
+
+export function resolveDefaultPreviewPort(
+  portRows: DronePortMapping[],
+  defaultContainerPortRaw: number | null | undefined,
+): DronePortMapping | null {
+  if (!Array.isArray(portRows) || portRows.length === 0) return null;
+
+  for (const port of COMMON_PREVIEW_CONTAINER_PORTS) {
+    const match = portRows.find((row) => row.containerPort === port);
+    if (match) return match;
+  }
+
+  const firstNonSystemPort = portRows.find((row) => !NON_PREVIEW_CONTAINER_PORTS.has(row.containerPort));
+  if (firstNonSystemPort) return firstNonSystemPort;
+
+  const defaultContainerPort = Number(defaultContainerPortRaw);
+  if (Number.isFinite(defaultContainerPort) && defaultContainerPort > 0) {
+    const match = portRows.find((row) => row.containerPort === Math.floor(defaultContainerPort));
+    if (match) return match;
+  }
+
+  return portRows[0] ?? null;
+}
+
 export function normalizePreviewUrl(raw: string): string | null {
   const trimmed = String(raw ?? '').trim();
   if (!trimmed) return null;

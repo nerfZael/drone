@@ -65,7 +65,23 @@ import {
   resolveChatNameForDrone,
 } from './droneHub/app/helpers';
 import { allocateUntitledDisplayName, droneNameHasWhitespace } from './droneHub/app/name-helpers';
-import type { DroneSummary } from './droneHub/types';
+import type { DronePortMapping, DroneSummary, PortReachabilityByHostPort } from './droneHub/types';
+
+type PreviewPaneKey = 'single' | 'top' | 'bottom';
+type PreviewPaneSnapshot = {
+  drone: DroneSummary;
+  currentDroneId: string | null;
+  selectedPreviewPort: DronePortMapping | null;
+  currentPortReachability: PortReachabilityByHostPort;
+  portsLoading: boolean;
+  portsError: string | null;
+  portsErrorUi: string | null;
+  portsPane: { waiting: boolean; timedOut: boolean };
+  selectedPreviewDefaultUrl: string | null;
+  selectedPreviewUrlOverride: string | null;
+  setSelectedPreviewUrlOverride: (nextUrl: string | null) => void;
+  portRows: DronePortMapping[];
+};
 
 export type DroneHubAppModel = {
   sidebarProps: DroneSidebarProps;
@@ -1193,6 +1209,39 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setSelectedPreviewUrlOverride,
     portRows,
   } = useFilesAndPortsPaneState({ currentDrone, requestJson });
+  const [lockedPreviewByPane, setLockedPreviewByPane] = React.useState<
+    Partial<Record<PreviewPaneKey, Record<string, PreviewPaneSnapshot>>>
+  >({});
+  const setPreviewLockedForPane = React.useCallback(
+    (paneKey: PreviewPaneKey, droneIdRaw: string, nextLocked: boolean, snapshot?: PreviewPaneSnapshot) => {
+      const droneId = String(droneIdRaw ?? '').trim();
+      if (!droneId) return;
+      setLockedPreviewByPane((prev) => {
+        const currentPane = prev[paneKey] ?? {};
+        const current = currentPane[droneId];
+        if (nextLocked) {
+          if (!snapshot) return prev;
+          return {
+            ...prev,
+            [paneKey]: {
+              ...currentPane,
+              [droneId]: snapshot,
+            },
+          };
+        }
+        if (!current) return prev;
+        const nextPane = { ...currentPane };
+        delete nextPane[droneId];
+        if (Object.keys(nextPane).length === 0) {
+          const next = { ...prev };
+          delete next[paneKey];
+          return next;
+        }
+        return { ...prev, [paneKey]: nextPane };
+      });
+    },
+    [],
+  );
   const {
     openedFile: openedEditorFile,
     loading: openedEditorFileLoading,
@@ -1728,74 +1777,111 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   }, [selectedChat, selectedDrone]);
 
   const renderRightPanelTabContent = React.useCallback(
-    (drone: DroneSummary, tab: RightPanelTab, paneKey: 'top' | 'bottom' | 'single'): React.ReactNode => (
-      <RightPanelTabContent
-        drone={drone}
-        tab={tab}
-        paneKey={paneKey}
-        selectedChat={selectedChat}
-        orderedCanvasChatNodeIds={orderedCanvasChatNodeIds}
-        droneNameById={droneNameById}
-        droneRepoById={droneRepoById}
-        draftRepoLabel={canvasDraftRepoLabel}
-        chatNodeStateById={chatNodeStateById}
-        onActivateChatFromCanvas={onActivateChatFromCanvas}
-        onSendCanvasPrompt={sendCanvasPrompt}
-        onCreateCanvasDroneFromDraft={createCanvasDroneFromDraft}
-        onRenameCanvasChat={renameCanvasChat}
-        onDeleteCanvasChat={deleteCanvasChat}
-        canvasSpawnAgentMenuEntries={spawnAgentMenuEntries}
-        canvasSpawnAgentKey={spawnAgentKey}
-        onCanvasSpawnAgentKeyChange={setSpawnAgentKey}
-        onOpenCanvasCustomAgentModal={() => setCustomAgentModalOpen(true)}
-        canvasSpawnAgentConfig={spawnAgentConfig}
-        canvasSpawnModel={spawnModel}
-        onCanvasSpawnModelChange={setSpawnModel}
-        canvasCreateRepoMenuEntries={createRepoMenuEntries}
-        canvasCreateRepoPath={chatHeaderRepoPath}
-        onCanvasCreateRepoPathChange={setChatHeaderRepoPath}
-        canvasCreateGroup={draftCreateGroup}
-        onCanvasCreateGroupChange={setDraftCreateGroup}
-        canvasPullHostBranchBeforeCreate={pullHostBranchBeforeCreate}
-        onCanvasPullHostBranchBeforeCreateChange={setPullHostBranchBeforeCreate}
-        currentDroneId={currentDrone?.id ?? null}
-        currentCanvasChatNodeId={selectedCanvasChatNodeId}
-        defaultFsPathForCurrentDrone={defaultFsPathForCurrentDrone}
-        uiDroneName={uiDroneName}
-        currentFsPath={currentFsPath}
-        fsEntries={fsEntries}
-        fsLoading={fsLoading}
-        fsError={fsError}
-        fsErrorUi={fsErrorUi}
-        filesPane={filesPane}
-        fsExplorerView={fsExplorerView}
-        setFsExplorerView={setFsExplorerView}
-        setCurrentFsPath={setCurrentFsPath}
-        refreshFsList={refreshFsList}
-        selectedPreviewPort={selectedPreviewPort}
-        currentPortReachability={currentPortReachability}
-        portsLoading={portsLoading}
-        portsError={portsError}
-        portsErrorUi={portsErrorUi}
-        portsPane={portsPane}
-        selectedPreviewDefaultUrl={selectedPreviewDefaultUrl}
-        selectedPreviewUrlOverride={selectedPreviewUrlOverride}
-        setSelectedPreviewUrlOverride={setSelectedPreviewUrlOverride}
-        agentLabel={agentLabel}
-        portRows={portRows}
-        onOpenFileInEditor={(entry) => {
-          if (entry.kind !== 'file') return;
-          openEditorFile({ path: entry.path, name: entry.name });
-        }}
-        onRevealChangesFileInFiles={revealChangesFileInFiles}
-        onOpenChangesFileInEditor={openChangesFileInEditor}
-        onOpenPullRequestInChanges={(pane, _pullRequest) => {
-          setRightPanelOpen(true);
-          if (pane === 'bottom') setRightPanelBottomTab('changes');
-          else setRightPanelTab('changes');
-        }}
-      />
-    ),
+    (drone: DroneSummary, tab: RightPanelTab, paneKey: PreviewPaneKey): React.ReactNode => {
+      const lockedPreview = tab === 'preview' ? lockedPreviewByPane[paneKey]?.[drone.id] ?? null : null;
+      const previewDrone = lockedPreview?.drone ?? drone;
+      const previewCurrentDroneId = lockedPreview?.currentDroneId ?? currentDrone?.id ?? null;
+      const previewSelectedPort = lockedPreview?.selectedPreviewPort ?? selectedPreviewPort;
+      const previewPortReachability = lockedPreview?.currentPortReachability ?? currentPortReachability;
+      const previewPortsLoading = lockedPreview?.portsLoading ?? portsLoading;
+      const previewPortsError = lockedPreview?.portsError ?? portsError;
+      const previewPortsErrorUi = lockedPreview?.portsErrorUi ?? portsErrorUi;
+      const previewPortsPane = lockedPreview?.portsPane ?? portsPane;
+      const previewDefaultUrl = lockedPreview?.selectedPreviewDefaultUrl ?? selectedPreviewDefaultUrl;
+      const previewUrlOverride = lockedPreview?.selectedPreviewUrlOverride ?? selectedPreviewUrlOverride;
+      const previewSetUrlOverride = lockedPreview?.setSelectedPreviewUrlOverride ?? setSelectedPreviewUrlOverride;
+      const previewPortRows = lockedPreview?.portRows ?? portRows;
+
+      return (
+        <RightPanelTabContent
+          drone={previewDrone}
+          tab={tab}
+          paneKey={paneKey}
+          selectedChat={selectedChat}
+          orderedCanvasChatNodeIds={orderedCanvasChatNodeIds}
+          droneNameById={droneNameById}
+          droneRepoById={droneRepoById}
+          draftRepoLabel={canvasDraftRepoLabel}
+          chatNodeStateById={chatNodeStateById}
+          onActivateChatFromCanvas={onActivateChatFromCanvas}
+          onSendCanvasPrompt={sendCanvasPrompt}
+          onCreateCanvasDroneFromDraft={createCanvasDroneFromDraft}
+          onRenameCanvasChat={renameCanvasChat}
+          onDeleteCanvasChat={deleteCanvasChat}
+          canvasSpawnAgentMenuEntries={spawnAgentMenuEntries}
+          canvasSpawnAgentKey={spawnAgentKey}
+          onCanvasSpawnAgentKeyChange={setSpawnAgentKey}
+          onOpenCanvasCustomAgentModal={() => setCustomAgentModalOpen(true)}
+          canvasSpawnAgentConfig={spawnAgentConfig}
+          canvasSpawnModel={spawnModel}
+          onCanvasSpawnModelChange={setSpawnModel}
+          canvasCreateRepoMenuEntries={createRepoMenuEntries}
+          canvasCreateRepoPath={chatHeaderRepoPath}
+          onCanvasCreateRepoPathChange={setChatHeaderRepoPath}
+          canvasCreateGroup={draftCreateGroup}
+          onCanvasCreateGroupChange={setDraftCreateGroup}
+          canvasPullHostBranchBeforeCreate={pullHostBranchBeforeCreate}
+          onCanvasPullHostBranchBeforeCreateChange={setPullHostBranchBeforeCreate}
+          currentDroneId={previewCurrentDroneId}
+          currentCanvasChatNodeId={selectedCanvasChatNodeId}
+          defaultFsPathForCurrentDrone={defaultFsPathForCurrentDrone}
+          uiDroneName={uiDroneName}
+          currentFsPath={currentFsPath}
+          fsEntries={fsEntries}
+          fsLoading={fsLoading}
+          fsError={fsError}
+          fsErrorUi={fsErrorUi}
+          filesPane={filesPane}
+          fsExplorerView={fsExplorerView}
+          setFsExplorerView={setFsExplorerView}
+          setCurrentFsPath={setCurrentFsPath}
+          refreshFsList={refreshFsList}
+          selectedPreviewPort={previewSelectedPort}
+          currentPortReachability={previewPortReachability}
+          portsLoading={previewPortsLoading}
+          portsError={previewPortsError}
+          portsErrorUi={previewPortsErrorUi}
+          portsPane={previewPortsPane}
+          selectedPreviewDefaultUrl={previewDefaultUrl}
+          selectedPreviewUrlOverride={previewUrlOverride}
+          setSelectedPreviewUrlOverride={previewSetUrlOverride}
+          previewLocked={Boolean(lockedPreview)}
+          onTogglePreviewLocked={() => {
+            if (lockedPreview) {
+              setPreviewLockedForPane(paneKey, drone.id, false);
+              return;
+            }
+            setPreviewLockedForPane(paneKey, drone.id, true, {
+              drone,
+              currentDroneId: currentDrone?.id ?? null,
+              selectedPreviewPort,
+              currentPortReachability,
+              portsLoading,
+              portsError,
+              portsErrorUi,
+              portsPane: { waiting: portsPane.waiting, timedOut: portsPane.timedOut },
+              selectedPreviewDefaultUrl,
+              selectedPreviewUrlOverride,
+              setSelectedPreviewUrlOverride,
+              portRows,
+            });
+          }}
+          agentLabel={agentLabel}
+          portRows={previewPortRows}
+          onOpenFileInEditor={(entry) => {
+            if (entry.kind !== 'file') return;
+            openEditorFile({ path: entry.path, name: entry.name });
+          }}
+          onRevealChangesFileInFiles={revealChangesFileInFiles}
+          onOpenChangesFileInEditor={openChangesFileInEditor}
+          onOpenPullRequestInChanges={(pane, _pullRequest) => {
+            setRightPanelOpen(true);
+            if (pane === 'bottom') setRightPanelBottomTab('changes');
+            else setRightPanelTab('changes');
+          }}
+        />
+      );
+    },
     [
       agentLabel,
       currentDrone?.id,
@@ -1817,6 +1903,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       fsErrorUi,
       fsExplorerView,
       fsLoading,
+      lockedPreviewByPane,
       portRows,
       portsError,
       portsErrorUi,
@@ -1840,6 +1927,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       selectedPreviewDefaultUrl,
       selectedPreviewPort,
       selectedPreviewUrlOverride,
+      setPreviewLockedForPane,
       spawnAgentConfig,
       spawnAgentKey,
       spawnAgentMenuEntries,
@@ -1854,6 +1942,26 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       openChangesFileInEditor,
       openEditorFile,
     ],
+  );
+
+  const renderPersistentPreviewContent = React.useCallback(
+    (drone: DroneSummary, activeTab: RightPanelTab, paneKey: PreviewPaneKey): React.ReactNode => {
+      const sessions = Object.values(lockedPreviewByPane[paneKey] ?? {});
+      if (sessions.length === 0) return null;
+      return sessions.map((snapshot) => {
+        const visible = activeTab === 'preview' && snapshot.drone.id === drone.id;
+        return (
+          <div
+            key={`locked-preview:${paneKey}:${snapshot.drone.id}`}
+            className={`absolute inset-0 min-h-0 overflow-hidden ${visible ? '' : 'opacity-0 pointer-events-none'}`}
+            aria-hidden={!visible}
+          >
+            {renderRightPanelTabContent(snapshot.drone, 'preview', paneKey)}
+          </div>
+        );
+      });
+    },
+    [lockedPreviewByPane, renderRightPanelTabContent],
   );
 
   const handleAddCustomAgent = React.useCallback(() => {
@@ -2189,6 +2297,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setRightPanelBottomTab,
     startRightPanelResize,
     renderRightPanelTabContent,
+    activePreviewLockedByPane: {
+      single: Boolean(currentDrone && lockedPreviewByPane.single?.[currentDrone.id]),
+      top: Boolean(currentDrone && lockedPreviewByPane.top?.[currentDrone.id]),
+      bottom: Boolean(currentDrone && lockedPreviewByPane.bottom?.[currentDrone.id]),
+    },
+    renderPersistentPreviewContent,
   });
 
   return {
