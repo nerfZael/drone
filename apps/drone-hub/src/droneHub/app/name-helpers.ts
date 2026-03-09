@@ -11,6 +11,22 @@ export function isUntitledLikeDroneName(raw: string): boolean {
   return /^\d+$/.test(rest) || /^[a-z0-9]{4,18}(?:-\d+)?$/.test(rest);
 }
 
+export function allocateUntitledDisplayName(names: Iterable<string>): string {
+  const usedNums = new Set<number>();
+  for (const raw of names) {
+    const match = String(raw ?? '').trim().match(/^untitled\s+(\d+)$/i);
+    if (!match) continue;
+    const value = Number(match[1]);
+    if (Number.isFinite(value) && value >= 1 && Math.floor(value) === value) {
+      usedNums.add(value);
+    }
+  }
+  for (let i = 1; i <= 9999; i += 1) {
+    if (!usedNums.has(i)) return `Untitled ${i}`;
+  }
+  return `Untitled ${Date.now().toString(36)}`;
+}
+
 export function normalizeDraftDroneName(input: string): string {
   const cleaned = String(input ?? '')
     .toLowerCase()

@@ -64,7 +64,7 @@ import {
   normalizeContainerPathInput,
   resolveChatNameForDrone,
 } from './droneHub/app/helpers';
-import { droneNameHasWhitespace } from './droneHub/app/name-helpers';
+import { allocateUntitledDisplayName, droneNameHasWhitespace } from './droneHub/app/name-helpers';
 import type { DroneSummary } from './droneHub/types';
 
 export type DroneHubAppModel = {
@@ -249,6 +249,15 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     activeRepoPath,
     registryGroupNames,
   });
+  const draftSidebarPlaceholder = React.useMemo(() => {
+    if (!draftChat) return null;
+    if (String(draftChat.droneId ?? '').trim()) return null;
+    return {
+      name: allocateUntitledDisplayName(sidebarDrones.map((drone) => String(drone?.name ?? '').trim())),
+      repoPath: String(chatHeaderRepoPath ?? '').trim(),
+      group: String(draftCreateGroup ?? '').trim() || null,
+    };
+  }, [chatHeaderRepoPath, draftChat, draftCreateGroup, sidebarDrones]);
   const droneNameById = React.useMemo(() => {
     const out: Record<string, string> = {};
     for (const drone of drones) {
@@ -1869,6 +1878,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     drones,
     droneCountByRepoPath,
     uiDroneName,
+    draftSidebarPlaceholder,
     openDraftChatComposer,
     openCreateModal,
     selectDroneCard,
