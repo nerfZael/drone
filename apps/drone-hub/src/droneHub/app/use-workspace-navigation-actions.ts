@@ -27,6 +27,7 @@ type UseWorkspaceNavigationActionsArgs = {
   setDraftNameSuggestionError: React.Dispatch<React.SetStateAction<string | null>>;
   setDraftNameSuggesting: React.Dispatch<React.SetStateAction<boolean>>;
   setCreateMode: React.Dispatch<React.SetStateAction<'create' | 'clone'>>;
+  setCreateRuntime: React.Dispatch<React.SetStateAction<'container' | 'host'>>;
   setCloneSourceId: React.Dispatch<React.SetStateAction<string | null>>;
   setCreateName: React.Dispatch<React.SetStateAction<string>>;
   setCreateGroup: React.Dispatch<React.SetStateAction<string>>;
@@ -70,6 +71,7 @@ export function useWorkspaceNavigationActions({
   setDraftNameSuggestionError,
   setDraftNameSuggesting,
   setCreateMode,
+  setCreateRuntime,
   setCloneSourceId,
   setCreateName,
   setCreateGroup,
@@ -99,6 +101,7 @@ export function useWorkspaceNavigationActions({
       setCloneIncludeChats(true);
     }
     setCreateMode('create');
+    setCreateRuntime('container');
     setCloneSourceId(null);
     setCreateRepoPath(normalizeCreateRepoPath(activeRepoPath || ''));
     setCreateInitialMessage('');
@@ -117,6 +120,7 @@ export function useWorkspaceNavigationActions({
     setCreateInitialMessage,
     setCreateMessageSuffixRows,
     setCreateMode,
+    setCreateRuntime,
     setCreateName,
     setCreateOpen,
     setCreateRepoPath,
@@ -182,12 +186,15 @@ export function useWorkspaceNavigationActions({
   const openCloneModal = React.useCallback(
     (source: DroneSummary) => {
       if (creating || deletingDrones[source.id] || renamingDrones[source.id]) return;
+      const sourceRuntime = String(source?.runtime ?? 'container').trim().toLowerCase();
+      if (sourceRuntime === 'host') return;
       setAppView('workspace');
       setDraftChat(null);
       setDraftCreateOpen(false);
       setDraftCreateError(null);
       setCreateError(null);
       setCreateMode('clone');
+      setCreateRuntime('container');
       setCloneSourceId(source.id);
       setCreateName(suggestCloneName(source.name));
       setCreateGroup(source.group ?? '');
@@ -216,6 +223,7 @@ export function useWorkspaceNavigationActions({
       setCreateInitialMessage,
       setCreateMessageSuffixRows,
       setCreateMode,
+      setCreateRuntime,
       setCreateName,
       setCreateOpen,
       setCreateRepoPath,

@@ -47,8 +47,9 @@ export function useFilesAndPortsPaneState({ currentDrone, requestJson }: UseFile
 
   const defaultFsPathForCurrentDrone = React.useMemo(() => {
     if (!currentDrone) return '/dvm-data/home';
-    return droneHomePath(currentDrone);
-  }, [currentDrone?.name, currentDrone?.repoAttached, currentDrone?.repoPath]);
+    const homePath = droneHomePath(currentDrone);
+    return homePath || '/';
+  }, [currentDrone?.name, currentDrone?.repoAttached, currentDrone?.repoPath, currentDrone?.runtime]);
 
   const currentFsPath = React.useMemo(() => {
     const droneId = String(currentDrone?.id ?? '').trim();
@@ -85,7 +86,7 @@ export function useFilesAndPortsPaneState({ currentDrone, requestJson }: UseFile
         ? requestJson(`/api/drones/${encodeURIComponent(currentDrone.id)}/fs/list?path=${encodeURIComponent(currentFsPath)}`)
         : Promise.resolve({ ok: true, id: '', name: '', path: '/', entries: [] }),
     fsPollIntervalMs,
-    [currentDrone?.id, currentDrone?.hubPhase, currentFsPath, fsRefreshNonce],
+    [currentDrone?.id, currentDrone?.name, currentDrone?.hubPhase, currentFsPath, fsRefreshNonce],
   );
   const fsPayloadError =
     fsResp && (fsResp as any).ok === false ? String((fsResp as any)?.error ?? 'filesystem request failed') : null;

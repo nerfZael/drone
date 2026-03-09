@@ -188,7 +188,24 @@ export function maybeExtractApiKey(raw: string, provider: 'openai' | 'gemini'): 
   return text;
 }
 
-export function droneHomePath(drone: Pick<DroneSummary, 'repoAttached' | 'repoPath'> | null | undefined): string {
+export function normalizeDroneRuntime(raw: unknown): 'container' | 'host' {
+  return String(raw ?? '').trim().toLowerCase() === 'host' ? 'host' : 'container';
+}
+
+export function isHostRuntimeDrone(drone: Pick<DroneSummary, 'runtime'> | null | undefined): boolean {
+  return normalizeDroneRuntime(drone?.runtime) === 'host';
+}
+
+export function droneHomePath(
+  drone: Pick<DroneSummary, 'runtime' | 'repoAttached' | 'repoPath' | 'cwd'> | null | undefined,
+): string {
+  if (isHostRuntimeDrone(drone)) {
+    const cwd = String(drone?.cwd ?? '').trim();
+    if (cwd) return cwd;
+    const repoPath = String(drone?.repoPath ?? '').trim();
+    if (repoPath) return repoPath;
+    return '/';
+  }
   const repoAttached = Boolean(drone?.repoAttached ?? Boolean(String(drone?.repoPath ?? '').trim()));
   return repoAttached ? '/work/repo' : '/dvm-data/home';
 }

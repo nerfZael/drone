@@ -11,6 +11,15 @@ import { health, procStart, procStop, readOutput, sendInput, sendKeys, status } 
 import { dvmClone, dvmCreate, dvmExec, dvmLs, dvmPorts, dvmRemove, dvmScript, dvmSessionStart } from './host/dvm';
 import { droneRootPath } from './host/paths';
 import { loadRegistry, updateRegistry } from './host/registry';
+import {
+  hostDroneDaemonDataPath,
+  hostDroneDaemonLogPath,
+  hostDroneDaemonTokenPath,
+  hostDroneRootPath,
+  hostDroneWorkspacePath,
+  normalizeDroneRuntime,
+  type DroneRuntime,
+} from './host/runtime';
 import { resolveDetachedCliLaunchSpec } from './hub/hub-launch';
 import { parseHubRunnerProcessesFromPsOutput, selectHubRunnerPidsToStop } from './hub/orphan-hub-runners';
 import { startDroneHubApiServer } from './hub/server';
@@ -54,9 +63,26 @@ function normalizeContainerCwd(raw: any): string | undefined {
   return s;
 }
 
+function normalizeHostCwd(raw: any): string | undefined {
+  const s = raw == null ? '' : String(raw).trim();
+  if (!s) return undefined;
+  if (!path.isAbsolute(s)) {
+    throw new Error(`invalid --cwd: must be an absolute host path (example: ${path.join(path.sep, 'tmp', 'drone-work')})`);
+  }
+  return path.resolve(s);
+}
+
+function normalizeRuntimeOption(raw: unknown): DroneRuntime {
+  const value = String(raw ?? '').trim().toLowerCase();
+  if (!value) return 'container';
+  if (value === 'container' || value === 'host') return value;
+  throw new Error('invalid --runtime (expected container|host)');
+}
+
 type CreateCommandOptions = {
   group?: string;
   containerPort?: string | number;
+  runtime?: string;
   cwd?: string;
   mkdir?: boolean;
   repo?: string;
@@ -67,6 +93,7 @@ type CreateCommandOptions = {
 type ParsedCreateOptions = {
   group?: string;
   containerPort: number;
+  runtime: DroneRuntime;
   cwd?: string;
   mkdir: boolean;
   repoPath: string;
@@ -78,8 +105,9 @@ function addCreateOptions(command: Command): Command {
   return command
     .option('--group <group>', 'Optional group name for organizing drones in the Hub')
     .option('--container-port <port>', 'Daemon port inside container', '7777')
-    .option('--cwd <path>', 'Default working directory inside container (used by agent/run/proc-start when --cwd omitted)')
-    .option('--mkdir', 'Create --cwd inside the container (mkdir -p)', false)
+    .option('--runtime <runtime>', 'Drone runtime: container|host', 'container')
+    .option('--cwd <path>', 'Default working directory (container path for container runtime, host path for host runtime)')
+    .option('--mkdir', 'Create --cwd if it does not exist (mkdir -p)', false)
     .option('--drone-id <id>', 'Stable drone identity (internal; advanced use)')
     .option('--clone-container <name>', 'Clone this existing container into the new drone container before provisioning')
     .option(
@@ -105,13 +133,16 @@ function stableContainerNameFromDroneId(droneId: string): string {
   return `drone-${hex}`;
 }
 
-function resolveDroneFromRegistry(reg: Awaited<ReturnType<typeof loadRegistry>>, nameRaw: string): { key: string; drone: any; containerName: string } {
+function resolveDroneFromRegistry(
+  reg: Awaited<ReturnType<typeof loadRegistry>>,
+  nameRaw: string
+): { key: string; drone: any; containerName: string; runtime: DroneRuntime } {
   const name = String(nameRaw ?? '').trim();
   if (!name) throw new Error('missing drone name');
   const byKey = (reg as any)?.drones?.[name] ?? null;
   if (byKey) {
     const containerName = String(byKey?.containerName ?? byKey?.name ?? name).trim() || name;
-    return { key: name, drone: byKey, containerName };
+    return { key: name, drone: byKey, containerName, runtime: normalizeDroneRuntime((byKey as any)?.runtime) };
   }
   const entries = Object.entries((reg as any)?.drones ?? {});
   const byValueName = entries.find(([, v]) => String((v as any)?.name ?? '').trim() === name) ?? null;
@@ -119,19 +150,20 @@ function resolveDroneFromRegistry(reg: Awaited<ReturnType<typeof loadRegistry>>,
     const key = String(byValueName[0]);
     const drone = byValueName[1] as any;
     const containerName = String(drone?.containerName ?? drone?.name ?? key).trim() || key;
-    return { key, drone, containerName };
+    return { key, drone, containerName, runtime: normalizeDroneRuntime((drone as any)?.runtime) };
   }
   const byContainer = entries.find(([, v]) => String((v as any)?.containerName ?? '').trim() === name) ?? null;
   if (byContainer) {
     const key = String(byContainer[0]);
     const drone = byContainer[1] as any;
     const containerName = String(drone?.containerName ?? drone?.name ?? key).trim() || key;
-    return { key, drone, containerName };
+    return { key, drone, containerName, runtime: normalizeDroneRuntime((drone as any)?.runtime) };
   }
   throw new Error(`unknown drone: ${name} (not in registry)`);
 }
 
 function parseCreateOptions(options: CreateCommandOptions): ParsedCreateOptions {
+  const runtime = normalizeRuntimeOption(options.runtime);
   const repoArg = String(options.repo ?? '').trim();
   const repoPath =
     repoArg === '-' || repoArg.toLowerCase() === 'none' ? '' : path.resolve(repoArg || process.cwd());
@@ -139,11 +171,11 @@ function parseCreateOptions(options: CreateCommandOptions): ParsedCreateOptions 
   const group = groupRaw.trim() ? groupRaw.trim() : undefined;
   const containerPort = Number(options.containerPort);
   if (!Number.isFinite(containerPort) || containerPort <= 0) throw new Error('invalid --container-port');
-  const cwd = normalizeContainerCwd(options.cwd);
+  const cwd = runtime === 'host' ? normalizeHostCwd(options.cwd) : normalizeContainerCwd(options.cwd);
   const droneId = normalizeDroneIdentity(options.droneId);
   const cloneContainerRaw = String(options.cloneContainer ?? '').trim();
   const cloneContainer = cloneContainerRaw || undefined;
-  return { group, containerPort, cwd, mkdir: Boolean(options.mkdir), repoPath, droneId, cloneContainer };
+  return { group, containerPort, runtime, cwd, mkdir: Boolean(options.mkdir), repoPath, droneId, cloneContainer };
 }
 
 const DRONE_DISPLAY_NAME_MAX_LEN = 80;
@@ -619,6 +651,89 @@ async function resolveHostPort(container: string, containerPort: number): Promis
   return match.hostPort;
 }
 
+function normalizeHostPort(raw: unknown): number {
+  const hostPort = Number(raw);
+  if (!Number.isFinite(hostPort) || hostPort <= 0) throw new Error('missing host runtime daemon port');
+  return Math.floor(hostPort);
+}
+
+async function stopHostDaemonByPid(pidRaw: unknown): Promise<void> {
+  const pid = Number(pidRaw);
+  if (!Number.isFinite(pid) || pid <= 0) return;
+  const targetPid = Math.floor(pid);
+  const isRunning = () => {
+    try {
+      process.kill(targetPid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (!isRunning()) return;
+  try {
+    process.kill(targetPid, 'SIGTERM');
+  } catch {
+    return;
+  }
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    if (!isRunning()) return;
+    // eslint-disable-next-line no-await-in-loop
+    await sleep(100);
+  }
+  try {
+    process.kill(targetPid, 'SIGKILL');
+  } catch {
+    // ignore
+  }
+}
+
+async function removeHostRuntimeRootBestEffort(droneIdRaw: unknown): Promise<void> {
+  const droneId = String(droneIdRaw ?? '').trim();
+  if (!droneId) return;
+  try {
+    await fs.rm(hostDroneRootPath(droneId), { recursive: true, force: true });
+  } catch {
+    // ignore
+  }
+}
+
+async function launchHostDroneDaemon(opts: {
+  droneId: string;
+  hostPort: number;
+  token: string;
+}): Promise<number> {
+  const daemonPath = resolveDroneDaemonJsPath();
+  const daemonDataDir = hostDroneDaemonDataPath(opts.droneId);
+  const tokenPath = hostDroneDaemonTokenPath(opts.droneId);
+  const logPath = hostDroneDaemonLogPath(opts.droneId);
+  await fs.mkdir(daemonDataDir, { recursive: true });
+  await fs.writeFile(tokenPath, opts.token, 'utf8');
+  if (process.platform !== 'win32') {
+    try {
+      await fs.chmod(tokenPath, 0o600);
+    } catch {
+      // ignore
+    }
+  }
+  const log = await fs.open(logPath, 'a');
+  let child: ReturnType<typeof spawn> | null = null;
+  try {
+    child = spawn(
+      process.execPath,
+      [daemonPath, '--host', '127.0.0.1', '--port', String(opts.hostPort), '--data-dir', daemonDataDir, '--token-file', tokenPath],
+      { detached: true, stdio: ['ignore', log.fd, log.fd], env: process.env }
+    );
+    child.unref();
+  } finally {
+    await log.close();
+  }
+  if (!child?.pid || !Number.isFinite(child.pid)) {
+    throw new Error('failed to launch host daemon process');
+  }
+  return Math.floor(child.pid);
+}
+
 function makeClient(hostPort: number, token: string) {
   return { baseUrl: `http://127.0.0.1:${hostPort}`, token };
 }
@@ -631,8 +746,11 @@ async function withDroneClient<T>(
   fn: (ctx: { drone: DroneRegistryEntry; hostPort: number; client: DroneClient }) => Promise<T>
 ): Promise<T> {
   const reg = await loadRegistry();
-  const { drone, containerName } = resolveDroneFromRegistry(reg, name);
-  const hostPort = await resolveHostPort(containerName, Number((drone as any)?.containerPort ?? 7777));
+  const { drone, containerName, runtime } = resolveDroneFromRegistry(reg, name);
+  const hostPort =
+    runtime === 'host'
+      ? normalizeHostPort((drone as any)?.hostPort)
+      : await resolveHostPort(containerName, Number((drone as any)?.containerPort ?? 7777));
   const client = makeClient(hostPort, (drone as any).token);
   return await fn({ drone: drone as any, hostPort, client });
 }
@@ -674,7 +792,7 @@ function formatList(items: string[]): string {
 }
 
 const program = new Command();
-program.name('drone').description('Manage per-container drone daemons via dvm');
+program.name('drone').description('Manage drone daemons (container or host runtime)');
 
 const createCommand = addCreateOptions(
   program
@@ -685,14 +803,97 @@ const createCommand = addCreateOptions(
 createCommand
   .option('--no-build', 'Skip checking daemon build output')
   .action(async (name, options) => {
-    const { repoPath, group, containerPort, cwd, mkdir, droneId, cloneContainer } = parseCreateOptions(options);
+    const { repoPath, group, containerPort, runtime, cwd, mkdir, droneId, cloneContainer } = parseCreateOptions(options);
 
     if (options.build) await ensureDaemonBuilt(repoPath);
 
     const token = crypto.randomBytes(32).toString('base64url');
     const stableId = droneId ?? crypto.randomUUID();
-    const containerName = stableContainerNameFromDroneId(stableId);
     const displayName = normalizeDroneDisplayName(name);
+
+    if (runtime === 'host') {
+      if (cloneContainer) throw new Error('--clone-container is only supported for container runtime');
+      const hostPort = await getFreeTcpPort();
+      const hostPid = await launchHostDroneDaemon({ droneId: stableId, hostPort, token });
+      const workspaceDir = hostDroneWorkspacePath(stableId);
+      const defaultCwd = repoPath ? repoPath : workspaceDir;
+      const effectiveCwd = cwd || defaultCwd;
+      if (!repoPath) {
+        await fs.mkdir(workspaceDir, { recursive: true });
+      }
+      if (effectiveCwd) {
+        if (mkdir) {
+          await fs.mkdir(effectiveCwd, { recursive: true });
+        } else {
+          const st = await fs.stat(effectiveCwd).catch(() => null);
+          if (!st || !st.isDirectory()) {
+            await stopHostDaemonByPid(hostPid);
+            throw new Error(`cwd does not exist: ${effectiveCwd} (pass --mkdir to create)`);
+          }
+        }
+      }
+      try {
+        await waitForHealth(hostPort, token);
+      } catch (error) {
+        await stopHostDaemonByPid(hostPid);
+        throw error;
+      }
+
+      try {
+        await updateRegistry((reg) => {
+          const at = new Date().toISOString();
+          if (registryHasDisplayName(reg, displayName)) throw new Error(`drone already exists: ${displayName}`);
+          if (group) {
+            (reg as any).groups = (reg as any).groups ?? {};
+            if (!(reg as any).groups[group]) (reg as any).groups[group] = { name: group, createdAt: at, updatedAt: at };
+          }
+          reg.drones[stableId] = {
+            id: stableId,
+            runtime: 'host',
+            name: displayName,
+            containerName: stableContainerNameFromDroneId(stableId),
+            group,
+            cwd: effectiveCwd,
+            hostPort,
+            containerPort: hostPort,
+            token,
+            repoPath,
+            ...(repoPath ? { repo: { dest: repoPath } } : {}),
+            createdAt: at,
+            host: {
+              pid: hostPid,
+              workspaceDir,
+              rootDir: hostDroneRootPath(stableId),
+              dataDir: hostDroneDaemonDataPath(stableId),
+              tokenPath: hostDroneDaemonTokenPath(stableId),
+            },
+          } as any;
+        });
+      } catch (error) {
+        await stopHostDaemonByPid(hostPid);
+        throw error;
+      }
+
+      // eslint-disable-next-line no-console
+      console.log(
+        JSON.stringify(
+          {
+            ok: true,
+            id: stableId,
+            runtime: 'host',
+            name: displayName,
+            hostPort,
+            daemonPid: hostPid,
+            ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
+          },
+          null,
+          2
+        )
+      );
+      return;
+    }
+
+    const containerName = stableContainerNameFromDroneId(stableId);
 
     let hostPort = 0;
     if (cloneContainer) {
@@ -791,6 +992,7 @@ chmod +x /dvm-data/drone/daemon.js
       }
       reg.drones[stableId] = {
         id: stableId,
+        runtime: 'container',
         name: displayName,
         containerName,
         group,
@@ -805,7 +1007,11 @@ chmod +x /dvm-data/drone/daemon.js
 
     // eslint-disable-next-line no-console
     console.log(
-      JSON.stringify({ ok: true, id: stableId, name: displayName, containerName, hostPort, containerPort, ...(cwd ? { cwd } : {}) }, null, 2)
+      JSON.stringify(
+        { ok: true, id: stableId, runtime: 'container', name: displayName, containerName, hostPort, containerPort, ...(cwd ? { cwd } : {}) },
+        null,
+        2
+      )
     );
   });
 
@@ -819,7 +1025,10 @@ const importCommand = addCreateOptions(
 importCommand
   .option('--container <name>', 'Existing container name to import (defaults to derived from --drone-id when provided)')
   .action(async (name, options) => {
-    const { repoPath, group, containerPort, cwd, mkdir, droneId } = parseCreateOptions(options);
+    const { repoPath, group, containerPort, runtime, cwd, mkdir, droneId } = parseCreateOptions(options);
+    if (runtime !== 'container') {
+      throw new Error('drone import currently supports only container runtime');
+    }
 
     const displayName = normalizeDroneDisplayName(name);
 
@@ -863,6 +1072,7 @@ importCommand
       }
       reg.drones[stableId] = {
         id: stableId,
+        runtime: 'container',
         name: displayName,
         containerName,
         group,
@@ -877,25 +1087,33 @@ importCommand
 
     // eslint-disable-next-line no-console
     console.log(
-      JSON.stringify({ ok: true, id: stableId, name: displayName, containerName, hostPort, containerPort, ...(cwd ? { cwd } : {}) }, null, 2)
+      JSON.stringify(
+        { ok: true, id: stableId, runtime: 'container', name: displayName, containerName, hostPort, containerPort, ...(cwd ? { cwd } : {}) },
+        null,
+        2
+      )
     );
   });
 
 program
   .command('rm')
   .alias('remove')
-  .description('Remove a drone: delete container + remove from registry')
+  .description('Remove a drone and clean up runtime resources')
   .argument('<name>', 'Drone display name')
-  .option('--keep-volume', 'Keep the dvm persistence volume (dvm-<name>-data)', false)
+  .option('--keep-volume', 'Keep runtime persistence data (container volume or host runtime dir)', false)
   .option('--forget', 'Remove from registry even if container removal fails', true)
   .action(async (name, options) => {
     const regSnap = await loadRegistry();
     const nameStr = String(name ?? '').trim();
+    let runtime: DroneRuntime = 'container';
     let containerName = nameStr;
     let resolvedKey: string | null = null;
+    let resolvedDrone: any = null;
     try {
       const resolved = resolveDroneFromRegistry(regSnap, nameStr);
       resolvedKey = resolved.key;
+      resolvedDrone = resolved.drone;
+      runtime = resolved.runtime;
       containerName = resolved.containerName;
     } catch {
       // Not in registry; treat as raw container name.
@@ -904,10 +1122,21 @@ program
     const hadEntry = Boolean(resolvedKey);
 
     let removeErr: string | null = null;
-    try {
-      await dvmRemove(containerName, { keepVolume: Boolean(options.keepVolume) });
-    } catch (err: any) {
-      removeErr = err?.message ?? String(err);
+    if (runtime === 'host' && resolvedDrone) {
+      try {
+        await stopHostDaemonByPid((resolvedDrone as any)?.host?.pid);
+      } catch (err: any) {
+        removeErr = err?.message ?? String(err);
+      }
+      if (!Boolean(options.keepVolume) && resolvedKey) {
+        await removeHostRuntimeRootBestEffort(resolvedKey);
+      }
+    } else {
+      try {
+        await dvmRemove(containerName, { keepVolume: Boolean(options.keepVolume) });
+      } catch (err: any) {
+        removeErr = err?.message ?? String(err);
+      }
     }
 
     let removedRegistry = false;
@@ -927,7 +1156,14 @@ program
     // eslint-disable-next-line no-console
     console.log(
       JSON.stringify(
-        { ok: true, id: resolvedKey, name: nameStr, containerName, removedRegistry: removedRegistry || hadEntry },
+        {
+          ok: true,
+          id: resolvedKey,
+          name: nameStr,
+          runtime,
+          containerName: runtime === 'container' ? containerName : null,
+          removedRegistry: removedRegistry || hadEntry,
+        },
         null,
         2
       )
@@ -1087,6 +1323,7 @@ program
     const out: any[] = [];
     for (const d of Object.values(reg.drones)) {
       const g = String(d.group ?? '').trim();
+      const runtime = normalizeDroneRuntime((d as any)?.runtime);
       if (options.ungrouped) {
         if (g) continue;
       } else if (groupFilter) {
@@ -1095,11 +1332,15 @@ program
 
       try {
         const containerName = String((d as any)?.containerName ?? (d as any)?.name ?? '').trim() || String((d as any)?.name ?? '');
-        const hostPort = await resolveHostPort(containerName, d.containerPort);
+        const hostPort =
+          runtime === 'host'
+            ? normalizeHostPort((d as any)?.hostPort)
+            : await resolveHostPort(containerName, d.containerPort);
         const s = await status(makeClient(hostPort, d.token));
         out.push({
           name: d.name,
-          containerName,
+          runtime,
+          containerName: runtime === 'container' ? containerName : null,
           group: d.group ?? null,
           hostPort,
           containerPort: d.containerPort,
@@ -1107,7 +1348,7 @@ program
           status: s,
         });
       } catch (err: any) {
-        out.push({ name: d.name, group: d.group ?? null, ok: false, error: err?.message ?? String(err) });
+        out.push({ name: d.name, runtime, group: d.group ?? null, ok: false, error: err?.message ?? String(err) });
       }
     }
     // eslint-disable-next-line no-console
@@ -1494,8 +1735,9 @@ program
   .action(async (name) => {
     await withDroneClient(name, async ({ drone, hostPort, client }) => {
       const s = await status(client);
+      const runtime = normalizeDroneRuntime((drone as any)?.runtime);
       // eslint-disable-next-line no-console
-      console.log(JSON.stringify({ name, hostPort, containerPort: drone.containerPort, status: s }, null, 2));
+      console.log(JSON.stringify({ name, runtime, hostPort, containerPort: drone.containerPort, status: s }, null, 2));
     });
   });
 

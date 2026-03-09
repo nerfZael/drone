@@ -11,6 +11,7 @@ import { RawData, WebSocket, WebSocketServer } from 'ws';
 
 import { droneRootPath } from '../host/paths';
 import { loadRegistry, updateRegistry } from '../host/registry';
+import { normalizeDroneRuntime, type DroneRuntime } from '../host/runtime';
 import {
   dvmBaseSet,
   dvmCopyFromContainer,
@@ -33,6 +34,7 @@ import {
   dvmSessionType,
 } from '../host/dvm';
 import {
+  procStart,
   promptEnqueue as dronePromptEnqueue,
   promptGet as dronePromptGet,
   status as droneStatus,
@@ -48,6 +50,7 @@ import {
   deleteHostRefBestEffort,
   gitCurrentBranchOrSha,
   gitPullHostBranchBeforeCreate,
+  gitRepoDiffForPath,
   gitIsClean,
   gitIsAncestor,
   gitMergeBase,
@@ -157,6 +160,14 @@ function parsePullHostBranchBeforeCreate(raw: unknown): boolean {
   if (value === '0' || value === 'false' || value === 'no' || value === 'off') return false;
   if (value === '1' || value === 'true' || value === 'yes' || value === 'on') return true;
   return true;
+}
+
+function parseCreateRuntime(raw: unknown): DroneRuntime {
+  if (raw == null) return 'container';
+  const value = String(raw).trim().toLowerCase();
+  if (!value) return 'container';
+  if (value === 'container' || value === 'host') return value;
+  throw new Error('invalid runtime (expected container|host)');
 }
 
 function formatPullHostBranchBeforeCreateError(error: unknown): {
@@ -394,6 +405,7 @@ async function handleFsUploadRoute(opts: {
   const { req, res, u, resolved, droneRef } = opts;
   const droneId = resolved.id;
   const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+  const runtime = droneRuntime(resolved.drone);
   const fail = (statusCode: number, message: string) => {
     const err = new Error(message) as Error & { statusCode?: number };
     err.statusCode = statusCode;
@@ -437,7 +449,7 @@ async function handleFsUploadRoute(opts: {
       await fh.close();
     }
   };
-  const copyTmpFileToContainerAndReadMeta = async (opts: {
+  const copyTmpFileToRuntimeAndReadMeta = async (opts: {
     tmpPath: string;
     targetDir: string;
     fileName: string;
@@ -447,6 +459,20 @@ async function handleFsUploadRoute(opts: {
     mtimeMs: number | null;
   }> => {
     const { tmpPath, targetDir, fileName } = opts;
+    if (runtime === 'host') {
+      const hostTargetDir = path.resolve(String(targetDir ?? '').trim() || normalizeDroneCwdForRuntime(resolved.drone, null));
+      const preflight = await fs.stat(hostTargetDir);
+      if (!preflight.isDirectory()) throw fail(404, `path is not a directory: ${hostTargetDir}`);
+      const hostTargetPath = path.join(hostTargetDir, fileName);
+      await fs.copyFile(tmpPath, hostTargetPath);
+      const st = await fs.stat(hostTargetPath);
+      if (!st.isFile()) throw fail(404, `uploaded file not found: ${hostTargetPath}`);
+      return {
+        path: path.resolve(hostTargetPath),
+        size: Number.isFinite(st.size) ? Math.max(0, Math.floor(st.size)) : 0,
+        mtimeMs: Number.isFinite(st.mtimeMs) ? Math.max(0, Math.floor(st.mtimeMs)) : null,
+      };
+    }
     return await withLockedDroneContainer(
       { requestedDroneName: droneName, droneEntry: resolved.drone },
       async ({ containerName }) => {
@@ -510,7 +536,7 @@ async function handleFsUploadRoute(opts: {
 
   const contentType = headerValue('content-type').toLowerCase();
   const isJsonUpload = contentType.includes('application/json');
-  let targetDir = normalizeContainerPath(u.searchParams.get('path') ?? '');
+  let targetDir = normalizeFsPathForRuntime(resolved.drone, u.searchParams.get('path') ?? '', { fallbackToHome: true });
   let fileNameRaw = String(u.searchParams.get('name') ?? '').trim();
 
   const tmpDir = path.join(
@@ -526,7 +552,7 @@ async function handleFsUploadRoute(opts: {
       } catch (e: any) {
         throw fail(400, e?.message ?? String(e));
       }
-      if (!targetDir) targetDir = normalizeContainerPath(body?.path ?? '');
+      if (!targetDir) targetDir = normalizeFsPathForRuntime(resolved.drone, body?.path ?? '', { fallbackToHome: true });
       if (!fileNameRaw) fileNameRaw = String(body?.name ?? '').trim();
       if (typeof body?.dataBase64 !== 'string') throw fail(400, 'dataBase64 must be a string');
       const dataBase64 = String(body?.dataBase64 ?? '').replace(/\s+/g, '');
@@ -546,12 +572,12 @@ async function handleFsUploadRoute(opts: {
       const tmpPath = path.join(tmpDir, fileName);
       await fs.mkdir(tmpDir, { recursive: true });
       await fs.writeFile(tmpPath, bytes);
-      const result = await copyTmpFileToContainerAndReadMeta({ tmpPath, targetDir, fileName });
+      const result = await copyTmpFileToRuntimeAndReadMeta({ tmpPath, targetDir, fileName });
       respondUploadSuccess(result);
       return;
     }
 
-    if (!targetDir) targetDir = normalizeContainerPath(headerValue('x-upload-path'));
+    if (!targetDir) targetDir = normalizeFsPathForRuntime(resolved.drone, headerValue('x-upload-path'), { fallbackToHome: true });
     if (!fileNameRaw) fileNameRaw = decodeUploadNameHeader();
     const fileName = normalizeUploadFileName(fileNameRaw);
     if (!targetDir) throw fail(400, 'missing directory path');
@@ -559,13 +585,13 @@ async function handleFsUploadRoute(opts: {
     const tmpPath = path.join(tmpDir, fileName);
     await fs.mkdir(tmpDir, { recursive: true });
     await writeUploadStreamToTmpPath(tmpPath);
-    const result = await copyTmpFileToContainerAndReadMeta({ tmpPath, targetDir, fileName });
+    const result = await copyTmpFileToRuntimeAndReadMeta({ tmpPath, targetDir, fileName });
     respondUploadSuccess(result);
     return;
   } catch (e: any) {
     const msg = e?.message ?? String(e);
     const explicitStatus = Number((e as any)?.statusCode ?? 0);
-    const code = explicitStatus > 0 ? explicitStatus : looksLikeMissingContainerError(msg) ? 404 : 500;
+    const code = explicitStatus > 0 ? explicitStatus : runtime === 'host' ? hostFsErrorStatus(e) : looksLikeMissingContainerError(msg) ? 404 : 500;
     json(res, code, { ok: false, error: msg, id: droneId, name: droneName, path: targetDir || undefined });
     return;
   } finally {
@@ -581,7 +607,23 @@ function isRepoAttachedDrone(drone: any): boolean {
   if (!drone || typeof drone !== 'object') return false;
   const explicit = (drone as any).repoAttached;
   if (typeof explicit === 'boolean') return explicit;
-  return Boolean(String((drone as any).repoPath ?? '').trim());
+  return (
+    Boolean(String((drone as any).repoPath ?? '').trim()) ||
+    Boolean(String((drone as any).repo?.dest ?? '').trim()) ||
+    Boolean(String((drone as any).repo?.seededAt ?? '').trim())
+  );
+}
+
+function unsupportedHostCustomAgentError(): Error & { statusCode?: number } {
+  const err = new Error('custom agents are not yet supported for host runtime') as Error & { statusCode?: number };
+  err.statusCode = 400;
+  return err;
+}
+
+function assertChatAgentSupportedForDrone(drone: any, agent: ChatAgentConfig | null | undefined): void {
+  if (droneRuntime(drone) === 'host' && agent?.kind === 'custom') {
+    throw unsupportedHostCustomAgentError();
+  }
 }
 
 function looksLikeEmptyBundleExportError(message: string): boolean {
@@ -690,8 +732,58 @@ async function importBundleHeadToDroneRef(opts: {
 
 const NON_REPO_HOME_CWD = '/dvm-data/home';
 
+function droneRuntime(drone: any): DroneRuntime {
+  return normalizeDroneRuntime((drone as any)?.runtime);
+}
+
 function defaultDroneHomeCwd(drone: any): string {
+  if (droneRuntime(drone) === 'host') {
+    const cwd = String((drone as any)?.cwd ?? '').trim();
+    if (cwd && path.isAbsolute(cwd)) return path.normalize(cwd);
+    const repoPath = String((drone as any)?.repoPath ?? '').trim();
+    if (repoPath && path.isAbsolute(repoPath)) return path.normalize(repoPath);
+    return path.resolve(os.homedir());
+  }
   return isRepoAttachedDrone(drone) ? '/work/repo' : NON_REPO_HOME_CWD;
+}
+
+function normalizeDroneCwdForRuntime(drone: any, cwdRaw: unknown): string {
+  const fallback = defaultDroneHomeCwd(drone);
+  const runtime = droneRuntime(drone);
+  const raw = typeof cwdRaw === 'string' ? String(cwdRaw).trim() : '';
+  if (runtime === 'host') {
+    const target = raw || fallback;
+    if (!target) return path.resolve(os.homedir());
+    return path.isAbsolute(target) ? path.normalize(target) : path.resolve(fallback || os.homedir(), target);
+  }
+  return normalizeContainerPath(raw || fallback || NON_REPO_HOME_CWD);
+}
+
+async function resolveDroneDaemonClientForEntry(
+  drone: any,
+): Promise<{ client: ReturnType<typeof makeClient>; hostPort: number; token: string } | null> {
+  const token = typeof drone?.token === 'string' ? String(drone.token).trim() : '';
+  if (!token) return null;
+
+  const runtime = droneRuntime(drone);
+  const storedHostPort = Number(drone?.hostPort ?? NaN);
+  if (runtime === 'host') {
+    if (!Number.isFinite(storedHostPort) || storedHostPort <= 0) return null;
+    const hostPort = Math.floor(storedHostPort);
+    return { client: makeClient(hostPort, token), hostPort, token };
+  }
+
+  let hostPort = Number.isFinite(storedHostPort) && storedHostPort > 0 ? Math.floor(storedHostPort) : 0;
+  if (!hostPort) {
+    const containerName = String((drone as any)?.containerName ?? (drone as any)?.name ?? '').trim();
+    const containerPort = Number((drone as any)?.containerPort ?? NaN);
+    if (containerName && Number.isFinite(containerPort) && containerPort > 0) {
+      const resolved = await resolveHostPort(containerName, Math.floor(containerPort));
+      hostPort = Number.isFinite(resolved as number) && (resolved as number) > 0 ? Math.floor(resolved as number) : 0;
+    }
+  }
+  if (!hostPort) return null;
+  return { client: makeClient(hostPort, token), hostPort, token };
 }
 
 function droneRepoPathInContainer(drone: any): string {
@@ -875,14 +967,124 @@ function parseContainerFsListOutput(text: string): { resolvedPath: string; entri
     });
   }
 
+  sortFsEntries(entries);
+
+  return { resolvedPath, entries };
+}
+
+function sortFsEntries(entries: ContainerFsEntry[]): void {
   const rank = (k: ContainerFsEntry['kind']) => (k === 'directory' ? 0 : k === 'file' ? 1 : 2);
   entries.sort((a, b) => {
     const r = rank(a.kind) - rank(b.kind);
     if (r !== 0) return r;
     return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
   });
+}
 
+function normalizeFsPathForRuntime(drone: any, raw: unknown, opts?: { fallbackToHome?: boolean }): string {
+  const runtime = droneRuntime(drone);
+  if (runtime === 'host') {
+    const text = typeof raw === 'string' ? String(raw).trim() : '';
+    if (!text && opts?.fallbackToHome === false) return '';
+    return normalizeDroneCwdForRuntime(drone, text || null);
+  }
+  const text = typeof raw === 'string' ? String(raw) : '';
+  return normalizeContainerPath(text || '/');
+}
+
+function hostFsErrorStatus(error: unknown): number {
+  const code = String((error as any)?.code ?? '').trim().toUpperCase();
+  if (code === 'ENOENT' || code === 'ENOTDIR') return 404;
+  if (code === 'EACCES' || code === 'EPERM') return 403;
+  return 500;
+}
+
+async function hostMimeType(pathRaw: string): Promise<string | null> {
+  const targetPath = String(pathRaw ?? '').trim();
+  if (!targetPath) return null;
+  try {
+    const r = await runHostCommand('file', ['-Lb', '--mime-type', '--', targetPath], { timeoutMs: 2500 });
+    if (r.code !== 0) return null;
+    const mime = String(r.stdout ?? '').trim().toLowerCase();
+    if (!mime) return null;
+    return mime.split(/\s+/)[0] || null;
+  } catch {
+    return null;
+  }
+}
+
+async function listHostFsDirectory(targetPathRaw: string): Promise<{ resolvedPath: string; entries: ContainerFsEntry[] }> {
+  const resolvedPath = path.resolve(String(targetPathRaw ?? '').trim() || path.resolve(os.homedir()));
+  const dirStat = await fs.stat(resolvedPath);
+  if (!dirStat.isDirectory()) {
+    const err = new Error(`path is not a directory: ${resolvedPath}`) as Error & { code?: string };
+    err.code = 'ENOTDIR';
+    throw err;
+  }
+
+  const dirents = await fs.readdir(resolvedPath, { withFileTypes: true });
+  const entries: ContainerFsEntry[] = [];
+  for (const d of dirents) {
+    const name = String(d?.name ?? '').trim();
+    if (!name || name === '.' || name === '..') continue;
+    const fullPath = path.join(resolvedPath, name);
+    let stat: any = null;
+    try {
+      stat = await fs.lstat(fullPath);
+    } catch {
+      stat = null;
+    }
+    const kind: ContainerFsEntry['kind'] =
+      d.isDirectory() || Boolean(stat?.isDirectory())
+        ? 'directory'
+        : d.isFile() || Boolean(stat?.isFile())
+          ? 'file'
+          : 'other';
+    const ext = kind === 'file' ? extensionLower(name) || null : null;
+    entries.push({
+      name,
+      path: fullPath,
+      kind,
+      size: stat && Number.isFinite(stat.size) ? Math.max(0, Math.floor(stat.size)) : null,
+      mtimeMs: stat && Number.isFinite(stat.mtimeMs) ? Math.max(0, Math.floor(stat.mtimeMs)) : null,
+      ext,
+      isImage: kind === 'file' ? isLikelyImagePath(name) : false,
+      isVideo: kind === 'file' ? isLikelyVideoPath(name) : false,
+    });
+  }
+  sortFsEntries(entries);
   return { resolvedPath, entries };
+}
+
+async function readHostFileBytes(opts: {
+  targetPath: string;
+  maxBytes: number;
+}): Promise<{ buf: Buffer; size: number; mtimeMs: number | null; mime: string | null }> {
+  const targetPath = path.resolve(String(opts.targetPath ?? '').trim());
+  const st = await fs.stat(targetPath);
+  if (!st.isFile()) {
+    const err = new Error(`file not found: ${targetPath}`) as Error & { code?: string };
+    err.code = 'ENOENT';
+    throw err;
+  }
+  const size = Number.isFinite(st.size) ? Math.max(0, Math.floor(st.size)) : 0;
+  if (size > opts.maxBytes) {
+    const err = new Error(`file too large (${size} bytes, max ${opts.maxBytes})`) as Error & {
+      statusCode?: number;
+      size?: number;
+    };
+    err.statusCode = 413;
+    err.size = size;
+    throw err;
+  }
+  const buf = await fs.readFile(targetPath);
+  const mime = await hostMimeType(targetPath);
+  return {
+    buf,
+    size,
+    mtimeMs: Number.isFinite(st.mtimeMs) ? Math.max(0, Math.floor(st.mtimeMs)) : null,
+    mime,
+  };
 }
 
 function isUngroupedGroupName(name: string): boolean {
@@ -1682,14 +1884,21 @@ async function discoverModelsForBuiltinAgent(opts: {
   return { models: [], source: 'none', discoveredAt: new Date(now).toISOString(), error };
 }
 
-async function cliSupportsModelFlag(opts: { containerName: string; bin: string }): Promise<boolean> {
-  const key = `${opts.containerName}::${opts.bin}`;
+async function cliSupportsModelFlag(opts: { bin: string; runtime: DroneRuntime; containerName?: string; cwd?: string | null }): Promise<boolean> {
+  const keyBase = opts.runtime === 'host' ? String(opts.cwd ?? '').trim() || 'host' : String(opts.containerName ?? '').trim() || 'container';
+  const key = `${opts.runtime}:${keyBase}::${opts.bin}`;
   const now = Date.now();
   const cached = cliModelFlagSupportCache.get(key);
   if (cached && now - cached.atMs < CHAT_MODEL_DISCOVERY_CACHE_TTL_MS) return cached.supported;
-  const r = await dvmExec(opts.containerName, 'bash', ['-lc', `${opts.bin} --help`], {
-    timeoutMs: defaultSeedBootstrapTimeoutMs(),
-  });
+  const r =
+    opts.runtime === 'host'
+      ? await runHostCommand('bash', ['-lc', `${opts.bin} --help`], {
+          cwd: String(opts.cwd ?? '').trim() || undefined,
+          timeoutMs: defaultSeedBootstrapTimeoutMs(),
+        })
+      : await dvmExec(String(opts.containerName ?? ''), 'bash', ['-lc', `${opts.bin} --help`], {
+          timeoutMs: defaultSeedBootstrapTimeoutMs(),
+        });
   const text = stripAnsiFromCliOutput(`${r.stdout || ''}\n${r.stderr || ''}`);
   const supported = /\B--model\b/i.test(text) || /\B-m,\s*--model\b/i.test(text);
   cliModelFlagSupportCache.set(key, { atMs: now, supported });
@@ -1726,11 +1935,12 @@ async function enqueueTranscriptPrompt(opts: {
   script: string;
 }) {
   const d = opts.drone;
+  const runtime = droneRuntime(d);
   const containerName = String(d?.containerName ?? d?.name ?? '').trim();
   // After hub restarts, a container may still run an older daemon.js.
   // Best-effort upgrade once per container so new prompt behavior is consistent.
   const daemonKey = `${containerName}:${Number(d?.containerPort ?? 0)}`;
-  if (daemonKey && !DAEMON_UPGRADED_BY_CONTAINER.has(daemonKey)) {
+  if (runtime === 'container' && daemonKey && !DAEMON_UPGRADED_BY_CONTAINER.has(daemonKey)) {
     const existingTask = DAEMON_UPGRADE_TASKS.get(daemonKey);
     if (existingTask) {
       try {
@@ -1816,6 +2026,7 @@ async function sendPromptToChat(opts: {
     const d: any = (regLatest as any).drones?.[droneId] ?? null;
     if (!d) throw new Error(`unknown drone: ${droneId}`);
     const droneLabel = String(d?.name ?? '').trim() || droneId;
+    const runtime = droneRuntime(d);
     const containerName = String(d?.containerName ?? '').trim() || String(d?.name ?? '').trim() || droneId;
 
     const normalizedChat = opts.chatName || 'default';
@@ -1825,9 +2036,11 @@ async function sendPromptToChat(opts: {
     const agent = inferChatAgent(chat);
     const chatModel = normalizeChatModel((chat as any)?.model);
 
-    const cwdRaw = typeof opts.cwd === 'string' ? opts.cwd : '';
-    const defaultCwd = typeof d.cwd === 'string' && d.cwd.trim() ? d.cwd.trim() : '/dvm-data';
-    const cwd = cwdRaw ? normalizeContainerPath(cwdRaw) : normalizeContainerPath(defaultCwd);
+    const cwd = normalizeDroneCwdForRuntime(d, typeof opts.cwd === 'string' ? opts.cwd : null);
+    const cdCommand =
+      runtime === 'host'
+        ? `cd ${bashQuote(cwd)} 2>/dev/null || cd /`
+        : `cd ${bashQuote(cwd)} 2>/dev/null || cd /dvm-data || cd /`;
 
     const attachments = Array.isArray(opts.attachments) ? opts.attachments : [];
     const providedAttachmentRefs = normalizeChatImageAttachmentRefs(opts.attachmentRefs);
@@ -1848,16 +2061,26 @@ async function sendPromptToChat(opts: {
         chatName: normalizedChat,
         promptId,
       });
-      await copyChatAttachmentsToContainer({ containerName, containerDir: attachmentsDir, attachments });
+      if (runtime === 'host') {
+        await copyChatAttachmentsToHost({ hostDir: attachmentsDir, attachments });
+      } else {
+        await copyChatAttachmentsToContainer({ containerName, containerDir: attachmentsDir, attachments });
+      }
     }
 
     if (agent.kind === 'builtin' && agent.id === 'cursor') {
-      const chatId = await ensureCursorChatId({ droneId, containerName, chatName: normalizedChat });
+      const chatId = await ensureCursorChatId({
+        droneId,
+        containerName,
+        chatName: normalizedChat,
+        runtime,
+        cwd,
+      });
       const modelArg = chatModel ? ` --model ${bashQuote(chatModel)}` : '';
       const script = [
         'set -euo pipefail',
         `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
-        `cd ${bashQuote(cwd)} 2>/dev/null || cd /dvm-data || cd /`,
+        cdCommand,
         `agent${modelArg} --resume ${bashQuote(chatId)} -f --approve-mcps --print ${bashQuote(effectivePrompt)}`,
       ].join('\n');
       await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'cursor', script });
@@ -1872,7 +2095,7 @@ async function sendPromptToChat(opts: {
         const script = [
           'set -euo pipefail',
           `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
-          `cd ${bashQuote(cwd)} 2>/dev/null || cd /dvm-data || cd /`,
+          cdCommand,
           `codex --ask-for-approval never exec${modelArg} --skip-git-repo-check --sandbox danger-full-access --json --color never ${bashQuote(effectivePrompt)}`,
         ].join('\n');
         await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'codex', script });
@@ -1882,7 +2105,7 @@ async function sendPromptToChat(opts: {
       const script = [
         'set -euo pipefail',
         `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
-        `cd ${bashQuote(cwd)} 2>/dev/null || cd /dvm-data || cd /`,
+        cdCommand,
         `codex --ask-for-approval never exec${modelArg} --skip-git-repo-check --sandbox danger-full-access --json --color never resume ${bashQuote(existingThreadId)} ${bashQuote(effectivePrompt)}`,
       ].join('\n');
       await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'codex', script });
@@ -1898,12 +2121,12 @@ async function sendPromptToChat(opts: {
 
     if (agent.kind === 'builtin' && agent.id === 'claude') {
       const claudeSessionId = await ensureClaudeSessionId({ droneId, chatName: normalizedChat });
-      const supportsModel = chatModel ? await cliSupportsModelFlag({ containerName, bin: 'claude' }) : false;
+      const supportsModel = chatModel ? await cliSupportsModelFlag({ runtime, containerName, cwd, bin: 'claude' }) : false;
       const modelArg = chatModel && supportsModel ? ` --model ${bashQuote(chatModel)}` : '';
       const script = [
         'set -euo pipefail',
         `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
-        `cd ${bashQuote(cwd)} 2>/dev/null || cd /dvm-data || cd /`,
+        cdCommand,
         `claude --print --dangerously-skip-permissions --output-format text${modelArg} --session-id ${bashQuote(claudeSessionId)} ${bashQuote(effectivePrompt)}`,
       ].join('\n');
       await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'claude', script });
@@ -1918,7 +2141,7 @@ async function sendPromptToChat(opts: {
     }
 
     if (agent.kind === 'builtin' && agent.id === 'opencode') {
-      const supportsModel = chatModel ? await cliSupportsModelFlag({ containerName, bin: 'opencode' }) : false;
+      const supportsModel = chatModel ? await cliSupportsModelFlag({ runtime, containerName, cwd, bin: 'opencode' }) : false;
       const modelArg = chatModel && supportsModel ? ` --model ${bashQuote(chatModel)}` : '';
       const openCodeSessionId =
         typeof (chat as any).openCodeSessionId === 'string' ? String((chat as any).openCodeSessionId).trim() : '';
@@ -1927,7 +2150,7 @@ async function sendPromptToChat(opts: {
       const script = [
         'set -euo pipefail',
         `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
-        `cd ${bashQuote(cwd)} 2>/dev/null || cd /dvm-data || cd /`,
+        cdCommand,
         `opencode run --format default --title ${bashQuote(title)}${modelArg}${resumeArg} ${bashQuote(effectivePrompt)}`,
       ].join('\n');
       await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'opencode', script });
@@ -1942,6 +2165,9 @@ async function sendPromptToChat(opts: {
     }
 
     // Custom agent: keep tmux-backed full CLI behavior.
+    if (runtime === 'host') {
+      throw unsupportedHostCustomAgentError();
+    }
     const tmuxCmd = await resolveChatTmuxCommand({ droneId, chatName: normalizedChat });
     const { sessionName } = await ensureHubChatSessionRunning({
       containerName,
@@ -3841,6 +4067,7 @@ async function enqueuePrompt(opts: {
   // Make sure chat exists before we write pending state.
   await ensureChatEntry({ droneId, chatName });
   const { d, chat } = await getChatEntry({ droneId, chatName });
+  const runtime = droneRuntime(d);
   const agent = inferChatAgent(chat);
   const turns: any[] = Array.isArray((chat as any)?.turns) ? (chat as any).turns : [];
   const transcriptDoneIds = new Set(turns.map((t: any) => String(t?.id ?? '').trim()).filter(Boolean));
@@ -3890,9 +4117,7 @@ async function enqueuePrompt(opts: {
         })
       : false);
 
-  const cwdRaw = typeof opts.cwd === 'string' ? opts.cwd : '';
-  const defaultCwd = typeof (d as any)?.cwd === 'string' && String((d as any).cwd).trim() ? String((d as any).cwd).trim() : '/dvm-data';
-  const cwd = cwdRaw ? normalizeContainerPath(cwdRaw) : normalizeContainerPath(defaultCwd);
+  const cwd = normalizeDroneCwdForRuntime(d, typeof opts.cwd === 'string' ? opts.cwd : null);
   const rawAttachments = Array.isArray(opts.attachments) ? opts.attachments : [];
   const attachmentsForPending = buildChatImageAttachmentRefs({
     attachments: rawAttachments,
@@ -3919,18 +4144,25 @@ async function enqueuePrompt(opts: {
 
   if (defer) {
     if (rawAttachments.length > 0 && attachmentsForPending.length > 0) {
-      const containerName = String((d as any)?.containerName ?? (d as any)?.name ?? droneId).trim() || droneId;
       const attachmentsDir = buildChatAttachmentsDirectory({
         cwd,
         chatName,
         promptId: id,
       });
       try {
-        await copyChatAttachmentsToContainer({
-          containerName,
-          containerDir: attachmentsDir,
-          attachments: rawAttachments,
-        });
+        if (runtime === 'host') {
+          await copyChatAttachmentsToHost({
+            hostDir: attachmentsDir,
+            attachments: rawAttachments,
+          });
+        } else {
+          const containerName = String((d as any)?.containerName ?? (d as any)?.name ?? droneId).trim() || droneId;
+          await copyChatAttachmentsToContainer({
+            containerName,
+            containerDir: attachmentsDir,
+            attachments: rawAttachments,
+          });
+        }
       } catch (e: any) {
         const errText = e?.message ?? String(e);
         await updatePendingPrompt({
@@ -4069,6 +4301,7 @@ async function provisionDroneFromPending(name: string) {
 
   const repoPath = String(pending.repoPath ?? '').trim();
   const group = typeof pending.group === 'string' ? pending.group.trim() : '';
+  const runtime = normalizeDroneRuntime((pending as any)?.runtime);
   const build = Boolean(pending.build);
   const containerPort = typeof pending.containerPort === 'number' && Number.isFinite(pending.containerPort) ? pending.containerPort : null;
   const cloneFrom = typeof pending.cloneFrom === 'string' ? pending.cloneFrom.trim() : '';
@@ -4080,31 +4313,43 @@ async function provisionDroneFromPending(name: string) {
   const cloneSourceContainerName = cloneSource
     ? String((cloneSource.entry as any)?.containerName ?? (cloneSource.entry as any)?.name ?? cloneSource.key ?? '').trim()
     : '';
-  if (cloneFrom && !cloneSourceContainerName) {
+  const cloneSourceRuntime = cloneSource ? normalizeDroneRuntime((cloneSource.entry as any)?.runtime) : 'container';
+  if (cloneFrom && runtime === 'container' && cloneSourceRuntime !== 'container') {
+    await updatePendingDrone(name, {
+      phase: 'error',
+      message: 'Failed to start',
+      error: `clone source must use container runtime: ${cloneFrom}`,
+    });
+    return;
+  }
+  if (cloneFrom && runtime === 'container' && !cloneSourceContainerName) {
     await updatePendingDrone(name, { phase: 'error', message: 'Failed to start', error: `clone source not found: ${cloneFrom}` });
     return;
   }
 
-  await updatePendingDrone(name, { phase: 'creating', message: 'Creating container…' });
+  await updatePendingDrone(name, {
+    phase: 'creating',
+    message: runtime === 'host' ? 'Starting host runtime…' : 'Creating container…',
+  });
 
   const droneCli = resolveDroneCliPath();
   const repoArg = repoPath ? repoPath : '-';
   const displayName = String(pending?.name ?? '').trim() || name;
-  const args: string[] = [droneCli, 'create', displayName, '--repo', repoArg, '--drone-id', pendingDroneId];
+  const args: string[] = [droneCli, 'create', displayName, '--runtime', runtime, '--repo', repoArg, '--drone-id', pendingDroneId];
   if (group) args.push('--group', group);
   if (!build) args.push('--no-build');
   if (containerPort != null) args.push('--container-port', String(containerPort));
-  if (cloneSourceContainerName) args.push('--clone-container', cloneSourceContainerName);
-  if (!repoPath) args.push('--cwd', NON_REPO_HOME_CWD, '--mkdir');
+  if (runtime === 'container' && cloneSourceContainerName) args.push('--clone-container', cloneSourceContainerName);
+  if (runtime === 'container' && !repoPath) args.push('--cwd', NON_REPO_HOME_CWD, '--mkdir');
 
   const r = await runNodeCli(args);
   if (r.code !== 0) {
     const errText = (r.stderr || r.stdout || `drone create failed (exit ${r.code})`).trim();
     // If the container already exists (often due to a prior partial run),
     // try to import it into the registry and continue.
-    if (/already exists/i.test(errText)) {
+    if (runtime === 'container' && /already exists/i.test(errText)) {
       await updatePendingDrone(name, { phase: 'creating', message: 'Container exists; importing…' });
-      const impArgs: string[] = [droneCli, 'import', displayName, '--repo', repoArg, '--drone-id', pendingDroneId];
+      const impArgs: string[] = [droneCli, 'import', displayName, '--runtime', 'container', '--repo', repoArg, '--drone-id', pendingDroneId];
       if (group) impArgs.push('--group', group);
       if (containerPort != null) impArgs.push('--container-port', String(containerPort));
       if (!repoPath) impArgs.push('--cwd', NON_REPO_HOME_CWD, '--mkdir');
@@ -4123,7 +4368,7 @@ async function provisionDroneFromPending(name: string) {
 
   // If this drone is repo-attached, seed the container with the host repo before we enqueue any seed prompt.
   // This uses dvm's offline repo workflow (no host bind mount).
-  if (repoPath) {
+  if (repoPath && runtime === 'container') {
     await setDroneHubMetaByIdentity({
       droneId: pendingDroneId,
       hub: { phase: 'seeding', message: 'Seeding repo…' },
@@ -5251,7 +5496,10 @@ async function setChatAgentConfig(opts: {
     d.chats = d.chats ?? {};
     const cur = d.chats?.[opts.chatName];
     if (!cur) throw new Error(`unknown chat: ${opts.chatName}`);
-    if (opts.agent) cur.agent = opts.agent as any;
+    if (opts.agent) {
+      assertChatAgentSupportedForDrone(d, opts.agent);
+      cur.agent = opts.agent as any;
+    }
     if (opts.setModel) {
       if (opts.model) cur.model = opts.model;
       else delete cur.model;
@@ -5285,6 +5533,22 @@ async function ensureHubChatSessionRunning(opts: {
   });
 }
 
+async function copyChatAttachmentsToHost(opts: {
+  hostDir: string;
+  attachments: ChatImageAttachment[];
+}): Promise<void> {
+  const list = Array.isArray(opts.attachments) ? opts.attachments : [];
+  if (list.length === 0) return;
+  const dir = path.resolve(String(opts.hostDir ?? '').trim() || os.homedir());
+  await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+  for (const a of list) {
+    const filePath = path.join(dir, path.basename(String(a.fileName ?? '').trim() || 'attachment.bin'));
+    const buf = Buffer.from(String(a.dataBase64 ?? ''), 'base64');
+    if (!buf || buf.length === 0) throw new Error('attachment decode failed');
+    await fs.writeFile(filePath, buf, { mode: 0o600 });
+  }
+}
+
 function parseTurnSelection(selRaw: string, turnsLen: number): number[] {
   const sel = String(selRaw || 'last').trim().toLowerCase();
   if (sel === 'all') return Array.from({ length: turnsLen }, (_, i) => i);
@@ -5306,13 +5570,25 @@ function openCodeSessionTitle(droneName: string, chatName: string): string {
   return `drone-hub-${d}-${c}`;
 }
 
-async function ensureCursorChatId(opts: { droneId: string; containerName: string; chatName: string }): Promise<string> {
+async function ensureCursorChatId(opts: {
+  droneId: string;
+  containerName: string;
+  chatName: string;
+  runtime: DroneRuntime;
+  cwd?: string | null;
+}): Promise<string> {
   const { chat } = await getChatEntry({ droneId: opts.droneId, chatName: opts.chatName });
   const existing = typeof (chat as any).chatId === 'string' ? String((chat as any).chatId).trim() : '';
   if (existing) return existing;
-  const r = await dvmExec(opts.containerName, 'bash', ['-lc', 'agent create-chat'], {
-    timeoutMs: defaultSeedBootstrapTimeoutMs(),
-  });
+  const r =
+    opts.runtime === 'host'
+      ? await runHostCommand('bash', ['-lc', 'agent create-chat'], {
+          cwd: String(opts.cwd ?? '').trim() || undefined,
+          timeoutMs: defaultSeedBootstrapTimeoutMs(),
+        })
+      : await dvmExec(opts.containerName, 'bash', ['-lc', 'agent create-chat'], {
+          timeoutMs: defaultSeedBootstrapTimeoutMs(),
+        });
   if (r.code !== 0) throw new Error((r.stderr || r.stdout || 'agent create-chat failed').trim());
   const id = parseUuid(`${r.stdout}\n${r.stderr}`);
   if (!id) throw new Error(`failed to parse chatId from agent create-chat output: ${r.stdout || r.stderr || '(empty)'}`);
@@ -6462,7 +6738,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
       }
 
       // POST /api/drones
-      // Creates a new drone container (like `drone create`).
+      // Creates a new drone (container or host runtime, like `drone create`).
       if (method === 'POST' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'drones') {
         let body: any = null;
         try {
@@ -6481,6 +6757,13 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const pullHostBranchBeforeCreate = parsePullHostBranchBeforeCreate(body?.pullHostBranchBeforeCreate);
         const build = body?.build === true;
         const containerPortRaw = body?.containerPort;
+        let runtime: DroneRuntime = 'container';
+        try {
+          runtime = parseCreateRuntime(body?.runtime);
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          return;
+        }
 
         const droneCli = resolveDroneCliPath();
         if (!(await fileExists(droneCli))) {
@@ -6523,6 +6806,11 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           return;
         }
         const cloneFromEntry = cloneFromId ? findDroneEntryByIdentity(preRegAny, cloneFromId)?.entry : null;
+        const cloneFromRuntime = normalizeDroneRuntime((cloneFromEntry as any)?.runtime);
+        if (cloneFrom && runtime === 'container' && cloneFromRuntime !== 'container') {
+          json(res, 409, { ok: false, error: `clone source must use container runtime: ${cloneFrom}` });
+          return;
+        }
         const cloneFromContainerPortRaw = Number((cloneFromEntry as any)?.containerPort ?? NaN);
         const cloneFromContainerPort =
           Number.isFinite(cloneFromContainerPortRaw) && cloneFromContainerPortRaw > 0 && Math.floor(cloneFromContainerPortRaw) === cloneFromContainerPortRaw
@@ -6562,6 +6850,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             name,
             group: group ?? undefined,
             repoPath,
+            runtime,
             containerPort,
             build,
             createdAt: at,
@@ -6591,7 +6880,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         // Queue provisioning (bounded concurrency).
         enqueueProvisioning(droneId);
 
-        json(res, 202, { ok: true, id: droneId, name, phase: 'starting' });
+        json(res, 202, { ok: true, id: droneId, name, runtime, phase: 'starting' });
         return;
       }
 
@@ -6706,6 +6995,13 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
               const groupRaw = typeof raw?.group === 'string' ? raw.group.trim() : '';
               const group = groupRaw ? groupRaw : null;
               const repoPath = preflight.repoPath;
+              let runtime: DroneRuntime = 'container';
+              try {
+                runtime = parseCreateRuntime(raw?.runtime);
+              } catch (e: any) {
+                rejected.push({ name, error: e?.message ?? String(e), status: 400 });
+                continue;
+              }
               const build = raw?.build === true;
 
               const seedPrompt = String(raw?.seedPrompt ?? raw?.initialMessage ?? raw?.seed?.prompt ?? '').trim();
@@ -6731,6 +7027,11 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                 continue;
               }
               const cloneFromEntry = cloneFromId ? findDroneEntryByIdentity(regAny, cloneFromId)?.entry : null;
+              const cloneFromRuntime = normalizeDroneRuntime((cloneFromEntry as any)?.runtime);
+              if (cloneFrom && runtime === 'container' && cloneFromRuntime !== 'container') {
+                rejected.push({ name, error: `clone source must use container runtime: ${cloneFrom}`, status: 409 });
+                continue;
+              }
               const cloneFromContainerPortRaw = Number((cloneFromEntry as any)?.containerPort ?? NaN);
               const cloneFromContainerPort =
                 Number.isFinite(cloneFromContainerPortRaw) && cloneFromContainerPortRaw > 0 && Math.floor(cloneFromContainerPortRaw) === cloneFromContainerPortRaw
@@ -6752,6 +7053,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                 name,
                 group: group ?? undefined,
                 repoPath,
+                runtime,
                 containerPort,
                 build,
                 createdAt: at,
@@ -6984,6 +7286,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const pendingList: any[] = Object.values(regAny?.pending ?? {});
 
         const pendingSummaries = pendingList.map((p) => {
+          const runtime = normalizeDroneRuntime(p?.runtime);
           const repoAttached = Boolean(String(p?.repoPath ?? '').trim());
           const phase = String(p?.phase ?? 'starting') as PendingPhase;
           const seed = p?.seed;
@@ -7005,8 +7308,10 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             name: String(p?.name ?? ''),
             group: typeof p?.group === 'string' && p.group.trim() ? p.group.trim() : null,
             createdAt: String(p?.createdAt ?? nowIso()),
+            runtime,
             repoAttached,
             repoPath: repoAttached ? String(p?.repoPath ?? '') : '',
+            cwd: normalizeDroneCwdForRuntime(p, null),
             containerPort: typeof p?.containerPort === 'number' && Number.isFinite(p.containerPort) ? p.containerPort : 7777,
             hostPort: null,
             statusOk: false,
@@ -7022,11 +7327,14 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
 
         const realSummaries = await Promise.all(
           Object.values(regAny.drones ?? {}).map(async (d: any) => {
+            const runtime = normalizeDroneRuntime(d?.runtime);
             const containerName = String(d?.containerName ?? d?.name ?? '').trim();
             const hostPort =
               typeof d.hostPort === 'number' && Number.isFinite(d.hostPort)
                 ? d.hostPort
-                : await resolveHostPort(containerName || String(d.name ?? ''), d.containerPort);
+                : runtime === 'host'
+                  ? null
+                  : await resolveHostPort(containerName || String(d.name ?? ''), d.containerPort);
 
             const hubPhase = typeof d?.hub?.phase === 'string' ? String(d.hub.phase) : null;
             const hubMessage = typeof d?.hub?.message === 'string' ? String(d.hub.message) : null;
@@ -7048,7 +7356,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                 statusOk = true;
               } catch (e: any) {
                 const firstErr = e?.message ?? String(e);
-                if (looksLikeUnauthorizedDaemonError(firstErr)) {
+                if (runtime !== 'host' && looksLikeUnauthorizedDaemonError(firstErr)) {
                   try {
                     const refreshedToken = droneId ? await refreshRegistryTokenFromContainer({ droneId }) : null;
                     if (refreshedToken && refreshedToken !== token) {
@@ -7070,7 +7378,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                 }
               }
             } else if (!hostPort) {
-              statusError = 'no host port mapped (container likely stopped)';
+              statusError = runtime === 'host' ? 'no host port mapped' : 'no host port mapped (container likely stopped)';
             } else {
               statusError = 'missing token (still starting?)';
             }
@@ -7080,8 +7388,10 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
               name: d.name,
               group: d.group ?? null,
               createdAt: d.createdAt,
+              runtime,
               repoAttached,
               repoPath: repoAttached ? repoPath : '',
+              cwd: normalizeDroneCwdForRuntime(d, null),
               containerPort: d.containerPort,
               hostPort: hostPort ?? null,
               statusOk,
@@ -7154,9 +7464,29 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const resolved = await resolveDroneOrRespond(res, droneRef);
         if (!resolved) return;
         const droneId = resolved.id;
-        const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+        const drone = resolved.drone;
+        const runtime = droneRuntime(drone);
+        const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
 
-        const targetPath = normalizeContainerPath(u.searchParams.get('path') ?? '/');
+        const targetPath = normalizeFsPathForRuntime(drone, u.searchParams.get('path') ?? '', { fallbackToHome: true });
+        if (runtime === 'host') {
+          try {
+            const parsed = await listHostFsDirectory(targetPath);
+            json(res, 200, {
+              ok: true,
+              id: droneId,
+              name: droneName,
+              path: parsed.resolvedPath,
+              entries: parsed.entries,
+            });
+            return;
+          } catch (e: any) {
+            const msg = e?.message ?? String(e);
+            const code = hostFsErrorStatus(e);
+            json(res, code, { ok: false, error: msg, id: droneId, name: droneName, path: targetPath });
+            return;
+          }
+        }
         const script = [
           'set -euo pipefail',
           `target=${bashQuote(targetPath)}`,
@@ -7223,12 +7553,68 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const resolved = await resolveDroneOrRespond(res, droneRef);
         if (!resolved) return;
         const droneId = resolved.id;
-        const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+        const drone = resolved.drone;
+        const runtime = droneRuntime(drone);
+        const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
 
-        const targetPath = normalizeContainerPath(u.searchParams.get('path') ?? '');
+        const targetPath = normalizeFsPathForRuntime(drone, u.searchParams.get('path') ?? '', { fallbackToHome: false });
         if (!targetPath || targetPath === '/') {
           json(res, 400, { ok: false, error: 'missing file path' });
           return;
+        }
+
+        if (runtime === 'host') {
+          try {
+            const read = await readHostFileBytes({ targetPath, maxBytes: FS_EDITOR_MAX_BYTES });
+            const mimeRaw = String(read.mime ?? '').trim().toLowerCase();
+            const textLike = isLikelyTextMimeType(mimeRaw) && !bufferLooksBinary(read.buf);
+            if (!textLike) {
+              const inferredMime = mimeRaw.startsWith('image/')
+                ? mimeRaw
+                : mimeRaw.startsWith('video/')
+                  ? mimeRaw
+                  : isLikelyImagePath(targetPath)
+                    ? guessImageMimeType(targetPath)
+                    : isLikelyVideoPath(targetPath)
+                      ? guessVideoMimeType(targetPath)
+                      : mimeRaw || 'application/octet-stream';
+              const kind = inferredMime.startsWith('image/')
+                ? 'image'
+                : inferredMime.startsWith('video/')
+                  ? 'video'
+                  : 'binary';
+              json(res, 200, {
+                ok: true,
+                id: droneId,
+                name: droneName,
+                path: path.resolve(targetPath),
+                kind,
+                mime: inferredMime,
+                size: read.size,
+                mtimeMs: read.mtimeMs,
+              });
+              return;
+            }
+
+            json(res, 200, {
+              ok: true,
+              id: droneId,
+              name: droneName,
+              path: path.resolve(targetPath),
+              kind: 'text',
+              mime: mimeRaw || 'text/plain',
+              content: read.buf.toString('utf8'),
+              size: read.size,
+              mtimeMs: read.mtimeMs,
+            });
+            return;
+          } catch (e: any) {
+            const msg = e?.message ?? String(e);
+            const explicitStatus = Number((e as any)?.statusCode ?? 0);
+            const code = explicitStatus > 0 ? explicitStatus : hostFsErrorStatus(e);
+            json(res, code, { ok: false, error: msg, id: droneId, name: droneName, path: path.resolve(targetPath) });
+            return;
+          }
         }
 
         const isRepoRootBareNameRef = (() => {
@@ -7426,7 +7812,9 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const resolved = await resolveDroneOrRespond(res, droneRef);
         if (!resolved) return;
         const droneId = resolved.id;
-        const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+        const drone = resolved.drone;
+        const runtime = droneRuntime(drone);
+        const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
 
         let body: any = null;
         try {
@@ -7436,7 +7824,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           return;
         }
 
-        const targetPath = normalizeContainerPath(body?.path ?? '');
+        const targetPath = normalizeFsPathForRuntime(drone, body?.path ?? '', { fallbackToHome: false });
         if (!targetPath || targetPath === '/') {
           json(res, 400, { ok: false, error: 'missing file path' });
           return;
@@ -7450,6 +7838,32 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         if (nextBytes > FS_EDITOR_MAX_BYTES) {
           json(res, 413, { ok: false, error: `file too large (${nextBytes} bytes, max ${FS_EDITOR_MAX_BYTES})` });
           return;
+        }
+        if (runtime === 'host') {
+          try {
+            const resolvedPath = path.resolve(targetPath);
+            const st = await fs.stat(resolvedPath);
+            if (!st.isFile()) {
+              json(res, 404, { ok: false, error: `file not found: ${resolvedPath}`, id: droneId, name: droneName, path: resolvedPath });
+              return;
+            }
+            await fs.writeFile(resolvedPath, content, 'utf8');
+            const after = await fs.stat(resolvedPath);
+            json(res, 200, {
+              ok: true,
+              id: droneId,
+              name: droneName,
+              path: resolvedPath,
+              size: Number.isFinite(after.size) ? Math.max(0, Math.floor(after.size)) : 0,
+              mtimeMs: Number.isFinite(after.mtimeMs) ? Math.max(0, Math.floor(after.mtimeMs)) : null,
+            });
+            return;
+          } catch (e: any) {
+            const msg = e?.message ?? String(e);
+            const code = hostFsErrorStatus(e);
+            json(res, code, { ok: false, error: msg, id: droneId, name: droneName, path: path.resolve(targetPath) });
+            return;
+          }
         }
         const contentBase64 = Buffer.from(content, 'utf8').toString('base64');
 
@@ -7546,14 +7960,16 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const resolved = await resolveDroneOrRespond(res, droneRef);
         if (!resolved) return;
         const droneId = resolved.id;
-        const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
-        const targetPath = normalizeContainerPath(u.searchParams.get('path') ?? '');
+        const drone = resolved.drone;
+        const runtime = droneRuntime(drone);
+        const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
+        const targetPath = normalizeFsPathForRuntime(drone, u.searchParams.get('path') ?? '', { fallbackToHome: false });
         if (!targetPath || targetPath === '/') {
           json(res, 400, { ok: false, error: 'missing path' });
           return;
         }
 
-        const targetBaseName = path.posix.basename(targetPath.replace(/\/+$/g, '')) || 'download';
+        const targetBaseName = path.basename(String(targetPath).replace(/[\/\\]+$/g, '')) || 'download';
         const safeBaseName = targetBaseName
           .replace(/[\0\r\n\t]/g, '')
           .replace(/[\/\\]+/g, '')
@@ -7574,12 +7990,19 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
 
         try {
           await fs.mkdir(hostExtractDir, { recursive: true });
-          await withLockedDroneContainer(
-            { requestedDroneName: droneName, droneEntry: resolved.drone },
-            async ({ containerName }) => {
-              await dvmCopyFromContainer(containerName, targetPath, hostExtractDir);
-            },
-          );
+          if (runtime === 'host') {
+            const resolvedTargetPath = path.resolve(targetPath);
+            await fs.stat(resolvedTargetPath);
+            const destinationPath = path.join(hostExtractDir, safeBaseName);
+            await fs.cp(resolvedTargetPath, destinationPath, { recursive: true });
+          } else {
+            await withLockedDroneContainer(
+              { requestedDroneName: droneName, droneEntry: resolved.drone },
+              async ({ containerName }) => {
+                await dvmCopyFromContainer(containerName, targetPath, hostExtractDir);
+              },
+            );
+          }
 
           const copiedPath = path.join(hostExtractDir, safeBaseName);
           const copiedStat = await fs.stat(copiedPath);
@@ -7638,7 +8061,13 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           const msg = e?.message ?? String(e);
           const explicitStatus = Number((e as any)?.statusCode ?? 0);
           const missingPath = /no such file|cannot stat|could not find|not found|lstat/i.test(msg);
-          const code = explicitStatus > 0 ? explicitStatus : missingPath || looksLikeMissingContainerError(msg) ? 404 : 500;
+          const code = explicitStatus > 0
+            ? explicitStatus
+            : runtime === 'host'
+              ? hostFsErrorStatus(e)
+              : missingPath || looksLikeMissingContainerError(msg)
+                ? 404
+                : 500;
           json(res, code, { ok: false, error: msg, id: droneId, name: droneName, path: targetPath });
           return;
         }
@@ -7651,12 +8080,114 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const resolved = await resolveDroneOrRespond(res, droneRef);
         if (!resolved) return;
         const droneId = resolved.id;
-        const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+        const drone = resolved.drone;
+        const runtime = droneRuntime(drone);
+        const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
 
-        const targetPath = normalizeContainerPath(u.searchParams.get('path') ?? '');
+        const targetPath = normalizeFsPathForRuntime(drone, u.searchParams.get('path') ?? '', { fallbackToHome: false });
         if (!targetPath || targetPath === '/') {
           json(res, 400, { ok: false, error: 'missing file path' });
           return;
+        }
+
+        if (runtime === 'host') {
+          try {
+            const read = await readHostFileBytes({ targetPath, maxBytes: FS_MEDIA_MAX_BYTES });
+            const mimeRaw = String(read.mime ?? '').trim().toLowerCase();
+            const mime = mimeRaw.startsWith('image/')
+              ? mimeRaw
+              : mimeRaw.startsWith('video/')
+                ? mimeRaw
+                : isLikelyImagePath(targetPath)
+                  ? guessImageMimeType(targetPath)
+                  : isLikelyVideoPath(targetPath)
+                    ? guessVideoMimeType(targetPath)
+                    : 'application/octet-stream';
+            if (!mime.startsWith('image/') && !mime.startsWith('video/')) {
+              json(res, 415, { ok: false, error: 'not an image or video file', id: droneId, name: droneName, path: path.resolve(targetPath) });
+              return;
+            }
+
+            const buf = read.buf;
+            const total = buf.length;
+            const rangeHeader = String(req.headers.range ?? '').trim();
+            if (rangeHeader.startsWith('bytes=')) {
+              const raw = rangeHeader.slice('bytes='.length).split(',')[0]?.trim() ?? '';
+              const m = /^(\d*)-(\d*)$/.exec(raw);
+              if (!m) {
+                res.statusCode = 416;
+                res.setHeader('content-range', `bytes */${total}`);
+                res.end();
+                return;
+              }
+              const startRaw = String(m[1] ?? '').trim();
+              const endRaw = String(m[2] ?? '').trim();
+              let start = startRaw ? Number(startRaw) : NaN;
+              let end = endRaw ? Number(endRaw) : NaN;
+              if (!Number.isFinite(start) && Number.isFinite(end)) {
+                const suffixLen = Math.floor(end);
+                if (suffixLen <= 0) {
+                  res.statusCode = 416;
+                  res.setHeader('content-range', `bytes */${total}`);
+                  res.end();
+                  return;
+                }
+                start = Math.max(0, total - suffixLen);
+                end = total - 1;
+              } else {
+                start = Number.isFinite(start) ? Math.floor(start) : 0;
+                end = Number.isFinite(end) ? Math.floor(end) : total - 1;
+              }
+              if (start < 0 || end < start || start >= total) {
+                res.statusCode = 416;
+                res.setHeader('content-range', `bytes */${total}`);
+                res.end();
+                return;
+              }
+              const safeEnd = Math.min(end, total - 1);
+              const chunk = buf.subarray(start, safeEnd + 1);
+              res.statusCode = 206;
+              res.setHeader('content-type', mime);
+              res.setHeader('cache-control', 'no-store');
+              res.setHeader('accept-ranges', 'bytes');
+              res.setHeader('content-range', `bytes ${start}-${safeEnd}/${total}`);
+              res.setHeader('content-length', String(chunk.length));
+              res.end(chunk);
+              return;
+            }
+
+            res.statusCode = 200;
+            res.setHeader('content-type', mime);
+            res.setHeader('cache-control', 'no-store');
+            res.setHeader('accept-ranges', 'bytes');
+            res.setHeader('content-length', String(total));
+            res.end(buf);
+            return;
+          } catch (e: any) {
+            const msg = e?.message ?? String(e);
+            const explicitStatus = Number((e as any)?.statusCode ?? 0);
+            if (explicitStatus === 413) {
+              const size = Number((e as any)?.size ?? NaN);
+              const sizeText = Number.isFinite(size) ? `${Math.max(0, Math.floor(size))}` : 'unknown';
+              json(res, 413, {
+                ok: false,
+                error: `media too large (${sizeText} bytes, max ${FS_MEDIA_MAX_BYTES})`,
+                id: droneId,
+                name: droneName,
+                path: path.resolve(targetPath),
+              });
+              return;
+            }
+            const code = explicitStatus > 0 ? explicitStatus : hostFsErrorStatus(e);
+            json(res, code, {
+              ok: false,
+              error: code === 500 ? 'failed reading media' : msg,
+              id: droneId,
+              name: droneName,
+              path: path.resolve(targetPath),
+            });
+            return;
+          }
         }
 
         const script = [
@@ -7813,9 +8344,11 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const resolved = await resolveDroneOrRespond(res, droneRef);
         if (!resolved) return;
         const droneId = resolved.id;
-        const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+        const drone = resolved.drone;
+        const runtime = droneRuntime(drone);
+        const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
 
-        const targetPath = normalizeContainerPath(u.searchParams.get('path') ?? '');
+        const targetPath = normalizeFsPathForRuntime(drone, u.searchParams.get('path') ?? '', { fallbackToHome: false });
         if (!targetPath || targetPath === '/') {
           json(res, 400, { ok: false, error: 'missing file path' });
           return;
@@ -7823,6 +8356,48 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         if (!isLikelyImagePath(targetPath)) {
           json(res, 415, { ok: false, error: 'not an image file' });
           return;
+        }
+
+        if (runtime === 'host') {
+          try {
+            const read = await readHostFileBytes({ targetPath, maxBytes: FS_THUMB_MAX_BYTES });
+            const mimeRaw = String(read.mime ?? '').trim().toLowerCase();
+            const mime = mimeRaw.startsWith('image/') ? mimeRaw : guessImageMimeType(targetPath);
+            if (!mime.startsWith('image/')) {
+              json(res, 415, { ok: false, error: 'not an image file', id: droneId, name: droneName, path: path.resolve(targetPath) });
+              return;
+            }
+
+            res.statusCode = 200;
+            res.setHeader('content-type', mime);
+            res.setHeader('cache-control', 'no-store');
+            res.end(read.buf);
+            return;
+          } catch (e: any) {
+            const msg = e?.message ?? String(e);
+            const explicitStatus = Number((e as any)?.statusCode ?? 0);
+            if (explicitStatus === 413) {
+              const size = Number((e as any)?.size ?? NaN);
+              const sizeText = Number.isFinite(size) ? `${Math.max(0, Math.floor(size))}` : 'unknown';
+              json(res, 413, {
+                ok: false,
+                error: `image too large (${sizeText} bytes, max ${FS_THUMB_MAX_BYTES})`,
+                id: droneId,
+                name: droneName,
+                path: path.resolve(targetPath),
+              });
+              return;
+            }
+            const code = explicitStatus > 0 ? explicitStatus : hostFsErrorStatus(e);
+            json(res, code, {
+              ok: false,
+              error: code === 500 ? 'failed reading thumbnail' : msg,
+              id: droneId,
+              name: droneName,
+              path: path.resolve(targetPath),
+            });
+            return;
+          }
         }
 
         const script = [
@@ -7930,28 +8505,36 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const resolved = await resolveDroneOrRespond(res, droneRef);
         if (!resolved) return;
         const droneId = resolved.id;
-        const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+        const drone = resolved.drone;
+        const runtime = droneRuntime(drone);
+        const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
 
         try {
-          const ports = await withLockedDroneContainer(
-            { requestedDroneName: droneName, droneEntry: resolved.drone },
-            async ({ containerName }) => {
-            return await dvmPorts(containerName);
-            },
-          );
-          const mapped = ports.find(
-            (p) =>
-              Number(p?.containerPort) === containerPort &&
-              typeof p?.hostPort === 'number' &&
-              Number.isFinite(p.hostPort),
-          );
-          if (!mapped?.hostPort) {
+          let mappedHostPort = 0;
+          if (runtime === 'host') {
+            mappedHostPort = containerPort;
+          } else {
+            const ports = await withLockedDroneContainer(
+              { requestedDroneName: droneName, droneEntry: drone },
+              async ({ containerName }) => {
+              return await dvmPorts(containerName);
+              },
+            );
+            const mapped = ports.find(
+              (p) =>
+                Number(p?.containerPort) === containerPort &&
+                typeof p?.hostPort === 'number' &&
+                Number.isFinite(p.hostPort),
+            );
+            mappedHostPort = Number(mapped?.hostPort ?? 0);
+          }
+          if (!mappedHostPort) {
             json(res, 404, { ok: false, error: `container port ${containerPort} is not mapped on host`, id: droneId, name: droneName });
             return;
           }
 
           const restPath = parts.length > 5 ? `/${parts.slice(5).map((seg) => encodeURIComponent(seg)).join('/')}` : '/';
-          const targetUrl = `http://127.0.0.1:${mapped.hostPort}${restPath}${u.search || ''}`;
+          const targetUrl = `http://127.0.0.1:${mappedHostPort}${restPath}${u.search || ''}`;
           const upstream = await fetch(targetUrl, {
             method: 'GET',
             headers: {
@@ -7987,11 +8570,21 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const resolved = await resolveDroneOrRespond(res, droneRef);
         if (!resolved) return;
         const droneId = resolved.id;
-        const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+        const drone = resolved.drone;
+        const runtime = droneRuntime(drone);
+        const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
         try {
-          const ports = await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: resolved.drone }, async ({ containerName }) => {
-            return await dvmPorts(containerName);
-          });
+          const ports =
+            runtime === 'host'
+              ? (() => {
+                  const hostPort = Number((drone as any)?.hostPort ?? NaN);
+                  const containerPort = Number((drone as any)?.containerPort ?? hostPort);
+                  if (!Number.isFinite(hostPort) || hostPort <= 0 || !Number.isFinite(containerPort) || containerPort <= 0) return [];
+                  return [{ hostPort: Math.floor(hostPort), containerPort: Math.floor(containerPort) }];
+                })()
+              : await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: drone }, async ({ containerName }) => {
+                  return await dvmPorts(containerName);
+                });
           json(res, 200, { ok: true, id: droneId, name: droneName, ports });
           return;
         } catch (e: any) {
@@ -8018,37 +8611,58 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const d = resolved.drone;
         const droneId = resolved.id;
         const droneName = String(d?.name ?? droneRef).trim() || droneRef;
-        const repoAttached = Boolean(String(d?.repo?.dest ?? '').trim()) || Boolean(String(d?.repo?.seededAt ?? '').trim());
+        const runtime = droneRuntime(d);
+        const repoAttached = isRepoAttachedDrone(d);
         if (!repoAttached) {
           json(res, 400, { ok: false, error: 'drone has no repo attached' });
           return;
         }
-        const repoPathInContainer = droneRepoPathInContainer(d);
         try {
-          const { repoRoot, summary } = await withLockedDroneContainer(
-            { requestedDroneName: droneName, droneEntry: d },
-            async ({ containerName }) => {
-              return await droneRepoChangesSummary({
-                container: containerName,
-                repoPathInContainer,
-              });
-            },
-          );
-          json(res, 200, {
-            ok: true,
-            id: droneId,
-            name: droneName,
-            repoRoot,
-            branch: summary.branch,
-            counts: summary.counts,
-            entries: summary.entries,
-          });
-          return;
+          if (runtime === 'host') {
+            const repoPathRaw = String(d?.repoPath ?? '').trim();
+            if (!repoPathRaw) {
+              json(res, 400, { ok: false, error: 'drone host repo path is not configured' });
+              return;
+            }
+            const repoRoot = await gitTopLevel(repoPathRaw);
+            const summary = await gitRepoChangesSummary(repoRoot);
+            json(res, 200, {
+              ok: true,
+              id: droneId,
+              name: droneName,
+              repoRoot,
+              branch: summary.branch,
+              counts: summary.counts,
+              entries: summary.entries,
+            });
+            return;
+          } else {
+            const repoPathInContainer = droneRepoPathInContainer(d);
+            const { repoRoot, summary } = await withLockedDroneContainer(
+              { requestedDroneName: droneName, droneEntry: d },
+              async ({ containerName }) => {
+                return await droneRepoChangesSummary({
+                  container: containerName,
+                  repoPathInContainer,
+                });
+              },
+            );
+            json(res, 200, {
+              ok: true,
+              id: droneId,
+              name: droneName,
+              repoRoot,
+              branch: summary.branch,
+              counts: summary.counts,
+              entries: summary.entries,
+            });
+            return;
+          }
         } catch (e: any) {
           const msg = e?.message ?? String(e);
           const missingContainer = looksLikeMissingContainerError(msg);
           const repoUnavailable = looksLikeRepoUnavailableError(msg);
-          const status = missingContainer ? 404 : repoUnavailable ? 409 : 500;
+          const status = runtime === 'host' ? (repoUnavailable ? 409 : 500) : missingContainer ? 404 : repoUnavailable ? 409 : 500;
           json(res, status, {
             ok: false,
             error: repoUnavailable ? 'repository is not ready yet' : msg,
@@ -8173,12 +8787,12 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const d = resolved.drone;
         const droneId = resolved.id;
         const droneName = String(d?.name ?? droneRef).trim() || droneRef;
-        const repoAttached = Boolean(String(d?.repo?.dest ?? '').trim()) || Boolean(String(d?.repo?.seededAt ?? '').trim());
+        const runtime = droneRuntime(d);
+        const repoAttached = isRepoAttachedDrone(d);
         if (!repoAttached) {
           json(res, 400, { ok: false, error: 'drone has no repo attached' });
           return;
         }
-        const repoPathInContainer = droneRepoPathInContainer(d);
 
         const filePath = String(u.searchParams.get('path') ?? '').trim();
         if (!filePath) {
@@ -8194,16 +8808,15 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             : 3;
 
         try {
-          await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: d }, async ({ containerName }) => {
-            const repoRootRaw = await runGitInDroneOrThrow({
-              container: containerName,
-              repoPathInContainer,
-              args: ['rev-parse', '--show-toplevel'],
-            });
-            const repoRoot = String(repoRootRaw.stdout ?? '').trim() || repoPathInContainer;
-            const diff = await droneRepoDiffForPath({
-              container: containerName,
-              repoPathInContainer,
+          if (runtime === 'host') {
+            const repoPathRaw = String(d?.repoPath ?? '').trim();
+            if (!repoPathRaw) {
+              json(res, 400, { ok: false, error: 'drone host repo path is not configured' });
+              return;
+            }
+            const repoRoot = await gitTopLevel(repoPathRaw);
+            const diff = await gitRepoDiffForPath({
+              repoRoot,
               filePath,
               kind,
               contextLines,
@@ -8219,13 +8832,41 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
               truncated: diff.truncated,
               fromUntracked: diff.fromUntracked,
             });
-          });
+          } else {
+            const repoPathInContainer = droneRepoPathInContainer(d);
+            await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: d }, async ({ containerName }) => {
+              const repoRootRaw = await runGitInDroneOrThrow({
+                container: containerName,
+                repoPathInContainer,
+                args: ['rev-parse', '--show-toplevel'],
+              });
+              const repoRoot = String(repoRootRaw.stdout ?? '').trim() || repoPathInContainer;
+              const diff = await droneRepoDiffForPath({
+                container: containerName,
+                repoPathInContainer,
+                filePath,
+                kind,
+                contextLines: 3,
+              });
+              json(res, 200, {
+                ok: true,
+                id: droneId,
+                name: droneName,
+                repoRoot,
+                path: diff.path,
+                kind: diff.kind,
+                diff: diff.diff,
+                truncated: diff.truncated,
+                fromUntracked: diff.fromUntracked,
+              });
+            });
+          }
           return;
         } catch (e: any) {
           const msg = e?.message ?? String(e);
           const missingContainer = looksLikeMissingContainerError(msg);
           const repoUnavailable = looksLikeRepoUnavailableError(msg);
-          const status = missingContainer ? 404 : repoUnavailable ? 409 : 500;
+          const status = runtime === 'host' ? (repoUnavailable ? 409 : 500) : missingContainer ? 404 : repoUnavailable ? 409 : 500;
           json(res, status, {
             ok: false,
             error: repoUnavailable ? 'repository is not ready yet' : msg,
@@ -8254,15 +8895,58 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const d = resolved.drone;
         const droneId = resolved.id;
         const droneName = String(d?.name ?? droneRef).trim() || droneRef;
-        const repoAttached = Boolean(String(d?.repo?.dest ?? '').trim()) || Boolean(String(d?.repo?.seededAt ?? '').trim());
+        const runtime = droneRuntime(d);
+        const configuredDroneBranch = String(d?.repo?.branch ?? '').trim() || null;
+        const droneFromRef = String(d?.repo?.baseRef ?? '').trim() || null;
+        const repoAttached = isRepoAttachedDrone(d);
         if (!repoAttached) {
           json(res, 400, { ok: false, error: 'drone has no repo attached' });
           return;
         }
+        if (runtime === 'host') {
+          const repoPathRaw = String(d?.repoPath ?? '').trim();
+          if (!repoPathRaw) {
+            json(res, 400, { ok: false, error: 'drone has no repo attached' });
+            return;
+          }
+          try {
+            const repoRoot = await gitTopLevel(repoPathRaw);
+            const hostSummary = await gitRepoChangesSummary(repoRoot);
+            const hostHeadSha = String(hostSummary.branch.oid ?? '').trim().toLowerCase();
+            const normalizedHeadSha = /^[0-9a-f]{40}$/.test(hostHeadSha) ? hostHeadSha : '';
+            json(res, 200, {
+              ok: true,
+              id: droneId,
+              name: droneName,
+              repoRoot,
+              baseSha: normalizedHeadSha,
+              headSha: normalizedHeadSha,
+              counts: { changed: 0 },
+              entries: [],
+              mode: 'host-same-repo',
+              branchContext: {
+                hostCurrent: String(hostSummary.branch.head ?? '').trim() || null,
+                droneCurrent: String(hostSummary.branch.head ?? '').trim() || null,
+                droneConfigured: configuredDroneBranch,
+                droneFromRef,
+              },
+            });
+            return;
+          } catch (e: any) {
+            const msg = e?.message ?? String(e);
+            const repoUnavailable = looksLikeRepoUnavailableError(msg);
+            json(res, repoUnavailable ? 409 : 500, {
+              ok: false,
+              error: repoUnavailable ? 'repository is not ready yet' : msg,
+              ...(repoUnavailable ? { code: 'repo_unavailable' } : {}),
+              id: droneId,
+              name: droneName,
+            });
+            return;
+          }
+        }
         const repoPathInContainer = droneRepoPathInContainer(d);
         const repoPathRaw = String(d?.repoPath ?? '').trim();
-        const configuredDroneBranch = String(d?.repo?.branch ?? '').trim() || null;
-        const droneFromRef = String(d?.repo?.baseRef ?? '').trim() || null;
         let hostBranchHead: string | null = null;
         let pullPreviewBaseSha: string | undefined;
         const lastPullAny = d?.repo?.lastPull && typeof d.repo.lastPull === 'object' ? d.repo.lastPull : null;
@@ -8471,13 +9155,12 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const d = resolved.drone;
         const droneId = resolved.id;
         const droneName = String(d?.name ?? droneRef).trim() || droneRef;
-        const repoAttached = Boolean(String(d?.repo?.dest ?? '').trim()) || Boolean(String(d?.repo?.seededAt ?? '').trim());
+        const runtime = droneRuntime(d);
+        const repoAttached = isRepoAttachedDrone(d);
         if (!repoAttached) {
           json(res, 400, { ok: false, error: 'drone has no repo attached' });
           return;
         }
-        const repoPathInContainer = droneRepoPathInContainer(d);
-
         const filePath = String(u.searchParams.get('path') ?? '').trim();
         if (!filePath) {
           json(res, 400, { ok: false, error: 'missing diff path' });
@@ -8490,6 +9173,46 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           Number.isFinite(requestedContextLines) && requestedContextLines >= 0
             ? Math.min(2000, Math.floor(requestedContextLines))
             : 3;
+        if (runtime === 'host') {
+          const repoPathRaw = String(d?.repoPath ?? '').trim();
+          if (!repoPathRaw) {
+            json(res, 400, { ok: false, error: 'drone has no repo attached' });
+            return;
+          }
+          try {
+            const repoRoot = await gitTopLevel(repoPathRaw);
+            const hostSummary = await gitRepoChangesSummary(repoRoot);
+            const hostHeadSha = String(hostSummary.branch.oid ?? '').trim().toLowerCase();
+            const normalizedHeadSha = /^[0-9a-f]{40}$/.test(hostHeadSha) ? hostHeadSha : '';
+            const validBaseSha = /^[0-9a-f]{40}$/.test(baseSha) ? baseSha : normalizedHeadSha;
+            const validHeadSha = /^[0-9a-f]{40}$/.test(headSha) ? headSha : normalizedHeadSha;
+            json(res, 200, {
+              ok: true,
+              id: droneId,
+              name: droneName,
+              repoRoot,
+              baseSha: validBaseSha,
+              headSha: validHeadSha,
+              path: filePath,
+              diff: '',
+              truncated: false,
+              mode: 'host-same-repo',
+            });
+            return;
+          } catch (e: any) {
+            const msg = e?.message ?? String(e);
+            const repoUnavailable = looksLikeRepoUnavailableError(msg);
+            json(res, repoUnavailable ? 409 : 500, {
+              ok: false,
+              error: repoUnavailable ? 'repository is not ready yet' : msg,
+              ...(repoUnavailable ? { code: 'repo_unavailable' } : {}),
+              id: droneId,
+              name: droneName,
+            });
+            return;
+          }
+        }
+        const repoPathInContainer = droneRepoPathInContainer(d);
 
         try {
           const diff = await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: d }, async ({ containerName }) => {
@@ -8542,7 +9265,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const d = resolved.drone;
         const droneId = resolved.id;
         const droneName = String(d?.name ?? droneRef).trim() || droneRef;
-        const repoAttached = Boolean(String(d?.repo?.dest ?? '').trim()) || Boolean(String(d?.repo?.seededAt ?? '').trim());
+        const repoAttached = isRepoAttachedDrone(d);
         if (!repoAttached) {
           json(res, 400, { ok: false, error: 'drone has no repo attached' });
           return;
@@ -8647,7 +9370,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const d = resolved.drone;
         const droneId = resolved.id;
         const droneName = String(d?.name ?? droneRef).trim() || droneRef;
-        const repoAttached = Boolean(String(d?.repo?.dest ?? '').trim()) || Boolean(String(d?.repo?.seededAt ?? '').trim());
+        const repoAttached = isRepoAttachedDrone(d);
         if (!repoAttached) {
           json(res, 400, { ok: false, error: 'drone has no repo attached' });
           return;
@@ -8711,7 +9434,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const d = resolved.drone;
         const droneId = resolved.id;
         const droneName = String(d?.name ?? droneRef).trim() || droneRef;
-        const repoAttached = Boolean(String(d?.repo?.dest ?? '').trim()) || Boolean(String(d?.repo?.seededAt ?? '').trim());
+        const repoAttached = isRepoAttachedDrone(d);
         if (!repoAttached) {
           json(res, 400, { ok: false, error: 'drone has no repo attached' });
           return;
@@ -8788,7 +9511,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const d = resolved.drone;
         const droneId = resolved.id;
         const droneName = String(d?.name ?? droneRef).trim() || droneRef;
-        const repoAttached = Boolean(String(d?.repo?.dest ?? '').trim()) || Boolean(String(d?.repo?.seededAt ?? '').trim());
+        const repoAttached = isRepoAttachedDrone(d);
         if (!repoAttached) {
           json(res, 400, { ok: false, error: 'drone has no repo attached' });
           return;
@@ -8854,6 +9577,32 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const d = resolved.drone;
         const droneId = resolved.id;
         const droneName = String(d?.name ?? droneRef).trim() || droneRef;
+        const runtime = droneRuntime(d);
+        if (runtime === 'host') {
+          const repoPathRaw = String(d?.repoPath ?? '').trim();
+          if (!repoPathRaw) {
+            json(res, 400, { ok: false, error: 'drone has no repo attached' });
+            return;
+          }
+          try {
+            const repoRoot = await gitTopLevel(repoPathRaw);
+            const baseRef = await gitCurrentBranchOrSha(repoRoot);
+            json(res, 200, {
+              ok: true,
+              id: droneId,
+              name: droneName,
+              repoRoot,
+              baseRef,
+              mode: 'host-noop',
+              message: 'host runtime uses the host repository directly; reseed is not required',
+            });
+            return;
+          } catch (e: any) {
+            const msg = e?.message ?? String(e);
+            json(res, 500, { ok: false, error: msg, id: droneId, name: droneName });
+            return;
+          }
+        }
         const repoPathRaw = String(d?.repoPath ?? '').trim();
         if (!repoPathRaw) {
           json(res, 400, { ok: false, error: 'drone has no repo attached' });
@@ -8924,6 +9673,35 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const droneId = resolved.id;
         const d = resolved.drone;
         const droneName = String(d?.name ?? droneRef).trim() || droneRef;
+        const runtime = droneRuntime(d);
+        if (runtime === 'host') {
+          const repoPathRaw = String(d?.repoPath ?? '').trim();
+          if (!repoPathRaw) {
+            json(res, 400, { ok: false, error: 'drone has no repo attached' });
+            return;
+          }
+          try {
+            const repoRoot = await gitTopLevel(repoPathRaw);
+            const hostRef = await gitCurrentBranchOrSha(repoRoot);
+            const hostRefShaRaw = await runHostCommand('git', ['-C', repoRoot, 'rev-parse', hostRef]);
+            const hostRefSha = hostRefShaRaw.code === 0 ? (parseShaFromText(hostRefShaRaw.stdout) ?? null) : null;
+            json(res, 200, {
+              ok: true,
+              id: droneId,
+              name: droneName,
+              mode: 'host-noop',
+              repoRoot,
+              hostRef,
+              hostRefSha,
+              message: 'host runtime uses the host repository directly; push is not required',
+            });
+            return;
+          } catch (e: any) {
+            const msg = e?.message ?? String(e);
+            json(res, 500, { ok: false, error: msg, id: droneId, name: droneName });
+            return;
+          }
+        }
         const repoPathRaw = String(d?.repoPath ?? '').trim();
         if (!repoPathRaw) {
           json(res, 400, { ok: false, error: 'drone has no repo attached' });
@@ -9251,6 +10029,32 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const droneId = resolved.id;
         const d = resolved.drone;
         const droneName = String(d?.name ?? droneRef).trim() || droneRef;
+        const runtime = droneRuntime(d);
+        if (runtime === 'host') {
+          const repoPathRaw = String(d?.repoPath ?? '').trim();
+          if (!repoPathRaw) {
+            json(res, 400, { ok: false, error: 'drone has no repo attached' });
+            return;
+          }
+          try {
+            const repoRoot = await gitTopLevel(repoPathRaw);
+            const fromRef = String(d?.repo?.baseRef ?? '').trim() || (await gitCurrentBranchOrSha(repoRoot));
+            json(res, 200, {
+              ok: true,
+              id: droneId,
+              name: droneName,
+              mode: 'host-noop',
+              repoRoot,
+              fromRef,
+              message: 'host runtime uses the host repository directly; pull is not required',
+            });
+            return;
+          } catch (e: any) {
+            const msg = e?.message ?? String(e);
+            json(res, 500, { ok: false, error: msg, id: droneId, name: droneName });
+            return;
+          }
+        }
         const repoPathRaw = String(d?.repoPath ?? '').trim();
         if (!repoPathRaw) {
           json(res, 400, { ok: false, error: 'drone has no repo attached' });
@@ -10581,6 +11385,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         if (!resolved) return;
         const droneId = resolved.id;
         const d = resolved.drone;
+        const runtime = droneRuntime(d);
         const droneName = String(d?.name ?? droneRef).trim() || droneRef;
 
         const modeRaw = String(u.searchParams.get('mode') ?? 'shell')
@@ -10588,10 +11393,45 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           .toLowerCase();
         const mode: 'shell' | 'agent' = modeRaw === 'agent' ? 'agent' : 'shell';
         const chatName = normalizeChatName(u.searchParams.get('chat') ?? 'default');
-        const defaultCwd = defaultDroneHomeCwd(d);
-        const cwd = normalizeContainerPath(u.searchParams.get('cwd') ?? defaultCwd);
+        const cwd = normalizeDroneCwdForRuntime(d, u.searchParams.get('cwd') ?? null);
 
         try {
+          if (runtime === 'host') {
+            const daemon = await resolveDroneDaemonClientForEntry(d);
+            if (!daemon) {
+              json(res, 409, { ok: false, error: 'drone daemon not reachable (missing hostPort/token)', id: droneId, name: droneName });
+              return;
+            }
+            await waitForDroneDaemonReady(daemon.client, defaultDaemonReadyTimeoutMs());
+            const sessionName = mode === 'agent' ? hubChatSessionName(chatName) : hubShellSessionName();
+            if (mode === 'agent') await ensureChatEntry({ droneId, chatName });
+            const agentCmd = mode === 'agent' ? await resolveChatTmuxCommand({ droneId, chatName }) : resolveHubTerminalShellCommand();
+            const launchScript = [
+              'set -euo pipefail',
+              `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
+              `cd ${bashQuote(cwd)} 2>/dev/null || cd /`,
+              `exec ${agentCmd}`,
+            ].join('\n');
+            try {
+              await procStart(daemon.client, {
+                session: sessionName,
+                cmd: 'bash',
+                args: ['-lc', launchScript],
+                cwd,
+                force: false,
+              });
+            } catch (e: any) {
+              const msg = String(e?.message ?? e ?? '').trim().toLowerCase();
+              if (msg.includes('already exists') || msg.includes('process already exists')) {
+                // Reuse the existing session instead of restarting it and dropping user state.
+              } else {
+                throw e;
+              }
+            }
+            json(res, 200, { ok: true, id: droneId, name: droneName, mode, chat: mode === 'agent' ? chatName : null, cwd, sessionName });
+            return;
+          }
+
           await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: d }, async ({ containerName, droneEntry, droneId: lockedId }) => {
             const idForOps = normalizeDroneIdentity(lockedId) || normalizeDroneIdentity((droneEntry as any)?.id) || droneId;
             try {
@@ -10655,7 +11495,9 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const resolved = await resolveDroneOrRespond(res, droneRef);
         if (!resolved) return;
         const droneId = resolved.id;
-        const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+        const drone = resolved.drone;
+        const runtime = droneRuntime(drone);
+        const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
 
         const sinceRaw = u.searchParams.get('since');
         const maxBytesRaw = u.searchParams.get('maxBytes');
@@ -10665,8 +11507,31 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const tailLines = clampIntParam(tailRaw, HUB_WEB_TERMINAL_DEFAULT_TAIL_LINES, 0, HUB_WEB_TERMINAL_MAX_TAIL_LINES);
 
         try {
+          if (runtime === 'host') {
+            const daemon = await resolveDroneDaemonClientForEntry(drone);
+            if (!daemon) {
+              json(res, 409, { ok: false, error: 'drone daemon not reachable (missing hostPort/token)', id: droneId, name: droneName, sessionName });
+              return;
+            }
+            await waitForDroneDaemonReady(daemon.client, defaultDaemonReadyTimeoutMs());
+            const out = await droneTerminalOutput(daemon.client, {
+              session: sessionName,
+              since: since ?? 0,
+              max: since != null ? maxBytes : Math.max(maxBytes, tailLines * 256),
+            });
+            json(res, 200, {
+              ok: true,
+              id: droneId,
+              name: droneName,
+              sessionName,
+              offsetBytes: Number((out as any)?.nextOffset ?? 0),
+              text: String((out as any)?.chunk ?? ''),
+            });
+            return;
+          }
+
           const out = await withLockedDroneContainer(
-            { requestedDroneName: droneName, droneEntry: resolved.drone },
+            { requestedDroneName: droneName, droneEntry: drone },
             async ({ containerName }) => {
             return await dvmSessionRead({
               container: containerName,
@@ -10711,7 +11576,9 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const resolved = await resolveDroneOrRespond(res, droneRef);
         if (!resolved) return;
         const droneId = resolved.id;
-        const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+        const drone = resolved.drone;
+        const runtime = droneRuntime(drone);
+        const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
 
         let body: any = null;
         try {
@@ -10732,9 +11599,19 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         }
 
         try {
-          await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: resolved.drone }, async ({ containerName }) => {
-            await dvmSessionType(containerName, sessionName, { text: data });
-          });
+          if (runtime === 'host') {
+            const daemon = await resolveDroneDaemonClientForEntry(drone);
+            if (!daemon) {
+              json(res, 409, { ok: false, error: 'drone daemon not reachable (missing hostPort/token)', id: droneId, name: droneName, sessionName });
+              return;
+            }
+            await waitForDroneDaemonReady(daemon.client, defaultDaemonReadyTimeoutMs());
+            await droneTerminalInput(daemon.client, { session: sessionName, data });
+          } else {
+            await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: drone }, async ({ containerName }) => {
+              await dvmSessionType(containerName, sessionName, { text: data });
+            });
+          }
           json(res, 202, { ok: true, id: droneId, name: droneName, sessionName, bytes: Buffer.byteLength(data, 'utf8') });
           return;
         } catch (e: any) {
@@ -10760,6 +11637,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         if (!resolved) return;
         const droneId = resolved.id;
         const drone = resolved.drone;
+        const runtime = droneRuntime(drone);
         const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
         const containerName = String((drone as any)?.containerName ?? (drone as any)?.name ?? droneId).trim() || droneId;
 
@@ -10782,8 +11660,53 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           'export TERM=xterm-256color',
           'export COLORTERM=truecolor',
         ].join('; ');
-        const defaultCwd = defaultDroneHomeCwd(drone);
-        const cwd = normalizeContainerPath(u.searchParams.get('cwd') ?? defaultCwd);
+        const cwd = normalizeDroneCwdForRuntime(drone, u.searchParams.get('cwd') ?? null);
+
+        if (runtime === 'host') {
+          const manualSshCmd = `cd ${shellQuoteIfNeeded(cwd)} && exec bash -i`;
+          const manualAgentCmd = `cd ${shellQuoteIfNeeded(cwd)} && exec ${agentCmd}`;
+          const manualCommand = mode === 'ssh' ? manualSshCmd : manualAgentCmd;
+          const command =
+            mode === 'ssh'
+              ? [
+                  'set +e',
+                  markerSnippet,
+                  `cd ${bashQuote(cwd)} 2>/dev/null || cd /`,
+                  'exec bash -i',
+                ].join('; ')
+              : [
+                  'set +e',
+                  markerSnippet,
+                  `cd ${bashQuote(cwd)} 2>/dev/null || cd /`,
+                  `exec ${agentCmd}`,
+                ].join('; ');
+          const launched = await spawnTerminalWithBash(command, { terminal, markerPath });
+          if (!launched.ok) {
+            json(res, 500, {
+              ok: false,
+              error: launched.error,
+              command,
+              manualCommand,
+              chat: chatName,
+              sessionName,
+              note: 'You can run this command manually in a terminal.',
+            });
+            return;
+          }
+          json(res, 200, {
+            ok: true,
+            id: droneId,
+            name: droneName,
+            mode,
+            chat: chatName,
+            sessionName,
+            command,
+            manualCommand,
+            launcher: launched.launcher,
+          });
+          return;
+        }
+
         const manualSshCmd = buildDockerExecShellCommand(containerName, cwd);
         const sshCmd = manualSshCmd;
         const agentAttachCmd = buildDockerExecTmuxAttachCommand(containerName, sessionName);
@@ -10887,10 +11810,33 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         if (!resolved) return;
         const droneId = resolved.id;
         const drone = resolved.drone;
+        const runtime = droneRuntime(drone);
         const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
 
-        const defaultCwd = defaultDroneHomeCwd(drone);
-        const cwd = normalizeContainerPath(u.searchParams.get('cwd') ?? defaultCwd);
+        const cwd = normalizeDroneCwdForRuntime(drone, u.searchParams.get('cwd') ?? null);
+        if (runtime === 'host') {
+          const uri = `file://${encodeRemotePath(cwd)}`;
+          const manualCommand = `${editor} ${shellQuoteIfNeeded(cwd)}`;
+          const launched = await new Promise<{ ok: true; launcher: string } | { ok: false; error: string }>((resolve) => {
+            const child = spawn(editor, [cwd], { detached: true, stdio: 'ignore', env: process.env });
+            child.once('error', (err: any) => resolve({ ok: false, error: err?.message ?? String(err) }));
+            child.once('spawn', () => {
+              try {
+                child.unref();
+              } catch {
+                // ignore
+              }
+              resolve({ ok: true, launcher: `${editor} ${cwd}` });
+            });
+          });
+          if (!launched.ok) {
+            json(res, 500, { ok: false, error: launched.error, uri, manualCommand, note: 'Install the editor and run the command manually.' });
+            return;
+          }
+          json(res, 200, { ok: true, id: droneId, name: droneName, editor, cwd, uri, manualCommand, launcher: launched.launcher });
+          return;
+        }
+
         const containerNameRaw = String((drone as any)?.containerName ?? (drone as any)?.name ?? `drone-${droneId}`).trim();
         const id = await dockerContainerId(containerNameRaw);
         // Dev Containers "attached-container" URIs expect a hex-encoded JSON payload as the authority suffix.
@@ -11157,7 +12103,8 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           const resolved = await resolveDroneOrRespond(res, droneRef);
           if (!resolved) return;
           const droneId = resolved.id;
-          const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+          const drone = resolved.drone;
+          const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
           const chat = normalizeChatName(chatName);
           const promptIdRaw = String(body?.promptId ?? body?.prompt_id ?? body?.id ?? '').trim();
           if (promptIdRaw && !isSafePromptId(promptIdRaw)) {
@@ -11212,7 +12159,8 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           const resolved = await resolveDroneOrRespond(res, droneRef);
           if (!resolved) return;
           const droneId = resolved.id;
-          const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+          const drone = resolved.drone;
+          const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
           await reconcileChatFromDaemon({ droneId, chatName });
           const list = await readPendingPrompts({ droneId, chatName });
           json(res, 200, { ok: true, id: droneId, name: droneName, chat: chatName, pending: list });
@@ -11245,7 +12193,8 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           const resolved = await resolveDroneOrRespond(res, droneRef);
           if (!resolved) return;
           const droneId = resolved.id;
-          const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+          const drone = resolved.drone;
+          const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
           const result = await cancelQueuedPendingPrompt({ droneId, chatName, promptId });
           if (result.status === 'not-found') {
             json(res, 404, {
@@ -11303,7 +12252,12 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           const resolved = await resolveDroneOrRespond(res, droneRef);
           if (!resolved) return;
           const droneId = resolved.id;
-          const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+          const drone = resolved.drone;
+          const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
+          if (droneRuntime(drone) === 'host') {
+            json(res, 409, { ok: false, error: 'manual unstick is not yet supported for host runtime drones' });
+            return;
+          }
 
           await reconcileChatFromDaemon({ droneId, chatName });
           const pendingBefore = await readPendingPrompts({ droneId, chatName });
@@ -11332,7 +12286,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           }
 
           const sessionName = promptJobTmuxSessionName(promptId);
-          await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: resolved.drone }, async ({ containerName }) => {
+          await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: drone }, async ({ containerName }) => {
             const script = `tmux kill-session -t ${bashQuote(sessionName)} 2>/dev/null || true`;
             await dvmExec(containerName, 'bash', ['-lc', script]);
           });
@@ -11441,9 +12395,47 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           const resolved = await resolveDroneOrRespond(res, droneRef);
           if (!resolved) return;
           const droneId = resolved.id;
-          const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+          const drone = resolved.drone;
+          const runtime = droneRuntime(drone);
+          const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
 
-          await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: resolved.drone }, async ({ containerName, droneId: lockedId }) => {
+          if (runtime === 'host') {
+            const daemon = await resolveDroneDaemonClientForEntry(drone);
+            if (!daemon) throw new Error('drone daemon not reachable (missing hostPort/token)');
+            await waitForDroneDaemonReady(daemon.client, defaultDaemonReadyTimeoutMs());
+            if (view === 'screen') {
+              const r = await droneTerminalPrompt(daemon.client, { session: sessionName });
+              json(res, 200, {
+                ok: true,
+                id: droneId,
+                name: droneName,
+                chat: normalizedChat,
+                sessionName,
+                view,
+                tailLines,
+                text: String((r as any)?.text ?? ''),
+              });
+              return;
+            }
+            const out = await droneTerminalOutput(daemon.client, {
+              session: sessionName,
+              since: typeof since === 'number' && Number.isFinite(since) ? since : 0,
+              max: typeof maxBytes === 'number' && Number.isFinite(maxBytes) ? maxBytes : 200000,
+            });
+            json(res, 200, {
+              ok: true,
+              id: droneId,
+              name: droneName,
+              chat: normalizedChat,
+              sessionName,
+              view,
+              offsetBytes: Number((out as any)?.nextOffset ?? 0),
+              text: String((out as any)?.chunk ?? ''),
+            });
+            return;
+          }
+
+          await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: drone }, async ({ containerName, droneId: lockedId }) => {
             const idForOps = normalizeDroneIdentity(lockedId) || droneId;
             await ensureChatEntry({ droneId: idForOps, chatName: normalizedChat });
             const tmuxCmd = await resolveChatTmuxCommand({ droneId: idForOps, chatName: normalizedChat });
@@ -11865,7 +12857,8 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           });
           return;
         } catch (e: any) {
-          json(res, 500, { ok: false, error: e?.message ?? String(e) });
+          const status = Number((e as any)?.statusCode ?? 0);
+          json(res, status > 0 ? status : 500, { ok: false, error: e?.message ?? String(e) });
           return;
         }
       }

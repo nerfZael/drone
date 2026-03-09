@@ -13,7 +13,7 @@ import {
   HUB_LOGS_TAIL_LINES,
   RIGHT_PANEL_MIN_WIDTH_PX,
   RIGHT_PANEL_TAB_LABELS,
-  RIGHT_PANEL_TABS,
+  rightPanelTabsForRuntime,
   STARTUP_SEED_MISSING_GRACE_MS,
   createCanvasChatNodeId,
   type RightPanelTab,
@@ -181,6 +181,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     createOpen,
     creating,
     createMode,
+    createRuntime,
     cloneSourceId,
     cloneIncludeChats,
     createError,
@@ -200,6 +201,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setCreateOpen,
     setCreating,
     setCreateMode,
+    setCreateRuntime,
     setCloneSourceId,
     setCloneIncludeChats,
     setCreateError,
@@ -452,6 +454,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     if (!valid.has(spawnAgentKey)) setSpawnAgentKey('builtin:cursor');
   }, [customAgents, spawnAgentKey]);
 
+  React.useEffect(() => {
+    if (createRuntime === 'host' && spawnAgentKey.startsWith('custom:')) {
+      setSpawnAgentKey('builtin:cursor');
+    }
+  }, [createRuntime, spawnAgentKey, setSpawnAgentKey]);
+
   const resolveAgentKeyToConfig = React.useCallback(
     (key: string): ChatAgentConfig => {
       const k = String(key ?? '').trim();
@@ -521,6 +529,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
 
   type DroneQueueSpec = {
     name: string;
+    runtime?: 'container' | 'host';
     group?: string;
     repoPath?: string;
     build?: boolean;
@@ -688,6 +697,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setDraftNameSuggestionError,
       setDraftNameSuggesting,
       setCreateMode,
+      setCreateRuntime,
       setCloneSourceId,
       setCreateName,
       setCreateGroup,
@@ -874,6 +884,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       createInitialMessage,
       pullHostBranchBeforeCreate,
       createMode,
+      createRuntime,
       cloneSourceId,
       cloneIncludeChats,
       spawnAgentKey,
@@ -896,6 +907,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setCreateMessageSuffixRows,
       setCreateOpen,
       setCreateMode,
+      setCreateRuntime,
       setCloneSourceId,
       setCreateGroup,
       setCreateRepoPath,
@@ -1051,6 +1063,20 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   });
   const currentDroneRepoAttached = Boolean(currentDrone?.repoAttached ?? Boolean(String(currentDrone?.repoPath ?? '').trim()));
   const currentDroneRepoPath = String(currentDrone?.repoPath ?? '').trim();
+  const rightPanelTabs = React.useMemo(() => rightPanelTabsForRuntime(currentDrone?.runtime), [currentDrone?.runtime]);
+  React.useEffect(() => {
+    if (rightPanelTabs.length === 0) return;
+    if (!rightPanelTabs.includes(rightPanelTab)) {
+      setRightPanelTab(rightPanelTabs[0]);
+      return;
+    }
+    const bottomTabUnsupported = !rightPanelTabs.includes(rightPanelBottomTab);
+    const bottomTabConflictsInSplit = rightPanelSplit && rightPanelBottomTab === rightPanelTab;
+    if (bottomTabUnsupported || bottomTabConflictsInSplit) {
+      const fallbackBottomTab = rightPanelTabs.find((tab) => tab !== rightPanelTab) ?? rightPanelTabs[0];
+      if (fallbackBottomTab !== rightPanelBottomTab) setRightPanelBottomTab(fallbackBottomTab);
+    }
+  }, [rightPanelBottomTab, rightPanelSplit, rightPanelTab, rightPanelTabs, setRightPanelBottomTab, setRightPanelTab]);
   const deleteSelectedDroneFromInputShortcut = React.useCallback((): boolean => {
     const droneId = String(selectedDrone ?? '').trim();
     if (!droneId) return false;
@@ -1320,6 +1346,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const showRespondingAsStatusInHeader =
     Boolean(currentDroneBusy) && Boolean(currentDrone?.statusOk) && currentDrone?.hubPhase !== 'error';
   const currentCustomAgentMissing = currentAgent.kind === 'custom' && !customAgents.some((a) => a.id === currentAgent.id);
+  const currentDroneAllowsCustomAgents = String(currentDrone?.runtime ?? '').trim().toLowerCase() !== 'host';
   const agentDisabled =
     loadingChatInfo ||
     Boolean(openingTerminal) ||
@@ -1342,6 +1369,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     currentModel,
     registeredRepoPaths,
     customAgents,
+    allowCustomAgents: currentDroneAllowsCustomAgents,
     builtinAgentOptions,
     currentAgent,
     currentCustomAgentMissing,
@@ -1909,6 +1937,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     createOpen,
     creating,
     createMode,
+    createRuntime,
+    setCreateRuntime,
     cloneSourceId,
     createNameEntries,
     drones,
@@ -2101,7 +2131,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setRightPanelOpen,
     setRightPanelSplitMode,
     rightPanelSplit,
-    rightPanelTabs: RIGHT_PANEL_TABS,
+    rightPanelTabs,
     rightPanelTab,
     setRightPanelTab,
     rightPanelTabLabels: RIGHT_PANEL_TAB_LABELS,

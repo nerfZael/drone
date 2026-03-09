@@ -3,8 +3,10 @@ export type DroneSummary = {
   name: string;
   group: string | null;
   createdAt: string;
+  runtime?: 'container' | 'host';
   repoAttached?: boolean;
   repoPath: string;
+  cwd?: string;
   containerPort: number;
   hostPort: number | null;
   statusOk: boolean;
