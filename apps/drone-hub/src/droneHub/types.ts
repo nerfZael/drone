@@ -163,6 +163,19 @@ export type RepoDiffPayload =
     }
   | { ok: false; error: string };
 
+export type RepoSourcePayload =
+  | {
+      ok: true;
+      id: string;
+      name: string;
+      repoRoot: string;
+      path: string;
+      source: string;
+      exists: boolean;
+      truncated: boolean;
+    }
+  | { ok: false; error: string; code?: string };
+
 export type RepoPullChangeEntry = {
   path: string;
   originalPath: string | null;

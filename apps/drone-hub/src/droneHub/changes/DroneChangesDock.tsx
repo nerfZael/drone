@@ -12,6 +12,7 @@ import type {
   RepoPullRequestClosePayload,
   RepoPullRequestChangesPayload,
   RepoPullRequestMergePayload,
+  RepoSourcePayload,
 } from '../types';
 import {
   CHANGES_OPEN_PULL_REQUEST_EVENT,
@@ -21,7 +22,7 @@ import {
   selectedPullRequestForDrone,
 } from './navigation';
 import { DiffBlock } from './DiffBlock';
-import type { DiffState, DiffViewType } from './types';
+import type { DiffExpansionRange, DiffState, DiffViewType } from './types';
 import {
   CHANGES_DIFF_VIEW_STORAGE_KEY,
   CHANGES_EXPLORER_ZOOM_STORAGE_KEY,
@@ -33,6 +34,7 @@ import {
 } from './storage';
 import {
   badgeTone,
+  appendDiffExpansionRange,
   buildExplorerTree,
   changesPrMergeMethod,
   defaultKindForEntry,
@@ -43,7 +45,6 @@ import {
   flattenVisibleExplorerRows,
   hasStaged,
   hasUnstaged,
-  nextDiffContextLines,
   normalizeRef,
   parentDirPaths,
   pullRequestNoTextReason,
@@ -201,8 +202,10 @@ export function DroneChangesDock({
   );
 
   const [diffByKey, setDiffByKey] = React.useState<Record<string, DiffState>>({});
-  const [diffContextByKey, setDiffContextByKey] = React.useState<Record<string, number>>({});
+  const [expandedRangesByDiffKey, setExpandedRangesByDiffKey] = React.useState<Record<string, DiffExpansionRange[]>>({});
   const diffByKeyRef = React.useRef<Record<string, DiffState>>({});
+  const diffSourceByKeyRef = React.useRef<Record<string, string | null>>({});
+  const diffSourceInflightByKeyRef = React.useRef<Record<string, Promise<string | null>>>({});
   const inflightRef = React.useRef<Set<string>>(new Set());
   const mountedRef = React.useRef(true);
   const dockRootRef = React.useRef<HTMLDivElement | null>(null);
@@ -474,8 +477,10 @@ export function DroneChangesDock({
 
   React.useEffect(() => {
     setDiffByKey({});
-    setDiffContextByKey({});
+    setExpandedRangesByDiffKey({});
     diffByKeyRef.current = {};
+    diffSourceByKeyRef.current = {};
+    diffSourceInflightByKeyRef.current = {};
     inflightRef.current.clear();
     setExpandedPullFiles({});
     setHoveredFilePath(null);
@@ -691,13 +696,69 @@ export function DroneChangesDock({
     (path: string, prNumber: number | null | undefined) => `pr\u0000${Math.max(1, Math.floor(Number(prNumber ?? 0)))}\u0000${path}`,
     [],
   );
-  const diffContextLinesForKey = React.useCallback((key: string) => {
-    const requested = diffContextByKey[key];
-    return Number.isFinite(requested) && requested >= 0 ? Math.floor(requested) : 3;
-  }, [diffContextByKey]);
+  const clearDiffExpansionSource = React.useCallback((key: string) => {
+    delete diffSourceByKeyRef.current[key];
+    delete diffSourceInflightByKeyRef.current[key];
+  }, []);
+
+  const clearExpandedRangesForDiff = React.useCallback((key: string) => {
+    setExpandedRangesByDiffKey((prev) => {
+      if (!(key in prev)) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }, []);
+
+  const addExpandedRangeForDiff = React.useCallback((key: string, range: DiffExpansionRange) => {
+    setExpandedRangesByDiffKey((prev) => {
+      const current = prev[key] ?? [];
+      const nextRanges = appendDiffExpansionRange(current, range);
+      if (nextRanges === current) return prev;
+      return { ...prev, [key]: nextRanges };
+    });
+  }, []);
+
+  const loadDiffExpansionSource = React.useCallback(
+    async ({
+      stateKey,
+      filePath,
+      source,
+      sha,
+    }: {
+      stateKey: string;
+      filePath: string;
+      source: 'index' | 'head' | 'sha';
+      sha?: string | null;
+    }): Promise<string | null> => {
+      if (stateKey in diffSourceByKeyRef.current) {
+        return diffSourceByKeyRef.current[stateKey] ?? null;
+      }
+      const existing = diffSourceInflightByKeyRef.current[stateKey];
+      if (existing) return existing;
+
+      const request = requestJson<Extract<RepoSourcePayload, { ok: true }>>(
+        `/api/drones/${encodeURIComponent(droneId)}/repo/source?path=${encodeURIComponent(filePath)}&source=${source}${
+          source === 'sha' && typeof sha === 'string' && sha.trim() ? `&sha=${encodeURIComponent(sha.trim().toLowerCase())}` : ''
+        }`,
+      )
+        .then((data) => {
+          const next = data.exists ? String(data.source ?? '') : '';
+          diffSourceByKeyRef.current[stateKey] = next;
+          return next;
+        })
+        .finally(() => {
+          delete diffSourceInflightByKeyRef.current[stateKey];
+        });
+
+      diffSourceInflightByKeyRef.current[stateKey] = request;
+      return request;
+    },
+    [droneId],
+  );
 
   const loadDiff = React.useCallback(
-    async (path: string, kind: DiffKind, contextLines: number, retryEmptyUntracked = false, force = false) => {
+    async (path: string, kind: DiffKind, retryEmptyUntracked = false, force = false) => {
       const key = workingDiffStateKey(path, kind);
       if (inflightRef.current.has(key)) return;
       const cur = diffByKeyRef.current[key];
@@ -705,14 +766,16 @@ export function DroneChangesDock({
       if (cur?.status === 'loaded') {
         const shouldRetryEmptyUntracked =
           retryEmptyUntracked && kind === 'unstaged' && cur.fromUntracked && !String(cur.text ?? '').trim();
-        if (!force && cur.contextLines === contextLines && !shouldRetryEmptyUntracked) return;
+        if (!force && !shouldRetryEmptyUntracked) return;
       }
 
       inflightRef.current.add(key);
+      clearDiffExpansionSource(key);
+      clearExpandedRangesForDiff(key);
       setDiffByKey((prev) => ({ ...prev, [key]: { status: 'loading' } }));
       try {
         const data = await requestJson<Extract<RepoDiffPayload, { ok: true }>>(
-          `/api/drones/${encodeURIComponent(droneId)}/repo/diff?path=${encodeURIComponent(path)}&kind=${kind}&contextLines=${contextLines}`,
+          `/api/drones/${encodeURIComponent(droneId)}/repo/diff?path=${encodeURIComponent(path)}&kind=${kind}&contextLines=3`,
         );
         if (!mountedRef.current) return;
         setDiffByKey((prev) => ({
@@ -724,7 +787,7 @@ export function DroneChangesDock({
             fromUntracked: Boolean(data.fromUntracked),
             isBinary: false,
             noTextReason: null,
-            contextLines,
+            contextLines: 3,
           },
         }));
       } catch (e: any) {
@@ -737,7 +800,7 @@ export function DroneChangesDock({
         inflightRef.current.delete(key);
       }
     },
-    [droneId, workingDiffStateKey],
+    [clearDiffExpansionSource, clearExpandedRangesForDiff, droneId, workingDiffStateKey],
   );
 
   const loadRangeDiff = React.useCallback(
@@ -746,29 +809,29 @@ export function DroneChangesDock({
       baseSha,
       headSha,
       stateKey,
-      contextLines,
       force = false,
     }: {
       filePath: string;
       baseSha: string | null | undefined;
       headSha: string | null | undefined;
       stateKey: string;
-      contextLines: number;
       force?: boolean;
     }) => {
       const key = stateKey;
       if (inflightRef.current.has(key)) return;
       const cur = diffByKeyRef.current[key];
       if (cur?.status === 'loading') return;
-      if (!force && cur?.status === 'loaded' && cur.contextLines === contextLines) return;
+      if (!force && cur?.status === 'loaded') return;
 
       inflightRef.current.add(key);
+      clearDiffExpansionSource(key);
+      clearExpandedRangesForDiff(key);
       setDiffByKey((prev) => ({ ...prev, [key]: { status: 'loading' } }));
       try {
         const data = await requestJson<Extract<RepoPullDiffPayload, { ok: true }>>(
           `/api/drones/${encodeURIComponent(droneId)}/repo/pull/diff?path=${encodeURIComponent(filePath)}&base=${encodeURIComponent(
             String(baseSha ?? '').trim().toLowerCase(),
-          )}&head=${encodeURIComponent(String(headSha ?? '').trim().toLowerCase())}&contextLines=${contextLines}`,
+          )}&head=${encodeURIComponent(String(headSha ?? '').trim().toLowerCase())}&contextLines=3`,
         );
         if (!mountedRef.current) return;
         setDiffByKey((prev) => ({
@@ -780,7 +843,7 @@ export function DroneChangesDock({
             fromUntracked: false,
             isBinary: false,
             noTextReason: null,
-            contextLines,
+            contextLines: 3,
           },
         }));
       } catch (e: any) {
@@ -793,7 +856,7 @@ export function DroneChangesDock({
         inflightRef.current.delete(key);
       }
     },
-    [droneId],
+    [clearDiffExpansionSource, clearExpandedRangesForDiff, droneId],
   );
 
   React.useEffect(() => {
@@ -801,6 +864,11 @@ export function DroneChangesDock({
     const prNumber = Number(pullRequestChanges?.pullRequest.number);
     if (!Number.isFinite(prNumber) || prNumber <= 0) return;
     const list = pullRequestChanges?.entries ?? [];
+    for (const entry of list) {
+      const key = `pr\u0000${Math.floor(prNumber)}\u0000${entry.path}`;
+      clearDiffExpansionSource(key);
+      clearExpandedRangesForDiff(key);
+    }
     setDiffByKey((prev) => {
       const next = { ...prev };
       let changed = false;
@@ -832,7 +900,7 @@ export function DroneChangesDock({
       }
       return changed ? next : prev;
     });
-  }, [dataMode, pullRequestChanges?.entries, pullRequestChanges?.pullRequest.number]);
+  }, [clearDiffExpansionSource, clearExpandedRangesForDiff, dataMode, pullRequestChanges?.entries, pullRequestChanges?.pullRequest.number]);
 
   const splitShownKind = effectiveKindForEntry(selectedEntry, splitKind);
 
@@ -840,9 +908,8 @@ export function DroneChangesDock({
     if (dataMode !== 'working-tree') return;
     if (!repoAttached || disabled) return;
     if (!selectedEntry || !splitShownKind) return;
-    const key = workingDiffStateKey(selectedEntry.path, splitShownKind);
-    void loadDiff(selectedEntry.path, splitShownKind, diffContextLinesForKey(key), true);
-  }, [dataMode, diffContextLinesForKey, disabled, loadDiff, repoAttached, selectedEntry, splitShownKind, workingDiffStateKey]);
+    void loadDiff(selectedEntry.path, splitShownKind, true);
+  }, [dataMode, disabled, loadDiff, repoAttached, selectedEntry, splitShownKind]);
 
   React.useEffect(() => {
     if (dataMode !== 'working-tree') return;
@@ -850,10 +917,9 @@ export function DroneChangesDock({
     for (const entry of entries) {
       const k = effectiveKindForEntry(entry, stackedPreferredKind);
       if (!k) continue;
-      const key = workingDiffStateKey(entry.path, k);
-      void loadDiff(entry.path, k, diffContextLinesForKey(key), true);
+      void loadDiff(entry.path, k, true);
     }
-  }, [dataMode, diffContextLinesForKey, disabled, entries, loadDiff, repoAttached, stackedPreferredKind, viewMode, workingDiffStateKey]);
+  }, [dataMode, disabled, entries, loadDiff, repoAttached, stackedPreferredKind, viewMode]);
 
   React.useEffect(() => {
     if (dataMode !== 'pull-preview') return;
@@ -865,9 +931,8 @@ export function DroneChangesDock({
       baseSha: pullChanges?.baseSha,
       headSha: pullChanges?.headSha,
       stateKey: key,
-      contextLines: diffContextLinesForKey(key),
     });
-  }, [dataMode, diffContextLinesForKey, disabled, loadRangeDiff, pullChanges?.baseSha, pullChanges?.headSha, pullPreviewDiffStateKey, repoAttached, selectedEntry]);
+  }, [dataMode, disabled, loadRangeDiff, pullChanges?.baseSha, pullChanges?.headSha, pullPreviewDiffStateKey, repoAttached, selectedEntry]);
 
   const counts = changes?.counts;
   const pullBase = dataMode === 'pull-request' ? (pullRequestChanges?.pullRequest.baseSha ?? null) : (pullChanges?.baseSha ?? null);
@@ -991,43 +1056,44 @@ export function DroneChangesDock({
     [onRevealFileInFiles],
   );
 
-  const expandEntryDiffContext = React.useCallback(
-    (entry: RepoChangeEntry | null, kind?: DiffKind | null) => {
-      if (!entry) return;
-      if (dataMode === 'working-tree') {
-        const resolvedKind = kind ? effectiveKindForEntry(entry, kind) : effectiveKindForEntry(entry, stackedPreferredKind);
-        if (!resolvedKind) return;
-        const key = workingDiffStateKey(entry.path, resolvedKind);
-        const nextContextLines = nextDiffContextLines(diffContextLinesForKey(key));
-        if (!nextContextLines) return;
-        setDiffContextByKey((prev) => ({ ...prev, [key]: nextContextLines }));
-        void loadDiff(entry.path, resolvedKind, nextContextLines, true, true);
-        return;
-      }
+  const workingTreeExpansionSourceLoader = React.useCallback(
+    (entry: RepoChangeEntry | null, kind: DiffKind | null | undefined) => {
+      if (!entry || !kind) return null;
+      if (kind === 'unstaged' && entry.isUntracked) return null;
+      const sourcePath = entry.originalPath ?? entry.path;
+      const stateKey = workingDiffStateKey(entry.path, kind);
+      return () =>
+        loadDiffExpansionSource({
+          stateKey,
+          filePath: sourcePath,
+          source: kind === 'staged' ? 'head' : 'index',
+        });
+    },
+    [loadDiffExpansionSource, workingDiffStateKey],
+  );
 
+  const pullExpansionSourceLoader = React.useCallback(
+    (entry: RepoChangeEntry | null) => {
+      if (!entry) return null;
       const baseSha = dataMode === 'pull-request' ? pullRequestChanges?.pullRequest.baseSha : pullChanges?.baseSha;
       const headSha = dataMode === 'pull-request' ? pullRequestChanges?.pullRequest.headSha : pullChanges?.headSha;
+      if (!/^[0-9a-f]{40}$/.test(String(baseSha ?? '').trim().toLowerCase())) return null;
       const stateKey =
         dataMode === 'pull-request'
           ? pullRequestDiffStateKey(entry.path, pullRequestChanges?.pullRequest.number ?? pullRequestNumber)
           : pullPreviewDiffStateKey(entry.path, baseSha, headSha);
-      const nextContextLines = nextDiffContextLines(diffContextLinesForKey(stateKey));
-      if (!nextContextLines) return;
-      setDiffContextByKey((prev) => ({ ...prev, [stateKey]: nextContextLines }));
-      void loadRangeDiff({
-        filePath: entry.path,
-        baseSha,
-        headSha,
-        stateKey,
-        contextLines: nextContextLines,
-        force: true,
-      });
+      const sourcePath = entry.originalPath ?? entry.path;
+      return () =>
+        loadDiffExpansionSource({
+          stateKey,
+          filePath: sourcePath,
+          source: 'sha',
+          sha: baseSha,
+        });
     },
     [
       dataMode,
-      diffContextLinesForKey,
-      loadDiff,
-      loadRangeDiff,
+      loadDiffExpansionSource,
       pullChanges?.baseSha,
       pullChanges?.headSha,
       pullPreviewDiffStateKey,
@@ -1036,8 +1102,6 @@ export function DroneChangesDock({
       pullRequestChanges?.pullRequest.number,
       pullRequestDiffStateKey,
       pullRequestNumber,
-      stackedPreferredKind,
-      workingDiffStateKey,
     ],
   );
 
@@ -1608,8 +1672,9 @@ export function DroneChangesDock({
                         state={state}
                         filePath={entry.path}
                         viewType={diffViewType}
-                        onExpandContext={() => expandEntryDiffContext(entry, k)}
-                        expandContextDisabled={state?.status === 'loading' || nextDiffContextLines(diffContextLinesForKey(key)) === null}
+                        loadExpansionSource={workingTreeExpansionSourceLoader(entry, k)}
+                        expansionRanges={expandedRangesByDiffKey[key] ?? []}
+                        onAddExpansionRange={(range) => addExpandedRangeForDiff(key, range)}
                       />
                     </section>
                   );
@@ -1659,7 +1724,6 @@ export function DroneChangesDock({
                               baseSha: pullChanges?.baseSha,
                               headSha: pullChanges?.headSha,
                               stateKey: key,
-                              contextLines: diffContextLinesForKey(key),
                             });
                           }
                         }}
@@ -1674,8 +1738,9 @@ export function DroneChangesDock({
                         state={state}
                         filePath={entry.path}
                         viewType={diffViewType}
-                        onExpandContext={() => expandEntryDiffContext(entry)}
-                        expandContextDisabled={state?.status === 'loading' || nextDiffContextLines(diffContextLinesForKey(key)) === null}
+                        loadExpansionSource={pullExpansionSourceLoader(entry)}
+                        expansionRanges={expandedRangesByDiffKey[key] ?? []}
+                        onAddExpansionRange={(range) => addExpandedRangeForDiff(key, range)}
                       />
                     ) : null}
                   </section>
@@ -1742,11 +1807,9 @@ export function DroneChangesDock({
                   state={diffByKey[workingDiffStateKey(selectedEntry.path, splitShownKind)]}
                   filePath={selectedEntry.path}
                   viewType={diffViewType}
-                  onExpandContext={() => expandEntryDiffContext(selectedEntry, splitShownKind)}
-                  expandContextDisabled={
-                    diffByKey[workingDiffStateKey(selectedEntry.path, splitShownKind)]?.status === 'loading' ||
-                    nextDiffContextLines(diffContextLinesForKey(workingDiffStateKey(selectedEntry.path, splitShownKind))) === null
-                  }
+                  loadExpansionSource={workingTreeExpansionSourceLoader(selectedEntry, splitShownKind)}
+                  expansionRanges={expandedRangesByDiffKey[workingDiffStateKey(selectedEntry.path, splitShownKind)] ?? []}
+                  onAddExpansionRange={(range) => addExpandedRangeForDiff(workingDiffStateKey(selectedEntry.path, splitShownKind), range)}
                 />
               )
             ) : !selectedEntry ? (
@@ -1760,15 +1823,21 @@ export function DroneChangesDock({
                 }
                 filePath={selectedEntry.path}
                 viewType={diffViewType}
-                onExpandContext={() => expandEntryDiffContext(selectedEntry)}
-                expandContextDisabled={
-                  (() => {
-                    const key =
-                      dataMode === 'pull-request'
-                        ? pullRequestDiffStateKey(selectedEntry.path, pullRequestChanges?.pullRequest.number ?? pullRequestNumber)
-                        : pullPreviewDiffStateKey(selectedEntry.path, pullChanges?.baseSha, pullChanges?.headSha);
-                    return diffByKey[key]?.status === 'loading' || nextDiffContextLines(diffContextLinesForKey(key)) === null;
-                  })()
+                loadExpansionSource={pullExpansionSourceLoader(selectedEntry)}
+                expansionRanges={
+                  expandedRangesByDiffKey[
+                    dataMode === 'pull-request'
+                      ? pullRequestDiffStateKey(selectedEntry.path, pullRequestChanges?.pullRequest.number ?? pullRequestNumber)
+                      : pullPreviewDiffStateKey(selectedEntry.path, pullChanges?.baseSha, pullChanges?.headSha)
+                  ] ?? []
+                }
+                onAddExpansionRange={(range) =>
+                  addExpandedRangeForDiff(
+                    dataMode === 'pull-request'
+                      ? pullRequestDiffStateKey(selectedEntry.path, pullRequestChanges?.pullRequest.number ?? pullRequestNumber)
+                      : pullPreviewDiffStateKey(selectedEntry.path, pullChanges?.baseSha, pullChanges?.headSha),
+                    range,
+                  )
                 }
               />
             )}

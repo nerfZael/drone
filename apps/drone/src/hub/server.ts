@@ -8060,6 +8060,103 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         }
       }
 
+      // GET /api/drones/:name/repo/source?path=<repo-relative>&source=index|head|sha&sha=<40-hex>
+      // Returns raw file text from the "old" side of a diff so the client can expand hidden unchanged blocks inline.
+      if (
+        method === 'GET' &&
+        parts.length === 5 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'repo' &&
+        parts[4] === 'source'
+      ) {
+        const droneRef = decodeURIComponent(parts[2]);
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        const d = resolved.drone;
+        const droneId = resolved.id;
+        const droneName = String(d?.name ?? droneRef).trim() || droneRef;
+        const repoAttached = Boolean(String(d?.repo?.dest ?? '').trim()) || Boolean(String(d?.repo?.seededAt ?? '').trim());
+        if (!repoAttached) {
+          json(res, 400, { ok: false, error: 'drone has no repo attached' });
+          return;
+        }
+        const repoPathInContainer = droneRepoPathInContainer(d);
+
+        const filePath = String(u.searchParams.get('path') ?? '').trim();
+        if (!filePath) {
+          json(res, 400, { ok: false, error: 'missing source path' });
+          return;
+        }
+        const sourceMode = String(u.searchParams.get('source') ?? 'head').trim().toLowerCase();
+        const sha = String(u.searchParams.get('sha') ?? '').trim().toLowerCase();
+        const objectish =
+          sourceMode === 'index'
+            ? `:${filePath}`
+            : sourceMode === 'sha' && /^[0-9a-f]{40}$/.test(sha)
+              ? `${sha}:${filePath}`
+              : sourceMode === 'head'
+                ? `HEAD:${filePath}`
+                : null;
+        if (!objectish) {
+          json(res, 400, { ok: false, error: 'invalid source selector' });
+          return;
+        }
+
+        try {
+          const source = await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: d }, async ({ containerName }) => {
+            const repoRootRaw = await runGitInDroneOrThrow({
+              container: containerName,
+              repoPathInContainer,
+              args: ['rev-parse', '--show-toplevel'],
+            });
+            const repoRoot = String(repoRootRaw.stdout ?? '').trim() || repoPathInContainer;
+            const file = await runGitInDrone({
+              container: containerName,
+              repoPathInContainer,
+              args: ['show', objectish],
+              okCodes: [0, 128],
+            });
+            if (file.code === 128) {
+              return { repoRoot, source: '', exists: false };
+            }
+            const text = String(file.stdout ?? '');
+            const maxChars = 1_000_000;
+            const truncated = text.length > maxChars;
+            return {
+              repoRoot,
+              source: truncated ? text.slice(0, maxChars) : text,
+              exists: true,
+              truncated,
+            };
+          });
+          json(res, 200, {
+            ok: true,
+            id: droneId,
+            name: droneName,
+            repoRoot: source.repoRoot,
+            path: filePath,
+            source: source.source,
+            exists: source.exists,
+            truncated: Boolean((source as any).truncated),
+          });
+          return;
+        } catch (e: any) {
+          const msg = e?.message ?? String(e);
+          const missingContainer = looksLikeMissingContainerError(msg);
+          const repoUnavailable = looksLikeRepoUnavailableError(msg);
+          const status = missingContainer ? 404 : repoUnavailable ? 409 : 500;
+          json(res, status, {
+            ok: false,
+            error: repoUnavailable ? 'repository is not ready yet' : msg,
+            ...(repoUnavailable ? { code: 'repo_unavailable' } : {}),
+            id: droneId,
+            name: droneName,
+          });
+          return;
+        }
+      }
+
       // GET /api/drones/:name/repo/diff?path=<repo-relative>&kind=staged|unstaged
       // Returns unified diff text for a single file path.
       if (
