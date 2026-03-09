@@ -2357,21 +2357,6 @@ function looksLikeRepoUnavailableError(msg: string): boolean {
   );
 }
 
-function respondHostRuntimeRepoEndpointUnsupported(
-  res: http.ServerResponse,
-  opts: { droneId: string; droneName: string; endpoint: string },
-): void {
-  const endpoint = String(opts.endpoint ?? '').trim() || '/repo';
-  json(res, 409, {
-    ok: false,
-    error: `repo endpoint "${endpoint}" is not supported for host runtime drones`,
-    code: 'host_repo_endpoint_unsupported',
-    endpoint,
-    id: opts.droneId,
-    name: opts.droneName,
-  });
-}
-
 type PendingPromptState = 'queued' | 'sending' | 'sent' | 'failed';
 
 type PendingPrompt = {
@@ -8790,23 +8775,57 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const droneId = resolved.id;
         const droneName = String(d?.name ?? droneRef).trim() || droneRef;
         const runtime = droneRuntime(d);
+        const configuredDroneBranch = String(d?.repo?.branch ?? '').trim() || null;
+        const droneFromRef = String(d?.repo?.baseRef ?? '').trim() || null;
         const repoAttached = Boolean(String(d?.repo?.dest ?? '').trim()) || Boolean(String(d?.repo?.seededAt ?? '').trim());
         if (!repoAttached) {
           json(res, 400, { ok: false, error: 'drone has no repo attached' });
           return;
         }
         if (runtime === 'host') {
-          respondHostRuntimeRepoEndpointUnsupported(res, {
-            droneId,
-            droneName,
-            endpoint: '/repo/pull/changes',
-          });
-          return;
+          const repoPathRaw = String(d?.repoPath ?? '').trim();
+          if (!repoPathRaw) {
+            json(res, 400, { ok: false, error: 'drone has no repo attached' });
+            return;
+          }
+          try {
+            const repoRoot = await gitTopLevel(repoPathRaw);
+            const hostSummary = await gitRepoChangesSummary(repoRoot);
+            const hostHeadSha = String(hostSummary.branch.oid ?? '').trim().toLowerCase();
+            const normalizedHeadSha = /^[0-9a-f]{40}$/.test(hostHeadSha) ? hostHeadSha : '';
+            json(res, 200, {
+              ok: true,
+              id: droneId,
+              name: droneName,
+              repoRoot,
+              baseSha: normalizedHeadSha,
+              headSha: normalizedHeadSha,
+              counts: { changed: 0 },
+              entries: [],
+              mode: 'host-same-repo',
+              branchContext: {
+                hostCurrent: String(hostSummary.branch.head ?? '').trim() || null,
+                droneCurrent: String(hostSummary.branch.head ?? '').trim() || null,
+                droneConfigured: configuredDroneBranch,
+                droneFromRef,
+              },
+            });
+            return;
+          } catch (e: any) {
+            const msg = e?.message ?? String(e);
+            const repoUnavailable = looksLikeRepoUnavailableError(msg);
+            json(res, repoUnavailable ? 409 : 500, {
+              ok: false,
+              error: repoUnavailable ? 'repository is not ready yet' : msg,
+              ...(repoUnavailable ? { code: 'repo_unavailable' } : {}),
+              id: droneId,
+              name: droneName,
+            });
+            return;
+          }
         }
         const repoPathInContainer = droneRepoPathInContainer(d);
         const repoPathRaw = String(d?.repoPath ?? '').trim();
-        const configuredDroneBranch = String(d?.repo?.branch ?? '').trim() || null;
-        const droneFromRef = String(d?.repo?.baseRef ?? '').trim() || null;
         let hostBranchHead: string | null = null;
         let pullPreviewBaseSha: string | undefined;
         const lastPullAny = d?.repo?.lastPull && typeof d.repo.lastPull === 'object' ? d.repo.lastPull : null;
@@ -9021,16 +9040,6 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           json(res, 400, { ok: false, error: 'drone has no repo attached' });
           return;
         }
-        if (runtime === 'host') {
-          respondHostRuntimeRepoEndpointUnsupported(res, {
-            droneId,
-            droneName,
-            endpoint: '/repo/pull/diff',
-          });
-          return;
-        }
-        const repoPathInContainer = droneRepoPathInContainer(d);
-
         const filePath = String(u.searchParams.get('path') ?? '').trim();
         if (!filePath) {
           json(res, 400, { ok: false, error: 'missing diff path' });
@@ -9038,6 +9047,46 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         }
         const baseSha = String(u.searchParams.get('base') ?? '').trim().toLowerCase();
         const headSha = String(u.searchParams.get('head') ?? '').trim().toLowerCase();
+        if (runtime === 'host') {
+          const repoPathRaw = String(d?.repoPath ?? '').trim();
+          if (!repoPathRaw) {
+            json(res, 400, { ok: false, error: 'drone has no repo attached' });
+            return;
+          }
+          try {
+            const repoRoot = await gitTopLevel(repoPathRaw);
+            const hostSummary = await gitRepoChangesSummary(repoRoot);
+            const hostHeadSha = String(hostSummary.branch.oid ?? '').trim().toLowerCase();
+            const normalizedHeadSha = /^[0-9a-f]{40}$/.test(hostHeadSha) ? hostHeadSha : '';
+            const validBaseSha = /^[0-9a-f]{40}$/.test(baseSha) ? baseSha : normalizedHeadSha;
+            const validHeadSha = /^[0-9a-f]{40}$/.test(headSha) ? headSha : normalizedHeadSha;
+            json(res, 200, {
+              ok: true,
+              id: droneId,
+              name: droneName,
+              repoRoot,
+              baseSha: validBaseSha,
+              headSha: validHeadSha,
+              path: filePath,
+              diff: '',
+              truncated: false,
+              mode: 'host-same-repo',
+            });
+            return;
+          } catch (e: any) {
+            const msg = e?.message ?? String(e);
+            const repoUnavailable = looksLikeRepoUnavailableError(msg);
+            json(res, repoUnavailable ? 409 : 500, {
+              ok: false,
+              error: repoUnavailable ? 'repository is not ready yet' : msg,
+              ...(repoUnavailable ? { code: 'repo_unavailable' } : {}),
+              id: droneId,
+              name: droneName,
+            });
+            return;
+          }
+        }
+        const repoPathInContainer = droneRepoPathInContainer(d);
 
         try {
           const diff = await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: d }, async ({ containerName }) => {
@@ -9404,12 +9453,29 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const droneName = String(d?.name ?? droneRef).trim() || droneRef;
         const runtime = droneRuntime(d);
         if (runtime === 'host') {
-          respondHostRuntimeRepoEndpointUnsupported(res, {
-            droneId,
-            droneName,
-            endpoint: '/repo/reseed',
-          });
-          return;
+          const repoPathRaw = String(d?.repoPath ?? '').trim();
+          if (!repoPathRaw) {
+            json(res, 400, { ok: false, error: 'drone has no repo attached' });
+            return;
+          }
+          try {
+            const repoRoot = await gitTopLevel(repoPathRaw);
+            const baseRef = await gitCurrentBranchOrSha(repoRoot);
+            json(res, 200, {
+              ok: true,
+              id: droneId,
+              name: droneName,
+              repoRoot,
+              baseRef,
+              mode: 'host-noop',
+              message: 'host runtime uses the host repository directly; reseed is not required',
+            });
+            return;
+          } catch (e: any) {
+            const msg = e?.message ?? String(e);
+            json(res, 500, { ok: false, error: msg, id: droneId, name: droneName });
+            return;
+          }
         }
         const repoPathRaw = String(d?.repoPath ?? '').trim();
         if (!repoPathRaw) {
@@ -9483,12 +9549,32 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const droneName = String(d?.name ?? droneRef).trim() || droneRef;
         const runtime = droneRuntime(d);
         if (runtime === 'host') {
-          respondHostRuntimeRepoEndpointUnsupported(res, {
-            droneId,
-            droneName,
-            endpoint: '/repo/push',
-          });
-          return;
+          const repoPathRaw = String(d?.repoPath ?? '').trim();
+          if (!repoPathRaw) {
+            json(res, 400, { ok: false, error: 'drone has no repo attached' });
+            return;
+          }
+          try {
+            const repoRoot = await gitTopLevel(repoPathRaw);
+            const hostRef = await gitCurrentBranchOrSha(repoRoot);
+            const hostRefShaRaw = await runHostCommand('git', ['-C', repoRoot, 'rev-parse', hostRef]);
+            const hostRefSha = hostRefShaRaw.code === 0 ? (parseShaFromText(hostRefShaRaw.stdout) ?? null) : null;
+            json(res, 200, {
+              ok: true,
+              id: droneId,
+              name: droneName,
+              mode: 'host-noop',
+              repoRoot,
+              hostRef,
+              hostRefSha,
+              message: 'host runtime uses the host repository directly; push is not required',
+            });
+            return;
+          } catch (e: any) {
+            const msg = e?.message ?? String(e);
+            json(res, 500, { ok: false, error: msg, id: droneId, name: droneName });
+            return;
+          }
         }
         const repoPathRaw = String(d?.repoPath ?? '').trim();
         if (!repoPathRaw) {
@@ -9819,12 +9905,29 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const droneName = String(d?.name ?? droneRef).trim() || droneRef;
         const runtime = droneRuntime(d);
         if (runtime === 'host') {
-          respondHostRuntimeRepoEndpointUnsupported(res, {
-            droneId,
-            droneName,
-            endpoint: '/repo/pull',
-          });
-          return;
+          const repoPathRaw = String(d?.repoPath ?? '').trim();
+          if (!repoPathRaw) {
+            json(res, 400, { ok: false, error: 'drone has no repo attached' });
+            return;
+          }
+          try {
+            const repoRoot = await gitTopLevel(repoPathRaw);
+            const fromRef = String(d?.repo?.baseRef ?? '').trim() || (await gitCurrentBranchOrSha(repoRoot));
+            json(res, 200, {
+              ok: true,
+              id: droneId,
+              name: droneName,
+              mode: 'host-noop',
+              repoRoot,
+              fromRef,
+              message: 'host runtime uses the host repository directly; pull is not required',
+            });
+            return;
+          } catch (e: any) {
+            const msg = e?.message ?? String(e);
+            json(res, 500, { ok: false, error: msg, id: droneId, name: droneName });
+            return;
+          }
         }
         const repoPathRaw = String(d?.repoPath ?? '').trim();
         if (!repoPathRaw) {

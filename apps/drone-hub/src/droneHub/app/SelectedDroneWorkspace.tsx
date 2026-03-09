@@ -1123,7 +1123,7 @@ export function SelectedDroneWorkspace({
             <IconCursorApp className="opacity-70" />
             Cursor
           </button>
-          {currentDroneRepoAttached && !hostRuntime && (
+          {currentDroneRepoAttached && (
             <>
               <button
                 type="button"
@@ -1135,9 +1135,13 @@ export function SelectedDroneWorkspace({
                     : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
-                title="Apply repo changes from the drone container into the local repo"
+                title={
+                  hostRuntime
+                    ? 'Host runtime uses the host repository directly; this action is a no-op.'
+                    : 'Apply repo changes from the drone container into the local repo'
+                }
               >
-                {repoOp?.kind === 'pull' ? 'Applying...' : 'Apply changes'}
+                {repoOp?.kind === 'pull' ? 'Applying...' : hostRuntime ? 'Apply (noop)' : 'Apply changes'}
               </button>
               <button
                 type="button"
@@ -1149,9 +1153,13 @@ export function SelectedDroneWorkspace({
                     : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
-                title="Merge the current host branch into this drone branch"
+                title={
+                  hostRuntime
+                    ? 'Host runtime uses the host repository directly; this action is a no-op.'
+                    : 'Merge the current host branch into this drone branch'
+                }
               >
-                {repoOp?.kind === 'push' ? 'Pulling host…' : 'Pull host changes'}
+                {repoOp?.kind === 'push' ? 'Pulling host…' : hostRuntime ? 'Pull host (noop)' : 'Pull host changes'}
               </button>
             </>
           )}
@@ -1203,7 +1211,7 @@ export function SelectedDroneWorkspace({
                   >
                     Open VS Code
                   </button>
-                  {currentDroneRepoAttached && !hostRuntime && (
+                  {currentDroneRepoAttached && (
                     <>
                       <div className="my-1 border-t border-[var(--border-subtle)]" />
                       <button
@@ -1215,8 +1223,9 @@ export function SelectedDroneWorkspace({
                         disabled={isDroneStartingOrSeeding(currentDrone.hubPhase) || Boolean(openingEditor) || Boolean(openingTerminal) || Boolean(repoOp)}
                         className={cn(dropdownMenuItemBaseClass, 'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed')}
                         role="menuitem"
+                        title={hostRuntime ? 'Host runtime uses the host repository directly; this action is a no-op.' : undefined}
                       >
-                        Reseed repo
+                        {hostRuntime ? 'Reseed repo (noop)' : 'Reseed repo'}
                       </button>
                     </>
                   )}

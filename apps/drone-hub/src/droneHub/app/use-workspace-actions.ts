@@ -222,10 +222,6 @@ export function useWorkspaceActions({
 
   const pullRepoChanges = React.useCallback(async () => {
     if (!currentDrone) return;
-    if (isHostRuntimeDrone(currentDrone)) {
-      setRepoOperationError('Repo operations are not yet supported for host runtime drones.');
-      return;
-    }
     const droneId = String(currentDrone.id ?? '').trim();
     if (!droneId) return;
     clearRepoOperationError();
@@ -272,16 +268,14 @@ export function useWorkspaceActions({
 
   const pushRepoChanges = React.useCallback(async () => {
     if (!currentDrone) return;
-    if (isHostRuntimeDrone(currentDrone)) {
-      setRepoOperationError('Repo operations are not yet supported for host runtime drones.');
-      return;
-    }
     const droneId = String(currentDrone.id ?? '').trim();
     if (!droneId) return;
-    const confirmed = window.confirm(
-      'Pull current host branch changes into this drone branch? A clean merge creates a merge commit in the drone repo.',
-    );
-    if (!confirmed) return;
+    if (!isHostRuntimeDrone(currentDrone)) {
+      const confirmed = window.confirm(
+        'Pull current host branch changes into this drone branch? A clean merge creates a merge commit in the drone repo.',
+      );
+      if (!confirmed) return;
+    }
     clearRepoOperationError();
     setRepoOp({ kind: 'push' });
     try {
@@ -311,10 +305,6 @@ export function useWorkspaceActions({
 
   const reseedRepo = React.useCallback(async () => {
     if (!currentDrone) return;
-    if (isHostRuntimeDrone(currentDrone)) {
-      setRepoOperationError('Repo operations are not yet supported for host runtime drones.');
-      return;
-    }
     const droneId = String(currentDrone.id ?? '').trim();
     if (!droneId) return;
     clearRepoOperationError();

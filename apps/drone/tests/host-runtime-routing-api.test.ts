@@ -241,28 +241,48 @@ describeSocketSuite('host runtime routing api', () => {
     expect(String(diffResp.data?.diff ?? '')).toContain('+changed');
   });
 
-  test('returns explicit unsupported response for container-only repo routes on host runtime', async () => {
-    const droneId = 'host-repo-unsupported';
+  test('returns host same-repo semantics for pull/push/reseed routes on host runtime', async () => {
+    const droneId = 'host-repo-same-repo';
+    const repoRoot = path.join(tempRoot, 'host-repo-same-repo-root');
+    fs.mkdirSync(repoRoot, { recursive: true });
+    runGit(repoRoot, ['init']);
+    runGit(repoRoot, ['config', 'user.email', 'host-runtime@example.com']);
+    runGit(repoRoot, ['config', 'user.name', 'Host Runtime']);
+    fs.writeFileSync(path.join(repoRoot, 'tracked.txt'), 'base\n', 'utf8');
+    runGit(repoRoot, ['add', 'tracked.txt']);
+    runGit(repoRoot, ['commit', '-m', 'init']);
+
     await seedHostDrone(droneId, {
-      repoPath: tempRoot,
-      repo: { dest: '/work/repo' },
+      cwd: repoRoot,
+      repoPath: repoRoot,
+      repo: { dest: repoRoot },
     });
 
-    const checks: Array<{ method: 'GET' | 'POST'; endpoint: string }> = [
-      { method: 'GET', endpoint: '/repo/pull/changes' },
-      { method: 'GET', endpoint: '/repo/pull/diff' },
-      { method: 'POST', endpoint: '/repo/reseed' },
-      { method: 'POST', endpoint: '/repo/push' },
-      { method: 'POST', endpoint: '/repo/pull' },
+    const checks: Array<{ method: 'GET' | 'POST'; endpoint: string; mode: string }> = [
+      { method: 'GET', endpoint: '/repo/pull/changes', mode: 'host-same-repo' },
+      { method: 'GET', endpoint: '/repo/pull/diff?path=tracked.txt', mode: 'host-same-repo' },
+      { method: 'POST', endpoint: '/repo/reseed', mode: 'host-noop' },
+      { method: 'POST', endpoint: '/repo/push', mode: 'host-noop' },
+      { method: 'POST', endpoint: '/repo/pull', mode: 'host-noop' },
     ];
 
     for (const check of checks) {
       const resp = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}${check.endpoint}`, {
         method: check.method,
       });
-      expect(resp.r.status).toBe(409);
-      expect(String(resp.data?.code ?? '')).toBe('host_repo_endpoint_unsupported');
-      expect(String(resp.data?.endpoint ?? '')).toBe(check.endpoint);
+      if (resp.r.status !== 200) {
+        throw new Error(`${check.endpoint} failed with ${resp.r.status}: ${JSON.stringify(resp.data)}`);
+      }
+      expect(resp.r.status).toBe(200);
+      expect(resp.data?.ok).toBe(true);
+      expect(String(resp.data?.mode ?? '')).toBe(check.mode);
+      if (check.endpoint.startsWith('/repo/pull/changes')) {
+        expect(Number(resp.data?.counts?.changed ?? -1)).toBe(0);
+      }
+      if (check.endpoint.startsWith('/repo/pull/diff')) {
+        expect(String(resp.data?.path ?? '')).toBe('tracked.txt');
+        expect(String(resp.data?.diff ?? '')).toBe('');
+      }
     }
   });
 

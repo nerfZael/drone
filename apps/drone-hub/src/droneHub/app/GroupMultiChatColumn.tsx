@@ -86,7 +86,7 @@ export function GroupMultiChatColumn({
   const setChatInputDraft = useDroneHubUiStore((s) => s.setChatInputDraft);
   const terminalEmulator = useDroneHubUiStore((s) => s.terminalEmulator);
   const hostRuntime = isHostRuntimeDrone(drone);
-  const repoAttached = !hostRuntime && Boolean(drone.repoAttached ?? Boolean(String(drone.repoPath ?? '').trim()));
+  const repoAttached = Boolean(drone.repoAttached ?? Boolean(String(drone.repoPath ?? '').trim()));
   const quickOpenTabUrl = resolveDroneOpenTabUrl(drone);
   const disabledByProvisioning = isDroneStartingOrSeeding(drone.hubPhase);
 
@@ -379,10 +379,12 @@ export function GroupMultiChatColumn({
 
   const pushRepoChanges = React.useCallback(async () => {
     if (disabledByProvisioning || quickActionBusy || !repoAttached) return;
-    const confirmed = window.confirm(
-      'Pull current host branch changes into this drone branch? A clean merge creates a merge commit in the drone repo.',
-    );
-    if (!confirmed) return;
+    if (!hostRuntime) {
+      const confirmed = window.confirm(
+        'Pull current host branch changes into this drone branch? A clean merge creates a merge commit in the drone repo.',
+      );
+      if (!confirmed) return;
+    }
     setQuickActionBusy('push');
     setQuickActionError(null);
     try {
@@ -406,7 +408,7 @@ export function GroupMultiChatColumn({
     } finally {
       setQuickActionBusy(null);
     }
-  }, [disabledByProvisioning, drone.id, quickActionBusy, repoAttached]);
+  }, [disabledByProvisioning, drone.id, hostRuntime, quickActionBusy, repoAttached]);
 
   const openBrowserTab = React.useCallback(async () => {
     if (disabledByProvisioning) return;
@@ -516,9 +518,13 @@ export function GroupMultiChatColumn({
                       : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
                   }`}
                   style={{ fontFamily: 'var(--display)' }}
-                  title="Apply repo changes from this drone into the local repo"
+                  title={
+                    hostRuntime
+                      ? 'Host runtime uses the host repository directly; this action is a no-op.'
+                      : 'Apply repo changes from this drone into the local repo'
+                  }
                 >
-                  {quickActionBusy === 'pull' ? 'Applying...' : 'Apply'}
+                  {quickActionBusy === 'pull' ? 'Applying...' : hostRuntime ? 'Apply (noop)' : 'Apply'}
                 </button>
                 <button
                   type="button"
@@ -532,9 +538,13 @@ export function GroupMultiChatColumn({
                       : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
                   }`}
                   style={{ fontFamily: 'var(--display)' }}
-                  title="Merge current host branch commits into this drone branch"
+                  title={
+                    hostRuntime
+                      ? 'Host runtime uses the host repository directly; this action is a no-op.'
+                      : 'Merge current host branch commits into this drone branch'
+                  }
                 >
-                  {quickActionBusy === 'push' ? 'Pulling...' : 'Pull host'}
+                  {quickActionBusy === 'push' ? 'Pulling...' : hostRuntime ? 'Pull host (noop)' : 'Pull host'}
                 </button>
               </>
             ) : null}
