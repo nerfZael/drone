@@ -8090,6 +8090,11 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         }
         const rawKind = String(u.searchParams.get('kind') ?? 'unstaged').trim().toLowerCase();
         const kind = rawKind === 'staged' ? 'staged' : 'unstaged';
+        const requestedContextLines = Number(u.searchParams.get('contextLines') ?? 3);
+        const contextLines =
+          Number.isFinite(requestedContextLines) && requestedContextLines >= 0
+            ? Math.min(2000, Math.floor(requestedContextLines))
+            : 3;
 
         try {
           await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: d }, async ({ containerName }) => {
@@ -8104,7 +8109,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
               repoPathInContainer,
               filePath,
               kind,
-              contextLines: 3,
+              contextLines,
             });
             json(res, 200, {
               ok: true,
@@ -8383,6 +8388,11 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         }
         const baseSha = String(u.searchParams.get('base') ?? '').trim().toLowerCase();
         const headSha = String(u.searchParams.get('head') ?? '').trim().toLowerCase();
+        const requestedContextLines = Number(u.searchParams.get('contextLines') ?? 3);
+        const contextLines =
+          Number.isFinite(requestedContextLines) && requestedContextLines >= 0
+            ? Math.min(2000, Math.floor(requestedContextLines))
+            : 3;
 
         try {
           const diff = await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: d }, async ({ containerName }) => {
@@ -8392,7 +8402,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
               filePath,
               baseSha: /^[0-9a-f]{40}$/.test(baseSha) ? baseSha : undefined,
               headSha: /^[0-9a-f]{40}$/.test(headSha) ? headSha : undefined,
-              contextLines: 3,
+              contextLines,
             });
           });
           json(res, 200, {
