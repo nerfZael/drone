@@ -218,7 +218,6 @@ describeSocketSuite('host runtime routing api', () => {
     await seedHostDrone(droneId, {
       cwd: repoRoot,
       repoPath: repoRoot,
-      repo: { dest: repoRoot },
     });
 
     const changesResp = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/repo/changes`);
@@ -255,7 +254,6 @@ describeSocketSuite('host runtime routing api', () => {
     await seedHostDrone(droneId, {
       cwd: repoRoot,
       repoPath: repoRoot,
-      repo: { dest: repoRoot },
     });
 
     const checks: Array<{ method: 'GET' | 'POST'; endpoint: string; mode: string }> = [

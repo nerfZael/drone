@@ -858,6 +858,7 @@ createCommand
             containerPort: hostPort,
             token,
             repoPath,
+            ...(repoPath ? { repo: { dest: repoPath } } : {}),
             createdAt: at,
             host: {
               pid: hostPid,

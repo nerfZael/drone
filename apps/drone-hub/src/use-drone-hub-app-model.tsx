@@ -444,6 +444,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     if (!valid.has(spawnAgentKey)) setSpawnAgentKey('builtin:cursor');
   }, [customAgents, spawnAgentKey]);
 
+  React.useEffect(() => {
+    if (createRuntime === 'host' && spawnAgentKey.startsWith('custom:')) {
+      setSpawnAgentKey('builtin:cursor');
+    }
+  }, [createRuntime, spawnAgentKey, setSpawnAgentKey]);
+
   const resolveAgentKeyToConfig = React.useCallback(
     (key: string): ChatAgentConfig => {
       const k = String(key ?? '').trim();
@@ -1330,6 +1336,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const showRespondingAsStatusInHeader =
     Boolean(currentDroneBusy) && Boolean(currentDrone?.statusOk) && currentDrone?.hubPhase !== 'error';
   const currentCustomAgentMissing = currentAgent.kind === 'custom' && !customAgents.some((a) => a.id === currentAgent.id);
+  const currentDroneAllowsCustomAgents = String(currentDrone?.runtime ?? '').trim().toLowerCase() !== 'host';
   const agentDisabled =
     loadingChatInfo ||
     Boolean(openingTerminal) ||
@@ -1352,6 +1359,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     currentModel,
     registeredRepoPaths,
     customAgents,
+    allowCustomAgents: currentDroneAllowsCustomAgents,
     builtinAgentOptions,
     currentAgent,
     currentCustomAgentMissing,

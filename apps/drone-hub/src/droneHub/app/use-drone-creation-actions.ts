@@ -179,6 +179,10 @@ export function useDroneCreationActions({
     const runtime = createMode === 'clone' ? 'container' : createRuntime;
     const seedAgent = isClone && cloneIncludeChats ? null : resolveAgentKeyToConfig(spawnAgentKey);
     const seedModel = isClone && cloneIncludeChats ? null : spawnModelForSeed;
+    if (runtime === 'host' && seedAgent?.kind === 'custom') {
+      setCreateError('Host runtime currently supports builtin agents only.');
+      return;
+    }
     if (names.length === 0) {
       setCreateError('At least one name is required.');
       return;

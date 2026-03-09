@@ -607,7 +607,23 @@ function isRepoAttachedDrone(drone: any): boolean {
   if (!drone || typeof drone !== 'object') return false;
   const explicit = (drone as any).repoAttached;
   if (typeof explicit === 'boolean') return explicit;
-  return Boolean(String((drone as any).repoPath ?? '').trim());
+  return (
+    Boolean(String((drone as any).repoPath ?? '').trim()) ||
+    Boolean(String((drone as any).repo?.dest ?? '').trim()) ||
+    Boolean(String((drone as any).repo?.seededAt ?? '').trim())
+  );
+}
+
+function unsupportedHostCustomAgentError(): Error & { statusCode?: number } {
+  const err = new Error('custom agents are not yet supported for host runtime') as Error & { statusCode?: number };
+  err.statusCode = 400;
+  return err;
+}
+
+function assertChatAgentSupportedForDrone(drone: any, agent: ChatAgentConfig | null | undefined): void {
+  if (droneRuntime(drone) === 'host' && agent?.kind === 'custom') {
+    throw unsupportedHostCustomAgentError();
+  }
 }
 
 function looksLikeEmptyBundleExportError(message: string): boolean {
@@ -2150,7 +2166,7 @@ async function sendPromptToChat(opts: {
 
     // Custom agent: keep tmux-backed full CLI behavior.
     if (runtime === 'host') {
-      throw new Error('custom agent CLI mode is not yet supported for host runtime');
+      throw unsupportedHostCustomAgentError();
     }
     const tmuxCmd = await resolveChatTmuxCommand({ droneId, chatName: normalizedChat });
     const { sessionName } = await ensureHubChatSessionRunning({
@@ -5480,7 +5496,10 @@ async function setChatAgentConfig(opts: {
     d.chats = d.chats ?? {};
     const cur = d.chats?.[opts.chatName];
     if (!cur) throw new Error(`unknown chat: ${opts.chatName}`);
-    if (opts.agent) cur.agent = opts.agent as any;
+    if (opts.agent) {
+      assertChatAgentSupportedForDrone(d, opts.agent);
+      cur.agent = opts.agent as any;
+    }
     if (opts.setModel) {
       if (opts.model) cur.model = opts.model;
       else delete cur.model;
@@ -8593,7 +8612,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const droneId = resolved.id;
         const droneName = String(d?.name ?? droneRef).trim() || droneRef;
         const runtime = droneRuntime(d);
-        const repoAttached = Boolean(String(d?.repo?.dest ?? '').trim()) || Boolean(String(d?.repo?.seededAt ?? '').trim());
+        const repoAttached = isRepoAttachedDrone(d);
         if (!repoAttached) {
           json(res, 400, { ok: false, error: 'drone has no repo attached' });
           return;
@@ -8672,7 +8691,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const droneId = resolved.id;
         const droneName = String(d?.name ?? droneRef).trim() || droneRef;
         const runtime = droneRuntime(d);
-        const repoAttached = Boolean(String(d?.repo?.dest ?? '').trim()) || Boolean(String(d?.repo?.seededAt ?? '').trim());
+        const repoAttached = isRepoAttachedDrone(d);
         if (!repoAttached) {
           json(res, 400, { ok: false, error: 'drone has no repo attached' });
           return;
@@ -8777,7 +8796,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const runtime = droneRuntime(d);
         const configuredDroneBranch = String(d?.repo?.branch ?? '').trim() || null;
         const droneFromRef = String(d?.repo?.baseRef ?? '').trim() || null;
-        const repoAttached = Boolean(String(d?.repo?.dest ?? '').trim()) || Boolean(String(d?.repo?.seededAt ?? '').trim());
+        const repoAttached = isRepoAttachedDrone(d);
         if (!repoAttached) {
           json(res, 400, { ok: false, error: 'drone has no repo attached' });
           return;
@@ -9035,7 +9054,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const droneId = resolved.id;
         const droneName = String(d?.name ?? droneRef).trim() || droneRef;
         const runtime = droneRuntime(d);
-        const repoAttached = Boolean(String(d?.repo?.dest ?? '').trim()) || Boolean(String(d?.repo?.seededAt ?? '').trim());
+        const repoAttached = isRepoAttachedDrone(d);
         if (!repoAttached) {
           json(res, 400, { ok: false, error: 'drone has no repo attached' });
           return;
@@ -9139,7 +9158,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const d = resolved.drone;
         const droneId = resolved.id;
         const droneName = String(d?.name ?? droneRef).trim() || droneRef;
-        const repoAttached = Boolean(String(d?.repo?.dest ?? '').trim()) || Boolean(String(d?.repo?.seededAt ?? '').trim());
+        const repoAttached = isRepoAttachedDrone(d);
         if (!repoAttached) {
           json(res, 400, { ok: false, error: 'drone has no repo attached' });
           return;
@@ -9244,7 +9263,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const d = resolved.drone;
         const droneId = resolved.id;
         const droneName = String(d?.name ?? droneRef).trim() || droneRef;
-        const repoAttached = Boolean(String(d?.repo?.dest ?? '').trim()) || Boolean(String(d?.repo?.seededAt ?? '').trim());
+        const repoAttached = isRepoAttachedDrone(d);
         if (!repoAttached) {
           json(res, 400, { ok: false, error: 'drone has no repo attached' });
           return;
@@ -9308,7 +9327,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const d = resolved.drone;
         const droneId = resolved.id;
         const droneName = String(d?.name ?? droneRef).trim() || droneRef;
-        const repoAttached = Boolean(String(d?.repo?.dest ?? '').trim()) || Boolean(String(d?.repo?.seededAt ?? '').trim());
+        const repoAttached = isRepoAttachedDrone(d);
         if (!repoAttached) {
           json(res, 400, { ok: false, error: 'drone has no repo attached' });
           return;
@@ -9385,7 +9404,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const d = resolved.drone;
         const droneId = resolved.id;
         const droneName = String(d?.name ?? droneRef).trim() || droneRef;
-        const repoAttached = Boolean(String(d?.repo?.dest ?? '').trim()) || Boolean(String(d?.repo?.seededAt ?? '').trim());
+        const repoAttached = isRepoAttachedDrone(d);
         if (!repoAttached) {
           json(res, 400, { ok: false, error: 'drone has no repo attached' });
           return;
@@ -11297,13 +11316,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             } catch (e: any) {
               const msg = String(e?.message ?? e ?? '').trim().toLowerCase();
               if (msg.includes('already exists') || msg.includes('process already exists')) {
-                await procStart(daemon.client, {
-                  session: sessionName,
-                  cmd: 'bash',
-                  args: ['-lc', launchScript],
-                  cwd,
-                  force: true,
-                });
+                // Reuse the existing session instead of restarting it and dropping user state.
               } else {
                 throw e;
               }
@@ -12737,7 +12750,8 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           });
           return;
         } catch (e: any) {
-          json(res, 500, { ok: false, error: e?.message ?? String(e) });
+          const status = Number((e as any)?.statusCode ?? 0);
+          json(res, status > 0 ? status : 500, { ok: false, error: e?.message ?? String(e) });
           return;
         }
       }

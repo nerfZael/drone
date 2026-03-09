@@ -107,6 +107,25 @@ export function CreateDronesModal({
     createMode === 'clone' && cloneSourceId
       ? String(drones.find((d) => d.id === cloneSourceId)?.name ?? cloneSourceId)
       : '';
+  const hostRuntimeSelected = createMode !== 'clone' && createRuntime === 'host';
+  const hostCustomAgentsUnsupported = hostRuntimeSelected;
+  const filteredSpawnAgentMenuEntries = React.useMemo(() => {
+    const out: UiMenuSelectEntry[] = [];
+    let pendingSeparator = false;
+    for (const entry of spawnAgentMenuEntries) {
+      if (entry.kind === 'separator') {
+        pendingSeparator = out.length > 0;
+        continue;
+      }
+      if (hostCustomAgentsUnsupported && entry.value.startsWith('custom:')) continue;
+      if (pendingSeparator) {
+        out.push({ kind: 'separator' });
+        pendingSeparator = false;
+      }
+      out.push(entry);
+    }
+    return out;
+  }, [hostCustomAgentsUnsupported, spawnAgentMenuEntries]);
 
   return (
     <div
@@ -342,7 +361,7 @@ export function CreateDronesModal({
                   variant="form"
                   value={spawnAgentKey}
                   onValueChange={onSpawnAgentKeyChange}
-                  entries={spawnAgentMenuEntries}
+                  entries={filteredSpawnAgentMenuEntries}
                   disabled={creating || (createMode === 'clone' && cloneIncludeChats)}
                   triggerClassName="flex-1"
                   panelClassName="right-auto w-[460px] max-w-[calc(100vw-3rem)]"
@@ -352,14 +371,14 @@ export function CreateDronesModal({
                 <button
                   type="button"
                   onClick={onOpenCustomAgentModal}
-                  disabled={creating || (createMode === 'clone' && cloneIncludeChats)}
+                  disabled={creating || (createMode === 'clone' && cloneIncludeChats) || hostCustomAgentsUnsupported}
                   className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
-                    creating || (createMode === 'clone' && cloneIncludeChats)
+                    creating || (createMode === 'clone' && cloneIncludeChats) || hostCustomAgentsUnsupported
                       ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                       : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)] hover:border-[var(--border)]'
                   }`}
                   style={{ fontFamily: 'var(--display)' }}
-                  title="Manage saved custom agents"
+                  title={hostCustomAgentsUnsupported ? 'Custom agents are not yet supported for host runtime.' : 'Manage saved custom agents'}
                 >
                   Custom…
                 </button>
@@ -367,7 +386,9 @@ export function CreateDronesModal({
               <span className="text-[10px] text-[var(--muted-dim)] block mt-1">
                 {createMode === 'clone' && cloneIncludeChats
                   ? 'When cloning chats, agents are copied from the source chats.'
-                  : 'Used for the default chat. You can change per-chat later.'}
+                  : hostCustomAgentsUnsupported
+                    ? 'Host runtime currently supports builtin agents only.'
+                    : 'Used for the default chat. You can change per-chat later.'}
               </span>
             </div>
 

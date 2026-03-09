@@ -15,6 +15,7 @@ type UseDroneHubToolbarMenuStateArgs = {
   currentModel: string | null;
   registeredRepoPaths: string[];
   customAgents: CustomAgentProfile[];
+  allowCustomAgents?: boolean;
   builtinAgentOptions: BuiltinAgentOption[];
   currentAgent: ChatAgentConfig;
   currentCustomAgentMissing: boolean;
@@ -36,6 +37,7 @@ export function useDroneHubToolbarMenuState({
   currentModel,
   registeredRepoPaths,
   customAgents,
+  allowCustomAgents = true,
   builtinAgentOptions,
   currentAgent,
   currentCustomAgentMissing,
@@ -102,6 +104,9 @@ export function useDroneHubToolbarMenuState({
   );
 
   const toolbarAgentMenuEntries = React.useMemo(() => {
+    if (!allowCustomAgents) {
+      return builtinAgentOptions.map((o) => ({ value: o.key, label: o.label }));
+    }
     const entries: Array<
       | { value: string; label: string; title?: string; inactiveClassName?: string }
       | { kind: 'separator' }
@@ -124,7 +129,7 @@ export function useDroneHubToolbarMenuState({
       inactiveClassName: 'text-[var(--fg-secondary)] hover:bg-[var(--hover)]',
     });
     return entries;
-  }, [builtinAgentOptions, currentAgent, currentCustomAgentMissing, customAgents]);
+  }, [allowCustomAgents, builtinAgentOptions, currentAgent, currentCustomAgentMissing, customAgents]);
 
   const agentLabel = React.useMemo(() => {
     const builtin = builtinAgentOptions.find((o) => o.key === currentAgentKey);
@@ -149,6 +154,7 @@ export function useDroneHubToolbarMenuState({
         });
         return;
       }
+      if (!allowCustomAgents) return;
       if (!v.startsWith('custom:')) return;
       const id = v.slice('custom:'.length);
       const local = customAgents.find((a) => a.id === id) ?? null;
@@ -165,6 +171,7 @@ export function useDroneHubToolbarMenuState({
       }
     },
     [
+      allowCustomAgents,
       builtinAgentOptions,
       currentAgent,
       customAgents,
