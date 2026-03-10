@@ -29,7 +29,11 @@ export type RightPanelProps = {
   onResetWidth: () => void;
   renderTabContent: (drone: DroneSummary, tab: RightPanelTabId, pane: RightPanelPaneId) => React.ReactNode;
   persistentPreviewHostPane: RightPanelPaneId | null;
-  renderPersistentPreviewContent: (activeDroneId: string | null, previewVisible: boolean) => React.ReactNode;
+  onPersistentPreviewHostChange?: (state: {
+    style: React.CSSProperties;
+    activeDroneId: string | null;
+    previewVisible: boolean;
+  }) => void;
 };
 
 export function RightPanel({
@@ -50,7 +54,7 @@ export function RightPanel({
   onResetWidth,
   renderTabContent,
   persistentPreviewHostPane,
-  renderPersistentPreviewContent,
+  onPersistentPreviewHostChange,
 }: RightPanelProps) {
   const asideRef = React.useRef<HTMLElement | null>(null);
   const paneContentRefs = React.useRef<Partial<Record<RightPanelPaneId, HTMLDivElement | null>>>({});
@@ -69,19 +73,19 @@ export function RightPanel({
   const previewVisible = Boolean(visible && currentDrone && persistentPreviewHostPane);
 
   React.useLayoutEffect(() => {
-    const aside = asideRef.current;
+    const workspaceRoot = document.querySelector<HTMLElement>('[data-drone-workspace-root="1"]');
     const hostPane = persistentPreviewHostPane ? paneContentRefs.current[persistentPreviewHostPane] ?? null : null;
-    if (!aside || !hostPane || !previewVisible) {
+    if (!workspaceRoot || !hostPane || !previewVisible) {
       setPreviewHostStyle({ left: 0, top: 0, width: 0, height: 0 });
       return;
     }
 
     const updatePosition = () => {
-      const asideRect = aside.getBoundingClientRect();
+      const workspaceRect = workspaceRoot.getBoundingClientRect();
       const paneRect = hostPane.getBoundingClientRect();
       setPreviewHostStyle({
-        left: paneRect.left - asideRect.left,
-        top: paneRect.top - asideRect.top,
+        left: paneRect.left - workspaceRect.left,
+        top: paneRect.top - workspaceRect.top,
         width: paneRect.width,
         height: paneRect.height,
       });
@@ -95,7 +99,7 @@ export function RightPanel({
         : new ResizeObserver(() => {
             updatePosition();
           });
-    resizeObserver?.observe(aside);
+    resizeObserver?.observe(workspaceRoot);
     resizeObserver?.observe(hostPane);
     window.addEventListener('resize', updatePosition);
     return () => {
@@ -103,6 +107,24 @@ export function RightPanel({
       window.removeEventListener('resize', updatePosition);
     };
   }, [currentDrone?.id, persistentPreviewHostPane, previewVisible, rightPanelBottomTab, rightPanelSplit, rightPanelTab, rightPanelWidth]);
+
+  React.useLayoutEffect(() => {
+    onPersistentPreviewHostChange?.({
+      style: previewHostStyle,
+      activeDroneId: currentDrone?.id ?? null,
+      previewVisible,
+    });
+  }, [currentDrone?.id, onPersistentPreviewHostChange, previewHostStyle, previewVisible]);
+
+  React.useEffect(() => {
+    return () => {
+      onPersistentPreviewHostChange?.({
+        style: { left: 0, top: 0, width: 0, height: 0 },
+        activeDroneId: null,
+        previewVisible: false,
+      });
+    };
+  }, [onPersistentPreviewHostChange]);
 
   const renderPaneContent = React.useCallback(
     (activeTab: RightPanelTabId, pane: RightPanelPaneId, showActiveContent: boolean) => {
@@ -157,14 +179,6 @@ export function RightPanel({
           />
         </div>
       ) : null}
-      <div className="absolute inset-0 z-20 pointer-events-none overflow-hidden">
-        <div
-          className={`absolute overflow-hidden ${previewVisible ? 'pointer-events-auto' : 'pointer-events-none'}`}
-          style={previewHostStyle}
-        >
-          {renderPersistentPreviewContent(currentDrone?.id ?? null, previewVisible)}
-        </div>
-      </div>
       <div className={`flex-1 min-h-0 overflow-hidden flex flex-col ${rightPanelSplit ? '' : 'hidden'}`}>
         <div className="flex-1 min-h-0 overflow-hidden flex flex-col" data-right-panel-pane="top">
           <div className="flex-shrink-0 px-2 py-1 border-b border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] flex items-center gap-2">

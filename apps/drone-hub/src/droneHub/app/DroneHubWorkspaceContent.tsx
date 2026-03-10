@@ -13,6 +13,7 @@ export type DroneHubWorkspaceContentProps = {
   groupMultiChatWorkspaceProps: React.ComponentProps<typeof GroupMultiChatWorkspace> | null;
   noDroneSelectedStateProps: React.ComponentProps<typeof NoDroneSelectedState>;
   selectedDroneWorkspaceProps: React.ComponentProps<typeof SelectedDroneWorkspace> | null;
+  renderPersistentPreviewContent: (activeDroneId: string | null, previewVisible: boolean) => React.ReactNode;
 };
 
 export function DroneHubWorkspaceContent({
@@ -22,9 +23,20 @@ export function DroneHubWorkspaceContent({
   groupMultiChatWorkspaceProps,
   noDroneSelectedStateProps,
   selectedDroneWorkspaceProps,
+  renderPersistentPreviewContent,
 }: DroneHubWorkspaceContentProps) {
+  const [previewHostState, setPreviewHostState] = React.useState<{
+    style: React.CSSProperties;
+    activeDroneId: string | null;
+    previewVisible: boolean;
+  }>({
+    style: { left: 0, top: 0, width: 0, height: 0 },
+    activeDroneId: null,
+    previewVisible: false,
+  });
+
   return (
-    <div data-drone-workspace-root="1" className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden bg-[var(--panel)]">
+    <div data-drone-workspace-root="1" className="relative flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden bg-[var(--panel)]">
       {appView === 'settings' ? (
         <SettingsView {...settingsViewProps} />
       ) : draftChatWorkspaceProps ? (
@@ -32,10 +44,18 @@ export function DroneHubWorkspaceContent({
       ) : groupMultiChatWorkspaceProps ? (
         <GroupMultiChatWorkspace {...groupMultiChatWorkspaceProps} />
       ) : selectedDroneWorkspaceProps ? (
-        <SelectedDroneWorkspace {...selectedDroneWorkspaceProps} />
+        <SelectedDroneWorkspace {...selectedDroneWorkspaceProps} onPersistentPreviewHostChange={setPreviewHostState} />
       ) : (
         <NoDroneSelectedState {...noDroneSelectedStateProps} />
       )}
+      <div className="absolute inset-0 z-20 pointer-events-none overflow-hidden">
+        <div
+          className={`absolute overflow-hidden ${previewHostState.previewVisible ? 'pointer-events-auto' : 'pointer-events-none'}`}
+          style={previewHostState.style}
+        >
+          {renderPersistentPreviewContent(previewHostState.activeDroneId, previewHostState.previewVisible)}
+        </div>
+      </div>
     </div>
   );
 }
