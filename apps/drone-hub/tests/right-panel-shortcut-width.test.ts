@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { resolveNextRightPanelShortcutWidth } from '../src/droneHub/app/right-panel-shortcut-width';
+import {
+  clampCustomRightPanelWidthPx,
+  resolveRightPanelWidthModeFromWidth,
+  resolveRightPanelWidthPx,
+  rightPanelVisibleMaxWidthPx,
+} from '../src/droneHub/app/right-panel-width';
 
 describe('right panel width shortcut cycle', () => {
   test('cycles full -> two-thirds -> one-third -> full', () => {
@@ -25,5 +31,25 @@ describe('right panel width shortcut cycle', () => {
     const next = resolveNextRightPanelShortcutWidth(full, maxWidth);
     expect(full).toBe(400);
     expect(next).toBe(360);
+  });
+
+  test('preset widths stay proportional when workspace width changes', () => {
+    expect(resolveRightPanelWidthPx('two-thirds', 460, 1200)).toBe(800);
+    expect(resolveRightPanelWidthPx('two-thirds', 460, 900)).toBe(600);
+    expect(resolveRightPanelWidthPx('full', 460, 1200)).toBe(1200);
+    expect(resolveRightPanelWidthPx('full', 460, 900)).toBe(900);
+  });
+
+  test('custom widths keep chat from being squeezed below the reserved third', () => {
+    expect(clampCustomRightPanelWidthPx(950, 1200)).toBe(800);
+    expect(clampCustomRightPanelWidthPx(720, 900)).toBe(600);
+    expect(rightPanelVisibleMaxWidthPx(1200)).toBe(800);
+  });
+
+  test('matches preset modes from current rendered width', () => {
+    expect(resolveRightPanelWidthModeFromWidth(1200, 1200)).toBe('full');
+    expect(resolveRightPanelWidthModeFromWidth(800, 1200)).toBe('two-thirds');
+    expect(resolveRightPanelWidthModeFromWidth(400, 1200)).toBe('one-third');
+    expect(resolveRightPanelWidthModeFromWidth(517, 1200)).toBe('custom');
   });
 });

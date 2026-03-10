@@ -5,24 +5,32 @@ import { useShallow } from 'zustand/react/shallow';
 import {
   RIGHT_PANEL_DEFAULT_WIDTH_PX,
   RIGHT_PANEL_TABS,
-  clampRightPanelWidthPx,
   parseRightPanelTab,
-  rightPanelMaxWidthPx,
   viewportWidthPx,
   type RightPanelTab,
 } from './app-config';
+import {
+  clampCustomRightPanelWidthPx,
+  resolveRightPanelWidthModeFromWidth,
+  resolveRightPanelWidthPx,
+  rightPanelMaxWidthPx,
+  rightPanelVisibleMaxWidthPx,
+  type RightPanelWidthMode,
+} from './right-panel-width';
 
 type Updater<T> = T | ((prev: T) => T);
 
 type RightPanelLayoutState = {
   rightPanelOpen: boolean;
   rightPanelWidth: number;
+  rightPanelWidthMode: RightPanelWidthMode;
   rightPanelResizing: boolean;
   rightPanelTab: RightPanelTab;
   rightPanelSplit: boolean;
   rightPanelBottomTab: RightPanelTab;
   setRightPanelOpen: (next: Updater<boolean>) => void;
   setRightPanelWidth: (next: Updater<number>) => void;
+  setRightPanelWidthMode: (next: Updater<RightPanelWidthMode>) => void;
   setRightPanelResizing: (next: Updater<boolean>) => void;
   setRightPanelTab: (next: Updater<RightPanelTab>) => void;
   setRightPanelSplitMode: (next: boolean) => void;
@@ -32,8 +40,17 @@ type RightPanelLayoutState = {
 
 type RightPanelLayoutPersistedState = Pick<
   RightPanelLayoutState,
-  'rightPanelWidth' | 'rightPanelTab' | 'rightPanelSplit' | 'rightPanelBottomTab'
+  'rightPanelWidth' | 'rightPanelWidthMode' | 'rightPanelTab' | 'rightPanelSplit' | 'rightPanelBottomTab'
 >;
+
+function parseRightPanelWidthMode(raw: unknown): RightPanelWidthMode {
+  return raw === 'full' || raw === 'two-thirds' || raw === 'one-third' || raw === 'custom' ? raw : 'custom';
+}
+
+function inferLegacyRightPanelWidthMode(width: number, availableWidth: number): RightPanelWidthMode {
+  if (width > rightPanelVisibleMaxWidthPx(availableWidth) + 2) return 'full';
+  return resolveRightPanelWidthModeFromWidth(width, availableWidth);
+}
 
 function resolveNext<T>(prev: T, next: Updater<T>): T {
   return typeof next === 'function' ? (next as (current: T) => T)(prev) : next;
@@ -59,7 +76,8 @@ const useRightPanelLayoutStore = create<RightPanelLayoutState>()(
   persist(
     (set) => ({
       rightPanelOpen: true,
-      rightPanelWidth: clampRightPanelWidthPx(RIGHT_PANEL_DEFAULT_WIDTH_PX),
+      rightPanelWidth: clampCustomRightPanelWidthPx(RIGHT_PANEL_DEFAULT_WIDTH_PX),
+      rightPanelWidthMode: 'custom',
       rightPanelResizing: false,
       rightPanelTab: 'files',
       rightPanelSplit: true,
@@ -67,8 +85,9 @@ const useRightPanelLayoutStore = create<RightPanelLayoutState>()(
       setRightPanelOpen: (next) => set((s) => ({ rightPanelOpen: resolveNext(s.rightPanelOpen, next) })),
       setRightPanelWidth: (next) =>
         set((s) => ({
-          rightPanelWidth: clampRightPanelWidthPx(resolveNext(s.rightPanelWidth, next)),
+          rightPanelWidth: clampCustomRightPanelWidthPx(resolveNext(s.rightPanelWidth, next)),
         })),
+      setRightPanelWidthMode: (next) => set((s) => ({ rightPanelWidthMode: resolveNext(s.rightPanelWidthMode, next) })),
       setRightPanelResizing: (next) => set((s) => ({ rightPanelResizing: resolveNext(s.rightPanelResizing, next) })),
       setRightPanelTab: (next) =>
         set((s) => ({
@@ -90,21 +109,31 @@ const useRightPanelLayoutStore = create<RightPanelLayoutState>()(
         })),
       resetRightPanelWidth: () =>
         set({
-          rightPanelWidth: clampRightPanelWidthPx(RIGHT_PANEL_DEFAULT_WIDTH_PX),
+          rightPanelWidth: clampCustomRightPanelWidthPx(RIGHT_PANEL_DEFAULT_WIDTH_PX),
+          rightPanelWidthMode: 'custom',
         }),
     }),
     {
       name: 'droneHub.rightPanelLayout',
-      version: 1,
+      version: 2,
       storage: createJSONStorage(() => localStorage),
       partialize: (state): RightPanelLayoutPersistedState => ({
         rightPanelWidth: state.rightPanelWidth,
+        rightPanelWidthMode: state.rightPanelWidthMode,
         rightPanelTab: state.rightPanelTab,
         rightPanelSplit: state.rightPanelSplit,
         rightPanelBottomTab: state.rightPanelBottomTab,
       }),
       merge: (persistedState, currentState) => {
         const persisted = (persistedState as Partial<RightPanelLayoutPersistedState>) ?? {};
+        const persistedWidth = clampCustomRightPanelWidthPx(Number(persisted.rightPanelWidth ?? currentState.rightPanelWidth));
+        const inferredWidthMode =
+          persisted.rightPanelWidthMode == null
+            ? inferLegacyRightPanelWidthMode(
+                Number(persisted.rightPanelWidth ?? currentState.rightPanelWidth),
+                readWorkspaceWidthPx(),
+              )
+            : parseRightPanelWidthMode(persisted.rightPanelWidthMode);
         const rightPanelTab = parseRightPanelTab(persisted.rightPanelTab ?? currentState.rightPanelTab, currentState.rightPanelTab);
         const rightPanelSplit = Boolean(persisted.rightPanelSplit ?? currentState.rightPanelSplit);
         const rawBottomTab = parseRightPanelTab(
@@ -117,7 +146,8 @@ const useRightPanelLayoutStore = create<RightPanelLayoutState>()(
         return {
           ...currentState,
           ...persisted,
-          rightPanelWidth: clampRightPanelWidthPx(Number(persisted.rightPanelWidth ?? currentState.rightPanelWidth)),
+          rightPanelWidth: persistedWidth,
+          rightPanelWidthMode: inferredWidthMode,
           rightPanelTab,
           rightPanelSplit,
           rightPanelBottomTab,
@@ -130,13 +160,15 @@ const useRightPanelLayoutStore = create<RightPanelLayoutState>()(
 export function useRightPanelLayout() {
   const {
     rightPanelOpen,
-    rightPanelWidth,
+    rightPanelWidth: rightPanelCustomWidth,
+    rightPanelWidthMode,
     rightPanelResizing,
     rightPanelTab,
     rightPanelSplit,
     rightPanelBottomTab,
     setRightPanelOpen,
     setRightPanelWidth: setRightPanelWidthStore,
+    setRightPanelWidthMode: setRightPanelWidthModeStore,
     setRightPanelResizing,
     setRightPanelTab,
     setRightPanelSplitMode,
@@ -145,12 +177,14 @@ export function useRightPanelLayout() {
     useShallow((s) => ({
       rightPanelOpen: s.rightPanelOpen,
       rightPanelWidth: s.rightPanelWidth,
+      rightPanelWidthMode: s.rightPanelWidthMode,
       rightPanelResizing: s.rightPanelResizing,
       rightPanelTab: s.rightPanelTab,
       rightPanelSplit: s.rightPanelSplit,
       rightPanelBottomTab: s.rightPanelBottomTab,
       setRightPanelOpen: s.setRightPanelOpen,
       setRightPanelWidth: s.setRightPanelWidth,
+      setRightPanelWidthMode: s.setRightPanelWidthMode,
       setRightPanelResizing: s.setRightPanelResizing,
       setRightPanelTab: s.setRightPanelTab,
       setRightPanelSplitMode: s.setRightPanelSplitMode,
@@ -159,12 +193,21 @@ export function useRightPanelLayout() {
   );
   const rightPanelResizeRef = React.useRef<{ startX: number; startWidth: number } | null>(null);
   const [workspaceWidth, setWorkspaceWidth] = React.useState<number>(() => rightPanelMaxWidthPx(readWorkspaceWidthPx()));
+  const rightPanelWidth = React.useMemo(
+    () => resolveRightPanelWidthPx(rightPanelWidthMode, rightPanelCustomWidth, workspaceWidth),
+    [rightPanelCustomWidth, rightPanelWidthMode, workspaceWidth],
+  );
 
   const setRightPanelWidth = React.useCallback(
     (next: Updater<number>) => {
-      setRightPanelWidthStore((prev) => clampRightPanelWidthPx(resolveNext(prev, next), workspaceWidth));
+      const requestedWidth = resolveNext(rightPanelWidth, next);
+      const nextMode = resolveRightPanelWidthModeFromWidth(requestedWidth, workspaceWidth);
+      setRightPanelWidthModeStore(nextMode);
+      if (nextMode === 'custom') {
+        setRightPanelWidthStore(clampCustomRightPanelWidthPx(requestedWidth, workspaceWidth));
+      }
     },
-    [setRightPanelWidthStore, workspaceWidth],
+    [rightPanelWidth, setRightPanelWidthModeStore, setRightPanelWidthStore, workspaceWidth],
   );
 
   const resetRightPanelWidth = React.useCallback(() => {
@@ -196,7 +239,7 @@ export function useRightPanelLayout() {
   }, []);
 
   React.useEffect(() => {
-    setRightPanelWidthStore((prev) => clampRightPanelWidthPx(prev, workspaceWidth));
+    setRightPanelWidthStore((prev) => clampCustomRightPanelWidthPx(prev, workspaceWidth));
   }, [setRightPanelWidthStore, workspaceWidth]);
 
   React.useEffect(() => {
@@ -238,8 +281,8 @@ export function useRightPanelLayout() {
     [rightPanelOpen, rightPanelWidth, setRightPanelWidth, setRightPanelResizing],
   );
 
-  const rightPanelDefaultWidth = clampRightPanelWidthPx(RIGHT_PANEL_DEFAULT_WIDTH_PX, workspaceWidth);
-  const rightPanelWidthIsDefault = Math.abs(rightPanelWidth - rightPanelDefaultWidth) <= 1;
+  const rightPanelDefaultWidth = clampCustomRightPanelWidthPx(RIGHT_PANEL_DEFAULT_WIDTH_PX, workspaceWidth);
+  const rightPanelWidthIsDefault = rightPanelWidthMode === 'custom' && Math.abs(rightPanelWidth - rightPanelDefaultWidth) <= 1;
   const rightPanelWidthMax = rightPanelMaxWidthPx(workspaceWidth);
 
   return {

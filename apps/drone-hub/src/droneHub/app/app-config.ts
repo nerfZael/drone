@@ -68,17 +68,6 @@ export function viewportWidthPx(): number {
   return 1440;
 }
 
-export function rightPanelMaxWidthPx(availableWidth: number): number {
-  const safeAvailableWidth =
-    Number.isFinite(availableWidth) && availableWidth > 0 ? Math.floor(availableWidth) : viewportWidthPx();
-  return Math.max(RIGHT_PANEL_MIN_WIDTH_PX, safeAvailableWidth);
-}
-
-export function clampRightPanelWidthPx(width: number, availableWidth: number = viewportWidthPx()): number {
-  const safe = Number.isFinite(width) ? width : RIGHT_PANEL_DEFAULT_WIDTH_PX;
-  return Math.min(rightPanelMaxWidthPx(availableWidth), Math.max(RIGHT_PANEL_MIN_WIDTH_PX, Math.round(safe)));
-}
-
 export function clampGroupMultiChatColumnWidthPx(width: number): number {
   const safe = Number.isFinite(width) ? width : GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX;
   return Math.min(GROUP_MULTI_CHAT_COLUMN_WIDTH_MAX_PX, Math.max(GROUP_MULTI_CHAT_COLUMN_WIDTH_MIN_PX, Math.round(safe)));
