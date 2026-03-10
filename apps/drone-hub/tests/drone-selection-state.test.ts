@@ -47,4 +47,14 @@ describe('resolveSelectedChatForDrone', () => {
 
     expect(selected).toBe('review');
   });
+
+  test('falls back to default when the drone has no chats yet', () => {
+    const selected = resolveSelectedChatForDrone({
+      droneId: 'drone-a',
+      drones: [makeDrone('drone-a', [])],
+      lastSelectedChatByDrone: {},
+    });
+
+    expect(selected).toBe('default');
+  });
 });

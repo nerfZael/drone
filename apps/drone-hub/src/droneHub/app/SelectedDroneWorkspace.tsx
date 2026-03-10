@@ -679,6 +679,7 @@ export function SelectedDroneWorkspace({
     }
     return out;
   }, [currentDrone.chats]);
+  const hasChats = availableChats.length > 0;
   const [chatMutationBusy, setChatMutationBusy] = React.useState<null | 'create' | 'rename' | 'delete'>(null);
   const [pendingChatSelection, setPendingChatSelection] = React.useState<string | null>(null);
 
@@ -708,7 +709,7 @@ export function SelectedDroneWorkspace({
       await requestJson<{ ok: true }>(`/api/drones/${encodeURIComponent(currentDrone.id)}/chats`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: chatName, copyFromChat: activeChatName }),
+        body: JSON.stringify({ name: chatName, ...(hasChats ? { copyFromChat: activeChatName } : {}) }),
       });
       setPendingChatSelection(chatName);
       setChatInfoError(null);
@@ -717,7 +718,7 @@ export function SelectedDroneWorkspace({
     } finally {
       setChatMutationBusy(null);
     }
-  }, [activeChatName, availableChats.length, currentDrone.id, reportChatMutationError, setChatInfoError]);
+  }, [activeChatName, availableChats.length, currentDrone.id, hasChats, reportChatMutationError, setChatInfoError]);
 
   const renameActiveChat = React.useCallback(async () => {
     if (activeChatName === 'default') {
@@ -908,33 +909,35 @@ export function SelectedDroneWorkspace({
         {/* Tier 2: Toolbar */}
         <div className="px-5 pb-2.5 flex items-center gap-2 flex-wrap">
           {/* Agent selector */}
-          <div data-onboarding-id="chat.toolbar.agent" className="flex items-center gap-1.5">
-            <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-              Agent
-            </span>
-            <UiMenuSelect
-              variant="toolbar"
-              value={currentAgentKey}
-              onValueChange={pickAgentValue}
-              entries={toolbarAgentMenuEntries}
-              open={agentMenuOpen}
-              onOpenChange={(open) => {
-                if (open) {
-                  setTerminalMenuOpen(false);
-                  setHeaderOverflowOpen(false);
-                }
-                setAgentMenuOpen(open);
-              }}
-              disabled={agentDisabled}
-              title="Choose agent implementation for this chat."
-              triggerLabel={agentLabel}
-              chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
-              panelClassName="w-[260px]"
-              header="Choose agent"
-              headerStyle={{ fontFamily: 'var(--display)' }}
-            />
-          </div>
-          {modelControlEnabled && (
+          {hasChats ? (
+            <div data-onboarding-id="chat.toolbar.agent" className="flex items-center gap-1.5">
+              <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+                Agent
+              </span>
+              <UiMenuSelect
+                variant="toolbar"
+                value={currentAgentKey}
+                onValueChange={pickAgentValue}
+                entries={toolbarAgentMenuEntries}
+                open={agentMenuOpen}
+                onOpenChange={(open) => {
+                  if (open) {
+                    setTerminalMenuOpen(false);
+                    setHeaderOverflowOpen(false);
+                  }
+                  setAgentMenuOpen(open);
+                }}
+                disabled={agentDisabled}
+                title="Choose agent implementation for this chat."
+                triggerLabel={agentLabel}
+                chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
+                panelClassName="w-[260px]"
+                header="Choose agent"
+                headerStyle={{ fontFamily: 'var(--display)' }}
+              />
+            </div>
+          ) : null}
+          {hasChats && modelControlEnabled ? (
             <div data-onboarding-id="chat.toolbar.model" className="flex items-center gap-1.5">
               <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
                 Model
@@ -1007,7 +1010,7 @@ export function SelectedDroneWorkspace({
                 </span>
               )}
             </div>
-          )}
+          ) : null}
           {/* Repo (read-only for repo-attached drones only) */}
           {currentDroneRepoAttached && (
             <div className="flex items-center gap-1.5">
@@ -1658,7 +1661,13 @@ export function SelectedDroneWorkspace({
                   <EmptyState
                     icon={<IconChat className="w-8 h-8 text-[var(--muted)]" />}
                     title="No messages yet"
-                    description={transcriptError ? `Error: ${transcriptError}` : `Send a prompt to ${currentDroneLabel} to see the conversation here.`}
+                    description={
+                      transcriptError
+                        ? `Error: ${transcriptError}`
+                        : hasChats
+                          ? `Send a prompt to ${currentDroneLabel} to see the conversation here.`
+                          : `${currentDroneLabel} has no chats yet. Send the first prompt or click New to create one.`
+                    }
                   />
                 )}
               </div>
@@ -1687,7 +1696,13 @@ export function SelectedDroneWorkspace({
                   <EmptyState
                     icon={<IconChat className="w-8 h-8 text-[var(--muted)]" />}
                     title="No output yet"
-                    description={sessionError ? `Error: ${sessionError}` : `Send a prompt to ${currentDroneLabel} to see the session output here.`}
+                    description={
+                      sessionError
+                        ? `Error: ${sessionError}`
+                        : hasChats
+                          ? `Send a prompt to ${currentDroneLabel} to see the session output here.`
+                          : `${currentDroneLabel} has no chats yet. Send the first prompt or click New to create one.`
+                    }
                   />
                 )}
 

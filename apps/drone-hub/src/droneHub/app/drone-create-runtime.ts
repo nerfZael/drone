@@ -55,13 +55,14 @@ export function buildDraftDroneCreatePayload({
   const trimmedRepoPath = String(repoPath ?? '').trim();
   const trimmedPrompt = String(prompt ?? '').trim();
   const trimmedModel = String(seedModel ?? '').trim();
+  const hasChatSeed = Boolean(seedAgent || trimmedModel || trimmedPrompt);
   return {
     ...(trimmedName ? { name: trimmedName } : {}),
     ...(trimmedGroup ? { group: trimmedGroup } : {}),
     ...(trimmedRepoPath ? { repoPath: trimmedRepoPath } : {}),
     runtime,
     pullHostBranchBeforeCreate,
-    seedChat: 'default',
+    ...(hasChatSeed ? { seedChat: 'default' } : {}),
     ...(seedAgent ? { seedAgent } : {}),
     ...(trimmedModel ? { seedModel: trimmedModel } : {}),
     ...(trimmedPrompt ? { seedPrompt: trimmedPrompt } : {}),

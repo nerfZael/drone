@@ -19,6 +19,7 @@ type UseWorkspaceNavigationActionsArgs = {
   setCreateOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setCreateError: React.Dispatch<React.SetStateAction<string | null>>;
   setDraftCreateOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  setDraftCreateMode: React.Dispatch<React.SetStateAction<'with-chat' | 'without-chat'>>;
   setDraftCreateName: React.Dispatch<React.SetStateAction<string>>;
   setDraftCreateGroup: React.Dispatch<React.SetStateAction<string>>;
   setDraftCreateError: React.Dispatch<React.SetStateAction<string | null>>;
@@ -63,6 +64,7 @@ export function useWorkspaceNavigationActions({
   setCreateOpen,
   setCreateError,
   setDraftCreateOpen,
+  setDraftCreateMode,
   setDraftCreateName,
   setDraftCreateGroup,
   setDraftCreateError,
@@ -143,6 +145,7 @@ export function useWorkspaceNavigationActions({
     setCreateOpen(false);
     setCreateError(null);
     setDraftCreateOpen(false);
+    setDraftCreateMode('with-chat');
     setDraftCreateName('');
     setDraftCreateGroup(nextGroup);
     setDraftCreateError(null);
@@ -178,6 +181,7 @@ export function useWorkspaceNavigationActions({
     setDraftCreateName,
     setDraftCreating,
     setDraftCreateOpen,
+    setDraftCreateMode,
     setDraftNameSuggestionError,
     setDraftNameSuggesting,
     setSelectedChat,
