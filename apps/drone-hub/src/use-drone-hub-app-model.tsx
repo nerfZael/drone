@@ -36,7 +36,7 @@ import { useFileEditorState } from './droneHub/app/use-file-editor-state';
 import { useGroupBroadcast } from './droneHub/app/use-group-broadcast';
 import { useGroupManagement } from './droneHub/app/use-group-management';
 import { useJobsWorkflow } from './droneHub/app/use-jobs-workflow';
-import { resolveLockedPreviewHostPane } from './droneHub/app/locked-preview-host-pane';
+import { resolvePreviewHostPane } from './droneHub/app/locked-preview-host-pane';
 import { useLlmSettings } from './droneHub/app/use-llm-settings';
 import { useDeleteActionSettings } from './droneHub/app/use-delete-action-settings';
 import { useFilesystemSettings } from './droneHub/app/use-filesystem-settings';
@@ -1938,22 +1938,32 @@ export function useDroneHubAppModel(): DroneHubAppModel {
 
   const renderPersistentPreviewContent = React.useCallback(
     (activeDroneId: string | null, previewVisible: boolean): React.ReactNode => {
-      const sessions = Object.values(lockedPreviewByDrone) as PreviewPaneSnapshot[];
-      if (sessions.length === 0) return null;
-      return sessions.map((snapshot) => {
-        const visible = previewVisible && snapshot.drone.id === activeDroneId;
+      const sessionIds = new Set<string>();
+      const sessionDrones: DroneSummary[] = [];
+      if (previewVisible && currentDrone) {
+        sessionIds.add(currentDrone.id);
+        sessionDrones.push(currentDrone);
+      }
+      for (const snapshot of Object.values(lockedPreviewByDrone) as PreviewPaneSnapshot[]) {
+        if (sessionIds.has(snapshot.drone.id)) continue;
+        sessionIds.add(snapshot.drone.id);
+        sessionDrones.push(snapshot.drone);
+      }
+      if (sessionDrones.length === 0) return null;
+      return sessionDrones.map((sessionDrone) => {
+        const visible = previewVisible && sessionDrone.id === activeDroneId;
         return (
           <div
-            key={`locked-preview:${snapshot.drone.id}`}
+            key={`preview-session:${sessionDrone.id}`}
             className={`absolute inset-0 min-h-0 overflow-hidden ${visible ? '' : 'opacity-0 pointer-events-none'}`}
             aria-hidden={!visible}
           >
-            {renderRightPanelTabContent(snapshot.drone, 'preview', 'single')}
+            {renderRightPanelTabContent(sessionDrone, 'preview', 'single')}
           </div>
         );
       });
     },
-    [lockedPreviewByDrone, renderRightPanelTabContent],
+    [currentDrone, lockedPreviewByDrone, renderRightPanelTabContent],
   );
 
   const handleAddCustomAgent = React.useCallback(() => {
@@ -2291,9 +2301,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     renderRightPanelTabContent,
   });
 
-  const activePreviewLocked = Boolean(currentDrone && lockedPreviewByDrone[currentDrone.id]);
-  const persistentPreviewHostPane = resolveLockedPreviewHostPane({
-    previewLocked: activePreviewLocked,
+  const previewVisible = Boolean(currentDrone && (!rightPanelSplit ? rightPanelTab === 'preview' : rightPanelTab === 'preview' || rightPanelBottomTab === 'preview'));
+  const persistentPreviewHostPane = resolvePreviewHostPane({
+    previewVisible,
     rightPanelSplit,
     rightPanelTab,
     rightPanelBottomTab,
@@ -2316,7 +2326,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     onStartResize: startRightPanelResize,
     onResetWidth: resetRightPanelWidth,
     renderTabContent: renderRightPanelTabContent,
-    activePreviewLocked,
     persistentPreviewHostPane,
     renderPersistentPreviewContent,
   };

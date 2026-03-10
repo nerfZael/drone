@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { resolveLockedPreviewHostPane } from '../src/droneHub/app/locked-preview-host-pane';
+import { resolvePreviewHostPane } from '../src/droneHub/app/locked-preview-host-pane';
 
-describe('resolveLockedPreviewHostPane', () => {
-  test('returns single when the browser is locked in single-pane mode', () => {
+describe('resolvePreviewHostPane', () => {
+  test('returns single when Browser is visible in single-pane mode', () => {
     expect(
-      resolveLockedPreviewHostPane({
-        previewLocked: true,
+      resolvePreviewHostPane({
+        previewVisible: true,
         rightPanelSplit: false,
         rightPanelTab: 'preview',
         rightPanelBottomTab: 'terminal',
@@ -13,10 +13,10 @@ describe('resolveLockedPreviewHostPane', () => {
     ).toBe('single');
   });
 
-  test('keeps the locked browser attached to the top preview pane in split mode', () => {
+  test('keeps Browser attached to the top preview pane in split mode', () => {
     expect(
-      resolveLockedPreviewHostPane({
-        previewLocked: true,
+      resolvePreviewHostPane({
+        previewVisible: true,
         rightPanelSplit: true,
         rightPanelTab: 'preview',
         rightPanelBottomTab: 'terminal',
@@ -26,8 +26,8 @@ describe('resolveLockedPreviewHostPane', () => {
 
   test('falls back to the bottom preview pane when only the bottom pane is showing Browser', () => {
     expect(
-      resolveLockedPreviewHostPane({
-        previewLocked: true,
+      resolvePreviewHostPane({
+        previewVisible: true,
         rightPanelSplit: true,
         rightPanelTab: 'terminal',
         rightPanelBottomTab: 'preview',
@@ -37,8 +37,8 @@ describe('resolveLockedPreviewHostPane', () => {
 
   test('prefers the top pane when both split panes are set to Browser', () => {
     expect(
-      resolveLockedPreviewHostPane({
-        previewLocked: true,
+      resolvePreviewHostPane({
+        previewVisible: true,
         rightPanelSplit: true,
         rightPanelTab: 'preview',
         rightPanelBottomTab: 'preview',
@@ -46,13 +46,24 @@ describe('resolveLockedPreviewHostPane', () => {
     ).toBe('top');
   });
 
-  test('hides the locked browser host when no visible pane is on Browser', () => {
+  test('hides the Browser host when no visible pane is on Browser', () => {
     expect(
-      resolveLockedPreviewHostPane({
-        previewLocked: true,
+      resolvePreviewHostPane({
+        previewVisible: true,
         rightPanelSplit: true,
         rightPanelTab: 'terminal',
         rightPanelBottomTab: 'files',
+      }),
+    ).toBeNull();
+  });
+
+  test('returns null when Browser is not visible at all', () => {
+    expect(
+      resolvePreviewHostPane({
+        previewVisible: false,
+        rightPanelSplit: false,
+        rightPanelTab: 'preview',
+        rightPanelBottomTab: 'terminal',
       }),
     ).toBeNull();
   });
