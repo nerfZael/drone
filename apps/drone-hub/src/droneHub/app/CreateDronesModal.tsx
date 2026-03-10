@@ -5,6 +5,7 @@ import type { DroneSummary } from '../types';
 import { droneNameHasWhitespace } from './name-helpers';
 import { IconChevron, IconSpinner, IconTrash } from './icons';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
+import { filterSpawnAgentMenuEntriesForRuntime } from './drone-create-runtime';
 
 type CreateDronesModalProps = {
   open: boolean;
@@ -109,23 +110,10 @@ export function CreateDronesModal({
       : '';
   const hostRuntimeSelected = createMode !== 'clone' && createRuntime === 'host';
   const hostCustomAgentsUnsupported = hostRuntimeSelected;
-  const filteredSpawnAgentMenuEntries = React.useMemo(() => {
-    const out: UiMenuSelectEntry[] = [];
-    let pendingSeparator = false;
-    for (const entry of spawnAgentMenuEntries) {
-      if (entry.kind === 'separator') {
-        pendingSeparator = out.length > 0;
-        continue;
-      }
-      if (hostCustomAgentsUnsupported && entry.value.startsWith('custom:')) continue;
-      if (pendingSeparator) {
-        out.push({ kind: 'separator' });
-        pendingSeparator = false;
-      }
-      out.push(entry);
-    }
-    return out;
-  }, [hostCustomAgentsUnsupported, spawnAgentMenuEntries]);
+  const filteredSpawnAgentMenuEntries = React.useMemo(
+    () => filterSpawnAgentMenuEntriesForRuntime(createRuntime, spawnAgentMenuEntries),
+    [createRuntime, spawnAgentMenuEntries],
+  );
 
   return (
     <div

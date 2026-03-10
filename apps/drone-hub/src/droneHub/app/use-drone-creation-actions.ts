@@ -1,6 +1,7 @@
 import React from 'react';
 import type { ChatAgentConfig } from '../../domain';
 import type { ChatSendPayload } from '../chat';
+import { buildDraftDroneCreatePayload, runtimeSupportsCustomAgents } from './drone-create-runtime';
 import { makeId } from './helpers';
 
 type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
@@ -397,6 +398,11 @@ export function useDroneCreationActions({
       }
 
       const seedAgent = resolveAgentKeyToConfig(spawnAgentKey);
+      const runtime = createRuntime;
+      if (!runtimeSupportsCustomAgents(runtime) && seedAgent.kind === 'custom') {
+        setDraftCreateError('Host runtime currently supports builtin agents only.');
+        return false;
+      }
       if (automationPrompt && automationId && seedAgent.kind !== 'builtin') {
         setDraftCreateError('Automations require a builtin transcript agent.');
         return false;
@@ -407,16 +413,16 @@ export function useDroneCreationActions({
       let createdDrone = false;
       let postCreateError: string | null = null;
       try {
-        const body: any = {
-          ...(name ? { name } : {}),
-          ...(group ? { group } : {}),
-          ...(repoPath ? { repoPath } : {}),
+        const body = buildDraftDroneCreatePayload({
+          name,
+          group,
+          repoPath,
+          runtime,
           pullHostBranchBeforeCreate,
-          seedChat: 'default',
-          ...(seedAgent ? { seedAgent } : {}),
-          ...(seedModel ? { seedModel } : {}),
-          ...(prompt ? { seedPrompt: prompt } : {}),
-        };
+          seedAgent,
+          seedModel,
+          prompt,
+        });
         const data = await requestJson<{ ok: true; id: string; name: string; phase: 'starting' }>(
           `/api/drones`,
           {
@@ -539,6 +545,7 @@ export function useDroneCreationActions({
       draftChat?.prompt,
       draftCreateGroup,
       draftCreateName,
+      createRuntime,
       drones,
       pullHostBranchBeforeCreate,
       preferredSelectedDroneHoldUntilRef,

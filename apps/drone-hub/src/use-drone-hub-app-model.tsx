@@ -2155,6 +2155,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     onResetOnboarding: resetGuidedOnboardingDismissals,
     draftChat,
     nowMs,
+    createRuntime,
+    setCreateRuntime,
     spawnAgentMenuEntries,
     draftCreating,
     draftAutoRenaming,

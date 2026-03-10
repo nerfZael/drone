@@ -14,11 +14,18 @@ import {
   automationSleepSecondsFromConfig,
   formatAutomationSleepInterval,
 } from './automation-config';
+import {
+  filterSpawnAgentMenuEntriesForRuntime,
+  runtimeSupportsCustomAgents,
+  type CreateRuntime,
+} from './drone-create-runtime';
 import type { DraftAutomationStartInput } from './use-drone-creation-actions';
 
 type DraftChatWorkspaceProps = {
   draftChat: DraftChatState;
   nowMs: number;
+  createRuntime: CreateRuntime;
+  onCreateRuntimeChange: (value: CreateRuntime) => void;
   spawnAgentMenuEntries: UiMenuSelectEntry[];
   draftCreating: boolean;
   draftAutoRenaming: boolean;
@@ -38,6 +45,8 @@ type DraftChatWorkspaceProps = {
 export function DraftChatWorkspace({
   draftChat,
   nowMs,
+  createRuntime,
+  onCreateRuntimeChange,
   spawnAgentMenuEntries,
   draftCreating,
   draftAutoRenaming,
@@ -77,6 +86,11 @@ export function DraftChatWorkspace({
       setPullHostBranchBeforeCreate: s.setPullHostBranchBeforeCreate,
       setCustomAgentModalOpen: s.setCustomAgentModalOpen,
     })),
+  );
+  const hostCustomAgentsUnsupported = !runtimeSupportsCustomAgents(createRuntime);
+  const filteredSpawnAgentMenuEntries = React.useMemo(
+    () => filterSpawnAgentMenuEntriesForRuntime(createRuntime, spawnAgentMenuEntries),
+    [createRuntime, spawnAgentMenuEntries],
   );
   const draftAutomationActions = React.useMemo<ChatInputAutomationAction[]>(() => {
     const controlsLocked = draftCreating || draftAutoRenaming || Boolean(draftChat.prompt);
@@ -184,13 +198,48 @@ export function DraftChatWorkspace({
           <div className="mt-2 flex items-center gap-2 flex-wrap">
             <div className="flex items-center gap-1.5">
               <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+                Runtime
+              </span>
+              <div className="inline-flex items-center rounded border border-[var(--border-subtle)] bg-[var(--panel-raised)] p-0.5">
+                <button
+                  type="button"
+                  onClick={() => onCreateRuntimeChange('container')}
+                  disabled={draftCreating || draftAutoRenaming || Boolean(draftChat.prompt)}
+                  className={`h-[28px] px-2 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
+                    createRuntime === 'container'
+                      ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
+                      : 'bg-transparent border-transparent text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)]'
+                  } ${draftCreating || draftAutoRenaming || Boolean(draftChat.prompt) ? 'opacity-40 cursor-not-allowed' : ''}`}
+                  style={{ fontFamily: 'var(--display)' }}
+                  title="Create the new drone in a managed container."
+                >
+                  Container
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onCreateRuntimeChange('host')}
+                  disabled={draftCreating || draftAutoRenaming || Boolean(draftChat.prompt)}
+                  className={`h-[28px] px-2 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
+                    createRuntime === 'host'
+                      ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
+                      : 'bg-transparent border-transparent text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)]'
+                  } ${draftCreating || draftAutoRenaming || Boolean(draftChat.prompt) ? 'opacity-40 cursor-not-allowed' : ''}`}
+                  style={{ fontFamily: 'var(--display)' }}
+                  title="Create the new drone directly on the host machine."
+                >
+                  Host
+                </button>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
                 Agent
               </span>
               <UiMenuSelect
                 variant="toolbar"
                 value={spawnAgentKey}
                 onValueChange={setSpawnAgentKey}
-                entries={spawnAgentMenuEntries}
+                entries={filteredSpawnAgentMenuEntries}
                 disabled={draftCreating || draftAutoRenaming || Boolean(draftChat.prompt)}
                 triggerClassName="min-w-[170px] max-w-[240px]"
                 panelClassName="w-[320px]"
@@ -200,14 +249,14 @@ export function DraftChatWorkspace({
               <button
                 type="button"
                 onClick={() => setCustomAgentModalOpen(true)}
-                disabled={draftCreating || draftAutoRenaming || Boolean(draftChat.prompt)}
+                disabled={draftCreating || draftAutoRenaming || Boolean(draftChat.prompt) || hostCustomAgentsUnsupported}
                 className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
-                  draftCreating || draftAutoRenaming || Boolean(draftChat.prompt)
+                  draftCreating || draftAutoRenaming || Boolean(draftChat.prompt) || hostCustomAgentsUnsupported
                     ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
                     : 'bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
-                title="Manage custom agents"
+                title={hostCustomAgentsUnsupported ? 'Custom agents are not yet supported for host runtime.' : 'Manage custom agents'}
               >
                 Custom
               </button>
