@@ -23,7 +23,6 @@ import type {
   TranscriptItem,
 } from '../types';
 import { IconChat, IconChevron, IconCursorApp, IconDrone, IconFolder, IconSidebarExpand } from './icons';
-import { RightPanel, type RightPanelPaneId } from './RightPanel';
 import { type RightPanelTab } from './app-config';
 import type { StartupSeedState, TldrState } from './app-types';
 import type { RepoOpErrorMeta } from './helpers';
@@ -166,16 +165,6 @@ type SelectedDroneWorkspaceProps = {
   onSaveOpenedEditorFile: (contentOverride?: string) => Promise<boolean>;
   onCloseOpenedEditorFile: () => void;
   onOpenMarkdownFileReference: (ref: MarkdownFileReference) => void;
-  rightPanelWidth: number;
-  rightPanelWidthMax: number;
-  rightPanelMinWidth: number;
-  rightPanelResizing: boolean;
-  rightPanelBottomTab: RightPanelTab;
-  setRightPanelBottomTab: React.Dispatch<React.SetStateAction<RightPanelTab>>;
-  startRightPanelResize: React.MouseEventHandler<HTMLDivElement>;
-  renderRightPanelTabContent: (drone: DroneSummary, tab: RightPanelTab, pane: 'single' | 'top' | 'bottom') => React.ReactNode;
-  activePreviewLockedByPane: Partial<Record<RightPanelPaneId, boolean>>;
-  renderPersistentPreviewContent: (drone: DroneSummary, tab: RightPanelTab, pane: RightPanelPaneId) => React.ReactNode;
 };
 
 export function SelectedDroneWorkspace({
@@ -285,16 +274,6 @@ export function SelectedDroneWorkspace({
   onSaveOpenedEditorFile,
   onCloseOpenedEditorFile,
   onOpenMarkdownFileReference,
-  rightPanelWidth,
-  rightPanelWidthMax,
-  rightPanelMinWidth,
-  rightPanelResizing,
-  rightPanelBottomTab,
-  setRightPanelBottomTab,
-  startRightPanelResize,
-  renderRightPanelTabContent,
-  activePreviewLockedByPane,
-  renderPersistentPreviewContent,
 }: SelectedDroneWorkspaceProps) {
   const {
     sidebarCollapsed,
@@ -1745,29 +1724,6 @@ export function SelectedDroneWorkspace({
             </div>
           ) : null}
         </div>
-
-        {/* Right panel content (tabs are in the header toolbar) */}
-        {rightPanelOpen && (
-          <RightPanel
-            currentDrone={currentDrone}
-            rightPanelWidth={rightPanelWidth}
-            rightPanelWidthMax={rightPanelWidthMax}
-            rightPanelMinWidth={rightPanelMinWidth}
-            rightPanelResizing={rightPanelResizing}
-            rightPanelSplit={rightPanelSplit}
-            rightPanelTab={rightPanelTab}
-            rightPanelBottomTab={rightPanelBottomTab}
-            rightPanelTabs={rightPanelTabs}
-            rightPanelTabLabels={rightPanelTabLabels}
-            onRightPanelTabChange={setRightPanelTab}
-            onRightPanelBottomTabChange={setRightPanelBottomTab}
-            onStartResize={startRightPanelResize}
-            onResetWidth={resetRightPanelWidth}
-            renderTabContent={renderRightPanelTabContent}
-            activePreviewLockedByPane={activePreviewLockedByPane}
-            renderPersistentPreviewContent={renderPersistentPreviewContent}
-          />
-        )}
       </div>
     </>
   );
