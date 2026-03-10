@@ -21,6 +21,7 @@ import {
 import type { DroneSidebarProps } from './droneHub/app/DroneSidebar';
 import type { DroneHubOverlaysProps } from './droneHub/app/DroneHubOverlays';
 import type { DroneHubWorkspaceContentProps } from './droneHub/app/DroneHubWorkspaceContent';
+import { RightPanel } from './droneHub/app/RightPanel';
 import { RightPanelTabContent } from './droneHub/app/RightPanelTabContent';
 import { useHubLogs } from './droneHub/app/use-hub-logs';
 import { useCreateDroneRowsState } from './droneHub/app/use-create-drone-rows-state';
@@ -35,6 +36,7 @@ import { useFileEditorState } from './droneHub/app/use-file-editor-state';
 import { useGroupBroadcast } from './droneHub/app/use-group-broadcast';
 import { useGroupManagement } from './droneHub/app/use-group-management';
 import { useJobsWorkflow } from './droneHub/app/use-jobs-workflow';
+import { resolveLockedPreviewHostPane } from './droneHub/app/locked-preview-host-pane';
 import { useLlmSettings } from './droneHub/app/use-llm-settings';
 import { useDeleteActionSettings } from './droneHub/app/use-delete-action-settings';
 import { useFilesystemSettings } from './droneHub/app/use-filesystem-settings';
@@ -87,6 +89,7 @@ export type DroneHubAppModel = {
   sidebarProps: DroneSidebarProps;
   overlaysProps: DroneHubOverlaysProps;
   workspaceContentProps: DroneHubWorkspaceContentProps;
+  rightPanelProps: React.ComponentProps<typeof RightPanel>;
 };
 
 export function useDroneHubAppModel(): DroneHubAppModel {
@@ -1209,35 +1212,24 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setSelectedPreviewUrlOverride,
     portRows,
   } = useFilesAndPortsPaneState({ currentDrone, requestJson });
-  const [lockedPreviewByPane, setLockedPreviewByPane] = React.useState<
-    Partial<Record<PreviewPaneKey, Record<string, PreviewPaneSnapshot>>>
-  >({});
-  const setPreviewLockedForPane = React.useCallback(
-    (paneKey: PreviewPaneKey, droneIdRaw: string, nextLocked: boolean, snapshot?: PreviewPaneSnapshot) => {
+  const [lockedPreviewByDrone, setLockedPreviewByDrone] = React.useState<Record<string, PreviewPaneSnapshot>>({});
+  const setPreviewLockedForDrone = React.useCallback(
+    (droneIdRaw: string, nextLocked: boolean, snapshot?: PreviewPaneSnapshot) => {
       const droneId = String(droneIdRaw ?? '').trim();
       if (!droneId) return;
-      setLockedPreviewByPane((prev) => {
-        const currentPane = prev[paneKey] ?? {};
-        const current = currentPane[droneId];
+      setLockedPreviewByDrone((prev) => {
+        const current = prev[droneId];
         if (nextLocked) {
           if (!snapshot) return prev;
           return {
             ...prev,
-            [paneKey]: {
-              ...currentPane,
-              [droneId]: snapshot,
-            },
+            [droneId]: snapshot,
           };
         }
         if (!current) return prev;
-        const nextPane = { ...currentPane };
-        delete nextPane[droneId];
-        if (Object.keys(nextPane).length === 0) {
-          const next = { ...prev };
-          delete next[paneKey];
-          return next;
-        }
-        return { ...prev, [paneKey]: nextPane };
+        const next = { ...prev };
+        delete next[droneId];
+        return next;
       });
     },
     [],
@@ -1778,7 +1770,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
 
   const renderRightPanelTabContent = React.useCallback(
     (drone: DroneSummary, tab: RightPanelTab, paneKey: PreviewPaneKey): React.ReactNode => {
-      const lockedPreview = tab === 'preview' ? lockedPreviewByPane[paneKey]?.[drone.id] ?? null : null;
+      const lockedPreview = tab === 'preview' ? lockedPreviewByDrone[drone.id] ?? null : null;
       const previewDrone = lockedPreview?.drone ?? drone;
       const previewCurrentDroneId = lockedPreview?.currentDroneId ?? currentDrone?.id ?? null;
       const previewSelectedPort = lockedPreview?.selectedPreviewPort ?? selectedPreviewPort;
@@ -1848,10 +1840,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           previewLocked={Boolean(lockedPreview)}
           onTogglePreviewLocked={() => {
             if (lockedPreview) {
-              setPreviewLockedForPane(paneKey, drone.id, false);
+              setPreviewLockedForDrone(drone.id, false);
               return;
             }
-            setPreviewLockedForPane(paneKey, drone.id, true, {
+            setPreviewLockedForDrone(drone.id, true, {
               drone,
               currentDroneId: currentDrone?.id ?? null,
               selectedPreviewPort,
@@ -1903,7 +1895,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       fsErrorUi,
       fsExplorerView,
       fsLoading,
-      lockedPreviewByPane,
+      lockedPreviewByDrone,
       portRows,
       portsError,
       portsErrorUi,
@@ -1927,7 +1919,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       selectedPreviewDefaultUrl,
       selectedPreviewPort,
       selectedPreviewUrlOverride,
-      setPreviewLockedForPane,
+      setPreviewLockedForDrone,
       spawnAgentConfig,
       spawnAgentKey,
       spawnAgentMenuEntries,
@@ -1945,23 +1937,23 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   );
 
   const renderPersistentPreviewContent = React.useCallback(
-    (drone: DroneSummary, activeTab: RightPanelTab, paneKey: PreviewPaneKey): React.ReactNode => {
-      const sessions = Object.values(lockedPreviewByPane[paneKey] ?? {});
+    (activeDroneId: string | null, previewVisible: boolean): React.ReactNode => {
+      const sessions = Object.values(lockedPreviewByDrone) as PreviewPaneSnapshot[];
       if (sessions.length === 0) return null;
       return sessions.map((snapshot) => {
-        const visible = activeTab === 'preview' && snapshot.drone.id === drone.id;
+        const visible = previewVisible && snapshot.drone.id === activeDroneId;
         return (
           <div
-            key={`locked-preview:${paneKey}:${snapshot.drone.id}`}
+            key={`locked-preview:${snapshot.drone.id}`}
             className={`absolute inset-0 min-h-0 overflow-hidden ${visible ? '' : 'opacity-0 pointer-events-none'}`}
             aria-hidden={!visible}
           >
-            {renderRightPanelTabContent(snapshot.drone, 'preview', paneKey)}
+            {renderRightPanelTabContent(snapshot.drone, 'preview', 'single')}
           </div>
         );
       });
     },
-    [lockedPreviewByPane, renderRightPanelTabContent],
+    [lockedPreviewByDrone, renderRightPanelTabContent],
   );
 
   const handleAddCustomAgent = React.useCallback(() => {
@@ -2297,17 +2289,42 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setRightPanelBottomTab,
     startRightPanelResize,
     renderRightPanelTabContent,
-    activePreviewLockedByPane: {
-      single: Boolean(currentDrone && lockedPreviewByPane.single?.[currentDrone.id]),
-      top: Boolean(currentDrone && lockedPreviewByPane.top?.[currentDrone.id]),
-      bottom: Boolean(currentDrone && lockedPreviewByPane.bottom?.[currentDrone.id]),
-    },
-    renderPersistentPreviewContent,
   });
+
+  const activePreviewLocked = Boolean(currentDrone && lockedPreviewByDrone[currentDrone.id]);
+  const persistentPreviewHostPane = resolveLockedPreviewHostPane({
+    previewLocked: activePreviewLocked,
+    rightPanelSplit,
+    rightPanelTab,
+    rightPanelBottomTab,
+  });
+
+  const rightPanelProps: React.ComponentProps<typeof RightPanel> = {
+    currentDrone,
+    visible: Boolean(currentDrone && appView === 'workspace' && !draftChat && !selectedGroupMultiChatData && rightPanelOpen),
+    rightPanelWidth,
+    rightPanelWidthMax,
+    rightPanelMinWidth: RIGHT_PANEL_MIN_WIDTH_PX,
+    rightPanelResizing,
+    rightPanelSplit,
+    rightPanelTab,
+    rightPanelBottomTab,
+    rightPanelTabs,
+    rightPanelTabLabels: RIGHT_PANEL_TAB_LABELS,
+    onRightPanelTabChange: setRightPanelTab,
+    onRightPanelBottomTabChange: setRightPanelBottomTab,
+    onStartResize: startRightPanelResize,
+    onResetWidth: resetRightPanelWidth,
+    renderTabContent: renderRightPanelTabContent,
+    activePreviewLocked,
+    persistentPreviewHostPane,
+    renderPersistentPreviewContent,
+  };
 
   return {
     sidebarProps,
     overlaysProps,
     workspaceContentProps,
+    rightPanelProps,
   };
 }
