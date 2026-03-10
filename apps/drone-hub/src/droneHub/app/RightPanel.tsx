@@ -1,5 +1,6 @@
 import React from 'react';
 import type { DroneSummary } from '../types';
+import { resolveRightPanelWidthStyleValue, type RightPanelWidthMode } from './right-panel-width';
 
 export type RightPanelTabId =
   | 'terminal'
@@ -15,6 +16,7 @@ export type RightPanelProps = {
   currentDrone: DroneSummary | null;
   visible: boolean;
   rightPanelWidth: number;
+  rightPanelWidthMode: RightPanelWidthMode;
   rightPanelWidthMax: number;
   rightPanelMinWidth: number;
   rightPanelResizing: boolean;
@@ -40,6 +42,7 @@ export function RightPanel({
   currentDrone,
   visible,
   rightPanelWidth,
+  rightPanelWidthMode,
   rightPanelWidthMax,
   rightPanelMinWidth,
   rightPanelResizing,
@@ -146,6 +149,13 @@ export function RightPanel({
     },
     [currentDrone, persistentPreviewHostPane, renderTabContent, setPaneContentRef, visible],
   );
+  const rightPanelStyle = visible
+    ? {
+        width: resolveRightPanelWidthStyleValue(rightPanelWidthMode, rightPanelWidth),
+        minWidth: rightPanelMinWidth,
+        maxWidth: rightPanelWidthMode === 'custom' ? rightPanelWidthMax : '100%',
+      }
+    : { width: 0, minWidth: 0, maxWidth: 0 };
 
   return (
     <aside
@@ -154,11 +164,7 @@ export function RightPanel({
       className={`relative bg-[var(--panel-alt)] flex flex-col min-h-0 overflow-hidden transition-[width,border-color] ${
         visible ? 'flex-shrink-0 border-l border-[var(--border)]' : 'flex-shrink-0 border-l border-transparent pointer-events-none'
       }`}
-      style={
-        visible
-          ? { width: rightPanelWidth, minWidth: rightPanelMinWidth, maxWidth: rightPanelWidthMax }
-          : { width: 0, minWidth: 0, maxWidth: 0 }
-      }
+      style={rightPanelStyle}
     >
       {visible ? (
         <div

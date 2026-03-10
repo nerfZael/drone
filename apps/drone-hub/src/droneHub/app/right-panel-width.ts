@@ -43,6 +43,11 @@ export function resolveRightPanelWidthPx(
   );
 }
 
+export function resolveRightPanelWidthStyleValue(mode: RightPanelWidthMode, customWidth: number): number | string {
+  if (mode === 'custom') return customWidth;
+  return `${RIGHT_PANEL_MODE_RATIOS[mode] * 100}%`;
+}
+
 export function resolveRightPanelWidthModeFromWidth(
   width: number,
   availableWidth: number = viewportWidthPx(),
