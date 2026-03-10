@@ -594,6 +594,7 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
       onOpenDraftChatComposer: openDraftChatComposer,
       onOpenCreateModal: openCreateModal,
     },
+    renderPersistentPreviewContent,
     selectedDroneWorkspaceProps: currentDrone
       ? {
           currentDrone,
@@ -709,7 +710,6 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
           setRightPanelBottomTab,
           startRightPanelResize,
           renderRightPanelTabContent,
-          renderPersistentPreviewContent,
         }
       : null,
   };

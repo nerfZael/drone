@@ -174,7 +174,11 @@ type SelectedDroneWorkspaceProps = {
   setRightPanelBottomTab: React.Dispatch<React.SetStateAction<RightPanelTab>>;
   startRightPanelResize: React.MouseEventHandler<HTMLDivElement>;
   renderRightPanelTabContent: (drone: DroneSummary, tab: RightPanelTab, pane: 'single' | 'top' | 'bottom') => React.ReactNode;
-  renderPersistentPreviewContent: (activeDroneId: string | null, previewVisible: boolean) => React.ReactNode;
+  onPersistentPreviewHostChange?: (state: {
+    style: React.CSSProperties;
+    activeDroneId: string | null;
+    previewVisible: boolean;
+  }) => void;
 };
 
 export function SelectedDroneWorkspace({
@@ -291,7 +295,7 @@ export function SelectedDroneWorkspace({
   setRightPanelBottomTab,
   startRightPanelResize,
   renderRightPanelTabContent,
-  renderPersistentPreviewContent,
+  onPersistentPreviewHostChange,
 }: SelectedDroneWorkspaceProps) {
   const {
     sidebarCollapsed,
@@ -1767,7 +1771,7 @@ export function SelectedDroneWorkspace({
           onResetWidth={resetRightPanelWidth}
           renderTabContent={renderRightPanelTabContent}
           persistentPreviewHostPane={persistentPreviewHostPane}
-          renderPersistentPreviewContent={renderPersistentPreviewContent}
+          onPersistentPreviewHostChange={onPersistentPreviewHostChange}
         />
       </div>
     </>
