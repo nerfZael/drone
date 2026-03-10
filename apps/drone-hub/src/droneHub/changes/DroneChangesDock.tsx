@@ -51,6 +51,7 @@ import {
   pullRequestStateBadge,
   refreshTimeLabel,
   resolveExplorerSidebarWidthBounds,
+  sortRepoChangeEntries,
   shortRefName,
   shortSha,
   statusBadgeTitle,
@@ -425,17 +426,19 @@ export function DroneChangesDock({
     };
   }, [dataMode, disabled, droneId, markModeRefreshed, pullRequestNumber, refreshNonce, repoAttached]);
 
+  const workingTreeEntries = React.useMemo(() => sortRepoChangeEntries(changes?.entries ?? []), [changes?.entries]);
+
   const pullEntriesAsWorkingEntries: RepoChangeEntry[] = React.useMemo(() => {
-    return toWorkingEntriesFromPull(pullChanges?.entries ?? []);
+    return sortRepoChangeEntries(toWorkingEntriesFromPull(pullChanges?.entries ?? []));
   }, [pullChanges?.entries]);
 
   const pullRequestEntriesAsWorkingEntries: RepoChangeEntry[] = React.useMemo(() => {
-    return toWorkingEntriesFromPull(pullRequestChanges?.entries ?? []);
+    return sortRepoChangeEntries(toWorkingEntriesFromPull(pullRequestChanges?.entries ?? []));
   }, [pullRequestChanges?.entries]);
 
   const entries =
     dataMode === 'working-tree'
-      ? (changes?.entries ?? [])
+      ? workingTreeEntries
       : dataMode === 'pull-request'
         ? pullRequestEntriesAsWorkingEntries
         : pullEntriesAsWorkingEntries;
