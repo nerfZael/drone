@@ -1239,6 +1239,15 @@ export function DroneChangesDock({
     [loadDiffExpansionSource, workingDiffStateKey],
   );
 
+  const workingTreeExpansionSourceId = React.useCallback(
+    (entry: RepoChangeEntry | null, kind: DiffKind | null | undefined) => {
+      if (!entry || !kind) return null;
+      if (kind === 'unstaged' && entry.isUntracked) return null;
+      return workingDiffStateKey(entry.path, kind);
+    },
+    [workingDiffStateKey],
+  );
+
   const pullExpansionSourceLoader = React.useCallback(
     (entry: RepoChangeEntry | null) => {
       if (!entry) return null;
@@ -1261,6 +1270,29 @@ export function DroneChangesDock({
     [
       dataMode,
       loadDiffExpansionSource,
+      pullChanges?.baseSha,
+      pullChanges?.headSha,
+      pullPreviewDiffStateKey,
+      pullRequestChanges?.pullRequest.baseSha,
+      pullRequestChanges?.pullRequest.headSha,
+      pullRequestChanges?.pullRequest.number,
+      pullRequestDiffStateKey,
+      pullRequestNumber,
+    ],
+  );
+
+  const pullExpansionSourceId = React.useCallback(
+    (entry: RepoChangeEntry | null) => {
+      if (!entry) return null;
+      const baseSha = dataMode === 'pull-request' ? pullRequestChanges?.pullRequest.baseSha : pullChanges?.baseSha;
+      const headSha = dataMode === 'pull-request' ? pullRequestChanges?.pullRequest.headSha : pullChanges?.headSha;
+      if (!/^[0-9a-f]{40}$/.test(String(baseSha ?? '').trim().toLowerCase())) return null;
+      return dataMode === 'pull-request'
+        ? pullRequestDiffStateKey(entry.path, pullRequestChanges?.pullRequest.number ?? pullRequestNumber)
+        : pullPreviewDiffStateKey(entry.path, baseSha, headSha);
+    },
+    [
+      dataMode,
       pullChanges?.baseSha,
       pullChanges?.headSha,
       pullPreviewDiffStateKey,
@@ -1844,6 +1876,7 @@ export function DroneChangesDock({
                         state={state}
                         filePath={entry.path}
                         viewType={diffViewType}
+                        expansionSourceId={workingTreeExpansionSourceId(entry, k)}
                         loadExpansionSource={workingTreeExpansionSourceLoader(entry, k)}
                         expansionRanges={expandedRangesByDiffKey[key] ?? []}
                         onAddExpansionRange={(range) => addExpandedRangeForDiff(key, range)}
@@ -1910,6 +1943,7 @@ export function DroneChangesDock({
                         state={state}
                         filePath={entry.path}
                         viewType={diffViewType}
+                        expansionSourceId={pullExpansionSourceId(entry)}
                         loadExpansionSource={pullExpansionSourceLoader(entry)}
                         expansionRanges={expandedRangesByDiffKey[key] ?? []}
                         onAddExpansionRange={(range) => addExpandedRangeForDiff(key, range)}
@@ -1979,6 +2013,7 @@ export function DroneChangesDock({
                   state={diffByKey[workingDiffStateKey(selectedEntry.path, splitShownKind)]}
                   filePath={selectedEntry.path}
                   viewType={diffViewType}
+                  expansionSourceId={workingTreeExpansionSourceId(selectedEntry, splitShownKind)}
                   loadExpansionSource={workingTreeExpansionSourceLoader(selectedEntry, splitShownKind)}
                   expansionRanges={expandedRangesByDiffKey[workingDiffStateKey(selectedEntry.path, splitShownKind)] ?? []}
                   onAddExpansionRange={(range) => addExpandedRangeForDiff(workingDiffStateKey(selectedEntry.path, splitShownKind), range)}
@@ -1995,6 +2030,7 @@ export function DroneChangesDock({
                 }
                 filePath={selectedEntry.path}
                 viewType={diffViewType}
+                expansionSourceId={pullExpansionSourceId(selectedEntry)}
                 loadExpansionSource={pullExpansionSourceLoader(selectedEntry)}
                 expansionRanges={
                   expandedRangesByDiffKey[

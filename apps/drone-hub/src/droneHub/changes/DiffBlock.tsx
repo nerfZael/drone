@@ -215,6 +215,7 @@ export function DiffBlock({
   state,
   filePath,
   viewType = 'unified',
+  expansionSourceId,
   loadExpansionSource,
   expansionRanges = [],
   onAddExpansionRange,
@@ -222,6 +223,7 @@ export function DiffBlock({
   state: DiffState | undefined;
   filePath?: string | null;
   viewType?: DiffViewType;
+  expansionSourceId?: string | null;
   loadExpansionSource?: (() => Promise<string | null>) | null;
   expansionRanges?: DiffExpansionRange[];
   onAddExpansionRange?: ((range: DiffExpansionRange) => void) | null;
@@ -246,7 +248,7 @@ export function DiffBlock({
     setExpandingActionKey(null);
     setExpansionError(null);
     sourceLoadRef.current = null;
-  }, [filePath, loadExpansionSource, rawText]);
+  }, [expansionSourceId, filePath, rawText]);
 
   const ensureSourceLines = React.useCallback(
     async (showError: boolean): Promise<string[] | null> => {
