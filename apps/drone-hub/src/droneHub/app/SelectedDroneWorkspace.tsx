@@ -23,11 +23,13 @@ import type {
   TranscriptItem,
 } from '../types';
 import { IconChat, IconChevron, IconCursorApp, IconDrone, IconFolder, IconSidebarExpand } from './icons';
-import { type RightPanelTab } from './app-config';
+import { RightPanel } from './RightPanel';
+import { RIGHT_PANEL_MIN_WIDTH_PX, type RightPanelTab } from './app-config';
 import type { StartupSeedState, TldrState } from './app-types';
 import type { RepoOpErrorMeta } from './helpers';
 import { requestChangesPullRequest } from '../changes/navigation';
 import { chatInputDraftKeyForDroneChat, droneHomePath, isDroneStartingOrSeeding, resolveChatNameForDrone } from './helpers';
+import { resolvePreviewHostPane } from './locked-preview-host-pane';
 import { openDroneTabFromLastPreview, resolveDroneOpenTabUrl } from './quick-actions';
 import { cn } from '../../ui/cn';
 import { dropdownMenuItemBaseClass, dropdownPanelBaseClass } from '../../ui/dropdown';
@@ -165,6 +167,14 @@ type SelectedDroneWorkspaceProps = {
   onSaveOpenedEditorFile: (contentOverride?: string) => Promise<boolean>;
   onCloseOpenedEditorFile: () => void;
   onOpenMarkdownFileReference: (ref: MarkdownFileReference) => void;
+  rightPanelWidth: number;
+  rightPanelWidthMax: number;
+  rightPanelResizing: boolean;
+  rightPanelBottomTab: RightPanelTab;
+  setRightPanelBottomTab: React.Dispatch<React.SetStateAction<RightPanelTab>>;
+  startRightPanelResize: React.MouseEventHandler<HTMLDivElement>;
+  renderRightPanelTabContent: (drone: DroneSummary, tab: RightPanelTab, pane: 'single' | 'top' | 'bottom') => React.ReactNode;
+  renderPersistentPreviewContent: (activeDroneId: string | null, previewVisible: boolean) => React.ReactNode;
 };
 
 export function SelectedDroneWorkspace({
@@ -274,6 +284,14 @@ export function SelectedDroneWorkspace({
   onSaveOpenedEditorFile,
   onCloseOpenedEditorFile,
   onOpenMarkdownFileReference,
+  rightPanelWidth,
+  rightPanelWidthMax,
+  rightPanelResizing,
+  rightPanelBottomTab,
+  setRightPanelBottomTab,
+  startRightPanelResize,
+  renderRightPanelTabContent,
+  renderPersistentPreviewContent,
 }: SelectedDroneWorkspaceProps) {
   const {
     sidebarCollapsed,
@@ -514,6 +532,13 @@ export function SelectedDroneWorkspace({
   const quickOpenTabDisabled = isDroneStartingOrSeeding(currentDrone.hubPhase) || !quickOpenTabUrl;
   const editorRef = React.useRef<any>(null);
   const openedEditorIsText = openedEditorFileKind === 'text';
+  const previewVisible = !rightPanelSplit ? rightPanelTab === 'preview' : rightPanelTab === 'preview' || rightPanelBottomTab === 'preview';
+  const persistentPreviewHostPane = resolvePreviewHostPane({
+    previewVisible,
+    rightPanelSplit,
+    rightPanelTab,
+    rightPanelBottomTab,
+  });
   const openedEditorMediaSrc = React.useMemo(() => {
     if (!openedEditorFilePath) return '';
     if (openedEditorFileKind !== 'image' && openedEditorFileKind !== 'video') return '';
@@ -1724,6 +1749,26 @@ export function SelectedDroneWorkspace({
             </div>
           ) : null}
         </div>
+        <RightPanel
+          currentDrone={currentDrone}
+          visible={rightPanelOpen}
+          rightPanelWidth={rightPanelWidth}
+          rightPanelWidthMax={rightPanelWidthMax}
+          rightPanelMinWidth={RIGHT_PANEL_MIN_WIDTH_PX}
+          rightPanelResizing={rightPanelResizing}
+          rightPanelSplit={rightPanelSplit}
+          rightPanelTab={rightPanelTab}
+          rightPanelBottomTab={rightPanelBottomTab}
+          rightPanelTabs={rightPanelTabs}
+          rightPanelTabLabels={rightPanelTabLabels}
+          onRightPanelTabChange={setRightPanelTab}
+          onRightPanelBottomTabChange={setRightPanelBottomTab}
+          onStartResize={startRightPanelResize}
+          onResetWidth={resetRightPanelWidth}
+          renderTabContent={renderRightPanelTabContent}
+          persistentPreviewHostPane={persistentPreviewHostPane}
+          renderPersistentPreviewContent={renderPersistentPreviewContent}
+        />
       </div>
     </>
   );
