@@ -27,6 +27,7 @@ import { RightPanel } from './RightPanel';
 import { RIGHT_PANEL_MIN_WIDTH_PX, type RightPanelTab } from './app-config';
 import type { StartupSeedState, TldrState } from './app-types';
 import type { RepoOpErrorMeta } from './helpers';
+import type { RightPanelWidthMode } from './right-panel-width';
 import { requestChangesPullRequest } from '../changes/navigation';
 import { chatInputDraftKeyForDroneChat, droneHomePath, isDroneStartingOrSeeding, resolveChatNameForDrone } from './helpers';
 import { resolvePreviewHostPane } from './locked-preview-host-pane';
@@ -168,6 +169,7 @@ type SelectedDroneWorkspaceProps = {
   onCloseOpenedEditorFile: () => void;
   onOpenMarkdownFileReference: (ref: MarkdownFileReference) => void;
   rightPanelWidth: number;
+  rightPanelWidthMode: RightPanelWidthMode;
   rightPanelWidthMax: number;
   rightPanelResizing: boolean;
   rightPanelBottomTab: RightPanelTab;
@@ -289,6 +291,7 @@ export function SelectedDroneWorkspace({
   onCloseOpenedEditorFile,
   onOpenMarkdownFileReference,
   rightPanelWidth,
+  rightPanelWidthMode,
   rightPanelWidthMax,
   rightPanelResizing,
   rightPanelBottomTab,
@@ -1757,6 +1760,7 @@ export function SelectedDroneWorkspace({
           currentDrone={currentDrone}
           visible={rightPanelOpen}
           rightPanelWidth={rightPanelWidth}
+          rightPanelWidthMode={rightPanelWidthMode}
           rightPanelWidthMax={rightPanelWidthMax}
           rightPanelMinWidth={RIGHT_PANEL_MIN_WIDTH_PX}
           rightPanelResizing={rightPanelResizing}

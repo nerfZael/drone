@@ -4,6 +4,7 @@ import {
   clampCustomRightPanelWidthPx,
   resolveRightPanelWidthModeFromWidth,
   resolveRightPanelWidthPx,
+  resolveRightPanelWidthStyleValue,
   rightPanelVisibleMaxWidthPx,
 } from '../src/droneHub/app/right-panel-width';
 
@@ -51,5 +52,12 @@ describe('right panel width shortcut cycle', () => {
     expect(resolveRightPanelWidthModeFromWidth(800, 1200)).toBe('two-thirds');
     expect(resolveRightPanelWidthModeFromWidth(400, 1200)).toBe('one-third');
     expect(resolveRightPanelWidthModeFromWidth(517, 1200)).toBe('custom');
+  });
+
+  test('preset styles use percentages so they track sidebar animation continuously', () => {
+    expect(resolveRightPanelWidthStyleValue('full', 1200)).toBe('100%');
+    expect(resolveRightPanelWidthStyleValue('two-thirds', 800)).toBe(`${(2 / 3) * 100}%`);
+    expect(resolveRightPanelWidthStyleValue('one-third', 400)).toBe(`${(1 / 3) * 100}%`);
+    expect(resolveRightPanelWidthStyleValue('custom', 517)).toBe(517);
   });
 });
