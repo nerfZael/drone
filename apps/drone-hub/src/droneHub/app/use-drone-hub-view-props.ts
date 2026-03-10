@@ -389,6 +389,8 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     onResetOnboarding,
     draftChat,
     nowMs,
+    createRuntime,
+    setCreateRuntime,
     spawnAgentMenuEntries,
     draftCreating,
     draftAutoRenaming,
@@ -552,6 +554,8 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
       ? {
           draftChat,
           nowMs,
+          createRuntime,
+          onCreateRuntimeChange: setCreateRuntime,
           spawnAgentMenuEntries,
           draftCreating,
           draftAutoRenaming,

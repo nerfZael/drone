@@ -150,6 +150,7 @@ export function useWorkspaceNavigationActions({
     setDraftAutoRenaming(false);
     setDraftNameSuggestionError(null);
     setDraftNameSuggesting(false);
+    setCreateRuntime('container');
     resetDraftNameSuggestSeq();
     setDraftChat({ droneId: '', droneName: '', prompt: null, focusKey: newDraftChatFocusKey() });
     setSelectedDrone(null);
@@ -169,6 +170,7 @@ export function useWorkspaceNavigationActions({
     setChatHeaderRepoPath,
     setCreateError,
     setCreateOpen,
+    setCreateRuntime,
     setDraftAutoRenaming,
     setDraftChat,
     setDraftCreateError,
