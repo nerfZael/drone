@@ -6,8 +6,11 @@ import {
   estimateExplorerSidebarWidth,
   flattenVisibleExplorerRows,
   resolveExplorerSidebarWidthBounds,
+  sameRepoChangesPayload,
+  sameRepoPullChangesPayload,
+  sameRepoPullRequestChangesPayload,
 } from '../src/droneHub/changes/helpers';
-import type { RepoChangeEntry } from '../src/droneHub/types';
+import type { RepoChangeEntry, RepoChangesPayload, RepoPullChangesPayload, RepoPullRequestChangesPayload } from '../src/droneHub/types';
 
 function change(path: string): RepoChangeEntry {
   return {
@@ -167,5 +170,129 @@ describe('changes file actions', () => {
     };
     expect(entryPathExistsInCurrentTree(deletedInPull, 'pull-preview')).toBe(false);
     expect(entryPathExistsInCurrentTree(deletedInPull, 'pull-request')).toBe(false);
+  });
+});
+
+describe('changes payload equality', () => {
+  test('treats equivalent working-tree payloads as unchanged', () => {
+    const payloadA: Extract<RepoChangesPayload, { ok: true }> = {
+      ok: true,
+      id: 'drone-a',
+      name: 'Drone A',
+      repoRoot: '/repo',
+      branch: { head: 'main', upstream: 'origin/main', ahead: 0, behind: 0 },
+      counts: { changed: 2, staged: 1, unstaged: 1, untracked: 0, conflicted: 0 },
+      entries: [
+        {
+          ...change('src/app.ts'),
+          code: ' M',
+          unstagedChar: 'M',
+          unstagedType: 'modified',
+          isUntracked: false,
+        },
+        {
+          ...change('src/other.ts'),
+          code: 'M ',
+          stagedChar: 'M',
+          stagedType: 'modified',
+          unstagedChar: '.',
+          unstagedType: null,
+          isUntracked: false,
+        },
+      ],
+    };
+    const payloadB: Extract<RepoChangesPayload, { ok: true }> = {
+      ...payloadA,
+      entries: payloadA.entries.map((entry) => ({ ...entry })).reverse(),
+    };
+
+    expect(sameRepoChangesPayload(payloadA, payloadB)).toBe(true);
+    expect(
+      sameRepoChangesPayload(payloadA, {
+        ...payloadB,
+        entries: payloadB.entries.map((entry) => (entry.path === 'src/app.ts' ? { ...entry, code: 'M ' } : entry)),
+      }),
+    ).toBe(false);
+  });
+
+  test('treats equivalent pull-preview payloads as unchanged', () => {
+    const payloadA: Extract<RepoPullChangesPayload, { ok: true }> = {
+      ok: true,
+      id: 'drone-a',
+      name: 'Drone A',
+      repoRoot: '/repo',
+      baseSha: 'a'.repeat(40),
+      headSha: 'b'.repeat(40),
+      branchContext: {
+        hostCurrent: 'main',
+        droneCurrent: 'feature',
+        droneConfigured: 'feature',
+        droneFromRef: 'origin/feature',
+      },
+      counts: { changed: 1 },
+      entries: [{ path: 'src/app.ts', originalPath: null, statusChar: 'M', statusType: 'modified' }],
+    };
+    const payloadB: Extract<RepoPullChangesPayload, { ok: true }> = {
+      ...payloadA,
+      branchContext: { ...payloadA.branchContext },
+      entries: payloadA.entries.map((entry) => ({ ...entry })).reverse(),
+    };
+
+    expect(sameRepoPullChangesPayload(payloadA, payloadB)).toBe(true);
+    expect(
+      sameRepoPullChangesPayload(payloadA, {
+        ...payloadB,
+        headSha: 'c'.repeat(40),
+      }),
+    ).toBe(false);
+  });
+
+  test('treats equivalent pull-request payloads as unchanged', () => {
+    const payloadA: Extract<RepoPullRequestChangesPayload, { ok: true }> = {
+      ok: true,
+      id: 'drone-a',
+      name: 'Drone A',
+      repoRoot: '/repo',
+      github: { owner: 'openai', repo: 'repo' },
+      pullRequest: {
+        number: 42,
+        title: 'Fix changes refresh',
+        state: 'open',
+        htmlUrl: 'https://example.com/pr/42',
+        baseRefName: 'main',
+        headRefName: 'feature',
+        baseSha: 'a'.repeat(40),
+        headSha: 'b'.repeat(40),
+      },
+      counts: { changed: 1, additions: 10, deletions: 2 },
+      entries: [
+        {
+          path: 'src/app.ts',
+          originalPath: null,
+          statusChar: 'M',
+          statusType: 'modified',
+          additions: 10,
+          deletions: 2,
+          changes: 12,
+          patch: '@@ -1 +1 @@',
+          truncated: false,
+          isBinary: false,
+        },
+      ],
+    };
+    const payloadB: Extract<RepoPullRequestChangesPayload, { ok: true }> = {
+      ...payloadA,
+      github: { ...payloadA.github },
+      pullRequest: { ...payloadA.pullRequest },
+      entries: payloadA.entries.map((entry) => ({ ...entry })).reverse(),
+    };
+
+    expect(sameRepoPullRequestChangesPayload(payloadA, payloadB)).toBe(true);
+    expect(
+      sameRepoPullRequestChangesPayload(payloadA, {
+        ...payloadB,
+        entries: payloadB.entries.map((entry, index) => (index === 0 ? { ...entry, patch: '@@ -1 +1,2 @@' } : entry)),
+      }),
+    ).toBe(false);
   });
 });

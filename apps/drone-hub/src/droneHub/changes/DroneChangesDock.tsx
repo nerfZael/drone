@@ -51,6 +51,9 @@ import {
   pullRequestStateBadge,
   refreshTimeLabel,
   resolveExplorerSidebarWidthBounds,
+  sameRepoChangesPayload,
+  sameRepoPullChangesPayload,
+  sameRepoPullRequestChangesPayload,
   sortRepoChangeEntries,
   shortRefName,
   shortSha,
@@ -81,6 +84,19 @@ function clampNumber(value: number, min: number, max: number): number {
 
 function clampExplorerZoom(value: number): number {
   return Math.round(clampNumber(value, EXPLORER_ZOOM_MIN, EXPLORER_ZOOM_MAX) * 100) / 100;
+}
+
+function pruneRecordKeys<T>(record: Record<string, T>, validKeys: Set<string>): Record<string, T> {
+  let changed = false;
+  const next: Record<string, T> = {};
+  for (const [key, value] of Object.entries(record)) {
+    if (!validKeys.has(key)) {
+      changed = true;
+      continue;
+    }
+    next[key] = value;
+  }
+  return changed ? next : record;
 }
 
 function MetaChip({
@@ -132,6 +148,7 @@ export function DroneChangesDock({
   const [changes, setChanges] = React.useState<Extract<RepoChangesPayload, { ok: true }> | null>(null);
   const [changesLoading, setChangesLoading] = React.useState(false);
   const [changesError, setChangesError] = React.useState<string | null>(null);
+  const changesRef = React.useRef<Extract<RepoChangesPayload, { ok: true }> | null>(null);
 
   const startup = usePaneReadiness({
     hubPhase,
@@ -142,6 +159,7 @@ export function DroneChangesDock({
   const [pullChanges, setPullChanges] = React.useState<Extract<RepoPullChangesPayload, { ok: true }> | null>(null);
   const [pullLoading, setPullLoading] = React.useState(false);
   const [pullError, setPullError] = React.useState<string | null>(null);
+  const pullChangesRef = React.useRef<Extract<RepoPullChangesPayload, { ok: true }> | null>(null);
   const initialRequestedPullNumberRef = React.useRef<number | null>(requestedPullRequestForDrone(droneId));
   const [pullRequestNumber, setPullRequestNumber] = React.useState<number | null>(
     () => initialRequestedPullNumberRef.current ?? selectedPullRequestForDrone(droneId),
@@ -149,6 +167,7 @@ export function DroneChangesDock({
   const [pullRequestChanges, setPullRequestChanges] = React.useState<Extract<RepoPullRequestChangesPayload, { ok: true }> | null>(null);
   const [pullRequestLoading, setPullRequestLoading] = React.useState(false);
   const [pullRequestError, setPullRequestError] = React.useState<string | null>(null);
+  const pullRequestChangesRef = React.useRef<Extract<RepoPullRequestChangesPayload, { ok: true }> | null>(null);
   const [pullRequestActionBusy, setPullRequestActionBusy] = React.useState<'merge' | 'close' | null>(null);
   const [pullRequestActionError, setPullRequestActionError] = React.useState<string | null>(null);
   const [pullRequestActionNotice, setPullRequestActionNotice] = React.useState<string | null>(null);
@@ -237,6 +256,18 @@ export function DroneChangesDock({
   }, []);
 
   React.useEffect(() => {
+    changesRef.current = changes;
+  }, [changes]);
+
+  React.useEffect(() => {
+    pullChangesRef.current = pullChanges;
+  }, [pullChanges]);
+
+  React.useEffect(() => {
+    pullRequestChangesRef.current = pullRequestChanges;
+  }, [pullRequestChanges]);
+
+  React.useEffect(() => {
     writeChangesStorage(CHANGES_VIEW_STORAGE_KEY, viewMode);
   }, [viewMode]);
   React.useEffect(() => {
@@ -301,6 +332,7 @@ export function DroneChangesDock({
 
   React.useEffect(() => {
     if (!repoAttached || disabled || dataMode !== 'working-tree') {
+      changesRef.current = null;
       setChanges(null);
       setChangesError(null);
       setChangesLoading(false);
@@ -318,9 +350,12 @@ export function DroneChangesDock({
           `/api/drones/${encodeURIComponent(droneId)}/repo/changes`,
         );
         if (!mounted) return;
-        setChanges(data);
+        if (!sameRepoChangesPayload(changesRef.current, data)) {
+          changesRef.current = data;
+          setChanges(data);
+          markModeRefreshed('working-tree');
+        }
         setChangesError(null);
-        markModeRefreshed('working-tree');
         startup.markReady();
       } catch (e: any) {
         if (!mounted) return;
@@ -343,6 +378,7 @@ export function DroneChangesDock({
 
   React.useEffect(() => {
     if (!repoAttached || disabled || dataMode !== 'pull-preview') {
+      pullChangesRef.current = null;
       setPullChanges(null);
       setPullError(null);
       setPullLoading(false);
@@ -360,9 +396,12 @@ export function DroneChangesDock({
           `/api/drones/${encodeURIComponent(droneId)}/repo/pull/changes`,
         );
         if (!mounted) return;
-        setPullChanges(data);
+        if (!sameRepoPullChangesPayload(pullChangesRef.current, data)) {
+          pullChangesRef.current = data;
+          setPullChanges(data);
+          markModeRefreshed('pull-preview');
+        }
         setPullError(null);
-        markModeRefreshed('pull-preview');
       } catch (e: any) {
         if (!mounted) return;
         setPullError(e?.message ?? String(e));
@@ -384,12 +423,17 @@ export function DroneChangesDock({
 
   React.useEffect(() => {
     if (!repoAttached || disabled || dataMode !== 'pull-request' || !pullRequestNumber) {
+      pullRequestChangesRef.current = null;
       setPullRequestChanges(null);
       setPullRequestError(null);
       setPullRequestLoading(false);
       return;
     }
-    setPullRequestChanges((prev) => (prev && prev.pullRequest.number === pullRequestNumber ? prev : null));
+    setPullRequestChanges((prev) => {
+      const next = prev && prev.pullRequest.number === pullRequestNumber ? prev : null;
+      pullRequestChangesRef.current = next;
+      return next;
+    });
 
     let mounted = true;
     const activePullNumber = pullRequestNumber;
@@ -402,13 +446,17 @@ export function DroneChangesDock({
           `/api/drones/${encodeURIComponent(droneId)}/repo/pull-requests/${activePullNumber}/changes`,
         );
         if (!mounted) return;
-        setPullRequestChanges(data);
+        if (!sameRepoPullRequestChangesPayload(pullRequestChangesRef.current, data)) {
+          pullRequestChangesRef.current = data;
+          setPullRequestChanges(data);
+          markModeRefreshed('pull-request');
+        }
         setPullRequestError(null);
-        markModeRefreshed('pull-request');
       } catch (e: any) {
         if (!mounted) return;
         const status = Number(e?.status ?? 0);
         if (status === 404) {
+          pullRequestChangesRef.current = null;
           setPullRequestChanges(null);
           setPullRequestError(`PR #${activePullNumber} was not found on GitHub (it may have been deleted or is inaccessible).`);
           return;
@@ -479,17 +527,6 @@ export function DroneChangesDock({
   React.useEffect(() => {
     diffByKeyRef.current = diffByKey;
   }, [diffByKey]);
-
-  React.useEffect(() => {
-    setDiffByKey({});
-    setExpandedRangesByDiffKey({});
-    diffByKeyRef.current = {};
-    diffSourceByKeyRef.current = {};
-    diffSourceInflightByKeyRef.current = {};
-    inflightRef.current.clear();
-    setExpandedPullFiles({});
-    setHoveredFilePath(null);
-  }, [dataMode, entriesSignature, refreshNonce]);
 
   React.useEffect(() => {
     if (!hoveredFilePath) return;
@@ -701,6 +738,59 @@ export function DroneChangesDock({
     (path: string, prNumber: number | null | undefined) => `pr\u0000${Math.max(1, Math.floor(Number(prNumber ?? 0)))}\u0000${path}`,
     [],
   );
+  const validDiffStateKeys = React.useMemo(() => {
+    const keys = new Set<string>();
+    if (dataMode === 'working-tree') {
+      for (const entry of entries) {
+        if (hasStaged(entry)) keys.add(workingDiffStateKey(entry.path, 'staged'));
+        if (hasUnstaged(entry)) keys.add(workingDiffStateKey(entry.path, 'unstaged'));
+      }
+      return keys;
+    }
+    if (dataMode === 'pull-preview') {
+      for (const entry of entries) {
+        keys.add(pullPreviewDiffStateKey(entry.path, pullChanges?.baseSha, pullChanges?.headSha));
+      }
+      return keys;
+    }
+    for (const entry of entries) {
+      keys.add(pullRequestDiffStateKey(entry.path, pullRequestChanges?.pullRequest.number ?? pullRequestNumber));
+    }
+    return keys;
+  }, [
+    dataMode,
+    entries,
+    pullChanges?.baseSha,
+    pullChanges?.headSha,
+    pullRequestChanges?.pullRequest.number,
+    pullRequestDiffStateKey,
+    pullPreviewDiffStateKey,
+    pullRequestNumber,
+    workingDiffStateKey,
+  ]);
+
+  React.useEffect(() => {
+    setDiffByKey((prev) => pruneRecordKeys(prev, validDiffStateKeys));
+    setExpandedRangesByDiffKey((prev) => pruneRecordKeys(prev, validDiffStateKeys));
+    diffByKeyRef.current = pruneRecordKeys(diffByKeyRef.current, validDiffStateKeys);
+    diffSourceByKeyRef.current = pruneRecordKeys(diffSourceByKeyRef.current, validDiffStateKeys);
+    diffSourceInflightByKeyRef.current = pruneRecordKeys(diffSourceInflightByKeyRef.current, validDiffStateKeys);
+    inflightRef.current = new Set(Array.from(inflightRef.current).filter((key) => validDiffStateKeys.has(key)));
+    setExpandedPullFiles((prev) => {
+      let changed = false;
+      const next: Record<string, boolean> = {};
+      for (const [path, open] of Object.entries(prev)) {
+        if (!entries.some((entry) => entry.path === path)) {
+          changed = true;
+          continue;
+        }
+        next[path] = open;
+      }
+      return changed ? next : prev;
+    });
+    setHoveredFilePath((prev) => (prev && !entries.some((entry) => entry.path === prev) ? null : prev));
+  }, [entries, validDiffStateKeys]);
+
   const clearDiffExpansionSource = React.useCallback((key: string) => {
     delete diffSourceByKeyRef.current[key];
     delete diffSourceInflightByKeyRef.current[key];
@@ -775,26 +865,47 @@ export function DroneChangesDock({
       }
 
       inflightRef.current.add(key);
+      const keepRenderedDiff = force && cur?.status === 'loaded';
       clearDiffExpansionSource(key);
-      clearExpandedRangesForDiff(key);
-      setDiffByKey((prev) => ({ ...prev, [key]: { status: 'loading' } }));
+      if (!keepRenderedDiff) {
+        clearExpandedRangesForDiff(key);
+      }
+      if (!keepRenderedDiff) {
+        setDiffByKey((prev) => ({ ...prev, [key]: { status: 'loading' } }));
+      }
       try {
         const data = await requestJson<Extract<RepoDiffPayload, { ok: true }>>(
           `/api/drones/${encodeURIComponent(droneId)}/repo/diff?path=${encodeURIComponent(path)}&kind=${kind}&contextLines=3`,
         );
         if (!mountedRef.current) return;
-        setDiffByKey((prev) => ({
-          ...prev,
-          [key]: {
-            status: 'loaded',
-            text: typeof data.diff === 'string' ? data.diff : '',
-            truncated: Boolean(data.truncated),
-            fromUntracked: Boolean(data.fromUntracked),
-            isBinary: false,
-            noTextReason: null,
-            contextLines: 3,
-          },
-        }));
+        const nextState: DiffState = {
+          status: 'loaded',
+          text: typeof data.diff === 'string' ? data.diff : '',
+          truncated: Boolean(data.truncated),
+          fromUntracked: Boolean(data.fromUntracked),
+          isBinary: false,
+          noTextReason: null,
+          contextLines: 3,
+        };
+        setDiffByKey((prev) => {
+          const existing = prev[key];
+          if (
+            existing &&
+            existing.status === 'loaded' &&
+            existing.text === nextState.text &&
+            existing.truncated === nextState.truncated &&
+            existing.fromUntracked === nextState.fromUntracked &&
+            existing.isBinary === nextState.isBinary &&
+            existing.noTextReason === nextState.noTextReason &&
+            existing.contextLines === nextState.contextLines
+          ) {
+            return prev;
+          }
+          return {
+            ...prev,
+            [key]: nextState,
+          };
+        });
       } catch (e: any) {
         if (!mountedRef.current) return;
         setDiffByKey((prev) => ({
@@ -829,9 +940,14 @@ export function DroneChangesDock({
       if (!force && cur?.status === 'loaded') return;
 
       inflightRef.current.add(key);
+      const keepRenderedDiff = force && cur?.status === 'loaded';
       clearDiffExpansionSource(key);
-      clearExpandedRangesForDiff(key);
-      setDiffByKey((prev) => ({ ...prev, [key]: { status: 'loading' } }));
+      if (!keepRenderedDiff) {
+        clearExpandedRangesForDiff(key);
+      }
+      if (!keepRenderedDiff) {
+        setDiffByKey((prev) => ({ ...prev, [key]: { status: 'loading' } }));
+      }
       try {
         const data = await requestJson<Extract<RepoPullDiffPayload, { ok: true }>>(
           `/api/drones/${encodeURIComponent(droneId)}/repo/pull/diff?path=${encodeURIComponent(filePath)}&base=${encodeURIComponent(
@@ -839,18 +955,34 @@ export function DroneChangesDock({
           )}&head=${encodeURIComponent(String(headSha ?? '').trim().toLowerCase())}&contextLines=3`,
         );
         if (!mountedRef.current) return;
-        setDiffByKey((prev) => ({
-          ...prev,
-          [key]: {
-            status: 'loaded',
-            text: typeof data.diff === 'string' ? data.diff : '',
-            truncated: Boolean(data.truncated),
-            fromUntracked: false,
-            isBinary: false,
-            noTextReason: null,
-            contextLines: 3,
-          },
-        }));
+        const nextState: DiffState = {
+          status: 'loaded',
+          text: typeof data.diff === 'string' ? data.diff : '',
+          truncated: Boolean(data.truncated),
+          fromUntracked: false,
+          isBinary: false,
+          noTextReason: null,
+          contextLines: 3,
+        };
+        setDiffByKey((prev) => {
+          const existing = prev[key];
+          if (
+            existing &&
+            existing.status === 'loaded' &&
+            existing.text === nextState.text &&
+            existing.truncated === nextState.truncated &&
+            existing.fromUntracked === nextState.fromUntracked &&
+            existing.isBinary === nextState.isBinary &&
+            existing.noTextReason === nextState.noTextReason &&
+            existing.contextLines === nextState.contextLines
+          ) {
+            return prev;
+          }
+          return {
+            ...prev,
+            [key]: nextState,
+          };
+        });
       } catch (e: any) {
         if (!mountedRef.current) return;
         setDiffByKey((prev) => ({
@@ -927,6 +1059,22 @@ export function DroneChangesDock({
   }, [dataMode, disabled, entries, loadDiff, repoAttached, stackedPreferredKind, viewMode]);
 
   React.useEffect(() => {
+    if (refreshNonce <= 0) return;
+    if (dataMode !== 'working-tree') return;
+    if (!repoAttached || disabled) return;
+    if (viewMode === 'stacked') {
+      for (const entry of entries) {
+        const k = effectiveKindForEntry(entry, stackedPreferredKind);
+        if (!k) continue;
+        void loadDiff(entry.path, k, true, true);
+      }
+      return;
+    }
+    if (!selectedEntry || !splitShownKind) return;
+    void loadDiff(selectedEntry.path, splitShownKind, true, true);
+  }, [dataMode, disabled, entries, loadDiff, refreshNonce, repoAttached, selectedEntry, splitShownKind, stackedPreferredKind, viewMode]);
+
+  React.useEffect(() => {
     if (dataMode !== 'pull-preview') return;
     if (!repoAttached || disabled) return;
     if (!selectedEntry) return;
@@ -938,6 +1086,20 @@ export function DroneChangesDock({
       stateKey: key,
     });
   }, [dataMode, disabled, loadRangeDiff, pullChanges?.baseSha, pullChanges?.headSha, pullPreviewDiffStateKey, repoAttached, selectedEntry]);
+
+  React.useEffect(() => {
+    if (refreshNonce <= 0) return;
+    if (dataMode !== 'pull-preview') return;
+    if (!repoAttached || disabled || !selectedEntry) return;
+    const key = pullPreviewDiffStateKey(selectedEntry.path, pullChanges?.baseSha, pullChanges?.headSha);
+    void loadRangeDiff({
+      filePath: selectedEntry.path,
+      baseSha: pullChanges?.baseSha,
+      headSha: pullChanges?.headSha,
+      stateKey: key,
+      force: true,
+    });
+  }, [dataMode, disabled, loadRangeDiff, pullChanges?.baseSha, pullChanges?.headSha, pullPreviewDiffStateKey, refreshNonce, repoAttached, selectedEntry]);
 
   const counts = changes?.counts;
   const pullBase = dataMode === 'pull-request' ? (pullRequestChanges?.pullRequest.baseSha ?? null) : (pullChanges?.baseSha ?? null);

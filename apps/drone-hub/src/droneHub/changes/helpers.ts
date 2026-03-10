@@ -1,7 +1,10 @@
 import type {
   RepoChangeEntry,
+  RepoChangesPayload,
   RepoPullChangeEntry,
+  RepoPullChangesPayload,
   RepoPullRequestChangeEntry,
+  RepoPullRequestChangesPayload,
   RepoPullRequestMergeMethod,
 } from '../types';
 import type { DiffExpansionRange, DiffNoTextReason } from './types';
@@ -432,6 +435,116 @@ export function toWorkingEntriesFromPull(entries: Array<RepoPullChangeEntry | Re
     isIgnored: false,
     isConflicted: entry.statusType === 'unmerged',
   }));
+}
+
+function repoChangeEntrySignature(entry: RepoChangeEntry): string {
+  return [
+    entry.path,
+    entry.originalPath ?? '',
+    entry.code,
+    entry.stagedChar,
+    entry.unstagedChar,
+    entry.stagedType ?? '',
+    entry.unstagedType ?? '',
+    entry.isUntracked ? '1' : '0',
+    entry.isIgnored ? '1' : '0',
+    entry.isConflicted ? '1' : '0',
+  ].join('\u0000');
+}
+
+function repoPullChangeEntrySignature(entry: RepoPullChangeEntry): string {
+  return [entry.path, entry.originalPath ?? '', entry.statusChar, entry.statusType ?? ''].join('\u0000');
+}
+
+function repoPullRequestChangeEntrySignature(entry: RepoPullRequestChangeEntry): string {
+  return [
+    entry.path,
+    entry.originalPath ?? '',
+    entry.statusChar,
+    entry.statusType ?? '',
+    String(entry.additions),
+    String(entry.deletions),
+    String(entry.changes),
+    entry.patch ?? '',
+    entry.truncated ? '1' : '0',
+    entry.isBinary ? '1' : '0',
+  ].join('\u0000');
+}
+
+function sameUnorderedArray<T>(a: T[], b: T[], toSignature: (value: T) => string): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  const aSignatures = a.map(toSignature).sort();
+  const bSignatures = b.map(toSignature).sort();
+  for (let i = 0; i < a.length; i += 1) {
+    if (aSignatures[i] !== bSignatures[i]) return false;
+  }
+  return true;
+}
+
+export function sameRepoChangesPayload(
+  a: Extract<RepoChangesPayload, { ok: true }> | null,
+  b: Extract<RepoChangesPayload, { ok: true }> | null,
+): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return (
+    a.repoRoot === b.repoRoot &&
+    a.branch.head === b.branch.head &&
+    a.branch.upstream === b.branch.upstream &&
+    a.branch.ahead === b.branch.ahead &&
+    a.branch.behind === b.branch.behind &&
+    a.counts.changed === b.counts.changed &&
+    a.counts.staged === b.counts.staged &&
+    a.counts.unstaged === b.counts.unstaged &&
+    a.counts.untracked === b.counts.untracked &&
+    a.counts.conflicted === b.counts.conflicted &&
+    sameUnorderedArray(a.entries, b.entries, repoChangeEntrySignature)
+  );
+}
+
+export function sameRepoPullChangesPayload(
+  a: Extract<RepoPullChangesPayload, { ok: true }> | null,
+  b: Extract<RepoPullChangesPayload, { ok: true }> | null,
+): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return (
+    a.repoRoot === b.repoRoot &&
+    a.baseSha === b.baseSha &&
+    a.headSha === b.headSha &&
+    a.branchContext.hostCurrent === b.branchContext.hostCurrent &&
+    a.branchContext.droneCurrent === b.branchContext.droneCurrent &&
+    a.branchContext.droneConfigured === b.branchContext.droneConfigured &&
+    a.branchContext.droneFromRef === b.branchContext.droneFromRef &&
+    a.counts.changed === b.counts.changed &&
+    sameUnorderedArray(a.entries, b.entries, repoPullChangeEntrySignature)
+  );
+}
+
+export function sameRepoPullRequestChangesPayload(
+  a: Extract<RepoPullRequestChangesPayload, { ok: true }> | null,
+  b: Extract<RepoPullRequestChangesPayload, { ok: true }> | null,
+): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return (
+    a.repoRoot === b.repoRoot &&
+    a.github.owner === b.github.owner &&
+    a.github.repo === b.github.repo &&
+    a.pullRequest.number === b.pullRequest.number &&
+    a.pullRequest.title === b.pullRequest.title &&
+    a.pullRequest.state === b.pullRequest.state &&
+    a.pullRequest.htmlUrl === b.pullRequest.htmlUrl &&
+    a.pullRequest.baseRefName === b.pullRequest.baseRefName &&
+    a.pullRequest.headRefName === b.pullRequest.headRefName &&
+    a.pullRequest.baseSha === b.pullRequest.baseSha &&
+    a.pullRequest.headSha === b.pullRequest.headSha &&
+    a.counts.changed === b.counts.changed &&
+    a.counts.additions === b.counts.additions &&
+    a.counts.deletions === b.counts.deletions &&
+    sameUnorderedArray(a.entries, b.entries, repoPullRequestChangeEntrySignature)
+  );
 }
 
 export function refreshTimeLabel(epochMs: number | null): { text: string; title: string | undefined } {
