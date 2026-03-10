@@ -28,7 +28,6 @@ export type RightPanelProps = {
   onStartResize: React.MouseEventHandler<HTMLDivElement>;
   onResetWidth: () => void;
   renderTabContent: (drone: DroneSummary, tab: RightPanelTabId, pane: RightPanelPaneId) => React.ReactNode;
-  activePreviewLocked: boolean;
   persistentPreviewHostPane: RightPanelPaneId | null;
   renderPersistentPreviewContent: (activeDroneId: string | null, previewVisible: boolean) => React.ReactNode;
 };
@@ -50,7 +49,6 @@ export function RightPanel({
   onStartResize,
   onResetWidth,
   renderTabContent,
-  activePreviewLocked,
   persistentPreviewHostPane,
   renderPersistentPreviewContent,
 }: RightPanelProps) {
@@ -108,25 +106,23 @@ export function RightPanel({
 
   const renderPaneContent = React.useCallback(
     (activeTab: RightPanelTabId, pane: RightPanelPaneId, showActiveContent: boolean) => {
-      const previewLockedHere = Boolean(activePreviewLocked && activeTab === 'preview' && persistentPreviewHostPane === pane);
-      const previewLockedElsewhere = Boolean(
-        activePreviewLocked && activeTab === 'preview' && persistentPreviewHostPane && persistentPreviewHostPane !== pane,
-      );
+      const previewHostedHere = Boolean(activeTab === 'preview' && persistentPreviewHostPane === pane);
+      const previewHostedElsewhere = Boolean(activeTab === 'preview' && persistentPreviewHostPane && persistentPreviewHostPane !== pane);
       return (
         <div ref={setPaneContentRef(pane)} className="flex-1 min-h-0 overflow-hidden relative">
-          {showActiveContent && visible && currentDrone && (!activePreviewLocked || activeTab !== 'preview') ? (
+          {showActiveContent && visible && currentDrone && (activeTab !== 'preview' || !persistentPreviewHostPane) ? (
             <div className="absolute inset-0 min-h-0 overflow-hidden">{renderTabContent(currentDrone, activeTab, pane)}</div>
           ) : null}
-          {previewLockedHere ? <div className="absolute inset-0 min-h-0 overflow-hidden" aria-hidden="true" /> : null}
-          {previewLockedElsewhere ? (
+          {previewHostedHere ? <div className="absolute inset-0 min-h-0 overflow-hidden" aria-hidden="true" /> : null}
+          {previewHostedElsewhere ? (
             <div className="absolute inset-0 min-h-0 overflow-hidden flex items-center justify-center bg-[rgba(0,0,0,.08)] px-4 text-center text-[11px] text-[var(--muted-dim)]">
-              Locked browser is shown in the other preview pane. Switch this pane to another tab or unlock the browser to move it.
+              This Browser session is already active in the other preview pane.
             </div>
           ) : null}
         </div>
       );
     },
-    [activePreviewLocked, currentDrone, persistentPreviewHostPane, renderTabContent, setPaneContentRef, visible],
+    [currentDrone, persistentPreviewHostPane, renderTabContent, setPaneContentRef, visible],
   );
 
   return (
