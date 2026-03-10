@@ -217,6 +217,26 @@ export function diffKey(path: string, kind: DiffKind): string {
   return `${kind}\u0000${path}`;
 }
 
+function compareRepoChangeEntries(a: RepoChangeEntry, b: RepoChangeEntry): number {
+  const pathCmp = String(a.path ?? '').localeCompare(String(b.path ?? ''));
+  if (pathCmp !== 0) return pathCmp;
+  const originalPathCmp = String(a.originalPath ?? '').localeCompare(String(b.originalPath ?? ''));
+  if (originalPathCmp !== 0) return originalPathCmp;
+  const codeCmp = String(a.code ?? '').localeCompare(String(b.code ?? ''));
+  if (codeCmp !== 0) return codeCmp;
+  const stagedCmp = String(a.stagedChar ?? '').localeCompare(String(b.stagedChar ?? ''));
+  if (stagedCmp !== 0) return stagedCmp;
+  const unstagedCmp = String(a.unstagedChar ?? '').localeCompare(String(b.unstagedChar ?? ''));
+  if (unstagedCmp !== 0) return unstagedCmp;
+  if (a.isUntracked !== b.isUntracked) return a.isUntracked ? -1 : 1;
+  if (a.isConflicted !== b.isConflicted) return a.isConflicted ? -1 : 1;
+  return 0;
+}
+
+export function sortRepoChangeEntries(entries: RepoChangeEntry[]): RepoChangeEntry[] {
+  return entries.slice().sort(compareRepoChangeEntries);
+}
+
 export function parentDirPaths(filePath: string): string[] {
   const segs = String(filePath ?? '').split('/').filter(Boolean);
   const out: string[] = [];
