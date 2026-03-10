@@ -32,6 +32,27 @@ describe('draft drone create runtime support', () => {
     });
   });
 
+  test('omits chat seed fields when creating an empty drone', () => {
+    const payload = buildDraftDroneCreatePayload({
+      name: 'empty-drone',
+      group: 'ops',
+      repoPath: '/work/repo',
+      runtime: 'container',
+      pullHostBranchBeforeCreate: true,
+      seedAgent: null,
+      seedModel: null,
+      prompt: '',
+    });
+
+    expect(payload).toEqual({
+      name: 'empty-drone',
+      group: 'ops',
+      repoPath: '/work/repo',
+      runtime: 'container',
+      pullHostBranchBeforeCreate: true,
+    });
+  });
+
   test('filters custom agents out of host runtime menus', () => {
     const entries: UiMenuSelectEntry[] = [
       { kind: 'item', value: 'builtin:cursor', label: 'Cursor' },

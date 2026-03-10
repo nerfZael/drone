@@ -3,6 +3,7 @@ import { useShallow } from 'zustand/react/shallow';
 
 type CreateMode = 'create' | 'clone';
 type CreateRuntime = 'container' | 'host';
+type DraftCreateMode = 'with-chat' | 'without-chat';
 
 type Updater<T> = T | ((prev: T) => T);
 
@@ -19,6 +20,7 @@ type CreateDraftWorkflowState = {
   createInitialMessage: string;
   createRepoMenuOpen: boolean;
   draftCreateOpen: boolean;
+  draftCreateMode: DraftCreateMode;
   draftCreateName: string;
   draftCreateGroup: string;
   draftCreateError: string | null;
@@ -39,6 +41,7 @@ type CreateDraftWorkflowState = {
   setCreateInitialMessage: (next: Updater<string>) => void;
   setCreateRepoMenuOpen: (next: Updater<boolean>) => void;
   setDraftCreateOpen: (next: Updater<boolean>) => void;
+  setDraftCreateMode: (next: Updater<DraftCreateMode>) => void;
   setDraftCreateName: (next: Updater<string>) => void;
   setDraftCreateGroup: (next: Updater<string>) => void;
   setDraftCreateError: (next: Updater<string | null>) => void;
@@ -66,6 +69,7 @@ const useCreateDraftWorkflowStore = create<CreateDraftWorkflowState>((set) => ({
   createInitialMessage: '',
   createRepoMenuOpen: false,
   draftCreateOpen: false,
+  draftCreateMode: 'with-chat',
   draftCreateName: '',
   draftCreateGroup: '',
   draftCreateError: null,
@@ -86,6 +90,7 @@ const useCreateDraftWorkflowStore = create<CreateDraftWorkflowState>((set) => ({
   setCreateInitialMessage: (next) => set((s) => ({ createInitialMessage: resolveNext(s.createInitialMessage, next) })),
   setCreateRepoMenuOpen: (next) => set((s) => ({ createRepoMenuOpen: resolveNext(s.createRepoMenuOpen, next) })),
   setDraftCreateOpen: (next) => set((s) => ({ draftCreateOpen: resolveNext(s.draftCreateOpen, next) })),
+  setDraftCreateMode: (next) => set((s) => ({ draftCreateMode: resolveNext(s.draftCreateMode, next) })),
   setDraftCreateName: (next) => set((s) => ({ draftCreateName: resolveNext(s.draftCreateName, next) })),
   setDraftCreateGroup: (next) => set((s) => ({ draftCreateGroup: resolveNext(s.draftCreateGroup, next) })),
   setDraftCreateError: (next) => set((s) => ({ draftCreateError: resolveNext(s.draftCreateError, next) })),
@@ -112,6 +117,7 @@ export function useCreateDraftWorkflowState() {
       createInitialMessage: s.createInitialMessage,
       createRepoMenuOpen: s.createRepoMenuOpen,
       draftCreateOpen: s.draftCreateOpen,
+      draftCreateMode: s.draftCreateMode,
       draftCreateName: s.draftCreateName,
       draftCreateGroup: s.draftCreateGroup,
       draftCreateError: s.draftCreateError,
@@ -132,6 +138,7 @@ export function useCreateDraftWorkflowState() {
       setCreateInitialMessage: s.setCreateInitialMessage,
       setCreateRepoMenuOpen: s.setCreateRepoMenuOpen,
       setDraftCreateOpen: s.setDraftCreateOpen,
+      setDraftCreateMode: s.setDraftCreateMode,
       setDraftCreateName: s.setDraftCreateName,
       setDraftCreateGroup: s.setDraftCreateGroup,
       setDraftCreateError: s.setDraftCreateError,

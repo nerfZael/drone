@@ -39,6 +39,7 @@ type UseDroneCreationActionsArgs = {
   spawnAgentKey: string;
   spawnModelForSeed: string | null;
   draftChat: { droneId: string; droneName: string; prompt: any | null; focusKey?: string } | null;
+  draftCreateMode: 'with-chat' | 'without-chat';
   draftCreateName: string;
   draftCreateGroup: string;
   draftCreateRepoPath: string;
@@ -126,6 +127,7 @@ export function useDroneCreationActions({
   spawnAgentKey,
   spawnModelForSeed,
   draftChat,
+  draftCreateMode,
   draftCreateName,
   draftCreateGroup,
   draftCreateRepoPath,
@@ -355,11 +357,14 @@ export function useDroneCreationActions({
       prompt?: string;
       name?: string;
       group?: string;
+      createMode?: 'with-chat' | 'without-chat';
       autoRename?: boolean;
       autoRenamePrompt?: string;
       automationStart?: DraftAutomationStartInput;
     }): Promise<boolean> => {
       const pending = draftChat?.prompt ?? null;
+      const effectiveCreateMode = opts?.createMode ?? draftCreateMode;
+      const createWithoutChat = effectiveCreateMode === 'without-chat';
       const prompt = String(opts?.prompt ?? pending?.prompt ?? '').trim();
       const automationStartRaw = opts?.automationStart ?? null;
       const automationId = String(automationStartRaw?.automationId ?? '').trim();
@@ -380,11 +385,11 @@ export function useDroneCreationActions({
       const name = nameRaw.trim();
       const group = String(opts?.group ?? draftCreateGroup ?? '').trim();
       const repoPath = String(draftCreateRepoPath ?? '').trim();
-      if (!prompt && !automationPrompt) {
+      if (!createWithoutChat && !prompt && !automationPrompt) {
         setDraftCreateError('Send a first message or run an automation before creating a drone.');
         return false;
       }
-      if (!prompt && automationPrompt && !automationId) {
+      if (!createWithoutChat && !prompt && automationPrompt && !automationId) {
         setDraftCreateError('Automation id is required.');
         return false;
       }
@@ -397,19 +402,19 @@ export function useDroneCreationActions({
         return false;
       }
 
-      const seedAgent = resolveAgentKeyToConfig(spawnAgentKey);
+      const seedAgent = createWithoutChat ? null : resolveAgentKeyToConfig(spawnAgentKey);
       const runtime = createRuntime;
-      if (!runtimeSupportsCustomAgents(runtime) && seedAgent.kind === 'custom') {
+      if (!runtimeSupportsCustomAgents(runtime) && seedAgent?.kind === 'custom') {
         setDraftCreateError('Host runtime currently supports builtin agents only.');
         return false;
       }
-      if (automationPrompt && automationId && seedAgent.kind !== 'builtin') {
+      if (automationPrompt && automationId && seedAgent?.kind !== 'builtin') {
         setDraftCreateError('Automations require a builtin transcript agent.');
         return false;
       }
       setDraftCreating(true);
       setDraftCreateError(null);
-      const seedModel = spawnModelForSeed;
+      const seedModel = createWithoutChat ? null : spawnModelForSeed;
       let createdDrone = false;
       let postCreateError: string | null = null;
       try {
@@ -421,7 +426,7 @@ export function useDroneCreationActions({
           pullHostBranchBeforeCreate,
           seedAgent,
           seedModel,
-          prompt,
+          prompt: createWithoutChat ? '' : prompt,
         });
         const data = await requestJson<{ ok: true; id: string; name: string; phase: 'starting' }>(
           `/api/drones`,
@@ -436,14 +441,16 @@ export function useDroneCreationActions({
         if (!droneId) throw new Error('create drone did not return an id');
         createdDrone = true;
 
-        rememberStartupSeed([{ id: droneId, name: createdName }], {
-          agent: seedAgent,
-          model: seedModel,
-          prompt,
-          chatName: 'default',
-          group,
-          repoPath,
-        });
+        if (seedAgent || seedModel || prompt) {
+          rememberStartupSeed([{ id: droneId, name: createdName }], {
+            agent: seedAgent,
+            model: seedModel,
+            prompt,
+            chatName: 'default',
+            group,
+            repoPath,
+          });
+        }
         preferredSelectedDroneRef.current = droneId;
         preferredSelectedDroneHoldUntilRef.current = Date.now() + startupSeedMissingGraceMs;
         setSelectedDrone(droneId);
@@ -465,7 +472,7 @@ export function useDroneCreationActions({
           };
         });
 
-        if (automationPrompt && automationId) {
+        if (!createWithoutChat && automationPrompt && automationId) {
           const startBody = {
             automationId,
             automationLabel,
@@ -501,7 +508,7 @@ export function useDroneCreationActions({
           }
         }
 
-        if (opts?.autoRename) {
+        if (opts?.autoRename && !createWithoutChat) {
           const renameSourcePrompt = String(opts.autoRenamePrompt ?? prompt ?? '').trim();
           if (renameSourcePrompt) {
             setDraftAutoRenaming(true);
@@ -515,6 +522,7 @@ export function useDroneCreationActions({
         setDraftCreateError(postCreateError);
         setDraftNameSuggestionError(null);
         setDraftNameSuggesting(false);
+        if (createWithoutChat) setDraftChat(null);
         return true;
       } catch (e: any) {
         const err = e?.message ?? String(e);
@@ -542,6 +550,7 @@ export function useDroneCreationActions({
     },
     [
       draftCreateRepoPath,
+      draftCreateMode,
       draftChat?.prompt,
       draftCreateGroup,
       draftCreateName,
@@ -601,10 +610,11 @@ export function useDroneCreationActions({
       setDraftAutoRenaming(false);
       setDraftCreateOpen(false);
 
-      return await createDroneFromDraft({ prompt, autoRename: true });
+      return await createDroneFromDraft({ prompt, autoRename: !draftCreateName.trim() });
     },
     [
       createDroneFromDraft,
+      draftCreateName,
       setDraftAutoRenaming,
       setDraftChat,
       setDraftCreateError,
@@ -666,7 +676,7 @@ export function useDroneCreationActions({
 
       return await createDroneFromDraft({
         prompt: '',
-        autoRename: true,
+        autoRename: !draftCreateName.trim(),
         autoRenamePrompt: prompt,
         automationStart: {
           automationId,
@@ -682,6 +692,7 @@ export function useDroneCreationActions({
     },
     [
       createDroneFromDraft,
+      draftCreateName,
       draftChat?.focusKey,
       setDraftAutoRenaming,
       setDraftChat,

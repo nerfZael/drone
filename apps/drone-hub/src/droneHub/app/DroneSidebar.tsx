@@ -53,14 +53,13 @@ function SidebarIconButton({
 }
 
 function getSidebarDroneChats(drone: DroneSummary): string[] {
-  const source = Array.isArray(drone?.chats) && drone.chats.length > 0 ? drone.chats : ['default'];
+  const source = Array.isArray(drone?.chats) ? drone.chats : [];
   const out: string[] = [];
   for (const raw of source) {
     const chat = String(raw ?? '').trim();
     if (!chat || out.includes(chat)) continue;
     out.push(chat);
   }
-  if (out.length === 0) out.push('default');
   return out;
 }
 
@@ -628,7 +627,7 @@ export function DroneSidebar({
             }
             deleteBusy={Boolean(deletingDrones[d.id])}
           />
-          {!hasOnlyDefaultChat ? (
+          {chats.length > 0 && !hasOnlyDefaultChat ? (
             <div className="ml-5 mr-1 flex flex-col gap-0.5">
               {chats.map((chatName) => {
                 const chatNodeId = createCanvasChatNodeId(d.id, chatName);
