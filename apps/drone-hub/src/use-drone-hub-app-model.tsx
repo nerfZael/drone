@@ -21,7 +21,6 @@ import {
 import type { DroneSidebarProps } from './droneHub/app/DroneSidebar';
 import type { DroneHubOverlaysProps } from './droneHub/app/DroneHubOverlays';
 import type { DroneHubWorkspaceContentProps } from './droneHub/app/DroneHubWorkspaceContent';
-import { RightPanel } from './droneHub/app/RightPanel';
 import { RightPanelTabContent } from './droneHub/app/RightPanelTabContent';
 import { useHubLogs } from './droneHub/app/use-hub-logs';
 import { useCreateDroneRowsState } from './droneHub/app/use-create-drone-rows-state';
@@ -36,7 +35,6 @@ import { useFileEditorState } from './droneHub/app/use-file-editor-state';
 import { useGroupBroadcast } from './droneHub/app/use-group-broadcast';
 import { useGroupManagement } from './droneHub/app/use-group-management';
 import { useJobsWorkflow } from './droneHub/app/use-jobs-workflow';
-import { resolvePreviewHostPane } from './droneHub/app/locked-preview-host-pane';
 import { useLlmSettings } from './droneHub/app/use-llm-settings';
 import { useDeleteActionSettings } from './droneHub/app/use-delete-action-settings';
 import { useFilesystemSettings } from './droneHub/app/use-filesystem-settings';
@@ -89,7 +87,6 @@ export type DroneHubAppModel = {
   sidebarProps: DroneSidebarProps;
   overlaysProps: DroneHubOverlaysProps;
   workspaceContentProps: DroneHubWorkspaceContentProps;
-  rightPanelProps: React.ComponentProps<typeof RightPanel>;
 };
 
 export function useDroneHubAppModel(): DroneHubAppModel {
@@ -2299,41 +2296,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setRightPanelBottomTab,
     startRightPanelResize,
     renderRightPanelTabContent,
-  });
-
-  const previewVisible = Boolean(currentDrone && (!rightPanelSplit ? rightPanelTab === 'preview' : rightPanelTab === 'preview' || rightPanelBottomTab === 'preview'));
-  const persistentPreviewHostPane = resolvePreviewHostPane({
-    previewVisible,
-    rightPanelSplit,
-    rightPanelTab,
-    rightPanelBottomTab,
-  });
-
-  const rightPanelProps: React.ComponentProps<typeof RightPanel> = {
-    currentDrone,
-    visible: Boolean(currentDrone && appView === 'workspace' && !draftChat && !selectedGroupMultiChatData && rightPanelOpen),
-    rightPanelWidth,
-    rightPanelWidthMax,
-    rightPanelMinWidth: RIGHT_PANEL_MIN_WIDTH_PX,
-    rightPanelResizing,
-    rightPanelSplit,
-    rightPanelTab,
-    rightPanelBottomTab,
-    rightPanelTabs,
-    rightPanelTabLabels: RIGHT_PANEL_TAB_LABELS,
-    onRightPanelTabChange: setRightPanelTab,
-    onRightPanelBottomTabChange: setRightPanelBottomTab,
-    onStartResize: startRightPanelResize,
-    onResetWidth: resetRightPanelWidth,
-    renderTabContent: renderRightPanelTabContent,
-    persistentPreviewHostPane,
     renderPersistentPreviewContent,
-  };
+  });
 
   return {
     sidebarProps,
     overlaysProps,
     workspaceContentProps,
-    rightPanelProps,
   };
 }

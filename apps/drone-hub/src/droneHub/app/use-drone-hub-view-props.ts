@@ -522,6 +522,14 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     onSaveOpenedEditorFile,
     onCloseOpenedEditorFile,
     onOpenMarkdownFileReference,
+    rightPanelWidth,
+    rightPanelWidthMax,
+    rightPanelResizing,
+    rightPanelBottomTab,
+    setRightPanelBottomTab,
+    startRightPanelResize,
+    renderRightPanelTabContent,
+    renderPersistentPreviewContent,
   } = args;
 
   return {
@@ -694,6 +702,14 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
           onSaveOpenedEditorFile,
           onCloseOpenedEditorFile,
           onOpenMarkdownFileReference,
+          rightPanelWidth,
+          rightPanelWidthMax,
+          rightPanelResizing,
+          rightPanelBottomTab,
+          setRightPanelBottomTab,
+          startRightPanelResize,
+          renderRightPanelTabContent,
+          renderPersistentPreviewContent,
         }
       : null,
   };
