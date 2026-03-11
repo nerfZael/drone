@@ -662,6 +662,12 @@ code, pre {
   gap: 1rem;
 }
 
+.dh-markdown-table-dialog-actions {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+}
+
 .dh-markdown-table-dialog-title {
   color: var(--fg);
   font-family: var(--display);
