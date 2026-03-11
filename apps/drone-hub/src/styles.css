@@ -634,14 +634,14 @@ code, pre {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 2rem;
+  padding: 1rem;
   background: rgba(3, 6, 12, .72);
   backdrop-filter: blur(6px);
 }
 
 .dh-markdown-table-dialog-panel {
-  width: min(1400px, calc(100vw - 4rem));
-  max-height: calc(100vh - 4rem);
+  width: min(1800px, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -692,6 +692,7 @@ code, pre {
 
 .dh-markdown-table-dialog .dh-markdown-table-wrap {
   flex: 1;
+  width: 100%;
   overflow: auto;
 }
 

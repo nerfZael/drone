@@ -114,7 +114,7 @@ function MarkdownTable({
       {expanded && typeof document !== 'undefined'
         ? createPortal(
             <div className="dh-markdown-table-dialog" role="dialog" aria-modal="true" aria-label="Expanded table view" onClick={onCloseExpanded}>
-              <div className="dh-markdown-table-dialog-panel" onClick={(event) => event.stopPropagation()}>
+              <div className="dh-markdown dh-markdown-table-dialog-panel" onClick={(event) => event.stopPropagation()}>
                 <div className="dh-markdown-table-dialog-header">
                   <div>
                     <div className="dh-markdown-table-dialog-title">Expanded Table</div>
