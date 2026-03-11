@@ -2,6 +2,14 @@ import React from 'react';
 import { MarkdownMessage, type MarkdownFileReference } from './MarkdownMessage';
 import { IconChevron } from './icons';
 
+function containsWideMarkdownBlocks(rawText: string): boolean {
+  const text = String(rawText ?? '');
+  if (!text) return false;
+  if (/^```/m.test(text)) return true;
+  if (/!\[[^\]]*]\([^)]+\)/.test(text)) return true;
+  return /^\|.+\|\s*$/m.test(text) && /^\|\s*[-:| ]+\|\s*$/m.test(text);
+}
+
 export function CollapsibleMarkdown({
   text,
   className,
@@ -24,6 +32,7 @@ export function CollapsibleMarkdown({
   const normalizedText = React.useMemo(() => text.replace(/\r\n/g, '\n'), [text]);
   const totalLines = React.useMemo(() => normalizedText.split('\n').length, [normalizedText]);
   const isLong = totalLines > collapseAfterLines || text.length > 2000;
+  const hasWideBlocks = React.useMemo(() => containsWideMarkdownBlocks(normalizedText), [normalizedText]);
   const [collapsed, setCollapsed] = React.useState(isLong);
   const leadSplit = React.useMemo(() => {
     if (!preserveLeadParagraph) return null;
@@ -34,6 +43,7 @@ export function CollapsibleMarkdown({
     if (!lead || !rest) return null;
     return { lead, rest };
   }, [normalizedText, preserveLeadParagraph]);
+  const collapseRestCompletely = isLong && Boolean(leadSplit) && hasWideBlocks;
 
   React.useEffect(() => {
     setCollapsed(isLong);
@@ -49,9 +59,25 @@ export function CollapsibleMarkdown({
       {isLong && leadSplit ? (
         <>
           <MarkdownMessage text={leadSplit.lead} className={className} onOpenFileReference={onOpenFileReference} onOpenLink={onOpenLink} />
-          <div className={`output-collapse ${collapsed ? 'collapsed' : ''}`} style={style}>
-            <MarkdownMessage text={leadSplit.rest} className={className} onOpenFileReference={onOpenFileReference} onOpenLink={onOpenLink} />
-          </div>
+          {collapseRestCompletely ? (
+            collapsed ? null : (
+              <MarkdownMessage
+                text={leadSplit.rest}
+                className={className}
+                onOpenFileReference={onOpenFileReference}
+                onOpenLink={onOpenLink}
+              />
+            )
+          ) : (
+            <div className={`output-collapse ${collapsed ? 'collapsed' : ''}`} style={style}>
+              <MarkdownMessage
+                text={leadSplit.rest}
+                className={className}
+                onOpenFileReference={onOpenFileReference}
+                onOpenLink={onOpenLink}
+              />
+            </div>
+          )}
         </>
       ) : (
         <div className={`output-collapse ${isLong && collapsed ? 'collapsed' : ''}`} style={style}>

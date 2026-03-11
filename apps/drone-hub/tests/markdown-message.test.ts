@@ -15,6 +15,7 @@ describe('MarkdownMessage', () => {
     const html = renderMarkdown(['- alpha', '- beta', '', '| A | B |', '| - | - |', '| 1 | 2 |'].join('\n'));
     expect(html).toContain('<ul>');
     expect(html).toContain('<li>alpha</li>');
+    expect(html).toContain('dh-markdown-table-wrap');
     expect(html).toContain('<table>');
     expect(html).toContain('<thead>');
   });
