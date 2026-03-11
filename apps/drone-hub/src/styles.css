@@ -520,13 +520,86 @@ code, pre {
   background: rgba(0, 0, 0, .16);
 }
 
+.dh-markdown-table-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: .5rem;
+  margin-bottom: .4rem;
+}
+
+.dh-markdown-table-label {
+  color: var(--muted-dim);
+  font-family: var(--display);
+  font-size: 10px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.dh-markdown-table-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .03);
+}
+
+.dh-markdown-table-toggle-button {
+  appearance: none;
+  border: 0;
+  margin: 0;
+  padding: .16rem .52rem;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: 600 10px/1.2 var(--sans);
+  letter-spacing: .02em;
+  cursor: pointer;
+}
+
+.dh-markdown-table-toggle-button:hover {
+  color: var(--fg-secondary);
+}
+
+.dh-markdown-table-toggle-button.is-active {
+  background: rgba(167, 139, 250, .16);
+  color: var(--fg);
+}
+
 .dh-markdown table {
   width: max-content;
   min-width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
+  table-layout: auto;
   font-size: 12px;
   margin: 0;
+}
+
+.dh-markdown-table--fit {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.dh-markdown-table-wrap--fit {
+  overflow-x: hidden;
+}
+
+.dh-markdown-table--fit th,
+.dh-markdown-table--fit td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.dh-markdown-table--natural {
+  width: max-content;
+  min-width: 100%;
+}
+
+.dh-markdown table {
+  border-collapse: separate;
+  border-spacing: 0;
 }
 .dh-markdown th,
 .dh-markdown td {

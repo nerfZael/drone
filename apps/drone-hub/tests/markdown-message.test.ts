@@ -16,8 +16,20 @@ describe('MarkdownMessage', () => {
     expect(html).toContain('<ul>');
     expect(html).toContain('<li>alpha</li>');
     expect(html).toContain('dh-markdown-table-wrap');
-    expect(html).toContain('<table>');
+    expect(html).toContain('dh-markdown-table--fit');
+    expect(html).toContain('<table class="dh-markdown-table dh-markdown-table--fit">');
     expect(html).toContain('<thead>');
+  });
+
+  test('defaults dense structured tables to natural mode', () => {
+    const html = renderMarkdown(
+      [
+        '| Name | Path | Sha | Status | Owner |',
+        '| - | - | - | - | - |',
+        '| alpha | src/features/auth/routes/index.tsx | 1234567890abcdef1234567890abcdef | ready | platform |',
+      ].join('\n'),
+    );
+    expect(html).toContain('dh-markdown-table--natural');
   });
 
   test('renders callout blockquotes and strips marker text', () => {
