@@ -4,6 +4,7 @@ import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
 
 type CalloutKind = 'note' | 'tip' | 'important' | 'warning' | 'caution';
+type TableMode = 'fit' | 'natural';
 const COMMON_FILE_BASENAMES = new Set([
   'dockerfile',
   'makefile',
@@ -33,6 +34,80 @@ function flattenText(node: React.ReactNode): string {
     return flattenText((node.props as { children?: React.ReactNode }).children);
   }
   return '';
+}
+
+function collectElementChildrenByType(node: React.ReactNode, type: string, out: React.ReactElement[] = []): React.ReactElement[] {
+  if (node == null || typeof node === 'boolean') return out;
+  if (Array.isArray(node)) {
+    for (const part of node) collectElementChildrenByType(part, type, out);
+    return out;
+  }
+  if (!React.isValidElement(node)) return out;
+  if (node.type === type) out.push(node as React.ReactElement);
+  collectElementChildrenByType((node.props as { children?: React.ReactNode }).children, type, out);
+  return out;
+}
+
+function inferTableMode(children: React.ReactNode): TableMode {
+  const rows = collectElementChildrenByType(children, 'tr');
+  const columnCount = rows.reduce((max, row) => {
+    const cells = collectElementChildrenByType((row.props as { children?: React.ReactNode }).children, 'th').length
+      || collectElementChildrenByType((row.props as { children?: React.ReactNode }).children, 'td').length;
+    return Math.max(max, cells);
+  }, 0);
+  const cellTexts = rows
+    .flatMap((row) =>
+      collectElementChildrenByType((row.props as { children?: React.ReactNode }).children, 'th')
+        .concat(collectElementChildrenByType((row.props as { children?: React.ReactNode }).children, 'td')),
+    )
+    .map((cell) => flattenText((cell.props as { children?: React.ReactNode }).children).trim())
+    .filter(Boolean);
+  const hasLongToken = cellTexts.some((text) => text.split(/\s+/).some((token) => token.length >= 24));
+  const hasStructuredToken = cellTexts.some((text) => /https?:\/\/|[\\/]|[A-Fa-f0-9]{16,}|[_-]{2,}/.test(text));
+  if (columnCount >= 6) return 'natural';
+  if (columnCount >= 5 && (hasLongToken || hasStructuredToken)) return 'natural';
+  if (columnCount >= 4 && hasLongToken) return 'natural';
+  return 'fit';
+}
+
+function MarkdownTable({ children, ...props }: React.ComponentProps<'table'>) {
+  const inferredMode = React.useMemo(() => inferTableMode(children), [children]);
+  const [mode, setMode] = React.useState<TableMode>(inferredMode);
+
+  React.useEffect(() => {
+    setMode(inferredMode);
+  }, [inferredMode]);
+
+  return (
+    <div className="dh-markdown-block dh-markdown-block--wide">
+      <div className="dh-markdown-table-toolbar">
+        <span className="dh-markdown-table-label">Table</span>
+        <div className="dh-markdown-table-toggle" role="group" aria-label="Table display mode">
+          <button
+            type="button"
+            className={`dh-markdown-table-toggle-button ${mode === 'fit' ? 'is-active' : ''}`}
+            aria-pressed={mode === 'fit'}
+            onClick={() => setMode('fit')}
+          >
+            Fit
+          </button>
+          <button
+            type="button"
+            className={`dh-markdown-table-toggle-button ${mode === 'natural' ? 'is-active' : ''}`}
+            aria-pressed={mode === 'natural'}
+            onClick={() => setMode('natural')}
+          >
+            Natural
+          </button>
+        </div>
+      </div>
+      <div className={`dh-markdown-table-wrap dh-markdown-table-wrap--${mode}`}>
+        <table className={`dh-markdown-table dh-markdown-table--${mode}`} {...props}>
+          {children}
+        </table>
+      </div>
+    </div>
+  );
 }
 
 function detectCalloutKind(node: React.ReactNode): CalloutKind | null {
@@ -320,13 +395,7 @@ export function MarkdownMessage({
               <pre {...props}>{children}</pre>
             </div>
           ),
-          table: ({ children, node: _node, ...props }) => (
-            <div className="dh-markdown-block dh-markdown-block--wide">
-              <div className="dh-markdown-table-wrap">
-                <table {...props}>{children}</table>
-              </div>
-            </div>
-          ),
+          table: ({ children, node: _node, ...props }) => <MarkdownTable {...props}>{children}</MarkdownTable>,
         }}
       >
         {normalizedText}
