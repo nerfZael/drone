@@ -252,6 +252,17 @@ code, pre {
   color: var(--fg);
   word-break: break-word;
 }
+.dh-markdown--transcript {
+  --dh-prose-max: 72ch;
+  width: 100%;
+}
+.dh-markdown--transcript > * {
+  max-width: min(100%, var(--dh-prose-max));
+}
+.dh-markdown--transcript > .dh-markdown-block--wide {
+  width: 100%;
+  max-width: none;
+}
 .dh-markdown--agent { color: var(--fg-secondary); }
 .dh-markdown--muted { color: var(--fg-secondary); }
 .dh-markdown--error { color: var(--red); }
@@ -488,19 +499,40 @@ code, pre {
   color: var(--fg-secondary);
 }
 
-.dh-markdown table {
-  display: block;
+.dh-markdown-block {
+  margin: .9rem 0;
+}
+.dh-markdown-block > :first-child {
+  margin-top: 0;
+}
+.dh-markdown-block > :last-child {
+  margin-bottom: 0;
+}
+.dh-markdown-block pre {
+  margin: 0;
+}
+
+.dh-markdown-table-wrap {
   overflow-x: auto;
   max-width: 100%;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, .16);
+}
+
+.dh-markdown table {
+  width: max-content;
+  min-width: 100%;
   border-collapse: separate;
   border-spacing: 0;
   font-size: 12px;
-  margin: .9rem 0;
+  margin: 0;
 }
 .dh-markdown th,
 .dh-markdown td {
   border: 1px solid var(--border-subtle);
   padding: 6px 10px;
+  vertical-align: top;
 }
 .dh-markdown thead th {
   color: var(--muted);
@@ -510,6 +542,9 @@ code, pre {
   letter-spacing: .05em;
   text-transform: uppercase;
   background: rgba(255,255,255,.02);
+}
+.dh-markdown tbody tr:nth-child(even) td {
+  background: rgba(255,255,255,.015);
 }
 
 @media (prefers-reduced-motion: reduce) {

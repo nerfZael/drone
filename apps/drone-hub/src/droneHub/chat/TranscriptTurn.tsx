@@ -419,7 +419,7 @@ export const TranscriptTurn = React.memo(
               <IconBot className="text-[var(--accent)] w-3.5 h-3.5" />
             </div>
           )}
-          <div className={`${showRoleIcons ? 'max-w-[85%]' : 'max-w-full'} min-w-[120px]`}>
+          <div className={`${showRoleIcons ? 'min-w-0 flex-1' : 'w-full'} min-w-[120px]`}>
             <div className="flex items-center justify-between mb-1.5">
               <span
                 className="text-[10px] font-semibold text-[var(--accent)] tracking-wide uppercase"
@@ -469,7 +469,7 @@ export const TranscriptTurn = React.memo(
               <CollapsibleMarkdown
                 text={displayedText}
                 fadeTo={item.ok ? 'var(--accent-subtle)' : 'var(--red-subtle)'}
-                className={showingTldr ? 'dh-markdown--muted' : item.ok ? 'dh-markdown--agent' : 'dh-markdown--error'}
+                className={`dh-markdown--transcript ${showingTldr ? 'dh-markdown--muted' : item.ok ? 'dh-markdown--agent' : 'dh-markdown--error'}`}
                 preserveLeadParagraph
                 onOpenFileReference={onOpenFileReference}
                 onOpenLink={onOpenLink}

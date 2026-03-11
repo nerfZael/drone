@@ -315,6 +315,18 @@ export function MarkdownMessage({
               </blockquote>
             );
           },
+          pre: ({ children, node: _node, ...props }) => (
+            <div className="dh-markdown-block dh-markdown-block--wide">
+              <pre {...props}>{children}</pre>
+            </div>
+          ),
+          table: ({ children, node: _node, ...props }) => (
+            <div className="dh-markdown-block dh-markdown-block--wide">
+              <div className="dh-markdown-table-wrap">
+                <table {...props}>{children}</table>
+              </div>
+            </div>
+          ),
         }}
       >
         {normalizedText}
