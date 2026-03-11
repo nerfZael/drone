@@ -263,6 +263,11 @@ code, pre {
   width: 100%;
   max-width: none;
 }
+.dh-markdown--transcript li > .dh-markdown-block--wide {
+  width: calc(100% + 1.5rem);
+  max-width: none;
+  margin-left: -1.5rem;
+}
 .dh-markdown--agent { color: var(--fg-secondary); }
 .dh-markdown--muted { color: var(--fg-secondary); }
 .dh-markdown--error { color: var(--red); }
@@ -488,15 +493,20 @@ code, pre {
   border: 1px solid var(--border-subtle);
   padding: 12px 14px;
   border-radius: 8px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: hidden;
   margin: .9rem 0;
 }
 .dh-markdown pre code {
+  display: block;
   background: transparent;
   border: 0;
   padding: 0;
   font-size: inherit;
   color: var(--fg-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .dh-markdown-block {
