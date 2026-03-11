@@ -546,6 +546,22 @@ code, pre {
   text-transform: uppercase;
 }
 
+.dh-markdown-table-expand {
+  appearance: none;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--accent);
+  font: 600 10px/1.2 var(--sans);
+  letter-spacing: .02em;
+  cursor: pointer;
+}
+
+.dh-markdown-table-expand:hover {
+  color: var(--fg);
+}
+
 .dh-markdown-table-toggle {
   display: inline-flex;
   align-items: center;
@@ -609,6 +625,74 @@ code, pre {
 .dh-markdown-table--natural {
   width: max-content;
   min-width: 100%;
+}
+
+.dh-markdown-table-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  background: rgba(3, 6, 12, .72);
+  backdrop-filter: blur(6px);
+}
+
+.dh-markdown-table-dialog-panel {
+  width: min(1400px, calc(100vw - 4rem));
+  max-height: calc(100vh - 4rem);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: .9rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(16, 18, 22, .98);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, .45);
+}
+
+.dh-markdown-table-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.dh-markdown-table-dialog-title {
+  color: var(--fg);
+  font-family: var(--display);
+  font-size: 12px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.dh-markdown-table-dialog-subtitle {
+  margin-top: .18rem;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.dh-markdown-table-dialog-close {
+  appearance: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .03);
+  color: var(--fg-secondary);
+  padding: .32rem .7rem;
+  font: 600 11px/1 var(--sans);
+  cursor: pointer;
+}
+
+.dh-markdown-table-dialog-close:hover {
+  border-color: var(--accent-muted);
+  color: var(--fg);
+}
+
+.dh-markdown-table-dialog .dh-markdown-table-wrap {
+  flex: 1;
+  overflow: auto;
 }
 
 .dh-markdown table {

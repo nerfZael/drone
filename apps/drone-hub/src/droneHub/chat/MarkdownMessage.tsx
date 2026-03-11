@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
@@ -49,16 +50,39 @@ function MarkdownTable({
   children,
   mode,
   onModeChange,
+  expanded,
+  onOpenExpanded,
+  onCloseExpanded,
   ...props
 }: React.ComponentProps<'table'> & {
   mode: TableMode;
   onModeChange: (mode: TableMode) => void;
+  expanded: boolean;
+  onOpenExpanded: () => void;
+  onCloseExpanded: () => void;
 }) {
+  React.useEffect(() => {
+    if (!expanded) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onCloseExpanded();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [expanded, onCloseExpanded]);
 
   return (
     <div className="dh-markdown-block dh-markdown-block--wide">
       <div className="dh-markdown-table-toolbar">
         <span className="dh-markdown-table-label">Table</span>
+        <button
+          type="button"
+          className="dh-markdown-table-expand"
+          title="Open this table in a larger scroll view"
+          aria-label="Open table in expanded scroll view"
+          onClick={onOpenExpanded}
+        >
+          Expand
+        </button>
         <div className="dh-markdown-table-toggle" role="group" aria-label="Table display mode">
           <button
             type="button"
@@ -87,6 +111,34 @@ function MarkdownTable({
           {children}
         </table>
       </div>
+      {expanded && typeof document !== 'undefined'
+        ? createPortal(
+            <div className="dh-markdown-table-dialog" role="dialog" aria-modal="true" aria-label="Expanded table view" onClick={onCloseExpanded}>
+              <div className="dh-markdown-table-dialog-panel" onClick={(event) => event.stopPropagation()}>
+                <div className="dh-markdown-table-dialog-header">
+                  <div>
+                    <div className="dh-markdown-table-dialog-title">Expanded Table</div>
+                    <div className="dh-markdown-table-dialog-subtitle">Scroll mode with a wider viewport</div>
+                  </div>
+                  <button
+                    type="button"
+                    className="dh-markdown-table-dialog-close"
+                    onClick={onCloseExpanded}
+                    aria-label="Close expanded table view"
+                  >
+                    Close
+                  </button>
+                </div>
+                <div className="dh-markdown-table-wrap dh-markdown-table-wrap--natural">
+                  <table className="dh-markdown-table dh-markdown-table--natural" {...props}>
+                    {children}
+                  </table>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
@@ -270,9 +322,11 @@ export function MarkdownMessage({
   );
   const normalizedText = React.useMemo(() => normalizeLooseNestedBullets(text), [text]);
   const [tableModes, setTableModes] = React.useState<Record<string, TableMode>>({});
+  const [expandedTableId, setExpandedTableId] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     setTableModes({});
+    setExpandedTableId(null);
   }, [normalizedText]);
 
   return (
@@ -388,9 +442,12 @@ export function MarkdownMessage({
               <MarkdownTable
                 {...props}
                 mode={mode}
+                expanded={expandedTableId === tableId}
                 onModeChange={(nextMode) =>
                   setTableModes((prev) => (prev[tableId] === nextMode ? prev : { ...prev, [tableId]: nextMode }))
                 }
+                onOpenExpanded={() => setExpandedTableId(tableId)}
+                onCloseExpanded={() => setExpandedTableId((prev) => (prev === tableId ? null : prev))}
               >
                 {children}
               </MarkdownTable>

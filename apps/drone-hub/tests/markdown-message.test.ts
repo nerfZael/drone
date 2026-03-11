@@ -20,6 +20,7 @@ describe('MarkdownMessage', () => {
     expect(html).toContain('<table class="dh-markdown-table dh-markdown-table--fit">');
     expect(html).toContain('>Wrap<');
     expect(html).toContain('>Scroll<');
+    expect(html).toContain('>Expand<');
     expect(html).toContain('<thead>');
   });
 
