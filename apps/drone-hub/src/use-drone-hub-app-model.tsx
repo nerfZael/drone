@@ -894,7 +894,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [clearDronesUnread, selectDroneChatBase],
   );
-  const { createDrone, createDroneFromDraft, startDraftPrompt, startDraftAutomation } =
+  const { createDrone, createDroneFromDraft, queueDraftPromptDuringCreate, startDraftPrompt, startDraftAutomation } =
     useDroneCreationActions({
       drones,
       createNameRows,
@@ -2184,6 +2184,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setDraftAutoRenaming,
     startDraftPrompt,
     startDraftAutomation,
+    queueDraftPromptDuringCreate,
     createDroneFromDraft,
     enqueueQueuedPrompt,
     setDraftCreateError,

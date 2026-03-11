@@ -1,7 +1,9 @@
 import React from 'react';
 import type { ChatAgentConfig } from '../../domain';
 import type { ChatSendPayload } from '../chat';
+import type { DraftChatState } from './app-types';
 import { attachmentRefsFromPayload, normalizeChatImageAttachmentPayloads } from './chat-attachment-payloads';
+import { createDraftQueuedPrompt } from './draft-chat-queue';
 import { buildDraftDroneCreatePayload, runtimeSupportsCustomAgents } from './drone-create-runtime';
 import { makeId } from './helpers';
 
@@ -39,7 +41,7 @@ type UseDroneCreationActionsArgs = {
   cloneIncludeChats: boolean;
   spawnAgentKey: string;
   spawnModelForSeed: string | null;
-  draftChat: { droneId: string; droneName: string; prompt: any | null; focusKey?: string } | null;
+  draftChat: DraftChatState | null;
   draftCreateMode: 'with-chat' | 'without-chat';
   draftCreateName: string;
   draftCreateGroup: string;
@@ -175,6 +177,21 @@ export function useDroneCreationActions({
   preferredSelectedDroneRef,
   preferredSelectedDroneHoldUntilRef,
 }: UseDroneCreationActionsArgs) {
+  const draftChatRef = React.useRef(draftChat);
+  React.useEffect(() => {
+    draftChatRef.current = draftChat;
+  }, [draftChat]);
+  const setDraftChatState = React.useCallback(
+    (next: DraftChatState | null | ((prev: DraftChatState | null) => DraftChatState | null)) => {
+      setDraftChat((prev: DraftChatState | null) => {
+        const resolved = typeof next === 'function' ? (next as (prev: DraftChatState | null) => DraftChatState | null)(prev) : next;
+        draftChatRef.current = resolved;
+        return resolved;
+      });
+    },
+    [setDraftChat],
+  );
+
   const createDrone = React.useCallback(async () => {
     const rowSpecs = createNameRows.map((nameRaw, idx) => ({
       nameRaw: String(nameRaw ?? ''),
@@ -370,12 +387,14 @@ export function useDroneCreationActions({
       autoRenamePrompt?: string;
       automationStart?: DraftAutomationStartInput;
     }): Promise<boolean> => {
-      const pending = draftChat?.prompt ?? null;
+      const latestDraftChat = draftChatRef.current;
+      const pending = latestDraftChat?.prompt ?? null;
       const effectiveCreateMode = opts?.createMode ?? draftCreateMode;
       const createWithoutChat = effectiveCreateMode === 'without-chat';
       const prompt = String(opts?.prompt ?? pending?.prompt ?? '').trim();
       const draftAttachments = normalizeChatImageAttachmentPayloads(pending?.attachmentPayloads ?? []);
       const hasDraftAttachments = draftAttachments.length > 0;
+      const shouldSeedPromptViaCreate = !createWithoutChat && !hasDraftAttachments && prompt.length > 0;
       const automationStartRaw = opts?.automationStart ?? null;
       const automationId = String(automationStartRaw?.automationId ?? '').trim();
       const automationLabel = String(automationStartRaw?.automationLabel ?? '').trim() || automationId || 'Automation';
@@ -436,7 +455,7 @@ export function useDroneCreationActions({
           pullHostBranchBeforeCreate,
           seedAgent,
           seedModel,
-          prompt: createWithoutChat || hasDraftAttachments ? '' : prompt,
+          prompt: shouldSeedPromptViaCreate ? prompt : '',
         });
         const data = await requestJson<{ ok: true; id: string; name: string; phase: 'starting' }>(
           `/api/drones`,
@@ -451,7 +470,7 @@ export function useDroneCreationActions({
         if (!droneId) throw new Error('create drone did not return an id');
         createdDrone = true;
 
-        if (seedAgent || seedModel || (prompt && !hasDraftAttachments)) {
+        if (shouldSeedPromptViaCreate) {
           rememberStartupSeed([{ id: droneId, name: createdName }], {
             agent: seedAgent,
             model: seedModel,
@@ -461,9 +480,6 @@ export function useDroneCreationActions({
             repoPath,
           });
         }
-        if (hasDraftAttachments) {
-          enqueueQueuedPrompt(droneId, 'default', prompt, draftAttachments);
-        }
         preferredSelectedDroneRef.current = droneId;
         preferredSelectedDroneHoldUntilRef.current = Date.now() + startupSeedMissingGraceMs;
         setSelectedDrone(droneId);
@@ -471,12 +487,13 @@ export function useDroneCreationActions({
         selectionAnchorRef.current = droneId;
         setSelectedChat('default');
 
-        setDraftChat((prev: any) => {
+        setDraftChatState((prev) => {
           if (!prev?.prompt) return prev;
           return {
             ...(prev ?? { focusKey: undefined }),
             droneId,
             droneName: createdName,
+            queuedPrompts: Array.isArray(prev.queuedPrompts) ? prev.queuedPrompts : [],
             prompt: {
               ...prev.prompt,
               state: 'sent',
@@ -521,6 +538,23 @@ export function useDroneCreationActions({
           }
         }
 
+        if (hasDraftAttachments) {
+          enqueueQueuedPrompt(droneId, 'default', prompt, draftAttachments);
+        }
+        const queuedPromptsToHandoff = Array.isArray(draftChatRef.current?.queuedPrompts) ? draftChatRef.current.queuedPrompts : [];
+        for (const queuedPrompt of queuedPromptsToHandoff) {
+          enqueueQueuedPrompt(droneId, 'default', queuedPrompt.prompt, queuedPrompt.attachmentPayloads);
+        }
+        if (queuedPromptsToHandoff.length > 0) {
+          setDraftChatState((prev) => {
+            if (!prev?.prompt) return prev;
+            return {
+              ...prev,
+              queuedPrompts: [],
+            };
+          });
+        }
+
         if (opts?.autoRename && !createWithoutChat) {
           const renameSourcePrompt = String(opts.autoRenamePrompt ?? prompt ?? '').trim();
           if (renameSourcePrompt) {
@@ -535,7 +569,7 @@ export function useDroneCreationActions({
         setDraftCreateError(postCreateError);
         setDraftNameSuggestionError(null);
         setDraftNameSuggesting(false);
-        if (createWithoutChat) setDraftChat(null);
+        if (createWithoutChat) setDraftChatState(null);
         return true;
       } catch (e: any) {
         const err = e?.message ?? String(e);
@@ -543,7 +577,7 @@ export function useDroneCreationActions({
           setDraftCreateError(`Drone created, but setup was incomplete: ${err}`);
           return true;
         }
-        setDraftChat((prev: any) => {
+        setDraftChatState((prev) => {
           if (!prev?.prompt) return prev;
           return {
             ...(prev ?? { droneId: '', droneName: '' }),
@@ -564,7 +598,6 @@ export function useDroneCreationActions({
     [
       draftCreateRepoPath,
       draftCreateMode,
-      draftChat?.prompt,
       draftCreateGroup,
       draftCreateName,
       createRuntime,
@@ -593,7 +626,25 @@ export function useDroneCreationActions({
       spawnModelForSeed,
       startupSeedMissingGraceMs,
       suggestAndRenameDraftDrone,
+      setDraftChatState,
     ],
+  );
+
+  const queueDraftPromptDuringCreate = React.useCallback(
+    (payload: ChatSendPayload): boolean => {
+      const nextPrompt = createDraftQueuedPrompt(payload);
+      if (!nextPrompt) return false;
+      setDraftChatState((prev) => {
+        if (!prev?.prompt) return prev;
+        const queuedPrompts = Array.isArray(prev.queuedPrompts) ? prev.queuedPrompts : [];
+        return {
+          ...prev,
+          queuedPrompts: [...queuedPrompts, nextPrompt],
+        };
+      });
+      return true;
+    },
+    [setDraftChatState],
   );
 
   const startDraftPrompt = React.useCallback(
@@ -601,10 +652,11 @@ export function useDroneCreationActions({
       const attachments = normalizeChatImageAttachmentPayloads(payload?.attachments);
       const prompt = String(payload?.prompt ?? '').trim();
       if (!prompt && attachments.length === 0) return false;
-      setDraftChat({
+      const nextDraftChat: DraftChatState = {
         droneId: '',
         droneName: '',
         focusKey: draftChat?.focusKey,
+        queuedPrompts: [],
         prompt: {
           id: `draft-${makeId()}`,
           at: new Date().toISOString(),
@@ -612,7 +664,8 @@ export function useDroneCreationActions({
           ...(attachments.length > 0 ? { attachments: attachmentRefsFromPayload(attachments), attachmentPayloads: attachments } : {}),
           state: 'sending',
         },
-      });
+      };
+      setDraftChatState(nextDraftChat);
       setDraftCreateError(null);
       setDraftCreateName('');
       setDraftSuggestedName('');
@@ -627,7 +680,7 @@ export function useDroneCreationActions({
       createDroneFromDraft,
       draftCreateName,
       setDraftAutoRenaming,
-      setDraftChat,
+      setDraftChatState,
       setDraftCreateError,
       setDraftCreateName,
       setDraftCreateOpen,
@@ -658,10 +711,11 @@ export function useDroneCreationActions({
         return false;
       }
 
-      setDraftChat({
+      const nextDraftChat: DraftChatState = {
         droneId: '',
         droneName: '',
         focusKey: draftChat?.focusKey,
+        queuedPrompts: [],
         prompt: {
           id: `draft-automation-${makeId()}`,
           at: new Date().toISOString(),
@@ -676,7 +730,8 @@ export function useDroneCreationActions({
           },
           state: 'sending',
         },
-      });
+      };
+      setDraftChatState(nextDraftChat);
       setDraftCreateError(null);
       setDraftCreateName('');
       setDraftSuggestedName('');
@@ -706,7 +761,7 @@ export function useDroneCreationActions({
       draftCreateName,
       draftChat?.focusKey,
       setDraftAutoRenaming,
-      setDraftChat,
+      setDraftChatState,
       setDraftCreateError,
       setDraftCreateName,
       setDraftCreateOpen,
@@ -719,6 +774,7 @@ export function useDroneCreationActions({
   return {
     createDrone,
     createDroneFromDraft,
+    queueDraftPromptDuringCreate,
     startDraftPrompt,
     startDraftAutomation,
   };

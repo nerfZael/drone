@@ -1,4 +1,5 @@
 import type { ChatAgentConfig } from '../../domain';
+import type { ChatImageAttachmentPayload } from '../chat';
 import type { PendingPrompt } from '../types';
 import type { RepoPullConflict } from './helpers';
 
@@ -33,6 +34,11 @@ export type DraftChatState = {
   droneId: string;
   droneName: string;
   prompt: PendingPrompt | null;
+  queuedPrompts: Array<
+    PendingPrompt & {
+      attachmentPayloads?: ChatImageAttachmentPayload[];
+    }
+  >;
   // Changes each time the draft composer is opened so input autofocus can re-trigger.
   focusKey?: string;
 };
