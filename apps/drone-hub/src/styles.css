@@ -591,12 +591,16 @@ code, pre {
   table-layout: fixed;
 }
 
-.dh-markdown-table-wrap--fit {
-  overflow-x: hidden;
-}
-
 .dh-markdown-table--fit th,
 .dh-markdown-table--fit td {
+  max-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.dh-markdown-table--fit th *,
+.dh-markdown-table--fit td * {
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-word;
