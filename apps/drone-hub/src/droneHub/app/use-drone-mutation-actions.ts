@@ -56,6 +56,7 @@ export function useDroneMutationActions({
       opts?: {
         showAlert?: boolean;
         migrateVolumeName?: boolean;
+        allowPending?: boolean;
         source?: string;
         attempt?: number;
         suggestedBase?: string;
@@ -69,7 +70,8 @@ export function useDroneMutationActions({
       if (!droneId || !newName || newName === currentName) {
         return { ok: false, error: 'no-op rename' };
       }
-      if (!current || isDroneStartingOrSeeding(current.hubPhase)) {
+      const allowPending = opts?.allowPending === true;
+      if ((!current || isDroneStartingOrSeeding(current.hubPhase)) && !allowPending) {
         if (opts?.showAlert) {
           window.alert(`Drone "${currentName}" is still starting.`);
         }
@@ -322,12 +324,13 @@ export function useDroneMutationActions({
             return;
           }
           const renamed = await renameDroneTo(droneId, candidate, {
+            allowPending: true,
             source: 'draft-auto-rename',
             attempt,
             suggestedBase: base,
           });
           if (renamed.ok) return;
-          const errorMessage = String(renamed.error ?? '').trim();
+          const errorMessage = String(('error' in renamed ? renamed.error : '') ?? '').trim();
           lastError = errorMessage || 'rename failed';
           const msg = errorMessage.toLowerCase();
           const nameConflict =

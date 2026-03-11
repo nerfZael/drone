@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { startDroneHubApiServer } from '../src/hub/server';
 import { resetDroneRootDirForTests } from '../src/host/paths';
-import { updateRegistry } from '../src/host/registry';
+import { loadRegistry, updateRegistry } from '../src/host/registry';
 import { getSocketListenSupport } from './socket-listen-support';
 
 const listenSupport = getSocketListenSupport();
@@ -219,5 +219,45 @@ describeSocketSuite('chat management api', () => {
     expect(output.data?.ok).toBe(true);
     expect(String(output.data?.text ?? '')).toBe('');
     expect(Number(output.data?.offsetBytes ?? 0)).toBe(0);
+  });
+
+  test('renames pending drones before startup completes', async () => {
+    const droneId = 'pending-rename';
+    const now = new Date().toISOString();
+    await updateRegistry((reg: any) => {
+      reg.pending = reg.pending ?? {};
+      reg.pending[droneId] = {
+        id: droneId,
+        name: 'Untitled 1',
+        runtime: 'host',
+        repoPath: '',
+        containerPort: 7777,
+        build: false,
+        createdAt: now,
+        updatedAt: now,
+        phase: 'starting',
+        message: 'Starting...',
+      };
+    });
+
+    const renamed = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/rename`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ newName: 'auth-bugfix', source: 'draft-auto-rename' }),
+    });
+    expect(renamed.r.status).toBe(200);
+    expect(renamed.data?.ok).toBe(true);
+    expect(renamed.data?.newName).toBe('auth-bugfix');
+
+    const regAny: any = await loadRegistry();
+    expect(String(regAny?.pending?.[droneId]?.name ?? '')).toBe('auth-bugfix');
+
+    const oldRef = await apiFetch(`/api/drones/${encodeURIComponent('Untitled 1')}/chats/default/pending`);
+    expect(oldRef.r.status).toBe(404);
+
+    const newRef = await apiFetch(`/api/drones/${encodeURIComponent('auth-bugfix')}/chats/default/pending`);
+    expect(newRef.r.status).toBe(200);
+    expect(newRef.data?.ok).toBe(true);
+    expect(newRef.data?.pending).toEqual([]);
   });
 });

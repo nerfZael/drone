@@ -10748,10 +10748,15 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
       // POST /api/drones/:id/rename
       if (method === 'POST' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'drones' && parts[3] === 'rename') {
         const droneRef = decodeURIComponent(parts[2]);
-        const resolved = await resolveDroneOrRespond(res, droneRef);
-        if (!resolved) return;
-        const droneId = resolved.id;
-        const oldName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+        const regSnapshot: any = await loadRegistry();
+        const found = findDroneIdByRef(regSnapshot, droneRef);
+        if (!found) {
+          json(res, 404, { ok: false, error: `unknown drone: ${droneRef}` });
+          return;
+        }
+        const droneId = found.id;
+        const currentEntry = (found.kind === 'real' ? regSnapshot?.drones?.[droneId] : regSnapshot?.pending?.[droneId]) ?? null;
+        const oldName = String(currentEntry?.name ?? droneRef).trim() || droneRef;
 
         let body: any = null;
         try {
@@ -10832,10 +10837,18 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             if (String((v as any)?.name ?? '').trim() === newName) return { ok: false, status: 409, error: `pending drone already exists: ${newName}` };
           }
           const d = regAny?.drones?.[droneId];
-          if (!d) return { ok: false, status: 404, error: `unknown drone: ${droneId}` };
-          d.name = newName;
-          regAny.drones = regAny.drones ?? {};
-          regAny.drones[droneId] = d;
+          const pending = regAny?.pending?.[droneId];
+          if (!d && !pending) return { ok: false, status: 404, error: `unknown drone: ${droneId}` };
+          const target = d ?? pending;
+          if (!target) return { ok: false, status: 404, error: `unknown drone: ${droneId}` };
+          target.name = newName;
+          if (d) {
+            regAny.drones = regAny.drones ?? {};
+            regAny.drones[droneId] = d;
+          } else {
+            regAny.pending = regAny.pending ?? {};
+            regAny.pending[droneId] = target;
+          }
           return { ok: true, id: droneId, oldName, newName, renamed: true };
         });
         if (!(renamed as any).ok) {
