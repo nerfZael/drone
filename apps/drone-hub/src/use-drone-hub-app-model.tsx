@@ -16,6 +16,7 @@ import {
   rightPanelTabsForRuntime,
   STARTUP_SEED_MISSING_GRACE_MS,
   createCanvasChatNodeId,
+  parseCanvasChatNodeId,
   type RightPanelTab,
 } from './droneHub/app/app-config';
 import type { DroneSidebarProps } from './droneHub/app/DroneSidebar';
@@ -51,6 +52,7 @@ import { useDroneHubToolbarMenuState } from './droneHub/app/use-drone-hub-toolba
 import { useTranscriptTldrState } from './droneHub/app/use-transcript-tldr-state';
 import { useWorkspaceNavigationActions } from './droneHub/app/use-workspace-navigation-actions';
 import { useWorkspaceActions } from './droneHub/app/use-workspace-actions';
+import { busyChatNodeIdsForDrone, droneChatNodeIds, normalizedDroneChats } from './droneHub/app/chat-node-helpers';
 import {
   useDroneHubSidebarProps,
   useDroneHubOverlaysProps,
@@ -93,7 +95,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const {
     optimisticallyDeletedDrones,
     startupSeedByDrone,
-    unreadAgentMessageByDroneId,
+    unreadAgentMessageByChatNodeId,
     transcripts,
     transcriptError,
     loadingTranscript,
@@ -104,7 +106,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     pinnedToBottom,
     setOptimisticallyDeletedDrones,
     setStartupSeedByDrone,
-    setUnreadAgentMessageByDroneId,
+    setUnreadAgentMessageByChatNodeId,
     setTranscripts,
     setTranscriptError,
     setLoadingTranscript,
@@ -299,82 +301,80 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     }
     return out;
   }, [drones]);
-  const validDroneIdSet = React.useMemo(() => {
+  const validChatNodeIdSet = React.useMemo(() => {
     const out = new Set<string>();
     for (const drone of drones) {
-      const id = String(drone?.id ?? '').trim();
-      if (!id) continue;
-      out.add(id);
+      for (const nodeId of droneChatNodeIds(drone)) out.add(nodeId);
     }
     return out;
   }, [drones]);
-  const markDronesUnread = React.useMemo(
-    () => (droneIdsRaw: string[]): number => {
-      const targetIds: string[] = [];
-      for (const raw of Array.isArray(droneIdsRaw) ? droneIdsRaw : []) {
-        const id = String(raw ?? '').trim();
-        if (!id || targetIds.includes(id) || !validDroneIdSet.has(id)) continue;
-        targetIds.push(id);
+  const markChatsUnread = React.useMemo(
+    () => (chatNodeIdsRaw: string[]): number => {
+      const targetNodeIds: string[] = [];
+      for (const raw of Array.isArray(chatNodeIdsRaw) ? chatNodeIdsRaw : []) {
+        const nodeId = String(raw ?? '').trim();
+        if (!nodeId || targetNodeIds.includes(nodeId) || !validChatNodeIdSet.has(nodeId)) continue;
+        targetNodeIds.push(nodeId);
       }
-      if (targetIds.length === 0) return 0;
-      setUnreadAgentMessageByDroneId((prev) => {
+      if (targetNodeIds.length === 0) return 0;
+      setUnreadAgentMessageByChatNodeId((prev) => {
         let changed = false;
         const next = { ...prev };
-        for (const id of targetIds) {
-          if (next[id]) continue;
-          next[id] = true;
+        for (const nodeId of targetNodeIds) {
+          if (next[nodeId]) continue;
+          next[nodeId] = true;
           changed = true;
         }
         return changed ? next : prev;
       });
-      return targetIds.length;
+      return targetNodeIds.length;
     },
-    [setUnreadAgentMessageByDroneId, validDroneIdSet],
+    [setUnreadAgentMessageByChatNodeId, validChatNodeIdSet],
   );
-  const clearDronesUnread = React.useCallback(
-    (droneIdsRaw: string[]): number => {
-      const targetIds: string[] = [];
-      for (const raw of Array.isArray(droneIdsRaw) ? droneIdsRaw : []) {
-        const id = String(raw ?? '').trim();
-        if (!id || targetIds.includes(id)) continue;
-        targetIds.push(id);
+  const clearChatsUnread = React.useCallback(
+    (chatNodeIdsRaw: string[]): number => {
+      const targetNodeIds: string[] = [];
+      for (const raw of Array.isArray(chatNodeIdsRaw) ? chatNodeIdsRaw : []) {
+        const nodeId = String(raw ?? '').trim();
+        if (!nodeId || targetNodeIds.includes(nodeId)) continue;
+        targetNodeIds.push(nodeId);
       }
-      if (targetIds.length === 0) return 0;
-      setUnreadAgentMessageByDroneId((prev) => {
+      if (targetNodeIds.length === 0) return 0;
+      setUnreadAgentMessageByChatNodeId((prev) => {
         let changed = false;
         const next = { ...prev };
-        for (const id of targetIds) {
-          if (!next[id]) continue;
-          delete next[id];
+        for (const nodeId of targetNodeIds) {
+          if (!next[nodeId]) continue;
+          delete next[nodeId];
           changed = true;
         }
         return changed ? next : prev;
       });
-      return targetIds.length;
+      return targetNodeIds.length;
     },
-    [setUnreadAgentMessageByDroneId],
+    [setUnreadAgentMessageByChatNodeId],
   );
   React.useEffect(() => {
     if (dronesLoading || dronesError) return;
-    setUnreadAgentMessageByDroneId((prev) => {
+    setUnreadAgentMessageByChatNodeId((prev) => {
       const prevEntries = Object.entries(prev);
       if (prevEntries.length === 0) return prev;
       const next: Record<string, boolean> = {};
       let changed = false;
-      for (const [id, unread] of prevEntries) {
+      for (const [nodeId, unread] of prevEntries) {
         if (!unread) {
           changed = true;
           continue;
         }
-        if (!validDroneIdSet.has(id)) {
+        if (!validChatNodeIdSet.has(nodeId)) {
           changed = true;
           continue;
         }
-        next[id] = true;
+        next[nodeId] = true;
       }
       return changed ? next : prev;
     });
-  }, [dronesError, dronesLoading, setUnreadAgentMessageByDroneId, validDroneIdSet]);
+  }, [dronesError, dronesLoading, setUnreadAgentMessageByChatNodeId, validChatNodeIdSet]);
   const sidebarSelectableDroneIdSet = React.useMemo(
     () => new Set(sidebarDronesFilteredByRepo.map((drone) => drone.id)),
     [sidebarDronesFilteredByRepo],
@@ -404,7 +404,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const preferredSelectedDroneHoldUntilRef = React.useRef<number>(0);
   const lastSyncedCanvasRepoContextRef = React.useRef<string>('');
   const lastSyncedCanvasAgentModelContextRef = React.useRef<string>('');
-  const previousBusyByDroneIdRef = React.useRef<Record<string, boolean>>({});
+  const previousBusyChatNodeIdSetRef = React.useRef<Set<string>>(new Set());
   const droneIdentityByNameRef = React.useRef<Record<string, string>>({});
   const llmSettingsState = useLlmSettings(requestJson);
   const deleteActionSettingsState = useDeleteActionSettings(requestJson);
@@ -880,19 +880,15 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   });
   const selectDroneCard = React.useCallback(
     (droneIdRaw: string, opts?: { toggle?: boolean; range?: boolean }) => {
-      const droneId = String(droneIdRaw ?? '').trim();
-      if (droneId) clearDronesUnread([droneId]);
       selectDroneCardBase(droneIdRaw, opts);
     },
-    [clearDronesUnread, selectDroneCardBase],
+    [selectDroneCardBase],
   );
   const selectDroneChat = React.useCallback(
     (droneIdRaw: string, chatNameRaw: string) => {
-      const droneId = String(droneIdRaw ?? '').trim();
-      if (droneId) clearDronesUnread([droneId]);
       selectDroneChatBase(droneIdRaw, chatNameRaw);
     },
-    [clearDronesUnread, selectDroneChatBase],
+    [selectDroneChatBase],
   );
   const { createDrone, createDroneFromDraft, queueDraftPromptDuringCreate, startDraftPrompt, startDraftAutomation } =
     useDroneCreationActions({
@@ -955,29 +951,29 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const currentDrone = selectedDrone ? drones.find((d) => d.id === selectedDrone) ?? null : null;
   const currentDroneLabel = currentDrone ? uiDroneName(currentDrone.name) : '';
   React.useEffect(() => {
-    const selectedDroneId = String(selectedDrone ?? '').trim();
-    if (!selectedDroneId) return;
-    clearDronesUnread([selectedDroneId]);
-  }, [clearDronesUnread, selectedDrone]);
+    const selectedNodeId = createCanvasChatNodeId(String(selectedDrone ?? '').trim(), String(selectedChat ?? '').trim() || 'default');
+    if (!selectedNodeId) return;
+    clearChatsUnread([selectedNodeId]);
+  }, [clearChatsUnread, selectedChat, selectedDrone]);
   React.useEffect(() => {
-    const previousBusyByDroneId = previousBusyByDroneIdRef.current;
-    const nextBusyByDroneId: Record<string, boolean> = {};
-    const markUnreadDroneIds: string[] = [];
-    const selectedDroneId = String(selectedDrone ?? '').trim();
+    const previousBusyChatNodeIdSet = previousBusyChatNodeIdSetRef.current;
+    const nextBusyChatNodeIdSet = new Set<string>();
+    const markUnreadChatNodeIds: string[] = [];
+    const selectedNodeId = createCanvasChatNodeId(String(selectedDrone ?? '').trim(), String(selectedChat ?? '').trim() || 'default');
     for (const drone of drones) {
-      const id = String(drone?.id ?? '').trim();
-      if (!id) continue;
-      const busyNow = !isDroneStartingOrSeeding(drone.hubPhase) && Boolean(drone.busy);
-      nextBusyByDroneId[id] = busyNow;
-      if (previousBusyByDroneId[id] && !busyNow && id !== selectedDroneId) {
-        markUnreadDroneIds.push(id);
-      }
+      if (isDroneStartingOrSeeding(drone.hubPhase)) continue;
+      for (const nodeId of busyChatNodeIdsForDrone(drone)) nextBusyChatNodeIdSet.add(nodeId);
     }
-    previousBusyByDroneIdRef.current = nextBusyByDroneId;
-    if (markUnreadDroneIds.length > 0) {
-      markDronesUnread(markUnreadDroneIds);
+    for (const nodeId of previousBusyChatNodeIdSet) {
+      if (nextBusyChatNodeIdSet.has(nodeId) || nodeId === selectedNodeId) continue;
+      if (!parseCanvasChatNodeId(nodeId)) continue;
+      markUnreadChatNodeIds.push(nodeId);
     }
-  }, [drones, markDronesUnread, selectedDrone]);
+    previousBusyChatNodeIdSetRef.current = nextBusyChatNodeIdSet;
+    if (markUnreadChatNodeIds.length > 0) {
+      markChatsUnread(markUnreadChatNodeIds);
+    }
+  }, [drones, markChatsUnread, selectedChat, selectedDrone]);
 
   const selectedDroneIdentity = React.useMemo(() => {
     if (!selectedDrone) return '';
@@ -1106,26 +1102,34 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     return true;
   }, [deleteDrone, selectedDrone]);
   const markSelectedDronesUnreadShortcut = React.useCallback((): boolean => {
-    const targetDroneIds: string[] = [];
+    const targetChatNodeIds: string[] = [];
     const activeElement = document.activeElement;
     const canvasFocused =
       activeElement instanceof HTMLElement &&
       Boolean(activeElement.closest('[data-drone-canvas-viewport="1"]'));
     if (canvasFocused) {
-      const canvasSelectedDroneIds = useDroneCanvasStore
+      const canvasSelectedNodeIds = useDroneCanvasStore
         .getState()
         .selectedDroneIds.filter((id) => !isCanvasDraftNodeId(id));
-      targetDroneIds.push(...canvasSelectedDroneIds);
+      for (const nodeId of canvasSelectedNodeIds) {
+        if (!parseCanvasChatNodeId(nodeId)) continue;
+        targetChatNodeIds.push(nodeId);
+      }
     }
-    if (targetDroneIds.length === 0 && selectedDroneIds.length > 0) {
-      targetDroneIds.push(...selectedDroneIds);
+    if (targetChatNodeIds.length === 0 && selectedDroneIds.length > 0) {
+      for (const droneId of selectedDroneIds) {
+        const nodeId = createCanvasChatNodeId(droneId, droneId === selectedDrone ? selectedChat : 'default');
+        if (!nodeId) continue;
+        targetChatNodeIds.push(nodeId);
+      }
     }
-    if (targetDroneIds.length === 0) {
+    if (targetChatNodeIds.length === 0) {
       const droneId = String(selectedDrone ?? '').trim();
-      if (droneId) targetDroneIds.push(droneId);
+      const nodeId = createCanvasChatNodeId(droneId, String(selectedChat ?? '').trim() || 'default');
+      if (nodeId) targetChatNodeIds.push(nodeId);
     }
-    return markDronesUnread(targetDroneIds) > 0;
-  }, [markDronesUnread, selectedDrone, selectedDroneIds]);
+    return markChatsUnread(targetChatNodeIds) > 0;
+  }, [markChatsUnread, selectedChat, selectedDrone, selectedDroneIds]);
   useDroneHubLifecycleEffects({
     normalizeCreateRepoPath,
     setCreateRepoPath,
@@ -1343,14 +1347,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const busyChatNodeIdSet = React.useMemo(() => {
     const out = new Set<string>();
     for (const drone of drones) {
-      const droneId = String(drone?.id ?? '').trim();
-      if (!droneId) continue;
-      const rawBusyChats = Array.isArray(drone?.busyChats) ? drone.busyChats : [];
-      for (const rawChatName of rawBusyChats) {
-        const chatName = String(rawChatName ?? '').trim() || 'default';
-        const nodeId = createCanvasChatNodeId(droneId, chatName);
-        if (nodeId) out.add(nodeId);
-      }
+      for (const nodeId of busyChatNodeIdsForDrone(drone)) out.add(nodeId);
     }
     const selectedNodeId = createCanvasChatNodeId(String(selectedDrone ?? '').trim(), String(selectedChat ?? '').trim() || 'default');
     if (selectedNodeId && selectedIsResponding) out.add(selectedNodeId);
@@ -1371,9 +1368,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     for (const drone of drones) {
       const droneId = String(drone?.id ?? '').trim();
       if (!droneId) continue;
-      const chats = Array.isArray(drone?.chats) && drone.chats.length > 0 ? drone.chats : ['default'];
-      for (const rawChatName of chats) {
-        const chatName = String(rawChatName ?? '').trim() || 'default';
+      for (const chatName of normalizedDroneChats(drone, { includeDefaultWhenEmpty: true })) {
         const nodeId = createCanvasChatNodeId(droneId, chatName);
         if (!nodeId) continue;
         out[nodeId] = {
@@ -1382,12 +1377,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           hubPhase: drone.hubPhase,
           hubMessage: drone.hubMessage,
           busy: busyChatNodeIdSet.has(nodeId),
-          unreadAgentMessage: unreadAgentMessageByDroneId[droneId] === true && chatName === 'default',
+          unreadAgentMessage: unreadAgentMessageByChatNodeId[nodeId] === true,
         };
       }
     }
     return out;
-  }, [busyChatNodeIdSet, drones, unreadAgentMessageByDroneId]);
+  }, [busyChatNodeIdSet, drones, unreadAgentMessageByChatNodeId]);
   const showRespondingAsStatusInHeader =
     Boolean(currentDroneBusy) && Boolean(currentDrone?.statusOk) && currentDrone?.hubPhase !== 'error';
   const currentCustomAgentMissing = currentAgent.kind === 'custom' && !customAgents.some((a) => a.id === currentAgent.id);
@@ -2001,7 +1996,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     sidebarOptimisticDroneIdSet,
     selectedDroneSet,
     busyChatNodeIdSet,
-    unreadAgentMessageByDroneId,
+    unreadAgentMessageByChatNodeId,
     deletingDrones,
     renamingDrones,
     settingBaseImages,

@@ -2,16 +2,17 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { useShallow } from 'zustand/react/shallow';
 import type { PendingPrompt, TranscriptItem } from '../types';
+import { createCanvasChatNodeId } from './app-config';
 import type { StartupSeedState } from './app-types';
 
 type Updater<T> = T | ((prev: T) => T);
 
-type DroneHubRuntimePersistedState = Pick<DroneHubRuntimeState, 'unreadAgentMessageByDroneId'>;
+type DroneHubRuntimePersistedState = Pick<DroneHubRuntimeState, 'unreadAgentMessageByChatNodeId'>;
 
 type DroneHubRuntimeState = {
   optimisticallyDeletedDrones: Record<string, boolean>;
   startupSeedByDrone: Record<string, StartupSeedState>;
-  unreadAgentMessageByDroneId: Record<string, boolean>;
+  unreadAgentMessageByChatNodeId: Record<string, boolean>;
   transcripts: TranscriptItem[] | null;
   transcriptError: string | null;
   loadingTranscript: boolean;
@@ -22,7 +23,7 @@ type DroneHubRuntimeState = {
   pinnedToBottom: boolean;
   setOptimisticallyDeletedDrones: (next: Updater<Record<string, boolean>>) => void;
   setStartupSeedByDrone: (next: Updater<Record<string, StartupSeedState>>) => void;
-  setUnreadAgentMessageByDroneId: (next: Updater<Record<string, boolean>>) => void;
+  setUnreadAgentMessageByChatNodeId: (next: Updater<Record<string, boolean>>) => void;
   setTranscripts: (next: Updater<TranscriptItem[] | null>) => void;
   setTranscriptError: (next: Updater<string | null>) => void;
   setLoadingTranscript: (next: Updater<boolean>) => void;
@@ -37,13 +38,15 @@ function resolveNext<T>(prev: T, next: Updater<T>): T {
   return typeof next === 'function' ? (next as (current: T) => T)(prev) : next;
 }
 
-function normalizeUnreadAgentMessageByDroneId(value: unknown): Record<string, boolean> {
+function normalizeUnreadAgentMessageByChatNodeId(value: unknown): Record<string, boolean> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   const out: Record<string, boolean> = {};
   for (const [key, unread] of Object.entries(value as Record<string, unknown>)) {
-    const id = String(key ?? '').trim();
-    if (!id || unread !== true) continue;
-    out[id] = true;
+    const rawKey = String(key ?? '').trim();
+    if (!rawKey || unread !== true) continue;
+    const chatNodeId = rawKey.startsWith('chat:') ? rawKey : createCanvasChatNodeId(rawKey, 'default');
+    if (!chatNodeId) continue;
+    out[chatNodeId] = true;
   }
   return out;
 }
@@ -53,7 +56,7 @@ export const useDroneHubRuntimeStore = create<DroneHubRuntimeState>()(
     (set) => ({
       optimisticallyDeletedDrones: {},
       startupSeedByDrone: {},
-      unreadAgentMessageByDroneId: {},
+      unreadAgentMessageByChatNodeId: {},
       transcripts: null,
       transcriptError: null,
       loadingTranscript: false,
@@ -70,9 +73,9 @@ export const useDroneHubRuntimeStore = create<DroneHubRuntimeState>()(
         set((s) => ({
           startupSeedByDrone: resolveNext(s.startupSeedByDrone, next),
         })),
-      setUnreadAgentMessageByDroneId: (next) =>
+      setUnreadAgentMessageByChatNodeId: (next) =>
         set((s) => ({
-          unreadAgentMessageByDroneId: resolveNext(s.unreadAgentMessageByDroneId, next),
+          unreadAgentMessageByChatNodeId: resolveNext(s.unreadAgentMessageByChatNodeId, next),
         })),
       setTranscripts: (next) => set((s) => ({ transcripts: resolveNext(s.transcripts, next) })),
       setTranscriptError: (next) =>
@@ -95,15 +98,20 @@ export const useDroneHubRuntimeStore = create<DroneHubRuntimeState>()(
       version: 1,
       storage: createJSONStorage(() => localStorage),
       partialize: (state): DroneHubRuntimePersistedState => ({
-        unreadAgentMessageByDroneId: state.unreadAgentMessageByDroneId,
+        unreadAgentMessageByChatNodeId: state.unreadAgentMessageByChatNodeId,
       }),
       merge: (persistedState, currentState) => {
-        const persisted = (persistedState as Partial<DroneHubRuntimePersistedState>) ?? {};
+        const persisted =
+          (persistedState as Partial<DroneHubRuntimePersistedState> & {
+            unreadAgentMessageByDroneId?: unknown;
+          }) ?? {};
         return {
           ...currentState,
           ...persisted,
-          unreadAgentMessageByDroneId: normalizeUnreadAgentMessageByDroneId(
-            persisted.unreadAgentMessageByDroneId ?? currentState.unreadAgentMessageByDroneId,
+          unreadAgentMessageByChatNodeId: normalizeUnreadAgentMessageByChatNodeId(
+            persisted.unreadAgentMessageByChatNodeId ??
+              persisted.unreadAgentMessageByDroneId ??
+              currentState.unreadAgentMessageByChatNodeId,
           ),
         };
       },
@@ -116,7 +124,7 @@ export function useDroneHubRuntimeState() {
     useShallow((s) => ({
       optimisticallyDeletedDrones: s.optimisticallyDeletedDrones,
       startupSeedByDrone: s.startupSeedByDrone,
-      unreadAgentMessageByDroneId: s.unreadAgentMessageByDroneId,
+      unreadAgentMessageByChatNodeId: s.unreadAgentMessageByChatNodeId,
       transcripts: s.transcripts,
       transcriptError: s.transcriptError,
       loadingTranscript: s.loadingTranscript,
@@ -127,7 +135,7 @@ export function useDroneHubRuntimeState() {
       pinnedToBottom: s.pinnedToBottom,
       setOptimisticallyDeletedDrones: s.setOptimisticallyDeletedDrones,
       setStartupSeedByDrone: s.setStartupSeedByDrone,
-      setUnreadAgentMessageByDroneId: s.setUnreadAgentMessageByDroneId,
+      setUnreadAgentMessageByChatNodeId: s.setUnreadAgentMessageByChatNodeId,
       setTranscripts: s.setTranscripts,
       setTranscriptError: s.setTranscriptError,
       setLoadingTranscript: s.setLoadingTranscript,
