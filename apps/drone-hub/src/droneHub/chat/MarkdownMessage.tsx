@@ -36,40 +36,6 @@ function flattenText(node: React.ReactNode): string {
   return '';
 }
 
-function collectElementChildrenByType(node: React.ReactNode, type: string, out: React.ReactElement[] = []): React.ReactElement[] {
-  if (node == null || typeof node === 'boolean') return out;
-  if (Array.isArray(node)) {
-    for (const part of node) collectElementChildrenByType(part, type, out);
-    return out;
-  }
-  if (!React.isValidElement(node)) return out;
-  if (node.type === type) out.push(node as React.ReactElement);
-  collectElementChildrenByType((node.props as { children?: React.ReactNode }).children, type, out);
-  return out;
-}
-
-function inferTableMode(children: React.ReactNode): TableMode {
-  const rows = collectElementChildrenByType(children, 'tr');
-  const columnCount = rows.reduce((max, row) => {
-    const cells = collectElementChildrenByType((row.props as { children?: React.ReactNode }).children, 'th').length
-      || collectElementChildrenByType((row.props as { children?: React.ReactNode }).children, 'td').length;
-    return Math.max(max, cells);
-  }, 0);
-  const cellTexts = rows
-    .flatMap((row) =>
-      collectElementChildrenByType((row.props as { children?: React.ReactNode }).children, 'th')
-        .concat(collectElementChildrenByType((row.props as { children?: React.ReactNode }).children, 'td')),
-    )
-    .map((cell) => flattenText((cell.props as { children?: React.ReactNode }).children).trim())
-    .filter(Boolean);
-  const hasLongToken = cellTexts.some((text) => text.split(/\s+/).some((token) => token.length >= 24));
-  const hasStructuredToken = cellTexts.some((text) => /https?:\/\/|[\\/]|[A-Fa-f0-9]{16,}|[_-]{2,}/.test(text));
-  if (columnCount >= 6) return 'natural';
-  if (columnCount >= 5 && (hasLongToken || hasStructuredToken)) return 'natural';
-  if (columnCount >= 4 && hasLongToken) return 'natural';
-  return 'fit';
-}
-
 function tableIdFromNode(node: unknown, children: React.ReactNode): string {
   const pos = (node as { position?: { start?: { offset?: number }; end?: { offset?: number } } } | null)?.position;
   const start = pos?.start?.offset;
@@ -98,21 +64,21 @@ function MarkdownTable({
             type="button"
             className={`dh-markdown-table-toggle-button ${mode === 'fit' ? 'is-active' : ''}`}
             aria-pressed={mode === 'fit'}
-            title="Fit the table to the available width by wrapping cell content"
-            aria-label="Fit table to available width"
+            title="Wrap cell content to fit the table to the available width"
+            aria-label="Wrap table to available width"
             onClick={() => onModeChange('fit')}
           >
-            Fit
+            Wrap
           </button>
           <button
             type="button"
             className={`dh-markdown-table-toggle-button ${mode === 'natural' ? 'is-active' : ''}`}
             aria-pressed={mode === 'natural'}
             title="Keep natural column widths and allow horizontal scrolling"
-            aria-label="Use natural table width with horizontal scrolling"
+            aria-label="Scroll table horizontally using natural column widths"
             onClick={() => onModeChange('natural')}
           >
-            Natural
+            Scroll
           </button>
         </div>
       </div>
@@ -417,8 +383,7 @@ export function MarkdownMessage({
           ),
           table: ({ children, node, ...props }) => {
             const tableId = tableIdFromNode(node, children);
-            const inferredMode = inferTableMode(children);
-            const mode = tableModes[tableId] ?? inferredMode;
+            const mode = tableModes[tableId] ?? 'fit';
             return (
               <MarkdownTable
                 {...props}

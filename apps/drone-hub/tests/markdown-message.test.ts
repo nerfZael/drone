@@ -18,10 +18,12 @@ describe('MarkdownMessage', () => {
     expect(html).toContain('dh-markdown-table-wrap');
     expect(html).toContain('dh-markdown-table--fit');
     expect(html).toContain('<table class="dh-markdown-table dh-markdown-table--fit">');
+    expect(html).toContain('>Wrap<');
+    expect(html).toContain('>Scroll<');
     expect(html).toContain('<thead>');
   });
 
-  test('defaults dense structured tables to natural mode', () => {
+  test('defaults dense structured tables to wrap mode', () => {
     const html = renderMarkdown(
       [
         '| Name | Path | Sha | Status | Owner |',
@@ -29,7 +31,7 @@ describe('MarkdownMessage', () => {
         '| alpha | src/features/auth/routes/index.tsx | 1234567890abcdef1234567890abcdef | ready | platform |',
       ].join('\n'),
     );
-    expect(html).toContain('dh-markdown-table--natural');
+    expect(html).toContain('dh-markdown-table--fit');
   });
 
   test('renders callout blockquotes and strips marker text', () => {
