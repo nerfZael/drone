@@ -105,6 +105,7 @@ export function ChatInput({
   const hasActiveAutomation = Boolean(activeAutomationAction);
   const composerLocked =
     Boolean(disabled) || (lockComposerWhileAutomationActive && hasActiveAutomation);
+  const attachmentControlsLocked = composerLocked || sending;
   const visibleAutomationActions = React.useMemo(
     () =>
       availableAutomationActions.filter((action) => {
@@ -214,7 +215,7 @@ export function ChatInput({
 
   function openPicker() {
     if (!attachmentsOn) return;
-    if (composerLocked || sending || waiting) return;
+    if (attachmentControlsLocked) return;
     fileInputRef.current?.click();
   }
 
@@ -353,12 +354,12 @@ export function ChatInput({
       className="flex-shrink-0 px-5 pt-2 pb-5 bg-transparent"
       onDragEnter={(e) => {
         if (!attachmentsOn) return;
-        if (composerLocked || sending || waiting) return;
+        if (attachmentControlsLocked) return;
         if (e.dataTransfer?.types?.includes?.('Files')) setDragActive(true);
       }}
       onDragOver={(e) => {
         if (!attachmentsOn) return;
-        if (composerLocked || sending || waiting) return;
+        if (attachmentControlsLocked) return;
         e.preventDefault();
       }}
       onDragLeave={() => {
@@ -367,7 +368,7 @@ export function ChatInput({
       }}
       onDrop={(e) => {
         if (!attachmentsOn) return;
-        if (composerLocked || sending || waiting) return;
+        if (attachmentControlsLocked) return;
         e.preventDefault();
         setDragActive(false);
         addFiles(e.dataTransfer?.files ?? null);
@@ -400,9 +401,9 @@ export function ChatInput({
                 <button
                   type="button"
                   onClick={() => openPicker()}
-                  disabled={composerLocked || sending || waiting}
+                  disabled={attachmentControlsLocked}
                   className={`text-[10px] font-semibold tracking-wide uppercase px-2 py-1 rounded border transition-all ${
-                    composerLocked || sending || waiting
+                    attachmentControlsLocked
                       ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                       : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
                   }`}
@@ -423,9 +424,9 @@ export function ChatInput({
                     <button
                       type="button"
                       onClick={() => removeAttachment(a.id)}
-                      disabled={composerLocked || sending || waiting}
+                      disabled={attachmentControlsLocked}
                       className={`absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full border text-[10px] font-bold flex items-center justify-center transition-all ${
-                        composerLocked || sending || waiting
+                        attachmentControlsLocked
                           ? 'opacity-40 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                           : 'bg-[var(--panel-raised)] border-[var(--border)] text-[var(--muted)] hover:text-[var(--red)] hover:border-[var(--red)]'
                       }`}
@@ -454,14 +455,14 @@ export function ChatInput({
                     // allow re-selecting same file
                     e.currentTarget.value = '';
                   }}
-                  disabled={composerLocked || sending || waiting}
+                  disabled={attachmentControlsLocked}
                 />
                 <button
                   type="button"
                   onClick={() => openPicker()}
-                  disabled={composerLocked || sending || waiting}
+                  disabled={attachmentControlsLocked}
                   className={`inline-flex items-center justify-center w-[44px] h-[44px] rounded-md border transition-all ${
-                    composerLocked || sending || waiting
+                    attachmentControlsLocked
                       ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                       : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)]'
                   }`}
@@ -483,7 +484,7 @@ export function ChatInput({
               onChange={(e) => setDraft(e.target.value)}
               onPaste={(e) => {
                 if (!attachmentsOn) return;
-                if (composerLocked || sending || waiting) return;
+                if (attachmentControlsLocked) return;
                 const items = Array.from(e.clipboardData?.items ?? []);
                 const files: File[] = [];
                 for (const it of items) {
