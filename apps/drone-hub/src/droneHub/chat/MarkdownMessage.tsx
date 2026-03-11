@@ -70,13 +70,24 @@ function inferTableMode(children: React.ReactNode): TableMode {
   return 'fit';
 }
 
-function MarkdownTable({ children, ...props }: React.ComponentProps<'table'>) {
-  const inferredMode = React.useMemo(() => inferTableMode(children), [children]);
-  const [mode, setMode] = React.useState<TableMode>(inferredMode);
+function tableIdFromNode(node: unknown, children: React.ReactNode): string {
+  const pos = (node as { position?: { start?: { offset?: number }; end?: { offset?: number } } } | null)?.position;
+  const start = pos?.start?.offset;
+  const end = pos?.end?.offset;
+  if (typeof start === 'number' && typeof end === 'number') return `pos:${start}:${end}`;
+  const text = flattenText(children).replace(/\s+/g, ' ').trim();
+  return `text:${text.slice(0, 160)}:${text.length}`;
+}
 
-  React.useEffect(() => {
-    setMode(inferredMode);
-  }, [inferredMode]);
+function MarkdownTable({
+  children,
+  mode,
+  onModeChange,
+  ...props
+}: React.ComponentProps<'table'> & {
+  mode: TableMode;
+  onModeChange: (mode: TableMode) => void;
+}) {
 
   return (
     <div className="dh-markdown-block dh-markdown-block--wide">
@@ -87,7 +98,9 @@ function MarkdownTable({ children, ...props }: React.ComponentProps<'table'>) {
             type="button"
             className={`dh-markdown-table-toggle-button ${mode === 'fit' ? 'is-active' : ''}`}
             aria-pressed={mode === 'fit'}
-            onClick={() => setMode('fit')}
+            title="Fit the table to the available width by wrapping cell content"
+            aria-label="Fit table to available width"
+            onClick={() => onModeChange('fit')}
           >
             Fit
           </button>
@@ -95,7 +108,9 @@ function MarkdownTable({ children, ...props }: React.ComponentProps<'table'>) {
             type="button"
             className={`dh-markdown-table-toggle-button ${mode === 'natural' ? 'is-active' : ''}`}
             aria-pressed={mode === 'natural'}
-            onClick={() => setMode('natural')}
+            title="Keep natural column widths and allow horizontal scrolling"
+            aria-label="Use natural table width with horizontal scrolling"
+            onClick={() => onModeChange('natural')}
           >
             Natural
           </button>
@@ -288,6 +303,11 @@ export function MarkdownMessage({
     [onOpenLink],
   );
   const normalizedText = React.useMemo(() => normalizeLooseNestedBullets(text), [text]);
+  const [tableModes, setTableModes] = React.useState<Record<string, TableMode>>({});
+
+  React.useEffect(() => {
+    setTableModes({});
+  }, [normalizedText]);
 
   return (
     <div className={`dh-markdown ${className ?? ''}`}>
@@ -395,7 +415,22 @@ export function MarkdownMessage({
               <pre {...props}>{children}</pre>
             </div>
           ),
-          table: ({ children, node: _node, ...props }) => <MarkdownTable {...props}>{children}</MarkdownTable>,
+          table: ({ children, node, ...props }) => {
+            const tableId = tableIdFromNode(node, children);
+            const inferredMode = inferTableMode(children);
+            const mode = tableModes[tableId] ?? inferredMode;
+            return (
+              <MarkdownTable
+                {...props}
+                mode={mode}
+                onModeChange={(nextMode) =>
+                  setTableModes((prev) => (prev[tableId] === nextMode ? prev : { ...prev, [tableId]: nextMode }))
+                }
+              >
+                {children}
+              </MarkdownTable>
+            );
+          },
         }}
       >
         {normalizedText}
