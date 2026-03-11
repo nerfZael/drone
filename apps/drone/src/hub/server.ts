@@ -332,6 +332,9 @@ async function withLockedDroneContainer<T>(
 }
 
 type ResolvedDrone = { id: string; drone: any };
+type ResolvedOrPendingDrone =
+  | { kind: 'real'; id: string; drone: any }
+  | { kind: 'pending'; id: string; pending: any };
 
 function findDroneIdByRef(regAny: any, refRaw: string): { kind: 'real' | 'pending'; id: string } | null {
   const ref = String(refRaw ?? '').trim();
@@ -381,6 +384,19 @@ async function resolveDroneOrRespond(res: http.ServerResponse, droneRef: string)
       json(res, 404, { ok: false, error: `unknown drone: ${ref}` });
     },
   );
+}
+
+async function resolveDroneOrPendingForRead(droneRef: string): Promise<ResolvedOrPendingDrone | null> {
+  const ref = String(droneRef ?? '').trim();
+  if (!ref) return null;
+  const regAny: any = await loadRegistry();
+  const found = findDroneIdByRef(regAny, ref);
+  if (!found) return null;
+  const real = regAny?.drones?.[found.id] ?? null;
+  if (real) return { kind: 'real', id: found.id, drone: real };
+  const pending = regAny?.pending?.[found.id] ?? null;
+  if (pending) return { kind: 'pending', id: found.id, pending };
+  return null;
 }
 
 async function resolveDroneOrRejectUpgrade(socket: any, droneRef: string): Promise<ResolvedDrone | null> {
@@ -12155,10 +12171,19 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const droneRef = decodeURIComponent(parts[2]);
         const chatName = normalizeChatName(decodeURIComponent(parts[4]));
         try {
-          const resolved = await resolveDroneOrRespond(res, droneRef);
-          if (!resolved) return;
-          const droneId = resolved.id;
-          const drone = resolved.drone;
+          const resolved = await resolveDroneOrPendingForRead(droneRef);
+          if (!resolved) {
+            json(res, 404, { ok: false, error: `unknown drone: ${droneRef}` });
+            return;
+          }
+          if (resolved.kind === 'pending') {
+            const droneName = String(resolved.pending?.name ?? droneRef).trim() || droneRef;
+            json(res, 200, { ok: true, id: resolved.id, name: droneName, chat: chatName, pending: [] });
+            return;
+          }
+          const real = resolved;
+          const droneId = real.id;
+          const drone = real.drone;
           const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
           await reconcileChatFromDaemon({ droneId, chatName });
           const list = await readPendingPrompts({ droneId, chatName });
@@ -12391,8 +12416,38 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const tailLines = tailRaw != null ? Number(tailRaw) : 200;
 
         try {
-          const resolved = await resolveDroneOrRespond(res, droneRef);
-          if (!resolved) return;
+          const resolved = await resolveDroneOrPendingForRead(droneRef);
+          if (!resolved) {
+            json(res, 404, { ok: false, error: `unknown drone: ${droneRef}` });
+            return;
+          }
+          if (resolved.kind === 'pending') {
+            const droneName = String(resolved.pending?.name ?? droneRef).trim() || droneRef;
+            if (view === 'screen') {
+              json(res, 200, {
+                ok: true,
+                id: resolved.id,
+                name: droneName,
+                chat: normalizedChat,
+                sessionName,
+                view,
+                tailLines,
+                text: '',
+              });
+              return;
+            }
+            json(res, 200, {
+              ok: true,
+              id: resolved.id,
+              name: droneName,
+              chat: normalizedChat,
+              sessionName,
+              view,
+              offsetBytes: 0,
+              text: '',
+            });
+            return;
+          }
           const droneId = resolved.id;
           const drone = resolved.drone;
           const runtime = droneRuntime(drone);
@@ -12874,8 +12929,17 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const droneRef = decodeURIComponent(parts[2]);
         const chatName = decodeURIComponent(parts[4]) || 'default';
         try {
-          const resolved = await resolveDroneOrRespond(res, droneRef);
-          if (!resolved) return;
+          const resolved = await resolveDroneOrPendingForRead(droneRef);
+          if (!resolved) {
+            json(res, 404, { ok: false, error: `unknown drone: ${droneRef}` });
+            return;
+          }
+          if (resolved.kind === 'pending') {
+            const droneName = String(resolved.pending?.name ?? droneRef).trim() || droneRef;
+            const sel = u.searchParams.get('turn') ?? 'last';
+            json(res, 200, { ok: true, id: resolved.id, name: droneName, chat: chatName, selection: sel, transcripts: [] });
+            return;
+          }
           const droneId = resolved.id;
           const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
           await reconcileChatFromDaemon({ droneId, chatName });

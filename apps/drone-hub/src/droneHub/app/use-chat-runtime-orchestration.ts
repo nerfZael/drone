@@ -4,9 +4,11 @@ import { stripAnsi } from '../../domain';
 import type { ChatSendPayload } from '../chat';
 import type { DroneSummary, PendingPrompt, TranscriptItem } from '../types';
 import type { StartupSeedState } from './app-types';
+import { isTransientDroneStartupError } from './chat-startup-errors';
 import { droneChatQueueKey, isDroneStartingOrSeeding, parseDroneChatQueueKey } from './helpers';
 import { fetchJson, isNotFoundError, useNowMs, usePoll } from './hooks';
 import { beginRecordBusyKey, removeRecordKey } from './keyed-record-state';
+import type { QueuedPrompt } from './use-queued-prompts-state';
 
 type RequestJson = <T>(url: string, init?: RequestInit) => Promise<T>;
 
@@ -36,8 +38,8 @@ type UseChatRuntimeOrchestrationArgs = {
   drones: DroneSummary[];
   outputView: 'screen' | 'log';
   optimisticPendingPrompts: PendingPrompt[];
-  queuedPromptsByDroneChat: Record<string, PendingPrompt[]>;
-  getQueuedPromptsForKey: (key: string) => PendingPrompt[];
+  queuedPromptsByDroneChat: Record<string, QueuedPrompt[]>;
+  getQueuedPromptsForKey: (key: string) => QueuedPrompt[];
   flushingQueuedKeysRef: React.MutableRefObject<Set<string>>;
   selectedChat: string;
   selectedDrone: string | null;
@@ -52,8 +54,13 @@ type UseChatRuntimeOrchestrationArgs = {
   setSessionText: React.Dispatch<React.SetStateAction<string>>;
   setTranscriptError: React.Dispatch<React.SetStateAction<string | null>>;
   setTranscripts: React.Dispatch<React.SetStateAction<TranscriptItem[] | null>>;
-  enqueueQueuedPrompt: (droneIdRaw: string, chatNameRaw: string, promptRaw: string) => PendingPrompt | null;
-  patchQueuedPrompt: (key: string, id: string, patch: Partial<PendingPrompt>) => void;
+  enqueueQueuedPrompt: (
+    droneIdRaw: string,
+    chatNameRaw: string,
+    promptRaw: string,
+    attachmentsRaw?: ChatSendPayload['attachments'],
+  ) => QueuedPrompt | null;
+  patchQueuedPrompt: (key: string, id: string, patch: Partial<QueuedPrompt>) => void;
   removeQueuedPrompt: (key: string, id: string) => void;
   requestJson: RequestJson;
 };
@@ -224,11 +231,7 @@ export function useChatRuntimeOrchestration({
       const optimisticPrompt =
         prompt || (attachments.length === 1 ? '[image attachment]' : `[${attachments.length} image attachments]`);
       if (isDroneStartingOrSeeding(currentDrone.hubPhase)) {
-        if (attachments.length > 0) {
-          setPromptError(`"${currentDroneLabel}" is still provisioning. Image attachments can be sent once it is ready.`);
-          return false;
-        }
-        enqueueQueuedPrompt(currentDrone.id, selectedChat || 'default', prompt);
+        enqueueQueuedPrompt(currentDrone.id, selectedChat || 'default', prompt, attachments);
         setPromptError(null);
         return true;
       }
@@ -391,7 +394,7 @@ export function useChatRuntimeOrchestration({
               {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ prompt: head.prompt }),
+                body: JSON.stringify({ prompt: head.prompt, attachments: head.attachmentPayloads ?? [] }),
               },
             );
 
@@ -532,6 +535,7 @@ export function useChatRuntimeOrchestration({
       if (!selectedDrone || !selectedChat || busy) return;
       if (isDroneStartingOrSeeding(selectedDroneHubPhase)) return;
       busy = true;
+      let keepLoading = false;
       const initial = transcriptsRef.current === null && !transcriptErrorRef.current;
       if (initial && mounted) setLoadingTranscript(true);
       try {
@@ -547,11 +551,15 @@ export function useChatRuntimeOrchestration({
           // Treat 404 as "no transcript yet" to avoid a scary error state for brand new chats.
           setTranscripts([]);
           setTranscriptError(null);
+        } else if (isTransientDroneStartupError(e)) {
+          keepLoading = true;
+          setTranscripts(null);
+          setTranscriptError(null);
         } else {
           setTranscriptError(e?.message ?? String(e));
         }
       } finally {
-        if (mounted) setLoadingTranscript(false);
+        if (mounted && !keepLoading) setLoadingTranscript(false);
         busy = false;
       }
     };
@@ -580,6 +588,7 @@ export function useChatRuntimeOrchestration({
     const load = async () => {
       if (!selectedDrone || !selectedChat || busy) return;
       busy = true;
+      let keepLoading = false;
       const d = drones.find((x) => x.id === selectedDrone) ?? null;
       if (isDroneStartingOrSeeding(d?.hubPhase)) {
         if (mounted) resetSessionOutputState();
@@ -645,9 +654,14 @@ export function useChatRuntimeOrchestration({
         }
       } catch (e: any) {
         if (!mounted) return;
-        setSessionError(e?.message ?? String(e));
+        if (isTransientDroneStartupError(e)) {
+          keepLoading = true;
+          setSessionError(null);
+        } else {
+          setSessionError(e?.message ?? String(e));
+        }
       } finally {
-        if (mounted) setLoadingSession(false);
+        if (mounted && !keepLoading) setLoadingSession(false);
         busy = false;
       }
     };

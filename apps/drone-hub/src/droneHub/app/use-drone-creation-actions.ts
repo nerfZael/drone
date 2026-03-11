@@ -1,6 +1,7 @@
 import React from 'react';
 import type { ChatAgentConfig } from '../../domain';
 import type { ChatSendPayload } from '../chat';
+import { attachmentRefsFromPayload, normalizeChatImageAttachmentPayloads } from './chat-attachment-payloads';
 import { buildDraftDroneCreatePayload, runtimeSupportsCustomAgents } from './drone-create-runtime';
 import { makeId } from './helpers';
 
@@ -46,6 +47,12 @@ type UseDroneCreationActionsArgs = {
   startupSeedMissingGraceMs: number;
   resolveAgentKeyToConfig: (key: string) => ChatAgentConfig;
   queueDrones: (list: any[]) => Promise<QueueDronesResponse>;
+  enqueueQueuedPrompt: (
+    droneIdRaw: string,
+    chatNameRaw: string,
+    promptRaw: string,
+    attachmentsRaw?: ChatSendPayload['attachments'],
+  ) => { id: string } | null;
   requestJson: RequestJsonFn;
   suggestAndRenameDraftDrone: (droneId: string, prompt: string) => Promise<void>;
   rememberStartupSeed: (
@@ -134,6 +141,7 @@ export function useDroneCreationActions({
   startupSeedMissingGraceMs,
   resolveAgentKeyToConfig,
   queueDrones,
+  enqueueQueuedPrompt,
   requestJson,
   suggestAndRenameDraftDrone,
   rememberStartupSeed,
@@ -366,6 +374,8 @@ export function useDroneCreationActions({
       const effectiveCreateMode = opts?.createMode ?? draftCreateMode;
       const createWithoutChat = effectiveCreateMode === 'without-chat';
       const prompt = String(opts?.prompt ?? pending?.prompt ?? '').trim();
+      const draftAttachments = normalizeChatImageAttachmentPayloads(pending?.attachmentPayloads ?? []);
+      const hasDraftAttachments = draftAttachments.length > 0;
       const automationStartRaw = opts?.automationStart ?? null;
       const automationId = String(automationStartRaw?.automationId ?? '').trim();
       const automationLabel = String(automationStartRaw?.automationLabel ?? '').trim() || automationId || 'Automation';
@@ -385,7 +395,7 @@ export function useDroneCreationActions({
       const name = nameRaw.trim();
       const group = String(opts?.group ?? draftCreateGroup ?? '').trim();
       const repoPath = String(draftCreateRepoPath ?? '').trim();
-      if (!createWithoutChat && !prompt && !automationPrompt) {
+      if (!createWithoutChat && !prompt && !automationPrompt && !hasDraftAttachments) {
         setDraftCreateError('Send a first message or run an automation before creating a drone.');
         return false;
       }
@@ -426,7 +436,7 @@ export function useDroneCreationActions({
           pullHostBranchBeforeCreate,
           seedAgent,
           seedModel,
-          prompt: createWithoutChat ? '' : prompt,
+          prompt: createWithoutChat || hasDraftAttachments ? '' : prompt,
         });
         const data = await requestJson<{ ok: true; id: string; name: string; phase: 'starting' }>(
           `/api/drones`,
@@ -441,7 +451,7 @@ export function useDroneCreationActions({
         if (!droneId) throw new Error('create drone did not return an id');
         createdDrone = true;
 
-        if (seedAgent || seedModel || prompt) {
+        if (seedAgent || seedModel || (prompt && !hasDraftAttachments)) {
           rememberStartupSeed([{ id: droneId, name: createdName }], {
             agent: seedAgent,
             model: seedModel,
@@ -450,6 +460,9 @@ export function useDroneCreationActions({
             group,
             repoPath,
           });
+        }
+        if (hasDraftAttachments) {
+          enqueueQueuedPrompt(droneId, 'default', prompt, draftAttachments);
         }
         preferredSelectedDroneRef.current = droneId;
         preferredSelectedDroneHoldUntilRef.current = Date.now() + startupSeedMissingGraceMs;
@@ -556,6 +569,7 @@ export function useDroneCreationActions({
       draftCreateName,
       createRuntime,
       drones,
+      enqueueQueuedPrompt,
       pullHostBranchBeforeCreate,
       preferredSelectedDroneHoldUntilRef,
       preferredSelectedDroneRef,
@@ -584,13 +598,9 @@ export function useDroneCreationActions({
 
   const startDraftPrompt = React.useCallback(
     async (payload: ChatSendPayload): Promise<boolean> => {
-      const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
-      if (attachments.length > 0) {
-        setDraftCreateError('Image attachments are only supported after the drone is created.');
-        return false;
-      }
+      const attachments = normalizeChatImageAttachmentPayloads(payload?.attachments);
       const prompt = String(payload?.prompt ?? '').trim();
-      if (!prompt) return false;
+      if (!prompt && attachments.length === 0) return false;
       setDraftChat({
         droneId: '',
         droneName: '',
@@ -599,6 +609,7 @@ export function useDroneCreationActions({
           id: `draft-${makeId()}`,
           at: new Date().toISOString(),
           prompt,
+          ...(attachments.length > 0 ? { attachments: attachmentRefsFromPayload(attachments), attachmentPayloads: attachments } : {}),
           state: 'sending',
         },
       });

@@ -1,12 +1,13 @@
 import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { ChatInput, type ChatInputAutomationAction, type ChatSendPayload, EmptyState, PendingTranscriptTurn } from '../chat';
+import { ChatInput, type ChatImageAttachmentPayload, type ChatInputAutomationAction, type ChatSendPayload, EmptyState, PendingTranscriptTurn } from '../chat';
 import { draftChatInputResetKey, droneChatQueueKey } from './helpers';
 import { IconChat, IconChevron } from './icons';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
 import type { ChatAgentConfig } from '../../domain';
 import type { PendingPrompt } from '../types';
 import type { DraftChatState } from './app-types';
+import type { QueuedPrompt } from './use-queued-prompts-state';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 import {
   AUTOMATION_RUNS_MAX,
@@ -21,6 +22,19 @@ import {
 } from './drone-create-runtime';
 import type { DraftAutomationStartInput } from './use-drone-creation-actions';
 import { SegmentedToolbarToggle } from './SegmentedToolbarToggle';
+
+function sameAttachmentList(aRaw: PendingPrompt['attachments'], bRaw: PendingPrompt['attachments']): boolean {
+  const a = Array.isArray(aRaw) ? aRaw : [];
+  const b = Array.isArray(bRaw) ? bRaw : [];
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    const left = a[i];
+    const right = b[i];
+    if (!left || !right) return false;
+    if (left.name !== right.name || left.mime !== right.mime || left.size !== right.size) return false;
+  }
+  return true;
+}
 
 type DraftChatWorkspaceProps = {
   draftChat: DraftChatState;
@@ -37,12 +51,17 @@ type DraftChatWorkspaceProps = {
   draftCreateName: string;
   draftCreateGroup: string;
   draftCreateError: string | null;
-  queuedPromptsByDroneChat: Record<string, PendingPrompt[]>;
+  queuedPromptsByDroneChat: Record<string, QueuedPrompt[]>;
   onCancel: () => void;
   onStartDraftPrompt: (payload: ChatSendPayload) => Promise<boolean>;
   onStartDraftAutomation: (automation: DraftAutomationStartInput) => Promise<boolean>;
   onCreateEmptyDrone: () => Promise<boolean>;
-  onEnqueueQueuedPrompt: (droneId: string, chatName: string, prompt: string) => void;
+  onEnqueueQueuedPrompt: (
+    droneId: string,
+    chatName: string,
+    prompt: string,
+    attachments?: ChatImageAttachmentPayload[],
+  ) => void;
   onDraftCreateNameChange: (value: string) => void;
   onDraftCreateGroupChange: (value: string) => void;
   onSetDraftCreateError: (error: string | null) => void;
@@ -204,6 +223,19 @@ export function DraftChatWorkspace({
     }
     return actions;
   }, [automations, controlsLocked, createWithChat, onStartDraftAutomation, spawnAgentConfig.kind]);
+  const queuedDraftPrompts = draftChat.droneId ? queuedPromptsByDroneChat[droneChatQueueKey(draftChat.droneId, 'default')] ?? [] : [];
+  const visibleQueuedDraftPrompts = React.useMemo(() => {
+    const pending = draftChat.prompt;
+    if (!pending) return queuedDraftPrompts;
+    let skippedMirror = false;
+    return queuedDraftPrompts.filter((item) => {
+      if (skippedMirror) return true;
+      if (String(item.prompt ?? '') !== String(pending.prompt ?? '')) return true;
+      if (!sameAttachmentList(item.attachments, pending.attachments)) return true;
+      skippedMirror = true;
+      return false;
+    });
+  }, [draftChat.prompt, queuedDraftPrompts]);
 
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
@@ -437,7 +469,7 @@ export function DraftChatWorkspace({
           <div className="px-5 py-5">
             <div className="mx-auto max-w-[1275px] space-y-5">
               <PendingTranscriptTurn item={draftChat.prompt} nowMs={nowMs} />
-              {(draftChat.droneId ? queuedPromptsByDroneChat[droneChatQueueKey(draftChat.droneId, 'default')] ?? [] : []).map((p) => (
+              {visibleQueuedDraftPrompts.map((p) => (
                 <PendingTranscriptTurn key={`draft-queued-${p.id}`} item={p} nowMs={nowMs} />
               ))}
             </div>
@@ -464,7 +496,7 @@ export function DraftChatWorkspace({
           sending={draftCreating || draftAutoRenaming}
           waiting={Boolean(draftChat.prompt)}
           autoFocus={!draftCreating && !draftAutoRenaming && !draftChat.prompt}
-          attachmentsEnabled={false}
+          attachmentsEnabled
           automationActions={draftAutomationActions}
           onSend={async (payload: ChatSendPayload) => {
             if (!draftChat.prompt) return await onStartDraftPrompt(payload);
@@ -474,13 +506,9 @@ export function DraftChatWorkspace({
               return false;
             }
             const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
-            if (attachments.length > 0) {
-              onSetDraftCreateError('Image attachments are only supported after the drone is created.');
-              return false;
-            }
             const prompt = String(payload?.prompt ?? '').trim();
-            if (!prompt) return false;
-            onEnqueueQueuedPrompt(droneId, 'default', prompt);
+            if (!prompt && attachments.length === 0) return false;
+            onEnqueueQueuedPrompt(droneId, 'default', prompt, attachments);
             onSetDraftCreateError(null);
             return true;
           }}
