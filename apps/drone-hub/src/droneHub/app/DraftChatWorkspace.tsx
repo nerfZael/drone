@@ -5,7 +5,6 @@ import { draftChatInputResetKey, droneChatQueueKey } from './helpers';
 import { IconChat, IconChevron } from './icons';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
 import type { ChatAgentConfig } from '../../domain';
-import type { PendingPrompt } from '../types';
 import type { DraftChatState } from './app-types';
 import type { QueuedPrompt } from './use-queued-prompts-state';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
@@ -22,19 +21,7 @@ import {
 } from './drone-create-runtime';
 import type { DraftAutomationStartInput } from './use-drone-creation-actions';
 import { SegmentedToolbarToggle } from './SegmentedToolbarToggle';
-
-function sameAttachmentList(aRaw: PendingPrompt['attachments'], bRaw: PendingPrompt['attachments']): boolean {
-  const a = Array.isArray(aRaw) ? aRaw : [];
-  const b = Array.isArray(bRaw) ? bRaw : [];
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i += 1) {
-    const left = a[i];
-    const right = b[i];
-    if (!left || !right) return false;
-    if (left.name !== right.name || left.mime !== right.mime || left.size !== right.size) return false;
-  }
-  return true;
-}
+import { visibleDraftQueuedPrompts as resolveVisibleDraftQueuedPrompts } from './draft-chat-queue';
 
 type DraftChatWorkspaceProps = {
   draftChat: DraftChatState;
@@ -55,6 +42,7 @@ type DraftChatWorkspaceProps = {
   onCancel: () => void;
   onStartDraftPrompt: (payload: ChatSendPayload) => Promise<boolean>;
   onStartDraftAutomation: (automation: DraftAutomationStartInput) => Promise<boolean>;
+  onQueueDraftPromptDuringCreate: (payload: ChatSendPayload) => boolean;
   onCreateEmptyDrone: () => Promise<boolean>;
   onEnqueueQueuedPrompt: (
     droneId: string,
@@ -86,6 +74,7 @@ export function DraftChatWorkspace({
   onCancel,
   onStartDraftPrompt,
   onStartDraftAutomation,
+  onQueueDraftPromptDuringCreate,
   onCreateEmptyDrone,
   onEnqueueQueuedPrompt,
   onDraftCreateNameChange,
@@ -224,18 +213,15 @@ export function DraftChatWorkspace({
     return actions;
   }, [automations, controlsLocked, createWithChat, onStartDraftAutomation, spawnAgentConfig.kind]);
   const queuedDraftPrompts = draftChat.droneId ? queuedPromptsByDroneChat[droneChatQueueKey(draftChat.droneId, 'default')] ?? [] : [];
-  const visibleQueuedDraftPrompts = React.useMemo(() => {
-    const pending = draftChat.prompt;
-    if (!pending) return queuedDraftPrompts;
-    let skippedMirror = false;
-    return queuedDraftPrompts.filter((item) => {
-      if (skippedMirror) return true;
-      if (String(item.prompt ?? '') !== String(pending.prompt ?? '')) return true;
-      if (!sameAttachmentList(item.attachments, pending.attachments)) return true;
-      skippedMirror = true;
-      return false;
-    });
-  }, [draftChat.prompt, queuedDraftPrompts]);
+  const visibleQueuedDraftPrompts = React.useMemo(
+    () =>
+      resolveVisibleDraftQueuedPrompts({
+        pendingPrompt: draftChat.prompt,
+        localQueuedPrompts: draftChat.queuedPrompts,
+        stagedQueuedPrompts: queuedDraftPrompts,
+      }),
+    [draftChat.prompt, draftChat.queuedPrompts, queuedDraftPrompts],
+  );
 
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
@@ -493,17 +479,22 @@ export function DraftChatWorkspace({
           resetKey={draftChatInputResetKey(draftChat)}
           droneName="new drone"
           promptError={draftCreateError}
-          sending={draftCreating || draftAutoRenaming}
-          waiting={Boolean(draftChat.prompt)}
-          autoFocus={!draftCreating && !draftAutoRenaming && !draftChat.prompt}
+          sending={false}
+          waiting={false}
+          autoFocus={!draftCreating && !draftAutoRenaming && !draftChat.prompt && visibleQueuedDraftPrompts.length === 0}
           attachmentsEnabled
           automationActions={draftAutomationActions}
           onSend={async (payload: ChatSendPayload) => {
             if (!draftChat.prompt) return await onStartDraftPrompt(payload);
             const droneId = String(draftChat.droneId ?? '').trim();
             if (!droneId) {
-              onSetDraftCreateError('Drone is still being created. Please wait a moment.');
-              return false;
+              if (!draftCreating) {
+                onSetDraftCreateError('Drone creation failed before it could be queued. Retry the first message.');
+                return false;
+              }
+              const queued = onQueueDraftPromptDuringCreate(payload);
+              if (queued) onSetDraftCreateError(null);
+              return queued;
             }
             const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
             const prompt = String(payload?.prompt ?? '').trim();

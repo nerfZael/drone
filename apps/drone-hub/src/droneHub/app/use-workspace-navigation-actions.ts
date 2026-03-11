@@ -155,7 +155,7 @@ export function useWorkspaceNavigationActions({
     setDraftNameSuggesting(false);
     setCreateRuntime('container');
     resetDraftNameSuggestSeq();
-    setDraftChat({ droneId: '', droneName: '', prompt: null, focusKey: newDraftChatFocusKey() });
+    setDraftChat({ droneId: '', droneName: '', prompt: null, queuedPrompts: [], focusKey: newDraftChatFocusKey() });
     setSelectedDrone(null);
     setSelectedDroneIds([]);
     selectionAnchorRef.current = null;
