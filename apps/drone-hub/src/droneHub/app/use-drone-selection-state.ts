@@ -1,18 +1,8 @@
 import React from 'react';
 import type { StartupSeedState } from './app-types';
 import { isStartupSeedFresh } from './app-config';
+import { normalizedDroneChats } from './chat-node-helpers';
 import type { DroneSummary } from '../types';
-
-function normalizedDroneChats(drone: DroneSummary | null | undefined): string[] {
-  const list = Array.isArray(drone?.chats) ? drone.chats : [];
-  const out: string[] = [];
-  for (const raw of list) {
-    const chat = String(raw ?? '').trim();
-    if (!chat || out.includes(chat)) continue;
-    out.push(chat);
-  }
-  return out;
-}
 
 export function resolveSelectedChatForDrone(args: {
   droneId: string;

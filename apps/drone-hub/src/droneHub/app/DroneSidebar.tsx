@@ -4,6 +4,7 @@ import { DroneCard } from '../overview';
 import { TypingDots } from '../overview/icons';
 import type { DroneSummary, RepoSummary } from '../types';
 import { DRONE_CHAT_DND_MIME, DRONE_DND_MIME, createCanvasChatNodeId } from './app-config';
+import { normalizedDroneChats } from './chat-node-helpers';
 import { compareDronesByNewestFirst, isDroneStartingOrSeeding } from './helpers';
 import { IconAutoMinimize, IconChevron, IconColumns, IconFolder, IconList, IconPencil, IconPlus, IconPlusDouble, IconSettings, IconSidebarCollapse, IconSidebarExpand, IconSpinner, IconTrash, SkeletonLine } from './icons';
 import { useDroneSidebarUiState } from './use-drone-hub-ui-store';
@@ -52,17 +53,6 @@ function SidebarIconButton({
   );
 }
 
-function getSidebarDroneChats(drone: DroneSummary): string[] {
-  const source = Array.isArray(drone?.chats) ? drone.chats : [];
-  const out: string[] = [];
-  for (const raw of source) {
-    const chat = String(raw ?? '').trim();
-    if (!chat || out.includes(chat)) continue;
-    out.push(chat);
-  }
-  return out;
-}
-
 type DraftSidebarPlaceholder = {
   name: string;
   repoPath: string;
@@ -88,7 +78,7 @@ export type DroneSidebarProps = {
   sidebarOptimisticDroneIdSet: Set<string>;
   selectedDroneSet: Set<string>;
   busyChatNodeIdSet: Set<string>;
-  unreadAgentMessageByDroneId: Record<string, boolean>;
+  unreadAgentMessageByChatNodeId: Record<string, boolean>;
   deletingDrones: Record<string, boolean>;
   renamingDrones: Record<string, boolean>;
   settingBaseImages: Record<string, boolean>;
@@ -151,7 +141,7 @@ export function DroneSidebar({
   sidebarOptimisticDroneIdSet,
   selectedDroneSet,
   busyChatNodeIdSet,
-  unreadAgentMessageByDroneId,
+  unreadAgentMessageByChatNodeId,
   deletingDrones,
   renamingDrones,
   settingBaseImages,
@@ -556,13 +546,16 @@ export function DroneSidebar({
         );
       }
       const isOptimistic = sidebarOptimisticDroneIdSet.has(d.id);
-      const chats = getSidebarDroneChats(d);
+      const chats = normalizedDroneChats(d);
       const hasOnlyDefaultChat = chats.length === 1 && chats[0] === 'default';
       const defaultChatNodeId = createCanvasChatNodeId(d.id, 'default');
       const showDroneBusy =
         !isDroneStartingOrSeeding(d.hubPhase) &&
         hasOnlyDefaultChat &&
         Boolean(defaultChatNodeId && busyChatNodeIdSet.has(defaultChatNodeId));
+      const showDroneUnread =
+        hasOnlyDefaultChat &&
+        Boolean(defaultChatNodeId && unreadAgentMessageByChatNodeId[defaultChatNodeId] === true);
       const showGroup = opts?.showGroup;
       return (
         <div key={d.id} className="flex flex-col gap-0.5">
@@ -574,7 +567,7 @@ export function DroneSidebar({
             busy={
               showDroneBusy
             }
-            unreadAgentMessage={unreadAgentMessageByDroneId[d.id] === true}
+            unreadAgentMessage={showDroneUnread}
             showGroup={showGroup}
             onClick={(rowOpts) => onSelectDroneCard(d.id, rowOpts)}
             draggable={!movingDroneGroups && !isOptimistic}
@@ -633,7 +626,7 @@ export function DroneSidebar({
                 const chatNodeId = createCanvasChatNodeId(d.id, chatName);
                 if (!chatNodeId) return null;
                 const selected = selectedDrone === d.id && activeChatName === chatName;
-                const unread = unreadAgentMessageByDroneId[d.id] === true && chatName === 'default';
+                const unread = unreadAgentMessageByChatNodeId[chatNodeId] === true;
                 const busy = busyChatNodeIdSet.has(chatNodeId);
                 return (
                   <button
@@ -666,18 +659,19 @@ export function DroneSidebar({
                     }`}
                     title={`${uiDroneName(d.name)} / ${chatName}`}
                   >
-                    {busy ? (
-                      <span className="inline-flex items-center flex-shrink-0" title="Agent responding">
-                        <TypingDots color="var(--yellow)" />
-                      </span>
-                    ) : unread ? (
+                    {!busy && unread ? (
                       <span className="h-1.5 w-1.5 rounded-full bg-[var(--yellow)] flex-shrink-0" />
                     ) : (
                       <span className="h-1.5 w-1.5 flex-shrink-0" />
                     )}
-                    <span className="truncate font-mono">
+                    <span className="min-w-0 flex-1 truncate font-mono">
                       {chatName}
                     </span>
+                    {busy ? (
+                      <span className="inline-flex items-center flex-shrink-0" title="Agent responding">
+                        <TypingDots color="var(--yellow)" />
+                      </span>
+                    ) : null}
                   </button>
                 );
               })}
@@ -706,7 +700,7 @@ export function DroneSidebar({
       busyChatNodeIdSet,
       sidebarOptimisticDroneIdSet,
       uiDroneName,
-      unreadAgentMessageByDroneId,
+      unreadAgentMessageByChatNodeId,
     ],
   );
 

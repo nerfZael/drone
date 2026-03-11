@@ -44,7 +44,7 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   {
     id: 'markSelectedDronesUnread',
     label: 'Mark selected drones unread',
-    description: 'Marks the selected drone(s) as unread so the canvas unread indicator is shown.',
+    description: 'Marks the selected chat(s) unread, or the active chat for each selected drone, so unread indicators are shown.',
   },
   {
     id: 'toggleSidebarCollapsed',
