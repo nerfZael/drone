@@ -1,30 +1,43 @@
 import React from 'react';
 import { create } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
+import type { ChatImageAttachmentPayload } from '../chat';
 import type { PendingPrompt } from '../types';
+import { attachmentRefsFromPayload, normalizeChatImageAttachmentPayloads } from './chat-attachment-payloads';
 import { droneChatQueueKey, makeId, parseDroneChatQueueKey } from './helpers';
 
+export type QueuedPrompt = PendingPrompt & {
+  attachmentPayloads?: ChatImageAttachmentPayload[];
+};
+
 type QueuedPromptsState = {
-  queuedPromptsByDroneChat: Record<string, PendingPrompt[]>;
-  enqueueQueuedPrompt: (droneIdRaw: string, chatNameRaw: string, promptRaw: string) => PendingPrompt | null;
-  patchQueuedPrompt: (key: string, id: string, patch: Partial<PendingPrompt>) => void;
+  queuedPromptsByDroneChat: Record<string, QueuedPrompt[]>;
+  enqueueQueuedPrompt: (
+    droneIdRaw: string,
+    chatNameRaw: string,
+    promptRaw: string,
+    attachmentsRaw?: ChatImageAttachmentPayload[],
+  ) => QueuedPrompt | null;
+  patchQueuedPrompt: (key: string, id: string, patch: Partial<QueuedPrompt>) => void;
   removeQueuedPrompt: (key: string, id: string) => void;
   clearQueuedPromptsForDrone: (droneIdRaw: string) => void;
-  getQueuedPromptsForKey: (key: string) => PendingPrompt[];
+  getQueuedPromptsForKey: (key: string) => QueuedPrompt[];
 };
 
 const useQueuedPromptsStore = create<QueuedPromptsState>((set, get) => ({
   queuedPromptsByDroneChat: {},
-  enqueueQueuedPrompt: (droneIdRaw, chatNameRaw, promptRaw) => {
+  enqueueQueuedPrompt: (droneIdRaw, chatNameRaw, promptRaw, attachmentsRaw) => {
     const droneId = String(droneIdRaw ?? '').trim();
     const chatName = String(chatNameRaw ?? '').trim() || 'default';
     const prompt = String(promptRaw ?? '').trim();
-    if (!droneId || !prompt) return null;
-    const item: PendingPrompt = {
+    const attachmentPayloads = normalizeChatImageAttachmentPayloads(attachmentsRaw);
+    if (!droneId || (!prompt && attachmentPayloads.length === 0)) return null;
+    const item: QueuedPrompt = {
       id: `queued-${makeId()}`,
       at: new Date().toISOString(),
       prompt,
       state: 'queued',
+      ...(attachmentPayloads.length > 0 ? { attachments: attachmentRefsFromPayload(attachmentPayloads), attachmentPayloads } : {}),
     };
     const key = droneChatQueueKey(droneId, chatName);
     set((prev) => {
@@ -69,7 +82,7 @@ const useQueuedPromptsStore = create<QueuedPromptsState>((set, get) => ({
     if (!droneId) return;
     set((prev) => {
       let changed = false;
-      const next: Record<string, PendingPrompt[]> = {};
+      const next: Record<string, QueuedPrompt[]> = {};
       for (const [k, v] of Object.entries(prev.queuedPromptsByDroneChat)) {
         const parsed = parseDroneChatQueueKey(k);
         if (parsed && parsed.droneId === droneId) {

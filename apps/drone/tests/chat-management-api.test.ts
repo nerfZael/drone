@@ -184,4 +184,40 @@ describeSocketSuite('chat management api', () => {
     expect((listed.data?.chats ?? []).includes('default')).toBe(true);
     expect((listed.data?.chats ?? []).includes('qa')).toBe(false);
   });
+
+  test('returns empty chat reads for pending drones instead of still-starting errors', async () => {
+    const droneId = 'pending-chat-read';
+    const now = new Date().toISOString();
+    await updateRegistry((reg: any) => {
+      reg.pending = reg.pending ?? {};
+      reg.pending[droneId] = {
+        id: droneId,
+        name: droneId,
+        runtime: 'host',
+        repoPath: '',
+        containerPort: 7777,
+        build: false,
+        createdAt: now,
+        updatedAt: now,
+        phase: 'starting',
+        message: 'Starting...',
+      };
+    });
+
+    const pending = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    expect(pending.r.status).toBe(200);
+    expect(pending.data?.ok).toBe(true);
+    expect(pending.data?.pending).toEqual([]);
+
+    const transcript = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/transcript?turn=all`);
+    expect(transcript.r.status).toBe(200);
+    expect(transcript.data?.ok).toBe(true);
+    expect(transcript.data?.transcripts).toEqual([]);
+
+    const output = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/output`);
+    expect(output.r.status).toBe(200);
+    expect(output.data?.ok).toBe(true);
+    expect(String(output.data?.text ?? '')).toBe('');
+    expect(Number(output.data?.offsetBytes ?? 0)).toBe(0);
+  });
 });

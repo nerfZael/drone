@@ -917,6 +917,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       startupSeedMissingGraceMs: STARTUP_SEED_MISSING_GRACE_MS,
       resolveAgentKeyToConfig,
       queueDrones,
+      enqueueQueuedPrompt,
       requestJson,
       suggestAndRenameDraftDrone,
       rememberStartupSeed,
