@@ -6,7 +6,14 @@ import { Command } from 'commander';
 
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 const DEFAULT_TERMINATE_TOKEN = 'TERMINATE';
-const DEFAULT_AGENT_CLI = 'agent -f --approve-mcps --print';
+const BUILTIN_AGENT_IDS = ['cursor', 'codex', 'claude', 'opencode'] as const;
+const DEFAULT_BUILTIN_AGENT_ID = 'cursor';
+const DEFAULT_CURSOR_CLI = 'agent -f --approve-mcps --print';
+const DEFAULT_CODEX_CLI = 'codex exec --skip-git-repo-check --color never';
+const DEFAULT_CLAUDE_CLI = 'claude --print --dangerously-skip-permissions --output-format text';
+const DEFAULT_OPENCODE_CLI = 'opencode run --format default';
+
+type BuiltinAgentId = (typeof BUILTIN_AGENT_IDS)[number];
 
 type CliOptions = {
   prompt?: string;
@@ -14,6 +21,7 @@ type CliOptions = {
   promptStdin?: boolean;
   timeout?: string;
   terminate?: string;
+  agent?: string;
   cli?: string;
 };
 
@@ -22,6 +30,47 @@ type PromptSource = 'prompt' | 'file' | 'stdin';
 function toNonEmptyString(raw: unknown): string | undefined {
   const text = raw == null ? '' : String(raw).trim();
   return text ? text : undefined;
+}
+
+function firstNonEmptyEnv(...names: string[]): string | undefined {
+  for (const name of names) {
+    const value = toNonEmptyString(process.env[name]);
+    if (value) return value;
+  }
+  return undefined;
+}
+
+function normalizeBuiltinAgentId(raw: unknown): BuiltinAgentId | undefined {
+  const text = toNonEmptyString(raw)?.toLowerCase();
+  if (!text) return undefined;
+  return BUILTIN_AGENT_IDS.includes(text as BuiltinAgentId) ? (text as BuiltinAgentId) : undefined;
+}
+
+function resolveBuiltinAgentId(raw: unknown): BuiltinAgentId {
+  const direct = toNonEmptyString(raw);
+  const env = firstNonEmptyEnv('LOOPED_AGENT');
+  const candidate = direct ?? env;
+  const normalized = normalizeBuiltinAgentId(candidate);
+  if (candidate && !normalized) {
+    throw new Error(`invalid --agent: expected one of ${BUILTIN_AGENT_IDS.join(', ')}`);
+  }
+  return normalized ?? DEFAULT_BUILTIN_AGENT_ID;
+}
+
+function resolveBuiltinAgentCommand(agent: BuiltinAgentId): string {
+  if (agent === 'cursor') {
+    return (
+      firstNonEmptyEnv('LOOPED_CURSOR_CMD', 'DRONE_HUB_CURSOR_CMD', 'LOOPED_AGENT_CMD', 'DRONE_HUB_AGENT_CMD') ??
+      DEFAULT_CURSOR_CLI
+    );
+  }
+  if (agent === 'codex') {
+    return firstNonEmptyEnv('LOOPED_CODEX_CMD', 'DRONE_HUB_CODEX_CMD') ?? DEFAULT_CODEX_CLI;
+  }
+  if (agent === 'claude') {
+    return firstNonEmptyEnv('LOOPED_CLAUDE_CMD', 'DRONE_HUB_CLAUDE_CMD') ?? DEFAULT_CLAUDE_CLI;
+  }
+  return firstNonEmptyEnv('LOOPED_OPENCODE_CMD', 'DRONE_HUB_OPENCODE_CMD') ?? DEFAULT_OPENCODE_CLI;
 }
 
 function shellQuote(value: string): string {
@@ -118,6 +167,20 @@ function buildCommandLine(cliCommand: string, promptText: string): string {
     return cli.split('{prompt}').join(promptArg);
   }
   return `${cli} ${promptArg}`;
+}
+
+function resolveCommandConfig(options: { agent?: string; cli?: string }): {
+  agent: BuiltinAgentId;
+  cliCommand: string;
+  explicitCli: boolean;
+} {
+  const explicitCli = toNonEmptyString(options.cli);
+  const agent = resolveBuiltinAgentId(options.agent);
+  return {
+    agent,
+    cliCommand: explicitCli ?? resolveBuiltinAgentCommand(agent),
+    explicitCli: Boolean(explicitCli),
+  };
 }
 
 function createTerminateMatcher(token: string): (chunk: string) => boolean {
@@ -222,9 +285,13 @@ program
   )
   .option('--terminate <token>', 'Stop looping when this token appears in CLI output', DEFAULT_TERMINATE_TOKEN)
   .option(
+    '--agent <id>',
+    `Builtin agent preset (${BUILTIN_AGENT_IDS.join(', ')}). Used when --cli is not provided`,
+    DEFAULT_BUILTIN_AGENT_ID
+  )
+  .option(
     '--cli <command>',
-    'Agentic CLI command. Use {prompt} placeholder or prompt is appended as final argument',
-    DEFAULT_AGENT_CLI
+    'Explicit CLI command override. Use {prompt} placeholder or prompt is appended as final argument'
   )
   .action(async (options: CliOptions) => {
     const prompt = await resolvePromptText({
@@ -236,11 +303,14 @@ program
     const timeoutRaw = toNonEmptyString(options.timeout);
     const timeoutMs = parseTimeoutMs(timeoutRaw, DEFAULT_TIMEOUT_MS);
     const terminateToken = toNonEmptyString(options.terminate) ?? DEFAULT_TERMINATE_TOKEN;
-    const cliCommand = toNonEmptyString(options.cli) ?? DEFAULT_AGENT_CLI;
+    const commandConfig = resolveCommandConfig({ agent: options.agent, cli: options.cli });
 
-    const commandLine = buildCommandLine(cliCommand, prompt.text);
+    const commandLine = buildCommandLine(commandConfig.cliCommand, prompt.text);
     process.stderr.write(
       `[looped] starting loop: timeout=${timeoutMs}ms terminate=${JSON.stringify(terminateToken)} promptSource=${prompt.source}\n`
+    );
+    process.stderr.write(
+      `[looped] agent=${commandConfig.agent} explicitCli=${commandConfig.explicitCli ? 'yes' : 'no'} command=${JSON.stringify(commandConfig.cliCommand)}\n`
     );
     process.stderr.write(`[looped] prompt: ${previewPrompt(prompt.text)}\n`);
 
