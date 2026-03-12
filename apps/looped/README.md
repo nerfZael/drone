@@ -42,11 +42,13 @@ looped [options]
 
 Options:
 - `-p, --prompt <text>`: prompt text to run
-- `-f, --file <path>`: read prompt from file
+- `--file <path>`: read prompt from file
 - `--prompt-stdin`: read prompt from stdin
 - `-t, --timeout <duration>`: timeout per iteration (supports `ms`, `s`, `m`, `h`, `d`)
 - `--terminate <token>`: termination marker to look for in output (default: `TERMINATE`)
 - `--agent <id>`: builtin agent preset to use when `--cli` is not provided (`cursor`, `codex`, `claude`, `opencode`; default: `cursor`)
+- `--chat-mode <mode>`: conversation reuse mode (`continue`, `fresh`; default: `continue`)
+- `-f, --fresh`: shortcut for `--chat-mode fresh`
 - `--cli <command>`: explicit agentic CLI command to run per iteration; overrides `--agent`
 
 `--cli` behavior:
@@ -59,8 +61,19 @@ Builtin agent defaults:
 - `claude`: `claude --print --dangerously-skip-permissions --output-format text`
 - `opencode`: `opencode run --format default`
 
+Conversation modes:
+- `continue`: reuse the same chat/session across iterations when supported
+- `fresh`: current one-shot behavior; start fresh each iteration
+
+Current support:
+- builtin `cursor`: `continue` is supported and uses the same Cursor chat across iterations
+- builtin `codex`: `continue` is supported and reuses the same Codex thread across iterations
+- builtin `claude`, `opencode`: currently fall back to `fresh`
+- explicit `--cli`: currently falls back to `fresh`
+
 Env overrides:
 - `LOOPED_AGENT`: default builtin agent when `--agent` is omitted
+- `LOOPED_CHAT_MODE`: default chat mode when `--chat-mode` is omitted
 - `LOOPED_AGENT_CMD`: generic fallback command override for `cursor`
 - `LOOPED_CURSOR_CMD`, `LOOPED_CODEX_CMD`, `LOOPED_CLAUDE_CMD`, `LOOPED_OPENCODE_CMD`: per-agent overrides
 - `DRONE_HUB_*_CMD` env vars are also respected as fallbacks for parity with the drone setup
@@ -76,9 +89,6 @@ looped -p "Summarize this repo and propose 3 improvements."
 
 # prompt from file
 looped --file ./prompt.txt
-
-# prompt from -f
-looped -f ./prompt.txt
 
 # prompt from stdin
 cat ./prompt.txt | looped --prompt-stdin
@@ -101,6 +111,10 @@ looped -p "Do one pass." --terminate STOP_NOW
 
 # select Codex without writing the full command
 looped -p "Do one pass." --agent codex
+
+# force the old one-shot behavior
+looped -p "Do one pass." --chat-mode fresh
+looped -p "Do one pass." -f
 
 # select Codex via env for all runs in this shell
 export LOOPED_AGENT=codex
