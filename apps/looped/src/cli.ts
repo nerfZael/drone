@@ -459,7 +459,7 @@ program
   .name('looped')
   .description('Minimal harness wrapper for repeatedly running an agentic CLI prompt')
   .option('-p, --prompt <text>', 'Prompt text to run')
-  .option('--file <path>', 'Read prompt text from file')
+  .option('-f, --file <path>', 'Read prompt text from file')
   .option('--prompt-stdin', 'Read prompt text from stdin', false)
   .option(
     '-t, --timeout <duration>',
@@ -476,7 +476,7 @@ program
     `Conversation reuse mode (${CHAT_MODES.join(', ')}). "continue" is supported for the builtin cursor and codex presets and is the default`,
     DEFAULT_CHAT_MODE
   )
-  .option('-f, --fresh', 'Shortcut for --chat-mode fresh', false)
+  .option('-n, --fresh', 'Shortcut for --chat-mode fresh', false)
   .option(
     '--cli <command>',
     'Explicit CLI command override. Use {prompt} placeholder or prompt is appended as final argument'

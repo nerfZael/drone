@@ -42,13 +42,13 @@ looped [options]
 
 Options:
 - `-p, --prompt <text>`: prompt text to run
-- `--file <path>`: read prompt from file
+- `-f, --file <path>`: read prompt from file
 - `--prompt-stdin`: read prompt from stdin
 - `-t, --timeout <duration>`: timeout per iteration (supports `ms`, `s`, `m`, `h`, `d`)
 - `--terminate <token>`: termination marker to look for in output (default: `TERMINATE`)
 - `--agent <id>`: builtin agent preset to use when `--cli` is not provided (`cursor`, `codex`, `claude`, `opencode`; default: `cursor`)
 - `--chat-mode <mode>`: conversation reuse mode (`continue`, `fresh`; default: `continue`)
-- `-f, --fresh`: shortcut for `--chat-mode fresh`
+- `-n, --fresh`: shortcut for `--chat-mode fresh`
 - `--cli <command>`: explicit agentic CLI command to run per iteration; overrides `--agent`
 
 `--cli` behavior:
@@ -89,6 +89,7 @@ looped -p "Summarize this repo and propose 3 improvements."
 
 # prompt from file
 looped --file ./prompt.txt
+looped -f ./prompt.txt
 
 # prompt from stdin
 cat ./prompt.txt | looped --prompt-stdin
@@ -114,7 +115,7 @@ looped -p "Do one pass." --agent codex
 
 # force the old one-shot behavior
 looped -p "Do one pass." --chat-mode fresh
-looped -p "Do one pass." -f
+looped -p "Do one pass." -n
 
 # select Codex via env for all runs in this shell
 export LOOPED_AGENT=codex
