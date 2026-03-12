@@ -11,10 +11,10 @@ From the monorepo root:
 bun install
 
 # build looped
-bun --filter looped run build
+bun run --cwd apps/looped build
 
 # install `looped` into your shell PATH
-npm link ./apps/looped
+cd apps/looped && npm link
 
 # verify
 looped --help
@@ -46,11 +46,24 @@ Options:
 - `--prompt-stdin`: read prompt from stdin
 - `-t, --timeout <duration>`: timeout per iteration (supports `ms`, `s`, `m`, `h`, `d`)
 - `--terminate <token>`: termination marker to look for in output (default: `TERMINATE`)
-- `--cli <command>`: agentic CLI command to run per iteration (default: `agent -f --approve-mcps --print`)
+- `--agent <id>`: builtin agent preset to use when `--cli` is not provided (`cursor`, `codex`, `claude`, `opencode`; default: `cursor`)
+- `--cli <command>`: explicit agentic CLI command to run per iteration; overrides `--agent`
 
 `--cli` behavior:
 - If command contains `{prompt}`, that placeholder is replaced with a safely quoted prompt.
 - Otherwise, prompt is appended as the final argument.
+
+Builtin agent defaults:
+- `cursor`: `agent -f --approve-mcps --print`
+- `codex`: `codex exec --skip-git-repo-check --color never`
+- `claude`: `claude --print --dangerously-skip-permissions --output-format text`
+- `opencode`: `opencode run --format default`
+
+Env overrides:
+- `LOOPED_AGENT`: default builtin agent when `--agent` is omitted
+- `LOOPED_AGENT_CMD`: generic fallback command override for `cursor`
+- `LOOPED_CURSOR_CMD`, `LOOPED_CODEX_CMD`, `LOOPED_CLAUDE_CMD`, `LOOPED_OPENCODE_CMD`: per-agent overrides
+- `DRONE_HUB_*_CMD` env vars are also respected as fallbacks for parity with the drone setup
 
 ## Examples
 
@@ -86,11 +99,15 @@ looped -p "Do one pass." --timeout 2d
 # custom terminate token
 looped -p "Do one pass." --terminate STOP_NOW
 
-# custom CLI command (future execution step)
-looped -p "Do one pass." --cli codex
+# select Codex without writing the full command
+looped -p "Do one pass." --agent codex
+
+# select Codex via env for all runs in this shell
+export LOOPED_AGENT=codex
+looped -p "Do one pass."
 
 # custom CLI with explicit prompt placeholder
-looped -f ./prompt.txt --cli "codex run --print --prompt {prompt}"
+looped -f ./prompt.txt --cli "codex exec {prompt}"
 
 # command that exits immediately when TERMINATE appears
 looped -p "ignored by this example" --cli "node -e \"console.log('TERMINATE')\""
