@@ -6,6 +6,7 @@ A Bun + Turborepo monorepo for running and managing **agent-enabled “drone” 
 - **`drone`** (`apps/drone`): host CLI + in-container daemon that exposes a local REST API for controlling processes/sessions inside a container (implemented on top of `dvm`).
 - **`drone-hub`** (`apps/drone-hub`): web UI for listing/grouping drones and interacting with them (Vite/React).
 - **`looped`** (`apps/looped`): scaffolded minimal loop harness wrapper for repeatedly running an agentic CLI prompt.
+- **`drone-sdk`** (`packages/drone-sdk`): TypeScript SDK for creating drones, working with groups and chats, and sending prompts through Drone Hub.
 
 ## Repo layout
 
@@ -13,6 +14,7 @@ A Bun + Turborepo monorepo for running and managing **agent-enabled “drone” 
 - **`apps/drone/`**: Drone CLI + daemon
 - **`apps/drone-hub/`**: Drone Hub UI
 - **`apps/looped/`**: Looped CLI scaffold
+- **`packages/drone-sdk/`**: Drone SDK package
 
 ## Prerequisites
 
