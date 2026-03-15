@@ -5,9 +5,49 @@ import { IconChevron } from './icons';
 function containsWideMarkdownBlocks(rawText: string): boolean {
   const text = String(rawText ?? '');
   if (!text) return false;
-  if (/^```/m.test(text)) return true;
+  if (/^\s{0,3}(?:```|~~~)/m.test(text)) return true;
   if (/!\[[^\]]*]\([^)]+\)/.test(text)) return true;
   return /^\|.+\|\s*$/m.test(text) && /^\|\s*[-:| ]+\|\s*$/m.test(text);
+}
+
+function parseFenceMarker(line: string): { markerChar: '`' | '~'; markerLength: number } | null {
+  const match = /^\s{0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+  if (!match) return null;
+  const marker = match[1] ?? '';
+  const markerChar = marker[0];
+  if (markerChar !== '`' && markerChar !== '~') return null;
+  return { markerChar, markerLength: marker.length };
+}
+
+function isClosingFence(line: string, fence: { markerChar: '`' | '~'; markerLength: number }): boolean {
+  const match = /^\s{0,3}(`{3,}|~{3,})\s*$/.exec(line);
+  if (!match) return false;
+  const marker = match[1] ?? '';
+  return marker[0] === fence.markerChar && marker.length >= fence.markerLength;
+}
+
+function findLeadParagraphBreak(rawText: string): number {
+  const text = String(rawText ?? '');
+  if (!text.includes('\n\n')) return -1;
+  const lines = text.split('\n');
+  let offset = 0;
+  let fence: { markerChar: '`' | '~'; markerLength: number } | null = null;
+
+  for (let i = 0; i < lines.length - 1; i++) {
+    const line = lines[i] ?? '';
+    if (fence) {
+      if (isClosingFence(line, fence)) fence = null;
+    } else {
+      fence = parseFenceMarker(line);
+    }
+
+    if (!fence && lines[i + 1] === '' && offset + line.length > 0) {
+      return offset + line.length;
+    }
+    offset += line.length + 1;
+  }
+
+  return -1;
 }
 
 export function CollapsibleMarkdown({
@@ -36,7 +76,7 @@ export function CollapsibleMarkdown({
   const [collapsed, setCollapsed] = React.useState(isLong);
   const leadSplit = React.useMemo(() => {
     if (!preserveLeadParagraph) return null;
-    const firstBreak = normalizedText.indexOf('\n\n');
+    const firstBreak = findLeadParagraphBreak(normalizedText);
     if (firstBreak <= 0) return null;
     const lead = normalizedText.slice(0, firstBreak).trimEnd();
     const rest = normalizedText.slice(firstBreak + 2).trimStart();
