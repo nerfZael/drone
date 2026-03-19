@@ -39,6 +39,7 @@ import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
 import { useDroneHubUiStore, useSelectedDroneWorkspaceUiState } from './use-drone-hub-ui-store';
 import { usePromptAutomationState } from './use-prompt-automation-state';
 import { HeaderPullRequestShortcuts } from './HeaderPullRequestShortcuts';
+import { buildPendingTimelineBlocks } from './pending-timeline-blocks';
 import {
   buildPendingPromptLoopGroups,
   buildTranscriptRenderBlocks,
@@ -50,7 +51,6 @@ import {
   formatBytes,
   formatEditorMtime,
   parseGithubPullRequestHref,
-  parseIsoMs,
 } from './selected-drone-workspace-utils';
 
 type LaunchHint =
@@ -418,64 +418,20 @@ export function SelectedDroneWorkspace({
   }, [promptAutomationJob]);
   const runningAutomationHasRenderedGroup = Boolean(promptAutomationJob?.running && runningAutomationIdentity);
   const pendingTimelineBlocks = React.useMemo(() => {
-    const items: Array<
-      | { kind: 'prompt-loop-group'; key: string; identity: string; pendingRuns: PendingPrompt[]; sortMs: number; order: number }
-      | { kind: 'pending-prompt'; key: string; item: PendingPrompt; sortMs: number; order: number }
-      | { kind: 'queued-automation'; key: string; queueId: string; sortMs: number; order: number }
-      | { kind: 'running-automation'; key: string; sortMs: number; order: number }
-    > = [];
-    let order = 0;
-    for (const group of pendingOnlyPromptLoopGroups) {
-      const sortMs = group.pendingRuns.reduce((min, run) => {
-        const ms = parseIsoMs(run.updatedAt ?? run.at);
-        return ms < min ? ms : min;
-      }, Number.MAX_SAFE_INTEGER);
-      items.push({
-        kind: 'prompt-loop-group',
-        key: `pending-loop:${group.key}`,
-        identity: group.identity,
-        pendingRuns: group.pendingRuns,
-        sortMs,
-        order: order++,
-      });
-    }
-    for (const item of pendingPlainPrompts) {
-      items.push({
-        kind: 'pending-prompt',
-        key: `pending-prompt:${item.id}`,
-        item,
-        sortMs: parseIsoMs(item.updatedAt ?? item.at),
-        order: order++,
-      });
-    }
-    for (const queued of queuedAutomationItems) {
-      const queueId = String(queued.queueId ?? '').trim();
-      if (!queueId) continue;
-      items.push({
-        kind: 'queued-automation',
-        key: `queued-automation:${queueId}`,
-        queueId,
-        sortMs: parseIsoMs(queued.enqueuedAt),
-        order: order++,
-      });
-    }
-    if (promptAutomationJob?.running && !runningAutomationHasRenderedGroup) {
-      items.push({
-        kind: 'running-automation',
-        key: `running-automation:${runningAutomationJobKey || String(promptAutomationJob.automationId ?? 'active')}`,
-        sortMs: parseIsoMs(promptAutomationJob.startedAt ?? promptAutomationJob.updatedAt),
-        order: order++,
-      });
-    }
-    items.sort((a, b) => {
-      if (a.sortMs !== b.sortMs) return a.sortMs - b.sortMs;
-      return a.order - b.order;
+    return buildPendingTimelineBlocks({
+      pendingOnlyPromptLoopGroups,
+      pendingPlainPrompts,
+      queuedAutomationItems,
+      promptAutomationJob,
+      runningAutomationIdentity,
+      runningAutomationHasRenderedGroup,
+      runningAutomationJobKey,
     });
-    return items;
   }, [
     pendingOnlyPromptLoopGroups,
     pendingPlainPrompts,
     promptAutomationJob,
+    runningAutomationIdentity,
     queuedAutomationItems,
     runningAutomationHasRenderedGroup,
     runningAutomationJobKey,
