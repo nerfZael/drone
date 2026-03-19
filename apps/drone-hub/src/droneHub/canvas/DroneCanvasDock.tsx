@@ -5,6 +5,7 @@ import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
 import type { DroneSummary } from '../types';
 import {
   DRONE_CHAT_DND_MIME,
+  DRONE_DND_MIME,
   createCanvasChatNodeId,
   parseCanvasChatNodeId,
 } from '../app/app-config';
@@ -14,8 +15,7 @@ import { TypingDots } from '../overview/icons';
 import { CanvasMessageBar } from './CanvasMessageBar';
 import {
   collectUniqueChatTargets,
-  orderChatNodeIdsBySidebar,
-  parseDraggedChatPayload,
+  resolveDraggedCanvasChatNodeIds,
   sortChatNodeIdsForDestructiveDelete,
 } from './chat-node-utils';
 import {
@@ -84,15 +84,11 @@ type DroneCanvasIndicatorState = {
   unreadAgentMessage: boolean;
 };
 
-function parseDraggedChatNodeIds(event: React.DragEvent<HTMLElement>): string[] {
-  return parseDraggedChatPayload(event.dataTransfer.getData(DRONE_CHAT_DND_MIME));
-}
-
 function hasChatDragPayload(event: React.DragEvent<HTMLElement>): boolean {
   const transfer = event.dataTransfer;
   if (!transfer) return false;
   const types = Array.from(transfer.types ?? []);
-  return types.includes(DRONE_CHAT_DND_MIME);
+  return types.includes(DRONE_CHAT_DND_MIME) || types.includes(DRONE_DND_MIME);
 }
 
 function screenToWorldPoint(
@@ -1399,8 +1395,7 @@ export function DroneCanvasDock({
       if (!hasChatDragPayload(event)) return;
       event.preventDefault();
       setDragOverCanvas(false);
-      const droppedIds = parseDraggedChatNodeIds(event);
-      const ids = orderChatNodeIdsBySidebar(droppedIds, sidebarOrderedChatNodeIds);
+      const ids = resolveDraggedCanvasChatNodeIds(event.dataTransfer, sidebarOrderedChatNodeIds);
       if (ids.length === 0) return;
       const viewport = viewportRef.current;
       if (!viewport) return;
