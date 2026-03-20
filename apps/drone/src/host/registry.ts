@@ -102,6 +102,11 @@ type DroneRegistryV1 = {
       }>;
       updatedAt?: string;
     };
+    nonRepoEnvironment?: {
+      vars?: Record<string, string>;
+      autoApplyToNewContainerDrones?: boolean;
+      updatedAt?: string;
+    };
   };
   /**
    * Hub-managed shared skills library.
@@ -121,6 +126,11 @@ type DroneRegistryV1 = {
       addedAt: string;
       remoteUrl?: string;
       github?: { owner: string; repo: string };
+      environment?: {
+        vars?: Record<string, string>;
+        autoApplyToNewContainerDrones?: boolean;
+        updatedAt?: string;
+      };
     }
   >;
   /**
@@ -177,6 +187,12 @@ type DroneRegistryV1 = {
         agent?:
           | { kind: 'builtin'; id: 'cursor' | 'codex' | 'claude' | 'opencode' }
           | { kind: 'custom'; id: string; label: string; command: string };
+      };
+      environment?: {
+        vars?: Record<string, string>;
+        useRepoVars?: boolean;
+        disabledRepoKeys?: string[];
+        updatedAt?: string;
       };
     }
   >;
@@ -242,6 +258,12 @@ type DroneRegistryV1 = {
        */
       chats?: Record<string, DroneRegistryChatEntry>;
       archivedChats?: Record<string, DroneRegistryArchivedChatEntry>;
+      environment?: {
+        vars?: Record<string, string>;
+        useRepoVars?: boolean;
+        disabledRepoKeys?: string[];
+        updatedAt?: string;
+      };
     }
   >;
 };

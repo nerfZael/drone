@@ -11,6 +11,7 @@ describe('host runtime repo UX safeguards', () => {
     expect(tabs).toContain('changes');
     expect(tabs).toContain('prs');
     expect(tabs).toContain('terminal');
+    expect(tabs).toContain('env');
     expect(tabs).toContain('files');
     expect(tabs).toEqual(RIGHT_PANEL_TABS);
   });

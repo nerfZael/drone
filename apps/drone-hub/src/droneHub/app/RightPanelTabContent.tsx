@@ -1,6 +1,7 @@
 import React from 'react';
 import { DroneCanvasDock } from '../canvas';
 import { DroneChangesDock } from '../changes';
+import { DroneEnvDock } from '../env';
 import { DroneFleetDock } from '../fleet';
 import { DroneFilesDock } from '../files';
 import { DroneLinksDock, DronePreviewDock } from '../overview';
@@ -226,6 +227,17 @@ export function RightPanelTabContent({
           droneName={drone.name}
           chatName={chatName}
           defaultCwd={defaultFsPathForCurrentDrone}
+          disabled={disabled}
+          hubPhase={drone.hubPhase}
+          hubMessage={drone.hubMessage}
+        />
+      );
+
+    case 'env':
+      return (
+        <DroneEnvDock
+          droneId={drone.id}
+          droneName={drone.name}
           disabled={disabled}
           hubPhase={drone.hubPhase}
           hubMessage={drone.hubMessage}

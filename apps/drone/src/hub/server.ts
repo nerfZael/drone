@@ -51,6 +51,14 @@ import {
 import { jobsPlanFromAgentMessage, suggestDroneNameFromMessage, suggestTaskTitleFromMessage } from './jobs-from-message';
 import { tldrFromAgentMessage } from './tldr-from-message';
 import { cloneChatEntryForDroneClone, maybeBootstrapPromptFromTranscript } from './chat-clone';
+import {
+  buildEnvExportLines,
+  deriveCreatedDroneEnvironmentConfig,
+  normalizeDisabledRepoKeys,
+  normalizeEnvVarMap,
+  resolveDroneEnvironmentConfig,
+  resolveRepoEnvironmentConfig,
+} from './environment-config';
 import { hasActivePriorPendingPrompt, shouldDeferQueuedTranscriptPrompt, stalePendingPromptState } from './pendingPromptEnqueue';
 import {
   cleanupQuarantineWorktree,
@@ -452,6 +460,71 @@ async function resolveDroneOrPendingForRead(droneRef: string): Promise<ResolvedO
   const pending = regAny?.pending?.[found.id] ?? null;
   if (pending) return { kind: 'pending', id: found.id, pending };
   return null;
+}
+
+function sortedEnvEntries(varsRaw: unknown, source: 'repo' | 'drone'): Array<{ key: string; value: string; source: 'repo' | 'drone' }> {
+  return Object.entries(normalizeEnvVarMap(varsRaw))
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => ({ key, value, source }));
+}
+
+function repoEnvironmentPayload(regAny: any, repoPathRaw: unknown) {
+  const repo = resolveRepoEnvironmentConfig(regAny, repoPathRaw);
+  return {
+    ok: true as const,
+    repoPath: repo.repoPath,
+    label: repo.label,
+    registered: repo.registered,
+    autoApplyToNewContainerDrones: repo.autoApplyToNewContainerDrones,
+    updatedAt: repo.updatedAt,
+    vars: repo.vars,
+    entries: sortedEnvEntries(repo.vars, 'repo'),
+  };
+}
+
+function droneEnvironmentPayload(regAny: any, opts: {
+  id: string;
+  kind: 'real' | 'pending';
+  entry: any;
+}) {
+  const env = resolveDroneEnvironmentConfig(regAny, opts.entry);
+  const disabledRepoKeys = [...env.disabledRepoKeys].sort((a, b) => a.localeCompare(b));
+  const disabledSet = new Set(disabledRepoKeys);
+  const availableRepoEntries = Object.entries(env.repo.vars)
+    .filter(([key]) => disabledSet.has(key))
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => ({ key, value, source: 'repo' as const }));
+  const resolvedEntries = [
+    ...Object.entries(env.repoVars)
+      .filter(([key]) => !(key in env.vars))
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, value]) => ({ key, value, source: 'repo' as const })),
+    ...Object.entries(env.vars)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, value]) => ({ key, value, source: 'drone' as const })),
+  ];
+  return {
+    ok: true as const,
+    id: opts.id,
+    kind: opts.kind,
+    name: String(opts.entry?.name ?? opts.id).trim() || opts.id,
+    runtime: normalizeDroneRuntime((opts.entry as any)?.runtime),
+    repoPath: String(opts.entry?.repoPath ?? '').trim(),
+    repoLabel: env.repo.label,
+    repoRegistered: env.repo.registered,
+    repoVars: env.repo.vars,
+    repoEntries: sortedEnvEntries(env.repo.vars, 'repo'),
+    useRepoVars: env.useRepoVars,
+    disabledRepoKeys,
+    excludedRepoEntries: availableRepoEntries,
+    vars: env.vars,
+    customEntries: sortedEnvEntries(env.vars, 'drone'),
+    resolvedVars: env.resolvedVars,
+    resolvedEntries,
+    updatedAt: env.updatedAt,
+    repoUpdatedAt: env.repo.updatedAt,
+    autoApplyToNewContainerDrones: env.repo.autoApplyToNewContainerDrones,
+  };
 }
 
 async function resolveDroneOrRejectUpgrade(socket: any, droneRef: string): Promise<ResolvedDrone | null> {
@@ -2517,6 +2590,8 @@ async function sendPromptToChat(opts: {
     const { chat } = await getChatEntry({ droneId, chatName: normalizedChat });
     const agent = inferChatAgent(chat);
     const chatModel = normalizeChatModel((chat as any)?.model);
+    const managedEnv = resolveDroneEnvironmentConfig(regLatest, d).resolvedVars;
+    const managedEnvLines = buildEnvExportLines(managedEnv);
 
     const cwd = normalizeDroneCwdForRuntime(d, typeof opts.cwd === 'string' ? opts.cwd : null);
     const cdCommand =
@@ -2569,6 +2644,7 @@ async function sendPromptToChat(opts: {
       const modelArg = chatModel ? ` --model ${bashQuote(chatModel)}` : '';
       const script = [
         'set -euo pipefail',
+        ...managedEnvLines,
         `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
         cdCommand,
         `agent${modelArg} --resume ${bashQuote(chatId)} -f --approve-mcps --print ${bashQuote(promptWithHistory)}`,
@@ -2584,6 +2660,7 @@ async function sendPromptToChat(opts: {
       if (!existingThreadId) {
         const script = [
           'set -euo pipefail',
+          ...managedEnvLines,
           `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
           cdCommand,
           `codex --ask-for-approval never exec${modelArg} --skip-git-repo-check --sandbox danger-full-access --json --color never ${bashQuote(promptWithHistory)}`,
@@ -2594,6 +2671,7 @@ async function sendPromptToChat(opts: {
 
       const script = [
         'set -euo pipefail',
+        ...managedEnvLines,
         `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
         cdCommand,
         `codex --ask-for-approval never exec${modelArg} --skip-git-repo-check --sandbox danger-full-access --json --color never resume ${bashQuote(existingThreadId)} ${bashQuote(promptWithHistory)}`,
@@ -2615,6 +2693,7 @@ async function sendPromptToChat(opts: {
       const modelArg = chatModel && supportsModel ? ` --model ${bashQuote(chatModel)}` : '';
       const script = [
         'set -euo pipefail',
+        ...managedEnvLines,
         `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
         cdCommand,
         `claude --print --dangerously-skip-permissions --output-format text${modelArg} --session-id ${bashQuote(claudeSessionId)} ${bashQuote(promptWithHistory)}`,
@@ -2639,6 +2718,7 @@ async function sendPromptToChat(opts: {
       const resumeArg = openCodeSessionId ? ` --session ${bashQuote(openCodeSessionId)}` : '';
       const script = [
         'set -euo pipefail',
+        ...managedEnvLines,
         `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
         cdCommand,
         `opencode run --format default --title ${bashQuote(title)}${modelArg}${resumeArg} ${bashQuote(promptWithHistory)}`,
@@ -2664,6 +2744,7 @@ async function sendPromptToChat(opts: {
       chatName: normalizedChat,
       command: tmuxCmd,
       cwd,
+      envVars: managedEnv,
     });
     await dvmSessionType(containerName, sessionName, { text: effectivePrompt });
     await sleepMs(60);
@@ -5430,26 +5511,36 @@ async function provisionDroneFromPending(name: string) {
     await updateRegistry((regLatest: any) => {
       const pendingLatest = regLatest?.pending?.[name] ?? null;
       const fleetMeta = pendingLatest?.fleet && typeof pendingLatest.fleet === 'object' ? pendingLatest.fleet : null;
-      if (!fleetMeta) return;
+      const environment = pendingLatest?.environment ?? null;
       const found = findDroneEntryByIdentity(regLatest, pendingDroneId);
       if (!found) return;
       const d = found.entry;
-      const current = fleetActorConfig(d);
-      setFleetActorConfig(d, {
-        createdBy:
-          typeof fleetMeta.createdBy === 'string' && fleetMeta.createdBy.trim()
-            ? String(fleetMeta.createdBy).trim()
-            : current.createdBy,
-        createdAt:
-          typeof fleetMeta.createdAt === 'string' && fleetMeta.createdAt.trim()
-            ? String(fleetMeta.createdAt).trim()
-            : current.createdAt,
-        enabled: fleetMeta.enabled === true,
-        capabilities: sanitizeFleetCapabilities(fleetMeta.capabilities),
-        readScopes: sanitizeFleetReadScopes(fleetMeta.readScopes),
-        assigned: fleetMeta.assigned,
-        quotas: sanitizeFleetQuotas(fleetMeta.quotas),
-      });
+      if (fleetMeta) {
+        const current = fleetActorConfig(d);
+        setFleetActorConfig(d, {
+          createdBy:
+            typeof fleetMeta.createdBy === 'string' && fleetMeta.createdBy.trim()
+              ? String(fleetMeta.createdBy).trim()
+              : current.createdBy,
+          createdAt:
+            typeof fleetMeta.createdAt === 'string' && fleetMeta.createdAt.trim()
+              ? String(fleetMeta.createdAt).trim()
+              : current.createdAt,
+          enabled: fleetMeta.enabled === true,
+          capabilities: sanitizeFleetCapabilities(fleetMeta.capabilities),
+          readScopes: sanitizeFleetReadScopes(fleetMeta.readScopes),
+          assigned: fleetMeta.assigned,
+          quotas: sanitizeFleetQuotas(fleetMeta.quotas),
+        });
+      }
+      if (environment && typeof environment === 'object') {
+        d.environment = {
+          vars: normalizeEnvVarMap((environment as any)?.vars),
+          useRepoVars: (environment as any)?.useRepoVars === true,
+          disabledRepoKeys: normalizeDisabledRepoKeys((environment as any)?.disabledRepoKeys),
+          updatedAt: typeof (environment as any)?.updatedAt === 'string' ? String((environment as any).updatedAt).trim() || null : null,
+        };
+      }
       regLatest.drones[found.key] = d;
     });
   } catch {
@@ -6805,20 +6896,22 @@ function isHubWebTerminalSessionName(raw: string): boolean {
   return s.startsWith(prefix) && s.length > prefix.length;
 }
 
-function buildHubSessionShell(opts: { command: string; cwd: string }): string {
+function buildHubSessionShell(opts: { command: string; cwd: string; envVars?: Record<string, string> | null }): string {
   const cmd = String(opts.command || '').trim() || resolveContainerTerminalShellCommand(process.env);
   const cwd = normalizeContainerPath(String(opts.cwd ?? '').trim() || '/dvm-data');
-  const env = [
+  const baseEnv = [
     'export TERM=xterm-256color',
     'export COLORTERM=truecolor',
   ].join('; ');
+  const managedEnv = buildEnvExportLines(opts.envVars).join('; ');
   return [
     'set -e',
-    env,
+    baseEnv,
+    managedEnv,
     `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
     `cd ${bashQuote(cwd)} 2>/dev/null || cd /dvm-data`,
     cmd,
-  ].join('; ');
+  ].filter((part) => Boolean(String(part).trim())).join('; ');
 }
 
 async function ensureHubSessionRunning(opts: {
@@ -6826,6 +6919,7 @@ async function ensureHubSessionRunning(opts: {
   sessionName: string;
   command: string;
   cwd?: string | null;
+  envVars?: Record<string, string> | null;
 }) {
   const sessionName = sanitizeTmuxSessionName(opts.sessionName || 'default');
   // If a tmux session exists but its pane is dead (e.g. shell got terminated),
@@ -6845,6 +6939,7 @@ async function ensureHubSessionRunning(opts: {
   const shell = buildHubSessionShell({
     command: opts.command,
     cwd: String(opts.cwd ?? '').trim() || '/dvm-data',
+    envVars: opts.envVars ?? null,
   });
   try {
     await dvmSessionStart(opts.containerName, sessionName, 'bash', ['-lc', shell], true);
@@ -6941,6 +7036,7 @@ async function ensureHubChatSessionRunning(opts: {
   chatName: string;
   command: string;
   cwd?: string | null;
+  envVars?: Record<string, string> | null;
 }) {
   const sessionName = hubChatSessionName(opts.chatName || 'default');
   const agentCmd = String(opts.command || '').trim() || resolveHubAgentCommand();
@@ -6949,6 +7045,7 @@ async function ensureHubChatSessionRunning(opts: {
     sessionName,
     command: agentCmd,
     cwd: String(opts.cwd ?? '').trim() || '/dvm-data',
+    envVars: opts.envVars ?? null,
   });
 }
 
@@ -8427,6 +8524,63 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         return;
       }
 
+      // GET /api/repo-env?repoPath=<absolute-path-or-empty>
+      if (method === 'GET' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'repo-env') {
+        const repoPath = u.searchParams.has('repoPath') ? String(u.searchParams.get('repoPath') ?? '') : '';
+        const regAny: any = await loadRegistry();
+        json(res, 200, repoEnvironmentPayload(regAny, repoPath));
+        return;
+      }
+
+      // POST /api/repo-env
+      if (method === 'POST' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'repo-env') {
+        let body: any = null;
+        try {
+          body = await readJsonBody(req);
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          return;
+        }
+
+        const repoPath = typeof body?.repoPath === 'string' ? body.repoPath.trim() : '';
+        if (repoPath && !path.isAbsolute(repoPath)) {
+          json(res, 400, { ok: false, error: 'invalid repoPath (expected absolute path or empty string)' });
+          return;
+        }
+        const vars = normalizeEnvVarMap(body?.vars);
+        const autoApplyToNewContainerDrones = body?.autoApplyToNewContainerDrones === true;
+        const updatedAt = nowIso();
+
+        await updateRegistry((regAny: any) => {
+          regAny.settings = regAny.settings ?? {};
+          if (!repoPath) {
+            regAny.settings.nonRepoEnvironment = {
+              vars,
+              autoApplyToNewContainerDrones,
+              updatedAt,
+            };
+            return;
+          }
+
+          regAny.repos = regAny.repos ?? {};
+          let entry = regAny.repos[repoPath];
+          if (!entry || typeof entry !== 'object') {
+            entry = { path: repoPath, addedAt: updatedAt };
+          }
+          entry.path = repoPath;
+          entry.environment = {
+            vars,
+            autoApplyToNewContainerDrones,
+            updatedAt,
+          };
+          regAny.repos[repoPath] = entry;
+        });
+
+        const regAny: any = await loadRegistry();
+        json(res, 200, repoEnvironmentPayload(regAny, repoPath));
+        return;
+      }
+
       // GET /api/fleet/actors/:drone
       if (method === 'GET' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'fleet' && parts[2] === 'actors') {
         const droneRef = decodeURIComponent(parts[3]);
@@ -8703,6 +8857,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             return;
           }
         }
+        const createdEnvironment = deriveCreatedDroneEnvironmentConfig(preRegAny, { repoPath, runtime });
         const droneId = makeDroneIdentity();
         const pendingWrite: { ok: boolean; status?: number; error?: string } = await updateRegistry((regAny: any) => {
           if (droneDisplayNameExists(regAny, name)) return { ok: false, status: 409, error: `drone already exists: ${name}` };
@@ -8721,6 +8876,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             updatedAt: at,
             phase: 'starting',
             message: 'Starting…',
+            environment: createdEnvironment,
             ...(cloneFromId ? { cloneFrom: cloneFromId, cloneChats: Boolean(cloneChats) } : {}),
             ...(seedPrompt || seedAgent || seedModel
               ? {
@@ -8867,6 +9023,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                 continue;
               }
               const build = raw?.build === true;
+              const createdEnvironment = deriveCreatedDroneEnvironmentConfig(regAny, { repoPath, runtime });
 
               const seedPrompt = String(raw?.seedPrompt ?? raw?.initialMessage ?? raw?.seed?.prompt ?? '').trim();
               const seedChatName = normalizeChatName(raw?.seedChat ?? raw?.seed?.chatName ?? raw?.seed?.chat ?? 'default');
@@ -8924,6 +9081,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                 updatedAt: at,
                 phase: 'starting',
                 message: 'Starting…',
+                environment: createdEnvironment,
                 ...(cloneFromId ? { cloneFrom: cloneFromId, cloneChats: Boolean(cloneChats) } : {}),
                 ...(seedPrompt || seedAgent || seedModel
                   ? {
@@ -13198,6 +13356,71 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         }
       }
 
+      // GET /api/drones/:id/env
+      if (method === 'GET' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'drones' && parts[3] === 'env') {
+        const droneRef = decodeURIComponent(parts[2]);
+        const resolved = await resolveDroneOrPendingForRead(droneRef);
+        if (!resolved) {
+          json(res, 404, { ok: false, error: `unknown drone: ${droneRef}` });
+          return;
+        }
+        const regAny: any = await loadRegistry();
+        const entry = resolved.kind === 'real' ? resolved.drone : resolved.pending;
+        json(res, 200, droneEnvironmentPayload(regAny, { id: resolved.id, kind: resolved.kind, entry }));
+        return;
+      }
+
+      // POST /api/drones/:id/env
+      if (method === 'POST' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'drones' && parts[3] === 'env') {
+        const droneRef = decodeURIComponent(parts[2]);
+        const resolved = await resolveDroneOrPendingForRead(droneRef);
+        if (!resolved) {
+          json(res, 404, { ok: false, error: `unknown drone: ${droneRef}` });
+          return;
+        }
+
+        let body: any = null;
+        try {
+          body = await readJsonBody(req);
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          return;
+        }
+
+        const vars = normalizeEnvVarMap(body?.vars);
+        const useRepoVars = body?.useRepoVars === true;
+        const disabledRepoKeys = useRepoVars ? normalizeDisabledRepoKeys(body?.disabledRepoKeys) : [];
+        const updatedAt = nowIso();
+
+        await updateRegistry((regAny: any) => {
+          const target = resolved.kind === 'real' ? regAny?.drones?.[resolved.id] : regAny?.pending?.[resolved.id];
+          if (!target) throw new Error(`unknown drone: ${resolved.id}`);
+          target.environment = {
+            vars,
+            useRepoVars,
+            disabledRepoKeys,
+            updatedAt,
+          };
+          if (resolved.kind === 'real') {
+            regAny.drones = regAny.drones ?? {};
+            regAny.drones[resolved.id] = target;
+          } else {
+            regAny.pending = regAny.pending ?? {};
+            regAny.pending[resolved.id] = target;
+          }
+        });
+
+        const regAny: any = await loadRegistry();
+        const refreshed = await resolveDroneOrPendingForRead(resolved.id);
+        if (!refreshed) {
+          json(res, 404, { ok: false, error: `unknown drone: ${resolved.id}` });
+          return;
+        }
+        const entry = refreshed.kind === 'real' ? refreshed.drone : refreshed.pending;
+        json(res, 200, droneEnvironmentPayload(regAny, { id: refreshed.id, kind: refreshed.kind, entry }));
+        return;
+      }
+
       // DELETE /api/drones/:id?keepVolume=0|1&forget=0|1
       if (method === 'DELETE' && parts.length === 3 && parts[0] === 'api' && parts[1] === 'drones') {
         const droneRef = decodeURIComponent(parts[2]);
@@ -13811,6 +14034,9 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const mode: 'shell' | 'agent' = modeRaw === 'agent' ? 'agent' : 'shell';
         const chatName = normalizeChatName(u.searchParams.get('chat') ?? 'default');
         const cwd = normalizeDroneUiCwdForRuntime(d, u.searchParams.get('cwd') ?? null);
+        const regAny: any = await loadRegistry();
+        const managedEnv = resolveDroneEnvironmentConfig(regAny, d).resolvedVars;
+        const managedEnvLines = buildEnvExportLines(managedEnv);
 
         try {
           await syncSkillLibraryForDrone({ droneId, droneEntry: d });
@@ -13829,6 +14055,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                 : resolveHostTerminalShellCommand(process.env);
             const launchScript = [
               'set -euo pipefail',
+              ...managedEnvLines,
               `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
               `cd ${bashQuote(cwd)} 2>/dev/null || cd /`,
               `exec ${agentCmd}`,
@@ -13839,6 +14066,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                 cmd: 'bash',
                 args: ['-lc', launchScript],
                 cwd,
+                env: managedEnv,
                 force: mode !== 'agent',
                 terminal: true,
               });
@@ -13872,6 +14100,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                 chatName,
                 command: tmuxCmd,
                 cwd,
+                envVars: managedEnv,
               });
               json(res, 200, { ok: true, id: idForOps, name: droneName, mode, chat: chatName, cwd, sessionName });
               return;
@@ -13883,6 +14112,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
               sessionName,
               command: resolveHubTerminalShellCommand(),
               cwd,
+              envVars: managedEnv,
             });
             json(res, 200, { ok: true, id: idForOps, name: droneName, mode, chat: null, cwd, sessionName });
           });

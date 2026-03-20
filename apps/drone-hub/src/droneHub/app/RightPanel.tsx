@@ -4,6 +4,7 @@ import { resolveRightPanelWidthStyleValue, type RightPanelWidthMode } from './ri
 
 export type RightPanelTabId =
   | 'terminal'
+  | 'env'
   | 'files'
   | 'preview'
   | 'links'

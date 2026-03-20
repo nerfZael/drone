@@ -34,6 +34,7 @@ export const STARTUP_SEED_MISSING_GRACE_MS = 30_000;
 export type RightPanelTab = RightPanelTabId;
 export const RIGHT_PANEL_TABS: RightPanelTab[] = [
   'terminal',
+  'env',
   'files',
   'preview',
   'links',
@@ -44,6 +45,7 @@ export const RIGHT_PANEL_TABS: RightPanelTab[] = [
 ];
 export const RIGHT_PANEL_TAB_LABELS: Record<RightPanelTab, string> = {
   terminal: 'Terminal',
+  env: 'ENV',
   files: 'Files',
   preview: 'Browser',
   links: 'Links',
