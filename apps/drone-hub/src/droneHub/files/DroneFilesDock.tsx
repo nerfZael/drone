@@ -530,7 +530,7 @@ export function DroneFilesDock({
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-auto px-2.5 py-2">
+      <div className={`flex-1 min-h-0 px-2.5 py-2 ${activeOpenedFilePath ? 'overflow-hidden' : 'overflow-auto'}`}>
         {activeOpenedFilePath ? (
           <OpenedDroneFilePanel
             droneId={droneId}

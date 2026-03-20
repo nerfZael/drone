@@ -56,7 +56,7 @@ export function OpenedDroneFilePanel({
       return;
     }
     setOpenedTextMode(defaultTextFileViewModeForPath(activeFilePath));
-  }, [activeFilePath, openedEditorIsText]);
+  }, [activeFilePath, fileNavigationSeq, openedEditorIsText]);
 
   React.useEffect(() => {
     if ((fileKind ?? 'text') !== 'image' || !activeFilePath) {
@@ -149,7 +149,7 @@ export function OpenedDroneFilePanel({
   );
 
   return (
-    <div className="h-full min-h-0 flex flex-col gap-2">
+    <div className="h-full min-h-0 overflow-hidden flex flex-col gap-2">
       <div className="flex items-start justify-between gap-2">
         <button
           type="button"
@@ -192,7 +192,7 @@ export function OpenedDroneFilePanel({
           ) : null}
         </div>
       </div>
-      <div className="min-w-0 rounded-md border border-[var(--border-subtle)] bg-[var(--panel)]">
+      <div className="min-w-0 flex-1 min-h-0 rounded-md border border-[var(--border-subtle)] bg-[var(--panel)] flex flex-col">
         <div className="px-3 py-2 border-b border-[var(--border-subtle)]">
           <div className="text-[10px] text-[var(--muted-dim)] uppercase tracking-wide" style={{ fontFamily: 'var(--display)' }}>
             {fileName
@@ -219,7 +219,7 @@ export function OpenedDroneFilePanel({
             {fileError}
           </div>
         ) : null}
-        <div className="h-[calc(100%-0px)] min-h-[360px] border-t border-[var(--border-subtle)]">
+        <div className="flex-1 min-h-[360px] border-t border-[var(--border-subtle)]">
           {fileLoading ? (
             <div className="h-full w-full flex items-center justify-center text-[12px] text-[var(--muted)]">Loading file...</div>
           ) : fileKind === 'image' && openedFileMediaSrc ? (
