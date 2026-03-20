@@ -94,6 +94,34 @@ describeSocketSuite('pull requests api route matching', () => {
     expect(data?.error).toBe('drone has no repo attached');
   });
 
+  test('commit inspection routes are matched (do not fall through to 404)', async () => {
+    const droneId = 'drone-pr-route';
+
+    const branchList = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/repo/commits`);
+    expect(branchList.r.status).toBe(400);
+    expect(branchList.data?.ok).toBe(false);
+    expect(branchList.data?.error).toBe('drone has no repo attached');
+
+    const branchChanges = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/repo/commits/0123456789abcdef0123456789abcdef01234567/changes`,
+    );
+    expect(branchChanges.r.status).toBe(400);
+    expect(branchChanges.data?.ok).toBe(false);
+    expect(branchChanges.data?.error).toBe('drone has no repo attached');
+
+    const prCommits = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/repo/pull-requests/123/commits`);
+    expect(prCommits.r.status).toBe(400);
+    expect(prCommits.data?.ok).toBe(false);
+    expect(prCommits.data?.error).toBe('drone has no repo attached');
+
+    const prCommitChanges = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/repo/pull-requests/123/commits/0123456789abcdef0123456789abcdef01234567/changes`,
+    );
+    expect(prCommitChanges.r.status).toBe(400);
+    expect(prCommitChanges.data?.ok).toBe(false);
+    expect(prCommitChanges.data?.error).toBe('drone has no repo attached');
+  });
+
   test('POST /repo/push is matched (does not fall through to 404)', async () => {
     const droneId = 'drone-pr-route';
     const { r, data } = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/repo/push`, {

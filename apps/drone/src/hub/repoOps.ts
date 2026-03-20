@@ -66,6 +66,42 @@ export type RepoNameStatusEntry = {
   statusChar: string;
 };
 
+export type RepoCommitSummary = {
+  sha: string;
+  parents: string[];
+  authorName: string;
+  authorEmail: string | null;
+  authoredAt: string;
+  subject: string;
+  isMerge: boolean;
+};
+
+export type RepoCommitChangeEntry = {
+  path: string;
+  originalPath: string | null;
+  statusChar: string;
+  statusType: RepoChangeType;
+  additions: number;
+  deletions: number;
+  changes: number;
+};
+
+export type RepoCommitDetails = {
+  repoRoot: string;
+  commit: RepoCommitSummary & {
+    body: string;
+    committerName: string;
+    committerEmail: string | null;
+    committedAt: string;
+  };
+  counts: {
+    changed: number;
+    additions: number;
+    deletions: number;
+  };
+  entries: RepoCommitChangeEntry[];
+};
+
 export type RepoPatchApplyErrorKind = 'patch_apply_conflict' | 'patch_apply_failed';
 
 export class RepoPatchApplyError extends Error {
@@ -235,6 +271,114 @@ function parseGitNameStatusZ(raw: string): RepoNameStatusEntry[] {
     return String(a.originalPath ?? '').localeCompare(String(b.originalPath ?? ''));
   });
   return out;
+}
+
+type RepoNumStatEntry = {
+  path: string;
+  originalPath: string | null;
+  additions: number;
+  deletions: number;
+};
+
+function parseNumstatValue(raw: string): number {
+  const text = String(raw ?? '').trim();
+  if (!text || text === '-') return 0;
+  const parsed = Number.parseInt(text, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+export function parseGitNumStatZ(raw: string): RepoNumStatEntry[] {
+  const tokens = String(raw ?? '')
+    .split('\0')
+    .filter((token) => token.length > 0);
+  const out: RepoNumStatEntry[] = [];
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i];
+    const parts = token.split('\t');
+    if (parts.length < 3) continue;
+    const additions = parseNumstatValue(parts[0]);
+    const deletions = parseNumstatValue(parts[1]);
+    const rest = parts.slice(2).join('\t');
+    if (rest) {
+      out.push({
+        path: rest,
+        originalPath: null,
+        additions,
+        deletions,
+      });
+      continue;
+    }
+    const originalPath = tokens[i + 1] ?? '';
+    const path = tokens[i + 2] ?? '';
+    if (originalPath || path) {
+      out.push({
+        path: path || originalPath,
+        originalPath: originalPath || null,
+        additions,
+        deletions,
+      });
+    }
+    i += 2;
+  }
+  return out;
+}
+
+export function parseGitCommitList(raw: string): RepoCommitSummary[] {
+  return String(raw ?? '')
+    .split('\x1e')
+    .map((record) => record.trim())
+    .filter(Boolean)
+    .map((record) => {
+      const [shaRaw, parentsRaw, authorNameRaw, authorEmailRaw, authoredAtRaw, subjectRaw] = record.split('\x1f');
+      const sha = String(shaRaw ?? '').trim().toLowerCase();
+      if (!/^[0-9a-f]{40}$/.test(sha)) return null;
+      const parents = String(parentsRaw ?? '')
+        .trim()
+        .split(/\s+/g)
+        .map((value) => value.trim().toLowerCase())
+        .filter((value) => /^[0-9a-f]{40}$/.test(value));
+      return {
+        sha,
+        parents,
+        authorName: String(authorNameRaw ?? '').trim(),
+        authorEmail: String(authorEmailRaw ?? '').trim() || null,
+        authoredAt: String(authoredAtRaw ?? '').trim(),
+        subject: String(subjectRaw ?? '').trim() || sha.slice(0, 12),
+        isMerge: parents.length > 1,
+      } satisfies RepoCommitSummary;
+    })
+    .filter((value): value is RepoCommitSummary => value != null);
+}
+
+export function parseGitCommitDetails(raw: string): RepoCommitDetails['commit'] {
+  const parts = String(raw ?? '').split('\0');
+  const sha = String(parts[0] ?? '').trim().toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('failed to resolve commit sha');
+  const parents = String(parts[1] ?? '')
+    .trim()
+    .split(/\s+/g)
+    .map((value) => value.trim().toLowerCase())
+    .filter((value) => /^[0-9a-f]{40}$/.test(value));
+  return {
+    sha,
+    parents,
+    authorName: String(parts[2] ?? '').trim(),
+    authorEmail: String(parts[3] ?? '').trim() || null,
+    authoredAt: String(parts[4] ?? '').trim(),
+    committerName: String(parts[5] ?? '').trim(),
+    committerEmail: String(parts[6] ?? '').trim() || null,
+    committedAt: String(parts[7] ?? '').trim(),
+    subject: String(parts[8] ?? '').trim() || sha.slice(0, 12),
+    body: String(parts[9] ?? ''),
+    isMerge: parents.length > 1,
+  };
+}
+
+function commitDiffTreeArgs(sha: string, parentSha: string | null, format: '--name-status' | '--numstat'): string[] {
+  if (parentSha) {
+    return ['diff-tree', format, '-z', '-r', '--find-renames', '--find-copies', parentSha, sha];
+  }
+  return ['diff-tree', '--root', format, '-z', '-r', '--find-renames', '--find-copies', sha];
 }
 
 function pushRepoChangeEntry(list: RepoChangeEntry[], opts: { path: string; originalPath?: string | null; stagedChar: string; unstagedChar: string; forceConflicted?: boolean }) {
@@ -533,6 +677,131 @@ export async function gitRepoChangesSummary(repoRoot: string): Promise<RepoChang
     '-z',
   ]);
   return parseGitStatusPorcelainV2Z(raw);
+}
+
+export async function gitRepoCommitList(opts: {
+  repoRoot: string;
+  headRef?: string;
+  baseRef?: string | null;
+  limit?: number;
+}): Promise<RepoCommitSummary[]> {
+  const repoRoot = String(opts.repoRoot ?? '').trim();
+  if (!repoRoot) throw new Error('missing repo root');
+  const headRef = String(opts.headRef ?? 'HEAD').trim() || 'HEAD';
+  const baseRef = String(opts.baseRef ?? '').trim();
+  const limit =
+    typeof opts.limit === 'number' && Number.isFinite(opts.limit) && opts.limit > 0 ? Math.min(200, Math.floor(opts.limit)) : 100;
+  const revisionRange = baseRef ? `${baseRef}..${headRef}` : headRef;
+  const raw = await runLocalOrThrow('git', [
+    '-C',
+    repoRoot,
+    'log',
+    `--max-count=${limit}`,
+    '--date=iso-strict',
+    '--no-show-signature',
+    '--format=%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%aI%x1f%s',
+    revisionRange,
+  ]);
+  return parseGitCommitList(raw);
+}
+
+export async function gitRepoCommitDetails(opts: { repoRoot: string; sha: string }): Promise<RepoCommitDetails> {
+  const repoRoot = String(opts.repoRoot ?? '').trim();
+  const sha = String(opts.sha ?? '').trim().toLowerCase();
+  if (!repoRoot) throw new Error('missing repo root');
+  if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('invalid commit sha');
+
+  const commitMeta = parseGitCommitDetails(
+    await runLocalOrThrow('git', [
+      '-C',
+      repoRoot,
+      'show',
+      '-s',
+      '--no-show-signature',
+      '--format=%H%x00%P%x00%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI%x00%s%x00%b',
+      sha,
+    ]),
+  );
+  const parentSha = commitMeta.parents[0] ?? null;
+  const [nameStatusRaw, numstatRaw] = await Promise.all([
+    runLocalOrThrow('git', ['-C', repoRoot, ...commitDiffTreeArgs(sha, parentSha, '--name-status')]),
+    runLocalOrThrow('git', ['-C', repoRoot, ...commitDiffTreeArgs(sha, parentSha, '--numstat')]),
+  ]);
+  const nameStatus = parseGitNameStatusZ(nameStatusRaw);
+  const numstat = parseGitNumStatZ(numstatRaw);
+  const statByKey = new Map<string, RepoNumStatEntry>();
+  for (const entry of numstat) {
+    statByKey.set(`${entry.path}\u0000${entry.originalPath ?? ''}`, entry);
+  }
+  const entries: RepoCommitChangeEntry[] = nameStatus.map((entry) => {
+    const stats = statByKey.get(`${entry.path}\u0000${entry.originalPath ?? ''}`) ?? null;
+    const additions = stats?.additions ?? 0;
+    const deletions = stats?.deletions ?? 0;
+    return {
+      path: entry.path,
+      originalPath: entry.originalPath,
+      statusChar: entry.statusChar,
+      statusType: statusCharToType(entry.statusChar),
+      additions,
+      deletions,
+      changes: additions + deletions,
+    };
+  });
+  const additions = entries.reduce((sum, entry) => sum + entry.additions, 0);
+  const deletions = entries.reduce((sum, entry) => sum + entry.deletions, 0);
+  return {
+    repoRoot,
+    commit: commitMeta,
+    counts: {
+      changed: entries.length,
+      additions,
+      deletions,
+    },
+    entries,
+  };
+}
+
+export async function gitRepoCommitDiffForPath(opts: {
+  repoRoot: string;
+  sha: string;
+  filePath: string;
+  contextLines?: number;
+  maxChars?: number;
+}): Promise<{ repoRoot: string; sha: string; path: string; diff: string; truncated: boolean }> {
+  const repoRoot = String(opts.repoRoot ?? '').trim();
+  const sha = String(opts.sha ?? '').trim().toLowerCase();
+  const requestedPath = String(opts.filePath ?? '').trim();
+  if (!repoRoot) throw new Error('missing repo root');
+  if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('invalid commit sha');
+  if (!requestedPath || requestedPath.includes('\0')) throw new Error('invalid file path');
+  const contextLines =
+    typeof opts.contextLines === 'number' && Number.isFinite(opts.contextLines) && opts.contextLines >= 0
+      ? Math.floor(opts.contextLines)
+      : 3;
+  const maxChars =
+    typeof opts.maxChars === 'number' && Number.isFinite(opts.maxChars) && opts.maxChars > 0 ? Math.floor(opts.maxChars) : 350_000;
+  const parentsRaw = await runLocalOrThrow('git', ['-C', repoRoot, 'show', '-s', '--format=%P', sha]);
+  const parentSha = String(parentsRaw ?? '')
+    .trim()
+    .split(/\s+/g)
+    .map((value) => value.trim().toLowerCase())
+    .find((value) => /^[0-9a-f]{40}$/.test(value)) ?? null;
+  const args = parentSha
+    ? ['-C', repoRoot, 'diff', '--no-color', '--no-ext-diff', `-U${contextLines}`, parentSha, sha, '--', requestedPath]
+    : ['-C', repoRoot, 'show', '--format=', '--no-color', '--no-ext-diff', `-U${contextLines}`, sha, '--', requestedPath];
+  let diffText = await runLocalOrThrow('git', args);
+  let truncated = false;
+  if (diffText.length > maxChars) {
+    truncated = true;
+    diffText = `${diffText.slice(0, maxChars)}\n\n@@ truncated @@\n`;
+  }
+  return {
+    repoRoot,
+    sha,
+    path: requestedPath,
+    diff: diffText,
+    truncated,
+  };
 }
 
 export async function gitRepoDiffForPath(opts: {

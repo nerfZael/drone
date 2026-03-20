@@ -223,6 +223,73 @@ export type RepoPullDiffPayload =
     }
   | { ok: false; error: string; code?: string };
 
+export type RepoCommitSummary = {
+  sha: string;
+  parents: string[];
+  authorName: string;
+  authorEmail: string | null;
+  authoredAt: string;
+  subject: string;
+  isMerge: boolean;
+};
+
+export type RepoCommitChangeEntry = {
+  path: string;
+  originalPath: string | null;
+  statusChar: string;
+  statusType: RepoChangeType;
+  additions: number;
+  deletions: number;
+  changes: number;
+};
+
+export type RepoCommitListPayload =
+  | {
+      ok: true;
+      id: string;
+      name: string;
+      repoRoot: string;
+      branch: RepoBranchSummary;
+      baseRef: string | null;
+      commits: RepoCommitSummary[];
+    }
+  | { ok: false; error: string; code?: string };
+
+export type RepoCommitChangesPayload =
+  | {
+      ok: true;
+      id: string;
+      name: string;
+      repoRoot: string;
+      commit: RepoCommitSummary & {
+        body: string;
+        committerName: string;
+        committerEmail: string | null;
+        committedAt: string;
+      };
+      counts: {
+        changed: number;
+        additions: number;
+        deletions: number;
+      };
+      entries: RepoCommitChangeEntry[];
+    }
+  | { ok: false; error: string; code?: string };
+
+export type RepoCommitDiffPayload =
+  | {
+      ok: true;
+      id: string;
+      name: string;
+      repoRoot: string;
+      sha: string;
+      path: string;
+      diff: string;
+      truncated: boolean;
+      isBinary: boolean;
+    }
+  | { ok: false; error: string; code?: string };
+
 export type RepoPullRequestChangeEntry = {
   path: string;
   originalPath: string | null;
@@ -259,6 +326,40 @@ export type RepoPullRequestChangesPayload =
         deletions: number;
       };
       entries: RepoPullRequestChangeEntry[];
+    }
+  | { ok: false; error: string; code?: string };
+
+export type RepoPullRequestCommitListPayload =
+  | {
+      ok: true;
+      id: string;
+      name: string;
+      repoRoot: string;
+      github: { owner: string; repo: string };
+      pullNumber: number;
+      commits: RepoCommitSummary[];
+    }
+  | { ok: false; error: string; code?: string };
+
+export type RepoPullRequestCommitChangesPayload =
+  | {
+      ok: true;
+      id: string;
+      name: string;
+      repoRoot: string;
+      github: { owner: string; repo: string };
+      commit: RepoCommitSummary & {
+        body: string;
+        committerName: string;
+        committerEmail: string | null;
+        committedAt: string;
+      };
+      counts: {
+        changed: number;
+        additions: number;
+        deletions: number;
+      };
+      entries: RepoCommitChangeEntry[];
     }
   | { ok: false; error: string; code?: string };
 

@@ -5,10 +5,15 @@ import { IconPencil } from '../app/icons';
 import { provisioningLabel, usePaneReadiness } from '../panes/usePaneReadiness';
 import type {
   RepoChangeEntry,
+  RepoCommitChangesPayload,
+  RepoCommitDiffPayload,
+  RepoCommitListPayload,
   RepoChangesPayload,
   RepoDiffPayload,
   RepoPullChangesPayload,
   RepoPullDiffPayload,
+  RepoPullRequestCommitChangesPayload,
+  RepoPullRequestCommitListPayload,
   RepoPullRequestClosePayload,
   RepoPullRequestChangesPayload,
   RepoPullRequestMergePayload,
@@ -22,11 +27,17 @@ import {
   selectedPullRequestForDrone,
 } from './navigation';
 import { DiffBlock } from './DiffBlock';
+import { CommitInspectionView } from './CommitInspectionView';
+import { MetaChip } from './MetaChip';
 import type { DiffExpansionRange, DiffState, DiffViewType } from './types';
 import {
+  CHANGES_BRANCH_MODE_STORAGE_KEY,
+  CHANGES_COMMIT_LIST_WIDTH_STORAGE_KEY,
+  CHANGES_CONTEXT_STORAGE_KEY,
   CHANGES_DIFF_VIEW_STORAGE_KEY,
   CHANGES_EXPLORER_ZOOM_STORAGE_KEY,
   CHANGES_EXPLORER_WIDTH_STORAGE_KEY,
+  CHANGES_PRIMARY_VIEW_STORAGE_KEY,
   CHANGES_VIEW_STORAGE_KEY,
   readChangesStorage,
   removeChangesStorage,
@@ -51,14 +62,19 @@ import {
   pullRequestStateBadge,
   refreshTimeLabel,
   resolveExplorerSidebarWidthBounds,
+  sameRepoCommitChangesPayload,
+  sameRepoCommitListPayload,
   sameRepoChangesPayload,
   sameRepoPullChangesPayload,
+  sameRepoPullRequestCommitChangesPayload,
+  sameRepoPullRequestCommitListPayload,
   sameRepoPullRequestChangesPayload,
   sortRepoChangeEntries,
   shortRefName,
   shortSha,
   statusBadgeTitle,
   statusCharLabel,
+  toWorkingEntriesFromCommit,
   toWorkingEntriesFromPull,
   type ChangesDataMode,
   type DiffKind,
@@ -66,6 +82,9 @@ import {
 } from './helpers';
 
 type ChangesViewMode = 'stacked' | 'split';
+type ChangesContextMode = 'branch' | 'pull-request';
+type ChangesPrimaryView = 'changes' | 'commits';
+type BranchChangesMode = Exclude<ChangesDataMode, 'pull-request'>;
 type LastRefreshedByMode = Record<ChangesDataMode, number | null>;
 const EXPLORER_SIDEBAR_MIN_WIDTH_PX = 180;
 const EXPLORER_SIDEBAR_DEFAULT_WIDTH_PX = 240;
@@ -77,6 +96,11 @@ const EXPLORER_ZOOM_MIN = 0.9;
 const EXPLORER_ZOOM_DEFAULT = 1;
 const EXPLORER_ZOOM_MAX = 1.4;
 const EXPLORER_ZOOM_STEP = 0.1;
+const COMMIT_LIST_MIN_WIDTH_PX = 220;
+const COMMIT_LIST_DEFAULT_WIDTH_PX = 300;
+const COMMIT_LIST_MAX_WIDTH_PX = 460;
+const COMMIT_LIST_MAX_RATIO = 0.42;
+const COMMIT_DETAIL_MIN_WIDTH_PX = 420;
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -97,30 +121,6 @@ function pruneRecordKeys<T>(record: Record<string, T>, validKeys: Set<string>): 
     next[key] = value;
   }
   return changed ? next : record;
-}
-
-function MetaChip({
-  label,
-  value,
-  title,
-  mono = false,
-}: {
-  label: string;
-  value: React.ReactNode;
-  title?: string;
-  mono?: boolean;
-}) {
-  return (
-    <span
-      className={`inline-flex items-center gap-1 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-1.5 py-[1px] text-[10px] ${
-        mono ? 'font-mono' : ''
-      }`}
-      title={title}
-    >
-      <span className="uppercase tracking-[0.08em] text-[var(--muted-dim)]">{label}</span>
-      <span className="text-[var(--fg-secondary)]">{value}</span>
-    </span>
-  );
 }
 
 export function DroneChangesDock({
@@ -176,10 +176,20 @@ export function DroneChangesDock({
     'pull-preview': null,
     'pull-request': null,
   });
-
-  const [dataMode, setDataMode] = React.useState<ChangesDataMode>(() =>
-    initialRequestedPullNumberRef.current && initialRequestedPullNumberRef.current > 0 ? 'pull-request' : 'working-tree',
+  const [contextMode, setContextMode] = React.useState<ChangesContextMode>(() =>
+    initialRequestedPullNumberRef.current && initialRequestedPullNumberRef.current > 0
+      ? 'pull-request'
+      : readChangesStorage(CHANGES_CONTEXT_STORAGE_KEY) === 'pull-request'
+        ? 'pull-request'
+        : 'branch',
   );
+  const [primaryView, setPrimaryView] = React.useState<ChangesPrimaryView>(() =>
+    readChangesStorage(CHANGES_PRIMARY_VIEW_STORAGE_KEY) === 'commits' ? 'commits' : 'changes',
+  );
+  const [branchChangesMode, setBranchChangesMode] = React.useState<BranchChangesMode>(() =>
+    readChangesStorage(CHANGES_BRANCH_MODE_STORAGE_KEY) === 'pull-preview' ? 'pull-preview' : 'working-tree',
+  );
+  const dataMode: ChangesDataMode = contextMode === 'pull-request' ? 'pull-request' : branchChangesMode;
 
   const [viewMode, setViewMode] = React.useState<ChangesViewMode>(() => {
     const raw = readChangesStorage(CHANGES_VIEW_STORAGE_KEY);
@@ -191,10 +201,39 @@ export function DroneChangesDock({
   });
 
   const [selectedPath, setSelectedPath] = React.useState<string | null>(null);
+  const [selectedCommitSha, setSelectedCommitSha] = React.useState<string | null>(null);
+  const [commitFileSelectedPath, setCommitFileSelectedPath] = React.useState<string | null>(null);
   const [splitKind, setSplitKind] = React.useState<DiffKind>('unstaged');
   const [stackedPreferredKind, setStackedPreferredKind] = React.useState<DiffKind>('unstaged');
   const [expandedDirs, setExpandedDirs] = React.useState<Record<string, boolean>>({});
   const [expandedPullFiles, setExpandedPullFiles] = React.useState<Record<string, boolean>>({});
+  const [expandedCommitDirs, setExpandedCommitDirs] = React.useState<Record<string, boolean>>({});
+  const [expandedCommitFiles, setExpandedCommitFiles] = React.useState<Record<string, boolean>>({});
+  const [branchCommitList, setBranchCommitList] = React.useState<Extract<RepoCommitListPayload, { ok: true }> | null>(null);
+  const [branchCommitListLoading, setBranchCommitListLoading] = React.useState(false);
+  const [branchCommitListError, setBranchCommitListError] = React.useState<string | null>(null);
+  const branchCommitListRef = React.useRef<Extract<RepoCommitListPayload, { ok: true }> | null>(null);
+  const [pullRequestCommitList, setPullRequestCommitList] = React.useState<Extract<RepoPullRequestCommitListPayload, { ok: true }> | null>(null);
+  const [pullRequestCommitListLoading, setPullRequestCommitListLoading] = React.useState(false);
+  const [pullRequestCommitListError, setPullRequestCommitListError] = React.useState<string | null>(null);
+  const pullRequestCommitListRef = React.useRef<Extract<RepoPullRequestCommitListPayload, { ok: true }> | null>(null);
+  const [branchCommitDetails, setBranchCommitDetails] = React.useState<Extract<RepoCommitChangesPayload, { ok: true }> | null>(null);
+  const [branchCommitDetailsLoading, setBranchCommitDetailsLoading] = React.useState(false);
+  const [branchCommitDetailsError, setBranchCommitDetailsError] = React.useState<string | null>(null);
+  const branchCommitDetailsRef = React.useRef<Extract<RepoCommitChangesPayload, { ok: true }> | null>(null);
+  const [pullRequestCommitDetails, setPullRequestCommitDetails] = React.useState<Extract<RepoPullRequestCommitChangesPayload, { ok: true }> | null>(null);
+  const [pullRequestCommitDetailsLoading, setPullRequestCommitDetailsLoading] = React.useState(false);
+  const [pullRequestCommitDetailsError, setPullRequestCommitDetailsError] = React.useState<string | null>(null);
+  const pullRequestCommitDetailsRef = React.useRef<Extract<RepoPullRequestCommitChangesPayload, { ok: true }> | null>(null);
+  const commitLayoutRef = React.useRef<HTMLDivElement | null>(null);
+  const [commitListWidthPx, setCommitListWidthPx] = React.useState<number>(() => {
+    const raw = Number(readChangesStorage(CHANGES_COMMIT_LIST_WIDTH_STORAGE_KEY));
+    if (!Number.isFinite(raw) || raw < 160) return COMMIT_LIST_DEFAULT_WIDTH_PX;
+    return Math.floor(raw);
+  });
+  const [commitListResizing, setCommitListResizing] = React.useState(false);
+  const commitListDragRef = React.useRef<{ pointerId: number; startX: number; startWidth: number; liveWidth: number } | null>(null);
+  const commitListResizeBodyStyleRef = React.useRef<{ cursor: string; userSelect: string } | null>(null);
   const splitLayoutRef = React.useRef<HTMLDivElement | null>(null);
   const [explorerManualWidthPx, setExplorerManualWidthPx] = React.useState<number | null>(() => {
     const raw = Number(readChangesStorage(CHANGES_EXPLORER_WIDTH_STORAGE_KEY));
@@ -229,6 +268,9 @@ export function DroneChangesDock({
   const diffSourceByKeyRef = React.useRef<Record<string, string | null>>({});
   const diffSourceInflightByKeyRef = React.useRef<Record<string, Promise<string | null>>>({});
   const inflightRef = React.useRef<Set<string>>(new Set());
+  const [commitDiffByKey, setCommitDiffByKey] = React.useState<Record<string, DiffState>>({});
+  const commitDiffByKeyRef = React.useRef<Record<string, DiffState>>({});
+  const commitInflightRef = React.useRef<Set<string>>(new Set());
   const mountedRef = React.useRef(true);
   const dockRootRef = React.useRef<HTMLDivElement | null>(null);
   const [dockHovered, setDockHovered] = React.useState(false);
@@ -266,6 +308,18 @@ export function DroneChangesDock({
   React.useEffect(() => {
     pullRequestChangesRef.current = pullRequestChanges;
   }, [pullRequestChanges]);
+  React.useEffect(() => {
+    branchCommitListRef.current = branchCommitList;
+  }, [branchCommitList]);
+  React.useEffect(() => {
+    pullRequestCommitListRef.current = pullRequestCommitList;
+  }, [pullRequestCommitList]);
+  React.useEffect(() => {
+    branchCommitDetailsRef.current = branchCommitDetails;
+  }, [branchCommitDetails]);
+  React.useEffect(() => {
+    pullRequestCommitDetailsRef.current = pullRequestCommitDetails;
+  }, [pullRequestCommitDetails]);
 
   React.useEffect(() => {
     writeChangesStorage(CHANGES_VIEW_STORAGE_KEY, viewMode);
@@ -273,6 +327,15 @@ export function DroneChangesDock({
   React.useEffect(() => {
     writeChangesStorage(CHANGES_DIFF_VIEW_STORAGE_KEY, diffViewType);
   }, [diffViewType]);
+  React.useEffect(() => {
+    writeChangesStorage(CHANGES_CONTEXT_STORAGE_KEY, contextMode);
+  }, [contextMode]);
+  React.useEffect(() => {
+    writeChangesStorage(CHANGES_PRIMARY_VIEW_STORAGE_KEY, primaryView);
+  }, [primaryView]);
+  React.useEffect(() => {
+    writeChangesStorage(CHANGES_BRANCH_MODE_STORAGE_KEY, branchChangesMode);
+  }, [branchChangesMode]);
 
   React.useEffect(() => {
     if (explorerManualWidthPx === null) {
@@ -284,6 +347,9 @@ export function DroneChangesDock({
   React.useEffect(() => {
     writeChangesStorage(CHANGES_EXPLORER_ZOOM_STORAGE_KEY, String(explorerZoom));
   }, [explorerZoom]);
+  React.useEffect(() => {
+    writeChangesStorage(CHANGES_COMMIT_LIST_WIDTH_STORAGE_KEY, String(Math.floor(commitListWidthPx)));
+  }, [commitListWidthPx]);
 
   React.useEffect(() => {
     const onOpenPullRequest = (event: Event) => {
@@ -294,7 +360,7 @@ export function DroneChangesDock({
       const normalizedPullNumber = Math.floor(pullNumber);
       consumeRequestedPullRequestForDrone(droneId);
       setPullRequestNumber(normalizedPullNumber);
-      setDataMode('pull-request');
+      setContextMode('pull-request');
       setRefreshNonce((n) => n + 1);
     };
     window.addEventListener(CHANGES_OPEN_PULL_REQUEST_EVENT, onOpenPullRequest as EventListener);
@@ -305,24 +371,24 @@ export function DroneChangesDock({
     const requestedPullNumber = consumeRequestedPullRequestForDrone(droneId);
     if (requestedPullNumber && requestedPullNumber > 0) {
       setPullRequestNumber(requestedPullNumber);
-      setDataMode('pull-request');
+      setContextMode('pull-request');
       setRefreshNonce((n) => n + 1);
       return;
     }
     setPullRequestNumber(selectedPullRequestForDrone(droneId));
-    setDataMode('working-tree');
+    setContextMode('branch');
   }, [droneId]);
 
   React.useEffect(() => {
-    if (dataMode !== 'pull-request') return;
+    if (contextMode !== 'pull-request') return;
     if (pullRequestNumber && pullRequestNumber > 0) return;
-    setDataMode('working-tree');
-  }, [dataMode, pullRequestNumber]);
+    setContextMode('branch');
+  }, [contextMode, pullRequestNumber]);
 
   React.useEffect(() => {
     setPullRequestActionError(null);
     setPullRequestActionNotice(null);
-  }, [dataMode, pullRequestNumber]);
+  }, [contextMode, pullRequestNumber]);
 
   React.useEffect(() => {
     if (!pullRequestActionNotice) return;
@@ -331,7 +397,7 @@ export function DroneChangesDock({
   }, [pullRequestActionNotice]);
 
   React.useEffect(() => {
-    if (!repoAttached || disabled || dataMode !== 'working-tree') {
+    if (!repoAttached || disabled || primaryView !== 'changes' || dataMode !== 'working-tree') {
       changesRef.current = null;
       setChanges(null);
       setChangesError(null);
@@ -374,10 +440,10 @@ export function DroneChangesDock({
       mounted = false;
       if (timer) clearInterval(timer);
     };
-  }, [dataMode, disabled, droneId, markModeRefreshed, refreshNonce, repoAttached, startup.markReady]);
+  }, [dataMode, disabled, droneId, markModeRefreshed, primaryView, refreshNonce, repoAttached, startup.markReady]);
 
   React.useEffect(() => {
-    if (!repoAttached || disabled || dataMode !== 'pull-preview') {
+    if (!repoAttached || disabled || primaryView !== 'changes' || dataMode !== 'pull-preview') {
       pullChangesRef.current = null;
       setPullChanges(null);
       setPullError(null);
@@ -419,7 +485,7 @@ export function DroneChangesDock({
       mounted = false;
       if (timer) clearInterval(timer);
     };
-  }, [dataMode, disabled, droneId, markModeRefreshed, refreshNonce, repoAttached]);
+  }, [dataMode, disabled, droneId, markModeRefreshed, primaryView, refreshNonce, repoAttached]);
 
   React.useEffect(() => {
     if (!repoAttached || disabled || dataMode !== 'pull-request' || !pullRequestNumber) {
@@ -474,6 +540,150 @@ export function DroneChangesDock({
     };
   }, [dataMode, disabled, droneId, markModeRefreshed, pullRequestNumber, refreshNonce, repoAttached]);
 
+  React.useEffect(() => {
+    if (!repoAttached || disabled || primaryView !== 'commits' || contextMode !== 'branch') {
+      branchCommitListRef.current = null;
+      setBranchCommitList(null);
+      setBranchCommitListError(null);
+      setBranchCommitListLoading(false);
+      return;
+    }
+    let mounted = true;
+    const load = async () => {
+      if (!mounted) return;
+      setBranchCommitListLoading(true);
+      try {
+        const data = await requestJson<Extract<RepoCommitListPayload, { ok: true }>>(
+          `/api/drones/${encodeURIComponent(droneId)}/repo/commits?limit=100`,
+        );
+        if (!mounted) return;
+        if (!sameRepoCommitListPayload(branchCommitListRef.current, data)) {
+          branchCommitListRef.current = data;
+          setBranchCommitList(data);
+        }
+        setBranchCommitListError(null);
+      } catch (e: any) {
+        if (!mounted) return;
+        setBranchCommitListError(e?.message ?? String(e));
+      } finally {
+        if (mounted) setBranchCommitListLoading(false);
+      }
+    };
+    void load();
+    return () => {
+      mounted = false;
+    };
+  }, [contextMode, disabled, droneId, primaryView, refreshNonce, repoAttached]);
+
+  React.useEffect(() => {
+    if (!repoAttached || disabled || primaryView !== 'commits' || contextMode !== 'pull-request' || !pullRequestNumber) {
+      pullRequestCommitListRef.current = null;
+      setPullRequestCommitList(null);
+      setPullRequestCommitListError(null);
+      setPullRequestCommitListLoading(false);
+      return;
+    }
+    let mounted = true;
+    const activePullNumber = pullRequestNumber;
+    const load = async () => {
+      if (!mounted) return;
+      setPullRequestCommitListLoading(true);
+      try {
+        const data = await requestJson<Extract<RepoPullRequestCommitListPayload, { ok: true }>>(
+          `/api/drones/${encodeURIComponent(droneId)}/repo/pull-requests/${activePullNumber}/commits`,
+        );
+        if (!mounted) return;
+        if (!sameRepoPullRequestCommitListPayload(pullRequestCommitListRef.current, data)) {
+          pullRequestCommitListRef.current = data;
+          setPullRequestCommitList(data);
+        }
+        setPullRequestCommitListError(null);
+      } catch (e: any) {
+        if (!mounted) return;
+        setPullRequestCommitListError(e?.message ?? String(e));
+      } finally {
+        if (mounted) setPullRequestCommitListLoading(false);
+      }
+    };
+    void load();
+    return () => {
+      mounted = false;
+    };
+  }, [contextMode, disabled, droneId, primaryView, pullRequestNumber, refreshNonce, repoAttached]);
+
+  React.useEffect(() => {
+    if (!repoAttached || disabled || primaryView !== 'commits' || contextMode !== 'branch' || !selectedCommitSha) {
+      branchCommitDetailsRef.current = null;
+      setBranchCommitDetails(null);
+      setBranchCommitDetailsError(null);
+      setBranchCommitDetailsLoading(false);
+      return;
+    }
+    let mounted = true;
+    const sha = selectedCommitSha;
+    const load = async () => {
+      if (!mounted) return;
+      setBranchCommitDetailsLoading(true);
+      try {
+        const data = await requestJson<Extract<RepoCommitChangesPayload, { ok: true }>>(
+          `/api/drones/${encodeURIComponent(droneId)}/repo/commits/${encodeURIComponent(sha)}/changes`,
+        );
+        if (!mounted) return;
+        if (!sameRepoCommitChangesPayload(branchCommitDetailsRef.current, data)) {
+          branchCommitDetailsRef.current = data;
+          setBranchCommitDetails(data);
+        }
+        setBranchCommitDetailsError(null);
+      } catch (e: any) {
+        if (!mounted) return;
+        setBranchCommitDetailsError(e?.message ?? String(e));
+      } finally {
+        if (mounted) setBranchCommitDetailsLoading(false);
+      }
+    };
+    void load();
+    return () => {
+      mounted = false;
+    };
+  }, [contextMode, disabled, droneId, primaryView, refreshNonce, repoAttached, selectedCommitSha]);
+
+  React.useEffect(() => {
+    if (!repoAttached || disabled || primaryView !== 'commits' || contextMode !== 'pull-request' || !pullRequestNumber || !selectedCommitSha) {
+      pullRequestCommitDetailsRef.current = null;
+      setPullRequestCommitDetails(null);
+      setPullRequestCommitDetailsError(null);
+      setPullRequestCommitDetailsLoading(false);
+      return;
+    }
+    let mounted = true;
+    const activePullNumber = pullRequestNumber;
+    const sha = selectedCommitSha;
+    const load = async () => {
+      if (!mounted) return;
+      setPullRequestCommitDetailsLoading(true);
+      try {
+        const data = await requestJson<Extract<RepoPullRequestCommitChangesPayload, { ok: true }>>(
+          `/api/drones/${encodeURIComponent(droneId)}/repo/pull-requests/${activePullNumber}/commits/${encodeURIComponent(sha)}/changes`,
+        );
+        if (!mounted) return;
+        if (!sameRepoPullRequestCommitChangesPayload(pullRequestCommitDetailsRef.current, data)) {
+          pullRequestCommitDetailsRef.current = data;
+          setPullRequestCommitDetails(data);
+        }
+        setPullRequestCommitDetailsError(null);
+      } catch (e: any) {
+        if (!mounted) return;
+        setPullRequestCommitDetailsError(e?.message ?? String(e));
+      } finally {
+        if (mounted) setPullRequestCommitDetailsLoading(false);
+      }
+    };
+    void load();
+    return () => {
+      mounted = false;
+    };
+  }, [contextMode, disabled, droneId, primaryView, pullRequestNumber, refreshNonce, repoAttached, selectedCommitSha]);
+
   const workingTreeEntries = React.useMemo(() => sortRepoChangeEntries(changes?.entries ?? []), [changes?.entries]);
 
   const pullEntriesAsWorkingEntries: RepoChangeEntry[] = React.useMemo(() => {
@@ -494,6 +704,22 @@ export function DroneChangesDock({
     dataMode === 'working-tree' ? changesLoading : dataMode === 'pull-request' ? pullRequestLoading : pullLoading;
   const listError =
     dataMode === 'working-tree' ? changesError : dataMode === 'pull-request' ? pullRequestError : pullError;
+  const commitList = contextMode === 'pull-request' ? pullRequestCommitList?.commits ?? [] : branchCommitList?.commits ?? [];
+  const commitListLoading = contextMode === 'pull-request' ? pullRequestCommitListLoading : branchCommitListLoading;
+  const commitListError = contextMode === 'pull-request' ? pullRequestCommitListError : branchCommitListError;
+  const activeCommitDetails = contextMode === 'pull-request' ? pullRequestCommitDetails : branchCommitDetails;
+  const activeCommitDetailsLoading = contextMode === 'pull-request' ? pullRequestCommitDetailsLoading : branchCommitDetailsLoading;
+  const activeCommitDetailsError = contextMode === 'pull-request' ? pullRequestCommitDetailsError : branchCommitDetailsError;
+  const commitEntries = React.useMemo(
+    () => sortRepoChangeEntries(toWorkingEntriesFromCommit(activeCommitDetails?.entries ?? [])),
+    [activeCommitDetails?.entries],
+  );
+  const selectedCommitSummary = React.useMemo(
+    () => (selectedCommitSha ? commitList.find((entry) => entry.sha === selectedCommitSha) ?? null : null),
+    [commitList, selectedCommitSha],
+  );
+  const selectedCommit =
+    activeCommitDetails && activeCommitDetails.commit.sha === selectedCommitSha ? activeCommitDetails.commit : selectedCommitSummary;
 
   const entriesSignature = React.useMemo(
     () =>
@@ -525,8 +751,32 @@ export function DroneChangesDock({
   }, [entriesSignature]);
 
   React.useEffect(() => {
+    if (primaryView !== 'commits') return;
+    setSelectedCommitSha((prev) => {
+      if (commitList.length === 0) return null;
+      if (prev && commitList.some((entry) => entry.sha === prev)) return prev;
+      return null;
+    });
+  }, [commitList, primaryView]);
+
+  React.useEffect(() => {
+    setCommitFileSelectedPath((prev) => {
+      if (commitEntries.length === 0) return null;
+      if (prev && commitEntries.some((entry) => entry.path === prev)) return prev;
+      return commitEntries[0].path;
+    });
+  }, [
+    selectedCommitSha,
+    activeCommitDetails?.commit.sha,
+    commitEntries,
+  ]);
+
+  React.useEffect(() => {
     diffByKeyRef.current = diffByKey;
   }, [diffByKey]);
+  React.useEffect(() => {
+    commitDiffByKeyRef.current = commitDiffByKey;
+  }, [commitDiffByKey]);
 
   React.useEffect(() => {
     if (!hoveredFilePath) return;
@@ -548,6 +798,9 @@ export function DroneChangesDock({
   }, [dataMode, selectedEntry]);
 
   const explorerTree = React.useMemo(() => buildExplorerTree(entries), [entries]);
+  const commitExplorerTree = React.useMemo(() => buildExplorerTree(commitEntries), [commitEntries]);
+  const activeExplorerTree = primaryView === 'commits' ? commitExplorerTree : explorerTree;
+  const activeExpandedDirs = primaryView === 'commits' ? expandedCommitDirs : expandedDirs;
 
   React.useEffect(() => {
     setExpandedDirs((prev) => {
@@ -571,6 +824,28 @@ export function DroneChangesDock({
       return changed ? next : prev;
     });
   }, [explorerTree, selectedPath]);
+  React.useEffect(() => {
+    setExpandedCommitDirs((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const node of commitExplorerTree) {
+        if (node.kind !== 'dir') continue;
+        if (!(node.path in next)) {
+          next[node.path] = true;
+          changed = true;
+        }
+      }
+      if (commitFileSelectedPath) {
+        for (const p of parentDirPaths(commitFileSelectedPath)) {
+          if (!next[p]) {
+            next[p] = true;
+            changed = true;
+          }
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [commitExplorerTree, commitFileSelectedPath]);
 
   const recomputeExplorerWidth = React.useCallback(() => {
     if (viewMode !== 'split') return;
@@ -578,7 +853,7 @@ export function DroneChangesDock({
     const splitWidth = splitLayoutRef.current?.clientWidth ?? 0;
     if (splitWidth <= 0) return;
     const bounds = resolveExplorerSidebarWidthBounds(splitWidth, explorerWidthOptions);
-    const rows = flattenVisibleExplorerRows(explorerTree, expandedDirs);
+    const rows = flattenVisibleExplorerRows(activeExplorerTree, activeExpandedDirs);
     const autoWidth = clampNumber(
       Math.floor(estimateExplorerSidebarWidth(rows, splitWidth, explorerWidthOptions) * explorerZoom),
       bounds.minWidthPx,
@@ -593,7 +868,7 @@ export function DroneChangesDock({
       if (outOfBounds || Math.abs(prev - nextWidth) >= EXPLORER_WIDTH_UPDATE_THRESHOLD_PX) return nextWidth;
       return prev;
     });
-  }, [expandedDirs, explorerManualWidthPx, explorerTree, explorerWidthOptions, explorerZoom, viewMode]);
+  }, [activeExpandedDirs, activeExplorerTree, explorerManualWidthPx, explorerWidthOptions, explorerZoom, viewMode]);
 
   const restoreResizeBodyStyles = React.useCallback(() => {
     const styles = explorerResizeBodyStyleRef.current;
@@ -678,6 +953,80 @@ export function DroneChangesDock({
     setExplorerZoom(EXPLORER_ZOOM_DEFAULT);
   }, []);
 
+  const resolveCommitListWidthBounds = React.useCallback(() => {
+    const panelWidth = commitLayoutRef.current?.clientWidth ?? 0;
+    return resolveExplorerSidebarWidthBounds(panelWidth, {
+      minWidthPx: COMMIT_LIST_MIN_WIDTH_PX,
+      maxWidthPx: COMMIT_LIST_MAX_WIDTH_PX,
+      maxWidthRatio: COMMIT_LIST_MAX_RATIO,
+      minDiffWidthPx: COMMIT_DETAIL_MIN_WIDTH_PX,
+      fallbackWidthPx: COMMIT_LIST_DEFAULT_WIDTH_PX,
+    });
+  }, []);
+
+  const restoreCommitListResizeBodyStyles = React.useCallback(() => {
+    const styles = commitListResizeBodyStyleRef.current;
+    if (!styles) return;
+    document.body.style.cursor = styles.cursor;
+    document.body.style.userSelect = styles.userSelect;
+    commitListResizeBodyStyleRef.current = null;
+  }, []);
+
+  const finishCommitListResize = React.useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const drag = commitListDragRef.current;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      commitListDragRef.current = null;
+      setCommitListResizing(false);
+      setCommitListWidthPx(Math.floor(drag.liveWidth));
+      restoreCommitListResizeBodyStyles();
+    },
+    [restoreCommitListResizeBodyStyles],
+  );
+
+  const startCommitListResize = React.useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0) return;
+      const bounds = resolveCommitListWidthBounds();
+      event.preventDefault();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      commitListDragRef.current = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startWidth: clampNumber(commitListWidthPx, bounds.minWidthPx, bounds.maxWidthPx),
+        liveWidth: clampNumber(commitListWidthPx, bounds.minWidthPx, bounds.maxWidthPx),
+      };
+      commitListResizeBodyStyleRef.current = {
+        cursor: document.body.style.cursor,
+        userSelect: document.body.style.userSelect,
+      };
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      setCommitListResizing(true);
+    },
+    [commitListWidthPx, resolveCommitListWidthBounds],
+  );
+
+  const moveCommitListResize = React.useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const drag = commitListDragRef.current;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      const bounds = resolveCommitListWidthBounds();
+      const nextWidth = clampNumber(drag.startWidth + (event.clientX - drag.startX), bounds.minWidthPx, bounds.maxWidthPx);
+      drag.liveWidth = nextWidth;
+      setCommitListWidthPx(Math.floor(nextWidth));
+    },
+    [resolveCommitListWidthBounds],
+  );
+
+  const resetCommitListWidth = React.useCallback(() => {
+    const bounds = resolveCommitListWidthBounds();
+    setCommitListWidthPx(clampNumber(COMMIT_LIST_DEFAULT_WIDTH_PX, bounds.minWidthPx, bounds.maxWidthPx));
+  }, [resolveCommitListWidthBounds]);
+
   React.useEffect(() => {
     recomputeExplorerWidth();
   }, [recomputeExplorerWidth]);
@@ -727,6 +1076,41 @@ export function DroneChangesDock({
       restoreResizeBodyStyles();
     };
   }, [restoreResizeBodyStyles]);
+  React.useEffect(() => {
+    if (primaryView !== 'commits') return;
+    const panel = commitLayoutRef.current;
+    if (!panel) return;
+    let raf = 0;
+    const sync = () => {
+      if (raf) cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        const bounds = resolveCommitListWidthBounds();
+        setCommitListWidthPx((prev) => clampNumber(prev, bounds.minWidthPx, bounds.maxWidthPx));
+      });
+    };
+    sync();
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', sync);
+      return () => {
+        if (raf) cancelAnimationFrame(raf);
+        window.removeEventListener('resize', sync);
+      };
+    }
+    const observer = new ResizeObserver(() => {
+      sync();
+    });
+    observer.observe(panel);
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      observer.disconnect();
+    };
+  }, [primaryView, resolveCommitListWidthBounds]);
+  React.useEffect(() => {
+    return () => {
+      restoreCommitListResizeBodyStyles();
+    };
+  }, [restoreCommitListResizeBodyStyles]);
 
   const workingDiffStateKey = React.useCallback((path: string, kind: DiffKind) => `wt\u0000${diffKey(path, kind)}`, []);
   const pullPreviewDiffStateKey = React.useCallback(
@@ -736,6 +1120,11 @@ export function DroneChangesDock({
   );
   const pullRequestDiffStateKey = React.useCallback(
     (path: string, prNumber: number | null | undefined) => `pr\u0000${Math.max(1, Math.floor(Number(prNumber ?? 0)))}\u0000${path}`,
+    [],
+  );
+  const commitDiffStateKey = React.useCallback(
+    (path: string, sha: string | null | undefined, mode: ChangesContextMode) =>
+      `commit\u0000${mode}\u0000${String(sha ?? '').trim().toLowerCase()}\u0000${path}`,
     [],
   );
   const validDiffStateKeys = React.useMemo(() => {
@@ -768,6 +1157,15 @@ export function DroneChangesDock({
     pullRequestNumber,
     workingDiffStateKey,
   ]);
+  const validCommitDiffStateKeys = React.useMemo(() => {
+    const keys = new Set<string>();
+    const sha = selectedCommit?.sha ?? selectedCommitSha;
+    if (!sha) return keys;
+    for (const entry of commitEntries) {
+      keys.add(commitDiffStateKey(entry.path, sha, contextMode));
+    }
+    return keys;
+  }, [commitDiffStateKey, commitEntries, contextMode, selectedCommit?.sha, selectedCommitSha]);
 
   React.useEffect(() => {
     setDiffByKey((prev) => pruneRecordKeys(prev, validDiffStateKeys));
@@ -790,6 +1188,23 @@ export function DroneChangesDock({
     });
     setHoveredFilePath((prev) => (prev && !entries.some((entry) => entry.path === prev) ? null : prev));
   }, [entries, validDiffStateKeys]);
+  React.useEffect(() => {
+    setCommitDiffByKey((prev) => pruneRecordKeys(prev, validCommitDiffStateKeys));
+    commitDiffByKeyRef.current = pruneRecordKeys(commitDiffByKeyRef.current, validCommitDiffStateKeys);
+    commitInflightRef.current = new Set(Array.from(commitInflightRef.current).filter((key) => validCommitDiffStateKeys.has(key)));
+    setExpandedCommitFiles((prev) => {
+      let changed = false;
+      const next: Record<string, boolean> = {};
+      for (const [path, open] of Object.entries(prev)) {
+        if (!commitEntries.some((entry) => entry.path === path)) {
+          changed = true;
+          continue;
+        }
+        next[path] = open;
+      }
+      return changed ? next : prev;
+    });
+  }, [commitEntries, validCommitDiffStateKeys]);
 
   const clearDiffExpansionSource = React.useCallback((key: string) => {
     delete diffSourceByKeyRef.current[key];
@@ -996,6 +1411,61 @@ export function DroneChangesDock({
     [clearDiffExpansionSource, clearExpandedRangesForDiff, droneId],
   );
 
+  const loadCommitDiff = React.useCallback(
+    async ({
+      filePath,
+      sha,
+      stateKey,
+      mode,
+      force = false,
+    }: {
+      filePath: string;
+      sha: string | null | undefined;
+      stateKey: string;
+      mode: ChangesContextMode;
+      force?: boolean;
+    }) => {
+      const normalizedSha = String(sha ?? '').trim().toLowerCase();
+      if (!/^[0-9a-f]{40}$/.test(normalizedSha)) return;
+      if (commitInflightRef.current.has(stateKey)) return;
+      const cur = commitDiffByKeyRef.current[stateKey];
+      if (cur?.status === 'loading') return;
+      if (!force && cur?.status === 'loaded') return;
+
+      commitInflightRef.current.add(stateKey);
+      if (!(force && cur?.status === 'loaded')) {
+        setCommitDiffByKey((prev) => ({ ...prev, [stateKey]: { status: 'loading' } }));
+      }
+      try {
+        const url =
+          mode === 'pull-request' && pullRequestNumber
+            ? `/api/drones/${encodeURIComponent(droneId)}/repo/pull-requests/${pullRequestNumber}/commits/${encodeURIComponent(normalizedSha)}/diff?path=${encodeURIComponent(filePath)}&contextLines=3`
+            : `/api/drones/${encodeURIComponent(droneId)}/repo/commits/${encodeURIComponent(normalizedSha)}/diff?path=${encodeURIComponent(filePath)}&contextLines=3`;
+        const data = await requestJson<Extract<RepoCommitDiffPayload, { ok: true }>>(url);
+        if (!mountedRef.current) return;
+        const nextState: DiffState = {
+          status: 'loaded',
+          text: typeof data.diff === 'string' ? data.diff : '',
+          truncated: Boolean(data.truncated),
+          fromUntracked: false,
+          isBinary: Boolean(data.isBinary),
+          noTextReason: data.isBinary ? 'binary' : data.truncated && !String(data.diff ?? '').trim() ? 'truncated' : null,
+          contextLines: 3,
+        };
+        setCommitDiffByKey((prev) => ({ ...prev, [stateKey]: nextState }));
+      } catch (e: any) {
+        if (!mountedRef.current) return;
+        setCommitDiffByKey((prev) => ({
+          ...prev,
+          [stateKey]: { status: 'error', error: e?.message ?? String(e) },
+        }));
+      } finally {
+        commitInflightRef.current.delete(stateKey);
+      }
+    },
+    [droneId, pullRequestNumber],
+  );
+
   React.useEffect(() => {
     if (dataMode !== 'pull-request') return;
     const prNumber = Number(pullRequestChanges?.pullRequest.number);
@@ -1101,9 +1571,84 @@ export function DroneChangesDock({
     });
   }, [dataMode, disabled, loadRangeDiff, pullChanges?.baseSha, pullChanges?.headSha, pullPreviewDiffStateKey, refreshNonce, repoAttached, selectedEntry]);
 
+  const selectedCommitFileEntry = React.useMemo(
+    () => (commitFileSelectedPath ? commitEntries.find((entry) => entry.path === commitFileSelectedPath) ?? null : null),
+    [commitEntries, commitFileSelectedPath],
+  );
+
+  React.useEffect(() => {
+    if (primaryView !== 'commits') return;
+    if (!repoAttached || disabled) return;
+    if (!selectedCommit || !selectedCommitFileEntry || viewMode !== 'split') return;
+    const key = commitDiffStateKey(selectedCommitFileEntry.path, selectedCommit.sha, contextMode);
+    void loadCommitDiff({
+      filePath: selectedCommitFileEntry.path,
+      sha: selectedCommit.sha,
+      stateKey: key,
+      mode: contextMode,
+    });
+  }, [commitDiffStateKey, contextMode, disabled, loadCommitDiff, primaryView, repoAttached, selectedCommit, selectedCommitFileEntry, viewMode]);
+
+  React.useEffect(() => {
+    if (primaryView !== 'commits') return;
+    if (!repoAttached || disabled || viewMode !== 'stacked' || !selectedCommit) return;
+    for (const entry of commitEntries) {
+      const key = commitDiffStateKey(entry.path, selectedCommit.sha, contextMode);
+      if (expandedCommitFiles[entry.path] !== true) continue;
+      void loadCommitDiff({
+        filePath: entry.path,
+        sha: selectedCommit.sha,
+        stateKey: key,
+        mode: contextMode,
+      });
+    }
+  }, [commitDiffStateKey, commitEntries, contextMode, disabled, expandedCommitFiles, loadCommitDiff, primaryView, repoAttached, selectedCommit, viewMode]);
+
+  React.useEffect(() => {
+    if (primaryView !== 'commits') return;
+    if (refreshNonce <= 0) return;
+    if (!repoAttached || disabled || !selectedCommit) return;
+    if (viewMode === 'stacked') {
+      for (const entry of commitEntries) {
+        if (expandedCommitFiles[entry.path] !== true) continue;
+        const key = commitDiffStateKey(entry.path, selectedCommit.sha, contextMode);
+        void loadCommitDiff({
+          filePath: entry.path,
+          sha: selectedCommit.sha,
+          stateKey: key,
+          mode: contextMode,
+          force: true,
+        });
+      }
+      return;
+    }
+    if (!selectedCommitFileEntry) return;
+    const key = commitDiffStateKey(selectedCommitFileEntry.path, selectedCommit.sha, contextMode);
+    void loadCommitDiff({
+      filePath: selectedCommitFileEntry.path,
+      sha: selectedCommit.sha,
+      stateKey: key,
+      mode: contextMode,
+      force: true,
+    });
+  }, [
+    commitDiffStateKey,
+    commitEntries,
+    contextMode,
+    disabled,
+    expandedCommitFiles,
+    loadCommitDiff,
+    primaryView,
+    refreshNonce,
+    repoAttached,
+    selectedCommit,
+    selectedCommitFileEntry,
+    viewMode,
+  ]);
+
   const counts = changes?.counts;
-  const pullBase = dataMode === 'pull-request' ? (pullRequestChanges?.pullRequest.baseSha ?? null) : (pullChanges?.baseSha ?? null);
-  const pullHead = dataMode === 'pull-request' ? (pullRequestChanges?.pullRequest.headSha ?? null) : (pullChanges?.headSha ?? null);
+  const pullBase = contextMode === 'pull-request' ? (pullRequestChanges?.pullRequest.baseSha ?? null) : (pullChanges?.baseSha ?? null);
+  const pullHead = contextMode === 'pull-request' ? (pullRequestChanges?.pullRequest.headSha ?? null) : (pullChanges?.headSha ?? null);
   const pullHostBranch = normalizeRef(pullChanges?.branchContext?.hostCurrent);
   const pullDroneCurrentBranch = normalizeRef(pullChanges?.branchContext?.droneCurrent);
   const pullDroneConfiguredBranch = normalizeRef(pullChanges?.branchContext?.droneConfigured);
@@ -1114,21 +1659,21 @@ export function DroneChangesDock({
       ? `Current: ${pullDroneCurrentBranch} | configured: ${pullDroneConfiguredBranch}`
       : pullDroneCurrentBranch ?? pullDroneConfiguredBranch ?? undefined;
   const selectedPullRequestNumber =
-    dataMode === 'pull-request' ? Math.max(1, Math.floor(Number(pullRequestNumber ?? 0))) || null : null;
+    contextMode === 'pull-request' ? Math.max(1, Math.floor(Number(pullRequestNumber ?? 0))) || null : null;
   const loadedPullRequestNumber =
-    dataMode === 'pull-request' ? Math.max(1, Math.floor(Number(pullRequestChanges?.pullRequest.number ?? 0))) || null : null;
+    contextMode === 'pull-request' ? Math.max(1, Math.floor(Number(pullRequestChanges?.pullRequest.number ?? 0))) || null : null;
   const hasLoadedActivePullRequest =
-    dataMode === 'pull-request' &&
+    contextMode === 'pull-request' &&
     Boolean(selectedPullRequestNumber) &&
     Boolean(loadedPullRequestNumber) &&
     selectedPullRequestNumber === loadedPullRequestNumber;
   const activePullRequestNumber = hasLoadedActivePullRequest ? loadedPullRequestNumber : null;
   const awaitingPullRequestDetails =
-    dataMode === 'pull-request' && Boolean(selectedPullRequestNumber) && !hasLoadedActivePullRequest && !pullRequestError;
-  const activePullRequestTitleRaw = dataMode === 'pull-request' ? String(pullRequestChanges?.pullRequest.title ?? '').trim() : '';
-  const activePullRequestHtmlUrl = dataMode === 'pull-request' ? String(pullRequestChanges?.pullRequest.htmlUrl ?? '').trim() : '';
-  const activePullRequestState = dataMode === 'pull-request' ? String(pullRequestChanges?.pullRequest.state ?? '').trim().toLowerCase() : '';
-  const activePullRequestStatus = dataMode === 'pull-request' ? pullRequestStateBadge(pullRequestChanges?.pullRequest.state) : null;
+    contextMode === 'pull-request' && Boolean(selectedPullRequestNumber) && !hasLoadedActivePullRequest && !pullRequestError;
+  const activePullRequestTitleRaw = contextMode === 'pull-request' ? String(pullRequestChanges?.pullRequest.title ?? '').trim() : '';
+  const activePullRequestHtmlUrl = contextMode === 'pull-request' ? String(pullRequestChanges?.pullRequest.htmlUrl ?? '').trim() : '';
+  const activePullRequestState = contextMode === 'pull-request' ? String(pullRequestChanges?.pullRequest.state ?? '').trim().toLowerCase() : '';
+  const activePullRequestStatus = contextMode === 'pull-request' ? pullRequestStateBadge(pullRequestChanges?.pullRequest.state) : null;
   const activePullRequestIsFinalState = activePullRequestState === 'merged' || activePullRequestState === 'closed';
   const activePullRequestActionBlockedReason = !activePullRequestNumber
     ? 'No pull request selected.'
@@ -1136,6 +1681,8 @@ export function DroneChangesDock({
       ? `PR is already ${activePullRequestState}.`
       : null;
   const refreshed = refreshTimeLabel(lastRefreshedByMode[dataMode] ?? null);
+  const commitRepoRootLabel =
+    String(activeCommitDetails?.repoRoot ?? branchCommitList?.repoRoot ?? pullRequestCommitList?.repoRoot ?? repoPath ?? '').trim() || '-';
 
   const mergeActivePullRequest = React.useCallback(async () => {
     if (!activePullRequestNumber || pullRequestActionBusy || activePullRequestIsFinalState) return;
@@ -1318,6 +1865,46 @@ export function DroneChangesDock({
         const tag = target.tagName;
         if (target.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       }
+      if (primaryView === 'commits') {
+        const commitIndex = selectedCommitSha ? commitList.findIndex((entry) => entry.sha === selectedCommitSha) : -1;
+        const fileIndex = commitFileSelectedPath ? commitEntries.findIndex((entry) => entry.path === commitFileSelectedPath) : -1;
+        const key = event.key.toLowerCase();
+        if (key === '[' || key === ']') {
+          if (commitList.length === 0) return;
+          const delta = key === ']' ? 1 : -1;
+          const baseIndex = commitIndex >= 0 ? commitIndex : key === ']' ? -1 : 0;
+          const nextIndex = Math.min(commitList.length - 1, Math.max(0, baseIndex + delta));
+          const nextCommit = commitList[nextIndex];
+          if (!nextCommit || nextCommit.sha === selectedCommitSha) return;
+          setSelectedCommitSha(nextCommit.sha);
+          setCommitFileSelectedPath(null);
+          event.preventDefault();
+          return;
+        }
+        if (key === 'j' || key === 'k') {
+          if (commitEntries.length === 0) return;
+          const delta = key === 'j' ? 1 : -1;
+          const baseIndex = fileIndex >= 0 ? fileIndex : key === 'j' ? -1 : 0;
+          const nextIndex = Math.min(commitEntries.length - 1, Math.max(0, baseIndex + delta));
+          const nextEntry = commitEntries[nextIndex];
+          if (!nextEntry || nextEntry.path === commitFileSelectedPath) return;
+          setCommitFileSelectedPath(nextEntry.path);
+          event.preventDefault();
+          return;
+        }
+        const targetEntry = selectedCommitFileEntry;
+        if (!targetEntry) return;
+        if (key === 'e') {
+          openEntryInEditor(targetEntry);
+          event.preventDefault();
+          return;
+        }
+        if (key === 'g') {
+          revealEntryInFiles(targetEntry);
+          event.preventDefault();
+        }
+        return;
+      }
       const targetEntry = hoveredEntry ?? (dockHovered ? selectedEntry : null);
       if (!targetEntry) return;
       const key = event.key.toLowerCase();
@@ -1334,7 +1921,20 @@ export function DroneChangesDock({
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [dataMode, dockHovered, hoveredEntry, openEntryInEditor, revealEntryInFiles, selectedEntry]);
+  }, [
+    commitEntries,
+    commitFileSelectedPath,
+    commitList,
+    dataMode,
+    dockHovered,
+    hoveredEntry,
+    openEntryInEditor,
+    primaryView,
+    revealEntryInFiles,
+    selectedCommitFileEntry,
+    selectedCommitSha,
+    selectedEntry,
+  ]);
 
   function renderFileQuickActions(entry: RepoChangeEntry, alwaysVisible: boolean = false): React.ReactNode {
     const canOpenInEditor = entryPathExistsInCurrentTree(entry, dataMode);
@@ -1479,6 +2079,108 @@ export function DroneChangesDock({
     });
   }
 
+  function renderCommitExplorer(nodes: ExplorerNode[], depth: number): React.ReactNode {
+    return nodes.map((node) => {
+      const indentPx = explorerIndentBasePx + depth * explorerIndentStepPx;
+      if (node.kind === 'dir') {
+        const open = expandedCommitDirs[node.path] !== false;
+        return (
+          <React.Fragment key={`commit-dir:${node.path}`}>
+            <div className="w-full relative" style={{ paddingLeft: `${indentPx}px` }}>
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute inline-flex items-center justify-center text-[var(--muted-dim)]"
+                style={{
+                  left: `${Math.max(0, indentPx - explorerLeadingSlotPx)}px`,
+                  top: '50%',
+                  width: `${explorerLeadingSlotPx}px`,
+                  height: `${explorerLeadingSlotPx}px`,
+                  transform: 'translateY(-50%)',
+                }}
+              >
+                <IconChevron down={open} size={explorerIconSizePx} />
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setExpandedCommitDirs((prev) => ({ ...prev, [node.path]: !open }));
+                }}
+                className="w-full text-left px-1 rounded border border-transparent hover:bg-[var(--hover)] flex items-center gap-0.5"
+                style={{
+                  height: `${explorerRowHeightPx}px`,
+                  minHeight: `${explorerRowHeightPx}px`,
+                }}
+                title={node.path}
+              >
+                <span
+                  className="inline-flex items-center justify-center flex-shrink-0 text-[var(--muted)]"
+                  style={{ width: `${explorerLeadingSlotPx}px`, height: `${explorerLeadingSlotPx}px` }}
+                >
+                  <IconFolder size={explorerIconSizePx} />
+                </span>
+                <span className="text-[var(--fg-secondary)] truncate flex-1" style={{ fontSize: `${explorerTextSizePx}px` }}>
+                  {node.name}
+                </span>
+                <span className="text-[var(--muted-dim)] tabular-nums" style={{ fontSize: `${explorerMetaTextSizePx}px` }}>
+                  {node.count}
+                </span>
+              </button>
+            </div>
+            {open && node.children && node.children.length > 0 ? renderCommitExplorer(node.children, depth + 1) : null}
+          </React.Fragment>
+        );
+      }
+
+      const entry = node.entry ?? null;
+      if (!entry) return null;
+      const active = entry.path === commitFileSelectedPath;
+      const FileIcon = iconForFilePath(entry.path);
+      return (
+        <div key={`commit-file:${entry.path}`} className="w-full group/file" style={{ paddingLeft: `${indentPx}px` }}>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => {
+                setCommitFileSelectedPath(entry.path);
+              }}
+              className={`flex-1 min-w-0 text-left px-1 rounded border transition-colors flex items-center gap-0.5 ${
+                active ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)]' : 'border-transparent hover:bg-[var(--hover)]'
+              }`}
+              style={{
+                height: `${explorerRowHeightPx}px`,
+                minHeight: `${explorerRowHeightPx}px`,
+              }}
+              title={entry.path}
+            >
+              <span
+                className="inline-flex items-center justify-center flex-shrink-0 text-[var(--muted-dim)]"
+                style={{ width: `${explorerLeadingSlotPx}px`, height: `${explorerLeadingSlotPx}px` }}
+              >
+                <FileIcon size={explorerIconSizePx} />
+              </span>
+              <span className="text-[var(--fg-secondary)] truncate flex-1" style={{ fontSize: `${explorerTextSizePx}px` }}>
+                {node.name}
+              </span>
+              <span
+                className={`inline-flex items-center justify-center rounded border font-mono ${badgeTone(entry)}`}
+                style={{
+                  minWidth: `${explorerBadgeMinWidthPx}px`,
+                  height: `${explorerBadgeHeightPx}px`,
+                  fontSize: `${explorerMetaTextSizePx}px`,
+                }}
+                title={statusBadgeTitle(entry, 'pull-preview')}
+              >
+                {statusCharLabel(entry.stagedChar)}
+                {statusCharLabel(entry.unstagedChar)}
+              </span>
+            </button>
+            {renderFileQuickActions(entry, active)}
+          </div>
+        </div>
+      );
+    });
+  }
+
   const statusLegendTitle = "Status badge uses S/U (staged/unstaged). '-' means no change and '?' means untracked.";
   const unavailableReason = String(repoUnavailableReason ?? '').trim();
 
@@ -1496,55 +2198,103 @@ export function DroneChangesDock({
         <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.12em] uppercase" style={{ fontFamily: 'var(--display)' }}>
           Changes
         </div>
-        <div data-onboarding-id="changes.viewMode" className="inline-flex items-center gap-1">
+        <div data-onboarding-id="changes.viewMode" className="inline-flex items-center gap-1 flex-wrap justify-end">
           {repoAttached && !disabled ? (
             <>
               <span className="text-[9px] uppercase tracking-wide text-[var(--muted-dim)] mr-1" style={{ fontFamily: 'var(--display)' }}>
-                Mode
+                Context
               </span>
               <button
                 type="button"
-                onClick={() => setDataMode('working-tree')}
+                onClick={() => setContextMode('branch')}
                 className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
-                  dataMode === 'working-tree'
+                  contextMode === 'branch'
                     ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                     : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
-                title="Working tree changes inside the drone (staged/unstaged)"
+                title="Inspect the current branch workspace and branch history"
               >
-                Working
-              </button>
-              <button
-                type="button"
-                onClick={() => setDataMode('pull-preview')}
-                className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
-                  dataMode === 'pull-preview'
-                    ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                    : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
-                }`}
-                style={{ fontFamily: 'var(--display)' }}
-                title="Apply preview: committed diff from base to drone HEAD (what applying changes would merge)"
-              >
-                Apply
+                Branch
               </button>
               <button
                 type="button"
                 onClick={() => {
                   if (!pullRequestNumber) return;
-                  setDataMode('pull-request');
+                  setContextMode('pull-request');
                 }}
                 disabled={!pullRequestNumber}
                 className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
-                  dataMode === 'pull-request'
+                  contextMode === 'pull-request'
                     ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                     : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:opacity-40 disabled:cursor-not-allowed'
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
-                title={pullRequestNumber ? `Exact GitHub PR #${pullRequestNumber} diff` : 'Click a PR title in the PRs tab to set PR mode'}
+                title={pullRequestNumber ? `Inspect PR #${pullRequestNumber}` : 'Click a PR title in the PRs tab to enter PR context'}
               >
                 PR
               </button>
+              <span className="mx-1 text-[var(--border-subtle)]">|</span>
+              <span className="text-[9px] uppercase tracking-wide text-[var(--muted-dim)] mr-1" style={{ fontFamily: 'var(--display)' }}>
+                View
+              </span>
+              <button
+                type="button"
+                onClick={() => setPrimaryView('changes')}
+                className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
+                  primaryView === 'changes'
+                    ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                    : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
+                }`}
+                style={{ fontFamily: 'var(--display)' }}
+                title="Inspect the aggregate diff"
+              >
+                Changes
+              </button>
+              <button
+                type="button"
+                onClick={() => setPrimaryView('commits')}
+                className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
+                  primaryView === 'commits'
+                    ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                    : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
+                }`}
+                style={{ fontFamily: 'var(--display)' }}
+                title="Inspect individual commits"
+              >
+                Commits
+              </button>
+              {contextMode === 'branch' && primaryView === 'changes' ? (
+                <>
+                  <span className="mx-1 text-[var(--border-subtle)]">|</span>
+                  <button
+                    type="button"
+                    onClick={() => setBranchChangesMode('working-tree')}
+                    className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
+                      branchChangesMode === 'working-tree'
+                        ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                        : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
+                    }`}
+                    style={{ fontFamily: 'var(--display)' }}
+                    title="Working tree changes inside the drone (staged/unstaged)"
+                  >
+                    Working
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBranchChangesMode('pull-preview')}
+                    className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
+                      branchChangesMode === 'pull-preview'
+                        ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                        : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
+                    }`}
+                    style={{ fontFamily: 'var(--display)' }}
+                    title="Apply preview: committed diff from base to drone HEAD (what applying changes would merge)"
+                  >
+                    Apply
+                  </button>
+                </>
+              ) : null}
               <span className="mx-1 text-[var(--border-subtle)]">|</span>
             </>
           ) : null}
@@ -1627,6 +2377,30 @@ export function DroneChangesDock({
           <span title={String(hubMessage ?? '').trim() || undefined}>
             {startup.timedOut ? 'Still provisioning… repo not ready yet.' : 'Provisioning… waiting for repo.'}
           </span>
+        ) : primaryView === 'commits' ? (
+          commitListLoading && commitList.length === 0 ? (
+            <span>{contextMode === 'pull-request' ? 'Loading pull request commits…' : 'Loading branch commits…'}</span>
+          ) : commitListError ? (
+            <span className="text-[var(--red)]">{commitListError}</span>
+          ) : (
+            <>
+                <span className="truncate max-w-[40ch]" title={commitRepoRootLabel}>
+                  {commitRepoRootLabel}
+                </span>
+              {contextMode === 'pull-request' ? (
+                <MetaChip label="pr" value={`#${pullRequestNumber ?? '-'}`} mono />
+              ) : null}
+              <MetaChip label="commits" value={commitList.length} />
+              {selectedCommit ? (
+                <>
+                  <MetaChip label="selected" value={shortSha(selectedCommit.sha)} title={selectedCommit.subject} mono />
+                  {activeCommitDetails ? <MetaChip label="files" value={activeCommitDetails.counts.changed} /> : null}
+                </>
+              ) : (
+                <span className="text-[var(--muted-dim)]">Select a commit to inspect its patch.</span>
+              )}
+            </>
+          )
         ) : listLoading &&
           ((dataMode === 'working-tree' && !changes) || (dataMode === 'pull-preview' && !pullChanges) || (dataMode === 'pull-request' && !pullRequestChanges)) ? (
           <span>{dataMode === 'pull-request' ? 'Loading pull request…' : dataMode === 'pull-preview' ? 'Loading apply preview…' : 'Loading changes...'}</span>
@@ -1696,13 +2470,13 @@ export function DroneChangesDock({
           </>
         )}
       </div>
-      {dataMode === 'pull-request' && awaitingPullRequestDetails ? (
+      {contextMode === 'pull-request' && awaitingPullRequestDetails ? (
         <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[10px] text-[var(--muted)]">
           Loading PR #{selectedPullRequestNumber} details...
         </div>
       ) : null}
-      {dataMode === 'pull-request' && hasLoadedActivePullRequest && activePullRequestNumber ? (
-        <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] bg-[rgba(167,139,250,.06)] flex items-start justify-between gap-3">
+      {contextMode === 'pull-request' && hasLoadedActivePullRequest && activePullRequestNumber ? (
+        <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] bg-[rgba(255,255,255,.05)] flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div
               className="text-[9px] font-semibold tracking-[0.12em] uppercase text-[var(--muted-dim)]"
@@ -1713,6 +2487,10 @@ export function DroneChangesDock({
             <div className="mt-1 text-[13px] leading-snug font-semibold text-[var(--fg-secondary)] truncate" title={activePullRequestTitleRaw || undefined}>
               <span className="font-mono text-[var(--accent)] mr-1.5">#{activePullRequestNumber}</span>
               <span>{activePullRequestTitleRaw || 'Untitled pull request'}</span>
+            </div>
+            <div className="mt-1 inline-flex items-center gap-1.5 text-[10px] text-[var(--muted)]">
+              <MetaChip label="base" value={pullRequestChanges?.pullRequest.baseRefName ?? '-'} mono />
+              <MetaChip label="head" value={pullRequestChanges?.pullRequest.headRefName ?? '-'} mono />
             </div>
           </div>
           <div className="shrink-0 flex items-center gap-1.5">
@@ -1764,10 +2542,10 @@ export function DroneChangesDock({
           </div>
         </div>
       ) : null}
-      {dataMode === 'pull-request' && pullRequestActionNotice ? (
+      {contextMode === 'pull-request' && pullRequestActionNotice ? (
         <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] text-[10px] text-[var(--green)] bg-[var(--green-subtle)]">{pullRequestActionNotice}</div>
       ) : null}
-      {dataMode === 'pull-request' && pullRequestActionError ? (
+      {contextMode === 'pull-request' && pullRequestActionError ? (
         <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] text-[10px] text-[var(--red)] bg-[var(--red-subtle)]">{pullRequestActionError}</div>
       ) : null}
 
@@ -1796,6 +2574,59 @@ export function DroneChangesDock({
             ) : null}
           </div>
         </div>
+      ) : primaryView === 'commits' ? (
+        commitListError ? (
+          <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--red)]">{commitListError}</div>
+        ) : commitList.length === 0 && !commitListLoading ? (
+          <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--muted)]">
+            {contextMode === 'pull-request'
+              ? pullRequestNumber
+                ? `No commits found for PR #${pullRequestNumber}.`
+                : 'No pull request selected.'
+              : 'No commits found for this branch context.'}
+          </div>
+        ) : (
+          <CommitInspectionView
+            contextMode={contextMode}
+            pullRequestNumber={pullRequestNumber}
+            commitList={commitList}
+            commitListLoading={commitListLoading}
+            selectedCommitSha={selectedCommitSha}
+            onSelectCommit={setSelectedCommitSha}
+            selectedCommit={selectedCommit}
+            activeCommitDetails={activeCommitDetails}
+            activeCommitDetailsLoading={activeCommitDetailsLoading}
+            activeCommitDetailsError={activeCommitDetailsError}
+            commitEntries={commitEntries}
+            commitFileSelectedPath={commitFileSelectedPath}
+            selectedCommitFileEntry={selectedCommitFileEntry}
+            onSelectCommitFile={setCommitFileSelectedPath}
+            expandedCommitFiles={expandedCommitFiles}
+            onToggleCommitFile={(path, nextOpen) => setExpandedCommitFiles((prev) => ({ ...prev, [path]: nextOpen }))}
+            commitDiffByKey={commitDiffByKey}
+            commitDiffStateKey={commitDiffStateKey}
+            loadCommitDiff={loadCommitDiff}
+            diffViewType={diffViewType}
+            viewMode={viewMode}
+            commitExplorerTree={commitExplorerTree}
+            renderCommitExplorer={renderCommitExplorer}
+            renderFileQuickActions={renderFileQuickActions}
+            commitLayoutRef={commitLayoutRef}
+            commitListWidthPx={commitListWidthPx}
+            commitListResizing={commitListResizing}
+            startCommitListResize={startCommitListResize}
+            moveCommitListResize={moveCommitListResize}
+            finishCommitListResize={finishCommitListResize}
+            resetCommitListWidth={resetCommitListWidth}
+            splitLayoutRef={splitLayoutRef}
+            explorerResizing={explorerResizing}
+            explorerWidthPx={explorerWidthPx}
+            startExplorerResize={startExplorerResize}
+            moveExplorerResize={moveExplorerResize}
+            finishExplorerResize={finishExplorerResize}
+            resetExplorerWidthPreference={resetExplorerWidthPreference}
+          />
+        )
       ) : listError ? (
         <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--red)]">{listError}</div>
       ) : entries.length === 0 && !listLoading ? (

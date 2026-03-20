@@ -70,6 +70,45 @@ export type GithubPullRequestChanges = {
   entries: GithubPullRequestFileChange[];
 };
 
+export type GithubCommitSummary = {
+  sha: string;
+  parents: string[];
+  authorName: string;
+  authorEmail: string | null;
+  authoredAt: string;
+  subject: string;
+  isMerge: boolean;
+};
+
+export type GithubCommitChangeEntry = {
+  path: string;
+  originalPath: string | null;
+  statusChar: string;
+  statusType: GithubPullRequestFileStatusType;
+  additions: number;
+  deletions: number;
+  changes: number;
+  patch: string | null;
+  truncated: boolean;
+  isBinary: boolean;
+};
+
+export type GithubCommitChanges = {
+  repo: GithubRepoRef;
+  commit: GithubCommitSummary & {
+    body: string;
+    committerName: string;
+    committerEmail: string | null;
+    committedAt: string;
+  };
+  counts: {
+    changed: number;
+    additions: number;
+    deletions: number;
+  };
+  entries: GithubCommitChangeEntry[];
+};
+
 export class GithubPullRequestError extends Error {
   statusCode: number;
   code: string | null;
@@ -400,6 +439,84 @@ function mapGithubPullRequest(raw: any): GithubPullRequestSummary | null {
   };
 }
 
+function splitCommitMessage(raw: unknown): { subject: string; body: string } {
+  const message = String(raw ?? '');
+  const [subjectLine, ...rest] = message.split('\n');
+  return {
+    subject: String(subjectLine ?? '').trim() || '(no subject)',
+    body: rest.join('\n').replace(/^\n+/, ''),
+  };
+}
+
+function mapGithubCommitSummary(raw: any): GithubCommitSummary | null {
+  const sha = String(raw?.sha ?? '').trim().toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(sha)) return null;
+  const parents = Array.isArray(raw?.parents)
+    ? raw.parents
+        .map((parent: any) => String(parent?.sha ?? '').trim().toLowerCase())
+        .filter((value: string) => /^[0-9a-f]{40}$/.test(value))
+    : [];
+  const commitBlock = raw?.commit ?? {};
+  const authorBlock = commitBlock?.author ?? {};
+  const message = splitCommitMessage(commitBlock?.message);
+  return {
+    sha,
+    parents,
+    authorName: String(authorBlock?.name ?? raw?.author?.login ?? '').trim(),
+    authorEmail: String(authorBlock?.email ?? '').trim() || null,
+    authoredAt: String(authorBlock?.date ?? '').trim(),
+    subject: message.subject,
+    isMerge: parents.length > 1,
+  };
+}
+
+function mapGithubCommitChanges(raw: any, repo: GithubRepoRef): GithubCommitChanges {
+  const summary = mapGithubCommitSummary(raw);
+  if (!summary) throw new GithubPullRequestError('commit not found', { statusCode: 404, code: 'commit_not_found' });
+  const commitBlock = raw?.commit ?? {};
+  const committerBlock = commitBlock?.committer ?? {};
+  const message = splitCommitMessage(commitBlock?.message);
+  const files = Array.isArray(raw?.files) ? raw.files : [];
+  const entries: GithubCommitChangeEntry[] = files
+    .map((row: any) => {
+      const pathText = String(row?.filename ?? '').trim();
+      if (!pathText) return null;
+      const originalPathRaw = String(row?.previous_filename ?? '').trim();
+      const status = mapGithubFileStatus(row?.status);
+      const patch = buildGithubPullRequestUnifiedDiff(row);
+      return {
+        path: pathText,
+        originalPath: originalPathRaw || null,
+        statusChar: status.statusChar,
+        statusType: status.statusType,
+        additions: Math.max(0, Math.floor(Number(row?.additions ?? 0) || 0)),
+        deletions: Math.max(0, Math.floor(Number(row?.deletions ?? 0) || 0)),
+        changes: Math.max(0, Math.floor(Number(row?.changes ?? 0) || 0)),
+        patch: patch.patch,
+        truncated: patch.truncated,
+        isBinary: patch.isBinary,
+      };
+    })
+    .filter((row: GithubCommitChangeEntry | null): row is GithubCommitChangeEntry => row != null);
+  return {
+    repo,
+    commit: {
+      ...summary,
+      subject: message.subject,
+      body: message.body,
+      committerName: String(committerBlock?.name ?? '').trim(),
+      committerEmail: String(committerBlock?.email ?? '').trim() || null,
+      committedAt: String(committerBlock?.date ?? '').trim(),
+    },
+    counts: {
+      changed: entries.length,
+      additions: entries.reduce((sum, entry) => sum + entry.additions, 0),
+      deletions: entries.reduce((sum, entry) => sum + entry.deletions, 0),
+    },
+    entries,
+  };
+}
+
 function mapGithubPullRequestFromGraphql(raw: any, owner: string): GithubPullRequestSummary | null {
   const number = Number(raw?.number);
   if (!Number.isFinite(number) || number <= 0) return null;
@@ -637,6 +754,26 @@ async function listGithubPullRequestFiles(opts: {
   return out;
 }
 
+async function listGithubPullRequestCommits(opts: {
+  repo: GithubRepoRef;
+  pullNumber: number;
+  token: string | null;
+}): Promise<any[]> {
+  const out: any[] = [];
+  for (let page = 1; page <= 20; page += 1) {
+    const rows = await githubApiRequest<any[]>({
+      path: `/repos/${encodeURIComponent(opts.repo.owner)}/${encodeURIComponent(opts.repo.repo)}/pulls/${opts.pullNumber}/commits?per_page=100&page=${page}`,
+      method: 'GET',
+      token: opts.token,
+    });
+    const list = Array.isArray(rows) ? rows : [];
+    if (list.length === 0) break;
+    out.push(...list);
+    if (list.length < 100) break;
+  }
+  return out;
+}
+
 export async function listGithubPullRequestChangesForRepoRoot(opts: {
   repoRoot: string;
   pullNumber: number;
@@ -707,6 +844,53 @@ export async function listGithubPullRequestChangesForRepoRoot(opts: {
     },
     entries,
   };
+}
+
+export async function listGithubPullRequestCommitsForRepoRoot(opts: {
+  repoRoot: string;
+  pullNumber: number;
+}): Promise<{ repo: GithubRepoRef; pullNumber: number; commits: GithubCommitSummary[] }> {
+  const repoRoot = String(opts.repoRoot ?? '').trim();
+  if (!repoRoot) throw new GithubPullRequestError('missing repo root', { statusCode: 400 });
+  const pullNumber = assertValidPullNumber(opts.pullNumber);
+  const repo = await resolveGithubRepoForRepoRoot(repoRoot);
+  const token = await resolveGithubToken();
+  const rows = await listGithubPullRequestCommits({ repo, pullNumber, token });
+  return {
+    repo,
+    pullNumber,
+    commits: rows
+      .map((row) => mapGithubCommitSummary(row))
+      .filter((row): row is GithubCommitSummary => row != null),
+  };
+}
+
+export async function getGithubPullRequestCommitForRepoRoot(opts: {
+  repoRoot: string;
+  pullNumber: number;
+  sha: string;
+}): Promise<GithubCommitChanges> {
+  const repoRoot = String(opts.repoRoot ?? '').trim();
+  if (!repoRoot) throw new GithubPullRequestError('missing repo root', { statusCode: 400 });
+  const pullNumber = assertValidPullNumber(opts.pullNumber);
+  const sha = String(opts.sha ?? '').trim().toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(sha)) throw new GithubPullRequestError('invalid commit sha', { statusCode: 400, code: 'invalid_commit_sha' });
+  const repo = await resolveGithubRepoForRepoRoot(repoRoot);
+  const token = await resolveGithubToken();
+  const commits = await listGithubPullRequestCommits({ repo, pullNumber, token });
+  const hasCommit = commits.some((row) => String(row?.sha ?? '').trim().toLowerCase() === sha);
+  if (!hasCommit) {
+    throw new GithubPullRequestError(`Commit ${sha.slice(0, 12)} is not part of PR #${pullNumber}.`, {
+      statusCode: 404,
+      code: 'commit_not_found',
+    });
+  }
+  const raw = await githubApiRequest<any>({
+    path: `/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/commits/${sha}`,
+    method: 'GET',
+    token,
+  });
+  return mapGithubCommitChanges(raw, repo);
 }
 
 export async function mergeGithubPullRequestForRepoRoot(opts: {

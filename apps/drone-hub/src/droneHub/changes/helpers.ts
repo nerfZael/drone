@@ -1,8 +1,14 @@
 import type {
   RepoChangeEntry,
+  RepoCommitChangeEntry,
+  RepoCommitChangesPayload,
+  RepoCommitListPayload,
+  RepoCommitSummary,
   RepoChangesPayload,
   RepoPullChangeEntry,
   RepoPullChangesPayload,
+  RepoPullRequestCommitChangesPayload,
+  RepoPullRequestCommitListPayload,
   RepoPullRequestChangeEntry,
   RepoPullRequestChangesPayload,
   RepoPullRequestMergeMethod,
@@ -437,6 +443,21 @@ export function toWorkingEntriesFromPull(entries: Array<RepoPullChangeEntry | Re
   }));
 }
 
+export function toWorkingEntriesFromCommit(entries: RepoCommitChangeEntry[]): RepoChangeEntry[] {
+  return entries.map((entry) => ({
+    path: entry.path,
+    originalPath: entry.originalPath,
+    code: `${String(entry.statusChar ?? '?').charAt(0)}.`,
+    stagedChar: String(entry.statusChar ?? '?').charAt(0),
+    unstagedChar: '.',
+    stagedType: entry.statusType ?? 'unknown',
+    unstagedType: null,
+    isUntracked: false,
+    isIgnored: false,
+    isConflicted: entry.statusType === 'unmerged',
+  }));
+}
+
 function repoChangeEntrySignature(entry: RepoChangeEntry): string {
   return [
     entry.path,
@@ -468,6 +489,30 @@ function repoPullRequestChangeEntrySignature(entry: RepoPullRequestChangeEntry):
     entry.patch ?? '',
     entry.truncated ? '1' : '0',
     entry.isBinary ? '1' : '0',
+  ].join('\u0000');
+}
+
+function repoCommitSummarySignature(entry: RepoCommitSummary): string {
+  return [
+    entry.sha,
+    entry.parents.join(','),
+    entry.authorName,
+    entry.authorEmail ?? '',
+    entry.authoredAt,
+    entry.subject,
+    entry.isMerge ? '1' : '0',
+  ].join('\u0000');
+}
+
+function repoCommitChangeEntrySignature(entry: RepoCommitChangeEntry): string {
+  return [
+    entry.path,
+    entry.originalPath ?? '',
+    entry.statusChar,
+    entry.statusType ?? '',
+    String(entry.additions),
+    String(entry.deletions),
+    String(entry.changes),
   ].join('\u0000');
 }
 
@@ -544,6 +589,81 @@ export function sameRepoPullRequestChangesPayload(
     a.counts.additions === b.counts.additions &&
     a.counts.deletions === b.counts.deletions &&
     sameUnorderedArray(a.entries, b.entries, repoPullRequestChangeEntrySignature)
+  );
+}
+
+export function sameRepoCommitListPayload(
+  a: Extract<RepoCommitListPayload, { ok: true }> | null,
+  b: Extract<RepoCommitListPayload, { ok: true }> | null,
+): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return (
+    a.repoRoot === b.repoRoot &&
+    a.branch.head === b.branch.head &&
+    a.branch.upstream === b.branch.upstream &&
+    a.branch.oid === b.branch.oid &&
+    a.branch.ahead === b.branch.ahead &&
+    a.branch.behind === b.branch.behind &&
+    a.baseRef === b.baseRef &&
+    sameUnorderedArray(a.commits, b.commits, repoCommitSummarySignature)
+  );
+}
+
+export function sameRepoCommitChangesPayload(
+  a: Extract<RepoCommitChangesPayload, { ok: true }> | null,
+  b: Extract<RepoCommitChangesPayload, { ok: true }> | null,
+): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return (
+    a.repoRoot === b.repoRoot &&
+    repoCommitSummarySignature(a.commit) === repoCommitSummarySignature(b.commit) &&
+    a.commit.body === b.commit.body &&
+    a.commit.committerName === b.commit.committerName &&
+    a.commit.committerEmail === b.commit.committerEmail &&
+    a.commit.committedAt === b.commit.committedAt &&
+    a.counts.changed === b.counts.changed &&
+    a.counts.additions === b.counts.additions &&
+    a.counts.deletions === b.counts.deletions &&
+    sameUnorderedArray(a.entries, b.entries, repoCommitChangeEntrySignature)
+  );
+}
+
+export function sameRepoPullRequestCommitListPayload(
+  a: Extract<RepoPullRequestCommitListPayload, { ok: true }> | null,
+  b: Extract<RepoPullRequestCommitListPayload, { ok: true }> | null,
+): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return (
+    a.repoRoot === b.repoRoot &&
+    a.github.owner === b.github.owner &&
+    a.github.repo === b.github.repo &&
+    a.pullNumber === b.pullNumber &&
+    sameUnorderedArray(a.commits, b.commits, repoCommitSummarySignature)
+  );
+}
+
+export function sameRepoPullRequestCommitChangesPayload(
+  a: Extract<RepoPullRequestCommitChangesPayload, { ok: true }> | null,
+  b: Extract<RepoPullRequestCommitChangesPayload, { ok: true }> | null,
+): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return (
+    a.repoRoot === b.repoRoot &&
+    a.github.owner === b.github.owner &&
+    a.github.repo === b.github.repo &&
+    repoCommitSummarySignature(a.commit) === repoCommitSummarySignature(b.commit) &&
+    a.commit.body === b.commit.body &&
+    a.commit.committerName === b.commit.committerName &&
+    a.commit.committerEmail === b.commit.committerEmail &&
+    a.commit.committedAt === b.commit.committedAt &&
+    a.counts.changed === b.counts.changed &&
+    a.counts.additions === b.counts.additions &&
+    a.counts.deletions === b.counts.deletions &&
+    sameUnorderedArray(a.entries, b.entries, repoCommitChangeEntrySignature)
   );
 }
 

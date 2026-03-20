@@ -54,6 +54,9 @@ import { hasActivePriorPendingPrompt, shouldDeferQueuedTranscriptPrompt, stalePe
 import {
   cleanupQuarantineWorktree,
   deleteHostRefBestEffort,
+  gitRepoCommitDetails,
+  gitRepoCommitDiffForPath,
+  gitRepoCommitList,
   gitCurrentBranchOrSha,
   gitPullHostBranchBeforeCreate,
   gitRepoDiffForPath,
@@ -84,7 +87,11 @@ import {
   type ChatImageAttachmentRef,
 } from './chat-attachments';
 import {
+  droneRepoBaseSha,
   droneRepoChangesSummary,
+  droneRepoCommitDetails,
+  droneRepoCommitDiffForPath,
+  droneRepoCommitList,
   droneRepoDiffForPath,
   droneRepoPullChangesSummary,
   droneRepoPullDiffForPath,
@@ -95,9 +102,11 @@ import {
 } from './drone-repo';
 import {
   closeGithubPullRequestForRepoRoot,
+  getGithubPullRequestCommitForRepoRoot,
   inspectGithubRepoForRepoRoot,
   isGithubPullRequestError,
   listGithubPullRequestChangesForRepoRoot,
+  listGithubPullRequestCommitsForRepoRoot,
   listGithubPullRequestsForRepoRoot,
   mergeGithubPullRequestForRepoRoot,
   normalizeGithubPullRequestListState,
@@ -10476,6 +10485,248 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         }
       }
 
+      // GET /api/drones/:name/repo/commits
+      // Lists recent commits for the current branch context.
+      if (
+        method === 'GET' &&
+        parts.length === 5 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'repo' &&
+        parts[4] === 'commits'
+      ) {
+        const droneRef = decodeURIComponent(parts[2]);
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        const d = resolved.drone;
+        const droneId = resolved.id;
+        const droneName = String(d?.name ?? droneRef).trim() || droneRef;
+        const runtime = droneRuntime(d);
+        const repoAttached = isRepoAttachedDrone(d);
+        if (!repoAttached) {
+          json(res, 400, { ok: false, error: 'drone has no repo attached' });
+          return;
+        }
+        const requestedLimit = Number(u.searchParams.get('limit') ?? 100);
+        const limit = Number.isFinite(requestedLimit) && requestedLimit > 0 ? Math.min(200, Math.floor(requestedLimit)) : 100;
+        try {
+          if (runtime === 'host') {
+            const repoPathRaw = String(d?.repoPath ?? '').trim();
+            if (!repoPathRaw) {
+              json(res, 400, { ok: false, error: 'drone host repo path is not configured' });
+              return;
+            }
+            const repoRoot = await gitTopLevel(repoPathRaw);
+            const summary = await gitRepoChangesSummary(repoRoot);
+            const baseRef = summary.branch.upstream ? await gitMergeBase(repoRoot, 'HEAD', summary.branch.upstream) : null;
+            const commits = await gitRepoCommitList({ repoRoot, headRef: 'HEAD', baseRef, limit });
+            json(res, 200, {
+              ok: true,
+              id: droneId,
+              name: droneName,
+              repoRoot,
+              branch: summary.branch,
+              baseRef,
+              commits,
+            });
+            return;
+          }
+          const repoPathInContainer = droneRepoPathInContainer(d);
+          const listed = await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: d }, async ({ containerName }) => {
+            const baseRef = await droneRepoBaseSha({ container: containerName, repoPathInContainer });
+            const summary = await droneRepoChangesSummary({ container: containerName, repoPathInContainer });
+            const commits = await droneRepoCommitList({
+              container: containerName,
+              repoPathInContainer,
+              headRef: 'HEAD',
+              baseRef,
+              limit,
+            });
+            return {
+              repoRoot: commits.repoRoot,
+              branch: summary.summary.branch,
+              baseRef,
+              commits: commits.commits,
+            };
+          });
+          json(res, 200, {
+            ok: true,
+            id: droneId,
+            name: droneName,
+            repoRoot: listed.repoRoot,
+            branch: listed.branch,
+            baseRef: listed.baseRef,
+            commits: listed.commits,
+          });
+          return;
+        } catch (e: any) {
+          const msg = e?.message ?? String(e);
+          const missingContainer = looksLikeMissingContainerError(msg);
+          const repoUnavailable = looksLikeRepoUnavailableError(msg);
+          const status = runtime === 'host' ? (repoUnavailable ? 409 : 500) : missingContainer ? 404 : repoUnavailable ? 409 : 500;
+          json(res, status, {
+            ok: false,
+            error: repoUnavailable ? 'repository is not ready yet' : msg,
+            ...(repoUnavailable ? { code: 'repo_unavailable' } : {}),
+            id: droneId,
+            name: droneName,
+          });
+          return;
+        }
+      }
+
+      // GET /api/drones/:name/repo/commits/:sha/changes
+      if (
+        method === 'GET' &&
+        parts.length === 7 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'repo' &&
+        parts[4] === 'commits' &&
+        parts[6] === 'changes'
+      ) {
+        const droneRef = decodeURIComponent(parts[2]);
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        const d = resolved.drone;
+        const droneId = resolved.id;
+        const droneName = String(d?.name ?? droneRef).trim() || droneRef;
+        const runtime = droneRuntime(d);
+        const repoAttached = isRepoAttachedDrone(d);
+        if (!repoAttached) {
+          json(res, 400, { ok: false, error: 'drone has no repo attached' });
+          return;
+        }
+        const sha = String(parts[5] ?? '').trim().toLowerCase();
+        if (!/^[0-9a-f]{40}$/.test(sha)) {
+          json(res, 400, { ok: false, error: 'invalid commit sha', code: 'invalid_commit_sha', id: droneId, name: droneName });
+          return;
+        }
+        try {
+          if (runtime === 'host') {
+            const repoPathRaw = String(d?.repoPath ?? '').trim();
+            if (!repoPathRaw) {
+              json(res, 400, { ok: false, error: 'drone host repo path is not configured' });
+              return;
+            }
+            const repoRoot = await gitTopLevel(repoPathRaw);
+            const detail = await gitRepoCommitDetails({ repoRoot, sha });
+            json(res, 200, { ok: true, id: droneId, name: droneName, ...detail });
+            return;
+          }
+          const repoPathInContainer = droneRepoPathInContainer(d);
+          const detail = await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: d }, async ({ containerName }) => {
+            return await droneRepoCommitDetails({ container: containerName, repoPathInContainer, sha });
+          });
+          json(res, 200, { ok: true, id: droneId, name: droneName, ...detail });
+          return;
+        } catch (e: any) {
+          const msg = e?.message ?? String(e);
+          const missingContainer = looksLikeMissingContainerError(msg);
+          const repoUnavailable = looksLikeRepoUnavailableError(msg);
+          const status = runtime === 'host' ? (repoUnavailable ? 409 : 500) : missingContainer ? 404 : repoUnavailable ? 409 : 500;
+          json(res, status, {
+            ok: false,
+            error: repoUnavailable ? 'repository is not ready yet' : msg,
+            ...(repoUnavailable ? { code: 'repo_unavailable' } : {}),
+            id: droneId,
+            name: droneName,
+          });
+          return;
+        }
+      }
+
+      // GET /api/drones/:name/repo/commits/:sha/diff?path=<repo-relative>
+      if (
+        method === 'GET' &&
+        parts.length === 7 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'repo' &&
+        parts[4] === 'commits' &&
+        parts[6] === 'diff'
+      ) {
+        const droneRef = decodeURIComponent(parts[2]);
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        const d = resolved.drone;
+        const droneId = resolved.id;
+        const droneName = String(d?.name ?? droneRef).trim() || droneRef;
+        const runtime = droneRuntime(d);
+        const repoAttached = isRepoAttachedDrone(d);
+        if (!repoAttached) {
+          json(res, 400, { ok: false, error: 'drone has no repo attached' });
+          return;
+        }
+        const sha = String(parts[5] ?? '').trim().toLowerCase();
+        const filePath = String(u.searchParams.get('path') ?? '').trim();
+        if (!/^[0-9a-f]{40}$/.test(sha)) {
+          json(res, 400, { ok: false, error: 'invalid commit sha', code: 'invalid_commit_sha', id: droneId, name: droneName });
+          return;
+        }
+        if (!filePath) {
+          json(res, 400, { ok: false, error: 'missing diff path', id: droneId, name: droneName });
+          return;
+        }
+        const requestedContextLines = Number(u.searchParams.get('contextLines') ?? 3);
+        const contextLines =
+          Number.isFinite(requestedContextLines) && requestedContextLines >= 0
+            ? Math.min(2000, Math.floor(requestedContextLines))
+            : 3;
+        try {
+          if (runtime === 'host') {
+            const repoPathRaw = String(d?.repoPath ?? '').trim();
+            if (!repoPathRaw) {
+              json(res, 400, { ok: false, error: 'drone host repo path is not configured' });
+              return;
+            }
+            const repoRoot = await gitTopLevel(repoPathRaw);
+            const diff = await gitRepoCommitDiffForPath({ repoRoot, sha, filePath, contextLines });
+            json(res, 200, {
+              ok: true,
+              id: droneId,
+              name: droneName,
+              repoRoot: diff.repoRoot,
+              sha: diff.sha,
+              path: diff.path,
+              diff: diff.diff,
+              truncated: diff.truncated,
+              isBinary: false,
+            });
+            return;
+          }
+          const repoPathInContainer = droneRepoPathInContainer(d);
+          const diff = await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: d }, async ({ containerName }) => {
+            return await droneRepoCommitDiffForPath({ container: containerName, repoPathInContainer, sha, filePath, contextLines });
+          });
+          json(res, 200, {
+            ok: true,
+            id: droneId,
+            name: droneName,
+            repoRoot: diff.repoRoot,
+            sha: diff.sha,
+            path: diff.path,
+            diff: diff.diff,
+            truncated: diff.truncated,
+            isBinary: false,
+          });
+          return;
+        } catch (e: any) {
+          const msg = e?.message ?? String(e);
+          const missingContainer = looksLikeMissingContainerError(msg);
+          const repoUnavailable = looksLikeRepoUnavailableError(msg);
+          const status = runtime === 'host' ? (repoUnavailable ? 409 : 500) : missingContainer ? 404 : repoUnavailable ? 409 : 500;
+          json(res, status, {
+            ok: false,
+            error: repoUnavailable ? 'repository is not ready yet' : msg,
+            ...(repoUnavailable ? { code: 'repo_unavailable' } : {}),
+            id: droneId,
+            name: droneName,
+          });
+          return;
+        }
+      }
+
       // GET /api/drones/:name/repo/pull/changes
       // "PR perspective": committed delta between dvm.baseSha..HEAD in the container repo.
       if (
@@ -10996,6 +11247,205 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             pullRequest: pr.pullRequest,
             counts: pr.counts,
             entries: pr.entries,
+          });
+          return;
+        } catch (e: any) {
+          if (isGithubPullRequestError(e)) {
+            json(res, e.statusCode, {
+              ok: false,
+              error: e.message,
+              ...(e.code ? { code: e.code } : {}),
+              id: droneId,
+              name: droneName,
+            });
+            return;
+          }
+          const msg = e?.message ?? String(e);
+          json(res, 500, { ok: false, error: msg, id: droneId, name: droneName });
+          return;
+        }
+      }
+
+      // GET /api/drones/:name/repo/pull-requests/:number/commits
+      if (
+        method === 'GET' &&
+        parts.length === 7 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'repo' &&
+        parts[4] === 'pull-requests' &&
+        parts[6] === 'commits'
+      ) {
+        const droneRef = decodeURIComponent(parts[2]);
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        const d = resolved.drone;
+        const droneId = resolved.id;
+        const droneName = String(d?.name ?? droneRef).trim() || droneRef;
+        const repoAttached = isRepoAttachedDrone(d);
+        if (!repoAttached) {
+          json(res, 400, { ok: false, error: 'drone has no repo attached' });
+          return;
+        }
+        const repoPathRaw = String(d?.repoPath ?? '').trim();
+        if (!repoPathRaw) {
+          json(res, 409, { ok: false, error: 'host repo path is unavailable for this drone', code: 'repo_path_missing', id: droneId, name: droneName });
+          return;
+        }
+        const pullNumber = Number.parseInt(String(parts[5] ?? '').trim(), 10);
+        if (!Number.isFinite(pullNumber) || pullNumber <= 0 || Math.floor(pullNumber) !== pullNumber) {
+          json(res, 400, { ok: false, error: 'invalid pull request number', code: 'invalid_pull_number', id: droneId, name: droneName });
+          return;
+        }
+        try {
+          const repoRoot = await gitTopLevel(repoPathRaw);
+          const listed = await listGithubPullRequestCommitsForRepoRoot({ repoRoot, pullNumber });
+          json(res, 200, {
+            ok: true,
+            id: droneId,
+            name: droneName,
+            repoRoot,
+            github: listed.repo,
+            pullNumber: listed.pullNumber,
+            commits: listed.commits,
+          });
+          return;
+        } catch (e: any) {
+          if (isGithubPullRequestError(e)) {
+            json(res, e.statusCode, {
+              ok: false,
+              error: e.message,
+              ...(e.code ? { code: e.code } : {}),
+              id: droneId,
+              name: droneName,
+            });
+            return;
+          }
+          const msg = e?.message ?? String(e);
+          json(res, 500, { ok: false, error: msg, id: droneId, name: droneName });
+          return;
+        }
+      }
+
+      // GET /api/drones/:name/repo/pull-requests/:number/commits/:sha/changes
+      if (
+        method === 'GET' &&
+        parts.length === 9 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'repo' &&
+        parts[4] === 'pull-requests' &&
+        parts[6] === 'commits' &&
+        parts[8] === 'changes'
+      ) {
+        const droneRef = decodeURIComponent(parts[2]);
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        const d = resolved.drone;
+        const droneId = resolved.id;
+        const droneName = String(d?.name ?? droneRef).trim() || droneRef;
+        const repoAttached = isRepoAttachedDrone(d);
+        if (!repoAttached) {
+          json(res, 400, { ok: false, error: 'drone has no repo attached' });
+          return;
+        }
+        const repoPathRaw = String(d?.repoPath ?? '').trim();
+        if (!repoPathRaw) {
+          json(res, 409, { ok: false, error: 'host repo path is unavailable for this drone', code: 'repo_path_missing', id: droneId, name: droneName });
+          return;
+        }
+        const pullNumber = Number.parseInt(String(parts[5] ?? '').trim(), 10);
+        const sha = String(parts[7] ?? '').trim().toLowerCase();
+        if (!Number.isFinite(pullNumber) || pullNumber <= 0 || Math.floor(pullNumber) !== pullNumber) {
+          json(res, 400, { ok: false, error: 'invalid pull request number', code: 'invalid_pull_number', id: droneId, name: droneName });
+          return;
+        }
+        if (!/^[0-9a-f]{40}$/.test(sha)) {
+          json(res, 400, { ok: false, error: 'invalid commit sha', code: 'invalid_commit_sha', id: droneId, name: droneName });
+          return;
+        }
+        try {
+          const repoRoot = await gitTopLevel(repoPathRaw);
+          const detail = await getGithubPullRequestCommitForRepoRoot({ repoRoot, pullNumber, sha });
+          json(res, 200, { ok: true, id: droneId, name: droneName, ...detail });
+          return;
+        } catch (e: any) {
+          if (isGithubPullRequestError(e)) {
+            json(res, e.statusCode, {
+              ok: false,
+              error: e.message,
+              ...(e.code ? { code: e.code } : {}),
+              id: droneId,
+              name: droneName,
+            });
+            return;
+          }
+          const msg = e?.message ?? String(e);
+          json(res, 500, { ok: false, error: msg, id: droneId, name: droneName });
+          return;
+        }
+      }
+
+      // GET /api/drones/:name/repo/pull-requests/:number/commits/:sha/diff?path=<repo-relative>
+      if (
+        method === 'GET' &&
+        parts.length === 9 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'repo' &&
+        parts[4] === 'pull-requests' &&
+        parts[6] === 'commits' &&
+        parts[8] === 'diff'
+      ) {
+        const droneRef = decodeURIComponent(parts[2]);
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        const d = resolved.drone;
+        const droneId = resolved.id;
+        const droneName = String(d?.name ?? droneRef).trim() || droneRef;
+        const repoAttached = isRepoAttachedDrone(d);
+        if (!repoAttached) {
+          json(res, 400, { ok: false, error: 'drone has no repo attached' });
+          return;
+        }
+        const repoPathRaw = String(d?.repoPath ?? '').trim();
+        if (!repoPathRaw) {
+          json(res, 409, { ok: false, error: 'host repo path is unavailable for this drone', code: 'repo_path_missing', id: droneId, name: droneName });
+          return;
+        }
+        const pullNumber = Number.parseInt(String(parts[5] ?? '').trim(), 10);
+        const sha = String(parts[7] ?? '').trim().toLowerCase();
+        const filePath = String(u.searchParams.get('path') ?? '').trim();
+        if (!Number.isFinite(pullNumber) || pullNumber <= 0 || Math.floor(pullNumber) !== pullNumber) {
+          json(res, 400, { ok: false, error: 'invalid pull request number', code: 'invalid_pull_number', id: droneId, name: droneName });
+          return;
+        }
+        if (!/^[0-9a-f]{40}$/.test(sha)) {
+          json(res, 400, { ok: false, error: 'invalid commit sha', code: 'invalid_commit_sha', id: droneId, name: droneName });
+          return;
+        }
+        if (!filePath) {
+          json(res, 400, { ok: false, error: 'missing diff path', id: droneId, name: droneName });
+          return;
+        }
+        try {
+          const repoRoot = await gitTopLevel(repoPathRaw);
+          const detail = await getGithubPullRequestCommitForRepoRoot({ repoRoot, pullNumber, sha });
+          const entry = detail.entries.find((candidate) => candidate.path === filePath || candidate.originalPath === filePath) ?? null;
+          if (!entry) {
+            json(res, 404, { ok: false, error: `File ${filePath} was not found in commit ${sha.slice(0, 12)}.`, code: 'file_not_found', id: droneId, name: droneName });
+            return;
+          }
+          json(res, 200, {
+            ok: true,
+            id: droneId,
+            name: droneName,
+            repoRoot,
+            sha,
+            path: entry.path,
+            diff: entry.patch ?? '',
+            truncated: entry.truncated,
+            isBinary: entry.isBinary,
           });
           return;
         } catch (e: any) {

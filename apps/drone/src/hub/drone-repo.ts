@@ -1,6 +1,13 @@
 import { dvmExec } from '../host/dvm';
 import { normalizeContainerPath } from './hub-format';
-import { parseGitStatusPorcelainV2Z } from './repoOps';
+import {
+  parseGitCommitDetails,
+  parseGitCommitList,
+  parseGitNumStatZ,
+  parseGitStatusPorcelainV2Z,
+  type RepoCommitDetails,
+  type RepoCommitSummary,
+} from './repoOps';
 
 export async function runGitInDrone(opts: {
   container: string;
@@ -355,4 +362,176 @@ export async function droneRepoPullDiffForPath(opts: {
     diffText = `${diffText.slice(0, maxChars)}\n\n@@ truncated @@\n`;
   }
   return { repoRoot, baseSha, headSha, path: requestedPath, diff: diffText, truncated };
+}
+
+export async function droneRepoCommitList(opts: {
+  container: string;
+  repoPathInContainer: string;
+  headRef?: string;
+  baseRef?: string | null;
+  limit?: number;
+}): Promise<{ repoRoot: string; commits: RepoCommitSummary[] }> {
+  const repoPathInContainer = normalizeContainerPath(opts.repoPathInContainer);
+  const repoRootRaw = await runGitInDroneOrThrow({
+    container: opts.container,
+    repoPathInContainer,
+    args: ['rev-parse', '--show-toplevel'],
+  });
+  const repoRoot = String(repoRootRaw.stdout ?? '').trim() || repoPathInContainer;
+  const headRef = String(opts.headRef ?? 'HEAD').trim() || 'HEAD';
+  const baseRef = String(opts.baseRef ?? '').trim();
+  const limit =
+    typeof opts.limit === 'number' && Number.isFinite(opts.limit) && opts.limit > 0 ? Math.min(200, Math.floor(opts.limit)) : 100;
+  const revisionRange = baseRef ? `${baseRef}..${headRef}` : headRef;
+  const raw = await runGitInDroneOrThrow({
+    container: opts.container,
+    repoPathInContainer,
+    args: [
+      'log',
+      `--max-count=${limit}`,
+      '--date=iso-strict',
+      '--no-show-signature',
+      '--format=%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%aI%x1f%s',
+      revisionRange,
+    ],
+  });
+  return {
+    repoRoot,
+    commits: parseGitCommitList(raw.stdout),
+  };
+}
+
+export async function droneRepoCommitDetails(opts: {
+  container: string;
+  repoPathInContainer: string;
+  sha: string;
+}): Promise<RepoCommitDetails> {
+  const repoPathInContainer = normalizeContainerPath(opts.repoPathInContainer);
+  const sha = String(opts.sha ?? '').trim().toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('invalid commit sha');
+  const repoRootRaw = await runGitInDroneOrThrow({
+    container: opts.container,
+    repoPathInContainer,
+    args: ['rev-parse', '--show-toplevel'],
+  });
+  const repoRoot = String(repoRootRaw.stdout ?? '').trim() || repoPathInContainer;
+  const commit = parseGitCommitDetails(
+    (
+      await runGitInDroneOrThrow({
+        container: opts.container,
+        repoPathInContainer,
+        args: ['show', '-s', '--no-show-signature', '--format=%H%x00%P%x00%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI%x00%s%x00%b', sha],
+      })
+    ).stdout,
+  );
+  const parentSha = commit.parents[0] ?? null;
+  const [nameStatusRaw, numstatRaw] = await Promise.all([
+    runGitInDroneOrThrow({
+      container: opts.container,
+      repoPathInContainer,
+      args: parentSha
+        ? ['diff-tree', '--name-status', '-z', '-r', '--find-renames', '--find-copies', parentSha, sha]
+        : ['diff-tree', '--root', '--name-status', '-z', '-r', '--find-renames', '--find-copies', sha],
+    }),
+    runGitInDroneOrThrow({
+      container: opts.container,
+      repoPathInContainer,
+      args: parentSha
+        ? ['diff-tree', '--numstat', '-z', '-r', '--find-renames', '--find-copies', parentSha, sha]
+        : ['diff-tree', '--root', '--numstat', '-z', '-r', '--find-renames', '--find-copies', sha],
+    }),
+  ]);
+  const nameStatus = parseGitNameStatusZ(nameStatusRaw.stdout);
+  const numstat = parseGitNumStatZ(numstatRaw.stdout);
+  const statByKey = new Map<string, { additions: number; deletions: number }>();
+  for (const entry of numstat) {
+    statByKey.set(`${entry.path}\u0000${entry.originalPath ?? ''}`, {
+      additions: entry.additions,
+      deletions: entry.deletions,
+    });
+  }
+  const entries = nameStatus.map((entry) => {
+    const stats = statByKey.get(`${entry.path}\u0000${entry.originalPath ?? ''}`) ?? null;
+    const additions = stats?.additions ?? 0;
+    const deletions = stats?.deletions ?? 0;
+    return {
+      path: entry.path,
+      originalPath: entry.originalPath,
+      statusChar: entry.statusChar,
+      statusType: nameStatusCharToType(entry.statusChar),
+      additions,
+      deletions,
+      changes: additions + deletions,
+    };
+  });
+  const additions = entries.reduce((sum, entry) => sum + entry.additions, 0);
+  const deletions = entries.reduce((sum, entry) => sum + entry.deletions, 0);
+  return {
+    repoRoot,
+    commit,
+    counts: {
+      changed: entries.length,
+      additions,
+      deletions,
+    },
+    entries,
+  };
+}
+
+export async function droneRepoCommitDiffForPath(opts: {
+  container: string;
+  repoPathInContainer: string;
+  sha: string;
+  filePath: string;
+  contextLines?: number;
+  maxChars?: number;
+}): Promise<{ repoRoot: string; sha: string; path: string; diff: string; truncated: boolean }> {
+  const repoPathInContainer = normalizeContainerPath(opts.repoPathInContainer);
+  const sha = String(opts.sha ?? '').trim().toLowerCase();
+  const requestedPath = String(opts.filePath ?? '').trim();
+  if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('invalid commit sha');
+  if (!requestedPath || requestedPath.includes('\0')) throw new Error('invalid file path');
+  const contextLines =
+    typeof opts.contextLines === 'number' && Number.isFinite(opts.contextLines) && opts.contextLines >= 0
+      ? Math.floor(opts.contextLines)
+      : 3;
+  const maxChars =
+    typeof opts.maxChars === 'number' && Number.isFinite(opts.maxChars) && opts.maxChars > 0 ? Math.floor(opts.maxChars) : 350_000;
+  const repoRootRaw = await runGitInDroneOrThrow({
+    container: opts.container,
+    repoPathInContainer,
+    args: ['rev-parse', '--show-toplevel'],
+  });
+  const repoRoot = String(repoRootRaw.stdout ?? '').trim() || repoPathInContainer;
+  const parentsRaw = await runGitInDroneOrThrow({
+    container: opts.container,
+    repoPathInContainer,
+    args: ['show', '-s', '--format=%P', sha],
+  });
+  const parentSha =
+    String(parentsRaw.stdout ?? '')
+      .trim()
+      .split(/\s+/g)
+      .map((value) => value.trim().toLowerCase())
+      .find((value) => /^[0-9a-f]{40}$/.test(value)) ?? null;
+  const diffRaw = await runGitInDroneOrThrow({
+    container: opts.container,
+    repoPathInContainer,
+    args: parentSha
+      ? ['diff', '--no-color', '--no-ext-diff', `-U${contextLines}`, parentSha, sha, '--', requestedPath]
+      : ['show', '--format=', '--no-color', '--no-ext-diff', `-U${contextLines}`, sha, '--', requestedPath],
+  });
+  let diffText = diffRaw.stdout ?? '';
+  let truncated = false;
+  if (diffText.length > maxChars) {
+    truncated = true;
+    diffText = `${diffText.slice(0, maxChars)}\n\n@@ truncated @@\n`;
+  }
+  return {
+    repoRoot,
+    sha,
+    path: requestedPath,
+    diff: diffText,
+    truncated,
+  };
 }
