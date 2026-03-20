@@ -2,7 +2,7 @@ import React from 'react';
 import Editor from '@monaco-editor/react';
 import { SegmentedToolbarToggle } from '../app/SegmentedToolbarToggle';
 import { MarkdownMessage } from '../chat/MarkdownMessage';
-import { defaultTextFileViewModeForPath, editorLanguageForPath, isMarkdownPath, type TextFileViewMode } from '../code-languages';
+import { defaultTextFileViewModeForFile, editorLanguageForPath, isMarkdownFile, type TextFileViewMode } from '../code-languages';
 import { formatBytes, formatEditorMtime } from '../app/selected-drone-workspace-utils';
 import { resolveMarkdownPreviewLinkTarget } from './markdown-preview-link-utils';
 import type { DroneOpenedFileState } from './opened-file-types';
@@ -42,8 +42,10 @@ export function OpenedDroneFilePanel({
   } = file;
   const activeFilePath = String(filePath ?? '').trim();
   const openedEditorIsText = (fileKind ?? 'text') === 'text';
-  const openedFileIsMarkdown = openedEditorIsText && isMarkdownPath(activeFilePath);
-  const [openedTextMode, setOpenedTextMode] = React.useState<TextFileViewMode>('edit');
+  const openedFileIsMarkdown = openedEditorIsText && isMarkdownFile(activeFilePath, fileMime);
+  const [openedTextMode, setOpenedTextMode] = React.useState<TextFileViewMode>(() =>
+    activeFilePath && openedEditorIsText ? defaultTextFileViewModeForFile(activeFilePath, fileMime) : 'edit',
+  );
   const editorRef = React.useRef<any>(null);
   const [openedFileImageZoom, setOpenedFileImageZoom] = React.useState(1);
   const [openedFileImagePan, setOpenedFileImagePan] = React.useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -55,8 +57,8 @@ export function OpenedDroneFilePanel({
       setOpenedTextMode('edit');
       return;
     }
-    setOpenedTextMode(defaultTextFileViewModeForPath(activeFilePath));
-  }, [activeFilePath, fileNavigationSeq, openedEditorIsText]);
+    setOpenedTextMode(defaultTextFileViewModeForFile(activeFilePath, fileMime));
+  }, [activeFilePath, fileMime, fileNavigationSeq, openedEditorIsText]);
 
   React.useEffect(() => {
     if ((fileKind ?? 'text') !== 'image' || !activeFilePath) {

@@ -94,6 +94,21 @@ export function isMarkdownPath(filePath: string): boolean {
   return codeLanguagesForPath(filePath).editor === 'markdown';
 }
 
+export function isMarkdownMime(mimeRaw: string | null | undefined): boolean {
+  const mime = String(mimeRaw ?? '').trim().toLowerCase();
+  if (!mime) return false;
+  if (mime === 'text/markdown' || mime === 'text/x-markdown' || mime === 'application/markdown') return true;
+  return mime.startsWith('text/markdown;') || mime.startsWith('text/x-markdown;') || mime.startsWith('application/markdown;');
+}
+
+export function isMarkdownFile(filePath: string, mime?: string | null): boolean {
+  return isMarkdownPath(filePath) || isMarkdownMime(mime);
+}
+
 export function defaultTextFileViewModeForPath(filePath: string): TextFileViewMode {
   return isMarkdownPath(filePath) ? 'preview' : 'edit';
+}
+
+export function defaultTextFileViewModeForFile(filePath: string, mime?: string | null): TextFileViewMode {
+  return isMarkdownFile(filePath, mime) ? 'preview' : 'edit';
 }
