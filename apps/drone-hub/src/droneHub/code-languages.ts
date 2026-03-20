@@ -3,6 +3,8 @@ type CodeLanguages = {
   diff: string | null;
 };
 
+export type TextFileViewMode = 'preview' | 'edit';
+
 const FALLBACK_LANGUAGES: CodeLanguages = {
   editor: 'plaintext',
   diff: null,
@@ -86,4 +88,12 @@ export function editorLanguageForPath(filePath: string): string {
 
 export function diffLanguageForPath(filePath: string): string | null {
   return codeLanguagesForPath(filePath).diff;
+}
+
+export function isMarkdownPath(filePath: string): boolean {
+  return codeLanguagesForPath(filePath).editor === 'markdown';
+}
+
+export function defaultTextFileViewModeForPath(filePath: string): TextFileViewMode {
+  return isMarkdownPath(filePath) ? 'preview' : 'edit';
 }

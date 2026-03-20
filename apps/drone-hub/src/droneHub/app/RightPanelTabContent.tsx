@@ -16,6 +16,7 @@ import type {
   DroneSummary,
   PortReachabilityByHostPort,
 } from '../types';
+import type { DroneOpenedFileState } from '../files/opened-file-types';
 import { repoUnavailableReasonForRuntime, type RightPanelTab } from './app-config';
 import { isDroneStartingOrSeeding } from './helpers';
 
@@ -113,6 +114,11 @@ type RightPanelTabContentProps = {
   agentLabel: string;
   portRows: DronePortMapping[];
   onOpenFileInEditor: (entry: DroneFsEntry) => void;
+  onOpenFileTargetInEditor: (next: { path: string; name: string; line?: number | null; column?: number | null }) => void;
+  openedFile: DroneOpenedFileState;
+  onOpenedEditorFileContentChange: (next: string) => void;
+  onSaveOpenedEditorFile: (contentOverride?: string) => Promise<boolean>;
+  onCloseOpenedEditorFile: () => void;
   onOpenPullRequestInChanges: (paneKey: 'top' | 'bottom' | 'single', pullRequest: RepoPullRequestSummary) => void;
   onRevealChangesFileInFiles: (paneKey: 'top' | 'bottom' | 'single', repoRelativePath: string) => void;
   onOpenChangesFileInEditor: (repoRelativePath: string) => void;
@@ -176,6 +182,11 @@ export function RightPanelTabContent({
   agentLabel,
   portRows,
   onOpenFileInEditor,
+  onOpenFileTargetInEditor,
+  openedFile,
+  onOpenedEditorFileContentChange,
+  onSaveOpenedEditorFile,
+  onCloseOpenedEditorFile,
   onOpenPullRequestInChanges,
   onRevealChangesFileInFiles,
   onOpenChangesFileInEditor,
@@ -282,6 +293,11 @@ export function RightPanelTabContent({
           onOpenPath={setCurrentFsPath}
           onRefresh={refreshFsList}
           onOpenFile={onOpenFileInEditor}
+          onOpenFileTarget={onOpenFileTargetInEditor}
+          openedFile={openedFile}
+          onOpenedFileContentChange={onOpenedEditorFileContentChange}
+          onSaveOpenedFile={onSaveOpenedEditorFile}
+          onCloseOpenedFile={onCloseOpenedEditorFile}
         />
       );
 

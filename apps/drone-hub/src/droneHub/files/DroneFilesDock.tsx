@@ -1,7 +1,10 @@
 import React from 'react';
+import { formatBytes } from '../app/selected-drone-workspace-utils';
 import { requestJson } from '../http';
 import { IconFolder, IconList, iconForFilePath } from '../icons';
 import type { DroneFsEntry, DroneFsUploadPayload } from '../types';
+import { OpenedDroneFilePanel } from './OpenedDroneFilePanel';
+import type { DroneOpenedFileState } from './opened-file-types';
 
 function normalizeContainerPathInput(raw: string): string {
   const trimmed = String(raw ?? '').trim();
@@ -15,21 +18,6 @@ function parentContainerPath(rawPath: string): string {
   const i = p.lastIndexOf('/');
   if (i <= 0) return '/';
   return p.slice(0, i) || '/';
-}
-
-function formatBytes(value: number | null | undefined): string {
-  const n = Number(value);
-  if (!Number.isFinite(n) || n < 0) return '-';
-  if (n < 1024) return `${Math.floor(n)} B`;
-  const units = ['KB', 'MB', 'GB', 'TB'];
-  let v = n / 1024;
-  let idx = 0;
-  while (v >= 1024 && idx < units.length - 1) {
-    v /= 1024;
-    idx += 1;
-  }
-  const precision = v >= 100 ? 0 : v >= 10 ? 1 : 2;
-  return `${v.toFixed(precision)} ${units[idx]}`;
 }
 
 function formatLocalDateTime(ms: number | null | undefined): string {
@@ -86,7 +74,12 @@ export function DroneFilesDock({
   onSetViewMode,
   onOpenPath,
   onOpenFile,
+  onOpenFileTarget,
   onRefresh,
+  openedFile,
+  onOpenedFileContentChange,
+  onSaveOpenedFile,
+  onCloseOpenedFile,
 }: {
   droneId: string;
   droneName: string;
@@ -101,11 +94,17 @@ export function DroneFilesDock({
   onSetViewMode: (next: 'list' | 'thumb') => void;
   onOpenPath: (nextPath: string) => void;
   onOpenFile: (entry: DroneFsEntry) => void;
+  onOpenFileTarget?: (next: { path: string; name: string; line?: number | null; column?: number | null }) => void;
   onRefresh: () => void;
+  openedFile: DroneOpenedFileState;
+  onOpenedFileContentChange?: (next: string) => void;
+  onSaveOpenedFile?: (contentOverride?: string) => Promise<boolean>;
+  onCloseOpenedFile?: () => void;
 }) {
   const shownName = String(droneLabel ?? droneName).trim() || droneName;
   const normalizedPath = normalizeContainerPathInput(path);
   const normalizedHomePath = normalizeContainerPathInput(homePath);
+  const activeOpenedFilePath = String(openedFile.path ?? '').trim();
   const [pathInput, setPathInput] = React.useState(normalizedPath);
   const [thumbFailedByPath, setThumbFailedByPath] = React.useState<Record<string, boolean>>({});
   const [openedImage, setOpenedImage] = React.useState<DroneFsEntry | null>(null);
@@ -146,6 +145,16 @@ export function DroneFilesDock({
     setUploadError(null);
     setUploadStatus(null);
   }, [droneId, normalizedPath]);
+
+  React.useEffect(() => {
+    if (!activeOpenedFilePath) return;
+    setOpenedImage(null);
+    setOpenedImageFailed(false);
+    setOpenedImageZoom(1);
+    setOpenedImagePan({ x: 0, y: 0 });
+    setOpenedImagePanning(false);
+    openedImagePanDragRef.current = null;
+  }, [activeOpenedFilePath]);
 
   React.useEffect(
     () => () => {
@@ -345,6 +354,25 @@ export function DroneFilesDock({
     if (entry.kind === 'file') return `Double-click to open: ${entry.path}`;
     return entry.path;
   }, []);
+  const openResolvedFile = React.useCallback(
+    (next: { path: string; name: string; line?: number | null; column?: number | null }) => {
+      if (onOpenFileTarget) {
+        onOpenFileTarget(next);
+        return;
+      }
+      onOpenFile({
+        name: next.name,
+        path: next.path,
+        kind: 'file',
+        size: null,
+        mtimeMs: null,
+        ext: null,
+        isImage: false,
+        isVideo: false,
+      });
+    },
+    [onOpenFile, onOpenFileTarget],
+  );
   const onEntryKeyDown = React.useCallback(
     (event: React.KeyboardEvent<HTMLElement>, entry: DroneFsEntry) => {
       if (!canOpenEntry(entry)) return;
@@ -503,6 +531,17 @@ export function DroneFilesDock({
       </div>
 
       <div className="flex-1 min-h-0 overflow-auto px-2.5 py-2">
+        {activeOpenedFilePath ? (
+          <OpenedDroneFilePanel
+            droneId={droneId}
+            file={openedFile}
+            onFileContentChange={onOpenedFileContentChange}
+            onSaveFile={onSaveOpenedFile}
+            onCloseFile={onCloseOpenedFile}
+            onOpenResolvedFile={openResolvedFile}
+          />
+        ) : (
+          <>
         {uploadStatus && (
           <div className="mb-2 p-2 rounded-md bg-[rgba(66,153,225,.12)] border border-[rgba(66,153,225,.28)] text-[12px] text-[var(--fg-secondary)]">
             {uploadStatus}
@@ -735,6 +774,8 @@ export function DroneFilesDock({
               );
             })}
           </div>
+        )}
+          </>
         )}
       </div>
       {dragActive && (

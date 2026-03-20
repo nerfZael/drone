@@ -1551,6 +1551,28 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setNewCustomAgentCommand,
     setCustomAgentModalOpen,
   });
+  const focusFilesPane = React.useCallback(() => {
+    setRightPanelOpen(true);
+    if (!rightPanelSplit) {
+      setRightPanelTab('files');
+      return;
+    }
+    if (rightPanelTab === 'files') return;
+    if (rightPanelBottomTab === 'files') return;
+    setRightPanelTab('files');
+  }, [rightPanelBottomTab, rightPanelSplit, rightPanelTab, setRightPanelOpen, setRightPanelTab]);
+  const openFileInFilesPane = React.useCallback(
+    (next: { path: string; name: string; line?: number | null; column?: number | null }) => {
+      const containerPath = String(next.path ?? '').trim();
+      if (!containerPath) return;
+      const slash = containerPath.lastIndexOf('/');
+      const parentPath = slash > 0 ? containerPath.slice(0, slash) : '/';
+      setCurrentFsPath(parentPath || '/');
+      focusFilesPane();
+      openEditorFile(next);
+    },
+    [focusFilesPane, openEditorFile, setCurrentFsPath],
+  );
   const openMarkdownFileReference = React.useCallback(
     (ref: MarkdownFileReference) => {
       let rawPath = String(ref.path ?? '').trim().replace(/\\/g, '/');
@@ -1566,14 +1588,14 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           ? `/${normalized}`
           : `${basePath}/${normalized}`;
       const name = containerPath.split('/').filter(Boolean).pop() || containerPath;
-      openEditorFile({
+      openFileInFilesPane({
         path: containerPath,
         name,
         line: ref.line,
         column: ref.column,
       });
     },
-    [currentDrone, openEditorFile],
+    [currentDrone, openFileInFilesPane],
   );
   const resolveCurrentDroneRepoFilePath = React.useCallback(
     (repoRelativePathRaw: string): string | null => {
@@ -1589,9 +1611,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const containerPath = resolveCurrentDroneRepoFilePath(repoRelativePath);
       if (!containerPath) return;
       const name = containerPath.split('/').filter(Boolean).pop() || containerPath;
-      openEditorFile({ path: containerPath, name });
+      openFileInFilesPane({ path: containerPath, name });
     },
-    [openEditorFile, resolveCurrentDroneRepoFilePath],
+    [openFileInFilesPane, resolveCurrentDroneRepoFilePath],
   );
   const revealChangesFileInFiles = React.useCallback(
     (pane: 'top' | 'bottom' | 'single', repoRelativePath: string) => {
@@ -2027,8 +2049,28 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           portRows={previewPortRows}
           onOpenFileInEditor={(entry) => {
             if (entry.kind !== 'file') return;
-            openEditorFile({ path: entry.path, name: entry.name });
+            openFileInFilesPane({ path: entry.path, name: entry.name });
           }}
+          onOpenFileTargetInEditor={openFileInFilesPane}
+          openedFile={{
+            path: openedEditorFile?.path ?? null,
+            name: openedEditorFile?.name ?? null,
+            loading: openedEditorFileLoading,
+            saving: openedEditorFileSaving,
+            error: openedEditorFileError,
+            kind: openedEditorFileKind,
+            mime: openedEditorFileMime,
+            size: openedEditorFileSize,
+            content: openedEditorFileContent,
+            dirty: openedEditorFileDirty,
+            mtimeMs: openedEditorFileMtimeMs,
+            targetLine: openedEditorFile?.targetLine ?? null,
+            targetColumn: openedEditorFile?.targetColumn ?? null,
+            navigationSeq: openedEditorFile?.navigationSeq ?? 0,
+          }}
+          onOpenedEditorFileContentChange={setOpenedFileContent}
+          onSaveOpenedEditorFile={saveOpenedFile}
+          onCloseOpenedEditorFile={closeEditorFile}
           onRevealChangesFileInFiles={revealChangesFileInFiles}
           onOpenChangesFileInEditor={openChangesFileInEditor}
           onOpenPullRequestInChanges={(pane, _pullRequest) => {
@@ -2098,7 +2140,20 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setSelectedPreviewUrlOverride,
       uiDroneName,
       openChangesFileInEditor,
-      openEditorFile,
+      openFileInFilesPane,
+      openedEditorFile,
+      openedEditorFileContent,
+      openedEditorFileDirty,
+      openedEditorFileError,
+      openedEditorFileKind,
+      openedEditorFileLoading,
+      openedEditorFileMime,
+      openedEditorFileMtimeMs,
+      openedEditorFileSaving,
+      openedEditorFileSize,
+      setOpenedFileContent,
+      saveOpenedFile,
+      closeEditorFile,
     ],
   );
 

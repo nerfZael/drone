@@ -336,27 +336,38 @@ export function MarkdownMessage({
   className,
   onOpenFileReference,
   onOpenLink,
+  preferOpenLinkBeforeModifiedClick = false,
 }: {
   text: string;
   className?: string;
   onOpenFileReference?: (ref: MarkdownFileReference) => void;
   onOpenLink?: (href: string) => boolean;
+  preferOpenLinkBeforeModifiedClick?: boolean;
 }) {
   const handleAnchorClick = React.useCallback(
     (event: React.MouseEvent<HTMLAnchorElement>, hrefText: string) => {
       if (!onOpenLink || !hrefText) return;
       if (event.defaultPrevented) return;
       if (event.button !== 0) return;
+      if (preferOpenLinkBeforeModifiedClick && !event.shiftKey && !event.altKey) {
+        const handled = Boolean(onOpenLink(hrefText));
+        if (handled) {
+          event.preventDefault();
+          return;
+        }
+      }
       if (event.metaKey || event.ctrlKey) {
         event.preventDefault();
         window.open(hrefText, '_blank', 'noopener,noreferrer');
         return;
       }
       if (event.shiftKey || event.altKey) return;
-      const handled = Boolean(onOpenLink(hrefText));
-      if (handled) event.preventDefault();
+      if (!preferOpenLinkBeforeModifiedClick) {
+        const handled = Boolean(onOpenLink(hrefText));
+        if (handled) event.preventDefault();
+      }
     },
-    [onOpenLink],
+    [onOpenLink, preferOpenLinkBeforeModifiedClick],
   );
   const normalizedText = React.useMemo(() => normalizeLooseNestedBullets(text), [text]);
   const [tableModes, setTableModes] = React.useState<Record<string, TableMode>>({});
