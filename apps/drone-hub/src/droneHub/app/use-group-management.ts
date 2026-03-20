@@ -3,6 +3,11 @@ import { requestJson } from '../http';
 import type { DroneSummary } from '../types';
 import { isUngroupedGroupName } from '../../domain';
 import { isNotFoundError } from './hooks';
+import {
+  renameSidebarEntryOrderMapKey,
+  renameSidebarGroupOrderToken,
+  renameSidebarGroupTokenList,
+} from './sidebar-group-order';
 
 type UseGroupManagementArgs = {
   autoDelete: boolean;
@@ -11,6 +16,11 @@ type UseGroupManagementArgs = {
   optimisticallyDeletedDrones: Record<string, boolean>;
   setOptimisticallyDeletedDrones: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   setCollapsedGroups: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
+  setSidebarGroupOrder: React.Dispatch<React.SetStateAction<string[]>>;
+  setSidebarDroneOrderByGroup: React.Dispatch<React.SetStateAction<Record<string, string[]>>>;
+  setHiddenSidebarGroups: React.Dispatch<React.SetStateAction<string[]>>;
+  selectedGroupMultiChat: string | null;
+  setSelectedGroupMultiChat: React.Dispatch<React.SetStateAction<string | null>>;
 };
 
 export type MoveDronesToGroupResult = {
@@ -31,6 +41,11 @@ export function useGroupManagement({
   optimisticallyDeletedDrones,
   setOptimisticallyDeletedDrones,
   setCollapsedGroups,
+  setSidebarGroupOrder,
+  setSidebarDroneOrderByGroup,
+  setHiddenSidebarGroups,
+  selectedGroupMultiChat,
+  setSelectedGroupMultiChat,
 }: UseGroupManagementArgs) {
   const [groupMoveError, setGroupMoveError] = React.useState<string | null>(null);
   const [movingDroneGroups, setMovingDroneGroups] = React.useState(false);
@@ -81,6 +96,28 @@ export function useGroupManagement({
           delete nextMap[group];
           return nextMap;
         });
+        setSidebarGroupOrder((prev) =>
+          renameSidebarGroupOrderToken(
+            prev,
+            { group, kind: 'group' },
+            { group: newName, kind: 'group' },
+          ),
+        );
+        setHiddenSidebarGroups((prev) =>
+          renameSidebarGroupTokenList(
+            prev,
+            { group, kind: 'group' },
+            { group: newName, kind: 'group' },
+          ),
+        );
+        setSidebarDroneOrderByGroup((prev) =>
+          renameSidebarEntryOrderMapKey(
+            prev,
+            { group, kind: 'group' },
+            { group: newName, kind: 'group' },
+          ),
+        );
+        if (selectedGroupMultiChat === group) setSelectedGroupMultiChat(newName);
       } catch (e: any) {
         const msg = String(e?.message ?? e ?? '').trim();
         console.error('[DroneHub] rename group failed', { group, newName, error: e });
@@ -94,7 +131,15 @@ export function useGroupManagement({
         });
       }
     },
-    [renamingGroups, setCollapsedGroups],
+    [
+      renamingGroups,
+      selectedGroupMultiChat,
+      setCollapsedGroups,
+      setHiddenSidebarGroups,
+      setSelectedGroupMultiChat,
+      setSidebarDroneOrderByGroup,
+      setSidebarGroupOrder,
+    ],
   );
 
   const deleteGroup = React.useCallback(
@@ -185,6 +230,7 @@ export function useGroupManagement({
         } else {
           await requestJson(`/api/groups/${encodeURIComponent(group)}`, { method: 'DELETE' });
         }
+        if (selectedGroupMultiChat === group) setSelectedGroupMultiChat(null);
       } catch (e: any) {
         console.error('[DroneHub] delete group failed', { group, error: e });
         if (addedByThisDelete.length > 0) {
@@ -212,7 +258,9 @@ export function useGroupManagement({
       deletingGroups,
       optimisticallyDeletedDrones,
       polledDrones,
+      selectedGroupMultiChat,
       setOptimisticallyDeletedDrones,
+      setSelectedGroupMultiChat,
       shouldConfirmDelete,
     ],
   );

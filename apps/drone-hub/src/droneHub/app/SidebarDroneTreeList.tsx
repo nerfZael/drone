@@ -5,7 +5,18 @@ import type { DroneSummary } from '../types';
 import { DRONE_CHAT_DND_MIME, createCanvasChatNodeId } from './app-config';
 import { normalizedDroneChats } from './chat-node-helpers';
 import { isDroneStartingOrSeeding } from './helpers';
-import { IconChevron } from './icons';
+import { IconChevron, IconSpinner, IconTrash } from './icons';
+import {
+  orderSidebarEntries,
+  reorderSidebarEntryOrder,
+  type SidebarGroupDropPlacement,
+} from './sidebar-group-order';
+import {
+  sidebarDropPlacementFromClientY,
+  SidebarReorderDropIndicator,
+  SidebarReorderHandle,
+} from './sidebar-reorder-ui';
+import { useDroneSidebarUiState } from './use-drone-hub-ui-store';
 import type { SidebarDroneTree } from './sidebar-drone-tree';
 
 export type SidebarInlineSectionKind = 'chats' | 'children';
@@ -70,6 +81,10 @@ export type SidebarDroneTreeListProps = {
   onToggleSection: (droneId: string, kind: SidebarInlineSectionKind) => void;
   onSelectDroneCard: (droneId: string, opts?: { toggle?: boolean; range?: boolean }) => void;
   onSelectDroneChat: (droneId: string, chatName: string) => void;
+  onDeleteDroneChat: (
+    droneId: string,
+    chatName: string,
+  ) => Promise<{ ok: boolean; deletedDrone?: boolean; error?: string | null }>;
   onOpenCloneModal: (drone: DroneSummary) => void;
   onRenameDrone: (droneId: string) => void;
   onSetDroneBaseImage: (droneId: string) => void;
@@ -77,8 +92,24 @@ export type SidebarDroneTreeListProps = {
   onOpenDroneErrorModal: (drone: DroneSummary, message: string) => void;
   onDroneDragStart: (droneId: string, event: React.DragEvent<HTMLDivElement>) => void;
   onDroneDragEnd: () => void;
+  groupOrderKey?: string | null;
   showGroup?: boolean;
 };
+
+const SIDEBAR_DRONE_REORDER_DND_MIME = 'application/x-dronehub-sidebar-drone';
+const SIDEBAR_CHAT_REORDER_DND_MIME = 'application/x-dronehub-sidebar-chat';
+
+function flattenSidebarTreeOrder(tree: SidebarDroneTree): string[] {
+  const out: string[] = [];
+  const visit = (droneId: string) => {
+    const id = String(droneId ?? '').trim();
+    if (!id || out.includes(id)) return;
+    out.push(id);
+    for (const childId of tree.childDroneIdsByParentId[id] ?? []) visit(childId);
+  };
+  for (const rootId of tree.rootDroneIds) visit(rootId);
+  return out;
+}
 
 export function SidebarDroneTreeList({
   droneById,
@@ -99,6 +130,7 @@ export function SidebarDroneTreeList({
   onToggleSection,
   onSelectDroneCard,
   onSelectDroneChat,
+  onDeleteDroneChat,
   onOpenCloneModal,
   onRenameDrone,
   onSetDroneBaseImage,
@@ -106,8 +138,105 @@ export function SidebarDroneTreeList({
   onOpenDroneErrorModal,
   onDroneDragStart,
   onDroneDragEnd,
+  groupOrderKey,
   showGroup,
 }: SidebarDroneTreeListProps) {
+  const {
+    sidebarChatOrderByDrone,
+    setSidebarDroneOrderByGroup,
+    setSidebarChatOrderByDrone,
+  } = useDroneSidebarUiState();
+  const [dragOverDrone, setDragOverDrone] = React.useState<{
+    droneId: string;
+    placement: SidebarGroupDropPlacement;
+  } | null>(null);
+  const [dragOverChat, setDragOverChat] = React.useState<{
+    key: string;
+    placement: SidebarGroupDropPlacement;
+  } | null>(null);
+  const [deletingChats, setDeletingChats] = React.useState<Record<string, boolean>>({});
+  const visibleDroneOrder = React.useMemo(() => flattenSidebarTreeOrder(tree), [tree]);
+
+  const parseDraggedDroneId = React.useCallback((event: React.DragEvent<HTMLElement>): string | null => {
+    try {
+      const raw = event.dataTransfer.getData(SIDEBAR_DRONE_REORDER_DND_MIME);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      const droneId = String(parsed?.droneId ?? '').trim();
+      return droneId || null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const parseDraggedChatRef = React.useCallback((event: React.DragEvent<HTMLElement>): { droneId: string; chatName: string } | null => {
+    try {
+      const raw = event.dataTransfer.getData(SIDEBAR_CHAT_REORDER_DND_MIME);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      const droneId = String(parsed?.droneId ?? '').trim();
+      const chatName = String(parsed?.chatName ?? '').trim();
+      if (!droneId || !chatName) return null;
+      return { droneId, chatName };
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const onDroneReorderDrop = React.useCallback(
+    (overDroneIdRaw: string, event: React.DragEvent<HTMLDivElement>) => {
+      if (!groupOrderKey) return false;
+      const activeDroneId = parseDraggedDroneId(event);
+      const overDroneId = String(overDroneIdRaw ?? '').trim();
+      if (!activeDroneId || !overDroneId || activeDroneId === overDroneId) {
+        setDragOverDrone(null);
+        return false;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      const placement = dragOverDrone?.droneId === overDroneId ? dragOverDrone.placement : 'after';
+      setSidebarDroneOrderByGroup((prev) => ({
+        ...prev,
+        [groupOrderKey]: reorderSidebarEntryOrder(
+          prev[groupOrderKey] ?? [],
+          visibleDroneOrder,
+          activeDroneId,
+          overDroneId,
+          placement,
+        ),
+      }));
+      setDragOverDrone(null);
+      return true;
+    },
+    [dragOverDrone, groupOrderKey, parseDraggedDroneId, setSidebarDroneOrderByGroup, visibleDroneOrder],
+  );
+
+  const onDeleteChatClick = React.useCallback(
+    async (droneIdRaw: string, chatNameRaw: string) => {
+      const droneId = String(droneIdRaw ?? '').trim();
+      const chatName = String(chatNameRaw ?? '').trim();
+      if (!droneId || !chatName || chatName === 'default') return;
+      const key = `${droneId}:${chatName}`;
+      if (deletingChats[key]) return;
+      setDeletingChats((prev) => ({ ...prev, [key]: true }));
+      try {
+        const result = await onDeleteDroneChat(droneId, chatName);
+        if (!result.ok) {
+          if (result.error) window.alert(result.error);
+          return;
+        }
+      } finally {
+        setDeletingChats((prev) => {
+          if (!prev[key]) return prev;
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        });
+      }
+    },
+    [deletingChats, onDeleteDroneChat],
+  );
+
   const renderDroneNode = React.useCallback(
     (droneId: string, ancestorDroneIds?: Set<string>): React.ReactNode => {
       if (ancestorDroneIds?.has(droneId)) return null;
@@ -136,7 +265,11 @@ export function SidebarDroneTreeList({
       }
 
       const isOptimistic = sidebarOptimisticDroneIdSet.has(drone.id);
-      const chats = normalizedDroneChats(drone);
+      const chats = orderSidebarEntries(
+        normalizedDroneChats(drone),
+        sidebarChatOrderByDrone[drone.id] ?? [],
+        (chatName) => chatName,
+      );
       const hasOnlyDefaultChat = chats.length === 1 && chats[0] === 'default';
       const hasChatSection = chats.length > 0 && !hasOnlyDefaultChat;
       const childDroneIds = tree.childDroneIdsByParentId[drone.id] ?? [];
@@ -154,65 +287,115 @@ export function SidebarDroneTreeList({
 
       return (
         <div key={drone.id} className="flex flex-col gap-0.5">
-          <DroneCard
-            drone={drone}
-            displayName={uiDroneName(drone.name)}
-            statusHint={isOptimistic ? 'queued' : undefined}
-            selected={selectedDroneSet.has(drone.id)}
-            busy={showDroneBusy}
-            unreadAgentMessage={showDroneUnread}
-            showGroup={showGroup}
-            onClick={(rowOpts) => onSelectDroneCard(drone.id, rowOpts)}
-            draggable={!movingDroneGroups && !isOptimistic}
-            onDragStart={(event) => {
-              onDroneDragStart(drone.id, event);
-              if (!hasOnlyDefaultChat) return;
-              const nodeId = createCanvasChatNodeId(drone.id, 'default');
-              if (!nodeId) return;
-              const payload = [{ nodeId, droneId: drone.id, chatName: 'default' }];
-              try {
-                event.dataTransfer.setData(DRONE_CHAT_DND_MIME, JSON.stringify(payload));
-              } catch {
-                // Ignore drag payload assignment errors.
-              }
+          <div
+            className="relative flex items-stretch gap-1"
+            onDragOver={(event) => {
+              if (!groupOrderKey) return;
+              const activeDroneId = parseDraggedDroneId(event);
+              if (!activeDroneId || activeDroneId === drone.id) return;
+              event.preventDefault();
+              event.stopPropagation();
+              event.dataTransfer.dropEffect = 'move';
+              const placement = sidebarDropPlacementFromClientY(event.clientY, event.currentTarget);
+              setDragOverDrone((prev) =>
+                prev?.droneId === drone.id && prev.placement === placement ? prev : { droneId: drone.id, placement },
+              );
             }}
-            onDragEnd={onDroneDragEnd}
-            onClone={() => onOpenCloneModal(drone)}
-            onRename={() => onRenameDrone(drone.id)}
-            onSetBaseImage={() => onSetDroneBaseImage(drone.id)}
-            onDelete={() => onDeleteDrone(drone.id)}
-            onErrorClick={onOpenDroneErrorModal}
-            cloneDisabled={
-              isOptimistic ||
-              Boolean(deletingDrones[drone.id]) ||
-              Boolean(renamingDrones[drone.id]) ||
-              Boolean(settingBaseImages[drone.id]) ||
-              String(drone.runtime ?? 'container').trim().toLowerCase() === 'host'
-            }
-            renameDisabled={
-              isOptimistic ||
-              Boolean(deletingDrones[drone.id]) ||
-              Boolean(renamingDrones[drone.id]) ||
-              Boolean(settingBaseImages[drone.id]) ||
-              isDroneStartingOrSeeding(drone.hubPhase)
-            }
-            renameBusy={Boolean(renamingDrones[drone.id])}
-            setBaseImageDisabled={
-              isOptimistic ||
-              Boolean(deletingDrones[drone.id]) ||
-              Boolean(renamingDrones[drone.id]) ||
-              Boolean(settingBaseImages[drone.id]) ||
-              isDroneStartingOrSeeding(drone.hubPhase)
-            }
-            setBaseImageBusy={Boolean(settingBaseImages[drone.id])}
-            deleteDisabled={
-              isOptimistic ||
-              Boolean(deletingDrones[drone.id]) ||
-              Boolean(renamingDrones[drone.id]) ||
-              Boolean(settingBaseImages[drone.id])
-            }
-            deleteBusy={Boolean(deletingDrones[drone.id])}
-          />
+            onDragLeave={(event) => {
+              const related = event.relatedTarget;
+              if (related instanceof Node && event.currentTarget.contains(related)) return;
+              setDragOverDrone((prev) => (prev?.droneId === drone.id ? null : prev));
+            }}
+            onDrop={(event) => {
+              void onDroneReorderDrop(drone.id, event);
+            }}
+          >
+            {dragOverDrone?.droneId === drone.id ? (
+              <SidebarReorderDropIndicator placement={dragOverDrone.placement} />
+            ) : null}
+            {groupOrderKey ? (
+              <SidebarReorderHandle
+                draggable={!movingDroneGroups && !isOptimistic}
+                onDragStart={(event) => {
+                  event.stopPropagation();
+                  event.dataTransfer.effectAllowed = 'move';
+                  try {
+                    event.dataTransfer.setData(
+                      SIDEBAR_DRONE_REORDER_DND_MIME,
+                      JSON.stringify({ droneId: drone.id, groupOrderKey }),
+                    );
+                  } catch {
+                    // Ignore drag payload assignment errors.
+                  }
+                }}
+                onDragEnd={() => setDragOverDrone(null)}
+                className="inline-flex w-6 flex-shrink-0 items-center justify-center self-stretch rounded border border-[var(--border-subtle)] text-[var(--muted-dim)] transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--hover)] hover:text-[var(--muted)] cursor-grab active:cursor-grabbing"
+                title={`Drag to reorder ${uiDroneName(drone.name)}`}
+                aria-label={`Drag to reorder ${uiDroneName(drone.name)}`}
+              />
+            ) : null}
+            <div className="min-w-0 flex-1">
+              <DroneCard
+                drone={drone}
+                displayName={uiDroneName(drone.name)}
+                statusHint={isOptimistic ? 'queued' : undefined}
+                selected={selectedDroneSet.has(drone.id)}
+                busy={showDroneBusy}
+                unreadAgentMessage={showDroneUnread}
+                showGroup={showGroup}
+                onClick={(rowOpts) => onSelectDroneCard(drone.id, rowOpts)}
+                draggable={!movingDroneGroups && !isOptimistic}
+                onDragStart={(event) => {
+                  onDroneDragStart(drone.id, event);
+                  if (!hasOnlyDefaultChat) return;
+                  const nodeId = createCanvasChatNodeId(drone.id, 'default');
+                  if (!nodeId) return;
+                  const payload = [{ nodeId, droneId: drone.id, chatName: 'default' }];
+                  try {
+                    event.dataTransfer.setData(DRONE_CHAT_DND_MIME, JSON.stringify(payload));
+                  } catch {
+                    // Ignore drag payload assignment errors.
+                  }
+                }}
+                onDragEnd={onDroneDragEnd}
+                onClone={() => onOpenCloneModal(drone)}
+                onRename={() => onRenameDrone(drone.id)}
+                onSetBaseImage={() => onSetDroneBaseImage(drone.id)}
+                onDelete={() => onDeleteDrone(drone.id)}
+                onErrorClick={onOpenDroneErrorModal}
+                cloneDisabled={
+                  isOptimistic ||
+                  Boolean(deletingDrones[drone.id]) ||
+                  Boolean(renamingDrones[drone.id]) ||
+                  Boolean(settingBaseImages[drone.id]) ||
+                  String(drone.runtime ?? 'container').trim().toLowerCase() === 'host'
+                }
+                renameDisabled={
+                  isOptimistic ||
+                  Boolean(deletingDrones[drone.id]) ||
+                  Boolean(renamingDrones[drone.id]) ||
+                  Boolean(settingBaseImages[drone.id]) ||
+                  isDroneStartingOrSeeding(drone.hubPhase)
+                }
+                renameBusy={Boolean(renamingDrones[drone.id])}
+                setBaseImageDisabled={
+                  isOptimistic ||
+                  Boolean(deletingDrones[drone.id]) ||
+                  Boolean(renamingDrones[drone.id]) ||
+                  Boolean(settingBaseImages[drone.id]) ||
+                  isDroneStartingOrSeeding(drone.hubPhase)
+                }
+                setBaseImageBusy={Boolean(settingBaseImages[drone.id])}
+                deleteDisabled={
+                  isOptimistic ||
+                  Boolean(deletingDrones[drone.id]) ||
+                  Boolean(renamingDrones[drone.id]) ||
+                  Boolean(settingBaseImages[drone.id])
+                }
+                deleteBusy={Boolean(deletingDrones[drone.id])}
+              />
+            </div>
+          </div>
           {hasChatSection ? (
             <>
               <div className="ml-5 mr-1">
@@ -229,54 +412,137 @@ export function SidebarDroneTreeList({
                   {chats.map((chatName) => {
                     const chatNodeId = createCanvasChatNodeId(drone.id, chatName);
                     if (!chatNodeId) return null;
+                    const chatKey = `${drone.id}:${chatName}`;
                     const selected = selectedDrone === drone.id && activeChatName === chatName;
                     const unread = unreadAgentMessageByChatNodeId[chatNodeId] === true;
                     const busy = busyChatNodeIdSet.has(chatNodeId);
+                    const deletingChat = Boolean(deletingChats[chatKey]);
+                    const canDeleteChat = chatName !== 'default';
                     return (
-                      <button
+                      <div
                         key={`${drone.id}:${chatName}`}
-                        type="button"
-                        draggable={!movingDroneGroups && !isOptimistic}
-                        onDragStart={(event) => {
-                          event.stopPropagation();
-                          event.dataTransfer.effectAllowed = 'copyMove';
-                          const payload = [{ droneId: drone.id, chatName }];
-                          try {
-                            event.dataTransfer.setData(DRONE_CHAT_DND_MIME, JSON.stringify(payload));
-                          } catch {
-                            // Ignore drag payload assignment errors.
+                        className="relative flex items-stretch gap-1 group/chat-row"
+                        onDragOver={(event) => {
+                          const activeChatRef = parseDraggedChatRef(event);
+                          if (!activeChatRef || activeChatRef.droneId !== drone.id || activeChatRef.chatName === chatName) {
+                            return;
                           }
-                          try {
-                            event.dataTransfer.setData('text/plain', `${uiDroneName(drone.name)} / ${chatName}`);
-                          } catch {
-                            // Ignore drag payload assignment errors.
-                          }
-                        }}
-                        onClick={(event) => {
+                          event.preventDefault();
                           event.stopPropagation();
-                          onSelectDroneChat(drone.id, chatName);
+                          event.dataTransfer.dropEffect = 'move';
+                          const placement = sidebarDropPlacementFromClientY(event.clientY, event.currentTarget);
+                          setDragOverChat((prev) =>
+                            prev?.key === chatKey && prev.placement === placement ? prev : { key: chatKey, placement },
+                          );
                         }}
-                        className={`w-full h-7 rounded border px-2 text-left text-[11px] transition-all flex items-center gap-1.5 ${
-                          selected
-                            ? 'border-[var(--accent-muted)] bg-[var(--selected)] text-[var(--fg)]'
-                            : 'border-transparent text-[var(--muted)] hover:border-[var(--border-subtle)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                        }`}
-                        title={`${uiDroneName(drone.name)} / ${chatName}`}
+                        onDragLeave={(event) => {
+                          const related = event.relatedTarget;
+                          if (related instanceof Node && event.currentTarget.contains(related)) return;
+                          setDragOverChat((prev) => (prev?.key === chatKey ? null : prev));
+                        }}
+                        onDrop={(event) => {
+                          const activeChatRef = parseDraggedChatRef(event);
+                          if (!activeChatRef || activeChatRef.droneId !== drone.id || activeChatRef.chatName === chatName) {
+                            setDragOverChat(null);
+                            return;
+                          }
+                          event.preventDefault();
+                          event.stopPropagation();
+                          const placement = dragOverChat?.key === chatKey ? dragOverChat.placement : 'after';
+                          setSidebarChatOrderByDrone((prev) => ({
+                            ...prev,
+                            [drone.id]: reorderSidebarEntryOrder(
+                              prev[drone.id] ?? [],
+                              chats,
+                              activeChatRef.chatName,
+                              chatName,
+                              placement,
+                            ),
+                          }));
+                          setDragOverChat(null);
+                        }}
                       >
-                        {!busy && unread ? (
-                          <span className="h-1.5 w-1.5 rounded-full bg-[var(--yellow)] flex-shrink-0" />
-                        ) : (
-                          <span className="h-1.5 w-1.5 flex-shrink-0" />
-                        )}
-                        <span className="min-w-0 flex-1 truncate font-mono">
-                          {chatName}
-                        </span>
-                        {busy ? (
-                          <span className="inline-flex items-center flex-shrink-0" title="Agent responding">
-                            <TypingDots color="var(--yellow)" />
-                          </span>
+                        {dragOverChat?.key === chatKey ? (
+                          <SidebarReorderDropIndicator placement={dragOverChat.placement} />
                         ) : null}
-                      </button>
+                        <SidebarReorderHandle
+                          draggable={!movingDroneGroups && !isOptimistic}
+                          onDragStart={(event) => {
+                            event.stopPropagation();
+                            event.dataTransfer.effectAllowed = 'move';
+                            try {
+                              event.dataTransfer.setData(
+                                SIDEBAR_CHAT_REORDER_DND_MIME,
+                                JSON.stringify({ droneId: drone.id, chatName }),
+                              );
+                            } catch {
+                              // Ignore drag payload assignment errors.
+                            }
+                            try {
+                              event.dataTransfer.setData(DRONE_CHAT_DND_MIME, JSON.stringify([{ droneId: drone.id, chatName }]));
+                            } catch {
+                              // Ignore drag payload assignment errors.
+                            }
+                            try {
+                              event.dataTransfer.setData('text/plain', `${uiDroneName(drone.name)} / ${chatName}`);
+                            } catch {
+                              // Ignore drag payload assignment errors.
+                            }
+                          }}
+                          onDragEnd={() => setDragOverChat(null)}
+                          className="inline-flex w-6 flex-shrink-0 items-center justify-center rounded border border-[var(--border-subtle)] text-[var(--muted-dim)] transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--hover)] hover:text-[var(--muted)] cursor-grab active:cursor-grabbing"
+                          title={`Drag to reorder ${chatName}`}
+                          aria-label={`Drag to reorder ${chatName}`}
+                        />
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onSelectDroneChat(drone.id, chatName);
+                          }}
+                          className={`flex-1 h-7 rounded border px-2 text-left text-[11px] transition-all flex items-center gap-1.5 min-w-0 ${
+                            selected
+                              ? 'border-[var(--accent-muted)] bg-[var(--selected)] text-[var(--fg)]'
+                              : 'border-transparent text-[var(--muted)] hover:border-[var(--border-subtle)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                          }`}
+                          title={`${uiDroneName(drone.name)} / ${chatName}`}
+                        >
+                          {!busy && unread ? (
+                            <span className="h-1.5 w-1.5 rounded-full bg-[var(--yellow)] flex-shrink-0" />
+                          ) : (
+                            <span className="h-1.5 w-1.5 flex-shrink-0" />
+                          )}
+                          <span className="min-w-0 flex-1 truncate font-mono">
+                            {chatName}
+                          </span>
+                          {busy ? (
+                            <span className="inline-flex items-center flex-shrink-0" title="Agent responding">
+                              <TypingDots color="var(--yellow)" />
+                            </span>
+                          ) : null}
+                        </button>
+                        {canDeleteChat ? (
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void onDeleteChatClick(drone.id, chatName);
+                            }}
+                            disabled={deletingChat}
+                            className={`inline-flex w-7 flex-shrink-0 items-center justify-center rounded border transition-all ${
+                              deletingChat
+                                ? 'bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
+                                : 'opacity-0 pointer-events-none group-hover/chat-row:opacity-100 group-hover/chat-row:pointer-events-auto bg-[var(--red-subtle)] border-[rgba(255,90,90,.2)] text-[var(--red)] hover:bg-[rgba(255,90,90,.15)]'
+                            }`}
+                            title={`Delete chat "${chatName}"`}
+                            aria-label={`Delete chat "${chatName}"`}
+                          >
+                            {deletingChat ? <IconSpinner className="opacity-90" /> : <IconTrash className="opacity-90" />}
+                          </button>
+                        ) : (
+                          <span className="w-7 flex-shrink-0" />
+                        )}
+                      </div>
                     );
                   })}
                 </div>
@@ -317,8 +583,11 @@ export function SidebarDroneTreeList({
       droneById,
       movingDroneGroups,
       onDeleteDrone,
+      onDeleteDroneChat,
+      onDeleteChatClick,
       onDroneDragEnd,
       onDroneDragStart,
+      onDroneReorderDrop,
       onOpenCloneModal,
       onOpenDroneErrorModal,
       onRenameDrone,
@@ -326,15 +595,23 @@ export function SidebarDroneTreeList({
       onSelectDroneChat,
       onSetDroneBaseImage,
       onToggleSection,
+      parseDraggedChatRef,
+      parseDraggedDroneId,
       renamingDrones,
       selectedDrone,
       selectedDroneSet,
+      setSidebarChatOrderByDrone,
       settingBaseImages,
       showGroup,
+      sidebarChatOrderByDrone,
       sidebarOptimisticDroneIdSet,
       tree.childDroneIdsByParentId,
       uiDroneName,
       unreadAgentMessageByChatNodeId,
+      deletingChats,
+      dragOverChat,
+      dragOverDrone,
+      groupOrderKey,
     ],
   );
 

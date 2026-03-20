@@ -19,6 +19,7 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     settingBaseImages,
     movingDroneGroups,
     sidebarGroups,
+    sidebarHiddenGroupCount,
     collapsedGroups,
     deletingGroups,
     renamingGroups,
@@ -38,6 +39,7 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     openKanbanBoard,
     selectDroneCard,
     selectDroneChat,
+    deleteCanvasChat,
     openCloneModal,
     renameDrone,
     setDroneBaseImage,
@@ -76,6 +78,7 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     settingBaseImages,
     movingDroneGroups,
     sidebarGroups,
+    sidebarHiddenGroupCount,
     collapsedGroups,
     deletingGroups,
     renamingGroups,
@@ -97,6 +100,7 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     onSelectDroneChat: (droneId, chatName) => {
       selectDroneChat(droneId, chatName);
     },
+    onDeleteDroneChat: async (droneId, chatName) => await deleteCanvasChat(droneId, chatName),
     onOpenCloneModal: openCloneModal,
     onRenameDrone: renameDrone,
     onSetDroneBaseImage: (droneId) => {

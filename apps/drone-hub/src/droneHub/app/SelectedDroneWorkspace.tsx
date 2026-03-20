@@ -40,6 +40,7 @@ import { useDroneHubUiStore, useSelectedDroneWorkspaceUiState } from './use-dron
 import { usePromptAutomationState } from './use-prompt-automation-state';
 import { HeaderPullRequestShortcuts } from './HeaderPullRequestShortcuts';
 import { buildPendingTimelineBlocks } from './pending-timeline-blocks';
+import { orderSidebarEntries } from './sidebar-group-order';
 import {
   buildPendingPromptLoopGroups,
   buildTranscriptRenderBlocks,
@@ -359,6 +360,7 @@ export function SelectedDroneWorkspace({
   const chatDraftValue = useDroneHubUiStore((s) => s.chatInputDrafts[chatDraftKey] ?? '');
   const setChatInputDraft = useDroneHubUiStore((s) => s.setChatInputDraft);
   const automations = useDroneHubUiStore((s) => s.automations);
+  const sidebarChatOrder = useDroneHubUiStore((s) => s.sidebarChatOrderByDrone[currentDrone.id] ?? []);
   const {
     promptAutomationJob,
     cancelQueuedAutomationErrorById,
@@ -647,8 +649,8 @@ export function SelectedDroneWorkspace({
       seen.add(name);
       out.push(name);
     }
-    return out;
-  }, [currentDrone.chats]);
+    return orderSidebarEntries(out, sidebarChatOrder, (chatName) => chatName);
+  }, [currentDrone.chats, sidebarChatOrder]);
   const hasChats = availableChats.length > 0;
   const [chatMutationBusy, setChatMutationBusy] = React.useState<null | 'create' | 'rename' | 'delete'>(null);
   const [pendingChatSelection, setPendingChatSelection] = React.useState<string | null>(null);

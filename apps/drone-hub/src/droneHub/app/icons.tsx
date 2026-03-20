@@ -89,6 +89,39 @@ export function IconPencil({ className }: { className?: string }) {
   );
 }
 
+export function IconGrip({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <circle cx="5" cy="4" r="1" />
+      <circle cx="11" cy="4" r="1" />
+      <circle cx="5" cy="8" r="1" />
+      <circle cx="11" cy="8" r="1" />
+      <circle cx="5" cy="12" r="1" />
+      <circle cx="11" cy="12" r="1" />
+    </svg>
+  );
+}
+
+export function IconEye({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M1.3 8c1.5-2.5 3.8-4 6.7-4s5.2 1.5 6.7 4c-1.5 2.5-3.8 4-6.7 4S2.8 10.5 1.3 8z" />
+      <circle cx="8" cy="8" r="2.2" />
+    </svg>
+  );
+}
+
+export function IconEyeOff({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M1.3 8c1.5-2.5 3.8-4 6.7-4 1.2 0 2.3.25 3.3.74" />
+      <path d="M14.7 8c-.58.97-1.28 1.8-2.09 2.43A7.2 7.2 0 018 12c-2.9 0-5.2-1.5-6.7-4 .56-.94 1.22-1.74 1.99-2.37" />
+      <circle cx="8" cy="8" r="2.2" />
+      <path d="M2 2l12 12" />
+    </svg>
+  );
+}
+
 export function IconVsCode({ className }: { className?: string }) {
   return (
     <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">

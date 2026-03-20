@@ -54,6 +54,7 @@ import { useTranscriptTldrState } from './droneHub/app/use-transcript-tldr-state
 import { useWorkspaceNavigationActions } from './droneHub/app/use-workspace-navigation-actions';
 import { useWorkspaceActions } from './droneHub/app/use-workspace-actions';
 import { busyChatNodeIdsForDrone, droneChatNodeIds, normalizedDroneChats } from './droneHub/app/chat-node-helpers';
+import { orderSidebarEntries } from './droneHub/app/sidebar-group-order';
 import {
   useDroneHubSidebarProps,
   useDroneHubOverlaysProps,
@@ -124,6 +125,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     viewMode,
     sidebarGroupingMode,
     collapsedGroups,
+    sidebarGroupOrder,
+    sidebarDroneOrderByGroup,
+    sidebarChatOrderByDrone,
+    hiddenSidebarGroups,
+    showHiddenSidebarGroups,
     autoDelete,
     terminalEmulator,
     selectedDrone,
@@ -154,6 +160,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setChatHeaderRepoPath,
     setAppView,
     setCollapsedGroups,
+    setSidebarGroupOrder,
+    setSidebarDroneOrderByGroup,
+    setSidebarChatOrderByDrone,
+    setHiddenSidebarGroups,
     setSelectedDrone,
     setSelectedDroneIds,
     setSelectedGroupMultiChat,
@@ -264,12 +274,17 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     sidebarDronesFilteredByRepo,
     sidebarVisibleDrones,
     sidebarGroups,
+    sidebarHiddenGroupCount,
     sidebarHasUngroupedGroup,
   } = useSidebarViewModel({
     selectedDroneIds,
     viewMode,
     sidebarGroupingMode,
     collapsedGroups,
+    sidebarGroupOrder,
+    sidebarDroneOrderByGroup,
+    hiddenSidebarGroups,
+    showHiddenSidebarGroups,
     drones,
     startupSeedByDrone,
     optimisticallyDeletedDrones,
@@ -685,6 +700,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     optimisticallyDeletedDrones,
     setOptimisticallyDeletedDrones,
     setCollapsedGroups,
+    setSidebarGroupOrder,
+    setSidebarDroneOrderByGroup,
+    setHiddenSidebarGroups,
+    selectedGroupMultiChat,
+    setSelectedGroupMultiChat,
   });
   const terminalMenuRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -700,7 +720,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     deletingDrones,
     renamingDrones,
     settingBaseImages,
-    deleteDrone,
+    deleteDrone: deleteDroneBase,
     renameDrone,
     setDroneBaseImage,
     renameDroneTo,
@@ -715,6 +735,32 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setStartupSeedByDrone,
     onNameSuggestionFailure: showNameSuggestionFailureToast,
   });
+  const deleteDrone = React.useCallback(
+    async (droneIdRaw: string): Promise<boolean> => {
+      const droneId = String(droneIdRaw ?? '').trim();
+      if (!droneId) return false;
+      const deleted = await deleteDroneBase(droneId);
+      if (!deleted) return false;
+      setSidebarChatOrderByDrone((prev) => {
+        if (!(droneId in prev)) return prev;
+        const next = { ...prev };
+        delete next[droneId];
+        return next;
+      });
+      setSidebarDroneOrderByGroup((prev) => {
+        let changed = false;
+        const next: Record<string, string[]> = {};
+        for (const [key, entries] of Object.entries(prev)) {
+          const filtered = entries.filter((entry) => entry !== droneId);
+          if (filtered.length !== entries.length) changed = true;
+          if (filtered.length > 0) next[key] = filtered;
+        }
+        return changed ? next : prev;
+      });
+      return true;
+    },
+    [deleteDroneBase, setSidebarChatOrderByDrone, setSidebarDroneOrderByGroup],
+  );
 
   const normalizeCreateRepoPath = React.useCallback(
     (candidate: string): string => {
@@ -1760,6 +1806,14 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             body: JSON.stringify({ newName }),
           },
         );
+        setSidebarChatOrderByDrone((prev) => {
+          const currentOrder = prev[droneId];
+          if (!currentOrder || !currentOrder.includes(chatName)) return prev;
+          return {
+            ...prev,
+            [droneId]: currentOrder.map((entry) => (entry === chatName ? newName : entry)),
+          };
+        });
         if (selectedDrone === droneId && selectedChat === chatName) {
           setSelectedChat(newName);
         }
@@ -1768,7 +1822,15 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         return { ok: false, error: err?.message ?? String(err) };
       }
     },
-    [drones, requestJson, selectedChat, selectedDrone, setSelectedChat, sidebarSelectableDroneIdSet],
+    [
+      drones,
+      requestJson,
+      selectedChat,
+      selectedDrone,
+      setSelectedChat,
+      setSidebarChatOrderByDrone,
+      sidebarSelectableDroneIdSet,
+    ],
   );
   const deleteCanvasChat = React.useCallback(
     async (
@@ -1810,6 +1872,18 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}`,
           { method: 'DELETE' },
         );
+        setSidebarChatOrderByDrone((prev) => {
+          const currentOrder = prev[droneId];
+          if (!currentOrder || !currentOrder.includes(chatName)) return prev;
+          const next = { ...prev };
+          const filtered = currentOrder.filter((entry) => entry !== chatName);
+          if (filtered.length === 0) {
+            delete next[droneId];
+            return next;
+          }
+          next[droneId] = filtered;
+          return next;
+        });
         if (selectedDrone === droneId && selectedChat === chatName) {
           const remaining = chats.filter((chat) => chat !== chatName);
           const fallbackChat = remaining.includes('default') ? 'default' : remaining[0] ?? 'default';
@@ -1829,6 +1903,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       selectedChat,
       selectedDrone,
       setSelectedChat,
+      setSidebarChatOrderByDrone,
       sidebarSelectableDroneIdSet,
       uiDroneName,
     ],
@@ -1844,9 +1919,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     for (const droneId of orderedDroneIds) {
       const drone = droneById.get(droneId);
       if (!drone) continue;
-      const chats = Array.isArray(drone.chats) && drone.chats.length > 0 ? drone.chats : ['default'];
-      for (const chatNameRaw of chats) {
-        const chatName = String(chatNameRaw ?? '').trim();
+      const chats = orderSidebarEntries(
+        normalizedDroneChats(drone, { includeDefaultWhenEmpty: true }),
+        sidebarChatOrderByDrone[droneId] ?? [],
+        (chatName) => chatName,
+      );
+      for (const chatName of chats) {
         if (!chatName) continue;
         const nodeId = createCanvasChatNodeId(droneId, chatName);
         if (!nodeId || out.includes(nodeId)) continue;
@@ -1854,7 +1932,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       }
     }
     return out;
-  }, [drones, orderedDroneIds]);
+  }, [drones, orderedDroneIds, sidebarChatOrderByDrone]);
   const selectedCanvasChatNodeId = React.useMemo(() => {
     const droneId = String(selectedDrone ?? '').trim();
     if (!droneId) return null;
@@ -2099,6 +2177,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     settingBaseImages,
     movingDroneGroups,
     sidebarGroups,
+    sidebarHiddenGroupCount,
     collapsedGroups,
     deletingGroups,
     renamingGroups,
@@ -2118,6 +2197,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     openKanbanBoard,
     selectDroneCard,
     selectDroneChat,
+    deleteCanvasChat,
     openCloneModal,
     renameDrone,
     setDroneBaseImage,
