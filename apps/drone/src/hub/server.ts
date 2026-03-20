@@ -50,6 +50,7 @@ import {
 } from '../host/api';
 import { jobsPlanFromAgentMessage, suggestDroneNameFromMessage, suggestTaskTitleFromMessage } from './jobs-from-message';
 import { tldrFromAgentMessage } from './tldr-from-message';
+import { resolveTranscriptPromptAt } from './transcript-order';
 import { cloneChatEntryForDroneClone, maybeBootstrapPromptFromTranscript } from './chat-clone';
 import {
   buildEnvExportLines,
@@ -4954,12 +4955,11 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
       const stdout = typeof job?.stdout === 'string' ? job.stdout : '';
       const stderr = typeof job?.stderr === 'string' ? job.stderr : '';
       const finishedAt = typeof job?.finishedAt === 'string' ? job.finishedAt : nowIso();
-      const promptAt =
-        typeof p?.at === 'string' && String(p.at).trim()
-          ? String(p.at).trim()
-          : typeof job?.startedAt === 'string' && String(job.startedAt).trim()
-            ? String(job.startedAt).trim()
-            : finishedAt;
+      const promptAt = resolveTranscriptPromptAt({
+        pendingAt: p?.at,
+        jobStartedAt: job?.startedAt,
+        finishedAt,
+      });
       if (agent.id === 'codex') {
         const parsed = parseCodexJsonl(stdout || '');
         const threadId = parsed.threadId;
@@ -5037,12 +5037,11 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
         const parsed = parseCodexJsonl(stdout);
         const output = String(parsed.message ?? '').trimEnd();
         const finishedAt = typeof job?.finishedAt === 'string' ? job.finishedAt : nowIso();
-        const promptAt =
-          typeof p?.at === 'string' && String(p.at).trim()
-            ? String(p.at).trim()
-            : typeof job?.startedAt === 'string' && String(job.startedAt).trim()
-              ? String(job.startedAt).trim()
-              : finishedAt;
+        const promptAt = resolveTranscriptPromptAt({
+          pendingAt: p?.at,
+          jobStartedAt: job?.startedAt,
+          finishedAt,
+        });
         if (parsed.threadId) {
           entry.codexThreadId = parsed.threadId;
           changed = true;
