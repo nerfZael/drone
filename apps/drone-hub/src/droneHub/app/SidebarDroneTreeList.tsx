@@ -14,7 +14,6 @@ import {
 import {
   sidebarDropPlacementFromClientY,
   SidebarReorderDropIndicator,
-  SidebarReorderHandle,
 } from './sidebar-reorder-ui';
 import { useDroneSidebarUiState } from './use-drone-hub-ui-store';
 import type { SidebarDroneTree } from './sidebar-drone-tree';
@@ -313,27 +312,6 @@ export function SidebarDroneTreeList({
             {dragOverDrone?.droneId === drone.id ? (
               <SidebarReorderDropIndicator placement={dragOverDrone.placement} />
             ) : null}
-            {groupOrderKey ? (
-              <SidebarReorderHandle
-                draggable={!movingDroneGroups && !isOptimistic}
-                onDragStart={(event) => {
-                  event.stopPropagation();
-                  event.dataTransfer.effectAllowed = 'move';
-                  try {
-                    event.dataTransfer.setData(
-                      SIDEBAR_DRONE_REORDER_DND_MIME,
-                      JSON.stringify({ droneId: drone.id, groupOrderKey }),
-                    );
-                  } catch {
-                    // Ignore drag payload assignment errors.
-                  }
-                }}
-                onDragEnd={() => setDragOverDrone(null)}
-                className="inline-flex w-6 flex-shrink-0 items-center justify-center self-stretch rounded border border-[var(--border-subtle)] text-[var(--muted-dim)] transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--hover)] hover:text-[var(--muted)] cursor-grab active:cursor-grabbing"
-                title={`Drag to reorder ${uiDroneName(drone.name)}`}
-                aria-label={`Drag to reorder ${uiDroneName(drone.name)}`}
-              />
-            ) : null}
             <div className="min-w-0 flex-1">
               <DroneCard
                 drone={drone}
@@ -347,6 +325,16 @@ export function SidebarDroneTreeList({
                 draggable={!movingDroneGroups && !isOptimistic}
                 onDragStart={(event) => {
                   onDroneDragStart(drone.id, event);
+                  if (groupOrderKey) {
+                    try {
+                      event.dataTransfer.setData(
+                        SIDEBAR_DRONE_REORDER_DND_MIME,
+                        JSON.stringify({ droneId: drone.id, groupOrderKey }),
+                      );
+                    } catch {
+                      // Ignore drag payload assignment errors.
+                    }
+                  }
                   if (!hasOnlyDefaultChat) return;
                   const nodeId = createCanvasChatNodeId(drone.id, 'default');
                   if (!nodeId) return;
@@ -357,7 +345,10 @@ export function SidebarDroneTreeList({
                     // Ignore drag payload assignment errors.
                   }
                 }}
-                onDragEnd={onDroneDragEnd}
+                onDragEnd={() => {
+                  setDragOverDrone(null);
+                  onDroneDragEnd();
+                }}
                 onClone={() => onOpenCloneModal(drone)}
                 onRename={() => onRenameDrone(drone.id)}
                 onSetBaseImage={() => onSetDroneBaseImage(drone.id)}
@@ -465,8 +456,13 @@ export function SidebarDroneTreeList({
                         {dragOverChat?.key === chatKey ? (
                           <SidebarReorderDropIndicator placement={dragOverChat.placement} />
                         ) : null}
-                        <SidebarReorderHandle
+                        <button
+                          type="button"
                           draggable={!movingDroneGroups && !isOptimistic}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onSelectDroneChat(drone.id, chatName);
+                          }}
                           onDragStart={(event) => {
                             event.stopPropagation();
                             event.dataTransfer.effectAllowed = 'move';
@@ -479,7 +475,10 @@ export function SidebarDroneTreeList({
                               // Ignore drag payload assignment errors.
                             }
                             try {
-                              event.dataTransfer.setData(DRONE_CHAT_DND_MIME, JSON.stringify([{ droneId: drone.id, chatName }]));
+                              event.dataTransfer.setData(
+                                DRONE_CHAT_DND_MIME,
+                                JSON.stringify([{ droneId: drone.id, chatName }]),
+                              );
                             } catch {
                               // Ignore drag payload assignment errors.
                             }
@@ -490,16 +489,6 @@ export function SidebarDroneTreeList({
                             }
                           }}
                           onDragEnd={() => setDragOverChat(null)}
-                          className="inline-flex w-6 flex-shrink-0 items-center justify-center rounded border border-[var(--border-subtle)] text-[var(--muted-dim)] transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--hover)] hover:text-[var(--muted)] cursor-grab active:cursor-grabbing"
-                          title={`Drag to reorder ${chatName}`}
-                          aria-label={`Drag to reorder ${chatName}`}
-                        />
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            onSelectDroneChat(drone.id, chatName);
-                          }}
                           className={`flex-1 h-7 rounded border px-2 text-left text-[11px] transition-all flex items-center gap-1.5 min-w-0 ${
                             selected
                               ? 'border-[var(--accent-muted)] bg-[var(--selected)] text-[var(--fg)]'
