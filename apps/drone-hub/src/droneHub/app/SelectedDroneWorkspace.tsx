@@ -1,5 +1,4 @@
 import React from 'react';
-import Editor from '@monaco-editor/react';
 import {
   PromptLoopTranscriptGroup,
   AutomationLaneStatusCard,
@@ -48,9 +47,6 @@ import {
 } from './prompt-loop-groups';
 import { resolveRunningPromptLoopIdentity } from './prompt-loop-running-identity';
 import {
-  editorLanguageForPath,
-  formatBytes,
-  formatEditorMtime,
   parseGithubPullRequestHref,
 } from './selected-drone-workspace-utils';
 
@@ -157,25 +153,8 @@ type SelectedDroneWorkspaceProps = {
   cancelPendingPromptErrorById: Record<string, string>;
   unstickingPendingPromptById: Record<string, true>;
   unstickPendingPromptErrorById: Record<string, string>;
-  openedEditorFilePath: string | null;
-  openedEditorFileName: string | null;
-  openedEditorFileLoading: boolean;
-  openedEditorFileSaving: boolean;
-  openedEditorFileError: string | null;
   openedEditorFileOpenFailureMessage: string | null;
   openedEditorFileOpenFailureAt: number | null;
-  openedEditorFileKind: 'text' | 'image' | 'video' | 'binary';
-  openedEditorFileMime: string | null;
-  openedEditorFileSize: number;
-  openedEditorFileContent: string;
-  openedEditorFileDirty: boolean;
-  openedEditorFileMtimeMs: number | null;
-  openedEditorFileTargetLine: number | null;
-  openedEditorFileTargetColumn: number | null;
-  openedEditorFileNavigationSeq: number;
-  onOpenedEditorFileContentChange: (next: string) => void;
-  onSaveOpenedEditorFile: (contentOverride?: string) => Promise<boolean>;
-  onCloseOpenedEditorFile: () => void;
   onOpenMarkdownFileReference: (ref: MarkdownFileReference) => void;
   rightPanelWidth: number;
   rightPanelWidthMode: RightPanelWidthMode;
@@ -284,25 +263,8 @@ export function SelectedDroneWorkspace({
   cancelPendingPromptErrorById,
   unstickingPendingPromptById,
   unstickPendingPromptErrorById,
-  openedEditorFilePath,
-  openedEditorFileName,
-  openedEditorFileLoading,
-  openedEditorFileSaving,
-  openedEditorFileError,
   openedEditorFileOpenFailureMessage,
   openedEditorFileOpenFailureAt,
-  openedEditorFileKind,
-  openedEditorFileMime,
-  openedEditorFileSize,
-  openedEditorFileContent,
-  openedEditorFileDirty,
-  openedEditorFileMtimeMs,
-  openedEditorFileTargetLine,
-  openedEditorFileTargetColumn,
-  openedEditorFileNavigationSeq,
-  onOpenedEditorFileContentChange,
-  onSaveOpenedEditorFile,
-  onCloseOpenedEditorFile,
   onOpenMarkdownFileReference,
   rightPanelWidth,
   rightPanelWidthMode,
@@ -489,7 +451,6 @@ export function SelectedDroneWorkspace({
     );
   }, [promptAutomationJob, stopPromptAutomation, stoppingPromptAutomationMode]);
   const shouldAutoFocusInput = React.useMemo(() => {
-    if (openedEditorFilePath) return false;
     if (chatUiMode === 'transcript') {
       return !loadingTranscript && (transcripts?.length ?? 0) === 0 && visiblePendingPromptsWithStartup.length === 0;
     }
@@ -498,7 +459,6 @@ export function SelectedDroneWorkspace({
     chatUiMode,
     loadingSession,
     loadingTranscript,
-    openedEditorFilePath,
     sessionText,
     transcripts,
     visiblePendingPromptsWithStartup.length,
@@ -510,8 +470,6 @@ export function SelectedDroneWorkspace({
   }, [setRightPanelOpen, setRightPanelTab]);
   const quickOpenTabUrl = resolveDroneOpenTabUrl(currentDrone);
   const quickOpenTabDisabled = isDroneStartingOrSeeding(currentDrone.hubPhase) || !quickOpenTabUrl;
-  const editorRef = React.useRef<any>(null);
-  const openedEditorIsText = openedEditorFileKind === 'text';
   const previewVisible = !rightPanelSplit ? rightPanelTab === 'preview' : rightPanelTab === 'preview' || rightPanelBottomTab === 'preview';
   const persistentPreviewHostPane = resolvePreviewHostPane({
     previewVisible,
@@ -519,44 +477,8 @@ export function SelectedDroneWorkspace({
     rightPanelTab,
     rightPanelBottomTab,
   });
-  const openedEditorMediaSrc = React.useMemo(() => {
-    if (!openedEditorFilePath) return '';
-    if (openedEditorFileKind !== 'image' && openedEditorFileKind !== 'video') return '';
-    return `/api/drones/${encodeURIComponent(currentDrone.id)}/fs/media?path=${encodeURIComponent(openedEditorFilePath)}`;
-  }, [currentDrone.id, openedEditorFileKind, openedEditorFilePath]);
-  const [openedEditorImageZoom, setOpenedEditorImageZoom] = React.useState(1);
-  const [openedEditorImagePan, setOpenedEditorImagePan] = React.useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const [openedEditorImagePanning, setOpenedEditorImagePanning] = React.useState(false);
-  const openedEditorImagePanDragRef = React.useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null);
   const [fileOpenToast, setFileOpenToast] = React.useState<{ id: number; message: string } | null>(null);
   const repoIdentityRef = React.useRef<{ owner: string; repo: string } | null>(null);
-  const applyEditorCursorTarget = React.useCallback(() => {
-    if (!openedEditorIsText || !openedEditorFilePath || !openedEditorFileTargetLine) return;
-    const editor = editorRef.current;
-    if (!editor) return;
-    const model = editor.getModel?.();
-    const maxLine = Number(model?.getLineCount?.() ?? openedEditorFileTargetLine);
-    const line = Math.min(Math.max(1, openedEditorFileTargetLine), Number.isFinite(maxLine) && maxLine > 0 ? maxLine : openedEditorFileTargetLine);
-    const requestedColumn = openedEditorFileTargetColumn ?? 1;
-    const maxColumn = Number(model?.getLineMaxColumn?.(line) ?? requestedColumn);
-    const column = Math.min(Math.max(1, requestedColumn), Number.isFinite(maxColumn) && maxColumn > 0 ? maxColumn : requestedColumn);
-    editor.setPosition?.({ lineNumber: line, column });
-    editor.revealPositionInCenter?.({ lineNumber: line, column });
-    editor.focus?.();
-  }, [openedEditorFilePath, openedEditorFileTargetColumn, openedEditorFileTargetLine, openedEditorIsText]);
-
-  React.useEffect(() => {
-    if (!openedEditorIsText || openedEditorFileLoading || !openedEditorFilePath || !openedEditorFileTargetLine) return;
-    if (!openedEditorFileNavigationSeq) return;
-    applyEditorCursorTarget();
-  }, [
-    applyEditorCursorTarget,
-    openedEditorFileLoading,
-    openedEditorFileNavigationSeq,
-    openedEditorFilePath,
-    openedEditorFileTargetLine,
-    openedEditorIsText,
-  ]);
 
   React.useEffect(() => {
     if (!openedEditorFileOpenFailureMessage || !openedEditorFileOpenFailureAt) return;
@@ -567,42 +489,6 @@ export function SelectedDroneWorkspace({
     }, 4200);
     return () => window.clearTimeout(timeout);
   }, [openedEditorFileOpenFailureAt, openedEditorFileOpenFailureMessage]);
-
-  React.useEffect(() => {
-    if (openedEditorFileKind !== 'image' || !openedEditorMediaSrc) {
-      setOpenedEditorImageZoom(1);
-      setOpenedEditorImagePan({ x: 0, y: 0 });
-      setOpenedEditorImagePanning(false);
-      openedEditorImagePanDragRef.current = null;
-      return;
-    }
-    setOpenedEditorImageZoom(1);
-    setOpenedEditorImagePan({ x: 0, y: 0 });
-    setOpenedEditorImagePanning(false);
-    openedEditorImagePanDragRef.current = null;
-  }, [openedEditorFileKind, openedEditorMediaSrc]);
-
-  React.useEffect(() => {
-    if (!openedEditorImagePanning) return;
-    const onMouseMove = (event: MouseEvent) => {
-      const drag = openedEditorImagePanDragRef.current;
-      if (!drag) return;
-      setOpenedEditorImagePan({
-        x: drag.baseX + (event.clientX - drag.startX),
-        y: drag.baseY + (event.clientY - drag.startY),
-      });
-    };
-    const onMouseUp = () => {
-      setOpenedEditorImagePanning(false);
-      openedEditorImagePanDragRef.current = null;
-    };
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
-    return () => {
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
-    };
-  }, [openedEditorImagePanning]);
 
   React.useEffect(() => {
     repoIdentityRef.current = null;
@@ -1372,155 +1258,7 @@ export function SelectedDroneWorkspace({
         {/* Chat area */}
         <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden relative">
           <div className="flex-1 min-h-0 relative">
-            {openedEditorFilePath ? (
-              <div className="h-full min-w-0 min-h-0 flex flex-col">
-                <div className="px-4 py-2 border-b border-[var(--border-subtle)] bg-[var(--panel-alt)] flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-[10px] text-[var(--muted-dim)] uppercase tracking-wide" style={{ fontFamily: 'var(--display)' }}>
-                      {openedEditorFileName ? `Editing ${openedEditorFileName}` : 'Editing file'}
-                    </div>
-                    <div className="text-[12px] text-[var(--fg-secondary)] font-mono truncate" title={openedEditorFilePath}>
-                      {openedEditorFilePath}
-                    </div>
-                    <div className="text-[10px] text-[var(--muted)]">
-                      {openedEditorIsText
-                        ? openedEditorFileSaving
-                          ? 'Saving...'
-                          : openedEditorFileDirty
-                            ? 'Unsaved changes'
-                            : `Saved • ${formatEditorMtime(openedEditorFileMtimeMs)}`
-                        : `Preview${openedEditorFileMime ? ` • ${openedEditorFileMime}` : ''}${openedEditorFileSize > 0 ? ` • ${formatBytes(openedEditorFileSize)}` : ''}`}
-                    </div>
-                  </div>
-                  <div className="inline-flex items-center gap-1.5">
-                    {openedEditorIsText ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void onSaveOpenedEditorFile();
-                        }}
-                        disabled={openedEditorFileLoading || openedEditorFileSaving || !openedEditorFileDirty}
-                        className={`h-7 px-2.5 rounded border text-[10px] font-semibold tracking-wide uppercase transition-colors ${
-                          openedEditorFileLoading || openedEditorFileSaving || !openedEditorFileDirty
-                            ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] opacity-50 cursor-not-allowed'
-                            : 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:shadow-[var(--glow-accent)]'
-                        }`}
-                        style={{ fontFamily: 'var(--display)' }}
-                        title="Save file (Ctrl/Cmd+S)"
-                      >
-                        Save
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      onClick={onCloseOpenedEditorFile}
-                      className="h-7 px-2.5 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-colors"
-                      style={{ fontFamily: 'var(--display)' }}
-                      title="Close file editor"
-                    >
-                      Close
-                    </button>
-                  </div>
-                </div>
-                {openedEditorFileError ? (
-                  <div className="mx-4 mt-3 rounded border border-[rgba(255,90,90,.24)] bg-[var(--red-subtle)] px-3 py-2 text-[11px] text-[var(--red)]">
-                    {openedEditorFileError}
-                  </div>
-                ) : null}
-                <div className="flex-1 min-h-0 border-t border-[var(--border-subtle)]">
-                  {openedEditorFileLoading ? (
-                    <div className="h-full w-full flex items-center justify-center text-[12px] text-[var(--muted)]">Loading file...</div>
-                  ) : openedEditorFileKind === 'image' && openedEditorMediaSrc ? (
-                    <div
-                      className="h-full w-full p-3 flex items-center justify-center select-none"
-                      style={{ cursor: openedEditorImageZoom > 1 ? (openedEditorImagePanning ? 'grabbing' : 'grab') : 'default' }}
-                      onWheel={(event) => {
-                        event.preventDefault();
-                        const factor = event.deltaY < 0 ? 1.15 : 1 / 1.15;
-                        setOpenedEditorImageZoom((prev) => {
-                          const next = Math.max(1, Math.min(8, prev * factor));
-                          if (next === 1 && prev !== 1) {
-                            setOpenedEditorImagePan({ x: 0, y: 0 });
-                            setOpenedEditorImagePanning(false);
-                            openedEditorImagePanDragRef.current = null;
-                          }
-                          return next;
-                        });
-                      }}
-                      onMouseDown={(event) => {
-                        if (event.button !== 2) return;
-                        if (openedEditorImageZoom <= 1) return;
-                        event.preventDefault();
-                        openedEditorImagePanDragRef.current = {
-                          startX: event.clientX,
-                          startY: event.clientY,
-                          baseX: openedEditorImagePan.x,
-                          baseY: openedEditorImagePan.y,
-                        };
-                        setOpenedEditorImagePanning(true);
-                      }}
-                      onContextMenu={(event) => {
-                        if (openedEditorImageZoom > 1 || openedEditorImagePanning) event.preventDefault();
-                      }}
-                    >
-                      <img
-                        src={openedEditorMediaSrc}
-                        alt={openedEditorFileName ?? 'image preview'}
-                        draggable={false}
-                        onDragStart={(event) => event.preventDefault()}
-                        className="max-w-full max-h-full object-contain rounded border border-[var(--border-subtle)] bg-[var(--panel-alt)]"
-                        style={{
-                          transform: `translate(${openedEditorImagePan.x}px, ${openedEditorImagePan.y}px) scale(${openedEditorImageZoom})`,
-                          transformOrigin: 'center center',
-                        }}
-                      />
-                    </div>
-                  ) : openedEditorFileKind === 'video' && openedEditorMediaSrc ? (
-                    <div className="h-full w-full p-3 flex items-center justify-center">
-                      <video
-                        src={openedEditorMediaSrc}
-                        controls
-                        className="max-w-full max-h-full rounded border border-[var(--border-subtle)] bg-[var(--panel-alt)]"
-                      />
-                    </div>
-                  ) : openedEditorFileKind === 'binary' ? (
-                    <div className="h-full w-full flex items-center justify-center px-6">
-                      <div className="max-w-[560px] rounded border border-[var(--border-subtle)] bg-[var(--panel-alt)] px-4 py-3 text-center">
-                        <div className="text-[12px] text-[var(--fg-secondary)]">Binary file preview is not available.</div>
-                        <div className="mt-1 text-[11px] text-[var(--muted)]">
-                          {openedEditorFileMime ? `${openedEditorFileMime} • ` : ''}
-                          {formatBytes(openedEditorFileSize)}
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <Editor
-                      path={openedEditorFilePath}
-                      language={editorLanguageForPath(openedEditorFilePath)}
-                      value={openedEditorFileContent}
-                      onChange={(next) => onOpenedEditorFileContentChange(next ?? '')}
-                      onMount={(editor, monaco) => {
-                        editorRef.current = editor;
-                        editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-                          void onSaveOpenedEditorFile(editor.getValue());
-                        });
-                        applyEditorCursorTarget();
-                      }}
-                      theme="vs-dark"
-                      options={{
-                        readOnly: openedEditorFileSaving,
-                        fontSize: 12,
-                        minimap: { enabled: false },
-                        wordWrap: 'on',
-                        scrollBeyondLastLine: false,
-                        automaticLayout: true,
-                        padding: { top: 12, bottom: 12 },
-                      }}
-                    />
-                  )}
-                </div>
-              </div>
-            ) : chatUiMode === 'transcript' ? (
+            {chatUiMode === 'transcript' ? (
               <div className="h-full min-w-0 min-h-0 overflow-auto">
                 {loadingTranscript && !transcripts && visiblePendingPromptsWithStartup.length === 0 ? (
                   <TranscriptSkeleton message="Loading chat messages..." />
@@ -1715,36 +1453,32 @@ export function SelectedDroneWorkspace({
             )}
           </div>
 
-          {!openedEditorFilePath && (
-            <>
-              <ChatInput
-                resetKey={`${selectedDroneIdentity}:${selectedChat ?? ''}`}
-                droneName={currentDrone.name}
-                focusTargetId="primary-chat"
-                draftValue={chatDraftValue}
-                onDraftValueChange={(next) => setChatInputDraft(chatDraftKey, next)}
-                promptError={stopResponseError || promptError}
-                sending={sendingPrompt}
-                waiting={
-                  chatUiMode === 'transcript'
-                    ? visiblePendingPromptsWithStartup.some((p) => p.state !== 'failed')
-                    : (showRespondingAsStatusInHeader || canStopResponse)
-                }
-                automationActions={chatAutomationActions}
-                lockComposerWhileAutomationActive={false}
-                autoFocus={shouldAutoFocusInput}
-                onStop={canStopResponse ? () => requestStopResponse() : undefined}
-                stopping={stoppingResponse}
-                onSend={async (payload: ChatSendPayload) => {
-                  try {
-                    return await sendPromptText(payload);
-                  } catch {
-                    return false;
-                  }
-                }}
-              />
-            </>
-          )}
+          <ChatInput
+            resetKey={`${selectedDroneIdentity}:${selectedChat ?? ''}`}
+            droneName={currentDrone.name}
+            focusTargetId="primary-chat"
+            draftValue={chatDraftValue}
+            onDraftValueChange={(next) => setChatInputDraft(chatDraftKey, next)}
+            promptError={stopResponseError || promptError}
+            sending={sendingPrompt}
+            waiting={
+              chatUiMode === 'transcript'
+                ? visiblePendingPromptsWithStartup.some((p) => p.state !== 'failed')
+                : (showRespondingAsStatusInHeader || canStopResponse)
+            }
+            automationActions={chatAutomationActions}
+            lockComposerWhileAutomationActive={false}
+            autoFocus={shouldAutoFocusInput}
+            onStop={canStopResponse ? () => requestStopResponse() : undefined}
+            stopping={stoppingResponse}
+            onSend={async (payload: ChatSendPayload) => {
+              try {
+                return await sendPromptText(payload);
+              } catch {
+                return false;
+              }
+            }}
+          />
           {fileOpenToast ? (
             <div className="absolute right-4 bottom-4 z-20">
               <button
