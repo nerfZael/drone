@@ -116,8 +116,8 @@ export function SettingsView({
 
   return (
     <div ref={settingsScrollRef} className="flex-1 overflow-y-auto">
-      <div className="max-w-[1480px] mx-auto px-4 py-5 sm:px-5 sm:py-6 lg:px-6 lg:py-8">
-        <div className="grid grid-cols-1 xl:grid-cols-[240px_minmax(0,1fr)] gap-4 items-start">
+      <div className="w-full min-h-full px-4 py-5 sm:px-5 sm:py-6 lg:px-6 lg:py-8">
+        <div className="grid grid-cols-1 xl:grid-cols-[240px_minmax(0,1fr)] gap-4 items-start min-h-full">
           <aside className="xl:sticky xl:top-5">
             <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-alt)] overflow-hidden">
               <div className="px-4 py-4 border-b border-[var(--border)]">
