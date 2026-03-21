@@ -619,10 +619,11 @@ function fleetError(message: string, status: number = 400): Error & { status?: n
 }
 
 async function processFleetRequest(actorId: string, actorEntry: any, request: any): Promise<unknown> {
-  const actorName = String(actorEntry?.name ?? actorId);
-  const actorConfig = fleetActorConfig(actorEntry);
-  const limits = effectiveFleetLimits(actorEntry);
   const regAny: any = await loadRegistry();
+  const actorEntryLatest = findDroneEntryByIdentity(regAny, actorId)?.entry ?? actorEntry;
+  const actorName = String(actorEntryLatest?.name ?? actorId);
+  const actorConfig = fleetActorConfig(actorEntryLatest);
+  const limits = effectiveFleetLimits(actorEntryLatest);
   const action = String(request?.type ?? '').trim() as 'create_child' | 'send_message' | 'read_messages' | 'stop_chat';
   const reject = async (message: string, status: number = 400, target?: { id: string; name: string } | null): Promise<never> => {
     await appendFleetAuditEvent({
@@ -646,7 +647,23 @@ async function processFleetRequest(actorId: string, actorEntry: any, request: an
     if (!actorConfig.capabilities.includes(FLEET_CAPABILITY_CREATE)) await reject('missing capability: drone:create', 403);
     const name = normalizeDroneDisplayName((request?.payload as any)?.name);
     const groupRaw = typeof (request?.payload as any)?.group === 'string' ? String((request.payload as any).group).trim() : '';
-    const group = groupRaw || String(actorEntry?.group ?? '').trim() || '';
+    const group = groupRaw || String(actorEntryLatest?.group ?? '').trim() || '';
+    const cloneParent = (request?.payload as any)?.cloneParent === true;
+    const sourceEnvironment =
+      actorEntryLatest?.environment && typeof actorEntryLatest.environment === 'object'
+        ? {
+            vars: normalizeEnvVarMap((actorEntryLatest.environment as any)?.vars),
+            useRepoVars: (actorEntryLatest.environment as any)?.useRepoVars === true,
+            disabledRepoKeys: normalizeDisabledRepoKeys((actorEntryLatest.environment as any)?.disabledRepoKeys),
+            updatedAt:
+              typeof (actorEntryLatest.environment as any)?.updatedAt === 'string'
+                ? String((actorEntryLatest.environment as any).updatedAt).trim() || null
+                : null,
+          }
+        : null;
+    const sourceChatEntry = actorEntryLatest?.chats?.default ?? null;
+    const sourceChatAgent = sourceChatEntry ? inferChatAgent(sourceChatEntry, actorEntryLatest) : null;
+    const sourceChatModel = normalizeChatModel(sourceChatEntry?.model);
     if (findDroneIdByRef(regAny, name)) await reject(`drone already exists: ${name}`, 409);
     const children = fleetChildrenForActor(regAny, actorId);
     if (children.length >= limits.maxChildren) await reject(`child limit reached (${limits.maxChildren})`, 429);
@@ -664,14 +681,25 @@ async function processFleetRequest(actorId: string, actorEntry: any, request: an
         id: childId,
         name,
         group: group || undefined,
-        runtime: droneRuntime(actorEntry),
-        repoPath: String(actorEntry?.repoPath ?? '').trim(),
-        containerPort: Number(actorEntry?.containerPort ?? 7777),
+        runtime: droneRuntime(actorEntryLatest),
+        repoPath: String(actorEntryLatest?.repoPath ?? '').trim(),
+        containerPort: Number(actorEntryLatest?.containerPort ?? 7777),
         build: false,
         createdAt: at,
         updatedAt: at,
         phase: 'starting',
         message: 'Starting…',
+        ...(cloneParent ? { cloneFrom: actorId, cloneChats: false } : {}),
+        ...(cloneParent && sourceEnvironment ? { environment: sourceEnvironment } : {}),
+        ...(cloneParent && (sourceChatAgent || sourceChatModel)
+          ? {
+              seed: {
+                chatName: 'default',
+                ...(sourceChatAgent ? { agent: sourceChatAgent } : {}),
+                ...(sourceChatModel ? { model: sourceChatModel } : {}),
+              },
+            }
+          : {}),
         fleet: setFleetActorConfig({}, {
           createdBy: actorId,
           createdAt: at,
@@ -691,9 +719,13 @@ async function processFleetRequest(actorId: string, actorEntry: any, request: an
       status: 'accepted',
       target: childId,
       targetName: name,
-      meta: { requestId: String(request?.id ?? ''), group: group || null },
+      meta: {
+        requestId: String(request?.id ?? ''),
+        group: group || null,
+        cloneParent,
+      },
     });
-    return { child: { id: childId, name, group: group || null, phase: 'starting' } };
+    return { child: { id: childId, name, group: group || null, phase: 'starting', cloneParent } };
   }
 
   if (action === 'send_message') {

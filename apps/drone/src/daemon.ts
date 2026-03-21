@@ -763,7 +763,7 @@ async function main() {
           ok: true,
           ...snapshot,
           commands: [
-            'fleet create --name <child> --group <group> [--idempotency-key <key>]',
+            'fleet create --name <child> [--group <group>] [--clone-parent] [--idempotency-key <key>]',
             'fleet send --to <drone> --chat <chat> --message "<text>"',
             'fleet stop --to <drone> --chat <chat>',
             'fleet read --from <drone> --chat <chat> --limit 20 [--cursor <cursor>]',

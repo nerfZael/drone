@@ -545,6 +545,85 @@ describeSocketSuite('fleet api', () => {
     }
   });
 
+  test('queues child clone requests that clone the parent with a fresh chat', async () => {
+    const parentDaemon = await startStubDaemon('parent-clone-token');
+    try {
+      const now = new Date().toISOString();
+      await updateRegistry((reg: any) => {
+        reg.drones = {
+          'parent-clone': {
+            id: 'parent-clone',
+            name: 'parent-clone',
+            hostPort: parentDaemon.port,
+            token: 'parent-clone-token',
+            runtime: 'container',
+            containerPort: 7777,
+            repoPath: '/work/repo',
+            createdAt: now,
+            environment: {
+              vars: { FOO: 'bar', EMPTY: '' },
+              useRepoVars: true,
+              disabledRepoKeys: ['SECRET_TOKEN'],
+              updatedAt: now,
+            },
+            fleet: {
+              enabled: true,
+              capabilities: ['drone:create'],
+              readScopes: ['children'],
+              assigned: [],
+              quotas: { maxChildren: 2 },
+            },
+            chats: {
+              default: {
+                createdAt: now,
+                agent: { kind: 'builtin', id: 'claude' },
+                model: 'claude-3-5-haiku',
+                turns: [{ at: now, prompt: 'status?', ok: true, output: 'ready' }],
+                pendingPrompts: [{ id: 'queued', at: now, prompt: 'later', state: 'queued' }],
+              },
+            },
+          },
+        };
+      });
+
+      const createResp = await fetch(`http://127.0.0.1:${parentDaemon.port}/v1/fleet/requests`, {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer parent-clone-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          type: 'create_child',
+          payload: { name: 'fleet-child-clone', cloneParent: true },
+        }),
+      });
+      const createData: any = await createResp.json();
+      const createRequest = await waitForRequest(parentDaemon, 'parent-clone-token', String(createData?.request?.id ?? ''));
+      expect(createRequest.state).toBe('done');
+      expect(createRequest.result?.child?.cloneParent).toBe(true);
+      const childId = String(createRequest.result?.child?.id ?? '');
+      expect(childId).not.toBe('');
+
+      const regAny: any = await loadRegistry();
+      const pendingChild = regAny?.pending?.[childId] ?? null;
+      expect(String(pendingChild?.cloneFrom ?? '')).toBe('parent-clone');
+      expect(pendingChild?.cloneChats).toBe(false);
+      expect(pendingChild?.environment).toEqual({
+        vars: { FOO: 'bar', EMPTY: '' },
+        useRepoVars: true,
+        disabledRepoKeys: ['SECRET_TOKEN'],
+        updatedAt: now,
+      });
+      expect(pendingChild?.seed).toEqual({
+        chatName: 'default',
+        agent: { kind: 'builtin', id: 'claude' },
+        model: 'claude-3-5-haiku',
+      });
+    } finally {
+      await parentDaemon.close();
+    }
+  });
+
   test('does not execute fleet work when the daemon claim step fails', async () => {
     const parentDaemon = await startStubDaemon('parent-claim-token', { failClaims: true });
     try {

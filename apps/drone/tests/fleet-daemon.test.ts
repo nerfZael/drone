@@ -174,6 +174,7 @@ describeSocketSuite('fleet daemon', () => {
     const helpData: any = await helpResponse.json();
     expect(helpResponse.status).toBe(200);
     expect(Array.isArray(helpData?.commands)).toBe(true);
+    expect((helpData?.commands ?? []).includes('fleet create --name <child> [--group <group>] [--clone-parent] [--idempotency-key <key>]')).toBe(true);
     expect((helpData?.commands ?? []).includes('fleet stop --to <drone> --chat <chat>')).toBe(true);
 
     const stopResponse = await fetch(`${baseUrl}/v1/fleet/requests`, {

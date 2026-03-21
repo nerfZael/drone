@@ -131,26 +131,38 @@ program
   .description('Queue a child drone creation request')
   .requiredOption('--name <name>', 'Child drone name')
   .option('--group <group>', 'Optional group override')
+  .option('--clone-parent', 'Clone the parent drone into the child with a fresh chat', false)
   .option('--idempotency-key <key>', 'Stable idempotency key')
   .option('--wait', 'Wait for the hub reconciler result', false)
   .option('--timeout-ms <n>', 'Wait timeout in milliseconds', '60000')
   .option('--poll-ms <n>', 'Status poll interval in milliseconds', '500')
-  .action(async (options: { name: string; group?: string; idempotencyKey?: string; wait?: boolean; timeoutMs: string; pollMs: string }) => {
-    const client = await createClient();
-    printJson(
-      await createFleetRequestAndMaybeWait(client, {
-        idempotencyKey: options.idempotencyKey,
-        wait: options.wait,
-        timeoutMs: options.timeoutMs,
-        pollMs: options.pollMs,
-        type: 'create_child',
-        payload: {
-          name: String(options.name),
-          ...(options.group ? { group: String(options.group) } : {}),
-        },
-      }),
-    );
-  });
+  .action(
+    async (options: {
+      name: string;
+      group?: string;
+      cloneParent?: boolean;
+      idempotencyKey?: string;
+      wait?: boolean;
+      timeoutMs: string;
+      pollMs: string;
+    }) => {
+      const client = await createClient();
+      printJson(
+        await createFleetRequestAndMaybeWait(client, {
+          idempotencyKey: options.idempotencyKey,
+          wait: options.wait,
+          timeoutMs: options.timeoutMs,
+          pollMs: options.pollMs,
+          type: 'create_child',
+          payload: {
+            name: String(options.name),
+            ...(options.group ? { group: String(options.group) } : {}),
+            ...(options.cloneParent ? { cloneParent: true } : {}),
+          },
+        }),
+      );
+    },
+  );
 
 program
   .command('send')
