@@ -78,6 +78,17 @@ export function SettingsView({
     settingsScrollRef.current?.scrollTo({ top: 0 });
   }, [activeTab]);
 
+  const handleSelectTab = React.useCallback(
+    (tabId: SettingsTabId) => {
+      setActiveTab(tabId);
+      if (tabId === 'archive') {
+        void deleteAction.loadArchivedDrones();
+        void deleteAction.loadArchivedChats();
+      }
+    },
+    [deleteAction],
+  );
+
   const handleRefreshAll = React.useCallback(() => {
     if (skillLibrary.draftDirty) {
       const ok = window.confirm('Discard unsaved skill edits and refresh all settings?');
@@ -136,7 +147,7 @@ export function SettingsView({
                 {SETTINGS_TABS.map((tab) => {
                   const active = tab.id === activeTab;
                   return (
-                    <button key={tab.id} type="button" onClick={() => setActiveTab(tab.id)} className={settingsNavButtonClass(active)}>
+                    <button key={tab.id} type="button" onClick={() => handleSelectTab(tab.id)} className={settingsNavButtonClass(active)}>
                       <div
                         className={`text-[11px] font-semibold uppercase tracking-[0.08em] ${
                           active ? 'text-[var(--accent)]' : 'text-[var(--muted)]'
