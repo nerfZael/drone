@@ -717,7 +717,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const showNameSuggestionFailureToast = React.useCallback((error: unknown) => {
     const msg = String(error instanceof Error ? error.message : error ?? '').trim();
     const id = makeId();
-    setNameSuggestToast({ id, message: msg || 'Name suggestion failed.' });
+    setNameSuggestToast({ id, title: 'Name suggestion failed', message: msg || 'Name suggestion failed.' });
     window.setTimeout(() => {
       setNameSuggestToast((cur) => (cur?.id === id ? null : cur));
     }, 6000);
@@ -789,7 +789,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     [drones],
   );
 
-  const { openCreateModal, openDraftChatComposer, openCloneModal } =
+  const { openCreateModal, openDraftChatComposer } =
     useWorkspaceNavigationActions({
       creating,
       createMode,
@@ -1011,9 +1011,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [selectDroneChatBase],
   );
-  const { createDrone, createDroneFromDraft, queueDraftPromptDuringCreate, startDraftPrompt, startDraftAutomation } =
+  const { cloneDrone, createDrone, createDroneFromDraft, queueDraftPromptDuringCreate, startDraftPrompt, startDraftAutomation } =
     useDroneCreationActions({
       drones,
+      creating,
       createNameRows,
       createMessageSuffixRows,
       createGroup,
@@ -1032,6 +1033,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       draftCreateGroup,
       draftCreateRepoPath: chatHeaderRepoPath,
       startupSeedMissingGraceMs: STARTUP_SEED_MISSING_GRACE_MS,
+      suggestCloneName,
       resolveAgentKeyToConfig,
       queueDrones,
       enqueueQueuedPrompt,
@@ -1061,6 +1063,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setDraftAutoRenaming,
       setDraftCreateOpen,
       setDraftCreating,
+      setNameSuggestToast,
       setSelectedDrone,
       setSelectedDroneIds,
       setSelectedChat,
@@ -1068,6 +1071,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       preferredSelectedDroneRef,
       preferredSelectedDroneHoldUntilRef,
     });
+  const openCloneModal = React.useCallback((source: DroneSummary) => {
+    void cloneDrone(source);
+  }, [cloneDrone]);
 
   const currentDrone = selectedDrone ? drones.find((d) => d.id === selectedDrone) ?? null : null;
   const currentDroneLabel = currentDrone ? uiDroneName(currentDrone.name) : '';

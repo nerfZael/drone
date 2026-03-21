@@ -31,7 +31,7 @@ import { normalizeSidebarGroupOrder } from './sidebar-group-order';
 
 type Updater<T> = T | ((prev: T) => T);
 
-type NameSuggestToast = null | { id: string; message: string };
+type NameSuggestToast = null | { id: string; title?: string; message: string };
 type ViewMode = 'grouped' | 'flat';
 type SidebarGroupingMode = 'groups' | 'repos';
 type FsExplorerView = 'list' | 'thumb';

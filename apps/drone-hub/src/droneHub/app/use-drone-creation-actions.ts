@@ -1,5 +1,6 @@
 import React from 'react';
 import type { ChatAgentConfig } from '../../domain';
+import type { DroneSummary } from '../types';
 import type { ChatSendPayload } from '../chat';
 import type { DraftChatState } from './app-types';
 import { attachmentRefsFromPayload, normalizeChatImageAttachmentPayloads } from './chat-attachment-payloads';
@@ -29,6 +30,7 @@ export type DraftAutomationStartInput = {
 
 type UseDroneCreationActionsArgs = {
   drones: Array<{ id: string; name: string }>;
+  creating: boolean;
   createNameRows: string[];
   createMessageSuffixRows: string[];
   createGroup: string;
@@ -47,6 +49,7 @@ type UseDroneCreationActionsArgs = {
   draftCreateGroup: string;
   draftCreateRepoPath: string;
   startupSeedMissingGraceMs: number;
+  suggestCloneName: (sourceName: string) => string;
   resolveAgentKeyToConfig: (key: string) => ChatAgentConfig;
   queueDrones: (list: any[]) => Promise<QueueDronesResponse>;
   enqueueQueuedPrompt: (
@@ -92,6 +95,7 @@ type UseDroneCreationActionsArgs = {
   setDraftAutoRenaming: React.Dispatch<React.SetStateAction<boolean>>;
   setDraftCreateOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setDraftCreating: React.Dispatch<React.SetStateAction<boolean>>;
+  setNameSuggestToast: React.Dispatch<React.SetStateAction<{ id: string; title?: string; message: string } | null>>;
   setSelectedDrone: React.Dispatch<React.SetStateAction<string | null>>;
   setSelectedDroneIds: React.Dispatch<React.SetStateAction<string[]>>;
   setSelectedChat: React.Dispatch<React.SetStateAction<string>>;
@@ -124,6 +128,7 @@ async function waitMs(ms: number): Promise<void> {
 
 export function useDroneCreationActions({
   drones,
+  creating,
   createNameRows,
   createMessageSuffixRows,
   createGroup,
@@ -142,6 +147,7 @@ export function useDroneCreationActions({
   draftCreateGroup,
   draftCreateRepoPath,
   startupSeedMissingGraceMs,
+  suggestCloneName,
   resolveAgentKeyToConfig,
   queueDrones,
   enqueueQueuedPrompt,
@@ -171,6 +177,7 @@ export function useDroneCreationActions({
   setDraftAutoRenaming,
   setDraftCreateOpen,
   setDraftCreating,
+  setNameSuggestToast,
   setSelectedDrone,
   setSelectedDroneIds,
   setSelectedChat,
@@ -182,6 +189,19 @@ export function useDroneCreationActions({
   React.useEffect(() => {
     draftChatRef.current = draftChat;
   }, [draftChat]);
+  const cloneDronePendingRef = React.useRef(false);
+  const showTransientToast = React.useCallback(
+    (message: string, title = 'Action failed') => {
+      const text = String(message ?? '').trim();
+      if (!text) return;
+      const id = makeId();
+      setNameSuggestToast({ id, title, message: text });
+      window.setTimeout(() => {
+        setNameSuggestToast((current) => (current?.id === id ? null : current));
+      }, 5000);
+    },
+    [setNameSuggestToast],
+  );
   const setDraftChatState = React.useCallback(
     (next: DraftChatState | null | ((prev: DraftChatState | null) => DraftChatState | null)) => {
       setDraftChat((prev: DraftChatState | null) => {
@@ -191,6 +211,83 @@ export function useDroneCreationActions({
       });
     },
     [setDraftChat],
+  );
+  const cloneDrone = React.useCallback(
+    async (source: DroneSummary): Promise<boolean> => {
+      const sourceId = String(source?.id ?? '').trim();
+      if (!sourceId || creating || cloneDronePendingRef.current) return false;
+      const sourceRuntime = String(source?.runtime ?? 'container').trim().toLowerCase();
+      if (sourceRuntime === 'host') {
+        showTransientToast('Host runtime drones cannot be cloned.', 'Clone failed');
+        return false;
+      }
+      const name = suggestCloneName(String(source?.name ?? '').trim());
+      const group = String(source?.group ?? '').trim();
+      const repoPath =
+        source && (source.repoAttached ?? Boolean(String(source.repoPath ?? '').trim()))
+          ? String(source.repoPath ?? '').trim()
+          : '';
+
+      setCreating(true);
+      cloneDronePendingRef.current = true;
+      setCreateError(null);
+      try {
+        const resp = await requestJson<QueueDronesResponse>(`/api/drones/batch`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            drones: [
+              {
+                name,
+                runtime: 'container',
+                ...(group ? { group } : {}),
+                ...(repoPath ? { repoPath } : {}),
+                cloneFrom: sourceId,
+                cloneChats: true,
+              },
+            ],
+            pullHostBranchBeforeCreate: false,
+          }),
+        });
+        const acceptedList = Array.isArray(resp?.accepted) ? resp.accepted : [];
+        const firstAccepted = acceptedList.length > 0 ? acceptedList[0] : null;
+        const firstAcceptedId = String((firstAccepted as any)?.id ?? '').trim();
+        if (firstAcceptedId) {
+          preferredSelectedDroneRef.current = firstAcceptedId;
+          preferredSelectedDroneHoldUntilRef.current = Date.now() + startupSeedMissingGraceMs;
+          setSelectedDrone(firstAcceptedId);
+          setSelectedDroneIds([firstAcceptedId]);
+          selectionAnchorRef.current = firstAcceptedId;
+          return true;
+        }
+
+        const rejected = Array.isArray(resp?.rejected) ? resp.rejected : [];
+        const firstRejected = rejected.length > 0 ? rejected[0] : null;
+        const rejectedMessage = String((firstRejected as any)?.error ?? '').trim();
+        showTransientToast(rejectedMessage || `Failed to clone ${source.name}.`, 'Clone failed');
+        return false;
+      } catch (e: any) {
+        showTransientToast(e?.message ?? `Failed to clone ${source.name}.`, 'Clone failed');
+        return false;
+      } finally {
+        cloneDronePendingRef.current = false;
+        setCreating(false);
+      }
+    },
+    [
+      creating,
+      preferredSelectedDroneHoldUntilRef,
+      preferredSelectedDroneRef,
+      requestJson,
+      selectionAnchorRef,
+      setCreateError,
+      setCreating,
+      setSelectedDrone,
+      setSelectedDroneIds,
+      showTransientToast,
+      startupSeedMissingGraceMs,
+      suggestCloneName,
+    ],
   );
 
   const createDrone = React.useCallback(async () => {
@@ -775,6 +872,7 @@ export function useDroneCreationActions({
   );
 
   return {
+    cloneDrone,
     createDrone,
     createDroneFromDraft,
     queueDraftPromptDuringCreate,

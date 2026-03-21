@@ -5562,6 +5562,7 @@ async function provisionDroneFromPending(name: string) {
       const pendingLatest = regLatest?.pending?.[name] ?? null;
       const fleetMeta = pendingLatest?.fleet && typeof pendingLatest.fleet === 'object' ? pendingLatest.fleet : null;
       const environment = pendingLatest?.environment ?? null;
+      const cloneSourceLatest = cloneFrom ? findDroneEntryByIdentity(regLatest, cloneFrom)?.entry : null;
       const found = findDroneEntryByIdentity(regLatest, pendingDroneId);
       if (!found) return;
       const d = found.entry;
@@ -5591,15 +5592,35 @@ async function provisionDroneFromPending(name: string) {
           updatedAt: typeof (environment as any)?.updatedAt === 'string' ? String((environment as any).updatedAt).trim() || null : null,
         };
       }
+      if (cloneSourceLatest && typeof cloneSourceLatest === 'object') {
+        const cloneSourceCwd =
+          typeof (cloneSourceLatest as any)?.cwd === 'string'
+            ? String((cloneSourceLatest as any).cwd).trim()
+            : '';
+        const cloneSourceRepoPath =
+          typeof (cloneSourceLatest as any)?.repoPath === 'string'
+            ? String((cloneSourceLatest as any).repoPath).trim()
+            : '';
+        const cloneSourceRepo = (cloneSourceLatest as any)?.repo;
+        if (cloneSourceCwd) d.cwd = cloneSourceCwd;
+        if (cloneSourceRepoPath && !String((d as any)?.repoPath ?? '').trim()) d.repoPath = cloneSourceRepoPath;
+        if (cloneSourceRepo && typeof cloneSourceRepo === 'object') {
+          try {
+            d.repo = JSON.parse(JSON.stringify(cloneSourceRepo));
+          } catch {
+            d.repo = { ...(cloneSourceRepo as any) };
+          }
+        }
+      }
       regLatest.drones[found.key] = d;
     });
   } catch {
     // ignore (best-effort lineage persistence)
   }
 
-  // If this drone is repo-attached, seed the container with the host repo before we enqueue any seed prompt.
-  // This uses dvm's offline repo workflow (no host bind mount).
-  if (repoPath && runtime === 'container') {
+  // For fresh repo-attached creates, seed the container with the host repo before we enqueue any seed prompt.
+  // For clone flows, preserve the source container's actual repo contents instead of reseeding from host.
+  if (repoPath && runtime === 'container' && !cloneFrom) {
     await setDroneHubMetaByIdentity({
       droneId: pendingDroneId,
       hub: { phase: 'seeding', message: 'Seeding repo…' },
@@ -8892,7 +8913,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           json(res, 400, { ok: false, error: 'invalid containerPort' });
           return;
         }
-        if (repoPath && pullHostBranchBeforeCreate) {
+        if (repoPath && pullHostBranchBeforeCreate && !cloneFrom) {
           try {
             const pulled = await gitPullHostBranchBeforeCreate(repoPath);
             repoPath = pulled.repoRoot;
@@ -8990,12 +9011,13 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         for (const [index, raw] of list.entries()) {
           const repoRaw = typeof raw?.repoPath === 'string' ? raw.repoPath.trim() : '';
           const repoPath = repoRaw ? repoRaw : '';
+          const cloneFromRaw = typeof raw?.cloneFrom === 'string' ? raw.cloneFrom.trim() : '';
           const hasPullOverride = Boolean(raw) && Object.prototype.hasOwnProperty.call(raw, 'pullHostBranchBeforeCreate');
           const shouldPullHostBranchBeforeCreate = hasPullOverride
             ? parsePullHostBranchBeforeCreate(raw?.pullHostBranchBeforeCreate)
             : defaultPullHostBranchBeforeCreate;
 
-          if (!repoPath || !shouldPullHostBranchBeforeCreate) {
+          if (!repoPath || !shouldPullHostBranchBeforeCreate || cloneFromRaw) {
             preflightByIndex[index] = {
               repoPath,
               pullError: null,

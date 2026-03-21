@@ -2,6 +2,7 @@ import React from 'react';
 
 type NameSuggestToast = {
   id: string;
+  title?: string;
   message: string;
 };
 
@@ -33,7 +34,7 @@ export function HubTransientToasts({
           <div className="flex items-start gap-3">
             <div className="min-w-0 flex-1">
               <div className="text-[10px] font-semibold text-[var(--red)] mb-1 tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                Name suggestion failed
+                {nameSuggestToast.title ?? 'Action failed'}
               </div>
               <div className="text-[11px] text-[var(--muted)] whitespace-pre-wrap">{nameSuggestToast.message}</div>
             </div>
