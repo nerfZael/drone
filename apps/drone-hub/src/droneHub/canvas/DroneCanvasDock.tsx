@@ -21,6 +21,10 @@ import {
   sortChatNodeIdsForDestructiveDelete,
 } from './chat-node-utils';
 import {
+  cloneCanvasDronesById,
+  collectCloneableDroneIdsFromCanvasSelection,
+} from './clone-shortcuts';
+import {
   DRAFT_CANVAS_NODE_PREFIX,
   MAX_CANVAS_SCALE,
   MIN_CANVAS_SCALE,
@@ -262,6 +266,7 @@ function renderNodeUnreadIndicator(state: DroneCanvasIndicatorState | null): Rea
 }
 
 export function DroneCanvasDock({
+  droneById,
   droneNameById,
   sidebarOrderedChatNodeIds,
   sidebarSelectedChatNodeId,
@@ -274,6 +279,7 @@ export function DroneCanvasDock({
   onCreateCanvasDroneFromDraft,
   onRenameChat,
   onDeleteChat,
+  onCloneDrone,
   spawnAgentMenuEntries,
   spawnAgentKey,
   onSpawnAgentKeyChange,
@@ -289,6 +295,7 @@ export function DroneCanvasDock({
   pullHostBranchBeforeCreate,
   onPullHostBranchBeforeCreateChange,
 }: {
+  droneById: Record<string, DroneSummary>;
   droneNameById: Record<string, string>;
   sidebarOrderedChatNodeIds: string[];
   sidebarSelectedChatNodeId?: string | null;
@@ -322,6 +329,7 @@ export function DroneCanvasDock({
     droneId: string,
     chatName: string,
   ) => Promise<{ ok: boolean; deletedDrone?: boolean; error?: string | null }>;
+  onCloneDrone?: (drone: DroneSummary) => Promise<boolean> | boolean;
   spawnAgentMenuEntries: UiMenuSelectEntry[];
   spawnAgentKey: string;
   onSpawnAgentKeyChange: (next: string) => void;
@@ -393,6 +401,7 @@ export function DroneCanvasDock({
   const nodeElementByDroneIdRef = React.useRef<Record<string, HTMLButtonElement | null>>({});
   const lastSyncedSidebarSelectionRef = React.useRef<string>('');
   const inlineRenameInputRef = React.useRef<HTMLInputElement | null>(null);
+  const copiedDroneIdsRef = React.useRef<string[]>([]);
   const suppressNodeClickRef = React.useRef(false);
   const [dragOverCanvas, setDragOverCanvas] = React.useState(false);
   const [draggingNodeId, setDraggingNodeId] = React.useState<string | null>(null);
@@ -1564,6 +1573,19 @@ export function DroneCanvasDock({
     setSelectionBox(null);
   }, []);
 
+  const copySelectedDronesForClone = React.useCallback((): string[] => {
+    const copiedDroneIds = collectCloneableDroneIdsFromCanvasSelection(selectedDroneIds);
+    copiedDroneIdsRef.current = copiedDroneIds;
+    return copiedDroneIds;
+  }, [selectedDroneIds]);
+
+  const pasteCopiedDronesAsClones = React.useCallback(() => {
+    if (!onCloneDrone) return;
+    const copiedDroneIds = copiedDroneIdsRef.current.slice();
+    if (copiedDroneIds.length === 0) return;
+    void cloneCanvasDronesById(copiedDroneIds, droneById, onCloneDrone);
+  }, [droneById, onCloneDrone]);
+
   const onViewportKeyDown = React.useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
       const targetIsEditable = isEditableElement(event.target);
@@ -1587,6 +1609,24 @@ export function DroneCanvasDock({
 
       const key = event.key.toLowerCase();
       const isPrimaryMod = event.ctrlKey || event.metaKey;
+
+      if (!event.repeat && isPrimaryMod && !event.altKey && !event.shiftKey && key === 'c') {
+        const copiedDroneIds = copySelectedDronesForClone();
+        if (copiedDroneIds.length > 0) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+        return;
+      }
+
+      if (!event.repeat && isPrimaryMod && !event.altKey && !event.shiftKey && key === 'v') {
+        if (copiedDroneIdsRef.current.length > 0) {
+          event.preventDefault();
+          event.stopPropagation();
+          pasteCopiedDronesAsClones();
+        }
+        return;
+      }
 
       if (isPrimaryMod && !event.altKey && !event.shiftKey && key === 'a') {
         event.preventDefault();
@@ -1645,6 +1685,7 @@ export function DroneCanvasDock({
     [
       clearSelection,
       closeMessageBar,
+      copySelectedDronesForClone,
       createDraftShortcutBinding,
       messageBarExpanded,
       nodeOrder,
@@ -1653,6 +1694,7 @@ export function DroneCanvasDock({
       deleteChatNode,
       createDraftNearViewportCenter,
       focusPrimaryChatInputShortcutBinding,
+      pasteCopiedDronesAsClones,
       removeNodes,
       selectedDroneIds,
       setSelectedDroneIds,

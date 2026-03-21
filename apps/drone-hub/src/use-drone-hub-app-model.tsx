@@ -310,6 +310,15 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     }
     return out;
   }, [drones, uiDroneName]);
+  const droneById = React.useMemo(() => {
+    const out: Record<string, DroneSummary> = {};
+    for (const drone of drones) {
+      const id = String(drone?.id ?? '').trim();
+      if (!id) continue;
+      out[id] = drone;
+    }
+    return out;
+  }, [drones]);
   const droneRepoById = React.useMemo(() => {
     const out: Record<string, string> = {};
     for (const drone of drones) {
@@ -1983,6 +1992,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           paneKey={paneKey}
           selectedChat={selectedChat}
           orderedCanvasChatNodeIds={orderedCanvasChatNodeIds}
+          droneById={droneById}
           droneNameById={droneNameById}
           droneRepoById={droneRepoById}
           fleetParentIdByDroneId={fleetParentIdByDroneId}
@@ -1993,6 +2003,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           onCreateCanvasDroneFromDraft={createCanvasDroneFromDraft}
           onRenameCanvasChat={renameCanvasChat}
           onDeleteCanvasChat={deleteCanvasChat}
+          onCloneCanvasDrone={cloneDrone}
           canvasSpawnAgentMenuEntries={spawnAgentMenuEntries}
           canvasSpawnAgentKey={spawnAgentKey}
           onCanvasSpawnAgentKeyChange={setSpawnAgentKey}
@@ -2095,8 +2106,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       createCanvasDroneFromDraft,
       renameCanvasChat,
       deleteCanvasChat,
+      cloneDrone,
       canvasDraftRepoLabel,
       defaultFsPathForCurrentDrone,
+      droneById,
       droneNameById,
       droneRepoById,
       fleetParentIdByDroneId,
