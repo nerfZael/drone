@@ -1313,27 +1313,33 @@ export function SelectedDroneWorkspace({
           )}
         >
           {fleetDropHintVisible && (
-            <div className="pointer-events-none absolute inset-3 z-[4] rounded-xl border border-dashed border-[var(--accent-muted)] bg-[rgba(123,188,255,.06)] shadow-[inset_0_0_0_1px_rgba(123,188,255,.08)]" />
-          )}
-          {fleetDropHintVisible && (
-            <div className="pointer-events-none absolute left-1/2 top-4 z-[5] w-[min(520px,calc(100%-2rem))] -translate-x-1/2">
+            <div className="pointer-events-none absolute inset-0 z-[5] flex items-center justify-center px-6 py-6">
               <div
                 className={cn(
-                  'rounded-lg border px-4 py-3 text-center shadow-[0_16px_44px_rgba(0,0,0,.22)] backdrop-blur-sm transition-all',
+                  'flex w-full max-w-[560px] items-center justify-center rounded-xl border border-dashed px-6 py-8 text-center shadow-[0_24px_60px_rgba(0,0,0,.28)] backdrop-blur-sm transition-all',
                   fleetBadgeDropActive
-                    ? 'border-[var(--accent)] bg-[rgba(17,24,36,.94)] text-[var(--fg-secondary)]'
-                    : 'border-[var(--accent-muted)] bg-[rgba(17,20,28,.9)] text-[var(--muted)]',
+                    ? 'border-[var(--accent)] bg-[rgba(17,24,36,.94)] text-[var(--fg-secondary)] shadow-[inset_0_0_0_1px_rgba(123,188,255,.18),0_24px_60px_rgba(0,0,0,.28)]'
+                    : 'border-[var(--accent-muted)] bg-[rgba(17,20,28,.9)] text-[var(--muted)] shadow-[inset_0_0_0_1px_rgba(123,188,255,.1),0_24px_60px_rgba(0,0,0,.24)]',
                 )}
               >
-                <div className="text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ fontFamily: 'var(--display)' }}>
-                  Fleet Assignment
-                </div>
-                <div className="mt-1 text-[12px]">
-                  {fleetDropHintText}
+                <div className="max-w-[420px]">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ fontFamily: 'var(--display)' }}>
+                    Fleet Assignment
+                  </div>
+                  <div className="mt-2 text-[13px] leading-5">
+                    {fleetDropHintText}
+                  </div>
                 </div>
               </div>
             </div>
           )}
+          <div
+            className={cn(
+              'flex-1 flex min-h-0 flex-col transition-opacity duration-150',
+              fleetDropHintVisible && 'pointer-events-none select-none opacity-0',
+            )}
+            aria-hidden={fleetDropHintVisible}
+          >
           <div className="flex-1 min-h-0 relative">
             {chatUiMode === 'transcript' ? (
               <div className="h-full min-w-0 min-h-0 overflow-auto">
@@ -1588,6 +1594,7 @@ export function SelectedDroneWorkspace({
               </button>
             </div>
           ) : null}
+          </div>
         </div>
         <RightPanel
           currentDrone={currentDrone}
