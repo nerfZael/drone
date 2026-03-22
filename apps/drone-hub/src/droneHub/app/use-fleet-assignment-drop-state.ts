@@ -64,6 +64,12 @@ export function useFleetAssignmentDropState({
     [currentDrone, openDroneErrorModal],
   );
 
+  const clearTransientDropState = React.useCallback(() => {
+    setFleetBadgeSidebarDropActive(false);
+    setFleetBadgeNativeDropActive(false);
+    setCanvasAssignmentPreview(null);
+  }, []);
+
   const updateFleetDropState = React.useCallback(
     (event: DragMoveEvent | DragOverEvent) => {
       const activeData = parseDroneHubDragData(event.active.data.current);
@@ -103,11 +109,19 @@ export function useFleetAssignmentDropState({
     };
     window.addEventListener(CANVAS_ASSIGNMENT_PREVIEW_EVENT, onCanvasAssignmentPreview as EventListener);
     window.addEventListener(FLEET_ASSIGNMENT_UPDATED_EVENT, onFleetAssignmentUpdated as EventListener);
+    window.addEventListener('mouseup', clearTransientDropState);
+    window.addEventListener('dragend', clearTransientDropState);
+    window.addEventListener('drop', clearTransientDropState);
+    window.addEventListener('blur', clearTransientDropState);
     return () => {
       window.removeEventListener(CANVAS_ASSIGNMENT_PREVIEW_EVENT, onCanvasAssignmentPreview as EventListener);
       window.removeEventListener(FLEET_ASSIGNMENT_UPDATED_EVENT, onFleetAssignmentUpdated as EventListener);
+      window.removeEventListener('mouseup', clearTransientDropState);
+      window.removeEventListener('dragend', clearTransientDropState);
+      window.removeEventListener('drop', clearTransientDropState);
+      window.removeEventListener('blur', clearTransientDropState);
     };
-  }, [currentDrone.id]);
+  }, [clearTransientDropState, currentDrone.id]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -149,12 +163,12 @@ export function useFleetAssignmentDropState({
   useDndMonitor({
     onDragMove: updateFleetDropState,
     onDragOver: updateFleetDropState,
-    onDragCancel: () => setFleetBadgeSidebarDropActive(false),
+    onDragCancel: clearTransientDropState,
     onDragEnd: (event: DragEndEvent) => {
       const activeData = parseDroneHubDragData(event.active.data.current);
       const overType = String(event.over?.data.current?.type ?? '').trim();
       const overDroneId = String(event.over?.data.current?.droneId ?? '').trim();
-      setFleetBadgeSidebarDropActive(false);
+      clearTransientDropState();
       if (overType !== 'fleet-assignment-drop' || overDroneId !== currentDrone.id) return;
       void assignFleetTargetsToCurrentDrone(assignedDroneIdsFromData(activeData));
     },
