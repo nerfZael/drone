@@ -799,6 +799,7 @@ async function processFleetRequest(actorId: string, actorEntry: any, request: an
       droneId: targetResolved.id,
       chatName,
       prompt: message,
+      allowQueued: false,
     });
     if (enqueued.kind !== 'enqueued') await reject(enqueued.error, enqueued.status, target);
     const enqueuedResult = enqueued as Extract<typeof enqueued, { kind: 'enqueued' }>;
@@ -5350,54 +5351,14 @@ async function enqueuePrompt(opts: {
   await ensureChatEntry({ droneId, chatName });
   const { d, chat } = await getChatEntry({ droneId, chatName });
   const runtime = droneRuntime(d);
-  const agent = inferChatAgent(chat, d);
-  const turns: any[] = Array.isArray((chat as any)?.turns) ? (chat as any).turns : [];
-  const transcriptDoneIds = new Set(turns.map((t: any) => String(t?.id ?? '').trim()).filter(Boolean));
-  const priorPending: any[] = Array.isArray((chat as any)?.pendingPrompts) ? (chat as any).pendingPrompts : [];
-  const sessionKnown =
-    agent.kind !== 'builtin'
-      ? true
-      : agent.id === 'codex'
-        ? Boolean(String((chat as any)?.codexThreadId ?? '').trim())
-        : agent.id === 'opencode'
-          ? Boolean(String((chat as any)?.openCodeSessionId ?? '').trim())
-          : true;
-  const automationLane = getPromptAutomationLane(droneId, chatName);
-  const automationLaneBusy = promptAutomationLaneBusy(automationLane, { includeQueued: true });
-  const isAutomationPrompt = Boolean(opts.automation && String((opts.automation as any)?.kind ?? '').trim() === 'prompt-loop');
-  // Unified FIFO: once an automation is active/queued for this chat, later manual prompts
-  // are accepted but held behind automation completion.
-  const blockedByAutomation = automationLaneBusy && !isAutomationPrompt;
-  // Preserve prompt ordering: for non-automation prompts, once any earlier prompt is still active
-  // (queued/sending/sent and not yet in transcript), queue this prompt behind it.
-  const hasPriorActive = !isAutomationPrompt
-    ? hasActivePriorPendingPrompt({
-        priorPendingPrompts: priorPending
-          .map((p: any) => ({ id: String(p?.id ?? '').trim(), state: String(p?.state ?? '') }))
-          .filter((p: any) => p.id),
-        transcriptDoneIds,
-      })
-    : false;
-  // Preserve prompt ordering for queued rows as a fallback for automation prompts.
-  const hasPriorQueued = priorPending.some((p: any) => {
-    if (String(p?.state ?? '') !== 'queued') return false;
-    if (isAutomationPrompt) return !Boolean((p as any)?.blockedByAutomation);
-    return true;
+  const disposition = getPromptEnqueueDisposition({
+    droneId,
+    chatName,
+    droneEntry: d,
+    chatEntry: chat,
+    automation: opts.automation,
   });
-  const defer =
-    blockedByAutomation ||
-    hasPriorActive ||
-    hasPriorQueued ||
-    (agent.kind === 'builtin'
-      ? shouldDeferQueuedTranscriptPrompt({
-          agentId: agent.id,
-          sessionKnown,
-          priorPendingPrompts: priorPending
-            .map((p: any) => ({ id: String(p?.id ?? '').trim(), state: String(p?.state ?? '') }))
-            .filter((p: any) => p.id),
-          transcriptDoneIds,
-        })
-      : false);
+  const { defer, blockedByAutomation } = disposition;
 
   const cwd = normalizeDroneCwdForRuntime(d, typeof opts.cwd === 'string' ? opts.cwd : null);
   const rawAttachments = Array.isArray(opts.attachments) ? opts.attachments : [];
@@ -5506,6 +5467,79 @@ async function enqueuePrompt(opts: {
   return { id, pendingState: 'sending', blockedByAutomation };
 }
 
+type PromptEnqueueDisposition = {
+  defer: boolean;
+  blockedByAutomation: boolean;
+  hasPriorActive: boolean;
+  hasPriorQueued: boolean;
+  waitingForSession: boolean;
+};
+
+function getPromptEnqueueDisposition(opts: {
+  droneId: string;
+  chatName: string;
+  droneEntry: any;
+  chatEntry: any;
+  automation?: PromptAutomationMeta | null;
+}): PromptEnqueueDisposition {
+  const droneId = normalizeDroneIdentity(opts.droneId);
+  const chatName = normalizeChatName(opts.chatName);
+  const agent = inferChatAgent(opts.chatEntry, opts.droneEntry);
+  const turns: any[] = Array.isArray((opts.chatEntry as any)?.turns) ? (opts.chatEntry as any).turns : [];
+  const transcriptDoneIds = new Set(turns.map((t: any) => String(t?.id ?? '').trim()).filter(Boolean));
+  const priorPending: any[] = Array.isArray((opts.chatEntry as any)?.pendingPrompts) ? (opts.chatEntry as any).pendingPrompts : [];
+  const sessionKnown =
+    agent.kind !== 'builtin'
+      ? true
+      : agent.id === 'codex'
+        ? Boolean(String((opts.chatEntry as any)?.codexThreadId ?? '').trim())
+        : agent.id === 'opencode'
+          ? Boolean(String((opts.chatEntry as any)?.openCodeSessionId ?? '').trim())
+          : true;
+  const automationLane = getPromptAutomationLane(droneId, chatName);
+  const automationLaneBusy = promptAutomationLaneBusy(automationLane, { includeQueued: true });
+  const isAutomationPrompt = Boolean(opts.automation && String((opts.automation as any)?.kind ?? '').trim() === 'prompt-loop');
+  const blockedByAutomation = automationLaneBusy && !isAutomationPrompt;
+  const hasPriorActive = !isAutomationPrompt
+    ? hasActivePriorPendingPrompt({
+        priorPendingPrompts: priorPending
+          .map((p: any) => ({ id: String(p?.id ?? '').trim(), state: String(p?.state ?? '') }))
+          .filter((p: any) => p.id),
+        transcriptDoneIds,
+      })
+    : false;
+  const hasPriorQueued = priorPending.some((p: any) => {
+    if (String(p?.state ?? '') !== 'queued') return false;
+    if (isAutomationPrompt) return !Boolean((p as any)?.blockedByAutomation);
+    return true;
+  });
+  const waitingForSession =
+    agent.kind === 'builtin'
+      ? shouldDeferQueuedTranscriptPrompt({
+          agentId: agent.id,
+          sessionKnown,
+          priorPendingPrompts: priorPending
+            .map((p: any) => ({ id: String(p?.id ?? '').trim(), state: String(p?.state ?? '') }))
+            .filter((p: any) => p.id),
+          transcriptDoneIds,
+        })
+      : false;
+  return {
+    defer: blockedByAutomation || hasPriorActive || hasPriorQueued || waitingForSession,
+    blockedByAutomation,
+    hasPriorActive,
+    hasPriorQueued,
+    waitingForSession,
+  };
+}
+
+function describePromptEnqueueConflict(disposition: PromptEnqueueDisposition): string {
+  if (disposition.blockedByAutomation) return 'message would be queued behind automation';
+  if (disposition.hasPriorActive || disposition.waitingForSession) return 'chat already has a pending message awaiting a response';
+  if (disposition.hasPriorQueued) return 'chat already has a queued message';
+  return 'message would be queued';
+}
+
 type UnifiedPromptCreateOpts = {
   group?: string | null;
   repoPath?: string | null;
@@ -5521,6 +5555,7 @@ async function createOrEnqueuePromptUnified(opts: {
   attachments?: ChatImageAttachment[];
   automation?: PromptAutomationMeta | null;
   cwd?: string | null;
+  allowQueued?: boolean;
 }): Promise<
   | { kind: 'enqueued'; id: string; pendingState: PendingPromptState; blockedByAutomation: boolean }
   | { kind: 'error'; status: number; error: string }
@@ -5538,8 +5573,27 @@ async function createOrEnqueuePromptUnified(opts: {
   if (!droneId) return { kind: 'error', status: 400, error: 'missing drone id' };
   if (!prompt) return { kind: 'error', status: 400, error: 'missing prompt' };
 
-  const regSnap: any = await loadRegistry();
+  let regSnap: any = await loadRegistry();
+  if (opts.allowQueued === false && regSnap?.pending?.[droneId] && !regSnap?.drones?.[droneId]) {
+    regSnap = await loadRegistry();
+  }
   if (regSnap?.drones?.[droneId]) {
+    if (opts.allowQueued === false) {
+      const disposition = getPromptEnqueueDisposition({
+        droneId,
+        chatName,
+        droneEntry: regSnap.drones[droneId],
+        chatEntry: regSnap.drones[droneId]?.chats?.[chatName] ?? null,
+        automation: opts.automation,
+      });
+      if (disposition.defer) {
+        return {
+          kind: 'error',
+          status: 409,
+          error: `${describePromptEnqueueConflict(disposition)}; fleet send requires immediate delivery`,
+        };
+      }
+    }
     try {
       await syncSkillLibraryForDrone({ droneId, droneEntry: regSnap.drones[droneId] });
     } catch (e: any) {
@@ -5574,6 +5628,13 @@ async function createOrEnqueuePromptUnified(opts: {
   // If the drone is still provisioning, stage prompt rows on the pending entry and
   // migrate them into normal chat `pendingPrompts` once startup finishes.
   if (regSnap?.pending?.[droneId] && !regSnap?.drones?.[droneId]) {
+    if (opts.allowQueued === false) {
+      return {
+        kind: 'error',
+        status: 409,
+        error: `drone "${droneId}" is still starting; fleet send requires immediate delivery`,
+      };
+    }
     if (attachments.length > 0) {
       return {
         kind: 'error',

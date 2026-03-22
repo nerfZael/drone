@@ -521,6 +521,99 @@ describeSocketSuite('fleet api', () => {
     }
   });
 
+  test('rejects fleet send requests that would be queued behind an unanswered message', async () => {
+    const parentDaemon = await startStubDaemon('parent-send-blocked-token');
+    const childDaemon = await startStubDaemon('child-send-blocked-token');
+    try {
+      const now = new Date().toISOString();
+      await updateRegistry((reg: any) => {
+        reg.drones = {
+          'parent-send-blocked': {
+            id: 'parent-send-blocked',
+            name: 'parent-send-blocked',
+            hostPort: parentDaemon.port,
+            token: 'parent-send-blocked-token',
+            containerPort: 7777,
+            repoPath: '',
+            createdAt: now,
+            fleet: {
+              enabled: true,
+              capabilities: ['drone:message:send'],
+              readScopes: ['children'],
+              assigned: [],
+            },
+            chats: { default: { createdAt: now, agent: { kind: 'builtin', id: 'cursor' }, turns: [], pendingPrompts: [] } },
+          },
+          'child-send-blocked': {
+            id: 'child-send-blocked',
+            name: 'child-send-blocked',
+            hostPort: childDaemon.port,
+            token: 'child-send-blocked-token',
+            containerPort: 7777,
+            repoPath: '',
+            createdAt: now,
+            fleet: {
+              createdBy: 'parent-send-blocked',
+              createdAt: now,
+              enabled: false,
+              capabilities: [],
+              readScopes: ['children'],
+              assigned: [],
+            },
+            chats: {
+              default: {
+                createdAt: now,
+                agent: { kind: 'builtin', id: 'cursor' },
+                turns: [],
+                pendingPrompts: [
+                  {
+                    id: 'pending-turn-1',
+                    at: now,
+                    updatedAt: now,
+                    prompt: 'first message',
+                    state: 'sent',
+                  },
+                ],
+              },
+            },
+          },
+        };
+      });
+
+      const sendResp = await fetch(`http://127.0.0.1:${parentDaemon.port}/v1/fleet/requests`, {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer parent-send-blocked-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          type: 'send_message',
+          payload: { to: 'child-send-blocked', chat: 'default', message: 'follow-up message' },
+        }),
+      });
+      const sendData: any = await sendResp.json();
+      const sendRequest = await waitForRequest(parentDaemon, 'parent-send-blocked-token', String(sendData?.request?.id ?? ''));
+      expect(sendRequest.state).toBe('failed');
+      expect(String(sendRequest.error ?? '')).toContain('pending message awaiting a response');
+      expect(String(sendRequest.error ?? '')).toContain('immediate delivery');
+      expect(childDaemon.promptEnqueues).toHaveLength(0);
+
+      const audit = await apiFetch('/api/fleet/audit?actor=parent-send-blocked');
+      expect(audit.r.status).toBe(200);
+      expect(
+        (audit.data?.items ?? []).some(
+          (item: any) =>
+            item.action === 'send_message' &&
+            item.status === 'rejected' &&
+            String(item.reason ?? '').includes('pending message awaiting a response'),
+        ),
+      ).toBe(true);
+    } finally {
+      await parentDaemon.close();
+      await childDaemon.close();
+    }
+  });
+
   test('reconciles stop requests for a child drone chat', async () => {
     const parentDaemon = await startStubDaemon('parent-stop-token');
     const childDaemon = await startStubDaemon('child-stop-token');
