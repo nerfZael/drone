@@ -1,6 +1,11 @@
 export { ChatTabs } from './ChatTabs';
 export { ChatInput } from './ChatInput';
-export type { ChatImageAttachmentPayload, ChatInputAutomationAction, ChatSendPayload } from './ChatInput';
+export type {
+  ChatDraftAutomationPayload,
+  ChatImageAttachmentPayload,
+  ChatInputAutomationAction,
+  ChatSendPayload,
+} from './ChatInput';
 export { EmptyState } from './EmptyState';
 export { CollapsibleOutput } from './CollapsibleOutput';
 export { TranscriptTurn } from './TranscriptTurn';

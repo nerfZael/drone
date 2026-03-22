@@ -80,6 +80,17 @@ type UsePromptAutomationStateArgs = {
   automations: AutomationConfig[];
 };
 
+type PromptAutomationStartInput = {
+  automationId: string;
+  automationLabel?: string;
+  prompt: string;
+  onFailurePrompt?: string;
+  runs?: unknown;
+  sleepBetweenRunsSeconds?: unknown;
+  stopPhrase?: string;
+  stopPhraseCaseSensitive?: boolean;
+};
+
 type PromptAutomationRuntimeConfig = {
   automationId: string;
   automationLabel: string;
@@ -245,9 +256,9 @@ export function usePromptAutomationState({
     };
   }, [chatName, droneId]);
 
-  const startPromptAutomation = React.useCallback(
-    (automation: AutomationConfig, opts?: { runs?: unknown }) => {
-      if (promptAutomationBusy) return;
+  const startPromptAutomationLaunch = React.useCallback(
+    async (launch: PromptAutomationStartInput): Promise<boolean> => {
+      if (promptAutomationBusy) return false;
       setPromptAutomationBusy(true);
       setPromptAutomationError(null);
       setPromptAutomationStatusError(null);
@@ -255,44 +266,76 @@ export function usePromptAutomationState({
       if (chatUiMode !== 'transcript') {
         setPromptAutomationBusy(false);
         setPromptAutomationError('Automation is only available in transcript mode (builtin agents).');
-        return;
+        return false;
       }
+      const automationId = String(launch?.automationId ?? '').trim();
+      const automationLabel = String(launch?.automationLabel ?? '').trim() || automationId || 'Automation';
+      const prompt = String(launch?.prompt ?? '').trim();
+      const onFailurePrompt = String(launch?.onFailurePrompt ?? '').trim();
+      const runs = clampPromptAutomationRuns(launch?.runs);
+      const sleepBetweenRunsSeconds = Math.max(0, Math.round(Number(launch?.sleepBetweenRunsSeconds) || 0));
+      const stopPhrase = String(launch?.stopPhrase ?? '').trim();
+      const stopPhraseCaseSensitive = Boolean(launch?.stopPhraseCaseSensitive);
+      if (!automationId) {
+        setPromptAutomationBusy(false);
+        setPromptAutomationError('Automation id is required.');
+        return false;
+      }
+      if (!prompt) {
+        setPromptAutomationBusy(false);
+        setPromptAutomationError(`"${automationLabel}" prompt is empty.`);
+        return false;
+      }
+      try {
+        const data = await requestJson<PromptAutomationStatusResponse>(
+          promptAutomationApiPath(droneId, chatName, 'start'),
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              automationId,
+              automationLabel,
+              prompt,
+              onFailurePrompt,
+              runs,
+              sleepBetweenRunsSeconds,
+              stopPhrase,
+              stopPhraseCaseSensitive,
+            }),
+          },
+        );
+        setPromptAutomationJob(data.job);
+        setPromptAutomationStatusError(null);
+        return true;
+      } catch (e: any) {
+        setPromptAutomationError(e?.message ?? String(e));
+        return false;
+      } finally {
+        setPromptAutomationBusy(false);
+      }
+    },
+    [chatName, chatUiMode, droneId, promptAutomationBusy],
+  );
+
+  const startPromptAutomation = React.useCallback(
+    (automation: AutomationConfig, opts?: { runs?: unknown }) => {
       const config = normalizePromptAutomationRuntimeConfig(automation);
       if (!config.prompt) {
-        setPromptAutomationBusy(false);
         setPromptAutomationError(`"${config.automationLabel}" prompt is empty. Update it in Settings > Automation.`);
         return;
       }
-      const runs = clampPromptAutomationRuns(opts?.runs ?? config.runs);
-      void (async () => {
-        try {
-          const data = await requestJson<PromptAutomationStatusResponse>(
-            promptAutomationApiPath(droneId, chatName, 'start'),
-            {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({
-                automationId: config.automationId,
-                automationLabel: config.automationLabel,
-                prompt: config.prompt,
-                onFailurePrompt: config.onFailurePrompt,
-                runs,
-                sleepBetweenRunsSeconds: config.sleepBetweenRunsSeconds,
-                stopPhrase: config.stopPhrase,
-                stopPhraseCaseSensitive: config.stopPhraseCaseSensitive,
-              }),
-            },
-          );
-          setPromptAutomationJob(data.job);
-          setPromptAutomationStatusError(null);
-        } catch (e: any) {
-          setPromptAutomationError(e?.message ?? String(e));
-        } finally {
-          setPromptAutomationBusy(false);
-        }
-      })();
+      void startPromptAutomationLaunch({
+        automationId: config.automationId,
+        automationLabel: config.automationLabel,
+        prompt: config.prompt,
+        onFailurePrompt: config.onFailurePrompt,
+        runs: opts?.runs ?? config.runs,
+        sleepBetweenRunsSeconds: config.sleepBetweenRunsSeconds,
+        stopPhrase: config.stopPhrase,
+        stopPhraseCaseSensitive: config.stopPhraseCaseSensitive,
+      });
     },
-    [chatName, chatUiMode, droneId, promptAutomationBusy],
+    [startPromptAutomationLaunch],
   );
 
   const stopPromptAutomation = React.useCallback(
@@ -473,6 +516,7 @@ export function usePromptAutomationState({
     cancelQueuedPromptAutomation,
     chatAutomationActions,
     queuedAutomationItems,
+    startPromptAutomationLaunch,
     stopPromptAutomation,
     stoppingPromptAutomationMode,
     stopPromptAutomationError,

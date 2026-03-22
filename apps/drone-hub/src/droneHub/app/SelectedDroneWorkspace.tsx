@@ -35,6 +35,7 @@ import { openDroneTabFromLastPreview, resolveDroneOpenTabUrl } from './quick-act
 import { cn } from '../../ui/cn';
 import { dropdownMenuItemBaseClass, dropdownPanelBaseClass } from '../../ui/dropdown';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
+import { createDraftChatAutomationLaunch } from './chat-draft-automation';
 import { useDroneHubUiStore, useSelectedDroneWorkspaceUiState } from './use-drone-hub-ui-store';
 import { usePromptAutomationState } from './use-prompt-automation-state';
 import { HeaderPullRequestShortcuts } from './HeaderPullRequestShortcuts';
@@ -334,6 +335,7 @@ export function SelectedDroneWorkspace({
     cancelQueuedPromptAutomation,
     chatAutomationActions,
     queuedAutomationItems,
+    startPromptAutomationLaunch,
     stopPromptAutomation,
     stoppingPromptAutomationMode,
     stopPromptAutomationError,
@@ -1478,6 +1480,23 @@ export function SelectedDroneWorkspace({
                 return false;
               }
             }}
+            onSendAutomation={
+              chatUiMode === 'transcript'
+                ? async (payload) => {
+                    try {
+                      const launch = createDraftChatAutomationLaunch({
+                        prompt: payload.prompt,
+                        runs: payload.runs,
+                        sleepAmount: payload.sleepAmount,
+                        sleepUnit: payload.sleepUnit,
+                      });
+                      return await startPromptAutomationLaunch(launch);
+                    } catch {
+                      return false;
+                    }
+                  }
+                : undefined
+            }
           />
           {fileOpenToast ? (
             <div className="absolute right-4 bottom-4 z-20">
