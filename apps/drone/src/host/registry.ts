@@ -10,11 +10,12 @@ type DroneRegistryChatEntry = {
   chatId?: string;
   model?: string;
   agent?:
-    | { kind: 'builtin'; id: 'cursor' | 'codex' | 'claude' | 'opencode' }
+    | { kind: 'builtin'; id: 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi' }
     | { kind: 'custom'; id: string; label: string; command: string };
   codexThreadId?: string;
   claudeSessionId?: string;
   openCodeSessionId?: string;
+  piSessionId?: string;
   turns?: Array<{
     at: string;
     id?: string;
@@ -185,7 +186,7 @@ type DroneRegistryV1 = {
         prompt?: string;
         cwd?: string;
         agent?:
-          | { kind: 'builtin'; id: 'cursor' | 'codex' | 'claude' | 'opencode' }
+          | { kind: 'builtin'; id: 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi' }
           | { kind: 'custom'; id: string; label: string; command: string };
       };
       environment?: {

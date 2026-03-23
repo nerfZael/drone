@@ -42,6 +42,7 @@ export function useChatConfigState({
     | 'codex'
     | 'claude'
     | 'opencode'
+    | 'pi'
     | null = chatInfo?.agent?.kind === 'builtin' ? chatInfo.agent.id : null;
 
   const selectedDroneSummary = React.useMemo(

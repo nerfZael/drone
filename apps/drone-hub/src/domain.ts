@@ -1,5 +1,5 @@
 export type ChatAgentConfig =
-  | { kind: 'builtin'; id: 'cursor' | 'codex' | 'claude' | 'opencode' }
+  | { kind: 'builtin'; id: 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi' }
   | { kind: 'custom'; id: string; label: string; command: string };
 
 export type ChatInfo = {
@@ -81,13 +81,14 @@ export function normalizeChatInfoPayload(data: any): ChatInfo {
   const createdAt = String(data?.createdAt ?? '').trim() || new Date().toISOString();
 
   const raw = data?.agent;
-  const normalizeBuiltin = (v: any): 'cursor' | 'codex' | 'claude' | 'opencode' | null => {
+  const normalizeBuiltin = (v: any): 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi' | null => {
     const id = String(v ?? '')
       .trim()
       .toLowerCase();
-    if (id === 'cursor' || id === 'codex' || id === 'claude' || id === 'opencode') return id;
+    if (id === 'cursor' || id === 'codex' || id === 'claude' || id === 'opencode' || id === 'pi') return id;
     if (id === 'cloud') return 'claude';
     if (id === 'open-code' || id === 'open_code') return 'opencode';
+    if (id === 'pi-agent' || id === 'pi_agent') return 'pi';
     return null;
   };
   const builtinId = normalizeBuiltin(raw?.id);
@@ -116,6 +117,7 @@ export function normalizeChatInfoPayload(data: any): ChatInfo {
   if (String(data?.openCodeSessionId ?? '').trim() || String(data?.opencodeSessionId ?? '').trim()) {
     return { name, chat, model, sessionName, createdAt, agent: { kind: 'builtin', id: 'opencode' } };
   }
+  if (String(data?.piSessionId ?? '').trim()) return { name, chat, model, sessionName, createdAt, agent: { kind: 'builtin', id: 'pi' } };
   if (String(data?.codexThreadId ?? '').trim()) return { name, chat, model, sessionName, createdAt, agent: { kind: 'builtin', id: 'codex' } };
   if (String(data?.chatId ?? '').trim()) return { name, chat, model, sessionName, createdAt, agent: { kind: 'builtin', id: 'cursor' } };
   return { name, chat, model, sessionName, createdAt, agent: { kind: 'builtin', id: 'cursor' } };

@@ -53,6 +53,13 @@ import { tldrFromAgentMessage } from './tldr-from-message';
 import { resolveTranscriptPromptAt } from './transcript-order';
 import { cloneChatEntryForDroneClone, maybeBootstrapPromptFromTranscript } from './chat-clone';
 import {
+  formatCodexJobFailure,
+  hasKnownBuiltinTranscriptSession,
+  parseCodexJsonl,
+  parsePiJsonl,
+  readBuiltinTranscriptSessionId,
+} from './builtin-transcript-sessions';
+import {
   buildEnvExportLines,
   deriveCreatedDroneEnvironmentConfig,
   normalizeDisabledRepoKeys,
@@ -2000,7 +2007,7 @@ function isValidDroneNameDashCase(raw: string): boolean {
   return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(s);
 }
 
-type BuiltinAgentId = 'cursor' | 'codex' | 'claude' | 'opencode';
+type BuiltinAgentId = 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi';
 
 type ChatAgentConfig =
   | { kind: 'builtin'; id: BuiltinAgentId }
@@ -2187,9 +2194,10 @@ function normalizeBuiltinAgentId(raw: any): BuiltinAgentId | null {
   const id = String(raw ?? '')
     .trim()
     .toLowerCase();
-  if (id === 'cursor' || id === 'codex' || id === 'claude' || id === 'opencode') return id;
+  if (id === 'cursor' || id === 'codex' || id === 'claude' || id === 'opencode' || id === 'pi') return id;
   if (id === 'cloud' || id === 'claude-code' || id === 'claude_code') return 'claude';
   if (id === 'open-code' || id === 'open_code') return 'opencode';
+  if (id === 'pi-agent' || id === 'pi_agent') return 'pi';
   return null;
 }
 
@@ -2497,6 +2505,7 @@ async function discoverModelsForBuiltinAgent(opts: {
     codex: 'codex',
     claude: 'claude',
     opencode: 'opencode',
+    pi: 'pi',
   };
   const bin = binByAgent[opts.agentId];
 
@@ -2540,6 +2549,9 @@ async function discoverModelsForBuiltinAgent(opts: {
   if (opts.agentId === 'opencode') {
     candidates.push('opencode models --json');
     candidates.push('opencode models');
+  }
+  if (opts.agentId === 'pi') {
+    candidates.push('pi --list-models');
   }
 
   const deduped = Array.from(new Set(candidates.map((c) => c.trim()).filter(Boolean)));
@@ -2823,8 +2835,7 @@ async function sendPromptToChat(opts: {
 
     if (agent.kind === 'builtin' && agent.id === 'codex') {
       const modelArg = chatModel ? ` --model ${bashQuote(chatModel)}` : '';
-      const existingThreadId =
-        typeof (chat as any).codexThreadId === 'string' ? String((chat as any).codexThreadId).trim() : '';
+      const existingThreadId = readBuiltinTranscriptSessionId(chat, 'codex');
       if (!existingThreadId) {
         const script = [
           'set -euo pipefail',
@@ -2883,8 +2894,7 @@ async function sendPromptToChat(opts: {
     if (agent.kind === 'builtin' && agent.id === 'opencode') {
       const supportsModel = chatModel ? await cliSupportsModelFlag({ runtime, containerName, cwd, bin: 'opencode' }) : false;
       const modelArg = chatModel && supportsModel ? ` --model ${bashQuote(chatModel)}` : '';
-      const openCodeSessionId =
-        typeof (chat as any).openCodeSessionId === 'string' ? String((chat as any).openCodeSessionId).trim() : '';
+      const openCodeSessionId = readBuiltinTranscriptSessionId(chat, 'opencode');
       const title = openCodeSessionTitle(droneLabel, normalizedChat);
       const resumeArg = openCodeSessionId ? ` --session ${bashQuote(openCodeSessionId)}` : '';
       const script = [
@@ -2902,6 +2912,29 @@ async function sendPromptToChat(opts: {
         mode: 'transcript' as const,
         chat: normalizedChat,
         openCodeSessionId: openCodeSessionId || null,
+        turnOk: true as const,
+      };
+    }
+
+    if (agent.kind === 'builtin' && agent.id === 'pi') {
+      const modelArg = chatModel ? ` --model ${bashQuote(chatModel)}` : '';
+      const piSessionId = readBuiltinTranscriptSessionId(chat, 'pi');
+      const sessionArg = piSessionId ? ` --session ${bashQuote(piSessionId)}` : '';
+      const script = [
+        'set -euo pipefail',
+        ...buildContainerManagedEnvLines(d),
+        ...managedEnvLines,
+        `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
+        cdCommand,
+        `pi --mode json${modelArg}${sessionArg} ${bashQuote(promptWithHistory)}`,
+      ].join('\n');
+      await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'pi', script });
+      return {
+        ok: true as const,
+        agent,
+        mode: 'transcript' as const,
+        chat: normalizedChat,
+        piSessionId: piSessionId || null,
         turnOk: true as const,
       };
     }
@@ -3196,14 +3229,56 @@ function startupPromptToPendingPrompt(prompt: PendingStartupPrompt): PendingProm
   };
 }
 
-function pruneCompletedPendingPrompts(list: PendingPrompt[], turnsRaw: unknown): PendingPrompt[] {
-  const turns = Array.isArray(turnsRaw) ? turnsRaw : [];
-  const transcriptIds = new Set(turns.map((t: any) => String(t?.id ?? '').trim()).filter(Boolean));
-  if (transcriptIds.size === 0) return list;
-  return list.filter((item) => item.state === 'failed' || !transcriptIds.has(item.id));
+const RECENT_COMPLETED_PENDING_PROMPT_GRACE_MS = 2 * 60_000;
+
+function parseRecentPendingPromptIsoMs(raw: unknown): number {
+  const text = typeof raw === 'string' ? raw.trim() : '';
+  if (!text) return 0;
+  const ms = Date.parse(text);
+  return Number.isFinite(ms) ? ms : 0;
 }
 
-function pendingPromptsFromChatEntry(entry: any): PendingPrompt[] {
+function pruneCompletedPendingPrompts(
+  list: PendingPrompt[],
+  turnsRaw: unknown,
+  opts?: { keepRecentlyCompleted?: boolean; nowMs?: number },
+): PendingPrompt[] {
+  const turns = Array.isArray(turnsRaw) ? turnsRaw : [];
+  const turnById = new Map<string, any>();
+  for (const turn of turns) {
+    const id = String((turn as any)?.id ?? '').trim();
+    if (!id) continue;
+    turnById.set(id, turn);
+  }
+  if (turnById.size === 0) return list;
+
+  const keepRecentlyCompleted = opts?.keepRecentlyCompleted === true;
+  const nowMs = typeof opts?.nowMs === 'number' && Number.isFinite(opts.nowMs) ? opts.nowMs : Date.now();
+
+  return list.filter((item) => {
+    if (item.state === 'failed') return true;
+    const turn = turnById.get(item.id);
+    if (!turn) return true;
+    if (!keepRecentlyCompleted) return false;
+
+    const completedMs = Math.max(
+      parseRecentPendingPromptIsoMs((turn as any)?.completedAt),
+      parseRecentPendingPromptIsoMs((turn as any)?.promptAt),
+      parseRecentPendingPromptIsoMs((turn as any)?.at),
+      parseRecentPendingPromptIsoMs((item as any)?.updatedAt),
+      parseRecentPendingPromptIsoMs((item as any)?.at),
+    );
+    if (!completedMs) return false;
+    return nowMs - completedMs <= RECENT_COMPLETED_PENDING_PROMPT_GRACE_MS;
+  });
+}
+
+function transcriptTurnIdsFromEntry(entry: any): Set<string> {
+  const turns = Array.isArray(entry?.turns) ? entry.turns : [];
+  return new Set(turns.map((turn: any) => String(turn?.id ?? '').trim()).filter(Boolean));
+}
+
+function pendingPromptsFromChatEntry(entry: any, opts?: { keepRecentlyCompleted?: boolean }): PendingPrompt[] {
   const list = Array.isArray(entry?.pendingPrompts) ? entry.pendingPrompts : [];
   return pruneCompletedPendingPrompts(
     list
@@ -3225,6 +3300,7 @@ function pendingPromptsFromChatEntry(entry: any): PendingPrompt[] {
     .filter((p: PendingPrompt) => p.id && p.prompt.trim())
     .slice(-60),
     entry?.turns,
+    { keepRecentlyCompleted: opts?.keepRecentlyCompleted === true },
   );
 }
 
@@ -3371,7 +3447,7 @@ async function readPendingPrompts(opts: { droneId: string; chatName: string }): 
   }
   const chatName = opts.chatName || 'default';
   const entry = d?.chats?.[chatName];
-  return pendingPromptsFromChatEntry(entry).slice(-50);
+  return pendingPromptsFromChatEntry(entry, { keepRecentlyCompleted: true }).slice(-50);
 }
 
 async function readPendingStartupPrompts(opts: { droneId: string; chatName: string }): Promise<PendingPrompt[]> {
@@ -3574,7 +3650,10 @@ async function stopTranscriptPendingPrompts(opts: {
   await ensureChatEntry({ droneId, chatName });
   await reconcileChatFromDaemon({ droneId, chatName });
 
-  const pending = await readPendingPrompts({ droneId, chatName });
+  const regAny: any = await loadRegistry();
+  const entry = regAny?.drones?.[droneId]?.chats?.[chatName] ?? null;
+  const transcriptIds = transcriptTurnIdsFromEntry(entry);
+  const pending = (await readPendingPrompts({ droneId, chatName })).filter((item) => !transcriptIds.has(item.id));
   const explicitPromptIds = new Set(
     Array.isArray(opts.promptIds)
       ? opts.promptIds.map((id) => String(id ?? '').trim()).filter(Boolean)
@@ -5015,12 +5094,7 @@ async function pumpQueuedPendingPromptsForChat(opts: { droneId: string; chatName
       }
     }
 
-    const sessionKnown =
-      agent.id === 'codex'
-        ? Boolean(String(entry?.codexThreadId ?? '').trim())
-        : agent.id === 'opencode'
-          ? Boolean(String(entry?.openCodeSessionId ?? '').trim())
-          : true;
+    const sessionKnown = hasKnownBuiltinTranscriptSession(entry, agent.id);
     const prior = pendingList
       .slice(0, idx)
       .map((x: any) => ({ id: String(x?.id ?? '').trim(), state: String(x?.state ?? '') }))
@@ -5391,6 +5465,35 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
         continue;
       }
 
+      if (agent.id === 'pi') {
+        const parsed = parsePiJsonl(stdout || '');
+        if (parsed.sessionId && String(parsed.sessionId).trim() && String(entry?.piSessionId ?? '').trim() !== parsed.sessionId) {
+          entry.piSessionId = parsed.sessionId;
+          changed = true;
+        }
+        const output = String(parsed.message ?? '').trimEnd();
+        if (!output) {
+          pendingList[i] = { ...p, state: 'failed', error: 'pi finished but no assistant message was parsed', updatedAt: nowIso() };
+          changed = true;
+          continue;
+        }
+        turns.push({
+          at: promptAt,
+          promptAt,
+          completedAt: finishedAt,
+          id,
+          prompt: String(p?.prompt ?? ''),
+          ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
+          ...(promptAutomation ? { automation: promptAutomation } : {}),
+          ok: true,
+          output,
+        });
+        transcriptIds.add(id);
+        pendingList[i] = { ...p, state: 'sent', updatedAt: nowIso() };
+        changed = true;
+        continue;
+      }
+
       if (
         agent.id === 'opencode' &&
         !(typeof entry?.openCodeSessionId === 'string' && String(entry.openCodeSessionId).trim())
@@ -5465,6 +5568,40 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           continue;
         }
       }
+      if (agent.id === 'pi') {
+        const stdout = String(job?.stdout ?? '');
+        const parsed = parsePiJsonl(stdout);
+        const output = String(parsed.message ?? '').trimEnd();
+        const finishedAt = typeof job?.finishedAt === 'string' ? job.finishedAt : nowIso();
+        const promptAt = resolveTranscriptPromptAt({
+          pendingAt: p?.at,
+          jobStartedAt: job?.startedAt,
+          finishedAt,
+        });
+        if (parsed.sessionId && String(parsed.sessionId).trim() && String(entry?.piSessionId ?? '').trim() !== parsed.sessionId) {
+          entry.piSessionId = parsed.sessionId;
+          changed = true;
+        }
+        // Same self-heal logic as Codex: if Pi produced a complete assistant turn before the
+        // daemon finalized the job as failed, trust the parsed transcript output.
+        if (output) {
+          turns.push({
+            at: promptAt,
+            promptAt,
+            completedAt: finishedAt,
+            id,
+            prompt: String(p?.prompt ?? ''),
+            ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
+            ...(promptAutomation ? { automation: promptAutomation } : {}),
+            ok: true,
+            output,
+          });
+          transcriptIds.add(id);
+          pendingList[i] = { ...p, state: 'sent', error: undefined, updatedAt: nowIso() };
+          changed = true;
+          continue;
+        }
+      }
       const exitCode =
         typeof job?.exitCode === 'number' && Number.isFinite(job.exitCode)
           ? Math.floor(job.exitCode)
@@ -5498,7 +5635,9 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
     }
   }
 
-  const prunedPendingList = pruneCompletedPendingPrompts(pendingList as PendingPrompt[], turns);
+  const prunedPendingList = pruneCompletedPendingPrompts(pendingList as PendingPrompt[], turns, {
+    keepRecentlyCompleted: true,
+  });
   if (prunedPendingList.length !== pendingList.length) {
     pendingList.length = 0;
     pendingList.push(...prunedPendingList);
@@ -5528,12 +5667,15 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
       if (entry && typeof entry === 'object' && typeof (entry as any).openCodeSessionId === 'string' && String((entry as any).openCodeSessionId).trim()) {
         cur.openCodeSessionId = String((entry as any).openCodeSessionId).trim();
       }
+      if (entry && typeof entry === 'object' && typeof (entry as any).piSessionId === 'string' && String((entry as any).piSessionId).trim()) {
+        cur.piSessionId = String((entry as any).piSessionId).trim();
+      }
       dLatest.chats[opts.chatName] = cur;
       regLatest.drones = regLatest.drones ?? {};
       regLatest.drones[droneId] = dLatest;
     });
 
-    // Best-effort: session ids may have been established (codexThreadId/openCodeSessionId)
+    // Best-effort: session ids may have been established (codexThreadId/openCodeSessionId/piSessionId)
     // or a prior prompt may have completed/failed, unblocking queued follow-ups.
     enqueuePendingPromptPump(droneId, opts.chatName);
   }
@@ -5700,14 +5842,7 @@ function getPromptEnqueueDisposition(opts: {
   const turns: any[] = Array.isArray((opts.chatEntry as any)?.turns) ? (opts.chatEntry as any).turns : [];
   const transcriptDoneIds = new Set(turns.map((t: any) => String(t?.id ?? '').trim()).filter(Boolean));
   const priorPending: any[] = Array.isArray((opts.chatEntry as any)?.pendingPrompts) ? (opts.chatEntry as any).pendingPrompts : [];
-  const sessionKnown =
-    agent.kind !== 'builtin'
-      ? true
-      : agent.id === 'codex'
-        ? Boolean(String((opts.chatEntry as any)?.codexThreadId ?? '').trim())
-        : agent.id === 'opencode'
-          ? Boolean(String((opts.chatEntry as any)?.openCodeSessionId ?? '').trim())
-          : true;
+  const sessionKnown = agent.kind !== 'builtin' ? true : hasKnownBuiltinTranscriptSession(opts.chatEntry, agent.id);
   const automationLane = getPromptAutomationLane(droneId, chatName);
   const automationLaneBusy = promptAutomationLaneBusy(automationLane, { includeQueued: true });
   const isAutomationPrompt = Boolean(opts.automation && String((opts.automation as any)?.kind ?? '').trim() === 'prompt-loop');
@@ -6580,6 +6715,10 @@ async function removeDroneRuntimeArtifacts(opts: {
     updateLiveRegistry: opts.updateLiveRegistry,
   });
 
+  if (droneRuntime(opts.droneEntry) === 'host') {
+    return { containerGone: true, removeErr: null };
+  }
+
   return await removeDroneContainerAndCleanup({
     droneId,
     containerName,
@@ -7350,6 +7489,9 @@ function resolveBuiltinTmuxCommand(agent: ChatAgentConfig['id']): string {
   if (agent === 'opencode') {
     return String(process.env.DRONE_HUB_OPENCODE_CMD ?? '').trim() || 'opencode';
   }
+  if (agent === 'pi') {
+    return String(process.env.DRONE_HUB_PI_CMD ?? '').trim() || 'pi';
+  }
   return resolveHubAgentCommand();
 }
 
@@ -7779,139 +7921,11 @@ async function ensureOpenCodeSessionId(opts: {
   });
 }
 
-function parseCodexJsonl(stdout: string): { threadId: string | null; message: string | null } {
-  let threadId: string | null = null;
-  let lastMsg: string | null = null;
-  let streamedMsg = '';
-
-  function takeText(v: any): string | null {
-    if (typeof v === 'string' && v) return v;
-    return null;
-  }
-
-  function extractItemText(item: any): string | null {
-    if (!item || typeof item !== 'object') return null;
-    const direct = takeText(item.text) ?? takeText(item.output_text);
-    if (direct) return direct;
-    const content = item.content;
-    if (!Array.isArray(content)) return null;
-    const parts: string[] = [];
-    for (const c of content) {
-      if (!c || typeof c !== 'object') continue;
-      const t = takeText((c as any).text) ?? takeText((c as any).output_text);
-      if (t) parts.push(t);
-    }
-    if (parts.length === 0) return null;
-    return parts.join('\n');
-  }
-
-  const lines = String(stdout || '')
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean);
-  for (const line of lines) {
-    let obj: any = null;
-    try {
-      obj = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (!obj || typeof obj !== 'object') continue;
-    if (obj.type === 'thread.started' && typeof obj.thread_id === 'string') {
-      threadId = obj.thread_id;
-      continue;
-    }
-    if ((obj.type === 'item.completed' || obj.type === 'item.started') && obj.item && typeof obj.item === 'object') {
-      const itemType = String(obj.item.type ?? '');
-      const text = extractItemText(obj.item);
-      if (text && (itemType === 'agent_message' || itemType === 'assistant_message')) {
-        lastMsg = text;
-      }
-      continue;
-    }
-
-    // Some Codex JSONL variants emit assistant text directly as output-text events.
-    if (obj.type === 'response.output_text.delta') {
-      const delta = takeText(obj.delta);
-      if (delta) streamedMsg += delta;
-      continue;
-    }
-    if (obj.type === 'response.output_text.done') {
-      const text = takeText(obj.text);
-      if (text) lastMsg = text;
-      continue;
-    }
-
-    const responseText = takeText(obj?.response?.output_text);
-    if (responseText) {
-      lastMsg = responseText;
-    }
-  }
-  if (!lastMsg && streamedMsg) lastMsg = streamedMsg;
-  return { threadId, message: lastMsg };
-}
-
-function formatCodexJobFailure(stdoutRaw: string, stderrRaw: string, fallbackRaw: string): string {
-  const stdout = String(stdoutRaw ?? '').trim();
-  const stderr = String(stderrRaw ?? '').trim();
-  const fallback = String(fallbackRaw ?? '').trim() || 'Codex turn failed.';
-  const merged = [stderr, stdout].filter(Boolean).join('\n');
-  if (!merged) return fallback;
-
-  const lifecycleOnlyTypes = new Set([
-    'thread.started',
-    'turn.started',
-    'turn.completed',
-    'item.started',
-    'item.completed',
-    'response.output_text.delta',
-    'response.output_text.done',
-  ]);
-  const explicitErrors: string[] = [];
-  let parsedCount = 0;
-  let nonLifecycleEventSeen = false;
-  let nonJsonLineSeen = false;
-
-  for (const lineRaw of merged.split('\n')) {
-    const line = String(lineRaw ?? '').trim();
-    if (!line) continue;
-    let obj: any = null;
-    try {
-      obj = JSON.parse(line);
-    } catch {
-      nonJsonLineSeen = true;
-      continue;
-    }
-    if (!obj || typeof obj !== 'object') continue;
-    parsedCount += 1;
-    const type = String(obj.type ?? '').trim();
-    if (!lifecycleOnlyTypes.has(type)) nonLifecycleEventSeen = true;
-    const push = (raw: any) => {
-      const text = typeof raw === 'string' ? raw.trim() : '';
-      if (!text) return;
-      if (!explicitErrors.includes(text)) explicitErrors.push(text);
-    };
-    push(obj.error);
-    push(obj.message);
-    if (obj.error && typeof obj.error === 'object') {
-      push(obj.error.message);
-    }
-    if (obj.last_error && typeof obj.last_error === 'object') {
-      push(obj.last_error.message);
-    }
-  }
-
-  if (explicitErrors.length > 0) return explicitErrors.join('\n');
-  const lifecycleOnly = parsedCount > 0 && !nonLifecycleEventSeen && !nonJsonLineSeen;
-  if (lifecycleOnly) return 'Codex turn started but exited before producing a response.';
-  return fallback;
-}
-
 async function recordTranscriptTurn(opts: {
   droneName: string;
   chatName: string;
   turn: { at: string; id?: string; prompt: string; ok: boolean; output: string; error?: string };
-  agentPatch?: Partial<{ codexThreadId: string; claudeSessionId: string; openCodeSessionId: string }>;
+  agentPatch?: Partial<{ codexThreadId: string; claudeSessionId: string; openCodeSessionId: string; piSessionId: string }>;
 }): Promise<void> {
   await updateRegistry((reg: any) => {
     const d = reg?.drones?.[opts.droneName];
@@ -7929,6 +7943,9 @@ async function recordTranscriptTurn(opts: {
     }
     if (opts.agentPatch?.openCodeSessionId) {
       chat.openCodeSessionId = opts.agentPatch.openCodeSessionId;
+    }
+    if (opts.agentPatch?.piSessionId) {
+      chat.piSessionId = opts.agentPatch.piSessionId;
     }
     d.chats[opts.chatName] = chat;
     reg.drones = reg.drones ?? {};
@@ -15422,7 +15439,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
       }
 
       // POST /api/drones/:id/chats/:chat/prompt
-      // Chat input. For builtin transcript agents (cursor/codex/claude/opencode):
+      // Chat input. For builtin transcript agents (cursor/codex/claude/opencode/pi):
       // record a clean transcript turn.
       // For custom agents: send input into a tmux session (full CLI view).
       if (
@@ -15722,14 +15739,10 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           }
 
           await reconcileChatFromDaemon({ droneId, chatName });
-          const pendingBefore = await readPendingPrompts({ droneId, chatName });
-          const pendingItemBefore = pendingBefore.find((p) => p.id === promptId) ?? null;
           const regBefore: any = await loadRegistry();
-          const turnsBefore: any[] = Array.isArray(regBefore?.drones?.[droneId]?.chats?.[chatName]?.turns)
-            ? regBefore.drones[droneId].chats[chatName].turns
-            : [];
-          const alreadyRecovered = turnsBefore.some((t: any) => String(t?.id ?? '').trim() === promptId);
-          if (!pendingItemBefore && alreadyRecovered) {
+          const entryBefore = regBefore?.drones?.[droneId]?.chats?.[chatName] ?? null;
+          const alreadyRecovered = transcriptTurnIdsFromEntry(entryBefore).has(promptId);
+          if (alreadyRecovered) {
             json(res, 200, {
               ok: true,
               id: droneId,
@@ -15742,6 +15755,8 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             });
             return;
           }
+          const pendingBefore = await readPendingPrompts({ droneId, chatName });
+          const pendingItemBefore = pendingBefore.find((p) => p.id === promptId) ?? null;
           if (!pendingItemBefore) {
             json(res, 404, { ok: false, error: `unknown pending prompt: ${promptId}` });
             return;
@@ -16428,7 +16443,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           }
           json(res, 400, {
             ok: false,
-            error: `invalid request (expected agent cursor|codex|claude|opencode|custom or model)`,
+            error: `invalid request (expected agent cursor|codex|claude|opencode|pi|custom or model)`,
           });
           return;
         } catch (e: any) {
@@ -16480,7 +16495,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           if (agent.kind === 'custom') {
             json(res, 410, {
               ok: false,
-              error: 'transcript is only available for builtin agents (cursor/codex/claude/opencode). Use /output for custom agents.',
+              error: 'transcript is only available for builtin agents (cursor/codex/claude/opencode/pi). Use /output for custom agents.',
               agent,
             });
             return;

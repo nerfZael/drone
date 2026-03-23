@@ -95,7 +95,7 @@ type CachedSourceAnalysis = {
   analyses: CandidateAnalysis[];
 };
 
-const SUPPORTED_PORTABLE_COMPATIBILITY = 'codex,claude,cursor,opencode';
+const SUPPORTED_PORTABLE_COMPATIBILITY = 'codex,claude,cursor,opencode,pi';
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
 const SKILL_SOURCE_DEFINITIONS: SkillSourceDefinition[] = [

@@ -1,4 +1,4 @@
-export type BuiltinTranscriptAgentId = 'cursor' | 'codex' | 'claude' | 'opencode';
+export type BuiltinTranscriptAgentId = 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi';
 
 export type PendingPromptState = 'queued' | 'sending' | 'sent' | 'failed';
 
@@ -67,7 +67,7 @@ export function stalePendingPromptState(opts: PendingPromptStalenessOpts): 'send
 
 /**
  * For agents whose continuation/session identifier is only discoverable after the first turn
- * completes (notably Codex thread ids and OpenCode session ids), we must avoid enqueuing
+ * completes (notably Codex thread ids, OpenCode session ids, and Pi session ids), we must avoid enqueuing
  * follow-up queued prompts that would otherwise start a brand new session.
  *
  * If a prior prompt is already enqueued/running (state: sent/sending) and the session is not
@@ -81,7 +81,7 @@ export function shouldDeferQueuedTranscriptPrompt(opts: {
 }): boolean {
   const done = opts.transcriptDoneIds ?? new Set<string>();
   const agent = opts.agentId;
-  if (agent !== 'codex' && agent !== 'opencode') return false;
+  if (agent !== 'codex' && agent !== 'opencode' && agent !== 'pi') return false;
   if (opts.sessionKnown) return false;
 
   // If any earlier prompt is already enqueued in the daemon (sent/sending) and not yet

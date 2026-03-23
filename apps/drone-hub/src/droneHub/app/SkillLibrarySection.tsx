@@ -86,7 +86,7 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
             Skill library
           </div>
           <div className="text-[11px] text-[var(--muted-dim)] mt-1 leading-relaxed">
-            Author portable `SKILL.md` packages once, then let the Hub project them into Codex, Claude, Cursor, and OpenCode.
+            Author portable `SKILL.md` packages once, then let the Hub project them into Codex, Claude, Cursor, OpenCode, and Pi-compatible skill roots.
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -188,7 +188,7 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
             <div className="min-w-0">
               <div className="text-[13px] font-semibold text-[var(--fg)] truncate">{draft.id ? draft.name || 'Untitled skill' : 'New skill draft'}</div>
               <div className="text-[10px] text-[var(--muted-dim)] mt-1">
-                Projects to `.agents/skills`, `.claude/skills`, `.cursor/skills`, and `.opencode/skills`.
+                Projects to `.agents/skills` (shared by Codex and Pi), `.claude/skills`, `.cursor/skills`, and `.opencode/skills`.
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -223,7 +223,7 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
             </label>
             <label className="flex flex-col gap-1">
               <span className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Compatibility</span>
-              <input value={draft.compatibility} onChange={(e) => updateDraftField('compatibility', e.target.value)} className={inputClassName()} placeholder="codex,claude,cursor,opencode" />
+              <input value={draft.compatibility} onChange={(e) => updateDraftField('compatibility', e.target.value)} className={inputClassName()} placeholder="codex,claude,cursor,opencode,pi" />
             </label>
           </div>
 

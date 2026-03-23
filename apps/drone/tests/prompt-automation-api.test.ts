@@ -240,6 +240,72 @@ describeSocketSuite('prompt automation api', () => {
     expect(String(mockPromptJobs.get(promptId)?.state ?? '')).toBe('canceled');
   });
 
+  test('stop endpoint ignores recently completed prompts that already exist in the transcript', async () => {
+    const droneId = 'drone-stop-completed-response';
+    const promptId = 'completed-prompt';
+    const now = new Date().toISOString();
+    await updateRegistry((reg: any) => {
+      reg.drones = reg.drones ?? {};
+      reg.drones[droneId] = {
+        id: droneId,
+        name: droneId,
+        hostPort: mockDaemon?.port ?? 1,
+        token: 'mock-token',
+        containerPort: 7777,
+        repoPath: '',
+        createdAt: now,
+        chats: {
+          default: {
+            createdAt: now,
+            agent: { kind: 'builtin', id: 'cursor' },
+            turns: [
+              {
+                id: promptId,
+                at: now,
+                promptAt: now,
+                completedAt: now,
+                prompt: 'already finished',
+                ok: true,
+                output: 'done',
+              },
+            ],
+            pendingPrompts: [
+              {
+                id: promptId,
+                at: now,
+                updatedAt: now,
+                prompt: 'already finished',
+                state: 'sent',
+              },
+            ],
+          },
+        },
+      };
+    });
+
+    const stopped = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/stop`, {
+      method: 'POST',
+    });
+    expect(stopped.r.status).toBe(200);
+    expect(Boolean(stopped.data?.stopped)).toBe(false);
+    expect(stopped.data?.stoppedPromptIds).toEqual([]);
+    expect(stopped.data?.clearedPromptIds).toEqual([]);
+
+    const pending = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    expect(pending.r.status).toBe(200);
+    const pendingRows = Array.isArray(pending.data?.pending) ? pending.data.pending : [];
+    expect(pendingRows).toHaveLength(1);
+    expect(String(pendingRows[0]?.state ?? '')).toBe('sent');
+    expect(String(pendingRows[0]?.error ?? '')).toBe('');
+
+    const transcript = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/transcript?turn=all`);
+    expect(transcript.r.status).toBe(200);
+    const transcriptRows = Array.isArray(transcript.data?.transcripts) ? transcript.data.transcripts : [];
+    expect(transcriptRows).toHaveLength(1);
+    expect(String(transcriptRows[0]?.id ?? '')).toBe(promptId);
+    expect(String(transcriptRows[0]?.output ?? '')).toBe('done');
+  });
+
   test('automation stop all cancels an active automation transcript run', async () => {
     const droneId = 'drone-stop-active-automation-response';
     const now = new Date().toISOString();

@@ -385,7 +385,7 @@ describe('skill source import', () => {
       );
 
       expect(imported.slug).toBe('portable-review');
-      expect(imported.compatibility).toBe('codex,claude,cursor,opencode');
+      expect(imported.compatibility).toBe('codex,claude,cursor,opencode,pi');
       expect(imported.markdownBody).toContain('summarize risk');
       expect(imported.files.map((file) => file.path)).toEqual(['references/checklist.md', 'scripts/check.sh']);
       expect(imported.overlays?.codex?.openaiYaml).toContain('tools:');

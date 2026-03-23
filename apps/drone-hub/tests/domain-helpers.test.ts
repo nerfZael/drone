@@ -82,6 +82,13 @@ describe('drone hub domain helpers', () => {
     });
     expect(opencode.agent).toEqual({ kind: 'builtin', id: 'opencode' });
 
+    const pi = normalizeChatInfoPayload({
+      name: 'auth-drone',
+      chat: 'default',
+      agent: { kind: 'builtin', id: 'pi-agent' },
+    });
+    expect(pi.agent).toEqual({ kind: 'builtin', id: 'pi' });
+
     const inferred = normalizeChatInfoPayload({
       name: 'auth-drone',
       chat: 'default',
@@ -102,6 +109,13 @@ describe('drone hub domain helpers', () => {
       openCodeSessionId: 'sess-123',
     });
     expect(inferredOpenCode.agent).toEqual({ kind: 'builtin', id: 'opencode' });
+
+    const inferredPi = normalizeChatInfoPayload({
+      name: 'auth-drone',
+      chat: 'default',
+      piSessionId: '550e8400-e29b-41d4-a716-446655440000',
+    });
+    expect(inferredPi.agent).toEqual({ kind: 'builtin', id: 'pi' });
   });
 
   test('formats relative time in readable UI buckets', () => {

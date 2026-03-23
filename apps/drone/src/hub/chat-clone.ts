@@ -31,6 +31,7 @@ function builtinChatNeedsTranscriptBootstrap(agentId: BuiltinTranscriptAgentId, 
   if (agentId === 'codex') return !String(entry?.codexThreadId ?? '').trim();
   if (agentId === 'claude') return !String(entry?.claudeSessionId ?? '').trim();
   if (agentId === 'opencode') return !String(entry?.openCodeSessionId ?? '').trim();
+  if (agentId === 'pi') return !String(entry?.piSessionId ?? '').trim();
   return false;
 }
 

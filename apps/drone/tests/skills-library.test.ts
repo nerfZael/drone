@@ -112,12 +112,12 @@ describe('skills library registry CRUD', () => {
         name: 'PR Review',
         slug: 'pr-review',
         description: 'Review PR changes before shipping.',
-        compatibility: 'codex,claude,cursor,opencode',
+        compatibility: 'codex,claude,cursor,opencode,pi',
         markdownBody: 'Start with failing tests.',
       });
 
       expect(updated.slug).toBe('pr-review');
-      expect(updated.compatibility).toBe('codex,claude,cursor,opencode');
+      expect(updated.compatibility).toBe('codex,claude,cursor,opencode,pi');
       expect(updated.markdownBody).toBe('Start with failing tests.');
 
       const deleted = await deleteSkillRecord(created.id);

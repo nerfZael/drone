@@ -51,7 +51,8 @@ export type CreateDroneAgentInput =
   | 'codex'
   | 'claude'
   | 'opencode'
-  | { kind: 'builtin'; id: 'cursor' | 'codex' | 'claude' | 'opencode' }
+  | 'pi'
+  | { kind: 'builtin'; id: 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi' }
   | { kind: 'custom'; id: string; label: string; command: string };
 
 export type CreateDroneBatchItem = CreateDroneInput & {

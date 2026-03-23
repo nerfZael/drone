@@ -105,7 +105,7 @@ export function CustomAgentsModal({
               />
             </label>
             <div className="text-[10px] text-[var(--muted-dim)]">
-              Custom agents always use CLI mode (full tmux output). Built-in Cursor, Codex, Claude Code, and OpenCode use transcript mode by default.
+              Custom agents always use CLI mode (full tmux output). Built-in Cursor, Codex, Claude Code, OpenCode, and Pi use transcript mode by default.
             </div>
           </div>
         </div>
