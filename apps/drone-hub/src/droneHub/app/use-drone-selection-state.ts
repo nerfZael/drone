@@ -26,9 +26,11 @@ type UseDroneSelectionStateArgs = {
   selectedChat: string;
   fleetDashboardOpen: boolean;
   kanbanBoardOpen: boolean;
+  playbookRunsOpen: boolean;
   draftChat: { prompt: unknown | null } | null;
   drones: DroneSummary[];
   dronesFilteredByRepo: DroneSummary[];
+  visibleDronesFilteredByRepo: DroneSummary[];
   startupSeedByDrone: Record<string, StartupSeedState>;
   selectionAnchorRef: React.MutableRefObject<string | null>;
   preferredSelectedDroneRef: React.MutableRefObject<string | null>;
@@ -45,6 +47,7 @@ type UseDroneSelectionStateArgs = {
   setSelectedDroneIds: React.Dispatch<React.SetStateAction<string[]>>;
   setSelectedGroupMultiChat: React.Dispatch<React.SetStateAction<string | null>>;
   setKanbanBoardOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  setPlaybookRunsOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setSelectedChat: React.Dispatch<React.SetStateAction<string>>;
 };
 
@@ -55,9 +58,11 @@ export function useDroneSelectionState({
   selectedChat,
   fleetDashboardOpen,
   kanbanBoardOpen,
+  playbookRunsOpen,
   draftChat,
   drones,
   dronesFilteredByRepo,
+  visibleDronesFilteredByRepo,
   startupSeedByDrone,
   selectionAnchorRef,
   preferredSelectedDroneRef,
@@ -74,6 +79,7 @@ export function useDroneSelectionState({
   setSelectedDroneIds,
   setSelectedGroupMultiChat,
   setKanbanBoardOpen,
+  setPlaybookRunsOpen,
   setSelectedChat,
 }: UseDroneSelectionStateArgs) {
   const lastSelectedChatByDroneRef = React.useRef<Record<string, string>>({});
@@ -106,6 +112,7 @@ export function useDroneSelectionState({
       setFleetDashboardOpen(false);
       setSelectedGroupMultiChat(null);
       setKanbanBoardOpen(false);
+      setPlaybookRunsOpen(false);
       setDraftChat(null);
       setDraftCreateOpen(false);
       setDraftCreateError(null);
@@ -160,6 +167,7 @@ export function useDroneSelectionState({
       setSelectedDrone,
       setSelectedDroneIds,
       setSelectedGroupMultiChat,
+      setPlaybookRunsOpen,
     ],
   );
 
@@ -175,7 +183,7 @@ export function useDroneSelectionState({
   );
 
   React.useEffect(() => {
-    const valid = new Set(dronesFilteredByRepo.map((d) => d.id));
+    const valid = new Set(visibleDronesFilteredByRepo.map((d) => d.id));
     setSelectedDroneIds((prev) => {
       const next = prev.filter((id) => valid.has(id));
       if (selectedDrone && valid.has(selectedDrone) && !next.includes(selectedDrone)) {
@@ -184,7 +192,7 @@ export function useDroneSelectionState({
       if (next.length === prev.length && next.every((id, idx) => id === prev[idx])) return prev;
       return next;
     });
-  }, [selectedDrone, setSelectedDroneIds, dronesFilteredByRepo]);
+  }, [selectedDrone, setSelectedDroneIds, visibleDronesFilteredByRepo]);
 
   // Auto-select first drone (and recover from deletions).
   React.useEffect(() => {
@@ -204,6 +212,14 @@ export function useDroneSelectionState({
       preferredSelectedDroneHoldUntilRef.current = 0;
       return;
     }
+    if (playbookRunsOpen) {
+      if (selectedDrone) setSelectedDrone(null);
+      setSelectedDroneIds((prev) => (prev.length === 0 ? prev : []));
+      selectionAnchorRef.current = null;
+      preferredSelectedDroneRef.current = null;
+      preferredSelectedDroneHoldUntilRef.current = 0;
+      return;
+    }
     if (draftChat) {
       if (!draftChat.prompt) {
         if (selectedDrone) setSelectedDrone(null);
@@ -214,7 +230,9 @@ export function useDroneSelectionState({
       }
       return;
     }
-    if (dronesFilteredByRepo.length === 0) {
+    const selectedExistsInRepo = Boolean(selectedDrone && dronesFilteredByRepo.some((d) => d.id === selectedDrone));
+    if (visibleDronesFilteredByRepo.length === 0) {
+      if (selectedExistsInRepo) return;
       if (selectedDrone) setSelectedDrone(null);
       setSelectedDroneIds((prev) => (prev.length === 0 ? prev : []));
       resetGroupDndState();
@@ -226,7 +244,7 @@ export function useDroneSelectionState({
     }
     const preferred = preferredSelectedDroneRef.current;
     if (preferred) {
-      const preferredExists = dronesFilteredByRepo.some((d) => d.id === preferred);
+      const preferredExists = visibleDronesFilteredByRepo.some((d) => d.id === preferred);
       if (preferredExists) {
         if (selectedDrone !== preferred) {
           setSelectedDrone(preferred);
@@ -243,12 +261,12 @@ export function useDroneSelectionState({
       if (!holdActive && !isStartupSeedFresh(seed)) {
         preferredSelectedDroneRef.current = null;
         preferredSelectedDroneHoldUntilRef.current = 0;
-      } else if (!selectedDrone || !dronesFilteredByRepo.some((d) => d.id === selectedDrone)) {
+      } else if (!selectedExistsInRepo) {
         return;
       }
     }
-    if (!selectedDrone || !dronesFilteredByRepo.some((d) => d.id === selectedDrone)) {
-      const first = dronesFilteredByRepo[0].id;
+    if (!selectedExistsInRepo) {
+      const first = visibleDronesFilteredByRepo[0].id;
       setSelectedDrone(first);
       setSelectedDroneIds((prev) => (prev.length === 1 && prev[0] === first ? prev : [first]));
       selectionAnchorRef.current = first;
@@ -258,7 +276,9 @@ export function useDroneSelectionState({
     draftChat,
     fleetDashboardOpen,
     dronesFilteredByRepo,
+    visibleDronesFilteredByRepo,
     kanbanBoardOpen,
+    playbookRunsOpen,
     preferredSelectedDroneHoldUntilRef,
     preferredSelectedDroneRef,
     resolveChatForDrone,

@@ -1,4 +1,4 @@
-export type SettingsTabId = 'general' | 'trash' | 'archive' | 'shortcuts' | 'automations' | 'skills' | 'system';
+export type SettingsTabId = 'general' | 'trash' | 'archive' | 'shortcuts' | 'automations' | 'playbooks' | 'skills' | 'system';
 
 export const SETTINGS_TABS: Array<{
   id: SettingsTabId;
@@ -35,6 +35,12 @@ export const SETTINGS_TABS: Array<{
     label: 'Automations',
     title: 'Automation jobs',
     description: 'Manage reusable prompt loops that can be launched from chat.',
+  },
+  {
+    id: 'playbooks',
+    label: 'Playbooks',
+    title: 'Playbook runs',
+    description: 'Manage reusable repo-scoped message sequences and follow-up action buttons.',
   },
   {
     id: 'skills',

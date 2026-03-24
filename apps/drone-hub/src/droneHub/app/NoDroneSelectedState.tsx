@@ -1,7 +1,7 @@
 import React from 'react';
 import { EmptyState } from '../chat';
 import { FleetDashboard, type NoDroneSelectedStateProps } from './FleetDashboard';
-import { IconBoard, IconDrone, IconPlus, IconPlusDouble } from './icons';
+import { IconBoard, IconDrone, IconList, IconPlus, IconPlusDouble } from './icons';
 
 export function NoDroneSelectedState({
   dronesLoading,
@@ -10,6 +10,7 @@ export function NoDroneSelectedState({
   onOpenDraftChatComposer,
   onOpenCreateModal,
   onOpenKanbanBoard,
+  onOpenPlaybookRuns,
   ...fleetDashboardProps
 }: NoDroneSelectedStateProps) {
   const showNoDronesEmptyState = !dronesLoading && sidebarDroneCount === 0 && !dronesError;
@@ -58,11 +59,23 @@ export function NoDroneSelectedState({
                 Open task board
               </span>
             </button>
+            <button
+              type="button"
+              onClick={onOpenPlaybookRuns}
+              className="w-full inline-flex items-center gap-2 h-[32px] px-3 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[11px] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] transition-all"
+              title="Open playbook runs"
+              aria-label="Open playbook runs"
+            >
+              <IconList className="opacity-80" />
+              <span className="font-semibold tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+                Open playbook runs
+              </span>
+            </button>
           </div>
         }
       />
     );
   }
 
-  return <FleetDashboard {...fleetDashboardProps} dronesLoading={dronesLoading} sidebarDroneCount={sidebarDroneCount} dronesError={dronesError} onOpenDraftChatComposer={onOpenDraftChatComposer} onOpenCreateModal={onOpenCreateModal} onOpenKanbanBoard={onOpenKanbanBoard} />;
+  return <FleetDashboard {...fleetDashboardProps} dronesLoading={dronesLoading} sidebarDroneCount={sidebarDroneCount} dronesError={dronesError} onOpenDraftChatComposer={onOpenDraftChatComposer} onOpenCreateModal={onOpenCreateModal} onOpenKanbanBoard={onOpenKanbanBoard} onOpenPlaybookRuns={onOpenPlaybookRuns} />;
 }

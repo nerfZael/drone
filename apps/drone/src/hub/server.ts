@@ -2090,8 +2090,253 @@ type TranscriptTurn = {
 
 type PendingPhase = 'starting' | 'creating' | 'seeding' | 'error';
 
+type PlaybookDefinition = {
+  id: string;
+  label: string;
+  messages: string[];
+  artifacts: string[];
+  actions: Array<{
+    id: string;
+    label: string;
+    message: string;
+  }>;
+  createdAt: string;
+  updatedAt?: string;
+};
+
+type PlaybookRunStatus = 'starting' | 'running' | 'completed' | 'failed';
+
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+const PLAYBOOK_LABEL_MAX_CHARS = 72;
+const PLAYBOOK_ACTION_LABEL_MAX_CHARS = 40;
+const PLAYBOOK_MESSAGE_MAX_CHARS = 8_000;
+const PLAYBOOK_MAX_MESSAGES = 20;
+const PLAYBOOK_MAX_ACTIONS = 12;
+const PLAYBOOK_MAX_ITEMS = 60;
+
+function normalizeDroneEntryKind(raw: unknown): 'standard' | 'playbook-run' {
+  return String(raw ?? '').trim().toLowerCase() === 'playbook-run' ? 'playbook-run' : 'standard';
+}
+
+function normalizeDroneEntryVisibility(raw: unknown): 'visible' | 'hidden' {
+  return String(raw ?? '').trim().toLowerCase() === 'hidden' ? 'hidden' : 'visible';
+}
+
+function playbookMetaFromEntry(raw: unknown):
+  | {
+      id: string;
+      label: string;
+      messageCount: number;
+      chatName: string;
+      artifacts: string[];
+      actions: Array<{ id: string; label: string; message: string }>;
+    }
+  | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const id = String((raw as any).id ?? '').trim();
+  if (!id) return null;
+  const label = String((raw as any).label ?? '').trim() || id;
+  const messageCountRaw = Number((raw as any).messageCount);
+  const messageCount = Number.isFinite(messageCountRaw) && messageCountRaw > 0 ? Math.floor(messageCountRaw) : 1;
+  const chatName = normalizeChatName((raw as any).chatName ?? 'default');
+  const artifacts = normalizePlaybookArtifacts((raw as any).artifacts);
+  const actions = normalizePlaybookActions((raw as any).actions);
+  return { id, label, messageCount, chatName, artifacts, actions };
+}
+
+function normalizePlaybookLabel(raw: unknown): string {
+  return String(raw ?? '').replace(/\s+/g, ' ').trim().slice(0, PLAYBOOK_LABEL_MAX_CHARS);
+}
+
+function normalizePlaybookMessages(raw: unknown): string[] {
+  const list = Array.isArray(raw) ? raw : [];
+  const out: string[] = [];
+  for (const item of list) {
+    const message = String(item ?? '').slice(0, PLAYBOOK_MESSAGE_MAX_CHARS);
+    if (!message.trim()) continue;
+    out.push(message);
+    if (out.length >= PLAYBOOK_MAX_MESSAGES) break;
+  }
+  return out;
+}
+
+function normalizePlaybookArtifacts(raw: unknown): string[] {
+  const list = Array.isArray(raw) ? raw : [];
+  const out: string[] = [];
+  for (const item of list) {
+    const artifact = String(item ?? '')
+      .trim()
+      .replace(/\\/g, '/')
+      .replace(/^\.\/+/, '')
+      .replace(/^\/+/, '')
+      .slice(0, PLAYBOOK_MESSAGE_MAX_CHARS);
+    if (!artifact) continue;
+    out.push(artifact);
+    if (out.length >= PLAYBOOK_MAX_ITEMS) break;
+  }
+  return out;
+}
+
+function normalizePlaybookActions(raw: unknown): Array<{ id: string; label: string; message: string }> {
+  const list = Array.isArray(raw) ? raw : [];
+  const out: Array<{ id: string; label: string; message: string }> = [];
+  for (const item of list) {
+    if (!item || typeof item !== 'object') continue;
+    const id = String((item as any).id ?? '').trim() || crypto.randomUUID();
+    const label = String((item as any).label ?? '').replace(/\s+/g, ' ').trim().slice(0, PLAYBOOK_ACTION_LABEL_MAX_CHARS);
+    const message = String((item as any).message ?? '').slice(0, PLAYBOOK_MESSAGE_MAX_CHARS);
+    if (!label || !message.trim()) continue;
+    out.push({ id, label, message });
+    if (out.length >= PLAYBOOK_MAX_ACTIONS) break;
+  }
+  return out;
+}
+
+function normalizePlaybookDefinitions(regAny: any): PlaybookDefinition[] {
+  const out: PlaybookDefinition[] = [];
+  const seen = new Set<string>();
+  for (const [key, raw] of Object.entries(regAny?.playbooks ?? {})) {
+    if (!raw || typeof raw !== 'object') continue;
+    const id = String((raw as any).id ?? key).trim();
+    if (!id || seen.has(id)) continue;
+    const label = normalizePlaybookLabel((raw as any).label ?? '');
+    const messages = normalizePlaybookMessages((raw as any).messages);
+    const artifacts = normalizePlaybookArtifacts((raw as any).artifacts);
+    const actions = normalizePlaybookActions((raw as any).actions);
+    seen.add(id);
+    out.push({
+      id,
+      label,
+      messages,
+      artifacts,
+      actions,
+      createdAt: typeof (raw as any).createdAt === 'string' && String((raw as any).createdAt).trim() ? String((raw as any).createdAt) : nowIso(),
+      updatedAt:
+        typeof (raw as any).updatedAt === 'string' && String((raw as any).updatedAt).trim() ? String((raw as any).updatedAt) : undefined,
+    });
+    if (out.length >= PLAYBOOK_MAX_ITEMS) break;
+  }
+  return out.sort((a, b) => {
+    const aMs = Date.parse(a.updatedAt ?? a.createdAt);
+    const bMs = Date.parse(b.updatedAt ?? b.createdAt);
+    if (Number.isFinite(aMs) && Number.isFinite(bMs) && aMs !== bMs) return bMs - aMs;
+    return a.label.localeCompare(b.label) || a.id.localeCompare(b.id);
+  });
+}
+
+function lastTranscriptTurnFromEntry(entry: any): any | null {
+  const turns = Array.isArray(entry?.turns) ? entry.turns : [];
+  return turns.length > 0 ? turns[turns.length - 1] ?? null : null;
+}
+
+function parseIsoOrZero(raw: unknown): number {
+  const ms = Date.parse(String(raw ?? '').trim());
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function summarizePlaybookRunEntry(args: {
+  droneId: string;
+  name: string;
+  createdAt: string;
+  repoPath: string;
+  runtime: DroneRuntime;
+  playbook: {
+    id: string;
+    label: string;
+    messageCount: number;
+    chatName: string;
+    artifacts: string[];
+    actions: Array<{ id: string; label: string; message: string }>;
+  };
+  pendingEntry?: any | null;
+  droneEntry?: any | null;
+}): {
+  id: string;
+  droneId: string;
+  droneName: string;
+  playbookId: string;
+  playbookLabel: string;
+  chatName: string;
+  repoPath: string;
+  runtime: DroneRuntime;
+  visibility: 'hidden' | 'visible';
+  kind: 'playbook-run';
+  status: PlaybookRunStatus;
+  createdAt: string;
+  updatedAt: string;
+  lastMessage: string;
+  artifacts: string[];
+  actions: Array<{ id: string; label: string; message: string }>;
+  pendingCount: number;
+  failedCount: number;
+  runsCompleted: number;
+  statusError: string | null;
+} {
+  const pendingEntry = args.pendingEntry ?? null;
+  const droneEntry = args.droneEntry ?? null;
+  const playbook = args.playbook;
+  const chatName = playbook.chatName || 'default';
+  const chatEntry = droneEntry?.chats?.[chatName] ?? null;
+  const pendingPrompts = pendingEntry
+    ? normalizePendingStartupPrompts(pendingEntry.startupQueuedPrompts, chatName).map(startupPromptToPendingPrompt)
+    : pendingPromptsFromChatEntry(chatEntry, { keepRecentlyCompleted: true });
+  const failedCount = pendingPrompts.filter((item) => item.state === 'failed').length;
+  const activePendingCount = pendingPrompts.filter((item) => item.state !== 'failed').length;
+  const lastTurn = lastTranscriptTurnFromEntry(chatEntry);
+  const lastMessage = String(lastTurn?.output ?? '').trim();
+  const statusError =
+    typeof pendingEntry?.error === 'string' && pendingEntry.error.trim()
+      ? pendingEntry.error.trim()
+      : typeof droneEntry?.hub?.message === 'string' && String(droneEntry.hub.message).trim()
+        ? String(droneEntry.hub.message).trim()
+        : failedCount > 0
+          ? String(pendingPrompts.find((item) => item.state === 'failed')?.error ?? '').trim() || 'One or more playbook prompts failed.'
+          : null;
+  let status: PlaybookRunStatus = 'starting';
+  if (pendingEntry) {
+    status = String(pendingEntry.phase ?? '').trim() === 'error' ? 'failed' : 'starting';
+  } else if (String(droneEntry?.hub?.phase ?? '').trim() === 'error' || failedCount > 0) {
+    status = 'failed';
+  } else if (String(droneEntry?.hub?.phase ?? '').trim() === 'starting' || String(droneEntry?.hub?.phase ?? '').trim() === 'seeding' || String(droneEntry?.hub?.phase ?? '').trim() === 'creating') {
+    status = 'starting';
+  } else if (activePendingCount > 0 || Boolean(busyChatNamesForDrone(droneEntry, args.droneId).length > 0)) {
+    status = 'running';
+  } else if (lastTurn) {
+    status = 'completed';
+  }
+  const updatedAtMs = Math.max(
+    parseIsoOrZero(pendingEntry?.updatedAt),
+    parseIsoOrZero(droneEntry?.hub?.updatedAt),
+    parseIsoOrZero(lastTurn?.completedAt),
+    parseIsoOrZero(lastTurn?.promptAt),
+    parseIsoOrZero(lastTurn?.at),
+    ...pendingPrompts.map((item) => parseIsoOrZero(item.updatedAt ?? item.at)),
+  );
+  return {
+    id: args.droneId,
+    droneId: args.droneId,
+    droneName: args.name,
+    playbookId: playbook.id,
+    playbookLabel: playbook.label,
+    chatName,
+    repoPath: args.repoPath,
+    runtime: args.runtime,
+    visibility: 'hidden',
+    kind: 'playbook-run',
+    status,
+    createdAt: args.createdAt,
+    updatedAt: updatedAtMs > 0 ? new Date(updatedAtMs).toISOString() : args.createdAt,
+    lastMessage: lastMessage || (statusError ?? ''),
+    artifacts: playbook.artifacts,
+    actions: playbook.actions,
+    pendingCount: activePendingCount,
+    failedCount,
+    runsCompleted: Array.isArray(chatEntry?.turns) ? chatEntry.turns.length : 0,
+    statusError: status === 'failed' ? statusError : null,
+  };
 }
 
 function normalizeDroneIdentity(raw: unknown): string {
@@ -6157,10 +6402,17 @@ async function provisionDroneFromPending(name: string) {
       const pendingLatest = regLatest?.pending?.[name] ?? null;
       const fleetMeta = pendingLatest?.fleet && typeof pendingLatest.fleet === 'object' ? pendingLatest.fleet : null;
       const environment = pendingLatest?.environment ?? null;
+      const pendingKind = normalizeDroneEntryKind(pendingLatest?.kind);
+      const pendingVisibility = normalizeDroneEntryVisibility(pendingLatest?.visibility);
+      const pendingPlaybook = playbookMetaFromEntry(pendingLatest?.playbook);
       const cloneSourceLatest = cloneFrom ? findDroneEntryByIdentity(regLatest, cloneFrom)?.entry : null;
       const found = findDroneEntryByIdentity(regLatest, pendingDroneId);
       if (!found) return;
       const d = found.entry;
+      d.kind = pendingKind;
+      d.visibility = pendingVisibility;
+      if (pendingPlaybook) d.playbook = pendingPlaybook;
+      else delete d.playbook;
       if (fleetMeta) {
         const current = fleetActorConfig(d);
         setFleetActorConfig(d, {
@@ -9444,6 +9696,293 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         return;
       }
 
+      // GET /api/playbooks
+      if (method === 'GET' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'playbooks') {
+        const regAny: any = await loadRegistry();
+        json(res, 200, { ok: true, playbooks: normalizePlaybookDefinitions(regAny) });
+        return;
+      }
+
+      // POST /api/playbooks
+      if (method === 'POST' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'playbooks') {
+        let body: any = null;
+        try {
+          body = await readJsonBody(req);
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          return;
+        }
+        const label = normalizePlaybookLabel(body?.label ?? '');
+        const messages = normalizePlaybookMessages(body?.messages);
+        const artifacts = normalizePlaybookArtifacts(body?.artifacts);
+        const actions = normalizePlaybookActions(body?.actions);
+        if (!label) {
+          json(res, 400, { ok: false, error: 'missing label' });
+          return;
+        }
+        if (messages.length === 0) {
+          json(res, 400, { ok: false, error: 'add at least one message' });
+          return;
+        }
+        const id = crypto.randomUUID();
+        const at = nowIso();
+        await updateRegistry((regAny: any) => {
+          regAny.playbooks = regAny.playbooks ?? {};
+          regAny.playbooks[id] = {
+            id,
+            label,
+            messages,
+            artifacts,
+            actions,
+            createdAt: at,
+            updatedAt: at,
+          };
+        });
+        const regAny: any = await loadRegistry();
+        json(res, 201, { ok: true, playbook: normalizePlaybookDefinitions(regAny).find((item) => item.id === id) ?? null });
+        return;
+      }
+
+      // DELETE /api/playbooks
+      if (method === 'DELETE' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'playbooks') {
+        await updateRegistry((regAny: any) => {
+          regAny.playbooks = {};
+        });
+        json(res, 200, { ok: true });
+        return;
+      }
+
+      // POST /api/playbooks/:id
+      if (method === 'POST' && parts.length === 3 && parts[0] === 'api' && parts[1] === 'playbooks') {
+        const playbookId = String(decodeURIComponent(parts[2] ?? '')).trim();
+        if (!playbookId) {
+          json(res, 400, { ok: false, error: 'missing playbook id' });
+          return;
+        }
+        let body: any = null;
+        try {
+          body = await readJsonBody(req);
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          return;
+        }
+        const label = normalizePlaybookLabel(body?.label ?? '');
+        const messages = normalizePlaybookMessages(body?.messages);
+        const artifacts = normalizePlaybookArtifacts(body?.artifacts);
+        const actions = normalizePlaybookActions(body?.actions);
+        if (!label) {
+          json(res, 400, { ok: false, error: 'missing label' });
+          return;
+        }
+        if (messages.length === 0) {
+          json(res, 400, { ok: false, error: 'add at least one message' });
+          return;
+        }
+        const result = await updateRegistry((regAny: any) => {
+          const current = regAny?.playbooks?.[playbookId] ?? null;
+          if (!current) return { ok: false as const, status: 404 as const, error: `unknown playbook: ${playbookId}` };
+          const createdAt = typeof current.createdAt === 'string' && current.createdAt.trim() ? String(current.createdAt) : nowIso();
+          regAny.playbooks = regAny.playbooks ?? {};
+          regAny.playbooks[playbookId] = {
+            id: playbookId,
+            label,
+            messages,
+            artifacts,
+            actions,
+            createdAt,
+            updatedAt: nowIso(),
+          };
+          return { ok: true as const };
+        });
+        if (!result.ok) {
+          json(res, result.status ?? 500, { ok: false, error: result.error ?? 'failed updating playbook' });
+          return;
+        }
+        const regAny: any = await loadRegistry();
+        json(res, 200, { ok: true, playbook: normalizePlaybookDefinitions(regAny).find((item) => item.id === playbookId) ?? null });
+        return;
+      }
+
+      // DELETE /api/playbooks/:id
+      if (method === 'DELETE' && parts.length === 3 && parts[0] === 'api' && parts[1] === 'playbooks') {
+        const playbookId = String(decodeURIComponent(parts[2] ?? '')).trim();
+        if (!playbookId) {
+          json(res, 400, { ok: false, error: 'missing playbook id' });
+          return;
+        }
+        const removed = await updateRegistry((regAny: any) => {
+          if (!regAny?.playbooks?.[playbookId]) return false;
+          delete regAny.playbooks[playbookId];
+          return true;
+        });
+        if (!removed) {
+          json(res, 404, { ok: false, error: `unknown playbook: ${playbookId}` });
+          return;
+        }
+        json(res, 200, { ok: true, id: playbookId });
+        return;
+      }
+
+      // POST /api/playbooks/:id/run
+      if (method === 'POST' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'playbooks' && parts[3] === 'run') {
+        const playbookId = String(decodeURIComponent(parts[2] ?? '')).trim();
+        if (!playbookId) {
+          json(res, 400, { ok: false, error: 'missing playbook id' });
+          return;
+        }
+        let body: any = null;
+        try {
+          body = await readJsonBody(req);
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          return;
+        }
+        let repoPath = typeof body?.repoPath === 'string' ? body.repoPath.trim() : '';
+        if (!repoPath) {
+          json(res, 400, { ok: false, error: 'missing repoPath' });
+          return;
+        }
+        if (!path.isAbsolute(repoPath)) {
+          json(res, 400, { ok: false, error: 'invalid repoPath (expected absolute path)' });
+          return;
+        }
+        const pullHostBranchBeforeCreate = parsePullHostBranchBeforeCreate(body?.pullHostBranchBeforeCreate);
+        if (pullHostBranchBeforeCreate) {
+          try {
+            const pulled = await gitPullHostBranchBeforeCreate(repoPath);
+            repoPath = pulled.repoRoot;
+          } catch (e: any) {
+            const pullError = formatPullHostBranchBeforeCreateError(e);
+            json(res, pullError.status, {
+              ok: false,
+              error: `Failed to pull host branch before launching playbook: ${pullError.message}`,
+              code: 'host_branch_pull_before_playbook_run_failed',
+              reason: pullError.reason,
+            });
+            return;
+          }
+        }
+        const droneCli = resolveDroneCliPath();
+        if (!(await fileExists(droneCli))) {
+          json(res, 500, { ok: false, error: `drone CLI not found at ${droneCli}` });
+          return;
+        }
+        const regAny: any = await loadRegistry();
+        const playbook = normalizePlaybookDefinitions(regAny).find((item) => item.id === playbookId) ?? null;
+        if (!playbook) {
+          json(res, 404, { ok: false, error: `unknown playbook: ${playbookId}` });
+          return;
+        }
+        if (playbook.messages.length === 0) {
+          json(res, 409, { ok: false, error: 'playbook has no messages' });
+          return;
+        }
+        const droneId = makeDroneIdentity();
+        const name = allocateUntitledDisplayName(regAny);
+        const at = nowIso();
+        const runtime: DroneRuntime = 'container';
+        const containerPort = 7777;
+        const createdEnvironment = deriveCreatedDroneEnvironmentConfig(regAny, { repoPath, runtime });
+        const startupQueuedPrompts = playbook.messages.map((prompt, index) => ({
+          id: `${droneId.replace(/[^A-Za-z0-9._-]+/g, '').slice(0, 24)}-${String(index + 1).padStart(2, '0')}`,
+          chatName: 'default',
+          at,
+          prompt,
+          state: 'queued' as const,
+          updatedAt: at,
+        }));
+        await updateRegistry((regLatest: any) => {
+          regLatest.pending = regLatest.pending ?? {};
+          regLatest.pending[droneId] = {
+            id: droneId,
+            name,
+            kind: 'playbook-run',
+            visibility: 'hidden',
+            playbook: {
+              id: playbook.id,
+              label: playbook.label,
+              messageCount: playbook.messages.length,
+              chatName: 'default',
+              artifacts: playbook.artifacts,
+              actions: playbook.actions,
+            },
+            repoPath,
+            runtime,
+            containerPort,
+            build: false,
+            createdAt: at,
+            updatedAt: at,
+            phase: 'starting',
+            message: `Launching ${playbook.label}…`,
+            environment: createdEnvironment,
+            startupQueuedPrompts,
+          };
+        });
+        enqueueProvisioning(droneId);
+        json(res, 202, {
+          ok: true,
+          droneId,
+          playbookId: playbook.id,
+          playbookLabel: playbook.label,
+          chatName: 'default',
+          repoPath,
+          phase: 'starting',
+        });
+        return;
+      }
+
+      // GET /api/playbook-runs
+      if (method === 'GET' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'playbook-runs') {
+        const repoPath = u.searchParams.has('repoPath') ? String(u.searchParams.get('repoPath') ?? '').trim() : '';
+        const regAny: any = await loadRegistry();
+        const byId = new Map<string, ReturnType<typeof summarizePlaybookRunEntry>>();
+        for (const [rawId, pendingEntry] of Object.entries(regAny?.pending ?? {})) {
+          const droneId = normalizeDroneIdentity((pendingEntry as any)?.id ?? rawId);
+          const playbook = playbookMetaFromEntry((pendingEntry as any)?.playbook);
+          if (!droneId || !playbook) continue;
+          if (normalizeDroneEntryKind((pendingEntry as any)?.kind) !== 'playbook-run') continue;
+          const entryRepoPath = String((pendingEntry as any)?.repoPath ?? '').trim();
+          if (repoPath && repoPath !== entryRepoPath) continue;
+          byId.set(
+            droneId,
+            summarizePlaybookRunEntry({
+              droneId,
+              name: String((pendingEntry as any)?.name ?? droneId).trim() || droneId,
+              createdAt: String((pendingEntry as any)?.createdAt ?? nowIso()),
+              repoPath: entryRepoPath,
+              runtime: normalizeDroneRuntime((pendingEntry as any)?.runtime),
+              playbook,
+              pendingEntry,
+            }),
+          );
+        }
+        for (const [rawId, droneEntry] of Object.entries(regAny?.drones ?? {})) {
+          const droneId = normalizeDroneIdentity((droneEntry as any)?.id ?? rawId);
+          const playbook = playbookMetaFromEntry((droneEntry as any)?.playbook);
+          if (!droneId || !playbook) continue;
+          if (normalizeDroneEntryKind((droneEntry as any)?.kind) !== 'playbook-run') continue;
+          const entryRepoPath = String((droneEntry as any)?.repoPath ?? '').trim();
+          if (repoPath && repoPath !== entryRepoPath) continue;
+          byId.set(
+            droneId,
+            summarizePlaybookRunEntry({
+              droneId,
+              name: String((droneEntry as any)?.name ?? droneId).trim() || droneId,
+              createdAt: String((droneEntry as any)?.createdAt ?? nowIso()),
+              repoPath: entryRepoPath,
+              runtime: normalizeDroneRuntime((droneEntry as any)?.runtime),
+              playbook,
+              droneEntry,
+            }),
+          );
+        }
+        const runs = Array.from(byId.values()).sort(
+          (a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || Date.parse(b.createdAt) - Date.parse(a.createdAt),
+        );
+        json(res, 200, { ok: true, runs });
+        return;
+      }
+
       // POST /api/drones
       // Creates a new drone (container or host runtime, like `drone create`).
       if (method === 'POST' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'drones') {
@@ -10019,6 +10558,9 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             id: normalizeDroneIdentity(p?.id) || null,
             name: String(p?.name ?? ''),
             group: typeof p?.group === 'string' && p.group.trim() ? p.group.trim() : null,
+            kind: normalizeDroneEntryKind(p?.kind),
+            visibility: normalizeDroneEntryVisibility(p?.visibility),
+            playbook: playbookMetaFromEntry(p?.playbook),
             createdAt: String(p?.createdAt ?? nowIso()),
             fleetParentId: resolveStableDroneOrPendingIdFromRef(regAny, fleetActorConfig(p).createdBy),
             fleetAssignedIds: normalizeFleetAssignedRefsForSummary(regAny, p?.id, fleetActorConfig(p).assigned),
@@ -10103,6 +10645,9 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
               id: normalizeDroneIdentity(d?.id) || null,
               name: d.name,
               group: d.group ?? null,
+              kind: normalizeDroneEntryKind(d?.kind),
+              visibility: normalizeDroneEntryVisibility(d?.visibility),
+              playbook: playbookMetaFromEntry(d?.playbook),
               createdAt: d.createdAt,
               fleetParentId: resolveStableDroneOrPendingIdFromRef(regAny, fleetActorConfig(d).createdBy),
               fleetAssignedIds: normalizeFleetAssignedRefsForSummary(regAny, d?.id, fleetActorConfig(d).assigned),

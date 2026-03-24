@@ -172,7 +172,7 @@ function SidebarGroupSection({
   }, [actualItems, groupLabel, groupRef]);
   const { attributes, listeners, setNodeRef: setDraggableNodeRef } = useDraggable({
     id: `sidebar-group:${groupToken}`,
-    data: groupDragData,
+    data: groupDragData ?? undefined,
     disabled: !groupDragData,
   });
   const { setNodeRef: setReorderDropNodeRef } = useDroppable({
@@ -224,8 +224,8 @@ function SidebarGroupSection({
         className={`group/group-header w-full px-3 py-2 flex items-center justify-between gap-2 border-b border-[var(--border-subtle)] transition-colors ${
           isDropTarget ? 'bg-[var(--accent-subtle)]' : 'hover:bg-[var(--hover)]'
         } ${groupDragData ? 'cursor-grab touch-none active:cursor-grabbing' : ''}`}
-        {...(attributes as Record<string, unknown>)}
-        {...(listeners as Record<string, unknown>)}
+        {...(attributes as unknown as Record<string, unknown>)}
+        {...(listeners as unknown as Record<string, unknown>)}
       >
         <button
           type="button"
@@ -409,6 +409,7 @@ export type DroneSidebarProps = {
   onOpenDraftChatComposer: () => void;
   onOpenCreateModal: () => void;
   onOpenKanbanBoard: () => void;
+  onOpenPlaybookRuns: () => void;
   onSelectDroneCard: (droneId: string, opts?: { toggle?: boolean; range?: boolean }) => void;
   onSelectDroneChat: (droneId: string, chatName: string) => void;
   onDeleteDroneChat: (
@@ -469,6 +470,7 @@ export function DroneSidebar({
   onOpenDraftChatComposer,
   onOpenCreateModal,
   onOpenKanbanBoard,
+  onOpenPlaybookRuns,
   onSelectDroneCard,
   onSelectDroneChat,
   onDeleteDroneChat,
@@ -499,6 +501,7 @@ export function DroneSidebar({
     selectedChat,
     selectedGroupMultiChat,
     kanbanBoardOpen,
+    playbookRunsOpen,
     sidebarReposCollapsed,
     sidebarAutoMinimize,
     autoDelete,
@@ -1068,6 +1071,19 @@ export function DroneSidebar({
               </button>
               <button
                 type="button"
+                onClick={onOpenPlaybookRuns}
+                className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
+                  playbookRunsOpen
+                    ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                    : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
+                }`}
+                title="Open playbook runs"
+                aria-label="Open playbook runs"
+              >
+                <IconList className="opacity-80" />
+              </button>
+              <button
+                type="button"
                 onClick={() => setAppView((prev) => (prev === 'settings' ? 'workspace' : 'settings'))}
                 className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
                   appView === 'settings'
@@ -1159,6 +1175,22 @@ export function DroneSidebar({
                   <IconBoard className="opacity-80" />
                   <span className="font-semibold tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
                     Open task board
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={onOpenPlaybookRuns}
+                  className={`w-full inline-flex items-center gap-2 h-[30px] px-3 rounded border transition-all ${
+                    playbookRunsOpen
+                      ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                      : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
+                  }`}
+                  title="Open playbook runs"
+                  aria-label="Open playbook runs"
+                >
+                  <IconList className="opacity-80" />
+                  <span className="font-semibold tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+                    Open playbook runs
                   </span>
                 </button>
               </div>
@@ -1577,6 +1609,20 @@ export function DroneSidebar({
           tabIndex={collapsedRailInteractive ? 0 : -1}
         >
           <IconBoard className="opacity-80" />
+        </SidebarIconButton>
+        <SidebarIconButton
+          onClick={() => { setSidebarCollapsed(false); onOpenPlaybookRuns(); }}
+          className={`border ${
+            playbookRunsOpen
+              ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+              : 'border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
+          }`}
+          title="Open playbook runs"
+          ariaLabel="Open playbook runs"
+          disabled={!collapsedRailInteractive}
+          tabIndex={collapsedRailInteractive ? 0 : -1}
+        >
+          <IconList className="opacity-80" />
         </SidebarIconButton>
         <SidebarIconButton
           onClick={() => { setSidebarCollapsed(false); onOpenVisibleMultiChat(); }}

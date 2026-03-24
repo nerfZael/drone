@@ -34,6 +34,7 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     openDraftChatComposer,
     openCreateModal,
     openKanbanBoard,
+    openPlaybookRuns,
     selectDroneCard,
     selectDroneChat,
     deleteCanvasChat,
@@ -84,6 +85,7 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     onOpenDraftChatComposer: openDraftChatComposer,
     onOpenCreateModal: openCreateModal,
     onOpenKanbanBoard: openKanbanBoard,
+    onOpenPlaybookRuns: openPlaybookRuns,
     onSelectDroneCard: selectDroneCard,
     onSelectDroneChat: (droneId, chatName) => {
       selectDroneChat(droneId, chatName);
@@ -377,7 +379,9 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     onReplayOnboarding,
     onResetOnboarding,
     draftChat,
+    activeRepoPath,
     kanbanBoardOpen,
+    playbookRunsOpen,
     kanbanBoard,
     setKanbanBoard,
     boardLoading,
@@ -388,6 +392,7 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     suggestKanbanCardTitleFromPaste,
     nowMs,
     createRuntime,
+    pullHostBranchBeforeCreate,
     setCreateRuntime,
     draftCreateMode,
     setDraftCreateMode,
@@ -413,6 +418,8 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     removeQueuedPrompt,
     setDraftCreateError,
     createDroneFromDraft,
+    registeredRepoPaths,
+    setActiveRepoPath,
     selectedGroupMultiChatData,
     groupBroadcastPromptError,
     groupBroadcastSending,
@@ -430,6 +437,8 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     openDraftChatComposer,
     openCreateModal,
     openKanbanBoard,
+    openPlaybookRuns,
+    openPlaybookRunArtifact,
     currentDrone,
     deleteMode,
     currentDroneLabel,
@@ -534,6 +543,7 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     renderRightPanelTabContent,
     renderPersistentPreviewContent,
     setKanbanBoardOpen,
+    setPlaybookRunsOpen,
   } = args;
 
   return {
@@ -603,6 +613,20 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
           onClose: () => setKanbanBoardOpen(false),
         }
       : null,
+    playbookRunsWorkspaceProps: playbookRunsOpen
+      ? {
+          activeRepoPath,
+          registeredRepoPaths,
+          pullHostBranchBeforeCreate,
+          onSetActiveRepoPath: setActiveRepoPath,
+          onClose: () => setPlaybookRunsOpen(false),
+          onOpenRun: (droneId, chatName) => {
+            setPlaybookRunsOpen(false);
+            selectDroneChat(droneId, chatName);
+          },
+          onOpenArtifact: openPlaybookRunArtifact,
+        }
+      : null,
     groupMultiChatWorkspaceProps: selectedGroupMultiChatData
       ? {
           selectedGroupMultiChatData,
@@ -628,6 +652,7 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
       onOpenDraftChatComposer: openDraftChatComposer,
       onOpenCreateModal: openCreateModal,
       onOpenKanbanBoard: openKanbanBoard,
+      onOpenPlaybookRuns: openPlaybookRuns,
       onSelectDrone: selectDroneCard,
       onSelectDroneChat: selectDroneChat,
     },

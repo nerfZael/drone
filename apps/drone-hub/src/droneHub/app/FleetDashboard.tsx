@@ -93,6 +93,7 @@ export type NoDroneSelectedStateProps = {
   onOpenDraftChatComposer: () => void;
   onOpenCreateModal: () => void;
   onOpenKanbanBoard: () => void;
+  onOpenPlaybookRuns: () => void;
   onSelectDrone: (droneId: string) => void;
   onSelectDroneChat: (droneId: string, chatName: string) => void;
 };

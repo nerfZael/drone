@@ -3,6 +3,7 @@ import { DraftChatWorkspace } from './DraftChatWorkspace';
 import { GroupMultiChatWorkspace } from './GroupMultiChatWorkspace';
 import { KanbanBoardWorkspace } from './KanbanBoardWorkspace';
 import { NoDroneSelectedState } from './NoDroneSelectedState';
+import { PlaybookRunsWorkspace } from './PlaybookRunsWorkspace';
 import { SelectedDroneWorkspace } from './SelectedDroneWorkspace';
 import { SettingsView } from './SettingsView';
 import type { AppView } from './app-types';
@@ -12,6 +13,7 @@ export type DroneHubWorkspaceContentProps = {
   settingsViewProps: React.ComponentProps<typeof SettingsView>;
   draftChatWorkspaceProps: React.ComponentProps<typeof DraftChatWorkspace> | null;
   kanbanBoardWorkspaceProps: React.ComponentProps<typeof KanbanBoardWorkspace> | null;
+  playbookRunsWorkspaceProps: React.ComponentProps<typeof PlaybookRunsWorkspace> | null;
   groupMultiChatWorkspaceProps: React.ComponentProps<typeof GroupMultiChatWorkspace> | null;
   noDroneSelectedStateProps: React.ComponentProps<typeof NoDroneSelectedState>;
   selectedDroneWorkspaceProps: React.ComponentProps<typeof SelectedDroneWorkspace> | null;
@@ -23,6 +25,7 @@ export function DroneHubWorkspaceContent({
   settingsViewProps,
   draftChatWorkspaceProps,
   kanbanBoardWorkspaceProps,
+  playbookRunsWorkspaceProps,
   groupMultiChatWorkspaceProps,
   noDroneSelectedStateProps,
   selectedDroneWorkspaceProps,
@@ -46,6 +49,8 @@ export function DroneHubWorkspaceContent({
         <DraftChatWorkspace {...draftChatWorkspaceProps} />
       ) : kanbanBoardWorkspaceProps ? (
         <KanbanBoardWorkspace {...kanbanBoardWorkspaceProps} />
+      ) : playbookRunsWorkspaceProps ? (
+        <PlaybookRunsWorkspace {...playbookRunsWorkspaceProps} />
       ) : groupMultiChatWorkspaceProps ? (
         <GroupMultiChatWorkspace {...groupMultiChatWorkspaceProps} />
       ) : selectedDroneWorkspaceProps ? (

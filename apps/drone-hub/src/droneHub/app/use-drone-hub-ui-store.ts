@@ -62,6 +62,7 @@ type DroneHubUiState = {
   selectedDroneIds: string[];
   selectedGroupMultiChat: string | null;
   kanbanBoardOpen: boolean;
+  playbookRunsOpen: boolean;
   kanbanBoard: KanbanBoardState;
   groupBroadcastExpanded: boolean;
   groupMultiChatColumnWidth: number;
@@ -111,6 +112,7 @@ type DroneHubUiState = {
   setSelectedDroneIds: (next: Updater<string[]>) => void;
   setSelectedGroupMultiChat: (next: Updater<string | null>) => void;
   setKanbanBoardOpen: (next: Updater<boolean>) => void;
+  setPlaybookRunsOpen: (next: Updater<boolean>) => void;
   setKanbanBoard: (next: Updater<KanbanBoardState>) => void;
   setGroupBroadcastExpanded: (next: Updater<boolean>) => void;
   setGroupMultiChatColumnWidth: (next: Updater<number>) => void;
@@ -354,6 +356,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       selectedDroneIds: [],
       selectedGroupMultiChat: null,
       kanbanBoardOpen: false,
+      playbookRunsOpen: false,
       kanbanBoard: createDefaultKanbanBoardState(),
       groupBroadcastExpanded: false,
       groupMultiChatColumnWidth: GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX,
@@ -412,6 +415,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       setSelectedDroneIds: (next) => set((s) => ({ selectedDroneIds: resolveNext(s.selectedDroneIds, next) })),
       setSelectedGroupMultiChat: (next) => set((s) => ({ selectedGroupMultiChat: resolveNext(s.selectedGroupMultiChat, next) })),
       setKanbanBoardOpen: (next) => set((s) => ({ kanbanBoardOpen: resolveNext(s.kanbanBoardOpen, next) })),
+      setPlaybookRunsOpen: (next) => set((s) => ({ playbookRunsOpen: resolveNext(s.playbookRunsOpen, next) })),
       setKanbanBoard: (next) =>
         set((s) => ({
           kanbanBoard: resolveNext(s.kanbanBoard, next),
@@ -647,6 +651,7 @@ export function useDroneHubAppModelUiState() {
       selectedDroneIds: s.selectedDroneIds,
       selectedGroupMultiChat: s.selectedGroupMultiChat,
       kanbanBoardOpen: s.kanbanBoardOpen,
+      playbookRunsOpen: s.playbookRunsOpen,
       kanbanBoard: s.kanbanBoard,
       selectedChat: s.selectedChat,
       draftChat: s.draftChat,
@@ -683,6 +688,7 @@ export function useDroneHubAppModelUiState() {
       setSelectedDroneIds: s.setSelectedDroneIds,
       setSelectedGroupMultiChat: s.setSelectedGroupMultiChat,
       setKanbanBoardOpen: s.setKanbanBoardOpen,
+      setPlaybookRunsOpen: s.setPlaybookRunsOpen,
       setKanbanBoard: s.setKanbanBoard,
       setGroupBroadcastExpanded: s.setGroupBroadcastExpanded,
       setSelectedChat: s.setSelectedChat,
@@ -725,6 +731,7 @@ export function useDroneSidebarUiState() {
       selectedChat: s.selectedChat,
       selectedGroupMultiChat: s.selectedGroupMultiChat,
       kanbanBoardOpen: s.kanbanBoardOpen,
+      playbookRunsOpen: s.playbookRunsOpen,
       sidebarReposCollapsed: s.sidebarReposCollapsed,
       sidebarAutoMinimize: s.sidebarAutoMinimize,
       sidebarGroupingMode: s.sidebarGroupingMode,
@@ -748,6 +755,7 @@ export function useDroneSidebarUiState() {
       setAutoDelete: s.setAutoDelete,
       setFleetDashboardOpen: s.setFleetDashboardOpen,
       setKanbanBoardOpen: s.setKanbanBoardOpen,
+      setPlaybookRunsOpen: s.setPlaybookRunsOpen,
       setSidebarCollapsed: s.setSidebarCollapsed,
     })),
   );

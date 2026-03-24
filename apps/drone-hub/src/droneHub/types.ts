@@ -2,6 +2,20 @@ export type DroneSummary = {
   id: string;
   name: string;
   group: string | null;
+  kind?: 'standard' | 'playbook-run';
+  visibility?: 'visible' | 'hidden';
+  playbook?: {
+    id: string;
+    label: string;
+    messageCount: number;
+    chatName?: string;
+    artifacts?: string[];
+    actions?: Array<{
+      id: string;
+      label: string;
+      message: string;
+    }>;
+  } | null;
   createdAt: string;
   fleetParentId?: string | null;
   fleetAssignedIds?: string[] | null;
@@ -499,3 +513,44 @@ export type PendingPrompt = {
 };
 
 export type CustomAgentProfile = { id: string; label: string; command: string };
+
+export type PlaybookDefinition = {
+  id: string;
+  label: string;
+  messages: string[];
+  artifacts: string[];
+  actions: Array<{
+    id: string;
+    label: string;
+    message: string;
+  }>;
+  createdAt: string;
+  updatedAt?: string;
+};
+
+export type PlaybookRunSummary = {
+  id: string;
+  droneId: string;
+  droneName: string;
+  playbookId: string;
+  playbookLabel: string;
+  chatName: string;
+  repoPath: string;
+  runtime: 'container' | 'host';
+  visibility: 'visible' | 'hidden';
+  kind: 'playbook-run';
+  status: 'starting' | 'running' | 'completed' | 'failed';
+  createdAt: string;
+  updatedAt: string;
+  lastMessage: string;
+  artifacts: string[];
+  actions: Array<{
+    id: string;
+    label: string;
+    message: string;
+  }>;
+  pendingCount: number;
+  failedCount: number;
+  runsCompleted: number;
+  statusError: string | null;
+};

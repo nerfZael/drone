@@ -1,7 +1,7 @@
 import React from 'react';
 import { isUngroupedGroupName } from '../../domain';
 import type { DroneSummary } from '../types';
-import { compareDronesByNewestFirst } from './helpers';
+import { compareDronesByNewestFirst, isHiddenDrone } from './helpers';
 import { isStartupSeedFresh } from './app-config';
 import type { StartupSeedState } from './app-types';
 import { orderSidebarEntries, orderSidebarGroups, sidebarGroupOrderToken } from './sidebar-group-order';
@@ -95,9 +95,14 @@ export function useSidebarViewModel({
     [sidebarOptimisticDrones],
   );
 
+  const sidebarVisibleBaseDrones = React.useMemo(
+    () => drones.filter((drone) => !isHiddenDrone(drone)),
+    [drones],
+  );
+
   const sidebarDrones = React.useMemo(
-    () => [...drones, ...sidebarOptimisticDrones],
-    [drones, sidebarOptimisticDrones],
+    () => [...sidebarVisibleBaseDrones, ...sidebarOptimisticDrones],
+    [sidebarOptimisticDrones, sidebarVisibleBaseDrones],
   );
 
   const uiDroneName = React.useCallback((nameRaw: string): string => String(nameRaw ?? '').trim(), []);

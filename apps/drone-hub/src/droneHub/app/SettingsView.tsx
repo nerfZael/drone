@@ -2,6 +2,7 @@ import React from 'react';
 import { AutomationSettingsSection } from './AutomationSettingsSection';
 import { ArchiveSettingsTab } from './ArchiveSettingsTab';
 import { GeneralSettingsTab } from './GeneralSettingsTab';
+import { PlaybookSettingsSection } from './PlaybookSettingsSection';
 import { ShortcutSettingsSection } from './ShortcutSettingsSection';
 import { SkillLibrarySection } from './SkillLibrarySection';
 import { SystemLogsSettingsTab } from './SystemLogsSettingsTab';
@@ -121,6 +122,7 @@ export function SettingsView({
     if (activeTab === 'archive') return <ArchiveSettingsTab deleteAction={deleteAction} />;
     if (activeTab === 'shortcuts') return <ShortcutSettingsSection />;
     if (activeTab === 'automations') return <AutomationSettingsSection />;
+    if (activeTab === 'playbooks') return <PlaybookSettingsSection />;
     if (activeTab === 'skills') return <SkillLibrarySection skillLibrary={skillLibrary} />;
     return <SystemLogsSettingsTab hubLogsState={hubLogsState} hubLogsTailLines={hubLogsTailLines} hubLogsMaxBytes={hubLogsMaxBytes} />;
   };

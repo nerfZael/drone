@@ -5,6 +5,36 @@ import path from 'node:path';
 import { droneRootPath, legacyDroneRootDirs } from './paths';
 import { normalizeDroneRuntime, type DroneRuntime } from './runtime';
 
+type DroneRegistryDroneKind = 'standard' | 'playbook-run';
+type DroneRegistryDroneVisibility = 'visible' | 'hidden';
+
+type DroneRegistryPlaybookMeta = {
+  id: string;
+  label: string;
+  messageCount: number;
+  chatName?: string;
+  artifacts?: string[];
+  actions?: Array<{
+    id: string;
+    label: string;
+    message: string;
+  }>;
+};
+
+type DroneRegistryPlaybookEntry = {
+  id: string;
+  label: string;
+  messages: string[];
+  artifacts?: string[];
+  actions?: Array<{
+    id: string;
+    label: string;
+    message: string;
+  }>;
+  createdAt: string;
+  updatedAt?: string;
+};
+
 type DroneRegistryChatEntry = {
   createdAt: string;
   chatId?: string;
@@ -116,6 +146,7 @@ type DroneRegistryV1 = {
    * The Hub projects these skills into drone runtimes on demand.
    */
   skills?: Record<string, unknown>;
+  playbooks?: Record<string, DroneRegistryPlaybookEntry>;
   /**
    * Host-side list of repositories the user has "registered" with `drone repo`.
    * This is stored in the same registry file so the Hub UI can render it.
@@ -166,6 +197,9 @@ type DroneRegistryV1 = {
       id?: string;
       name: string;
       group?: string;
+      kind?: DroneRegistryDroneKind;
+      visibility?: DroneRegistryDroneVisibility;
+      playbook?: DroneRegistryPlaybookMeta;
       runtime?: DroneRuntime;
       repoPath: string;
       containerPort: number;
@@ -234,6 +268,9 @@ type DroneRegistryV1 = {
        * This is host-side metadata (stored in the host drone registry file).
        */
       group?: string;
+      kind?: DroneRegistryDroneKind;
+      visibility?: DroneRegistryDroneVisibility;
+      playbook?: DroneRegistryPlaybookMeta;
       /**
        * Optional default working directory inside the container.
        * Used when starting processes (agent/run/proc-start) if the caller does not provide --cwd.
@@ -276,6 +313,7 @@ export type DroneRegistry = {
    */
   settings?: DroneRegistryV1['settings'];
   skills?: Record<string, unknown>;
+  playbooks?: Record<string, DroneRegistryPlaybookEntry>;
   repos?: DroneRegistryV1['repos'];
   groups?: DroneRegistryV1['groups'];
   archived?: Record<string, DroneRegistryArchivedEntry>;
@@ -462,6 +500,7 @@ function hasMeaningfulRegistryData(reg: DroneRegistry): boolean {
   if (countRecordEntries(reg.pending) > 0) return true;
   if (countRecordEntries(reg.archived) > 0) return true;
   if (countRecordEntries(reg.skills) > 0) return true;
+  if (countRecordEntries(reg.playbooks) > 0) return true;
   if (countRecordEntries(reg.repos) > 0) return true;
   if (countRecordEntries(reg.groups) > 0) return true;
   if (countRecordEntries(reg.settings) > 0) return true;
@@ -469,6 +508,40 @@ function hasMeaningfulRegistryData(reg: DroneRegistry): boolean {
 }
 
 function normalizeV2Registry(input: DroneRegistry): DroneRegistry {
+  input.playbooks = input.playbooks ?? {};
+  for (const [key, entryAny] of Object.entries(input.playbooks ?? {})) {
+    const entry = entryAny as any;
+    if (!entry || typeof entry !== 'object') continue;
+    const id = typeof entry.id === 'string' && entry.id.trim() ? entry.id.trim() : String(key);
+    const label = typeof entry.label === 'string' ? entry.label.trim() : '';
+    const messages = Array.isArray(entry.messages)
+      ? entry.messages.map((item: unknown) => String(item ?? '')).filter((item: string) => item.trim())
+      : [];
+    const artifacts = Array.isArray(entry.artifacts)
+      ? entry.artifacts.map((item: unknown) => String(item ?? '').trim()).filter((item: string) => item)
+      : [];
+    const actions = Array.isArray(entry.actions)
+      ? entry.actions
+          .map((item: unknown) => {
+            const action = item as any;
+            const id = String(action?.id ?? '').trim();
+            const label = typeof action?.label === 'string' ? action.label.trim() : '';
+            const message = typeof action?.message === 'string' ? action.message : '';
+            if (!id || !label || !message.trim()) return null;
+            return { id, label, message };
+          })
+          .filter(Boolean)
+      : [];
+    (input.playbooks as any)[key] = {
+      id,
+      label,
+      messages: messages.slice(0, 40),
+      artifacts: artifacts.slice(0, 60),
+      actions: actions.slice(0, 20),
+      createdAt: typeof entry.createdAt === 'string' && entry.createdAt.trim() ? entry.createdAt : new Date().toISOString(),
+      updatedAt: typeof entry.updatedAt === 'string' && entry.updatedAt.trim() ? entry.updatedAt : undefined,
+    };
+  }
   for (const [key, entryAny] of Object.entries(input.drones ?? {})) {
     const entry = entryAny as any;
     if (!entry || typeof entry !== 'object') continue;
@@ -484,6 +557,37 @@ function normalizeV2Registry(input: DroneRegistry): DroneRegistry {
           ? `drone-${entry.id}`
           : 'drone-unknown';
     entry.containerName = containerName;
+    entry.kind = entry.kind === 'playbook-run' ? 'playbook-run' : 'standard';
+    entry.visibility = entry.visibility === 'hidden' ? 'hidden' : 'visible';
+    if (entry.playbook && typeof entry.playbook === 'object') {
+      const playbookId = typeof entry.playbook.id === 'string' ? entry.playbook.id.trim() : '';
+      const playbookLabel = typeof entry.playbook.label === 'string' ? entry.playbook.label.trim() : '';
+      const messageCountRaw = Number(entry.playbook.messageCount);
+      entry.playbook = playbookId
+        ? {
+            id: playbookId,
+            label: playbookLabel || playbookId,
+            messageCount: Number.isFinite(messageCountRaw) && messageCountRaw > 0 ? Math.floor(messageCountRaw) : 1,
+            chatName:
+              typeof entry.playbook.chatName === 'string' && entry.playbook.chatName.trim()
+                ? entry.playbook.chatName.trim()
+                : undefined,
+            artifacts: Array.isArray(entry.playbook.artifacts)
+              ? entry.playbook.artifacts.map((item: any) => String(item ?? '').trim()).filter(Boolean)
+              : undefined,
+            actions: Array.isArray(entry.playbook.actions)
+              ? entry.playbook.actions
+                  .filter((item: any) => item && typeof item === 'object')
+                  .map((item: any) => ({
+                    id: String(item.id ?? '').trim(),
+                    label: String(item.label ?? '').trim(),
+                    message: String(item.message ?? ''),
+                  }))
+                  .filter((item: any) => item.id && item.label && item.message.trim())
+              : undefined,
+          }
+        : undefined;
+    }
     (input.drones as any)[key] = entry;
   }
   for (const [key, entryAny] of Object.entries(input.pending ?? {})) {
@@ -501,6 +605,37 @@ function normalizeV2Registry(input: DroneRegistry): DroneRegistry {
           ? `drone-${entry.id}`
           : undefined;
     if (containerName) entry.containerName = containerName;
+    entry.kind = entry.kind === 'playbook-run' ? 'playbook-run' : 'standard';
+    entry.visibility = entry.visibility === 'hidden' ? 'hidden' : 'visible';
+    if (entry.playbook && typeof entry.playbook === 'object') {
+      const playbookId = typeof entry.playbook.id === 'string' ? entry.playbook.id.trim() : '';
+      const playbookLabel = typeof entry.playbook.label === 'string' ? entry.playbook.label.trim() : '';
+      const messageCountRaw = Number(entry.playbook.messageCount);
+      entry.playbook = playbookId
+        ? {
+            id: playbookId,
+            label: playbookLabel || playbookId,
+            messageCount: Number.isFinite(messageCountRaw) && messageCountRaw > 0 ? Math.floor(messageCountRaw) : 1,
+            chatName:
+              typeof entry.playbook.chatName === 'string' && entry.playbook.chatName.trim()
+                ? entry.playbook.chatName.trim()
+                : undefined,
+            artifacts: Array.isArray(entry.playbook.artifacts)
+              ? entry.playbook.artifacts.map((item: any) => String(item ?? '').trim()).filter(Boolean)
+              : undefined,
+            actions: Array.isArray(entry.playbook.actions)
+              ? entry.playbook.actions
+                  .filter((item: any) => item && typeof item === 'object')
+                  .map((item: any) => ({
+                    id: String(item.id ?? '').trim(),
+                    label: String(item.label ?? '').trim(),
+                    message: String(item.message ?? ''),
+                  }))
+                  .filter((item: any) => item.id && item.label && item.message.trim())
+              : undefined,
+          }
+        : undefined;
+    }
     (input.pending as any)[key] = entry;
   }
   for (const [key, entryAny] of Object.entries(input.archived ?? {})) {
@@ -518,6 +653,37 @@ function normalizeV2Registry(input: DroneRegistry): DroneRegistry {
           ? `drone-${entry.id}`
           : 'drone-unknown';
     entry.containerName = containerName;
+    entry.kind = entry.kind === 'playbook-run' ? 'playbook-run' : 'standard';
+    entry.visibility = entry.visibility === 'hidden' ? 'hidden' : 'visible';
+    if (entry.playbook && typeof entry.playbook === 'object') {
+      const playbookId = typeof entry.playbook.id === 'string' ? entry.playbook.id.trim() : '';
+      const playbookLabel = typeof entry.playbook.label === 'string' ? entry.playbook.label.trim() : '';
+      const messageCountRaw = Number(entry.playbook.messageCount);
+      entry.playbook = playbookId
+        ? {
+            id: playbookId,
+            label: playbookLabel || playbookId,
+            messageCount: Number.isFinite(messageCountRaw) && messageCountRaw > 0 ? Math.floor(messageCountRaw) : 1,
+            chatName:
+              typeof entry.playbook.chatName === 'string' && entry.playbook.chatName.trim()
+                ? entry.playbook.chatName.trim()
+                : undefined,
+            artifacts: Array.isArray(entry.playbook.artifacts)
+              ? entry.playbook.artifacts.map((item: any) => String(item ?? '').trim()).filter(Boolean)
+              : undefined,
+            actions: Array.isArray(entry.playbook.actions)
+              ? entry.playbook.actions
+                  .filter((item: any) => item && typeof item === 'object')
+                  .map((item: any) => ({
+                    id: String(item.id ?? '').trim(),
+                    label: String(item.label ?? '').trim(),
+                    message: String(item.message ?? ''),
+                  }))
+                  .filter((item: any) => item.id && item.label && item.message.trim())
+              : undefined,
+          }
+        : undefined;
+    }
     (input.archived as any)[key] = entry;
   }
   return input;
@@ -528,6 +694,7 @@ function migrateV1ToV2(v1: DroneRegistryV1): DroneRegistry {
     version: 2,
     settings: v1.settings,
     skills: v1.skills,
+    playbooks: {},
     repos: v1.repos,
     groups: v1.groups,
     archived: {},

@@ -116,7 +116,7 @@ export function CommitInspectionView({
   resetExplorerWidthPreference: () => void;
 }) {
   return (
-    <div ref={commitLayoutRef} className="flex-1 min-h-0 overflow-hidden flex">
+    <div ref={commitLayoutRef as React.RefObject<HTMLDivElement>} className="flex-1 min-h-0 overflow-hidden flex">
       <div
         className={`shrink-0 border-r border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] overflow-auto ${
           commitListResizing ? '' : 'transition-[width] duration-150 ease-out'
@@ -266,7 +266,7 @@ export function CommitInspectionView({
                 })}
               </div>
             ) : (
-              <div ref={splitLayoutRef} className="flex-1 min-h-0 overflow-hidden flex">
+              <div ref={splitLayoutRef as React.RefObject<HTMLDivElement>} className="flex-1 min-h-0 overflow-hidden flex">
                 <div className="flex-1 min-w-0 min-h-0 overflow-auto bg-[rgba(0,0,0,.12)]">
                   <div className="sticky top-0 z-10 px-2.5 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/95 backdrop-blur flex items-center justify-between gap-2">
                     <div className="min-w-0 text-[10px] text-[var(--muted)] font-mono truncate">

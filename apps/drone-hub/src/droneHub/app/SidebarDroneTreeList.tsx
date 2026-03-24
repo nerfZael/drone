@@ -238,7 +238,7 @@ function SidebarDroneRow({
           groupOrderKey,
           groupName: groupName ?? null,
         }
-      : null,
+      : undefined,
     disabled: !groupOrderKey || dragDisabled,
   });
 
@@ -258,8 +258,8 @@ function SidebarDroneRow({
           dragNodeRef={setDragNodeRef}
           draggable={!dragDisabled}
           dragging={isDragging}
-          dragAttributes={attributes as Record<string, unknown>}
-          dragListeners={listeners as Record<string, unknown>}
+          dragAttributes={attributes as unknown as Record<string, unknown>}
+          dragListeners={listeners as unknown as Record<string, unknown>}
           onClone={() => onOpenCloneModal(drone)}
           onRename={() => onRenameDrone(drone.id)}
           onSetBaseImage={() => onSetDroneBaseImage(drone.id)}
@@ -323,7 +323,7 @@ function SidebarChatRow({
   );
   const { attributes, listeners, isDragging, setNodeRef: setDragNodeRef } = useDraggable({
     id: `sidebar-chat:${chatKey}`,
-    data: chatDragData,
+    data: chatDragData ?? undefined,
     disabled: !chatDragData || movingDroneGroups || isOptimistic,
   });
   const { setNodeRef } = useDroppable({
@@ -342,8 +342,8 @@ function SidebarChatRow({
       <button
         ref={setDragNodeRef}
         type="button"
-        {...(attributes as Record<string, unknown>)}
-        {...(listeners as Record<string, unknown>)}
+        {...(attributes as unknown as Record<string, unknown>)}
+        {...(listeners as unknown as Record<string, unknown>)}
         onClick={(event) => {
           event.stopPropagation();
           onSelectDroneChat(drone.id, chatName);

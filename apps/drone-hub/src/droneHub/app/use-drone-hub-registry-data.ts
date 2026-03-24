@@ -2,6 +2,7 @@ import React from 'react';
 import { isUngroupedGroupName } from '../../domain';
 import type { DroneSummary, RepoSummary } from '../types';
 import { compareDronesByNewestFirst } from './helpers';
+import { isHiddenDrone } from './helpers';
 import { fetchJson, usePoll } from './hooks';
 
 type Updater<T> = T | ((prev: T) => T);
@@ -105,15 +106,26 @@ export function useDroneHubRegistryData({
     return drones.filter((d) => String(d?.repoPath ?? '').trim() === targetRepo);
   }, [activeRepoPath, drones]);
 
+  const sidebarDronesBase = React.useMemo(
+    () => drones.filter((drone) => !isHiddenDrone(drone)),
+    [drones],
+  );
+
+  const sidebarDronesFilteredByRepoBase = React.useMemo(() => {
+    const targetRepo = String(activeRepoPath ?? '').trim();
+    if (!targetRepo) return sidebarDronesBase;
+    return sidebarDronesBase.filter((d) => String(d?.repoPath ?? '').trim() === targetRepo);
+  }, [activeRepoPath, sidebarDronesBase]);
+
   const droneCountByRepoPath = React.useMemo(() => {
     const counts = new Map<string, number>();
-    for (const d of drones) {
+    for (const d of sidebarDronesBase) {
       const p = String(d?.repoPath ?? '').trim();
       if (!p) continue;
       counts.set(p, (counts.get(p) ?? 0) + 1);
     }
     return counts;
-  }, [drones]);
+  }, [sidebarDronesBase]);
 
   const groups = React.useMemo(() => {
     const m = new Map<string, DroneSummary[]>();
@@ -122,7 +134,7 @@ export function useDroneHubRegistryData({
       if (!g || isUngroupedGroupName(g)) continue;
       if (!m.has(g)) m.set(g, []);
     }
-    for (const d of dronesFilteredByRepo) {
+    for (const d of sidebarDronesFilteredByRepoBase) {
       const raw = (d.group ?? '').trim();
       const g = !raw || isUngroupedGroupName(raw) ? 'Ungrouped' : raw;
       const arr = m.get(g) ?? [];
@@ -139,7 +151,7 @@ export function useDroneHubRegistryData({
       return a.group.localeCompare(b.group);
     });
     return out;
-  }, [dronesFilteredByRepo, registryGroupNames]);
+  }, [registryGroupNames, sidebarDronesFilteredByRepoBase]);
 
   return {
     polledDrones,
@@ -153,6 +165,7 @@ export function useDroneHubRegistryData({
     registeredRepoPathSet,
     registryGroupNames,
     dronesFilteredByRepo,
+    sidebarDronesFilteredByRepoBase,
     droneCountByRepoPath,
     groups,
   };

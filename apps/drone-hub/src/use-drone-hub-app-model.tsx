@@ -146,6 +146,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     selectedDroneIds,
     selectedGroupMultiChat,
     kanbanBoardOpen,
+    playbookRunsOpen,
     kanbanBoard,
     selectedChat,
     draftChat,
@@ -179,6 +180,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setSelectedDroneIds,
     setSelectedGroupMultiChat,
     setKanbanBoardOpen,
+    setPlaybookRunsOpen,
     setKanbanBoard,
     setGroupBroadcastExpanded,
     setSelectedChat,
@@ -821,7 +823,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     [drones],
   );
 
-  const { openCreateModal, openDraftChatComposer } =
+  const { openCreateModal, openDraftChatComposer, openPlaybookRuns } =
     useWorkspaceNavigationActions({
       creating,
       createMode,
@@ -860,6 +862,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setSelectedDrone,
       setSelectedDroneIds,
       setKanbanBoardOpen,
+      setPlaybookRunsOpen,
       setSelectedChat,
       resetDraftNameSuggestSeq: () => {
         draftNameSuggestSeqRef.current = 0;
@@ -874,6 +877,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setDraftCreateOpen(false);
     setDraftCreateError(null);
     setFleetDashboardOpen(false);
+    setPlaybookRunsOpen(false);
     setSelectedGroupMultiChat(null);
     setSelectedDrone(null);
     setSelectedDroneIds([]);
@@ -894,6 +898,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setDraftCreateOpen,
     setFleetDashboardOpen,
     setKanbanBoardOpen,
+    setPlaybookRunsOpen,
     setSelectedChat,
     setSelectedDrone,
     setSelectedDroneIds,
@@ -1053,9 +1058,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     selectedChat,
     fleetDashboardOpen,
     kanbanBoardOpen,
+    playbookRunsOpen,
     draftChat,
     drones,
     dronesFilteredByRepo,
+    visibleDronesFilteredByRepo: sidebarDronesFilteredByRepo,
     startupSeedByDrone,
     selectionAnchorRef,
     preferredSelectedDroneRef,
@@ -1072,6 +1079,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setSelectedDroneIds,
     setSelectedGroupMultiChat,
     setKanbanBoardOpen,
+    setPlaybookRunsOpen,
     setSelectedChat,
   });
   const selectDroneCard = React.useCallback(
@@ -1688,6 +1696,34 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       openEditorFile(next);
     },
     [focusFilesPane, openEditorFile, setCurrentFsPath],
+  );
+  const [pendingPlaybookArtifact, setPendingPlaybookArtifact] = React.useState<{
+    droneId: string;
+    path: string;
+    name: string;
+  } | null>(null);
+  React.useEffect(() => {
+    if (!pendingPlaybookArtifact) return;
+    if (String(currentDrone?.id ?? '') !== pendingPlaybookArtifact.droneId) return;
+    openFileInFilesPane({
+      path: pendingPlaybookArtifact.path,
+      name: pendingPlaybookArtifact.name,
+    });
+    setPendingPlaybookArtifact(null);
+  }, [currentDrone?.id, openFileInFilesPane, pendingPlaybookArtifact]);
+  const openPlaybookRunArtifact = React.useCallback(
+    (droneId: string, chatName: string, path: string, name: string) => {
+      const filePath = String(path ?? '').trim();
+      if (!filePath) return;
+      setPlaybookRunsOpen(false);
+      setPendingPlaybookArtifact({
+        droneId,
+        path: filePath,
+        name: String(name ?? '').trim() || filePath.split('/').filter(Boolean).pop() || filePath,
+      });
+      selectDroneChat(droneId, chatName);
+    },
+    [selectDroneChat, setPlaybookRunsOpen],
   );
   const openMarkdownFileReference = React.useCallback(
     (ref: MarkdownFileReference) => {
@@ -2380,6 +2416,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     openDraftChatComposer,
     openCreateModal,
     openKanbanBoard,
+    openPlaybookRuns,
     selectDroneCard,
     selectDroneChat,
     deleteCanvasChat,
@@ -2527,6 +2564,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     suggestKanbanCardTitleFromPaste,
     nowMs,
     createRuntime,
+    pullHostBranchBeforeCreate,
     setCreateRuntime,
     draftCreateMode,
     setDraftCreateMode,
@@ -2569,6 +2607,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     openDraftChatComposer,
     openCreateModal,
     openKanbanBoard,
+    openPlaybookRuns,
+    openPlaybookRunArtifact,
+    activeRepoPath,
+    registeredRepoPaths,
+    playbookRunsOpen,
     currentDrone,
     deleteMode: deleteActionSettingsState.deleteSettings?.deleteAction.mode ?? 'permanent',
     currentDroneLabel,
@@ -2690,6 +2733,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     startRightPanelResize,
     renderRightPanelTabContent,
     renderPersistentPreviewContent,
+    setKanbanBoardOpen,
+    setPlaybookRunsOpen,
   });
 
   return {
