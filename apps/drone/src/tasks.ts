@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import fs from 'node:fs/promises';
-import { tasksCreate, tasksGet, tasksList, tasksSearch, type DroneClient } from './host/api';
+import { tasksCreate, tasksDelete, tasksGet, tasksList, tasksSearch, type DroneClient } from './host/api';
 
 function resolveBaseUrl(): string {
   const explicit =
@@ -196,6 +196,16 @@ program
         ...(typeof options.description === 'string' ? { description: options.description } : {}),
       }),
     );
+  });
+
+program
+  .command('delete')
+  .alias('rm')
+  .description('Delete a task visible to this drone scope')
+  .argument('<taskId>', 'Task id')
+  .action(async (taskId: string) => {
+    const client = await createClient();
+    printJson(await tasksDelete(client, taskId));
   });
 
 async function main() {

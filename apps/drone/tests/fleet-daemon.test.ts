@@ -325,6 +325,33 @@ describeSocketSuite('fleet daemon', () => {
       messageId: 'message-1',
     });
 
+    const deleteResponse = await fetch(`${baseUrl}/v1/tasks/${encodeURIComponent('task-1')}`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const deleteData: any = await deleteResponse.json();
+    expect(deleteResponse.status).toBe(202);
+    expect(deleteData?.queued).toBe(true);
+    expect(deleteData?.request?.taskId).toBe('task-1');
+
+    const pendingDeleteResponse = await fetch(`${baseUrl}/v1/tasks/pending-deletes`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const pendingDeleteData: any = await pendingDeleteResponse.json();
+    expect(pendingDeleteResponse.status).toBe(200);
+    expect(pendingDeleteData?.requests).toMatchObject([{ taskId: 'task-1' }]);
+
+    const pendingDeleteRequestId = String(pendingDeleteData?.requests?.[0]?.id ?? '');
+    expect(pendingDeleteRequestId).toBeTruthy();
+
+    const ackDeleteResponse = await fetch(`${baseUrl}/v1/tasks/pending-deletes/${encodeURIComponent(pendingDeleteRequestId)}/ack`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const ackDeleteData: any = await ackDeleteResponse.json();
+    expect(ackDeleteResponse.status).toBe(200);
+    expect(ackDeleteData?.removed).toBe(true);
+
     const createResponse = await fetch(`${baseUrl}/v1/tasks`, {
       method: 'POST',
       headers: {

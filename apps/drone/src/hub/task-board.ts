@@ -194,6 +194,37 @@ export function appendTaskToBoard(board: TaskBoardState, card: TaskBoardCard): T
   };
 }
 
+export function removeScopedTaskFromBoard(
+  board: TaskBoardState,
+  taskIdRaw: unknown,
+  playbookIdRaw: unknown,
+  repoPathRaw: unknown,
+): { board: TaskBoardState; removed: boolean } {
+  const taskId = String(taskIdRaw ?? '').trim();
+  const playbookId = String(playbookIdRaw ?? '').trim();
+  const repoPath = String(repoPathRaw ?? '').trim();
+  if (!taskId || !playbookId || !repoPath) return { board, removed: false };
+  let removed = false;
+  const lanes = board.lanes.map((lane) => {
+    const cards = lane.cards.filter((card) => {
+      const matchesTask =
+        card.id === taskId && String(card.playbookId ?? '').trim() === playbookId && String(card.repoPath ?? '').trim() === repoPath;
+      if (matchesTask) removed = true;
+      return !matchesTask;
+    });
+    return cards.length === lane.cards.length ? lane : { ...lane, cards };
+  });
+  return removed
+    ? {
+        board: {
+          taskTypes: board.taskTypes.slice(),
+          lanes,
+        },
+        removed: true,
+      }
+    : { board, removed: false };
+}
+
 export function persistTaskBoardState(regAny: any, board: TaskBoardState, updatedAtRaw: string = nowIso()): void {
   regAny.settings = regAny.settings ?? {};
   regAny.settings.kanbanBoard = {

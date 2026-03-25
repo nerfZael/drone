@@ -39,6 +39,8 @@ import {
   tasksStateSet as droneTasksStateSet,
   tasksPendingCreateAck as droneTasksPendingCreateAck,
   tasksPendingCreateList as droneTasksPendingCreateList,
+  tasksPendingDeleteAck as droneTasksPendingDeleteAck,
+  tasksPendingDeleteList as droneTasksPendingDeleteList,
   fleetRequestClaim as droneFleetRequestClaim,
   fleetRequestList as droneFleetRequestList,
   fleetRequestResolve as droneFleetRequestResolve,
@@ -70,6 +72,7 @@ import {
   normalizeTaskTitle,
   normalizeTaskTypeId,
   persistTaskBoardState,
+  removeScopedTaskFromBoard,
   type TaskBoardCard,
 } from './task-board';
 import {
@@ -846,6 +849,45 @@ async function drainPendingTaskCreatesForDrone(droneId: string, droneEntry: any)
   }
 }
 
+async function drainPendingTaskDeletesForDrone(droneId: string, droneEntry: any): Promise<void> {
+  try {
+    const daemon = await resolveDroneDaemonClientForEntry(droneEntry);
+    if (!daemon) return;
+    const pending = await droneTasksPendingDeleteList(daemon.client).catch(() => null);
+    const requests = Array.isArray(pending?.requests) ? pending.requests : [];
+    if (requests.length === 0) return;
+    const acknowledgedIds = new Set<string>();
+    let boardChanged = false;
+    await updateRegistry((regLatest: any) => {
+      const latestDrone = regLatest?.drones?.[droneId] ?? null;
+      const playbook = playbookMetaFromEntry(latestDrone?.playbook);
+      if (!latestDrone || !playbook) return;
+      const repoPath = String(latestDrone?.repoPath ?? '').trim();
+      let board = getTaskBoardStateFromRegistry(regLatest);
+      for (const request of requests) {
+        const requestId = String(request?.id ?? '').trim();
+        const taskId = String(request?.taskId ?? '').trim();
+        if (!requestId || !taskId) continue;
+        const removed = removeScopedTaskFromBoard(board, taskId, playbook.id, repoPath);
+        board = removed.board;
+        if (removed.removed) boardChanged = true;
+        acknowledgedIds.add(requestId);
+      }
+      if (boardChanged) persistTaskBoardState(regLatest, board);
+    });
+    if (acknowledgedIds.size === 0) return;
+    for (const requestId of acknowledgedIds) {
+      await droneTasksPendingDeleteAck(daemon.client, requestId, {}).catch(() => {});
+    }
+    if (!boardChanged) return;
+    const regLatest: any = await loadRegistry();
+    const latestDrone = regLatest?.drones?.[droneId] ?? null;
+    if (latestDrone) await syncTaskStateSnapshotToDrone(droneId, latestDrone);
+  } catch {
+    // ignore (best-effort sync)
+  }
+}
+
 function fleetError(message: string, status: number = 400): Error & { status?: number } {
   const err = new Error(message) as Error & { status?: number };
   err.status = status;
@@ -1148,6 +1190,7 @@ async function runFleetReconcilerCycle(): Promise<void> {
       await syncFleetPolicySnapshotToDrone(String(actorId), actorEntry);
       await syncTaskStateSnapshotToDrone(String(actorId), actorEntry);
       await drainPendingTaskCreatesForDrone(String(actorId), actorEntry);
+      await drainPendingTaskDeletesForDrone(String(actorId), actorEntry);
       if (!daemon) continue;
       let requests: any[] = [];
       try {

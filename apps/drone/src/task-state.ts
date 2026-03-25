@@ -44,6 +44,12 @@ type PendingTaskCreateRequest = {
   createdAt: string;
 };
 
+type PendingTaskDeleteRequest = {
+  id: string;
+  taskId: string;
+  createdAt: string;
+};
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -58,6 +64,17 @@ export function normalizePendingTaskCreateRequest(raw: any): PendingTaskCreateRe
     title,
     description: String(raw?.description ?? ''),
     typeId,
+    createdAt: typeof raw?.createdAt === 'string' && raw.createdAt.trim() ? raw.createdAt.trim() : nowIso(),
+  };
+}
+
+export function normalizePendingTaskDeleteRequest(raw: any): PendingTaskDeleteRequest | null {
+  const id = String(raw?.id ?? '').trim();
+  const taskId = String(raw?.taskId ?? '').trim();
+  if (!id || !taskId) return null;
+  return {
+    id,
+    taskId,
     createdAt: typeof raw?.createdAt === 'string' && raw.createdAt.trim() ? raw.createdAt.trim() : nowIso(),
   };
 }
@@ -271,4 +288,4 @@ export function searchTasks(snapshot: TaskStateSnapshot, queryRaw: string, rawTy
     });
 }
 
-export type { PendingTaskCreateRequest, TaskStateSnapshot };
+export type { PendingTaskCreateRequest, PendingTaskDeleteRequest, TaskStateSnapshot };

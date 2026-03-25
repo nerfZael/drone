@@ -215,6 +215,11 @@ export async function tasksGet(client: DroneClient, taskId: string) {
   return await req(client, 'GET', `/v1/tasks/${encodeURIComponent(normalized)}`);
 }
 
+export async function tasksDelete(client: DroneClient, taskId: string) {
+  const normalized = String(taskId ?? '').trim();
+  return await req(client, 'DELETE', `/v1/tasks/${encodeURIComponent(normalized)}`);
+}
+
 export async function tasksCreate(
   client: DroneClient,
   payload: {
@@ -236,6 +241,18 @@ export async function tasksPendingCreateAck(
   payload?: { taskId?: string | null },
 ) {
   return await req(client, 'POST', `/v1/tasks/pending-creates/${encodeURIComponent(id)}/ack`, payload ?? {});
+}
+
+export async function tasksPendingDeleteList(client: DroneClient) {
+  return await req(client, 'GET', '/v1/tasks/pending-deletes');
+}
+
+export async function tasksPendingDeleteAck(
+  client: DroneClient,
+  id: string,
+  payload?: { taskId?: string | null },
+) {
+  return await req(client, 'POST', `/v1/tasks/pending-deletes/${encodeURIComponent(id)}/ack`, payload ?? {});
 }
 
 export async function terminalInput(client: DroneClient, payload: { session: string; data: string }) {

@@ -21,10 +21,12 @@ import {
   filterTasksByTypeIds,
   firstTaskTypeId,
   normalizePendingTaskCreateRequest,
+  normalizePendingTaskDeleteRequest,
   normalizeTaskStateSnapshot,
   searchTasks,
   taskSummaryForResponse,
   type PendingTaskCreateRequest,
+  type PendingTaskDeleteRequest,
   type TaskStateSnapshot,
 } from './task-state';
 
@@ -246,6 +248,17 @@ async function saveTaskStateSnapshot(dataDir: string, snapshot: TaskStateSnapsho
   await writeJsonFileAtomic(path.join(dataDir, 'tasks.json'), snapshot);
 }
 
+let TASK_STATE_MUTATION_TAIL: Promise<void> = Promise.resolve();
+
+async function withTaskStateMutationLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = TASK_STATE_MUTATION_TAIL.then(fn, fn);
+  TASK_STATE_MUTATION_TAIL = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return await run;
+}
+
 async function loadPendingTaskCreates(dataDir: string): Promise<PendingTaskCreateRequest[]> {
   const raw = await readJsonFile(path.join(dataDir, 'task-create-queue.json'), []);
   return (Array.isArray(raw) ? raw : []).map(normalizePendingTaskCreateRequest).filter(Boolean) as PendingTaskCreateRequest[];
@@ -253,6 +266,15 @@ async function loadPendingTaskCreates(dataDir: string): Promise<PendingTaskCreat
 
 async function savePendingTaskCreates(dataDir: string, list: PendingTaskCreateRequest[]): Promise<void> {
   await writeJsonFileAtomic(path.join(dataDir, 'task-create-queue.json'), list);
+}
+
+async function loadPendingTaskDeletes(dataDir: string): Promise<PendingTaskDeleteRequest[]> {
+  const raw = await readJsonFile(path.join(dataDir, 'task-delete-queue.json'), []);
+  return (Array.isArray(raw) ? raw : []).map(normalizePendingTaskDeleteRequest).filter(Boolean) as PendingTaskDeleteRequest[];
+}
+
+async function savePendingTaskDeletes(dataDir: string, list: PendingTaskDeleteRequest[]): Promise<void> {
+  await writeJsonFileAtomic(path.join(dataDir, 'task-delete-queue.json'), list);
 }
 
 function normalizeFleetRequestState(raw: unknown): FleetRequestState | null {
@@ -856,40 +878,39 @@ async function main() {
       }
 
       if (method === 'POST' && pathname === '/v1/tasks') {
-        const snapshot = await loadTaskStateSnapshot(dataDir);
-        if (!snapshot.enabled || !snapshot.playbook?.id) {
-          json(res, 409, { error: 'this drone was not created by a playbook' });
-          return;
-        }
         const body = await readJson(req);
-        const title = String(body?.title ?? '').trim();
-        const description = String(body?.description ?? '');
-        const requestedTypeId = String(body?.typeId ?? '').trim();
-        const defaultTypeId = firstTaskTypeId(snapshot);
-        const taskTypeId = requestedTypeId || defaultTypeId || '';
-        if (!title) {
-          json(res, 400, { error: 'missing task title' });
-          return;
-        }
-        if (!taskTypeId) {
-          json(res, 400, { error: 'missing task type' });
-          return;
-        }
-        if (!snapshot.taskTypes.some((item) => item.id === taskTypeId && item.active !== false)) {
-          json(res, 400, { error: `unknown task type: ${taskTypeId}` });
-          return;
-        }
-        const pending = await loadPendingTaskCreates(dataDir);
-        const request: PendingTaskCreateRequest = {
-          id: crypto.randomUUID(),
-          title,
-          description,
-          typeId: taskTypeId,
-          createdAt: nowIso(),
-        };
-        pending.push(request);
-        await savePendingTaskCreates(dataDir, pending.slice(-500));
-        json(res, 202, { ok: true, queued: true, request });
+        const result = await withTaskStateMutationLock(async () => {
+          const snapshot = await loadTaskStateSnapshot(dataDir);
+          if (!snapshot.enabled || !snapshot.playbook?.id) {
+            return { status: 409, body: { error: 'this drone was not created by a playbook' } };
+          }
+          const title = String(body?.title ?? '').trim();
+          const description = String(body?.description ?? '');
+          const requestedTypeId = String(body?.typeId ?? '').trim();
+          const defaultTypeId = firstTaskTypeId(snapshot);
+          const taskTypeId = requestedTypeId || defaultTypeId || '';
+          if (!title) {
+            return { status: 400, body: { error: 'missing task title' } };
+          }
+          if (!taskTypeId) {
+            return { status: 400, body: { error: 'missing task type' } };
+          }
+          if (!snapshot.taskTypes.some((item) => item.id === taskTypeId && item.active !== false)) {
+            return { status: 400, body: { error: `unknown task type: ${taskTypeId}` } };
+          }
+          const pending = await loadPendingTaskCreates(dataDir);
+          const request: PendingTaskCreateRequest = {
+            id: crypto.randomUUID(),
+            title,
+            description,
+            typeId: taskTypeId,
+            createdAt: nowIso(),
+          };
+          pending.push(request);
+          await savePendingTaskCreates(dataDir, pending.slice(-500));
+          return { status: 202, body: { ok: true, queued: true, request } };
+        });
+        json(res, result.status, result.body);
         return;
       }
 
@@ -906,6 +927,51 @@ async function main() {
           repoPath: snapshot.repoPath,
           requests: await loadPendingTaskCreates(dataDir),
         });
+        return;
+      }
+
+      if (method === 'GET' && pathname === '/v1/tasks/pending-deletes') {
+        const snapshot = await loadTaskStateSnapshot(dataDir);
+        if (!snapshot.enabled || !snapshot.playbook?.id) {
+          json(res, 409, { error: 'this drone was not created by a playbook' });
+          return;
+        }
+        json(res, 200, {
+          ok: true,
+          actor: snapshot.actor,
+          playbook: snapshot.playbook,
+          repoPath: snapshot.repoPath,
+          requests: await loadPendingTaskDeletes(dataDir),
+        });
+        return;
+      }
+
+      if (method === 'DELETE' && /^\/v1\/tasks\/[^/]+$/.test(pathname)) {
+        const taskId = decodeURIComponent(pathname.slice('/v1/tasks/'.length));
+        const result = await withTaskStateMutationLock(async () => {
+          const snapshot = await loadTaskStateSnapshot(dataDir);
+          if (!snapshot.enabled || !snapshot.playbook?.id) {
+            return { status: 409, body: { error: 'this drone was not created by a playbook' } };
+          }
+          const task = findTaskById(snapshot, taskId);
+          if (!task) {
+            return { status: 404, body: { error: `task not found: ${taskId}` } };
+          }
+          const pending = await loadPendingTaskDeletes(dataDir);
+          const existing = pending.find((item) => item.taskId === task.id) ?? null;
+          if (existing) {
+            return { status: 202, body: { ok: true, queued: true, duplicate: true, request: existing } };
+          }
+          const request: PendingTaskDeleteRequest = {
+            id: crypto.randomUUID(),
+            taskId: task.id,
+            createdAt: nowIso(),
+          };
+          pending.push(request);
+          await savePendingTaskDeletes(dataDir, pending.slice(-500));
+          return { status: 202, body: { ok: true, queued: true, request } };
+        });
+        json(res, result.status, result.body);
         return;
       }
 
@@ -935,23 +1001,51 @@ async function main() {
           json(res, 400, { error: 'missing request id' });
           return;
         }
-        const pending = await loadPendingTaskCreates(dataDir);
-        const nextPending = pending.filter((item) => item.id !== requestId);
-        await savePendingTaskCreates(dataDir, nextPending);
-        json(res, 200, { ok: true, removed: pending.length !== nextPending.length });
+        const removed = await withTaskStateMutationLock(async () => {
+          const pending = await loadPendingTaskCreates(dataDir);
+          const nextPending = pending.filter((item) => item.id !== requestId);
+          await savePendingTaskCreates(dataDir, nextPending);
+          return pending.length !== nextPending.length;
+        });
+        json(res, 200, { ok: true, removed });
+        return;
+      }
+
+      if (method === 'POST' && pathname.startsWith('/v1/tasks/pending-deletes/') && pathname.endsWith('/ack')) {
+        const match = pathname.match(/^\/v1\/tasks\/pending-deletes\/([^/]+)\/ack$/);
+        const requestId = match ? decodeURIComponent(match[1] ?? '').trim() : '';
+        if (!requestId) {
+          json(res, 400, { error: 'missing request id' });
+          return;
+        }
+        const removed = await withTaskStateMutationLock(async () => {
+          const pending = await loadPendingTaskDeletes(dataDir);
+          const nextPending = pending.filter((item) => item.id !== requestId);
+          await savePendingTaskDeletes(dataDir, nextPending);
+          return pending.length !== nextPending.length;
+        });
+        json(res, 200, { ok: true, removed });
         return;
       }
 
       if (method === 'POST' && pathname === '/v1/tasks/state') {
         const body = await readJson(req);
         const snapshot = normalizeTaskStateSnapshot(body);
-        await saveTaskStateSnapshot(dataDir, snapshot);
-        const pending = await loadPendingTaskCreates(dataDir);
-        const knownTypeIds = new Set(snapshot.taskTypes.filter((item) => item.active !== false).map((item) => item.id));
-        const filteredPending = pending.filter((item) => knownTypeIds.size === 0 || knownTypeIds.has(item.typeId));
-        if (filteredPending.length !== pending.length) {
-          await savePendingTaskCreates(dataDir, filteredPending);
-        }
+        await withTaskStateMutationLock(async () => {
+          await saveTaskStateSnapshot(dataDir, snapshot);
+          const pendingCreates = await loadPendingTaskCreates(dataDir);
+          const knownTypeIds = new Set(snapshot.taskTypes.filter((item) => item.active !== false).map((item) => item.id));
+          const filteredCreates = pendingCreates.filter((item) => knownTypeIds.size === 0 || knownTypeIds.has(item.typeId));
+          if (filteredCreates.length !== pendingCreates.length) {
+            await savePendingTaskCreates(dataDir, filteredCreates);
+          }
+          const pendingDeletes = await loadPendingTaskDeletes(dataDir);
+          const knownTaskIds = new Set(snapshot.tasks.map((item) => item.id));
+          const filteredDeletes = pendingDeletes.filter((item) => knownTaskIds.has(item.taskId));
+          if (filteredDeletes.length !== pendingDeletes.length) {
+            await savePendingTaskDeletes(dataDir, filteredDeletes);
+          }
+        });
         json(res, 200, { ok: true, snapshot });
         return;
       }
