@@ -78,6 +78,7 @@ type UseDroneCreationActionsArgs = {
       repoPath?: string | null;
     },
   ) => void;
+  rememberSeenModels: (models: Iterable<string | null | undefined>) => void;
   isValidDroneName: (name: string) => boolean;
   hasWhitespaceInNameRaw: (nameRaw: string) => boolean;
   setCreateError: React.Dispatch<React.SetStateAction<string | null>>;
@@ -162,6 +163,7 @@ export function useDroneCreationActions({
   requestJson,
   suggestAndRenameDraftDrone,
   rememberStartupSeed,
+  rememberSeenModels,
   isValidDroneName,
   hasWhitespaceInNameRaw,
   setCreateError,
@@ -408,6 +410,7 @@ export function useDroneCreationActions({
       const rejected = Array.isArray(resp?.rejected) ? resp.rejected : [];
 
       if (acceptedByName.size > 0) {
+        if (seedModel) rememberSeenModels([seedModel]);
         rememberStartupSeed(Array.from(acceptedByName.values()), {
           runtime,
           agent: seedAgent,
@@ -482,6 +485,7 @@ export function useDroneCreationActions({
     preferredSelectedDroneHoldUntilRef,
     preferredSelectedDroneRef,
     queueDrones,
+    rememberSeenModels,
     rememberStartupSeed,
     resolveAgentKeyToConfig,
     selectionAnchorRef,
@@ -597,6 +601,7 @@ export function useDroneCreationActions({
         createdDrone = true;
 
         if (shouldSeedPromptViaCreate) {
+          if (seedModel) rememberSeenModels([seedModel]);
           rememberStartupSeed([{ id: droneId, name: createdName }], {
             runtime,
             agent: seedAgent,
@@ -733,6 +738,7 @@ export function useDroneCreationActions({
       pullHostBranchBeforeCreate,
       preferredSelectedDroneHoldUntilRef,
       preferredSelectedDroneRef,
+      rememberSeenModels,
       rememberStartupSeed,
       requestJson,
       resolveAgentKeyToConfig,

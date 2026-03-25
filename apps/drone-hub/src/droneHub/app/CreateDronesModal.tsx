@@ -1,4 +1,5 @@
 import React from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import type { ChatAgentConfig } from '../../domain';
 import { isValidDroneNameDashCase } from '../../domain';
 import type { DroneSummary } from '../types';
@@ -6,6 +7,8 @@ import { droneNameHasWhitespace } from './name-helpers';
 import { IconChevron, IconSpinner, IconTrash } from './icons';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
 import { filterSpawnAgentMenuEntriesForRuntime } from './drone-create-runtime';
+import { buildSpawnModelMenuEntries, getSpawnModelTriggerLabel } from './spawn-model-history';
+import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 
 type CreateDronesModalProps = {
   open: boolean;
@@ -111,6 +114,24 @@ export function CreateDronesModal({
   const hostRuntimeSelected = createMode !== 'clone' && createRuntime === 'host';
   const hostCustomAgentsUnsupported = hostRuntimeSelected;
   const filteredSpawnAgentMenuEntries = filterSpawnAgentMenuEntriesForRuntime(createRuntime, spawnAgentMenuEntries);
+  const { seenModelIds } = useDroneHubUiStore(
+    useShallow((s) => ({
+      seenModelIds: s.seenModelIds,
+    })),
+  );
+  const spawnModelMenuEntries = React.useMemo(
+    () => buildSpawnModelMenuEntries(seenModelIds, spawnModel),
+    [seenModelIds, spawnModel],
+  );
+  const spawnModelTriggerLabel = React.useMemo(
+    () => getSpawnModelTriggerLabel(seenModelIds, spawnModel),
+    [seenModelIds, spawnModel],
+  );
+  const spawnModelMenuDisabled =
+    creating ||
+    (createMode === 'clone' && cloneIncludeChats) ||
+    spawnAgentConfig.kind !== 'builtin' ||
+    spawnModelMenuEntries.length <= 1;
 
   return (
     <div
@@ -382,6 +403,20 @@ export function CreateDronesModal({
                 Model for created drones (optional)
               </div>
               <div className="flex items-center gap-2">
+                <UiMenuSelect
+                  variant="form"
+                  value={spawnModel}
+                  onValueChange={onSpawnModelChange}
+                  entries={spawnModelMenuEntries}
+                  disabled={spawnModelMenuDisabled}
+                  triggerClassName="w-[190px] flex-none"
+                  panelClassName="right-auto w-[360px] max-w-[calc(100vw-3rem)]"
+                  menuClassName="max-h-[240px] overflow-y-auto"
+                  title="Choose from models already seen in existing drones."
+                  triggerLabel={spawnModelTriggerLabel}
+                  triggerLabelClassName="font-mono"
+                  chevron={(menuOpen) => <IconChevron down={!menuOpen} className="text-[var(--muted-dim)] opacity-70 flex-shrink-0" />}
+                />
                 <input
                   value={spawnModel}
                   onChange={(e) => onSpawnModelChange(e.target.value)}

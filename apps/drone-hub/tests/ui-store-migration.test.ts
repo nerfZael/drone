@@ -8,6 +8,7 @@ describe('drone hub ui store migration', () => {
       {
         sidebarGroupingMode: 'repos',
         autoDelete: true,
+        seenModelIds: ['gpt-5.4', 'o3'],
         automations: [
           {
             id: 'automation-a',
@@ -23,6 +24,7 @@ describe('drone hub ui store migration', () => {
     expect(migrated).toMatchObject({
       sidebarGroupingMode: 'repos',
       autoDelete: true,
+      seenModelIds: ['gpt-5.4', 'o3'],
     });
     expect(Array.isArray(migrated.automations)).toBe(true);
     expect((migrated.automations ?? [])[0]).toMatchObject({

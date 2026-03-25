@@ -4,6 +4,7 @@ import type { ChatAgentConfig } from '../../domain';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
 import { IconChevron } from './icons';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
+import { buildSpawnModelMenuEntries, getSpawnModelTriggerLabel } from './spawn-model-history';
 
 type SpawnContextToolbarProps = {
   agentMenuEntries: UiMenuSelectEntry[];
@@ -35,6 +36,7 @@ export function SpawnContextToolbar({
   const {
     spawnAgentKey,
     spawnModel,
+    seenModelIds,
     chatHeaderRepoPath,
     setSpawnAgentKey,
     setSpawnModel,
@@ -43,12 +45,22 @@ export function SpawnContextToolbar({
     useShallow((s) => ({
       spawnAgentKey: s.spawnAgentKey,
       spawnModel: s.spawnModel,
+      seenModelIds: s.seenModelIds,
       chatHeaderRepoPath: s.chatHeaderRepoPath,
       setSpawnAgentKey: s.setSpawnAgentKey,
       setSpawnModel: s.setSpawnModel,
       setChatHeaderRepoPath: s.setChatHeaderRepoPath,
     })),
   );
+  const spawnModelMenuEntries = React.useMemo(
+    () => buildSpawnModelMenuEntries(seenModelIds, spawnModel),
+    [seenModelIds, spawnModel],
+  );
+  const spawnModelTriggerLabel = React.useMemo(
+    () => getSpawnModelTriggerLabel(seenModelIds, spawnModel),
+    [seenModelIds, spawnModel],
+  );
+  const spawnModelMenuDisabled = controlsLocked || spawnModelMenuEntries.length <= 1;
 
   return (
     <>
@@ -89,6 +101,20 @@ export function SpawnContextToolbar({
           <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
             Model
           </span>
+          <UiMenuSelect
+            variant="toolbar"
+            value={spawnModel}
+            onValueChange={setSpawnModel}
+            entries={spawnModelMenuEntries}
+            disabled={spawnModelMenuDisabled}
+            triggerClassName="min-w-[140px] max-w-[180px]"
+            panelClassName="w-[320px]"
+            menuClassName="max-h-[220px] overflow-y-auto"
+            title={modelTitle}
+            triggerLabel={spawnModelTriggerLabel}
+            triggerLabelClassName="font-mono"
+            chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
+          />
           <input
             value={spawnModel}
             onChange={(event) => setSpawnModel(event.target.value)}

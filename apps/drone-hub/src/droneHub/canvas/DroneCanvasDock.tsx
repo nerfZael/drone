@@ -18,6 +18,7 @@ import {
 } from '../app/drone-hub-dnd';
 import { isShortcutMatch } from '../app/shortcuts';
 import { resolveCanvasChatDisplay } from '../app/chat-node-helpers';
+import { buildSpawnModelMenuEntries, getSpawnModelTriggerLabel } from '../app/spawn-model-history';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { TypingDots } from '../overview/icons';
 import { CanvasMessageBar } from './CanvasMessageBar';
@@ -575,12 +576,26 @@ export function DroneCanvasDock({
     () => String(draftRepoLabel ?? '').trim(),
     [draftRepoLabel],
   );
-  const { createDraftShortcutBinding, focusPrimaryChatInputShortcutBinding } = useDroneHubUiStore(
+  const {
+    createDraftShortcutBinding,
+    focusPrimaryChatInputShortcutBinding,
+    seenModelIds,
+  } = useDroneHubUiStore(
     useShallow((s) => ({
       createDraftShortcutBinding: s.shortcutBindings.createDraftDrone,
       focusPrimaryChatInputShortcutBinding: s.shortcutBindings.focusPrimaryChatInput,
+      seenModelIds: s.seenModelIds,
     })),
   );
+  const spawnModelMenuEntries = React.useMemo(
+    () => buildSpawnModelMenuEntries(seenModelIds, normalizedSpawnModel),
+    [normalizedSpawnModel, seenModelIds],
+  );
+  const spawnModelTriggerLabel = React.useMemo(
+    () => getSpawnModelTriggerLabel(seenModelIds, normalizedSpawnModel),
+    [normalizedSpawnModel, seenModelIds],
+  );
+  const spawnModelMenuDisabled = controlsDisabled || spawnModelMenuEntries.length <= 1;
 
   React.useEffect(() => {
     const known = new Set(nodeOrder);
@@ -1916,6 +1931,19 @@ export function DroneCanvasDock({
               <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
                 Model
               </span>
+              <UiMenuSelect
+                variant="toolbar"
+                value={normalizedSpawnModel}
+                onValueChange={onSpawnModelChange}
+                entries={spawnModelMenuEntries}
+                disabled={spawnModelMenuDisabled}
+                triggerClassName="min-w-[130px] max-w-[180px]"
+                panelClassName="w-[320px]"
+                menuClassName="max-h-[220px] overflow-y-auto"
+                title="Choose from models already seen in existing drones."
+                triggerLabel={spawnModelTriggerLabel}
+                triggerLabelClassName="font-mono"
+              />
               <input
                 value={normalizedSpawnModel}
                 onChange={(event) => onSpawnModelChange(event.target.value)}

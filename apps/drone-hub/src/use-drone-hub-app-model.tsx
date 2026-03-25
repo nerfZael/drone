@@ -197,6 +197,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setFsExplorerView,
     setSpawnAgentKey,
     setSpawnModel,
+    rememberSeenModels,
     setPullHostBranchBeforeCreate,
     setCustomAgents,
     setCustomAgentModalOpen,
@@ -711,6 +712,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     resolveAgentKeyToConfig,
     queueDrones,
     rememberStartupSeed,
+    rememberSeenModels,
   });
 
   const {
@@ -1135,6 +1137,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       requestJson,
       suggestAndRenameDraftDrone,
       rememberStartupSeed,
+      rememberSeenModels,
       isValidDroneName: isValidDroneNameDashCase,
       hasWhitespaceInNameRaw: droneNameHasWhitespace,
       setCreateError,
@@ -1539,6 +1542,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       ? `builtin:${currentAgent.id}`
       : `custom:${currentAgent.id}`;
   React.useEffect(() => {
+    rememberSeenModels([currentModel, ...chatModels.map((model) => model.id)]);
+  }, [chatModels, currentModel, rememberSeenModels]);
+  React.useEffect(() => {
     const droneId = String(selectedDrone ?? '').trim();
     const chatName = String(selectedChat ?? '').trim() || 'default';
     if (!droneId) {
@@ -1933,6 +1939,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         const droneName = String((data as any)?.name ?? '').trim() || droneId;
         if (!droneId) return { ok: false, error: 'Failed creating drone: missing id.' };
 
+        if (seedModel) rememberSeenModels([seedModel]);
         rememberStartupSeed([{ id: droneId, name: droneName }], {
           runtime: 'container',
           agent: seedAgent,
@@ -1959,6 +1966,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       spawnModel,
       preferredSelectedDroneHoldUntilRef,
       preferredSelectedDroneRef,
+      rememberSeenModels,
       rememberStartupSeed,
       requestJson,
       suggestAndRenameDraftDrone,

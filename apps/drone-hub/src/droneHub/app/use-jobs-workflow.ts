@@ -52,6 +52,7 @@ type UseJobsWorkflowArgs = {
       repoPath?: string | null;
     },
   ) => void;
+  rememberSeenModels: (models: Iterable<string | null | undefined>) => void;
 };
 
 export function useJobsWorkflow({
@@ -63,6 +64,7 @@ export function useJobsWorkflow({
   resolveAgentKeyToConfig,
   queueDrones,
   rememberStartupSeed,
+  rememberSeenModels,
 }: UseJobsWorkflowArgs) {
   const [parsingJobsByTurn, setParsingJobsByTurn] = React.useState<Record<number, boolean>>({});
   const [jobsModal, setJobsModal] = React.useState<JobsModalState | null>(null);
@@ -181,6 +183,7 @@ export function useJobsWorkflow({
           return false;
         }
 
+        if (seedModel) rememberSeenModels([seedModel]);
         rememberStartupSeed([{ id: String(acceptedEntry.id), name }], {
           runtime: 'container',
           agent: seedAgent,
@@ -200,7 +203,7 @@ export function useJobsWorkflow({
         setSpawningJobById((prev) => ({ ...prev, [job.id]: false }));
       }
     },
-    [queueDrones, rememberStartupSeed, resolveAgentKeyToConfig, spawnModelForSeed],
+    [queueDrones, rememberSeenModels, rememberStartupSeed, resolveAgentKeyToConfig, spawnModelForSeed],
   );
 
   const spawnAllDronesForJobs = React.useCallback(
@@ -300,6 +303,7 @@ export function useJobsWorkflow({
       }
 
       if (acceptedNames.size > 0) {
+        if (seedModel) rememberSeenModels([seedModel]);
         const acceptedList = Array.isArray(resp?.accepted) ? resp.accepted : [];
         const idByName = new Map<string, string>();
         for (const a of acceptedList) {
@@ -323,7 +327,7 @@ export function useJobsWorkflow({
       }
       return { accepted: acceptedNames.size, rejected: rejected.length };
     },
-    [queueDrones, rememberStartupSeed, resolveAgentKeyToConfig, spawnedJobById, spawnModelForSeed],
+    [queueDrones, rememberSeenModels, rememberStartupSeed, resolveAgentKeyToConfig, spawnedJobById, spawnModelForSeed],
   );
 
   const spawnOneFromJobsModal = React.useCallback(
