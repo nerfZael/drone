@@ -80,7 +80,7 @@ export function KanbanTaskPlaybookButtonEditor({
                   <button
                     type="button"
                     onClick={() => onRemoveTaskPlaybookButton(button.id)}
-                    className="inline-flex h-9 items-center rounded-lg border border-[rgba(255,90,90,.15)] bg-[rgba(255,90,90,.06)] px-3 text-[10px] font-semibold uppercase tracking-wide text-[var(--red)] transition-all hover:bg-[rgba(255,90,90,.14)] hover:border-[rgba(255,90,90,.25)]"
+                    className="inline-flex h-9 items-center justify-self-start rounded-lg border border-[rgba(255,90,90,.15)] bg-[rgba(255,90,90,.06)] px-3 text-[10px] font-semibold uppercase tracking-wide text-[var(--red)] transition-all hover:bg-[rgba(255,90,90,.14)] hover:border-[rgba(255,90,90,.25)]"
                     style={{ fontFamily: 'var(--display)' }}
                   >
                     Remove
