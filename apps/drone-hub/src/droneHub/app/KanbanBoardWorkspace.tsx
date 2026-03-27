@@ -32,6 +32,7 @@ import {
   type KanbanLane,
   type KanbanTaskType,
 } from './kanban-board-state';
+import { shouldApplySuggestedKanbanTitle } from './kanban-generated-title-state';
 import { IconBoard, IconPlus, IconTrash } from './icons';
 import { KanbanTaskDetailsDialog } from './KanbanTaskDetailsDialog';
 import { KanbanTaskTypeEditor } from './KanbanTaskTypeEditor';
@@ -329,6 +330,7 @@ export function KanbanBoardWorkspace({
   const [typesEditorOpen, setTypesEditorOpen] = React.useState(false);
   const [selectedCardRef, setSelectedCardRef] = React.useState<KanbanCardRef | null>(null);
   const [activeDragCardId, setActiveDragCardId] = React.useState<string | null>(null);
+  const pendingGeneratedTitleByCardIdRef = React.useRef(new Map<string, string>());
   const laneCount = board.lanes.length;
   const activeTaskTypes = React.useMemo(
     () => board.taskTypes.filter((item) => item.active !== false),
@@ -480,6 +482,7 @@ export function KanbanBoardWorkspace({
       const laneId = String(laneIdRaw ?? '').trim();
       const cardId = String(cardIdRaw ?? '').trim();
       if (!laneId || !cardId) return;
+      if (Object.prototype.hasOwnProperty.call(patch, 'title')) pendingGeneratedTitleByCardIdRef.current.delete(cardId);
       onBoardChange((prev) => ({
         ...prev,
         lanes: prev.lanes.map((lane) =>
@@ -512,6 +515,7 @@ export function KanbanBoardWorkspace({
       const laneId = String(laneIdRaw ?? '').trim();
       const cardId = String(cardIdRaw ?? '').trim();
       if (!laneId || !cardId) return;
+      pendingGeneratedTitleByCardIdRef.current.delete(cardId);
       onBoardChange((prev) => ({
         ...prev,
         lanes: prev.lanes.map((lane) =>
@@ -591,10 +595,16 @@ export function KanbanBoardWorkspace({
       const nextCard = addCard(firstLaneId, parsed);
       if (!parsed.needsGeneratedTitle || !nextCard) return;
       const provisionalTitle = nextCard.title;
+      pendingGeneratedTitleByCardIdRef.current.set(nextCard.id, provisionalTitle);
       void onSuggestCardTitleFromPaste(parsed.description)
         .then((suggestedTitle) => {
           const title = String(suggestedTitle ?? '').trim();
-          if (!title) return;
+          if (!title) {
+            pendingGeneratedTitleByCardIdRef.current.delete(nextCard.id);
+            return;
+          }
+          const pendingProvisionalTitle = pendingGeneratedTitleByCardIdRef.current.get(nextCard.id);
+          pendingGeneratedTitleByCardIdRef.current.delete(nextCard.id);
           onBoardChange((prev) => ({
             ...prev,
             lanes: prev.lanes.map((lane) =>
@@ -602,7 +612,12 @@ export function KanbanBoardWorkspace({
                 ? {
                     ...lane,
                     cards: lane.cards.map((card) =>
-                      card.id === nextCard.id && (!card.title.trim() || card.title === provisionalTitle)
+                      card.id === nextCard.id &&
+                      shouldApplySuggestedKanbanTitle({
+                        pendingProvisionalTitle,
+                        provisionalTitle,
+                        currentTitle: card.title,
+                      })
                         ? { ...card, title }
                         : card,
                     ),
@@ -611,9 +626,11 @@ export function KanbanBoardWorkspace({
             ),
           }));
         })
-        .catch(() => {});
+        .catch(() => {
+          pendingGeneratedTitleByCardIdRef.current.delete(nextCard.id);
+        });
     },
-    [addCard, board.lanes, controlsLocked, defaultCreateTypeId, onBoardChange, onSuggestCardTitleFromPaste],
+    [addCard, board.lanes, controlsLocked, onBoardChange, onSuggestCardTitleFromPaste],
   );
 
   const toggleTypeFilter = React.useCallback((typeIdRaw: string) => {
@@ -954,6 +971,11 @@ export function KanbanBoardWorkspace({
           selectedCardEntry?.card.droneId && availableDroneIdSet.has(String(selectedCardEntry.card.droneId)),
         )}
         onClose={() => setSelectedCardRef(null)}
+        onTitleDraftChange={() => {
+          const cardId = String(selectedCardEntry?.card.id ?? '').trim();
+          if (!cardId) return;
+          pendingGeneratedTitleByCardIdRef.current.delete(cardId);
+        }}
         onUpdate={(patch) => {
           if (!selectedCardEntry) return;
           updateCard(selectedCardEntry.lane.id, selectedCardEntry.card.id, patch);

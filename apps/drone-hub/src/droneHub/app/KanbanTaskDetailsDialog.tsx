@@ -11,6 +11,7 @@ type KanbanTaskDetailsDialogProps = {
   controlsLocked: boolean;
   creatorDroneAvailable: boolean;
   onClose: () => void;
+  onTitleDraftChange: () => void;
   onUpdate: (patch: { title?: string; description?: string; typeId?: string }) => void;
   onDelete: () => void;
   onOpenCreatorDrone: () => void;
@@ -23,6 +24,7 @@ export function KanbanTaskDetailsDialog({
   controlsLocked,
   creatorDroneAvailable,
   onClose,
+  onTitleDraftChange,
   onUpdate,
   onDelete,
   onOpenCreatorDrone,
@@ -150,6 +152,7 @@ export function KanbanTaskDetailsDialog({
                 value={draftTitle}
                 onChange={(event) => {
                   titleDirtyRef.current = true;
+                  onTitleDraftChange();
                   setDraftTitle(event.target.value);
                 }}
                 onBlur={commitTitleDraft}
