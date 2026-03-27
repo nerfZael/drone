@@ -848,8 +848,8 @@ async function main() {
 
       if (method === 'GET' && pathname === '/v1/tasks') {
         const snapshot = await loadTaskStateSnapshot(dataDir);
-        if (!snapshot.enabled || !snapshot.playbook?.id) {
-          json(res, 409, { error: 'this drone was not created by a playbook' });
+        if (!snapshot.enabled) {
+          json(res, 409, { error: 'task CLI is not enabled for this drone' });
           return;
         }
         const typeIds = u.searchParams.getAll('type').map((item) => String(item ?? '').trim()).filter(Boolean);
@@ -859,8 +859,8 @@ async function main() {
 
       if (method === 'GET' && pathname === '/v1/tasks/search') {
         const snapshot = await loadTaskStateSnapshot(dataDir);
-        if (!snapshot.enabled || !snapshot.playbook?.id) {
-          json(res, 409, { error: 'this drone was not created by a playbook' });
+        if (!snapshot.enabled) {
+          json(res, 409, { error: 'task CLI is not enabled for this drone' });
           return;
         }
         const query = String(u.searchParams.get('q') ?? '').trim();
@@ -881,8 +881,8 @@ async function main() {
         const body = await readJson(req);
         const result = await withTaskStateMutationLock(async () => {
           const snapshot = await loadTaskStateSnapshot(dataDir);
-          if (!snapshot.enabled || !snapshot.playbook?.id) {
-            return { status: 409, body: { error: 'this drone was not created by a playbook' } };
+          if (!snapshot.enabled) {
+            return { status: 409, body: { error: 'task CLI is not enabled for this drone' } };
           }
           const title = String(body?.title ?? '').trim();
           const description = String(body?.description ?? '');
@@ -916,8 +916,8 @@ async function main() {
 
       if (method === 'GET' && pathname === '/v1/tasks/pending-creates') {
         const snapshot = await loadTaskStateSnapshot(dataDir);
-        if (!snapshot.enabled || !snapshot.playbook?.id) {
-          json(res, 409, { error: 'this drone was not created by a playbook' });
+        if (!snapshot.enabled) {
+          json(res, 409, { error: 'task CLI is not enabled for this drone' });
           return;
         }
         json(res, 200, {
@@ -932,8 +932,8 @@ async function main() {
 
       if (method === 'GET' && pathname === '/v1/tasks/pending-deletes') {
         const snapshot = await loadTaskStateSnapshot(dataDir);
-        if (!snapshot.enabled || !snapshot.playbook?.id) {
-          json(res, 409, { error: 'this drone was not created by a playbook' });
+        if (!snapshot.enabled) {
+          json(res, 409, { error: 'task CLI is not enabled for this drone' });
           return;
         }
         json(res, 200, {
@@ -950,8 +950,8 @@ async function main() {
         const taskId = decodeURIComponent(pathname.slice('/v1/tasks/'.length));
         const result = await withTaskStateMutationLock(async () => {
           const snapshot = await loadTaskStateSnapshot(dataDir);
-          if (!snapshot.enabled || !snapshot.playbook?.id) {
-            return { status: 409, body: { error: 'this drone was not created by a playbook' } };
+          if (!snapshot.enabled) {
+            return { status: 409, body: { error: 'task CLI is not enabled for this drone' } };
           }
           const task = findTaskById(snapshot, taskId);
           if (!task) {
@@ -977,8 +977,8 @@ async function main() {
 
       if (method === 'GET' && /^\/v1\/tasks\/[^/]+$/.test(pathname)) {
         const snapshot = await loadTaskStateSnapshot(dataDir);
-        if (!snapshot.enabled || !snapshot.playbook?.id) {
-          json(res, 409, { error: 'this drone was not created by a playbook' });
+        if (!snapshot.enabled) {
+          json(res, 409, { error: 'task CLI is not enabled for this drone' });
           return;
         }
         const taskId = decodeURIComponent(pathname.slice('/v1/tasks/'.length));

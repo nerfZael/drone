@@ -162,14 +162,14 @@ export function taskTypeLabel(board: TaskBoardState, typeIdRaw: unknown): string
   return board.taskTypes.find((item) => item.id === typeId)?.label ?? (typeId || 'Task');
 }
 
-export function listScopedTasksForPlaybook(board: TaskBoardState, playbookIdRaw: unknown, repoPathRaw: unknown): TaskBoardScopedTask[] {
-  const playbookId = String(playbookIdRaw ?? '').trim();
+export function listScopedTasksForDroneScope(board: TaskBoardState, repoPathRaw: unknown, playbookIdRaw?: unknown): TaskBoardScopedTask[] {
   const repoPath = String(repoPathRaw ?? '').trim();
+  const playbookId = String(playbookIdRaw ?? '').trim();
   const out: TaskBoardScopedTask[] = [];
   for (const lane of board.lanes) {
     for (const card of lane.cards) {
-      if (String(card.playbookId ?? '').trim() !== playbookId) continue;
       if (String(card.repoPath ?? '').trim() !== repoPath) continue;
+      if (playbookId && String(card.playbookId ?? '').trim() !== playbookId) continue;
       out.push({
         ...card,
         typeLabel: taskTypeLabel(board, card.typeId),
@@ -183,6 +183,10 @@ export function listScopedTasksForPlaybook(board: TaskBoardState, playbookIdRaw:
     const bMs = Date.parse(b.updatedAt || b.createdAt);
     return (Number.isFinite(bMs) ? bMs : 0) - (Number.isFinite(aMs) ? aMs : 0);
   });
+}
+
+export function listScopedTasksForPlaybook(board: TaskBoardState, playbookIdRaw: unknown, repoPathRaw: unknown): TaskBoardScopedTask[] {
+  return listScopedTasksForDroneScope(board, repoPathRaw, playbookIdRaw);
 }
 
 export function findScopedTaskById(board: TaskBoardState, taskIdRaw: unknown): TaskBoardScopedTask | null {
@@ -220,12 +224,14 @@ export function removeScopedTaskFromBoard(
   const taskId = String(taskIdRaw ?? '').trim();
   const playbookId = String(playbookIdRaw ?? '').trim();
   const repoPath = String(repoPathRaw ?? '').trim();
-  if (!taskId || !playbookId || !repoPath) return { board, removed: false };
+  if (!taskId) return { board, removed: false };
   let removed = false;
   const lanes = board.lanes.map((lane) => {
     const cards = lane.cards.filter((card) => {
       const matchesTask =
-        card.id === taskId && String(card.playbookId ?? '').trim() === playbookId && String(card.repoPath ?? '').trim() === repoPath;
+        card.id === taskId &&
+        String(card.repoPath ?? '').trim() === repoPath &&
+        (!playbookId || String(card.playbookId ?? '').trim() === playbookId);
       if (matchesTask) removed = true;
       return !matchesTask;
     });

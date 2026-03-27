@@ -81,7 +81,7 @@ import {
   fallbackTaskTypeId,
   findScopedTaskById,
   getTaskBoardStateFromRegistry,
-  listScopedTasksForPlaybook,
+  listScopedTasksForDroneScope,
   normalizeTaskTitle,
   normalizeTaskTypeId,
   persistTaskBoardState,
@@ -786,22 +786,8 @@ async function listFleetMessagesForTarget(targetId: string, chatNameRaw: unknown
 function buildTaskStateSnapshotForDrone(regAny: any, droneId: string, droneEntry: any) {
   const playbook = playbookMetaFromEntry(droneEntry?.playbook);
   const repoPath = String(droneEntry?.repoPath ?? '').trim();
-  if (normalizeDroneEntryKind(droneEntry?.kind) !== 'playbook-run' || !playbook) {
-    return {
-      enabled: false,
-      actor: {
-        id: droneId,
-        name: String(droneEntry?.name ?? droneId).trim() || droneId,
-      },
-      playbook: null,
-      repoPath: repoPath || null,
-      taskTypes: [],
-      tasks: [],
-      updatedAt: nowIso(),
-    };
-  }
   const board = getTaskBoardStateFromRegistry(regAny);
-  const tasks = listScopedTasksForPlaybook(board, playbook.id, repoPath).map((item) => ({
+  const tasks = listScopedTasksForDroneScope(board, repoPath, playbook?.id).map((item) => ({
     id: item.id,
     title: item.title,
     description: item.description,
@@ -826,10 +812,12 @@ function buildTaskStateSnapshotForDrone(regAny: any, droneId: string, droneEntry
       id: droneId,
       name: String(droneEntry?.name ?? droneId).trim() || droneId,
     },
-    playbook: {
-      id: playbook.id,
-      label: playbook.label,
-    },
+    playbook: playbook
+      ? {
+          id: playbook.id,
+          label: playbook.label,
+        }
+      : null,
     repoPath: repoPath || null,
     taskTypes: board.taskTypes,
     tasks,
@@ -907,7 +895,7 @@ async function drainPendingTaskCreatesForDrone(droneId: string, droneEntry: any)
     await updateRegistry((regLatest: any) => {
       const latestDrone = regLatest?.drones?.[droneId] ?? null;
       const playbook = playbookMetaFromEntry(latestDrone?.playbook);
-      if (!latestDrone || !playbook) return;
+      if (!latestDrone) return;
       const repoPath = String(latestDrone?.repoPath ?? '').trim();
       let board = getTaskBoardStateFromRegistry(regLatest);
       const fallbackType = fallbackTaskTypeId(board.taskTypes);
@@ -928,8 +916,12 @@ async function drainPendingTaskCreatesForDrone(droneId: string, droneEntry: any)
           repoPath,
           droneId,
           droneName: String(latestDrone?.name ?? droneId).trim() || droneId,
-          playbookId: playbook.id,
-          playbookLabel: playbook.label,
+          ...(playbook
+            ? {
+                playbookId: playbook.id,
+                playbookLabel: playbook.label,
+              }
+            : {}),
         });
         acceptedIds.add(requestId);
       }
@@ -959,14 +951,14 @@ async function drainPendingTaskDeletesForDrone(droneId: string, droneEntry: any)
     await updateRegistry((regLatest: any) => {
       const latestDrone = regLatest?.drones?.[droneId] ?? null;
       const playbook = playbookMetaFromEntry(latestDrone?.playbook);
-      if (!latestDrone || !playbook) return;
+      if (!latestDrone) return;
       const repoPath = String(latestDrone?.repoPath ?? '').trim();
       let board = getTaskBoardStateFromRegistry(regLatest);
       for (const request of requests) {
         const requestId = String(request?.id ?? '').trim();
         const taskId = String(request?.taskId ?? '').trim();
         if (!requestId || !taskId) continue;
-        const removed = removeScopedTaskFromBoard(board, taskId, playbook.id, repoPath);
+        const removed = removeScopedTaskFromBoard(board, taskId, playbook?.id ?? '', repoPath);
         board = removed.board;
         if (removed.removed) boardChanged = true;
         acknowledgedIds.add(requestId);

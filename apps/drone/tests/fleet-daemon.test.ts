@@ -375,4 +375,98 @@ describeSocketSuite('fleet daemon', () => {
     expect(pendingResponse.status).toBe(200);
     expect(pendingData?.requests).toMatchObject([{ title: 'Toolbar button overlaps on mobile', typeId: 'bug' }]);
   });
+
+  test('allows non-playbook drones to use the task CLI when task snapshots are enabled', async () => {
+    const port = await allocatePort();
+    const dataDir = path.join(tempRoot, `daemon-${port}`);
+    fs.mkdirSync(dataDir, { recursive: true });
+    const token = 'daemon-token';
+    const daemon = Bun.spawn([process.execPath, daemonEntry, '--host', '127.0.0.1', '--port', String(port), '--data-dir', dataDir, '--token', token], {
+      cwd: process.cwd(),
+      stdout: 'ignore',
+      stderr: 'pipe',
+    });
+    processes.push(daemon);
+    const baseUrl = `http://127.0.0.1:${port}`;
+    await waitForHealth(baseUrl, token, daemon);
+
+    const setResponse = await fetch(`${baseUrl}/v1/tasks/state`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        enabled: true,
+        actor: { id: 'drone-standard', name: 'Drone Standard' },
+        repoPath: '/tmp/repo-under-test',
+        taskTypes: [{ id: 'bug', label: 'Bug', active: true }],
+        tasks: [
+          {
+            id: 'task-1',
+            title: 'Crash when opening settings',
+            description: 'Repro on first load.',
+            typeId: 'bug',
+            typeLabel: 'Bug',
+            laneId: 'lane-1',
+            laneTitle: 'To do',
+            createdAt: '2026-03-24T00:00:00.000Z',
+            updatedAt: '2026-03-24T00:00:00.000Z',
+            droneId: 'drone-standard',
+            droneName: 'Drone Standard',
+          },
+        ],
+      }),
+    });
+    expect(setResponse.status).toBe(200);
+
+    const listResponse = await fetch(`${baseUrl}/v1/tasks`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const listData: any = await listResponse.json();
+    expect(listResponse.status).toBe(200);
+    expect(listData?.playbook).toBeNull();
+    expect(listData?.repoPath).toBe('/tmp/repo-under-test');
+    expect(listData?.tasks).toMatchObject([{ id: 'task-1', title: 'Crash when opening settings', typeId: 'bug' }]);
+
+    const createResponse = await fetch(`${baseUrl}/v1/tasks`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        title: 'Fix empty state spacing',
+        typeId: 'bug',
+      }),
+    });
+    const createData: any = await createResponse.json();
+    expect(createResponse.status).toBe(202);
+    expect(createData?.queued).toBe(true);
+
+    const pendingCreateResponse = await fetch(`${baseUrl}/v1/tasks/pending-creates`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const pendingCreateData: any = await pendingCreateResponse.json();
+    expect(pendingCreateResponse.status).toBe(200);
+    expect(pendingCreateData?.playbook).toBeNull();
+    expect(pendingCreateData?.requests).toMatchObject([{ title: 'Fix empty state spacing', typeId: 'bug' }]);
+
+    const deleteResponse = await fetch(`${baseUrl}/v1/tasks/${encodeURIComponent('task-1')}`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const deleteData: any = await deleteResponse.json();
+    expect(deleteResponse.status).toBe(202);
+    expect(deleteData?.queued).toBe(true);
+    expect(deleteData?.request?.taskId).toBe('task-1');
+
+    const pendingDeleteResponse = await fetch(`${baseUrl}/v1/tasks/pending-deletes`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const pendingDeleteData: any = await pendingDeleteResponse.json();
+    expect(pendingDeleteResponse.status).toBe(200);
+    expect(pendingDeleteData?.playbook).toBeNull();
+    expect(pendingDeleteData?.requests).toMatchObject([{ taskId: 'task-1' }]);
+  });
 });
