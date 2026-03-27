@@ -1,5 +1,6 @@
 import React from 'react';
 import type { KanbanCard, KanbanTaskType } from './kanban-board-state';
+import { KANBAN_TASK_UNTITLED_FALLBACK, resolveCommittedKanbanTaskTitle } from './kanban-task-details-dialog-state';
 import { MarkdownMessage } from '../chat/MarkdownMessage';
 import { IconPencil } from './icons';
 
@@ -27,12 +28,38 @@ export function KanbanTaskDetailsDialog({
   onOpenCreatorDrone,
 }: KanbanTaskDetailsDialogProps) {
   const [editingDescription, setEditingDescription] = React.useState(false);
+  const [draftTitle, setDraftTitle] = React.useState('');
   const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
+  const titleDirtyRef = React.useRef(false);
+  const backdropPressedRef = React.useRef(false);
   const cardId = card?.id ?? null;
+
+  const commitTitleDraft = React.useCallback(() => {
+    if (!card) return;
+    const wasDirty = titleDirtyRef.current;
+    const nextTitle = resolveCommittedKanbanTaskTitle(draftTitle, card.title);
+    titleDirtyRef.current = false;
+    if (wasDirty && nextTitle !== draftTitle) setDraftTitle(nextTitle);
+    if (!wasDirty) return;
+    if (nextTitle !== card.title) onUpdate({ title: nextTitle });
+  }, [card, draftTitle, onUpdate]);
+
+  const handleRequestClose = React.useCallback(() => {
+    commitTitleDraft();
+    onClose();
+  }, [commitTitleDraft, onClose]);
 
   React.useEffect(() => {
     setEditingDescription(false);
+    setDraftTitle(card?.title ?? '');
+    titleDirtyRef.current = false;
+    backdropPressedRef.current = false;
   }, [cardId]);
+
+  React.useEffect(() => {
+    if (titleDirtyRef.current) return;
+    setDraftTitle(card?.title ?? '');
+  }, [card?.title, cardId]);
 
   React.useEffect(() => {
     if (!card) return;
@@ -44,11 +71,11 @@ export function KanbanTaskDetailsDialog({
       }
       event.preventDefault();
       event.stopPropagation();
-      onClose();
+      handleRequestClose();
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [cardId, onClose, editingDescription]);
+  }, [cardId, editingDescription, handleRequestClose]);
 
   React.useEffect(() => {
     if (editingDescription && textareaRef.current) {
@@ -67,7 +94,20 @@ export function KanbanTaskDetailsDialog({
       role="dialog"
       aria-modal="true"
       aria-label="Task details"
-      onClick={onClose}
+      onPointerDown={(event) => {
+        backdropPressedRef.current = event.target === event.currentTarget;
+      }}
+      onPointerUp={(event) => {
+        if (!backdropPressedRef.current || event.target !== event.currentTarget) {
+          backdropPressedRef.current = false;
+          return;
+        }
+        backdropPressedRef.current = false;
+        handleRequestClose();
+      }}
+      onPointerCancel={() => {
+        backdropPressedRef.current = false;
+      }}
     >
       <div
         className="animate-slide-up w-full max-w-[720px] overflow-hidden rounded-2xl border border-[rgba(167,139,250,.12)] bg-[rgba(16,18,22,.98)] shadow-[0_32px_100px_rgba(0,0,0,.6),0_0_40px_rgba(167,139,250,.04)]"
@@ -87,11 +127,11 @@ export function KanbanTaskDetailsDialog({
                   </span>
                 ) : null}
               </div>
-              <div className="mt-1.5 text-[12px] font-medium text-[var(--fg)]">{card.title || 'Untitled task'}</div>
+              <div className="mt-1.5 text-[12px] font-medium text-[var(--fg)]">{card.title || KANBAN_TASK_UNTITLED_FALLBACK}</div>
             </div>
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleRequestClose}
               className="inline-flex h-8 items-center justify-center rounded-lg border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)] transition-all hover:border-[var(--border)] hover:text-[var(--fg)]"
               style={{ fontFamily: 'var(--display)' }}
             >
@@ -107,8 +147,12 @@ export function KanbanTaskDetailsDialog({
               <label className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>Title</label>
               <input
                 type="text"
-                value={card.title}
-                onChange={(event) => onUpdate({ title: event.target.value })}
+                value={draftTitle}
+                onChange={(event) => {
+                  titleDirtyRef.current = true;
+                  setDraftTitle(event.target.value);
+                }}
+                onBlur={commitTitleDraft}
                 disabled={controlsLocked}
                 placeholder="Task title"
                 className="h-10 rounded-lg border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-3 text-[13px] text-[var(--fg)] transition-colors focus:outline-none focus:border-[var(--accent-muted)] focus:bg-[rgba(0,0,0,.28)] disabled:cursor-not-allowed disabled:opacity-60"
