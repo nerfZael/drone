@@ -163,6 +163,15 @@ type DroneRegistryV1 = {
       }>;
       updatedAt?: string;
     };
+    taskPlaybookButtons?: {
+      items?: Array<{
+        id?: string;
+        label?: string;
+        playbookId?: string;
+        taskTypeIds?: string[];
+      }>;
+      updatedAt?: string;
+    };
     uiPreferences?: {
       sidebarGroupingMode?: 'groups' | 'repos';
       sidebarGroupOrder?: string[];

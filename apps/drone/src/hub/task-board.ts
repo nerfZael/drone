@@ -185,6 +185,23 @@ export function listScopedTasksForPlaybook(board: TaskBoardState, playbookIdRaw:
   });
 }
 
+export function findScopedTaskById(board: TaskBoardState, taskIdRaw: unknown): TaskBoardScopedTask | null {
+  const taskId = String(taskIdRaw ?? '').trim();
+  if (!taskId) return null;
+  for (const lane of board.lanes) {
+    for (const card of lane.cards) {
+      if (card.id !== taskId) continue;
+      return {
+        ...card,
+        typeLabel: taskTypeLabel(board, card.typeId),
+        laneId: lane.id,
+        laneTitle: lane.title,
+      };
+    }
+  }
+  return null;
+}
+
 export function appendTaskToBoard(board: TaskBoardState, card: TaskBoardCard): TaskBoardState {
   const lanes = board.lanes.length > 0 ? board.lanes.map((lane) => ({ ...lane, cards: lane.cards.slice() })) : createDefaultTaskBoardState().lanes;
   lanes[0].cards.unshift(card);

@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 import { loadRegistry, updateRegistry } from '../host/registry';
 import {
   persistTaskBoardState,
+  normalizeTaskTypeId,
   sanitizeTaskBoardState,
   type TaskBoardCard as KanbanBoardCard,
   type TaskBoardLane as KanbanBoardLane,
@@ -110,6 +111,12 @@ export type EffectiveFilesystemSettings = {
   uploadMaxBytesSource: FilesystemSettingsSource;
 };
 export type { KanbanBoardTaskType, KanbanBoardCard, KanbanBoardLane, KanbanBoardSettings };
+export type TaskPlaybookButtonSettings = Array<{
+  id: string;
+  label: string;
+  playbookId: string;
+  taskTypeIds: string[];
+}>;
 export type UiAutomationSleepUnit = 'seconds' | 'minutes' | 'hours' | 'days';
 export type UiAutomationConfig = {
   id: string;
@@ -156,6 +163,8 @@ const UI_AUTOMATION_LABEL_MAX_CHARS = 72;
 const UI_AUTOMATION_PROMPT_MAX_CHARS = 8_000;
 const UI_AUTOMATION_ON_FAILURE_PROMPT_MAX_CHARS = 8_000;
 const UI_AUTOMATION_MAX_ITEMS = 40;
+const TASK_PLAYBOOK_BUTTON_LABEL_MAX_CHARS = 48;
+const TASK_PLAYBOOK_BUTTON_MAX_ITEMS = 60;
 
 export function parseLlmProvider(raw: unknown): LlmProviderId | null {
   const s = String(raw ?? '')
@@ -336,6 +345,36 @@ function sanitizeUiPreferencesSettings(value: unknown): UiPreferencesSettings {
     autoDelete: raw.autoDelete === true,
     automations: normalizeUiAutomationConfigs(raw.automations),
   };
+}
+
+function normalizeTaskPlaybookButtonLabel(value: unknown): string {
+  return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, TASK_PLAYBOOK_BUTTON_LABEL_MAX_CHARS);
+}
+
+function sanitizeTaskPlaybookButtonSettings(value: unknown): TaskPlaybookButtonSettings {
+  const list = Array.isArray(value) ? value : [];
+  const out: TaskPlaybookButtonSettings = [];
+  const seen = new Set<string>();
+  for (const item of list) {
+    const raw = item && typeof item === 'object' && !Array.isArray(item) ? (item as Record<string, unknown>) : {};
+    const id = String(raw.id ?? '').trim() || crypto.randomUUID();
+    if (!id || seen.has(id)) continue;
+    const label = normalizeTaskPlaybookButtonLabel(raw.label);
+    const playbookId = String(raw.playbookId ?? '').trim();
+    const taskTypeIds = Array.isArray(raw.taskTypeIds)
+      ? Array.from(new Set(raw.taskTypeIds.map((entry) => normalizeTaskTypeId(entry)).filter(Boolean)))
+      : [];
+    if (!label || !playbookId || taskTypeIds.length === 0) continue;
+    seen.add(id);
+    out.push({
+      id,
+      label,
+      playbookId,
+      taskTypeIds,
+    });
+    if (out.length >= TASK_PLAYBOOK_BUTTON_MAX_ITEMS) break;
+  }
+  return out;
 }
 
 function apiKeyHint(apiKey: string | null): string | null {
@@ -684,6 +723,46 @@ export async function resolveKanbanBoardSettingsResponse(): Promise<{
   return {
     ok: true,
     kanbanBoard: stored.board,
+    updatedAt: stored.updatedAt,
+  };
+}
+
+async function getStoredTaskPlaybookButtonSettings(): Promise<{ taskPlaybookButtons: TaskPlaybookButtonSettings; updatedAt: string | null }> {
+  const reg = await loadRegistry();
+  const raw = reg.settings?.taskPlaybookButtons;
+  const updatedAtRaw = raw?.updatedAt;
+  return {
+    taskPlaybookButtons: sanitizeTaskPlaybookButtonSettings(raw?.items),
+    updatedAt: typeof updatedAtRaw === 'string' && updatedAtRaw.trim() ? updatedAtRaw : null,
+  };
+}
+
+export async function upsertStoredTaskPlaybookButtonSettings(valueRaw: unknown): Promise<void> {
+  const taskPlaybookButtons = sanitizeTaskPlaybookButtonSettings(valueRaw);
+  const updatedAt = new Date().toISOString();
+  await updateRegistry((reg) => {
+    reg.settings ??= {};
+    reg.settings.taskPlaybookButtons = {
+      items: taskPlaybookButtons.map((item) => ({
+        id: item.id,
+        label: item.label,
+        playbookId: item.playbookId,
+        taskTypeIds: item.taskTypeIds.slice(),
+      })),
+      updatedAt,
+    };
+  });
+}
+
+export async function resolveTaskPlaybookButtonSettingsResponse(): Promise<{
+  ok: true;
+  taskPlaybookButtons: TaskPlaybookButtonSettings;
+  updatedAt: string | null;
+}> {
+  const stored = await getStoredTaskPlaybookButtonSettings();
+  return {
+    ok: true,
+    taskPlaybookButtons: stored.taskPlaybookButtons,
     updatedAt: stored.updatedAt,
   };
 }

@@ -3,31 +3,40 @@ import type { KanbanCard, KanbanTaskType } from './kanban-board-state';
 import { KANBAN_TASK_UNTITLED_FALLBACK, resolveCommittedKanbanTaskTitle } from './kanban-task-details-dialog-state';
 import { MarkdownMessage } from '../chat/MarkdownMessage';
 import { IconPencil } from './icons';
+import type { TaskPlaybookButton } from '../types';
 
 type KanbanTaskDetailsDialogProps = {
   card: KanbanCard | null;
   laneTitle: string | null;
   taskTypes: KanbanTaskType[];
+  taskPlaybookButtons: TaskPlaybookButton[];
   controlsLocked: boolean;
   creatorDroneAvailable: boolean;
+  taskButtonBusyId: string | null;
+  taskButtonError: string | null;
   onClose: () => void;
   onTitleDraftChange: () => void;
   onUpdate: (patch: { title?: string; description?: string; typeId?: string }) => void;
   onDelete: () => void;
   onOpenCreatorDrone: () => void;
+  onRunTaskPlaybookButton: (buttonId: string) => void;
 };
 
 export function KanbanTaskDetailsDialog({
   card,
   laneTitle,
   taskTypes,
+  taskPlaybookButtons,
   controlsLocked,
   creatorDroneAvailable,
+  taskButtonBusyId,
+  taskButtonError,
   onClose,
   onTitleDraftChange,
   onUpdate,
   onDelete,
   onOpenCreatorDrone,
+  onRunTaskPlaybookButton,
 }: KanbanTaskDetailsDialogProps) {
   const [editingDescription, setEditingDescription] = React.useState(false);
   const [draftTitle, setDraftTitle] = React.useState('');
@@ -89,6 +98,7 @@ export function KanbanTaskDetailsDialog({
   if (!card) return null;
   const activeTaskTypes = taskTypes.filter((item) => item.active !== false || item.id === card.typeId);
   const hasDescription = Boolean(card.description?.trim());
+  const taskButtonsDisabledReason = String(card.repoPath ?? '').trim() ? null : 'This task does not have a repo path yet.';
 
   return (
     <div
@@ -226,6 +236,42 @@ export function KanbanTaskDetailsDialog({
               </button>
             )}
           </div>
+
+          {taskPlaybookButtons.length > 0 ? (
+            <div className="rounded-xl border border-[var(--border-subtle)] bg-[rgba(255,255,255,.015)] px-4 py-3.5">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+                Task Buttons
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {taskPlaybookButtons.map((button) => {
+                  const busy = taskButtonBusyId === button.id;
+                  return (
+                    <button
+                      key={button.id}
+                      type="button"
+                      onClick={() => onRunTaskPlaybookButton(button.id)}
+                      disabled={controlsLocked || busy || Boolean(taskButtonsDisabledReason)}
+                      className={`inline-flex h-9 items-center justify-center rounded-lg border px-4 text-[10px] font-semibold uppercase tracking-wide transition-all ${
+                        controlsLocked || busy || taskButtonsDisabledReason
+                          ? 'cursor-not-allowed border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] text-[var(--muted-dim)] opacity-60'
+                          : 'border-[rgba(167,139,250,.2)] bg-[rgba(167,139,250,.08)] text-[var(--accent)] hover:bg-[rgba(167,139,250,.14)] hover:border-[rgba(167,139,250,.3)]'
+                      }`}
+                      style={{ fontFamily: 'var(--display)' }}
+                      title={taskButtonsDisabledReason ?? undefined}
+                    >
+                      {busy ? 'Launching…' : button.label}
+                    </button>
+                  );
+                })}
+              </div>
+              {taskButtonsDisabledReason ? (
+                <div className="mt-3 text-[11px] text-[var(--muted-dim)]">{taskButtonsDisabledReason}</div>
+              ) : null}
+              {taskButtonError ? (
+                <div className="mt-3 text-[11px] text-[var(--red)]">{taskButtonError}</div>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="rounded-xl border border-[var(--border-subtle)] bg-[rgba(255,255,255,.015)] px-4 py-3.5">
             <div className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>

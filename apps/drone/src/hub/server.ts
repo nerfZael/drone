@@ -67,6 +67,7 @@ import {
 import {
   appendTaskToBoard,
   fallbackTaskTypeId,
+  findScopedTaskById,
   getTaskBoardStateFromRegistry,
   listScopedTasksForPlaybook,
   normalizeTaskTitle,
@@ -170,12 +171,14 @@ import {
   resolveFilesystemSettingsResponse,
   resolveEffectiveProviderApiKeySettings,
   resolveLlmSettingsResponse,
+  resolveTaskPlaybookButtonSettingsResponse,
   resolveUiPreferencesSettingsResponse,
   upsertStoredDeleteActionSettings,
   upsertStoredFilesystemSettings,
   upsertStoredKanbanBoardSettings,
   upsertStoredLlmProvider,
   upsertStoredProviderApiKey,
+  upsertStoredTaskPlaybookButtonSettings,
   upsertStoredUiPreferencesSettings,
   type ArchiveRetentionId,
   type ArchiveRuntimePolicy,
@@ -2249,6 +2252,29 @@ type PlaybookDefinition = {
   updatedAt?: string;
 };
 
+type TaskTemplateContext = {
+  task: {
+    id: string;
+    title: string;
+    description: string;
+    typeId: string;
+    typeLabel: string;
+    laneId: string;
+    laneTitle: string;
+    repoPath: string;
+    droneId: string;
+    droneName: string;
+    playbookId: string;
+    playbookLabel: string;
+    chatName: string;
+    prompt: string;
+    promptId: string;
+    messageId: string;
+    createdAt: string;
+    updatedAt: string;
+  };
+};
+
 type PlaybookRunStatus = 'starting' | 'running' | 'completed' | 'failed';
 type PlaybookRunQueueState = 'queued' | 'waiting' | 'launching' | 'error';
 
@@ -2277,6 +2303,78 @@ type PlaybookRunQueueGate = {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function buildTaskTemplateContext(task: ReturnType<typeof findScopedTaskById>): TaskTemplateContext | null {
+  if (!task) return null;
+  return {
+    task: {
+      id: task.id,
+      title: task.title,
+      description: task.description,
+      typeId: task.typeId,
+      typeLabel: task.typeLabel,
+      laneId: task.laneId,
+      laneTitle: task.laneTitle,
+      repoPath: String(task.repoPath ?? '').trim(),
+      droneId: String(task.droneId ?? '').trim(),
+      droneName: String(task.droneName ?? '').trim(),
+      playbookId: String(task.playbookId ?? '').trim(),
+      playbookLabel: String(task.playbookLabel ?? '').trim(),
+      chatName: String(task.chatName ?? '').trim(),
+      prompt: String(task.prompt ?? ''),
+      promptId: String(task.promptId ?? '').trim(),
+      messageId: String(task.messageId ?? '').trim(),
+      createdAt: task.createdAt,
+      updatedAt: task.updatedAt,
+    },
+  };
+}
+
+function resolveTaskTemplatePath(context: TaskTemplateContext, keyPathRaw: string): { found: boolean; value: string } {
+  const keyPath = String(keyPathRaw ?? '').trim();
+  if (!keyPath) return { found: false, value: '' };
+  const parts = keyPath.split('.').filter(Boolean);
+  let current: unknown = context;
+  for (const part of parts) {
+    if (!current || typeof current !== 'object' || Array.isArray(current)) return { found: false, value: '' };
+    if (!Object.prototype.hasOwnProperty.call(current, part)) return { found: false, value: '' };
+    current = (current as Record<string, unknown>)[part];
+  }
+  if (current == null) return { found: true, value: '' };
+  if (typeof current === 'string') return { found: true, value: current };
+  if (typeof current === 'number' || typeof current === 'boolean') return { found: true, value: String(current) };
+  return { found: true, value: '' };
+}
+
+function renderTaskTemplateString(raw: unknown, context: TaskTemplateContext | null | undefined): string {
+  const source = String(raw ?? '');
+  if (!context || !source.includes('{{')) return source;
+  return source.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (match, keyPath) => {
+    const resolved = resolveTaskTemplatePath(context, keyPath);
+    return resolved.found ? resolved.value : match;
+  });
+}
+
+function renderPlaybookMessagesForTask(playbook: PlaybookDefinition, context: TaskTemplateContext | null): PlaybookMessageDefinition[] {
+  return playbook.messages
+    .map((message) => ({
+      ...message,
+      prompt: renderTaskTemplateString(message.prompt, context),
+    }))
+    .filter((message) => message.prompt.trim().length > 0);
+}
+
+function renderPlaybookActionsForTask(
+  playbook: PlaybookDefinition,
+  context: TaskTemplateContext | null,
+): Array<{ id: string; label: string; messages: string[] }> {
+  return playbook.actions
+    .map((action) => ({
+      ...action,
+      messages: action.messages.map((message) => renderTaskTemplateString(message, context)).filter((message) => message.trim().length > 0),
+    }))
+    .filter((action) => action.label.trim().length > 0 && action.messages.length > 0);
 }
 
 const PLAYBOOK_LABEL_MAX_CHARS = 72;
@@ -2732,6 +2830,8 @@ async function startPlaybookRunLaunch(opts: {
   pullHostBranchBeforeCreate: boolean;
   queueItemId?: string | null;
   serializeFirstMessageGroup?: boolean;
+  renderedMessages?: PlaybookMessageDefinition[] | null;
+  renderedActions?: Array<{ id: string; label: string; messages: string[] }> | null;
 }): Promise<{
   ok: true;
   droneId: string;
@@ -2755,7 +2855,9 @@ async function startPlaybookRunLaunch(opts: {
   const regAny: any = await loadRegistry();
   const playbook = normalizePlaybookDefinitions(regAny).find((item) => item.id === playbookId) ?? null;
   if (!playbook) throw new Error(`unknown playbook: ${playbookId}`);
-  if (playbook.messages.length === 0) throw new Error('playbook has no messages');
+  const playbookMessages = Array.isArray(opts.renderedMessages) ? opts.renderedMessages : playbook.messages;
+  const playbookActions = Array.isArray(opts.renderedActions) ? opts.renderedActions : playbook.actions;
+  if (playbookMessages.length === 0) throw new Error('playbook has no messages');
   const playbookAgent = normalizePlaybookAgent(playbook.agent);
   const playbookModel = normalizePlaybookModel(playbook.model, playbookAgent);
   const droneId = makeDroneIdentity();
@@ -2764,7 +2866,7 @@ async function startPlaybookRunLaunch(opts: {
   const runtime: DroneRuntime = 'container';
   const containerPort = 7777;
   const createdEnvironment = deriveCreatedDroneEnvironmentConfig(regAny, { repoPath, runtime });
-  const startupQueuedPrompts = playbook.messages.map((message, index) => ({
+  const startupQueuedPrompts = playbookMessages.map((message, index) => ({
     id: `${droneId.replace(/[^A-Za-z0-9._-]+/g, '').slice(0, 24)}-${String(index + 1).padStart(2, '0')}`,
     chatName: 'default',
     at,
@@ -2792,10 +2894,10 @@ async function startPlaybookRunLaunch(opts: {
       playbook: {
         id: playbook.id,
         label: playbook.label,
-        messageCount: playbook.messages.length,
+        messageCount: playbookMessages.length,
         chatName: 'default',
         artifacts: playbook.artifacts,
-        actions: playbook.actions,
+        actions: playbookActions,
       },
       repoPath,
       runtime,
@@ -8729,6 +8831,26 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         }
       }
 
+      if (pathname === '/api/settings/task-playbook-buttons') {
+        if (method === 'GET') {
+          json(res, 200, await resolveTaskPlaybookButtonSettingsResponse());
+          return;
+        }
+
+        if (method === 'POST') {
+          let body: any = null;
+          try {
+            body = await readJsonBody(req);
+          } catch (e: any) {
+            json(res, 400, { ok: false, error: e?.message ?? String(e) });
+            return;
+          }
+          await upsertStoredTaskPlaybookButtonSettings(body?.taskPlaybookButtons);
+          json(res, 200, await resolveTaskPlaybookButtonSettingsResponse());
+          return;
+        }
+      }
+
       if (pathname === '/api/settings/hub/logs') {
         if (method === 'GET') {
           const maxBytes = clampIntParam(
@@ -9057,6 +9179,83 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
       }
 
       const parts = pathname.split('/').filter(Boolean);
+
+      // POST /api/tasks/:taskId/run-button/:buttonId
+      if (method === 'POST' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'tasks' && parts[3] === 'run-button') {
+        const taskId = String(decodeURIComponent(parts[2] ?? '')).trim();
+        const buttonId = String(decodeURIComponent(parts[4] ?? '')).trim();
+        if (!taskId) {
+          json(res, 400, { ok: false, error: 'missing task id' });
+          return;
+        }
+        if (!buttonId) {
+          json(res, 400, { ok: false, error: 'missing button id' });
+          return;
+        }
+        const regAny: any = await loadRegistry();
+        const board = getTaskBoardStateFromRegistry(regAny);
+        const task = findScopedTaskById(board, taskId);
+        if (!task) {
+          json(res, 404, { ok: false, error: `unknown task: ${taskId}` });
+          return;
+        }
+        const repoPath = String(task.repoPath ?? '').trim();
+        if (!repoPath) {
+          json(res, 409, { ok: false, error: 'task does not have a repo path' });
+          return;
+        }
+        if (!path.isAbsolute(repoPath)) {
+          json(res, 409, { ok: false, error: 'task repo path must be absolute' });
+          return;
+        }
+        const taskButtons = (await resolveTaskPlaybookButtonSettingsResponse()).taskPlaybookButtons;
+        const button = taskButtons.find((item) => item.id === buttonId) ?? null;
+        if (!button) {
+          json(res, 404, { ok: false, error: `unknown task playbook button: ${buttonId}` });
+          return;
+        }
+        if (!button.taskTypeIds.includes(task.typeId)) {
+          json(res, 409, { ok: false, error: `button "${button.label}" is not available for task type "${task.typeId}"` });
+          return;
+        }
+        const playbook = normalizePlaybookDefinitions(regAny).find((item) => item.id === button.playbookId) ?? null;
+        if (!playbook) {
+          json(res, 404, { ok: false, error: `unknown playbook: ${button.playbookId}` });
+          return;
+        }
+        const taskTemplateContext = buildTaskTemplateContext(task);
+        const renderedMessages = renderPlaybookMessagesForTask(playbook, taskTemplateContext);
+        const renderedActions = renderPlaybookActionsForTask(playbook, taskTemplateContext);
+        if (renderedMessages.length === 0) {
+          json(res, 409, { ok: false, error: 'rendered playbook messages are empty for this task' });
+          return;
+        }
+        try {
+          const launched = await startPlaybookRunLaunch({
+            playbookId: playbook.id,
+            repoPath,
+            pullHostBranchBeforeCreate: false,
+            renderedMessages,
+            renderedActions,
+          });
+          json(res, 202, {
+            ...launched,
+            ok: true,
+            taskId: task.id,
+            button: {
+              id: button.id,
+              label: button.label,
+            },
+          });
+          return;
+        } catch (e: any) {
+          json(res, /unknown playbook/i.test(e?.message ?? '') ? 404 : /playbook has no messages/i.test(e?.message ?? '') ? 409 : 500, {
+            ok: false,
+            error: e?.message ?? String(e),
+          });
+          return;
+        }
+      }
 
       if (parts.length === 3 && parts[0] === 'api' && parts[1] === 'skills') {
         const skillId = decodeURIComponent(parts[2]);

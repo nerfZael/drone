@@ -39,6 +39,7 @@ import { useGroupManagement } from './droneHub/app/use-group-management';
 import { useJobsWorkflow } from './droneHub/app/use-jobs-workflow';
 import { useLlmSettings } from './droneHub/app/use-llm-settings';
 import { useKanbanBoardSettings } from './droneHub/app/use-kanban-board-settings';
+import { useTaskPlaybookButtonSettings } from './droneHub/app/use-task-playbook-button-settings';
 import { useUiPreferencesSettings } from './droneHub/app/use-ui-preferences-settings';
 import { useDeleteActionSettings } from './droneHub/app/use-delete-action-settings';
 import { useFilesystemSettings } from './droneHub/app/use-filesystem-settings';
@@ -484,6 +485,16 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     reloadBoard,
     onBoardChange,
   } = useKanbanBoardSettings({
+    enabled: kanbanBoardOpen,
+    requestJson,
+  });
+  const {
+    taskPlaybookButtons,
+    taskPlaybookButtonsLoading,
+    taskPlaybookButtonsSaving,
+    taskPlaybookButtonsError,
+    onTaskPlaybookButtonsChange,
+  } = useTaskPlaybookButtonSettings({
     enabled: kanbanBoardOpen,
     requestJson,
   });
@@ -2567,6 +2578,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     kanbanBoardOpen,
     kanbanBoard: board,
     onKanbanBoardChange: onBoardChange,
+    taskPlaybookButtons,
+    taskPlaybookButtonsLoading,
+    taskPlaybookButtonsSaving,
+    taskPlaybookButtonsError,
+    onTaskPlaybookButtonsChange,
     boardLoading,
     boardSaving,
     boardError,

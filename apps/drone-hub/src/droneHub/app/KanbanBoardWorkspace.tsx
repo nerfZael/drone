@@ -20,6 +20,8 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import type { ChatAgentConfig } from '../../domain';
 import type { UiMenuSelectEntry } from '../../ui/menuSelect';
+import { requestJson } from '../http';
+import type { PlaybookDefinition, TaskPlaybookButton } from '../types';
 import {
   createKanbanCard,
   createKanbanLane,
@@ -33,13 +35,19 @@ import {
   type KanbanTaskType,
 } from './kanban-board-state';
 import { shouldApplySuggestedKanbanTitle } from './kanban-generated-title-state';
+import { fetchJson, usePoll } from './hooks';
 import { IconBoard, IconPlus, IconTrash } from './icons';
 import { KanbanTaskDetailsDialog } from './KanbanTaskDetailsDialog';
+import { KanbanTaskPlaybookButtonEditor } from './KanbanTaskPlaybookButtonEditor';
 import { KanbanTaskTypeEditor } from './KanbanTaskTypeEditor';
 import { SpawnContextToolbar } from './SpawnContextToolbar';
 
 type KanbanBoardWorkspaceProps = {
   board: KanbanBoardState;
+  taskPlaybookButtons: TaskPlaybookButton[];
+  taskPlaybookButtonsLoading: boolean;
+  taskPlaybookButtonsSaving: boolean;
+  taskPlaybookButtonsError: string | null;
   spawnAgentMenuEntries: UiMenuSelectEntry[];
   spawnAgentConfig: ChatAgentConfig;
   createRepoMenuEntries: UiMenuSelectEntry[];
@@ -52,7 +60,9 @@ type KanbanBoardWorkspaceProps = {
   onSuggestCardTitleFromPaste: (description: string) => Promise<string | null>;
   availableDroneIds: string[];
   onOpenTaskDrone: (droneId: string) => void;
+  onOpenTaskRun: (droneId: string, chatName: string) => void;
   onBoardChange: React.Dispatch<React.SetStateAction<KanbanBoardState>>;
+  onTaskPlaybookButtonsChange: React.Dispatch<React.SetStateAction<TaskPlaybookButton[]>>;
   onClose: () => void;
 };
 
@@ -309,6 +319,10 @@ function KanbanLaneCards({
 
 export function KanbanBoardWorkspace({
   board,
+  taskPlaybookButtons,
+  taskPlaybookButtonsLoading,
+  taskPlaybookButtonsSaving,
+  taskPlaybookButtonsError,
   spawnAgentMenuEntries,
   spawnAgentConfig,
   createRepoMenuEntries,
@@ -321,7 +335,9 @@ export function KanbanBoardWorkspace({
   onSuggestCardTitleFromPaste,
   availableDroneIds,
   onOpenTaskDrone,
+  onOpenTaskRun,
   onBoardChange,
+  onTaskPlaybookButtonsChange,
   onClose,
 }: KanbanBoardWorkspaceProps) {
   const rootRef = React.useRef<HTMLDivElement | null>(null);
@@ -330,6 +346,8 @@ export function KanbanBoardWorkspace({
   const [typesEditorOpen, setTypesEditorOpen] = React.useState(false);
   const [selectedCardRef, setSelectedCardRef] = React.useState<KanbanCardRef | null>(null);
   const [activeDragCardId, setActiveDragCardId] = React.useState<string | null>(null);
+  const [taskButtonBusyId, setTaskButtonBusyId] = React.useState<string | null>(null);
+  const [taskButtonError, setTaskButtonError] = React.useState<string | null>(null);
   const pendingGeneratedTitleByCardIdRef = React.useRef(new Map<string, string>());
   const laneCount = board.lanes.length;
   const activeTaskTypes = React.useMemo(
@@ -360,6 +378,12 @@ export function KanbanBoardWorkspace({
     () => new Set(availableDroneIds.map((item) => String(item ?? '').trim()).filter(Boolean)),
     [availableDroneIds],
   );
+  const { value: playbooksResp, loading: playbooksLoading } = usePoll<{ ok: true; playbooks: PlaybookDefinition[] }>(
+    () => fetchJson('/api/playbooks'),
+    5_000,
+    [],
+  );
+  const playbooks = Array.isArray(playbooksResp?.playbooks) ? playbooksResp.playbooks : [];
   const cardCount = React.useMemo(
     () => visibleBoard.lanes.reduce((sum, lane) => sum + lane.cards.length, 0),
     [visibleBoard.lanes],
@@ -384,10 +408,21 @@ export function KanbanBoardWorkspace({
     if (!lane || !card) return null;
     return { lane, card };
   }, [board.lanes, selectedCardRef]);
+  const visibleTaskPlaybookButtons = React.useMemo(() => {
+    const cardTypeId = String(selectedCardEntry?.card.typeId ?? '').trim();
+    if (!cardTypeId) return [];
+    const availablePlaybookIds = new Set(playbooks.map((playbook) => playbook.id));
+    return taskPlaybookButtons.filter((button) => button.taskTypeIds.includes(cardTypeId) && availablePlaybookIds.has(button.playbookId));
+  }, [playbooks, selectedCardEntry?.card.typeId, taskPlaybookButtons]);
 
   React.useEffect(() => {
     if (selectedCardRef && !selectedCardEntry) setSelectedCardRef(null);
   }, [selectedCardEntry, selectedCardRef]);
+
+  React.useEffect(() => {
+    setTaskButtonBusyId(null);
+    setTaskButtonError(null);
+  }, [selectedCardRef?.cardId]);
 
   React.useEffect(() => {
     setSelectedTypeIds((prev) => prev.filter((typeId) => activeTaskTypes.some((item) => item.id === typeId)));
@@ -684,6 +719,69 @@ export function KanbanBoardWorkspace({
     setSelectedTypeIds((prev) => prev.filter((item) => item !== taskTypeId));
   }, [board.taskTypes, onBoardChange]);
 
+  const addTaskPlaybookButton = React.useCallback(() => {
+    const defaultPlaybookId = String(playbooks[0]?.id ?? '').trim();
+    const defaultTaskTypeId = String(board.taskTypes[0]?.id ?? '').trim();
+    if (!defaultPlaybookId || !defaultTaskTypeId) return;
+    onTaskPlaybookButtonsChange((prev) => [
+      ...prev,
+      {
+        id: `task-button-${crypto.randomUUID()}`,
+        label: 'Run playbook',
+        playbookId: defaultPlaybookId,
+        taskTypeIds: [defaultTaskTypeId],
+      },
+    ]);
+  }, [board.taskTypes, onTaskPlaybookButtonsChange, playbooks]);
+
+  const updateTaskPlaybookButton = React.useCallback((buttonIdRaw: string, patch: Partial<TaskPlaybookButton>) => {
+    const buttonId = String(buttonIdRaw ?? '').trim();
+    if (!buttonId) return;
+    onTaskPlaybookButtonsChange((prev) =>
+      prev.map((button) =>
+        button.id === buttonId
+          ? {
+              ...button,
+              ...(Object.prototype.hasOwnProperty.call(patch, 'label') ? { label: String(patch.label ?? '') } : {}),
+              ...(Object.prototype.hasOwnProperty.call(patch, 'playbookId') ? { playbookId: String(patch.playbookId ?? '') } : {}),
+              ...(Object.prototype.hasOwnProperty.call(patch, 'taskTypeIds')
+                ? { taskTypeIds: Array.from(new Set((Array.isArray(patch.taskTypeIds) ? patch.taskTypeIds : []).map((item) => String(item ?? '').trim()).filter(Boolean))) }
+                : {}),
+            }
+          : button,
+      ),
+    );
+  }, [onTaskPlaybookButtonsChange]);
+
+  const removeTaskPlaybookButton = React.useCallback((buttonIdRaw: string) => {
+    const buttonId = String(buttonIdRaw ?? '').trim();
+    if (!buttonId) return;
+    onTaskPlaybookButtonsChange((prev) => prev.filter((button) => button.id !== buttonId));
+  }, [onTaskPlaybookButtonsChange]);
+
+  const runTaskPlaybookButton = React.useCallback(async (buttonIdRaw: string) => {
+    const taskId = String(selectedCardEntry?.card.id ?? '').trim();
+    const buttonId = String(buttonIdRaw ?? '').trim();
+    if (!taskId || !buttonId) return;
+    setTaskButtonBusyId(buttonId);
+    setTaskButtonError(null);
+    try {
+      const data = await requestJson<{ ok: true; droneId: string; chatName: string }>(
+        `/api/tasks/${encodeURIComponent(taskId)}/run-button/${encodeURIComponent(buttonId)}`,
+        { method: 'POST' },
+      );
+      const droneId = String(data?.droneId ?? '').trim();
+      const chatName = String(data?.chatName ?? 'default').trim() || 'default';
+      if (!droneId) throw new Error('Task playbook launch did not return a drone id.');
+      setSelectedCardRef(null);
+      onOpenTaskRun(droneId, chatName);
+    } catch (err: any) {
+      setTaskButtonError(err?.message ?? String(err));
+    } finally {
+      setTaskButtonBusyId((current) => (current === buttonId ? null : current));
+    }
+  }, [onOpenTaskRun, selectedCardEntry?.card.id]);
+
   const handleOpenCreatorDrone = React.useCallback(() => {
     const droneId = String(selectedCardEntry?.card.droneId ?? '').trim();
     if (!droneId || !availableDroneIdSet.has(droneId)) return;
@@ -823,12 +921,16 @@ export function KanbanBoardWorkspace({
                 );
               })}
             </div>
-            {(boardLoading || boardSaving || boardUpdatedAt || boardError) && (
+            {(boardLoading || boardSaving || boardUpdatedAt || boardError || taskPlaybookButtonsSaving || taskPlaybookButtonsError) && (
               <div className="ml-auto flex items-center gap-2 text-[10px] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--code)' }}>
                 {boardLoading ? (
                   <span className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-[var(--accent)] animate-pulse-dot" />Loading…</span>
                 ) : boardSaving ? (
                   <span className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-[var(--yellow)] animate-pulse-dot" />Saving…</span>
+                ) : taskPlaybookButtonsSaving ? (
+                  <span className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-[var(--yellow)] animate-pulse-dot" />Saving task buttons…</span>
+                ) : taskPlaybookButtonsError ? (
+                  <span className="flex items-center gap-1.5 text-[var(--red)]" title={taskPlaybookButtonsError}><span className="h-1.5 w-1.5 rounded-full bg-[var(--red)]" />Task button error</span>
                 ) : boardError ? (
                   <span className="flex items-center gap-1.5 text-[var(--red)]" title={boardError}><span className="h-1.5 w-1.5 rounded-full bg-[var(--red)]" />Sync error</span>
                 ) : boardUpdatedAt ? (
@@ -838,12 +940,23 @@ export function KanbanBoardWorkspace({
             )}
           </div>
           {typesEditorOpen ? (
-            <KanbanTaskTypeEditor
-              taskTypes={board.taskTypes}
-              onAddTaskType={addTaskType}
-              onUpdateTaskType={updateTaskType}
-              onRemoveTaskType={removeTaskType}
-            />
+            <>
+              <KanbanTaskTypeEditor
+                taskTypes={board.taskTypes}
+                onAddTaskType={addTaskType}
+                onUpdateTaskType={updateTaskType}
+                onRemoveTaskType={removeTaskType}
+              />
+              <KanbanTaskPlaybookButtonEditor
+                taskTypes={board.taskTypes}
+                taskPlaybookButtons={taskPlaybookButtons}
+                playbooks={playbooks}
+                playbooksLoading={playbooksLoading}
+                onAddTaskPlaybookButton={addTaskPlaybookButton}
+                onUpdateTaskPlaybookButton={updateTaskPlaybookButton}
+                onRemoveTaskPlaybookButton={removeTaskPlaybookButton}
+              />
+            </>
           ) : null}
           {filteredSelectionActive ? (
             <div className="mx-6 mb-4 flex items-center gap-2 rounded-lg border border-[rgba(255,178,36,.16)] bg-[rgba(255,178,36,.06)] px-3 py-2 text-[10px] text-[var(--yellow)]">
@@ -966,10 +1079,13 @@ export function KanbanBoardWorkspace({
         card={selectedCardEntry?.card ?? null}
         laneTitle={selectedCardEntry?.lane.title ?? null}
         taskTypes={board.taskTypes}
+        taskPlaybookButtons={visibleTaskPlaybookButtons}
         controlsLocked={controlsLocked}
         creatorDroneAvailable={Boolean(
           selectedCardEntry?.card.droneId && availableDroneIdSet.has(String(selectedCardEntry.card.droneId)),
         )}
+        taskButtonBusyId={taskButtonBusyId}
+        taskButtonError={taskButtonError}
         onClose={() => setSelectedCardRef(null)}
         onTitleDraftChange={() => {
           const cardId = String(selectedCardEntry?.card.id ?? '').trim();
@@ -985,6 +1101,9 @@ export function KanbanBoardWorkspace({
           removeCard(selectedCardEntry.lane.id, selectedCardEntry.card.id);
         }}
         onOpenCreatorDrone={handleOpenCreatorDrone}
+        onRunTaskPlaybookButton={(buttonId) => {
+          void runTaskPlaybookButton(buttonId);
+        }}
       />
     </div>
   );

@@ -1,5 +1,6 @@
 import type { AutomationConfig } from './automation-config';
 import type { KanbanBoardState } from './kanban-board-state';
+import type { TaskPlaybookButton } from '../types';
 
 export type LlmProviderId = 'openai' | 'gemini';
 export type DroneDeleteMode = 'permanent' | 'archive';
@@ -65,6 +66,12 @@ export type FilesystemSettingsResponse = {
 export type KanbanBoardSettingsResponse = {
   ok: true;
   kanbanBoard: KanbanBoardState;
+  updatedAt: string | null;
+};
+
+export type TaskPlaybookButtonSettingsResponse = {
+  ok: true;
+  taskPlaybookButtons: TaskPlaybookButton[];
   updatedAt: string | null;
 };
 

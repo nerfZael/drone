@@ -386,6 +386,11 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     playbookRunsOpen,
     kanbanBoard,
     onKanbanBoardChange,
+    taskPlaybookButtons,
+    taskPlaybookButtonsLoading,
+    taskPlaybookButtonsSaving,
+    taskPlaybookButtonsError,
+    onTaskPlaybookButtonsChange,
     boardLoading,
     boardSaving,
     boardError,
@@ -609,6 +614,10 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     kanbanBoardWorkspaceProps: kanbanBoardOpen
       ? {
           board: kanbanBoard,
+          taskPlaybookButtons,
+          taskPlaybookButtonsLoading,
+          taskPlaybookButtonsSaving,
+          taskPlaybookButtonsError,
           spawnAgentMenuEntries,
           spawnAgentConfig,
           createRepoMenuEntries,
@@ -624,7 +633,12 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
             setKanbanBoardOpen(false);
             selectDroneCard(droneId);
           },
+          onOpenTaskRun: (droneId: string, chatName: string) => {
+            setKanbanBoardOpen(false);
+            selectDroneChat(droneId, chatName);
+          },
           onBoardChange: onKanbanBoardChange,
+          onTaskPlaybookButtonsChange,
           onClose: () => setKanbanBoardOpen(false),
         }
       : null,
