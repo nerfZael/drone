@@ -4,7 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, test } from 'bun:test';
 import {
+  buildWorkingTreeRepoChangeReviewToken,
   gitPullHostBranchBeforeCreate,
+  gitRepoChangesSummary,
   deleteHostRefBestEffort,
   HostRepoPullBeforeCreateError,
   importBundleHeadToHostRef,
@@ -248,6 +250,22 @@ describe('repoOps git-native pull helpers', () => {
         err = e;
       }
       expect(String((err as any)?.message ?? err)).toContain('bundle not found');
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('gitRepoChangesSummary uses git-compatible worktree hashing for review tokens', async () => {
+    const { repoRoot, cleanup } = mkRepo();
+    try {
+      writeAndCommit(repoRoot, 'a.txt', 'one\n', 'init');
+      fs.writeFileSync(path.join(repoRoot, 'a.txt'), 'one\ntwo\n', 'utf8');
+
+      const summary = await gitRepoChangesSummary(repoRoot);
+      const entry = summary.entries.find((item) => item.path === 'a.txt');
+      expect(entry).toBeTruthy();
+      const gitBlobHash = runOrThrow('git', ['hash-object', '--no-filters', '--', 'a.txt'], repoRoot).trim().toLowerCase();
+      expect(entry?.reviewToken).toBe(buildWorkingTreeRepoChangeReviewToken(entry!, gitBlobHash));
     } finally {
       cleanup();
     }

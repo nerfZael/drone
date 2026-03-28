@@ -98,6 +98,7 @@ import {
 } from './environment-config';
 import { hasActivePriorPendingPrompt, shouldDeferQueuedTranscriptPrompt, stalePendingPromptState } from './pendingPromptEnqueue';
 import {
+  buildReviewScopeId,
   cleanupQuarantineWorktree,
   deleteHostRefBestEffort,
   gitRepoCommitDetails,
@@ -119,6 +120,7 @@ import {
   gitStashPush,
   gitTopLevel,
   isRepoPatchApplyError,
+  repoChangeReviewKey,
   quarantineWorktreePath,
 } from './repoOps';
 import { isHubApiAuthorized, isHubApiAuthorizedForWebSocket, rejectWebSocketUpgrade } from './hub-auth';
@@ -3318,6 +3320,17 @@ const PROMPT_AUTOMATION_WAIT_FOR_IDLE_TIMEOUT_MS = 30 * 60_000;
 const PROMPT_AUTOMATION_WAIT_FOR_PROMPT_TIMEOUT_MS = 30 * 60_000;
 const PROMPT_AUTOMATION_ON_FAILURE_PROMPT_MAX_CHARS = 8_000;
 const PROMPT_AUTOMATION_INTER_RUN_SLEEP_CHUNK_MS = 5_000;
+
+function attachReviewMetadataToPullEntries<T extends { path: string; originalPath: string | null }>(entries: T[]): Array<T & { reviewKey: string; reviewToken: string }> {
+  return entries.map((entry) => {
+    const reviewKey = repoChangeReviewKey(entry.path, entry.originalPath);
+    return {
+      ...entry,
+      reviewKey,
+      reviewToken: reviewKey,
+    };
+  });
+}
 const PROMPT_AUTOMATION_COMPLETION_STALL_RECOVERY_GRACE_MS = 15_000;
 
 type PromptAutomationJobStatus = 'running' | 'completed' | 'failed' | 'stopped';
@@ -12251,6 +12264,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
               id: droneId,
               name: droneName,
               repoRoot,
+              reviewScopeId: buildReviewScopeId('working-tree', [repoRoot, droneId]),
               branch: summary.branch,
               counts: summary.counts,
               entries: summary.entries,
@@ -12272,6 +12286,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
               id: droneId,
               name: droneName,
               repoRoot,
+              reviewScopeId: buildReviewScopeId('working-tree', [repoRoot, droneId]),
               branch: summary.branch,
               counts: summary.counts,
               entries: summary.entries,
@@ -12780,6 +12795,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
               id: droneId,
               name: droneName,
               repoRoot,
+              reviewScopeId: buildReviewScopeId('pull-preview', [repoRoot, droneId, normalizedHeadSha, normalizedHeadSha, normalizedHeadSha]),
               baseSha: normalizedHeadSha,
               headSha: normalizedHeadSha,
               counts: { changed: 0 },
@@ -12809,6 +12825,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const repoPathInContainer = droneRepoPathInContainer(d);
         const repoPathRaw = String(d?.repoPath ?? '').trim();
         let hostBranchHead: string | null = null;
+        let hostHeadShaForReview: string | null = null;
         let pullPreviewBaseSha: string | undefined;
         const lastPullAny = d?.repo?.lastPull && typeof d.repo.lastPull === 'object' ? d.repo.lastPull : null;
         const lastPullMode = String((lastPullAny as any)?.mode ?? '').trim().toLowerCase();
@@ -12850,6 +12867,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                 hostBranchHead = String(hostSummary.branch.head ?? '').trim() || hostBranchHead;
                 const hostHeadSha = String(hostSummary.branch.oid ?? '').trim().toLowerCase();
                 if (/^[0-9a-f]{40}$/.test(hostHeadSha)) {
+                  hostHeadShaForReview = hostHeadSha;
                   const hostContainsLastExport = await gitIsAncestor(repoRoot, lastExportedHeadSha, 'HEAD');
                   if (!hostContainsLastExport) {
                     const recoveryBaseSha = await gitMergeBase(repoRoot, 'HEAD', lastExportedHeadSha);
@@ -12881,6 +12899,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
               hostBranchHead = String(hostSummary.branch.head ?? '').trim() || hostBranchHead;
               const hostHeadSha = String(hostSummary.branch.oid ?? '').trim().toLowerCase();
               if (/^[0-9a-f]{40}$/.test(hostHeadSha)) {
+                hostHeadShaForReview = hostHeadSha;
                 const cacheKey = [droneId, repoRoot, hostHeadSha, summary.baseSha, summary.headSha].join('\u0000');
                 const now = Date.now();
                 const cached = pullPreviewHostMergeCache.get(cacheKey);
@@ -12975,10 +12994,17 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             id: droneId,
             name: droneName,
             repoRoot: summary.repoRoot,
+            reviewScopeId: buildReviewScopeId('pull-preview', [
+              summary.repoRoot,
+              droneId,
+              hostHeadShaForReview ?? '',
+              summary.baseSha,
+              summary.headSha,
+            ]),
             baseSha: summary.baseSha,
             headSha: summary.headSha,
             counts: { changed: entriesForPreview.length },
-            entries: entriesForPreview,
+            entries: attachReviewMetadataToPullEntries(entriesForPreview),
             branchContext: {
               hostCurrent: hostBranchHead,
               droneCurrent: summary.branchHead,
@@ -13255,10 +13281,17 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             id: droneId,
             name: droneName,
             repoRoot,
+            reviewScopeId: buildReviewScopeId('pull-request', [
+              pr.repo.owner,
+              pr.repo.repo,
+              pr.pullRequest.number,
+              pr.pullRequest.baseSha,
+              pr.pullRequest.headSha,
+            ]),
             github: pr.repo,
             pullRequest: pr.pullRequest,
             counts: pr.counts,
-            entries: pr.entries,
+            entries: attachReviewMetadataToPullEntries(pr.entries),
           });
           return;
         } catch (e: any) {

@@ -441,6 +441,8 @@ export function toWorkingEntriesFromPull(entries: Array<RepoPullChangeEntry | Re
     isUntracked: false,
     isIgnored: false,
     isConflicted: entry.statusType === 'unmerged',
+    reviewKey: entry.reviewKey,
+    reviewToken: entry.reviewToken,
   }));
 }
 
@@ -456,6 +458,8 @@ export function toWorkingEntriesFromCommit(entries: RepoCommitChangeEntry[]): Re
     isUntracked: false,
     isIgnored: false,
     isConflicted: entry.statusType === 'unmerged',
+    reviewKey: `${String(entry.originalPath ?? '').trim()}\u0000${entry.path}`,
+    reviewToken: `${String(entry.originalPath ?? '').trim()}\u0000${entry.path}`,
   }));
 }
 
@@ -471,11 +475,15 @@ function repoChangeEntrySignature(entry: RepoChangeEntry): string {
     entry.isUntracked ? '1' : '0',
     entry.isIgnored ? '1' : '0',
     entry.isConflicted ? '1' : '0',
+    entry.reviewKey ?? '',
+    entry.reviewToken ?? '',
   ].join('\u0000');
 }
 
 function repoPullChangeEntrySignature(entry: RepoPullChangeEntry): string {
-  return [entry.path, entry.originalPath ?? '', entry.statusChar, entry.statusType ?? ''].join('\u0000');
+  return [entry.path, entry.originalPath ?? '', entry.statusChar, entry.statusType ?? '', entry.reviewKey ?? '', entry.reviewToken ?? ''].join(
+    '\u0000',
+  );
 }
 
 function repoPullRequestChangeEntrySignature(entry: RepoPullRequestChangeEntry): string {
@@ -490,6 +498,8 @@ function repoPullRequestChangeEntrySignature(entry: RepoPullRequestChangeEntry):
     entry.patch ?? '',
     entry.truncated ? '1' : '0',
     entry.isBinary ? '1' : '0',
+    entry.reviewKey ?? '',
+    entry.reviewToken ?? '',
   ].join('\u0000');
 }
 
@@ -536,6 +546,7 @@ export function sameRepoChangesPayload(
   if (!a || !b) return false;
   return (
     a.repoRoot === b.repoRoot &&
+    a.reviewScopeId === b.reviewScopeId &&
     a.branch.head === b.branch.head &&
     a.branch.upstream === b.branch.upstream &&
     a.branch.ahead === b.branch.ahead &&
@@ -557,6 +568,7 @@ export function sameRepoPullChangesPayload(
   if (!a || !b) return false;
   return (
     a.repoRoot === b.repoRoot &&
+    a.reviewScopeId === b.reviewScopeId &&
     a.baseSha === b.baseSha &&
     a.headSha === b.headSha &&
     a.branchContext.hostCurrent === b.branchContext.hostCurrent &&
@@ -576,6 +588,7 @@ export function sameRepoPullRequestChangesPayload(
   if (!a || !b) return false;
   return (
     a.repoRoot === b.repoRoot &&
+    a.reviewScopeId === b.reviewScopeId &&
     a.github.owner === b.github.owner &&
     a.github.repo === b.github.repo &&
     a.pullRequest.number === b.pullRequest.number &&

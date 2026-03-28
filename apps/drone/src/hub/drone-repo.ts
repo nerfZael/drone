@@ -1,10 +1,12 @@
 import { dvmExec } from '../host/dvm';
 import { normalizeContainerPath } from './hub-format';
 import {
+  buildWorkingTreeRepoChangeReviewToken,
   parseGitCommitDetails,
   parseGitCommitList,
   parseGitNumStatZ,
   parseGitStatusPorcelainV2Z,
+  repoChangeReviewKey,
   type RepoCommitDetails,
   type RepoCommitSummary,
 } from './repoOps';
@@ -48,10 +50,48 @@ export async function droneRepoChangesSummary(opts: {
     repoPathInContainer,
     args: ['status', '--porcelain=v2', '--branch', '--untracked-files=all', '-z'],
   });
+  const parsed = parseGitStatusPorcelainV2Z(statusRaw.stdout);
+  const entries = await Promise.all(
+    parsed.entries.map(async (entry) => {
+      const needsWorktreeHash = entry.isUntracked || (entry.unstagedType !== null && entry.unstagedType !== 'deleted');
+      const worktreeContentHash = needsWorktreeHash
+        ? await hashDroneFileContents({
+            container: opts.container,
+            repoPathInContainer,
+            repoRelativePath: entry.path,
+          })
+        : null;
+      return {
+        ...entry,
+        reviewKey: repoChangeReviewKey(entry.path, entry.originalPath),
+        reviewToken: buildWorkingTreeRepoChangeReviewToken(entry, worktreeContentHash),
+      };
+    }),
+  );
   return {
     repoRoot,
-    summary: parseGitStatusPorcelainV2Z(statusRaw.stdout),
+    summary: {
+      ...parsed,
+      entries,
+    },
   };
+}
+
+async function hashDroneFileContents(opts: {
+  container: string;
+  repoPathInContainer: string;
+  repoRelativePath: string;
+}): Promise<string | null> {
+  const requestedPath = String(opts.repoRelativePath ?? '').trim();
+  if (!requestedPath || requestedPath.includes('\0')) return null;
+  const result = await runGitInDrone({
+    container: opts.container,
+    repoPathInContainer: opts.repoPathInContainer,
+    args: ['hash-object', '--no-filters', '--', requestedPath],
+  });
+  if (result.code !== 0) return null;
+  const hash = String(result.stdout ?? '').trim().toLowerCase();
+  return /^[0-9a-f]{40}$/.test(hash) ? hash : null;
 }
 
 export async function droneRepoDiffForPath(opts: {

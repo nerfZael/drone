@@ -180,6 +180,7 @@ describe('changes payload equality', () => {
       id: 'drone-a',
       name: 'Drone A',
       repoRoot: '/repo',
+      reviewScopeId: 'wt-scope',
       branch: { head: 'main', upstream: 'origin/main', ahead: 0, behind: 0 },
       counts: { changed: 2, staged: 1, unstaged: 1, untracked: 0, conflicted: 0 },
       entries: [
@@ -221,6 +222,7 @@ describe('changes payload equality', () => {
       id: 'drone-a',
       name: 'Drone A',
       repoRoot: '/repo',
+      reviewScopeId: 'pull-scope',
       baseSha: 'a'.repeat(40),
       headSha: 'b'.repeat(40),
       branchContext: {
@@ -253,6 +255,7 @@ describe('changes payload equality', () => {
       id: 'drone-a',
       name: 'Drone A',
       repoRoot: '/repo',
+      reviewScopeId: 'pr-scope',
       github: { owner: 'openai', repo: 'repo' },
       pullRequest: {
         number: 42,

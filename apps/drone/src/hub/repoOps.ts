@@ -38,6 +38,10 @@ export type RepoChangeEntry = {
   isUntracked: boolean;
   isIgnored: boolean;
   isConflicted: boolean;
+  headBlobOid?: string | null;
+  indexBlobOid?: string | null;
+  reviewKey?: string;
+  reviewToken?: string;
 };
 
 export type RepoChangesSummary = {
@@ -101,6 +105,42 @@ export type RepoCommitDetails = {
   };
   entries: RepoCommitChangeEntry[];
 };
+
+function reviewDigest(parts: Array<string | number | null | undefined>): string {
+  const hash = crypto.createHash('sha1');
+  for (const part of parts) {
+    hash.update(String(part ?? ''));
+    hash.update('\0');
+  }
+  return hash.digest('hex');
+}
+
+export function buildReviewScopeId(kind: string, parts: Array<string | number | null | undefined>): string {
+  return reviewDigest([kind, ...parts]);
+}
+
+export function repoChangeReviewKey(pathRaw: string, originalPathRaw?: string | null): string {
+  const path = String(pathRaw ?? '').trim();
+  const originalPath = String(originalPathRaw ?? '').trim();
+  return `${originalPath}\u0000${path}`;
+}
+
+export function buildWorkingTreeRepoChangeReviewToken(entry: RepoChangeEntry, worktreeContentHash: string | null): string {
+  return reviewDigest([
+    repoChangeReviewKey(entry.path, entry.originalPath),
+    entry.code,
+    entry.stagedChar,
+    entry.unstagedChar,
+    entry.stagedType ?? '',
+    entry.unstagedType ?? '',
+    entry.isUntracked ? '1' : '0',
+    entry.isIgnored ? '1' : '0',
+    entry.isConflicted ? '1' : '0',
+    entry.headBlobOid ?? '',
+    entry.indexBlobOid ?? '',
+    worktreeContentHash ?? '',
+  ]);
+}
 
 export type RepoPatchApplyErrorKind = 'patch_apply_conflict' | 'patch_apply_failed';
 
@@ -407,7 +447,18 @@ function commitDiffTreeArgs(sha: string, parentSha: string | null, format: '--na
   return ['diff-tree', '--root', format, '-z', '-r', '--find-renames', '--find-copies', sha];
 }
 
-function pushRepoChangeEntry(list: RepoChangeEntry[], opts: { path: string; originalPath?: string | null; stagedChar: string; unstagedChar: string; forceConflicted?: boolean }) {
+function pushRepoChangeEntry(
+  list: RepoChangeEntry[],
+  opts: {
+    path: string;
+    originalPath?: string | null;
+    stagedChar: string;
+    unstagedChar: string;
+    forceConflicted?: boolean;
+    headBlobOid?: string | null;
+    indexBlobOid?: string | null;
+  }
+) {
   const stagedChar = normalizeStatusChar(opts.stagedChar);
   const unstagedChar = normalizeStatusChar(opts.unstagedChar);
   const stagedType = statusCharToType(stagedChar);
@@ -426,6 +477,8 @@ function pushRepoChangeEntry(list: RepoChangeEntry[], opts: { path: string; orig
     isUntracked,
     isIgnored,
     isConflicted,
+    headBlobOid: opts.headBlobOid ? String(opts.headBlobOid).trim().toLowerCase() : null,
+    indexBlobOid: opts.indexBlobOid ? String(opts.indexBlobOid).trim().toLowerCase() : null,
   });
 }
 
@@ -484,6 +537,8 @@ export function parseGitStatusPorcelainV2Z(raw: string): RepoChangesSummary {
           path: filePath,
           stagedChar: xy.charAt(0),
           unstagedChar: xy.charAt(1),
+          headBlobOid: String(fields[6] ?? '').trim() || null,
+          indexBlobOid: String(fields[7] ?? '').trim() || null,
         });
       }
       continue;
@@ -501,6 +556,8 @@ export function parseGitStatusPorcelainV2Z(raw: string): RepoChangesSummary {
           originalPath: origPath || null,
           stagedChar: xy.charAt(0),
           unstagedChar: xy.charAt(1),
+          headBlobOid: String(fields[6] ?? '').trim() || null,
+          indexBlobOid: String(fields[7] ?? '').trim() || null,
         });
       }
       continue;
@@ -516,6 +573,8 @@ export function parseGitStatusPorcelainV2Z(raw: string): RepoChangesSummary {
           stagedChar: xy.charAt(0) || 'U',
           unstagedChar: xy.charAt(1) || 'U',
           forceConflicted: true,
+          headBlobOid: String(fields[8] ?? '').trim() || null,
+          indexBlobOid: String(fields[9] ?? '').trim() || null,
         });
       }
       continue;
@@ -550,6 +609,37 @@ export function parseGitStatusPorcelainV2Z(raw: string): RepoChangesSummary {
       untracked,
       conflicted,
     },
+  };
+}
+
+async function hashHostFileContents(repoRoot: string, repoRelativePath: string): Promise<string | null> {
+  const absPath = path.resolve(repoRoot, repoRelativePath);
+  const repoWithSep = repoRoot.endsWith(path.sep) ? repoRoot : `${repoRoot}${path.sep}`;
+  if (absPath !== repoRoot && !absPath.startsWith(repoWithSep)) return null;
+  try {
+    const content = await fs.readFile(absPath);
+    const header = Buffer.from(`blob ${content.length}\0`, 'utf8');
+    return crypto.createHash('sha1').update(header).update(content).digest('hex');
+  } catch {
+    return null;
+  }
+}
+
+async function applyWorkingTreeReviewMetadata(repoRoot: string, summary: RepoChangesSummary): Promise<RepoChangesSummary> {
+  const entries = await Promise.all(
+    summary.entries.map(async (entry) => {
+      const needsWorktreeHash = entry.isUntracked || (entry.unstagedType !== null && entry.unstagedType !== 'deleted');
+      const worktreeContentHash = needsWorktreeHash ? await hashHostFileContents(repoRoot, entry.path) : null;
+      return {
+        ...entry,
+        reviewKey: repoChangeReviewKey(entry.path, entry.originalPath),
+        reviewToken: buildWorkingTreeRepoChangeReviewToken(entry, worktreeContentHash),
+      };
+    })
+  );
+  return {
+    ...summary,
+    entries,
   };
 }
 
@@ -702,7 +792,8 @@ export async function gitRepoChangesSummary(repoRoot: string): Promise<RepoChang
     '--untracked-files=all',
     '-z',
   ]);
-  return parseGitStatusPorcelainV2Z(raw);
+  const summary = parseGitStatusPorcelainV2Z(raw);
+  return await applyWorkingTreeReviewMetadata(repoRoot, summary);
 }
 
 export async function gitRepoCommitList(opts: {
