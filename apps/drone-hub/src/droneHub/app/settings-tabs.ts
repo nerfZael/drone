@@ -10,7 +10,7 @@ export const SETTINGS_TABS: Array<{
     id: 'general',
     label: 'General',
     title: 'General settings',
-    description: 'LLM providers, filesystem uploads, transcript defaults, and onboarding controls.',
+    description: 'GitHub readiness, LLM providers, filesystem uploads, transcript defaults, and onboarding controls.',
   },
   {
     id: 'profiles',

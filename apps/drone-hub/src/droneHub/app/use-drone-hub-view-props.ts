@@ -370,6 +370,7 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     appView,
     setupStatusState,
     llmSettingsState,
+    githubSettingsState,
     skillLibraryState,
     deleteActionSettingsState,
     filesystemSettingsState,
@@ -585,6 +586,7 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
           }
         : null,
     settingsViewProps: {
+      github: githubSettingsState,
       llm: llmSettingsState,
       skillLibrary: skillLibraryState,
       deleteAction: deleteActionSettingsState,

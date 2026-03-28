@@ -1,9 +1,11 @@
 import React from 'react';
 import { bytesToMaxMiB, bytesToMinMiB, bytesToNearestMiB, miBToBytes } from './filesystem-size-utils';
 import type { UseFilesystemSettingsResult } from './use-filesystem-settings';
+import type { UseGithubSettingsResult } from './use-github-settings';
 import type { UseLlmSettingsResult } from './use-llm-settings';
 
 type GeneralSettingsTabProps = {
+  github: UseGithubSettingsResult;
   llm: UseLlmSettingsResult;
   filesystem: UseFilesystemSettingsResult;
   transcriptInlineImages: boolean;
@@ -13,6 +15,7 @@ type GeneralSettingsTabProps = {
 };
 
 export function GeneralSettingsTab({
+  github,
   llm,
   filesystem,
   transcriptInlineImages,
@@ -67,9 +70,28 @@ export function GeneralSettingsTab({
     filesystemSettings != null ? bytesToMaxMiB(filesystemSettings.filesystem.maxUploadMaxBytes, filesystemMinMiB) : 8192;
   const filesystemDefaultMiB =
     filesystemSettings != null ? bytesToNearestMiB(filesystemSettings.filesystem.defaultUploadMaxBytes) : 2048;
+  const githubStatus = github.githubSettings?.github ?? null;
+  const githubAuthLabel =
+    githubStatus?.authSource === 'environment'
+      ? `Environment${githubStatus.authEnvKey ? ` (${githubStatus.authEnvKey})` : ''}`
+      : githubStatus?.authSource === 'gh'
+        ? 'Host gh auth'
+        : 'Unavailable';
+  const githubCliLabel = !githubStatus
+    ? 'Checking…'
+    : githubStatus.ghCliInstalled
+      ? githubStatus.ghCliAuthenticated
+        ? 'Installed and authenticated'
+        : 'Installed'
+      : 'Not installed';
 
   return (
     <>
+      {github.githubSettingsError && (
+        <div className="rounded border border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
+          {github.githubSettingsError}
+        </div>
+      )}
       {llmSettingsError && (
         <div className="rounded border border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
           {llmSettingsError}
@@ -80,6 +102,41 @@ export function GeneralSettingsTab({
           {llmSettingsNotice}
         </div>
       )}
+
+      <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3">
+        {github.githubSettingsLoading && !github.githubSettings ? (
+          <div className="text-[12px] text-[var(--muted-dim)]">Loading GitHub status…</div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">GitHub pull requests</div>
+              <div className="text-[12px] text-[var(--muted)]">Hub PR actions use the GitHub API. Host `gh` is used only as an optional auth source.</div>
+            </div>
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
+              <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">PR transport</div>
+                <div className="text-[13px] text-[var(--fg-secondary)] mt-2">
+                  {githubStatus?.pullRequestTransport === 'github-api' ? 'GitHub API' : 'Unknown'}
+                </div>
+                <div className="text-[11px] text-[var(--muted-dim)] mt-1">List, inspect, merge, and close PRs without shelling out to container `gh`.</div>
+              </div>
+              <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">Effective auth</div>
+                <div className="text-[13px] text-[var(--fg-secondary)] mt-2">{githubAuthLabel}</div>
+                <div className="text-[11px] text-[var(--muted-dim)] mt-1">{githubStatus?.authDetail ?? 'Loading GitHub auth status…'}</div>
+              </div>
+              <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">Host gh CLI</div>
+                <div className="text-[13px] text-[var(--fg-secondary)] mt-2">{githubCliLabel}</div>
+                <div className="text-[11px] text-[var(--muted-dim)] mt-1">
+                  {githubStatus?.ghCliVersion ?? (githubStatus?.ghCliInstalled ? 'Version unavailable' : 'Install gh if you want Hub to reuse host GitHub login state.')}
+                </div>
+                {githubStatus?.ghCliPath ? <div className="text-[11px] text-[var(--muted-dim)] mt-1 break-all">{githubStatus.ghCliPath}</div> : null}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
 
       <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3">
         {llmSettingsLoading && !llmSettings ? (

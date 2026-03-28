@@ -63,6 +63,21 @@ export type FilesystemSettingsResponse = {
   };
 };
 
+export type GithubSettingsResponse = {
+  ok: true;
+  github: {
+    pullRequestTransport: 'github-api';
+    authReady: boolean;
+    authSource: 'environment' | 'gh' | null;
+    authEnvKey: string | null;
+    authDetail: string;
+    ghCliInstalled: boolean;
+    ghCliAuthenticated: boolean;
+    ghCliPath: string | null;
+    ghCliVersion: string | null;
+  };
+};
+
 export type KanbanBoardSettingsResponse = {
   ok: true;
   kanbanBoard: KanbanBoardState;

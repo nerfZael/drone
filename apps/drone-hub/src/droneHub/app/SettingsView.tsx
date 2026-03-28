@@ -12,12 +12,14 @@ import { SETTINGS_TABS, type SettingsTabId } from './settings-tabs';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 import type { UseDeleteActionSettingsResult } from './use-delete-action-settings';
 import type { UseFilesystemSettingsResult } from './use-filesystem-settings';
+import type { UseGithubSettingsResult } from './use-github-settings';
 import type { UseHubLogsResult } from './use-hub-logs';
 import type { UseLlmSettingsResult } from './use-llm-settings';
 import type { UseProfileSettingsResult } from './use-profile-settings';
 import type { UseSkillLibraryResult } from './use-skill-library';
 
 type SettingsViewProps = {
+  github: UseGithubSettingsResult;
   llm: UseLlmSettingsResult;
   skillLibrary: UseSkillLibraryResult;
   deleteAction: UseDeleteActionSettingsResult;
@@ -44,6 +46,7 @@ function settingsNavButtonClass(active: boolean) {
 }
 
 export function SettingsView({
+  github,
   llm,
   skillLibrary,
   deleteAction,
@@ -66,6 +69,7 @@ export function SettingsView({
 
   const settingsBusy =
     hubLogsState.hubLogsLoading ||
+    github.githubSettingsLoading ||
     llm.llmSettingsLoading ||
     deleteAction.deleteSettingsLoading ||
     filesystem.filesystemSettingsLoading ||
@@ -111,6 +115,7 @@ export function SettingsView({
       if (!ok) return;
     }
     void llm.loadLlmSettings();
+    void github.loadGithubSettings();
     void deleteAction.loadDeleteSettings();
     void filesystem.loadFilesystemSettings();
     void deleteAction.loadArchivedDrones();
@@ -119,12 +124,13 @@ export function SettingsView({
     void hubLogsState.loadHubLogs();
     void skillLibrary.loadSkills();
     void skillLibrary.loadSkillSources();
-  }, [deleteAction, filesystem, hubLogsState, llm, profile, skillLibrary]);
+  }, [deleteAction, filesystem, github, hubLogsState, llm, profile, skillLibrary]);
 
   const renderActiveTab = () => {
     if (activeTab === 'general') {
       return (
         <GeneralSettingsTab
+          github={github}
           llm={llm}
           filesystem={filesystem}
           transcriptInlineImages={transcriptInlineImages}

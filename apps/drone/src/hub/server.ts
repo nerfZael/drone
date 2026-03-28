@@ -150,6 +150,7 @@ import {
 import {
   closeGithubPullRequestForRepoRoot,
   getGithubPullRequestCommitForRepoRoot,
+  inspectGithubAuthStatus,
   inspectGithubRepoForRepoRoot,
   isGithubPullRequestError,
   listGithubPullRequestChangesForRepoRoot,
@@ -456,6 +457,37 @@ async function checkHostCommand(command: string): Promise<{ available: boolean; 
   return { available: false, detail: `${command} is not on PATH` };
 }
 
+function githubAuthDetail(auth: Awaited<ReturnType<typeof inspectGithubAuthStatus>>): string {
+  if (auth.tokenSource === 'environment') {
+    return `GitHub auth is available from ${auth.tokenEnvKey ?? 'environment'}.`;
+  }
+  if (auth.tokenSource === 'gh') {
+    return 'GitHub auth is available from host gh auth.';
+  }
+  if (auth.ghCliInstalled) {
+    return 'Host gh is installed but not authenticated. Run gh auth login or set DRONE_HUB_GITHUB_TOKEN / GITHUB_TOKEN / GH_TOKEN.';
+  }
+  return 'Set DRONE_HUB_GITHUB_TOKEN / GITHUB_TOKEN / GH_TOKEN, or install and authenticate host gh.';
+}
+
+async function resolveGithubSettingsResponse(): Promise<any> {
+  const auth = await inspectGithubAuthStatus();
+  return {
+    ok: true,
+    github: {
+      pullRequestTransport: 'github-api',
+      authReady: auth.tokenAvailable,
+      authSource: auth.tokenSource,
+      authEnvKey: auth.tokenEnvKey,
+      authDetail: githubAuthDetail(auth),
+      ghCliInstalled: auth.ghCliInstalled,
+      ghCliAuthenticated: auth.ghCliAuthenticated,
+      ghCliPath: auth.ghCliPath,
+      ghCliVersion: auth.ghCliVersion,
+    },
+  };
+}
+
 async function resolveSetupStatusResponse(): Promise<any> {
   await ensureDefaultProfileForFirstRun();
   const setupState = await ensureHubSetupState();
@@ -483,6 +515,7 @@ async function resolveSetupStatusResponse(): Promise<any> {
     }
   }
   const tmuxCommand = await checkHostCommand('tmux');
+  const githubSettings = await resolveGithubSettingsResponse();
   const hasBaseImage = await new BaseConfigManager().hasBase();
   const dependencies = [
     {
@@ -500,6 +533,14 @@ async function resolveSetupStatusResponse(): Promise<any> {
       blocking: false,
       requiredFor: 'host-runtime drones',
       detail: tmuxCommand.available ? 'Host-runtime drones can launch local daemons.' : 'Install tmux if you plan to use host-runtime drones.',
+    },
+    {
+      id: 'github',
+      label: 'GitHub auth',
+      status: githubSettings.github.authReady ? 'ready' : 'warning',
+      blocking: false,
+      requiredFor: 'pull request actions',
+      detail: githubSettings.github.authDetail,
     },
     {
       id: 'llm',
@@ -8900,6 +8941,13 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           }
           await upsertStoredLlmProvider(provider);
           json(res, 200, await resolveLlmSettingsResponse());
+          return;
+        }
+      }
+
+      if (pathname === '/api/settings/github') {
+        if (method === 'GET') {
+          json(res, 200, await resolveGithubSettingsResponse());
           return;
         }
       }

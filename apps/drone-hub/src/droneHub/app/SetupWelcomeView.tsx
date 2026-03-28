@@ -152,7 +152,7 @@ export function SetupWelcomeView({
                 <div className="flex flex-col gap-3">
                   <div className="rounded-2xl border border-[var(--border-subtle)] bg-[rgba(0,0,0,.14)] px-4 py-4">
                     <div className="text-[11px] font-semibold text-[var(--fg-secondary)]">1. Resolve blockers</div>
-                    <div className="mt-1 text-[11px] text-[var(--muted-dim)]">Docker and LLM setup have the biggest impact on first-run success.</div>
+                    <div className="mt-1 text-[11px] text-[var(--muted-dim)]">Docker, GitHub auth, and LLM setup have the biggest impact on first-run success.</div>
                   </div>
                   <div className="rounded-2xl border border-[var(--border-subtle)] bg-[rgba(0,0,0,.14)] px-4 py-4">
                     <div className="text-[11px] font-semibold text-[var(--fg-secondary)]">2. Choose your profile strategy</div>

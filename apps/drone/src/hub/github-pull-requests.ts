@@ -16,6 +16,18 @@ export type GithubRepoResolutionDebug = {
   parsedRepo: GithubRepoRef | null;
 };
 
+export type GithubTokenSource = 'environment' | 'gh' | null;
+
+export type GithubAuthStatus = {
+  tokenAvailable: boolean;
+  tokenSource: GithubTokenSource;
+  tokenEnvKey: string | null;
+  ghCliInstalled: boolean;
+  ghCliPath: string | null;
+  ghCliVersion: string | null;
+  ghCliAuthenticated: boolean;
+};
+
 export type GithubPullRequestSummary = {
   number: number;
   title: string;
@@ -186,6 +198,18 @@ async function gitBestRemoteUrl(repoRoot: string): Promise<string | null> {
   return null;
 }
 
+async function resolveLocalCommandPath(command: string): Promise<string | null> {
+  const cmd = String(command ?? '').trim();
+  if (!cmd) return null;
+  const result = await runLocal('bash', ['-lc', `command -v ${cmd}`]);
+  if (result.code !== 0) return null;
+  const line = String(result.stdout ?? '')
+    .split('\n')
+    .map((entry) => entry.trim())
+    .find(Boolean);
+  return line || null;
+}
+
 function parseGithubSlug(remoteUrl: string | null): GithubRepoRef | null {
   const value = String(remoteUrl ?? '').trim();
   if (!value) return null;
@@ -224,6 +248,42 @@ export async function inspectGithubRepoForRepoRoot(repoRootRaw: string): Promise
 }
 
 const GITHUB_TOKEN_ENV_KEYS = ['DRONE_HUB_GITHUB_TOKEN', 'GITHUB_TOKEN', 'GH_TOKEN'] as const;
+
+export async function inspectGithubAuthStatus(): Promise<GithubAuthStatus> {
+  let tokenSource: GithubTokenSource = null;
+  let tokenEnvKey: string | null = null;
+  for (const key of GITHUB_TOKEN_ENV_KEYS) {
+    const raw = String(process.env[key] ?? '').trim();
+    if (!raw) continue;
+    tokenSource = 'environment';
+    tokenEnvKey = key;
+    break;
+  }
+
+  const ghCliPath = await resolveLocalCommandPath('gh');
+  const ghCliInstalled = Boolean(ghCliPath);
+  const ghVersionResult = ghCliInstalled ? await runLocal('gh', ['--version']) : { code: 127, stdout: '', stderr: '' };
+  const ghCliVersion =
+    ghVersionResult.code === 0
+      ? String(ghVersionResult.stdout ?? '')
+          .split('\n')
+          .map((entry) => entry.trim())
+          .find(Boolean) ?? null
+      : null;
+  const ghTokenResult = ghCliInstalled ? await runLocal('gh', ['auth', 'token']) : { code: 127, stdout: '', stderr: '' };
+  const ghCliAuthenticated = ghTokenResult.code === 0 && Boolean(String(ghTokenResult.stdout ?? '').trim());
+  if (!tokenSource && ghCliAuthenticated) tokenSource = 'gh';
+
+  return {
+    tokenAvailable: tokenSource != null,
+    tokenSource,
+    tokenEnvKey,
+    ghCliInstalled,
+    ghCliPath,
+    ghCliVersion,
+    ghCliAuthenticated,
+  };
+}
 
 async function resolveGithubToken(): Promise<string | null> {
   for (const key of GITHUB_TOKEN_ENV_KEYS) {

@@ -44,6 +44,7 @@ import { useTaskPlaybookButtonSettings } from './droneHub/app/use-task-playbook-
 import { useUiPreferencesSettings } from './droneHub/app/use-ui-preferences-settings';
 import { useDeleteActionSettings } from './droneHub/app/use-delete-action-settings';
 import { useFilesystemSettings } from './droneHub/app/use-filesystem-settings';
+import { useGithubSettings } from './droneHub/app/use-github-settings';
 import { useProfileSettings } from './droneHub/app/use-profile-settings';
 import { useSetupStatus } from './droneHub/app/use-setup-status';
 import { useSkillLibrary } from './droneHub/app/use-skill-library';
@@ -504,6 +505,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   });
   useUiPreferencesSettings({ requestJson });
   const deleteActionSettingsState = useDeleteActionSettings(requestJson);
+  const githubSettingsState = useGithubSettings(requestJson);
   const filesystemSettingsState = useFilesystemSettings(requestJson);
   const profileSettingsState = useProfileSettings(requestJson);
   const setupStatusState = useSetupStatus(requestJson);
@@ -2590,6 +2592,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const workspaceContentProps: DroneHubWorkspaceContentProps = useDroneHubWorkspaceContentProps({
     appView,
     llmSettingsState,
+    githubSettingsState,
     skillLibraryState,
     deleteActionSettingsState,
     filesystemSettingsState,
