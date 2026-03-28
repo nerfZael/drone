@@ -205,6 +205,8 @@ function SidebarGroupSection({
   const countVisibleClass = pinGroupActionsVisible
     ? 'opacity-0 pointer-events-none'
     : 'opacity-100 group-hover/group-header:opacity-0 group-hover/group-header:pointer-events-none';
+  const actionRailWidthClass = canRenameGroup ? 'group-hover/group-header:w-[124px]' : 'group-hover/group-header:w-[92px]';
+  const pinnedActionRailWidthClass = canRenameGroup ? 'w-[124px]' : 'w-[92px]';
 
   return (
     <div
@@ -221,7 +223,7 @@ function SidebarGroupSection({
       ) : null}
       <div
         ref={setHeaderNodeRef}
-        className={`group/group-header w-full px-3 py-2 flex items-center justify-between gap-2 border-b border-[var(--border-subtle)] transition-colors ${
+        className={`group/group-header relative w-full px-3 py-2 flex items-center justify-between gap-2 border-b border-[var(--border-subtle)] transition-colors ${
           isDropTarget ? 'bg-[var(--accent-subtle)]' : 'hover:bg-[var(--hover)]'
         } ${groupDragData ? 'cursor-grab touch-none active:cursor-grabbing' : ''}`}
         {...(attributes as unknown as Record<string, unknown>)}
@@ -233,123 +235,117 @@ function SidebarGroupSection({
           className="flex items-center gap-2 min-w-0 text-left flex-1"
           title={collapsed ? 'Expand group' : 'Collapse group'}
         >
-          <IconChevron down={!collapsed} className="text-[var(--muted-dim)]" />
-          <IconFolder className="text-[var(--muted-dim)] opacity-50" />
+          <IconChevron down={!collapsed} className="flex-shrink-0 text-[var(--muted-dim)]" />
+          <IconFolder className="flex-shrink-0 text-[var(--muted-dim)] opacity-50" />
           <span
-            className="text-[11px] font-semibold text-[var(--fg-secondary)] truncate tracking-wide uppercase"
+            className="min-w-0 flex-1 truncate text-[11px] font-semibold text-[var(--fg-secondary)] tracking-wide uppercase"
             style={{ fontFamily: 'var(--display)' }}
           >
             {groupLabel}
           </span>
         </button>
         <div
-          data-group-drag-block="true"
-          className={`flex items-center justify-end flex-shrink-0 transition-[min-width] duration-150 ${
-            pinGroupActionsVisible
-              ? canRenameGroup
-                ? 'min-w-[184px]'
-                : 'min-w-[154px]'
-              : canRenameGroup
-                ? 'min-w-[92px] group-hover/group-header:min-w-[184px]'
-                : 'min-w-[72px] group-hover/group-header:min-w-[154px]'
+          className={`relative flex-shrink-0 transition-[width] duration-150 ${
+            pinGroupActionsVisible ? pinnedActionRailWidthClass : `w-[64px] ${actionRailWidthClass}`
           }`}
-          onPointerDown={stopGroupHeaderActionInteraction}
-          onMouseDown={stopGroupHeaderActionInteraction}
         >
-          <div className="w-full flex items-center justify-end gap-2">
-            <div
-              className={`text-[10px] font-mono text-[var(--muted-dim)] transition-opacity duration-150 ${countVisibleClass}`}
-            >
-              {actualItems.length} drone{actualItems.length !== 1 ? 's' : ''}
-            </div>
-            <div className={`flex items-center justify-end gap-1 ${actionsVisibleClass}`}>
-              {canRenameGroup ? (
+          <div
+            className={`absolute inset-0 flex items-center justify-end text-[10px] font-mono text-[var(--muted-dim)] transition-opacity duration-150 ${countVisibleClass}`}
+          >
+            {actualItems.length} drone{actualItems.length !== 1 ? 's' : ''}
+          </div>
+          <div
+            data-group-drag-block="true"
+            className={`absolute inset-y-0 right-0 flex items-center justify-end gap-1 ${actionsVisibleClass}`}
+            onPointerDown={stopGroupHeaderActionInteraction}
+            onMouseDown={stopGroupHeaderActionInteraction}
+          >
+            {canRenameGroup ? (
+              <button
+                type="button"
+                onClick={() => onRenameGroup(groupRef.group)}
+                disabled={isDeletingGroup || isRenamingGroup}
+                aria-busy={isRenamingGroup}
+                className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
+                  isDeletingGroup || isRenamingGroup
+                    ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
+                    : 'bg-[rgba(167,139,250,.08)] border-[rgba(167,139,250,.18)] text-[var(--accent)] hover:bg-[rgba(167,139,250,.12)]'
+                }`}
+                title={isRenamingGroup ? `Renaming group "${groupLabel}"…` : `Rename group "${groupLabel}"`}
+                aria-label={isRenamingGroup ? `Renaming group "${groupLabel}"` : `Rename group "${groupLabel}"`}
+              >
+                {isRenamingGroup ? <IconSpinner className="opacity-90" /> : <IconPencil className="opacity-90" />}
+              </button>
+            ) : null}
+            {!placeholderOnly ? (
+              <>
                 <button
                   type="button"
-                  onClick={() => onRenameGroup(groupRef.group)}
+                  onClick={() => toggleSidebarGroupHidden(groupRef)}
                   disabled={isDeletingGroup || isRenamingGroup}
-                  aria-busy={isRenamingGroup}
                   className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
                     isDeletingGroup || isRenamingGroup
                       ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                      : 'bg-[rgba(167,139,250,.08)] border-[rgba(167,139,250,.18)] text-[var(--accent)] hover:bg-[rgba(167,139,250,.12)]'
+                      : isHiddenGroup
+                        ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)] hover:bg-[rgba(167,139,250,.18)]'
+                        : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] hover:bg-[var(--hover)]'
                   }`}
-                  title={isRenamingGroup ? `Renaming group "${groupLabel}"…` : `Rename group "${groupLabel}"`}
-                  aria-label={isRenamingGroup ? `Renaming group "${groupLabel}"` : `Rename group "${groupLabel}"`}
+                  title={isHiddenGroup ? `Unhide "${groupLabel}"` : `Hide "${groupLabel}"`}
+                  aria-label={isHiddenGroup ? `Unhide "${groupLabel}"` : `Hide "${groupLabel}"`}
                 >
-                  {isRenamingGroup ? <IconSpinner className="opacity-90" /> : <IconPencil className="opacity-90" />}
+                  {isHiddenGroup ? <IconEye className="opacity-90" /> : <IconEyeOff className="opacity-90" />}
                 </button>
-              ) : null}
-              {!placeholderOnly ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => toggleSidebarGroupHidden(groupRef)}
-                    disabled={isDeletingGroup || isRenamingGroup}
-                    className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
-                      isDeletingGroup || isRenamingGroup
-                        ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                        : isHiddenGroup
-                          ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)] hover:bg-[rgba(167,139,250,.18)]'
-                          : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] hover:bg-[var(--hover)]'
-                    }`}
-                    title={isHiddenGroup ? `Unhide "${groupLabel}"` : `Hide "${groupLabel}"`}
-                    aria-label={isHiddenGroup ? `Unhide "${groupLabel}"` : `Hide "${groupLabel}"`}
-                  >
-                    {isHiddenGroup ? <IconEye className="opacity-90" /> : <IconEyeOff className="opacity-90" />}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onOpenGroupMultiChat(groupRef.group)}
-                    disabled={isDeletingGroup}
-                    className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
-                      isDeletingGroup
-                        ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                        : selectedGroupMultiChat === groupRef.group
-                          ? 'opacity-100 pointer-events-auto bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
-                          : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
-                    }`}
-                    title={`Open "${groupLabel}" multi-chat`}
-                    aria-label={`Open "${groupLabel}" multi-chat`}
-                  >
-                    <IconColumns className="opacity-90" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onDeleteGroup(groupRef.group, actualItems.length, {
-                        kind,
-                        label: groupLabel,
-                        repoPath: isVirtualGroup ? hoveredRepoPath || null : null,
-                      })
-                    }
-                    disabled={isDeletingGroup || isRenamingGroup}
-                    aria-busy={isDeletingGroup}
-                    className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
-                      isDeletingGroup || isRenamingGroup
-                        ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                        : 'bg-[var(--red-subtle)] border-[rgba(255,90,90,.2)] text-[var(--red)] hover:bg-[rgba(255,90,90,.15)]'
-                    }`}
-                    title={
-                      isDeletingGroup
-                        ? `Deleting group "${groupLabel}"…`
-                        : isVirtualGroup
-                          ? `Delete all drones in "${groupLabel}"`
-                          : `Delete group "${groupLabel}" (and all drones inside)`
-                    }
-                    aria-label={
-                      isDeletingGroup
-                        ? `Deleting group "${groupLabel}"`
-                        : isVirtualGroup
-                          ? `Delete all drones in "${groupLabel}"`
-                          : `Delete group "${groupLabel}" (and all drones inside)`
-                    }
-                  >
-                    {isDeletingGroup ? <IconSpinner className="opacity-90" /> : <IconTrash className="opacity-90" />}
-                  </button>
-                </>
-              ) : null}
-            </div>
+                <button
+                  type="button"
+                  onClick={() => onOpenGroupMultiChat(groupRef.group)}
+                  disabled={isDeletingGroup}
+                  className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
+                    isDeletingGroup
+                      ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
+                      : selectedGroupMultiChat === groupRef.group
+                        ? 'opacity-100 pointer-events-auto bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
+                        : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
+                  }`}
+                  title={`Open "${groupLabel}" multi-chat`}
+                  aria-label={`Open "${groupLabel}" multi-chat`}
+                >
+                  <IconColumns className="opacity-90" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    onDeleteGroup(groupRef.group, actualItems.length, {
+                      kind,
+                      label: groupLabel,
+                      repoPath: isVirtualGroup ? hoveredRepoPath || null : null,
+                    })
+                  }
+                  disabled={isDeletingGroup || isRenamingGroup}
+                  aria-busy={isDeletingGroup}
+                  className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
+                    isDeletingGroup || isRenamingGroup
+                      ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
+                      : 'bg-[var(--red-subtle)] border-[rgba(255,90,90,.2)] text-[var(--red)] hover:bg-[rgba(255,90,90,.15)]'
+                  }`}
+                  title={
+                    isDeletingGroup
+                      ? `Deleting group "${groupLabel}"…`
+                      : isVirtualGroup
+                        ? `Delete all drones in "${groupLabel}"`
+                        : `Delete group "${groupLabel}" (and all drones inside)`
+                  }
+                  aria-label={
+                    isDeletingGroup
+                      ? `Deleting group "${groupLabel}"`
+                      : isVirtualGroup
+                        ? `Delete all drones in "${groupLabel}"`
+                        : `Delete group "${groupLabel}" (and all drones inside)`
+                  }
+                >
+                  {isDeletingGroup ? <IconSpinner className="opacity-90" /> : <IconTrash className="opacity-90" />}
+                </button>
+              </>
+            ) : null}
           </div>
         </div>
       </div>
