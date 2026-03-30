@@ -150,6 +150,8 @@ export function useWorkspaceNavigationActions({
       setChatHeaderRepoPath(normalizeCreateRepoPath(String(opts?.repoPath ?? '')));
     } else if (activeRepo) {
       setChatHeaderRepoPath(normalizeCreateRepoPath(activeRepo));
+    } else {
+      setChatHeaderRepoPath('');
     }
     setAppView('workspace');
     setKanbanBoardOpen(false);

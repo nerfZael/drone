@@ -39,10 +39,25 @@ type FsExplorerView = 'list' | 'thumb';
 type OutputView = 'screen' | 'log';
 type KanbanBoardViewMode = 'board' | 'table';
 type KanbanBoardScopeType = KanbanTaskScopeType;
+type SpawnContextPreferences = {
+  spawnAgentKey: string;
+  spawnModel: string;
+  repoBranchSource: RepoBranchSourceMode;
+  repoCreateRemoteBranch: string;
+  pullHostBranchBeforeCreate: boolean;
+};
 const CHAT_INPUT_DRAFT_MAX_CHARS = 4_000;
 const CHAT_INPUT_DRAFT_MAX_KEYS = 80;
 const CHAT_INPUT_DRAFTS_STORAGE_KEY = profileStorageKey('droneHub.chatInputDrafts');
 const CHAT_INPUT_DRAFTS_PERSIST_DEBOUNCE_MS = 300;
+const NO_REPO_SPAWN_CONTEXT_KEY = '__no_repo__';
+const DEFAULT_SPAWN_CONTEXT_PREFERENCES: SpawnContextPreferences = {
+  spawnAgentKey: 'builtin:cursor',
+  spawnModel: '',
+  repoBranchSource: 'host',
+  repoCreateRemoteBranch: '',
+  pullHostBranchBeforeCreate: true,
+};
 
 type DroneHubUiState = {
   activeRepoPath: string;
@@ -94,6 +109,8 @@ type DroneHubUiState = {
   showCanvasLastMessagePreviews: boolean;
   automations: AutomationConfig[];
   transcriptInlineImageOverrides: Record<string, boolean>;
+  spawnContextRepoPath: string;
+  spawnContextByRepoKey: Record<string, SpawnContextPreferences>;
   spawnAgentKey: string;
   spawnModel: string;
   seenModelIds: string[];
@@ -162,6 +179,8 @@ type DroneHubUiState = {
   removeAutomation: (id: string) => void;
   clearAutomations: () => void;
   setTranscriptInlineImageOverride: (messageId: string, next: boolean | null) => void;
+  setSpawnContextRepoPath: (next: Updater<string>) => void;
+  updateSpawnContextForRepo: (repoPath: string, next: Partial<SpawnContextPreferences>) => void;
   setSpawnAgentKey: (next: Updater<string>) => void;
   setSpawnModel: (next: Updater<string>) => void;
   rememberSeenModels: (models: Iterable<string | null | undefined>) => void;
@@ -183,6 +202,84 @@ type DroneHubUiState = {
 
 function resolveNext<T>(prev: T, next: Updater<T>): T {
   return typeof next === 'function' ? (next as (current: T) => T)(prev) : next;
+}
+
+function normalizeSpawnAgentKeyValue(value: unknown): string {
+  const normalized = typeof value === 'string' ? value.trim() : String(value ?? '').trim();
+  return normalized || DEFAULT_SPAWN_CONTEXT_PREFERENCES.spawnAgentKey;
+}
+
+function normalizeRepoBranchSourceMode(value: unknown): RepoBranchSourceMode {
+  return value === 'remote' ? 'remote' : 'host';
+}
+
+function normalizeSpawnContextRepoPath(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : String(value ?? '').trim();
+}
+
+function spawnContextRepoKeyForPath(repoPathRaw: unknown): string {
+  const repoPath = normalizeSpawnContextRepoPath(repoPathRaw);
+  return repoPath || NO_REPO_SPAWN_CONTEXT_KEY;
+}
+
+function normalizeSpawnContextPreferences(
+  value: Partial<SpawnContextPreferences> | null | undefined,
+): SpawnContextPreferences {
+  return {
+    spawnAgentKey: normalizeSpawnAgentKeyValue(value?.spawnAgentKey),
+    spawnModel: normalizeTrimmedString(value?.spawnModel),
+    repoBranchSource: normalizeRepoBranchSourceMode(value?.repoBranchSource),
+    repoCreateRemoteBranch: normalizeTrimmedString(value?.repoCreateRemoteBranch),
+    pullHostBranchBeforeCreate: normalizeBoolean(value?.pullHostBranchBeforeCreate),
+  };
+}
+
+export function normalizeSpawnContextByRepoKey(value: unknown): Record<string, SpawnContextPreferences> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const out: Record<string, SpawnContextPreferences> = {};
+  for (const [keyRaw, entryRaw] of Object.entries(value as Record<string, unknown>)) {
+    const key = String(keyRaw ?? '').trim();
+    if (!key) continue;
+    out[key] = normalizeSpawnContextPreferences(entryRaw as Partial<SpawnContextPreferences>);
+  }
+  return out;
+}
+
+export function resolveSpawnContextPreferencesForRepo(
+  byRepoKey: Record<string, SpawnContextPreferences> | null | undefined,
+  repoPathRaw: unknown,
+): SpawnContextPreferences {
+  const map = byRepoKey ?? {};
+  const repoKey = spawnContextRepoKeyForPath(repoPathRaw);
+  return (
+    map[repoKey] ??
+    map[NO_REPO_SPAWN_CONTEXT_KEY] ??
+    DEFAULT_SPAWN_CONTEXT_PREFERENCES
+  );
+}
+
+function buildUpdatedSpawnContextByRepoKey(
+  prev: Record<string, SpawnContextPreferences>,
+  repoPathRaw: unknown,
+  patch: Partial<SpawnContextPreferences>,
+): Record<string, SpawnContextPreferences> {
+  const repoKey = spawnContextRepoKeyForPath(repoPathRaw);
+  const merged = normalizeSpawnContextPreferences({
+    ...resolveSpawnContextPreferencesForRepo(prev, repoPathRaw),
+    ...patch,
+  });
+  const current = prev[repoKey];
+  if (
+    current &&
+    current.spawnAgentKey === merged.spawnAgentKey &&
+    current.spawnModel === merged.spawnModel &&
+    current.repoBranchSource === merged.repoBranchSource &&
+    current.repoCreateRemoteBranch === merged.repoCreateRemoteBranch &&
+    current.pullHostBranchBeforeCreate === merged.pullHostBranchBeforeCreate
+  ) {
+    return prev;
+  }
+  return { ...prev, [repoKey]: merged };
 }
 
 type DroneHubUiPersistedState = Pick<
@@ -218,6 +315,7 @@ type DroneHubUiPersistedState = Pick<
   | 'transcriptInlineImages'
   | 'showCanvasLastMessagePreviews'
   | 'automations'
+  | 'spawnContextByRepoKey'
   | 'spawnAgentKey'
   | 'spawnModel'
   | 'seenModelIds'
@@ -233,7 +331,23 @@ export function migrateDroneHubUiPersistedState(
   _version?: number,
 ): Partial<DroneHubUiPersistedState> {
   if (!persistedState || typeof persistedState !== 'object' || Array.isArray(persistedState)) return {};
-  return { ...(persistedState as Partial<DroneHubUiPersistedState>) };
+  const migrated = { ...(persistedState as Partial<DroneHubUiPersistedState>) };
+  const normalizedContexts = normalizeSpawnContextByRepoKey((migrated as any).spawnContextByRepoKey);
+  if (Object.keys(normalizedContexts).length > 0) {
+    migrated.spawnContextByRepoKey = normalizedContexts;
+    return migrated;
+  }
+  const legacySpawnDefaults = normalizeSpawnContextPreferences({
+    spawnAgentKey: migrated.spawnAgentKey,
+    spawnModel: migrated.spawnModel,
+    repoBranchSource: migrated.repoBranchSource,
+    repoCreateRemoteBranch: migrated.repoCreateRemoteBranch,
+    pullHostBranchBeforeCreate: migrated.pullHostBranchBeforeCreate,
+  });
+  migrated.spawnContextByRepoKey = {
+    [NO_REPO_SPAWN_CONTEXT_KEY]: legacySpawnDefaults,
+  };
+  return migrated;
 }
 
 function sanitizeCustomAgents(value: unknown): CustomAgentProfile[] {
@@ -497,12 +611,16 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       showCanvasLastMessagePreviews: false,
       automations: [],
       transcriptInlineImageOverrides: {},
-      spawnAgentKey: 'builtin:cursor',
-      spawnModel: '',
+      spawnContextRepoPath: '',
+      spawnContextByRepoKey: {
+        [NO_REPO_SPAWN_CONTEXT_KEY]: { ...DEFAULT_SPAWN_CONTEXT_PREFERENCES },
+      },
+      spawnAgentKey: DEFAULT_SPAWN_CONTEXT_PREFERENCES.spawnAgentKey,
+      spawnModel: DEFAULT_SPAWN_CONTEXT_PREFERENCES.spawnModel,
       seenModelIds: [],
-      repoBranchSource: 'host',
-      repoCreateRemoteBranch: '',
-      pullHostBranchBeforeCreate: true,
+      repoBranchSource: DEFAULT_SPAWN_CONTEXT_PREFERENCES.repoBranchSource,
+      repoCreateRemoteBranch: DEFAULT_SPAWN_CONTEXT_PREFERENCES.repoCreateRemoteBranch,
+      pullHostBranchBeforeCreate: DEFAULT_SPAWN_CONTEXT_PREFERENCES.pullHostBranchBeforeCreate,
       customAgents: [],
       customAgentModalOpen: false,
       newCustomAgentLabel: '',
@@ -667,8 +785,60 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           }
           return { transcriptInlineImageOverrides: merged };
         }),
-      setSpawnAgentKey: (next) => set((s) => ({ spawnAgentKey: resolveNext(s.spawnAgentKey, next) })),
-      setSpawnModel: (next) => set((s) => ({ spawnModel: resolveNext(s.spawnModel, next) })),
+      setSpawnContextRepoPath: (next) =>
+        set((s) => {
+          const repoPath = normalizeSpawnContextRepoPath(resolveNext(s.spawnContextRepoPath, next));
+          if (repoPath === s.spawnContextRepoPath) return s;
+          const resolved = resolveSpawnContextPreferencesForRepo(s.spawnContextByRepoKey, repoPath);
+          return {
+            spawnContextRepoPath: repoPath,
+            spawnAgentKey: resolved.spawnAgentKey,
+            spawnModel: resolved.spawnModel,
+            repoBranchSource: resolved.repoBranchSource,
+            repoCreateRemoteBranch: resolved.repoCreateRemoteBranch,
+            pullHostBranchBeforeCreate: resolved.pullHostBranchBeforeCreate,
+          };
+        }),
+      updateSpawnContextForRepo: (repoPathRaw, patch) =>
+        set((s) => {
+          const repoPath = normalizeSpawnContextRepoPath(repoPathRaw);
+          const nextByRepoKey = buildUpdatedSpawnContextByRepoKey(s.spawnContextByRepoKey, repoPath, patch);
+          if (nextByRepoKey === s.spawnContextByRepoKey) return s;
+          if (spawnContextRepoKeyForPath(s.spawnContextRepoPath) !== spawnContextRepoKeyForPath(repoPath)) {
+            return { spawnContextByRepoKey: nextByRepoKey };
+          }
+          const resolved = resolveSpawnContextPreferencesForRepo(nextByRepoKey, repoPath);
+          return {
+            spawnContextByRepoKey: nextByRepoKey,
+            spawnAgentKey: resolved.spawnAgentKey,
+            spawnModel: resolved.spawnModel,
+            repoBranchSource: resolved.repoBranchSource,
+            repoCreateRemoteBranch: resolved.repoCreateRemoteBranch,
+            pullHostBranchBeforeCreate: resolved.pullHostBranchBeforeCreate,
+          };
+        }),
+      setSpawnAgentKey: (next) =>
+        set((s) => {
+          const spawnAgentKey = normalizeSpawnAgentKeyValue(resolveNext(s.spawnAgentKey, next));
+          const nextByRepoKey = buildUpdatedSpawnContextByRepoKey(s.spawnContextByRepoKey, s.spawnContextRepoPath, {
+            spawnAgentKey,
+          });
+          return {
+            spawnAgentKey,
+            spawnContextByRepoKey: nextByRepoKey,
+          };
+        }),
+      setSpawnModel: (next) =>
+        set((s) => {
+          const spawnModel = normalizeTrimmedString(resolveNext(s.spawnModel, next));
+          const nextByRepoKey = buildUpdatedSpawnContextByRepoKey(s.spawnContextByRepoKey, s.spawnContextRepoPath, {
+            spawnModel,
+          });
+          return {
+            spawnModel,
+            spawnContextByRepoKey: nextByRepoKey,
+          };
+        }),
       rememberSeenModels: (models) =>
         set((s) => {
           const next = mergeSeenModelIds(s.seenModelIds, models);
@@ -677,10 +847,39 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           }
           return { seenModelIds: next };
         }),
-      setRepoBranchSource: (next) => set((s) => ({ repoBranchSource: resolveNext(s.repoBranchSource, next) })),
-      setRepoCreateRemoteBranch: (next) => set((s) => ({ repoCreateRemoteBranch: resolveNext(s.repoCreateRemoteBranch, next) })),
+      setRepoBranchSource: (next) =>
+        set((s) => {
+          const repoBranchSource = normalizeRepoBranchSourceMode(resolveNext(s.repoBranchSource, next));
+          const nextByRepoKey = buildUpdatedSpawnContextByRepoKey(s.spawnContextByRepoKey, s.spawnContextRepoPath, {
+            repoBranchSource,
+          });
+          return {
+            repoBranchSource,
+            spawnContextByRepoKey: nextByRepoKey,
+          };
+        }),
+      setRepoCreateRemoteBranch: (next) =>
+        set((s) => {
+          const repoCreateRemoteBranch = normalizeTrimmedString(resolveNext(s.repoCreateRemoteBranch, next));
+          const nextByRepoKey = buildUpdatedSpawnContextByRepoKey(s.spawnContextByRepoKey, s.spawnContextRepoPath, {
+            repoCreateRemoteBranch,
+          });
+          return {
+            repoCreateRemoteBranch,
+            spawnContextByRepoKey: nextByRepoKey,
+          };
+        }),
       setPullHostBranchBeforeCreate: (next) =>
-        set((s) => ({ pullHostBranchBeforeCreate: resolveNext(s.pullHostBranchBeforeCreate, next) })),
+        set((s) => {
+          const pullHostBranchBeforeCreate = resolveNext(s.pullHostBranchBeforeCreate, next) === true;
+          const nextByRepoKey = buildUpdatedSpawnContextByRepoKey(s.spawnContextByRepoKey, s.spawnContextRepoPath, {
+            pullHostBranchBeforeCreate,
+          });
+          return {
+            pullHostBranchBeforeCreate,
+            spawnContextByRepoKey: nextByRepoKey,
+          };
+        }),
       setCustomAgents: (next) => set((s) => ({ customAgents: resolveNext(s.customAgents, next) })),
       setCustomAgentModalOpen: (next) => set((s) => ({ customAgentModalOpen: resolveNext(s.customAgentModalOpen, next) })),
       setNewCustomAgentLabel: (next) => set((s) => ({ newCustomAgentLabel: resolveNext(s.newCustomAgentLabel, next) })),
@@ -704,7 +903,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
     }),
     {
       name: profileStorageKey('droneHub.ui'),
-      version: 11,
+      version: 12,
       storage: createJSONStorage(() => localStorage),
       migrate: (persistedState, version) => migrateDroneHubUiPersistedState(persistedState, version),
       partialize: (state): DroneHubUiPersistedState => ({
@@ -739,6 +938,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         transcriptInlineImages: state.transcriptInlineImages,
         showCanvasLastMessagePreviews: state.showCanvasLastMessagePreviews,
         automations: state.automations,
+        spawnContextByRepoKey: state.spawnContextByRepoKey,
         spawnAgentKey: state.spawnAgentKey,
         spawnModel: state.spawnModel,
         seenModelIds: state.seenModelIds,
@@ -832,6 +1032,9 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           automations: normalizeAutomationConfigs(
             (persisted as any).automations ?? currentState.automations,
           ),
+          spawnContextByRepoKey: normalizeSpawnContextByRepoKey(
+            (persisted as any).spawnContextByRepoKey ?? currentState.spawnContextByRepoKey,
+          ),
           seenModelIds: normalizeSeenModelIds(
             persisted.seenModelIds ?? currentState.seenModelIds,
           ),
@@ -896,6 +1099,7 @@ export function useDroneHubAppModelUiState() {
       outputView: s.outputView,
       fsExplorerView: s.fsExplorerView,
       showCanvasLastMessagePreviews: s.showCanvasLastMessagePreviews,
+      spawnContextRepoPath: s.spawnContextRepoPath,
       spawnAgentKey: s.spawnAgentKey,
       spawnModel: s.spawnModel,
       seenModelIds: s.seenModelIds,
@@ -948,6 +1152,8 @@ export function useDroneHubAppModelUiState() {
       setOutputView: s.setOutputView,
       setFsExplorerView: s.setFsExplorerView,
       setShowCanvasLastMessagePreviews: s.setShowCanvasLastMessagePreviews,
+      setSpawnContextRepoPath: s.setSpawnContextRepoPath,
+      updateSpawnContextForRepo: s.updateSpawnContextForRepo,
       setSpawnAgentKey: s.setSpawnAgentKey,
       setSpawnModel: s.setSpawnModel,
       rememberSeenModels: s.rememberSeenModels,

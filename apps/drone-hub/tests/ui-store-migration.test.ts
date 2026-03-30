@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { migrateDroneHubUiPersistedState } from '../src/droneHub/app/use-drone-hub-ui-store';
+import {
+  migrateDroneHubUiPersistedState,
+  normalizeSpawnContextByRepoKey,
+  resolveSpawnContextPreferencesForRepo,
+} from '../src/droneHub/app/use-drone-hub-ui-store';
 import { restoreUiPreferencesFromPersistedStorage } from '../src/droneHub/app/use-ui-preferences-settings';
 
 describe('drone hub ui store migration', () => {
@@ -50,6 +54,70 @@ describe('drone hub ui store migration', () => {
   test('returns an empty object for invalid persisted payloads', () => {
     expect(migrateDroneHubUiPersistedState(null, 5)).toEqual({});
     expect(migrateDroneHubUiPersistedState('invalid', 5)).toEqual({});
+  });
+
+  test('migrates legacy global spawn defaults into the non-repo bucket', () => {
+    const migrated = migrateDroneHubUiPersistedState(
+      {
+        spawnAgentKey: 'builtin:codex',
+        spawnModel: 'gpt-5.4',
+        repoBranchSource: 'remote',
+        repoCreateRemoteBranch: 'origin/feature-x',
+        pullHostBranchBeforeCreate: false,
+      },
+      11,
+    );
+
+    expect(migrated.spawnContextByRepoKey).toEqual({
+      __no_repo__: {
+        spawnAgentKey: 'builtin:codex',
+        spawnModel: 'gpt-5.4',
+        repoBranchSource: 'remote',
+        repoCreateRemoteBranch: 'origin/feature-x',
+        pullHostBranchBeforeCreate: false,
+      },
+    });
+  });
+
+  test('resolves repo-scoped spawn defaults before falling back to non-repo defaults', () => {
+    const byRepo = normalizeSpawnContextByRepoKey({
+      __no_repo__: {
+        spawnAgentKey: 'builtin:cursor',
+        spawnModel: '',
+        repoBranchSource: 'host',
+        repoCreateRemoteBranch: '',
+        pullHostBranchBeforeCreate: true,
+      },
+      '/tmp/repo-a': {
+        spawnAgentKey: 'builtin:codex',
+        spawnModel: 'gpt-5.4',
+        repoBranchSource: 'remote',
+        repoCreateRemoteBranch: 'origin/feature-a',
+        pullHostBranchBeforeCreate: false,
+      },
+    });
+
+    expect(resolveSpawnContextPreferencesForRepo(byRepo, '/tmp/repo-a')).toMatchObject({
+      spawnAgentKey: 'builtin:codex',
+      spawnModel: 'gpt-5.4',
+      repoBranchSource: 'remote',
+      repoCreateRemoteBranch: 'origin/feature-a',
+      pullHostBranchBeforeCreate: false,
+    });
+    expect(resolveSpawnContextPreferencesForRepo(byRepo, '/tmp/repo-b')).toMatchObject({
+      spawnAgentKey: 'builtin:cursor',
+      spawnModel: '',
+      repoBranchSource: 'host',
+      repoCreateRemoteBranch: '',
+      pullHostBranchBeforeCreate: true,
+    });
+    expect(resolveSpawnContextPreferencesForRepo(byRepo, '')).toMatchObject({
+      spawnAgentKey: 'builtin:cursor',
+      spawnModel: '',
+      repoBranchSource: 'host',
+      repoCreateRemoteBranch: '',
+      pullHostBranchBeforeCreate: true,
+    });
   });
 
   test('restores automations from the raw localStorage envelope when backend settings are still empty', () => {

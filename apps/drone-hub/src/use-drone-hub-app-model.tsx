@@ -166,6 +166,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     headerOverflowOpen,
     outputView,
     fsExplorerView,
+    spawnContextRepoPath,
     spawnAgentKey,
     spawnModel,
     repoBranchSource,
@@ -205,6 +206,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setClearingDroneError,
     setHeaderOverflowOpen,
     setFsExplorerView,
+    setSpawnContextRepoPath,
+    updateSpawnContextForRepo,
     setSpawnAgentKey,
     setSpawnModel,
     rememberSeenModels,
@@ -868,6 +871,14 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [registeredRepoPathSet],
   );
+  const activeSpawnContextRepoPath = React.useMemo(
+    () => normalizeCreateRepoPath(createOpen ? createRepoPath : chatHeaderRepoPath),
+    [chatHeaderRepoPath, createOpen, createRepoPath, normalizeCreateRepoPath],
+  );
+  React.useEffect(() => {
+    if (spawnContextRepoPath === activeSpawnContextRepoPath) return;
+    setSpawnContextRepoPath(activeSpawnContextRepoPath);
+  }, [activeSpawnContextRepoPath, setSpawnContextRepoPath, spawnContextRepoPath]);
 
   const suggestCloneName = React.useCallback(
     (sourceName: string) => {
@@ -1642,16 +1653,19 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       effectiveChatInfo.agent.kind === 'builtin'
         ? String(effectiveChatInfo.model ?? '')
         : '';
-    setSpawnAgentKey((prev) => (prev === nextAgentKey ? prev : nextAgentKey));
-    setSpawnModel((prev) => (prev === nextModel ? prev : nextModel));
+    updateSpawnContextForRepo(currentDroneRepoAttached ? currentDroneRepoPath : '', {
+      spawnAgentKey: nextAgentKey,
+      spawnModel: nextModel,
+    });
     lastSyncedCanvasAgentModelContextRef.current = contextKey;
   }, [
+    currentDroneRepoAttached,
+    currentDroneRepoPath,
     currentDrone?.name,
     effectiveChatInfo,
     selectedChat,
     selectedDrone,
-    setSpawnAgentKey,
-    setSpawnModel,
+    updateSpawnContextForRepo,
   ]);
   const currentDroneBusy =
     currentDrone && !isDroneStartingOrSeeding(currentDrone.hubPhase)
