@@ -9,6 +9,7 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragOverEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
 import {
@@ -28,9 +29,12 @@ import {
   createKanbanLane,
   createKanbanTaskType,
   fallbackTaskTypeId,
+  findKanbanCardLocation,
   moveKanbanCard,
   parsePastedKanbanCard,
+  previewKanbanCardMove,
   resolveKanbanCardScope,
+  resolveKanbanCardDropTarget,
   type KanbanBoardState,
   type KanbanCard,
   type KanbanLane,
@@ -97,11 +101,6 @@ type KanbanCardRef = {
   cardId: string;
 };
 
-type KanbanCardLocation = {
-  laneId: string;
-  index: number;
-};
-
 type SortableKanbanCardProps = {
   card: KanbanCard;
   laneId: string;
@@ -127,6 +126,42 @@ type KanbanLaneCardsProps = {
 
 const LANE_ACCENTS = ['#E0C84F', '#6AABFF', '#F5A623', '#34D399', '#C084FC', '#F472B6'] as const;
 const NO_REPO_FILTER_VALUE = '__kanban-no-repo__';
+const KANBAN_DROP_TARGET_SWITCH_BUFFER_PX = 10;
+
+function resolvePreviewTargetIndex(
+  activeLocation: { laneId: string; index: number },
+  dropTarget: { toLaneId: string; toIndex: number },
+): number {
+  if (activeLocation.laneId === dropTarget.toLaneId && activeLocation.index < dropTarget.toIndex) {
+    return dropTarget.toIndex - 1;
+  }
+  return dropTarget.toIndex;
+}
+
+function resolveCommittedMoveFromPreview(
+  sourceBoard: Pick<KanbanBoardState, 'lanes'>,
+  previewBoard: Pick<KanbanBoardState, 'lanes'>,
+  cardIdRaw: string,
+): { cardId: string; fromLaneId: string; toLaneId: string; toIndex: number } | null {
+  const cardId = String(cardIdRaw ?? '').trim();
+  if (!cardId) return null;
+  const sourceLocation = findKanbanCardLocation(sourceBoard, cardId);
+  const previewLocation = findKanbanCardLocation(previewBoard, cardId);
+  if (!sourceLocation || !previewLocation) return null;
+  if (sourceLocation.laneId === previewLocation.laneId && sourceLocation.index === previewLocation.index) {
+    return null;
+  }
+  return {
+    cardId,
+    fromLaneId: sourceLocation.laneId,
+    toLaneId: previewLocation.laneId,
+    toIndex:
+      sourceLocation.laneId === previewLocation.laneId && sourceLocation.index < previewLocation.index
+        ? previewLocation.index + 1
+        : previewLocation.index,
+  };
+}
+
 function isEditablePasteTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   if (target.isContentEditable) return true;
@@ -160,16 +195,6 @@ function matchesRepoFilter(repoPathRaw: unknown, selectedRepoPathRaw: string): b
   if (!selectedRepoPath) return true;
   if (selectedRepoPath === NO_REPO_FILTER_VALUE) return !repoPath;
   return repoPath === selectedRepoPath;
-}
-
-function findKanbanCardLocation(board: KanbanBoardState, cardIdRaw: string): KanbanCardLocation | null {
-  const cardId = String(cardIdRaw ?? '').trim();
-  if (!cardId) return null;
-  for (const lane of board.lanes) {
-    const index = lane.cards.findIndex((card) => card.id === cardId);
-    if (index >= 0) return { laneId: lane.id, index };
-  }
-  return null;
 }
 
 function stopCardDragActivation(event: React.PointerEvent<HTMLElement>) {
@@ -241,7 +266,6 @@ function SortableKanbanCard({
     setNodeRef,
     transform,
     transition,
-    isDragging,
   } = useSortable({
     id: card.id,
     data: { type: 'card', laneId },
@@ -255,7 +279,7 @@ function SortableKanbanCard({
     [transform, transition],
   );
 
-  const dragging = isDragging || activeDragCardId === card.id;
+  const dragging = activeDragCardId === card.id;
 
   return (
     <article
@@ -405,6 +429,9 @@ export function KanbanBoardWorkspace({
   const [typesEditorOpen, setTypesEditorOpen] = React.useState(false);
   const [selectedCardRef, setSelectedCardRef] = React.useState<KanbanCardRef | null>(null);
   const [activeDragCardId, setActiveDragCardId] = React.useState<string | null>(null);
+  const [activeDragCard, setActiveDragCard] = React.useState<KanbanCard | null>(null);
+  const [dragPreviewBoard, setDragPreviewBoard] = React.useState<KanbanBoardState | null>(null);
+  const dragPreviewTargetRef = React.useRef<{ overId: string; toLaneId: string; toIndex: number } | null>(null);
   const [taskButtonBusyId, setTaskButtonBusyId] = React.useState<string | null>(null);
   const [taskButtonError, setTaskButtonError] = React.useState<string | null>(null);
   const pendingGeneratedTitleByCardIdRef = React.useRef(new Map<string, string>());
@@ -585,6 +612,7 @@ export function KanbanBoardWorkspace({
       })),
     };
   }, [boardFilterActive, filteredSelectionActive, repoFilteringEnabled, scopedBoard, selectedRepoPath, selectedTypeIdSet]);
+  const renderedBoard = dragPreviewBoard ?? visibleBoard;
   const taskTypeLabelById = React.useMemo(
     () => Object.fromEntries(board.taskTypes.map((item) => [item.id, item.label])),
     [board.taskTypes],
@@ -603,14 +631,6 @@ export function KanbanBoardWorkspace({
     () => visibleBoard.lanes.reduce((sum, lane) => sum + lane.cards.length, 0),
     [visibleBoard.lanes],
   );
-  const activeDragCard = React.useMemo(() => {
-    if (!activeDragCardId) return null;
-    for (const lane of visibleBoard.lanes) {
-      const card = lane.cards.find((item) => item.id === activeDragCardId) ?? null;
-      if (card) return card;
-    }
-    return null;
-  }, [activeDragCardId, visibleBoard.lanes]);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -929,55 +949,149 @@ export function KanbanBoardWorkspace({
     [onBoardChange],
   );
 
-  const handleDragStart = React.useCallback((event: DragStartEvent) => {
-    const cardId = String(event.active.id ?? '').trim();
-    setActiveDragCardId(cardId || null);
-  }, []);
+  const handleDragStart = React.useCallback(
+    (event: DragStartEvent) => {
+      const cardId = String(event.active.id ?? '').trim();
+      if (!cardId) {
+        setActiveDragCardId(null);
+        setActiveDragCard(null);
+        setDragPreviewBoard(null);
+        dragPreviewTargetRef.current = null;
+        return;
+      }
+      setActiveDragCardId(cardId);
+      setActiveDragCard(
+        visibleBoard.lanes.flatMap((lane) => lane.cards).find((item) => item.id === cardId) ??
+          board.lanes.flatMap((lane) => lane.cards).find((item) => item.id === cardId) ??
+          null,
+      );
+      setDragPreviewBoard(null);
+      dragPreviewTargetRef.current = null;
+    },
+    [board.lanes, visibleBoard],
+  );
+
+  const handleDragOver = React.useCallback(
+    (event: DragOverEvent) => {
+      if (filteredSelectionActive) return;
+      const activeCardId = String(event.active.id ?? '').trim();
+      const overId = String(event.over?.id ?? '').trim();
+      if (!activeCardId) return;
+      if (!event.over || !overId) return;
+      const overType = String((event.over.data.current as { type?: string } | undefined)?.type ?? '').trim();
+      const activeRectTop = event.active.rect.current.translated?.top ?? event.active.rect.current.initial?.top ?? 0;
+      const activeRectHeight = event.active.rect.current.translated?.height ?? event.active.rect.current.initial?.height ?? 0;
+      const overRectTop = event.over.rect.top;
+      const overRectHeight = event.over.rect.height;
+      const previewSourceBoard = dragPreviewBoard ?? visibleBoard;
+      const dropTarget = resolveKanbanCardDropTarget(previewSourceBoard, {
+        activeCardId,
+        overId,
+        overType,
+        overLaneId: String((event.over.data.current as { laneId?: string } | undefined)?.laneId ?? '').trim(),
+        activeRectTop,
+        activeRectHeight,
+        overRectTop,
+        overRectHeight,
+      });
+      const activeLocation = findKanbanCardLocation(previewSourceBoard, activeCardId);
+      if (!dropTarget || !activeLocation) return;
+      let stabilizedTarget = dropTarget;
+      const previousTarget = dragPreviewTargetRef.current;
+      if (overType !== 'lane' && overType !== 'lane-end' && previousTarget?.overId === overId) {
+        const activeMidpoint = activeRectTop + activeRectHeight / 2;
+        const overMidpoint = overRectTop + overRectHeight / 2;
+        const deadZone = Math.max(
+          KANBAN_DROP_TARGET_SWITCH_BUFFER_PX,
+          Math.min(18, Math.round(overRectHeight * 0.2)),
+        );
+        if (Math.abs(activeMidpoint - overMidpoint) <= deadZone && previousTarget.toLaneId === dropTarget.toLaneId) {
+          stabilizedTarget = {
+            toLaneId: previousTarget.toLaneId,
+            toIndex: previousTarget.toIndex,
+          };
+        }
+      }
+      if (
+        previousTarget?.overId === overId &&
+        previousTarget.toLaneId === stabilizedTarget.toLaneId &&
+        previousTarget.toIndex === stabilizedTarget.toIndex
+      ) {
+        return;
+      }
+      const previewTargetIndex = resolvePreviewTargetIndex(activeLocation, stabilizedTarget);
+      if (activeLocation.laneId === stabilizedTarget.toLaneId && activeLocation.index === previewTargetIndex) {
+        return;
+      }
+      dragPreviewTargetRef.current = {
+        overId,
+        toLaneId: stabilizedTarget.toLaneId,
+        toIndex: stabilizedTarget.toIndex,
+      };
+      setDragPreviewBoard(
+        previewKanbanCardMove(previewSourceBoard, {
+          cardId: activeCardId,
+          fromLaneId: activeLocation.laneId,
+          toLaneId: stabilizedTarget.toLaneId,
+          toIndex: stabilizedTarget.toIndex,
+        }),
+      );
+    },
+    [dragPreviewBoard, filteredSelectionActive, visibleBoard],
+  );
 
   const handleDragEnd = React.useCallback(
     (event: DragEndEvent) => {
+      const previewBoardAtDrop = dragPreviewBoard;
       setActiveDragCardId(null);
+      setActiveDragCard(null);
+      setDragPreviewBoard(null);
+      dragPreviewTargetRef.current = null;
       if (filteredSelectionActive) return;
       const activeCardId = String(event.active.id ?? '').trim();
       const overId = String(event.over?.id ?? '').trim();
       if (!activeCardId || !event.over || !overId) return;
 
+      const previewMove = previewBoardAtDrop
+        ? resolveCommittedMoveFromPreview(visibleBoard, previewBoardAtDrop, activeCardId)
+        : null;
+      if (previewMove) {
+        onBoardChange((prev) => moveKanbanCard(prev, previewMove));
+        return;
+      }
+
       const activeLocation = findKanbanCardLocation(board, activeCardId);
       if (!activeLocation) return;
 
-      const overType = String((event.over.data.current as { type?: string } | undefined)?.type ?? '').trim();
-      let toLaneId = '';
-      let toIndex = 0;
-
-      if (overType === 'lane' || overType === 'lane-end') {
-        toLaneId = String((event.over.data.current as { laneId?: string } | undefined)?.laneId ?? '').trim();
-        if (!toLaneId) return;
-        toIndex = board.lanes.find((lane) => lane.id === toLaneId)?.cards.length ?? 0;
-      } else {
-        const overLocation = findKanbanCardLocation(board, overId);
-        if (!overLocation) return;
-        toLaneId = overLocation.laneId;
-        const activeRect = event.active.rect.current.translated ?? event.active.rect.current.initial;
-        const activeMidpoint = (activeRect?.top ?? 0) + (activeRect?.height ?? 0) / 2;
-        const overMidpoint = event.over.rect.top + event.over.rect.height / 2;
-        const placeAfter = activeMidpoint > overMidpoint;
-        toIndex = overLocation.index + (placeAfter ? 1 : 0);
-      }
+      const dropTarget = resolveKanbanCardDropTarget(board, {
+        activeCardId,
+        overId,
+        overType: String((event.over.data.current as { type?: string } | undefined)?.type ?? '').trim(),
+        overLaneId: String((event.over.data.current as { laneId?: string } | undefined)?.laneId ?? '').trim(),
+        activeRectTop: event.active.rect.current.translated?.top ?? event.active.rect.current.initial?.top ?? 0,
+        activeRectHeight: event.active.rect.current.translated?.height ?? event.active.rect.current.initial?.height ?? 0,
+        overRectTop: event.over.rect.top,
+        overRectHeight: event.over.rect.height,
+      });
+      if (!dropTarget) return;
 
       onBoardChange((prev) =>
         moveKanbanCard(prev, {
           cardId: activeCardId,
           fromLaneId: activeLocation.laneId,
-          toLaneId,
-          toIndex,
+          toLaneId: dropTarget.toLaneId,
+          toIndex: dropTarget.toIndex,
         }),
       );
     },
-    [board, filteredSelectionActive, onBoardChange],
+    [board, dragPreviewBoard, filteredSelectionActive, onBoardChange, visibleBoard],
   );
 
   const handleDragCancel = React.useCallback(() => {
     setActiveDragCardId(null);
+    setActiveDragCard(null);
+    setDragPreviewBoard(null);
+    dragPreviewTargetRef.current = null;
   }, []);
 
   const handlePasteCapture = React.useCallback(
@@ -1499,12 +1613,13 @@ export function KanbanBoardWorkspace({
           sensors={sensors}
           collisionDetection={closestCenter}
           onDragStart={handleDragStart}
+          onDragOver={handleDragOver}
           onDragEnd={handleDragEnd}
           onDragCancel={handleDragCancel}
         >
           <div className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden px-6 py-6">
             <div className="flex h-full min-h-0 w-max items-start gap-5 pr-6">
-              {visibleBoard.lanes.map((lane, laneIdx) => {
+              {renderedBoard.lanes.map((lane, laneIdx) => {
                 const accent = laneAccent(laneIdx);
                 return (
                   <section key={lane.id} className="dh-lane-column flex h-full min-h-0 w-[300px] flex-col">

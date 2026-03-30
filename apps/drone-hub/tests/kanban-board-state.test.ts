@@ -4,7 +4,9 @@ import {
   createDefaultKanbanBoardState,
   moveKanbanCard,
   parsePastedKanbanCard,
+  previewKanbanCardMove,
   resolveKanbanCardScope,
+  resolveKanbanCardDropTarget,
   sanitizeKanbanBoardState,
 } from '../src/droneHub/app/kanban-board-state';
 
@@ -77,12 +79,13 @@ describe('kanban board state helpers', () => {
           cards: [
             { id: 'a', title: 'A', description: '' },
             { id: 'b', title: 'B', description: '' },
+            { id: 'c', title: 'C', description: '' },
           ],
         },
         {
           id: 'review',
           title: 'Review',
-          cards: [{ id: 'c', title: 'C', description: '' }],
+          cards: [],
         },
       ],
     });
@@ -93,7 +96,7 @@ describe('kanban board state helpers', () => {
       toLaneId: 'todo',
       toIndex: 0,
     });
-    expect(reordered.lanes[0]?.cards.map((card) => card.id)).toEqual(['b', 'a']);
+    expect(reordered.lanes[0]?.cards.map((card) => card.id)).toEqual(['b', 'a', 'c']);
 
     const movedAcross = moveKanbanCard(reordered, {
       cardId: 'a',
@@ -101,8 +104,96 @@ describe('kanban board state helpers', () => {
       toLaneId: 'review',
       toIndex: 1,
     });
-    expect(movedAcross.lanes[0]?.cards.map((card) => card.id)).toEqual(['b']);
-    expect(movedAcross.lanes[1]?.cards.map((card) => card.id)).toEqual(['c', 'a']);
+    expect(movedAcross.lanes[0]?.cards.map((card) => card.id)).toEqual(['b', 'c']);
+    expect(movedAcross.lanes[1]?.cards.map((card) => card.id)).toEqual(['a']);
+  });
+
+  test('resolves drop targets for cards and lane endings', () => {
+    const board = sanitizeKanbanBoardState({
+      lanes: [
+        {
+          id: 'todo',
+          title: 'To do',
+          cards: [
+            { id: 'a', title: 'A', description: '' },
+            { id: 'b', title: 'B', description: '' },
+            { id: 'c', title: 'C', description: '' },
+          ],
+        },
+        {
+          id: 'review',
+          title: 'Review',
+          cards: [{ id: 'd', title: 'D', description: '' }],
+        },
+      ],
+    });
+
+    expect(
+      resolveKanbanCardDropTarget(board, {
+        activeCardId: 'a',
+        overId: 'b',
+        activeRectTop: 0,
+        activeRectHeight: 20,
+        overRectTop: 0,
+        overRectHeight: 20,
+      }),
+    ).toEqual({ toLaneId: 'todo', toIndex: 2 });
+
+    expect(
+      resolveKanbanCardDropTarget(board, {
+        activeCardId: 'c',
+        overId: 'b',
+        activeRectTop: 999,
+        activeRectHeight: 20,
+        overRectTop: 0,
+        overRectHeight: 20,
+      }),
+    ).toEqual({ toLaneId: 'todo', toIndex: 1 });
+
+    expect(
+      resolveKanbanCardDropTarget(board, {
+        activeCardId: 'a',
+        overId: 'lane-end:review',
+        overType: 'lane-end',
+        overLaneId: 'review',
+      }),
+    ).toEqual({ toLaneId: 'review', toIndex: 1 });
+  });
+
+  test('keeps timestamps stable for preview moves and updates them on commit', () => {
+    const board = sanitizeKanbanBoardState({
+      lanes: [
+        {
+          id: 'todo',
+          title: 'To do',
+          cards: [
+            { id: 'a', title: 'A', description: '', updatedAt: '2024-01-01T00:00:00.000Z' },
+            { id: 'b', title: 'B', description: '', updatedAt: '2024-01-02T00:00:00.000Z' },
+          ],
+        },
+        {
+          id: 'review',
+          title: 'Review',
+          cards: [],
+        },
+      ],
+    });
+
+    const preview = previewKanbanCardMove(board, {
+      cardId: 'a',
+      fromLaneId: 'todo',
+      toLaneId: 'review',
+      toIndex: 0,
+    });
+    expect(preview.lanes[1]?.cards[0]?.updatedAt).toBe('2024-01-01T00:00:00.000Z');
+
+    const committed = moveKanbanCard(board, {
+      cardId: 'a',
+      fromLaneId: 'todo',
+      toLaneId: 'review',
+      toIndex: 0,
+    });
+    expect(committed.lanes[1]?.cards[0]?.updatedAt).not.toBe('2024-01-01T00:00:00.000Z');
   });
 
   test('maps legacy repo cards to repo scope and empty cards to global scope', () => {

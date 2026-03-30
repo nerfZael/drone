@@ -44,6 +44,17 @@ export type MoveKanbanCardInput = {
   toIndex: number;
 };
 
+export type ResolveKanbanCardDropTargetInput = {
+  activeCardId: string;
+  overId: string;
+  overType?: string;
+  overLaneId?: string;
+  activeRectTop?: number | null;
+  activeRectHeight?: number | null;
+  overRectTop?: number | null;
+  overRectHeight?: number | null;
+};
+
 const DEFAULT_KANBAN_LANE_TITLES = ['To do', 'In progress', 'Review', 'Done'] as const;
 const DEFAULT_TASK_TYPES = [
   { id: 'bug', label: 'Bug', active: true },
@@ -326,7 +337,69 @@ export function parsePastedKanbanCard(
   };
 }
 
-export function moveKanbanCard(board: KanbanBoardState, input: MoveKanbanCardInput): KanbanBoardState {
+export function findKanbanCardLocation(board: Pick<KanbanBoardState, 'lanes'>, cardIdRaw: string): { laneId: string; index: number } | null {
+  const cardId = String(cardIdRaw ?? '').trim();
+  if (!cardId) return null;
+  for (const lane of board.lanes) {
+    const index = lane.cards.findIndex((card) => card.id === cardId);
+    if (index >= 0) return { laneId: lane.id, index };
+  }
+  return null;
+}
+
+export function resolveKanbanCardDropTarget(
+  board: Pick<KanbanBoardState, 'lanes'>,
+  input: ResolveKanbanCardDropTargetInput,
+): { toLaneId: string; toIndex: number } | null {
+  const activeCardId = String(input.activeCardId ?? '').trim();
+  const overId = String(input.overId ?? '').trim();
+  const overType = String(input.overType ?? '').trim();
+  if (!activeCardId || !overId) return null;
+  const activeLocation = findKanbanCardLocation(board, activeCardId);
+  if (!activeLocation) return null;
+
+  if (overType === 'lane' || overType === 'lane-end') {
+    const toLaneId = String(input.overLaneId ?? '').trim();
+    if (!toLaneId) return null;
+    const targetLane = board.lanes.find((lane) => lane.id === toLaneId) ?? null;
+    if (!targetLane) return null;
+    return { toLaneId, toIndex: targetLane.cards.length };
+  }
+
+  const overLocation = findKanbanCardLocation(board, overId);
+  if (!overLocation) return null;
+  if (activeLocation.laneId === overLocation.laneId) {
+    if (activeLocation.index < overLocation.index) {
+      return {
+        toLaneId: overLocation.laneId,
+        toIndex: overLocation.index + 1,
+      };
+    }
+    if (activeLocation.index > overLocation.index) {
+      return {
+        toLaneId: overLocation.laneId,
+        toIndex: overLocation.index,
+      };
+    }
+    return {
+      toLaneId: overLocation.laneId,
+      toIndex: overLocation.index,
+    };
+  }
+  const activeMidpoint = Number(input.activeRectTop ?? 0) + Number(input.activeRectHeight ?? 0) / 2;
+  const overMidpoint = Number(input.overRectTop ?? 0) + Number(input.overRectHeight ?? 0) / 2;
+  const placeAfter = activeMidpoint > overMidpoint;
+  return {
+    toLaneId: overLocation.laneId,
+    toIndex: overLocation.index + (placeAfter ? 1 : 0),
+  };
+}
+
+function moveKanbanCardInternal(
+  board: KanbanBoardState,
+  input: MoveKanbanCardInput,
+  updateTimestamp: boolean,
+): KanbanBoardState {
   const cardId = String(input.cardId ?? '').trim();
   const fromLaneId = String(input.fromLaneId ?? '').trim();
   const toLaneId = String(input.toLaneId ?? '').trim();
@@ -343,10 +416,12 @@ export function moveKanbanCard(board: KanbanBoardState, input: MoveKanbanCardInp
   const card = sourceLane.cards[sourceIndex] ?? null;
   if (!card) return board;
 
-  const movedCard = {
-    ...card,
-    updatedAt: new Date().toISOString(),
-  };
+  const movedCard = updateTimestamp
+    ? {
+        ...card,
+        updatedAt: new Date().toISOString(),
+      }
+    : card;
   const sourceCards = sourceLane.cards.filter((item) => item.id !== cardId);
   const unclampedTargetIndex = fromLaneId === toLaneId && sourceIndex < toIndexRaw ? toIndexRaw - 1 : toIndexRaw;
   const targetIndex = Math.max(0, Math.min(targetLane.cards.length, unclampedTargetIndex));
@@ -370,4 +445,12 @@ export function moveKanbanCard(board: KanbanBoardState, input: MoveKanbanCardInp
       return lane;
     }),
   };
+}
+
+export function previewKanbanCardMove(board: KanbanBoardState, input: MoveKanbanCardInput): KanbanBoardState {
+  return moveKanbanCardInternal(board, input, false);
+}
+
+export function moveKanbanCard(board: KanbanBoardState, input: MoveKanbanCardInput): KanbanBoardState {
+  return moveKanbanCardInternal(board, input, true);
 }

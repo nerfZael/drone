@@ -219,7 +219,9 @@ code, pre {
   box-shadow: 0 0 16px rgba(167, 139, 250, .08);
 }
 .dh-kanban-card.is-dragging {
-  opacity: .25;
+  visibility: hidden;
+  border-color: transparent;
+  box-shadow: none;
   transform: none;
 }
 
