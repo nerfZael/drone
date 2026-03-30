@@ -23,17 +23,29 @@ import type { UiMenuSelectEntry } from '../../ui/menuSelect';
 import { requestJson } from '../http';
 import type { PlaybookDefinition, TaskPlaybookButton } from '../types';
 import {
+  cardMatchesKanbanScope,
   createKanbanCard,
   createKanbanLane,
   createKanbanTaskType,
   fallbackTaskTypeId,
   moveKanbanCard,
   parsePastedKanbanCard,
+  resolveKanbanCardScope,
   type KanbanBoardState,
   type KanbanCard,
   type KanbanLane,
+  type KanbanTaskScopeType,
   type KanbanTaskType,
 } from './kanban-board-state';
+import {
+  GLOBAL_KANBAN_SCOPE_LABEL,
+  buildKanbanScopeTaskCounts,
+  filterKanbanBoardByScope,
+  kanbanBoardScopeKey,
+  labelForKanbanBoardScope,
+  listKanbanScopeValues,
+  type KanbanBoardScopeSelection,
+} from './kanban-task-scope';
 import { shouldApplySuggestedKanbanTitle } from './kanban-generated-title-state';
 import { fetchJson, usePoll } from './hooks';
 import { IconBoard, IconPlus, IconTable, IconTrash } from './icons';
@@ -48,6 +60,15 @@ import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 type KanbanBoardWorkspaceProps = {
   initialRepoPath: string;
   registeredRepoPaths: string[];
+  groupScopeNames: string[];
+  availableScopeDrones: Array<{
+    id: string;
+    name: string;
+    group: string | null;
+    repoPath: string;
+  }>;
+  currentScopeGroupName: string | null;
+  currentScopeDroneId: string | null;
   board: KanbanBoardState;
   taskPlaybookButtons: TaskPlaybookButton[];
   taskPlaybookButtonsLoading: boolean;
@@ -106,7 +127,6 @@ type KanbanLaneCardsProps = {
 
 const LANE_ACCENTS = ['#E0C84F', '#6AABFF', '#F5A623', '#34D399', '#C084FC', '#F472B6'] as const;
 const NO_REPO_FILTER_VALUE = '__kanban-no-repo__';
-
 function isEditablePasteTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   if (target.isContentEditable) return true;
@@ -343,6 +363,10 @@ function KanbanLaneCards({
 export function KanbanBoardWorkspace({
   initialRepoPath,
   registeredRepoPaths,
+  groupScopeNames,
+  availableScopeDrones,
+  currentScopeGroupName,
+  currentScopeDroneId,
   board,
   taskPlaybookButtons,
   taskPlaybookButtonsLoading,
@@ -369,6 +393,10 @@ export function KanbanBoardWorkspace({
   const controlsLocked = boardLoading;
   const kanbanBoardSelectionInitialized = useDroneHubUiStore((s) => s.kanbanBoardSelectionInitialized);
   const setKanbanBoardSelectionInitialized = useDroneHubUiStore((s) => s.setKanbanBoardSelectionInitialized);
+  const storedScopeType = useDroneHubUiStore((s) => s.kanbanBoardScopeType);
+  const storedScopeValue = useDroneHubUiStore((s) => s.kanbanBoardScopeValue);
+  const setStoredScopeType = useDroneHubUiStore((s) => s.setKanbanBoardScopeType);
+  const setStoredScopeValue = useDroneHubUiStore((s) => s.setKanbanBoardScopeValue);
   const selectedRepoPath = useDroneHubUiStore((s) => s.kanbanBoardSelectedRepoPath);
   const setStoredSelectedRepoPath = useDroneHubUiStore((s) => s.setKanbanBoardSelectedRepoPath);
   const viewMode = useDroneHubUiStore((s) => s.kanbanBoardViewMode);
@@ -382,6 +410,23 @@ export function KanbanBoardWorkspace({
   const pendingGeneratedTitleByCardIdRef = React.useRef(new Map<string, string>());
   const laneCount = board.lanes.length;
   const initialRepoPathNormalized = React.useMemo(() => String(initialRepoPath ?? '').trim(), [initialRepoPath]);
+  const normalizedCurrentScopeGroupName = React.useMemo(() => String(currentScopeGroupName ?? '').trim(), [currentScopeGroupName]);
+  const normalizedCurrentScopeDroneId = React.useMemo(() => String(currentScopeDroneId ?? '').trim(), [currentScopeDroneId]);
+  const selectedBoardScope = React.useMemo<KanbanBoardScopeSelection>(
+    () => ({
+      scopeType: storedScopeType,
+      scopeValue: storedScopeType === 'global' ? '' : String(storedScopeValue ?? '').trim(),
+    }),
+    [storedScopeType, storedScopeValue],
+  );
+  const setSelectedBoardScope = React.useCallback(
+    (next: KanbanBoardScopeSelection) => {
+      setKanbanBoardSelectionInitialized(true);
+      setStoredScopeType(next.scopeType);
+      setStoredScopeValue(next.scopeType === 'global' ? '' : next.scopeValue);
+    },
+    [setKanbanBoardSelectionInitialized, setStoredScopeType, setStoredScopeValue],
+  );
   const setSelectedRepoPath = React.useCallback(
     (next: string | ((current: string) => string)) => {
       setKanbanBoardSelectionInitialized(true);
@@ -393,27 +438,106 @@ export function KanbanBoardWorkspace({
     () => board.taskTypes.filter((item) => item.active !== false),
     [board.taskTypes],
   );
+  const repoFilteringEnabled = selectedBoardScope.scopeType !== 'repo';
   const selectedTypeIdSet = React.useMemo(
     () => new Set(selectedTypeIds.filter((typeId) => activeTaskTypes.some((item) => item.id === typeId))),
     [activeTaskTypes, selectedTypeIds],
   );
   const filteredSelectionActive = selectedTypeIdSet.size > 0 && selectedTypeIdSet.size < activeTaskTypes.length;
-  const repoFilterActive = Boolean(selectedRepoPath);
+  const repoFilterActive = repoFilteringEnabled && Boolean(selectedRepoPath);
   const boardFilterActive = filteredSelectionActive || repoFilterActive;
   const dragInteractionLocked = controlsLocked || filteredSelectionActive;
   const laneStructureLocked = controlsLocked || filteredSelectionActive;
-  const laneDeleteLocked = controlsLocked || filteredSelectionActive || repoFilterActive;
+  const laneDeleteLocked = controlsLocked || filteredSelectionActive || repoFilterActive || selectedBoardScope.scopeType !== 'global';
   const addTaskLocked = controlsLocked || filteredSelectionActive;
-  const cardsForSelectedRepo = React.useMemo(() => {
-    const out: KanbanCard[] = [];
+  const droneNameById = React.useMemo(
+    () => new Map(availableScopeDrones.map((drone) => [drone.id, drone.name])),
+    [availableScopeDrones],
+  );
+  const droneRepoPathById = React.useMemo(
+    () => new Map(availableScopeDrones.map((drone) => [drone.id, String(drone.repoPath ?? '').trim()])),
+    [availableScopeDrones],
+  );
+  const taskScopeCountsByKey = React.useMemo(() => buildKanbanScopeTaskCounts(board), [board]);
+  const repoScopePaths = React.useMemo(() => {
+    const values = new Set<string>(registeredRepoPaths.map((item) => String(item ?? '').trim()).filter(Boolean));
+    if (initialRepoPathNormalized) values.add(initialRepoPathNormalized);
+    for (const value of listKanbanScopeValues(board, 'repo')) values.add(value);
+    return Array.from(values.values()).sort((a, b) => a.localeCompare(b));
+  }, [board, initialRepoPathNormalized, registeredRepoPaths]);
+  const groupScopeOptions = React.useMemo(() => {
+    const values = new Set<string>(groupScopeNames.map((item) => String(item ?? '').trim()).filter(Boolean));
+    if (normalizedCurrentScopeGroupName) values.add(normalizedCurrentScopeGroupName);
+    for (const value of listKanbanScopeValues(board, 'group')) values.add(value);
+    return Array.from(values.values())
+      .sort((a, b) => a.localeCompare(b))
+      .map((value) => ({
+        value,
+        label: value,
+        count: taskScopeCountsByKey[kanbanBoardScopeKey({ scopeType: 'group', scopeValue: value })] ?? 0,
+      }));
+  }, [board, groupScopeNames, normalizedCurrentScopeGroupName, taskScopeCountsByKey]);
+  const droneScopeOptions = React.useMemo(() => {
+    const liveById = new Map(
+      availableScopeDrones.map((drone) => [
+        drone.id,
+        {
+          value: drone.id,
+          label: String(drone.name ?? '').trim() || drone.id,
+          count: 0,
+        },
+      ]),
+    );
+    if (normalizedCurrentScopeDroneId && !liveById.has(normalizedCurrentScopeDroneId)) {
+      liveById.set(normalizedCurrentScopeDroneId, {
+        value: normalizedCurrentScopeDroneId,
+        label: droneNameById.get(normalizedCurrentScopeDroneId) ?? normalizedCurrentScopeDroneId,
+        count: 0,
+      });
+    }
     for (const lane of board.lanes) {
       for (const card of lane.cards) {
-        if (!matchesRepoFilter(card.repoPath, selectedRepoPath)) continue;
-        out.push(card);
+        const scope = resolveKanbanCardScope(card);
+        if (scope.scopeType !== 'drone' || !scope.scopeValue) continue;
+        if (!liveById.has(scope.scopeValue)) {
+          liveById.set(scope.scopeValue, {
+            value: scope.scopeValue,
+            label: droneNameById.get(scope.scopeValue) ?? scope.scopeValue,
+            count: 0,
+          });
+        }
       }
     }
-    return out;
-  }, [board.lanes, selectedRepoPath]);
+    return Array.from(liveById.values())
+      .map((item) => ({
+        ...item,
+        count: taskScopeCountsByKey[kanbanBoardScopeKey({ scopeType: 'drone', scopeValue: item.value })] ?? 0,
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [availableScopeDrones, board.lanes, droneNameById, normalizedCurrentScopeDroneId, taskScopeCountsByKey]);
+  const repoScopeOptions = React.useMemo(
+    () =>
+      repoScopePaths.map((value) => ({
+        value,
+        label: playbookRunsRepoLabel(value),
+        count: taskScopeCountsByKey[kanbanBoardScopeKey({ scopeType: 'repo', scopeValue: value })] ?? 0,
+      })),
+    [repoScopePaths, taskScopeCountsByKey],
+  );
+  const scopeOptionAvailability = React.useMemo(
+    () => ({
+      repo: new Set(repoScopeOptions.map((item) => item.value)),
+      group: new Set(groupScopeOptions.map((item) => item.value)),
+      drone: new Set(droneScopeOptions.map((item) => item.value)),
+    }),
+    [droneScopeOptions, groupScopeOptions, repoScopeOptions],
+  );
+  const scopedBoard = React.useMemo(() => filterKanbanBoardByScope(board, selectedBoardScope), [board, selectedBoardScope]);
+  const scopedCards = React.useMemo(() => scopedBoard.lanes.flatMap((lane) => lane.cards), [scopedBoard.lanes]);
+  const cardsForSelectedRepo = React.useMemo(
+    () => (repoFilteringEnabled ? scopedCards.filter((card) => matchesRepoFilter(card.repoPath, selectedRepoPath)) : scopedCards),
+    [repoFilteringEnabled, scopedCards, selectedRepoPath],
+  );
   const typeTaskCountById = React.useMemo(() => {
     const next: Record<string, number> = {};
     for (const card of cardsForSelectedRepo) next[card.typeId] = (next[card.typeId] ?? 0) + 1;
@@ -421,17 +545,10 @@ export function KanbanBoardWorkspace({
   }, [cardsForSelectedRepo]);
   const cardsForSelectedTypes = React.useMemo(() => {
     if (!filteredSelectionActive) {
-      return board.lanes.flatMap((lane) => lane.cards);
+      return scopedCards;
     }
-    const out: KanbanCard[] = [];
-    for (const lane of board.lanes) {
-      for (const card of lane.cards) {
-        if (!selectedTypeIdSet.has(card.typeId)) continue;
-        out.push(card);
-      }
-    }
-    return out;
-  }, [board.lanes, filteredSelectionActive, selectedTypeIdSet]);
+    return scopedCards.filter((card) => selectedTypeIdSet.has(card.typeId));
+  }, [filteredSelectionActive, scopedCards, selectedTypeIdSet]);
   const repoTaskCountByPath = React.useMemo(() => {
     const next: Record<string, number> = {};
     for (const card of cardsForSelectedTypes) {
@@ -445,20 +562,29 @@ export function KanbanBoardWorkspace({
     () => cardsForSelectedTypes.reduce((sum, card) => sum + (normalizeCardRepoPath(card.repoPath) ? 0 : 1), 0),
     [cardsForSelectedTypes],
   );
+  const availableRepoFilterPaths = React.useMemo(() => {
+    const values = new Set<string>(registeredRepoPaths.map((item) => String(item ?? '').trim()).filter(Boolean));
+    for (const card of scopedCards) {
+      const repoPath = normalizeCardRepoPath(card.repoPath);
+      if (!repoPath) continue;
+      values.add(repoPath);
+    }
+    return Array.from(values.values()).sort((a, b) => a.localeCompare(b));
+  }, [registeredRepoPaths, scopedCards]);
   const visibleBoard = React.useMemo(() => {
-    if (!boardFilterActive) return board;
+    if (!boardFilterActive) return scopedBoard;
     return {
-      ...board,
-      lanes: board.lanes.map((lane) => ({
+      ...scopedBoard,
+      lanes: scopedBoard.lanes.map((lane) => ({
         ...lane,
         cards: lane.cards.filter(
           (card) =>
             (!filteredSelectionActive || selectedTypeIdSet.has(card.typeId)) &&
-            matchesRepoFilter(card.repoPath, selectedRepoPath),
+            (!repoFilteringEnabled || matchesRepoFilter(card.repoPath, selectedRepoPath)),
         ),
       })),
     };
-  }, [board, boardFilterActive, filteredSelectionActive, selectedRepoPath, selectedTypeIdSet]);
+  }, [boardFilterActive, filteredSelectionActive, repoFilteringEnabled, scopedBoard, selectedRepoPath, selectedTypeIdSet]);
   const taskTypeLabelById = React.useMemo(
     () => Object.fromEntries(board.taskTypes.map((item) => [item.id, item.label])),
     [board.taskTypes],
@@ -506,26 +632,61 @@ export function KanbanBoardWorkspace({
 
   React.useEffect(() => {
     if (kanbanBoardSelectionInitialized) return;
-    if (!initialRepoPathNormalized) return;
-    setStoredSelectedRepoPath(initialRepoPathNormalized);
+    if (normalizedCurrentScopeGroupName) {
+      setStoredScopeType('group');
+      setStoredScopeValue(normalizedCurrentScopeGroupName);
+    } else if (normalizedCurrentScopeDroneId) {
+      setStoredScopeType('drone');
+      setStoredScopeValue(normalizedCurrentScopeDroneId);
+    } else if (initialRepoPathNormalized) {
+      setStoredScopeType('repo');
+      setStoredScopeValue(initialRepoPathNormalized);
+    } else {
+      setStoredScopeType('global');
+      setStoredScopeValue('');
+    }
     setKanbanBoardSelectionInitialized(true);
   }, [
     initialRepoPathNormalized,
     kanbanBoardSelectionInitialized,
+    normalizedCurrentScopeDroneId,
+    normalizedCurrentScopeGroupName,
     setKanbanBoardSelectionInitialized,
-    setStoredSelectedRepoPath,
+    setStoredScopeType,
+    setStoredScopeValue,
   ]);
 
   React.useEffect(() => {
     if (!selectedRepoPath || selectedRepoPath === NO_REPO_FILTER_VALUE) return;
-    if (registeredRepoPaths.length === 0) return;
-    if (registeredRepoPaths.includes(selectedRepoPath)) return;
+    if (!repoFilteringEnabled) {
+      setSelectedRepoPath('');
+      return;
+    }
+    if (availableRepoFilterPaths.includes(selectedRepoPath)) return;
     setSelectedRepoPath('');
-  }, [registeredRepoPaths, selectedRepoPath, setSelectedRepoPath]);
+  }, [availableRepoFilterPaths, repoFilteringEnabled, selectedRepoPath, setSelectedRepoPath]);
+
+  React.useEffect(() => {
+    if (selectedBoardScope.scopeType === 'global') return;
+    const available =
+      selectedBoardScope.scopeType === 'repo'
+        ? scopeOptionAvailability.repo
+        : selectedBoardScope.scopeType === 'group'
+          ? scopeOptionAvailability.group
+          : scopeOptionAvailability.drone;
+    if (available.has(selectedBoardScope.scopeValue)) return;
+    setSelectedBoardScope({ scopeType: 'global', scopeValue: '' });
+  }, [scopeOptionAvailability, selectedBoardScope, setSelectedBoardScope]);
 
   React.useEffect(() => {
     if (selectedCardRef && !selectedCardEntry) setSelectedCardRef(null);
   }, [selectedCardEntry, selectedCardRef]);
+
+  React.useEffect(() => {
+    if (!selectedCardEntry) return;
+    if (cardMatchesKanbanScope(selectedCardEntry.card, selectedBoardScope)) return;
+    setSelectedCardRef(null);
+  }, [selectedBoardScope, selectedCardEntry]);
 
   React.useEffect(() => {
     setTaskButtonBusyId(null);
@@ -540,6 +701,22 @@ export function KanbanBoardWorkspace({
     if (selectedTypeIdSet.size === 1) return [...selectedTypeIdSet][0] ?? fallbackTaskTypeId(board.taskTypes);
     return fallbackTaskTypeId(board.taskTypes);
   }, [board.taskTypes, selectedTypeIdSet]);
+  const boardScopeCardCount = scopedCards.length;
+  const selectedBoardScopeLabel = React.useMemo(
+    () => labelForKanbanBoardScope(selectedBoardScope, { repoLabel: playbookRunsRepoLabel, droneNameById }),
+    [droneNameById, selectedBoardScope],
+  );
+  const selectedBoardScopeOptions = React.useMemo(
+    () =>
+      selectedBoardScope.scopeType === 'repo'
+        ? repoScopeOptions
+        : selectedBoardScope.scopeType === 'group'
+          ? groupScopeOptions
+          : selectedBoardScope.scopeType === 'drone'
+            ? droneScopeOptions
+            : [],
+    [droneScopeOptions, groupScopeOptions, repoScopeOptions, selectedBoardScope.scopeType],
+  );
 
   const openCard = React.useCallback((laneIdRaw: string, cardIdRaw: string) => {
     const laneId = String(laneIdRaw ?? '').trim();
@@ -547,6 +724,39 @@ export function KanbanBoardWorkspace({
     if (!laneId || !cardId) return;
     setSelectedCardRef({ laneId, cardId });
   }, []);
+
+  const selectBoardScopeType = React.useCallback(
+    (scopeType: KanbanTaskScopeType) => {
+      if (scopeType === 'global') {
+        setSelectedBoardScope({ scopeType: 'global', scopeValue: '' });
+        return;
+      }
+      const nextValue =
+        scopeType === 'repo'
+          ? selectedBoardScope.scopeType === 'repo' && selectedBoardScope.scopeValue
+            ? selectedBoardScope.scopeValue
+            : initialRepoPathNormalized || repoScopeOptions[0]?.value || ''
+          : scopeType === 'group'
+            ? selectedBoardScope.scopeType === 'group' && selectedBoardScope.scopeValue
+              ? selectedBoardScope.scopeValue
+              : normalizedCurrentScopeGroupName || groupScopeOptions[0]?.value || ''
+            : selectedBoardScope.scopeType === 'drone' && selectedBoardScope.scopeValue
+              ? selectedBoardScope.scopeValue
+              : normalizedCurrentScopeDroneId || droneScopeOptions[0]?.value || '';
+      if (!nextValue) return;
+      setSelectedBoardScope({ scopeType, scopeValue: nextValue });
+    },
+    [
+      droneScopeOptions,
+      groupScopeOptions,
+      initialRepoPathNormalized,
+      normalizedCurrentScopeDroneId,
+      normalizedCurrentScopeGroupName,
+      repoScopeOptions,
+      selectedBoardScope,
+      setSelectedBoardScope,
+    ],
+  );
 
   const addLane = React.useCallback(() => {
     onBoardChange((prev) => ({
@@ -591,17 +801,26 @@ export function KanbanBoardWorkspace({
   const addCard = React.useCallback(
     (
       laneIdRaw: string,
-      seed?: Partial<Pick<ReturnType<typeof createKanbanCard>, 'title' | 'description' | 'typeId' | 'repoPath'>>,
+      seed?: Partial<
+        Pick<ReturnType<typeof createKanbanCard>, 'title' | 'description' | 'typeId' | 'repoPath' | 'scopeType' | 'scopeValue'>
+      >,
     ): ReturnType<typeof createKanbanCard> | null => {
       const laneId = String(laneIdRaw ?? '').trim();
       if (!laneId) return null;
       const timestamp = new Date().toISOString();
-      const defaultRepoPath = selectedRepoPath && selectedRepoPath !== NO_REPO_FILTER_VALUE ? selectedRepoPath : '';
+      let defaultRepoPath = normalizeCardRepoPath(seed?.repoPath);
+      if (!defaultRepoPath) {
+        if (selectedBoardScope.scopeType === 'repo') defaultRepoPath = selectedBoardScope.scopeValue;
+        else if (selectedRepoPath && selectedRepoPath !== NO_REPO_FILTER_VALUE) defaultRepoPath = selectedRepoPath;
+        else if (selectedBoardScope.scopeType === 'drone') defaultRepoPath = droneRepoPathById.get(selectedBoardScope.scopeValue) ?? '';
+      }
       const nextCard = createKanbanCard({
         title: seed?.title ?? 'Untitled task',
         description: seed?.description ?? '',
         typeId: seed?.typeId ?? defaultCreateTypeId,
-        repoPath: seed?.repoPath ?? defaultRepoPath,
+        scopeType: seed?.scopeType ?? selectedBoardScope.scopeType,
+        scopeValue: seed?.scopeValue ?? selectedBoardScope.scopeValue,
+        repoPath: defaultRepoPath,
         createdAt: timestamp,
         updatedAt: timestamp,
       }, defaultCreateTypeId);
@@ -619,11 +838,22 @@ export function KanbanBoardWorkspace({
       setSelectedCardRef({ laneId, cardId: nextCard.id });
       return nextCard;
     },
-    [defaultCreateTypeId, onBoardChange, selectedRepoPath],
+    [defaultCreateTypeId, droneRepoPathById, onBoardChange, selectedBoardScope, selectedRepoPath],
   );
 
   const updateCard = React.useCallback(
-    (laneIdRaw: string, cardIdRaw: string, patch: { title?: string; description?: string; typeId?: string; repoPath?: string | null }) => {
+    (
+      laneIdRaw: string,
+      cardIdRaw: string,
+      patch: {
+        title?: string;
+        description?: string;
+        typeId?: string;
+        repoPath?: string | null;
+        scopeType?: KanbanTaskScopeType;
+        scopeValue?: string | null;
+      },
+    ) => {
       const laneId = String(laneIdRaw ?? '').trim();
       const cardId = String(cardIdRaw ?? '').trim();
       if (!laneId || !cardId) return;
@@ -646,11 +876,24 @@ export function KanbanBoardWorkspace({
                           ...(Object.prototype.hasOwnProperty.call(patch, 'typeId') ? { typeId: String(patch.typeId ?? '') } : {}),
                           updatedAt: new Date().toISOString(),
                         };
+                        if (Object.prototype.hasOwnProperty.call(patch, 'scopeType')) {
+                          nextCard.scopeType = patch.scopeType;
+                        }
+                        if (Object.prototype.hasOwnProperty.call(patch, 'scopeValue')) {
+                          const nextScopeValue = String(patch.scopeValue ?? '').trim();
+                          if (nextScopeValue) nextCard.scopeValue = nextScopeValue;
+                          else delete nextCard.scopeValue;
+                        }
                         if (Object.prototype.hasOwnProperty.call(patch, 'repoPath')) {
                           const nextRepoPath = normalizeCardRepoPath(patch.repoPath);
                           if (nextRepoPath) nextCard.repoPath = nextRepoPath;
                           else delete nextCard.repoPath;
                         }
+                        const scope = resolveKanbanCardScope(nextCard);
+                        nextCard.scopeType = scope.scopeType;
+                        if (scope.scopeValue) nextCard.scopeValue = scope.scopeValue;
+                        else delete nextCard.scopeValue;
+                        if (scope.scopeType === 'repo' && scope.scopeValue) nextCard.repoPath = scope.scopeValue;
                         return nextCard;
                       })()
                     : card,
@@ -935,9 +1178,14 @@ export function KanbanBoardWorkspace({
                     <span className="inline-flex items-center gap-1.5 rounded-md bg-[rgba(255,255,255,.04)] px-2.5 py-1 text-[10px] font-medium text-[var(--muted-dim)]" style={{ fontFamily: 'var(--code)' }}>
                       {laneCount}<span className="opacity-40">L</span> {cardCount}<span className="opacity-40">T</span>
                     </span>
+                    <span className="inline-flex items-center gap-1.5 rounded-md border border-[rgba(255,255,255,.08)] bg-[rgba(255,255,255,.02)] px-2.5 py-1 text-[10px] font-medium text-[var(--muted-dim)]" style={{ fontFamily: 'var(--code)' }}>
+                      {selectedBoardScopeLabel}
+                      <span className="opacity-40">/</span>
+                      {boardScopeCardCount}
+                    </span>
                   </div>
                   <div className="mt-1.5 text-[11px] text-[var(--muted)] leading-relaxed max-w-[52ch]">
-                    Organize work across lanes. Paste text to create tasks, drag to reorder, and filter by type or repo.
+                    Switch between global, repo, group, and drone-owned boards. Paste text to create tasks, drag to reorder, and filter the current board by type or repo.
                   </div>
                 </div>
               </div>
@@ -1034,6 +1282,58 @@ export function KanbanBoardWorkspace({
             />
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="mr-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+                Board
+              </span>
+              {([
+                ['global', GLOBAL_KANBAN_SCOPE_LABEL, true],
+                ['repo', 'Repo', repoScopeOptions.length > 0],
+                ['group', 'Group', groupScopeOptions.length > 0],
+                ['drone', 'Drone', droneScopeOptions.length > 0],
+              ] as Array<[KanbanTaskScopeType, string, boolean]>).map(([scopeType, label, enabled]) => {
+                const active = selectedBoardScope.scopeType === scopeType;
+                return (
+                  <button
+                    key={scopeType}
+                    type="button"
+                    onClick={() => selectBoardScopeType(scopeType)}
+                    disabled={!enabled}
+                    className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[10px] font-semibold uppercase tracking-wide transition-all ${
+                      active
+                        ? 'bg-[var(--fg)] text-[var(--panel)] shadow-[0_2px_8px_rgba(0,0,0,.2)]'
+                        : enabled
+                          ? 'bg-[rgba(255,255,255,.04)] text-[var(--muted-dim)] hover:bg-[rgba(255,255,255,.07)] hover:text-[var(--fg)]'
+                          : 'cursor-not-allowed bg-[rgba(255,255,255,.03)] text-[var(--muted-dim)] opacity-35'
+                    }`}
+                    style={{ fontFamily: 'var(--display)' }}
+                    title={!enabled ? `No ${label.toLowerCase()} boards are available yet.` : undefined}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+              {selectedBoardScope.scopeType !== 'global' ? (
+                <select
+                  value={selectedBoardScope.scopeValue}
+                  onChange={(event) =>
+                    setSelectedBoardScope({
+                      scopeType: selectedBoardScope.scopeType,
+                      scopeValue: event.target.value,
+                    })
+                  }
+                  disabled={controlsLocked || selectedBoardScopeOptions.length === 0}
+                  className="h-8 min-w-[180px] rounded-lg border border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] px-3 text-[11px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)] disabled:cursor-not-allowed disabled:opacity-50"
+                  title={selectedBoardScope.scopeValue || undefined}
+                >
+                  {selectedBoardScopeOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label} ({option.count})
+                    </option>
+                  ))}
+                </select>
+              ) : null}
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="mr-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
                 Type
               </span>
               <button
@@ -1074,66 +1374,70 @@ export function KanbanBoardWorkspace({
                 );
               })}
             </div>
-            <div className="h-4 w-px bg-[var(--border-subtle)]" />
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="mr-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
-                Repo
-              </span>
-              <button
-                type="button"
-                onClick={() => setSelectedRepoPath('')}
-                className={`inline-flex h-8 items-center rounded-lg px-3 text-[10px] font-semibold uppercase tracking-wide transition-all ${
-                  selectedRepoPath === ''
-                    ? 'bg-[var(--fg)] text-[var(--panel)] shadow-[0_2px_8px_rgba(0,0,0,.2)]'
-                    : 'bg-[rgba(255,255,255,.04)] text-[var(--muted-dim)] hover:bg-[rgba(255,255,255,.07)] hover:text-[var(--fg)]'
-                }`}
-                style={{ fontFamily: 'var(--display)' }}
-              >
-                All
-                <span className="ml-1.5 text-[9px] opacity-60" style={{ fontFamily: 'var(--code)' }}>
-                  {cardsForSelectedTypes.length}
-                </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectedRepoPath((current) => (current === NO_REPO_FILTER_VALUE ? '' : NO_REPO_FILTER_VALUE))}
-                className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[10px] font-semibold uppercase tracking-wide transition-all ${
-                  selectedRepoPath === NO_REPO_FILTER_VALUE
-                    ? 'bg-[rgba(167,139,250,.16)] text-[var(--accent)] border border-[rgba(167,139,250,.2)]'
-                    : 'bg-[rgba(255,255,255,.04)] text-[var(--muted-dim)] border border-transparent hover:bg-[rgba(255,255,255,.07)] hover:text-[var(--fg)]'
-                }`}
-                style={{ fontFamily: 'var(--display)' }}
-              >
-                {selectedRepoPath === NO_REPO_FILTER_VALUE && <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent)]" />}
-                No repo
-                <span className="text-[9px] opacity-50" style={{ fontFamily: 'var(--code)' }}>
-                  {noRepoTaskCount}
-                </span>
-              </button>
-              {registeredRepoPaths.map((repoPath) => {
-                const active = selectedRepoPath === repoPath;
-                return (
+            {repoFilteringEnabled ? (
+              <>
+                <div className="h-4 w-px bg-[var(--border-subtle)]" />
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="mr-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+                    Repo
+                  </span>
                   <button
-                    key={repoPath}
                     type="button"
-                    onClick={() => setSelectedRepoPath((current) => (current === repoPath ? '' : repoPath))}
+                    onClick={() => setSelectedRepoPath('')}
+                    className={`inline-flex h-8 items-center rounded-lg px-3 text-[10px] font-semibold uppercase tracking-wide transition-all ${
+                      selectedRepoPath === ''
+                        ? 'bg-[var(--fg)] text-[var(--panel)] shadow-[0_2px_8px_rgba(0,0,0,.2)]'
+                        : 'bg-[rgba(255,255,255,.04)] text-[var(--muted-dim)] hover:bg-[rgba(255,255,255,.07)] hover:text-[var(--fg)]'
+                    }`}
+                    style={{ fontFamily: 'var(--display)' }}
+                  >
+                    All
+                    <span className="ml-1.5 text-[9px] opacity-60" style={{ fontFamily: 'var(--code)' }}>
+                      {cardsForSelectedTypes.length}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedRepoPath((current) => (current === NO_REPO_FILTER_VALUE ? '' : NO_REPO_FILTER_VALUE))}
                     className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[10px] font-semibold uppercase tracking-wide transition-all ${
-                      active
+                      selectedRepoPath === NO_REPO_FILTER_VALUE
                         ? 'bg-[rgba(167,139,250,.16)] text-[var(--accent)] border border-[rgba(167,139,250,.2)]'
                         : 'bg-[rgba(255,255,255,.04)] text-[var(--muted-dim)] border border-transparent hover:bg-[rgba(255,255,255,.07)] hover:text-[var(--fg)]'
                     }`}
                     style={{ fontFamily: 'var(--display)' }}
-                    title={repoPath}
                   >
-                    {active && <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent)]" />}
-                    {playbookRunsRepoLabel(repoPath)}
+                    {selectedRepoPath === NO_REPO_FILTER_VALUE && <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent)]" />}
+                    No repo
                     <span className="text-[9px] opacity-50" style={{ fontFamily: 'var(--code)' }}>
-                      {repoTaskCountByPath[repoPath] ?? 0}
+                      {noRepoTaskCount}
                     </span>
                   </button>
-                );
-              })}
-            </div>
+                  {availableRepoFilterPaths.map((repoPath) => {
+                    const active = selectedRepoPath === repoPath;
+                    return (
+                      <button
+                        key={repoPath}
+                        type="button"
+                        onClick={() => setSelectedRepoPath((current) => (current === repoPath ? '' : repoPath))}
+                        className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[10px] font-semibold uppercase tracking-wide transition-all ${
+                          active
+                            ? 'bg-[rgba(167,139,250,.16)] text-[var(--accent)] border border-[rgba(167,139,250,.2)]'
+                            : 'bg-[rgba(255,255,255,.04)] text-[var(--muted-dim)] border border-transparent hover:bg-[rgba(255,255,255,.07)] hover:text-[var(--fg)]'
+                        }`}
+                        style={{ fontFamily: 'var(--display)' }}
+                        title={repoPath}
+                      >
+                        {active && <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent)]" />}
+                        {playbookRunsRepoLabel(repoPath)}
+                        <span className="text-[9px] opacity-50" style={{ fontFamily: 'var(--code)' }}>
+                          {repoTaskCountByPath[repoPath] ?? 0}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            ) : null}
             {(boardLoading || boardSaving || boardUpdatedAt || boardError || taskPlaybookButtonsSaving || taskPlaybookButtonsError) && (
               <div className="ml-auto flex items-center gap-2 text-[10px] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--code)' }}>
                 {boardLoading ? (
@@ -1243,6 +1547,8 @@ export function KanbanBoardWorkspace({
                             ? 'Clear task-type filters to delete lanes'
                             : repoFilterActive
                               ? 'Clear the repo filter to delete lanes'
+                              : selectedBoardScope.scopeType !== 'global'
+                                ? 'Switch to the global board to delete lanes'
                               : board.lanes.length <= 1
                                 ? 'Keep at least one lane'
                                 : 'Delete lane'
@@ -1310,6 +1616,8 @@ export function KanbanBoardWorkspace({
         card={selectedCardEntry?.card ?? null}
         laneTitle={selectedCardEntry?.lane.title ?? null}
         registeredRepoPaths={registeredRepoPaths}
+        groupScopeNames={groupScopeNames}
+        scopeDrones={availableScopeDrones}
         taskTypes={board.taskTypes}
         taskPlaybookButtons={visibleTaskPlaybookButtons}
         controlsLocked={controlsLocked}

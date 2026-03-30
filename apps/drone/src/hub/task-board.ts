@@ -4,6 +4,8 @@ export type TaskBoardTaskType = {
   active: boolean;
 };
 
+export type TaskBoardScopeType = 'global' | 'repo' | 'group' | 'drone';
+
 export type TaskBoardCard = {
   id: string;
   title: string;
@@ -11,6 +13,8 @@ export type TaskBoardCard = {
   typeId: string;
   createdAt: string;
   updatedAt: string;
+  scopeType?: TaskBoardScopeType;
+  scopeValue?: string;
   repoPath?: string;
   droneId?: string;
   droneName?: string;
@@ -41,6 +45,7 @@ export type TaskBoardScopedTask = TaskBoardCard & {
 
 const TASK_TITLE_MAX_CHARS = 240;
 const DEFAULT_TASK_BOARD_LANES = ['To do', 'In progress', 'Review', 'Done'] as const;
+const TASK_BOARD_SCOPE_TYPES = new Set<TaskBoardScopeType>(['global', 'repo', 'group', 'drone']);
 const DEFAULT_TASK_BOARD_TYPES = [
   { id: 'bug', label: 'Bug', active: true },
   { id: 'feature', label: 'Feature', active: true },
@@ -70,6 +75,41 @@ export function normalizeTaskTitle(raw: unknown): string {
     .find(Boolean);
   const collapsed = (firstLine || text).replace(/\s+/g, ' ').trim();
   return collapsed.slice(0, TASK_TITLE_MAX_CHARS);
+}
+
+export function normalizeTaskBoardScopeType(raw: unknown): TaskBoardScopeType | null {
+  const value = String(raw ?? '')
+    .trim()
+    .toLowerCase();
+  return TASK_BOARD_SCOPE_TYPES.has(value as TaskBoardScopeType) ? (value as TaskBoardScopeType) : null;
+}
+
+function normalizeTaskBoardScopeValue(
+  scopeType: TaskBoardScopeType,
+  scopeValueRaw: unknown,
+  fallbackRepoPathRaw?: unknown,
+): string {
+  if (scopeType === 'global') return '';
+  const fallbackRepoPath = String(fallbackRepoPathRaw ?? '').trim();
+  const value = String(scopeValueRaw ?? '').trim();
+  if (scopeType === 'repo') return value || fallbackRepoPath;
+  return value;
+}
+
+export function resolveTaskBoardCardScope(card: Pick<TaskBoardCard, 'scopeType' | 'scopeValue' | 'repoPath'>): {
+  scopeType: TaskBoardScopeType;
+  scopeValue: string;
+} {
+  const repoPath = String(card.repoPath ?? '').trim();
+  const scopeType = normalizeTaskBoardScopeType(card.scopeType);
+  if (!scopeType) {
+    return repoPath ? { scopeType: 'repo', scopeValue: repoPath } : { scopeType: 'global', scopeValue: '' };
+  }
+  const scopeValue = normalizeTaskBoardScopeValue(scopeType, card.scopeValue, repoPath);
+  if (!scopeValue && scopeType !== 'global') {
+    return repoPath ? { scopeType: 'repo', scopeValue: repoPath } : { scopeType: 'global', scopeValue: '' };
+  }
+  return { scopeType, scopeValue };
 }
 
 export function createDefaultTaskBoardState(): TaskBoardState {
@@ -126,6 +166,12 @@ export function sanitizeTaskBoardState(raw: unknown): TaskBoardState {
       if (!id || !title) continue;
       const createdAt = typeof card.createdAt === 'string' && card.createdAt.trim() ? card.createdAt.trim() : nowIso();
       const updatedAt = typeof card.updatedAt === 'string' && card.updatedAt.trim() ? card.updatedAt.trim() : createdAt;
+      const repoPath = typeof card.repoPath === 'string' && card.repoPath.trim() ? card.repoPath.trim() : '';
+      const scope = resolveTaskBoardCardScope({
+        scopeType: card.scopeType as TaskBoardScopeType | undefined,
+        scopeValue: typeof card.scopeValue === 'string' ? card.scopeValue : undefined,
+        repoPath,
+      });
       cards.push({
         id,
         title,
@@ -133,7 +179,9 @@ export function sanitizeTaskBoardState(raw: unknown): TaskBoardState {
         typeId: normalizeTaskTypeId(card.typeId) || fallbackType,
         createdAt,
         updatedAt,
-        ...(typeof card.repoPath === 'string' && card.repoPath.trim() ? { repoPath: card.repoPath.trim() } : {}),
+        scopeType: scope.scopeType,
+        ...(scope.scopeValue ? { scopeValue: scope.scopeValue } : {}),
+        ...(scope.scopeType === 'repo' && scope.scopeValue ? { repoPath: scope.scopeValue } : repoPath ? { repoPath } : {}),
         ...(typeof card.droneId === 'string' && card.droneId.trim() ? { droneId: card.droneId.trim() } : {}),
         ...(typeof card.droneName === 'string' && card.droneName.trim() ? { droneName: card.droneName.trim() } : {}),
         ...(typeof card.playbookId === 'string' && card.playbookId.trim() ? { playbookId: card.playbookId.trim() } : {}),
@@ -168,7 +216,12 @@ export function listScopedTasksForDroneScope(board: TaskBoardState, repoPathRaw:
   const out: TaskBoardScopedTask[] = [];
   for (const lane of board.lanes) {
     for (const card of lane.cards) {
-      if (String(card.repoPath ?? '').trim() !== repoPath) continue;
+      const scope = resolveTaskBoardCardScope(card);
+      if (repoPath) {
+        if (scope.scopeType !== 'repo' || scope.scopeValue !== repoPath) continue;
+      } else if (scope.scopeType !== 'global') {
+        continue;
+      }
       if (playbookId && String(card.playbookId ?? '').trim() !== playbookId) continue;
       out.push({
         ...card,
@@ -206,9 +259,83 @@ export function findScopedTaskById(board: TaskBoardState, taskIdRaw: unknown): T
   return null;
 }
 
+export function removeTasksForScope(
+  board: TaskBoardState,
+  scopeTypeRaw: unknown,
+  scopeValueRaw?: unknown,
+): { board: TaskBoardState; removedCount: number } {
+  const scopeType = normalizeTaskBoardScopeType(scopeTypeRaw);
+  const scopeValue = normalizeTaskBoardScopeValue(scopeType ?? 'global', scopeValueRaw);
+  if (!scopeType) return { board, removedCount: 0 };
+  let removedCount = 0;
+  const lanes = board.lanes.map((lane) => {
+    const cards = lane.cards.filter((card) => {
+      const scope = resolveTaskBoardCardScope(card);
+      const matches = scope.scopeType === scopeType && scope.scopeValue === scopeValue;
+      if (matches) removedCount += 1;
+      return !matches;
+    });
+    return cards.length === lane.cards.length ? lane : { ...lane, cards };
+  });
+  return removedCount > 0
+    ? {
+        board: {
+          taskTypes: board.taskTypes.slice(),
+          lanes,
+        },
+        removedCount,
+      }
+    : { board, removedCount: 0 };
+}
+
+export function renameTasksForScope(
+  board: TaskBoardState,
+  scopeTypeRaw: unknown,
+  oldScopeValueRaw: unknown,
+  newScopeValueRaw: unknown,
+): { board: TaskBoardState; renamedCount: number } {
+  const scopeType = normalizeTaskBoardScopeType(scopeTypeRaw);
+  if (!scopeType || scopeType === 'global') return { board, renamedCount: 0 };
+  const oldScopeValue = normalizeTaskBoardScopeValue(scopeType, oldScopeValueRaw);
+  const newScopeValue = normalizeTaskBoardScopeValue(scopeType, newScopeValueRaw);
+  if (!oldScopeValue || !newScopeValue || oldScopeValue === newScopeValue) return { board, renamedCount: 0 };
+  let renamedCount = 0;
+  const lanes = board.lanes.map((lane) => ({
+    ...lane,
+    cards: lane.cards.map((card) => {
+      const scope = resolveTaskBoardCardScope(card);
+      if (scope.scopeType !== scopeType || scope.scopeValue !== oldScopeValue) return card;
+      renamedCount += 1;
+      const nextCard: TaskBoardCard = {
+        ...card,
+        scopeType,
+        scopeValue: newScopeValue,
+      };
+      if (scopeType === 'repo') nextCard.repoPath = newScopeValue;
+      return nextCard;
+    }),
+  }));
+  return renamedCount > 0
+    ? {
+        board: {
+          taskTypes: board.taskTypes.slice(),
+          lanes,
+        },
+        renamedCount,
+      }
+    : { board, renamedCount: 0 };
+}
+
 export function appendTaskToBoard(board: TaskBoardState, card: TaskBoardCard): TaskBoardState {
   const lanes = board.lanes.length > 0 ? board.lanes.map((lane) => ({ ...lane, cards: lane.cards.slice() })) : createDefaultTaskBoardState().lanes;
-  lanes[0].cards.unshift(card);
+  const scope = resolveTaskBoardCardScope(card);
+  const nextCard: TaskBoardCard = {
+    ...card,
+    scopeType: scope.scopeType,
+    ...(scope.scopeValue ? { scopeValue: scope.scopeValue } : {}),
+    ...(scope.scopeType === 'repo' && scope.scopeValue ? { repoPath: scope.scopeValue } : {}),
+  };
+  lanes[0].cards.unshift(nextCard);
   return {
     taskTypes: board.taskTypes.slice(),
     lanes,
@@ -259,23 +386,28 @@ export function persistTaskBoardState(regAny: any, board: TaskBoardState, update
     lanes: board.lanes.map((lane) => ({
       id: lane.id,
       title: lane.title,
-      cards: lane.cards.map((card) => ({
-        id: card.id,
-        title: card.title,
-        description: card.description,
-        typeId: card.typeId,
-        createdAt: card.createdAt,
-        updatedAt: card.updatedAt,
-        ...(card.repoPath ? { repoPath: card.repoPath } : {}),
-        ...(card.droneId ? { droneId: card.droneId } : {}),
-        ...(card.droneName ? { droneName: card.droneName } : {}),
-        ...(card.playbookId ? { playbookId: card.playbookId } : {}),
-        ...(card.playbookLabel ? { playbookLabel: card.playbookLabel } : {}),
-        ...(card.chatName ? { chatName: card.chatName } : {}),
-        ...(card.prompt ? { prompt: card.prompt } : {}),
-        ...(card.promptId ? { promptId: card.promptId } : {}),
-        ...(card.messageId ? { messageId: card.messageId } : {}),
-      })),
+      cards: lane.cards.map((card) => {
+        const scope = resolveTaskBoardCardScope(card);
+        return {
+          id: card.id,
+          title: card.title,
+          description: card.description,
+          typeId: card.typeId,
+          createdAt: card.createdAt,
+          updatedAt: card.updatedAt,
+          scopeType: scope.scopeType,
+          ...(scope.scopeValue ? { scopeValue: scope.scopeValue } : {}),
+          ...(scope.scopeType === 'repo' && scope.scopeValue ? { repoPath: scope.scopeValue } : card.repoPath ? { repoPath: card.repoPath } : {}),
+          ...(card.droneId ? { droneId: card.droneId } : {}),
+          ...(card.droneName ? { droneName: card.droneName } : {}),
+          ...(card.playbookId ? { playbookId: card.playbookId } : {}),
+          ...(card.playbookLabel ? { playbookLabel: card.playbookLabel } : {}),
+          ...(card.chatName ? { chatName: card.chatName } : {}),
+          ...(card.prompt ? { prompt: card.prompt } : {}),
+          ...(card.promptId ? { promptId: card.promptId } : {}),
+          ...(card.messageId ? { messageId: card.messageId } : {}),
+        };
+      }),
     })),
     updatedAt: updatedAtRaw,
   };

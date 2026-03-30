@@ -449,6 +449,7 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     setDraftCreateError,
     createDroneFromDraft,
     registeredRepoPaths,
+    registryGroupNames,
     setActiveRepoPath,
     setSettingsPlaybookFocusId,
     selectedGroupMultiChatData,
@@ -671,6 +672,18 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
       ? {
           initialRepoPath: activeRepoPath,
           registeredRepoPaths,
+          groupScopeNames: registryGroupNames,
+          availableScopeDrones: drones.map((drone: any) => ({
+            id: String(drone?.id ?? '').trim(),
+            name: String(drone?.name ?? '').trim(),
+            group: typeof drone?.group === 'string' ? drone.group : null,
+            repoPath: String(drone?.repoPath ?? '').trim(),
+          })).filter((drone: any) => drone.id),
+          currentScopeGroupName:
+            typeof selectedGroupMultiChatData?.group === 'string' && !selectedGroupMultiChatData.group.startsWith('__sidebar-')
+              ? selectedGroupMultiChatData.group
+              : null,
+          currentScopeDroneId: String(currentDrone?.id ?? '').trim() || null,
           board: kanbanBoard,
           taskPlaybookButtons,
           taskPlaybookButtonsLoading,

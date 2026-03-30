@@ -36,6 +36,8 @@ describe('kanban board settings persistence', () => {
                 title: 'Stripe checkout trusts client credits',
                 description: 'Client-supplied credits can mint arbitrary balance after checkout.',
                 typeId: 'bug',
+                scopeType: 'repo',
+                scopeValue: '/tmp/storyspark',
                 repoPath: '/tmp/storyspark',
                 playbookId: 'playbook-1',
                 playbookLabel: 'Find bug',
@@ -53,6 +55,8 @@ describe('kanban board settings persistence', () => {
         id: 'task-1',
         title: 'Stripe checkout trusts client credits',
         typeId: 'bug',
+        scopeType: 'repo',
+        scopeValue: '/tmp/storyspark',
         playbookId: 'playbook-1',
       });
 

@@ -4,6 +4,8 @@ export type KanbanTaskType = {
   active: boolean;
 };
 
+export type KanbanTaskScopeType = 'global' | 'repo' | 'group' | 'drone';
+
 export type KanbanCard = {
   id: string;
   title: string;
@@ -11,6 +13,8 @@ export type KanbanCard = {
   typeId: string;
   createdAt?: string;
   updatedAt?: string;
+  scopeType?: KanbanTaskScopeType;
+  scopeValue?: string;
   repoPath?: string;
   droneId?: string;
   droneName?: string;
@@ -46,6 +50,7 @@ const DEFAULT_TASK_TYPES = [
   { id: 'feature', label: 'Feature', active: true },
   { id: 'idea', label: 'Idea', active: true },
 ] as const;
+const KANBAN_TASK_SCOPE_TYPES = new Set<KanbanTaskScopeType>(['global', 'repo', 'group', 'drone']);
 const PASTED_TEXT_INLINE_TITLE_MAX_CHARS = 24;
 
 function defaultKanbanLaneTitle(index: number): string {
@@ -65,6 +70,50 @@ export function normalizeTaskTypeId(value: unknown): string {
     .replace(/^-+|-+$/g, '')
     .slice(0, 40);
   return cleaned;
+}
+
+export function normalizeKanbanTaskScopeType(value: unknown): KanbanTaskScopeType | null {
+  const normalized = String(value ?? '')
+    .trim()
+    .toLowerCase();
+  return KANBAN_TASK_SCOPE_TYPES.has(normalized as KanbanTaskScopeType) ? (normalized as KanbanTaskScopeType) : null;
+}
+
+function normalizeKanbanTaskScopeValue(
+  scopeType: KanbanTaskScopeType,
+  scopeValueRaw: unknown,
+  fallbackRepoPathRaw?: unknown,
+): string {
+  if (scopeType === 'global') return '';
+  const fallbackRepoPath = String(fallbackRepoPathRaw ?? '').trim();
+  const value = String(scopeValueRaw ?? '').trim();
+  if (scopeType === 'repo') return value || fallbackRepoPath;
+  return value;
+}
+
+export function resolveKanbanCardScope(card: Pick<KanbanCard, 'scopeType' | 'scopeValue' | 'repoPath'>): {
+  scopeType: KanbanTaskScopeType;
+  scopeValue: string;
+} {
+  const repoPath = String(card.repoPath ?? '').trim();
+  const scopeType = normalizeKanbanTaskScopeType(card.scopeType);
+  if (!scopeType) {
+    return repoPath ? { scopeType: 'repo', scopeValue: repoPath } : { scopeType: 'global', scopeValue: '' };
+  }
+  const scopeValue = normalizeKanbanTaskScopeValue(scopeType, card.scopeValue, repoPath);
+  if (!scopeValue && scopeType !== 'global') {
+    return repoPath ? { scopeType: 'repo', scopeValue: repoPath } : { scopeType: 'global', scopeValue: '' };
+  }
+  return { scopeType, scopeValue };
+}
+
+export function cardMatchesKanbanScope(
+  card: Pick<KanbanCard, 'scopeType' | 'scopeValue' | 'repoPath'>,
+  scope: { scopeType: KanbanTaskScopeType; scopeValue?: string },
+): boolean {
+  const resolvedCardScope = resolveKanbanCardScope(card);
+  const resolvedTargetValue = normalizeKanbanTaskScopeValue(scope.scopeType, scope.scopeValue);
+  return resolvedCardScope.scopeType === scope.scopeType && resolvedCardScope.scopeValue === resolvedTargetValue;
 }
 
 export function createDefaultKanbanTaskTypes(): KanbanTaskType[] {
@@ -112,6 +161,8 @@ export function createKanbanCard(
       | 'typeId'
       | 'createdAt'
       | 'updatedAt'
+      | 'scopeType'
+      | 'scopeValue'
       | 'repoPath'
       | 'droneId'
       | 'droneName'
@@ -127,6 +178,12 @@ export function createKanbanCard(
 ): KanbanCard {
   const fallbackTypeId = normalizeTaskTypeId(fallbackTypeIdRaw) || 'idea';
   const typeId = normalizeTaskTypeId(seed?.typeId) || fallbackTypeId;
+  const repoPath = typeof seed?.repoPath === 'string' && seed.repoPath.trim() ? seed.repoPath.trim() : '';
+  const scope = resolveKanbanCardScope({
+    scopeType: seed?.scopeType,
+    scopeValue: seed?.scopeValue,
+    repoPath,
+  });
   return {
     id: createKanbanId('card'),
     title: String(seed?.title ?? '').trim(),
@@ -134,7 +191,9 @@ export function createKanbanCard(
     typeId,
     ...(typeof seed?.createdAt === 'string' && seed.createdAt.trim() ? { createdAt: seed.createdAt.trim() } : {}),
     ...(typeof seed?.updatedAt === 'string' && seed.updatedAt.trim() ? { updatedAt: seed.updatedAt.trim() } : {}),
-    ...(typeof seed?.repoPath === 'string' && seed.repoPath.trim() ? { repoPath: seed.repoPath.trim() } : {}),
+    scopeType: scope.scopeType,
+    ...(scope.scopeValue ? { scopeValue: scope.scopeValue } : {}),
+    ...(scope.scopeType === 'repo' && scope.scopeValue ? { repoPath: scope.scopeValue } : repoPath ? { repoPath } : {}),
     ...(typeof seed?.droneId === 'string' && seed.droneId.trim() ? { droneId: seed.droneId.trim() } : {}),
     ...(typeof seed?.droneName === 'string' && seed.droneName.trim() ? { droneName: seed.droneName.trim() } : {}),
     ...(typeof seed?.playbookId === 'string' && seed.playbookId.trim() ? { playbookId: seed.playbookId.trim() } : {}),
@@ -176,24 +235,32 @@ export function sanitizeKanbanBoardState(value: unknown): KanbanBoardState {
   for (let i = 0; i < lanesRaw.length; i += 1) {
     const laneRaw = lanesRaw[i];
     if (!laneRaw || typeof laneRaw !== 'object' || Array.isArray(laneRaw)) continue;
-    const laneRecord = laneRaw as Record<string, unknown>;
-    const title = String(laneRecord.title ?? '').trim() || defaultKanbanLaneTitle(i);
-    const cardsRaw = Array.isArray(laneRecord.cards) ? laneRecord.cards : [];
-    const cards: KanbanCard[] = [];
-    for (const cardRaw of cardsRaw) {
-      if (!cardRaw || typeof cardRaw !== 'object' || Array.isArray(cardRaw)) continue;
-      const cardRecord = cardRaw as Record<string, unknown>;
-      cards.push({
-        id: String(cardRecord.id ?? '').trim() || createKanbanId('card'),
-        title: String(cardRecord.title ?? '').trim(),
-        description: String(cardRecord.description ?? '').trim(),
-        typeId: normalizeTaskTypeId(cardRecord.typeId) || fallbackTypeId,
-        ...(typeof cardRecord.createdAt === 'string' && cardRecord.createdAt.trim() ? { createdAt: cardRecord.createdAt.trim() } : {}),
-        ...(typeof cardRecord.updatedAt === 'string' && cardRecord.updatedAt.trim() ? { updatedAt: cardRecord.updatedAt.trim() } : {}),
-        ...(typeof cardRecord.repoPath === 'string' && cardRecord.repoPath.trim() ? { repoPath: cardRecord.repoPath.trim() } : {}),
-        ...(typeof cardRecord.droneId === 'string' && cardRecord.droneId.trim() ? { droneId: cardRecord.droneId.trim() } : {}),
-        ...(typeof cardRecord.droneName === 'string' && cardRecord.droneName.trim() ? { droneName: cardRecord.droneName.trim() } : {}),
-        ...(typeof cardRecord.playbookId === 'string' && cardRecord.playbookId.trim() ? { playbookId: cardRecord.playbookId.trim() } : {}),
+      const laneRecord = laneRaw as Record<string, unknown>;
+      const title = String(laneRecord.title ?? '').trim() || defaultKanbanLaneTitle(i);
+      const cardsRaw = Array.isArray(laneRecord.cards) ? laneRecord.cards : [];
+      const cards: KanbanCard[] = [];
+      for (const cardRaw of cardsRaw) {
+        if (!cardRaw || typeof cardRaw !== 'object' || Array.isArray(cardRaw)) continue;
+        const cardRecord = cardRaw as Record<string, unknown>;
+        const repoPath = typeof cardRecord.repoPath === 'string' && cardRecord.repoPath.trim() ? cardRecord.repoPath.trim() : '';
+        const scope = resolveKanbanCardScope({
+          scopeType: cardRecord.scopeType as KanbanTaskScopeType | undefined,
+          scopeValue: typeof cardRecord.scopeValue === 'string' ? cardRecord.scopeValue : undefined,
+          repoPath,
+        });
+        cards.push({
+          id: String(cardRecord.id ?? '').trim() || createKanbanId('card'),
+          title: String(cardRecord.title ?? '').trim(),
+          description: String(cardRecord.description ?? '').trim(),
+          typeId: normalizeTaskTypeId(cardRecord.typeId) || fallbackTypeId,
+          ...(typeof cardRecord.createdAt === 'string' && cardRecord.createdAt.trim() ? { createdAt: cardRecord.createdAt.trim() } : {}),
+          ...(typeof cardRecord.updatedAt === 'string' && cardRecord.updatedAt.trim() ? { updatedAt: cardRecord.updatedAt.trim() } : {}),
+          scopeType: scope.scopeType,
+          ...(scope.scopeValue ? { scopeValue: scope.scopeValue } : {}),
+          ...(scope.scopeType === 'repo' && scope.scopeValue ? { repoPath: scope.scopeValue } : repoPath ? { repoPath } : {}),
+          ...(typeof cardRecord.droneId === 'string' && cardRecord.droneId.trim() ? { droneId: cardRecord.droneId.trim() } : {}),
+          ...(typeof cardRecord.droneName === 'string' && cardRecord.droneName.trim() ? { droneName: cardRecord.droneName.trim() } : {}),
+          ...(typeof cardRecord.playbookId === 'string' && cardRecord.playbookId.trim() ? { playbookId: cardRecord.playbookId.trim() } : {}),
         ...(typeof cardRecord.playbookLabel === 'string' && cardRecord.playbookLabel.trim() ? { playbookLabel: cardRecord.playbookLabel.trim() } : {}),
         ...(typeof cardRecord.chatName === 'string' && cardRecord.chatName.trim() ? { chatName: cardRecord.chatName.trim() } : {}),
         ...(typeof cardRecord.prompt === 'string' && cardRecord.prompt ? { prompt: cardRecord.prompt } : {}),

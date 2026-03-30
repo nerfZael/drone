@@ -2459,8 +2459,40 @@ export function DroneChangesDock({
       }}
     >
       <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] flex items-center justify-between gap-2">
-        <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.12em] uppercase" style={{ fontFamily: 'var(--display)' }}>
-          Changes
+        <div className="flex items-center gap-2 min-w-0 flex-wrap">
+          <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.12em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+            Changes
+          </div>
+          {repoAttached && !disabled && contextMode === 'branch' && primaryView === 'changes' ? (
+            <div className="inline-flex items-center gap-1 flex-wrap">
+              <button
+                type="button"
+                onClick={() => setBranchChangesMode('working-tree')}
+                className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
+                  branchChangesMode === 'working-tree'
+                    ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                    : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
+                }`}
+                style={{ fontFamily: 'var(--display)' }}
+                title="Working tree changes inside the drone (staged/unstaged)"
+              >
+                Working
+              </button>
+              <button
+                type="button"
+                onClick={() => setBranchChangesMode('pull-preview')}
+                className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
+                  branchChangesMode === 'pull-preview'
+                    ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                    : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
+                }`}
+                style={{ fontFamily: 'var(--display)' }}
+                title="Apply preview: committed diff from base to drone HEAD (what applying changes would merge)"
+              >
+                Apply
+              </button>
+            </div>
+          ) : null}
         </div>
         <div data-onboarding-id="changes.viewMode" className="inline-flex items-center gap-1 flex-wrap justify-end">
           {repoAttached && !disabled ? (
@@ -2532,37 +2564,6 @@ export function DroneChangesDock({
               >
                 Commits
               </button>
-              {contextMode === 'branch' && primaryView === 'changes' ? (
-                <>
-                  <span className="mx-1 text-[var(--border-subtle)]">|</span>
-                  <button
-                    type="button"
-                    onClick={() => setBranchChangesMode('working-tree')}
-                    className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
-                      branchChangesMode === 'working-tree'
-                        ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                        : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
-                    }`}
-                    style={{ fontFamily: 'var(--display)' }}
-                    title="Working tree changes inside the drone (staged/unstaged)"
-                  >
-                    Working
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setBranchChangesMode('pull-preview')}
-                    className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
-                      branchChangesMode === 'pull-preview'
-                        ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                        : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
-                    }`}
-                    style={{ fontFamily: 'var(--display)' }}
-                    title="Apply preview: committed diff from base to drone HEAD (what applying changes would merge)"
-                  >
-                    Apply
-                  </button>
-                </>
-              ) : null}
               <span className="mx-1 text-[var(--border-subtle)]">|</span>
             </>
           ) : null}

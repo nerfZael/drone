@@ -1,5 +1,5 @@
 import React from 'react';
-import type { KanbanCard, KanbanTaskType } from './kanban-board-state';
+import { resolveKanbanCardScope, type KanbanCard, type KanbanTaskScopeType, type KanbanTaskType } from './kanban-board-state';
 import { KANBAN_TASK_UNTITLED_FALLBACK, resolveCommittedKanbanTaskTitle } from './kanban-task-details-dialog-state';
 import { MarkdownMessage } from '../chat/MarkdownMessage';
 import { IconPencil } from './icons';
@@ -10,6 +10,13 @@ type KanbanTaskDetailsDialogProps = {
   card: KanbanCard | null;
   laneTitle: string | null;
   registeredRepoPaths: string[];
+  groupScopeNames: string[];
+  scopeDrones: Array<{
+    id: string;
+    name: string;
+    group: string | null;
+    repoPath: string;
+  }>;
   taskTypes: KanbanTaskType[];
   taskPlaybookButtons: TaskPlaybookButton[];
   controlsLocked: boolean;
@@ -18,7 +25,14 @@ type KanbanTaskDetailsDialogProps = {
   taskButtonError: string | null;
   onClose: () => void;
   onTitleDraftChange: () => void;
-  onUpdate: (patch: { title?: string; description?: string; typeId?: string; repoPath?: string | null }) => void;
+  onUpdate: (patch: {
+    title?: string;
+    description?: string;
+    typeId?: string;
+    repoPath?: string | null;
+    scopeType?: KanbanTaskScopeType;
+    scopeValue?: string | null;
+  }) => void;
   onDelete: () => void;
   onOpenCreatorDrone: () => void;
   onRunTaskPlaybookButton: (buttonId: string) => void;
@@ -28,6 +42,8 @@ export function KanbanTaskDetailsDialog({
   card,
   laneTitle,
   registeredRepoPaths,
+  groupScopeNames,
+  scopeDrones,
   taskTypes,
   taskPlaybookButtons,
   controlsLocked,
@@ -99,15 +115,58 @@ export function KanbanTaskDetailsDialog({
   }, [editingDescription]);
 
   const repoPath = String(card?.repoPath ?? '').trim();
+  const cardScope = React.useMemo(() => (card ? resolveKanbanCardScope(card) : { scopeType: 'global' as const, scopeValue: '' }), [card]);
   const repoOptions = React.useMemo(() => {
     const out = Array.from(new Set(registeredRepoPaths.map((item) => String(item ?? '').trim()).filter(Boolean)));
     if (repoPath && !out.includes(repoPath)) out.push(repoPath);
     return out;
   }, [registeredRepoPaths, repoPath]);
+  const groupOptions = React.useMemo(() => {
+    const out = Array.from(new Set(groupScopeNames.map((item) => String(item ?? '').trim()).filter(Boolean)));
+    if (cardScope.scopeType === 'group' && cardScope.scopeValue && !out.includes(cardScope.scopeValue)) out.push(cardScope.scopeValue);
+    return out.sort((a, b) => a.localeCompare(b));
+  }, [cardScope.scopeType, cardScope.scopeValue, groupScopeNames]);
+  const droneOptions = React.useMemo(() => {
+    const byId = new Map(
+      scopeDrones.map((drone) => [
+        drone.id,
+        {
+          id: drone.id,
+          label: String(drone.name ?? '').trim() || drone.id,
+          repoPath: String(drone.repoPath ?? '').trim(),
+        },
+      ]),
+    );
+    if (cardScope.scopeType === 'drone' && cardScope.scopeValue && !byId.has(cardScope.scopeValue)) {
+      byId.set(cardScope.scopeValue, {
+        id: cardScope.scopeValue,
+        label: cardScope.scopeValue,
+        repoPath: '',
+      });
+    }
+    return Array.from(byId.values()).sort((a, b) => a.label.localeCompare(b.label));
+  }, [cardScope.scopeType, cardScope.scopeValue, scopeDrones]);
 
   if (!card) return null;
   const activeTaskTypes = taskTypes.filter((item) => item.active !== false || item.id === card.typeId);
   const hasDescription = Boolean(card.description?.trim());
+  const boardTargetLabel =
+    cardScope.scopeType === 'repo' ? 'Board Repo' : cardScope.scopeType === 'group' ? 'Board Group' : 'Board Drone';
+  const boardTargetOptions =
+    cardScope.scopeType === 'repo'
+      ? repoOptions.map((value) => ({ value, label: playbookRunsRepoLabel(value) }))
+      : cardScope.scopeType === 'group'
+        ? groupOptions.map((value) => ({ value, label: value }))
+        : droneOptions.map((drone) => ({ value: drone.id, label: drone.label }));
+  const boardMetadataValue =
+    cardScope.scopeType === 'global'
+      ? 'Global'
+      : cardScope.scopeType === 'repo'
+        ? playbookRunsRepoLabel(cardScope.scopeValue)
+        : cardScope.scopeType === 'group'
+          ? cardScope.scopeValue
+          : droneOptions.find((drone) => drone.id === cardScope.scopeValue)?.label ?? cardScope.scopeValue;
+  const repoFieldLocked = cardScope.scopeType === 'repo';
   const taskButtonsDisabledReason = repoPath ? null : 'This task does not have a repo attached yet.';
 
   return (
@@ -164,7 +223,7 @@ export function KanbanTaskDetailsDialog({
         </div>
 
         <div className="flex flex-col gap-5 px-6 py-6">
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_180px_220px]">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_160px_160px_220px]">
             <div className="flex flex-col gap-2">
               <label className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>Title</label>
               <input
@@ -197,11 +256,75 @@ export function KanbanTaskDetailsDialog({
               </select>
             </div>
             <div className="flex flex-col gap-2">
+              <label className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>Board</label>
+              <select
+                value={cardScope.scopeType}
+                onChange={(event) => {
+                  const nextScopeType = event.target.value as KanbanTaskScopeType;
+                  if (nextScopeType === 'global') {
+                    onUpdate({ scopeType: 'global', scopeValue: '' });
+                    return;
+                  }
+                  const nextScopeValue =
+                    nextScopeType === 'repo'
+                      ? repoPath || repoOptions[0] || ''
+                      : nextScopeType === 'group'
+                        ? groupOptions[0] || ''
+                        : String(card.droneId ?? '').trim() || droneOptions[0]?.id || '';
+                  if (!nextScopeValue) return;
+                  onUpdate({
+                    scopeType: nextScopeType,
+                    scopeValue: nextScopeValue,
+                    ...(nextScopeType === 'repo' ? { repoPath: nextScopeValue } : {}),
+                  });
+                }}
+                disabled={controlsLocked}
+                className="h-10 rounded-lg border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-3 text-[12px] text-[var(--fg)] transition-colors focus:outline-none focus:border-[var(--accent-muted)] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <option value="global">Global</option>
+                <option value="repo" disabled={repoOptions.length === 0}>Repo</option>
+                <option value="group" disabled={groupOptions.length === 0}>Group</option>
+                <option value="drone" disabled={droneOptions.length === 0}>Drone</option>
+              </select>
+            </div>
+            <div className="flex flex-col gap-2">
+              <label className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+                {cardScope.scopeType === 'global' ? 'Board Target' : boardTargetLabel}
+              </label>
+              <select
+                value={cardScope.scopeType === 'global' ? '' : cardScope.scopeValue}
+                onChange={(event) => {
+                  const nextScopeValue = event.target.value;
+                  onUpdate({
+                    scopeType: cardScope.scopeType,
+                    scopeValue: nextScopeValue,
+                    ...(cardScope.scopeType === 'repo' ? { repoPath: nextScopeValue } : {}),
+                  });
+                }}
+                disabled={controlsLocked || cardScope.scopeType === 'global' || boardTargetOptions.length === 0}
+                className="h-10 rounded-lg border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-3 text-[12px] text-[var(--fg)] transition-colors focus:outline-none focus:border-[var(--accent-muted)] disabled:cursor-not-allowed disabled:opacity-60"
+                title={cardScope.scopeValue || undefined}
+              >
+                {cardScope.scopeType === 'global' ? (
+                  <option value="">No target</option>
+                ) : (
+                  boardTargetOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[220px_1fr]">
+            <div className="flex flex-col gap-2">
               <label className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>Repo</label>
               <select
                 value={repoPath}
                 onChange={(event) => onUpdate({ repoPath: event.target.value || null })}
-                disabled={controlsLocked}
+                disabled={controlsLocked || repoFieldLocked}
                 className="h-10 rounded-lg border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-3 text-[12px] text-[var(--fg)] transition-colors focus:outline-none focus:border-[var(--accent-muted)] disabled:cursor-not-allowed disabled:opacity-60"
                 title={repoPath || undefined}
               >
@@ -213,6 +336,17 @@ export function KanbanTaskDetailsDialog({
                   </option>
                 ))}
               </select>
+            </div>
+            <div className="flex items-end">
+              {repoFieldLocked ? (
+                <div className="text-[11px] text-[var(--muted-dim)]">
+                  Repo-scoped tasks are always attached to their board repo.
+                </div>
+              ) : (
+                <div className="text-[11px] text-[var(--muted-dim)]">
+                  Repo attachment stays separate from board ownership for global, group, and drone tasks.
+                </div>
+              )}
             </div>
           </div>
 
@@ -309,6 +443,7 @@ export function KanbanTaskDetailsDialog({
               {[
                 ['Created', card.createdAt],
                 ['Updated', card.updatedAt],
+                ['Board', boardMetadataValue],
                 ['Repo', repoPath || 'No repo'],
                 ['Playbook', card.playbookLabel],
                 ['Creator', card.droneName],

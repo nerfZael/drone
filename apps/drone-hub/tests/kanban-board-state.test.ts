@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  cardMatchesKanbanScope,
   createDefaultKanbanBoardState,
   moveKanbanCard,
   parsePastedKanbanCard,
+  resolveKanbanCardScope,
   sanitizeKanbanBoardState,
 } from '../src/droneHub/app/kanban-board-state';
 
@@ -101,5 +103,50 @@ describe('kanban board state helpers', () => {
     });
     expect(movedAcross.lanes[0]?.cards.map((card) => card.id)).toEqual(['b']);
     expect(movedAcross.lanes[1]?.cards.map((card) => card.id)).toEqual(['c', 'a']);
+  });
+
+  test('maps legacy repo cards to repo scope and empty cards to global scope', () => {
+    const board = sanitizeKanbanBoardState({
+      lanes: [
+        {
+          id: 'lane-1',
+          title: 'To do',
+          cards: [
+            { id: 'repo-task', title: 'Repo task', description: '', repoPath: '/tmp/repo-a' },
+            { id: 'global-task', title: 'Global task', description: '' },
+          ],
+        },
+      ],
+    });
+
+    expect(resolveKanbanCardScope(board.lanes[0]!.cards[0]!)).toEqual({
+      scopeType: 'repo',
+      scopeValue: '/tmp/repo-a',
+    });
+    expect(resolveKanbanCardScope(board.lanes[0]!.cards[1]!)).toEqual({
+      scopeType: 'global',
+      scopeValue: '',
+    });
+  });
+
+  test('matches cards against scoped board selections', () => {
+    expect(
+      cardMatchesKanbanScope(
+        { id: 'task-1', title: 'Repo task', description: '', typeId: 'idea', repoPath: '/tmp/repo-a' },
+        { scopeType: 'repo', scopeValue: '/tmp/repo-a' },
+      ),
+    ).toBe(true);
+    expect(
+      cardMatchesKanbanScope(
+        { id: 'task-2', title: 'Group task', description: '', typeId: 'idea', scopeType: 'group', scopeValue: 'feature-x' },
+        { scopeType: 'group', scopeValue: 'feature-x' },
+      ),
+    ).toBe(true);
+    expect(
+      cardMatchesKanbanScope(
+        { id: 'task-3', title: 'Other group', description: '', typeId: 'idea', scopeType: 'group', scopeValue: 'feature-y' },
+        { scopeType: 'group', scopeValue: 'feature-x' },
+      ),
+    ).toBe(false);
   });
 });

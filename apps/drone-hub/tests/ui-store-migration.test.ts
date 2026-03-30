@@ -11,6 +11,8 @@ describe('drone hub ui store migration', () => {
         showCanvasLastMessagePreviews: true,
         seenModelIds: ['gpt-5.4', 'o3'],
         kanbanBoardSelectionInitialized: true,
+        kanbanBoardScopeType: 'group',
+        kanbanBoardScopeValue: 'feature-x',
         kanbanBoardSelectedRepoPath: '/tmp/repo-a',
         kanbanBoardViewMode: 'table',
         automations: [
@@ -31,6 +33,8 @@ describe('drone hub ui store migration', () => {
       showCanvasLastMessagePreviews: true,
       seenModelIds: ['gpt-5.4', 'o3'],
       kanbanBoardSelectionInitialized: true,
+      kanbanBoardScopeType: 'group',
+      kanbanBoardScopeValue: 'feature-x',
       kanbanBoardSelectedRepoPath: '/tmp/repo-a',
       kanbanBoardViewMode: 'table',
     });

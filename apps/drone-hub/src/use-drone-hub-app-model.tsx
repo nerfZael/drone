@@ -2699,6 +2699,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     settingsActiveTab,
     settingsPlaybookFocusId,
     registeredRepoPaths,
+    registryGroupNames,
     setActiveRepoPath,
     setSettingsActiveTab,
     setSettingsPlaybookFocusId,
