@@ -2,6 +2,13 @@ import type { ChatAgentConfig } from '../../domain';
 import type { UiMenuSelectEntry } from '../../ui/menuSelect';
 
 export type CreateRuntime = 'container' | 'host';
+export type RepoBranchSourceMode = 'host' | 'remote';
+
+export type RepoBranchSelectionState = {
+  repoBranchSource: RepoBranchSourceMode;
+  pullHostBranchBeforeCreate: boolean;
+  remoteBranch?: string | null;
+};
 
 export function runtimeSupportsCustomAgents(runtime: CreateRuntime): boolean {
   return runtime !== 'host';
@@ -34,7 +41,7 @@ type BuildDraftDroneCreatePayloadArgs = {
   group?: string | null;
   repoPath?: string | null;
   runtime: CreateRuntime;
-  pullHostBranchBeforeCreate: boolean;
+  repoBranchSelection: RepoBranchSelectionState;
   seedAgent: ChatAgentConfig | null;
   seedModel?: string | null;
   prompt?: string | null;
@@ -45,7 +52,7 @@ export function buildDraftDroneCreatePayload({
   group,
   repoPath,
   runtime,
-  pullHostBranchBeforeCreate,
+  repoBranchSelection,
   seedAgent,
   seedModel,
   prompt,
@@ -55,13 +62,17 @@ export function buildDraftDroneCreatePayload({
   const trimmedRepoPath = String(repoPath ?? '').trim();
   const trimmedPrompt = String(prompt ?? '').trim();
   const trimmedModel = String(seedModel ?? '').trim();
+  const repoBranchSource = repoBranchSelection.repoBranchSource;
+  const remoteBranch = String(repoBranchSelection.remoteBranch ?? '').trim();
   const hasChatSeed = Boolean(seedAgent || trimmedModel || trimmedPrompt);
   return {
     ...(trimmedName ? { name: trimmedName } : {}),
     ...(trimmedGroup ? { group: trimmedGroup } : {}),
     ...(trimmedRepoPath ? { repoPath: trimmedRepoPath } : {}),
     runtime,
-    pullHostBranchBeforeCreate,
+    pullHostBranchBeforeCreate: repoBranchSelection.pullHostBranchBeforeCreate,
+    repoBranchSource,
+    ...(repoBranchSource === 'remote' && remoteBranch ? { remoteBranch } : {}),
     ...(hasChatSeed ? { seedChat: 'default' } : {}),
     ...(seedAgent ? { seedAgent } : {}),
     ...(trimmedModel ? { seedModel: trimmedModel } : {}),

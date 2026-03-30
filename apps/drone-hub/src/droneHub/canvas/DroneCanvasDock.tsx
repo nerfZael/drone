@@ -18,6 +18,7 @@ import {
 } from '../app/drone-hub-dnd';
 import { isShortcutMatch } from '../app/shortcuts';
 import { resolveCanvasChatDisplay } from '../app/chat-node-helpers';
+import { repoPathLabel } from '../app/repo-path-label';
 import { buildSpawnModelMenuEntries, getSpawnModelTriggerLabel } from '../app/spawn-model-history';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { TypingDots } from '../overview/icons';
@@ -1990,10 +1991,10 @@ export function DroneCanvasDock({
               entries={createRepoMenuEntries}
               disabled={controlsDisabled}
               triggerClassName="min-w-[170px] max-w-[280px]"
-              panelClassName="w-[680px] max-w-[calc(100vw-3rem)]"
+              panelClassName="w-[380px] max-w-[calc(100vw-3rem)]"
               menuClassName="max-h-[220px] overflow-y-auto"
               title={normalizedCreateRepoPath || 'No repo'}
-              triggerLabel={normalizedCreateRepoPath || 'No repo'}
+              triggerLabel={normalizedCreateRepoPath ? repoPathLabel(normalizedCreateRepoPath) : 'No repo'}
               triggerLabelClassName={normalizedCreateRepoPath ? 'font-mono text-[11px]' : undefined}
             />
           </div>

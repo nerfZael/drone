@@ -36,6 +36,7 @@ import { cn } from '../../ui/cn';
 import { dropdownMenuItemBaseClass, dropdownPanelBaseClass, useDropdownDismiss } from '../../ui/dropdown';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
 import { createDraftChatAutomationLaunch } from './chat-draft-automation';
+import { repoPathLabel } from './repo-path-label';
 import { useDroneHubUiStore, useSelectedDroneWorkspaceUiState } from './use-drone-hub-ui-store';
 import { usePromptAutomationState } from './use-prompt-automation-state';
 import { HeaderPullRequestShortcuts } from './HeaderPullRequestShortcuts';
@@ -972,10 +973,10 @@ export function SelectedDroneWorkspace({
                 entries={createRepoMenuEntries}
                 disabled={true}
                 triggerClassName="min-w-[220px] max-w-[420px]"
-                panelClassName="w-[720px] max-w-[calc(100vw-3rem)]"
+                panelClassName="w-[380px] max-w-[calc(100vw-3rem)]"
                 menuClassName="max-h-[240px] overflow-y-auto"
                 title={currentDroneRepoPath || 'No repo'}
-                triggerLabel={currentDroneRepoPath || 'No repo'}
+                triggerLabel={currentDroneRepoPath ? repoPathLabel(currentDroneRepoPath) : 'No repo'}
                 triggerLabelClassName={currentDroneRepoPath ? 'font-mono text-[11px]' : undefined}
                 chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
               />

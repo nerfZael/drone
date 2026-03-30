@@ -9,6 +9,7 @@ type UiMenuSelectOptionEntry = {
   value: string;
   label: React.ReactNode;
   title?: string;
+  searchText?: string;
   disabled?: boolean;
   className?: string;
   activeClassName?: string;
@@ -38,6 +39,9 @@ type UiMenuSelectProps = {
   header?: React.ReactNode;
   headerClassName?: string;
   headerStyle?: React.CSSProperties;
+  searchable?: boolean;
+  searchPlaceholder?: string;
+  emptySearchLabel?: React.ReactNode;
   triggerLabel?: React.ReactNode;
   triggerLabelClassName?: string;
   chevron?: (open: boolean) => React.ReactNode;
@@ -91,6 +95,9 @@ export function UiMenuSelect(props: UiMenuSelectProps) {
     header,
     headerClassName,
     headerStyle,
+    searchable = false,
+    searchPlaceholder = 'Search…',
+    emptySearchLabel = 'No matches',
     triggerLabel,
     triggerLabelClassName,
     chevron,
@@ -101,11 +108,13 @@ export function UiMenuSelect(props: UiMenuSelectProps) {
   const isControlled = typeof openProp === 'boolean';
   const [internalOpen, setInternalOpen] = React.useState(false);
   const open = isControlled ? Boolean(openProp) : internalOpen;
+  const [searchQuery, setSearchQuery] = React.useState('');
 
   const setOpen = React.useCallback(
     (next: React.SetStateAction<boolean>) => {
       const resolved = typeof next === 'function' ? next(open) : next;
       if (!isControlled) setInternalOpen(resolved);
+      if (!resolved) setSearchQuery('');
       onOpenChange?.(resolved);
     },
     [isControlled, onOpenChange, open]
@@ -123,6 +132,17 @@ export function UiMenuSelect(props: UiMenuSelectProps) {
     () => entries.find((entry) => isOptionEntry(entry) && entry.value === value) as UiMenuSelectOptionEntry | undefined,
     [entries, value]
   );
+  const filteredEntries = React.useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!searchable || !query) return entries;
+    return entries.filter((entry) => {
+      if (!isOptionEntry(entry)) return true;
+      const haystack = [entry.searchText, entry.title, entry.value]
+        .map((part) => String(part ?? '').trim().toLowerCase())
+        .filter(Boolean);
+      return haystack.some((part) => part.includes(query));
+    });
+  }, [entries, searchQuery, searchable]);
 
   const resolvedTriggerLabel = triggerLabel ?? selectedEntry?.label ?? '';
 
@@ -167,8 +187,19 @@ export function UiMenuSelect(props: UiMenuSelectProps) {
               {header}
             </div>
           ) : null}
+          {searchable ? (
+            <div className="px-2 pt-2 pb-1 border-b border-[var(--border-subtle)]">
+              <input
+                autoFocus
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder={searchPlaceholder}
+                className="w-full h-8 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] px-2 text-[11px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none"
+              />
+            </div>
+          ) : null}
           <div className={cn('py-1', menuClassName)}>
-            {entries.map((entry, index) => {
+            {filteredEntries.map((entry, index) => {
               if (!isOptionEntry(entry)) {
                 return <div key={entry.key ?? `separator-${index}`} className={cn('my-1 border-t border-[var(--border-subtle)]', entry.className)} />;
               }
@@ -197,6 +228,11 @@ export function UiMenuSelect(props: UiMenuSelectProps) {
                 </button>
               );
             })}
+            {filteredEntries.every((entry) => !isOptionEntry(entry)) ? (
+              <div className="px-3 py-3 text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]">
+                {emptySearchLabel}
+              </div>
+            ) : null}
           </div>
         </div>
       )}

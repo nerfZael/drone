@@ -14,7 +14,7 @@ import {
 import { resolveDroneContainerNameByIdentity, setDroneHubMetaByIdentity } from './drone-lifecycle-service';
 import { findDroneEntryByIdentity, normalizeDroneIdentity } from './drone-lifecycle-registry';
 import type { PendingPhase, PendingPromptProjection, PendingStartupPrompt } from './drone-pending-state';
-import { gitCurrentBranchOrSha, gitTopLevel } from './repoOps';
+import { gitCurrentBranchOrSha, gitResolveRemoteBranchForCreate, gitTopLevel } from './repoOps';
 
 type PendingDronePatch = Partial<{
   phase: PendingPhase;
@@ -249,7 +249,12 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
       });
       try {
         const repoRoot = await gitTopLevel(repoPath);
-        const baseRef = await gitCurrentBranchOrSha(repoRoot);
+        const repoSeedSource = String((pending as any)?.repoSeedSource ?? '').trim().toLowerCase() === 'remote' ? 'remote' : 'host';
+        const repoSeedRemoteBranch = String((pending as any)?.repoSeedRemoteBranch ?? '').trim();
+        const baseRef =
+          repoSeedSource === 'remote'
+            ? (await gitResolveRemoteBranchForCreate(repoRoot, repoSeedRemoteBranch)).remoteBranch
+            : await gitCurrentBranchOrSha(repoRoot);
         const repoSeedContainer = await resolveDroneContainerNameByIdentity(pendingDroneId);
         if (!repoSeedContainer) throw new Error('drone disappeared during repo seed');
 
@@ -257,7 +262,7 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
           container: repoSeedContainer,
           hostPath: repoRoot,
           dest: '/work/repo',
-          baseRef: 'HEAD',
+          baseRef,
           branch: 'dvm/work',
           clean: true,
           timeoutMs: deps.defaultRepoSeedTimeoutMs(),

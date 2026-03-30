@@ -1,15 +1,18 @@
 import React from 'react';
+import { cn } from '../../ui/cn';
 
 export function EmptyState({
   icon,
   title,
   description,
   actions,
+  actionsClassName,
 }: {
   icon: React.ReactNode;
   title: string;
   description: string;
   actions?: React.ReactNode;
+  actionsClassName?: string;
 }) {
   return (
     <div className="flex flex-col items-center justify-center h-full text-center px-8">
@@ -26,7 +29,7 @@ export function EmptyState({
         {title}
       </h3>
       <p className="text-sm text-[var(--muted)] max-w-[320px] leading-relaxed">{description}</p>
-      {actions ? <div className="mt-5 w-full max-w-[340px]">{actions}</div> : null}
+      {actions ? <div className={cn('mt-5 w-full max-w-[340px]', actionsClassName)}>{actions}</div> : null}
     </div>
   );
 }

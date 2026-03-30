@@ -261,6 +261,8 @@ type DroneRegistryV1 = {
       playbook?: DroneRegistryPlaybookMeta;
       runtime?: DroneRuntime;
       repoPath: string;
+      repoSeedSource?: 'host' | 'remote';
+      repoSeedRemoteBranch?: string;
       containerPort: number;
       build: boolean;
       createdAt: string;

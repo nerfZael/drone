@@ -3,6 +3,7 @@ import type { ChatAgentConfig } from '../../domain';
 import type { ChatModelOption } from './app-types';
 import type { CustomAgentProfile } from '../types';
 import type { UiMenuSelectEntry } from '../../ui/menuSelect';
+import { repoPathLabel } from './repo-path-label';
 
 type BuiltinAgentOption = {
   key: string;
@@ -85,7 +86,7 @@ export function useDroneHubToolbarMenuState({
   const createRepoMenuEntries = React.useMemo(
     () => [
       { value: '', label: 'No repo' },
-      ...registeredRepoPaths.map((path) => ({ value: path, label: path, title: path, className: 'font-mono truncate' })),
+      ...registeredRepoPaths.map((path) => ({ value: path, label: repoPathLabel(path), title: path, className: 'font-mono truncate' })),
     ],
     [registeredRepoPaths],
   );

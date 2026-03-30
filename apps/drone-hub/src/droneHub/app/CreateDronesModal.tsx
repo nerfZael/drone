@@ -6,9 +6,12 @@ import type { DroneSummary } from '../types';
 import { droneNameHasWhitespace } from './name-helpers';
 import { IconChevron, IconSpinner, IconTrash } from './icons';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
-import { filterSpawnAgentMenuEntriesForRuntime } from './drone-create-runtime';
+import { filterSpawnAgentMenuEntriesForRuntime, type RepoBranchSourceMode } from './drone-create-runtime';
 import { buildSpawnModelMenuEntries, getSpawnModelTriggerLabel } from './spawn-model-history';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
+import { RepoBranchSourceControls } from './RepoBranchSourceControls';
+import { repoPathLabel } from './repo-path-label';
+import type { RepoRemoteBranchOption } from '../types';
 
 type CreateDronesModalProps = {
   open: boolean;
@@ -31,6 +34,14 @@ type CreateDronesModalProps = {
   onCreateRepoMenuOpenChange: (open: boolean) => void;
   registeredRepoPaths: string[];
   activeRepoPath: string;
+  repoBranchSource: RepoBranchSourceMode;
+  onRepoBranchSourceChange: (value: RepoBranchSourceMode) => void;
+  repoCreateRemoteBranch: string;
+  onRepoCreateRemoteBranchChange: (value: string) => void;
+  createRepoHostBranch: string | null;
+  createRepoRemoteBranches: RepoRemoteBranchOption[];
+  createRepoBranchesLoading: boolean;
+  createRepoBranchesError: string | null;
   pullHostBranchBeforeCreate: boolean;
   onPullHostBranchBeforeCreateChange: (checked: boolean) => void;
   cloneIncludeChats: boolean;
@@ -79,6 +90,14 @@ export function CreateDronesModal({
   onCreateRepoMenuOpenChange,
   registeredRepoPaths,
   activeRepoPath,
+  repoBranchSource,
+  onRepoBranchSourceChange,
+  repoCreateRemoteBranch,
+  onRepoCreateRemoteBranchChange,
+  createRepoHostBranch,
+  createRepoRemoteBranches,
+  createRepoBranchesLoading,
+  createRepoBranchesError,
   pullHostBranchBeforeCreate,
   onPullHostBranchBeforeCreateChange,
   cloneIncludeChats,
@@ -112,6 +131,7 @@ export function CreateDronesModal({
       ? String(drones.find((d) => d.id === cloneSourceId)?.name ?? cloneSourceId)
       : '';
   const hostRuntimeSelected = createMode !== 'clone' && createRuntime === 'host';
+  const remoteBranchCheckoutEnabled = createMode !== 'clone' && createRuntime === 'container';
   const hostCustomAgentsUnsupported = hostRuntimeSelected;
   const filteredSpawnAgentMenuEntries = filterSpawnAgentMenuEntriesForRuntime(createRuntime, spawnAgentMenuEntries);
   const { seenModelIds } = useDroneHubUiStore(
@@ -299,9 +319,9 @@ export function CreateDronesModal({
                   onOpenChange={onCreateRepoMenuOpenChange}
                   disabled={creating}
                   triggerClassName="flex-1"
-                  panelClassName="right-auto w-[720px] max-w-[calc(100vw-3rem)]"
+                  panelClassName="right-auto w-[380px] max-w-[calc(100vw-3rem)]"
                   title={createRepoPath || 'No repo'}
-                  triggerLabel={createRepoPath || 'No repo'}
+                  triggerLabel={createRepoPath ? repoPathLabel(createRepoPath) : 'No repo'}
                   triggerLabelClassName={createRepoPath ? 'font-mono text-[12px]' : undefined}
                   chevron={(menuOpen) => <IconChevron down={!menuOpen} className="text-[var(--muted-dim)] opacity-70 flex-shrink-0" />}
                   menuClassName="max-h-[220px] overflow-y-auto"
@@ -331,16 +351,31 @@ export function CreateDronesModal({
                   Tip: you have an active repo selected in the sidebar. Click it again to unselect.
                 </span>
               )}
-              <label className="mt-2 inline-flex items-center gap-2 select-none cursor-pointer" title="Before creating a repo-attached drone, run a host git pull --ff-only on the current branch.">
-                <input
-                  type="checkbox"
-                  className="accent-[var(--accent)]"
-                  checked={pullHostBranchBeforeCreate}
-                  onChange={(e) => onPullHostBranchBeforeCreateChange(e.target.checked)}
-                  disabled={creating}
-                />
-                <span className="text-[11px] text-[var(--muted)]">Pull host branch before create</span>
-              </label>
+              {createRepoPath ? (
+                <div className="mt-3">
+                  <RepoBranchSourceControls
+                    repoPath={createRepoPath}
+                    hostBranch={createRepoHostBranch}
+                    remoteBranches={createRepoRemoteBranches}
+                    loading={createRepoBranchesLoading}
+                    error={createRepoBranchesError}
+                    branchSource={remoteBranchCheckoutEnabled ? repoBranchSource : 'host'}
+                    onBranchSourceChange={onRepoBranchSourceChange}
+                    pullHostBranchBeforeCreate={pullHostBranchBeforeCreate}
+                    onPullHostBranchBeforeCreateChange={onPullHostBranchBeforeCreateChange}
+                    remoteBranch={repoCreateRemoteBranch}
+                    onRemoteBranchChange={onRepoCreateRemoteBranchChange}
+                    remoteBranchCheckoutEnabled={remoteBranchCheckoutEnabled}
+                    remoteBranchCheckoutDisabledReason={
+                      createRuntime === 'host'
+                        ? 'Remote branch checkout is only available for container runtime drones.'
+                        : null
+                    }
+                    disabled={creating || createMode === 'clone'}
+                    compact
+                  />
+                </div>
+              ) : null}
             </div>
 
             {createMode === 'clone' && (

@@ -17,6 +17,7 @@ import {
 import { readLocalStorageItem } from './hooks';
 import type { CustomAgentProfile } from '../types';
 import type { SettingsTabId } from './settings-tabs';
+import type { RepoBranchSourceMode } from './drone-create-runtime';
 import {
   automationConfigsEqual,
   createAutomationConfig,
@@ -91,6 +92,8 @@ type DroneHubUiState = {
   spawnAgentKey: string;
   spawnModel: string;
   seenModelIds: string[];
+  repoBranchSource: RepoBranchSourceMode;
+  repoCreateRemoteBranch: string;
   pullHostBranchBeforeCreate: boolean;
   customAgents: CustomAgentProfile[];
   customAgentModalOpen: boolean;
@@ -154,6 +157,8 @@ type DroneHubUiState = {
   setSpawnAgentKey: (next: Updater<string>) => void;
   setSpawnModel: (next: Updater<string>) => void;
   rememberSeenModels: (models: Iterable<string | null | undefined>) => void;
+  setRepoBranchSource: (next: Updater<RepoBranchSourceMode>) => void;
+  setRepoCreateRemoteBranch: (next: Updater<string>) => void;
   setPullHostBranchBeforeCreate: (next: Updater<boolean>) => void;
   setCustomAgents: (next: Updater<CustomAgentProfile[]>) => void;
   setCustomAgentModalOpen: (next: Updater<boolean>) => void;
@@ -205,6 +210,8 @@ type DroneHubUiPersistedState = Pick<
   | 'spawnAgentKey'
   | 'spawnModel'
   | 'seenModelIds'
+  | 'repoBranchSource'
+  | 'repoCreateRemoteBranch'
   | 'pullHostBranchBeforeCreate'
   | 'customAgents'
   | 'shortcutBindings'
@@ -467,6 +474,8 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       spawnAgentKey: 'builtin:cursor',
       spawnModel: '',
       seenModelIds: [],
+      repoBranchSource: 'host',
+      repoCreateRemoteBranch: '',
       pullHostBranchBeforeCreate: true,
       customAgents: [],
       customAgentModalOpen: false,
@@ -634,6 +643,8 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           }
           return { seenModelIds: next };
         }),
+      setRepoBranchSource: (next) => set((s) => ({ repoBranchSource: resolveNext(s.repoBranchSource, next) })),
+      setRepoCreateRemoteBranch: (next) => set((s) => ({ repoCreateRemoteBranch: resolveNext(s.repoCreateRemoteBranch, next) })),
       setPullHostBranchBeforeCreate: (next) =>
         set((s) => ({ pullHostBranchBeforeCreate: resolveNext(s.pullHostBranchBeforeCreate, next) })),
       setCustomAgents: (next) => set((s) => ({ customAgents: resolveNext(s.customAgents, next) })),
@@ -659,7 +670,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
     }),
     {
       name: profileStorageKey('droneHub.ui'),
-      version: 10,
+      version: 11,
       storage: createJSONStorage(() => localStorage),
       migrate: (persistedState, version) => migrateDroneHubUiPersistedState(persistedState, version),
       partialize: (state): DroneHubUiPersistedState => ({
@@ -694,6 +705,8 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         spawnAgentKey: state.spawnAgentKey,
         spawnModel: state.spawnModel,
         seenModelIds: state.seenModelIds,
+        repoBranchSource: state.repoBranchSource,
+        repoCreateRemoteBranch: state.repoCreateRemoteBranch,
         pullHostBranchBeforeCreate: state.pullHostBranchBeforeCreate,
         customAgents: state.customAgents,
         shortcutBindings: state.shortcutBindings,
@@ -776,6 +789,13 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           seenModelIds: normalizeSeenModelIds(
             persisted.seenModelIds ?? currentState.seenModelIds,
           ),
+          repoBranchSource:
+            persisted.repoBranchSource === 'remote' || persisted.repoBranchSource === 'host'
+              ? persisted.repoBranchSource
+              : currentState.repoBranchSource,
+          repoCreateRemoteBranch: normalizeTrimmedString(
+            persisted.repoCreateRemoteBranch ?? currentState.repoCreateRemoteBranch,
+          ),
           pullHostBranchBeforeCreate: normalizeBoolean(
             persisted.pullHostBranchBeforeCreate ?? currentState.pullHostBranchBeforeCreate,
           ),
@@ -827,6 +847,8 @@ export function useDroneHubAppModelUiState() {
       spawnAgentKey: s.spawnAgentKey,
       spawnModel: s.spawnModel,
       seenModelIds: s.seenModelIds,
+      repoBranchSource: s.repoBranchSource,
+      repoCreateRemoteBranch: s.repoCreateRemoteBranch,
       pullHostBranchBeforeCreate: s.pullHostBranchBeforeCreate,
       customAgents: s.customAgents,
       customAgentModalOpen: s.customAgentModalOpen,
@@ -871,6 +893,8 @@ export function useDroneHubAppModelUiState() {
       setSpawnAgentKey: s.setSpawnAgentKey,
       setSpawnModel: s.setSpawnModel,
       rememberSeenModels: s.rememberSeenModels,
+      setRepoBranchSource: s.setRepoBranchSource,
+      setRepoCreateRemoteBranch: s.setRepoCreateRemoteBranch,
       setPullHostBranchBeforeCreate: s.setPullHostBranchBeforeCreate,
       setCustomAgents: s.setCustomAgents,
       setCustomAgentModalOpen: s.setCustomAgentModalOpen,

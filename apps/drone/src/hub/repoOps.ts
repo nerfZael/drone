@@ -27,6 +27,13 @@ export type RepoBranchSummary = {
   behind: number;
 };
 
+export type RepoRemoteBranchSummary = {
+  ref: string;
+  remote: string;
+  branch: string;
+  oid: string | null;
+};
+
 export type RepoChangeEntry = {
   path: string;
   originalPath: string | null;
@@ -655,6 +662,96 @@ export async function gitCurrentBranchOrSha(repoRoot: string): Promise<string> {
   ).trim();
   if (branch) return branch;
   return (await runLocalOrThrow('git', ['-C', repoRoot, 'rev-parse', 'HEAD'])).trim();
+}
+
+function normalizeRemoteBranchRef(raw: unknown): string {
+  return String(raw ?? '')
+    .trim()
+    .replace(/^refs\/remotes\//, '')
+    .replace(/^remotes\//, '');
+}
+
+export async function gitListRemoteBranches(repoPathRaw: string): Promise<{
+  repoRoot: string;
+  hostBranch: string | null;
+  remoteBranches: RepoRemoteBranchSummary[];
+}> {
+  const repoPath = String(repoPathRaw ?? '').trim();
+  if (!repoPath) throw new Error('missing repo path');
+  const repoRoot = await gitTopLevel(repoPath);
+  const status = await gitRepoChangesSummary(repoRoot);
+  const raw = await runLocalOrThrow('git', [
+    '-C',
+    repoRoot,
+    'for-each-ref',
+    '--format=%(refname:short)%00%(objectname)%00%(symref)',
+    'refs/remotes',
+  ]);
+
+  const remoteBranches: RepoRemoteBranchSummary[] = [];
+  for (const line of String(raw ?? '')
+    .split('\n')
+    .map((entry) => entry.trim())
+    .filter(Boolean)) {
+    const [refShortRaw, oidRaw, symrefRaw] = line.split('\0');
+    const ref = normalizeRemoteBranchRef(refShortRaw);
+    if (!ref || ref.endsWith('/HEAD')) continue;
+    if (String(symrefRaw ?? '').trim()) continue;
+    const slash = ref.indexOf('/');
+    if (slash <= 0 || slash >= ref.length - 1) continue;
+    const remote = ref.slice(0, slash);
+    const branch = ref.slice(slash + 1);
+    const oid = String(oidRaw ?? '').trim().toLowerCase();
+    remoteBranches.push({
+      ref,
+      remote,
+      branch,
+      oid: /^[0-9a-f]{40}$/.test(oid) ? oid : null,
+    });
+  }
+
+  remoteBranches.sort((a, b) => {
+    const remoteCompare = a.remote.localeCompare(b.remote);
+    if (remoteCompare !== 0) return remoteCompare;
+    return a.branch.localeCompare(b.branch);
+  });
+
+  return {
+    repoRoot,
+    hostBranch: String(status.branch.head ?? '').trim() || null,
+    remoteBranches,
+  };
+}
+
+export async function gitResolveRemoteBranchForCreate(repoPathRaw: string, remoteBranchRaw: string): Promise<{
+  repoRoot: string;
+  remoteBranch: string;
+  oid: string | null;
+}> {
+  const repoRoot = await gitTopLevel(String(repoPathRaw ?? '').trim());
+  const remoteBranch = normalizeRemoteBranchRef(remoteBranchRaw);
+  if (!remoteBranch) throw new Error('missing remote branch');
+
+  const listed = await gitListRemoteBranches(repoRoot);
+  const matched = listed.remoteBranches.find((entry) => entry.ref === remoteBranch) ?? null;
+  if (matched) {
+    return {
+      repoRoot: listed.repoRoot,
+      remoteBranch: matched.ref,
+      oid: matched.oid,
+    };
+  }
+
+  const verified = await runLocalOrThrow('git', ['-C', repoRoot, 'rev-parse', '--verify', `refs/remotes/${remoteBranch}`]).catch(() => '');
+  const oid = String(verified ?? '').trim().toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(oid)) {
+    throw new Error(`remote branch "${remoteBranch}" was not found in ${repoRoot}`);
+  }
+  return {
+    repoRoot,
+    remoteBranch,
+    oid,
+  };
 }
 
 export type HostRepoPullBeforeCreateErrorCode =

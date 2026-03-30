@@ -6,7 +6,9 @@ import { describe, expect, test } from 'bun:test';
 import {
   buildWorkingTreeRepoChangeReviewToken,
   gitPullHostBranchBeforeCreate,
+  gitListRemoteBranches,
   gitRepoChangesSummary,
+  gitResolveRemoteBranchForCreate,
   deleteHostRefBestEffort,
   HostRepoPullBeforeCreateError,
   importBundleHeadToHostRef,
@@ -129,6 +131,40 @@ describe('repoOps git-native pull helpers', () => {
       expect((err as HostRepoPullBeforeCreateError).code).toBe('detached_head');
     } finally {
       cleanup();
+    }
+  });
+
+  test('lists remote branches and resolves a selected remote branch for repo seeding', async () => {
+    const remoteRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-repo-ops-remote-list-'));
+    const { repoRoot: sourceRepo, cleanup: cleanupSource } = mkRepo();
+    const hostClone = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-repo-ops-host-list-'));
+    try {
+      runOrThrow('git', ['init', '--bare'], remoteRoot);
+      runOrThrow('git', ['remote', 'add', 'origin', remoteRoot], sourceRepo);
+      writeAndCommit(sourceRepo, 'base.txt', 'base\n', 'init');
+      runOrThrow('git', ['push', '-u', 'origin', 'main'], sourceRepo);
+      runOrThrow('git', ['checkout', '-b', 'release/next'], sourceRepo);
+      writeAndCommit(sourceRepo, 'release.txt', 'next\n', 'release');
+      runOrThrow('git', ['push', '-u', 'origin', 'release/next'], sourceRepo);
+
+      runOrThrow('git', ['clone', '-b', 'main', remoteRoot, hostClone]);
+      runOrThrow('git', ['fetch', '--all', '--prune'], hostClone);
+
+      const listed = await gitListRemoteBranches(hostClone);
+      expect(listed.repoRoot).toBe(hostClone);
+      expect(listed.hostBranch).toBe('main');
+      expect(listed.remoteBranches.map((entry) => entry.ref)).toContain('origin/main');
+      expect(listed.remoteBranches.map((entry) => entry.ref)).toContain('origin/release/next');
+      expect(listed.remoteBranches.some((entry) => entry.ref.endsWith('/HEAD'))).toBe(false);
+
+      const resolved = await gitResolveRemoteBranchForCreate(hostClone, 'origin/release/next');
+      expect(resolved.repoRoot).toBe(hostClone);
+      expect(resolved.remoteBranch).toBe('origin/release/next');
+      expect(resolved.oid).toMatch(/^[0-9a-f]{40}$/);
+    } finally {
+      cleanupSource();
+      fs.rmSync(remoteRoot, { recursive: true, force: true });
+      fs.rmSync(hostClone, { recursive: true, force: true });
     }
   });
 

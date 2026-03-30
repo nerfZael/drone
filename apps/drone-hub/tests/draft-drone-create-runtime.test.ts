@@ -13,7 +13,10 @@ describe('draft drone create runtime support', () => {
       group: 'ops',
       repoPath: '/work/repo',
       runtime: 'host',
-      pullHostBranchBeforeCreate: true,
+      repoBranchSelection: {
+        repoBranchSource: 'host',
+        pullHostBranchBeforeCreate: true,
+      },
       seedAgent: { kind: 'builtin', id: 'cursor' },
       seedModel: 'gpt-5',
       prompt: 'boot',
@@ -25,6 +28,7 @@ describe('draft drone create runtime support', () => {
       repoPath: '/work/repo',
       runtime: 'host',
       pullHostBranchBeforeCreate: true,
+      repoBranchSource: 'host',
       seedChat: 'default',
       seedAgent: { kind: 'builtin', id: 'cursor' },
       seedModel: 'gpt-5',
@@ -38,7 +42,10 @@ describe('draft drone create runtime support', () => {
       group: 'ops',
       repoPath: '/work/repo',
       runtime: 'container',
-      pullHostBranchBeforeCreate: true,
+      repoBranchSelection: {
+        repoBranchSource: 'host',
+        pullHostBranchBeforeCreate: true,
+      },
       seedAgent: null,
       seedModel: null,
       prompt: '',
@@ -50,6 +57,34 @@ describe('draft drone create runtime support', () => {
       repoPath: '/work/repo',
       runtime: 'container',
       pullHostBranchBeforeCreate: true,
+      repoBranchSource: 'host',
+    });
+  });
+
+  test('includes remote branch selections in draft create payloads', () => {
+    const payload = buildDraftDroneCreatePayload({
+      name: 'remote-drone',
+      group: 'ops',
+      repoPath: '/work/repo',
+      runtime: 'container',
+      repoBranchSelection: {
+        repoBranchSource: 'remote',
+        pullHostBranchBeforeCreate: true,
+        remoteBranch: 'origin/release/next',
+      },
+      seedAgent: null,
+      seedModel: null,
+      prompt: '',
+    });
+
+    expect(payload).toEqual({
+      name: 'remote-drone',
+      group: 'ops',
+      repoPath: '/work/repo',
+      runtime: 'container',
+      pullHostBranchBeforeCreate: true,
+      repoBranchSource: 'remote',
+      remoteBranch: 'origin/release/next',
     });
   });
 

@@ -44,6 +44,25 @@ export type RepoSummary = {
   github: { owner: string; repo: string } | null;
 };
 
+export type RepoRemoteBranchOption = {
+  name: string;
+  remote: string;
+  branch: string;
+  headSha: string | null;
+};
+
+export type RepoBranchesPayload =
+  | {
+      ok: true;
+      repoRoot: string;
+      hostBranch: string | null;
+      remoteBranches: RepoRemoteBranchOption[];
+    }
+  | {
+      ok: false;
+      error: string;
+    };
+
 export type DronePortMapping = { hostPort: number; containerPort: number };
 export type DroneTerminalMode = 'shell' | 'agent';
 export type PortPreviewSelection = { containerPort: number };
