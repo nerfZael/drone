@@ -1282,9 +1282,10 @@ export async function applyPatchesToMainWorkingTree(opts: { repoRoot: string; pa
 
 // Apply a single exported diff (base..HEAD) directly to the host working tree.
 // This is used as a conflict fallback so users get one complete conflict set.
-export async function applyExportedDiffToMainWorkingTree(opts: { repoRoot: string; diffPath: string }): Promise<void> {
+export async function applyExportedDiffToMainWorkingTree(opts: { repoRoot: string; diffPath: string; label?: string }): Promise<void> {
   const repoRoot = String(opts.repoRoot ?? '').trim();
   const diffPath = String(opts.diffPath ?? '').trim();
+  const label = String(opts.label ?? '').trim() || path.basename(diffPath);
   if (!repoRoot) throw new Error('missing repoRoot');
   if (!diffPath) throw new Error('missing diffPath');
 
@@ -1296,7 +1297,9 @@ export async function applyExportedDiffToMainWorkingTree(opts: { repoRoot: strin
   if (r.code === 0) return;
 
   const combined = `${String(r.stderr ?? '')}\n${String(r.stdout ?? '')}`.trim();
-  const conflictFiles = parsePatchConflictFiles(combined);
+  const conflictFiles = Array.from(new Set([...parsePatchConflictFiles(combined), ...(await gitUnmergedFiles(repoRoot))])).sort((a, b) =>
+    a.localeCompare(b)
+  );
   const looksLikeConflict =
     conflictFiles.length > 0 ||
     /patch does not apply|CONFLICT|could not apply|failed to merge|with conflicts|U\s+\S+/i.test(combined) ||
@@ -1304,14 +1307,57 @@ export async function applyExportedDiffToMainWorkingTree(opts: { repoRoot: strin
   const details = (r.stderr || r.stdout || `git apply failed (exit ${r.code})`).trim();
   throw new RepoPatchApplyError({
     kind: looksLikeConflict ? 'patch_apply_conflict' : 'patch_apply_failed',
-    patchName: path.basename(diffPath),
+    patchName: label,
     conflictFiles,
     stdout: r.stdout,
     stderr: r.stderr,
     message: looksLikeConflict
-      ? `Host repo has merge conflicts while applying ${path.basename(diffPath)}.\n\n${details}`
-      : `Failed applying exported diff ${path.basename(diffPath)} to host repo.\n\n${details}`,
+      ? `Host repo has conflicts while applying ${label}.\n\n${details}`
+      : `Failed applying exported diff ${label} to host repo.\n\n${details}`,
   });
+}
+
+// Apply the net branch changes from merge-base(HEAD, branch)..branch directly to the
+// host worktree and index. This preserves conflict markers/unmerged entries without
+// leaving the repo in an actual git merge state, so later commits stay single-parent.
+export async function applyBranchDiffToMainWorkingTree(opts: { repoRoot: string; branch: string }): Promise<void> {
+  const repoRoot = String(opts.repoRoot ?? '').trim();
+  const branch = String(opts.branch ?? '').trim();
+  if (!repoRoot) throw new Error('missing repoRoot');
+  if (!branch) throw new Error('missing branch');
+
+  const diff = await runLocal('git', [
+    '-C',
+    repoRoot,
+    'diff',
+    '--binary',
+    '--full-index',
+    '--find-renames',
+    '--no-color',
+    '--no-ext-diff',
+    `HEAD...${branch}`,
+  ]);
+  if (diff.code !== 0) {
+    const details = `${String(diff.stderr ?? '')}\n${String(diff.stdout ?? '')}`.trim();
+    throw new Error(`Failed generating host apply diff for ${branch}.${details ? `\n\n${details}` : ''}`);
+  }
+
+  if (!String(diff.stdout ?? '').trim()) return;
+
+  const tempRoot = droneRootPath('repo-exports');
+  await fs.mkdir(tempRoot, { recursive: true });
+  const tempDir = await fs.mkdtemp(path.join(tempRoot, 'host-apply-'));
+  const diffPath = path.join(tempDir, 'import.diff');
+  try {
+    await fs.writeFile(diffPath, diff.stdout, 'utf8');
+    await applyExportedDiffToMainWorkingTree({ repoRoot, diffPath, label: branch });
+  } finally {
+    try {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    } catch {
+      // ignore temp cleanup failures
+    }
+  }
 }
 
 function parsePatchConflictFiles(text: string): string[] {
@@ -1421,44 +1467,6 @@ async function gitUnmergedFiles(repoRoot: string): Promise<string[]> {
     .map((l) => l.trim())
     .filter(Boolean)
     .sort((a, b) => a.localeCompare(b));
-}
-
-export async function mergeBranchIntoMainWorkingTreeNoCommit(opts: { repoRoot: string; branch: string }): Promise<void> {
-  const repoRoot = String(opts.repoRoot ?? '').trim();
-  const branch = String(opts.branch ?? '').trim();
-  if (!repoRoot) throw new Error('missing repoRoot');
-  if (!branch) throw new Error('missing branch');
-
-  const r = await runLocal('git', ['-C', repoRoot, 'merge', '--no-commit', '--no-ff', branch]);
-  if (r.code === 0) return;
-
-  const combined = `${String(r.stderr ?? '')}\n${String(r.stdout ?? '')}`.trim();
-  const conflictFiles = Array.from(new Set([...parsePatchConflictFiles(combined), ...(await gitUnmergedFiles(repoRoot))])).sort((a, b) =>
-    a.localeCompare(b)
-  );
-  const looksLikeConflict =
-    conflictFiles.length > 0 ||
-    /CONFLICT|Automatic merge failed|Merge conflict/i.test(combined);
-  const details = (r.stderr || r.stdout || `git merge failed (exit ${r.code})`).trim();
-
-  if (!looksLikeConflict) {
-    try {
-      await runLocalOrThrow('git', ['-C', repoRoot, 'merge', '--abort']);
-    } catch {
-      // ignore; best effort cleanup for non-conflict merge failures.
-    }
-  }
-
-  throw new RepoPatchApplyError({
-    kind: looksLikeConflict ? 'patch_apply_conflict' : 'patch_apply_failed',
-    patchName: branch,
-    conflictFiles,
-    stdout: r.stdout,
-    stderr: r.stderr,
-    message: looksLikeConflict
-      ? `Host repo has merge conflicts while merging ${branch}.\n\n${details}`
-      : `Failed merging ${branch} into host repo.\n\n${details}`,
-  });
 }
 
 export async function importBundleHeadToHostRef(opts: { repoRoot: string; bundlePath: string; refName: string }): Promise<string> {

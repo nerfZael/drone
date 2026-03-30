@@ -4,13 +4,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, test } from 'bun:test';
 import {
+  applyBranchDiffToMainWorkingTree,
   buildWorkingTreeRepoChangeReviewToken,
   gitPullHostBranchBeforeCreate,
   gitRepoChangesSummary,
   deleteHostRefBestEffort,
   HostRepoPullBeforeCreateError,
   importBundleHeadToHostRef,
-  mergeBranchIntoMainWorkingTreeNoCommit,
   RepoPatchApplyError,
 } from '../src/hub/repoOps';
 
@@ -178,7 +178,7 @@ describe('repoOps git-native pull helpers', () => {
     }
   });
 
-  test('mergeBranchIntoMainWorkingTreeNoCommit creates a normal merge state on success', async () => {
+  test('applyBranchDiffToMainWorkingTree stages imported changes without leaving merge state', async () => {
     const { repoRoot, cleanup } = mkRepo();
     try {
       writeAndCommit(repoRoot, 'base.txt', 'base\n', 'init');
@@ -186,22 +186,24 @@ describe('repoOps git-native pull helpers', () => {
       writeAndCommit(repoRoot, 'feature.txt', 'feature\n', 'feature work');
       runOrThrow('git', ['checkout', 'main'], repoRoot);
 
-      await mergeBranchIntoMainWorkingTreeNoCommit({ repoRoot, branch: 'feature' });
+      await applyBranchDiffToMainWorkingTree({ repoRoot, branch: 'feature' });
 
-      const mergeHead = runOrThrow('git', ['rev-parse', '--verify', 'MERGE_HEAD'], repoRoot).trim();
-      expect(mergeHead.length).toBe(40);
       const status = runOrThrow('git', ['status', '--porcelain'], repoRoot);
       expect(status.trim().length).toBeGreaterThan(0);
+      const mergeHead = run('git', ['rev-parse', '--verify', 'MERGE_HEAD'], repoRoot);
+      expect(mergeHead.code).not.toBe(0);
 
-      runOrThrow('git', ['merge', '--abort'], repoRoot);
-      const clean = runOrThrow('git', ['status', '--porcelain'], repoRoot).trim();
-      expect(clean).toBe('');
+      runOrThrow('git', ['commit', '-m', 'apply imported changes'], repoRoot);
+      const parents = runOrThrow('git', ['rev-list', '--parents', '-n', '1', 'HEAD'], repoRoot)
+        .trim()
+        .split(/\s+/);
+      expect(parents).toHaveLength(2);
     } finally {
       cleanup();
     }
   });
 
-  test('mergeBranchIntoMainWorkingTreeNoCommit reports conflict files for merge conflicts', async () => {
+  test('applyBranchDiffToMainWorkingTree reports conflict files without leaving merge state', async () => {
     const { repoRoot, cleanup } = mkRepo();
     try {
       writeAndCommit(repoRoot, 'conflict.txt', 'same\n', 'init');
@@ -212,7 +214,7 @@ describe('repoOps git-native pull helpers', () => {
 
       let err: unknown = null;
       try {
-        await mergeBranchIntoMainWorkingTreeNoCommit({ repoRoot, branch: 'feature' });
+        await applyBranchDiffToMainWorkingTree({ repoRoot, branch: 'feature' });
       } catch (e) {
         err = e;
       }
@@ -220,6 +222,7 @@ describe('repoOps git-native pull helpers', () => {
       expect(err).toBeInstanceOf(RepoPatchApplyError);
       const patchErr = err as RepoPatchApplyError;
       expect(patchErr.kind).toBe('patch_apply_conflict');
+      expect(patchErr.patchName).toBe('feature');
       expect(patchErr.conflictFiles).toContain('conflict.txt');
 
       const unmerged = runOrThrow('git', ['diff', '--name-only', '--diff-filter=U'], repoRoot)
@@ -227,8 +230,8 @@ describe('repoOps git-native pull helpers', () => {
         .map((l) => l.trim())
         .filter(Boolean);
       expect(unmerged).toContain('conflict.txt');
-
-      runOrThrow('git', ['merge', '--abort'], repoRoot);
+      const mergeHead = run('git', ['rev-parse', '--verify', 'MERGE_HEAD'], repoRoot);
+      expect(mergeHead.code).not.toBe(0);
     } finally {
       cleanup();
     }
