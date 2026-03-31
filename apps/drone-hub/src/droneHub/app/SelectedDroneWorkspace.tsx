@@ -40,6 +40,7 @@ import { repoPathLabel } from './repo-path-label';
 import { useDroneHubUiStore, useSelectedDroneWorkspaceUiState } from './use-drone-hub-ui-store';
 import { usePromptAutomationState } from './use-prompt-automation-state';
 import { HeaderPullRequestShortcuts } from './HeaderPullRequestShortcuts';
+import { CliPendingPromptStrip } from './CliPendingPromptStrip';
 import { buildPendingTimelineBlocks } from './pending-timeline-blocks';
 import {
   buildPendingPromptLoopGroups,
@@ -469,6 +470,10 @@ export function SelectedDroneWorkspace({
     runningAutomationHasRenderedGroup,
     runningAutomationJobKey,
   ]);
+  const visibleCliPendingPrompts = React.useMemo(() => {
+    if (chatUiMode !== 'cli') return [];
+    return visiblePendingPromptsWithStartup.filter((item) => item.state !== 'failed').slice(-3);
+  }, [chatUiMode, visiblePendingPromptsWithStartup]);
   const queuedAutomationById = React.useMemo(() => {
     const out = new Map<string, (typeof queuedAutomationItems)[number]>();
     for (const item of queuedAutomationItems) {
@@ -1513,6 +1518,8 @@ export function SelectedDroneWorkspace({
               </div>
             )}
           </div>
+
+          {chatUiMode === 'cli' ? <CliPendingPromptStrip items={visibleCliPendingPrompts} nowMs={nowMs} /> : null}
 
           <ChatInput
             resetKey={`${selectedDroneIdentity}:${selectedChat ?? ''}`}

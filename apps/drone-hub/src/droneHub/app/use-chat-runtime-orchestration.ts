@@ -5,6 +5,12 @@ import type { ChatSendPayload } from '../chat';
 import type { DroneSummary, PendingPrompt, TranscriptItem } from '../types';
 import type { StartupSeedState } from './app-types';
 import { formatDroneRuntimeError, isTransientDroneStartupError } from './chat-startup-errors';
+import {
+  appendOptimisticPendingPrompt,
+  createOptimisticPendingPrompt,
+  normalizePendingPromptState,
+  reconcileOptimisticPendingPrompt,
+} from './optimistic-pending-prompts';
 import { droneChatQueueKey, isDroneStartingOrSeeding, parseDroneChatQueueKey } from './helpers';
 import { fetchJson, isNotFoundError, useNowMs, usePoll } from './hooks';
 import { beginRecordBusyKey, removeRecordKey } from './keyed-record-state';
@@ -14,25 +20,6 @@ type RequestJson = <T>(url: string, init?: RequestInit) => Promise<T>;
 
 const STOPPED_BY_USER_ERROR = 'Stopped by user.';
 const STOPPED_BEFORE_SUBMISSION_ERROR = 'Stopped before submission.';
-
-function optimisticAttachmentRefsFromPayload(raw: unknown): Array<{ name: string; mime: string; size: number; previewDataUrl?: string }> {
-  const list = Array.isArray(raw) ? raw : [];
-  const out: Array<{ name: string; mime: string; size: number; previewDataUrl?: string }> = [];
-  for (const item of list) {
-    if (!item || typeof item !== 'object') continue;
-    const name = String((item as any).name ?? '').trim();
-    const mime = String((item as any).mime ?? '').trim().toLowerCase();
-    const sizeNum = Number((item as any).size ?? 0);
-    const dataBase64 = String((item as any).dataBase64 ?? '').trim();
-    if (!name || !mime.startsWith('image/') || !Number.isFinite(sizeNum) || sizeNum <= 0) continue;
-    const previewDataUrl =
-      dataBase64 && /^[A-Za-z0-9+/]+={0,2}$/.test(dataBase64.slice(0, Math.min(4096, dataBase64.length)))
-        ? `data:${mime};base64,${dataBase64}`
-        : undefined;
-    out.push({ name, mime, size: Math.floor(sizeNum), ...(previewDataUrl ? { previewDataUrl } : {}) });
-  }
-  return out.slice(0, 8);
-}
 
 type UseChatRuntimeOrchestrationArgs = {
   chatInfo: ChatInfo | null;
@@ -153,28 +140,42 @@ export function useChatRuntimeOrchestration({
   }, []);
 
   const addOptimisticPendingPrompt = React.useCallback(
-    (id: string, prompt: string, attachmentsRaw?: unknown, opts?: { state?: PendingPrompt['state']; blockedByAutomation?: boolean }) => {
-      if (!id) return;
-      const attachments = optimisticAttachmentRefsFromPayload(attachmentsRaw);
-      const nextStateRaw = String(opts?.state ?? '').trim();
-      const nextState: PendingPrompt['state'] =
-        nextStateRaw === 'queued' || nextStateRaw === 'sending' || nextStateRaw === 'sent' || nextStateRaw === 'failed'
-          ? nextStateRaw
-          : 'sending';
-      setOptimisticPendingPrompts((prev) => {
-        if (prev.some((p) => p.id === id)) return prev;
-        return [
-          ...prev,
-          {
-            id,
-            at: new Date().toISOString(),
-            prompt,
-            ...(attachments.length > 0 ? { attachments } : {}),
-            state: nextState,
-            ...(opts?.blockedByAutomation ? { blockedByAutomation: true } : {}),
-          },
-        ];
+    (
+      prompt: string,
+      attachmentsRaw?: ChatSendPayload['attachments'],
+      opts?: { id?: string | null; state?: PendingPrompt['state']; blockedByAutomation?: boolean },
+    ): PendingPrompt | null => {
+      const item = createOptimisticPendingPrompt({
+        id: opts?.id,
+        prompt,
+        attachments: attachmentsRaw,
+        state: opts?.state,
+        blockedByAutomation: opts?.blockedByAutomation,
       });
+      if (!item) return null;
+      const nextState = normalizePendingPromptState(opts?.state);
+      setOptimisticPendingPrompts((prev) => {
+        return appendOptimisticPendingPrompt(prev, { ...item, state: nextState });
+      });
+      return { ...item, state: nextState };
+    },
+    [setOptimisticPendingPrompts],
+  );
+
+  const reconcileLocalPendingPrompt = React.useCallback(
+    (
+      optimisticId: string,
+      opts: { confirmedId?: string | null; state?: unknown; blockedByAutomation?: boolean; error?: string | null },
+    ) => {
+      setOptimisticPendingPrompts((prev) =>
+        reconcileOptimisticPendingPrompt(prev, {
+          optimisticId,
+          confirmedId: opts.confirmedId,
+          state: opts.state,
+          blockedByAutomation: opts.blockedByAutomation,
+          error: opts.error,
+        }),
+      );
     },
     [setOptimisticPendingPrompts],
   );
@@ -250,8 +251,6 @@ export function useChatRuntimeOrchestration({
       const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
       if (!prompt && attachments.length === 0) return false;
 
-      const optimisticPrompt =
-        prompt || (attachments.length === 1 ? '[image attachment]' : `[${attachments.length} image attachments]`);
       if (isDroneStartingOrSeeding(currentDrone.hubPhase)) {
         enqueueQueuedPrompt(currentDrone.id, selectedChat || 'default', prompt, attachments);
         setPromptError(null);
@@ -260,6 +259,8 @@ export function useChatRuntimeOrchestration({
 
       const originDroneId = currentDrone.id;
       const originChat = selectedChat || 'default';
+      const optimisticItem = addOptimisticPendingPrompt(prompt, attachments, { state: 'sending' });
+      const optimisticId = String(optimisticItem?.id ?? '').trim();
 
       setSendingPromptCount((c) => c + 1);
       setPromptError(null);
@@ -284,9 +285,15 @@ export function useChatRuntimeOrchestration({
           (selectedChatRef.current || 'default') === originChat;
         if (stillOnSameChat) {
           if (chatUiMode === 'cli') bumpCliTyping();
-          const id = String((data as any)?.promptId ?? '').trim();
-          if (chatUiMode === 'transcript') {
-            addOptimisticPendingPrompt(id, optimisticPrompt, attachments, {
+          if (optimisticId) {
+            reconcileLocalPendingPrompt(optimisticId, {
+              confirmedId: String((data as any)?.promptId ?? '').trim(),
+              state: data?.pendingState,
+              blockedByAutomation: data?.blockedByAutomation === true,
+            });
+          } else {
+            addOptimisticPendingPrompt(prompt, attachments, {
+              id: String((data as any)?.promptId ?? '').trim(),
               state: data?.pendingState,
               blockedByAutomation: data?.blockedByAutomation === true,
             });
@@ -294,11 +301,15 @@ export function useChatRuntimeOrchestration({
         }
         return true;
       } catch (e: any) {
+        const message = formatDroneRuntimeError(e);
         if (
           selectedDroneRef.current === originDroneId &&
           (selectedChatRef.current || 'default') === originChat
         ) {
-          setPromptError(formatDroneRuntimeError(e));
+          if (optimisticId) {
+            reconcileLocalPendingPrompt(optimisticId, { state: 'failed', error: message });
+          }
+          setPromptError(message);
         }
         return false;
       } finally {
@@ -443,12 +454,11 @@ export function useChatRuntimeOrchestration({
               parsed.chatName === (String(selectedChat ?? '').trim() || 'default');
             if (selectedKeyMatches) {
               if (chatUiMode === 'cli') bumpCliTyping();
-              if (chatUiMode === 'transcript') {
-                addOptimisticPendingPrompt(id, head.prompt, head.attachments, {
-                  state: data?.pendingState,
-                  blockedByAutomation: data?.blockedByAutomation === true,
-                });
-              }
+              addOptimisticPendingPrompt(head.prompt, head.attachmentPayloads, {
+                id,
+                state: data?.pendingState,
+                blockedByAutomation: data?.blockedByAutomation === true,
+              });
             }
           } catch (e: any) {
             const errText = e?.message ?? String(e);
@@ -477,7 +487,6 @@ export function useChatRuntimeOrchestration({
 
   const { value: pendingResp } = usePoll<{ ok: true; pending: PendingPrompt[] }>(
     async () => {
-      if (chatUiMode !== 'transcript') return { ok: true, pending: [] };
       if (!selectedDrone || !selectedChat) return { ok: true, pending: [] };
       if (!hasSelectedDroneSummary) return { ok: true, pending: [] };
       if (isDroneStartingOrSeeding(selectedDroneHubPhase)) return { ok: true, pending: [] };
@@ -486,7 +495,7 @@ export function useChatRuntimeOrchestration({
       );
     },
     1000,
-    [chatUiMode, selectedDrone, selectedChat, hasSelectedDroneSummary, selectedDroneHubPhase],
+    [selectedDrone, selectedChat, hasSelectedDroneSummary, selectedDroneHubPhase],
   );
 
   const pendingPrompts: PendingPrompt[] = React.useMemo(() => {
@@ -502,7 +511,7 @@ export function useChatRuntimeOrchestration({
   }, [optimisticPendingPrompts, pendingResp]);
 
   const visiblePendingPrompts = React.useMemo(() => {
-    if (chatUiMode !== 'transcript') return [];
+    if (chatUiMode !== 'transcript') return pendingPrompts;
     const ts = Array.isArray(transcripts) ? transcripts : [];
     const ids = new Set(ts.map((t) => String((t as any)?.id ?? '')).filter(Boolean));
     return pendingPrompts.filter((p) => p.state === 'failed' || !ids.has(p.id));
@@ -533,6 +542,7 @@ export function useChatRuntimeOrchestration({
 
   const visiblePendingPromptsWithStartup = React.useMemo(() => {
     const base = (() => {
+      if (chatUiMode !== 'transcript') return visiblePendingPrompts;
       if (!startupPendingPrompt) return visiblePendingPrompts;
       const startupPrompt = String(startupPendingPrompt.prompt ?? '').trim();
       if (

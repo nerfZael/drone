@@ -21,28 +21,15 @@ import {
   isHostRuntimeDrone,
   resolveChatNameForDrone,
 } from './helpers';
+import {
+  appendOptimisticPendingPrompt,
+  createOptimisticPendingPrompt,
+  normalizePendingPromptState,
+  reconcileOptimisticPendingPrompt,
+} from './optimistic-pending-prompts';
 import { parseIsoDateMs, type GroupMultiChatColumnRuntimeState } from './group-multi-chat-sort';
 import { openDroneTabFromLastPreview, resolveDroneOpenTabUrl } from './quick-actions';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
-
-function optimisticAttachmentRefsFromPayload(raw: unknown): Array<{ name: string; mime: string; size: number; previewDataUrl?: string }> {
-  const list = Array.isArray(raw) ? raw : [];
-  const out: Array<{ name: string; mime: string; size: number; previewDataUrl?: string }> = [];
-  for (const item of list) {
-    if (!item || typeof item !== 'object') continue;
-    const name = String((item as any).name ?? '').trim();
-    const mime = String((item as any).mime ?? '').trim().toLowerCase();
-    const sizeNum = Number((item as any).size ?? 0);
-    const dataBase64 = String((item as any).dataBase64 ?? '').trim();
-    if (!name || !mime.startsWith('image/') || !Number.isFinite(sizeNum) || sizeNum <= 0) continue;
-    const previewDataUrl =
-      dataBase64 && /^[A-Za-z0-9+/]+={0,2}$/.test(dataBase64.slice(0, Math.min(4096, dataBase64.length)))
-        ? `data:${mime};base64,${dataBase64}`
-        : undefined;
-    out.push({ name, mime, size: Math.floor(sizeNum), ...(previewDataUrl ? { previewDataUrl } : {}) });
-  }
-  return out.slice(0, 8);
-}
 
 export type GroupMultiChatColumnProps = {
   drone: DroneSummary;
@@ -257,8 +244,6 @@ export function GroupMultiChatColumn({
       const prompt = String(payload?.prompt ?? '').trim();
       const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
       if (!prompt && attachments.length === 0) return false;
-      const optimisticPrompt = prompt || (attachments.length === 1 ? '[image attachment]' : `[${attachments.length} image attachments]`);
-      const optimisticAttachments = optimisticAttachmentRefsFromPayload(attachments);
       if (isDroneStartingOrSeeding(drone.hubPhase)) {
         if (attachments.length > 0) {
           setPromptError(`\"${shownName}\" is still starting. Image attachments can be sent once it is ready.`);
@@ -269,6 +254,15 @@ export function GroupMultiChatColumn({
       }
       setSendingPromptCount((c) => c + 1);
       setPromptError(null);
+      const optimisticItem = createOptimisticPendingPrompt({
+        prompt,
+        attachments,
+        state: 'sending',
+      });
+      const optimisticId = String(optimisticItem?.id ?? '').trim();
+      if (optimisticItem) {
+        setOptimisticPendingPrompts((prev) => appendOptimisticPendingPrompt(prev, optimisticItem));
+      }
       try {
         const data = await requestJson<{ ok: true; accepted: true; promptId: string; pendingState?: PendingPrompt['state'] }>(
           `/api/drones/${encodeURIComponent(drone.id)}/chats/${encodeURIComponent(chatName)}/prompt`,
@@ -279,30 +273,30 @@ export function GroupMultiChatColumn({
           },
         );
         const id = String((data as any)?.promptId ?? '').trim();
-        const pendingStateRaw = String(data?.pendingState ?? '').trim();
-        const pendingState: PendingPrompt['state'] =
-          pendingStateRaw === 'queued' || pendingStateRaw === 'sending' || pendingStateRaw === 'sent' || pendingStateRaw === 'failed'
-            ? pendingStateRaw
-            : 'sending';
-        if (id) {
-          setOptimisticPendingPrompts((prev) => {
-            if (prev.some((p) => p.id === id)) return prev;
-            return [
-              ...prev,
-              {
-                id,
-                at: new Date().toISOString(),
-                prompt: optimisticPrompt,
-                ...(optimisticAttachments.length > 0 ? { attachments: optimisticAttachments } : {}),
+        const pendingState = normalizePendingPromptState(data?.pendingState);
+        setOptimisticPendingPrompts((prev) =>
+          optimisticId
+            ? reconcileOptimisticPendingPrompt(prev, {
+                optimisticId,
+                confirmedId: id,
                 state: pendingState,
-              },
-            ];
-          });
-        }
+              })
+            : prev,
+        );
         requestAnimationFrame(() => scrollColumnToBottom());
         return true;
       } catch (err: any) {
-        setPromptError(err?.message ?? String(err));
+        const message = err?.message ?? String(err);
+        if (optimisticId) {
+          setOptimisticPendingPrompts((prev) =>
+            reconcileOptimisticPendingPrompt(prev, {
+              optimisticId,
+              state: 'failed',
+              error: message,
+            }),
+          );
+        }
+        setPromptError(message);
         return false;
       } finally {
         setSendingPromptCount((c) => Math.max(0, c - 1));
