@@ -1804,6 +1804,16 @@ function normalizeDroneUiCwdForRuntime(drone: any, cwdRaw: unknown): string {
   return normalizeDroneCwdForRuntime(drone, null);
 }
 
+function hostChatAttachmentsStorageRoot(): string {
+  const xdgStateHome = String(process.env.XDG_STATE_HOME ?? '').trim();
+  if (xdgStateHome) return path.resolve(xdgStateHome, 'drone-hub', 'attachments');
+  return path.resolve(os.homedir(), '.local', 'state', 'drone-hub', 'attachments');
+}
+
+function chatAttachmentsStorageRootForDrone(drone: any): string {
+  return droneRuntime(drone) === 'host' ? hostChatAttachmentsStorageRoot() : '/dvm-data/drone-hub/attachments';
+}
+
 async function resolveDroneDaemonClientForEntry(
   drone: any,
 ): Promise<{ client: ReturnType<typeof makeClient>; hostPort: number; token: string } | null> {
@@ -3898,6 +3908,7 @@ async function sendPromptToChat(opts: {
     const attachments = Array.isArray(opts.attachments) ? opts.attachments : [];
     const providedAttachmentRefs = normalizeChatImageAttachmentRefs(opts.attachmentRefs);
     const promptId = String(opts.id ?? '').trim() || crypto.randomBytes(9).toString('hex');
+    const attachmentsStorageRoot = chatAttachmentsStorageRootForDrone(d);
     const attachmentsForPrompt =
       providedAttachmentRefs.length > 0
         ? providedAttachmentRefs
@@ -3906,6 +3917,7 @@ async function sendPromptToChat(opts: {
             cwd,
             chatName: normalizedChat,
             promptId,
+            storageRoot: attachmentsStorageRoot,
           });
     const effectivePrompt = promptWithImageAttachments(opts.prompt, attachmentsForPrompt);
     const promptWithHistory =
@@ -3921,6 +3933,7 @@ async function sendPromptToChat(opts: {
         cwd,
         chatName: normalizedChat,
         promptId,
+        storageRoot: attachmentsStorageRoot,
       });
       if (runtime === 'host') {
         await copyChatAttachmentsToHost({ hostDir: attachmentsDir, attachments });
@@ -4202,7 +4215,7 @@ function normalizeChatImageAttachmentRefs(raw: unknown): ChatImageAttachmentRef[
       size: Math.floor(sizeNum),
       fileName: fileName || path.posix.basename(pathRaw),
       path: normalizeContainerPath(pathRaw),
-      relativePath: relRaw || path.posix.basename(pathRaw),
+      relativePath: relRaw || normalizeContainerPath(pathRaw),
     });
   }
   return out.slice(0, 8);
@@ -6417,11 +6430,13 @@ async function enqueuePrompt(opts: {
 
   const cwd = normalizeDroneCwdForRuntime(d, typeof opts.cwd === 'string' ? opts.cwd : null);
   const rawAttachments = Array.isArray(opts.attachments) ? opts.attachments : [];
+  const attachmentsStorageRoot = chatAttachmentsStorageRootForDrone(d);
   const attachmentsForPending = buildChatImageAttachmentRefs({
     attachments: rawAttachments,
     cwd,
     chatName,
     promptId: id,
+    storageRoot: attachmentsStorageRoot,
   });
 
   await pushPendingPrompt({
@@ -6446,6 +6461,7 @@ async function enqueuePrompt(opts: {
         cwd,
         chatName,
         promptId: id,
+        storageRoot: attachmentsStorageRoot,
       });
       try {
         if (runtime === 'host') {

@@ -35,6 +35,12 @@ export type ChatImageAttachmentRef = {
 
 const CHAT_ATTACHMENTS_DIR_NAME = '.drone-hub/attachments';
 
+function normalizeAttachmentsStorageRoot(storageRootRaw: string | undefined, cwd: string): string {
+  const storageRoot = normalizeContainerPath(String(storageRootRaw ?? '').trim());
+  if (storageRoot && storageRoot !== '/') return storageRoot;
+  return normalizeContainerPath(path.posix.join(cwd, CHAT_ATTACHMENTS_DIR_NAME));
+}
+
 function sanitizePathSegment(raw: string, fallback: string): string {
   const cleaned = String(raw ?? '')
     .trim()
@@ -167,11 +173,17 @@ export function promptWithImageAttachments(
   return prompt ? `${prompt}\n\n${block}` : block;
 }
 
-export function buildChatAttachmentsDirectory(opts: { cwd: string; chatName: string; promptId: string }): string {
+export function buildChatAttachmentsDirectory(opts: {
+  cwd: string;
+  chatName: string;
+  promptId: string;
+  storageRoot?: string;
+}): string {
   const cwd = normalizeContainerPath(String(opts.cwd ?? '').trim() || '/dvm-data');
+  const storageRoot = normalizeAttachmentsStorageRoot(opts.storageRoot, cwd);
   const chatSegment = sanitizePathSegment(opts.chatName, 'chat');
   const promptSegment = sanitizePathSegment(opts.promptId, 'prompt');
-  return normalizeContainerPath(path.posix.join(cwd, CHAT_ATTACHMENTS_DIR_NAME, chatSegment, promptSegment));
+  return normalizeContainerPath(path.posix.join(storageRoot, chatSegment, promptSegment));
 }
 
 export function buildChatImageAttachmentRefs(opts: {
@@ -179,6 +191,7 @@ export function buildChatImageAttachmentRefs(opts: {
   cwd: string;
   chatName: string;
   promptId: string;
+  storageRoot?: string;
 }): ChatImageAttachmentRef[] {
   const list = Array.isArray(opts.attachments) ? opts.attachments : [];
   if (list.length === 0) return [];
@@ -187,11 +200,12 @@ export function buildChatImageAttachmentRefs(opts: {
     cwd,
     chatName: opts.chatName,
     promptId: opts.promptId,
+    storageRoot: opts.storageRoot,
   });
   return list.map((a) => {
     const absPath = normalizeContainerPath(path.posix.join(dir, a.fileName));
     const relPathRaw = path.posix.relative(cwd, absPath);
-    const relPath = relPathRaw && relPathRaw !== '.' && !relPathRaw.startsWith('../') ? relPathRaw : path.posix.basename(absPath);
+    const relPath = relPathRaw && relPathRaw !== '.' && !relPathRaw.startsWith('../') ? relPathRaw : absPath;
     return {
       name: a.name,
       mime: a.mime,
