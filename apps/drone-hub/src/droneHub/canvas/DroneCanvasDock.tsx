@@ -2329,10 +2329,10 @@ export function DroneCanvasDock({
                   ) : assignmentHoverTarget ? (
                     <span className="block">
                       <span className="block truncate text-[12.5px] font-semibold text-[var(--fg-secondary)]">
-                        Release to assign
+                        Release to choose action
                       </span>
                       <span className="block truncate text-[10px] text-[var(--muted-dim)]">
-                        {assignmentHoverTargetCount} drone{assignmentHoverTargetCount === 1 ? '' : 's'} to this drone
+                        {assignmentHoverTargetCount} drone{assignmentHoverTargetCount === 1 ? '' : 's'} dropped into this chat
                       </span>
                     </span>
                   ) : (

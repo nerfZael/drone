@@ -229,6 +229,14 @@ export function useDroneHubOverlaysProps(args: any): DroneHubOverlaysProps {
     clearingDroneError,
     closeDroneErrorModal,
     clearDroneHubError,
+    droneDropActionModal,
+    closeDroneDropActionModal,
+    droppedDroneTarget,
+    droppedDroneTargetLabel,
+    droppedDroneRows,
+    assignDroppedDronesToTarget,
+    probeRepoChangesFromDrone,
+    syncDroppedDroneIntoTarget,
     setNameSuggestToast,
   } = args;
 
@@ -377,6 +385,18 @@ export function useDroneHubOverlaysProps(args: any): DroneHubOverlaysProps {
           },
         }
       : null,
+    droneDropActionModalProps:
+      droneDropActionModal && droppedDroneTarget && droppedDroneRows.length > 0
+        ? {
+            targetDroneId: droppedDroneTarget.id,
+            targetDroneLabel: droppedDroneTargetLabel || droppedDroneTarget.id,
+            droppedDrones: droppedDroneRows,
+            onAssignAll: assignDroppedDronesToTarget,
+            onProbeSyncStatus: probeRepoChangesFromDrone,
+            onRequestClose: closeDroneDropActionModal,
+            onSyncDrone: syncDroppedDroneIntoTarget,
+          }
+        : null,
   };
 }
 
@@ -523,6 +543,7 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     repoTransferPeers,
     pullRepoChangesFromDrone,
     applyRepoChangesToDrone,
+    openDroneDropActionModal,
     repoOp,
     headerOverflowRef,
     reseedRepo,
@@ -820,6 +841,7 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
           repoTransferPeers,
           pullRepoChangesFromDrone,
           applyRepoChangesToDrone,
+          onRequestDropActions: openDroneDropActionModal,
           repoOp,
           headerOverflowRef,
           reseedRepo,

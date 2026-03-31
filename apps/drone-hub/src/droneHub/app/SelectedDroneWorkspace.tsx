@@ -51,7 +51,7 @@ import {
   type TranscriptTimelineBlock,
 } from './prompt-loop-groups';
 import { resolveRunningPromptLoopIdentity } from './prompt-loop-running-identity';
-import type { RepoTransferPeer } from './use-workspace-actions';
+import type { RepoTransferActionResult, RepoTransferPeer } from './use-workspace-actions';
 import {
   parseGithubPullRequestHref,
 } from './selected-drone-workspace-utils';
@@ -113,8 +113,9 @@ type SelectedDroneWorkspaceProps = {
   pullRepoChanges: () => Promise<void>;
   pushRepoChanges: () => Promise<void>;
   repoTransferPeers: RepoTransferPeer[];
-  pullRepoChangesFromDrone: (sourceDroneId: string) => Promise<void>;
-  applyRepoChangesToDrone: (targetDroneId: string) => Promise<void>;
+  pullRepoChangesFromDrone: (sourceDroneId: string) => Promise<RepoTransferActionResult>;
+  applyRepoChangesToDrone: (targetDroneId: string) => Promise<RepoTransferActionResult>;
+  onRequestDropActions: (targetDroneId: string, sourceDroneIds: string[]) => { ok: boolean; error?: string | null };
   repoOp: { kind: 'pull' | 'push' | 'reseed' | 'pull-from-drone' | 'push-to-drone' } | null;
   headerOverflowRef: React.RefObject<HTMLDivElement | null>;
   reseedRepo: () => Promise<void>;
@@ -234,6 +235,7 @@ export function SelectedDroneWorkspace({
   repoTransferPeers,
   pullRepoChangesFromDrone,
   applyRepoChangesToDrone,
+  onRequestDropActions,
   repoOp,
   headerOverflowRef,
   reseedRepo,
@@ -356,6 +358,7 @@ export function SelectedDroneWorkspace({
     currentDrone,
     currentDroneLabel,
     openDroneErrorModal,
+    onRequestDropActions,
     setRightPanelOpen,
     setRightPanelTab,
   });
@@ -662,13 +665,13 @@ export function SelectedDroneWorkspace({
                           : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--fg-secondary)]',
                     )}
                     title={fleetBadgeError ? `${fleetBadgeTitle} ${fleetBadgeError}` : fleetBadgeTitle}
-                    aria-label={`${fleetBadgeSummaryText}. Open Fleet tab or drop drones here to assign them.`}
+                    aria-label={`${fleetBadgeSummaryText}. Open Fleet tab or drop drones here to choose assign or sync actions.`}
                   >
                     <span className="uppercase tracking-[0.12em]" style={{ fontFamily: 'var(--display)' }}>
                       Fleet
                     </span>
                     <span className="font-mono text-[10px] text-inherit">
-                      {fleetBadgeAssigning ? 'Assigning…' : fleetBadgeSummaryText}
+                      {fleetBadgeAssigning ? 'Opening…' : fleetBadgeSummaryText}
                     </span>
                   </button>
                 </div>
@@ -1281,7 +1284,7 @@ export function SelectedDroneWorkspace({
               >
                 <div className="max-w-[420px]">
                   <div className="text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ fontFamily: 'var(--display)' }}>
-                    Fleet Assignment
+                    Drone Drop Actions
                   </div>
                   <div className="mt-2 text-[13px] leading-5">
                     {fleetDropHintText}

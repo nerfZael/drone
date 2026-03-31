@@ -15126,14 +15126,23 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           String(commitDirtyRaw ?? '')
             .trim()
             .toLowerCase() === 'true';
+        const probeOnlyRaw = body?.probeOnly;
+        const probeOnly =
+          probeOnlyRaw === true ||
+          probeOnlyRaw === 1 ||
+          String(probeOnlyRaw ?? '')
+            .trim()
+            .toLowerCase() === 'true';
         const defaultAutoCommitMessage = 'chore(drone): snapshot working tree before drone sync';
         const requestedAutoCommitMessage = String(body?.commitMessage ?? '').trim();
         const autoCommitMessage = requestedAutoCommitMessage || defaultAutoCommitMessage;
 
-        await setDroneHubMetaByIdentity({
-          droneId: targetDroneId,
-          hub: { phase: 'seeding', message: `Pulling repo changes from ${sourceDroneName}…` },
-        });
+        if (!probeOnly) {
+          await setDroneHubMetaByIdentity({
+            droneId: targetDroneId,
+            hub: { phase: 'seeding', message: `Pulling repo changes from ${sourceDroneName}…` },
+          });
+        }
 
         let sourceRepoRoot = '';
         let targetRepoRoot = '';
@@ -15146,7 +15155,6 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         let sourceDirtyFileCount = 0;
         let sourceAutoCommitSha: string | null = null;
         let sourceAutoCommitMessage: string | null = null;
-        let noChangesToPull = false;
         const sourceSafeSeg =
           String(sourceDroneName ?? '')
             .toLowerCase()
@@ -15163,7 +15171,9 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           sourceRepoRoot = await gitTopLevel(sourceRepoPathRaw);
           targetRepoRoot = await gitTopLevel(targetRepoPathRaw);
           if (sourceRepoRoot !== targetRepoRoot) {
-            await setDroneHubMetaByIdentity({ droneId: targetDroneId, hub: null });
+            if (!probeOnly) {
+              await setDroneHubMetaByIdentity({ droneId: targetDroneId, hub: null });
+            }
             json(res, 409, {
               ok: false,
               error: 'source and target drones are not attached to the same host repo',
@@ -15257,10 +15267,13 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
               } catch (e: any) {
                 const exportMsg = e?.message ?? String(e);
                 if (looksLikeEmptyBundleExportError(exportMsg)) {
-                  noChangesToPull = true;
                   return { ok: true as const, noChanges: true as const };
                 }
                 throw e;
+              }
+
+              if (probeOnly) {
+                return { ok: true as const, noChanges: false as const };
               }
 
               importRefSha = await importBundleHeadToDroneRef({
@@ -15332,7 +15345,9 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           );
 
           if (transferResult.ok && transferResult.noChanges) {
-            await setDroneHubMetaByIdentity({ droneId: targetDroneId, hub: null });
+            if (!probeOnly) {
+              await setDroneHubMetaByIdentity({ droneId: targetDroneId, hub: null });
+            }
             json(res, 200, {
               ok: true,
               mode: 'no-changes',
@@ -15349,7 +15364,9 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           }
 
           if (!transferResult.ok && transferResult.code === 'source_drone_dirty') {
-            await setDroneHubMetaByIdentity({ droneId: targetDroneId, hub: null });
+            if (!probeOnly) {
+              await setDroneHubMetaByIdentity({ droneId: targetDroneId, hub: null });
+            }
             json(res, 409, {
               ok: false,
               error: transferResult.details,
@@ -15365,7 +15382,9 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           }
 
           if (!transferResult.ok && transferResult.code === 'target_drone_dirty') {
-            await setDroneHubMetaByIdentity({ droneId: targetDroneId, hub: null });
+            if (!probeOnly) {
+              await setDroneHubMetaByIdentity({ droneId: targetDroneId, hub: null });
+            }
             json(res, 409, {
               ok: false,
               error: transferResult.details,
@@ -15379,10 +15398,12 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           }
 
           if (transferResult.ok) {
-            await setDroneHubMetaByIdentity({ droneId: targetDroneId, hub: null });
+            if (!probeOnly) {
+              await setDroneHubMetaByIdentity({ droneId: targetDroneId, hub: null });
+            }
             json(res, 200, {
               ok: true,
-              mode: 'peer-merge-commit',
+              mode: probeOnly ? 'ready' : 'peer-merge-commit',
               sourceDroneId,
               sourceDroneName,
               targetDroneId,
@@ -15405,13 +15426,15 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
               'Resolve conflicts inside the target drone, then stage and commit to finish the merge.',
             ].join(' ');
             const fullMsg = `${transferResult.details}\n\n${guidance}`;
-            await setDroneHubMetaByIdentity({
-              droneId: targetDroneId,
-              hub: {
-                phase: 'error',
-                message: `Peer sync conflict${importRefName ? ` (${importRefName})` : ''}: resolve conflicts in target drone`,
-              },
-            });
+            if (!probeOnly) {
+              await setDroneHubMetaByIdentity({
+                droneId: targetDroneId,
+                hub: {
+                  phase: 'error',
+                  message: `Peer sync conflict${importRefName ? ` (${importRefName})` : ''}: resolve conflicts in target drone`,
+                },
+              });
+            }
             json(res, 409, {
               ok: false,
               error: fullMsg,
@@ -15432,7 +15455,9 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         } catch (e: any) {
           const msg = e?.message ?? String(e);
           if (looksLikeBundleMissingPrerequisiteError(msg)) {
-            await setDroneHubMetaByIdentity({ droneId: targetDroneId, hub: { phase: 'error', message: 'Peer sync needs reseed (history mismatch)' } });
+            if (!probeOnly) {
+              await setDroneHubMetaByIdentity({ droneId: targetDroneId, hub: { phase: 'error', message: 'Peer sync needs reseed (history mismatch)' } });
+            }
             json(res, 409, {
               ok: false,
               error: 'Target drone is missing prerequisite commits for this source export. Re-seed or re-clone the target drone and sync again.',
@@ -15446,7 +15471,9 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             return;
           }
 
-          await setDroneHubMetaByIdentity({ droneId: targetDroneId, hub: { phase: 'error', message: `Peer sync failed: ${msg}` } });
+          if (!probeOnly) {
+            await setDroneHubMetaByIdentity({ droneId: targetDroneId, hub: { phase: 'error', message: `Peer sync failed: ${msg}` } });
+          }
           json(res, 500, {
             ok: false,
             error: msg,

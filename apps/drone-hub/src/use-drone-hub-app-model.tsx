@@ -108,6 +108,11 @@ type PreviewPaneSnapshot = {
   portRows: DronePortMapping[];
 };
 
+type DroneDropActionModalState = {
+  sourceDroneIds: string[];
+  targetDroneId: string;
+};
+
 export type DroneHubAppModel = {
   sidebarProps: DroneSidebarProps;
   overlaysProps: DroneHubOverlaysProps;
@@ -1248,6 +1253,31 @@ export function useDroneHubAppModel(): DroneHubAppModel {
 
   const currentDrone = selectedDrone ? drones.find((d) => d.id === selectedDrone) ?? null : null;
   const currentDroneLabel = currentDrone ? uiDroneName(currentDrone.name) : '';
+  const [droneDropActionModal, setDroneDropActionModal] = React.useState<DroneDropActionModalState | null>(null);
+  const openDroneDropActionModal = React.useCallback(
+    (targetDroneIdRaw: string, sourceDroneIdsRaw: string[]): { ok: boolean; error?: string | null } => {
+      const targetDroneId = String(targetDroneIdRaw ?? '').trim();
+      if (!targetDroneId || !droneById[targetDroneId]) {
+        return { ok: false, error: 'Target drone is unavailable.' };
+      }
+      const sourceDroneIds = Array.from(
+        new Set(
+          (Array.isArray(sourceDroneIdsRaw) ? sourceDroneIdsRaw : [])
+            .map((item) => String(item ?? '').trim())
+            .filter((droneId) => droneId && droneId !== targetDroneId && Boolean(droneById[droneId])),
+        ),
+      );
+      if (sourceDroneIds.length === 0) {
+        return { ok: false, error: 'No drones were dropped.' };
+      }
+      setDroneDropActionModal({ targetDroneId, sourceDroneIds });
+      return { ok: true, error: null };
+    },
+    [droneById],
+  );
+  const closeDroneDropActionModal = React.useCallback(() => {
+    setDroneDropActionModal(null);
+  }, []);
   React.useEffect(() => {
     const selectedNodeId = createCanvasChatNodeId(String(selectedDrone ?? '').trim(), String(selectedChat ?? '').trim() || 'default');
     if (!selectedNodeId) return;
@@ -1370,6 +1400,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     repoTransferPeers,
     pullRepoChangesFromDrone,
     applyRepoChangesToDrone,
+    probeRepoChangesFromDrone,
+    syncRepoChangesIntoDrone,
     reseedRepo,
   } = useWorkspaceActions({
     autoDelete,
@@ -1391,6 +1423,45 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setDroneErrorModal,
       setClearingDroneError,
     });
+  const droppedDroneTarget = React.useMemo(
+    () => (droneDropActionModal ? droneById[droneDropActionModal.targetDroneId] ?? null : null),
+    [droneById, droneDropActionModal],
+  );
+  const droppedDroneRows = React.useMemo(() => {
+    if (!droneDropActionModal) return [];
+    return droneDropActionModal.sourceDroneIds
+      .map((droneId) => droneById[droneId] ?? null)
+      .filter(Boolean)
+      .map((drone) => ({
+        id: String(drone!.id ?? '').trim(),
+        label: uiDroneName(drone!.name),
+        group: typeof drone!.group === 'string' && drone!.group.trim() ? drone!.group.trim() : null,
+      }));
+  }, [droneById, droneDropActionModal, uiDroneName]);
+  const droppedDroneTargetLabel = React.useMemo(
+    () => (droppedDroneTarget ? uiDroneName(droppedDroneTarget.name) : ''),
+    [droppedDroneTarget, uiDroneName],
+  );
+  React.useEffect(() => {
+    if (!droneDropActionModal) return;
+    if (!droppedDroneTarget || droppedDroneRows.length === 0) {
+      setDroneDropActionModal(null);
+    }
+  }, [droppedDroneRows.length, droppedDroneTarget, droneDropActionModal]);
+  const syncDroppedDroneIntoTarget = React.useCallback(
+    async (sourceDroneIdRaw: string, targetDroneIdRaw: string) => {
+      const sourceDroneId = String(sourceDroneIdRaw ?? '').trim();
+      const targetDroneId = String(targetDroneIdRaw ?? '').trim();
+      const result = await syncRepoChangesIntoDrone(sourceDroneId, targetDroneId);
+      const errorMessage = String(result.error ?? '').trim();
+      if (!result.ok && errorMessage) {
+        const targetDrone = droneById[targetDroneId] ?? null;
+        if (targetDrone) openDroneErrorModal(targetDrone, errorMessage, result.meta ?? null);
+      }
+      return result;
+    },
+    [droneById, openDroneErrorModal, syncRepoChangesIntoDrone],
+  );
   const {
     selectedGroupMultiChatData,
     groupBroadcastPromptError,
@@ -2060,6 +2131,18 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [],
   );
+  const assignDroppedDronesToTarget = React.useCallback(async () => {
+    const targetDroneId = String(droneDropActionModal?.targetDroneId ?? '').trim();
+    const sourceDroneIds = droneDropActionModal?.sourceDroneIds ?? [];
+    if (!targetDroneId || sourceDroneIds.length === 0) {
+      return { ok: false, error: 'No dropped drones selected.', meta: null };
+    }
+    const result = await assignCanvasDronesToOwner(targetDroneId, sourceDroneIds);
+    if (!result.ok && result.error && droppedDroneTarget) {
+      openDroneErrorModal(droppedDroneTarget, result.error, null);
+    }
+    return { ok: result.ok, error: result.error ?? null, meta: null };
+  }, [assignCanvasDronesToOwner, droneDropActionModal, droppedDroneTarget, openDroneErrorModal]);
   const sendCanvasPrompt = React.useCallback(
     async (
       targetsRaw: Array<{ droneId: string; chatName: string }>,
@@ -2446,7 +2529,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           draftRepoLabel={canvasDraftRepoLabel}
           chatNodeStateById={chatNodeStateById}
           onActivateChatFromCanvas={onActivateChatFromCanvas}
-          onAssignCanvasDronesToOwner={assignCanvasDronesToOwner}
+          onAssignCanvasDronesToOwner={async (ownerDroneId, targetDroneIds) => openDroneDropActionModal(ownerDroneId, targetDroneIds)}
           onSendCanvasPrompt={sendCanvasPrompt}
           onCreateCanvasDroneFromDraft={createCanvasDroneFromDraft}
           onRenameCanvasChat={renameCanvasChat}
@@ -2548,7 +2631,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [
       agentLabel,
-      assignCanvasDronesToOwner,
       currentDrone?.id,
       currentFsPath,
       currentPortReachability,
@@ -2565,6 +2647,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       fleetAssignedIdsByDroneId,
       chatNodeStateById,
       onActivateChatFromCanvas,
+      openDroneDropActionModal,
       orderedCanvasChatNodeIds,
       filesPane,
       fsEntries,
@@ -2837,6 +2920,14 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     clearingDroneError,
     closeDroneErrorModal,
     clearDroneHubError,
+    droneDropActionModal,
+    closeDroneDropActionModal,
+    droppedDroneTarget,
+    droppedDroneTargetLabel,
+    droppedDroneRows,
+    assignDroppedDronesToTarget,
+    probeRepoChangesFromDrone,
+    syncDroppedDroneIntoTarget,
     setNameSuggestToast,
   });
 
@@ -2982,6 +3073,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     repoTransferPeers,
     pullRepoChangesFromDrone,
     applyRepoChangesToDrone,
+    openDroneDropActionModal,
     repoOp,
     headerOverflowRef,
     reseedRepo,

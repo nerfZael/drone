@@ -2,6 +2,9 @@ import React from 'react';
 import type { DroneSummary, RepoSummary } from '../types';
 import type { RepoOpErrorMeta } from './helpers';
 import { compareDronesByNewestFirst, droneHomePath, isHostRuntimeDrone } from './helpers';
+import { normalizeRepoTransferProbeStatus, type RepoTransferProbeStatus } from './repo-transfer-probe-status';
+
+export type { RepoTransferProbeStatus } from './repo-transfer-probe-status';
 
 type LaunchHint =
   | {
@@ -18,6 +21,12 @@ export type RepoTransferPeer = {
   id: string;
   name: string;
   group: string | null;
+};
+
+export type RepoTransferActionResult = {
+  ok: boolean;
+  error?: string | null;
+  meta?: RepoOpErrorMeta | null;
 };
 
 type RequestJson = <T>(url: string, init?: RequestInit) => Promise<T>;
@@ -465,12 +474,19 @@ export function useWorkspaceActions({
   }, [clearRepoOperationError, currentDrone, postJson, setRepoOperationError, showTransientToast]);
 
   const transferRepoChangesFromDrone = React.useCallback(
-    async (sourceDroneIdRaw: string, targetDroneIdRaw: string, busyKind: 'pull-from-drone' | 'push-to-drone') => {
+    async (
+      sourceDroneIdRaw: string,
+      targetDroneIdRaw: string,
+      busyKind: 'pull-from-drone' | 'push-to-drone',
+    ): Promise<RepoTransferActionResult> => {
       const sourceDroneId = String(sourceDroneIdRaw ?? '').trim();
       const targetDroneId = String(targetDroneIdRaw ?? '').trim();
-      if (!sourceDroneId || !targetDroneId) return;
+      if (!sourceDroneId || !targetDroneId) {
+        return { ok: false, error: 'Missing source or target drone.', meta: null };
+      }
       const sourceDrone = (Array.isArray(drones) ? drones : []).find((drone) => String(drone?.id ?? '').trim() === sourceDroneId) ?? null;
       const targetDrone = (Array.isArray(drones) ? drones : []).find((drone) => String(drone?.id ?? '').trim() === targetDroneId) ?? null;
+      let lastErrorMeta: RepoOpErrorMeta | null = null;
       clearRepoOperationError();
       setRepoOp({ kind: busyKind });
       try {
@@ -482,11 +498,13 @@ export function useWorkspaceActions({
           const conflictFiles = Array.isArray(data?.conflictFiles)
             ? data.conflictFiles.map((f: any) => String(f ?? '').trim()).filter(Boolean)
             : [];
-          setRepoOperationError(message, {
+          const meta = {
             code: code || null,
             patchName: patchName || null,
             conflictFiles,
-          });
+          };
+          lastErrorMeta = meta;
+          setRepoOperationError(message, meta);
           throw new Error(message);
         };
 
@@ -504,7 +522,7 @@ export function useWorkspaceActions({
           const confirmed = window.confirm(
             `"${sourceLabel}" has uncommitted changes (${dirtyLabel}).\n\nPress OK to stage everything, create a placeholder commit, and continue sync.\n\nPress Cancel to stop.`,
           );
-          if (!confirmed) return;
+          if (!confirmed) return { ok: false, error: '', meta: null };
           response = await postJson(url, { sourceDroneId, commitDirty: true, commitMessage: autoCommitMessage });
         }
         if (!response.ok) throwRepoTransferError(response.data, 'Peer repo transfer failed.');
@@ -514,8 +532,11 @@ export function useWorkspaceActions({
           targetDroneName: peerDroneLabel(targetDrone, String(response.data?.targetDroneName ?? '').trim() || 'target drone'),
         });
         showTransientToast(success.message, success.title, 'success');
+        return { ok: true, error: null, meta: null };
       } catch (e: any) {
-        setRepoOperationError(e?.message ?? String(e));
+        const message = e?.message ?? String(e);
+        setRepoOperationError(message, lastErrorMeta);
+        return { ok: false, error: message, meta: lastErrorMeta };
       } finally {
         setRepoOp(null);
       }
@@ -526,8 +547,8 @@ export function useWorkspaceActions({
   const pullRepoChangesFromDrone = React.useCallback(
     async (sourceDroneId: string) => {
       const targetDroneId = String(currentDrone?.id ?? '').trim();
-      if (!targetDroneId) return;
-      await transferRepoChangesFromDrone(sourceDroneId, targetDroneId, 'pull-from-drone');
+      if (!targetDroneId) return { ok: false, error: 'Missing target drone.', meta: null };
+      return await transferRepoChangesFromDrone(sourceDroneId, targetDroneId, 'pull-from-drone');
     },
     [currentDrone, transferRepoChangesFromDrone],
   );
@@ -535,10 +556,48 @@ export function useWorkspaceActions({
   const applyRepoChangesToDrone = React.useCallback(
     async (targetDroneId: string) => {
       const sourceDroneId = String(currentDrone?.id ?? '').trim();
-      if (!sourceDroneId) return;
-      await transferRepoChangesFromDrone(sourceDroneId, targetDroneId, 'push-to-drone');
+      if (!sourceDroneId) return { ok: false, error: 'Missing source drone.', meta: null };
+      return await transferRepoChangesFromDrone(sourceDroneId, targetDroneId, 'push-to-drone');
     },
     [currentDrone, transferRepoChangesFromDrone],
+  );
+
+  const probeRepoChangesFromDrone = React.useCallback(
+    async (sourceDroneIdRaw: string, targetDroneIdRaw: string): Promise<RepoTransferProbeStatus> => {
+      const sourceDroneId = String(sourceDroneIdRaw ?? '').trim();
+      const targetDroneId = String(targetDroneIdRaw ?? '').trim();
+      if (!sourceDroneId || !targetDroneId) {
+        return {
+          kind: 'blocked',
+          label: 'Sync unavailable',
+          detail: 'Missing source or target drone.',
+          syncAllowed: false,
+          code: null,
+        };
+      }
+      try {
+        const response = await postJson(`/api/drones/${encodeURIComponent(targetDroneId)}/repo/pull-from-drone`, {
+          sourceDroneId,
+          probeOnly: true,
+        });
+        return normalizeRepoTransferProbeStatus(response);
+      } catch (error: any) {
+        return {
+          kind: 'blocked',
+          label: 'Sync unavailable',
+          detail: String(error?.message ?? error ?? '').trim() || 'Failed to inspect sync state.',
+          syncAllowed: false,
+          code: null,
+        };
+      }
+    },
+    [postJson],
+  );
+
+  const syncRepoChangesIntoDrone = React.useCallback(
+    async (sourceDroneId: string, targetDroneId: string) =>
+      await transferRepoChangesFromDrone(sourceDroneId, targetDroneId, 'pull-from-drone'),
+    [transferRepoChangesFromDrone],
   );
 
   const reseedRepo = React.useCallback(async () => {
@@ -577,6 +636,8 @@ export function useWorkspaceActions({
     repoTransferPeers,
     pullRepoChangesFromDrone,
     applyRepoChangesToDrone,
+    probeRepoChangesFromDrone,
+    syncRepoChangesIntoDrone,
     reseedRepo,
   };
 }

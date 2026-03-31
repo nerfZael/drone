@@ -293,7 +293,7 @@ describeSocketSuite('host runtime routing api', () => {
     }
   });
 
-  test('rejects peer drone sync route on host runtime targets', async () => {
+  test('rejects peer drone sync route on host runtime targets, including probe requests', async () => {
     const droneId = 'host-peer-sync';
     const repoRoot = path.join(tempRoot, 'host-peer-sync-root');
     fs.mkdirSync(repoRoot, { recursive: true });
@@ -317,6 +317,15 @@ describeSocketSuite('host runtime routing api', () => {
     expect(resp.r.status).toBe(409);
     expect(resp.data?.ok).toBe(false);
     expect(String(resp.data?.code ?? '')).toBe('peer_sync_unsupported_runtime');
+
+    const probeResp = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/repo/pull-from-drone`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sourceDroneId: 'peer-source', probeOnly: true }),
+    });
+    expect(probeResp.r.status).toBe(409);
+    expect(probeResp.data?.ok).toBe(false);
+    expect(String(probeResp.data?.code ?? '')).toBe('peer_sync_unsupported_runtime');
   });
 
   test('stages deferred image attachments on host runtime prompts', async () => {
