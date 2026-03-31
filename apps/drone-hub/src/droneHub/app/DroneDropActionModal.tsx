@@ -65,6 +65,18 @@ export function DroneDropActionModal({
 
   const busy = assigning || Boolean(syncingDroneId);
   const droppedCount = droppedDrones.length;
+  const droppedDroneIds = React.useMemo(
+    () =>
+      droppedDrones
+        .map((drone) => String(drone.id ?? '').trim())
+        .filter(Boolean),
+    [droppedDrones],
+  );
+  const droppedDroneIdsKey = React.useMemo(() => droppedDroneIds.join('\u0000'), [droppedDroneIds]);
+  const stableDroppedDroneIds = React.useMemo(
+    () => (droppedDroneIdsKey ? droppedDroneIdsKey.split('\u0000').filter(Boolean) : []),
+    [droppedDroneIdsKey],
+  );
 
   const refreshProbe = React.useCallback(
     async (sourceDroneIdRaw: string) => {
@@ -99,20 +111,14 @@ export function DroneDropActionModal({
     setAssigning(false);
     setSyncingDroneId(null);
     const nextState: Record<string, ProbeState> = {};
-    for (const drone of droppedDrones) {
-      const droneId = String(drone.id ?? '').trim();
-      if (!droneId) continue;
+    for (const droneId of stableDroppedDroneIds) {
       nextState[droneId] = LOADING_PROBE_STATE;
     }
     setProbeByDroneId(nextState);
     void Promise.all(
-      droppedDrones.map(async (drone) => {
-        const droneId = String(drone.id ?? '').trim();
-        if (!droneId) return;
-        await refreshProbe(droneId);
-      }),
+      stableDroppedDroneIds.map(async (droneId) => await refreshProbe(droneId)),
     );
-  }, [droppedDrones, refreshProbe, targetDroneId]);
+  }, [droppedDroneIdsKey, refreshProbe, stableDroppedDroneIds, targetDroneId]);
 
   React.useEffect(
     () => () => {
