@@ -1123,14 +1123,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       if (movingDroneGroups) return;
       const droneId = String(droneIdRaw ?? '').trim();
       if (!droneId) return;
-      setDraftChat(null);
-      setFleetDashboardOpen(false);
       setGroupMoveError(null);
-      setSelectedDrone(droneId);
       if (!selectedDroneSet.has(droneId)) setSelectedDroneIds([droneId]);
       selectionAnchorRef.current = droneId;
     },
-    [movingDroneGroups, selectedDroneSet, selectionAnchorRef, setDraftChat, setFleetDashboardOpen, setGroupMoveError, setSelectedDrone, setSelectedDroneIds],
+    [movingDroneGroups, selectedDroneSet, selectionAnchorRef, setGroupMoveError, setSelectedDroneIds],
   );
   const { selectDroneCard: selectDroneCardBase, selectDroneChat: selectDroneChatBase } = useDroneSelectionState({
     orderedDroneIds,
