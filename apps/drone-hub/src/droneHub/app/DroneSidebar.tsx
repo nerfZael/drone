@@ -916,7 +916,6 @@ export function DroneSidebar({
   const {
     sidebarCollapsed,
     selectedDroneIds,
-    draftChat,
     appView,
     viewMode,
     sidebarGroupingMode,
@@ -1759,6 +1758,9 @@ export function DroneSidebar({
       busy: false,
     };
   }, [visibleDraftSidebarPlaceholder]);
+  const draftSidebarPlaceholderNodeId = draftSidebarPlaceholderDrone
+    ? sidebarDroneNodeId(DRAFT_SIDEBAR_PLACEHOLDER_ID)
+    : null;
   const renderSidebarGroups = React.useMemo(() => {
     if (!draftSidebarPlaceholderDrone) return optimisticSidebarGroups;
     const placeholderGroup =
@@ -1858,6 +1860,15 @@ export function DroneSidebar({
     if (sidebarDroneById[droneId]) return;
     setChatEditor(null);
   }, [chatEditor, sidebarDroneById]);
+
+  React.useEffect(() => {
+    if (draftSidebarPlaceholderNodeId) {
+      setSelectedFolderPath(null);
+      setSelectedSidebarNodeId(draftSidebarPlaceholderNodeId);
+      return;
+    }
+    setSelectedSidebarNodeId((prev) => (prev === sidebarDroneNodeId(DRAFT_SIDEBAR_PLACEHOLDER_ID) ? null : prev));
+  }, [draftSidebarPlaceholderNodeId]);
 
   React.useEffect(() => {
     const droneId = String(selectedDrone ?? '').trim();
@@ -2214,11 +2225,7 @@ export function DroneSidebar({
               <button
                 type="button"
                 onClick={onOpenDraftChatComposer}
-                className={`inline-flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md border px-3 text-[10px] font-semibold uppercase tracking-[0.12em] transition-all ${
-                  draftChat
-                    ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] shadow-[0_0_0_1px_rgba(167,139,250,.12)]'
-                    : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
-                }`}
+                className="inline-flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--muted)] transition-all hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]"
                 style={{ fontFamily: 'var(--display)' }}
                 title="Create drone"
                 aria-label="Create drone"
@@ -2676,11 +2683,7 @@ export function DroneSidebar({
         </SidebarIconButton>
         <SidebarIconButton
           onClick={() => { setSidebarCollapsed(false); onOpenDraftChatComposer(); }}
-          className={`border ${
-            draftChat
-              ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-              : 'border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
-          }`}
+          className="border border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]"
           title="Create drone"
           ariaLabel="Create drone"
           disabled={!collapsedRailInteractive}
