@@ -97,4 +97,64 @@ describe('buildSidebarNodeTree', () => {
     expect(alphaNode.repoGroupPath).toBe(`repo:${repoPath}`);
     expect(alphaNode.totalDroneCount).toBe(0);
   });
+
+  test('keeps newly inserted repo-root drones ahead of saved repo node order', () => {
+    const repoPath = '/work/repo-a';
+    const repoGroup = `repo:${repoPath}`;
+    const alphaFolderPath = `repo-scope:${repoGroup}:alpha`;
+    const sidebarGroups: SidebarGroup[] = [
+      {
+        group: repoGroup,
+        label: 'repo-a',
+        kind: 'repo',
+        items: [
+          drone({
+            id: 'new-drone',
+            name: 'new-drone',
+            repoPath,
+            repoAttached: true,
+            createdAt: '2026-03-31T12:00:00.000Z',
+          }),
+          drone({
+            id: 'older-drone',
+            name: 'older-drone',
+            repoPath,
+            repoAttached: true,
+            createdAt: '2026-03-30T12:00:00.000Z',
+          }),
+          drone({
+            id: 'alpha-drone',
+            name: 'alpha-drone',
+            repoPath,
+            repoAttached: true,
+            group: 'alpha',
+            createdAt: '2026-03-29T12:00:00.000Z',
+          }),
+        ],
+      },
+    ];
+    const sidebarFolderTree = buildSidebarFolderTree(sidebarGroups, []);
+
+    const tree = buildSidebarNodeTree({
+      sidebarFolderTree,
+      sidebarGroups,
+      sidebarGroupOrder: [],
+      repoScopedGroupPathsByRepoGroup: {
+        [repoGroup]: ['alpha'],
+      },
+      sidebarDroneOrderByGroup: {},
+      sidebarNodeOrderByParent: {
+        [sidebarFolderNodeId(repoGroup)]: [
+          sidebarDroneNodeId('older-drone'),
+          sidebarFolderNodeId(alphaFolderPath),
+        ],
+      },
+    });
+
+    expect(tree.childIdsByParent[sidebarFolderNodeId(repoGroup)]).toEqual([
+      sidebarDroneNodeId('new-drone'),
+      sidebarDroneNodeId('older-drone'),
+      sidebarFolderNodeId(alphaFolderPath),
+    ]);
+  });
 });

@@ -252,10 +252,15 @@ export function buildSidebarNodeTree({
     if (group.kind === 'repo') {
       const repoRootNode = nodesById[sidebarFolderNodeId(groupPath)];
       if (!repoRootNode || repoRootNode.kind !== 'folder') continue;
+      const repoRootItems: DroneSummary[] = [];
       const itemsByActualGroup = new Map<string, DroneSummary[]>();
       for (const item of group.items) {
         const actualGroupPath = String(item.group ?? '').trim();
         const key = !actualGroupPath || isUngroupedGroupName(actualGroupPath) ? '' : actualGroupPath;
+        if (!key) {
+          repoRootItems.push(item);
+          continue;
+        }
         const existingItems = itemsByActualGroup.get(key);
         if (existingItems) {
           existingItems.push(item);
@@ -268,6 +273,24 @@ export function buildSidebarNodeTree({
         if (!groupPath || itemsByActualGroup.has(groupPath)) continue;
         itemsByActualGroup.set(groupPath, []);
       }
+      const orderedRepoRootItems = orderSidebarEntries(
+        repoRootItems,
+        sidebarDroneOrderByGroup[sidebarGroupOrderToken({ group: 'Ungrouped', kind: 'group' })] ?? [],
+        (item) => item.id,
+        { unorderedPlacement: 'start' },
+      );
+      const repoRootTree = buildSidebarDroneTree(orderedRepoRootItems);
+      appendDroneTreeNodes({
+        tree: repoRootTree,
+        rootDroneIds: repoRootTree.rootDroneIds,
+        parentId: repoRootNode.id,
+        groupPath: null,
+        repoGroupPath: group.group,
+        depth: repoRootNode.depth + 1,
+        nodesById,
+        childIdsByParentDraft,
+        sidebarNodeOrderByParent,
+      });
       const repoFolderNodeByGroupPath = ensureRepoScopedGroupFolders({
         repoGroup: group,
         repoRootNode,
@@ -279,17 +302,17 @@ export function buildSidebarNodeTree({
       for (const [actualGroupPath, rawItems] of itemsByActualGroup.entries()) {
         const orderedDroneItems = orderSidebarEntries(
           rawItems,
-          sidebarDroneOrderByGroup[sidebarGroupOrderToken({ group: actualGroupPath || 'Ungrouped', kind: 'group' })] ?? [],
+          sidebarDroneOrderByGroup[sidebarGroupOrderToken({ group: actualGroupPath, kind: 'group' })] ?? [],
           (item) => item.id,
           { unorderedPlacement: 'start' },
         );
         const tree = buildSidebarDroneTree(orderedDroneItems);
-        const parentNode = actualGroupPath ? repoFolderNodeByGroupPath.get(actualGroupPath) : repoRootNode;
+        const parentNode = repoFolderNodeByGroupPath.get(actualGroupPath);
         appendDroneTreeNodes({
           tree,
           rootDroneIds: tree.rootDroneIds,
           parentId: parentNode?.id ?? repoRootNode.id,
-          groupPath: actualGroupPath || null,
+          groupPath: actualGroupPath,
           repoGroupPath: group.group,
           depth: (parentNode?.depth ?? repoRootNode.depth) + 1,
           nodesById,
