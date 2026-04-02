@@ -10561,6 +10561,20 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           json(res, 404, { ok: false, error: `unknown cloneFrom drone: ${cloneFrom}` });
           return;
         }
+        const fleetParentRaw =
+          typeof body?.fleetParentId === 'string'
+            ? body.fleetParentId.trim()
+            : typeof body?.parentDroneId === 'string'
+              ? body.parentDroneId.trim()
+              : typeof body?.fleet?.createdBy === 'string'
+                ? body.fleet.createdBy.trim()
+                : '';
+        const fleetParentFound = fleetParentRaw ? findDroneIdByRef(preRegAny, fleetParentRaw) : null;
+        const fleetParentId = fleetParentFound ? resolveStableDroneOrPendingIdFromRef(preRegAny, fleetParentRaw) : null;
+        if (fleetParentRaw && !fleetParentId) {
+          json(res, 404, { ok: false, error: `unknown fleet parent drone: ${fleetParentRaw}` });
+          return;
+        }
         const cloneFromEntry = cloneFromId ? findDroneEntryByIdentity(preRegAny, cloneFromId)?.entry : null;
         const cloneFromRuntime = normalizeDroneRuntime((cloneFromEntry as any)?.runtime);
         if (cloneFrom && runtime === 'container' && cloneFromRuntime !== 'container') {
@@ -10648,6 +10662,19 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             ...(repoPath && !cloneFrom ? { repoSeedSource: repoBranchSource } : {}),
             ...(repoPath && repoBranchSource === 'remote' && remoteBranch && !cloneFrom ? { repoSeedRemoteBranch: remoteBranch } : {}),
             ...(cloneFromId ? { cloneFrom: cloneFromId, cloneChats: Boolean(cloneChats) } : {}),
+            ...(fleetParentId
+              ? {
+                  fleet: setFleetActorConfig({}, {
+                    createdBy: fleetParentId,
+                    createdAt: at,
+                    enabled: false,
+                    capabilities: [],
+                    readScopes: ['children'],
+                    assigned: [],
+                    quotas: {},
+                  }).fleet,
+                }
+              : {}),
             ...(seedPrompt || seedAgent || seedModel
               ? {
                   seed: {
@@ -10915,6 +10942,20 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                 rejected.push({ name, error: `unknown cloneFrom drone: ${cloneFrom}`, status: 404 });
                 continue;
               }
+              const fleetParentRaw =
+                typeof raw?.fleetParentId === 'string'
+                  ? raw.fleetParentId.trim()
+                  : typeof raw?.parentDroneId === 'string'
+                    ? raw.parentDroneId.trim()
+                    : typeof raw?.fleet?.createdBy === 'string'
+                      ? raw.fleet.createdBy.trim()
+                      : '';
+              const fleetParentFound = fleetParentRaw ? findDroneIdByRef(regAny, fleetParentRaw) : null;
+              const fleetParentId = fleetParentFound ? resolveStableDroneOrPendingIdFromRef(regAny, fleetParentRaw) : null;
+              if (fleetParentRaw && !fleetParentId) {
+                rejected.push({ name, error: `unknown fleet parent drone: ${fleetParentRaw}`, status: 404 });
+                continue;
+              }
               const cloneFromEntry = cloneFromId ? findDroneEntryByIdentity(regAny, cloneFromId)?.entry : null;
               const cloneFromRuntime = normalizeDroneRuntime((cloneFromEntry as any)?.runtime);
               if (cloneFrom && runtime === 'container' && cloneFromRuntime !== 'container') {
@@ -10955,6 +10996,19 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                   ? { repoSeedRemoteBranch: remoteBranch }
                   : {}),
                 ...(cloneFromId ? { cloneFrom: cloneFromId, cloneChats: Boolean(cloneChats) } : {}),
+                ...(fleetParentId
+                  ? {
+                      fleet: setFleetActorConfig({}, {
+                        createdBy: fleetParentId,
+                        createdAt: at,
+                        enabled: false,
+                        capabilities: [],
+                        readScopes: ['children'],
+                        assigned: [],
+                        quotas: {},
+                      }).fleet,
+                    }
+                  : {}),
                 ...(seedPrompt || seedAgent || seedModel
                   ? {
                       seed: {

@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { startDroneHubApiServer } from '../src/hub/server';
+import { loadRegistry, updateRegistry } from '../src/host/registry';
 import { resetDroneRootDirForTests } from '../src/host/paths';
 import { getSocketListenSupport } from './socket-listen-support';
 
@@ -90,5 +91,61 @@ describeSocketSuite('create runtime api', () => {
     expect(Array.isArray(resp.data?.rejected)).toBe(true);
     expect((resp.data?.rejected ?? []).length).toBe(1);
     expect(String(resp.data?.rejected?.[0]?.error ?? '')).toContain('invalid runtime');
+  });
+
+  test('batch create persists requested fleet parent lineage', async () => {
+    const now = new Date().toISOString();
+    await updateRegistry((reg: any) => {
+      reg.drones = {
+        'task-parent': {
+          id: 'task-parent',
+          name: 'task-parent',
+          runtime: 'container',
+          containerPort: 7777,
+          repoPath: '',
+          createdAt: now,
+          chats: { default: { createdAt: now, turns: [], pendingPrompts: [] } },
+        },
+      };
+    });
+
+    const resp = await apiFetch('/api/drones/batch', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        drones: [{ name: 'task-child', runtime: 'container', fleetParentId: 'task-parent' }],
+      }),
+    });
+    expect(resp.r.status).toBe(202);
+    expect(resp.data?.ok).toBe(true);
+    expect((resp.data?.accepted ?? []).length).toBe(1);
+    const childId = String(resp.data?.accepted?.[0]?.id ?? '').trim();
+    expect(childId).not.toBe('');
+
+    const regAny: any = await loadRegistry();
+    expect(String(regAny?.pending?.[childId]?.fleet?.createdBy ?? '')).toBe('task-parent');
+
+    const listResp = await apiFetch('/api/drones');
+    expect(listResp.r.status).toBe(200);
+    const child = Array.isArray(listResp.data?.drones)
+      ? listResp.data.drones.find((item: any) => String(item?.id ?? '').trim() === childId)
+      : null;
+    expect(String(child?.fleetParentId ?? '')).toBe('task-parent');
+  });
+
+  test('batch create rejects unknown fleet parent references', async () => {
+    const resp = await apiFetch('/api/drones/batch', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        drones: [{ name: 'missing-parent-child', runtime: 'container', fleetParentId: 'missing-parent' }],
+      }),
+    });
+    expect(resp.r.status).toBe(202);
+    expect(resp.data?.ok).toBe(true);
+    expect((resp.data?.accepted ?? []).length).toBe(0);
+    expect((resp.data?.rejected ?? []).length).toBe(1);
+    expect(resp.data?.rejected?.[0]?.status).toBe(404);
+    expect(String(resp.data?.rejected?.[0]?.error ?? '')).toContain('unknown fleet parent drone');
   });
 });

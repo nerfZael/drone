@@ -23,6 +23,7 @@ describe('drone hub task spawn queue spec', () => {
       runtime: 'container',
       group: 'platform',
       repoPath: '/work/repo',
+      fleetParentId: 'dr-123',
       cloneFrom: 'dr-123',
       cloneChats: false,
       seedAgent: { kind: 'builtin', id: 'codex' },
@@ -52,6 +53,7 @@ describe('drone hub task spawn queue spec', () => {
       name: 'Auth fix',
       group: 'platform',
       repoPath: '/work/repo',
+      fleetParentId: 'dr-123',
       runtime: 'container',
       pullHostBranchBeforeCreate: false,
       repoBranchSource: 'remote',
@@ -81,6 +83,7 @@ describe('drone hub task spawn queue spec', () => {
       }),
     ).toEqual({
       name: 'Docs',
+      fleetParentId: 'dr-123',
       runtime: 'container',
       pullHostBranchBeforeCreate: true,
       repoBranchSource: 'host',

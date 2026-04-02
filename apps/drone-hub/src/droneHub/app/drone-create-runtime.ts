@@ -40,6 +40,7 @@ type BuildDraftDroneCreatePayloadArgs = {
   name?: string | null;
   group?: string | null;
   repoPath?: string | null;
+  fleetParentId?: string | null;
   runtime: CreateRuntime;
   repoBranchSelection: RepoBranchSelectionState;
   seedAgent: ChatAgentConfig | null;
@@ -51,6 +52,7 @@ export function buildDraftDroneCreatePayload({
   name,
   group,
   repoPath,
+  fleetParentId,
   runtime,
   repoBranchSelection,
   seedAgent,
@@ -60,6 +62,7 @@ export function buildDraftDroneCreatePayload({
   const trimmedName = String(name ?? '').trim();
   const trimmedGroup = String(group ?? '').trim();
   const trimmedRepoPath = String(repoPath ?? '').trim();
+  const trimmedFleetParentId = String(fleetParentId ?? '').trim();
   const trimmedPrompt = String(prompt ?? '').trim();
   const trimmedModel = String(seedModel ?? '').trim();
   const repoBranchSource = repoBranchSelection.repoBranchSource;
@@ -69,6 +72,7 @@ export function buildDraftDroneCreatePayload({
     ...(trimmedName ? { name: trimmedName } : {}),
     ...(trimmedGroup ? { group: trimmedGroup } : {}),
     ...(trimmedRepoPath ? { repoPath: trimmedRepoPath } : {}),
+    ...(trimmedFleetParentId ? { fleetParentId: trimmedFleetParentId } : {}),
     runtime,
     pullHostBranchBeforeCreate: repoBranchSelection.pullHostBranchBeforeCreate,
     repoBranchSource,
