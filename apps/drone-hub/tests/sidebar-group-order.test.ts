@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  mergeVisibleSidebarGroupOrder,
   orderSidebarEntries,
   orderSidebarGroups,
   renameSidebarEntryOrderMapKey,
@@ -75,6 +76,22 @@ describe('sidebar-group-order', () => {
       'group:Gamma': ['drone-b', 'drone-a'],
       'group:Beta': ['drone-c'],
     });
+  });
+
+  test('can persist the current visible group order before a rename', () => {
+    const stabilized = mergeVisibleSidebarGroupOrder([], [
+      { group: 'Alpha', kind: 'group' as const },
+      { group: 'Beta', kind: 'group' as const },
+      { group: 'Gamma', kind: 'group' as const },
+    ]);
+
+    expect(
+      renameSidebarGroupOrderToken(
+        stabilized,
+        { group: 'Beta', kind: 'group' },
+        { group: 'Omega', kind: 'group' },
+      ),
+    ).toEqual(['group:Alpha', 'group:Omega', 'group:Gamma']);
   });
 
   test('orders arbitrary entries by a persisted list', () => {

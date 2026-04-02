@@ -3,10 +3,14 @@ import type { DroneSummary } from '../types';
 import type { SidebarGroup } from './use-sidebar-view-model';
 import type { MoveDronesToGroupResult } from './use-group-management';
 import {
+  mergeVisibleSidebarGroupOrder,
   renameSidebarEntryOrderMapKeysByPrefix,
   renameSidebarGroupTokenListByPrefix,
 } from './sidebar-group-order';
-import { renameSidebarNodeOrderByParentGroupPrefix } from './sidebar-node-order';
+import {
+  mergeVisibleSidebarNodeOrderByParent,
+  renameSidebarNodeOrderByParentGroupPrefix,
+} from './sidebar-node-order';
 import { renameCollapsedGroupKeysByPrefix } from './sidebar-collapsed-groups';
 import {
   applySidebarOptimisticOpsToDrones,
@@ -32,6 +36,7 @@ type UseSidebarOptimisticGroupsArgs = {
   hiddenSidebarGroups: string[];
   sidebarDroneOrderByGroup: Record<string, string[]>;
   sidebarNodeOrderByParent: Record<string, string[]>;
+  visibleNodeOrderByParent: Record<string, string[]>;
   setCollapsedGroups: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   setSidebarGroupOrder: React.Dispatch<React.SetStateAction<string[]>>;
   setHiddenSidebarGroups: React.Dispatch<React.SetStateAction<string[]>>;
@@ -52,6 +57,7 @@ export function useSidebarOptimisticGroups({
   hiddenSidebarGroups,
   sidebarDroneOrderByGroup,
   sidebarNodeOrderByParent,
+  visibleNodeOrderByParent,
   setCollapsedGroups,
   setSidebarGroupOrder,
   setHiddenSidebarGroups,
@@ -100,11 +106,13 @@ export function useSidebarOptimisticGroups({
       const hiddenSnapshot = hiddenSidebarGroups;
       const droneOrderSnapshot = sidebarDroneOrderByGroup;
       const nodeOrderSnapshot = sidebarNodeOrderByParent;
+      const stabilizedGroupOrder = mergeVisibleSidebarGroupOrder(sidebarGroupOrder, sidebarGroups);
+      const stabilizedNodeOrder = mergeVisibleSidebarNodeOrderByParent(sidebarNodeOrderByParent, visibleNodeOrderByParent);
 
       setCollapsedGroups((prev) => renameCollapsedGroupKeysByPrefix(prev, group, nextName));
-      setSidebarGroupOrder((prev) =>
+      setSidebarGroupOrder(() =>
         renameSidebarGroupTokenListByPrefix(
-          prev,
+          stabilizedGroupOrder,
           { group, kind: 'group' },
           { group: nextName, kind: 'group' },
         ),
@@ -123,7 +131,7 @@ export function useSidebarOptimisticGroups({
           { group: nextName, kind: 'group' },
         ),
       );
-      setSidebarNodeOrderByParent((prev) => renameSidebarNodeOrderByParentGroupPrefix(prev, group, nextName));
+      setSidebarNodeOrderByParent(() => renameSidebarNodeOrderByParentGroupPrefix(stabilizedNodeOrder, group, nextName));
 
       const opId = createOptimisticSidebarOpId();
       setPendingSidebarOps((prev) => [...prev, { id: opId, kind: 'rename_group', sourceGroup: group, targetGroup: nextName }]);
@@ -151,6 +159,8 @@ export function useSidebarOptimisticGroups({
       sidebarDroneOrderByGroup,
       sidebarGroupOrder,
       sidebarNodeOrderByParent,
+      sidebarGroups,
+      visibleNodeOrderByParent,
     ],
   );
 

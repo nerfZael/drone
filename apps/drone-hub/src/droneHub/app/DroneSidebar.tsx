@@ -26,6 +26,7 @@ import {
   sidebarFolderDisplayLabel,
   type SidebarFolderNode,
 } from './sidebar-folder-tree';
+import { buildSidebarNodeTree } from './sidebar-node-tree';
 import {
   joinSidebarGroupPath,
   sidebarGroupBaseName,
@@ -987,6 +988,29 @@ export function DroneSidebar({
     () => groupSidebarRepoScopedGroupsByRepoGroup(sidebarRepoScopedGroupByPath),
     [sidebarRepoScopedGroupByPath],
   );
+  const visibleFolderNodeOrderByParent = React.useMemo(() => {
+    const baseSidebarFolderTree = buildSidebarFolderTree(sidebarGroups, sidebarGroupOrder);
+    const nodeTree = buildSidebarNodeTree({
+      sidebarFolderTree: baseSidebarFolderTree,
+      sidebarGroups,
+      sidebarGroupOrder,
+      repoScopedGroupPathsByRepoGroup,
+      sidebarDroneOrderByGroup,
+      sidebarNodeOrderByParent,
+    });
+    return Object.fromEntries(
+      Object.entries(nodeTree.childIdsByParent).map(([parentId, childIds]) => [
+        parentId,
+        childIds.filter((childId) => nodeTree.nodesById[childId]?.kind === 'folder'),
+      ]),
+    );
+  }, [
+    repoScopedGroupPathsByRepoGroup,
+    sidebarDroneOrderByGroup,
+    sidebarGroupOrder,
+    sidebarGroups,
+    sidebarNodeOrderByParent,
+  ]);
   const handleRenameGroup = React.useCallback(
     async (group: string, nextName?: string) => {
       const ok = await onRenameGroup(group, nextName);
@@ -1026,6 +1050,7 @@ export function DroneSidebar({
     hiddenSidebarGroups,
     sidebarDroneOrderByGroup,
     sidebarNodeOrderByParent,
+    visibleNodeOrderByParent: visibleFolderNodeOrderByParent,
     setCollapsedGroups,
     setSidebarGroupOrder,
     setHiddenSidebarGroups,

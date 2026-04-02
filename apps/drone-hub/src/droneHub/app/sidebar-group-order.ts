@@ -44,6 +44,14 @@ export function orderSidebarGroups<T extends SidebarGroupOrderRef>(groups: T[], 
     .map((entry) => entry.group);
 }
 
+export function mergeVisibleSidebarGroupOrder<T extends SidebarGroupOrderRef>(order: string[], groups: T[]): string[] {
+  const visibleTokens = groups.map((group) => sidebarGroupOrderToken(group));
+  if (visibleTokens.length === 0) return normalizeSidebarGroupOrder(order);
+  const visibleTokenSet = new Set(visibleTokens);
+  const hiddenTokens = normalizeSidebarGroupOrder(order).filter((token) => !visibleTokenSet.has(token));
+  return normalizeSidebarGroupOrder([...visibleTokens, ...hiddenTokens]);
+}
+
 export function orderSidebarEntries<T>(
   entries: T[],
   order: string[],

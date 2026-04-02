@@ -39,6 +39,28 @@ function normalizeNodeOrderMap(value: Record<string, string[]>): Record<string, 
   return out;
 }
 
+export function mergeVisibleSidebarNodeOrderByParent(
+  map: Record<string, string[]>,
+  visibleChildIdsByParent: Record<string, string[]>,
+): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  const parentIds = new Set<string>([...Object.keys(map), ...Object.keys(visibleChildIdsByParent)]);
+
+  for (const parentId of parentIds) {
+    const visibleChildIds = normalizeSidebarGroupOrder(visibleChildIdsByParent[parentId] ?? []);
+    const existingOrder = normalizeSidebarGroupOrder(map[parentId] ?? []);
+    if (visibleChildIds.length === 0) {
+      if (existingOrder.length > 0) out[parentId] = existingOrder;
+      continue;
+    }
+    const visibleChildIdSet = new Set(visibleChildIds);
+    const hiddenEntries = existingOrder.filter((entry) => !visibleChildIdSet.has(entry));
+    out[parentId] = normalizeSidebarGroupOrder([...visibleChildIds, ...hiddenEntries]);
+  }
+
+  return normalizeNodeOrderMap(out);
+}
+
 export function orderSidebarNodeIds(childIds: string[], order: string[]): string[] {
   const visibleChildIds = normalizeSidebarGroupOrder(childIds);
   if (visibleChildIds.length < 2) return visibleChildIds;
