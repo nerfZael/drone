@@ -54,6 +54,7 @@ export type SidebarDroneTreeListProps = {
   movingDroneGroups: boolean;
   sidebarOptimisticDroneIdSet: Set<string>;
   collapsedDroneSections: Record<string, boolean>;
+  setCollapsedDroneSections: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   uiDroneName: (nameRaw: string) => string;
   onToggleSection: (droneId: string, kind: SidebarInlineSectionKind) => void;
   onSelectDroneCard: (droneId: string, opts?: { toggle?: boolean; range?: boolean }) => void;
@@ -603,6 +604,7 @@ function SidebarDroneNode({
   movingDroneGroups,
   sidebarOptimisticDroneIdSet,
   collapsedDroneSections,
+  setCollapsedDroneSections,
   uiDroneName,
   onToggleSection,
   onSelectDroneCard,
@@ -998,18 +1000,32 @@ export function SidebarDroneTreeList({
     async (parentDroneIdRaw: string | null, sourceDroneIdsRaw: string[]) => {
       const parentDroneId = String(parentDroneIdRaw ?? '').trim() || null;
       if (!canSetSidebarDroneSelectionParent(droneById, sourceDroneIdsRaw, parentDroneId)) return;
-      const result = await onReparentDronesToParent(parentDroneId, sourceDroneIdsRaw, { targetGroup: groupName });
-      const reparentedIds = Array.isArray(result.reparentedIds)
-        ? result.reparentedIds.map((item) => String(item ?? '').trim()).filter(Boolean)
-        : [];
-      if (
-        parentDroneId &&
-        reparentedIds.length > 0 &&
-        collapsedDroneSections[sidebarInlineSectionKey(parentDroneId, 'children')]
-      ) {
-        onToggleSection(parentDroneId, 'children');
+      const childrenSectionKey = parentDroneId ? sidebarInlineSectionKey(parentDroneId, 'children') : null;
+      const shouldOptimisticallyOpenChildren = Boolean(
+        childrenSectionKey && collapsedDroneSections[childrenSectionKey],
+      );
+      if (childrenSectionKey && shouldOptimisticallyOpenChildren) {
+        setCollapsedDroneSections((prev) =>
+          prev[childrenSectionKey]
+            ? {
+                ...prev,
+                [childrenSectionKey]: false,
+              }
+            : prev,
+        );
       }
+      const result = await onReparentDronesToParent(parentDroneId, sourceDroneIdsRaw, { targetGroup: groupName });
       if (!result.ok && result.error) {
+        if (childrenSectionKey && shouldOptimisticallyOpenChildren) {
+          setCollapsedDroneSections((prev) =>
+            prev[childrenSectionKey]
+              ? prev
+              : {
+                  ...prev,
+                  [childrenSectionKey]: true,
+                },
+          );
+        }
         const targetDrone = parentDroneId ? droneById[parentDroneId] ?? null : null;
         if (targetDrone) onOpenDroneErrorModal(targetDrone, result.error);
         else window.alert(result.error);
@@ -1020,7 +1036,7 @@ export function SidebarDroneTreeList({
       droneById,
       onOpenDroneErrorModal,
       onReparentDronesToParent,
-      onToggleSection,
+      setCollapsedDroneSections,
     ],
   );
 

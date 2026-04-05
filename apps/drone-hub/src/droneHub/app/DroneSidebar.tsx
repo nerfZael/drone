@@ -1989,6 +1989,7 @@ export function DroneSidebar({
     movingDroneGroups,
     sidebarOptimisticDroneIdSet,
     collapsedDroneSections,
+    setCollapsedDroneSections,
     uiDroneName,
     onToggleSection: toggleDroneSection,
     onSelectDroneCard,
