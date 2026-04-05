@@ -5,6 +5,7 @@ import { compareDronesByNewestFirst, isHiddenDrone } from './helpers';
 import { isStartupSeedFresh } from './app-config';
 import type { StartupSeedState } from './app-types';
 import { orderSidebarEntries, orderSidebarGroups, sidebarGroupOrderToken } from './sidebar-group-order';
+import { isSidebarGroupDeleting as matchesDeletingSidebarGroup } from './sidebar-group-delete-visibility';
 import { isSameOrDescendantSidebarGroupPath } from './sidebar-group-paths';
 import { buildRepoSidebarGroups } from './sidebar-repo-groups';
 
@@ -22,6 +23,7 @@ type UseSidebarViewModelArgs = {
   viewMode: 'grouped' | 'flat';
   sidebarGroupingMode: 'groups' | 'repos';
   collapsedGroups: Record<string, boolean>;
+  deletingGroups: Record<string, boolean>;
   sidebarGroupOrder: string[];
   sidebarDroneOrderByGroup: Record<string, string[]>;
   hiddenSidebarGroups: string[];
@@ -39,6 +41,7 @@ export function useSidebarViewModel({
   viewMode,
   sidebarGroupingMode,
   collapsedGroups,
+  deletingGroups,
   sidebarGroupOrder,
   sidebarDroneOrderByGroup,
   hiddenSidebarGroups,
@@ -123,6 +126,10 @@ export function useSidebarViewModel({
     },
     [hiddenSidebarGroupTokenSet, hiddenSidebarGroups],
   );
+  const isSidebarGroupDeleting = React.useCallback(
+    (group: SidebarGroup) => matchesDeletingSidebarGroup(group, deletingGroups),
+    [deletingGroups],
+  );
 
   const allSidebarGroups = React.useMemo(() => {
     if (sidebarGroupingMode === 'repos') {
@@ -132,7 +139,7 @@ export function useSidebarViewModel({
         registeredRepoPaths,
         sidebarDroneOrderByGroup,
         sidebarGroupOrder,
-      });
+      }).filter((group) => !isSidebarGroupDeleting(group));
     }
 
     const m = new Map<string, DroneSummary[]>();
@@ -168,9 +175,10 @@ export function useSidebarViewModel({
       if (!isUngroupedGroupName(a.label) && isUngroupedGroupName(b.label)) return 1;
       return a.label.localeCompare(b.label);
     });
-    return orderSidebarGroups(out, sidebarGroupOrder);
+    return orderSidebarGroups(out, sidebarGroupOrder).filter((group) => !isSidebarGroupDeleting(group));
   }, [
     activeRepoPath,
+    isSidebarGroupDeleting,
     registeredRepoPaths,
     registryGroupNames,
     sidebarDroneOrderByGroup,

@@ -80,6 +80,7 @@ export type SidebarDroneTreeListProps = {
   onReparentDronesToParent: (
     parentDroneId: string | null,
     droneIds: string[],
+    opts?: { targetGroup?: string | null },
   ) => Promise<{ ok: boolean; error?: string | null; reparentedIds?: string[] }>;
   groupOrderKey?: string | null;
   groupName?: string | null;
@@ -997,7 +998,7 @@ export function SidebarDroneTreeList({
     async (parentDroneIdRaw: string | null, sourceDroneIdsRaw: string[]) => {
       const parentDroneId = String(parentDroneIdRaw ?? '').trim() || null;
       if (!canSetSidebarDroneSelectionParent(droneById, sourceDroneIdsRaw, parentDroneId)) return;
-      const result = await onReparentDronesToParent(parentDroneId, sourceDroneIdsRaw);
+      const result = await onReparentDronesToParent(parentDroneId, sourceDroneIdsRaw, { targetGroup: groupName });
       const reparentedIds = Array.isArray(result.reparentedIds)
         ? result.reparentedIds.map((item) => String(item ?? '').trim()).filter(Boolean)
         : [];

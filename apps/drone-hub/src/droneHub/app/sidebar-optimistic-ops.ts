@@ -15,6 +15,13 @@ export type SidebarOptimisticOp =
     }
   | {
       id: string;
+      kind: 'reparent_drones';
+      droneIds: string[];
+      targetParentDroneId: string | null;
+      targetGroup?: string | null;
+    }
+  | {
+      id: string;
       kind: 'rename_group';
       sourceGroup: string;
       targetGroup: string;
@@ -45,6 +52,21 @@ export function applySidebarOptimisticOpsToDrones(
       next = next.map((drone) =>
         droneIdSet.has(drone.id)
           ? { ...drone, group: targetGroup }
+          : drone,
+      );
+      continue;
+    }
+
+    if (op.kind === 'reparent_drones') {
+      const droneIdSet = new Set(op.droneIds);
+      const targetParentDroneId = String(op.targetParentDroneId ?? '').trim() || null;
+      next = next.map((drone) =>
+        droneIdSet.has(drone.id)
+          ? {
+              ...drone,
+              fleetParentId: targetParentDroneId,
+              ...(op.targetGroup !== undefined ? { group: normalizeGroupPath(op.targetGroup) } : {}),
+            }
           : drone,
       );
       continue;
@@ -138,6 +160,18 @@ export function pruneSatisfiedSidebarOptimisticOps(
     if (op.kind === 'move_drones') {
       return op.droneIds.some((droneId) => {
         const drone = drones.find((item) => item.id === droneId);
+        const currentGroup = normalizeGroupPath(drone?.group);
+        const targetGroup = normalizeGroupPath(op.targetGroup);
+        return currentGroup !== targetGroup;
+      });
+    }
+    if (op.kind === 'reparent_drones') {
+      return op.droneIds.some((droneId) => {
+        const drone = drones.find((item) => item.id === droneId);
+        const currentParentDroneId = String(drone?.fleetParentId ?? '').trim() || null;
+        const targetParentDroneId = String(op.targetParentDroneId ?? '').trim() || null;
+        if (currentParentDroneId !== targetParentDroneId) return true;
+        if (op.targetGroup === undefined) return false;
         const currentGroup = normalizeGroupPath(drone?.group);
         const targetGroup = normalizeGroupPath(op.targetGroup);
         return currentGroup !== targetGroup;

@@ -304,6 +304,31 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     repoPaths: [createRepoPath, chatHeaderRepoPath],
   });
   const {
+    groupMoveError,
+    setGroupMoveError,
+    movingDroneGroups,
+    deletingGroups,
+    renamingGroups,
+    createGroup: createSidebarGroup,
+    renameGroup,
+    deleteGroup,
+    moveDronesToGroup,
+    createGroupAndMove,
+  } = useGroupManagement({
+    autoDelete,
+    drones,
+    polledDrones,
+    optimisticallyDeletedDrones,
+    setOptimisticallyDeletedDrones,
+    setCollapsedGroups,
+    setSidebarGroupOrder,
+    setSidebarDroneOrderByGroup,
+    setSidebarNodeOrderByParent,
+    setHiddenSidebarGroups,
+    selectedGroupMultiChat,
+    setSelectedGroupMultiChat,
+  });
+  const {
     queuedPromptsByDroneChat,
     flushingQueuedKeysRef,
     enqueueQueuedPrompt,
@@ -330,6 +355,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     viewMode,
     sidebarGroupingMode,
     collapsedGroups,
+    deletingGroups,
     sidebarGroupOrder,
     sidebarDroneOrderByGroup,
     hiddenSidebarGroups,
@@ -794,31 +820,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     updateCreateMessageSuffixRow,
   } = useCreateDroneRowsState();
   const createNameRef = React.useRef<HTMLInputElement | null>(null);
-  const {
-    groupMoveError,
-    setGroupMoveError,
-    movingDroneGroups,
-    deletingGroups,
-    renamingGroups,
-    createGroup: createSidebarGroup,
-    renameGroup,
-    deleteGroup,
-    moveDronesToGroup,
-    createGroupAndMove,
-  } = useGroupManagement({
-    autoDelete,
-    drones,
-    polledDrones,
-    optimisticallyDeletedDrones,
-    setOptimisticallyDeletedDrones,
-    setCollapsedGroups,
-    setSidebarGroupOrder,
-    setSidebarDroneOrderByGroup,
-    setSidebarNodeOrderByParent,
-    setHiddenSidebarGroups,
-    selectedGroupMultiChat,
-    setSelectedGroupMultiChat,
-  });
   const terminalMenuRef = React.useRef<HTMLDivElement | null>(null);
 
   const showNameSuggestionFailureToast = React.useCallback((error: unknown) => {

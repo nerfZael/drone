@@ -1047,6 +1047,7 @@ export function DroneSidebar({
     runOptimisticCreateGroupAndMove,
     runOptimisticRenameGroup,
     runOptimisticMoveDronesToGroup,
+    runOptimisticReparentDronesToParent,
   } = useSidebarOptimisticGroups({
     isRepoGroupingMode,
     sidebarGroups,
@@ -1066,6 +1067,7 @@ export function DroneSidebar({
     onCreateGroupAndMove,
     onRenameGroup: handleRenameGroup,
     onMoveDronesToGroup,
+    onReparentDronesToParent,
   });
 
   const clearCollapseTimer = React.useCallback(() => {
@@ -1293,7 +1295,9 @@ export function DroneSidebar({
 
     setFolderEditor((prev) => (prev ? { ...prev, pending: true, error: null } : prev));
     if (draft.mode === 'create') {
-      const result = await runOptimisticCreateGroup(nextPath);
+      const result = await runOptimisticCreateGroup(nextPath, {
+        placement: draft.parentPath ? 'end' : 'start',
+      });
       if (!result.ok) {
         setFolderEditor((prev) => (prev ? { ...prev, pending: false, error: result.error || 'Create folder failed.' } : prev));
         return;
@@ -1998,7 +2002,7 @@ export function DroneSidebar({
     onDeleteDrone,
     onOpenDroneErrorModal,
     onPrepareDroneDragStart,
-    onReparentDronesToParent,
+    onReparentDronesToParent: runOptimisticReparentDronesToParent,
   } satisfies Omit<React.ComponentProps<typeof SidebarDroneTreeList>, 'tree'>;
 
   const onSidebarWheel = React.useCallback(
@@ -2421,7 +2425,7 @@ export function DroneSidebar({
                   onDeleteDrone={onDeleteDrone}
                   onOpenDroneErrorModal={onOpenDroneErrorModal}
                   onPrepareDroneDragStart={onPrepareDroneDragStart}
-                  onReparentDronesToParent={onReparentDronesToParent}
+                  onReparentDronesToParent={runOptimisticReparentDronesToParent}
                 />
                   </>
                 {!isRepoGroupingMode && !sidebarHasUngroupedGroup && showExternalMoveTargets && (

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  insertSidebarGroupOrderToken,
   mergeVisibleSidebarGroupOrder,
   orderSidebarEntries,
   orderSidebarGroups,
@@ -92,6 +93,36 @@ describe('sidebar-group-order', () => {
         { group: 'Omega', kind: 'group' },
       ),
     ).toEqual(['group:Alpha', 'group:Omega', 'group:Gamma']);
+  });
+
+  test('can insert a new root folder at the top of the visible folder order', () => {
+    expect(
+      insertSidebarGroupOrderToken(
+        ['group:Hidden', 'group:Alpha', 'group:Beta'],
+        [
+          { group: 'Alpha', kind: 'group' as const },
+          { group: 'Beta', kind: 'group' as const },
+        ],
+        { group: 'Gamma', kind: 'group' },
+        'start',
+      ),
+    ).toEqual(['group:Gamma', 'group:Alpha', 'group:Beta', 'group:Hidden']);
+  });
+
+  test('can insert a new child folder after its visible siblings', () => {
+    expect(
+      insertSidebarGroupOrderToken(
+        ['group:alpha', 'group:alpha/a', 'group:alpha/b', 'group:beta'],
+        [
+          { group: 'alpha', kind: 'group' as const },
+          { group: 'alpha/a', kind: 'group' as const },
+          { group: 'alpha/b', kind: 'group' as const },
+          { group: 'beta', kind: 'group' as const },
+        ],
+        { group: 'alpha/c', kind: 'group' },
+        'end',
+      ),
+    ).toEqual(['group:alpha', 'group:alpha/a', 'group:alpha/b', 'group:alpha/c', 'group:beta']);
   });
 
   test('orders arbitrary entries by a persisted list', () => {

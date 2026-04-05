@@ -1,6 +1,7 @@
 import {
   isSameOrDescendantSidebarGroupPath,
   rewriteSidebarGroupPathPrefix,
+  sidebarGroupParentPath,
 } from './sidebar-group-paths';
 
 export type SidebarGroupOrderKind = 'group' | 'repo';
@@ -11,6 +12,7 @@ export type SidebarGroupOrderRef = {
 };
 
 export type SidebarGroupDropPlacement = 'before' | 'after';
+export type SidebarGroupCreatePlacement = 'start' | 'end';
 
 export function sidebarGroupOrderToken({ group, kind }: SidebarGroupOrderRef): string {
   return `${kind}:${String(group ?? '').trim()}`;
@@ -50,6 +52,56 @@ export function mergeVisibleSidebarGroupOrder<T extends SidebarGroupOrderRef>(or
   const visibleTokenSet = new Set(visibleTokens);
   const hiddenTokens = normalizeSidebarGroupOrder(order).filter((token) => !visibleTokenSet.has(token));
   return normalizeSidebarGroupOrder([...visibleTokens, ...hiddenTokens]);
+}
+
+export function insertSidebarGroupOrderToken<T extends SidebarGroupOrderRef>(
+  order: string[],
+  groups: T[],
+  group: SidebarGroupOrderRef,
+  placement: SidebarGroupCreatePlacement = 'end',
+): string[] {
+  const nextToken = sidebarGroupOrderToken(group);
+  if (!nextToken) return normalizeSidebarGroupOrder(order);
+
+  const stabilizedOrder = mergeVisibleSidebarGroupOrder(order, groups);
+  if (stabilizedOrder.includes(nextToken)) return stabilizedOrder;
+
+  const visibleTokens = groups.map((entry) => sidebarGroupOrderToken(entry));
+  const visibleTokenSet = new Set(visibleTokens);
+  const hiddenTokens = stabilizedOrder.filter((token) => !visibleTokenSet.has(token));
+  const visibleOrder = stabilizedOrder.filter((token) => visibleTokenSet.has(token));
+
+  const siblingTokens = groups
+    .filter((entry) => entry.kind === group.kind)
+    .filter((entry) => {
+      if (entry.kind !== 'group' || group.kind !== 'group') return true;
+      return sidebarGroupParentPath(entry.group) === sidebarGroupParentPath(group.group);
+    })
+    .map((entry) => sidebarGroupOrderToken(entry));
+
+  if (siblingTokens.length === 0) {
+    return normalizeSidebarGroupOrder([...visibleOrder, nextToken, ...hiddenTokens]);
+  }
+
+  const siblingTokenSet = new Set(siblingTokens);
+  let anchorIndex = -1;
+  if (placement === 'start') {
+    anchorIndex = visibleOrder.findIndex((token) => siblingTokenSet.has(token));
+  } else {
+    for (let index = visibleOrder.length - 1; index >= 0; index -= 1) {
+      if (!siblingTokenSet.has(visibleOrder[index] ?? '')) continue;
+      anchorIndex = index;
+      break;
+    }
+  }
+
+  if (anchorIndex < 0) {
+    return normalizeSidebarGroupOrder([...visibleOrder, nextToken, ...hiddenTokens]);
+  }
+
+  const nextVisibleOrder = visibleOrder.slice();
+  nextVisibleOrder.splice(placement === 'start' ? anchorIndex : anchorIndex + 1, 0, nextToken);
+  return normalizeSidebarGroupOrder([...nextVisibleOrder, ...hiddenTokens]);
 }
 
 export function orderSidebarEntries<T>(

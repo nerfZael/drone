@@ -1,5 +1,6 @@
 import React from 'react';
 import { useDndMonitor, useDraggable, useDroppable, type DragEndEvent, type DragMoveEvent, type DragOverEvent } from '@dnd-kit/core';
+import { isUngroupedGroupName } from '../../domain';
 import { DroneCard } from '../overview';
 import { TypingDots } from '../overview/icons';
 import type { DroneSummary } from '../types';
@@ -8,7 +9,7 @@ import { normalizedDroneChats } from './chat-node-helpers';
 import { createSidebarChatDragData, parseDroneHubDragData, useDroneHubActiveDrag, type SidebarDroneDragData } from './drone-hub-dnd';
 import { isDroneStartingOrSeeding } from './helpers';
 import { IconChatThread, IconColumns, IconDrone, IconEye, IconEyeOff, IconFolder, IconPencil, IconPlus, IconSpinner, IconTrash } from './icons';
-import { canReparentSidebarDroneSelection } from './sidebar-drone-drop';
+import { canReparentSidebarDroneSelection, canSetSidebarDroneSelectionParent } from './sidebar-drone-drop';
 import { buildSidebarDroneTree, type SidebarDroneTree } from './sidebar-drone-tree';
 import { buildSidebarNodeTree, type SidebarNodeTreeModel, type SidebarTreeDroneNode, type SidebarTreeFolderNode, type SidebarTreeNode } from './sidebar-node-tree';
 import {
@@ -81,7 +82,7 @@ type GroupedSidebarTreeProps = {
   onSelectDroneCard: (droneId: string, opts?: { toggle?: boolean; range?: boolean }) => void;
   onSelectDroneChat: (droneId: string, chatName: string) => void;
   onMoveDronesToGroup: (group: string, droneIds: string[]) => Promise<MoveDronesToGroupResult>;
-  onRenameGroup: (group: string, nextName?: string) => Promise<boolean> | boolean;
+  onRenameGroup: (group: string, nextName?: string, opts?: { skipNodeOrderUpdate?: boolean }) => Promise<boolean> | boolean;
   onToggleGroupCollapsed: (group: string) => void;
   collapsedGroups: Record<string, boolean>;
   deletingGroups: Record<string, boolean>;
@@ -144,6 +145,7 @@ type GroupedSidebarTreeProps = {
   onReparentDronesToParent: (
     parentDroneId: string | null,
     droneIds: string[],
+    opts?: { targetGroup?: string | null },
   ) => Promise<{ ok: boolean; error?: string | null; reparentedIds?: string[] }>;
 };
 
@@ -1227,9 +1229,54 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       }
       const nextPath = joinSidebarGroupPath([targetParentPath, sidebarGroupBaseName(sourcePath)]);
       if (!nextPath || nextPath === sourcePath) return true;
-      return Boolean(await onRenameGroup(sourcePath, nextPath));
+      return Boolean(await onRenameGroup(sourcePath, nextPath, { skipNodeOrderUpdate: true }));
     },
     [onRenameGroup],
+  );
+
+  const completeDroneTreeMove = React.useCallback(
+    async (args: {
+      movingDroneIds: string[];
+      targetParentNode: SidebarTreeNode | null;
+      targetFolderPath: string | null;
+    }) => {
+      const movingDroneIds = Array.from(
+        new Set(args.movingDroneIds.map((droneId) => String(droneId ?? '').trim()).filter(Boolean)),
+      );
+      if (movingDroneIds.length === 0) return true;
+
+      const targetParentDroneId = args.targetParentNode?.kind === 'drone' ? args.targetParentNode.droneId : null;
+      if (!canSetSidebarDroneSelectionParent(droneById, movingDroneIds, targetParentDroneId)) {
+        return false;
+      }
+
+      const reparentResult = await props.onReparentDronesToParent(targetParentDroneId, movingDroneIds, {
+        targetGroup: args.targetFolderPath,
+      });
+      if (!reparentResult.ok) {
+        const targetDrone = targetParentDroneId ? droneById[targetParentDroneId] ?? null : null;
+        if (targetDrone && reparentResult.error) props.onOpenDroneErrorModal(targetDrone, reparentResult.error);
+        else if (reparentResult.error) window.alert(reparentResult.error);
+        return false;
+      }
+
+      if (targetParentDroneId) return true;
+
+      const normalizedTargetGroup = (() => {
+        const group = String(args.targetFolderPath ?? '').trim();
+        return !group || isUngroupedGroupName(group) ? null : group;
+      })();
+      const needsGroupMove = movingDroneIds.some((droneId) => {
+        const currentGroup = String(droneById[droneId]?.group ?? '').trim();
+        const normalizedCurrentGroup = !currentGroup || isUngroupedGroupName(currentGroup) ? null : currentGroup;
+        return normalizedCurrentGroup !== normalizedTargetGroup;
+      });
+      if (!needsGroupMove) return true;
+
+      const moveResult = await onMoveDronesToGroup(normalizedTargetGroup ?? 'Ungrouped', movingDroneIds);
+      return moveResult.ok;
+    },
+    [droneById, onMoveDronesToGroup, props],
   );
 
   const updateTreeDragState = React.useCallback(
@@ -1464,10 +1511,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
             const targetFolderPath = targetParentNode?.kind === 'folder' ? folderTargetGroupPath(targetParentNode) : null;
             const sourceNode = nodeTree.nodesById[sidebarDroneNodeId(active.droneId)] as SidebarTreeDroneNode | undefined;
             const sourceParentId = sourceNode?.parentId ?? targetParentId;
-            const movingDroneIds =
-              props.selectedDroneSet.has(active.droneId) && props.selectedDroneIds.length > 0
-                ? props.selectedDroneIds.slice()
-                : [active.droneId];
+            const movingDroneIds = active.droneIds.slice();
             const previousNodeOrderByParent = sidebarNodeOrderByParent;
             const movingNodeIds = movingDroneIds.map(sidebarDroneNodeId);
             const sourceVisibleChildIds = nodeTree.childIdsByParent[sourceParentId] ?? [];
@@ -1486,8 +1530,12 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
                 placement: 'into',
               }),
             );
-            void onMoveDronesToGroup(targetFolderPath ?? 'Ungrouped', movingDroneIds).then((result) => {
-              if (!result.ok) {
+            void completeDroneTreeMove({
+              movingDroneIds,
+              targetParentNode,
+              targetFolderPath,
+            }).then((ok) => {
+              if (!ok) {
                 setSidebarNodeOrderByParent(previousNodeOrderByParent);
               }
             });
@@ -1496,10 +1544,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
           return;
         }
 
-        const movingDroneIds =
-          props.selectedDroneSet.has(active.droneId) && props.selectedDroneIds.length > 0
-            ? props.selectedDroneIds.slice()
-            : [active.droneId];
+        const movingDroneIds = active.droneIds.slice();
         const allowIntoTarget =
           (targetNode.kind === 'drone' &&
             canReparentSidebarDroneSelection(droneById, movingDroneIds, targetNode.droneId)) ||
@@ -1524,12 +1569,10 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
         const placement = resolvedTreeTarget.placement;
         if (placement === 'into' && resolvedTargetNode.kind === 'drone') {
           clearDragState();
-          void props.onReparentDronesToParent(resolvedTargetNode.droneId, movingDroneIds).then((result) => {
-            if (!result.ok && result.error) {
-              const targetDrone = droneById[resolvedTargetNode.droneId] ?? null;
-              if (targetDrone) props.onOpenDroneErrorModal(targetDrone, result.error);
-              else window.alert(result.error);
-            }
+          void completeDroneTreeMove({
+            movingDroneIds,
+            targetParentNode: resolvedTargetNode,
+            targetFolderPath: null,
           });
           return;
         }
@@ -1583,8 +1626,12 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
             placement,
           }),
         );
-        void onMoveDronesToGroup(targetFolderPath ?? 'Ungrouped', movingDroneIds).then((result) => {
-          if (!result.ok) {
+        void completeDroneTreeMove({
+          movingDroneIds,
+          targetParentNode,
+          targetFolderPath,
+        }).then((ok) => {
+          if (!ok) {
             setSidebarNodeOrderByParent(previousNodeOrderByParent);
           }
         });
