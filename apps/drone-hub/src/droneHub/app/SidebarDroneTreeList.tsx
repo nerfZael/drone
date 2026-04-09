@@ -26,16 +26,11 @@ import {
   canSetSidebarDroneSelectionParent,
   sidebarDroneDropIntentFromRects,
 } from './sidebar-drone-drop';
+import { sidebarInlineSectionKey, type SidebarInlineSectionKind } from './sidebar-inline-sections';
 import { useDroneSidebarUiState } from './use-drone-hub-ui-store';
 import type { SidebarDroneTree } from './sidebar-drone-tree';
 import type { SidebarDensityMode } from './settings-types';
-
-export type SidebarInlineSectionKind = 'chats' | 'children';
-
-export function sidebarInlineSectionKey(droneIdRaw: string, kind: SidebarInlineSectionKind): string {
-  const droneId = String(droneIdRaw ?? '').trim();
-  return `${kind}:${droneId}`;
-}
+import type { ChatEditorState } from './use-sidebar-interactions';
 
 export type SidebarDroneTreeListProps = {
   droneById: Record<string, DroneSummary>;
@@ -88,14 +83,7 @@ export type SidebarDroneTreeListProps = {
   showGroup?: boolean;
 };
 
-type ChatEditorState = {
-  mode: 'create' | 'rename';
-  droneId: string;
-  targetChatName: string | null;
-  value: string;
-  error: string | null;
-  pending: boolean;
-};
+export type SidebarDroneTreeListSharedProps = Omit<SidebarDroneTreeListProps, 'tree'>;
 
 type SidebarDroneRowProps = {
   drone: DroneSummary;
@@ -866,6 +854,7 @@ export function SidebarDroneTreeList({
   movingDroneGroups,
   sidebarOptimisticDroneIdSet,
   collapsedDroneSections,
+  setCollapsedDroneSections,
   uiDroneName,
   onToggleSection,
   onSelectDroneCard,
