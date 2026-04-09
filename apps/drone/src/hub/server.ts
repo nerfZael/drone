@@ -136,6 +136,7 @@ import {
 import { isHubApiAuthorized, isHubApiAuthorizedForWebSocket, rejectWebSocketUpgrade } from './hub-auth';
 import { bashQuote, encodeRemotePath, hexEncodeUtf8, normalizeContainerPath, parseBoolParam, shellQuoteIfNeeded } from './hub-format';
 import { readJsonBody, withCors } from './hub-http';
+import { shouldAwaitTerminalSkillSync, type HubWebTerminalMode } from './terminal-open';
 import {
   buildChatAttachmentsDirectory,
   buildChatImageAttachmentRefs,
@@ -16864,7 +16865,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const modeRaw = String(u.searchParams.get('mode') ?? 'shell')
           .trim()
           .toLowerCase();
-        const mode: 'shell' | 'agent' = modeRaw === 'agent' ? 'agent' : 'shell';
+        const mode: HubWebTerminalMode = modeRaw === 'agent' ? 'agent' : 'shell';
         const chatName = normalizeChatName(u.searchParams.get('chat') ?? 'default');
         const cwd = normalizeDroneUiCwdForRuntime(d, u.searchParams.get('cwd') ?? null);
         const regAny: any = await loadRegistry();
@@ -16873,8 +16874,12 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const managedEnvLines = buildEnvExportLines(managedEnv);
 
         try {
-          await syncSkillLibraryForDrone({ droneId, droneEntry: d });
-          await syncRepoAgentsInstructionsForDrone({ droneId, droneEntry: d });
+          if (shouldAwaitTerminalSkillSync(mode)) {
+            await syncSkillLibraryForDrone({ droneId, droneEntry: d });
+          }
+          if (mode === 'agent') {
+            await syncRepoAgentsInstructionsForDrone({ droneId, droneEntry: d });
+          }
           if (runtime === 'host') {
             const daemon = await resolveDroneDaemonClientForEntry(d);
             if (!daemon) {
@@ -16919,15 +16924,15 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
 
           await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: d }, async ({ containerName, droneEntry, droneId: lockedId }) => {
             const idForOps = normalizeDroneIdentity(lockedId) || normalizeDroneIdentity((droneEntry as any)?.id) || droneId;
-            try {
-              await upgradeDroneDaemonInContainer({
-                containerName,
-                containerPort: Number((droneEntry as any)?.containerPort ?? 7777),
-              });
-            } catch {
-              // Best-effort daemon refresh; continue if upgrade fails.
-            }
             if (mode === 'agent') {
+              try {
+                await upgradeDroneDaemonInContainer({
+                  containerName,
+                  containerPort: Number((droneEntry as any)?.containerPort ?? 7777),
+                });
+              } catch {
+                // Best-effort daemon refresh; continue if upgrade fails.
+              }
               await ensureChatEntry({ droneId: idForOps, chatName });
               const tmuxCmd = await resolveChatTmuxCommand({ droneId: idForOps, chatName });
               const { sessionName } = await ensureHubChatSessionRunning({
