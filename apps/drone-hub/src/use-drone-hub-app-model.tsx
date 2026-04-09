@@ -48,6 +48,7 @@ import { removeDroneIdsFromSidebarNodeOrderByParent } from './droneHub/app/sideb
 import { useDeleteActionSettings } from './droneHub/app/use-delete-action-settings';
 import { useFilesystemSettings } from './droneHub/app/use-filesystem-settings';
 import { useGithubSettings } from './droneHub/app/use-github-settings';
+import { useAgentsSettings } from './droneHub/app/use-agents-settings';
 import { useProfileSettings } from './droneHub/app/use-profile-settings';
 import { useSetupStatus } from './droneHub/app/use-setup-status';
 import { useSkillLibrary } from './droneHub/app/use-skill-library';
@@ -534,6 +535,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   useUiPreferencesSettings({ requestJson });
   const deleteActionSettingsState = useDeleteActionSettings(requestJson);
   const githubSettingsState = useGithubSettings(requestJson);
+  const agentsSettingsState = useAgentsSettings(requestJson);
   const filesystemSettingsState = useFilesystemSettings(requestJson);
   const profileSettingsState = useProfileSettings(requestJson);
   const setupStatusState = useSetupStatus(requestJson);
@@ -2936,6 +2938,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     llmSettingsState,
     githubSettingsState,
     skillLibraryState,
+    agentsSettingsState,
     deleteActionSettingsState,
     filesystemSettingsState,
     profileSettingsState,

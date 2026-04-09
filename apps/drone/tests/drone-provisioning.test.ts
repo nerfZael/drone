@@ -27,6 +27,7 @@ function createControllerHarness() {
   const ensureChatEntryCalls: any[] = [];
   const enqueuePromptCalls: any[] = [];
   const setChatAgentConfigCalls: any[] = [];
+  const syncRepoAgentsCalls: any[] = [];
   const syncSkillLibraryCalls: any[] = [];
   const syncTaskStateCalls: any[] = [];
 
@@ -81,6 +82,9 @@ function createControllerHarness() {
       setChatAgentConfigCalls.push(opts);
     },
     startupPromptToPendingPrompt: pendingStateHelpers.startupPromptToPendingPrompt,
+    syncRepoAgentsInstructionsForDrone: async (opts) => {
+      syncRepoAgentsCalls.push(opts);
+    },
     syncSkillLibraryForDrone: async (opts) => {
       syncSkillLibraryCalls.push(opts);
     },
@@ -94,6 +98,7 @@ function createControllerHarness() {
     ensureChatEntryCalls,
     enqueuePromptCalls,
     setChatAgentConfigCalls,
+    syncRepoAgentsCalls,
     syncSkillLibraryCalls,
     syncTaskStateCalls,
   };
@@ -134,6 +139,7 @@ describe('drone provisioning controller', () => {
       });
       expect(harness.syncTaskStateCalls).toHaveLength(1);
       expect(harness.syncSkillLibraryCalls).toHaveLength(1);
+      expect(harness.syncRepoAgentsCalls).toHaveLength(1);
     });
   });
 

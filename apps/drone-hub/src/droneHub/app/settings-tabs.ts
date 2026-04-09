@@ -1,4 +1,4 @@
-export type SettingsTabId = 'general' | 'profiles' | 'trash' | 'archive' | 'shortcuts' | 'automations' | 'playbooks' | 'skills' | 'system';
+export type SettingsTabId = 'general' | 'profiles' | 'trash' | 'archive' | 'shortcuts' | 'automations' | 'playbooks' | 'skills' | 'agents' | 'system';
 
 export const SETTINGS_TABS: Array<{
   id: SettingsTabId;
@@ -53,6 +53,12 @@ export const SETTINGS_TABS: Array<{
     label: 'Skills',
     title: 'Skill library',
     description: 'Create and manage portable skill packages for supported agent tools.',
+  },
+  {
+    id: 'agents',
+    label: 'Agents',
+    title: 'Repo instructions',
+    description: 'Manage the default AGENTS.md injected into repo-attached container drones and configure per-repo overrides.',
   },
   {
     id: 'system',

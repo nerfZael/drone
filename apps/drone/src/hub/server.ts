@@ -91,6 +91,12 @@ import {
   type TaskBoardCard,
 } from './task-board';
 import {
+  normalizeAgentsMarkdown,
+  normalizeRepoAgentsMode,
+  resolveDefaultAgentsConfig,
+  resolveRepoAgentsConfig,
+} from './agents-config';
+import {
   buildEnvExportLines,
   deriveCreatedDroneEnvironmentConfig,
   normalizeDisabledRepoKeys,
@@ -740,6 +746,33 @@ function repoEnvironmentPayload(regAny: any, repoPathRaw: unknown) {
     updatedAt: repo.updatedAt,
     vars: repo.vars,
     entries: sortedEnvEntries(repo.vars, 'repo'),
+  };
+}
+
+function defaultAgentsPayload(regAny: any) {
+  const agents = resolveDefaultAgentsConfig(regAny);
+  return {
+    ok: true as const,
+    agents: {
+      content: agents.content,
+      enabled: agents.enabled,
+      updatedAt: agents.updatedAt,
+    },
+  };
+}
+
+function repoAgentsPayload(regAny: any, repoPathRaw: unknown) {
+  const agents = resolveRepoAgentsConfig(regAny, repoPathRaw);
+  return {
+    ok: true as const,
+    repoPath: agents.repoPath,
+    label: agents.label,
+    registered: agents.registered,
+    mode: agents.mode,
+    content: agents.content,
+    updatedAt: agents.updatedAt,
+    effectiveContent: agents.effectiveContent,
+    effectiveSource: agents.effectiveSource,
   };
 }
 
@@ -1901,6 +1934,35 @@ async function syncSkillLibraryForDrone(opts: { droneId: string; droneEntry: any
       containerName,
       targets: buildContainerSkillProjectionTargets(droneEntry),
     });
+  });
+}
+
+async function syncRepoAgentsInstructionsForDrone(opts: { droneId: string; droneEntry: any }): Promise<void> {
+  const droneId = normalizeDroneIdentity(opts.droneId);
+  const droneEntry = opts.droneEntry;
+  if (!droneId || !droneEntry) return;
+  if (droneRuntime(droneEntry) !== 'container') return;
+  if (!isRepoAttachedDrone(droneEntry)) return;
+
+  const regAny: any = await loadRegistry();
+  const repoAgents = resolveRepoAgentsConfig(regAny, (droneEntry as any)?.repoPath);
+  const effectiveContent = repoAgents.effectiveContent;
+  if (!effectiveContent) return;
+
+  const requestedDroneName = String((droneEntry as any)?.name ?? droneId).trim() || droneId;
+  const repoRoot = droneRepoPathInContainer(droneEntry);
+  const targetPath = path.posix.join(repoRoot, 'AGENTS.md');
+
+  await withLockedDroneContainer({ requestedDroneName, droneEntry }, async ({ containerName }) => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'drone-agents-sync-'));
+    try {
+      const localPath = path.join(tempRoot, 'AGENTS.md');
+      await fs.writeFile(localPath, effectiveContent, 'utf8');
+      await dvmExec(containerName, 'bash', ['-lc', `mkdir -p ${bashQuote(path.posix.dirname(targetPath))}`]);
+      await dvmCopyToContainer(containerName, localPath, targetPath, { clean: false });
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true }).catch(() => {});
+    }
   });
 }
 
@@ -6655,12 +6717,13 @@ async function createOrEnqueuePromptUnified(opts: {
     }
     try {
       await syncSkillLibraryForDrone({ droneId, droneEntry: regSnap.drones[droneId] });
+      await syncRepoAgentsInstructionsForDrone({ droneId, droneEntry: regSnap.drones[droneId] });
     } catch (e: any) {
       const error = String(e?.message ?? String(e));
       const warningKey = `${droneId}\u0000${error}`;
       if (!PROMPT_SKILL_SYNC_WARNINGS.has(warningKey)) {
         PROMPT_SKILL_SYNC_WARNINGS.add(warningKey);
-        hubLog('warn', 'skill sync failed before prompt enqueue; continuing', {
+        hubLog('warn', 'managed repo sync failed before prompt enqueue; continuing', {
           droneId,
           chatName,
           error,
@@ -6766,6 +6829,7 @@ const { dequeueProvisioning, enqueueProvisioning, enqueueProvisioningForAllPendi
   runNodeCli,
   setChatAgentConfig,
   startupPromptToPendingPrompt,
+  syncRepoAgentsInstructionsForDrone,
   syncSkillLibraryForDrone,
   syncTaskStateSnapshotToDrone,
 });
@@ -9164,6 +9228,38 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         }
       }
 
+      if (pathname === '/api/settings/agents') {
+        if (method === 'GET') {
+          const regAny: any = await loadRegistry();
+          json(res, 200, defaultAgentsPayload(regAny));
+          return;
+        }
+
+        if (method === 'POST') {
+          let body: any = null;
+          try {
+            body = await readJsonBody(req);
+          } catch (e: any) {
+            json(res, 400, { ok: false, error: e?.message ?? String(e) });
+            return;
+          }
+
+          const content = normalizeAgentsMarkdown(body?.content);
+          const updatedAt = nowIso();
+          await updateRegistry((regAny: any) => {
+            regAny.settings = regAny.settings ?? {};
+            regAny.settings.agents = {
+              content,
+              updatedAt,
+            };
+          });
+
+          const regAny: any = await loadRegistry();
+          json(res, 200, defaultAgentsPayload(regAny));
+          return;
+        }
+      }
+
       if (pathname === '/api/settings/profiles') {
         if (method === 'GET') {
           json(res, 200, { ok: true, ...(await listProfilesState()) });
@@ -10019,6 +10115,66 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
 
         const regAny: any = await loadRegistry();
         json(res, 200, repoEnvironmentPayload(regAny, repoPath));
+        return;
+      }
+
+      // GET /api/repo-agents?repoPath=<absolute-path>
+      if (method === 'GET' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'repo-agents') {
+        const repoPath = String(u.searchParams.get('repoPath') ?? '').trim();
+        if (!repoPath) {
+          json(res, 400, { ok: false, error: 'missing repoPath' });
+          return;
+        }
+        if (!path.isAbsolute(repoPath)) {
+          json(res, 400, { ok: false, error: 'invalid repoPath (expected absolute path)' });
+          return;
+        }
+        const regAny: any = await loadRegistry();
+        json(res, 200, repoAgentsPayload(regAny, repoPath));
+        return;
+      }
+
+      // POST /api/repo-agents
+      if (method === 'POST' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'repo-agents') {
+        let body: any = null;
+        try {
+          body = await readJsonBody(req);
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          return;
+        }
+
+        const repoPath = typeof body?.repoPath === 'string' ? body.repoPath.trim() : '';
+        if (!repoPath) {
+          json(res, 400, { ok: false, error: 'missing repoPath' });
+          return;
+        }
+        if (!path.isAbsolute(repoPath)) {
+          json(res, 400, { ok: false, error: 'invalid repoPath (expected absolute path)' });
+          return;
+        }
+
+        const mode = normalizeRepoAgentsMode(body?.mode);
+        const content = normalizeAgentsMarkdown(body?.content);
+        const updatedAt = nowIso();
+
+        await updateRegistry((regAny: any) => {
+          regAny.repos = regAny.repos ?? {};
+          let entry = regAny.repos[repoPath];
+          if (!entry || typeof entry !== 'object') {
+            entry = { path: repoPath, addedAt: updatedAt };
+          }
+          entry.path = repoPath;
+          entry.agents = {
+            mode,
+            content,
+            updatedAt,
+          };
+          regAny.repos[repoPath] = entry;
+        });
+
+        const regAny: any = await loadRegistry();
+        json(res, 200, repoAgentsPayload(regAny, repoPath));
         return;
       }
 
@@ -14204,6 +14360,9 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             reg2.drones = reg2.drones ?? {};
             reg2.drones[droneId] = dd;
           });
+          const regAfterReseed: any = await loadRegistry();
+          const reseededDrone = regAfterReseed?.drones?.[droneId] ?? d;
+          await syncRepoAgentsInstructionsForDrone({ droneId, droneEntry: reseededDrone });
           await setDroneHubMetaByIdentity({ droneId, hub: null });
           json(res, 200, { ok: true, id: droneId, name: droneName, repoRoot, baseRef });
           return;
@@ -16715,6 +16874,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
 
         try {
           await syncSkillLibraryForDrone({ droneId, droneEntry: d });
+          await syncRepoAgentsInstructionsForDrone({ droneId, droneEntry: d });
           if (runtime === 'host') {
             const daemon = await resolveDroneDaemonClientForEntry(d);
             if (!daemon) {
@@ -16973,6 +17133,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           await ensureChatEntry({ droneId, chatName });
         }
         await syncSkillLibraryForDrone({ droneId, droneEntry: drone });
+        await syncRepoAgentsInstructionsForDrone({ droneId, droneEntry: drone });
 
         // CLI-agnostic "continuation": keep one tmux session per chat.
         // This avoids relying on any CLI-specific resume flag.

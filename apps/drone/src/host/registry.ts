@@ -137,6 +137,10 @@ type DroneRegistryV1 = {
       uploadMaxBytes?: number;
       updatedAt?: string;
     };
+    agents?: {
+      content?: string;
+      updatedAt?: string;
+    };
     kanbanBoard?: {
       taskTypes?: Array<{
         id?: string;
@@ -225,6 +229,11 @@ type DroneRegistryV1 = {
       environment?: {
         vars?: Record<string, string>;
         autoApplyToNewContainerDrones?: boolean;
+        updatedAt?: string;
+      };
+      agents?: {
+        mode?: 'inherit' | 'override' | 'disabled';
+        content?: string;
         updatedAt?: string;
       };
     }
