@@ -5,6 +5,7 @@ import type { MoveDronesToGroupResult } from './use-group-management';
 import {
   insertSidebarGroupOrderToken,
   mergeVisibleSidebarGroupOrder,
+  removeSidebarGroupOrderToken,
   renameSidebarEntryOrderMapKeysByPrefix,
   renameSidebarGroupTokenListByPrefix,
   type SidebarGroupCreatePlacement,
@@ -31,6 +32,7 @@ type ReparentDronesResult = {
   ok: boolean;
   error?: string | null;
   reparentedIds?: string[];
+  rollbackOptimistic?: () => void;
 };
 
 type OptimisticReparentOptions = {
@@ -99,7 +101,6 @@ export function useSidebarOptimisticGroups({
       const group = String(groupRaw ?? '').trim();
       if (!group) return { ok: false, error: 'Group name is required.' };
       const placement = opts?.placement ?? 'end';
-      const groupOrderSnapshot = sidebarGroupOrder;
       setSidebarGroupOrder((prev) =>
         insertSidebarGroupOrderToken(prev, sidebarGroups, { group, kind: 'group' }, placement),
       );
@@ -108,11 +109,11 @@ export function useSidebarOptimisticGroups({
       const result = await onCreateGroup(group);
       if (!result.ok) {
         setPendingSidebarOps((prev) => prev.filter((op) => op.id !== opId));
-        setSidebarGroupOrder(groupOrderSnapshot);
+        setSidebarGroupOrder((prev) => removeSidebarGroupOrderToken(prev, { group, kind: 'group' }));
       }
       return result;
     },
-    [createOptimisticSidebarOpId, onCreateGroup, setSidebarGroupOrder, sidebarGroupOrder, sidebarGroups],
+    [createOptimisticSidebarOpId, onCreateGroup, setSidebarGroupOrder, sidebarGroups],
   );
 
   const runOptimisticRenameGroup = React.useCallback(
@@ -220,8 +221,11 @@ export function useSidebarOptimisticGroups({
         return { ok: false, error: 'No drones selected to reparent.', reparentedIds: [] } satisfies ReparentDronesResult;
       }
 
+      const optimisticDrones = isRepoGroupingMode
+        ? sidebarDronesFilteredByRepo
+        : applySidebarOptimisticOpsToDrones(sidebarDronesFilteredByRepo, pendingSidebarOps);
       const targetParentDrone = targetParentDroneId
-        ? sidebarDronesFilteredByRepo.find((drone) => drone.id === targetParentDroneId) ?? null
+        ? optimisticDrones.find((drone) => drone.id === targetParentDroneId) ?? null
         : null;
       const targetGroup = targetParentDrone
         ? (String(targetParentDrone.group ?? '').trim() || null)
@@ -229,6 +233,9 @@ export function useSidebarOptimisticGroups({
           ? String(opts.targetGroup ?? '').trim() || null
           : undefined;
       const opId = createOptimisticSidebarOpId();
+      const rollbackOptimistic = () => {
+        setPendingSidebarOps((prev) => prev.filter((op) => op.id !== opId));
+      };
       setPendingSidebarOps((prev) => [
         ...prev,
         {
@@ -242,11 +249,11 @@ export function useSidebarOptimisticGroups({
 
       const result = await onReparentDronesToParent(targetParentDroneId, droneIds);
       if (!result.ok) {
-        setPendingSidebarOps((prev) => prev.filter((op) => op.id !== opId));
+        rollbackOptimistic();
       }
-      return result;
+      return result.ok ? { ...result, rollbackOptimistic } : result;
     },
-    [createOptimisticSidebarOpId, onReparentDronesToParent, sidebarDronesFilteredByRepo],
+    [createOptimisticSidebarOpId, isRepoGroupingMode, onReparentDronesToParent, pendingSidebarOps, sidebarDronesFilteredByRepo],
   );
 
   const runOptimisticCreateGroupAndMove = React.useCallback(

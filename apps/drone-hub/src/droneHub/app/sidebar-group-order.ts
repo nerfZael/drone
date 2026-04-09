@@ -104,6 +104,12 @@ export function insertSidebarGroupOrderToken<T extends SidebarGroupOrderRef>(
   return normalizeSidebarGroupOrder([...nextVisibleOrder, ...hiddenTokens]);
 }
 
+export function removeSidebarGroupOrderToken(order: string[], group: SidebarGroupOrderRef): string[] {
+  const token = sidebarGroupOrderToken(group);
+  if (!token) return normalizeSidebarGroupOrder(order);
+  return normalizeSidebarGroupOrder(order).filter((entry) => entry !== token);
+}
+
 export function orderSidebarEntries<T>(
   entries: T[],
   order: string[],

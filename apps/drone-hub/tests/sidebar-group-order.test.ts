@@ -4,6 +4,7 @@ import {
   mergeVisibleSidebarGroupOrder,
   orderSidebarEntries,
   orderSidebarGroups,
+  removeSidebarGroupOrderToken,
   renameSidebarEntryOrderMapKey,
   renameSidebarGroupOrderToken,
   reorderSidebarEntryOrder,
@@ -123,6 +124,15 @@ describe('sidebar-group-order', () => {
         'end',
       ),
     ).toEqual(['group:alpha', 'group:alpha/a', 'group:alpha/b', 'group:alpha/c', 'group:beta']);
+  });
+
+  test('can remove only the failed optimistic folder token without resetting newer order changes', () => {
+    expect(
+      removeSidebarGroupOrderToken(
+        ['group:new-folder', 'group:beta', 'group:alpha', 'group:hidden'],
+        { group: 'new-folder', kind: 'group' },
+      ),
+    ).toEqual(['group:beta', 'group:alpha', 'group:hidden']);
   });
 
   test('orders arbitrary entries by a persisted list', () => {

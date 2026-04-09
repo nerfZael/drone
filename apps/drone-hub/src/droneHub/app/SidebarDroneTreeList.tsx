@@ -77,7 +77,7 @@ export type SidebarDroneTreeListProps = {
     parentDroneId: string | null,
     droneIds: string[],
     opts?: { targetGroup?: string | null },
-  ) => Promise<{ ok: boolean; error?: string | null; reparentedIds?: string[] }>;
+  ) => Promise<{ ok: boolean; error?: string | null; reparentedIds?: string[]; rollbackOptimistic?: () => void }>;
   groupOrderKey?: string | null;
   groupName?: string | null;
   showGroup?: boolean;

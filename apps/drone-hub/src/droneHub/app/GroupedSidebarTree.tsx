@@ -146,7 +146,7 @@ type GroupedSidebarTreeProps = {
     parentDroneId: string | null,
     droneIds: string[],
     opts?: { targetGroup?: string | null },
-  ) => Promise<{ ok: boolean; error?: string | null; reparentedIds?: string[] }>;
+  ) => Promise<{ ok: boolean; error?: string | null; reparentedIds?: string[]; rollbackOptimistic?: () => void }>;
 };
 
 type TreeDropPlacement = SidebarGroupDropPlacement | 'into';
@@ -1274,6 +1274,9 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       if (!needsGroupMove) return true;
 
       const moveResult = await onMoveDronesToGroup(normalizedTargetGroup ?? 'Ungrouped', movingDroneIds);
+      if (!moveResult.ok) {
+        reparentResult.rollbackOptimistic?.();
+      }
       return moveResult.ok;
     },
     [droneById, onMoveDronesToGroup, props],
