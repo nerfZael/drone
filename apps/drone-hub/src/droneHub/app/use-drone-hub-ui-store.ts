@@ -455,25 +455,66 @@ function normalizeChatInputDrafts(value: unknown): Record<string, string> {
   return out;
 }
 
+function isExactShortcutBinding(
+  value: unknown,
+  expected: ShortcutBinding | null,
+): boolean {
+  const normalized = sanitizeSingleShortcutBinding(value, null);
+  if (!normalized || !expected) return normalized === expected;
+  return (
+    normalized.key === expected.key &&
+    normalized.mod === expected.mod &&
+    normalized.ctrl === expected.ctrl &&
+    normalized.meta === expected.meta &&
+    normalized.alt === expected.alt &&
+    normalized.shift === expected.shift
+  );
+}
+
 function migrateLegacyShortcutBindings(value: unknown): unknown {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
   const raw = value as Record<string, unknown>;
-  if (Object.prototype.hasOwnProperty.call(raw, 'focusPrimaryChatInput')) return value;
+  const next = { ...raw };
+  let changed = false;
   const createDraftRaw = raw.createDraftDrone;
-  if (!createDraftRaw || typeof createDraftRaw !== 'object' || Array.isArray(createDraftRaw)) return value;
-  const binding = createDraftRaw as Record<string, unknown>;
-  const key = String(binding.key ?? '').trim().toLowerCase();
-  const mod = binding.mod === true;
-  const ctrl = binding.ctrl === true;
-  const meta = binding.meta === true;
-  const alt = binding.alt === true;
-  const shift = binding.shift === true;
-  const isLegacyDefaultCreateShortcut = key === 'enter' && !mod && !ctrl && !meta && !alt && !shift;
-  if (!isLegacyDefaultCreateShortcut) return value;
-  return {
-    ...raw,
-    createDraftDrone: { key: 'tab', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  };
+  if (createDraftRaw && typeof createDraftRaw === 'object' && !Array.isArray(createDraftRaw)) {
+    const binding = createDraftRaw as Record<string, unknown>;
+    const key = String(binding.key ?? '').trim().toLowerCase();
+    const mod = binding.mod === true;
+    const ctrl = binding.ctrl === true;
+    const meta = binding.meta === true;
+    const alt = binding.alt === true;
+    const shift = binding.shift === true;
+    const isLegacyDefaultCreateShortcut = key === 'enter' && !mod && !ctrl && !meta && !alt && !shift;
+    if (isLegacyDefaultCreateShortcut) {
+      next.createDraftDrone = { key: 'tab', mod: false, ctrl: false, meta: false, alt: false, shift: false };
+      changed = true;
+    }
+  }
+  const hasCreateDroneChatBinding = Object.prototype.hasOwnProperty.call(raw, 'createDroneChat');
+  const usesLegacyUnreadShortcut = isExactShortcutBinding(raw.markSelectedDronesUnread, {
+    key: 'q',
+    mod: false,
+    ctrl: false,
+    meta: false,
+    alt: false,
+    shift: false,
+  });
+  const usesLegacyTldrShortcut = isExactShortcutBinding(raw.toggleTldr, {
+    key: 'w',
+    mod: false,
+    ctrl: false,
+    meta: false,
+    alt: false,
+    shift: false,
+  });
+  if (!hasCreateDroneChatBinding && usesLegacyUnreadShortcut && usesLegacyTldrShortcut) {
+    next.createDroneChat = { key: 'q', mod: false, ctrl: false, meta: false, alt: false, shift: false };
+    next.markSelectedDronesUnread = { key: 'z', mod: false, ctrl: false, meta: false, alt: false, shift: false };
+    next.toggleTldr = null;
+    changed = true;
+  }
+  return changed ? next : value;
 }
 
 let pendingChatInputDraftsPersist: Record<string, string> | null = null;

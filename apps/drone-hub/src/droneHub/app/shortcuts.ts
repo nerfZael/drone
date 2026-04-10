@@ -1,6 +1,7 @@
 export type ShortcutActionId =
   | 'openFleetDashboard'
   | 'createDraftDrone'
+  | 'createDroneChat'
   | 'openKanbanBoard'
   | 'focusPrimaryChatInput'
   | 'markSelectedDronesUnread'
@@ -43,6 +44,11 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     id: 'createDraftDrone',
     label: 'Create new drone',
     description: 'Opens the quick single-drone composer.',
+  },
+  {
+    id: 'createDroneChat',
+    label: 'Create new chat',
+    description: 'Creates a new chat on the selected drone, opens it immediately, and focuses the composer.',
   },
   {
     id: 'openKanbanBoard',
@@ -119,13 +125,14 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
 const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   openFleetDashboard: { key: 'v', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   createDraftDrone: { key: 'tab', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  createDroneChat: { key: 'q', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openKanbanBoard: { key: 'y', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   focusPrimaryChatInput: { key: 'enter', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  markSelectedDronesUnread: { key: 'q', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  markSelectedDronesUnread: { key: 'z', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleSidebarCollapsed: { key: 'a', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleRightPanelOpen: { key: 'd', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleRightPanelWidth: { key: 's', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  toggleTldr: { key: 'w', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  toggleTldr: null,
   openHoveredGroupMultiChat: { key: 'g', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openPullRequestsTab: { key: 'r', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openChangesTab: { key: 'c', mod: false, ctrl: false, meta: false, alt: false, shift: false },
@@ -188,6 +195,7 @@ export function cloneDefaultShortcutBindings(): ShortcutBindingMap {
   return {
     openFleetDashboard: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openFleetDashboard),
     createDraftDrone: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createDraftDrone),
+    createDroneChat: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createDroneChat),
     openKanbanBoard: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openKanbanBoard),
     focusPrimaryChatInput: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.focusPrimaryChatInput),
     markSelectedDronesUnread: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.markSelectedDronesUnread),

@@ -93,6 +93,25 @@ export function chatInputDraftKeyForDroneChat(droneIdRaw: string, chatNameRaw: s
   return `drone:${droneId}:chat:${chatName}`;
 }
 
+export function suggestNextDroneChatName(chats: readonly string[] | null | undefined): string {
+  const availableChats = Array.isArray(chats) ? chats : [];
+  const taken = new Set(
+    availableChats
+      .map((chat) => String(chat ?? '').trim())
+      .filter(Boolean),
+  );
+  let nextIndex = Math.max(1, taken.size + 1);
+  for (const chat of taken) {
+    const match = chat.match(/^chat-(\d+)$/i);
+    if (!match) continue;
+    const index = Number(match[1]);
+    if (!Number.isFinite(index) || index < 1) continue;
+    nextIndex = Math.max(nextIndex, index + 1);
+  }
+  while (taken.has(`chat-${nextIndex}`)) nextIndex += 1;
+  return `chat-${nextIndex}`;
+}
+
 export function newDraftChatFocusKey(nowMs: number = Date.now(), randomSeed: number = Math.random()): string {
   const ms = Number.isFinite(nowMs) && nowMs > 0 ? Math.floor(nowMs) : Date.now();
   const rnd = Number.isFinite(randomSeed) && randomSeed >= 0 ? randomSeed : Math.random();

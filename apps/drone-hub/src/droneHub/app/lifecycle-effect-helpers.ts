@@ -75,6 +75,11 @@ export function shouldDispatchEditableShortcutAction({
   targetInPrimaryChatInput,
   targetInCanvasMessageInput,
 }: EditableShortcutDispatchArgs): boolean {
-  if (matchedActionId !== 'createDraftDrone') return false;
-  return targetInPrimaryChatInput || targetInCanvasMessageInput;
+  if (matchedActionId === 'createDraftDrone') {
+    return targetInPrimaryChatInput || targetInCanvasMessageInput;
+  }
+  if (matchedActionId === 'createDroneChat') {
+    return targetInPrimaryChatInput;
+  }
+  return false;
 }

@@ -37,6 +37,7 @@ type UseDroneHubLifecycleEffectsArgs = {
   setDroneErrorModal: Setter<DroneErrorModalState | null>;
   openFleetDashboard: () => void;
   openDraftChatComposer: (opts?: { repoPath?: string | null; group?: string | null }) => void;
+  createDroneChatFromShortcut: () => Promise<boolean>;
   openKanbanBoard: () => void;
   openGroupMultiChat: (group: string) => void;
   openSidebarVisibleMultiChat: () => void;
@@ -108,6 +109,7 @@ export function useDroneHubLifecycleEffects({
   setDroneErrorModal,
   openFleetDashboard,
   openDraftChatComposer,
+  createDroneChatFromShortcut,
   openKanbanBoard,
   openGroupMultiChat,
   openSidebarVisibleMultiChat,
@@ -186,6 +188,29 @@ export function useDroneHubLifecycleEffects({
   }, [droneErrorModal, setDroneErrorModal]);
 
   React.useEffect(() => {
+    const focusPrimaryChatInput = (): boolean => {
+      const modalOpen = Boolean(document.querySelector('[role="dialog"][aria-modal="true"]'));
+      if (modalOpen) return false;
+      const primaryInput = document.querySelector<HTMLTextAreaElement>(
+        '[data-chat-input-focus-id="primary-chat"]',
+      );
+      if (!primaryInput) return false;
+      if (primaryInput.getClientRects().length === 0) return false;
+      primaryInput.focus();
+      const end = primaryInput.value.length;
+      primaryInput.setSelectionRange(end, end);
+      return true;
+    };
+
+    const focusPrimaryChatInputWithRetry = (remainingAttempts: number = 10) => {
+      if (focusPrimaryChatInput() || remainingAttempts <= 0) return;
+      window.setTimeout(() => {
+        window.requestAnimationFrame(() => {
+          focusPrimaryChatInputWithRetry(remainingAttempts - 1);
+        });
+      }, 30);
+    };
+
     const openRightPanelTabFromShortcut = (tab: RightPanelTab) => {
       if (!currentDrone) return;
       setRightPanelOpen(true);
@@ -280,23 +305,20 @@ export function useDroneHubLifecycleEffects({
         }
         return true;
       },
+      createDroneChat: () => {
+        if (!currentDrone) return false;
+        void (async () => {
+          const created = await createDroneChatFromShortcut();
+          if (!created) return;
+          focusPrimaryChatInputWithRetry();
+        })();
+        return true;
+      },
       openKanbanBoard: () => {
         openKanbanBoard();
         return true;
       },
-      focusPrimaryChatInput: () => {
-        const modalOpen = Boolean(document.querySelector('[role="dialog"][aria-modal="true"]'));
-        if (modalOpen) return false;
-        const primaryInput = document.querySelector<HTMLTextAreaElement>(
-          '[data-chat-input-focus-id="primary-chat"]',
-        );
-        if (!primaryInput) return false;
-        if (primaryInput.getClientRects().length === 0) return false;
-        primaryInput.focus();
-        const end = primaryInput.value.length;
-        primaryInput.setSelectionRange(end, end);
-        return true;
-      },
+      focusPrimaryChatInput: () => focusPrimaryChatInput(),
       markSelectedDronesUnread: () => onMarkSelectedDronesUnreadShortcut(),
       toggleSidebarCollapsed: () => {
         setSidebarCollapsed((prev) => !prev);
@@ -426,6 +448,7 @@ export function useDroneHubLifecycleEffects({
     currentDrone,
     openFleetDashboard,
     openDraftChatComposer,
+    createDroneChatFromShortcut,
     openKanbanBoard,
     openGroupMultiChat,
     openSidebarVisibleMultiChat,

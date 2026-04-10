@@ -28,4 +28,21 @@ describe('editable shortcut dispatch', () => {
     });
     expect(out).toBe(false);
   });
+
+  test('allows create-chat shortcut from primary chat input only', () => {
+    expect(
+      shouldDispatchEditableShortcutAction({
+        matchedActionId: 'createDroneChat',
+        targetInPrimaryChatInput: true,
+        targetInCanvasMessageInput: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldDispatchEditableShortcutAction({
+        matchedActionId: 'createDroneChat',
+        targetInPrimaryChatInput: false,
+        targetInCanvasMessageInput: true,
+      }),
+    ).toBe(false);
+  });
 });
