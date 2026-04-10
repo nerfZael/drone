@@ -395,9 +395,6 @@ export class DvmApi {
       'log="$root/output.log"',
       clearLog ? ': > "$log"' : '',
       'touch "$log"',
-      `printf "\\n[dvm session %s] started %s\\n" ${JSON.stringify(
-        sessionName
-      )} "$(date -Is)" >> "$log"`,
       `tmux set-option -t "$TMUX_PANE" history-limit ${JSON.stringify(String(history))} || true`,
       'tmux set-option -t "$TMUX_PANE" remain-on-exit on || true',
       `tmux pipe-pane -o -t "$TMUX_PANE" 'if [ -d /dvm-data ]; then b=/dvm-data; else b=/tmp; fi; mkdir -p "$b/dvm-sessions/${sessionName}"; exec cat >> "$b/dvm-sessions/${sessionName}/output.log"' || true`,

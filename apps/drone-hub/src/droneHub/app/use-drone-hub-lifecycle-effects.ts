@@ -302,6 +302,10 @@ export function useDroneHubLifecycleEffects({
         setSidebarCollapsed((prev) => !prev);
         return true;
       },
+      toggleRightPanelOpen: () => {
+        setRightPanelOpen((prev) => !prev);
+        return true;
+      },
       toggleRightPanelWidth: () => {
         setRightPanelOpen(true);
         const nextWidth = resolveNextRightPanelShortcutWidth(rightPanelWidth, rightPanelWidthMax);

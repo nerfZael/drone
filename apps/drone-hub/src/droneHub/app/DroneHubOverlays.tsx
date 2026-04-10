@@ -2,6 +2,7 @@ import React from 'react';
 import { CreateDronesFromAgentMessageModal } from '../../CreateDronesFromAgentMessageModal';
 import { CreateDronesModal } from './CreateDronesModal';
 import { CustomAgentsModal } from './CustomAgentsModal';
+import { DirtyDroneApplyModal } from './DirtyDroneApplyModal';
 import { DroneDropActionModal } from './DroneDropActionModal';
 import { DraftCreateDroneModal } from './DraftCreateDroneModal';
 import { DroneErrorModal } from './DroneErrorModal';
@@ -15,6 +16,7 @@ export type DroneHubOverlaysProps = {
   hubTransientToastsProps: React.ComponentProps<typeof HubTransientToasts>;
   createFromAgentMessageModalProps: React.ComponentProps<typeof CreateDronesFromAgentMessageModal>;
   reposModalProps: React.ComponentProps<typeof ReposModal> | null;
+  dirtyDroneApplyModalProps: React.ComponentProps<typeof DirtyDroneApplyModal> | null;
   droneErrorModalProps: React.ComponentProps<typeof DroneErrorModal> | null;
   droneDropActionModalProps: React.ComponentProps<typeof DroneDropActionModal> | null;
 };
@@ -26,6 +28,7 @@ export function DroneHubOverlays({
   hubTransientToastsProps,
   createFromAgentMessageModalProps,
   reposModalProps,
+  dirtyDroneApplyModalProps,
   droneErrorModalProps,
   droneDropActionModalProps,
 }: DroneHubOverlaysProps) {
@@ -37,6 +40,7 @@ export function DroneHubOverlays({
       <HubTransientToasts {...hubTransientToastsProps} />
       <CreateDronesFromAgentMessageModal {...createFromAgentMessageModalProps} />
       {reposModalProps && <ReposModal {...reposModalProps} />}
+      {dirtyDroneApplyModalProps && <DirtyDroneApplyModal {...dirtyDroneApplyModalProps} />}
       {droneErrorModalProps && <DroneErrorModal {...droneErrorModalProps} />}
       {droneDropActionModalProps && <DroneDropActionModal {...droneDropActionModalProps} />}
     </>

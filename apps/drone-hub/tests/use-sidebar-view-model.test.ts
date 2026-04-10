@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { buildRepoSidebarGroups } from '../src/droneHub/app/sidebar-repo-groups';
+import { isSidebarGroupDeleting } from '../src/droneHub/app/sidebar-group-delete-visibility';
 import type { DroneSummary } from '../src/droneHub/types';
 
 function drone(seed: Partial<DroneSummary> & Pick<DroneSummary, 'id' | 'name'>): DroneSummary {
@@ -65,5 +66,31 @@ describe('buildRepoSidebarGroups', () => {
         items: [],
       },
     ]);
+  });
+});
+
+describe('isSidebarGroupDeleting', () => {
+  test('matches descendant grouped folders while a parent delete is in progress', () => {
+    expect(
+      isSidebarGroupDeleting(
+        { group: 'alpha/beta', kind: 'group' },
+        { alpha: true },
+      ),
+    ).toBe(true);
+  });
+
+  test('matches repo groups by exact repo key only', () => {
+    expect(
+      isSidebarGroupDeleting(
+        { group: 'repo:/work/repo-a', kind: 'repo' },
+        { 'repo:/work/repo-a': true },
+      ),
+    ).toBe(true);
+    expect(
+      isSidebarGroupDeleting(
+        { group: 'repo:/work/repo-b', kind: 'repo' },
+        { 'repo:/work/repo-a': true },
+      ),
+    ).toBe(false);
   });
 });

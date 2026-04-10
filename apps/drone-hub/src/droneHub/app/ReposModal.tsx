@@ -16,6 +16,18 @@ type RepoEnvPayload = {
   entries: Array<{ key: string; value: string; source: 'repo' }>;
 };
 
+type RepoAgentsPayload = {
+  ok: true;
+  repoPath: string;
+  label: string;
+  registered: boolean;
+  mode: 'inherit' | 'override' | 'disabled';
+  content: string;
+  updatedAt: string | null;
+  effectiveContent: string | null;
+  effectiveSource: 'repo' | 'default' | null;
+};
+
 type ReposModalProps = {
   repos: RepoSummary[];
   reposError: string | null | undefined;
@@ -53,6 +65,8 @@ export function ReposModal({
   const [notice, setNotice] = React.useState<string | null>(null);
   const [autoApply, setAutoApply] = React.useState(false);
   const [entries, setEntries] = React.useState<EnvDraftEntry[]>([]);
+  const [repoAgentsMode, setRepoAgentsMode] = React.useState<'inherit' | 'override' | 'disabled'>('inherit');
+  const [repoAgentsContent, setRepoAgentsContent] = React.useState('');
   const normalizedActiveRepoPath = String(activeRepoPath ?? '').trim();
   const { importText, setImportText, importFromText, importFromFile } = useEnvDraftImport({
     setEntries,
@@ -90,9 +104,20 @@ export function ReposModal({
     setConfigError(null);
     setNotice(null);
     try {
-      const payload = await requestJson<RepoEnvPayload>(`/api/repo-env?repoPath=${encodeURIComponent(repoPath)}`);
-      setEntries(envValueEntriesToDraftEntries(payload.entries));
-      setAutoApply(payload.autoApplyToNewContainerDrones);
+      const envPromise = requestJson<RepoEnvPayload>(`/api/repo-env?repoPath=${encodeURIComponent(repoPath)}`);
+      const agentsPromise = repoPath
+        ? requestJson<RepoAgentsPayload>(`/api/repo-agents?repoPath=${encodeURIComponent(repoPath)}`)
+        : Promise.resolve<RepoAgentsPayload | null>(null);
+      const [envPayload, agentsPayload] = await Promise.all([envPromise, agentsPromise]);
+      setEntries(envValueEntriesToDraftEntries(envPayload.entries));
+      setAutoApply(envPayload.autoApplyToNewContainerDrones);
+      if (agentsPayload) {
+        setRepoAgentsMode(agentsPayload.mode);
+        setRepoAgentsContent(agentsPayload.content);
+      } else {
+        setRepoAgentsMode('inherit');
+        setRepoAgentsContent('');
+      }
     } catch (err: any) {
       setConfigError(err?.message ?? String(err));
     } finally {
@@ -114,7 +139,7 @@ export function ReposModal({
     }
     setSaving(true);
     try {
-      const payload = await requestJson<RepoEnvPayload>('/api/repo-env', {
+      const envPromise = requestJson<RepoEnvPayload>('/api/repo-env', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -123,16 +148,33 @@ export function ReposModal({
           vars: envDraftEntriesToMap(entries),
         }),
       });
-      setEntries(envValueEntriesToDraftEntries(payload.entries));
-      setAutoApply(payload.autoApplyToNewContainerDrones);
+      const agentsPromise =
+        selectedRepoPath && selectedRepoPath.trim()
+          ? requestJson<RepoAgentsPayload>('/api/repo-agents', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                repoPath: selectedRepoPath,
+                mode: repoAgentsMode,
+                content: repoAgentsContent,
+              }),
+            })
+          : Promise.resolve<RepoAgentsPayload | null>(null);
+      const [envPayload, agentsPayload] = await Promise.all([envPromise, agentsPromise]);
+      setEntries(envValueEntriesToDraftEntries(envPayload.entries));
+      setAutoApply(envPayload.autoApplyToNewContainerDrones);
+      if (agentsPayload) {
+        setRepoAgentsMode(agentsPayload.mode);
+        setRepoAgentsContent(agentsPayload.content);
+      }
       setConfigError(null);
-      setNotice('Repository environment updated.');
+      setNotice(selectedRepoPath ? 'Repository settings updated.' : 'Repository environment updated.');
     } catch (err: any) {
       setConfigError(err?.message ?? String(err));
     } finally {
       setSaving(false);
     }
-  }, [autoApply, entries, selectedRepoPath, validationError]);
+  }, [autoApply, entries, repoAgentsContent, repoAgentsMode, selectedRepoPath, validationError]);
 
   const currentRepoPath = selectedRepoPath ?? '';
   const selectedRepoMeta = repoItems.find((repo) => String(repo.path ?? '') === currentRepoPath) ?? null;
@@ -355,6 +397,75 @@ export function ReposModal({
                 textareaClassName="min-h-[130px] rounded border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-3 py-2 font-mono text-[11px] text-[var(--fg)] focus:outline-none"
               />
             </div>
+
+            {currentRepoPath ? (
+              <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] p-4 flex flex-col gap-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-[10px] font-semibold tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
+                      AGENTS.md Override
+                    </div>
+                    <div className="text-[11px] text-[var(--muted-dim)]">
+                      Choose whether this repo inherits the Hub default, replaces it, or disables injection entirely.
+                    </div>
+                  </div>
+                  <div className="text-[10px] text-[var(--muted-dim)]">
+                    {repoAgentsMode === 'override'
+                      ? 'Custom override'
+                      : repoAgentsMode === 'disabled'
+                        ? 'Disabled'
+                        : 'Inherited'}
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {([
+                    { id: 'inherit', label: 'Inherit default' },
+                    { id: 'override', label: 'Custom override' },
+                    { id: 'disabled', label: 'Disable' },
+                  ] as const).map((option) => {
+                    const active = repoAgentsMode === option.id;
+                    return (
+                      <button
+                        key={option.id}
+                        type="button"
+                        onClick={() => setRepoAgentsMode(option.id)}
+                        disabled={saving}
+                        className={`h-9 rounded border px-3 text-[10px] font-semibold tracking-wide uppercase ${
+                          active
+                            ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                            : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] text-[var(--muted)] hover:bg-[var(--hover)]'
+                        } ${saving ? 'opacity-60 cursor-not-allowed' : ''}`}
+                        style={{ fontFamily: 'var(--display)' }}
+                      >
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <textarea
+                  value={repoAgentsContent}
+                  onChange={(event) => setRepoAgentsContent(event.target.value)}
+                  disabled={saving || repoAgentsMode !== 'override'}
+                  spellCheck={false}
+                  className={`min-h-[220px] rounded border px-3 py-3 font-mono text-[11px] focus:outline-none ${
+                    saving || repoAgentsMode !== 'override'
+                      ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] text-[var(--muted-dim)]'
+                      : 'border-[var(--border-subtle)] bg-[var(--panel-raised)] text-[var(--fg)] focus:border-[var(--accent-muted)]'
+                  }`}
+                  placeholder={'# Repo-specific instructions\n\nOverride the Hub default for this repository only.'}
+                />
+
+                <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] px-3 py-2 text-[11px] text-[var(--muted-dim)]">
+                  Repo-attached container drones copy the effective content into the repo root as `AGENTS.md`.
+                </div>
+              </div>
+            ) : (
+              <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] p-4 text-[11px] text-[var(--muted-dim)]">
+                `AGENTS.md` injection only applies to repo-attached drones. The shared no-repository scope keeps environment variables only.
+              </div>
+            )}
 
             {selectedGithubUrl ? (
               <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] p-4 flex items-center justify-between gap-3">

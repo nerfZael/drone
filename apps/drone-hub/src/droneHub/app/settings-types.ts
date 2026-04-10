@@ -66,6 +66,15 @@ export type FilesystemSettingsResponse = {
   };
 };
 
+export type AgentsSettingsResponse = {
+  ok: true;
+  agents: {
+    content: string;
+    enabled: boolean;
+    updatedAt: string | null;
+  };
+};
+
 export type GithubSettingsResponse = {
   ok: true;
   github: {

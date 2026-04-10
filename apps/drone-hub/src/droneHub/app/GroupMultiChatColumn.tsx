@@ -28,6 +28,12 @@ import {
   normalizePendingPromptState,
   reconcileOptimisticPendingPrompt,
 } from './optimistic-pending-prompts';
+import { DirtyDroneApplyModal } from './DirtyDroneApplyModal';
+import {
+  dirtyDroneApplyRequestBody,
+  reconcileDirtyDroneApplyModal,
+  type DirtyDroneApplyModalState,
+} from './dirty-drone-apply';
 import { parseIsoDateMs, type GroupMultiChatColumnRuntimeState } from './group-multi-chat-sort';
 import { openDroneTabFromLastPreview, resolveDroneOpenTabUrl } from './quick-actions';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
@@ -77,6 +83,7 @@ export function GroupMultiChatColumn({
   const [optimisticPendingPrompts, setOptimisticPendingPrompts] = React.useState<PendingPrompt[]>([]);
   const [quickActionBusy, setQuickActionBusy] = React.useState<null | 'ssh' | 'pull' | 'push'>(null);
   const [quickActionError, setQuickActionError] = React.useState<string | null>(null);
+  const [dirtyDroneApplyModal, setDirtyDroneApplyModal] = React.useState<DirtyDroneApplyModalState | null>(null);
   const columnScrollRef = React.useRef<HTMLDivElement | null>(null);
   const draftKey = React.useMemo(() => chatInputDraftKeyForDroneChat(drone.id, chatName), [drone.id, chatName]);
   const draftValue = useDroneHubUiStore((s) => s.chatInputDrafts[draftKey] ?? '');
@@ -371,7 +378,7 @@ export function GroupMultiChatColumn({
     }
   }, [chatName, disabledByProvisioning, drone, quickActionBusy, terminalEmulator]);
 
-  const pullRepoChanges = React.useCallback(async () => {
+  const executePullRepoChanges = React.useCallback(async (body: Record<string, unknown> = {}) => {
     if (disabledByProvisioning || quickActionBusy || !repoAttached) return;
     setQuickActionBusy('pull');
     setQuickActionError(null);
@@ -394,21 +401,17 @@ export function GroupMultiChatColumn({
         return { ok: response.ok, status: response.status, statusText: response.statusText, data: parsed };
       };
 
-      const defaultAutoCommitMessage = 'chore(drone): snapshot working tree before apply changes';
-      let result = await postPull({});
+      let result = await postPull(body);
       const initialCode = String(result.data?.code ?? '').trim().toLowerCase();
       if (!result.ok && initialCode === 'drone_dirty') {
-        const dirtyFileCount = Number(result.data?.dirtyFileCount);
-        const dirtyLabel =
-          Number.isFinite(dirtyFileCount) && dirtyFileCount > 0
-            ? `${Math.floor(dirtyFileCount)} file${dirtyFileCount === 1 ? '' : 's'}`
-            : 'one or more files';
-        const autoCommitMessage = String(result.data?.autoCommitMessage ?? '').trim() || defaultAutoCommitMessage;
-        const confirmed = window.confirm(
-          `This drone has uncommitted changes (${dirtyLabel}).\n\nPress OK to stage everything, create a placeholder commit, and continue Apply Changes.\n\nPress Cancel to stop.`,
-        );
-        if (!confirmed) return;
-        result = await postPull({ commitDirty: true, commitMessage: autoCommitMessage });
+        setDirtyDroneApplyModal({
+          droneId: String(drone.id ?? '').trim(),
+          droneLabel: shownName,
+          dirtyFileCount: Number(result.data?.dirtyFileCount) || 0,
+          autoCommitMessage:
+            String(result.data?.autoCommitMessage ?? '').trim() || 'chore(drone): snapshot working tree before apply changes',
+        });
+        return;
       }
 
       if (!result.ok) {
@@ -419,7 +422,25 @@ export function GroupMultiChatColumn({
     } finally {
       setQuickActionBusy(null);
     }
-  }, [disabledByProvisioning, drone.id, quickActionBusy, repoAttached]);
+  }, [disabledByProvisioning, drone.id, quickActionBusy, repoAttached, shownName]);
+
+  const pullRepoChanges = React.useCallback(async () => {
+    await executePullRepoChanges();
+  }, [executePullRepoChanges]);
+
+  const continueDirtyDroneApply = React.useCallback(
+    async (choice: 'commit' | 'keep') => {
+      if (!dirtyDroneApplyModal) return;
+      const requestBody = dirtyDroneApplyRequestBody(choice, dirtyDroneApplyModal.autoCommitMessage);
+      setDirtyDroneApplyModal(null);
+      await executePullRepoChanges(requestBody);
+    },
+    [dirtyDroneApplyModal, executePullRepoChanges],
+  );
+
+  React.useEffect(() => {
+    setDirtyDroneApplyModal((current) => reconcileDirtyDroneApplyModal(current, drone.id));
+  }, [drone.id]);
 
   const pushRepoChanges = React.useCallback(async () => {
     if (disabledByProvisioning || quickActionBusy || !repoAttached) return;
@@ -669,6 +690,19 @@ export function GroupMultiChatColumn({
         stopping={stoppingResponse}
         onSend={sendPrompt}
       />
+      {dirtyDroneApplyModal ? (
+        <DirtyDroneApplyModal
+          dirtyDroneApplyModal={dirtyDroneApplyModal}
+          busy={quickActionBusy === 'pull'}
+          onCancel={() => setDirtyDroneApplyModal(null)}
+          onKeepDirtyAndApply={() => {
+            void continueDirtyDroneApply('keep');
+          }}
+          onCommitAndApply={() => {
+            void continueDirtyDroneApply('commit');
+          }}
+        />
+      ) : null}
     </section>
   );
 }

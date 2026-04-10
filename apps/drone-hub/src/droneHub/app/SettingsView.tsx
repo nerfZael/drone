@@ -1,4 +1,5 @@
 import React from 'react';
+import { AgentsSettingsSection } from './AgentsSettingsSection';
 import { AutomationSettingsSection } from './AutomationSettingsSection';
 import { ArchiveSettingsTab } from './ArchiveSettingsTab';
 import { GeneralSettingsTab } from './GeneralSettingsTab';
@@ -12,6 +13,7 @@ import { TrashBehaviorSettingsTab } from './TrashBehaviorSettingsTab';
 import { SETTINGS_TABS, type SettingsTabId } from './settings-tabs';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 import type { UseDeleteActionSettingsResult } from './use-delete-action-settings';
+import type { UseAgentsSettingsResult } from './use-agents-settings';
 import type { UseFilesystemSettingsResult } from './use-filesystem-settings';
 import type { UseGithubSettingsResult } from './use-github-settings';
 import type { UseHubLogsResult } from './use-hub-logs';
@@ -23,6 +25,7 @@ import type { UseSyncSetsResult } from './use-sync-sets';
 type SettingsViewProps = {
   github: UseGithubSettingsResult;
   llm: UseLlmSettingsResult;
+  agents: UseAgentsSettingsResult;
   skillLibrary: UseSkillLibraryResult;
   deleteAction: UseDeleteActionSettingsResult;
   filesystem: UseFilesystemSettingsResult;
@@ -51,6 +54,7 @@ function settingsNavButtonClass(active: boolean) {
 export function SettingsView({
   github,
   llm,
+  agents,
   skillLibrary,
   deleteAction,
   filesystem,
@@ -86,6 +90,8 @@ export function SettingsView({
     llm.savingGeminiSettings ||
     llm.clearingGeminiSettings ||
     llm.savingLlmProvider ||
+    agents.agentsSettingsLoading ||
+    agents.savingAgentsSettings ||
     skillLibrary.skillsLoading ||
     skillLibrary.skillSourcesLoading ||
     skillLibrary.sourceSkillsLoading ||
@@ -102,6 +108,7 @@ export function SettingsView({
     Boolean(profile.activatingProfileName) ||
     Boolean(profile.deletingProfileName);
   const activeTabMeta = SETTINGS_TABS.find((tab) => tab.id === activeTab) ?? SETTINGS_TABS[0];
+  const agentsDraftDirty = agents.agentsContentDraft !== (agents.agentsSettings?.agents.content ?? '');
 
   React.useEffect(() => {
     settingsScrollRef.current?.scrollTo({ top: 0 });
@@ -123,18 +130,23 @@ export function SettingsView({
       const ok = window.confirm('Discard unsaved skill edits and refresh all settings?');
       if (!ok) return;
     }
+    if (agentsDraftDirty) {
+      const ok = window.confirm('Discard unsaved AGENTS.md edits and refresh all settings?');
+      if (!ok) return;
+    }
     void llm.loadLlmSettings();
     void github.loadGithubSettings();
     void deleteAction.loadDeleteSettings();
     void filesystem.loadFilesystemSettings();
     void syncSets.loadSyncSets();
+    void agents.loadAgentsSettings();
     void deleteAction.loadArchivedDrones();
     void deleteAction.loadArchivedChats();
     void profile.loadProfileSettings();
     void hubLogsState.loadHubLogs();
     void skillLibrary.loadSkills();
     void skillLibrary.loadSkillSources();
-  }, [deleteAction, filesystem, github, hubLogsState, llm, profile, skillLibrary, syncSets]);
+  }, [agents, agentsDraftDirty, deleteAction, filesystem, github, hubLogsState, llm, profile, skillLibrary, syncSets]);
 
   const renderActiveTab = () => {
     if (activeTab === 'general') {
@@ -160,6 +172,7 @@ export function SettingsView({
       return <PlaybookSettingsSection focusedPlaybookId={focusedPlaybookId} onFocusedPlaybookHandled={onFocusedPlaybookHandled} />;
     }
     if (activeTab === 'skills') return <SkillLibrarySection skillLibrary={skillLibrary} />;
+    if (activeTab === 'agents') return <AgentsSettingsSection agents={agents} />;
     return <SystemLogsSettingsTab hubLogsState={hubLogsState} hubLogsTailLines={hubLogsTailLines} hubLogsMaxBytes={hubLogsMaxBytes} />;
   };
 

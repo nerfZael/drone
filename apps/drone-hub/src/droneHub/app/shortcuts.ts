@@ -5,6 +5,7 @@ export type ShortcutActionId =
   | 'focusPrimaryChatInput'
   | 'markSelectedDronesUnread'
   | 'toggleSidebarCollapsed'
+  | 'toggleRightPanelOpen'
   | 'toggleRightPanelWidth'
   | 'toggleTldr'
   | 'openHoveredGroupMultiChat'
@@ -64,6 +65,11 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     description: 'Toggles the left drone sidebar between minimized and expanded.',
   },
   {
+    id: 'toggleRightPanelOpen',
+    label: 'Toggle side panel visibility',
+    description: 'Shows or hides the right side panel.',
+  },
+  {
     id: 'toggleRightPanelWidth',
     label: 'Toggle side panel width',
     description: 'Cycles the right panel width between full, two-thirds, and one-third of workspace width.',
@@ -117,9 +123,10 @@ const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   focusPrimaryChatInput: { key: 'enter', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   markSelectedDronesUnread: { key: 'q', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleSidebarCollapsed: { key: 'a', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  toggleRightPanelOpen: { key: 'd', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleRightPanelWidth: { key: 's', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleTldr: { key: 'w', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  openHoveredGroupMultiChat: { key: 'd', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  openHoveredGroupMultiChat: { key: 'g', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openPullRequestsTab: { key: 'r', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openChangesTab: { key: 'c', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openCanvasTab: { key: 'x', mod: false, ctrl: false, meta: false, alt: false, shift: false },
@@ -173,23 +180,28 @@ export function sanitizeSingleShortcutBinding(value: unknown, fallback: Shortcut
   return sanitizeShortcutBinding(value, fallback);
 }
 
+function cloneShortcutBinding(binding: ShortcutBinding | null): ShortcutBinding | null {
+  return binding ? { ...binding } : null;
+}
+
 export function cloneDefaultShortcutBindings(): ShortcutBindingMap {
   return {
-    openFleetDashboard: { ...DEFAULT_SHORTCUT_BINDINGS.openFleetDashboard! },
-    createDraftDrone: { ...DEFAULT_SHORTCUT_BINDINGS.createDraftDrone! },
-    openKanbanBoard: { ...DEFAULT_SHORTCUT_BINDINGS.openKanbanBoard! },
-    focusPrimaryChatInput: { ...DEFAULT_SHORTCUT_BINDINGS.focusPrimaryChatInput! },
-    markSelectedDronesUnread: { ...DEFAULT_SHORTCUT_BINDINGS.markSelectedDronesUnread! },
-    toggleSidebarCollapsed: { ...DEFAULT_SHORTCUT_BINDINGS.toggleSidebarCollapsed! },
-    toggleRightPanelWidth: { ...DEFAULT_SHORTCUT_BINDINGS.toggleRightPanelWidth! },
-    toggleTldr: { ...DEFAULT_SHORTCUT_BINDINGS.toggleTldr! },
-    openHoveredGroupMultiChat: { ...DEFAULT_SHORTCUT_BINDINGS.openHoveredGroupMultiChat! },
-    openPullRequestsTab: { ...DEFAULT_SHORTCUT_BINDINGS.openPullRequestsTab! },
-    openChangesTab: { ...DEFAULT_SHORTCUT_BINDINGS.openChangesTab! },
-    openCanvasTab: { ...DEFAULT_SHORTCUT_BINDINGS.openCanvasTab! },
-    openBrowserTab: { ...DEFAULT_SHORTCUT_BINDINGS.openBrowserTab! },
-    openFilesTab: { ...DEFAULT_SHORTCUT_BINDINGS.openFilesTab! },
-    openTerminalTab: { ...DEFAULT_SHORTCUT_BINDINGS.openTerminalTab! },
+    openFleetDashboard: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openFleetDashboard),
+    createDraftDrone: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createDraftDrone),
+    openKanbanBoard: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openKanbanBoard),
+    focusPrimaryChatInput: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.focusPrimaryChatInput),
+    markSelectedDronesUnread: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.markSelectedDronesUnread),
+    toggleSidebarCollapsed: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleSidebarCollapsed),
+    toggleRightPanelOpen: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleRightPanelOpen),
+    toggleRightPanelWidth: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleRightPanelWidth),
+    toggleTldr: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleTldr),
+    openHoveredGroupMultiChat: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openHoveredGroupMultiChat),
+    openPullRequestsTab: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openPullRequestsTab),
+    openChangesTab: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openChangesTab),
+    openCanvasTab: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openCanvasTab),
+    openBrowserTab: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openBrowserTab),
+    openFilesTab: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openFilesTab),
+    openTerminalTab: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openTerminalTab),
   };
 }
 

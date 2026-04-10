@@ -227,6 +227,9 @@ export function useDroneHubOverlaysProps(args: any): DroneHubOverlaysProps {
     setActiveRepoPath,
     deleteRepo,
     githubUrlForRepo,
+    dirtyDroneApplyModal,
+    closeDirtyDroneApplyModal,
+    continueDirtyDroneApply,
     droneErrorModal,
     clearingDroneError,
     closeDroneErrorModal,
@@ -377,6 +380,18 @@ export function useDroneHubOverlaysProps(args: any): DroneHubOverlaysProps {
           getGithubUrlForRepo: githubUrlForRepo,
         }
       : null,
+    dirtyDroneApplyModalProps: dirtyDroneApplyModal
+      ? {
+          dirtyDroneApplyModal,
+          onCancel: closeDirtyDroneApplyModal,
+          onKeepDirtyAndApply: () => {
+            void continueDirtyDroneApply('keep');
+          },
+          onCommitAndApply: () => {
+            void continueDirtyDroneApply('commit');
+          },
+        }
+      : null,
     droneErrorModalProps: droneErrorModal
       ? {
           droneErrorModal,
@@ -408,6 +423,7 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     setupStatusState,
     llmSettingsState,
     githubSettingsState,
+    agentsSettingsState,
     skillLibraryState,
     deleteActionSettingsState,
     filesystemSettingsState,
@@ -635,6 +651,7 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     settingsViewProps: {
       github: githubSettingsState,
       llm: llmSettingsState,
+      agents: agentsSettingsState,
       skillLibrary: skillLibraryState,
       deleteAction: deleteActionSettingsState,
       filesystem: filesystemSettingsState,

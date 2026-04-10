@@ -85,6 +85,7 @@ export function DroneFilesDock({
   onOpenFile,
   onOpenFileTarget,
   onRefresh,
+  onRefreshOpenedFile,
   openedFile,
   onOpenedFileContentChange,
   onSaveOpenedFile,
@@ -105,6 +106,7 @@ export function DroneFilesDock({
   onOpenFile: (entry: DroneFsEntry) => void;
   onOpenFileTarget?: (next: { path: string; name: string; line?: number | null; column?: number | null }) => void;
   onRefresh: () => void;
+  onRefreshOpenedFile?: () => void;
   openedFile: DroneOpenedFileState;
   onOpenedFileContentChange?: (next: string) => void;
   onSaveOpenedFile?: (contentOverride?: string) => Promise<boolean>;
@@ -236,13 +238,14 @@ export function DroneFilesDock({
 
   const refreshExplorer = React.useCallback(() => {
     onRefresh();
+    onRefreshOpenedFile?.();
     const visibleExpandedDirs = Object.entries(expandedDirs)
       .filter(([, open]) => open)
       .map(([dirPath]) => dirPath);
     for (const dirPath of visibleExpandedDirs) {
       void loadDirectory(dirPath, { force: true });
     }
-  }, [expandedDirs, loadDirectory, onRefresh]);
+  }, [expandedDirs, loadDirectory, onRefresh, onRefreshOpenedFile]);
 
   const uploadFilesToCurrentPath = React.useCallback(
     async (dropped: FileList | File[] | null | undefined) => {
@@ -542,6 +545,7 @@ export function DroneFilesDock({
   }
 
   const showStartupPlaceholder = Boolean(startup?.waiting) && !error && entries.length === 0;
+  const hasOpenedFile = activeOpenedFilePath.length > 0;
   const startupLabel = startup?.hubPhase === 'seeding' ? 'Seeding' : 'Starting';
   const startupDetail = String(startup?.hubMessage ?? '').trim();
   const startupText = startup?.timedOut
@@ -650,8 +654,8 @@ export function DroneFilesDock({
       ) : null}
 
       <div className="flex-1 min-h-0 flex overflow-hidden">
-        <div className="flex-1 min-w-0 min-h-0 p-2.5 overflow-hidden">
-          {activeOpenedFilePath ? (
+        {hasOpenedFile ? (
+          <div className="flex-1 min-w-0 min-h-0 p-2.5 overflow-hidden">
             <OpenedDroneFilePanel
               droneId={droneId}
               file={openedFile}
@@ -660,18 +664,14 @@ export function DroneFilesDock({
               onCloseFile={onCloseOpenedFile}
               onOpenResolvedFile={openResolvedFile}
             />
-          ) : (
-            <div className="h-full min-h-0 rounded-md border border-[var(--border-subtle)] bg-[var(--panel)] flex items-center justify-center p-6">
-              <div className="max-w-sm text-center">
-                <div className="text-[15px] font-medium text-[var(--fg-secondary)]">No file selected</div>
-                <div className="mt-2 text-[12px] text-[var(--muted)]">Select a file from the explorer to view or edit it.</div>
-                <div className="mt-3 font-mono text-[10px] text-[var(--muted-dim)] break-all">{normalizedPath}</div>
-              </div>
-            </div>
-          )}
-        </div>
+          </div>
+        ) : null}
 
-        <div className="w-[300px] shrink-0 border-l border-[var(--border-subtle)] bg-[var(--panel)] flex flex-col">
+        <div
+          className={`shrink-0 bg-[var(--panel)] flex flex-col ${
+            hasOpenedFile ? 'w-[300px] border-l border-[var(--border-subtle)]' : 'w-full'
+          }`}
+        >
           <div className="flex-1 min-h-0 overflow-auto px-1.5 py-1">
             {showStartupPlaceholder ? (
               <div className="rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3 text-[12px] text-[var(--muted)]">

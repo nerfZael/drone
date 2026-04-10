@@ -7,6 +7,7 @@ import { DroneFilesDock } from '../files';
 import { DroneLinksDock, DronePreviewDock } from '../overview';
 import { DronePullRequestsDock } from '../pullRequests';
 import { DroneTerminalDock } from '../terminal';
+import type { TerminalPaneSessionsState } from '../terminal/terminal-tabs-state';
 import type { ChatAgentConfig } from '../../domain';
 import type { UiMenuSelectEntry } from '../../ui/menuSelect';
 import type {
@@ -99,6 +100,17 @@ type RightPanelTabContentProps = {
   currentDroneId: string | null;
   currentCanvasChatNodeId: string | null;
   defaultFsPathForCurrentDrone: string;
+  terminalSessionsState: TerminalPaneSessionsState;
+  onEnsureTerminalSessions: (droneId: string, paneKey: 'top' | 'bottom' | 'single', cwd: string) => void;
+  onCreateTerminalSession: (droneId: string, paneKey: 'top' | 'bottom' | 'single', cwd: string) => void;
+  onActivateTerminalSession: (droneId: string, paneKey: 'top' | 'bottom' | 'single', sessionId: string) => void;
+  onResolveTerminalSessionName: (
+    droneId: string,
+    paneKey: 'top' | 'bottom' | 'single',
+    sessionId: string,
+    sessionName: string,
+  ) => void;
+  onCloseTerminalSession: (droneId: string, paneKey: 'top' | 'bottom' | 'single', sessionId: string) => void;
   uiDroneName: (nameRaw: string) => string;
   currentFsPath: string;
   fsEntries: DroneFsEntry[];
@@ -110,6 +122,7 @@ type RightPanelTabContentProps = {
   setFsExplorerView: React.Dispatch<React.SetStateAction<'list' | 'thumb'>>;
   setCurrentFsPath: (nextPath: string) => void;
   refreshFsList: () => void;
+  onRefreshOpenedEditorFile: () => void;
   selectedPreviewPort: DronePortMapping | null;
   currentPortReachability: PortReachabilityByHostPort;
   portsLoading: boolean;
@@ -171,6 +184,12 @@ export function RightPanelTabContent({
   currentDroneId,
   currentCanvasChatNodeId,
   defaultFsPathForCurrentDrone,
+  terminalSessionsState,
+  onEnsureTerminalSessions,
+  onCreateTerminalSession,
+  onActivateTerminalSession,
+  onResolveTerminalSessionName,
+  onCloseTerminalSession,
   uiDroneName,
   currentFsPath,
   fsEntries,
@@ -182,6 +201,7 @@ export function RightPanelTabContent({
   setFsExplorerView,
   setCurrentFsPath,
   refreshFsList,
+  onRefreshOpenedEditorFile,
   selectedPreviewPort,
   currentPortReachability,
   portsLoading,
@@ -256,6 +276,13 @@ export function RightPanelTabContent({
           droneName={drone.name}
           chatName={chatName}
           defaultCwd={defaultFsPathForCurrentDrone}
+          paneKey={paneKey}
+          sessionsState={terminalSessionsState}
+          onEnsureSessions={onEnsureTerminalSessions}
+          onCreateSession={onCreateTerminalSession}
+          onActivateSession={onActivateTerminalSession}
+          onResolveSessionName={onResolveTerminalSessionName}
+          onCloseSession={onCloseTerminalSession}
           disabled={disabled}
           hubPhase={drone.hubPhase}
           hubMessage={drone.hubMessage}
@@ -310,6 +337,7 @@ export function RightPanelTabContent({
           onSetViewMode={setFsExplorerView}
           onOpenPath={setCurrentFsPath}
           onRefresh={refreshFsList}
+          onRefreshOpenedFile={onRefreshOpenedEditorFile}
           onOpenFile={onOpenFileInEditor}
           onOpenFileTarget={onOpenFileTargetInEditor}
           openedFile={openedFile}

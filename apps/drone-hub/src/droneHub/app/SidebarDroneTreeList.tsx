@@ -26,16 +26,11 @@ import {
   canSetSidebarDroneSelectionParent,
   sidebarDroneDropIntentFromRects,
 } from './sidebar-drone-drop';
+import { sidebarInlineSectionKey, type SidebarInlineSectionKind } from './sidebar-inline-sections';
 import { useDroneSidebarUiState } from './use-drone-hub-ui-store';
 import type { SidebarDroneTree } from './sidebar-drone-tree';
 import type { SidebarDensityMode } from './settings-types';
-
-export type SidebarInlineSectionKind = 'chats' | 'children';
-
-export function sidebarInlineSectionKey(droneIdRaw: string, kind: SidebarInlineSectionKind): string {
-  const droneId = String(droneIdRaw ?? '').trim();
-  return `${kind}:${droneId}`;
-}
+import type { ChatEditorState } from './use-sidebar-interactions';
 
 export type SidebarDroneTreeListProps = {
   droneById: Record<string, DroneSummary>;
@@ -54,6 +49,7 @@ export type SidebarDroneTreeListProps = {
   movingDroneGroups: boolean;
   sidebarOptimisticDroneIdSet: Set<string>;
   collapsedDroneSections: Record<string, boolean>;
+  setCollapsedDroneSections: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   uiDroneName: (nameRaw: string) => string;
   onToggleSection: (droneId: string, kind: SidebarInlineSectionKind) => void;
   onSelectDroneCard: (droneId: string, opts?: { toggle?: boolean; range?: boolean }) => void;
@@ -80,20 +76,14 @@ export type SidebarDroneTreeListProps = {
   onReparentDronesToParent: (
     parentDroneId: string | null,
     droneIds: string[],
-  ) => Promise<{ ok: boolean; error?: string | null; reparentedIds?: string[] }>;
+    opts?: { targetGroup?: string | null },
+  ) => Promise<{ ok: boolean; error?: string | null; reparentedIds?: string[]; rollbackOptimistic?: () => void }>;
   groupOrderKey?: string | null;
   groupName?: string | null;
   showGroup?: boolean;
 };
 
-type ChatEditorState = {
-  mode: 'create' | 'rename';
-  droneId: string;
-  targetChatName: string | null;
-  value: string;
-  error: string | null;
-  pending: boolean;
-};
+export type SidebarDroneTreeListSharedProps = Omit<SidebarDroneTreeListProps, 'tree'>;
 
 type SidebarDroneRowProps = {
   drone: DroneSummary;
@@ -602,6 +592,7 @@ function SidebarDroneNode({
   movingDroneGroups,
   sidebarOptimisticDroneIdSet,
   collapsedDroneSections,
+  setCollapsedDroneSections,
   uiDroneName,
   onToggleSection,
   onSelectDroneCard,
@@ -863,6 +854,7 @@ export function SidebarDroneTreeList({
   movingDroneGroups,
   sidebarOptimisticDroneIdSet,
   collapsedDroneSections,
+  setCollapsedDroneSections,
   uiDroneName,
   onToggleSection,
   onSelectDroneCard,
@@ -997,18 +989,32 @@ export function SidebarDroneTreeList({
     async (parentDroneIdRaw: string | null, sourceDroneIdsRaw: string[]) => {
       const parentDroneId = String(parentDroneIdRaw ?? '').trim() || null;
       if (!canSetSidebarDroneSelectionParent(droneById, sourceDroneIdsRaw, parentDroneId)) return;
-      const result = await onReparentDronesToParent(parentDroneId, sourceDroneIdsRaw);
-      const reparentedIds = Array.isArray(result.reparentedIds)
-        ? result.reparentedIds.map((item) => String(item ?? '').trim()).filter(Boolean)
-        : [];
-      if (
-        parentDroneId &&
-        reparentedIds.length > 0 &&
-        collapsedDroneSections[sidebarInlineSectionKey(parentDroneId, 'children')]
-      ) {
-        onToggleSection(parentDroneId, 'children');
+      const childrenSectionKey = parentDroneId ? sidebarInlineSectionKey(parentDroneId, 'children') : null;
+      const shouldOptimisticallyOpenChildren = Boolean(
+        childrenSectionKey && collapsedDroneSections[childrenSectionKey],
+      );
+      if (childrenSectionKey && shouldOptimisticallyOpenChildren) {
+        setCollapsedDroneSections((prev) =>
+          prev[childrenSectionKey]
+            ? {
+                ...prev,
+                [childrenSectionKey]: false,
+              }
+            : prev,
+        );
       }
+      const result = await onReparentDronesToParent(parentDroneId, sourceDroneIdsRaw, { targetGroup: groupName });
       if (!result.ok && result.error) {
+        if (childrenSectionKey && shouldOptimisticallyOpenChildren) {
+          setCollapsedDroneSections((prev) =>
+            prev[childrenSectionKey]
+              ? prev
+              : {
+                  ...prev,
+                  [childrenSectionKey]: true,
+                },
+          );
+        }
         const targetDrone = parentDroneId ? droneById[parentDroneId] ?? null : null;
         if (targetDrone) onOpenDroneErrorModal(targetDrone, result.error);
         else window.alert(result.error);
@@ -1019,7 +1025,7 @@ export function SidebarDroneTreeList({
       droneById,
       onOpenDroneErrorModal,
       onReparentDronesToParent,
-      onToggleSection,
+      setCollapsedDroneSections,
     ],
   );
 

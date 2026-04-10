@@ -52,6 +52,7 @@ export function useFileEditorState({
   onRefreshFsList,
 }: UseFileEditorStateArgs) {
   const [openedFile, setOpenedFile] = React.useState<OpenEditorFile | null>(null);
+  const [refreshNonce, setRefreshNonce] = React.useState(0);
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -249,7 +250,7 @@ export function useFileEditorState({
     return () => {
       cancelled = true;
     };
-  }, [openedFile?.droneId, openedFile?.path, requestJson]);
+  }, [openedFile?.droneId, openedFile?.path, refreshNonce, requestJson]);
 
   const dirty = React.useMemo(() => {
     if (!openedFile) return false;
@@ -300,6 +301,12 @@ export function useFileEditorState({
     setContent(nextText);
   }, [kind]);
 
+  const refreshOpenedFile = React.useCallback(() => {
+    if (!openedFile || loading || saving) return;
+    if (kind === 'text' && contentRef.current !== savedContent) return;
+    setRefreshNonce((n) => n + 1);
+  }, [kind, loading, openedFile, savedContent, saving]);
+
   return {
     openedFile,
     loading,
@@ -315,6 +322,7 @@ export function useFileEditorState({
     openEditorFile,
     closeEditorFile,
     setOpenedFileContent,
+    refreshOpenedFile,
     saveOpenedFile,
   };
 }

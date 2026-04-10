@@ -1,6 +1,11 @@
 import React from 'react';
 import type { DroneSummary, RepoSummary } from '../types';
 import type { RepoOpErrorMeta } from './helpers';
+import {
+  dirtyDroneApplyRequestBody,
+  reconcileDirtyDroneApplyModal,
+  type DirtyDroneApplyModalState,
+} from './dirty-drone-apply';
 import { compareDronesByNewestFirst, droneHomePath, isHostRuntimeDrone } from './helpers';
 import { normalizeRepoTransferProbeStatus, type RepoTransferProbeStatus } from './repo-transfer-probe-status';
 
@@ -122,18 +127,21 @@ function formatRepoPullSuccessMessage(data: any, currentDrone: DroneSummary | nu
   const hostRef = String(data?.fromRef ?? '').trim();
   const exportedHeadSha = shortSha(data?.exportedHeadSha);
   const autoCommitSha = shortSha(data?.droneAutoCommitSha);
+  const dirtyFileCount = Number(data?.droneDirtyFileCount);
+  const keptDirtyChanges = Number.isFinite(dirtyFileCount) && dirtyFileCount > 0 && !autoCommitSha;
 
   if (mode === 'no-changes' || data?.noChanges === true) {
     return {
       title: 'No drone changes to apply',
       message: exportedHeadSha
-        ? `No new commits to apply from "${droneLabel}" (${exportedHeadSha}).`
-        : `No new commits to apply from "${droneLabel}".`,
+        ? `No new commits to apply from "${droneLabel}" (${exportedHeadSha}).${keptDirtyChanges ? ' Uncommitted drone edits remain only in the drone workspace.' : ''}`
+        : `No new commits to apply from "${droneLabel}".${keptDirtyChanges ? ' Uncommitted drone edits remain only in the drone workspace.' : ''}`,
     };
   }
 
   const suffix: string[] = [];
   if (autoCommitSha) suffix.push(`Snapshot commit ${autoCommitSha} captured prior drone edits.`);
+  if (keptDirtyChanges) suffix.push('Uncommitted drone edits remain in the drone workspace and were not applied.');
   suffix.push('Review the host working tree and commit when ready.');
 
   return {
@@ -194,6 +202,7 @@ export function useWorkspaceActions({
   const [repoOp, setRepoOp] = React.useState<RepoOpState>(null);
   const [repoOpError, setRepoOpError] = React.useState<string | null>(null);
   const [repoOpErrorMeta, setRepoOpErrorMeta] = React.useState<RepoOpErrorMeta | null>(null);
+  const [dirtyDroneApplyModal, setDirtyDroneApplyModal] = React.useState<DirtyDroneApplyModalState | null>(null);
   const repoTransferPeers = React.useMemo(() => listRepoTransferPeers(currentDrone, drones), [currentDrone, drones]);
 
   const shouldConfirmDelete = React.useCallback((): boolean => !autoDelete, [autoDelete]);
@@ -386,7 +395,7 @@ export function useWorkspaceActions({
     return { ok: r.ok, status: r.status, data };
   }, []);
 
-  const pullRepoChanges = React.useCallback(async () => {
+  const executePullRepoChanges = React.useCallback(async (body: Record<string, unknown> = {}) => {
     if (!currentDrone) return;
     const droneId = String(currentDrone.id ?? '').trim();
     if (!droneId) return;
@@ -408,21 +417,17 @@ export function useWorkspaceActions({
         });
         throw new Error(message);
       };
-      const defaultAutoCommitMessage = 'chore(drone): snapshot working tree before apply changes';
-      let response = await postJson(url, {});
+      let response = await postJson(url, body);
       const initialCode = String(response.data?.code ?? '').trim().toLowerCase();
       if (!response.ok && initialCode === 'drone_dirty') {
-        const dirtyFileCount = Number(response.data?.dirtyFileCount);
-        const dirtyLabel =
-          Number.isFinite(dirtyFileCount) && dirtyFileCount > 0
-            ? `${Math.floor(dirtyFileCount)} file${dirtyFileCount === 1 ? '' : 's'}`
-            : 'one or more files';
-        const autoCommitMessage = String(response.data?.autoCommitMessage ?? '').trim() || defaultAutoCommitMessage;
-        const confirmed = window.confirm(
-          `This drone has uncommitted changes (${dirtyLabel}).\n\nPress OK to stage everything, create a placeholder commit, and continue Apply Changes.\n\nPress Cancel to stop.`,
-        );
-        if (!confirmed) return;
-        response = await postJson(url, { commitDirty: true, commitMessage: autoCommitMessage });
+        setDirtyDroneApplyModal({
+          droneLabel: repoActionDroneLabel(currentDrone),
+          droneId,
+          dirtyFileCount: Number(response.data?.dirtyFileCount) || 0,
+          autoCommitMessage:
+            String(response.data?.autoCommitMessage ?? '').trim() || 'chore(drone): snapshot working tree before apply changes',
+        });
+        return;
       }
       if (!response.ok) throwRepoPullError(response.data, 'Repo pull failed.');
       const success = formatRepoPullSuccessMessage(response.data, currentDrone);
@@ -433,6 +438,28 @@ export function useWorkspaceActions({
       setRepoOp(null);
     }
   }, [clearRepoOperationError, currentDrone, postJson, setRepoOperationError, showTransientToast]);
+
+  const pullRepoChanges = React.useCallback(async () => {
+    await executePullRepoChanges();
+  }, [executePullRepoChanges]);
+
+  const closeDirtyDroneApplyModal = React.useCallback(() => {
+    setDirtyDroneApplyModal(null);
+  }, []);
+
+  const continueDirtyDroneApply = React.useCallback(
+    async (choice: 'commit' | 'keep') => {
+      if (!dirtyDroneApplyModal) return;
+      const requestBody = dirtyDroneApplyRequestBody(choice, dirtyDroneApplyModal.autoCommitMessage);
+      setDirtyDroneApplyModal(null);
+      await executePullRepoChanges(requestBody);
+    },
+    [dirtyDroneApplyModal, executePullRepoChanges],
+  );
+
+  React.useEffect(() => {
+    setDirtyDroneApplyModal((current) => reconcileDirtyDroneApplyModal(current, currentDrone?.id));
+  }, [currentDrone]);
 
   const pushRepoChanges = React.useCallback(async () => {
     if (!currentDrone) return;
@@ -625,8 +652,11 @@ export function useWorkspaceActions({
     repoOp,
     repoOpError,
     repoOpErrorMeta,
+    dirtyDroneApplyModal,
     clearRepoOperationError,
     setRepoOperationError,
+    closeDirtyDroneApplyModal,
+    continueDirtyDroneApply,
     githubUrlForRepo,
     deleteRepo,
     openDroneTerminal,

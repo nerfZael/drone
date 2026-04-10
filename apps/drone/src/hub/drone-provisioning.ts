@@ -49,6 +49,7 @@ type DroneProvisioningControllerDeps = {
   runNodeCli: (args: string[], opts?: { cwd?: string; timeoutMs?: number }) => Promise<{ code: number; stdout: string; stderr: string }>;
   setChatAgentConfig: (opts: { droneId: string; chatName: string; agent?: any; setModel: boolean; model?: string | null }) => Promise<void>;
   startupPromptToPendingPrompt: (prompt: PendingStartupPrompt) => PendingPromptProjection;
+  syncRepoAgentsInstructionsForDrone: (opts: { droneId: string; droneEntry: any }) => Promise<void>;
   syncSkillLibraryForDrone: (opts: { droneId: string; droneEntry: any }) => Promise<void>;
   syncSharedPathsToDrone: (opts: { droneId: string; droneEntry: any }) => Promise<void>;
   syncTaskStateSnapshotToDrone: (droneId: string, droneEntry: any) => Promise<void>;
@@ -386,6 +387,7 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
         await deps.syncTaskStateSnapshotToDrone(pendingDroneId, createdDrone);
         await deps.syncSkillLibraryForDrone({ droneId: pendingDroneId, droneEntry: createdDrone });
         await deps.syncSharedPathsToDrone({ droneId: pendingDroneId, droneEntry: createdDrone });
+        await deps.syncRepoAgentsInstructionsForDrone({ droneId: pendingDroneId, droneEntry: createdDrone });
       }
     } catch (e: any) {
       deps.hubLog('warn', 'post-create sync failed after drone creation', {

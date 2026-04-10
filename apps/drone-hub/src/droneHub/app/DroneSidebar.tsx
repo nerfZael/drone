@@ -1,22 +1,16 @@
 import React from 'react';
-import { useDndMonitor, useDraggable, useDroppable, type DragEndEvent, type DragMoveEvent, type DragOverEvent } from '@dnd-kit/core';
+import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { isUngroupedGroupName } from '../../domain';
 import type { DroneSummary, RepoSummary } from '../types';
-import { compareDronesByNewestFirst } from './helpers';
 import { dropdownMenuItemBaseClass, dropdownPanelBaseClass, useDropdownDismiss } from '../../ui/dropdown';
 import { IconAutoMinimize, IconBoard, IconChevron, IconColumns, IconEye, IconEyeOff, IconFolder, IconList, IconMore, IconPencil, IconPlus, IconPlusDouble, IconSettings, IconSidebarCollapse, IconSidebarExpand, IconSpinner, IconTrash, IconTreeView, SkeletonLine } from './icons';
-import { SidebarDroneTreeList, sidebarInlineSectionKey, type SidebarInlineSectionKind } from './SidebarDroneTreeList';
+import { SidebarDroneTreeList, type SidebarDroneTreeListSharedProps } from './SidebarDroneTreeList';
 import { GroupedSidebarTree } from './GroupedSidebarTree';
-import {
-  normalizeSidebarReorderTarget,
-  sidebarDropPlacementFromRects,
-  SidebarReorderDropIndicator,
-} from './sidebar-reorder-ui';
+import { SidebarReorderDropIndicator } from './sidebar-reorder-ui';
 import { buildSidebarDroneTree } from './sidebar-drone-tree';
 import { useDroneSidebarUiState } from './use-drone-hub-ui-store';
 import {
   orderSidebarGroups,
-  reorderSidebarGroupOrder,
   sidebarGroupOrderToken,
   type SidebarGroupDropPlacement,
   type SidebarGroupOrderKind,
@@ -29,12 +23,6 @@ import {
 } from './sidebar-folder-tree';
 import { buildSidebarNodeTree } from './sidebar-node-tree';
 import {
-  joinSidebarGroupPath,
-  sidebarGroupBaseName,
-  sidebarGroupParentPath,
-  isSameOrDescendantSidebarGroupPath,
-} from './sidebar-group-paths';
-import {
   groupSidebarRepoScopedGroupsByRepoGroup,
   removeSidebarRepoScopedGroupMapKeysByPrefix,
   rewriteSidebarRepoScopedGroupMapKeysByPrefix,
@@ -44,17 +32,18 @@ import {
   sidebarDroneNodeId,
   sidebarFolderNodeId,
 } from './sidebar-node-order';
-import {
-  draggedDroneIdsFromData,
-  parseDroneHubDragData,
-  useDroneHubActiveDrag,
-  type SidebarDragGroupRef,
-  type SidebarGroupDragData,
-} from './drone-hub-dnd';
+import { useDroneHubActiveDrag, type SidebarDragGroupRef, type SidebarGroupDragData } from './drone-hub-dnd';
 import { SIDEBAR_VISIBLE_MULTI_CHAT_GROUP, type SidebarGroup } from './use-sidebar-view-model';
-import type { MoveDronesToGroupResult } from './use-group-management';
 import { useSidebarOptimisticGroups } from './use-sidebar-optimistic-groups';
+import type { MoveDronesToGroupResult } from './use-group-management';
 import type { SidebarDensityMode } from './settings-types';
+import { useSidebarReadModel } from './use-sidebar-read-model';
+import {
+  useSidebarInteractions,
+  type ChatEditorState,
+  type FolderEditorState,
+} from './use-sidebar-interactions';
+import { useSidebarRootDnd } from './use-sidebar-root-dnd';
 
 const SIDEBAR_EXPANDED_WIDTH_PX = 280;
 const SIDEBAR_COLLAPSED_RAIL_WIDTH_PX = 40;
@@ -114,29 +103,10 @@ type DraftSidebarPlaceholder = {
 
 const DRAFT_SIDEBAR_PLACEHOLDER_ID = '__draft-sidebar-placeholder__';
 
-function repoPathToLabel(repoPathRaw: string): string {
-  const repoPath = String(repoPathRaw ?? '').trim();
-  if (!repoPath) return 'Ungrouped';
-  const parts = repoPath.split(/[\\/]/).filter(Boolean);
-  return parts[parts.length - 1] || repoPath;
-}
-
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName.toLowerCase();
   return target.isContentEditable || tag === 'input' || tag === 'textarea' || tag === 'select';
-}
-
-function sidebarFolderHiddenByTokens(
-  hiddenTokens: Set<string>,
-  path: string,
-  kind: SidebarGroupOrderKind,
-): boolean {
-  const tokenPrefix = `${kind}:`;
-  return Array.from(hiddenTokens).some((token) => {
-    if (!token.startsWith(tokenPrefix)) return false;
-    return isSameOrDescendantSidebarGroupPath(path, token.slice(tokenPrefix.length));
-  });
 }
 
 type SidebarGroupSectionProps = {
@@ -161,7 +131,7 @@ type SidebarGroupSectionProps = {
   selectedGroupMultiChat: string | null;
   dragOverSidebarGroup: { token: string; placement: SidebarGroupDropPlacement } | null;
   showMoveDropZone: boolean;
-  sharedDroneTreeListProps: Omit<React.ComponentProps<typeof SidebarDroneTreeList>, 'tree'>;
+  sharedDroneTreeListProps: SidebarDroneTreeListSharedProps;
   groupTree: ReturnType<typeof buildSidebarDroneTree>;
   onToggleGroupCollapsed: (group: string) => void;
   onRenameGroup: (group: string) => void;
@@ -428,26 +398,6 @@ function SidebarGroupSection({
   );
 }
 
-type FolderEditorState = {
-  mode: 'create' | 'rename';
-  parentPath: string | null;
-  anchorPath: string | null;
-  targetPath: string | null;
-  repoGroupPath: string | null;
-  value: string;
-  error: string | null;
-  pending: boolean;
-};
-
-type ChatEditorState = {
-  mode: 'create' | 'rename';
-  droneId: string;
-  targetChatName: string | null;
-  value: string;
-  error: string | null;
-  pending: boolean;
-};
-
 type SidebarFolderTreeNodeProps = {
   node: SidebarFolderNode;
   activeRepoPath: string;
@@ -463,7 +413,7 @@ type SidebarFolderTreeNodeProps = {
   folderEditor: FolderEditorState | null;
   folderEditorInputRef: React.RefObject<HTMLInputElement>;
   selectedGroupMultiChat: string | null;
-  sharedDroneTreeListProps: Omit<React.ComponentProps<typeof SidebarDroneTreeList>, 'tree'>;
+  sharedDroneTreeListProps: SidebarDroneTreeListSharedProps;
   onSelectFolder: (path: string) => void;
   onToggleGroupCollapsed: (group: string) => void;
   onOpenFolderCreate: (
@@ -962,25 +912,6 @@ export function DroneSidebar({
     setSidebarCollapsed,
   } = useDroneSidebarUiState();
   const activeDrag = useDroneHubActiveDrag();
-  const [dragOverCreateGroup, setDragOverCreateGroup] = React.useState(false);
-  const [createGroupTargetDroneIds, setCreateGroupTargetDroneIds] = React.useState<string[] | null>(null);
-  const [createGroupName, setCreateGroupName] = React.useState('');
-  const [createGroupInlineError, setCreateGroupInlineError] = React.useState<string | null>(null);
-  const [creatingGroupMove, setCreatingGroupMove] = React.useState(false);
-  const [selectedSidebarNodeId, setSelectedSidebarNodeId] = React.useState<string | null>(null);
-  const [selectedFolderPath, setSelectedFolderPath] = React.useState<string | null>(null);
-  const [folderEditor, setFolderEditor] = React.useState<FolderEditorState | null>(null);
-  const [chatEditor, setChatEditor] = React.useState<ChatEditorState | null>(null);
-  const [collapsedDroneSections, setCollapsedDroneSections] = React.useState<Record<string, boolean>>({});
-  const [dragOverGroup, setDragOverGroup] = React.useState<string | null>(null);
-  const [dragOverUngrouped, setDragOverUngrouped] = React.useState(false);
-  const [dragOverSidebarGroup, setDragOverSidebarGroup] = React.useState<{
-    token: string;
-    placement: SidebarGroupDropPlacement;
-  } | null>(null);
-  const createGroupInputRef = React.useRef<HTMLInputElement | null>(null);
-  const folderEditorInputRef = React.useRef<HTMLInputElement>(null);
-  const chatEditorInputRef = React.useRef<HTMLInputElement>(null);
   const headerActionsMenuRef = React.useRef<HTMLDivElement | null>(null);
   const footerOptionsMenuRef = React.useRef<HTMLDivElement | null>(null);
   const collapseTimerRef = React.useRef<number | null>(null);
@@ -1047,6 +978,7 @@ export function DroneSidebar({
     runOptimisticCreateGroupAndMove,
     runOptimisticRenameGroup,
     runOptimisticMoveDronesToGroup,
+    runOptimisticReparentDronesToParent,
   } = useSidebarOptimisticGroups({
     isRepoGroupingMode,
     sidebarGroups,
@@ -1066,6 +998,134 @@ export function DroneSidebar({
     onCreateGroupAndMove,
     onRenameGroup: handleRenameGroup,
     onMoveDronesToGroup,
+    onReparentDronesToParent,
+  });
+  const activeChatName = String(selectedChat ?? '').trim() || 'default';
+  const visibleDraftSidebarPlaceholder = React.useMemo(() => {
+    if (!draftSidebarPlaceholder) return null;
+    const repoPath = String(draftSidebarPlaceholder.repoPath ?? '').trim();
+    const activeRepo = String(activeRepoPath ?? '').trim();
+    if (activeRepo && activeRepo !== repoPath) return null;
+    return {
+      ...draftSidebarPlaceholder,
+      repoPath,
+      group: String(draftSidebarPlaceholder.group ?? '').trim() || null,
+    };
+  }, [activeRepoPath, draftSidebarPlaceholder]);
+  const draftSidebarPlaceholderDrone = React.useMemo<DroneSummary | null>(() => {
+    if (!visibleDraftSidebarPlaceholder) return null;
+    return {
+      id: DRAFT_SIDEBAR_PLACEHOLDER_ID,
+      name: visibleDraftSidebarPlaceholder.name,
+      group: visibleDraftSidebarPlaceholder.group,
+      createdAt: new Date().toISOString(),
+      repoAttached: Boolean(visibleDraftSidebarPlaceholder.repoPath),
+      repoPath: visibleDraftSidebarPlaceholder.repoPath,
+      containerPort: 0,
+      hostPort: null,
+      statusOk: true,
+      statusError: null,
+      chats: ['default'],
+      hubPhase: null,
+      hubMessage: null,
+      busy: false,
+    };
+  }, [visibleDraftSidebarPlaceholder]);
+  const draftSidebarPlaceholderNodeId = draftSidebarPlaceholderDrone
+    ? sidebarDroneNodeId(DRAFT_SIDEBAR_PLACEHOLDER_ID)
+    : null;
+  const {
+    renderSidebarGroups,
+    sidebarFolderTree,
+    flatSidebarTree,
+    sidebarDroneById,
+    visibleSidebarFolderPathSet,
+  } = useSidebarReadModel({
+    draftSidebarPlaceholderDrone,
+    hiddenSidebarGroupTokenSet,
+    isRepoGroupingMode,
+    optimisticSidebarDronesFilteredByRepo,
+    optimisticSidebarGroups,
+    repoScopedGroupPathsByRepoGroup,
+    showHiddenSidebarGroups,
+    sidebarGroupOrder,
+    sidebarGroupingMode,
+  });
+  const {
+    blurChatEditor,
+    blurFolderEditor,
+    chatEditor,
+    chatEditorInputRef,
+    closeChatEditor,
+    closeCreateGroupInline,
+    closeFolderEditor,
+    collapsedDroneSections,
+    createGroupInlineError,
+    createGroupInputRef,
+    createGroupName,
+    createGroupTargetDroneIds,
+    creatingGroupMove,
+    folderEditor,
+    folderEditorInputRef,
+    handleGroupedSelectDroneCard,
+    handleGroupedSelectDroneChat,
+    handleGroupedSelectFolder,
+    moveFolderIntoGroup,
+    onSubmitCreateGroupInline,
+    openDroneChatCreate,
+    openFolderCreate,
+    selectedFolderPath,
+    selectedSidebarNodeId,
+    setCollapsedDroneSections,
+    setCreateGroupInlineError,
+    setCreateGroupName,
+    setCreateGroupTargetDroneIds,
+    setSelectedSidebarNodeId,
+    startRenameDroneChat,
+    startRenameFolder,
+    submitChatEditor,
+    submitFolderEditor,
+    toggleDroneSection,
+    updateChatEditorValue,
+    updateFolderEditorValue,
+  } = useSidebarInteractions({
+    activeChatName,
+    collapsedGroups,
+    draftSidebarPlaceholderNodeId,
+    draftSidebarPlaceholderDroneId: DRAFT_SIDEBAR_PLACEHOLDER_ID,
+    isRepoGroupingMode,
+    onCreateDroneChat,
+    onRenameDroneChat,
+    onSelectDroneCard,
+    onSelectDroneChat,
+    onToggleGroupCollapsed,
+    optimisticSidebarDronesFilteredByRepo,
+    runOptimisticCreateGroup,
+    runOptimisticCreateGroupAndMove,
+    runOptimisticRenameGroup,
+    selectedDrone,
+    setSidebarRepoScopedGroupByPath,
+    sidebarDroneById,
+    visibleSidebarFolderPathSet,
+  });
+  const {
+    activeDraggedDroneIds,
+    dragOverCreateGroup,
+    dragOverGroup,
+    dragOverSidebarGroup,
+    dragOverUngrouped,
+    draggingSidebarGroup,
+  } = useSidebarRootDnd({
+    activeDrag,
+    isRepoGroupingMode,
+    moveFolderIntoGroup,
+    runOptimisticMoveDronesToGroup,
+    setCreateGroupInlineError,
+    setCreateGroupTargetDroneIds,
+    setSidebarGroupOrder,
+    sidebarGroupOrder,
+    sidebarGroups,
+    sidebarHasUngroupedGroup,
   });
 
   const clearCollapseTimer = React.useCallback(() => {
@@ -1096,345 +1156,6 @@ export function DroneSidebar({
     clearExpandTimer();
     lastAutoCollapsedAtRef.current = 0;
   }, [clearCollapseTimer, clearExpandTimer, sidebarAutoMinimize]);
-
-  React.useEffect(() => {
-    if (!createGroupTargetDroneIds || createGroupTargetDroneIds.length === 0) return;
-    const id = window.requestAnimationFrame(() => {
-      createGroupInputRef.current?.focus();
-      createGroupInputRef.current?.select();
-    });
-    return () => window.cancelAnimationFrame(id);
-  }, [createGroupTargetDroneIds]);
-
-  const folderEditorFocusKey = React.useMemo(
-    () =>
-      folderEditor
-        ? `${folderEditor.mode}:${folderEditor.parentPath ?? ''}:${folderEditor.anchorPath ?? ''}:${folderEditor.targetPath ?? ''}:${folderEditor.repoGroupPath ?? ''}`
-        : null,
-    [folderEditor],
-  );
-
-  React.useEffect(() => {
-    if (!folderEditorFocusKey) return;
-    const id = window.requestAnimationFrame(() => {
-      folderEditorInputRef.current?.focus();
-      folderEditorInputRef.current?.select();
-    });
-    return () => window.cancelAnimationFrame(id);
-  }, [folderEditorFocusKey]);
-
-  const chatEditorFocusKey = React.useMemo(
-    () =>
-      chatEditor
-        ? `${chatEditor.mode}:${chatEditor.droneId}:${chatEditor.targetChatName ?? ''}`
-        : null,
-    [chatEditor],
-  );
-
-  React.useEffect(() => {
-    if (!chatEditorFocusKey) return;
-    const id = window.requestAnimationFrame(() => {
-      chatEditorInputRef.current?.focus();
-      chatEditorInputRef.current?.select();
-    });
-    return () => window.cancelAnimationFrame(id);
-  }, [chatEditorFocusKey]);
-
-  const closeCreateGroupInline = React.useCallback(() => {
-    if (creatingGroupMove) return;
-    setCreateGroupTargetDroneIds(null);
-    setCreateGroupName('');
-    setCreateGroupInlineError(null);
-  }, [creatingGroupMove]);
-
-  const closeFolderEditor = React.useCallback(() => {
-    setFolderEditor(null);
-  }, []);
-
-  const updateFolderEditorValue = React.useCallback((next: string) => {
-    setFolderEditor((prev) => (prev ? { ...prev, value: next, error: null } : prev));
-  }, []);
-
-  const closeChatEditor = React.useCallback(() => {
-    setChatEditor(null);
-  }, []);
-
-  const updateChatEditorValue = React.useCallback((next: string) => {
-    setChatEditor((prev) => (prev ? { ...prev, value: next, error: null } : prev));
-  }, []);
-
-  const openDroneChatCreate = React.useCallback(
-    (drone: DroneSummary) => {
-      const droneId = String(drone?.id ?? '').trim();
-      if (!droneId) return;
-      const existingChats = Array.isArray(drone?.chats) && drone.chats.length > 0 ? drone.chats : ['default'];
-      const seedName = `chat-${Math.max(1, existingChats.length + 1)}`;
-      setSelectedSidebarNodeId(sidebarDroneNodeId(droneId));
-      setFolderEditor(null);
-      setChatEditor({
-        mode: 'create',
-        droneId,
-        targetChatName: null,
-        value: seedName,
-        error: null,
-        pending: false,
-      });
-    },
-    [],
-  );
-
-  const startRenameDroneChat = React.useCallback((droneIdRaw: string, chatNameRaw: string) => {
-    const droneId = String(droneIdRaw ?? '').trim();
-    const chatName = String(chatNameRaw ?? '').trim() || 'default';
-    if (!droneId || !chatName || chatName === 'default') return;
-    setSelectedSidebarNodeId(sidebarChatSidebarNodeId(droneId, chatName));
-    setFolderEditor(null);
-    setChatEditor({
-      mode: 'rename',
-      droneId,
-      targetChatName: chatName,
-      value: chatName,
-      error: null,
-      pending: false,
-    });
-  }, []);
-
-  const openFolderCreate = React.useCallback(
-    (parentPathRaw: string | null, opts?: { anchorPath?: string | null; repoGroupPath?: string | null }) => {
-      const parentPath = String(parentPathRaw ?? '').trim() || null;
-      const anchorPath = String(opts?.anchorPath ?? '').trim() || parentPath;
-      const repoGroupPath = String(opts?.repoGroupPath ?? '').trim() || null;
-      if (parentPath && collapsedGroups[parentPath]) onToggleGroupCollapsed(parentPath);
-      setSelectedFolderPath(anchorPath);
-      setChatEditor(null);
-      setFolderEditor({
-        mode: 'create',
-        parentPath,
-        anchorPath,
-        targetPath: null,
-        repoGroupPath,
-        value: '',
-        error: null,
-        pending: false,
-      });
-    },
-    [collapsedGroups, onToggleGroupCollapsed],
-  );
-
-  const startRenameFolder = React.useCallback((groupRaw: string) => {
-    const group = String(groupRaw ?? '').trim();
-    if (!group || isUngroupedGroupName(group)) return;
-    setSelectedFolderPath(group);
-    setChatEditor(null);
-    setFolderEditor({
-      mode: 'rename',
-      parentPath: sidebarGroupParentPath(group),
-      anchorPath: group,
-      targetPath: group,
-      repoGroupPath: null,
-      value: sidebarGroupBaseName(group),
-      error: null,
-      pending: false,
-    });
-  }, []);
-
-  const onSubmitCreateGroupInline = React.useCallback(
-    async (event: React.FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
-      if (creatingGroupMove) return;
-      const ids = createGroupTargetDroneIds ?? [];
-      const group = String(createGroupName ?? '').trim();
-      if (!group) {
-        setCreateGroupInlineError('Group name is required.');
-        return;
-      }
-      if (ids.length === 0) {
-        setCreateGroupInlineError('No drones selected for group move.');
-        return;
-      }
-
-      setCreatingGroupMove(true);
-      setCreateGroupInlineError(null);
-      try {
-        const result = await runOptimisticCreateGroupAndMove(group, ids);
-        if (!result.ok) {
-          setCreateGroupInlineError(result.error || 'Failed to create group.');
-          return;
-        }
-        setCreateGroupTargetDroneIds(null);
-        setCreateGroupName('');
-      } catch (error: any) {
-        const msg = String(error?.message ?? error ?? '').trim();
-        setCreateGroupInlineError(msg || 'Failed to create group.');
-      } finally {
-        setCreatingGroupMove(false);
-      }
-    },
-    [createGroupName, createGroupTargetDroneIds, creatingGroupMove, runOptimisticCreateGroupAndMove],
-  );
-
-  const submitFolderEditor = React.useCallback(async () => {
-    const draft = folderEditor;
-    if (!draft || draft.pending) return;
-    const segment = String(draft.value ?? '').trim().replace(/^\/+|\/+$/g, '');
-    if (!segment) {
-      setFolderEditor((prev) => (prev ? { ...prev, error: 'Folder name is required.' } : prev));
-      return;
-    }
-    if (segment.includes('/')) {
-      setFolderEditor((prev) => (prev ? { ...prev, error: 'Use one folder segment here.' } : prev));
-      return;
-    }
-    const nextPath = joinSidebarGroupPath([draft.parentPath, segment]);
-    if (!nextPath) {
-      setFolderEditor((prev) => (prev ? { ...prev, error: 'Folder name is required.' } : prev));
-      return;
-    }
-
-    setFolderEditor((prev) => (prev ? { ...prev, pending: true, error: null } : prev));
-    if (draft.mode === 'create') {
-      const result = await runOptimisticCreateGroup(nextPath);
-      if (!result.ok) {
-        setFolderEditor((prev) => (prev ? { ...prev, pending: false, error: result.error || 'Create folder failed.' } : prev));
-        return;
-      }
-      if (draft.repoGroupPath) {
-        setSidebarRepoScopedGroupByPath((prev) => {
-          if (prev[nextPath] === draft.repoGroupPath) return prev;
-          return { ...prev, [nextPath]: draft.repoGroupPath };
-        });
-      }
-      setSelectedFolderPath(nextPath);
-      setSelectedSidebarNodeId(isRepoGroupingMode ? null : sidebarFolderNodeId(nextPath));
-      setFolderEditor(null);
-      return;
-    }
-
-    try {
-      const ok = await runOptimisticRenameGroup(draft.targetPath ?? '', nextPath);
-      if (!ok) {
-        setFolderEditor((prev) => (prev ? { ...prev, pending: false } : prev));
-        return;
-      }
-      setSelectedFolderPath(nextPath);
-      setSelectedSidebarNodeId(isRepoGroupingMode ? null : sidebarFolderNodeId(nextPath));
-      setFolderEditor(null);
-    } catch (error: any) {
-      const message = String(error?.message ?? error ?? '').trim();
-      setFolderEditor((prev) => (prev ? { ...prev, pending: false, error: message || 'Rename folder failed.' } : prev));
-    }
-  }, [folderEditor, isRepoGroupingMode, runOptimisticCreateGroup, runOptimisticRenameGroup, setSidebarRepoScopedGroupByPath]);
-
-  const blurFolderEditor = React.useCallback(() => {
-    const draft = folderEditor;
-    if (!draft || draft.pending) return;
-    const segment = String(draft.value ?? '').trim().replace(/^\/+|\/+$/g, '');
-    if (!segment) {
-      setFolderEditor(null);
-      return;
-    }
-    void submitFolderEditor();
-  }, [folderEditor, submitFolderEditor]);
-
-  const submitChatEditor = React.useCallback(async () => {
-    const draft = chatEditor;
-    if (!draft || draft.pending) return;
-    const chatName = String(draft.value ?? '').trim();
-    if (!chatName) {
-      setChatEditor((prev) => (prev ? { ...prev, error: 'Chat name is required.' } : prev));
-      return;
-    }
-
-    setChatEditor((prev) => (prev ? { ...prev, pending: true, error: null } : prev));
-    if (draft.mode === 'create') {
-      const drone =
-        optimisticSidebarDronesFilteredByRepo.find((candidate) => {
-          const droneId = String(candidate?.id ?? '').trim();
-          return droneId === draft.droneId;
-        }) ?? null;
-      if (!drone) {
-        setChatEditor((prev) => (prev ? { ...prev, pending: false, error: 'Drone is unavailable.' } : prev));
-        return;
-      }
-      const result = await onCreateDroneChat(drone, chatName);
-      if (!result.ok) {
-        setChatEditor((prev) => (prev ? { ...prev, pending: false, error: result.error || 'Create chat failed.' } : prev));
-        return;
-      }
-      const nextChatName = String(result.chatName ?? chatName).trim() || chatName;
-      setSelectedFolderPath(null);
-      setSelectedSidebarNodeId(sidebarChatSidebarNodeId(draft.droneId, nextChatName));
-      onSelectDroneChat(draft.droneId, nextChatName);
-      setChatEditor(null);
-      return;
-    }
-
-    const targetChatName = String(draft.targetChatName ?? '').trim();
-    const result = await onRenameDroneChat(draft.droneId, targetChatName, chatName);
-    if (!result.ok) {
-      setChatEditor((prev) => (prev ? { ...prev, pending: false, error: result.error || 'Rename chat failed.' } : prev));
-      return;
-    }
-    const nextChatName = String(result.chatName ?? chatName).trim() || chatName;
-    setSelectedFolderPath(null);
-    setSelectedSidebarNodeId(sidebarChatSidebarNodeId(draft.droneId, nextChatName));
-    onSelectDroneChat(draft.droneId, nextChatName);
-    setChatEditor(null);
-  }, [chatEditor, onCreateDroneChat, onRenameDroneChat, onSelectDroneChat, optimisticSidebarDronesFilteredByRepo, setSelectedSidebarNodeId]);
-
-  const blurChatEditor = React.useCallback(() => {
-    const draft = chatEditor;
-    if (!draft || draft.pending) return;
-    const chatName = String(draft.value ?? '').trim();
-    if (!chatName) {
-      setChatEditor(null);
-      return;
-    }
-    void submitChatEditor();
-  }, [chatEditor, submitChatEditor]);
-
-  const moveFolderIntoGroup = React.useCallback(
-    async (sourceGroupRaw: string, targetGroupRaw: string) => {
-      const sourceGroup = String(sourceGroupRaw ?? '').trim();
-      const targetGroup = String(targetGroupRaw ?? '').trim();
-      if (!sourceGroup || !targetGroup) return false;
-      if (isUngroupedGroupName(sourceGroup) || isUngroupedGroupName(targetGroup)) return false;
-      if (sourceGroup === targetGroup) return false;
-      if (isSameOrDescendantSidebarGroupPath(targetGroup, sourceGroup)) return false;
-      const nextGroup = joinSidebarGroupPath([targetGroup, sidebarGroupBaseName(sourceGroup)]);
-      if (!nextGroup || nextGroup === sourceGroup) return false;
-      const ok = await runOptimisticRenameGroup(sourceGroup, nextGroup);
-      if (ok) {
-        setSelectedFolderPath(nextGroup);
-        setSelectedSidebarNodeId(sidebarFolderNodeId(nextGroup));
-      }
-      return ok;
-    },
-    [runOptimisticRenameGroup],
-  );
-
-  const handleGroupedSelectFolder = React.useCallback((path: string) => {
-    setSelectedFolderPath(path);
-    setSelectedSidebarNodeId(sidebarFolderNodeId(path));
-  }, []);
-
-  const handleGroupedSelectDroneCard = React.useCallback(
-    (droneId: string, opts?: { toggle?: boolean; range?: boolean }) => {
-      setSelectedFolderPath(null);
-      setSelectedSidebarNodeId(sidebarDroneNodeId(droneId));
-      onSelectDroneCard(droneId, opts);
-    },
-    [onSelectDroneCard],
-  );
-
-  const handleGroupedSelectDroneChat = React.useCallback(
-    (droneId: string, chatName: string) => {
-      setSelectedFolderPath(null);
-      setSelectedSidebarNodeId(sidebarChatSidebarNodeId(droneId, chatName));
-      onSelectDroneChat(droneId, chatName);
-    },
-    [onSelectDroneChat],
-  );
 
   const collapseSidebarWithGuard = React.useCallback(() => {
     clearCollapseTimer();
@@ -1490,274 +1211,6 @@ export function DroneSidebar({
     [clearExpandTimer],
   );
 
-  const activeDraggedDroneIds = React.useMemo(() => draggedDroneIdsFromData(activeDrag), [activeDrag]);
-  const draggingSidebarGroup =
-    activeDrag?.type === 'sidebar-group' ? sidebarGroupOrderToken(activeDrag.groupRef) : null;
-
-  const clearSidebarDragState = React.useCallback(() => {
-    setDragOverSidebarGroup(null);
-    setDragOverGroup(null);
-    setDragOverUngrouped(false);
-    setDragOverCreateGroup(false);
-  }, []);
-
-  const currentPlacementFromEvent = React.useCallback(
-    (event: DragMoveEvent | DragOverEvent | DragEndEvent): SidebarGroupDropPlacement =>
-      sidebarDropPlacementFromRects(
-        event.active.rect.current.translated ?? event.active.rect.current.initial,
-        event.over?.rect ?? null,
-      ),
-    [],
-  );
-
-  const currentSidebarGroupTargetFromEvent = React.useCallback(
-    (
-      event: DragMoveEvent | DragOverEvent | DragEndEvent,
-      activeGroupRef: SidebarDragGroupRef,
-      overGroupRef: SidebarDragGroupRef,
-    ) => {
-      const visibleTokens = orderSidebarGroups(sidebarGroups, sidebarGroupOrder)
-        .filter((group) => {
-          if (group.kind !== activeGroupRef.kind) return false;
-          if (group.kind !== 'group') return true;
-          return sidebarGroupParentPath(group.group) === sidebarGroupParentPath(overGroupRef.group);
-        })
-        .map((group) => sidebarGroupOrderToken(group));
-      const overTokenRaw = sidebarGroupOrderToken(overGroupRef);
-      return normalizeSidebarReorderTarget(visibleTokens, overTokenRaw, currentPlacementFromEvent(event));
-    },
-    [currentPlacementFromEvent, sidebarGroupOrder, sidebarGroups],
-  );
-
-  const resolveMoveTargetGroupFromOverData = React.useCallback((overData: Record<string, unknown> | undefined): string | null => {
-    if (!overData) return null;
-    if (overData.type === 'sidebar-group-move') {
-      return String(overData.group ?? '').trim() || null;
-    }
-    if (overData.type === 'sidebar-drone-reorder') {
-      return String(overData.groupName ?? '').trim() || null;
-    }
-    return null;
-  }, []);
-
-  const updateSidebarDragState = React.useCallback(
-    (event: DragMoveEvent | DragOverEvent) => {
-      const activeData = parseDroneHubDragData(event.active.data.current);
-      const overData = event.over?.data.current as Record<string, unknown> | undefined;
-      const draggedDroneIds = draggedDroneIdsFromData(activeData);
-      if (
-        activeData?.type === 'sidebar-group' &&
-        overData?.type === 'sidebar-group-reorder' &&
-        overData.groupRef &&
-        typeof overData.groupRef === 'object'
-      ) {
-        const target = overData.groupRef as SidebarDragGroupRef;
-        const draggedToken = sidebarGroupOrderToken(activeData.groupRef);
-        const targetToken = sidebarGroupOrderToken(target);
-        const sameFolderParent =
-          activeData.groupRef.kind !== 'group' ||
-          target.kind !== 'group' ||
-          sidebarGroupParentPath(activeData.groupRef.group) === sidebarGroupParentPath(target.group);
-        if (sameFolderParent && draggedToken && targetToken && draggedToken !== targetToken) {
-          const dropTarget = currentSidebarGroupTargetFromEvent(event, activeData.groupRef, target);
-          setDragOverGroup(null);
-          setDragOverUngrouped(false);
-          setDragOverCreateGroup(false);
-          setDragOverSidebarGroup({
-            token: dropTarget.overId,
-            placement: dropTarget.placement,
-          });
-          return;
-        }
-      }
-
-      if (
-        activeData?.type === 'sidebar-group' &&
-        overData?.type === 'sidebar-group-reorder' &&
-        overData.groupRef &&
-        typeof overData.groupRef === 'object'
-      ) {
-        const target = overData.groupRef as SidebarDragGroupRef;
-        const sameFolderParent =
-          activeData.groupRef.kind !== 'group' ||
-          target.kind !== 'group' ||
-          sidebarGroupParentPath(activeData.groupRef.group) === sidebarGroupParentPath(target.group);
-        if (
-          !sameFolderParent &&
-          target.kind === 'group' &&
-          target.group &&
-          target.group !== activeData.groupRef.group &&
-          !isUngroupedGroupName(target.group) &&
-          !isSameOrDescendantSidebarGroupPath(target.group, activeData.groupRef.group)
-        ) {
-          setDragOverSidebarGroup(null);
-          setDragOverUngrouped(false);
-          setDragOverCreateGroup(false);
-          setDragOverGroup(target.group);
-          return;
-        }
-      }
-
-      if (
-        activeData?.type === 'sidebar-group' &&
-        overData?.type === 'sidebar-group-move' &&
-        typeof overData.group === 'string'
-      ) {
-        const targetGroup = String(overData.group ?? '').trim();
-        if (
-          targetGroup &&
-          targetGroup !== activeData.groupRef.group &&
-          !isUngroupedGroupName(targetGroup) &&
-          !isSameOrDescendantSidebarGroupPath(targetGroup, activeData.groupRef.group)
-        ) {
-          setDragOverSidebarGroup(null);
-          setDragOverUngrouped(false);
-          setDragOverCreateGroup(false);
-          setDragOverGroup(targetGroup);
-          return;
-        }
-      }
-
-      if (!isRepoGroupingMode && draggedDroneIds.length > 0) {
-        const moveTargetGroup = resolveMoveTargetGroupFromOverData(overData);
-        if (moveTargetGroup) {
-          if (activeData?.type === 'sidebar-group' && activeData.groupRef.kind === 'group' && activeData.groupRef.group === moveTargetGroup) {
-            clearSidebarDragState();
-            return;
-          }
-          setDragOverSidebarGroup(null);
-          setDragOverUngrouped(false);
-          setDragOverCreateGroup(false);
-          setDragOverGroup(moveTargetGroup);
-          return;
-        }
-        if (overData?.type === 'sidebar-ungrouped-drop' && !sidebarHasUngroupedGroup) {
-          setDragOverSidebarGroup(null);
-          setDragOverGroup(null);
-          setDragOverCreateGroup(false);
-          setDragOverUngrouped(true);
-          return;
-        }
-        if (overData?.type === 'sidebar-create-group-drop') {
-          setDragOverSidebarGroup(null);
-          setDragOverGroup(null);
-          setDragOverUngrouped(false);
-          setDragOverCreateGroup(true);
-          return;
-        }
-      }
-
-      clearSidebarDragState();
-    },
-    [clearSidebarDragState, currentPlacementFromEvent, currentSidebarGroupTargetFromEvent, isRepoGroupingMode, resolveMoveTargetGroupFromOverData, sidebarHasUngroupedGroup],
-  );
-
-  useDndMonitor({
-    onDragMove: updateSidebarDragState,
-    onDragOver: updateSidebarDragState,
-    onDragCancel: clearSidebarDragState,
-    onDragEnd: (event) => {
-      const activeData = parseDroneHubDragData(event.active.data.current);
-      const overData = event.over?.data.current as Record<string, unknown> | undefined;
-      const draggedDroneIds = draggedDroneIdsFromData(activeData);
-
-      if (
-        activeData?.type === 'sidebar-group' &&
-        overData?.type === 'sidebar-group-reorder' &&
-        overData.groupRef &&
-        typeof overData.groupRef === 'object'
-      ) {
-        const target = overData.groupRef as SidebarDragGroupRef;
-        const targetToken = sidebarGroupOrderToken(target);
-        const sameFolderParent =
-          activeData.groupRef.kind !== 'group' ||
-          target.kind !== 'group' ||
-          sidebarGroupParentPath(activeData.groupRef.group) === sidebarGroupParentPath(target.group);
-        if (sameFolderParent && targetToken && targetToken !== sidebarGroupOrderToken(activeData.groupRef)) {
-          const fallbackTarget = currentSidebarGroupTargetFromEvent(event, activeData.groupRef, target);
-          const dropTarget = dragOverSidebarGroup ?? {
-            token: fallbackTarget.overId,
-            placement: fallbackTarget.placement,
-          };
-          const resolvedTarget =
-            orderSidebarGroups(sidebarGroups, sidebarGroupOrder).find(
-              (group) => sidebarGroupOrderToken(group) === dropTarget.token,
-            ) ?? target;
-          setSidebarGroupOrder((prev) =>
-            reorderSidebarGroupOrder(prev, sidebarGroups, activeData.groupRef, resolvedTarget, dropTarget.placement),
-          );
-          clearSidebarDragState();
-          return;
-        }
-      }
-
-      if (
-        activeData?.type === 'sidebar-group' &&
-        overData?.type === 'sidebar-group-reorder' &&
-        overData.groupRef &&
-        typeof overData.groupRef === 'object'
-      ) {
-        const target = overData.groupRef as SidebarDragGroupRef;
-        const sameFolderParent =
-          activeData.groupRef.kind !== 'group' ||
-          target.kind !== 'group' ||
-          sidebarGroupParentPath(activeData.groupRef.group) === sidebarGroupParentPath(target.group);
-        if (
-          !sameFolderParent &&
-          target.kind === 'group' &&
-          target.group &&
-          target.group !== activeData.groupRef.group &&
-          !isUngroupedGroupName(target.group) &&
-          !isSameOrDescendantSidebarGroupPath(target.group, activeData.groupRef.group)
-        ) {
-          void moveFolderIntoGroup(activeData.groupRef.group, target.group);
-          clearSidebarDragState();
-          return;
-        }
-      }
-
-      if (
-        activeData?.type === 'sidebar-group' &&
-        overData?.type === 'sidebar-group-move' &&
-        typeof overData.group === 'string'
-      ) {
-        const targetGroup = String(overData.group ?? '').trim();
-        if (
-          targetGroup &&
-          targetGroup !== activeData.groupRef.group &&
-          !isUngroupedGroupName(targetGroup) &&
-          !isSameOrDescendantSidebarGroupPath(targetGroup, activeData.groupRef.group)
-        ) {
-          void moveFolderIntoGroup(activeData.groupRef.group, targetGroup);
-          clearSidebarDragState();
-          return;
-        }
-      }
-
-      if (!isRepoGroupingMode && draggedDroneIds.length > 0) {
-        const moveTargetGroup = resolveMoveTargetGroupFromOverData(overData);
-        if (moveTargetGroup) {
-          void runOptimisticMoveDronesToGroup(moveTargetGroup, draggedDroneIds);
-          clearSidebarDragState();
-          return;
-        }
-        if (overData?.type === 'sidebar-ungrouped-drop' && !sidebarHasUngroupedGroup) {
-          void runOptimisticMoveDronesToGroup('Ungrouped', draggedDroneIds);
-          clearSidebarDragState();
-          return;
-        }
-        if (overData?.type === 'sidebar-create-group-drop') {
-          setCreateGroupTargetDroneIds(draggedDroneIds);
-          setCreateGroupInlineError(null);
-          clearSidebarDragState();
-          return;
-        }
-      }
-
-      clearSidebarDragState();
-    },
-  });
-
   const toggleSidebarGroupHidden = React.useCallback(
     (target: SidebarDragGroupRef) => {
       const token = sidebarGroupOrderToken(target);
@@ -1783,192 +1236,6 @@ export function DroneSidebar({
   });
   const sidebarVisibleDroneCount = sidebarVisibleDrones.length;
   const sidebarVisibleMultiChatActive = selectedGroupMultiChat === SIDEBAR_VISIBLE_MULTI_CHAT_GROUP;
-  const activeChatName = String(selectedChat ?? '').trim() || 'default';
-  const visibleDraftSidebarPlaceholder = React.useMemo(() => {
-    if (!draftSidebarPlaceholder) return null;
-    const repoPath = String(draftSidebarPlaceholder.repoPath ?? '').trim();
-    const activeRepo = String(activeRepoPath ?? '').trim();
-    if (activeRepo && activeRepo !== repoPath) return null;
-    return {
-      ...draftSidebarPlaceholder,
-      repoPath,
-      group: String(draftSidebarPlaceholder.group ?? '').trim() || null,
-    };
-  }, [activeRepoPath, draftSidebarPlaceholder]);
-  const draftSidebarPlaceholderDrone = React.useMemo<DroneSummary | null>(() => {
-    if (!visibleDraftSidebarPlaceholder) return null;
-    return {
-      id: DRAFT_SIDEBAR_PLACEHOLDER_ID,
-      name: visibleDraftSidebarPlaceholder.name,
-      group: visibleDraftSidebarPlaceholder.group,
-      createdAt: new Date().toISOString(),
-      repoAttached: Boolean(visibleDraftSidebarPlaceholder.repoPath),
-      repoPath: visibleDraftSidebarPlaceholder.repoPath,
-      containerPort: 0,
-      hostPort: null,
-      statusOk: true,
-      statusError: null,
-      chats: ['default'],
-      hubPhase: null,
-      hubMessage: null,
-      busy: false,
-    };
-  }, [visibleDraftSidebarPlaceholder]);
-  const draftSidebarPlaceholderNodeId = draftSidebarPlaceholderDrone
-    ? sidebarDroneNodeId(DRAFT_SIDEBAR_PLACEHOLDER_ID)
-    : null;
-  const renderSidebarGroups = React.useMemo(() => {
-    if (!draftSidebarPlaceholderDrone) return optimisticSidebarGroups;
-    const placeholderGroup =
-      sidebarGroupingMode === 'repos'
-        ? {
-            group: draftSidebarPlaceholderDrone.repoPath
-              ? `repo:${draftSidebarPlaceholderDrone.repoPath}`
-              : 'repo:ungrouped',
-            label: draftSidebarPlaceholderDrone.repoPath
-              ? repoPathToLabel(draftSidebarPlaceholderDrone.repoPath)
-              : 'Ungrouped',
-            kind: 'repo' as const,
-          }
-        : {
-            group: String(draftSidebarPlaceholderDrone.group ?? '').trim() || 'Ungrouped',
-            label: String(draftSidebarPlaceholderDrone.group ?? '').trim() || 'Ungrouped',
-            kind: 'group' as const,
-          };
-    if (
-      !showHiddenSidebarGroups &&
-      sidebarFolderHiddenByTokens(hiddenSidebarGroupTokenSet, placeholderGroup.group, placeholderGroup.kind)
-    ) {
-      return optimisticSidebarGroups;
-    }
-    const next = optimisticSidebarGroups.map((group) =>
-      group.group === placeholderGroup.group
-        ? { ...group, items: [draftSidebarPlaceholderDrone, ...group.items] }
-        : group,
-    );
-    if (next.some((group) => group.group === placeholderGroup.group)) return next;
-    next.push({ ...placeholderGroup, items: [draftSidebarPlaceholderDrone] });
-    next.sort((a, b) => {
-      if (isUngroupedGroupName(a.label) && !isUngroupedGroupName(b.label)) return -1;
-      if (!isUngroupedGroupName(a.label) && isUngroupedGroupName(b.label)) return 1;
-      return a.label.localeCompare(b.label);
-    });
-    return orderSidebarGroups(next, sidebarGroupOrder);
-  }, [draftSidebarPlaceholderDrone, hiddenSidebarGroupTokenSet, optimisticSidebarGroups, showHiddenSidebarGroups, sidebarGroupOrder, sidebarGroupingMode]);
-  const sidebarFolderTree = React.useMemo(
-    () => buildSidebarFolderTree(renderSidebarGroups, sidebarGroupOrder),
-    [renderSidebarGroups, sidebarGroupOrder],
-  );
-  const flatSidebarFolderNodes = React.useMemo(() => flattenSidebarFolderTree(sidebarFolderTree), [sidebarFolderTree]);
-  const visibleSidebarFolderPathSet = React.useMemo(() => {
-    const out = new Set(flatSidebarFolderNodes.map((node) => node.path));
-    if (!isRepoGroupingMode) return out;
-    const visibleRepoGroupPathSet = new Set(
-      renderSidebarGroups
-        .filter((group) => group.kind === 'repo')
-        .map((group) => String(group.group ?? '').trim())
-        .filter(Boolean),
-    );
-    for (const [repoGroupPath, groupPaths] of Object.entries(repoScopedGroupPathsByRepoGroup)) {
-      if (!visibleRepoGroupPathSet.has(repoGroupPath)) continue;
-      for (const groupPath of groupPaths) out.add(groupPath);
-    }
-    return out;
-  }, [flatSidebarFolderNodes, isRepoGroupingMode, renderSidebarGroups, repoScopedGroupPathsByRepoGroup]);
-  const flatSidebarDrones = React.useMemo(() => {
-    const items = optimisticSidebarDronesFilteredByRepo.slice().sort(compareDronesByNewestFirst);
-    return draftSidebarPlaceholderDrone ? [draftSidebarPlaceholderDrone, ...items] : items;
-  }, [draftSidebarPlaceholderDrone, optimisticSidebarDronesFilteredByRepo]);
-  const flatSidebarTree = React.useMemo(() => buildSidebarDroneTree(flatSidebarDrones), [flatSidebarDrones]);
-  const sidebarDroneById = React.useMemo(() => {
-    const out: Record<string, DroneSummary> = {};
-    for (const drone of flatSidebarDrones) {
-      const droneId = String(drone?.id ?? '').trim();
-      if (!droneId) continue;
-      out[droneId] = drone;
-    }
-    return out;
-  }, [flatSidebarDrones]);
-
-  const toggleDroneSection = React.useCallback((droneIdRaw: string, kind: SidebarInlineSectionKind) => {
-    const key = sidebarInlineSectionKey(droneIdRaw, kind);
-    setCollapsedDroneSections((prev) => ({
-      ...prev,
-      [key]: !prev[key],
-    }));
-  }, []);
-
-  React.useEffect(() => {
-    if (!selectedFolderPath) return;
-    if (visibleSidebarFolderPathSet.has(selectedFolderPath)) return;
-    setSelectedFolderPath(null);
-    setSelectedSidebarNodeId((prev) => (prev === sidebarFolderNodeId(selectedFolderPath) ? null : prev));
-    setFolderEditor((prev) =>
-      prev?.targetPath === selectedFolderPath || prev?.parentPath === selectedFolderPath || prev?.anchorPath === selectedFolderPath
-        ? null
-        : prev,
-    );
-  }, [selectedFolderPath, visibleSidebarFolderPathSet]);
-
-  React.useEffect(() => {
-    const droneId = String(chatEditor?.droneId ?? '').trim();
-    if (!droneId) return;
-    if (sidebarDroneById[droneId]) return;
-    setChatEditor(null);
-  }, [chatEditor, sidebarDroneById]);
-
-  React.useEffect(() => {
-    if (draftSidebarPlaceholderNodeId) {
-      setSelectedFolderPath(null);
-      setSelectedSidebarNodeId(draftSidebarPlaceholderNodeId);
-      return;
-    }
-    setSelectedSidebarNodeId((prev) => (prev === sidebarDroneNodeId(DRAFT_SIDEBAR_PLACEHOLDER_ID) ? null : prev));
-  }, [draftSidebarPlaceholderNodeId]);
-
-  React.useEffect(() => {
-    const droneId = String(selectedDrone ?? '').trim();
-    if (!droneId) return;
-    const nextNodeId =
-      String(activeChatName ?? '').trim() && activeChatName !== 'default'
-        ? sidebarChatSidebarNodeId(droneId, activeChatName)
-        : sidebarDroneNodeId(droneId);
-    setSelectedSidebarNodeId((prev) => (prev && prev.startsWith('folder:') ? prev : nextNodeId));
-  }, [activeChatName, selectedDrone]);
-
-  React.useEffect(() => {
-    const selectedDroneId = String(selectedDrone ?? '').trim();
-    const selectedChatName = String(activeChatName ?? '').trim() || 'default';
-    if (!selectedDroneId) return;
-    setCollapsedDroneSections((prev) => {
-      const next = { ...prev };
-      let changed = false;
-
-      if (selectedChatName !== 'default') {
-        const chatKey = sidebarInlineSectionKey(selectedDroneId, 'chats');
-        if (next[chatKey]) {
-          next[chatKey] = false;
-          changed = true;
-        }
-      }
-
-      const visited = new Set<string>();
-      let currentDroneId = selectedDroneId;
-      while (currentDroneId && !visited.has(currentDroneId)) {
-        visited.add(currentDroneId);
-        const parentId = String(sidebarDroneById[currentDroneId]?.fleetParentId ?? '').trim();
-        if (!parentId || !sidebarDroneById[parentId]) break;
-        const childrenKey = sidebarInlineSectionKey(parentId, 'children');
-        if (next[childrenKey]) {
-          next[childrenKey] = false;
-          changed = true;
-        }
-        currentDroneId = parentId;
-      }
-
-      return changed ? next : prev;
-    });
-  }, [activeChatName, selectedDrone, sidebarDroneById]);
   const sharedDroneTreeListProps = {
     droneById: sidebarDroneById,
     sidebarDensityMode,
@@ -1985,6 +1252,7 @@ export function DroneSidebar({
     movingDroneGroups,
     sidebarOptimisticDroneIdSet,
     collapsedDroneSections,
+    setCollapsedDroneSections,
     uiDroneName,
     onToggleSection: toggleDroneSection,
     onSelectDroneCard,
@@ -1998,8 +1266,8 @@ export function DroneSidebar({
     onDeleteDrone,
     onOpenDroneErrorModal,
     onPrepareDroneDragStart,
-    onReparentDronesToParent,
-  } satisfies Omit<React.ComponentProps<typeof SidebarDroneTreeList>, 'tree'>;
+    onReparentDronesToParent: runOptimisticReparentDronesToParent,
+  } satisfies SidebarDroneTreeListSharedProps;
 
   const onSidebarWheel = React.useCallback(
     (event: React.WheelEvent<HTMLElement>) => {
@@ -2421,7 +1689,7 @@ export function DroneSidebar({
                   onDeleteDrone={onDeleteDrone}
                   onOpenDroneErrorModal={onOpenDroneErrorModal}
                   onPrepareDroneDragStart={onPrepareDroneDragStart}
-                  onReparentDronesToParent={onReparentDronesToParent}
+                  onReparentDronesToParent={runOptimisticReparentDronesToParent}
                 />
                   </>
                 {!isRepoGroupingMode && !sidebarHasUngroupedGroup && showExternalMoveTargets && (

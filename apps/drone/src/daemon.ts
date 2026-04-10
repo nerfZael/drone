@@ -635,6 +635,22 @@ async function capturePromptLine(session: string): Promise<string> {
   }
 }
 
+async function captureScreenText(session: string, tailLinesRaw: number): Promise<string> {
+  try {
+    const target = `${session}:0.0`;
+    const tailLines = Math.max(20, Math.min(5000, Math.floor(tailLinesRaw || 200)));
+    const { stdout } = await tmux(['capture-pane', '-p', '-t', target, '-S', String(-tailLines)]);
+    return String(stdout ?? '');
+  } catch {
+    try {
+      const { stdout } = await tmux(['capture-pane', '-p', '-t', `${session}:0.0`]);
+      return String(stdout ?? '');
+    } catch {
+      return '';
+    }
+  }
+}
+
 async function sleep(ms: number) {
   await new Promise((r) => setTimeout(r, ms));
 }
@@ -1344,7 +1360,7 @@ async function main() {
         const terminal = body?.terminal === true;
 
         const state = await readState();
-        if (state.process && !force) {
+        if (!terminal && state.process && !force) {
           json(res, 409, { error: 'process already exists', process: state.process });
           return;
         }
@@ -1365,12 +1381,15 @@ async function main() {
         await startSession({ session, cmd, args, cwd, env });
         await pipePaneToFile(session, logPath);
 
-        const next: DroneState = {
-          process: { session, cmd, args, cwd, env, logPath, startedAt: new Date().toISOString() },
-        };
-        await writeState(next);
+        const processInfo = { session, cmd, args, cwd, env, logPath, startedAt: new Date().toISOString() };
+        if (!terminal) {
+          const next: DroneState = {
+            process: processInfo,
+          };
+          await writeState(next);
+        }
 
-        json(res, 200, { ok: true, process: next.process });
+        json(res, 200, { ok: true, process: processInfo });
         return;
       }
 
@@ -1383,7 +1402,9 @@ async function main() {
           return;
         }
         if (await sessionExists(target)) await killSession(target);
-        await writeState({});
+        if (state.process?.session === target) {
+          await writeState({});
+        }
         json(res, 200, { ok: true });
         return;
       }
@@ -1457,9 +1478,28 @@ async function main() {
           json(res, 400, { error: 'invalid session' });
           return;
         }
+        const view = String(u.searchParams.get('view') ?? 'log').trim().toLowerCase();
         const since = Number(u.searchParams.get('since') ?? '0');
         const max = Number(u.searchParams.get('max') ?? '65536');
+        const tail = Number(u.searchParams.get('tail') ?? '200');
         const logPath = await sessionLogPathFor(session);
+        if (view === 'screen') {
+          const exists = await sessionExists(session);
+          if (!exists) {
+            json(res, 404, { error: `session not found: ${session}` });
+            return;
+          }
+          let nextOffset = 0;
+          try {
+            const st = await fs.stat(logPath);
+            nextOffset = Number.isFinite(st.size) && st.size > 0 ? Math.floor(st.size) : 0;
+          } catch {
+            nextOffset = 0;
+          }
+          const text = await captureScreenText(session, tail);
+          json(res, 200, { ok: true, session, view, chunk: text, nextOffset, logPath, tailLines: tail });
+          return;
+        }
         const out = await readSessionLogChunk(logPath, since, max);
         json(res, 200, { ok: true, session, chunk: out.chunk, nextOffset: out.nextOffset, logPath });
         return;
