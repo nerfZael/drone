@@ -485,6 +485,22 @@ export function DroneTerminalDock({
       }
     };
 
+    const bootstrapInitialOutput = async () => {
+      if (outputOffsetRef.current != null) return;
+      const qs = new URLSearchParams();
+      qs.set('tail', String(TERMINAL_INITIAL_TAIL_LINES));
+      const data = await requestJson<ReadTerminalOutputResponse>(
+        `/api/drones/${encodeURIComponent(droneId)}/terminal/${encodeURIComponent(sessionName)}/output?${qs.toString()}`,
+      );
+      if (!mounted) return;
+      const nextOffset = Number(data?.offsetBytes);
+      const nextText = typeof data?.text === 'string' ? data.text : '';
+      if (Number.isFinite(nextOffset) && nextOffset >= 0) {
+        outputOffsetRef.current = nextOffset;
+      }
+      applyServerOutput(nextText);
+    };
+
     const connect = (since?: number) => {
       if (!mounted) return;
       clearReconnectTimer();
@@ -568,8 +584,17 @@ export function DroneTerminalDock({
       };
     };
 
-    const initialSince = outputOffsetRef.current == null ? undefined : outputOffsetRef.current;
-    connect(initialSince);
+    void bootstrapInitialOutput()
+      .then(() => {
+        if (!mounted) return;
+        const initialSince = outputOffsetRef.current == null ? undefined : outputOffsetRef.current;
+        connect(initialSince);
+      })
+      .catch((e: any) => {
+        if (!mounted) return;
+        setError(formatDroneRuntimeError(e));
+        setStreamMode('poll');
+      });
 
     return () => {
       mounted = false;
