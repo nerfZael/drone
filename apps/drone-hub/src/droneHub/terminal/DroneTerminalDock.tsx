@@ -6,6 +6,9 @@ import '@xterm/xterm/css/xterm.css';
 import { formatDroneRuntimeError } from '../app/chat-startup-errors';
 import { requestJson } from '../http';
 import { provisioningLabel, usePaneReadiness } from '../panes/usePaneReadiness';
+import { DroneTerminalEmptyState } from './DroneTerminalEmptyState';
+import { DroneTerminalTabsBar } from './DroneTerminalTabsBar';
+import type { TerminalPaneSessionsState } from './terminal-tabs-state';
 
 const TERMINAL_INITIAL_TAIL_LINES = 40;
 const TERMINAL_MAX_BYTES = 200_000;
@@ -48,6 +51,13 @@ type TerminalStreamServerMessage =
   | { type: 'error'; error?: string }
   | { type: 'pong' };
 
+type CloseTerminalResponse = {
+  ok: true;
+  id: string;
+  name: string;
+  sessionName: string;
+};
+
 function normalizeTerminalCwdInput(raw: string): string {
   return String(raw ?? '').trim();
 }
@@ -57,6 +67,13 @@ export function DroneTerminalDock({
   droneName,
   chatName,
   defaultCwd,
+  paneKey,
+  sessionsState,
+  onEnsureSessions,
+  onCreateSession,
+  onActivateSession,
+  onResolveSessionName,
+  onCloseSession,
   disabled,
   hubPhase,
   hubMessage,
@@ -65,16 +82,44 @@ export function DroneTerminalDock({
   droneName: string;
   chatName: string;
   defaultCwd: string;
+  paneKey: 'single' | 'top' | 'bottom';
+  sessionsState: TerminalPaneSessionsState;
+  onEnsureSessions: (droneId: string, paneKey: 'single' | 'top' | 'bottom', cwd: string) => void;
+  onCreateSession: (droneId: string, paneKey: 'single' | 'top' | 'bottom', cwd: string) => void;
+  onActivateSession: (droneId: string, paneKey: 'single' | 'top' | 'bottom', sessionId: string) => void;
+  onResolveSessionName: (
+    droneId: string,
+    paneKey: 'single' | 'top' | 'bottom',
+    sessionId: string,
+    sessionName: string,
+  ) => void;
+  onCloseSession: (droneId: string, paneKey: 'single' | 'top' | 'bottom', sessionId: string) => void;
   disabled: boolean;
   hubPhase?: 'creating' | 'starting' | 'seeding' | 'error' | null;
   hubMessage?: string | null;
 }) {
   const normalizedCwd = React.useMemo(() => normalizeTerminalCwdInput(defaultCwd), [defaultCwd]);
+  const activeSession = React.useMemo(
+    () => sessionsState.sessions.find((session) => session.id === sessionsState.activeSessionId) ?? null,
+    [sessionsState.activeSessionId, sessionsState.sessions],
+  );
+  const activeSessionId = String(activeSession?.id ?? '').trim();
+  const activeSessionCwd = React.useMemo(
+    () => normalizeTerminalCwdInput(activeSession?.cwd ?? normalizedCwd),
+    [activeSession?.cwd, normalizedCwd],
+  );
+  const shouldOpenDefaultShellSession = Boolean(
+    activeSession &&
+      !activeSession.sessionName &&
+      activeSessionId === 'terminal-1' &&
+      sessionsState.sessions.length === 1,
+  );
   const [sessionName, setSessionName] = React.useState<string>('');
   const [error, setError] = React.useState<string | null>(null);
   const [streamMode, setStreamMode] = React.useState<'ws' | 'poll'>(() =>
     typeof window !== 'undefined' && typeof window.WebSocket !== 'undefined' ? 'ws' : 'poll',
   );
+  const [closingSessionId, setClosingSessionId] = React.useState<string | null>(null);
 
   const terminalHostRef = React.useRef<HTMLDivElement | null>(null);
   const terminalRef = React.useRef<Terminal | null>(null);
@@ -100,6 +145,12 @@ export function DroneTerminalDock({
     resetKey: `${droneId}\u0000terminal`,
     timeoutMs: 18_000,
   });
+
+  React.useEffect(() => {
+    if (!droneId || disabled) return;
+    if (sessionsState.initialized) return;
+    onEnsureSessions(droneId, paneKey, normalizedCwd);
+  }, [disabled, droneId, normalizedCwd, onEnsureSessions, paneKey, sessionsState.initialized]);
 
   function isImmediateInput(data: string): boolean {
     return /[\r\n\t\u0003\u0004\u001b]/.test(data);
@@ -282,7 +333,7 @@ export function DroneTerminalDock({
   }, [queueInput]);
 
   React.useEffect(() => {
-    if (!droneName || disabled) {
+    if (!droneName || disabled || !activeSessionId || !activeSession) {
       if (wsReconnectTimerRef.current != null) {
         clearTimeout(wsReconnectTimerRef.current);
         wsReconnectTimerRef.current = null;
@@ -302,6 +353,11 @@ export function DroneTerminalDock({
       activeTargetRef.current = null;
       emptyStreakRef.current = 0;
       errorStreakRef.current = 0;
+      const term = terminalRef.current;
+      if (term) {
+        term.reset();
+        term.clear();
+      }
       return;
     }
 
@@ -345,7 +401,14 @@ export function DroneTerminalDock({
       const qs = new URLSearchParams();
       qs.set('mode', 'shell');
       qs.set('chat', chatName || 'default');
-      qs.set('cwd', normalizedCwd);
+      qs.set('cwd', activeSessionCwd);
+      if (activeSession.sessionName) {
+        qs.set('session', activeSession.sessionName);
+      } else if (!shouldOpenDefaultShellSession) {
+        qs.set('create', '1');
+      } else {
+        // The first tab keeps the legacy/default shell session so prewarm can still pay off.
+      }
       const data = await requestJson<OpenTerminalResponse>(`/api/drones/${encodeURIComponent(droneId)}/terminal/open?${qs.toString()}`, {
         method: 'POST',
       });
@@ -354,6 +417,7 @@ export function DroneTerminalDock({
       const nextSession = String(data?.sessionName ?? '').trim();
       if (!nextSession) throw new Error('terminal session did not return a session name');
 
+      onResolveSessionName(droneId, paneKey, activeSessionId, nextSession);
       setSessionName(nextSession);
       outputOffsetRef.current = null;
       inputBufferRef.current = '';
@@ -386,7 +450,7 @@ export function DroneTerminalDock({
     return () => {
       cancelled = true;
     };
-  }, [droneId, chatName, normalizedCwd, disabled, queueInput]);
+  }, [activeSessionCwd, activeSessionId, chatName, disabled, droneId, droneName, onResolveSessionName, paneKey, queueInput, shouldOpenDefaultShellSession]);
 
   React.useEffect(() => {
     const el = dockRootRef.current;
@@ -638,6 +702,49 @@ export function DroneTerminalDock({
     };
   }, []);
 
+  const handleCreateSession = React.useCallback(() => {
+    setError(null);
+    onCreateSession(droneId, paneKey, normalizedCwd);
+  }, [droneId, normalizedCwd, onCreateSession, paneKey]);
+
+  const handleActivateSession = React.useCallback(
+    (sessionId: string) => {
+      if (!sessionId || sessionId === closingSessionId) return;
+      setError(null);
+      onActivateSession(droneId, paneKey, sessionId);
+    },
+    [closingSessionId, droneId, onActivateSession, paneKey],
+  );
+
+  const handleCloseSession = React.useCallback(
+    async (sessionId: string) => {
+      const session = sessionsState.sessions.find((entry) => entry.id === sessionId) ?? null;
+      if (!session || closingSessionId) return;
+      setClosingSessionId(sessionId);
+      try {
+        if (session.sessionName) {
+          await requestJson<CloseTerminalResponse>(
+            `/api/drones/${encodeURIComponent(droneId)}/terminal/${encodeURIComponent(session.sessionName)}`,
+            { method: 'DELETE' },
+          );
+        }
+        onCloseSession(droneId, paneKey, sessionId);
+        setError(null);
+      } catch (e: any) {
+        const status = Number((e as any)?.status);
+        if (status === 404) {
+          onCloseSession(droneId, paneKey, sessionId);
+          setError(null);
+        } else {
+          setError(formatDroneRuntimeError(e));
+        }
+      } finally {
+        setClosingSessionId((current) => (current === sessionId ? null : current));
+      }
+    },
+    [closingSessionId, droneId, onCloseSession, paneKey, sessionsState.sessions],
+  );
+
   return (
     <div
       ref={dockRootRef}
@@ -649,7 +756,22 @@ export function DroneTerminalDock({
         </div>
       )}
 
+      <DroneTerminalTabsBar
+        sessions={sessionsState.sessions}
+        activeSessionId={activeSession?.id ?? null}
+        closingSessionId={closingSessionId}
+        disabled={disabled}
+        onActivateSession={handleActivateSession}
+        onCloseSession={(sessionId) => {
+          void handleCloseSession(sessionId);
+        }}
+        onCreateSession={handleCreateSession}
+      />
+
       <div className="flex-1 min-h-0 bg-[#101216] relative pt-1 pl-1">
+        {!disabled && sessionsState.initialized && sessionsState.sessions.length === 0 ? (
+          <DroneTerminalEmptyState onCreateSession={handleCreateSession} />
+        ) : null}
         {disabled && (
           <div className="absolute inset-0 z-10 flex items-center justify-center text-center px-6">
             <div className="max-w-[360px] rounded-md border border-[var(--border-subtle)] bg-[rgba(0,0,0,.35)] backdrop-blur px-4 py-3">

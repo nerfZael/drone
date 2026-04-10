@@ -92,6 +92,10 @@ import {
   resolveChatNameForDrone,
 } from './droneHub/app/helpers';
 import { allocateUntitledDisplayName, droneNameHasWhitespace } from './droneHub/app/name-helpers';
+import {
+  createTerminalPaneSessionsState,
+} from './droneHub/terminal/terminal-tabs-state';
+import { useTerminalPaneSessions } from './droneHub/terminal/use-terminal-pane-sessions';
 import type { DronePortMapping, DroneSummary, PortReachabilityByHostPort } from './droneHub/types';
 
 type PreviewPaneKey = 'single' | 'top' | 'bottom';
@@ -1613,6 +1617,15 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     rightPanelTab,
     selectedChat,
   ]);
+  const {
+    terminalSessionsByPane,
+    terminalPaneStateKey,
+    ensureTerminalPaneSessions,
+    createTerminalPaneTab,
+    setActiveTerminalPaneTab,
+    setTerminalPaneTabSessionName,
+    closeTerminalPaneTab,
+  } = useTerminalPaneSessions();
   const [lockedPreviewByDrone, setLockedPreviewByDrone] = React.useState<Record<string, PreviewPaneSnapshot>>({});
   const setPreviewLockedForDrone = React.useCallback(
     (droneIdRaw: string, nextLocked: boolean, snapshot?: PreviewPaneSnapshot) => {
@@ -2565,6 +2578,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
 
   const renderRightPanelTabContent = React.useCallback(
     (drone: DroneSummary, tab: RightPanelTab, paneKey: PreviewPaneKey): React.ReactNode => {
+      const terminalKey = terminalPaneStateKey(drone.id, paneKey);
+      const terminalSessionsState = terminalKey
+        ? terminalSessionsByPane[terminalKey] ?? createTerminalPaneSessionsState()
+        : createTerminalPaneSessionsState();
       const lockedPreview = tab === 'preview' ? lockedPreviewByDrone[drone.id] ?? null : null;
       const previewDrone = lockedPreview?.drone ?? drone;
       const previewCurrentDroneId = lockedPreview?.currentDroneId ?? currentDrone?.id ?? null;
@@ -2617,6 +2634,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           currentDroneId={previewCurrentDroneId}
           currentCanvasChatNodeId={selectedCanvasChatNodeId}
           defaultFsPathForCurrentDrone={defaultFsPathForCurrentDrone}
+          terminalSessionsState={terminalSessionsState}
+          onEnsureTerminalSessions={ensureTerminalPaneSessions}
+          onCreateTerminalSession={createTerminalPaneTab}
+          onActivateTerminalSession={setActiveTerminalPaneTab}
+          onResolveTerminalSessionName={setTerminalPaneTabSessionName}
+          onCloseTerminalSession={closeTerminalPaneTab}
           uiDroneName={uiDroneName}
           currentFsPath={currentFsPath}
           fsEntries={fsEntries}
@@ -2722,6 +2745,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       fsExplorerView,
       fsLoading,
       lockedPreviewByDrone,
+      terminalSessionsByPane,
       portRows,
       portsError,
       portsErrorUi,
@@ -2737,6 +2761,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setChatHeaderRepoPath,
       setCustomAgentModalOpen,
       setDraftCreateGroup,
+      ensureTerminalPaneSessions,
+      createTerminalPaneTab,
+      setActiveTerminalPaneTab,
+      setTerminalPaneTabSessionName,
+      closeTerminalPaneTab,
       setPullHostBranchBeforeCreate,
       setSpawnAgentKey,
       setSpawnModel,

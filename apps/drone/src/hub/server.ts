@@ -57,6 +57,7 @@ import {
   fleetRequestList as droneFleetRequestList,
   fleetRequestResolve as droneFleetRequestResolve,
   procStart,
+  procStop,
   promptEnqueue as dronePromptEnqueue,
   promptCancel as dronePromptCancel,
   promptGet as dronePromptGet,
@@ -136,7 +137,15 @@ import {
 import { isHubApiAuthorized, isHubApiAuthorizedForWebSocket, rejectWebSocketUpgrade } from './hub-auth';
 import { bashQuote, encodeRemotePath, hexEncodeUtf8, normalizeContainerPath, parseBoolParam, shellQuoteIfNeeded } from './hub-format';
 import { readJsonBody, withCors } from './hub-http';
-import { shouldAwaitTerminalSkillSync, type HubWebTerminalMode } from './terminal-open';
+import {
+  createHubShellSessionName,
+  hubChatSessionName,
+  hubShellSessionName,
+  isHubShellSessionName,
+  isHubWebTerminalSessionName,
+  shouldAwaitTerminalSkillSync,
+  type HubWebTerminalMode,
+} from './terminal-open';
 import {
   buildChatAttachmentsDirectory,
   buildChatImageAttachmentRefs,
@@ -8054,14 +8063,6 @@ function defaultChatAgentConfigForDrone(droneEntry: any): ChatAgentConfig {
   return { kind: 'builtin', id: defaultBuiltinChatAgentIdForDrone(droneEntry) };
 }
 
-function hubChatSessionName(chatName: string): string {
-  return `drone-hub-chat-${sanitizeTmuxSessionName(chatName || 'default')}`;
-}
-
-function hubShellSessionName(): string {
-  return 'drone-hub-shell';
-}
-
 const HUB_WEB_TERMINAL_DEFAULT_TAIL_LINES = 300;
 const HUB_WEB_TERMINAL_MAX_TAIL_LINES = 1000;
 const HUB_WEB_TERMINAL_MAX_BYTES = 200_000;
@@ -8086,15 +8087,6 @@ function parseOptionalNonNegativeInt(raw: string | null): number | undefined {
 function clampIntParam(raw: string | null, defaultValue: number, min: number, max: number): number {
   const parsed = parseOptionalNonNegativeInt(raw);
   return clampInt(parsed ?? defaultValue, min, max);
-}
-
-function isHubWebTerminalSessionName(raw: string): boolean {
-  const s = String(raw ?? '').trim();
-  if (!isSafeTmuxSessionName(s)) return false;
-  if (s === hubShellSessionName()) return true;
-  // One tmux session per chat.
-  const prefix = 'drone-hub-chat-';
-  return s.startsWith(prefix) && s.length > prefix.length;
 }
 
 function buildHubSessionShell(opts: { command: string; cwd: string; envVars?: Record<string, string> | null }): string {
@@ -16865,7 +16857,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         return;
       }
 
-      // POST /api/drones/:id/terminal/open?mode=shell|agent&chat=<chatName>&cwd=/path
+      // POST /api/drones/:id/terminal/open?mode=shell|agent&chat=<chatName>&cwd=/path&session=<name>&create=1
       // Opens (or reuses) a tmux-backed terminal session for in-app web terminal use.
       if (method === 'POST' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'drones' && parts[3] === 'terminal' && parts[4] === 'open') {
         const droneRef = decodeURIComponent(parts[2]);
@@ -16881,11 +16873,39 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           .toLowerCase();
         const mode: HubWebTerminalMode = modeRaw === 'agent' ? 'agent' : 'shell';
         const chatName = normalizeChatName(u.searchParams.get('chat') ?? 'default');
+        const requestedSessionName = String(u.searchParams.get('session') ?? '').trim();
+        const createNewShell = u.searchParams.get('create') === '1';
         const cwd = normalizeDroneUiCwdForRuntime(d, u.searchParams.get('cwd') ?? null);
         const regAny: any = await loadRegistry();
         const managedEnv = resolveDroneEnvironmentConfig(regAny, d).resolvedVars;
         const runtimeEnv = resolveContainerManagedEnvVars(d, managedEnv);
         const managedEnvLines = buildEnvExportLines(managedEnv);
+
+        let shellSessionName = '';
+        if (mode === 'agent') {
+          if (createNewShell) {
+            json(res, 400, { ok: false, error: 'agent terminal sessions cannot be created with create=1', id: droneId, name: droneName });
+            return;
+          }
+          if (requestedSessionName && requestedSessionName !== hubChatSessionName(chatName)) {
+            json(res, 400, { ok: false, error: 'agent terminal session does not match the requested chat', id: droneId, name: droneName });
+            return;
+          }
+        } else {
+          if (createNewShell && requestedSessionName) {
+            json(res, 400, { ok: false, error: 'shell terminal open accepts either create=1 or session=<name>, not both', id: droneId, name: droneName });
+            return;
+          }
+          if (requestedSessionName) {
+            if (!isSafeTmuxSessionName(requestedSessionName) || !isHubShellSessionName(requestedSessionName)) {
+              json(res, 400, { ok: false, error: 'invalid shell terminal session name', id: droneId, name: droneName });
+              return;
+            }
+            shellSessionName = requestedSessionName;
+          } else {
+            shellSessionName = createNewShell ? createHubShellSessionName() : hubShellSessionName();
+          }
+        }
 
         try {
           if (shouldAwaitTerminalSkillSync(mode)) {
@@ -16901,7 +16921,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
               return;
             }
             await waitForDroneDaemonReady(daemon.client, defaultDaemonReadyTimeoutMs());
-            const sessionName = mode === 'agent' ? hubChatSessionName(chatName) : hubShellSessionName();
+            const sessionName = mode === 'agent' ? hubChatSessionName(chatName) : shellSessionName;
             if (mode === 'agent') await ensureChatEntry({ droneId, chatName });
             const agentCmd =
               mode === 'agent'
@@ -16921,12 +16941,12 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                 args: ['-lc', launchScript],
                 cwd,
                 env: managedEnv,
-                force: mode !== 'agent',
+                force: false,
                 terminal: true,
               });
             } catch (e: any) {
               const msg = String(e?.message ?? e ?? '').trim().toLowerCase();
-              if (mode === 'agent' && (msg.includes('already exists') || msg.includes('process already exists'))) {
+              if (msg.includes('already exists') || msg.includes('process already exists')) {
                 // Reuse the existing session instead of restarting it and dropping user state.
               } else {
                 throw e;
@@ -16960,7 +16980,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
               return;
             }
 
-            const sessionName = hubShellSessionName();
+            const sessionName = shellSessionName;
             await ensureHubSessionRunning({
               containerName,
               sessionName,
@@ -16979,6 +16999,66 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
 
       // GET /api/drones/:id/terminal/:session/output?since=<bytes>&maxBytes=<bytes>&tail=<lines>
       // Read output from a tmux-backed terminal session.
+      if (
+        method === 'DELETE' &&
+        parts.length === 5 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'terminal'
+      ) {
+        const droneRef = decodeURIComponent(parts[2]);
+        const sessionName = decodeURIComponent(parts[4]);
+        if (!isSafeTmuxSessionName(sessionName)) {
+          json(res, 400, { ok: false, error: 'invalid session name' });
+          return;
+        }
+        if (!isHubWebTerminalSessionName(sessionName)) {
+          json(res, 404, { ok: false, error: 'unknown session', name: droneRef, sessionName });
+          return;
+        }
+
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        const droneId = resolved.id;
+        const drone = resolved.drone;
+        const runtime = droneRuntime(drone);
+        const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
+
+        try {
+          if (runtime === 'host') {
+            const daemon = await resolveDroneDaemonClientForEntry(drone);
+            if (!daemon) {
+              json(res, 409, { ok: false, error: 'drone daemon not reachable (missing hostPort/token)', id: droneId, name: droneName, sessionName });
+              return;
+            }
+            await waitForDroneDaemonReady(daemon.client, defaultDaemonReadyTimeoutMs());
+            await procStop(daemon.client, { session: sessionName });
+            json(res, 200, { ok: true, id: droneId, name: droneName, sessionName });
+            return;
+          }
+
+          await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: drone }, async ({ containerName }) => {
+            const cleanupScript = [
+              'set -euo pipefail',
+              `s=${bashQuote(sessionName)}`,
+              'if tmux has-session -t "$s" 2>/dev/null; then',
+              '  tmux kill-session -t "$s" 2>/dev/null || true',
+              'fi',
+              `rm -rf /dvm-data/dvm-sessions/${sessionName} /tmp/dvm-sessions/${sessionName} 2>/dev/null || true`,
+            ].join('\n');
+            const result = await dvmExec(containerName, 'bash', ['-lc', cleanupScript]);
+            if (result.code !== 0) {
+              throw new Error(result.stderr || result.stdout || `failed to close terminal session ${sessionName}`);
+            }
+          });
+          json(res, 200, { ok: true, id: droneId, name: droneName, sessionName });
+          return;
+        } catch (e: any) {
+          json(res, 500, { ok: false, error: e?.message ?? String(e), id: droneId, name: droneName, sessionName });
+          return;
+        }
+      }
+
       if (
         method === 'GET' &&
         parts.length === 6 &&

@@ -1344,7 +1344,7 @@ async function main() {
         const terminal = body?.terminal === true;
 
         const state = await readState();
-        if (state.process && !force) {
+        if (!terminal && state.process && !force) {
           json(res, 409, { error: 'process already exists', process: state.process });
           return;
         }
@@ -1365,12 +1365,15 @@ async function main() {
         await startSession({ session, cmd, args, cwd, env });
         await pipePaneToFile(session, logPath);
 
-        const next: DroneState = {
-          process: { session, cmd, args, cwd, env, logPath, startedAt: new Date().toISOString() },
-        };
-        await writeState(next);
+        const processInfo = { session, cmd, args, cwd, env, logPath, startedAt: new Date().toISOString() };
+        if (!terminal) {
+          const next: DroneState = {
+            process: processInfo,
+          };
+          await writeState(next);
+        }
 
-        json(res, 200, { ok: true, process: next.process });
+        json(res, 200, { ok: true, process: processInfo });
         return;
       }
 
@@ -1383,7 +1386,9 @@ async function main() {
           return;
         }
         if (await sessionExists(target)) await killSession(target);
-        await writeState({});
+        if (state.process?.session === target) {
+          await writeState({});
+        }
         json(res, 200, { ok: true });
         return;
       }
