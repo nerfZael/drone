@@ -62,6 +62,16 @@ function normalizeTerminalCwdInput(raw: string): string {
   return String(raw ?? '').trim();
 }
 
+function sanitizeTerminalReplayText(rawText: string): string {
+  const raw = String(rawText ?? '');
+  if (!raw) return '';
+  const filtered = raw
+    .split('\n')
+    .filter((line) => !/^\[dvm session [^\]]+\] started .+$/.test(line.trim()))
+    .join('\n');
+  return filtered.replace(/^\n+/, '');
+}
+
 export function DroneTerminalDock({
   droneId,
   droneName,
@@ -168,11 +178,12 @@ export function DroneTerminalDock({
   }
 
   const applyServerOutput = React.useCallback((nextText: string) => {
-    if (!nextText) {
+    const sanitizedText = sanitizeTerminalReplayText(nextText);
+    if (!sanitizedText) {
       emptyStreakRef.current = Math.min(50, emptyStreakRef.current + 1);
       return;
     }
-    terminalRef.current?.write(nextText);
+    terminalRef.current?.write(sanitizedText);
     lastActivityAtRef.current = Date.now();
     emptyStreakRef.current = 0;
   }, []);
@@ -488,7 +499,6 @@ export function DroneTerminalDock({
     const bootstrapInitialOutput = async () => {
       if (outputOffsetRef.current != null) return;
       const qs = new URLSearchParams();
-      qs.set('view', 'screen');
       qs.set('tail', String(TERMINAL_INITIAL_TAIL_LINES));
       const data = await requestJson<ReadTerminalOutputResponse>(
         `/api/drones/${encodeURIComponent(droneId)}/terminal/${encodeURIComponent(sessionName)}/output?${qs.toString()}`,
