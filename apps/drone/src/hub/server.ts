@@ -17088,6 +17088,8 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const sinceRaw = u.searchParams.get('since');
         const maxBytesRaw = u.searchParams.get('maxBytes');
         const tailRaw = u.searchParams.get('tail');
+        const viewRaw = String(u.searchParams.get('view') ?? 'log').trim().toLowerCase();
+        const view = viewRaw === 'screen' ? 'screen' : 'log';
         const since = parseOptionalNonNegativeInt(sinceRaw);
         const maxBytes = clampIntParam(maxBytesRaw, HUB_WEB_TERMINAL_MAX_BYTES, 1, HUB_WEB_TERMINAL_MAX_BYTES);
         const tailLines = clampIntParam(tailRaw, HUB_WEB_TERMINAL_DEFAULT_TAIL_LINES, 0, HUB_WEB_TERMINAL_MAX_TAIL_LINES);
@@ -17102,14 +17104,17 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             await waitForDroneDaemonReady(daemon.client, defaultDaemonReadyTimeoutMs());
             const out = await droneTerminalOutput(daemon.client, {
               session: sessionName,
+              view,
               since: since ?? 0,
               max: since != null ? maxBytes : Math.max(maxBytes, tailLines * 256),
+              tail: tailLines,
             });
             json(res, 200, {
               ok: true,
               id: droneId,
               name: droneName,
               sessionName,
+              view,
               offsetBytes: Number((out as any)?.nextOffset ?? 0),
               text: String((out as any)?.chunk ?? ''),
             });
@@ -17119,16 +17124,36 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           const out = await withLockedDroneContainer(
             { requestedDroneName: droneName, droneEntry: drone },
             async ({ containerName }) => {
-            return await dvmSessionRead({
-              container: containerName,
-              session: sessionName,
-              since,
-              maxBytes: since != null ? maxBytes : undefined,
-              tailLines: since != null ? undefined : tailLines,
-            });
+              if (view === 'screen') {
+                const n = Math.max(20, Math.min(5000, tailLines || HUB_WEB_TERMINAL_DEFAULT_TAIL_LINES));
+                const screenScript = [
+                  'set -euo pipefail',
+                  `session=${JSON.stringify(sessionName)}`,
+                  `n=${JSON.stringify(String(n))}`,
+                  'tmux capture-pane -p -t "$session" -S "-$n" 2>/dev/null || tmux capture-pane -p -t "$session" 2>/dev/null || true',
+                ].join('\n');
+                const screenResult = await dvmExec(containerName, 'bash', ['-lc', screenScript]);
+                if (screenResult.code !== 0) {
+                  throw new Error((screenResult.stderr || screenResult.stdout || 'tmux capture-pane failed').trim());
+                }
+                const offset = await dvmSessionRead({
+                  container: containerName,
+                  session: sessionName,
+                  since: Number.MAX_SAFE_INTEGER,
+                  maxBytes: 1,
+                });
+                return { offsetBytes: offset.offsetBytes, text: screenResult.stdout || '' };
+              }
+              return await dvmSessionRead({
+                container: containerName,
+                session: sessionName,
+                since,
+                maxBytes: since != null ? maxBytes : undefined,
+                tailLines: since != null ? undefined : tailLines,
+              });
             },
           );
-          json(res, 200, { ok: true, id: droneId, name: droneName, sessionName, ...out });
+          json(res, 200, { ok: true, id: droneId, name: droneName, sessionName, view, ...out });
           return;
         } catch (e: any) {
           const msg = e?.message ?? String(e);

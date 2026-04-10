@@ -259,13 +259,18 @@ export async function terminalInput(client: DroneClient, payload: { session: str
   return await req(client, 'POST', '/v1/terminal/input', payload);
 }
 
-export async function terminalOutput(client: DroneClient, payload: { session: string; since?: number; max?: number }) {
+export async function terminalOutput(
+  client: DroneClient,
+  payload: { session: string; since?: number; max?: number; view?: 'log' | 'screen'; tail?: number },
+) {
   const since = payload.since ?? 0;
   const max = payload.max ?? 65536;
+  const view = payload.view === 'screen' ? 'screen' : 'log';
+  const tail = payload.tail ?? 200;
   return await req(
     client,
     'GET',
-    `/v1/terminal/output?session=${encodeURIComponent(payload.session)}&since=${encodeURIComponent(String(since))}&max=${encodeURIComponent(String(max))}`,
+    `/v1/terminal/output?session=${encodeURIComponent(payload.session)}&since=${encodeURIComponent(String(since))}&max=${encodeURIComponent(String(max))}&view=${encodeURIComponent(view)}&tail=${encodeURIComponent(String(tail))}`,
   );
 }
 

@@ -488,6 +488,7 @@ export function DroneTerminalDock({
     const bootstrapInitialOutput = async () => {
       if (outputOffsetRef.current != null) return;
       const qs = new URLSearchParams();
+      qs.set('view', 'screen');
       qs.set('tail', String(TERMINAL_INITIAL_TAIL_LINES));
       const data = await requestJson<ReadTerminalOutputResponse>(
         `/api/drones/${encodeURIComponent(droneId)}/terminal/${encodeURIComponent(sessionName)}/output?${qs.toString()}`,
