@@ -1,4 +1,4 @@
-export type SettingsTabId = 'general' | 'profiles' | 'trash' | 'archive' | 'shortcuts' | 'automations' | 'playbooks' | 'skills' | 'system';
+export type SettingsTabId = 'general' | 'sync' | 'profiles' | 'trash' | 'archive' | 'shortcuts' | 'automations' | 'playbooks' | 'skills' | 'system';
 
 export const SETTINGS_TABS: Array<{
   id: SettingsTabId;
@@ -11,6 +11,12 @@ export const SETTINGS_TABS: Array<{
     label: 'General',
     title: 'General settings',
     description: 'GitHub readiness, LLM providers, filesystem uploads, transcript defaults, and onboarding controls.',
+  },
+  {
+    id: 'sync',
+    label: 'Sync',
+    title: 'Sync sets',
+    description: 'Mirror host or Hub-managed file trees into every new drone and bulk-apply them to existing drones.',
   },
   {
     id: 'profiles',

@@ -51,6 +51,7 @@ import { useGithubSettings } from './droneHub/app/use-github-settings';
 import { useProfileSettings } from './droneHub/app/use-profile-settings';
 import { useSetupStatus } from './droneHub/app/use-setup-status';
 import { useSkillLibrary } from './droneHub/app/use-skill-library';
+import { useSyncSets } from './droneHub/app/use-sync-sets';
 import type { ProfileSettingsResponse } from './droneHub/app/settings-types';
 import { useQueuedPromptsState } from './droneHub/app/use-queued-prompts-state';
 import { useRightPanelLayout } from './droneHub/app/use-right-panel-layout';
@@ -535,6 +536,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const deleteActionSettingsState = useDeleteActionSettings(requestJson);
   const githubSettingsState = useGithubSettings(requestJson);
   const filesystemSettingsState = useFilesystemSettings(requestJson);
+  const syncSetsState = useSyncSets(requestJson);
   const profileSettingsState = useProfileSettings(requestJson);
   const setupStatusState = useSetupStatus(requestJson);
   const skillLibraryState = useSkillLibrary(requestJson);
@@ -2938,6 +2940,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     skillLibraryState,
     deleteActionSettingsState,
     filesystemSettingsState,
+    syncSetsState,
     profileSettingsState,
     setupStatusState,
     hubLogsState,

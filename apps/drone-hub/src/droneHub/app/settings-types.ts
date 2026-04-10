@@ -8,6 +8,8 @@ export type ArchiveRetentionId = '1h' | '8h' | '1d' | '1w';
 export type ArchiveRuntimePolicy = 'keep-running' | 'stop';
 export type SidebarGroupingMode = 'groups' | 'repos';
 export type SidebarDensityMode = 'compact' | 'default' | 'comfortable';
+export type SyncSetSourceType = 'hub-managed' | 'host-path';
+export type SyncSetTargetStatusState = 'idle' | 'synced' | 'error';
 
 export type ApiKeySettingsResponse = {
   ok: true;
@@ -130,6 +132,59 @@ export type ProfileSettingsResponse = {
   removedContainers?: string[];
   removedHostRoots?: string[];
   reloadRequired?: boolean;
+};
+
+export type SyncSetTargetStatus = {
+  targetId: string;
+  targetName: string;
+  targetKind: 'drone' | 'host';
+  state: SyncSetTargetStatusState;
+  appliedVersionId: string | null;
+  appliedAt: string | null;
+  error: string | null;
+};
+
+export type SyncSet = {
+  id: string;
+  label: string;
+  sourceType: SyncSetSourceType;
+  sourcePath: string | null;
+  targetPath: string;
+  applyToHost: boolean;
+  scope: { type: 'all' };
+  createdAt: string;
+  updatedAt: string;
+  lastAppliedVersionId: string | null;
+  lastAppliedAt: string | null;
+  managedSourcePath: string;
+  effectiveSourcePath: string;
+  sourceExists: boolean;
+  targetStatus: SyncSetTargetStatus[];
+};
+
+export type SyncSetsResponse = {
+  ok: true;
+  syncSets: SyncSet[];
+  updatedAt: string | null;
+};
+
+export type SyncSetApplyFailure = {
+  targetId: string;
+  targetName: string;
+  error: string;
+};
+
+export type SyncSetApplyResponse = {
+  ok: true;
+  syncSet: SyncSet | null;
+  appliedDrones: number;
+  totalDrones: number;
+  appliedHost: boolean;
+  failures: SyncSetApplyFailure[];
+  versionId: string;
+  sourcePath: string;
+  fileCount: number;
+  totalBytes: number;
 };
 
 export type SetupDependencyStatus = 'ready' | 'missing' | 'warning';

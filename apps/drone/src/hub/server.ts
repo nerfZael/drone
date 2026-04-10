@@ -98,6 +98,18 @@ import {
   resolveDroneEnvironmentConfig,
   resolveRepoEnvironmentConfig,
 } from './environment-config';
+import {
+  buildStoredSyncSet,
+  ensureSyncSetSourceIsReadable,
+  ensureHubManagedSyncSetSourceDir,
+  findStoredSyncSetIndex,
+  parseSyncSetMutationInput,
+  readStoredSyncSets,
+  removeHubManagedSyncSetSourceDir,
+  writeStoredSyncSets,
+  type ParsedSyncSetMutationInput,
+} from './sync-sets';
+import { createSyncSetService } from './sync-set-service';
 import { hasActivePriorPendingPrompt, shouldDeferQueuedTranscriptPrompt, stalePendingPromptState } from './pendingPromptEnqueue';
 import {
   applyBranchDiffToMainWorkingTree,
@@ -1903,6 +1915,18 @@ async function syncSkillLibraryForDrone(opts: { droneId: string; droneEntry: any
     });
   });
 }
+
+const syncSetService = createSyncSetService({
+  loadRegistry,
+  updateRegistry,
+  normalizeDroneIdentity,
+  droneRuntime,
+  withLockedDroneContainer,
+  nowIso,
+  logWarn: (message, meta) => {
+    hubLog('warn', message, meta);
+  },
+});
 
 function buildDockerExecShellCommand(containerName: string, cwdRaw: string): string {
   const cwd = normalizeContainerPath(cwdRaw);
@@ -6767,6 +6791,7 @@ const { dequeueProvisioning, enqueueProvisioning, enqueueProvisioningForAllPendi
   setChatAgentConfig,
   startupPromptToPendingPrompt,
   syncSkillLibraryForDrone,
+  syncSharedPathsToDrone: (opts) => syncSetService.applyAllSyncSetsToDrone(opts),
   syncTaskStateSnapshotToDrone,
 });
 
@@ -9160,6 +9185,200 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           }
           await upsertStoredFilesystemSettings({ uploadMaxBytes });
           json(res, 200, await resolveFilesystemSettingsResponse());
+          return;
+        }
+      }
+
+      if (pathname === '/api/settings/sync-sets') {
+        if (method === 'GET') {
+          const regAny: any = await loadRegistry();
+          json(res, 200, {
+            ok: true,
+            syncSets: await syncSetService.buildViewsFromRegistry(regAny),
+            updatedAt: regAny?.settings?.syncSets?.updatedAt ?? null,
+          });
+          return;
+        }
+
+        if (method === 'POST') {
+          let body: any = null;
+          try {
+            body = await readJsonBody(req);
+          } catch (e: any) {
+            json(res, 400, { ok: false, error: e?.message ?? String(e) });
+            return;
+          }
+          let input: ParsedSyncSetMutationInput;
+          try {
+            input = parseSyncSetMutationInput(body);
+            await ensureSyncSetSourceIsReadable(input);
+          } catch (e: any) {
+            json(res, 400, { ok: false, error: e?.message ?? String(e) });
+            return;
+          }
+          const createdAt = nowIso();
+          const syncSetId = `sync-${crypto.randomBytes(8).toString('hex')}`;
+          const createdManagedSourceDir = input.sourceType === 'hub-managed';
+          if (input.sourceType === 'hub-managed') {
+            await ensureHubManagedSyncSetSourceDir(syncSetId);
+          }
+          try {
+            await updateRegistry((regAny: any) => {
+              const syncSets = readStoredSyncSets(regAny);
+              syncSets.push(
+                buildStoredSyncSet({
+                  id: syncSetId,
+                  label: input.label,
+                  sourceType: input.sourceType,
+                  sourcePath: input.sourcePath,
+                  targetPath: input.targetPath,
+                  applyToHost: input.applyToHost,
+                  createdAt,
+                  updatedAt: createdAt,
+                }),
+              );
+              writeStoredSyncSets(regAny, syncSets, createdAt);
+            });
+          } catch (e) {
+            if (createdManagedSourceDir) {
+              await removeHubManagedSyncSetSourceDir(syncSetId);
+            }
+            throw e;
+          }
+          const regAny: any = await loadRegistry();
+          json(res, 201, {
+            ok: true,
+            syncSets: await syncSetService.buildViewsFromRegistry(regAny),
+            updatedAt: regAny?.settings?.syncSets?.updatedAt ?? null,
+          });
+          return;
+        }
+      }
+
+      const syncSetApplyMatch = pathname.match(/^\/api\/settings\/sync-sets\/([^/]+)\/apply$/);
+      if (syncSetApplyMatch) {
+        if (method === 'POST') {
+          try {
+            const result = await syncSetService.applySyncSetToAllExistingTargets(decodeURIComponent(syncSetApplyMatch[1]));
+            json(res, 200, {
+              ok: true,
+              syncSet: result.syncSetView,
+              appliedDrones: result.appliedDrones,
+              totalDrones: result.totalDrones,
+              appliedHost: result.appliedHost,
+              failures: result.failures,
+              versionId: result.snapshot.versionId,
+              sourcePath: result.snapshot.sourcePath,
+              fileCount: result.snapshot.fileCount,
+              totalBytes: result.snapshot.totalBytes,
+            });
+          } catch (e: any) {
+            const message = e?.message ?? String(e);
+            const status = /^unknown sync set: /.test(String(message)) ? 404 : 400;
+            json(res, status, { ok: false, error: message });
+          }
+          return;
+        }
+      }
+
+      const syncSetMatch = pathname.match(/^\/api\/settings\/sync-sets\/([^/]+)$/);
+      if (syncSetMatch) {
+        const syncSetId = decodeURIComponent(syncSetMatch[1]);
+        if (method === 'PATCH') {
+          let body: any = null;
+          try {
+            body = await readJsonBody(req);
+          } catch (e: any) {
+            json(res, 400, { ok: false, error: e?.message ?? String(e) });
+            return;
+          }
+          let input: ParsedSyncSetMutationInput;
+          try {
+            input = parseSyncSetMutationInput(body);
+            await ensureSyncSetSourceIsReadable(input);
+          } catch (e: any) {
+            json(res, 400, { ok: false, error: e?.message ?? String(e) });
+            return;
+          }
+          let notFound = false;
+          const updatedAt = nowIso();
+          const existingRegAny: any = await loadRegistry();
+          const existingSyncSets = readStoredSyncSets(existingRegAny);
+          if (findStoredSyncSetIndex(existingSyncSets, syncSetId) < 0) {
+            json(res, 404, { ok: false, error: `unknown sync set: ${syncSetId}` });
+            return;
+          }
+          if (input.sourceType === 'hub-managed') {
+            await ensureHubManagedSyncSetSourceDir(syncSetId);
+          }
+          await updateRegistry((regAny: any) => {
+            const syncSets = readStoredSyncSets(regAny);
+            const index = findStoredSyncSetIndex(syncSets, syncSetId);
+            if (index < 0) {
+              notFound = true;
+              return;
+            }
+            const existing = syncSets[index]!;
+            const materialChanged =
+              existing.sourceType !== input.sourceType ||
+              (existing.sourcePath ?? null) !== (input.sourcePath ?? null) ||
+              existing.targetPath !== input.targetPath ||
+              existing.applyToHost !== input.applyToHost;
+            const nextExisting = materialChanged
+              ? {
+                  ...existing,
+                  lastAppliedVersionId: null,
+                  lastAppliedAt: null,
+                  targetStatus: {},
+                }
+              : existing;
+            syncSets[index] = buildStoredSyncSet({
+              id: existing.id,
+              label: input.label,
+              sourceType: input.sourceType,
+              sourcePath: input.sourcePath,
+              targetPath: input.targetPath,
+              applyToHost: input.applyToHost,
+              createdAt: existing.createdAt,
+              updatedAt,
+              existing: nextExisting,
+            });
+            writeStoredSyncSets(regAny, syncSets, updatedAt);
+          });
+          if (notFound) {
+            json(res, 404, { ok: false, error: `unknown sync set: ${syncSetId}` });
+            return;
+          }
+          const regAny: any = await loadRegistry();
+          json(res, 200, {
+            ok: true,
+            syncSets: await syncSetService.buildViewsFromRegistry(regAny),
+            updatedAt: regAny?.settings?.syncSets?.updatedAt ?? null,
+          });
+          return;
+        }
+
+        if (method === 'DELETE') {
+          let removed = false;
+          await updateRegistry((regAny: any) => {
+            const syncSets = readStoredSyncSets(regAny);
+            const index = findStoredSyncSetIndex(syncSets, syncSetId);
+            if (index < 0) return;
+            syncSets.splice(index, 1);
+            removed = true;
+            writeStoredSyncSets(regAny, syncSets, nowIso());
+          });
+          if (!removed) {
+            json(res, 404, { ok: false, error: `unknown sync set: ${syncSetId}` });
+            return;
+          }
+          await removeHubManagedSyncSetSourceDir(syncSetId);
+          const regAny: any = await loadRegistry();
+          json(res, 200, {
+            ok: true,
+            syncSets: await syncSetService.buildViewsFromRegistry(regAny),
+            updatedAt: regAny?.settings?.syncSets?.updatedAt ?? null,
+          });
           return;
         }
       }

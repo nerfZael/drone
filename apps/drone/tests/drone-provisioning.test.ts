@@ -28,6 +28,7 @@ function createControllerHarness() {
   const enqueuePromptCalls: any[] = [];
   const setChatAgentConfigCalls: any[] = [];
   const syncSkillLibraryCalls: any[] = [];
+  const syncSharedPathsCalls: any[] = [];
   const syncTaskStateCalls: any[] = [];
 
   const controller = createDroneProvisioningController({
@@ -84,6 +85,9 @@ function createControllerHarness() {
     syncSkillLibraryForDrone: async (opts) => {
       syncSkillLibraryCalls.push(opts);
     },
+    syncSharedPathsToDrone: async (opts) => {
+      syncSharedPathsCalls.push(opts);
+    },
     syncTaskStateSnapshotToDrone: async (droneId, droneEntry) => {
       syncTaskStateCalls.push({ droneId, droneEntry });
     },
@@ -95,6 +99,7 @@ function createControllerHarness() {
     enqueuePromptCalls,
     setChatAgentConfigCalls,
     syncSkillLibraryCalls,
+    syncSharedPathsCalls,
     syncTaskStateCalls,
   };
 }
@@ -134,6 +139,7 @@ describe('drone provisioning controller', () => {
       });
       expect(harness.syncTaskStateCalls).toHaveLength(1);
       expect(harness.syncSkillLibraryCalls).toHaveLength(1);
+      expect(harness.syncSharedPathsCalls).toHaveLength(1);
     });
   });
 

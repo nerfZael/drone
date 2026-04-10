@@ -50,6 +50,7 @@ type DroneProvisioningControllerDeps = {
   setChatAgentConfig: (opts: { droneId: string; chatName: string; agent?: any; setModel: boolean; model?: string | null }) => Promise<void>;
   startupPromptToPendingPrompt: (prompt: PendingStartupPrompt) => PendingPromptProjection;
   syncSkillLibraryForDrone: (opts: { droneId: string; droneEntry: any }) => Promise<void>;
+  syncSharedPathsToDrone: (opts: { droneId: string; droneEntry: any }) => Promise<void>;
   syncTaskStateSnapshotToDrone: (droneId: string, droneEntry: any) => Promise<void>;
 };
 
@@ -384,9 +385,10 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
       if (createdDrone) {
         await deps.syncTaskStateSnapshotToDrone(pendingDroneId, createdDrone);
         await deps.syncSkillLibraryForDrone({ droneId: pendingDroneId, droneEntry: createdDrone });
+        await deps.syncSharedPathsToDrone({ droneId: pendingDroneId, droneEntry: createdDrone });
       }
     } catch (e: any) {
-      deps.hubLog('warn', 'skill sync failed after drone creation', {
+      deps.hubLog('warn', 'post-create sync failed after drone creation', {
         droneId: pendingDroneId,
         error: String(e?.message ?? String(e)),
       });

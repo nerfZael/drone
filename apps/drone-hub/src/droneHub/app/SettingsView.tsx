@@ -6,6 +6,7 @@ import { PlaybookSettingsSection } from './PlaybookSettingsSection';
 import { ProfilesSettingsTab } from './ProfilesSettingsTab';
 import { ShortcutSettingsSection } from './ShortcutSettingsSection';
 import { SkillLibrarySection } from './SkillLibrarySection';
+import { SyncSettingsTab } from './SyncSettingsTab';
 import { SystemLogsSettingsTab } from './SystemLogsSettingsTab';
 import { TrashBehaviorSettingsTab } from './TrashBehaviorSettingsTab';
 import { SETTINGS_TABS, type SettingsTabId } from './settings-tabs';
@@ -17,6 +18,7 @@ import type { UseHubLogsResult } from './use-hub-logs';
 import type { UseLlmSettingsResult } from './use-llm-settings';
 import type { UseProfileSettingsResult } from './use-profile-settings';
 import type { UseSkillLibraryResult } from './use-skill-library';
+import type { UseSyncSetsResult } from './use-sync-sets';
 
 type SettingsViewProps = {
   github: UseGithubSettingsResult;
@@ -24,6 +26,7 @@ type SettingsViewProps = {
   skillLibrary: UseSkillLibraryResult;
   deleteAction: UseDeleteActionSettingsResult;
   filesystem: UseFilesystemSettingsResult;
+  syncSets: UseSyncSetsResult;
   profile: UseProfileSettingsResult;
   hubLogsState: UseHubLogsResult;
   hubLogsTailLines: number;
@@ -51,6 +54,7 @@ export function SettingsView({
   skillLibrary,
   deleteAction,
   filesystem,
+  syncSets,
   profile,
   hubLogsState,
   hubLogsTailLines,
@@ -73,6 +77,7 @@ export function SettingsView({
     llm.llmSettingsLoading ||
     deleteAction.deleteSettingsLoading ||
     filesystem.filesystemSettingsLoading ||
+    syncSets.syncSetsLoading ||
     profile.profileSettingsLoading ||
     deleteAction.archivedDronesLoading ||
     deleteAction.archivedChatsLoading ||
@@ -89,6 +94,10 @@ export function SettingsView({
     skillLibrary.skillsDeleting ||
     deleteAction.savingDeleteSettings ||
     filesystem.savingFilesystemSettings ||
+    syncSets.creatingSyncSet ||
+    Boolean(syncSets.savingSyncSetId) ||
+    Boolean(syncSets.deletingSyncSetId) ||
+    Boolean(syncSets.applyingSyncSetId) ||
     profile.creatingProfile ||
     Boolean(profile.activatingProfileName) ||
     Boolean(profile.deletingProfileName);
@@ -118,13 +127,14 @@ export function SettingsView({
     void github.loadGithubSettings();
     void deleteAction.loadDeleteSettings();
     void filesystem.loadFilesystemSettings();
+    void syncSets.loadSyncSets();
     void deleteAction.loadArchivedDrones();
     void deleteAction.loadArchivedChats();
     void profile.loadProfileSettings();
     void hubLogsState.loadHubLogs();
     void skillLibrary.loadSkills();
     void skillLibrary.loadSkillSources();
-  }, [deleteAction, filesystem, github, hubLogsState, llm, profile, skillLibrary]);
+  }, [deleteAction, filesystem, github, hubLogsState, llm, profile, skillLibrary, syncSets]);
 
   const renderActiveTab = () => {
     if (activeTab === 'general') {
@@ -140,6 +150,7 @@ export function SettingsView({
         />
       );
     }
+    if (activeTab === 'sync') return <SyncSettingsTab syncSets={syncSets} />;
     if (activeTab === 'profiles') return <ProfilesSettingsTab profile={profile} />;
     if (activeTab === 'trash') return <TrashBehaviorSettingsTab deleteAction={deleteAction} />;
     if (activeTab === 'archive') return <ArchiveSettingsTab deleteAction={deleteAction} />;
