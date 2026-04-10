@@ -60,7 +60,11 @@ import { useRightPanelLayout } from './droneHub/app/use-right-panel-layout';
 import { useDroneSelectionState } from './droneHub/app/use-drone-selection-state';
 import { SIDEBAR_VISIBLE_MULTI_CHAT_GROUP, useSidebarViewModel } from './droneHub/app/use-sidebar-view-model';
 import { useChatConfigState } from './droneHub/app/use-chat-config-state';
-import { resolveSpawnContextPreferencesForRepo, useDroneHubAppModelUiState } from './droneHub/app/use-drone-hub-ui-store';
+import {
+  resolveSpawnContextPreferencesForRepo,
+  useDroneHubAppModelUiState,
+  useDroneHubUiStore,
+} from './droneHub/app/use-drone-hub-ui-store';
 import { useDroneHubRuntimeState } from './droneHub/app/use-drone-hub-runtime-store';
 import { useDroneHubLifecycleEffects } from './droneHub/app/use-drone-hub-lifecycle-effects';
 import { useDroneHubRegistryData } from './droneHub/app/use-drone-hub-registry-data';
@@ -86,6 +90,12 @@ import {
 import type { MarkdownFileReference } from './droneHub/chat/MarkdownMessage';
 import { buildDroneHubTaskQueueSpec, type DroneHubTaskSpawnMode } from './droneHub/chat/drone-hub-task-spawn';
 import {
+  buildSuggestedChatNameCandidate,
+  isSuggestedChatRenameConflict,
+  isSuggestedChatRenameRetriable,
+} from './droneHub/app/chat-name-suggestions';
+import {
+  chatInputDraftKeyForDroneChat,
   droneHomePath,
   isDroneStartingOrSeeding,
   makeId,
@@ -2370,6 +2380,96 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       sidebarSelectableDroneIdSet,
     ],
   );
+  const suggestAndRenameDroneChatFromMessage = React.useCallback(
+    async (droneIdRaw: string, chatNameRaw: string, promptRaw: string): Promise<void> => {
+      const droneId = String(droneIdRaw ?? '').trim();
+      const chatName = String(chatNameRaw ?? '').trim();
+      const prompt = String(promptRaw ?? '').trim();
+      if (!droneId || !chatName || !prompt || chatName === 'default') return;
+      try {
+        const data = await requestJson<{ ok: true; name: string }>(
+          '/api/drones/name-from-message',
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              message: prompt,
+              source: 'chat-auto-rename',
+              droneId,
+            }),
+          },
+        );
+        const base = String((data as any)?.name ?? '').trim();
+        if (!base) {
+          showNameSuggestionFailureToast(new Error('Chat name suggestion returned an empty value.'));
+          return;
+        }
+        if (base === chatName) return;
+
+        const startedAtMs = Date.now();
+        const maxRetryMs = 2 * 60 * 1000;
+        let candidateIndex = 1;
+        let lastError = '';
+        for (let attempt = 1; attempt <= 180; attempt += 1) {
+          const candidate = buildSuggestedChatNameCandidate(base, candidateIndex);
+          if (!candidate) {
+            showNameSuggestionFailureToast(new Error('Chat name suggestion produced an empty candidate.'));
+            return;
+          }
+          try {
+            await requestJson<{ ok: true; chat: string }>(
+              `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/rename`,
+              {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ newName: candidate }),
+              },
+            );
+            setSidebarChatOrderByDrone((prev) => {
+              const currentOrder = prev[droneId];
+              if (!currentOrder || !currentOrder.includes(chatName)) return prev;
+              return {
+                ...prev,
+                [droneId]: currentOrder.map((entry) => (entry === chatName ? candidate : entry)),
+              };
+            });
+            const { selectedDrone: activeDroneId, selectedChat: activeChatName } = useDroneHubUiStore.getState();
+            if (activeDroneId === droneId && activeChatName === chatName) {
+              setSelectedChat(candidate);
+            }
+            return;
+          } catch (error: any) {
+            const message = String(error?.message ?? error ?? '').trim();
+            lastError = message || 'rename failed';
+            if (isSuggestedChatRenameConflict(message)) {
+              candidateIndex += 1;
+              continue;
+            }
+            if (!isSuggestedChatRenameRetriable(message)) {
+              showNameSuggestionFailureToast(new Error(`Chat auto-rename failed: ${lastError}`));
+              return;
+            }
+            const delayMs = Math.min(3000, 250 + attempt * 250);
+            if (Date.now() - startedAtMs + delayMs > maxRetryMs) break;
+            await new Promise<void>((resolve) => window.setTimeout(resolve, delayMs));
+          }
+        }
+        const waitedMs = Date.now() - startedAtMs;
+        const timeoutMessage = lastError
+          ? `Chat auto-rename timed out after ${Math.round(waitedMs / 1000)}s (last error: ${lastError}).`
+          : `Chat auto-rename timed out after ${Math.round(waitedMs / 1000)}s.`;
+        showNameSuggestionFailureToast(new Error(timeoutMessage));
+      } catch (error: any) {
+        console.error('[DroneHub] chat auto-rename skipped', {
+          id: droneId,
+          chat: chatName,
+          error: error?.message ?? String(error),
+        });
+        showNameSuggestionFailureToast(error);
+      }
+    },
+    [requestJson, setSelectedChat, setSidebarChatOrderByDrone, showNameSuggestionFailureToast],
+  );
   const createDroneChat = React.useCallback(
     async (
       drone: DroneSummary,
@@ -2403,10 +2503,16 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   );
   const createDroneChatFromShortcut = React.useCallback(async (): Promise<boolean> => {
     if (!currentDrone) return false;
+    const sourceChatName = resolveChatNameForDrone(currentDrone, selectedChat);
+    const sourceDraftKey = chatInputDraftKeyForDroneChat(currentDrone.id, sourceChatName);
+    const sourcePrompt = String(useDroneHubUiStore.getState().chatInputDrafts[sourceDraftKey] ?? '').trim();
     const chatName = suggestNextDroneChatName(currentDrone.chats);
     const result = await createDroneChat(currentDrone, chatName);
+    if (result.ok && sourcePrompt) {
+      void suggestAndRenameDroneChatFromMessage(currentDrone.id, chatName, sourcePrompt);
+    }
     return result.ok === true;
-  }, [createDroneChat, currentDrone]);
+  }, [createDroneChat, currentDrone, selectedChat, suggestAndRenameDroneChatFromMessage]);
   useDroneHubLifecycleEffects({
     normalizeCreateRepoPath,
     setCreateRepoPath,
