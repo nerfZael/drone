@@ -11,6 +11,7 @@ import {
   normalizePendingPromptState,
   reconcileOptimisticPendingPrompt,
 } from './optimistic-pending-prompts';
+import { fetchDroneChatTranscript, sendDroneChatPrompt } from './chat-api';
 import { droneChatQueueKey, isDroneStartingOrSeeding, parseDroneChatQueueKey } from './helpers';
 import { fetchJson, isNotFoundError, resolvePollIntervalMs, usePoll } from './hooks';
 import { beginRecordBusyKey, removeRecordKey } from './keyed-record-state';
@@ -265,20 +266,12 @@ export function useChatRuntimeOrchestration({
       setPromptError(null);
       setStopResponseError(null);
       try {
-        const data = await requestJson<{
-          ok: true;
-          accepted: true;
-          promptId: string;
-          pendingState?: PendingPrompt['state'];
-          blockedByAutomation?: boolean;
-        }>(
-          `/api/drones/${encodeURIComponent(currentDrone.id)}/chats/${encodeURIComponent(selectedChat || 'default')}/prompt`,
-          {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ prompt, attachments }),
-          },
-        );
+        const data = await sendDroneChatPrompt(requestJson, {
+          droneId: currentDrone.id,
+          chatName: selectedChat || 'default',
+          prompt,
+          attachments,
+        });
         const stillOnSameChat =
           selectedDroneRef.current === originDroneId &&
           (selectedChatRef.current || 'default') === originChat;
@@ -429,20 +422,12 @@ export function useChatRuntimeOrchestration({
 
           patchQueuedPrompt(key, head.id, { state: 'sending', error: undefined });
           try {
-            const data = await requestJson<{
-              ok: true;
-              accepted: true;
-              promptId: string;
-              pendingState?: PendingPrompt['state'];
-              blockedByAutomation?: boolean;
-            }>(
-              `/api/drones/${encodeURIComponent(parsed.droneId)}/chats/${encodeURIComponent(parsed.chatName)}/prompt`,
-              {
-                method: 'POST',
-                headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ prompt: head.prompt, attachments: head.attachmentPayloads ?? [] }),
-              },
-            );
+            const data = await sendDroneChatPrompt(requestJson, {
+              droneId: parsed.droneId,
+              chatName: parsed.chatName,
+              prompt: head.prompt,
+              attachments: head.attachmentPayloads ?? [],
+            });
 
             const id = String((data as any)?.promptId ?? '').trim();
             removeQueuedPrompt(key, head.id);
@@ -645,11 +630,13 @@ export function useChatRuntimeOrchestration({
       const initial = transcriptsRef.current === null && !transcriptErrorRef.current;
       if (initial && mounted) setLoadingTranscript(true);
       try {
-        const data = await fetchJson<{ ok: true; transcripts: TranscriptItem[] }>(
-          `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(selectedChat)}/transcript?turn=all`,
-        );
+        const data = await fetchDroneChatTranscript(requestJson, {
+          droneId: selectedDrone,
+          chatName: selectedChat,
+          turn: 'all',
+        });
         if (!mounted) return;
-        setTranscripts(data.transcripts ?? []);
+        setTranscripts(data);
         setTranscriptError(null);
       } catch (e: any) {
         if (!mounted) return;
@@ -694,6 +681,7 @@ export function useChatRuntimeOrchestration({
     selectedChat,
     hasSelectedDroneSummary,
     selectedDroneHubPhase,
+    requestJson,
     setLoadingTranscript,
     setTranscriptError,
     setTranscripts,

@@ -37,6 +37,8 @@ import {
 import { parseIsoDateMs, type GroupMultiChatColumnRuntimeState } from './group-multi-chat-sort';
 import { openDroneTabFromLastPreview, resolveDroneOpenTabUrl } from './quick-actions';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
+import { useAgentCopilotOrchestration } from './use-agent-copilot-orchestration';
+import { fetchDroneChatTranscript, sendDroneChatPrompt } from './chat-api';
 
 export type GroupMultiChatColumnProps = {
   drone: DroneSummary;
@@ -93,6 +95,13 @@ export function GroupMultiChatColumn({
   const quickOpenTabUrl = resolveDroneOpenTabUrl(drone);
   const disabledByProvisioning = isDroneStartingOrSeeding(drone.hubPhase);
 
+  useAgentCopilotOrchestration({
+    requestJson,
+    sourceDroneId: drone.id,
+    sourceChatName: chatName,
+    transcripts,
+  });
+
   const scrollColumnToBottom = React.useCallback(() => {
     const el = columnScrollRef.current;
     if (!el) return;
@@ -126,11 +135,13 @@ export function GroupMultiChatColumn({
       }
       busy = true;
       try {
-        const data = await fetchJson<{ ok: true; transcripts: TranscriptItem[] }>(
-          `/api/drones/${encodeURIComponent(drone.id)}/chats/${encodeURIComponent(chatName)}/transcript?turn=all`,
-        );
+        const data = await fetchDroneChatTranscript(requestJson, {
+          droneId: drone.id,
+          chatName,
+          turn: 'all',
+        });
         if (!mounted) return;
-        setTranscripts(data.transcripts ?? []);
+        setTranscripts(data);
         setError(null);
       } catch (err: any) {
         if (!mounted) return;
@@ -287,14 +298,12 @@ export function GroupMultiChatColumn({
         setOptimisticPendingPrompts((prev) => appendOptimisticPendingPrompt(prev, optimisticItem));
       }
       try {
-        const data = await requestJson<{ ok: true; accepted: true; promptId: string; pendingState?: PendingPrompt['state'] }>(
-          `/api/drones/${encodeURIComponent(drone.id)}/chats/${encodeURIComponent(chatName)}/prompt`,
-          {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ prompt, attachments }),
-          },
-        );
+        const data = await sendDroneChatPrompt(requestJson, {
+          droneId: drone.id,
+          chatName,
+          prompt,
+          attachments,
+        });
         const id = String((data as any)?.promptId ?? '').trim();
         const pendingState = normalizePendingPromptState(data?.pendingState);
         setOptimisticPendingPrompts((prev) =>

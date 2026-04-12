@@ -130,8 +130,10 @@ export async function fetchJson<T>(url: string): Promise<T> {
 }
 
 export function isNotFoundError(err: any): boolean {
+  const status = Number(err?.status ?? 0);
+  if (status === 404) return true;
   const msg = String(err?.message ?? err ?? '').trim();
-  return /^404\b/.test(msg);
+  return /^404\b/.test(msg) || /unknown (?:chat|drone)\b/i.test(msg);
 }
 
 export async function probeLocalhostPort(hostPort: number, timeoutMs: number): Promise<boolean> {

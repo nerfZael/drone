@@ -1,6 +1,7 @@
 import React from 'react';
 import type { ChatSendPayload } from '../chat';
 import type { DroneSummary } from '../types';
+import { sendDroneChatPrompt } from './chat-api';
 import { isDroneStartingOrSeeding, resolveChatNameForDrone } from './helpers';
 import { SIDEBAR_VISIBLE_MULTI_CHAT_GROUP, type SidebarGroup } from './use-sidebar-view-model';
 import { isSameOrDescendantSidebarGroupPath } from './sidebar-group-paths';
@@ -92,14 +93,12 @@ export function useGroupBroadcast({
               throw new Error(`"${d.name}" is still starting.`);
             }
             const chatName = resolveChatNameForDrone(d, preferredChat);
-            await requestJson<{ ok: true; accepted: true; promptId: string }>(
-              `/api/drones/${encodeURIComponent(d.id)}/chats/${encodeURIComponent(chatName)}/prompt`,
-              {
-                method: 'POST',
-                headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ prompt, attachments }),
-              },
-            );
+            await sendDroneChatPrompt(requestJson, {
+              droneId: d.id,
+              chatName,
+              prompt,
+              attachments,
+            });
             return d.name;
           }),
         );

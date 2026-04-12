@@ -10,6 +10,7 @@ import type { MarkdownFileReference } from './MarkdownMessage';
 import { RelativeTimeText } from './RelativeTimeText';
 import type { DroneHubTask } from './drone-hub-task-parser';
 import type { DroneHubTaskSpawnMode } from './drone-hub-task-spawn';
+import { extractAgentCopilotFromAgentMessage } from './agent-copilot-parser';
 import { extractDroneHubTasksFromAgentMessage } from './drone-hub-task-parser';
 import { IconBot, IconCopy, IconImage, IconJobs, IconSpinner, IconTldr, IconUser } from './icons';
 
@@ -290,7 +291,14 @@ export const TranscriptTurn = React.memo(
       () => (item.ok ? extractDroneHubTasksFromAgentMessage(cleaned) : { cleanedText: cleaned, tasks: [] }),
       [cleaned, item.ok],
     );
-    const cleanedAgentMessage = extractedTaskData.cleanedText;
+    const extractedCopilotData = React.useMemo(
+      () =>
+        item.ok
+          ? extractAgentCopilotFromAgentMessage(extractedTaskData.cleanedText)
+          : { cleanedText: extractedTaskData.cleanedText, copilot: null, error: null },
+      [extractedTaskData.cleanedText, item.ok],
+    );
+    const cleanedAgentMessage = extractedCopilotData.cleanedText;
     const droneHubTasks = extractedTaskData.tasks;
     const promptIso = item.promptAt || item.at;
     const agentIso = item.completedAt || item.at;
