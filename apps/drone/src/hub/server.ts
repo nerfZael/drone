@@ -8077,6 +8077,7 @@ async function archiveChatById(opts: {
   const chatName = normalizeChatName(opts.chatName);
   const retention = normalizeArchiveRetention(opts.archiveRetention);
   const autoContinueEnabledByDefault = (await resolveEffectiveAgentMessageAutoContinueSettings()).enabledByDefault;
+  const agentSuggestionEnabledByDefault = (await resolveEffectiveAgentSuggestionSettings()).enabledByDefault;
   if (!droneId || !chatName) {
     return {
       hadDrone: false,
@@ -8137,6 +8138,7 @@ async function archiveChatById(opts: {
         droneEntry,
         createdAt: nowIso(),
         autoContinueEnabledByDefault,
+        agentSuggestionEnabledByDefault,
       });
     }
     regAny.drones = regAny.drones ?? {};
@@ -19562,6 +19564,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         const copyFromRaw = String(body?.copyFrom ?? body?.copyFromChat ?? body?.fromChat ?? '').trim();
         const copyFrom = copyFromRaw ? normalizeChatName(copyFromRaw) : '';
         const autoContinueEnabledByDefault = (await resolveEffectiveAgentMessageAutoContinueSettings()).enabledByDefault;
+        const agentSuggestionEnabledByDefault = (await resolveEffectiveAgentSuggestionSettings()).enabledByDefault;
 
         try {
           const chats = await updateRegistry((regAny: any) => {
@@ -19579,6 +19582,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                   droneEntry: d,
                   createdAt,
                   autoContinueEnabledByDefault,
+                  agentSuggestionEnabledByDefault,
                 });
               } else {
                 throw new Error(`unknown chat: ${copyFrom}`);
@@ -19588,6 +19592,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
               droneEntry: d,
               createdAt,
               autoContinueEnabledByDefault,
+              agentSuggestionEnabledByDefault,
             });
             if (copyFrom) {
               const source = d.chats?.[copyFrom];
@@ -19597,6 +19602,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                 createdAt,
                 sourceChatEntry: source,
                 autoContinueEnabledByDefault,
+                agentSuggestionEnabledByDefault,
               });
             }
             d.chats[chatName] = entry;
@@ -19770,6 +19776,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
 
         try {
           const autoContinueEnabledByDefault = (await resolveEffectiveAgentMessageAutoContinueSettings()).enabledByDefault;
+          const agentSuggestionEnabledByDefault = (await resolveEffectiveAgentSuggestionSettings()).enabledByDefault;
           await stopSingleDroneChatActivity({
             droneId,
             chatName,
@@ -19811,6 +19818,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                 droneEntry: d,
                 createdAt: nowIso(),
                 autoContinueEnabledByDefault,
+                agentSuggestionEnabledByDefault,
               });
             }
             regAny.drones = regAny.drones ?? {};

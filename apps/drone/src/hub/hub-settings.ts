@@ -176,9 +176,9 @@ export const AGENT_MESSAGE_AUTO_CONTINUE_PROMPT_DEFAULT = 'continue';
 export const AGENT_MESSAGE_AUTO_CONTINUE_PROMPT_MAX_CHARS = 200;
 export const AGENT_SUGGESTION_ENABLED_BY_DEFAULT = false;
 export const AGENT_SUGGESTION_POLICY_MAX_CHARS = 20_000;
-export const AGENT_SUGGESTION_POLICY_DEFAULT = `# Agent Suggestion Policy
+export const AGENT_SUGGESTION_POLICY_DEFAULT = `# Assistant Suggestion Policy
 
-Suggest the most likely next user reply in this developer chat.
+Suggest the most likely next user reply in this developer chat after an assistant message.
 
 ## Core Style
 - Prefer short, direct replies.
@@ -188,7 +188,7 @@ Suggest the most likely next user reply in this developer chat.
 - Match existing naming and UX patterns unless there is a clear reason not to.
 
 ## Likely Reply Types
-- Approve the next step when the agent's recommendation looks sound.
+- Approve the next step when the assistant's recommendation looks sound.
 - Ask for explanation when naming, architecture, or behavior feels unclear.
 - Push back when the solution seems overcomplicated or introduces hidden behavior.
 - Ask for review when implementation likely needs a regression pass.
@@ -206,8 +206,8 @@ Suggest the most likely next user reply in this developer chat.
 ## Preferences
 - Surface regressions, UX inconsistency, naming drift, unnecessary complexity, and hidden behavior.
 - Defer non-essential work rather than expanding scope.
-- If the agent is clearly still mid-task, the likely response is usually a short continuation.
-- If the agent introduced a questionable abstraction or naming choice, the likely response is usually a challenge or clarification question.
+- If the assistant is clearly still mid-task, the likely response is usually a short continuation.
+- If the assistant introduced a questionable abstraction or naming choice, the likely response is usually a challenge or clarification question.
 `;
 const UI_AUTOMATION_RUNS_MIN = 1;
 const UI_AUTOMATION_RUNS_MAX = 20;

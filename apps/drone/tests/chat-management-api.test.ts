@@ -145,6 +145,41 @@ describeSocketSuite('chat management api', () => {
     expect(settingsReset.r.status).toBe(200);
   });
 
+  test('applies the assistant suggestion default to newly created builtin chats', async () => {
+    const droneId = 'drone-chat-create-assistant-suggestion-default';
+    await seedDrone(droneId);
+
+    const settingsUpdated = await apiFetch('/api/settings/agent-suggestion', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ enabledByDefault: true }),
+    });
+    expect(settingsUpdated.r.status).toBe(200);
+    expect(settingsUpdated.data?.agentSuggestion?.enabledByDefault).toBe(true);
+
+    const created = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'review' }),
+    });
+    expect(created.r.status).toBe(201);
+
+    const reviewChat = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/review`);
+    expect(reviewChat.r.status).toBe(200);
+    expect(reviewChat.data?.agentSuggestionEnabled).toBe(true);
+
+    const regAny: any = await loadRegistry();
+    expect(regAny?.drones?.[droneId]?.chats?.review?.agentSuggestionEnabled).toBe(true);
+    expect(typeof regAny?.drones?.[droneId]?.chats?.review?.agentSuggestionEnabledAt).toBe('string');
+
+    const settingsReset = await apiFetch('/api/settings/agent-suggestion', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ enabledByDefault: false }),
+    });
+    expect(settingsReset.r.status).toBe(200);
+  });
+
   test('creates a chat from the implicit default on legacy drones without chats', async () => {
     const droneId = 'drone-chat-legacy-default';
     const now = new Date().toISOString();
@@ -307,6 +342,104 @@ describeSocketSuite('chat management api', () => {
     });
     expect(updated.r.status).toBe(400);
     expect(String(updated.data?.error ?? '')).toContain('builtin transcript chats');
+  });
+
+  test('stores and returns per-chat assistant suggestion toggle state', async () => {
+    const droneId = 'drone-chat-assistant-suggestion';
+    await seedDrone(droneId);
+
+    const initial = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default`);
+    expect(initial.r.status).toBe(200);
+    expect(initial.data?.agentSuggestionEnabled).toBe(false);
+
+    const updated = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/config`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ agentSuggestionEnabled: true }),
+    });
+    expect(updated.r.status).toBe(200);
+    expect(updated.data?.agentSuggestionEnabled).toBe(true);
+
+    const chatInfo = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default`);
+    expect(chatInfo.r.status).toBe(200);
+    expect(chatInfo.data?.agentSuggestionEnabled).toBe(true);
+
+    const regAny: any = await loadRegistry();
+    expect(regAny?.drones?.[droneId]?.chats?.default?.agentSuggestionEnabled).toBe(true);
+    expect(typeof regAny?.drones?.[droneId]?.chats?.default?.agentSuggestionEnabledAt).toBe('string');
+  });
+
+  test('rejects enabling assistant suggestion for custom-agent chats', async () => {
+    const droneId = 'drone-chat-assistant-suggestion-custom';
+    await seedDrone(droneId);
+
+    const setCustom = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/config`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        agent: {
+          kind: 'custom',
+          id: 'custom-shell',
+          label: 'Custom Shell',
+          command: 'custom-shell',
+        },
+      }),
+    });
+    expect(setCustom.r.status).toBe(200);
+
+    const updated = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/config`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ agentSuggestionEnabled: true }),
+    });
+    expect(updated.r.status).toBe(400);
+    expect(String(updated.data?.error ?? '')).toContain('builtin transcript chats');
+  });
+
+  test('records assistant suggestions as used only through the direct-use endpoint', async () => {
+    const droneId = 'drone-chat-assistant-suggestion-used-direct';
+    await seedDrone(droneId);
+
+    const completedAt = new Date().toISOString();
+    await updateRegistry((reg: any) => {
+      const entry = reg?.drones?.[droneId]?.chats?.default;
+      if (!entry) throw new Error('missing seeded chat entry');
+      entry.turns = [
+        {
+          id: 'prompt-1',
+          at: completedAt,
+          promptAt: completedAt,
+          completedAt,
+          prompt: 'show me the diff',
+          ok: true,
+          output: 'I restored the feature and changed the button behavior.',
+        },
+      ];
+    });
+
+    const before = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/transcript?turn=all`);
+    expect(before.r.status).toBe(200);
+    expect(before.data?.transcripts?.[0]?.agentSuggestion).toBeUndefined();
+
+    const marked = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/transcript/prompt-1/agent-suggestion/used-direct`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          suggestion: 'Continue',
+          policyFingerprint: 'abc123def456',
+        }),
+      },
+    );
+    expect(marked.r.status).toBe(200);
+    expect(marked.data?.promptId).toBe('prompt-1');
+
+    const after = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/transcript?turn=all`);
+    expect(after.r.status).toBe(200);
+    expect(after.data?.transcripts?.[0]?.agentSuggestion?.usedDirectAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(after.data?.transcripts?.[0]?.agentSuggestion?.policyFingerprint).toBe('abc123def456');
+    expect(String(after.data?.transcripts?.[0]?.agentSuggestion?.suggestionHash ?? '')).toHaveLength(24);
   });
 
   test('archives chats when delete mode is archive and supports restore/delete-now', async () => {

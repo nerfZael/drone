@@ -1,12 +1,13 @@
 import React from 'react';
 import { stripAnsi } from '../../domain';
-import type { TranscriptItem } from '../types';
+import type { PendingPrompt, TranscriptItem } from '../types';
 import type { AgentSuggestionState } from './app-types';
 
 type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
 
 type UseAgentSuggestionStateArgs = {
   transcripts: TranscriptItem[] | null;
+  pendingPrompts: PendingPrompt[];
   chatUiModeRef: React.MutableRefObject<'transcript' | 'cli'>;
   requestJson: RequestJsonFn;
   transcriptMessageId: (item: TranscriptItem) => string;
@@ -24,8 +25,19 @@ type AgentSuggestionResponse = {
 
 const CONTEXT_TURNS = 3;
 
+export function resolveLatestAgentSuggestionTarget(
+  transcripts: TranscriptItem[] | null,
+  pendingPrompts: PendingPrompt[],
+): TranscriptItem | null {
+  const list = Array.isArray(transcripts) ? transcripts : [];
+  if (list.length === 0) return null;
+  if (Array.isArray(pendingPrompts) && pendingPrompts.length > 0) return null;
+  return list[list.length - 1] ?? null;
+}
+
 export function useAgentSuggestionState({
   transcripts,
+  pendingPrompts,
   chatUiModeRef,
   requestJson,
   transcriptMessageId,
@@ -61,10 +73,8 @@ export function useAgentSuggestionState({
   }, []);
 
   const latestAgentSuggestionTarget = React.useMemo(() => {
-    const list = Array.isArray(transcripts) ? transcripts : [];
-    if (list.length === 0) return null;
-    return list[list.length - 1] ?? null;
-  }, [transcripts]);
+    return resolveLatestAgentSuggestionTarget(transcripts, pendingPrompts);
+  }, [pendingPrompts, transcripts]);
 
   const requestAgentSuggestionForMessage = React.useCallback(
     async (target: TranscriptItem, opts?: { force?: boolean }) => {
@@ -104,7 +114,7 @@ export function useAgentSuggestionState({
           }),
         });
         const suggestion = String(data?.suggestion ?? '').trim();
-        if (!suggestion) throw new Error('Empty agent suggestion response.');
+        if (!suggestion) throw new Error('Empty assistant suggestion response.');
         if (latestRequestTokenByMessageIdRef.current?.[messageId] !== requestToken) return;
         setAgentSuggestionByMessageId((prev) => ({
           ...prev,

@@ -8,7 +8,12 @@ import { resetDroneRootDirForTests } from '../src/host/paths';
 import {
   collectProviderApiKeyDiagnostics,
   describeSecretValue,
+  AGENT_SUGGESTION_POLICY_DEFAULT,
+  AGENT_SUGGESTION_ENABLED_BY_DEFAULT,
+  AGENT_SUGGESTION_POLICY_MAX_CHARS,
+  resolveAgentSuggestionSettingsResponse,
   upsertStoredProviderApiKey,
+  upsertStoredAgentSuggestionSettings,
 } from '../src/hub/hub-settings';
 import { getSocketListenSupport } from './socket-listen-support';
 
@@ -98,6 +103,37 @@ describe('LLM settings diagnostics', () => {
   });
 });
 
+describe('assistant suggestion settings', () => {
+  test('returns defaults before anything is stored', async () => {
+    await withTempDroneDataDirAndEnv({}, async () => {
+      const resolved = await resolveAgentSuggestionSettingsResponse();
+      expect(resolved.agentSuggestion.policyMarkdown).toBe(AGENT_SUGGESTION_POLICY_DEFAULT);
+      expect(resolved.agentSuggestion.policyMarkdownSource).toBe('default');
+      expect(resolved.agentSuggestion.enabledByDefault).toBe(AGENT_SUGGESTION_ENABLED_BY_DEFAULT);
+      expect(resolved.agentSuggestion.enabledByDefaultSource).toBe('default');
+      expect(resolved.agentSuggestion.maxPolicyChars).toBe(AGENT_SUGGESTION_POLICY_MAX_CHARS);
+      expect(resolved.agentSuggestion.updatedAt).toBeNull();
+      expect(resolved.agentSuggestion.policyFingerprint).toHaveLength(12);
+    });
+  });
+
+  test('persists custom assistant suggestion settings and returns the derived fingerprint', async () => {
+    await withTempDroneDataDirAndEnv({}, async () => {
+      await upsertStoredAgentSuggestionSettings({
+        policyMarkdown: '# Assistant Suggestion Policy\n\nPrefer asking for review.',
+        enabledByDefault: true,
+      });
+      const resolved = await resolveAgentSuggestionSettingsResponse();
+      expect(resolved.agentSuggestion.policyMarkdown).toContain('Prefer asking for review.');
+      expect(resolved.agentSuggestion.policyMarkdownSource).toBe('settings');
+      expect(resolved.agentSuggestion.enabledByDefault).toBe(true);
+      expect(resolved.agentSuggestion.enabledByDefaultSource).toBe('settings');
+      expect(resolved.agentSuggestion.updatedAt).not.toBeNull();
+      expect(resolved.agentSuggestion.policyFingerprint).toHaveLength(12);
+    });
+  });
+});
+
 describeSocketSuite('LLM settings api', () => {
   const token = 'test-token';
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-llm-settings-api-'));
@@ -177,5 +213,32 @@ describeSocketSuite('LLM settings api', () => {
     expect(updated.data.agentMessageAutoContinue.enabledByDefault).toBe(true);
     expect(updated.data.agentMessageAutoContinue.enabledByDefaultSource).toBe('settings');
     expect(updated.data.agentMessageAutoContinue.updatedAt).not.toBeNull();
+  });
+
+  test('reads and updates assistant suggestion settings', async () => {
+    const initial = await apiFetch('/api/settings/agent-suggestion');
+    expect(initial.r.status).toBe(200);
+    expect(initial.data.agentSuggestion.policyMarkdown).toBe(AGENT_SUGGESTION_POLICY_DEFAULT);
+    expect(initial.data.agentSuggestion.policyMarkdownSource).toBe('default');
+    expect(initial.data.agentSuggestion.enabledByDefault).toBe(false);
+    expect(initial.data.agentSuggestion.enabledByDefaultSource).toBe('default');
+    expect(initial.data.agentSuggestion.maxPolicyChars).toBe(AGENT_SUGGESTION_POLICY_MAX_CHARS);
+    expect(initial.data.agentSuggestion.policyFingerprint).toHaveLength(12);
+
+    const updated = await apiFetch('/api/settings/agent-suggestion', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        policyMarkdown: '# Assistant Suggestion Policy\n\nPrefer terse approvals.',
+        enabledByDefault: true,
+      }),
+    });
+    expect(updated.r.status).toBe(200);
+    expect(updated.data.agentSuggestion.policyMarkdown).toContain('Prefer terse approvals.');
+    expect(updated.data.agentSuggestion.policyMarkdownSource).toBe('settings');
+    expect(updated.data.agentSuggestion.enabledByDefault).toBe(true);
+    expect(updated.data.agentSuggestion.enabledByDefaultSource).toBe('settings');
+    expect(updated.data.agentSuggestion.updatedAt).not.toBeNull();
+    expect(updated.data.agentSuggestion.policyFingerprint).toHaveLength(12);
   });
 });

@@ -1437,6 +1437,20 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     removeQueuedPrompt,
     requestJson,
   });
+  const {
+    latestAgentSuggestionTarget,
+    latestAgentSuggestionState,
+    requestAgentSuggestionForMessage,
+  } = useAgentSuggestionState({
+    transcripts,
+    pendingPrompts: visiblePendingPromptsWithStartup,
+    chatUiModeRef,
+    requestJson,
+    transcriptMessageId,
+    enabled: chatInfo?.agentSuggestionEnabled === true,
+    currentPolicyFingerprint:
+      agentSuggestionSettingsState.agentSuggestionSettings?.agentSuggestion.policyFingerprint ?? '',
+  });
 
   React.useEffect(() => {
     if (!selectedDrone) return;

@@ -76,7 +76,7 @@ export async function suggestReplyToAgentMessage(
   if (!response) throw new Error('missing agent response');
 
   const policyMarkdown = clip(String(opts?.policyMarkdown ?? ''), 18_000);
-  if (!policyMarkdown) throw new Error('missing agent suggestion policy');
+  if (!policyMarkdown) throw new Error('missing assistant suggestion policy');
 
   const runtime = await resolveLlmRuntime(llm);
   const modelId = String(process.env.DRONE_HUB_AGENT_SUGGESTION_MODEL ?? '').trim() || defaultModelId(runtime.provider);
@@ -157,7 +157,7 @@ export async function suggestReplyToAgentMessage(
     object = out.object;
   } catch (e: any) {
     const msg = e?.message ?? String(e);
-    throw new Error(`${providerDisplayName(runtime.provider)} agent suggestion failed (model: ${modelId}): ${msg}`);
+    throw new Error(`${providerDisplayName(runtime.provider)} assistant suggestion failed (model: ${modelId}): ${msg}`);
   }
 
   const suggestion = clip(String(object?.suggestion ?? ''), 1200);

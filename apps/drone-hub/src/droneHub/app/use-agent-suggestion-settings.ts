@@ -65,7 +65,7 @@ export function useAgentSuggestionSettings(
       setAgentSuggestionSettings(data);
       setAgentSuggestionPolicyDraft(data.agentSuggestion.policyMarkdown);
       setAgentSuggestionEnabledByDefaultDraft(data.agentSuggestion.enabledByDefault);
-      setAgentSuggestionSettingsNotice('Saved agent suggestion settings.');
+      setAgentSuggestionSettingsNotice('Saved assistant suggestion settings.');
     } catch (e: any) {
       setAgentSuggestionSettingsError(e?.message ?? String(e));
     } finally {
