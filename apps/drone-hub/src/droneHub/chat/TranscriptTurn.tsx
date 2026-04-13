@@ -12,7 +12,7 @@ import type { DroneHubTask } from './drone-hub-task-parser';
 import type { DroneHubTaskSpawnMode } from './drone-hub-task-spawn';
 import { extractAgentCopilotFromAgentMessage } from './agent-copilot-parser';
 import { extractDroneHubTasksFromAgentMessage } from './drone-hub-task-parser';
-import { IconBot, IconCheck, IconCopy, IconImage, IconJobs, IconSpinner, IconTldr, IconUser } from './icons';
+import { IconAlert, IconBot, IconCheck, IconCopy, IconImage, IconJobs, IconSpinner, IconTldr, IconUser } from './icons';
 
 type TldrState =
   | { status: 'idle' }
@@ -29,10 +29,9 @@ type InlineAgentImage = {
 };
 
 type AutoContinueBadge = {
-  label: string;
   title: string;
   toneClassName: string;
-  icon: 'spinner' | 'check' | null;
+  icon: 'spinner' | 'check' | 'alert';
 };
 
 type AgentMessageAutoContinueState = NonNullable<TranscriptItem['agentMessageAutoContinue']>;
@@ -61,37 +60,33 @@ function resolveAutoContinueBadge(state: TranscriptItem['agentMessageAutoContinu
   if (!state?.status) return null;
   if (state.status === 'pending') {
     return {
-      label: 'Checking',
       title: 'Checking whether Hub should auto-continue this chat.',
-      toneClassName: 'border-[var(--accent-muted)] bg-[rgba(0,0,0,.18)] text-[var(--accent)]',
+      toneClassName: 'text-[var(--muted-dim)]',
       icon: 'spinner',
     };
   }
   if (state.status === 'failed') {
     const error = String(state.error ?? '').trim();
     return {
-      label: 'Check Failed',
       title: error ? `Auto-continue check failed: ${error}` : 'Auto-continue check failed.',
-      toneClassName: 'border-[rgba(255,90,90,.28)] bg-[var(--red-subtle)] text-[var(--red)]',
-      icon: null,
+      toneClassName: 'text-[var(--red)]',
+      icon: 'alert',
     };
   }
 
   const source = autoContinueSourceLabel(state.source);
   if (state.bucket === 'continue') {
     return {
-      label: 'Continue',
       title: state.continuedAt
         ? `Auto-continue checked via ${source}: classified as continue. Hub sent the follow-up prompt.`
         : `Auto-continue checked via ${source}: classified as continue. Hub is sending the follow-up prompt.`,
-      toneClassName: 'border-[rgba(74,222,128,.35)] bg-[var(--green-subtle)] text-[var(--green)]',
+      toneClassName: 'text-[var(--muted-dim)]',
       icon: 'check',
     };
   }
   return {
-    label: 'User Turn',
     title: `Auto-continue checked via ${source}: classified as wait for the next user turn. No follow-up prompt was sent.`,
-    toneClassName: 'border-[var(--accent-muted)] bg-[rgba(0,0,0,.18)] text-[var(--accent)]',
+    toneClassName: 'text-[var(--muted-dim)]',
     icon: 'check',
   };
 }
@@ -502,24 +497,25 @@ export const TranscriptTurn = React.memo(
                 >
                   Agent
                 </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <RelativeTimeText
+                  at={agentIso}
+                  className="text-[9px] leading-none text-[var(--muted-dim)] font-mono"
+                  title={new Date(agentIso).toLocaleString()}
+                />
                 {autoContinueBadge ? (
                   <span
-                    className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[9px] uppercase tracking-wide ${autoContinueBadge.toneClassName}`}
-                    style={{ fontFamily: 'var(--display)' }}
+                    className={`inline-flex items-center justify-center h-3.5 w-3.5 ${autoContinueBadge.toneClassName}`}
                     title={autoContinueBadge.title}
                     aria-label={autoContinueBadge.title}
                   >
                     {autoContinueBadge.icon === 'spinner' ? <IconSpinner className="w-3 h-3" /> : null}
                     {autoContinueBadge.icon === 'check' ? <IconCheck className="w-3 h-3" /> : null}
-                    {autoContinueBadge.label}
+                    {autoContinueBadge.icon === 'alert' ? <IconAlert className="w-3 h-3" /> : null}
                   </span>
                 ) : null}
               </div>
-              <RelativeTimeText
-                at={agentIso}
-                className="text-[9px] leading-none text-[var(--muted-dim)] font-mono"
-                title={new Date(agentIso).toLocaleString()}
-              />
             </div>
             <div
               className={`border rounded-lg rounded-tl-sm px-4 py-3 relative group ${

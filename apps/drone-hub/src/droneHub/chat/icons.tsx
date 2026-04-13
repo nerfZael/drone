@@ -63,6 +63,14 @@ export function IconCheck({ className }: { className?: string }) {
   );
 }
 
+export function IconAlert({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M8 1.5a6.5 6.5 0 110 13 6.5 6.5 0 010-13zm0 3a.75.75 0 00-.75.75v4.1a.75.75 0 001.5 0v-4.1A.75.75 0 008 4.5zm0 7.2a1 1 0 100-2 1 1 0 000 2z" />
+    </svg>
+  );
+}
+
 export function TypingDots({ color = 'var(--muted)' }: { color?: string }) {
   return (
     <span className="inline-flex items-center gap-1" aria-label="typing" title="typing">
