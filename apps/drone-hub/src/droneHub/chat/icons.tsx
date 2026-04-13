@@ -49,6 +49,20 @@ export function IconImage({ className }: { className?: string }) {
   );
 }
 
+export function IconCheck({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M3.75 8.35l2.55 2.55 5.95-5.95"
+        stroke="currentColor"
+        strokeWidth="1.65"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function TypingDots({ color = 'var(--muted)' }: { color?: string }) {
   return (
     <span className="inline-flex items-center gap-1" aria-label="typing" title="typing">

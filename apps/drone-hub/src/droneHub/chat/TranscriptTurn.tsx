@@ -12,7 +12,7 @@ import type { DroneHubTask } from './drone-hub-task-parser';
 import type { DroneHubTaskSpawnMode } from './drone-hub-task-spawn';
 import { extractAgentCopilotFromAgentMessage } from './agent-copilot-parser';
 import { extractDroneHubTasksFromAgentMessage } from './drone-hub-task-parser';
-import { IconBot, IconCopy, IconImage, IconJobs, IconSpinner, IconTldr, IconUser } from './icons';
+import { IconBot, IconCheck, IconCopy, IconImage, IconJobs, IconSpinner, IconTldr, IconUser } from './icons';
 
 type TldrState =
   | { status: 'idle' }
@@ -28,6 +28,15 @@ type InlineAgentImage = {
   label: string;
 };
 
+type AutoContinueBadge = {
+  label: string;
+  title: string;
+  toneClassName: string;
+  icon: 'spinner' | 'check' | null;
+};
+
+type AgentMessageAutoContinueState = NonNullable<TranscriptItem['agentMessageAutoContinue']>;
+
 const IMAGE_EXTENSIONS = new Set([
   'png',
   'jpg',
@@ -41,6 +50,51 @@ const IMAGE_EXTENSIONS = new Set([
   'tif',
   'tiff',
 ]);
+
+function autoContinueSourceLabel(source: AgentMessageAutoContinueState['source'] | undefined): string {
+  if (source === 'llm') return 'LLM';
+  if (source === 'agent-copilot-json') return 'agent copilot JSON';
+  return 'unknown source';
+}
+
+function resolveAutoContinueBadge(state: TranscriptItem['agentMessageAutoContinue'] | undefined): AutoContinueBadge | null {
+  if (!state?.status) return null;
+  if (state.status === 'pending') {
+    return {
+      label: 'Checking',
+      title: 'Checking whether Hub should auto-continue this chat.',
+      toneClassName: 'border-[var(--accent-muted)] bg-[rgba(0,0,0,.18)] text-[var(--accent)]',
+      icon: 'spinner',
+    };
+  }
+  if (state.status === 'failed') {
+    const error = String(state.error ?? '').trim();
+    return {
+      label: 'Check Failed',
+      title: error ? `Auto-continue check failed: ${error}` : 'Auto-continue check failed.',
+      toneClassName: 'border-[rgba(255,90,90,.28)] bg-[var(--red-subtle)] text-[var(--red)]',
+      icon: null,
+    };
+  }
+
+  const source = autoContinueSourceLabel(state.source);
+  if (state.bucket === 'continue') {
+    return {
+      label: 'Continue',
+      title: state.continuedAt
+        ? `Auto-continue checked via ${source}: classified as continue. Hub sent the follow-up prompt.`
+        : `Auto-continue checked via ${source}: classified as continue. Hub is sending the follow-up prompt.`,
+      toneClassName: 'border-[rgba(74,222,128,.35)] bg-[var(--green-subtle)] text-[var(--green)]',
+      icon: 'check',
+    };
+  }
+  return {
+    label: 'User Turn',
+    title: `Auto-continue checked via ${source}: classified as wait for the next user turn. No follow-up prompt was sent.`,
+    toneClassName: 'border-[var(--accent-muted)] bg-[rgba(0,0,0,.18)] text-[var(--accent)]',
+    icon: 'check',
+  };
+}
 
 function imagePathHasKnownExtension(rawPath: string): boolean {
   const pathOnly = String(rawPath ?? '').split('?')[0].split('#')[0].trim();
@@ -302,7 +356,7 @@ export const TranscriptTurn = React.memo(
     const droneHubTasks = extractedTaskData.tasks;
     const promptIso = item.promptAt || item.at;
     const agentIso = item.completedAt || item.at;
-    const autoContinuePending = item.agentMessageAutoContinue?.status === 'pending';
+    const autoContinueBadge = resolveAutoContinueBadge(item.agentMessageAutoContinue);
     const tldrStatus = tldr?.status ?? 'idle';
     const tldrLoading = tldrStatus === 'loading';
     const tldrError = tldr && tldr.status === 'error' ? tldr.error : '';
@@ -448,14 +502,16 @@ export const TranscriptTurn = React.memo(
                 >
                   Agent
                 </span>
-                {autoContinuePending ? (
+                {autoContinueBadge ? (
                   <span
-                    className="inline-flex items-center gap-1 rounded border border-[var(--accent-muted)] bg-[rgba(0,0,0,.18)] px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-[var(--accent)]"
+                    className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[9px] uppercase tracking-wide ${autoContinueBadge.toneClassName}`}
                     style={{ fontFamily: 'var(--display)' }}
-                    title="Checking whether Hub should auto-continue this chat."
+                    title={autoContinueBadge.title}
+                    aria-label={autoContinueBadge.title}
                   >
-                    <IconSpinner className="w-3 h-3" />
-                    Checking
+                    {autoContinueBadge.icon === 'spinner' ? <IconSpinner className="w-3 h-3" /> : null}
+                    {autoContinueBadge.icon === 'check' ? <IconCheck className="w-3 h-3" /> : null}
+                    {autoContinueBadge.label}
                   </span>
                 ) : null}
               </div>
