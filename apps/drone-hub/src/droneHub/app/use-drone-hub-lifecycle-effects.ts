@@ -414,8 +414,9 @@ export function useDroneHubLifecycleEffects({
         !e.ctrlKey &&
         !e.metaKey &&
         !e.altKey;
-      const allowShiftDeleteFromInput = isPrimaryChatInputTarget(e.target);
-      if (shiftDeleteOnly && !captureRoot && (!isEditableTarget(e.target) || allowShiftDeleteFromInput)) {
+      const allowShiftDeleteFromChatInput =
+        isPrimaryChatInputTarget(e.target) || isCanvasMessageInputTarget(e.target);
+      if (shiftDeleteOnly && !captureRoot && (!isEditableTarget(e.target) || allowShiftDeleteFromChatInput)) {
         const handled = onDeleteSelectedDroneFromInputShortcut();
         if (handled) {
           e.preventDefault();
