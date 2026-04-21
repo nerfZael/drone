@@ -1721,6 +1721,11 @@ function looksLikeBundleMissingPrerequisiteError(message: string): boolean {
   return /lacks these prerequisite commits|missing prerequisite commits|repository lacks.*prerequisite/i.test(raw);
 }
 
+function looksLikeUnrelatedHistoriesError(message: string): boolean {
+  const raw = String(message ?? '');
+  return /refusing to merge unrelated histories/i.test(raw);
+}
+
 function parseShaFromText(raw: string): string | null {
   const m = String(raw ?? '').match(/\b[0-9a-f]{40}\b/i);
   return m ? m[0].toLowerCase() : null;
@@ -1764,6 +1769,54 @@ async function droneUnmergedFiles(opts: { containerName: string; repoPathInConta
     .map((line) => line.trim())
     .filter(Boolean)
     .sort((a, b) => a.localeCompare(b));
+}
+
+async function exportFullHeadBundleFromDrone(opts: {
+  containerName: string;
+  repoPathInContainer: string;
+  outDir: string;
+  label?: string;
+}): Promise<{ exportedPath: string }> {
+  const repoPathInContainer = normalizeContainerPath(opts.repoPathInContainer || '/work/repo');
+  const outDir = path.resolve(String(opts.outDir ?? ''));
+  const safeLabel =
+    String(opts.label || opts.containerName || 'drone')
+      .toLowerCase()
+      .replace(/[^a-z0-9_.-]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'drone';
+  const runId = `${Date.now().toString(36)}-${crypto.randomBytes(4).toString('hex')}`;
+  const containerTmp = normalizeContainerPath(`/tmp/drone-hub/full-repo-exports/${safeLabel}-${runId}`);
+  const containerBundlePath = normalizeContainerPath(`${containerTmp}/changes.bundle`);
+  const exportedPath = path.join(outDir, `bundle-full-${safeLabel}-${runId}.bundle`);
+
+  await fs.mkdir(outDir, { recursive: true });
+
+  const create = await dvmExec(opts.containerName, 'bash', [
+    '-lc',
+    [
+      'set -euo pipefail',
+      `rm -rf ${JSON.stringify(containerTmp)}`,
+      `mkdir -p ${JSON.stringify(containerTmp)}`,
+      `cd ${JSON.stringify(repoPathInContainer)}`,
+      `git bundle create ${JSON.stringify(containerBundlePath)} HEAD`,
+    ].join('\n'),
+  ]);
+  if (create.code !== 0) {
+    const details = `${String(create.stderr ?? '')}\n${String(create.stdout ?? '')}`.trim();
+    throw new Error(`Failed creating full source bundle.${details ? `\n\n${details}` : ''}`);
+  }
+
+  try {
+    await dvmCopyFromContainer(opts.containerName, containerBundlePath, exportedPath);
+  } finally {
+    try {
+      await dvmExec(opts.containerName, 'bash', ['-lc', `rm -rf ${JSON.stringify(containerTmp)} || true`]);
+    } catch {
+      // ignore cleanup failure
+    }
+  }
+
+  return { exportedPath };
 }
 
 async function importBundleHeadToDroneRef(opts: {
@@ -16883,13 +16936,52 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                 return { ok: true as const, noChanges: false as const };
               }
 
-              importRefSha = await importBundleHeadToDroneRef({
-                containerName: target.containerName,
-                repoPathInContainer: targetRepoPathInContainer,
-                hostBundlePath: exportPath,
-                containerBundlePath,
-                refName: importRefName,
-              });
+              let usedFullBundleFallback = false;
+              try {
+                importRefSha = await importBundleHeadToDroneRef({
+                  containerName: target.containerName,
+                  repoPathInContainer: targetRepoPathInContainer,
+                  hostBundlePath: exportPath,
+                  containerBundlePath,
+                  refName: importRefName,
+                });
+              } catch (e: any) {
+                const importMsg = e?.message ?? String(e);
+                if (!looksLikeBundleMissingPrerequisiteError(importMsg)) {
+                  throw e;
+                }
+
+                hubLog('warn', 'Peer sync bundle import missing prerequisites; retrying with full source bundle', {
+                  sourceDroneName,
+                  targetDroneName,
+                  importRefName,
+                  error: importMsg,
+                });
+
+                const deltaExportPath = exportPath;
+                const fullExported = await exportFullHeadBundleFromDrone({
+                  containerName: source.containerName,
+                  repoPathInContainer: sourceRepoPathInContainer,
+                  outDir: patchesOutRoot,
+                  label: sourceDroneName,
+                });
+                exportPath = fullExported.exportedPath;
+                usedFullBundleFallback = true;
+
+                try {
+                  await fs.rm(deltaExportPath, { recursive: true, force: true });
+                } catch {
+                  // ignore cleanup failure
+                }
+
+                importRefSha = await importBundleHeadToDroneRef({
+                  containerName: target.containerName,
+                  repoPathInContainer: targetRepoPathInContainer,
+                  hostBundlePath: exportPath,
+                  containerBundlePath,
+                  refName: importRefName,
+                });
+              }
 
               const merge = await runGitInDrone({
                 container: target.containerName,
@@ -16925,9 +17017,26 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                   ...(await droneUnmergedFiles({ containerName: target.containerName, repoPathInContainer: targetRepoPathInContainer })),
                 ]),
               ).sort((a, b) => a.localeCompare(b));
+              const looksLikeUnrelatedHistories = looksLikeUnrelatedHistoriesError(combined);
               const looksLikeConflict =
                 conflictFiles.length > 0 || /CONFLICT|Automatic merge failed|Merge conflict/i.test(combined);
               const details = (merge.stderr || merge.stdout || `git merge failed (exit ${merge.code})`).trim();
+
+              if (looksLikeUnrelatedHistories) {
+                return {
+                  ok: false as const,
+                  code: 'target_unrelated_history' as const,
+                  details:
+                    `${details}\n\n` +
+                    (usedFullBundleFallback
+                      ? 'The source bundle was imported with a full-history fallback, but Git found no shared history with the target drone. '
+                      : 'Git found no shared history between the source and target drone branches. ') +
+                    'Re-seed the target drone, or use an explicit patch/unrelated-history workflow.',
+                  conflictFiles: [] as string[],
+                  looksLikeConflict: false,
+                  usedFullBundleFallback,
+                };
+              }
 
               if (!looksLikeConflict) {
                 try {
@@ -16947,6 +17056,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                 details,
                 conflictFiles,
                 looksLikeConflict,
+                usedFullBundleFallback,
               };
             },
           );
@@ -16996,6 +17106,26 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
               ok: false,
               error: transferResult.details,
               code: transferResult.code,
+              sourceDroneId,
+              sourceDroneName,
+              targetDroneId,
+              targetDroneName,
+            });
+            return;
+          }
+
+          if (!transferResult.ok && transferResult.code === 'target_unrelated_history') {
+            if (!probeOnly) {
+              await setDroneHubMetaByIdentity({
+                droneId: targetDroneId,
+                hub: { phase: 'error', message: 'Peer sync stopped: unrelated Git histories' },
+              });
+            }
+            json(res, 409, {
+              ok: false,
+              error: transferResult.details,
+              code: transferResult.code,
+              usedFullBundleFallback: transferResult.usedFullBundleFallback,
               sourceDroneId,
               sourceDroneName,
               targetDroneId,
