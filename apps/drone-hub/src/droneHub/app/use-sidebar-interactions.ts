@@ -295,10 +295,11 @@ export function useSidebarInteractions({
         setFolderEditor((prev: FolderEditorState | null) => (prev ? { ...prev, pending: false, error: result.error || 'Create folder failed.' } : prev));
         return;
       }
-      if (draft.repoGroupPath) {
+      const repoGroupPath = draft.repoGroupPath;
+      if (repoGroupPath) {
         setSidebarRepoScopedGroupByPath((prev: Record<string, string>) => {
-          if (prev[nextPath] === draft.repoGroupPath) return prev;
-          return { ...prev, [nextPath]: draft.repoGroupPath };
+          if (prev[nextPath] === repoGroupPath) return prev;
+          return { ...prev, [nextPath]: repoGroupPath };
         });
       }
       setSelectedFolderPath(nextPath);

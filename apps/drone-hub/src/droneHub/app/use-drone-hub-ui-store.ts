@@ -1200,6 +1200,7 @@ export function useDroneHubAppModelUiState() {
       fsExplorerView: s.fsExplorerView,
       showCanvasLastMessagePreviews: s.showCanvasLastMessagePreviews,
       spawnContextRepoPath: s.spawnContextRepoPath,
+      spawnContextByRepoKey: s.spawnContextByRepoKey,
       spawnAgentKey: s.spawnAgentKey,
       spawnModel: s.spawnModel,
       seenModelIds: s.seenModelIds,

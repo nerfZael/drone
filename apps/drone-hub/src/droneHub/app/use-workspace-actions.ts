@@ -439,7 +439,7 @@ export function useWorkspaceActions({
         const conflictFiles = Array.isArray(response.data?.conflictFiles)
           ? response.data.conflictFiles.map((f: any) => String(f ?? '').trim()).filter(Boolean)
           : [];
-        const preview = conflictFiles.slice(0, 8);
+        const preview: string[] = conflictFiles.slice(0, 8);
         const suffix = conflictFiles.length > preview.length ? `\n- and ${conflictFiles.length - preview.length} more` : '';
         const confirmed = window.confirm(
           [

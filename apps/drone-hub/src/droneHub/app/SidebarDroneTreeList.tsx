@@ -606,6 +606,7 @@ function SidebarDroneNode({
   onDeleteDrone,
   onOpenDroneErrorModal,
   onPrepareDroneDragStart,
+  onReparentDronesToParent,
   groupOrderKey,
   groupName,
   showGroup,
@@ -799,6 +800,7 @@ function SidebarDroneNode({
               movingDroneGroups={movingDroneGroups}
               sidebarOptimisticDroneIdSet={sidebarOptimisticDroneIdSet}
               collapsedDroneSections={collapsedDroneSections}
+              setCollapsedDroneSections={setCollapsedDroneSections}
               uiDroneName={uiDroneName}
               onToggleSection={onToggleSection}
               onSelectDroneCard={onSelectDroneCard}
@@ -812,6 +814,7 @@ function SidebarDroneNode({
               onDeleteDrone={onDeleteDrone}
               onOpenDroneErrorModal={onOpenDroneErrorModal}
               onPrepareDroneDragStart={onPrepareDroneDragStart}
+              onReparentDronesToParent={onReparentDronesToParent}
               groupOrderKey={groupOrderKey}
               groupName={groupName}
               showGroup={showGroup}
@@ -1262,6 +1265,7 @@ export function SidebarDroneTreeList({
           movingDroneGroups={movingDroneGroups}
           sidebarOptimisticDroneIdSet={sidebarOptimisticDroneIdSet}
           collapsedDroneSections={collapsedDroneSections}
+          setCollapsedDroneSections={setCollapsedDroneSections}
           uiDroneName={uiDroneName}
           onToggleSection={onToggleSection}
           onSelectDroneCard={onSelectDroneCard}
@@ -1275,6 +1279,7 @@ export function SidebarDroneTreeList({
           onDeleteDrone={onDeleteDrone}
           onOpenDroneErrorModal={onOpenDroneErrorModal}
           onPrepareDroneDragStart={onPrepareDroneDragStart}
+          onReparentDronesToParent={onReparentDronesToParent}
           groupOrderKey={groupOrderKey}
           groupName={groupName}
           showGroup={showGroup}

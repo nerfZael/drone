@@ -7,6 +7,13 @@ import {
   resolveEffectiveProviderApiKeySettings,
   type LlmProviderId,
 } from './hub-settings';
+import {
+  deleteAssistantArtifactsForThread,
+  listAssistantArtifactFiles,
+  readAssistantArtifactFile,
+  runAssistantArtifactAction,
+  type AssistantArtifactActionInput,
+} from './assistant-artifacts';
 
 type AssistantThreadStatus = 'idle' | 'running' | 'waiting_for_approval' | 'error';
 type AssistantThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
@@ -50,6 +57,7 @@ type AssistantThread = {
   model: string;
   provider: LlmProviderId;
   thinkingLevel: AssistantThinkingLevel;
+  systemPrompt: string;
   accessScope: AssistantAccessScope;
   messages: any[];
   queuedPrompts: AssistantQueuedPrompt[];
@@ -64,7 +72,10 @@ type AssistantQueuedPrompt = {
   provider: LlmProviderId;
   model: string;
   thinkingLevel: AssistantThinkingLevel;
+  deliveryMode: AssistantPromptDeliveryMode;
 };
+
+type AssistantPromptDeliveryMode = 'queue' | 'asap';
 
 type AssistantApproval = {
   id: string;
@@ -80,6 +91,8 @@ type AssistantApproval = {
 type StoredAssistantState = {
   activeThreadId?: string | null;
   threads?: AssistantThread[];
+  systemPrompt?: string;
+  systemPromptUpdatedAt?: string;
   updatedAt?: string;
 };
 
@@ -193,8 +206,21 @@ export type AssistantModelOption = {
   thinkingLevel: AssistantThinkingLevel;
 };
 
+export type AssistantSystemPromptSettings = {
+  ok: true;
+  assistantSystemPrompt: {
+    prompt: string;
+    promptSource: 'settings' | 'default';
+    updatedAt: string | null;
+    defaultPrompt: string;
+    maxPromptChars: number;
+    runtimeAppendix: string;
+  };
+};
+
 const ASSISTANT_THREAD_MESSAGE_LIMIT = 80;
 const ASSISTANT_REGISTRY_MAX_THREADS = 24;
+const ASSISTANT_SYSTEM_PROMPT_MAX_CHARS = 20_000;
 const CHAT_MESSAGE_DEFAULT_LIMIT = 10;
 const CHAT_MESSAGE_MAX_LIMIT = 50;
 const CHAT_MESSAGE_RESPONSE_MAX_BYTES = 500_000;
@@ -206,6 +232,24 @@ const CHAT_IDLE_MAX_TARGETS = 20;
 const DEFAULT_OPENAI_MODEL = 'gpt-5.5';
 const DEFAULT_GEMINI_MODEL = 'gemini-3-flash-preview';
 const DEFAULT_THREAD_TITLE = 'New thread';
+const ASSISTANT_SYSTEM_PROMPT_RUNTIME_APPENDIX =
+  'Current access scope is appended at run time. The assistant must not claim read or write access outside that scope.';
+const ASSISTANT_SYSTEM_PROMPT_DEFAULT = [
+  'You are Drone Hub Assistant, a concise operator assistant embedded in the Drone Hub app.',
+  'You help the user understand available drones and coordinate work across drone chats.',
+  'Use get_current_context when the user asks about the current, active, selected, or open drone/chat, or before acting on phrases like "this drone".',
+  'Use list_drones before referring to specific drones unless the user already provided an exact drone id.',
+  'Use get_chat_overview before reading chat details, then read_chat_messages in pages when you need conversation context.',
+  'Use assistant_files to maintain private, thread-scoped Markdown notes when tracking work, decisions, plans, questions, or handoff details. These files are for the user-facing Artifacts UI and are not visible to drones.',
+  'Chat timelines contain user messages and agent messages. Queued or pending user messages appear in the same timeline with a non-completed status.',
+  'When you send a drone chat message and need the result, call wait_for_agent_chats_idle on the target chat before reading the transcript again. This blocks server-side and avoids repeated LLM polling.',
+  'Do not load more chat pages than needed. Start with the latest page.',
+  'Creating drones, changing drone groups, and sending a user message to a drone are actions that require user approval; explain briefly what you intend to do.',
+  'If one of those write tools returns successfully, the user already approved that action. Do not ask for the same approval again.',
+  'When creating a drone, omit fields you want inherited from the current open drone. Only set repoBranchSource=remote when the user asked for a remote branch and you have a remoteBranch value.',
+  'Do not claim a drone completed work unless the drone transcript or user says so.',
+  'Keep responses practical and short.',
+].join('\n');
 const ASSISTANT_MODEL_OPTIONS: Array<{
   provider: LlmProviderId;
   id: string;
@@ -260,6 +304,19 @@ function normalizeThinkingLevel(raw: unknown): AssistantThinkingLevel {
   const value = String(raw ?? '').trim().toLowerCase();
   if (value === 'minimal' || value === 'low' || value === 'medium' || value === 'high' || value === 'xhigh') return value;
   return 'off';
+}
+
+function normalizeAssistantPromptDeliveryMode(raw: unknown): AssistantPromptDeliveryMode {
+  const value = String(raw ?? '').trim().toLowerCase();
+  return value === 'asap' || value === 'steer' || value === 'steering' ? 'asap' : 'queue';
+}
+
+function makeAssistantUserMessage(prompt: string): any {
+  return {
+    role: 'user',
+    content: [{ type: 'text', text: prompt }],
+    timestamp: Date.now(),
+  };
 }
 
 function titleFromPrompt(prompt: string): string {
@@ -406,6 +463,14 @@ function normalizeAssistantRepoBranchSource(raw: unknown): 'host' | 'remote' {
 
 function cleanOptionalString(raw: unknown): string {
   return String(raw ?? '').trim();
+}
+
+function normalizeAssistantSystemPrompt(raw: unknown): string {
+  const text = typeof raw === 'string' ? raw.trim() : '';
+  if (!text) return '';
+  return text.length > ASSISTANT_SYSTEM_PROMPT_MAX_CHARS
+    ? text.slice(0, ASSISTANT_SYSTEM_PROMPT_MAX_CHARS).trim()
+    : text;
 }
 
 function clampChatIdleTimeoutMs(raw: unknown): number {
@@ -816,6 +881,7 @@ function normalizeQueuedPrompt(raw: any, fallback: { provider: LlmProviderId; mo
     provider,
     model,
     thinkingLevel: allowedThinkingLevelForModel(provider, model, raw.thinkingLevel ?? fallback.thinkingLevel ?? 'off'),
+    deliveryMode: normalizeAssistantPromptDeliveryMode(raw.deliveryMode),
   };
 }
 
@@ -828,7 +894,7 @@ function sanitizeThread(thread: AssistantThread): AssistantThread {
   };
 }
 
-function normalizeThread(raw: any, fallback: { provider: LlmProviderId; model: string }): AssistantThread | null {
+function normalizeThread(raw: any, fallback: { provider: LlmProviderId; model: string; systemPrompt?: string }): AssistantThread | null {
   if (!raw || typeof raw !== 'object') return null;
   const id = String(raw.id ?? '').trim();
   if (!id) return null;
@@ -851,6 +917,7 @@ function normalizeThread(raw: any, fallback: { provider: LlmProviderId; model: s
     model,
     provider,
     thinkingLevel,
+    systemPrompt: normalizeAssistantSystemPrompt(raw.systemPrompt) || fallback.systemPrompt || ASSISTANT_SYSTEM_PROMPT_DEFAULT,
     accessScope: makeAssistantAccessScope(raw.accessScope),
     messages,
     queuedPrompts,
@@ -859,10 +926,22 @@ function normalizeThread(raw: any, fallback: { provider: LlmProviderId; model: s
   };
 }
 
-function serializeState(activeThreadId: string, threads: AssistantThread[]): StoredAssistantState {
+function serializeState(input: {
+  activeThreadId: string;
+  threads: AssistantThread[];
+  systemPrompt: string;
+  systemPromptUpdatedAt: string | null;
+}): StoredAssistantState {
+  const systemPrompt = normalizeAssistantSystemPrompt(input.systemPrompt) || ASSISTANT_SYSTEM_PROMPT_DEFAULT;
   return {
-    activeThreadId,
-    threads: threads.slice(0, ASSISTANT_REGISTRY_MAX_THREADS).map(sanitizeThread),
+    activeThreadId: input.activeThreadId,
+    threads: input.threads.slice(0, ASSISTANT_REGISTRY_MAX_THREADS).map(sanitizeThread),
+    ...(systemPrompt !== ASSISTANT_SYSTEM_PROMPT_DEFAULT
+      ? {
+          systemPrompt,
+          systemPromptUpdatedAt: input.systemPromptUpdatedAt ?? nowIso(),
+        }
+      : {}),
     updatedAt: nowIso(),
   };
 }
@@ -881,6 +960,8 @@ export class HubAssistantService {
   private activeAgents = new Map<string, any>();
   private queuePumpPromises = new Map<string, Promise<void>>();
   private streamingMessages = new Map<string, any>();
+  private defaultSystemPrompt = ASSISTANT_SYSTEM_PROMPT_DEFAULT;
+  private defaultSystemPromptUpdatedAt: string | null = null;
   private appContext: AssistantAppContext = {
     activeDroneId: null,
     activeDroneName: null,
@@ -1052,6 +1133,21 @@ export class HubAssistantService {
     return await this.snapshot();
   }
 
+  async systemPromptSettings(): Promise<AssistantSystemPromptSettings> {
+    await this.ensureLoaded();
+    return this.systemPromptSettingsSync();
+  }
+
+  async updateSystemPrompt(input: { prompt?: unknown }): Promise<AssistantSystemPromptSettings> {
+    await this.ensureLoaded();
+    const prompt = normalizeAssistantSystemPrompt(input.prompt);
+    if (!prompt) throw new Error('missing system prompt');
+    this.defaultSystemPrompt = prompt;
+    this.defaultSystemPromptUpdatedAt = prompt === ASSISTANT_SYSTEM_PROMPT_DEFAULT ? null : nowIso();
+    await this.persist();
+    return this.systemPromptSettingsSync();
+  }
+
   async updateThread(threadId: string, patch: { title?: unknown; model?: unknown; provider?: unknown; thinkingLevel?: unknown }): Promise<AssistantSnapshot> {
     await this.ensureLoaded();
     const thread = this.getThread(threadId);
@@ -1074,6 +1170,7 @@ export class HubAssistantService {
     this.activeAgents.delete(threadId);
     this.queuePumpPromises.delete(threadId);
     this.streamingMessages.delete(threadId);
+    await deleteAssistantArtifactsForThread(threadId);
     this.threads = this.threads.filter((thread) => thread.id !== threadId);
     if (this.threads.length === 0) {
       this.threads = [this.makeThread()];
@@ -1091,6 +1188,24 @@ export class HubAssistantService {
     return await this.snapshot();
   }
 
+  async listArtifactFiles(threadId: string) {
+    await this.ensureLoaded();
+    this.getThread(threadId);
+    return await listAssistantArtifactFiles(threadId);
+  }
+
+  async readArtifactFile(threadId: string, artifactPath: unknown) {
+    await this.ensureLoaded();
+    this.getThread(threadId);
+    return await readAssistantArtifactFile(threadId, artifactPath);
+  }
+
+  async runArtifactAction(threadId: string, input: AssistantArtifactActionInput) {
+    await this.ensureLoaded();
+    this.getThread(threadId);
+    return await runAssistantArtifactAction(threadId, input);
+  }
+
   async cancelQueuedPrompt(threadId: string, queuedPromptId: string): Promise<AssistantSnapshot> {
     await this.ensureLoaded();
     const thread = this.threads.find((item) => item.id === String(threadId ?? '').trim());
@@ -1100,6 +1215,7 @@ export class HubAssistantService {
     if (next.length === thread.queuedPrompts.length) throw new Error(`unknown queued assistant message: ${queuedPromptId}`);
     thread.queuedPrompts = next;
     thread.updatedAt = nowIso();
+    this.syncActiveSteeringQueue(thread);
     await this.persist();
     return await this.snapshot();
   }
@@ -1116,14 +1232,26 @@ export class HubAssistantService {
 
   async promptThread(
     threadId: string,
-    input: { prompt?: unknown; model?: unknown; provider?: unknown; thinkingLevel?: unknown },
+    input: { prompt?: unknown; model?: unknown; provider?: unknown; thinkingLevel?: unknown; deliveryMode?: unknown },
     onEvent?: (event: AssistantPromptEvent) => void | Promise<void>,
   ): Promise<void> {
     await this.ensureLoaded();
     const thread = this.getThread(threadId);
     this.activeThreadId = thread.id;
     const queuedPrompt = this.makeQueuedPrompt(thread, input);
+    const activeAgent = this.activeAgents.get(thread.id);
+    const canSteerActiveThread = Boolean(activeAgent);
+    if (canSteerActiveThread && queuedPrompt.deliveryMode === 'asap') {
+      thread.queuedPrompts.push(queuedPrompt);
+      activeAgent?.steer?.(makeAssistantUserMessage(queuedPrompt.prompt));
+      thread.updatedAt = nowIso();
+      await this.persist();
+      await onEvent?.({ type: 'snapshot', snapshot: await this.snapshot() });
+      return;
+    }
+
     if (this.activeAgents.has(thread.id) || this.queuePumpPromises.has(thread.id) || this.hasQueuedPrompts(thread.id)) {
+      if (!canSteerActiveThread) queuedPrompt.deliveryMode = 'queue';
       thread.queuedPrompts.push(queuedPrompt);
       thread.updatedAt = nowIso();
       await this.persist();
@@ -1152,7 +1280,10 @@ export class HubAssistantService {
     return this.threads.some((thread) => thread.id === threadId && thread.queuedPrompts.length > 0);
   }
 
-  private makeQueuedPrompt(thread: AssistantThread, input: { prompt?: unknown; model?: unknown; provider?: unknown; thinkingLevel?: unknown }): AssistantQueuedPrompt {
+  private makeQueuedPrompt(
+    thread: AssistantThread,
+    input: { prompt?: unknown; model?: unknown; provider?: unknown; thinkingLevel?: unknown; deliveryMode?: unknown },
+  ): AssistantQueuedPrompt {
     const prompt = String(input.prompt ?? '').trim();
     if (!prompt) throw new Error('missing prompt');
     const provider = normalizeProvider(input.provider ?? thread.provider);
@@ -1164,7 +1295,30 @@ export class HubAssistantService {
       provider,
       model,
       thinkingLevel: allowedThinkingLevelForModel(provider, model, input.thinkingLevel ?? thread.thinkingLevel),
+      deliveryMode: normalizeAssistantPromptDeliveryMode(input.deliveryMode),
     };
+  }
+
+  private syncActiveSteeringQueue(thread: AssistantThread): void {
+    const activeAgent = this.activeAgents.get(thread.id);
+    if (!activeAgent) return;
+    activeAgent.clearSteeringQueue?.();
+    for (const queuedPrompt of thread.queuedPrompts) {
+      if (queuedPrompt.deliveryMode !== 'asap') continue;
+      activeAgent.steer?.(makeAssistantUserMessage(queuedPrompt.prompt));
+    }
+  }
+
+  private removeDeliveredSteeringPrompt(thread: AssistantThread, message: any): boolean {
+    if (message?.role !== 'user') return false;
+    const prompt = textFromMessage(message).trim();
+    if (!prompt) return false;
+    const index = thread.queuedPrompts.findIndex(
+      (queuedPrompt) => queuedPrompt.deliveryMode === 'asap' && queuedPrompt.prompt.trim() === prompt,
+    );
+    if (index < 0) return false;
+    thread.queuedPrompts.splice(index, 1);
+    return true;
   }
 
   private shiftNextQueuedPrompt(threadId: string): { thread: AssistantThread; queuedPrompt: AssistantQueuedPrompt } | null {
@@ -1247,6 +1401,10 @@ export class HubAssistantService {
         if (event.type === 'message_update') {
           this.streamingMessages.set(thread.id, sanitizeMessage(event.message));
         }
+        if (event.type === 'message_start' && this.removeDeliveredSteeringPrompt(thread, event.message)) {
+          thread.updatedAt = nowIso();
+          await this.persist();
+        }
         if (event.type === 'message_end' || event.type === 'agent_end' || event.type === 'turn_end') {
           thread.messages = agent.state.messages.map(sanitizeMessage).slice(-ASSISTANT_THREAD_MESSAGE_LIMIT);
           if (agent.state.streamingMessage) {
@@ -1290,13 +1448,23 @@ export class HubAssistantService {
   private async ensureLoaded(): Promise<void> {
     if (this.loaded) return;
     const { provider } = await resolveEffectiveLlmProvider();
-    const fallback = { provider, model: defaultModelForProvider(provider) };
     const regAny: any = await loadRegistry();
     const stored = regAny?.settings?.assistant as StoredAssistantState | undefined;
+    const storedSystemPrompt = normalizeAssistantSystemPrompt(stored?.systemPrompt);
+    this.defaultSystemPrompt = storedSystemPrompt || ASSISTANT_SYSTEM_PROMPT_DEFAULT;
+    this.defaultSystemPromptUpdatedAt =
+      storedSystemPrompt && typeof stored?.systemPromptUpdatedAt === 'string' && stored.systemPromptUpdatedAt.trim()
+        ? stored.systemPromptUpdatedAt.trim()
+        : null;
+    const fallback = {
+      provider,
+      model: defaultModelForProvider(provider),
+      systemPrompt: ASSISTANT_SYSTEM_PROMPT_DEFAULT,
+    };
     const threads = Array.isArray(stored?.threads)
       ? stored.threads.map((thread) => normalizeThread(thread, fallback)).filter(Boolean) as AssistantThread[]
       : [];
-    this.threads = threads.length > 0 ? threads : [this.makeThread(fallback)];
+    this.threads = threads.length > 0 ? threads : [this.makeThread({ ...fallback, systemPrompt: this.defaultSystemPrompt })];
     const activeThreadId = String(stored?.activeThreadId ?? '').trim();
     this.activeThreadId = this.threads.some((thread) => thread.id === activeThreadId) ? activeThreadId : this.threads[0].id;
     this.loaded = true;
@@ -1311,7 +1479,7 @@ export class HubAssistantService {
     return makeAssistantAccessScope({ readMode: 'all', writeMode: 'selected', droneIds: [activeDroneId] });
   }
 
-  private makeThread(input?: { provider?: LlmProviderId; model?: string; title?: string; accessScope?: AssistantAccessScope }): AssistantThread {
+  private makeThread(input?: { provider?: LlmProviderId; model?: string; title?: string; accessScope?: AssistantAccessScope; systemPrompt?: string }): AssistantThread {
     const provider = normalizeProvider(input?.provider);
     const at = nowIso();
     return {
@@ -1322,6 +1490,7 @@ export class HubAssistantService {
       provider,
       model: allowedModelForProvider(provider, input?.model),
       thinkingLevel: allowedThinkingLevelForModel(provider, allowedModelForProvider(provider, input?.model), 'off'),
+      systemPrompt: normalizeAssistantSystemPrompt(input?.systemPrompt) || this.defaultSystemPrompt,
       accessScope: input?.accessScope ?? makeAssistantAccessScope(),
       messages: [],
       queuedPrompts: [],
@@ -1339,7 +1508,12 @@ export class HubAssistantService {
 
   private async persist(): Promise<void> {
     const activeThread = firstThread(this.threads, this.activeThreadId);
-    const state = serializeState(activeThread.id, this.threads);
+    const state = serializeState({
+      activeThreadId: activeThread.id,
+      threads: this.threads,
+      systemPrompt: this.defaultSystemPrompt,
+      systemPromptUpdatedAt: this.defaultSystemPromptUpdatedAt,
+    });
     await updateRegistry((regAny: any) => {
       regAny.settings = regAny.settings ?? {};
       regAny.settings.assistant = state;
@@ -1427,6 +1601,43 @@ export class HubAssistantService {
           return {
             content: [{ type: 'text', text: JSON.stringify(context, null, 2) }],
             details: context,
+          };
+        },
+      },
+      {
+        name: 'assistant_files',
+        label: 'Assistant files',
+        description:
+          'Maintain private Markdown or text artifacts for this assistant thread. Drones cannot read or write these files. Use action=list/read/write/append/patch/delete. Patch applies exact oldText to newText replacements and can include baseRevision from read.',
+        parameters: Type.Object({
+          action: Type.String({ description: 'One of: list, read, write, append, patch, delete.' }),
+          path: Type.Optional(Type.String({ description: 'Thread-local artifact path, such as status.md or notes/architecture.md.' })),
+          content: Type.Optional(Type.String({ description: 'File content for write or text to append for append.' })),
+          baseRevision: Type.Optional(Type.String({ description: 'Optional revision from read/list. When provided, stale writes or patches are rejected.' })),
+          patches: Type.Optional(
+            Type.Array(
+              Type.Object({
+                oldText: Type.String({ description: 'Exact text to replace. Must occur exactly once.' }),
+                newText: Type.String({ description: 'Replacement text.' }),
+              }),
+            ),
+          ),
+        }),
+        execute: async (_toolCallId: string, params: any) => {
+          const result = await runAssistantArtifactAction(threadId, params ?? {});
+          const action = String(params?.action ?? '').trim().toLowerCase();
+          const file = (result as any)?.file;
+          const files = Array.isArray((result as any)?.files) ? (result as any).files : null;
+          const summary = files
+            ? `${files.length} assistant artifact file${files.length === 1 ? '' : 's'}.`
+            : file
+              ? `${action || 'Updated'} ${file.path} (${file.size} bytes, revision ${file.revision}).`
+              : action === 'delete'
+                ? `${(result as any)?.deleted ? 'Deleted' : 'No existing file at'} ${(result as any)?.path ?? params?.path ?? ''}.`
+                : 'Assistant artifact action completed.';
+          return {
+            content: [{ type: 'text', text: summary }],
+            details: result,
           };
         },
       },
@@ -1803,26 +2014,28 @@ export class HubAssistantService {
     }));
   }
 
+  private systemPromptSettingsSync(): AssistantSystemPromptSettings {
+    const prompt = normalizeAssistantSystemPrompt(this.defaultSystemPrompt) || ASSISTANT_SYSTEM_PROMPT_DEFAULT;
+    return {
+      ok: true,
+      assistantSystemPrompt: {
+        prompt,
+        promptSource: prompt === ASSISTANT_SYSTEM_PROMPT_DEFAULT ? 'default' : 'settings',
+        updatedAt: prompt === ASSISTANT_SYSTEM_PROMPT_DEFAULT ? null : this.defaultSystemPromptUpdatedAt,
+        defaultPrompt: ASSISTANT_SYSTEM_PROMPT_DEFAULT,
+        maxPromptChars: ASSISTANT_SYSTEM_PROMPT_MAX_CHARS,
+        runtimeAppendix: ASSISTANT_SYSTEM_PROMPT_RUNTIME_APPENDIX,
+      },
+    };
+  }
+
   private systemPrompt(threadId?: string): string {
+    const thread = threadId ? this.threads.find((item) => item.id === threadId) : null;
     const accessScope = this.activeAccessScope(threadId);
     const readScope = accessScope.readMode === 'selected' ? `selected drones (${accessScope.droneIds.join(', ')})` : 'all drones';
     const writeScope = accessScope.writeMode === 'selected' ? `selected drones (${accessScope.droneIds.join(', ')})` : 'all drones';
     const scopeText = `Current access scope: read=${readScope}; write=${writeScope}. Do not claim read or write access outside those scopes.`;
-    return [
-      'You are Drone Hub Assistant, a concise operator assistant embedded in the Drone Hub app.',
-      'You help the user understand available drones and coordinate work across drone chats.',
-      scopeText,
-      'Use get_current_context when the user asks about the current, active, selected, or open drone/chat, or before acting on phrases like "this drone".',
-      'Use list_drones before referring to specific drones unless the user already provided an exact drone id.',
-      'Use get_chat_overview before reading chat details, then read_chat_messages in pages when you need conversation context.',
-      'Chat timelines contain user messages and agent messages. Queued or pending user messages appear in the same timeline with a non-completed status.',
-      'When you send a drone chat message and need the result, call wait_for_agent_chats_idle on the target chat before reading the transcript again. This blocks server-side and avoids repeated LLM polling.',
-      'Do not load more chat pages than needed. Start with the latest page.',
-      'Creating drones, changing drone groups, and sending a user message to a drone are actions that require user approval; explain briefly what you intend to do.',
-      'If one of those write tools returns successfully, the user already approved that action. Do not ask for the same approval again.',
-      'When creating a drone, omit fields you want inherited from the current open drone. Only set repoBranchSource=remote when the user asked for a remote branch and you have a remoteBranch value.',
-      'Do not claim a drone completed work unless the drone transcript or user says so.',
-      'Keep responses practical and short.',
-    ].join('\n');
+    const basePrompt = normalizeAssistantSystemPrompt(thread?.systemPrompt) || this.defaultSystemPrompt;
+    return [basePrompt, scopeText].join('\n\n');
   }
 }

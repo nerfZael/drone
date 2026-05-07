@@ -3,12 +3,13 @@ import { useDndMonitor, useDroppable } from '@dnd-kit/core';
 import { requestJson } from '../http';
 import { MarkdownMessage } from '../chat/MarkdownMessage';
 import { parseDroneHubDragData } from '../app/drone-hub-dnd';
-import { IconChatThread, IconPlus, IconSidebarCollapse, IconSidebarExpand, IconTrash } from '../app/icons';
+import { IconChatThread, IconPencil, IconPlus, IconSidebarCollapse, IconSidebarExpand, IconTrash } from '../app/icons';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 
 const ASSISTANT_AUTO_APPROVE_STORAGE_KEY = 'droneHub.assistant.autoApprove';
 const ASSISTANT_SCOPE_STORAGE_KEY = 'droneHub.assistant.scope';
 const ASSISTANT_THREAD_SIDEBAR_OPEN_STORAGE_KEY = 'droneHub.assistant.threadSidebarOpen';
+const ASSISTANT_PROMPT_DELIVERY_MODE_STORAGE_KEY = 'droneHub.assistant.promptDeliveryMode';
 
 type AssistantThreadStatus = 'idle' | 'running' | 'waiting_for_approval' | 'error';
 
@@ -28,7 +29,10 @@ type AssistantQueuedPrompt = {
   provider: 'openai' | 'gemini';
   model: string;
   thinkingLevel: string;
+  deliveryMode?: AssistantPromptDeliveryMode;
 };
+
+type AssistantPromptDeliveryMode = 'queue' | 'asap';
 
 type AssistantThread = {
   id: string;
@@ -76,6 +80,18 @@ type AssistantSnapshot = {
   streamingMessage?: AssistantMessage;
 };
 
+type AssistantSystemPromptSettings = {
+  ok: true;
+  assistantSystemPrompt: {
+    prompt: string;
+    promptSource: 'settings' | 'default';
+    updatedAt: string | null;
+    defaultPrompt: string;
+    maxPromptChars: number;
+    runtimeAppendix: string;
+  };
+};
+
 type AssistantScopeDrone = { id: string; name: string };
 type AssistantScopeMode = 'all' | 'selected';
 
@@ -87,6 +103,11 @@ function readInitialAutoApprove(): boolean {
 function readInitialThreadSidebarOpen(): boolean {
   if (typeof window === 'undefined') return true;
   return window.localStorage.getItem(ASSISTANT_THREAD_SIDEBAR_OPEN_STORAGE_KEY) !== '0';
+}
+
+function readInitialPromptDeliveryMode(): AssistantPromptDeliveryMode {
+  if (typeof window === 'undefined') return 'queue';
+  return window.localStorage.getItem(ASSISTANT_PROMPT_DELIVERY_MODE_STORAGE_KEY) === 'asap' ? 'asap' : 'queue';
 }
 
 function readInitialScope(): { readMode: AssistantScopeMode; writeMode: AssistantScopeMode; drones: AssistantScopeDrone[] } {
@@ -151,6 +172,7 @@ function toolCalls(message: AssistantMessage): AssistantToolCall[] {
 
 const TOOL_LABELS: Record<string, string> = {
   create_drone: 'Create drone',
+  assistant_files: 'Assistant files',
   get_current_context: 'Read current context',
   get_chat_overview: 'Read chat overview',
   inspect_drone: 'Inspect drone',
@@ -379,11 +401,12 @@ function QueuedPromptRow({
   busy: boolean;
   onCancel: () => void;
 }) {
+  const asap = prompt.deliveryMode === 'asap';
   return (
     <div className="px-3 py-2 bg-[rgba(255,255,255,.018)] border-y border-[var(--border-subtle)]">
       <div className="mb-1 flex items-center justify-between gap-2">
         <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
-          Queued
+          {asap ? 'ASAP queue' : 'Queued'}
         </div>
         <button
           type="button"
@@ -710,12 +733,128 @@ function ScopeModeControl({
   );
 }
 
+function AssistantSystemPromptModal({
+  settings,
+  draft,
+  loading,
+  saving,
+  error,
+  notice,
+  onDraftChange,
+  onUseDefault,
+  onClose,
+  onSave,
+}: {
+  settings: AssistantSystemPromptSettings | null;
+  draft: string;
+  loading: boolean;
+  saving: boolean;
+  error: string | null;
+  notice: string | null;
+  onDraftChange: (value: string) => void;
+  onUseDefault: () => void;
+  onClose: () => void;
+  onSave: () => void;
+}) {
+  const currentPrompt = settings?.assistantSystemPrompt.prompt ?? '';
+  const maxChars = settings?.assistantSystemPrompt.maxPromptChars ?? 20_000;
+  const dirty = draft !== currentPrompt;
+  const saveDisabled = loading || saving || !dirty || !draft.trim();
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 px-3 py-4">
+      <div className="flex max-h-[min(760px,calc(100vh-2rem))] w-[min(860px,calc(100vw-1.5rem))] flex-col overflow-hidden rounded border border-[var(--border)] bg-[var(--panel-alt)] shadow-[0_24px_80px_rgba(0,0,0,.55)]">
+        <div className="flex flex-shrink-0 items-center justify-between border-b border-[var(--border)] px-4 py-3">
+          <div className="min-w-0">
+            <div className="text-[13px] font-semibold text-[var(--fg)]" style={{ fontFamily: 'var(--display)' }}>
+              Assistant system prompt
+            </div>
+            <div className="mt-1 text-[11px] text-[var(--muted-dim)]">
+              Saved changes apply to new assistant threads. Existing threads keep the prompt they were created with.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-8 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+            style={{ fontFamily: 'var(--display)' }}
+          >
+            Close
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+          {error ? (
+            <div className="mb-3 rounded border border-[rgba(255,90,90,.35)] bg-[rgba(255,90,90,.08)] px-3 py-2 text-[11px] text-[var(--red)]">
+              {error}
+            </div>
+          ) : null}
+          {notice ? (
+            <div className="mb-3 rounded border border-[rgba(52,211,153,.2)] bg-[rgba(16,185,129,.08)] px-3 py-2 text-[11px] text-[#34d399]">
+              {notice}
+            </div>
+          ) : null}
+          <label className="flex min-h-0 flex-col gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">Prompt</span>
+            <textarea
+              value={draft}
+              onChange={(event) => onDraftChange(event.target.value)}
+              disabled={loading || saving}
+              maxLength={maxChars}
+              rows={20}
+              className="min-h-[360px] resize-y rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.18)] px-3 py-2 font-mono text-[12px] leading-relaxed text-[var(--fg)] placeholder:text-[var(--muted-dim)] transition-colors focus:border-[var(--accent-muted)] focus:outline-none disabled:opacity-50"
+              placeholder={loading ? 'Loading system prompt...' : 'Enter the assistant system prompt'}
+            />
+          </label>
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[10px] text-[var(--muted-dim)]">
+            <span>
+              Source: {settings?.assistantSystemPrompt.promptSource === 'settings' ? 'settings' : 'default'}
+            </span>
+            <span>
+              {draft.length.toLocaleString()} / {maxChars.toLocaleString()}
+            </span>
+          </div>
+          <div className="mt-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-2 text-[11px] leading-relaxed text-[var(--muted-dim)]">
+            {settings?.assistantSystemPrompt.runtimeAppendix ?? 'Access-scope instructions are appended at run time.'}
+          </div>
+        </div>
+
+        <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2 border-t border-[var(--border)] px-4 py-3">
+          <button
+            type="button"
+            onClick={onUseDefault}
+            disabled={loading || saving}
+            className="h-9 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:cursor-not-allowed disabled:opacity-45"
+            style={{ fontFamily: 'var(--display)' }}
+          >
+            Use default
+          </button>
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={saveDisabled}
+            className={`h-9 rounded border px-3 text-[11px] font-semibold uppercase tracking-wide ${
+              saveDisabled
+                ? 'cursor-not-allowed border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] opacity-45'
+                : 'border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)] hover:brightness-110'
+            }`}
+            style={{ fontFamily: 'var(--display)' }}
+          >
+            {saving ? 'Saving...' : 'Save for new threads'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function AssistantDock() {
   const [snapshot, setSnapshot] = React.useState<AssistantSnapshot | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [draft, setDraft] = React.useState('');
   const [threadSidebarOpen, setThreadSidebarOpen] = React.useState(readInitialThreadSidebarOpen);
+  const [promptDeliveryMode, setPromptDeliveryMode] = React.useState<AssistantPromptDeliveryMode>(readInitialPromptDeliveryMode);
   const [autoApprove, setAutoApprove] = React.useState(readInitialAutoApprove);
   const initialScope = React.useMemo(readInitialScope, []);
   const [scopeReadMode, setScopeReadMode] = React.useState<AssistantScopeMode>(() => initialScope.readMode);
@@ -724,6 +863,13 @@ export function AssistantDock() {
   const [scopeSyncReady, setScopeSyncReady] = React.useState(false);
   const [approvalBusyId, setApprovalBusyId] = React.useState<string | null>(null);
   const [queuedCancelBusyId, setQueuedCancelBusyId] = React.useState<string | null>(null);
+  const [systemPromptOpen, setSystemPromptOpen] = React.useState(false);
+  const [systemPromptSettings, setSystemPromptSettings] = React.useState<AssistantSystemPromptSettings | null>(null);
+  const [systemPromptDraft, setSystemPromptDraft] = React.useState('');
+  const [systemPromptLoading, setSystemPromptLoading] = React.useState(false);
+  const [systemPromptSaving, setSystemPromptSaving] = React.useState(false);
+  const [systemPromptError, setSystemPromptError] = React.useState<string | null>(null);
+  const [systemPromptNotice, setSystemPromptNotice] = React.useState<string | null>(null);
   const selectedDrone = useDroneHubUiStore((state) => state.selectedDrone);
   const selectedChat = useDroneHubUiStore((state) => state.selectedChat);
   const appView = useDroneHubUiStore((state) => state.appView);
@@ -779,6 +925,46 @@ export function AssistantDock() {
     }
   }, []);
 
+  const loadSystemPromptSettings = React.useCallback(async () => {
+    setSystemPromptLoading(true);
+    setSystemPromptError(null);
+    setSystemPromptNotice(null);
+    try {
+      const data = await requestJson<AssistantSystemPromptSettings>('/api/assistant/system-prompt');
+      setSystemPromptSettings(data);
+      setSystemPromptDraft(data.assistantSystemPrompt.prompt);
+    } catch (err: any) {
+      setSystemPromptError(err?.message ?? String(err));
+    } finally {
+      setSystemPromptLoading(false);
+    }
+  }, []);
+
+  const openSystemPromptEditor = React.useCallback(() => {
+    setSystemPromptOpen(true);
+    void loadSystemPromptSettings();
+  }, [loadSystemPromptSettings]);
+
+  const saveSystemPromptSettings = React.useCallback(async () => {
+    setSystemPromptSaving(true);
+    setSystemPromptError(null);
+    setSystemPromptNotice(null);
+    try {
+      const data = await requestJson<AssistantSystemPromptSettings>('/api/assistant/system-prompt', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt: systemPromptDraft }),
+      });
+      setSystemPromptSettings(data);
+      setSystemPromptDraft(data.assistantSystemPrompt.prompt);
+      setSystemPromptNotice('Saved. New assistant threads will use this prompt.');
+    } catch (err: any) {
+      setSystemPromptError(err?.message ?? String(err));
+    } finally {
+      setSystemPromptSaving(false);
+    }
+  }, [systemPromptDraft]);
+
   React.useEffect(() => {
     void refresh();
   }, [refresh]);
@@ -792,6 +978,11 @@ export function AssistantDock() {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(ASSISTANT_THREAD_SIDEBAR_OPEN_STORAGE_KEY, threadSidebarOpen ? '1' : '0');
   }, [threadSidebarOpen]);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(ASSISTANT_PROMPT_DELIVERY_MODE_STORAGE_KEY, promptDeliveryMode);
+  }, [promptDeliveryMode]);
 
   const resolveScopeDroneNames = React.useCallback(async (ids: string[], fallbackLabel?: string): Promise<AssistantScopeDrone[]> => {
     const cleanIds = Array.from(new Set(ids.map((id) => String(id ?? '').trim()).filter(Boolean)));
@@ -1013,6 +1204,7 @@ export function AssistantDock() {
         provider: activeThread.provider,
         model: activeThread.model,
         thinkingLevel: activeThread.thinkingLevel,
+        deliveryMode: promptDeliveryMode,
       }),
     });
     try {
@@ -1027,7 +1219,7 @@ export function AssistantDock() {
     } finally {
       void refresh();
     }
-  }, [activeThread, draft, refresh]);
+  }, [activeThread, draft, promptDeliveryMode, refresh]);
 
   const stop = React.useCallback(async () => {
     if (!activeThread) return;
@@ -1132,6 +1324,15 @@ export function AssistantDock() {
               <IconPlus className="h-3.5 w-3.5" />
             </button>
           ) : null}
+          <button
+            type="button"
+            onClick={openSystemPromptEditor}
+            className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg)]"
+            title="Edit assistant system prompt"
+            aria-label="Edit assistant system prompt"
+          >
+            <IconPencil className="h-3.5 w-3.5" />
+          </button>
           <button
             type="button"
             onClick={() => setAutoApprove((value) => !value)}
@@ -1249,7 +1450,7 @@ export function AssistantDock() {
             }
           }}
           disabled={!activeThread}
-          placeholder={running ? 'Queue a message' : 'Ask the assistant'}
+          placeholder={running ? (promptDeliveryMode === 'asap' ? 'Send at next turn' : 'Queue a message') : 'Ask the assistant'}
           className="h-20 w-full resize-none rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] px-3 py-2 text-[12px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:border-[var(--accent-muted)] focus:outline-none disabled:opacity-50"
         />
         <div className="mt-2 flex items-center gap-2">
@@ -1268,6 +1469,30 @@ export function AssistantDock() {
               </option>
             ))}
           </select>
+          <div
+            className="grid h-8 flex-shrink-0 grid-cols-2 overflow-hidden rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]"
+            role="group"
+            aria-label="Assistant message delivery"
+          >
+            {(['queue', 'asap'] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                disabled={!activeThread}
+                onClick={() => setPromptDeliveryMode(mode)}
+                aria-pressed={promptDeliveryMode === mode}
+                title={mode === 'queue' ? 'Queue after the assistant finishes' : 'Inject after the current turn before the next assistant response'}
+                className={`min-w-[42px] px-2 text-[10px] font-semibold uppercase tracking-wide disabled:opacity-40 ${
+                  promptDeliveryMode === mode
+                    ? 'bg-[var(--accent-subtle)] text-[var(--accent)]'
+                    : 'text-[var(--muted)] hover:bg-[rgba(255,255,255,.025)] hover:text-[var(--fg-secondary)]'
+                }`}
+                style={{ fontFamily: 'var(--display)' }}
+              >
+                {mode === 'queue' ? 'Queue' : 'ASAP'}
+              </button>
+            ))}
+          </div>
           {running ? (
             <button
               type="button"
@@ -1290,6 +1515,20 @@ export function AssistantDock() {
         </div>
       </div>
       </div>
+      {systemPromptOpen ? (
+        <AssistantSystemPromptModal
+          settings={systemPromptSettings}
+          draft={systemPromptDraft}
+          loading={systemPromptLoading}
+          saving={systemPromptSaving}
+          error={systemPromptError}
+          notice={systemPromptNotice}
+          onDraftChange={setSystemPromptDraft}
+          onUseDefault={() => setSystemPromptDraft(systemPromptSettings?.assistantSystemPrompt.defaultPrompt ?? '')}
+          onClose={() => setSystemPromptOpen(false)}
+          onSave={() => void saveSystemPromptSettings()}
+        />
+      ) : null}
     </div>
   );
 }

@@ -12,7 +12,8 @@ export type RightPanelTabId =
   | 'changes'
   | 'prs'
   | 'canvas'
-  | 'assistant';
+  | 'assistant'
+  | 'artifacts';
 export type RightPanelPaneId = 'single' | 'top' | 'bottom';
 
 export type RightPanelProps = {

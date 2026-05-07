@@ -1,5 +1,5 @@
 import React from 'react';
-import { AssistantDock } from '../assistant';
+import { AssistantArtifactsDock, AssistantDock } from '../assistant';
 import { DroneCanvasDock } from '../canvas';
 import { DroneChangesDock } from '../changes';
 import { DroneEnvDock } from '../env';
@@ -227,6 +227,7 @@ export function RightPanelTabContent({
   onOpenChangesFileInEditor,
 }: RightPanelTabContentProps) {
   if (tab === 'assistant') return <AssistantDock />;
+  if (tab === 'artifacts') return <AssistantArtifactsDock />;
 
   const disabled = isDroneStartingOrSeeding(drone.hubPhase);
   const repoFeaturesEnabled = Boolean(drone.repoAttached ?? Boolean(String(drone.repoPath ?? '').trim()));

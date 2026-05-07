@@ -3,7 +3,7 @@ import { timeAgo } from '../../domain';
 
 const listeners = new Set<() => void>();
 let snapshotNowMs = Date.now();
-let timerId: ReturnType<typeof setInterval> | null = null;
+let timerId: number | null = null;
 
 function startTimer(): void {
   if (timerId != null || typeof window === 'undefined') return;
@@ -15,7 +15,7 @@ function startTimer(): void {
 
 function stopTimer(): void {
   if (listeners.size > 0 || timerId == null) return;
-  clearInterval(timerId);
+  window.clearInterval(timerId);
   timerId = null;
 }
 

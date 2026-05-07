@@ -47,6 +47,7 @@ export const RIGHT_PANEL_TABS: RightPanelTab[] = [
   'prs',
   'canvas',
   'assistant',
+  'artifacts',
 ];
 export const RIGHT_PANEL_TAB_LABELS: Record<RightPanelTab, string> = {
   terminal: 'Terminal',
@@ -59,6 +60,7 @@ export const RIGHT_PANEL_TAB_LABELS: Record<RightPanelTab, string> = {
   prs: 'PRs',
   canvas: 'Canvas',
   assistant: 'Assistant',
+  artifacts: 'Artifacts',
 };
 export function rightPanelTabsForRuntime(runtimeRaw: unknown): RightPanelTab[] {
   void runtimeRaw;

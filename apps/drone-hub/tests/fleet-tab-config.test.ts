@@ -6,4 +6,9 @@ describe('fleet tab config', () => {
     expect(RIGHT_PANEL_TABS).toContain('fleet');
     expect(RIGHT_PANEL_TAB_LABELS.fleet).toBe('Fleet');
   });
+
+  test('exposes assistant artifacts in the right panel tab set', () => {
+    expect(RIGHT_PANEL_TABS).toContain('artifacts');
+    expect(RIGHT_PANEL_TAB_LABELS.artifacts).toBe('Artifacts');
+  });
 });
