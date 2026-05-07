@@ -3,6 +3,12 @@ import { maybeExtractApiKey } from './helpers';
 import type { ApiKeySettingsResponse, LlmProviderId, LlmSettingsResponse } from './settings-types';
 
 type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
+type ApiKeyProviderId = 'openai' | 'gemini';
+
+function providerLabel(provider: LlmProviderId): string {
+  if (provider === 'codex') return 'Codex';
+  return provider === 'gemini' ? 'Gemini' : 'OpenAI';
+}
 
 export type UseLlmSettingsResult = {
   llmSettings: LlmSettingsResponse | null;
@@ -26,8 +32,8 @@ export type UseLlmSettingsResult = {
   updateGeminiSettingsDraft: (raw: string) => void;
   loadLlmSettings: () => Promise<void>;
   saveLlmProviderSettings: () => Promise<void>;
-  toggleApiKeyVisibility: (provider: LlmProviderId) => Promise<void>;
-  mutateApiKeySettings: (provider: LlmProviderId, action: 'save' | 'clear') => Promise<void>;
+  toggleApiKeyVisibility: (provider: ApiKeyProviderId) => Promise<void>;
+  mutateApiKeySettings: (provider: ApiKeyProviderId, action: 'save' | 'clear') => Promise<void>;
 };
 
 export function useLlmSettings(requestJson: RequestJsonFn): UseLlmSettingsResult {
@@ -78,12 +84,13 @@ export function useLlmSettings(requestJson: RequestJsonFn): UseLlmSettingsResult
         updatedAt: data.updatedAt,
       };
       if (provider === 'openai') return { ...prev, openai: next };
+      if (provider === 'codex') return { ...prev, codex: next };
       return { ...prev, gemini: next };
     });
   }, []);
 
   const toggleApiKeyVisibility = React.useCallback(
-    async (provider: LlmProviderId) => {
+    async (provider: ApiKeyProviderId) => {
       const showing = provider === 'openai' ? showOpenAiKey : showGeminiKey;
       const draft = provider === 'openai' ? openAiSettingsDraft : geminiSettingsDraft;
       const hasKey = provider === 'openai' ? Boolean(llmSettings?.openai.hasKey) : Boolean(llmSettings?.gemini.hasKey);
@@ -113,7 +120,7 @@ export function useLlmSettings(requestJson: RequestJsonFn): UseLlmSettingsResult
         try {
           const data = await requestJson<ApiKeySettingsResponse>(`/api/settings/${provider}?reveal=1`);
           const apiKey = String(data.apiKey ?? '').trim();
-          if (!apiKey) throw new Error(`${provider === 'gemini' ? 'Gemini' : 'OpenAI'} API key is unavailable.`);
+          if (!apiKey) throw new Error(`${providerLabel(provider)} API key is unavailable.`);
           updateProviderKeySettings(provider, data);
           if (provider === 'openai') {
             setOpenAiSettingsDraft(apiKey);
@@ -148,14 +155,14 @@ export function useLlmSettings(requestJson: RequestJsonFn): UseLlmSettingsResult
   );
 
   const mutateApiKeySettings = React.useCallback(
-    async (provider: LlmProviderId, action: 'save' | 'clear') => {
-      const providerLabel = provider === 'gemini' ? 'Gemini' : 'OpenAI';
+    async (provider: ApiKeyProviderId, action: 'save' | 'clear') => {
+      const label = providerLabel(provider);
       const envKeyName = provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY';
       const draft = provider === 'openai' ? openAiSettingsDraft : geminiSettingsDraft;
       const apiKey = String(maybeExtractApiKey(draft, provider) ?? '').trim();
       if (action === 'save') {
         if (!apiKey) {
-          setLlmSettingsError(`${providerLabel} API key is required.`);
+          setLlmSettingsError(`${label} API key is required.`);
           return;
         }
         if (apiKey !== draft) {
@@ -194,9 +201,9 @@ export function useLlmSettings(requestJson: RequestJsonFn): UseLlmSettingsResult
           setShowGeminiKey(false);
         }
         if (action === 'save') {
-          setLlmSettingsNotice(`Saved ${providerLabel} API key.`);
+          setLlmSettingsNotice(`Saved ${label} API key.`);
         } else {
-          setLlmSettingsNotice(data.hasKey ? `Using environment ${envKeyName}.` : `Cleared stored ${providerLabel} API key.`);
+          setLlmSettingsNotice(data.hasKey ? `Using environment ${envKeyName}.` : `Cleared stored ${label} API key.`);
         }
       } catch (e: any) {
         setLlmSettingsError(e?.message ?? String(e));
@@ -226,7 +233,7 @@ export function useLlmSettings(requestJson: RequestJsonFn): UseLlmSettingsResult
       });
       setLlmSettings((prev) => (prev ? { ...prev, provider: data.provider } : data));
       setLlmProviderDraft(data.provider.selected);
-      setLlmSettingsNotice(`Using ${data.provider.selected === 'gemini' ? 'Gemini' : 'OpenAI'} for LLM calls.`);
+      setLlmSettingsNotice(`Using ${providerLabel(data.provider.selected)} for LLM calls.`);
     } catch (e: any) {
       setLlmSettingsError(e?.message ?? String(e));
     } finally {

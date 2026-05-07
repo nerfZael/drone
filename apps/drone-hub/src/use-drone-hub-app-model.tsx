@@ -618,7 +618,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const description = String(descriptionRaw ?? '').trim();
       if (!description) return null;
       const selectedProvider = llmSettings?.provider?.selected ?? 'openai';
-      const selectedSettings = selectedProvider === 'gemini' ? llmSettings?.gemini : llmSettings?.openai;
+      const selectedSettings = selectedProvider === 'gemini' ? llmSettings?.gemini : selectedProvider === 'codex' ? llmSettings?.codex : llmSettings?.openai;
       if (!selectedSettings?.hasKey) return null;
       const data = await requestJson<{ ok: true; title: string }>('/api/tasks/title-from-message', {
         method: 'POST',

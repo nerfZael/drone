@@ -5,6 +5,13 @@ import type { UseAgentSuggestionSettingsResult } from './use-agent-suggestion-se
 import type { UseFilesystemSettingsResult } from './use-filesystem-settings';
 import type { UseGithubSettingsResult } from './use-github-settings';
 import type { UseLlmSettingsResult } from './use-llm-settings';
+import type { LlmProviderId } from './settings-types';
+
+function llmProviderLabel(provider: LlmProviderId | null | undefined): string {
+  if (provider === 'codex') return 'Codex';
+  if (provider === 'gemini') return 'Gemini';
+  return 'OpenAI';
+}
 
 type GeneralSettingsTabProps = {
   github: UseGithubSettingsResult;
@@ -49,6 +56,7 @@ export function GeneralSettingsTab({
     setLlmProviderDraft,
     updateOpenAiSettingsDraft,
     updateGeminiSettingsDraft,
+    loadLlmSettings,
     saveLlmProviderSettings,
     toggleApiKeyVisibility,
     mutateApiKeySettings,
@@ -187,11 +195,11 @@ export function GeneralSettingsTab({
         {llmSettingsLoading && !llmSettings ? (
           <div className="text-[12px] text-[var(--muted-dim)]">Loading settings…</div>
         ) : (
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 xl:grid-cols-4 gap-3">
             <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3">
               <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">Active provider</div>
               <div className="text-[13px] text-[var(--fg-secondary)] mt-2">
-                {llmSettings?.provider.selected === 'gemini' ? 'Gemini' : 'OpenAI'}
+                {llmProviderLabel(llmSettings?.provider.selected)}
               </div>
               <div className="text-[11px] text-[var(--muted-dim)] mt-1">
                 {llmSettings?.provider.source === 'settings'
@@ -217,6 +225,15 @@ export function GeneralSettingsTab({
               </div>
               <div className="text-[11px] text-[var(--muted-dim)] mt-1">
                 {llmSettings?.gemini.updatedAt ? `Updated ${new Date(llmSettings.gemini.updatedAt).toLocaleString()}` : 'Stored only when set in Hub'}
+              </div>
+            </div>
+            <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">Codex login</div>
+              <div className="text-[13px] text-[var(--fg-secondary)] mt-2">
+                {llmSettings?.codex.hasKey ? llmSettings.codex.keyHint ?? 'Configured' : 'Not configured'}
+              </div>
+              <div className="text-[11px] text-[var(--muted-dim)] mt-1">
+                {llmSettings?.codex.updatedAt ? `Refreshed ${new Date(llmSettings.codex.updatedAt).toLocaleString()}` : 'Uses local Codex CLI auth'}
               </div>
             </div>
           </div>
@@ -256,6 +273,19 @@ export function GeneralSettingsTab({
           </button>
           <button
             type="button"
+            onClick={() => setLlmProviderDraft('codex')}
+            disabled={savingLlmProvider || llmSettingsLoading}
+            className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+              llmProviderDraft === 'codex'
+                ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
+                : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+            } ${savingLlmProvider || llmSettingsLoading ? 'opacity-40 cursor-not-allowed' : ''}`}
+            style={{ fontFamily: 'var(--display)' }}
+          >
+            Codex
+          </button>
+          <button
+            type="button"
             onClick={() => void saveLlmProviderSettings()}
             disabled={savingLlmProvider || llmSettingsLoading || llmProviderDraft === (llmSettings?.provider.selected ?? 'openai')}
             className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
@@ -271,6 +301,39 @@ export function GeneralSettingsTab({
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
+          <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+            Codex subscription auth
+          </div>
+          {llmSettings?.codex.hasKey ? (
+            <div className="text-[11px] text-[var(--muted-dim)]">
+              {llmSettings.codex.keyHint ?? 'Codex CLI login found'}
+              {llmSettings.codex.updatedAt ? ` • Refreshed ${new Date(llmSettings.codex.updatedAt).toLocaleString()}` : ''}
+            </div>
+          ) : (
+            <div className="text-[11px] text-[var(--muted-dim)]">No Codex CLI login found for the Hub process.</div>
+          )}
+          <div className="text-[12px] leading-relaxed text-[var(--fg-secondary)]">
+            The Assistant panel reuses the local Codex CLI ChatGPT login from the Hub host. Sign in with `codex` in the same environment that starts Drone Hub,
+            then reload settings.
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void loadLlmSettings()}
+              disabled={llmSettingsLoading}
+              className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+                llmSettingsLoading
+                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                  : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+              }`}
+              style={{ fontFamily: 'var(--display)' }}
+            >
+              Refresh
+            </button>
+          </div>
+        </div>
+
         <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
           <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
             OpenAI API key

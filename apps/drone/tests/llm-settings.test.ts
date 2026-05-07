@@ -21,7 +21,7 @@ const listenSupport = getSocketListenSupport();
 const describeSocketSuite = listenSupport.ok ? describe : describe.skip;
 
 async function withTempDroneDataDirAndEnv<T>(
-  env: Partial<Record<'OPENAI_API_KEY' | 'GEMINI_API_KEY', string | undefined>>,
+  env: Partial<Record<'OPENAI_API_KEY' | 'GEMINI_API_KEY' | 'DRONE_HUB_CODEX_AUTH_FILE', string | undefined>>,
   fn: () => Promise<T>,
 ): Promise<T> {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-llm-settings-'));
@@ -31,12 +31,15 @@ async function withTempDroneDataDirAndEnv<T>(
   const previousDataDir = process.env.DRONE_DATA_DIR;
   const previousOpenAi = process.env.OPENAI_API_KEY;
   const previousGemini = process.env.GEMINI_API_KEY;
+  const previousCodexAuthFile = process.env.DRONE_HUB_CODEX_AUTH_FILE;
 
   process.env.DRONE_DATA_DIR = droneDataDir;
   if (env.OPENAI_API_KEY === undefined) delete process.env.OPENAI_API_KEY;
   else process.env.OPENAI_API_KEY = env.OPENAI_API_KEY;
   if (env.GEMINI_API_KEY === undefined) delete process.env.GEMINI_API_KEY;
   else process.env.GEMINI_API_KEY = env.GEMINI_API_KEY;
+  if (env.DRONE_HUB_CODEX_AUTH_FILE === undefined) delete process.env.DRONE_HUB_CODEX_AUTH_FILE;
+  else process.env.DRONE_HUB_CODEX_AUTH_FILE = env.DRONE_HUB_CODEX_AUTH_FILE;
   resetDroneRootDirForTests();
 
   try {
@@ -48,9 +51,19 @@ async function withTempDroneDataDirAndEnv<T>(
     else process.env.OPENAI_API_KEY = previousOpenAi;
     if (previousGemini == null) delete process.env.GEMINI_API_KEY;
     else process.env.GEMINI_API_KEY = previousGemini;
+    if (previousCodexAuthFile == null) delete process.env.DRONE_HUB_CODEX_AUTH_FILE;
+    else process.env.DRONE_HUB_CODEX_AUTH_FILE = previousCodexAuthFile;
     resetDroneRootDirForTests();
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
+}
+
+function base64UrlJson(value: unknown): string {
+  return Buffer.from(JSON.stringify(value), 'utf8').toString('base64url');
+}
+
+function fakeJwt(payload: Record<string, unknown>): string {
+  return `${base64UrlJson({ alg: 'none' })}.${base64UrlJson(payload)}.signature`;
 }
 
 describe('LLM settings diagnostics', () => {
@@ -99,6 +112,32 @@ describe('LLM settings diagnostics', () => {
       expect(diagnostics.effective.source).toBe('settings');
       expect(diagnostics.effective.hasValue).toBe(true);
       expect(diagnostics.effective.fingerprint).toBe(diagnostics.stored.fingerprint);
+    });
+  });
+
+  test('reports Codex CLI OAuth as provider auth', async () => {
+    await withTempDroneDataDirAndEnv({}, async () => {
+      const authPath = path.join(process.env.DRONE_DATA_DIR!, 'codex-auth.json');
+      process.env.DRONE_HUB_CODEX_AUTH_FILE = authPath;
+      fs.writeFileSync(
+        authPath,
+        JSON.stringify({
+          auth_mode: 'chatgpt',
+          tokens: {
+            access_token: fakeJwt({ exp: Math.floor(Date.now() / 1000) + 3600 }),
+            refresh_token: 'refresh-token',
+            account_id: 'acct-123',
+          },
+          last_refresh: '2026-05-07T00:00:00.000Z',
+        }),
+        'utf8',
+      );
+
+      const diagnostics = await collectProviderApiKeyDiagnostics('codex');
+      expect(diagnostics.envVar).toBe('DRONE_HUB_CODEX_AUTH_FILE');
+      expect(diagnostics.effective.source).toBe('codex-cli');
+      expect(diagnostics.effective.hasValue).toBe(true);
+      expect(diagnostics.effective.fingerprint).not.toBeNull();
     });
   });
 });

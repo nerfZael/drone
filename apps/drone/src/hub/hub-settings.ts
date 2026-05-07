@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 
 import dotenv from 'dotenv';
@@ -13,6 +15,8 @@ import {
   type TaskBoardState as KanbanBoardSettings,
   type TaskBoardTaskType as KanbanBoardTaskType,
 } from './task-board';
+
+const dynamicImport = new Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<any>;
 
 let HUB_ENV_LOADED = false;
 export function loadHubEnv() {
@@ -57,8 +61,8 @@ export function hubLog(level: 'info' | 'warn' | 'error', message: string, meta?:
   console.log(`[DroneHub] ${message}`, payload);
 }
 
-export type LlmProviderId = 'openai' | 'gemini';
-export type ApiKeySettingsSource = 'settings' | 'environment' | null;
+export type LlmProviderId = 'openai' | 'gemini' | 'codex';
+export type ApiKeySettingsSource = 'settings' | 'environment' | 'codex-cli' | null;
 export type EffectiveProviderApiKeySettings = {
   apiKey: string | null;
   source: ApiKeySettingsSource;
@@ -73,7 +77,7 @@ export type SecretValueDiagnostics = {
 };
 export type ProviderApiKeyResolutionDiagnostics = {
   provider: LlmProviderId;
-  envVar: 'OPENAI_API_KEY' | 'GEMINI_API_KEY';
+  envVar: 'OPENAI_API_KEY' | 'GEMINI_API_KEY' | 'DRONE_HUB_CODEX_AUTH_FILE';
   env: SecretValueDiagnostics;
   stored: {
     hasValue: boolean;
@@ -232,7 +236,8 @@ export function parseLlmProvider(raw: unknown): LlmProviderId | null {
   const s = String(raw ?? '')
     .trim()
     .toLowerCase();
-  if (s === 'openai' || s === 'gemini') return s;
+  if (s === 'openai' || s === 'gemini' || s === 'codex') return s;
+  if (s === 'openai-codex' || s === 'chatgpt' || s === 'chatgpt-codex') return 'codex';
   return null;
 }
 
@@ -476,15 +481,18 @@ function apiKeyHint(apiKey: string | null): string | null {
   return `${key.slice(0, 4)}...${key.slice(-4)}`;
 }
 
-function providerApiKeyEnvVar(provider: LlmProviderId): 'OPENAI_API_KEY' | 'GEMINI_API_KEY' {
+function providerApiKeyEnvVar(provider: LlmProviderId): 'OPENAI_API_KEY' | 'GEMINI_API_KEY' | 'DRONE_HUB_CODEX_AUTH_FILE' {
+  if (provider === 'codex') return 'DRONE_HUB_CODEX_AUTH_FILE';
   return provider === 'openai' ? 'OPENAI_API_KEY' : 'GEMINI_API_KEY';
 }
 
 export function providerDisplayName(provider: LlmProviderId): string {
+  if (provider === 'codex') return 'Codex';
   return provider === 'openai' ? 'OpenAI' : 'Gemini';
 }
 
 async function getStoredProviderApiKey(provider: LlmProviderId): Promise<{ apiKey: string; updatedAt: string | null } | null> {
+  if (provider === 'codex') return null;
   const reg = await loadRegistry();
   const block = provider === 'openai' ? reg.settings?.openai : reg.settings?.gemini;
   const apiKey = normalizeApiKey(block?.apiKey);
@@ -495,6 +503,7 @@ async function getStoredProviderApiKey(provider: LlmProviderId): Promise<{ apiKe
 }
 
 export async function upsertStoredProviderApiKey(provider: LlmProviderId, apiKeyRaw: string): Promise<void> {
+  if (provider === 'codex') throw new Error('Codex uses local Codex CLI authentication, not a stored API key.');
   const apiKey = normalizeApiKey(apiKeyRaw);
   if (!apiKey) throw new Error('API key is required.');
   const updatedAt = new Date().toISOString();
@@ -506,6 +515,7 @@ export async function upsertStoredProviderApiKey(provider: LlmProviderId, apiKey
 }
 
 export async function clearStoredProviderApiKey(provider: LlmProviderId): Promise<void> {
+  if (provider === 'codex') return;
   await updateRegistry((reg) => {
     if (!reg.settings) return;
     if (provider === 'openai') {
@@ -519,7 +529,100 @@ export async function clearStoredProviderApiKey(provider: LlmProviderId): Promis
   });
 }
 
+function codexAuthFilePath(): string {
+  const configured = normalizeApiKey(process.env.DRONE_HUB_CODEX_AUTH_FILE);
+  if (configured) return configured;
+  return path.join(os.homedir(), '.codex', 'auth.json');
+}
+
+function decodeJwtPayload(token: string): any | null {
+  try {
+    const parts = String(token ?? '').split('.');
+    if (parts.length !== 3) return null;
+    const raw = parts[1] ?? '';
+    const padded = `${raw}${'='.repeat((4 - (raw.length % 4)) % 4)}`;
+    return JSON.parse(Buffer.from(padded.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function codexAccessTokenExpiresAt(accessToken: string): number | null {
+  const exp = Number(decodeJwtPayload(accessToken)?.exp);
+  if (!Number.isFinite(exp) || exp <= 0) return null;
+  return exp * 1000;
+}
+
+function codexCredentialsFromAuthJson(parsed: any): {
+  access: string;
+  refresh: string;
+  accountId: string | null;
+  lastRefresh: string | null;
+  expires: number | null;
+} | null {
+  const tokens = parsed?.tokens && typeof parsed.tokens === 'object' ? parsed.tokens : {};
+  const access = normalizeApiKey(tokens.access_token);
+  const refresh = normalizeApiKey(tokens.refresh_token);
+  if (!access || !refresh) return null;
+  const accountId = normalizeApiKey(tokens.account_id) || null;
+  const lastRefresh = normalizeApiKey(parsed?.last_refresh) || null;
+  return {
+    access,
+    refresh,
+    accountId,
+    lastRefresh,
+    expires: codexAccessTokenExpiresAt(access),
+  };
+}
+
+async function refreshCodexCliAuthFile(authPath: string, parsed: any, refreshToken: string): Promise<{ apiKey: string; updatedAt: string | null }> {
+  const { refreshOpenAICodexToken } = await dynamicImport('@mariozechner/pi-ai/oauth');
+  const refreshed = await refreshOpenAICodexToken(refreshToken);
+  const updatedAt = new Date().toISOString();
+  const next = {
+    ...parsed,
+    auth_mode: typeof parsed?.auth_mode === 'string' && parsed.auth_mode.trim() ? parsed.auth_mode : 'chatgpt',
+    tokens: {
+      ...(parsed?.tokens && typeof parsed.tokens === 'object' ? parsed.tokens : {}),
+      access_token: refreshed.access,
+      refresh_token: refreshed.refresh,
+      account_id: typeof refreshed.accountId === 'string' ? refreshed.accountId : (parsed?.tokens?.account_id ?? undefined),
+    },
+    last_refresh: updatedAt,
+  };
+  await fs.writeFile(authPath, JSON.stringify(next, null, 2), 'utf8');
+  await fs.chmod(authPath, 0o600).catch(() => {});
+  return { apiKey: refreshed.access, updatedAt };
+}
+
+async function resolveCodexCliAuthSettings(): Promise<EffectiveProviderApiKeySettings> {
+  const authPath = codexAuthFilePath();
+  try {
+    const parsed = JSON.parse(await fs.readFile(authPath, 'utf8'));
+    const credentials = codexCredentialsFromAuthJson(parsed);
+    if (!credentials) return { apiKey: null, source: null, updatedAt: null };
+
+    const refreshAt = credentials.expires ? credentials.expires - 5 * 60 * 1000 : null;
+    if (refreshAt && Date.now() >= refreshAt) {
+      try {
+        const refreshed = await refreshCodexCliAuthFile(authPath, parsed, credentials.refresh);
+        return { apiKey: refreshed.apiKey, source: 'codex-cli', updatedAt: refreshed.updatedAt };
+      } catch {
+        if (credentials.expires && Date.now() >= credentials.expires) {
+          return { apiKey: null, source: null, updatedAt: credentials.lastRefresh };
+        }
+      }
+    }
+
+    return { apiKey: credentials.access, source: 'codex-cli', updatedAt: credentials.lastRefresh };
+  } catch {
+    return { apiKey: null, source: null, updatedAt: null };
+  }
+}
+
 export async function resolveEffectiveProviderApiKeySettings(provider: LlmProviderId): Promise<EffectiveProviderApiKeySettings> {
+  if (provider === 'codex') return await resolveCodexCliAuthSettings();
+
   const stored = await getStoredProviderApiKey(provider);
   if (stored) {
     return {
@@ -611,17 +714,20 @@ export async function resolveLlmSettingsResponse(): Promise<{
   provider: { selected: LlmProviderId; source: LlmProviderSource };
   openai: { hasKey: boolean; source: ApiKeySettingsSource; keyHint: string | null; updatedAt: string | null };
   gemini: { hasKey: boolean; source: ApiKeySettingsSource; keyHint: string | null; updatedAt: string | null };
+  codex: { hasKey: boolean; source: ApiKeySettingsSource; keyHint: string | null; updatedAt: string | null };
 }> {
-  const [provider, openai, gemini] = await Promise.all([
+  const [provider, openai, gemini, codex] = await Promise.all([
     resolveEffectiveLlmProvider(),
     resolveEffectiveProviderApiKeySettings('openai'),
     resolveEffectiveProviderApiKeySettings('gemini'),
+    resolveEffectiveProviderApiKeySettings('codex'),
   ]);
   return {
     ok: true,
     provider: { selected: provider.provider, source: provider.source },
     openai: providerKeySettingsResponse(openai),
     gemini: providerKeySettingsResponse(gemini),
+    codex: providerKeySettingsResponse(codex),
   };
 }
 

@@ -608,7 +608,8 @@ async function resolveSetupStatusResponse(): Promise<any> {
   const repoCount = Object.keys(reposObj).length;
   const llmSettings = await resolveLlmSettingsResponse();
   const activeProvider = llmSettings.provider.selected;
-  const activeProviderSettings = activeProvider === 'gemini' ? llmSettings.gemini : llmSettings.openai;
+  const activeProviderSettings =
+    activeProvider === 'gemini' ? llmSettings.gemini : activeProvider === 'codex' ? llmSettings.codex : llmSettings.openai;
   const dockerCommand = await checkHostCommand('docker');
   let dockerStatus: { status: 'ready' | 'missing' | 'warning'; detail: string | null } = {
     status: dockerCommand.available ? 'ready' : 'missing',
@@ -656,8 +657,10 @@ async function resolveSetupStatusResponse(): Promise<any> {
       blocking: !activeProviderSettings.hasKey,
       requiredFor: 'agent chats',
       detail: activeProviderSettings.hasKey
-        ? `${activeProvider === 'gemini' ? 'Gemini' : 'OpenAI'} is configured.`
-        : `Configure a ${activeProvider === 'gemini' ? 'Gemini' : 'OpenAI'} key before sending prompts.`,
+        ? `${providerDisplayName(activeProvider)} is configured.`
+        : activeProvider === 'codex'
+          ? 'Run Codex CLI login on the Hub host before sending prompts.'
+          : `Configure a ${providerDisplayName(activeProvider)} key before sending prompts.`,
     },
     {
       id: 'base-image',
@@ -9530,15 +9533,17 @@ async function logProviderApiKeyResolution(
 }
 
 async function logHubLlmStartupSnapshot() {
-  const [openai, gemini] = await Promise.all([
+  const [openai, gemini, codex] = await Promise.all([
     collectProviderApiKeyDiagnostics('openai'),
     collectProviderApiKeyDiagnostics('gemini'),
+    collectProviderApiKeyDiagnostics('codex'),
   ]);
   hubLog('info', 'hub llm configuration snapshot', {
     ...llmProviderEnvLogMeta(),
     cwd: process.cwd(),
     openai,
     gemini,
+    codex,
   });
 }
 
@@ -10331,8 +10336,8 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         return;
       }
 
-      if (pathname === '/api/settings/openai' || pathname === '/api/settings/gemini') {
-        const provider: LlmProviderId = pathname.endsWith('/gemini') ? 'gemini' : 'openai';
+      if (pathname === '/api/settings/openai' || pathname === '/api/settings/gemini' || pathname === '/api/settings/codex') {
+        const provider: LlmProviderId = pathname.endsWith('/gemini') ? 'gemini' : pathname.endsWith('/codex') ? 'codex' : 'openai';
         if (method === 'GET') {
           const resolved = await resolveEffectiveProviderApiKeySettings(provider);
           const revealApiKey = u.searchParams.get('reveal') === '1';
@@ -10344,12 +10349,16 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           }
           json(res, 200, {
             ok: true,
-            ...providerKeySettingsResponse(resolved, { includeApiKey: revealApiKey }),
+            ...providerKeySettingsResponse(resolved, { includeApiKey: provider !== 'codex' && revealApiKey }),
           });
           return;
         }
 
         if (method === 'POST') {
+          if (provider === 'codex') {
+            json(res, 400, { ok: false, error: 'Codex uses local Codex CLI authentication. Run `codex` on the Hub host to sign in.' });
+            return;
+          }
           let body: any = null;
           try {
             body = await readJsonBody(req);
@@ -10372,6 +10381,10 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         }
 
         if (method === 'DELETE') {
+          if (provider === 'codex') {
+            json(res, 400, { ok: false, error: 'Codex credentials are managed by the Codex CLI.' });
+            return;
+          }
           await clearStoredProviderApiKey(provider);
           const resolved = await resolveEffectiveProviderApiKeySettings(provider);
           json(res, 200, {
@@ -10386,7 +10399,8 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         if (method === 'GET') {
           const data = await resolveLlmSettingsResponse();
           const selectedProvider = data.provider.selected;
-          const selectedProviderSettings = selectedProvider === 'openai' ? data.openai : data.gemini;
+          const selectedProviderSettings =
+            selectedProvider === 'openai' ? data.openai : selectedProvider === 'gemini' ? data.gemini : data.codex;
           if (!selectedProviderSettings.hasKey) {
             await logProviderApiKeyResolution('warn', 'settings llm lookup resolved without selected provider key', selectedProvider, {
               pathname,
@@ -10408,7 +10422,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           }
           const provider = parseLlmProvider(body?.provider);
           if (!provider) {
-            json(res, 400, { ok: false, error: 'provider must be openai or gemini' });
+            json(res, 400, { ok: false, error: 'provider must be openai, gemini, or codex' });
             return;
           }
           await upsertStoredLlmProvider(provider);

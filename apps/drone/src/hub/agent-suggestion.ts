@@ -1,12 +1,5 @@
 import type { LlmProviderId } from './hub-settings';
-import { DEFAULT_GEMINI_FLASH_MODEL_ID } from './llm-models';
-
-type LlmRuntime = {
-  provider: LlmProviderId;
-  z: any;
-  generateObject: any;
-  modelFactory: (modelId: string) => any;
-};
+import { defaultHubLlmModelId, providerDisplayName, resolveHubLlmRuntime } from './llm-runtime';
 
 export type AgentSuggestionKind =
   | 'approval'
@@ -31,34 +24,8 @@ export type AgentSuggestionResult =
       kind: 'none';
     };
 
-function normalizeProvider(raw: unknown): LlmProviderId {
-  return String(raw ?? '').trim().toLowerCase() === 'gemini' ? 'gemini' : 'openai';
-}
-
-function providerDisplayName(provider: LlmProviderId): string {
-  return provider === 'gemini' ? 'Gemini' : 'OpenAI';
-}
-
 function defaultModelId(provider: LlmProviderId): string {
-  return provider === 'gemini' ? DEFAULT_GEMINI_FLASH_MODEL_ID : 'gpt-4o-mini';
-}
-
-async function resolveLlmRuntime(opts?: { provider?: LlmProviderId; apiKey?: string }): Promise<LlmRuntime> {
-  const provider = normalizeProvider(opts?.provider);
-  const apiKey = String(opts?.apiKey ?? '').trim();
-  if (!apiKey) throw new Error(`Missing ${providerDisplayName(provider)} API key. Configure it in Settings.`);
-
-  const [{ generateObject }, { z }] = await Promise.all([import('ai'), import('zod')]);
-
-  if (provider === 'gemini') {
-    const { createGoogleGenerativeAI } = await import('@ai-sdk/google');
-    const google = createGoogleGenerativeAI({ apiKey });
-    return { provider, z, generateObject, modelFactory: google };
-  }
-
-  const { createOpenAI } = await import('@ai-sdk/openai');
-  const openai = createOpenAI({ apiKey });
-  return { provider, z, generateObject, modelFactory: openai };
+  return defaultHubLlmModelId(provider, 'small');
 }
 
 function normalizeNewlines(s: string): string {
@@ -182,7 +149,7 @@ export async function suggestReplyToAgentMessage(
   const policyMarkdown = clip(String(opts?.policyMarkdown ?? ''), 18_000);
   if (!policyMarkdown) throw new Error('missing assistant suggestion policy');
 
-  const runtime = await resolveLlmRuntime(llm);
+  const runtime = await resolveHubLlmRuntime(llm);
   const modelId = String(process.env.DRONE_HUB_AGENT_SUGGESTION_MODEL ?? '').trim() || defaultModelId(runtime.provider);
 
   const schema = runtime.z.object({

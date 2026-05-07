@@ -2,7 +2,7 @@ import type { AutomationConfig } from './automation-config';
 import type { KanbanBoardState } from './kanban-board-state';
 import type { TaskPlaybookButton } from '../types';
 
-export type LlmProviderId = 'openai' | 'gemini';
+export type LlmProviderId = 'openai' | 'gemini' | 'codex';
 export type DroneDeleteMode = 'permanent' | 'archive';
 export type ArchiveRetentionId = '1h' | '8h' | '1d' | '1w';
 export type ArchiveRuntimePolicy = 'keep-running' | 'stop';
@@ -28,6 +28,7 @@ export type LlmSettingsResponse = {
   };
   openai: Omit<ApiKeySettingsResponse, 'ok'>;
   gemini: Omit<ApiKeySettingsResponse, 'ok'>;
+  codex: Omit<ApiKeySettingsResponse, 'ok'>;
 };
 
 export type HubLogsResponse = {

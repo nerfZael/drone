@@ -141,7 +141,7 @@ type DroneRegistryV1 = {
       updatedAt?: string;
     };
     llm?: {
-      provider?: 'openai' | 'gemini';
+      provider?: 'openai' | 'gemini' | 'codex';
       updatedAt?: string;
     };
     openai?: {
