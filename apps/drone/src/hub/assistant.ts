@@ -77,6 +77,14 @@ type AssistantQueuedPrompt = {
 
 type AssistantPromptDeliveryMode = 'queue' | 'asap';
 
+type AssistantRunModel = {
+  provider: LlmProviderId;
+  model: string;
+  thinkingLevel: AssistantThinkingLevel;
+  promptId: string;
+  startedAt: string;
+};
+
 type AssistantApproval = {
   id: string;
   threadId: string;
@@ -195,6 +203,7 @@ export type AssistantSnapshot = {
   pendingApprovals: AssistantApproval[];
   models: AssistantModelOption[];
   accessScope: AssistantAccessScope;
+  runningModels: Record<string, AssistantRunModel>;
   streamingMessage?: any;
 };
 
@@ -960,6 +969,7 @@ export class HubAssistantService {
   private activeAgents = new Map<string, any>();
   private queuePumpPromises = new Map<string, Promise<void>>();
   private streamingMessages = new Map<string, any>();
+  private runningModels = new Map<string, AssistantRunModel>();
   private defaultSystemPrompt = ASSISTANT_SYSTEM_PROMPT_DEFAULT;
   private defaultSystemPromptUpdatedAt: string | null = null;
   private appContext: AssistantAppContext = {
@@ -1114,6 +1124,7 @@ export class HubAssistantService {
       pendingApprovals: this.pendingApprovals(),
       models: await this.modelOptions(),
       accessScope: sanitizeMessage(this.activeAccessScope()),
+      runningModels: Object.fromEntries([...this.runningModels.entries()].map(([threadId, model]) => [threadId, sanitizeMessage(model)])),
       ...(streamingMessage ? { streamingMessage: sanitizeMessage(streamingMessage) } : {}),
     };
   }
@@ -1240,8 +1251,14 @@ export class HubAssistantService {
     this.activeThreadId = thread.id;
     const queuedPrompt = this.makeQueuedPrompt(thread, input);
     const activeAgent = this.activeAgents.get(thread.id);
+    const runningModel = this.runningModels.get(thread.id);
     const canSteerActiveThread = Boolean(activeAgent);
     if (canSteerActiveThread && queuedPrompt.deliveryMode === 'asap') {
+      if (runningModel) {
+        queuedPrompt.provider = runningModel.provider;
+        queuedPrompt.model = runningModel.model;
+        queuedPrompt.thinkingLevel = runningModel.thinkingLevel;
+      }
       thread.queuedPrompts.push(queuedPrompt);
       activeAgent?.steer?.(makeAssistantUserMessage(queuedPrompt.prompt));
       thread.updatedAt = nowIso();
@@ -1353,29 +1370,29 @@ export class HubAssistantService {
     queuedPrompt: AssistantQueuedPrompt,
     onEvent?: (event: AssistantPromptEvent) => void | Promise<void>,
   ): Promise<void> {
-    thread.provider = queuedPrompt.provider;
-    thread.model = queuedPrompt.model;
-    thread.thinkingLevel = queuedPrompt.thinkingLevel;
+    const runProvider = queuedPrompt.provider;
+    const runModel = queuedPrompt.model;
+    const runThinkingLevel = queuedPrompt.thinkingLevel;
     let agent: any = null;
 
     try {
       const runtime = await this.runtime();
-      const model = this.resolveModel(runtime, thread.provider, thread.model);
+      const model = this.resolveModel(runtime, runProvider, runModel);
       const tools = this.buildTools(runtime, thread.id, onEvent);
-      const providerSettings = await resolveEffectiveProviderApiKeySettings(thread.provider);
+      const providerSettings = await resolveEffectiveProviderApiKeySettings(runProvider);
       if (!providerSettings.apiKey) {
-        throw new Error(`Missing ${providerDisplayName(thread.provider)} API key. Configure it in Settings.`);
+        throw new Error(`Missing ${providerDisplayName(runProvider)} API key. Configure it in Settings.`);
       }
 
       agent = new runtime.Agent({
         initialState: {
           systemPrompt: this.systemPrompt(thread.id),
           model,
-          thinkingLevel: thread.thinkingLevel,
+          thinkingLevel: runThinkingLevel,
           tools,
           messages: thread.messages.map(sanitizeMessage),
         },
-        ...(thread.provider === 'openai' ? { convertToLlm: convertMessagesForOpenAi } : {}),
+        ...(runProvider === 'openai' ? { convertToLlm: convertMessagesForOpenAi } : {}),
         getApiKey: async (provider: string) => {
           if (provider === 'google') {
             const resolved = await resolveEffectiveProviderApiKeySettings('gemini');
@@ -1392,6 +1409,13 @@ export class HubAssistantService {
       });
 
       this.activeAgents.set(thread.id, agent);
+      this.runningModels.set(thread.id, {
+        provider: runProvider,
+        model: runModel,
+        thinkingLevel: runThinkingLevel,
+        promptId: queuedPrompt.id,
+        startedAt: nowIso(),
+      });
       thread.status = 'running';
       thread.error = null;
       thread.updatedAt = nowIso();
@@ -1434,6 +1458,8 @@ export class HubAssistantService {
       if (agent) thread.messages = agent.state.messages.map(sanitizeMessage).slice(-ASSISTANT_THREAD_MESSAGE_LIMIT);
       thread.updatedAt = nowIso();
       this.streamingMessages.delete(thread.id);
+      const runningModel = this.runningModels.get(thread.id);
+      if (runningModel?.promptId === queuedPrompt.id) this.runningModels.delete(thread.id);
       if (this.activeAgents.get(thread.id) === agent) this.activeAgents.delete(thread.id);
       for (const [id, approval] of [...this.approvals]) {
         if (approval.threadId !== thread.id) continue;
@@ -1997,6 +2023,7 @@ export class HubAssistantService {
       pendingApprovals: this.pendingApprovals(),
       models: [],
       accessScope: sanitizeMessage(this.activeAccessScope()),
+      runningModels: Object.fromEntries([...this.runningModels.entries()].map(([threadId, model]) => [threadId, sanitizeMessage(model)])),
       ...(streamingMessage ? { streamingMessage: sanitizeMessage(streamingMessage) } : {}),
     };
   }

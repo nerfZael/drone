@@ -34,6 +34,14 @@ type AssistantQueuedPrompt = {
 
 type AssistantPromptDeliveryMode = 'queue' | 'asap';
 
+type AssistantRunModel = {
+  provider: 'openai' | 'gemini';
+  model: string;
+  thinkingLevel: string;
+  promptId: string;
+  startedAt: string;
+};
+
 type AssistantThread = {
   id: string;
   title: string;
@@ -77,6 +85,7 @@ type AssistantSnapshot = {
   pendingApprovals: AssistantApproval[];
   models: AssistantModelOption[];
   accessScope?: AssistantAccessScope;
+  runningModels?: Record<string, AssistantRunModel>;
   streamingMessage?: AssistantMessage;
 };
 
@@ -240,6 +249,22 @@ function formatUpdatedAt(raw: string): string {
   return new Date(ms).toLocaleDateString();
 }
 
+function modelSelectionKey(selection: Pick<AssistantRunModel, 'provider' | 'model' | 'thinkingLevel'>): string {
+  return `${selection.provider}:${selection.model}:${selection.thinkingLevel}`;
+}
+
+function modelSelectionLabel(
+  selection: Pick<AssistantRunModel, 'provider' | 'model' | 'thinkingLevel'>,
+  options: AssistantModelOption[],
+): string {
+  const match = options.find(
+    (option) =>
+      modelSelectionKey({ provider: option.provider, model: option.id, thinkingLevel: option.thinkingLevel }) === modelSelectionKey(selection),
+  );
+  if (match) return match.name;
+  return `${selection.provider}/${selection.model}${selection.thinkingLevel !== 'off' ? ` ${selection.thinkingLevel}` : ''}`;
+}
+
 function assistantThreadStatusTone(status: AssistantThreadStatus): string {
   if (status === 'running') return 'bg-[var(--green)]';
   if (status === 'waiting_for_approval') return 'bg-[var(--accent)]';
@@ -394,10 +419,12 @@ function AssistantMessageRow({ message, showToolCalls = true }: { message: Assis
 
 function QueuedPromptRow({
   prompt,
+  modelLabel,
   busy,
   onCancel,
 }: {
   prompt: AssistantQueuedPrompt;
+  modelLabel: string;
   busy: boolean;
   onCancel: () => void;
 }) {
@@ -408,15 +435,24 @@ function QueuedPromptRow({
         <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
           {asap ? 'ASAP queue' : 'Queued'}
         </div>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={onCancel}
-          className="h-6 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.16)] px-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:text-[var(--red)] disabled:opacity-50"
-          style={{ fontFamily: 'var(--display)' }}
-        >
-          Cancel
-        </button>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span
+            className="max-w-[180px] truncate rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.025)] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--muted)]"
+            title={`Queued model: ${modelLabel}`}
+            style={{ fontFamily: 'var(--display)' }}
+          >
+            {modelLabel}
+          </span>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onCancel}
+            className="h-6 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.16)] px-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:text-[var(--red)] disabled:opacity-50"
+            style={{ fontFamily: 'var(--display)' }}
+          >
+            Cancel
+          </button>
+        </div>
       </div>
       <div className="whitespace-pre-wrap break-words text-[12px] text-[var(--fg-secondary)]">{prompt.prompt}</div>
     </div>
@@ -1275,7 +1311,9 @@ export function AssistantDock() {
   }, [activePendingApprovals, approvalBusyId, autoApprove, resolveApproval]);
 
   const modelOptions = snapshot?.models ?? [];
-  const selectedModelKey = activeThread ? `${activeThread.provider}:${activeThread.model}:${activeThread.thinkingLevel}` : '';
+  const activeRunningModel = activeThread ? snapshot?.runningModels?.[activeThread.id] ?? null : null;
+  const selectedModelKey = activeThread ? modelSelectionKey({ provider: activeThread.provider, model: activeThread.model, thinkingLevel: activeThread.thinkingLevel }) : '';
+  const activeRunningModelLabel = activeRunningModel ? modelSelectionLabel(activeRunningModel, modelOptions) : '';
   const selectedScopeDisabled = scopeDrones.length === 0;
 
   return (
@@ -1419,6 +1457,7 @@ export function AssistantDock() {
               <QueuedPromptRow
                 key={item.key}
                 prompt={item.prompt}
+                modelLabel={modelSelectionLabel({ provider: item.prompt.provider, model: item.prompt.model, thinkingLevel: item.prompt.thinkingLevel }, modelOptions)}
                 busy={queuedCancelBusyId === item.prompt.id}
                 onCancel={() => void cancelQueuedPrompt(item.prompt)}
               />
@@ -1456,12 +1495,13 @@ export function AssistantDock() {
         <div className="mt-2 flex items-center gap-2">
           <select
             value={selectedModelKey}
-            disabled={!activeThread || running}
+            disabled={!activeThread}
             onChange={(event) => {
               const [provider, model, thinkingLevel] = event.target.value.split(':');
               void updateThread({ provider: provider as AssistantThread['provider'], model, thinkingLevel });
             }}
             className="min-w-0 flex-1 rounded border border-[var(--border-subtle)] bg-[var(--panel)] px-2 py-1 text-[11px] text-[var(--fg-secondary)] focus:outline-none disabled:opacity-50"
+            aria-label="Next assistant model"
           >
             {modelOptions.map((model) => (
               <option key={`${model.provider}:${model.id}:${model.thinkingLevel}`} value={`${model.provider}:${model.id}:${model.thinkingLevel}`}>
@@ -1469,6 +1509,15 @@ export function AssistantDock() {
               </option>
             ))}
           </select>
+          {activeRunningModel ? (
+            <span
+              className="max-w-[180px] truncate rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.025)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]"
+              title={`Running model: ${activeRunningModelLabel}`}
+              style={{ fontFamily: 'var(--display)' }}
+            >
+              Running {activeRunningModelLabel}
+            </span>
+          ) : null}
           <div
             className="grid h-8 flex-shrink-0 grid-cols-2 overflow-hidden rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]"
             role="group"

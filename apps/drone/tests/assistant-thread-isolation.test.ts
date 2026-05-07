@@ -19,7 +19,7 @@ function deferred<T = void>(): {
 function installFakeRuntime(
   service: HubAssistantService,
   handlers: {
-    onPrompt?: (prompt: string) => Promise<void> | void;
+    onPrompt?: (prompt: string, run: { provider: string; model: string; thinkingLevel: string }) => Promise<void> | void;
   },
 ): void {
   const Type = {
@@ -33,9 +33,15 @@ function installFakeRuntime(
 
   class FakeAgent {
     state: { messages: any[]; streamingMessage: any };
+    private readonly run: { provider: string; model: string; thinkingLevel: string };
     private subscribers: Array<(event: any) => Promise<void> | void> = [];
 
     constructor(opts: any) {
+      this.run = {
+        provider: String(opts?.initialState?.model?.provider ?? ''),
+        model: String(opts?.initialState?.model?.id ?? ''),
+        thinkingLevel: String(opts?.initialState?.thinkingLevel ?? ''),
+      };
       this.state = {
         messages: [...(opts?.initialState?.messages ?? [])],
         streamingMessage: null,
@@ -54,7 +60,7 @@ function installFakeRuntime(
       this.state.messages.push({ role: 'user', content: prompt });
       this.state.streamingMessage = { role: 'assistant', content: [{ type: 'text', text: `running ${prompt}` }] };
       await this.emit({ type: 'message_update', message: this.state.streamingMessage });
-      await handlers.onPrompt?.(prompt);
+      await handlers.onPrompt?.(prompt, this.run);
       this.state.streamingMessage = null;
       this.state.messages.push({ role: 'assistant', content: [{ type: 'text', text: `done ${prompt}` }] });
       await this.emit({ type: 'turn_end', message: this.state.messages[this.state.messages.length - 1] });
@@ -69,7 +75,7 @@ function installFakeRuntime(
   (service as any).runtime = async () => ({
     Agent: FakeAgent,
     Type,
-    getModel: () => ({ reasoning: false }),
+    getModel: (provider: string, model: string) => ({ provider, id: model, reasoning: false }),
     getModels: () => [],
     getSupportedThinkingLevels: () => ['off'],
   });
@@ -152,6 +158,59 @@ describe('assistant thread isolation', () => {
         releaseSlow.resolve();
         await slowRun;
         expect(completions).toEqual(['fast', 'slow']);
+      } finally {
+        if (previousKey == null) delete process.env.OPENAI_API_KEY;
+        else process.env.OPENAI_API_KEY = previousKey;
+      }
+    });
+  });
+
+  test('keeps selected next model separate from running and queued prompt models', async () => {
+    await withTempDroneDataDir('assistant-thread-model-selection-', async () => {
+      const previousKey = process.env.OPENAI_API_KEY;
+      process.env.OPENAI_API_KEY = 'test-key';
+      try {
+        const slowStarted = deferred();
+        const releaseSlow = deferred();
+        const runs: Array<{ prompt: string; thinkingLevel: string }> = [];
+        const service = makeService();
+        installFakeRuntime(service, {
+          onPrompt: async (prompt, run) => {
+            runs.push({ prompt, thinkingLevel: run.thinkingLevel });
+            if (prompt === 'slow') {
+              slowStarted.resolve();
+              await releaseSlow.promise;
+            }
+          },
+        });
+
+        const created = await service.createThread({ title: 'model thread' });
+        const threadId = created.activeThreadId;
+        await service.updateThread(threadId, { provider: 'openai', model: 'gpt-5.5', thinkingLevel: 'off' });
+
+        const slowRun = service.promptThread(threadId, { prompt: 'slow', deliveryMode: 'queue' });
+        await slowStarted.promise;
+
+        await service.promptThread(threadId, { prompt: 'queued-old', deliveryMode: 'queue' });
+        await service.updateThread(threadId, { provider: 'openai', model: 'gpt-5.5', thinkingLevel: 'high' });
+
+        let snapshot = await service.snapshot();
+        let thread = snapshot.threads.find((item) => item.id === threadId) as any;
+        expect(thread.thinkingLevel).toBe('high');
+        expect(snapshot.runningModels[threadId]?.thinkingLevel).toBe('off');
+        expect(thread.queuedPrompts.find((prompt: any) => prompt.prompt === 'queued-old')?.thinkingLevel).toBe('off');
+
+        releaseSlow.resolve();
+        await slowRun;
+
+        snapshot = await service.snapshot();
+        thread = snapshot.threads.find((item) => item.id === threadId) as any;
+        expect(runs).toEqual([
+          { prompt: 'slow', thinkingLevel: 'off' },
+          { prompt: 'queued-old', thinkingLevel: 'off' },
+        ]);
+        expect(thread.thinkingLevel).toBe('high');
+        expect(snapshot.runningModels[threadId]).toBeUndefined();
       } finally {
         if (previousKey == null) delete process.env.OPENAI_API_KEY;
         else process.env.OPENAI_API_KEY = previousKey;
