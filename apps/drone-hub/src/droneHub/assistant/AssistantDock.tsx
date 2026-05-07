@@ -38,6 +38,7 @@ type AssistantThread = {
   model: string;
   provider: 'openai' | 'gemini';
   thinkingLevel: string;
+  accessScope: AssistantAccessScope;
   messages: AssistantMessage[];
   queuedPrompts?: AssistantQueuedPrompt[];
   status: AssistantThreadStatus;
@@ -744,6 +745,8 @@ export function AssistantDock() {
     if (!snapshot) return null;
     return snapshot.threads.find((thread) => thread.id === snapshot.activeThreadId) ?? snapshot.threads[0] ?? null;
   }, [snapshot]);
+  const activeAccessScope: AssistantAccessScope | null = activeThread?.accessScope ?? snapshot?.accessScope ?? null;
+  const activeAccessScopeDroneIdsKey = activeAccessScope?.droneIds?.join('\u0000') ?? '';
   const activePendingApprovals = React.useMemo(
     () => (snapshot?.pendingApprovals ?? []).filter((approval) => approval.threadId === activeThread?.id && approval.status === 'pending'),
     [activeThread?.id, snapshot?.pendingApprovals],
@@ -806,7 +809,7 @@ export function AssistantDock() {
   }, []);
 
   React.useEffect(() => {
-    const scope = snapshot?.accessScope;
+    const scope = activeAccessScope;
     if (!scope) return;
     let cancelled = false;
     const ids = Array.from(new Set((Array.isArray(scope.droneIds) ? scope.droneIds : []).map((id) => String(id ?? '').trim()).filter(Boolean)));
@@ -830,12 +833,12 @@ export function AssistantDock() {
       cancelled = true;
     };
   }, [
+    activeAccessScope?.readMode,
+    activeAccessScope?.writeMode,
+    activeAccessScope?.updatedAt,
+    activeAccessScopeDroneIdsKey,
     resolveScopeDroneNames,
     snapshot?.activeThreadId,
-    snapshot?.accessScope?.readMode,
-    snapshot?.accessScope?.writeMode,
-    snapshot?.accessScope?.updatedAt,
-    snapshot?.accessScope?.droneIds?.join('\u0000'),
   ]);
 
   const addScopeDrones = React.useCallback((drones: AssistantScopeDrone[]) => {

@@ -878,10 +878,9 @@ export class HubAssistantService {
   private activeThreadId = '';
   private loaded = false;
   private runtimePromise: Promise<AssistantRuntime> | null = null;
-  private activeAgent: any = null;
-  private activeThreadRunId: string | null = null;
-  private queuePumpPromise: Promise<void> | null = null;
-  private streamingMessage: any = null;
+  private activeAgents = new Map<string, any>();
+  private queuePumpPromises = new Map<string, Promise<void>>();
+  private streamingMessages = new Map<string, any>();
   private appContext: AssistantAppContext = {
     activeDroneId: null,
     activeDroneName: null,
@@ -959,6 +958,19 @@ export class HubAssistantService {
     return drones.filter((drone) => allowed.has(drone.id));
   }
 
+  private scopedAppContext(threadId: string): AssistantAppContext {
+    const allowed = this.allowedDroneIdSet('read', threadId);
+    if (!allowed) return { ...this.appContext };
+    const activeDroneId = cleanOptionalString(this.appContext.activeDroneId);
+    if (activeDroneId && allowed.has(activeDroneId)) return { ...this.appContext };
+    return {
+      ...this.appContext,
+      activeDroneId: null,
+      activeDroneName: null,
+      activeChatName: null,
+    };
+  }
+
   private async buildCreateDroneRequest(params: any, threadId?: string): Promise<any> {
     const regAny: any = await loadRegistry();
     const hasParam = (key: string) => Object.prototype.hasOwnProperty.call(params ?? {}, key);
@@ -1013,6 +1025,7 @@ export class HubAssistantService {
 
   async snapshot(): Promise<AssistantSnapshot> {
     await this.ensureLoaded();
+    const streamingMessage = this.streamingMessages.get(this.activeThreadId);
     return {
       ok: true,
       activeThreadId: this.activeThreadId,
@@ -1020,7 +1033,7 @@ export class HubAssistantService {
       pendingApprovals: this.pendingApprovals(),
       models: await this.modelOptions(),
       accessScope: sanitizeMessage(this.activeAccessScope()),
-      ...(this.streamingMessage ? { streamingMessage: sanitizeMessage(this.streamingMessage) } : {}),
+      ...(streamingMessage ? { streamingMessage: sanitizeMessage(streamingMessage) } : {}),
     };
   }
 
@@ -1041,7 +1054,8 @@ export class HubAssistantService {
 
   async updateThread(threadId: string, patch: { title?: unknown; model?: unknown; provider?: unknown; thinkingLevel?: unknown }): Promise<AssistantSnapshot> {
     await this.ensureLoaded();
-    const thread = this.requireThread(threadId);
+    const thread = this.getThread(threadId);
+    this.activeThreadId = thread.id;
     const title = typeof patch.title === 'string' ? patch.title.trim() : '';
     if (title) thread.title = title.slice(0, 80);
     if (patch.provider != null) thread.provider = normalizeProvider(patch.provider);
@@ -1056,7 +1070,10 @@ export class HubAssistantService {
 
   async deleteThread(threadId: string): Promise<AssistantSnapshot> {
     await this.ensureLoaded();
-    if (this.activeThreadRunId === threadId) this.activeAgent?.abort?.();
+    this.activeAgents.get(threadId)?.abort?.();
+    this.activeAgents.delete(threadId);
+    this.queuePumpPromises.delete(threadId);
+    this.streamingMessages.delete(threadId);
     this.threads = this.threads.filter((thread) => thread.id !== threadId);
     if (this.threads.length === 0) {
       this.threads = [this.makeThread()];
@@ -1070,7 +1087,7 @@ export class HubAssistantService {
 
   async stopThread(threadId: string): Promise<AssistantSnapshot> {
     await this.ensureLoaded();
-    if (this.activeThreadRunId === threadId) this.activeAgent?.abort?.();
+    this.activeAgents.get(threadId)?.abort?.();
     return await this.snapshot();
   }
 
@@ -1103,33 +1120,36 @@ export class HubAssistantService {
     onEvent?: (event: AssistantPromptEvent) => void | Promise<void>,
   ): Promise<void> {
     await this.ensureLoaded();
-    const thread = this.requireThread(threadId);
+    const thread = this.getThread(threadId);
+    this.activeThreadId = thread.id;
     const queuedPrompt = this.makeQueuedPrompt(thread, input);
-    if (this.activeAgent || this.queuePumpPromise || this.hasQueuedPrompts()) {
+    if (this.activeAgents.has(thread.id) || this.queuePumpPromises.has(thread.id) || this.hasQueuedPrompts(thread.id)) {
       thread.queuedPrompts.push(queuedPrompt);
       thread.updatedAt = nowIso();
       await this.persist();
       await onEvent?.({ type: 'snapshot', snapshot: await this.snapshot() });
-      if (!this.activeAgent && !this.queuePumpPromise) {
-        this.queuePumpPromise = this.drainQueuedPrompts(onEvent).finally(() => {
-          this.queuePumpPromise = null;
+      if (!this.activeAgents.has(thread.id) && !this.queuePumpPromises.has(thread.id)) {
+        const pump = this.drainQueuedPrompts(thread.id, onEvent).finally(() => {
+          this.queuePumpPromises.delete(thread.id);
         });
-        await this.queuePumpPromise;
+        this.queuePumpPromises.set(thread.id, pump);
+        await pump;
       }
       return;
     }
 
-    this.queuePumpPromise = (async () => {
+    const pump = (async () => {
       await this.runQueuedPrompt(thread, queuedPrompt, onEvent);
-      await this.drainQueuedPrompts(onEvent);
+      await this.drainQueuedPrompts(thread.id, onEvent);
     })().finally(() => {
-      this.queuePumpPromise = null;
+      this.queuePumpPromises.delete(thread.id);
     });
-    await this.queuePumpPromise;
+    this.queuePumpPromises.set(thread.id, pump);
+    await pump;
   }
 
-  private hasQueuedPrompts(): boolean {
-    return this.threads.some((thread) => thread.queuedPrompts.length > 0);
+  private hasQueuedPrompts(threadId: string): boolean {
+    return this.threads.some((thread) => thread.id === threadId && thread.queuedPrompts.length > 0);
   }
 
   private makeQueuedPrompt(thread: AssistantThread, input: { prompt?: unknown; model?: unknown; provider?: unknown; thinkingLevel?: unknown }): AssistantQueuedPrompt {
@@ -1147,9 +1167,10 @@ export class HubAssistantService {
     };
   }
 
-  private shiftNextQueuedPrompt(): { thread: AssistantThread; queuedPrompt: AssistantQueuedPrompt } | null {
+  private shiftNextQueuedPrompt(threadId: string): { thread: AssistantThread; queuedPrompt: AssistantQueuedPrompt } | null {
     let selected: { thread: AssistantThread; queuedPrompt: AssistantQueuedPrompt; index: number; ms: number } | null = null;
     for (const thread of this.threads) {
+      if (thread.id !== threadId) continue;
       for (let index = 0; index < thread.queuedPrompts.length; index += 1) {
         const queuedPrompt = thread.queuedPrompts[index];
         const ms = Date.parse(queuedPrompt.createdAt);
@@ -1163,9 +1184,9 @@ export class HubAssistantService {
     return { thread: selected.thread, queuedPrompt: selected.queuedPrompt };
   }
 
-  private async drainQueuedPrompts(onEvent?: (event: AssistantPromptEvent) => void | Promise<void>): Promise<void> {
-    while (!this.activeAgent) {
-      const next = this.shiftNextQueuedPrompt();
+  private async drainQueuedPrompts(threadId: string, onEvent?: (event: AssistantPromptEvent) => void | Promise<void>): Promise<void> {
+    while (!this.activeAgents.has(threadId)) {
+      const next = this.shiftNextQueuedPrompt(threadId);
       if (!next) return;
       await this.persist();
       await onEvent?.({ type: 'snapshot', snapshot: await this.snapshot() });
@@ -1216,8 +1237,7 @@ export class HubAssistantService {
         toolExecution: 'sequential',
       });
 
-      this.activeAgent = agent;
-      this.activeThreadRunId = thread.id;
+      this.activeAgents.set(thread.id, agent);
       thread.status = 'running';
       thread.error = null;
       thread.updatedAt = nowIso();
@@ -1225,11 +1245,15 @@ export class HubAssistantService {
 
       agent.subscribe(async (event: any) => {
         if (event.type === 'message_update') {
-          this.streamingMessage = sanitizeMessage(event.message);
+          this.streamingMessages.set(thread.id, sanitizeMessage(event.message));
         }
         if (event.type === 'message_end' || event.type === 'agent_end' || event.type === 'turn_end') {
           thread.messages = agent.state.messages.map(sanitizeMessage).slice(-ASSISTANT_THREAD_MESSAGE_LIMIT);
-          this.streamingMessage = agent.state.streamingMessage ? sanitizeMessage(agent.state.streamingMessage) : null;
+          if (agent.state.streamingMessage) {
+            this.streamingMessages.set(thread.id, sanitizeMessage(agent.state.streamingMessage));
+          } else {
+            this.streamingMessages.delete(thread.id);
+          }
           const firstUser = thread.messages.find((message) => message?.role === 'user');
           if (thread.title === DEFAULT_THREAD_TITLE && firstUser) thread.title = titleFromPrompt(textFromMessage(firstUser));
           thread.updatedAt = nowIso();
@@ -1251,11 +1275,8 @@ export class HubAssistantService {
     } finally {
       if (agent) thread.messages = agent.state.messages.map(sanitizeMessage).slice(-ASSISTANT_THREAD_MESSAGE_LIMIT);
       thread.updatedAt = nowIso();
-      this.streamingMessage = null;
-      if (this.activeThreadRunId === thread.id) {
-        this.activeAgent = null;
-        this.activeThreadRunId = null;
-      }
+      this.streamingMessages.delete(thread.id);
+      if (this.activeAgents.get(thread.id) === agent) this.activeAgents.delete(thread.id);
       for (const [id, approval] of [...this.approvals]) {
         if (approval.threadId !== thread.id) continue;
         this.approvals.delete(id);
@@ -1309,11 +1330,10 @@ export class HubAssistantService {
     };
   }
 
-  private requireThread(threadId: string): AssistantThread {
+  private getThread(threadId: string): AssistantThread {
     const id = String(threadId ?? '').trim();
     const thread = this.threads.find((item) => item.id === id);
     if (!thread) throw new Error(`unknown assistant thread: ${threadId}`);
-    this.activeThreadId = thread.id;
     return thread;
   }
 
@@ -1400,7 +1420,7 @@ export class HubAssistantService {
         parameters: Type.Object({}),
         execute: async () => {
           const context = {
-            app: this.appContext,
+            app: this.scopedAppContext(threadId),
             accessScope: this.activeAccessScope(threadId),
             recentChats: await recentChatActivity(8, this.allowedDroneIdSet('read', threadId)),
           };
@@ -1729,7 +1749,7 @@ export class HubAssistantService {
       createdAt: nowIso(),
       status: 'pending',
     };
-    const thread = this.requireThread(input.threadId);
+    const thread = this.getThread(input.threadId);
     thread.status = 'waiting_for_approval';
     await new Promise<void>((resolve) => {
       const entry = {
@@ -1758,6 +1778,7 @@ export class HubAssistantService {
   }
 
   private snapshotSyncFallback(): AssistantSnapshot {
+    const streamingMessage = this.streamingMessages.get(this.activeThreadId);
     return {
       ok: true,
       activeThreadId: this.activeThreadId,
@@ -1765,7 +1786,7 @@ export class HubAssistantService {
       pendingApprovals: this.pendingApprovals(),
       models: [],
       accessScope: sanitizeMessage(this.activeAccessScope()),
-      ...(this.streamingMessage ? { streamingMessage: sanitizeMessage(this.streamingMessage) } : {}),
+      ...(streamingMessage ? { streamingMessage: sanitizeMessage(streamingMessage) } : {}),
     };
   }
 
