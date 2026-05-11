@@ -46,6 +46,24 @@ function fileIdentity(file: File): string {
 }
 
 export function imageFilesFromClipboardData(data: Pick<DataTransfer, 'files' | 'items'> | null | undefined): File[] {
+  const fileList = Array.from(data?.files ?? []);
+  // Browsers often expose the same pasted image on both `files` and `items`; merging both
+  // duplicates attachments (and `lastModified` may differ between wrappers). Prefer the
+  // FileList when it already contains images; fall back to `items` when it does not.
+  const hasImageInFiles = fileList.some((f) => isLikelyImageFile(f));
+  if (hasImageInFiles) {
+    const out: File[] = [];
+    const seen = new Set<string>();
+    for (const file of fileList) {
+      if (!isLikelyImageFile(file)) continue;
+      const key = fileIdentity(file);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(file);
+    }
+    return out;
+  }
+
   const out: File[] = [];
   const seen = new Set<string>();
   const add = (file: File | null | undefined) => {
@@ -55,8 +73,6 @@ export function imageFilesFromClipboardData(data: Pick<DataTransfer, 'files' | '
     seen.add(key);
     out.push(file);
   };
-
-  for (const file of Array.from(data?.files ?? [])) add(file);
   for (const item of Array.from(data?.items ?? [])) {
     if (!item || item.kind !== 'file') continue;
     add(item.getAsFile());

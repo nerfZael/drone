@@ -19,6 +19,23 @@ describe('chat input attachment helpers', () => {
     expect(files).toEqual([one, two]);
   });
 
+  test('does not merge clipboard items when FileList already has images (avoids duplicate paste)', () => {
+    const fromFiles = new File(['x'], 'paste.png', { type: 'image/png', lastModified: 100 });
+    const fromItems = new File(['x'], 'paste.png', { type: 'image/png', lastModified: 999 });
+
+    const files = imageFilesFromClipboardData({
+      files: [fromFiles] as any,
+      items: [
+        {
+          kind: 'file',
+          getAsFile: () => fromItems,
+        },
+      ] as any,
+    });
+
+    expect(files).toEqual([fromFiles]);
+  });
+
   test('falls back to clipboard items when files are absent', () => {
     const one = new File(['one'], 'one.png', { type: 'image/png', lastModified: 1 });
     const text = new File(['text'], 'notes.txt', { type: 'text/plain', lastModified: 2 });
