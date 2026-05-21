@@ -20,9 +20,6 @@ function readInitialOpen(): boolean {
 
 function useMinimizedAssistantActivity(enabled: boolean): AssistantActivityCounts {
   const [counts, setCounts] = React.useState<AssistantActivityCounts>({ normal: 0, voice: 0, total: 0 });
-  const [eventsUnavailable, setEventsUnavailable] = React.useState(
-    () => typeof window === 'undefined' || typeof window.EventSource === 'undefined',
-  );
   const [eventsConnected, setEventsConnected] = React.useState(false);
   const enabledRef = React.useRef(enabled);
   const refreshTimerRef = React.useRef<number | null>(null);
@@ -68,7 +65,6 @@ function useMinimizedAssistantActivity(enabled: boolean): AssistantActivityCount
 
   React.useEffect(() => {
     if (!enabled || typeof window === 'undefined' || typeof window.EventSource === 'undefined') {
-      setEventsUnavailable(true);
       setEventsConnected(false);
       return;
     }
@@ -77,7 +73,6 @@ function useMinimizedAssistantActivity(enabled: boolean): AssistantActivityCount
     const markConnected = () => {
       if (closed) return;
       setEventsConnected(true);
-      setEventsUnavailable(false);
       scheduleRefresh();
     };
     const markChanged = () => {
@@ -91,7 +86,6 @@ function useMinimizedAssistantActivity(enabled: boolean): AssistantActivityCount
     source.onerror = () => {
       if (closed) return;
       setEventsConnected(false);
-      setEventsUnavailable(true);
     };
     return () => {
       closed = true;
@@ -100,13 +94,13 @@ function useMinimizedAssistantActivity(enabled: boolean): AssistantActivityCount
   }, [enabled, scheduleRefresh]);
 
   React.useEffect(() => {
-    if (!enabled || !eventsUnavailable || eventsConnected) return;
+    if (!enabled || eventsConnected) return;
     const intervalMs = counts.total > 0 ? ASSISTANT_ACTIVITY_ACTIVE_REFRESH_INTERVAL_MS : ASSISTANT_ACTIVITY_IDLE_REFRESH_INTERVAL_MS;
     const timer = window.setInterval(() => {
       void refresh();
     }, intervalMs);
     return () => window.clearInterval(timer);
-  }, [counts.total, enabled, eventsConnected, eventsUnavailable, refresh]);
+  }, [counts.total, enabled, eventsConnected, refresh]);
 
   React.useEffect(() => {
     return () => {
