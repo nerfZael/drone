@@ -70,6 +70,9 @@ function makeFileService(files: Map<string, Map<string, string>>): HubAssistantS
     createDrone: async () => {
       throw new Error('not implemented');
     },
+    createChat: async () => {
+      throw new Error('not implemented');
+    },
     setDroneGroup: async () => {
       throw new Error('not implemented');
     },

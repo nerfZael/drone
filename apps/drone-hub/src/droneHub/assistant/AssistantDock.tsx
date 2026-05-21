@@ -349,6 +349,7 @@ function toolCalls(message: AssistantMessage): AssistantToolCall[] {
 }
 
 const TOOL_LABELS: Record<string, string> = {
+  create_chat: 'Create chat',
   create_drone: 'Create drone',
   assistant_files: 'Assistant files',
   get_current_context: 'Read current context',

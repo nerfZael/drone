@@ -238,6 +238,9 @@ describe('assistant chat idle wait', () => {
         createDrone: async () => {
           throw new Error('not implemented');
         },
+        createChat: async () => {
+          throw new Error('not implemented');
+        },
         setDroneGroup: async () => {
           throw new Error('not implemented');
         },

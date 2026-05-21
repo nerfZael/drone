@@ -337,6 +337,7 @@ import { createDronePendingPromptStore, type PendingPrompt } from './drone-pendi
 import { createDroneProvisioningController } from './drone-provisioning';
 import {
   HubAssistantService,
+  type AssistantCreateChatResult,
   type AssistantCreateDroneResult,
   type AssistantDroneSummary,
   type AssistantSetDroneGroupResult,
@@ -11191,6 +11192,15 @@ export async function startDroneHubApiServer(opts: {
         runtime: String(data?.runtime ?? request?.runtime ?? 'container').trim() || 'container',
         phase: String(data?.phase ?? 'starting').trim() || 'starting',
         request,
+      };
+    },
+    createChat: async ({ droneId, chatName }): Promise<AssistantCreateChatResult> => {
+      const data = await callLocalHubApi(`/api/drones/${encodeURIComponent(droneId)}/chats`, { name: chatName });
+      return {
+        droneId: String(data?.id ?? droneId).trim() || droneId,
+        droneName: String(data?.name ?? droneId).trim() || droneId,
+        chatName: String(data?.chat ?? chatName).trim() || chatName,
+        chats: Array.isArray(data?.chats) ? data.chats.map((chat: any) => String(chat ?? '').trim()).filter(Boolean) : [],
       };
     },
     setDroneGroup: async ({ droneIds, group }): Promise<AssistantSetDroneGroupResult> => {

@@ -24,6 +24,12 @@ function makeAssistantService(): HubAssistantService {
       phase: 'starting',
       request: {},
     }),
+    createChat: async () => ({
+      droneId: 'drone-a',
+      droneName: 'Drone A',
+      chatName: 'new-chat',
+      chats: ['default', 'new-chat'],
+    }),
     setDroneGroup: async () => ({ group: null, moved: [], rejected: [], total: 0 }),
     messageDrone: async () => ({ promptId: 'prompt-a' }),
   });

@@ -46,6 +46,13 @@ export type AssistantCreateDroneResult = {
   request: any;
 };
 
+export type AssistantCreateChatResult = {
+  droneId: string;
+  droneName: string;
+  chatName: string;
+  chats: string[];
+};
+
 export type AssistantSetDroneGroupResult = {
   group: string | null;
   moved: Array<{ id: string; name: string; previousGroup: string | null; group: string | null }>;
@@ -174,6 +181,7 @@ export type AssistantChangeEvent = {
 type AssistantToolCallbacks = {
   listDrones: () => Promise<AssistantDroneSummary[]>;
   createDrone: (opts: any) => Promise<AssistantCreateDroneResult>;
+  createChat: (opts: { droneId: string; chatName: string }) => Promise<AssistantCreateChatResult>;
   setDroneGroup: (opts: { droneIds: string[]; group: string | null }) => Promise<AssistantSetDroneGroupResult>;
   messageDrone: (opts: {
     droneId: string;
@@ -577,7 +585,7 @@ const ASSISTANT_SYSTEM_PROMPT_DEFAULT = [
   'Chat timelines contain user messages and agent messages. Queued or pending user messages appear in the same timeline with a non-completed status.',
   'When you send a drone chat message and need the result later, call subscribe_to_chats_idle on the target chat. This returns immediately so you can continue other work. If there is nothing else to do, end your turn; the system will resume this thread when the subscribed chats become idle.',
   'Do not load more chat pages than needed. Start with the latest page.',
-  'Creating or cloning drones does not require approval, and assistant-created drones must use the container (Docker) runtime. Changing drone groups, sending a user message to a drone, and running bash in a drone require user approval; explain briefly what you intend to do.',
+  'Creating or cloning drones and creating chats do not require approval, and assistant-created drones must use the container (Docker) runtime. Changing drone groups, sending a user message to a drone, and running bash in a drone require user approval; explain briefly what you intend to do.',
   'File write tools require write access to the target drone and should be used carefully for concrete code or content edits.',
   'If an approval-gated write tool returns successfully, the user already approved that action. Do not ask for the same approval again.',
   'Voice threads can use speak to send short spoken replies back to the voice device that started the request.',
@@ -609,6 +617,7 @@ const ASSISTANT_TOOL_SUMMARIES: AssistantToolSummary[] = [
   { name: 'speak', label: 'Speak', category: 'actions', description: 'Send a short spoken reply to the connected Android or desktop voice device.' },
   { name: 'create_drone', label: 'Create drone', category: 'actions', description: 'Create a new container drone.' },
   { name: 'clone_drone', label: 'Clone drone', category: 'actions', description: 'Clone an existing container drone into a new container drone.' },
+  { name: 'create_chat', label: 'Create chat', category: 'actions', description: 'Create a new chat in an existing drone.' },
   { name: 'set_drone_group', label: 'Set drone group', category: 'actions', description: 'Move drones to a group after user approval.' },
   { name: 'message_drone', label: 'Send user message to drone', category: 'actions', description: 'Send a user message to a drone chat after approval.' },
 ];
@@ -616,6 +625,7 @@ const ASSISTANT_ALL_TOOL_NAMES = ASSISTANT_TOOL_SUMMARIES.map((tool) => tool.nam
 const ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES = ASSISTANT_ALL_TOOL_NAMES.filter(
   (name) => name !== 'get_system_prompt' && name !== 'update_system_prompt' && name !== 'set_thinking_level' && name !== 'speak',
 );
+const ASSISTANT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES = ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES.filter((name) => name !== 'create_chat');
 const ASSISTANT_VOICE_DEFAULT_ENABLED_TOOL_NAMES = [...ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES, 'set_thinking_level', 'speak'];
 const ASSISTANT_OVERVIEW_PROMPT_DEFAULT = [
   'You write a concise Markdown status overview for an assistant thread in Drone Hub.',
@@ -1104,6 +1114,16 @@ function enabledToolsForVoiceMode(enabledTools: string[], voiceEnabled: boolean)
   const base = normalizeAssistantEnabledTools(enabledTools);
   if (!voiceEnabled) return base.filter((name) => name !== 'speak');
   return normalizeAssistantEnabledTools([...base, 'speak'], ASSISTANT_VOICE_DEFAULT_ENABLED_TOOL_NAMES);
+}
+
+function normalizeStoredAssistantEnabledTools(raw: unknown, voiceEnabled: boolean): string[] {
+  const base = normalizeAssistantEnabledTools(raw);
+  const hadLegacyDefaultTools =
+    Array.isArray(raw) && ASSISTANT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES.every((name) => base.includes(name));
+  if (hadLegacyDefaultTools && !base.includes('create_chat')) {
+    base.push('create_chat');
+  }
+  return enabledToolsForVoiceMode(base, voiceEnabled);
 }
 
 function normalizeAssistantSystemPromptPatches(raw: unknown): Array<{ oldText: string; newText: string }> {
@@ -1750,7 +1770,7 @@ function normalizeThread(raw: any, fallback: { provider: LlmProviderId; model: s
     thinkingLevel,
     systemPrompt: normalizeAssistantSystemPrompt(raw.systemPrompt) || fallback.systemPrompt || ASSISTANT_SYSTEM_PROMPT_DEFAULT,
     systemPromptUpdatedAt: cleanOptionalString(raw.systemPromptUpdatedAt) || null,
-    enabledTools: enabledToolsForVoiceMode(raw.enabledTools, normalizeAssistantVoiceEnabled(raw.voiceEnabled)),
+    enabledTools: normalizeStoredAssistantEnabledTools(raw.enabledTools, normalizeAssistantVoiceEnabled(raw.voiceEnabled)),
     accessScope: makeAssistantAccessScope(raw.accessScope),
     autoApprove: normalizeAssistantAutoApprove(raw.autoApprove),
     promptDeliveryMode: normalizeAssistantPromptDeliveryMode(raw.promptDeliveryMode),
@@ -3828,6 +3848,33 @@ export class HubAssistantService {
               },
             ],
             details: { ...result, phase: 'ready', ready },
+          };
+        },
+      },
+      {
+        name: 'create_chat',
+        label: 'Create chat',
+        description:
+          'Create a new chat in an existing drone. This does not require user approval, but requires assistant write access to the target drone.',
+        parameters: Type.Object({
+          targetDroneId: Type.String({ description: 'Target drone id or visible name.' }),
+          name: Type.String({ description: 'Name for the new chat.' }),
+        }),
+        executionMode: 'sequential',
+        execute: async (_toolCallId: string, params: any) => {
+          const targetDroneRef = params?.targetDroneId ?? params?.droneId ?? params?.targetDrone;
+          const droneId = await this.requireDroneInScope(targetDroneRef, 'write', threadId);
+          const chatName = cleanOptionalString(params?.name ?? params?.chatName);
+          if (!chatName) throw new Error('missing chat name');
+          const result = await this.tools.createChat({ droneId, chatName });
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Created chat ${result.chatName} in ${result.droneName} (${result.droneId}).`,
+              },
+            ],
+            details: result,
           };
         },
       },

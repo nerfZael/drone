@@ -96,6 +96,9 @@ function makeService(): HubAssistantService {
     createDrone: async () => {
       throw new Error('not implemented');
     },
+    createChat: async () => {
+      throw new Error('not implemented');
+    },
     setDroneGroup: async () => {
       throw new Error('not implemented');
     },
@@ -217,6 +220,9 @@ describe('assistant thread isolation', () => {
           await markDroneReady({ id: 'drone-new', name: 'Drone New' });
           return { id: 'drone-new', name: 'Drone New', runtime: 'container' };
         },
+        createChat: async () => {
+          throw new Error('not implemented');
+        },
         setDroneGroup: async () => {
           throw new Error('not implemented');
         },
@@ -279,6 +285,9 @@ describe('assistant thread isolation', () => {
           }, 10);
           return { id: 'drone-new', name: request.name, runtime: request.runtime, phase: 'starting' };
         },
+        createChat: async () => {
+          throw new Error('not implemented');
+        },
         setDroneGroup: async () => {
           throw new Error('not implemented');
         },
@@ -336,6 +345,9 @@ describe('assistant thread isolation', () => {
             };
           });
           return { id: 'drone-pending', name: request.name, runtime: 'container', phase: 'starting' };
+        },
+        createChat: async () => {
+          throw new Error('not implemented');
         },
         setDroneGroup: async () => {
           throw new Error('not implemented');
@@ -403,6 +415,9 @@ describe('assistant thread isolation', () => {
           await markDroneReady({ id: 'clone-new', name: request.name, runtime: request.runtime, group: 'Build', repoPath: '/tmp/source-container' });
           return { id: 'clone-new', name: request.name, runtime: request.runtime, phase: 'starting' };
         },
+        createChat: async () => {
+          throw new Error('not implemented');
+        },
         setDroneGroup: async () => {
           throw new Error('not implemented');
         },
@@ -443,6 +458,69 @@ describe('assistant thread isolation', () => {
       await expect(cloneDrone.execute('clone-pending', { sourceDroneId: 'source-pending', name: 'Clone Pending' })).rejects.toThrow(
         'clone source must be a ready drone: source-pending',
       );
+    });
+  });
+
+  test('creates drone chats without approval using target drone write scope', async () => {
+    await withTempDroneDataDir('assistant-create-chat-', async () => {
+      const now = new Date().toISOString();
+      await updateRegistry((reg: any) => {
+        reg.drones = {
+          target: {
+            id: 'target',
+            name: 'Target Drone',
+            group: 'Build',
+            runtime: 'container',
+            repoPath: '/tmp/target',
+            createdAt: now,
+            chats: { default: { createdAt: now, turns: [] } },
+          },
+        };
+      });
+      const requests: Array<{ droneId: string; chatName: string }> = [];
+      const service = new HubAssistantService({
+        listDrones: async () => [
+          { id: 'target', name: 'Target Drone', group: 'Build', runtime: 'container', repoPath: '/tmp/target', status: 'ready', chats: ['default'] },
+        ],
+        createDrone: async () => {
+          throw new Error('not implemented');
+        },
+        createChat: async (request) => {
+          requests.push(request);
+          return {
+            droneId: request.droneId,
+            droneName: 'Target Drone',
+            chatName: request.chatName,
+            chats: ['default', request.chatName],
+          };
+        },
+        setDroneGroup: async () => {
+          throw new Error('not implemented');
+        },
+        messageDrone: async () => {
+          throw new Error('not implemented');
+        },
+      });
+      installFakeRuntime(service, {});
+      const snapshot = await service.createThread({ title: 'create chat', activeDroneId: 'target', activeChatName: 'default' });
+      const approvals: any[] = [];
+
+      const preflight = await (service as any).beforeToolCall(
+        snapshot.activeThreadId,
+        { toolCall: { id: 'chat-call', name: 'create_chat' }, args: { targetDroneId: 'Target Drone', name: 'Plan' } },
+        async (event: any) => {
+          if (event.type === 'approval_pending') approvals.push(event.approval);
+        },
+      );
+      const runtime = await (service as any).runtime();
+      const tools = (service as any).buildTools(runtime, snapshot.activeThreadId, null);
+      const createChat = tools.find((tool: any) => tool.name === 'create_chat');
+      const result = await createChat.execute('chat-call', { targetDroneId: 'Target Drone', name: 'Plan' });
+
+      expect(preflight).toBeUndefined();
+      expect(approvals).toHaveLength(0);
+      expect(requests).toEqual([{ droneId: 'target', chatName: 'Plan' }]);
+      expect(result.details).toMatchObject({ droneId: 'target', droneName: 'Target Drone', chatName: 'Plan' });
     });
   });
 
@@ -488,6 +566,9 @@ describe('assistant thread isolation', () => {
         const service = new HubAssistantService({
           listDrones: async () => [],
           createDrone: async () => {
+            throw new Error('not implemented');
+          },
+          createChat: async () => {
             throw new Error('not implemented');
           },
           setDroneGroup: async () => {
