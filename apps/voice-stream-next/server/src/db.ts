@@ -369,6 +369,8 @@ const ASSISTANT_DEFAULT_ENABLED_TOOLS = [
   'get_system_prompt',
   'update_system_prompt',
   'set_thinking_level',
+  'web_search',
+  'fetch_content',
 ] as const;
 const ASSISTANT_DEFAULT_CAPABILITIES: AssistantThreadCapabilities = {
   artifacts: true,

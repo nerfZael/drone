@@ -408,6 +408,7 @@ const ASSISTANT_TOOL_CATEGORY_LABELS: Record<string, string> = {
   speech: 'Speech',
   prompts: 'Prompts',
   settings: 'Settings',
+  web: 'Web',
 };
 
 function AssistantToolsPanel({

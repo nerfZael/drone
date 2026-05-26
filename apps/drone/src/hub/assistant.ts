@@ -17,6 +17,7 @@ import {
   runAssistantArtifactAction,
   type AssistantArtifactActionInput,
 } from './assistant-artifacts';
+import { fetchContent, searchWeb } from './web-search';
 
 type AssistantThreadStatus = 'idle' | 'running' | 'waiting_for_approval' | 'waiting_for_chats_idle' | 'error';
 type AssistantThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
@@ -139,6 +140,8 @@ type StoredAssistantState = {
   activeThreadId?: string | null;
   threads?: AssistantThread[];
   chatIdleSubscriptions?: AssistantChatIdleSubscription[];
+  webSearchToolMigrationApplied?: boolean;
+  fetchContentToolMigrationApplied?: boolean;
   systemPrompt?: string;
   systemPromptUpdatedAt?: string;
   voiceSystemPrompt?: string;
@@ -579,6 +582,7 @@ const ASSISTANT_SYSTEM_PROMPT_DEFAULT = [
   'You are Drone Hub Assistant, a concise operator assistant embedded in the Drone Hub app.',
   'You help the user understand available drones and coordinate work across drone chats.',
   'Use get_current_context when the user asks about the current, active, selected, or open drone/chat, or before acting on phrases like "this drone".',
+  'Use web_search for current information, documentation, news, prices, schedules, or facts that may have changed. Use fetch_content when the user gives a direct URL to read, inspect, summarize, or analyze. Cite source URLs in the final answer.',
   'Use list_drones before referring to specific drones unless the user already provided an exact drone id.',
   'Use get_chat_overview before reading chat details, then read_chat_messages in pages when you need conversation context.',
   'Use assistant_files to maintain private, thread-scoped Markdown notes when tracking work, decisions, plans, questions, or handoff details. These files are for the user-facing Artifacts UI and are not visible to drones.',
@@ -605,6 +609,8 @@ const ASSISTANT_SYSTEM_PROMPT_DEFAULT = [
 const ASSISTANT_TOOL_SUMMARIES: AssistantToolSummary[] = [
   { name: 'list_drones', label: 'List drones', category: 'context', description: 'List drones visible to this assistant thread.' },
   { name: 'get_current_context', label: 'Get current context', category: 'context', description: 'Read the current Drone Hub UI context.' },
+  { name: 'web_search', label: 'Web search', category: 'context', description: 'Search the web for current information and source URLs.' },
+  { name: 'fetch_content', label: 'Fetch content', category: 'context', description: 'Fetch readable page content from a URL.' },
   { name: 'assistant_files', label: 'Assistant files', category: 'files', description: 'Maintain private Markdown or text artifacts for this thread.' },
   { name: 'get_system_prompt', label: 'Get system prompt', category: 'prompts', description: 'Read the global and current thread system prompts.' },
   { name: 'update_system_prompt', label: 'Update system prompt', category: 'prompts', description: 'Update only this thread system prompt.' },
@@ -639,8 +645,32 @@ const ASSISTANT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES = ASSISTANT_DEFAULT_ENABLED_TO
 const ASSISTANT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES = ASSISTANT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES
   .filter((name) => name !== 'subscribe_to_any_chat_idle' && name !== 'subscribe_to_all_chats_idle')
   .concat('subscribe_to_chats_idle');
+const ASSISTANT_PRE_FETCH_CONTENT_DEFAULT_ENABLED_TOOL_NAMES = ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES.filter((name) => name !== 'fetch_content');
+const ASSISTANT_PRE_FETCH_CONTENT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES = ASSISTANT_PRE_FETCH_CONTENT_DEFAULT_ENABLED_TOOL_NAMES.filter((name) => name !== 'create_chat');
+const ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES = ASSISTANT_PRE_FETCH_CONTENT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES
+  .filter((name) => name !== 'subscribe_to_any_chat_idle' && name !== 'subscribe_to_all_chats_idle')
+  .concat('subscribe_to_chats_idle');
+const ASSISTANT_PRE_WEB_SEARCH_DEFAULT_ENABLED_TOOL_NAMES = ASSISTANT_PRE_FETCH_CONTENT_DEFAULT_ENABLED_TOOL_NAMES.filter((name) => name !== 'web_search');
+const ASSISTANT_PRE_WEB_SEARCH_LEGACY_DEFAULT_ENABLED_TOOL_NAMES = ASSISTANT_PRE_WEB_SEARCH_DEFAULT_ENABLED_TOOL_NAMES.filter((name) => name !== 'create_chat');
+const ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES = ASSISTANT_PRE_WEB_SEARCH_LEGACY_DEFAULT_ENABLED_TOOL_NAMES
+  .filter((name) => name !== 'subscribe_to_any_chat_idle' && name !== 'subscribe_to_all_chats_idle')
+  .concat('subscribe_to_chats_idle');
 const ASSISTANT_VOICE_DEFAULT_ENABLED_TOOL_NAMES = [...ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES, 'set_thinking_level', 'create_new_thread', 'speak'];
 const ASSISTANT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES = [...ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES, 'set_thinking_level', 'speak'];
+const ASSISTANT_PRE_FETCH_CONTENT_VOICE_DEFAULT_ENABLED_TOOL_NAMES = [...ASSISTANT_PRE_FETCH_CONTENT_DEFAULT_ENABLED_TOOL_NAMES, 'set_thinking_level', 'create_new_thread', 'speak'];
+const ASSISTANT_PRE_FETCH_CONTENT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES = [...ASSISTANT_PRE_FETCH_CONTENT_DEFAULT_ENABLED_TOOL_NAMES, 'set_thinking_level', 'speak'];
+const ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES = [
+  ...ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES,
+  'set_thinking_level',
+  'speak',
+];
+const ASSISTANT_PRE_WEB_SEARCH_VOICE_DEFAULT_ENABLED_TOOL_NAMES = [...ASSISTANT_PRE_WEB_SEARCH_DEFAULT_ENABLED_TOOL_NAMES, 'set_thinking_level', 'create_new_thread', 'speak'];
+const ASSISTANT_PRE_WEB_SEARCH_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES = [...ASSISTANT_PRE_WEB_SEARCH_DEFAULT_ENABLED_TOOL_NAMES, 'set_thinking_level', 'speak'];
+const ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES = [
+  ...ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES,
+  'set_thinking_level',
+  'speak',
+];
 const ASSISTANT_OVERVIEW_PROMPT_DEFAULT = [
   'You write a concise Markdown status overview for an assistant thread in Drone Hub.',
   'Focus on the current state of the work, recent actions, tool calls, approvals, blockers, and next likely step.',
@@ -827,6 +857,16 @@ function normalizeSearchContextLines(raw: unknown, label: string): number {
   const n = Number(raw);
   if (!Number.isInteger(n) || n < 0) throw new Error(`${label} must be a non-negative integer`);
   return Math.min(ASSISTANT_SEARCH_MAX_CONTEXT_LINES, n);
+}
+
+function normalizeWebSearchRecencyFilter(raw: unknown): 'day' | 'week' | 'month' | 'year' | undefined {
+  const value = String(raw ?? '').trim().toLowerCase();
+  return value === 'day' || value === 'week' || value === 'month' || value === 'year' ? value : undefined;
+}
+
+function normalizeFetchContentLivecrawl(raw: unknown): 'never' | 'fallback' | 'preferred' | 'always' | undefined {
+  const value = String(raw ?? '').trim().toLowerCase();
+  return value === 'never' || value === 'fallback' || value === 'preferred' || value === 'always' ? value : undefined;
 }
 
 function normalizeChatNameForAssistant(raw: unknown): string {
@@ -1158,15 +1198,55 @@ function appendUniqueEnabledTool(tools: string[], name: string): void {
   if (!tools.includes(name)) tools.push(name);
 }
 
-function normalizeStoredAssistantEnabledTools(raw: unknown, voiceEnabled: boolean): string[] {
+function sameToolSet(rawNames: Set<string>, names: string[]): boolean {
+  return rawNames.size === names.length && names.every((name) => rawNames.has(name));
+}
+
+function normalizeStoredAssistantEnabledTools(
+  raw: unknown,
+  voiceEnabled: boolean,
+  migrations: { webSearchDefaultTool: boolean; fetchContentDefaultTool: boolean },
+): string[] {
   const base = normalizeAssistantEnabledTools(raw);
   const rawNames = new Set(Array.isArray(raw) ? raw.map((name) => String(name ?? '').trim()).filter(Boolean) : []);
   const hadLegacyDefaultTools =
-    rawNames.size > 0 && ASSISTANT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES.every((name) => rawNames.has(name));
+    rawNames.size > 0 && (
+      ASSISTANT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES.every((name) => rawNames.has(name))
+      || ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES.every((name) => rawNames.has(name))
+      || ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES.every((name) => rawNames.has(name))
+    );
   if (hadLegacyDefaultTools) {
     appendUniqueEnabledTool(base, 'create_chat');
     appendUniqueEnabledTool(base, 'subscribe_to_any_chat_idle');
     appendUniqueEnabledTool(base, 'subscribe_to_all_chats_idle');
+  }
+  const hadPreWebSearchDefaultTools = migrations.webSearchDefaultTool && (
+    sameToolSet(rawNames, ASSISTANT_PRE_WEB_SEARCH_DEFAULT_ENABLED_TOOL_NAMES)
+    || sameToolSet(rawNames, ASSISTANT_PRE_WEB_SEARCH_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
+    || sameToolSet(rawNames, ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
+    || (voiceEnabled && sameToolSet(rawNames, ASSISTANT_PRE_WEB_SEARCH_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
+    || (voiceEnabled && sameToolSet(rawNames, ASSISTANT_PRE_WEB_SEARCH_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
+    || (voiceEnabled && sameToolSet(rawNames, ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
+  );
+  if (hadPreWebSearchDefaultTools) {
+    appendUniqueEnabledTool(base, 'web_search');
+  }
+  const hadPreFetchContentDefaultTools = migrations.fetchContentDefaultTool && (
+    sameToolSet(rawNames, ASSISTANT_PRE_FETCH_CONTENT_DEFAULT_ENABLED_TOOL_NAMES)
+    || sameToolSet(rawNames, ASSISTANT_PRE_FETCH_CONTENT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
+    || sameToolSet(rawNames, ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
+    || sameToolSet(rawNames, ASSISTANT_PRE_WEB_SEARCH_DEFAULT_ENABLED_TOOL_NAMES)
+    || sameToolSet(rawNames, ASSISTANT_PRE_WEB_SEARCH_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
+    || sameToolSet(rawNames, ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
+    || (voiceEnabled && sameToolSet(rawNames, ASSISTANT_PRE_FETCH_CONTENT_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
+    || (voiceEnabled && sameToolSet(rawNames, ASSISTANT_PRE_FETCH_CONTENT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
+    || (voiceEnabled && sameToolSet(rawNames, ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
+    || (voiceEnabled && sameToolSet(rawNames, ASSISTANT_PRE_WEB_SEARCH_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
+    || (voiceEnabled && sameToolSet(rawNames, ASSISTANT_PRE_WEB_SEARCH_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
+    || (voiceEnabled && sameToolSet(rawNames, ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
+  );
+  if (hadPreFetchContentDefaultTools) {
+    appendUniqueEnabledTool(base, 'fetch_content');
   }
   const hadLegacyVoiceDefaultTools =
     voiceEnabled && rawNames.size > 0 && ASSISTANT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES.every((name) => rawNames.has(name));
@@ -1819,7 +1899,11 @@ function sanitizeThread(thread: AssistantThread): AssistantThread {
   };
 }
 
-function normalizeThread(raw: any, fallback: { provider: LlmProviderId; model: string; systemPrompt?: string }): AssistantThread | null {
+function normalizeThread(
+  raw: any,
+  fallback: { provider: LlmProviderId; model: string; systemPrompt?: string },
+  options?: { migrateWebSearchDefaultTool?: boolean; migrateFetchContentDefaultTool?: boolean },
+): AssistantThread | null {
   if (!raw || typeof raw !== 'object') return null;
   const id = String(raw.id ?? '').trim();
   if (!id) return null;
@@ -1846,7 +1930,14 @@ function normalizeThread(raw: any, fallback: { provider: LlmProviderId; model: s
     thinkingLevel,
     systemPrompt: migrateAssistantSystemPrompt(raw.systemPrompt) || fallback.systemPrompt || ASSISTANT_SYSTEM_PROMPT_DEFAULT,
     systemPromptUpdatedAt: cleanOptionalString(raw.systemPromptUpdatedAt) || null,
-    enabledTools: normalizeStoredAssistantEnabledTools(raw.enabledTools, normalizeAssistantVoiceEnabled(raw.voiceEnabled)),
+    enabledTools: normalizeStoredAssistantEnabledTools(
+      raw.enabledTools,
+      normalizeAssistantVoiceEnabled(raw.voiceEnabled),
+      {
+        webSearchDefaultTool: options?.migrateWebSearchDefaultTool === true,
+        fetchContentDefaultTool: options?.migrateFetchContentDefaultTool === true,
+      },
+    ),
     accessScope: makeAssistantAccessScope(raw.accessScope),
     autoApprove: normalizeAssistantAutoApprove(raw.autoApprove),
     promptDeliveryMode: normalizeAssistantPromptDeliveryMode(raw.promptDeliveryMode),
@@ -1878,6 +1969,8 @@ function serializeState(input: {
     activeThreadId: input.activeThreadId,
     threads: input.threads.slice(0, ASSISTANT_REGISTRY_MAX_THREADS).map(sanitizeThread),
     ...(chatIdleSubscriptions.length > 0 ? { chatIdleSubscriptions } : {}),
+    webSearchToolMigrationApplied: true,
+    fetchContentToolMigrationApplied: true,
     ...(systemPrompt !== ASSISTANT_SYSTEM_PROMPT_DEFAULT
       ? {
           systemPrompt,
@@ -3264,7 +3357,11 @@ export class HubAssistantService {
       model: defaultModelForProvider(storedFallbackProvider),
       systemPrompt: ASSISTANT_SYSTEM_PROMPT_DEFAULT,
     };
-    const threads = storedThreads.map((thread) => normalizeThread(thread, storedFallback)).filter(Boolean) as AssistantThread[];
+    const migrateWebSearchDefaultTool = stored?.webSearchToolMigrationApplied !== true;
+    const migrateFetchContentDefaultTool = stored?.fetchContentToolMigrationApplied !== true;
+    const threads = storedThreads
+      .map((thread) => normalizeThread(thread, storedFallback, { migrateWebSearchDefaultTool, migrateFetchContentDefaultTool }))
+      .filter(Boolean) as AssistantThread[];
     if (threads.length > 0) {
       this.threads = threads;
     } else {
@@ -3457,6 +3554,52 @@ export class HubAssistantService {
           return {
             content: [{ type: 'text', text: JSON.stringify(context, null, 2) }],
             details: context,
+          };
+        },
+      },
+      {
+        name: 'web_search',
+        label: 'Web search',
+        description:
+          'Search the web for current information, documentation, news, prices, schedules, or facts that may have changed. Returns compact source snippets with URLs.',
+        parameters: Type.Object({
+          query: Type.String({ description: 'Search query.' }),
+          numResults: Type.Optional(Type.Number({ description: 'Number of results to return. Defaults to 5, max 10.' })),
+          recencyFilter: Type.Optional(Type.String({ description: 'Optional recency filter: day, week, month, or year.' })),
+          domainFilter: Type.Optional(Type.Array(Type.String({ description: 'Domain to include, or prefix with - to exclude.' }))),
+        }),
+        execute: async (_toolCallId: string, params: any) => {
+          const result = await searchWeb({
+            query: String(params?.query ?? ''),
+            numResults: params?.numResults,
+            recencyFilter: normalizeWebSearchRecencyFilter(params?.recencyFilter),
+            domainFilter: Array.isArray(params?.domainFilter) ? params.domainFilter.map((item: any) => String(item ?? '')) : [],
+          });
+          return {
+            content: [{ type: 'text', text: result.answer }],
+            details: result,
+          };
+        },
+      },
+      {
+        name: 'fetch_content',
+        label: 'Fetch content',
+        description:
+          'Fetch readable content from a direct http or https URL. Use when the user gives a URL to read, inspect, summarize, or analyze.',
+        parameters: Type.Object({
+          url: Type.String({ description: 'The http or https URL to fetch.' }),
+          maxCharacters: Type.Optional(Type.Number({ description: 'Maximum content characters to return. Defaults to 12000, max 30000.' })),
+          livecrawl: Type.Optional(Type.String({ description: 'Optional Exa livecrawl mode: never, fallback, preferred, or always.' })),
+        }),
+        execute: async (_toolCallId: string, params: any) => {
+          const result = await fetchContent({
+            url: String(params?.url ?? ''),
+            maxCharacters: params?.maxCharacters,
+            livecrawl: normalizeFetchContentLivecrawl(params?.livecrawl),
+          });
+          return {
+            content: [{ type: 'text', text: result.answer }],
+            details: result,
           };
         },
       },

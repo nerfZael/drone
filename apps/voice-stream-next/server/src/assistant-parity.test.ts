@@ -25,6 +25,7 @@ function testUser(db: VoiceStreamNextDb) {
 
 describe('assistant parity runtime', () => {
   const dbs: VoiceStreamNextDb[] = [];
+  const originalFetch = globalThis.fetch;
 
   afterEach(() => {
     for (const db of dbs) db.db.close();
@@ -32,6 +33,9 @@ describe('assistant parity runtime', () => {
     delete process.env.VOICE_STREAM_NEXT_TEST_MODEL_TOOL_CALLS;
     delete process.env.OPENAI_API_KEY;
     delete process.env.VOICE_STREAM_NEXT_OPENAI_API_KEY;
+    delete process.env.EXA_API_KEY;
+    delete process.env.VOICE_STREAM_NEXT_EXA_API_KEY;
+    globalThis.fetch = originalFetch;
   });
 
   test('writes assistant artifacts without approval', async () => {
@@ -123,6 +127,83 @@ describe('assistant parity runtime', () => {
     expect(events.some((event) => event.type === 'tool_call')).toBe(true);
     expect(events.some((event) => event.type === 'tool_result')).toBe(true);
     expect(db.listMessages(user.id, thread.id).some((message) => message.contentJson?.includes('modelToolCall'))).toBe(true);
+  });
+
+  test('executes model-requested web search tool calls', async () => {
+    const db = tempDb('assistant-web-search');
+    dbs.push(db);
+    const user = testUser(db);
+    const thread = db.createThread(user.id, { title: 'Web search' });
+    process.env.EXA_API_KEY = 'exa-test-key';
+    process.env.VOICE_STREAM_NEXT_TEST_MODEL_TOOL_CALLS = JSON.stringify([
+      {
+        name: 'web_search',
+        arguments: { query: 'pi web access exa', numResults: 2, recencyFilter: '', domainFilter: [] },
+      },
+    ]);
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? '{}'));
+      expect(body.query).toBe('pi web access exa');
+      expect(body.numResults).toBe(2);
+      return new Response(JSON.stringify({
+        results: [
+          {
+            title: 'Pi Web Access',
+            url: 'https://pi.dev/packages/pi-web-access',
+            publishedDate: '2026-05-20',
+            highlights: ['Adds web_search to Pi with Exa-backed results.'],
+          },
+        ],
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as any;
+    const events: any[] = [];
+
+    await promptAssistantThread(db, user.id, thread.id, { prompt: 'Search the web for Pi web access.' }, (event) => events.push(event));
+
+    const toolCall = db.listToolCalls(user.id, thread.id)[0];
+    expect(toolCall?.toolName).toBe('web_search');
+    const toolResult = db.listMessages(user.id, thread.id).find((message) => message.role === 'toolResult' && message.toolName === 'web_search');
+    expect(toolResult?.content).toContain('https://pi.dev/packages/pi-web-access');
+    expect(events.some((event) => event.type === 'tool_result' && event.result?.provider === 'exa')).toBe(true);
+  });
+
+  test('executes model-requested fetch content tool calls', async () => {
+    const db = tempDb('assistant-fetch-content');
+    dbs.push(db);
+    const user = testUser(db);
+    const thread = db.createThread(user.id, { title: 'Fetch content' });
+    process.env.EXA_API_KEY = 'exa-test-key';
+    process.env.VOICE_STREAM_NEXT_TEST_MODEL_TOOL_CALLS = JSON.stringify([
+      {
+        name: 'fetch_content',
+        arguments: { url: 'https://pi.dev/packages/pi-web-access', maxCharacters: 2000, livecrawl: 'fallback' },
+      },
+    ]);
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? '{}'));
+      expect(body.urls).toEqual(['https://pi.dev/packages/pi-web-access']);
+      expect(body.text.maxCharacters).toBe(2000);
+      return new Response(JSON.stringify({
+        results: [
+          {
+            title: 'Pi Web Access',
+            url: 'https://pi.dev/packages/pi-web-access',
+            publishedDate: '2026-05-20',
+            text: 'Adds web_search and fetch_content tools for Pi.',
+          },
+        ],
+        statuses: [{ id: 'https://pi.dev/packages/pi-web-access', status: 'success' }],
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as any;
+    const events: any[] = [];
+
+    await promptAssistantThread(db, user.id, thread.id, { prompt: 'Read https://pi.dev/packages/pi-web-access' }, (event) => events.push(event));
+
+    const toolCall = db.listToolCalls(user.id, thread.id)[0];
+    expect(toolCall?.toolName).toBe('fetch_content');
+    const toolResult = db.listMessages(user.id, thread.id).find((message) => message.role === 'toolResult' && message.toolName === 'fetch_content');
+    expect(toolResult?.content).toContain('Adds web_search and fetch_content tools for Pi.');
+    expect(events.some((event) => event.type === 'tool_result' && event.result?.provider === 'exa')).toBe(true);
   });
 
   test('pauses model-requested approval tools before execution', async () => {
