@@ -33,6 +33,7 @@ import type {
 } from './dashboardTypes.js';
 import { timeLabel } from './time.js';
 import { TranscriptPanel } from './TranscriptPanel.js';
+import { AssistantFilesPanel, type ArtifactPanelMode } from './assistant/AssistantFilesPanel.js';
 import { AssistantSystemPromptModal, type AssistantSystemPromptKind, type AssistantSystemPromptMode } from './assistant/AssistantSystemPromptModal.js';
 import { cn } from './ui/cn.js';
 import { MarkdownMessage } from './ui/MarkdownMessage.js';
@@ -578,19 +579,6 @@ async function readAssistantEventStream(response: Response, handleEvent: (event:
   if (line) handleEvent(JSON.parse(line));
 }
 
-function formatArtifactSize(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
-  if (bytes < 1024) return `${bytes} B`;
-  const kb = bytes / 1024;
-  if (kb < 1024) return `${kb.toFixed(kb >= 10 ? 0 : 1)} KB`;
-  const mb = kb / 1024;
-  return `${mb.toFixed(mb >= 10 ? 0 : 1)} MB`;
-}
-
-function artifactFileName(path: string): string {
-  return path.split('/').filter(Boolean).pop() || path || 'Untitled';
-}
-
 function chooseDefaultArtifact(artifacts: AssistantArtifactRecord[], preferredPath?: string | null): AssistantArtifactRecord | null {
   return (
     artifacts.find((artifact) => artifact.path === preferredPath) ??
@@ -617,6 +605,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const [artifactDirty, setArtifactDirty] = React.useState(false);
   const [artifactsLoading, setArtifactsLoading] = React.useState(false);
   const [artifactsError, setArtifactsError] = React.useState<string | null>(null);
+  const [artifactPanelMode, setArtifactPanelMode] = React.useState<ArtifactPanelMode>('view');
   const [assistantFilesOpen, setAssistantFilesOpen] = React.useState(false);
   const [assistantToolsOpen, setAssistantToolsOpen] = React.useState(false);
   const [systemPromptOpen, setSystemPromptOpen] = React.useState(false);
@@ -678,11 +667,12 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   React.useEffect(() => {
     setThreadTitleDraft(activeThread?.title ?? '');
   }, [activeThread?.id, activeThread?.title]);
-  const hydrateArtifactDraft = React.useCallback((artifact: AssistantArtifactRecord | null) => {
+  const hydrateArtifactDraft = React.useCallback((artifact: AssistantArtifactRecord | null, mode?: ArtifactPanelMode) => {
     setSelectedArtifact(artifact);
     setArtifactPathDraft(artifact?.path ?? '');
     setArtifactContentDraft(artifact?.content ?? '');
     setArtifactDirty(false);
+    setArtifactPanelMode(mode ?? (artifact ? 'view' : 'edit'));
   }, []);
   const activeInheritedSystemPrompt = React.useMemo(() => {
     const settings = assistantSnapshotData?.assistantSettings;
@@ -1201,10 +1191,27 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   }
 
   function newArtifactDraft() {
-    hydrateArtifactDraft(null);
+    if (busy) return;
+    if (artifactDirty && !window.confirm('Discard unsaved changes and create a new file?')) return;
+    hydrateArtifactDraft(null, 'edit');
     setArtifactPathDraft('notes/new-artifact.md');
     setArtifactContentDraft('');
     setArtifactDirty(true);
+  }
+
+  function cancelArtifactEdit() {
+    if (selectedArtifact) {
+      hydrateArtifactDraft(selectedArtifact, 'view');
+      return;
+    }
+    const fallback = chooseDefaultArtifact(artifacts);
+    if (fallback) {
+      hydrateArtifactDraft(fallback, 'view');
+      return;
+    }
+    hydrateArtifactDraft(null, 'view');
+    setArtifactPathDraft('');
+    setArtifactContentDraft('');
   }
 
   async function saveArtifact() {
@@ -1238,7 +1245,8 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   }
 
   async function deleteArtifact() {
-    if (!activeThread || !artifactPathDraft.trim()) return;
+    if (!activeThread || !selectedArtifact) return;
+    const artifactPath = selectedArtifact.path;
     setBusy(true);
     setError(null);
     try {
@@ -1246,7 +1254,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
         `/api/assistant/threads/${encodeURIComponent(activeThread.id)}/artifacts/file`,
         {
           method: 'DELETE',
-          body: JSON.stringify({ path: artifactPathDraft.trim() }),
+          body: JSON.stringify({ path: artifactPath }),
         },
       );
       setArtifacts(data.artifacts);
@@ -2200,116 +2208,38 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
               ) : null}
 
               {assistantFilesOpen && activeThread ? (
-                <section className="flex min-h-0 flex-1 flex-col border-t border-[var(--border)] bg-[var(--panel-alt)] p-3">
-                  <div className="mb-2.5 flex shrink-0 items-start justify-between gap-3">
-                    <div>
-                      <span className={assistantKickerClass}>Files</span>
-                      <h2 className="m-0 mt-0.5 text-sm leading-tight text-[var(--fg)]">Assistant Files</h2>
-                      <small className="mt-1 block text-[11px] text-[var(--muted)]">{artifacts.length} file{artifacts.length === 1 ? '' : 's'} in this thread</small>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <button type="button" className={assistantActionButtonClass} onClick={newArtifactDraft} disabled={busy}>
-                        New
-                      </button>
-                      <button type="button" className={assistantActionButtonClass} onClick={() => void loadArtifacts(activeThread.id)} disabled={busy || artifactsLoading}>
-                        {artifactsLoading ? 'Refreshing...' : 'Refresh'}
-                      </button>
-                    </div>
-                  </div>
-                  {artifactsError ? <div className="mb-2 rounded border border-[rgba(248,113,113,.28)] bg-[rgba(248,113,113,.08)] p-2 text-xs text-[#fecaca]">{artifactsError}</div> : null}
-                  <div className="grid min-h-0 flex-1 grid-cols-[minmax(190px,.32fr)_minmax(0,1fr)] gap-2.5 max-[880px]:grid-cols-1">
-                    <div className="grid max-h-[260px] content-start gap-2 overflow-auto">
-                      {artifactsLoading && artifacts.length === 0 ? <div className={assistantEmptyClass}>Loading assistant files...</div> : null}
-                      {artifacts.map((artifact) => {
-                        const active = selectedArtifact?.path === artifact.path && !artifactDirty;
-                        return (
-                          <button
-                            key={artifact.id}
-                            type="button"
-                            className={cn(
-                              'grid min-h-[54px] gap-0.5 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2.5 py-2 text-left',
-                              active && '!border-[rgba(74,222,128,.28)] !bg-[rgba(74,222,128,.08)] !text-[var(--fg)]',
-                            )}
-                            onClick={() => hydrateArtifactDraft(artifact)}
-                          >
-                            <strong className="min-w-0 truncate text-[var(--fg-secondary)]">{artifactFileName(artifact.path)}</strong>
-                            <span className="min-w-0 truncate text-[11px] text-[var(--muted)]">{artifact.path}</span>
-                            <small className="text-[10px] text-[var(--muted)]">{formatArtifactSize(artifact.size)} · {timeLabel(artifact.updatedAt)}</small>
-                          </button>
-                        );
-                      })}
-                      {artifacts.length === 0 && !artifactsLoading ? <div className={assistantEmptyClass}>No assistant files yet.</div> : null}
-                    </div>
-                    <div className="grid min-w-0 gap-2.5">
-                      <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-2 max-[880px]:grid-cols-1">
-                        <div className="grid min-w-0 gap-0.5 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.018)] px-2.5 py-2">
-                          <span className="font-display text-[9px] font-bold uppercase text-[var(--muted-dim)]">Path</span>
-                          <strong className="min-w-0 truncate text-[11px] text-[var(--fg-secondary)]">{artifactPathDraft.trim() || 'Draft file'}</strong>
-                        </div>
-                        <div className="grid min-w-0 gap-0.5 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.018)] px-2.5 py-2">
-                          <span className="font-display text-[9px] font-bold uppercase text-[var(--muted-dim)]">Size</span>
-                          <strong className="min-w-0 truncate text-[11px] text-[var(--fg-secondary)]">{formatArtifactSize(new Blob([artifactContentDraft]).size)}</strong>
-                        </div>
-                        <div className="grid min-w-0 gap-0.5 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.018)] px-2.5 py-2">
-                          <span className="font-display text-[9px] font-bold uppercase text-[var(--muted-dim)]">Revision</span>
-                          <strong className="min-w-0 truncate text-[11px] text-[var(--fg-secondary)]">{selectedArtifact?.revision ? selectedArtifact.revision.slice(0, 8) : 'Draft'}</strong>
-                        </div>
-                      </div>
-                      <label className="grid gap-1 text-[10px] font-bold uppercase text-[var(--muted)]">
-                        Path
-                        <input
-                          value={artifactPathDraft}
-                          onChange={(event) => {
-                            setArtifactPathDraft(event.target.value);
-                            setArtifactDirty(true);
-                          }}
-                          placeholder="notes/plan.md"
-                          disabled={busy}
-                        />
-                      </label>
-                      <div className="grid min-h-0 grid-cols-2 gap-2.5 max-[880px]:grid-cols-1">
-                        <section className="grid min-h-[260px] min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-1.5 overflow-auto rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] p-2.5">
-                          <div className="font-display text-[9px] font-bold uppercase text-[var(--muted-dim)]">Preview</div>
-                          {artifactContentDraft.trim() ? (
-                            <MarkdownMessage text={artifactContentDraft} />
-                          ) : (
-                            <div className={assistantEmptyClass}>Nothing to preview.</div>
-                          )}
-                        </section>
-                        <label className="grid min-h-[260px] min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-1.5 text-[10px] font-bold uppercase text-[var(--muted)]">
-                          Source
-                          <textarea
-                            value={artifactContentDraft}
-                            onChange={(event) => {
-                              setArtifactContentDraft(event.target.value);
-                              setArtifactDirty(true);
-                            }}
-                            placeholder="Artifact content..."
-                            disabled={busy}
-                            className="min-h-0 max-h-none resize-y font-mono text-[11px] leading-normal"
-                          />
-                        </label>
-                      </div>
-                      <div className="flex items-center justify-between gap-1.5 text-[10px] text-[var(--muted)]">
-                        <span>{artifactDirty ? 'Unsaved changes' : selectedArtifact ? `Updated ${timeLabel(selectedArtifact.updatedAt)}` : 'Draft'}</span>
-                        <div className="flex items-center gap-1.5">
-                          <button type="button" className={assistantActionButtonClass} onClick={() => void copyArtifact()} disabled={!artifactContentDraft || busy}>
-                            Copy
-                          </button>
-                          <button type="button" className={assistantActionButtonClass} onClick={downloadArtifact} disabled={!artifactPathDraft.trim() || busy}>
-                            Download
-                          </button>
-                          <button type="button" className={assistantActionButtonClass} onClick={() => void deleteArtifact()} disabled={!selectedArtifact || busy}>
-                            Delete
-                          </button>
-                          <button type="button" className={assistantActionButtonClass} onClick={() => void saveArtifact()} disabled={!artifactPathDraft.trim() || busy}>
-                            Save
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </section>
+                <AssistantFilesPanel
+                  artifacts={artifacts}
+                  artifactsLoading={artifactsLoading}
+                  artifactsError={artifactsError}
+                  selectedArtifact={selectedArtifact}
+                  artifactPathDraft={artifactPathDraft}
+                  artifactContentDraft={artifactContentDraft}
+                  artifactDirty={artifactDirty}
+                  panelMode={artifactPanelMode}
+                  busy={busy}
+                  onRefresh={() => void loadArtifacts(activeThread.id)}
+                  onNew={newArtifactDraft}
+                  onSelect={(artifact) => {
+                    if (busy) return;
+                    if (artifactDirty && !window.confirm('Discard unsaved changes and open this file?')) return;
+                    hydrateArtifactDraft(artifact, 'view');
+                  }}
+                  onPanelModeChange={setArtifactPanelMode}
+                  onPathChange={(path) => {
+                    setArtifactPathDraft(path);
+                    setArtifactDirty(true);
+                  }}
+                  onContentChange={(content) => {
+                    setArtifactContentDraft(content);
+                    setArtifactDirty(true);
+                  }}
+                  onCancelEdit={cancelArtifactEdit}
+                  onSave={() => void saveArtifact()}
+                  onDelete={() => void deleteArtifact()}
+                  onCopy={() => void copyArtifact()}
+                  onDownload={downloadArtifact}
+                />
               ) : (
                 <>
                 <div className="flex min-h-0 flex-1 flex-col gap-0 overflow-auto bg-[#151a20] py-4">
