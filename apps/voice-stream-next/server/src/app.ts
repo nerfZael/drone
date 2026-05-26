@@ -1761,6 +1761,52 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     }),
   );
 
+  app.get('/api/assistant/keys', async (req, reply) =>
+    withUser(req, reply, db, clerkEnabled, async (ctx) => ({
+      ok: true,
+      keys: db.assistantApiKeysView(ctx.user.id),
+    })),
+  );
+
+  app.get('/api/assistant/keys/:provider', async (req, reply) =>
+    withUser(req, reply, db, clerkEnabled, async (ctx) => {
+      const provider = (req.params as any)?.provider;
+      return {
+        ok: true,
+        key: db.assistantApiKeyView(ctx.user.id, provider),
+      };
+    }),
+  );
+
+  app.post('/api/assistant/keys/:provider', async (req, reply) =>
+    withUser(req, reply, db, clerkEnabled, async (ctx) => {
+      const provider = (req.params as any)?.provider;
+      const body = jsonBody(req);
+      const key = db.upsertAssistantApiKey(ctx.user.id, provider, body.apiKey);
+      emitAssistantChange('assistant_api_key_updated');
+      return {
+        ok: true,
+        key,
+        keys: db.assistantApiKeysView(ctx.user.id),
+        snapshot: assistantSnapshot(db, ctx.user.id),
+      };
+    }),
+  );
+
+  app.delete('/api/assistant/keys/:provider', async (req, reply) =>
+    withUser(req, reply, db, clerkEnabled, async (ctx) => {
+      const provider = (req.params as any)?.provider;
+      const deleted = db.deleteAssistantApiKey(ctx.user.id, provider);
+      emitAssistantChange('assistant_api_key_deleted');
+      return {
+        ok: true,
+        deleted,
+        keys: db.assistantApiKeysView(ctx.user.id),
+        snapshot: assistantSnapshot(db, ctx.user.id),
+      };
+    }),
+  );
+
   app.post('/api/assistant/approvals/:approvalId/approve', async (req, reply) =>
     withUser(req, reply, db, clerkEnabled, async (ctx) => {
       const approvalId = String((req.params as any).approvalId ?? '');

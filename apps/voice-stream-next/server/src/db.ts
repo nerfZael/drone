@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { Database } from 'bun:sqlite';
@@ -232,6 +233,15 @@ export type AssistantSettingsRecord = {
   updatedAt: string;
 };
 
+export type AssistantApiKeyProvider = 'openai' | 'exa';
+
+export type AssistantApiKeyView = {
+  provider: AssistantApiKeyProvider;
+  hasKey: boolean;
+  keyHint: string | null;
+  updatedAt: string | null;
+};
+
 export type AssistantCodexConnectionRecord = {
   userId: string;
   accessToken: string;
@@ -328,6 +338,47 @@ function newSecret(): string {
 
 function sha256(value: string): string {
   return new Bun.CryptoHasher('sha256').update(value).digest('hex');
+}
+
+function cleanAssistantApiKeyProvider(raw: unknown): AssistantApiKeyProvider {
+  const value = String(raw ?? '').trim().toLowerCase();
+  if (value === 'openai' || value === 'exa') return value;
+  throw Object.assign(new Error('unsupported assistant API key provider'), { statusCode: 400 });
+}
+
+function cleanApiKey(raw: unknown): string {
+  return String(raw ?? '').trim();
+}
+
+function apiKeyHint(apiKey: string): string {
+  const value = cleanApiKey(apiKey);
+  if (value.length <= 8) return `${value.slice(0, 2)}...${value.slice(-2)}`;
+  return `${value.slice(0, 4)}...${value.slice(-4)}`;
+}
+
+function assistantSecretKey(): Buffer {
+  const raw = process.env.VOICE_STREAM_NEXT_SECRETS_KEY?.trim();
+  if (!raw) {
+    throw Object.assign(new Error('VOICE_STREAM_NEXT_SECRETS_KEY is required to store assistant API keys.'), { statusCode: 500 });
+  }
+  if (/^[a-f0-9]{64}$/i.test(raw)) return Buffer.from(raw, 'hex');
+  return crypto.createHash('sha256').update(raw, 'utf8').digest();
+}
+
+function encryptAssistantSecret(value: string): string {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', assistantSecretKey(), iv);
+  const encrypted = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return ['v1', iv.toString('base64'), tag.toString('base64'), encrypted.toString('base64')].join(':');
+}
+
+function decryptAssistantSecret(value: string): string {
+  const [version, ivRaw, tagRaw, encryptedRaw] = String(value ?? '').split(':');
+  if (version !== 'v1' || !ivRaw || !tagRaw || !encryptedRaw) throw new Error('assistant API key is not readable');
+  const decipher = crypto.createDecipheriv('aes-256-gcm', assistantSecretKey(), Buffer.from(ivRaw, 'base64'));
+  decipher.setAuthTag(Buffer.from(tagRaw, 'base64'));
+  return Buffer.concat([decipher.update(Buffer.from(encryptedRaw, 'base64')), decipher.final()]).toString('utf8');
 }
 
 function dataDir(): string {
@@ -1698,6 +1749,70 @@ export class VoiceStreamNextDb {
         $userId: userId,
       });
     return this.ensureAssistantSettings(userId);
+  }
+
+  assistantApiKeyView(userId: string, providerRaw: unknown): AssistantApiKeyView {
+    const provider = cleanAssistantApiKeyProvider(providerRaw);
+    const row = this.db
+      .query('SELECT provider, key_hint, updated_at FROM assistant_api_keys WHERE user_id = $userId AND provider = $provider')
+      .get({ $userId: userId, $provider: provider }) as any;
+    return {
+      provider,
+      hasKey: Boolean(row),
+      keyHint: row ? String(row.key_hint ?? '') || null : null,
+      updatedAt: row ? String(row.updated_at ?? '') || null : null,
+    };
+  }
+
+  assistantApiKeysView(userId: string): Record<AssistantApiKeyProvider, AssistantApiKeyView> {
+    return {
+      openai: this.assistantApiKeyView(userId, 'openai'),
+      exa: this.assistantApiKeyView(userId, 'exa'),
+    };
+  }
+
+  assistantApiKey(userId: string, providerRaw: unknown): string | null {
+    const provider = cleanAssistantApiKeyProvider(providerRaw);
+    const row = this.db
+      .query('SELECT encrypted_key FROM assistant_api_keys WHERE user_id = $userId AND provider = $provider')
+      .get({ $userId: userId, $provider: provider }) as any;
+    if (!row) return null;
+    const apiKey = decryptAssistantSecret(String(row.encrypted_key ?? ''));
+    return cleanApiKey(apiKey) || null;
+  }
+
+  upsertAssistantApiKey(userId: string, providerRaw: unknown, apiKeyRaw: unknown): AssistantApiKeyView {
+    const provider = cleanAssistantApiKeyProvider(providerRaw);
+    const apiKey = cleanApiKey(apiKeyRaw);
+    if (!apiKey) throw Object.assign(new Error('API key is required.'), { statusCode: 400 });
+    const at = nowIso();
+    this.db
+      .query(
+        `
+        INSERT INTO assistant_api_keys (user_id, provider, encrypted_key, key_hint, updated_at)
+        VALUES ($userId, $provider, $encryptedKey, $keyHint, $updatedAt)
+        ON CONFLICT(user_id, provider) DO UPDATE SET
+          encrypted_key = excluded.encrypted_key,
+          key_hint = excluded.key_hint,
+          updated_at = excluded.updated_at
+      `,
+      )
+      .run({
+        $userId: userId,
+        $provider: provider,
+        $encryptedKey: encryptAssistantSecret(apiKey),
+        $keyHint: apiKeyHint(apiKey),
+        $updatedAt: at,
+      });
+    return this.assistantApiKeyView(userId, provider);
+  }
+
+  deleteAssistantApiKey(userId: string, providerRaw: unknown): boolean {
+    const provider = cleanAssistantApiKeyProvider(providerRaw);
+    const result = this.db
+      .query('DELETE FROM assistant_api_keys WHERE user_id = $userId AND provider = $provider')
+      .run({ $userId: userId, $provider: provider });
+    return Number(result.changes ?? 0) > 0;
   }
 
   codexConnection(userId: string): AssistantCodexConnectionRecord | null {

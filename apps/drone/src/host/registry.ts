@@ -156,6 +156,10 @@ type DroneRegistryV1 = {
       apiKey?: string;
       updatedAt?: string;
     };
+    exa?: {
+      apiKey?: string;
+      updatedAt?: string;
+    };
     voiceStream?: {
       pairingPassword?: string;
       updatedAt?: string;

@@ -62,7 +62,7 @@ export function hubLog(level: 'info' | 'warn' | 'error', message: string, meta?:
 }
 
 export type LlmProviderId = 'openai' | 'gemini' | 'codex';
-export type StoredApiKeyProviderId = 'openai' | 'gemini' | 'groq';
+export type StoredApiKeyProviderId = 'openai' | 'gemini' | 'groq' | 'exa';
 export type ApiKeySettingsSource = 'settings' | 'environment' | 'codex-cli' | null;
 export type EffectiveProviderApiKeySettings = {
   apiKey: string | null;
@@ -682,7 +682,13 @@ export function providerDisplayName(provider: LlmProviderId): string {
 
 async function getStoredProviderApiKey(provider: StoredApiKeyProviderId): Promise<{ apiKey: string; updatedAt: string | null } | null> {
   const reg = await loadRegistry();
-  const block = provider === 'openai' ? reg.settings?.openai : provider === 'gemini' ? reg.settings?.gemini : reg.settings?.groq;
+  const block = provider === 'openai'
+    ? reg.settings?.openai
+    : provider === 'gemini'
+      ? reg.settings?.gemini
+      : provider === 'groq'
+        ? reg.settings?.groq
+        : reg.settings?.exa;
   const apiKey = normalizeApiKey(block?.apiKey);
   if (!apiKey) return null;
   const updatedAtRaw = block?.updatedAt;
@@ -698,7 +704,8 @@ export async function upsertStoredProviderApiKey(provider: StoredApiKeyProviderI
     reg.settings ??= {};
     if (provider === 'openai') reg.settings.openai = { apiKey, updatedAt };
     else if (provider === 'gemini') reg.settings.gemini = { apiKey, updatedAt };
-    else reg.settings.groq = { apiKey, updatedAt };
+    else if (provider === 'groq') reg.settings.groq = { apiKey, updatedAt };
+    else reg.settings.exa = { apiKey, updatedAt };
   });
 }
 
@@ -712,8 +719,13 @@ export async function clearStoredProviderApiKey(provider: StoredApiKeyProviderId
       if (!reg.settings.gemini) return;
       delete reg.settings.gemini;
     } else {
-      if (!reg.settings.groq) return;
-      delete reg.settings.groq;
+      if (provider === 'groq') {
+        if (!reg.settings.groq) return;
+        delete reg.settings.groq;
+      } else {
+        if (!reg.settings.exa) return;
+        delete reg.settings.exa;
+      }
     }
     if (Object.keys(reg.settings).length === 0) delete reg.settings;
   });
@@ -866,6 +878,16 @@ export async function resolveEffectiveProviderApiKeySettings(provider: LlmProvid
 
 export async function resolveGroqApiKeySettings(): Promise<EffectiveProviderApiKeySettings> {
   const stored = await getStoredProviderApiKey('groq');
+  if (!stored) return { apiKey: null, source: null, updatedAt: null };
+  return {
+    apiKey: stored.apiKey,
+    source: 'settings',
+    updatedAt: stored.updatedAt,
+  };
+}
+
+export async function resolveExaApiKeySettings(): Promise<EffectiveProviderApiKeySettings> {
+  const stored = await getStoredProviderApiKey('exa');
   if (!stored) return { apiKey: null, source: null, updatedAt: null };
   return {
     apiKey: stored.apiKey,

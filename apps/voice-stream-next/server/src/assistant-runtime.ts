@@ -2,7 +2,7 @@ import { pcm16ToWav } from './wav.js';
 
 export type RuntimeResult = {
   text: string;
-  provider: 'openai' | 'groq' | 'fallback';
+  provider: 'groq' | 'fallback';
 };
 
 const GROQ_TRANSCRIPTION_ENDPOINT = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -10,10 +10,6 @@ const GROQ_TTS_DEFAULT_ENDPOINT = 'https://api.groq.com/openai/v1/audio/speech';
 const GROQ_TRANSCRIPTION_DEFAULT_MODEL = 'whisper-large-v3-turbo';
 const GROQ_TTS_DEFAULT_MODEL = 'canopylabs/orpheus-v1-english';
 const GROQ_TTS_DEFAULT_VOICE = 'austin';
-
-function openAiApiKey(): string {
-  return process.env.OPENAI_API_KEY?.trim() || process.env.VOICE_STREAM_NEXT_OPENAI_API_KEY?.trim() || '';
-}
 
 function groqApiKey(env: NodeJS.ProcessEnv = process.env): string {
   return env.GROQ_API_KEY?.trim() || env.VOICE_STREAM_NEXT_GROQ_API_KEY?.trim() || '';
@@ -25,10 +21,6 @@ function groqSttApiKey(env: NodeJS.ProcessEnv = process.env): string {
 
 function groqTtsApiKey(env: NodeJS.ProcessEnv = process.env): string {
   return env.GROQ_TTS_API_KEY?.trim() || env.VOICE_STREAM_NEXT_GROQ_TTS_API_KEY?.trim() || groqApiKey(env);
-}
-
-function assistantModel(): string {
-  return process.env.VOICE_STREAM_NEXT_ASSISTANT_MODEL?.trim() || 'gpt-5.5';
 }
 
 function groqSttModel(): string {
@@ -56,35 +48,8 @@ function groqTtsVoice(): string {
     GROQ_TTS_DEFAULT_VOICE;
 }
 
-export function hasOpenAiRuntime(): boolean {
-  return Boolean(openAiApiKey());
-}
-
 export function hasGroqSpeechRuntime(env: NodeJS.ProcessEnv = process.env): boolean {
   return Boolean(groqSttApiKey(env));
-}
-
-export async function generateAssistantReply(messages: { role: 'user' | 'assistant'; content: string }[]): Promise<RuntimeResult> {
-  if (!openAiApiKey()) {
-    throw new Error('OpenAI API key is not configured for assistant replies.');
-  }
-
-  const response = await fetch('https://api.openai.com/v1/responses', {
-    method: 'POST',
-    headers: openAiHeaders(),
-    body: JSON.stringify({
-      model: assistantModel(),
-      instructions: 'You are VoiceStream, a concise voice assistant. Answer directly and keep spoken replies short.',
-      input: messages.map((message) => `${message.role.toUpperCase()}: ${message.content}`).join('\n\n'),
-    }),
-  });
-  const body = await parseOpenAiResponse(response);
-  const text = String(body.output_text ?? '').trim();
-  if (!text) throw new Error('OpenAI response did not include assistant text.');
-  return {
-    provider: 'openai',
-    text,
-  };
 }
 
 export async function transcribePcm16(pcm: Uint8Array): Promise<RuntimeResult> {
@@ -151,17 +116,6 @@ export async function synthesizeSpeech(text: string): Promise<{ audio: Uint8Arra
     provider: 'groq',
     audio: new Uint8Array(await response.arrayBuffer()),
   };
-}
-
-function openAiHeaders(): Record<string, string> {
-  return {
-    authorization: `Bearer ${openAiApiKey()}`,
-    'content-type': 'application/json',
-  };
-}
-
-async function parseOpenAiResponse(response: Response): Promise<any> {
-  return parseProviderJsonResponse(response, 'OpenAI');
 }
 
 async function parseProviderJsonResponse(response: Response, providerLabel: string): Promise<any> {

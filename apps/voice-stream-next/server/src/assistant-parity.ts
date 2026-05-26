@@ -1,4 +1,5 @@
 import {
+  type AssistantApiKeyView,
   type AssistantApprovalRecord,
   type AssistantMessage,
   type AssistantQueuedPromptRecord,
@@ -38,6 +39,7 @@ export type AssistantSnapshot = {
   models: AssistantModelOption[];
   availableTools: AssistantToolSummary[];
   assistantSettings: AssistantSettingsRecord;
+  apiKeys: Record<'openai' | 'exa', AssistantApiKeyView>;
   codexConnection: { connected: boolean; accountId: string | null; expiresAt: string | null; updatedAt: string | null };
   runningModels: Record<string, { provider: string; model: string; thinkingLevel: string; runId: string }>;
 };
@@ -212,6 +214,7 @@ export function assistantSnapshot(db: VoiceStreamNextDb, userId: string, activeT
     models: MODEL_OPTIONS,
     availableTools: ASSISTANT_TOOLS,
     assistantSettings: db.ensureAssistantSettings(userId),
+    apiKeys: db.assistantApiKeysView(userId),
     codexConnection: db.codexConnectionView(userId),
     runningModels,
   };
@@ -376,7 +379,8 @@ async function approvalContinuationText(
   const fallback = approvedAssistantText(approval.toolName, result);
   const run = approval.runId ? db.listRuns(userId, approval.threadId, 20).find((item) => item.id === approval.runId) : null;
   const provider = run?.provider ?? thread.provider;
-  if (provider !== 'openai' || !openAiApiKey()) return fallback;
+  const apiKey = provider === 'openai' ? db.assistantApiKey(userId, 'openai') : null;
+  if (provider !== 'openai' || !apiKey) return fallback;
 
   try {
     const settings = db.ensureAssistantSettings(userId);
@@ -403,6 +407,7 @@ async function approvalContinuationText(
       input: followup,
       tools: [],
       emit: () => undefined,
+      apiKey,
     });
     return final.text.trim() || fallback;
   } catch {
@@ -447,9 +452,8 @@ async function runModelDrivenTurn(
     return;
   }
 
-  if (modelConfig.provider === 'openai' && !openAiApiKey()) {
-    throw new Error('OpenAI API key is not configured. Add OPENAI_API_KEY or connect Codex for subscription-backed assistant runs.');
-  }
+  const openAiKey = modelConfig.provider === 'openai' ? db.assistantApiKey(userId, 'openai') : null;
+  if (modelConfig.provider === 'openai' && !openAiKey) throw new Error('OpenAI API key is not configured. Add your OpenAI key in assistant settings or connect Codex.');
 
   if (modelConfig.provider === 'openai') {
     const initialTiming = createProviderTimingLogger(db, userId, threadId, run, {
@@ -466,6 +470,7 @@ async function runModelDrivenTurn(
       tools: enabledTools,
       emit,
       logTiming: initialTiming,
+      apiKey: openAiKey ?? '',
     });
     if (first.toolCalls.length > 0) {
       const completed = await executeModelToolCalls(db, userId, threadId, run, thread, first.toolCalls, emit);
@@ -485,6 +490,7 @@ async function runModelDrivenTurn(
         tools: [],
         emit,
         logTiming: followupTiming,
+        apiKey: openAiKey ?? '',
       });
       const finalText = final.text.trim() || completed.map((item) => approvedAssistantText(item.toolName, item.result)).join('\n') || 'Done.';
       const assistantMessage = db.addMessage(userId, threadId, {
@@ -822,6 +828,7 @@ async function streamOpenAiResponse(input: {
   input: string;
   tools: unknown[];
   emit: (event: PromptEvent) => void;
+  apiKey: string;
   logTiming?: ProviderTimingLogger;
 }): Promise<OpenAiStreamResult> {
   const body: Record<string, unknown> = {
@@ -847,7 +854,7 @@ async function streamOpenAiResponse(input: {
   const response = await fetch(OPENAI_RESPONSES_ENDPOINT, {
     method: 'POST',
     headers: {
-      authorization: `Bearer ${openAiApiKey()}`,
+      authorization: `Bearer ${input.apiKey}`,
       'content-type': 'application/json',
     },
     body: JSON.stringify(body),
@@ -968,10 +975,6 @@ function assistantContentJson(text: string, thinking: string): string | null {
   if (cleanThinking) parts.push({ type: 'thinking', thinking: cleanThinking });
   if (cleanText) parts.push({ type: 'text', text: cleanText });
   return parts.length > 0 ? JSON.stringify(parts) : null;
-}
-
-function openAiApiKey(): string {
-  return process.env.OPENAI_API_KEY?.trim() || process.env.VOICE_STREAM_NEXT_OPENAI_API_KEY?.trim() || '';
 }
 
 function responseToolDefinitions(thread: AssistantThread): unknown[] {
@@ -1356,19 +1359,21 @@ async function executeAssistantTool(db: VoiceStreamNextDb, userId: string, threa
     return { ok: true, thinkingLevel: updated?.thinkingLevel ?? thinkingLevel };
   }
   if (toolName === 'web_search') {
+    const apiKey = db.assistantApiKey(userId, 'exa') ?? '';
     return await searchWeb({
       query: String(parsed.query ?? ''),
       numResults: parsed.numResults == null || parsed.numResults === '' ? undefined : Number(parsed.numResults),
       recencyFilter: cleanRecencyFilter(parsed.recencyFilter),
       domainFilter: Array.isArray(parsed.domainFilter) ? parsed.domainFilter.map((item) => String(item ?? '')) : [],
-    });
+    }, apiKey);
   }
   if (toolName === 'fetch_content') {
+    const apiKey = db.assistantApiKey(userId, 'exa') ?? '';
     return await fetchContent({
       url: String(parsed.url ?? ''),
       maxCharacters: parsed.maxCharacters == null || parsed.maxCharacters === '' ? undefined : Number(parsed.maxCharacters),
       livecrawl: cleanLivecrawl(parsed.livecrawl),
-    });
+    }, apiKey);
   }
   throw Object.assign(new Error(`unknown assistant tool: ${toolName}`), { statusCode: 400 });
 }

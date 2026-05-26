@@ -6,6 +6,7 @@ import { droneRootPath } from '../host/paths';
 import { loadRegistry, withRegistryLock } from '../host/registry';
 import {
   providerDisplayName,
+  resolveExaApiKeySettings,
   resolveEffectiveProviderApiKeySettings,
   type LlmProviderId,
 } from './hub-settings';
@@ -3569,12 +3570,14 @@ export class HubAssistantService {
           domainFilter: Type.Optional(Type.Array(Type.String({ description: 'Domain to include, or prefix with - to exclude.' }))),
         }),
         execute: async (_toolCallId: string, params: any) => {
+          const exaSettings = await resolveExaApiKeySettings();
+          if (!exaSettings.apiKey) throw new Error('Exa API key is not configured. Add it in Drone Hub settings.');
           const result = await searchWeb({
             query: String(params?.query ?? ''),
             numResults: params?.numResults,
             recencyFilter: normalizeWebSearchRecencyFilter(params?.recencyFilter),
             domainFilter: Array.isArray(params?.domainFilter) ? params.domainFilter.map((item: any) => String(item ?? '')) : [],
-          });
+          }, exaSettings.apiKey);
           return {
             content: [{ type: 'text', text: result.answer }],
             details: result,
@@ -3592,11 +3595,13 @@ export class HubAssistantService {
           livecrawl: Type.Optional(Type.String({ description: 'Optional Exa livecrawl mode: never, fallback, preferred, or always.' })),
         }),
         execute: async (_toolCallId: string, params: any) => {
+          const exaSettings = await resolveExaApiKeySettings();
+          if (!exaSettings.apiKey) throw new Error('Exa API key is not configured. Add it in Drone Hub settings.');
           const result = await fetchContent({
             url: String(params?.url ?? ''),
             maxCharacters: params?.maxCharacters,
             livecrawl: normalizeFetchContentLivecrawl(params?.livecrawl),
-          });
+          }, exaSettings.apiKey);
           return {
             content: [{ type: 'text', text: result.answer }],
             details: result,

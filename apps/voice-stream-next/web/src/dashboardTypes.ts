@@ -205,6 +205,13 @@ export type AssistantSettingsRecord = {
   updatedAt: string;
 };
 
+export type AssistantApiKeyView = {
+  provider: 'openai' | 'exa';
+  hasKey: boolean;
+  keyHint: string | null;
+  updatedAt: string | null;
+};
+
 export type AssistantToolSummary = {
   name: string;
   label: string;
@@ -244,6 +251,7 @@ export type AssistantSnapshot = {
   models: AssistantModelOption[];
   availableTools: AssistantToolSummary[];
   assistantSettings: AssistantSettingsRecord;
+  apiKeys: Record<'openai' | 'exa', AssistantApiKeyView>;
   codexConnection: AssistantCodexConnection;
   runningModels: Record<string, { provider: string; model: string; thinkingLevel: string; runId: string }>;
 };

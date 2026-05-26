@@ -90,14 +90,8 @@ const EXA_CONTENTS_URL = 'https://api.exa.ai/contents';
 const DEFAULT_TIMEOUT_MS = 12_000;
 const DEFAULT_CONTENT_TIMEOUT_MS = 15_000;
 
-export function hasWebSearchApiKey(env: NodeJS.ProcessEnv = process.env): boolean {
-  return Boolean(webSearchApiKey(env));
-}
-
-export async function searchWeb(input: WebSearchInput, env: NodeJS.ProcessEnv = process.env): Promise<WebSearchResult> {
-  const apiKey = webSearchApiKey(env);
-  if (!apiKey) throw new Error('Exa API key is not configured. Set DRONE_EXA_API_KEY or EXA_API_KEY.');
-
+export async function searchWeb(input: WebSearchInput, apiKey: string): Promise<WebSearchResult> {
+  if (!apiKey.trim()) throw new Error('Exa API key is not configured. Add it in Drone Hub settings.');
   const query = String(input.query ?? '').trim();
   if (!query) throw new Error('web search query is required');
 
@@ -144,10 +138,8 @@ export async function searchWeb(input: WebSearchInput, env: NodeJS.ProcessEnv = 
   };
 }
 
-export async function fetchContent(input: FetchContentInput, env: NodeJS.ProcessEnv = process.env): Promise<FetchContentResult> {
-  const apiKey = webSearchApiKey(env);
-  if (!apiKey) throw new Error('Exa API key is not configured. Set DRONE_EXA_API_KEY or EXA_API_KEY.');
-
+export async function fetchContent(input: FetchContentInput, apiKey: string): Promise<FetchContentResult> {
+  if (!apiKey.trim()) throw new Error('Exa API key is not configured. Add it in Drone Hub settings.');
   const url = cleanHttpUrl(input.url);
   const startedAt = Date.now();
   const response = await fetch(EXA_CONTENTS_URL, {
@@ -192,10 +184,6 @@ export async function fetchContent(input: FetchContentInput, env: NodeJS.Process
     status,
     elapsedMs: Date.now() - startedAt,
   };
-}
-
-function webSearchApiKey(env: NodeJS.ProcessEnv): string {
-  return env.DRONE_EXA_API_KEY?.trim() || env.EXA_API_KEY?.trim() || '';
 }
 
 function clampNumResults(raw: unknown): number {

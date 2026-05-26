@@ -250,6 +250,7 @@ import {
   resolveEffectiveVoiceTranscriptionSettings,
   resolveFilesystemSettingsResponse,
   resolveEffectiveProviderApiKeySettings,
+  resolveExaApiKeySettings,
   resolveGroqApiKeySettings,
   resolveVoiceStreamPairingPasswordSettings,
   resolveLlmSettingsResponse,
@@ -12194,13 +12195,25 @@ export async function startDroneHubApiServer(opts: {
         return;
       }
 
-      if (pathname === '/api/settings/openai' || pathname === '/api/settings/gemini' || pathname === '/api/settings/codex' || pathname === '/api/settings/groq') {
-        const provider = pathname.endsWith('/gemini') ? 'gemini' : pathname.endsWith('/codex') ? 'codex' : pathname.endsWith('/groq') ? 'groq' : 'openai';
+      if (pathname === '/api/settings/openai' || pathname === '/api/settings/gemini' || pathname === '/api/settings/codex' || pathname === '/api/settings/groq' || pathname === '/api/settings/exa') {
+        const provider = pathname.endsWith('/gemini')
+          ? 'gemini'
+          : pathname.endsWith('/codex')
+            ? 'codex'
+            : pathname.endsWith('/groq')
+              ? 'groq'
+              : pathname.endsWith('/exa')
+                ? 'exa'
+                : 'openai';
         if (method === 'GET') {
-          const resolved = provider === 'groq' ? await resolveGroqApiKeySettings() : await resolveEffectiveProviderApiKeySettings(provider);
+          const resolved = provider === 'groq'
+            ? await resolveGroqApiKeySettings()
+            : provider === 'exa'
+              ? await resolveExaApiKeySettings()
+              : await resolveEffectiveProviderApiKeySettings(provider as LlmProviderId);
           const revealApiKey = u.searchParams.get('reveal') === '1';
-          if (!resolved.apiKey && provider !== 'groq') {
-            await logProviderApiKeyResolution('warn', 'settings provider lookup resolved without API key', provider, {
+          if (!resolved.apiKey && provider !== 'groq' && provider !== 'exa') {
+            await logProviderApiKeyResolution('warn', 'settings provider lookup resolved without API key', provider as LlmProviderId, {
               pathname,
               method,
             });
@@ -12230,7 +12243,11 @@ export async function startDroneHubApiServer(opts: {
             return;
           }
           await upsertStoredProviderApiKey(provider as StoredApiKeyProviderId, apiKey);
-          const resolved = provider === 'groq' ? await resolveGroqApiKeySettings() : await resolveEffectiveProviderApiKeySettings(provider);
+          const resolved = provider === 'groq'
+            ? await resolveGroqApiKeySettings()
+            : provider === 'exa'
+              ? await resolveExaApiKeySettings()
+              : await resolveEffectiveProviderApiKeySettings(provider as LlmProviderId);
           if (provider === 'groq') notifyGroqApiKeySettingsChanged();
           json(res, 200, {
             ok: true,
@@ -12245,7 +12262,11 @@ export async function startDroneHubApiServer(opts: {
             return;
           }
           await clearStoredProviderApiKey(provider as StoredApiKeyProviderId);
-          const resolved = provider === 'groq' ? await resolveGroqApiKeySettings() : await resolveEffectiveProviderApiKeySettings(provider);
+          const resolved = provider === 'groq'
+            ? await resolveGroqApiKeySettings()
+            : provider === 'exa'
+              ? await resolveExaApiKeySettings()
+              : await resolveEffectiveProviderApiKeySettings(provider as LlmProviderId);
           if (provider === 'groq') notifyGroqApiKeySettingsChanged();
           json(res, 200, {
             ok: true,

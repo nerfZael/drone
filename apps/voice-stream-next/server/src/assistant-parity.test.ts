@@ -31,10 +31,7 @@ describe('assistant parity runtime', () => {
     for (const db of dbs) db.db.close();
     dbs.length = 0;
     delete process.env.VOICE_STREAM_NEXT_TEST_MODEL_TOOL_CALLS;
-    delete process.env.OPENAI_API_KEY;
-    delete process.env.VOICE_STREAM_NEXT_OPENAI_API_KEY;
-    delete process.env.EXA_API_KEY;
-    delete process.env.VOICE_STREAM_NEXT_EXA_API_KEY;
+    delete process.env.VOICE_STREAM_NEXT_SECRETS_KEY;
     globalThis.fetch = originalFetch;
   });
 
@@ -134,7 +131,8 @@ describe('assistant parity runtime', () => {
     dbs.push(db);
     const user = testUser(db);
     const thread = db.createThread(user.id, { title: 'Web search' });
-    process.env.EXA_API_KEY = 'exa-test-key';
+    process.env.VOICE_STREAM_NEXT_SECRETS_KEY = 'test-secret';
+    db.upsertAssistantApiKey(user.id, 'exa', 'exa-test-key');
     process.env.VOICE_STREAM_NEXT_TEST_MODEL_TOOL_CALLS = JSON.stringify([
       {
         name: 'web_search',
@@ -172,7 +170,8 @@ describe('assistant parity runtime', () => {
     dbs.push(db);
     const user = testUser(db);
     const thread = db.createThread(user.id, { title: 'Fetch content' });
-    process.env.EXA_API_KEY = 'exa-test-key';
+    process.env.VOICE_STREAM_NEXT_SECRETS_KEY = 'test-secret';
+    db.upsertAssistantApiKey(user.id, 'exa', 'exa-test-key');
     process.env.VOICE_STREAM_NEXT_TEST_MODEL_TOOL_CALLS = JSON.stringify([
       {
         name: 'fetch_content',
@@ -331,9 +330,6 @@ describe('assistant parity runtime', () => {
     const user = testUser(db);
     const thread = db.createThread(user.id, { title: 'OpenAI', provider: 'openai', model: 'gpt-5.2' });
     const events: any[] = [];
-    delete process.env.OPENAI_API_KEY;
-    delete process.env.VOICE_STREAM_NEXT_OPENAI_API_KEY;
-
     await promptAssistantThread(db, user.id, thread.id, { prompt: 'hello there', provider: 'openai' }, (event) => events.push(event));
     const assistantMessage = db.listMessages(user.id, thread.id).find((message) => message.role === 'assistant');
 
@@ -354,7 +350,8 @@ describe('assistant parity runtime', () => {
       enabledTools: [],
     });
     const originalFetch = globalThis.fetch;
-    process.env.OPENAI_API_KEY = 'test-key';
+    process.env.VOICE_STREAM_NEXT_SECRETS_KEY = 'test-secret';
+    db.upsertAssistantApiKey(user.id, 'openai', 'test-key');
     globalThis.fetch = (async () =>
       new Response(JSON.stringify({ error: { message: 'quota exceeded' } }), {
         status: 429,

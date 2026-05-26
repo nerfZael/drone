@@ -626,6 +626,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const [threadTitleDraft, setThreadTitleDraft] = React.useState('');
   const [codexConnectFlow, setCodexConnectFlow] = React.useState<{ state: string; authorizationUrl: string; redirectUri: string; expiresAt: string } | null>(null);
   const [codexCodeDraft, setCodexCodeDraft] = React.useState('');
+  const [apiKeyDrafts, setApiKeyDrafts] = React.useState<Record<'openai' | 'exa', string>>({ openai: '', exa: '' });
   const [deviceName, setDeviceName] = React.useState('Android voice client');
   const [deviceType, setDeviceType] = React.useState('android');
   const [androidApkInfo, setAndroidApkInfo] = React.useState<AndroidApkInfo | null>(null);
@@ -1351,6 +1352,43 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
       );
       setAssistantSnapshotData(data.snapshot);
       setNotice('Saved assistant settings.');
+    } catch (err: any) {
+      setError(err?.message ?? String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveAssistantApiKey(provider: 'openai' | 'exa') {
+    const apiKey = apiKeyDrafts[provider].trim();
+    if (!apiKey) {
+      setError('API key is required.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const data = await client.request<{ ok: true; snapshot: AssistantSnapshot }>(`/api/assistant/keys/${provider}`, {
+        method: 'POST',
+        body: JSON.stringify({ apiKey }),
+      });
+      setAssistantSnapshotData(data.snapshot);
+      setApiKeyDrafts((current) => ({ ...current, [provider]: '' }));
+      setNotice(`Saved ${provider === 'openai' ? 'OpenAI' : 'Exa'} key.`);
+    } catch (err: any) {
+      setError(err?.message ?? String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteAssistantApiKey(provider: 'openai' | 'exa') {
+    setBusy(true);
+    setError(null);
+    try {
+      const data = await client.request<{ ok: true; snapshot: AssistantSnapshot }>(`/api/assistant/keys/${provider}`, { method: 'DELETE' });
+      setAssistantSnapshotData(data.snapshot);
+      setNotice(`Deleted ${provider === 'openai' ? 'OpenAI' : 'Exa'} key.`);
     } catch (err: any) {
       setError(err?.message ?? String(err));
     } finally {
@@ -2476,6 +2514,43 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                     <div className={assistantEmptyClass}>No Android setup QR is available.</div>
                   )}
                   <AppDownloadLinks androidInfo={androidApkInfo} desktopInfo={desktopAppInfo} />
+                </div>
+              </section>
+
+              <section className={assistantPanelClass}>
+                <div className={assistantPanelHeaderClass}>
+                  <div>
+                    <span className={assistantKickerClass}>Assistant</span>
+                    <h2 className={assistantPanelTitleClass}>API Keys</h2>
+                  </div>
+                </div>
+                <div className="grid gap-2">
+                  {(['openai', 'exa'] as const).map((provider) => {
+                    const key = assistantSnapshotData?.apiKeys?.[provider];
+                    const label = provider === 'openai' ? 'OpenAI' : 'Exa';
+                    return (
+                      <div key={provider} className="grid grid-cols-[120px_minmax(180px,1fr)_auto_auto] items-center gap-2 rounded border border-[var(--border)] bg-white/[.02] p-2 max-[880px]:grid-cols-1">
+                        <div className="min-w-0">
+                          <strong className="block text-xs text-[var(--fg)]">{label}</strong>
+                          <small className="block truncate text-[11px] text-[var(--muted)]">{key?.hasKey ? key.keyHint : 'Not configured'}</small>
+                        </div>
+                        <input
+                          type="password"
+                          value={apiKeyDrafts[provider]}
+                          disabled={busy}
+                          placeholder={key?.hasKey ? 'Paste replacement key' : `Paste ${label} key`}
+                          onChange={(event) => setApiKeyDrafts((current) => ({ ...current, [provider]: event.currentTarget.value }))}
+                          className="h-[30px] min-w-0"
+                        />
+                        <button type="button" className={assistantActionButtonClass} onClick={() => void saveAssistantApiKey(provider)} disabled={busy || !apiKeyDrafts[provider].trim()}>
+                          Save
+                        </button>
+                        <button type="button" className={assistantActionButtonClass} onClick={() => void deleteAssistantApiKey(provider)} disabled={busy || !key?.hasKey}>
+                          Delete
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
               </section>
 

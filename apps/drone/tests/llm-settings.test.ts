@@ -302,6 +302,31 @@ describeSocketSuite('LLM settings api', () => {
     expect(groqSettingsChangeNotifications).toBe(notificationCountBefore + 2);
   });
 
+  test('stores Exa key for assistant web tools', async () => {
+    const initial = await apiFetch('/api/settings/exa');
+    expect(initial.r.status).toBe(200);
+    expect(initial.data.hasKey).toBe(false);
+
+    const saved = await apiFetch('/api/settings/exa', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ apiKey: 'stored-exa-key' }),
+    });
+    expect(saved.r.status).toBe(200);
+    expect(saved.data.hasKey).toBe(true);
+    expect(saved.data.source).toBe('settings');
+    expect(saved.data.apiKey).toBeUndefined();
+
+    const revealed = await apiFetch('/api/settings/exa?reveal=1');
+    expect(revealed.r.status).toBe(200);
+    expect(revealed.data.apiKey).toBe('stored-exa-key');
+
+    const cleared = await apiFetch('/api/settings/exa', { method: 'DELETE' });
+    expect(cleared.r.status).toBe(200);
+    expect(cleared.data.hasKey).toBe(false);
+    expect(cleared.data.source).toBeNull();
+  });
+
   test('stores Voice Stream pairing password settings', async () => {
     const notificationCountBefore = voiceStreamPairingPasswordChangeNotifications;
     const initial = await apiFetch('/api/settings/llm');
