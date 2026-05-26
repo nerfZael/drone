@@ -321,64 +321,89 @@ function AssistantMessageRow({ message, streaming = false }: { message: Assistan
   );
 }
 
-function ToolActivityMessage({ call, result }: { call?: AssistantToolCall; result?: AssistantMessage }) {
+function ToolDisclosure({
+  title,
+  status,
+  children,
+}: {
+  title: string;
+  status?: 'ok' | 'error';
+  children: React.ReactNode;
+}) {
   const [open, setOpen] = React.useState(false);
-  const resultText = messageText(result);
-  const title = toolLabel(call?.name || result?.toolName || undefined);
-  const status = result ? (result.isError ? 'error' : 'done') : 'pending';
   return (
-    <div
-      className={cn(
-        'mx-5 my-3 overflow-hidden rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.018)] text-[var(--fg-secondary)]',
-        status === 'error' && 'border-[rgba(248,113,113,.22)]',
-      )}
-    >
+    <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]">
       <button
         type="button"
-        className="flex min-h-[38px] w-full min-w-0 items-center gap-2 border-0 bg-transparent px-3 py-2 text-left font-display text-[10px] font-semibold uppercase tracking-normal text-[var(--muted)] hover:bg-[rgba(255,255,255,.025)] hover:text-[var(--fg-secondary)]"
         onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:bg-[rgba(255,255,255,.025)] hover:text-[var(--fg-secondary)]"
+        style={{ fontFamily: 'var(--display)' }}
+        aria-expanded={open}
       >
-        {result ? (
+        {status ? (
           <span
-            className={cn(
-              'inline-flex h-3 w-3 shrink-0 items-center justify-center rounded-full text-[#071015]',
-              result.isError ? 'bg-[#f87171]' : 'bg-[#4ade80]',
-            )}
+            className={`inline-flex h-3 w-3 flex-shrink-0 items-center justify-center rounded-full ${
+              status === 'error' ? 'bg-[var(--red)] text-[var(--bg)]' : 'bg-[var(--green)] text-[var(--bg)]'
+            }`}
           >
-            {result.isError ? <span className="h-1.5 w-1.5 rounded-full bg-current" /> : <ToolCheckIcon />}
+            {status === 'error' ? <span className="h-1.5 w-1.5 rounded-full bg-current" /> : <ToolCheckIcon className="h-2.5 w-2.5" />}
           </span>
         ) : null}
         <span className="min-w-0 flex-1 truncate">{title}</span>
       </button>
-      {open ? (
-        <div className="grid gap-2 border-t border-[var(--border-subtle)] px-3 py-2.5">
-          {call ? (
-            <div>
-              <div className="font-display text-[10px] font-bold uppercase tracking-normal text-[var(--muted-dim)]">Arguments</div>
-              <pre className="mt-1.5 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.14)] p-2 font-mono text-[11px] leading-normal text-[var(--fg-secondary)]">{JSON.stringify(call.args ?? {}, null, 2)}</pre>
-            </div>
-          ) : null}
-          {result ? (
-            <div className={call ? 'border-t border-[var(--border-subtle)] pt-2' : ''}>
-              <div className="font-display text-[10px] font-bold uppercase tracking-normal text-[var(--muted-dim)]">Result</div>
-              {resultText ? (
-                <pre className="mt-1.5 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.14)] p-2 font-mono text-[11px] leading-normal text-[var(--fg-secondary)]">{resultText}</pre>
-              ) : (
-                <div className="text-[11px] leading-normal text-[var(--muted-dim)]">No result payload.</div>
-              )}
-            </div>
-          ) : (
-            <div className={cn('text-[11px] leading-normal text-[var(--muted-dim)]', call && 'border-t border-[var(--border-subtle)] pt-2')}>Waiting for result...</div>
-          )}
-        </div>
-      ) : null}
+      {open ? <div className="border-t border-[var(--border-subtle)] px-2 py-1.5">{children}</div> : null}
     </div>
   );
 }
 
-function ToolCheckIcon() {
+function ToolPayloadDetails({ call, result }: { call?: AssistantToolCall; result?: AssistantMessage }) {
+  const resultText = result ? messageText(result) : '';
   return (
-    <svg className="h-2.5 w-2.5 shrink-0" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <>
+      {call ? (
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+            Arguments
+          </div>
+          <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-words text-[10px] text-[var(--muted-dim)]">
+            {JSON.stringify(call.args, null, 2)}
+          </pre>
+        </div>
+      ) : null}
+      {result ? (
+        <div className={call ? 'mt-2 border-t border-[var(--border-subtle)] pt-2' : ''}>
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+            Result
+          </div>
+          {resultText ? (
+            <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words text-[11px] text-[var(--fg-secondary)]">{resultText}</pre>
+          ) : (
+            <div className="mt-1 text-[11px] text-[var(--muted-dim)]">No result payload.</div>
+          )}
+        </div>
+      ) : (
+        <div className={call ? 'mt-2 border-t border-[var(--border-subtle)] pt-2 text-[11px] text-[var(--muted-dim)]' : 'text-[11px] text-[var(--muted-dim)]'}>
+          Waiting for result...
+        </div>
+      )}
+    </>
+  );
+}
+
+function ToolActivityMessage({ call, result }: { call?: AssistantToolCall; result?: AssistantMessage }) {
+  const title = toolLabel(call?.name || result?.toolName || undefined);
+  return (
+    <div className="mx-3">
+      <ToolDisclosure title={title} status={result ? (result.isError ? 'error' : 'ok') : undefined}>
+        <ToolPayloadDetails call={call} result={result} />
+      </ToolDisclosure>
+    </div>
+  );
+}
+
+function ToolCheckIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M2 5.2l2 2 4-4.4" />
     </svg>
   );
@@ -546,6 +571,8 @@ type AssistantPromptEvent =
   | { type: 'delta'; delta: string }
   | { type: 'thinking_delta'; delta: string }
   | { type: 'message'; message: AssistantMessage }
+  | { type: 'tool_call'; [key: string]: unknown }
+  | { type: 'tool_result'; [key: string]: unknown }
   | { type: 'approval_pending'; snapshot: AssistantSnapshot }
   | { type: 'done'; snapshot: AssistantSnapshot }
   | { type: 'error'; error: string; snapshot?: AssistantSnapshot }
@@ -973,6 +1000,10 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
         }
         if (promptEvent.type === 'message' && promptEvent.message) {
           setMessages((current) => upsertMessage(current, promptEvent.message as AssistantMessage));
+          return;
+        }
+        if (promptEvent.type === 'tool_call' || promptEvent.type === 'tool_result') {
+          void loadMessages(activeThread.id);
           return;
         }
         if ((promptEvent.type === 'snapshot' || promptEvent.type === 'approval_pending' || promptEvent.type === 'queued' || promptEvent.type === 'done') && promptEvent.snapshot) {
