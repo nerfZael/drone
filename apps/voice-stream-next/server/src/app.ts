@@ -1021,8 +1021,9 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     try {
       const body = jsonBody(req);
       const displayName = cleanText(body.displayName, 'Desktop voice client') || 'Desktop voice client';
+      const installationId = cleanText(body.installationId) || null;
       const expiresAt = desktopAuthExpiresAt();
-      const { request, secret, deviceToken } = db.createDesktopAuthRequest({ displayName, expiresAt });
+      const { request, secret, deviceToken } = db.createDesktopAuthRequest({ displayName, expiresAt, installationId });
       return {
         ok: true,
         requestId: request.id,
@@ -1099,7 +1100,8 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       const body = jsonBody(req);
       const deviceType = cleanText(body.deviceType, 'desktop') || 'desktop';
       const displayName = cleanText(body.displayName, deviceType) || deviceType;
-      const result = db.registerDevice(ctx.user.id, { deviceType, displayName });
+      const installationId = deviceType === 'desktop' ? cleanText(body.installationId) || null : null;
+      const result = db.registerDevice(ctx.user.id, { deviceType, displayName, installationId });
       db.addLog(ctx.user.id, {
         deviceId: result.device.id,
         source: deviceType,
@@ -1346,6 +1348,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     const deviceId = String((req.params as any).deviceId ?? '');
     const query = (req.query ?? {}) as Record<string, unknown>;
     const token = cleanText(req.headers['x-voice-device-token'] || query.token);
+    const installationId = cleanText(req.headers['x-voice-installation-id'] || query.installationId) || null;
     const clientVersion = parseClientVersion(req.headers['x-voice-client-version'], parseClientVersion(query.clientVersion, parseClientVersion(query.protocolVersion, null)));
     const auth = verifyDeviceAuth(db, deviceId, token, clientVersion);
     if (!auth.ok) {
@@ -1357,9 +1360,10 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       });
       return;
     }
+    const device = installationId ? db.assignDeviceInstallationId(auth.device.userId, auth.device.id, installationId) ?? auth.device : auth.device;
     return {
       ok: true,
-      device: auth.device,
+      device,
       settings: voiceApprovalSettingsResponse(db.ensureVoiceSettings(auth.device.userId)).settings,
       minClientVersion: minClientVersion(),
     };

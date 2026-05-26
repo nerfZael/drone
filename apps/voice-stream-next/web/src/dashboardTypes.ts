@@ -28,6 +28,7 @@ export type DeviceRecord = {
   userId: string;
   deviceType: string;
   displayName: string;
+  installationId: string | null;
   tokenHint: string;
   lastSeenAt: string;
   createdAt: string;

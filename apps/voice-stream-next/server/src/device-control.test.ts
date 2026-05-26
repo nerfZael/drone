@@ -34,6 +34,8 @@ describe('device lifecycle', () => {
     db.createPairingSession(user.id, registered.device.id, expiredAt);
 
     expect(db.verifyDeviceToken(registered.device.id, registered.token).ok).toBe(false);
+    expect(db.listDevices(user.id).some((device) => device.id === registered.device.id)).toBe(false);
+    expect(db.deviceForUser(user.id, registered.device.id)?.revokedAt).toBeTruthy();
 
     const fresh = db.registerDevice(user.id, { deviceType: 'android', displayName: 'Phone 2' });
     const future = pairingExpiresAt();
@@ -64,6 +66,32 @@ describe('device lifecycle', () => {
     const revoked = db.revokeDevice(user.id, registered.device.id);
     expect(revoked?.revokedAt).toBeTruthy();
     expect(db.verifyDeviceToken(registered.device.id, rotated!.token).ok).toBe(false);
+  });
+
+  test('backfills installation ids for existing desktop pairings', () => {
+    const db = tempDb('installation-backfill');
+    dbs.push(db);
+    const user = db.upsertUser({
+      clerkUserId: 'clerk_installation',
+      displayName: 'Installation User',
+      email: 'installation@example.local',
+      admin: false,
+    });
+    const legacy = db.registerDevice(user.id, { deviceType: 'desktop', displayName: 'Desktop' });
+    expect(legacy.device.installationId).toBeNull();
+
+    const assigned = db.assignDeviceInstallationId(user.id, legacy.device.id, 'desktop_install_legacy');
+    expect(assigned?.id).toBe(legacy.device.id);
+    expect(assigned?.installationId).toBe('desktop_install_legacy');
+
+    const reused = db.registerDevice(user.id, {
+      deviceType: 'desktop',
+      displayName: 'Desktop Renamed',
+      installationId: 'desktop_install_legacy',
+    });
+    expect(reused.device.id).toBe(legacy.device.id);
+    expect(reused.device.displayName).toBe('Desktop Renamed');
+    expect(db.listDevices(user.id).filter((device) => device.installationId === 'desktop_install_legacy')).toHaveLength(1);
   });
 
   test('rejects clients below the configured minimum version', () => {
@@ -210,7 +238,7 @@ describe('voice session device validation', () => {
         method: 'POST',
         url: '/api/desktop-auth/requests',
         headers: { 'content-type': 'application/json' },
-        payload: JSON.stringify({ displayName: 'Browser Desktop' }),
+        payload: JSON.stringify({ displayName: 'Browser Desktop', installationId: 'desktop_install_1' }),
       });
       expect(requestResponse.statusCode).toBe(200);
       const request = requestResponse.json();
@@ -260,6 +288,34 @@ describe('voice session device validation', () => {
       expect(bootstrapResponse.statusCode).toBe(200);
       expect(bootstrapResponse.json().device.id).toBe(claimed.device.id);
       expect(bootstrapResponse.json().settings.unlockCode).toBeTruthy();
+
+      const secondRequestResponse = await built.app.inject({
+        method: 'POST',
+        url: '/api/desktop-auth/requests',
+        headers: { 'content-type': 'application/json' },
+        payload: JSON.stringify({ displayName: 'Browser Desktop Renamed', installationId: 'desktop_install_1' }),
+      });
+      expect(secondRequestResponse.statusCode).toBe(200);
+      const secondRequest = secondRequestResponse.json();
+
+      const secondClaimResponse = await built.app.inject({
+        method: 'POST',
+        url: '/api/desktop-auth/claim',
+        headers: {
+          'content-type': 'application/json',
+          'x-voice-dev-user-email': 'browser-desktop@example.local',
+          'x-voice-dev-user-name': 'Browser Desktop User',
+          'x-voice-dev-admin': '0',
+        },
+        payload: JSON.stringify({ requestId: secondRequest.requestId, secret: secondRequest.secret }),
+      });
+      expect(secondClaimResponse.statusCode).toBe(200);
+      const secondClaimed = secondClaimResponse.json();
+      expect(secondClaimed.device.id).toBe(claimed.device.id);
+      expect(secondClaimed.device.displayName).toBe('Browser Desktop Renamed');
+      expect(built.db.listDevices().filter((device) => device.installationId === 'desktop_install_1')).toHaveLength(1);
+      expect(built.db.verifyDeviceToken(claimed.device.id, request.deviceToken).ok).toBe(false);
+      expect(built.db.verifyDeviceToken(claimed.device.id, secondRequest.deviceToken).ok).toBe(true);
     } finally {
       await built.app.close();
       built.db.db.close();

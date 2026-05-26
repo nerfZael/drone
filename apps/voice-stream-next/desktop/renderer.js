@@ -100,6 +100,7 @@ function debugWindow(message, details = {}) {
     signedOutExpandInFlight: state.signedOutExpandInFlight,
     hasDeviceId: Boolean(state.config?.deviceId),
     hasDeviceToken: Boolean(state.config?.deviceToken),
+    installationId: state.config?.installationId || '',
   }).catch(() => undefined);
 }
 
@@ -537,6 +538,7 @@ async function loadDashboard() {
       const data = await api(`/api/devices/${encodeURIComponent(state.config.deviceId)}/bootstrap`, {
         headers: {
           'x-voice-device-token': state.config.deviceToken,
+          'x-voice-installation-id': state.config.installationId || '',
           'x-voice-client-version': '1',
         },
       });
@@ -666,7 +668,7 @@ async function pairDevice() {
   const config = readFormConfig();
   const data = await api('/api/devices', {
     method: 'POST',
-    body: JSON.stringify({ deviceType: 'desktop', displayName: config.deviceName }),
+    body: JSON.stringify({ deviceType: 'desktop', displayName: config.deviceName, installationId: config.installationId }),
   });
   applyConfig(await desktop.writeConfig({ ...config, deviceId: data.device.id, deviceToken: data.token }));
   ensureControlSocket();
@@ -686,7 +688,7 @@ async function signInWithBrowser() {
   }
   const data = await api('/api/desktop-auth/requests', {
     method: 'POST',
-    body: JSON.stringify({ displayName: saved.deviceName, protocolVersion: 1 }),
+    body: JSON.stringify({ displayName: saved.deviceName, protocolVersion: 1, installationId: saved.installationId }),
   });
   const authUrl = new URL(authBaseUrl);
   authUrl.searchParams.set('desktopAuthRequest', data.requestId);

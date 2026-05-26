@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain, screen, shell, Menu, Tray, nativeImage, clipboard } = require('electron');
 const { fork } = require('node:child_process');
+const { randomUUID } = require('node:crypto');
 const fs = require('node:fs');
 const { createRequire } = require('node:module');
 const path = require('node:path');
@@ -73,6 +74,7 @@ const defaultConfig = {
   devEmail: 'desktop@example.local',
   devName: 'Desktop Operator',
   devAdmin: false,
+  installationId: '',
   deviceId: '',
   deviceToken: '',
   deviceName: 'Desktop voice client',
@@ -98,18 +100,39 @@ function configPath() {
   return path.join(app.getPath('userData'), 'voice-stream-next-desktop.json');
 }
 
+function createInstallationId() {
+  return `desktop_${randomUUID().replace(/-/g, '')}`;
+}
+
+function normalizeConfig(nextConfig) {
+  const config = { ...defaultConfig, ...nextConfig };
+  if (!String(config.installationId || '').trim()) {
+    config.installationId = createInstallationId();
+  }
+  return config;
+}
+
+function persistConfig(config) {
+  fs.mkdirSync(path.dirname(configPath()), { recursive: true });
+  fs.writeFileSync(configPath(), JSON.stringify(config, null, 2));
+}
+
 function readConfig() {
   try {
-    return { ...defaultConfig, ...JSON.parse(fs.readFileSync(configPath(), 'utf8')) };
+    const parsed = JSON.parse(fs.readFileSync(configPath(), 'utf8'));
+    const config = normalizeConfig(parsed);
+    if (!parsed.installationId) persistConfig(config);
+    return config;
   } catch {
-    return { ...defaultConfig };
+    const config = normalizeConfig({});
+    persistConfig(config);
+    return config;
   }
 }
 
 function writeConfig(nextConfig) {
-  const config = { ...defaultConfig, ...nextConfig };
-  fs.mkdirSync(path.dirname(configPath()), { recursive: true });
-  fs.writeFileSync(configPath(), JSON.stringify(config, null, 2));
+  const config = normalizeConfig(nextConfig);
+  persistConfig(config);
   return config;
 }
 
