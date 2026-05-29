@@ -4,6 +4,7 @@ const { randomUUID } = require('node:crypto');
 const fs = require('node:fs');
 const { createRequire } = require('node:module');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const APP_NAME = 'Drone';
 const LINUX_DESKTOP_FILE_NAME = 'drone.desktop';
@@ -74,12 +75,23 @@ const defaultTurnOffShortcut = {
 };
 
 const sampleRate = 16_000;
-const voicePhrases = require('../shared/voice-phrases.js');
+const voicePhrases = loadSharedClassicScript('voice-phrases.js');
 const defaultVoicePhraseSettings = voicePhrases.VOICE_PHRASE_DEFAULTS;
 let currentVoskGrammar = voicePhrases.buildAwakeWakeGrammar({
   triggerPhrase: 'approval code',
   shutdownPhrase: defaultVoicePhraseSettings.shutdownPhrase,
 });
+
+function loadSharedClassicScript(fileName) {
+  const filename = path.join(__dirname, '..', 'shared', fileName);
+  const sharedModule = { exports: {} };
+  const context = vm.createContext({
+    module: sharedModule,
+    exports: sharedModule.exports,
+  });
+  vm.runInContext(fs.readFileSync(filename, 'utf8'), context, { filename });
+  return sharedModule.exports;
+}
 
 const defaultConfig = {
   serverUrl: process.env.VOICE_STREAM_NEXT_SERVER_URL || 'http://127.0.0.1:3299',
