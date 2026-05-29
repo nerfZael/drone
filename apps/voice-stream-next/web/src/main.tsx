@@ -113,6 +113,7 @@ declare global {
       startVosk?: () => Promise<DesktopVoskStatus>;
       stopVosk?: () => Promise<DesktopVoskStatus>;
       resetVosk?: () => Promise<DesktopVoskStatus>;
+      setVoskGrammar?: (mode: 'awake' | 'sleep', settings: VoiceSettings) => Promise<DesktopVoskStatus>;
       sendVoskFrame?: (frame: ArrayBuffer) => void;
       onVoskStatus?: (callback: (status: DesktopVoskStatus) => void) => () => void;
       onVoskText?: (callback: (result: DesktopVoskText) => void) => () => void;
