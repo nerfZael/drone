@@ -202,8 +202,8 @@ function updateAuthStatus(kind, message) {
 function authGuidance(config) {
   const webUrl = deriveWebUrl(config);
   return webUrl
-    ? `Sign in at ${webUrl}, then connect this desktop.`
-    : 'Sign in on the web dashboard, then connect this desktop.';
+    ? `Click Sign in in this desktop app. It opens ${webUrl} and connects after the browser tab says Device connected.`
+    : 'Click Sign in in this desktop app, then finish the browser handoff.';
 }
 
 function showPairingMessage(message, kind = 'muted') {
@@ -656,9 +656,10 @@ function headers() {
 
 async function api(path, init = {}) {
   const config = readFormConfig();
+  const { suppressAuthGuidance = false, ...fetchInit } = init;
   const response = await fetch(`${trimSlash(config.serverUrl)}${path}`, {
-    ...init,
-    headers: { ...headers(), ...(init.headers || {}) },
+    ...fetchInit,
+    headers: { ...headers(), ...(fetchInit.headers || {}) },
   });
   const text = await response.text();
   let body = null;
@@ -672,7 +673,8 @@ async function api(path, init = {}) {
   if (!response.ok) {
     const err = new Error(body?.error || `${response.status} ${response.statusText}`);
     err.statusCode = response.status;
-    if (response.status === 401 || response.status === 403) {
+    err.reason = body?.reason || '';
+    if (!suppressAuthGuidance && (response.status === 401 || response.status === 403)) {
       err.authFailure = true;
       updateAuthStatus('error', `Auth failed (${response.status}). ${authGuidance(config)}`);
     }
@@ -750,6 +752,7 @@ async function reportClientStatus(mode, status) {
   ensureControlSocket();
   const data = await api(`/api/devices/${encodeURIComponent(state.config.deviceId)}/status`, {
     method: 'POST',
+    suppressAuthGuidance: true,
     body: JSON.stringify({
       token: state.config.deviceToken,
       installationId: state.config.installationId || '',
@@ -987,6 +990,7 @@ async function loadDashboard() {
   try {
     if (state.config?.deviceId && state.config?.deviceToken) {
       const data = await api(`/api/devices/${encodeURIComponent(state.config.deviceId)}/bootstrap`, {
+        suppressAuthGuidance: true,
         headers: {
           'x-voice-device-token': state.config.deviceToken,
           'x-voice-installation-id': state.config.installationId || '',
@@ -1036,6 +1040,9 @@ async function loadDashboard() {
     updateConnection('ok', 'Connected', state.config.deviceId ? `${state.config.deviceName} · ${state.config.deviceId.slice(0, 12)}` : `${dashboard.user.displayName}`);
     showPairingMessage(state.config.deviceId ? 'Desktop connected.' : `Signed in as ${dashboard.user.displayName}. Connect this desktop before recording.`);
   } catch (err) {
+    if (state.config?.deviceId && staleDeviceError(err)) {
+      await clearSavedDevice(`Saved desktop pairing is stale (${err.reason || err.message}). Sign in again.`);
+    }
     updateConnection('error', 'Connection failed', err?.message || 'Could not reach server');
     if (err?.authFailure) {
       showStatus(err.message);
@@ -1108,16 +1115,44 @@ function handleUpdatePayload(update) {
 
 async function loadVoiceSettings(forceReload = false) {
   if (!forceReload && state.voiceSettings) return state.voiceSettings;
-  const data = await api('/api/settings/voice-approval');
-  state.voiceSettings = data.settings;
+  let settings;
+  try {
+    if (state.config?.deviceId && state.config?.deviceToken) {
+      const data = await api(`/api/devices/${encodeURIComponent(state.config.deviceId)}/bootstrap`, {
+        suppressAuthGuidance: true,
+        headers: {
+          'x-voice-device-token': state.config.deviceToken,
+          'x-voice-installation-id': state.config.installationId || '',
+          'x-voice-client-version': '1',
+        },
+      });
+      if (data.device?.id && data.device.id !== state.config.deviceId) {
+        applyConfig(await desktop.writeConfig({
+          ...state.config,
+          deviceId: data.device.id,
+          deviceName: data.device.displayName || state.config.deviceName,
+        }));
+      }
+      settings = data.settings;
+    } else {
+      const data = await api('/api/settings/voice-approval');
+      settings = data.settings;
+    }
+  } catch (err) {
+    if (state.config?.deviceId && staleDeviceError(err)) {
+      await clearSavedDevice(`Saved desktop pairing is stale (${err.reason || err.message}). Sign in again.`);
+    }
+    throw err;
+  }
+  state.voiceSettings = settings;
   state.approvalRecognizer.configure({
-    triggerPhrase: data.settings.triggerPhrase,
-    minDigits: data.settings.minDigits,
-    maxDigits: data.settings.maxDigits,
-    stableMs: data.settings.stableMs,
-    collectTimeoutMs: data.settings.collectTimeoutMs,
-    duplicateCooldownMs: data.settings.duplicateCooldownMs,
-    finalizeCheckIntervalMs: data.settings.finalizeCheckIntervalMs,
+    triggerPhrase: settings.triggerPhrase,
+    minDigits: settings.minDigits,
+    maxDigits: settings.maxDigits,
+    stableMs: settings.stableMs,
+    collectTimeoutMs: settings.collectTimeoutMs,
+    duplicateCooldownMs: settings.duplicateCooldownMs,
+    finalizeCheckIntervalMs: settings.finalizeCheckIntervalMs,
   });
   return state.voiceSettings;
 }
@@ -1489,6 +1524,7 @@ async function createVoiceSession(target) {
   try {
     const data = await api('/api/voice/sessions', {
       method: 'POST',
+      suppressAuthGuidance: true,
       body: JSON.stringify({ deviceId: state.config.deviceId, token: state.config.deviceToken, installationId: state.config.installationId || '', mode: target, protocolVersion: 1 }),
     });
     if (data.device?.id && data.device.id !== state.config.deviceId) {
@@ -1501,12 +1537,8 @@ async function createVoiceSession(target) {
     return data;
   } catch (err) {
     if (!staleDeviceError(err)) throw err;
-    await clearSavedDevice('Saved desktop pairing is stale. Re-pairing desktop.');
-    await pairDevice();
-    return api('/api/voice/sessions', {
-      method: 'POST',
-      body: JSON.stringify({ deviceId: state.config.deviceId, token: state.config.deviceToken, installationId: state.config.installationId || '', mode: target, protocolVersion: 1 }),
-    });
+    await clearSavedDevice(`Saved desktop pairing is stale (${err.reason || err.message}). Sign in again.`);
+    throw new Error('Sign in before starting voice.');
   }
 }
 
@@ -1537,6 +1569,7 @@ async function startMic(target = 'assistant', options = {}) {
     setMode('recording', recordingStatus(state.voiceTarget));
     await api('/api/logs', {
       method: 'POST',
+      suppressAuthGuidance: true,
       body: JSON.stringify({
         deviceId: state.config.deviceId,
         token: state.config.deviceToken,
@@ -1601,6 +1634,7 @@ async function stopMic(nextMode = 'awake', options = {}) {
   }
   await api('/api/logs', {
     method: 'POST',
+    suppressAuthGuidance: true,
     body: JSON.stringify({
       deviceId: state.config.deviceId,
       token: state.config.deviceToken,
@@ -2050,6 +2084,7 @@ async function logDesktopEvent(level, message, details) {
   if (!state.config?.deviceId || !state.config?.deviceToken) return;
   await api('/api/logs', {
     method: 'POST',
+    suppressAuthGuidance: true,
     body: JSON.stringify({
       deviceId: state.config.deviceId,
       token: state.config.deviceToken,
@@ -2070,7 +2105,11 @@ async function applyDesktopVoskGrammar(mode, settings) {
 
 async function enterAwake() {
   resetApprovalCollection();
-  const settings = await loadVoiceSettings(true).catch(() => null);
+  const settings = await loadVoiceSettings(true).catch((err) => {
+    showStatus(err?.message || 'Could not load voice settings.');
+    return null;
+  });
+  if (!state.config?.deviceId || !state.config?.deviceToken) return;
   setMode('awake', 'Awake. Say "hey Sebastian" to start recording.');
   await applyDesktopVoskGrammar('awake', settings);
   startWakeListener();
@@ -2086,7 +2125,11 @@ async function enterSleep() {
   }
   resetApprovalCollection();
   playLocalVoiceCue('sleep');
-  const settings = await loadVoiceSettings(true).catch(() => null);
+  const settings = await loadVoiceSettings(true).catch((err) => {
+    showStatus(err?.message || 'Could not load voice settings.');
+    return null;
+  });
+  if (!state.config?.deviceId || !state.config?.deviceToken) return;
   setMode('sleeping', 'Sleeping. Say your unlock or shutdown phrase.');
   await applyDesktopVoskGrammar('sleep', settings);
   startWakeListener();
@@ -2115,7 +2158,18 @@ async function processApprovalCode(code) {
     return;
   }
   playLocalVoiceCue('status');
-  await api('/api/voice/approval-codes', { method: 'POST', body: JSON.stringify({ code, source: 'desktop' }) });
+  await api('/api/voice/approval-codes', {
+    method: 'POST',
+    suppressAuthGuidance: true,
+    body: JSON.stringify({
+      deviceId: state.config.deviceId,
+      token: state.config.deviceToken,
+      voiceSessionId: state.voiceSessionId || '',
+      code,
+      source: 'desktop',
+      protocolVersion: 1,
+    }),
+  });
   showStatus(`Approval sent: ${code}.`);
   await loadDashboard();
 }
