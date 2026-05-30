@@ -3993,7 +3993,6 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
             if (target === 'clipboard' && message.transcriptText) {
               await copyText(message.transcriptText || '');
             }
-            const settings = voiceSettings;
             await finishVoiceFromServer('Sleeping. Say your unlock or shutdown phrase.', 'sleeping');
             void onRefresh();
           } else if (message.type === 'assistant_error') {
@@ -4026,11 +4025,14 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
     await refs.current.context?.close().catch(() => undefined);
     refs.current = {};
     setStreaming(false);
-    if (nextMode === 'sleeping') resetApprovalCollection();
     setMode(nextMode);
     setStatus('Voice stream stopped.');
     void reportDesktopStatus(nextMode, 'Voice stream stopped.');
-    if (nextMode !== 'off') startWakeListener();
+    if (nextMode === 'sleeping') {
+      await enterStoppedSleep('Voice stream stopped.');
+    } else if (nextMode !== 'off') {
+      startWakeListener();
+    }
   }
 
   async function finishVoiceFromServer(nextStatus: string, nextMode: VoiceMode = 'awake') {
@@ -4043,6 +4045,20 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
     setMode(nextMode);
     setStatus(nextStatus);
     void reportDesktopStatus(nextMode, nextStatus);
+    if (nextMode === 'sleeping') {
+      await enterStoppedSleep(nextStatus);
+    } else {
+      startWakeListener();
+    }
+  }
+
+  async function enterStoppedSleep(nextStatus = 'Sleeping. Say your unlock or shutdown phrase.') {
+    resetApprovalCollection();
+    setMode('sleeping');
+    setStatus(nextStatus);
+    void reportDesktopStatus('sleeping', nextStatus);
+    const settings = await loadVoiceSettings().catch(() => null);
+    if (settings) void window.voiceStreamDesktop?.setVoskGrammar?.('sleep', settings);
     startWakeListener();
   }
 
