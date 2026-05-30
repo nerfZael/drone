@@ -4020,8 +4020,10 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
       if (sleepMatch === 'unlock') {
         setMode('awake');
         setStatus('Unlocked.');
+        void reportDesktopStatus('awake', 'Unlocked.');
         const awakeSettings = await loadVoiceSettings().catch(() => settings);
         if (awakeSettings) void window.voiceStreamDesktop?.setVoskGrammar?.('awake', awakeSettings);
+        startWakeListener();
         return;
       }
       if (sleepMatch === 'shutdown') {

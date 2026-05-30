@@ -2189,6 +2189,7 @@ async function processPhraseText(text, finalizeNow = false) {
       setMode('awake', 'Unlocked.');
       const awakeSettings = await loadVoiceSettings(true).catch(() => settings);
       await applyDesktopVoskGrammar('awake', awakeSettings);
+      startWakeListener();
       return;
     }
     if (sleepMatch === 'shutdown') {
