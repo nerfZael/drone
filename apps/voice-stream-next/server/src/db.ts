@@ -441,6 +441,7 @@ const ASSISTANT_DEFAULT_ENABLED_TOOLS = [
   'set_thinking_level',
   'web_search',
   'fetch_content',
+  'create_new_thread',
 ] as const;
 const ASSISTANT_DEFAULT_CAPABILITIES: AssistantThreadCapabilities = {
   artifacts: true,
@@ -2354,8 +2355,8 @@ export class VoiceStreamNextDb {
       .query(
         `
         SELECT * FROM assistant_threads
-        WHERE user_id = $userId AND source = 'voice'
-        ORDER BY updated_at DESC, created_at DESC
+        WHERE user_id = $userId AND (source = 'voice' OR voice_enabled = 1)
+        ORDER BY created_at DESC, updated_at DESC
         LIMIT 1
       `,
       )

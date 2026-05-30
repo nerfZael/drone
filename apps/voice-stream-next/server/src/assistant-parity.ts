@@ -142,6 +142,13 @@ const ASSISTANT_TOOLS: AssistantToolSummary[] = [
     description: 'Fetch readable page content from a URL.',
     approval: 'never',
   },
+  {
+    name: 'create_new_thread',
+    label: 'Create new thread',
+    category: 'settings',
+    description: 'Open a fresh assistant thread. In voice mode, future recordings use the new voice thread by default.',
+    approval: 'never',
+  },
 ];
 
 const MODEL_OPTIONS: AssistantModelOption[] = [
@@ -751,6 +758,7 @@ function prepareAgentToolArguments(toolName: string, args: unknown): Record<stri
     };
   }
   if (toolName === 'speak') return { text: String(value.text ?? '') };
+  if (toolName === 'create_new_thread') return { title: String(value.title ?? '') };
   return value;
 }
 
@@ -1055,6 +1063,22 @@ function responseToolDefinitions(db: VoiceStreamNextDb, userId: string, thread: 
         strict: true,
       });
     }
+    if (toolName === 'create_new_thread') {
+      definitions.push({
+        type: 'function',
+        name: 'create_new_thread',
+        description: 'Open a fresh assistant thread. Only use this after the user explicitly asks to start, open, create, clear, reset, or switch to a new assistant thread or session. In voice mode, the new voice thread becomes the default target for future voice recordings.',
+        parameters: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', description: 'Optional title for the new thread. Use an empty string unless the user gave a title.' },
+          },
+          required: ['title'],
+          additionalProperties: false,
+        },
+        strict: true,
+      });
+    }
     if (toolName === 'web_search' && thread.capabilities.externalCalls) {
       definitions.push({
         type: 'function',
@@ -1328,6 +1352,26 @@ async function executeApprovedTool(
     const updated = db.updateThread(userId, thread.id, { thinkingLevel });
     return { ok: true, thinkingLevel: updated?.thinkingLevel ?? thinkingLevel };
   }
+  if (toolName === 'create_new_thread') {
+    const source = thread.voiceEnabled || thread.source === 'voice' ? 'voice' : 'web';
+    const title = String(parsed.title ?? '').trim() || (source === 'voice' ? 'Voice thread' : 'Assistant thread');
+    const created = db.createThread(userId, {
+      title,
+      source,
+      voiceEnabled: source === 'voice',
+      provider: thread.provider,
+      model: thread.model,
+      thinkingLevel: thread.thinkingLevel,
+      promptDeliveryMode: thread.promptDeliveryMode,
+    });
+    return {
+      ok: true,
+      previousThreadId: thread.id,
+      threadId: created.id,
+      thread: created,
+      voiceDefaultForRecordings: created.voiceEnabled,
+    };
+  }
   if (toolName === 'web_search') {
     const apiKey = db.assistantApiKey(userId, 'exa') ?? '';
     return await searchWeb({
@@ -1490,6 +1534,11 @@ function toolResultText(toolName: string, result: unknown): string {
   if (toolName === 'fetch_content') return String((result as any)?.answer ?? 'Content fetch completed.');
   if (toolName === 'update_system_prompt') return 'Thread system prompt updated.';
   if (toolName === 'set_thinking_level') return `Thinking level set to ${(result as any)?.thinkingLevel ?? 'off'}.`;
+  if (toolName === 'create_new_thread') {
+    const thread = (result as any)?.thread;
+    if (thread?.voiceEnabled) return `Created a new voice thread: ${thread.title}. Future voice recordings will use it by default.`;
+    return `Created a new assistant thread: ${thread?.title ?? 'Assistant thread'}.`;
+  }
   return 'Tool completed.';
 }
 
