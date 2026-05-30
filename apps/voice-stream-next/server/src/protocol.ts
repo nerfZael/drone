@@ -23,6 +23,8 @@ export type ControlClientMessage =
 export type VoiceClientMessage =
   | { type: 'client_hello'; protocolVersion?: number; client?: string; mode?: string }
   | { type: 'client_ping'; sentAt?: string }
+  | { type: 'pause'; reason?: string }
+  | { type: 'resume'; reason?: string }
   | { type: 'end'; reason?: string };
 
 export function parseControlClientMessage(raw: unknown): ControlClientMessage | null {
@@ -90,6 +92,12 @@ export function parseVoiceClientMessage(raw: unknown): VoiceClientMessage | null
     return {
       type: 'client_ping',
       sentAt: typeof parsed.sentAt === 'string' ? parsed.sentAt : undefined,
+    };
+  }
+  if (parsed.type === 'pause' || parsed.type === 'resume') {
+    return {
+      type: parsed.type,
+      reason: typeof parsed.reason === 'string' ? parsed.reason.slice(0, 120) : undefined,
     };
   }
   if (parsed.type === 'end') {

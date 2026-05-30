@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { parseControlClientMessage } from './protocol.js';
+import { parseControlClientMessage, parseVoiceClientMessage } from './protocol.js';
 
 describe('parseControlClientMessage', () => {
   test('accepts status, ping, and command ack messages', () => {
@@ -37,5 +37,23 @@ describe('parseControlClientMessage', () => {
   test('rejects unknown control messages', () => {
     expect(parseControlClientMessage(JSON.stringify({ type: 'server_command' }))).toBeNull();
     expect(parseControlClientMessage('not-json')).toBeNull();
+  });
+});
+
+describe('parseVoiceClientMessage', () => {
+  test('accepts pause and resume messages', () => {
+    expect(parseVoiceClientMessage(JSON.stringify({ type: 'pause', reason: 'thinking' }))).toEqual({
+      type: 'pause',
+      reason: 'thinking',
+    });
+    expect(parseVoiceClientMessage(JSON.stringify({ type: 'resume', reason: 'ready' }))).toEqual({
+      type: 'resume',
+      reason: 'ready',
+    });
+  });
+
+  test('rejects unknown voice messages', () => {
+    expect(parseVoiceClientMessage(JSON.stringify({ type: 'paused' }))).toBeNull();
+    expect(parseVoiceClientMessage('not-json')).toBeNull();
   });
 });

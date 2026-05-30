@@ -89,6 +89,61 @@ describe('voice integration', () => {
     expect(dashboard.clientStatuses.some((entry: any) => entry.deviceId === registered.device.id && entry.status === 'Ready for commands')).toBe(true);
   });
 
+  test('ignores voice frames while a desktop stream is paused', async () => {
+    const registered = await fetch(`${baseUrl}/api/devices`, {
+      method: 'POST',
+      headers: devHeaders,
+      body: JSON.stringify({ deviceType: 'desktop', displayName: 'Paused Desktop' }),
+    }).then((response) => response.json());
+
+    const session = await fetch(`${baseUrl}/api/voice/sessions`, {
+      method: 'POST',
+      headers: devHeaders,
+      body: JSON.stringify({ deviceId: registered.device.id, mode: 'clipboard' }),
+    }).then((response) => response.json());
+
+    const wsUrl = new URL('/api/voice/stream', baseUrl);
+    wsUrl.protocol = 'ws:';
+    wsUrl.searchParams.set('deviceId', registered.device.id);
+    wsUrl.searchParams.set('token', registered.token);
+    wsUrl.searchParams.set('sessionId', session.session.id);
+    wsUrl.searchParams.set('mode', 'clipboard');
+
+    const socket = new WebSocket(wsUrl);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        socket.addEventListener('open', () => resolve());
+        socket.addEventListener('error', () => reject(new Error('websocket failed to open')));
+      });
+      socket.send(JSON.stringify({ type: 'client_hello', protocolVersion: 1, client: 'test', mode: 'clipboard' }));
+      socket.send(JSON.stringify({ type: 'pause', reason: 'test pause' }));
+      socket.send(samplePcmChunk());
+
+      const user = db.userByClerkId('dev_voice_integration_example_local');
+      expect(user).toBeTruthy();
+      await waitForCondition('paused status', () =>
+        db.listClientStatuses(user!.id).some((entry) => entry.deviceId === registered.device.id && entry.mode === 'paused'),
+      );
+
+      socket.send(JSON.stringify({ type: 'resume', reason: 'test resume' }));
+      socket.send(samplePcmChunk());
+      socket.send(JSON.stringify({ type: 'end' }));
+
+      await waitForCondition('voice stream disconnected log', () =>
+        db.listLogs(user!.id, 20).some((entry) => entry.message === 'Voice stream disconnected'),
+      );
+      const disconnected = db.listLogs(user!.id, 20).find((entry) => entry.message === 'Voice stream disconnected');
+      const details = JSON.parse(disconnected?.detailsJson || '{}');
+      expect(details.frames).toBe(1);
+      expect(details.wallDurationMs).toBeGreaterThanOrEqual(details.durationMs);
+      expect(details.pausedMs).toBeGreaterThanOrEqual(0);
+    } finally {
+      if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+        socket.close();
+      }
+    }
+  });
+
   test('enables newly registered extension tool routes for assistant use', async () => {
     const registered = await fetch(`${baseUrl}/api/devices`, {
       method: 'POST',
