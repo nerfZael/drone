@@ -68,6 +68,24 @@ describe('device lifecycle', () => {
     expect(db.verifyDeviceToken(registered.device.id, rotated!.token).ok).toBe(false);
   });
 
+  test('renames active devices without changing revoked devices', () => {
+    const db = tempDb('device-rename');
+    dbs.push(db);
+    const user = db.upsertUser({
+      clerkUserId: 'clerk_device_rename',
+      displayName: 'Device Rename User',
+      email: 'device-rename@example.local',
+      admin: false,
+    });
+    const registered = db.registerDevice(user.id, { deviceType: 'android', displayName: 'Phone' });
+
+    const renamed = db.updateDeviceName(user.id, registered.device.id, 'Kitchen phone');
+    expect(renamed?.displayName).toBe('Kitchen phone');
+
+    db.revokeDevice(user.id, registered.device.id);
+    expect(db.updateDeviceName(user.id, registered.device.id, 'Old phone')).toBeNull();
+  });
+
   test('backfills installation ids for existing desktop pairings', () => {
     const db = tempDb('installation-backfill');
     dbs.push(db);

@@ -1612,6 +1612,23 @@ export class VoiceStreamNextDb {
     return row ? rowDevice(row) : null;
   }
 
+  updateDeviceName(userId: string, deviceId: string, displayName: string): DeviceRecord | null {
+    const device = this.deviceForUser(userId, deviceId);
+    if (!device || device.revokedAt) return null;
+    this.db
+      .query(
+        `
+        UPDATE devices
+        SET display_name = $displayName
+        WHERE user_id = $userId
+          AND id = $deviceId
+          AND revoked_at IS NULL
+      `,
+      )
+      .run({ $displayName: displayName, $userId: userId, $deviceId: deviceId });
+    return this.deviceForUser(userId, deviceId);
+  }
+
   assignDeviceInstallationId(userId: string, deviceId: string, installationIdRaw: string | null | undefined, token?: string): DeviceRecord | null {
     const installationId = cleanInstallationId(installationIdRaw);
     const device = this.deviceForUser(userId, deviceId);
