@@ -1246,6 +1246,24 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     }),
   );
 
+  app.patch('/api/devices/:deviceId', async (req, reply) =>
+    withUser(req, reply, db, clerkEnabled, async (ctx) => {
+      const deviceId = String((req.params as any).deviceId ?? '');
+      const body = jsonBody(req);
+      const displayName = cleanText(body.displayName);
+      if (!displayName) throw Object.assign(new Error('device name is required'), { statusCode: 400 });
+      const device = db.updateDeviceName(ctx.user.id, deviceId, displayName);
+      if (!device) throw Object.assign(new Error('unknown device'), { statusCode: 404 });
+      db.addLog(ctx.user.id, {
+        deviceId,
+        source: 'web',
+        level: 'info',
+        message: `Device renamed: ${device.displayName}`,
+      });
+      return { ok: true, device };
+    }),
+  );
+
   app.patch('/api/assistant/extensions/tools/:toolName/route', async (req, reply) =>
     withUser(req, reply, db, clerkEnabled, async (ctx) => {
       const toolName = String((req.params as any).toolName ?? '');

@@ -36,8 +36,7 @@ import type {
   VoiceApprovalFormState,
   VoiceSettings,
 } from './dashboardTypes.js';
-import { timeLabel } from './time.js';
-import { TranscriptPanel } from './TranscriptPanel.js';
+import { exactTimeLabel, relativeTimeAgo, timeLabel } from './time.js';
 import { AssistantFilesPanel, type ArtifactPanelMode } from './assistant/AssistantFilesPanel.js';
 import { AssistantSystemPromptModal, type AssistantSystemPromptKind, type AssistantSystemPromptMode } from './assistant/AssistantSystemPromptModal.js';
 import { cn } from './ui/cn.js';
@@ -57,6 +56,14 @@ const ASSISTANT_PROVIDERS: Array<{ id: 'codex' | 'openai'; label: string; title:
 ];
 
 type AssistantSettingsPromptField = 'normalSystemPrompt' | 'voiceSystemPrompt';
+type SettingsPane = 'devices' | 'assistant' | 'voice' | 'activity';
+
+const SETTINGS_PANES: Array<{ id: SettingsPane; label: string }> = [
+  { id: 'devices', label: 'Devices' },
+  { id: 'assistant', label: 'Assistant' },
+  { id: 'voice', label: 'Voice' },
+  { id: 'activity', label: 'Activity' },
+];
 
 const assistantIconButtonClass =
   'relative flex h-7 w-7 shrink-0 items-center justify-center rounded border border-[var(--border-subtle)] bg-white/[.02] p-0 text-[var(--muted)] transition hover:bg-white/[.05] hover:text-[var(--fg-secondary)] disabled:pointer-events-none disabled:opacity-50';
@@ -73,6 +80,10 @@ const assistantActionButtonClass =
   'inline-flex h-[30px] items-center justify-center rounded border border-[var(--border)] bg-white/[.035] px-2.5 font-display text-[10px] font-semibold uppercase text-[var(--fg-secondary)] transition hover:border-[rgba(136,145,168,.36)] hover:text-[var(--fg)] disabled:pointer-events-none disabled:opacity-50';
 const assistantFieldLabelClass = 'grid gap-1.5 text-[10px] font-extrabold uppercase leading-tight text-[var(--muted)]';
 const assistantRowClass = 'rounded-[7px] border border-[var(--border-subtle)] bg-white/[.025] text-[var(--fg-secondary)]';
+const settingsTabClass =
+  'relative -mb-px inline-flex h-8 items-center justify-center rounded-t-md border border-[var(--border-subtle)] border-b-transparent bg-black/[.12] px-3 font-display text-[10px] font-semibold uppercase text-[var(--muted)] shadow-none transition hover:bg-white/[.04] hover:text-[var(--fg-secondary)]';
+const settingsTabActiveClass =
+  'border-[rgba(74,222,128,.30)] border-b-[var(--panel-alt)] bg-[rgba(74,222,128,.08)] text-[var(--green)]';
 const ASSISTANT_MESSAGES_BOTTOM_THRESHOLD_PX = 1;
 
 function modelSelectionKey(selection: { provider: string; model: string; thinkingLevel: string }): string {
@@ -843,6 +854,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const [dashboard, setDashboard] = React.useState<DashboardData | null>(null);
   const [assistantSnapshotData, setAssistantSnapshotData] = React.useState<AssistantSnapshot | null>(null);
   const [activeView, setActiveView] = React.useState<DashboardView>('threads');
+  const [settingsPane, setSettingsPane] = React.useState<SettingsPane>('devices');
   const [threadSidebarOpen, setThreadSidebarOpen] = React.useState(true);
   const [threadFilter, setThreadFilter] = React.useState<'all' | 'normal' | 'voice'>('all');
   const [activeThreadId, setActiveThreadId] = React.useState<string | null>(null);
@@ -882,6 +894,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const [codexConnectFlow, setCodexConnectFlow] = React.useState<{ state: string; authorizationUrl: string; redirectUri: string; expiresAt: string } | null>(null);
   const [codexCodeDraft, setCodexCodeDraft] = React.useState('');
   const [apiKeyDrafts, setApiKeyDrafts] = React.useState<Record<'openai' | 'exa', string>>({ openai: '', exa: '' });
+  const [deviceNameEditor, setDeviceNameEditor] = React.useState<{ deviceId: string; draft: string } | null>(null);
   const [deviceName, setDeviceName] = React.useState('Android voice client');
   const [deviceType, setDeviceType] = React.useState('android');
   const [androidApkInfo, setAndroidApkInfo] = React.useState<AndroidApkInfo | null>(null);
@@ -1973,6 +1986,32 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     }
   }
 
+  async function renameDevice(deviceId: string, draftName: string) {
+    const displayName = draftName.trim();
+    if (!displayName) {
+      setError('Device name is required.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const data = await client.request<{ ok: true; device: DeviceRecord }>(
+        `/api/devices/${encodeURIComponent(deviceId)}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({ displayName }),
+        },
+      );
+      setDeviceNameEditor(null);
+      await loadDashboard();
+      setNotice(`Renamed device to ${data.device.displayName}.`);
+    } catch (err: any) {
+      setError(err?.message ?? String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function sendDeviceCommand(deviceId: string, command: 'sleep' | 'off' | 'awake' | 'query_status') {
     setBusy(true);
     setError(null);
@@ -2180,12 +2219,6 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     return filesFromDrop(event.dataTransfer);
   }
 
-  function openThreadFromTranscript(threadId: string) {
-    setActiveView('threads');
-    setActiveThreadId(threadId);
-    setNotice('Opened assistant thread from transcript session.');
-  }
-
   if (loading) {
     return <div className="loading-screen">Loading Voice Stream...</div>;
   }
@@ -2218,7 +2251,6 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     return true;
   });
   const logs = dashboard?.logs ?? [];
-  const transcripts = dashboard?.transcripts ?? [];
   const speechPlayback = dashboard?.speechPlayback;
   const speechPlaybackTarget = dashboard?.settings.speechPlaybackTarget ?? speechPlayback?.preferredTarget ?? 'auto';
   const pendingApprovals = assistantSnapshotData?.pendingApprovals ?? [];
@@ -2314,9 +2346,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const connectedDeviceIds = new Set((dashboard?.clientStatuses ?? []).map((status) => status.deviceId));
   const navItems: Array<{ id: DashboardView; label: string; count?: number }> = [
     { id: 'threads', label: 'Chat', count: threads.length },
-    { id: 'devices', label: 'Devices', count: devices.length },
-    { id: 'settings', label: 'Settings' },
-    { id: 'activity', label: 'Activity', count: transcripts.length + logs.length },
+    { id: 'settings', label: 'Settings', count: devices.length },
     ...(dashboard?.user.admin ? [{ id: 'admin' as const, label: 'Admin' }] : []),
   ];
 
@@ -2463,7 +2493,8 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
             onClick={() => {
               setDeviceType('android');
               if (!deviceName.trim() || deviceName === 'Desktop dev client') setDeviceName('Android voice client');
-              setActiveView('devices');
+              setSettingsPane('devices');
+              setActiveView('settings');
             }}
           >
             Android Setup
@@ -2500,7 +2531,13 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
             </svg>
           </button>
           <div className="grid min-w-[140px] flex-1 gap-px">
-            <strong className="min-w-0 truncate text-xs font-semibold leading-tight text-[var(--fg)]">{activeView === 'threads' ? activeThread?.title ?? 'Assistant' : navItems.find((item) => item.id === activeView)?.label}</strong>
+            <strong className="min-w-0 truncate text-xs font-semibold leading-tight text-[var(--fg)]">
+              {activeView === 'threads'
+                ? activeThread?.title ?? 'Assistant'
+                : activeView === 'settings'
+                  ? `Settings / ${SETTINGS_PANES.find((pane) => pane.id === settingsPane)?.label ?? 'General'}`
+                  : navItems.find((item) => item.id === activeView)?.label}
+            </strong>
             <span className="flex items-center gap-1.5 font-display text-[10px] font-medium uppercase leading-tight text-[var(--muted-dim)]">
               <span className="h-1.5 w-1.5 rounded-full bg-[var(--green)] shadow-[0_0_12px_rgba(74,222,128,.32)]" />
               {activeView === 'threads' ? (activeThread ? activeThread.status ?? 'idle' : 'no thread') : 'live'}
@@ -2623,12 +2660,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                   aria-label={item.label}
                   aria-pressed={activeView === item.id}
                 >
-                  {item.id === 'devices' ? (
-                    <svg viewBox="0 0 24 24" aria-hidden="true" className={assistantIconSvgClass}>
-                      <rect x="7" y="2" width="10" height="20" rx="2" />
-                      <path d="M11 18h2" />
-                    </svg>
-                  ) : item.id === 'settings' ? (
+                  {item.id === 'settings' ? (
                     <svg viewBox="0 0 24 24" aria-hidden="true" className={assistantIconSvgClass}>
                       <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
                       <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.2.34.6.6 1 .6h.6a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1.4Z" />
@@ -2930,41 +2962,152 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
             </section>
           ) : null}
 
-          {activeView === 'devices' ? (
-            <section className="grid min-h-0 grid-cols-[minmax(280px,.58fr)_minmax(0,1fr)] items-start gap-3 overflow-auto p-3 max-[880px]:grid-cols-1">
-              <section className={assistantPanelClass}>
-                <div className={assistantPanelHeaderClass}>
-                  <div>
-                    <span className={assistantKickerClass}>Pairing</span>
-                    <h2 className={assistantPanelTitleClass}>Android Setup</h2>
-                  </div>
-                  <button type="button" className={assistantActionButtonClass} onClick={() => void refreshAndroidSetup()}>
-                    Refresh QR
+          {activeView === 'settings' ? (
+            <section className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-3">
+              <div className="sticky top-0 z-10 flex w-full flex-wrap items-end gap-1 bg-[var(--panel-alt)] pt-0">
+                {SETTINGS_PANES.map((pane) => (
+                  <button
+                    key={pane.id}
+                    type="button"
+                    className={cn(settingsTabClass, settingsPane === pane.id && settingsTabActiveClass)}
+                    aria-pressed={settingsPane === pane.id}
+                    onClick={() => setSettingsPane(pane.id)}
+                  >
+                    {pane.label}
                   </button>
-                </div>
-                <div className="mb-3 grid gap-2 rounded border border-[var(--border-subtle)] bg-white/[.02] p-3">
-                  <div className="flex min-w-0 items-center justify-between gap-2">
-                    <small className={assistantKickerClass}>Android Setup</small>
-                    {androidApkInfo?.available ? (
-                      <span className="text-xs text-[var(--muted)]">
-                        v{androidApkInfo.versionName ?? androidApkInfo.versionCode ?? '?'}
-                        {androidApkInfo.variant ? ` / ${androidApkInfo.variant}` : ''}
-                      </span>
-                    ) : null}
-                  </div>
-                  {androidSetupQr && androidSetupInfo?.setupUrl ? (
-                    <div className="flex flex-wrap items-start gap-3">
-                      <a href={androidSetupInfo.setupUrl} className="block rounded-[7px] border border-[var(--border)] bg-white p-1 transition hover:border-[rgba(136,145,168,.5)]" title="Android setup QR">
-                        <img src={androidSetupQr} alt="Android setup QR" className="h-[132px] w-[132px]" />
-                      </a>
-                    </div>
-                  ) : (
-                    <div className={assistantEmptyClass}>No Android setup QR is available.</div>
-                  )}
-                  <AppDownloadLinks androidInfo={androidApkInfo} desktopInfo={desktopAppInfo} />
-                </div>
-              </section>
+                ))}
+              </div>
 
+              {settingsPane === 'devices' ? (
+                <>
+                  <section className={assistantPanelClass}>
+                    <div className={assistantPanelHeaderClass}>
+                      <div>
+                        <span className={assistantKickerClass}>Pairing</span>
+                        <h2 className={assistantPanelTitleClass}>Android Setup</h2>
+                      </div>
+                      <button type="button" className={assistantActionButtonClass} onClick={() => void refreshAndroidSetup()}>
+                        Refresh QR
+                      </button>
+                    </div>
+                    <div className="grid gap-2 rounded border border-[var(--border-subtle)] bg-white/[.02] p-3">
+                      <div className="flex min-w-0 items-center justify-between gap-2">
+                        <small className={assistantKickerClass}>Android Setup</small>
+                        {androidApkInfo?.available ? (
+                          <span className="text-xs text-[var(--muted)]">
+                            v{androidApkInfo.versionName ?? androidApkInfo.versionCode ?? '?'}
+                            {androidApkInfo.variant ? ` / ${androidApkInfo.variant}` : ''}
+                          </span>
+                        ) : null}
+                      </div>
+                      {androidSetupQr && androidSetupInfo?.setupUrl ? (
+                        <div className="flex flex-wrap items-start gap-3">
+                          <a href={androidSetupInfo.setupUrl} className="block rounded-[7px] border border-[var(--border)] bg-white p-1 transition hover:border-[rgba(136,145,168,.5)]" title="Android setup QR">
+                            <img src={androidSetupQr} alt="Android setup QR" className="h-[132px] w-[132px]" />
+                          </a>
+                        </div>
+                      ) : (
+                        <div className={assistantEmptyClass}>No Android setup QR is available.</div>
+                      )}
+                      <AppDownloadLinks androidInfo={androidApkInfo} desktopInfo={desktopAppInfo} />
+                    </div>
+                  </section>
+
+                  <section className={assistantPanelClass}>
+                    <div className={assistantPanelHeaderClass}>
+                      <div>
+                        <h2 className={assistantPanelTitleClass}>Devices</h2>
+                      </div>
+                    </div>
+                    <div className="grid gap-2">
+                      {devices.map((device) => {
+                        const status = dashboard?.clientStatuses.find((entry) => entry.deviceId === device.id);
+                        const pairing = dashboard?.pairingSessions.find((entry) => entry.deviceId === device.id);
+                        const activeAt = status?.updatedAt ?? device.lastSeenAt;
+                        const lastActiveRelative = relativeTimeAgo(activeAt);
+                        const lastActiveExact = exactTimeLabel(activeAt);
+                        const editing = deviceNameEditor?.deviceId === device.id;
+                        return (
+                          <article key={device.id} className={cn(assistantRowClass, 'grid grid-cols-[minmax(0,1fr)_auto] gap-3 p-3 max-[760px]:grid-cols-1')}>
+                            <div className="grid min-w-0 gap-1.5">
+                              {editing ? (
+                                <form
+                                  className="flex min-w-0 flex-wrap items-center gap-1.5"
+                                  onSubmit={(event) => {
+                                    event.preventDefault();
+                                    void renameDevice(device.id, deviceNameEditor.draft);
+                                  }}
+                                >
+                                  <input
+                                    value={deviceNameEditor.draft}
+                                    disabled={busy}
+                                    autoFocus
+                                    onChange={(event) => setDeviceNameEditor({ deviceId: device.id, draft: event.currentTarget.value })}
+                                    onKeyDown={(event) => {
+                                      if (event.key === 'Escape') setDeviceNameEditor(null);
+                                    }}
+                                    className="h-[30px] min-w-[10ch] max-w-full"
+                                    style={{ width: `${Math.min(Math.max(deviceNameEditor.draft.length + 2, 12), 42)}ch` }}
+                                  />
+                                  <button type="submit" className={assistantActionButtonClass} disabled={busy || !deviceNameEditor.draft.trim()}>
+                                    Save
+                                  </button>
+                                  <button type="button" className={assistantActionButtonClass} disabled={busy} onClick={() => setDeviceNameEditor(null)}>
+                                    Cancel
+                                  </button>
+                                </form>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="group flex w-fit max-w-full min-w-0 items-center gap-1.5 rounded border-0 bg-transparent p-0 text-left text-xs font-semibold text-[var(--fg)] shadow-none transition hover:text-[var(--green)] focus:outline-none focus:ring-1 focus:ring-[rgba(74,222,128,.28)] disabled:pointer-events-none disabled:opacity-50"
+                                  disabled={busy}
+                                  onClick={() => setDeviceNameEditor({ deviceId: device.id, draft: device.displayName })}
+                                  title={`Rename ${device.displayName}`}
+                                  aria-label={`Rename ${device.displayName}`}
+                                >
+                                  <span className="min-w-0 truncate">{device.displayName}</span>
+                                  <svg viewBox="0 0 24 24" aria-hidden="true" className="h-3.5 w-3.5 shrink-0 fill-none stroke-current stroke-2 opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100">
+                                    <path d="M12 20h9" />
+                                    <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                                  </svg>
+                                </button>
+                              )}
+                              <div className="flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-xs text-[var(--muted)]">
+                                <span>{device.deviceType}</span>
+                                <span>{status ? `${status.mode} / ${status.status}` : 'No live status'}</span>
+                                <span title={lastActiveExact}>Last active {lastActiveRelative}</span>
+                                <span>token {device.tokenHint}...</span>
+                              </div>
+                              {pairing && !pairing.claimedAt ? <span className="text-xs text-[var(--muted)]">Pairing expires {timeLabel(pairing.expiresAt)}</span> : null}
+                            </div>
+                            <div className="flex flex-wrap justify-end gap-[7px]">
+                              <button type="button" className={assistantActionButtonClass} disabled={busy} onClick={() => void sendDeviceCommand(device.id, 'query_status')}>
+                                Query
+                              </button>
+                              <button type="button" className={assistantActionButtonClass} disabled={busy} onClick={() => void sendDeviceCommand(device.id, 'sleep')}>
+                                Sleep
+                              </button>
+                              <button type="button" className={assistantActionButtonClass} disabled={busy} onClick={() => void sendDeviceCommand(device.id, 'off')}>
+                                Off
+                              </button>
+                              <button type="button" className={assistantActionButtonClass} disabled={busy} onClick={() => void rotateDeviceToken(device.id)}>
+                                Rotate
+                              </button>
+                              <button type="button" className={assistantActionButtonClass} disabled={busy} onClick={() => void revokeDevice(device.id)}>
+                                Revoke
+                              </button>
+                            </div>
+                          </article>
+                        );
+                      })}
+                      {devices.length === 0 ? <div className={assistantEmptyClass}>No paired devices yet.</div> : null}
+                    </div>
+                  </section>
+                </>
+              ) : null}
+
+              {settingsPane === 'assistant' ? (
+                <>
               <section className={assistantPanelClass}>
                 <div className={assistantPanelHeaderClass}>
                   <div>
@@ -3005,53 +3148,6 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                 </div>
               </section>
 
-              <section className={assistantPanelClass}>
-                <div className={assistantPanelHeaderClass}>
-                  <div>
-                    <span className={assistantKickerClass}>Fleet</span>
-                    <h2 className={assistantPanelTitleClass}>Devices</h2>
-                  </div>
-                </div>
-                <div className="grid gap-2">
-                  {devices.map((device) => {
-                    const status = dashboard?.clientStatuses.find((entry) => entry.deviceId === device.id);
-                    const pairing = dashboard?.pairingSessions.find((entry) => entry.deviceId === device.id);
-                    return (
-                      <article key={device.id} className={cn(assistantRowClass, 'grid grid-cols-[minmax(0,1fr)_auto] gap-3 p-3 max-[620px]:grid-cols-1')}>
-                        <div className="grid min-w-0 gap-1">
-                          <strong className="text-xs text-[var(--fg)]">{device.displayName}</strong>
-                          <span className="text-xs text-[var(--muted)]">{device.deviceType}</span>
-                          <span className="text-xs text-[var(--muted)]">{status ? `${status.mode} / ${status.status}` : 'No live status'}</span>
-                          {pairing && !pairing.claimedAt ? <span className="text-xs text-[var(--muted)]">Pairing expires {timeLabel(pairing.expiresAt)}</span> : null}
-                        </div>
-                        <div className="flex flex-wrap justify-end gap-[7px]">
-                          <button type="button" className={assistantActionButtonClass} disabled={busy} onClick={() => void sendDeviceCommand(device.id, 'query_status')}>
-                            Query
-                          </button>
-                          <button type="button" className={assistantActionButtonClass} disabled={busy} onClick={() => void sendDeviceCommand(device.id, 'sleep')}>
-                            Sleep
-                          </button>
-                          <button type="button" className={assistantActionButtonClass} disabled={busy} onClick={() => void sendDeviceCommand(device.id, 'off')}>
-                            Off
-                          </button>
-                          <button type="button" className={assistantActionButtonClass} disabled={busy} onClick={() => void rotateDeviceToken(device.id)}>
-                            Rotate
-                          </button>
-                          <button type="button" className={assistantActionButtonClass} disabled={busy} onClick={() => void revokeDevice(device.id)}>
-                            Revoke
-                          </button>
-                        </div>
-                      </article>
-                    );
-                  })}
-                  {devices.length === 0 ? <div className={assistantEmptyClass}>No paired devices yet.</div> : null}
-                </div>
-              </section>
-            </section>
-          ) : null}
-
-          {activeView === 'settings' ? (
-            <section className="grid h-full min-h-0 gap-3 overflow-y-auto p-3">
               <section className={assistantPanelClass}>
                 <div className={assistantPanelHeaderClass}>
                   <div>
@@ -3258,7 +3354,11 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                 busy={busy}
                 onUpdateRoute={(toolName, route) => void updateExtensionToolRoute(toolName, route)}
               />
+                </>
+              ) : null}
 
+              {settingsPane === 'voice' ? (
+                <>
               <section className={assistantPanelClass}>
                 <div className={assistantPanelHeaderClass}>
                   <div>
@@ -3435,62 +3535,30 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                   </button>
                 </form>
               </section>
-            </section>
-          ) : null}
+                </>
+              ) : null}
 
-          {activeView === 'activity' ? (
-            <section className="grid min-h-0 gap-3 overflow-auto p-3">
-              <TranscriptPanel transcripts={transcripts} devices={devices} threads={threads} onOpenThread={openThreadFromTranscript} />
-
-              <section className={assistantPanelClass}>
-                <div className={assistantPanelHeaderClass}>
-                  <div>
-                    <span className={assistantKickerClass}>Runtime</span>
-                    <h2 className={assistantPanelTitleClass}>Logs</h2>
-                  </div>
-                  <button type="button" className={assistantActionButtonClass} onClick={() => void copyLogs()}>
-                    Copy Logs
-                  </button>
-                </div>
-                <div className="grid gap-2">
-                  {logs.map((log) => (
-                    <article key={log.id} className={cn(assistantRowClass, 'grid grid-cols-[92px_120px_minmax(0,1fr)_auto] items-center gap-2 p-2 max-[620px]:grid-cols-1')}>
-                      <span className={cn('w-fit rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase', log.level === 'error' ? 'border-[rgba(255,90,90,.24)] bg-[var(--red-subtle)] text-[var(--red)]' : 'border-[rgba(74,222,128,.22)] bg-[var(--green-subtle)] text-[var(--green)]')}>{log.level}</span>
-                      <span className="text-xs text-[var(--muted)]">{log.source}</span>
-                      <strong className="min-w-0 text-xs text-[var(--fg)]">{log.message}</strong>
-                      <time className="text-xs text-[var(--muted)]">{timeLabel(log.createdAt)}</time>
-                    </article>
-                  ))}
-                  {logs.length === 0 ? <div className={assistantEmptyClass}>No logs yet.</div> : null}
-                </div>
-              </section>
-
-              {dashboard?.user.admin ? (
+              {settingsPane === 'activity' ? (
                 <section className={assistantPanelClass}>
                   <div className={assistantPanelHeaderClass}>
                     <div>
-                      <span className={assistantKickerClass}>Admin</span>
-                      <h2 className={assistantPanelTitleClass}>Device Monitor</h2>
+                      <span className={assistantKickerClass}>Runtime</span>
+                      <h2 className={assistantPanelTitleClass}>Logs</h2>
                     </div>
+                    <button type="button" className={assistantActionButtonClass} onClick={() => void copyLogs()}>
+                      Copy Logs
+                    </button>
                   </div>
                   <div className="grid gap-2">
-                    {dashboard.adminDevices.map((device) => (
-                      <article key={device.id} className={cn(assistantRowClass, 'grid grid-cols-[minmax(0,1fr)_120px_140px_auto] items-center gap-2 p-2 max-[620px]:grid-cols-1')}>
-                        <strong className="min-w-0 text-xs text-[var(--fg)]">{device.displayName}</strong>
-                        <span className="text-xs text-[var(--muted)]">{device.deviceType}</span>
-                        <span className="text-xs text-[var(--muted)]">token {device.tokenHint}...</span>
-                        <time className="text-xs text-[var(--muted)]">{timeLabel(device.lastSeenAt)}</time>
+                    {logs.map((log) => (
+                      <article key={log.id} className={cn(assistantRowClass, 'grid grid-cols-[92px_120px_minmax(0,1fr)_auto] items-center gap-2 p-2 max-[620px]:grid-cols-1')}>
+                        <span className={cn('w-fit rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase', log.level === 'error' ? 'border-[rgba(255,90,90,.24)] bg-[var(--red-subtle)] text-[var(--red)]' : 'border-[rgba(74,222,128,.22)] bg-[var(--green-subtle)] text-[var(--green)]')}>{log.level}</span>
+                        <span className="text-xs text-[var(--muted)]">{log.source}</span>
+                        <strong className="min-w-0 text-xs text-[var(--fg)]">{log.message}</strong>
+                        <time className="text-xs text-[var(--muted)]">{timeLabel(log.createdAt)}</time>
                       </article>
                     ))}
-                    {dashboard.adminClientStatuses.map((status) => (
-                      <article key={`status-${status.deviceId}`} className="grid grid-cols-[minmax(0,1fr)_120px_140px_auto] items-center gap-2 rounded-[7px] border border-[rgba(74,222,128,.18)] bg-[rgba(74,222,128,.06)] p-2 text-[var(--fg-secondary)] max-[620px]:grid-cols-1">
-                        <strong className="min-w-0 text-xs text-[var(--fg)]">{status.displayName}</strong>
-                        <span className="text-xs text-[var(--muted)]">{status.mode}</span>
-                        <span className="text-xs text-[var(--muted)]">{status.microphone || status.status}</span>
-                        <time className="text-xs text-[var(--muted)]">{timeLabel(status.updatedAt)}</time>
-                      </article>
-                    ))}
-                    {dashboard.adminDevices.length === 0 ? <div className={assistantEmptyClass}>No connected devices yet.</div> : null}
+                    {logs.length === 0 ? <div className={assistantEmptyClass}>No logs yet.</div> : null}
                   </div>
                 </section>
               ) : null}
