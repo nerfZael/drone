@@ -2374,6 +2374,9 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     let terminalFinalize: TerminalCommand | null = null;
     const chunks: Uint8Array[] = [];
     const startedAt = Date.now();
+    let pausedAt: number | null = null;
+    let accumulatedPausedMs = 0;
+    let durationLimit: ReturnType<typeof setTimeout> | null = null;
     const streamingEnabled = streamingTranscriptionEnabled();
     const commandDetectionEnabled = streamingEnabled && !ignoreCommands;
     const transcriptionConfig = buildStreamingTranscriptionConfigFromEnv();
@@ -2462,17 +2465,81 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           });
         })
       : null;
-    socket.send(JSON.stringify({ type: 'server_hello', protocolVersion: VOICE_STREAM_PROTOCOL_VERSION, maxBytes: MAX_STREAM_BYTES, maxDurationMs: MAX_STREAM_DURATION_MS }));
+    socket.send(JSON.stringify({
+      type: 'server_hello',
+      protocolVersion: VOICE_STREAM_PROTOCOL_VERSION,
+      maxBytes: MAX_STREAM_BYTES,
+      maxDurationMs: MAX_STREAM_DURATION_MS,
+    }));
     const heartbeat = setInterval(() => {
       if ((socket as any).readyState === 1) {
         socket.send(JSON.stringify({ type: 'server_ping', sentAt: new Date().toISOString() }));
       }
     }, HEARTBEAT_INTERVAL_MS);
-    const durationLimit = setTimeout(() => {
-      if ((socket as any).readyState === 1) {
-        socket.close(VoiceCloseCode.TooLong, 'stream duration limit exceeded');
-      }
-    }, MAX_STREAM_DURATION_MS);
+    function activeDurationMs(now = Date.now()): number {
+      const currentPauseMs = pausedAt === null ? 0 : Math.max(0, now - pausedAt);
+      return Math.max(0, now - startedAt - accumulatedPausedMs - currentPauseMs);
+    }
+
+    function clearDurationLimit(): void {
+      if (!durationLimit) return;
+      clearTimeout(durationLimit);
+      durationLimit = null;
+    }
+
+    function scheduleDurationLimit(): void {
+      clearDurationLimit();
+      if (finalized || pausedAt !== null) return;
+      const remainingMs = Math.max(0, MAX_STREAM_DURATION_MS - activeDurationMs());
+      durationLimit = setTimeout(() => {
+        if ((socket as any).readyState === 1) {
+          socket.close(VoiceCloseCode.TooLong, 'stream active duration limit exceeded');
+        }
+      }, remainingMs);
+    }
+
+    function pauseVoiceStream(reason = ''): void {
+      if (pausedAt !== null) return;
+      pausedAt = Date.now();
+      clearDurationLimit();
+      db.upsertClientStatus(device.userId, device.id, {
+        mode: 'paused',
+        status: 'Voice stream paused',
+        protocolVersion: VOICE_STREAM_PROTOCOL_VERSION,
+      });
+      emitAppEvent(device.userId, 'client_status_changed', { deviceId: device.id, mode: 'paused' });
+      emitAppEvent(device.userId, 'device_changed', { deviceId: device.id, reason: 'voice_stream_paused' });
+      addLog(device.userId, {
+        deviceId: device.id,
+        source: device.deviceType,
+        level: 'info',
+        message: 'Voice stream paused',
+        detailsJson: JSON.stringify({ mode: streamMode, reason }),
+      });
+    }
+
+    function resumeVoiceStream(reason = ''): void {
+      if (pausedAt === null) return;
+      accumulatedPausedMs += Math.max(0, Date.now() - pausedAt);
+      pausedAt = null;
+      scheduleDurationLimit();
+      db.upsertClientStatus(device.userId, device.id, {
+        mode: 'recording',
+        status: 'Voice stream resumed',
+        protocolVersion: VOICE_STREAM_PROTOCOL_VERSION,
+      });
+      emitAppEvent(device.userId, 'client_status_changed', { deviceId: device.id, mode: 'recording' });
+      emitAppEvent(device.userId, 'device_changed', { deviceId: device.id, reason: 'voice_stream_resumed' });
+      addLog(device.userId, {
+        deviceId: device.id,
+        source: device.deviceType,
+        level: 'info',
+        message: 'Voice stream resumed',
+        detailsJson: JSON.stringify({ mode: streamMode, reason }),
+      });
+    }
+
+    scheduleDurationLimit();
     addLog(device.userId, {
       deviceId: device.id,
       source: device.deviceType,
@@ -2507,11 +2574,20 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           socket.send(JSON.stringify({ type: 'server_pong', sentAt: new Date().toISOString(), clientSentAt: parsed.sentAt }));
           return;
         }
+        if (parsed.type === 'pause') {
+          pauseVoiceStream(parsed.reason);
+          return;
+        }
+        if (parsed.type === 'resume') {
+          resumeVoiceStream(parsed.reason);
+          return;
+        }
         if (parsed.type === 'end') {
           void finalizeVoiceStream();
         }
         return;
       }
+      if (pausedAt !== null) return;
       frames += 1;
       const size = binarySize(data);
       bytes += size;
@@ -2538,7 +2614,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       finalized = true;
       streamingManager?.stop();
       clearInterval(heartbeat);
-      clearTimeout(durationLimit);
+      clearDurationLimit();
       const session =
         (requestedSessionId ? db.voiceSessionForDevice(device.userId, device.id, requestedSessionId) : null) ??
         db.latestVoiceSessionForDevice(device.userId, device.id) ??
@@ -2667,12 +2743,25 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         mode: terminalFinalize?.type === 'sleep' ? 'sleeping' : 'awake',
       });
       emitAppEvent(device.userId, 'device_changed', { deviceId: device.id, reason: 'voice_stream_disconnected' });
+      const endedAt = Date.now();
+      const activeMs = activeDurationMs(endedAt);
+      const wallMs = Math.max(0, endedAt - startedAt);
       addLog(device.userId, {
         deviceId: device.id,
         source: device.deviceType,
         level: 'info',
         message: 'Voice stream disconnected',
-        detailsJson: JSON.stringify({ frames, bytes, durationMs: Date.now() - startedAt, transcriptChars: transcript.length, assistantChars: assistantText.length, runtime, mode: streamMode }),
+        detailsJson: JSON.stringify({
+          frames,
+          bytes,
+          durationMs: activeMs,
+          wallDurationMs: wallMs,
+          pausedMs: Math.max(0, wallMs - activeMs),
+          transcriptChars: transcript.length,
+          assistantChars: assistantText.length,
+          runtime,
+          mode: streamMode,
+        }),
       });
       if ((socket as any).readyState === 1) {
         setTimeout(() => {

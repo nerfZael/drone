@@ -43,6 +43,16 @@ const LOCAL_VOICE_CUE_TONES = {
     { frequencyHz: 820, durationMs: 70 },
     { frequencyHz: 1040, durationMs: 120 },
   ],
+  recording_pause: [
+    { frequencyHz: 440, durationMs: 65 },
+    { frequencyHz: 0, durationMs: 35 },
+    { frequencyHz: 330, durationMs: 95 },
+  ],
+  recording_resume: [
+    { frequencyHz: 330, durationMs: 55 },
+    { frequencyHz: 440, durationMs: 70 },
+    { frequencyHz: 560, durationMs: 85 },
+  ],
 };
 
 let lastPlayedCue = '';

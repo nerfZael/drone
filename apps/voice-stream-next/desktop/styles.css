@@ -773,9 +773,18 @@ h2 {
   background: rgba(167, 139, 250, .12);
 }
 
+.voice-orb.is-paused {
+  border-color: rgba(255, 178, 36, .58);
+  background: rgba(255, 178, 36, .10);
+}
+
 .voice-orb.is-recording .orb-ring,
 .voice-orb.is-transcribing .orb-ring {
   animation: pulse-ring 1.4s ease-in-out infinite;
+}
+
+.voice-orb.is-paused .orb-ring {
+  border-color: rgba(255, 178, 36, .30);
 }
 
 .voice-orb.is-sleeping {
@@ -972,6 +981,10 @@ body.is-compact .voice-orb.is-awake {
 body.is-compact .voice-orb.is-recording,
 body.is-compact .voice-orb.is-transcribing {
   background: rgba(167, 139, 250, .10);
+}
+
+body.is-compact .voice-orb.is-paused {
+  background: rgba(255, 178, 36, .10);
 }
 
 body.is-compact .voice-orb.is-sleeping {

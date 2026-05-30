@@ -31,6 +31,14 @@ const DEFAULT_TURN_OFF_SHORTCUT = {
   alt: false,
   shift: true,
 };
+const DEFAULT_PAUSE_RESUME_SHORTCUT = {
+  key: 'p',
+  mod: true,
+  ctrl: false,
+  meta: false,
+  alt: false,
+  shift: true,
+};
 const MODIFIER_ONLY_SHORTCUT_KEYS = new Set(['shift', 'control', 'ctrl', 'alt', 'meta', 'os']);
 
 const preRollBuffer = new PcmCaptureBuffer(PRE_ROLL_MAX_BYTES);
@@ -58,6 +66,7 @@ const state = {
   voiceSessionId: null,
   voiceTarget: 'assistant',
   voiceSuppressCommands: false,
+  recordingPaused: false,
   transcriptionShortcutActive: false,
   transcriptionReturnMode: null,
   transcriptionReturnStatus: '',
@@ -136,6 +145,10 @@ const els = {
   turnOffShortcutClear: document.querySelector('#turnOffShortcutClear'),
   turnOffShortcutReset: document.querySelector('#turnOffShortcutReset'),
   turnOffShortcutStatus: document.querySelector('#turnOffShortcutStatus'),
+  pauseResumeShortcutCapture: document.querySelector('#pauseResumeShortcutCapture'),
+  pauseResumeShortcutClear: document.querySelector('#pauseResumeShortcutClear'),
+  pauseResumeShortcutReset: document.querySelector('#pauseResumeShortcutReset'),
+  pauseResumeShortcutStatus: document.querySelector('#pauseResumeShortcutStatus'),
   extensionsConfigInput: document.querySelector('#extensionsConfigInput'),
   addExtensionFileButton: document.querySelector('#addExtensionFileButton'),
   extensionDropzone: document.querySelector('#extensionDropzone'),
@@ -229,6 +242,9 @@ function readFormConfig() {
     inputDeviceId: els.inputDeviceSelect?.value ?? state.config?.inputDeviceId ?? '',
     outputDeviceId: els.outputDeviceSelect?.value ?? state.config?.outputDeviceId ?? '',
     transcriptionShortcut: sanitizeShortcutBinding(state.config?.transcriptionShortcut, DEFAULT_TRANSCRIPTION_SHORTCUT),
+    awakeSleepToggleShortcut: sanitizeShortcutBinding(state.config?.awakeSleepToggleShortcut, DEFAULT_AWAKE_SLEEP_TOGGLE_SHORTCUT),
+    turnOffShortcut: sanitizeShortcutBinding(state.config?.turnOffShortcut, DEFAULT_TURN_OFF_SHORTCUT),
+    pauseResumeShortcut: sanitizeShortcutBinding(state.config?.pauseResumeShortcut, DEFAULT_PAUSE_RESUME_SHORTCUT),
   };
 }
 
@@ -448,6 +464,7 @@ function applyConfig(config) {
     transcriptionShortcut: sanitizeShortcutBinding(config?.transcriptionShortcut, DEFAULT_TRANSCRIPTION_SHORTCUT),
     awakeSleepToggleShortcut: sanitizeShortcutBinding(config?.awakeSleepToggleShortcut, DEFAULT_AWAKE_SLEEP_TOGGLE_SHORTCUT),
     turnOffShortcut: sanitizeShortcutBinding(config?.turnOffShortcut, DEFAULT_TURN_OFF_SHORTCUT),
+    pauseResumeShortcut: sanitizeShortcutBinding(config?.pauseResumeShortcut, DEFAULT_PAUSE_RESUME_SHORTCUT),
   };
   if (els.serverUrlInput) els.serverUrlInput.value = config.serverUrl;
   if (els.deviceNameInput) els.deviceNameInput.value = config.deviceName;
@@ -483,7 +500,7 @@ function applyConfig(config) {
 
 function normalizeShortcutStatusPayload(status) {
   if (!status) return null;
-  if (status.transcription || status.awakeSleepToggle || status.turnOff) return status;
+  if (status.transcription || status.awakeSleepToggle || status.turnOff || status.pauseResume) return status;
   if (typeof status.registered === 'boolean') return { transcription: status };
   return status;
 }
@@ -516,6 +533,15 @@ function renderShortcutSettings() {
       statusEl: els.turnOffShortcutStatus,
       statusKey: 'turnOff',
       disabledLabel: 'Turn off shortcut is disabled.',
+    },
+    {
+      configKey: 'pauseResumeShortcut',
+      defaultBinding: DEFAULT_PAUSE_RESUME_SHORTCUT,
+      captureEl: els.pauseResumeShortcutCapture,
+      clearEl: els.pauseResumeShortcutClear,
+      statusEl: els.pauseResumeShortcutStatus,
+      statusKey: 'pauseResume',
+      disabledLabel: 'Pause and resume shortcut is disabled.',
     },
   ];
   const statuses = normalizeShortcutStatusPayload(state.shortcutStatus);
@@ -813,7 +839,7 @@ function ensureControlSocket() {
       return;
     }
     if (message.type === 'speech_audio') {
-      if (state.voiceSuppressCommands && (state.mode === 'recording' || state.mode === 'transcribing')) return;
+      if (state.voiceSuppressCommands && (state.mode === 'recording' || state.mode === 'paused' || state.mode === 'transcribing')) return;
       playWavBase64(message.audioBase64);
       return;
     }
@@ -843,7 +869,7 @@ function handleRemoteControlCommand(message, socket) {
       void reportClientStatus(state.mode, els.micStatus.textContent || state.mode);
       return;
     }
-    if (state.voiceSuppressCommands && (state.mode === 'recording' || state.mode === 'transcribing')) {
+    if (state.voiceSuppressCommands && (state.mode === 'recording' || state.mode === 'paused' || state.mode === 'transcribing')) {
       ack({ ok: false, mode: state.mode, status: els.micStatus.textContent || state.mode, error: 'busy transcribing' });
       return;
     }
@@ -873,11 +899,14 @@ function updateVoiceButtons() {
     awake: ['Awake', 'Sleep'],
     sleeping: ['Sleeping', 'Wake'],
     recording: ['Recording', 'Stop'],
+    paused: ['Paused', 'Resume'],
     transcribing: ['Working', 'Please wait'],
     error: ['Voice error', 'Retry'],
   };
   const [modeLabel, actionLabel] = state.voiceTarget === 'clipboard' && state.mode === 'recording'
     ? ['Recording', 'Transcription']
+    : state.voiceTarget === 'clipboard' && state.mode === 'paused'
+      ? ['Paused', 'Resume']
     : state.voiceTarget === 'clipboard' && state.mode === 'transcribing'
       ? ['Transcribing', 'Copying']
       : labels[state.mode] || ['Voice', 'Toggle'];
@@ -915,6 +944,7 @@ function flushPendingStreamFrames() {
 }
 
 function sendOrBufferStreamFrame(pcmBuffer) {
+  if (state.recordingPaused || state.mode === 'paused') return;
   if (state.voiceOutgoingReady && state.voiceSocket?.readyState === WebSocket.OPEN) {
     flushPendingStreamFrames();
     state.voiceSocket.send(pcmBuffer);
@@ -926,7 +956,7 @@ function sendOrBufferStreamFrame(pcmBuffer) {
 }
 
 function pushPreRollFrame(pcmBuffer) {
-  if (state.mode === 'recording' || state.mode === 'off') return;
+  if (state.mode === 'recording' || state.mode === 'paused' || state.mode === 'off') return;
   preRollBuffer.push(pcmBuffer);
 }
 
@@ -942,7 +972,7 @@ function reconnectDelayLabel(delayMs) {
 }
 
 function scheduleVoiceReconnect() {
-  if (state.mode !== 'recording' || state.voiceStreamEnding || !state.voiceSessionId) return;
+  if (!['recording', 'paused'].includes(state.mode) || state.voiceStreamEnding || !state.voiceSessionId) return;
   if (state.voiceReconnecting) return;
   state.voiceReconnecting = true;
   const attempt = Math.min(state.voiceReconnectAttempt, MAX_RECONNECT_EXPONENT);
@@ -952,7 +982,7 @@ function scheduleVoiceReconnect() {
   state.voiceReconnectTimer = window.setTimeout(() => {
     state.voiceReconnectTimer = null;
     state.voiceReconnecting = false;
-    if (state.mode !== 'recording' || state.voiceStreamEnding) return;
+    if (!['recording', 'paused'].includes(state.mode) || state.voiceStreamEnding) return;
     state.voiceOutgoingReady = false;
     const previousSocket = state.voiceSocket;
     if (previousSocket) {
@@ -977,6 +1007,7 @@ function resetVoiceStreamState() {
   state.voiceStreamEnding = false;
   state.voicePostStopMode = 'awake';
   state.voicePostStopStatus = '';
+  state.recordingPaused = false;
   pendingStreamBuffer.clear();
 }
 
@@ -993,6 +1024,7 @@ async function cleanupLocalCapture() {
   state.stream = null;
   state.audioContext = null;
   state.processor = null;
+  state.recordingPaused = false;
   cancelAnimationFrame(state.meterFrame);
   els.meterBar.style.width = '0%';
 }
@@ -1607,6 +1639,7 @@ async function startMic(target = 'assistant', options = {}) {
     state.voiceSocket = null;
     state.voiceSessionId = null;
     state.voiceSuppressCommands = false;
+    state.recordingPaused = false;
     resetVoiceStreamState();
     if (state.mode !== 'off') startWakeListener();
     throw err;
@@ -1682,7 +1715,7 @@ function openVoiceSocket(target) {
     state.voiceOutgoingReady = true;
     socket.send(JSON.stringify({ type: 'client_hello', protocolVersion: 1, client: 'electron-fallback', mode: target }));
     flushPendingStreamFrames();
-    showStatus(recordingStatus(target));
+    showStatus(state.recordingPaused ? pausedStatus(target) : recordingStatus(target));
   };
   socket.onmessage = async (event) => {
     if (typeof event.data !== 'string') {
@@ -1691,6 +1724,11 @@ function openVoiceSocket(target) {
     }
     try {
       const message = JSON.parse(event.data);
+      if (message.type === 'server_hello') {
+        if (state.recordingPaused || state.mode === 'paused') {
+          sendVoiceStreamControl('pause', 'desktop reconnect');
+        }
+      }
       if (message.type === 'server_ping') {
         socket.send(JSON.stringify({ type: 'client_ping', sentAt: new Date().toISOString() }));
       }
@@ -1770,14 +1808,14 @@ function openVoiceSocket(target) {
       completeStoppedVoice(state.voicePostStopMode || 'awake', state.voicePostStopStatus || 'Voice stream closed before transcription completed.');
       return;
     }
-    if (state.mode === 'recording' && !state.voiceStreamEnding && event.code === 1000) {
+    if (['recording', 'paused'].includes(state.mode) && !state.voiceStreamEnding && event.code === 1000) {
       if (target === 'clipboard' && !terminalMessageReceived) {
         void logDesktopEvent('warn', 'Voice stream closed before clipboard result', { code: event.code, reason: event.reason || '' });
       }
       void finishMicFromServer();
       return;
     }
-    if (state.mode === 'recording' && !state.voiceStreamEnding) {
+    if (['recording', 'paused'].includes(state.mode) && !state.voiceStreamEnding) {
       showStatus(serverConnectionErrorMessage());
       scheduleVoiceReconnect();
       return;
@@ -1788,7 +1826,7 @@ function openVoiceSocket(target) {
   };
   socket.onerror = () => {
     state.voiceOutgoingReady = false;
-    if (state.mode === 'recording' && !state.voiceStreamEnding) {
+    if (['recording', 'paused'].includes(state.mode) && !state.voiceStreamEnding) {
       showStatus(serverConnectionErrorMessage());
       scheduleVoiceReconnect();
     }
@@ -1966,6 +2004,33 @@ function recordingStatus(target) {
   if (target === 'patch') return 'Patching voice transcript into chat.';
   if (target === 'clipboard') return 'Recording clipboard transcription.';
   return 'Streaming microphone frames to the Drone service.';
+}
+
+function pausedStatus(target = state.voiceTarget) {
+  if (target === 'clipboard') return 'Clipboard transcription paused.';
+  if (target === 'patch') return 'Voice patch recording paused.';
+  return 'Voice request recording paused.';
+}
+
+function resumeStatus(target = state.voiceTarget) {
+  return recordingStatus(target);
+}
+
+function sendVoiceStreamControl(type, reason = 'desktop shortcut') {
+  const socket = state.voiceSocket;
+  if (!socket || (socket.readyState !== WebSocket.OPEN && socket.readyState !== WebSocket.CONNECTING)) return;
+  const send = () => {
+    try {
+      socket.send(JSON.stringify({ type, reason }));
+    } catch {
+      // The stream may close while a pause/resume shortcut is being handled.
+    }
+  };
+  if (socket.readyState === WebSocket.OPEN) {
+    send();
+    return;
+  }
+  socket.addEventListener('open', send, { once: true });
 }
 
 async function copyText(text) {
@@ -2172,6 +2237,51 @@ async function turnOff(options = {}) {
   setMode('off', 'Off.');
 }
 
+function pauseRecording() {
+  if (state.mode !== 'recording' || (!state.voiceSocket && !state.stream)) {
+    showStatus('No active recording to pause.');
+    return false;
+  }
+  state.recordingPaused = true;
+  pendingStreamBuffer.clear();
+  sendVoiceStreamControl('pause');
+  els.meterBar.style.width = '0%';
+  playLocalVoiceCue('recording_pause');
+  setMode('paused', pausedStatus(state.voiceTarget));
+  void logDesktopEvent('info', 'Desktop microphone capture paused', { target: state.voiceTarget });
+  return true;
+}
+
+function resumeRecording() {
+  if (state.mode !== 'paused' || (!state.voiceSocket && !state.stream)) {
+    showStatus('No paused recording to resume.');
+    return false;
+  }
+  state.recordingPaused = false;
+  pendingStreamBuffer.clear();
+  sendVoiceStreamControl('resume');
+  playLocalVoiceCue('recording_resume');
+  setMode('recording', resumeStatus(state.voiceTarget));
+  void logDesktopEvent('info', 'Desktop microphone capture resumed', { target: state.voiceTarget });
+  return true;
+}
+
+async function togglePauseResumeRecording() {
+  if (state.mode === 'recording') {
+    pauseRecording();
+    return;
+  }
+  if (state.mode === 'paused') {
+    resumeRecording();
+    return;
+  }
+  if (state.mode === 'transcribing') {
+    showStatus('Voice transcription is finishing.');
+    return;
+  }
+  showStatus('No active recording to pause.');
+}
+
 async function processApprovalCode(code) {
   const settings = await loadVoiceSettings();
   if (state.mode === 'sleeping') {
@@ -2205,6 +2315,11 @@ async function processPhraseText(text, finalizeNow = false) {
   if (state.mode === 'recording') {
     showStatus('Recording. Wake commands are ignored until capture stops.');
     void logDesktopEvent('info', 'Wake phrase ignored while recording', { text });
+    return;
+  }
+  if (state.mode === 'paused') {
+    showStatus(pausedStatus(state.voiceTarget));
+    void logDesktopEvent('info', 'Wake phrase ignored while recording is paused', { text });
     return;
   }
   if (state.mode === 'sleeping' && settings && globalThis.VoicePhrases) {
@@ -2392,6 +2507,11 @@ function stopVoskWakeListener() {
 
 function renderMeter() {
   if (!state.analyser || !state.stream) return;
+  if (state.recordingPaused || state.mode === 'paused') {
+    els.meterBar.style.width = '0%';
+    state.meterFrame = requestAnimationFrame(renderMeter);
+    return;
+  }
   const data = new Uint8Array(state.analyser.frequencyBinCount);
   state.analyser.getByteFrequencyData(data);
   const average = data.reduce((sum, value) => sum + value, 0) / data.length;
@@ -2400,6 +2520,10 @@ function renderMeter() {
 }
 
 async function togglePrimaryVoice() {
+  if (state.mode === 'paused') {
+    resumeRecording();
+    return;
+  }
   if (state.mode === 'recording' || state.mode === 'transcribing') {
     if (state.transcriptionShortcutActive && state.voiceTarget === 'clipboard') {
       await stopMic(transcriptionReturnMode(), { finalStatus: transcriptionReturnStatus() });
@@ -2430,6 +2554,15 @@ async function toggleTranscriptionShortcut(overlayRestore = null) {
   if (state.mode === 'transcribing') {
     showStatus('Voice transcription is already running.');
     restoreTemporaryTranscriptionOverlay(overlayRestore, 650);
+    return;
+  }
+  if (state.mode === 'paused') {
+    if (state.voiceTarget !== 'clipboard') {
+      showStatus('Assistant voice recording is paused.');
+      restoreTemporaryTranscriptionOverlay(overlayRestore, 650);
+      return;
+    }
+    await stopMic(transcriptionReturnMode(), { cue: 'stop_button', finalStatus: transcriptionReturnStatus() });
     return;
   }
   if (state.mode === 'recording') {
@@ -2539,6 +2672,14 @@ bindShortcutControls({
   resetEl: els.turnOffShortcutReset,
   resetInvoker: desktop.resetTurnOffShortcut ? () => desktop.resetTurnOffShortcut() : null,
 });
+bindShortcutControls({
+  configKey: 'pauseResumeShortcut',
+  defaultBinding: DEFAULT_PAUSE_RESUME_SHORTCUT,
+  captureEl: els.pauseResumeShortcutCapture,
+  clearEl: els.pauseResumeShortcutClear,
+  resetEl: els.pauseResumeShortcutReset,
+  resetInvoker: desktop.resetPauseResumeShortcut ? () => desktop.resetPauseResumeShortcut() : null,
+});
 if (els.inputDeviceSelect) {
   els.inputDeviceSelect.addEventListener('change', () => {
     renderDevicePicker(els.inputDeviceSelect);
@@ -2645,6 +2786,11 @@ document.addEventListener('keydown', (event) => {
     void turnOff().catch((err) => showStatus(err?.message || 'Could not turn voice off.'));
     return;
   }
+  if (isShortcutMatch(state.config?.pauseResumeShortcut, event)) {
+    event.preventDefault();
+    void togglePauseResumeRecording().catch((err) => showStatus(err?.message || 'Could not pause or resume recording.'));
+    return;
+  }
   if (!isShortcutMatch(state.config?.transcriptionShortcut, event)) return;
   event.preventDefault();
   void (async () => {
@@ -2683,6 +2829,12 @@ if (desktop.onAwakeSleepToggleShortcut) {
 if (desktop.onTurnOffShortcut) {
   desktop.onTurnOffShortcut(() => {
     void turnOff().catch((err) => showStatus(err?.message || 'Could not turn voice off.'));
+  });
+}
+
+if (desktop.onPauseResumeShortcut) {
+  desktop.onPauseResumeShortcut(() => {
+    void togglePauseResumeRecording().catch((err) => showStatus(err?.message || 'Could not pause or resume recording.'));
   });
 }
 

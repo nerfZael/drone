@@ -74,6 +74,15 @@ const defaultTurnOffShortcut = {
   shift: true,
 };
 
+const defaultPauseResumeShortcut = {
+  key: 'p',
+  mod: true,
+  ctrl: false,
+  meta: false,
+  alt: false,
+  shift: true,
+};
+
 const sampleRate = 16_000;
 const voicePhrases = loadSharedClassicScript('voice-phrases.js');
 const defaultVoicePhraseSettings = voicePhrases.VOICE_PHRASE_DEFAULTS;
@@ -110,6 +119,7 @@ const defaultConfig = {
   transcriptionShortcut: defaultTranscriptionShortcut,
   awakeSleepToggleShortcut: defaultAwakeSleepToggleShortcut,
   turnOffShortcut: defaultTurnOffShortcut,
+  pauseResumeShortcut: defaultPauseResumeShortcut,
   extensionBridgeEnabled: true,
   extensions: [],
   authSavedAt: '',
@@ -141,6 +151,7 @@ function normalizeConfig(nextConfig) {
   config.transcriptionShortcut = sanitizeShortcutBinding(config.transcriptionShortcut, defaultTranscriptionShortcut);
   config.awakeSleepToggleShortcut = sanitizeShortcutBinding(config.awakeSleepToggleShortcut, defaultAwakeSleepToggleShortcut);
   config.turnOffShortcut = sanitizeShortcutBinding(config.turnOffShortcut, defaultTurnOffShortcut);
+  config.pauseResumeShortcut = sanitizeShortcutBinding(config.pauseResumeShortcut, defaultPauseResumeShortcut);
   if (!String(config.installationId || '').trim()) {
     config.installationId = createInstallationId();
   }
@@ -676,6 +687,7 @@ function allShortcutStatuses() {
     transcription: transcriptionShortcutRegistration.getStatus(),
     awakeSleepToggle: awakeSleepToggleShortcutRegistration.getStatus(),
     turnOff: turnOffShortcutRegistration.getStatus(),
+    pauseResume: pauseResumeShortcutRegistration.getStatus(),
   };
 }
 
@@ -688,6 +700,7 @@ function registerAllGlobalShortcuts() {
   transcriptionShortcutRegistration.register();
   awakeSleepToggleShortcutRegistration.register();
   turnOffShortcutRegistration.register();
+  pauseResumeShortcutRegistration.register();
   return allShortcutStatuses();
 }
 
@@ -728,6 +741,20 @@ function triggerTurnOffShortcut() {
   triggerRendererShortcut('shortcut:turnOff');
 }
 
+function triggerPauseResumeShortcut() {
+  const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow({ compactShowInactive: true });
+  const shouldShowCompact = ['recording', 'paused'].includes(trayStatus.mode) && (!win.isVisible() || win.isMinimized());
+  if (shouldShowCompact) applyCompactMode(win, { inactive: true });
+  const send = () => {
+    if (!win.isDestroyed()) win.webContents.send('shortcut:pauseResume');
+  };
+  if (win.webContents.isLoading()) {
+    win.webContents.once('did-finish-load', send);
+  } else {
+    send();
+  }
+}
+
 const transcriptionShortcutRegistration = createShortcutRegistration({
   defaultBinding: defaultTranscriptionShortcut,
   configKey: 'transcriptionShortcut',
@@ -744,6 +771,12 @@ const turnOffShortcutRegistration = createShortcutRegistration({
   defaultBinding: defaultTurnOffShortcut,
   configKey: 'turnOffShortcut',
   onTrigger: triggerTurnOffShortcut,
+});
+
+const pauseResumeShortcutRegistration = createShortcutRegistration({
+  defaultBinding: defaultPauseResumeShortcut,
+  configKey: 'pauseResumeShortcut',
+  onTrigger: triggerPauseResumeShortcut,
 });
 
 function restoreTemporaryOverlay(win, restoreWindowMode) {
@@ -1327,6 +1360,7 @@ function trayModeLabel(mode) {
     awake: 'Awake',
     sleeping: 'Asleep',
     recording: 'Recording',
+    paused: 'Paused',
     transcribing: 'Working',
     error: 'Error',
   };
@@ -1336,7 +1370,7 @@ function trayModeLabel(mode) {
 function normalizeTrayMode(mode) {
   const value = String(mode || '').trim().toLowerCase();
   if (value === 'asleep' || value === 'sleep') return 'sleeping';
-  if (['off', 'awake', 'sleeping', 'recording', 'transcribing', 'error'].includes(value)) return value;
+  if (['off', 'awake', 'sleeping', 'recording', 'paused', 'transcribing', 'error'].includes(value)) return value;
   return 'off';
 }
 
@@ -1570,6 +1604,11 @@ if (!gotSingleInstanceLock) {
   });
   ipcMain.handle('shortcut:resetTurnOff', () => {
     const config = writeConfig({ ...readConfig(), turnOffShortcut: defaultTurnOffShortcut });
+    registerAllGlobalShortcuts();
+    return { ok: true, config, status: allShortcutStatuses() };
+  });
+  ipcMain.handle('shortcut:resetPauseResume', () => {
+    const config = writeConfig({ ...readConfig(), pauseResumeShortcut: defaultPauseResumeShortcut });
     registerAllGlobalShortcuts();
     return { ok: true, config, status: allShortcutStatuses() };
   });
