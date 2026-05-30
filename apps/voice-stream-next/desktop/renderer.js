@@ -657,10 +657,21 @@ function headers() {
 async function api(path, init = {}) {
   const config = readFormConfig();
   const { suppressAuthGuidance = false, ...fetchInit } = init;
-  const response = await fetch(`${trimSlash(config.serverUrl)}${path}`, {
-    ...fetchInit,
-    headers: { ...headers(), ...(fetchInit.headers || {}) },
-  });
+  let response;
+  try {
+    response = await fetch(`${trimSlash(config.serverUrl)}${path}`, {
+      ...fetchInit,
+      headers: { ...headers(), ...(fetchInit.headers || {}) },
+    });
+  } catch (cause) {
+    const message = serverConnectionErrorMessage(config.serverUrl);
+    const err = new Error(message);
+    err.cause = cause;
+    err.serverUrl = trimSlash(config.serverUrl);
+    updateConnection('error', 'Server offline', `Cannot reach ${trimSlash(config.serverUrl)}`);
+    if (!suppressAuthGuidance) updateAuthStatus('error', message);
+    throw err;
+  }
   const text = await response.text();
   let body = null;
   if (text) {
@@ -696,6 +707,11 @@ function updateConnection(kind, label, detail) {
 
 function showStatus(message) {
   els.micStatus.textContent = message;
+}
+
+function serverConnectionErrorMessage(serverUrl = readFormConfig().serverUrl) {
+  const url = trimSlash(serverUrl) || 'the configured server';
+  return `Cannot reach Voice Stream Next server at ${url}. Start the VSN server and try again.`;
 }
 
 function ensureSignedOutWindowExpanded() {
@@ -1762,7 +1778,7 @@ function openVoiceSocket(target) {
       return;
     }
     if (state.mode === 'recording' && !state.voiceStreamEnding) {
-      showStatus('Voice stream disconnected.');
+      showStatus(serverConnectionErrorMessage());
       scheduleVoiceReconnect();
       return;
     }
@@ -1773,7 +1789,7 @@ function openVoiceSocket(target) {
   socket.onerror = () => {
     state.voiceOutgoingReady = false;
     if (state.mode === 'recording' && !state.voiceStreamEnding) {
-      showStatus('Voice stream error.');
+      showStatus(serverConnectionErrorMessage());
       scheduleVoiceReconnect();
     }
   };
