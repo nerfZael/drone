@@ -370,6 +370,40 @@ describe('assistant parity runtime', () => {
     expect(events.some((event) => event.type === 'tool_result' && event.result?.provider === 'exa')).toBe(true);
   });
 
+  test('creates a new voice thread from the assistant tool for future recordings', async () => {
+    const db = tempDb('assistant-create-new-thread');
+    dbs.push(db);
+    const user = testUser(db);
+    const device = db.registerDevice(user.id, { deviceType: 'android', displayName: 'Phone' });
+    const thread = db.createThread(user.id, {
+      title: 'Current voice thread',
+      source: 'voice',
+      voiceEnabled: true,
+      provider: 'codex',
+      model: 'gpt-5.5',
+      thinkingLevel: 'high',
+    });
+    process.env.VOICE_STREAM_NEXT_TEST_MODEL_TOOL_CALLS = JSON.stringify([
+      {
+        name: 'create_new_thread',
+        arguments: { title: 'Fresh voice thread' },
+      },
+    ]);
+
+    await promptAssistantThread(db, user.id, thread.id, { prompt: 'Start a new thread.' }, () => undefined);
+
+    const created = db.listThreads(user.id).find((item) => item.title === 'Fresh voice thread');
+    if (!created) throw new Error('expected create_new_thread to create a voice thread');
+    expect(created.source).toBe('voice');
+    expect(created.voiceEnabled).toBe(true);
+    expect(created.provider).toBe('codex');
+    expect(created.thinkingLevel).toBe('high');
+    expect(db.latestVoiceThreadOrNull(user.id)?.id).toBe(created.id);
+
+    const session = db.createVoiceSession(user.id, device.device.id, 'assistant');
+    expect(session.assistantThreadId).toBe(created.id);
+  });
+
   test('pauses model-requested approval tools before execution', async () => {
     const db = tempDb('assistant-model-approval');
     dbs.push(db);

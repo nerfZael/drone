@@ -17,6 +17,9 @@ const ASSISTANT_WEB_SEARCH_MIGRATION_VERSION = '20260526140000';
 const ASSISTANT_FETCH_CONTENT_MIGRATION_VERSION = '20260526141000';
 const ASSISTANT_API_KEYS_MIGRATION_VERSION = '20260526142000';
 const ASSISTANT_DEFAULT_TOOLS_MIGRATION_VERSION = '20260527183000';
+const DEVICE_AUTH_REQUEST_TYPE_MIGRATION_VERSION = '20260527190000';
+const VOICE_SLEEP_PHRASES_MIGRATION_VERSION = '20260529120000';
+const ASSISTANT_CREATE_NEW_THREAD_TOOL_MIGRATION_VERSION = '20260530120000';
 
 function migrationRows(db: VoiceStreamNextDb): Array<{ version: string; name: string; checksum: string }> {
   return db.db
@@ -49,6 +52,9 @@ describe('database migrations', () => {
       ASSISTANT_FETCH_CONTENT_MIGRATION_VERSION,
       ASSISTANT_API_KEYS_MIGRATION_VERSION,
       ASSISTANT_DEFAULT_TOOLS_MIGRATION_VERSION,
+      DEVICE_AUTH_REQUEST_TYPE_MIGRATION_VERSION,
+      VOICE_SLEEP_PHRASES_MIGRATION_VERSION,
+      ASSISTANT_CREATE_NEW_THREAD_TOOL_MIGRATION_VERSION,
     ]);
     expect(columnNames(db, 'devices')).toContain('revoked_at');
     expect(columnNames(db, 'devices')).toContain('installation_id');
@@ -66,7 +72,7 @@ describe('database migrations', () => {
     const second = new VoiceStreamNextDb(filePath);
     dbs.push(second);
 
-    expect(migrationRows(second)).toHaveLength(8);
+    expect(migrationRows(second)).toHaveLength(11);
   });
 
   test('rejects changed migration checksums', () => {

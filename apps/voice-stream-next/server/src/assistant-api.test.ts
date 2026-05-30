@@ -159,6 +159,22 @@ describe('assistant API parity', () => {
     expect(desktopFiles.artifacts[0].content).toContain('Shared across devices');
   });
 
+  test('uses manually voice-enabled web threads for device recordings', async () => {
+    const user = db.upsertUser({
+      clerkUserId: 'clerk_voice_enabled_web_thread',
+      displayName: 'Voice Enabled Web Thread',
+      email: 'voice-enabled-web-thread@example.local',
+      admin: false,
+    });
+    const registered = db.registerDevice(user.id, { deviceType: 'desktop', displayName: 'Desktop' });
+    const thread = db.createThread(user.id, { title: 'Manual voice thread', source: 'web', voiceEnabled: true });
+
+    expect(db.latestVoiceThreadOrNull(user.id)?.id).toBe(thread.id);
+
+    const session = db.createVoiceSession(user.id, registered.device.id, 'assistant');
+    expect(session.assistantThreadId).toBe(thread.id);
+  });
+
   test('does not create a voice thread when Android reads files before any voice session', async () => {
     const user = db.upsertUser({
       clerkUserId: 'clerk_android_empty_files',
