@@ -1812,7 +1812,6 @@ async function handleTerminalDetected(message, socket, target) {
         ? 'Awake. Finishing clipboard transcription.'
         : 'Awake. Finishing voice request.';
   if (commandType === 'sleep') {
-    const settings = await loadVoiceSettings().catch(() => null);
     status = 'Sleeping. Say your unlock or shutdown phrase.';
     resetApprovalCollection();
     playLocalVoiceCue('sleep');
@@ -1824,9 +1823,10 @@ async function handleTerminalDetected(message, socket, target) {
     : voiceResultReturnTarget('awake', status);
   state.voicePostStopMode = returnTarget.mode;
   state.voicePostStopStatus = returnTarget.status;
-  setMode(returnTarget.mode, returnTarget.status);
   if (commandType === 'sleep') {
-    startWakeListener();
+    await enterStoppedSleep(returnTarget.status);
+  } else {
+    setMode(returnTarget.mode, returnTarget.status);
   }
   void logDesktopEvent('info', 'Desktop microphone capture stopped after terminal phrase', {
     commandType,
@@ -1870,15 +1870,24 @@ function completeStoppedVoice(nextMode = 'awake', status = '') {
     return;
   }
   if (nextMode === 'sleeping') {
-    resetApprovalCollection();
-    setMode('sleeping', status || 'Sleeping.');
-    startWakeListener();
+    void enterStoppedSleep(status || 'Sleeping.');
     finishTranscriptionShortcutOverlay();
     return;
   }
   setMode('awake', status || 'Awake. Waiting for voice command.');
   startWakeListener();
   finishTranscriptionShortcutOverlay();
+}
+
+async function enterStoppedSleep(status = 'Sleeping.') {
+  resetApprovalCollection();
+  setMode('sleeping', status || 'Sleeping.');
+  const settings = await loadVoiceSettings(true).catch((err) => {
+    showStatus(err?.message || 'Could not load voice settings.');
+    return null;
+  });
+  await applyDesktopVoskGrammar('sleep', settings);
+  startWakeListener();
 }
 
 function voiceResultReturnTarget(defaultMode = 'awake', defaultStatus = '') {
