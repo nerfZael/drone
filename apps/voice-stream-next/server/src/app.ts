@@ -79,6 +79,20 @@ type DesktopAppInfo = {
   downloadUrl: string | null;
 };
 
+type AppEventType =
+  | 'assistant_changed'
+  | 'device_changed'
+  | 'device_connected'
+  | 'device_disconnected'
+  | 'client_status_changed'
+  | 'settings_changed'
+  | 'speech_playback_changed'
+  | 'log_created'
+  | 'transcript_created'
+  | 'approval_code_created'
+  | 'release_changed'
+  | 'setup_changed';
+
 function parsePort(raw: unknown, fallback: number): number {
   const value = Number(raw);
   return Number.isInteger(value) && value > 0 && value <= 65535 ? value : fallback;
@@ -544,9 +558,9 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
   const db = new VoiceStreamNextDb();
   const controlChannels = new ControlChannelRegistry();
   const extensionBridges = new ExtensionBridgeRegistry();
-  const assistantEventClients = new Set<{ res: any; userId: string }>();
+  const appEventClients = new Set<{ res: any; userId: string; admin: boolean }>();
   const speechEventClients = new Set<{ id: string; res: any; userId: string; connectedAt: string }>();
-  let assistantChangeSequence = 0;
+  let appEventSequence = 0;
   const clerkEnabled = Boolean(process.env.CLERK_SECRET_KEY?.trim());
   const port = parsePort(process.env.VOICE_STREAM_NEXT_API_PORT ?? process.env.PORT, 3299);
 
@@ -577,25 +591,54 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     });
   });
 
-  const writeAssistantSseEvent = (res: any, event: string, data: unknown) => {
+  const writeSseEvent = (res: any, event: string, data: unknown) => {
     res.write(`event: ${event}\n`);
     res.write(`data: ${JSON.stringify(data)}\n\n`);
   };
-  const emitAssistantChange = (reason: string, threadId?: string) => {
+
+  const emitAppEvent = (userId: string | null, type: AppEventType, data: Record<string, unknown> = {}) => {
     const event = {
-      type: 'assistant_changed',
-      sequence: ++assistantChangeSequence,
-      reason,
-      ...(threadId ? { threadId } : {}),
+      type,
+      sequence: ++appEventSequence,
       at: new Date().toISOString(),
+      ...(userId ? { userId } : {}),
+      ...data,
     };
-    for (const client of [...assistantEventClients]) {
+    for (const client of [...appEventClients]) {
       if (client.res.destroyed || client.res.writableEnded) {
-        assistantEventClients.delete(client);
+        appEventClients.delete(client);
         continue;
       }
-      writeAssistantSseEvent(client.res, 'assistant_change', event);
+      if (userId && client.userId !== userId && !client.admin) continue;
+      writeSseEvent(client.res, 'app_event', event);
     }
+  };
+
+  const emitAssistantChange = (reason: string, threadId?: string, userId?: string) => {
+    emitAppEvent(userId ?? null, 'assistant_changed', { reason, ...(threadId ? { threadId } : {}) });
+  };
+
+  const addLog = (
+    userId: string,
+    input: { deviceId?: string | null; source: string; level: string; message: string; detailsJson?: string | null },
+  ) => {
+    const log = db.addLog(userId, input);
+    emitAppEvent(userId, 'log_created', { logId: log.id, deviceId: log.deviceId });
+    return log;
+  };
+
+  const addApprovalCode = (
+    userId: string,
+    input: { voiceSessionId?: string | null; code: string; source: string },
+  ) => {
+    const approvalCode = db.addApprovalCode(userId, input);
+    emitAppEvent(userId, 'approval_code_created', { approvalCodeId: approvalCode.id, voiceSessionId: approvalCode.voiceSessionId });
+    return approvalCode;
+  };
+
+  const addTranscript = (userId: string, voiceSessionId: string, text: string) => {
+    db.addTranscript(userId, voiceSessionId, text);
+    emitAppEvent(userId, 'transcript_created', { voiceSessionId });
   };
 
   type SpeechSurface = 'web' | 'desktop' | 'android';
@@ -673,7 +716,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       if (client) speechEventClients.delete(client);
       return false;
     }
-    writeAssistantSseEvent(client.res, 'speech_audio', payload);
+    writeSseEvent(client.res, 'speech_audio', payload);
     return true;
   };
 
@@ -686,7 +729,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     if (!clean) return;
     const destination = selectSpeechDestination(userId);
     if (!destination) {
-      db.addLog(userId, {
+      addLog(userId, {
         source: 'speech',
         level: 'warn',
         message: 'Speech playback skipped: no connected playback target',
@@ -697,7 +740,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     try {
       const speech = await synthesizeSpeech(clean);
       if (!speech.audio) {
-        db.addLog(userId, {
+        addLog(userId, {
           source: 'speech',
           level: 'warn',
           message: 'Speech playback skipped: TTS is not configured',
@@ -719,7 +762,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       const delivered = destination.surface === 'web'
         ? Boolean(destination.clientId && sendSpeechToWeb(destination.clientId, payload))
         : Boolean(destination.deviceId && controlChannels.sendSpeechAudio(destination.deviceId, payload));
-      db.addLog(userId, {
+      addLog(userId, {
         deviceId: destination.deviceId ?? null,
         source: 'speech',
         level: delivered ? 'info' : 'warn',
@@ -727,7 +770,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         detailsJson: JSON.stringify({ source: metadata.source, target: destination.surface, chars: clean.length, bytes: speech.audio.byteLength }),
       });
     } catch (error: any) {
-      db.addLog(userId, {
+      addLog(userId, {
         deviceId: destination.deviceId ?? null,
         source: 'speech',
         level: 'error',
@@ -767,7 +810,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
   const handleAssistantPromptEvent = (userId: string, threadId: string, event: any) => {
     handleSpeakToolResult(userId, threadId, event);
     if (['snapshot', 'message', 'queued', 'tool_call', 'tool_result', 'approval_pending', 'done', 'error'].includes(String(event?.type ?? ''))) {
-      emitAssistantChange(`assistant_${String(event.type)}`, threadId);
+      emitAssistantChange(`assistant_${String(event.type)}`, threadId, userId);
     }
   };
 
@@ -815,12 +858,13 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     withUser(req, reply, db, clerkEnabled, async (ctx) => {
       requireAdmin(ctx);
       const android = writeAndroidApkRelease(req, req.body);
-      db.addLog(ctx.user.id, {
+      addLog(ctx.user.id, {
         source: 'admin',
         level: 'info',
         message: `Android release uploaded: ${android.fileName ?? 'latest APK'}`,
         detailsJson: JSON.stringify({ variant: android.variant, versionCode: android.versionCode, size: android.size }),
       });
+      emitAppEvent(null, 'release_changed', { platform: 'android' });
       return { ok: true, android };
     }),
   );
@@ -829,12 +873,13 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     withUser(req, reply, db, clerkEnabled, async (ctx) => {
       requireAdmin(ctx);
       const desktop = writeDesktopAppRelease(req, req.body);
-      db.addLog(ctx.user.id, {
+      addLog(ctx.user.id, {
         source: 'admin',
         level: 'info',
         message: `Desktop release uploaded: ${desktop.fileName ?? 'latest app'}`,
         detailsJson: JSON.stringify({ variant: desktop.variant, size: desktop.size }),
       });
+      emitAppEvent(null, 'release_changed', { platform: 'desktop' });
       return { ok: true, desktop };
     }),
   );
@@ -844,6 +889,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       const expiresAt = pairingExpiresAt();
       const created = db.createAndroidSetupSession(ctx.user.id, expiresAt);
       const setupPath = `/api/mobile/android/setup/${encodeURIComponent(created.session.id)}?secret=${encodeURIComponent(created.secret)}`;
+      emitAppEvent(ctx.user.id, 'setup_changed', { setupId: created.session.id });
       return {
         ok: true,
         android: readAndroidApkInfo(req),
@@ -916,13 +962,15 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       pairingSessionId: claimed.pairingSession.id,
       apkUrl: android.downloadUrl,
     });
-    db.addLog(claimed.device.userId, {
+    addLog(claimed.device.userId, {
       deviceId: claimed.device.id,
       source: 'android',
       level: 'info',
       message: `Android setup QR paired: ${claimed.device.displayName}`,
       detailsJson: JSON.stringify({ androidSetupSessionId: claimed.session.id, expiresAt }),
     });
+    emitAppEvent(claimed.device.userId, 'device_changed', { deviceId: claimed.device.id, reason: 'android_setup_redeemed' });
+    emitAppEvent(claimed.device.userId, 'setup_changed', { setupId: claimed.session.id, deviceId: claimed.device.id });
     return {
       ok: true,
       paired: true,
@@ -965,7 +1013,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     return reply.send(createReadStream(desktopFile));
   });
 
-  app.get('/api/assistant/events', async (req, reply) => {
+  app.get('/api/events', async (req, reply) => {
     try {
       const ctx = await resolveRequestUser(req, db, clerkEnabled);
       reply.hijack();
@@ -975,9 +1023,9 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         connection: 'keep-alive',
       });
       (req.raw.socket as any).setTimeout?.(0);
-      const client = { res: reply.raw, userId: ctx.user.id };
-      assistantEventClients.add(client);
-      writeAssistantSseEvent(reply.raw, 'connected', { ok: true, at: new Date().toISOString() });
+      const client = { res: reply.raw, userId: ctx.user.id, admin: Boolean(ctx.user.admin) };
+      appEventClients.add(client);
+      writeSseEvent(reply.raw, 'connected', { ok: true, sequence: appEventSequence, at: new Date().toISOString() });
       const keepAlive = setInterval(() => {
         if (reply.raw.destroyed || reply.raw.writableEnded) return;
         reply.raw.write(': keepalive\n\n');
@@ -985,7 +1033,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       (keepAlive as any).unref?.();
       const cleanup = () => {
         clearInterval(keepAlive);
-        assistantEventClients.delete(client);
+        appEventClients.delete(client);
       };
       req.raw.on('close', cleanup);
       reply.raw.on('close', cleanup);
@@ -1012,7 +1060,8 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         connectedAt,
       };
       speechEventClients.add(client);
-      writeAssistantSseEvent(reply.raw, 'connected', { ok: true, target: 'web', at: connectedAt });
+      writeSseEvent(reply.raw, 'connected', { ok: true, target: 'web', at: connectedAt });
+      emitAppEvent(ctx.user.id, 'speech_playback_changed', { reason: 'web_speech_connected' });
       const keepAlive = setInterval(() => {
         if (reply.raw.destroyed || reply.raw.writableEnded) return;
         reply.raw.write(': keepalive\n\n');
@@ -1020,7 +1069,9 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       (keepAlive as any).unref?.();
       const cleanup = () => {
         clearInterval(keepAlive);
-        speechEventClients.delete(client);
+        if (speechEventClients.delete(client)) {
+          emitAppEvent(ctx.user.id, 'speech_playback_changed', { reason: 'web_speech_disconnected' });
+        }
       };
       req.raw.on('close', cleanup);
       reply.raw.on('close', cleanup);
@@ -1051,10 +1102,10 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
   app.patch('/api/settings/voice-codes', async (req, reply) =>
     withUser(req, reply, db, clerkEnabled, async (ctx) => {
       const body = jsonBody(req);
-      const current = db.ensureVoiceSettings(ctx.user.id);
       const settings = db.updateVoiceSettings(ctx.user.id, {
         lockCode: cleanCode(body.lockCode, 'lock code'),
       });
+      emitAppEvent(ctx.user.id, 'settings_changed', { settings: 'voice_codes' });
       return { ok: true, settings };
     }),
   );
@@ -1072,6 +1123,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         throw Object.assign(new Error('Invalid voice approval settings.'), { statusCode: 400 });
       }
       const settings = db.updateVoiceApprovalSettings(ctx.user.id, parsed);
+      emitAppEvent(ctx.user.id, 'settings_changed', { settings: 'voice_approval' });
       return voiceApprovalSettingsResponse(settings);
     }),
   );
@@ -1080,6 +1132,8 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     withUser(req, reply, db, clerkEnabled, async (ctx) => {
       const body = jsonBody(req);
       const settings = db.updateSpeechPlaybackTarget(ctx.user.id, cleanSpeechPlaybackTarget(body.target ?? body.speechPlaybackTarget));
+      emitAppEvent(ctx.user.id, 'settings_changed', { settings: 'speech_playback' });
+      emitAppEvent(ctx.user.id, 'speech_playback_changed', { preferredTarget: settings.speechPlaybackTarget });
       return { ok: true, settings, speechPlayback: speechPlaybackStatus(ctx.user.id) };
     }),
   );
@@ -1120,13 +1174,14 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         const status = claimed.reason === 'expired' ? 409 : 404;
         throw Object.assign(new Error(`desktop auth request ${claimed.reason.replace('_', ' ')}`), { statusCode: status });
       }
-      db.addLog(ctx.user.id, {
+      addLog(ctx.user.id, {
         deviceId: claimed.device.id,
         source: 'web',
         level: 'info',
         message: `Desktop auto-connected: ${claimed.device.displayName}`,
         detailsJson: JSON.stringify({ desktopAuthRequestId: claimed.request.id }),
       });
+      emitAppEvent(ctx.user.id, 'device_changed', { deviceId: claimed.device.id, reason: 'desktop_auth_claimed' });
       return {
         ok: true,
         device: claimed.device,
@@ -1170,13 +1225,14 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       const displayName = cleanText(body.displayName, deviceType) || deviceType;
       const installationId = cleanText(body.installationId) || null;
       const result = db.registerDevice(ctx.user.id, { deviceType, displayName, installationId });
-      db.addLog(ctx.user.id, {
+      addLog(ctx.user.id, {
         deviceId: result.device.id,
         source: deviceType,
         level: 'info',
         message: `Device paired: ${displayName}`,
         detailsJson: JSON.stringify({ deviceType }),
       });
+      emitAppEvent(ctx.user.id, 'device_changed', { deviceId: result.device.id, reason: 'device_paired' });
       return { ok: true, ...result };
     }),
   );
@@ -1202,13 +1258,15 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         pairingSessionId: pairingSession.id,
         apkUrl: deviceType === 'android' ? androidApk.downloadUrl : null,
       });
-      db.addLog(ctx.user.id, {
+      addLog(ctx.user.id, {
         deviceId: result.device.id,
         source: 'web',
         level: 'info',
         message: `Pairing payload created: ${displayName}`,
         detailsJson: JSON.stringify({ deviceType, expiresAt, pairingSessionId: pairingSession.id }),
       });
+      emitAppEvent(ctx.user.id, 'device_changed', { deviceId: result.device.id, reason: 'pairing_payload_created' });
+      emitAppEvent(ctx.user.id, 'setup_changed', { deviceId: result.device.id, pairingSessionId: pairingSession.id });
       return {
         ok: true,
         device: result.device,
@@ -1254,12 +1312,13 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       if (!displayName) throw Object.assign(new Error('device name is required'), { statusCode: 400 });
       const device = db.updateDeviceName(ctx.user.id, deviceId, displayName);
       if (!device) throw Object.assign(new Error('unknown device'), { statusCode: 404 });
-      db.addLog(ctx.user.id, {
+      addLog(ctx.user.id, {
         deviceId,
         source: 'web',
         level: 'info',
         message: `Device renamed: ${device.displayName}`,
       });
+      emitAppEvent(ctx.user.id, 'device_changed', { deviceId, reason: 'device_renamed' });
       return { ok: true, device };
     }),
   );
@@ -1286,7 +1345,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         targetKind,
         targetDeviceId,
       });
-      emitAssistantChange('extension_route_updated');
+      emitAssistantChange('extension_route_updated', undefined, ctx.user.id);
       return { ok: true, route, snapshot: assistantSnapshot(db, ctx.user.id) };
     }),
   );
@@ -1303,12 +1362,15 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         status: 'Device revoked',
         protocolVersion: VOICE_STREAM_PROTOCOL_VERSION,
       });
-      db.addLog(ctx.user.id, {
+      addLog(ctx.user.id, {
         deviceId,
         source: 'web',
         level: 'info',
         message: `Device revoked: ${device.displayName}`,
       });
+      emitAppEvent(ctx.user.id, 'client_status_changed', { deviceId, mode: 'off' });
+      emitAppEvent(ctx.user.id, 'device_changed', { deviceId, reason: 'device_revoked' });
+      emitAppEvent(ctx.user.id, 'speech_playback_changed', { reason: 'device_revoked' });
       return { ok: true, device };
     }),
   );
@@ -1343,12 +1405,15 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           apkUrl: deviceType === 'android' ? androidApk.downloadUrl : null,
         });
       }
-      db.addLog(ctx.user.id, {
+      addLog(ctx.user.id, {
         deviceId,
         source: 'web',
         level: 'info',
         message: `Device token rotated: ${rotated.device.displayName}`,
       });
+      emitAppEvent(ctx.user.id, 'device_changed', { deviceId, reason: 'device_token_rotated' });
+      if (pairingSession) emitAppEvent(ctx.user.id, 'setup_changed', { deviceId, pairingSessionId: pairingSession.id });
+      emitAppEvent(ctx.user.id, 'speech_playback_changed', { reason: 'device_token_rotated' });
       return {
         ok: true,
         device: rotated.device,
@@ -1370,13 +1435,14 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       const command = cleanControlCommand(body.command);
       const reason = cleanText(body.reason, 'dashboard') || 'dashboard';
       const result = await controlChannels.sendCommand(deviceId, command, reason);
-      db.addLog(ctx.user.id, {
+      addLog(ctx.user.id, {
         deviceId,
         source: 'web',
         level: result.delivered ? 'info' : 'warn',
         message: result.delivered ? `Remote command sent: ${command}` : `Remote command not delivered: ${command}`,
         detailsJson: JSON.stringify(result),
       });
+      emitAppEvent(ctx.user.id, 'device_changed', { deviceId, reason: 'device_command_sent', command });
       return { ok: true, ...result };
     }),
   );
@@ -1413,7 +1479,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           return;
         }
         const device = resolveDeviceInstallation(db, auth.device, cleanText(body.installationId || req.headers['x-voice-installation-id']) || null, token);
-        const log = db.addLog(device.userId, {
+        const log = addLog(device.userId, {
           deviceId: device.id,
           source: cleanText(body.source, device.deviceType) || device.deviceType,
           level: cleanText(body.level, 'info') || 'info',
@@ -1423,7 +1489,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         return { ok: true, log, device };
       }
       return withUser(req, reply, db, clerkEnabled, async (ctx) => {
-        const log = db.addLog(ctx.user.id, {
+        const log = addLog(ctx.user.id, {
           deviceId,
           source: cleanText(body.source, 'web') || 'web',
           level: cleanText(body.level, 'info') || 'info',
@@ -1472,6 +1538,8 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       lastError: cleanText(body.lastError) || null,
       reportedAt: cleanText(body.reportedAt) || null,
     });
+    emitAppEvent(device.userId, 'client_status_changed', { deviceId: device.id, mode: status.mode });
+    emitAppEvent(device.userId, 'device_changed', { deviceId: device.id, reason: 'device_status_reported' });
     return { ok: true, status, device };
   });
 
@@ -1492,6 +1560,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       return;
     }
     const device = resolveDeviceInstallation(db, auth.device, installationId, token);
+    emitAppEvent(device.userId, 'device_changed', { deviceId: device.id, reason: 'device_bootstrap' });
     return {
       ok: true,
       device,
@@ -1590,7 +1659,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     }
     const device = resolveDeviceInstallation(db, auth.device, installationId, token);
     controlChannels.register(device.id, socket);
-    db.addLog(device.userId, {
+    addLog(device.userId, {
       deviceId: device.id,
       source: device.deviceType,
       level: 'info',
@@ -1600,6 +1669,9 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         connectedDeviceIds: controlChannels.connectedDeviceIds().length,
       }),
     });
+    emitAppEvent(device.userId, 'device_connected', { deviceId: device.id, deviceType: device.deviceType });
+    emitAppEvent(device.userId, 'device_changed', { deviceId: device.id, reason: 'control_connected' });
+    emitAppEvent(device.userId, 'speech_playback_changed', { reason: 'control_connected' });
     socket.send(JSON.stringify({
       type: 'control_hello',
       protocolVersion: VOICE_STREAM_PROTOCOL_VERSION,
@@ -1623,7 +1695,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         return;
       }
       if (parsed.type === 'client_status') {
-        db.upsertClientStatus(device.userId, device.id, {
+        const status = db.upsertClientStatus(device.userId, device.id, {
           mode: cleanDeviceMode(parsed.mode),
           status: cleanText(parsed.status, 'No status') || 'No status',
           microphone: cleanText(parsed.microphone),
@@ -1632,6 +1704,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           lastError: cleanText(parsed.lastError) || null,
           reportedAt: cleanText(parsed.reportedAt) || null,
         });
+        emitAppEvent(device.userId, 'client_status_changed', { deviceId: device.id, mode: status.mode });
         return;
       }
       if (parsed.type === 'command_ack') {
@@ -1643,7 +1716,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     socket.on('close', (code: number, reason: Buffer) => {
       clearInterval(heartbeat);
       controlChannels.unregister(device.id, socket);
-      db.addLog(device.userId, {
+      addLog(device.userId, {
         deviceId: device.id,
         source: device.deviceType,
         level: 'warn',
@@ -1654,6 +1727,9 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           connectedDeviceIds: controlChannels.connectedDeviceIds().length,
         }),
       });
+      emitAppEvent(device.userId, 'device_disconnected', { deviceId: device.id, deviceType: device.deviceType });
+      emitAppEvent(device.userId, 'device_changed', { deviceId: device.id, reason: 'control_disconnected' });
+      emitAppEvent(device.userId, 'speech_playback_changed', { reason: 'control_disconnected' });
     });
   });
 
@@ -1722,12 +1798,14 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
             manifests,
           });
           registered = true;
-          db.upsertClientStatus(device.userId, device.id, {
+          const status = db.upsertClientStatus(device.userId, device.id, {
             mode: 'awake',
             status: manifests.length > 0 ? 'Extension bridge connected' : 'Extension bridge connected without tools',
             protocolVersion: VOICE_STREAM_PROTOCOL_VERSION,
           });
-          emitAssistantChange('extension_bridge_connected');
+          emitAppEvent(device.userId, 'client_status_changed', { deviceId: device.id, mode: status.mode });
+          emitAppEvent(device.userId, 'device_changed', { deviceId: device.id, reason: 'extension_bridge_connected' });
+          emitAssistantChange('extension_bridge_connected', undefined, device.userId);
           socket.send(JSON.stringify({
             type: 'extension_bridge_registered',
             manifests: manifests.map((manifest) => manifest.id),
@@ -1758,7 +1836,10 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           }
         }
       }
-      if (registered) emitAssistantChange('extension_bridge_disconnected');
+      if (registered) {
+        emitAppEvent(device.userId, 'device_changed', { deviceId: device.id, reason: 'extension_bridge_disconnected' });
+        emitAssistantChange('extension_bridge_disconnected', undefined, device.userId);
+      }
     });
   });
 
@@ -1779,7 +1860,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           return;
         }
         const code = cleanCode(body.code, 'approval code');
-        const approvalCode = db.addApprovalCode(auth.device.userId, {
+        const approvalCode = addApprovalCode(auth.device.userId, {
           voiceSessionId: cleanText(body.voiceSessionId) || null,
           code,
           source: cleanText(body.source, auth.device.deviceType) || auth.device.deviceType,
@@ -1788,7 +1869,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       }
       return withUser(req, reply, db, clerkEnabled, async (ctx) => {
         const code = cleanCode(body.code, 'approval code');
-        const approvalCode = db.addApprovalCode(ctx.user.id, {
+        const approvalCode = addApprovalCode(ctx.user.id, {
           voiceSessionId: cleanText(body.voiceSessionId) || null,
           code,
           source: cleanText(body.source, 'client') || 'client',
@@ -1826,7 +1907,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       events.push(event);
       handleAssistantPromptEvent(auth.device.userId, threadId, event);
     });
-    emitAssistantChange('device_thread_prompted', threadId);
+    emitAssistantChange('device_thread_prompted', threadId, auth.device.userId);
     return { ok: true, events, snapshot };
   });
 
@@ -1851,7 +1932,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         thinkingLevel: cleanText(body.thinkingLevel) || undefined,
         promptDeliveryMode: body.promptDeliveryMode === 'asap' ? 'asap' : 'queue',
       });
-      emitAssistantChange('thread_created', thread.id);
+      emitAssistantChange('thread_created', thread.id, ctx.user.id);
       return { ok: true, thread, snapshot: assistantSnapshot(db, ctx.user.id, thread.id) };
     }),
   );
@@ -1872,7 +1953,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       if (Array.isArray(body.enabledTools)) patch.enabledTools = body.enabledTools.map((tool: unknown) => cleanText(tool)).filter(Boolean);
       if (body.promptDeliveryMode !== undefined) patch.promptDeliveryMode = body.promptDeliveryMode === 'asap' ? 'asap' : 'queue';
       const thread = db.updateThread(ctx.user.id, threadId, patch);
-      emitAssistantChange('thread_updated', threadId);
+      emitAssistantChange('thread_updated', threadId, ctx.user.id);
       return { ok: true, thread, snapshot: assistantSnapshot(db, ctx.user.id, threadId) };
     }),
   );
@@ -1882,7 +1963,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       const threadId = String((req.params as any).threadId ?? '');
       const deleted = db.deleteThread(ctx.user.id, threadId);
       if (!deleted) throw Object.assign(new Error('unknown thread'), { statusCode: 404 });
-      emitAssistantChange('thread_deleted', threadId);
+      emitAssistantChange('thread_deleted', threadId, ctx.user.id);
       return { ok: true, deleted, snapshot: assistantSnapshot(db, ctx.user.id) };
     }),
   );
@@ -1912,7 +1993,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         events.push(event);
         handleAssistantPromptEvent(ctx.user.id, threadId, event);
       });
-      emitAssistantChange('thread_prompted', threadId);
+      emitAssistantChange('thread_prompted', threadId, ctx.user.id);
       return { ok: true, events, snapshot, messages: db.listMessages(ctx.user.id, threadId) };
     }),
   );
@@ -1934,7 +2015,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         events.push(event);
         handleAssistantPromptEvent(ctx.user.id, threadId, event);
       });
-      emitAssistantChange('thread_prompted', threadId);
+      emitAssistantChange('thread_prompted', threadId, ctx.user.id);
       return { ok: true, events, snapshot };
     }),
   );
@@ -1966,7 +2047,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         writeEvent(event);
         handleAssistantPromptEvent(ctx.user.id, threadId, event);
       });
-      emitAssistantChange('thread_prompted', threadId);
+      emitAssistantChange('thread_prompted', threadId, ctx.user.id);
       reply.raw.end();
     } catch (error: any) {
       const status = Number(error?.statusCode ?? 0) || 500;
@@ -1988,13 +2069,13 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         await resolveAssistantApproval(db, ctx.user.id, approval.id, false, ctx.user.email || ctx.user.displayName || 'user');
       }
       if (!run) {
-        if (pendingApprovals.length > 0) emitAssistantChange('thread_stopped', threadId);
+        if (pendingApprovals.length > 0) emitAssistantChange('thread_stopped', threadId, ctx.user.id);
         return { ok: true, stopped: pendingApprovals.length > 0, snapshot: assistantSnapshot(db, ctx.user.id, threadId) };
       }
       const at = new Date().toISOString();
       db.updateRun(ctx.user.id, run.id, { status: 'cancelled', cancelledAt: at, error: 'Cancelled by user' });
       db.updateThread(ctx.user.id, threadId, { status: 'idle', error: null });
-      emitAssistantChange('thread_stopped', threadId);
+      emitAssistantChange('thread_stopped', threadId, ctx.user.id);
       return { ok: true, stopped: true, snapshot: assistantSnapshot(db, ctx.user.id, threadId) };
     }),
   );
@@ -2006,7 +2087,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       if (!db.thread(ctx.user.id, threadId)) throw Object.assign(new Error('unknown thread'), { statusCode: 404 });
       const queuedPrompt = db.cancelQueuedPrompt(ctx.user.id, threadId, queuedPromptId);
       if (!queuedPrompt) throw Object.assign(new Error('unknown queued prompt'), { statusCode: 404 });
-      emitAssistantChange('queued_prompt_cancelled', threadId);
+      emitAssistantChange('queued_prompt_cancelled', threadId, ctx.user.id);
       return { ok: true, queuedPrompt, snapshot: assistantSnapshot(db, ctx.user.id, threadId) };
     }),
   );
@@ -2087,7 +2168,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           });
         }
       }
-      emitAssistantChange('codex_connected');
+      emitAssistantChange('codex_connected', undefined, ctx.user.id);
       return {
         ok: true,
         codexConnection: db.codexConnectionView(ctx.user.id),
@@ -2099,7 +2180,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
   app.delete('/api/assistant/codex/connection', async (req, reply) =>
     withUser(req, reply, db, clerkEnabled, async (ctx) => {
       const deleted = db.deleteCodexConnection(ctx.user.id);
-      emitAssistantChange('codex_disconnected');
+      emitAssistantChange('codex_disconnected', undefined, ctx.user.id);
       return {
         ok: true,
         deleted,
@@ -2120,7 +2201,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         defaultThinkingLevel: body.defaultThinkingLevel === undefined ? undefined : cleanText(body.defaultThinkingLevel, 'off'),
         defaultEnabledTools: Array.isArray(body.defaultEnabledTools) ? body.defaultEnabledTools.map((tool: unknown) => cleanText(tool)).filter(Boolean) : undefined,
       });
-      emitAssistantChange('assistant_settings_updated');
+      emitAssistantChange('assistant_settings_updated', undefined, ctx.user.id);
       return { ok: true, settings, snapshot: assistantSnapshot(db, ctx.user.id) };
     }),
   );
@@ -2147,7 +2228,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       const provider = (req.params as any)?.provider;
       const body = jsonBody(req);
       const key = db.upsertAssistantApiKey(ctx.user.id, provider, body.apiKey);
-      emitAssistantChange('assistant_api_key_updated');
+      emitAssistantChange('assistant_api_key_updated', undefined, ctx.user.id);
       return {
         ok: true,
         key,
@@ -2161,7 +2242,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     withUser(req, reply, db, clerkEnabled, async (ctx) => {
       const provider = (req.params as any)?.provider;
       const deleted = db.deleteAssistantApiKey(ctx.user.id, provider);
-      emitAssistantChange('assistant_api_key_deleted');
+      emitAssistantChange('assistant_api_key_deleted', undefined, ctx.user.id);
       return {
         ok: true,
         deleted,
@@ -2180,7 +2261,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       if (pendingSpeakText && pending) {
         enqueueSpeechAudio(ctx.user.id, pendingSpeakText, { source: 'assistant', threadId: pending.threadId, messageId: pending.toolCallId });
       }
-      emitAssistantChange('approval_resolved', snapshot.activeThreadId ?? undefined);
+      emitAssistantChange('approval_resolved', snapshot.activeThreadId ?? undefined, ctx.user.id);
       return { ok: true, snapshot };
     }),
   );
@@ -2189,7 +2270,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     withUser(req, reply, db, clerkEnabled, async (ctx) => {
       const approvalId = String((req.params as any).approvalId ?? '');
       const snapshot = await resolveAssistantApproval(db, ctx.user.id, approvalId, false, ctx.user.email || ctx.user.displayName || 'user');
-      emitAssistantChange('approval_resolved', snapshot.activeThreadId ?? undefined);
+      emitAssistantChange('approval_resolved', snapshot.activeThreadId ?? undefined, ctx.user.id);
       return { ok: true, snapshot };
     }),
   );
@@ -2224,7 +2305,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         throw Object.assign(new Error('artifact content is too large'), { statusCode: 413 });
       }
       const artifact = db.upsertArtifact(ctx.user.id, threadId, { path: artifactPath, content });
-      emitAssistantChange('artifact_saved', threadId);
+      emitAssistantChange('artifact_saved', threadId, ctx.user.id);
       return { ok: true, artifact, artifacts: db.listArtifacts(ctx.user.id, threadId), snapshot: assistantSnapshot(db, ctx.user.id, threadId) };
     }),
   );
@@ -2236,7 +2317,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       const body = jsonBody(req);
       const artifactPath = sanitizeArtifactPath(body.path ?? queryValue((req.query as any)?.path));
       const deleted = db.deleteArtifact(ctx.user.id, threadId, artifactPath);
-      emitAssistantChange('artifact_deleted', threadId);
+      emitAssistantChange('artifact_deleted', threadId, ctx.user.id);
       return { ok: true, deleted, artifacts: db.listArtifacts(ctx.user.id, threadId), snapshot: assistantSnapshot(db, ctx.user.id, threadId) };
     }),
   );
@@ -2320,7 +2401,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
                 : 'Voice finish command detected',
             protocolVersion: VOICE_STREAM_PROTOCOL_VERSION,
           });
-          db.addLog(device.userId, {
+          addLog(device.userId, {
             deviceId: device.id,
             source: device.deviceType,
             level: 'info',
@@ -2360,7 +2441,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
                 : 'Voice finish phrase detected',
             protocolVersion: VOICE_STREAM_PROTOCOL_VERSION,
           });
-          db.addLog(device.userId, {
+          addLog(device.userId, {
             deviceId: device.id,
             source: device.deviceType,
             level: 'info',
@@ -2392,7 +2473,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         socket.close(VoiceCloseCode.TooLong, 'stream duration limit exceeded');
       }
     }, MAX_STREAM_DURATION_MS);
-    db.addLog(device.userId, {
+    addLog(device.userId, {
       deviceId: device.id,
       source: device.deviceType,
       level: streamingEnabled ? 'info' : 'warn',
@@ -2412,6 +2493,8 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       status: 'Voice stream connected',
       protocolVersion: VOICE_STREAM_PROTOCOL_VERSION,
     });
+    emitAppEvent(device.userId, 'client_status_changed', { deviceId: device.id, mode: 'recording' });
+    emitAppEvent(device.userId, 'device_changed', { deviceId: device.id, reason: 'voice_stream_connected' });
 
     socket.on('message', (data, isBinary) => {
       if (!isBinary) {
@@ -2474,10 +2557,10 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           runtime = transcription.provider;
         }
         if (transcript) {
-          db.addTranscript(device.userId, session.id, transcript);
+          addTranscript(device.userId, session.id, transcript);
           const approvalCode = approvalCodeFromText(transcript);
           if (approvalCode) {
-            db.addApprovalCode(device.userId, { voiceSessionId: session.id, code: approvalCode, source: device.deviceType });
+            addApprovalCode(device.userId, { voiceSessionId: session.id, code: approvalCode, source: device.deviceType });
           }
           if (streamMode === 'clipboard') {
             if ((socket as any).readyState === 1) {
@@ -2540,7 +2623,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
               });
               const thread = db.thread(device.userId, session.assistantThreadId);
               runtime = thread ? `${thread.provider}:${thread.model}` : 'assistant';
-              emitAssistantChange('voice_thread_prompted', session.assistantThreadId);
+              emitAssistantChange('voice_thread_prompted', session.assistantThreadId, device.userId);
               if (!assistantText && assistantError) {
                 throw new Error(assistantError);
               }
@@ -2561,7 +2644,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           socket.send(JSON.stringify({ type: 'finish', mode: streamMode, transcriptText: '' }));
         }
       } catch (error: any) {
-        db.addLog(device.userId, {
+        addLog(device.userId, {
           deviceId: device.id,
           source: device.deviceType,
           level: 'error',
@@ -2579,7 +2662,12 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         status: terminalFinalize?.type === 'sleep' ? 'Sleeping.' : 'Voice stream disconnected',
         protocolVersion: VOICE_STREAM_PROTOCOL_VERSION,
       });
-      db.addLog(device.userId, {
+      emitAppEvent(device.userId, 'client_status_changed', {
+        deviceId: device.id,
+        mode: terminalFinalize?.type === 'sleep' ? 'sleeping' : 'awake',
+      });
+      emitAppEvent(device.userId, 'device_changed', { deviceId: device.id, reason: 'voice_stream_disconnected' });
+      addLog(device.userId, {
         deviceId: device.id,
         source: device.deviceType,
         level: 'info',

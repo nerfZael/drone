@@ -57,6 +57,14 @@ const ASSISTANT_PROVIDERS: Array<{ id: 'codex' | 'openai'; label: string; title:
 
 type AssistantSettingsPromptField = 'normalSystemPrompt' | 'voiceSystemPrompt';
 type SettingsPane = 'devices' | 'assistant' | 'voice' | 'activity';
+type AppEvent = {
+  type: string;
+  sequence: number;
+  at: string;
+  threadId?: string;
+  platform?: 'android' | 'desktop';
+};
+type SseMessage = { event: string; data: unknown };
 
 const SETTINGS_PANES: Array<{ id: SettingsPane; label: string }> = [
   { id: 'devices', label: 'Devices' },
@@ -841,6 +849,64 @@ async function readAssistantEventStream(response: Response, handleEvent: (event:
   if (line) handleEvent(JSON.parse(line));
 }
 
+async function readSseStream(response: Response, handleMessage: (message: SseMessage) => void): Promise<void> {
+  if (!response.ok) throw new Error(`SSE stream failed: ${response.status} ${response.statusText}`);
+  if (!response.body) throw new Error('SSE stream did not include a response body');
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let eventName = 'message';
+  let dataLines: string[] = [];
+
+  const dispatch = () => {
+    if (dataLines.length === 0) {
+      eventName = 'message';
+      return;
+    }
+    const dataText = dataLines.join('\n');
+    let data: unknown = dataText;
+    try {
+      data = JSON.parse(dataText);
+    } catch {
+      // Keep non-JSON SSE payloads as plain text.
+    }
+    handleMessage({ event: eventName, data });
+    eventName = 'message';
+    dataLines = [];
+  };
+
+  const consumeLine = (rawLine: string) => {
+    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
+    if (!line) {
+      dispatch();
+      return;
+    }
+    if (line.startsWith(':')) return;
+    if (line.startsWith('event:')) {
+      eventName = line.slice(6).trim() || 'message';
+      return;
+    }
+    if (line.startsWith('data:')) {
+      dataLines.push(line.slice(5).replace(/^ /, ''));
+    }
+  };
+
+  for (;;) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    buffer += decoder.decode(chunk.value, { stream: true });
+    let newlineIndex = buffer.indexOf('\n');
+    while (newlineIndex >= 0) {
+      consumeLine(buffer.slice(0, newlineIndex));
+      buffer = buffer.slice(newlineIndex + 1);
+      newlineIndex = buffer.indexOf('\n');
+    }
+  }
+  buffer += decoder.decode();
+  if (buffer) consumeLine(buffer);
+  dispatch();
+}
+
 function chooseDefaultArtifact(artifacts: AssistantArtifactRecord[], preferredPath?: string | null): AssistantArtifactRecord | null {
   return (
     artifacts.find((artifact) => artifact.path === preferredPath) ??
@@ -910,14 +976,44 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const [pairingDeviceId, setPairingDeviceId] = React.useState<string | null>(null);
   const [approvalSettings, setApprovalSettings] = React.useState<VoiceApprovalFormState>(VOICE_APPROVAL_SETTINGS_DEFAULT);
   const settingsHydratedRef = React.useRef(false);
+  const approvalSettingsDirtyRef = React.useRef(false);
   const assistantSettingsPromptDirtyRef = React.useRef<Record<AssistantSettingsPromptField, boolean>>({
     normalSystemPrompt: false,
     voiceSystemPrompt: false,
   });
   const assistantEventRefreshTimerRef = React.useRef<number | null>(null);
+  const dashboardEventRefreshTimerRef = React.useRef<number | null>(null);
+  const releaseEventRefreshTimerRef = React.useRef<number | null>(null);
+  const appEventsConnectedRef = React.useRef(false);
+  const scheduleAssistantEventRefreshRef = React.useRef<() => void>(() => {});
+  const scheduleDashboardEventRefreshRef = React.useRef<() => void>(() => {});
+  const scheduleReleaseEventRefreshRef = React.useRef<(platform?: 'android' | 'desktop') => void>(() => {});
   const messagesScrollRef = React.useRef<HTMLDivElement | null>(null);
   const messagesStickToBottomRef = React.useRef(true);
   const messageScrollSignatureRef = React.useRef('');
+
+  const hydrateApprovalSettings = React.useCallback((settings: VoiceSettings) => {
+    setApprovalSettings({
+      triggerPhrase: settings.triggerPhrase,
+      unlockPhrase: settings.unlockPhrase,
+      shutdownPhrase: settings.shutdownPhrase,
+      lockCode: settings.lockCode,
+      minDigits: settings.minDigits,
+      maxDigits: settings.maxDigits,
+      stableMs: settings.stableMs,
+      collectTimeoutMs: settings.collectTimeoutMs,
+      duplicateCooldownMs: settings.duplicateCooldownMs,
+      finalizeCheckIntervalMs: settings.finalizeCheckIntervalMs,
+      postPromptCommandSuppressionMs: settings.postPromptCommandSuppressionMs,
+    });
+    settingsHydratedRef.current = true;
+    approvalSettingsDirtyRef.current = false;
+  }, []);
+
+  const updateApprovalSettingsDraft = React.useCallback((patch: Partial<VoiceApprovalFormState>) => {
+    approvalSettingsDirtyRef.current = true;
+    setApprovalSettings((prev) => ({ ...prev, ...patch }));
+  }, []);
 
   const assistantThreads = assistantSnapshotData?.threads ?? dashboard?.threads ?? [];
   const activeThread =
@@ -1048,35 +1144,22 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     }
   }, [client]);
 
-  const loadDashboard = React.useCallback(async () => {
+  const loadDashboard = React.useCallback(async (options: { includeAssistant?: boolean } = {}) => {
     setError(null);
     try {
       const data = await client.request<DashboardData>('/api/dashboard');
       setDashboard(data);
-      await Promise.all([loadAssistantSnapshot(activeThreadId), loadAssistantExtensions()]);
-      if (!settingsHydratedRef.current) {
-        setApprovalSettings({
-          triggerPhrase: data.settings.triggerPhrase,
-          unlockPhrase: data.settings.unlockPhrase,
-          shutdownPhrase: data.settings.shutdownPhrase,
-          lockCode: data.settings.lockCode,
-          minDigits: data.settings.minDigits,
-          maxDigits: data.settings.maxDigits,
-          stableMs: data.settings.stableMs,
-          collectTimeoutMs: data.settings.collectTimeoutMs,
-          duplicateCooldownMs: data.settings.duplicateCooldownMs,
-          finalizeCheckIntervalMs: data.settings.finalizeCheckIntervalMs,
-          postPromptCommandSuppressionMs: data.settings.postPromptCommandSuppressionMs,
-        });
-        settingsHydratedRef.current = true;
+      if (options.includeAssistant !== false) {
+        await Promise.all([loadAssistantSnapshot(activeThreadId), loadAssistantExtensions()]);
       }
+      if (!settingsHydratedRef.current || !approvalSettingsDirtyRef.current) hydrateApprovalSettings(data.settings);
       if (!activeThreadId && data.threads[0]) setActiveThreadId(data.threads[0].id);
     } catch (err: any) {
       setError(err?.message ?? String(err));
     } finally {
       setLoading(false);
     }
-  }, [activeThreadId, client, loadAssistantExtensions, loadAssistantSnapshot]);
+  }, [activeThreadId, client, hydrateApprovalSettings, loadAssistantExtensions, loadAssistantSnapshot]);
 
   const loadAndroidApkInfo = React.useCallback(async () => {
     try {
@@ -1116,9 +1199,37 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     if (assistantEventRefreshTimerRef.current !== null) window.clearTimeout(assistantEventRefreshTimerRef.current);
     assistantEventRefreshTimerRef.current = window.setTimeout(() => {
       assistantEventRefreshTimerRef.current = null;
-      void loadDashboard();
+      void Promise.all([loadAssistantSnapshot(activeThreadId), loadAssistantExtensions()]);
+    }, 160);
+  }, [activeThreadId, loadAssistantExtensions, loadAssistantSnapshot]);
+
+  const scheduleDashboardEventRefresh = React.useCallback(() => {
+    if (document.visibilityState === 'hidden') return;
+    if (dashboardEventRefreshTimerRef.current !== null) window.clearTimeout(dashboardEventRefreshTimerRef.current);
+    dashboardEventRefreshTimerRef.current = window.setTimeout(() => {
+      dashboardEventRefreshTimerRef.current = null;
+      void loadDashboard({ includeAssistant: false });
     }, 160);
   }, [loadDashboard]);
+
+  const scheduleReleaseEventRefresh = React.useCallback(
+    (platform?: 'android' | 'desktop') => {
+      if (document.visibilityState === 'hidden') return;
+      if (releaseEventRefreshTimerRef.current !== null) window.clearTimeout(releaseEventRefreshTimerRef.current);
+      releaseEventRefreshTimerRef.current = window.setTimeout(() => {
+        releaseEventRefreshTimerRef.current = null;
+        if (!platform || platform === 'android') void loadAndroidApkInfo();
+        if (!platform || platform === 'desktop') void loadDesktopAppInfo();
+      }, 160);
+    },
+    [loadAndroidApkInfo, loadDesktopAppInfo],
+  );
+
+  React.useEffect(() => {
+    scheduleAssistantEventRefreshRef.current = scheduleAssistantEventRefresh;
+    scheduleDashboardEventRefreshRef.current = scheduleDashboardEventRefresh;
+    scheduleReleaseEventRefreshRef.current = scheduleReleaseEventRefresh;
+  }, [scheduleAssistantEventRefresh, scheduleDashboardEventRefresh, scheduleReleaseEventRefresh]);
 
   const loadMessages = React.useCallback(
     async (threadId: string | null) => {
@@ -1163,43 +1274,93 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   }, [activeThread?.id]);
 
   React.useEffect(() => {
-    const refresh = () => {
-      if (document.visibilityState === 'hidden') return;
-      void loadDashboard();
-    };
-    const timer = window.setInterval(refresh, 4000);
-    window.addEventListener('focus', refresh);
-    return () => {
-      window.clearInterval(timer);
-      window.removeEventListener('focus', refresh);
-    };
-  }, [loadDashboard]);
+    const controller = new AbortController();
+    let stopped = false;
+    let retryTimer: number | null = null;
 
-  React.useEffect(() => {
-    if (typeof window.EventSource === 'undefined') return undefined;
-    let closed = false;
-    const source = new window.EventSource('/api/assistant/events');
-    const refresh = () => {
-      if (closed) return;
-      scheduleAssistantEventRefresh();
+    const handleAppEvent = (event: AppEvent) => {
+      if (event.type === 'assistant_changed') {
+        scheduleAssistantEventRefreshRef.current();
+        return;
+      }
+      if (event.type === 'release_changed') {
+        scheduleReleaseEventRefreshRef.current(event.platform);
+        scheduleDashboardEventRefreshRef.current();
+        return;
+      }
+      scheduleDashboardEventRefreshRef.current();
+      if (event.type === 'device_changed' || event.type === 'device_connected' || event.type === 'device_disconnected') {
+        scheduleAssistantEventRefreshRef.current();
+      }
     };
-    source.onopen = refresh;
-    source.onmessage = refresh;
-    source.addEventListener('connected', refresh);
-    source.addEventListener('assistant_change', refresh);
-    source.onerror = () => {
-      if (closed) return;
-      scheduleAssistantEventRefresh();
+
+    const waitForRetry = () =>
+      new Promise<void>((resolve) => {
+        retryTimer = window.setTimeout(() => {
+          retryTimer = null;
+          resolve();
+        }, 2000);
+      });
+
+    const connect = async () => {
+      while (!stopped) {
+        try {
+          const response = await client.stream('/api/events', { signal: controller.signal });
+          if (!response.ok) throw new Error(`SSE stream failed: ${response.status} ${response.statusText}`);
+          appEventsConnectedRef.current = true;
+          scheduleDashboardEventRefreshRef.current();
+          await readSseStream(response, (message) => {
+            if (message.event === 'connected') {
+              appEventsConnectedRef.current = true;
+              scheduleDashboardEventRefreshRef.current();
+              return;
+            }
+            if (message.event !== 'app_event') return;
+            handleAppEvent(message.data as AppEvent);
+          });
+        } catch {
+          if (stopped || controller.signal.aborted) return;
+        }
+        appEventsConnectedRef.current = false;
+        await waitForRetry();
+      }
     };
+
+    void connect();
     return () => {
-      closed = true;
-      source.close();
+      stopped = true;
+      appEventsConnectedRef.current = false;
+      controller.abort();
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
       if (assistantEventRefreshTimerRef.current !== null) {
         window.clearTimeout(assistantEventRefreshTimerRef.current);
         assistantEventRefreshTimerRef.current = null;
       }
+      if (dashboardEventRefreshTimerRef.current !== null) {
+        window.clearTimeout(dashboardEventRefreshTimerRef.current);
+        dashboardEventRefreshTimerRef.current = null;
+      }
+      if (releaseEventRefreshTimerRef.current !== null) {
+        window.clearTimeout(releaseEventRefreshTimerRef.current);
+        releaseEventRefreshTimerRef.current = null;
+      }
     };
-  }, [scheduleAssistantEventRefresh]);
+  }, [client]);
+
+  React.useEffect(() => {
+    const refresh = (force = false) => {
+      if (document.visibilityState === 'hidden') return;
+      if (appEventsConnectedRef.current && !force) return;
+      void loadDashboard();
+    };
+    const timer = window.setInterval(() => refresh(false), 8000);
+    const focusRefresh = () => refresh(true);
+    window.addEventListener('focus', focusRefresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', focusRefresh);
+    };
+  }, [loadDashboard]);
 
   React.useEffect(() => {
     if (typeof window.EventSource === 'undefined') return undefined;
@@ -1232,15 +1393,17 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   React.useEffect(() => {
     const threadId = activeThread?.id ?? null;
     if (!threadId) return undefined;
-    const refresh = () => {
+    const refresh = (force = false) => {
       if (document.visibilityState === 'hidden') return;
+      if (appEventsConnectedRef.current && !force) return;
       void loadMessages(threadId);
     };
-    const timer = window.setInterval(refresh, 2500);
-    window.addEventListener('focus', refresh);
+    const timer = window.setInterval(() => refresh(false), 8000);
+    const focusRefresh = () => refresh(true);
+    window.addEventListener('focus', focusRefresh);
     return () => {
       window.clearInterval(timer);
-      window.removeEventListener('focus', refresh);
+      window.removeEventListener('focus', focusRefresh);
     };
   }, [activeThread?.id, loadMessages]);
 
@@ -1679,19 +1842,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
         method: 'POST',
         body: JSON.stringify({ settings: approvalSettings }),
       });
-      setApprovalSettings({
-        triggerPhrase: data.settings.triggerPhrase,
-        unlockPhrase: data.settings.unlockPhrase,
-        shutdownPhrase: data.settings.shutdownPhrase,
-        lockCode: data.settings.lockCode,
-        minDigits: data.settings.minDigits,
-        maxDigits: data.settings.maxDigits,
-        stableMs: data.settings.stableMs,
-        collectTimeoutMs: data.settings.collectTimeoutMs,
-        duplicateCooldownMs: data.settings.duplicateCooldownMs,
-        finalizeCheckIntervalMs: data.settings.finalizeCheckIntervalMs,
-        postPromptCommandSuppressionMs: data.settings.postPromptCommandSuppressionMs,
-      });
+      hydrateApprovalSettings(data.settings);
       await loadDashboard();
       setNotice('Saved voice approval settings.');
     } catch (err: any) {
@@ -3418,7 +3569,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                       value={approvalSettings.triggerPhrase}
                       onChange={(event) => {
                         const value = event.currentTarget.value;
-                        setApprovalSettings((prev) => ({ ...prev, triggerPhrase: value }));
+                        updateApprovalSettingsDraft({ triggerPhrase: value });
                       }}
                     />
                   </label>
@@ -3428,7 +3579,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                       value={approvalSettings.unlockPhrase}
                       onChange={(event) => {
                         const value = event.currentTarget.value;
-                        setApprovalSettings((prev) => ({ ...prev, unlockPhrase: value }));
+                        updateApprovalSettingsDraft({ unlockPhrase: value });
                       }}
                     />
                   </label>
@@ -3438,7 +3589,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                       value={approvalSettings.shutdownPhrase}
                       onChange={(event) => {
                         const value = event.currentTarget.value;
-                        setApprovalSettings((prev) => ({ ...prev, shutdownPhrase: value }));
+                        updateApprovalSettingsDraft({ shutdownPhrase: value });
                       }}
                     />
                   </label>
@@ -3448,7 +3599,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                       value={approvalSettings.lockCode}
                       onChange={(event) => {
                         const value = codeValue(event.currentTarget.value);
-                        setApprovalSettings((prev) => ({ ...prev, lockCode: value }));
+                        updateApprovalSettingsDraft({ lockCode: value });
                       }}
                     />
                   </label>
@@ -3461,7 +3612,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                       value={approvalSettings.minDigits}
                       onChange={(event) => {
                         const value = Number(event.currentTarget.value);
-                        setApprovalSettings((prev) => ({ ...prev, minDigits: value }));
+                        updateApprovalSettingsDraft({ minDigits: value });
                       }}
                     />
                   </label>
@@ -3474,7 +3625,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                       value={approvalSettings.maxDigits}
                       onChange={(event) => {
                         const value = Number(event.currentTarget.value);
-                        setApprovalSettings((prev) => ({ ...prev, maxDigits: value }));
+                        updateApprovalSettingsDraft({ maxDigits: value });
                       }}
                     />
                   </label>
@@ -3487,7 +3638,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                       value={approvalSettings.stableMs}
                       onChange={(event) => {
                         const value = Number(event.currentTarget.value);
-                        setApprovalSettings((prev) => ({ ...prev, stableMs: value }));
+                        updateApprovalSettingsDraft({ stableMs: value });
                       }}
                     />
                   </label>
@@ -3500,7 +3651,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                       value={approvalSettings.collectTimeoutMs}
                       onChange={(event) => {
                         const value = Number(event.currentTarget.value);
-                        setApprovalSettings((prev) => ({ ...prev, collectTimeoutMs: value }));
+                        updateApprovalSettingsDraft({ collectTimeoutMs: value });
                       }}
                     />
                   </label>
@@ -3513,7 +3664,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                       value={approvalSettings.duplicateCooldownMs}
                       onChange={(event) => {
                         const value = Number(event.currentTarget.value);
-                        setApprovalSettings((prev) => ({ ...prev, duplicateCooldownMs: value }));
+                        updateApprovalSettingsDraft({ duplicateCooldownMs: value });
                       }}
                     />
                   </label>
@@ -3526,7 +3677,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                       value={approvalSettings.finalizeCheckIntervalMs}
                       onChange={(event) => {
                         const value = Number(event.currentTarget.value);
-                        setApprovalSettings((prev) => ({ ...prev, finalizeCheckIntervalMs: value }));
+                        updateApprovalSettingsDraft({ finalizeCheckIntervalMs: value });
                       }}
                     />
                   </label>
