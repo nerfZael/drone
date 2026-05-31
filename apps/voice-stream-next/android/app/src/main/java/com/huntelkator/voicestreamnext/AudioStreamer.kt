@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -444,8 +445,10 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
             bufferSize,
         )
         recorder = audioRecord
+        var echoCanceler: AcousticEchoCanceler? = null
         val buffer = ByteArray(CHUNK_BYTES)
         try {
+            echoCanceler = configureEchoCanceler(audioRecord)
             val microphone = microphoneRouter.routeForRecording(audioRecord)
             audioRecord.startRecording()
             emitStatus(
@@ -470,6 +473,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
             }
         } finally {
             microphoneRouter.releaseRouting()
+            echoCanceler?.runCatching { release() }
             runCatching { audioRecord.stop() }
             runCatching { audioRecord.release() }
             if (recorder === audioRecord) recorder = null
@@ -481,6 +485,26 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
             wakeDetector?.release()
             wakeDetector = null
         }
+    }
+
+    private fun configureEchoCanceler(audioRecord: AudioRecord): AcousticEchoCanceler? {
+        if (!api.androidEchoCancellationEnabled()) return null
+        if (!AcousticEchoCanceler.isAvailable()) {
+            ClientLog.i("AudioStreamer", "Android acoustic echo canceler requested but unavailable")
+            return null
+        }
+        return runCatching {
+            val canceler = AcousticEchoCanceler.create(audioRecord.audioSessionId)
+            if (canceler == null) {
+                ClientLog.i("AudioStreamer", "Android acoustic echo canceler could not be created")
+            } else {
+                canceler.setEnabled(true)
+                ClientLog.i("AudioStreamer", "Android acoustic echo canceler enabled=${canceler.enabled}")
+            }
+            canceler
+        }.onFailure { error ->
+            ClientLog.w("AudioStreamer", "Android acoustic echo canceler failed", error)
+        }.getOrNull()
     }
 
     private fun handleDetectorFrame(frame: ByteArray, onStatus: (String) -> Unit) {

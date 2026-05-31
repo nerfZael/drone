@@ -5,6 +5,9 @@ const MAX_PENDING_STREAM_BYTES = pcmBytesForMs(5000);
 const BASE_RECONNECT_DELAY_MS = 500;
 const MAX_RECONNECT_DELAY_MS = 10_000;
 const MAX_RECONNECT_EXPONENT = 4;
+const SLEEP_PHRASE_STABLE_MS = 650;
+const SLEEP_PHRASE_MIN_HITS = 2;
+const SLEEP_PHRASE_MAX_GAP_MS = 1500;
 // Keep the status command path available, but do not match spoken status phrases locally.
 const ENABLE_STATUS_WAKE_COMMAND = false;
 const DEFAULT_TRANSCRIPTION_SHORTCUT = {
@@ -84,6 +87,7 @@ const state = {
   lastTranscriptionShortcutAt: 0,
   lastRecognizedText: '',
   lastRecognizedAt: 0,
+  sleepPhraseCandidate: null,
   approvalRecognizer: new ApprovalCodeRecognizer(),
   approvalFinalizeTimer: null,
   analyser: null,
@@ -768,6 +772,7 @@ function applyWindowState(windowState) {
 }
 
 function setMode(mode, status) {
+  if (state.mode !== mode || mode !== 'sleeping') resetSleepPhraseCandidate();
   state.mode = mode;
   if (status) showStatus(status);
   updateVoiceButtons();
@@ -2170,6 +2175,39 @@ function wakePhraseMatch(text) {
   return null;
 }
 
+function resetSleepPhraseCandidate() {
+  state.sleepPhraseCandidate = null;
+}
+
+function stableSleepPhraseMatch(text, settings, finalResult = false) {
+  if (!settings || !globalThis.VoicePhrases) {
+    resetSleepPhraseCandidate();
+    return null;
+  }
+  const match = globalThis.VoicePhrases.sleepPhraseMatch(text, settings.unlockPhrase, settings.shutdownPhrase);
+  if (!match) {
+    resetSleepPhraseCandidate();
+    return null;
+  }
+  if (finalResult) {
+    resetSleepPhraseCandidate();
+    return match;
+  }
+  const now = Date.now();
+  const candidate = state.sleepPhraseCandidate;
+  if (!candidate || candidate.match !== match || now - candidate.lastSeenAt > SLEEP_PHRASE_MAX_GAP_MS) {
+    state.sleepPhraseCandidate = { match, firstSeenAt: now, lastSeenAt: now, hits: 1 };
+    return null;
+  }
+  candidate.hits += 1;
+  candidate.lastSeenAt = now;
+  if (candidate.hits >= SLEEP_PHRASE_MIN_HITS && now - candidate.firstSeenAt >= SLEEP_PHRASE_STABLE_MS) {
+    resetSleepPhraseCandidate();
+    return match;
+  }
+  return null;
+}
+
 async function logDesktopEvent(level, message, details) {
   if (!state.config?.deviceId || !state.config?.deviceToken) return;
   await api('/api/logs', {
@@ -2309,7 +2347,7 @@ async function processApprovalCode(code) {
   await loadDashboard();
 }
 
-async function processPhraseText(text, finalizeNow = false) {
+async function processPhraseText(text, finalizeNow = false, finalResult = false) {
   const settings = await loadVoiceSettings().catch(() => null);
   if (state.mode !== 'sleeping' && acceptApprovalText(text, finalizeNow)) return;
   if (state.mode === 'recording') {
@@ -2322,8 +2360,8 @@ async function processPhraseText(text, finalizeNow = false) {
     void logDesktopEvent('info', 'Wake phrase ignored while recording is paused', { text });
     return;
   }
-  if (state.mode === 'sleeping' && settings && globalThis.VoicePhrases) {
-    const sleepMatch = globalThis.VoicePhrases.sleepPhraseMatch(text, settings.unlockPhrase, settings.shutdownPhrase);
+  if (state.mode === 'sleeping') {
+    const sleepMatch = stableSleepPhraseMatch(text, settings, finalResult);
     if (sleepMatch === 'unlock') {
       playLocalVoiceCue('unlock');
       setMode('awake', 'Unlocked.');
@@ -2408,10 +2446,10 @@ async function startVoskWakeListener() {
       const text = String(result?.text || '').trim();
       if (!text) return;
       const now = Date.now();
-      if (text === state.lastRecognizedText && now - state.lastRecognizedAt < 1500) return;
+      if (state.mode !== 'sleeping' && text === state.lastRecognizedText && now - state.lastRecognizedAt < 1500) return;
       state.lastRecognizedText = text;
       state.lastRecognizedAt = now;
-      void processPhraseText(text).catch((err) => showStatus(err.message));
+      void processPhraseText(text, false, Boolean(result?.final)).catch((err) => showStatus(err.message));
     });
 
     await startWakeAudioCapture();
@@ -2448,10 +2486,10 @@ function startSpeechWakeListener() {
     const text = result?.[0]?.transcript?.trim();
     if (!text) return;
     const now = Date.now();
-    if (text === state.lastRecognizedText && now - state.lastRecognizedAt < 1500) return;
+    if (state.mode !== 'sleeping' && text === state.lastRecognizedText && now - state.lastRecognizedAt < 1500) return;
     state.lastRecognizedText = text;
     state.lastRecognizedAt = now;
-    void processPhraseText(text).catch((err) => showStatus(err.message));
+    void processPhraseText(text, false, Boolean(result?.isFinal)).catch((err) => showStatus(err.message));
   };
   recognition.onerror = () => showStatus('Wake listener paused.');
   recognition.onend = () => {
@@ -2479,6 +2517,7 @@ function wakeListenerStatus(awakeStatus = 'Awake. Listening for voice commands.'
 }
 
 function stopWakeListener() {
+  resetSleepPhraseCandidate();
   stopVoskWakeListener();
   const recognition = state.recognition;
   if (!recognition) return;

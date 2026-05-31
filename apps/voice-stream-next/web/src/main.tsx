@@ -48,6 +48,9 @@ const publishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | un
 const desktopDeviceStorageKey = 'voiceStreamNext.desktopDevice';
 const ASSISTANT_VOICE_SYSTEM_PROMPT_DEFAULT = 'You are VoiceStream, a concise voice assistant. Keep spoken replies short and practical.';
 const ASSISTANT_SYSTEM_PROMPT_MAX_CHARS = 20_000;
+const SLEEP_PHRASE_STABLE_MS = 650;
+const SLEEP_PHRASE_MIN_HITS = 2;
+const SLEEP_PHRASE_MAX_GAP_MS = 1_500;
 
 const ASSISTANT_PROVIDERS: Array<{ id: 'codex' | 'openai'; label: string; title: string }> = [
   { id: 'codex', label: 'Codex', title: 'Use connected Codex ChatGPT authentication for Codex models.' },
@@ -3753,6 +3756,7 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
   const modeRef = React.useRef(mode);
   const streamingRef = React.useRef(streaming);
   const lastRecognizedRef = React.useRef({ text: '', at: 0 });
+  const sleepPhraseCandidateRef = React.useRef<{ match: 'unlock' | 'shutdown'; firstSeenAt: number; lastSeenAt: number; hits: number } | null>(null);
   const controlSocketRef = React.useRef<WebSocket | null>(null);
   const approvalRecognizerRef = React.useRef(new ApprovalCodeRecognizer());
   const approvalFinalizeTimerRef = React.useRef<number | null>(null);
@@ -3768,6 +3772,7 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
 
   React.useEffect(() => {
     modeRef.current = mode;
+    if (mode !== 'sleeping') sleepPhraseCandidateRef.current = null;
   }, [mode]);
 
   React.useEffect(() => {
@@ -4114,7 +4119,36 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
     void reportDesktopStatus('off', 'Off.');
   }
 
-  async function processPhraseText(text: string, finalizeNow = false) {
+  function stableSleepPhraseMatchForText(text: string, settings: VoiceSettings | null, finalResult = false): 'unlock' | 'shutdown' | null {
+    if (!settings) {
+      sleepPhraseCandidateRef.current = null;
+      return null;
+    }
+    const match = sleepPhraseMatch(text, settings.unlockPhrase, settings.shutdownPhrase);
+    if (!match) {
+      sleepPhraseCandidateRef.current = null;
+      return null;
+    }
+    if (finalResult) {
+      sleepPhraseCandidateRef.current = null;
+      return match;
+    }
+    const now = Date.now();
+    const candidate = sleepPhraseCandidateRef.current;
+    if (!candidate || candidate.match !== match || now - candidate.lastSeenAt > SLEEP_PHRASE_MAX_GAP_MS) {
+      sleepPhraseCandidateRef.current = { match, firstSeenAt: now, lastSeenAt: now, hits: 1 };
+      return null;
+    }
+    candidate.hits += 1;
+    candidate.lastSeenAt = now;
+    if (candidate.hits >= SLEEP_PHRASE_MIN_HITS && now - candidate.firstSeenAt >= SLEEP_PHRASE_STABLE_MS) {
+      sleepPhraseCandidateRef.current = null;
+      return match;
+    }
+    return null;
+  }
+
+  async function processPhraseText(text: string, finalizeNow = false, finalResult = false) {
     const currentMode = modeRef.current;
     const settings = await loadVoiceSettings().catch(() => null);
     if (currentMode !== 'sleeping' && acceptApprovalText(text, finalizeNow)) return;
@@ -4122,8 +4156,8 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
       setStatus('Recording. Voice commands are ignored until capture stops.');
       return;
     }
-    if (currentMode === 'sleeping' && settings) {
-      const sleepMatch = sleepPhraseMatch(text, settings.unlockPhrase, settings.shutdownPhrase);
+    if (currentMode === 'sleeping') {
+      const sleepMatch = stableSleepPhraseMatchForText(text, settings, finalResult);
       if (sleepMatch === 'unlock') {
         setMode('awake');
         setStatus('Unlocked.');
@@ -4194,9 +4228,9 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
         const text = result.text?.trim();
         if (!text) return;
         const now = Date.now();
-        if (text === lastRecognizedRef.current.text && now - lastRecognizedRef.current.at < 1500) return;
+        if (modeRef.current !== 'sleeping' && text === lastRecognizedRef.current.text && now - lastRecognizedRef.current.at < 1500) return;
         lastRecognizedRef.current = { text, at: now };
-        void processPhraseText(text).catch((err) => setStatus(err?.message ?? String(err)));
+        void processPhraseText(text, false, Boolean(result.final)).catch((err) => setStatus(err?.message ?? String(err)));
       });
 
       processor.onaudioprocess = (event) => {
@@ -4238,9 +4272,9 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
       const text = result?.[0]?.transcript?.trim();
       if (!text) return;
       const now = Date.now();
-      if (text === lastRecognizedRef.current.text && now - lastRecognizedRef.current.at < 1500) return;
+      if (modeRef.current !== 'sleeping' && text === lastRecognizedRef.current.text && now - lastRecognizedRef.current.at < 1500) return;
       lastRecognizedRef.current = { text, at: now };
-      void processPhraseText(text);
+      void processPhraseText(text, false, Boolean(result?.isFinal));
     };
     recognition.onerror = () => setStatus('Wake listener paused.');
     recognition.onend = () => {
@@ -4268,6 +4302,7 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
   }
 
   function stopWakeListener() {
+    sleepPhraseCandidateRef.current = null;
     stopVoskWakeListener();
     const recognition = refs.current.recognition;
     if (!recognition) return;

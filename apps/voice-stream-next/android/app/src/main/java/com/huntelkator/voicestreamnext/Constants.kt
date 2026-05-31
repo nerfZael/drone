@@ -12,6 +12,7 @@ object Constants {
     const val PREF_DEVICE_TOKEN = "device_token"
     const val PREF_DEVICE_NAME = "device_name"
     const val PREF_INSTALLATION_ID = "installation_id"
+    const val PREF_ANDROID_ECHO_CANCELLATION = "android_echo_cancellation"
 
     const val ACTION_START_VOICE = "com.huntelkator.voicestreamnext.action.START_VOICE"
     const val ACTION_START_AWAKE = "com.huntelkator.voicestreamnext.action.START_AWAKE"

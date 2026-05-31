@@ -27,6 +27,7 @@ class VoskWakeWordDetector(
     @Volatile private var unlockPhrase = VoicePhraseDefaults.unlockPhrase
     @Volatile private var shutdownPhrase = VoicePhraseDefaults.shutdownPhrase
     @Volatile private var approvalTriggerPhrase = "approval code"
+    private val sleepPhraseStability = SleepPhraseStability()
 
     fun prepare() {
         if (available || !loading.compareAndSet(false, true)) return
@@ -82,6 +83,7 @@ class VoskWakeWordDetector(
             if (!modeChanged && !phrasesChanged) return@synchronized
             lastDetectedPhrase = null
             lastDetectedAtMs = 0L
+            sleepPhraseStability.reset()
             rebuildRecognizerLocked()
             if (available) {
                 onStatus(listeningStatus())
@@ -90,12 +92,12 @@ class VoskWakeWordDetector(
     }
 
     fun acceptPcm(frame: ByteArray, length: Int): WakePhrase? {
-        val resultJson = synchronized(recognizerLock) {
+        val (resultJson, finalResult) = synchronized(recognizerLock) {
             val localRecognizer = recognizer ?: return null
             val accepted = runCatching { localRecognizer.acceptWaveForm(frame, length) }.getOrDefault(false)
-            if (accepted) localRecognizer.result else localRecognizer.partialResult
+            Pair(if (accepted) localRecognizer.result else localRecognizer.partialResult, accepted)
         }
-        return detectWakePhrase(resultJson)
+        return detectWakePhrase(resultJson, finalResult)
     }
 
     fun reset() {
@@ -103,6 +105,7 @@ class VoskWakeWordDetector(
             recognizer?.runCatching { reset() }
             lastDetectedPhrase = null
             lastDetectedAtMs = 0L
+            sleepPhraseStability.reset()
         }
     }
 
@@ -115,11 +118,12 @@ class VoskWakeWordDetector(
             model = null
             lastDetectedPhrase = null
             lastDetectedAtMs = 0L
+            sleepPhraseStability.reset()
         }
         loading.set(false)
     }
 
-    private fun detectWakePhrase(json: String?): WakePhrase? {
+    private fun detectWakePhrase(json: String?, finalResult: Boolean): WakePhrase? {
         if (json.isNullOrBlank()) return null
         val text = runCatching {
             val obj = JSONObject(json)
@@ -128,12 +132,16 @@ class VoskWakeWordDetector(
         if (text.isNotBlank()) {
             onText(text)
         }
+        val now = SystemClock.elapsedRealtime()
         val phrase = if (sleepMode) {
-            WakePhraseMatcher.matchSleep(text, unlockPhrase, shutdownPhrase)
+            sleepPhraseStability.accept(
+                WakePhraseMatcher.matchSleep(text, unlockPhrase, shutdownPhrase),
+                finalResult,
+                now,
+            )
         } else {
             WakePhraseMatcher.match(text)
         } ?: return null
-        val now = SystemClock.elapsedRealtime()
         val suppress = synchronized(recognizerLock) {
             phrase == lastDetectedPhrase && now - lastDetectedAtMs < PHRASE_COOLDOWN_MS
         }
@@ -158,6 +166,7 @@ class VoskWakeWordDetector(
         available = true
         lastDetectedPhrase = null
         lastDetectedAtMs = 0L
+        sleepPhraseStability.reset()
     }
 
     private fun buildGrammarJson(): String = JSONArray(buildGrammarEntries()).toString()

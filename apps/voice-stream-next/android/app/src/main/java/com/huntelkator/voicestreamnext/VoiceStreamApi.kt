@@ -124,6 +124,17 @@ class VoiceStreamApi(private val context: Context) {
             .apply()
     }
 
+    fun androidEchoCancellationEnabled(): Boolean {
+        return context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(Constants.PREF_ANDROID_ECHO_CANCELLATION, false)
+    }
+
+    fun saveAndroidEchoCancellationEnabled(enabled: Boolean) {
+        context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE).edit()
+            .putBoolean(Constants.PREF_ANDROID_ECHO_CANCELLATION, enabled)
+            .apply()
+    }
+
     fun pairedDeviceId(): String {
         return context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
             .getString(Constants.PREF_DEVICE_ID, "").orEmpty()

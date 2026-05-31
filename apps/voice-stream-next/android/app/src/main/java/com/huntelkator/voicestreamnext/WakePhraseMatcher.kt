@@ -74,6 +74,49 @@ object WakePhraseMatcher {
     }
 }
 
+class SleepPhraseStability(
+    private val stableMs: Long = 650L,
+    private val minHits: Int = 2,
+    private val maxGapMs: Long = 1_500L,
+) {
+    private var candidate: WakePhrase? = null
+    private var firstSeenAtMs = 0L
+    private var lastSeenAtMs = 0L
+    private var hits = 0
+
+    fun accept(phrase: WakePhrase?, finalResult: Boolean, nowMs: Long): WakePhrase? {
+        if (phrase != WakePhrase.UNLOCK && phrase != WakePhrase.SHUTDOWN) {
+            reset()
+            return null
+        }
+        if (finalResult) {
+            reset()
+            return phrase
+        }
+        if (candidate != phrase || nowMs - lastSeenAtMs > maxGapMs) {
+            candidate = phrase
+            firstSeenAtMs = nowMs
+            lastSeenAtMs = nowMs
+            hits = 1
+            return null
+        }
+        hits += 1
+        lastSeenAtMs = nowMs
+        if (hits >= minHits && nowMs - firstSeenAtMs >= stableMs) {
+            reset()
+            return phrase
+        }
+        return null
+    }
+
+    fun reset() {
+        candidate = null
+        firstSeenAtMs = 0L
+        lastSeenAtMs = 0L
+        hits = 0
+    }
+}
+
 enum class WakePhrase {
     START,
     PATCH,
