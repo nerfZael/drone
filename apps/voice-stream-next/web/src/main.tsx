@@ -38,7 +38,7 @@ import type {
 } from './dashboardTypes.js';
 import { exactTimeLabel, relativeTimeAgo, timeLabel } from './time.js';
 import { AssistantFilesPanel, type ArtifactPanelMode } from './assistant/AssistantFilesPanel.js';
-import { AssistantSystemPromptModal, type AssistantSystemPromptKind, type AssistantSystemPromptMode } from './assistant/AssistantSystemPromptModal.js';
+import { AssistantSystemPromptModal, type AssistantSystemPromptMode } from './assistant/AssistantSystemPromptModal.js';
 import { cn } from './ui/cn.js';
 import { MarkdownMessage } from './ui/MarkdownMessage.js';
 import { UiMenuSelect, type UiMenuSelectEntry } from './ui/MenuSelect.js';
@@ -46,7 +46,6 @@ import './styles.css';
 
 const publishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined;
 const desktopDeviceStorageKey = 'voiceStreamNext.desktopDevice';
-const ASSISTANT_NORMAL_SYSTEM_PROMPT_DEFAULT = 'You are VoiceStream, a concise standalone assistant. Answer directly and keep useful context in the thread.';
 const ASSISTANT_VOICE_SYSTEM_PROMPT_DEFAULT = 'You are VoiceStream, a concise voice assistant. Keep spoken replies short and practical.';
 const ASSISTANT_SYSTEM_PROMPT_MAX_CHARS = 20_000;
 
@@ -55,7 +54,7 @@ const ASSISTANT_PROVIDERS: Array<{ id: 'codex' | 'openai'; label: string; title:
   { id: 'openai', label: 'OpenAI', title: 'Use the configured OpenAI API key for OpenAI models.' },
 ];
 
-type AssistantSettingsPromptField = 'normalSystemPrompt' | 'voiceSystemPrompt';
+type AssistantSettingsPromptField = 'voiceSystemPrompt';
 type SettingsPane = 'devices' | 'assistant' | 'voice' | 'activity';
 type AppEvent = {
   type: string;
@@ -922,7 +921,6 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const [activeView, setActiveView] = React.useState<DashboardView>('threads');
   const [settingsPane, setSettingsPane] = React.useState<SettingsPane>('devices');
   const [threadSidebarOpen, setThreadSidebarOpen] = React.useState(true);
-  const [threadFilter, setThreadFilter] = React.useState<'all' | 'normal' | 'voice'>('all');
   const [activeThreadId, setActiveThreadId] = React.useState<string | null>(null);
   const [messages, setMessages] = React.useState<AssistantMessage[]>([]);
   const [streamingReply, setStreamingReply] = React.useState('');
@@ -939,12 +937,9 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const [assistantToolsOpen, setAssistantToolsOpen] = React.useState(false);
   const [systemPromptOpen, setSystemPromptOpen] = React.useState(false);
   const [systemPromptMode, setSystemPromptMode] = React.useState<AssistantSystemPromptMode>('thread');
-  const [systemPromptGlobalKind, setSystemPromptGlobalKind] = React.useState<AssistantSystemPromptKind>('normal');
-  const [normalSystemPromptDraft, setNormalSystemPromptDraft] = React.useState(ASSISTANT_NORMAL_SYSTEM_PROMPT_DEFAULT);
   const [voiceSystemPromptDraft, setVoiceSystemPromptDraft] = React.useState(ASSISTANT_VOICE_SYSTEM_PROMPT_DEFAULT);
   const [threadSystemPromptDraft, setThreadSystemPromptDraft] = React.useState('');
   const [assistantSettingsPromptDrafts, setAssistantSettingsPromptDrafts] = React.useState<Record<AssistantSettingsPromptField, string>>({
-    normalSystemPrompt: ASSISTANT_NORMAL_SYSTEM_PROMPT_DEFAULT,
     voiceSystemPrompt: ASSISTANT_VOICE_SYSTEM_PROMPT_DEFAULT,
   });
   const [systemPromptSaving, setSystemPromptSaving] = React.useState(false);
@@ -978,7 +973,6 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const settingsHydratedRef = React.useRef(false);
   const approvalSettingsDirtyRef = React.useRef(false);
   const assistantSettingsPromptDirtyRef = React.useRef<Record<AssistantSettingsPromptField, boolean>>({
-    normalSystemPrompt: false,
     voiceSystemPrompt: false,
   });
   const assistantEventRefreshTimerRef = React.useRef<number | null>(null);
@@ -1082,27 +1076,20 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   }, []);
   const activeInheritedSystemPrompt = React.useMemo(() => {
     const settings = assistantSnapshotData?.assistantSettings;
-    if (activeThread?.voiceEnabled) return settings?.voiceSystemPrompt ?? ASSISTANT_VOICE_SYSTEM_PROMPT_DEFAULT;
-    return settings?.normalSystemPrompt ?? ASSISTANT_NORMAL_SYSTEM_PROMPT_DEFAULT;
-  }, [activeThread?.voiceEnabled, assistantSnapshotData?.assistantSettings]);
+    return settings?.voiceSystemPrompt ?? ASSISTANT_VOICE_SYSTEM_PROMPT_DEFAULT;
+  }, [assistantSnapshotData?.assistantSettings]);
   const seedSystemPromptDrafts = React.useCallback(() => {
-    const normalPrompt = assistantSnapshotData?.assistantSettings.normalSystemPrompt ?? ASSISTANT_NORMAL_SYSTEM_PROMPT_DEFAULT;
     const voicePrompt = assistantSnapshotData?.assistantSettings.voiceSystemPrompt ?? ASSISTANT_VOICE_SYSTEM_PROMPT_DEFAULT;
-    setNormalSystemPromptDraft(normalPrompt);
     setVoiceSystemPromptDraft(voicePrompt);
     setThreadSystemPromptDraft(activeThread?.systemPrompt ?? '');
-    setSystemPromptGlobalKind(activeThread?.voiceEnabled ? 'voice' : 'normal');
-  }, [activeThread?.systemPrompt, activeThread?.voiceEnabled, assistantSnapshotData?.assistantSettings]);
+  }, [activeThread?.systemPrompt, assistantSnapshotData?.assistantSettings]);
 
   React.useEffect(() => {
-    const normalSystemPrompt = assistantSnapshotData?.assistantSettings.normalSystemPrompt ?? ASSISTANT_NORMAL_SYSTEM_PROMPT_DEFAULT;
     const voiceSystemPrompt = assistantSnapshotData?.assistantSettings.voiceSystemPrompt ?? ASSISTANT_VOICE_SYSTEM_PROMPT_DEFAULT;
     setAssistantSettingsPromptDrafts((current) => ({
-      normalSystemPrompt: assistantSettingsPromptDirtyRef.current.normalSystemPrompt ? current.normalSystemPrompt : normalSystemPrompt,
       voiceSystemPrompt: assistantSettingsPromptDirtyRef.current.voiceSystemPrompt ? current.voiceSystemPrompt : voiceSystemPrompt,
     }));
   }, [
-    assistantSnapshotData?.assistantSettings.normalSystemPrompt,
     assistantSnapshotData?.assistantSettings.voiceSystemPrompt,
   ]);
 
@@ -1453,23 +1440,22 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     scrollMessagesToBottom();
   }, [activeThread, assistantSnapshotData?.pendingApprovals, messages, scrollMessagesToBottom, streamingReply, streamingThinking]);
 
-  async function createThread(options: { voiceEnabled?: boolean } = {}) {
+  async function createThread() {
     setBusy(true);
     setError(null);
     try {
       const data = await client.request<{ ok: true; thread: AssistantThread; snapshot: AssistantSnapshot }>('/api/assistant/threads', {
         method: 'POST',
         body: JSON.stringify({
-          title: options.voiceEnabled ? 'Voice thread' : 'Assistant thread',
-          source: options.voiceEnabled ? 'voice' : 'web',
-          voiceEnabled: Boolean(options.voiceEnabled),
+          title: 'New thread',
+          source: 'voice',
+          voiceEnabled: true,
         }),
       });
       setActiveThreadId(data.thread.id);
       setAssistantSnapshotData(data.snapshot);
-      if (options.voiceEnabled) setThreadFilter('voice');
       await loadDashboard();
-      setNotice(options.voiceEnabled ? 'Created voice assistant thread.' : 'Created assistant thread.');
+      setNotice('Created thread.');
     } catch (err: any) {
       setError(err?.message ?? String(err));
     } finally {
@@ -1965,7 +1951,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   }
 
   async function saveGlobalSystemPrompt() {
-    const prompt = systemPromptGlobalKind === 'voice' ? voiceSystemPromptDraft : normalSystemPromptDraft;
+    const prompt = voiceSystemPromptDraft;
     if (!prompt.trim()) {
       setSystemPromptError('System prompt is required.');
       return;
@@ -1974,17 +1960,13 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     setSystemPromptError(null);
     setSystemPromptNotice(null);
     try {
-      const patch = systemPromptGlobalKind === 'voice'
-        ? { voiceSystemPrompt: prompt }
-        : { normalSystemPrompt: prompt };
       const data = await client.request<{ ok: true; settings: AssistantSnapshot['assistantSettings']; snapshot: AssistantSnapshot }>(
         '/api/assistant/settings',
-        { method: 'PATCH', body: JSON.stringify(patch) },
+        { method: 'PATCH', body: JSON.stringify({ voiceSystemPrompt: prompt }) },
       );
       setAssistantSnapshotData(data.snapshot);
-      setNormalSystemPromptDraft(data.snapshot.assistantSettings.normalSystemPrompt);
       setVoiceSystemPromptDraft(data.snapshot.assistantSettings.voiceSystemPrompt);
-      setSystemPromptNotice(`Saved ${systemPromptGlobalKind} default prompt.`);
+      setSystemPromptNotice('Saved default prompt.');
     } catch (err: any) {
       setSystemPromptError(err?.message ?? String(err));
     } finally {
@@ -2016,7 +1998,6 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   async function promoteThreadSystemPrompt() {
     const prompt = threadSystemPromptDraft.trim();
     if (!prompt) return;
-    const kind: AssistantSystemPromptKind = activeThread?.voiceEnabled ? 'voice' : 'normal';
     setPromoteSystemPromptSaving(true);
     setSystemPromptError(null);
     setSystemPromptNotice(null);
@@ -2025,13 +2006,12 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
         '/api/assistant/settings',
         {
           method: 'PATCH',
-          body: JSON.stringify(kind === 'voice' ? { voiceSystemPrompt: prompt } : { normalSystemPrompt: prompt }),
+          body: JSON.stringify({ voiceSystemPrompt: prompt }),
         },
       );
       setAssistantSnapshotData(data.snapshot);
-      setNormalSystemPromptDraft(data.snapshot.assistantSettings.normalSystemPrompt);
       setVoiceSystemPromptDraft(data.snapshot.assistantSettings.voiceSystemPrompt);
-      setSystemPromptNotice(`Saved thread prompt as the ${kind} default.`);
+      setSystemPromptNotice('Saved thread prompt as the default.');
     } catch (err: any) {
       setSystemPromptError(err?.message ?? String(err));
     } finally {
@@ -2394,13 +2374,6 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
 
   const devices = dashboard?.devices ?? [];
   const threads = assistantThreads;
-  const normalThreadCount = threads.filter((thread) => !thread.voiceEnabled && thread.source !== 'voice').length;
-  const voiceThreadCount = threads.filter((thread) => thread.voiceEnabled || thread.source === 'voice').length;
-  const visibleThreads = threads.filter((thread) => {
-    if (threadFilter === 'voice') return Boolean(thread.voiceEnabled) || thread.source === 'voice';
-    if (threadFilter === 'normal') return !thread.voiceEnabled && thread.source !== 'voice';
-    return true;
-  });
   const logs = dashboard?.logs ?? [];
   const speechPlayback = dashboard?.speechPlayback;
   const speechPlaybackTarget = dashboard?.settings.speechPlaybackTarget ?? speechPlayback?.preferredTarget ?? 'auto';
@@ -2532,25 +2505,10 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
           <button type="button" className={assistantPrimaryButtonClass} onClick={() => void createThread()} disabled={busy}>
             + New Thread
           </button>
-          <button type="button" className={assistantPrimaryButtonClass} onClick={() => void createThread({ voiceEnabled: true })} disabled={busy}>
-            + Voice Thread
-          </button>
-        </div>
-
-        <div className="m-2 grid grid-cols-3 overflow-hidden rounded border border-[var(--border-subtle)] bg-white/[.025]" role="group" aria-label="Thread filter">
-          <button type="button" className={cn('flex h-7 min-w-0 items-center justify-center gap-1 border-0 border-r border-[var(--border-subtle)] bg-transparent px-1.5 font-display text-[10px] font-bold uppercase text-[var(--muted)]', threadFilter === 'all' && '!bg-[rgba(74,222,128,.10)] !text-[var(--green)]')} onClick={() => setThreadFilter('all')}>
-            All <span className="text-[var(--muted-dim)]">{threads.length}</span>
-          </button>
-          <button type="button" className={cn('flex h-7 min-w-0 items-center justify-center gap-1 border-0 border-r border-[var(--border-subtle)] bg-transparent px-1.5 font-display text-[10px] font-bold uppercase text-[var(--muted)]', threadFilter === 'normal' && '!bg-[rgba(74,222,128,.10)] !text-[var(--green)]')} onClick={() => setThreadFilter('normal')}>
-            Normal <span className="text-[var(--muted-dim)]">{normalThreadCount}</span>
-          </button>
-          <button type="button" className={cn('flex h-7 min-w-0 items-center justify-center gap-1 border-0 bg-transparent px-1.5 font-display text-[10px] font-bold uppercase text-[var(--muted)]', threadFilter === 'voice' && '!bg-[rgba(74,222,128,.10)] !text-[var(--green)]')} onClick={() => setThreadFilter('voice')}>
-            Voice <span className="text-[var(--muted-dim)]">{voiceThreadCount}</span>
-          </button>
         </div>
 
         <div className="grid min-h-0 content-start gap-1.5 overflow-auto p-1.5 max-[880px]:grid-flow-col max-[880px]:auto-cols-[minmax(180px,220px)] max-[880px]:overflow-x-auto max-[880px]:overflow-y-hidden">
-          {visibleThreads.map((thread) => {
+          {threads.map((thread) => {
             const active = thread.id === activeThread?.id;
             const messageCount = active ? messages.length : 0;
             const queuedCount = (thread as AssistantThreadView).queuedPrompts?.length ?? 0;
@@ -2575,7 +2533,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                     <strong className="min-w-0 truncate text-xs font-semibold">{thread.title || 'Untitled thread'}</strong>
                   </div>
                   <small className="min-w-0 truncate text-[10px] leading-tight text-[var(--muted)]">
-                    {thread.voiceEnabled || thread.source === 'voice' ? 'voice' : 'normal'} · {timeLabel(thread.updatedAt)}
+                    {timeLabel(thread.updatedAt)}
                     {messageCount ? ` · ${messageCount}` : ''}
                     {queuedCount ? ` · ${queuedCount} queued` : ''}
                   </small>
@@ -2599,57 +2557,10 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
               </div>
             );
           })}
-          {visibleThreads.length === 0 ? <div className={assistantEmptyClass}>No {threadFilter === 'all' ? 'assistant' : threadFilter} threads yet.</div> : null}
+          {threads.length === 0 ? <div className={assistantEmptyClass}>No threads yet.</div> : null}
         </div>
 
         <div className="grid gap-2 border-t border-[var(--border)] bg-white/[.018] p-2 max-[880px]:hidden">
-          <div className="grid gap-2 rounded border border-[var(--border-subtle)] bg-white/[.025] p-2">
-            <div className="flex min-w-0 items-center justify-between gap-2">
-              <span className="min-w-0 truncate font-display text-[10px] font-bold uppercase text-[var(--muted)]">Android Setup</span>
-              {androidApkInfo?.available ? (
-                <span className="shrink-0 text-[10px] text-[var(--muted)]">v{androidApkInfo.versionName ?? androidApkInfo.versionCode ?? '?'}</span>
-              ) : null}
-            </div>
-            {androidSetupQr && androidSetupInfo?.setupUrl ? (
-              <a href={androidSetupInfo.setupUrl} className="block w-fit rounded-[7px] border border-[var(--border)] bg-white p-1 transition hover:border-[rgba(136,145,168,.5)]" title="Android setup QR">
-                <img src={androidSetupQr} alt="Android setup QR" className="h-[112px] w-[112px]" />
-              </a>
-            ) : (
-              <div className="rounded border border-[var(--border-subtle)] bg-black/[.12] p-2 text-[10px] leading-tight text-[var(--muted)]">No setup QR</div>
-            )}
-            <AppDownloadLinks androidInfo={androidApkInfo} desktopInfo={desktopAppInfo} />
-          </div>
-          <button type="button" className="grid min-h-[104px] w-full justify-items-center gap-[7px] rounded border border-[var(--border-subtle)] bg-white/[.025] p-3 font-display text-[10px] font-bold uppercase text-[var(--muted)] transition hover:bg-white/[.05] hover:text-[var(--fg-secondary)] disabled:pointer-events-none disabled:opacity-50" onClick={() => void createThread({ voiceEnabled: true })} disabled={busy}>
-            <svg viewBox="0 0 24 24" aria-hidden="true" className="h-11 w-11 rounded-full bg-white/[.045] p-2.5 fill-none stroke-current stroke-[1.8]">
-              <rect x="9" y="3" width="6" height="11" rx="3" />
-              <path d="M5 11a7 7 0 0 0 14 0" />
-              <path d="M12 18v3" />
-              <path d="M8 21h8" />
-            </svg>
-            <span>Start Voice</span>
-          </button>
-          <button
-            type="button"
-            className={cn(assistantPrimaryButtonClass, 'h-[34px] text-[var(--muted)]', threadFilter === 'voice' && assistantIconButtonActiveClass)}
-            onClick={() => {
-              setThreadFilter('voice');
-              setActiveView('threads');
-            }}
-          >
-            Voice Mode
-          </button>
-          <button
-            type="button"
-            className={cn(assistantPrimaryButtonClass, 'h-[34px] text-[var(--muted)]')}
-            onClick={() => {
-              setDeviceType('android');
-              if (!deviceName.trim() || deviceName === 'Desktop dev client') setDeviceName('Android voice client');
-              setSettingsPane('devices');
-              setActiveView('settings');
-            }}
-          >
-            Android Setup
-          </button>
           <div className="flex items-center justify-between gap-2">
             <span className="text-[10px] leading-tight text-[var(--muted)]">Connected devices</span>
             <strong className="text-xs text-[var(--fg)]">{connectedDeviceIds.size}/{devices.length}</strong>
@@ -2766,22 +2677,6 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                   <svg viewBox="0 0 24 24" aria-hidden="true" className={assistantIconSvgClass}>
                     <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
                     <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.2.34.6.6 1 .6h.6a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1.4Z" />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  className={cn(assistantIconButtonClass, activeThread?.voiceEnabled && assistantIconButtonActiveClass)}
-                  onClick={() => void updateThreadSettings({ voiceEnabled: !activeThread?.voiceEnabled })}
-                  disabled={!activeThread || busy}
-                  title={activeThread?.voiceEnabled ? 'Voice replies are on' : 'Voice replies are off'}
-                  aria-label={activeThread?.voiceEnabled ? 'Turn off voice replies' : 'Turn on voice replies'}
-                  aria-pressed={Boolean(activeThread?.voiceEnabled)}
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true" className={assistantIconSvgClass}>
-                    <rect x="9" y="3" width="6" height="11" rx="3" />
-                    <path d="M5 11a7 7 0 0 0 14 0" />
-                    <path d="M12 18v3" />
-                    <path d="M8 21h8" />
                   </svg>
                 </button>
                 <button
@@ -3308,22 +3203,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                 </div>
                 <div className="grid gap-2.5">
                   <label className={assistantFieldLabelClass}>
-                    Normal assistant prompt
-                    <textarea
-                      value={assistantSettingsPromptDrafts.normalSystemPrompt}
-                      onChange={(event) => {
-                        const value = event.currentTarget.value;
-                        assistantSettingsPromptDirtyRef.current.normalSystemPrompt = true;
-                        setAssistantSettingsPromptDrafts((current) => ({ ...current, normalSystemPrompt: value }));
-                      }}
-                      onBlur={(event) => void updateAssistantSettings(
-                        { normalSystemPrompt: event.currentTarget.value },
-                        { clearPromptDirty: ['normalSystemPrompt'] },
-                      )}
-                    />
-                  </label>
-                  <label className={assistantFieldLabelClass}>
-                    Voice assistant prompt
+                    Assistant prompt
                     <textarea
                       value={assistantSettingsPromptDrafts.voiceSystemPrompt}
                       onChange={(event) => {
@@ -3822,15 +3702,10 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
       <AssistantSystemPromptModal
         open={systemPromptOpen}
         threadTitle={activeThread?.title ?? ''}
-        threadVoiceEnabled={Boolean(activeThread?.voiceEnabled)}
         mode={systemPromptMode}
         onModeChange={setSystemPromptMode}
-        globalKind={systemPromptGlobalKind}
-        onGlobalKindChange={setSystemPromptGlobalKind}
         threadDraft={threadSystemPromptDraft}
         onThreadDraftChange={setThreadSystemPromptDraft}
-        normalDraft={normalSystemPromptDraft}
-        onNormalDraftChange={setNormalSystemPromptDraft}
         voiceDraft={voiceSystemPromptDraft}
         onVoiceDraftChange={setVoiceSystemPromptDraft}
         inheritedPrompt={activeInheritedSystemPrompt}
@@ -3844,10 +3719,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
         onSaveGlobal={() => void saveGlobalSystemPrompt()}
         onPromoteThread={() => void promoteThreadSystemPrompt()}
         onUseInherited={() => setThreadSystemPromptDraft('')}
-        onResetGlobal={() => {
-          if (systemPromptGlobalKind === 'voice') setVoiceSystemPromptDraft(ASSISTANT_VOICE_SYSTEM_PROMPT_DEFAULT);
-          else setNormalSystemPromptDraft(ASSISTANT_NORMAL_SYSTEM_PROMPT_DEFAULT);
-        }}
+        onResetGlobal={() => setVoiceSystemPromptDraft(ASSISTANT_VOICE_SYSTEM_PROMPT_DEFAULT)}
       />
     </main>
   );
@@ -4611,8 +4483,6 @@ function ThreadDeleteConfirmModal({
   onConfirm: () => void;
 }) {
   const title = thread.title?.trim() || 'Untitled thread';
-  const kind = thread.voiceEnabled || thread.source === 'voice' ? 'voice thread' : 'assistant thread';
-
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && !busy) onCancel();
@@ -4650,7 +4520,7 @@ function ThreadDeleteConfirmModal({
           <div className="min-w-0">
             <h2 id="delete-thread-title" className="m-0 text-[15px] font-bold leading-tight text-[var(--fg)]">Delete thread?</h2>
             <p id="delete-thread-description" className="mt-1 text-xs leading-relaxed text-[var(--muted)]">
-              This will permanently delete the {kind} "{title}" and its messages.
+              This will permanently delete "{title}" and its messages.
             </p>
           </div>
         </div>

@@ -1921,12 +1921,11 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
   app.post('/api/assistant/threads', async (req, reply) =>
     withUser(req, reply, db, clerkEnabled, async (ctx) => {
       const body = jsonBody(req);
-      const source = cleanText(body.source) === 'voice' || Boolean(body.voiceEnabled) ? 'voice' : 'web';
       const requestedProvider = cleanText(body.provider);
       const thread = db.createThread(ctx.user.id, {
-        title: cleanText(body.title, 'Assistant thread') || 'Assistant thread',
-        source,
-        voiceEnabled: Boolean(body.voiceEnabled) || source === 'voice',
+        title: cleanText(body.title, 'New thread') || 'New thread',
+        source: 'voice',
+        voiceEnabled: true,
         provider: requestedProvider || undefined,
         model: cleanText(body.model) || undefined,
         thinkingLevel: cleanText(body.thinkingLevel) || undefined,
@@ -1943,11 +1942,11 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       if (!db.thread(ctx.user.id, threadId)) throw Object.assign(new Error('unknown thread'), { statusCode: 404 });
       const body = jsonBody(req);
       const patch: Parameters<VoiceStreamNextDb['updateThread']>[2] = {};
-      if (body.title !== undefined) patch.title = cleanText(body.title, 'Assistant thread') || 'Assistant thread';
+      if (body.title !== undefined) patch.title = cleanText(body.title, 'New thread') || 'New thread';
       if (body.provider !== undefined) patch.provider = cleanText(body.provider, 'openai') || 'openai';
       if (body.model !== undefined) patch.model = cleanText(body.model, 'gpt-5.5') || 'gpt-5.5';
       if (body.thinkingLevel !== undefined) patch.thinkingLevel = cleanText(body.thinkingLevel, 'off') || 'off';
-      if (body.voiceEnabled !== undefined) patch.voiceEnabled = Boolean(body.voiceEnabled);
+      if (body.voiceEnabled !== undefined) patch.voiceEnabled = true;
       if (body.autoApprove !== undefined) patch.autoApprove = Boolean(body.autoApprove);
       if (body.systemPrompt !== undefined) patch.systemPrompt = cleanText(body.systemPrompt) || null;
       if (Array.isArray(body.enabledTools)) patch.enabledTools = body.enabledTools.map((tool: unknown) => cleanText(tool)).filter(Boolean);

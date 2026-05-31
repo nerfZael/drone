@@ -39,7 +39,7 @@ describe('assistant API parity', () => {
     delete process.env.VOICE_STREAM_NEXT_DATA_DIR;
   });
 
-  test('creates normal and voice threads, renames, and deletes through the API', async () => {
+  test('creates voice-enabled threads, renames, and deletes through the API', async () => {
     const settings = await built.app.inject({
       method: 'PATCH',
       url: '/api/assistant/settings',
@@ -53,16 +53,16 @@ describe('assistant API parity', () => {
     expect(settings.settings.defaultProvider).toBe('codex');
     expect(settings.settings.defaultModel).toBe('gpt-5.3-codex-spark');
 
-    const normal = await built.app.inject({
+    const first = await built.app.inject({
       method: 'POST',
       url: '/api/assistant/threads',
       headers: devHeaders,
-      payload: JSON.stringify({ title: 'Normal API thread' }),
+      payload: JSON.stringify({ title: 'API thread' }),
     }).then((response) => response.json());
-    expect(normal.thread.source).toBe('web');
-    expect(normal.thread.voiceEnabled).toBe(false);
-    expect(normal.thread.provider).toBe('codex');
-    expect(normal.thread.model).toBe('gpt-5.3-codex-spark');
+    expect(first.thread.source).toBe('voice');
+    expect(first.thread.voiceEnabled).toBe(true);
+    expect(first.thread.provider).toBe('codex');
+    expect(first.thread.model).toBe('gpt-5.3-codex-spark');
 
     const voice = await built.app.inject({
       method: 'POST',
@@ -75,7 +75,7 @@ describe('assistant API parity', () => {
 
     const renamed = await built.app.inject({
       method: 'PATCH',
-      url: `/api/assistant/threads/${normal.thread.id}`,
+      url: `/api/assistant/threads/${first.thread.id}`,
       headers: devHeaders,
       payload: JSON.stringify({ title: 'Renamed API thread' }),
     }).then((response) => response.json());
@@ -83,11 +83,11 @@ describe('assistant API parity', () => {
 
     const deleted = await built.app.inject({
       method: 'DELETE',
-      url: `/api/assistant/threads/${normal.thread.id}`,
+      url: `/api/assistant/threads/${first.thread.id}`,
       headers: devAuthHeaders,
     }).then((response) => response.json());
     expect(deleted.deleted).toBe(true);
-    expect(deleted.snapshot.threads.some((thread: any) => thread.id === normal.thread.id)).toBe(false);
+    expect(deleted.snapshot.threads.some((thread: any) => thread.id === first.thread.id)).toBe(false);
   });
 
   test('lets paired Android devices read the shared current voice thread files', async () => {
@@ -159,7 +159,7 @@ describe('assistant API parity', () => {
     expect(desktopFiles.artifacts[0].content).toContain('Shared across devices');
   });
 
-  test('uses manually voice-enabled web threads for device recordings', async () => {
+  test('uses manually created threads for device recordings', async () => {
     const user = db.upsertUser({
       clerkUserId: 'clerk_voice_enabled_web_thread',
       displayName: 'Voice Enabled Web Thread',
@@ -167,7 +167,7 @@ describe('assistant API parity', () => {
       admin: false,
     });
     const registered = db.registerDevice(user.id, { deviceType: 'desktop', displayName: 'Desktop' });
-    const thread = db.createThread(user.id, { title: 'Manual voice thread', source: 'web', voiceEnabled: true });
+    const thread = db.createThread(user.id, { title: 'Manual thread' });
 
     expect(db.latestVoiceThreadOrNull(user.id)?.id).toBe(thread.id);
 

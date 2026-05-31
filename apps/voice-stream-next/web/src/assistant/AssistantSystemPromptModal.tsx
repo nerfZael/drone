@@ -2,20 +2,14 @@ import * as React from 'react';
 import { cn } from '../ui/cn.js';
 
 export type AssistantSystemPromptMode = 'thread' | 'global';
-export type AssistantSystemPromptKind = 'normal' | 'voice';
 
 type AssistantSystemPromptModalProps = {
   open: boolean;
   threadTitle: string;
-  threadVoiceEnabled: boolean;
   mode: AssistantSystemPromptMode;
   onModeChange: (mode: AssistantSystemPromptMode) => void;
-  globalKind: AssistantSystemPromptKind;
-  onGlobalKindChange: (kind: AssistantSystemPromptKind) => void;
   threadDraft: string;
   onThreadDraftChange: (value: string) => void;
-  normalDraft: string;
-  onNormalDraftChange: (value: string) => void;
   voiceDraft: string;
   onVoiceDraftChange: (value: string) => void;
   inheritedPrompt: string;
@@ -39,15 +33,10 @@ function charsLabel(value: string, maxChars: number): string {
 export function AssistantSystemPromptModal({
   open,
   threadTitle,
-  threadVoiceEnabled,
   mode,
   onModeChange,
-  globalKind,
-  onGlobalKindChange,
   threadDraft,
   onThreadDraftChange,
-  normalDraft,
-  onNormalDraftChange,
   voiceDraft,
   onVoiceDraftChange,
   inheritedPrompt,
@@ -74,9 +63,6 @@ export function AssistantSystemPromptModal({
 
   if (!open) return null;
 
-  const activeGlobalDraft = globalKind === 'voice' ? voiceDraft : normalDraft;
-  const activeGlobalSetter = globalKind === 'voice' ? onVoiceDraftChange : onNormalDraftChange;
-  const activeThreadKind: AssistantSystemPromptKind = threadVoiceEnabled ? 'voice' : 'normal';
   const busy = saving || promoteSaving;
   const tabClass = (active: boolean) =>
     cn(
@@ -99,7 +85,7 @@ export function AssistantSystemPromptModal({
           <div>
             <span className="font-display text-[10px] font-bold uppercase text-[var(--muted-dim)]">Assistant</span>
             <h2 className="m-0 mt-0.5 text-base font-bold leading-tight text-[var(--fg)]">System Prompt</h2>
-            <small className="mt-1 block text-[11px] text-[var(--muted)]">{threadTitle || 'Current thread'} · {activeThreadKind}</small>
+            <small className="mt-1 block text-[11px] text-[var(--muted)]">{threadTitle || 'Current thread'}</small>
           </div>
           <button
             type="button"
@@ -131,7 +117,7 @@ export function AssistantSystemPromptModal({
             <div className="flex items-end justify-between gap-3.5">
               <div>
                 <strong className="text-[13px] text-[var(--fg)]">Thread prompt</strong>
-                <small className="block text-[11px] text-[var(--muted)]">Overrides the {activeThreadKind} default for this thread only.</small>
+                <small className="block text-[11px] text-[var(--muted)]">Overrides the default for this thread only.</small>
               </div>
               <span className="text-[11px] text-[var(--muted)]">{charsLabel(threadDraft, maxChars)}</span>
             </div>
@@ -158,7 +144,7 @@ export function AssistantSystemPromptModal({
                 Use Default
               </button>
               <button type="button" className={secondaryButtonClass} onClick={onPromoteThread} disabled={busy || !threadDraft.trim()}>
-                {promoteSaving ? 'Saving...' : `Make ${activeThreadKind} Default`}
+                {promoteSaving ? 'Saving...' : 'Make Default'}
               </button>
               <button type="button" className={primaryButtonClass} onClick={onSaveThread} disabled={busy}>
                 {saving ? 'Saving...' : 'Save Thread Prompt'}
@@ -167,33 +153,25 @@ export function AssistantSystemPromptModal({
           </div>
         ) : (
           <div className="grid min-h-0 gap-2.5 overflow-auto p-3.5">
-            <div className="inline-flex w-max overflow-hidden rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.025)]" role="group" aria-label="Default prompt type">
-              <button type="button" className={tabClass(globalKind === 'normal')} onClick={() => onGlobalKindChange('normal')}>
-                Normal
-              </button>
-              <button type="button" className={tabClass(globalKind === 'voice')} onClick={() => onGlobalKindChange('voice')}>
-                Voice
-              </button>
-            </div>
             <div className="flex items-end justify-between gap-3.5">
               <div>
-                <strong className="text-[13px] text-[var(--fg)]">{globalKind === 'voice' ? 'Voice default' : 'Normal default'}</strong>
+                <strong className="text-[13px] text-[var(--fg)]">Default prompt</strong>
                 <small className="block text-[11px] text-[var(--muted)]">Used by threads that do not have a thread override.</small>
               </div>
-              <span className="text-[11px] text-[var(--muted)]">{charsLabel(activeGlobalDraft, maxChars)}</span>
+              <span className="text-[11px] text-[var(--muted)]">{charsLabel(voiceDraft, maxChars)}</span>
             </div>
             <textarea
               autoFocus
-              value={activeGlobalDraft}
+              value={voiceDraft}
               maxLength={maxChars}
-              onChange={(event) => activeGlobalSetter(event.currentTarget.value)}
+              onChange={(event) => onVoiceDraftChange(event.currentTarget.value)}
               className="min-h-[260px] max-h-[44vh] resize-y rounded-md border border-[var(--border)] bg-[rgba(255,255,255,.035)] p-2 font-mono text-xs leading-relaxed text-[var(--fg)] outline-none"
             />
             <footer className="flex justify-end gap-1.5">
               <button type="button" className={secondaryButtonClass} onClick={onResetGlobal} disabled={busy}>
                 Reset Draft
               </button>
-              <button type="button" className={primaryButtonClass} onClick={onSaveGlobal} disabled={busy || !activeGlobalDraft.trim()}>
+              <button type="button" className={primaryButtonClass} onClick={onSaveGlobal} disabled={busy || !voiceDraft.trim()}>
                 {saving ? 'Saving...' : 'Save Default'}
               </button>
             </footer>
