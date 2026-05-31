@@ -324,6 +324,77 @@ function windowDebugLog(message, details = {}) {
   }
 }
 
+function commandLogPath() {
+  return path.join(app.getPath('userData'), 'voice-stream-next-command-debug.log');
+}
+
+function sanitizeCommandLogEntry(entry = {}) {
+  const value = entry && typeof entry === 'object' ? entry : {};
+  const clean = (raw, max = 500) => String(raw ?? '').slice(0, max);
+  const outcome = clean(value.outcome, 40);
+  return {
+    at: clean(value.at || new Date().toISOString(), 80),
+    mode: clean(value.mode, 40),
+    source: clean(value.source, 40),
+    text: clean(value.text, 500),
+    final: Boolean(value.final),
+    outcome: outcome || 'event',
+    command: clean(value.command, 80),
+    reason: clean(value.reason, 160),
+  };
+}
+
+function readCommandLogEntries(limit = 200) {
+  try {
+    const file = commandLogPath();
+    if (!fs.existsSync(file)) return [];
+    return fs.readFileSync(file, 'utf8')
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .slice(-limit)
+      .map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean)
+      .reverse();
+  } catch {
+    return [];
+  }
+}
+
+function trimCommandLogFile() {
+  try {
+    const file = commandLogPath();
+    if (!fs.existsSync(file) || fs.statSync(file).size <= 256 * 1024) return;
+    const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/).filter(Boolean).slice(-250);
+    fs.writeFileSync(file, `${lines.join('\n')}\n`);
+  } catch {
+    // Command logging must never affect recognition.
+  }
+}
+
+function appendCommandLog(entry) {
+  const file = commandLogPath();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const saved = sanitizeCommandLogEntry(entry);
+  fs.appendFileSync(file, `${JSON.stringify(saved)}\n`);
+  trimCommandLogFile();
+  return { ok: true, entry: saved, logs: readCommandLogEntries() };
+}
+
+function clearCommandLogs() {
+  try {
+    fs.writeFileSync(commandLogPath(), '');
+  } catch {
+    // Ignore missing or temporarily unavailable log files.
+  }
+  return { ok: true, logs: [] };
+}
+
 function windowSnapshot(win) {
   if (!win || win.isDestroyed()) return null;
   return {
@@ -1581,6 +1652,9 @@ if (!gotSingleInstanceLock) {
     windowDebugLog(String(message || 'renderer'), { renderer: details || {}, snapshot: windowSnapshot(mainWindow) });
     return { ok: true };
   });
+  ipcMain.handle('commandLog:append', (_event, entry) => appendCommandLog(entry));
+  ipcMain.handle('commandLog:read', () => ({ ok: true, logs: readCommandLogEntries() }));
+  ipcMain.handle('commandLog:clear', () => clearCommandLogs());
   ipcMain.handle('window:state', () => windowStatePayload());
   ipcMain.handle('window:compact', (event) => applyCompactMode(windowFromEvent(event)));
   ipcMain.handle('window:expand', (event) => applyExpandedMode(windowFromEvent(event)));

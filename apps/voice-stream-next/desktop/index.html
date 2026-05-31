@@ -56,6 +56,7 @@
               <div class="settings-tabs" role="tablist" aria-label="Settings sections">
                 <button id="audioSettingsTab" class="settings-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="audioSettingsPanel">Audio</button>
                 <button id="shortcutsSettingsTab" class="settings-tab" type="button" role="tab" aria-selected="false" aria-controls="shortcutsSettingsPanel">Shortcuts</button>
+                <button id="logsSettingsTab" class="settings-tab" type="button" role="tab" aria-selected="false" aria-controls="logsSettingsPanel">Logs</button>
               </div>
               <div id="audioSettingsPanel" class="settings-tab-panel is-active" role="tabpanel" aria-labelledby="audioSettingsTab">
                 <div class="voice-device-panel" aria-label="Audio devices">
@@ -137,6 +138,20 @@
                     <button id="pauseResumeShortcutReset" class="secondary mini-button" type="button">Reset</button>
                   </div>
                   <p id="pauseResumeShortcutStatus" class="shortcut-status muted">Checking shortcut registration.</p>
+                </div>
+              </div>
+              <div id="logsSettingsPanel" class="settings-tab-panel" role="tabpanel" aria-labelledby="logsSettingsTab" hidden>
+                <div class="command-log-panel" aria-label="Voice command logs">
+                  <div class="command-log-actions">
+                    <span class="device-picker-title">Voice commands</span>
+                    <div>
+                      <button id="refreshCommandLogsButton" class="secondary mini-button" type="button">Refresh</button>
+                      <button id="copyCommandLogsButton" class="secondary mini-button" type="button">Copy</button>
+                      <button id="clearCommandLogsButton" class="secondary mini-button" type="button">Clear</button>
+                    </div>
+                  </div>
+                  <div id="commandLogList" class="command-log-list" aria-live="polite"></div>
+                  <p id="commandLogStatus" class="shortcut-status muted">No local command logs loaded.</p>
                 </div>
               </div>
             </div>

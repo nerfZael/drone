@@ -441,7 +441,7 @@ h2 {
 
 .settings-tabs {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 4px;
   margin-bottom: 12px;
   padding: 3px;
@@ -597,6 +597,100 @@ h2 {
 
 .shortcut-status.error {
   color: var(--red);
+}
+
+.command-log-panel {
+  display: grid;
+  gap: 10px;
+  text-align: left;
+}
+
+.command-log-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.command-log-actions > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.command-log-list {
+  display: grid;
+  gap: 6px;
+  max-height: 360px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.command-log-row,
+.command-log-empty {
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, .025);
+}
+
+.command-log-row.is-matched {
+  border-color: rgba(74, 222, 128, .24);
+}
+
+.command-log-row.is-unmatched {
+  border-color: rgba(255, 178, 36, .24);
+}
+
+.command-log-row.is-pending {
+  border-color: rgba(167, 139, 250, .26);
+}
+
+.command-log-row.is-ignored {
+  border-color: rgba(136, 145, 168, .24);
+}
+
+.command-log-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.command-log-meta strong {
+  color: var(--fg-secondary);
+}
+
+.command-log-row.is-matched .command-log-meta strong {
+  color: var(--green);
+}
+
+.command-log-row.is-unmatched .command-log-meta strong {
+  color: var(--yellow);
+}
+
+.command-log-row.is-pending .command-log-meta strong {
+  color: var(--accent);
+}
+
+.command-log-text {
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.command-log-detail,
+.command-log-empty {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 .device-picker {

@@ -88,6 +88,8 @@ const state = {
   lastRecognizedText: '',
   lastRecognizedAt: 0,
   sleepPhraseCandidate: null,
+  sleepPhraseTimer: null,
+  commandLogs: [],
   approvalRecognizer: new ApprovalCodeRecognizer(),
   approvalFinalizeTimer: null,
   analyser: null,
@@ -135,8 +137,10 @@ const els = {
   settingsPanel: document.querySelector('#settingsPanel'),
   audioSettingsTab: document.querySelector('#audioSettingsTab'),
   shortcutsSettingsTab: document.querySelector('#shortcutsSettingsTab'),
+  logsSettingsTab: document.querySelector('#logsSettingsTab'),
   audioSettingsPanel: document.querySelector('#audioSettingsPanel'),
   shortcutsSettingsPanel: document.querySelector('#shortcutsSettingsPanel'),
+  logsSettingsPanel: document.querySelector('#logsSettingsPanel'),
   transcriptionShortcutCapture: document.querySelector('#transcriptionShortcutCapture'),
   transcriptionShortcutClear: document.querySelector('#transcriptionShortcutClear'),
   transcriptionShortcutReset: document.querySelector('#transcriptionShortcutReset'),
@@ -153,6 +157,11 @@ const els = {
   pauseResumeShortcutClear: document.querySelector('#pauseResumeShortcutClear'),
   pauseResumeShortcutReset: document.querySelector('#pauseResumeShortcutReset'),
   pauseResumeShortcutStatus: document.querySelector('#pauseResumeShortcutStatus'),
+  commandLogList: document.querySelector('#commandLogList'),
+  commandLogStatus: document.querySelector('#commandLogStatus'),
+  refreshCommandLogsButton: document.querySelector('#refreshCommandLogsButton'),
+  copyCommandLogsButton: document.querySelector('#copyCommandLogsButton'),
+  clearCommandLogsButton: document.querySelector('#clearCommandLogsButton'),
   extensionsConfigInput: document.querySelector('#extensionsConfigInput'),
   addExtensionFileButton: document.querySelector('#addExtensionFileButton'),
   extensionDropzone: document.querySelector('#extensionDropzone'),
@@ -1038,6 +1047,107 @@ function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char]);
 }
 
+function formatLogTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value || '');
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function commandLogLine(log) {
+  const parts = [
+    `[${log.at || ''}]`,
+    String(log.outcome || 'event').toUpperCase(),
+    log.mode ? `mode=${log.mode}` : '',
+    log.source ? `source=${log.source}` : '',
+    log.final ? 'final' : 'partial',
+    log.command ? `command=${log.command}` : '',
+    log.reason ? `reason=${log.reason}` : '',
+    `text=${JSON.stringify(log.text || '')}`,
+  ].filter(Boolean);
+  return parts.join(' ');
+}
+
+function renderCommandLogs() {
+  if (!els.commandLogList || !els.commandLogStatus) return;
+  const logs = state.commandLogs || [];
+  els.commandLogList.textContent = '';
+  if (!logs.length) {
+    els.commandLogList.innerHTML = '<div class="command-log-empty">No command logs yet.</div>';
+    els.commandLogStatus.textContent = 'Matched and unmatched local wake commands will appear here.';
+    return;
+  }
+  for (const log of logs) {
+    const row = document.createElement('article');
+    row.className = `command-log-row is-${String(log.outcome || 'event').toLowerCase()}`;
+
+    const meta = document.createElement('div');
+    meta.className = 'command-log-meta';
+    meta.innerHTML = `<span>${escapeHtml(formatLogTime(log.at))}</span><strong>${escapeHtml(log.outcome || 'event')}</strong><span>${escapeHtml(log.mode || '')}</span>`;
+
+    const text = document.createElement('div');
+    text.className = 'command-log-text';
+    text.textContent = log.text ? `"${log.text}"` : '(empty)';
+
+    const detail = document.createElement('div');
+    detail.className = 'command-log-detail';
+    detail.textContent = [
+      log.command ? `command ${log.command}` : '',
+      log.reason || '',
+      log.source ? `${log.source}${log.final ? ' final' : ' partial'}` : '',
+    ].filter(Boolean).join(' · ');
+
+    row.append(meta, text, detail);
+    els.commandLogList.append(row);
+  }
+  els.commandLogStatus.textContent = `Showing ${logs.length} local command log${logs.length === 1 ? '' : 's'}.`;
+}
+
+async function loadCommandLogs() {
+  if (!desktop.readCommandLogs) return;
+  const result = await desktop.readCommandLogs();
+  state.commandLogs = Array.isArray(result?.logs) ? result.logs : [];
+  renderCommandLogs();
+}
+
+async function clearCommandLogs() {
+  if (!desktop.clearCommandLogs) return;
+  const result = await desktop.clearCommandLogs();
+  state.commandLogs = Array.isArray(result?.logs) ? result.logs : [];
+  renderCommandLogs();
+  showStatus('Cleared local command logs.');
+}
+
+async function copyCommandLogs() {
+  const text = (state.commandLogs || []).map(commandLogLine).join('\n');
+  if (!text) {
+    showStatus('No local command logs to copy.');
+    return;
+  }
+  await desktop.writeClipboard(text);
+  showStatus('Copied local command logs.');
+}
+
+function isLogsSettingsActive() {
+  return Boolean(els.logsSettingsTab?.classList.contains('is-active'));
+}
+
+async function recordCommandRecognitionLog(entry) {
+  const payload = {
+    at: new Date().toISOString(),
+    mode: state.mode,
+    source: state.wakeUsesVosk ? 'vosk' : 'speech-recognition',
+    ...entry,
+  };
+  if (!desktop.appendCommandLog) return;
+  try {
+    const result = await desktop.appendCommandLog(payload);
+    state.commandLogs = Array.isArray(result?.logs) ? result.logs : [payload, ...state.commandLogs].slice(0, 200);
+    if (isLogsSettingsActive()) renderCommandLogs();
+  } catch {
+    // Local command diagnostics must not affect wake handling.
+  }
+}
+
 async function loadDashboard() {
   updateConnection('pending', 'Connecting', 'Loading dashboard');
   try {
@@ -1368,18 +1478,19 @@ function closeSettingsPanel() {
 }
 
 function selectSettingsTab(tab) {
-  const shortcutsActive = tab === 'shortcuts';
-  els.audioSettingsTab?.classList.toggle('is-active', !shortcutsActive);
-  els.shortcutsSettingsTab?.classList.toggle('is-active', shortcutsActive);
-  els.audioSettingsTab?.setAttribute('aria-selected', String(!shortcutsActive));
-  els.shortcutsSettingsTab?.setAttribute('aria-selected', String(shortcutsActive));
-  if (els.audioSettingsPanel) {
-    els.audioSettingsPanel.hidden = shortcutsActive;
-    els.audioSettingsPanel.classList.toggle('is-active', !shortcutsActive);
-  }
-  if (els.shortcutsSettingsPanel) {
-    els.shortcutsSettingsPanel.hidden = !shortcutsActive;
-    els.shortcutsSettingsPanel.classList.toggle('is-active', shortcutsActive);
+  const tabs = [
+    { id: 'audio', tabEl: els.audioSettingsTab, panelEl: els.audioSettingsPanel },
+    { id: 'shortcuts', tabEl: els.shortcutsSettingsTab, panelEl: els.shortcutsSettingsPanel },
+    { id: 'logs', tabEl: els.logsSettingsTab, panelEl: els.logsSettingsPanel },
+  ];
+  for (const item of tabs) {
+    const active = item.id === tab;
+    item.tabEl?.classList.toggle('is-active', active);
+    item.tabEl?.setAttribute('aria-selected', String(active));
+    if (item.panelEl) {
+      item.panelEl.hidden = !active;
+      item.panelEl.classList.toggle('is-active', active);
+    }
   }
   closeDeviceMenus();
 }
@@ -1390,8 +1501,11 @@ function toggleSettingsPanel() {
   els.settingsPanel.hidden = !willOpen;
   els.settingsButton.setAttribute('aria-expanded', String(willOpen));
   if (willOpen) {
-    if (!els.shortcutsSettingsTab?.classList.contains('is-active')) {
+    if (els.audioSettingsTab?.classList.contains('is-active')) {
       void refreshAudioDevicePickers();
+    }
+    if (isLogsSettingsActive()) {
+      void loadCommandLogs().catch(() => undefined);
     }
     if (desktop.shortcutStatus) {
       void desktop.shortcutStatus().then((status) => {
@@ -2176,36 +2290,74 @@ function wakePhraseMatch(text) {
 }
 
 function resetSleepPhraseCandidate() {
+  if (state.sleepPhraseTimer) {
+    window.clearTimeout(state.sleepPhraseTimer);
+    state.sleepPhraseTimer = null;
+  }
   state.sleepPhraseCandidate = null;
+}
+
+function sleepPhraseWords(phrase) {
+  return globalThis.VoicePhrases.phraseWords(phrase);
+}
+
+function classifySleepPhraseText(text, settings) {
+  if (!settings || !globalThis.VoicePhrases) return null;
+  const words = globalThis.VoicePhrases.wordsFromText(text);
+  const candidates = [
+    { match: 'unlock', target: sleepPhraseWords(settings.unlockPhrase) },
+    { match: 'shutdown', target: sleepPhraseWords(settings.shutdownPhrase) },
+  ];
+  for (const candidate of candidates) {
+    if (candidate.target.length === 0 || words.length === 0 || words.length > candidate.target.length) continue;
+    const prefix = words.every((word, index) => word === candidate.target[index]);
+    if (!prefix) continue;
+    return { match: candidate.match, complete: words.length === candidate.target.length };
+  }
+  return null;
+}
+
+function scheduleSleepPhraseCompletion(match, text, finalResult) {
+  if (state.sleepPhraseTimer) window.clearTimeout(state.sleepPhraseTimer);
+  state.sleepPhraseTimer = window.setTimeout(() => {
+    const candidate = state.sleepPhraseCandidate;
+    if (!candidate || candidate.match !== match || !candidate.complete || state.mode !== 'sleeping') return;
+    resetSleepPhraseCandidate();
+    void recordCommandRecognitionLog({ text, final: finalResult, outcome: 'matched', command: match, reason: 'stable partial' });
+    void applySleepPhraseMatch(match).catch((err) => showStatus(err?.message || 'Could not apply sleep command.'));
+  }, SLEEP_PHRASE_STABLE_MS);
 }
 
 function stableSleepPhraseMatch(text, settings, finalResult = false) {
   if (!settings || !globalThis.VoicePhrases) {
     resetSleepPhraseCandidate();
-    return null;
+    return { status: 'none', match: null };
   }
-  const match = globalThis.VoicePhrases.sleepPhraseMatch(text, settings.unlockPhrase, settings.shutdownPhrase);
-  if (!match) {
+  const phrase = classifySleepPhraseText(text, settings);
+  if (!phrase) {
     resetSleepPhraseCandidate();
-    return null;
+    return { status: 'none', match: null };
   }
-  if (finalResult) {
+  if (finalResult && phrase.complete) {
     resetSleepPhraseCandidate();
-    return match;
+    return { status: 'matched', match: phrase.match };
   }
   const now = Date.now();
   const candidate = state.sleepPhraseCandidate;
-  if (!candidate || candidate.match !== match || now - candidate.lastSeenAt > SLEEP_PHRASE_MAX_GAP_MS) {
-    state.sleepPhraseCandidate = { match, firstSeenAt: now, lastSeenAt: now, hits: 1 };
-    return null;
+  if (!candidate || candidate.match !== phrase.match || now - candidate.lastSeenAt > SLEEP_PHRASE_MAX_GAP_MS) {
+    state.sleepPhraseCandidate = { match: phrase.match, firstSeenAt: now, lastSeenAt: now, hits: phrase.complete ? 1 : 0, complete: phrase.complete };
+    if (phrase.complete) scheduleSleepPhraseCompletion(phrase.match, text, finalResult);
+    return { status: 'pending', match: phrase.match, complete: phrase.complete };
   }
-  candidate.hits += 1;
+  if (phrase.complete) candidate.hits += 1;
+  candidate.complete = candidate.complete || phrase.complete;
   candidate.lastSeenAt = now;
-  if (candidate.hits >= SLEEP_PHRASE_MIN_HITS && now - candidate.firstSeenAt >= SLEEP_PHRASE_STABLE_MS) {
+  if (candidate.complete) scheduleSleepPhraseCompletion(phrase.match, text, finalResult);
+  if (candidate.complete && candidate.hits >= SLEEP_PHRASE_MIN_HITS && now - candidate.firstSeenAt >= SLEEP_PHRASE_STABLE_MS) {
     resetSleepPhraseCandidate();
-    return match;
+    return { status: 'matched', match: phrase.match };
   }
-  return null;
+  return { status: 'pending', match: phrase.match, complete: phrase.complete };
 }
 
 async function logDesktopEvent(level, message, details) {
@@ -2347,37 +2499,59 @@ async function processApprovalCode(code) {
   await loadDashboard();
 }
 
+async function applySleepPhraseMatch(match) {
+  if (match === 'unlock') {
+    playLocalVoiceCue('unlock');
+    setMode('awake', 'Unlocked.');
+    const awakeSettings = await loadVoiceSettings(true).catch(() => state.voiceSettings);
+    await applyDesktopVoskGrammar('awake', awakeSettings);
+    startWakeListener();
+    return;
+  }
+  if (match === 'shutdown') {
+    await turnOff({ cue: 'sleeping_off' });
+  }
+}
+
 async function processPhraseText(text, finalizeNow = false, finalResult = false) {
   const settings = await loadVoiceSettings().catch(() => null);
   if (state.mode !== 'sleeping' && acceptApprovalText(text, finalizeNow)) return;
   if (state.mode === 'recording') {
     showStatus('Recording. Wake commands are ignored until capture stops.');
+    void recordCommandRecognitionLog({ text, final: finalResult, outcome: 'ignored', reason: 'recording' });
     void logDesktopEvent('info', 'Wake phrase ignored while recording', { text });
     return;
   }
   if (state.mode === 'paused') {
     showStatus(pausedStatus(state.voiceTarget));
+    void recordCommandRecognitionLog({ text, final: finalResult, outcome: 'ignored', reason: 'recording paused' });
     void logDesktopEvent('info', 'Wake phrase ignored while recording is paused', { text });
     return;
   }
   if (state.mode === 'sleeping') {
     const sleepMatch = stableSleepPhraseMatch(text, settings, finalResult);
-    if (sleepMatch === 'unlock') {
-      playLocalVoiceCue('unlock');
-      setMode('awake', 'Unlocked.');
-      const awakeSettings = await loadVoiceSettings(true).catch(() => settings);
-      await applyDesktopVoskGrammar('awake', awakeSettings);
-      startWakeListener();
+    if (sleepMatch.status === 'matched') {
+      void recordCommandRecognitionLog({ text, final: finalResult, outcome: 'matched', command: sleepMatch.match });
+      await applySleepPhraseMatch(sleepMatch.match);
       return;
     }
-    if (sleepMatch === 'shutdown') {
-      await turnOff({ cue: 'sleeping_off' });
+    if (sleepMatch.status === 'pending') {
+      showStatus('Sleeping. Recognized possible sleep command.');
+      void recordCommandRecognitionLog({
+        text,
+        final: finalResult,
+        outcome: 'pending',
+        command: sleepMatch.match,
+        reason: sleepMatch.complete ? 'waiting for stability' : 'phrase prefix',
+      });
       return;
     }
     showStatus('Sleeping. Say your unlock or shutdown phrase.');
+    void recordCommandRecognitionLog({ text, final: finalResult, outcome: 'unmatched', reason: 'sleep command not matched' });
     return;
   }
   if (settings && globalThis.VoicePhrases?.matchesPhrase(text, settings.shutdownPhrase)) {
+    void recordCommandRecognitionLog({ text, final: finalResult, outcome: 'matched', command: 'shutdown' });
     await turnOff({ cue: 'sleeping_off' });
     return;
   }
@@ -2385,9 +2559,11 @@ async function processPhraseText(text, finalizeNow = false, finalResult = false)
   if (!match) {
     const heard = String(text || '').trim();
     showStatus(heard ? `Heard "${heard}". No voice command matched.` : 'No voice command matched.');
+    void recordCommandRecognitionLog({ text: heard, final: finalResult, outcome: 'unmatched', reason: 'awake command not matched' });
     void logDesktopEvent('info', 'Wake phrase did not match command', { text: heard });
     return;
   }
+  void recordCommandRecognitionLog({ text, final: finalResult, outcome: 'matched', command: match });
   void logDesktopEvent('info', 'Wake command matched', { text, command: match });
   if (match === 'sleep') {
     await enterSleep();
@@ -2687,6 +2863,14 @@ if (els.shortcutsSettingsTab) {
     }
   });
 }
+if (els.logsSettingsTab) {
+  els.logsSettingsTab.addEventListener('click', () => {
+    selectSettingsTab('logs');
+    void loadCommandLogs().catch((err) => {
+      if (els.commandLogStatus) els.commandLogStatus.textContent = err?.message || 'Could not load local command logs.';
+    });
+  });
+}
 bindShortcutControls({
   configKey: 'transcriptionShortcut',
   defaultBinding: DEFAULT_TRANSCRIPTION_SHORTCUT,
@@ -2796,6 +2980,21 @@ if (els.reloadExtensionsButton) {
     } catch (err) {
       showStatus(err?.message || 'Could not reload local extensions.');
     }
+  });
+}
+if (els.refreshCommandLogsButton) {
+  els.refreshCommandLogsButton.addEventListener('click', () => {
+    void loadCommandLogs().catch((err) => showStatus(err?.message || 'Could not refresh local command logs.'));
+  });
+}
+if (els.copyCommandLogsButton) {
+  els.copyCommandLogsButton.addEventListener('click', () => {
+    void copyCommandLogs().catch((err) => showStatus(err?.message || 'Could not copy local command logs.'));
+  });
+}
+if (els.clearCommandLogsButton) {
+  els.clearCommandLogsButton.addEventListener('click', () => {
+    void clearCommandLogs().catch((err) => showStatus(err?.message || 'Could not clear local command logs.'));
   });
 }
 document.addEventListener('click', (event) => {
