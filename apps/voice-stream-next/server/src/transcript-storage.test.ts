@@ -76,4 +76,41 @@ describe('transcript storage', () => {
     db.addTranscript(user.id, session.id, '   ');
     expect(db.listTranscripts(user.id)).toHaveLength(0);
   });
+
+  test('stores voice recording metadata with paired transcript and prunes per mode', () => {
+    const db = tempDb('voice-recordings');
+    dbs.push(db);
+    const user = db.upsertUser({
+      clerkUserId: 'clerk_recordings',
+      displayName: 'Recording User',
+      email: 'recordings@example.local',
+      admin: false,
+    });
+    const device = db.registerDevice(user.id, { deviceType: 'desktop', displayName: 'Desk' });
+    const sessions = Array.from({ length: 12 }, (_, index) => db.createVoiceSession(user.id, device.device.id, 'clipboard'));
+    for (const [index, session] of sessions.entries()) {
+      db.addTranscript(user.id, session.id, `Transcript ${index}`);
+      db.addVoiceRecording(user.id, {
+        voiceSessionId: session.id,
+        deviceId: device.device.id,
+        assistantThreadId: session.assistantThreadId,
+        mode: 'clipboard',
+        filePath: `/tmp/${session.id}.wav`,
+        mimeType: 'audio/wav',
+        sizeBytes: 100 + index,
+        durationMs: 1_000 + index,
+        sampleRateHz: 16_000,
+        channels: 1,
+      });
+    }
+
+    expect(db.listVoiceRecordings(user.id, 20, { mode: 'clipboard' })).toHaveLength(12);
+    const pruned = db.pruneVoiceRecordings(user.id, 'clipboard', 10);
+    expect(pruned).toHaveLength(2);
+    const recordings = db.listVoiceRecordings(user.id, 20, { mode: 'clipboard' });
+    expect(recordings).toHaveLength(10);
+    expect(recordings[0]?.transcriptText).toBe('Transcript 11');
+    expect(recordings[0]?.deviceName).toBe('Desk');
+    expect(recordings.some((recording) => recording.voiceSessionId === sessions[0]?.id)).toBe(false);
+  });
 });

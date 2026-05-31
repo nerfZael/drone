@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
@@ -15,6 +15,7 @@ import {
   type TerminalCommand,
 } from './streaming-transcription.js';
 import { approvalCodeFromText } from './approval-code.js';
+import { pcm16ToWav } from './wav.js';
 import { parseVoiceApprovalSettings, voiceApprovalSettingsResponse } from './voice-approval-settings.js';
 import {
   assistantAvailableToolSummaries,
@@ -78,6 +79,10 @@ type DesktopAppInfo = {
   builtAt: string | null;
   downloadUrl: string | null;
 };
+
+const VOICE_RECORDING_RETENTION_PER_MODE = 10;
+const VOICE_RECORDING_SAMPLE_RATE_HZ = 16_000;
+const VOICE_RECORDING_CHANNELS = 1;
 
 type AppEventType =
   | 'assistant_changed'
@@ -534,6 +539,66 @@ function concatChunks(chunks: Uint8Array[], totalBytes: number): Uint8Array {
     offset += chunk.byteLength;
   }
   return output;
+}
+
+function voiceRecordingMode(mode: string): 'assistant' | 'clipboard' | null {
+  return mode === 'assistant' || mode === 'clipboard' ? mode : null;
+}
+
+function safePathPart(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 120) || 'unknown';
+}
+
+function voiceRecordingDir(db: VoiceStreamNextDb, userId: string, mode: 'assistant' | 'clipboard'): string {
+  return path.join(path.dirname(db.path), 'voice-recordings', safePathPart(userId), mode);
+}
+
+function voiceRecordingFilePath(db: VoiceStreamNextDb, userId: string, mode: 'assistant' | 'clipboard', sessionId: string): string {
+  return path.join(voiceRecordingDir(db, userId, mode), `${safePathPart(sessionId)}.wav`);
+}
+
+function pcmDurationMs(bytes: number, sampleRateHz = VOICE_RECORDING_SAMPLE_RATE_HZ, channels = VOICE_RECORDING_CHANNELS): number {
+  const bytesPerSample = 2;
+  return Math.round((Math.max(0, bytes) / (sampleRateHz * channels * bytesPerSample)) * 1000);
+}
+
+function deleteRecordingFile(filePath: string): void {
+  if (!filePath) return;
+  try {
+    if (existsSync(filePath)) unlinkSync(filePath);
+  } catch {
+    // Best-effort retention cleanup; stale DB rows have already been removed.
+  }
+}
+
+function saveVoiceRecording(opts: {
+  db: VoiceStreamNextDb;
+  userId: string;
+  sessionId: string;
+  deviceId: string;
+  assistantThreadId: string;
+  mode: 'assistant' | 'clipboard';
+  pcm: Uint8Array;
+}): void {
+  if (opts.pcm.byteLength === 0) return;
+  const filePath = voiceRecordingFilePath(opts.db, opts.userId, opts.mode, opts.sessionId);
+  mkdirSync(path.dirname(filePath), { recursive: true });
+  const wav = pcm16ToWav(opts.pcm, VOICE_RECORDING_SAMPLE_RATE_HZ, VOICE_RECORDING_CHANNELS);
+  writeFileSync(filePath, wav);
+  opts.db.addVoiceRecording(opts.userId, {
+    voiceSessionId: opts.sessionId,
+    deviceId: opts.deviceId,
+    assistantThreadId: opts.assistantThreadId,
+    mode: opts.mode,
+    filePath,
+    mimeType: 'audio/wav',
+    sizeBytes: wav.byteLength,
+    durationMs: pcmDurationMs(opts.pcm.byteLength),
+    sampleRateHz: VOICE_RECORDING_SAMPLE_RATE_HZ,
+    channels: VOICE_RECORDING_CHANNELS,
+  });
+  const pruned = opts.db.pruneVoiceRecordings(opts.userId, opts.mode, VOICE_RECORDING_RETENTION_PER_MODE);
+  for (const recording of pruned) deleteRecordingFile(recording.filePath);
 }
 
 async function withUser<T>(
@@ -1510,6 +1575,48 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         ok: true,
         transcripts: db.listTranscripts(ctx.user.id, 200, { deviceId, voiceSessionId }),
       };
+    }),
+  );
+
+  app.get('/api/voice/recordings', async (req, reply) =>
+    withUser(req, reply, db, clerkEnabled, async (ctx) => {
+      const query = (req.query ?? {}) as Record<string, unknown>;
+      const mode = cleanText(query.mode).toLowerCase();
+      const validMode = mode === 'assistant' || mode === 'clipboard' ? mode : undefined;
+      const limitRaw = Number(query.limit);
+      const limit = Number.isInteger(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 40) : 20;
+      const recordings = validMode
+        ? db.listVoiceRecordings(ctx.user.id, limit, { mode: validMode })
+        : [
+            ...db.listVoiceRecordings(ctx.user.id, VOICE_RECORDING_RETENTION_PER_MODE, { mode: 'assistant' }),
+            ...db.listVoiceRecordings(ctx.user.id, VOICE_RECORDING_RETENTION_PER_MODE, { mode: 'clipboard' }),
+          ];
+      return {
+        ok: true,
+        retentionPerMode: VOICE_RECORDING_RETENTION_PER_MODE,
+        recordings,
+      };
+    }),
+  );
+
+  app.get('/api/voice/recordings/:recordingId/audio', async (req, reply) =>
+    withUser(req, reply, db, clerkEnabled, async (ctx) => {
+      const recordingId = cleanText((req.params as any).recordingId);
+      const recording = db.voiceRecording(ctx.user.id, recordingId);
+      if (!recording || !existsSync(recording.filePath)) {
+        reply.code(404).send({ ok: false, error: 'recording not found' });
+        return;
+      }
+      const download = queryValue((req.query as any)?.download) === '1';
+      const stat = statSync(recording.filePath);
+      reply.header('content-type', recording.mimeType || 'audio/wav');
+      reply.header('content-length', String(stat.size));
+      reply.header('cache-control', 'private, max-age=60');
+      if (download) {
+        const fileName = `voice-${recording.mode}-${recording.createdAt.replace(/[^0-9T-]+/g, '-')}.wav`;
+        reply.header('content-disposition', `attachment; filename="${fileName}"`);
+      }
+      return reply.send(createReadStream(recording.filePath));
     }),
   );
 
@@ -2669,6 +2776,8 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         (requestedSessionId ? db.voiceSessionForDevice(device.userId, device.id, requestedSessionId) : null) ??
         db.latestVoiceSessionForDevice(device.userId, device.id) ??
         db.createVoiceSession(device.userId, device.id, streamMode);
+      const recordingMode = voiceRecordingMode(streamMode);
+      const recordingPcm = recordingMode ? concatChunks(chunks, storedBytes) : new Uint8Array(0);
       let transcript = '';
       let assistantText = '';
       let runtime = 'fallback';
@@ -2678,7 +2787,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         } else if (terminalFinalize?.transcriptText) {
           transcript = terminalFinalize.transcriptText.trim();
         } else {
-          const transcription = await transcribePcm16(concatChunks(chunks, storedBytes));
+          const transcription = await transcribePcm16(recordingPcm);
           transcript = transcription.text;
           runtime = transcription.provider;
         }
@@ -2781,6 +2890,27 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           socket.send(JSON.stringify({ type: 'assistant_error', error: error?.message ?? String(error) }));
         }
       } finally {
+        if (recordingMode && terminalFinalize?.type !== 'abort') {
+          try {
+            saveVoiceRecording({
+              db,
+              userId: device.userId,
+              sessionId: session.id,
+              deviceId: device.id,
+              assistantThreadId: session.assistantThreadId,
+              mode: recordingMode,
+              pcm: recordingPcm,
+            });
+          } catch (error: any) {
+            addLog(device.userId, {
+              deviceId: device.id,
+              source: device.deviceType,
+              level: 'error',
+              message: 'Voice recording save failed',
+              detailsJson: JSON.stringify({ error: error?.message ?? String(error), mode: streamMode }),
+            });
+          }
+        }
         db.endVoiceSession(device.userId, session.id);
       }
       db.upsertClientStatus(device.userId, device.id, {

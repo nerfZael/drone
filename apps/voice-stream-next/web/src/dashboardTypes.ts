@@ -345,6 +345,28 @@ export type TranscriptRecord = {
   createdAt: string;
 };
 
+export type VoiceRecordingRecord = {
+  id: string;
+  voiceSessionId: string;
+  assistantThreadId: string;
+  userId: string;
+  deviceId: string;
+  deviceName: string;
+  mode: string;
+  filePath: string;
+  mimeType: string;
+  sizeBytes: number;
+  durationMs: number;
+  sampleRateHz: number;
+  channels: number;
+  transcriptId: string | null;
+  transcriptText: string | null;
+  transcriptCreatedAt: string | null;
+  sessionStartedAt: string;
+  sessionEndedAt: string | null;
+  createdAt: string;
+};
+
 export type TranscriptSessionGroup = {
   voiceSessionId: string;
   assistantThreadId: string;

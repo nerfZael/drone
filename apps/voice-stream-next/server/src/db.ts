@@ -320,6 +320,28 @@ export type TranscriptRecord = {
   createdAt: string;
 };
 
+export type VoiceRecordingRecord = {
+  id: string;
+  voiceSessionId: string;
+  assistantThreadId: string;
+  userId: string;
+  deviceId: string;
+  deviceName: string;
+  mode: string;
+  filePath: string;
+  mimeType: string;
+  sizeBytes: number;
+  durationMs: number;
+  sampleRateHz: number;
+  channels: number;
+  transcriptId: string | null;
+  transcriptText: string | null;
+  transcriptCreatedAt: string | null;
+  sessionStartedAt: string;
+  sessionEndedAt: string | null;
+  createdAt: string;
+};
+
 export type ApprovalCodeRecord = {
   id: string;
   voiceSessionId: string | null;
@@ -874,6 +896,30 @@ function rowTranscript(row: any): TranscriptRecord {
     mode: String(row.mode ?? ''),
     text: String(row.text ?? ''),
     final: asBool(row.final),
+    sessionStartedAt: String(row.session_started_at ?? row.created_at),
+    sessionEndedAt: row.session_ended_at == null ? null : String(row.session_ended_at),
+    createdAt: String(row.created_at),
+  };
+}
+
+function rowVoiceRecording(row: any): VoiceRecordingRecord {
+  return {
+    id: String(row.id),
+    voiceSessionId: String(row.voice_session_id),
+    assistantThreadId: String(row.assistant_thread_id ?? ''),
+    userId: String(row.user_id),
+    deviceId: String(row.device_id ?? ''),
+    deviceName: String(row.device_name ?? ''),
+    mode: String(row.mode ?? ''),
+    filePath: String(row.file_path ?? ''),
+    mimeType: String(row.mime_type ?? 'audio/wav'),
+    sizeBytes: Number(row.size_bytes ?? 0),
+    durationMs: Number(row.duration_ms ?? 0),
+    sampleRateHz: Number(row.sample_rate_hz ?? 16_000),
+    channels: Number(row.channels ?? 1),
+    transcriptId: row.transcript_id == null ? null : String(row.transcript_id),
+    transcriptText: row.transcript_text == null ? null : String(row.transcript_text),
+    transcriptCreatedAt: row.transcript_created_at == null ? null : String(row.transcript_created_at),
     sessionStartedAt: String(row.session_started_at ?? row.created_at),
     sessionEndedAt: row.session_ended_at == null ? null : String(row.session_ended_at),
     createdAt: String(row.created_at),
@@ -3288,6 +3334,222 @@ export class VoiceStreamNextDb {
       `,
       )
       .run({ $id: newId('trn'), $voiceSessionId: voiceSessionId, $userId: userId, $text: trimmed, $createdAt: nowIso() });
+  }
+
+  addVoiceRecording(
+    userId: string,
+    input: {
+      voiceSessionId: string;
+      deviceId: string;
+      assistantThreadId: string;
+      mode: string;
+      filePath: string;
+      mimeType: string;
+      sizeBytes: number;
+      durationMs: number;
+      sampleRateHz: number;
+      channels: number;
+    },
+  ): VoiceRecordingRecord {
+    const at = nowIso();
+    const mode = input.mode.trim() || 'assistant';
+    const existing = this.db
+      .query('SELECT * FROM voice_recordings WHERE user_id = $userId AND voice_session_id = $voiceSessionId')
+      .get({ $userId: userId, $voiceSessionId: input.voiceSessionId });
+    if (existing) {
+      this.db
+        .query(
+          `
+          UPDATE voice_recordings
+          SET device_id = $deviceId,
+              assistant_thread_id = $assistantThreadId,
+              mode = $mode,
+              file_path = $filePath,
+              mime_type = $mimeType,
+              size_bytes = $sizeBytes,
+              duration_ms = $durationMs,
+              sample_rate_hz = $sampleRateHz,
+              channels = $channels,
+              created_at = $createdAt
+          WHERE user_id = $userId AND voice_session_id = $voiceSessionId
+        `,
+        )
+        .run({
+          $deviceId: input.deviceId,
+          $assistantThreadId: input.assistantThreadId,
+          $mode: mode,
+          $filePath: input.filePath,
+          $mimeType: input.mimeType,
+          $sizeBytes: Math.max(0, Math.floor(input.sizeBytes)),
+          $durationMs: Math.max(0, Math.floor(input.durationMs)),
+          $sampleRateHz: Math.max(1, Math.floor(input.sampleRateHz)),
+          $channels: Math.max(1, Math.floor(input.channels)),
+          $createdAt: at,
+          $userId: userId,
+          $voiceSessionId: input.voiceSessionId,
+        });
+    } else {
+      this.db
+        .query(
+          `
+          INSERT INTO voice_recordings (
+            id,
+            voice_session_id,
+            user_id,
+            device_id,
+            assistant_thread_id,
+            mode,
+            file_path,
+            mime_type,
+            size_bytes,
+            duration_ms,
+            sample_rate_hz,
+            channels,
+            created_at
+          )
+          VALUES (
+            $id,
+            $voiceSessionId,
+            $userId,
+            $deviceId,
+            $assistantThreadId,
+            $mode,
+            $filePath,
+            $mimeType,
+            $sizeBytes,
+            $durationMs,
+            $sampleRateHz,
+            $channels,
+            $createdAt
+          )
+        `,
+        )
+        .run({
+          $id: newId('rec'),
+          $voiceSessionId: input.voiceSessionId,
+          $userId: userId,
+          $deviceId: input.deviceId,
+          $assistantThreadId: input.assistantThreadId,
+          $mode: mode,
+          $filePath: input.filePath,
+          $mimeType: input.mimeType,
+          $sizeBytes: Math.max(0, Math.floor(input.sizeBytes)),
+          $durationMs: Math.max(0, Math.floor(input.durationMs)),
+          $sampleRateHz: Math.max(1, Math.floor(input.sampleRateHz)),
+          $channels: Math.max(1, Math.floor(input.channels)),
+          $createdAt: at,
+        });
+    }
+    const row = this.voiceRecordingRow(userId, input.voiceSessionId);
+    if (!row) throw new Error('Stored recording was not found');
+    return rowVoiceRecording(row);
+  }
+
+  listVoiceRecordings(
+    userId: string,
+    limit = 20,
+    options: { mode?: string; includePatch?: boolean } = {},
+  ): VoiceRecordingRecord[] {
+    const filters = ['voice_recordings.user_id = $userId'];
+    const params: { $userId: string; $limit: number; $mode?: string } = {
+      $userId: userId,
+      $limit: Math.max(1, Math.floor(limit)),
+    };
+    if (options.mode) {
+      filters.push('voice_recordings.mode = $mode');
+      params.$mode = options.mode;
+    } else if (!options.includePatch) {
+      filters.push("voice_recordings.mode IN ('assistant', 'clipboard')");
+    }
+    return this.db
+      .query(
+        `
+        SELECT ${this.voiceRecordingSelectColumns()}
+        FROM voice_recordings
+        JOIN voice_sessions ON voice_sessions.id = voice_recordings.voice_session_id
+        LEFT JOIN devices ON devices.id = voice_recordings.device_id
+        LEFT JOIN transcripts ON transcripts.id = (
+          SELECT t.id
+          FROM transcripts t
+          WHERE t.voice_session_id = voice_recordings.voice_session_id
+          ORDER BY t.created_at DESC
+          LIMIT 1
+        )
+        WHERE ${filters.join(' AND ')}
+        ORDER BY voice_recordings.created_at DESC
+        LIMIT $limit
+      `,
+      )
+      .all(params)
+      .map(rowVoiceRecording);
+  }
+
+  voiceRecording(userId: string, recordingId: string): VoiceRecordingRecord | null {
+    const row = this.db
+      .query(
+        `
+        SELECT ${this.voiceRecordingSelectColumns()}
+        FROM voice_recordings
+        JOIN voice_sessions ON voice_sessions.id = voice_recordings.voice_session_id
+        LEFT JOIN devices ON devices.id = voice_recordings.device_id
+        LEFT JOIN transcripts ON transcripts.id = (
+          SELECT t.id
+          FROM transcripts t
+          WHERE t.voice_session_id = voice_recordings.voice_session_id
+          ORDER BY t.created_at DESC
+          LIMIT 1
+        )
+        WHERE voice_recordings.user_id = $userId AND voice_recordings.id = $recordingId
+        LIMIT 1
+      `,
+      )
+      .get({ $userId: userId, $recordingId: recordingId });
+    return row ? rowVoiceRecording(row) : null;
+  }
+
+  pruneVoiceRecordings(userId: string, mode: string, keep = 10): VoiceRecordingRecord[] {
+    const rows = this.listVoiceRecordings(userId, 10_000, { mode });
+    const stale = rows.slice(Math.max(0, Math.floor(keep)));
+    if (stale.length === 0) return [];
+    const deleteOne = this.db.query('DELETE FROM voice_recordings WHERE user_id = $userId AND id = $id');
+    for (const recording of stale) {
+      deleteOne.run({ $userId: userId, $id: recording.id });
+    }
+    return stale;
+  }
+
+  private voiceRecordingRow(userId: string, voiceSessionId: string): any | null {
+    return this.db
+      .query(
+        `
+        SELECT ${this.voiceRecordingSelectColumns()}
+        FROM voice_recordings
+        JOIN voice_sessions ON voice_sessions.id = voice_recordings.voice_session_id
+        LEFT JOIN devices ON devices.id = voice_recordings.device_id
+        LEFT JOIN transcripts ON transcripts.id = (
+          SELECT t.id
+          FROM transcripts t
+          WHERE t.voice_session_id = voice_recordings.voice_session_id
+          ORDER BY t.created_at DESC
+          LIMIT 1
+        )
+        WHERE voice_recordings.user_id = $userId AND voice_recordings.voice_session_id = $voiceSessionId
+        LIMIT 1
+      `,
+      )
+      .get({ $userId: userId, $voiceSessionId: voiceSessionId });
+  }
+
+  private voiceRecordingSelectColumns(): string {
+    return `
+      voice_recordings.*,
+      devices.display_name AS device_name,
+      voice_sessions.started_at AS session_started_at,
+      voice_sessions.ended_at AS session_ended_at,
+      transcripts.id AS transcript_id,
+      transcripts.text AS transcript_text,
+      transcripts.created_at AS transcript_created_at
+    `;
   }
 
   listTranscripts(userId: string, limit = 100, options: { deviceId?: string; voiceSessionId?: string } = {}): TranscriptRecord[] {

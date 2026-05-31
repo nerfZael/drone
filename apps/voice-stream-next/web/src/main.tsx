@@ -34,6 +34,7 @@ import type {
   DesktopVoskText,
   DeviceRecord,
   SpeechPlaybackTarget,
+  VoiceRecordingRecord,
   VoiceApprovalFormState,
   VoiceSettings,
 } from './dashboardTypes.js';
@@ -59,7 +60,7 @@ const ASSISTANT_PROVIDERS: Array<{ id: 'codex' | 'openai'; label: string; title:
 ];
 
 type AssistantSettingsPromptField = 'voiceSystemPrompt';
-type SettingsPane = 'devices' | 'assistant' | 'skills' | 'voice' | 'activity';
+type SettingsPane = 'devices' | 'assistant' | 'skills' | 'voice' | 'recordings' | 'activity';
 type AssistantSkillDraft = {
   id: string | null;
   slug: string;
@@ -83,6 +84,7 @@ const SETTINGS_PANES: Array<{ id: SettingsPane; label: string }> = [
   { id: 'assistant', label: 'Assistant' },
   { id: 'skills', label: 'Skills' },
   { id: 'voice', label: 'Voice' },
+  { id: 'recordings', label: 'Recordings' },
   { id: 'activity', label: 'Activity' },
 ];
 
@@ -1019,6 +1021,9 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const [adminAndroidFile, setAdminAndroidFile] = React.useState<File | null>(null);
   const [adminDesktopFile, setAdminDesktopFile] = React.useState<File | null>(null);
   const [assistantExtensions, setAssistantExtensions] = React.useState<AssistantExtensionsResponse | null>(null);
+  const [voiceRecordings, setVoiceRecordings] = React.useState<VoiceRecordingRecord[]>([]);
+  const [voiceRecordingsLoading, setVoiceRecordingsLoading] = React.useState(false);
+  const [voiceRecordingsError, setVoiceRecordingsError] = React.useState<string | null>(null);
   const [androidSetupInfo, setAndroidSetupInfo] = React.useState<AndroidSetupInfo | null>(null);
   const [androidSetupQr, setAndroidSetupQr] = React.useState('');
   const [pairingText, setPairingText] = React.useState('');
@@ -1222,6 +1227,19 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     }
   }, [client]);
 
+  const loadVoiceRecordings = React.useCallback(async () => {
+    setVoiceRecordingsLoading(true);
+    setVoiceRecordingsError(null);
+    try {
+      const data = await client.request<{ ok: true; retentionPerMode: number; recordings: VoiceRecordingRecord[] }>('/api/voice/recordings');
+      setVoiceRecordings(data.recordings);
+    } catch (err: any) {
+      setVoiceRecordingsError(err?.message ?? String(err));
+    } finally {
+      setVoiceRecordingsLoading(false);
+    }
+  }, [client]);
+
   const refreshAndroidSetup = React.useCallback(async () => {
     try {
       const data = await client.request<{ ok: true; android: AndroidApkInfo; setup: AndroidSetupInfo }>('/api/mobile/android/setup', {
@@ -1303,6 +1321,10 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   React.useEffect(() => {
     void loadDesktopAppInfo();
   }, [loadDesktopAppInfo]);
+
+  React.useEffect(() => {
+    if (activeView === 'settings' && settingsPane === 'recordings') void loadVoiceRecordings();
+  }, [activeView, settingsPane, loadVoiceRecordings]);
 
   React.useEffect(() => {
     void refreshAndroidSetup();
@@ -2480,6 +2502,8 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const devices = dashboard?.devices ?? [];
   const threads = assistantThreads;
   const logs = dashboard?.logs ?? [];
+  const assistantRecordings = voiceRecordings.filter((recording) => recording.mode === 'assistant');
+  const clipboardRecordings = voiceRecordings.filter((recording) => recording.mode === 'clipboard');
   const speechPlayback = dashboard?.speechPlayback;
   const speechPlaybackTarget = dashboard?.settings.speechPlaybackTarget ?? speechPlayback?.preferredTarget ?? 'auto';
   const pendingApprovals = assistantSnapshotData?.pendingApprovals ?? [];
@@ -3827,6 +3851,66 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                 </>
               ) : null}
 
+              {settingsPane === 'recordings' ? (
+                <section className={assistantPanelClass}>
+                  <div className={assistantPanelHeaderClass}>
+                    <div>
+                      <span className={assistantKickerClass}>Voice</span>
+                      <h2 className={assistantPanelTitleClass}>Recent Recordings</h2>
+                    </div>
+                    <button type="button" className={assistantActionButtonClass} disabled={voiceRecordingsLoading} onClick={() => void loadVoiceRecordings()}>
+                      Refresh
+                    </button>
+                  </div>
+                  {voiceRecordingsError ? <div className="mb-2 rounded border border-[rgba(255,90,90,.24)] bg-[var(--red-subtle)] p-2 text-xs text-[var(--red)]">{voiceRecordingsError}</div> : null}
+                  <div className="grid gap-3 xl:grid-cols-2">
+                    {([
+                      ['assistant', assistantRecordings],
+                      ['clipboard', clipboardRecordings],
+                    ] as Array<['assistant' | 'clipboard', VoiceRecordingRecord[]]>).map(([mode, recordings]) => (
+                      <div key={mode} className="grid content-start gap-2">
+                        <div className="flex min-w-0 items-center justify-between gap-2">
+                          <h3 className="m-0 font-display text-[12px] font-bold uppercase text-[var(--fg)]">{mode === 'assistant' ? 'Assistant' : 'Clipboard'}</h3>
+                          <span className="text-[11px] text-[var(--muted)]">{recordings.length} / 10</span>
+                        </div>
+                        {recordings.map((recording) => (
+                          <article key={recording.id} className={cn(assistantRowClass, 'grid gap-2 p-2.5')}>
+                            <div className="grid gap-1">
+                              <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                                <strong className="min-w-0 truncate text-xs text-[var(--fg)]">{recording.deviceName || recording.deviceId || 'Voice device'}</strong>
+                                <span className="rounded border border-[var(--border-subtle)] px-1.5 py-0.5 font-display text-[9px] font-bold uppercase text-[var(--muted)]">
+                                  {formatDurationMs(recording.durationMs)}
+                                </span>
+                                <span className="rounded border border-[var(--border-subtle)] px-1.5 py-0.5 font-display text-[9px] font-bold uppercase text-[var(--muted)]">
+                                  {formatBytes(recording.sizeBytes)}
+                                </span>
+                              </div>
+                              <time className="text-[11px] text-[var(--muted)]" title={exactTimeLabel(recording.createdAt)}>
+                                {timeLabel(recording.createdAt)}
+                              </time>
+                            </div>
+                            <audio controls preload="metadata" src={recordingAudioUrl(recording.id)} className="h-8 w-full" />
+                            <div className="flex flex-wrap gap-1.5">
+                              <a className={assistantActionButtonClass} href={recordingAudioUrl(recording.id, true)} download>
+                                Download
+                              </a>
+                            </div>
+                            <div className="max-h-[120px] overflow-y-auto rounded border border-[var(--border-subtle)] bg-black/[.10] p-2 text-xs leading-relaxed text-[var(--fg-secondary)]">
+                              {recording.transcriptText ? recording.transcriptText : <span className="text-[var(--muted)]">No paired transcript.</span>}
+                            </div>
+                          </article>
+                        ))}
+                        {recordings.length === 0 ? (
+                          <div className={assistantEmptyClass}>
+                            {voiceRecordingsLoading ? 'Loading recordings.' : `No ${mode} recordings yet.`}
+                          </div>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
+
               {settingsPane === 'activity' ? (
                 <section className={assistantPanelClass}>
                   <div className={assistantPanelHeaderClass}>
@@ -4877,6 +4961,19 @@ function formatBytes(bytes: number): string {
   if (kb < 1024) return `${kb.toFixed(kb >= 10 ? 0 : 1)} KB`;
   const mb = kb / 1024;
   return `${mb.toFixed(mb >= 10 ? 0 : 1)} MB`;
+}
+
+function formatDurationMs(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return '0s';
+  const totalSeconds = Math.round(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}:${String(seconds).padStart(2, '0')}` : `${seconds}s`;
+}
+
+function recordingAudioUrl(recordingId: string, download = false): string {
+  const query = download ? '?download=1' : '';
+  return `/api/voice/recordings/${encodeURIComponent(recordingId)}/audio${query}`;
 }
 
 function appDownloadMeta(info: AndroidApkInfo | DesktopAppInfo | null): string {

@@ -22,6 +22,7 @@ const VOICE_SLEEP_PHRASES_MIGRATION_VERSION = '20260529120000';
 const ASSISTANT_CREATE_NEW_THREAD_TOOL_MIGRATION_VERSION = '20260530120000';
 const ASSISTANT_SKILLS_MIGRATION_VERSION = '20260531120000';
 const ASSISTANT_THREAD_SKILLS_MIGRATION_VERSION = '20260531121000';
+const VOICE_RECORDINGS_MIGRATION_VERSION = '20260601090000';
 
 function migrationRows(db: VoiceStreamNextDb): Array<{ version: string; name: string; checksum: string }> {
   return db.db
@@ -59,6 +60,7 @@ describe('database migrations', () => {
       ASSISTANT_CREATE_NEW_THREAD_TOOL_MIGRATION_VERSION,
       ASSISTANT_SKILLS_MIGRATION_VERSION,
       ASSISTANT_THREAD_SKILLS_MIGRATION_VERSION,
+      VOICE_RECORDINGS_MIGRATION_VERSION,
     ]);
     expect(columnNames(db, 'devices')).toContain('revoked_at');
     expect(columnNames(db, 'devices')).toContain('installation_id');
@@ -66,6 +68,7 @@ describe('database migrations', () => {
     expect(columnNames(db, 'assistant_threads')).toContain('enabled_tools_json');
     expect(columnNames(db, 'assistant_settings')).toContain('default_enabled_tools_json');
     expect(columnNames(db, 'voice_settings')).toContain('speech_playback_target');
+    expect(columnNames(db, 'voice_recordings')).toContain('file_path');
   });
 
   test('does not rerun already applied migrations', () => {
@@ -76,7 +79,7 @@ describe('database migrations', () => {
     const second = new VoiceStreamNextDb(filePath);
     dbs.push(second);
 
-    expect(migrationRows(second)).toHaveLength(13);
+    expect(migrationRows(second)).toHaveLength(14);
   });
 
   test('rejects changed migration checksums', () => {
