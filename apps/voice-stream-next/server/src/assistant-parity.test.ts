@@ -133,6 +133,76 @@ describe('assistant parity runtime', () => {
     expect(thread.enabledTools).toEqual(['speak', 'web_search']);
   });
 
+  test('stores assistant skills and exposes them in snapshots', () => {
+    const db = tempDb('assistant-skills');
+    dbs.push(db);
+    const user = testUser(db);
+
+    const skill = db.createAssistantSkill(user.id, {
+      name: 'Research',
+      description: 'Use for current web research.',
+      markdownBody: 'Search first, then fetch the best source.',
+      toolNames: ['web_search', 'fetch_content', 'web_search'],
+    });
+    const updated = db.updateAssistantSkill(user.id, skill.id, {
+      description: 'Use for source-backed current web research.',
+      toolNames: 'web_search fetch_content',
+    });
+
+    expect(updated?.slug).toBe('research');
+    expect(updated?.toolNames).toEqual(['web_search', 'fetch_content']);
+    expect(db.assistantSkillByName(user.id, 'Research')?.id).toBe(skill.id);
+    expect(assistantSnapshot(db, user.id).skills[0]?.description).toBe('Use for source-backed current web research.');
+  });
+
+  test('load_skill persists skill tools for the thread', async () => {
+    const db = tempDb('assistant-load-skill');
+    dbs.push(db);
+    const user = testUser(db);
+    db.createAssistantSkill(user.id, {
+      name: 'Research',
+      description: 'Use for source-backed current web research.',
+      markdownBody: 'Search first, then fetch the best source.',
+      toolNames: ['web_search', 'fetch_content'],
+    });
+    const thread = db.createThread(user.id, { title: 'Skill loading', enabledTools: ['load_skill'] });
+    process.env.VOICE_STREAM_NEXT_TEST_MODEL_TOOL_CALLS = JSON.stringify([
+      { name: 'load_skill', arguments: { skill: 'research' } },
+    ]);
+
+    await promptAssistantThread(db, user.id, thread.id, { prompt: 'Research this.' }, () => undefined);
+
+    const toolCall = db.listToolCalls(user.id, thread.id)[0];
+    expect(toolCall?.toolName).toBe('load_skill');
+    expect(toolCall?.status).toBe('completed');
+    const result = JSON.parse(toolCall?.resultJson || '{}');
+    expect(result.toolNames).toEqual(['web_search', 'fetch_content']);
+    expect(result.content).toContain('Search first, then fetch the best source.');
+    expect(db.listThreadSkills(user.id, thread.id).map((skill) => skill.slug)).toEqual(['research']);
+    const toolResult = db.listMessages(user.id, thread.id).find((message) => message.role === 'toolResult' && message.toolName === 'load_skill');
+    expect(toolResult?.content).toContain('Loaded skill: Research');
+
+    delete process.env.VOICE_STREAM_NEXT_TEST_MODEL_TOOL_CALLS;
+    process.env.VOICE_STREAM_NEXT_SECRETS_KEY = 'test-secret';
+    db.upsertAssistantApiKey(user.id, 'openai', 'openai-test-key');
+    let requestBody: any = null;
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      requestBody = JSON.parse(String(init?.body ?? '{}'));
+      const body = [
+        'data: {"type":"response.output_text.delta","delta":"Ready."}',
+        'data: {"type":"response.completed","response":{"output_text":"Ready.","output":[]}}',
+        'data: [DONE]',
+        '',
+      ].join('\n\n');
+      return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    }) as any;
+
+    await promptAssistantThread(db, user.id, thread.id, { prompt: 'Continue researching.' }, () => undefined);
+
+    expect(requestBody?.tools?.some((tool: any) => tool.name === 'web_search')).toBe(true);
+    expect(requestBody?.tools?.some((tool: any) => tool.name === 'fetch_content')).toBe(true);
+  });
+
   test('exposes and executes configured extension tools', async () => {
     const db = tempDb('assistant-extension-tools');
     dbs.push(db);

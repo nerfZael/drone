@@ -20,6 +20,8 @@ const ASSISTANT_DEFAULT_TOOLS_MIGRATION_VERSION = '20260527183000';
 const DEVICE_AUTH_REQUEST_TYPE_MIGRATION_VERSION = '20260527190000';
 const VOICE_SLEEP_PHRASES_MIGRATION_VERSION = '20260529120000';
 const ASSISTANT_CREATE_NEW_THREAD_TOOL_MIGRATION_VERSION = '20260530120000';
+const ASSISTANT_SKILLS_MIGRATION_VERSION = '20260531120000';
+const ASSISTANT_THREAD_SKILLS_MIGRATION_VERSION = '20260531121000';
 
 function migrationRows(db: VoiceStreamNextDb): Array<{ version: string; name: string; checksum: string }> {
   return db.db
@@ -55,6 +57,8 @@ describe('database migrations', () => {
       DEVICE_AUTH_REQUEST_TYPE_MIGRATION_VERSION,
       VOICE_SLEEP_PHRASES_MIGRATION_VERSION,
       ASSISTANT_CREATE_NEW_THREAD_TOOL_MIGRATION_VERSION,
+      ASSISTANT_SKILLS_MIGRATION_VERSION,
+      ASSISTANT_THREAD_SKILLS_MIGRATION_VERSION,
     ]);
     expect(columnNames(db, 'devices')).toContain('revoked_at');
     expect(columnNames(db, 'devices')).toContain('installation_id');
@@ -72,7 +76,7 @@ describe('database migrations', () => {
     const second = new VoiceStreamNextDb(filePath);
     dbs.push(second);
 
-    expect(migrationRows(second)).toHaveLength(11);
+    expect(migrationRows(second)).toHaveLength(13);
   });
 
   test('rejects changed migration checksums', () => {

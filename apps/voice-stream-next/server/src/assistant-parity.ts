@@ -23,6 +23,7 @@ import {
   type AssistantQueuedPromptRecord,
   type AssistantRunRecord,
   type AssistantSettingsRecord,
+  type AssistantSkillRecord,
   type AssistantThread,
   type AssistantThreadCapabilities,
   type AssistantToolCallRecord,
@@ -49,7 +50,7 @@ export type AssistantModelOption = {
 export type AssistantToolSummary = {
   name: string;
   label: string;
-  category: 'artifacts' | 'speech' | 'prompts' | 'settings' | 'web' | 'extensions';
+  category: 'artifacts' | 'skills' | 'speech' | 'prompts' | 'settings' | 'web' | 'extensions';
   description: string;
   approval: AssistantExtensionApprovalPolicy;
 };
@@ -62,6 +63,7 @@ export type AssistantSnapshot = {
   pendingApprovals: AssistantApprovalView[];
   models: AssistantModelOption[];
   availableTools: AssistantToolSummary[];
+  skills: AssistantSkillRecord[];
   assistantSettings: AssistantSettingsRecord;
   apiKeys: Record<'openai' | 'exa', AssistantApiKeyView>;
   codexConnection: { connected: boolean; accountId: string | null; expiresAt: string | null; updatedAt: string | null };
@@ -98,6 +100,13 @@ const ASSISTANT_TOOLS: AssistantToolSummary[] = [
     label: 'Assistant artifacts',
     category: 'artifacts',
     description: 'Maintain thread-scoped notes and files.',
+    approval: 'never',
+  },
+  {
+    name: 'load_skill',
+    label: 'Load skill',
+    category: 'skills',
+    description: 'Load a saved skill and enable the available tools it names for this thread.',
     approval: 'never',
   },
   {
@@ -262,6 +271,7 @@ export function assistantSnapshot(db: VoiceStreamNextDb, userId: string, activeT
     pendingApprovals: db.listApprovals(userId).filter((approval) => approval.status === 'pending').map(approvalView),
     models: MODEL_OPTIONS,
     availableTools: assistantAvailableToolSummaries(db, userId),
+    skills: db.listAssistantSkills(userId),
     assistantSettings: db.ensureAssistantSettings(userId),
     apiKeys: db.assistantApiKeysView(userId),
     codexConnection: db.codexConnectionView(userId),
@@ -460,9 +470,11 @@ async function runModelDrivenTurn(
 ): Promise<void> {
   thread = options.thread ?? db.thread(userId, threadId) ?? thread;
   const settings = db.ensureAssistantSettings(userId);
-  const enabledTools = responseToolDefinitions(db, userId, thread);
+  const persistedSkillToolNames = threadLoadedSkillToolNames(db, userId, thread);
+  const enabledTools = responseToolDefinitions(db, userId, thread, { loadedSkillToolNames: persistedSkillToolNames });
   const toolInstruction = toolCatalogInstruction(db, userId, enabledTools);
-  const instructions = modelInstructions({ settings, thread, toolInstruction, allowToolCalls: enabledTools.length > 0 });
+  const skillInstruction = skillCatalogInstruction(db, userId, thread);
+  const instructions = modelInstructions({ settings, thread, toolInstruction, skillInstruction, allowToolCalls: enabledTools.length > 0 });
   const testCalls = testModelToolCalls();
   const usingTestModel = testCalls.length > 0;
 
@@ -491,6 +503,7 @@ async function runModelDrivenTurn(
     requestKind: 'agent',
   });
   const context = makeAgentRunContext({ db, userId, threadId, run, thread, emit });
+  for (const toolName of persistedSkillToolNames) context.loadedSkillToolNames.add(toolName);
   const agent = new Agent({
     initialState: {
       systemPrompt: instructions,
@@ -502,6 +515,12 @@ async function runModelDrivenTurn(
     sessionId: assistantProviderSessionId(userId, threadId),
     transport: modelConfig.provider === 'codex' ? 'sse' : 'auto',
     toolExecution: 'sequential',
+    afterToolCall: async ({ toolCall, result, isError, context: loopContext }) => {
+      if (!isError && normalizeModelToolName(toolCall.name) === 'load_skill') {
+        loopContext.tools = buildAgentTools(context);
+      }
+      return undefined;
+    },
     getApiKey: async (provider: string) => {
       if (provider === 'openai-codex') return codexAccessToken(db, userId);
       if (provider === 'openai') return db.assistantApiKey(userId, 'openai') ?? undefined;
@@ -520,6 +539,9 @@ async function runModelDrivenTurn(
       timing('response_headers', { status: response.status });
     },
   });
+  context.refreshAgentTools = () => {
+    agent.state.tools = buildAgentTools(context);
+  };
 
   agent.subscribe(async (event) => {
     await persistAgentEvent(context, event);
@@ -552,14 +574,19 @@ type AgentRunContext = {
   toolCallsByModelId: Map<string, AssistantToolCallRecord>;
   approvalPendingModelIds: Set<string>;
   persistedToolResultModelIds: Set<string>;
+  loadedSkillToolNames: Set<string>;
+  refreshAgentTools?: () => void;
 };
 
-function makeAgentRunContext(input: Omit<AgentRunContext, 'toolCallsByModelId' | 'approvalPendingModelIds' | 'persistedToolResultModelIds'>): AgentRunContext {
+function makeAgentRunContext(
+  input: Omit<AgentRunContext, 'toolCallsByModelId' | 'approvalPendingModelIds' | 'persistedToolResultModelIds' | 'loadedSkillToolNames' | 'refreshAgentTools'>,
+): AgentRunContext {
   return {
     ...input,
     toolCallsByModelId: new Map(),
     approvalPendingModelIds: new Set(),
     persistedToolResultModelIds: new Set(),
+    loadedSkillToolNames: new Set(),
   };
 }
 
@@ -708,7 +735,9 @@ function emptyUsage() {
 }
 
 function buildAgentTools(context: AgentRunContext): AgentTool<any>[] {
-  return responseToolDefinitions(context.db, context.userId, context.thread).map((definition: any) => {
+  return responseToolDefinitions(context.db, context.userId, context.thread, {
+    loadedSkillToolNames: context.loadedSkillToolNames,
+  }).map((definition: any) => {
     const name = String(definition?.name ?? '');
     return {
       name,
@@ -742,6 +771,7 @@ function prepareAgentToolArguments(toolName: string, args: unknown): Record<stri
     };
   }
   if (toolName === 'set_thinking_level') return { thinkingLevel: String(value.thinkingLevel ?? value.level ?? 'off') };
+  if (toolName === 'load_skill') return { skill: String(value.skill ?? value.name ?? value.slug ?? '') };
   if (toolName === 'web_search') {
     return {
       query: String(value.query ?? ''),
@@ -788,6 +818,11 @@ async function executeAgentTool(
       runId: context.run.id,
       toolCallId: toolCall.id,
     });
+    if (toolName === 'load_skill') {
+      const skillToolNames = Array.isArray((result as any)?.toolNames) ? (result as any).toolNames.map((item: unknown) => String(item ?? '').trim()).filter(Boolean) : [];
+      for (const skillToolName of skillToolNames) context.loadedSkillToolNames.add(skillToolName);
+      context.refreshAgentTools?.();
+    }
     context.db.updateToolCall(context.userId, toolCall.id, { status: 'completed', resultJson: JSON.stringify(result) });
     return {
       content: [{ type: 'text', text: modelVisibleToolResultText(toolName, result) }],
@@ -803,7 +838,7 @@ async function executeAgentTool(
 
 async function createAgentToolCallRecord(context: AgentRunContext, call: Pick<ToolCall, 'id' | 'name' | 'arguments'>): Promise<AssistantToolCallRecord> {
   const toolName = normalizeModelToolName(call.name);
-  ensureToolEnabled(context.thread, toolName);
+  ensureToolEnabled(context.thread, toolName, context.loadedSkillToolNames);
   ensureCapability(context.thread, toolName);
   const args = call.arguments ?? {};
   const needsApproval = await approvalRequiredFor(context.db, context.userId, context.thread, toolName, args);
@@ -966,6 +1001,22 @@ function responseToolNames(tools: unknown[]): string[] {
   return tools.map((tool: any) => String(tool?.name ?? '').trim()).filter(Boolean);
 }
 
+function threadLoadedSkillToolNames(db: VoiceStreamNextDb, userId: string, thread: AssistantThread): string[] {
+  const requestedToolNames = [...new Set(db.listThreadSkills(userId, thread.id).flatMap((skill) => skill.toolNames))];
+  return availableSkillToolNames(db, userId, thread, requestedToolNames);
+}
+
+function availableSkillToolNames(
+  db: VoiceStreamNextDb,
+  userId: string,
+  thread: AssistantThread,
+  requestedToolNames: string[],
+): string[] {
+  const requested = new Set(requestedToolNames);
+  const available = new Set(responseToolNames(responseToolDefinitions(db, userId, thread, { loadedSkillToolNames: requestedToolNames })));
+  return [...requested].filter((toolName) => available.has(toolName));
+}
+
 function toolCatalogInstruction(db: VoiceStreamNextDb, userId: string, tools: unknown[]): string {
   const names = new Set(responseToolNames(tools));
   if (names.size === 0) return '';
@@ -975,9 +1026,32 @@ function toolCatalogInstruction(db: VoiceStreamNextDb, userId: string, tools: un
   return ['Available assistant tools this turn:', ...lines].join('\n');
 }
 
-function responseToolDefinitions(db: VoiceStreamNextDb, userId: string, thread: AssistantThread): unknown[] {
+function skillCatalogInstruction(db: VoiceStreamNextDb, userId: string, thread: AssistantThread): string {
+  if (!thread.enabledTools.includes('load_skill')) return '';
+  const skills = db.listAssistantSkills(userId).filter((skill) => !skill.disableModelInvocation);
+  if (skills.length === 0) return '';
+  return [
+    'Available skills:',
+    ...skills.map((skill) => {
+      const tools = skill.toolNames.length > 0 ? ` Tools enabled after load: ${skill.toolNames.join(', ')}.` : '';
+      return `- ${skill.name} (${skill.slug}): ${skill.description}${tools}`;
+    }),
+    'Use the load_skill tool before following a skill. Do not invent skill content.',
+  ].join('\n');
+}
+
+function responseToolDefinitions(
+  db: VoiceStreamNextDb,
+  userId: string,
+  thread: AssistantThread,
+  options: { loadedSkillToolNames?: Iterable<string> } = {},
+): unknown[] {
   const definitions: unknown[] = [];
-  for (const toolName of thread.enabledTools) {
+  const toolNames = [
+    ...thread.enabledTools,
+    ...Array.from(options.loadedSkillToolNames ?? []),
+  ];
+  for (const toolName of [...new Set(toolNames)]) {
     if (toolName === 'assistant_artifacts' && thread.capabilities.artifacts) {
       definitions.push({
         type: 'function',
@@ -1010,6 +1084,22 @@ function responseToolDefinitions(db: VoiceStreamNextDb, userId: string, thread: 
             text: { type: 'string', description: 'Short text to speak.' },
           },
           required: ['text'],
+          additionalProperties: false,
+        },
+        strict: true,
+      });
+    }
+    if (toolName === 'load_skill') {
+      definitions.push({
+        type: 'function',
+        name: 'load_skill',
+        description: 'Load one saved skill by name or slug. The tool returns the full skill instructions and enables the available tool names listed by that skill for this thread.',
+        parameters: {
+          type: 'object',
+          properties: {
+            skill: { type: 'string', description: 'The skill name or slug to load.' },
+          },
+          required: ['skill'],
           additionalProperties: false,
         },
         strict: true,
@@ -1139,11 +1229,13 @@ function modelInstructions(input: {
   settings: AssistantSettingsRecord;
   thread: AssistantThread;
   toolInstruction?: string;
+  skillInstruction?: string;
   allowToolCalls: boolean;
 }): string {
   return [
     input.thread.voiceEnabled ? input.settings.voiceSystemPrompt : input.settings.normalSystemPrompt,
     input.thread.systemPrompt ? `Thread system prompt:\n${input.thread.systemPrompt}` : '',
+    input.skillInstruction,
     input.allowToolCalls ? input.toolInstruction : '',
     input.allowToolCalls
       ? 'You may call the provided assistant tools when they help. Prefer tools for artifacts, spoken replies, web searches, fetched URL content, prompt reads/updates, and thread settings instead of describing those actions. Use web_search for current information, documentation, news, prices, or facts that may have changed. Use fetch_content when the user gives a direct URL to read, inspect, summarize, or analyze. Cite source URLs in the final answer. Never write XML, JSON, or pseudo function-call syntax in normal assistant text; use the API tool call channel for tool calls.'
@@ -1324,6 +1416,27 @@ async function executeApprovedTool(
 ): Promise<unknown> {
   const parsed = args && typeof args === 'object' ? args as Record<string, unknown> : {};
   if (toolName === 'assistant_artifacts') return executeArtifactTool(db, userId, thread.id, parsed);
+  if (toolName === 'load_skill') {
+    const skillName = String(parsed.skill ?? parsed.name ?? parsed.slug ?? '').trim();
+    if (!skillName) throw Object.assign(new Error('skill name is required'), { statusCode: 400 });
+    const skill = db.assistantSkillByName(userId, skillName);
+    if (!skill) throw Object.assign(new Error(`unknown skill: ${skillName}`), { statusCode: 404 });
+    const enabledToolNames = availableSkillToolNames(db, userId, thread, skill.toolNames);
+    const enabledToolNameSet = new Set(enabledToolNames);
+    const unavailableToolNames = skill.toolNames.filter((item) => !enabledToolNameSet.has(item));
+    db.loadThreadSkill(userId, thread.id, skill.id);
+    return {
+      ok: true,
+      id: skill.id,
+      slug: skill.slug,
+      name: skill.name,
+      description: skill.description,
+      toolNames: enabledToolNames,
+      requestedToolNames: skill.toolNames,
+      unavailableToolNames,
+      content: formatLoadedSkillContent(skill, enabledToolNames, unavailableToolNames),
+    };
+  }
   if (toolName === 'speak') {
     const text = String(parsed.text ?? '').trim();
     if (!text) throw Object.assign(new Error('speak text is required'), { statusCode: 400 });
@@ -1452,6 +1565,18 @@ function executeArtifactTool(db: VoiceStreamNextDb, userId: string, threadId: st
   return { ok: true, artifact: db.upsertArtifact(userId, threadId, { path: artifactPath, content: nextContent }) };
 }
 
+function formatLoadedSkillContent(skill: AssistantSkillRecord, enabledToolNames = skill.toolNames, unavailableToolNames: string[] = []): string {
+  return [
+    `# ${skill.name}`,
+    '',
+    `Description: ${skill.description}`,
+    enabledToolNames.length > 0 ? `Enabled tools for this thread: ${enabledToolNames.join(', ')}` : 'Enabled tools for this thread: none',
+    unavailableToolNames.length > 0 ? `Unavailable tool names ignored: ${unavailableToolNames.join(', ')}` : '',
+    '',
+    String(skill.markdownBody ?? '').trim(),
+  ].filter((part) => part !== '').join('\n');
+}
+
 function patchText(current: string, oldText: string, newText: string, label: string): string {
   if (!oldText) throw Object.assign(new Error(`${label} patch oldText is required`), { statusCode: 400 });
   const index = current.indexOf(oldText);
@@ -1459,8 +1584,8 @@ function patchText(current: string, oldText: string, newText: string, label: str
   return `${current.slice(0, index)}${newText}${current.slice(index + oldText.length)}`;
 }
 
-function ensureToolEnabled(thread: AssistantThread, toolName: string): void {
-  if (thread.enabledTools.includes(toolName)) return;
+function ensureToolEnabled(thread: AssistantThread, toolName: string, loadedSkillToolNames: ReadonlySet<string> = new Set()): void {
+  if (thread.enabledTools.includes(toolName) || loadedSkillToolNames.has(toolName)) return;
   throw Object.assign(new Error(`${toolLabel(toolName)} is disabled for this thread`), { statusCode: 403 });
 }
 
@@ -1527,6 +1652,10 @@ function toolResultText(toolName: string, result: unknown): string {
     if (artifact?.path) return `Artifact updated: ${artifact.path}`;
     if ((result as any)?.deleted) return `Artifact deleted: ${(result as any).path}`;
     return 'Artifact tool completed.';
+  }
+  if (toolName === 'load_skill') {
+    const tools = Array.isArray((result as any)?.toolNames) ? (result as any).toolNames : [];
+    return `Loaded skill: ${(result as any)?.name ?? 'skill'}${tools.length > 0 ? ` (${tools.length} tool${tools.length === 1 ? '' : 's'} enabled)` : ''}.`;
   }
   if (toolName === 'speak') return `Spoken reply prepared: ${String((result as any)?.text ?? '').slice(0, 120)}`;
   if (toolName === 'web_search') return String((result as any)?.answer ?? 'Web search completed.');

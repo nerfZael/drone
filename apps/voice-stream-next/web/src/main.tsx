@@ -22,6 +22,7 @@ import type {
   AssistantMessage,
   AssistantModelOption,
   AssistantQueuedPromptRecord,
+  AssistantSkillRecord,
   AssistantSnapshot,
   AssistantToolSummary,
   AssistantThread,
@@ -58,7 +59,16 @@ const ASSISTANT_PROVIDERS: Array<{ id: 'codex' | 'openai'; label: string; title:
 ];
 
 type AssistantSettingsPromptField = 'voiceSystemPrompt';
-type SettingsPane = 'devices' | 'assistant' | 'voice' | 'activity';
+type SettingsPane = 'devices' | 'assistant' | 'skills' | 'voice' | 'activity';
+type AssistantSkillDraft = {
+  id: string | null;
+  slug: string;
+  name: string;
+  description: string;
+  markdownBody: string;
+  toolNamesText: string;
+  disableModelInvocation: boolean;
+};
 type AppEvent = {
   type: string;
   sequence: number;
@@ -71,6 +81,7 @@ type SseMessage = { event: string; data: unknown };
 const SETTINGS_PANES: Array<{ id: SettingsPane; label: string }> = [
   { id: 'devices', label: 'Devices' },
   { id: 'assistant', label: 'Assistant' },
+  { id: 'skills', label: 'Skills' },
   { id: 'voice', label: 'Voice' },
   { id: 'activity', label: 'Activity' },
 ];
@@ -193,6 +204,7 @@ type AppToast = {
 
 const TOOL_LABELS: Record<string, string> = {
   assistant_artifacts: 'Assistant artifacts',
+  load_skill: 'Load skill',
   speak: 'Speak',
   get_system_prompt: 'Read system prompt',
   update_system_prompt: 'Update system prompt',
@@ -203,6 +215,44 @@ function toolLabel(name: string | undefined): string {
   const key = String(name ?? '').trim();
   if (!key) return 'Tool';
   return TOOL_LABELS[key] ?? key.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function emptySkillDraft(): AssistantSkillDraft {
+  return {
+    id: null,
+    slug: '',
+    name: '',
+    description: '',
+    markdownBody: '',
+    toolNamesText: '',
+    disableModelInvocation: false,
+  };
+}
+
+function draftFromAssistantSkill(skill: AssistantSkillRecord): AssistantSkillDraft {
+  return {
+    id: skill.id,
+    slug: skill.slug,
+    name: skill.name,
+    description: skill.description,
+    markdownBody: skill.markdownBody,
+    toolNamesText: skill.toolNames.join(', '),
+    disableModelInvocation: skill.disableModelInvocation,
+  };
+}
+
+function skillPayloadFromDraft(draft: AssistantSkillDraft): Record<string, unknown> {
+  return {
+    name: draft.name,
+    slug: draft.slug,
+    description: draft.description,
+    markdownBody: draft.markdownBody,
+    toolNames: draft.toolNamesText
+      .split(/[\s,]+/g)
+      .map((item) => item.trim())
+      .filter(Boolean),
+    disableModelInvocation: draft.disableModelInvocation,
+  };
 }
 
 function messageParts(message: AssistantMessage | undefined): AssistantContentPart[] {
@@ -958,6 +1008,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const [codexConnectFlow, setCodexConnectFlow] = React.useState<{ state: string; authorizationUrl: string; redirectUri: string; expiresAt: string } | null>(null);
   const [codexCodeDraft, setCodexCodeDraft] = React.useState('');
   const [apiKeyDrafts, setApiKeyDrafts] = React.useState<Record<'openai' | 'exa', string>>({ openai: '', exa: '' });
+  const [skillDraft, setSkillDraft] = React.useState<AssistantSkillDraft>(() => emptySkillDraft());
   const [deviceNameEditor, setDeviceNameEditor] = React.useState<{ deviceId: string; draft: string } | null>(null);
   const [deviceName, setDeviceName] = React.useState('Android voice client');
   const [deviceType, setDeviceType] = React.useState('android');
@@ -1926,6 +1977,55 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     }
   }
 
+  async function saveAssistantSkill() {
+    if (!skillDraft.name.trim()) {
+      setError('Skill name is required.');
+      return;
+    }
+    if (!skillDraft.description.trim()) {
+      setError('Skill description is required.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const path = skillDraft.id
+        ? `/api/assistant/skills/${encodeURIComponent(skillDraft.id)}`
+        : '/api/assistant/skills';
+      const data = await client.request<{ ok: true; skill: AssistantSkillRecord; snapshot: AssistantSnapshot }>(path, {
+        method: skillDraft.id ? 'PATCH' : 'POST',
+        body: JSON.stringify(skillPayloadFromDraft(skillDraft)),
+      });
+      setAssistantSnapshotData(data.snapshot);
+      setSkillDraft(draftFromAssistantSkill(data.skill));
+      setNotice(skillDraft.id ? 'Saved skill.' : 'Created skill.');
+    } catch (err: any) {
+      setError(err?.message ?? String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteAssistantSkill() {
+    if (!skillDraft.id) return;
+    if (!window.confirm(`Delete "${skillDraft.name || 'this skill'}"? This cannot be undone.`)) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const data = await client.request<{ ok: true; deleted: boolean; snapshot: AssistantSnapshot }>(
+        `/api/assistant/skills/${encodeURIComponent(skillDraft.id)}`,
+        { method: 'DELETE' },
+      );
+      setAssistantSnapshotData(data.snapshot);
+      setSkillDraft(emptySkillDraft());
+      setNotice('Deleted skill.');
+    } catch (err: any) {
+      setError(err?.message ?? String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function updateExtensionToolRoute(
     toolName: string,
     route: Pick<AssistantExtensionToolRoute, 'enabled' | 'targetKind' | 'targetDeviceId'>,
@@ -2387,6 +2487,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const enabledTools = new Set(activeThread?.enabledTools ?? []);
   const enabledToolNames = activeThread?.enabledTools ?? [];
   const availableTools = assistantSnapshotData?.availableTools ?? [];
+  const assistantSkills = assistantSnapshotData?.skills ?? [];
   const defaultEnabledTools = new Set(assistantSnapshotData?.assistantSettings.defaultEnabledTools ?? []);
   const defaultEnabledToolNames = assistantSnapshotData?.assistantSettings.defaultEnabledTools ?? [];
   const autoApprove = Boolean(activeThread?.autoApprove);
@@ -3389,6 +3490,128 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                 onUpdateRoute={(toolName, route) => void updateExtensionToolRoute(toolName, route)}
               />
                 </>
+              ) : null}
+
+              {settingsPane === 'skills' ? (
+                <section className={assistantPanelClass}>
+                  <div className={assistantPanelHeaderClass}>
+                    <div>
+                      <span className={assistantKickerClass}>Assistant</span>
+                      <h2 className={assistantPanelTitleClass}>Skills</h2>
+                    </div>
+                    <div className="flex flex-wrap justify-end gap-1.5">
+                      <button type="button" className={assistantActionButtonClass} disabled={busy} onClick={() => setSkillDraft(emptySkillDraft())}>
+                        New
+                      </button>
+                      <button type="button" className={assistantActionButtonClass} disabled={busy || !skillDraft.name.trim() || !skillDraft.description.trim()} onClick={() => void saveAssistantSkill()}>
+                        {skillDraft.id ? 'Save' : 'Create'}
+                      </button>
+                      <button type="button" className={assistantActionButtonClass} disabled={busy || !skillDraft.id} onClick={() => void deleteAssistantSkill()}>
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 xl:grid-cols-[minmax(220px,.34fr)_minmax(0,1fr)]">
+                    <div className="grid content-start gap-1.5">
+                      {assistantSkills.map((skill) => {
+                        const selected = skill.id === skillDraft.id;
+                        return (
+                          <button
+                            key={skill.id}
+                            type="button"
+                            className={cn(
+                              'grid min-h-[58px] w-full content-center gap-1 rounded border border-[var(--border-subtle)] bg-white/[.02] px-2 py-1.5 text-left transition hover:border-[rgba(136,145,168,.36)] hover:bg-white/[.04]',
+                              selected && 'border-[rgba(74,222,128,.30)] bg-[rgba(74,222,128,.08)]',
+                            )}
+                            disabled={busy}
+                            onClick={() => setSkillDraft(draftFromAssistantSkill(skill))}
+                          >
+                            <span className="flex min-w-0 items-center gap-1.5">
+                              <strong className="min-w-0 truncate text-xs text-[var(--fg)]">{skill.name}</strong>
+                              {skill.disableModelInvocation ? <small className="shrink-0 rounded border border-[var(--border-subtle)] px-1 text-[9px] uppercase text-[var(--muted)]">manual</small> : null}
+                            </span>
+                            <small className="line-clamp-2 text-[11px] leading-snug text-[var(--muted)]">{skill.description}</small>
+                          </button>
+                        );
+                      })}
+                      {assistantSkills.length === 0 ? <div className={assistantEmptyClass}>No skills yet.</div> : null}
+                    </div>
+
+                    <div className="grid gap-2.5">
+                      <div className="grid grid-cols-[minmax(160px,1fr)_minmax(120px,220px)] gap-2.5 max-[760px]:grid-cols-1">
+                        <label className={assistantFieldLabelClass}>
+                          Name
+                          <input
+                            value={skillDraft.name}
+                            disabled={busy}
+                            onChange={(event) => setSkillDraft((current) => ({ ...current, name: event.currentTarget.value }))}
+                            placeholder="Frontend design"
+                          />
+                        </label>
+                        <label className={assistantFieldLabelClass}>
+                          Slug
+                          <input
+                            value={skillDraft.slug}
+                            disabled={busy}
+                            onChange={(event) => setSkillDraft((current) => ({ ...current, slug: event.currentTarget.value }))}
+                            placeholder="frontend-design"
+                          />
+                        </label>
+                      </div>
+
+                      <label className={assistantFieldLabelClass}>
+                        Description
+                        <textarea
+                          value={skillDraft.description}
+                          disabled={busy}
+                          rows={3}
+                          onChange={(event) => setSkillDraft((current) => ({ ...current, description: event.currentTarget.value }))}
+                          placeholder="When this skill should be loaded."
+                        />
+                      </label>
+
+                      <label className={assistantFieldLabelClass}>
+                        Tool names
+                        <input
+                          value={skillDraft.toolNamesText}
+                          disabled={busy}
+                          onChange={(event) => setSkillDraft((current) => ({ ...current, toolNamesText: event.currentTarget.value }))}
+                          placeholder="web_search, fetch_content, extension_id__tool"
+                          list="assistant-skill-tool-options"
+                        />
+                      </label>
+                      <datalist id="assistant-skill-tool-options">
+                        {availableTools.map((tool) => <option key={tool.name} value={tool.name} />)}
+                      </datalist>
+
+                      <label className="flex min-w-0 cursor-pointer items-start gap-2 rounded-[5px] border border-[var(--border-subtle)] bg-white/[.02] px-2 py-1.5 text-[11px] text-[var(--muted)]">
+                        <input
+                          type="checkbox"
+                          className="mt-0.5 h-3.5 w-3.5 accent-[var(--accent)]"
+                          checked={skillDraft.disableModelInvocation}
+                          disabled={busy}
+                          onChange={(event) => setSkillDraft((current) => ({ ...current, disableModelInvocation: event.currentTarget.checked }))}
+                        />
+                        <span className="grid gap-px">
+                          <strong className="text-xs text-[var(--fg-secondary)]">Hide from automatic loading</strong>
+                          <small className="text-[11px] text-[var(--muted)]">The skill remains saved, but the assistant will not see it in the skill catalog.</small>
+                        </span>
+                      </label>
+
+                      <label className={assistantFieldLabelClass}>
+                        Instructions
+                        <textarea
+                          value={skillDraft.markdownBody}
+                          disabled={busy}
+                          rows={14}
+                          onChange={(event) => setSkillDraft((current) => ({ ...current, markdownBody: event.currentTarget.value }))}
+                          placeholder="# Skill instructions"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                </section>
               ) : null}
 
               {settingsPane === 'voice' ? (

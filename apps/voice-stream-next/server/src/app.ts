@@ -2098,6 +2098,57 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     })),
   );
 
+  app.get('/api/assistant/skills', async (req, reply) =>
+    withUser(req, reply, db, clerkEnabled, async (ctx) => ({
+      ok: true,
+      skills: db.listAssistantSkills(ctx.user.id),
+    })),
+  );
+
+  app.post('/api/assistant/skills', async (req, reply) =>
+    withUser(req, reply, db, clerkEnabled, async (ctx) => {
+      const body = jsonBody(req);
+      const skill = db.createAssistantSkill(ctx.user.id, {
+        name: cleanText(body.name),
+        slug: cleanText(body.slug) || undefined,
+        description: cleanText(body.description),
+        markdownBody: cleanText(body.markdownBody ?? body.content),
+        toolNames: Array.isArray(body.toolNames) ? body.toolNames : cleanText(body.toolNames),
+        disableModelInvocation: Boolean(body.disableModelInvocation),
+      });
+      emitAssistantChange('assistant_skill_created', undefined, ctx.user.id);
+      return { ok: true, skill, snapshot: assistantSnapshot(db, ctx.user.id) };
+    }),
+  );
+
+  app.patch('/api/assistant/skills/:skillId', async (req, reply) =>
+    withUser(req, reply, db, clerkEnabled, async (ctx) => {
+      const skillId = String((req.params as any).skillId ?? '');
+      const body = jsonBody(req);
+      const patch: Parameters<VoiceStreamNextDb['updateAssistantSkill']>[2] = {};
+      if (body.name !== undefined) patch.name = cleanText(body.name);
+      if (body.slug !== undefined) patch.slug = cleanText(body.slug);
+      if (body.description !== undefined) patch.description = cleanText(body.description);
+      if (body.markdownBody !== undefined || body.content !== undefined) patch.markdownBody = cleanText(body.markdownBody ?? body.content);
+      if (body.toolNames !== undefined) patch.toolNames = Array.isArray(body.toolNames) ? body.toolNames : cleanText(body.toolNames);
+      if (body.disableModelInvocation !== undefined) patch.disableModelInvocation = Boolean(body.disableModelInvocation);
+      const skill = db.updateAssistantSkill(ctx.user.id, skillId, patch);
+      if (!skill) throw Object.assign(new Error('unknown skill'), { statusCode: 404 });
+      emitAssistantChange('assistant_skill_updated', undefined, ctx.user.id);
+      return { ok: true, skill, snapshot: assistantSnapshot(db, ctx.user.id) };
+    }),
+  );
+
+  app.delete('/api/assistant/skills/:skillId', async (req, reply) =>
+    withUser(req, reply, db, clerkEnabled, async (ctx) => {
+      const skillId = String((req.params as any).skillId ?? '');
+      const deleted = db.deleteAssistantSkill(ctx.user.id, skillId);
+      if (!deleted) throw Object.assign(new Error('unknown skill'), { statusCode: 404 });
+      emitAssistantChange('assistant_skill_deleted', undefined, ctx.user.id);
+      return { ok: true, deleted, snapshot: assistantSnapshot(db, ctx.user.id) };
+    }),
+  );
+
   app.get('/api/assistant/settings', async (req, reply) =>
     withUser(req, reply, db, clerkEnabled, async (ctx) => ({
       ok: true,
