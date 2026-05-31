@@ -3585,7 +3585,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                           >
                             <span className="flex min-w-0 items-center gap-1.5">
                               <strong className="min-w-0 truncate text-xs text-[var(--fg)]">{skill.name}</strong>
-                              {skill.disableModelInvocation ? <small className="shrink-0 rounded border border-[var(--border-subtle)] px-1 text-[9px] uppercase text-[var(--muted)]">manual</small> : null}
+                              {skill.disableModelInvocation ? <small className="shrink-0 rounded border border-[var(--border-subtle)] px-1 text-[9px] uppercase text-[var(--muted)]">hidden</small> : null}
                             </span>
                             <small className="line-clamp-2 text-[11px] leading-snug text-[var(--muted)]">{skill.description}</small>
                           </button>
@@ -3650,8 +3650,8 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                           onChange={(event) => setSkillDraft((current) => ({ ...current, disableModelInvocation: event.currentTarget.checked }))}
                         />
                         <span className="grid gap-px">
-                          <strong className="text-xs text-[var(--fg-secondary)]">Hide from automatic loading</strong>
-                          <small className="text-[11px] text-[var(--muted)]">The skill remains saved, but the assistant will not see it in the skill catalog.</small>
+                          <strong className="text-xs text-[var(--fg-secondary)]">Hide from assistant discovery</strong>
+                          <small className="text-[11px] text-[var(--muted)]">Hidden skills stay saved and can still be loaded explicitly by name or slug.</small>
                         </span>
                       </label>
 
