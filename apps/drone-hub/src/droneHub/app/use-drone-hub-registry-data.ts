@@ -59,6 +59,9 @@ function sameDroneSummary(left: DroneSummary, right: DroneSummary): boolean {
     sameOptionalText(left.kind, right.kind) &&
     sameOptionalText(left.visibility, right.visibility) &&
     left.createdAt === right.createdAt &&
+    sameOptionalText(left.lastActivityAt, right.lastActivityAt) &&
+    sameOptionalText(left.lastMessageAt, right.lastMessageAt) &&
+    sameOptionalText(left.lastActivityChat, right.lastActivityChat) &&
     sameOptionalText(left.fleetParentId, right.fleetParentId) &&
     sameStringArray(left.fleetAssignedIds, right.fleetAssignedIds) &&
     sameOptionalText(left.runtime, right.runtime) &&

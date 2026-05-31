@@ -19,6 +19,9 @@ export type DroneSummary = {
     }>;
   } | null;
   createdAt: string;
+  lastActivityAt?: string | null;
+  lastMessageAt?: string | null;
+  lastActivityChat?: string | null;
   fleetParentId?: string | null;
   fleetAssignedIds?: string[] | null;
   runtime?: 'container' | 'host';

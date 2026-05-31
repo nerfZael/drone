@@ -4049,6 +4049,60 @@ function parseIsoOrZero(raw: unknown): number {
   return Number.isFinite(ms) ? ms : 0;
 }
 
+function summarizeDroneActivity(entry: any): {
+  lastActivityAt: string | null;
+  lastMessageAt: string | null;
+  lastActivityChat: string | null;
+} {
+  let lastActivityMs = Math.max(
+    parseIsoOrZero(entry?.createdAt),
+    parseIsoOrZero(entry?.updatedAt),
+    parseIsoOrZero(entry?.hub?.updatedAt),
+  );
+  let lastMessageMs = 0;
+  let lastActivityChat: string | null = null;
+  let lastMessageChat: string | null = null;
+
+  const chats = entry?.chats && typeof entry.chats === 'object' ? entry.chats : {};
+  for (const [chatName, chatEntry] of Object.entries(chats) as Array<[string, any]>) {
+    const turns = Array.isArray(chatEntry?.turns) ? chatEntry.turns : [];
+    for (const turn of turns) {
+      const turnMs = Math.max(
+        parseIsoOrZero((turn as any)?.completedAt),
+        parseIsoOrZero((turn as any)?.promptAt),
+        parseIsoOrZero((turn as any)?.at),
+      );
+      if (turnMs > lastMessageMs) {
+        lastMessageMs = turnMs;
+        lastMessageChat = chatName;
+      }
+      if (turnMs > lastActivityMs) {
+        lastActivityMs = turnMs;
+        lastActivityChat = chatName;
+      }
+    }
+
+    const pendingPrompts = Array.isArray(chatEntry?.pendingPrompts) ? chatEntry.pendingPrompts : [];
+    for (const prompt of pendingPrompts) {
+      const promptMs = Math.max(
+        parseIsoOrZero((prompt as any)?.updatedAt),
+        parseIsoOrZero((prompt as any)?.at),
+        parseIsoOrZero((prompt as any)?.createdAt),
+      );
+      if (promptMs > lastActivityMs) {
+        lastActivityMs = promptMs;
+        lastActivityChat = chatName;
+      }
+    }
+  }
+
+  return {
+    lastActivityAt: lastActivityMs > 0 ? new Date(lastActivityMs).toISOString() : null,
+    lastMessageAt: lastMessageMs > 0 ? new Date(lastMessageMs).toISOString() : null,
+    lastActivityChat: lastActivityChat ?? (lastActivityMs === lastMessageMs ? lastMessageChat : null),
+  };
+}
+
 function summarizePlaybookRunEntry(args: {
   droneId: string;
   name: string;
@@ -15256,6 +15310,7 @@ export async function startDroneHubApiServer(opts: {
           const repoAttached = Boolean(String(p?.repoPath ?? '').trim());
           const phase = String(p?.phase ?? 'starting') as PendingPhase;
           const seed = p?.seed;
+          const activity = summarizeDroneActivity(p);
           const hasSeed =
             seed &&
             typeof seed === 'object' &&
@@ -15277,6 +15332,9 @@ export async function startDroneHubApiServer(opts: {
             visibility: normalizeDroneEntryVisibility(p?.visibility),
             playbook: playbookMetaFromEntry(p?.playbook),
             createdAt: String(p?.createdAt ?? nowIso()),
+            lastActivityAt: activity.lastActivityAt,
+            lastMessageAt: activity.lastMessageAt,
+            lastActivityChat: activity.lastActivityChat,
             fleetParentId: resolveStableDroneOrPendingIdFromRef(regAny, fleetActorConfig(p).createdBy),
             fleetAssignedIds: normalizeFleetAssignedRefsForSummary(regAny, p?.id, fleetActorConfig(p).assigned),
             runtime,
@@ -15301,6 +15359,7 @@ export async function startDroneHubApiServer(opts: {
           Object.values(regAny.drones ?? {}).map(async (d: any) => {
             const runtime = normalizeDroneRuntime(d?.runtime);
             const containerName = String(d?.containerName ?? d?.name ?? '').trim();
+            const activity = summarizeDroneActivity(d);
             const hostPort =
               typeof d.hostPort === 'number' && Number.isFinite(d.hostPort)
                 ? d.hostPort
@@ -15376,6 +15435,9 @@ export async function startDroneHubApiServer(opts: {
               visibility: normalizeDroneEntryVisibility(d?.visibility),
               playbook: playbookMetaFromEntry(d?.playbook),
               createdAt: d.createdAt,
+              lastActivityAt: activity.lastActivityAt,
+              lastMessageAt: activity.lastMessageAt,
+              lastActivityChat: activity.lastActivityChat,
               fleetParentId: resolveStableDroneOrPendingIdFromRef(regAny, fleetActorConfig(d).createdBy),
               fleetAssignedIds: normalizeFleetAssignedRefsForSummary(regAny, d?.id, fleetActorConfig(d).assigned),
               runtime,

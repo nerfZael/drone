@@ -28,6 +28,13 @@ function cleanPositiveInt(value, fallback, max) {
   return Math.min(Math.floor(number), max);
 }
 
+function cleanIsoTimestamp(value) {
+  const text = cleanString(value);
+  if (!text) return null;
+  const ms = Date.parse(text);
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+}
+
 function truncateString(value, maxChars) {
   const text = String(value ?? '');
   if (text.length <= maxChars) return { value: text, truncated: false, originalLength: text.length };
@@ -208,6 +215,43 @@ function normalizeAgent(value) {
   return { kind: 'builtin', id };
 }
 
+function summarizeStatusObject(status) {
+  if (!status || typeof status !== 'object') return null;
+
+  const phase = cleanString(status.phase || status.state || status.status);
+  if (phase) return phase;
+
+  const process = status.process && typeof status.process === 'object' ? status.process : null;
+  if (process) {
+    const running = process.running === true ? 'running' : process.running === false ? 'stopped' : '';
+    const cmd = cleanString(process.cmd);
+    if (running && cmd) return `process ${running}: ${cmd}`;
+    if (running) return `process ${running}`;
+    if (cmd) return `process: ${cmd}`;
+    return 'process';
+  }
+
+  if (typeof status.ok === 'boolean') return status.ok ? 'ready' : 'not ready';
+  return null;
+}
+
+function droneStatusSummary(drone) {
+  const hubPhase = cleanString(drone?.hubPhase);
+  const hubMessage = cleanString(drone?.hubMessage);
+  if (hubPhase) return hubMessage ? `${hubPhase}: ${hubMessage}` : hubPhase;
+
+  const statusError = cleanString(drone?.statusError);
+  if (statusError) return `offline: ${statusError}`;
+
+  if (drone?.busy === true || (Array.isArray(drone?.busyChats) && drone.busyChats.length > 0)) return 'busy';
+
+  if (typeof drone?.status === 'string') return cleanString(drone.status) || null;
+  if (drone?.status && typeof drone.status === 'object') return summarizeStatusObject(drone.status);
+  if (drone?.statusOk === true) return 'ready';
+  if (drone?.statusOk === false) return 'offline';
+  return null;
+}
+
 function droneSummary(drone) {
   return {
     id: cleanString(drone?.id),
@@ -216,8 +260,23 @@ function droneSummary(drone) {
     runtime: cleanString(drone?.runtime, 'container'),
     repoPath: cleanString(drone?.repoPath) || null,
     cwd: cleanString(drone?.cwd) || null,
-    status: cleanString(drone?.status) || null,
+    status: droneStatusSummary(drone),
+    createdAt: cleanIsoTimestamp(drone?.createdAt),
+    lastActivityAt: cleanIsoTimestamp(drone?.lastActivityAt),
+    lastMessageAt: cleanIsoTimestamp(drone?.lastMessageAt),
+    lastActivityChat: cleanString(drone?.lastActivityChat) || null,
   };
+}
+
+function compareDronesByRecentActivity(a, b) {
+  const aMs = Date.parse(a.lastActivityAt || a.lastMessageAt || a.createdAt || '');
+  const bMs = Date.parse(b.lastActivityAt || b.lastMessageAt || b.createdAt || '');
+  const aValid = Number.isFinite(aMs);
+  const bValid = Number.isFinite(bMs);
+  if (aValid && bValid && aMs !== bMs) return bMs - aMs;
+  if (aValid && !bValid) return -1;
+  if (!aValid && bValid) return 1;
+  return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
 }
 
 function droneAliases(value) {
@@ -515,6 +574,7 @@ exports.activate = async function activate(api) {
       let drones = Array.isArray(response?.drones) ? response.drones.map(droneSummary) : [];
       if (group) drones = drones.filter((drone) => drone.group === group);
       if (wantedNames.size > 0) drones = drones.filter((drone) => wantedNames.has(drone.id) || wantedNames.has(drone.name));
+      drones.sort(compareDronesByRecentActivity);
       return { ok: true, count: drones.length, drones: drones.slice(0, limit) };
     },
   });
