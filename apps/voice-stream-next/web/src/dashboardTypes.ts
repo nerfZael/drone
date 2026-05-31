@@ -166,6 +166,21 @@ export type AssistantToolCallRecord = {
   updatedAt: string;
 };
 
+export type AssistantSkillRecord = {
+  id: string;
+  userId: string;
+  slug: string;
+  name: string;
+  description: string;
+  markdownBody: string;
+  toolNames: string[];
+  disableModelInvocation: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AssistantLoadedSkillView = Pick<AssistantSkillRecord, 'id' | 'slug' | 'name'>;
+
 export type AssistantApprovalRecord = {
   id: string;
   threadId: string;
@@ -298,6 +313,7 @@ export type AssistantThreadView = AssistantThread & {
   queuedPrompts: AssistantQueuedPromptRecord[];
   toolCalls: AssistantToolCallRecord[];
   artifactsCount: number;
+  loadedSkills: AssistantLoadedSkillView[];
 };
 
 export type AssistantSnapshot = {
@@ -308,6 +324,7 @@ export type AssistantSnapshot = {
   pendingApprovals: AssistantApprovalRecord[];
   models: AssistantModelOption[];
   availableTools: AssistantToolSummary[];
+  skills: AssistantSkillRecord[];
   assistantSettings: AssistantSettingsRecord;
   apiKeys: Record<'openai' | 'exa', AssistantApiKeyView>;
   codexConnection: AssistantCodexConnection;

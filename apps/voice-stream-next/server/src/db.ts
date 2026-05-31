@@ -201,6 +201,24 @@ export type AssistantToolCallRecord = {
   updatedAt: string;
 };
 
+export type AssistantSkillRecord = {
+  id: string;
+  userId: string;
+  slug: string;
+  name: string;
+  description: string;
+  markdownBody: string;
+  toolNames: string[];
+  disableModelInvocation: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export const ASSISTANT_SKILL_NAME_MAX_CHARS = 120;
+export const ASSISTANT_SKILL_DESCRIPTION_MAX_CHARS = 1000;
+export const ASSISTANT_SKILL_BODY_MAX_CHARS = 64 * 1024;
+export const ASSISTANT_SKILL_TOOL_NAMES_MAX = 40;
+
 export type AssistantApprovalRecord = {
   id: string;
   userId: string;
@@ -430,11 +448,59 @@ function cleanInstallationId(raw: unknown): string | null {
   return value ? value.slice(0, 128) : null;
 }
 
+function normalizeSkillSlug(raw: unknown): string {
+  const slug = String(raw ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
+  if (!slug) throw Object.assign(new Error('skill slug is required'), { statusCode: 400 });
+  return slug;
+}
+
+function normalizeToolName(raw: unknown): string {
+  return String(raw ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 128);
+}
+
+function normalizeSkillToolNames(raw: unknown): string[] {
+  const values = Array.isArray(raw)
+    ? raw
+    : String(raw ?? '')
+        .split(/[\s,]+/g)
+        .filter(Boolean);
+  const toolNames = [...new Set(values.map(normalizeToolName).filter(Boolean))];
+  if (toolNames.length > ASSISTANT_SKILL_TOOL_NAMES_MAX) {
+    throw Object.assign(new Error(`skills can include at most ${ASSISTANT_SKILL_TOOL_NAMES_MAX} tool names`), { statusCode: 400 });
+  }
+  return toolNames;
+}
+
+function cleanSkillText(raw: unknown, label: string, maxChars: number, options: { required?: boolean; statusCode?: number } = {}): string {
+  const value = String(raw ?? '').trim();
+  if (options.required && !value) throw Object.assign(new Error(`${label} is required`), { statusCode: 400 });
+  if (value.length > maxChars) {
+    throw Object.assign(new Error(`${label} must be ${maxChars} characters or fewer`), { statusCode: options.statusCode ?? 400 });
+  }
+  return value;
+}
+
+function isUniqueConstraintError(error: unknown): boolean {
+  const message = String((error as any)?.message ?? error ?? '').toLowerCase();
+  return message.includes('unique constraint failed') || message.includes('constraint failed');
+}
+
 const ASSISTANT_DEFAULT_PROVIDER = 'openai';
 const ASSISTANT_DEFAULT_MODEL = 'gpt-5.5';
 const ASSISTANT_DEFAULT_THINKING_LEVEL = 'off';
 const ASSISTANT_DEFAULT_ENABLED_TOOLS = [
   'assistant_artifacts',
+  'load_skill',
   'speak',
   'get_system_prompt',
   'update_system_prompt',
@@ -681,6 +747,21 @@ function rowAssistantToolCall(row: any): AssistantToolCallRecord {
     argsJson: String(row.args_json ?? '{}'),
     resultJson: row.result_json == null ? null : String(row.result_json),
     approvalRequired: asBool(row.approval_required),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function rowAssistantSkill(row: any): AssistantSkillRecord {
+  return {
+    id: String(row.id),
+    userId: String(row.user_id),
+    slug: String(row.slug),
+    name: String(row.name ?? ''),
+    description: String(row.description ?? ''),
+    markdownBody: String(row.markdown_body ?? ''),
+    toolNames: parseJsonArray(row.tool_names_json, []),
+    disableModelInvocation: asBool(row.disable_model_invocation),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
   };
@@ -2002,6 +2083,189 @@ export class VoiceStreamNextDb {
     this.db
       .query('DELETE FROM assistant_extension_manifests WHERE user_id = $userId AND extension_id = $extensionId')
       .run({ $userId: userId, $extensionId: extensionId });
+  }
+
+  listAssistantSkills(userId: string): AssistantSkillRecord[] {
+    return this.db
+      .query('SELECT * FROM assistant_skills WHERE user_id = $userId ORDER BY slug ASC')
+      .all({ $userId: userId })
+      .map(rowAssistantSkill);
+  }
+
+  listThreadSkills(userId: string, threadId: string): AssistantSkillRecord[] {
+    return this.db
+      .query(
+        `
+        SELECT s.*
+        FROM assistant_thread_skills loaded
+        JOIN assistant_skills s ON s.id = loaded.skill_id
+        WHERE loaded.user_id = $userId
+          AND loaded.thread_id = $threadId
+        ORDER BY loaded.loaded_at ASC, s.slug ASC
+      `,
+      )
+      .all({ $userId: userId, $threadId: threadId })
+      .map(rowAssistantSkill);
+  }
+
+  assistantSkill(userId: string, skillIdOrSlug: string): AssistantSkillRecord | null {
+    const key = String(skillIdOrSlug ?? '').trim();
+    if (!key) return null;
+    const row = this.db
+      .query('SELECT * FROM assistant_skills WHERE user_id = $userId AND (id = $key OR slug = $key)')
+      .get({ $userId: userId, $key: key });
+    return row ? rowAssistantSkill(row) : null;
+  }
+
+  assistantSkillByName(userId: string, nameOrSlug: string): AssistantSkillRecord | null {
+    const key = String(nameOrSlug ?? '').trim();
+    if (!key) return null;
+    try {
+      const slug = normalizeSkillSlug(key);
+      const bySlug = this.assistantSkill(userId, slug);
+      if (bySlug) return bySlug;
+    } catch {}
+    const normalizedName = key.toLowerCase();
+    return this.listAssistantSkills(userId).find((skill) => skill.name.toLowerCase() === normalizedName) ?? null;
+  }
+
+  createAssistantSkill(
+    userId: string,
+    input: { slug?: string; name?: string; description?: string; markdownBody?: string; toolNames?: unknown; disableModelInvocation?: boolean },
+  ): AssistantSkillRecord {
+    const name = cleanSkillText(input.name, 'skill name', ASSISTANT_SKILL_NAME_MAX_CHARS, { required: true });
+    const description = cleanSkillText(input.description, 'skill description', ASSISTANT_SKILL_DESCRIPTION_MAX_CHARS, { required: true });
+    const markdownBody = cleanSkillText(input.markdownBody, 'skill instructions', ASSISTANT_SKILL_BODY_MAX_CHARS, { statusCode: 413 });
+    const slug = normalizeSkillSlug(input.slug ?? name);
+    const at = nowIso();
+    const id = newId('skl');
+    try {
+      this.db
+        .query(
+          `
+          INSERT INTO assistant_skills (
+            id,
+            user_id,
+            slug,
+            name,
+            description,
+            markdown_body,
+            tool_names_json,
+            disable_model_invocation,
+            created_at,
+            updated_at
+          )
+          VALUES (
+            $id,
+            $userId,
+            $slug,
+            $name,
+            $description,
+            $markdownBody,
+            $toolNamesJson,
+            $disableModelInvocation,
+            $createdAt,
+            $updatedAt
+          )
+        `,
+        )
+        .run({
+          $id: id,
+          $userId: userId,
+          $slug: slug,
+          $name: name,
+          $description: description,
+          $markdownBody: markdownBody,
+          $toolNamesJson: JSON.stringify(normalizeSkillToolNames(input.toolNames)),
+          $disableModelInvocation: input.disableModelInvocation ? 1 : 0,
+          $createdAt: at,
+          $updatedAt: at,
+        });
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        throw Object.assign(new Error('skill slug already exists'), { statusCode: 409 });
+      }
+      throw error;
+    }
+    return this.assistantSkill(userId, id)!;
+  }
+
+  updateAssistantSkill(
+    userId: string,
+    skillId: string,
+    input: Partial<{ slug: string; name: string; description: string; markdownBody: string; toolNames: unknown; disableModelInvocation: boolean }>,
+  ): AssistantSkillRecord | null {
+    const current = this.assistantSkill(userId, skillId);
+    if (!current) return null;
+    const name = input.name === undefined
+      ? current.name
+      : cleanSkillText(input.name, 'skill name', ASSISTANT_SKILL_NAME_MAX_CHARS, { required: true });
+    const description = input.description === undefined
+      ? current.description
+      : cleanSkillText(input.description, 'skill description', ASSISTANT_SKILL_DESCRIPTION_MAX_CHARS, { required: true });
+    const markdownBody = input.markdownBody === undefined
+      ? current.markdownBody
+      : cleanSkillText(input.markdownBody, 'skill instructions', ASSISTANT_SKILL_BODY_MAX_CHARS, { statusCode: 413 });
+    const slug = input.slug === undefined ? current.slug : normalizeSkillSlug(input.slug || name);
+    const toolNames = input.toolNames === undefined ? current.toolNames : normalizeSkillToolNames(input.toolNames);
+    const at = nowIso();
+    try {
+      this.db
+        .query(
+          `
+          UPDATE assistant_skills
+          SET slug = $slug,
+              name = $name,
+              description = $description,
+              markdown_body = $markdownBody,
+              tool_names_json = $toolNamesJson,
+              disable_model_invocation = $disableModelInvocation,
+              updated_at = $updatedAt
+          WHERE user_id = $userId AND id = $id
+        `,
+        )
+        .run({
+          $slug: slug,
+          $name: name,
+          $description: description,
+          $markdownBody: markdownBody,
+          $toolNamesJson: JSON.stringify(toolNames),
+          $disableModelInvocation: (input.disableModelInvocation ?? current.disableModelInvocation) ? 1 : 0,
+          $updatedAt: at,
+          $userId: userId,
+          $id: current.id,
+        });
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        throw Object.assign(new Error('skill slug already exists'), { statusCode: 409 });
+      }
+      throw error;
+    }
+    return this.assistantSkill(userId, current.id);
+  }
+
+  loadThreadSkill(userId: string, threadId: string, skillId: string): AssistantSkillRecord | null {
+    const thread = this.thread(userId, threadId);
+    const skill = this.assistantSkill(userId, skillId);
+    if (!thread || !skill) return null;
+    const at = nowIso();
+    this.db
+      .query(
+        `
+        INSERT INTO assistant_thread_skills (user_id, thread_id, skill_id, loaded_at)
+        VALUES ($userId, $threadId, $skillId, $loadedAt)
+        ON CONFLICT(thread_id, skill_id) DO UPDATE SET loaded_at = excluded.loaded_at
+      `,
+      )
+      .run({ $userId: userId, $threadId: thread.id, $skillId: skill.id, $loadedAt: at });
+    return skill;
+  }
+
+  deleteAssistantSkill(userId: string, skillId: string): boolean {
+    const result = this.db
+      .query('DELETE FROM assistant_skills WHERE user_id = $userId AND id = $id')
+      .run({ $userId: userId, $id: skillId });
+    return Number(result.changes ?? 0) > 0;
   }
 
   clearAssistantExtensionManifests(): void {
