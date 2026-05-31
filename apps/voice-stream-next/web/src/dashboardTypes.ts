@@ -179,6 +179,8 @@ export type AssistantSkillRecord = {
   updatedAt: string;
 };
 
+export type AssistantLoadedSkillView = Pick<AssistantSkillRecord, 'id' | 'slug' | 'name'>;
+
 export type AssistantApprovalRecord = {
   id: string;
   threadId: string;
@@ -311,6 +313,7 @@ export type AssistantThreadView = AssistantThread & {
   queuedPrompts: AssistantQueuedPromptRecord[];
   toolCalls: AssistantToolCallRecord[];
   artifactsCount: number;
+  loadedSkills: AssistantLoadedSkillView[];
 };
 
 export type AssistantSnapshot = {

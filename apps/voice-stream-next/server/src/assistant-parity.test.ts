@@ -179,6 +179,9 @@ describe('assistant parity runtime', () => {
     expect(result.toolNames).toEqual(['web_search', 'fetch_content']);
     expect(result.content).toContain('Search first, then fetch the best source.');
     expect(db.listThreadSkills(user.id, thread.id).map((skill) => skill.slug)).toEqual(['research']);
+    expect(assistantSnapshot(db, user.id, thread.id).threads.find((item) => item.id === thread.id)?.loadedSkills).toEqual([
+      { id: result.id, slug: 'research', name: 'Research' },
+    ]);
     const toolResult = db.listMessages(user.id, thread.id).find((message) => message.role === 'toolResult' && message.toolName === 'load_skill');
     expect(toolResult?.content).toContain('Loaded skill: Research');
 

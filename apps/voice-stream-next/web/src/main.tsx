@@ -101,6 +101,8 @@ const assistantActionButtonClass =
   'inline-flex h-[30px] items-center justify-center rounded border border-[var(--border)] bg-white/[.035] px-2.5 font-display text-[10px] font-semibold uppercase text-[var(--fg-secondary)] transition hover:border-[rgba(136,145,168,.36)] hover:text-[var(--fg)] disabled:pointer-events-none disabled:opacity-50';
 const assistantFieldLabelClass = 'grid gap-1.5 text-[10px] font-extrabold uppercase leading-tight text-[var(--muted)]';
 const assistantRowClass = 'rounded-[7px] border border-[var(--border-subtle)] bg-white/[.025] text-[var(--fg-secondary)]';
+const assistantSkillBadgeClass =
+  'inline-flex max-w-[130px] items-center rounded border border-[rgba(74,222,128,.22)] bg-[rgba(74,222,128,.07)] px-1.5 py-0.5 font-display text-[9px] font-semibold uppercase leading-none text-[var(--green)]';
 const settingsTabClass =
   'relative -mb-px inline-flex h-8 items-center justify-center rounded-t-md border border-[var(--border-subtle)] border-b-transparent bg-black/[.12] px-3 font-display text-[10px] font-semibold uppercase text-[var(--muted)] shadow-none transition hover:bg-white/[.04] hover:text-[var(--fg-secondary)]';
 const settingsTabActiveClass =
@@ -2484,6 +2486,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const activePendingApprovals = pendingApprovals.filter((approval) => approval.threadId === activeThread?.id && approval.status === 'pending');
   const activeRuns = (activeThread as AssistantThreadView | null)?.runs?.filter((run) => run.status === 'running' || run.status === 'waiting_for_approval') ?? [];
   const queuedPrompts = (activeThread as AssistantThreadView | null)?.queuedPrompts ?? [];
+  const activeLoadedSkills = (activeThread as AssistantThreadView | null)?.loadedSkills ?? [];
   const enabledTools = new Set(activeThread?.enabledTools ?? []);
   const enabledToolNames = activeThread?.enabledTools ?? [];
   const availableTools = assistantSnapshotData?.availableTools ?? [];
@@ -2616,6 +2619,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
             const active = thread.id === activeThread?.id;
             const messageCount = active ? messages.length : 0;
             const queuedCount = (thread as AssistantThreadView).queuedPrompts?.length ?? 0;
+            const loadedSkills = (thread as AssistantThreadView).loadedSkills ?? [];
             return (
               <div
                 key={thread.id}
@@ -2641,6 +2645,20 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                     {messageCount ? ` · ${messageCount}` : ''}
                     {queuedCount ? ` · ${queuedCount} queued` : ''}
                   </small>
+                  {loadedSkills.length > 0 ? (
+                    <span className="flex min-w-0 flex-wrap gap-1 pr-1">
+                      {loadedSkills.slice(0, 2).map((skill) => (
+                        <span key={skill.id} className={assistantSkillBadgeClass} title={`Loaded skill: ${skill.name}`}>
+                          <span className="truncate">{skill.name}</span>
+                        </span>
+                      ))}
+                      {loadedSkills.length > 2 ? (
+                        <span className={assistantSkillBadgeClass} title={`${loadedSkills.length - 2} more loaded skill(s)`}>
+                          +{loadedSkills.length - 2}
+                        </span>
+                      ) : null}
+                    </span>
+                  ) : null}
                 </button>
                 <button
                   type="button"
@@ -2704,9 +2722,23 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                   ? `Settings / ${SETTINGS_PANES.find((pane) => pane.id === settingsPane)?.label ?? 'General'}`
                   : navItems.find((item) => item.id === activeView)?.label}
             </strong>
-            <span className="flex items-center gap-1.5 font-display text-[10px] font-medium uppercase leading-tight text-[var(--muted-dim)]">
+            <span className="flex min-w-0 flex-wrap items-center gap-1.5 font-display text-[10px] font-medium uppercase leading-tight text-[var(--muted-dim)]">
               <span className="h-1.5 w-1.5 rounded-full bg-[var(--green)] shadow-[0_0_12px_rgba(74,222,128,.32)]" />
               {activeView === 'threads' ? (activeThread ? activeThread.status ?? 'idle' : 'no thread') : 'live'}
+              {activeView === 'threads' && activeLoadedSkills.length > 0 ? (
+                <>
+                  {activeLoadedSkills.slice(0, 4).map((skill) => (
+                    <span key={skill.id} className={assistantSkillBadgeClass} title={`Loaded skill: ${skill.name}`}>
+                      <span className="truncate">{skill.name}</span>
+                    </span>
+                  ))}
+                  {activeLoadedSkills.length > 4 ? (
+                    <span className={assistantSkillBadgeClass} title={`${activeLoadedSkills.length - 4} more loaded skill(s)`}>
+                      +{activeLoadedSkills.length - 4}
+                    </span>
+                  ) : null}
+                </>
+              ) : null}
             </span>
           </div>
 

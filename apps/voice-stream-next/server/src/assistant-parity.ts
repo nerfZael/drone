@@ -76,7 +76,10 @@ export type AssistantThreadView = AssistantThread & {
   queuedPrompts: AssistantQueuedPromptRecord[];
   toolCalls: AssistantToolCallRecord[];
   artifactsCount: number;
+  loadedSkills: AssistantLoadedSkillView[];
 };
+
+export type AssistantLoadedSkillView = Pick<AssistantSkillRecord, 'id' | 'slug' | 'name'>;
 
 export type AssistantApprovalView = AssistantApprovalRecord & {
   args: unknown;
@@ -261,6 +264,7 @@ export function assistantSnapshot(db: VoiceStreamNextDb, userId: string, activeT
       queuedPrompts: db.listQueuedPrompts(userId, thread.id),
       toolCalls: db.listToolCalls(userId, thread.id),
       artifactsCount: db.listArtifacts(userId, thread.id).length,
+      loadedSkills: db.listThreadSkills(userId, thread.id).map(skillLoadedView),
     };
   });
   return {
@@ -1272,6 +1276,10 @@ function isBuiltInTool(toolName: string): boolean {
 
 function approvalView(approval: AssistantApprovalRecord): AssistantApprovalView {
   return { ...approval, args: safeJson(approval.argsJson) };
+}
+
+function skillLoadedView(skill: AssistantSkillRecord): AssistantLoadedSkillView {
+  return { id: skill.id, slug: skill.slug, name: skill.name };
 }
 
 function cleanProvider(raw: unknown): string {
