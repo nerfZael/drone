@@ -64,6 +64,7 @@ const state = {
   voicePostStopStatus: '',
   desktopAuthPollTimer: null,
   voiceStreamEnding: false,
+  voiceStreamStarting: false,
   wakeUsesVosk: false,
   controlSocket: null,
   voiceSessionId: null,
@@ -79,6 +80,7 @@ const state = {
   recognition: null,
   wakeStream: null,
   wakeAudioContext: null,
+  wakeAnalyser: null,
   wakeProcessor: null,
   wakeUnsubscribe: null,
   wakeStarting: false,
@@ -964,7 +966,7 @@ function sendOrBufferStreamFrame(pcmBuffer) {
     state.voiceSocket.send(pcmBuffer);
     return;
   }
-  if (state.mode === 'recording') {
+  if (state.mode === 'recording' || state.voiceStreamStarting) {
     pendingStreamBuffer.push(pcmBuffer);
   }
 }
@@ -975,6 +977,10 @@ function pushPreRollFrame(pcmBuffer) {
 }
 
 function handleWakeAudioFrame(pcmBuffer) {
+  if (state.voiceStreamStarting) {
+    sendOrBufferStreamFrame(pcmBuffer);
+    return;
+  }
   pushPreRollFrame(pcmBuffer);
   if (state.wakeUsesVosk && desktop.sendVoskFrame) {
     desktop.sendVoskFrame(pcmBuffer);
@@ -1019,6 +1025,7 @@ function resetVoiceStreamState() {
   state.voiceOutgoingReady = false;
   state.voiceReconnectAttempt = 0;
   state.voiceStreamEnding = false;
+  state.voiceStreamStarting = false;
   state.voicePostStopMode = 'awake';
   state.voicePostStopStatus = '';
   state.recordingPaused = false;
@@ -1710,30 +1717,36 @@ async function createVoiceSession(target) {
 }
 
 async function startMic(target = 'assistant', options = {}) {
-  const session = await createVoiceSession(target);
-  stopWakeListener();
+  const previousMode = state.mode;
+  state.voiceTarget = cleanVoiceTarget(target);
+  state.voiceSuppressCommands = options.ignoreCommands === true;
+  resetVoiceStreamState();
+  pendingStreamBuffer.pushAll(preRollBuffer.drain());
+  state.voiceStreamStarting = true;
   try {
+    const session = await createVoiceSession(target);
     state.voiceSessionId = session.session.id;
-    state.voiceTarget = cleanVoiceTarget(target);
-    state.voiceSuppressCommands = options.ignoreCommands === true;
-    resetVoiceStreamState();
-    pendingStreamBuffer.pushAll(preRollBuffer.drain());
     if (options.cue) playLocalVoiceCue(options.cue);
-    state.stream = await getMicrophoneStream();
-    const context = new AudioContext({ sampleRate: 16000 });
-    state.audioContext = context;
-    const source = context.createMediaStreamSource(state.stream);
-    state.analyser = context.createAnalyser();
-    state.analyser.fftSize = 256;
-    state.processor = context.createScriptProcessor(4096, 1, 1);
+    const reusedWakeCapture = adoptWakeAudioCaptureForRecording();
+    if (!reusedWakeCapture) {
+      stopWakeListener();
+      state.stream = await getMicrophoneStream();
+      const context = new AudioContext({ sampleRate: 16000 });
+      state.audioContext = context;
+      const source = context.createMediaStreamSource(state.stream);
+      state.analyser = context.createAnalyser();
+      state.analyser.fftSize = 256;
+      state.processor = context.createScriptProcessor(4096, 1, 1);
+      source.connect(state.analyser);
+      source.connect(state.processor);
+      state.processor.connect(context.destination);
+    }
     state.voiceSocket = openVoiceSocket(state.voiceTarget);
     state.processor.onaudioprocess = (event) => {
       sendOrBufferStreamFrame(floatToPcm16(event.inputBuffer.getChannelData(0)));
     };
-    source.connect(state.analyser);
-    source.connect(state.processor);
-    state.processor.connect(context.destination);
     setMode('recording', recordingStatus(state.voiceTarget));
+    state.voiceStreamStarting = false;
     await api('/api/logs', {
       method: 'POST',
       suppressAuthGuidance: true,
@@ -1759,8 +1772,9 @@ async function startMic(target = 'assistant', options = {}) {
     state.voiceSessionId = null;
     state.voiceSuppressCommands = false;
     state.recordingPaused = false;
+    state.voiceStreamStarting = false;
     resetVoiceStreamState();
-    if (state.mode !== 'off') startWakeListener();
+    if (previousMode !== 'off') startWakeListener();
     throw err;
   }
 }
@@ -2582,14 +2596,18 @@ async function startWakeAudioCapture() {
   const media = await getMicrophoneStream();
   const context = new AudioContext({ sampleRate: 16000 });
   const source = context.createMediaStreamSource(media);
+  const analyser = context.createAnalyser();
+  analyser.fftSize = 256;
   const processor = context.createScriptProcessor(4096, 1, 1);
   processor.onaudioprocess = (event) => {
     handleWakeAudioFrame(floatToPcm16(event.inputBuffer.getChannelData(0)));
   };
+  source.connect(analyser);
   source.connect(processor);
   processor.connect(context.destination);
   state.wakeStream = media;
   state.wakeAudioContext = context;
+  state.wakeAnalyser = analyser;
   state.wakeProcessor = processor;
   return true;
 }
@@ -2692,6 +2710,39 @@ function wakeListenerStatus(awakeStatus = 'Awake. Listening for voice commands.'
   return state.mode === 'sleeping' ? sleepingStatusText() : awakeStatus;
 }
 
+function stopWakeRecognizerOnly() {
+  resetSleepPhraseCandidate();
+  if (state.wakeUnsubscribe) state.wakeUnsubscribe();
+  state.wakeUnsubscribe = null;
+  state.wakeUsesVosk = false;
+  const recognition = state.recognition;
+  if (recognition) {
+    recognition.onend = null;
+    state.recognition = null;
+    try {
+      recognition.stop();
+    } catch {
+      // Ignore already-ended SpeechRecognition sessions.
+    }
+  }
+  state.wakeStarting = false;
+  if (desktop.stopVosk) void desktop.stopVosk();
+}
+
+function adoptWakeAudioCaptureForRecording() {
+  if (!state.wakeStream || !state.wakeAudioContext || !state.wakeProcessor) return false;
+  stopWakeRecognizerOnly();
+  state.stream = state.wakeStream;
+  state.audioContext = state.wakeAudioContext;
+  state.processor = state.wakeProcessor;
+  state.analyser = state.wakeAnalyser;
+  state.wakeStream = null;
+  state.wakeAudioContext = null;
+  state.wakeAnalyser = null;
+  state.wakeProcessor = null;
+  return true;
+}
+
 function stopWakeListener() {
   resetSleepPhraseCandidate();
   stopVoskWakeListener();
@@ -2712,6 +2763,7 @@ function stopVoskWakeListener() {
   state.wakeUsesVosk = false;
   if (state.wakeProcessor) state.wakeProcessor.disconnect();
   state.wakeProcessor = null;
+  state.wakeAnalyser = null;
   if (state.wakeStream) state.wakeStream.getTracks().forEach((track) => track.stop());
   state.wakeStream = null;
   if (state.wakeAudioContext) void state.wakeAudioContext.close().catch(() => {});

@@ -195,19 +195,30 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
     }
 
     private fun beginRecording(target: String, onStatus: (String) -> Unit) {
-        if (recording.get()) return
+        if (!recording.compareAndSet(false, true)) return
         currentTarget = cleanTarget(target)
         outgoingReady.set(false)
         reconnectAttempt = 0
         pendingStreamBuffer.clear()
         pendingStreamBuffer.pushAll(preRollBuffer.drain())
-        val deviceId = api.pairedDeviceId()
-        val sessionId = api.createVoiceSession(deviceId, currentTarget)
-        beginRecordingWithSession(sessionId, currentTarget, onStatus)
+        try {
+            val deviceId = api.pairedDeviceId()
+            val sessionId = api.createVoiceSession(deviceId, currentTarget)
+            beginRecordingWithSession(sessionId, currentTarget, onStatus, recordingAlreadyStarted = true)
+        } catch (error: Exception) {
+            recording.set(false)
+            pendingStreamBuffer.clear()
+            onStatus(error.message ?: "Voice stream failed to start.")
+        }
     }
 
-    private fun beginRecordingWithSession(sessionId: String, target: String, onStatus: (String) -> Unit) {
-        if (recording.getAndSet(true)) return
+    private fun beginRecordingWithSession(
+        sessionId: String,
+        target: String,
+        onStatus: (String) -> Unit,
+        recordingAlreadyStarted: Boolean = false,
+    ) {
+        if (!recordingAlreadyStarted && recording.getAndSet(true)) return
         currentTarget = cleanTarget(target)
         outgoingReady.set(false)
         reconnectAttempt = 0
