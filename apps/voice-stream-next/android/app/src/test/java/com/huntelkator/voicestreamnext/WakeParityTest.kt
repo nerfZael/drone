@@ -51,6 +51,39 @@ class WakeParityTest {
     }
 
     @Test
+    fun sleepPhraseStabilityPrefersFinalResults() {
+        val stability = SleepPhraseStability(stableMs = 650, minHits = 2)
+
+        assertEquals(WakePhrase.UNLOCK, stability.accept(WakePhrase.UNLOCK, finalResult = true, nowMs = 0))
+    }
+
+    @Test
+    fun sleepPhraseStabilityRequiresRepeatedStablePartialResults() {
+        val stability = SleepPhraseStability(stableMs = 650, minHits = 2)
+
+        assertNull(stability.accept(WakePhrase.UNLOCK, finalResult = false, nowMs = 0))
+        assertNull(stability.accept(WakePhrase.UNLOCK, finalResult = false, nowMs = 400))
+        assertEquals(WakePhrase.UNLOCK, stability.accept(WakePhrase.UNLOCK, finalResult = false, nowMs = 700))
+    }
+
+    @Test
+    fun sleepPhraseStabilityResetsOnNonSleepMatch() {
+        val stability = SleepPhraseStability(stableMs = 650, minHits = 2)
+
+        assertNull(stability.accept(WakePhrase.UNLOCK, finalResult = false, nowMs = 0))
+        assertNull(stability.accept(WakePhrase.START, finalResult = false, nowMs = 700))
+        assertNull(stability.accept(WakePhrase.UNLOCK, finalResult = false, nowMs = 800))
+    }
+
+    @Test
+    fun sleepPhraseStabilityResetsAfterLongGap() {
+        val stability = SleepPhraseStability(stableMs = 650, minHits = 2, maxGapMs = 1_500)
+
+        assertNull(stability.accept(WakePhrase.UNLOCK, finalResult = false, nowMs = 0))
+        assertNull(stability.accept(WakePhrase.UNLOCK, finalResult = false, nowMs = 1_700))
+    }
+
+    @Test
     fun approvalCodeRequiresPhraseAndStableDigits() {
         val recognizer = ApprovalCodeRecognizer(stableMs = 500, collectTimeoutMs = 3_000)
 

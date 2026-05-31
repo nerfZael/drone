@@ -10,6 +10,7 @@ import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.media.audiofx.AcousticEchoCanceler
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -22,6 +23,7 @@ import android.view.ViewGroup
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -46,6 +48,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var browserAuth: BrowserAuthCoordinator
     private lateinit var serverInput: EditText
     private lateinit var deviceNameInput: EditText
+    private lateinit var echoCancellationCheckbox: CheckBox
     private lateinit var statusText: TextView
     private lateinit var approvalText: TextView
     private lateinit var microphoneText: TextView
@@ -517,6 +520,13 @@ class MainActivity : ComponentActivity() {
     private fun buildSettingsContent(): LinearLayout {
         serverInput = field("Server URL")
         deviceNameInput = field("Device name")
+        echoCancellationCheckbox = CheckBox(this).apply {
+            text = if (AcousticEchoCanceler.isAvailable()) "Acoustic echo canceler" else "Acoustic echo canceler unavailable"
+            textSize = 14f
+            setTextColor(COLOR_TEXT)
+            isEnabled = AcousticEchoCanceler.isAvailable()
+            setPadding(0, 6.dp(), 0, 2.dp())
+        }
 
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -526,6 +536,7 @@ class MainActivity : ComponentActivity() {
             addView(card("Connection").apply {
                 addView(serverInput)
                 addView(deviceNameInput)
+                addView(echoCancellationCheckbox)
                 addView(row(
                     button("Save") { saveConfigFromForm() },
                     button("Open web") { openWebDashboard() }
@@ -851,6 +862,9 @@ class MainActivity : ComponentActivity() {
         serverInput.setText(config.serverUrl)
         val prefs = getSharedPreferences(Constants.PREFS_NAME, MODE_PRIVATE)
         deviceNameInput.setText(prefs.getString(Constants.PREF_DEVICE_NAME, Constants.DEFAULT_DEVICE_NAME))
+        if (::echoCancellationCheckbox.isInitialized) {
+            echoCancellationCheckbox.isChecked = AcousticEchoCanceler.isAvailable() && api.androidEchoCancellationEnabled()
+        }
         updatePairingMessage()
     }
 
@@ -867,7 +881,21 @@ class MainActivity : ComponentActivity() {
         getSharedPreferences(Constants.PREFS_NAME, MODE_PRIVATE).edit()
             .putString(Constants.PREF_DEVICE_NAME, deviceNameInput.text.toString().ifBlank { Constants.DEFAULT_DEVICE_NAME })
             .apply()
-        showStatus("Settings saved.")
+        val echoSettingChanged = if (::echoCancellationCheckbox.isInitialized) {
+            val nextEchoEnabled = echoCancellationCheckbox.isEnabled && echoCancellationCheckbox.isChecked
+            val changed = api.androidEchoCancellationEnabled() != nextEchoEnabled
+            api.saveAndroidEchoCancellationEnabled(nextEchoEnabled)
+            changed
+        } else {
+            false
+        }
+        showStatus(
+            if (echoSettingChanged && sessionMode != SessionMode.OFF) {
+                "Settings saved. Restart listening to apply echo canceler."
+            } else {
+                "Settings saved."
+            }
+        )
     }
 
     private fun refreshDashboard() = runApi("Loading dashboard") {
