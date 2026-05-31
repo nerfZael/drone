@@ -593,7 +593,7 @@ function rowThread(row: any): AssistantThread {
     thinkingLevel: String(row.thinking_level ?? ASSISTANT_DEFAULT_THINKING_LEVEL),
     status: normalizeRunStatus(row.status),
     error: row.error == null ? null : String(row.error),
-    voiceEnabled: asBool(row.voice_enabled) || String(row.source ?? '') === 'voice',
+    voiceEnabled: true,
     autoApprove: asBool(row.auto_approve),
     systemPrompt: row.system_prompt == null ? null : String(row.system_prompt),
     enabledTools: parseJsonArray(row.enabled_tools_json, [...ASSISTANT_DEFAULT_ENABLED_TOOLS]),
@@ -2209,7 +2209,6 @@ export class VoiceStreamNextDb {
     const id = newId('thr');
     const at = nowIso();
     const settings = this.ensureAssistantSettings(userId);
-    const voiceEnabled = input.voiceEnabled ?? input.source === 'voice';
     this.db
       .query(
         `
@@ -2259,12 +2258,12 @@ export class VoiceStreamNextDb {
         $id: id,
         $userId: userId,
         $deviceId: input.deviceId ?? null,
-        $title: input.title?.trim() || 'Assistant thread',
-        $source: input.source?.trim() || 'web',
+        $title: input.title?.trim() || 'New thread',
+        $source: 'voice',
         $provider: input.provider?.trim() || settings.defaultProvider,
         $model: input.model?.trim() || settings.defaultModel,
         $thinkingLevel: input.thinkingLevel?.trim() || settings.defaultThinkingLevel,
-        $voiceEnabled: voiceEnabled ? 1 : 0,
+        $voiceEnabled: 1,
         $autoApprove: input.autoApprove ? 1 : 0,
         $enabledToolsJson: JSON.stringify(input.enabledTools ?? settings.defaultEnabledTools),
         $capabilitiesJson: JSON.stringify(input.capabilities ?? ASSISTANT_DEFAULT_CAPABILITIES),
@@ -2333,7 +2332,7 @@ export class VoiceStreamNextDb {
         $thinkingLevel: input.thinkingLevel ?? current.thinkingLevel,
         $status: input.status ?? current.status,
         $error: input.error === undefined ? current.error : input.error,
-        $voiceEnabled: (input.voiceEnabled ?? current.voiceEnabled) ? 1 : 0,
+        $voiceEnabled: 1,
         $autoApprove: (input.autoApprove ?? current.autoApprove) ? 1 : 0,
         $systemPrompt: input.systemPrompt === undefined ? current.systemPrompt : input.systemPrompt,
         $enabledToolsJson: JSON.stringify(input.enabledTools ?? current.enabledTools),
@@ -2347,7 +2346,7 @@ export class VoiceStreamNextDb {
   }
 
   latestVoiceThread(userId: string, sourceDeviceId: string): AssistantThread {
-    return this.latestVoiceThreadOrNull(userId) ?? this.createThread(userId, { deviceId: sourceDeviceId, source: 'voice', title: 'Voice thread' });
+    return this.latestVoiceThreadOrNull(userId) ?? this.createThread(userId, { deviceId: sourceDeviceId, source: 'voice', title: 'New thread' });
   }
 
   latestVoiceThreadOrNull(userId: string): AssistantThread | null {
@@ -2355,7 +2354,7 @@ export class VoiceStreamNextDb {
       .query(
         `
         SELECT * FROM assistant_threads
-        WHERE user_id = $userId AND (source = 'voice' OR voice_enabled = 1)
+        WHERE user_id = $userId
         ORDER BY created_at DESC, updated_at DESC
         LIMIT 1
       `,

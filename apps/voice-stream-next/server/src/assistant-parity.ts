@@ -1353,12 +1353,11 @@ async function executeApprovedTool(
     return { ok: true, thinkingLevel: updated?.thinkingLevel ?? thinkingLevel };
   }
   if (toolName === 'create_new_thread') {
-    const source = thread.voiceEnabled || thread.source === 'voice' ? 'voice' : 'web';
-    const title = String(parsed.title ?? '').trim() || (source === 'voice' ? 'Voice thread' : 'Assistant thread');
+    const title = String(parsed.title ?? '').trim() || 'New thread';
     const created = db.createThread(userId, {
       title,
-      source,
-      voiceEnabled: source === 'voice',
+      source: 'voice',
+      voiceEnabled: true,
       provider: thread.provider,
       model: thread.model,
       thinkingLevel: thread.thinkingLevel,
@@ -1536,8 +1535,7 @@ function toolResultText(toolName: string, result: unknown): string {
   if (toolName === 'set_thinking_level') return `Thinking level set to ${(result as any)?.thinkingLevel ?? 'off'}.`;
   if (toolName === 'create_new_thread') {
     const thread = (result as any)?.thread;
-    if (thread?.voiceEnabled) return `Created a new voice thread: ${thread.title}. Future voice recordings will use it by default.`;
-    return `Created a new assistant thread: ${thread?.title ?? 'Assistant thread'}.`;
+    return `Created a new thread: ${thread?.title ?? 'New thread'}. Future voice recordings will use it by default.`;
   }
   return 'Tool completed.';
 }
