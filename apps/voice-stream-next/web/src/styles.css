@@ -2484,4 +2484,77 @@ pre {
   color: var(--fg);
 }
 
+@media (max-width: 620px) {
+  .assistant-dock-shell :where(input, select, textarea) {
+    font-size: 16px;
+  }
+
+  .assistant-dock-shell :where(input, select) {
+    min-height: 34px;
+  }
+
+  .toast-stack {
+    top: max(10px, env(safe-area-inset-top));
+    right: 8px;
+    left: 8px;
+    width: auto;
+  }
+
+  .app-toast {
+    grid-template-columns: 24px minmax(0, 1fr) 28px;
+    gap: 8px;
+    padding: 7px;
+  }
+
+  .desktop-shell {
+    min-height: 100dvh;
+    overflow-y: auto;
+  }
+
+  .desktop-topbar {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    padding: 14px;
+  }
+
+  .desktop-voice-focus {
+    min-height: auto;
+    padding: 28px 14px 20px;
+  }
+
+  .desktop-voice-copy h2 {
+    font-size: 26px;
+  }
+
+  .desktop-voice-orb {
+    width: min(74vw, 230px);
+    height: min(74vw, 230px);
+    min-width: 168px;
+    min-height: 168px;
+  }
+
+  .desktop-connection-strip {
+    grid-template-columns: 1fr;
+    width: min(100%, 420px);
+  }
+
+  .signin-page {
+    width: min(100vw - 24px, 520px);
+    min-height: 100dvh;
+    padding: 24px 0;
+  }
+
+  .signin-copy {
+    padding-left: 14px;
+  }
+
+  .signin-copy h1 {
+    font-size: clamp(32px, 12vw, 48px);
+  }
+
+  .download-link {
+    flex: 1 1 100%;
+  }
+}
+
 @tailwind utilities;
