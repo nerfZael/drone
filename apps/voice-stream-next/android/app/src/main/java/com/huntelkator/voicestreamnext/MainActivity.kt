@@ -820,10 +820,6 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun playSelectedSpeech() {
-        if (sessionMode == SessionMode.SLEEPING || sessionMode == SessionMode.OFF) {
-            showStatus("Speech playback is only available while awake or recording.")
-            return
-        }
         val entry = speechHistoryEntries.getOrNull(speechHistoryIndex) ?: return
         thread(name = "VoiceStreamSpeechHistoryPlayback") {
             val audio = SpeechHistoryStore.readAudio(applicationContext, entry)
