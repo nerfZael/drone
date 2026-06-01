@@ -1623,6 +1623,7 @@ class MainActivity : ComponentActivity() {
                     lower.contains("waking") || lower.contains("starting") || lower.contains("reconnecting") || lower.contains("thinking") || lower.contains("queued") || lower.contains("waiting for approval") -> LOADING
                     lower.startsWith("sleep") || lower.startsWith("unlock") || lower.contains("sleeping") -> SLEEPING
                     lower.contains("waiting") || lower.contains("listening") || lower.contains("assistant replied") || lower.contains("transcript received") || lower.contains("audio received") -> AWAKE
+                    lower.contains("assistant audio") -> AWAKE
                     else -> RECORDING
                 }
             }

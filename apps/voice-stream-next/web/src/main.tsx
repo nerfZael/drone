@@ -5403,6 +5403,24 @@ function appDownloadMeta(info: AndroidApkInfo | DesktopAppInfo | null): string {
   return parts.join(' / ') || 'Ready';
 }
 
+function DownloadPlatformIcon({ platform }: { platform: 'desktop' | 'android' }) {
+  if (platform === 'android') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" className="download-link-icon">
+        <rect x="7" y="3" width="10" height="18" rx="2.2" />
+        <path d="M10 18h4" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="download-link-icon">
+      <rect x="4" y="5" width="16" height="11" rx="1.8" />
+      <path d="M9 20h6" />
+      <path d="M12 16v4" />
+    </svg>
+  );
+}
+
 function AppDownloadLinks({
   androidInfo,
   desktopInfo,
@@ -5413,8 +5431,20 @@ function AppDownloadLinks({
   loading?: boolean;
 }) {
   const entries = [
-    { label: 'Download desktop app', info: desktopInfo, href: desktopInfo?.available ? desktopInfo.downloadUrl : null },
-    { label: 'Download Android app', info: androidInfo, href: androidInfo?.available ? androidInfo.downloadUrl : null },
+    {
+      platform: 'desktop' as const,
+      label: 'Desktop app',
+      action: 'Download for Linux',
+      info: desktopInfo,
+      href: desktopInfo?.available ? desktopInfo.downloadUrl : null,
+    },
+    {
+      platform: 'android' as const,
+      label: 'Android app',
+      action: 'Download APK',
+      info: androidInfo,
+      href: androidInfo?.available ? androidInfo.downloadUrl : null,
+    },
   ];
   return (
     <div className="download-links" aria-label="App downloads">
@@ -5422,12 +5452,16 @@ function AppDownloadLinks({
         const meta = loading && !entry.info ? 'Checking...' : appDownloadMeta(entry.info);
         const content = (
           <>
-            <span>{entry.label}</span>
-            <small>{meta}</small>
+            <DownloadPlatformIcon platform={entry.platform} />
+            <span className="download-link-copy">
+              <span className="download-link-label">{entry.label}</span>
+              <strong>{entry.href ? entry.action : 'Unavailable'}</strong>
+              <small>{meta}</small>
+            </span>
           </>
         );
         return entry.href ? (
-          <a key={entry.label} className="download-link" href={entry.href}>
+          <a key={entry.label} className="download-link" href={entry.href} aria-label={`${entry.action}: ${meta}`}>
             {content}
           </a>
         ) : (
@@ -5515,7 +5549,7 @@ function DesktopAutoConnect({ client, children }: { client: ApiClient; children:
   return (
     <div className="signin-page">
       <div className="signin-copy">
-        <div className="kicker">Drone</div>
+        <div className="kicker">VoiceStream</div>
         <h1>Connecting device</h1>
         <p>
           {error
@@ -5592,6 +5626,14 @@ function Root() {
   return (
     <ClerkProvider
       publishableKey={publishableKey}
+      localization={{
+        signIn: {
+          start: {
+            title: 'Sign in to VoiceStream',
+            subtitle: 'Welcome back. Continue to your voice workspace.',
+          },
+        },
+      }}
       appearance={{
         variables: {
           colorBackground: '#171b21',
@@ -5625,12 +5667,12 @@ function Root() {
       <SignedOut>
         <div className="signin-page">
           <div className="signin-copy">
-            <div className="signin-brand" aria-label="Drone">
+            <div className="signin-brand" aria-label="VoiceStream Next">
               <span className="signin-brand-mark" aria-hidden="true" />
-              <span>Drone</span>
+              <span>VoiceStream Next</span>
             </div>
-            <h1>Sign in to Drone</h1>
-            <p>Access assistant threads, paired devices, and workspace controls.</p>
+            <h1>Sign in to VoiceStream</h1>
+            <p>Manage assistant threads, voice devices, settings, and app releases from one workspace.</p>
             <SignedOutDownloadLinks />
           </div>
           <div className="signin-auth-card">

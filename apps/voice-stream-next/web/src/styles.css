@@ -602,10 +602,10 @@ h2 {
 .signin-page {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 420px;
-  gap: 32px;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 430px);
+  gap: clamp(36px, 7vw, 92px);
   align-items: center;
-  width: min(1100px, calc(100vw - 32px));
+  width: min(1120px, calc(100vw - 48px));
   margin: 0 auto;
 }
 
@@ -1832,12 +1832,11 @@ pre {
 .signin-page {
   position: relative;
   isolation: isolate;
+  height: 100%;
   color: var(--fg);
-  background:
-    linear-gradient(135deg, rgba(167, 139, 250, .07), transparent 38%),
-    linear-gradient(180deg, rgba(255,255,255,.025), transparent 54%),
-    var(--bg);
-  padding: 40px 0;
+  background: var(--bg);
+  padding: 56px 0;
+  overflow: auto;
 }
 
 .signin-page::before {
@@ -1846,55 +1845,64 @@ pre {
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  opacity: .54;
+  opacity: .42;
   background-image: radial-gradient(circle, rgba(255,255,255,.04) 1px, transparent 1px);
   background-size: 20px 20px;
-  mask-image: linear-gradient(180deg, rgba(0,0,0,.92), transparent 84%);
+  mask-image: linear-gradient(180deg, rgba(0,0,0,.82), transparent 86%);
 }
 
 .signin-copy {
   display: grid;
-  gap: 18px;
-  padding: 0 0 0 22px;
-  border-left: 4px solid var(--accent);
+  align-content: center;
+  gap: 20px;
+  max-width: 610px;
+  padding: 0 0 0 24px;
+  border-left: 1px solid rgba(167, 139, 250, .42);
 }
 
 .signin-brand {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   width: max-content;
   color: var(--fg);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 850;
+  letter-spacing: .04em;
+  text-transform: uppercase;
 }
 
 .signin-brand-mark {
   width: 32px;
   height: 32px;
-  border: 1px solid rgba(167, 139, 250, .34);
+  border: 1px solid rgba(167, 139, 250, .42);
   border-radius: 8px;
-  background:
-    linear-gradient(135deg, rgba(167, 139, 250, .22), rgba(74, 222, 128, .10)),
-    rgba(255, 255, 255, .04);
-  box-shadow: 0 0 28px rgba(167, 139, 250, .12);
+  background: rgba(255, 255, 255, .045);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.025);
 }
 
 .signin-copy h1 {
   color: var(--fg);
   font-family: inherit;
-  font-size: clamp(34px, 5vw, 64px);
-  line-height: .98;
+  font-size: clamp(42px, 5vw, 68px);
+  font-weight: 820;
+  line-height: .96;
+  max-width: 640px;
 }
 
 .signin-copy p {
+  max-width: 560px;
   color: var(--fg-secondary);
   margin-top: 0;
+  font-size: 18px;
+  line-height: 1.5;
 }
 
 .signin-auth-card {
   display: grid;
   justify-items: stretch;
+  align-self: center;
+  width: min(100%, 430px);
 }
 
 .signin-auth-card :where(.cl-rootBox, .cl-cardBox, .cl-card) {
@@ -1904,9 +1912,8 @@ pre {
 .signin-auth-card .cl-card {
   border-color: var(--border);
   border-radius: 8px;
-  background:
-    linear-gradient(180deg, rgba(255,255,255,.025), rgba(255,255,255,.01)),
-    var(--panel-alt);
+  background: var(--panel-alt);
+  box-shadow: 0 18px 60px rgba(0,0,0,.26);
 }
 
 .signin-auth-card .cl-headerTitle {
@@ -1916,16 +1923,25 @@ pre {
 
 .signin-auth-card .cl-socialButtonsBlockButton {
   border-color: var(--border);
-  background: rgba(255,255,255,.035);
+  border-radius: 7px;
+  background: rgba(255,255,255,.04);
   color: var(--fg);
   transition: border-color .16s ease, background .16s ease, color .16s ease, transform .16s ease;
 }
 
+.signin-auth-card .cl-socialButtonsProviderIcon {
+  width: 16px !important;
+  height: 16px !important;
+  overflow: hidden;
+  object-fit: contain;
+  font-size: 0;
+}
+
 .signin-auth-card .cl-socialButtonsBlockButton:hover,
 .signin-auth-card .cl-socialButtonsBlockButton:focus-visible {
-  border-color: rgba(167, 139, 250, .36) !important;
-  background: var(--accent) !important;
-  color: #101216 !important;
+  border-color: rgba(167, 139, 250, .52) !important;
+  background: rgba(255,255,255,.075) !important;
+  color: var(--fg) !important;
   transform: translateY(-1px);
 }
 
@@ -1936,7 +1952,7 @@ pre {
 .signin-auth-card .cl-formButtonPrimary:hover,
 .signin-auth-card .cl-formButtonPrimary:focus-visible {
   border-color: rgba(167, 139, 250, .52) !important;
-  background: #b69cff !important;
+  background: #b9a3ff !important;
   color: #101216 !important;
   transform: translateY(-1px);
 }
@@ -1944,29 +1960,62 @@ pre {
 .download-links {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 18px;
+  gap: 10px;
+  margin-top: 8px;
 }
 
 .download-link {
-  display: grid;
-  min-width: min(100%, 190px);
-  min-height: 44px;
-  align-content: center;
-  gap: 2px;
+  display: inline-grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  min-width: min(100%, 228px);
+  min-height: 62px;
+  gap: 10px;
   border: 1px solid var(--border);
   border-radius: 7px;
-  background: rgba(255,255,255,.035);
+  background: rgba(255,255,255,.03);
   color: var(--fg-secondary);
-  padding: 7px 10px;
+  padding: 9px 12px;
   text-decoration: none;
   transition: border-color .16s ease, background .16s ease, color .16s ease, transform .16s ease;
 }
 
-.download-link span {
-  font-size: 12px;
-  font-weight: 800;
+.download-link-icon {
+  width: 34px;
+  height: 34px;
+  padding: 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  background: rgba(255,255,255,.035);
+  color: var(--accent);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+}
+
+.download-link-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.download-link-label {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 850;
   line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.download-link strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 820;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .download-link small {
@@ -1981,12 +2030,13 @@ pre {
 
 .download-link:hover {
   border-color: rgba(167, 139, 250, .52);
+  background: rgba(255,255,255,.055);
   color: var(--fg);
   transform: translateY(-1px);
 }
 
 .download-link.is-disabled {
-  opacity: .56;
+  opacity: .52;
   pointer-events: none;
 }
 
@@ -1997,11 +2047,19 @@ pre {
 .assistant-dock-shell .download-link {
   min-width: 0;
   flex: 1 1 150px;
-  min-height: 38px;
-  padding: 6px 8px;
+  min-height: 46px;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 8px;
+  padding: 7px 8px;
 }
 
-.assistant-dock-shell .download-link span {
+.assistant-dock-shell .download-link-icon {
+  width: 28px;
+  height: 28px;
+  padding: 6px;
+}
+
+.assistant-dock-shell .download-link-label {
   font-size: 10px;
   text-transform: uppercase;
 }
@@ -2851,15 +2909,26 @@ pre {
   .signin-page {
     width: min(100vw - 24px, 520px);
     min-height: 100dvh;
-    padding: 24px 0;
+    padding: 28px 0 24px;
+    align-content: start;
+    gap: 24px;
   }
 
   .signin-copy {
+    gap: 14px;
     padding-left: 14px;
   }
 
   .signin-copy h1 {
     font-size: clamp(32px, 12vw, 48px);
+  }
+
+  .signin-copy p {
+    font-size: 15px;
+  }
+
+  .signin-auth-card {
+    width: 100%;
   }
 
   .download-link {

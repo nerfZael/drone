@@ -71,6 +71,10 @@ class VoiceSessionService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
+            null -> {
+                ClientLog.w("Service", "Ignoring service start without an action")
+                if (!serviceActive) stopSelf(startId)
+            }
             Constants.ACTION_QUERY_STATUS -> {
                 publishStatus(lastStatus, lastMode, currentMicrophone, lastApprovalStatus)
                 if (!serviceActive) {
@@ -94,9 +98,13 @@ class VoiceSessionService : Service() {
                 serviceActive = true
                 startAwake()
             }
-            else -> {
+            Constants.ACTION_START_VOICE -> {
                 serviceActive = true
-                startVoice(intent?.getStringExtra(Constants.EXTRA_STREAM_TARGET) ?: Constants.STREAM_TARGET_ASSISTANT)
+                startVoice(intent.getStringExtra(Constants.EXTRA_STREAM_TARGET) ?: Constants.STREAM_TARGET_ASSISTANT)
+            }
+            else -> {
+                ClientLog.w("Service", "Ignoring unknown service action ${intent.action}")
+                if (!serviceActive) stopSelf(startId)
             }
         }
         return START_STICKY
@@ -156,8 +164,18 @@ class VoiceSessionService : Service() {
                     if (status == "Off") stopVoice()
                 }
             } catch (error: Exception) {
+                val message = error.message?.takeIf { it.isNotBlank() } ?: error.javaClass.simpleName
                 ClientLog.w("Service", "Voice stream failed to start", error)
-                publishStatus("Voice stream failed to start.", Constants.MODE_ERROR, currentMicrophone, lastApprovalStatus)
+                runCatching {
+                    api.uploadLog(
+                        "Android foreground voice service failed to start",
+                        org.json.JSONObject()
+                            .put("target", target)
+                            .put("error", message)
+                            .put("type", error.javaClass.name)
+                    )
+                }
+                publishStatus("Voice stream failed to start: $message", Constants.MODE_ERROR, currentMicrophone, lastApprovalStatus)
                 stopVoice()
             }
         }
@@ -450,6 +468,7 @@ class VoiceSessionService : Service() {
             lower.contains("sleeping") || lower.startsWith("sleep") || lower.startsWith("unlock:") -> Constants.MODE_SLEEPING
             lower.contains("waking") || lower.contains("starting") || lower.contains("reconnecting") || lower.contains("thinking") || lower.contains("queued") || lower.contains("waiting for approval") -> Constants.MODE_LOADING
             lower.contains("assistant replied") || lower.contains("transcript received") || lower.contains("audio received") -> Constants.MODE_AWAKE
+            lower.contains("assistant audio") -> Constants.MODE_AWAKE
             lower.contains("waiting") || lower.contains("listening") || lower.contains("copied voice transcription") || lower.contains("no voice transcription") -> Constants.MODE_AWAKE
             lower.contains("closed") || lower == "off" -> Constants.MODE_OFF
             lower.contains("approval") -> if (lower.contains("sent")) Constants.MODE_AWAKE else lastMode

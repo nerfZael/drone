@@ -89,7 +89,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
         currentOnStatus = onStatus
         awakeMode = true
         sleeping = false
-        refreshApprovalSettingsBlocking()
+        approvalCodeRecognizer.configure(approvalCodeSettings)
         wakeDetector = VoskWakeWordDetector(
             context,
             { status -> onStatus(status) },
@@ -98,6 +98,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
             applyWakeDetectorSettingsIfReady()
             detector.prepare()
         }
+        refreshApprovalSettings { applyWakeDetectorSettingsIfReady() }
         onStatus("Awake: waiting for \"hey sebastian\"")
         thread(name = "VoiceStreamNextAwakeAudio") {
             runRecorder(onStatus, detectWake = true)
@@ -206,14 +207,20 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
         reconnectAttempt = 0
         pendingStreamBuffer.clear()
         pendingStreamBuffer.pushAll(preRollBuffer.drain())
-        try {
-            val deviceId = api.pairedDeviceId()
-            val sessionId = api.createVoiceSession(deviceId, currentTarget)
-            beginRecordingWithSession(sessionId, currentTarget, onStatus, recordingAlreadyStarted = true)
-        } catch (error: Exception) {
-            recording.set(false)
-            pendingStreamBuffer.clear()
-            onStatus(error.message ?: "Voice stream failed to start.")
+        emitStatus(onStatus, "Voice stream starting", currentMicrophone)
+        thread(name = "VoiceStreamBeginRecording") {
+            try {
+                val deviceId = api.pairedDeviceId()
+                val sessionId = api.createVoiceSession(deviceId, currentTarget)
+                beginRecordingWithSession(sessionId, currentTarget, onStatus, recordingAlreadyStarted = true)
+            } catch (error: Exception) {
+                recording.set(false)
+                pendingStreamBuffer.clear()
+                val message = error.message?.takeIf { it.isNotBlank() } ?: error.javaClass.simpleName
+                ClientLog.w("AudioStreamer", "Voice stream failed to start target=$currentTarget", error)
+                uploadVoiceStartFailure(currentTarget, message, error)
+                onStatus("Voice stream failed to start: $message")
+            }
         }
     }
 
@@ -678,13 +685,6 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
         )
     }
 
-    private fun refreshApprovalSettingsBlocking() {
-        val settings = runCatching { api.voiceApprovalSettings() }.getOrDefault(VoiceApprovalSettings())
-        approvalSettings = settings
-        approvalCodeSettings = settings.toApprovalCodeSettings()
-        approvalCodeRecognizer.configure(approvalCodeSettings)
-    }
-
     private fun refreshApprovalSettings(onUpdated: (() -> Unit)? = null) {
         thread(name = "VoiceStreamApprovalSettingsRefresh") {
             val settings = runCatching { api.voiceApprovalSettings() }.getOrDefault(VoiceApprovalSettings())
@@ -694,6 +694,18 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
                 approvalCodeRecognizer.configure(approvalCodeSettings)
                 onUpdated?.invoke()
             }
+        }
+    }
+
+    private fun uploadVoiceStartFailure(target: String, message: String, error: Exception) {
+        runCatching {
+            api.uploadLog(
+                "Android voice stream failed to start",
+                JSONObject()
+                    .put("target", target)
+                    .put("error", message)
+                    .put("type", error.javaClass.name)
+            )
         }
     }
 
