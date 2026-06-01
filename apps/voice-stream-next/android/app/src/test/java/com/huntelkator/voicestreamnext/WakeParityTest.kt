@@ -11,6 +11,9 @@ class WakeParityTest {
         assertEquals(WakePhrase.PATCH, WakePhraseMatcher.match("patch me in"))
         assertEquals(WakePhrase.CLIPBOARD, WakePhraseMatcher.match("can you transcribe this"))
         assertEquals(WakePhrase.SLEEP, WakePhraseMatcher.match("go to sleep"))
+        assertEquals(WakePhrase.STOP_AUDIO, WakePhraseMatcher.match("ok stop"))
+        assertEquals(WakePhrase.STOP_AUDIO, WakePhraseMatcher.match("okay stop"))
+        assertEquals(WakePhrase.REPEAT_AUDIO, WakePhraseMatcher.match("repeat what you said"))
         assertNull(WakePhraseMatcher.match("hello there"))
         assertNull(WakePhraseMatcher.match("hey"))
         assertNull(WakePhraseMatcher.match("sebastian"))
@@ -165,6 +168,8 @@ class WakeParityTest {
         assertEquals(WakeState.RECORDING, controller.state)
 
         assertEquals(WakeAction.NONE, controller.wakeDetected(WakePhrase.SLEEP))
+        assertEquals(WakeAction.NONE, controller.wakeDetected(WakePhrase.STOP_AUDIO))
+        assertEquals(WakeAction.NONE, controller.wakeDetected(WakePhrase.REPEAT_AUDIO))
         assertEquals(WakeAction.NONE, controller.wakeDetected(WakePhrase.STATUS))
         assertEquals(WakeState.RECORDING, controller.state)
     }

@@ -45,6 +45,12 @@ object WakePhraseMatcher {
         val hasSleep = words.windowed(3).any { triple ->
             triple[0] == "go" && triple[1] == "to" && triple[2] == "sleep"
         }
+        val hasStopAudio = words.windowed(2).any { pair ->
+            (pair[0] == "ok" || pair[0] == "okay") && pair[1] == "stop"
+        }
+        val hasRepeatAudio = words.windowed(4).any { phrase ->
+            phrase[0] == "repeat" && phrase[1] == "what" && phrase[2] == "you" && phrase[3] == "said"
+        }
         val compact = words.joinToString("")
         val hasStatus = STATUS_WAKE_COMMAND_ENABLED && (
             words.any { it == "status" } ||
@@ -57,6 +63,8 @@ object WakePhraseMatcher {
 
         return when {
             hasSleep -> WakePhrase.SLEEP
+            hasStopAudio -> WakePhrase.STOP_AUDIO
+            hasRepeatAudio -> WakePhrase.REPEAT_AUDIO
             hasStart -> WakePhrase.START
             hasPatch -> WakePhrase.PATCH
             hasClipboard -> WakePhrase.CLIPBOARD
@@ -122,6 +130,8 @@ enum class WakePhrase {
     PATCH,
     CLIPBOARD,
     SLEEP,
+    STOP_AUDIO,
+    REPEAT_AUDIO,
     STATUS,
     UNLOCK,
     SHUTDOWN;
@@ -130,6 +140,8 @@ enum class WakePhrase {
     val hasPatch: Boolean get() = this == PATCH
     val hasClipboard: Boolean get() = this == CLIPBOARD
     val hasSleep: Boolean get() = this == SLEEP
+    val hasStopAudio: Boolean get() = this == STOP_AUDIO
+    val hasRepeatAudio: Boolean get() = this == REPEAT_AUDIO
     val hasStatus: Boolean get() = this == STATUS
     val hasUnlock: Boolean get() = this == UNLOCK
     val hasShutdown: Boolean get() = this == SHUTDOWN

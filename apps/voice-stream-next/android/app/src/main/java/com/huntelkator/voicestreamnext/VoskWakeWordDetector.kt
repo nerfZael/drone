@@ -200,6 +200,9 @@ class VoskWakeWordDetector(
             "patch me in",
             "can you transcribe",
             "transcribe",
+            "ok stop",
+            "okay stop",
+            "repeat what you said",
             "go to sleep",
         )
         private val APPROVAL_GRAMMAR = listOf(

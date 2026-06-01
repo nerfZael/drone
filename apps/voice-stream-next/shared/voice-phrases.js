@@ -11,6 +11,9 @@ const AWAKE_WAKE_PHRASES = [
   'patch me in',
   'can you transcribe',
   'transcribe',
+  'ok stop',
+  'okay stop',
+  'repeat what you said',
   'go to sleep',
 ];
 

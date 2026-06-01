@@ -336,20 +336,37 @@ function renderItemsFromMessages(sourceMessages: AssistantMessage[]): AssistantR
   return items;
 }
 
-const speechAudioQueue: Array<{ src: string; revoke?: () => void }> = [];
+const speechAudioQueue: Array<{ src: string; revoke?: () => void; repeatSrc?: string; requireAwakeMode?: boolean }> = [];
 let speechAudioPlaying = false;
+let speechAudioMode = 'off';
+let activeSpeechAudio: { audio: HTMLAudioElement; finish: () => void; requireAwakeMode?: boolean } | null = null;
+let lastCompletedSpeechAudioSrc: string | null = null;
 
-function queueSpeechAudio(audioBase64: string, contentType = 'audio/wav'): void {
+function speechPlaybackAllowed(): boolean {
+  return ['awake', 'recording', 'paused', 'transcribing'].includes(speechAudioMode);
+}
+
+function setSpeechPlaybackMode(mode: string): void {
+  speechAudioMode = mode;
+  if (mode === 'sleeping' || mode === 'off') {
+    stopSpeechAudioPlayback({ clearQueue: true, onlyAwakeMode: true });
+  }
+}
+
+function queueSpeechAudio(audioBase64: string, contentType = 'audio/wav', options: { requireAwakeMode?: boolean } = {}): void {
   const clean = audioBase64.trim();
   if (!clean || typeof Audio === 'undefined') return;
-  speechAudioQueue.push({ src: `data:${contentType.trim() || 'audio/wav'};base64,${clean}` });
+  if (options.requireAwakeMode && !speechPlaybackAllowed()) return;
+  const src = `data:${contentType.trim() || 'audio/wav'};base64,${clean}`;
+  speechAudioQueue.push({ src, repeatSrc: src, requireAwakeMode: options.requireAwakeMode });
   void drainSpeechAudioQueue();
 }
 
-function queueSpeechAudioBytes(data: BlobPart, contentType = 'audio/wav'): void {
+function queueSpeechAudioBytes(data: BlobPart, contentType = 'audio/wav', options: { requireAwakeMode?: boolean } = {}): void {
   if (typeof Audio === 'undefined') return;
+  if (options.requireAwakeMode && !speechPlaybackAllowed()) return;
   const url = URL.createObjectURL(new Blob([data], { type: contentType }));
-  speechAudioQueue.push({ src: url, revoke: () => URL.revokeObjectURL(url) });
+  speechAudioQueue.push({ src: url, revoke: () => URL.revokeObjectURL(url), requireAwakeMode: options.requireAwakeMode });
   void drainSpeechAudioQueue();
 }
 
@@ -359,8 +376,13 @@ async function drainSpeechAudioQueue(): Promise<void> {
   try {
     while (speechAudioQueue.length > 0) {
       const item = speechAudioQueue.shift()!;
+      if (item.requireAwakeMode && !speechPlaybackAllowed()) {
+        item.revoke?.();
+        continue;
+      }
       try {
-        await playSpeechAudio(item.src);
+        const completed = await playSpeechAudio(item.src, item.requireAwakeMode);
+        if (completed && item.repeatSrc) lastCompletedSpeechAudioSrc = item.repeatSrc;
       } finally {
         item.revoke?.();
       }
@@ -370,14 +392,56 @@ async function drainSpeechAudioQueue(): Promise<void> {
   }
 }
 
-function playSpeechAudio(src: string): Promise<void> {
+function playSpeechAudio(src: string, requireAwakeMode = false): Promise<boolean> {
   return new Promise((resolve) => {
     const audio = new Audio(src);
-    const finish = () => resolve();
-    audio.addEventListener('ended', finish, { once: true });
+    let settled = false;
+    let completed = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (activeSpeechAudio?.audio === audio) activeSpeechAudio = null;
+      resolve(completed);
+    };
+    activeSpeechAudio = { audio, finish, requireAwakeMode };
+    audio.addEventListener('ended', () => {
+      completed = true;
+      finish();
+    }, { once: true });
     audio.addEventListener('error', finish, { once: true });
     audio.play().catch(finish);
   });
+}
+
+function stopSpeechAudioPlayback(options: { clearQueue?: boolean; onlyAwakeMode?: boolean } = {}): boolean {
+  if (options.clearQueue) {
+    for (let index = speechAudioQueue.length - 1; index >= 0; index -= 1) {
+      const item = speechAudioQueue[index]!;
+      if (options.onlyAwakeMode && !item.requireAwakeMode) continue;
+      speechAudioQueue.splice(index, 1);
+      item.revoke?.();
+    }
+  }
+  const active = activeSpeechAudio;
+  if (!active) return false;
+  if (options.onlyAwakeMode && !active.requireAwakeMode) return false;
+  activeSpeechAudio = null;
+  try {
+    active.audio.pause();
+    active.audio.currentTime = 0;
+  } catch {
+    // Ignore stop races with already-finished audio.
+  }
+  active.finish();
+  return true;
+}
+
+function repeatLastSpeechAudioPlayback(): boolean {
+  if (!lastCompletedSpeechAudioSrc) return false;
+  stopSpeechAudioPlayback({ clearQueue: false });
+  speechAudioQueue.unshift({ src: lastCompletedSpeechAudioSrc, repeatSrc: lastCompletedSpeechAudioSrc, requireAwakeMode: true });
+  void drainSpeechAudioQueue();
+  return true;
 }
 
 function ReasoningBlock({ text, streaming = false }: { text: string; streaming?: boolean }) {
@@ -4111,6 +4175,7 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
 
   React.useEffect(() => {
     modeRef.current = mode;
+    setSpeechPlaybackMode(mode);
     if (mode !== 'sleeping') sleepPhraseCandidateRef.current = null;
   }, [mode]);
 
@@ -4263,7 +4328,7 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
       if (message.type === 'speech_audio') {
         const audioBase64 = String(message.audioBase64 ?? '').trim();
         const contentType = String(message.contentType ?? 'audio/wav').trim() || 'audio/wav';
-        if (audioBase64) queueSpeechAudio(audioBase64, contentType);
+        if (audioBase64) queueSpeechAudio(audioBase64, contentType, { requireAwakeMode: true });
         return;
       }
       if (message.type === 'server_command') {
@@ -4372,7 +4437,7 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
         }
         return;
       }
-      queueSpeechAudioBytes(event.data, 'audio/wav');
+      queueSpeechAudioBytes(event.data, 'audio/wav', { requireAwakeMode: true });
     };
     source.connect(processor);
     processor.connect(context.destination);
@@ -4420,6 +4485,7 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
   }
 
   async function enterStoppedSleep(nextStatus = 'Sleeping. Say your unlock or shutdown phrase.') {
+    stopSpeechAudioPlayback({ clearQueue: true });
     resetApprovalCollection();
     setMode('sleeping');
     setStatus(nextStatus);
@@ -4440,6 +4506,7 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
 
   async function enterSleep() {
     if (streaming) void stopVoice('sleeping');
+    stopSpeechAudioPlayback({ clearQueue: true });
     resetApprovalCollection();
     setMode('sleeping');
     const settings = await loadVoiceSettings().catch(() => null);
@@ -4451,6 +4518,7 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
 
   function turnOff() {
     if (streaming) void stopVoice('off');
+    stopSpeechAudioPlayback({ clearQueue: true });
     stopWakeListener();
     resetApprovalCollection();
     setMode('off');
@@ -4524,6 +4592,18 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
     }
     if (match === 'sleep') {
       enterSleep();
+      return;
+    }
+    if (match === 'stop_audio') {
+      const stopped = stopSpeechAudioPlayback({ clearQueue: false });
+      setStatus(stopped ? 'Assistant audio stopped.' : 'No assistant audio is playing.');
+      void reportDesktopStatus(currentMode, stopped ? 'Assistant audio stopped.' : 'No assistant audio is playing.');
+      return;
+    }
+    if (match === 'repeat_audio') {
+      const repeated = repeatLastSpeechAudioPlayback();
+      setStatus(repeated ? 'Repeating assistant audio.' : 'No assistant audio to repeat.');
+      void reportDesktopStatus(currentMode, repeated ? 'Repeating assistant audio.' : 'No assistant audio to repeat.');
       return;
     }
     if (match === 'status') {
@@ -4784,10 +4864,12 @@ function sleepPhraseMatch(text: string, unlockPhrase: string, shutdownPhrase: st
   return null;
 }
 
-function wakePhraseMatch(text: string): 'start' | 'patch' | 'clipboard' | 'sleep' | 'status' | null {
+function wakePhraseMatch(text: string): 'start' | 'patch' | 'clipboard' | 'sleep' | 'stop_audio' | 'repeat_audio' | 'status' | null {
   const words = phraseWords(text);
   const compact = words.join('');
   if (words.some((word, index) => word === 'go' && words[index + 1] === 'to' && words[index + 2] === 'sleep')) return 'sleep';
+  if (words.some((word, index) => (word === 'ok' || word === 'okay') && words[index + 1] === 'stop')) return 'stop_audio';
+  if (words.some((word, index) => word === 'repeat' && words[index + 1] === 'what' && words[index + 2] === 'you' && words[index + 3] === 'said')) return 'repeat_audio';
   if (words.some((word, index) => (word === 'hey' || word === 'hay') && (words[index + 1] === 'sebastian' || words[index + 1] === 'sebastien'))) return 'start';
   if (words.some((word, index) => word === 'patch' && words[index + 1] === 'me' && words[index + 2] === 'in')) return 'patch';
   if (words.includes('transcribe')) return 'clipboard';

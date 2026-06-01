@@ -22,19 +22,37 @@ object AssistantAudioPlayer {
     @Volatile private var activeTrack: AudioTrack? = null
     @Volatile private var activePlayer: MediaPlayer? = null
     @Volatile private var workerRunning = false
+    @Volatile private var lastCompletedWav: ByteArray? = null
 
     fun stopAll() {
         generation.incrementAndGet()
         synchronized(lock) {
             queue.clear()
-            workerRunning = false
         }
         releaseActivePlayback()
     }
 
-    fun playWav(context: Context, wav: ByteArray, onStatus: ((String) -> Unit)? = null) {
+    fun stopCurrent() {
+        generation.incrementAndGet()
+        releaseActivePlayback()
+    }
+
+    fun repeatLast(context: Context, onStatus: ((String) -> Unit)? = null): Boolean {
+        val wav = lastCompletedWav?.copyOf() ?: return false
+        generation.incrementAndGet()
+        releaseActivePlayback()
         synchronized(lock) {
-            queue.add(PlaybackRequest(context.applicationContext, wav, onStatus))
+            queue.addFirst(PlaybackRequest(context.applicationContext, wav, onStatus, rememberOnComplete = true))
+            if (workerRunning) return true
+            workerRunning = true
+        }
+        startWorker()
+        return true
+    }
+
+    fun playWav(context: Context, wav: ByteArray, rememberOnComplete: Boolean = true, onStatus: ((String) -> Unit)? = null) {
+        synchronized(lock) {
+            queue.add(PlaybackRequest(context.applicationContext, wav, onStatus, rememberOnComplete))
             if (workerRunning) return
             workerRunning = true
         }
@@ -66,12 +84,12 @@ object AssistantAudioPlayer {
             } finally {
                 var restart = false
                 synchronized(lock) {
-                    if (playbackGeneration == generation.get()) {
+                    if (workerRunning) {
                         workerRunning = false
-                        if (queue.isNotEmpty()) {
-                            workerRunning = true
-                            restart = true
-                        }
+                    }
+                    if (queue.isNotEmpty()) {
+                        workerRunning = true
+                        restart = true
                     }
                 }
                 if (restart) startWorker()
@@ -108,7 +126,9 @@ object AssistantAudioPlayer {
                 if (written <= 0) return
                 offset += written
             }
-            SystemClock.sleep(audio.durationMs + 180L)
+            waitForAudioTrackCompletion(track, audio.pcm.size / audio.bytesPerFrame, audio.durationMs, playbackGeneration)
+            if (playbackGeneration != generation.get()) return
+            rememberCompleted(next)
             ClientLog.i("AssistantAudio", "Assistant audio played durationMs=${audio.durationMs}")
             next.onStatus?.invoke("Assistant audio played.")
         } finally {
@@ -146,7 +166,9 @@ object AssistantAudioPlayer {
             }
             if (playbackGeneration != generation.get()) return
             playbackError?.let { error(it) }
-            if (durationMs > 0L) SystemClock.sleep(180L)
+            rememberCompleted(next)
+            if (durationMs > 0L) SystemClock.sleep(80L)
+            if (playbackGeneration != generation.get()) return
             ClientLog.i("AssistantAudio", "Assistant audio played with MediaPlayer durationMs=$durationMs")
             next.onStatus?.invoke("Assistant audio played.")
         } finally {
@@ -193,6 +215,23 @@ object AssistantAudioPlayer {
         activePlayer = null
     }
 
+    private fun rememberCompleted(next: PlaybackRequest) {
+        if (next.rememberOnComplete) {
+            lastCompletedWav = next.wav.copyOf()
+        }
+    }
+
+    private fun waitForAudioTrackCompletion(track: AudioTrack, targetFrames: Int, durationMs: Long, playbackGeneration: Int) {
+        if (targetFrames <= 0) return
+        val deadlineMs = SystemClock.elapsedRealtime() + max(5_000L, durationMs + 1_000L)
+        while (playbackGeneration == generation.get()) {
+            val playedFrames = runCatching { track.playbackHeadPosition }.getOrDefault(targetFrames)
+            if (playedFrames >= targetFrames) return
+            if (SystemClock.elapsedRealtime() > deadlineMs) return
+            SystemClock.sleep(20L)
+        }
+    }
+
     private fun requestAudioFocus(context: Context, attributes: AudioAttributes): AudioFocusRequest? {
         val audioManager = context.getSystemService(AudioManager::class.java) ?: return null
         val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
@@ -226,6 +265,7 @@ object AssistantAudioPlayer {
         val context: Context,
         val wav: ByteArray,
         val onStatus: ((String) -> Unit)?,
+        val rememberOnComplete: Boolean,
     )
 
     private data class WavPcm(val pcm: ByteArray, val sampleRateHz: Int, val channels: Int, val bitsPerSample: Int) {

@@ -38,6 +38,13 @@ describe('voice-phrases', () => {
     expect(grammar).toContain('shut down completely');
   });
 
+  test('awake grammar includes assistant playback stop phrases', () => {
+    const grammar = buildAwakeWakeGrammar({ triggerPhrase: 'approval code' });
+    expect(grammar).toContain('ok stop');
+    expect(grammar).toContain('okay stop');
+    expect(grammar).toContain('repeat what you said');
+  });
+
   test('sleep grammar only includes configured phrases', () => {
     const grammar = buildSleepWakeGrammar({
       unlockPhrase: 'wake up now',

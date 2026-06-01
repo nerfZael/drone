@@ -177,6 +177,7 @@ class VoiceSessionService : Service() {
     }
 
     private fun enterSleep() {
+        AssistantAudioPlayer.stopAll()
         if (!streamer.enterSleep()) {
             stopVoice()
         }
@@ -299,10 +300,14 @@ class VoiceSessionService : Service() {
                                         contentType = message.optString("contentType", "audio/wav"),
                                     )
                                     broadcastSpeechHistoryChanged()
-                                    AssistantAudioPlayer.playWav(applicationContext, audio) { status ->
-                                        publishStatus(status, lastMode, currentMicrophone, lastApprovalStatus)
+                                    if (streamer.canPlayAssistantAudio()) {
+                                        AssistantAudioPlayer.playWav(applicationContext, audio) { status ->
+                                            publishStatus(status, lastMode, currentMicrophone, lastApprovalStatus)
+                                        }
+                                        publishStatus("Assistant audio received.", lastMode, currentMicrophone, lastApprovalStatus)
+                                    } else {
+                                        ClientLog.i("Service", "Assistant audio received but playback skipped mode=$lastMode")
                                     }
-                                    publishStatus("Assistant audio received.", lastMode, currentMicrophone, lastApprovalStatus)
                                 }.onFailure { error ->
                                     ClientLog.w("Service", "Assistant audio decode failed", error)
                                     publishStatus("Assistant audio failed: ${error.message ?: error.javaClass.simpleName}", Constants.MODE_ERROR, currentMicrophone, lastApprovalStatus)

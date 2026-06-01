@@ -785,6 +785,7 @@ function applyWindowState(windowState) {
 function setMode(mode, status) {
   if (state.mode !== mode || mode !== 'sleeping') resetSleepPhraseCandidate();
   state.mode = mode;
+  if (mode === 'sleeping' || mode === 'off') stopSpeechPlayback({ clearQueue: true });
   if (status) showStatus(status);
   updateVoiceButtons();
   if (desktop.setTrayStatus) {
@@ -856,6 +857,7 @@ function ensureControlSocket() {
     }
     if (message.type === 'speech_audio') {
       if (state.voiceSuppressCommands && (state.mode === 'recording' || state.mode === 'paused' || state.mode === 'transcribing')) return;
+      if (!canPlaySpeechAudio()) return;
       playWavBase64(message.audioBase64);
       return;
     }
@@ -2051,6 +2053,7 @@ function completeStoppedVoice(nextMode = 'awake', status = '') {
 }
 
 async function enterStoppedSleep(status = 'Sleeping.') {
+  stopSpeechPlayback({ clearQueue: true });
   resetApprovalCollection();
   setMode('sleeping', status || 'Sleeping.');
   const settings = await loadVoiceSettings(true).catch((err) => {
@@ -2188,8 +2191,15 @@ async function copyText(text) {
 
 const speechPlaybackQueue = [];
 let speechPlaybackActive = false;
+let activeSpeechPlayback = null;
+let lastCompletedSpeechPlaybackData = null;
+
+function canPlaySpeechAudio() {
+  return ['awake', 'recording', 'paused', 'transcribing'].includes(state.mode);
+}
 
 function playWav(data) {
+  if (!canPlaySpeechAudio()) return;
   speechPlaybackQueue.push(data);
   void drainSpeechPlaybackQueue();
 }
@@ -2210,6 +2220,10 @@ async function drainSpeechPlaybackQueue() {
   speechPlaybackActive = true;
   try {
     while (speechPlaybackQueue.length > 0) {
+      if (!canPlaySpeechAudio()) {
+        speechPlaybackQueue.length = 0;
+        break;
+      }
       await playWavNow(speechPlaybackQueue.shift());
     }
   } finally {
@@ -2221,21 +2235,57 @@ async function playWavNow(data) {
   const url = URL.createObjectURL(new Blob([data], { type: 'audio/wav' }));
   const audio = new Audio(url);
   const outputDeviceId = state.config?.outputDeviceId || '';
+  let completed = false;
   try {
     if (outputDeviceId && typeof audio.setSinkId === 'function') {
       await audio.setSinkId(outputDeviceId);
     }
     await new Promise((resolve) => {
-      const finish = () => resolve();
-      audio.addEventListener('ended', finish, { once: true });
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        if (activeSpeechPlayback?.audio === audio) activeSpeechPlayback = null;
+        resolve();
+      };
+      activeSpeechPlayback = { audio, finish };
+      audio.addEventListener('ended', () => {
+        completed = true;
+        finish();
+      }, { once: true });
       audio.addEventListener('error', finish, { once: true });
       audio.play().catch(finish);
     });
   } catch (err) {
     showStatus(err?.message ? `Audio playback failed: ${err.message}` : 'Audio playback failed.');
   } finally {
+    if (activeSpeechPlayback?.audio === audio) activeSpeechPlayback = null;
+    if (completed) lastCompletedSpeechPlaybackData = data;
     URL.revokeObjectURL(url);
   }
+}
+
+function stopSpeechPlayback(options = {}) {
+  if (options.clearQueue) speechPlaybackQueue.length = 0;
+  const active = activeSpeechPlayback;
+  if (!active) return false;
+  activeSpeechPlayback = null;
+  try {
+    active.audio.pause();
+    active.audio.currentTime = 0;
+  } catch {
+    // Ignore stop races with already-finished audio.
+  }
+  active.finish();
+  return true;
+}
+
+function repeatLastSpeechPlayback() {
+  if (!lastCompletedSpeechPlaybackData) return false;
+  stopSpeechPlayback({ clearQueue: false });
+  speechPlaybackQueue.unshift(lastCompletedSpeechPlaybackData);
+  void drainSpeechPlaybackQueue();
+  return true;
 }
 
 function resetApprovalCollection() {
@@ -2296,6 +2346,8 @@ function wakePhraseMatch(text) {
   const words = String(text || '').toLowerCase().split(/[^a-z]+/).filter(Boolean);
   const compact = words.join('');
   if (words.some((word, index) => word === 'go' && words[index + 1] === 'to' && words[index + 2] === 'sleep')) return 'sleep';
+  if (words.some((word, index) => (word === 'ok' || word === 'okay') && words[index + 1] === 'stop')) return 'stop_audio';
+  if (words.some((word, index) => word === 'repeat' && words[index + 1] === 'what' && words[index + 2] === 'you' && words[index + 3] === 'said')) return 'repeat_audio';
   if (words.some((word, index) => (word === 'hey' || word === 'hay') && (words[index + 1] === 'sebastian' || words[index + 1] === 'sebastien'))) return 'start';
   if (words.some((word, index) => word === 'patch' && words[index + 1] === 'me' && words[index + 2] === 'in')) return 'patch';
   if (words.some((word, index) => word === 'can' && words[index + 1] === 'you' && words[index + 2] === 'transcribe')) return 'clipboard';
@@ -2410,6 +2462,7 @@ async function enterAwake() {
 }
 
 async function enterSleep() {
+  stopSpeechPlayback({ clearQueue: true });
   if (state.mode === 'sleeping' && !state.voiceSocket && !state.stream) {
     return;
   }
@@ -2430,6 +2483,7 @@ async function enterSleep() {
 }
 
 async function turnOff(options = {}) {
+  stopSpeechPlayback({ clearQueue: true });
   if (state.voiceSocket || state.stream) {
     await stopMic('off', { cue: options.cue || 'stop_button' });
     return;
@@ -2581,6 +2635,16 @@ async function processPhraseText(text, finalizeNow = false, finalResult = false)
   void logDesktopEvent('info', 'Wake command matched', { text, command: match });
   if (match === 'sleep') {
     await enterSleep();
+    return;
+  }
+  if (match === 'stop_audio') {
+    const stopped = stopSpeechPlayback({ clearQueue: false });
+    showStatus(stopped ? 'Assistant audio stopped.' : 'No assistant audio is playing.');
+    return;
+  }
+  if (match === 'repeat_audio') {
+    const repeated = repeatLastSpeechPlayback();
+    showStatus(repeated ? 'Repeating assistant audio.' : 'No assistant audio to repeat.');
     return;
   }
   if (match === 'status') {

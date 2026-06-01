@@ -819,6 +819,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun playSelectedSpeech() {
+        if (sessionMode == SessionMode.SLEEPING || sessionMode == SessionMode.OFF) {
+            showStatus("Speech playback is only available while awake or recording.")
+            return
+        }
         val entry = speechHistoryEntries.getOrNull(speechHistoryIndex) ?: return
         thread(name = "VoiceStreamSpeechHistoryPlayback") {
             val audio = SpeechHistoryStore.readAudio(applicationContext, entry)
@@ -827,7 +831,7 @@ class MainActivity : ComponentActivity() {
                 runOnUiThread { refreshSpeechHistory(selectLatest = false) }
                 return@thread
             }
-            AssistantAudioPlayer.playWav(applicationContext, audio) { status ->
+            AssistantAudioPlayer.playWav(applicationContext, audio, rememberOnComplete = false) { status ->
                 showStatus(status)
             }
             showStatus("Playing saved speech.")
@@ -1207,6 +1211,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun enterSleep() {
+        AssistantAudioPlayer.stopAll()
         startService(Intent(this, VoiceSessionService::class.java).apply { action = Constants.ACTION_SLEEP })
         wakeController.toggleAwakeSleep()
         showStatus("Sleeping.")
@@ -1214,6 +1219,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun turnOff() {
+        AssistantAudioPlayer.stopAll()
         startService(Intent(this, VoiceSessionService::class.java).apply { action = Constants.ACTION_STOP_VOICE })
         wakeController.stopAll()
         cuePlayer.play(LocalCue.STOP_BUTTON)
