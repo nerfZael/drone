@@ -2140,6 +2140,11 @@ pre {
   box-shadow: 0 0 0 3px rgba(136, 145, 168, .10);
 }
 
+.assistant-dock-shell .assistant-chat-composer-input:focus {
+  border-color: transparent;
+  box-shadow: none;
+}
+
 .assistant-markdown {
   font: 13px/1.65 var(--sans);
   color: inherit;

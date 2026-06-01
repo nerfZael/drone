@@ -16,13 +16,13 @@ type AssistantFilesPanelProps = {
   artifactDirty: boolean;
   panelMode: ArtifactPanelMode;
   busy: boolean;
-  onRefresh: () => void;
   onNew: () => void;
   onSelect: (artifact: AssistantArtifactRecord) => void;
   onPanelModeChange: (mode: ArtifactPanelMode) => void;
   onPathChange: (path: string) => void;
   onContentChange: (content: string) => void;
   onCancelEdit: () => void;
+  onCloseFile: () => void;
   onSave: () => void;
   onDelete: () => void;
   onCopy: () => void;
@@ -34,6 +34,32 @@ const actionButtonClass =
 const primaryButtonClass =
   'inline-flex h-7 items-center justify-center gap-1 rounded-md border border-[rgba(74,222,128,.35)] bg-[rgba(74,222,128,.12)] px-2.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--green)] transition hover:border-[rgba(74,222,128,.5)] hover:bg-[rgba(74,222,128,.18)] disabled:pointer-events-none disabled:opacity-45';
 const iconClass = 'h-3.5 w-3.5 shrink-0 fill-none stroke-current stroke-[1.75]';
+
+function PlusIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className={cn(iconClass, className)}>
+      <path d="M12 5v14" />
+      <path d="M5 12h14" />
+    </svg>
+  );
+}
+
+function BackIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className={cn(iconClass, className)}>
+      <path d="M15 18 9 12l6-6" />
+    </svg>
+  );
+}
+
+function PencilIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className={cn(iconClass, className)}>
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
+  );
+}
 
 function formatArtifactSize(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
@@ -99,6 +125,25 @@ function FolderIcon({ className }: { className?: string }) {
   );
 }
 
+function MobileEmptyFilesState({ busy, onNew }: { busy: boolean; onNew: () => void }) {
+  return (
+    <div className="hidden min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 py-10 text-center max-md:flex">
+      <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-[var(--border-subtle)] bg-white/[.03] text-[var(--muted)]">
+        <FileTypeIcon path="notes.md" className="h-6 w-6" />
+      </div>
+      <div className="max-w-sm">
+        <p className="text-sm font-medium text-[var(--fg)]">No assistant files</p>
+        <p className="mt-1 text-xs leading-relaxed text-[var(--muted)]">
+          Create notes, plans, or artifacts for this thread.
+        </p>
+      </div>
+      <button type="button" className={primaryButtonClass} onClick={onNew} disabled={busy}>
+        New file
+      </button>
+    </div>
+  );
+}
+
 function ExplorerSidebar({
   artifacts,
   artifactsLoading,
@@ -106,6 +151,7 @@ function ExplorerSidebar({
   selectedPath,
   onSelect,
   onNew,
+  hiddenOnMobile,
 }: {
   artifacts: AssistantArtifactRecord[];
   artifactsLoading: boolean;
@@ -113,6 +159,7 @@ function ExplorerSidebar({
   selectedPath: string;
   onSelect: (artifact: AssistantArtifactRecord) => void;
   onNew: () => void;
+  hiddenOnMobile: boolean;
 }) {
   const groups = React.useMemo(() => buildExplorerGroups(artifacts), [artifacts]);
   const [collapsedDirs, setCollapsedDirs] = React.useState<Set<string>>(() => new Set());
@@ -138,33 +185,44 @@ function ExplorerSidebar({
   };
 
   return (
-    <aside className="flex min-h-0 w-full shrink-0 flex-col border-r border-[var(--border-subtle)] bg-[rgba(0,0,0,.14)] max-md:max-h-[34dvh] max-md:border-b max-md:border-r-0 md:w-[240px]">
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--border-subtle)] px-2.5 py-2">
-        <span className="font-display text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--muted)]">Explorer</span>
-        <button type="button" className={cn(actionButtonClass, 'h-6 px-2')} onClick={onNew} disabled={busy} title="New file" aria-label="New file">
-          <svg viewBox="0 0 24 24" aria-hidden="true" className="h-3 w-3 fill-none stroke-current stroke-2">
-            <path d="M12 5v14" />
-            <path d="M5 12h14" />
-          </svg>
+    <aside className={cn('flex min-h-0 w-full shrink-0 flex-col border-r border-[var(--border-subtle)] bg-[rgba(0,0,0,.14)] max-md:flex-1 max-md:border-r-0 max-md:bg-transparent md:w-[240px]', hiddenOnMobile && 'max-md:hidden')}>
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--border-subtle)] px-2.5 py-2 max-md:border-b-0 max-md:px-3 max-md:pt-3">
+        <div className="min-w-0 md:hidden">
+          <div className="flex items-center gap-2">
+            <h2 className="m-0 font-display text-[13px] font-bold tracking-tight text-[var(--fg)]">Files</h2>
+            {artifacts.length > 0 ? (
+              <span className="rounded-full border border-[var(--border-subtle)] bg-white/[.03] px-2 py-0.5 text-[10px] tabular-nums text-[var(--muted)]">
+                {artifacts.length}
+              </span>
+            ) : null}
+          </div>
+          <p className="mt-0.5 text-[11px] text-[var(--muted)]">Thread notes and artifacts</p>
+        </div>
+        <span className="font-display text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--muted)] max-md:hidden">Explorer</span>
+        <button type="button" className={cn(actionButtonClass, 'h-7 w-7 px-0')} onClick={onNew} disabled={busy} title="New file" aria-label="New file">
+          <PlusIcon className="h-3 w-3" />
         </button>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto p-1.5">
+      <div className="min-h-0 flex-1 overflow-auto p-1.5 max-md:px-3 max-md:py-3">
         {artifactsLoading && artifacts.length === 0 ? (
           <p className="px-2 py-3 text-xs text-[var(--muted)]">Loading files…</p>
         ) : null}
         {!artifactsLoading && artifacts.length === 0 ? (
-          <p className="px-2 py-3 text-xs leading-relaxed text-[var(--muted)]">
-            No files yet. Create one to store notes and plans for this thread.
-          </p>
+          <>
+            <MobileEmptyFilesState busy={busy} onNew={onNew} />
+            <p className="px-2 py-3 text-xs leading-relaxed text-[var(--muted)] max-md:hidden">
+              No files yet. Create one to store notes and plans for this thread.
+            </p>
+          </>
         ) : null}
         {groups.map((group) => {
           const collapsed = group.directory ? collapsedDirs.has(group.directory) : false;
           return (
-            <div key={group.directory || '__root__'} className="mb-0.5">
+            <div key={group.directory || '__root__'} className="mb-1 max-md:mb-0">
               {group.directory ? (
                 <button
                   type="button"
-                  className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-[11px] text-[var(--muted)] transition hover:bg-white/[.04] hover:text-[var(--fg-secondary)]"
+                  className="flex w-full items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 py-1 text-left text-[11px] text-[var(--muted)] shadow-none transition hover:bg-white/[.04] hover:text-[var(--fg-secondary)] max-md:rounded-none max-md:px-0 max-md:py-1.5 max-md:hover:bg-transparent"
                   onClick={() => toggleDir(group.directory)}
                 >
                   <svg
@@ -180,7 +238,7 @@ function ExplorerSidebar({
                 </button>
               ) : null}
               {!collapsed ? (
-                <ul className={cn('grid gap-0.5', group.directory && 'ml-3 border-l border-[var(--border-subtle)] pl-1.5')}>
+                <ul className={cn('grid gap-0.5 max-md:gap-1', group.directory && 'ml-3 border-l border-[var(--border-subtle)] pl-1.5 max-md:ml-5 max-md:border-l-0 max-md:pl-0')}>
                   {group.files.map((artifact) => {
                     const active = selectedPath === artifact.path;
                     return (
@@ -188,10 +246,10 @@ function ExplorerSidebar({
                         <button
                           type="button"
                           className={cn(
-                            'group flex w-full min-w-0 items-start gap-2 rounded-md px-2 py-1.5 text-left transition disabled:pointer-events-none disabled:opacity-45',
+                            'group flex w-full min-w-0 items-start gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left shadow-none transition disabled:pointer-events-none disabled:opacity-45 max-md:rounded-md max-md:px-2 max-md:py-2 max-md:ring-0',
                             active
-                              ? 'bg-[rgba(74,222,128,.1)] text-[var(--fg)] ring-1 ring-inset ring-[rgba(74,222,128,.22)]'
-                              : 'text-[var(--fg-secondary)] hover:bg-white/[.04]',
+                              ? 'bg-[rgba(74,222,128,.1)] text-[var(--fg)] ring-1 ring-inset ring-[rgba(74,222,128,.22)] max-md:bg-white/[.025] max-md:text-[var(--fg)] max-md:ring-0'
+                              : 'text-[var(--fg-secondary)] hover:bg-white/[.04] max-md:hover:bg-white/[.025]',
                           )}
                           onClick={() => onSelect(artifact)}
                           disabled={busy}
@@ -240,7 +298,7 @@ function Breadcrumb({ path }: { path: string }) {
 
 function EmptyDetailState({ busy, onNew }: { busy: boolean; onNew: () => void }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 py-10 text-center">
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 py-10 text-center max-md:hidden">
       <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-[var(--border-subtle)] bg-white/[.03] text-[var(--muted)]">
         <FileTypeIcon path="notes.md" className="h-6 w-6" />
       </div>
@@ -267,13 +325,13 @@ export function AssistantFilesPanel({
   artifactDirty,
   panelMode,
   busy,
-  onRefresh,
   onNew,
   onSelect,
   onPanelModeChange,
   onPathChange,
   onContentChange,
   onCancelEdit,
+  onCloseFile,
   onSave,
   onDelete,
   onCopy,
@@ -283,10 +341,13 @@ export function AssistantFilesPanel({
   const isEditing = panelMode === 'edit';
   const displayPath = artifactPathDraft.trim() || selectedArtifact?.path || '';
   const contentSize = new Blob([artifactContentDraft]).size;
+  const showMobileList = !hasOpenFile;
+  const displayFileName = artifactFileName(displayPath);
+  const displayDirectory = artifactDirectory(displayPath);
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col overflow-hidden border-t border-[var(--border)] bg-[var(--panel-alt)]">
-      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[var(--border-subtle)] px-3 py-2.5">
+    <section className="flex min-h-0 flex-1 flex-col overflow-hidden border-t border-[var(--border)] bg-[var(--panel-alt)] max-md:border-t-0">
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[var(--border-subtle)] px-3 py-2.5 max-md:hidden">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <h2 className="m-0 font-display text-[13px] font-bold tracking-tight text-[var(--fg)]">Assistant files</h2>
@@ -297,11 +358,9 @@ export function AssistantFilesPanel({
           <p className="mt-0.5 text-[11px] text-[var(--muted)]">Thread-scoped notes and artifacts</p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-          <button type="button" className={actionButtonClass} onClick={onNew} disabled={busy}>
-            New
-          </button>
-          <button type="button" className={actionButtonClass} onClick={onRefresh} disabled={busy || artifactsLoading}>
-            {artifactsLoading ? 'Refreshing…' : 'Refresh'}
+          <button type="button" className={actionButtonClass} onClick={onNew} disabled={busy} title="New file" aria-label="New file">
+            <PlusIcon className="h-3 w-3" />
+            <span>New</span>
           </button>
         </div>
       </header>
@@ -320,23 +379,52 @@ export function AssistantFilesPanel({
           selectedPath={selectedArtifact?.path ?? ''}
           onSelect={onSelect}
           onNew={onNew}
+          hiddenOnMobile={!showMobileList}
         />
 
-        <div className="flex min-h-0 min-w-0 flex-col">
+        <div className={cn('flex min-h-0 min-w-0 flex-col', showMobileList && 'max-md:hidden')}>
           {!hasOpenFile ? (
             <EmptyDetailState busy={busy} onNew={onNew} />
           ) : (
             <>
-              <div className="shrink-0 border-b border-[var(--border-subtle)] bg-[rgba(255,255,255,.015)] px-3 py-2">
-                <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="shrink-0 border-b border-[var(--border-subtle)] bg-[rgba(255,255,255,.015)] px-3 py-2 max-md:bg-transparent max-md:px-3 max-md:py-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2 max-md:flex-nowrap max-md:items-start">
+                  <button type="button" className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-md border-0 bg-transparent p-0 text-[var(--muted)] shadow-none transition hover:bg-white/[.04] hover:text-[var(--fg-secondary)] disabled:pointer-events-none disabled:opacity-45 max-md:inline-flex" onClick={onCloseFile} disabled={busy} title="Back to files" aria-label="Back to files">
+                    <BackIcon />
+                  </button>
                   <div className="min-w-0 flex-1">
-                    <Breadcrumb path={displayPath} />
-                    <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[10px] text-[var(--muted)]">
+                    <div className="max-md:hidden">
+                      <Breadcrumb path={displayPath} />
+                    </div>
+                    <div className="hidden min-w-0 max-md:block">
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <h2 className="m-0 min-w-0 truncate text-sm font-semibold leading-tight text-[var(--fg)]">{displayFileName}</h2>
+                        {!isEditing ? (
+                          <button type="button" className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border-0 bg-transparent p-0 text-[var(--muted)] shadow-none transition hover:bg-white/[.04] hover:text-[var(--fg-secondary)] disabled:pointer-events-none disabled:opacity-45" onClick={() => onPanelModeChange('edit')} disabled={busy} title="Edit file" aria-label="Edit file">
+                            <PencilIcon className="h-3 w-3" />
+                          </button>
+                        ) : null}
+                      </div>
+                      <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] leading-tight text-[var(--muted)]">
+                        {displayDirectory ? <span className="min-w-0 truncate">{displayDirectory}</span> : null}
+                        {displayDirectory ? <span className="text-[var(--muted-dim)]">·</span> : null}
+                        <span>{formatArtifactSize(contentSize)}</span>
+                        {selectedArtifact ? (
+                          <>
+                            <span className="text-[var(--muted-dim)]">·</span>
+                            <span>{timeLabel(selectedArtifact.updatedAt)}</span>
+                          </>
+                        ) : null}
+                        {artifactDirty ? (
+                          <>
+                            <span className="text-[var(--muted-dim)]">·</span>
+                            <span className="font-medium text-[rgba(250,204,21,.9)]">Unsaved</span>
+                          </>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[10px] text-[var(--muted)] max-md:hidden">
                       <span>{formatArtifactSize(contentSize)}</span>
-                      <span className="text-[var(--muted-dim)]">·</span>
-                      <span>
-                        {selectedArtifact?.revision ? `rev ${selectedArtifact.revision.slice(0, 8)}` : 'New draft'}
-                      </span>
                       {selectedArtifact ? (
                         <>
                           <span className="text-[var(--muted-dim)]">·</span>
@@ -353,7 +441,7 @@ export function AssistantFilesPanel({
                   </div>
                   <div className="flex shrink-0 flex-wrap items-center gap-1">
                     {!isEditing ? (
-                      <button type="button" className={primaryButtonClass} onClick={() => onPanelModeChange('edit')} disabled={busy}>
+                      <button type="button" className={cn(primaryButtonClass, 'max-md:hidden')} onClick={() => onPanelModeChange('edit')} disabled={busy}>
                         Edit
                       </button>
                     ) : (
@@ -403,11 +491,7 @@ export function AssistantFilesPanel({
                 </div>
               )}
 
-              <footer className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-2">
-                <span className="text-[10px] text-[var(--muted)]">
-                  {isEditing ? 'Editing source' : 'Preview'}
-                  {artifactDirty ? ' · unsaved changes' : ''}
-                </span>
+              <footer className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-2">
                 <div className="flex flex-wrap items-center gap-1">
                   <button type="button" className={actionButtonClass} onClick={onCopy} disabled={!artifactContentDraft || busy}>
                     Copy

@@ -1081,6 +1081,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const [messageDraft, setMessageDraft] = React.useState('');
   const [threadTitleDraft, setThreadTitleDraft] = React.useState('');
   const [threadDeleteCandidate, setThreadDeleteCandidate] = React.useState<AssistantThread | null>(null);
+  const [artifactDeleteCandidate, setArtifactDeleteCandidate] = React.useState<AssistantArtifactRecord | null>(null);
   const [codexConnectFlow, setCodexConnectFlow] = React.useState<{ state: string; authorizationUrl: string; redirectUri: string; expiresAt: string } | null>(null);
   const [codexCodeDraft, setCodexCodeDraft] = React.useState('');
   const [apiKeyDrafts, setApiKeyDrafts] = React.useState<Record<'openai' | 'exa', string>>({ openai: '', exa: '' });
@@ -1109,15 +1110,23 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     voiceSystemPrompt: false,
   });
   const assistantEventRefreshTimerRef = React.useRef<number | null>(null);
+  const artifactsEventRefreshTimerRef = React.useRef<number | null>(null);
   const dashboardEventRefreshTimerRef = React.useRef<number | null>(null);
   const releaseEventRefreshTimerRef = React.useRef<number | null>(null);
   const appEventsConnectedRef = React.useRef(false);
   const scheduleAssistantEventRefreshRef = React.useRef<() => void>(() => {});
+  const scheduleArtifactsEventRefreshRef = React.useRef<(threadId?: string | null) => void>(() => {});
   const scheduleDashboardEventRefreshRef = React.useRef<() => void>(() => {});
   const scheduleReleaseEventRefreshRef = React.useRef<(platform?: 'android' | 'desktop') => void>(() => {});
   const messagesScrollRef = React.useRef<HTMLDivElement | null>(null);
   const messagesStickToBottomRef = React.useRef(true);
   const messageScrollSignatureRef = React.useRef('');
+  const activeThreadIdRef = React.useRef<string | null>(null);
+
+  const selectActiveThread = React.useCallback((threadId: string | null) => {
+    activeThreadIdRef.current = threadId;
+    setActiveThreadId(threadId);
+  }, []);
 
   React.useEffect(() => {
     const media = window.matchMedia(COMPACT_VIEWPORT_QUERY);
@@ -1255,17 +1264,21 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
 
   const loadAssistantSnapshot = React.useCallback(
     async (preferredThreadId?: string | null) => {
-      const query = preferredThreadId ? `?activeThreadId=${encodeURIComponent(preferredThreadId)}` : '';
+      const requestedThreadId = preferredThreadId ?? null;
+      const query = requestedThreadId ? `?activeThreadId=${encodeURIComponent(requestedThreadId)}` : '';
       const snapshot = await client.request<AssistantSnapshot>(`/api/assistant/threads${query}`);
+      if (requestedThreadId && activeThreadIdRef.current && activeThreadIdRef.current !== requestedThreadId) {
+        return snapshot;
+      }
       setAssistantSnapshotData(snapshot);
       const nextThreadId = snapshot.activeThreadId ?? snapshot.threads[0]?.id ?? null;
-      if (!activeThreadId && nextThreadId) setActiveThreadId(nextThreadId);
-      const visibleThreadId = preferredThreadId ?? activeThreadId ?? nextThreadId;
+      if (!activeThreadIdRef.current && nextThreadId) selectActiveThread(nextThreadId);
+      const visibleThreadId = requestedThreadId ?? activeThreadIdRef.current ?? nextThreadId;
       const visibleThread = snapshot.threads.find((thread) => thread.id === visibleThreadId) ?? snapshot.threads[0] ?? null;
       if (visibleThread) setMessages(visibleThread.messages);
       return snapshot;
     },
-    [activeThreadId, client],
+    [client, selectActiveThread],
   );
 
   const loadAssistantExtensions = React.useCallback(async () => {
@@ -1288,13 +1301,13 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
         await Promise.all([loadAssistantSnapshot(activeThreadId), loadAssistantExtensions()]);
       }
       if (!settingsHydratedRef.current || !approvalSettingsDirtyRef.current) hydrateApprovalSettings(data.settings);
-      if (!activeThreadId && data.threads[0]) setActiveThreadId(data.threads[0].id);
+      if (!activeThreadIdRef.current && data.threads[0]) selectActiveThread(data.threads[0].id);
     } catch (err: any) {
       setError(err?.message ?? String(err));
     } finally {
       setLoading(false);
     }
-  }, [activeThreadId, client, hydrateApprovalSettings, loadAssistantExtensions, loadAssistantSnapshot]);
+  }, [activeThreadId, client, hydrateApprovalSettings, loadAssistantExtensions, loadAssistantSnapshot, selectActiveThread]);
 
   const loadAndroidApkInfo = React.useCallback(async () => {
     try {
@@ -1351,6 +1364,17 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     }, 160);
   }, [activeThreadId, loadAssistantExtensions, loadAssistantSnapshot]);
 
+  const scheduleArtifactsEventRefresh = React.useCallback((threadId?: string | null) => {
+    const targetThreadId = threadId ?? activeThreadIdRef.current;
+    if (document.visibilityState === 'hidden' || !targetThreadId) return;
+    if (artifactsEventRefreshTimerRef.current !== null) window.clearTimeout(artifactsEventRefreshTimerRef.current);
+    artifactsEventRefreshTimerRef.current = window.setTimeout(() => {
+      artifactsEventRefreshTimerRef.current = null;
+      if (activeThreadIdRef.current !== targetThreadId) return;
+      void loadArtifacts(targetThreadId);
+    }, 160);
+  }, [loadArtifacts]);
+
   const scheduleDashboardEventRefresh = React.useCallback(() => {
     if (document.visibilityState === 'hidden') return;
     if (dashboardEventRefreshTimerRef.current !== null) window.clearTimeout(dashboardEventRefreshTimerRef.current);
@@ -1375,9 +1399,10 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
 
   React.useEffect(() => {
     scheduleAssistantEventRefreshRef.current = scheduleAssistantEventRefresh;
+    scheduleArtifactsEventRefreshRef.current = scheduleArtifactsEventRefresh;
     scheduleDashboardEventRefreshRef.current = scheduleDashboardEventRefresh;
     scheduleReleaseEventRefreshRef.current = scheduleReleaseEventRefresh;
-  }, [scheduleAssistantEventRefresh, scheduleDashboardEventRefresh, scheduleReleaseEventRefresh]);
+  }, [scheduleArtifactsEventRefresh, scheduleAssistantEventRefresh, scheduleDashboardEventRefresh, scheduleReleaseEventRefresh]);
 
   const loadMessages = React.useCallback(
     async (threadId: string | null) => {
@@ -1389,6 +1414,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
         const data = await client.request<{ ok: true; messages: AssistantMessage[] }>(
           `/api/assistant/threads/${encodeURIComponent(threadId)}/messages`,
         );
+        if (activeThreadIdRef.current && activeThreadIdRef.current !== threadId) return;
         setMessages(data.messages);
       } catch (err: any) {
         setError(err?.message ?? String(err));
@@ -1433,6 +1459,9 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     const handleAppEvent = (event: AppEvent) => {
       if (event.type === 'assistant_changed') {
         scheduleAssistantEventRefreshRef.current();
+        if (!event.threadId || event.threadId === activeThreadIdRef.current) {
+          scheduleArtifactsEventRefreshRef.current(event.threadId);
+        }
         return;
       }
       if (event.type === 'release_changed') {
@@ -1487,6 +1516,10 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
       if (assistantEventRefreshTimerRef.current !== null) {
         window.clearTimeout(assistantEventRefreshTimerRef.current);
         assistantEventRefreshTimerRef.current = null;
+      }
+      if (artifactsEventRefreshTimerRef.current !== null) {
+        window.clearTimeout(artifactsEventRefreshTimerRef.current);
+        artifactsEventRefreshTimerRef.current = null;
       }
       if (dashboardEventRefreshTimerRef.current !== null) {
         window.clearTimeout(dashboardEventRefreshTimerRef.current);
@@ -1617,10 +1650,11 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
           voiceEnabled: true,
         }),
       });
-      setActiveThreadId(data.thread.id);
+      selectActiveThread(data.thread.id);
       setAssistantSnapshotData(data.snapshot);
-      await loadDashboard();
-      setNotice('Created thread.');
+      const createdThread = data.snapshot.threads.find((thread) => thread.id === data.thread.id) as AssistantThreadView | undefined;
+      setMessages(createdThread?.messages ?? []);
+      await loadDashboard({ includeAssistant: false });
     } catch (err: any) {
       setError(err?.message ?? String(err));
     } finally {
@@ -1797,7 +1831,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
       );
       setAssistantSnapshotData(data.snapshot);
       const nextThreadId = data.snapshot.activeThreadId ?? data.snapshot.threads[0]?.id ?? null;
-      setActiveThreadId(nextThreadId);
+      selectActiveThread(nextThreadId);
       const visibleThread = data.snapshot.threads.find((thread) => thread.id === nextThreadId) ?? null;
       setMessages(visibleThread?.messages ?? []);
       setThreadDeleteCandidate(null);
@@ -1879,7 +1913,11 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
         `/api/assistant/threads/${encodeURIComponent(threadId)}/artifacts`,
       );
       setArtifacts(data.artifacts);
-      const nextSelected = chooseDefaultArtifact(data.artifacts, selectedArtifact?.path);
+      const nextSelected = selectedArtifact
+        ? chooseDefaultArtifact(data.artifacts, selectedArtifact.path)
+        : isCompactViewport()
+          ? null
+          : chooseDefaultArtifact(data.artifacts);
       if (!artifactDirty) hydrateArtifactDraft(nextSelected);
     } catch (err: any) {
       const message = err?.message ?? String(err);
@@ -1909,6 +1947,14 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
       hydrateArtifactDraft(fallback, 'view');
       return;
     }
+    hydrateArtifactDraft(null, 'view');
+    setArtifactPathDraft('');
+    setArtifactContentDraft('');
+  }
+
+  function closeArtifactFile() {
+    if (busy) return;
+    if (artifactDirty && !window.confirm('Discard unsaved changes and return to files?')) return;
     hydrateArtifactDraft(null, 'view');
     setArtifactPathDraft('');
     setArtifactContentDraft('');
@@ -1944,9 +1990,9 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     }
   }
 
-  async function deleteArtifact() {
-    if (!activeThread || !selectedArtifact) return;
-    const artifactPath = selectedArtifact.path;
+  async function deleteArtifact(artifact: AssistantArtifactRecord | null = artifactDeleteCandidate) {
+    if (!activeThread || !artifact) return;
+    const artifactPath = artifact.path;
     setBusy(true);
     setError(null);
     try {
@@ -1960,6 +2006,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
       setArtifacts(data.artifacts);
       setAssistantSnapshotData(data.snapshot);
       hydrateArtifactDraft(chooseDefaultArtifact(data.artifacts));
+      setArtifactDeleteCandidate(null);
       setNotice('Deleted assistant artifact.');
     } catch (err: any) {
       setError(err?.message ?? String(err));
@@ -2708,7 +2755,22 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
 
   return (
     <main className="assistant-dock-shell relative flex h-screen min-h-0 overflow-hidden bg-[var(--panel-alt)] text-[var(--fg)] max-[880px]:h-dvh max-[880px]:flex-col">
-      {threadSidebarOpen ? <aside className="relative z-[1] flex min-h-0 w-52 max-w-[46%] shrink-0 flex-col border-r border-[var(--border)] bg-black/[.14] max-[880px]:absolute max-[880px]:inset-0 max-[880px]:z-30 max-[880px]:w-full max-[880px]:max-w-none max-[880px]:border-r-0 max-[880px]:bg-[var(--panel-alt)]">
+      <button
+        type="button"
+        className={cn(
+          'hidden border-0 bg-black/20 p-0 shadow-none transition-opacity duration-150 max-[880px]:absolute max-[880px]:inset-0 max-[880px]:z-20 max-[880px]:block',
+          threadSidebarOpen ? 'max-[880px]:opacity-100' : 'max-[880px]:pointer-events-none max-[880px]:opacity-0',
+        )}
+        onClick={() => setThreadSidebarOpen(false)}
+        aria-label="Close thread sidebar"
+      />
+      <aside
+        className={cn(
+          'relative z-[1] flex min-h-0 w-52 max-w-[46%] shrink-0 flex-col border-r border-[var(--border)] bg-black/[.14] transition-transform duration-150 ease-out max-[880px]:absolute max-[880px]:inset-y-0 max-[880px]:left-0 max-[880px]:z-30 max-[880px]:w-[min(86vw,330px)] max-[880px]:max-w-none max-[880px]:bg-[var(--panel-alt)] max-[880px]:shadow-[18px_0_40px_rgba(0,0,0,.32)]',
+          threadSidebarOpen ? 'max-[880px]:translate-x-0' : 'hidden max-[880px]:flex max-[880px]:-translate-x-[calc(100%+1px)] max-[880px]:pointer-events-none',
+        )}
+        aria-hidden={!threadSidebarOpen}
+      >
         <div className="flex min-h-11 shrink-0 items-center gap-2 border-b border-[var(--border)] px-2">
           <button
             type="button"
@@ -2772,7 +2834,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                   )}
                   onClick={() => {
                     setActiveView('threads');
-                    setActiveThreadId(thread.id);
+                    selectActiveThread(thread.id);
                     closeThreadSidebarOnCompact();
                   }}
                 >
@@ -2828,7 +2890,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
             <strong className="text-xs text-[var(--fg)]">{connectedDeviceIds.size}/{devices.length}</strong>
           </div>
         </div>
-      </aside> : null}
+      </aside>
 
       <section className="relative z-[1] flex min-h-0 min-w-0 flex-1 flex-col">
         <header className="relative z-[2] flex min-h-11 shrink-0 items-center gap-2 border-b border-[var(--border)] bg-white/[.025] px-2">
@@ -2844,14 +2906,36 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
               <path d="M4 5h16v10H8l-4 4V5Z" />
             </svg>
           </button>
-          <div className="grid min-w-[140px] flex-1 gap-px">
-            <strong className="min-w-0 truncate text-xs font-semibold leading-tight text-[var(--fg)]">
-              {activeView === 'threads'
-                ? activeThread?.title ?? 'Assistant'
-                : activeView === 'settings'
-                  ? `Settings / ${SETTINGS_PANES.find((pane) => pane.id === settingsPane)?.label ?? 'General'}`
-                  : navItems.find((item) => item.id === activeView)?.label}
-            </strong>
+          <div className="grid min-w-[120px] flex-1 gap-px">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <strong className="min-w-0 truncate text-xs font-semibold leading-tight text-[var(--fg)]">
+                {activeView === 'threads'
+                  ? activeThread?.title ?? 'Assistant'
+                  : activeView === 'settings'
+                    ? `Settings / ${SETTINGS_PANES.find((pane) => pane.id === settingsPane)?.label ?? 'General'}`
+                    : navItems.find((item) => item.id === activeView)?.label}
+              </strong>
+              {activeView === 'threads' ? (
+                <button
+                  type="button"
+                  className={cn(
+                    'hidden h-5 shrink-0 items-center gap-1 rounded border border-[var(--border-subtle)] bg-white/[.02] px-1.5 font-display text-[10px] font-bold leading-none text-[var(--muted)] shadow-none transition hover:bg-white/[.05] hover:text-[var(--fg-secondary)] disabled:pointer-events-none disabled:opacity-50 max-[620px]:inline-flex',
+                    assistantFilesOpen && assistantIconButtonActiveClass,
+                  )}
+                  onClick={() => setAssistantFilesOpen((open) => !open)}
+                  disabled={!activeThread}
+                  title={assistantFilesOpen ? 'Hide assistant files' : 'Show assistant files'}
+                  aria-label={assistantFilesOpen ? 'Hide assistant files' : 'Show assistant files'}
+                  aria-pressed={assistantFilesOpen}
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true" className="h-3 w-3 fill-none stroke-current stroke-2">
+                    <path d="M4 6.5h5l1.5 2H20v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z" />
+                    <path d="M4 6.5v11" />
+                  </svg>
+                  <span>{artifacts.length > 9 ? '9+' : artifacts.length}</span>
+                </button>
+              ) : null}
+            </div>
             <span className="flex min-w-0 flex-wrap items-center gap-1.5 font-display text-[10px] font-medium uppercase leading-tight text-[var(--muted-dim)]">
               <span className="h-1.5 w-1.5 rounded-full bg-[var(--green)] shadow-[0_0_12px_rgba(74,222,128,.32)]" />
               {activeView === 'threads' ? (activeThread ? activeThread.status ?? 'idle' : 'no thread') : 'live'}
@@ -2887,22 +2971,6 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                   <path d="M14 2v6h6" />
                   <path d="M12 18h6" />
                   <path d="M15 15v6" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                className={cn(assistantIconButtonClass, 'hidden max-[620px]:flex', mobileModelControlsOpen && assistantIconButtonActiveClass)}
-                onClick={() => setMobileModelControlsOpen((open) => !open)}
-                disabled={!activeThread}
-                title={mobileModelControlsOpen ? 'Hide model controls' : 'Show model controls'}
-                aria-label={mobileModelControlsOpen ? 'Hide model controls' : 'Show model controls'}
-                aria-pressed={mobileModelControlsOpen}
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true" className={assistantIconSvgClass}>
-                  <path d="M4 7h16" />
-                  <path d="M4 17h16" />
-                  <path d="M8 4v6" />
-                  <path d="M16 14v6" />
                 </svg>
               </button>
             </>
@@ -2953,21 +3021,6 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
             ) : null}
             {activeView === 'threads' ? (
               <>
-                <button
-                  type="button"
-                  className={cn(assistantIconButtonClass, assistantFilesOpen && assistantIconButtonActiveClass)}
-                  onClick={() => setAssistantFilesOpen((open) => !open)}
-                  disabled={!activeThread}
-                  title={assistantFilesOpen ? 'Hide assistant files' : 'Show assistant files'}
-                  aria-label={assistantFilesOpen ? 'Hide assistant files' : 'Show assistant files'}
-                  aria-pressed={assistantFilesOpen}
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true" className={assistantIconSvgClass}>
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
-                    <path d="M14 2v6h6" />
-                  </svg>
-                  {artifacts.length > 0 ? <span className="absolute -right-1.5 -top-1.5 min-w-4 rounded-full border border-[var(--panel-alt)] bg-[var(--green)] px-1 text-center text-[9px] font-bold leading-[14px] text-[#071015]">{artifacts.length > 9 ? '9+' : artifacts.length}</span> : null}
-                </button>
                 <button
                   type="button"
                   className={assistantIconButtonClass}
@@ -3048,124 +3101,96 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
         </header>
 
         {mobileToolbarOpen ? (
-          <div className="hidden shrink-0 items-center gap-1.5 overflow-x-auto border-b border-[var(--border)] bg-[rgba(0,0,0,.16)] px-2 py-2 max-[620px]:flex">
-            {activeView !== 'threads' ? (
-              <button
-                type="button"
-                className={assistantIconButtonClass}
-                onClick={() => {
-                  setActiveView('threads');
-                  setMobileToolbarOpen(false);
-                }}
-                title="Back to assistant chat"
-                aria-label="Back to assistant chat"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true" className={assistantIconSvgClass}>
-                  <path d="M4 5h16v10H8l-4 4V5Z" />
-                </svg>
-              </button>
-            ) : null}
-            {activeView === 'threads' ? (
-              <>
+          <div className="hidden shrink-0 border-b border-[var(--border)] bg-[rgba(0,0,0,.16)] px-2 py-2 max-[620px]:block">
+            <div className="grid gap-1.5">
+              {activeView !== 'threads' ? (
                 <button
                   type="button"
-                  className={cn(assistantIconButtonClass, assistantFilesOpen && assistantIconButtonActiveClass)}
-                  onClick={() => setAssistantFilesOpen((open) => !open)}
-                  disabled={!activeThread}
-                  title={assistantFilesOpen ? 'Hide assistant files' : 'Show assistant files'}
-                  aria-label={assistantFilesOpen ? 'Hide assistant files' : 'Show assistant files'}
-                  aria-pressed={assistantFilesOpen}
+                  className="flex min-h-9 w-full items-center justify-between rounded border border-[var(--border-subtle)] bg-white/[.025] px-3 text-left text-xs text-[var(--fg-secondary)] shadow-none"
+                  onClick={() => {
+                    setActiveView('threads');
+                    setMobileToolbarOpen(false);
+                  }}
                 >
-                  <svg viewBox="0 0 24 24" aria-hidden="true" className={assistantIconSvgClass}>
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
-                    <path d="M14 2v6h6" />
-                  </svg>
-                  {artifacts.length > 0 ? <span className="absolute -right-1.5 -top-1.5 min-w-4 rounded-full border border-[var(--panel-alt)] bg-[var(--green)] px-1 text-center text-[9px] font-bold leading-[14px] text-[#071015]">{artifacts.length > 9 ? '9+' : artifacts.length}</span> : null}
+                  <span>Back to chat</span>
+                  <span className="text-[10px] uppercase text-[var(--muted)]">Chat</span>
                 </button>
+              ) : null}
+              {activeView === 'threads' ? (
+                <>
+                  <button
+                    type="button"
+                    className={cn('flex min-h-9 w-full items-center justify-between rounded border border-[var(--border-subtle)] bg-white/[.025] px-3 text-left text-xs text-[var(--fg-secondary)] shadow-none', mobileModelControlsOpen && assistantIconButtonActiveClass)}
+                    onClick={() => {
+                      setMobileModelControlsOpen((open) => !open);
+                      setMobileToolbarOpen(false);
+                    }}
+                    disabled={!activeThread}
+                  >
+                    <span>Model and delivery</span>
+                    <span className="text-[10px] uppercase text-[var(--muted)]">{compactModelSelectionLabel(selectedModelLabel)}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="flex min-h-9 w-full items-center justify-between rounded border border-[var(--border-subtle)] bg-white/[.025] px-3 text-left text-xs text-[var(--fg-secondary)] shadow-none"
+                    onClick={() => {
+                      openSystemPromptEditor();
+                      setMobileToolbarOpen(false);
+                    }}
+                    disabled={!activeThread}
+                  >
+                    <span>System prompt</span>
+                    <span className="text-[10px] uppercase text-[var(--muted)]">Edit</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={cn('flex min-h-9 w-full items-center justify-between rounded border border-[var(--border-subtle)] bg-white/[.025] px-3 text-left text-xs text-[var(--fg-secondary)] shadow-none', assistantToolsOpen && assistantIconButtonActiveClass)}
+                    onClick={() => {
+                      setAssistantToolsOpen((open) => !open);
+                      setMobileToolbarOpen(false);
+                    }}
+                    disabled={!activeThread}
+                  >
+                    <span>Tools</span>
+                    <span className="text-[10px] uppercase text-[var(--muted)]">{enabledToolNames.length}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={cn('flex min-h-9 w-full items-center justify-between rounded border border-[var(--border-subtle)] bg-white/[.025] px-3 text-left text-xs text-[var(--fg-secondary)] shadow-none', autoApprove && assistantIconButtonActiveClass)}
+                    onClick={() => {
+                      void updateThreadSettings({ autoApprove: !autoApprove });
+                      setMobileToolbarOpen(false);
+                    }}
+                    disabled={!activeThread || busy}
+                  >
+                    <span>Auto-approve tool calls</span>
+                    <span className="text-[10px] uppercase text-[var(--muted)]">{autoApprove ? 'On' : 'Off'}</span>
+                  </button>
+                </>
+              ) : null}
+              {navItems.filter((item) => item.id !== 'threads').map((item) => (
                 <button
+                  key={item.id}
                   type="button"
-                  className={assistantIconButtonClass}
-                  onClick={openSystemPromptEditor}
-                  disabled={!activeThread}
-                  title="Edit assistant system prompts"
-                  aria-label="Edit assistant system prompts"
+                  className={cn('flex min-h-9 w-full items-center justify-between rounded border border-[var(--border-subtle)] bg-white/[.025] px-3 text-left text-xs text-[var(--fg-secondary)] shadow-none', activeView === item.id && assistantIconButtonActiveClass)}
+                  onClick={() => {
+                    setActiveView(item.id);
+                    setMobileToolbarOpen(false);
+                  }}
                 >
-                  <svg viewBox="0 0 24 24" aria-hidden="true" className={assistantIconSvgClass}>
-                    <path d="M12 20h9" />
-                    <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
-                  </svg>
+                  <span>{item.label}</span>
+                  {typeof item.count === 'number' ? <span className="text-[10px] uppercase text-[var(--muted)]">{item.count}</span> : null}
                 </button>
-                <button
-                  type="button"
-                  className={cn(assistantIconButtonClass, assistantToolsOpen && assistantIconButtonActiveClass)}
-                  onClick={() => setAssistantToolsOpen((open) => !open)}
-                  disabled={!activeThread}
-                  title={assistantToolsOpen ? 'Hide assistant tools' : 'Show assistant tools'}
-                  aria-label={assistantToolsOpen ? 'Hide assistant tools' : 'Show assistant tools'}
-                  aria-pressed={assistantToolsOpen}
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true" className={assistantIconSvgClass}>
-                    <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
-                    <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06A1.7 1.7 0 1 1 3.9 16.9l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06A2 2 0 1 1 7.03 3.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.2.34.6.6 1 .6h.6a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1.4Z" />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  className={cn(assistantIconButtonClass, autoApprove && assistantIconButtonActiveClass)}
-                  onClick={() => void updateThreadSettings({ autoApprove: !autoApprove })}
-                  disabled={!activeThread || busy}
-                  title={autoApprove ? 'Auto-approve tool calls is on' : 'Auto-approve tool calls is off'}
-                  aria-label={autoApprove ? 'Turn off auto-approve' : 'Turn on auto-approve'}
-                  aria-pressed={autoApprove}
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true" className={assistantIconSvgClass}>
-                    <path d="M20 6 9 17l-5-5" />
-                    <path d="M15 6h5v5" />
-                  </svg>
-                </button>
-              </>
-            ) : null}
-            {navItems.filter((item) => item.id !== 'threads').map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={cn(assistantIconButtonClass, activeView === item.id && assistantIconButtonActiveClass)}
-                onClick={() => {
-                  setActiveView(item.id);
-                  setMobileToolbarOpen(false);
-                }}
-                title={item.label}
-                aria-label={item.label}
-                aria-pressed={activeView === item.id}
-              >
-                {item.id === 'settings' ? (
-                  <svg viewBox="0 0 24 24" aria-hidden="true" className={assistantIconSvgClass}>
-                    <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
-                    <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06A1.7 1.7 0 1 1 3.9 16.9l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06A2 2 0 1 1 7.03 3.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.2.34.6.6 1 .6h.6a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1.4Z" />
-                  </svg>
-                ) : (
-                  <svg viewBox="0 0 24 24" aria-hidden="true" className={assistantIconSvgClass}>
-                    <path d="M12 3 5 6v5c0 4.5 3 8.5 7 10 4-1.5 7-5.5 7-10V6l-7-3Z" />
-                    <path d="M9 12l2 2 4-4" />
-                  </svg>
-                )}
-                {typeof item.count === 'number' ? <span className="absolute -right-1.5 -top-1.5 min-w-4 rounded-full border border-[var(--panel-alt)] bg-[var(--green)] px-1 text-center text-[9px] font-bold leading-[14px] text-[#071015]">{item.count}</span> : null}
-              </button>
-            ))}
-            <span className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-[rgba(74,222,128,.18)] bg-[rgba(74,222,128,.06)] px-2.5 font-display text-[10px] font-semibold uppercase text-[var(--green)] before:h-1.5 before:w-1.5 before:rounded-full before:bg-current before:shadow-[0_0_12px_rgba(74,222,128,.34)]">Live</span>
-            {identitySlot ? <div className="ml-0.5 flex h-7 w-7 shrink-0 items-center justify-center [&_button]:h-7 [&_button]:w-7">{identitySlot}</div> : null}
+              ))}
+              <div className="flex min-h-9 items-center justify-between rounded border border-[var(--border-subtle)] bg-white/[.018] px-3 text-xs text-[var(--fg-secondary)]">
+                <span>Live</span>
+                {identitySlot ? <div className="flex h-7 w-7 shrink-0 items-center justify-center [&_button]:h-7 [&_button]:w-7">{identitySlot}</div> : <span className="text-[10px] uppercase text-[var(--muted)]">Connected</span>}
+              </div>
+            </div>
           </div>
         ) : null}
 
         <ToastStack toasts={toasts} onDismiss={dismissToast} />
-        {threadDeleteCandidate ? (
-          <ThreadDeleteConfirmModal
-            thread={threadDeleteCandidate}
-            busy={busy}
-            onCancel={() => setThreadDeleteCandidate(null)}
-            onConfirm={() => void deleteThread(threadDeleteCandidate.id)}
-          />
-        ) : null}
 
         {activeView === 'threads' && assistantToolsOpen && activeThread ? (
           <AssistantToolsPanel
@@ -3205,7 +3230,6 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                   artifactDirty={artifactDirty}
                   panelMode={artifactPanelMode}
                   busy={busy}
-                  onRefresh={() => void loadArtifacts(activeThread.id)}
                   onNew={newArtifactDraft}
                   onSelect={(artifact) => {
                     if (busy) return;
@@ -3222,8 +3246,11 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                     setArtifactDirty(true);
                   }}
                   onCancelEdit={cancelArtifactEdit}
+                  onCloseFile={closeArtifactFile}
                   onSave={() => void saveArtifact()}
-                  onDelete={() => void deleteArtifact()}
+                  onDelete={() => {
+                    if (selectedArtifact) setArtifactDeleteCandidate(selectedArtifact);
+                  }}
                   onCopy={() => void copyArtifact()}
                   onDownload={downloadArtifact}
                 />
@@ -3303,8 +3330,8 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                   {!activeThread ? <div className={assistantEmptyClass}>Create a thread to start.</div> : null}
                 </div>
 
-                <form className="block shrink-0 border-t border-[var(--border)] bg-[rgba(0,0,0,.12)] p-2" onSubmit={(event) => void sendMessage(event)}>
-                <div className={cn('mb-2 flex min-w-0 flex-wrap items-center gap-1.5', !mobileModelControlsOpen && 'max-[620px]:hidden')}>
+                <form className="block shrink-0 bg-[#151a20] p-2 pt-1" onSubmit={(event) => void sendMessage(event)}>
+                <div className={cn('mb-1 flex min-w-0 flex-wrap items-center gap-1.5', !mobileModelControlsOpen && 'max-[620px]:hidden')}>
                   <div className="inline-flex shrink-0 overflow-hidden rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.025)]" role="group" aria-label="Assistant provider">
                     {providerOptions.map((provider) => {
                       const selected = provider.id === activeProvider;
@@ -3418,7 +3445,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                     }}
                     placeholder={activeRuns.length > 0 ? ((activeThread?.promptDeliveryMode ?? 'queue') === 'asap' ? 'Send at next turn' : 'Queue a message') : 'Ask the assistant'}
                     disabled={!activeThread || busy}
-                    className="block min-h-[92px] max-h-[180px] w-full resize-y border-0 bg-transparent px-2.5 pb-9 pt-2 text-xs leading-relaxed text-[var(--fg)] outline-none max-[620px]:min-h-[42px] max-[620px]:max-h-[132px] max-[620px]:resize-none max-[620px]:py-2 max-[620px]:pr-[68px]"
+                    className="assistant-chat-composer-input block min-h-[92px] max-h-[180px] w-full resize-y border-0 bg-transparent px-2.5 pb-9 pt-2 text-xs leading-relaxed text-[var(--fg)] outline-none max-[620px]:min-h-[42px] max-[620px]:max-h-[132px] max-[620px]:resize-none max-[620px]:py-2 max-[620px]:pr-[68px]"
                   />
                   {activeRunningModel ? (
                     <span className="absolute bottom-2 left-2.5 max-w-[calc(100%-106px)] truncate text-[10px] text-[var(--muted-dim)] max-[620px]:hidden" title={`Running model: ${activeRunningModelLabel}`}>
@@ -4321,6 +4348,22 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
           ) : null}
         </section>
       </section>
+      {threadDeleteCandidate ? (
+        <ThreadDeleteConfirmModal
+          thread={threadDeleteCandidate}
+          busy={busy}
+          onCancel={() => setThreadDeleteCandidate(null)}
+          onConfirm={() => void deleteThread(threadDeleteCandidate.id)}
+        />
+      ) : null}
+      {artifactDeleteCandidate ? (
+        <ArtifactDeleteConfirmModal
+          artifact={artifactDeleteCandidate}
+          busy={busy}
+          onCancel={() => setArtifactDeleteCandidate(null)}
+          onConfirm={() => void deleteArtifact(artifactDeleteCandidate)}
+        />
+      ) : null}
       <AssistantSystemPromptModal
         open={systemPromptOpen}
         threadTitle={activeThread?.title ?? ''}
@@ -5193,6 +5236,82 @@ function ThreadDeleteConfirmModal({
             <h2 id="delete-thread-title" className="m-0 text-[15px] font-bold leading-tight text-[var(--fg)]">Delete thread?</h2>
             <p id="delete-thread-description" className="mt-1 text-xs leading-relaxed text-[var(--muted)]">
               This will permanently delete "{title}" and its messages.
+            </p>
+          </div>
+        </div>
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            className={assistantActionButtonClass}
+            onClick={onCancel}
+            disabled={busy}
+            autoFocus
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="inline-flex h-[30px] items-center justify-center rounded border border-[rgba(248,113,113,.46)] bg-[rgba(248,113,113,.12)] px-2.5 font-display text-[10px] font-semibold uppercase text-[#fecaca] transition hover:bg-[rgba(248,113,113,.18)] disabled:pointer-events-none disabled:opacity-50"
+            onClick={onConfirm}
+            disabled={busy}
+          >
+            {busy ? 'Deleting...' : 'Delete'}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ArtifactDeleteConfirmModal({
+  artifact,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  artifact: AssistantArtifactRecord;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const path = artifact.path?.trim() || 'Untitled file';
+  React.useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !busy) onCancel();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [busy, onCancel]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-black/60 px-4 py-6 backdrop-blur-sm"
+      role="presentation"
+      onMouseDown={() => {
+        if (!busy) onCancel();
+      }}
+    >
+      <section
+        className="w-full max-w-sm rounded-lg border border-[rgba(248,113,113,.32)] bg-[var(--panel-alt)] p-4 text-[var(--fg)] shadow-[0_24px_80px_rgba(0,0,0,.42)]"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="delete-artifact-title"
+        aria-describedby="delete-artifact-description"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="mb-3 flex items-start gap-3">
+          <div className="grid h-9 w-9 shrink-0 place-items-center rounded border border-[rgba(248,113,113,.34)] bg-[rgba(248,113,113,.10)] text-[#fca5a5]" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false" className="h-4 w-4 fill-none stroke-current stroke-2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+              <path d="M14 2v6h6" />
+              <path d="M9 13h6" />
+              <path d="M10 17h4" />
+            </svg>
+          </div>
+          <div className="min-w-0">
+            <h2 id="delete-artifact-title" className="m-0 text-[15px] font-bold leading-tight text-[var(--fg)]">Delete file?</h2>
+            <p id="delete-artifact-description" className="mt-1 text-xs leading-relaxed text-[var(--muted)]">
+              This will permanently delete "{path}" from this thread.
             </p>
           </div>
         </div>
