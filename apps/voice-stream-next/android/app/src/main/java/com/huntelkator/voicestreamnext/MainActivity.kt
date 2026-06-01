@@ -611,6 +611,7 @@ class MainActivity : ComponentActivity() {
         val text = when {
             lower.contains("waiting for approval") -> "Waiting for approval"
             lower.contains("queued voice prompt") || lower.contains("queued") -> "Queued"
+            lower.contains("assistant is thinking") -> ""
             lower.contains("thinking") -> "Assistant is thinking..."
             else -> ""
         }
