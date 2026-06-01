@@ -110,6 +110,11 @@ const settingsTabClass =
 const settingsTabActiveClass =
   'border-[rgba(74,222,128,.30)] border-b-[var(--panel-alt)] bg-[rgba(74,222,128,.08)] text-[var(--green)]';
 const ASSISTANT_MESSAGES_BOTTOM_THRESHOLD_PX = 1;
+const COMPACT_VIEWPORT_QUERY = '(max-width: 880px)';
+
+function isCompactViewport(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia(COMPACT_VIEWPORT_QUERY).matches;
+}
 
 function modelSelectionKey(selection: { provider: string; model: string; thinkingLevel: string }): string {
   return `${selection.provider}:${selection.model}:${selection.thinkingLevel}`;
@@ -1041,7 +1046,9 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const [assistantSnapshotData, setAssistantSnapshotData] = React.useState<AssistantSnapshot | null>(null);
   const [activeView, setActiveView] = React.useState<DashboardView>('threads');
   const [settingsPane, setSettingsPane] = React.useState<SettingsPane>('devices');
-  const [threadSidebarOpen, setThreadSidebarOpen] = React.useState(true);
+  const [threadSidebarOpen, setThreadSidebarOpen] = React.useState(() => !isCompactViewport());
+  const [mobileToolbarOpen, setMobileToolbarOpen] = React.useState(false);
+  const [mobileModelControlsOpen, setMobileModelControlsOpen] = React.useState(false);
   const [activeThreadId, setActiveThreadId] = React.useState<string | null>(null);
   const [messages, setMessages] = React.useState<AssistantMessage[]>([]);
   const [streamingReply, setStreamingReply] = React.useState('');
@@ -1110,6 +1117,21 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const messagesScrollRef = React.useRef<HTMLDivElement | null>(null);
   const messagesStickToBottomRef = React.useRef(true);
   const messageScrollSignatureRef = React.useRef('');
+
+  React.useEffect(() => {
+    const media = window.matchMedia(COMPACT_VIEWPORT_QUERY);
+    const syncLayoutMode = (matches: boolean) => {
+      setThreadSidebarOpen(!matches);
+      if (!matches) {
+        setMobileToolbarOpen(false);
+        setMobileModelControlsOpen(false);
+      }
+    };
+    syncLayoutMode(media.matches);
+    const onChange = (event: MediaQueryListEvent) => syncLayoutMode(event.matches);
+    media.addEventListener('change', onChange);
+    return () => media.removeEventListener('change', onChange);
+  }, []);
 
   const hydrateApprovalSettings = React.useCallback((settings: VoiceSettings) => {
     setApprovalSettings({
@@ -2674,23 +2696,33 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     label: <span className="font-display text-[10px] font-bold uppercase">{pane.label}</span>,
   }));
   const activeSettingsPaneLabel = SETTINGS_PANES.find((pane) => pane.id === settingsPane)?.label ?? 'Settings';
+  const messageDraftRows = Math.min(5, Math.max(1, messageDraft.split('\n').length));
+  const closeThreadSidebarOnCompact = () => {
+    if (isCompactViewport()) setThreadSidebarOpen(false);
+  };
 
   return (
     <main className="assistant-dock-shell relative flex h-screen min-h-0 overflow-hidden bg-[var(--panel-alt)] text-[var(--fg)] max-[880px]:h-dvh max-[880px]:flex-col">
-      {threadSidebarOpen ? <aside className="relative z-[1] flex min-h-0 w-52 max-w-[46%] shrink-0 flex-col border-r border-[var(--border)] bg-black/[.14] max-[880px]:max-h-[34dvh] max-[880px]:w-full max-[880px]:max-w-none max-[880px]:border-b max-[880px]:border-r-0 max-[620px]:max-h-[38dvh]">
+      {threadSidebarOpen ? <aside className="relative z-[1] flex min-h-0 w-52 max-w-[46%] shrink-0 flex-col border-r border-[var(--border)] bg-black/[.14] max-[880px]:absolute max-[880px]:inset-0 max-[880px]:z-30 max-[880px]:w-full max-[880px]:max-w-none max-[880px]:border-r-0 max-[880px]:bg-[var(--panel-alt)]">
         <div className="flex min-h-11 shrink-0 items-center gap-2 border-b border-[var(--border)] px-2">
-          <div className="grid h-7 w-7 shrink-0 place-items-center rounded border border-[var(--border-subtle)] bg-white/[.03] text-[var(--muted)]" aria-hidden="true">
+          <button
+            type="button"
+            className={assistantIconButtonClass}
+            onClick={() => setThreadSidebarOpen(false)}
+            title="Back to assistant chat"
+            aria-label="Back to assistant chat"
+          >
             <svg viewBox="0 0 24 24" focusable="false" className="h-4 w-4 fill-none stroke-current stroke-[1.8]">
               <path d="M4 5h16v10H8l-4 4V5Z" />
             </svg>
-          </div>
+          </button>
           <div className="grid min-w-0 gap-px">
             <span className={assistantKickerClass}>Threads</span>
             <small className="text-[10px] leading-tight text-[var(--muted)]">{threads.length} assistant</small>
           </div>
           <button
             type="button"
-            className={cn(assistantIconButtonClass, 'ml-auto')}
+            className={cn(assistantIconButtonClass, 'ml-auto max-[880px]:hidden')}
             onClick={() => setThreadSidebarOpen(false)}
             title="Hide thread sidebar"
             aria-label="Hide thread sidebar"
@@ -2703,12 +2735,20 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
         </div>
 
         <div className="grid gap-1.5 border-b border-[var(--border)] p-2">
-          <button type="button" className={assistantPrimaryButtonClass} onClick={() => void createThread()} disabled={busy}>
+          <button
+            type="button"
+            className={assistantPrimaryButtonClass}
+            onClick={() => {
+              void createThread();
+              closeThreadSidebarOnCompact();
+            }}
+            disabled={busy}
+          >
             + New Thread
           </button>
         </div>
 
-        <div className="grid min-h-0 content-start gap-1.5 overflow-auto p-1.5 max-[880px]:grid-flow-col max-[880px]:auto-cols-[minmax(180px,220px)] max-[880px]:overflow-x-auto max-[880px]:overflow-y-hidden">
+        <div className="grid min-h-0 content-start gap-1.5 overflow-auto p-1.5">
           {threads.map((thread) => {
             const active = thread.id === activeThread?.id;
             const messageCount = active ? messages.length : 0;
@@ -2728,6 +2768,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                   onClick={() => {
                     setActiveView('threads');
                     setActiveThreadId(thread.id);
+                    closeThreadSidebarOnCompact();
                   }}
                 >
                   <div className="flex min-w-0 items-center gap-[7px]">
@@ -2785,7 +2826,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
       </aside> : null}
 
       <section className="relative z-[1] flex min-h-0 min-w-0 flex-1 flex-col">
-        <header className="relative z-[1] flex min-h-11 shrink-0 items-center gap-2 border-b border-[var(--border)] bg-white/[.025] px-2 max-[620px]:h-auto max-[620px]:items-stretch max-[620px]:flex-col max-[620px]:p-2">
+        <header className="relative z-[2] flex min-h-11 shrink-0 items-center gap-2 border-b border-[var(--border)] bg-white/[.025] px-2">
           <button
             type="button"
             className={cn(assistantIconButtonClass, 'h-8 w-8', threadSidebarOpen && assistantIconButtonActiveClass)}
@@ -2795,17 +2836,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
             aria-pressed={threadSidebarOpen}
           >
             <svg viewBox="0 0 24 24" aria-hidden="true" className={assistantIconSvgClass}>
-              {threadSidebarOpen ? (
-                <>
-                  <path d="M15 18l-6-6 6-6" />
-                  <path d="M20 4v16" />
-                </>
-              ) : (
-                <>
-                  <path d="M9 18l6-6-6-6" />
-                  <path d="M4 4v16" />
-                </>
-              )}
+              <path d="M4 5h16v10H8l-4 4V5Z" />
             </svg>
           </button>
           <div className="grid min-w-[140px] flex-1 gap-px">
@@ -2836,7 +2867,57 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
             </span>
           </div>
 
-          <div className="flex min-w-0 shrink items-center justify-end gap-1.5 max-[620px]:w-full max-[620px]:justify-start max-[880px]:overflow-x-auto max-[880px]:pb-1">
+          {activeView === 'threads' ? (
+            <>
+              <button
+                type="button"
+                className={cn(assistantIconButtonClass, 'hidden max-[620px]:flex')}
+                onClick={() => void createThread()}
+                disabled={busy}
+                title="New assistant thread"
+                aria-label="New assistant thread"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" className={assistantIconSvgClass}>
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+                  <path d="M14 2v6h6" />
+                  <path d="M12 18h6" />
+                  <path d="M15 15v6" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className={cn(assistantIconButtonClass, 'hidden max-[620px]:flex', mobileModelControlsOpen && assistantIconButtonActiveClass)}
+                onClick={() => setMobileModelControlsOpen((open) => !open)}
+                disabled={!activeThread}
+                title={mobileModelControlsOpen ? 'Hide model controls' : 'Show model controls'}
+                aria-label={mobileModelControlsOpen ? 'Hide model controls' : 'Show model controls'}
+                aria-pressed={mobileModelControlsOpen}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" className={assistantIconSvgClass}>
+                  <path d="M4 7h16" />
+                  <path d="M4 17h16" />
+                  <path d="M8 4v6" />
+                  <path d="M16 14v6" />
+                </svg>
+              </button>
+            </>
+          ) : null}
+          <button
+            type="button"
+            className={cn(assistantIconButtonClass, 'hidden max-[620px]:flex', mobileToolbarOpen && assistantIconButtonActiveClass)}
+            onClick={() => setMobileToolbarOpen((open) => !open)}
+            title={mobileToolbarOpen ? 'Hide assistant toolbar' : 'Show assistant toolbar'}
+            aria-label={mobileToolbarOpen ? 'Hide assistant toolbar' : 'Show assistant toolbar'}
+            aria-pressed={mobileToolbarOpen}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" className={assistantIconSvgClass}>
+              <path d="M4 7h16" />
+              <path d="M4 12h16" />
+              <path d="M4 17h16" />
+            </svg>
+          </button>
+
+          <div className="flex min-w-0 shrink items-center justify-end gap-1.5 max-[620px]:hidden max-[880px]:overflow-x-auto">
             {activeView !== 'threads' ? (
               <button
                 type="button"
@@ -2960,6 +3041,116 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
             {identitySlot ? <div className="ml-0.5 flex h-7 w-7 shrink-0 items-center justify-center [&_button]:h-7 [&_button]:w-7">{identitySlot}</div> : null}
           </div>
         </header>
+
+        {mobileToolbarOpen ? (
+          <div className="hidden shrink-0 items-center gap-1.5 overflow-x-auto border-b border-[var(--border)] bg-[rgba(0,0,0,.16)] px-2 py-2 max-[620px]:flex">
+            {activeView !== 'threads' ? (
+              <button
+                type="button"
+                className={assistantIconButtonClass}
+                onClick={() => {
+                  setActiveView('threads');
+                  setMobileToolbarOpen(false);
+                }}
+                title="Back to assistant chat"
+                aria-label="Back to assistant chat"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" className={assistantIconSvgClass}>
+                  <path d="M4 5h16v10H8l-4 4V5Z" />
+                </svg>
+              </button>
+            ) : null}
+            {activeView === 'threads' ? (
+              <>
+                <button
+                  type="button"
+                  className={cn(assistantIconButtonClass, assistantFilesOpen && assistantIconButtonActiveClass)}
+                  onClick={() => setAssistantFilesOpen((open) => !open)}
+                  disabled={!activeThread}
+                  title={assistantFilesOpen ? 'Hide assistant files' : 'Show assistant files'}
+                  aria-label={assistantFilesOpen ? 'Hide assistant files' : 'Show assistant files'}
+                  aria-pressed={assistantFilesOpen}
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true" className={assistantIconSvgClass}>
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+                    <path d="M14 2v6h6" />
+                  </svg>
+                  {artifacts.length > 0 ? <span className="absolute -right-1.5 -top-1.5 min-w-4 rounded-full border border-[var(--panel-alt)] bg-[var(--green)] px-1 text-center text-[9px] font-bold leading-[14px] text-[#071015]">{artifacts.length > 9 ? '9+' : artifacts.length}</span> : null}
+                </button>
+                <button
+                  type="button"
+                  className={assistantIconButtonClass}
+                  onClick={openSystemPromptEditor}
+                  disabled={!activeThread}
+                  title="Edit assistant system prompts"
+                  aria-label="Edit assistant system prompts"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true" className={assistantIconSvgClass}>
+                    <path d="M12 20h9" />
+                    <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  className={cn(assistantIconButtonClass, assistantToolsOpen && assistantIconButtonActiveClass)}
+                  onClick={() => setAssistantToolsOpen((open) => !open)}
+                  disabled={!activeThread}
+                  title={assistantToolsOpen ? 'Hide assistant tools' : 'Show assistant tools'}
+                  aria-label={assistantToolsOpen ? 'Hide assistant tools' : 'Show assistant tools'}
+                  aria-pressed={assistantToolsOpen}
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true" className={assistantIconSvgClass}>
+                    <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
+                    <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06A1.7 1.7 0 1 1 3.9 16.9l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06A2 2 0 1 1 7.03 3.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.2.34.6.6 1 .6h.6a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1.4Z" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  className={cn(assistantIconButtonClass, autoApprove && assistantIconButtonActiveClass)}
+                  onClick={() => void updateThreadSettings({ autoApprove: !autoApprove })}
+                  disabled={!activeThread || busy}
+                  title={autoApprove ? 'Auto-approve tool calls is on' : 'Auto-approve tool calls is off'}
+                  aria-label={autoApprove ? 'Turn off auto-approve' : 'Turn on auto-approve'}
+                  aria-pressed={autoApprove}
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true" className={assistantIconSvgClass}>
+                    <path d="M20 6 9 17l-5-5" />
+                    <path d="M15 6h5v5" />
+                  </svg>
+                </button>
+              </>
+            ) : null}
+            {navItems.filter((item) => item.id !== 'threads').map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={cn(assistantIconButtonClass, activeView === item.id && assistantIconButtonActiveClass)}
+                onClick={() => {
+                  setActiveView(item.id);
+                  setMobileToolbarOpen(false);
+                }}
+                title={item.label}
+                aria-label={item.label}
+                aria-pressed={activeView === item.id}
+              >
+                {item.id === 'settings' ? (
+                  <svg viewBox="0 0 24 24" aria-hidden="true" className={assistantIconSvgClass}>
+                    <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
+                    <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06A1.7 1.7 0 1 1 3.9 16.9l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06A2 2 0 1 1 7.03 3.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.2.34.6.6 1 .6h.6a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1.4Z" />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" aria-hidden="true" className={assistantIconSvgClass}>
+                    <path d="M12 3 5 6v5c0 4.5 3 8.5 7 10 4-1.5 7-5.5 7-10V6l-7-3Z" />
+                    <path d="M9 12l2 2 4-4" />
+                  </svg>
+                )}
+                {typeof item.count === 'number' ? <span className="absolute -right-1.5 -top-1.5 min-w-4 rounded-full border border-[var(--panel-alt)] bg-[var(--green)] px-1 text-center text-[9px] font-bold leading-[14px] text-[#071015]">{item.count}</span> : null}
+              </button>
+            ))}
+            <span className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-[rgba(74,222,128,.18)] bg-[rgba(74,222,128,.06)] px-2.5 font-display text-[10px] font-semibold uppercase text-[var(--green)] before:h-1.5 before:w-1.5 before:rounded-full before:bg-current before:shadow-[0_0_12px_rgba(74,222,128,.34)]">Live</span>
+            {identitySlot ? <div className="ml-0.5 flex h-7 w-7 shrink-0 items-center justify-center [&_button]:h-7 [&_button]:w-7">{identitySlot}</div> : null}
+          </div>
+        ) : null}
 
         <ToastStack toasts={toasts} onDismiss={dismissToast} />
         {threadDeleteCandidate ? (
@@ -3108,7 +3299,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                 </div>
 
                 <form className="block shrink-0 border-t border-[var(--border)] bg-[rgba(0,0,0,.12)] p-2" onSubmit={(event) => void sendMessage(event)}>
-                <div className="mb-2 flex min-w-0 flex-wrap items-center gap-1.5">
+                <div className={cn('mb-2 flex min-w-0 flex-wrap items-center gap-1.5', !mobileModelControlsOpen && 'max-[620px]:hidden')}>
                   <div className="inline-flex shrink-0 overflow-hidden rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.025)]" role="group" aria-label="Assistant provider">
                     {providerOptions.map((provider) => {
                       const selected = provider.id === activeProvider;
@@ -3175,7 +3366,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                   </div>
                   <div
                     className={cn(
-                      'inline-flex h-[30px] max-w-[220px] min-w-0 items-center gap-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[var(--muted)] max-[620px]:max-w-none max-[620px]:basis-full',
+                      'inline-flex h-[30px] max-w-[220px] min-w-0 items-center gap-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[var(--muted)] max-[620px]:hidden',
                       activeProvider === 'codex' && !codexConnection.connected && '!border-[rgba(245,158,11,.45)] !bg-[rgba(245,158,11,.07)]',
                     )}
                     title={activeProviderMeta?.title ?? providerAuthLabel}
@@ -3207,9 +3398,10 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                     </button>
                   </div>
                 ) : null}
-                <div className="relative min-h-[92px] rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.025)]">
+                <div className="relative min-h-[92px] rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.025)] max-[620px]:min-h-[42px]">
                   <textarea
                     value={messageDraft}
+                    rows={messageDraftRows}
                     onChange={(event) => setMessageDraft(event.target.value)}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter' && !event.shiftKey) {
@@ -3221,10 +3413,10 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                     }}
                     placeholder={activeRuns.length > 0 ? ((activeThread?.promptDeliveryMode ?? 'queue') === 'asap' ? 'Send at next turn' : 'Queue a message') : 'Ask the assistant'}
                     disabled={!activeThread || busy}
-                    className="block min-h-[92px] max-h-[180px] w-full resize-y border-0 bg-transparent px-2.5 pb-9 pt-2 text-xs leading-relaxed text-[var(--fg)] outline-none"
+                    className="block min-h-[92px] max-h-[180px] w-full resize-y border-0 bg-transparent px-2.5 pb-9 pt-2 text-xs leading-relaxed text-[var(--fg)] outline-none max-[620px]:min-h-[42px] max-[620px]:max-h-[132px] max-[620px]:resize-none max-[620px]:py-2 max-[620px]:pr-[68px]"
                   />
                   {activeRunningModel ? (
-                    <span className="absolute bottom-2 left-2.5 max-w-[calc(100%-106px)] truncate text-[10px] text-[var(--muted-dim)]" title={`Running model: ${activeRunningModelLabel}`}>
+                    <span className="absolute bottom-2 left-2.5 max-w-[calc(100%-106px)] truncate text-[10px] text-[var(--muted-dim)] max-[620px]:hidden" title={`Running model: ${activeRunningModelLabel}`}>
                       Running {compactModelSelectionLabel(activeRunningModelLabel)}
                     </span>
                   ) : null}
