@@ -138,7 +138,7 @@ function ExplorerSidebar({
   };
 
   return (
-    <aside className="flex min-h-0 w-full shrink-0 flex-col border-r border-[var(--border-subtle)] bg-[rgba(0,0,0,.14)] md:w-[240px]">
+    <aside className="flex min-h-0 w-full shrink-0 flex-col border-r border-[var(--border-subtle)] bg-[rgba(0,0,0,.14)] max-md:max-h-[34dvh] max-md:border-b max-md:border-r-0 md:w-[240px]">
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--border-subtle)] px-2.5 py-2">
         <span className="font-display text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--muted)]">Explorer</span>
         <button type="button" className={cn(actionButtonClass, 'h-6 px-2')} onClick={onNew} disabled={busy} title="New file" aria-label="New file">
@@ -286,7 +286,7 @@ export function AssistantFilesPanel({
 
   return (
     <section className="flex min-h-0 flex-1 flex-col overflow-hidden border-t border-[var(--border)] bg-[var(--panel-alt)]">
-      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--border-subtle)] px-3 py-2.5">
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[var(--border-subtle)] px-3 py-2.5">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <h2 className="m-0 font-display text-[13px] font-bold tracking-tight text-[var(--fg)]">Assistant files</h2>
@@ -296,7 +296,7 @@ export function AssistantFilesPanel({
           </div>
           <p className="mt-0.5 text-[11px] text-[var(--muted)]">Thread-scoped notes and artifacts</p>
         </div>
-        <div className="flex shrink-0 items-center gap-1.5">
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5">
           <button type="button" className={actionButtonClass} onClick={onNew} disabled={busy}>
             New
           </button>
@@ -351,7 +351,7 @@ export function AssistantFilesPanel({
                       ) : null}
                     </div>
                   </div>
-                  <div className="flex shrink-0 items-center gap-1">
+                  <div className="flex shrink-0 flex-wrap items-center gap-1">
                     {!isEditing ? (
                       <button type="button" className={primaryButtonClass} onClick={() => onPanelModeChange('edit')} disabled={busy}>
                         Edit
@@ -403,12 +403,12 @@ export function AssistantFilesPanel({
                 </div>
               )}
 
-              <footer className="flex shrink-0 items-center justify-between gap-2 border-t border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-2">
+              <footer className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-2">
                 <span className="text-[10px] text-[var(--muted)]">
                   {isEditing ? 'Editing source' : 'Preview'}
                   {artifactDirty ? ' · unsaved changes' : ''}
                 </span>
-                <div className="flex items-center gap-1">
+                <div className="flex flex-wrap items-center gap-1">
                   <button type="button" className={actionButtonClass} onClick={onCopy} disabled={!artifactContentDraft || busy}>
                     Copy
                   </button>

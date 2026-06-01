@@ -654,7 +654,7 @@ function AssistantToolsPanel({
   }, [tools]);
 
   return (
-    <div className="absolute right-2 top-[50px] z-[35] w-[min(420px,calc(100vw-2rem))] overflow-hidden rounded-md border border-[var(--border)] bg-[var(--panel-alt)] shadow-[0_18px_55px_rgba(0,0,0,.48)]">
+    <div className="absolute right-2 top-[50px] z-[35] w-[min(420px,calc(100vw-2rem))] overflow-hidden rounded-md border border-[var(--border)] bg-[var(--panel-alt)] shadow-[0_18px_55px_rgba(0,0,0,.48)] max-[620px]:fixed max-[620px]:inset-x-2 max-[620px]:bottom-2 max-[620px]:top-2 max-[620px]:w-auto">
       <div className="flex items-center justify-between gap-2.5 border-b border-[var(--border)] px-3 py-2">
         <div className="min-w-0">
           <strong className="block font-display text-xs font-bold text-[var(--fg)]">Assistant tools</strong>
@@ -667,7 +667,7 @@ function AssistantToolsPanel({
         <button type="button" className="h-7 border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2.5 font-display text-[10px] font-bold uppercase text-[var(--muted)]" onClick={onDisableAll} disabled={disabled}>Disable all</button>
         <span className="ml-auto text-[10px] text-[var(--muted-dim)]">{enabledTools.length} / {tools.length}</span>
       </div>
-      <div className="max-h-[min(520px,calc(100vh-190px))] overflow-y-auto p-2">
+      <div className="max-h-[min(520px,calc(100vh-190px))] overflow-y-auto p-2 max-[620px]:max-h-none">
         {categories.map(([category, categoryTools]) => (
           <section key={category} className="mt-2 first:mt-0">
             <div className="mb-1 px-1 font-display text-[9px] font-bold uppercase text-[var(--muted-dim)]">{ASSISTANT_TOOL_CATEGORY_LABELS[category] ?? category}</div>
@@ -2668,10 +2668,16 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     { id: 'settings', label: 'Settings', count: devices.length },
     ...(dashboard?.user.admin ? [{ id: 'admin' as const, label: 'Admin' }] : []),
   ];
+  const settingsPaneEntries: UiMenuSelectEntry[] = SETTINGS_PANES.map((pane) => ({
+    value: pane.id,
+    title: pane.label,
+    label: <span className="font-display text-[10px] font-bold uppercase">{pane.label}</span>,
+  }));
+  const activeSettingsPaneLabel = SETTINGS_PANES.find((pane) => pane.id === settingsPane)?.label ?? 'Settings';
 
   return (
-    <main className="assistant-dock-shell relative flex h-screen min-h-0 overflow-hidden bg-[var(--panel-alt)] text-[var(--fg)]">
-      {threadSidebarOpen ? <aside className="relative z-[1] flex min-h-0 w-52 max-w-[46%] shrink-0 flex-col border-r border-[var(--border)] bg-black/[.14] max-[880px]:w-full max-[880px]:max-w-none max-[880px]:border-b max-[880px]:border-r-0">
+    <main className="assistant-dock-shell relative flex h-screen min-h-0 overflow-hidden bg-[var(--panel-alt)] text-[var(--fg)] max-[880px]:h-dvh max-[880px]:flex-col">
+      {threadSidebarOpen ? <aside className="relative z-[1] flex min-h-0 w-52 max-w-[46%] shrink-0 flex-col border-r border-[var(--border)] bg-black/[.14] max-[880px]:max-h-[34dvh] max-[880px]:w-full max-[880px]:max-w-none max-[880px]:border-b max-[880px]:border-r-0 max-[620px]:max-h-[38dvh]">
         <div className="flex min-h-11 shrink-0 items-center gap-2 border-b border-[var(--border)] px-2">
           <div className="grid h-7 w-7 shrink-0 place-items-center rounded border border-[var(--border-subtle)] bg-white/[.03] text-[var(--muted)]" aria-hidden="true">
             <svg viewBox="0 0 24 24" focusable="false" className="h-4 w-4 fill-none stroke-current stroke-[1.8]">
@@ -2830,7 +2836,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
             </span>
           </div>
 
-          <div className="flex min-w-0 shrink items-center justify-end gap-1.5 max-[620px]:justify-start max-[880px]:overflow-x-auto">
+          <div className="flex min-w-0 shrink items-center justify-end gap-1.5 max-[620px]:w-full max-[620px]:justify-start max-[880px]:overflow-x-auto max-[880px]:pb-1">
             {activeView !== 'threads' ? (
               <button
                 type="button"
@@ -3169,7 +3175,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                   </div>
                   <div
                     className={cn(
-                      'inline-flex h-[30px] max-w-[220px] min-w-0 items-center gap-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[var(--muted)]',
+                      'inline-flex h-[30px] max-w-[220px] min-w-0 items-center gap-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[var(--muted)] max-[620px]:max-w-none max-[620px]:basis-full',
                       activeProvider === 'codex' && !codexConnection.connected && '!border-[rgba(245,158,11,.45)] !bg-[rgba(245,158,11,.07)]',
                     )}
                     title={activeProviderMeta?.title ?? providerAuthLabel}
@@ -3180,7 +3186,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                       <button type="button" className="h-7 border-[rgba(74,222,128,.28)] bg-[rgba(74,222,128,.08)] px-2.5 font-display text-[10px] font-bold uppercase text-[var(--green)]" onClick={() => void startCodexConnect()} disabled={busy}>Connect</button>
                     ) : null}
                   </div>
-                  <div className="ml-auto inline-flex items-center gap-1.5">
+                  <div className="ml-auto inline-flex items-center gap-1.5 max-[620px]:ml-0">
                     {activeRuns.length > 0 ? (
                       <button type="button" className="h-7 border-[rgba(248,113,113,.45)] bg-[rgba(248,113,113,.10)] px-2.5 font-display text-[10px] font-bold uppercase text-[#fca5a5]" onClick={() => void stopActiveRun()} disabled={busy}>
                         Stop
@@ -3189,7 +3195,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                   </div>
                 </div>
                 {codexConnectFlow ? (
-                  <div className="mb-2 grid grid-cols-[minmax(180px,1fr)_auto] gap-2">
+                  <div className="mb-2 grid grid-cols-[minmax(180px,1fr)_auto] gap-2 max-[620px]:grid-cols-1">
                     <input
                       value={codexCodeDraft}
                       disabled={busy}
@@ -3234,7 +3240,20 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
 
           {activeView === 'settings' ? (
             <section className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-3">
-              <div className="sticky top-0 z-10 flex w-full flex-wrap items-end gap-1 bg-[var(--panel-alt)] pt-0">
+              <div className="sticky top-0 z-10 hidden bg-[var(--panel-alt)] pb-1 max-[620px]:block">
+                <UiMenuSelect
+                  value={settingsPane}
+                  entries={settingsPaneEntries}
+                  placement="below"
+                  title={`Settings pane: ${activeSettingsPaneLabel}`}
+                  triggerLabel={activeSettingsPaneLabel}
+                  triggerClassName="h-9 border-[var(--border)] bg-white/[.025] text-[var(--fg-secondary)]"
+                  panelClassName="w-full"
+                  menuClassName="max-h-[320px]"
+                  onValueChange={(value) => setSettingsPane(value as SettingsPane)}
+                />
+              </div>
+              <div className="sticky top-0 z-10 flex w-full flex-nowrap items-end gap-1 overflow-x-auto bg-[var(--panel-alt)] pt-0 pb-1 max-[620px]:hidden">
                 {SETTINGS_PANES.map((pane) => (
                   <button
                     key={pane.id}
