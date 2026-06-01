@@ -42,6 +42,7 @@ import { exactTimeLabel, relativeTimeAgo, timeLabel } from './time.js';
 import { AssistantFilesPanel, type ArtifactPanelMode } from './assistant/AssistantFilesPanel.js';
 import { AssistantSystemPromptModal, type AssistantSystemPromptMode } from './assistant/AssistantSystemPromptModal.js';
 import { cn } from './ui/cn.js';
+import { CircuitRobotLoader } from './ui/CircuitRobotLoader.js';
 import { MarkdownMessage } from './ui/MarkdownMessage.js';
 import { UiMenuSelect, type UiMenuSelectEntry } from './ui/MenuSelect.js';
 import './styles.css';
@@ -2564,7 +2565,11 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   }
 
   if (loading) {
-    return <div className="loading-screen">Loading Voice Stream...</div>;
+    return (
+      <div className="loading-screen">
+        <CircuitRobotLoader />
+      </div>
+    );
   }
 
   if (window.voiceStreamDesktop?.isDesktop) {
