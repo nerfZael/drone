@@ -63,7 +63,7 @@ const ASSISTANT_PROVIDERS: Array<{ id: 'codex' | 'openai'; label: string; title:
 
 type AssistantApiKeyProvider = 'openai' | 'exa';
 type AssistantSettingsPromptField = 'voiceSystemPrompt';
-type SettingsPane = 'devices' | 'assistant' | 'skills' | 'voice' | 'recordings' | 'activity';
+type SettingsPane = 'devices' | 'assistant' | 'assistant-config' | 'skills' | 'voice' | 'recordings' | 'activity';
 type AssistantSkillDraft = {
   id: string | null;
   slug: string;
@@ -102,6 +102,7 @@ type SseMessage = { event: string; data: unknown };
 const SETTINGS_PANES: Array<{ id: SettingsPane; label: string }> = [
   { id: 'devices', label: 'Devices' },
   { id: 'assistant', label: 'Assistants' },
+  { id: 'assistant-config', label: 'Assistant Config' },
   { id: 'skills', label: 'Skills' },
   { id: 'voice', label: 'Voice' },
   { id: 'recordings', label: 'Recordings' },
@@ -824,7 +825,6 @@ function AssistantExtensionsPanel({
     <section className={assistantPanelClass}>
       <div className={assistantPanelHeaderClass}>
         <div>
-          <span className={assistantKickerClass}>Assistant</span>
           <h2 className={assistantPanelTitleClass}>Extensions</h2>
         </div>
       </div>
@@ -3805,7 +3805,6 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
               <section className={assistantPanelClass}>
                 <div className={assistantPanelHeaderClass}>
                   <div>
-                    <span className={assistantKickerClass}>Assistant</span>
                     <h2 className={assistantPanelTitleClass}>Profiles</h2>
                   </div>
                   <button type="button" className={assistantActionButtonClass} disabled={busy} onClick={() => void createAssistantProfile()}>
@@ -4001,11 +4000,14 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                   ) : null}
                 </div>
               </section>
+                </>
+              ) : null}
 
+                {settingsPane === 'assistant-config' ? (
+                <>
               <section className={assistantPanelClass}>
                 <div className={assistantPanelHeaderClass}>
                   <div>
-                    <span className={assistantKickerClass}>Assistant</span>
                     <h2 className={assistantPanelTitleClass}>API Keys</h2>
                   </div>
                 </div>
@@ -4056,7 +4058,6 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
               <section className={assistantPanelClass}>
                 <div className={assistantPanelHeaderClass}>
                   <div>
-                    <span className={assistantKickerClass}>Assistant</span>
                     <h2 className={assistantPanelTitleClass}>Codex Connection</h2>
                   </div>
                   {codexConnection.connected ? (
@@ -4095,7 +4096,6 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
               <section className={assistantPanelClass}>
                 <div className={assistantPanelHeaderClass}>
                   <div>
-                    <span className={assistantKickerClass}>Assistant</span>
                     <h2 className={assistantPanelTitleClass}>New Thread Model</h2>
                   </div>
                   <span className="max-w-[220px] truncate text-right text-[11px] text-[var(--muted)]">
@@ -4164,7 +4164,6 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
               <section className={assistantPanelClass}>
                 <div className={assistantPanelHeaderClass}>
                   <div>
-                    <span className={assistantKickerClass}>Assistant</span>
                     <h2 className={assistantPanelTitleClass}>Global Tool Defaults</h2>
                   </div>
                   <div className="flex flex-wrap justify-end gap-1.5">
@@ -4225,7 +4224,6 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                 <section className={assistantPanelClass}>
                   <div className={assistantPanelHeaderClass}>
                     <div>
-                      <span className={assistantKickerClass}>Assistant</span>
                       <h2 className={assistantPanelTitleClass}>Skills</h2>
                     </div>
                     <div className="flex flex-wrap justify-end gap-1.5">
