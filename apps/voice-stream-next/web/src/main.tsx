@@ -6017,10 +6017,19 @@ function NativeWebViewDashboard() {
   );
 }
 
+function shouldCheckNativeWebViewSession(): boolean {
+  const params = new URLSearchParams(window.location.search);
+  return params.get('nativeWebView') === '1';
+}
+
 function NativeWebViewSessionGate({ children }: { children: React.ReactNode }) {
-  const [state, setState] = React.useState<'checking' | 'active' | 'inactive'>('checking');
+  const shouldCheckSession = React.useMemo(shouldCheckNativeWebViewSession, []);
+  const [state, setState] = React.useState<'checking' | 'active' | 'inactive'>(() =>
+    shouldCheckSession ? 'checking' : 'inactive',
+  );
 
   React.useEffect(() => {
+    if (!shouldCheckSession) return undefined;
     let cancelled = false;
     void fetch('/api/me', { credentials: 'same-origin' })
       .then(async (response) => {
@@ -6033,7 +6042,7 @@ function NativeWebViewSessionGate({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [shouldCheckSession]);
 
   if (state === 'active') return <NativeWebViewDashboard />;
   if (state === 'checking') {

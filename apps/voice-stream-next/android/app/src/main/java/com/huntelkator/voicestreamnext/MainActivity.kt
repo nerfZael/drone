@@ -1354,7 +1354,7 @@ class MainActivity : ComponentActivity() {
         showStatus("Opening dashboard.")
         dashboardButton.isEnabled = false
         val serverUrl = serverInput.text.toString().ifBlank { Constants.DEFAULT_SERVER_URL }
-        val redirectUrl = VoiceStreamWebUrls.dashboardUrl(serverUrl)
+        val redirectUrl = VoiceStreamWebUrls.nativeWebViewDashboardUrl(serverUrl)
         thread(name = "VoiceStreamWebViewHandoff") {
             val result = runCatching { api.createWebViewHandoff(redirectUrl) }
             runOnUiThread {

@@ -146,6 +146,14 @@ object VoiceStreamWebUrls {
         }.getOrElse { trimmed }
     }
 
+    fun nativeWebViewDashboardUrl(serverUrl: String): String {
+        return Uri.parse(dashboardUrl(serverUrl))
+            .buildUpon()
+            .appendQueryParameter("nativeWebView", "1")
+            .build()
+            .toString()
+    }
+
     fun authUrl(serverUrl: String, request: BrowserAuthRequest, deviceName: String): Uri {
         return Uri.parse(dashboardUrl(serverUrl))
             .buildUpon()
