@@ -1316,11 +1316,7 @@ class MainActivity : ComponentActivity() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (::webPanel.isInitialized && webPanel.visibility == View.VISIBLE) {
-                    if (dashboardWebView.canGoBack()) {
-                        dashboardWebView.goBack()
-                    } else {
-                        closeDashboardView()
-                    }
+                    closeDashboardView()
                     return
                 }
                 if (::filesPanel.isInitialized && filesPanel.visibility == View.VISIBLE) {
@@ -1328,7 +1324,11 @@ class MainActivity : ComponentActivity() {
                     return
                 }
                 isEnabled = false
-                onBackPressedDispatcher.onBackPressed()
+                try {
+                    onBackPressedDispatcher.onBackPressed()
+                } finally {
+                    isEnabled = true
+                }
             }
         })
     }
@@ -1671,6 +1671,7 @@ class MainActivity : ComponentActivity() {
         if (::settingsPanel.isInitialized) settingsPanel.updateFrameMargins(bottom = safeBottom + 74.dp())
         if (::root.isInitialized) root.setPadding(24.dp(), topInset + 28.dp(), 24.dp(), safeBottom + 94.dp())
         if (::filesPanel.isInitialized) filesPanel.setPadding(18.dp(), topInset + 20.dp(), 18.dp(), safeBottom)
+        if (::webPanel.isInitialized) webPanel.setPadding(0, topInset, 0, bottomInset)
     }
 
     private fun View.updateFrameMargins(top: Int? = null, bottom: Int? = null) {
