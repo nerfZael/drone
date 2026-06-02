@@ -33,6 +33,10 @@ data class BrowserAuthResult(
     val deviceId: String?,
     val deviceName: String?,
 )
+data class WebViewHandoffResult(
+    val url: String,
+    val expiresAt: String,
+)
 data class AndroidSetupRedeemResult(
     val updateAvailable: Boolean,
     val latestVersionCode: Long?,
@@ -208,6 +212,24 @@ class VoiceStreamApi(private val context: Context) {
             status = json.optString("status", "pending"),
             deviceId = device?.optString("id")?.takeIf { it.isNotBlank() },
             deviceName = device?.optString("displayName")?.takeIf { it.isNotBlank() },
+        )
+    }
+
+    fun createWebViewHandoff(redirectUrl: String): WebViewHandoffResult {
+        val deviceId = pairedDeviceId()
+        val token = pairedDeviceToken()
+        if (deviceId.isBlank() || token.isBlank()) throw IOException("Sign in before opening the dashboard.")
+        val json = deviceRequest(
+            "POST",
+            "/api/devices/$deviceId/webview-handoff",
+            JSONObject()
+                .put("redirectUrl", redirectUrl)
+                .put("installationId", installationId())
+                .put("clientVersion", BuildConfig.VERSION_CODE)
+        )
+        return WebViewHandoffResult(
+            url = json.getString("url"),
+            expiresAt = json.getString("expiresAt"),
         )
     }
 
@@ -487,7 +509,7 @@ class VoiceStreamApi(private val context: Context) {
         }
     }
 
-    private fun deviceRequest(method: String, path: String): JSONObject {
+    private fun deviceRequest(method: String, path: String, body: JSONObject? = null): JSONObject {
         val config = loadConfig()
         val token = pairedDeviceToken()
         if (token.isBlank()) throw IOException("Pair this device before loading assistant files.")
@@ -496,8 +518,13 @@ class VoiceStreamApi(private val context: Context) {
             .url(url)
             .header("content-type", "application/json")
             .header("x-voice-device-token", token)
+            .header("x-voice-installation-id", installationId())
             .header("x-voice-client-version", BuildConfig.VERSION_CODE.toString())
-        builder.method(method, null)
+        if (body == null) {
+            builder.method(method, null)
+        } else {
+            builder.method(method, body.toString().toRequestBody(JSON))
+        }
         client.newCall(builder.build()).execute().use { response ->
             val text = response.body.string()
             if (!response.isSuccessful) {

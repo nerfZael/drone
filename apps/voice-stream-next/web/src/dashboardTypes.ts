@@ -394,7 +394,7 @@ export type ClientStatusRecord = {
 
 export type DashboardData = {
   ok: true;
-  authMode: 'clerk' | 'dev';
+  authMode: 'clerk' | 'dev' | 'webview';
   user: UserProfile;
   settings: VoiceSettings;
   speechPlayback?: SpeechPlaybackStatus;

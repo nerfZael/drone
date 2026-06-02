@@ -68,6 +68,33 @@ describe('device lifecycle', () => {
     expect(db.verifyDeviceToken(registered.device.id, rotated!.token).ok).toBe(false);
   });
 
+  test('creates one-time WebView handoffs and validates dashboard session tokens', () => {
+    const db = tempDb('webview-handoff');
+    dbs.push(db);
+    const user = db.upsertUser({
+      clerkUserId: 'clerk_webview',
+      displayName: 'WebView User',
+      email: 'webview@example.local',
+      admin: false,
+    });
+    const registered = db.registerDevice(user.id, { deviceType: 'android', displayName: 'Phone' });
+    const { handoff, secret } = db.createWebViewHandoff({
+      userId: user.id,
+      deviceId: registered.device.id,
+      redirectUrl: 'http://127.0.0.1:5185/',
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+
+    const claimed = db.claimWebViewHandoff(handoff.id, secret, new Date(Date.now() + 60_000).toISOString());
+    expect(claimed.ok).toBe(true);
+    if (!claimed.ok) return;
+    expect(db.userForWebViewSessionToken(claimed.sessionToken)?.id).toBe(user.id);
+    expect(db.claimWebViewHandoff(handoff.id, secret, new Date(Date.now() + 60_000).toISOString()).ok).toBe(false);
+
+    db.revokeDevice(user.id, registered.device.id);
+    expect(db.userForWebViewSessionToken(claimed.sessionToken)).toBeNull();
+  });
+
   test('renames active devices without changing revoked devices', () => {
     const db = tempDb('device-rename');
     dbs.push(db);

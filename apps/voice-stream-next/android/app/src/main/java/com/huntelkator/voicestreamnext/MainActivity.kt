@@ -30,7 +30,12 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import android.webkit.CookieManager
+import android.webkit.WebResourceRequest
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import com.journeyapps.barcodescanner.ScanContract
@@ -86,6 +91,9 @@ class MainActivity : ComponentActivity() {
     private lateinit var fileNextButton: Button
     private lateinit var fileExplorerButton: Button
     private lateinit var fileRefreshButton: Button
+    private lateinit var dashboardButton: Button
+    private lateinit var webPanel: FrameLayout
+    private lateinit var dashboardWebView: WebView
 
     private val wakeController = WakeToggleController()
     @Volatile private var updateCheckRunning = false
@@ -167,6 +175,7 @@ class MainActivity : ComponentActivity() {
             ClientLog.w("Activity", "System bar configuration failed", error)
         }
         buildUi()
+        installBackHandler()
         loadConfigIntoForm()
         updateSessionUi(SessionMode.OFF, "Ready")
         refreshSpeechHistory(selectLatest = true)
@@ -209,6 +218,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         if (::browserAuth.isInitialized) browserAuth.stop()
+        if (::dashboardWebView.isInitialized) {
+            dashboardWebView.stopLoading()
+            dashboardWebView.destroy()
+        }
         super.onDestroy()
     }
 
@@ -362,6 +375,14 @@ class MainActivity : ComponentActivity() {
             ViewGroup.LayoutParams.MATCH_PARENT,
         ))
 
+        webPanel = buildWebPanel().apply {
+            visibility = View.GONE
+        }
+        screen.addView(webPanel, FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT,
+        ))
+
         screen.setOnApplyWindowInsetsListener { _, insets ->
             positionSystemBars(insets.topSystemInset(), insets.bottomSystemInset())
             insets
@@ -374,6 +395,13 @@ class MainActivity : ComponentActivity() {
         val title = label("Drone", 34f, COLOR_TEXT, true).apply {
             gravity = Gravity.CENTER
             setPadding(0, 2.dp(), 0, 0)
+        }
+        dashboardButton = Button(this).apply {
+            text = "Web"
+            styleFloatingButton()
+            setCompoundDrawablesWithIntrinsicBounds(android.R.drawable.ic_menu_view, 0, 0, 0)
+            compoundDrawablePadding = 6.dp()
+            setOnClickListener { openDashboardView() }
         }
         val filesButtonFrame = FrameLayout(this).apply {
             filesButton = Button(this@MainActivity).apply {
@@ -397,9 +425,30 @@ class MainActivity : ComponentActivity() {
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            addView(View(this@MainActivity), LinearLayout.LayoutParams(104.dp(), 1))
+            addView(dashboardButton, LinearLayout.LayoutParams(104.dp(), 44.dp()))
             addView(title, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
             addView(filesButtonFrame, LinearLayout.LayoutParams(104.dp(), ViewGroup.LayoutParams.MATCH_PARENT))
+        }
+    }
+
+    private fun buildWebPanel(): FrameLayout {
+        CookieManager.getInstance().setAcceptCookie(true)
+        dashboardWebView = WebView(this).apply {
+            setBackgroundColor(COLOR_BACKGROUND)
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            webViewClient = object : WebViewClient() {
+                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                    return false
+                }
+            }
+        }
+        return FrameLayout(this).apply {
+            setBackgroundColor(COLOR_BACKGROUND)
+            addView(dashboardWebView, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            ))
         }
     }
 
@@ -1229,6 +1278,61 @@ class MainActivity : ComponentActivity() {
         startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(VoiceStreamWebUrls.dashboardUrl(serverInput.text.toString().ifBlank { Constants.DEFAULT_SERVER_URL }))))
     }
 
+    private fun openDashboardView() {
+        saveConfigFromForm()
+        if (api.pairedDeviceId().isBlank() || api.pairedDeviceToken().isBlank()) {
+            showStatus("Sign in before opening the dashboard.")
+            renderAuthState()
+            return
+        }
+        showStatus("Opening dashboard.")
+        dashboardButton.isEnabled = false
+        val serverUrl = serverInput.text.toString().ifBlank { Constants.DEFAULT_SERVER_URL }
+        val redirectUrl = VoiceStreamWebUrls.dashboardUrl(serverUrl)
+        thread(name = "VoiceStreamWebViewHandoff") {
+            val result = runCatching { api.createWebViewHandoff(redirectUrl) }
+            runOnUiThread {
+                dashboardButton.isEnabled = true
+                result
+                    .onSuccess { handoff ->
+                        webPanel.visibility = View.VISIBLE
+                        dashboardWebView.loadUrl(handoff.url)
+                    }
+                    .onFailure { error ->
+                        showStatus(error.message ?: "Could not open dashboard.")
+                    }
+            }
+        }
+    }
+
+    private fun closeDashboardView() {
+        if (!::webPanel.isInitialized) return
+        webPanel.visibility = View.GONE
+        dashboardWebView.stopLoading()
+        showStatus("Ready.")
+    }
+
+    private fun installBackHandler() {
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (::webPanel.isInitialized && webPanel.visibility == View.VISIBLE) {
+                    if (dashboardWebView.canGoBack()) {
+                        dashboardWebView.goBack()
+                    } else {
+                        closeDashboardView()
+                    }
+                    return
+                }
+                if (::filesPanel.isInitialized && filesPanel.visibility == View.VISIBLE) {
+                    closeFilesView()
+                    return
+                }
+                isEnabled = false
+                onBackPressedDispatcher.onBackPressed()
+            }
+        })
+    }
+
     private fun signInWithBrowser() {
         saveConfigFromForm()
         browserAuth.start(
@@ -1241,6 +1345,9 @@ class MainActivity : ComponentActivity() {
         browserAuth.stop()
         turnOff()
         api.clearPairing()
+        CookieManager.getInstance().removeAllCookies(null)
+        CookieManager.getInstance().flush()
+        if (::webPanel.isInitialized) webPanel.visibility = View.GONE
         updatePairingMessage()
         renderAuthState()
         renderUpdateBanner(null)
@@ -1294,6 +1401,7 @@ class MainActivity : ComponentActivity() {
         voicePanel.visibility = if (connected) View.VISIBLE else View.GONE
         settingsButton.visibility = if (connected) View.VISIBLE else View.GONE
         microphoneText.visibility = if (connected) View.VISIBLE else View.GONE
+        dashboardButton.visibility = if (connected) View.VISIBLE else View.INVISIBLE
         filesButton.visibility = if (connected) View.VISIBLE else View.GONE
         filesBadgeText.visibility = if (connected && (assistantThreadSummary?.artifactsCount ?: assistantArtifacts.size) > 0) View.VISIBLE else View.GONE
         signOutButton.visibility = if (connected) View.VISIBLE else View.GONE
@@ -1302,6 +1410,7 @@ class MainActivity : ComponentActivity() {
             settingsButton.text = "Settings"
             renderUpdateBanner(null)
             if (::filesPanel.isInitialized) filesPanel.visibility = View.GONE
+            if (::webPanel.isInitialized) webPanel.visibility = View.GONE
             assistantThreadSummary = null
             assistantArtifacts = emptyList()
             selectedArtifactIndex = -1

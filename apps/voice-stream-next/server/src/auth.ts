@@ -4,7 +4,7 @@ import type { UserProfile, VoiceStreamNextDb } from './db.js';
 
 export type AuthContext = {
   user: UserProfile;
-  mode: 'clerk' | 'dev';
+  mode: 'clerk' | 'dev' | 'webview';
 };
 
 type ClerkUserLike = {
@@ -49,21 +49,55 @@ function isAdmin(clerkUserId: string, email: string, explicitAdmin = false): boo
   return explicitAdmin || adminIds.has(clerkUserId.toLowerCase()) || (email ? adminEmails.has(email.toLowerCase()) : false);
 }
 
-export async function resolveRequestUser(req: FastifyRequest, db: VoiceStreamNextDb, clerkEnabled: boolean): Promise<AuthContext> {
-  if (clerkEnabled) {
-    const auth = getAuth(req);
-    if (!auth.isAuthenticated || !auth.userId) {
-      throw Object.assign(new Error('unauthorized'), { statusCode: 401 });
+function cookieValue(rawCookie: unknown, name: string): string {
+  const cookie = String(Array.isArray(rawCookie) ? rawCookie[0] : rawCookie ?? '');
+  for (const part of cookie.split(';')) {
+    const index = part.indexOf('=');
+    if (index <= 0) continue;
+    const key = part.slice(0, index).trim();
+    if (key !== name) continue;
+    try {
+      return decodeURIComponent(part.slice(index + 1).trim());
+    } catch {
+      return '';
     }
-    const clerkUser = (await clerkClient.users.getUser(auth.userId)) as ClerkUserLike;
-    const email = emailForClerkUser(clerkUser);
-    const user = db.upsertUser({
-      clerkUserId: clerkUser.id,
-      displayName: displayNameForClerkUser(clerkUser),
-      email,
-      admin: isAdmin(clerkUser.id, email),
-    });
-    return { user, mode: 'clerk' };
+  }
+  return '';
+}
+
+function hasAuthorizationHeader(req: FastifyRequest): boolean {
+  return String(req.headers.authorization ?? '').trim().length > 0;
+}
+
+async function resolveClerkRequestUser(req: FastifyRequest, db: VoiceStreamNextDb): Promise<AuthContext> {
+  const auth = getAuth(req);
+  if (!auth.isAuthenticated || !auth.userId) {
+    throw Object.assign(new Error('unauthorized'), { statusCode: 401 });
+  }
+  const clerkUser = (await clerkClient.users.getUser(auth.userId)) as ClerkUserLike;
+  const email = emailForClerkUser(clerkUser);
+  const user = db.upsertUser({
+    clerkUserId: clerkUser.id,
+    displayName: displayNameForClerkUser(clerkUser),
+    email,
+    admin: isAdmin(clerkUser.id, email),
+  });
+  return { user, mode: 'clerk' };
+}
+
+export async function resolveRequestUser(req: FastifyRequest, db: VoiceStreamNextDb, clerkEnabled: boolean): Promise<AuthContext> {
+  if (clerkEnabled && hasAuthorizationHeader(req)) {
+    return resolveClerkRequestUser(req, db);
+  }
+
+  const webviewSession = cookieValue(req.headers.cookie, 'voice_stream_webview_session');
+  if (webviewSession) {
+    const user = db.userForWebViewSessionToken(webviewSession);
+    if (user) return { user, mode: 'webview' };
+  }
+
+  if (clerkEnabled) {
+    return resolveClerkRequestUser(req, db);
   }
 
   const headerId = String(req.headers['x-voice-dev-user-id'] ?? '').trim();

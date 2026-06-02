@@ -56,6 +56,23 @@ export function createClerkClient(getToken: () => Promise<string | null>): ApiCl
   };
 }
 
+export function createCookieClient(): ApiClient {
+  return {
+    async request<T>(path: string, init?: RequestInit) {
+      return requestJson<T>(path, withCookieHeaders(init));
+    },
+    async stream(path: string, init?: RequestInit) {
+      return fetch(path, withCookieHeaders(init));
+    },
+  };
+}
+
+function withCookieHeaders(init?: RequestInit): RequestInit {
+  const headers = new Headers(init?.headers);
+  if (init?.body != null && !headers.has('content-type')) headers.set('content-type', 'application/json');
+  return { ...init, headers, credentials: 'same-origin' };
+}
+
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init);
   const text = await response.text();

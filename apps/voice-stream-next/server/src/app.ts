@@ -174,6 +174,18 @@ function desktopAuthExpiresAt(from = Date.now()): string {
   return new Date(from + ttlMs).toISOString();
 }
 
+function webViewHandoffExpiresAt(from = Date.now()): string {
+  return new Date(from + 2 * 60 * 1000).toISOString();
+}
+
+function webViewSessionExpiresAt(from = Date.now()): string {
+  return new Date(from + 30 * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function webViewSessionMaxAgeSeconds(expiresAt: string): number {
+  return Math.max(0, Math.floor((Date.parse(expiresAt) - Date.now()) / 1000));
+}
+
 function queryValue(value: unknown): string {
   return Array.isArray(value) ? String(value[0] ?? '') : String(value ?? '');
 }
@@ -455,6 +467,45 @@ function originUrl(raw: unknown): string {
   } catch {
     return '';
   }
+}
+
+function safeWebViewRedirectUrl(req: FastifyRequest, raw: unknown): string {
+  const fallback = serverPublicUrl(req);
+  const value = cleanText(raw, fallback) || fallback;
+  try {
+    const redirect = new URL(value);
+    const server = new URL(fallback);
+    if (redirect.protocol !== 'http:' && redirect.protocol !== 'https:') return fallback;
+    const allowedOrigins = new Set([server.origin]);
+    if (server.port === '3299') {
+      const dashboard = new URL(server.toString());
+      dashboard.port = '5185';
+      allowedOrigins.add(dashboard.origin);
+    }
+    if (!allowedOrigins.has(redirect.origin)) return fallback;
+    redirect.username = '';
+    redirect.password = '';
+    redirect.hash = '';
+    return redirect.toString();
+  } catch {
+    return fallback;
+  }
+}
+
+function webViewSessionCookie(token: string, expiresAt: string, req: FastifyRequest): string {
+  const secure =
+    firstHeaderValue(req.headers['x-forwarded-proto']) === 'https' ||
+    String((req as any).protocol ?? '').toLowerCase() === 'https';
+  return [
+    `voice_stream_webview_session=${encodeURIComponent(token)}`,
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Lax',
+    `Max-Age=${webViewSessionMaxAgeSeconds(expiresAt)}`,
+    secure ? 'Secure' : '',
+  ]
+    .filter(Boolean)
+    .join('; ');
 }
 
 function deviceAuthFailureMessage(result: Extract<DeviceAuthResult, { ok: false }>): string {
@@ -1281,6 +1332,62 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       reply.code(500).send({ ok: false, error: error?.message ?? String(error) });
       return undefined;
     }
+  });
+
+  app.post('/api/devices/:deviceId/webview-handoff', async (req, reply) => {
+    const deviceId = cleanText((req.params as any).deviceId);
+    const token = cleanText(req.headers['x-voice-device-token'] || (jsonBody(req) as any).token);
+    if (!deviceId || !token) {
+      reply.code(401).send({ ok: false, error: 'device token required' });
+      return;
+    }
+    const body = jsonBody(req);
+    const auth = verifyDeviceAuth(
+      db,
+      deviceId,
+      token,
+      parseClientVersion(req.headers['x-voice-client-version'], parseClientVersion(body.clientVersion, null)),
+    );
+    if (!auth.ok) {
+      reply.code(auth.reason === 'client_too_old' ? 426 : 401).send({
+        ok: false,
+        error: deviceAuthFailureMessage(auth),
+        reason: auth.reason,
+        minClientVersion: auth.reason === 'client_too_old' ? auth.minClientVersion : undefined,
+      });
+      return;
+    }
+    const device = resolveDeviceInstallation(db, auth.device, cleanText(req.headers['x-voice-installation-id'] || body.installationId) || null, token);
+    const redirectUrl = safeWebViewRedirectUrl(req, body.redirectUrl);
+    const { handoff, secret } = db.createWebViewHandoff({
+      userId: device.userId,
+      deviceId: device.id,
+      redirectUrl,
+      expiresAt: webViewHandoffExpiresAt(),
+    });
+    const claimUrl = new URL('/api/android-webview/claim', serverPublicUrl(req));
+    claimUrl.searchParams.set('id', handoff.id);
+    claimUrl.searchParams.set('secret', secret);
+    return { ok: true, url: claimUrl.toString(), expiresAt: handoff.expiresAt };
+  });
+
+  app.get('/api/android-webview/claim', async (req, reply) => {
+    const query = req.query as any;
+    const id = cleanText(query.id);
+    const secret = cleanText(query.secret);
+    if (!id || !secret) {
+      reply.code(400).send({ ok: false, error: 'webview handoff is missing' });
+      return;
+    }
+    const result = db.claimWebViewHandoff(id, secret, webViewSessionExpiresAt());
+    if (!result.ok) {
+      const status = result.reason === 'expired' || result.reason === 'claimed' ? 409 : result.reason === 'invalid_secret' ? 401 : 404;
+      reply.code(status).send({ ok: false, error: `webview handoff ${result.reason.replace('_', ' ')}` });
+      return;
+    }
+    reply
+      .header('set-cookie', webViewSessionCookie(result.sessionToken, result.expiresAt, req))
+      .redirect(result.handoff.redirectUrl);
   });
 
   app.post('/api/devices', async (req, reply) =>

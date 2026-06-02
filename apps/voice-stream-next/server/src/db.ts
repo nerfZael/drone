@@ -92,6 +92,20 @@ export type DesktopAuthPollResult =
   | { ok: true; status: 'claimed'; request: DesktopAuthRequestRecord; device: DeviceRecord }
   | { ok: false; reason: 'not_found' | 'invalid_secret' | 'expired' };
 
+export type WebViewHandoffRecord = {
+  id: string;
+  userId: string;
+  deviceId: string;
+  redirectUrl: string;
+  expiresAt: string;
+  claimedAt: string | null;
+  createdAt: string;
+};
+
+export type WebViewHandoffClaimResult =
+  | { ok: true; handoff: WebViewHandoffRecord; sessionToken: string; expiresAt: string }
+  | { ok: false; reason: 'not_found' | 'invalid_secret' | 'expired' | 'claimed' };
+
 export type DeviceAuthFailureReason = 'not_found' | 'invalid_token' | 'revoked' | 'pairing_expired' | 'client_too_old';
 
 export type DeviceAuthResult =
@@ -656,6 +670,18 @@ function rowDesktopAuthRequest(row: any): DesktopAuthRequestRecord {
   };
 }
 
+function rowWebViewHandoff(row: any): WebViewHandoffRecord {
+  return {
+    id: String(row.id),
+    userId: String(row.user_id),
+    deviceId: String(row.device_id),
+    redirectUrl: String(row.redirect_url),
+    expiresAt: String(row.expires_at),
+    claimedAt: row.claimed_at == null ? null : String(row.claimed_at),
+    createdAt: String(row.created_at),
+  };
+}
+
 function rowLog(row: any): LogRecord {
   return {
     id: String(row.id),
@@ -1195,6 +1221,11 @@ export class VoiceStreamNextDb {
     return row ? rowUser(row) : null;
   }
 
+  userById(userId: string): UserProfile | null {
+    const row = this.db.query('SELECT * FROM users WHERE id = $userId').get({ $userId: userId });
+    return row ? rowUser(row) : null;
+  }
+
   ensureVoiceSettings(userId: string): VoiceSettings {
     const existing = this.db.query('SELECT * FROM voice_settings WHERE user_id = $userId').get({ $userId: userId });
     if (existing) return rowVoiceSettings(existing);
@@ -1543,6 +1574,118 @@ export class VoiceStreamNextDb {
     const deviceRow = this.db.query('SELECT * FROM devices WHERE id = $id').get({ $id: request.deviceId });
     if (!deviceRow) return { ok: true, status: 'pending', request };
     return { ok: true, status: 'claimed', request, device: rowDevice(deviceRow) };
+  }
+
+  createWebViewHandoff(input: { userId: string; deviceId: string; redirectUrl: string; expiresAt: string }): { handoff: WebViewHandoffRecord; secret: string } {
+    const at = nowIso();
+    const id = newId('wvho');
+    const secret = newSecret();
+    this.db
+      .query(
+        `
+        INSERT INTO webview_handoffs (id, secret_hash, user_id, device_id, redirect_url, expires_at, claimed_at, created_at)
+        VALUES ($id, $secretHash, $userId, $deviceId, $redirectUrl, $expiresAt, NULL, $createdAt)
+      `,
+      )
+      .run({
+        $id: id,
+        $secretHash: sha256(secret),
+        $userId: input.userId,
+        $deviceId: input.deviceId,
+        $redirectUrl: input.redirectUrl,
+        $expiresAt: input.expiresAt,
+        $createdAt: at,
+      });
+    const row = this.db.query('SELECT * FROM webview_handoffs WHERE id = $id').get({ $id: id });
+    return { handoff: rowWebViewHandoff(row), secret };
+  }
+
+  claimWebViewHandoff(handoffId: string, secret: string, sessionExpiresAt: string): WebViewHandoffClaimResult {
+    const sessionId = newId('wvs');
+    const sessionToken = newSecret();
+    const at = nowIso();
+    let claimedHandoff: WebViewHandoffRecord | null = null;
+    this.db.run('BEGIN IMMEDIATE');
+    try {
+      const row = this.db.query('SELECT * FROM webview_handoffs WHERE id = $id').get({ $id: handoffId });
+      if (!row) {
+        this.db.run('ROLLBACK');
+        return { ok: false, reason: 'not_found' };
+      }
+      if (String((row as any).secret_hash) !== sha256(secret)) {
+        this.db.run('ROLLBACK');
+        return { ok: false, reason: 'invalid_secret' };
+      }
+      const handoff = rowWebViewHandoff(row);
+      if (handoff.claimedAt) {
+        this.db.run('ROLLBACK');
+        return { ok: false, reason: 'claimed' };
+      }
+      if (Date.parse(handoff.expiresAt) < Date.now()) {
+        this.db.run('ROLLBACK');
+        return { ok: false, reason: 'expired' };
+      }
+
+      const update = this.db
+        .query(
+          `
+          UPDATE webview_handoffs
+          SET claimed_at = $claimedAt
+          WHERE id = $id AND claimed_at IS NULL
+        `,
+        )
+        .run({ $claimedAt: at, $id: handoff.id }) as { changes?: number };
+      if (Number(update.changes ?? 0) !== 1) {
+        this.db.run('ROLLBACK');
+        return { ok: false, reason: 'claimed' };
+      }
+      this.db
+        .query(
+          `
+          INSERT INTO webview_sessions (id, token_hash, user_id, device_id, expires_at, revoked_at, created_at, last_seen_at)
+          VALUES ($id, $tokenHash, $userId, $deviceId, $expiresAt, NULL, $createdAt, $lastSeenAt)
+        `,
+        )
+        .run({
+          $id: sessionId,
+          $tokenHash: sha256(sessionToken),
+          $userId: handoff.userId,
+          $deviceId: handoff.deviceId,
+          $expiresAt: sessionExpiresAt,
+          $createdAt: at,
+          $lastSeenAt: at,
+        });
+      this.db.run('COMMIT');
+      claimedHandoff = { ...handoff, claimedAt: at };
+    } catch (error) {
+      this.db.run('ROLLBACK');
+      throw error;
+    }
+    return { ok: true, handoff: claimedHandoff!, sessionToken, expiresAt: sessionExpiresAt };
+  }
+
+  userForWebViewSessionToken(token: string): UserProfile | null {
+    const tokenHash = sha256(token);
+    const row = this.db
+      .query(
+        `
+        SELECT webview_sessions.*
+        FROM webview_sessions
+        JOIN devices ON devices.id = webview_sessions.device_id
+        WHERE webview_sessions.token_hash = $tokenHash
+          AND webview_sessions.revoked_at IS NULL
+          AND webview_sessions.expires_at > $now
+          AND devices.revoked_at IS NULL
+        LIMIT 1
+      `,
+      )
+      .get({ $tokenHash: tokenHash, $now: nowIso() });
+    if (!row) return null;
+    const at = nowIso();
+    this.db
+      .query('UPDATE webview_sessions SET last_seen_at = $lastSeenAt WHERE id = $id')
+      .run({ $lastSeenAt: at, $id: String((row as any).id) });
+    return this.userById(String((row as any).user_id));
   }
 
   registerDevice(userId: string, input: { deviceType: string; displayName: string; installationId?: string | null }): { device: DeviceRecord; token: string } {

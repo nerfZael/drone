@@ -7,7 +7,7 @@ import {
   approvalRecognizerOptions,
   VOICE_APPROVAL_SETTINGS_DEFAULT,
 } from '../../server/src/voice-approval-settings.js';
-import { createClerkClient, createDevClient, readDevUser } from './apiClient.js';
+import { createClerkClient, createCookieClient, createDevClient, readDevUser } from './apiClient.js';
 import type {
   ApiClient,
   AndroidApkInfo,
@@ -5621,69 +5621,121 @@ function DevDashboard() {
   );
 }
 
-function Root() {
-  if (!publishableKey) return <DevDashboard />;
+function NativeWebViewDashboard() {
+  const client = React.useMemo(createCookieClient, []);
   return (
-    <ClerkProvider
-      publishableKey={publishableKey}
-      localization={{
-        signIn: {
-          start: {
-            title: 'Sign in to VoiceStream',
-            subtitle: 'Welcome back. Continue to your voice workspace.',
-          },
-        },
-      }}
-      appearance={{
-        variables: {
-          colorBackground: '#171b21',
-          colorText: '#dfe3ea',
-          colorTextSecondary: '#8891a8',
-          colorPrimary: '#a78bfa',
-          colorInputBackground: 'rgba(255,255,255,.035)',
-          colorInputText: '#dfe3ea',
-          borderRadius: '8px',
-        },
-        elements: {
-          card: {
-            backgroundColor: '#171b21',
-            border: '1px solid #2d3340',
-            boxShadow: 'none',
-          },
-          headerTitle: { color: '#dfe3ea' },
-          headerSubtitle: { color: '#8891a8' },
-          socialButtonsBlockButton: {
-            backgroundColor: 'rgba(255,255,255,.035)',
-            borderColor: '#2d3340',
-            color: '#dfe3ea',
-          },
-          formButtonPrimary: {
-            backgroundColor: '#a78bfa',
-            color: '#101216',
-          },
-        },
-      }}
-    >
-      <SignedOut>
-        <div className="signin-page">
-          <div className="signin-copy">
-            <div className="signin-brand" aria-label="VoiceStream Next">
-              <span className="signin-brand-mark" aria-hidden="true" />
-              <span>VoiceStream Next</span>
-            </div>
-            <h1>Sign in to VoiceStream</h1>
-            <p>Manage assistant threads, voice devices, settings, and app releases from one workspace.</p>
-            <SignedOutDownloadLinks />
-          </div>
-          <div className="signin-auth-card">
-            <SignIn routing="hash" />
-          </div>
+    <AppShell
+      client={client}
+      identitySlot={
+        <div className="grid h-7 w-7 place-items-center rounded border border-[var(--border-subtle)] bg-white/[.02] font-display text-[11px] font-semibold uppercase text-[var(--muted)]" title="Native Android session is active.">
+          A
         </div>
-      </SignedOut>
-      <SignedIn>
-        <ClerkDashboard />
-      </SignedIn>
-    </ClerkProvider>
+      }
+    />
+  );
+}
+
+function NativeWebViewSessionGate({ children }: { children: React.ReactNode }) {
+  const [state, setState] = React.useState<'checking' | 'active' | 'inactive'>('checking');
+
+  React.useEffect(() => {
+    let cancelled = false;
+    void fetch('/api/me', { credentials: 'same-origin' })
+      .then(async (response) => {
+        const data = response.ok ? await response.json().catch(() => null) : null;
+        if (!cancelled) setState(data?.authMode === 'webview' ? 'active' : 'inactive');
+      })
+      .catch(() => {
+        if (!cancelled) setState('inactive');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (state === 'active') return <NativeWebViewDashboard />;
+  if (state === 'checking') {
+    return (
+      <div className="signin-page">
+        <div className="signin-copy">
+          <div className="kicker">VoiceStream</div>
+          <h1>Opening dashboard</h1>
+          <p>Checking your native app session.</p>
+        </div>
+      </div>
+    );
+  }
+  return <>{children}</>;
+}
+
+function Root() {
+  return (
+    <NativeWebViewSessionGate>
+      {!publishableKey ? (
+        <DevDashboard />
+      ) : (
+        <ClerkProvider
+          publishableKey={publishableKey}
+          localization={{
+            signIn: {
+              start: {
+                title: 'Sign in to VoiceStream',
+                subtitle: 'Welcome back. Continue to your voice workspace.',
+              },
+            },
+          }}
+          appearance={{
+            variables: {
+              colorBackground: '#171b21',
+              colorText: '#dfe3ea',
+              colorTextSecondary: '#8891a8',
+              colorPrimary: '#a78bfa',
+              colorInputBackground: 'rgba(255,255,255,.035)',
+              colorInputText: '#dfe3ea',
+              borderRadius: '8px',
+            },
+            elements: {
+              card: {
+                backgroundColor: '#171b21',
+                border: '1px solid #2d3340',
+                boxShadow: 'none',
+              },
+              headerTitle: { color: '#dfe3ea' },
+              headerSubtitle: { color: '#8891a8' },
+              socialButtonsBlockButton: {
+                backgroundColor: 'rgba(255,255,255,.035)',
+                borderColor: '#2d3340',
+                color: '#dfe3ea',
+              },
+              formButtonPrimary: {
+                backgroundColor: '#a78bfa',
+                color: '#101216',
+              },
+            },
+          }}
+        >
+          <SignedOut>
+            <div className="signin-page">
+              <div className="signin-copy">
+                <div className="signin-brand" aria-label="VoiceStream Next">
+                  <span className="signin-brand-mark" aria-hidden="true" />
+                  <span>VoiceStream Next</span>
+                </div>
+                <h1>Sign in to VoiceStream</h1>
+                <p>Manage assistant threads, voice devices, settings, and app releases from one workspace.</p>
+                <SignedOutDownloadLinks />
+              </div>
+              <div className="signin-auth-card">
+                <SignIn routing="hash" />
+              </div>
+            </div>
+          </SignedOut>
+          <SignedIn>
+            <ClerkDashboard />
+          </SignedIn>
+        </ClerkProvider>
+      )}
+    </NativeWebViewSessionGate>
   );
 }
 
