@@ -1,0 +1,12 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "RAILPACK",
+    "buildCommand": "bun run --filter voice-stream-next build"
+  },
+  "deploy": {
+    "startCommand": "bun run --filter voice-stream-next start",
+    "healthcheckPath": "/api/health",
+    "healthcheckTimeout": 60
+  }
+}

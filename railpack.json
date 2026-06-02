@@ -1,0 +1,17 @@
+{
+  "$schema": "https://schema.railpack.com",
+  "provider": "node",
+  "steps": {
+    "install": {
+      "commands": [
+        {
+          "cmd": "bun install --frozen-lockfile --omit optional",
+          "customName": "Install dependencies without optional native desktop packages"
+        },
+        {
+          "path": "node_modules/.bin"
+        }
+      ]
+    }
+  }
+}
