@@ -2165,6 +2165,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       const body = jsonBody(req);
       const patch: Parameters<VoiceStreamNextDb['updateThread']>[2] = {};
       if (body.title !== undefined) patch.title = cleanText(body.title, 'New thread') || 'New thread';
+      if (body.assistantProfileId !== undefined) patch.assistantProfileId = cleanText(body.assistantProfileId) || null;
       if (body.provider !== undefined) patch.provider = cleanText(body.provider, 'openai') || 'openai';
       if (body.model !== undefined) patch.model = cleanText(body.model, 'gpt-5.5') || 'gpt-5.5';
       if (body.thinkingLevel !== undefined) patch.thinkingLevel = cleanText(body.thinkingLevel, 'off') || 'off';
@@ -2513,7 +2514,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         ...(body.baseProfileId !== undefined ? { baseProfileId: cleanText(body.baseProfileId) || null } : {}),
         ...(body.enabled !== undefined ? { enabled: Boolean(body.enabled) } : {}),
         ...(body.sortOrder !== undefined ? { sortOrder: Number(body.sortOrder) || 0 } : {}),
-        ...(body.systemPrompt !== undefined ? { systemPrompt: cleanText(body.systemPrompt) || null } : {}),
+        ...(body.systemPrompt !== undefined ? { systemPrompt: cleanText(body.systemPrompt) } : {}),
         ...(body.enabledTools !== undefined ? { enabledTools: Array.isArray(body.enabledTools) ? body.enabledTools.map((tool: unknown) => cleanText(tool)).filter(Boolean) : null } : {}),
       });
       if (!profile) throw Object.assign(new Error('unknown assistant profile'), { statusCode: 404 });

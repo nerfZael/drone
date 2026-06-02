@@ -576,6 +576,7 @@ const ASSISTANT_DEFAULT_PROFILE_NAME = 'Sebastian';
 const ASSISTANT_DEFAULT_WAKE_PHRASE = 'hey sebastian';
 const ASSISTANT_DEFAULT_WAKE_PHRASE_ALIASES = ['hay sebastian', 'hey sebastien', 'hay sebastien'];
 const ASSISTANT_DEFAULT_TTS_VOICE = 'austin';
+const ASSISTANT_DEFAULT_PROFILE_SYSTEM_PROMPT = 'You are Sebastian, an AI assistant.\nThe user is often not reading your messages, so use the speak tool to send audio messages to them unless instructed differently';
 const ASSISTANT_TTS_VOICE_OPTIONS = ['autumn', 'diana', 'hannah', 'austin', 'daniel', 'troy'] as const;
 
 function parseJsonArray(raw: unknown, fallback: string[]): string[] {
@@ -2256,6 +2257,28 @@ export class VoiceStreamNextDb {
         existingRow.wake_phrase_aliases_json = JSON.stringify(ASSISTANT_DEFAULT_WAKE_PHRASE_ALIASES);
         touched = true;
       }
+      if (
+        normalizeAssistantWakePhrase(existingRow.wake_phrase) === ASSISTANT_DEFAULT_WAKE_PHRASE
+        && existingRow.system_prompt == null
+      ) {
+        this.db
+          .query(
+            `
+            UPDATE assistant_profiles
+            SET system_prompt = $systemPrompt,
+                updated_at = $updatedAt
+            WHERE user_id = $userId AND id = $profileId
+          `,
+          )
+          .run({
+            $systemPrompt: ASSISTANT_DEFAULT_PROFILE_SYSTEM_PROMPT,
+            $updatedAt: nowIso(),
+            $userId: userId,
+            $profileId: String(existingRow.id),
+          });
+        existingRow.system_prompt = ASSISTANT_DEFAULT_PROFILE_SYSTEM_PROMPT;
+        touched = true;
+      }
       if (this.enabledAssistantProfileCount(userId) <= 0) {
         this.db
           .query(
@@ -2309,7 +2332,7 @@ export class VoiceStreamNextDb {
           $ttsVoice,
           1,
           0,
-          NULL,
+          $systemPrompt,
           NULL,
           $createdAt,
           $updatedAt
@@ -2323,6 +2346,7 @@ export class VoiceStreamNextDb {
         $wakePhrase: ASSISTANT_DEFAULT_WAKE_PHRASE,
         $wakePhraseAliasesJson: JSON.stringify(ASSISTANT_DEFAULT_WAKE_PHRASE_ALIASES),
         $ttsVoice: ASSISTANT_DEFAULT_TTS_VOICE,
+        $systemPrompt: ASSISTANT_DEFAULT_PROFILE_SYSTEM_PROMPT,
         $createdAt: at,
         $updatedAt: at,
       });
@@ -3210,16 +3234,24 @@ export class VoiceStreamNextDb {
   updateThread(
     userId: string,
     threadId: string,
-    input: Partial<Pick<AssistantThread, 'title' | 'provider' | 'model' | 'thinkingLevel' | 'status' | 'error' | 'voiceEnabled' | 'autoApprove' | 'systemPrompt' | 'enabledTools' | 'capabilities' | 'promptDeliveryMode'>>,
+    input: Partial<Pick<AssistantThread, 'title' | 'assistantProfileId' | 'provider' | 'model' | 'thinkingLevel' | 'status' | 'error' | 'voiceEnabled' | 'autoApprove' | 'systemPrompt' | 'enabledTools' | 'capabilities' | 'promptDeliveryMode'>>,
   ): AssistantThread | null {
     const current = this.thread(userId, threadId);
     if (!current) return null;
+    const assistantProfile = input.assistantProfileId === undefined
+      ? this.assistantProfile(userId, current.assistantProfileId ?? '') ?? this.enabledAssistantProfile(userId)
+      : this.enabledAssistantProfile(userId, input.assistantProfileId);
+    if (!assistantProfile) throw Object.assign(new Error('unknown or disabled assistant profile'), { statusCode: 404 });
+    if (input.assistantProfileId !== undefined && assistantProfile.id !== current.assistantProfileId && this.threadMessageCount(userId, threadId) > 0) {
+      throw Object.assign(new Error('assistant profile cannot be changed after thread messages exist'), { statusCode: 400 });
+    }
     const at = nowIso();
     this.db
       .query(
         `
         UPDATE assistant_threads
         SET title = $title,
+            assistant_profile_id = $assistantProfileId,
             provider = $provider,
             model = $model,
             thinking_level = $thinkingLevel,
@@ -3237,6 +3269,7 @@ export class VoiceStreamNextDb {
       )
       .run({
         $title: input.title ?? current.title,
+        $assistantProfileId: assistantProfile.id,
         $provider: input.provider ?? current.provider,
         $model: input.model ?? current.model,
         $thinkingLevel: input.thinkingLevel ?? current.thinkingLevel,
@@ -3253,6 +3286,13 @@ export class VoiceStreamNextDb {
         $threadId: threadId,
       });
     return this.thread(userId, threadId);
+  }
+
+  private threadMessageCount(userId: string, threadId: string): number {
+    const row = this.db
+      .query('SELECT COUNT(*) AS count FROM assistant_messages WHERE user_id = $userId AND thread_id = $threadId')
+      .get({ $userId: userId, $threadId: threadId }) as any;
+    return Number(row?.count ?? 0);
   }
 
   latestVoiceThread(userId: string, sourceDeviceId: string, assistantProfileId?: string | null): AssistantThread {

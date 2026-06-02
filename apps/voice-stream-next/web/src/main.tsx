@@ -78,6 +78,8 @@ type AssistantProfileDraft = {
   wakePhraseAliases: string[];
   ttsVoice: string;
   enabled: boolean;
+  systemPrompt: string;
+  enabledTools: string[] | null;
 };
 const ASSISTANT_TTS_VOICE_OPTIONS = [
   { id: 'autumn', label: 'Autumn - female' },
@@ -98,7 +100,7 @@ type SseMessage = { event: string; data: unknown };
 
 const SETTINGS_PANES: Array<{ id: SettingsPane; label: string }> = [
   { id: 'devices', label: 'Devices' },
-  { id: 'assistant', label: 'Assistant' },
+  { id: 'assistant', label: 'Assistants' },
   { id: 'skills', label: 'Skills' },
   { id: 'voice', label: 'Voice' },
   { id: 'recordings', label: 'Recordings' },
@@ -288,6 +290,8 @@ function profileDraftFromAssistantProfile(profile: AssistantProfile): AssistantP
     wakePhraseAliases: profile.wakePhraseAliases ?? [],
     ttsVoice: profile.ttsVoice,
     enabled: profile.enabled,
+    systemPrompt: profile.systemPrompt ?? '',
+    enabledTools: profile.enabledTools ? [...profile.enabledTools] : null,
   };
 }
 
@@ -298,6 +302,8 @@ function assistantProfilePayloadFromDraft(draft: AssistantProfileDraft): Record<
     wakePhraseAliases: draft.wakePhraseAliases.map((alias) => alias.trim()).filter(Boolean),
     ttsVoice: draft.ttsVoice.trim(),
     enabled: draft.enabled,
+    systemPrompt: draft.systemPrompt.trim(),
+    enabledTools: draft.enabledTools,
   };
 }
 
@@ -1122,6 +1128,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const [codexCodeDraft, setCodexCodeDraft] = React.useState('');
   const [apiKeyDrafts, setApiKeyDrafts] = React.useState<Record<'openai' | 'exa', string>>({ openai: '', exa: '' });
   const [assistantProfileDrafts, setAssistantProfileDrafts] = React.useState<Record<string, AssistantProfileDraft>>({});
+  const [selectedAssistantProfileId, setSelectedAssistantProfileId] = React.useState<string | null>(null);
   const [skillDraft, setSkillDraft] = React.useState<AssistantSkillDraft>(() => emptySkillDraft());
   const [deviceNameEditor, setDeviceNameEditor] = React.useState<{ deviceId: string; draft: string } | null>(null);
   const [deviceName, setDeviceName] = React.useState('Android voice client');
@@ -1296,6 +1303,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
       }
       return next;
     });
+    setSelectedAssistantProfileId((current) => current && profiles.some((profile) => profile.id === current) ? current : profiles[0]?.id ?? null);
   }, [assistantSnapshotData?.assistantProfiles]);
 
   React.useEffect(() => {
@@ -2150,7 +2158,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     setAssistantProfileDrafts((current) => ({
       ...current,
       [profileId]: {
-        ...(current[profileId] ?? { name: '', wakePhrase: '', wakePhraseAliases: [], ttsVoice: '', enabled: true }),
+        ...(current[profileId] ?? { name: '', wakePhrase: '', wakePhraseAliases: [], ttsVoice: '', enabled: true, systemPrompt: '', enabledTools: null }),
         ...patch,
       },
     }));
@@ -2195,6 +2203,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
       });
       setAssistantSnapshotData(data.snapshot);
       setAssistantProfileDrafts((current) => ({ ...current, [data.profile.id]: profileDraftFromAssistantProfile(data.profile) }));
+      setSelectedAssistantProfileId(data.profile.id);
       setNotice('Created assistant profile.');
     } catch (err: any) {
       setError(err?.message ?? String(err));
@@ -2761,7 +2770,29 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const defaultEnabledTools = new Set(assistantSnapshotData?.assistantSettings.defaultEnabledTools ?? []);
   const defaultEnabledToolNames = assistantSnapshotData?.assistantSettings.defaultEnabledTools ?? [];
   const assistantProfiles = assistantSnapshotData?.assistantProfiles ?? dashboard?.assistantProfiles ?? [];
+  const selectedAssistantProfile =
+    assistantProfiles.find((profile) => profile.id === selectedAssistantProfileId) ??
+    assistantProfiles[0] ??
+    null;
+  const selectedAssistantProfileDraft = selectedAssistantProfile
+    ? assistantProfileDrafts[selectedAssistantProfile.id] ?? profileDraftFromAssistantProfile(selectedAssistantProfile)
+    : null;
+  const selectedProfileEnabledTools = selectedAssistantProfileDraft?.enabledTools ?? defaultEnabledToolNames;
+  const selectedProfileEnabledToolSet = new Set(selectedProfileEnabledTools);
   const enabledAssistantProfileCount = assistantProfiles.filter((profile) => profile.enabled).length;
+  const enabledAssistantProfiles = assistantProfiles.filter((profile) => profile.enabled);
+  const activeAssistantProfile =
+    assistantProfiles.find((profile) => profile.id === activeThread?.assistantProfileId) ??
+    enabledAssistantProfiles[0] ??
+    null;
+  const assistantProfileMenuEntries: UiMenuSelectEntry[] = enabledAssistantProfiles.map((profile) => ({
+    value: profile.id,
+    label: profile.name,
+    detail: profile.wakePhrase,
+  }));
+  const activeAssistantProfileLabel = activeAssistantProfile?.name ?? 'Assistant profile';
+  const activeThreadMessageCount = (activeThread as AssistantThreadView | null)?.messages?.length ?? messages.length;
+  const assistantProfileLocked = activeThreadMessageCount > 0;
   const autoApprove = Boolean(activeThread?.autoApprove);
   const codexConnection = assistantSnapshotData?.codexConnection ?? { connected: false, accountId: null, expiresAt: null, updatedAt: null };
   const assistantSettings = assistantSnapshotData?.assistantSettings ?? null;
@@ -3468,6 +3499,22 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                     })}
                   </div>
                   <UiMenuSelect
+                    value={activeAssistantProfile?.id ?? ''}
+                    entries={assistantProfileMenuEntries}
+                    variant="toolbar"
+                    role="listbox"
+                    itemRole="option"
+                    title={assistantProfileLocked ? 'Assistant profile cannot be changed after messages exist' : `Assistant profile: ${activeAssistantProfileLabel}`}
+                    header="Assistant profile"
+                    triggerLabel={activeAssistantProfileLabel}
+                    panelClassName="w-[220px]"
+                    disabled={!activeThread || busy || assistantProfileLocked || assistantProfileMenuEntries.length === 0}
+                    onValueChange={(value) => {
+                      if (!value || value === activeThread?.assistantProfileId) return;
+                      void updateThreadSettings({ assistantProfileId: value });
+                    }}
+                  />
+                  <UiMenuSelect
                     value={selectedModelKey}
                     entries={modelMenuEntries}
                     variant="toolbar"
@@ -3741,102 +3788,193 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                     Add profile
                   </button>
                 </div>
-                <div className="grid gap-2.5">
-                  {assistantProfiles.map((profile) => {
-                    const draft = assistantProfileDrafts[profile.id] ?? profileDraftFromAssistantProfile(profile);
-                    const disableEnabledToggle = busy || (draft.enabled && enabledAssistantProfileCount <= 1);
-                    return (
-                      <article key={profile.id} className="grid gap-2.5 rounded border border-[var(--border-subtle)] bg-white/[.02] p-2.5">
-                        <div className="grid grid-cols-[minmax(120px,1fr)_minmax(130px,170px)_auto] items-end gap-2 max-[880px]:grid-cols-1">
-                          <label className={assistantFieldLabelClass}>
-                            Name
-                            <input
-                              value={draft.name}
-                              disabled={busy}
-                              className="h-[30px] min-w-0"
-                              onChange={(event) => updateAssistantProfileDraft(profile.id, { name: event.currentTarget.value })}
-                            />
-                          </label>
-                          <label className={assistantFieldLabelClass}>
-                            Voice
-                            <select
-                              value={draft.ttsVoice}
-                              disabled={busy}
-                              className="h-[30px] min-w-0"
-                              onChange={(event) => updateAssistantProfileDraft(profile.id, { ttsVoice: event.currentTarget.value })}
-                            >
-                              {ASSISTANT_TTS_VOICE_OPTIONS.map((voice) => (
-                                <option key={voice.id} value={voice.id}>{voice.label}</option>
-                              ))}
-                            </select>
-                          </label>
-                          <label className="flex h-[30px] items-center gap-2 rounded border border-[var(--border-subtle)] bg-white/[.02] px-2 text-[11px] font-semibold text-[var(--fg-secondary)]">
-                            <input
-                              type="checkbox"
-                              checked={draft.enabled}
-                              disabled={disableEnabledToggle}
-                              className="h-3.5 w-3.5 accent-[var(--green)]"
-                              onChange={(event) => updateAssistantProfileDraft(profile.id, { enabled: event.currentTarget.checked })}
-                            />
-                            Enabled
-                          </label>
-                        </div>
+                <div className="grid gap-3 xl:grid-cols-[minmax(220px,.34fr)_minmax(0,1fr)]">
+                  <div className="grid content-start gap-1.5">
+                    {assistantProfiles.map((profile) => {
+                      const selected = profile.id === selectedAssistantProfile?.id;
+                      const draft = assistantProfileDrafts[profile.id] ?? profileDraftFromAssistantProfile(profile);
+                      return (
+                        <button
+                          key={profile.id}
+                          type="button"
+                          className={cn(
+                            'grid min-h-[58px] w-full content-center gap-1 rounded border border-[var(--border-subtle)] bg-white/[.02] px-2 py-1.5 text-left transition hover:border-[rgba(136,145,168,.36)] hover:bg-white/[.04]',
+                            selected && 'border-[rgba(74,222,128,.30)] bg-[rgba(74,222,128,.08)]',
+                          )}
+                          onClick={() => setSelectedAssistantProfileId(profile.id)}
+                        >
+                          <span className="flex min-w-0 items-center justify-between gap-2">
+                            <strong className="truncate text-xs text-[var(--fg)]">{draft.name || 'Assistant'}</strong>
+                            <span className={cn('shrink-0 rounded border border-[var(--border-subtle)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--muted)]', draft.enabled && 'border-[rgba(74,222,128,.28)] text-[var(--green)]')}>
+                              {draft.enabled ? 'Enabled' : 'Off'}
+                            </span>
+                          </span>
+                          <span className="truncate text-[11px] text-[var(--muted)]">{draft.wakePhrase || 'No wake phrase'}</span>
+                        </button>
+                      );
+                    })}
+                    {assistantProfiles.length === 0 ? <div className={assistantEmptyClass}>No assistant profiles loaded.</div> : null}
+                  </div>
+
+                  {selectedAssistantProfile && selectedAssistantProfileDraft ? (
+                    <article className="grid gap-2.5 rounded border border-[var(--border-subtle)] bg-white/[.02] p-2.5">
+                      <div className="grid grid-cols-[minmax(120px,1fr)_minmax(130px,170px)_auto] items-end gap-2 max-[880px]:grid-cols-1">
                         <label className={assistantFieldLabelClass}>
-                          Primary wake phrase
+                          Name
                           <input
-                            value={draft.wakePhrase}
+                            value={selectedAssistantProfileDraft.name}
                             disabled={busy}
                             className="h-[30px] min-w-0"
-                            onChange={(event) => updateAssistantProfileDraft(profile.id, { wakePhrase: event.currentTarget.value })}
+                            onChange={(event) => updateAssistantProfileDraft(selectedAssistantProfile.id, { name: event.currentTarget.value })}
                           />
                         </label>
-                        <div className="grid gap-1.5">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className={assistantFieldLabelClass}>Aliases</span>
-                            <button
-                              type="button"
-                              className={assistantActionButtonClass}
-                              disabled={busy}
-                              onClick={() => updateAssistantProfileDraft(profile.id, { wakePhraseAliases: [...draft.wakePhraseAliases, ''] })}
-                            >
-                              Add alias
-                            </button>
-                          </div>
-                          <div className="grid gap-1.5">
-                            {draft.wakePhraseAliases.map((alias, aliasIndex) => (
-                              <div key={`${profile.id}:alias:${aliasIndex}`} className="grid grid-cols-[minmax(160px,1fr)_auto] gap-1.5">
-                                <input
-                                  value={alias}
-                                  disabled={busy}
-                                  className="h-[30px] min-w-0"
-                                  onChange={(event) => {
-                                    const next = [...draft.wakePhraseAliases];
-                                    next[aliasIndex] = event.currentTarget.value;
-                                    updateAssistantProfileDraft(profile.id, { wakePhraseAliases: next });
-                                  }}
-                                />
-                                <button
-                                  type="button"
-                                  className={assistantActionButtonClass}
-                                  disabled={busy}
-                                  onClick={() => updateAssistantProfileDraft(profile.id, { wakePhraseAliases: draft.wakePhraseAliases.filter((_, index) => index !== aliasIndex) })}
-                                >
-                                  Remove
-                                </button>
-                              </div>
+                        <label className={assistantFieldLabelClass}>
+                          Voice
+                          <select
+                            value={selectedAssistantProfileDraft.ttsVoice}
+                            disabled={busy}
+                            className="h-[30px] min-w-0"
+                            onChange={(event) => updateAssistantProfileDraft(selectedAssistantProfile.id, { ttsVoice: event.currentTarget.value })}
+                          >
+                            {ASSISTANT_TTS_VOICE_OPTIONS.map((voice) => (
+                              <option key={voice.id} value={voice.id}>{voice.label}</option>
                             ))}
-                            {draft.wakePhraseAliases.length === 0 ? <div className="text-[11px] text-[var(--muted)]">No aliases configured.</div> : null}
-                          </div>
-                        </div>
-                        <div className="flex justify-end">
-                          <button type="button" className={assistantActionButtonClass} disabled={busy || !draft.name.trim() || !draft.wakePhrase.trim() || !draft.ttsVoice.trim()} onClick={() => void saveAssistantProfile(profile)}>
-                            Save profile
+                          </select>
+                        </label>
+                        <label className="flex h-[30px] items-center gap-2 rounded border border-[var(--border-subtle)] bg-white/[.02] px-2 text-[11px] font-semibold text-[var(--fg-secondary)]">
+                          <input
+                            type="checkbox"
+                            checked={selectedAssistantProfileDraft.enabled}
+                            disabled={busy || (selectedAssistantProfileDraft.enabled && enabledAssistantProfileCount <= 1)}
+                            className="h-3.5 w-3.5 accent-[var(--green)]"
+                            onChange={(event) => updateAssistantProfileDraft(selectedAssistantProfile.id, { enabled: event.currentTarget.checked })}
+                          />
+                          Enabled
+                        </label>
+                      </div>
+
+                      <label className={assistantFieldLabelClass}>
+                        Primary wake phrase
+                        <input
+                          value={selectedAssistantProfileDraft.wakePhrase}
+                          disabled={busy}
+                          className="h-[30px] min-w-0"
+                          onChange={(event) => updateAssistantProfileDraft(selectedAssistantProfile.id, { wakePhrase: event.currentTarget.value })}
+                        />
+                      </label>
+
+                      <div className="grid gap-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className={assistantFieldLabelClass}>Aliases</span>
+                          <button
+                            type="button"
+                            className={assistantActionButtonClass}
+                            disabled={busy}
+                            onClick={() => updateAssistantProfileDraft(selectedAssistantProfile.id, { wakePhraseAliases: [...selectedAssistantProfileDraft.wakePhraseAliases, ''] })}
+                          >
+                            Add alias
                           </button>
                         </div>
-                      </article>
-                    );
-                  })}
-                  {assistantProfiles.length === 0 ? <div className={assistantEmptyClass}>No assistant profiles loaded.</div> : null}
+                        <div className="grid gap-1.5">
+                          {selectedAssistantProfileDraft.wakePhraseAliases.map((alias, aliasIndex) => (
+                            <div key={`${selectedAssistantProfile.id}:alias:${aliasIndex}`} className="grid grid-cols-[minmax(160px,1fr)_auto] gap-1.5">
+                              <input
+                                value={alias}
+                                disabled={busy}
+                                className="h-[30px] min-w-0"
+                                onChange={(event) => {
+                                  const next = [...selectedAssistantProfileDraft.wakePhraseAliases];
+                                  next[aliasIndex] = event.currentTarget.value;
+                                  updateAssistantProfileDraft(selectedAssistantProfile.id, { wakePhraseAliases: next });
+                                }}
+                              />
+                              <button
+                                type="button"
+                                className={assistantActionButtonClass}
+                                disabled={busy}
+                                onClick={() => updateAssistantProfileDraft(selectedAssistantProfile.id, { wakePhraseAliases: selectedAssistantProfileDraft.wakePhraseAliases.filter((_, index) => index !== aliasIndex) })}
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          ))}
+                          {selectedAssistantProfileDraft.wakePhraseAliases.length === 0 ? <div className="text-[11px] text-[var(--muted)]">No aliases configured.</div> : null}
+                        </div>
+                      </div>
+
+                      <label className={assistantFieldLabelClass}>
+                        System prompt
+                        <textarea
+                          value={selectedAssistantProfileDraft.systemPrompt}
+                          disabled={busy}
+                          rows={5}
+                          onChange={(event) => updateAssistantProfileDraft(selectedAssistantProfile.id, { systemPrompt: event.currentTarget.value })}
+                        />
+                      </label>
+
+                      <div className="grid gap-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <span className={assistantFieldLabelClass}>Default tools</span>
+                            <div className="text-[11px] text-[var(--muted)]">
+                              {selectedAssistantProfileDraft.enabledTools === null
+                                ? `${defaultEnabledToolNames.length} / ${availableTools.length} enabled from global defaults.`
+                                : `${selectedProfileEnabledTools.length} / ${availableTools.length} enabled for this profile.`}
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap justify-end gap-1.5">
+                            <button type="button" className={assistantActionButtonClass} disabled={busy || selectedAssistantProfileDraft.enabledTools === null} onClick={() => updateAssistantProfileDraft(selectedAssistantProfile.id, { enabledTools: null })}>
+                              Use global
+                            </button>
+                            <button type="button" className={assistantActionButtonClass} disabled={busy} onClick={() => updateAssistantProfileDraft(selectedAssistantProfile.id, { enabledTools: availableTools.map((tool) => tool.name) })}>
+                              Enable all
+                            </button>
+                            <button type="button" className={assistantActionButtonClass} disabled={busy} onClick={() => updateAssistantProfileDraft(selectedAssistantProfile.id, { enabledTools: [] })}>
+                              Disable all
+                            </button>
+                          </div>
+                        </div>
+                        <div className="grid max-h-[300px] gap-1 overflow-y-auto pr-1">
+                          {availableTools.map((tool) => {
+                            const checked = selectedProfileEnabledToolSet.has(tool.name);
+                            return (
+                              <label
+                                key={tool.name}
+                                className={cn(
+                                  'flex min-w-0 cursor-pointer items-start gap-2 rounded-[5px] border border-[var(--border-subtle)] bg-white/[.02] px-2 py-1.5',
+                                  checked && 'border-[rgba(139,92,246,.55)] bg-[rgba(139,92,246,.12)]',
+                                )}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  disabled={busy}
+                                  onChange={(event) => {
+                                    const next = new Set(selectedAssistantProfileDraft.enabledTools ?? defaultEnabledToolNames);
+                                    if (event.currentTarget.checked) next.add(tool.name);
+                                    else next.delete(tool.name);
+                                    updateAssistantProfileDraft(selectedAssistantProfile.id, { enabledTools: [...next] });
+                                  }}
+                                  className="mt-0.5 h-3.5 w-3.5 accent-[var(--accent)]"
+                                />
+                                <span className="grid min-w-0 gap-px">
+                                  <strong className="truncate text-xs text-[var(--fg)]">{tool.label}</strong>
+                                  <small className="line-clamp-2 text-[11px] text-[var(--muted)]">{tool.description}</small>
+                                </span>
+                              </label>
+                            );
+                          })}
+                          {availableTools.length === 0 ? <div className={assistantEmptyClass}>No tools loaded.</div> : null}
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end">
+                        <button type="button" className={assistantActionButtonClass} disabled={busy || !selectedAssistantProfileDraft.name.trim() || !selectedAssistantProfileDraft.wakePhrase.trim() || !selectedAssistantProfileDraft.ttsVoice.trim()} onClick={() => void saveAssistantProfile(selectedAssistantProfile)}>
+                          Save profile
+                        </button>
+                      </div>
+                    </article>
+                  ) : null}
                 </div>
               </section>
 
@@ -3877,32 +4015,6 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                       </div>
                     );
                   })}
-                </div>
-              </section>
-
-              <section className={assistantPanelClass}>
-                <div className={assistantPanelHeaderClass}>
-                  <div>
-                    <span className={assistantKickerClass}>Assistant</span>
-                    <h2 className={assistantPanelTitleClass}>System Prompts</h2>
-                  </div>
-                </div>
-                <div className="grid gap-2.5">
-                  <label className={assistantFieldLabelClass}>
-                    Assistant prompt
-                    <textarea
-                      value={assistantSettingsPromptDrafts.voiceSystemPrompt}
-                      onChange={(event) => {
-                        const value = event.currentTarget.value;
-                        assistantSettingsPromptDirtyRef.current.voiceSystemPrompt = true;
-                        setAssistantSettingsPromptDrafts((current) => ({ ...current, voiceSystemPrompt: value }));
-                      }}
-                      onBlur={(event) => void updateAssistantSettings(
-                        { voiceSystemPrompt: event.currentTarget.value },
-                        { clearPromptDirty: ['voiceSystemPrompt'] },
-                      )}
-                    />
-                  </label>
                 </div>
               </section>
 
@@ -4018,7 +4130,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                 <div className={assistantPanelHeaderClass}>
                   <div>
                     <span className={assistantKickerClass}>Assistant</span>
-                    <h2 className={assistantPanelTitleClass}>Default Tools</h2>
+                    <h2 className={assistantPanelTitleClass}>Global Tool Defaults</h2>
                   </div>
                   <div className="flex flex-wrap justify-end gap-1.5">
                     <button type="button" className={assistantActionButtonClass} disabled={busy} onClick={() => void updateAssistantSettings({ defaultEnabledTools: availableTools.map((tool) => tool.name) })}>
@@ -4030,7 +4142,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                   </div>
                 </div>
                 <div className="grid gap-2">
-                  <div className="text-[11px] text-[var(--muted)]">{defaultEnabledToolNames.length} / {availableTools.length} enabled for new chats.</div>
+                  <div className="text-[11px] text-[var(--muted)]">{defaultEnabledToolNames.length} / {availableTools.length} enabled for profiles using global defaults.</div>
                   <div className="grid max-h-[360px] gap-1 overflow-y-auto pr-1">
                     {availableTools.map((tool) => {
                       const checked = defaultEnabledTools.has(tool.name);
