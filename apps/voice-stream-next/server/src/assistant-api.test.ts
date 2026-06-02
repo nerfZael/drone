@@ -37,6 +37,7 @@ describe('assistant API parity', () => {
     await built.app.close();
     db.db.close();
     delete process.env.VOICE_STREAM_NEXT_DATA_DIR;
+    delete process.env.VOICE_STREAM_NEXT_SECRETS_KEY;
   });
 
   test('creates voice-enabled threads, renames, and deletes through the API', async () => {
@@ -88,6 +89,35 @@ describe('assistant API parity', () => {
     }).then((response) => response.json());
     expect(deleted.deleted).toBe(true);
     expect(deleted.snapshot.threads.some((thread: any) => thread.id === first.thread.id)).toBe(false);
+  });
+
+  test('reveals assistant API keys only through the copy endpoint', async () => {
+    process.env.VOICE_STREAM_NEXT_SECRETS_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+
+    const saved = await built.app.inject({
+      method: 'POST',
+      url: '/api/assistant/keys/openai',
+      headers: devHeaders,
+      payload: JSON.stringify({ apiKey: 'sk-openai-copy-test' }),
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json().key.keyHint).toContain('test');
+
+    const listed = await built.app.inject({
+      method: 'GET',
+      url: '/api/assistant/keys',
+      headers: devAuthHeaders,
+    }).then((response) => response.json());
+    expect(JSON.stringify(listed)).not.toContain('sk-openai-copy-test');
+    expect(listed.keys.openai.hasKey).toBe(true);
+
+    const revealed = await built.app.inject({
+      method: 'GET',
+      url: '/api/assistant/keys/openai/reveal',
+      headers: devAuthHeaders,
+    });
+    expect(revealed.statusCode).toBe(200);
+    expect(revealed.json().apiKey).toBe('sk-openai-copy-test');
   });
 
   test('lets paired Android devices read the shared current voice thread files', async () => {
