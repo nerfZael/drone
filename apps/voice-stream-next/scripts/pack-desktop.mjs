@@ -10,6 +10,7 @@ const repoRoot = path.resolve(appDir, '../..');
 const requireFromApp = createRequire(path.join(appDir, 'package.json'));
 const vendorDir = path.join(appDir, '.desktop-vendor');
 const vendorNodeModules = path.join(vendorDir, 'node_modules');
+const appManifest = JSON.parse(fs.readFileSync(path.join(appDir, 'package.json'), 'utf8'));
 const copied = new Set();
 
 function packageRoot(packageName, fromDir = appDir) {
@@ -44,6 +45,7 @@ function copyRuntimePackage(packageName, fromDir = appDir) {
 
 function runPackager() {
   const modelPath = path.resolve(repoRoot, 'apps/voice-stream/android/app/src/main/assets/model-en-us');
+  const electronPackagerBin = path.join(packageRoot('@electron/packager'), 'bin', 'electron-packager.js');
   const args = [
     '.',
     'Drone',
@@ -58,12 +60,15 @@ function runPackager() {
     "--ignore=^/(android|docs|gradle|release|server|web|dist|\\.desktop-vendor)(/|$)",
     "--ignore=^/(build.gradle.kts|settings.gradle.kts|gradle.properties|gradlew|gradlew.bat)$",
   ];
-  const result = spawnSync('electron-packager', args, {
+  const result = spawnSync('node', [electronPackagerBin, ...args], {
     cwd: appDir,
     env: process.env,
     shell: process.platform === 'win32',
     stdio: 'inherit',
   });
+  if (result.error) {
+    console.error(result.error.message);
+  }
   if (result.status !== 0) {
     process.exit(result.status || 1);
   }
@@ -159,6 +164,7 @@ function publishDesktopDownload() {
   "app": "voice-stream-next",
   "platform": "desktop",
   "variant": ${jsonString(variant)},
+  "versionName": ${jsonString(appManifest.version)},
   "fileName": ${jsonString(latestFileName)},
   "variantFileName": ${jsonString(variantFileName)},
   "size": ${fs.statSync(latestFile).size},

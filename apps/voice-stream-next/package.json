@@ -1,6 +1,6 @@
 {
   "name": "voice-stream-next",
-  "version": "0.1.0",
+  "version": "0.1.19",
   "description": "VoiceStream desktop, web, Android, and assistant service.",
   "author": "Huntelkator",
   "private": true,
