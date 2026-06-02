@@ -181,6 +181,14 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
         return active.get() && !sleeping && (awakeMode || recording.get())
     }
 
+    fun canPlayQueuedAssistantAudio(): Boolean {
+        return active.get() && !sleeping
+    }
+
+    fun isRecordingAudio(): Boolean {
+        return recording.get()
+    }
+
     fun stop() {
         active.set(false)
         recording.set(false)
@@ -214,6 +222,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
 
     private fun beginRecording(target: String, onStatus: (String) -> Unit) {
         if (!recording.compareAndSet(false, true)) return
+        AssistantAudioPlayer.pausePlayback(requeueActive = true)
         currentTarget = cleanTarget(target)
         outgoingReady.set(false)
         reconnectAttempt = 0
@@ -245,6 +254,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
         recordingAlreadyStarted: Boolean = false,
     ) {
         if (!recordingAlreadyStarted && recording.getAndSet(true)) return
+        AssistantAudioPlayer.pausePlayback(requeueActive = true)
         currentTarget = cleanTarget(target)
         outgoingReady.set(false)
         reconnectAttempt = 0
