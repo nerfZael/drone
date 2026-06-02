@@ -232,6 +232,11 @@ type AppToast = {
   message: string;
 };
 
+type AssistantStreamingDraft = {
+  reply: string;
+  thinking: string;
+};
+
 const TOOL_LABELS: Record<string, string> = {
   assistant_artifacts: 'Assistant artifacts',
   load_skill: 'Load skill',
@@ -1095,8 +1100,8 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const [mobileModelControlsOpen, setMobileModelControlsOpen] = React.useState(false);
   const [activeThreadId, setActiveThreadId] = React.useState<string | null>(null);
   const [messages, setMessages] = React.useState<AssistantMessage[]>([]);
-  const [streamingReply, setStreamingReply] = React.useState('');
-  const [streamingThinking, setStreamingThinking] = React.useState('');
+  const [streamingByThreadId, setStreamingByThreadId] = React.useState<Record<string, AssistantStreamingDraft>>({});
+  const [promptSubmittingByThreadId, setPromptSubmittingByThreadId] = React.useState<Record<string, boolean>>({});
   const [artifacts, setArtifacts] = React.useState<AssistantArtifactRecord[]>([]);
   const [selectedArtifact, setSelectedArtifact] = React.useState<AssistantArtifactRecord | null>(null);
   const [artifactPathDraft, setArtifactPathDraft] = React.useState('');
@@ -1160,6 +1165,8 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const dashboardEventRefreshTimerRef = React.useRef<number | null>(null);
   const releaseEventRefreshTimerRef = React.useRef<number | null>(null);
   const appEventsConnectedRef = React.useRef(false);
+  const promptSubmittingThreadIdsRef = React.useRef<Record<string, boolean>>({});
+  const streamingRequestThreadIdsRef = React.useRef<Record<string, boolean>>({});
   const scheduleAssistantEventRefreshRef = React.useRef<() => void>(() => {});
   const scheduleArtifactsEventRefreshRef = React.useRef<(threadId?: string | null) => void>(() => {});
   const scheduleDashboardEventRefreshRef = React.useRef<() => void>(() => {});
@@ -1168,11 +1175,16 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const messagesStickToBottomRef = React.useRef(true);
   const messageScrollSignatureRef = React.useRef('');
   const activeThreadIdRef = React.useRef<string | null>(null);
+  const messageDraftRef = React.useRef('');
 
   const selectActiveThread = React.useCallback((threadId: string | null) => {
     activeThreadIdRef.current = threadId;
     setActiveThreadId(threadId);
   }, []);
+
+  React.useEffect(() => {
+    messageDraftRef.current = messageDraft;
+  }, [messageDraft]);
 
   React.useEffect(() => {
     const media = window.matchMedia(COMPACT_VIEWPORT_QUERY);
@@ -1217,6 +1229,10 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     assistantThreads.find((thread) => thread.id === activeThreadId) ??
     assistantThreads[0] ??
     null;
+  const activeThreadStreaming = activeThread ? streamingByThreadId[activeThread.id] : null;
+  const streamingReply = activeThreadStreaming?.reply ?? '';
+  const streamingThinking = activeThreadStreaming?.thinking ?? '';
+  const activePromptSubmitting = activeThread ? Boolean(promptSubmittingByThreadId[activeThread.id]) : false;
   const updateMessagesStickToBottom = React.useCallback((node: HTMLDivElement | null) => {
     if (!node) return;
     const gap = node.scrollHeight - node.scrollTop - node.clientHeight;
@@ -1260,6 +1276,32 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   }, []);
   const setError = React.useCallback((message: string | null) => pushToast('error', message), [pushToast]);
   const setNotice = React.useCallback((message: string | null) => pushToast('notice', message), [pushToast]);
+  const setPromptSubmitting = React.useCallback((threadId: string, submitting: boolean) => {
+    const next = { ...promptSubmittingThreadIdsRef.current, [threadId]: submitting };
+    if (!submitting) delete next[threadId];
+    promptSubmittingThreadIdsRef.current = next;
+    setPromptSubmittingByThreadId(next);
+  }, []);
+  const clearThreadStreaming = React.useCallback((threadId: string) => {
+    setStreamingByThreadId((current) => {
+      if (!current[threadId]) return current;
+      const next = { ...current };
+      delete next[threadId];
+      return next;
+    });
+  }, []);
+  const appendThreadStreaming = React.useCallback((threadId: string, patch: Partial<AssistantStreamingDraft>) => {
+    setStreamingByThreadId((current) => {
+      const existing = current[threadId] ?? { reply: '', thinking: '' };
+      return {
+        ...current,
+        [threadId]: {
+          reply: patch.reply === undefined ? existing.reply : `${existing.reply}${patch.reply}`,
+          thinking: patch.thinking === undefined ? existing.thinking : `${existing.thinking}${patch.thinking}`,
+        },
+      };
+    });
+  }, []);
   React.useEffect(() => {
     if (toasts.length === 0) return undefined;
     const timers = toasts.map((toast) => window.setTimeout(() => dismissToast(toast.id), toast.kind === 'error' ? 7200 : 4200));
@@ -1723,15 +1765,28 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   async function sendMessage(event?: React.FormEvent) {
     event?.preventDefault();
     const content = messageDraft.trim();
-    if (!activeThread || !content) return;
-    setBusy(true);
+    const submittedDraft = messageDraft;
+    const targetThread = activeThread as AssistantThreadView | null;
+    if (!targetThread || !content) return;
+    const targetThreadId = targetThread.id;
+    if (promptSubmittingThreadIdsRef.current[targetThreadId]) return;
+    const ownsStreamingState = !streamingRequestThreadIdsRef.current[targetThreadId];
+    if (ownsStreamingState) {
+      streamingRequestThreadIdsRef.current = { ...streamingRequestThreadIdsRef.current, [targetThreadId]: true };
+    }
+    let promptSubmitReleased = false;
+    const releasePromptSubmit = () => {
+      if (promptSubmitReleased) return;
+      promptSubmitReleased = true;
+      setPromptSubmitting(targetThreadId, false);
+    };
+    setPromptSubmitting(targetThreadId, true);
     setError(null);
-    setStreamingReply('');
-    setStreamingThinking('');
+    if (ownsStreamingState) clearThreadStreaming(targetThreadId);
     scrollMessagesToBottom({ force: true });
     try {
       const response = await client.stream(
-        `/api/assistant/threads/${encodeURIComponent(activeThread.id)}/stream`,
+        `/api/assistant/threads/${encodeURIComponent(targetThreadId)}/stream`,
         {
           method: 'POST',
           body: JSON.stringify({ prompt: content }),
@@ -1747,44 +1802,55 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
         }
         throw new Error(data?.error ?? `${response.status} ${response.statusText}`);
       }
-      setMessageDraft('');
+      if (activeThreadIdRef.current === targetThreadId && messageDraftRef.current === submittedDraft) {
+        messageDraftRef.current = '';
+        setMessageDraft('');
+      }
       scrollMessagesToBottom({ force: true });
       await readAssistantEventStream(response, (promptEvent) => {
         if (promptEvent.type === 'delta') {
-          setStreamingReply((current) => `${current}${String(promptEvent.delta ?? '')}`);
+          if (ownsStreamingState) appendThreadStreaming(targetThreadId, { reply: String(promptEvent.delta ?? '') });
           return;
         }
         if (promptEvent.type === 'thinking_delta') {
-          setStreamingThinking((current) => `${current}${String(promptEvent.delta ?? '')}`);
+          if (ownsStreamingState) appendThreadStreaming(targetThreadId, { thinking: String(promptEvent.delta ?? '') });
           return;
         }
         if (promptEvent.type === 'message' && promptEvent.message) {
-          setMessages((current) => upsertMessage(current, promptEvent.message as AssistantMessage));
+          if (activeThreadIdRef.current === targetThreadId) {
+            setMessages((current) => upsertMessage(current, promptEvent.message as AssistantMessage));
+          }
           return;
         }
         if (promptEvent.type === 'tool_call' || promptEvent.type === 'tool_result') {
-          void loadMessages(activeThread.id);
+          if (activeThreadIdRef.current === targetThreadId) void loadMessages(targetThreadId);
           return;
         }
         if ((promptEvent.type === 'snapshot' || promptEvent.type === 'approval_pending' || promptEvent.type === 'queued' || promptEvent.type === 'done') && promptEvent.snapshot) {
+          releasePromptSubmit();
           const snapshot = promptEvent.snapshot as AssistantSnapshot;
           setAssistantSnapshotData(snapshot);
-          const visibleThread = snapshot.threads.find((thread) => thread.id === activeThread.id);
-          if (visibleThread) setMessages(visibleThread.messages);
-          if (promptEvent.type === 'done') setStreamingReply('');
+          const visibleThread = snapshot.threads.find((thread) => thread.id === targetThreadId);
+          if (visibleThread && activeThreadIdRef.current === targetThreadId) setMessages(visibleThread.messages);
+          if (promptEvent.type === 'done' && ownsStreamingState) clearThreadStreaming(targetThreadId);
           return;
         }
         if (promptEvent.type === 'error') {
+          releasePromptSubmit();
           throw new Error(String(promptEvent.error ?? 'Assistant stream failed'));
         }
       });
-      await Promise.all([loadAssistantSnapshot(activeThread.id), loadDashboard()]);
+      await Promise.all([loadAssistantSnapshot(targetThreadId), loadDashboard()]);
     } catch (err: any) {
       setError(err?.message ?? String(err));
     } finally {
-      setStreamingReply('');
-      setStreamingThinking('');
-      setBusy(false);
+      releasePromptSubmit();
+      if (ownsStreamingState) clearThreadStreaming(targetThreadId);
+      if (ownsStreamingState) {
+        const next = { ...streamingRequestThreadIdsRef.current };
+        delete next[targetThreadId];
+        streamingRequestThreadIdsRef.current = next;
+      }
     }
   }
 
@@ -3612,17 +3678,21 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                   <textarea
                     value={messageDraft}
                     rows={messageDraftRows}
-                    onChange={(event) => setMessageDraft(event.target.value)}
+                    onChange={(event) => {
+                      const nextDraft = event.target.value;
+                      messageDraftRef.current = nextDraft;
+                      setMessageDraft(nextDraft);
+                    }}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter' && !event.shiftKey) {
                         event.preventDefault();
-                        if (activeThread && messageDraft.trim() && !busy) {
+                        if (activeThread && messageDraft.trim() && !activePromptSubmitting) {
                           void sendMessage();
                         }
                       }
                     }}
                     placeholder={activeRuns.length > 0 ? ((activeThread?.promptDeliveryMode ?? 'queue') === 'asap' ? 'Send at next turn' : 'Queue a message') : 'Ask the assistant'}
-                    disabled={!activeThread || busy}
+                    disabled={!activeThread}
                     className="assistant-chat-composer-input block min-h-[92px] max-h-[180px] w-full resize-y border-0 bg-transparent px-2.5 pb-9 pt-2 text-xs leading-relaxed text-[var(--fg)] outline-none max-[620px]:min-h-[42px] max-[620px]:max-h-[132px] max-[620px]:resize-none max-[620px]:py-2 max-[620px]:pr-[68px]"
                   />
                   {activeRunningModel ? (
@@ -3630,7 +3700,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                       Running {compactModelSelectionLabel(activeRunningModelLabel)}
                     </span>
                   ) : null}
-                  <button type="submit" className="absolute bottom-2 right-2 h-7 border-[rgba(74,222,128,.28)] bg-[rgba(74,222,128,.08)] px-2.5 font-display text-[10px] font-bold uppercase text-[var(--green)]" disabled={!activeThread || !messageDraft.trim() || busy}>
+                  <button type="submit" className="absolute bottom-2 right-2 h-7 border-[rgba(74,222,128,.28)] bg-[rgba(74,222,128,.08)] px-2.5 font-display text-[10px] font-bold uppercase text-[var(--green)]" disabled={!activeThread || !messageDraft.trim() || activePromptSubmitting}>
                     Send
                   </button>
                 </div>
