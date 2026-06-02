@@ -5,7 +5,7 @@
     "install": {
       "commands": [
         {
-          "cmd": "bun install --frozen-lockfile",
+          "cmd": "bun install --frozen-lockfile --ignore-scripts",
           "customName": "Install dependencies"
         },
         {
