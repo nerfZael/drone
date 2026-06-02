@@ -3463,8 +3463,9 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
           ) : null}
 
           {activeView === 'settings' ? (
-            <section className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-3">
-              <div className="sticky top-0 z-10 hidden bg-[var(--panel-alt)] pb-1 max-[620px]:block">
+            <section className="flex h-full min-h-0 flex-col">
+              <div className="shrink-0 bg-[var(--panel-alt)] px-3 pt-3">
+                <div className="hidden pb-1 max-[620px]:block">
                 <UiMenuSelect
                   value={settingsPane}
                   entries={settingsPaneEntries}
@@ -3476,22 +3477,24 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                   menuClassName="max-h-[320px]"
                   onValueChange={(value) => setSettingsPane(value as SettingsPane)}
                 />
-              </div>
-              <div className="sticky top-0 z-10 flex w-full flex-nowrap items-end gap-1 overflow-x-auto bg-[var(--panel-alt)] pt-0 pb-1 max-[620px]:hidden">
-                {SETTINGS_PANES.map((pane) => (
-                  <button
-                    key={pane.id}
-                    type="button"
-                    className={cn(settingsTabClass, settingsPane === pane.id && settingsTabActiveClass)}
-                    aria-pressed={settingsPane === pane.id}
-                    onClick={() => setSettingsPane(pane.id)}
-                  >
-                    {pane.label}
-                  </button>
-                ))}
+                </div>
+                <div className="flex w-full flex-nowrap items-end gap-1 overflow-x-auto bg-[var(--panel-alt)] pt-0 pb-1 max-[620px]:hidden">
+                  {SETTINGS_PANES.map((pane) => (
+                    <button
+                      key={pane.id}
+                      type="button"
+                      className={cn(settingsTabClass, settingsPane === pane.id && settingsTabActiveClass)}
+                      aria-pressed={settingsPane === pane.id}
+                      onClick={() => setSettingsPane(pane.id)}
+                    >
+                      {pane.label}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              {settingsPane === 'devices' ? (
+              <div className="grid min-h-0 flex-1 content-start gap-3 overflow-y-auto p-3">
+                {settingsPane === 'devices' ? (
                 <>
                   <section className={assistantPanelClass}>
                     <div className={assistantPanelHeaderClass}>
@@ -3619,7 +3622,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                 </>
               ) : null}
 
-              {settingsPane === 'assistant' ? (
+                {settingsPane === 'assistant' ? (
                 <>
               <section className={assistantPanelClass}>
                 <div className={assistantPanelHeaderClass}>
@@ -3855,7 +3858,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                 </>
               ) : null}
 
-              {settingsPane === 'skills' ? (
+                {settingsPane === 'skills' ? (
                 <section className={assistantPanelClass}>
                   <div className={assistantPanelHeaderClass}>
                     <div>
@@ -3977,7 +3980,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                 </section>
               ) : null}
 
-              {settingsPane === 'voice' ? (
+                {settingsPane === 'voice' ? (
                 <>
               <section className={assistantPanelClass}>
                 <div className={assistantPanelHeaderClass}>
@@ -4158,7 +4161,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                 </>
               ) : null}
 
-              {settingsPane === 'recordings' ? (
+                {settingsPane === 'recordings' ? (
                 <section className={assistantPanelClass}>
                   <div className={assistantPanelHeaderClass}>
                     <div>
@@ -4218,7 +4221,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                 </section>
               ) : null}
 
-              {settingsPane === 'activity' ? (
+                {settingsPane === 'activity' ? (
                 <section className={assistantPanelClass}>
                   <div className={assistantPanelHeaderClass}>
                     <div>
@@ -4241,7 +4244,8 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                     {logs.length === 0 ? <div className={assistantEmptyClass}>No logs yet.</div> : null}
                   </div>
                 </section>
-              ) : null}
+                ) : null}
+              </div>
             </section>
           ) : null}
 
