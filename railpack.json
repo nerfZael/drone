@@ -5,8 +5,8 @@
     "install": {
       "commands": [
         {
-          "cmd": "bun install --frozen-lockfile --omit optional",
-          "customName": "Install dependencies without optional native desktop packages"
+          "cmd": "bun install --frozen-lockfile",
+          "customName": "Install dependencies"
         },
         {
           "path": "node_modules/.bin"
