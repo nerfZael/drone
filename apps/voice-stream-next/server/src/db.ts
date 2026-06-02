@@ -127,6 +127,7 @@ export type AssistantThread = {
   id: string;
   userId: string;
   deviceId: string | null;
+  assistantProfileId: string | null;
   title: string;
   source: string;
   provider: string;
@@ -140,6 +141,22 @@ export type AssistantThread = {
   enabledTools: string[];
   capabilities: AssistantThreadCapabilities;
   promptDeliveryMode: 'queue' | 'asap';
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AssistantProfile = {
+  id: string;
+  userId: string;
+  baseProfileId: string | null;
+  name: string;
+  wakePhrase: string;
+  wakePhraseAliases: string[];
+  ttsVoice: string;
+  enabled: boolean;
+  sortOrder: number;
+  systemPrompt: string | null;
+  enabledTools: string[] | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -314,6 +331,7 @@ export type VoiceSession = {
   userId: string;
   deviceId: string;
   assistantThreadId: string;
+  assistantProfileId: string | null;
   mode: string;
   startedAt: string;
   endedAt: string | null;
@@ -554,6 +572,11 @@ const ASSISTANT_DEFAULT_CAPABILITIES: AssistantThreadCapabilities = {
 };
 const ASSISTANT_NORMAL_SYSTEM_PROMPT_DEFAULT = 'You are VoiceStream, a concise standalone assistant. Answer directly and keep useful context in the thread.';
 const ASSISTANT_VOICE_SYSTEM_PROMPT_DEFAULT = 'You are VoiceStream, a concise voice assistant. Keep spoken replies short and practical.';
+const ASSISTANT_DEFAULT_PROFILE_NAME = 'Sebastian';
+const ASSISTANT_DEFAULT_WAKE_PHRASE = 'hey sebastian';
+const ASSISTANT_DEFAULT_WAKE_PHRASE_ALIASES = ['hay sebastian', 'hey sebastien', 'hay sebastien'];
+const ASSISTANT_DEFAULT_TTS_VOICE = 'austin';
+const ASSISTANT_TTS_VOICE_OPTIONS = ['autumn', 'diana', 'hannah', 'austin', 'daniel', 'troy'] as const;
 
 function parseJsonArray(raw: unknown, fallback: string[]): string[] {
   if (Array.isArray(raw)) return raw.map((item) => String(item)).filter(Boolean);
@@ -585,6 +608,42 @@ function normalizeRunStatus(raw: unknown): AssistantRunStatus {
 
 function normalizePromptDeliveryMode(raw: unknown): 'queue' | 'asap' {
   return String(raw ?? '').trim() === 'asap' ? 'asap' : 'queue';
+}
+
+function normalizeAssistantWakePhrase(raw: unknown): string {
+  const value = String(raw ?? '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return value.slice(0, 80).trim();
+}
+
+function assistantWakePhraseWordCount(phrase: string): number {
+  return phrase.split(/[^a-z0-9]+/).filter(Boolean).length;
+}
+
+function normalizeAssistantWakePhraseAliases(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const aliases: string[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    const alias = normalizeAssistantWakePhrase(item);
+    if (!alias || seen.has(alias)) continue;
+    seen.add(alias);
+    aliases.push(alias);
+  }
+  return aliases;
+}
+
+function cleanTtsVoice(raw: unknown): string {
+  const value = String(raw ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-zA-Z0-9_.:-]+/g, '')
+    .slice(0, 80);
+  return (ASSISTANT_TTS_VOICE_OPTIONS as readonly string[]).includes(value) ? value : '';
 }
 
 function rowUser(row: any): UserProfile {
@@ -700,6 +759,7 @@ function rowThread(row: any): AssistantThread {
     id: String(row.id),
     userId: String(row.user_id),
     deviceId: row.device_id == null ? null : String(row.device_id),
+    assistantProfileId: row.assistant_profile_id == null ? null : String(row.assistant_profile_id),
     title: String(row.title),
     source: String(row.source),
     provider: String(row.provider ?? ASSISTANT_DEFAULT_PROVIDER),
@@ -713,6 +773,25 @@ function rowThread(row: any): AssistantThread {
     enabledTools: parseJsonArray(row.enabled_tools_json, [...ASSISTANT_DEFAULT_ENABLED_TOOLS]),
     capabilities: parseJsonObject(row.capabilities_json, ASSISTANT_DEFAULT_CAPABILITIES),
     promptDeliveryMode: normalizePromptDeliveryMode(row.prompt_delivery_mode),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function rowAssistantProfile(row: any): AssistantProfile {
+  const enabledToolsRaw = row.enabled_tools_json;
+  return {
+    id: String(row.id),
+    userId: String(row.user_id),
+    baseProfileId: row.base_profile_id == null ? null : String(row.base_profile_id),
+    name: String(row.name ?? ASSISTANT_DEFAULT_PROFILE_NAME),
+    wakePhrase: normalizeAssistantWakePhrase(row.wake_phrase) || ASSISTANT_DEFAULT_WAKE_PHRASE,
+    wakePhraseAliases: normalizeAssistantWakePhraseAliases(parseJsonArray(row.wake_phrase_aliases_json, [])),
+    ttsVoice: cleanTtsVoice(row.tts_voice) || ASSISTANT_DEFAULT_TTS_VOICE,
+    enabled: asBool(row.enabled),
+    sortOrder: Number(row.sort_order ?? 0),
+    systemPrompt: row.system_prompt == null ? null : String(row.system_prompt),
+    enabledTools: enabledToolsRaw == null ? null : parseJsonArray(enabledToolsRaw, [...ASSISTANT_DEFAULT_ENABLED_TOOLS]),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
   };
@@ -894,6 +973,7 @@ function rowVoiceSession(row: any): VoiceSession {
     userId: String(row.user_id),
     deviceId: String(row.device_id),
     assistantThreadId: String(row.assistant_thread_id),
+    assistantProfileId: row.assistant_profile_id == null ? null : String(row.assistant_profile_id),
     mode: String(row.mode),
     startedAt: String(row.started_at),
     endedAt: row.ended_at == null ? null : String(row.ended_at),
@@ -1208,6 +1288,7 @@ export class VoiceStreamNextDb {
     const user = this.userByClerkId(input.clerkUserId);
     if (!user) throw new Error('failed to upsert user');
     this.ensureVoiceSettings(user.id);
+    this.ensureDefaultAssistantProfile(user.id);
     return user;
   }
 
@@ -2146,6 +2227,375 @@ export class VoiceStreamNextDb {
     return this.ensureAssistantSettings(userId);
   }
 
+  ensureDefaultAssistantProfile(userId: string): AssistantProfile {
+    const existing = this.db
+      .query('SELECT * FROM assistant_profiles WHERE user_id = $userId ORDER BY sort_order ASC, created_at ASC LIMIT 1')
+      .get({ $userId: userId });
+    if (existing) {
+      const existingRow = existing as any;
+      let touched = false;
+      if (
+        normalizeAssistantWakePhrase(existingRow.wake_phrase) === ASSISTANT_DEFAULT_WAKE_PHRASE
+        && (existingRow.wake_phrase_aliases_json == null || String(existingRow.wake_phrase_aliases_json).trim() === '')
+      ) {
+        this.db
+          .query(
+            `
+            UPDATE assistant_profiles
+            SET wake_phrase_aliases_json = $wakePhraseAliasesJson,
+                updated_at = $updatedAt
+            WHERE user_id = $userId AND id = $profileId
+          `,
+          )
+          .run({
+            $wakePhraseAliasesJson: JSON.stringify(ASSISTANT_DEFAULT_WAKE_PHRASE_ALIASES),
+            $updatedAt: nowIso(),
+            $userId: userId,
+            $profileId: String(existingRow.id),
+          });
+        existingRow.wake_phrase_aliases_json = JSON.stringify(ASSISTANT_DEFAULT_WAKE_PHRASE_ALIASES);
+        touched = true;
+      }
+      if (this.enabledAssistantProfileCount(userId) <= 0) {
+        this.db
+          .query(
+            `
+            UPDATE assistant_profiles
+            SET enabled = 1,
+                updated_at = $updatedAt
+            WHERE user_id = $userId AND id = $profileId
+          `,
+          )
+          .run({
+            $updatedAt: nowIso(),
+            $userId: userId,
+            $profileId: String(existingRow.id),
+          });
+        existingRow.enabled = 1;
+        touched = true;
+      }
+      if (touched) existingRow.updated_at = nowIso();
+      const profile = rowAssistantProfile(existingRow);
+      this.backfillAssistantProfileRefs(userId, profile.id);
+      return profile;
+    }
+    const at = nowIso();
+    const id = newId('apf');
+    this.db
+      .query(
+        `
+        INSERT INTO assistant_profiles (
+          id,
+          user_id,
+          base_profile_id,
+          name,
+          wake_phrase,
+          wake_phrase_aliases_json,
+          tts_voice,
+          enabled,
+          sort_order,
+          system_prompt,
+          enabled_tools_json,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          $id,
+          $userId,
+          NULL,
+          $name,
+          $wakePhrase,
+          $wakePhraseAliasesJson,
+          $ttsVoice,
+          1,
+          0,
+          NULL,
+          NULL,
+          $createdAt,
+          $updatedAt
+        )
+      `,
+      )
+      .run({
+        $id: id,
+        $userId: userId,
+        $name: ASSISTANT_DEFAULT_PROFILE_NAME,
+        $wakePhrase: ASSISTANT_DEFAULT_WAKE_PHRASE,
+        $wakePhraseAliasesJson: JSON.stringify(ASSISTANT_DEFAULT_WAKE_PHRASE_ALIASES),
+        $ttsVoice: ASSISTANT_DEFAULT_TTS_VOICE,
+        $createdAt: at,
+        $updatedAt: at,
+      });
+    this.backfillAssistantProfileRefs(userId, id);
+    return this.assistantProfile(userId, id)!;
+  }
+
+  listAssistantProfiles(userId: string): AssistantProfile[] {
+    this.ensureDefaultAssistantProfile(userId);
+    return this.db
+      .query('SELECT * FROM assistant_profiles WHERE user_id = $userId ORDER BY sort_order ASC, created_at ASC')
+      .all({ $userId: userId })
+      .map(rowAssistantProfile);
+  }
+
+  assistantProfile(userId: string, profileId: string): AssistantProfile | null {
+    const row = this.db
+      .query('SELECT * FROM assistant_profiles WHERE user_id = $userId AND id = $profileId')
+      .get({ $userId: userId, $profileId: profileId });
+    return row ? rowAssistantProfile(row) : null;
+  }
+
+  defaultAssistantProfile(userId: string): AssistantProfile {
+    return this.ensureDefaultAssistantProfile(userId);
+  }
+
+  enabledAssistantProfile(userId: string, profileId?: string | null): AssistantProfile | null {
+    if (profileId) {
+      const profile = this.assistantProfile(userId, profileId);
+      return profile?.enabled ? profile : null;
+    }
+    this.ensureDefaultAssistantProfile(userId);
+    const row = this.db
+      .query('SELECT * FROM assistant_profiles WHERE user_id = $userId AND enabled = 1 ORDER BY sort_order ASC, created_at ASC LIMIT 1')
+      .get({ $userId: userId });
+    return row ? rowAssistantProfile(row) : null;
+  }
+
+  createAssistantProfile(
+    userId: string,
+    input: {
+      name?: unknown;
+      wakePhrase?: unknown;
+      wakePhraseAliases?: unknown;
+      ttsVoice?: unknown;
+      baseProfileId?: unknown;
+      systemPrompt?: unknown;
+      enabledTools?: unknown;
+      enabled?: boolean;
+    },
+  ): AssistantProfile {
+    this.ensureDefaultAssistantProfile(userId);
+    const name = String(input.name ?? '').trim().slice(0, 80) || 'Assistant';
+    const wakePhrase = normalizeAssistantWakePhrase(input.wakePhrase);
+    if (assistantWakePhraseWordCount(wakePhrase) < 2) {
+      throw Object.assign(new Error('wake phrase must contain at least two words'), { statusCode: 400 });
+    }
+    const wakePhraseAliases = normalizeAssistantWakePhraseAliases(input.wakePhraseAliases);
+    this.assertAssistantWakePhrasesAvailable(userId, null, wakePhrase, wakePhraseAliases);
+    const ttsVoice = cleanTtsVoice(input.ttsVoice) || ASSISTANT_DEFAULT_TTS_VOICE;
+    const baseProfileId = String(input.baseProfileId ?? '').trim() || null;
+    if (baseProfileId && !this.assistantProfile(userId, baseProfileId)) {
+      throw Object.assign(new Error('unknown base assistant profile'), { statusCode: 404 });
+    }
+    const enabledTools = Array.isArray(input.enabledTools) ? input.enabledTools.map((tool) => String(tool).trim()).filter(Boolean) : null;
+    const at = nowIso();
+    const id = newId('apf');
+    const row = this.db.query('SELECT COALESCE(MAX(sort_order), -1) + 1 AS nextSortOrder FROM assistant_profiles WHERE user_id = $userId').get({ $userId: userId }) as any;
+    try {
+      this.db
+        .query(
+          `
+          INSERT INTO assistant_profiles (
+            id,
+            user_id,
+            base_profile_id,
+            name,
+            wake_phrase,
+            wake_phrase_aliases_json,
+            tts_voice,
+            enabled,
+            sort_order,
+            system_prompt,
+            enabled_tools_json,
+            created_at,
+            updated_at
+          )
+          VALUES (
+            $id,
+            $userId,
+            $baseProfileId,
+            $name,
+            $wakePhrase,
+            $wakePhraseAliasesJson,
+            $ttsVoice,
+            $enabled,
+            $sortOrder,
+            $systemPrompt,
+            $enabledToolsJson,
+            $createdAt,
+            $updatedAt
+          )
+        `,
+        )
+        .run({
+          $id: id,
+          $userId: userId,
+          $baseProfileId: baseProfileId,
+          $name: name,
+          $wakePhrase: wakePhrase,
+          $wakePhraseAliasesJson: JSON.stringify(wakePhraseAliases),
+          $ttsVoice: ttsVoice,
+          $enabled: input.enabled === false ? 0 : 1,
+          $sortOrder: Number(row?.nextSortOrder ?? 0),
+          $systemPrompt: input.systemPrompt == null ? null : String(input.systemPrompt),
+          $enabledToolsJson: enabledTools ? JSON.stringify(enabledTools) : null,
+          $createdAt: at,
+          $updatedAt: at,
+        });
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        throw Object.assign(new Error('wake phrase is already used by another assistant profile'), { statusCode: 409 });
+      }
+      throw error;
+    }
+    return this.assistantProfile(userId, id)!;
+  }
+
+  updateAssistantProfile(
+    userId: string,
+    profileId: string,
+    input: Partial<Pick<AssistantProfile, 'name' | 'wakePhrase' | 'wakePhraseAliases' | 'ttsVoice' | 'baseProfileId' | 'enabled' | 'sortOrder' | 'systemPrompt' | 'enabledTools'>>,
+  ): AssistantProfile | null {
+    const current = this.assistantProfile(userId, profileId);
+    if (!current) return null;
+    const wakePhrase = input.wakePhrase === undefined ? current.wakePhrase : normalizeAssistantWakePhrase(input.wakePhrase);
+    if (assistantWakePhraseWordCount(wakePhrase) < 2) {
+      throw Object.assign(new Error('wake phrase must contain at least two words'), { statusCode: 400 });
+    }
+    const wakePhraseAliases = (input as any).wakePhraseAliases === undefined
+      ? current.wakePhraseAliases
+      : normalizeAssistantWakePhraseAliases((input as any).wakePhraseAliases);
+    this.assertAssistantWakePhrasesAvailable(userId, profileId, wakePhrase, wakePhraseAliases);
+    const enabled = input.enabled ?? current.enabled;
+    if (!enabled && current.enabled && this.enabledAssistantProfileCount(userId) <= 1) {
+      throw Object.assign(new Error('at least one assistant profile must remain enabled'), { statusCode: 400 });
+    }
+    const baseProfileId = input.baseProfileId === undefined ? current.baseProfileId : input.baseProfileId;
+    if (baseProfileId && baseProfileId === profileId) {
+      throw Object.assign(new Error('assistant profile cannot inherit from itself'), { statusCode: 400 });
+    }
+    if (baseProfileId && !this.assistantProfile(userId, baseProfileId)) {
+      throw Object.assign(new Error('unknown base assistant profile'), { statusCode: 404 });
+    }
+    if (baseProfileId && this.assistantProfileInheritanceCreatesCycle(userId, profileId, baseProfileId)) {
+      throw Object.assign(new Error('assistant profile inheritance cannot contain a cycle'), { statusCode: 400 });
+    }
+    const at = nowIso();
+    try {
+      this.db
+        .query(
+          `
+          UPDATE assistant_profiles
+          SET base_profile_id = $baseProfileId,
+              name = $name,
+              wake_phrase = $wakePhrase,
+              wake_phrase_aliases_json = $wakePhraseAliasesJson,
+              tts_voice = $ttsVoice,
+              enabled = $enabled,
+              sort_order = $sortOrder,
+              system_prompt = $systemPrompt,
+              enabled_tools_json = $enabledToolsJson,
+              updated_at = $updatedAt
+          WHERE user_id = $userId AND id = $profileId
+        `,
+        )
+        .run({
+          $baseProfileId: baseProfileId ?? null,
+          $name: input.name === undefined ? current.name : String(input.name).trim().slice(0, 80) || current.name,
+          $wakePhrase: wakePhrase,
+          $wakePhraseAliasesJson: JSON.stringify(wakePhraseAliases),
+          $ttsVoice: input.ttsVoice === undefined ? current.ttsVoice : cleanTtsVoice(input.ttsVoice) || current.ttsVoice,
+          $enabled: enabled ? 1 : 0,
+          $sortOrder: input.sortOrder ?? current.sortOrder,
+          $systemPrompt: input.systemPrompt === undefined ? current.systemPrompt : input.systemPrompt,
+          $enabledToolsJson: input.enabledTools === undefined ? (current.enabledTools ? JSON.stringify(current.enabledTools) : null) : (input.enabledTools ? JSON.stringify(input.enabledTools) : null),
+          $updatedAt: at,
+          $userId: userId,
+          $profileId: profileId,
+        });
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        throw Object.assign(new Error('wake phrase is already used by another assistant profile'), { statusCode: 409 });
+      }
+      throw error;
+    }
+    return this.assistantProfile(userId, profileId);
+  }
+
+  resolvedAssistantProfileSystemPrompt(userId: string, profileId: string | null, seenProfileIds = new Set<string>()): string | null {
+    const profile = profileId ? this.assistantProfile(userId, profileId) : this.defaultAssistantProfile(userId);
+    if (!profile) return null;
+    if (seenProfileIds.has(profile.id)) return null;
+    seenProfileIds.add(profile.id);
+    if (profile.systemPrompt?.trim()) return profile.systemPrompt;
+    if (profile.baseProfileId) return this.resolvedAssistantProfileSystemPrompt(userId, profile.baseProfileId, seenProfileIds);
+    return null;
+  }
+
+  resolvedAssistantProfileEnabledTools(userId: string, profileId: string | null, seenProfileIds = new Set<string>()): string[] | null {
+    const profile = profileId ? this.assistantProfile(userId, profileId) : this.defaultAssistantProfile(userId);
+    if (!profile) return null;
+    if (seenProfileIds.has(profile.id)) return null;
+    seenProfileIds.add(profile.id);
+    if (profile.enabledTools) return profile.enabledTools;
+    if (profile.baseProfileId) return this.resolvedAssistantProfileEnabledTools(userId, profile.baseProfileId, seenProfileIds);
+    return null;
+  }
+
+  private assertAssistantWakePhrasesAvailable(userId: string, profileId: string | null, wakePhrase: string, wakePhraseAliases: string[]): void {
+    const phrases = [wakePhrase, ...wakePhraseAliases].filter(Boolean);
+    const seen = new Set<string>();
+    for (const phrase of phrases) {
+      if (assistantWakePhraseWordCount(phrase) < 2) {
+        throw Object.assign(new Error('wake phrases must contain at least two words'), { statusCode: 400 });
+      }
+      if (seen.has(phrase)) {
+        throw Object.assign(new Error('wake phrases must be unique'), { statusCode: 400 });
+      }
+      seen.add(phrase);
+    }
+    const rows = this.db
+      .query('SELECT id, wake_phrase, wake_phrase_aliases_json FROM assistant_profiles WHERE user_id = $userId')
+      .all({ $userId: userId }) as any[];
+    for (const row of rows) {
+      if (profileId && String(row.id) === profileId) continue;
+      const otherPhrases = [
+        normalizeAssistantWakePhrase(row.wake_phrase),
+        ...normalizeAssistantWakePhraseAliases(parseJsonArray(row.wake_phrase_aliases_json, [])),
+      ];
+      if (otherPhrases.some((phrase) => phrase && seen.has(phrase))) {
+        throw Object.assign(new Error('wake phrase is already used by another assistant profile'), { statusCode: 409 });
+      }
+    }
+  }
+
+  private enabledAssistantProfileCount(userId: string): number {
+    const row = this.db
+      .query('SELECT COUNT(*) AS count FROM assistant_profiles WHERE user_id = $userId AND enabled = 1')
+      .get({ $userId: userId }) as any;
+    return Number(row?.count ?? 0);
+  }
+
+  private assistantProfileInheritanceCreatesCycle(userId: string, profileId: string, baseProfileId: string): boolean {
+    const seen = new Set([profileId]);
+    let nextProfileId: string | null = baseProfileId;
+    while (nextProfileId) {
+      if (seen.has(nextProfileId)) return true;
+      seen.add(nextProfileId);
+      nextProfileId = this.assistantProfile(userId, nextProfileId)?.baseProfileId ?? null;
+    }
+    return false;
+  }
+
+  private backfillAssistantProfileRefs(userId: string, profileId: string): void {
+    this.db
+      .query('UPDATE assistant_threads SET assistant_profile_id = $profileId WHERE user_id = $userId AND assistant_profile_id IS NULL')
+      .run({ $profileId: profileId, $userId: userId });
+    this.db
+      .query('UPDATE voice_sessions SET assistant_profile_id = $profileId WHERE user_id = $userId AND assistant_profile_id IS NULL')
+      .run({ $profileId: profileId, $userId: userId });
+  }
+
   assistantApiKeyView(userId: string, providerRaw: unknown): AssistantApiKeyView {
     const provider = cleanAssistantApiKeyProvider(providerRaw);
     const row = this.db
@@ -2649,6 +3099,7 @@ export class VoiceStreamNextDb {
       title?: string;
       source?: string;
       deviceId?: string | null;
+      assistantProfileId?: string | null;
       voiceEnabled?: boolean;
       provider?: string;
       model?: string;
@@ -2662,6 +3113,9 @@ export class VoiceStreamNextDb {
     const id = newId('thr');
     const at = nowIso();
     const settings = this.ensureAssistantSettings(userId);
+    const profile = this.enabledAssistantProfile(userId, input.assistantProfileId);
+    if (!profile) throw Object.assign(new Error('unknown or disabled assistant profile'), { statusCode: 404 });
+    const enabledTools = input.enabledTools ?? this.resolvedAssistantProfileEnabledTools(userId, profile.id) ?? settings.defaultEnabledTools;
     this.db
       .query(
         `
@@ -2669,6 +3123,7 @@ export class VoiceStreamNextDb {
           id,
           user_id,
           device_id,
+          assistant_profile_id,
           title,
           source,
           provider,
@@ -2689,6 +3144,7 @@ export class VoiceStreamNextDb {
           $id,
           $userId,
           $deviceId,
+          $assistantProfileId,
           $title,
           $source,
           $provider,
@@ -2711,14 +3167,15 @@ export class VoiceStreamNextDb {
         $id: id,
         $userId: userId,
         $deviceId: input.deviceId ?? null,
+        $assistantProfileId: profile.id,
         $title: input.title?.trim() || 'New thread',
-        $source: 'voice',
+        $source: input.source?.trim() || 'voice',
         $provider: input.provider?.trim() || settings.defaultProvider,
         $model: input.model?.trim() || settings.defaultModel,
         $thinkingLevel: input.thinkingLevel?.trim() || settings.defaultThinkingLevel,
         $voiceEnabled: 1,
         $autoApprove: input.autoApprove ? 1 : 0,
-        $enabledToolsJson: JSON.stringify(input.enabledTools ?? settings.defaultEnabledTools),
+        $enabledToolsJson: JSON.stringify(enabledTools),
         $capabilitiesJson: JSON.stringify(input.capabilities ?? ASSISTANT_DEFAULT_CAPABILITIES),
         $promptDeliveryMode: input.promptDeliveryMode === 'asap' ? 'asap' : 'queue',
         $createdAt: at,
@@ -2798,21 +3255,27 @@ export class VoiceStreamNextDb {
     return this.thread(userId, threadId);
   }
 
-  latestVoiceThread(userId: string, sourceDeviceId: string): AssistantThread {
-    return this.latestVoiceThreadOrNull(userId) ?? this.createThread(userId, { deviceId: sourceDeviceId, source: 'voice', title: 'New thread' });
+  latestVoiceThread(userId: string, sourceDeviceId: string, assistantProfileId?: string | null): AssistantThread {
+    const profile = this.enabledAssistantProfile(userId, assistantProfileId);
+    if (!profile) throw Object.assign(new Error('unknown or disabled assistant profile'), { statusCode: 404 });
+    return this.latestVoiceThreadOrNull(userId, profile.id) ??
+      this.createThread(userId, { deviceId: sourceDeviceId, assistantProfileId: profile.id, source: 'voice', title: 'New thread' });
   }
 
-  latestVoiceThreadOrNull(userId: string): AssistantThread | null {
+  latestVoiceThreadOrNull(userId: string, assistantProfileId?: string | null): AssistantThread | null {
+    const profile = this.enabledAssistantProfile(userId, assistantProfileId);
+    if (!profile) return null;
     const row = this.db
       .query(
         `
         SELECT * FROM assistant_threads
         WHERE user_id = $userId
+          AND assistant_profile_id = $assistantProfileId
         ORDER BY created_at DESC, updated_at DESC
         LIMIT 1
       `,
       )
-      .get({ $userId: userId });
+      .get({ $userId: userId, $assistantProfileId: profile.id });
     return row ? rowThread(row) : null;
   }
 
@@ -3421,19 +3884,29 @@ export class VoiceStreamNextDb {
     return result.changes > 0;
   }
 
-  createVoiceSession(userId: string, deviceId: string, mode = 'recording'): VoiceSession {
-    const thread = this.latestVoiceThread(userId, deviceId);
+  createVoiceSession(userId: string, deviceId: string, mode = 'recording', options: { assistantProfileId?: string | null } = {}): VoiceSession {
+    const profile = this.enabledAssistantProfile(userId, options.assistantProfileId);
+    if (!profile) throw Object.assign(new Error('unknown or disabled assistant profile'), { statusCode: 404 });
+    const thread = this.latestVoiceThread(userId, deviceId, profile.id);
     const id = newId('vsn');
     const at = nowIso();
     const cleanMode = mode.trim() || 'recording';
     this.db
       .query(
         `
-        INSERT INTO voice_sessions (id, user_id, device_id, assistant_thread_id, mode, started_at)
-        VALUES ($id, $userId, $deviceId, $assistantThreadId, $mode, $startedAt)
+        INSERT INTO voice_sessions (id, user_id, device_id, assistant_thread_id, assistant_profile_id, mode, started_at)
+        VALUES ($id, $userId, $deviceId, $assistantThreadId, $assistantProfileId, $mode, $startedAt)
       `,
       )
-      .run({ $id: id, $userId: userId, $deviceId: deviceId, $assistantThreadId: thread.id, $mode: cleanMode, $startedAt: at });
+      .run({
+        $id: id,
+        $userId: userId,
+        $deviceId: deviceId,
+        $assistantThreadId: thread.id,
+        $assistantProfileId: profile.id,
+        $mode: cleanMode,
+        $startedAt: at,
+      });
     const row = this.db.query('SELECT * FROM voice_sessions WHERE id = $id').get({ $id: id });
     return rowVoiceSession(row);
   }
@@ -3838,6 +4311,7 @@ export class VoiceStreamNextDb {
   dashboard(user: UserProfile): any {
     const settings = this.ensureVoiceSettings(user.id);
     const assistantSettings = this.ensureAssistantSettings(user.id);
+    const assistantProfiles = this.listAssistantProfiles(user.id);
     const threads = this.listThreads(user.id);
     const logs = this.listLogs(user.id, 60);
     const devices = this.listDevices(user.id);
@@ -3848,6 +4322,7 @@ export class VoiceStreamNextDb {
       user,
       settings,
       assistantSettings,
+      assistantProfiles,
       threads,
       logs,
       approvalCodes: this.listApprovalCodes(user.id, 40),

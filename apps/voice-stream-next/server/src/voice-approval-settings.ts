@@ -168,7 +168,10 @@ export function parseVoiceApprovalSettings(raw: unknown): VoiceApprovalSettings 
   };
 }
 
-export function voiceApprovalSettingsResponse(settings: VoiceApprovalSettings & { updatedAt: string; speechPlaybackTarget?: string }) {
+export function voiceApprovalSettingsResponse(
+  settings: VoiceApprovalSettings & { updatedAt: string; speechPlaybackTarget?: string },
+  options: { assistantProfiles?: unknown[] } = {},
+) {
   return {
     ok: true as const,
     settings: {
@@ -185,9 +188,11 @@ export function voiceApprovalSettingsResponse(settings: VoiceApprovalSettings & 
       postPromptCommandSuppressionMs: settings.postPromptCommandSuppressionMs,
       speechPlaybackTarget: settings.speechPlaybackTarget ?? 'auto',
       updatedAt: settings.updatedAt,
+      assistantProfiles: options.assistantProfiles ?? [],
     },
     defaults: VOICE_APPROVAL_SETTINGS_DEFAULT,
     limits: VOICE_APPROVAL_SETTINGS_LIMITS,
+    assistantProfiles: options.assistantProfiles ?? [],
   };
 }
 

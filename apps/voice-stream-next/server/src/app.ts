@@ -854,7 +854,9 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       return;
     }
     try {
-      const speech = await synthesizeSpeech(clean);
+      const thread = metadata.threadId ? db.thread(userId, metadata.threadId) : null;
+      const profile = thread?.assistantProfileId ? db.assistantProfile(userId, thread.assistantProfileId) : db.defaultAssistantProfile(userId);
+      const speech = await synthesizeSpeech(clean, { voice: profile?.ttsVoice });
       if (!speech.audio) {
         addLog(userId, {
           source: 'speech',
@@ -883,7 +885,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         source: 'speech',
         level: delivered ? 'info' : 'warn',
         message: delivered ? `Speech playback queued on ${destination.surface}` : `Speech playback failed for ${destination.surface}`,
-        detailsJson: JSON.stringify({ source: metadata.source, target: destination.surface, chars: clean.length, bytes: speech.audio.byteLength }),
+        detailsJson: JSON.stringify({ source: metadata.source, target: destination.surface, assistantProfileId: profile?.id ?? null, ttsVoice: profile?.ttsVoice ?? null, chars: clean.length, bytes: speech.audio.byteLength }),
       });
     } catch (error: any) {
       addLog(userId, {
@@ -1227,7 +1229,9 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
   );
 
   app.get('/api/settings/voice-approval', async (req, reply) =>
-    withUser(req, reply, db, clerkEnabled, async (ctx) => voiceApprovalSettingsResponse(db.ensureVoiceSettings(ctx.user.id))),
+    withUser(req, reply, db, clerkEnabled, async (ctx) =>
+      voiceApprovalSettingsResponse(db.ensureVoiceSettings(ctx.user.id), { assistantProfiles: db.listAssistantProfiles(ctx.user.id) }),
+    ),
   );
 
   app.post('/api/settings/voice-approval', async (req, reply) =>
@@ -1240,7 +1244,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       }
       const settings = db.updateVoiceApprovalSettings(ctx.user.id, parsed);
       emitAppEvent(ctx.user.id, 'settings_changed', { settings: 'voice_approval' });
-      return voiceApprovalSettingsResponse(settings);
+      return voiceApprovalSettingsResponse(settings, { assistantProfiles: db.listAssistantProfiles(ctx.user.id) });
     }),
   );
 
@@ -1778,7 +1782,8 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     return {
       ok: true,
       device,
-      settings: voiceApprovalSettingsResponse(db.ensureVoiceSettings(auth.device.userId)).settings,
+      settings: voiceApprovalSettingsResponse(db.ensureVoiceSettings(auth.device.userId), { assistantProfiles: db.listAssistantProfiles(auth.device.userId) }).settings,
+      assistantProfiles: db.listAssistantProfiles(auth.device.userId),
       minClientVersion: minClientVersion(),
     };
   });
@@ -1787,6 +1792,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     const deviceId = String((req.params as any).deviceId ?? '');
     const query = (req.query ?? {}) as Record<string, unknown>;
     const token = cleanText(req.headers['x-voice-device-token'] || query.token);
+    const assistantProfileId = queryValue(query.assistantProfileId) || null;
     const clientVersion = parseClientVersion(req.headers['x-voice-client-version'], parseClientVersion(query.clientVersion, parseClientVersion(query.protocolVersion, null)));
     const auth = verifyDeviceAuth(db, deviceId, token, clientVersion);
     if (!auth.ok) {
@@ -1798,7 +1804,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       });
       return;
     }
-    const thread = db.latestVoiceThreadOrNull(auth.device.userId);
+    const thread = db.latestVoiceThreadOrNull(auth.device.userId, assistantProfileId);
     if (!thread) {
       return {
         ok: true,
@@ -1831,6 +1837,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     const deviceId = String((req.params as any).deviceId ?? '');
     const query = (req.query ?? {}) as Record<string, unknown>;
     const token = cleanText(req.headers['x-voice-device-token'] || query.token);
+    const assistantProfileId = queryValue(query.assistantProfileId) || null;
     const clientVersion = parseClientVersion(req.headers['x-voice-client-version'], parseClientVersion(query.clientVersion, parseClientVersion(query.protocolVersion, null)));
     const auth = verifyDeviceAuth(db, deviceId, token, clientVersion);
     if (!auth.ok) {
@@ -1842,7 +1849,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       });
       return;
     }
-    const thread = db.latestVoiceThreadOrNull(auth.device.userId);
+    const thread = db.latestVoiceThreadOrNull(auth.device.userId, assistantProfileId);
     if (!thread) {
       return {
         ok: true,
@@ -2139,6 +2146,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       const thread = db.createThread(ctx.user.id, {
         title: cleanText(body.title, 'New thread') || 'New thread',
         source: 'voice',
+        assistantProfileId: cleanText(body.assistantProfileId) || null,
         voiceEnabled: true,
         provider: requestedProvider || undefined,
         model: cleanText(body.model) || undefined,
@@ -2470,6 +2478,51 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     }),
   );
 
+  app.get('/api/assistant/profiles', async (req, reply) =>
+    withUser(req, reply, db, clerkEnabled, async (ctx) => ({ ok: true, profiles: db.listAssistantProfiles(ctx.user.id) })),
+  );
+
+  app.post('/api/assistant/profiles', async (req, reply) =>
+    withUser(req, reply, db, clerkEnabled, async (ctx) => {
+      const body = jsonBody(req);
+      const profile = db.createAssistantProfile(ctx.user.id, {
+        name: body.name,
+        wakePhrase: body.wakePhrase,
+        wakePhraseAliases: body.wakePhraseAliases,
+        ttsVoice: body.ttsVoice,
+        baseProfileId: body.baseProfileId,
+        systemPrompt: body.systemPrompt,
+        enabledTools: body.enabledTools,
+        enabled: body.enabled === undefined ? true : Boolean(body.enabled),
+      });
+      emitAssistantChange('assistant_profile_created', undefined, ctx.user.id);
+      emitAppEvent(ctx.user.id, 'settings_changed', { settings: 'assistant_profiles' });
+      return { ok: true, profile, profiles: db.listAssistantProfiles(ctx.user.id), snapshot: assistantSnapshot(db, ctx.user.id) };
+    }),
+  );
+
+  app.patch('/api/assistant/profiles/:profileId', async (req, reply) =>
+    withUser(req, reply, db, clerkEnabled, async (ctx) => {
+      const profileId = String((req.params as any).profileId ?? '');
+      const body = jsonBody(req);
+      const profile = db.updateAssistantProfile(ctx.user.id, profileId, {
+        ...(body.name !== undefined ? { name: cleanText(body.name, 'Assistant') || 'Assistant' } : {}),
+        ...(body.wakePhrase !== undefined ? { wakePhrase: body.wakePhrase } : {}),
+        ...(body.wakePhraseAliases !== undefined ? { wakePhraseAliases: body.wakePhraseAliases } : {}),
+        ...(body.ttsVoice !== undefined ? { ttsVoice: body.ttsVoice } : {}),
+        ...(body.baseProfileId !== undefined ? { baseProfileId: cleanText(body.baseProfileId) || null } : {}),
+        ...(body.enabled !== undefined ? { enabled: Boolean(body.enabled) } : {}),
+        ...(body.sortOrder !== undefined ? { sortOrder: Number(body.sortOrder) || 0 } : {}),
+        ...(body.systemPrompt !== undefined ? { systemPrompt: cleanText(body.systemPrompt) || null } : {}),
+        ...(body.enabledTools !== undefined ? { enabledTools: Array.isArray(body.enabledTools) ? body.enabledTools.map((tool: unknown) => cleanText(tool)).filter(Boolean) : null } : {}),
+      });
+      if (!profile) throw Object.assign(new Error('unknown assistant profile'), { statusCode: 404 });
+      emitAssistantChange('assistant_profile_updated', undefined, ctx.user.id);
+      emitAppEvent(ctx.user.id, 'settings_changed', { settings: 'assistant_profiles' });
+      return { ok: true, profile, profiles: db.listAssistantProfiles(ctx.user.id), snapshot: assistantSnapshot(db, ctx.user.id) };
+    }),
+  );
+
   app.get('/api/assistant/keys', async (req, reply) =>
     withUser(req, reply, db, clerkEnabled, async (ctx) => ({
       ok: true,
@@ -2590,6 +2643,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     const body = jsonBody(req);
     const deviceId = cleanText(body.deviceId);
     const mode = cleanVoiceStreamMode(cleanText(body.mode));
+    const assistantProfileId = cleanText(body.assistantProfileId) || null;
     if (!deviceId) throw Object.assign(new Error('deviceId is required'), { statusCode: 400 });
     const token = cleanText(body.token || req.headers['x-voice-device-token']);
     if (token) {
@@ -2604,13 +2658,13 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         return;
       }
       const device = resolveDeviceInstallation(db, auth.device, cleanText(body.installationId || req.headers['x-voice-installation-id']) || null, token);
-      const session = db.createVoiceSession(device.userId, device.id, mode);
+      const session = db.createVoiceSession(device.userId, device.id, mode, { assistantProfileId });
       return { ok: true, session, device };
     }
     return withUser(req, reply, db, clerkEnabled, async (ctx) => {
       const device = db.deviceForUser(ctx.user.id, deviceId);
       if (!device || device.revokedAt) throw Object.assign(new Error('unknown device'), { statusCode: 404 });
-      const session = db.createVoiceSession(ctx.user.id, deviceId, mode);
+      const session = db.createVoiceSession(ctx.user.id, deviceId, mode, { assistantProfileId });
       return { ok: true, session };
     });
   },
@@ -2623,6 +2677,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     const installationId = cleanText(query.installationId) || null;
     const requestedSessionId = queryValue(query.sessionId);
     const streamMode = cleanVoiceStreamMode(queryValue(query.mode));
+    const assistantProfileId = queryValue(query.assistantProfileId) || null;
     const ignoreCommands = queryValue(query.ignoreCommands) === '1';
     const verifiedDevice = verifyDeviceAuth(db, deviceId, token, parseClientVersion(query.clientVersion, parseClientVersion(query.protocolVersion, null)));
     if (!verifiedDevice.ok) {
@@ -2879,10 +2934,14 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       streamingManager?.stop();
       clearInterval(heartbeat);
       clearDurationLimit();
+      const requestedSession = requestedSessionId ? db.voiceSessionForDevice(device.userId, device.id, requestedSessionId) : null;
+      const profileMatchedRequestedSession = requestedSession && (!assistantProfileId || requestedSession.assistantProfileId === assistantProfileId)
+        ? requestedSession
+        : null;
       const session =
-        (requestedSessionId ? db.voiceSessionForDevice(device.userId, device.id, requestedSessionId) : null) ??
-        db.latestVoiceSessionForDevice(device.userId, device.id) ??
-        db.createVoiceSession(device.userId, device.id, streamMode);
+        profileMatchedRequestedSession ??
+        (assistantProfileId ? null : db.latestVoiceSessionForDevice(device.userId, device.id)) ??
+        db.createVoiceSession(device.userId, device.id, streamMode, { assistantProfileId });
       const recordingMode = voiceRecordingMode(streamMode);
       const recordingPcm = recordingMode ? concatChunks(chunks, storedBytes) : new Uint8Array(0);
       let transcript = '';

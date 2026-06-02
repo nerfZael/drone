@@ -42,7 +42,8 @@ function groqTtsModel(): string {
     GROQ_TTS_DEFAULT_MODEL;
 }
 
-function groqTtsVoice(): string {
+function groqTtsVoice(voice?: string): string {
+  if (voice?.trim()) return voice.trim();
   return process.env.GROQ_TTS_VOICE?.trim() ||
     process.env.VOICE_STREAM_NEXT_TTS_VOICE?.trim() ||
     GROQ_TTS_DEFAULT_VOICE;
@@ -93,7 +94,7 @@ export async function transcribePcm16(pcm: Uint8Array): Promise<RuntimeResult> {
   };
 }
 
-export async function synthesizeSpeech(text: string): Promise<{ audio: Uint8Array | null; provider: 'groq' | 'fallback' }> {
+export async function synthesizeSpeech(text: string, options: { voice?: string } = {}): Promise<{ audio: Uint8Array | null; provider: 'groq' | 'fallback' }> {
   const input = text.trim().slice(0, 4096);
   if (!groqTtsApiKey() || !input) {
     return { audio: null, provider: 'fallback' };
@@ -106,7 +107,7 @@ export async function synthesizeSpeech(text: string): Promise<{ audio: Uint8Arra
     },
     body: JSON.stringify({
       model: groqTtsModel(),
-      voice: groqTtsVoice(),
+      voice: groqTtsVoice(options.voice),
       input,
       response_format: 'wav',
     }),

@@ -21,6 +21,7 @@ import type {
   AssistantExtensionToolRoute,
   AssistantMessage,
   AssistantModelOption,
+  AssistantProfile,
   AssistantQueuedPromptRecord,
   AssistantSkillRecord,
   AssistantSnapshot,
@@ -71,6 +72,21 @@ type AssistantSkillDraft = {
   toolNamesText: string;
   disableModelInvocation: boolean;
 };
+type AssistantProfileDraft = {
+  name: string;
+  wakePhrase: string;
+  wakePhraseAliases: string[];
+  ttsVoice: string;
+  enabled: boolean;
+};
+const ASSISTANT_TTS_VOICE_OPTIONS = [
+  { id: 'autumn', label: 'Autumn - female' },
+  { id: 'diana', label: 'Diana - female' },
+  { id: 'hannah', label: 'Hannah - female' },
+  { id: 'austin', label: 'Austin - male' },
+  { id: 'daniel', label: 'Daniel - male' },
+  { id: 'troy', label: 'Troy - male' },
+] as const;
 type AppEvent = {
   type: string;
   sequence: number;
@@ -262,6 +278,26 @@ function skillPayloadFromDraft(draft: AssistantSkillDraft): Record<string, unkno
       .map((item) => item.trim())
       .filter(Boolean),
     disableModelInvocation: draft.disableModelInvocation,
+  };
+}
+
+function profileDraftFromAssistantProfile(profile: AssistantProfile): AssistantProfileDraft {
+  return {
+    name: profile.name,
+    wakePhrase: profile.wakePhrase,
+    wakePhraseAliases: profile.wakePhraseAliases ?? [],
+    ttsVoice: profile.ttsVoice,
+    enabled: profile.enabled,
+  };
+}
+
+function assistantProfilePayloadFromDraft(draft: AssistantProfileDraft): Record<string, unknown> {
+  return {
+    name: draft.name.trim(),
+    wakePhrase: draft.wakePhrase.trim(),
+    wakePhraseAliases: draft.wakePhraseAliases.map((alias) => alias.trim()).filter(Boolean),
+    ttsVoice: draft.ttsVoice.trim(),
+    enabled: draft.enabled,
   };
 }
 
@@ -1085,6 +1121,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const [codexConnectFlow, setCodexConnectFlow] = React.useState<{ state: string; authorizationUrl: string; redirectUri: string; expiresAt: string } | null>(null);
   const [codexCodeDraft, setCodexCodeDraft] = React.useState('');
   const [apiKeyDrafts, setApiKeyDrafts] = React.useState<Record<'openai' | 'exa', string>>({ openai: '', exa: '' });
+  const [assistantProfileDrafts, setAssistantProfileDrafts] = React.useState<Record<string, AssistantProfileDraft>>({});
   const [skillDraft, setSkillDraft] = React.useState<AssistantSkillDraft>(() => emptySkillDraft());
   const [deviceNameEditor, setDeviceNameEditor] = React.useState<{ deviceId: string; draft: string } | null>(null);
   const [deviceName, setDeviceName] = React.useState('Android voice client');
@@ -1249,6 +1286,17 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   }, [
     assistantSnapshotData?.assistantSettings.voiceSystemPrompt,
   ]);
+
+  React.useEffect(() => {
+    const profiles = assistantSnapshotData?.assistantProfiles ?? [];
+    setAssistantProfileDrafts((current) => {
+      const next: Record<string, AssistantProfileDraft> = {};
+      for (const profile of profiles) {
+        next[profile.id] = current[profile.id] ?? profileDraftFromAssistantProfile(profile);
+      }
+      return next;
+    });
+  }, [assistantSnapshotData?.assistantProfiles]);
 
   React.useEffect(() => {
     if (systemPromptOpen) seedSystemPromptDrafts();
@@ -2098,6 +2146,63 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     }
   }
 
+  function updateAssistantProfileDraft(profileId: string, patch: Partial<AssistantProfileDraft>) {
+    setAssistantProfileDrafts((current) => ({
+      ...current,
+      [profileId]: {
+        ...(current[profileId] ?? { name: '', wakePhrase: '', wakePhraseAliases: [], ttsVoice: '', enabled: true }),
+        ...patch,
+      },
+    }));
+  }
+
+  async function saveAssistantProfile(profile: AssistantProfile) {
+    const draft = assistantProfileDrafts[profile.id] ?? profileDraftFromAssistantProfile(profile);
+    setBusy(true);
+    setError(null);
+    try {
+      const data = await client.request<{ ok: true; profile: AssistantProfile; profiles: AssistantProfile[]; snapshot: AssistantSnapshot }>(
+        `/api/assistant/profiles/${encodeURIComponent(profile.id)}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify(assistantProfilePayloadFromDraft(draft)),
+        },
+      );
+      setAssistantSnapshotData(data.snapshot);
+      setAssistantProfileDrafts((current) => ({ ...current, [data.profile.id]: profileDraftFromAssistantProfile(data.profile) }));
+      setNotice('Saved assistant profile.');
+    } catch (err: any) {
+      setError(err?.message ?? String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createAssistantProfile() {
+    const existingCount = assistantSnapshotData?.assistantProfiles.length ?? 0;
+    setBusy(true);
+    setError(null);
+    try {
+      const data = await client.request<{ ok: true; profile: AssistantProfile; profiles: AssistantProfile[]; snapshot: AssistantSnapshot }>('/api/assistant/profiles', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: `Assistant ${existingCount + 1}`,
+          wakePhrase: `hey assistant ${existingCount + 1}`,
+          wakePhraseAliases: [],
+          ttsVoice: 'austin',
+          enabled: true,
+        }),
+      });
+      setAssistantSnapshotData(data.snapshot);
+      setAssistantProfileDrafts((current) => ({ ...current, [data.profile.id]: profileDraftFromAssistantProfile(data.profile) }));
+      setNotice('Created assistant profile.');
+    } catch (err: any) {
+      setError(err?.message ?? String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function saveAssistantApiKey(provider: 'openai' | 'exa') {
     const apiKey = apiKeyDrafts[provider].trim();
     if (!apiKey) {
@@ -2655,6 +2760,8 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const assistantSkills = assistantSnapshotData?.skills ?? [];
   const defaultEnabledTools = new Set(assistantSnapshotData?.assistantSettings.defaultEnabledTools ?? []);
   const defaultEnabledToolNames = assistantSnapshotData?.assistantSettings.defaultEnabledTools ?? [];
+  const assistantProfiles = assistantSnapshotData?.assistantProfiles ?? dashboard?.assistantProfiles ?? [];
+  const enabledAssistantProfileCount = assistantProfiles.filter((profile) => profile.enabled).length;
   const autoApprove = Boolean(activeThread?.autoApprove);
   const codexConnection = assistantSnapshotData?.codexConnection ?? { connected: false, accountId: null, expiresAt: null, updatedAt: null };
   const assistantSettings = assistantSnapshotData?.assistantSettings ?? null;
@@ -3624,6 +3731,115 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
 
                 {settingsPane === 'assistant' ? (
                 <>
+              <section className={assistantPanelClass}>
+                <div className={assistantPanelHeaderClass}>
+                  <div>
+                    <span className={assistantKickerClass}>Assistant</span>
+                    <h2 className={assistantPanelTitleClass}>Profiles</h2>
+                  </div>
+                  <button type="button" className={assistantActionButtonClass} disabled={busy} onClick={() => void createAssistantProfile()}>
+                    Add profile
+                  </button>
+                </div>
+                <div className="grid gap-2.5">
+                  {assistantProfiles.map((profile) => {
+                    const draft = assistantProfileDrafts[profile.id] ?? profileDraftFromAssistantProfile(profile);
+                    const disableEnabledToggle = busy || (draft.enabled && enabledAssistantProfileCount <= 1);
+                    return (
+                      <article key={profile.id} className="grid gap-2.5 rounded border border-[var(--border-subtle)] bg-white/[.02] p-2.5">
+                        <div className="grid grid-cols-[minmax(120px,1fr)_minmax(130px,170px)_auto] items-end gap-2 max-[880px]:grid-cols-1">
+                          <label className={assistantFieldLabelClass}>
+                            Name
+                            <input
+                              value={draft.name}
+                              disabled={busy}
+                              className="h-[30px] min-w-0"
+                              onChange={(event) => updateAssistantProfileDraft(profile.id, { name: event.currentTarget.value })}
+                            />
+                          </label>
+                          <label className={assistantFieldLabelClass}>
+                            Voice
+                            <select
+                              value={draft.ttsVoice}
+                              disabled={busy}
+                              className="h-[30px] min-w-0"
+                              onChange={(event) => updateAssistantProfileDraft(profile.id, { ttsVoice: event.currentTarget.value })}
+                            >
+                              {ASSISTANT_TTS_VOICE_OPTIONS.map((voice) => (
+                                <option key={voice.id} value={voice.id}>{voice.label}</option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="flex h-[30px] items-center gap-2 rounded border border-[var(--border-subtle)] bg-white/[.02] px-2 text-[11px] font-semibold text-[var(--fg-secondary)]">
+                            <input
+                              type="checkbox"
+                              checked={draft.enabled}
+                              disabled={disableEnabledToggle}
+                              className="h-3.5 w-3.5 accent-[var(--green)]"
+                              onChange={(event) => updateAssistantProfileDraft(profile.id, { enabled: event.currentTarget.checked })}
+                            />
+                            Enabled
+                          </label>
+                        </div>
+                        <label className={assistantFieldLabelClass}>
+                          Primary wake phrase
+                          <input
+                            value={draft.wakePhrase}
+                            disabled={busy}
+                            className="h-[30px] min-w-0"
+                            onChange={(event) => updateAssistantProfileDraft(profile.id, { wakePhrase: event.currentTarget.value })}
+                          />
+                        </label>
+                        <div className="grid gap-1.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className={assistantFieldLabelClass}>Aliases</span>
+                            <button
+                              type="button"
+                              className={assistantActionButtonClass}
+                              disabled={busy}
+                              onClick={() => updateAssistantProfileDraft(profile.id, { wakePhraseAliases: [...draft.wakePhraseAliases, ''] })}
+                            >
+                              Add alias
+                            </button>
+                          </div>
+                          <div className="grid gap-1.5">
+                            {draft.wakePhraseAliases.map((alias, aliasIndex) => (
+                              <div key={`${profile.id}:alias:${aliasIndex}`} className="grid grid-cols-[minmax(160px,1fr)_auto] gap-1.5">
+                                <input
+                                  value={alias}
+                                  disabled={busy}
+                                  className="h-[30px] min-w-0"
+                                  onChange={(event) => {
+                                    const next = [...draft.wakePhraseAliases];
+                                    next[aliasIndex] = event.currentTarget.value;
+                                    updateAssistantProfileDraft(profile.id, { wakePhraseAliases: next });
+                                  }}
+                                />
+                                <button
+                                  type="button"
+                                  className={assistantActionButtonClass}
+                                  disabled={busy}
+                                  onClick={() => updateAssistantProfileDraft(profile.id, { wakePhraseAliases: draft.wakePhraseAliases.filter((_, index) => index !== aliasIndex) })}
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            ))}
+                            {draft.wakePhraseAliases.length === 0 ? <div className="text-[11px] text-[var(--muted)]">No aliases configured.</div> : null}
+                          </div>
+                        </div>
+                        <div className="flex justify-end">
+                          <button type="button" className={assistantActionButtonClass} disabled={busy || !draft.name.trim() || !draft.wakePhrase.trim() || !draft.ttsVoice.trim()} onClick={() => void saveAssistantProfile(profile)}>
+                            Save profile
+                          </button>
+                        </div>
+                      </article>
+                    );
+                  })}
+                  {assistantProfiles.length === 0 ? <div className={assistantEmptyClass}>No assistant profiles loaded.</div> : null}
+                </div>
+              </section>
+
               <section className={assistantPanelClass}>
                 <div className={assistantPanelHeaderClass}>
                   <div>
@@ -4641,7 +4857,7 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
     }
   }
 
-  async function startVoice(target: VoiceStreamTarget = 'assistant') {
+  async function startVoice(target: VoiceStreamTarget = 'assistant', assistantProfileId?: string | null) {
     stopWakeListener();
     let activeDevice = device;
     if (!activeDevice) {
@@ -4651,13 +4867,13 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
     if (!activeDevice) return;
     const session = await client.request<{ ok: true; session: { id: string } }>('/api/voice/sessions', {
       method: 'POST',
-      body: JSON.stringify({ deviceId: activeDevice.id, mode: target }),
+      body: JSON.stringify({ deviceId: activeDevice.id, mode: target, ...(assistantProfileId ? { assistantProfileId } : {}) }),
     });
     const media = await navigator.mediaDevices.getUserMedia({ audio: true });
     const context = new AudioContext({ sampleRate: 16_000 });
     const source = context.createMediaStreamSource(media);
     const processor = context.createScriptProcessor(4096, 1, 1);
-    const socket = openDesktopVoiceSocket(activeDevice, session.session.id, target);
+    const socket = openDesktopVoiceSocket(activeDevice, session.session.id, target, assistantProfileId);
     socket.onopen = () => {
       socket.send(JSON.stringify({ type: 'client_hello', protocolVersion: 1, client: 'electron-web', mode: target }));
     };
@@ -4848,33 +5064,33 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
       turnOff();
       return;
     }
-    const match = wakePhraseMatch(text);
+    const match = wakePhraseMatch(text, settings?.assistantProfiles);
     if (!match) {
       setStatus('No wake command matched.');
       return;
     }
-    if (match === 'sleep') {
+    if (match.command === 'sleep') {
       enterSleep();
       return;
     }
-    if (match === 'stop_audio') {
+    if (match.command === 'stop_audio') {
       const stopped = stopSpeechAudioPlayback({ clearQueue: false });
       setStatus(stopped ? 'Assistant audio stopped.' : 'No assistant audio is playing.');
       void reportDesktopStatus(currentMode, stopped ? 'Assistant audio stopped.' : 'No assistant audio is playing.');
       return;
     }
-    if (match === 'repeat_audio') {
+    if (match.command === 'repeat_audio') {
       const repeated = repeatLastSpeechAudioPlayback();
       setStatus(repeated ? 'Repeating assistant audio.' : 'No assistant audio to repeat.');
       void reportDesktopStatus(currentMode, repeated ? 'Repeating assistant audio.' : 'No assistant audio to repeat.');
       return;
     }
-    if (match === 'status') {
+    if (match.command === 'status') {
       setStatus(`Mode: ${currentMode}. Device: ${device?.id ? device.id.slice(0, 12) : 'unpaired'}.`);
       return;
     }
     if (currentMode === 'off') enterAwake();
-    await startVoice(match === 'patch' || match === 'clipboard' ? match : 'assistant');
+    await startVoice(match.command === 'patch' || match.command === 'clipboard' ? match.command : 'assistant', match.assistantProfileId);
   }
 
   function startWakeListener() {
@@ -5100,6 +5316,7 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
 
 type VoiceMode = 'off' | 'awake' | 'sleeping' | 'recording';
 type VoiceStreamTarget = 'assistant' | 'patch' | 'clipboard';
+type WakeCommand = 'start' | 'patch' | 'clipboard' | 'sleep' | 'stop_audio' | 'repeat_audio' | 'status';
 
 // Keep the status command path available, but do not match spoken status phrases locally.
 const ENABLE_STATUS_WAKE_COMMAND = false;
@@ -5127,16 +5344,19 @@ function sleepPhraseMatch(text: string, unlockPhrase: string, shutdownPhrase: st
   return null;
 }
 
-function wakePhraseMatch(text: string): 'start' | 'patch' | 'clipboard' | 'sleep' | 'stop_audio' | 'repeat_audio' | 'status' | null {
+function wakePhraseMatch(text: string, assistantProfiles: VoiceSettings['assistantProfiles'] = []): { command: WakeCommand; assistantProfileId?: string | null } | null {
   const words = phraseWords(text);
   const compact = words.join('');
-  if (words.some((word, index) => word === 'go' && words[index + 1] === 'to' && words[index + 2] === 'sleep')) return 'sleep';
-  if (words.some((word, index) => (word === 'ok' || word === 'okay') && words[index + 1] === 'stop')) return 'stop_audio';
-  if (words.some((word, index) => word === 'repeat' && words[index + 1] === 'what' && words[index + 2] === 'you' && words[index + 3] === 'said')) return 'repeat_audio';
-  if (words.some((word, index) => (word === 'hey' || word === 'hay') && (words[index + 1] === 'sebastian' || words[index + 1] === 'sebastien'))) return 'start';
-  if (words.some((word, index) => word === 'patch' && words[index + 1] === 'me' && words[index + 2] === 'in')) return 'patch';
-  if (words.includes('transcribe')) return 'clipboard';
-  if (ENABLE_STATUS_WAKE_COMMAND && (words.includes('status') || compact === 'stateus' || compact === 'checkstatus')) return 'status';
+  if (words.some((word, index) => word === 'go' && words[index + 1] === 'to' && words[index + 2] === 'sleep')) return { command: 'sleep' };
+  if (words.some((word, index) => (word === 'ok' || word === 'okay') && words[index + 1] === 'stop')) return { command: 'stop_audio' };
+  if (words.some((word, index) => word === 'repeat' && words[index + 1] === 'what' && words[index + 2] === 'you' && words[index + 3] === 'said')) return { command: 'repeat_audio' };
+  for (const profile of assistantProfiles.filter((profile) => profile.enabled)) {
+    const phrases = [profile.wakePhrase, ...(profile.wakePhraseAliases ?? [])];
+    if (phrases.some((phrase) => matchesPhrase(text, phrase))) return { command: 'start', assistantProfileId: profile.id };
+  }
+  if (words.some((word, index) => word === 'patch' && words[index + 1] === 'me' && words[index + 2] === 'in')) return { command: 'patch' };
+  if (words.includes('transcribe')) return { command: 'clipboard' };
+  if (ENABLE_STATUS_WAKE_COMMAND && (words.includes('status') || compact === 'stateus' || compact === 'checkstatus')) return { command: 'status' };
   return null;
 }
 
@@ -5162,13 +5382,14 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
-function openDesktopVoiceSocket(device: { id: string; token: string }, sessionId: string, target: VoiceStreamTarget): WebSocket {
+function openDesktopVoiceSocket(device: { id: string; token: string }, sessionId: string, target: VoiceStreamTarget, assistantProfileId?: string | null): WebSocket {
   const url = new URL('/api/voice/stream', window.location.href);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   url.searchParams.set('deviceId', device.id);
   url.searchParams.set('token', device.token);
   url.searchParams.set('sessionId', sessionId);
   url.searchParams.set('mode', target);
+  if (assistantProfileId) url.searchParams.set('assistantProfileId', assistantProfileId);
   return new WebSocket(url);
 }
 
