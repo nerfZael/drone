@@ -46,6 +46,7 @@
     "ws": "^8.19.0"
   },
   "optionalDependencies": {
+    "@rollup/rollup-linux-x64-gnu": "4.57.1",
     "vosk": "^0.3.39"
   },
   "devDependencies": {
