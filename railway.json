@@ -5,7 +5,7 @@
     "buildCommand": "turbo run build --filter=voice-stream-next"
   },
   "deploy": {
-    "startCommand": "turbo run start --filter=voice-stream-next",
+    "startCommand": "bun run --filter voice-stream-next start",
     "healthcheckPath": "/api/health",
     "healthcheckTimeout": 60
   }

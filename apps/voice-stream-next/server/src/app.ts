@@ -678,7 +678,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
   const speechEventClients = new Set<{ id: string; res: any; userId: string; connectedAt: string }>();
   let appEventSequence = 0;
   const clerkEnabled = Boolean(process.env.CLERK_SECRET_KEY?.trim());
-  const port = parsePort(process.env.VOICE_STREAM_NEXT_API_PORT ?? process.env.PORT, 3299);
+  const port = parsePort(process.env.PORT ?? process.env.VOICE_STREAM_NEXT_API_PORT, 3299);
 
   db.clearAssistantExtensionManifests();
 
