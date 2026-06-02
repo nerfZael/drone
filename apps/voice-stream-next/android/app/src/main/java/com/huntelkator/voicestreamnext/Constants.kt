@@ -13,6 +13,7 @@ object Constants {
     const val PREF_DEVICE_NAME = "device_name"
     const val PREF_INSTALLATION_ID = "installation_id"
     const val PREF_ANDROID_ECHO_CANCELLATION = "android_echo_cancellation"
+    const val PREF_MICROPHONE_DEVICE_KEY = "microphone_device_key"
 
     const val ACTION_START_VOICE = "com.huntelkator.voicestreamnext.action.START_VOICE"
     const val ACTION_START_AWAKE = "com.huntelkator.voicestreamnext.action.START_AWAKE"
@@ -20,12 +21,14 @@ object Constants {
     const val ACTION_STOP_RECORDING = "com.huntelkator.voicestreamnext.action.STOP_RECORDING"
     const val ACTION_STOP_VOICE = "com.huntelkator.voicestreamnext.action.STOP_VOICE"
     const val ACTION_QUERY_STATUS = "com.huntelkator.voicestreamnext.action.QUERY_STATUS"
+    const val ACTION_SET_MICROPHONE = "com.huntelkator.voicestreamnext.action.SET_MICROPHONE"
     const val ACTION_STATUS = "com.huntelkator.voicestreamnext.action.STATUS"
     const val ACTION_SPEECH_HISTORY_CHANGED = "com.huntelkator.voicestreamnext.action.SPEECH_HISTORY_CHANGED"
 
     const val EXTRA_STATUS = "status"
     const val EXTRA_MODE = "mode"
     const val EXTRA_MICROPHONE = "microphone"
+    const val EXTRA_MICROPHONE_DEVICE_KEY = "microphone_device_key"
     const val EXTRA_APPROVAL_STATUS = "approval_status"
     const val EXTRA_STREAM_TARGET = "stream_target"
 

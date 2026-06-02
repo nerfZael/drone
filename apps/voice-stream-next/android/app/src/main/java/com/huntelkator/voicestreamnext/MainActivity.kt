@@ -10,10 +10,15 @@ import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.media.audiofx.AcousticEchoCanceler
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.view.GestureDetector
 import android.view.Gravity
@@ -46,6 +51,8 @@ import kotlin.math.roundToInt
 class MainActivity : ComponentActivity() {
     private lateinit var api: VoiceStreamApi
     private lateinit var browserAuth: BrowserAuthCoordinator
+    private lateinit var microphoneRouter: MicrophoneRouter
+    private lateinit var audioManager: AudioManager
     private lateinit var serverInput: EditText
     private lateinit var deviceNameInput: EditText
     private lateinit var echoCancellationCheckbox: CheckBox
@@ -90,6 +97,7 @@ class MainActivity : ComponentActivity() {
     private val wakeController = WakeToggleController()
     @Volatile private var updateCheckRunning = false
     private val cuePlayer = LocalCuePlayer()
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var pendingStartAwake = false
     private var pendingStartTarget = Constants.STREAM_TARGET_ASSISTANT
     private var sessionMode = SessionMode.OFF
@@ -101,6 +109,16 @@ class MainActivity : ComponentActivity() {
     private var assistantArtifacts: List<AssistantArtifact> = emptyList()
     private var selectedArtifactIndex = -1
     @Volatile private var assistantFilesLoading = false
+
+    private val audioDeviceCallback = object : AudioDeviceCallback() {
+        override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) {
+            refreshMicrophoneSelectionFromDevices()
+        }
+
+        override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) {
+            refreshMicrophoneSelectionFromDevices()
+        }
+    }
 
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -161,6 +179,8 @@ class MainActivity : ComponentActivity() {
         ClientLog.install(applicationContext)
         ClientLog.i("Activity", "MainActivity created")
         api = VoiceStreamApi(applicationContext)
+        microphoneRouter = MicrophoneRouter(applicationContext)
+        audioManager = getSystemService(AudioManager::class.java)
         browserAuth = BrowserAuthCoordinator(api, browserAuthCallbacks())
         DiagnosticsUploader.upload(applicationContext, api, "activity-start", force = true)
         runCatching { configureSystemBars() }.onFailure { error ->
@@ -169,6 +189,7 @@ class MainActivity : ComponentActivity() {
         buildUi()
         loadConfigIntoForm()
         updateSessionUi(SessionMode.OFF, "Ready")
+        updateMicrophoneUi(microphoneRouter.describeCurrentSelection())
         refreshSpeechHistory(selectLatest = true)
         renderAuthState()
         if (api.pairedDeviceId().isNotBlank()) {
@@ -192,10 +213,12 @@ class MainActivity : ComponentActivity() {
             IntentFilter(Constants.ACTION_SPEECH_HISTORY_CHANGED),
             ContextCompat.RECEIVER_NOT_EXPORTED
         )
+        audioManager.registerAudioDeviceCallback(audioDeviceCallback, mainHandler)
     }
 
     override fun onResume() {
         super.onResume()
+        updateMicrophoneUi(microphoneRouter.describeCurrentSelection())
         refreshSpeechHistory(selectLatest = false)
         refreshAssistantThreadSummary()
         resyncServiceStatus()
@@ -204,6 +227,7 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         runCatching { unregisterReceiver(statusReceiver) }
         runCatching { unregisterReceiver(speechHistoryReceiver) }
+        runCatching { audioManager.unregisterAudioDeviceCallback(audioDeviceCallback) }
         super.onStop()
     }
 
@@ -315,6 +339,9 @@ class MainActivity : ComponentActivity() {
             gravity = Gravity.CENTER
             setPadding(14.dp(), 0, 14.dp(), 0)
             background = rounded(COLOR_FLOATING, 12.dp(), COLOR_STROKE)
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { showMicrophonePicker() }
         }
         screen.addView(microphoneText, FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -782,6 +809,45 @@ class MainActivity : ComponentActivity() {
 
     private fun updateMicrophoneUi(microphone: String) {
         microphoneText.text = microphone
+    }
+
+    private fun showMicrophonePicker() {
+        val options = microphoneRouter.pickerOptions()
+        val labels = options.map { option -> option.label }.toTypedArray()
+        val selectedIndex = options.indexOfFirst { option -> option.isSelected }.takeIf { it >= 0 } ?: 0
+        AlertDialog.Builder(this)
+            .setTitle("Microphone")
+            .setSingleChoiceItems(labels, selectedIndex) { dialog, which ->
+                val option = options[which]
+                microphoneRouter.saveSelectedDeviceKey(option.key)
+                val microphone = microphoneRouter.describeCurrentSelection()
+                updateMicrophoneUi(microphone)
+                applyMicrophoneSelectionToService(option.key)
+                dialog.dismiss()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun refreshMicrophoneSelectionFromDevices() {
+        mainHandler.post {
+            val deviceKey = microphoneRouter.currentSelectionKey()
+            updateMicrophoneUi(microphoneRouter.describeCurrentSelection())
+            if (sessionMode != SessionMode.OFF) {
+                applyMicrophoneSelectionToService(deviceKey)
+            }
+        }
+    }
+
+    private fun applyMicrophoneSelectionToService(deviceKey: String) {
+        runCatching {
+            startService(Intent(this, VoiceSessionService::class.java).apply {
+                action = Constants.ACTION_SET_MICROPHONE
+                putExtra(Constants.EXTRA_MICROPHONE_DEVICE_KEY, deviceKey)
+            })
+        }.onFailure { error ->
+            ClientLog.w("Activity", "Microphone selection update failed", error)
+        }
     }
 
     private fun refreshSpeechHistory(selectLatest: Boolean = false) {

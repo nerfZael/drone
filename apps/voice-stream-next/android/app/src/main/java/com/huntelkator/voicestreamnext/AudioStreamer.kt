@@ -66,6 +66,17 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
 
     var statusListener: ((StreamStatus) -> Unit)? = null
 
+    fun applyMicrophonePreference(): String {
+        val activeRecorder = recorder
+        val selection = if (activeRecorder != null && active.get()) {
+            microphoneRouter.routeForRecording(activeRecorder)
+        } else {
+            null
+        }
+        currentMicrophone = selection?.label ?: microphoneRouter.describeCurrentSelection()
+        return currentMicrophone
+    }
+
     private fun emitStatus(onStatus: (String) -> Unit, text: String, microphone: String? = null, approvalStatus: String = "") {
         if (!microphone.isNullOrBlank()) {
             currentMicrophone = microphone
