@@ -29,13 +29,16 @@ object PhraseMatcher {
 }
 
 object WakePhraseMatcher {
-    fun match(text: String): WakePhrase? {
+    fun match(text: String, assistantProfiles: List<AssistantVoiceProfile> = listOf(AssistantVoiceProfile.defaultSebastian())): WakePhraseMatch? {
         val words = PhraseMatcher.words(text)
 
-        val hasStart = words.windowed(2).any { pair ->
-            (pair[0] == "hey" || pair[0] == "hay") &&
-                (pair[1] == "sebastian" || pair[1] == "sebastien")
-        }
+        val startProfile = assistantProfiles
+            .filter { it.enabled }
+            .firstOrNull { profile ->
+                listOf(profile.wakePhrase).plus(profile.wakePhraseAliases).any { phrase ->
+                    PhraseMatcher.matchesPhrase(text, phrase)
+                }
+            }
         val hasPatch = words.windowed(3).any { triple ->
             triple[0] == "patch" && triple[1] == "me" && triple[2] == "in"
         }
@@ -62,24 +65,39 @@ object WakePhraseMatcher {
         )
 
         return when {
-            hasSleep -> WakePhrase.SLEEP
-            hasStopAudio -> WakePhrase.STOP_AUDIO
-            hasRepeatAudio -> WakePhrase.REPEAT_AUDIO
-            hasStart -> WakePhrase.START
-            hasPatch -> WakePhrase.PATCH
-            hasClipboard -> WakePhrase.CLIPBOARD
-            hasStatus -> WakePhrase.STATUS
+            hasSleep -> WakePhraseMatch(WakePhrase.SLEEP)
+            hasStopAudio -> WakePhraseMatch(WakePhrase.STOP_AUDIO)
+            hasRepeatAudio -> WakePhraseMatch(WakePhrase.REPEAT_AUDIO)
+            startProfile != null -> WakePhraseMatch(WakePhrase.START, startProfile.id.takeIf { it.isNotBlank() })
+            hasPatch -> WakePhraseMatch(WakePhrase.PATCH)
+            hasClipboard -> WakePhraseMatch(WakePhrase.CLIPBOARD)
+            hasStatus -> WakePhraseMatch(WakePhrase.STATUS)
             else -> null
         }
     }
 
-    fun matchSleep(text: String, unlockPhrase: String, shutdownPhrase: String): WakePhrase? {
+    fun matchSleep(text: String, unlockPhrase: String, shutdownPhrase: String): WakePhraseMatch? {
         return when {
-            PhraseMatcher.matchesPhrase(text, unlockPhrase) -> WakePhrase.UNLOCK
-            PhraseMatcher.matchesPhrase(text, shutdownPhrase) -> WakePhrase.SHUTDOWN
+            PhraseMatcher.matchesPhrase(text, unlockPhrase) -> WakePhraseMatch(WakePhrase.UNLOCK)
+            PhraseMatcher.matchesPhrase(text, shutdownPhrase) -> WakePhraseMatch(WakePhrase.SHUTDOWN)
             else -> null
         }
     }
+}
+
+data class WakePhraseMatch(
+    val phrase: WakePhrase,
+    val assistantProfileId: String? = null,
+) {
+    val hasStart: Boolean get() = phrase.hasStart
+    val hasPatch: Boolean get() = phrase.hasPatch
+    val hasClipboard: Boolean get() = phrase.hasClipboard
+    val hasSleep: Boolean get() = phrase.hasSleep
+    val hasStopAudio: Boolean get() = phrase.hasStopAudio
+    val hasRepeatAudio: Boolean get() = phrase.hasRepeatAudio
+    val hasStatus: Boolean get() = phrase.hasStatus
+    val hasUnlock: Boolean get() = phrase.hasUnlock
+    val hasShutdown: Boolean get() = phrase.hasShutdown
 }
 
 class SleepPhraseStability(

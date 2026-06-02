@@ -7,13 +7,14 @@ import org.junit.Test
 class WakeParityTest {
     @Test
     fun matchesLegacyWakePhrases() {
-        assertEquals(WakePhrase.START, WakePhraseMatcher.match("hey sebastian"))
-        assertEquals(WakePhrase.PATCH, WakePhraseMatcher.match("patch me in"))
-        assertEquals(WakePhrase.CLIPBOARD, WakePhraseMatcher.match("can you transcribe this"))
-        assertEquals(WakePhrase.SLEEP, WakePhraseMatcher.match("go to sleep"))
-        assertEquals(WakePhrase.STOP_AUDIO, WakePhraseMatcher.match("ok stop"))
-        assertEquals(WakePhrase.STOP_AUDIO, WakePhraseMatcher.match("okay stop"))
-        assertEquals(WakePhrase.REPEAT_AUDIO, WakePhraseMatcher.match("repeat what you said"))
+        assertEquals(WakePhrase.START, WakePhraseMatcher.match("hey sebastian")?.phrase)
+        assertEquals(WakePhrase.START, WakePhraseMatcher.match("hay sebastien")?.phrase)
+        assertEquals(WakePhrase.PATCH, WakePhraseMatcher.match("patch me in")?.phrase)
+        assertEquals(WakePhrase.CLIPBOARD, WakePhraseMatcher.match("can you transcribe this")?.phrase)
+        assertEquals(WakePhrase.SLEEP, WakePhraseMatcher.match("go to sleep")?.phrase)
+        assertEquals(WakePhrase.STOP_AUDIO, WakePhraseMatcher.match("ok stop")?.phrase)
+        assertEquals(WakePhrase.STOP_AUDIO, WakePhraseMatcher.match("okay stop")?.phrase)
+        assertEquals(WakePhrase.REPEAT_AUDIO, WakePhraseMatcher.match("repeat what you said")?.phrase)
         assertNull(WakePhraseMatcher.match("hello there"))
         assertNull(WakePhraseMatcher.match("hey"))
         assertNull(WakePhraseMatcher.match("sebastian"))
@@ -27,6 +28,34 @@ class WakeParityTest {
     }
 
     @Test
+    fun matchesConfiguredAssistantWakePhrase() {
+        val match = WakePhraseMatcher.match(
+            "hey jenny",
+            listOf(AssistantVoiceProfile(id = "profile_jenny", name = "Jenny", wakePhrase = "hey jenny", wakePhraseAliases = listOf("hello jenny"), ttsVoice = "jenny", enabled = true)),
+        )
+
+        assertEquals(WakePhrase.START, match?.phrase)
+        assertEquals("profile_jenny", match?.assistantProfileId)
+        assertEquals(
+            "profile_jenny",
+            WakePhraseMatcher.match(
+                "hello jenny",
+                listOf(AssistantVoiceProfile(id = "profile_jenny", name = "Jenny", wakePhrase = "hey jenny", wakePhraseAliases = listOf("hello jenny"), ttsVoice = "jenny", enabled = true)),
+            )?.assistantProfileId,
+        )
+    }
+
+    @Test
+    fun doesNotUseLegacySebastianWhenProfilesAreConfigured() {
+        val match = WakePhraseMatcher.match(
+            "hey sebastian",
+            listOf(AssistantVoiceProfile(id = "profile_sebastian", name = "Sebastian", wakePhrase = "hey sebastian", wakePhraseAliases = listOf("hay sebastian"), ttsVoice = "austin", enabled = false)),
+        )
+
+        assertNull(match)
+    }
+
+    @Test
     fun matchesConfiguredSleepPhrases() {
         assertEquals(
             WakePhrase.UNLOCK,
@@ -34,7 +63,7 @@ class WakeParityTest {
                 "please wake up now",
                 VoicePhraseDefaults.unlockPhrase,
                 VoicePhraseDefaults.shutdownPhrase,
-            ),
+            )?.phrase,
         )
         assertEquals(
             WakePhrase.SHUTDOWN,
@@ -42,7 +71,7 @@ class WakeParityTest {
                 "shut down completely",
                 VoicePhraseDefaults.unlockPhrase,
                 VoicePhraseDefaults.shutdownPhrase,
-            ),
+            )?.phrase,
         )
         assertNull(
             WakePhraseMatcher.matchSleep(

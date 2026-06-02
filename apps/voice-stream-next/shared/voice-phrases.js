@@ -4,10 +4,6 @@ const VOICE_PHRASE_DEFAULTS = {
 };
 
 const AWAKE_WAKE_PHRASES = [
-  'hey sebastian',
-  'hay sebastian',
-  'hey sebastien',
-  'hay sebastien',
   'patch me in',
   'can you transcribe',
   'transcribe',
@@ -80,7 +76,8 @@ function grammarEntriesFromPhrases(phrases) {
 
 function buildAwakeWakeGrammar(options = {}) {
   const triggerPhrase = normalizePhrase(options.triggerPhrase || 'approval code');
-  const entries = new Set([...AWAKE_WAKE_PHRASES, ...APPROVAL_GRAMMAR, '[unk]']);
+  const assistantWakePhrases = Array.isArray(options.assistantWakePhrases) ? options.assistantWakePhrases : [];
+  const entries = new Set([...AWAKE_WAKE_PHRASES, ...assistantWakePhrases.map(normalizePhrase).filter(Boolean), ...APPROVAL_GRAMMAR, '[unk]']);
   if (triggerPhrase) {
     entries.add(triggerPhrase);
     triggerPhrase.split(/\s+/).filter(Boolean).forEach((word) => entries.add(word));

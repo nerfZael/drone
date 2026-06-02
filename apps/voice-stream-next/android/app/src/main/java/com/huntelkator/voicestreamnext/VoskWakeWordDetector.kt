@@ -27,6 +27,7 @@ class VoskWakeWordDetector(
     @Volatile private var unlockPhrase = VoicePhraseDefaults.unlockPhrase
     @Volatile private var shutdownPhrase = VoicePhraseDefaults.shutdownPhrase
     @Volatile private var approvalTriggerPhrase = "approval code"
+    @Volatile private var assistantProfiles = listOf(AssistantVoiceProfile.defaultSebastian())
     private val sleepPhraseStability = SleepPhraseStability()
 
     fun prepare() {
@@ -67,19 +68,27 @@ class VoskWakeWordDetector(
         unlock: String,
         shutdown: String,
         approvalTrigger: String,
+        profiles: List<AssistantVoiceProfile> = listOf(AssistantVoiceProfile.defaultSebastian()),
     ) {
         val nextUnlock = PhraseMatcher.normalizePhrase(unlock).ifBlank { VoicePhraseDefaults.unlockPhrase }
         val nextShutdown = PhraseMatcher.normalizePhrase(shutdown).ifBlank { VoicePhraseDefaults.shutdownPhrase }
         val nextTrigger = PhraseMatcher.normalizePhrase(approvalTrigger).ifBlank { "approval code" }
+        val nextProfiles = if (profiles.isEmpty()) {
+            listOf(AssistantVoiceProfile.defaultSebastian())
+        } else {
+            profiles.filter { it.wakePhrase.isNotBlank() }
+        }
         synchronized(recognizerLock) {
             val modeChanged = sleepMode != sleepModeEnabled
             val phrasesChanged = unlockPhrase != nextUnlock ||
                 shutdownPhrase != nextShutdown ||
-                approvalTriggerPhrase != nextTrigger
+                approvalTriggerPhrase != nextTrigger ||
+                assistantProfiles != nextProfiles
             sleepMode = sleepModeEnabled
             unlockPhrase = nextUnlock
             shutdownPhrase = nextShutdown
             approvalTriggerPhrase = nextTrigger
+            assistantProfiles = nextProfiles
             if (!modeChanged && !phrasesChanged) return@synchronized
             lastDetectedPhrase = null
             lastDetectedAtMs = 0L
@@ -91,7 +100,7 @@ class VoskWakeWordDetector(
         }
     }
 
-    fun acceptPcm(frame: ByteArray, length: Int): WakePhrase? {
+    fun acceptPcm(frame: ByteArray, length: Int): WakePhraseMatch? {
         val (resultJson, finalResult) = synchronized(recognizerLock) {
             val localRecognizer = recognizer ?: return null
             val accepted = runCatching { localRecognizer.acceptWaveForm(frame, length) }.getOrDefault(false)
@@ -123,7 +132,7 @@ class VoskWakeWordDetector(
         loading.set(false)
     }
 
-    private fun detectWakePhrase(json: String?, finalResult: Boolean): WakePhrase? {
+    private fun detectWakePhrase(json: String?, finalResult: Boolean): WakePhraseMatch? {
         if (json.isNullOrBlank()) return null
         val text = runCatching {
             val obj = JSONObject(json)
@@ -133,15 +142,16 @@ class VoskWakeWordDetector(
             onText(text)
         }
         val now = SystemClock.elapsedRealtime()
-        val phrase = if (sleepMode) {
+        val match = if (sleepMode) {
             sleepPhraseStability.accept(
-                WakePhraseMatcher.matchSleep(text, unlockPhrase, shutdownPhrase),
+                WakePhraseMatcher.matchSleep(text, unlockPhrase, shutdownPhrase)?.phrase,
                 finalResult,
                 now,
-            )
+            )?.let { WakePhraseMatch(it) }
         } else {
-            WakePhraseMatcher.match(text)
+            WakePhraseMatcher.match(text, assistantProfiles)
         } ?: return null
+        val phrase = match.phrase
         val suppress = synchronized(recognizerLock) {
             phrase == lastDetectedPhrase && now - lastDetectedAtMs < PHRASE_COOLDOWN_MS
         }
@@ -150,7 +160,7 @@ class VoskWakeWordDetector(
             lastDetectedPhrase = phrase
             lastDetectedAtMs = now
         }
-        return phrase
+        return match
     }
 
     private fun rebuildRecognizerLocked() {
@@ -175,7 +185,7 @@ class VoskWakeWordDetector(
         return if (sleepMode) {
             buildSleepGrammarEntries(unlockPhrase, shutdownPhrase)
         } else {
-            buildAwakeGrammarEntries(approvalTriggerPhrase, shutdownPhrase)
+            buildAwakeGrammarEntries(approvalTriggerPhrase, shutdownPhrase, assistantProfiles)
         }
     }
 
@@ -183,7 +193,7 @@ class VoskWakeWordDetector(
         return if (sleepMode) {
             "Sleep: say unlock or shutdown phrase"
         } else {
-            "Awake: waiting for \"hey sebastian\""
+            "Awake: waiting for assistant wake phrase"
         }
     }
 
@@ -193,10 +203,6 @@ class VoskWakeWordDetector(
         private const val SAMPLE_RATE_HZ = 16_000
         private const val PHRASE_COOLDOWN_MS = 900L
         private val AWAKE_WAKE_PHRASES = listOf(
-            "hey sebastian",
-            "hay sebastian",
-            "hey sebastien",
-            "hay sebastien",
             "patch me in",
             "can you transcribe",
             "transcribe",
@@ -229,9 +235,15 @@ class VoskWakeWordDetector(
             "check status",
         )
 
-        private fun buildAwakeGrammarEntries(triggerPhrase: String, shutdownPhrase: String): List<String> {
+        private fun buildAwakeGrammarEntries(triggerPhrase: String, shutdownPhrase: String, assistantProfiles: List<AssistantVoiceProfile>): List<String> {
             val entries = LinkedHashSet<String>()
             entries.addAll(AWAKE_WAKE_PHRASES)
+            assistantProfiles.filter { it.enabled }.forEach { profile ->
+                listOf(profile.wakePhrase).plus(profile.wakePhraseAliases).forEach { phrase ->
+                    val wakePhrase = PhraseMatcher.normalizePhrase(phrase)
+                    if (wakePhrase.isNotBlank()) entries.add(wakePhrase)
+                }
+            }
             entries.addAll(APPROVAL_GRAMMAR)
             entries.add(PhraseMatcher.normalizePhrase(shutdownPhrase))
             val trigger = PhraseMatcher.normalizePhrase(triggerPhrase)

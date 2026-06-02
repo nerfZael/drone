@@ -20,6 +20,7 @@ import {
   type AssistantApiKeyView,
   type AssistantApprovalRecord,
   type AssistantMessage,
+  type AssistantProfile,
   type AssistantQueuedPromptRecord,
   type AssistantRunRecord,
   type AssistantSettingsRecord,
@@ -65,6 +66,7 @@ export type AssistantSnapshot = {
   availableTools: AssistantToolSummary[];
   skills: AssistantSkillRecord[];
   assistantSettings: AssistantSettingsRecord;
+  assistantProfiles: AssistantProfile[];
   apiKeys: Record<'openai' | 'exa', AssistantApiKeyView>;
   codexConnection: { connected: boolean; accountId: string | null; expiresAt: string | null; updatedAt: string | null };
   runningModels: Record<string, { provider: string; model: string; thinkingLevel: string; runId: string }>;
@@ -277,6 +279,7 @@ export function assistantSnapshot(db: VoiceStreamNextDb, userId: string, activeT
     availableTools: assistantAvailableToolSummaries(db, userId),
     skills: db.listAssistantSkills(userId),
     assistantSettings: db.ensureAssistantSettings(userId),
+    assistantProfiles: db.listAssistantProfiles(userId),
     apiKeys: db.assistantApiKeysView(userId),
     codexConnection: db.codexConnectionView(userId),
     runningModels,
@@ -478,7 +481,8 @@ async function runModelDrivenTurn(
   const enabledTools = responseToolDefinitions(db, userId, thread, { loadedSkillToolNames: persistedSkillToolNames });
   const toolInstruction = toolCatalogInstruction(db, userId, enabledTools);
   const skillInstruction = skillCatalogInstruction(db, userId, thread);
-  const instructions = modelInstructions({ settings, thread, toolInstruction, skillInstruction, allowToolCalls: enabledTools.length > 0 });
+  const profileSystemPrompt = db.resolvedAssistantProfileSystemPrompt(userId, thread.assistantProfileId);
+  const instructions = modelInstructions({ settings, thread, profileSystemPrompt, toolInstruction, skillInstruction, allowToolCalls: enabledTools.length > 0 });
   const testCalls = testModelToolCalls();
   const usingTestModel = testCalls.length > 0;
 
@@ -1232,12 +1236,14 @@ function responseToolDefinitions(
 function modelInstructions(input: {
   settings: AssistantSettingsRecord;
   thread: AssistantThread;
+  profileSystemPrompt?: string | null;
   toolInstruction?: string;
   skillInstruction?: string;
   allowToolCalls: boolean;
 }): string {
+  const basePrompt = input.thread.voiceEnabled ? input.settings.voiceSystemPrompt : input.settings.normalSystemPrompt;
   return [
-    input.thread.voiceEnabled ? input.settings.voiceSystemPrompt : input.settings.normalSystemPrompt,
+    input.profileSystemPrompt || basePrompt,
     input.thread.systemPrompt ? `Thread system prompt:\n${input.thread.systemPrompt}` : '',
     input.skillInstruction,
     input.allowToolCalls ? input.toolInstruction : '',
@@ -1461,11 +1467,13 @@ async function executeApprovedTool(
   }
   if (toolName === 'get_system_prompt') {
     const settings = db.ensureAssistantSettings(userId);
+    const profilePrompt = db.resolvedAssistantProfileSystemPrompt(userId, thread.assistantProfileId);
     return {
       ok: true,
       threadPrompt: thread.systemPrompt,
+      profilePrompt,
       globalPrompt: thread.voiceEnabled ? settings.voiceSystemPrompt : settings.normalSystemPrompt,
-      source: thread.systemPrompt ? 'thread' : 'global',
+      source: thread.systemPrompt ? 'thread' : profilePrompt ? 'profile' : 'global',
     };
   }
   if (toolName === 'set_thinking_level') {
@@ -1478,6 +1486,7 @@ async function executeApprovedTool(
     const created = db.createThread(userId, {
       title,
       source: 'voice',
+      assistantProfileId: thread.assistantProfileId,
       voiceEnabled: true,
       provider: thread.provider,
       model: thread.model,

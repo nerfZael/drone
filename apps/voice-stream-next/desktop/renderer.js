@@ -69,6 +69,7 @@ const state = {
   controlSocket: null,
   voiceSessionId: null,
   voiceTarget: 'assistant',
+  voiceAssistantProfileId: null,
   voiceSuppressCommands: false,
   recordingPaused: false,
   transcriptionShortcutActive: false,
@@ -1695,13 +1696,21 @@ async function ensureRecordingDevice() {
   }
 }
 
-async function createVoiceSession(target) {
+async function createVoiceSession(target, assistantProfileId = null) {
   await ensureRecordingDevice();
+  const body = {
+    deviceId: state.config.deviceId,
+    token: state.config.deviceToken,
+    installationId: state.config.installationId || '',
+    mode: target,
+    protocolVersion: 1,
+  };
+  if (assistantProfileId) body.assistantProfileId = assistantProfileId;
   try {
     const data = await api('/api/voice/sessions', {
       method: 'POST',
       suppressAuthGuidance: true,
-      body: JSON.stringify({ deviceId: state.config.deviceId, token: state.config.deviceToken, installationId: state.config.installationId || '', mode: target, protocolVersion: 1 }),
+      body: JSON.stringify(body),
     });
     if (data.device?.id && data.device.id !== state.config.deviceId) {
       applyConfig(await desktop.writeConfig({
@@ -1721,12 +1730,13 @@ async function createVoiceSession(target) {
 async function startMic(target = 'assistant', options = {}) {
   const previousMode = state.mode;
   state.voiceTarget = cleanVoiceTarget(target);
+  state.voiceAssistantProfileId = options.assistantProfileId || null;
   state.voiceSuppressCommands = options.ignoreCommands === true;
   resetVoiceStreamState();
   pendingStreamBuffer.pushAll(preRollBuffer.drain());
   state.voiceStreamStarting = true;
   try {
-    const session = await createVoiceSession(target);
+    const session = await createVoiceSession(target, state.voiceAssistantProfileId);
     state.voiceSessionId = session.session.id;
     if (options.cue) playLocalVoiceCue(options.cue);
     const reusedWakeCapture = adoptWakeAudioCaptureForRecording();
@@ -1772,6 +1782,7 @@ async function startMic(target = 'assistant', options = {}) {
     state.processor = null;
     state.voiceSocket = null;
     state.voiceSessionId = null;
+    state.voiceAssistantProfileId = null;
     state.voiceSuppressCommands = false;
     state.recordingPaused = false;
     state.voiceStreamStarting = false;
@@ -1840,6 +1851,7 @@ function openVoiceSocket(target) {
   url.searchParams.set('token', state.config.deviceToken);
   if (state.config.installationId) url.searchParams.set('installationId', state.config.installationId);
   if (state.voiceSessionId) url.searchParams.set('sessionId', state.voiceSessionId);
+  if (state.voiceAssistantProfileId) url.searchParams.set('assistantProfileId', state.voiceAssistantProfileId);
   if (state.voiceSuppressCommands) url.searchParams.set('ignoreCommands', '1');
   url.searchParams.set('mode', target);
   const socket = new WebSocket(url.toString());
@@ -2025,6 +2037,7 @@ function completeStoppedVoice(nextMode = 'awake', status = '') {
   const socket = state.voiceSocket;
   state.voiceSocket = null;
   state.voiceSessionId = null;
+  state.voiceAssistantProfileId = null;
   state.voiceSuppressCommands = false;
   resetVoiceStreamState();
   if (socket && socket.readyState === WebSocket.OPEN) {
@@ -2342,16 +2355,33 @@ function acceptApprovalText(text, finalizeNow = false) {
   return handleApprovalUpdate(update);
 }
 
-function wakePhraseMatch(text) {
-  const words = String(text || '').toLowerCase().split(/[^a-z]+/).filter(Boolean);
+function phraseWords(text) {
+  return String(text || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+}
+
+function matchesWakePhrase(text, phrase) {
+  if (globalThis.VoicePhrases?.matchesPhrase) {
+    return globalThis.VoicePhrases.matchesPhrase(text, phrase);
+  }
+  const words = phraseWords(text);
+  const phraseWordsList = phraseWords(phrase);
+  if (phraseWordsList.length === 0) return false;
+  return words.some((word, index) => phraseWordsList.every((phraseWord, offset) => words[index + offset] === phraseWord));
+}
+
+function wakePhraseMatch(text, assistantProfiles = []) {
+  const words = phraseWords(text);
   const compact = words.join('');
-  if (words.some((word, index) => word === 'go' && words[index + 1] === 'to' && words[index + 2] === 'sleep')) return 'sleep';
-  if (words.some((word, index) => (word === 'ok' || word === 'okay') && words[index + 1] === 'stop')) return 'stop_audio';
-  if (words.some((word, index) => word === 'repeat' && words[index + 1] === 'what' && words[index + 2] === 'you' && words[index + 3] === 'said')) return 'repeat_audio';
-  if (words.some((word, index) => (word === 'hey' || word === 'hay') && (words[index + 1] === 'sebastian' || words[index + 1] === 'sebastien'))) return 'start';
-  if (words.some((word, index) => word === 'patch' && words[index + 1] === 'me' && words[index + 2] === 'in')) return 'patch';
-  if (words.some((word, index) => word === 'can' && words[index + 1] === 'you' && words[index + 2] === 'transcribe')) return 'clipboard';
-  if (ENABLE_STATUS_WAKE_COMMAND && (words.includes('status') || compact === 'stateus' || compact === 'checkstatus')) return 'status';
+  if (words.some((word, index) => word === 'go' && words[index + 1] === 'to' && words[index + 2] === 'sleep')) return { command: 'sleep' };
+  if (words.some((word, index) => (word === 'ok' || word === 'okay') && words[index + 1] === 'stop')) return { command: 'stop_audio' };
+  if (words.some((word, index) => word === 'repeat' && words[index + 1] === 'what' && words[index + 2] === 'you' && words[index + 3] === 'said')) return { command: 'repeat_audio' };
+  for (const profile of assistantProfiles.filter((profile) => profile?.enabled !== false)) {
+    const phrases = [profile?.wakePhrase, ...(Array.isArray(profile?.wakePhraseAliases) ? profile.wakePhraseAliases : [])];
+    if (phrases.some((phrase) => matchesWakePhrase(text, phrase || ''))) return { command: 'start', assistantProfileId: profile.id || null };
+  }
+  if (words.some((word, index) => word === 'patch' && words[index + 1] === 'me' && words[index + 2] === 'in')) return { command: 'patch' };
+  if (words.some((word, index) => word === 'can' && words[index + 1] === 'you' && words[index + 2] === 'transcribe')) return { command: 'clipboard' };
+  if (ENABLE_STATUS_WAKE_COMMAND && (words.includes('status') || compact === 'stateus' || compact === 'checkstatus')) return { command: 'status' };
   return null;
 }
 
@@ -2456,7 +2486,7 @@ async function enterAwake() {
     return null;
   });
   if (!state.config?.deviceId || !state.config?.deviceToken) return;
-  setMode('awake', 'Awake. Say "hey Sebastian" to start recording.');
+  setMode('awake', 'Awake. Say your assistant wake phrase to start recording.');
   await applyDesktopVoskGrammar('awake', settings);
   startWakeListener();
 }
@@ -2623,7 +2653,7 @@ async function processPhraseText(text, finalizeNow = false, finalResult = false)
     await turnOff({ cue: 'sleeping_off' });
     return;
   }
-  const match = wakePhraseMatch(text);
+  const match = wakePhraseMatch(text, state.voiceSettings?.assistantProfiles || []);
   if (!match) {
     const heard = String(text || '').trim();
     showStatus(heard ? `Heard "${heard}". No voice command matched.` : 'No voice command matched.');
@@ -2631,29 +2661,29 @@ async function processPhraseText(text, finalizeNow = false, finalResult = false)
     void logDesktopEvent('info', 'Wake phrase did not match command', { text: heard });
     return;
   }
-  void recordCommandRecognitionLog({ text, final: finalResult, outcome: 'matched', command: match });
-  void logDesktopEvent('info', 'Wake command matched', { text, command: match });
-  if (match === 'sleep') {
+  void recordCommandRecognitionLog({ text, final: finalResult, outcome: 'matched', command: match.command });
+  void logDesktopEvent('info', 'Wake command matched', { text, command: match.command, assistantProfileId: match.assistantProfileId || null });
+  if (match.command === 'sleep') {
     await enterSleep();
     return;
   }
-  if (match === 'stop_audio') {
+  if (match.command === 'stop_audio') {
     const stopped = stopSpeechPlayback({ clearQueue: false });
     showStatus(stopped ? 'Assistant audio stopped.' : 'No assistant audio is playing.');
     return;
   }
-  if (match === 'repeat_audio') {
+  if (match.command === 'repeat_audio') {
     const repeated = repeatLastSpeechPlayback();
     showStatus(repeated ? 'Repeating assistant audio.' : 'No assistant audio to repeat.');
     return;
   }
-  if (match === 'status') {
+  if (match.command === 'status') {
     playLocalVoiceCue('status');
     showStatus(`Mode: ${state.mode}. Device: ${state.config?.deviceId ? state.config.deviceId.slice(0, 12) : 'unpaired'}.`);
     return;
   }
   if (state.mode === 'off') enterAwake();
-  await startMic(match === 'patch' || match === 'clipboard' ? match : 'assistant', { cue: 'wake' });
+  await startMic(match.command === 'patch' || match.command === 'clipboard' ? match.command : 'assistant', { cue: 'wake', assistantProfileId: match.assistantProfileId });
 }
 
 async function startWakeAudioCapture() {

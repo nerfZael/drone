@@ -24,10 +24,17 @@ describe('voice-phrases', () => {
   });
 
   test('awake grammar omits freestanding hey and sebastian tokens', () => {
-    const grammar = buildAwakeWakeGrammar({ triggerPhrase: 'approval code' });
+    const grammar = buildAwakeWakeGrammar({ triggerPhrase: 'approval code', assistantWakePhrases: ['hey sebastian'] });
     expect(grammar).toContain('hey sebastian');
     expect(grammar).not.toContain('hey');
     expect(grammar).not.toContain('sebastian');
+  });
+
+  test('awake grammar uses configured assistant wake phrases', () => {
+    const grammar = buildAwakeWakeGrammar({ triggerPhrase: 'approval code', assistantWakePhrases: ['hey jenny', 'hello jenny'] });
+    expect(grammar).toContain('hey jenny');
+    expect(grammar).toContain('hello jenny');
+    expect(grammar).not.toContain('hey sebastian');
   });
 
   test('awake grammar includes shutdown phrase when configured', () => {

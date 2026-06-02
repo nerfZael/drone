@@ -159,6 +159,110 @@ describe('assistant API parity', () => {
     expect(desktopFiles.artifacts[0].content).toContain('Shared across devices');
   });
 
+  test('seeds Sebastian and isolates voice sessions by assistant profile', async () => {
+    const user = db.upsertUser({
+      clerkUserId: 'clerk_assistant_profiles',
+      displayName: 'Assistant Profiles',
+      email: 'assistant-profiles@example.local',
+      admin: false,
+    });
+    const registered = db.registerDevice(user.id, { deviceType: 'android', displayName: 'Phone' });
+    const profiles = db.listAssistantProfiles(user.id);
+    expect(profiles).toHaveLength(1);
+    expect(profiles[0]?.name).toBe('Sebastian');
+    expect(profiles[0]?.wakePhrase).toBe('hey sebastian');
+    expect(profiles[0]?.wakePhraseAliases).toEqual(['hay sebastian', 'hey sebastien', 'hay sebastien']);
+
+    const jenny = db.createAssistantProfile(user.id, { name: 'Jenny', wakePhrase: 'hey jenny', wakePhraseAliases: ['hello jenny'], ttsVoice: 'jenny' });
+    expect(jenny.name).toBe('Jenny');
+    expect(jenny.wakePhraseAliases).toEqual(['hello jenny']);
+    expect(() => db.createAssistantProfile(user.id, { name: 'Duplicate', wakePhrase: 'hello jenny', ttsVoice: 'austin' })).toThrow('wake phrase is already used by another assistant profile');
+    const alex = db.createAssistantProfile(user.id, { name: 'Alex', wakePhrase: 'hey alex', ttsVoice: 'austin', baseProfileId: jenny.id });
+    expect(() => db.updateAssistantProfile(user.id, jenny.id, { baseProfileId: alex.id })).toThrow('assistant profile inheritance cannot contain a cycle');
+    const disabled = db.createAssistantProfile(user.id, { name: 'Mia', wakePhrase: 'hey mia', ttsVoice: 'mia', enabled: false });
+    expect(() => db.createVoiceSession(user.id, registered.device.id, 'assistant', { assistantProfileId: disabled.id })).toThrow('unknown or disabled assistant profile');
+
+    const sebastianSession = db.createVoiceSession(user.id, registered.device.id, 'assistant', { assistantProfileId: profiles[0]!.id });
+    const jennySession = db.createVoiceSession(user.id, registered.device.id, 'assistant', { assistantProfileId: jenny.id });
+    expect(sebastianSession.assistantProfileId).toBe(profiles[0]!.id);
+    expect(jennySession.assistantProfileId).toBe(jenny.id);
+    expect(jennySession.assistantThreadId).not.toBe(sebastianSession.assistantThreadId);
+    db.upsertArtifact(user.id, sebastianSession.assistantThreadId, { path: 'notes/profile.md', content: 'Sebastian notes' });
+    db.upsertArtifact(user.id, jennySession.assistantThreadId, { path: 'notes/profile.md', content: 'Jenny notes' });
+    const jennyFiles = await built.app.inject({
+      method: 'GET',
+      url: `/api/devices/${registered.device.id}/assistant/thread/artifacts?assistantProfileId=${jenny.id}`,
+      headers: {
+        'x-voice-device-token': registered.token,
+        'x-voice-client-version': '12',
+      },
+    }).then((response) => response.json());
+    expect(jennyFiles.thread.id).toBe(jennySession.assistantThreadId);
+    expect(jennyFiles.artifacts[0].content).toBe('Jenny notes');
+    db.updateAssistantProfile(user.id, profiles[0]!.id, { enabled: false });
+    const defaultSession = db.createVoiceSession(user.id, registered.device.id, 'assistant');
+    expect(defaultSession.assistantProfileId).toBe(jenny.id);
+    db.updateAssistantProfile(user.id, alex.id, { enabled: false });
+    expect(() => db.updateAssistantProfile(user.id, jenny.id, { enabled: false })).toThrow('at least one assistant profile must remain enabled');
+  });
+
+  test('backfills missing Sebastian aliases without overriding explicit alias edits', () => {
+    const user = db.upsertUser({
+      clerkUserId: 'clerk_assistant_profile_alias_backfill',
+      displayName: 'Assistant Profile Alias Backfill',
+      email: 'assistant-profile-alias-backfill@example.local',
+      admin: false,
+    });
+    const existing = db.listAssistantProfiles(user.id)[0]!;
+    db.db
+      .query(
+        `
+        UPDATE assistant_profiles
+        SET wake_phrase_aliases_json = NULL
+        WHERE user_id = $userId AND id = $profileId
+      `,
+      )
+      .run({ $userId: user.id, $profileId: existing.id });
+
+    const seeded = db.listAssistantProfiles(user.id)[0]!;
+    expect(seeded.wakePhraseAliases).toEqual(['hay sebastian', 'hey sebastien', 'hay sebastien']);
+
+    db.updateAssistantProfile(user.id, seeded.id, { wakePhraseAliases: [] });
+    expect(db.listAssistantProfiles(user.id)[0]?.wakePhraseAliases).toEqual([]);
+  });
+
+  test('repairs all-disabled assistant profiles and normalizes unsupported voices', () => {
+    const user = db.upsertUser({
+      clerkUserId: 'clerk_assistant_profile_repair',
+      displayName: 'Assistant Profile Repair',
+      email: 'assistant-profile-repair@example.local',
+      admin: false,
+    });
+    const registered = db.registerDevice(user.id, { deviceType: 'desktop', displayName: 'Desktop' });
+    const existing = db.listAssistantProfiles(user.id)[0]!;
+    db.db
+      .query(
+        `
+        UPDATE assistant_profiles
+        SET enabled = 0
+        WHERE user_id = $userId
+      `,
+      )
+      .run({ $userId: user.id });
+
+    const repaired = db.listAssistantProfiles(user.id)[0]!;
+    expect(repaired.id).toBe(existing.id);
+    expect(repaired.enabled).toBe(true);
+    expect(db.createVoiceSession(user.id, registered.device.id, 'assistant').assistantProfileId).toBe(existing.id);
+
+    const profile = db.createAssistantProfile(user.id, { name: 'Jenny', wakePhrase: 'hey jenny', ttsVoice: 'invalid voice' });
+    expect(profile.ttsVoice).toBe('austin');
+    const updated = db.updateAssistantProfile(user.id, profile.id, { ttsVoice: 'diana' });
+    expect(updated?.ttsVoice).toBe('diana');
+    const unchanged = db.updateAssistantProfile(user.id, profile.id, { ttsVoice: 'not-supported' });
+    expect(unchanged?.ttsVoice).toBe('diana');
+  });
+
   test('uses manually created threads for device recordings', async () => {
     const user = db.upsertUser({
       clerkUserId: 'clerk_voice_enabled_web_thread',

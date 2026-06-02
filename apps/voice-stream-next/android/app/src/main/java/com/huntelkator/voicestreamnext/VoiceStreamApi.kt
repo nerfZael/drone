@@ -9,8 +9,11 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.net.URI
+import java.net.URLEncoder
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+
+private const val PREF_ACTIVE_ASSISTANT_PROFILE_ID = "active_assistant_profile_id"
 
 data class ApiConfig(
     val serverUrl: String,
@@ -85,6 +88,7 @@ data class VoiceApprovalSettings(
     val duplicateCooldownMs: Long = 4_000,
     val finalizeCheckIntervalMs: Long = 250,
     val postPromptCommandSuppressionMs: Long = 1_800,
+    val assistantProfiles: List<AssistantVoiceProfile> = listOf(AssistantVoiceProfile.defaultSebastian()),
 ) {
     fun toApprovalCodeSettings(): ApprovalCodeSettings {
         return ApprovalCodeSettings(
@@ -96,6 +100,28 @@ data class VoiceApprovalSettings(
             duplicateCooldownMs = duplicateCooldownMs,
             finalizeCheckIntervalMs = finalizeCheckIntervalMs,
         )
+    }
+}
+
+data class AssistantVoiceProfile(
+    val id: String,
+    val name: String,
+    val wakePhrase: String,
+    val wakePhraseAliases: List<String>,
+    val ttsVoice: String,
+    val enabled: Boolean,
+) {
+    companion object {
+        fun defaultSebastian(): AssistantVoiceProfile {
+            return AssistantVoiceProfile(
+                id = "",
+                name = "Sebastian",
+                wakePhrase = "hey sebastian",
+                wakePhraseAliases = listOf("hay sebastian", "hey sebastien", "hay sebastien"),
+                ttsVoice = "austin",
+                enabled = true,
+            )
+        }
     }
 }
 
@@ -149,6 +175,21 @@ class VoiceStreamApi(private val context: Context) {
             .getString(Constants.PREF_DEVICE_TOKEN, "").orEmpty()
     }
 
+    fun activeAssistantProfileId(): String {
+        return context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(PREF_ACTIVE_ASSISTANT_PROFILE_ID, "").orEmpty()
+    }
+
+    private fun saveActiveAssistantProfileId(profileId: String?) {
+        val editor = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE).edit()
+        if (profileId.isNullOrBlank()) {
+            editor.remove(PREF_ACTIVE_ASSISTANT_PROFILE_ID)
+        } else {
+            editor.putString(PREF_ACTIVE_ASSISTANT_PROFILE_ID, profileId)
+        }
+        editor.apply()
+    }
+
     fun installationId(): String {
         val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
         val existing = prefs.getString(Constants.PREF_INSTALLATION_ID, "").orEmpty()
@@ -178,6 +219,7 @@ class VoiceStreamApi(private val context: Context) {
         context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE).edit()
             .remove(Constants.PREF_DEVICE_ID)
             .remove(Constants.PREF_DEVICE_TOKEN)
+            .remove(PREF_ACTIVE_ASSISTANT_PROFILE_ID)
             .apply()
     }
 
@@ -338,17 +380,21 @@ class VoiceStreamApi(private val context: Context) {
         }
     }
 
-    fun createVoiceSession(deviceId: String, mode: String = Constants.STREAM_TARGET_ASSISTANT): String {
+    fun createVoiceSession(deviceId: String, mode: String = Constants.STREAM_TARGET_ASSISTANT, assistantProfileId: String? = null): String {
+        val body = JSONObject()
+            .put("deviceId", deviceId)
+            .put("token", pairedDeviceToken())
+            .put("installationId", installationId())
+            .put("mode", mode)
+            .put("protocolVersion", 1)
+            .put("clientVersion", BuildConfig.VERSION_CODE)
+        if (!assistantProfileId.isNullOrBlank()) {
+            body.put("assistantProfileId", assistantProfileId)
+        }
         val json = request(
             "POST",
             "/api/voice/sessions",
-            JSONObject()
-                .put("deviceId", deviceId)
-                .put("token", pairedDeviceToken())
-                .put("installationId", installationId())
-                .put("mode", mode)
-                .put("protocolVersion", 1)
-                .put("clientVersion", BuildConfig.VERSION_CODE)
+            body
         )
         val device = json.optJSONObject("device")
         val returnedDeviceId = device?.optString("id").orEmpty()
@@ -358,13 +404,15 @@ class VoiceStreamApi(private val context: Context) {
                 device?.optString("displayName")?.takeIf { it.isNotBlank() } ?: Constants.DEFAULT_DEVICE_NAME
             )
         }
-        return json
-            .getJSONObject("session")
-            .getString("id")
+        val session = json.getJSONObject("session")
+        saveActiveAssistantProfileId(session.optString("assistantProfileId").takeIf { it.isNotBlank() } ?: assistantProfileId)
+        return session.getString("id")
     }
 
     fun voiceApprovalSettings(): VoiceApprovalSettings {
-        val settings = request("GET", "/api/settings/voice-approval").getJSONObject("settings")
+        val json = request("GET", "/api/settings/voice-approval")
+        val settings = json.getJSONObject("settings")
+        val profileArray = settings.optJSONArray("assistantProfiles") ?: json.optJSONArray("assistantProfiles")
         return VoiceApprovalSettings(
             triggerPhrase = settings.optString("triggerPhrase", "approval code").trim().ifBlank { "approval code" },
             unlockPhrase = PhraseMatcher.normalizePhrase(
@@ -381,7 +429,37 @@ class VoiceStreamApi(private val context: Context) {
             duplicateCooldownMs = settings.optLong("duplicateCooldownMs", 4_000).coerceIn(0, 15_000),
             finalizeCheckIntervalMs = settings.optLong("finalizeCheckIntervalMs", 250).coerceIn(100, 1_000),
             postPromptCommandSuppressionMs = settings.optLong("postPromptCommandSuppressionMs", 1_800).coerceIn(0, 5_000),
+            assistantProfiles = parseAssistantVoiceProfiles(profileArray),
         )
+    }
+
+    private fun parseAssistantVoiceProfiles(array: JSONArray?): List<AssistantVoiceProfile> {
+        if (array == null || array.length() == 0) return listOf(AssistantVoiceProfile.defaultSebastian())
+        val profiles = mutableListOf<AssistantVoiceProfile>()
+        for (index in 0 until array.length()) {
+            val item = array.optJSONObject(index) ?: continue
+            val wakePhrase = PhraseMatcher.normalizePhrase(item.optString("wakePhrase"))
+            if (wakePhrase.isBlank()) continue
+            val aliasesJson = item.optJSONArray("wakePhraseAliases")
+            val aliases = mutableListOf<String>()
+            if (aliasesJson != null) {
+                for (aliasIndex in 0 until aliasesJson.length()) {
+                    val alias = PhraseMatcher.normalizePhrase(aliasesJson.optString(aliasIndex))
+                    if (alias.isNotBlank()) aliases.add(alias)
+                }
+            }
+            profiles.add(
+                AssistantVoiceProfile(
+                    id = item.optString("id"),
+                    name = item.optString("name", "Assistant"),
+                    wakePhrase = wakePhrase,
+                    wakePhraseAliases = aliases.distinct(),
+                    ttsVoice = item.optString("ttsVoice", "austin"),
+                    enabled = item.optBoolean("enabled", true),
+                )
+            )
+        }
+        return profiles.ifEmpty { listOf(AssistantVoiceProfile.defaultSebastian()) }
     }
 
     fun sendAssistantMessage(content: String): AssistantExchange {
@@ -401,7 +479,7 @@ class VoiceStreamApi(private val context: Context) {
     fun assistantThreadSummary(): AssistantThreadSummary {
         val deviceId = pairedDeviceId()
         if (deviceId.isBlank()) throw IOException("Pair this device before loading assistant files.")
-        val json = deviceRequest("GET", "/api/devices/$deviceId/assistant/thread")
+        val json = deviceRequest("GET", "/api/devices/$deviceId/assistant/thread${activeAssistantProfileQuery()}")
         val thread = json.optJSONObject("thread") ?: return emptyAssistantThread(json.optInt("artifactsCount", 0))
         return parseAssistantThread(thread, json.optInt("artifactsCount", thread.optInt("artifactsCount", 0)))
     }
@@ -409,7 +487,7 @@ class VoiceStreamApi(private val context: Context) {
     fun assistantFiles(): AssistantFilesResult {
         val deviceId = pairedDeviceId()
         if (deviceId.isBlank()) throw IOException("Pair this device before loading assistant files.")
-        val json = deviceRequest("GET", "/api/devices/$deviceId/assistant/thread/artifacts")
+        val json = deviceRequest("GET", "/api/devices/$deviceId/assistant/thread/artifacts${activeAssistantProfileQuery()}")
         val artifacts = json.optJSONArray("artifacts").orEmptyArtifacts()
         val thread = json.optJSONObject("thread")?.let { parseAssistantThread(it, artifacts.size) }
             ?: emptyAssistantThread(artifacts.size)
@@ -532,6 +610,12 @@ class VoiceStreamApi(private val context: Context) {
             }
             return ApiJsonResponse.parseObject(text, method, path)
         }
+    }
+
+    private fun activeAssistantProfileQuery(): String {
+        val profileId = activeAssistantProfileId()
+        if (profileId.isBlank()) return ""
+        return "?assistantProfileId=${URLEncoder.encode(profileId, Charsets.UTF_8.name())}"
     }
 
     private fun parseAssistantThread(json: JSONObject, fallbackArtifactsCount: Int): AssistantThreadSummary {

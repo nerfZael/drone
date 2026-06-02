@@ -10,6 +10,23 @@ export type UserProfile = {
 
 export type VoiceSettings = VoiceApprovalSettings & {
   speechPlaybackTarget: SpeechPlaybackTarget;
+  assistantProfiles?: AssistantProfile[];
+  updatedAt: string;
+};
+
+export type AssistantProfile = {
+  id: string;
+  userId: string;
+  baseProfileId: string | null;
+  name: string;
+  wakePhrase: string;
+  wakePhraseAliases: string[];
+  ttsVoice: string;
+  enabled: boolean;
+  sortOrder: number;
+  systemPrompt: string | null;
+  enabledTools: string[] | null;
+  createdAt: string;
   updatedAt: string;
 };
 
@@ -91,6 +108,7 @@ export type AssistantThread = {
   title: string;
   source: string;
   deviceId: string | null;
+  assistantProfileId?: string | null;
   provider?: string;
   model?: string;
   thinkingLevel?: string;
@@ -326,6 +344,7 @@ export type AssistantSnapshot = {
   availableTools: AssistantToolSummary[];
   skills: AssistantSkillRecord[];
   assistantSettings: AssistantSettingsRecord;
+  assistantProfiles: AssistantProfile[];
   apiKeys: Record<'openai' | 'exa', AssistantApiKeyView>;
   codexConnection: AssistantCodexConnection;
   runningModels: Record<string, { provider: string; model: string; thinkingLevel: string; runId: string }>;
@@ -399,6 +418,7 @@ export type DashboardData = {
   settings: VoiceSettings;
   speechPlayback?: SpeechPlaybackStatus;
   assistantSettings?: AssistantSettingsRecord;
+  assistantProfiles?: AssistantProfile[];
   threads: AssistantThread[];
   assistantApprovals?: AssistantApprovalRecord[];
   logs: LogRecord[];

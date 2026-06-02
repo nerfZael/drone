@@ -63,6 +63,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
     @Volatile private var awakeMode = false
     @Volatile private var sleeping = false
     @Volatile private var currentMicrophone = "Mic: phone"
+    @Volatile private var pendingAssistantProfileId: String? = null
 
     var statusListener: ((StreamStatus) -> Unit)? = null
 
@@ -92,7 +93,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
                 sleeping = false
                 applyWakeDetectorSettingsIfReady()
                 refreshApprovalSettings { applyWakeDetectorSettingsIfReady() }
-                onStatus("Awake: waiting for \"hey sebastian\"")
+                onStatus(awakeWaitingStatus())
             }
             return
         }
@@ -110,7 +111,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
             detector.prepare()
         }
         refreshApprovalSettings { applyWakeDetectorSettingsIfReady() }
-        onStatus("Awake: waiting for \"hey sebastian\"")
+        onStatus(awakeWaitingStatus())
         thread(name = "VoiceStreamNextAwakeAudio") {
             runRecorder(onStatus, detectWake = true)
         }
@@ -167,10 +168,10 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
         sleeping = false
         applyWakeDetectorSettingsIfReady()
         if (recording.get()) {
-            endRecording(onStatus, "Awake: waiting for \"hey sebastian\"")
+            endRecording(onStatus, awakeWaitingStatus())
             closeSocket("recording stopped", sendEnd = false)
         } else {
-            onStatus("Awake: waiting for \"hey sebastian\"")
+            onStatus(awakeWaitingStatus())
         }
         wakeDetector?.reset()
         return true
@@ -218,11 +219,13 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
         reconnectAttempt = 0
         pendingStreamBuffer.clear()
         pendingStreamBuffer.pushAll(preRollBuffer.drain())
+        val assistantProfileId = pendingAssistantProfileId
+        pendingAssistantProfileId = null
         emitStatus(onStatus, "Voice stream starting", currentMicrophone)
         thread(name = "VoiceStreamBeginRecording") {
             try {
                 val deviceId = api.pairedDeviceId()
-                val sessionId = api.createVoiceSession(deviceId, currentTarget)
+                val sessionId = api.createVoiceSession(deviceId, currentTarget, assistantProfileId)
                 beginRecordingWithSession(sessionId, currentTarget, onStatus, recordingAlreadyStarted = true)
             } catch (error: Exception) {
                 recording.set(false)
@@ -352,7 +355,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
         val status = if (currentTarget == Constants.STREAM_TARGET_CLIPBOARD) {
             "Awake: voice transcription cancelled"
         } else {
-            "Awake: waiting for \"hey sebastian\""
+            awakeWaitingStatus()
         }
         onStatus(status)
     }
@@ -419,7 +422,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
         val status = if (currentTarget == Constants.STREAM_TARGET_CLIPBOARD) {
             if (copied) "Awake: copied voice transcription" else "Awake: no voice transcription detected"
         } else {
-            "Awake: waiting for \"hey sebastian\""
+            awakeWaitingStatus()
         }
         onStatus(status)
     }
@@ -548,48 +551,49 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
         if (!recording.get()) {
             preRollBuffer.push(frame)
         }
-        val phrase = wakeDetector?.acceptPcm(frame, frame.size) ?: return
+        val match = wakeDetector?.acceptPcm(frame, frame.size) ?: return
         if (recording.get()) {
             wakeDetector?.reset()
             return
         }
-        mainHandler.post { handleWakePhrase(phrase, onStatus) }
+        mainHandler.post { handleWakePhrase(match, onStatus) }
     }
 
-    private fun handleWakePhrase(phrase: WakePhrase, onStatus: (String) -> Unit) {
+    private fun handleWakePhrase(match: WakePhraseMatch, onStatus: (String) -> Unit) {
         if (!active.get()) return
         when {
-            phrase.hasUnlock && sleeping -> {
+            match.hasUnlock && sleeping -> {
                 sleeping = false
                 applyWakeDetectorSettingsIfReady()
                 refreshApprovalSettings { applyWakeDetectorSettingsIfReady() }
                 wakeDetector?.reset()
                 cuePlayer.play(LocalCue.UNLOCK)
-                onStatus("Awake: waiting for \"hey sebastian\"")
+                onStatus("Awake: waiting for assistant wake phrase")
             }
-            phrase.hasShutdown -> {
+            match.hasShutdown -> {
                 wakeDetector?.reset()
                 cuePlayer.play(LocalCue.SLEEPING_OFF)
                 onStatus("Off")
                 stop()
             }
-            phrase.hasStart && !sleeping -> {
+            match.hasStart && !sleeping -> {
                 sleeping = false
+                pendingAssistantProfileId = match.assistantProfileId
                 wakeDetector?.reset()
                 cuePlayer.play(LocalCue.WAKE)
                 beginRecording(Constants.STREAM_TARGET_ASSISTANT, onStatus)
             }
-            phrase.hasPatch && !sleeping -> {
+            match.hasPatch && !sleeping -> {
                 wakeDetector?.reset()
                 cuePlayer.play(LocalCue.WAKE)
                 beginRecording(Constants.STREAM_TARGET_PATCH, onStatus)
             }
-            phrase.hasClipboard && !sleeping -> {
+            match.hasClipboard && !sleeping -> {
                 wakeDetector?.reset()
                 cuePlayer.play(LocalCue.WAKE)
                 beginRecording(Constants.STREAM_TARGET_CLIPBOARD, onStatus)
             }
-            phrase.hasSleep -> {
+            match.hasSleep -> {
                 wakeDetector?.reset()
                 if (sleeping) return
                 sleeping = true
@@ -604,16 +608,16 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
                     onStatus(sleepingStatus())
                 }
             }
-            phrase.hasStatus -> {
+            match.hasStatus -> {
                 cuePlayer.play(LocalCue.STATUS)
-                onStatus(if (recording.get()) recordingStatus(currentTarget) else "Awake: waiting for \"hey sebastian\"")
+                onStatus(if (recording.get()) recordingStatus(currentTarget) else "Awake: waiting for assistant wake phrase")
             }
-            phrase.hasStopAudio -> {
+            match.hasStopAudio -> {
                 wakeDetector?.reset()
                 AssistantAudioPlayer.stopCurrent()
                 onStatus(if (recording.get()) recordingStatus(currentTarget) else "Awake: assistant audio stopped")
             }
-            phrase.hasRepeatAudio -> {
+            match.hasRepeatAudio -> {
                 wakeDetector?.reset()
                 val repeated = AssistantAudioPlayer.repeatLast(context, onStatus)
                 onStatus(if (repeated) "Awake: repeating assistant audio" else "Awake: no assistant audio to repeat")
@@ -693,6 +697,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
             unlock = settings.unlockPhrase,
             shutdown = settings.shutdownPhrase,
             approvalTrigger = settings.triggerPhrase,
+            profiles = settings.assistantProfiles,
         )
     }
 
@@ -789,6 +794,10 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
 
     private fun sleepingStatus(): String {
         return "Sleeping. Say your unlock or shutdown phrase."
+    }
+
+    private fun awakeWaitingStatus(): String {
+        return "Awake: waiting for assistant wake phrase"
     }
 
     private fun encode(value: String): String {

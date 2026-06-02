@@ -541,10 +541,17 @@ function resolveVoskGrammar(mode, settings = {}) {
   const triggerPhrase = String(settings.triggerPhrase || 'approval code').trim();
   const unlockPhrase = String(settings.unlockPhrase || defaultVoicePhraseSettings.unlockPhrase).trim();
   const shutdownPhrase = String(settings.shutdownPhrase || defaultVoicePhraseSettings.shutdownPhrase).trim();
+  const assistantWakePhrases = Array.isArray(settings.assistantProfiles)
+    ? settings.assistantProfiles
+      .filter((profile) => profile?.enabled !== false)
+      .flatMap((profile) => [profile?.wakePhrase, ...(Array.isArray(profile?.wakePhraseAliases) ? profile.wakePhraseAliases : [])])
+      .map((phrase) => String(phrase || '').trim())
+      .filter(Boolean)
+    : [];
   if (mode === 'sleep') {
     return voicePhrases.buildSleepWakeGrammar({ unlockPhrase, shutdownPhrase });
   }
-  return voicePhrases.buildAwakeWakeGrammar({ triggerPhrase, shutdownPhrase });
+  return voicePhrases.buildAwakeWakeGrammar({ triggerPhrase, shutdownPhrase, assistantWakePhrases });
 }
 
 async function applyVoskGrammar(mode, settings = {}) {
