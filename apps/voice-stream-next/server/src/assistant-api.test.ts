@@ -172,15 +172,27 @@ describe('assistant API parity', () => {
     expect(profiles[0]?.name).toBe('Sebastian');
     expect(profiles[0]?.wakePhrase).toBe('hey sebastian');
     expect(profiles[0]?.wakePhraseAliases).toEqual(['hay sebastian', 'hey sebastien', 'hay sebastien']);
+    expect(profiles[0]?.systemPrompt).toContain('You are Sebastian, an AI assistant.');
+    expect(profiles[0]?.systemPrompt).toContain('use the speak tool');
 
     const jenny = db.createAssistantProfile(user.id, { name: 'Jenny', wakePhrase: 'hey jenny', wakePhraseAliases: ['hello jenny'], ttsVoice: 'jenny' });
     expect(jenny.name).toBe('Jenny');
     expect(jenny.wakePhraseAliases).toEqual(['hello jenny']);
+    const updatedJenny = db.updateAssistantProfile(user.id, jenny.id, { systemPrompt: 'You are Jenny.', enabledTools: ['speak'] });
+    expect(updatedJenny?.systemPrompt).toBe('You are Jenny.');
+    expect(updatedJenny?.enabledTools).toEqual(['speak']);
+    expect(db.createThread(user.id, { title: 'Jenny tools', assistantProfileId: jenny.id }).enabledTools).toEqual(['speak']);
     expect(() => db.createAssistantProfile(user.id, { name: 'Duplicate', wakePhrase: 'hello jenny', ttsVoice: 'austin' })).toThrow('wake phrase is already used by another assistant profile');
     const alex = db.createAssistantProfile(user.id, { name: 'Alex', wakePhrase: 'hey alex', ttsVoice: 'austin', baseProfileId: jenny.id });
     expect(() => db.updateAssistantProfile(user.id, jenny.id, { baseProfileId: alex.id })).toThrow('assistant profile inheritance cannot contain a cycle');
     const disabled = db.createAssistantProfile(user.id, { name: 'Mia', wakePhrase: 'hey mia', ttsVoice: 'mia', enabled: false });
     expect(() => db.createVoiceSession(user.id, registered.device.id, 'assistant', { assistantProfileId: disabled.id })).toThrow('unknown or disabled assistant profile');
+    const manualThread = db.createThread(user.id, { title: 'Manual profile switch' });
+    expect(manualThread.assistantProfileId).toBe(profiles[0]!.id);
+    expect(db.updateThread(user.id, manualThread.id, { assistantProfileId: jenny.id })?.assistantProfileId).toBe(jenny.id);
+    expect(() => db.updateThread(user.id, manualThread.id, { assistantProfileId: disabled.id })).toThrow('unknown or disabled assistant profile');
+    db.addMessage(user.id, manualThread.id, { role: 'user', content: 'hello' });
+    expect(() => db.updateThread(user.id, manualThread.id, { assistantProfileId: profiles[0]!.id })).toThrow('assistant profile cannot be changed after thread messages exist');
 
     const sebastianSession = db.createVoiceSession(user.id, registered.device.id, 'assistant', { assistantProfileId: profiles[0]!.id });
     const jennySession = db.createVoiceSession(user.id, registered.device.id, 'assistant', { assistantProfileId: jenny.id });
@@ -226,9 +238,12 @@ describe('assistant API parity', () => {
 
     const seeded = db.listAssistantProfiles(user.id)[0]!;
     expect(seeded.wakePhraseAliases).toEqual(['hay sebastian', 'hey sebastien', 'hay sebastien']);
+    expect(seeded.systemPrompt).toContain('You are Sebastian, an AI assistant.');
 
     db.updateAssistantProfile(user.id, seeded.id, { wakePhraseAliases: [] });
     expect(db.listAssistantProfiles(user.id)[0]?.wakePhraseAliases).toEqual([]);
+    db.updateAssistantProfile(user.id, seeded.id, { systemPrompt: '' });
+    expect(db.listAssistantProfiles(user.id)[0]?.systemPrompt).toBe('');
   });
 
   test('repairs all-disabled assistant profiles and normalizes unsupported voices', () => {
