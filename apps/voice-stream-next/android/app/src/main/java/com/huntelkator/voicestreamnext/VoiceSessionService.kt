@@ -8,6 +8,9 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.graphics.BitmapFactory
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -27,6 +30,7 @@ class VoiceSessionService : Service() {
     private lateinit var api: VoiceStreamApi
     private lateinit var streamer: AudioStreamer
     private lateinit var microphoneRouter: MicrophoneRouter
+    private lateinit var audioManager: AudioManager
     private val mainHandler = Handler(Looper.getMainLooper())
     private val controlClient = OkHttpClient.Builder()
         .pingInterval(15, TimeUnit.SECONDS)
@@ -42,6 +46,16 @@ class VoiceSessionService : Service() {
     @Volatile private var controlReconnectAttempt = 0
     @Volatile private var controlReconnectRunnable: Runnable? = null
 
+    private val audioDeviceCallback = object : AudioDeviceCallback() {
+        override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) {
+            refreshMicrophoneAfterDeviceChange()
+        }
+
+        override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) {
+            refreshMicrophoneAfterDeviceChange()
+        }
+    }
+
     private val logUploadRunnable = object : Runnable {
         override fun run() {
             if (serviceActive) {
@@ -56,7 +70,9 @@ class VoiceSessionService : Service() {
         api = VoiceStreamApi(applicationContext)
         streamer = AudioStreamer(applicationContext, api)
         microphoneRouter = MicrophoneRouter(applicationContext)
-        currentMicrophone = microphoneRouter.describeBestAvailable()
+        audioManager = getSystemService(AudioManager::class.java)
+        currentMicrophone = microphoneRouter.describeCurrentSelection()
+        audioManager.registerAudioDeviceCallback(audioDeviceCallback, mainHandler)
         streamer.statusListener = { update ->
             if (update.microphone.isNotBlank()) {
                 currentMicrophone = update.microphone
@@ -77,6 +93,12 @@ class VoiceSessionService : Service() {
             }
             Constants.ACTION_QUERY_STATUS -> {
                 publishStatus(lastStatus, lastMode, currentMicrophone, lastApprovalStatus)
+                if (!serviceActive) {
+                    stopSelf(startId)
+                }
+            }
+            Constants.ACTION_SET_MICROPHONE -> {
+                setMicrophone(intent.getStringExtra(Constants.EXTRA_MICROPHONE_DEVICE_KEY).orEmpty())
                 if (!serviceActive) {
                     stopSelf(startId)
                 }
@@ -119,6 +141,7 @@ class VoiceSessionService : Service() {
         streamer.stop()
         AssistantAudioPlayer.stopAll()
         closeControlChannel()
+        runCatching { audioManager.unregisterAudioDeviceCallback(audioDeviceCallback) }
         releaseWakeLock()
         publishStatus("Off", Constants.MODE_OFF, currentMicrophone, "")
         super.onDestroy()
@@ -198,6 +221,19 @@ class VoiceSessionService : Service() {
         AssistantAudioPlayer.stopAll()
         if (!streamer.enterSleep()) {
             stopVoice()
+        }
+    }
+
+    private fun setMicrophone(deviceKey: String) {
+        microphoneRouter.saveSelectedDeviceKey(deviceKey)
+        currentMicrophone = streamer.applyMicrophonePreference()
+        publishStatus(lastStatus, lastMode, currentMicrophone, lastApprovalStatus)
+    }
+
+    private fun refreshMicrophoneAfterDeviceChange() {
+        mainHandler.post {
+            currentMicrophone = streamer.applyMicrophonePreference()
+            publishStatus(lastStatus, lastMode, currentMicrophone, lastApprovalStatus)
         }
     }
 
