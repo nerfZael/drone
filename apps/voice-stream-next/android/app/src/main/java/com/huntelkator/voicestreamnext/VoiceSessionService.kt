@@ -23,6 +23,7 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
 import java.net.URLEncoder
+import java.util.ArrayDeque
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 
@@ -45,6 +46,8 @@ class VoiceSessionService : Service() {
     @Volatile private var serviceActive = false
     @Volatile private var controlReconnectAttempt = 0
     @Volatile private var controlReconnectRunnable: Runnable? = null
+    private val deferredSpeechAudio = ArrayDeque<ByteArray>()
+    private val deferredSpeechAudioLock = Any()
 
     private val audioDeviceCallback = object : AudioDeviceCallback() {
         override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) {
@@ -296,6 +299,11 @@ class VoiceSessionService : Service() {
                 }
             }
         }
+        if (mode == Constants.MODE_OFF || mode == Constants.MODE_SLEEPING) {
+            clearDeferredSpeechAudio()
+        } else {
+            drainDeferredSpeechAudioIfReady()
+        }
     }
 
     private fun broadcastState() {
@@ -354,14 +362,7 @@ class VoiceSessionService : Service() {
                                         contentType = message.optString("contentType", "audio/wav"),
                                     )
                                     broadcastSpeechHistoryChanged()
-                                    if (streamer.canPlayAssistantAudio()) {
-                                        AssistantAudioPlayer.playWav(applicationContext, audio) { status ->
-                                            publishStatus(status, lastMode, currentMicrophone, lastApprovalStatus)
-                                        }
-                                        publishStatus("Assistant audio received.", lastMode, currentMicrophone, lastApprovalStatus)
-                                    } else {
-                                        ClientLog.i("Service", "Assistant audio received but playback skipped mode=$lastMode")
-                                    }
+                                    queueOrPlaySpeechAudio(audio)
                                 }.onFailure { error ->
                                     ClientLog.w("Service", "Assistant audio decode failed", error)
                                     publishStatus("Assistant audio failed: ${error.message ?: error.javaClass.simpleName}", Constants.MODE_ERROR, currentMicrophone, lastApprovalStatus)
@@ -448,6 +449,52 @@ class VoiceSessionService : Service() {
             .put("lastError", if (mode == Constants.MODE_ERROR) status else JSONObject.NULL)
             .put("reportedAt", java.time.Instant.now().toString())
         return localSocket.send(payload.toString())
+    }
+
+    private fun queueOrPlaySpeechAudio(audio: ByteArray) {
+        if (speechPlaybackBlocked() || streamer.isRecordingAudio()) {
+            synchronized(deferredSpeechAudioLock) {
+                deferredSpeechAudio.add(audio)
+            }
+            ClientLog.i("Service", "Assistant audio deferred while voice recording is active mode=$lastMode")
+            return
+        }
+        if (!streamer.canPlayQueuedAssistantAudio()) {
+            ClientLog.i("Service", "Assistant audio received but playback skipped mode=$lastMode")
+            return
+        }
+        playSpeechAudio(audio)
+    }
+
+    private fun drainDeferredSpeechAudioIfReady() {
+        if (speechPlaybackBlocked() || streamer.isRecordingAudio() || !streamer.canPlayQueuedAssistantAudio()) return
+        AssistantAudioPlayer.resumePlayback()
+        val queued = ArrayList<ByteArray>()
+        synchronized(deferredSpeechAudioLock) {
+            while (!deferredSpeechAudio.isEmpty()) {
+                queued.add(deferredSpeechAudio.removeFirst())
+            }
+        }
+        if (queued.isEmpty()) return
+        ClientLog.i("Service", "Playing ${queued.size} deferred assistant audio item(s)")
+        queued.forEach { audio -> playSpeechAudio(audio) }
+    }
+
+    private fun clearDeferredSpeechAudio() {
+        synchronized(deferredSpeechAudioLock) {
+            deferredSpeechAudio.clear()
+        }
+    }
+
+    private fun playSpeechAudio(audio: ByteArray) {
+        AssistantAudioPlayer.playWav(applicationContext, audio) { status ->
+            publishStatus(status, lastMode, currentMicrophone, lastApprovalStatus)
+        }
+        publishStatus("Assistant audio received.", lastMode, currentMicrophone, lastApprovalStatus)
+    }
+
+    private fun speechPlaybackBlocked(): Boolean {
+        return lastMode == Constants.MODE_RECORDING || lastMode == "transcribing"
     }
 
     private fun handleRemoteControlCommand(webSocket: WebSocket, message: JSONObject) {

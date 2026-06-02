@@ -83,6 +83,9 @@ type DesktopAppInfo = {
 const VOICE_RECORDING_RETENTION_PER_MODE = 10;
 const VOICE_RECORDING_SAMPLE_RATE_HZ = 16_000;
 const VOICE_RECORDING_CHANNELS = 1;
+const SPEECH_PLAYBACK_DEFER_POLL_MS = 100;
+const SPEECH_PLAYBACK_BLOCKER_STALE_MS = MAX_STREAM_DURATION_MS + 30_000;
+const SPEECH_PLAYBACK_BLOCKED_MODES = new Set(['recording', 'transcribing']);
 
 type AppEventType =
   | 'assistant_changed'
@@ -165,7 +168,23 @@ function speakTextFromArgsJson(raw: unknown): string {
 
 function cleanDeviceMode(raw: unknown): string {
   const mode = cleanText(raw, 'off').toLowerCase();
-  return ['off', 'awake', 'sleeping', 'recording', 'transcribing', 'error'].includes(mode) ? mode : 'error';
+  return ['off', 'awake', 'sleeping', 'recording', 'paused', 'transcribing', 'error'].includes(mode) ? mode : 'error';
+}
+
+function speechPlaybackBlockedMode(raw: unknown): boolean {
+  return SPEECH_PLAYBACK_BLOCKED_MODES.has(cleanText(raw).toLowerCase());
+}
+
+function speechPlaybackBlockerIsFresh(updatedAt: string): boolean {
+  const at = Date.parse(updatedAt);
+  return Number.isFinite(at) && Date.now() - at <= SPEECH_PLAYBACK_BLOCKER_STALE_MS;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    (timer as any).unref?.();
+  });
 }
 
 function desktopAuthExpiresAt(from = Date.now()): string {
@@ -766,6 +785,22 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
   };
   const speechQueues = new Map<string, Promise<void>>();
 
+  const connectedSpeechPlaybackBlockers = (userId: string) => db
+    .listClientStatuses(userId)
+    .filter((status) =>
+      controlChannels.isConnected(status.deviceId) &&
+      speechPlaybackBlockedMode(status.mode) &&
+      speechPlaybackBlockerIsFresh(status.updatedAt),
+    );
+
+  const waitForSpeechPlaybackReady = async (userId: string) => {
+    let blockers = connectedSpeechPlaybackBlockers(userId);
+    while (blockers.length > 0) {
+      await delay(SPEECH_PLAYBACK_DEFER_POLL_MS);
+      blockers = connectedSpeechPlaybackBlockers(userId);
+    }
+  };
+
   const latestSpeechClientForUser = (userId: string): SpeechDestination | null => {
     let latest: SpeechDestination | null = null;
     for (const client of [...speechEventClients]) {
@@ -843,6 +878,24 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
   ): Promise<void> => {
     const clean = cleanText(text).slice(0, 4096);
     if (!clean) return;
+    const initialBlockers = connectedSpeechPlaybackBlockers(userId);
+    if (initialBlockers.length > 0) {
+      addLog(userId, {
+        source: 'speech',
+        level: 'info',
+        message: 'Speech playback deferred while voice recording is active',
+        detailsJson: JSON.stringify({
+          source: metadata.source,
+          blockedDevices: initialBlockers.map((status) => ({
+            deviceId: status.deviceId,
+            mode: status.mode,
+            deviceType: status.deviceType,
+          })),
+          chars: clean.length,
+        }),
+      });
+      await waitForSpeechPlaybackReady(userId);
+    }
     const destination = selectSpeechDestination(userId);
     if (!destination) {
       addLog(userId, {

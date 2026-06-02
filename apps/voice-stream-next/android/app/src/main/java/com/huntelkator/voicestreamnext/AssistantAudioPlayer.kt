@@ -21,11 +21,14 @@ object AssistantAudioPlayer {
     private val queue = ArrayDeque<PlaybackRequest>()
     @Volatile private var activeTrack: AudioTrack? = null
     @Volatile private var activePlayer: MediaPlayer? = null
+    @Volatile private var activeRequest: PlaybackRequest? = null
     @Volatile private var workerRunning = false
+    @Volatile private var playbackPaused = false
     @Volatile private var lastCompletedWav: ByteArray? = null
 
     fun stopAll() {
         generation.incrementAndGet()
+        playbackPaused = false
         synchronized(lock) {
             queue.clear()
         }
@@ -35,6 +38,31 @@ object AssistantAudioPlayer {
     fun stopCurrent() {
         generation.incrementAndGet()
         releaseActivePlayback()
+    }
+
+    fun pausePlayback(requeueActive: Boolean = true) {
+        playbackPaused = true
+        val current = activeRequest
+        val request = current?.copy(wav = current.wav.copyOf())
+        generation.incrementAndGet()
+        releaseActivePlayback()
+        if (requeueActive && request != null) {
+            synchronized(lock) {
+                queue.addFirst(request)
+            }
+        }
+    }
+
+    fun resumePlayback() {
+        playbackPaused = false
+        var restart = false
+        synchronized(lock) {
+            if (queue.isNotEmpty() && !workerRunning) {
+                workerRunning = true
+                restart = true
+            }
+        }
+        if (restart) startWorker()
     }
 
     fun repeatLast(context: Context, onStatus: ((String) -> Unit)? = null): Boolean {
@@ -53,7 +81,7 @@ object AssistantAudioPlayer {
     fun playWav(context: Context, wav: ByteArray, rememberOnComplete: Boolean = true, onStatus: ((String) -> Unit)? = null) {
         synchronized(lock) {
             queue.add(PlaybackRequest(context.applicationContext, wav, onStatus, rememberOnComplete))
-            if (workerRunning) return
+            if (workerRunning || playbackPaused) return
             workerRunning = true
         }
         startWorker()
@@ -65,20 +93,25 @@ object AssistantAudioPlayer {
             try {
                 while (playbackGeneration == generation.get()) {
                     val next = synchronized(lock) { queue.poll() } ?: break
-                    runCatching {
-                        val attributes = AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_MEDIA)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                            .build()
-                        try {
-                            playPcmWav(next, attributes, playbackGeneration)
-                        } catch (error: Exception) {
-                            ClientLog.w("AssistantAudio", "PCM WAV playback unavailable signature=${signature(next.wav)} message=${error.message ?: error.javaClass.simpleName}; trying MediaPlayer", error)
-                            playWithMediaPlayer(next, attributes, playbackGeneration)
+                    activeRequest = next
+                    try {
+                        runCatching {
+                            val attributes = AudioAttributes.Builder()
+                                .setUsage(AudioAttributes.USAGE_MEDIA)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                                .build()
+                            try {
+                                playPcmWav(next, attributes, playbackGeneration)
+                            } catch (error: Exception) {
+                                ClientLog.w("AssistantAudio", "PCM WAV playback unavailable signature=${signature(next.wav)} message=${error.message ?: error.javaClass.simpleName}; trying MediaPlayer", error)
+                                playWithMediaPlayer(next, attributes, playbackGeneration)
+                            }
+                        }.onFailure { error ->
+                            ClientLog.w("AssistantAudio", "Assistant audio playback failed", error)
+                            next.onStatus?.invoke("Assistant audio failed: ${error.message ?: error.javaClass.simpleName}")
                         }
-                    }.onFailure { error ->
-                        ClientLog.w("AssistantAudio", "Assistant audio playback failed", error)
-                        next.onStatus?.invoke("Assistant audio failed: ${error.message ?: error.javaClass.simpleName}")
+                    } finally {
+                        if (activeRequest === next) activeRequest = null
                     }
                 }
             } finally {
@@ -87,7 +120,7 @@ object AssistantAudioPlayer {
                     if (workerRunning) {
                         workerRunning = false
                     }
-                    if (queue.isNotEmpty()) {
+                    if (queue.isNotEmpty() && !playbackPaused) {
                         workerRunning = true
                         restart = true
                     }

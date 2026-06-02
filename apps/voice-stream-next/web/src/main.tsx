@@ -384,20 +384,36 @@ function renderItemsFromMessages(sourceMessages: AssistantMessage[]): AssistantR
   return items;
 }
 
-const speechAudioQueue: Array<{ src: string; revoke?: () => void; repeatSrc?: string; requireAwakeMode?: boolean }> = [];
+type SpeechAudioQueueItem = {
+  src: string;
+  revoke?: () => void;
+  repeatSrc?: string;
+  requireAwakeMode?: boolean;
+  requeued?: boolean;
+};
+
+const speechAudioQueue: SpeechAudioQueueItem[] = [];
 let speechAudioPlaying = false;
 let speechAudioMode = 'off';
-let activeSpeechAudio: { audio: HTMLAudioElement; finish: () => void; requireAwakeMode?: boolean } | null = null;
+let activeSpeechAudio: { audio: HTMLAudioElement; finish: () => void; item: SpeechAudioQueueItem; requireAwakeMode?: boolean } | null = null;
 let lastCompletedSpeechAudioSrc: string | null = null;
 
 function speechPlaybackAllowed(): boolean {
   return ['awake', 'recording', 'paused', 'transcribing'].includes(speechAudioMode);
 }
 
+function speechPlaybackBlocked(): boolean {
+  return speechAudioMode === 'recording' || speechAudioMode === 'transcribing';
+}
+
 function setSpeechPlaybackMode(mode: string): void {
   speechAudioMode = mode;
   if (mode === 'sleeping' || mode === 'off') {
     stopSpeechAudioPlayback({ clearQueue: true, onlyAwakeMode: true });
+  } else if (speechPlaybackBlocked()) {
+    stopSpeechAudioPlayback({ clearQueue: false, requeueActive: true });
+  } else {
+    void drainSpeechAudioQueue();
   }
 }
 
@@ -423,16 +439,18 @@ async function drainSpeechAudioQueue(): Promise<void> {
   speechAudioPlaying = true;
   try {
     while (speechAudioQueue.length > 0) {
+      if (speechPlaybackBlocked()) break;
       const item = speechAudioQueue.shift()!;
+      item.requeued = false;
       if (item.requireAwakeMode && !speechPlaybackAllowed()) {
         item.revoke?.();
         continue;
       }
       try {
-        const completed = await playSpeechAudio(item.src, item.requireAwakeMode);
+        const completed = await playSpeechAudio(item);
         if (completed && item.repeatSrc) lastCompletedSpeechAudioSrc = item.repeatSrc;
       } finally {
-        item.revoke?.();
+        if (!item.requeued) item.revoke?.();
       }
     }
   } finally {
@@ -440,9 +458,9 @@ async function drainSpeechAudioQueue(): Promise<void> {
   }
 }
 
-function playSpeechAudio(src: string, requireAwakeMode = false): Promise<boolean> {
+function playSpeechAudio(item: SpeechAudioQueueItem): Promise<boolean> {
   return new Promise((resolve) => {
-    const audio = new Audio(src);
+    const audio = new Audio(item.src);
     let settled = false;
     let completed = false;
     const finish = () => {
@@ -451,7 +469,7 @@ function playSpeechAudio(src: string, requireAwakeMode = false): Promise<boolean
       if (activeSpeechAudio?.audio === audio) activeSpeechAudio = null;
       resolve(completed);
     };
-    activeSpeechAudio = { audio, finish, requireAwakeMode };
+    activeSpeechAudio = { audio, finish, item, requireAwakeMode: item.requireAwakeMode };
     audio.addEventListener('ended', () => {
       completed = true;
       finish();
@@ -461,7 +479,7 @@ function playSpeechAudio(src: string, requireAwakeMode = false): Promise<boolean
   });
 }
 
-function stopSpeechAudioPlayback(options: { clearQueue?: boolean; onlyAwakeMode?: boolean } = {}): boolean {
+function stopSpeechAudioPlayback(options: { clearQueue?: boolean; onlyAwakeMode?: boolean; requeueActive?: boolean } = {}): boolean {
   if (options.clearQueue) {
     for (let index = speechAudioQueue.length - 1; index >= 0; index -= 1) {
       const item = speechAudioQueue[index]!;
@@ -474,6 +492,10 @@ function stopSpeechAudioPlayback(options: { clearQueue?: boolean; onlyAwakeMode?
   if (!active) return false;
   if (options.onlyAwakeMode && !active.requireAwakeMode) return false;
   activeSpeechAudio = null;
+  if (options.requeueActive) {
+    active.item.requeued = true;
+    speechAudioQueue.unshift(active.item);
+  }
   try {
     active.audio.pause();
     active.audio.currentTime = 0;

@@ -787,12 +787,14 @@ function setMode(mode, status) {
   if (state.mode !== mode || mode !== 'sleeping') resetSleepPhraseCandidate();
   state.mode = mode;
   if (mode === 'sleeping' || mode === 'off') stopSpeechPlayback({ clearQueue: true });
+  if (speechPlaybackBlocked()) stopSpeechPlayback({ clearQueue: false, requeueActive: true });
   if (status) showStatus(status);
   updateVoiceButtons();
   if (desktop.setTrayStatus) {
     void desktop.setTrayStatus({ mode, status: status || els.micStatus.textContent || mode }).catch(() => undefined);
   }
   void reportClientStatus(mode, status || els.micStatus.textContent || mode);
+  if (!speechPlaybackBlocked()) void drainSpeechPlaybackQueue();
 }
 
 async function reportClientStatus(mode, status) {
@@ -857,8 +859,7 @@ function ensureControlSocket() {
       return;
     }
     if (message.type === 'speech_audio') {
-      if (state.voiceSuppressCommands && (state.mode === 'recording' || state.mode === 'paused' || state.mode === 'transcribing')) return;
-      if (!canPlaySpeechAudio()) return;
+      if (!canQueueSpeechAudio()) return;
       playWavBase64(message.audioBase64);
       return;
     }
@@ -2208,11 +2209,19 @@ let activeSpeechPlayback = null;
 let lastCompletedSpeechPlaybackData = null;
 
 function canPlaySpeechAudio() {
+  return canQueueSpeechAudio() && !speechPlaybackBlocked();
+}
+
+function canQueueSpeechAudio() {
   return ['awake', 'recording', 'paused', 'transcribing'].includes(state.mode);
 }
 
+function speechPlaybackBlocked() {
+  return state.mode === 'recording' || state.mode === 'transcribing';
+}
+
 function playWav(data) {
-  if (!canPlaySpeechAudio()) return;
+  if (!canQueueSpeechAudio()) return;
   speechPlaybackQueue.push(data);
   void drainSpeechPlaybackQueue();
 }
@@ -2233,6 +2242,7 @@ async function drainSpeechPlaybackQueue() {
   speechPlaybackActive = true;
   try {
     while (speechPlaybackQueue.length > 0) {
+      if (speechPlaybackBlocked()) break;
       if (!canPlaySpeechAudio()) {
         speechPlaybackQueue.length = 0;
         break;
@@ -2261,7 +2271,7 @@ async function playWavNow(data) {
         if (activeSpeechPlayback?.audio === audio) activeSpeechPlayback = null;
         resolve();
       };
-      activeSpeechPlayback = { audio, finish };
+      activeSpeechPlayback = { audio, finish, data };
       audio.addEventListener('ended', () => {
         completed = true;
         finish();
@@ -2283,6 +2293,9 @@ function stopSpeechPlayback(options = {}) {
   const active = activeSpeechPlayback;
   if (!active) return false;
   activeSpeechPlayback = null;
+  if (options.requeueActive && active.data) {
+    speechPlaybackQueue.unshift(active.data);
+  }
   try {
     active.audio.pause();
     active.audio.currentTime = 0;
