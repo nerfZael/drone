@@ -61,6 +61,7 @@ const ASSISTANT_PROVIDERS: Array<{ id: 'codex' | 'openai'; label: string; title:
   { id: 'openai', label: 'OpenAI', title: 'Use the configured OpenAI API key for OpenAI models.' },
 ];
 
+type AssistantApiKeyProvider = 'openai' | 'exa';
 type AssistantSettingsPromptField = 'voiceSystemPrompt';
 type SettingsPane = 'devices' | 'assistant' | 'skills' | 'voice' | 'recordings' | 'activity';
 type AssistantSkillDraft = {
@@ -1126,7 +1127,8 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const [artifactDeleteCandidate, setArtifactDeleteCandidate] = React.useState<AssistantArtifactRecord | null>(null);
   const [codexConnectFlow, setCodexConnectFlow] = React.useState<{ state: string; authorizationUrl: string; redirectUri: string; expiresAt: string } | null>(null);
   const [codexCodeDraft, setCodexCodeDraft] = React.useState('');
-  const [apiKeyDrafts, setApiKeyDrafts] = React.useState<Record<'openai' | 'exa', string>>({ openai: '', exa: '' });
+  const [apiKeyDrafts, setApiKeyDrafts] = React.useState<Record<AssistantApiKeyProvider, string>>({ openai: '', exa: '' });
+  const [apiKeyCopying, setApiKeyCopying] = React.useState<Record<AssistantApiKeyProvider, boolean>>({ openai: false, exa: false });
   const [assistantProfileDrafts, setAssistantProfileDrafts] = React.useState<Record<string, AssistantProfileDraft>>({});
   const [selectedAssistantProfileId, setSelectedAssistantProfileId] = React.useState<string | null>(null);
   const [skillDraft, setSkillDraft] = React.useState<AssistantSkillDraft>(() => emptySkillDraft());
@@ -2212,7 +2214,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     }
   }
 
-  async function saveAssistantApiKey(provider: 'openai' | 'exa') {
+  async function saveAssistantApiKey(provider: AssistantApiKeyProvider) {
     const apiKey = apiKeyDrafts[provider].trim();
     if (!apiKey) {
       setError('API key is required.');
@@ -2235,7 +2237,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     }
   }
 
-  async function deleteAssistantApiKey(provider: 'openai' | 'exa') {
+  async function deleteAssistantApiKey(provider: AssistantApiKeyProvider) {
     setBusy(true);
     setError(null);
     try {
@@ -2246,6 +2248,28 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
       setError(err?.message ?? String(err));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function copyAssistantApiKey(provider: AssistantApiKeyProvider) {
+    const label = provider === 'openai' ? 'OpenAI' : 'Exa';
+    const draftKey = apiKeyDrafts[provider].trim();
+    setApiKeyCopying((current) => ({ ...current, [provider]: true }));
+    setError(null);
+    try {
+      let apiKey = draftKey;
+      if (!apiKey) {
+        const data = await client.request<{ ok: true; apiKey: string }>(`/api/assistant/keys/${encodeURIComponent(provider)}/reveal`);
+        apiKey = data.apiKey;
+      }
+      if (!await copyText(apiKey)) {
+        throw new Error('Clipboard access is not available.');
+      }
+      setNotice(`Copied ${label} key.`);
+    } catch (err: any) {
+      setError(err?.message ?? String(err));
+    } finally {
+      setApiKeyCopying((current) => ({ ...current, [provider]: false }));
     }
   }
 
@@ -3989,8 +4013,10 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                   {(['openai', 'exa'] as const).map((provider) => {
                     const key = assistantSnapshotData?.apiKeys?.[provider];
                     const label = provider === 'openai' ? 'OpenAI' : 'Exa';
+                    const hasDraftKey = Boolean(apiKeyDrafts[provider].trim());
+                    const canCopyKey = hasDraftKey || Boolean(key?.hasKey);
                     return (
-                      <div key={provider} className="grid grid-cols-[120px_minmax(180px,1fr)_auto_auto] items-center gap-2 rounded border border-[var(--border)] bg-white/[.02] p-2 max-[880px]:grid-cols-1">
+                      <div key={provider} className="grid grid-cols-[120px_minmax(180px,1fr)_auto_auto_auto] items-center gap-2 rounded border border-[var(--border)] bg-white/[.02] p-2 max-[880px]:grid-cols-1">
                         <div className="min-w-0">
                           <strong className="block text-xs text-[var(--fg)]">{label}</strong>
                           <small className="block truncate text-[11px] text-[var(--muted)]">{key?.hasKey ? key.keyHint : 'Not configured'}</small>
@@ -4006,8 +4032,17 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                           }}
                           className="h-[30px] min-w-0"
                         />
-                        <button type="button" className={assistantActionButtonClass} onClick={() => void saveAssistantApiKey(provider)} disabled={busy || !apiKeyDrafts[provider].trim()}>
+                        <button type="button" className={assistantActionButtonClass} onClick={() => void saveAssistantApiKey(provider)} disabled={busy || !hasDraftKey}>
                           Save
+                        </button>
+                        <button
+                          type="button"
+                          className={assistantActionButtonClass}
+                          onClick={() => void copyAssistantApiKey(provider)}
+                          disabled={busy || apiKeyCopying[provider] || !canCopyKey}
+                          title={hasDraftKey ? `Copy pasted ${label} key` : `Copy saved ${label} key`}
+                        >
+                          {apiKeyCopying[provider] ? 'Copying' : 'Copy'}
                         </button>
                         <button type="button" className={assistantActionButtonClass} onClick={() => void deleteAssistantApiKey(provider)} disabled={busy || !key?.hasKey}>
                           Delete
@@ -5485,13 +5520,25 @@ async function copyText(text: string): Promise<boolean> {
     window.voiceStreamDesktop.writeClipboard(trimmed);
     return true;
   }
-  if (!navigator.clipboard) return false;
-  try {
-    await navigator.clipboard.writeText(trimmed);
-    return true;
-  } catch {
-    return false;
+  if (navigator.clipboard) {
+    try {
+      await navigator.clipboard.writeText(trimmed);
+      return true;
+    } catch {
+      // Fall through to the older browser copy path.
+    }
   }
+  const textarea = document.createElement('textarea');
+  textarea.value = trimmed;
+  textarea.setAttribute('readonly', 'true');
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  textarea.style.top = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand('copy');
+  textarea.remove();
+  return copied;
 }
 
 function openDesktopVoiceSocket(device: { id: string; token: string }, sessionId: string, target: VoiceStreamTarget, assistantProfileId?: string | null): WebSocket {

@@ -2531,6 +2531,21 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     })),
   );
 
+  app.get('/api/assistant/keys/:provider/reveal', async (req, reply) =>
+    withUser(req, reply, db, clerkEnabled, async (ctx) => {
+      const provider = (req.params as any)?.provider;
+      const key = db.assistantApiKey(ctx.user.id, provider);
+      if (!key) {
+        throw Object.assign(new Error('API key is not configured.'), { statusCode: 404 });
+      }
+      return {
+        ok: true,
+        provider,
+        apiKey: key,
+      };
+    }),
+  );
+
   app.get('/api/assistant/keys/:provider', async (req, reply) =>
     withUser(req, reply, db, clerkEnabled, async (ctx) => {
       const provider = (req.params as any)?.provider;
