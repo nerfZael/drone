@@ -26,6 +26,7 @@ class VoskWakeWordDetector(
     private var lastDetectedPhrase: WakePhrase? = null
     private var lastDetectedAtMs = 0L
     @Volatile private var approvalTriggerPhrase = "approval code"
+    @Volatile private var activationSettings = VoiceActivationSettings()
 
     fun prepare() {
         if (available || !loading.compareAndSet(false, true)) return
@@ -102,6 +103,26 @@ class VoskWakeWordDetector(
         }
     }
 
+    fun updateActivationSettings(settings: VoiceActivationSettings) {
+        val next = settings.normalized()
+        activationSettings = next
+        WakePhraseMatcher.updateActivationSettings(next)
+        synchronized(recognizerLock) {
+            val localModel = model ?: return@synchronized
+            val nextRecognizer = try {
+                Recognizer(localModel, Constants.SAMPLE_RATE_HZ.toFloat(), buildWakeGrammar())
+            } catch (error: IOException) {
+                DroneLog.w("Vosk", "Failed to rebuild recognizer for activation aliases", error)
+                return@synchronized
+            }
+            recognizer?.runCatching { close() }
+            recognizer = nextRecognizer
+            available = true
+            lastDetectedPhrase = null
+            lastDetectedAtMs = 0L
+        }
+    }
+
     fun release() {
         synchronized(recognizerLock) {
             available = false
@@ -163,6 +184,8 @@ class VoskWakeWordDetector(
         private val BASE_WAKE_GRAMMAR = listOf(
             "hey sebastian",
             "hay sebastian",
+            "sebastian enter real time mode",
+            "sebastian enter realtime mode",
             "hey",
             "hay",
             "sebastian",
@@ -199,12 +222,20 @@ class VoskWakeWordDetector(
     private fun buildWakeGrammar(): String {
         val entries = LinkedHashSet<String>()
         entries.addAll(BASE_WAKE_GRAMMAR)
+        activationSettings.normalAliases.forEach { addGrammarPhrase(entries, it) }
+        activationSettings.realTimeAliases.forEach { addGrammarPhrase(entries, it) }
         val trigger = normalizeGrammarPhrase(approvalTriggerPhrase)
         if (trigger.isNotBlank()) {
-            entries.add(trigger)
-            trigger.split(Regex("\\s+")).filter { it.isNotBlank() }.forEach { entries.add(it) }
+            addGrammarPhrase(entries, trigger)
         }
         return JSONArray(entries.toList()).toString()
+    }
+
+    private fun addGrammarPhrase(entries: LinkedHashSet<String>, phrase: String) {
+        val normalized = normalizeGrammarPhrase(phrase)
+        if (normalized.isBlank()) return
+        entries.add(normalized)
+        normalized.split(Regex("\\s+")).filter { it.isNotBlank() }.forEach { entries.add(it) }
     }
 
     private fun normalizeGrammarPhrase(phrase: String): String {

@@ -40,6 +40,9 @@ class WakeToggleController {
                 if (phrase.hasStart) {
                     state = WakeState.RECORDING
                     WakeAction.START_RECORDING
+                } else if (phrase.hasRealTime) {
+                    state = WakeState.RECORDING
+                    WakeAction.START_REALTIME_RECORDING
                 } else if (phrase.hasPatch) {
                     state = WakeState.RECORDING
                     WakeAction.START_PATCH_RECORDING
@@ -106,6 +109,7 @@ enum class WakeState {
 enum class WakeAction {
     NONE,
     START_RECORDING,
+    START_REALTIME_RECORDING,
     START_PATCH_RECORDING,
     START_CLIPBOARD_RECORDING,
     STOP_RECORDING,
