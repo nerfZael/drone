@@ -2722,6 +2722,15 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     });
   }
 
+  async function createReleaseUploadSession(platform: 'android' | 'desktop'): Promise<string> {
+    const data = await client.request<{ ok: true; uploadToken: string; expiresAt: string }>('/api/admin/releases/upload-session', {
+      method: 'POST',
+      body: JSON.stringify({ platform }),
+    });
+    if (!data.uploadToken) throw new Error('Release upload session did not include a token.');
+    return data.uploadToken;
+  }
+
   async function parseReleaseMetadataFile(file: File): Promise<Record<string, unknown>> {
     let metadata: any = null;
     try {
@@ -2832,12 +2841,14 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
       setAdminAndroidFile(artifact);
       setReleaseUploadProgress({ platform: 'android', fileName: artifact.name, loaded: 0, total: artifact.size || null, phase: 'uploading' });
       const path = '/api/admin/releases/android';
+      const uploadToken = await createReleaseUploadSession('android');
       const response = await client.upload(path, {
         method: 'PUT',
         headers: {
           'content-type': artifact.type || 'application/vnd.android.package-archive',
           'x-voice-release-file-name': artifact.name,
           'x-voice-release-metadata': JSON.stringify(metadata),
+          'x-voice-release-upload-token': uploadToken,
         },
         body: artifact,
       }, (progress) => setUploadProgress('android', artifact, progress));
@@ -2867,12 +2878,14 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
       setAdminDesktopFile(artifact);
       setReleaseUploadProgress({ platform: 'desktop', fileName: artifact.name, loaded: 0, total: artifact.size || null, phase: 'uploading' });
       const path = '/api/admin/releases/desktop';
+      const uploadToken = await createReleaseUploadSession('desktop');
       const response = await client.upload(path, {
         method: 'PUT',
         headers: {
           'content-type': artifact.type || 'application/octet-stream',
           'x-voice-release-file-name': artifact.name,
           'x-voice-release-metadata': JSON.stringify(metadata),
+          'x-voice-release-upload-token': uploadToken,
         },
         body: artifact,
       }, (progress) => setUploadProgress('desktop', artifact, progress));

@@ -1,4 +1,5 @@
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import cors from '@fastify/cors';
@@ -101,6 +102,16 @@ type AppEventType =
   | 'release_changed'
   | 'setup_changed';
 
+type ReleaseUploadPlatform = 'android' | 'desktop';
+
+type ReleaseUploadSession = {
+  token: string;
+  platform: ReleaseUploadPlatform;
+  ctx: AuthContext;
+  createdAt: number;
+  expiresAt: number;
+};
+
 function parsePort(raw: unknown, fallback: number): number {
   const value = Number(raw);
   return Number.isInteger(value) && value > 0 && value <= 65535 ? value : fallback;
@@ -109,6 +120,11 @@ function parsePort(raw: unknown, fallback: number): number {
 function uploadLimitBytes(): number {
   const raw = Number(process.env.VOICE_STREAM_NEXT_RELEASE_UPLOAD_LIMIT_BYTES ?? 1024 * 1024 * 1024);
   return Number.isInteger(raw) && raw > 0 ? raw : 1024 * 1024 * 1024;
+}
+
+function releaseUploadSessionTtlMs(): number {
+  const raw = Number(process.env.VOICE_STREAM_NEXT_RELEASE_UPLOAD_SESSION_TTL_MS ?? 15 * 60 * 1000);
+  return Number.isInteger(raw) && raw > 0 ? raw : 15 * 60 * 1000;
 }
 
 function jsonBody(req: FastifyRequest): any {
@@ -274,7 +290,7 @@ function releaseUploadFileName(req: FastifyRequest, fallback: string): string {
   return safeReleaseFileName(req.headers['x-voice-release-file-name'], fallback);
 }
 
-function releaseUploadLogDetails(req: FastifyRequest, platform: 'android' | 'desktop'): Record<string, unknown> {
+function releaseUploadLogDetails(req: FastifyRequest, platform: ReleaseUploadPlatform): Record<string, unknown> {
   const metadataHeader = headerValue(req.headers['x-voice-release-metadata']);
   const fileNameFallback = platform === 'android' ? 'voice-stream-next-android-latest.apk' : 'voice-stream-next-desktop-latest.tar.gz';
   return {
@@ -308,12 +324,22 @@ function parseHeaderInteger(raw: unknown): number | null {
   return Number.isInteger(value) && value >= 0 ? value : null;
 }
 
-function releaseUploadPlatformForRequest(req: FastifyRequest): 'android' | 'desktop' | null {
+function releaseUploadPlatformForRequest(req: FastifyRequest): ReleaseUploadPlatform | null {
   if (req.method.toUpperCase() !== 'PUT') return null;
   const pathOnly = req.url.split('?')[0];
   if (pathOnly === '/api/admin/releases/android') return 'android';
   if (pathOnly === '/api/admin/releases/desktop') return 'desktop';
   return null;
+}
+
+function releaseUploadToken(req: FastifyRequest): string {
+  return headerValue(req.headers['x-voice-release-upload-token']);
+}
+
+function pruneReleaseUploadSessions(sessions: Map<string, ReleaseUploadSession>, now = Date.now()): void {
+  for (const [token, session] of sessions) {
+    if (session.expiresAt <= now) sessions.delete(token);
+  }
 }
 
 function publicUrlForPath(req: FastifyRequest, urlPath: string): string {
@@ -739,6 +765,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
   const extensionBridges = new ExtensionBridgeRegistry();
   const appEventClients = new Set<{ res: any; userId: string; admin: boolean }>();
   const speechEventClients = new Set<{ id: string; res: any; userId: string; connectedAt: string }>();
+  const releaseUploadSessions = new Map<string, ReleaseUploadSession>();
   let appEventSequence = 0;
   const clerkEnabled = Boolean(process.env.CLERK_SECRET_KEY?.trim());
   const port = parsePort(process.env.PORT ?? process.env.VOICE_STREAM_NEXT_API_PORT, 3299);
@@ -1066,14 +1093,23 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       req.log.warn(uploadLog, `${label} release upload connection closed before request completed`);
     });
 
+    const token = releaseUploadToken(req);
+    const now = Date.now();
+    pruneReleaseUploadSessions(releaseUploadSessions, now);
+    const session = token ? releaseUploadSessions.get(token) : null;
+    releaseUploadSessions.delete(token);
     try {
-      const ctx = await resolveRequestUser(req, db, clerkEnabled);
+      if (!session) throw Object.assign(new Error('release upload session is missing or expired'), { statusCode: 401 });
+      if (session.platform !== platform) throw Object.assign(new Error('release upload session platform mismatch'), { statusCode: 400 });
+      if (session.expiresAt <= now) throw Object.assign(new Error('release upload session expired'), { statusCode: 401 });
+      const ctx = session.ctx;
       req.log.info({
         ...uploadLog,
         userId: ctx.user.id,
         userEmail: ctx.user.email,
         admin: ctx.user.admin,
-      }, `${label} release upload authenticated before body`);
+        sessionAgeMs: now - session.createdAt,
+      }, `${label} release upload session accepted before body`);
       requireAdmin(ctx);
       (req as FastifyRequest & { releaseUploadAuth?: AuthContext }).releaseUploadAuth = ctx;
     } catch (error: any) {
@@ -1108,6 +1144,36 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     ok: true,
     desktop: readDesktopAppInfo(req),
   }));
+
+  app.post('/api/admin/releases/upload-session', async (req, reply) =>
+    withUser(req, reply, db, clerkEnabled, async (ctx) => {
+      requireAdmin(ctx);
+      const body = jsonBody(req);
+      const platform = cleanText(body.platform).toLowerCase();
+      if (platform !== 'android' && platform !== 'desktop') {
+        throw Object.assign(new Error('release upload platform must be android or desktop'), { statusCode: 400 });
+      }
+      pruneReleaseUploadSessions(releaseUploadSessions);
+      const token = `rel_${crypto.randomUUID().replace(/-/g, '')}${crypto.randomUUID().replace(/-/g, '')}`;
+      const now = Date.now();
+      const expiresAt = now + releaseUploadSessionTtlMs();
+      releaseUploadSessions.set(token, {
+        token,
+        platform,
+        ctx,
+        createdAt: now,
+        expiresAt,
+      });
+      req.log.info({
+        platform,
+        reqId: req.id,
+        userId: ctx.user.id,
+        userEmail: ctx.user.email,
+        expiresAt: new Date(expiresAt).toISOString(),
+      }, `${platform === 'android' ? 'Android' : 'Desktop'} release upload session created`);
+      return { ok: true, uploadToken: token, expiresAt: new Date(expiresAt).toISOString() };
+    }),
+  );
 
   app.put('/api/admin/releases/android', async (req, reply) => {
     const uploadLog = releaseUploadLogDetails(req, 'android');
