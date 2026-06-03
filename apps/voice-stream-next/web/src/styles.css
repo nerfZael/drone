@@ -2364,10 +2364,15 @@ pre {
   color: #d4c9fa;
   font-family: var(--code);
   font-size: 12px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .assistant-markdown a {
   color: #b9a7f6;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   text-decoration: underline;
   text-decoration-thickness: 1.5px;
   text-underline-offset: 2px;
