@@ -274,6 +274,40 @@ function releaseUploadFileName(req: FastifyRequest, fallback: string): string {
   return safeReleaseFileName(req.headers['x-voice-release-file-name'], fallback);
 }
 
+function releaseUploadLogDetails(req: FastifyRequest, platform: 'android' | 'desktop'): Record<string, unknown> {
+  const metadataHeader = headerValue(req.headers['x-voice-release-metadata']);
+  const fileNameFallback = platform === 'android' ? 'voice-stream-next-android-latest.apk' : 'voice-stream-next-desktop-latest.tar.gz';
+  return {
+    platform,
+    reqId: req.id,
+    method: req.method,
+    url: req.url,
+    host: headerValue(req.headers.host),
+    contentType: headerValue(req.headers['content-type']) || null,
+    contentLength: parseHeaderInteger(req.headers['content-length']),
+    releaseFileName: releaseUploadFileName(req, fileNameFallback),
+    metadataPresent: metadataHeader.length > 0,
+    metadataBytes: Buffer.byteLength(metadataHeader),
+    outputDir: platform === 'android' ? androidApkDir() : desktopAppDir(),
+    dataDir: voiceStreamDataDir(),
+  };
+}
+
+function releaseInfoLogDetails(info: AndroidApkInfo | DesktopAppInfo): Record<string, unknown> {
+  return {
+    variant: info.variant,
+    fileName: info.fileName,
+    size: info.size,
+    downloadUrl: info.downloadUrl,
+    ...('versionCode' in info ? { versionCode: info.versionCode, versionName: info.versionName } : {}),
+  };
+}
+
+function parseHeaderInteger(raw: unknown): number | null {
+  const value = Number(headerValue(raw));
+  return Number.isInteger(value) && value >= 0 ? value : null;
+}
+
 function publicUrlForPath(req: FastifyRequest, urlPath: string): string {
   return `${serverPublicUrl(req)}${urlPath.startsWith('/') ? urlPath : `/${urlPath}`}`;
 }
@@ -677,12 +711,14 @@ async function withUser<T>(
   db: VoiceStreamNextDb,
   clerkEnabled: boolean,
   fn: (ctx: AuthContext) => Promise<T> | T,
+  onError?: (error: any, status: number) => void,
 ): Promise<T | undefined> {
   try {
     const ctx = await resolveRequestUser(req, db, clerkEnabled);
     return await fn(ctx);
   } catch (error: any) {
     const status = Number(error?.statusCode ?? 0) || 500;
+    onError?.(error, status);
     reply.code(status).send({ ok: false, error: error?.message ?? String(error) });
     return undefined;
   }
@@ -1025,10 +1061,24 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     desktop: readDesktopAppInfo(req),
   }));
 
-  app.put('/api/admin/releases/android', async (req, reply) =>
-    withUser(req, reply, db, clerkEnabled, async (ctx) => {
+  app.put('/api/admin/releases/android', async (req, reply) => {
+    const uploadLog = releaseUploadLogDetails(req, 'android');
+    req.log.info(uploadLog, 'Android release upload received');
+    return withUser(req, reply, db, clerkEnabled, async (ctx) => {
+      req.log.info({
+        ...uploadLog,
+        userId: ctx.user.id,
+        userEmail: ctx.user.email,
+        admin: ctx.user.admin,
+      }, 'Android release upload authenticated');
       requireAdmin(ctx);
       const android = writeAndroidApkRelease(req, req.body);
+      req.log.info({
+        ...uploadLog,
+        userId: ctx.user.id,
+        userEmail: ctx.user.email,
+        ...releaseInfoLogDetails(android),
+      }, 'Android release upload stored');
       addLog(ctx.user.id, {
         source: 'admin',
         level: 'info',
@@ -1037,13 +1087,37 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       });
       emitAppEvent(null, 'release_changed', { platform: 'android' });
       return { ok: true, android };
-    }),
-  );
+    }, (error, status) => {
+      const log = {
+        ...uploadLog,
+        status,
+        error: error?.message ?? String(error),
+        errorName: error?.name ?? null,
+        stack: status >= 500 ? error?.stack : undefined,
+      };
+      if (status >= 500) req.log.error(log, 'Android release upload failed');
+      else req.log.warn(log, 'Android release upload rejected');
+    });
+  });
 
-  app.put('/api/admin/releases/desktop', async (req, reply) =>
-    withUser(req, reply, db, clerkEnabled, async (ctx) => {
+  app.put('/api/admin/releases/desktop', async (req, reply) => {
+    const uploadLog = releaseUploadLogDetails(req, 'desktop');
+    req.log.info(uploadLog, 'Desktop release upload received');
+    return withUser(req, reply, db, clerkEnabled, async (ctx) => {
+      req.log.info({
+        ...uploadLog,
+        userId: ctx.user.id,
+        userEmail: ctx.user.email,
+        admin: ctx.user.admin,
+      }, 'Desktop release upload authenticated');
       requireAdmin(ctx);
       const desktop = writeDesktopAppRelease(req, req.body);
+      req.log.info({
+        ...uploadLog,
+        userId: ctx.user.id,
+        userEmail: ctx.user.email,
+        ...releaseInfoLogDetails(desktop),
+      }, 'Desktop release upload stored');
       addLog(ctx.user.id, {
         source: 'admin',
         level: 'info',
@@ -1052,8 +1126,18 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       });
       emitAppEvent(null, 'release_changed', { platform: 'desktop' });
       return { ok: true, desktop };
-    }),
-  );
+    }, (error, status) => {
+      const log = {
+        ...uploadLog,
+        status,
+        error: error?.message ?? String(error),
+        errorName: error?.name ?? null,
+        stack: status >= 500 ? error?.stack : undefined,
+      };
+      if (status >= 500) req.log.error(log, 'Desktop release upload failed');
+      else req.log.warn(log, 'Desktop release upload rejected');
+    });
+  });
 
   app.post('/api/mobile/android/setup', async (req, reply) =>
     withUser(req, reply, db, clerkEnabled, async (ctx) => {
