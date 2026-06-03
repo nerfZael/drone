@@ -7,7 +7,7 @@ import websocket from '@fastify/websocket';
 import { clerkPlugin } from '@clerk/fastify';
 import { VoiceStreamNextDb, type DeviceRecord, type SpeechPlaybackTarget } from './db.js';
 import { requireAdmin, resolveRequestUser, type AuthContext } from './auth.js';
-import { synthesizeSpeech, transcribePcm16 } from './assistant-runtime.js';
+import { hasGroqSpeechRuntime, hasGroqTtsRuntime, synthesizeSpeech, transcribePcm16, type RuntimeResult } from './assistant-runtime.js';
 import {
   StreamingTranscriptionManager,
   buildStreamingTranscriptionConfigFromEnv,
@@ -86,6 +86,9 @@ const VOICE_RECORDING_CHANNELS = 1;
 const SPEECH_PLAYBACK_DEFER_POLL_MS = 100;
 const SPEECH_PLAYBACK_BLOCKER_STALE_MS = MAX_STREAM_DURATION_MS + 30_000;
 const SPEECH_PLAYBACK_BLOCKED_MODES = new Set(['recording', 'transcribing']);
+const MICROCREDITS_PER_CREDIT = 1_000_000;
+const USD_MICROS_PER_DOLLAR = 1_000_000;
+const MICROCREDITS_PER_DOLLAR = 100 * MICROCREDITS_PER_CREDIT;
 
 type AppEventType =
   | 'assistant_changed'
@@ -131,6 +134,44 @@ function shouldEnableRegisteredExtensionRoute(
 
 function cleanText(raw: unknown, fallback = ''): string {
   return String(raw ?? fallback).trim();
+}
+
+function cleanCreditGrantAmountMicrocredits(body: any): number {
+  if (body?.amountMicrocredits != null && body.amountMicrocredits !== '') {
+    const amount = Math.floor(Number(body.amountMicrocredits));
+    if (Number.isSafeInteger(amount) && amount > 0) return amount;
+  }
+  const credits = Number(body?.amountCredits);
+  if (Number.isFinite(credits) && credits > 0) {
+    const amount = Math.round(credits * MICROCREDITS_PER_CREDIT);
+    if (Number.isSafeInteger(amount) && amount > 0) return amount;
+  }
+  throw Object.assign(new Error('credit grant amount must be positive'), { statusCode: 400 });
+}
+
+function creditMarkupMultiplier(): number {
+  const value = Number(process.env.VOICE_STREAM_NEXT_CREDIT_MARKUP ?? 1);
+  return Number.isFinite(value) && value > 0 ? value : 1;
+}
+
+function dollarsToVendorMicros(dollars: number): number {
+  return Math.max(0, Math.round((Number.isFinite(dollars) ? dollars : 0) * USD_MICROS_PER_DOLLAR));
+}
+
+function dollarsToChargedMicrocredits(dollars: number): number {
+  return Math.max(0, Math.round((Number.isFinite(dollars) ? dollars : 0) * MICROCREDITS_PER_DOLLAR * creditMarkupMultiplier()));
+}
+
+function groqSttCostDollars(durationMs: number): number {
+  const hourly = Number(process.env.VOICE_STREAM_NEXT_GROQ_STT_DOLLARS_PER_HOUR ?? 0.04);
+  const safeHourly = Number.isFinite(hourly) && hourly >= 0 ? hourly : 0.04;
+  return (Math.max(0, durationMs) / 3_600_000) * safeHourly;
+}
+
+function groqTtsCostDollars(inputCharacters: number): number {
+  const perMillion = Number(process.env.VOICE_STREAM_NEXT_GROQ_TTS_DOLLARS_PER_1M_CHARS ?? 22);
+  const safePerMillion = Number.isFinite(perMillion) && perMillion >= 0 ? perMillion : 22;
+  return (Math.max(0, inputCharacters) / 1_000_000) * safePerMillion;
 }
 
 function cleanCode(raw: unknown, label: string): string {
@@ -776,6 +817,54 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     emitAppEvent(userId, 'transcript_created', { voiceSessionId });
   };
 
+  const recordGroqTranscriptionUsage = (
+    userId: string,
+    result: RuntimeResult,
+    metadata: { deviceId?: string | null; voiceSessionId?: string | null; assistantThreadId?: string | null; source: string },
+  ) => {
+    if (result.provider !== 'groq') return;
+    const costDollars = groqSttCostDollars(result.audioDurationMs);
+    db.recordBillableUsage({
+      userId,
+      threadId: metadata.assistantThreadId ?? null,
+      service: 'groq',
+      provider: 'groq',
+      credentialSource: 'platform_groq_key',
+      model: result.model,
+      operation: 'speech_to_text',
+      unitCount: result.audioDurationMs,
+      vendorCostMicros: dollarsToVendorMicros(costDollars),
+      chargedMicrocredits: dollarsToChargedMicrocredits(costDollars),
+      status: 'succeeded',
+      metadata,
+    });
+    emitAppEvent(userId, 'settings_changed', { reason: 'credits_charged' });
+  };
+
+  const recordGroqTtsUsage = (
+    userId: string,
+    speech: { provider: 'groq' | 'fallback'; model: string | null; inputCharacters: number },
+    metadata: { source: string; threadId?: string; messageId?: string },
+  ) => {
+    if (speech.provider !== 'groq') return;
+    const costDollars = groqTtsCostDollars(speech.inputCharacters);
+    db.recordBillableUsage({
+      userId,
+      threadId: metadata.threadId ?? null,
+      service: 'groq',
+      provider: 'groq',
+      credentialSource: 'platform_groq_key',
+      model: speech.model,
+      operation: 'text_to_speech',
+      unitCount: speech.inputCharacters,
+      vendorCostMicros: dollarsToVendorMicros(costDollars),
+      chargedMicrocredits: dollarsToChargedMicrocredits(costDollars),
+      status: 'succeeded',
+      metadata,
+    });
+    emitAppEvent(userId, 'settings_changed', { reason: 'credits_charged' });
+  };
+
   type SpeechSurface = 'web' | 'desktop' | 'android';
   type SpeechDestination = {
     surface: SpeechSurface;
@@ -909,6 +998,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     try {
       const thread = metadata.threadId ? db.thread(userId, metadata.threadId) : null;
       const profile = thread?.assistantProfileId ? db.assistantProfile(userId, thread.assistantProfileId) : db.defaultAssistantProfile(userId);
+      if (hasGroqTtsRuntime()) db.requirePositiveCreditBalance(userId, 'Groq speech synthesis');
       const speech = await synthesizeSpeech(clean, { voice: profile?.ttsVoice });
       if (!speech.audio) {
         addLog(userId, {
@@ -919,6 +1009,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         });
         return;
       }
+      recordGroqTtsUsage(userId, speech, metadata);
       const payload: SpeechAudioCommand = {
         type: 'speech_audio',
         id: `speech_${crypto.randomUUID().replace(/-/g, '')}`,
@@ -1680,6 +1771,49 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     withUser(req, reply, db, clerkEnabled, async (ctx) => {
       requireAdmin(ctx);
       return { ok: true, devices: db.listDevices() };
+    }),
+  );
+
+  app.get('/api/admin/users', async (req, reply) =>
+    withUser(req, reply, db, clerkEnabled, async (ctx) => {
+      requireAdmin(ctx);
+      return { ok: true, users: db.listAdminUsersWithBilling() };
+    }),
+  );
+
+  app.get('/api/admin/users/:userId/credits', async (req, reply) =>
+    withUser(req, reply, db, clerkEnabled, async (ctx) => {
+      requireAdmin(ctx);
+      const userId = cleanText((req.params as any).userId);
+      const summary = db.adminUserBillingSummary(userId);
+      if (!summary) throw Object.assign(new Error('unknown user'), { statusCode: 404 });
+      return {
+        ok: true,
+        user: summary,
+        ledger: db.listCreditLedger(userId, 120),
+        usageEvents: db.listBillableUsageEvents(userId, 120),
+      };
+    }),
+  );
+
+  app.post('/api/admin/users/:userId/credits/grants', async (req, reply) =>
+    withUser(req, reply, db, clerkEnabled, async (ctx) => {
+      requireAdmin(ctx);
+      const targetUserId = cleanText((req.params as any).userId);
+      const body = jsonBody(req);
+      const ledgerEntry = db.grantCredits(ctx.user.id, targetUserId, {
+        amountMicrocredits: cleanCreditGrantAmountMicrocredits(body),
+        reason: cleanText(body.reason, 'Admin credit grant') || 'Admin credit grant',
+        metadata: { source: 'admin_page' },
+      });
+      const summary = db.adminUserBillingSummary(targetUserId);
+      emitAppEvent(targetUserId, 'settings_changed', { reason: 'credits_granted' });
+      return {
+        ok: true,
+        ledgerEntry,
+        user: summary,
+        users: db.listAdminUsersWithBilling(),
+      };
     }),
   );
 
@@ -2851,6 +2985,18 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
               detectedAt: detection.detectedAt,
             }),
           });
+        }, {
+          beforeTranscription: (pcm) => {
+            if (hasGroqSpeechRuntime() && pcm.byteLength >= 1600) {
+              db.requirePositiveCreditBalance(device.userId, 'Groq streaming transcription');
+            }
+          },
+          onTranscription: (result, source) => {
+            recordGroqTranscriptionUsage(device.userId, result, {
+              deviceId: device.id,
+              source: `voice_stream_${source}`,
+            });
+          },
         })
       : null;
     socket.send(JSON.stringify({
@@ -3022,9 +3168,18 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         } else if (terminalFinalize?.transcriptText) {
           transcript = terminalFinalize.transcriptText.trim();
         } else {
+          if (hasGroqSpeechRuntime() && recordingPcm.byteLength >= 1600) {
+            db.requirePositiveCreditBalance(device.userId, 'Groq speech transcription');
+          }
           const transcription = await transcribePcm16(recordingPcm);
           transcript = transcription.text;
           runtime = transcription.provider;
+          recordGroqTranscriptionUsage(device.userId, transcription, {
+            deviceId: device.id,
+            voiceSessionId: session.id,
+            assistantThreadId: session.assistantThreadId,
+            source: 'voice_final',
+          });
         }
         if (transcript) {
           addTranscript(device.userId, session.id, transcript);

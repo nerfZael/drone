@@ -55,6 +55,7 @@ const ASSISTANT_SYSTEM_PROMPT_MAX_CHARS = 20_000;
 const SLEEP_PHRASE_STABLE_MS = 650;
 const SLEEP_PHRASE_MIN_HITS = 2;
 const SLEEP_PHRASE_MAX_GAP_MS = 1_500;
+const MICROCREDITS_PER_CREDIT = 1_000_000;
 
 const ASSISTANT_PROVIDERS: Array<{ id: 'codex' | 'openai'; label: string; title: string }> = [
   { id: 'codex', label: 'Codex', title: 'Use connected Codex ChatGPT authentication for Codex models.' },
@@ -1166,6 +1167,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const [desktopAppInfo, setDesktopAppInfo] = React.useState<DesktopAppInfo | null>(null);
   const [adminAndroidFile, setAdminAndroidFile] = React.useState<File | null>(null);
   const [adminDesktopFile, setAdminDesktopFile] = React.useState<File | null>(null);
+  const [creditGrantDrafts, setCreditGrantDrafts] = React.useState<Record<string, { amountCredits: string; reason: string }>>({});
   const [assistantExtensions, setAssistantExtensions] = React.useState<AssistantExtensionsResponse | null>(null);
   const [voiceRecordings, setVoiceRecordings] = React.useState<VoiceRecordingRecord[]>([]);
   const [voiceRecordingsLoading, setVoiceRecordingsLoading] = React.useState(false);
@@ -2769,6 +2771,50 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     return nested.flat();
   }
 
+  function updateCreditGrantDraft(userId: string, patch: Partial<{ amountCredits: string; reason: string }>) {
+    setCreditGrantDrafts((current) => ({
+      ...current,
+      [userId]: {
+        amountCredits: current[userId]?.amountCredits ?? '',
+        reason: current[userId]?.reason ?? '',
+        ...patch,
+      },
+    }));
+  }
+
+  async function grantAdminCredits(userId: string) {
+    const draft = creditGrantDrafts[userId] ?? { amountCredits: '', reason: '' };
+    const amountCredits = Number(draft.amountCredits);
+    if (!Number.isFinite(amountCredits) || amountCredits <= 0) {
+      setError('Enter a positive credit amount.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const data = await client.request<{ ok: true; users: DashboardData['adminUsers'] }>(
+        `/api/admin/users/${encodeURIComponent(userId)}/credits/grants`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            amountCredits,
+            reason: draft.reason,
+          }),
+        },
+      );
+      setDashboard((current) => current ? { ...current, adminUsers: data.users } : current);
+      setCreditGrantDrafts((current) => ({
+        ...current,
+        [userId]: { amountCredits: '', reason: '' },
+      }));
+      setNotice(`Granted ${formatCredits(amountCredits * MICROCREDITS_PER_CREDIT)} credits.`);
+    } catch (err: any) {
+      setError(err?.message ?? String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function uploadAndroidReleaseFiles(files: File[]) {
     const { artifact, metadata } = await releaseFiles(files, 'android');
     if (!artifact || !metadata) {
@@ -2866,6 +2912,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const devices = dashboard?.devices ?? [];
   const threads = assistantThreads;
   const logs = dashboard?.logs ?? [];
+  const adminUsers = dashboard?.adminUsers ?? [];
   const assistantRecordings = voiceRecordings.filter((recording) => recording.mode === 'assistant');
   const clipboardRecordings = voiceRecordings.filter((recording) => recording.mode === 'clipboard');
   const speechPlayback = dashboard?.speechPlayback;
@@ -4709,6 +4756,84 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                   <div className={assistantPanelHeaderClass}>
                     <div>
                       <span className={assistantKickerClass}>Admin</span>
+                      <h2 className={assistantPanelTitleClass}>Users & Credits</h2>
+                    </div>
+                    <button type="button" className={assistantActionButtonClass} disabled={busy} onClick={() => void loadDashboard({ includeAssistant: false })}>
+                      Refresh
+                    </button>
+                  </div>
+                  <div className="grid gap-2">
+                    {adminUsers.map((item) => {
+                      const draft = creditGrantDrafts[item.user.id] ?? { amountCredits: '', reason: '' };
+                      const lastSeenExact = item.user.lastSeenAt ? exactTimeLabel(item.user.lastSeenAt) : '';
+                      const lastSeenRelative = item.user.lastSeenAt ? relativeTimeAgo(item.user.lastSeenAt) : 'never';
+                      const canGrant = Number(draft.amountCredits) > 0;
+                      return (
+                        <article key={item.user.id} className={cn(assistantRowClass, 'grid grid-cols-[minmax(180px,1.4fr)_120px_120px_120px_minmax(240px,1.3fr)] items-center gap-3 p-3 max-[1040px]:grid-cols-2 max-[680px]:grid-cols-1')}>
+                          <div className="min-w-0">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <strong className="min-w-0 truncate text-xs text-[var(--fg)]">{item.user.email || item.user.displayName || item.user.id}</strong>
+                              {item.user.admin ? <span className="rounded border border-[rgba(74,222,128,.24)] bg-[rgba(74,222,128,.08)] px-1.5 py-0.5 text-[10px] font-bold uppercase text-[var(--green)]">Admin</span> : null}
+                            </div>
+                            <div className="mt-1 flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-[11px] text-[var(--muted)]">
+                              <span className="min-w-0 truncate">{item.user.displayName || 'No name'}</span>
+                              <span title={lastSeenExact}>Last seen {lastSeenRelative}</span>
+                            </div>
+                          </div>
+                          <div className="grid gap-0.5">
+                            <span className={assistantKickerClass}>Threads</span>
+                            <strong className="text-sm text-[var(--fg)]">{item.threadCount}</strong>
+                          </div>
+                          <div className="grid gap-0.5">
+                            <span className={assistantKickerClass}>Profiles</span>
+                            <strong className="text-sm text-[var(--fg)]">{item.assistantProfileCount}</strong>
+                          </div>
+                          <div className="grid gap-0.5">
+                            <span className={assistantKickerClass}>Credits</span>
+                            <strong className="text-sm text-[var(--fg)]">{formatCredits(item.creditBalanceMicrocredits)}</strong>
+                            <small className="text-[10px] text-[var(--muted)]">
+                              Granted {formatCredits(item.creditsGrantedMicrocredits)} · Spent {formatCredits(item.creditsSpentMicrocredits)}
+                            </small>
+                          </div>
+                          <form
+                            className="grid grid-cols-[88px_minmax(0,1fr)_auto] items-center gap-2 max-[520px]:grid-cols-1"
+                            onSubmit={(event) => {
+                              event.preventDefault();
+                              void grantAdminCredits(item.user.id);
+                            }}
+                          >
+                            <input
+                              value={draft.amountCredits}
+                              onChange={(event) => updateCreditGrantDraft(item.user.id, { amountCredits: event.currentTarget.value })}
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              placeholder="Credits"
+                              disabled={busy}
+                              className="h-8 min-w-0"
+                            />
+                            <input
+                              value={draft.reason}
+                              onChange={(event) => updateCreditGrantDraft(item.user.id, { reason: event.currentTarget.value })}
+                              placeholder="Reason"
+                              disabled={busy}
+                              className="h-8 min-w-0"
+                            />
+                            <button type="submit" className={assistantActionButtonClass} disabled={busy || !canGrant}>
+                              Grant
+                            </button>
+                          </form>
+                        </article>
+                      );
+                    })}
+                    {adminUsers.length === 0 ? <div className={assistantEmptyClass}>No users yet.</div> : null}
+                  </div>
+                </section>
+
+                <section className={assistantPanelClass}>
+                  <div className={assistantPanelHeaderClass}>
+                    <div>
+                      <span className={assistantKickerClass}>Admin</span>
                       <h2 className={assistantPanelTitleClass}>App Releases</h2>
                     </div>
                   </div>
@@ -5852,6 +5977,16 @@ function formatBytes(bytes: number): string {
   if (kb < 1024) return `${kb.toFixed(kb >= 10 ? 0 : 1)} KB`;
   const mb = kb / 1024;
   return `${mb.toFixed(mb >= 10 ? 0 : 1)} MB`;
+}
+
+function formatCredits(microcredits: number): string {
+  const credits = Number(microcredits) / MICROCREDITS_PER_CREDIT;
+  if (!Number.isFinite(credits)) return '0';
+  const abs = Math.abs(credits);
+  if (abs >= 100) return credits.toFixed(0);
+  if (abs >= 1) return credits.toFixed(2);
+  if (abs > 0) return credits.toFixed(4);
+  return '0';
 }
 
 function formatDurationMs(ms: number): string {
