@@ -117,8 +117,16 @@ assert.equal(cleanedWake.text, "what am I saying right now?");
 const cleanedSleep = stripTranscriptCommands("That's it. This should not include the command.");
 assert.equal(cleanedSleep.wakeDetected, false);
 assert.equal(cleanedSleep.sleepDetected, true);
+assert.equal(cleanedSleep.sleepTargetState, "awake");
 assert.equal(cleanedSleep.abortDetected, false);
 assert.equal(cleanedSleep.text, "This should not include the command.");
+
+const cleanedGoToSleep = stripTranscriptCommands("Go to sleep. This should not include the command.");
+assert.equal(cleanedGoToSleep.wakeDetected, false);
+assert.equal(cleanedGoToSleep.sleepDetected, true);
+assert.equal(cleanedGoToSleep.sleepTargetState, "sleeping");
+assert.equal(cleanedGoToSleep.abortDetected, false);
+assert.equal(cleanedGoToSleep.text, "This should not include the command.");
 
 for (const phrase of ["ok stop", "ok, stop", "okay stop", "okay, stop"]) {
   const cleanedAbort = stripTranscriptCommands(`${phrase}. This should be discarded.`);
@@ -243,6 +251,7 @@ try {
   assert.deepEqual(sleepCommands[0], {
     type: "sleep",
     phrase: "that's it",
+    targetState: "awake",
     detectedAt: (sleepCommands[0] as any).detectedAt,
     transcriptText: "final full recording text",
   });

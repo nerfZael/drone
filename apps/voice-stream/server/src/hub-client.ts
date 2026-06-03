@@ -20,8 +20,8 @@ export async function connectVoiceThread(config: HubClientConfig, title = "Voice
   return await postHubJson(config, "/api/assistant/voice/connect", { title });
 }
 
-export async function submitVoiceMessage(config: HubClientConfig, prompt: string, title = "Voice thread"): Promise<HubVoiceThreadResult> {
-  return await postHubJson(config, "/api/assistant/voice/message", { prompt, title });
+export async function submitVoiceMessage(config: HubClientConfig, prompt: string, title = "Voice thread", deliveryMode?: "queue" | "asap"): Promise<HubVoiceThreadResult> {
+  return await postHubJson(config, "/api/assistant/voice/message", { prompt, title, deliveryMode });
 }
 
 export async function beginVoicePatch(config: HubClientConfig, source = "android", sessionId?: string | null): Promise<any> {

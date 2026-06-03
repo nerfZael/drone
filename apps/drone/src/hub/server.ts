@@ -265,6 +265,7 @@ import {
   upsertStoredLlmProvider,
   upsertStoredProviderApiKey,
   upsertStoredVoiceApprovalSettings,
+  upsertStoredVoiceActivationSettings,
   upsertStoredVoiceTranscriptionSettings,
   upsertVoiceStreamPairingPassword,
   upsertStoredTaskPlaybookButtonSettings,
@@ -11969,7 +11970,7 @@ export async function startDroneHubApiServer(opts: {
           return;
         }
         try {
-          json(res, 202, await assistantService.submitVoicePrompt({ prompt: body?.prompt ?? body?.message, title: body?.title, source: 'android' }));
+          json(res, 202, await assistantService.submitVoicePrompt({ prompt: body?.prompt ?? body?.message, title: body?.title, source: 'android', deliveryMode: body?.deliveryMode }));
         } catch (e: any) {
           json(res, 400, { ok: false, error: e?.message ?? String(e) });
         }
@@ -12598,7 +12599,11 @@ export async function startDroneHubApiServer(opts: {
               await reloadDesktopVoiceTranscriptionSettings();
               notifyVoiceTranscriptionSettingsChanged();
             }
-            if (voiceApprovalPayload == null && body?.voiceTranscription == null) {
+            if (body?.voiceActivation != null) {
+              await upsertStoredVoiceActivationSettings(body.voiceActivation);
+              notifyVoiceApprovalSettingsChanged();
+            }
+            if (voiceApprovalPayload == null && body?.voiceTranscription == null && body?.voiceActivation == null) {
               throw new Error('No voice settings payload provided');
             }
             json(res, 200, await resolveVoiceApprovalSettingsResponse());
@@ -12958,6 +12963,10 @@ export async function startDroneHubApiServer(opts: {
                 previousRootDir,
               },
             });
+            await reloadDesktopVoiceApprovalSettings();
+            await reloadDesktopVoiceTranscriptionSettings();
+            notifyVoiceApprovalSettingsChanged();
+            notifyVoiceTranscriptionSettingsChanged();
             json(res, 200, {
               ok: true,
               ...(await listProfilesState()),

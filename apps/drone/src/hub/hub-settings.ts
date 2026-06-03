@@ -6,6 +6,7 @@ import path from 'node:path';
 import dotenv from 'dotenv';
 
 import { loadRegistry, updateRegistry } from '../host/registry';
+import { readActiveProfileName } from '../host/profiles';
 import {
   persistTaskBoardState,
   normalizeTaskTypeId,
@@ -140,6 +141,7 @@ export type EffectiveAgentSuggestionSettings = {
 export type VoiceApprovalSettingsSource = 'settings' | 'default';
 export type VoiceTranscriptionFinalMode = 'full-recording' | 'segments';
 export type VoiceTranscriptionSettingsSource = 'settings' | 'default';
+export type VoiceActivationSettingsSource = 'settings' | 'default';
 export type VoiceApprovalSettings = {
   triggerPhrase: string;
   unlockCode: string;
@@ -162,6 +164,14 @@ export type VoiceTranscriptionSettings = {
 };
 export type EffectiveVoiceTranscriptionSettings = VoiceTranscriptionSettings & {
   source: VoiceTranscriptionSettingsSource;
+  updatedAt: string | null;
+};
+export type VoiceActivationSettings = {
+  normalAliases: string[];
+  realTimeAliases: string[];
+};
+export type EffectiveVoiceActivationSettings = VoiceActivationSettings & {
+  source: VoiceActivationSettingsSource;
   updatedAt: string | null;
 };
 export type { KanbanBoardTaskType, KanbanBoardCard, KanbanBoardLane, KanbanBoardSettings };
@@ -229,6 +239,10 @@ export const VOICE_APPROVAL_SETTINGS_DEFAULT: VoiceApprovalSettings = {
 export const VOICE_TRANSCRIPTION_SETTINGS_DEFAULT: VoiceTranscriptionSettings = {
   finalMode: 'full-recording',
 };
+export const VOICE_ACTIVATION_SETTINGS_DEFAULT: VoiceActivationSettings = {
+  normalAliases: ['hey Sebastian', 'hay Sebastian'],
+  realTimeAliases: ['Sebastian enter real-time mode', 'Sebastian enter realtime mode'],
+};
 export const VOICE_APPROVAL_SETTINGS_LIMITS = {
   triggerPhraseMaxChars: 64,
   codeMaxDigits: 8,
@@ -246,6 +260,8 @@ export const VOICE_APPROVAL_SETTINGS_LIMITS = {
   finalizeCheckIntervalMsMax: 1_000,
   postPromptCommandSuppressionMsMin: 0,
   postPromptCommandSuppressionMsMax: 5_000,
+  activationAliasMaxChars: 80,
+  activationAliasMaxCount: 12,
 } as const;
 export const AGENT_SUGGESTION_POLICY_DEFAULT = `# Assistant Suggestion Policy
 
@@ -461,6 +477,38 @@ function parseVoiceTranscriptionSettings(raw: unknown): VoiceTranscriptionSettin
   return { finalMode };
 }
 
+function normalizeVoiceActivationAlias(raw: unknown): string {
+  const text = typeof raw === 'string' ? raw.trim().replace(/\s+/g, ' ') : '';
+  if (!text) return '';
+  return text.length > VOICE_APPROVAL_SETTINGS_LIMITS.activationAliasMaxChars
+    ? text.slice(0, VOICE_APPROVAL_SETTINGS_LIMITS.activationAliasMaxChars).trim()
+    : text;
+}
+
+function normalizeVoiceActivationAliases(raw: unknown, fallback: string[], opts?: { fallbackEmpty?: boolean }): string[] {
+  const values = Array.isArray(raw) ? raw : [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of values) {
+    const alias = normalizeVoiceActivationAlias(item);
+    const key = alias.toLowerCase();
+    if (!alias || seen.has(key)) continue;
+    seen.add(key);
+    out.push(alias);
+    if (out.length >= VOICE_APPROVAL_SETTINGS_LIMITS.activationAliasMaxCount) break;
+  }
+  return out.length > 0 ? out : opts?.fallbackEmpty === false ? [] : fallback;
+}
+
+function parseVoiceActivationSettings(raw: unknown, opts?: { fallbackEmpty?: boolean }): VoiceActivationSettings | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const value = raw as Record<string, unknown>;
+  const normalAliases = normalizeVoiceActivationAliases(value.normalAliases, VOICE_ACTIVATION_SETTINGS_DEFAULT.normalAliases, opts);
+  const realTimeAliases = normalizeVoiceActivationAliases(value.realTimeAliases, VOICE_ACTIVATION_SETTINGS_DEFAULT.realTimeAliases, opts);
+  if (normalAliases.length === 0 || realTimeAliases.length === 0) return null;
+  return { normalAliases, realTimeAliases };
+}
+
 function voiceApprovalSettingsEqual(a: VoiceApprovalSettings, b: VoiceApprovalSettings): boolean {
   return (
     a.triggerPhrase === b.triggerPhrase &&
@@ -479,6 +527,14 @@ function voiceApprovalSettingsEqual(a: VoiceApprovalSettings, b: VoiceApprovalSe
 
 function voiceTranscriptionSettingsEqual(a: VoiceTranscriptionSettings, b: VoiceTranscriptionSettings): boolean {
   return a.finalMode === b.finalMode;
+}
+
+function stringArraysEqual(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
+function voiceActivationSettingsEqual(a: VoiceActivationSettings, b: VoiceActivationSettings): boolean {
+  return stringArraysEqual(a.normalAliases, b.normalAliases) && stringArraysEqual(a.realTimeAliases, b.realTimeAliases);
 }
 
 export function normalizeAgentMessageAutoContinuePrompt(raw: unknown): string {
@@ -1217,18 +1273,30 @@ export async function resolveEffectiveVoiceApprovalSettings(): Promise<Effective
 
 export async function resolveVoiceApprovalSettingsResponse(): Promise<{
   ok: true;
+  profile: {
+    activeProfile: string | null;
+    scoped: true;
+  };
   voiceApproval: EffectiveVoiceApprovalSettings;
   voiceTranscription: EffectiveVoiceTranscriptionSettings;
+  voiceActivation: EffectiveVoiceActivationSettings;
   defaults: VoiceApprovalSettings;
   transcriptionDefaults: VoiceTranscriptionSettings;
+  activationDefaults: VoiceActivationSettings;
   limits: typeof VOICE_APPROVAL_SETTINGS_LIMITS;
 }> {
   return {
     ok: true,
+    profile: {
+      activeProfile: await readActiveProfileName(),
+      scoped: true,
+    },
     voiceApproval: await resolveEffectiveVoiceApprovalSettings(),
     voiceTranscription: await resolveEffectiveVoiceTranscriptionSettings(),
+    voiceActivation: await resolveEffectiveVoiceActivationSettings(),
     defaults: VOICE_APPROVAL_SETTINGS_DEFAULT,
     transcriptionDefaults: VOICE_TRANSCRIPTION_SETTINGS_DEFAULT,
+    activationDefaults: VOICE_ACTIVATION_SETTINGS_DEFAULT,
     limits: VOICE_APPROVAL_SETTINGS_LIMITS,
   };
 }
@@ -1271,6 +1339,49 @@ export async function resolveEffectiveVoiceTranscriptionSettings(): Promise<Effe
   const stored = await getStoredVoiceTranscriptionSettings();
   return {
     ...(stored.settings ?? VOICE_TRANSCRIPTION_SETTINGS_DEFAULT),
+    source: stored.settings ? 'settings' : 'default',
+    updatedAt: stored.settings ? stored.updatedAt : null,
+  };
+}
+
+async function getStoredVoiceActivationSettings(): Promise<{
+  settings: VoiceActivationSettings | null;
+  updatedAt: string | null;
+}> {
+  const reg = await loadRegistry();
+  const raw = reg.settings?.voiceActivation;
+  const settings = parseVoiceActivationSettings(raw);
+  const updatedAtRaw = raw?.updatedAt;
+  return {
+    settings,
+    updatedAt: typeof updatedAtRaw === 'string' && updatedAtRaw.trim() ? updatedAtRaw.trim() : null,
+  };
+}
+
+export async function upsertStoredVoiceActivationSettings(settingsRaw: unknown): Promise<void> {
+  const settings = parseVoiceActivationSettings(settingsRaw, { fallbackEmpty: false });
+  if (!settings) {
+    throw new Error('Voice activation settings require at least one normal alias and one real-time alias.');
+  }
+  const updatedAt = new Date().toISOString();
+  await updateRegistry((reg) => {
+    reg.settings ??= {};
+    if (voiceActivationSettingsEqual(settings, VOICE_ACTIVATION_SETTINGS_DEFAULT)) {
+      delete reg.settings.voiceActivation;
+      if (Object.keys(reg.settings).length === 0) delete reg.settings;
+      return;
+    }
+    reg.settings.voiceActivation = {
+      ...settings,
+      updatedAt,
+    };
+  });
+}
+
+export async function resolveEffectiveVoiceActivationSettings(): Promise<EffectiveVoiceActivationSettings> {
+  const stored = await getStoredVoiceActivationSettings();
+  return {
+    ...(stored.settings ?? VOICE_ACTIVATION_SETTINGS_DEFAULT),
     source: stored.settings ? 'settings' : 'default',
     updatedAt: stored.settings ? stored.updatedAt : null,
   };

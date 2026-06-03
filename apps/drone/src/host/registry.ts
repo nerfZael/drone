@@ -186,6 +186,11 @@ type DroneRegistryV1 = {
       finalMode?: 'full-recording' | 'segments';
       updatedAt?: string;
     };
+    voiceActivation?: {
+      normalAliases?: string[];
+      realTimeAliases?: string[];
+      updatedAt?: string;
+    };
     filesystem?: {
       uploadMaxBytes?: number;
       updatedAt?: string;
