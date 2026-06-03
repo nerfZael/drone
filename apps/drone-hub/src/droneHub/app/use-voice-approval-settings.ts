@@ -1,5 +1,5 @@
 import React from 'react';
-import type { VoiceApprovalSettings, VoiceApprovalSettingsResponse, VoiceTranscriptionSettings } from './settings-types';
+import type { VoiceActivationSettings, VoiceApprovalSettings, VoiceApprovalSettingsResponse, VoiceTranscriptionSettings } from './settings-types';
 
 type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
 
@@ -10,9 +10,11 @@ export type UseVoiceApprovalSettingsResult = {
   voiceApprovalSettingsNotice: string | null;
   voiceApprovalDraft: VoiceApprovalSettings | null;
   voiceTranscriptionDraft: VoiceTranscriptionSettings | null;
+  voiceActivationDraft: VoiceActivationSettings | null;
   savingVoiceApprovalSettings: boolean;
   setVoiceApprovalDraft: React.Dispatch<React.SetStateAction<VoiceApprovalSettings | null>>;
   setVoiceTranscriptionDraft: React.Dispatch<React.SetStateAction<VoiceTranscriptionSettings | null>>;
+  setVoiceActivationDraft: React.Dispatch<React.SetStateAction<VoiceActivationSettings | null>>;
   loadVoiceApprovalSettings: () => Promise<void>;
   saveVoiceApprovalSettings: () => Promise<void>;
 };
@@ -24,6 +26,7 @@ export function useVoiceApprovalSettings(requestJson: RequestJsonFn): UseVoiceAp
   const [voiceApprovalSettingsNotice, setVoiceApprovalSettingsNotice] = React.useState<string | null>(null);
   const [voiceApprovalDraft, setVoiceApprovalDraft] = React.useState<VoiceApprovalSettings | null>(null);
   const [voiceTranscriptionDraft, setVoiceTranscriptionDraft] = React.useState<VoiceTranscriptionSettings | null>(null);
+  const [voiceActivationDraft, setVoiceActivationDraft] = React.useState<VoiceActivationSettings | null>(null);
   const [savingVoiceApprovalSettings, setSavingVoiceApprovalSettings] = React.useState(false);
 
   const applyResponse = React.useCallback((data: VoiceApprovalSettingsResponse) => {
@@ -43,6 +46,10 @@ export function useVoiceApprovalSettings(requestJson: RequestJsonFn): UseVoiceAp
     });
     setVoiceTranscriptionDraft({
       finalMode: data.voiceTranscription.finalMode,
+    });
+    setVoiceActivationDraft({
+      normalAliases: data.voiceActivation.normalAliases,
+      realTimeAliases: data.voiceActivation.realTimeAliases,
     });
   }, []);
 
@@ -64,7 +71,7 @@ export function useVoiceApprovalSettings(requestJson: RequestJsonFn): UseVoiceAp
   }, [loadVoiceApprovalSettings]);
 
   const saveVoiceApprovalSettings = React.useCallback(async () => {
-    if (!voiceApprovalDraft || !voiceTranscriptionDraft) return;
+    if (!voiceApprovalDraft || !voiceTranscriptionDraft || !voiceActivationDraft) return;
     setSavingVoiceApprovalSettings(true);
     setVoiceApprovalSettingsError(null);
     setVoiceApprovalSettingsNotice(null);
@@ -72,7 +79,7 @@ export function useVoiceApprovalSettings(requestJson: RequestJsonFn): UseVoiceAp
       const data = await requestJson<VoiceApprovalSettingsResponse>('/api/settings/voice-approval', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ voiceApproval: voiceApprovalDraft, voiceTranscription: voiceTranscriptionDraft }),
+        body: JSON.stringify({ voiceApproval: voiceApprovalDraft, voiceTranscription: voiceTranscriptionDraft, voiceActivation: voiceActivationDraft }),
       });
       applyResponse(data);
       setVoiceApprovalSettingsNotice('Saved voice settings.');
@@ -81,7 +88,7 @@ export function useVoiceApprovalSettings(requestJson: RequestJsonFn): UseVoiceAp
     } finally {
       setSavingVoiceApprovalSettings(false);
     }
-  }, [applyResponse, requestJson, voiceApprovalDraft, voiceTranscriptionDraft]);
+  }, [applyResponse, requestJson, voiceActivationDraft, voiceApprovalDraft, voiceTranscriptionDraft]);
 
   return {
     voiceApprovalSettings,
@@ -90,9 +97,11 @@ export function useVoiceApprovalSettings(requestJson: RequestJsonFn): UseVoiceAp
     voiceApprovalSettingsNotice,
     voiceApprovalDraft,
     voiceTranscriptionDraft,
+    voiceActivationDraft,
     savingVoiceApprovalSettings,
     setVoiceApprovalDraft,
     setVoiceTranscriptionDraft,
+    setVoiceActivationDraft,
     loadVoiceApprovalSettings,
     saveVoiceApprovalSettings,
   };

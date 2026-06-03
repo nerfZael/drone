@@ -432,6 +432,14 @@ class VoiceSessionService : Service() {
                 cuePlayer.play(LocalCue.WAKE)
                 beginRecording("Local wake word detected")
             }
+            WakeAction.START_REALTIME_RECORDING -> {
+                if (now - lastWakeToggleMs < WAKE_DEBOUNCE_MS) return
+                lastWakeToggleMs = now
+                wakeDetector?.reset()
+                DroneLog.i("Wake", "Real-time phrase detected; starting real-time recording")
+                cuePlayer.play(LocalCue.WAKE)
+                beginRecording("Local real-time phrase detected", STREAM_TARGET_REALTIME)
+            }
             WakeAction.START_PATCH_RECORDING -> {
                 if (now - lastWakeToggleMs < WAKE_DEBOUNCE_MS) return
                 lastWakeToggleMs = now
@@ -680,6 +688,7 @@ class VoiceSessionService : Service() {
         val type = parsed.optString("type")
         if (type == "approval_settings") {
             applyApprovalSettings(parsed.optJSONObject("settings"))
+            applyActivationSettings(parsed.optJSONObject("activation"))
             return
         }
         if (type != "sleep" && type != "abort") return
@@ -687,12 +696,16 @@ class VoiceSessionService : Service() {
         DroneLog.i("WebSocket", "Server $type command received")
         mainHandler.post {
             if (!recording.get()) return@post
-            val copied = if (type == "sleep" && streamTarget == STREAM_TARGET_CLIPBOARD) {
+            val targetState = parsed.optString("targetState")
+            val enterSleeping = type == "sleep" && targetState == "sleeping"
+            val copied = if (type == "sleep" && !enterSleeping && streamTarget == STREAM_TARGET_CLIPBOARD) {
                 copyTranscriptToClipboard(parsed.optString("transcriptText"))
             } else {
                 false
             }
-            val nextStatus = if (streamTarget == STREAM_TARGET_CLIPBOARD) {
+            val nextStatus = if (enterSleeping) {
+                sleepingStatus()
+            } else if (streamTarget == STREAM_TARGET_CLIPBOARD) {
                 when {
                     type == "abort" -> "Awake: voice transcription cancelled"
                     copied -> "Awake: copied voice transcription"
@@ -701,7 +714,11 @@ class VoiceSessionService : Service() {
             } else {
                 waitingStatus()
             }
-            wakeController.manualStopRecording(returnToAwake = serviceActive.get())
+            if (enterSleeping) {
+                wakeController.enterSleeping()
+            } else {
+                wakeController.manualStopRecording(returnToAwake = serviceActive.get())
+            }
             cuePlayer.play(LocalCue.SLEEP)
             endRecording(nextStatus, returnToAwake = true)
         }
@@ -743,6 +760,29 @@ class VoiceSessionService : Service() {
             publishState(sleepingStatus(), Constants.MODE_SLEEPING)
         }
         DroneLog.i("Approval", "Applied approval settings trigger=${next.triggerPhrase} min=${next.minDigits} max=${next.maxDigits}")
+    }
+
+    private fun applyActivationSettings(raw: JSONObject?) {
+        raw ?: return
+        val normalAliases = jsonStringArray(raw.optJSONArray("normalAliases"))
+        val realTimeAliases = jsonStringArray(raw.optJSONArray("realTimeAliases"))
+        val settings = VoiceActivationSettings(
+            normalAliases = normalAliases.ifEmpty { VoiceActivationSettings().normalAliases },
+            realTimeAliases = realTimeAliases.ifEmpty { VoiceActivationSettings().realTimeAliases },
+        ).normalized()
+        WakePhraseMatcher.updateActivationSettings(settings)
+        wakeDetector?.updateActivationSettings(settings)
+        DroneLog.i("Activation", "Applied voice activation aliases normal=${settings.normalAliases.size} realtime=${settings.realTimeAliases.size}")
+    }
+
+    private fun jsonStringArray(raw: org.json.JSONArray?): List<String> {
+        if (raw == null) return emptyList()
+        val values = mutableListOf<String>()
+        for (index in 0 until raw.length()) {
+            val value = raw.optString(index).trim()
+            if (value.isNotBlank()) values.add(value)
+        }
+        return values
     }
 
     private fun isWavAudio(data: ByteArray): Boolean {
@@ -992,6 +1032,7 @@ class VoiceSessionService : Service() {
 
     private fun connectingStatus(target: String): String {
         return when (target) {
+            STREAM_TARGET_REALTIME -> "Awake: entering real-time mode"
             STREAM_TARGET_PATCH -> "Awake: patching into chat"
             STREAM_TARGET_CLIPBOARD -> "Awake: recording clipboard transcription"
             else -> "Awake: connecting"
@@ -1000,6 +1041,7 @@ class VoiceSessionService : Service() {
 
     private fun recordingStatus(): String {
         return when (streamTarget) {
+            STREAM_TARGET_REALTIME -> "Awake: real-time mode"
             STREAM_TARGET_PATCH -> "Awake: patching into chat"
             STREAM_TARGET_CLIPBOARD -> "Awake: recording clipboard transcription"
             else -> "Awake: recording"
@@ -1057,6 +1099,7 @@ class VoiceSessionService : Service() {
         private const val APPROVAL_STATUS_MS = 2_500L
         private const val RECONNECT_CONTROL_WEBSOCKET_MS = 2_000L
         private const val STREAM_TARGET_ASSISTANT = "assistant"
+        private const val STREAM_TARGET_REALTIME = "realtime"
         private const val STREAM_TARGET_PATCH = "patch"
         private const val STREAM_TARGET_CLIPBOARD = "clipboard"
         private const val PRE_ROLL_MS = 1_500

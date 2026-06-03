@@ -2632,11 +2632,11 @@ export class HubAssistantService {
     return { ok: true, previousThreadId: previousThread.id, threadId: thread.id, thread: sanitizeThread(thread) };
   }
 
-  async submitVoicePrompt(input: { prompt?: unknown; title?: unknown; source?: AssistantVoiceSource }): Promise<{ ok: true; threadId: string; created: boolean; accepted: boolean }> {
+  async submitVoicePrompt(input: { prompt?: unknown; title?: unknown; source?: AssistantVoiceSource; deliveryMode?: unknown }): Promise<{ ok: true; threadId: string; created: boolean; accepted: boolean }> {
     const prompt = String(input.prompt ?? '').trim();
     if (!prompt) throw new Error('missing prompt');
     const voiceThread = await this.ensureLatestVoiceThread({ title: input.title });
-    void this.promptThread(voiceThread.threadId, { prompt, deliveryMode: 'queue', voiceSource: input.source }).catch((error: any) => {
+    void this.promptThread(voiceThread.threadId, { prompt, deliveryMode: normalizeAssistantPromptDeliveryMode(input.deliveryMode), voiceSource: input.source }).catch((error: any) => {
       console.warn('[assistant] voice prompt failed', {
         threadId: voiceThread.threadId,
         error: String(error?.message ?? error ?? ''),

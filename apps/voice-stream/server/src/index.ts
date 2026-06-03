@@ -54,8 +54,14 @@ const defaultApprovalSettings: VoiceApprovalSettings = {
   duplicateCooldownMs: 4_000,
   finalizeCheckIntervalMs: 250,
 };
+const defaultActivationSettings: VoiceActivationSettings = {
+  normalAliases: ["hey Sebastian", "hay Sebastian"],
+  realTimeAliases: ["Sebastian enter real-time mode", "Sebastian enter realtime mode"],
+};
 let currentApprovalSettings: VoiceApprovalSettings = defaultApprovalSettings;
 let currentApprovalSettingsFingerprint = JSON.stringify(defaultApprovalSettings);
+let currentActivationSettings: VoiceActivationSettings = defaultActivationSettings;
+let currentActivationSettingsFingerprint = JSON.stringify(defaultActivationSettings);
 
 type AndroidVersionInfo = {
   versionCode: number;
@@ -74,6 +80,11 @@ type VoiceApprovalSettings = {
   collectTimeoutMs: number;
   duplicateCooldownMs: number;
   finalizeCheckIntervalMs: number;
+};
+
+type VoiceActivationSettings = {
+  normalAliases: string[];
+  realTimeAliases: string[];
 };
 
 type ApprovalCodeMessage = {
@@ -178,7 +189,7 @@ let nextClientId = 1;
 let nextControlClientId = 1;
 let nextMonitorId = 1;
 const controlClients = new Map<number, WebSocket>();
-type VoiceMode = "assistant" | "patch" | "clipboard";
+type VoiceMode = "assistant" | "patch" | "clipboard" | "realtime";
 
 server.on("upgrade", (req, socket, head) => {
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
@@ -210,13 +221,19 @@ wss.on("connection", (socket, request) => {
   const sttManager = new GroqTranscriptionManager(
     {
       ...transcriptionConfig,
-      broadcastSegments: voiceMode === "assistant",
+      broadcastSegments: voiceMode === "assistant" || voiceMode === "realtime",
       ignoreEmptySleepCommands: voiceMode === "patch",
+      ignoreAbortCommands: voiceMode === "realtime",
+      finalTranscriptionMode: voiceMode === "realtime" ? "segments" : transcriptionConfig.finalTranscriptionMode,
     },
     (message) => broadcastTranscriptMessage(message),
     (command) => {
       sendAudioCommand(socket, clientId, command);
       void handleTranscriptCommand(clientId, voiceMode, command, patchSessionId);
+    },
+    (segment) => {
+      if (voiceMode !== "realtime") return;
+      return submitRealtimeVoiceSegment(clientId, segment.text);
     },
     `client ${clientId}`,
   );
@@ -322,10 +339,14 @@ async function refreshApprovalSettings(reason: string, forceBroadcast = false): 
   const data = await getVoiceApprovalSettings(hubClientConfig);
   const settings = parseVoiceApprovalSettings(data?.voiceApproval);
   if (!settings) throw new Error("Hub returned invalid voice approval settings");
+  const activationSettings = parseVoiceActivationSettings(data?.voiceActivation) ?? defaultActivationSettings;
   const fingerprint = JSON.stringify(settings);
-  const changed = fingerprint !== currentApprovalSettingsFingerprint;
+  const activationFingerprint = JSON.stringify(activationSettings);
+  const changed = fingerprint !== currentApprovalSettingsFingerprint || activationFingerprint !== currentActivationSettingsFingerprint;
   currentApprovalSettings = settings;
   currentApprovalSettingsFingerprint = fingerprint;
+  currentActivationSettings = activationSettings;
+  currentActivationSettingsFingerprint = activationFingerprint;
   if (changed || forceBroadcast) {
     console.log(`[approval-settings] ${changed ? "updated" : "sent"} reason=${reason}`);
     broadcastApprovalSettings();
@@ -361,6 +382,29 @@ function parseVoiceApprovalSettings(raw: any): VoiceApprovalSettings | null {
   };
 }
 
+function parseVoiceActivationSettings(raw: any): VoiceActivationSettings | null {
+  if (!raw || typeof raw !== "object") return null;
+  const normalAliases = parseActivationAliases(raw.normalAliases, defaultActivationSettings.normalAliases);
+  const realTimeAliases = parseActivationAliases(raw.realTimeAliases, defaultActivationSettings.realTimeAliases);
+  if (normalAliases.length === 0 || realTimeAliases.length === 0) return null;
+  return { normalAliases, realTimeAliases };
+}
+
+function parseActivationAliases(raw: any, fallback: string[]): string[] {
+  const values = Array.isArray(raw) ? raw : [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const alias = String(value ?? "").trim().replace(/\s+/g, " ");
+    const key = alias.toLowerCase();
+    if (!alias || seen.has(key)) continue;
+    seen.add(key);
+    out.push(alias);
+    if (out.length >= 12) break;
+  }
+  return out.length > 0 ? out : fallback;
+}
+
 function clampInteger(raw: unknown, min: number, max: number): number | null {
   const n = Number(raw);
   if (!Number.isFinite(n)) return null;
@@ -376,7 +420,7 @@ function broadcastApprovalSettings(): void {
 
 function sendApprovalSettings(socket: WebSocket): void {
   if (socket.readyState !== WebSocket.OPEN) return;
-  socket.send(JSON.stringify({ type: "approval_settings", settings: currentApprovalSettings }));
+  socket.send(JSON.stringify({ type: "approval_settings", settings: currentApprovalSettings, activation: currentActivationSettings }));
 }
 
 function sendAudioCommand(socket: WebSocket, clientId: number, command: TranscriptCommand): void {
@@ -394,7 +438,7 @@ function sendAudioCommand(socket: WebSocket, clientId: number, command: Transcri
 }
 
 function parseVoiceMode(raw: string | null): VoiceMode {
-  if (raw === "patch" || raw === "clipboard") return raw;
+  if (raw === "patch" || raw === "clipboard" || raw === "realtime") return raw;
   return "assistant";
 }
 
@@ -427,8 +471,13 @@ async function handleVoiceClientConnected(clientId: number, voiceMode: VoiceMode
 async function handleTranscriptCommand(clientId: number, voiceMode: VoiceMode, command: TranscriptCommand, patchSessionId: string | null): Promise<void> {
   if (command.type === "abort") {
     if (voiceMode === "patch") await handlePatchAbort(clientId, patchSessionId);
+    else if (voiceMode === "realtime") console.log(`[hub] ignored real-time abort command for client ${clientId}`);
     else if (voiceMode === "clipboard") console.log(`[hub] Android clipboard transcription aborted for client ${clientId}`);
     else console.log(`[hub] voice transcript aborted for client ${clientId}`);
+    return;
+  }
+  if (voiceMode === "realtime") {
+    console.log(`[hub] real-time voice session ended by ${command.phrase || "sleep"} for client ${clientId}`);
     return;
   }
   const prompt = String(command.transcriptText ?? "").trim();
@@ -460,6 +509,21 @@ async function handleTranscriptCommand(clientId: number, voiceMode: VoiceMode, c
     console.log(`[hub] submitted voice transcript chars=${prompt.length} thread=${result.threadId}`);
   } catch (error) {
     console.warn(`[hub] voice transcript submit failed for client ${clientId}`, error);
+  }
+}
+
+async function submitRealtimeVoiceSegment(clientId: number, prompt: string): Promise<void> {
+  const text = String(prompt ?? "").trim();
+  if (!text) return;
+  if (!hubClientConfig) {
+    console.warn(`[hub] skipped real-time voice segment for client ${clientId}: missing DRONE_HUB_API_URL or DRONE_HUB_API_TOKEN`);
+    return;
+  }
+  try {
+    const result = await submitVoiceMessage(hubClientConfig, text, "Voice thread", "asap");
+    console.log(`[hub] submitted real-time voice segment chars=${text.length} thread=${result.threadId}`);
+  } catch (error) {
+    console.warn(`[hub] real-time voice segment submit failed for client ${clientId}`, error);
   }
 }
 

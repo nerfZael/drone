@@ -1,9 +1,15 @@
 package com.example.voicestream
 
 import org.junit.Assert.assertEquals
+import org.junit.Before
 import org.junit.Test
 
 class WakeToggleControllerTest {
+    @Before
+    fun resetActivationSettings() {
+        WakePhraseMatcher.updateActivationSettings(VoiceActivationSettings())
+    }
+
     @Test
     fun heySebastianStartsRecordingAndDoesNotStopIt() {
         val controller = WakeToggleController()
@@ -81,6 +87,17 @@ class WakeToggleControllerTest {
     }
 
     @Test
+    fun realTimePhraseStartsRealTimeRecording() {
+        val controller = WakeToggleController()
+
+        controller.startAwake()
+        controller.wakeFromSleep()
+
+        assertEquals(WakeAction.START_REALTIME_RECORDING, controller.wakeDetected(WakePhrase.REALTIME))
+        assertEquals(WakeState.RECORDING, controller.state)
+    }
+
+    @Test
     fun clipboardPhraseStartsClipboardRecording() {
         val controller = WakeToggleController()
 
@@ -142,6 +159,8 @@ class WakeToggleControllerTest {
         assertEquals(null, WakePhraseMatcher.match("hay"))
         assertEquals(WakePhrase.START, WakePhraseMatcher.match("hey sebastian"))
         assertEquals(WakePhrase.START, WakePhraseMatcher.match("hay sebastian"))
+        assertEquals(WakePhrase.REALTIME, WakePhraseMatcher.match("sebastian enter real time mode"))
+        assertEquals(WakePhrase.REALTIME, WakePhraseMatcher.match("sebastian enter realtime mode"))
         assertEquals(WakePhrase.PATCH, WakePhraseMatcher.match("patch me in"))
         assertEquals(WakePhrase.CLIPBOARD, WakePhraseMatcher.match("can you transcribe"))
         assertEquals(WakePhrase.CLIPBOARD, WakePhraseMatcher.match("transcribe"))
@@ -156,6 +175,20 @@ class WakeToggleControllerTest {
         assertEquals(WakePhrase.STATUS, WakePhraseMatcher.match("check status"))
         assertEquals(WakePhrase.START, WakePhraseMatcher.match("hey sebastian that's it"))
         assertEquals(null, WakePhraseMatcher.match("what is it"))
+    }
+
+    @Test
+    fun matcherUsesConfiguredActivationAliases() {
+        WakePhraseMatcher.updateActivationSettings(
+            VoiceActivationSettings(
+                normalAliases = listOf("computer listen"),
+                realTimeAliases = listOf("computer live mode"),
+            )
+        )
+
+        assertEquals(null, WakePhraseMatcher.match("hey sebastian"))
+        assertEquals(WakePhrase.START, WakePhraseMatcher.match("computer listen"))
+        assertEquals(WakePhrase.REALTIME, WakePhraseMatcher.match("computer live mode"))
     }
 
     @Test
