@@ -7,6 +7,11 @@ plugins {
 
 val androidVersionCode = 19
 val androidVersionName = "0.1.19"
+val configuredAndroidServerUrl = System.getenv("VOICE_STREAM_NEXT_ANDROID_SERVER_URL")
+    ?.takeIf { it.isNotBlank() }
+    ?: System.getenv("VOICE_STREAM_NEXT_SERVER_URL")?.takeIf { it.isNotBlank() }
+val debugAndroidServerUrl = configuredAndroidServerUrl ?: "http://10.0.2.2:3299"
+val releaseAndroidServerUrl = configuredAndroidServerUrl ?: "https://voice-stream-next-production.up.railway.app"
 
 android {
     namespace = "com.huntelkator.voicestreamnext"
@@ -29,6 +34,15 @@ android {
         buildConfig = true
     }
 
+    buildTypes {
+        getByName("debug") {
+            buildConfigField("String", "DEFAULT_SERVER_URL", jsonString(debugAndroidServerUrl))
+        }
+        getByName("release") {
+            buildConfigField("String", "DEFAULT_SERVER_URL", jsonString(releaseAndroidServerUrl))
+        }
+    }
+
     sourceSets {
         getByName("main") {
             assets.srcDir("../../../voice-stream/android/app/src/main/assets")
@@ -44,10 +58,8 @@ android {
                 storePassword = releaseStorePassword
             }
         }
-        buildTypes {
-            getByName("release") {
-                signingConfig = signingConfigs.getByName("release")
-            }
+        buildTypes.getByName("release") {
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 

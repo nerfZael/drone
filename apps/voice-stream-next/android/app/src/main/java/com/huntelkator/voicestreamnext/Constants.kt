@@ -44,7 +44,7 @@ object Constants {
     const val STREAM_TARGET_ASSISTANT = "assistant"
     const val STREAM_TARGET_PATCH = "patch"
     const val STREAM_TARGET_CLIPBOARD = "clipboard"
-    const val DEFAULT_SERVER_URL = "http://10.0.2.2:3299"
+    val DEFAULT_SERVER_URL = BuildConfig.DEFAULT_SERVER_URL
     const val DEFAULT_DEV_EMAIL = "android@example.local"
     const val DEFAULT_DEV_NAME = "Android Operator"
     const val DEFAULT_DEVICE_NAME = "Android voice client"
