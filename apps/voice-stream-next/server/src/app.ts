@@ -745,20 +745,6 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
 
   db.clearAssistantExtensionManifests();
 
-  app.addHook('onRequest', async (req) => {
-    const platform = releaseUploadPlatformForRequest(req);
-    if (!platform) return;
-    const uploadLog = releaseUploadLogDetails(req, platform);
-    req.log.info(uploadLog, `${platform === 'android' ? 'Android' : 'Desktop'} release upload started`);
-    req.raw.once('aborted', () => {
-      req.log.warn(uploadLog, `${platform === 'android' ? 'Android' : 'Desktop'} release upload aborted while reading request body`);
-    });
-    req.raw.once('close', () => {
-      if (req.raw.complete || req.raw.destroyed) return;
-      req.log.warn(uploadLog, `${platform === 'android' ? 'Android' : 'Desktop'} release upload connection closed before request completed`);
-    });
-  });
-
   setAssistantExternalToolExecutor(async (input) => {
     if (input.route?.targetKind === 'server') {
       throw Object.assign(new Error(`${input.toolName} is configured for server execution, but no server-side extension runner is installed`), { statusCode: 501 });
@@ -1066,6 +1052,46 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     await app.register(clerkPlugin);
   }
 
+  app.addHook('onRequest', async (req, reply) => {
+    const platform = releaseUploadPlatformForRequest(req);
+    if (!platform) return;
+    const uploadLog = releaseUploadLogDetails(req, platform);
+    const label = platform === 'android' ? 'Android' : 'Desktop';
+    req.log.info(uploadLog, `${label} release upload started`);
+    req.raw.once('aborted', () => {
+      req.log.warn(uploadLog, `${label} release upload aborted while reading request body`);
+    });
+    req.raw.once('close', () => {
+      if (req.raw.complete || req.raw.destroyed) return;
+      req.log.warn(uploadLog, `${label} release upload connection closed before request completed`);
+    });
+
+    try {
+      const ctx = await resolveRequestUser(req, db, clerkEnabled);
+      req.log.info({
+        ...uploadLog,
+        userId: ctx.user.id,
+        userEmail: ctx.user.email,
+        admin: ctx.user.admin,
+      }, `${label} release upload authenticated before body`);
+      requireAdmin(ctx);
+      (req as FastifyRequest & { releaseUploadAuth?: AuthContext }).releaseUploadAuth = ctx;
+    } catch (error: any) {
+      const status = Number(error?.statusCode ?? 0) || 500;
+      const log = {
+        ...uploadLog,
+        status,
+        error: error?.message ?? String(error),
+        errorName: error?.name ?? null,
+        stack: status >= 500 ? error?.stack : undefined,
+      };
+      if (status >= 500) req.log.error(log, `${label} release upload failed before body`);
+      else req.log.warn(log, `${label} release upload rejected before body`);
+      reply.code(status).send({ ok: false, error: error?.message ?? String(error) });
+      return reply;
+    }
+  });
+
   app.get('/api/health', async () => ({
     ok: true,
     app: 'voice-stream-next',
@@ -1086,7 +1112,8 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
   app.put('/api/admin/releases/android', async (req, reply) => {
     const uploadLog = releaseUploadLogDetails(req, 'android');
     req.log.info(uploadLog, 'Android release upload received');
-    return withUser(req, reply, db, clerkEnabled, async (ctx) => {
+    const preAuth = (req as FastifyRequest & { releaseUploadAuth?: AuthContext }).releaseUploadAuth;
+    const handleUpload = async (ctx: AuthContext) => {
       req.log.info({
         ...uploadLog,
         userId: ctx.user.id,
@@ -1109,7 +1136,9 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       });
       emitAppEvent(null, 'release_changed', { platform: 'android' });
       return { ok: true, android };
-    }, (error, status) => {
+    };
+    if (preAuth) return handleUpload(preAuth);
+    return withUser(req, reply, db, clerkEnabled, handleUpload, (error, status) => {
       const log = {
         ...uploadLog,
         status,
@@ -1125,7 +1154,8 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
   app.put('/api/admin/releases/desktop', async (req, reply) => {
     const uploadLog = releaseUploadLogDetails(req, 'desktop');
     req.log.info(uploadLog, 'Desktop release upload received');
-    return withUser(req, reply, db, clerkEnabled, async (ctx) => {
+    const preAuth = (req as FastifyRequest & { releaseUploadAuth?: AuthContext }).releaseUploadAuth;
+    const handleUpload = async (ctx: AuthContext) => {
       req.log.info({
         ...uploadLog,
         userId: ctx.user.id,
@@ -1148,7 +1178,9 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       });
       emitAppEvent(null, 'release_changed', { platform: 'desktop' });
       return { ok: true, desktop };
-    }, (error, status) => {
+    };
+    if (preAuth) return handleUpload(preAuth);
+    return withUser(req, reply, db, clerkEnabled, handleUpload, (error, status) => {
       const log = {
         ...uploadLog,
         status,
