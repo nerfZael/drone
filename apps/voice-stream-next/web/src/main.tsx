@@ -137,6 +137,38 @@ function isCompactViewport(): boolean {
   return typeof window !== 'undefined' && window.matchMedia(COMPACT_VIEWPORT_QUERY).matches;
 }
 
+function useAssistantViewportHeight() {
+  React.useEffect(() => {
+    const root = document.documentElement;
+    let frame = 0;
+
+    const syncHeight = () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        const visualHeight = window.visualViewport?.height;
+        const height = Number.isFinite(visualHeight) && visualHeight ? visualHeight : window.innerHeight;
+        root.style.setProperty('--assistant-viewport-height', `${Math.round(height)}px`);
+      });
+    };
+
+    syncHeight();
+    window.visualViewport?.addEventListener('resize', syncHeight);
+    window.visualViewport?.addEventListener('scroll', syncHeight);
+    window.addEventListener('resize', syncHeight);
+    window.addEventListener('orientationchange', syncHeight);
+
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      window.visualViewport?.removeEventListener('resize', syncHeight);
+      window.visualViewport?.removeEventListener('scroll', syncHeight);
+      window.removeEventListener('resize', syncHeight);
+      window.removeEventListener('orientationchange', syncHeight);
+      root.style.removeProperty('--assistant-viewport-height');
+    };
+  }, []);
+}
+
 function modelSelectionKey(selection: { provider: string; model: string; thinkingLevel: string }): string {
   return `${selection.provider}:${selection.model}:${selection.thinkingLevel}`;
 }
@@ -1113,6 +1145,8 @@ function chooseDefaultArtifact(artifacts: AssistantArtifactRecord[], preferredPa
 }
 
 function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: React.ReactNode }) {
+  useAssistantViewportHeight();
+
   const [dashboard, setDashboard] = React.useState<DashboardData | null>(null);
   const [assistantSnapshotData, setAssistantSnapshotData] = React.useState<AssistantSnapshot | null>(null);
   const [activeView, setActiveView] = React.useState<DashboardView>('threads');
@@ -3004,7 +3038,10 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   };
 
   return (
-    <main className="assistant-dock-shell relative flex h-screen min-h-0 overflow-hidden bg-[var(--panel-alt)] text-[var(--fg)] max-[880px]:h-dvh max-[880px]:flex-col">
+    <main
+      className="assistant-dock-shell relative flex min-h-0 w-full max-w-full overflow-hidden overflow-x-hidden bg-[var(--panel-alt)] text-[var(--fg)] max-[880px]:flex-col"
+      style={{ height: 'var(--assistant-viewport-height, 100dvh)' }}
+    >
       <button
         type="button"
         className={cn(
@@ -3509,7 +3546,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                 <div
                   ref={messagesScrollRef}
                   onScroll={(event) => updateMessagesStickToBottom(event.currentTarget)}
-                  className="flex min-h-0 flex-1 flex-col gap-2 overflow-auto bg-[#151a20] py-3"
+                  className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overflow-x-hidden bg-[#151a20] py-3"
                 >
                   {assistantRenderItems.map((item) =>
                     item.type === 'message' ? (
@@ -3580,8 +3617,8 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                   {!activeThread ? <div className={assistantEmptyClass}>Create a thread to start.</div> : null}
                 </div>
 
-                <form className="block shrink-0 bg-[#151a20] p-2 pt-1" onSubmit={(event) => void sendMessage(event)}>
-                <div className={cn('mb-1 flex min-w-0 flex-wrap items-center gap-1.5', !mobileModelControlsOpen && 'max-[620px]:hidden')}>
+                <form className="block w-full max-w-full shrink-0 overflow-hidden bg-[#151a20] px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-1" onSubmit={(event) => void sendMessage(event)}>
+                <div className={cn('mb-1 flex min-w-0 flex-wrap items-center gap-1.5 max-[620px]:grid max-[620px]:grid-cols-2 max-[620px]:items-stretch', !mobileModelControlsOpen && 'max-[620px]:hidden')}>
                   <div className="inline-flex shrink-0 overflow-hidden rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.025)]" role="group" aria-label="Assistant provider">
                     {providerOptions.map((provider) => {
                       const selected = provider.id === activeProvider;

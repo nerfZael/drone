@@ -106,7 +106,7 @@ export function UiMenuSelect({
   return (
     <div
       ref={menuRef}
-      className={cn('relative min-w-0', variant === 'toolbar' && 'shrink-0 basis-[132px]', open && 'is-open')}
+      className={cn('relative min-w-0', variant === 'toolbar' && 'shrink-0 basis-[132px] max-[620px]:basis-auto', open && 'is-open')}
     >
       <button
         type="button"
