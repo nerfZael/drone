@@ -340,6 +340,14 @@ export type CreditLedgerRecord = {
   createdAt: string;
 };
 
+export type UserCreditSummary = {
+  balanceMicrocredits: number;
+  grantedMicrocredits: number;
+  purchasedMicrocredits: number;
+  spentMicrocredits: number;
+  lastCreditAt: string | null;
+};
+
 export type AdminUserBillingSummary = {
   user: UserProfile;
   threadCount: number;
@@ -1442,6 +1450,30 @@ export class VoiceStreamNextDb {
       .query('SELECT COALESCE(SUM(amount_microcredits), 0) AS balance FROM credit_ledger WHERE user_id = $userId')
       .get({ $userId: userId }) as { balance?: number } | undefined;
     return Number(row?.balance ?? 0);
+  }
+
+  userCreditSummary(userId: string): UserCreditSummary {
+    const row = this.db
+      .query(
+        `
+        SELECT
+          COALESCE(SUM(amount_microcredits), 0) AS balance_microcredits,
+          COALESCE(SUM(CASE WHEN kind = 'grant' AND amount_microcredits > 0 THEN amount_microcredits ELSE 0 END), 0) AS granted_microcredits,
+          COALESCE(SUM(CASE WHEN kind = 'purchase' AND amount_microcredits > 0 THEN amount_microcredits ELSE 0 END), 0) AS purchased_microcredits,
+          COALESCE(SUM(CASE WHEN amount_microcredits < 0 THEN -amount_microcredits ELSE 0 END), 0) AS spent_microcredits,
+          MAX(created_at) AS last_credit_at
+        FROM credit_ledger
+        WHERE user_id = $userId
+      `,
+      )
+      .get({ $userId: userId }) as any;
+    return {
+      balanceMicrocredits: Number(row?.balance_microcredits ?? 0),
+      grantedMicrocredits: Number(row?.granted_microcredits ?? 0),
+      purchasedMicrocredits: Number(row?.purchased_microcredits ?? 0),
+      spentMicrocredits: Number(row?.spent_microcredits ?? 0),
+      lastCreditAt: row?.last_credit_at == null ? null : String(row.last_credit_at),
+    };
   }
 
   requirePositiveCreditBalance(userId: string, label = 'paid usage'): void {
@@ -4791,6 +4823,7 @@ export class VoiceStreamNextDb {
       pairingSessions,
       transcripts: this.listTranscripts(user.id, 40),
       clientStatuses: this.listClientStatuses(user.id),
+      credits: this.userCreditSummary(user.id),
       adminUsers: user.admin ? this.listAdminUsersWithBilling() : [],
       adminDevices: user.admin ? this.listDevices() : [],
       adminClientStatuses: user.admin ? this.listClientStatuses() : [],

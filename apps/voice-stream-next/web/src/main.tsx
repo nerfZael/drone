@@ -2913,6 +2913,15 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const threads = assistantThreads;
   const logs = dashboard?.logs ?? [];
   const adminUsers = dashboard?.adminUsers ?? [];
+  const userCredits = dashboard?.credits ?? {
+    balanceMicrocredits: 0,
+    grantedMicrocredits: 0,
+    purchasedMicrocredits: 0,
+    spentMicrocredits: 0,
+    lastCreditAt: null,
+  };
+  const creditBalanceLabel = formatCredits(userCredits.balanceMicrocredits);
+  const creditsSpentLabel = formatCredits(userCredits.spentMicrocredits);
   const assistantRecordings = voiceRecordings.filter((recording) => recording.mode === 'assistant');
   const clipboardRecordings = voiceRecordings.filter((recording) => recording.mode === 'clipboard');
   const speechPlayback = dashboard?.speechPlayback;
@@ -3392,6 +3401,13 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                 </button>
               ))}
             </div>
+            <span
+              className="inline-flex h-7 max-w-[9.5rem] shrink-0 items-center gap-1.5 rounded border border-[rgba(148,163,184,.24)] bg-white/[.035] px-2.5 text-[11px] font-semibold text-[var(--fg-secondary)] max-[760px]:hidden"
+              title={`Current credits: ${creditBalanceLabel}. Spent: ${creditsSpentLabel}.`}
+            >
+              <span className="text-[10px] uppercase text-[var(--muted)]">Credits</span>
+              <span className="truncate font-display text-[var(--fg)]">{creditBalanceLabel}</span>
+            </span>
             <span className="inline-flex h-7 items-center gap-1.5 rounded-full border border-[rgba(74,222,128,.18)] bg-[rgba(74,222,128,.06)] px-2.5 font-display text-[10px] font-semibold uppercase text-[var(--green)] before:h-1.5 before:w-1.5 before:rounded-full before:bg-current before:shadow-[0_0_12px_rgba(74,222,128,.34)]">Live</span>
             {identitySlot ? <div className="ml-0.5 flex h-7 w-7 shrink-0 items-center justify-center [&_button]:h-7 [&_button]:w-7">{identitySlot}</div> : null}
           </div>
@@ -3479,6 +3495,10 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                   {typeof item.count === 'number' ? <span className="text-[10px] uppercase text-[var(--muted)]">{item.count}</span> : null}
                 </button>
               ))}
+              <div className="flex min-h-9 items-center justify-between rounded border border-[var(--border-subtle)] bg-white/[.018] px-3 text-xs text-[var(--fg-secondary)]">
+                <span>Credits</span>
+                <span className="text-[10px] uppercase text-[var(--muted)]">{creditBalanceLabel}</span>
+              </div>
               <div className="flex min-h-9 items-center justify-between rounded border border-[var(--border-subtle)] bg-white/[.018] px-3 text-xs text-[var(--fg-secondary)]">
                 <span>Live</span>
                 {identitySlot ? <div className="flex h-7 w-7 shrink-0 items-center justify-center [&_button]:h-7 [&_button]:w-7">{identitySlot}</div> : <span className="text-[10px] uppercase text-[var(--muted)]">Connected</span>}

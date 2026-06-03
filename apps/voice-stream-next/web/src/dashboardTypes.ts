@@ -25,6 +25,14 @@ export type CreditLedgerRecord = {
   createdAt: string;
 };
 
+export type UserCreditSummary = {
+  balanceMicrocredits: number;
+  grantedMicrocredits: number;
+  purchasedMicrocredits: number;
+  spentMicrocredits: number;
+  lastCreditAt: string | null;
+};
+
 export type AdminUserBillingSummary = {
   user: UserProfile;
   threadCount: number;
@@ -455,6 +463,7 @@ export type DashboardData = {
   approvalCodes: { id: string; code: string; source: string; createdAt: string }[];
   devices: DeviceRecord[];
   pairingSessions: PairingSessionRecord[];
+  credits: UserCreditSummary;
   adminUsers: AdminUserBillingSummary[];
   adminDevices: DeviceRecord[];
   adminClientStatuses: ClientStatusRecord[];

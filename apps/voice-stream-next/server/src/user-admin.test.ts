@@ -125,6 +125,12 @@ describe('user admin bootstrap', () => {
     const summary = db.adminUserBillingSummary(user.id);
     expect(summary?.creditsSpentMicrocredits).toBe(700_000);
     expect(summary?.creditBalanceMicrocredits).toBe(9_300_000);
+    expect(db.userCreditSummary(user.id)).toMatchObject({
+      balanceMicrocredits: 9_300_000,
+      grantedMicrocredits: 10_000_000,
+      purchasedMicrocredits: 0,
+      spentMicrocredits: 700_000,
+    });
     expect(db.listBillableUsageEvents(user.id)).toHaveLength(1);
   });
 });
