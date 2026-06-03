@@ -35,6 +35,9 @@ export function createDevClient(user: DevUser): ApiClient {
     async stream(path: string, init?: RequestInit) {
       return fetch(path, withHeaders(init));
     },
+    async upload(path: string, init: RequestInit, onProgress) {
+      return uploadWithProgress(path, withHeaders(init), onProgress);
+    },
   };
 }
 
@@ -53,6 +56,9 @@ export function createClerkClient(getToken: () => Promise<string | null>): ApiCl
     async stream(path: string, init?: RequestInit) {
       return fetch(path, await withHeaders(init));
     },
+    async upload(path: string, init: RequestInit, onProgress) {
+      return uploadWithProgress(path, await withHeaders(init), onProgress);
+    },
   };
 }
 
@@ -63,6 +69,9 @@ export function createCookieClient(): ApiClient {
     },
     async stream(path: string, init?: RequestInit) {
       return fetch(path, withCookieHeaders(init));
+    },
+    async upload(path: string, init: RequestInit, onProgress) {
+      return uploadWithProgress(path, withCookieHeaders(init), onProgress);
     },
   };
 }
@@ -86,4 +95,50 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (!response.ok) throw new Error(data?.error ?? `${response.status} ${response.statusText}`);
   return data as T;
+}
+
+function uploadWithProgress(
+  path: string,
+  init: RequestInit,
+  onProgress?: (progress: { loaded: number; total: number | null }) => void,
+): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(init.method || 'POST', path, true);
+    xhr.withCredentials = init.credentials === 'include';
+
+    const headers = new Headers(init.headers);
+    headers.forEach((value, key) => xhr.setRequestHeader(key, value));
+
+    xhr.upload.onprogress = (event) => {
+      onProgress?.({
+        loaded: event.loaded,
+        total: event.lengthComputable ? event.total : null,
+      });
+    };
+    xhr.onerror = () => reject(new Error(`Upload failed for ${path}`));
+    xhr.ontimeout = () => reject(new Error(`Upload timed out for ${path}`));
+    xhr.onabort = () => reject(new Error(`Upload aborted for ${path}`));
+    xhr.onload = () => {
+      const responseHeaders = parseResponseHeaders(xhr.getAllResponseHeaders());
+      resolve(new Response(xhr.responseText, {
+        status: xhr.status,
+        statusText: xhr.statusText,
+        headers: responseHeaders,
+      }));
+    };
+
+    xhr.send(init.body as XMLHttpRequestBodyInit | null | undefined);
+  });
+}
+
+function parseResponseHeaders(raw: string): Headers {
+  const headers = new Headers();
+  for (const line of raw.trim().split(/\r?\n/)) {
+    if (!line) continue;
+    const index = line.indexOf(':');
+    if (index <= 0) continue;
+    headers.append(line.slice(0, index).trim(), line.slice(index + 1).trim());
+  }
+  return headers;
 }

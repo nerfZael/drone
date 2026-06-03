@@ -1182,6 +1182,13 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const [loading, setLoading] = React.useState(true);
   const [busy, setBusy] = React.useState(false);
   const [toasts, setToasts] = React.useState<AppToast[]>([]);
+  const [releaseUploadProgress, setReleaseUploadProgress] = React.useState<{
+    platform: 'android' | 'desktop';
+    fileName: string;
+    loaded: number;
+    total: number | null;
+    phase: 'uploading' | 'processing';
+  } | null>(null);
   const [messageDraft, setMessageDraft] = React.useState('');
   const [threadTitleDraft, setThreadTitleDraft] = React.useState('');
   const [threadDeleteCandidate, setThreadDeleteCandidate] = React.useState<AssistantThread | null>(null);
@@ -2705,6 +2712,16 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     return data as T;
   }
 
+  function setUploadProgress(platform: 'android' | 'desktop', artifact: File, progress: { loaded: number; total: number | null }) {
+    setReleaseUploadProgress({
+      platform,
+      fileName: artifact.name,
+      loaded: progress.loaded,
+      total: progress.total,
+      phase: 'uploading',
+    });
+  }
+
   async function parseReleaseMetadataFile(file: File): Promise<Record<string, unknown>> {
     let metadata: any = null;
     try {
@@ -2813,8 +2830,9 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     setError(null);
     try {
       setAdminAndroidFile(artifact);
+      setReleaseUploadProgress({ platform: 'android', fileName: artifact.name, loaded: 0, total: artifact.size || null, phase: 'uploading' });
       const path = '/api/admin/releases/android';
-      const response = await client.stream(path, {
+      const response = await client.upload(path, {
         method: 'PUT',
         headers: {
           'content-type': artifact.type || 'application/vnd.android.package-archive',
@@ -2822,7 +2840,8 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
           'x-voice-release-metadata': JSON.stringify(metadata),
         },
         body: artifact,
-      });
+      }, (progress) => setUploadProgress('android', artifact, progress));
+      setReleaseUploadProgress((current) => current?.platform === 'android' ? { ...current, loaded: current.total ?? artifact.size, phase: 'processing' } : current);
       const data = await parseUploadResponse<{ ok: true; android: AndroidApkInfo }>(response, path);
       setAndroidApkInfo(data.android);
       await refreshAndroidSetup();
@@ -2832,6 +2851,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
       setError(err?.message ?? String(err));
     } finally {
       setBusy(false);
+      setReleaseUploadProgress(null);
     }
   }
 
@@ -2845,8 +2865,9 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     setError(null);
     try {
       setAdminDesktopFile(artifact);
+      setReleaseUploadProgress({ platform: 'desktop', fileName: artifact.name, loaded: 0, total: artifact.size || null, phase: 'uploading' });
       const path = '/api/admin/releases/desktop';
-      const response = await client.stream(path, {
+      const response = await client.upload(path, {
         method: 'PUT',
         headers: {
           'content-type': artifact.type || 'application/octet-stream',
@@ -2854,7 +2875,8 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
           'x-voice-release-metadata': JSON.stringify(metadata),
         },
         body: artifact,
-      });
+      }, (progress) => setUploadProgress('desktop', artifact, progress));
+      setReleaseUploadProgress((current) => current?.platform === 'desktop' ? { ...current, loaded: current.total ?? artifact.size, phase: 'processing' } : current);
       const data = await parseUploadResponse<{ ok: true; desktop: DesktopAppInfo }>(response, path);
       setDesktopAppInfo(data.desktop);
       await loadDashboard();
@@ -2863,6 +2885,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
       setError(err?.message ?? String(err));
     } finally {
       setBusy(false);
+      setReleaseUploadProgress(null);
     }
   }
 
@@ -4777,6 +4800,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                         <span className="font-display text-[10px] font-bold uppercase text-[var(--fg-secondary)]">{busy ? 'Uploading...' : 'Drop desktop build folder or archive + latest.json'}</span>
                         <small className="max-w-full truncate text-[11px] text-[var(--muted)]">{adminDesktopFile ? `${adminDesktopFile.name} / ${formatBytes(adminDesktopFile.size)}` : 'Click to choose the archive and companion latest.json'}</small>
                         <small className="text-[10px] text-[var(--muted-dim)]">Current: {appDownloadMeta(desktopAppInfo)}</small>
+                        {releaseUploadProgress?.platform === 'desktop' ? <ReleaseUploadProgress progress={releaseUploadProgress} /> : null}
                       </label>
                     </section>
 
@@ -4803,6 +4827,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                         <span className="font-display text-[10px] font-bold uppercase text-[var(--fg-secondary)]">{busy ? 'Uploading...' : 'Drop Android build folder or APK + metadata'}</span>
                         <small className="max-w-full truncate text-[11px] text-[var(--muted)]">{adminAndroidFile ? `${adminAndroidFile.name} / ${formatBytes(adminAndroidFile.size)}` : 'Click to choose the APK and latest.json or output-metadata.json'}</small>
                         <small className="text-[10px] text-[var(--muted-dim)]">Current: {appDownloadMeta(androidApkInfo)}</small>
+                        {releaseUploadProgress?.platform === 'android' ? <ReleaseUploadProgress progress={releaseUploadProgress} /> : null}
                       </label>
                     </section>
                   </div>
@@ -5912,6 +5937,42 @@ function appDownloadMeta(info: AndroidApkInfo | DesktopAppInfo | null): string {
     info.size ? formatBytes(info.size) : null,
   ].filter(Boolean);
   return parts.join(' / ') || 'Ready';
+}
+
+function ReleaseUploadProgress({
+  progress,
+}: {
+  progress: {
+    platform: 'android' | 'desktop';
+    fileName: string;
+    loaded: number;
+    total: number | null;
+    phase: 'uploading' | 'processing';
+  };
+}) {
+  const percent = progress.total ? Math.min(100, Math.max(0, Math.round((progress.loaded / progress.total) * 100))) : null;
+  const label = progress.phase === 'processing'
+    ? 'Processing upload'
+    : percent == null
+      ? `Uploading ${formatBytes(progress.loaded)}`
+      : `Uploading ${percent}%`;
+  return (
+    <div className="grid w-full max-w-[320px] gap-1 text-left">
+      <div className="flex min-w-0 items-center justify-between gap-2 text-[10px] text-[var(--muted)]">
+        <span className="min-w-0 truncate">{label}</span>
+        <span className="shrink-0">
+          {progress.total ? `${formatBytes(progress.loaded)} / ${formatBytes(progress.total)}` : formatBytes(progress.loaded)}
+        </span>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded bg-white/[.08]">
+        <div
+          className="h-full rounded bg-[var(--green)] transition-[width] duration-150"
+          style={{ width: `${progress.phase === 'processing' ? 100 : percent ?? 12}%` }}
+        />
+      </div>
+      <small className="max-w-full truncate text-[10px] text-[var(--muted-dim)]">{progress.fileName}</small>
+    </div>
+  );
 }
 
 function DownloadPlatformIcon({ platform }: { platform: 'desktop' | 'android' }) {

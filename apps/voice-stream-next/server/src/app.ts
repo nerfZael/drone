@@ -308,6 +308,14 @@ function parseHeaderInteger(raw: unknown): number | null {
   return Number.isInteger(value) && value >= 0 ? value : null;
 }
 
+function releaseUploadPlatformForRequest(req: FastifyRequest): 'android' | 'desktop' | null {
+  if (req.method.toUpperCase() !== 'PUT') return null;
+  const pathOnly = req.url.split('?')[0];
+  if (pathOnly === '/api/admin/releases/android') return 'android';
+  if (pathOnly === '/api/admin/releases/desktop') return 'desktop';
+  return null;
+}
+
 function publicUrlForPath(req: FastifyRequest, urlPath: string): string {
   return `${serverPublicUrl(req)}${urlPath.startsWith('/') ? urlPath : `/${urlPath}`}`;
 }
@@ -736,6 +744,20 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
   const port = parsePort(process.env.PORT ?? process.env.VOICE_STREAM_NEXT_API_PORT, 3299);
 
   db.clearAssistantExtensionManifests();
+
+  app.addHook('onRequest', async (req) => {
+    const platform = releaseUploadPlatformForRequest(req);
+    if (!platform) return;
+    const uploadLog = releaseUploadLogDetails(req, platform);
+    req.log.info(uploadLog, `${platform === 'android' ? 'Android' : 'Desktop'} release upload started`);
+    req.raw.once('aborted', () => {
+      req.log.warn(uploadLog, `${platform === 'android' ? 'Android' : 'Desktop'} release upload aborted while reading request body`);
+    });
+    req.raw.once('close', () => {
+      if (req.raw.complete || req.raw.destroyed) return;
+      req.log.warn(uploadLog, `${platform === 'android' ? 'Android' : 'Desktop'} release upload connection closed before request completed`);
+    });
+  });
 
   setAssistantExternalToolExecutor(async (input) => {
     if (input.route?.targetKind === 'server') {
