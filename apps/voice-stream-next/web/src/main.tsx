@@ -42,10 +42,15 @@ import type {
 import { exactTimeLabel, relativeTimeAgo, timeLabel } from './time.js';
 import { AssistantFilesPanel, type ArtifactPanelMode } from './assistant/AssistantFilesPanel.js';
 import { AssistantSystemPromptModal, type AssistantSystemPromptMode } from './assistant/AssistantSystemPromptModal.js';
+import { AdminPage } from './admin/AdminPage.js';
+import { dashboardRoutePath, parseDashboardRoute, SETTINGS_PANES, type SettingsPane } from './dashboardRoutes.js';
+import { AppDownloadLinks } from './downloads/AppDownloadLinks.js';
+import { SettingsPage } from './settings/SettingsPage.js';
 import { cn } from './ui/cn.js';
 import { CircuitRobotLoader } from './ui/CircuitRobotLoader.js';
 import { MarkdownMessage } from './ui/MarkdownMessage.js';
 import { UiMenuSelect, type UiMenuSelectEntry } from './ui/MenuSelect.js';
+import { formatBytes } from './utils/format.js';
 import './styles.css';
 
 const publishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined;
@@ -63,7 +68,6 @@ const ASSISTANT_PROVIDERS: Array<{ id: 'codex' | 'openai'; label: string; title:
 
 type AssistantApiKeyProvider = 'openai' | 'exa';
 type AssistantSettingsPromptField = 'voiceSystemPrompt';
-type SettingsPane = 'devices' | 'assistant' | 'assistant-config' | 'skills' | 'voice' | 'recordings' | 'activity';
 type AssistantSkillDraft = {
   id: string | null;
   slug: string;
@@ -99,16 +103,6 @@ type AppEvent = {
 };
 type SseMessage = { event: string; data: unknown };
 
-const SETTINGS_PANES: Array<{ id: SettingsPane; label: string }> = [
-  { id: 'devices', label: 'Devices' },
-  { id: 'assistant', label: 'Assistants' },
-  { id: 'assistant-config', label: 'Assistant Config' },
-  { id: 'skills', label: 'Skills' },
-  { id: 'voice', label: 'Voice' },
-  { id: 'recordings', label: 'Recordings' },
-  { id: 'activity', label: 'Activity' },
-];
-
 const assistantIconButtonClass =
   'relative flex h-7 w-7 shrink-0 items-center justify-center rounded border border-[var(--border-subtle)] bg-white/[.02] p-0 text-[var(--muted)] transition hover:bg-white/[.05] hover:text-[var(--fg-secondary)] disabled:pointer-events-none disabled:opacity-50';
 const assistantIconButtonActiveClass = '!border-[rgba(74,222,128,.28)] !bg-[rgba(74,222,128,.08)] !text-[var(--green)]';
@@ -126,10 +120,6 @@ const assistantFieldLabelClass = 'grid gap-1.5 text-[10px] font-extrabold upperc
 const assistantRowClass = 'rounded-[7px] border border-[var(--border-subtle)] bg-white/[.025] text-[var(--fg-secondary)]';
 const assistantSkillBadgeClass =
   'inline-flex max-w-[130px] items-center rounded border border-[rgba(74,222,128,.22)] bg-[rgba(74,222,128,.07)] px-1.5 py-0.5 font-display text-[9px] font-semibold uppercase leading-none text-[var(--green)]';
-const settingsTabClass =
-  'relative -mb-px inline-flex h-8 items-center justify-center rounded-t-md border border-[var(--border-subtle)] border-b-transparent bg-black/[.12] px-3 font-display text-[10px] font-semibold uppercase text-[var(--muted)] shadow-none transition hover:bg-white/[.04] hover:text-[var(--fg-secondary)]';
-const settingsTabActiveClass =
-  'border-[rgba(74,222,128,.30)] border-b-[var(--panel-alt)] bg-[rgba(74,222,128,.08)] text-[var(--green)]';
 const ASSISTANT_MESSAGES_BOTTOM_THRESHOLD_PX = 1;
 const COMPACT_VIEWPORT_QUERY = '(max-width: 880px)';
 
@@ -1147,10 +1137,11 @@ function chooseDefaultArtifact(artifacts: AssistantArtifactRecord[], preferredPa
 function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: React.ReactNode }) {
   useAssistantViewportHeight();
 
+  const initialRouteRef = React.useRef(parseDashboardRoute(window.location.pathname));
   const [dashboard, setDashboard] = React.useState<DashboardData | null>(null);
   const [assistantSnapshotData, setAssistantSnapshotData] = React.useState<AssistantSnapshot | null>(null);
-  const [activeView, setActiveView] = React.useState<DashboardView>('threads');
-  const [settingsPane, setSettingsPane] = React.useState<SettingsPane>('devices');
+  const [activeView, setActiveViewState] = React.useState<DashboardView>(initialRouteRef.current.view);
+  const [settingsPane, setSettingsPaneState] = React.useState<SettingsPane>(initialRouteRef.current.settingsPane);
   const [threadSidebarOpen, setThreadSidebarOpen] = React.useState(() => !isCompactViewport());
   const [mobileToolbarOpen, setMobileToolbarOpen] = React.useState(false);
   const [mobileModelControlsOpen, setMobileModelControlsOpen] = React.useState(false);
@@ -1240,9 +1231,40 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const activeThreadIdRef = React.useRef<string | null>(null);
   const messageDraftRef = React.useRef('');
 
+  const replaceDashboardRoute = React.useCallback((view: DashboardView, pane: SettingsPane) => {
+    const path = dashboardRoutePath(view, pane);
+    if (window.location.pathname !== path) window.history.replaceState({}, '', path);
+  }, []);
+
+  const pushDashboardRoute = React.useCallback((view: DashboardView, pane: SettingsPane) => {
+    const path = dashboardRoutePath(view, pane);
+    if (window.location.pathname !== path) window.history.pushState({}, '', path);
+  }, []);
+
+  const setActiveView = React.useCallback((view: DashboardView) => {
+    setActiveViewState(view);
+    pushDashboardRoute(view, settingsPane);
+  }, [pushDashboardRoute, settingsPane]);
+
+  const setSettingsPane = React.useCallback((pane: SettingsPane) => {
+    setSettingsPaneState(pane);
+    if (activeView === 'settings') pushDashboardRoute('settings', pane);
+  }, [activeView, pushDashboardRoute]);
+
   const selectActiveThread = React.useCallback((threadId: string | null) => {
     activeThreadIdRef.current = threadId;
     setActiveThreadId(threadId);
+  }, []);
+
+  React.useEffect(() => {
+    replaceDashboardRoute(activeView, settingsPane);
+    const handlePopState = () => {
+      const route = parseDashboardRoute(window.location.pathname);
+      setActiveViewState(route.view);
+      setSettingsPaneState(route.settingsPane);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
   React.useEffect(() => {
@@ -2788,47 +2810,6 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     return { artifact, metadata };
   }
 
-  function fileList(files: FileList | File[] | null | undefined): File[] {
-    return Array.from(files ?? []);
-  }
-
-  type DroppedEntry = {
-    isFile: boolean;
-    isDirectory: boolean;
-    file?: (success: (file: File) => void, failure?: (error: unknown) => void) => void;
-    createReader?: () => {
-      readEntries: (success: (entries: DroppedEntry[]) => void, failure?: (error: unknown) => void) => void;
-    };
-  };
-
-  async function filesFromEntry(entry: DroppedEntry): Promise<File[]> {
-    if (entry.isFile && entry.file) {
-      return new Promise((resolve, reject) => entry.file?.((file) => resolve([file]), reject));
-    }
-    if (!entry.isDirectory || !entry.createReader) return [];
-    const reader = entry.createReader();
-    const entries: DroppedEntry[] = [];
-    for (;;) {
-      const batch = await new Promise<DroppedEntry[]>((resolve, reject) => reader.readEntries(resolve, reject));
-      if (batch.length === 0) break;
-      entries.push(...batch);
-    }
-    const nested = await Promise.all(entries.map((child) => filesFromEntry(child)));
-    return nested.flat();
-  }
-
-  async function filesFromDrop(dataTransfer: DataTransfer): Promise<File[]> {
-    const itemEntries = Array.from(dataTransfer.items ?? [])
-      .map((item) => {
-        const getter = (item as DataTransferItem & { webkitGetAsEntry?: () => DroppedEntry | null }).webkitGetAsEntry;
-        return getter ? getter.call(item) : null;
-      })
-      .filter((entry): entry is DroppedEntry => Boolean(entry));
-    if (itemEntries.length === 0) return fileList(dataTransfer.files);
-    const nested = await Promise.all(itemEntries.map((entry) => filesFromEntry(entry)));
-    return nested.flat();
-  }
-
   async function uploadAndroidReleaseFiles(files: File[]) {
     const { artifact, metadata } = await releaseFiles(files, 'android');
     if (!artifact || !metadata) {
@@ -2900,11 +2881,6 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
       setBusy(false);
       setReleaseUploadProgress(null);
     }
-  }
-
-  async function droppedFiles(event: React.DragEvent<HTMLElement>): Promise<File[]> {
-    event.preventDefault();
-    return filesFromDrop(event.dataTransfer);
   }
 
   if (loading) {
@@ -3806,37 +3782,12 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
           ) : null}
 
           {activeView === 'settings' ? (
-            <section className="flex h-full min-h-0 flex-col">
-              <div className="shrink-0 bg-[var(--panel-alt)] px-3 pt-3">
-                <div className="hidden pb-1 max-[620px]:block">
-                <UiMenuSelect
-                  value={settingsPane}
-                  entries={settingsPaneEntries}
-                  placement="below"
-                  title={`Settings pane: ${activeSettingsPaneLabel}`}
-                  triggerLabel={activeSettingsPaneLabel}
-                  triggerClassName="h-9 border-[var(--border)] bg-white/[.025] text-[var(--fg-secondary)]"
-                  panelClassName="w-full"
-                  menuClassName="max-h-[320px]"
-                  onValueChange={(value) => setSettingsPane(value as SettingsPane)}
-                />
-                </div>
-                <div className="flex w-full flex-nowrap items-end gap-1 overflow-x-auto bg-[var(--panel-alt)] pt-0 pb-1 max-[620px]:hidden">
-                  {SETTINGS_PANES.map((pane) => (
-                    <button
-                      key={pane.id}
-                      type="button"
-                      className={cn(settingsTabClass, settingsPane === pane.id && settingsTabActiveClass)}
-                      aria-pressed={settingsPane === pane.id}
-                      onClick={() => setSettingsPane(pane.id)}
-                    >
-                      {pane.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="grid min-h-0 flex-1 content-start gap-3 overflow-y-auto p-3">
+            <SettingsPage
+              settingsPane={settingsPane}
+              settingsPaneEntries={settingsPaneEntries}
+              activeSettingsPaneLabel={activeSettingsPaneLabel}
+              onSettingsPaneChange={setSettingsPane}
+            >
                 {settingsPane === 'devices' ? (
                 <>
                   <section className={assistantPanelClass}>
@@ -4771,112 +4722,21 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                   </div>
                 </section>
                 ) : null}
-              </div>
-            </section>
+            </SettingsPage>
           ) : null}
 
-          {activeView === 'admin' ? (
-            dashboard?.user.admin ? (
-              <section className="grid min-h-0 gap-3 overflow-auto p-3">
-                <section className={assistantPanelClass}>
-                  <div className={assistantPanelHeaderClass}>
-                    <div>
-                      <span className={assistantKickerClass}>Admin</span>
-                      <h2 className={assistantPanelTitleClass}>App Releases</h2>
-                    </div>
-                  </div>
-                  <div className="mb-3 grid gap-2 rounded border border-[var(--border-subtle)] bg-white/[.02] p-3">
-                    <span className={assistantKickerClass}>Current downloads</span>
-                    <AppDownloadLinks androidInfo={androidApkInfo} desktopInfo={desktopAppInfo} />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3 max-[880px]:grid-cols-1">
-                    <section className="grid gap-2.5 rounded border border-[var(--border-subtle)] bg-white/[.02] p-3">
-                      <div>
-                        <span className={assistantKickerClass}>Desktop</span>
-                        <h3 className="m-0 mt-1 text-sm leading-tight text-[var(--fg)]">Upload desktop app</h3>
-                      </div>
-                      <label
-                        className={cn(
-                          'grid min-h-[132px] cursor-pointer place-items-center gap-2 rounded border border-dashed border-[var(--border)] bg-black/[.12] p-4 text-center transition hover:border-[rgba(167,139,250,.52)] hover:bg-white/[.035]',
-                          busy && 'pointer-events-none opacity-50',
-                        )}
-                        onDragOver={(event) => event.preventDefault()}
-                        onDrop={(event) => void droppedFiles(event).then((files) => uploadDesktopReleaseFiles(files))}
-                      >
-                        <input
-                          type="file"
-                          className="hidden"
-                          multiple
-                          accept=".tar.gz,.tgz,.zip,.dmg,.exe,.AppImage,.json,application/gzip,application/zip,application/json"
-                          onChange={(event) => void uploadDesktopReleaseFiles(fileList(event.currentTarget.files))}
-                        />
-                        <span className="font-display text-[10px] font-bold uppercase text-[var(--fg-secondary)]">{busy ? 'Uploading...' : 'Drop desktop build folder or archive + latest.json'}</span>
-                        <small className="max-w-full truncate text-[11px] text-[var(--muted)]">{adminDesktopFile ? `${adminDesktopFile.name} / ${formatBytes(adminDesktopFile.size)}` : 'Click to choose the archive and companion latest.json'}</small>
-                        <small className="text-[10px] text-[var(--muted-dim)]">Current: {appDownloadMeta(desktopAppInfo)}</small>
-                        {releaseUploadProgress?.platform === 'desktop' ? <ReleaseUploadProgress progress={releaseUploadProgress} /> : null}
-                      </label>
-                    </section>
-
-                    <section className="grid gap-2.5 rounded border border-[var(--border-subtle)] bg-white/[.02] p-3">
-                      <div>
-                        <span className={assistantKickerClass}>Android</span>
-                        <h3 className="m-0 mt-1 text-sm leading-tight text-[var(--fg)]">Upload Android APK</h3>
-                      </div>
-                      <label
-                        className={cn(
-                          'grid min-h-[132px] cursor-pointer place-items-center gap-2 rounded border border-dashed border-[var(--border)] bg-black/[.12] p-4 text-center transition hover:border-[rgba(167,139,250,.52)] hover:bg-white/[.035]',
-                          busy && 'pointer-events-none opacity-50',
-                        )}
-                        onDragOver={(event) => event.preventDefault()}
-                        onDrop={(event) => void droppedFiles(event).then((files) => uploadAndroidReleaseFiles(files))}
-                      >
-                        <input
-                          type="file"
-                          className="hidden"
-                          multiple
-                          accept=".apk,.json,application/vnd.android.package-archive,application/json"
-                          onChange={(event) => void uploadAndroidReleaseFiles(fileList(event.currentTarget.files))}
-                        />
-                        <span className="font-display text-[10px] font-bold uppercase text-[var(--fg-secondary)]">{busy ? 'Uploading...' : 'Drop Android build folder or APK + metadata'}</span>
-                        <small className="max-w-full truncate text-[11px] text-[var(--muted)]">{adminAndroidFile ? `${adminAndroidFile.name} / ${formatBytes(adminAndroidFile.size)}` : 'Click to choose the APK and latest.json or output-metadata.json'}</small>
-                        <small className="text-[10px] text-[var(--muted-dim)]">Current: {appDownloadMeta(androidApkInfo)}</small>
-                        {releaseUploadProgress?.platform === 'android' ? <ReleaseUploadProgress progress={releaseUploadProgress} /> : null}
-                      </label>
-                    </section>
-                  </div>
-                </section>
-
-                <section className={assistantPanelClass}>
-                  <div className={assistantPanelHeaderClass}>
-                    <div>
-                      <span className={assistantKickerClass}>Admin</span>
-                      <h2 className={assistantPanelTitleClass}>Device Monitor</h2>
-                    </div>
-                  </div>
-                  <div className="grid gap-2">
-                    {dashboard.adminDevices.map((device) => (
-                      <article key={device.id} className={cn(assistantRowClass, 'grid grid-cols-[minmax(0,1fr)_120px_140px_auto] items-center gap-2 p-2 max-[620px]:grid-cols-1')}>
-                        <strong className="min-w-0 text-xs text-[var(--fg)]">{device.displayName}</strong>
-                        <span className="text-xs text-[var(--muted)]">{device.deviceType}</span>
-                        <span className="text-xs text-[var(--muted)]">token {device.tokenHint}...</span>
-                        <time className="text-xs text-[var(--muted)]">{timeLabel(device.lastSeenAt)}</time>
-                      </article>
-                    ))}
-                    {dashboard.adminClientStatuses.map((status) => (
-                      <article key={`admin-status-${status.deviceId}`} className="grid grid-cols-[minmax(0,1fr)_120px_140px_auto] items-center gap-2 rounded-[7px] border border-[rgba(74,222,128,.18)] bg-[rgba(74,222,128,.06)] p-2 text-[var(--fg-secondary)] max-[620px]:grid-cols-1">
-                        <strong className="min-w-0 text-xs text-[var(--fg)]">{status.displayName}</strong>
-                        <span className="text-xs text-[var(--muted)]">{status.mode}</span>
-                        <span className="text-xs text-[var(--muted)]">{status.microphone || status.status}</span>
-                        <time className="text-xs text-[var(--muted)]">{timeLabel(status.updatedAt)}</time>
-                      </article>
-                    ))}
-                    {dashboard.adminDevices.length === 0 ? <div className={assistantEmptyClass}>No connected devices yet.</div> : null}
-                  </div>
-                </section>
-              </section>
-            ) : (
-              <div className={assistantEmptyClass}>Admin access required.</div>
-            )
+          {activeView === 'admin' && dashboard ? (
+            <AdminPage
+              dashboard={dashboard}
+              androidInfo={androidApkInfo}
+              desktopInfo={desktopAppInfo}
+              androidFile={adminAndroidFile}
+              desktopFile={adminDesktopFile}
+              releaseUploadProgress={releaseUploadProgress}
+              busy={busy}
+              onUploadAndroid={(files) => void uploadAndroidReleaseFiles(files)}
+              onUploadDesktop={(files) => void uploadDesktopReleaseFiles(files)}
+            />
           ) : null}
         </section>
       </section>
@@ -5920,15 +5780,6 @@ function ToastStack({ toasts, onDismiss }: { toasts: AppToast[]; onDismiss: (id:
   );
 }
 
-function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
-  if (bytes < 1024) return `${bytes} B`;
-  const kb = bytes / 1024;
-  if (kb < 1024) return `${kb.toFixed(kb >= 10 ? 0 : 1)} KB`;
-  const mb = kb / 1024;
-  return `${mb.toFixed(mb >= 10 ? 0 : 1)} MB`;
-}
-
 function formatDurationMs(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return '0s';
   const totalSeconds = Math.round(ms / 1000);
@@ -5940,123 +5791,6 @@ function formatDurationMs(ms: number): string {
 function recordingAudioUrl(recordingId: string, download = false): string {
   const query = download ? '?download=1' : '';
   return `/api/voice/recordings/${encodeURIComponent(recordingId)}/audio${query}`;
-}
-
-function appDownloadMeta(info: AndroidApkInfo | DesktopAppInfo | null): string {
-  if (!info?.available) return 'Not built yet';
-  const parts = [
-    info.variant,
-    'versionName' in info ? info.versionName ?? info.versionCode : null,
-    info.size ? formatBytes(info.size) : null,
-  ].filter(Boolean);
-  return parts.join(' / ') || 'Ready';
-}
-
-function ReleaseUploadProgress({
-  progress,
-}: {
-  progress: {
-    platform: 'android' | 'desktop';
-    fileName: string;
-    loaded: number;
-    total: number | null;
-    phase: 'uploading' | 'processing';
-  };
-}) {
-  const percent = progress.total ? Math.min(100, Math.max(0, Math.round((progress.loaded / progress.total) * 100))) : null;
-  const label = progress.phase === 'processing'
-    ? 'Processing upload'
-    : percent == null
-      ? `Uploading ${formatBytes(progress.loaded)}`
-      : `Uploading ${percent}%`;
-  return (
-    <div className="grid w-full max-w-[320px] gap-1 text-left">
-      <div className="flex min-w-0 items-center justify-between gap-2 text-[10px] text-[var(--muted)]">
-        <span className="min-w-0 truncate">{label}</span>
-        <span className="shrink-0">
-          {progress.total ? `${formatBytes(progress.loaded)} / ${formatBytes(progress.total)}` : formatBytes(progress.loaded)}
-        </span>
-      </div>
-      <div className="h-1.5 overflow-hidden rounded bg-white/[.08]">
-        <div
-          className="h-full rounded bg-[var(--green)] transition-[width] duration-150"
-          style={{ width: `${progress.phase === 'processing' ? 100 : percent ?? 12}%` }}
-        />
-      </div>
-      <small className="max-w-full truncate text-[10px] text-[var(--muted-dim)]">{progress.fileName}</small>
-    </div>
-  );
-}
-
-function DownloadPlatformIcon({ platform }: { platform: 'desktop' | 'android' }) {
-  if (platform === 'android') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true" className="download-link-icon">
-        <rect x="7" y="3" width="10" height="18" rx="2.2" />
-        <path d="M10 18h4" />
-      </svg>
-    );
-  }
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="download-link-icon">
-      <rect x="4" y="5" width="16" height="11" rx="1.8" />
-      <path d="M9 20h6" />
-      <path d="M12 16v4" />
-    </svg>
-  );
-}
-
-function AppDownloadLinks({
-  androidInfo,
-  desktopInfo,
-  loading = false,
-}: {
-  androidInfo: AndroidApkInfo | null;
-  desktopInfo: DesktopAppInfo | null;
-  loading?: boolean;
-}) {
-  const entries = [
-    {
-      platform: 'desktop' as const,
-      label: 'Desktop app',
-      action: 'Download for Linux',
-      info: desktopInfo,
-      href: desktopInfo?.available ? desktopInfo.downloadUrl : null,
-    },
-    {
-      platform: 'android' as const,
-      label: 'Android app',
-      action: 'Download APK',
-      info: androidInfo,
-      href: androidInfo?.available ? androidInfo.downloadUrl : null,
-    },
-  ];
-  return (
-    <div className="download-links" aria-label="App downloads">
-      {entries.map((entry) => {
-        const meta = loading && !entry.info ? 'Checking...' : appDownloadMeta(entry.info);
-        const content = (
-          <>
-            <DownloadPlatformIcon platform={entry.platform} />
-            <span className="download-link-copy">
-              <span className="download-link-label">{entry.label}</span>
-              <strong>{entry.href ? entry.action : 'Unavailable'}</strong>
-              <small>{meta}</small>
-            </span>
-          </>
-        );
-        return entry.href ? (
-          <a key={entry.label} className="download-link" href={entry.href} aria-label={`${entry.action}: ${meta}`}>
-            {content}
-          </a>
-        ) : (
-          <span key={entry.label} className="download-link is-disabled" aria-disabled="true">
-            {content}
-          </span>
-        );
-      })}
-    </div>
-  );
 }
 
 function SignedOutDownloadLinks() {
