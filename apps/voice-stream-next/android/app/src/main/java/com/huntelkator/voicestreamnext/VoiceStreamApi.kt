@@ -295,9 +295,7 @@ class VoiceStreamApi(private val context: Context) {
                 .getJSONObject("device")
             val returnedDeviceId = device.optString("id")
             val displayName = device.optString("displayName")
-            if (returnedDeviceId.isNotBlank() && returnedDeviceId != deviceId) {
-                savePairing(DevicePairing(returnedDeviceId, token), displayName.ifBlank { Constants.DEFAULT_DEVICE_NAME })
-            }
+            rememberReturnedDevice(device, deviceId, token)
             return displayName
         }
     }
@@ -410,7 +408,7 @@ class VoiceStreamApi(private val context: Context) {
     }
 
     fun voiceApprovalSettings(): VoiceApprovalSettings {
-        val json = request("GET", "/api/settings/voice-approval")
+        val json = voiceApprovalSettingsJson()
         val settings = json.getJSONObject("settings")
         val profileArray = settings.optJSONArray("assistantProfiles") ?: json.optJSONArray("assistantProfiles")
         return VoiceApprovalSettings(
@@ -430,6 +428,27 @@ class VoiceStreamApi(private val context: Context) {
             finalizeCheckIntervalMs = settings.optLong("finalizeCheckIntervalMs", 250).coerceIn(100, 1_000),
             postPromptCommandSuppressionMs = settings.optLong("postPromptCommandSuppressionMs", 1_800).coerceIn(0, 5_000),
             assistantProfiles = parseAssistantVoiceProfiles(profileArray),
+        )
+    }
+
+    private fun voiceApprovalSettingsJson(): JSONObject {
+        val deviceId = pairedDeviceId()
+        val token = pairedDeviceToken()
+        return if (deviceId.isNotBlank() && token.isNotBlank()) {
+            deviceRequest("GET", "/api/devices/$deviceId/bootstrap").also { json ->
+                rememberReturnedDevice(json.optJSONObject("device"), deviceId, token)
+            }
+        } else {
+            request("GET", "/api/settings/voice-approval")
+        }
+    }
+
+    private fun rememberReturnedDevice(device: JSONObject?, currentDeviceId: String, token: String) {
+        val returnedDeviceId = device?.optString("id").orEmpty()
+        if (returnedDeviceId.isBlank() || returnedDeviceId == currentDeviceId) return
+        savePairing(
+            DevicePairing(returnedDeviceId, token),
+            device?.optString("displayName")?.takeIf { it.isNotBlank() } ?: Constants.DEFAULT_DEVICE_NAME,
         )
     }
 
