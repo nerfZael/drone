@@ -2,8 +2,8 @@ import React from 'react';
 import type { AndroidApkInfo, DashboardData, DesktopAppInfo } from '../dashboardTypes.js';
 import { appDownloadMeta, AppDownloadLinks } from '../downloads/AppDownloadLinks.js';
 import { cn } from '../ui/cn.js';
-import { formatBytes } from '../utils/format.js';
-import { timeLabel } from '../time.js';
+import { formatBytes, formatCredits } from '../utils/format.js';
+import { exactTimeLabel, relativeTimeAgo, timeLabel } from '../time.js';
 
 type ReleaseUploadProgressInfo = {
   platform: 'android' | 'desktop';
@@ -30,8 +30,25 @@ type AdminPageProps = {
   desktopFile: File | null;
   releaseUploadProgress: ReleaseUploadProgressInfo | null;
   busy: boolean;
+  creditGrantDrafts: Record<string, CreditGrantDraft>;
+  emailCreditGrantDraft: EmailCreditGrantDraft;
+  canGrantCreditsByEmail: boolean;
+  onRefresh: () => void;
+  onCreditGrantDraftChange: (userId: string, patch: Partial<CreditGrantDraft>) => void;
+  onEmailCreditGrantDraftChange: React.Dispatch<React.SetStateAction<EmailCreditGrantDraft>>;
+  onGrantCredits: (userId: string) => void;
+  onGrantCreditsByEmail: () => void;
   onUploadAndroid: (files: File[]) => void | Promise<void>;
   onUploadDesktop: (files: File[]) => void | Promise<void>;
+};
+
+type CreditGrantDraft = {
+  amountCredits: string;
+  reason: string;
+};
+
+type EmailCreditGrantDraft = CreditGrantDraft & {
+  email: string;
 };
 
 const assistantKickerClass = 'font-display text-[11px] font-semibold uppercase leading-none text-[var(--muted)]';
@@ -40,6 +57,7 @@ const assistantPanelHeaderClass = 'mb-3 flex items-start justify-between gap-3';
 const assistantPanelTitleClass = 'm-0 mt-0.5 text-[15px] font-bold leading-tight text-[var(--fg)]';
 const assistantEmptyClass = 'p-2.5 text-xs text-[var(--muted)]';
 const assistantRowClass = 'rounded-[7px] border border-[var(--border-subtle)] bg-white/[.025] text-[var(--fg-secondary)]';
+const assistantActionButtonClass = 'inline-flex h-8 items-center justify-center rounded border border-[var(--border)] bg-[rgba(255,255,255,.045)] px-3 font-display text-[10px] font-bold uppercase text-[var(--fg-secondary)] shadow-none transition hover:border-[rgba(167,139,250,.45)] hover:bg-white/[.075] hover:text-[var(--fg)] disabled:cursor-not-allowed disabled:opacity-45';
 
 export function AdminPage({
   dashboard,
@@ -49,6 +67,14 @@ export function AdminPage({
   desktopFile,
   releaseUploadProgress,
   busy,
+  creditGrantDrafts,
+  emailCreditGrantDraft,
+  canGrantCreditsByEmail,
+  onRefresh,
+  onCreditGrantDraftChange,
+  onEmailCreditGrantDraftChange,
+  onGrantCredits,
+  onGrantCreditsByEmail,
   onUploadAndroid,
   onUploadDesktop,
 }: AdminPageProps) {
@@ -57,6 +83,145 @@ export function AdminPage({
   const releaseUploadingPlatform = releaseUploadProgress?.platform ?? null;
   return (
     <section className="grid min-h-0 gap-3 overflow-auto p-3">
+      <section className={assistantPanelClass}>
+        <div className={assistantPanelHeaderClass}>
+          <div>
+            <span className={assistantKickerClass}>Admin</span>
+            <h2 className={assistantPanelTitleClass}>Users & Credits</h2>
+          </div>
+          <button type="button" className={assistantActionButtonClass} disabled={busy} onClick={onRefresh}>
+            Refresh
+          </button>
+        </div>
+        <div className="grid gap-2">
+          <form
+            className={cn(assistantRowClass, 'grid grid-cols-[minmax(180px,1.2fr)_110px_minmax(160px,1fr)_auto] items-end gap-2 p-3 max-[760px]:grid-cols-2 max-[520px]:grid-cols-1')}
+            onSubmit={(event) => {
+              event.preventDefault();
+              onGrantCreditsByEmail();
+            }}
+          >
+            <label className="grid gap-1 text-[11px] text-[var(--muted)]">
+              Email
+              <input
+                value={emailCreditGrantDraft.email}
+                onChange={(event) => onEmailCreditGrantDraftChange((current) => ({ ...current, email: event.currentTarget.value }))}
+                type="email"
+                placeholder="person@example.com"
+                disabled={busy}
+                className="h-8 min-w-0"
+              />
+            </label>
+            <label className="grid gap-1 text-[11px] text-[var(--muted)]">
+              Credits
+              <input
+                value={emailCreditGrantDraft.amountCredits}
+                onChange={(event) => onEmailCreditGrantDraftChange((current) => ({ ...current, amountCredits: event.currentTarget.value }))}
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="Credits"
+                disabled={busy}
+                className="h-8 min-w-0"
+              />
+            </label>
+            <label className="grid gap-1 text-[11px] text-[var(--muted)]">
+              Reason
+              <input
+                value={emailCreditGrantDraft.reason}
+                onChange={(event) => onEmailCreditGrantDraftChange((current) => ({ ...current, reason: event.currentTarget.value }))}
+                placeholder="Reason"
+                disabled={busy}
+                className="h-8 min-w-0"
+              />
+            </label>
+            <button type="submit" className={assistantActionButtonClass} disabled={busy || !canGrantCreditsByEmail}>
+              Grant by Email
+            </button>
+          </form>
+          {dashboard.adminPendingCreditGrants.length > 0 ? (
+            <div className="grid gap-1.5 rounded border border-[var(--border-subtle)] bg-white/[.018] p-2">
+              <div className="flex items-center justify-between gap-2 px-1">
+                <span className={assistantKickerClass}>Pending email grants</span>
+                <span className="text-[10px] uppercase text-[var(--muted)]">{dashboard.adminPendingCreditGrants.length}</span>
+              </div>
+              {dashboard.adminPendingCreditGrants.map((grant) => (
+                <div key={grant.id} className="grid grid-cols-[minmax(0,1fr)_90px_minmax(0,1fr)_120px] items-center gap-2 rounded border border-[var(--border-subtle)] bg-white/[.018] px-2 py-1.5 text-xs max-[760px]:grid-cols-2 max-[520px]:grid-cols-1">
+                  <strong className="min-w-0 truncate text-[var(--fg)]">{grant.email}</strong>
+                  <span className="text-[var(--fg-secondary)]">{formatCredits(grant.amountMicrocredits)}</span>
+                  <span className="min-w-0 truncate text-[var(--muted)]">{grant.reason || 'Admin credit grant'}</span>
+                  <time className="text-[10px] uppercase text-[var(--muted)]">{relativeTimeAgo(grant.createdAt)}</time>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          {dashboard.adminUsers.map((item) => {
+            const draft = creditGrantDrafts[item.user.id] ?? { amountCredits: '', reason: '' };
+            const lastSeenExact = item.user.lastSeenAt ? exactTimeLabel(item.user.lastSeenAt) : '';
+            const lastSeenRelative = item.user.lastSeenAt ? relativeTimeAgo(item.user.lastSeenAt) : 'never';
+            const canGrant = Number(draft.amountCredits) > 0;
+            return (
+              <article key={item.user.id} className={cn(assistantRowClass, 'grid grid-cols-[minmax(180px,1.4fr)_120px_120px_120px_minmax(240px,1.3fr)] items-center gap-3 p-3 max-[1040px]:grid-cols-2 max-[680px]:grid-cols-1')}>
+                <div className="min-w-0">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <strong className="min-w-0 truncate text-xs text-[var(--fg)]">{item.user.email || item.user.displayName || item.user.id}</strong>
+                    {item.user.admin ? <span className="rounded border border-[rgba(74,222,128,.24)] bg-[rgba(74,222,128,.08)] px-1.5 py-0.5 text-[10px] font-bold uppercase text-[var(--green)]">Admin</span> : null}
+                  </div>
+                  <div className="mt-1 flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-[11px] text-[var(--muted)]">
+                    <span className="min-w-0 truncate">{item.user.displayName || 'No name'}</span>
+                    <span title={lastSeenExact}>Last seen {lastSeenRelative}</span>
+                  </div>
+                </div>
+                <div className="grid gap-0.5">
+                  <span className={assistantKickerClass}>Threads</span>
+                  <strong className="text-sm text-[var(--fg)]">{item.threadCount}</strong>
+                </div>
+                <div className="grid gap-0.5">
+                  <span className={assistantKickerClass}>Profiles</span>
+                  <strong className="text-sm text-[var(--fg)]">{item.assistantProfileCount}</strong>
+                </div>
+                <div className="grid gap-0.5">
+                  <span className={assistantKickerClass}>Credits</span>
+                  <strong className="text-sm text-[var(--fg)]">{formatCredits(item.creditBalanceMicrocredits)}</strong>
+                  <small className="text-[10px] text-[var(--muted)]">
+                    Granted {formatCredits(item.creditsGrantedMicrocredits)} / Spent {formatCredits(item.creditsSpentMicrocredits)}
+                  </small>
+                </div>
+                <form
+                  className="grid grid-cols-[88px_minmax(0,1fr)_auto] items-center gap-2 max-[520px]:grid-cols-1"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    onGrantCredits(item.user.id);
+                  }}
+                >
+                  <input
+                    value={draft.amountCredits}
+                    onChange={(event) => onCreditGrantDraftChange(item.user.id, { amountCredits: event.currentTarget.value })}
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="Credits"
+                    disabled={busy}
+                    className="h-8 min-w-0"
+                  />
+                  <input
+                    value={draft.reason}
+                    onChange={(event) => onCreditGrantDraftChange(item.user.id, { reason: event.currentTarget.value })}
+                    placeholder="Reason"
+                    disabled={busy}
+                    className="h-8 min-w-0"
+                  />
+                  <button type="submit" className={assistantActionButtonClass} disabled={busy || !canGrant}>
+                    Grant
+                  </button>
+                </form>
+              </article>
+            );
+          })}
+          {dashboard.adminUsers.length === 0 ? <div className={assistantEmptyClass}>No users yet.</div> : null}
+        </div>
+      </section>
+
       <section className={assistantPanelClass}>
         <div className={assistantPanelHeaderClass}>
           <div>

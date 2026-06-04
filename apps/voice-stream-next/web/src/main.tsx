@@ -51,7 +51,7 @@ import { cn } from './ui/cn.js';
 import { CircuitRobotLoader } from './ui/CircuitRobotLoader.js';
 import { MarkdownMessage } from './ui/MarkdownMessage.js';
 import { UiMenuSelect, type UiMenuSelectEntry } from './ui/MenuSelect.js';
-import { formatBytes } from './utils/format.js';
+import { formatBytes, formatCredits } from './utils/format.js';
 import './styles.css';
 
 const publishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined;
@@ -61,6 +61,7 @@ const ASSISTANT_SYSTEM_PROMPT_MAX_CHARS = 20_000;
 const SLEEP_PHRASE_STABLE_MS = 650;
 const SLEEP_PHRASE_MIN_HITS = 2;
 const SLEEP_PHRASE_MAX_GAP_MS = 1_500;
+const MICROCREDITS_PER_CREDIT = 1_000_000;
 
 const ASSISTANT_PROVIDERS: Array<{ id: 'codex' | 'openai'; label: string; title: string }> = [
   { id: 'codex', label: 'Codex', title: 'Use connected Codex ChatGPT authentication for Codex models.' },
@@ -1200,6 +1201,8 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const [desktopAppInfo, setDesktopAppInfo] = React.useState<DesktopAppInfo | null>(null);
   const [adminAndroidFile, setAdminAndroidFile] = React.useState<File | null>(null);
   const [adminDesktopFile, setAdminDesktopFile] = React.useState<File | null>(null);
+  const [creditGrantDrafts, setCreditGrantDrafts] = React.useState<Record<string, { amountCredits: string; reason: string }>>({});
+  const [emailCreditGrantDraft, setEmailCreditGrantDraft] = React.useState({ email: '', amountCredits: '', reason: '' });
   const [assistantExtensions, setAssistantExtensions] = React.useState<AssistantExtensionsResponse | null>(null);
   const [voiceRecordings, setVoiceRecordings] = React.useState<VoiceRecordingRecord[]>([]);
   const [voiceRecordingsLoading, setVoiceRecordingsLoading] = React.useState(false);
@@ -2820,6 +2823,86 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     return { artifact, metadata };
   }
 
+  function updateCreditGrantDraft(userId: string, patch: Partial<{ amountCredits: string; reason: string }>) {
+    setCreditGrantDrafts((current) => ({
+      ...current,
+      [userId]: {
+        amountCredits: current[userId]?.amountCredits ?? '',
+        reason: current[userId]?.reason ?? '',
+        ...patch,
+      },
+    }));
+  }
+
+  async function grantAdminCredits(userId: string) {
+    const draft = creditGrantDrafts[userId] ?? { amountCredits: '', reason: '' };
+    const amountCredits = Number(draft.amountCredits);
+    if (!Number.isFinite(amountCredits) || amountCredits <= 0) {
+      setError('Enter a positive credit amount.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const data = await client.request<{ ok: true; users: DashboardData['adminUsers'] }>(
+        `/api/admin/users/${encodeURIComponent(userId)}/credits/grants`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            amountCredits,
+            reason: draft.reason,
+          }),
+        },
+      );
+      setDashboard((current) => current ? { ...current, adminUsers: data.users } : current);
+      setCreditGrantDrafts((current) => ({
+        ...current,
+        [userId]: { amountCredits: '', reason: '' },
+      }));
+      setNotice(`Granted ${formatCredits(amountCredits * MICROCREDITS_PER_CREDIT)} credits.`);
+    } catch (err: any) {
+      setError(err?.message ?? String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function grantAdminCreditsByEmail() {
+    const email = emailCreditGrantDraft.email.trim();
+    const amountCredits = Number(emailCreditGrantDraft.amountCredits);
+    if (!email || !email.includes('@')) {
+      setError('Enter an email address.');
+      return;
+    }
+    if (!Number.isFinite(amountCredits) || amountCredits <= 0) {
+      setError('Enter a positive credit amount.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const data = await client.request<{ ok: true; users: DashboardData['adminUsers']; pendingCreditGrants: DashboardData['adminPendingCreditGrants']; pendingGrant?: unknown; ledgerEntry?: unknown }>(
+        '/api/admin/credits/email-grants',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            email,
+            amountCredits,
+            reason: emailCreditGrantDraft.reason,
+          }),
+        },
+      );
+      setDashboard((current) => current ? { ...current, adminUsers: data.users, adminPendingCreditGrants: data.pendingCreditGrants } : current);
+      setEmailCreditGrantDraft({ email: '', amountCredits: '', reason: '' });
+      const action = data.pendingGrant ? 'Reserved' : 'Granted';
+      setNotice(`${action} ${formatCredits(amountCredits * MICROCREDITS_PER_CREDIT)} credits for ${email}.`);
+    } catch (err: any) {
+      setError(err?.message ?? String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function uploadAndroidReleaseFiles(files: File[]) {
     const { artifact, metadata } = await releaseFiles(files, 'android');
     if (!artifact || !metadata) {
@@ -2893,6 +2976,16 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     }
   }
 
+  const userCredits = dashboard?.credits ?? {
+    balanceMicrocredits: 0,
+    grantedMicrocredits: 0,
+    purchasedMicrocredits: 0,
+    spentMicrocredits: 0,
+    lastCreditAt: null,
+  };
+  const creditBalanceLabel = formatCredits(userCredits.balanceMicrocredits);
+  const creditsSpentLabel = formatCredits(userCredits.spentMicrocredits);
+
   if (loading) {
     return (
       <div className="loading-screen">
@@ -2909,7 +3002,13 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
             <div className="kicker">Voice Stream</div>
             <h1>Desktop voice</h1>
           </div>
-          <div className="identity">{identitySlot}</div>
+          <div className="desktop-topbar-actions">
+            <span className="desktop-credit-chip" title={`Current credits: ${creditBalanceLabel}. Spent: ${creditsSpentLabel}.`}>
+              <span>Credits</span>
+              <strong>{creditBalanceLabel}</strong>
+            </span>
+            <div className="identity">{identitySlot}</div>
+          </div>
         </header>
 
         <ToastStack toasts={toasts} onDismiss={dismissToast} />
@@ -2922,6 +3021,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const devices = dashboard?.devices ?? [];
   const threads = assistantThreads;
   const logs = dashboard?.logs ?? [];
+  const canGrantCreditsByEmail = emailCreditGrantDraft.email.trim().includes('@') && Number(emailCreditGrantDraft.amountCredits) > 0;
   const wakeListenerLogs = logs.filter(isVoskUtteranceLog);
   const activityLogs = activityLogFilter === 'wake-listener' ? wakeListenerLogs : logs;
   const assistantRecordings = voiceRecordings.filter((recording) => recording.mode === 'assistant');
@@ -3406,6 +3506,13 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                 </button>
               ))}
             </div>
+            <span
+              className="inline-flex h-7 max-w-[9.5rem] shrink-0 items-center gap-1.5 rounded border border-[rgba(148,163,184,.24)] bg-white/[.035] px-2.5 text-[11px] font-semibold text-[var(--fg-secondary)] max-[620px]:hidden"
+              title={`Current credits: ${creditBalanceLabel}. Spent: ${creditsSpentLabel}.`}
+            >
+              <span className="text-[10px] uppercase text-[var(--muted)]">Credits</span>
+              <span className="truncate font-display text-[var(--fg)]">{creditBalanceLabel}</span>
+            </span>
             <span className="inline-flex h-7 items-center gap-1.5 rounded-full border border-[rgba(74,222,128,.18)] bg-[rgba(74,222,128,.06)] px-2.5 font-display text-[10px] font-semibold uppercase text-[var(--green)] before:h-1.5 before:w-1.5 before:rounded-full before:bg-current before:shadow-[0_0_12px_rgba(74,222,128,.34)]">Live</span>
             {identitySlot ? <div className="ml-0.5 flex h-7 w-7 shrink-0 items-center justify-center [&_button]:h-7 [&_button]:w-7">{identitySlot}</div> : null}
           </div>
@@ -3493,6 +3600,10 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                   {typeof item.count === 'number' ? <span className="text-[10px] uppercase text-[var(--muted)]">{item.count}</span> : null}
                 </button>
               ))}
+              <div className="flex min-h-9 items-center justify-between rounded border border-[var(--border-subtle)] bg-white/[.018] px-3 text-xs text-[var(--fg-secondary)]">
+                <span>Credits</span>
+                <span className="text-[10px] uppercase text-[var(--muted)]">{creditBalanceLabel}</span>
+              </div>
               <div className="flex min-h-9 items-center justify-between rounded border border-[var(--border-subtle)] bg-white/[.018] px-3 text-xs text-[var(--fg-secondary)]">
                 <span>Live</span>
                 {identitySlot ? <div className="flex h-7 w-7 shrink-0 items-center justify-center [&_button]:h-7 [&_button]:w-7">{identitySlot}</div> : <span className="text-[10px] uppercase text-[var(--muted)]">Connected</span>}
@@ -4771,6 +4882,14 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
               desktopFile={adminDesktopFile}
               releaseUploadProgress={releaseUploadProgress}
               busy={busy}
+              creditGrantDrafts={creditGrantDrafts}
+              emailCreditGrantDraft={emailCreditGrantDraft}
+              canGrantCreditsByEmail={canGrantCreditsByEmail}
+              onRefresh={() => void loadDashboard({ includeAssistant: false })}
+              onCreditGrantDraftChange={updateCreditGrantDraft}
+              onEmailCreditGrantDraftChange={setEmailCreditGrantDraft}
+              onGrantCredits={(userId) => void grantAdminCredits(userId)}
+              onGrantCreditsByEmail={() => void grantAdminCreditsByEmail()}
               onUploadAndroid={(files) => void uploadAndroidReleaseFiles(files)}
               onUploadDesktop={(files) => void uploadDesktopReleaseFiles(files)}
             />

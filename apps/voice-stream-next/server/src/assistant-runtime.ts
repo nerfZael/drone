@@ -3,6 +3,8 @@ import { normalizeWavChunkSizes, pcm16ToWav } from './wav.js';
 export type RuntimeResult = {
   text: string;
   provider: 'groq' | 'fallback';
+  model: string | null;
+  audioDurationMs: number;
 };
 
 const GROQ_TRANSCRIPTION_ENDPOINT = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -53,31 +55,42 @@ export function hasGroqSpeechRuntime(env: NodeJS.ProcessEnv = process.env): bool
   return Boolean(groqSttApiKey(env));
 }
 
+export function hasGroqTtsRuntime(env: NodeJS.ProcessEnv = process.env): boolean {
+  return Boolean(groqTtsApiKey(env));
+}
+
 export async function transcribePcm16(pcm: Uint8Array): Promise<RuntimeResult> {
   const testTranscript = process.env.VOICE_STREAM_NEXT_TEST_TRANSCRIPT;
   if (testTranscript != null) {
     return {
       provider: 'fallback',
+      model: null,
+      audioDurationMs: pcmDurationMs(pcm.byteLength),
       text: testTranscript.trim(),
     };
   }
   if (!groqSttApiKey()) {
     return {
       provider: 'fallback',
+      model: null,
+      audioDurationMs: pcmDurationMs(pcm.byteLength),
       text: '',
     };
   }
   if (pcm.byteLength < 1600) {
     return {
       provider: 'fallback',
+      model: null,
+      audioDurationMs: pcmDurationMs(pcm.byteLength),
       text: '',
     };
   }
 
+  const model = groqSttModel();
   const wav = pcm16ToWav(pcm);
   const wavBody = wav.buffer.slice(wav.byteOffset, wav.byteOffset + wav.byteLength) as ArrayBuffer;
   const form = new FormData();
-  form.append('model', groqSttModel());
+  form.append('model', model);
   form.append('file', new Blob([wavBody], { type: 'audio/wav' }), 'voice-stream.wav');
   form.append('response_format', 'json');
   form.append('temperature', '0');
@@ -90,15 +103,18 @@ export async function transcribePcm16(pcm: Uint8Array): Promise<RuntimeResult> {
   const body = await parseProviderJsonResponse(response, 'GROQ transcription');
   return {
     provider: 'groq',
+    model,
+    audioDurationMs: pcmDurationMs(pcm.byteLength),
     text: String(body.text ?? '').trim(),
   };
 }
 
-export async function synthesizeSpeech(text: string, options: { voice?: string } = {}): Promise<{ audio: Uint8Array | null; provider: 'groq' | 'fallback' }> {
+export async function synthesizeSpeech(text: string, options: { voice?: string } = {}): Promise<{ audio: Uint8Array | null; provider: 'groq' | 'fallback'; model: string | null; inputCharacters: number }> {
   const input = text.trim().slice(0, 4096);
   if (!groqTtsApiKey() || !input) {
-    return { audio: null, provider: 'fallback' };
+    return { audio: null, provider: 'fallback', model: null, inputCharacters: input.length };
   }
+  const model = groqTtsModel();
   const response = await fetch(groqTtsEndpoint(), {
     method: 'POST',
     headers: {
@@ -106,7 +122,7 @@ export async function synthesizeSpeech(text: string, options: { voice?: string }
       'content-type': 'application/json',
     },
     body: JSON.stringify({
-      model: groqTtsModel(),
+      model,
       voice: groqTtsVoice(options.voice),
       input,
       response_format: 'wav',
@@ -115,8 +131,14 @@ export async function synthesizeSpeech(text: string, options: { voice?: string }
   if (!response.ok) await parseProviderJsonResponse(response, 'GROQ TTS');
   return {
     provider: 'groq',
+    model,
+    inputCharacters: input.length,
     audio: normalizeWavChunkSizes(new Uint8Array(await response.arrayBuffer())),
   };
+}
+
+function pcmDurationMs(byteLength: number): number {
+  return Math.max(0, Math.round((byteLength / 2 / 16_000) * 1000));
 }
 
 async function parseProviderJsonResponse(response: Response, providerLabel: string): Promise<any> {

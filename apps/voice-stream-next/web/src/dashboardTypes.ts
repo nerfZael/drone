@@ -6,6 +6,56 @@ export type UserProfile = {
   displayName: string;
   email: string;
   admin: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  lastSeenAt?: string;
+};
+
+export type CreditLedgerKind = 'grant' | 'purchase' | 'usage' | 'refund' | 'adjustment';
+
+export type CreditLedgerRecord = {
+  id: string;
+  userId: string;
+  actorUserId: string | null;
+  kind: CreditLedgerKind;
+  amountMicrocredits: number;
+  balanceAfterMicrocredits: number;
+  reason: string;
+  metadataJson: string | null;
+  createdAt: string;
+};
+
+export type UserCreditSummary = {
+  balanceMicrocredits: number;
+  grantedMicrocredits: number;
+  purchasedMicrocredits: number;
+  spentMicrocredits: number;
+  lastCreditAt: string | null;
+};
+
+export type PendingCreditGrantRecord = {
+  id: string;
+  normalizedEmail: string;
+  email: string;
+  actorUserId: string | null;
+  amountMicrocredits: number;
+  reason: string;
+  metadataJson: string | null;
+  claimedUserId: string | null;
+  claimedLedgerId: string | null;
+  createdAt: string;
+  claimedAt: string | null;
+};
+
+export type AdminUserBillingSummary = {
+  user: UserProfile;
+  threadCount: number;
+  assistantProfileCount: number;
+  creditBalanceMicrocredits: number;
+  creditsGrantedMicrocredits: number;
+  creditsPurchasedMicrocredits: number;
+  creditsSpentMicrocredits: number;
+  lastCreditAt: string | null;
 };
 
 export type VoiceSettings = VoiceApprovalSettings & {
@@ -427,6 +477,9 @@ export type DashboardData = {
   approvalCodes: { id: string; code: string; source: string; createdAt: string }[];
   devices: DeviceRecord[];
   pairingSessions: PairingSessionRecord[];
+  credits: UserCreditSummary;
+  adminUsers: AdminUserBillingSummary[];
+  adminPendingCreditGrants: PendingCreditGrantRecord[];
   adminDevices: DeviceRecord[];
   adminClientStatuses: ClientStatusRecord[];
   stats: { threadCount: number; deviceCount: number; logCount: number; transcriptCount: number };

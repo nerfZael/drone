@@ -1,4 +1,4 @@
-import { hasGroqSpeechRuntime, transcribePcm16 } from './assistant-runtime.js';
+import { hasGroqSpeechRuntime, transcribePcm16, type RuntimeResult } from './assistant-runtime.js';
 
 export type TerminalCommandType = 'finish' | 'sleep' | 'abort';
 
@@ -33,6 +33,11 @@ export type StreamingTranscriptionConfig = {
   ignoreEmptyFinishCommands: boolean;
   finalTranscriptionMode: 'full-recording' | 'segments';
   maxSessionAudioBytes: number;
+};
+
+export type StreamingTranscriptionHooks = {
+  beforeTranscription?: (pcm: Uint8Array, source: 'segment' | 'final') => void;
+  onTranscription?: (result: RuntimeResult, source: 'segment' | 'final') => void;
 };
 
 type QueuedSegment = {
@@ -97,6 +102,7 @@ export class StreamingTranscriptionManager {
     private readonly config: StreamingTranscriptionConfig,
     private readonly onCommand: (command: TerminalCommand) => void,
     private readonly onDetection: (detection: TerminalDetection) => void = () => undefined,
+    private readonly hooks: StreamingTranscriptionHooks = {},
   ) {
     this.segmenter = new PcmSpeechSegmenter(config);
     this.timer = setInterval(() => {
@@ -149,7 +155,9 @@ export class StreamingTranscriptionManager {
   }
 
   private async transcribeSegment(segment: QueuedSegment): Promise<void> {
+    this.hooks.beforeTranscription?.(segment.pcm, 'segment');
     const result = await transcribePcm16(segment.pcm);
+    this.hooks.onTranscription?.(result, 'segment');
     if (this.stopped || this.terminalCommandDetected) return;
 
     const commandResult = stripTranscriptCommands(result.text);
@@ -224,7 +232,9 @@ export class StreamingTranscriptionManager {
   private async transcribeFinalSession(pcm: Uint8Array, fallbackText: string): Promise<string> {
     if (pcm.byteLength === 0) return fallbackText;
     try {
+      this.hooks.beforeTranscription?.(pcm, 'final');
       const result = await transcribePcm16(pcm);
+      this.hooks.onTranscription?.(result, 'final');
       const cleaned = stripTranscriptCommands(result.text).text;
       return hasTranscriptContent(cleaned) ? cleaned : fallbackText;
     } catch {

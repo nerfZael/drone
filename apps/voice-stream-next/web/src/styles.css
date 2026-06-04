@@ -674,6 +674,44 @@ h2 {
   line-height: 1.2;
 }
 
+.desktop-topbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+}
+
+.desktop-credit-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  max-width: 160px;
+  border: 1px solid rgba(148, 163, 184, .24);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, .04);
+  color: var(--desktop-muted);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0 10px;
+}
+
+.desktop-credit-chip span {
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.desktop-credit-chip strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--desktop-fg);
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .desktop-shell .kicker {
   color: var(--desktop-accent);
   font-size: 10px;

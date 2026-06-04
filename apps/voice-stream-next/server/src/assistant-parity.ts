@@ -41,6 +41,14 @@ import { fetchContent, searchWeb } from './web-search.js';
 
 export type AssistantProviderId = 'openai' | 'codex';
 
+type BillableCredentialSource =
+  | 'user_openai_key'
+  | 'platform_openai_key'
+  | 'user_exa_key'
+  | 'platform_exa_key'
+  | 'user_codex_oauth'
+  | 'test';
+
 export type AssistantModelOption = {
   provider: AssistantProviderId;
   id: string;
@@ -179,6 +187,10 @@ const MODEL_OPTIONS: AssistantModelOption[] = [
 
 const ARTIFACT_MAX_BYTES = 256 * 1024;
 const MODEL_TOOL_TEST_ENV = 'VOICE_STREAM_NEXT_TEST_MODEL_TOOL_CALLS';
+const USD_MICROS_PER_DOLLAR = 1_000_000;
+const MICROCREDITS_PER_DOLLAR = 100_000_000;
+const EXA_SEARCH_FALLBACK_COST_DOLLARS = 0.007;
+const EXA_FETCH_CONTENT_FALLBACK_COST_DOLLARS = 0.001;
 
 type ModelToolCall = {
   id: string | null;
@@ -485,10 +497,12 @@ async function runModelDrivenTurn(
   const instructions = modelInstructions({ settings, thread, profileSystemPrompt, toolInstruction, skillInstruction, allowToolCalls: enabledTools.length > 0 });
   const testCalls = testModelToolCalls();
   const usingTestModel = testCalls.length > 0;
+  const openAiCredential = modelConfig.provider === 'openai' && !usingTestModel ? resolveOpenAiCredential(db, userId) : null;
 
-  if (modelConfig.provider === 'openai' && !usingTestModel && !db.assistantApiKey(userId, 'openai')) {
-    throw new Error('OpenAI API key is not configured. Add your OpenAI key in assistant settings or connect Codex.');
+  if (modelConfig.provider === 'openai' && !usingTestModel && !openAiCredential) {
+    throw new Error('OpenAI API key is not configured. Add your OpenAI key in assistant settings, connect Codex, or ask an admin to enable platform credits.');
   }
+  if (openAiCredential) requireCreditsForPlatformCredential(db, userId, openAiCredential.source, 'OpenAI assistant usage');
 
   const faux = usingTestModel ? registerFauxProvider({ tokensPerSecond: 0 }) : null;
   if (faux) {
@@ -510,7 +524,12 @@ async function runModelDrivenTurn(
     thinkingLevel: modelConfig.thinkingLevel,
     requestKind: 'agent',
   });
-  const context = makeAgentRunContext({ db, userId, threadId, run, thread, emit });
+  const modelCredentialSource: BillableCredentialSource = usingTestModel
+    ? 'test'
+    : modelConfig.provider === 'codex'
+      ? 'user_codex_oauth'
+      : openAiCredential?.source ?? 'test';
+  const context = makeAgentRunContext({ db, userId, threadId, run, thread, emit, modelCredentialSource });
   for (const toolName of persistedSkillToolNames) context.loadedSkillToolNames.add(toolName);
   const agent = new Agent({
     initialState: {
@@ -524,14 +543,16 @@ async function runModelDrivenTurn(
     transport: modelConfig.provider === 'codex' ? 'sse' : 'auto',
     toolExecution: 'sequential',
     afterToolCall: async ({ toolCall, result, isError, context: loopContext }) => {
+      const stopForCredits = context.modelCredentialSource === 'platform_openai_key' && db.creditBalanceMicrocredits(userId) <= 0;
       if (!isError && normalizeModelToolName(toolCall.name) === 'load_skill') {
         loopContext.tools = buildAgentTools(context);
+        return stopForCredits ? { terminate: true } : undefined;
       }
-      return undefined;
+      return stopForCredits ? { terminate: true } : undefined;
     },
     getApiKey: async (provider: string) => {
       if (provider === 'openai-codex') return codexAccessToken(db, userId);
-      if (provider === 'openai') return db.assistantApiKey(userId, 'openai') ?? undefined;
+      if (provider === 'openai') return openAiCredential?.apiKey;
       return undefined;
     },
     onPayload: async (payload, model) => {
@@ -579,6 +600,7 @@ type AgentRunContext = {
   run: AssistantRunRecord;
   thread: AssistantThread;
   emit: (event: PromptEvent) => void;
+  modelCredentialSource: BillableCredentialSource;
   toolCallsByModelId: Map<string, AssistantToolCallRecord>;
   approvalPendingModelIds: Set<string>;
   persistedToolResultModelIds: Set<string>;
@@ -909,6 +931,7 @@ async function persistAgentEvent(context: AgentRunContext, event: AgentEvent): P
       isError: Boolean(message.errorMessage),
       spokenText: context.thread.voiceEnabled ? text : null,
     });
+    recordAssistantModelUsage(context, message);
     context.emit({ type: 'message', message: dbMessage });
     return;
   }
@@ -1304,6 +1327,109 @@ function cleanThinkingLevel(raw: unknown): string {
   return ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'].includes(value) ? value : 'off';
 }
 
+function platformOpenAiApiKey(): string {
+  return process.env.VOICE_STREAM_NEXT_PLATFORM_OPENAI_API_KEY?.trim() || '';
+}
+
+function platformExaApiKey(): string {
+  return process.env.VOICE_STREAM_NEXT_PLATFORM_EXA_API_KEY?.trim() || '';
+}
+
+function creditMarkupMultiplier(): number {
+  const value = Number(process.env.VOICE_STREAM_NEXT_CREDIT_MARKUP ?? 1);
+  return Number.isFinite(value) && value > 0 ? value : 1;
+}
+
+function dollarsToVendorMicros(dollars: number): number {
+  return Math.max(0, Math.round((Number.isFinite(dollars) ? dollars : 0) * USD_MICROS_PER_DOLLAR));
+}
+
+function dollarsToChargedMicrocredits(dollars: number): number {
+  return Math.max(0, Math.round((Number.isFinite(dollars) ? dollars : 0) * MICROCREDITS_PER_DOLLAR * creditMarkupMultiplier()));
+}
+
+function resolveOpenAiCredential(db: VoiceStreamNextDb, userId: string): { apiKey: string; source: BillableCredentialSource } | null {
+  const userKey = db.assistantApiKey(userId, 'openai');
+  if (userKey) return { apiKey: userKey, source: 'user_openai_key' };
+  const platformKey = platformOpenAiApiKey();
+  if (platformKey) return { apiKey: platformKey, source: 'platform_openai_key' };
+  return null;
+}
+
+function resolveExaCredential(db: VoiceStreamNextDb, userId: string): { apiKey: string; source: BillableCredentialSource } | null {
+  const userKey = db.assistantApiKey(userId, 'exa');
+  if (userKey) return { apiKey: userKey, source: 'user_exa_key' };
+  const platformKey = platformExaApiKey();
+  if (platformKey) return { apiKey: platformKey, source: 'platform_exa_key' };
+  return null;
+}
+
+function requireCreditsForPlatformCredential(db: VoiceStreamNextDb, userId: string, source: BillableCredentialSource, label: string): void {
+  if (!source.startsWith('platform_')) return;
+  db.requirePositiveCreditBalance(userId, label);
+}
+
+function recordAssistantModelUsage(context: AgentRunContext, message: PiAssistantMessage): void {
+  if (context.modelCredentialSource !== 'platform_openai_key') return;
+  const costDollars = Number(message.usage?.cost?.total ?? 0);
+  const vendorCostMicros = dollarsToVendorMicros(costDollars);
+  const chargedMicrocredits = dollarsToChargedMicrocredits(costDollars);
+  context.db.recordBillableUsage({
+    userId: context.userId,
+    threadId: context.threadId,
+    runId: context.run.id,
+    service: 'openai',
+    provider: 'openai',
+    credentialSource: context.modelCredentialSource,
+    model: message.responseModel ?? message.model ?? context.run.model,
+    operation: 'assistant_turn',
+    inputTokens: message.usage?.input ?? 0,
+    outputTokens: message.usage?.output ?? 0,
+    cacheReadTokens: message.usage?.cacheRead ?? 0,
+    cacheWriteTokens: message.usage?.cacheWrite ?? 0,
+    vendorCostMicros,
+    chargedMicrocredits,
+    status: message.errorMessage ? 'failed' : 'succeeded',
+    metadata: {
+      responseId: message.responseId ?? null,
+      stopReason: message.stopReason,
+      requestedModel: context.run.model,
+      thinkingLevel: context.run.thinkingLevel,
+    },
+  });
+}
+
+function recordExaUsage(
+  db: VoiceStreamNextDb,
+  userId: string,
+  thread: AssistantThread,
+  toolName: 'web_search' | 'fetch_content',
+  credentialSource: BillableCredentialSource,
+  result: any,
+  context: { runId?: string | null; toolCallId?: string } = {},
+): void {
+  if (credentialSource !== 'platform_exa_key') return;
+  const fallbackCostDollars = toolName === 'web_search' ? EXA_SEARCH_FALLBACK_COST_DOLLARS : EXA_FETCH_CONTENT_FALLBACK_COST_DOLLARS;
+  const costDollars = Number.isFinite(Number(result?.costDollars)) ? Number(result.costDollars) : fallbackCostDollars;
+  db.recordBillableUsage({
+    userId,
+    threadId: thread.id,
+    runId: context.runId ?? null,
+    toolCallId: context.toolCallId ?? null,
+    service: 'exa',
+    provider: 'exa',
+    credentialSource,
+    operation: toolName,
+    unitCount: toolName === 'web_search' ? 1 : 1,
+    vendorCostMicros: dollarsToVendorMicros(costDollars),
+    chargedMicrocredits: dollarsToChargedMicrocredits(costDollars),
+    status: 'succeeded',
+    metadata: toolName === 'web_search'
+      ? { query: result?.query ?? null, resultCount: Array.isArray(result?.results) ? result.results.length : 0, elapsedMs: result?.elapsedMs ?? null }
+      : { url: result?.url ?? null, elapsedMs: result?.elapsedMs ?? null },
+  });
+}
+
 type ParsedCommand =
   | { kind: 'artifact_write'; path: string; content: string; append: boolean }
   | { kind: 'artifact_read'; path: string }
@@ -1502,21 +1628,29 @@ async function executeApprovedTool(
     };
   }
   if (toolName === 'web_search') {
-    const apiKey = db.assistantApiKey(userId, 'exa') ?? '';
-    return await searchWeb({
+    const credential = resolveExaCredential(db, userId);
+    if (!credential) throw Object.assign(new Error('Exa API key is not configured. Add your Exa key in assistant settings or ask an admin to enable platform credits.'), { statusCode: 400 });
+    requireCreditsForPlatformCredential(db, userId, credential.source, 'Exa web search');
+    const result = await searchWeb({
       query: String(parsed.query ?? ''),
       numResults: parsed.numResults == null || parsed.numResults === '' ? undefined : Number(parsed.numResults),
       recencyFilter: cleanRecencyFilter(parsed.recencyFilter),
       domainFilter: Array.isArray(parsed.domainFilter) ? parsed.domainFilter.map((item) => String(item ?? '')) : [],
-    }, apiKey);
+    }, credential.apiKey);
+    recordExaUsage(db, userId, thread, 'web_search', credential.source, result, context);
+    return result;
   }
   if (toolName === 'fetch_content') {
-    const apiKey = db.assistantApiKey(userId, 'exa') ?? '';
-    return await fetchContent({
+    const credential = resolveExaCredential(db, userId);
+    if (!credential) throw Object.assign(new Error('Exa API key is not configured. Add your Exa key in assistant settings or ask an admin to enable platform credits.'), { statusCode: 400 });
+    requireCreditsForPlatformCredential(db, userId, credential.source, 'Exa content fetch');
+    const result = await fetchContent({
       url: String(parsed.url ?? ''),
       maxCharacters: parsed.maxCharacters == null || parsed.maxCharacters === '' ? undefined : Number(parsed.maxCharacters),
       livecrawl: cleanLivecrawl(parsed.livecrawl),
-    }, apiKey);
+    }, credential.apiKey);
+    recordExaUsage(db, userId, thread, 'fetch_content', credential.source, result, context);
+    return result;
   }
   const manifestTool = db.assistantExtensionToolManifest(userId, toolName);
   if (manifestTool) {

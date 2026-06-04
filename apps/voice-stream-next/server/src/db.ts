@@ -326,6 +326,98 @@ export type AssistantCodexOAuthStateRecord = {
   expiresAt: string;
 };
 
+export type CreditLedgerKind = 'grant' | 'purchase' | 'usage' | 'refund' | 'adjustment';
+
+export type CreditLedgerRecord = {
+  id: string;
+  userId: string;
+  actorUserId: string | null;
+  kind: CreditLedgerKind;
+  amountMicrocredits: number;
+  balanceAfterMicrocredits: number;
+  reason: string;
+  metadataJson: string | null;
+  createdAt: string;
+};
+
+export type UserCreditSummary = {
+  balanceMicrocredits: number;
+  grantedMicrocredits: number;
+  purchasedMicrocredits: number;
+  spentMicrocredits: number;
+  lastCreditAt: string | null;
+};
+
+export type PendingCreditGrantRecord = {
+  id: string;
+  normalizedEmail: string;
+  email: string;
+  actorUserId: string | null;
+  amountMicrocredits: number;
+  reason: string;
+  metadataJson: string | null;
+  claimedUserId: string | null;
+  claimedLedgerId: string | null;
+  createdAt: string;
+  claimedAt: string | null;
+};
+
+export type AdminUserBillingSummary = {
+  user: UserProfile;
+  threadCount: number;
+  assistantProfileCount: number;
+  creditBalanceMicrocredits: number;
+  creditsGrantedMicrocredits: number;
+  creditsPurchasedMicrocredits: number;
+  creditsSpentMicrocredits: number;
+  lastCreditAt: string | null;
+};
+
+export type BillableUsageEventRecord = {
+  id: string;
+  userId: string;
+  threadId: string | null;
+  runId: string | null;
+  toolCallId: string | null;
+  ledgerId: string | null;
+  service: string;
+  provider: string;
+  credentialSource: string;
+  model: string | null;
+  operation: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  unitCount: number;
+  vendorCostMicros: number;
+  chargedMicrocredits: number;
+  status: string;
+  metadataJson: string | null;
+  createdAt: string;
+};
+
+export type BillableUsageEventInput = {
+  userId: string;
+  threadId?: string | null;
+  runId?: string | null;
+  toolCallId?: string | null;
+  service: string;
+  provider: string;
+  credentialSource: string;
+  model?: string | null;
+  operation: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  unitCount?: number;
+  vendorCostMicros?: number;
+  chargedMicrocredits?: number;
+  status?: string;
+  metadata?: unknown;
+};
+
 export type VoiceSession = {
   id: string;
   userId: string;
@@ -417,6 +509,10 @@ type UpsertUserInput = {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function normalizeCreditGrantEmail(raw: unknown): string {
+  return String(raw ?? '').trim().toLowerCase();
 }
 
 function newId(prefix: string): string {
@@ -968,6 +1064,81 @@ function rowAssistantCodexOAuthState(row: any): AssistantCodexOAuthStateRecord {
   };
 }
 
+function cleanCreditLedgerKind(raw: unknown): CreditLedgerKind {
+  const value = String(raw ?? '').trim();
+  if (value === 'grant' || value === 'purchase' || value === 'usage' || value === 'refund' || value === 'adjustment') return value;
+  return 'adjustment';
+}
+
+function rowCreditLedger(row: any): CreditLedgerRecord {
+  return {
+    id: String(row.id),
+    userId: String(row.user_id),
+    actorUserId: row.actor_user_id == null ? null : String(row.actor_user_id),
+    kind: cleanCreditLedgerKind(row.kind),
+    amountMicrocredits: Number(row.amount_microcredits ?? 0),
+    balanceAfterMicrocredits: Number(row.balance_after_microcredits ?? 0),
+    reason: String(row.reason ?? ''),
+    metadataJson: row.metadata_json == null ? null : String(row.metadata_json),
+    createdAt: String(row.created_at),
+  };
+}
+
+function rowPendingCreditGrant(row: any): PendingCreditGrantRecord {
+  return {
+    id: String(row.id),
+    normalizedEmail: String(row.normalized_email),
+    email: String(row.email),
+    actorUserId: row.actor_user_id == null ? null : String(row.actor_user_id),
+    amountMicrocredits: Number(row.amount_microcredits ?? 0),
+    reason: String(row.reason ?? ''),
+    metadataJson: row.metadata_json == null ? null : String(row.metadata_json),
+    claimedUserId: row.claimed_user_id == null ? null : String(row.claimed_user_id),
+    claimedLedgerId: row.claimed_ledger_id == null ? null : String(row.claimed_ledger_id),
+    createdAt: String(row.created_at),
+    claimedAt: row.claimed_at == null ? null : String(row.claimed_at),
+  };
+}
+
+function rowAdminUserBillingSummary(row: any): AdminUserBillingSummary {
+  return {
+    user: rowUser(row),
+    threadCount: Number(row.thread_count ?? 0),
+    assistantProfileCount: Number(row.assistant_profile_count ?? 0),
+    creditBalanceMicrocredits: Number(row.credit_balance_microcredits ?? 0),
+    creditsGrantedMicrocredits: Number(row.credits_granted_microcredits ?? 0),
+    creditsPurchasedMicrocredits: Number(row.credits_purchased_microcredits ?? 0),
+    creditsSpentMicrocredits: Number(row.credits_spent_microcredits ?? 0),
+    lastCreditAt: row.last_credit_at == null ? null : String(row.last_credit_at),
+  };
+}
+
+function rowBillableUsageEvent(row: any): BillableUsageEventRecord {
+  return {
+    id: String(row.id),
+    userId: String(row.user_id),
+    threadId: row.thread_id == null ? null : String(row.thread_id),
+    runId: row.run_id == null ? null : String(row.run_id),
+    toolCallId: row.tool_call_id == null ? null : String(row.tool_call_id),
+    ledgerId: row.ledger_id == null ? null : String(row.ledger_id),
+    service: String(row.service ?? ''),
+    provider: String(row.provider ?? ''),
+    credentialSource: String(row.credential_source ?? ''),
+    model: row.model == null ? null : String(row.model),
+    operation: String(row.operation ?? ''),
+    inputTokens: Number(row.input_tokens ?? 0),
+    outputTokens: Number(row.output_tokens ?? 0),
+    cacheReadTokens: Number(row.cache_read_tokens ?? 0),
+    cacheWriteTokens: Number(row.cache_write_tokens ?? 0),
+    unitCount: Number(row.unit_count ?? 0),
+    vendorCostMicros: Number(row.vendor_cost_micros ?? 0),
+    chargedMicrocredits: Number(row.charged_microcredits ?? 0),
+    status: String(row.status ?? ''),
+    metadataJson: row.metadata_json == null ? null : String(row.metadata_json),
+    createdAt: String(row.created_at),
+  };
+}
+
 function rowVoiceSession(row: any): VoiceSession {
   return {
     id: String(row.id),
@@ -1290,6 +1461,7 @@ export class VoiceStreamNextDb {
     if (!user) throw new Error('failed to upsert user');
     this.ensureVoiceSettings(user.id);
     this.ensureDefaultAssistantProfile(user.id);
+    this.claimPendingCreditGrantsForUser(user.id, user.email);
     return user;
   }
 
@@ -1306,6 +1478,541 @@ export class VoiceStreamNextDb {
   userById(userId: string): UserProfile | null {
     const row = this.db.query('SELECT * FROM users WHERE id = $userId').get({ $userId: userId });
     return row ? rowUser(row) : null;
+  }
+
+  userByEmail(email: string): UserProfile | null {
+    const normalizedEmail = normalizeCreditGrantEmail(email);
+    if (!normalizedEmail) return null;
+    const row = this.db
+      .query(
+        `
+        SELECT *
+        FROM users
+        WHERE lower(trim(email)) = $normalizedEmail
+        ORDER BY last_seen_at DESC, created_at DESC
+        LIMIT 1
+      `,
+      )
+      .get({ $normalizedEmail: normalizedEmail });
+    return row ? rowUser(row) : null;
+  }
+
+  creditBalanceMicrocredits(userId: string): number {
+    const row = this.db
+      .query('SELECT COALESCE(SUM(amount_microcredits), 0) AS balance FROM credit_ledger WHERE user_id = $userId')
+      .get({ $userId: userId }) as { balance?: number } | undefined;
+    return Number(row?.balance ?? 0);
+  }
+
+  userCreditSummary(userId: string): UserCreditSummary {
+    const row = this.db
+      .query(
+        `
+        SELECT
+          COALESCE(SUM(amount_microcredits), 0) AS balance_microcredits,
+          COALESCE(SUM(CASE WHEN kind = 'grant' AND amount_microcredits > 0 THEN amount_microcredits ELSE 0 END), 0) AS granted_microcredits,
+          COALESCE(SUM(CASE WHEN kind = 'purchase' AND amount_microcredits > 0 THEN amount_microcredits ELSE 0 END), 0) AS purchased_microcredits,
+          COALESCE(SUM(CASE WHEN amount_microcredits < 0 THEN -amount_microcredits ELSE 0 END), 0) AS spent_microcredits,
+          MAX(created_at) AS last_credit_at
+        FROM credit_ledger
+        WHERE user_id = $userId
+      `,
+      )
+      .get({ $userId: userId }) as any;
+    return {
+      balanceMicrocredits: Number(row?.balance_microcredits ?? 0),
+      grantedMicrocredits: Number(row?.granted_microcredits ?? 0),
+      purchasedMicrocredits: Number(row?.purchased_microcredits ?? 0),
+      spentMicrocredits: Number(row?.spent_microcredits ?? 0),
+      lastCreditAt: row?.last_credit_at == null ? null : String(row.last_credit_at),
+    };
+  }
+
+  requirePositiveCreditBalance(userId: string, label = 'paid usage'): void {
+    if (this.creditBalanceMicrocredits(userId) > 0) return;
+    throw Object.assign(new Error(`Not enough credits for ${label}. Ask an admin to grant credits.`), { statusCode: 402 });
+  }
+
+  listCreditLedger(userId: string, limit = 80): CreditLedgerRecord[] {
+    const safeLimit = Math.max(1, Math.min(500, Math.floor(Number(limit) || 80)));
+    return this.db
+      .query(
+        `
+        SELECT *
+        FROM credit_ledger
+        WHERE user_id = $userId
+        ORDER BY created_at DESC, id DESC
+        LIMIT $limit
+      `,
+      )
+      .all({ $userId: userId, $limit: safeLimit })
+      .map(rowCreditLedger);
+  }
+
+  listPendingCreditGrants(limit = 120): PendingCreditGrantRecord[] {
+    const safeLimit = Math.max(1, Math.min(500, Math.floor(Number(limit) || 120)));
+    return this.db
+      .query(
+        `
+        SELECT *
+        FROM pending_credit_grants
+        WHERE claimed_at IS NULL
+        ORDER BY created_at DESC, id DESC
+        LIMIT $limit
+      `,
+      )
+      .all({ $limit: safeLimit })
+      .map(rowPendingCreditGrant);
+  }
+
+  listAdminUsersWithBilling(): AdminUserBillingSummary[] {
+    return this.db
+      .query(
+        `
+        SELECT
+          users.*,
+          COALESCE(thread_counts.thread_count, 0) AS thread_count,
+          COALESCE(profile_counts.assistant_profile_count, 0) AS assistant_profile_count,
+          COALESCE(SUM(credit_ledger.amount_microcredits), 0) AS credit_balance_microcredits,
+          COALESCE(SUM(CASE WHEN credit_ledger.kind = 'grant' AND credit_ledger.amount_microcredits > 0 THEN credit_ledger.amount_microcredits ELSE 0 END), 0) AS credits_granted_microcredits,
+          COALESCE(SUM(CASE WHEN credit_ledger.kind = 'purchase' AND credit_ledger.amount_microcredits > 0 THEN credit_ledger.amount_microcredits ELSE 0 END), 0) AS credits_purchased_microcredits,
+          COALESCE(SUM(CASE WHEN credit_ledger.amount_microcredits < 0 THEN -credit_ledger.amount_microcredits ELSE 0 END), 0) AS credits_spent_microcredits,
+          MAX(credit_ledger.created_at) AS last_credit_at
+        FROM users
+        LEFT JOIN (
+          SELECT user_id, COUNT(*) AS thread_count
+          FROM assistant_threads
+          GROUP BY user_id
+        ) AS thread_counts ON thread_counts.user_id = users.id
+        LEFT JOIN (
+          SELECT user_id, COUNT(*) AS assistant_profile_count
+          FROM assistant_profiles
+          GROUP BY user_id
+        ) AS profile_counts ON profile_counts.user_id = users.id
+        LEFT JOIN credit_ledger ON credit_ledger.user_id = users.id
+        GROUP BY users.id
+        ORDER BY users.last_seen_at DESC, users.created_at DESC
+      `,
+      )
+      .all()
+      .map(rowAdminUserBillingSummary);
+  }
+
+  adminUserBillingSummary(userId: string): AdminUserBillingSummary | null {
+    return this.listAdminUsersWithBilling().find((item) => item.user.id === userId) ?? null;
+  }
+
+  grantCredits(
+    actorUserId: string,
+    targetUserId: string,
+    input: { amountMicrocredits: number; reason?: string; metadata?: unknown },
+  ): CreditLedgerRecord {
+    const amountMicrocredits = Math.floor(Number(input.amountMicrocredits));
+    if (!Number.isSafeInteger(amountMicrocredits) || amountMicrocredits <= 0) {
+      throw Object.assign(new Error('credit grant amount must be positive'), { statusCode: 400 });
+    }
+    const reason = String(input.reason ?? '').trim().slice(0, 500);
+    const metadataJson = input.metadata == null ? null : JSON.stringify(input.metadata);
+    const at = nowIso();
+    const id = newId('crl');
+
+    this.db.run('BEGIN IMMEDIATE');
+    try {
+      const target = this.userById(targetUserId);
+      if (!target) throw Object.assign(new Error('unknown user'), { statusCode: 404 });
+      const actor = this.userById(actorUserId);
+      if (!actor) throw Object.assign(new Error('unknown admin user'), { statusCode: 404 });
+      const balanceAfter = this.creditBalanceMicrocredits(targetUserId) + amountMicrocredits;
+      this.db
+        .query(
+          `
+          INSERT INTO credit_ledger (
+            id,
+            user_id,
+            actor_user_id,
+            kind,
+            amount_microcredits,
+            balance_after_microcredits,
+            reason,
+            metadata_json,
+            created_at
+          )
+          VALUES (
+            $id,
+            $userId,
+            $actorUserId,
+            'grant',
+            $amountMicrocredits,
+            $balanceAfterMicrocredits,
+            $reason,
+            $metadataJson,
+            $createdAt
+          )
+        `,
+        )
+        .run({
+          $id: id,
+          $userId: targetUserId,
+          $actorUserId: actorUserId,
+          $amountMicrocredits: amountMicrocredits,
+          $balanceAfterMicrocredits: balanceAfter,
+          $reason: reason || 'Admin credit grant',
+          $metadataJson: metadataJson,
+          $createdAt: at,
+        });
+      this.db.run('COMMIT');
+    } catch (error) {
+      this.db.run('ROLLBACK');
+      throw error;
+    }
+
+    const row = this.db.query('SELECT * FROM credit_ledger WHERE id = $id').get({ $id: id });
+    return rowCreditLedger(row);
+  }
+
+  grantCreditsByEmail(
+    actorUserId: string,
+    input: { email: string; amountMicrocredits: number; reason?: string; metadata?: unknown },
+  ): { ledgerEntry: CreditLedgerRecord | null; pendingGrant: PendingCreditGrantRecord | null; user: AdminUserBillingSummary | null } {
+    const normalizedEmail = normalizeCreditGrantEmail(input.email);
+    if (!normalizedEmail || !normalizedEmail.includes('@')) {
+      throw Object.assign(new Error('enter a valid email address'), { statusCode: 400 });
+    }
+    const amountMicrocredits = Math.floor(Number(input.amountMicrocredits));
+    if (!Number.isSafeInteger(amountMicrocredits) || amountMicrocredits <= 0) {
+      throw Object.assign(new Error('credit grant amount must be positive'), { statusCode: 400 });
+    }
+
+    const existingUser = this.userByEmail(normalizedEmail);
+    if (existingUser) {
+      const metadata = typeof input.metadata === 'object' && input.metadata ? input.metadata : {};
+      const ledgerEntry = this.grantCredits(actorUserId, existingUser.id, {
+        amountMicrocredits,
+        reason: input.reason,
+        metadata: { ...metadata, source: 'admin_email_grant', email: normalizedEmail },
+      });
+      return {
+        ledgerEntry,
+        pendingGrant: null,
+        user: this.adminUserBillingSummary(existingUser.id),
+      };
+    }
+
+    const actor = this.userById(actorUserId);
+    if (!actor) throw Object.assign(new Error('unknown admin user'), { statusCode: 404 });
+    const reason = String(input.reason ?? '').trim().slice(0, 500);
+    const metadataJson = input.metadata == null ? null : JSON.stringify(input.metadata);
+    const id = newId('pcg');
+    const at = nowIso();
+    this.db
+      .query(
+        `
+        INSERT INTO pending_credit_grants (
+          id,
+          normalized_email,
+          email,
+          actor_user_id,
+          amount_microcredits,
+          reason,
+          metadata_json,
+          created_at
+        )
+        VALUES (
+          $id,
+          $normalizedEmail,
+          $email,
+          $actorUserId,
+          $amountMicrocredits,
+          $reason,
+          $metadataJson,
+          $createdAt
+        )
+      `,
+      )
+      .run({
+        $id: id,
+        $normalizedEmail: normalizedEmail,
+        $email: String(input.email).trim(),
+        $actorUserId: actorUserId,
+        $amountMicrocredits: amountMicrocredits,
+        $reason: reason || 'Admin credit grant',
+        $metadataJson: metadataJson,
+        $createdAt: at,
+      });
+    const row = this.db.query('SELECT * FROM pending_credit_grants WHERE id = $id').get({ $id: id });
+    return {
+      ledgerEntry: null,
+      pendingGrant: rowPendingCreditGrant(row),
+      user: null,
+    };
+  }
+
+  claimPendingCreditGrantsForUser(userId: string, email: string): CreditLedgerRecord[] {
+    const normalizedEmail = normalizeCreditGrantEmail(email);
+    if (!normalizedEmail) return [];
+    const hasPending = this.db
+      .query(
+        `
+        SELECT id
+        FROM pending_credit_grants
+        WHERE normalized_email = $normalizedEmail
+          AND claimed_at IS NULL
+        LIMIT 1
+      `,
+      )
+      .get({ $normalizedEmail: normalizedEmail });
+    if (!hasPending) return [];
+
+    const at = nowIso();
+    const ledgerEntries: CreditLedgerRecord[] = [];
+    this.db.run('BEGIN IMMEDIATE');
+    try {
+      const pendingRows = this.db
+        .query(
+          `
+          SELECT *
+          FROM pending_credit_grants
+          WHERE normalized_email = $normalizedEmail
+            AND claimed_at IS NULL
+          ORDER BY created_at ASC, id ASC
+        `,
+        )
+        .all({ $normalizedEmail: normalizedEmail });
+      if (pendingRows.length === 0) {
+        this.db.run('COMMIT');
+        return [];
+      }
+      for (const row of pendingRows) {
+        const pending = rowPendingCreditGrant(row);
+        const ledgerId = newId('crl');
+        const balanceAfter = this.creditBalanceMicrocredits(userId) + pending.amountMicrocredits;
+        const metadataJson = JSON.stringify({
+          source: 'pending_email_credit_grant',
+          pendingCreditGrantId: pending.id,
+          email: pending.normalizedEmail,
+          pendingMetadata: pending.metadataJson,
+        });
+        this.db
+          .query(
+            `
+            INSERT INTO credit_ledger (
+              id,
+              user_id,
+              actor_user_id,
+              kind,
+              amount_microcredits,
+              balance_after_microcredits,
+              reason,
+              metadata_json,
+              created_at
+            )
+            VALUES (
+              $id,
+              $userId,
+              $actorUserId,
+              'grant',
+              $amountMicrocredits,
+              $balanceAfterMicrocredits,
+              $reason,
+              $metadataJson,
+              $createdAt
+            )
+          `,
+          )
+          .run({
+            $id: ledgerId,
+            $userId: userId,
+            $actorUserId: pending.actorUserId,
+            $amountMicrocredits: pending.amountMicrocredits,
+            $balanceAfterMicrocredits: balanceAfter,
+            $reason: pending.reason || 'Admin credit grant',
+            $metadataJson: metadataJson,
+            $createdAt: at,
+          });
+        this.db
+          .query(
+            `
+            UPDATE pending_credit_grants
+            SET claimed_user_id = $userId,
+                claimed_ledger_id = $ledgerId,
+                claimed_at = $claimedAt
+            WHERE id = $pendingGrantId
+              AND claimed_at IS NULL
+          `,
+          )
+          .run({
+            $userId: userId,
+            $ledgerId: ledgerId,
+            $claimedAt: at,
+            $pendingGrantId: pending.id,
+          });
+        const ledgerRow = this.db.query('SELECT * FROM credit_ledger WHERE id = $id').get({ $id: ledgerId });
+        ledgerEntries.push(rowCreditLedger(ledgerRow));
+      }
+      this.db.run('COMMIT');
+    } catch (error) {
+      this.db.run('ROLLBACK');
+      throw error;
+    }
+    return ledgerEntries;
+  }
+
+  recordBillableUsage(input: BillableUsageEventInput): BillableUsageEventRecord {
+    const userId = String(input.userId ?? '').trim();
+    if (!userId) throw Object.assign(new Error('usage user id is required'), { statusCode: 400 });
+    const user = this.userById(userId);
+    if (!user) throw Object.assign(new Error('unknown user'), { statusCode: 404 });
+
+    const chargedMicrocredits = Math.max(0, Math.floor(Number(input.chargedMicrocredits ?? 0)));
+    if (!Number.isSafeInteger(chargedMicrocredits)) {
+      throw Object.assign(new Error('usage charge is too large'), { statusCode: 400 });
+    }
+    const vendorCostMicros = Math.max(0, Math.floor(Number(input.vendorCostMicros ?? 0)));
+    const at = nowIso();
+    const usageId = newId('use');
+    const ledgerId = chargedMicrocredits > 0 ? newId('crl') : null;
+
+    this.db.run('BEGIN IMMEDIATE');
+    try {
+      let balanceAfter = this.creditBalanceMicrocredits(userId);
+      if (chargedMicrocredits > 0 && ledgerId) {
+        balanceAfter -= chargedMicrocredits;
+        this.db
+          .query(
+            `
+            INSERT INTO credit_ledger (
+              id,
+              user_id,
+              actor_user_id,
+              kind,
+              amount_microcredits,
+              balance_after_microcredits,
+              reason,
+              metadata_json,
+              created_at
+            )
+            VALUES (
+              $id,
+              $userId,
+              NULL,
+              'usage',
+              $amountMicrocredits,
+              $balanceAfterMicrocredits,
+              $reason,
+              $metadataJson,
+              $createdAt
+            )
+          `,
+          )
+          .run({
+            $id: ledgerId,
+            $userId: userId,
+            $amountMicrocredits: -chargedMicrocredits,
+            $balanceAfterMicrocredits: balanceAfter,
+            $reason: `${input.service}/${input.operation}`,
+            $metadataJson: JSON.stringify({ usageEventId: usageId }),
+            $createdAt: at,
+          });
+      }
+
+      this.db
+        .query(
+          `
+          INSERT INTO billable_usage_events (
+            id,
+            user_id,
+            thread_id,
+            run_id,
+            tool_call_id,
+            ledger_id,
+            service,
+            provider,
+            credential_source,
+            model,
+            operation,
+            input_tokens,
+            output_tokens,
+            cache_read_tokens,
+            cache_write_tokens,
+            unit_count,
+            vendor_cost_micros,
+            charged_microcredits,
+            status,
+            metadata_json,
+            created_at
+          )
+          VALUES (
+            $id,
+            $userId,
+            $threadId,
+            $runId,
+            $toolCallId,
+            $ledgerId,
+            $service,
+            $provider,
+            $credentialSource,
+            $model,
+            $operation,
+            $inputTokens,
+            $outputTokens,
+            $cacheReadTokens,
+            $cacheWriteTokens,
+            $unitCount,
+            $vendorCostMicros,
+            $chargedMicrocredits,
+            $status,
+            $metadataJson,
+            $createdAt
+          )
+        `,
+        )
+        .run({
+          $id: usageId,
+          $userId: userId,
+          $threadId: input.threadId ?? null,
+          $runId: input.runId ?? null,
+          $toolCallId: input.toolCallId ?? null,
+          $ledgerId: ledgerId,
+          $service: String(input.service ?? '').trim() || 'unknown',
+          $provider: String(input.provider ?? '').trim() || 'unknown',
+          $credentialSource: String(input.credentialSource ?? '').trim() || 'unknown',
+          $model: input.model == null ? null : String(input.model),
+          $operation: String(input.operation ?? '').trim() || 'unknown',
+          $inputTokens: Math.max(0, Math.floor(Number(input.inputTokens ?? 0))),
+          $outputTokens: Math.max(0, Math.floor(Number(input.outputTokens ?? 0))),
+          $cacheReadTokens: Math.max(0, Math.floor(Number(input.cacheReadTokens ?? 0))),
+          $cacheWriteTokens: Math.max(0, Math.floor(Number(input.cacheWriteTokens ?? 0))),
+          $unitCount: Math.max(0, Math.floor(Number(input.unitCount ?? 0))),
+          $vendorCostMicros: vendorCostMicros,
+          $chargedMicrocredits: chargedMicrocredits,
+          $status: String(input.status ?? 'succeeded').trim() || 'succeeded',
+          $metadataJson: input.metadata == null ? null : JSON.stringify(input.metadata),
+          $createdAt: at,
+        });
+      this.db.run('COMMIT');
+    } catch (error) {
+      this.db.run('ROLLBACK');
+      throw error;
+    }
+
+    const row = this.db.query('SELECT * FROM billable_usage_events WHERE id = $id').get({ $id: usageId });
+    return rowBillableUsageEvent(row);
+  }
+
+  listBillableUsageEvents(userId: string, limit = 120): BillableUsageEventRecord[] {
+    const safeLimit = Math.max(1, Math.min(500, Math.floor(Number(limit) || 120)));
+    return this.db
+      .query(
+        `
+        SELECT *
+        FROM billable_usage_events
+        WHERE user_id = $userId
+        ORDER BY created_at DESC, id DESC
+        LIMIT $limit
+      `,
+      )
+      .all({ $userId: userId, $limit: safeLimit })
+      .map(rowBillableUsageEvent);
   }
 
   ensureVoiceSettings(userId: string): VoiceSettings {
@@ -4371,6 +5078,9 @@ export class VoiceStreamNextDb {
       pairingSessions,
       transcripts: this.listTranscripts(user.id, 40),
       clientStatuses: this.listClientStatuses(user.id),
+      credits: this.userCreditSummary(user.id),
+      adminUsers: user.admin ? this.listAdminUsersWithBilling() : [],
+      adminPendingCreditGrants: user.admin ? this.listPendingCreditGrants() : [],
       adminDevices: user.admin ? this.listDevices() : [],
       adminClientStatuses: user.admin ? this.listClientStatuses() : [],
       stats: {

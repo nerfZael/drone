@@ -14,6 +14,7 @@ export type WebSearchResult = {
   query: string;
   answer: string;
   results: WebSearchResultItem[];
+  costDollars: number | null;
   elapsedMs: number;
 };
 
@@ -44,6 +45,7 @@ export type FetchContentResult = {
   publishedDate: string | null;
   author: string | null;
   status: FetchContentStatus | null;
+  costDollars: number | null;
   elapsedMs: number;
 };
 
@@ -57,6 +59,7 @@ export type FetchContentStatus = {
 };
 
 type ExaSearchResponse = {
+  costDollars?: number | { total?: number };
   results?: Array<{
     title?: string;
     url?: string;
@@ -68,6 +71,7 @@ type ExaSearchResponse = {
 };
 
 type ExaContentsResponse = {
+  costDollars?: number | { total?: number };
   results?: Array<{
     title?: string;
     url?: string;
@@ -135,6 +139,7 @@ export async function searchWeb(input: WebSearchInput, apiKey: string): Promise<
     query,
     answer: buildAnswer(results),
     results,
+    costDollars: cleanCostDollars(body.costDollars),
     elapsedMs: Date.now() - startedAt,
   };
 }
@@ -184,8 +189,18 @@ export async function fetchContent(input: FetchContentInput, apiKey: string): Pr
     publishedDate: cleanNullableString(item?.publishedDate),
     author: cleanNullableString(item?.author),
     status,
+    costDollars: cleanCostDollars(body.costDollars),
     elapsedMs: Date.now() - startedAt,
   };
+}
+
+function cleanCostDollars(raw: unknown): number | null {
+  const value = typeof raw === 'number'
+    ? raw
+    : raw && typeof raw === 'object'
+      ? Number((raw as any).total)
+      : Number.NaN;
+  return Number.isFinite(value) && value >= 0 ? value : null;
 }
 
 function clampNumResults(raw: unknown): number {
