@@ -369,6 +369,8 @@ class VoiceSessionService : Service() {
                                 }
                             }
                         }
+                        "settings_changed" -> handleSettingsChanged(message)
+                        "release_changed" -> handleReleaseChanged(message)
                         "server_command" -> handleRemoteControlCommand(webSocket, message)
                     }
                 }
@@ -495,6 +497,32 @@ class VoiceSessionService : Service() {
 
     private fun speechPlaybackBlocked(): Boolean {
         return lastMode == Constants.MODE_RECORDING || lastMode == "transcribing"
+    }
+
+    private fun handleSettingsChanged(message: JSONObject) {
+        val settings = message.optString("settings")
+        if (settings != "assistant_profiles" && settings != "voice_approval" && settings != "voice_codes") return
+        ClientLog.i("Service", "Voice settings changed on server settings=$settings")
+        streamer.refreshVoiceSettingsFromControl()
+    }
+
+    private fun handleReleaseChanged(message: JSONObject) {
+        if (message.optString("platform") != "android") return
+        ClientLog.i("Service", "Android release changed on server")
+        thread(name = "VoiceStreamAndroidReleaseRefresh") {
+            runCatching {
+                val release = api.androidRelease()
+                val latestVersionCode = release.versionCode ?: return@runCatching
+                if (!release.available || latestVersionCode <= BuildConfig.VERSION_CODE.toLong()) return@runCatching
+                sendBroadcast(Intent(Constants.ACTION_ANDROID_UPDATE_AVAILABLE).apply {
+                    setPackage(packageName)
+                    putExtra(Constants.EXTRA_UPDATE_VERSION_CODE, latestVersionCode)
+                    putExtra(Constants.EXTRA_UPDATE_APK_URL, release.apkUrl.orEmpty())
+                })
+            }.onFailure { error ->
+                ClientLog.w("Service", "Android release refresh failed", error)
+            }
+        }
     }
 
     private fun handleRemoteControlCommand(webSocket: WebSocket, message: JSONObject) {

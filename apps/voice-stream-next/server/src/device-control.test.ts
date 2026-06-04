@@ -262,6 +262,70 @@ describe('control channel registry', () => {
     expect(result.delivered).toBe(true);
     expect(result.ack?.status).toBe('Ready');
   });
+
+  test('broadcasts settings change notifications', () => {
+    const registry = new ControlChannelRegistry();
+    const messages: string[] = [];
+    registry.register('dev_1', {
+      readyState: 1,
+      send(data: string) {
+        messages.push(data);
+      },
+    });
+
+    expect(registry.sendSettingsChanged('dev_1', 'assistant_profiles', 'assistant_profile_updated')).toBe(true);
+    expect(messages).toHaveLength(1);
+    expect(JSON.parse(messages[0]!)).toMatchObject({
+      type: 'settings_changed',
+      settings: 'assistant_profiles',
+      reason: 'assistant_profile_updated',
+    });
+  });
+
+  test('broadcasts release change notifications', () => {
+    const registry = new ControlChannelRegistry();
+    const messages: string[] = [];
+    registry.register('dev_1', {
+      readyState: 1,
+      send(data: string) {
+        messages.push(data);
+      },
+    });
+
+    expect(registry.sendReleaseChanged('dev_1', { platform: 'android', versionCode: 42, apkUrl: 'https://example.test/app.apk' })).toBe(true);
+    expect(JSON.parse(messages[0]!)).toMatchObject({
+      type: 'release_changed',
+      platform: 'android',
+      versionCode: 42,
+      apkUrl: 'https://example.test/app.apk',
+    });
+  });
+
+  test('ignores failed sockets when broadcasting notifications', () => {
+    const registry = new ControlChannelRegistry();
+    const messages: string[] = [];
+    let closed = false;
+    registry.register('dev_1', {
+      readyState: 1,
+      send() {
+        throw new Error('socket closed');
+      },
+      close() {
+        closed = true;
+      },
+    });
+    registry.register('dev_1', {
+      readyState: 1,
+      send(data: string) {
+        messages.push(data);
+      },
+    });
+
+    expect(registry.sendSettingsChanged('dev_1', 'assistant_profiles')).toBe(true);
+    expect(closed).toBe(true);
+    expect(messages).toHaveLength(1);
+    expect(JSON.parse(messages[0]!)).toMatchObject({ type: 'settings_changed', settings: 'assistant_profiles' });
+  });
 });
 
 describe('pairing payload integration', () => {

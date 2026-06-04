@@ -14,6 +14,21 @@ export type SpeechAudioCommand = {
   messageId?: string;
 };
 
+export type SettingsChangedCommand = {
+  type: 'settings_changed';
+  settings: string;
+  reason?: string;
+  sentAt: string;
+};
+
+export type ReleaseChangedCommand = {
+  type: 'release_changed';
+  platform: 'android' | 'desktop';
+  versionCode?: number | null;
+  apkUrl?: string | null;
+  sentAt: string;
+};
+
 export type ControlSocket = {
   send: (data: string) => void;
   close?: (code?: number, reason?: string) => void;
@@ -138,15 +153,39 @@ export class ControlChannelRegistry {
     return this.broadcast(deviceId, JSON.stringify(payload));
   }
 
+  sendSettingsChanged(deviceId: string, settings: string, reason?: string): boolean {
+    const payload: SettingsChangedCommand = {
+      type: 'settings_changed',
+      settings,
+      ...(reason ? { reason } : {}),
+      sentAt: new Date().toISOString(),
+    };
+    return this.broadcast(deviceId, JSON.stringify(payload));
+  }
+
+  sendReleaseChanged(deviceId: string, payload: Omit<ReleaseChangedCommand, 'type' | 'sentAt'>): boolean {
+    return this.broadcast(deviceId, JSON.stringify({
+      type: 'release_changed',
+      ...payload,
+      sentAt: new Date().toISOString(),
+    } satisfies ReleaseChangedCommand));
+  }
+
   private broadcast(deviceId: string, payload: string): boolean {
     const bucket = this.sockets.get(deviceId);
     if (!bucket || bucket.size === 0) return false;
     let sent = false;
     for (const socket of bucket) {
       if ((socket.readyState ?? 1) !== 1) continue;
-      socket.send(payload);
-      sent = true;
+      try {
+        socket.send(payload);
+        sent = true;
+      } catch {
+        bucket.delete(socket);
+        socket.close?.();
+      }
     }
+    if (bucket.size === 0) this.sockets.delete(deviceId);
     return sent;
   }
 }

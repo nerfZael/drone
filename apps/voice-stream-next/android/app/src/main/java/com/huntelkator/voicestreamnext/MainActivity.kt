@@ -106,6 +106,12 @@ class MainActivity : ComponentActivity() {
     @Volatile private var updateCheckRunning = false
     private val cuePlayer = LocalCuePlayer()
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val liveUpdateCheckRunnable = object : Runnable {
+        override fun run() {
+            checkForAppUpdate(force = true)
+            mainHandler.postDelayed(this, UPDATE_LIVE_CHECK_INTERVAL_MS)
+        }
+    }
     private var pendingStartAwake = false
     private var pendingStartTarget = Constants.STREAM_TARGET_ASSISTANT
     private var sessionMode = SessionMode.OFF
@@ -150,6 +156,16 @@ class MainActivity : ComponentActivity() {
     private val speechHistoryReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             refreshSpeechHistory(selectLatest = true)
+        }
+    }
+
+    private val androidUpdateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val versionCode = intent?.getLongExtra(Constants.EXTRA_UPDATE_VERSION_CODE, 0L) ?: 0L
+            if (versionCode <= currentVersionCode()) return
+            val apkUrl = intent?.getStringExtra(Constants.EXTRA_UPDATE_APK_URL)?.takeIf { it.isNotBlank() }
+            renderUpdateBanner(UpdateConfig(versionCode, apkUrl))
+            showStatus("Android update available.")
         }
     }
 
@@ -222,7 +238,14 @@ class MainActivity : ComponentActivity() {
             IntentFilter(Constants.ACTION_SPEECH_HISTORY_CHANGED),
             ContextCompat.RECEIVER_NOT_EXPORTED
         )
+        ContextCompat.registerReceiver(
+            this,
+            androidUpdateReceiver,
+            IntentFilter(Constants.ACTION_ANDROID_UPDATE_AVAILABLE),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
         audioManager.registerAudioDeviceCallback(audioDeviceCallback, mainHandler)
+        scheduleLiveUpdateChecks()
     }
 
     override fun onResume() {
@@ -231,11 +254,14 @@ class MainActivity : ComponentActivity() {
         refreshSpeechHistory(selectLatest = false)
         refreshAssistantThreadSummary()
         resyncServiceStatus()
+        checkForAppUpdate(force = true)
     }
 
     override fun onStop() {
+        stopLiveUpdateChecks()
         runCatching { unregisterReceiver(statusReceiver) }
         runCatching { unregisterReceiver(speechHistoryReceiver) }
+        runCatching { unregisterReceiver(androidUpdateReceiver) }
         runCatching { audioManager.unregisterAudioDeviceCallback(audioDeviceCallback) }
         super.onStop()
     }
@@ -1187,6 +1213,15 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun scheduleLiveUpdateChecks() {
+        mainHandler.removeCallbacks(liveUpdateCheckRunnable)
+        mainHandler.postDelayed(liveUpdateCheckRunnable, UPDATE_LIVE_CHECK_INTERVAL_MS)
+    }
+
+    private fun stopLiveUpdateChecks() {
+        mainHandler.removeCallbacks(liveUpdateCheckRunnable)
+    }
+
     private fun checkForAppUpdate(force: Boolean = false, showNoUpdate: Boolean = false) {
         val connected = api.pairedDeviceId().isNotBlank() && api.pairedDeviceToken().isNotBlank()
         if (!connected) {
@@ -1835,6 +1870,7 @@ class MainActivity : ComponentActivity() {
         const val COLOR_YELLOW = 0xffffb224.toInt()
         const val COLOR_RED = 0xffff5a5a.toInt()
         const val UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000L
+        const val UPDATE_LIVE_CHECK_INTERVAL_MS = 60 * 1000L
         const val COLOR_SYSTEM_BAR = 0xcc101216.toInt()
         val SPEECH_TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("MMM d HH:mm")
     }

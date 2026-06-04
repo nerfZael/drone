@@ -909,6 +909,24 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     emitAppEvent(userId ?? null, 'assistant_changed', { reason, ...(threadId ? { threadId } : {}) });
   };
 
+  const emitDeviceSettingsChanged = (userId: string, settings: string, reason?: string) => {
+    for (const device of db.listDevices(userId)) {
+      if (device.revokedAt) continue;
+      controlChannels.sendSettingsChanged(device.id, settings, reason);
+    }
+  };
+
+  const emitAndroidReleaseChanged = (android: AndroidApkInfo) => {
+    for (const device of db.listDevices()) {
+      if (device.revokedAt || device.deviceType !== 'android') continue;
+      controlChannels.sendReleaseChanged(device.id, {
+        platform: 'android',
+        versionCode: android.versionCode,
+        apkUrl: android.downloadUrl,
+      });
+    }
+  };
+
   const addLog = (
     userId: string,
     input: { deviceId?: string | null; source: string; level: string; message: string; detailsJson?: string | null },
@@ -1343,6 +1361,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         detailsJson: JSON.stringify({ variant: android.variant, versionCode: android.versionCode, size: android.size }),
       });
       emitAppEvent(null, 'release_changed', { platform: 'android' });
+      emitAndroidReleaseChanged(android);
       return { ok: true, android };
     };
     if (preAuth) return handleUpload(preAuth);
@@ -1623,6 +1642,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         lockCode: cleanCode(body.lockCode, 'lock code'),
       });
       emitAppEvent(ctx.user.id, 'settings_changed', { settings: 'voice_codes' });
+      emitDeviceSettingsChanged(ctx.user.id, 'voice_codes', 'voice_codes_updated');
       return { ok: true, settings };
     }),
   );
@@ -1643,6 +1663,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       }
       const settings = db.updateVoiceApprovalSettings(ctx.user.id, parsed);
       emitAppEvent(ctx.user.id, 'settings_changed', { settings: 'voice_approval' });
+      emitDeviceSettingsChanged(ctx.user.id, 'voice_approval', 'voice_approval_updated');
       return voiceApprovalSettingsResponse(settings, { assistantProfiles: db.listAssistantProfiles(ctx.user.id) });
     }),
   );
@@ -2960,6 +2981,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       });
       emitAssistantChange('assistant_profile_created', undefined, ctx.user.id);
       emitAppEvent(ctx.user.id, 'settings_changed', { settings: 'assistant_profiles' });
+      emitDeviceSettingsChanged(ctx.user.id, 'assistant_profiles', 'assistant_profile_created');
       return { ok: true, profile, profiles: db.listAssistantProfiles(ctx.user.id), snapshot: assistantSnapshot(db, ctx.user.id) };
     }),
   );
@@ -2982,6 +3004,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       if (!profile) throw Object.assign(new Error('unknown assistant profile'), { statusCode: 404 });
       emitAssistantChange('assistant_profile_updated', undefined, ctx.user.id);
       emitAppEvent(ctx.user.id, 'settings_changed', { settings: 'assistant_profiles' });
+      emitDeviceSettingsChanged(ctx.user.id, 'assistant_profiles', 'assistant_profile_updated');
       return { ok: true, profile, profiles: db.listAssistantProfiles(ctx.user.id), snapshot: assistantSnapshot(db, ctx.user.id) };
     }),
   );
