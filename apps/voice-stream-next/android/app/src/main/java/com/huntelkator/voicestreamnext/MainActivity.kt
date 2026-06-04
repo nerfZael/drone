@@ -1361,8 +1361,7 @@ class MainActivity : ComponentActivity() {
                 dashboardButton.isEnabled = true
                 result
                     .onSuccess { handoff ->
-                        webPanel.visibility = View.VISIBLE
-                        dashboardWebView.loadUrl(handoff.url)
+                        showDashboardView(handoff.url)
                     }
                     .onFailure { error ->
                         showStatus(error.message ?: "Could not open dashboard.")
@@ -1371,10 +1370,21 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun showDashboardView(url: String) {
+        settingsPanel.visibility = View.GONE
+        settingsButton.text = "Settings"
+        settingsButton.visibility = View.GONE
+        webPanel.visibility = View.VISIBLE
+        dashboardWebView.loadUrl(url)
+    }
+
     private fun closeDashboardView() {
         if (!::webPanel.isInitialized) return
         webPanel.visibility = View.GONE
         dashboardWebView.stopLoading()
+        if (api.pairedDeviceId().isNotBlank() && api.pairedDeviceToken().isNotBlank()) {
+            settingsButton.visibility = View.VISIBLE
+        }
         showStatus("Ready.")
     }
 
@@ -1463,9 +1473,14 @@ class MainActivity : ComponentActivity() {
 
     private fun renderAuthState() {
         val connected = api.pairedDeviceId().isNotBlank() && api.pairedDeviceToken().isNotBlank()
+        val dashboardOpen = ::webPanel.isInitialized && webPanel.visibility == View.VISIBLE
         signedOutPanel.visibility = if (connected) View.GONE else View.VISIBLE
         voicePanel.visibility = if (connected) View.VISIBLE else View.GONE
-        settingsButton.visibility = if (connected) View.VISIBLE else View.GONE
+        settingsButton.visibility = if (connected && !dashboardOpen) View.VISIBLE else View.GONE
+        if (dashboardOpen) {
+            settingsPanel.visibility = View.GONE
+            settingsButton.text = "Settings"
+        }
         microphoneText.visibility = if (connected) View.VISIBLE else View.GONE
         dashboardButton.visibility = if (connected) View.VISIBLE else View.INVISIBLE
         filesButton.visibility = if (connected) View.VISIBLE else View.GONE

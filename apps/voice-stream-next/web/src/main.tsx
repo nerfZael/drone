@@ -5984,12 +5984,8 @@ function NativeWebViewSessionGate({ children }: { children: React.ReactNode }) {
   if (state === 'active') return <NativeWebViewDashboard />;
   if (state === 'checking') {
     return (
-      <div className="signin-page">
-        <div className="signin-copy">
-          <div className="kicker">VoiceStream</div>
-          <h1>Opening dashboard</h1>
-          <p>Checking your native app session.</p>
-        </div>
+      <div className="loading-screen">
+        <CircuitRobotLoader label="Opening dashboard" />
       </div>
     );
   }
