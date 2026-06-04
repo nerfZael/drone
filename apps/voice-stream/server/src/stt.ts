@@ -20,6 +20,7 @@ export type TranscriptMessage = TranscriptStatus | TranscriptSegment;
 export type TranscriptCommand = {
   type: "sleep" | "abort";
   phrase: string;
+  targetState?: "awake" | "sleeping";
   detectedAt: string;
   transcriptText: string;
 };
@@ -48,6 +49,7 @@ export type TranscriptionConfig = {
   channels: number;
   broadcastSegments: boolean;
   ignoreEmptySleepCommands: boolean;
+  ignoreAbortCommands: boolean;
   finalTranscriptionMode: "full-recording" | "segments";
   maxSessionAudioBytes: number;
 };
@@ -67,6 +69,7 @@ export type SpeechSegmenterConfig = {
 
 type BroadcastFn = (message: TranscriptMessage) => void;
 type CommandFn = (command: TranscriptCommand) => void;
+type SegmentFn = (segment: TranscriptSegment) => void | Promise<void>;
 
 type QueuedSegment = {
   pcm: Buffer;
@@ -81,6 +84,8 @@ type QueuedSegment = {
 
 export class GroqTranscriptionManager {
   private readonly segmenter: PcmSpeechSegmenter;
+  private readonly onSegment?: SegmentFn;
+  private readonly logLabel: string;
   private readonly queue: QueuedSegment[] = [];
   private readonly timer: NodeJS.Timeout;
   private inFlight = false;
@@ -96,8 +101,11 @@ export class GroqTranscriptionManager {
     private readonly config: TranscriptionConfig,
     private readonly broadcast: BroadcastFn,
     private readonly onCommand?: CommandFn,
-    private readonly logLabel = "stt",
+    onSegmentOrLogLabel?: SegmentFn | string,
+    logLabel = "stt",
   ) {
+    this.onSegment = typeof onSegmentOrLogLabel === "function" ? onSegmentOrLogLabel : undefined;
+    this.logLabel = typeof onSegmentOrLogLabel === "string" ? onSegmentOrLogLabel : logLabel;
     this.segmenter = new PcmSpeechSegmenter(config);
     this.timer = setInterval(() => {
       this.processQueue();
@@ -212,7 +220,7 @@ export class GroqTranscriptionManager {
       const commandResult = stripTranscriptCommands(text);
       this.logSegmentResult(segment, text, commandResult, Date.now() - startedAt, prompt);
       const trimmed = commandResult.text;
-      if (commandResult.abortDetected) {
+      if (commandResult.abortDetected && !this.config.ignoreAbortCommands) {
         this.enterTerminalCommandState({ clearContext: true });
         this.log(
           `command=abort segment=${segment.sequence} phrase=${formatLogValue(commandResult.abortPhrase ?? "okay stop")} ` +
@@ -265,6 +273,7 @@ export class GroqTranscriptionManager {
         this.onCommand?.({
           type: "sleep",
           phrase: commandResult.sleepPhrase ?? "that's it",
+          targetState: commandResult.sleepTargetState ?? "awake",
           detectedAt: new Date().toISOString(),
           transcriptText,
         });
@@ -282,15 +291,26 @@ export class GroqTranscriptionManager {
 
       if (!commandResult.abortDetected && hasTranscriptContent(trimmed)) {
         this.rememberTranscript(trimmed);
+        const message: TranscriptSegment = {
+          type: "transcript_segment",
+          text: trimmed,
+          final: true,
+          model: this.config.model,
+          audioMs: segment.audioMs,
+          receivedAt: new Date().toISOString(),
+        };
         if (this.config.broadcastSegments) {
-          this.broadcast({
-            type: "transcript_segment",
-            text: trimmed,
-            final: true,
-            model: this.config.model,
-            audioMs: segment.audioMs,
-            receivedAt: new Date().toISOString(),
-          });
+          this.broadcast(message);
+        }
+        if (this.onSegment) {
+          try {
+            await this.onSegment(message);
+          } catch (error) {
+            this.log(
+              `segment=${segment.sequence} segment_callback_error ` +
+              `message=${formatLogValue(error instanceof Error ? error.message : String(error))}`
+            );
+          }
         }
       }
       this.inFlight = false;
@@ -575,6 +595,7 @@ export function buildTranscriptionConfigFromEnv(env: NodeJS.ProcessEnv): Transcr
     channels: 1,
     broadcastSegments: true,
     ignoreEmptySleepCommands: false,
+    ignoreAbortCommands: false,
     finalTranscriptionMode: parseFinalTranscriptionMode(env.GROQ_STT_FINAL_TRANSCRIPTION_MODE),
     maxSessionAudioBytes: parsePositiveInteger(env.GROQ_STT_MAX_SESSION_AUDIO_BYTES, 80 * 1024 * 1024),
   };
@@ -618,6 +639,7 @@ export function stripTranscriptCommands(text: string): {
   wakeDetected: boolean;
   sleepDetected: boolean;
   sleepPhrase?: string;
+  sleepTargetState?: "awake" | "sleeping";
   abortDetected: boolean;
   abortPhrase?: string;
 } {
@@ -625,6 +647,7 @@ export function stripTranscriptCommands(text: string): {
   let wakeDetected = false;
   let sleepDetected = false;
   let sleepPhrase: string | undefined;
+  let sleepTargetState: "awake" | "sleeping" | undefined;
   let abortDetected = false;
   let abortPhrase: string | undefined;
 
@@ -651,6 +674,14 @@ export function stripTranscriptCommands(text: string): {
   cleaned = cleaned.replace(/\b(?:that's|thats|that\s+is)\s+it\b[\s,.:;!?-]*/gi, (match) => {
     sleepDetected = true;
     sleepPhrase = match.trim();
+    sleepTargetState ??= "awake";
+    return " ";
+  });
+
+  cleaned = cleaned.replace(/\bgo\s+to\s+sleep\b[\s,.:;!?-]*/gi, (match) => {
+    sleepDetected = true;
+    sleepPhrase = match.trim();
+    sleepTargetState = "sleeping";
     return " ";
   });
 
@@ -665,6 +696,7 @@ export function stripTranscriptCommands(text: string): {
     wakeDetected,
     sleepDetected,
     sleepPhrase,
+    sleepTargetState,
     abortDetected,
     abortPhrase,
   };

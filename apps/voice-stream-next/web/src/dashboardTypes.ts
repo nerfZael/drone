@@ -489,6 +489,7 @@ export type DashboardData = {
 export type ApiClient = {
   request<T>(path: string, init?: RequestInit): Promise<T>;
   stream(path: string, init?: RequestInit): Promise<Response>;
+  upload(path: string, init: RequestInit, onProgress?: (progress: { loaded: number; total: number | null }) => void): Promise<Response>;
 };
 
 export type DevUser = {

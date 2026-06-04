@@ -94,8 +94,17 @@ export type VoiceTranscriptionSettings = {
   finalMode: VoiceTranscriptionFinalMode;
 };
 
+export type VoiceActivationSettings = {
+  normalAliases: string[];
+  realTimeAliases: string[];
+};
+
 export type VoiceApprovalSettingsResponse = {
   ok: true;
+  profile: {
+    activeProfile: string | null;
+    scoped: true;
+  };
   voiceApproval: VoiceApprovalSettings & {
     source: 'settings' | 'default';
     updatedAt: string | null;
@@ -104,8 +113,13 @@ export type VoiceApprovalSettingsResponse = {
     source: 'settings' | 'default';
     updatedAt: string | null;
   };
+  voiceActivation: VoiceActivationSettings & {
+    source: 'settings' | 'default';
+    updatedAt: string | null;
+  };
   defaults: VoiceApprovalSettings;
   transcriptionDefaults: VoiceTranscriptionSettings;
+  activationDefaults: VoiceActivationSettings;
   limits: {
     triggerPhraseMaxChars: number;
     codeMaxDigits: number;
@@ -123,6 +137,8 @@ export type VoiceApprovalSettingsResponse = {
     finalizeCheckIntervalMsMax: number;
     postPromptCommandSuppressionMsMin: number;
     postPromptCommandSuppressionMsMax: number;
+    activationAliasMaxChars: number;
+    activationAliasMaxCount: number;
   };
 };
 

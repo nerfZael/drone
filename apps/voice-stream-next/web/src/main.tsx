@@ -34,6 +34,7 @@ import type {
   DesktopVoskStatus,
   DesktopVoskText,
   DeviceRecord,
+  LogRecord,
   SpeechPlaybackTarget,
   VoiceRecordingRecord,
   VoiceApprovalFormState,
@@ -42,10 +43,15 @@ import type {
 import { exactTimeLabel, relativeTimeAgo, timeLabel } from './time.js';
 import { AssistantFilesPanel, type ArtifactPanelMode } from './assistant/AssistantFilesPanel.js';
 import { AssistantSystemPromptModal, type AssistantSystemPromptMode } from './assistant/AssistantSystemPromptModal.js';
+import { AdminPage } from './admin/AdminPage.js';
+import { dashboardRoutePath, parseDashboardRoute, SETTINGS_PANES, type SettingsPane } from './dashboardRoutes.js';
+import { AppDownloadLinks } from './downloads/AppDownloadLinks.js';
+import { SettingsPage } from './settings/SettingsPage.js';
 import { cn } from './ui/cn.js';
 import { CircuitRobotLoader } from './ui/CircuitRobotLoader.js';
 import { MarkdownMessage } from './ui/MarkdownMessage.js';
 import { UiMenuSelect, type UiMenuSelectEntry } from './ui/MenuSelect.js';
+import { formatBytes, formatCredits } from './utils/format.js';
 import './styles.css';
 
 const publishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined;
@@ -64,7 +70,6 @@ const ASSISTANT_PROVIDERS: Array<{ id: 'codex' | 'openai'; label: string; title:
 
 type AssistantApiKeyProvider = 'openai' | 'exa';
 type AssistantSettingsPromptField = 'voiceSystemPrompt';
-type SettingsPane = 'devices' | 'assistant' | 'assistant-config' | 'skills' | 'voice' | 'recordings' | 'activity';
 type AssistantSkillDraft = {
   id: string | null;
   slug: string;
@@ -100,16 +105,6 @@ type AppEvent = {
 };
 type SseMessage = { event: string; data: unknown };
 
-const SETTINGS_PANES: Array<{ id: SettingsPane; label: string }> = [
-  { id: 'devices', label: 'Devices' },
-  { id: 'assistant', label: 'Assistants' },
-  { id: 'assistant-config', label: 'Assistant Config' },
-  { id: 'skills', label: 'Skills' },
-  { id: 'voice', label: 'Voice' },
-  { id: 'recordings', label: 'Recordings' },
-  { id: 'activity', label: 'Activity' },
-];
-
 const assistantIconButtonClass =
   'relative flex h-7 w-7 shrink-0 items-center justify-center rounded border border-[var(--border-subtle)] bg-white/[.02] p-0 text-[var(--muted)] transition hover:bg-white/[.05] hover:text-[var(--fg-secondary)] disabled:pointer-events-none disabled:opacity-50';
 const assistantIconButtonActiveClass = '!border-[rgba(74,222,128,.28)] !bg-[rgba(74,222,128,.08)] !text-[var(--green)]';
@@ -127,15 +122,43 @@ const assistantFieldLabelClass = 'grid gap-1.5 text-[10px] font-extrabold upperc
 const assistantRowClass = 'rounded-[7px] border border-[var(--border-subtle)] bg-white/[.025] text-[var(--fg-secondary)]';
 const assistantSkillBadgeClass =
   'inline-flex max-w-[130px] items-center rounded border border-[rgba(74,222,128,.22)] bg-[rgba(74,222,128,.07)] px-1.5 py-0.5 font-display text-[9px] font-semibold uppercase leading-none text-[var(--green)]';
-const settingsTabClass =
-  'relative -mb-px inline-flex h-8 items-center justify-center rounded-t-md border border-[var(--border-subtle)] border-b-transparent bg-black/[.12] px-3 font-display text-[10px] font-semibold uppercase text-[var(--muted)] shadow-none transition hover:bg-white/[.04] hover:text-[var(--fg-secondary)]';
-const settingsTabActiveClass =
-  'border-[rgba(74,222,128,.30)] border-b-[var(--panel-alt)] bg-[rgba(74,222,128,.08)] text-[var(--green)]';
 const ASSISTANT_MESSAGES_BOTTOM_THRESHOLD_PX = 1;
 const COMPACT_VIEWPORT_QUERY = '(max-width: 880px)';
 
 function isCompactViewport(): boolean {
   return typeof window !== 'undefined' && window.matchMedia(COMPACT_VIEWPORT_QUERY).matches;
+}
+
+function useAssistantViewportHeight() {
+  React.useEffect(() => {
+    const root = document.documentElement;
+    let frame = 0;
+
+    const syncHeight = () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        const visualHeight = window.visualViewport?.height;
+        const height = Number.isFinite(visualHeight) && visualHeight ? visualHeight : window.innerHeight;
+        root.style.setProperty('--assistant-viewport-height', `${Math.round(height)}px`);
+      });
+    };
+
+    syncHeight();
+    window.visualViewport?.addEventListener('resize', syncHeight);
+    window.visualViewport?.addEventListener('scroll', syncHeight);
+    window.addEventListener('resize', syncHeight);
+    window.addEventListener('orientationchange', syncHeight);
+
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      window.visualViewport?.removeEventListener('resize', syncHeight);
+      window.visualViewport?.removeEventListener('scroll', syncHeight);
+      window.removeEventListener('resize', syncHeight);
+      window.removeEventListener('orientationchange', syncHeight);
+      root.style.removeProperty('--assistant-viewport-height');
+    };
+  }, []);
 }
 
 function modelSelectionKey(selection: { provider: string; model: string; thinkingLevel: string }): string {
@@ -1114,10 +1137,14 @@ function chooseDefaultArtifact(artifacts: AssistantArtifactRecord[], preferredPa
 }
 
 function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: React.ReactNode }) {
+  useAssistantViewportHeight();
+
+  const initialRouteRef = React.useRef(parseDashboardRoute(window.location.pathname));
   const [dashboard, setDashboard] = React.useState<DashboardData | null>(null);
   const [assistantSnapshotData, setAssistantSnapshotData] = React.useState<AssistantSnapshot | null>(null);
-  const [activeView, setActiveView] = React.useState<DashboardView>('threads');
-  const [settingsPane, setSettingsPane] = React.useState<SettingsPane>('devices');
+  const [activeView, setActiveViewState] = React.useState<DashboardView>(initialRouteRef.current.view);
+  const [settingsPane, setSettingsPaneState] = React.useState<SettingsPane>(initialRouteRef.current.settingsPane);
+  const [activityLogFilter, setActivityLogFilter] = React.useState<'all' | 'wake-listener'>('all');
   const [threadSidebarOpen, setThreadSidebarOpen] = React.useState(() => !isCompactViewport());
   const [mobileToolbarOpen, setMobileToolbarOpen] = React.useState(false);
   const [mobileModelControlsOpen, setMobileModelControlsOpen] = React.useState(false);
@@ -1149,6 +1176,13 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const [loading, setLoading] = React.useState(true);
   const [busy, setBusy] = React.useState(false);
   const [toasts, setToasts] = React.useState<AppToast[]>([]);
+  const [releaseUploadProgress, setReleaseUploadProgress] = React.useState<{
+    platform: 'android' | 'desktop';
+    fileName: string;
+    loaded: number;
+    total: number | null;
+    phase: 'uploading' | 'processing';
+  } | null>(null);
   const [messageDraft, setMessageDraft] = React.useState('');
   const [threadTitleDraft, setThreadTitleDraft] = React.useState('');
   const [threadDeleteCandidate, setThreadDeleteCandidate] = React.useState<AssistantThread | null>(null);
@@ -1202,9 +1236,40 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const activeThreadIdRef = React.useRef<string | null>(null);
   const messageDraftRef = React.useRef('');
 
+  const replaceDashboardRoute = React.useCallback((view: DashboardView, pane: SettingsPane) => {
+    const path = dashboardRoutePath(view, pane);
+    if (window.location.pathname !== path) window.history.replaceState({}, '', path);
+  }, []);
+
+  const pushDashboardRoute = React.useCallback((view: DashboardView, pane: SettingsPane) => {
+    const path = dashboardRoutePath(view, pane);
+    if (window.location.pathname !== path) window.history.pushState({}, '', path);
+  }, []);
+
+  const setActiveView = React.useCallback((view: DashboardView) => {
+    setActiveViewState(view);
+    pushDashboardRoute(view, settingsPane);
+  }, [pushDashboardRoute, settingsPane]);
+
+  const setSettingsPane = React.useCallback((pane: SettingsPane) => {
+    setSettingsPaneState(pane);
+    if (activeView === 'settings') pushDashboardRoute('settings', pane);
+  }, [activeView, pushDashboardRoute]);
+
   const selectActiveThread = React.useCallback((threadId: string | null) => {
     activeThreadIdRef.current = threadId;
     setActiveThreadId(threadId);
+  }, []);
+
+  React.useEffect(() => {
+    replaceDashboardRoute(activeView, settingsPane);
+    const handlePopState = () => {
+      const route = parseDashboardRoute(window.location.pathname);
+      setActiveViewState(route.view);
+      setSettingsPaneState(route.settingsPane);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
   React.useEffect(() => {
@@ -1592,6 +1657,11 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
       if (event.type === 'release_changed') {
         scheduleReleaseEventRefreshRef.current(event.platform);
         scheduleDashboardEventRefreshRef.current();
+        return;
+      }
+      if (event.type === 'voice_recording_changed') {
+        scheduleDashboardEventRefreshRef.current();
+        void loadVoiceRecordings();
         return;
       }
       scheduleDashboardEventRefreshRef.current();
@@ -2655,7 +2725,10 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   }
 
   async function copyLogs() {
-    const text = (dashboard?.logs ?? [])
+    const visibleLogs = activityLogFilter === 'wake-listener'
+      ? (dashboard?.logs ?? []).filter(isVoskUtteranceLog)
+      : (dashboard?.logs ?? []);
+    const text = visibleLogs
       .map((log) => `[${log.createdAt}] ${log.level.toUpperCase()} ${log.source}: ${log.message}${log.detailsJson ? ` ${log.detailsJson}` : ''}`)
       .join('\n');
     await navigator.clipboard?.writeText(text);
@@ -2672,6 +2745,25 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     }
     if (!response.ok) throw new Error(data?.error ?? `${response.status} ${response.statusText}`);
     return data as T;
+  }
+
+  function setUploadProgress(platform: 'android' | 'desktop', artifact: File, progress: { loaded: number; total: number | null }) {
+    setReleaseUploadProgress({
+      platform,
+      fileName: artifact.name,
+      loaded: progress.loaded,
+      total: progress.total,
+      phase: 'uploading',
+    });
+  }
+
+  async function createReleaseUploadSession(platform: 'android' | 'desktop'): Promise<string> {
+    const data = await client.request<{ ok: true; uploadToken: string; expiresAt: string }>('/api/admin/releases/upload-session', {
+      method: 'POST',
+      body: JSON.stringify({ platform }),
+    });
+    if (!data.uploadToken) throw new Error('Release upload session did not include a token.');
+    return data.uploadToken;
   }
 
   async function parseReleaseMetadataFile(file: File): Promise<Record<string, unknown>> {
@@ -2729,47 +2821,6 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
       ? files.find((file) => /\.apk$/i.test(file.name)) ?? null
       : files.find((file) => /\.(zip|dmg|exe|appimage|tar\.gz|tgz)$/i.test(file.name)) ?? null;
     return { artifact, metadata };
-  }
-
-  function fileList(files: FileList | File[] | null | undefined): File[] {
-    return Array.from(files ?? []);
-  }
-
-  type DroppedEntry = {
-    isFile: boolean;
-    isDirectory: boolean;
-    file?: (success: (file: File) => void, failure?: (error: unknown) => void) => void;
-    createReader?: () => {
-      readEntries: (success: (entries: DroppedEntry[]) => void, failure?: (error: unknown) => void) => void;
-    };
-  };
-
-  async function filesFromEntry(entry: DroppedEntry): Promise<File[]> {
-    if (entry.isFile && entry.file) {
-      return new Promise((resolve, reject) => entry.file?.((file) => resolve([file]), reject));
-    }
-    if (!entry.isDirectory || !entry.createReader) return [];
-    const reader = entry.createReader();
-    const entries: DroppedEntry[] = [];
-    for (;;) {
-      const batch = await new Promise<DroppedEntry[]>((resolve, reject) => reader.readEntries(resolve, reject));
-      if (batch.length === 0) break;
-      entries.push(...batch);
-    }
-    const nested = await Promise.all(entries.map((child) => filesFromEntry(child)));
-    return nested.flat();
-  }
-
-  async function filesFromDrop(dataTransfer: DataTransfer): Promise<File[]> {
-    const itemEntries = Array.from(dataTransfer.items ?? [])
-      .map((item) => {
-        const getter = (item as DataTransferItem & { webkitGetAsEntry?: () => DroppedEntry | null }).webkitGetAsEntry;
-        return getter ? getter.call(item) : null;
-      })
-      .filter((entry): entry is DroppedEntry => Boolean(entry));
-    if (itemEntries.length === 0) return fileList(dataTransfer.files);
-    const nested = await Promise.all(itemEntries.map((entry) => filesFromEntry(entry)));
-    return nested.flat();
   }
 
   function updateCreditGrantDraft(userId: string, patch: Partial<{ amountCredits: string; reason: string }>) {
@@ -2862,16 +2913,20 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     setError(null);
     try {
       setAdminAndroidFile(artifact);
+      setReleaseUploadProgress({ platform: 'android', fileName: artifact.name, loaded: 0, total: artifact.size || null, phase: 'uploading' });
       const path = '/api/admin/releases/android';
-      const response = await client.stream(path, {
+      const uploadToken = await createReleaseUploadSession('android');
+      const response = await client.upload(path, {
         method: 'PUT',
         headers: {
           'content-type': artifact.type || 'application/vnd.android.package-archive',
           'x-voice-release-file-name': artifact.name,
           'x-voice-release-metadata': JSON.stringify(metadata),
+          'x-voice-release-upload-token': uploadToken,
         },
         body: artifact,
-      });
+      }, (progress) => setUploadProgress('android', artifact, progress));
+      setReleaseUploadProgress((current) => current?.platform === 'android' ? { ...current, loaded: current.total ?? artifact.size, phase: 'processing' } : current);
       const data = await parseUploadResponse<{ ok: true; android: AndroidApkInfo }>(response, path);
       setAndroidApkInfo(data.android);
       await refreshAndroidSetup();
@@ -2881,6 +2936,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
       setError(err?.message ?? String(err));
     } finally {
       setBusy(false);
+      setReleaseUploadProgress(null);
     }
   }
 
@@ -2894,16 +2950,20 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     setError(null);
     try {
       setAdminDesktopFile(artifact);
+      setReleaseUploadProgress({ platform: 'desktop', fileName: artifact.name, loaded: 0, total: artifact.size || null, phase: 'uploading' });
       const path = '/api/admin/releases/desktop';
-      const response = await client.stream(path, {
+      const uploadToken = await createReleaseUploadSession('desktop');
+      const response = await client.upload(path, {
         method: 'PUT',
         headers: {
           'content-type': artifact.type || 'application/octet-stream',
           'x-voice-release-file-name': artifact.name,
           'x-voice-release-metadata': JSON.stringify(metadata),
+          'x-voice-release-upload-token': uploadToken,
         },
         body: artifact,
-      });
+      }, (progress) => setUploadProgress('desktop', artifact, progress));
+      setReleaseUploadProgress((current) => current?.platform === 'desktop' ? { ...current, loaded: current.total ?? artifact.size, phase: 'processing' } : current);
       const data = await parseUploadResponse<{ ok: true; desktop: DesktopAppInfo }>(response, path);
       setDesktopAppInfo(data.desktop);
       await loadDashboard();
@@ -2912,12 +2972,8 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
       setError(err?.message ?? String(err));
     } finally {
       setBusy(false);
+      setReleaseUploadProgress(null);
     }
-  }
-
-  async function droppedFiles(event: React.DragEvent<HTMLElement>): Promise<File[]> {
-    event.preventDefault();
-    return filesFromDrop(event.dataTransfer);
   }
 
   const userCredits = dashboard?.credits ?? {
@@ -2965,9 +3021,9 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const devices = dashboard?.devices ?? [];
   const threads = assistantThreads;
   const logs = dashboard?.logs ?? [];
-  const adminUsers = dashboard?.adminUsers ?? [];
-  const adminPendingCreditGrants = dashboard?.adminPendingCreditGrants ?? [];
   const canGrantCreditsByEmail = emailCreditGrantDraft.email.trim().includes('@') && Number(emailCreditGrantDraft.amountCredits) > 0;
+  const wakeListenerLogs = logs.filter(isVoskUtteranceLog);
+  const activityLogs = activityLogFilter === 'wake-listener' ? wakeListenerLogs : logs;
   const assistantRecordings = voiceRecordings.filter((recording) => recording.mode === 'assistant');
   const clipboardRecordings = voiceRecordings.filter((recording) => recording.mode === 'clipboard');
   const speechPlayback = dashboard?.speechPlayback;
@@ -3106,7 +3162,10 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   };
 
   return (
-    <main className="assistant-dock-shell relative flex h-screen min-h-0 overflow-hidden bg-[var(--panel-alt)] text-[var(--fg)] max-[880px]:h-dvh max-[880px]:flex-col">
+    <main
+      className="assistant-dock-shell relative flex min-h-0 w-full max-w-full overflow-hidden overflow-x-hidden bg-[var(--panel-alt)] text-[var(--fg)] max-[880px]:flex-col"
+      style={{ height: 'var(--assistant-viewport-height, 100dvh)' }}
+    >
       <button
         type="button"
         className={cn(
@@ -3622,7 +3681,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                 <div
                   ref={messagesScrollRef}
                   onScroll={(event) => updateMessagesStickToBottom(event.currentTarget)}
-                  className="flex min-h-0 flex-1 flex-col gap-2 overflow-auto bg-[#151a20] py-3"
+                  className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overflow-x-hidden bg-[#151a20] py-3"
                 >
                   {assistantRenderItems.map((item) =>
                     item.type === 'message' ? (
@@ -3693,8 +3752,8 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                   {!activeThread ? <div className={assistantEmptyClass}>Create a thread to start.</div> : null}
                 </div>
 
-                <form className="block shrink-0 bg-[#151a20] p-2 pt-1" onSubmit={(event) => void sendMessage(event)}>
-                <div className={cn('mb-1 flex min-w-0 flex-wrap items-center gap-1.5', !mobileModelControlsOpen && 'max-[620px]:hidden')}>
+                <form className="block w-full max-w-full shrink-0 overflow-hidden bg-[#151a20] px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-1" onSubmit={(event) => void sendMessage(event)}>
+                <div className={cn('mb-1 flex min-w-0 flex-wrap items-center gap-1.5 max-[620px]:grid max-[620px]:grid-cols-2 max-[620px]:items-stretch', !mobileModelControlsOpen && 'max-[620px]:hidden')}>
                   <div className="inline-flex shrink-0 overflow-hidden rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.025)]" role="group" aria-label="Assistant provider">
                     {providerOptions.map((provider) => {
                       const selected = provider.id === activeProvider;
@@ -3846,37 +3905,12 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
           ) : null}
 
           {activeView === 'settings' ? (
-            <section className="flex h-full min-h-0 flex-col">
-              <div className="shrink-0 bg-[var(--panel-alt)] px-3 pt-3">
-                <div className="hidden pb-1 max-[620px]:block">
-                <UiMenuSelect
-                  value={settingsPane}
-                  entries={settingsPaneEntries}
-                  placement="below"
-                  title={`Settings pane: ${activeSettingsPaneLabel}`}
-                  triggerLabel={activeSettingsPaneLabel}
-                  triggerClassName="h-9 border-[var(--border)] bg-white/[.025] text-[var(--fg-secondary)]"
-                  panelClassName="w-full"
-                  menuClassName="max-h-[320px]"
-                  onValueChange={(value) => setSettingsPane(value as SettingsPane)}
-                />
-                </div>
-                <div className="flex w-full flex-nowrap items-end gap-1 overflow-x-auto bg-[var(--panel-alt)] pt-0 pb-1 max-[620px]:hidden">
-                  {SETTINGS_PANES.map((pane) => (
-                    <button
-                      key={pane.id}
-                      type="button"
-                      className={cn(settingsTabClass, settingsPane === pane.id && settingsTabActiveClass)}
-                      aria-pressed={settingsPane === pane.id}
-                      onClick={() => setSettingsPane(pane.id)}
-                    >
-                      {pane.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="grid min-h-0 flex-1 content-start gap-3 overflow-y-auto p-3">
+            <SettingsPage
+              settingsPane={settingsPane}
+              settingsPaneEntries={settingsPaneEntries}
+              activeSettingsPaneLabel={activeSettingsPaneLabel}
+              onSettingsPaneChange={setSettingsPane}
+            >
                 {settingsPane === 'devices' ? (
                 <>
                   <section className={assistantPanelClass}>
@@ -4794,266 +4828,71 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                       <span className={assistantKickerClass}>Runtime</span>
                       <h2 className={assistantPanelTitleClass}>Logs</h2>
                     </div>
-                    <button type="button" className={assistantActionButtonClass} onClick={() => void copyLogs()}>
-                      Copy Logs
-                    </button>
-                  </div>
-                  <div className="grid gap-2">
-                    {logs.map((log) => (
-                      <article key={log.id} className={cn(assistantRowClass, 'grid grid-cols-[92px_120px_minmax(0,1fr)_auto] items-center gap-2 p-2 max-[620px]:grid-cols-1')}>
-                        <span className={cn('w-fit rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase', log.level === 'error' ? 'border-[rgba(255,90,90,.24)] bg-[var(--red-subtle)] text-[var(--red)]' : 'border-[rgba(74,222,128,.22)] bg-[var(--green-subtle)] text-[var(--green)]')}>{log.level}</span>
-                        <span className="text-xs text-[var(--muted)]">{log.source}</span>
-                        <strong className="min-w-0 text-xs text-[var(--fg)]">{log.message}</strong>
-                        <time className="text-xs text-[var(--muted)]">{timeLabel(log.createdAt)}</time>
-                      </article>
-                    ))}
-                    {logs.length === 0 ? <div className={assistantEmptyClass}>No logs yet.</div> : null}
-                  </div>
-                </section>
-                ) : null}
-              </div>
-            </section>
-          ) : null}
-
-          {activeView === 'admin' ? (
-            dashboard?.user.admin ? (
-              <section className="grid min-h-0 gap-3 overflow-auto p-3">
-                <section className={assistantPanelClass}>
-                  <div className={assistantPanelHeaderClass}>
-                    <div>
-                      <span className={assistantKickerClass}>Admin</span>
-                      <h2 className={assistantPanelTitleClass}>Users & Credits</h2>
-                    </div>
-                    <button type="button" className={assistantActionButtonClass} disabled={busy} onClick={() => void loadDashboard({ includeAssistant: false })}>
-                      Refresh
-                    </button>
-                  </div>
-                  <div className="grid gap-2">
-                    <form
-                      className={cn(assistantRowClass, 'grid grid-cols-[minmax(180px,1.2fr)_110px_minmax(160px,1fr)_auto] items-end gap-2 p-3 max-[760px]:grid-cols-2 max-[520px]:grid-cols-1')}
-                      onSubmit={(event) => {
-                        event.preventDefault();
-                        void grantAdminCreditsByEmail();
-                      }}
-                    >
-                      <label className="grid gap-1 text-[11px] text-[var(--muted)]">
-                        Email
-                        <input
-                          value={emailCreditGrantDraft.email}
-                          onChange={(event) => setEmailCreditGrantDraft((current) => ({ ...current, email: event.currentTarget.value }))}
-                          type="email"
-                          placeholder="person@example.com"
-                          disabled={busy}
-                          className="h-8 min-w-0"
-                        />
-                      </label>
-                      <label className="grid gap-1 text-[11px] text-[var(--muted)]">
-                        Credits
-                        <input
-                          value={emailCreditGrantDraft.amountCredits}
-                          onChange={(event) => setEmailCreditGrantDraft((current) => ({ ...current, amountCredits: event.currentTarget.value }))}
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          placeholder="Credits"
-                          disabled={busy}
-                          className="h-8 min-w-0"
-                        />
-                      </label>
-                      <label className="grid gap-1 text-[11px] text-[var(--muted)]">
-                        Reason
-                        <input
-                          value={emailCreditGrantDraft.reason}
-                          onChange={(event) => setEmailCreditGrantDraft((current) => ({ ...current, reason: event.currentTarget.value }))}
-                          placeholder="Reason"
-                          disabled={busy}
-                          className="h-8 min-w-0"
-                        />
-                      </label>
-                      <button type="submit" className={assistantActionButtonClass} disabled={busy || !canGrantCreditsByEmail}>
-                        Grant by Email
-                      </button>
-                    </form>
-                    {adminPendingCreditGrants.length > 0 ? (
-                      <div className="grid gap-1.5 rounded border border-[var(--border-subtle)] bg-white/[.018] p-2">
-                        <div className="flex items-center justify-between gap-2 px-1">
-                          <span className={assistantKickerClass}>Pending email grants</span>
-                          <span className="text-[10px] uppercase text-[var(--muted)]">{adminPendingCreditGrants.length}</span>
-                        </div>
-                        {adminPendingCreditGrants.map((grant) => (
-                          <div key={grant.id} className="grid grid-cols-[minmax(0,1fr)_90px_minmax(0,1fr)_120px] items-center gap-2 rounded border border-[var(--border-subtle)] bg-white/[.018] px-2 py-1.5 text-xs max-[760px]:grid-cols-2 max-[520px]:grid-cols-1">
-                            <strong className="min-w-0 truncate text-[var(--fg)]">{grant.email}</strong>
-                            <span className="text-[var(--fg-secondary)]">{formatCredits(grant.amountMicrocredits)}</span>
-                            <span className="min-w-0 truncate text-[var(--muted)]">{grant.reason || 'Admin credit grant'}</span>
-                            <time className="text-[10px] uppercase text-[var(--muted)]">{relativeTimeAgo(grant.createdAt)}</time>
-                          </div>
-                        ))}
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      <div className="flex overflow-hidden rounded-md border border-[var(--border-subtle)] bg-black/[.12]">
+                        <button
+                          type="button"
+                          className={cn('h-8 px-2.5 text-[10px] font-bold uppercase text-[var(--muted)]', activityLogFilter === 'all' && 'bg-[rgba(74,222,128,.10)] text-[var(--green)]')}
+                          aria-pressed={activityLogFilter === 'all'}
+                          onClick={() => setActivityLogFilter('all')}
+                        >
+                          All
+                        </button>
+                        <button
+                          type="button"
+                          className={cn('h-8 px-2.5 text-[10px] font-bold uppercase text-[var(--muted)]', activityLogFilter === 'wake-listener' && 'bg-[rgba(74,222,128,.10)] text-[var(--green)]')}
+                          aria-pressed={activityLogFilter === 'wake-listener'}
+                          onClick={() => setActivityLogFilter('wake-listener')}
+                        >
+                          Wake Listener ({wakeListenerLogs.length})
+                        </button>
                       </div>
-                    ) : null}
-                    {adminUsers.map((item) => {
-                      const draft = creditGrantDrafts[item.user.id] ?? { amountCredits: '', reason: '' };
-                      const lastSeenExact = item.user.lastSeenAt ? exactTimeLabel(item.user.lastSeenAt) : '';
-                      const lastSeenRelative = item.user.lastSeenAt ? relativeTimeAgo(item.user.lastSeenAt) : 'never';
-                      const canGrant = Number(draft.amountCredits) > 0;
+                      <button type="button" className={assistantActionButtonClass} onClick={() => void copyLogs()}>
+                        Copy Logs
+                      </button>
+                    </div>
+                  </div>
+                  <div className="grid gap-2">
+                    {activityLogs.map((log) => {
+                      const voskLog = isVoskUtteranceLog(log);
                       return (
-                        <article key={item.user.id} className={cn(assistantRowClass, 'grid grid-cols-[minmax(180px,1.4fr)_120px_120px_120px_minmax(240px,1.3fr)] items-center gap-3 p-3 max-[1040px]:grid-cols-2 max-[680px]:grid-cols-1')}>
-                          <div className="min-w-0">
-                            <div className="flex min-w-0 items-center gap-2">
-                              <strong className="min-w-0 truncate text-xs text-[var(--fg)]">{item.user.email || item.user.displayName || item.user.id}</strong>
-                              {item.user.admin ? <span className="rounded border border-[rgba(74,222,128,.24)] bg-[rgba(74,222,128,.08)] px-1.5 py-0.5 text-[10px] font-bold uppercase text-[var(--green)]">Admin</span> : null}
-                            </div>
-                            <div className="mt-1 flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-[11px] text-[var(--muted)]">
-                              <span className="min-w-0 truncate">{item.user.displayName || 'No name'}</span>
-                              <span title={lastSeenExact}>Last seen {lastSeenRelative}</span>
-                            </div>
-                          </div>
-                          <div className="grid gap-0.5">
-                            <span className={assistantKickerClass}>Threads</span>
-                            <strong className="text-sm text-[var(--fg)]">{item.threadCount}</strong>
-                          </div>
-                          <div className="grid gap-0.5">
-                            <span className={assistantKickerClass}>Profiles</span>
-                            <strong className="text-sm text-[var(--fg)]">{item.assistantProfileCount}</strong>
-                          </div>
-                          <div className="grid gap-0.5">
-                            <span className={assistantKickerClass}>Credits</span>
-                            <strong className="text-sm text-[var(--fg)]">{formatCredits(item.creditBalanceMicrocredits)}</strong>
-                            <small className="text-[10px] text-[var(--muted)]">
-                              Granted {formatCredits(item.creditsGrantedMicrocredits)} · Spent {formatCredits(item.creditsSpentMicrocredits)}
-                            </small>
-                          </div>
-                          <form
-                            className="grid grid-cols-[88px_minmax(0,1fr)_auto] items-center gap-2 max-[520px]:grid-cols-1"
-                            onSubmit={(event) => {
-                              event.preventDefault();
-                              void grantAdminCredits(item.user.id);
-                            }}
-                          >
-                            <input
-                              value={draft.amountCredits}
-                              onChange={(event) => updateCreditGrantDraft(item.user.id, { amountCredits: event.currentTarget.value })}
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              placeholder="Credits"
-                              disabled={busy}
-                              className="h-8 min-w-0"
-                            />
-                            <input
-                              value={draft.reason}
-                              onChange={(event) => updateCreditGrantDraft(item.user.id, { reason: event.currentTarget.value })}
-                              placeholder="Reason"
-                              disabled={busy}
-                              className="h-8 min-w-0"
-                            />
-                            <button type="submit" className={assistantActionButtonClass} disabled={busy || !canGrant}>
-                              Grant
-                            </button>
-                          </form>
+                        <article key={log.id} className={cn(assistantRowClass, 'grid grid-cols-[92px_120px_minmax(0,1fr)_auto] items-center gap-2 p-2 max-[620px]:grid-cols-1')}>
+                          <span className={cn('w-fit rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase', log.level === 'error' ? 'border-[rgba(255,90,90,.24)] bg-[var(--red-subtle)] text-[var(--red)]' : 'border-[rgba(74,222,128,.22)] bg-[var(--green-subtle)] text-[var(--green)]')}>{voskLog ? 'vosk' : log.level}</span>
+                          <span className="text-xs text-[var(--muted)]">
+                            {log.source}{voskLog && voskUtteranceMode(log) ? ` / ${voskUtteranceMode(log)}` : ''}
+                          </span>
+                          <strong className="min-w-0 text-xs text-[var(--fg)]">{voskLog ? voskUtteranceText(log) : log.message}</strong>
+                          <time className="text-xs text-[var(--muted)]" title={exactTimeLabel(log.createdAt)}>{timeLabel(log.createdAt)}</time>
                         </article>
                       );
                     })}
-                    {adminUsers.length === 0 ? <div className={assistantEmptyClass}>No users yet.</div> : null}
+                    {activityLogs.length === 0 ? <div className={assistantEmptyClass}>{activityLogFilter === 'wake-listener' ? 'No wake listener utterances yet.' : 'No logs yet.'}</div> : null}
                   </div>
                 </section>
+                ) : null}
+            </SettingsPage>
+          ) : null}
 
-                <section className={assistantPanelClass}>
-                  <div className={assistantPanelHeaderClass}>
-                    <div>
-                      <span className={assistantKickerClass}>Admin</span>
-                      <h2 className={assistantPanelTitleClass}>App Releases</h2>
-                    </div>
-                  </div>
-                  <div className="mb-3 grid gap-2 rounded border border-[var(--border-subtle)] bg-white/[.02] p-3">
-                    <span className={assistantKickerClass}>Current downloads</span>
-                    <AppDownloadLinks androidInfo={androidApkInfo} desktopInfo={desktopAppInfo} />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3 max-[880px]:grid-cols-1">
-                    <section className="grid gap-2.5 rounded border border-[var(--border-subtle)] bg-white/[.02] p-3">
-                      <div>
-                        <span className={assistantKickerClass}>Desktop</span>
-                        <h3 className="m-0 mt-1 text-sm leading-tight text-[var(--fg)]">Upload desktop app</h3>
-                      </div>
-                      <label
-                        className={cn(
-                          'grid min-h-[132px] cursor-pointer place-items-center gap-2 rounded border border-dashed border-[var(--border)] bg-black/[.12] p-4 text-center transition hover:border-[rgba(167,139,250,.52)] hover:bg-white/[.035]',
-                          busy && 'pointer-events-none opacity-50',
-                        )}
-                        onDragOver={(event) => event.preventDefault()}
-                        onDrop={(event) => void droppedFiles(event).then((files) => uploadDesktopReleaseFiles(files))}
-                      >
-                        <input
-                          type="file"
-                          className="hidden"
-                          multiple
-                          accept=".tar.gz,.tgz,.zip,.dmg,.exe,.AppImage,.json,application/gzip,application/zip,application/json"
-                          onChange={(event) => void uploadDesktopReleaseFiles(fileList(event.currentTarget.files))}
-                        />
-                        <span className="font-display text-[10px] font-bold uppercase text-[var(--fg-secondary)]">{busy ? 'Uploading...' : 'Drop desktop build folder or archive + latest.json'}</span>
-                        <small className="max-w-full truncate text-[11px] text-[var(--muted)]">{adminDesktopFile ? `${adminDesktopFile.name} / ${formatBytes(adminDesktopFile.size)}` : 'Click to choose the archive and companion latest.json'}</small>
-                        <small className="text-[10px] text-[var(--muted-dim)]">Current: {appDownloadMeta(desktopAppInfo)}</small>
-                      </label>
-                    </section>
-
-                    <section className="grid gap-2.5 rounded border border-[var(--border-subtle)] bg-white/[.02] p-3">
-                      <div>
-                        <span className={assistantKickerClass}>Android</span>
-                        <h3 className="m-0 mt-1 text-sm leading-tight text-[var(--fg)]">Upload Android APK</h3>
-                      </div>
-                      <label
-                        className={cn(
-                          'grid min-h-[132px] cursor-pointer place-items-center gap-2 rounded border border-dashed border-[var(--border)] bg-black/[.12] p-4 text-center transition hover:border-[rgba(167,139,250,.52)] hover:bg-white/[.035]',
-                          busy && 'pointer-events-none opacity-50',
-                        )}
-                        onDragOver={(event) => event.preventDefault()}
-                        onDrop={(event) => void droppedFiles(event).then((files) => uploadAndroidReleaseFiles(files))}
-                      >
-                        <input
-                          type="file"
-                          className="hidden"
-                          multiple
-                          accept=".apk,.json,application/vnd.android.package-archive,application/json"
-                          onChange={(event) => void uploadAndroidReleaseFiles(fileList(event.currentTarget.files))}
-                        />
-                        <span className="font-display text-[10px] font-bold uppercase text-[var(--fg-secondary)]">{busy ? 'Uploading...' : 'Drop Android build folder or APK + metadata'}</span>
-                        <small className="max-w-full truncate text-[11px] text-[var(--muted)]">{adminAndroidFile ? `${adminAndroidFile.name} / ${formatBytes(adminAndroidFile.size)}` : 'Click to choose the APK and latest.json or output-metadata.json'}</small>
-                        <small className="text-[10px] text-[var(--muted-dim)]">Current: {appDownloadMeta(androidApkInfo)}</small>
-                      </label>
-                    </section>
-                  </div>
-                </section>
-
-                <section className={assistantPanelClass}>
-                  <div className={assistantPanelHeaderClass}>
-                    <div>
-                      <span className={assistantKickerClass}>Admin</span>
-                      <h2 className={assistantPanelTitleClass}>Device Monitor</h2>
-                    </div>
-                  </div>
-                  <div className="grid gap-2">
-                    {dashboard.adminDevices.map((device) => (
-                      <article key={device.id} className={cn(assistantRowClass, 'grid grid-cols-[minmax(0,1fr)_120px_140px_auto] items-center gap-2 p-2 max-[620px]:grid-cols-1')}>
-                        <strong className="min-w-0 text-xs text-[var(--fg)]">{device.displayName}</strong>
-                        <span className="text-xs text-[var(--muted)]">{device.deviceType}</span>
-                        <span className="text-xs text-[var(--muted)]">token {device.tokenHint}...</span>
-                        <time className="text-xs text-[var(--muted)]">{timeLabel(device.lastSeenAt)}</time>
-                      </article>
-                    ))}
-                    {dashboard.adminClientStatuses.map((status) => (
-                      <article key={`admin-status-${status.deviceId}`} className="grid grid-cols-[minmax(0,1fr)_120px_140px_auto] items-center gap-2 rounded-[7px] border border-[rgba(74,222,128,.18)] bg-[rgba(74,222,128,.06)] p-2 text-[var(--fg-secondary)] max-[620px]:grid-cols-1">
-                        <strong className="min-w-0 text-xs text-[var(--fg)]">{status.displayName}</strong>
-                        <span className="text-xs text-[var(--muted)]">{status.mode}</span>
-                        <span className="text-xs text-[var(--muted)]">{status.microphone || status.status}</span>
-                        <time className="text-xs text-[var(--muted)]">{timeLabel(status.updatedAt)}</time>
-                      </article>
-                    ))}
-                    {dashboard.adminDevices.length === 0 ? <div className={assistantEmptyClass}>No connected devices yet.</div> : null}
-                  </div>
-                </section>
-              </section>
-            ) : (
-              <div className={assistantEmptyClass}>Admin access required.</div>
-            )
+          {activeView === 'admin' && dashboard ? (
+            <AdminPage
+              dashboard={dashboard}
+              androidInfo={androidApkInfo}
+              desktopInfo={desktopAppInfo}
+              androidFile={adminAndroidFile}
+              desktopFile={adminDesktopFile}
+              releaseUploadProgress={releaseUploadProgress}
+              busy={busy}
+              creditGrantDrafts={creditGrantDrafts}
+              emailCreditGrantDraft={emailCreditGrantDraft}
+              canGrantCreditsByEmail={canGrantCreditsByEmail}
+              onRefresh={() => void loadDashboard({ includeAssistant: false })}
+              onCreditGrantDraftChange={updateCreditGrantDraft}
+              onEmailCreditGrantDraftChange={setEmailCreditGrantDraft}
+              onGrantCredits={(userId) => void grantAdminCredits(userId)}
+              onGrantCreditsByEmail={() => void grantAdminCreditsByEmail()}
+              onUploadAndroid={(files) => void uploadAndroidReleaseFiles(files)}
+              onUploadDesktop={(files) => void uploadDesktopReleaseFiles(files)}
+            />
           ) : null}
         </section>
       </section>
@@ -6097,25 +5936,6 @@ function ToastStack({ toasts, onDismiss }: { toasts: AppToast[]; onDismiss: (id:
   );
 }
 
-function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
-  if (bytes < 1024) return `${bytes} B`;
-  const kb = bytes / 1024;
-  if (kb < 1024) return `${kb.toFixed(kb >= 10 ? 0 : 1)} KB`;
-  const mb = kb / 1024;
-  return `${mb.toFixed(mb >= 10 ? 0 : 1)} MB`;
-}
-
-function formatCredits(microcredits: number): string {
-  const credits = Number(microcredits) / MICROCREDITS_PER_CREDIT;
-  if (!Number.isFinite(credits)) return '0';
-  const abs = Math.abs(credits);
-  if (abs >= 100) return credits.toFixed(0);
-  if (abs >= 1) return credits.toFixed(2);
-  if (abs > 0) return credits.toFixed(4);
-  return '0';
-}
-
 function formatDurationMs(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return '0s';
   const totalSeconds = Math.round(ms / 1000);
@@ -6124,90 +5944,34 @@ function formatDurationMs(ms: number): string {
   return minutes > 0 ? `${minutes}:${String(seconds).padStart(2, '0')}` : `${seconds}s`;
 }
 
+function logDetails(log: LogRecord): Record<string, unknown> {
+  if (!log.detailsJson) return {};
+  try {
+    const parsed = JSON.parse(log.detailsJson);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function isVoskUtteranceLog(log: LogRecord): boolean {
+  return logDetails(log).kind === 'vosk_utterance' || log.message.startsWith('Vosk heard:');
+}
+
+function voskUtteranceText(log: LogRecord): string {
+  const detailsText = logDetails(log).text;
+  if (typeof detailsText === 'string' && detailsText.trim()) return detailsText.trim();
+  return log.message.replace(/^Vosk heard:\s*/i, '').trim();
+}
+
+function voskUtteranceMode(log: LogRecord): string {
+  const mode = logDetails(log).mode;
+  return typeof mode === 'string' ? mode.trim() : '';
+}
+
 function recordingAudioUrl(recordingId: string, download = false): string {
   const query = download ? '?download=1' : '';
   return `/api/voice/recordings/${encodeURIComponent(recordingId)}/audio${query}`;
-}
-
-function appDownloadMeta(info: AndroidApkInfo | DesktopAppInfo | null): string {
-  if (!info?.available) return 'Not built yet';
-  const parts = [
-    info.variant,
-    'versionName' in info ? info.versionName ?? info.versionCode : null,
-    info.size ? formatBytes(info.size) : null,
-  ].filter(Boolean);
-  return parts.join(' / ') || 'Ready';
-}
-
-function DownloadPlatformIcon({ platform }: { platform: 'desktop' | 'android' }) {
-  if (platform === 'android') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true" className="download-link-icon">
-        <rect x="7" y="3" width="10" height="18" rx="2.2" />
-        <path d="M10 18h4" />
-      </svg>
-    );
-  }
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="download-link-icon">
-      <rect x="4" y="5" width="16" height="11" rx="1.8" />
-      <path d="M9 20h6" />
-      <path d="M12 16v4" />
-    </svg>
-  );
-}
-
-function AppDownloadLinks({
-  androidInfo,
-  desktopInfo,
-  loading = false,
-}: {
-  androidInfo: AndroidApkInfo | null;
-  desktopInfo: DesktopAppInfo | null;
-  loading?: boolean;
-}) {
-  const entries = [
-    {
-      platform: 'desktop' as const,
-      label: 'Desktop app',
-      action: 'Download for Linux',
-      info: desktopInfo,
-      href: desktopInfo?.available ? desktopInfo.downloadUrl : null,
-    },
-    {
-      platform: 'android' as const,
-      label: 'Android app',
-      action: 'Download APK',
-      info: androidInfo,
-      href: androidInfo?.available ? androidInfo.downloadUrl : null,
-    },
-  ];
-  return (
-    <div className="download-links" aria-label="App downloads">
-      {entries.map((entry) => {
-        const meta = loading && !entry.info ? 'Checking...' : appDownloadMeta(entry.info);
-        const content = (
-          <>
-            <DownloadPlatformIcon platform={entry.platform} />
-            <span className="download-link-copy">
-              <span className="download-link-label">{entry.label}</span>
-              <strong>{entry.href ? entry.action : 'Unavailable'}</strong>
-              <small>{meta}</small>
-            </span>
-          </>
-        );
-        return entry.href ? (
-          <a key={entry.label} className="download-link" href={entry.href} aria-label={`${entry.action}: ${meta}`}>
-            {content}
-          </a>
-        ) : (
-          <span key={entry.label} className="download-link is-disabled" aria-disabled="true">
-            {content}
-          </span>
-        );
-      })}
-    </div>
-  );
 }
 
 function SignedOutDownloadLinks() {
@@ -6401,12 +6165,8 @@ function NativeWebViewSessionGate({ children }: { children: React.ReactNode }) {
   if (state === 'active') return <NativeWebViewDashboard />;
   if (state === 'checking') {
     return (
-      <div className="signin-page">
-        <div className="signin-copy">
-          <div className="kicker">VoiceStream</div>
-          <h1>Opening dashboard</h1>
-          <p>Checking your native app session.</p>
-        </div>
+      <div className="loading-screen">
+        <CircuitRobotLoader label="Opening dashboard" />
       </div>
     );
   }

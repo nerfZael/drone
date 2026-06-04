@@ -1,6 +1,7 @@
 import React from 'react';
-import type { VoiceApprovalSettings, VoiceTranscriptionSettings } from './settings-types';
+import type { VoiceActivationSettings, VoiceApprovalSettings, VoiceTranscriptionSettings } from './settings-types';
 import type { UseVoiceApprovalSettingsResult } from './use-voice-approval-settings';
+import { formatProfileDisplayName } from './profile-display';
 
 type VoiceApprovalSettingsTabProps = {
   voiceApproval: UseVoiceApprovalSettingsResult;
@@ -35,6 +36,11 @@ function sameTranscriptionSettings(a: VoiceTranscriptionSettings | null, b: Voic
   return a.finalMode === b.finalMode;
 }
 
+function sameActivationSettings(a: VoiceActivationSettings | null, b: VoiceActivationSettings | null): boolean {
+  if (!a || !b) return false;
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 function savedSettings(input: UseVoiceApprovalSettingsResult): VoiceApprovalSettings | null {
   const value = input.voiceApprovalSettings?.voiceApproval;
   if (!value) return null;
@@ -61,6 +67,15 @@ function savedTranscriptionSettings(input: UseVoiceApprovalSettingsResult): Voic
   };
 }
 
+function savedActivationSettings(input: UseVoiceApprovalSettingsResult): VoiceActivationSettings | null {
+  const value = input.voiceApprovalSettings?.voiceActivation;
+  if (!value) return null;
+  return {
+    normalAliases: value.normalAliases,
+    realTimeAliases: value.realTimeAliases,
+  };
+}
+
 function codeOnly(value: string, maxDigits: number): string {
   return value.replace(/\D/g, '').slice(0, maxDigits);
 }
@@ -79,6 +94,24 @@ function alignDigitBounds(settings: VoiceApprovalSettings): VoiceApprovalSetting
   };
 }
 
+function aliasLines(values: string[]): string {
+  return values.join('\n');
+}
+
+function aliasesFromText(value: string, maxChars: number, maxCount: number): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const line of value.split(/\r?\n/)) {
+    const alias = line.trim().replace(/\s+/g, ' ').slice(0, maxChars).trim();
+    const key = alias.toLowerCase();
+    if (!alias || seen.has(key)) continue;
+    seen.add(key);
+    out.push(alias);
+    if (out.length >= maxCount) break;
+  }
+  return out;
+}
+
 export function VoiceApprovalSettingsTab({ voiceApproval }: VoiceApprovalSettingsTabProps) {
   const {
     voiceApprovalSettings,
@@ -87,17 +120,35 @@ export function VoiceApprovalSettingsTab({ voiceApproval }: VoiceApprovalSetting
     voiceApprovalSettingsNotice,
     voiceApprovalDraft,
     voiceTranscriptionDraft,
+    voiceActivationDraft,
     savingVoiceApprovalSettings,
     setVoiceApprovalDraft,
     setVoiceTranscriptionDraft,
+    setVoiceActivationDraft,
     saveVoiceApprovalSettings,
   } = voiceApproval;
   const limits = voiceApprovalSettings?.limits;
   const defaults = voiceApprovalSettings?.defaults;
   const transcriptionDefaults = voiceApprovalSettings?.transcriptionDefaults;
+  const activationDefaults = voiceApprovalSettings?.activationDefaults;
   const saved = savedSettings(voiceApproval);
   const savedTranscription = savedTranscriptionSettings(voiceApproval);
-  const dirty = !sameSettings(voiceApprovalDraft, saved) || !sameTranscriptionSettings(voiceTranscriptionDraft, savedTranscription);
+  const savedActivation = savedActivationSettings(voiceApproval);
+  const dirty =
+    !sameSettings(voiceApprovalDraft, saved) ||
+    !sameTranscriptionSettings(voiceTranscriptionDraft, savedTranscription) ||
+    !sameActivationSettings(voiceActivationDraft, savedActivation);
+  const activationError = !voiceActivationDraft
+    ? ''
+    : voiceActivationDraft.normalAliases.length === 0
+      ? 'Add at least one normal voice alias.'
+      : voiceActivationDraft.realTimeAliases.length === 0
+        ? 'Add at least one real-time alias.'
+        : '';
+  const saveDisabled = !dirty || Boolean(activationError) || savingVoiceApprovalSettings || voiceApprovalSettingsLoading;
+  const activeProfileLabel = voiceApprovalSettings?.profile.activeProfile
+    ? formatProfileDisplayName(voiceApprovalSettings.profile.activeProfile)
+    : 'current data profile';
 
   const updateDraft = React.useCallback(
     (patch: Partial<VoiceApprovalSettings>) => {
@@ -115,7 +166,7 @@ export function VoiceApprovalSettingsTab({ voiceApproval }: VoiceApprovalSetting
     return <div className="text-[12px] text-[var(--muted-dim)]">Loading voice approval settings...</div>;
   }
 
-  if (!voiceApprovalDraft || !voiceTranscriptionDraft || !limits || !defaults || !transcriptionDefaults) {
+  if (!voiceApprovalDraft || !voiceTranscriptionDraft || !voiceActivationDraft || !limits || !defaults || !transcriptionDefaults || !activationDefaults) {
     return (
       <div className="rounded border border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
         {voiceApprovalSettingsError ?? 'Voice approval settings are unavailable.'}
@@ -252,6 +303,42 @@ export function VoiceApprovalSettingsTab({ voiceApproval }: VoiceApprovalSetting
 
       <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
         <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+          Activation
+        </div>
+        <div className="text-[11px] text-[var(--muted-dim)]">Saved for profile {activeProfileLabel}.</div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <label className="flex flex-col gap-1">
+            <span className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-semibold">Normal voice aliases</span>
+            <textarea
+              value={aliasLines(voiceActivationDraft.normalAliases)}
+              onChange={(e) => setVoiceActivationDraft((prev) => prev ? { ...prev, normalAliases: aliasesFromText(e.target.value, limits.activationAliasMaxChars, limits.activationAliasMaxCount) } : prev)}
+              disabled={savingVoiceApprovalSettings}
+              rows={4}
+              className="w-full resize-y rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] px-2 py-2 text-[12px] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)] disabled:opacity-40"
+            />
+            <span className="text-[10px] leading-relaxed text-[var(--muted-dim)]">One phrase per line. Default includes hey Sebastian.</span>
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-semibold">Real-time aliases</span>
+            <textarea
+              value={aliasLines(voiceActivationDraft.realTimeAliases)}
+              onChange={(e) => setVoiceActivationDraft((prev) => prev ? { ...prev, realTimeAliases: aliasesFromText(e.target.value, limits.activationAliasMaxChars, limits.activationAliasMaxCount) } : prev)}
+              disabled={savingVoiceApprovalSettings}
+              rows={4}
+              className="w-full resize-y rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] px-2 py-2 text-[12px] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)] disabled:opacity-40"
+            />
+            <span className="text-[10px] leading-relaxed text-[var(--muted-dim)]">Default includes Sebastian enter real-time mode.</span>
+          </label>
+        </div>
+        {activationError && (
+          <div className="rounded border border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] px-2 py-1 text-[11px] text-[var(--red)]">
+            {activationError}
+          </div>
+        )}
+      </div>
+
+      <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
+        <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
           Codes
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
@@ -321,6 +408,7 @@ export function VoiceApprovalSettingsTab({ voiceApproval }: VoiceApprovalSetting
           onClick={() => {
             setVoiceApprovalDraft(defaults);
             setVoiceTranscriptionDraft(transcriptionDefaults);
+            setVoiceActivationDraft(activationDefaults);
           }}
           disabled={savingVoiceApprovalSettings}
           className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:opacity-40 disabled:cursor-not-allowed"
@@ -331,9 +419,9 @@ export function VoiceApprovalSettingsTab({ voiceApproval }: VoiceApprovalSetting
         <button
           type="button"
           onClick={() => void saveVoiceApprovalSettings()}
-          disabled={!dirty || savingVoiceApprovalSettings || voiceApprovalSettingsLoading}
+          disabled={saveDisabled}
           className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
-            !dirty || savingVoiceApprovalSettings || voiceApprovalSettingsLoading
+            saveDisabled
               ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
               : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
           }`}

@@ -11,7 +11,53 @@ const requireFromApp = createRequire(path.join(appDir, 'package.json'));
 const vendorDir = path.join(appDir, '.desktop-vendor');
 const vendorNodeModules = path.join(vendorDir, 'node_modules');
 const appManifest = JSON.parse(fs.readFileSync(path.join(appDir, 'package.json'), 'utf8'));
+const buildMode = parseBuildMode(process.argv.slice(2));
+loadEnvFile(path.join(repoRoot, `.env.${buildMode}`));
 const copied = new Set();
+
+function parseBuildMode(args) {
+  for (const arg of args) {
+    if (arg === '--debug' || arg === '--mode=debug') return 'debug';
+    if (arg === '--release' || arg === '--mode=release') return 'release';
+  }
+  return 'release';
+}
+
+function packagedOutDir() {
+  return buildMode === 'debug' ? 'release/desktop-debug' : 'release/desktop';
+}
+
+function loadEnvFile(file) {
+  if (!fs.existsSync(file)) return;
+  for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
+    const parsed = parseEnvLine(line);
+    if (parsed && process.env[parsed.key] == null) process.env[parsed.key] = normalizeEnvValue(parsed.key, parsed.value);
+  }
+}
+
+function normalizeEnvValue(key, value) {
+  if (key === 'VOICE_STREAM_NEXT_DATA_DIR' && value && !path.isAbsolute(value)) {
+    return path.resolve(repoRoot, value);
+  }
+  return value;
+}
+
+function parseEnvLine(line) {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.startsWith('#')) return null;
+  const match = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(trimmed);
+  if (!match) return null;
+  return { key: match[1], value: parseEnvValue(match[2] ?? '') };
+}
+
+function parseEnvValue(raw) {
+  const value = raw.trim();
+  if (value.startsWith('"') && value.endsWith('"')) {
+    return value.slice(1, -1).replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+  }
+  if (value.startsWith("'") && value.endsWith("'")) return value.slice(1, -1);
+  return value.replace(/\s+#.*$/, '').trim();
+}
 
 function packageRoot(packageName, fromDir = appDir) {
   const packageJson = requireFromApp.resolve(`${packageName}/package.json`, { paths: [fromDir, repoRoot] });
@@ -45,15 +91,17 @@ function copyRuntimePackage(packageName, fromDir = appDir) {
 
 function runPackager() {
   const modelPath = path.resolve(repoRoot, 'apps/voice-stream/android/app/src/main/assets/model-en-us');
+  const desktopBuildConfigPath = writeDesktopBuildConfig();
   const electronPackagerBin = path.join(packageRoot('@electron/packager'), 'bin', 'electron-packager.js');
   const args = [
     '.',
     'Drone',
     '--out',
-    'release/desktop',
+    packagedOutDir(),
     '--overwrite',
     `--extra-resource=${modelPath}`,
     `--extra-resource=${vendorNodeModules}`,
+    `--extra-resource=${desktopBuildConfigPath}`,
     '--icon=assets/app-icon.png',
     '--protocol=voicestream',
     '--protocol-name=Drone',
@@ -62,7 +110,11 @@ function runPackager() {
   ];
   const result = spawnSync('node', [electronPackagerBin, ...args], {
     cwd: appDir,
-    env: process.env,
+    env: {
+      ...process.env,
+      NODE_ENV: buildMode === 'release' ? 'production' : 'development',
+      VOICE_STREAM_NEXT_DESKTOP_BUILD_MODE: buildMode,
+    },
     shell: process.platform === 'win32',
     stdio: 'inherit',
   });
@@ -74,8 +126,28 @@ function runPackager() {
   }
 }
 
+function writeDesktopBuildConfig() {
+  const outputDir = path.join(appDir, 'build');
+  const outputFile = path.join(outputDir, 'voice-stream-next-desktop-build-config.json');
+  const serverUrl =
+    process.env.VOICE_STREAM_NEXT_DESKTOP_SERVER_URL?.trim() ||
+    process.env.VOICE_STREAM_NEXT_SERVER_URL?.trim() ||
+    (buildMode === 'release' ? 'https://voice-stream-next-production.up.railway.app' : 'http://127.0.0.1:3299');
+  const webUrl = process.env.VOICE_STREAM_NEXT_WEB_URL?.trim() || serverUrl;
+  fs.mkdirSync(outputDir, { recursive: true });
+  fs.writeFileSync(outputFile, `${JSON.stringify({
+    app: 'voice-stream-next',
+    platform: 'desktop',
+    buildMode,
+    serverUrl: serverUrl.replace(/\/+$/, ''),
+    webUrl: webUrl.replace(/\/+$/, ''),
+    builtAt: new Date().toISOString(),
+  }, null, 2)}\n`);
+  return outputFile;
+}
+
 function latestPackagedDir() {
-  const releaseRoot = path.join(appDir, 'release', 'desktop');
+  const releaseRoot = path.join(appDir, packagedOutDir());
   const packagedDir = fs
     .readdirSync(releaseRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && entry.name.startsWith('Drone-'))
@@ -142,7 +214,8 @@ function publishDesktopDownload() {
   const packagedDir = latestPackagedDir();
 
   const outputDir = path.join(voiceStreamDataDir(), 'desktop');
-  const variant = `${process.platform}-${process.arch}`;
+  const platformVariant = `${process.platform}-${process.arch}`;
+  const variant = buildMode === 'debug' ? `debug-${platformVariant}` : platformVariant;
   const variantFileName = `voice-stream-next-desktop-${variant}.tar.gz`;
   const latestFileName = 'voice-stream-next-desktop-latest.tar.gz';
   const variantFile = path.join(outputDir, variantFileName);
@@ -164,6 +237,7 @@ function publishDesktopDownload() {
   "app": "voice-stream-next",
   "platform": "desktop",
   "variant": ${jsonString(variant)},
+  "buildMode": ${jsonString(buildMode)},
   "versionName": ${jsonString(appManifest.version)},
   "fileName": ${jsonString(latestFileName)},
   "variantFileName": ${jsonString(variantFileName)},

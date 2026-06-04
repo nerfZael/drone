@@ -90,6 +90,7 @@ let currentVoskGrammar = voicePhrases.buildAwakeWakeGrammar({
   triggerPhrase: 'approval code',
   shutdownPhrase: defaultVoicePhraseSettings.shutdownPhrase,
 });
+const packagedBuildConfig = loadPackagedBuildConfig();
 
 function loadSharedClassicScript(fileName) {
   const filename = path.join(__dirname, '..', 'shared', fileName);
@@ -103,8 +104,8 @@ function loadSharedClassicScript(fileName) {
 }
 
 const defaultConfig = {
-  serverUrl: process.env.VOICE_STREAM_NEXT_SERVER_URL || 'http://127.0.0.1:3299',
-  webUrl: process.env.VOICE_STREAM_NEXT_WEB_URL || '',
+  serverUrl: process.env.VOICE_STREAM_NEXT_DESKTOP_SERVER_URL || process.env.VOICE_STREAM_NEXT_SERVER_URL || packagedBuildConfig.serverUrl || 'http://127.0.0.1:3299',
+  webUrl: process.env.VOICE_STREAM_NEXT_WEB_URL || packagedBuildConfig.webUrl || '',
   authMode: 'dev',
   bearerToken: '',
   devEmail: 'desktop@example.local',
@@ -124,6 +125,26 @@ const defaultConfig = {
   extensions: [],
   authSavedAt: '',
 };
+
+function loadPackagedBuildConfig() {
+  const candidates = [
+    process.resourcesPath ? path.join(process.resourcesPath, 'voice-stream-next-desktop-build-config.json') : '',
+    path.join(__dirname, '..', 'build', 'voice-stream-next-desktop-build-config.json'),
+  ].filter(Boolean);
+  for (const file of candidates) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+      return {
+        serverUrl: String(parsed.serverUrl || '').trim().replace(/\/+$/, ''),
+        webUrl: String(parsed.webUrl || '').trim().replace(/\/+$/, ''),
+        buildMode: String(parsed.buildMode || '').trim(),
+      };
+    } catch {
+      // Ignore missing or malformed generated build config and fall back to local defaults.
+    }
+  }
+  return { serverUrl: '', webUrl: '', buildMode: '' };
+}
 
 const voskState = {
   vosk: null,
