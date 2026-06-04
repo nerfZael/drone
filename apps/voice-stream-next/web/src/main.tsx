@@ -34,6 +34,7 @@ import type {
   DesktopVoskStatus,
   DesktopVoskText,
   DeviceRecord,
+  LogRecord,
   SpeechPlaybackTarget,
   VoiceRecordingRecord,
   VoiceApprovalFormState,
@@ -1142,6 +1143,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const [assistantSnapshotData, setAssistantSnapshotData] = React.useState<AssistantSnapshot | null>(null);
   const [activeView, setActiveViewState] = React.useState<DashboardView>(initialRouteRef.current.view);
   const [settingsPane, setSettingsPaneState] = React.useState<SettingsPane>(initialRouteRef.current.settingsPane);
+  const [activityLogFilter, setActivityLogFilter] = React.useState<'all' | 'wake-listener'>('all');
   const [threadSidebarOpen, setThreadSidebarOpen] = React.useState(() => !isCompactViewport());
   const [mobileToolbarOpen, setMobileToolbarOpen] = React.useState(false);
   const [mobileModelControlsOpen, setMobileModelControlsOpen] = React.useState(false);
@@ -1652,6 +1654,11 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
       if (event.type === 'release_changed') {
         scheduleReleaseEventRefreshRef.current(event.platform);
         scheduleDashboardEventRefreshRef.current();
+        return;
+      }
+      if (event.type === 'voice_recording_changed') {
+        scheduleDashboardEventRefreshRef.current();
+        void loadVoiceRecordings();
         return;
       }
       scheduleDashboardEventRefreshRef.current();
@@ -2715,7 +2722,10 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   }
 
   async function copyLogs() {
-    const text = (dashboard?.logs ?? [])
+    const visibleLogs = activityLogFilter === 'wake-listener'
+      ? (dashboard?.logs ?? []).filter(isVoskUtteranceLog)
+      : (dashboard?.logs ?? []);
+    const text = visibleLogs
       .map((log) => `[${log.createdAt}] ${log.level.toUpperCase()} ${log.source}: ${log.message}${log.detailsJson ? ` ${log.detailsJson}` : ''}`)
       .join('\n');
     await navigator.clipboard?.writeText(text);
@@ -2912,6 +2922,8 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const devices = dashboard?.devices ?? [];
   const threads = assistantThreads;
   const logs = dashboard?.logs ?? [];
+  const wakeListenerLogs = logs.filter(isVoskUtteranceLog);
+  const activityLogs = activityLogFilter === 'wake-listener' ? wakeListenerLogs : logs;
   const assistantRecordings = voiceRecordings.filter((recording) => recording.mode === 'assistant');
   const clipboardRecordings = voiceRecordings.filter((recording) => recording.mode === 'clipboard');
   const speechPlayback = dashboard?.speechPlayback;
@@ -4705,20 +4717,45 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                       <span className={assistantKickerClass}>Runtime</span>
                       <h2 className={assistantPanelTitleClass}>Logs</h2>
                     </div>
-                    <button type="button" className={assistantActionButtonClass} onClick={() => void copyLogs()}>
-                      Copy Logs
-                    </button>
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      <div className="flex overflow-hidden rounded-md border border-[var(--border-subtle)] bg-black/[.12]">
+                        <button
+                          type="button"
+                          className={cn('h-8 px-2.5 text-[10px] font-bold uppercase text-[var(--muted)]', activityLogFilter === 'all' && 'bg-[rgba(74,222,128,.10)] text-[var(--green)]')}
+                          aria-pressed={activityLogFilter === 'all'}
+                          onClick={() => setActivityLogFilter('all')}
+                        >
+                          All
+                        </button>
+                        <button
+                          type="button"
+                          className={cn('h-8 px-2.5 text-[10px] font-bold uppercase text-[var(--muted)]', activityLogFilter === 'wake-listener' && 'bg-[rgba(74,222,128,.10)] text-[var(--green)]')}
+                          aria-pressed={activityLogFilter === 'wake-listener'}
+                          onClick={() => setActivityLogFilter('wake-listener')}
+                        >
+                          Wake Listener ({wakeListenerLogs.length})
+                        </button>
+                      </div>
+                      <button type="button" className={assistantActionButtonClass} onClick={() => void copyLogs()}>
+                        Copy Logs
+                      </button>
+                    </div>
                   </div>
                   <div className="grid gap-2">
-                    {logs.map((log) => (
-                      <article key={log.id} className={cn(assistantRowClass, 'grid grid-cols-[92px_120px_minmax(0,1fr)_auto] items-center gap-2 p-2 max-[620px]:grid-cols-1')}>
-                        <span className={cn('w-fit rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase', log.level === 'error' ? 'border-[rgba(255,90,90,.24)] bg-[var(--red-subtle)] text-[var(--red)]' : 'border-[rgba(74,222,128,.22)] bg-[var(--green-subtle)] text-[var(--green)]')}>{log.level}</span>
-                        <span className="text-xs text-[var(--muted)]">{log.source}</span>
-                        <strong className="min-w-0 text-xs text-[var(--fg)]">{log.message}</strong>
-                        <time className="text-xs text-[var(--muted)]">{timeLabel(log.createdAt)}</time>
-                      </article>
-                    ))}
-                    {logs.length === 0 ? <div className={assistantEmptyClass}>No logs yet.</div> : null}
+                    {activityLogs.map((log) => {
+                      const voskLog = isVoskUtteranceLog(log);
+                      return (
+                        <article key={log.id} className={cn(assistantRowClass, 'grid grid-cols-[92px_120px_minmax(0,1fr)_auto] items-center gap-2 p-2 max-[620px]:grid-cols-1')}>
+                          <span className={cn('w-fit rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase', log.level === 'error' ? 'border-[rgba(255,90,90,.24)] bg-[var(--red-subtle)] text-[var(--red)]' : 'border-[rgba(74,222,128,.22)] bg-[var(--green-subtle)] text-[var(--green)]')}>{voskLog ? 'vosk' : log.level}</span>
+                          <span className="text-xs text-[var(--muted)]">
+                            {log.source}{voskLog && voskUtteranceMode(log) ? ` / ${voskUtteranceMode(log)}` : ''}
+                          </span>
+                          <strong className="min-w-0 text-xs text-[var(--fg)]">{voskLog ? voskUtteranceText(log) : log.message}</strong>
+                          <time className="text-xs text-[var(--muted)]" title={exactTimeLabel(log.createdAt)}>{timeLabel(log.createdAt)}</time>
+                        </article>
+                      );
+                    })}
+                    {activityLogs.length === 0 ? <div className={assistantEmptyClass}>{activityLogFilter === 'wake-listener' ? 'No wake listener utterances yet.' : 'No logs yet.'}</div> : null}
                   </div>
                 </section>
                 ) : null}
@@ -5786,6 +5823,31 @@ function formatDurationMs(ms: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return minutes > 0 ? `${minutes}:${String(seconds).padStart(2, '0')}` : `${seconds}s`;
+}
+
+function logDetails(log: LogRecord): Record<string, unknown> {
+  if (!log.detailsJson) return {};
+  try {
+    const parsed = JSON.parse(log.detailsJson);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function isVoskUtteranceLog(log: LogRecord): boolean {
+  return logDetails(log).kind === 'vosk_utterance' || log.message.startsWith('Vosk heard:');
+}
+
+function voskUtteranceText(log: LogRecord): string {
+  const detailsText = logDetails(log).text;
+  if (typeof detailsText === 'string' && detailsText.trim()) return detailsText.trim();
+  return log.message.replace(/^Vosk heard:\s*/i, '').trim();
+}
+
+function voskUtteranceMode(log: LogRecord): string {
+  const mode = logDetails(log).mode;
+  return typeof mode === 'string' ? mode.trim() : '';
 }
 
 function recordingAudioUrl(recordingId: string, download = false): string {

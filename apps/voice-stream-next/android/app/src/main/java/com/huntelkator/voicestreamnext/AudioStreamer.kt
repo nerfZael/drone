@@ -55,6 +55,9 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
             scheduleApprovalFinalize()
         }
     }
+    private val recognizerTextUploadRunnable = Runnable {
+        uploadPendingRecognizerTextForDebugging()
+    }
     @Volatile private var approvalSettings = VoiceApprovalSettings()
     @Volatile private var currentSocketUrl = ""
     @Volatile private var currentTarget = Constants.STREAM_TARGET_ASSISTANT
@@ -64,6 +67,9 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
     @Volatile private var sleeping = false
     @Volatile private var currentMicrophone = "Mic: phone"
     @Volatile private var pendingAssistantProfileId: String? = null
+    @Volatile private var lastUploadedRecognizerText = ""
+    @Volatile private var lastRecognizerUploadAtMs = 0L
+    @Volatile private var pendingRecognizerText = ""
 
     var statusListener: ((StreamStatus) -> Unit)? = null
 
@@ -198,6 +204,8 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
         sleeping = false
         currentSocketUrl = ""
         currentOnStatus = null
+        pendingRecognizerText = ""
+        mainHandler.removeCallbacks(recognizerTextUploadRunnable)
         resetApprovalCollection()
         wakeDetector?.release()
         wakeDetector = null
@@ -636,11 +644,51 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
     }
 
     private fun handleLocalRecognizerText(text: String, onStatus: (String) -> Unit) {
-        if (!active.get() || sleeping) return
+        if (!active.get()) return
+        uploadRecognizerTextForDebugging(text)
+        if (sleeping) return
         val update = approvalCodeRecognizer.accept(text, SystemClock.elapsedRealtime())
         handleApprovalUpdate(update, onStatus)
         if (approvalCodeRecognizer.isCollecting) {
             scheduleApprovalFinalize()
+        }
+    }
+
+    private fun uploadRecognizerTextForDebugging(text: String) {
+        val cleaned = text.trim().replace(Regex("\\s+"), " ").take(240)
+        if (cleaned.isBlank() || cleaned == lastUploadedRecognizerText) return
+        pendingRecognizerText = cleaned
+        mainHandler.removeCallbacks(recognizerTextUploadRunnable)
+        mainHandler.postDelayed(recognizerTextUploadRunnable, LOCAL_RECOGNIZER_LOG_DEBOUNCE_MS)
+    }
+
+    private fun uploadPendingRecognizerTextForDebugging() {
+        if (!active.get()) return
+        val cleaned = pendingRecognizerText
+        pendingRecognizerText = ""
+        if (cleaned.isBlank() || cleaned == lastUploadedRecognizerText) return
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastRecognizerUploadAtMs < LOCAL_RECOGNIZER_LOG_COOLDOWN_MS) return
+        lastUploadedRecognizerText = cleaned
+        lastRecognizerUploadAtMs = now
+        val mode = when {
+            sleeping -> "sleeping"
+            recording.get() -> "recording"
+            else -> "awake"
+        }
+        thread(name = "VoiceStreamRecognizerTextUpload") {
+            runCatching {
+                api.uploadLog(
+                    "Vosk heard: $cleaned",
+                    JSONObject()
+                        .put("kind", "vosk_utterance")
+                        .put("text", cleaned)
+                        .put("mode", mode)
+                        .put("target", currentTarget)
+                )
+            }.onFailure { error ->
+                ClientLog.w("AudioStreamer", "Vosk utterance upload failed", error)
+            }
         }
     }
 
@@ -822,6 +870,8 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
         const val MAX_PENDING_STREAM_MS = 5_000
         const val PRE_ROLL_FRAME_COUNT = PRE_ROLL_MS / CHUNK_MS
         const val MAX_PENDING_STREAM_FRAME_COUNT = MAX_PENDING_STREAM_MS / CHUNK_MS
+        const val LOCAL_RECOGNIZER_LOG_DEBOUNCE_MS = 650L
+        const val LOCAL_RECOGNIZER_LOG_COOLDOWN_MS = 1_000L
         const val BASE_RECONNECT_DELAY_MS = 500L
         const val MAX_RECONNECT_DELAY_MS = 10_000L
         const val MAX_RECONNECT_EXPONENT = 4

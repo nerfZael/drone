@@ -424,6 +424,60 @@ describe('voice integration', () => {
     }
   });
 
+  test('keeps assistant recordings when a stop phrase aborts the voice prompt', async () => {
+    process.env.VOICE_STREAM_NEXT_TEST_TRANSCRIPT = 'Scratch that, okay stop.';
+    const registered = await fetch(`${baseUrl}/api/devices`, {
+      method: 'POST',
+      headers: devHeaders,
+      body: JSON.stringify({ deviceType: 'android', displayName: 'Abort Phone' }),
+    }).then((response) => response.json());
+
+    const session = await fetch(`${baseUrl}/api/voice/sessions`, {
+      method: 'POST',
+      headers: devHeaders,
+      body: JSON.stringify({ deviceId: registered.device.id, mode: 'assistant' }),
+    }).then((response) => response.json());
+
+    const wsUrl = new URL('/api/voice/stream', baseUrl);
+    wsUrl.protocol = 'ws:';
+    wsUrl.searchParams.set('deviceId', registered.device.id);
+    wsUrl.searchParams.set('token', registered.token);
+    wsUrl.searchParams.set('sessionId', session.session.id);
+    wsUrl.searchParams.set('mode', 'assistant');
+
+    const socket = new WebSocket(wsUrl);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        socket.addEventListener('open', () => resolve());
+        socket.addEventListener('error', () => reject(new Error('websocket failed to open')));
+      });
+      socket.send(JSON.stringify({ type: 'client_hello', protocolVersion: 1, client: 'test', mode: 'assistant' }));
+      const speechChunk = samplePcmChunk();
+      const silenceChunk = new ArrayBuffer(4096 * 2);
+      for (let index = 0; index < 8; index += 1) {
+        socket.send(speechChunk);
+      }
+      for (let index = 0; index < 12; index += 1) {
+        socket.send(silenceChunk);
+      }
+
+      const user = db.userByClerkId('dev_voice_integration_example_local');
+      expect(user).toBeTruthy();
+      await waitForCondition('aborted recording', () =>
+        db.listVoiceRecordings(user!.id, 20, { mode: 'assistant' }).some((recording) => recording.voiceSessionId === session.session.id),
+      );
+
+      const recordings = db.listVoiceRecordings(user!.id, 20, { mode: 'assistant' });
+      const recording = recordings.find((item) => item.voiceSessionId === session.session.id);
+      expect(recording?.sizeBytes).toBeGreaterThan(0);
+      expect(db.listTranscripts(user!.id, 20, { voiceSessionId: session.session.id })).toHaveLength(0);
+    } finally {
+      if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+        socket.close();
+      }
+    }
+  });
+
   test('exposes transcript filters on the transcripts API', async () => {
     const registered = await fetch(`${baseUrl}/api/devices`, {
       method: 'POST',

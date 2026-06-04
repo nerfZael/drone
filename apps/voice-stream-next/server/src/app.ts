@@ -6,7 +6,7 @@ import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import websocket from '@fastify/websocket';
 import { clerkPlugin } from '@clerk/fastify';
-import { VoiceStreamNextDb, type DeviceRecord, type SpeechPlaybackTarget } from './db.js';
+import { VoiceStreamNextDb, type DeviceRecord, type SpeechPlaybackTarget, type VoiceRecordingRecord } from './db.js';
 import { requireAdmin, resolveRequestUser, type AuthContext } from './auth.js';
 import { synthesizeSpeech, transcribePcm16 } from './assistant-runtime.js';
 import {
@@ -98,6 +98,7 @@ type AppEventType =
   | 'speech_playback_changed'
   | 'log_created'
   | 'transcript_created'
+  | 'voice_recording_changed'
   | 'approval_code_created'
   | 'release_changed'
   | 'setup_changed';
@@ -717,13 +718,13 @@ function saveVoiceRecording(opts: {
   assistantThreadId: string;
   mode: 'assistant' | 'clipboard';
   pcm: Uint8Array;
-}): void {
-  if (opts.pcm.byteLength === 0) return;
+}): { recording: VoiceRecordingRecord; pruned: VoiceRecordingRecord[] } | null {
+  if (opts.pcm.byteLength === 0) return null;
   const filePath = voiceRecordingFilePath(opts.db, opts.userId, opts.mode, opts.sessionId);
   mkdirSync(path.dirname(filePath), { recursive: true });
   const wav = pcm16ToWav(opts.pcm, VOICE_RECORDING_SAMPLE_RATE_HZ, VOICE_RECORDING_CHANNELS);
   writeFileSync(filePath, wav);
-  opts.db.addVoiceRecording(opts.userId, {
+  const recording = opts.db.addVoiceRecording(opts.userId, {
     voiceSessionId: opts.sessionId,
     deviceId: opts.deviceId,
     assistantThreadId: opts.assistantThreadId,
@@ -737,6 +738,7 @@ function saveVoiceRecording(opts: {
   });
   const pruned = opts.db.pruneVoiceRecordings(opts.userId, opts.mode, VOICE_RECORDING_RETENTION_PER_MODE);
   for (const recording of pruned) deleteRecordingFile(recording.filePath);
+  return { recording, pruned };
 }
 
 async function withUser<T>(
@@ -3329,9 +3331,9 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           socket.send(JSON.stringify({ type: 'assistant_error', error: error?.message ?? String(error) }));
         }
       } finally {
-        if (recordingMode && terminalFinalize?.type !== 'abort') {
+        if (recordingMode) {
           try {
-            saveVoiceRecording({
+            const saved = saveVoiceRecording({
               db,
               userId: device.userId,
               sessionId: session.id,
@@ -3340,6 +3342,15 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
               mode: recordingMode,
               pcm: recordingPcm,
             });
+            if (saved) {
+              emitAppEvent(device.userId, 'voice_recording_changed', {
+                recordingId: saved.recording.id,
+                voiceSessionId: session.id,
+                deviceId: device.id,
+                mode: recordingMode,
+                prunedCount: saved.pruned.length,
+              });
+            }
           } catch (error: any) {
             addLog(device.userId, {
               deviceId: device.id,
