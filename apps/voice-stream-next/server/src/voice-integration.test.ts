@@ -89,6 +89,62 @@ describe('voice integration', () => {
     expect(dashboard.clientStatuses.some((entry: any) => entry.deviceId === registered.device.id && entry.status === 'Ready for commands')).toBe(true);
   });
 
+  test('rejects billable voice transcription sessions when the user has no credits', async () => {
+    process.env.GROQ_API_KEY = 'test-groq-key';
+    try {
+      const registered = await fetch(`${baseUrl}/api/devices`, {
+        method: 'POST',
+        headers: devHeaders,
+        body: JSON.stringify({ deviceType: 'desktop', displayName: 'No Credit Desktop' }),
+      }).then((response) => response.json());
+
+      const response = await fetch(`${baseUrl}/api/voice/sessions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ deviceId: registered.device.id, token: registered.token, mode: 'clipboard', protocolVersion: 1 }),
+      });
+
+      expect(response.status).toBe(402);
+      const body = await response.json();
+      expect(body.reason).toBe('insufficient_credits');
+      expect(body.error).toContain('Voice transcription needs credits');
+    } finally {
+      delete process.env.GROQ_API_KEY;
+    }
+  });
+
+  test('allows voice transcription sessions with a user Groq key and no credits', async () => {
+    process.env.GROQ_API_KEY = 'test-platform-groq-key';
+    process.env.VOICE_STREAM_NEXT_SECRETS_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+    try {
+      const keyResponse = await fetch(`${baseUrl}/api/assistant/keys/groq`, {
+        method: 'POST',
+        headers: devHeaders,
+        body: JSON.stringify({ apiKey: 'test-user-groq-key' }),
+      });
+      expect(keyResponse.status).toBe(200);
+
+      const registered = await fetch(`${baseUrl}/api/devices`, {
+        method: 'POST',
+        headers: devHeaders,
+        body: JSON.stringify({ deviceType: 'desktop', displayName: 'User Groq Desktop' }),
+      }).then((response) => response.json());
+
+      const response = await fetch(`${baseUrl}/api/voice/sessions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ deviceId: registered.device.id, token: registered.token, mode: 'clipboard', protocolVersion: 1 }),
+      });
+
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.session.id).toBeTruthy();
+    } finally {
+      delete process.env.GROQ_API_KEY;
+      delete process.env.VOICE_STREAM_NEXT_SECRETS_KEY;
+    }
+  });
+
   test('defers backend speech while a connected voice client is recording', async () => {
     const originalFetch = globalThis.fetch;
     let socket: WebSocket | null = null;

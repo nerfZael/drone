@@ -57,4 +57,4 @@ The server defaults to `http://127.0.0.1:3299`, the web dashboard defaults to `h
 
 Clerk-backed server auth is enabled when `CLERK_SECRET_KEY` is set. Local development can use the built-in dev headers. Android initializes the Clerk SDK when `VOICE_STREAM_NEXT_ANDROID_CLERK_PUBLISHABLE_KEY` is present at build time.
 
-Voice speech runtime is server-side. Local wake detection runs on-device with Vosk, speech-to-text and TTS use Groq from the server (`GROQ_API_KEY`, optionally `GROQ_STT_API_KEY` / `GROQ_TTS_API_KEY`). Assistant OpenAI and Exa keys are stored per user from the dashboard and encrypted with `VOICE_STREAM_NEXT_SECRETS_KEY`.
+Voice speech runtime is server-side. Local wake detection runs on-device with Vosk. Speech-to-text and TTS use the user's Groq key from dashboard API key settings when configured; otherwise they use server Groq keys (`GROQ_API_KEY`, optionally `GROQ_STT_API_KEY` / `GROQ_TTS_API_KEY`) and platform credits. Assistant OpenAI, Exa, and Groq keys are stored per user from the dashboard and encrypted with `VOICE_STREAM_NEXT_SECRETS_KEY`.

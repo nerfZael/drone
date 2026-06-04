@@ -68,7 +68,13 @@ const ASSISTANT_PROVIDERS: Array<{ id: 'codex' | 'openai'; label: string; title:
   { id: 'openai', label: 'OpenAI', title: 'Use the configured OpenAI API key for OpenAI models.' },
 ];
 
-type AssistantApiKeyProvider = 'openai' | 'exa';
+type AssistantApiKeyProvider = 'openai' | 'exa' | 'groq';
+
+function assistantApiKeyProviderLabel(provider: AssistantApiKeyProvider): string {
+  if (provider === 'openai') return 'OpenAI';
+  if (provider === 'exa') return 'Exa';
+  return 'Groq';
+}
 type AssistantSettingsPromptField = 'voiceSystemPrompt';
 type AssistantSkillDraft = {
   id: string | null;
@@ -1189,8 +1195,8 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const [artifactDeleteCandidate, setArtifactDeleteCandidate] = React.useState<AssistantArtifactRecord | null>(null);
   const [codexConnectFlow, setCodexConnectFlow] = React.useState<{ state: string; authorizationUrl: string; redirectUri: string; expiresAt: string } | null>(null);
   const [codexCodeDraft, setCodexCodeDraft] = React.useState('');
-  const [apiKeyDrafts, setApiKeyDrafts] = React.useState<Record<AssistantApiKeyProvider, string>>({ openai: '', exa: '' });
-  const [apiKeyCopying, setApiKeyCopying] = React.useState<Record<AssistantApiKeyProvider, boolean>>({ openai: false, exa: false });
+  const [apiKeyDrafts, setApiKeyDrafts] = React.useState<Record<AssistantApiKeyProvider, string>>({ openai: '', exa: '', groq: '' });
+  const [apiKeyCopying, setApiKeyCopying] = React.useState<Record<AssistantApiKeyProvider, boolean>>({ openai: false, exa: false, groq: false });
   const [assistantProfileDrafts, setAssistantProfileDrafts] = React.useState<Record<string, AssistantProfileDraft>>({});
   const [selectedAssistantProfileId, setSelectedAssistantProfileId] = React.useState<string | null>(null);
   const [skillDraft, setSkillDraft] = React.useState<AssistantSkillDraft>(() => emptySkillDraft());
@@ -2390,7 +2396,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
       });
       setAssistantSnapshotData(data.snapshot);
       setApiKeyDrafts((current) => ({ ...current, [provider]: '' }));
-      setNotice(`Saved ${provider === 'openai' ? 'OpenAI' : 'Exa'} key.`);
+      setNotice(`Saved ${assistantApiKeyProviderLabel(provider)} key.`);
     } catch (err: any) {
       setError(err?.message ?? String(err));
     } finally {
@@ -2404,7 +2410,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     try {
       const data = await client.request<{ ok: true; snapshot: AssistantSnapshot }>(`/api/assistant/keys/${provider}`, { method: 'DELETE' });
       setAssistantSnapshotData(data.snapshot);
-      setNotice(`Deleted ${provider === 'openai' ? 'OpenAI' : 'Exa'} key.`);
+      setNotice(`Deleted ${assistantApiKeyProviderLabel(provider)} key.`);
     } catch (err: any) {
       setError(err?.message ?? String(err));
     } finally {
@@ -2413,7 +2419,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   }
 
   async function copyAssistantApiKey(provider: AssistantApiKeyProvider) {
-    const label = provider === 'openai' ? 'OpenAI' : 'Exa';
+    const label = assistantApiKeyProviderLabel(provider);
     const draftKey = apiKeyDrafts[provider].trim();
     setApiKeyCopying((current) => ({ ...current, [provider]: true }));
     setError(null);
@@ -4251,9 +4257,9 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                   </div>
                 </div>
                 <div className="grid gap-2">
-                  {(['openai', 'exa'] as const).map((provider) => {
+                  {(['openai', 'exa', 'groq'] as const).map((provider) => {
                     const key = assistantSnapshotData?.apiKeys?.[provider];
-                    const label = provider === 'openai' ? 'OpenAI' : 'Exa';
+                    const label = assistantApiKeyProviderLabel(provider);
                     const hasDraftKey = Boolean(apiKeyDrafts[provider].trim());
                     const canCopyKey = hasDraftKey || Boolean(key?.hasKey);
                     return (
@@ -5186,73 +5192,93 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
   }
 
   async function startVoice(target: VoiceStreamTarget = 'assistant', assistantProfileId?: string | null) {
+    const previousMode = modeRef.current;
     stopWakeListener();
-    let activeDevice = device;
-    if (!activeDevice) {
-      await pairDesktop();
-      activeDevice = JSON.parse(localStorage.getItem(desktopDeviceStorageKey) || 'null');
-    }
-    if (!activeDevice) return;
-    const session = await client.request<{ ok: true; session: { id: string } }>('/api/voice/sessions', {
-      method: 'POST',
-      body: JSON.stringify({ deviceId: activeDevice.id, mode: target, ...(assistantProfileId ? { assistantProfileId } : {}) }),
-    });
-    const media = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const context = new AudioContext({ sampleRate: 16_000 });
-    const source = context.createMediaStreamSource(media);
-    const processor = context.createScriptProcessor(4096, 1, 1);
-    const socket = openDesktopVoiceSocket(activeDevice, session.session.id, target, assistantProfileId);
-    socket.onopen = () => {
-      socket.send(JSON.stringify({ type: 'client_hello', protocolVersion: 1, client: 'electron-web', mode: target }));
-    };
-    processor.onaudioprocess = (event) => {
-      if (socket.readyState !== WebSocket.OPEN) return;
-      socket.send(floatToPcm16(event.inputBuffer.getChannelData(0)));
-    };
-    socket.onmessage = async (event) => {
-      if (typeof event.data === 'string') {
-        try {
-          const message = JSON.parse(event.data);
-          if (message.type === 'assistant_result') {
-            const nextStatus = `Transcript: ${message.transcript || 'empty'} / Reply: ${message.assistantText || 'empty'}`;
-            await finishVoiceFromServer(nextStatus);
-            void onRefresh();
-          } else if (message.type === 'transcript_result') {
-            await finishVoiceFromServer(message.status || 'Transcript patched into chat.');
-            void onRefresh();
-          } else if (message.type === 'finish') {
-            let nextStatus = 'Awake. Waiting for voice command.';
-            if (target === 'clipboard') {
-              const copied = await copyText(message.transcriptText || '');
-              nextStatus = copied ? 'Copied voice transcription.' : 'No voice transcription detected.';
-            }
-            await finishVoiceFromServer(nextStatus);
-            void onRefresh();
-          } else if (message.type === 'sleep') {
-            if (target === 'clipboard' && message.transcriptText) {
-              await copyText(message.transcriptText || '');
-            }
-            await finishVoiceFromServer('Sleeping. Say your unlock or shutdown phrase.', 'sleeping');
-            void onRefresh();
-          } else if (message.type === 'assistant_error') {
-            await finishVoiceFromServer(message.error || 'Voice runtime failed.');
-          } else if (message.type === 'server_ping') {
-            socket.send(JSON.stringify({ type: 'client_ping', sentAt: new Date().toISOString() }));
-          }
-        } catch {
-          setStatus(event.data);
-        }
-        return;
+    try {
+      let activeDevice = device;
+      if (!activeDevice) {
+        await pairDesktop();
+        activeDevice = JSON.parse(localStorage.getItem(desktopDeviceStorageKey) || 'null');
       }
-      queueSpeechAudioBytes(event.data, 'audio/wav', { requireAwakeMode: true });
-    };
-    source.connect(processor);
-    processor.connect(context.destination);
-    refs.current = { socket, stream: media, context, processor };
-    setStreaming(true);
-    setMode('recording');
-    setStatus(recordingStatus(target));
-    void reportDesktopStatus('recording', recordingStatus(target));
+      if (!activeDevice) throw new Error('Pair this desktop before starting voice.');
+      const session = await client.request<{ ok: true; session: { id: string } }>('/api/voice/sessions', {
+        method: 'POST',
+        body: JSON.stringify({ deviceId: activeDevice.id, mode: target, ...(assistantProfileId ? { assistantProfileId } : {}) }),
+      });
+      const media = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const context = new AudioContext({ sampleRate: 16_000 });
+      const source = context.createMediaStreamSource(media);
+      const processor = context.createScriptProcessor(4096, 1, 1);
+      const socket = openDesktopVoiceSocket(activeDevice, session.session.id, target, assistantProfileId);
+      socket.onopen = () => {
+        socket.send(JSON.stringify({ type: 'client_hello', protocolVersion: 1, client: 'electron-web', mode: target }));
+      };
+      processor.onaudioprocess = (event) => {
+        if (socket.readyState !== WebSocket.OPEN) return;
+        socket.send(floatToPcm16(event.inputBuffer.getChannelData(0)));
+      };
+      socket.onmessage = async (event) => {
+        if (typeof event.data === 'string') {
+          try {
+            const message = JSON.parse(event.data);
+            if (message.type === 'assistant_result') {
+              const nextStatus = `Transcript: ${message.transcript || 'empty'} / Reply: ${message.assistantText || 'empty'}`;
+              await finishVoiceFromServer(nextStatus);
+              void onRefresh();
+            } else if (message.type === 'transcript_result') {
+              await finishVoiceFromServer(message.status || 'Transcript patched into chat.');
+              void onRefresh();
+            } else if (message.type === 'finish') {
+              let nextStatus = 'Awake. Waiting for voice command.';
+              if (target === 'clipboard') {
+                const copied = await copyText(message.transcriptText || '');
+                nextStatus = copied ? 'Copied voice transcription.' : 'No voice transcription detected.';
+              }
+              await finishVoiceFromServer(nextStatus);
+              void onRefresh();
+            } else if (message.type === 'sleep') {
+              if (target === 'clipboard' && message.transcriptText) {
+                await copyText(message.transcriptText || '');
+              }
+              await finishVoiceFromServer('Sleeping. Say your unlock or shutdown phrase.', 'sleeping');
+              void onRefresh();
+            } else if (message.type === 'assistant_error') {
+              await finishVoiceFromServer(message.error || 'Voice runtime failed.');
+            } else if (message.type === 'server_ping') {
+              socket.send(JSON.stringify({ type: 'client_ping', sentAt: new Date().toISOString() }));
+            }
+          } catch {
+            setStatus(event.data);
+          }
+          return;
+        }
+        queueSpeechAudioBytes(event.data, 'audio/wav', { requireAwakeMode: true });
+      };
+      socket.onerror = () => {
+        void finishVoiceFromServer('Voice stream connection failed.');
+      };
+      source.connect(processor);
+      processor.connect(context.destination);
+      refs.current = { socket, stream: media, context, processor };
+      setStreaming(true);
+      setMode('recording');
+      setStatus(recordingStatus(target));
+      void reportDesktopStatus('recording', recordingStatus(target));
+    } catch (err: any) {
+      refs.current.processor?.disconnect();
+      refs.current.stream?.getTracks().forEach((track) => track.stop());
+      await refs.current.context?.close().catch(() => undefined);
+      refs.current.socket?.close();
+      refs.current = {};
+      setStreaming(false);
+      const nextMode = previousMode === 'off' || previousMode === 'sleeping' ? previousMode : 'awake';
+      const nextStatus = voiceStartFailureStatus(err);
+      setMode(nextMode);
+      setStatus(nextStatus);
+      void reportDesktopStatus(nextMode, nextStatus);
+      if (nextMode !== 'off') startWakeListener();
+      throw err;
+    }
   }
 
   async function stopVoice(nextMode: VoiceMode = 'awake') {
@@ -5692,6 +5718,13 @@ function recordingStatus(target: VoiceStreamTarget): string {
   if (target === 'patch') return 'Patching voice transcript into chat.';
   if (target === 'clipboard') return 'Recording clipboard transcription.';
   return 'Streaming desktop microphone.';
+}
+
+function voiceStartFailureStatus(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  if (!message.trim()) return 'Voice recording could not start.';
+  if (/credits/i.test(message)) return message;
+  return `Voice recording could not start: ${message}`;
 }
 
 async function copyText(text: string): Promise<boolean> {

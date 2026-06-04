@@ -36,6 +36,7 @@ export type StreamingTranscriptionConfig = {
 };
 
 export type StreamingTranscriptionHooks = {
+  transcribe?: (pcm: Uint8Array) => Promise<RuntimeResult>;
   beforeTranscription?: (pcm: Uint8Array, source: 'segment' | 'final') => void;
   onTranscription?: (result: RuntimeResult, source: 'segment' | 'final') => void;
 };
@@ -156,7 +157,7 @@ export class StreamingTranscriptionManager {
 
   private async transcribeSegment(segment: QueuedSegment): Promise<void> {
     this.hooks.beforeTranscription?.(segment.pcm, 'segment');
-    const result = await transcribePcm16(segment.pcm);
+    const result = await (this.hooks.transcribe?.(segment.pcm) ?? transcribePcm16(segment.pcm));
     this.hooks.onTranscription?.(result, 'segment');
     if (this.stopped || this.terminalCommandDetected) return;
 
@@ -233,7 +234,7 @@ export class StreamingTranscriptionManager {
     if (pcm.byteLength === 0) return fallbackText;
     try {
       this.hooks.beforeTranscription?.(pcm, 'final');
-      const result = await transcribePcm16(pcm);
+      const result = await (this.hooks.transcribe?.(pcm) ?? transcribePcm16(pcm));
       this.hooks.onTranscription?.(result, 'final');
       const cleaned = stripTranscriptCommands(result.text).text;
       return hasTranscriptContent(cleaned) ? cleaned : fallbackText;

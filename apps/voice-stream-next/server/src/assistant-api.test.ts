@@ -120,6 +120,36 @@ describe('assistant API parity', () => {
     expect(revealed.json().apiKey).toBe('sk-openai-copy-test');
   });
 
+  test('stores Groq API keys through assistant API key settings', async () => {
+    process.env.VOICE_STREAM_NEXT_SECRETS_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+
+    const saved = await built.app.inject({
+      method: 'POST',
+      url: '/api/assistant/keys/groq',
+      headers: devHeaders,
+      payload: JSON.stringify({ apiKey: 'gsk_user_groq_copy_test' }),
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json().key.provider).toBe('groq');
+    expect(saved.json().key.hasKey).toBe(true);
+
+    const listed = await built.app.inject({
+      method: 'GET',
+      url: '/api/assistant/keys',
+      headers: devAuthHeaders,
+    }).then((response) => response.json());
+    expect(JSON.stringify(listed)).not.toContain('gsk_user_groq_copy_test');
+    expect(listed.keys.groq.hasKey).toBe(true);
+
+    const revealed = await built.app.inject({
+      method: 'GET',
+      url: '/api/assistant/keys/groq/reveal',
+      headers: devAuthHeaders,
+    });
+    expect(revealed.statusCode).toBe(200);
+    expect(revealed.json().apiKey).toBe('gsk_user_groq_copy_test');
+  });
+
   test('lets paired Android devices read the shared current voice thread files', async () => {
     const user = db.upsertUser({
       clerkUserId: 'clerk_android_files',

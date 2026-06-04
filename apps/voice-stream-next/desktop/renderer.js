@@ -756,6 +756,14 @@ function serverConnectionErrorMessage(serverUrl = readFormConfig().serverUrl) {
   return `Cannot reach Voice Stream Next server at ${url}. Start the VSN server and try again.`;
 }
 
+function voiceStartFailureStatus(error) {
+  const message = error?.message ? String(error.message) : String(error || '');
+  if (!message.trim()) return 'Voice recording could not start.';
+  if (error?.statusCode === 402 || /credits/i.test(message)) return message;
+  if (/Cannot reach Voice Stream Next server/i.test(message)) return message;
+  return `Voice recording could not start: ${message}`;
+}
+
 function ensureSignedOutWindowExpanded() {
   if (state.config?.deviceId && state.config?.deviceToken) return;
   const resizeWindow = desktop.signedOutWindow || desktop.expandWindow;
@@ -1788,6 +1796,9 @@ async function startMic(target = 'assistant', options = {}) {
     state.recordingPaused = false;
     state.voiceStreamStarting = false;
     resetVoiceStreamState();
+    const status = voiceStartFailureStatus(err);
+    const returnMode = previousMode === 'off' || previousMode === 'sleeping' ? previousMode : 'awake';
+    setMode(returnMode, status);
     if (previousMode !== 'off') startWakeListener();
     throw err;
   }

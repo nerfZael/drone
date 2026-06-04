@@ -291,7 +291,7 @@ export type AssistantSettingsRecord = {
   updatedAt: string;
 };
 
-export type AssistantApiKeyProvider = 'openai' | 'exa';
+export type AssistantApiKeyProvider = 'openai' | 'exa' | 'groq';
 
 export type AssistantApiKeyView = {
   provider: AssistantApiKeyProvider;
@@ -529,7 +529,7 @@ function sha256(value: string): string {
 
 function cleanAssistantApiKeyProvider(raw: unknown): AssistantApiKeyProvider {
   const value = String(raw ?? '').trim().toLowerCase();
-  if (value === 'openai' || value === 'exa') return value;
+  if (value === 'openai' || value === 'exa' || value === 'groq') return value;
   throw Object.assign(new Error('unsupported assistant API key provider'), { statusCode: 400 });
 }
 
@@ -3344,6 +3344,7 @@ export class VoiceStreamNextDb {
     return {
       openai: this.assistantApiKeyView(userId, 'openai'),
       exa: this.assistantApiKeyView(userId, 'exa'),
+      groq: this.assistantApiKeyView(userId, 'groq'),
     };
   }
 

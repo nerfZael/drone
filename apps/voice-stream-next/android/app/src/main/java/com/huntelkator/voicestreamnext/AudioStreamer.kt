@@ -315,6 +315,9 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
                         "abort" -> handleServerAbort(onStatus)
                         "assistant_error" -> {
                             recording.set(false)
+                            outgoingReady.set(false)
+                            pendingStreamBuffer.clear()
+                            closeSocket("server error", sendEnd = false)
                             onStatus(message.optString("error", "Voice runtime failed."))
                         }
                     }
@@ -357,7 +360,8 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
                     if (socket === webSocket) socket = null
                     outgoingReady.set(false)
                     if (!active.get() || !recording.get()) return
-                    onStatus(t.message ?: "Voice stream failed.")
+                    val message = t.message?.takeIf { it.isNotBlank() } ?: "server is unavailable"
+                    onStatus("Voice stream connection failed: $message")
                     scheduleReconnect()
                 }
             },

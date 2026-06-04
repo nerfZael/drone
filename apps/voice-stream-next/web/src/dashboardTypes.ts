@@ -290,7 +290,7 @@ export type AssistantSettingsRecord = {
 };
 
 export type AssistantApiKeyView = {
-  provider: 'openai' | 'exa';
+  provider: 'openai' | 'exa' | 'groq';
   hasKey: boolean;
   keyHint: string | null;
   updatedAt: string | null;
@@ -395,7 +395,7 @@ export type AssistantSnapshot = {
   skills: AssistantSkillRecord[];
   assistantSettings: AssistantSettingsRecord;
   assistantProfiles: AssistantProfile[];
-  apiKeys: Record<'openai' | 'exa', AssistantApiKeyView>;
+  apiKeys: Record<'openai' | 'exa' | 'groq', AssistantApiKeyView>;
   codexConnection: AssistantCodexConnection;
   runningModels: Record<string, { provider: string; model: string; thinkingLevel: string; runId: string }>;
 };

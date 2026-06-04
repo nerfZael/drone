@@ -8,7 +8,7 @@ import websocket from '@fastify/websocket';
 import { clerkPlugin } from '@clerk/fastify';
 import { VoiceStreamNextDb, type DeviceRecord, type SpeechPlaybackTarget, type VoiceRecordingRecord } from './db.js';
 import { requireAdmin, resolveRequestUser, type AuthContext } from './auth.js';
-import { hasGroqSpeechRuntime, hasGroqTtsRuntime, synthesizeSpeech, transcribePcm16, type RuntimeResult } from './assistant-runtime.js';
+import { hasGroqSpeechRuntime, hasGroqTtsRuntime, synthesizeSpeech, transcribePcm16, type GroqCredentialSource, type RuntimeResult } from './assistant-runtime.js';
 import {
   StreamingTranscriptionManager,
   buildStreamingTranscriptionConfigFromEnv,
@@ -725,6 +725,37 @@ function voiceRecordingMode(mode: string): 'assistant' | 'clipboard' | null {
   return mode === 'assistant' || mode === 'clipboard' ? mode : null;
 }
 
+type GroqCredential = {
+  apiKey: string;
+  source: GroqCredentialSource;
+};
+
+function resolveGroqCredential(db: VoiceStreamNextDb, userId: string): GroqCredential | null {
+  const userKey = db.assistantApiKey(userId, 'groq');
+  if (userKey) return { apiKey: userKey, source: 'user_groq_key' };
+  return hasGroqSpeechRuntime() ? { apiKey: '', source: 'platform_groq_key' } : null;
+}
+
+function resolveGroqTtsCredential(db: VoiceStreamNextDb, userId: string): GroqCredential | null {
+  const userKey = db.assistantApiKey(userId, 'groq');
+  if (userKey) return { apiKey: userKey, source: 'user_groq_key' };
+  return hasGroqTtsRuntime() ? { apiKey: '', source: 'platform_groq_key' } : null;
+}
+
+function requireVoiceSessionSpeechReadiness(db: VoiceStreamNextDb, userId: string, mode: string): void {
+  if (mode !== 'assistant' && mode !== 'clipboard') return;
+  const credential = resolveGroqCredential(db, userId);
+  if (!credential || credential.source !== 'platform_groq_key') return;
+  if (db.creditBalanceMicrocredits(userId) > 0) return;
+  throw Object.assign(
+    new Error('Voice transcription needs credits before recording can start. Ask an admin to grant credits.'),
+    {
+      statusCode: 402,
+      reason: 'insufficient_credits',
+    },
+  );
+}
+
 function safePathPart(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 120) || 'unknown';
 }
@@ -896,13 +927,14 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     metadata: { deviceId?: string | null; voiceSessionId?: string | null; assistantThreadId?: string | null; source: string },
   ) => {
     if (result.provider !== 'groq') return;
+    if (result.credentialSource !== 'platform_groq_key') return;
     const costDollars = groqSttCostDollars(result.audioDurationMs);
     db.recordBillableUsage({
       userId,
       threadId: metadata.assistantThreadId ?? null,
       service: 'groq',
       provider: 'groq',
-      credentialSource: 'platform_groq_key',
+      credentialSource: result.credentialSource,
       model: result.model,
       operation: 'speech_to_text',
       unitCount: result.audioDurationMs,
@@ -916,17 +948,18 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
 
   const recordGroqTtsUsage = (
     userId: string,
-    speech: { provider: 'groq' | 'fallback'; model: string | null; inputCharacters: number },
+    speech: { provider: 'groq' | 'fallback'; credentialSource: GroqCredentialSource | null; model: string | null; inputCharacters: number },
     metadata: { source: string; threadId?: string; messageId?: string },
   ) => {
     if (speech.provider !== 'groq') return;
+    if (speech.credentialSource !== 'platform_groq_key') return;
     const costDollars = groqTtsCostDollars(speech.inputCharacters);
     db.recordBillableUsage({
       userId,
       threadId: metadata.threadId ?? null,
       service: 'groq',
       provider: 'groq',
-      credentialSource: 'platform_groq_key',
+      credentialSource: speech.credentialSource,
       model: speech.model,
       operation: 'text_to_speech',
       unitCount: speech.inputCharacters,
@@ -1071,8 +1104,13 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     try {
       const thread = metadata.threadId ? db.thread(userId, metadata.threadId) : null;
       const profile = thread?.assistantProfileId ? db.assistantProfile(userId, thread.assistantProfileId) : db.defaultAssistantProfile(userId);
-      if (hasGroqTtsRuntime()) db.requirePositiveCreditBalance(userId, 'Groq speech synthesis');
-      const speech = await synthesizeSpeech(clean, { voice: profile?.ttsVoice });
+      const groqCredential = resolveGroqTtsCredential(db, userId);
+      if (groqCredential?.source === 'platform_groq_key') db.requirePositiveCreditBalance(userId, 'Groq speech synthesis');
+      const speech = await synthesizeSpeech(clean, {
+        voice: profile?.ttsVoice,
+        apiKey: groqCredential?.apiKey,
+        credentialSource: groqCredential?.source,
+      });
       if (!speech.audio) {
         addLog(userId, {
           source: 'speech',
@@ -3087,12 +3125,23 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         return;
       }
       const device = resolveDeviceInstallation(db, auth.device, cleanText(body.installationId || req.headers['x-voice-installation-id']) || null, token);
+      try {
+        requireVoiceSessionSpeechReadiness(db, device.userId, mode);
+      } catch (error: any) {
+        reply.code(Number(error?.statusCode ?? 402) || 402).send({
+          ok: false,
+          error: error?.message ?? String(error),
+          reason: error?.reason ?? 'voice_session_unavailable',
+        });
+        return;
+      }
       const session = db.createVoiceSession(device.userId, device.id, mode, { assistantProfileId });
       return { ok: true, session, device };
     }
     return withUser(req, reply, db, clerkEnabled, async (ctx) => {
       const device = db.deviceForUser(ctx.user.id, deviceId);
       if (!device || device.revokedAt) throw Object.assign(new Error('unknown device'), { statusCode: 404 });
+      requireVoiceSessionSpeechReadiness(db, ctx.user.id, mode);
       const session = db.createVoiceSession(ctx.user.id, deviceId, mode, { assistantProfileId });
       return { ok: true, session };
     });
@@ -3114,6 +3163,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       return;
     }
     const device = resolveDeviceInstallation(db, verifiedDevice.device, installationId, token);
+    const groqSpeechCredential = resolveGroqCredential(db, device.userId);
 
     let frames = 0;
     let bytes = 0;
@@ -3125,7 +3175,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     let pausedAt: number | null = null;
     let accumulatedPausedMs = 0;
     let durationLimit: ReturnType<typeof setTimeout> | null = null;
-    const streamingEnabled = streamingTranscriptionEnabled();
+    const streamingEnabled = streamingTranscriptionEnabled() || Boolean(groqSpeechCredential);
     const commandDetectionEnabled = streamingEnabled && !ignoreCommands;
     const transcriptionConfig = buildStreamingTranscriptionConfigFromEnv();
     const streamingManager = commandDetectionEnabled
@@ -3212,8 +3262,12 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
             }),
           });
         }, {
+          transcribe: (pcm) => transcribePcm16(pcm, {
+            apiKey: groqSpeechCredential?.apiKey,
+            credentialSource: groqSpeechCredential?.source,
+          }),
           beforeTranscription: (pcm) => {
-            if (hasGroqSpeechRuntime() && pcm.byteLength >= 1600) {
+            if (groqSpeechCredential?.source === 'platform_groq_key' && pcm.byteLength >= 1600) {
               db.requirePositiveCreditBalance(device.userId, 'Groq streaming transcription');
             }
           },
@@ -3394,10 +3448,13 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         } else if (terminalFinalize?.transcriptText) {
           transcript = terminalFinalize.transcriptText.trim();
         } else {
-          if (hasGroqSpeechRuntime() && recordingPcm.byteLength >= 1600) {
+          if (groqSpeechCredential?.source === 'platform_groq_key' && recordingPcm.byteLength >= 1600) {
             db.requirePositiveCreditBalance(device.userId, 'Groq speech transcription');
           }
-          const transcription = await transcribePcm16(recordingPcm);
+          const transcription = await transcribePcm16(recordingPcm, {
+            apiKey: groqSpeechCredential?.apiKey,
+            credentialSource: groqSpeechCredential?.source,
+          });
           transcript = transcription.text;
           runtime = transcription.provider;
           recordGroqTranscriptionUsage(device.userId, transcription, {
