@@ -1,5 +1,6 @@
 const desktop = window.voiceStreamDesktop;
 
+const VOICE_PCM_SAMPLE_RATE_HZ = 16000;
 const PRE_ROLL_MAX_BYTES = pcmBytesForMs(1500);
 const MAX_PENDING_STREAM_BYTES = pcmBytesForMs(5000);
 const BASE_RECONNECT_DELAY_MS = 500;
@@ -1764,7 +1765,7 @@ async function startMic(target = 'assistant', options = {}) {
     }
     state.voiceSocket = openVoiceSocket(state.voiceTarget);
     state.processor.onaudioprocess = (event) => {
-      sendOrBufferStreamFrame(floatToPcm16(event.inputBuffer.getChannelData(0)));
+      sendOrBufferStreamFrame(floatToPcm16(event.inputBuffer.getChannelData(0), event.inputBuffer.sampleRate));
     };
     setMode('recording', recordingStatus(state.voiceTarget));
     state.voiceStreamStarting = false;
@@ -2148,13 +2149,31 @@ async function prepareFocusedWindowTranscriptionOverlay() {
   return { temporaryOverlay: true, restoreWindowMode: 'expanded' };
 }
 
-function floatToPcm16(input) {
-  const output = new Int16Array(input.length);
-  for (let index = 0; index < input.length; index += 1) {
-    const sample = Math.max(-1, Math.min(1, input[index]));
+function floatToPcm16(input, sourceSampleRate = VOICE_PCM_SAMPLE_RATE_HZ) {
+  const samples = resampleFloat32(input, sourceSampleRate, VOICE_PCM_SAMPLE_RATE_HZ);
+  const output = new Int16Array(samples.length);
+  for (let index = 0; index < samples.length; index += 1) {
+    const sample = Math.max(-1, Math.min(1, samples[index]));
     output[index] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
   }
   return output.buffer;
+}
+
+function resampleFloat32(input, sourceSampleRate, targetSampleRate) {
+  if (!Number.isFinite(sourceSampleRate) || sourceSampleRate <= 0 || Math.abs(sourceSampleRate - targetSampleRate) < 1) {
+    return input;
+  }
+  const ratio = sourceSampleRate / targetSampleRate;
+  const outputLength = Math.max(1, Math.round(input.length / ratio));
+  const output = new Float32Array(outputLength);
+  for (let index = 0; index < outputLength; index += 1) {
+    const sourcePosition = index * ratio;
+    const sourceIndex = Math.floor(sourcePosition);
+    const nextIndex = Math.min(input.length - 1, sourceIndex + 1);
+    const fraction = sourcePosition - sourceIndex;
+    output[index] = input[sourceIndex] * (1 - fraction) + input[nextIndex] * fraction;
+  }
+  return output;
 }
 
 function cleanVoiceTarget(target) {
@@ -2718,7 +2737,7 @@ async function startWakeAudioCapture() {
   analyser.fftSize = 256;
   const processor = context.createScriptProcessor(4096, 1, 1);
   processor.onaudioprocess = (event) => {
-    handleWakeAudioFrame(floatToPcm16(event.inputBuffer.getChannelData(0)));
+    handleWakeAudioFrame(floatToPcm16(event.inputBuffer.getChannelData(0), event.inputBuffer.sampleRate));
   };
   source.connect(analyser);
   source.connect(processor);

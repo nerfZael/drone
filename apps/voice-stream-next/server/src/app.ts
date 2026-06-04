@@ -554,7 +554,7 @@ function desktopContentType(fileName: string): string {
   return 'application/octet-stream';
 }
 
-function binarySize(data: unknown): number {
+export function binarySize(data: unknown): number {
   if (typeof data === 'string') return Buffer.byteLength(data);
   if (Buffer.isBuffer(data)) return data.byteLength;
   if (Array.isArray(data)) return data.reduce((total, item) => total + binarySize(item), 0);
@@ -563,8 +563,19 @@ function binarySize(data: unknown): number {
   return 0;
 }
 
-function binaryChunk(data: unknown): Uint8Array | null {
+export function binaryChunk(data: unknown): Uint8Array | null {
   if (Buffer.isBuffer(data)) return new Uint8Array(data);
+  if (Array.isArray(data)) {
+    const chunks = data.map((item) => binaryChunk(item)).filter((item): item is Uint8Array => Boolean(item));
+    if (chunks.length === 0) return null;
+    const output = new Uint8Array(chunks.reduce((total, item) => total + item.byteLength, 0));
+    let offset = 0;
+    for (const chunk of chunks) {
+      output.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return output;
+  }
   if (data instanceof ArrayBuffer) return new Uint8Array(data);
   if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
   return null;

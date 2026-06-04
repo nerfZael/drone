@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import path from 'node:path';
 
-import { buildApp } from './app.js';
+import { binaryChunk, binarySize, buildApp } from './app.js';
 
 const originalEnv = {
   PORT: process.env.PORT,
@@ -36,5 +36,12 @@ describe('app configuration', () => {
       await built.app.close();
       built.db.db.close();
     }
+  });
+
+  test('preserves fragmented binary websocket payloads', () => {
+    const fragments = [Buffer.from([1, 2]), new Uint8Array([3, 4]).buffer, new Uint8Array([5, 6, 7]).subarray(1)];
+
+    expect(binarySize(fragments)).toBe(6);
+    expect(Array.from(binaryChunk(fragments) ?? [])).toEqual([1, 2, 3, 4, 6, 7]);
   });
 });

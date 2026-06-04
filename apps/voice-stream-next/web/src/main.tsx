@@ -62,6 +62,8 @@ const SLEEP_PHRASE_STABLE_MS = 650;
 const SLEEP_PHRASE_MIN_HITS = 2;
 const SLEEP_PHRASE_MAX_GAP_MS = 1_500;
 const MICROCREDITS_PER_CREDIT = 1_000_000;
+const VOICE_PCM_SAMPLE_RATE_HZ = 16_000;
+const VOICE_PENDING_STREAM_MAX_BYTES = pcmBytesForMs(5_000);
 
 const ASSISTANT_PROVIDERS: Array<{ id: 'codex' | 'openai'; label: string; title: string }> = [
   { id: 'codex', label: 'Codex', title: 'Use connected Codex ChatGPT authentication for Codex models.' },
@@ -110,6 +112,44 @@ type AppEvent = {
   platform?: 'android' | 'desktop';
 };
 type SseMessage = { event: string; data: unknown };
+
+class PcmCaptureBuffer {
+  private readonly maxBytes: number;
+  private chunks: ArrayBuffer[] = [];
+  private totalBytes = 0;
+
+  constructor(maxBytes: number) {
+    this.maxBytes = Math.max(0, maxBytes);
+  }
+
+  push(chunk: ArrayBuffer): void {
+    const bytes = chunk.byteLength;
+    if (bytes <= 0 || this.maxBytes <= 0) return;
+    this.chunks.push(chunk.slice(0));
+    this.totalBytes += bytes;
+    while (this.totalBytes > this.maxBytes && this.chunks.length > 0) {
+      const removed = this.chunks.shift();
+      if (!removed) break;
+      this.totalBytes -= removed.byteLength;
+    }
+  }
+
+  drain(): ArrayBuffer[] {
+    const output = this.chunks;
+    this.chunks = [];
+    this.totalBytes = 0;
+    return output;
+  }
+
+  clear(): void {
+    this.chunks = [];
+    this.totalBytes = 0;
+  }
+}
+
+function pcmBytesForMs(ms: number, sampleRateHz = VOICE_PCM_SAMPLE_RATE_HZ): number {
+  return Math.max(0, Math.round(sampleRateHz * 2 * ms / 1000));
+}
 
 const assistantIconButtonClass =
   'relative flex h-7 w-7 shrink-0 items-center justify-center rounded border border-[var(--border-subtle)] bg-white/[.02] p-0 text-[var(--muted)] transition hover:bg-white/[.05] hover:text-[var(--fg-secondary)] disabled:pointer-events-none disabled:opacity-50';
@@ -4974,6 +5014,9 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
   const lastRecognizedRef = React.useRef({ text: '', at: 0 });
   const sleepPhraseCandidateRef = React.useRef<{ match: 'unlock' | 'shutdown'; firstSeenAt: number; lastSeenAt: number; hits: number } | null>(null);
   const controlSocketRef = React.useRef<WebSocket | null>(null);
+  const voiceOutgoingReadyRef = React.useRef(false);
+  const voiceStreamStartingRef = React.useRef(false);
+  const pendingStreamBufferRef = React.useRef(new PcmCaptureBuffer(VOICE_PENDING_STREAM_MAX_BYTES));
   const approvalRecognizerRef = React.useRef(new ApprovalCodeRecognizer());
   const approvalFinalizeTimerRef = React.useRef<number | null>(null);
 
@@ -4985,6 +5028,31 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
       }
     };
   }, []);
+
+  function flushPendingVoiceFrames(socket = refs.current.socket): void {
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    for (const frame of pendingStreamBufferRef.current.drain()) {
+      socket.send(frame);
+    }
+  }
+
+  function sendOrBufferVoiceFrame(pcmBuffer: ArrayBuffer): void {
+    const socket = refs.current.socket;
+    if (voiceOutgoingReadyRef.current && socket?.readyState === WebSocket.OPEN) {
+      flushPendingVoiceFrames(socket);
+      socket.send(pcmBuffer);
+      return;
+    }
+    if (modeRef.current === 'recording' || voiceStreamStartingRef.current) {
+      pendingStreamBufferRef.current.push(pcmBuffer);
+    }
+  }
+
+  function resetVoiceFrameBuffer(): void {
+    voiceOutgoingReadyRef.current = false;
+    voiceStreamStartingRef.current = false;
+    pendingStreamBufferRef.current.clear();
+  }
 
   React.useEffect(() => {
     modeRef.current = mode;
@@ -5194,6 +5262,8 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
   async function startVoice(target: VoiceStreamTarget = 'assistant', assistantProfileId?: string | null) {
     const previousMode = modeRef.current;
     stopWakeListener();
+    resetVoiceFrameBuffer();
+    voiceStreamStartingRef.current = true;
     try {
       let activeDevice = device;
       if (!activeDevice) {
@@ -5211,11 +5281,12 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
       const processor = context.createScriptProcessor(4096, 1, 1);
       const socket = openDesktopVoiceSocket(activeDevice, session.session.id, target, assistantProfileId);
       socket.onopen = () => {
+        voiceOutgoingReadyRef.current = true;
         socket.send(JSON.stringify({ type: 'client_hello', protocolVersion: 1, client: 'electron-web', mode: target }));
+        flushPendingVoiceFrames(socket);
       };
       processor.onaudioprocess = (event) => {
-        if (socket.readyState !== WebSocket.OPEN) return;
-        socket.send(floatToPcm16(event.inputBuffer.getChannelData(0)));
+        sendOrBufferVoiceFrame(floatToPcm16(event.inputBuffer.getChannelData(0), event.inputBuffer.sampleRate));
       };
       socket.onmessage = async (event) => {
         if (typeof event.data === 'string') {
@@ -5255,6 +5326,7 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
         queueSpeechAudioBytes(event.data, 'audio/wav', { requireAwakeMode: true });
       };
       socket.onerror = () => {
+        resetVoiceFrameBuffer();
         void finishVoiceFromServer('Voice stream connection failed.');
       };
       source.connect(processor);
@@ -5262,14 +5334,17 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
       refs.current = { socket, stream: media, context, processor };
       setStreaming(true);
       setMode('recording');
+      modeRef.current = 'recording';
       setStatus(recordingStatus(target));
       void reportDesktopStatus('recording', recordingStatus(target));
+      voiceStreamStartingRef.current = false;
     } catch (err: any) {
       refs.current.processor?.disconnect();
       refs.current.stream?.getTracks().forEach((track) => track.stop());
       await refs.current.context?.close().catch(() => undefined);
       refs.current.socket?.close();
       refs.current = {};
+      resetVoiceFrameBuffer();
       setStreaming(false);
       const nextMode = previousMode === 'off' || previousMode === 'sleeping' ? previousMode : 'awake';
       const nextStatus = voiceStartFailureStatus(err);
@@ -5289,6 +5364,7 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
     refs.current.stream?.getTracks().forEach((track) => track.stop());
     await refs.current.context?.close().catch(() => undefined);
     refs.current = {};
+    resetVoiceFrameBuffer();
     setStreaming(false);
     setMode(nextMode);
     setStatus('Voice stream stopped.');
@@ -5306,6 +5382,7 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
     refs.current.stream?.getTracks().forEach((track) => track.stop());
     await refs.current.context?.close().catch(() => undefined);
     refs.current = {};
+    resetVoiceFrameBuffer();
     setStreaming(false);
     setMode(nextMode);
     setStatus(nextStatus);
@@ -5486,7 +5563,7 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
       });
 
       processor.onaudioprocess = (event) => {
-        desktop.sendVoskFrame?.(floatToPcm16(event.inputBuffer.getChannelData(0)));
+        desktop.sendVoskFrame?.(floatToPcm16(event.inputBuffer.getChannelData(0), event.inputBuffer.sampleRate));
       };
       source.connect(processor);
       processor.connect(context.destination);
@@ -5766,13 +5843,31 @@ function openDesktopVoiceSocket(device: { id: string; token: string }, sessionId
   return new WebSocket(url);
 }
 
-function floatToPcm16(input: Float32Array): ArrayBuffer {
-  const output = new Int16Array(input.length);
-  for (let index = 0; index < input.length; index += 1) {
-    const sample = Math.max(-1, Math.min(1, input[index]));
+function floatToPcm16(input: Float32Array, sourceSampleRate = VOICE_PCM_SAMPLE_RATE_HZ): ArrayBuffer {
+  const samples = resampleFloat32(input, sourceSampleRate, VOICE_PCM_SAMPLE_RATE_HZ);
+  const output = new Int16Array(samples.length);
+  for (let index = 0; index < samples.length; index += 1) {
+    const sample = Math.max(-1, Math.min(1, samples[index]));
     output[index] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
   }
   return output.buffer;
+}
+
+function resampleFloat32(input: Float32Array, sourceSampleRate: number, targetSampleRate: number): Float32Array {
+  if (!Number.isFinite(sourceSampleRate) || sourceSampleRate <= 0 || Math.abs(sourceSampleRate - targetSampleRate) < 1) {
+    return input;
+  }
+  const ratio = sourceSampleRate / targetSampleRate;
+  const outputLength = Math.max(1, Math.round(input.length / ratio));
+  const output = new Float32Array(outputLength);
+  for (let index = 0; index < outputLength; index += 1) {
+    const sourcePosition = index * ratio;
+    const sourceIndex = Math.floor(sourcePosition);
+    const nextIndex = Math.min(input.length - 1, sourceIndex + 1);
+    const fraction = sourcePosition - sourceIndex;
+    output[index] = input[sourceIndex] * (1 - fraction) + input[nextIndex] * fraction;
+  }
+  return output;
 }
 
 function Metric({ label, value }: { label: string; value: React.ReactNode }) {
