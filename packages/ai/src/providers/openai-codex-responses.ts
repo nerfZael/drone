@@ -386,6 +386,11 @@ function buildRequestBody(
 				summary: options.reasoningSummary ?? "auto",
 			};
 		}
+	} else if (typeof model.thinkingLevelMap?.off === "string") {
+		body.reasoning = {
+			effort: model.thinkingLevelMap.off,
+			summary: options?.reasoningSummary ?? "auto",
+		};
 	}
 
 	return body;
