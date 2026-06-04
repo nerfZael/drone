@@ -1863,9 +1863,10 @@ class MainActivity : ComponentActivity() {
                 return when {
                     lower.isBlank() || lower == "off" || lower.contains("sign in") || lower.contains("pair this device") -> OFF
                     lower.contains("failed") || lower.contains("error") || lower.contains("missing") -> ERROR
-                    lower.contains("waking") || lower.contains("starting") || lower.contains("reconnecting") || lower.contains("thinking") || lower.contains("queued") || lower.contains("waiting for approval") -> LOADING
+                    lower.contains("waking") || lower.contains("starting") || lower.contains("reconnecting") -> LOADING
                     lower.startsWith("sleep") || lower.startsWith("unlock") || lower.contains("sleeping") -> SLEEPING
                     lower.contains("waiting") || lower.contains("listening") || lower.contains("assistant replied") || lower.contains("transcript received") || lower.contains("audio received") -> AWAKE
+                    lower.contains("thinking") || lower.contains("queued") || lower.contains("waiting for approval") -> AWAKE
                     lower.contains("assistant audio") -> AWAKE
                     else -> RECORDING
                 }
