@@ -99,6 +99,13 @@ function supportsOpenAiXhigh(modelId: string): boolean {
 	);
 }
 
+function supportsOpenAiReasoningNone(model: Model<any>): boolean {
+	return (
+		(model.api === "openai-responses" || model.api === "azure-openai-responses" || model.api === "openai-codex-responses") &&
+		(model.id === "gpt-5.5" || model.id === "gpt-5.5-pro")
+	);
+}
+
 function isGoogleThinkingApi(model: Model<any>): boolean {
 	return model.api === "google-generative-ai" || model.api === "google-vertex";
 }
@@ -124,6 +131,9 @@ function applyThinkingLevelMetadata(model: Model<any>): void {
 	}
 	if (supportsOpenAiXhigh(model.id)) {
 		mergeThinkingLevelMap(model, { xhigh: "xhigh" });
+	}
+	if (supportsOpenAiReasoningNone(model)) {
+		mergeThinkingLevelMap(model, { off: "none" });
 	}
 	if (model.id.includes("opus-4-6") || model.id.includes("opus-4.6")) {
 		mergeThinkingLevelMap(model, { xhigh: "max" });
