@@ -5212,6 +5212,10 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
         if (audioBase64) queueSpeechAudio(audioBase64, contentType, { requireAwakeMode: true });
         return;
       }
+      if (message.type === 'settings_changed') {
+        void handleRemoteSettingsChanged(message);
+        return;
+      }
       if (message.type === 'server_command') {
         void handleRemoteControlCommand(message, socket);
       }
@@ -5223,6 +5227,14 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
       if (controlSocketRef.current === socket) controlSocketRef.current = null;
     };
     controlSocketRef.current = socket;
+  }
+
+  async function handleRemoteSettingsChanged(message: any) {
+    const settingsName = String(message?.settings ?? '');
+    if (!['assistant_profiles', 'voice_approval', 'voice_codes'].includes(settingsName)) return;
+    const next = await loadVoiceSettings().catch(() => null);
+    if (!next || modeRef.current === 'off') return;
+    void window.voiceStreamDesktop?.setVoskGrammar?.(modeRef.current === 'sleeping' ? 'sleep' : 'awake', next);
   }
 
   async function handleRemoteControlCommand(message: any, socket: WebSocket) {

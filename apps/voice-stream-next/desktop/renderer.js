@@ -872,6 +872,10 @@ function ensureControlSocket() {
       playWavBase64(message.audioBase64);
       return;
     }
+    if (message.type === 'settings_changed') {
+      handleRemoteSettingsChanged(message);
+      return;
+    }
     if (message.type === 'server_command') {
       handleRemoteControlCommand(message, socket);
     }
@@ -883,6 +887,27 @@ function ensureControlSocket() {
     if (state.controlSocket === socket) state.controlSocket = null;
   };
   state.controlSocket = socket;
+}
+
+function handleRemoteSettingsChanged(message) {
+  const settingsName = String(message?.settings ?? '');
+  if (!['assistant_profiles', 'voice_approval', 'voice_codes'].includes(settingsName)) return;
+  void reloadVoiceSettingsFromControl(settingsName);
+}
+
+async function reloadVoiceSettingsFromControl(settingsName) {
+  const settings = await loadVoiceSettings(true).catch((err) => {
+    void logDesktopEvent('warn', 'Desktop voice settings reload failed', {
+      settings: settingsName,
+      error: err?.message || String(err),
+    });
+    return null;
+  });
+  if (!settings) return;
+  if (state.mode !== 'off') {
+    await applyDesktopVoskGrammar(state.mode === 'sleeping' ? 'sleep' : 'awake', settings);
+  }
+  void logDesktopEvent('info', 'Desktop voice settings reloaded', { settings: settingsName, mode: state.mode });
 }
 
 function handleRemoteControlCommand(message, socket) {

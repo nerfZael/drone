@@ -142,6 +142,10 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
         }
     }
 
+    fun refreshVoiceSettingsFromControl() {
+        refreshApprovalSettings { applyWakeDetectorSettingsIfReady() }
+    }
+
     fun enterSleep(): Boolean {
         val onStatus = currentOnStatus
         AssistantAudioPlayer.stopAll()
@@ -765,7 +769,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
 
     private fun refreshApprovalSettings(onUpdated: (() -> Unit)? = null) {
         thread(name = "VoiceStreamApprovalSettingsRefresh") {
-            val settings = runCatching { api.voiceApprovalSettings() }.getOrDefault(VoiceApprovalSettings())
+            val settings = runCatching { api.voiceApprovalSettings() }.getOrElse { approvalSettings }
             mainHandler.post {
                 approvalSettings = settings
                 approvalCodeSettings = settings.toApprovalCodeSettings()
