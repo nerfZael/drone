@@ -1168,6 +1168,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const [adminAndroidFile, setAdminAndroidFile] = React.useState<File | null>(null);
   const [adminDesktopFile, setAdminDesktopFile] = React.useState<File | null>(null);
   const [creditGrantDrafts, setCreditGrantDrafts] = React.useState<Record<string, { amountCredits: string; reason: string }>>({});
+  const [emailCreditGrantDraft, setEmailCreditGrantDraft] = React.useState({ email: '', amountCredits: '', reason: '' });
   const [assistantExtensions, setAssistantExtensions] = React.useState<AssistantExtensionsResponse | null>(null);
   const [voiceRecordings, setVoiceRecordings] = React.useState<VoiceRecordingRecord[]>([]);
   const [voiceRecordingsLoading, setVoiceRecordingsLoading] = React.useState(false);
@@ -2815,6 +2816,42 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     }
   }
 
+  async function grantAdminCreditsByEmail() {
+    const email = emailCreditGrantDraft.email.trim();
+    const amountCredits = Number(emailCreditGrantDraft.amountCredits);
+    if (!email || !email.includes('@')) {
+      setError('Enter an email address.');
+      return;
+    }
+    if (!Number.isFinite(amountCredits) || amountCredits <= 0) {
+      setError('Enter a positive credit amount.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const data = await client.request<{ ok: true; users: DashboardData['adminUsers']; pendingCreditGrants: DashboardData['adminPendingCreditGrants']; pendingGrant?: unknown; ledgerEntry?: unknown }>(
+        '/api/admin/credits/email-grants',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            email,
+            amountCredits,
+            reason: emailCreditGrantDraft.reason,
+          }),
+        },
+      );
+      setDashboard((current) => current ? { ...current, adminUsers: data.users, adminPendingCreditGrants: data.pendingCreditGrants } : current);
+      setEmailCreditGrantDraft({ email: '', amountCredits: '', reason: '' });
+      const action = data.pendingGrant ? 'Reserved' : 'Granted';
+      setNotice(`${action} ${formatCredits(amountCredits * MICROCREDITS_PER_CREDIT)} credits for ${email}.`);
+    } catch (err: any) {
+      setError(err?.message ?? String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function uploadAndroidReleaseFiles(files: File[]) {
     const { artifact, metadata } = await releaseFiles(files, 'android');
     if (!artifact || !metadata) {
@@ -2883,6 +2920,16 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     return filesFromDrop(event.dataTransfer);
   }
 
+  const userCredits = dashboard?.credits ?? {
+    balanceMicrocredits: 0,
+    grantedMicrocredits: 0,
+    purchasedMicrocredits: 0,
+    spentMicrocredits: 0,
+    lastCreditAt: null,
+  };
+  const creditBalanceLabel = formatCredits(userCredits.balanceMicrocredits);
+  const creditsSpentLabel = formatCredits(userCredits.spentMicrocredits);
+
   if (loading) {
     return (
       <div className="loading-screen">
@@ -2899,7 +2946,13 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
             <div className="kicker">Voice Stream</div>
             <h1>Desktop voice</h1>
           </div>
-          <div className="identity">{identitySlot}</div>
+          <div className="desktop-topbar-actions">
+            <span className="desktop-credit-chip" title={`Current credits: ${creditBalanceLabel}. Spent: ${creditsSpentLabel}.`}>
+              <span>Credits</span>
+              <strong>{creditBalanceLabel}</strong>
+            </span>
+            <div className="identity">{identitySlot}</div>
+          </div>
         </header>
 
         <ToastStack toasts={toasts} onDismiss={dismissToast} />
@@ -2913,15 +2966,8 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const threads = assistantThreads;
   const logs = dashboard?.logs ?? [];
   const adminUsers = dashboard?.adminUsers ?? [];
-  const userCredits = dashboard?.credits ?? {
-    balanceMicrocredits: 0,
-    grantedMicrocredits: 0,
-    purchasedMicrocredits: 0,
-    spentMicrocredits: 0,
-    lastCreditAt: null,
-  };
-  const creditBalanceLabel = formatCredits(userCredits.balanceMicrocredits);
-  const creditsSpentLabel = formatCredits(userCredits.spentMicrocredits);
+  const adminPendingCreditGrants = dashboard?.adminPendingCreditGrants ?? [];
+  const canGrantCreditsByEmail = emailCreditGrantDraft.email.trim().includes('@') && Number(emailCreditGrantDraft.amountCredits) > 0;
   const assistantRecordings = voiceRecordings.filter((recording) => recording.mode === 'assistant');
   const clipboardRecordings = voiceRecordings.filter((recording) => recording.mode === 'clipboard');
   const speechPlayback = dashboard?.speechPlayback;
@@ -3402,7 +3448,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
               ))}
             </div>
             <span
-              className="inline-flex h-7 max-w-[9.5rem] shrink-0 items-center gap-1.5 rounded border border-[rgba(148,163,184,.24)] bg-white/[.035] px-2.5 text-[11px] font-semibold text-[var(--fg-secondary)] max-[760px]:hidden"
+              className="inline-flex h-7 max-w-[9.5rem] shrink-0 items-center gap-1.5 rounded border border-[rgba(148,163,184,.24)] bg-white/[.035] px-2.5 text-[11px] font-semibold text-[var(--fg-secondary)] max-[620px]:hidden"
               title={`Current credits: ${creditBalanceLabel}. Spent: ${creditsSpentLabel}.`}
             >
               <span className="text-[10px] uppercase text-[var(--muted)]">Credits</span>
@@ -4783,6 +4829,67 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                     </button>
                   </div>
                   <div className="grid gap-2">
+                    <form
+                      className={cn(assistantRowClass, 'grid grid-cols-[minmax(180px,1.2fr)_110px_minmax(160px,1fr)_auto] items-end gap-2 p-3 max-[760px]:grid-cols-2 max-[520px]:grid-cols-1')}
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void grantAdminCreditsByEmail();
+                      }}
+                    >
+                      <label className="grid gap-1 text-[11px] text-[var(--muted)]">
+                        Email
+                        <input
+                          value={emailCreditGrantDraft.email}
+                          onChange={(event) => setEmailCreditGrantDraft((current) => ({ ...current, email: event.currentTarget.value }))}
+                          type="email"
+                          placeholder="person@example.com"
+                          disabled={busy}
+                          className="h-8 min-w-0"
+                        />
+                      </label>
+                      <label className="grid gap-1 text-[11px] text-[var(--muted)]">
+                        Credits
+                        <input
+                          value={emailCreditGrantDraft.amountCredits}
+                          onChange={(event) => setEmailCreditGrantDraft((current) => ({ ...current, amountCredits: event.currentTarget.value }))}
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          placeholder="Credits"
+                          disabled={busy}
+                          className="h-8 min-w-0"
+                        />
+                      </label>
+                      <label className="grid gap-1 text-[11px] text-[var(--muted)]">
+                        Reason
+                        <input
+                          value={emailCreditGrantDraft.reason}
+                          onChange={(event) => setEmailCreditGrantDraft((current) => ({ ...current, reason: event.currentTarget.value }))}
+                          placeholder="Reason"
+                          disabled={busy}
+                          className="h-8 min-w-0"
+                        />
+                      </label>
+                      <button type="submit" className={assistantActionButtonClass} disabled={busy || !canGrantCreditsByEmail}>
+                        Grant by Email
+                      </button>
+                    </form>
+                    {adminPendingCreditGrants.length > 0 ? (
+                      <div className="grid gap-1.5 rounded border border-[var(--border-subtle)] bg-white/[.018] p-2">
+                        <div className="flex items-center justify-between gap-2 px-1">
+                          <span className={assistantKickerClass}>Pending email grants</span>
+                          <span className="text-[10px] uppercase text-[var(--muted)]">{adminPendingCreditGrants.length}</span>
+                        </div>
+                        {adminPendingCreditGrants.map((grant) => (
+                          <div key={grant.id} className="grid grid-cols-[minmax(0,1fr)_90px_minmax(0,1fr)_120px] items-center gap-2 rounded border border-[var(--border-subtle)] bg-white/[.018] px-2 py-1.5 text-xs max-[760px]:grid-cols-2 max-[520px]:grid-cols-1">
+                            <strong className="min-w-0 truncate text-[var(--fg)]">{grant.email}</strong>
+                            <span className="text-[var(--fg-secondary)]">{formatCredits(grant.amountMicrocredits)}</span>
+                            <span className="min-w-0 truncate text-[var(--muted)]">{grant.reason || 'Admin credit grant'}</span>
+                            <time className="text-[10px] uppercase text-[var(--muted)]">{relativeTimeAgo(grant.createdAt)}</time>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
                     {adminUsers.map((item) => {
                       const draft = creditGrantDrafts[item.user.id] ?? { amountCredits: '', reason: '' };
                       const lastSeenExact = item.user.lastSeenAt ? exactTimeLabel(item.user.lastSeenAt) : '';

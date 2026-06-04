@@ -133,6 +133,82 @@ describe('user admin bootstrap', () => {
     });
     expect(db.listBillableUsageEvents(user.id)).toHaveLength(1);
   });
+
+  test('grants credits by email immediately when the user exists', () => {
+    const db = tempDb('email-existing-grant');
+    dbs.push(db);
+
+    const admin = db.upsertUser({
+      clerkUserId: 'clerk_email_admin',
+      displayName: 'Email Admin',
+      email: 'email-admin@example.local',
+      admin: true,
+    });
+    const user = db.upsertUser({
+      clerkUserId: 'clerk_existing_email_user',
+      displayName: 'Existing Email User',
+      email: 'existing@example.local',
+      admin: false,
+    });
+
+    const result = db.grantCreditsByEmail(admin.id, {
+      email: ' Existing@Example.Local ',
+      amountMicrocredits: 2_500_000,
+      reason: 'Welcome credits',
+    });
+
+    expect(result.ledgerEntry?.userId).toBe(user.id);
+    expect(result.pendingGrant).toBeNull();
+    expect(db.creditBalanceMicrocredits(user.id)).toBe(2_500_000);
+    expect(db.listPendingCreditGrants()).toHaveLength(0);
+  });
+
+  test('claims pending email credit grants when a matching user first signs in', () => {
+    const db = tempDb('email-pending-grant');
+    dbs.push(db);
+
+    const admin = db.upsertUser({
+      clerkUserId: 'clerk_pending_admin',
+      displayName: 'Pending Admin',
+      email: 'pending-admin@example.local',
+      admin: true,
+    });
+
+    const result = db.grantCreditsByEmail(admin.id, {
+      email: ' Future@Example.Local ',
+      amountMicrocredits: 3_250_000,
+      reason: 'Invite credits',
+    });
+
+    expect(result.ledgerEntry).toBeNull();
+    expect(result.pendingGrant?.normalizedEmail).toBe('future@example.local');
+    expect(db.listPendingCreditGrants()).toHaveLength(1);
+
+    const user = db.upsertUser({
+      clerkUserId: 'clerk_future_user',
+      displayName: 'Future User',
+      email: 'future@example.local',
+      admin: false,
+    });
+
+    expect(db.creditBalanceMicrocredits(user.id)).toBe(3_250_000);
+    expect(db.listPendingCreditGrants()).toHaveLength(0);
+    expect(db.listCreditLedger(user.id)).toHaveLength(1);
+    expect(db.userCreditSummary(user.id)).toMatchObject({
+      balanceMicrocredits: 3_250_000,
+      grantedMicrocredits: 3_250_000,
+      spentMicrocredits: 0,
+    });
+
+    db.upsertUser({
+      clerkUserId: 'clerk_future_user',
+      displayName: 'Future User',
+      email: 'future@example.local',
+      admin: false,
+    });
+    expect(db.creditBalanceMicrocredits(user.id)).toBe(3_250_000);
+    expect(db.listCreditLedger(user.id)).toHaveLength(1);
+  });
 });
 
 describe('data directory defaults', () => {

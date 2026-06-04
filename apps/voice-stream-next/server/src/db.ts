@@ -348,6 +348,20 @@ export type UserCreditSummary = {
   lastCreditAt: string | null;
 };
 
+export type PendingCreditGrantRecord = {
+  id: string;
+  normalizedEmail: string;
+  email: string;
+  actorUserId: string | null;
+  amountMicrocredits: number;
+  reason: string;
+  metadataJson: string | null;
+  claimedUserId: string | null;
+  claimedLedgerId: string | null;
+  createdAt: string;
+  claimedAt: string | null;
+};
+
 export type AdminUserBillingSummary = {
   user: UserProfile;
   threadCount: number;
@@ -495,6 +509,10 @@ type UpsertUserInput = {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function normalizeCreditGrantEmail(raw: unknown): string {
+  return String(raw ?? '').trim().toLowerCase();
 }
 
 function newId(prefix: string): string {
@@ -1066,6 +1084,22 @@ function rowCreditLedger(row: any): CreditLedgerRecord {
   };
 }
 
+function rowPendingCreditGrant(row: any): PendingCreditGrantRecord {
+  return {
+    id: String(row.id),
+    normalizedEmail: String(row.normalized_email),
+    email: String(row.email),
+    actorUserId: row.actor_user_id == null ? null : String(row.actor_user_id),
+    amountMicrocredits: Number(row.amount_microcredits ?? 0),
+    reason: String(row.reason ?? ''),
+    metadataJson: row.metadata_json == null ? null : String(row.metadata_json),
+    claimedUserId: row.claimed_user_id == null ? null : String(row.claimed_user_id),
+    claimedLedgerId: row.claimed_ledger_id == null ? null : String(row.claimed_ledger_id),
+    createdAt: String(row.created_at),
+    claimedAt: row.claimed_at == null ? null : String(row.claimed_at),
+  };
+}
+
 function rowAdminUserBillingSummary(row: any): AdminUserBillingSummary {
   return {
     user: rowUser(row),
@@ -1427,6 +1461,7 @@ export class VoiceStreamNextDb {
     if (!user) throw new Error('failed to upsert user');
     this.ensureVoiceSettings(user.id);
     this.ensureDefaultAssistantProfile(user.id);
+    this.claimPendingCreditGrantsForUser(user.id, user.email);
     return user;
   }
 
@@ -1442,6 +1477,23 @@ export class VoiceStreamNextDb {
 
   userById(userId: string): UserProfile | null {
     const row = this.db.query('SELECT * FROM users WHERE id = $userId').get({ $userId: userId });
+    return row ? rowUser(row) : null;
+  }
+
+  userByEmail(email: string): UserProfile | null {
+    const normalizedEmail = normalizeCreditGrantEmail(email);
+    if (!normalizedEmail) return null;
+    const row = this.db
+      .query(
+        `
+        SELECT *
+        FROM users
+        WHERE lower(trim(email)) = $normalizedEmail
+        ORDER BY last_seen_at DESC, created_at DESC
+        LIMIT 1
+      `,
+      )
+      .get({ $normalizedEmail: normalizedEmail });
     return row ? rowUser(row) : null;
   }
 
@@ -1495,6 +1547,22 @@ export class VoiceStreamNextDb {
       )
       .all({ $userId: userId, $limit: safeLimit })
       .map(rowCreditLedger);
+  }
+
+  listPendingCreditGrants(limit = 120): PendingCreditGrantRecord[] {
+    const safeLimit = Math.max(1, Math.min(500, Math.floor(Number(limit) || 120)));
+    return this.db
+      .query(
+        `
+        SELECT *
+        FROM pending_credit_grants
+        WHERE claimed_at IS NULL
+        ORDER BY created_at DESC, id DESC
+        LIMIT $limit
+      `,
+      )
+      .all({ $limit: safeLimit })
+      .map(rowPendingCreditGrant);
   }
 
   listAdminUsersWithBilling(): AdminUserBillingSummary[] {
@@ -1600,6 +1668,193 @@ export class VoiceStreamNextDb {
 
     const row = this.db.query('SELECT * FROM credit_ledger WHERE id = $id').get({ $id: id });
     return rowCreditLedger(row);
+  }
+
+  grantCreditsByEmail(
+    actorUserId: string,
+    input: { email: string; amountMicrocredits: number; reason?: string; metadata?: unknown },
+  ): { ledgerEntry: CreditLedgerRecord | null; pendingGrant: PendingCreditGrantRecord | null; user: AdminUserBillingSummary | null } {
+    const normalizedEmail = normalizeCreditGrantEmail(input.email);
+    if (!normalizedEmail || !normalizedEmail.includes('@')) {
+      throw Object.assign(new Error('enter a valid email address'), { statusCode: 400 });
+    }
+    const amountMicrocredits = Math.floor(Number(input.amountMicrocredits));
+    if (!Number.isSafeInteger(amountMicrocredits) || amountMicrocredits <= 0) {
+      throw Object.assign(new Error('credit grant amount must be positive'), { statusCode: 400 });
+    }
+
+    const existingUser = this.userByEmail(normalizedEmail);
+    if (existingUser) {
+      const metadata = typeof input.metadata === 'object' && input.metadata ? input.metadata : {};
+      const ledgerEntry = this.grantCredits(actorUserId, existingUser.id, {
+        amountMicrocredits,
+        reason: input.reason,
+        metadata: { ...metadata, source: 'admin_email_grant', email: normalizedEmail },
+      });
+      return {
+        ledgerEntry,
+        pendingGrant: null,
+        user: this.adminUserBillingSummary(existingUser.id),
+      };
+    }
+
+    const actor = this.userById(actorUserId);
+    if (!actor) throw Object.assign(new Error('unknown admin user'), { statusCode: 404 });
+    const reason = String(input.reason ?? '').trim().slice(0, 500);
+    const metadataJson = input.metadata == null ? null : JSON.stringify(input.metadata);
+    const id = newId('pcg');
+    const at = nowIso();
+    this.db
+      .query(
+        `
+        INSERT INTO pending_credit_grants (
+          id,
+          normalized_email,
+          email,
+          actor_user_id,
+          amount_microcredits,
+          reason,
+          metadata_json,
+          created_at
+        )
+        VALUES (
+          $id,
+          $normalizedEmail,
+          $email,
+          $actorUserId,
+          $amountMicrocredits,
+          $reason,
+          $metadataJson,
+          $createdAt
+        )
+      `,
+      )
+      .run({
+        $id: id,
+        $normalizedEmail: normalizedEmail,
+        $email: String(input.email).trim(),
+        $actorUserId: actorUserId,
+        $amountMicrocredits: amountMicrocredits,
+        $reason: reason || 'Admin credit grant',
+        $metadataJson: metadataJson,
+        $createdAt: at,
+      });
+    const row = this.db.query('SELECT * FROM pending_credit_grants WHERE id = $id').get({ $id: id });
+    return {
+      ledgerEntry: null,
+      pendingGrant: rowPendingCreditGrant(row),
+      user: null,
+    };
+  }
+
+  claimPendingCreditGrantsForUser(userId: string, email: string): CreditLedgerRecord[] {
+    const normalizedEmail = normalizeCreditGrantEmail(email);
+    if (!normalizedEmail) return [];
+    const hasPending = this.db
+      .query(
+        `
+        SELECT id
+        FROM pending_credit_grants
+        WHERE normalized_email = $normalizedEmail
+          AND claimed_at IS NULL
+        LIMIT 1
+      `,
+      )
+      .get({ $normalizedEmail: normalizedEmail });
+    if (!hasPending) return [];
+
+    const at = nowIso();
+    const ledgerEntries: CreditLedgerRecord[] = [];
+    this.db.run('BEGIN IMMEDIATE');
+    try {
+      const pendingRows = this.db
+        .query(
+          `
+          SELECT *
+          FROM pending_credit_grants
+          WHERE normalized_email = $normalizedEmail
+            AND claimed_at IS NULL
+          ORDER BY created_at ASC, id ASC
+        `,
+        )
+        .all({ $normalizedEmail: normalizedEmail });
+      if (pendingRows.length === 0) {
+        this.db.run('COMMIT');
+        return [];
+      }
+      for (const row of pendingRows) {
+        const pending = rowPendingCreditGrant(row);
+        const ledgerId = newId('crl');
+        const balanceAfter = this.creditBalanceMicrocredits(userId) + pending.amountMicrocredits;
+        const metadataJson = JSON.stringify({
+          source: 'pending_email_credit_grant',
+          pendingCreditGrantId: pending.id,
+          email: pending.normalizedEmail,
+          pendingMetadata: pending.metadataJson,
+        });
+        this.db
+          .query(
+            `
+            INSERT INTO credit_ledger (
+              id,
+              user_id,
+              actor_user_id,
+              kind,
+              amount_microcredits,
+              balance_after_microcredits,
+              reason,
+              metadata_json,
+              created_at
+            )
+            VALUES (
+              $id,
+              $userId,
+              $actorUserId,
+              'grant',
+              $amountMicrocredits,
+              $balanceAfterMicrocredits,
+              $reason,
+              $metadataJson,
+              $createdAt
+            )
+          `,
+          )
+          .run({
+            $id: ledgerId,
+            $userId: userId,
+            $actorUserId: pending.actorUserId,
+            $amountMicrocredits: pending.amountMicrocredits,
+            $balanceAfterMicrocredits: balanceAfter,
+            $reason: pending.reason || 'Admin credit grant',
+            $metadataJson: metadataJson,
+            $createdAt: at,
+          });
+        this.db
+          .query(
+            `
+            UPDATE pending_credit_grants
+            SET claimed_user_id = $userId,
+                claimed_ledger_id = $ledgerId,
+                claimed_at = $claimedAt
+            WHERE id = $pendingGrantId
+              AND claimed_at IS NULL
+          `,
+          )
+          .run({
+            $userId: userId,
+            $ledgerId: ledgerId,
+            $claimedAt: at,
+            $pendingGrantId: pending.id,
+          });
+        const ledgerRow = this.db.query('SELECT * FROM credit_ledger WHERE id = $id').get({ $id: ledgerId });
+        ledgerEntries.push(rowCreditLedger(ledgerRow));
+      }
+      this.db.run('COMMIT');
+    } catch (error) {
+      this.db.run('ROLLBACK');
+      throw error;
+    }
+    return ledgerEntries;
   }
 
   recordBillableUsage(input: BillableUsageEventInput): BillableUsageEventRecord {
@@ -4825,6 +5080,7 @@ export class VoiceStreamNextDb {
       clientStatuses: this.listClientStatuses(user.id),
       credits: this.userCreditSummary(user.id),
       adminUsers: user.admin ? this.listAdminUsersWithBilling() : [],
+      adminPendingCreditGrants: user.admin ? this.listPendingCreditGrants() : [],
       adminDevices: user.admin ? this.listDevices() : [],
       adminClientStatuses: user.admin ? this.listClientStatuses() : [],
       stats: {

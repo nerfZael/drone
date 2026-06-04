@@ -26,6 +26,7 @@ const VOICE_RECORDINGS_MIGRATION_VERSION = '20260601090000';
 const ASSISTANT_PROFILES_MIGRATION_VERSION = '20260601100000';
 const ANDROID_WEBVIEW_SESSIONS_MIGRATION_VERSION = '20260601120000';
 const BILLING_CREDITS_MIGRATION_VERSION = '20260603120000';
+const PENDING_CREDIT_GRANTS_MIGRATION_VERSION = '20260603130000';
 
 function migrationRows(db: VoiceStreamNextDb): Array<{ version: string; name: string; checksum: string }> {
   return db.db
@@ -67,6 +68,7 @@ describe('database migrations', () => {
       ASSISTANT_PROFILES_MIGRATION_VERSION,
       ANDROID_WEBVIEW_SESSIONS_MIGRATION_VERSION,
       BILLING_CREDITS_MIGRATION_VERSION,
+      PENDING_CREDIT_GRANTS_MIGRATION_VERSION,
     ]);
     expect(columnNames(db, 'devices')).toContain('revoked_at');
     expect(columnNames(db, 'devices')).toContain('installation_id');
@@ -80,6 +82,8 @@ describe('database migrations', () => {
     expect(columnNames(db, 'assistant_profiles')).toContain('wake_phrase_aliases_json');
     expect(columnNames(db, 'credit_ledger')).toContain('balance_after_microcredits');
     expect(columnNames(db, 'billable_usage_events')).toContain('credential_source');
+    expect(columnNames(db, 'pending_credit_grants')).toContain('normalized_email');
+    expect(columnNames(db, 'pending_credit_grants')).toContain('claimed_ledger_id');
   });
 
   test('does not rerun already applied migrations', () => {
@@ -90,7 +94,7 @@ describe('database migrations', () => {
     const second = new VoiceStreamNextDb(filePath);
     dbs.push(second);
 
-    expect(migrationRows(second)).toHaveLength(17);
+    expect(migrationRows(second)).toHaveLength(18);
   });
 
   test('rejects changed migration checksums', () => {

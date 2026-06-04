@@ -1777,7 +1777,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
   app.get('/api/admin/users', async (req, reply) =>
     withUser(req, reply, db, clerkEnabled, async (ctx) => {
       requireAdmin(ctx);
-      return { ok: true, users: db.listAdminUsersWithBilling() };
+      return { ok: true, users: db.listAdminUsersWithBilling(), pendingCreditGrants: db.listPendingCreditGrants() };
     }),
   );
 
@@ -1792,6 +1792,26 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         user: summary,
         ledger: db.listCreditLedger(userId, 120),
         usageEvents: db.listBillableUsageEvents(userId, 120),
+      };
+    }),
+  );
+
+  app.post('/api/admin/credits/email-grants', async (req, reply) =>
+    withUser(req, reply, db, clerkEnabled, async (ctx) => {
+      requireAdmin(ctx);
+      const body = jsonBody(req);
+      const result = db.grantCreditsByEmail(ctx.user.id, {
+        email: cleanText(body.email),
+        amountMicrocredits: cleanCreditGrantAmountMicrocredits(body),
+        reason: cleanText(body.reason, 'Admin credit grant') || 'Admin credit grant',
+        metadata: { source: 'admin_email_page' },
+      });
+      if (result.user?.user.id) emitAppEvent(result.user.user.id, 'settings_changed', { reason: 'credits_granted' });
+      return {
+        ok: true,
+        ...result,
+        users: db.listAdminUsersWithBilling(),
+        pendingCreditGrants: db.listPendingCreditGrants(),
       };
     }),
   );

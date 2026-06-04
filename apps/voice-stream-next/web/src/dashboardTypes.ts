@@ -33,6 +33,20 @@ export type UserCreditSummary = {
   lastCreditAt: string | null;
 };
 
+export type PendingCreditGrantRecord = {
+  id: string;
+  normalizedEmail: string;
+  email: string;
+  actorUserId: string | null;
+  amountMicrocredits: number;
+  reason: string;
+  metadataJson: string | null;
+  claimedUserId: string | null;
+  claimedLedgerId: string | null;
+  createdAt: string;
+  claimedAt: string | null;
+};
+
 export type AdminUserBillingSummary = {
   user: UserProfile;
   threadCount: number;
@@ -465,6 +479,7 @@ export type DashboardData = {
   pairingSessions: PairingSessionRecord[];
   credits: UserCreditSummary;
   adminUsers: AdminUserBillingSummary[];
+  adminPendingCreditGrants: PendingCreditGrantRecord[];
   adminDevices: DeviceRecord[];
   adminClientStatuses: ClientStatusRecord[];
   stats: { threadCount: number; deviceCount: number; logCount: number; transcriptCount: number };
