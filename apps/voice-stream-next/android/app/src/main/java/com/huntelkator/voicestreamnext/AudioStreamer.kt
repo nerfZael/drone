@@ -574,6 +574,10 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
     }
 
     private fun handleDetectorFrame(frame: ByteArray, onStatus: (String) -> Unit) {
+        if (shouldSuppressWakeDetectionForPlayback()) {
+            wakeDetector?.reset()
+            return
+        }
         if (!recording.get()) {
             preRollBuffer.push(frame)
         }
@@ -587,6 +591,10 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
 
     private fun handleWakePhrase(match: WakePhraseMatch, onStatus: (String) -> Unit) {
         if (!active.get()) return
+        if (shouldSuppressWakeDetectionForPlayback()) {
+            wakeDetector?.reset()
+            return
+        }
         when {
             match.hasUnlock && sleeping -> {
                 sleeping = false
@@ -649,6 +657,12 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
                 onStatus(if (repeated) "Awake: repeating assistant audio" else "Awake: no assistant audio to repeat")
             }
         }
+    }
+
+    private fun shouldSuppressWakeDetectionForPlayback(): Boolean {
+        return !recording.get() &&
+            api.suppressWakeDuringPlaybackEnabled() &&
+            AssistantAudioPlayer.isPlaybackActive()
     }
 
     private fun handleLocalRecognizerText(text: String, onStatus: (String) -> Unit) {

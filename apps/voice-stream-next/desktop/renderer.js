@@ -131,6 +131,7 @@ const els = {
   meterBar: document.querySelector('#meterBar'),
   inputDeviceSelect: document.querySelector('#inputDeviceSelect'),
   outputDeviceSelect: document.querySelector('#outputDeviceSelect'),
+  suppressWakeDuringPlaybackCheckbox: document.querySelector('#suppressWakeDuringPlaybackCheckbox'),
   inputDeviceButton: document.querySelector('#inputDeviceButton'),
   inputDeviceLabel: document.querySelector('#inputDeviceLabel'),
   inputDeviceMenu: document.querySelector('#inputDeviceMenu'),
@@ -258,6 +259,7 @@ function readFormConfig() {
     deviceName: els.deviceNameInput?.value.trim() || state.config?.deviceName || 'Desktop voice client',
     inputDeviceId: els.inputDeviceSelect?.value ?? state.config?.inputDeviceId ?? '',
     outputDeviceId: els.outputDeviceSelect?.value ?? state.config?.outputDeviceId ?? '',
+    suppressWakeDuringPlayback: els.suppressWakeDuringPlaybackCheckbox?.checked === true,
     transcriptionShortcut: sanitizeShortcutBinding(state.config?.transcriptionShortcut, DEFAULT_TRANSCRIPTION_SHORTCUT),
     awakeSleepToggleShortcut: sanitizeShortcutBinding(state.config?.awakeSleepToggleShortcut, DEFAULT_AWAKE_SLEEP_TOGGLE_SHORTCUT),
     turnOffShortcut: sanitizeShortcutBinding(state.config?.turnOffShortcut, DEFAULT_TURN_OFF_SHORTCUT),
@@ -482,11 +484,13 @@ function applyConfig(config) {
     awakeSleepToggleShortcut: sanitizeShortcutBinding(config?.awakeSleepToggleShortcut, DEFAULT_AWAKE_SLEEP_TOGGLE_SHORTCUT),
     turnOffShortcut: sanitizeShortcutBinding(config?.turnOffShortcut, DEFAULT_TURN_OFF_SHORTCUT),
     pauseResumeShortcut: sanitizeShortcutBinding(config?.pauseResumeShortcut, DEFAULT_PAUSE_RESUME_SHORTCUT),
+    suppressWakeDuringPlayback: config?.suppressWakeDuringPlayback === true,
   };
   if (els.serverUrlInput) els.serverUrlInput.value = config.serverUrl;
   if (els.deviceNameInput) els.deviceNameInput.value = config.deviceName;
   if (els.inputDeviceSelect) els.inputDeviceSelect.value = config.inputDeviceId || '';
   if (els.outputDeviceSelect) els.outputDeviceSelect.value = config.outputDeviceId || '';
+  if (els.suppressWakeDuringPlaybackCheckbox) els.suppressWakeDuringPlaybackCheckbox.checked = state.config.suppressWakeDuringPlayback === true;
   if (els.extensionsConfigInput) els.extensionsConfigInput.value = extensionConfigText(config);
   renderShortcutSettings();
   renderDevicePicker(els.inputDeviceSelect);
@@ -1019,10 +1023,19 @@ function handleWakeAudioFrame(pcmBuffer) {
     sendOrBufferStreamFrame(pcmBuffer);
     return;
   }
+  if (shouldSuppressWakeCommandsForPlayback()) {
+    preRollBuffer.clear();
+    return;
+  }
   pushPreRollFrame(pcmBuffer);
   if (state.wakeUsesVosk && desktop.sendVoskFrame) {
     desktop.sendVoskFrame(pcmBuffer);
   }
+}
+
+function shouldSuppressWakeCommandsForPlayback() {
+  return state.config?.suppressWakeDuringPlayback === true &&
+    (Boolean(activeSpeechPlayback) || Date.now() < speechPlaybackSuppressWakeUntil);
 }
 
 function reconnectDelayLabel(delayMs) {
@@ -2262,6 +2275,7 @@ const speechPlaybackQueue = [];
 let speechPlaybackActive = false;
 let activeSpeechPlayback = null;
 let lastCompletedSpeechPlaybackData = null;
+let speechPlaybackSuppressWakeUntil = 0;
 
 function canPlaySpeechAudio() {
   return canQueueSpeechAudio() && !speechPlaybackBlocked();
@@ -2338,6 +2352,9 @@ async function playWavNow(data) {
     showStatus(err?.message ? `Audio playback failed: ${err.message}` : 'Audio playback failed.');
   } finally {
     if (activeSpeechPlayback?.audio === audio) activeSpeechPlayback = null;
+    if (state.config?.suppressWakeDuringPlayback === true) {
+      speechPlaybackSuppressWakeUntil = Date.now() + 800;
+    }
     if (completed) lastCompletedSpeechPlaybackData = data;
     URL.revokeObjectURL(url);
   }
@@ -2681,6 +2698,10 @@ async function applySleepPhraseMatch(match) {
 
 async function processPhraseText(text, finalizeNow = false, finalResult = false) {
   const settings = await loadVoiceSettings().catch(() => null);
+  if (state.mode !== 'sleeping' && shouldSuppressWakeCommandsForPlayback()) {
+    void recordCommandRecognitionLog({ text, final: finalResult, outcome: 'ignored', reason: 'assistant playback' });
+    return;
+  }
   if (state.mode !== 'sleeping' && acceptApprovalText(text, finalizeNow)) return;
   if (state.mode === 'recording') {
     showStatus('Recording. Wake commands are ignored until capture stops.');
@@ -3129,6 +3150,16 @@ if (els.outputDeviceSelect) {
   els.outputDeviceSelect.addEventListener('change', () => {
     renderDevicePicker(els.outputDeviceSelect);
     void saveAudioDeviceSelection().catch((err) => showStatus(err?.message || 'Could not save output device.'));
+  });
+}
+if (els.suppressWakeDuringPlaybackCheckbox) {
+  els.suppressWakeDuringPlaybackCheckbox.addEventListener('change', async () => {
+    try {
+      applyConfig(await desktop.writeConfig(authSessionFields(readFormConfig())));
+      showStatus(els.suppressWakeDuringPlaybackCheckbox.checked ? 'Playback command pause enabled.' : 'Playback command pause disabled.');
+    } catch (err) {
+      showStatus(err?.message || 'Could not save playback command setting.');
+    }
   });
 }
 if (els.addExtensionFileButton) {
