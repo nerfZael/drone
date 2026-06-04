@@ -1,5 +1,36 @@
 import { describe, expect, test } from "vitest";
-import { codexPromptCacheKey } from "../src/providers/openai-codex-responses.js";
+import { getModel } from "../src/models.js";
+import { codexPromptCacheKey, streamSimpleOpenAICodexResponses } from "../src/providers/openai-codex-responses.js";
+import type { Context, Model } from "../src/types.js";
+
+const context: Context = {
+	systemPrompt: "You are concise.",
+	messages: [{ role: "user", content: "Hello", timestamp: Date.now() }],
+	tools: [],
+};
+
+function fakeCodexToken(): string {
+	const payload = Buffer.from(
+		JSON.stringify({
+			"https://api.openai.com/auth": { chatgpt_account_id: "acct-test" },
+		}),
+	).toString("base64");
+	return `header.${payload}.signature`;
+}
+
+async function capturePayload(model: Model<"openai-codex-responses">): Promise<any> {
+	let payload: any;
+	const stream = streamSimpleOpenAICodexResponses(model, context, {
+		apiKey: fakeCodexToken(),
+		onPayload: (nextPayload) => {
+			payload = nextPayload;
+			throw new Error("stop after payload capture");
+		},
+	});
+
+	await stream.result();
+	return payload;
+}
 
 describe("openai codex responses", () => {
 	test("shortens prompt cache keys to the provider limit", () => {
@@ -14,5 +45,13 @@ describe("openai codex responses", () => {
 	test("keeps short prompt cache keys unchanged", () => {
 		expect(codexPromptCacheKey("short-session")).toBe("short-session");
 		expect(codexPromptCacheKey(undefined)).toBeUndefined();
+	});
+
+	test("sends explicit no-reasoning effort for GPT-5.5 instant", async () => {
+		const model = getModel("openai-codex", "gpt-5.5") as Model<"openai-codex-responses">;
+
+		const payload = await capturePayload(model);
+
+		expect(payload?.reasoning).toEqual({ effort: "none", summary: "auto" });
 	});
 });

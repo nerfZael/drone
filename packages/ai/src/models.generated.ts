@@ -2565,7 +2565,7 @@ export const MODELS = {
 			provider: "azure-openai-responses",
 			baseUrl: "",
 			reasoning: true,
-			thinkingLevelMap: {"off":null,"xhigh":"xhigh"},
+			thinkingLevelMap: {"off":"none","xhigh":"xhigh"},
 			input: ["text", "image"],
 			cost: {
 				input: 5,
@@ -2583,7 +2583,7 @@ export const MODELS = {
 			provider: "azure-openai-responses",
 			baseUrl: "",
 			reasoning: true,
-			thinkingLevelMap: {"off":null,"xhigh":"xhigh"},
+			thinkingLevelMap: {"off":"none","xhigh":"xhigh"},
 			input: ["text", "image"],
 			cost: {
 				input: 30,
@@ -3242,7 +3242,7 @@ export const MODELS = {
 			provider: "cloudflare-ai-gateway",
 			baseUrl: "https://gateway.ai.cloudflare.com/v1/{CLOUDFLARE_ACCOUNT_ID}/{CLOUDFLARE_GATEWAY_ID}/openai",
 			reasoning: true,
-			thinkingLevelMap: {"off":null,"xhigh":"xhigh"},
+			thinkingLevelMap: {"off":"none","xhigh":"xhigh"},
 			input: ["text", "image"],
 			cost: {
 				input: 5,
@@ -4385,7 +4385,7 @@ export const MODELS = {
 			baseUrl: "https://api.individual.githubcopilot.com",
 			headers: {"User-Agent":"GitHubCopilotChat/0.35.0","Editor-Version":"vscode/1.107.0","Editor-Plugin-Version":"copilot-chat/0.35.0","Copilot-Integration-Id":"vscode-chat"},
 			reasoning: true,
-			thinkingLevelMap: {"off":null,"xhigh":"xhigh"},
+			thinkingLevelMap: {"off":"none","xhigh":"xhigh"},
 			input: ["text", "image"],
 			cost: {
 				input: 0,
@@ -7236,7 +7236,7 @@ export const MODELS = {
 			provider: "openai",
 			baseUrl: "https://api.openai.com/v1",
 			reasoning: true,
-			thinkingLevelMap: {"off":null,"xhigh":"xhigh"},
+			thinkingLevelMap: {"off":"none","xhigh":"xhigh"},
 			input: ["text", "image"],
 			cost: {
 				input: 5,
@@ -7254,7 +7254,7 @@ export const MODELS = {
 			provider: "openai",
 			baseUrl: "https://api.openai.com/v1",
 			reasoning: true,
-			thinkingLevelMap: {"off":null,"xhigh":"xhigh"},
+			thinkingLevelMap: {"off":"none","xhigh":"xhigh"},
 			input: ["text", "image"],
 			cost: {
 				input: 30,
@@ -7570,7 +7570,7 @@ export const MODELS = {
 			provider: "openai-codex",
 			baseUrl: "https://chatgpt.com/backend-api",
 			reasoning: true,
-			thinkingLevelMap: {"xhigh":"xhigh","minimal":"low"},
+			thinkingLevelMap: {"xhigh":"xhigh","minimal":"low","off":"none"},
 			input: ["text", "image"],
 			cost: {
 				input: 5,
@@ -8067,7 +8067,7 @@ export const MODELS = {
 			provider: "opencode",
 			baseUrl: "https://opencode.ai/zen/v1",
 			reasoning: true,
-			thinkingLevelMap: {"off":null,"xhigh":"xhigh"},
+			thinkingLevelMap: {"off":"none","xhigh":"xhigh"},
 			input: ["text", "image"],
 			cost: {
 				input: 5,
@@ -8085,7 +8085,7 @@ export const MODELS = {
 			provider: "opencode",
 			baseUrl: "https://opencode.ai/zen/v1",
 			reasoning: true,
-			thinkingLevelMap: {"off":null,"xhigh":"xhigh"},
+			thinkingLevelMap: {"off":"none","xhigh":"xhigh"},
 			input: ["text", "image"],
 			cost: {
 				input: 30,
