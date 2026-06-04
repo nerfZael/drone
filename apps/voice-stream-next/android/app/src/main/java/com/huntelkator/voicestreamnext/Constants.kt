@@ -13,6 +13,7 @@ object Constants {
     const val PREF_DEVICE_NAME = "device_name"
     const val PREF_INSTALLATION_ID = "installation_id"
     const val PREF_ANDROID_ECHO_CANCELLATION = "android_echo_cancellation"
+    const val PREF_SUPPRESS_WAKE_DURING_PLAYBACK = "suppress_wake_during_playback"
     const val PREF_MICROPHONE_DEVICE_KEY = "microphone_device_key"
 
     const val ACTION_START_VOICE = "com.huntelkator.voicestreamnext.action.START_VOICE"

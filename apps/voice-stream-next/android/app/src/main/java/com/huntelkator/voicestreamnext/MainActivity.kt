@@ -61,6 +61,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var serverInput: EditText
     private lateinit var deviceNameInput: EditText
     private lateinit var echoCancellationCheckbox: CheckBox
+    private lateinit var suppressWakeDuringPlaybackCheckbox: CheckBox
     private lateinit var statusText: TextView
     private lateinit var approvalText: TextView
     private lateinit var microphoneText: TextView
@@ -629,6 +630,15 @@ class MainActivity : ComponentActivity() {
             isEnabled = AcousticEchoCanceler.isAvailable()
             setPadding(0, 6.dp(), 0, 2.dp())
         }
+        suppressWakeDuringPlaybackCheckbox = CheckBox(this).apply {
+            text = "Pause commands during playback"
+            textSize = 14f
+            setTextColor(COLOR_TEXT)
+            setPadding(0, 2.dp(), 0, 2.dp())
+            setOnCheckedChangeListener { _, checked ->
+                api.saveSuppressWakeDuringPlaybackEnabled(checked)
+            }
+        }
 
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -639,6 +649,10 @@ class MainActivity : ComponentActivity() {
                 addView(serverInput)
                 addView(deviceNameInput)
                 addView(echoCancellationCheckbox)
+                addView(suppressWakeDuringPlaybackCheckbox)
+                addView(label("Use this when assistant audio plays on speaker so it cannot trigger wake commands.", 12f, COLOR_MUTED, false).apply {
+                    setPadding(0, 0, 0, 8.dp())
+                })
                 addView(row(
                     button("Save") { saveConfigFromForm() },
                     button("Open web") { openWebDashboard() }
@@ -1007,6 +1021,9 @@ class MainActivity : ComponentActivity() {
         if (::echoCancellationCheckbox.isInitialized) {
             echoCancellationCheckbox.isChecked = AcousticEchoCanceler.isAvailable() && api.androidEchoCancellationEnabled()
         }
+        if (::suppressWakeDuringPlaybackCheckbox.isInitialized) {
+            suppressWakeDuringPlaybackCheckbox.isChecked = api.suppressWakeDuringPlaybackEnabled()
+        }
         updatePairingMessage()
     }
 
@@ -1030,6 +1047,9 @@ class MainActivity : ComponentActivity() {
             changed
         } else {
             false
+        }
+        if (::suppressWakeDuringPlaybackCheckbox.isInitialized) {
+            api.saveSuppressWakeDuringPlaybackEnabled(suppressWakeDuringPlaybackCheckbox.isChecked)
         }
         showStatus(
             if (echoSettingChanged && sessionMode != SessionMode.OFF) {

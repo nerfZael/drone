@@ -165,6 +165,17 @@ class VoiceStreamApi(private val context: Context) {
             .apply()
     }
 
+    fun suppressWakeDuringPlaybackEnabled(): Boolean {
+        return context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(Constants.PREF_SUPPRESS_WAKE_DURING_PLAYBACK, false)
+    }
+
+    fun saveSuppressWakeDuringPlaybackEnabled(enabled: Boolean) {
+        context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE).edit()
+            .putBoolean(Constants.PREF_SUPPRESS_WAKE_DURING_PLAYBACK, enabled)
+            .apply()
+    }
+
     fun pairedDeviceId(): String {
         return context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
             .getString(Constants.PREF_DEVICE_ID, "").orEmpty()

@@ -40,6 +40,10 @@ object AssistantAudioPlayer {
         releaseActivePlayback()
     }
 
+    fun isPlaybackActive(): Boolean {
+        return activeRequest != null || activeTrack != null || activePlayer != null
+    }
+
     fun pausePlayback(requeueActive: Boolean = true) {
         playbackPaused = true
         val current = activeRequest

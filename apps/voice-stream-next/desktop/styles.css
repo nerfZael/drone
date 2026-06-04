@@ -481,6 +481,26 @@ h2 {
   width: 100%;
 }
 
+.settings-check-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  margin-top: 12px;
+  text-align: left;
+}
+
+.settings-check-row input {
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
+
+.settings-check-row .shortcut-help {
+  display: block;
+}
+
 .extensions-config-panel {
   display: grid;
   gap: 8px;
