@@ -28,6 +28,7 @@ const ANDROID_WEBVIEW_SESSIONS_MIGRATION_VERSION = '20260601120000';
 const BILLING_CREDITS_MIGRATION_VERSION = '20260603120000';
 const PENDING_CREDIT_GRANTS_MIGRATION_VERSION = '20260603130000';
 const EXTENSION_SKILLS_AND_EXECUTION_TARGETS_MIGRATION_VERSION = '20260605120000';
+const ASSISTANT_HANDS_FREE_MODE_MIGRATION_VERSION = '20260605130000';
 
 function migrationRows(db: VoiceStreamNextDb): Array<{ version: string; name: string; checksum: string }> {
   return db.db
@@ -71,6 +72,7 @@ describe('database migrations', () => {
       BILLING_CREDITS_MIGRATION_VERSION,
       PENDING_CREDIT_GRANTS_MIGRATION_VERSION,
       EXTENSION_SKILLS_AND_EXECUTION_TARGETS_MIGRATION_VERSION,
+      ASSISTANT_HANDS_FREE_MODE_MIGRATION_VERSION,
     ]);
     expect(columnNames(db, 'devices')).toContain('revoked_at');
     expect(columnNames(db, 'devices')).toContain('installation_id');
@@ -88,6 +90,8 @@ describe('database migrations', () => {
     expect(columnNames(db, 'pending_credit_grants')).toContain('claimed_ledger_id');
     expect(columnNames(db, 'assistant_skills')).toContain('managed_by_extension_id');
     expect(columnNames(db, 'assistant_thread_execution_targets')).toContain('target_device_id');
+    expect(columnNames(db, 'assistant_threads')).toContain('hands_free_mode');
+    expect(columnNames(db, 'assistant_profiles')).toContain('default_hands_free_mode');
   });
 
   test('does not rerun already applied migrations', () => {
@@ -98,7 +102,7 @@ describe('database migrations', () => {
     const second = new VoiceStreamNextDb(filePath);
     dbs.push(second);
 
-    expect(migrationRows(second)).toHaveLength(19);
+    expect(migrationRows(second)).toHaveLength(20);
   });
 
   test('rejects changed migration checksums', () => {

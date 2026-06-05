@@ -138,6 +138,7 @@ export type AssistantThread = {
   error: string | null;
   voiceEnabled: boolean;
   autoApprove: boolean;
+  handsFreeMode: boolean;
   systemPrompt: string | null;
   enabledTools: string[];
   capabilities: AssistantThreadCapabilities;
@@ -158,6 +159,7 @@ export type AssistantProfile = {
   sortOrder: number;
   systemPrompt: string | null;
   enabledTools: string[] | null;
+  defaultHandsFreeMode: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -880,6 +882,7 @@ function rowThread(row: any): AssistantThread {
     error: row.error == null ? null : String(row.error),
     voiceEnabled: true,
     autoApprove: asBool(row.auto_approve),
+    handsFreeMode: asBool(row.hands_free_mode),
     systemPrompt: row.system_prompt == null ? null : String(row.system_prompt),
     enabledTools: parseJsonArray(row.enabled_tools_json, [...ASSISTANT_DEFAULT_ENABLED_TOOLS]),
     capabilities: parseJsonObject(row.capabilities_json, ASSISTANT_DEFAULT_CAPABILITIES),
@@ -903,6 +906,7 @@ function rowAssistantProfile(row: any): AssistantProfile {
     sortOrder: Number(row.sort_order ?? 0),
     systemPrompt: row.system_prompt == null ? null : String(row.system_prompt),
     enabledTools: enabledToolsRaw == null ? null : parseJsonArray(enabledToolsRaw, [...ASSISTANT_DEFAULT_ENABLED_TOOLS]),
+    defaultHandsFreeMode: asBool(row.default_hands_free_mode),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
   };
@@ -3129,6 +3133,7 @@ export class VoiceStreamNextDb {
       baseProfileId?: unknown;
       systemPrompt?: unknown;
       enabledTools?: unknown;
+      defaultHandsFreeMode?: boolean;
       enabled?: boolean;
     },
   ): AssistantProfile {
@@ -3165,6 +3170,7 @@ export class VoiceStreamNextDb {
             sort_order,
             system_prompt,
             enabled_tools_json,
+            default_hands_free_mode,
             created_at,
             updated_at
           )
@@ -3180,6 +3186,7 @@ export class VoiceStreamNextDb {
             $sortOrder,
             $systemPrompt,
             $enabledToolsJson,
+            $defaultHandsFreeMode,
             $createdAt,
             $updatedAt
           )
@@ -3197,6 +3204,7 @@ export class VoiceStreamNextDb {
           $sortOrder: Number(row?.nextSortOrder ?? 0),
           $systemPrompt: input.systemPrompt == null ? null : String(input.systemPrompt),
           $enabledToolsJson: enabledTools ? JSON.stringify(enabledTools) : null,
+          $defaultHandsFreeMode: input.defaultHandsFreeMode ? 1 : 0,
           $createdAt: at,
           $updatedAt: at,
         });
@@ -3212,7 +3220,7 @@ export class VoiceStreamNextDb {
   updateAssistantProfile(
     userId: string,
     profileId: string,
-    input: Partial<Pick<AssistantProfile, 'name' | 'wakePhrase' | 'wakePhraseAliases' | 'ttsVoice' | 'baseProfileId' | 'enabled' | 'sortOrder' | 'systemPrompt' | 'enabledTools'>>,
+    input: Partial<Pick<AssistantProfile, 'name' | 'wakePhrase' | 'wakePhraseAliases' | 'ttsVoice' | 'baseProfileId' | 'enabled' | 'sortOrder' | 'systemPrompt' | 'enabledTools' | 'defaultHandsFreeMode'>>,
   ): AssistantProfile | null {
     const current = this.assistantProfile(userId, profileId);
     if (!current) return null;
@@ -3253,6 +3261,7 @@ export class VoiceStreamNextDb {
               sort_order = $sortOrder,
               system_prompt = $systemPrompt,
               enabled_tools_json = $enabledToolsJson,
+              default_hands_free_mode = $defaultHandsFreeMode,
               updated_at = $updatedAt
           WHERE user_id = $userId AND id = $profileId
         `,
@@ -3267,6 +3276,7 @@ export class VoiceStreamNextDb {
           $sortOrder: input.sortOrder ?? current.sortOrder,
           $systemPrompt: input.systemPrompt === undefined ? current.systemPrompt : input.systemPrompt,
           $enabledToolsJson: input.enabledTools === undefined ? (current.enabledTools ? JSON.stringify(current.enabledTools) : null) : (input.enabledTools ? JSON.stringify(input.enabledTools) : null),
+          $defaultHandsFreeMode: (input.defaultHandsFreeMode ?? current.defaultHandsFreeMode) ? 1 : 0,
           $updatedAt: at,
           $userId: userId,
           $profileId: profileId,
@@ -4095,6 +4105,7 @@ export class VoiceStreamNextDb {
       capabilities?: AssistantThreadCapabilities;
       promptDeliveryMode?: 'queue' | 'asap';
       autoApprove?: boolean;
+      handsFreeMode?: boolean;
     },
   ): AssistantThread {
     const id = newId('thr');
@@ -4120,6 +4131,7 @@ export class VoiceStreamNextDb {
           error,
           voice_enabled,
           auto_approve,
+          hands_free_mode,
           system_prompt,
           enabled_tools_json,
           capabilities_json,
@@ -4141,6 +4153,7 @@ export class VoiceStreamNextDb {
           NULL,
           $voiceEnabled,
           $autoApprove,
+          $handsFreeMode,
           NULL,
           $enabledToolsJson,
           $capabilitiesJson,
@@ -4162,6 +4175,7 @@ export class VoiceStreamNextDb {
         $thinkingLevel: input.thinkingLevel?.trim() || settings.defaultThinkingLevel,
         $voiceEnabled: 1,
         $autoApprove: input.autoApprove ? 1 : 0,
+        $handsFreeMode: (input.handsFreeMode ?? profile.defaultHandsFreeMode) ? 1 : 0,
         $enabledToolsJson: JSON.stringify(enabledTools),
         $capabilitiesJson: JSON.stringify(input.capabilities ?? ASSISTANT_DEFAULT_CAPABILITIES),
         $promptDeliveryMode: input.promptDeliveryMode === 'asap' ? 'asap' : 'queue',
@@ -4197,7 +4211,7 @@ export class VoiceStreamNextDb {
   updateThread(
     userId: string,
     threadId: string,
-    input: Partial<Pick<AssistantThread, 'title' | 'assistantProfileId' | 'provider' | 'model' | 'thinkingLevel' | 'status' | 'error' | 'voiceEnabled' | 'autoApprove' | 'systemPrompt' | 'enabledTools' | 'capabilities' | 'promptDeliveryMode'>>,
+    input: Partial<Pick<AssistantThread, 'title' | 'assistantProfileId' | 'provider' | 'model' | 'thinkingLevel' | 'status' | 'error' | 'voiceEnabled' | 'autoApprove' | 'handsFreeMode' | 'systemPrompt' | 'enabledTools' | 'capabilities' | 'promptDeliveryMode'>>,
   ): AssistantThread | null {
     const current = this.thread(userId, threadId);
     if (!current) return null;
@@ -4222,6 +4236,7 @@ export class VoiceStreamNextDb {
             error = $error,
             voice_enabled = $voiceEnabled,
             auto_approve = $autoApprove,
+            hands_free_mode = $handsFreeMode,
             system_prompt = $systemPrompt,
             enabled_tools_json = $enabledToolsJson,
             capabilities_json = $capabilitiesJson,
@@ -4240,6 +4255,7 @@ export class VoiceStreamNextDb {
         $error: input.error === undefined ? current.error : input.error,
         $voiceEnabled: 1,
         $autoApprove: (input.autoApprove ?? current.autoApprove) ? 1 : 0,
+        $handsFreeMode: (input.handsFreeMode ?? current.handsFreeMode) ? 1 : 0,
         $systemPrompt: input.systemPrompt === undefined ? current.systemPrompt : input.systemPrompt,
         $enabledToolsJson: JSON.stringify(input.enabledTools ?? current.enabledTools),
         $capabilitiesJson: JSON.stringify(input.capabilities ?? current.capabilities),

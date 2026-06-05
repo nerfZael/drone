@@ -95,6 +95,7 @@ type AssistantProfileDraft = {
   enabled: boolean;
   systemPrompt: string;
   enabledTools: string[] | null;
+  defaultHandsFreeMode: boolean;
 };
 const ASSISTANT_TTS_VOICE_OPTIONS = [
   { id: 'autumn', label: 'Autumn - female' },
@@ -369,6 +370,7 @@ function profileDraftFromAssistantProfile(profile: AssistantProfile): AssistantP
     enabled: profile.enabled,
     systemPrompt: profile.systemPrompt ?? '',
     enabledTools: profile.enabledTools ? [...profile.enabledTools] : null,
+    defaultHandsFreeMode: profile.defaultHandsFreeMode,
   };
 }
 
@@ -381,6 +383,7 @@ function assistantProfilePayloadFromDraft(draft: AssistantProfileDraft): Record<
     enabled: draft.enabled,
     systemPrompt: draft.systemPrompt.trim(),
     enabledTools: draft.enabledTools,
+    defaultHandsFreeMode: draft.defaultHandsFreeMode,
   };
 }
 
@@ -3131,6 +3134,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const activeThreadMessageCount = (activeThread as AssistantThreadView | null)?.messages?.length ?? messages.length;
   const assistantProfileLocked = activeThreadMessageCount > 0;
   const autoApprove = Boolean(activeThread?.autoApprove);
+  const handsFreeMode = Boolean(activeThread?.handsFreeMode);
   const codexConnection = assistantSnapshotData?.codexConnection ?? { connected: false, accountId: null, expiresAt: null, updatedAt: null };
   const assistantSettings = assistantSnapshotData?.assistantSettings ?? null;
   const activeProvider = activeThread?.provider ?? 'openai';
@@ -3551,6 +3555,20 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                     <path d="M15 6h5v5" />
                   </svg>
                 </button>
+                <button
+                  type="button"
+                  className={cn(assistantIconButtonClass, handsFreeMode && assistantIconButtonActiveClass)}
+                  onClick={() => void updateThreadSettings({ handsFreeMode: !handsFreeMode })}
+                  disabled={!activeThread || busy}
+                  title={handsFreeMode ? 'Hands-free mode is on' : 'Hands-free mode is off'}
+                  aria-label={handsFreeMode ? 'Turn off hands-free mode' : 'Turn on hands-free mode'}
+                  aria-pressed={handsFreeMode}
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true" className={assistantIconSvgClass}>
+                    <path d="M12 3 5 6v5c0 4.5 3 8.5 7 10 4-1.5 7-5.5 7-10V6l-7-3Z" />
+                    <path d="M9 12l2 2 4-4" />
+                  </svg>
+                </button>
               </>
             ) : null}
             <div className="flex min-w-0 items-center gap-1.5">
@@ -3661,6 +3679,18 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                   >
                     <span>Auto-approve tool calls</span>
                     <span className="text-[10px] uppercase text-[var(--muted)]">{autoApprove ? 'On' : 'Off'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={cn('flex min-h-9 w-full items-center justify-between rounded border border-[var(--border-subtle)] bg-white/[.025] px-3 text-left text-xs text-[var(--fg-secondary)] shadow-none', handsFreeMode && assistantIconButtonActiveClass)}
+                    onClick={() => {
+                      void updateThreadSettings({ handsFreeMode: !handsFreeMode });
+                      setMobileToolbarOpen(false);
+                    }}
+                    disabled={!activeThread || busy}
+                  >
+                    <span>Hands-free mode</span>
+                    <span className="text-[10px] uppercase text-[var(--muted)]">{handsFreeMode ? 'On' : 'Off'}</span>
                   </button>
                 </>
               ) : null}
@@ -4181,16 +4211,28 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                             ))}
                           </select>
                         </label>
-                        <label className="flex h-[30px] items-center gap-2 rounded border border-[var(--border-subtle)] bg-white/[.02] px-2 text-[11px] font-semibold text-[var(--fg-secondary)]">
-                          <input
-                            type="checkbox"
-                            checked={selectedAssistantProfileDraft.enabled}
-                            disabled={busy || (selectedAssistantProfileDraft.enabled && enabledAssistantProfileCount <= 1)}
-                            className="h-3.5 w-3.5 accent-[var(--green)]"
-                            onChange={(event) => updateAssistantProfileDraft(selectedAssistantProfile.id, { enabled: event.currentTarget.checked })}
-                          />
-                          Enabled
-                        </label>
+                        <div className="grid gap-1.5">
+                          <label className="flex h-[30px] items-center gap-2 rounded border border-[var(--border-subtle)] bg-white/[.02] px-2 text-[11px] font-semibold text-[var(--fg-secondary)]">
+                            <input
+                              type="checkbox"
+                              checked={selectedAssistantProfileDraft.enabled}
+                              disabled={busy || (selectedAssistantProfileDraft.enabled && enabledAssistantProfileCount <= 1)}
+                              className="h-3.5 w-3.5 accent-[var(--green)]"
+                              onChange={(event) => updateAssistantProfileDraft(selectedAssistantProfile.id, { enabled: event.currentTarget.checked })}
+                            />
+                            Enabled
+                          </label>
+                          <label className="flex h-[30px] items-center gap-2 rounded border border-[var(--border-subtle)] bg-white/[.02] px-2 text-[11px] font-semibold text-[var(--fg-secondary)]">
+                            <input
+                              type="checkbox"
+                              checked={selectedAssistantProfileDraft.defaultHandsFreeMode}
+                              disabled={busy}
+                              className="h-3.5 w-3.5 accent-[var(--green)]"
+                              onChange={(event) => updateAssistantProfileDraft(selectedAssistantProfile.id, { defaultHandsFreeMode: event.currentTarget.checked })}
+                            />
+                            Hands-free
+                          </label>
+                        </div>
                       </div>
 
                       <label className={assistantFieldLabelClass}>

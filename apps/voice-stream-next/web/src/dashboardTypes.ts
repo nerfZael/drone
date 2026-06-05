@@ -76,6 +76,7 @@ export type AssistantProfile = {
   sortOrder: number;
   systemPrompt: string | null;
   enabledTools: string[] | null;
+  defaultHandsFreeMode: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -166,6 +167,7 @@ export type AssistantThread = {
   error?: string | null;
   voiceEnabled?: boolean;
   autoApprove?: boolean;
+  handsFreeMode?: boolean;
   systemPrompt?: string | null;
   enabledTools?: string[];
   capabilities?: {
