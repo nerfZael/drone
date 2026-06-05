@@ -2677,6 +2677,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       if (body.thinkingLevel !== undefined) patch.thinkingLevel = cleanText(body.thinkingLevel, 'off') || 'off';
       if (body.voiceEnabled !== undefined) patch.voiceEnabled = true;
       if (body.autoApprove !== undefined) patch.autoApprove = Boolean(body.autoApprove);
+      if (body.handsFreeMode !== undefined) patch.handsFreeMode = Boolean(body.handsFreeMode);
       if (body.systemPrompt !== undefined) patch.systemPrompt = cleanText(body.systemPrompt) || null;
       if (Array.isArray(body.enabledTools)) patch.enabledTools = body.enabledTools.map((tool: unknown) => cleanText(tool)).filter(Boolean);
       if (body.promptDeliveryMode !== undefined) patch.promptDeliveryMode = body.promptDeliveryMode === 'asap' ? 'asap' : 'queue';
@@ -3000,6 +3001,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         baseProfileId: body.baseProfileId,
         systemPrompt: body.systemPrompt,
         enabledTools: body.enabledTools,
+        defaultHandsFreeMode: Boolean(body.defaultHandsFreeMode),
         enabled: body.enabled === undefined ? true : Boolean(body.enabled),
       });
       emitAssistantChange('assistant_profile_created', undefined, ctx.user.id);
@@ -3023,6 +3025,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         ...(body.sortOrder !== undefined ? { sortOrder: Number(body.sortOrder) || 0 } : {}),
         ...(body.systemPrompt !== undefined ? { systemPrompt: cleanText(body.systemPrompt) } : {}),
         ...(body.enabledTools !== undefined ? { enabledTools: Array.isArray(body.enabledTools) ? body.enabledTools.map((tool: unknown) => cleanText(tool)).filter(Boolean) : null } : {}),
+        ...(body.defaultHandsFreeMode !== undefined ? { defaultHandsFreeMode: Boolean(body.defaultHandsFreeMode) } : {}),
       });
       if (!profile) throw Object.assign(new Error('unknown assistant profile'), { statusCode: 404 });
       emitAssistantChange('assistant_profile_updated', undefined, ctx.user.id);
