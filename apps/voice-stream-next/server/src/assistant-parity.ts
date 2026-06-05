@@ -27,6 +27,7 @@ import {
   type AssistantSkillRecord,
   type AssistantThread,
   type AssistantThreadCapabilities,
+  type AssistantThreadExecutionTargetRecord,
   type AssistantToolCallRecord,
   type VoiceStreamNextDb,
 } from './db.js';
@@ -88,9 +89,20 @@ export type AssistantThreadView = AssistantThread & {
   toolCalls: AssistantToolCallRecord[];
   artifactsCount: number;
   loadedSkills: AssistantLoadedSkillView[];
+  executionTargets: AssistantExecutionTargetView[];
 };
 
 export type AssistantLoadedSkillView = Pick<AssistantSkillRecord, 'id' | 'slug' | 'name'>;
+
+export type AssistantExecutionTargetView = {
+  slot: string;
+  targetKind: AssistantThreadExecutionTargetRecord['targetKind'];
+  targetDeviceId: string | null;
+  targetDeviceName: string | null;
+  targetDeviceMissing: boolean;
+  targetDeviceRevoked: boolean;
+  updatedAt: string;
+};
 
 export type AssistantApprovalView = AssistantApprovalRecord & {
   args: unknown;
@@ -315,6 +327,9 @@ export function assistantSnapshot(db: VoiceStreamNextDb, userId: string, activeT
       toolCalls: db.listToolCalls(userId, thread.id),
       artifactsCount: db.listArtifacts(userId, thread.id).length,
       loadedSkills: db.listThreadSkills(userId, thread.id).map(skillLoadedView),
+      executionTargets: db
+        .listAssistantThreadExecutionTargets(userId, thread.id)
+        .map((target) => executionTargetView(db, userId, target)),
     };
   });
   return {
@@ -1382,6 +1397,23 @@ function skillLoadedView(skill: AssistantSkillRecord): AssistantLoadedSkillView 
   return { id: skill.id, slug: skill.slug, name: skill.name };
 }
 
+function executionTargetView(
+  db: VoiceStreamNextDb,
+  userId: string,
+  target: AssistantThreadExecutionTargetRecord,
+): AssistantExecutionTargetView {
+  const device = target.targetDeviceId ? db.deviceForUser(userId, target.targetDeviceId) : null;
+  return {
+    slot: target.slot,
+    targetKind: target.targetKind,
+    targetDeviceId: target.targetDeviceId,
+    targetDeviceName: device?.displayName ?? null,
+    targetDeviceMissing: Boolean(target.targetDeviceId && !device),
+    targetDeviceRevoked: Boolean(device?.revokedAt),
+    updatedAt: target.updatedAt,
+  };
+}
+
 function cleanProvider(raw: unknown): string {
   const value = String(raw ?? '').trim().toLowerCase();
   return value === 'codex' ? 'codex' : 'openai';
@@ -1794,7 +1826,7 @@ async function setExecutionTarget(
   userId: string,
   thread: AssistantThread,
   input: { slot: string; extensionId?: string; deviceId: string },
-): unknown {
+): Promise<unknown> {
   const slot = cleanExecutionSlot(input.slot);
   if (!slot) throw Object.assign(new Error('execution target slot is required'), { statusCode: 400 });
   const extensionId = cleanExtensionId(input.extensionId);

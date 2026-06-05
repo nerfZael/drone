@@ -382,6 +382,17 @@ export type AssistantThreadView = AssistantThread & {
   toolCalls: AssistantToolCallRecord[];
   artifactsCount: number;
   loadedSkills: AssistantLoadedSkillView[];
+  executionTargets: AssistantExecutionTargetView[];
+};
+
+export type AssistantExecutionTargetView = {
+  slot: string;
+  targetKind: string;
+  targetDeviceId: string | null;
+  targetDeviceName: string | null;
+  targetDeviceMissing: boolean;
+  targetDeviceRevoked: boolean;
+  updatedAt: string;
 };
 
 export type AssistantSnapshot = {

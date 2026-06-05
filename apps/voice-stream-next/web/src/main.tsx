@@ -3076,9 +3076,30 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const speechPlaybackTarget = dashboard?.settings.speechPlaybackTarget ?? speechPlayback?.preferredTarget ?? 'auto';
   const pendingApprovals = assistantSnapshotData?.pendingApprovals ?? [];
   const activePendingApprovals = pendingApprovals.filter((approval) => approval.threadId === activeThread?.id && approval.status === 'pending');
+  const connectedDeviceIds = new Set((dashboard?.clientStatuses ?? []).map((status) => status.deviceId));
   const activeRuns = (activeThread as AssistantThreadView | null)?.runs?.filter((run) => run.status === 'running' || run.status === 'waiting_for_approval') ?? [];
   const queuedPrompts = (activeThread as AssistantThreadView | null)?.queuedPrompts ?? [];
   const activeLoadedSkills = (activeThread as AssistantThreadView | null)?.loadedSkills ?? [];
+  const activeExecutionTargets = (activeThread as AssistantThreadView | null)?.executionTargets ?? [];
+  const activeWorkspaceTarget = activeExecutionTargets.find((target) => target.slot === 'workspace') ?? null;
+  const workspaceTargetMeta = (target: AssistantThreadView['executionTargets'][number] | null) => {
+    const baseLabel = target ? target.targetDeviceName ?? target.targetDeviceId ?? target.targetKind : '';
+    const staleReason = target?.targetDeviceMissing
+      ? 'missing'
+      : target?.targetDeviceRevoked
+        ? 'revoked'
+        : target?.targetDeviceId && !connectedDeviceIds.has(target.targetDeviceId)
+          ? 'disconnected'
+          : '';
+    return {
+      label: staleReason ? `${baseLabel} (${staleReason})` : baseLabel,
+      className: cn(
+        assistantSkillBadgeClass,
+        staleReason && 'border-[rgba(248,113,113,.28)] bg-[rgba(248,113,113,.08)] text-[#fca5a5]',
+      ),
+    };
+  };
+  const activeWorkspaceTargetMeta = workspaceTargetMeta(activeWorkspaceTarget);
   const enabledTools = new Set(activeThread?.enabledTools ?? []);
   const enabledToolNames = activeThread?.enabledTools ?? [];
   const availableTools = assistantSnapshotData?.availableTools ?? [];
@@ -3190,7 +3211,6 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const activeRunningModelLabel = activeRunningModel
     ? modelSelectionLabel({ provider: activeRunningModel.provider, model: activeRunningModel.model, thinkingLevel: activeRunningModel.thinkingLevel }, modelOptions)
     : '';
-  const connectedDeviceIds = new Set((dashboard?.clientStatuses ?? []).map((status) => status.deviceId));
   const navItems: Array<{ id: DashboardView; label: string; count?: number }> = [
     { id: 'threads', label: 'Chat', count: threads.length },
     { id: 'settings', label: 'Settings', count: devices.length },
@@ -3278,6 +3298,8 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
             const messageCount = active ? messages.length : 0;
             const queuedCount = (thread as AssistantThreadView).queuedPrompts?.length ?? 0;
             const loadedSkills = (thread as AssistantThreadView).loadedSkills ?? [];
+            const workspaceTarget = ((thread as AssistantThreadView).executionTargets ?? []).find((target) => target.slot === 'workspace') ?? null;
+            const workspaceTargetState = workspaceTargetMeta(workspaceTarget);
             return (
               <div
                 key={thread.id}
@@ -3304,8 +3326,13 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                     {messageCount ? ` · ${messageCount}` : ''}
                     {queuedCount ? ` · ${queuedCount} queued` : ''}
                   </small>
-                  {loadedSkills.length > 0 ? (
+                  {loadedSkills.length > 0 || workspaceTarget ? (
                     <span className="flex min-w-0 flex-wrap gap-1 pr-1">
+                      {workspaceTarget ? (
+                        <span className={workspaceTargetState.className} title={`Workspace target: ${workspaceTargetState.label}`}>
+                          <span className="truncate">Workspace: {workspaceTargetState.label}</span>
+                        </span>
+                      ) : null}
                       {loadedSkills.slice(0, 2).map((skill) => (
                         <span key={skill.id} className={assistantSkillBadgeClass} title={`Loaded skill: ${skill.name}`}>
                           <span className="truncate">{skill.name}</span>
@@ -3396,6 +3423,11 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
             <span className="flex min-w-0 flex-wrap items-center gap-1.5 font-display text-[10px] font-medium uppercase leading-tight text-[var(--muted-dim)]">
               <span className="h-1.5 w-1.5 rounded-full bg-[var(--green)] shadow-[0_0_12px_rgba(74,222,128,.32)]" />
               {activeView === 'threads' ? (activeThread ? activeThread.status ?? 'idle' : 'no thread') : 'live'}
+              {activeView === 'threads' && activeWorkspaceTarget ? (
+                <span className={activeWorkspaceTargetMeta.className} title={`Workspace target: ${activeWorkspaceTargetMeta.label}`}>
+                  <span className="truncate">Workspace: {activeWorkspaceTargetMeta.label}</span>
+                </span>
+              ) : null}
               {activeView === 'threads' && activeLoadedSkills.length > 0 ? (
                 <>
                   {activeLoadedSkills.slice(0, 4).map((skill) => (

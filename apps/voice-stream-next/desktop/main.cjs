@@ -1210,6 +1210,88 @@ function assertLoadableExtensionPath(filePath) {
   return resolved;
 }
 
+function bundledWorkspaceExtensionPath() {
+  return path.resolve(__dirname, 'extensions', 'workspace-extension.cjs');
+}
+
+function workspaceExtensionEntry(existing = {}) {
+  const existingConfig = existing.config && typeof existing.config === 'object' && !Array.isArray(existing.config) ? existing.config : {};
+  return {
+    id: 'workspace',
+    name: 'Workspace',
+    path: bundledWorkspaceExtensionPath(),
+    enabled: true,
+    config: {
+      ...existingConfig,
+      workspaceRoots: uniqueWorkspaceRoots(existingConfig.workspaceRoots),
+    },
+  };
+}
+
+function uniqueWorkspaceRoots(values) {
+  const rawValues = Array.isArray(values) ? values : [];
+  const seen = new Set();
+  const roots = [];
+  for (const value of rawValues) {
+    const text = String(value || '').trim();
+    if (!text) continue;
+    const resolved = path.resolve(text);
+    if (seen.has(resolved)) continue;
+    seen.add(resolved);
+    roots.push(resolved);
+  }
+  return roots;
+}
+
+async function enableWorkspaceExtension() {
+  const config = readConfig();
+  const extensions = Array.isArray(config.extensions) ? [...config.extensions] : [];
+  const existingIndex = extensions.findIndex((entry) => String(entry?.id || '') === 'workspace');
+  const existing = existingIndex >= 0 && extensions[existingIndex] && typeof extensions[existingIndex] === 'object'
+    ? extensions[existingIndex]
+    : {};
+  const entry = workspaceExtensionEntry(existing);
+  if (existingIndex >= 0) extensions[existingIndex] = entry;
+  else extensions.unshift(entry);
+  const savedConfig = writeConfig({ ...config, extensions });
+  return { entry, ...(await reloadExtensionsAfterConfigSave(savedConfig)) };
+}
+
+async function addWorkspaceRootToConfig(rootPath) {
+  const cleanRoot = String(rootPath || '').trim();
+  if (!cleanRoot) throw new Error('Workspace root path is required.');
+  const resolvedRoot = path.resolve(cleanRoot);
+  const stat = fs.existsSync(resolvedRoot) ? fs.statSync(resolvedRoot) : null;
+  if (!stat?.isDirectory()) throw new Error('Workspace root must be an existing directory.');
+  const config = readConfig();
+  const extensions = Array.isArray(config.extensions) ? [...config.extensions] : [];
+  const existingIndex = extensions.findIndex((entry) => String(entry?.id || '') === 'workspace');
+  const existing = existingIndex >= 0 && extensions[existingIndex] && typeof extensions[existingIndex] === 'object'
+    ? extensions[existingIndex]
+    : {};
+  const entry = workspaceExtensionEntry(existing);
+  entry.config.workspaceRoots = uniqueWorkspaceRoots([...(entry.config.workspaceRoots || []), resolvedRoot]);
+  if (existingIndex >= 0) extensions[existingIndex] = entry;
+  else extensions.unshift(entry);
+  const savedConfig = writeConfig({ ...config, extensions });
+  return { entry, ...(await reloadExtensionsAfterConfigSave(savedConfig)) };
+}
+
+async function saveWorkspaceRootsToConfig(roots) {
+  const config = readConfig();
+  const extensions = Array.isArray(config.extensions) ? [...config.extensions] : [];
+  const existingIndex = extensions.findIndex((entry) => String(entry?.id || '') === 'workspace');
+  const existing = existingIndex >= 0 && extensions[existingIndex] && typeof extensions[existingIndex] === 'object'
+    ? extensions[existingIndex]
+    : {};
+  const entry = workspaceExtensionEntry(existing);
+  entry.config.workspaceRoots = uniqueWorkspaceRoots(roots);
+  if (existingIndex >= 0) extensions[existingIndex] = entry;
+  else extensions.unshift(entry);
+  const savedConfig = writeConfig({ ...config, extensions });
+  return { entry, ...(await reloadExtensionsAfterConfigSave(savedConfig)) };
+}
+
 async function reloadExtensionsAfterConfigSave(savedConfig) {
   extensionHost.loaded = false;
   extensionHost.configKey = '';
@@ -1695,6 +1777,17 @@ if (!gotSingleInstanceLock) {
     return { ok: true, statuses: extensionHost.statuses, manifests: extensionHost.manifests };
   });
   ipcMain.handle('extensions:addFile', async (_event, filePath) => addExtensionFileToConfig(filePath));
+  ipcMain.handle('extensions:enableWorkspace', async () => enableWorkspaceExtension());
+  ipcMain.handle('extensions:saveWorkspaceRoots', async (_event, roots) => saveWorkspaceRootsToConfig(roots));
+  ipcMain.handle('extensions:addWorkspaceRoot', async (event) => {
+    const owner = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+    const result = await dialog.showOpenDialog(owner, {
+      title: 'Add workspace root',
+      properties: ['openDirectory'],
+    });
+    if (result.canceled || !result.filePaths[0]) return { ok: false, canceled: true };
+    return addWorkspaceRootToConfig(result.filePaths[0]);
+  });
   ipcMain.handle('extensions:chooseFile', async (event) => {
     const owner = BrowserWindow.fromWebContents(event.sender) || mainWindow;
     const result = await dialog.showOpenDialog(owner, {

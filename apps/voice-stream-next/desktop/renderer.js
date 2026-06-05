@@ -171,6 +171,10 @@ const els = {
   extensionDropzone: document.querySelector('#extensionDropzone'),
   saveExtensionsButton: document.querySelector('#saveExtensionsButton'),
   reloadExtensionsButton: document.querySelector('#reloadExtensionsButton'),
+  enableWorkspaceExtensionButton: document.querySelector('#enableWorkspaceExtensionButton'),
+  addWorkspaceRootButton: document.querySelector('#addWorkspaceRootButton'),
+  workspaceRootsStatus: document.querySelector('#workspaceRootsStatus'),
+  workspaceRootsList: document.querySelector('#workspaceRootsList'),
   extensionsStatus: document.querySelector('#extensionsStatus'),
 };
 
@@ -399,6 +403,89 @@ function extensionConfigText(config = state.config) {
   return extensions.length > 0 ? JSON.stringify(extensions, null, 2) : '';
 }
 
+function workspaceExtensionConfig(config = state.config) {
+  const extensions = Array.isArray(config?.extensions) ? config.extensions : [];
+  return extensions.find((entry) => String(entry?.id || '') === 'workspace') || null;
+}
+
+function workspaceRootsFromConfig(config = state.config) {
+  const workspace = workspaceExtensionConfig(config);
+  return Array.isArray(workspace?.config?.workspaceRoots) ? workspace.config.workspaceRoots.filter(Boolean) : [];
+}
+
+function renderWorkspaceExtensionConfig(config = state.config) {
+  if (!els.workspaceRootsStatus) return;
+  const workspace = workspaceExtensionConfig(config);
+  if (!workspace || workspace.enabled === false) {
+    els.workspaceRootsStatus.textContent = 'Not enabled.';
+    if (els.enableWorkspaceExtensionButton) els.enableWorkspaceExtensionButton.textContent = 'Enable';
+    if (els.workspaceRootsList) {
+      els.workspaceRootsList.replaceChildren();
+      els.workspaceRootsList.hidden = true;
+    }
+    return;
+  }
+  const roots = workspaceRootsFromConfig(config);
+  els.workspaceRootsStatus.textContent = roots.length > 0
+    ? `${roots.length} workspace root${roots.length === 1 ? '' : 's'} configured.`
+    : 'Enabled. Add at least one root for useful file access.';
+  if (els.enableWorkspaceExtensionButton) els.enableWorkspaceExtensionButton.textContent = 'Enabled';
+  renderWorkspaceRootsList(roots);
+}
+
+function renderWorkspaceRootsList(roots) {
+  if (!els.workspaceRootsList) return;
+  els.workspaceRootsList.replaceChildren();
+  if (roots.length === 0) {
+    els.workspaceRootsList.hidden = true;
+    return;
+  }
+  els.workspaceRootsList.hidden = false;
+  roots.forEach((root, index) => {
+    const row = document.createElement('div');
+    row.className = 'workspace-root-row';
+
+    const pathEl = document.createElement('span');
+    pathEl.className = 'workspace-root-path';
+    pathEl.textContent = String(root);
+    pathEl.title = String(root);
+    row.appendChild(pathEl);
+
+    const actions = document.createElement('div');
+    actions.className = 'workspace-root-actions';
+    const moveUp = document.createElement('button');
+    moveUp.type = 'button';
+    moveUp.className = 'secondary mini-button';
+    moveUp.textContent = 'Up';
+    moveUp.disabled = index === 0;
+    moveUp.addEventListener('click', () => {
+      const nextRoots = [...roots];
+      [nextRoots[index - 1], nextRoots[index]] = [nextRoots[index], nextRoots[index - 1]];
+      void saveWorkspaceRoots(nextRoots, 'Moved workspace root up.');
+    });
+    const moveDown = document.createElement('button');
+    moveDown.type = 'button';
+    moveDown.className = 'secondary mini-button';
+    moveDown.textContent = 'Down';
+    moveDown.disabled = index === roots.length - 1;
+    moveDown.addEventListener('click', () => {
+      const nextRoots = [...roots];
+      [nextRoots[index], nextRoots[index + 1]] = [nextRoots[index + 1], nextRoots[index]];
+      void saveWorkspaceRoots(nextRoots, 'Moved workspace root down.');
+    });
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'secondary mini-button danger-mini-button';
+    remove.textContent = 'Remove';
+    remove.addEventListener('click', () => {
+      void saveWorkspaceRoots(roots.filter((_, rootIndex) => rootIndex !== index), 'Removed workspace root.');
+    });
+    actions.append(moveUp, moveDown, remove);
+    row.appendChild(actions);
+    els.workspaceRootsList.appendChild(row);
+  });
+}
+
 function isAbsoluteExtensionPath(value) {
   return typeof value === 'string' && (/^\//.test(value.trim()) || /^[a-zA-Z]:[\\/]/.test(value.trim()));
 }
@@ -430,8 +517,10 @@ function renderExtensionStatus(result) {
     const row = document.createElement('div');
     row.className = status.ok ? 'ok' : 'error';
     const name = String(status.name || status.id || 'Extension');
+    const toolText = `${status.toolCount || 0} tool(s)`;
+    const skillText = status.skillCount ? `, ${status.skillCount} skill(s)` : '';
     row.textContent = status.ok
-      ? `${name}: ${status.enabled === false ? 'disabled' : `${status.toolCount || 0} tool(s)`}`
+      ? `${name}: ${status.enabled === false ? 'disabled' : `${toolText}${skillText}`}`
       : `${name}: ${status.error || 'failed to load'}`;
     els.extensionsStatus.appendChild(row);
   }
@@ -475,6 +564,14 @@ async function chooseExtensionFile() {
   await applyExtensionImport(result);
 }
 
+async function saveWorkspaceRoots(roots, successMessage) {
+  if (!desktop.saveWorkspaceRoots) throw new Error('Workspace root management is not available.');
+  const result = await desktop.saveWorkspaceRoots(roots);
+  applyConfig(result.config);
+  renderExtensionStatus(result);
+  showStatus(successMessage || 'Saved workspace roots.');
+}
+
 function applyConfig(config) {
   state.config = {
     ...config,
@@ -488,6 +585,7 @@ function applyConfig(config) {
   if (els.inputDeviceSelect) els.inputDeviceSelect.value = config.inputDeviceId || '';
   if (els.outputDeviceSelect) els.outputDeviceSelect.value = config.outputDeviceId || '';
   if (els.extensionsConfigInput) els.extensionsConfigInput.value = extensionConfigText(config);
+  renderWorkspaceExtensionConfig(config);
   renderShortcutSettings();
   renderDevicePicker(els.inputDeviceSelect);
   renderDevicePicker(els.outputDeviceSelect);
@@ -3134,6 +3232,34 @@ if (els.outputDeviceSelect) {
 if (els.addExtensionFileButton) {
   els.addExtensionFileButton.addEventListener('click', () => {
     void chooseExtensionFile().catch((err) => showStatus(err?.message || 'Could not add extension file.'));
+  });
+}
+if (els.enableWorkspaceExtensionButton) {
+  els.enableWorkspaceExtensionButton.addEventListener('click', async () => {
+    try {
+      if (!desktop.enableWorkspaceExtension) throw new Error('Workspace extension setup is not available.');
+      const result = await desktop.enableWorkspaceExtension();
+      applyConfig(result.config);
+      renderExtensionStatus(result);
+      showStatus('Enabled Workspace extension.');
+    } catch (err) {
+      showStatus(err?.message || 'Could not enable Workspace extension.');
+    }
+  });
+}
+if (els.addWorkspaceRootButton) {
+  els.addWorkspaceRootButton.addEventListener('click', async () => {
+    try {
+      if (!desktop.addWorkspaceRoot) throw new Error('Workspace root picker is not available.');
+      const result = await desktop.addWorkspaceRoot();
+      if (result?.canceled) return;
+      applyConfig(result.config);
+      renderExtensionStatus(result);
+      const rootCount = Array.isArray(result.entry?.config?.workspaceRoots) ? result.entry.config.workspaceRoots.length : 0;
+      showStatus(rootCount > 0 ? `Saved ${rootCount} workspace root${rootCount === 1 ? '' : 's'}.` : 'Saved Workspace extension.');
+    } catch (err) {
+      showStatus(err?.message || 'Could not add workspace root.');
+    }
   });
 }
 if (els.extensionDropzone) {
