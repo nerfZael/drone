@@ -91,6 +91,17 @@
                     <span class="device-picker-title">Extensions</span>
                     <button id="reloadExtensionsButton" class="secondary mini-button" type="button">Reload</button>
                   </div>
+                  <div class="workspace-extension-row" aria-label="Workspace extension">
+                    <div>
+                      <span class="workspace-extension-title">Workspace</span>
+                      <span id="workspaceRootsStatus" class="workspace-extension-status">Not enabled.</span>
+                    </div>
+                    <div class="workspace-extension-actions">
+                      <button id="enableWorkspaceExtensionButton" class="secondary mini-button" type="button">Enable</button>
+                      <button id="addWorkspaceRootButton" class="secondary mini-button" type="button">Add root</button>
+                    </div>
+                  </div>
+                  <div id="workspaceRootsList" class="workspace-roots-list" aria-label="Workspace roots"></div>
                   <div id="extensionDropzone" class="extension-dropzone" tabindex="0" aria-label="Local extension file drop area">
                     <button id="addExtensionFileButton" class="secondary mini-button" type="button">Add file</button>
                     <span>Drop .cjs or .js file</span>

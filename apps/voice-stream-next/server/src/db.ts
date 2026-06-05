@@ -12,6 +12,7 @@ import {
   extensionToolName,
   parseAssistantExtensionManifest,
   type AssistantExtensionManifest,
+  type AssistantExtensionSkillManifest,
   type AssistantExtensionToolRoute,
 } from './assistant-extensions.js';
 
@@ -241,7 +242,18 @@ export type AssistantSkillRecord = {
   markdownBody: string;
   toolNames: string[];
   disableModelInvocation: boolean;
+  managedByExtensionId: string | null;
+  managedSkillKey: string | null;
   createdAt: string;
+  updatedAt: string;
+};
+
+export type AssistantThreadExecutionTargetRecord = {
+  userId: string;
+  threadId: string;
+  slot: string;
+  targetKind: AssistantExtensionToolRoute['targetKind'];
+  targetDeviceId: string | null;
   updatedAt: string;
 };
 
@@ -658,6 +670,8 @@ const ASSISTANT_DEFAULT_ENABLED_TOOLS = [
   'web_search',
   'fetch_content',
   'create_new_thread',
+  'list_execution_targets',
+  'set_execution_target',
 ] as const;
 const ASSISTANT_DEFAULT_CAPABILITIES: AssistantThreadCapabilities = {
   artifacts: true,
@@ -986,7 +1000,20 @@ function rowAssistantSkill(row: any): AssistantSkillRecord {
     markdownBody: String(row.markdown_body ?? ''),
     toolNames: parseJsonArray(row.tool_names_json, []),
     disableModelInvocation: asBool(row.disable_model_invocation),
+    managedByExtensionId: row.managed_by_extension_id == null ? null : String(row.managed_by_extension_id),
+    managedSkillKey: row.managed_skill_key == null ? null : String(row.managed_skill_key),
     createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function rowAssistantThreadExecutionTarget(row: any): AssistantThreadExecutionTargetRecord {
+  return {
+    userId: String(row.user_id),
+    threadId: String(row.thread_id),
+    slot: String(row.slot),
+    targetKind: cleanTargetKind(row.target_kind),
+    targetDeviceId: row.target_device_id == null ? null : String(row.target_device_id),
     updatedAt: String(row.updated_at),
   };
 }
@@ -3433,6 +3460,7 @@ export class VoiceStreamNextDb {
         $manifestJson: JSON.stringify(manifest),
         $updatedAt: at,
       });
+    this.upsertAssistantExtensionSkills(userId, manifest);
     return this.assistantExtensionManifest(userId, manifest.id)!;
   }
 
@@ -3452,8 +3480,150 @@ export class VoiceStreamNextDb {
 
   deleteAssistantExtensionManifest(userId: string, extensionId: string): void {
     this.db
+      .query('DELETE FROM assistant_skills WHERE user_id = $userId AND managed_by_extension_id = $extensionId')
+      .run({ $userId: userId, $extensionId: extensionId });
+    this.db
       .query('DELETE FROM assistant_extension_manifests WHERE user_id = $userId AND extension_id = $extensionId')
       .run({ $userId: userId, $extensionId: extensionId });
+  }
+
+  private upsertAssistantExtensionSkills(userId: string, manifest: AssistantExtensionManifest): void {
+    const skills = manifest.skills ?? [];
+    const managedKeys = new Set(skills.map((skill) => skill.slug));
+    if (managedKeys.size === 0) {
+      this.db
+        .query('DELETE FROM assistant_skills WHERE user_id = $userId AND managed_by_extension_id = $extensionId')
+        .run({ $userId: userId, $extensionId: manifest.id });
+      return;
+    }
+
+    for (const skill of skills) {
+      this.upsertAssistantExtensionSkill(userId, manifest.id, skill);
+    }
+
+    const placeholders = [...managedKeys].map((_, index) => `$key${index}`).join(', ');
+    this.db
+      .query(
+        `
+        DELETE FROM assistant_skills
+        WHERE user_id = $userId
+          AND managed_by_extension_id = $extensionId
+          AND managed_skill_key NOT IN (${placeholders})
+      `,
+      )
+      .run({
+        $userId: userId,
+        $extensionId: manifest.id,
+        ...Object.fromEntries([...managedKeys].map((key, index) => [`$key${index}`, key])),
+      });
+  }
+
+  private upsertAssistantExtensionSkill(userId: string, extensionId: string, skill: AssistantExtensionSkillManifest): AssistantSkillRecord {
+    const current = this.assistantSkillByExtensionKey(userId, extensionId, skill.slug);
+    const preferredSlug = normalizeSkillSlug(skill.slug || skill.name);
+    const slug = this.availableManagedSkillSlug(userId, current?.id ?? null, extensionId, preferredSlug);
+    const at = nowIso();
+    if (current) {
+      this.db
+        .query(
+          `
+          UPDATE assistant_skills
+          SET slug = $slug,
+              name = $name,
+              description = $description,
+              markdown_body = $markdownBody,
+              tool_names_json = $toolNamesJson,
+              disable_model_invocation = $disableModelInvocation,
+              updated_at = $updatedAt
+          WHERE user_id = $userId
+            AND id = $id
+        `,
+        )
+        .run({
+          $slug: slug,
+          $name: cleanSkillText(skill.name, 'skill name', ASSISTANT_SKILL_NAME_MAX_CHARS, { required: true }),
+          $description: cleanSkillText(skill.description, 'skill description', ASSISTANT_SKILL_DESCRIPTION_MAX_CHARS, { required: true }),
+          $markdownBody: cleanSkillText(skill.markdownBody, 'skill instructions', ASSISTANT_SKILL_BODY_MAX_CHARS, { statusCode: 413 }),
+          $toolNamesJson: JSON.stringify(normalizeSkillToolNames(skill.toolNames)),
+          $disableModelInvocation: skill.disableModelInvocation ? 1 : 0,
+          $updatedAt: at,
+          $userId: userId,
+          $id: current.id,
+        });
+      return this.assistantSkill(userId, current.id)!;
+    }
+
+    const id = newId('skl');
+    this.db
+      .query(
+        `
+        INSERT INTO assistant_skills (
+          id,
+          user_id,
+          slug,
+          name,
+          description,
+          markdown_body,
+          tool_names_json,
+          disable_model_invocation,
+          managed_by_extension_id,
+          managed_skill_key,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          $id,
+          $userId,
+          $slug,
+          $name,
+          $description,
+          $markdownBody,
+          $toolNamesJson,
+          $disableModelInvocation,
+          $managedByExtensionId,
+          $managedSkillKey,
+          $createdAt,
+          $updatedAt
+        )
+      `,
+      )
+      .run({
+        $id: id,
+        $userId: userId,
+        $slug: slug,
+        $name: cleanSkillText(skill.name, 'skill name', ASSISTANT_SKILL_NAME_MAX_CHARS, { required: true }),
+        $description: cleanSkillText(skill.description, 'skill description', ASSISTANT_SKILL_DESCRIPTION_MAX_CHARS, { required: true }),
+        $markdownBody: cleanSkillText(skill.markdownBody, 'skill instructions', ASSISTANT_SKILL_BODY_MAX_CHARS, { statusCode: 413 }),
+        $toolNamesJson: JSON.stringify(normalizeSkillToolNames(skill.toolNames)),
+        $disableModelInvocation: skill.disableModelInvocation ? 1 : 0,
+        $managedByExtensionId: extensionId,
+        $managedSkillKey: skill.slug,
+        $createdAt: at,
+        $updatedAt: at,
+      });
+    return this.assistantSkill(userId, id)!;
+  }
+
+  private assistantSkillByExtensionKey(userId: string, extensionId: string, skillKey: string): AssistantSkillRecord | null {
+    const row = this.db
+      .query(
+        `
+        SELECT *
+        FROM assistant_skills
+        WHERE user_id = $userId
+          AND managed_by_extension_id = $extensionId
+          AND managed_skill_key = $skillKey
+      `,
+      )
+      .get({ $userId: userId, $extensionId: extensionId, $skillKey: skillKey });
+    return row ? rowAssistantSkill(row) : null;
+  }
+
+  private availableManagedSkillSlug(userId: string, currentSkillId: string | null, extensionId: string, preferredSlug: string): string {
+    const preferred = normalizeSkillSlug(preferredSlug);
+    const owner = this.assistantSkill(userId, preferred);
+    if (!owner || owner.id === currentSkillId) return preferred;
+    return normalizeSkillSlug(`${extensionId}-${preferred}`);
   }
 
   listAssistantSkills(userId: string): AssistantSkillRecord[] {
@@ -3640,6 +3810,7 @@ export class VoiceStreamNextDb {
   }
 
   clearAssistantExtensionManifests(): void {
+    this.db.query('DELETE FROM assistant_skills WHERE managed_by_extension_id IS NOT NULL').run();
     this.db.query('DELETE FROM assistant_extension_manifests').run();
   }
 
@@ -3709,6 +3880,90 @@ export class VoiceStreamNextDb {
         $updatedAt: at,
       });
     return this.assistantExtensionToolRoute(userId, input.toolName)!;
+  }
+
+  listAssistantThreadExecutionTargets(userId: string, threadId: string): AssistantThreadExecutionTargetRecord[] {
+    return this.db
+      .query(
+        `
+        SELECT *
+        FROM assistant_thread_execution_targets
+        WHERE user_id = $userId
+          AND thread_id = $threadId
+        ORDER BY slot ASC
+      `,
+      )
+      .all({ $userId: userId, $threadId: threadId })
+      .map(rowAssistantThreadExecutionTarget);
+  }
+
+  assistantThreadExecutionTarget(userId: string, threadId: string, slot: string): AssistantThreadExecutionTargetRecord | null {
+    const cleanSlot = normalizeToolName(slot);
+    if (!cleanSlot) return null;
+    const row = this.db
+      .query(
+        `
+        SELECT *
+        FROM assistant_thread_execution_targets
+        WHERE user_id = $userId
+          AND thread_id = $threadId
+          AND slot = $slot
+      `,
+      )
+      .get({ $userId: userId, $threadId: threadId, $slot: cleanSlot });
+    return row ? rowAssistantThreadExecutionTarget(row) : null;
+  }
+
+  upsertAssistantThreadExecutionTarget(
+    userId: string,
+    threadId: string,
+    input: { slot: string; targetKind: AssistantThreadExecutionTargetRecord['targetKind']; targetDeviceId?: string | null },
+  ): AssistantThreadExecutionTargetRecord {
+    const thread = this.thread(userId, threadId);
+    if (!thread) throw Object.assign(new Error('unknown assistant thread'), { statusCode: 404 });
+    const slot = normalizeToolName(input.slot);
+    if (!slot) throw Object.assign(new Error('execution target slot is required'), { statusCode: 400 });
+    const targetKind = cleanTargetKind(input.targetKind);
+    const targetDeviceId = targetKind === 'device' ? String(input.targetDeviceId ?? '').trim() || null : null;
+    if (targetKind === 'device') {
+      if (!targetDeviceId) throw Object.assign(new Error('target device id is required'), { statusCode: 400 });
+      if (!this.deviceForUser(userId, targetDeviceId)) throw Object.assign(new Error('unknown target device'), { statusCode: 404 });
+    }
+    const at = nowIso();
+    this.db
+      .query(
+        `
+        INSERT INTO assistant_thread_execution_targets (
+          user_id,
+          thread_id,
+          slot,
+          target_kind,
+          target_device_id,
+          updated_at
+        )
+        VALUES (
+          $userId,
+          $threadId,
+          $slot,
+          $targetKind,
+          $targetDeviceId,
+          $updatedAt
+        )
+        ON CONFLICT(user_id, thread_id, slot) DO UPDATE SET
+          target_kind = excluded.target_kind,
+          target_device_id = excluded.target_device_id,
+          updated_at = excluded.updated_at
+      `,
+      )
+      .run({
+        $userId: userId,
+        $threadId: threadId,
+        $slot: slot,
+        $targetKind: targetKind,
+        $targetDeviceId: targetDeviceId,
+        $updatedAt: at,
+      });
+    return this.assistantThreadExecutionTarget(userId, threadId, slot)!;
   }
 
   codexConnection(userId: string): AssistantCodexConnectionRecord | null {
