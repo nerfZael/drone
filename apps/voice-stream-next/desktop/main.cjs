@@ -1090,6 +1090,8 @@ function createExtensionApi(extensionConfig, manifest, tools) {
         supportedTargets: cleanExtensionTargets(value.supportedTargets || value.targets),
         defaultTarget: cleanExtensionTarget(value.defaultTarget, 'device'),
       };
+      const targetSlot = safeExtensionToolSegment(value.targetSlot || '');
+      if (targetSlot) toolManifest.targetSlot = targetSlot;
       if (!toolManifest.supportedTargets.includes(toolManifest.defaultTarget)) {
         toolManifest.defaultTarget = toolManifest.supportedTargets[0] || 'device';
       }
@@ -1100,6 +1102,31 @@ function createExtensionApi(extensionConfig, manifest, tools) {
         fullName,
         execute: value.execute,
         approval: approvalEvaluator,
+      });
+    },
+    registerSkill(skill) {
+      const value = skill && typeof skill === 'object' ? skill : {};
+      const name = String(value.name || '').trim();
+      const slug = String(value.slug || name)
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 80);
+      if (!name || !slug) throw new Error(`extension ${extensionConfig.id} registered a skill without a name`);
+      const rawToolNames = Array.isArray(value.toolNames) ? value.toolNames : [];
+      const toolNames = [...new Set(rawToolNames.map((toolName) => {
+        const text = String(toolName || '').trim();
+        if (!text) return '';
+        return text.includes('__') ? normalizeExtensionSkillToolName(text) : extensionToolName(extensionConfig.id, text);
+      }).filter(Boolean))];
+      manifest.skills.push({
+        slug,
+        name,
+        description: String(value.description || `${name} extension skill`).trim(),
+        markdownBody: String(value.markdownBody || value.instructions || '').trim(),
+        toolNames,
+        disableModelInvocation: value.disableModelInvocation === true,
       });
     },
     assistant: {
@@ -1132,6 +1159,15 @@ function normalizeExtensionInputSchema(schema) {
     required: Array.isArray(value.required) ? value.required.map((item) => String(item)).filter(Boolean) : [],
     additionalProperties: value.additionalProperties === true,
   };
+}
+
+function normalizeExtensionSkillToolName(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 128);
 }
 
 function cleanExtensionApproval(value) {
@@ -1231,7 +1267,7 @@ async function loadDesktopExtensions(options = {}) {
     const extensionIds = new Set();
     for (const extensionConfig of configs) {
       if (!extensionConfig.enabled) {
-        statuses.push({ id: extensionConfig.id, name: extensionConfig.name, enabled: false, ok: true, toolCount: 0 });
+        statuses.push({ id: extensionConfig.id, name: extensionConfig.name, enabled: false, ok: true, toolCount: 0, skillCount: 0 });
         continue;
       }
       const manifest = {
@@ -1239,6 +1275,7 @@ async function loadDesktopExtensions(options = {}) {
         name: extensionConfig.name,
         version: '0.0.0',
         tools: [],
+        skills: [],
       };
       const existingToolNames = new Set(tools.keys());
       try {
@@ -1252,17 +1289,17 @@ async function loadDesktopExtensions(options = {}) {
         const deactivate = extensionModule?.deactivate || extensionModule?.default?.deactivate;
         if (typeof activate !== 'function') throw new Error('extension must export activate(api)');
         await activate(createExtensionApi(extensionConfig, manifest, tools));
-        if (manifest.tools.length === 0) throw new Error('extension did not register any tools');
+        if (manifest.tools.length === 0 && manifest.skills.length === 0) throw new Error('extension did not register any tools or skills');
         if (typeof deactivate === 'function') {
           extensionHost.deactivators.push({ extensionId: extensionConfig.id, deactivate });
         }
         manifests.push(manifest);
-        statuses.push({ id: extensionConfig.id, name: extensionConfig.name, enabled: true, ok: true, toolCount: manifest.tools.length });
+        statuses.push({ id: extensionConfig.id, name: extensionConfig.name, enabled: true, ok: true, toolCount: manifest.tools.length, skillCount: manifest.skills.length });
       } catch (error) {
         for (const toolName of tools.keys()) {
           if (!existingToolNames.has(toolName)) tools.delete(toolName);
         }
-        statuses.push({ id: extensionConfig.id, name: extensionConfig.name, enabled: true, ok: false, error: error?.message || String(error), toolCount: 0 });
+        statuses.push({ id: extensionConfig.id, name: extensionConfig.name, enabled: true, ok: false, error: error?.message || String(error), toolCount: 0, skillCount: 0 });
         windowDebugLog('extension:loadFailed', { extensionId: extensionConfig.id, path: extensionConfig.path, error: error?.message || String(error) });
       }
     }

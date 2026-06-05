@@ -24,6 +24,7 @@ import {
   promptAssistantThread,
   resolveAssistantApproval,
   sanitizeArtifactPath,
+  setAssistantExecutionTargetProvider,
   setAssistantExternalToolApprovalEvaluator,
   setAssistantExternalToolExecutor,
 } from './assistant-parity.js';
@@ -881,6 +882,26 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       threadId: input.thread.id,
     });
   });
+  setAssistantExecutionTargetProvider(async (input) => ({
+    devices: extensionBridges.connectedDevices(input.userId).map((device) => ({
+      deviceId: device.deviceId,
+      deviceType: device.deviceType,
+      displayName: device.displayName,
+      connected: true,
+      connectedAt: device.connectedAt,
+      manifests: device.manifests
+        .filter((manifest) => !input.extensionId || manifest.id === input.extensionId)
+        .map((manifest) => ({
+          id: manifest.id,
+          name: manifest.name,
+          toolNames: manifest.tools
+            .filter((tool) => !input.slot || tool.targetSlot === input.slot)
+            .map((tool) => extensionToolName(manifest.id, tool.name)),
+          slots: [...new Set(manifest.tools.map((tool) => tool.targetSlot).filter(Boolean) as string[])],
+        }))
+        .filter((manifest) => manifest.toolNames.length > 0 || manifest.slots.length > 0),
+    })),
+  }));
 
   const writeSseEvent = (res: any, event: string, data: unknown) => {
     res.write(`event: ${event}\n`);
@@ -1207,6 +1228,8 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
 
   app.addHook('onClose', async () => {
     setAssistantExternalToolExecutor(null);
+    setAssistantExternalToolApprovalEvaluator(null);
+    setAssistantExecutionTargetProvider(null);
   });
 
   const handleAssistantPromptEvent = (userId: string, threadId: string, event: any) => {

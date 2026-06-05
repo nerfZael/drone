@@ -18,6 +18,16 @@ export type AssistantExtensionToolManifest = {
   approval?: AssistantExtensionApprovalPolicy;
   supportedTargets: AssistantExtensionTargetKind[];
   defaultTarget: AssistantExtensionTargetKind;
+  targetSlot?: string;
+};
+
+export type AssistantExtensionSkillManifest = {
+  slug: string;
+  name: string;
+  description: string;
+  markdownBody: string;
+  toolNames: string[];
+  disableModelInvocation: boolean;
 };
 
 export type AssistantExtensionManifest = {
@@ -26,6 +36,7 @@ export type AssistantExtensionManifest = {
   version: string;
   description?: string;
   tools: AssistantExtensionToolManifest[];
+  skills?: AssistantExtensionSkillManifest[];
 };
 
 export type AssistantExtensionToolRoute = {
@@ -67,14 +78,16 @@ export function parseAssistantExtensionManifest(raw: unknown): AssistantExtensio
   const name = cleanText(value.name, id);
   const version = cleanText(value.version, '0.0.0') || '0.0.0';
   const tools = Array.isArray(value.tools) ? value.tools.map(parseToolManifest).filter(Boolean) as AssistantExtensionToolManifest[] : [];
+  const skills = Array.isArray(value.skills) ? value.skills.map(parseSkillManifest).filter(Boolean) as AssistantExtensionSkillManifest[] : [];
   if (!id) throw Object.assign(new Error('extension id is required'), { statusCode: 400 });
-  if (tools.length === 0) throw Object.assign(new Error('extension must define at least one tool'), { statusCode: 400 });
+  if (tools.length === 0 && skills.length === 0) throw Object.assign(new Error('extension must define at least one tool or skill'), { statusCode: 400 });
   return {
     id,
     name,
     version,
     description: cleanText(value.description) || undefined,
     tools,
+    skills,
   };
 }
 
@@ -103,6 +116,22 @@ function parseToolManifest(raw: unknown): AssistantExtensionToolManifest | null 
     approval,
     supportedTargets,
     defaultTarget: supportedTargets.includes(defaultTarget) ? defaultTarget : supportedTargets[0] ?? 'device',
+    targetSlot: cleanSlot(value.targetSlot) || undefined,
+  };
+}
+
+function parseSkillManifest(raw: unknown): AssistantExtensionSkillManifest | null {
+  const value = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+  const name = cleanText(value.name);
+  const slug = cleanSkillSlug(value.slug ?? name);
+  if (!slug || !name) return null;
+  return {
+    slug,
+    name,
+    description: cleanText(value.description, `${name} extension skill`) || `${name} extension skill`,
+    markdownBody: cleanLongText(value.markdownBody ?? value.instructions, 64 * 1024),
+    toolNames: parseToolNames(value.toolNames),
+    disableModelInvocation: value.disableModelInvocation === true,
   };
 }
 
@@ -137,6 +166,24 @@ function cleanManifestId(raw: unknown): string {
   return safeToolSegment(raw).replace(/_/g, '-');
 }
 
+function cleanSkillSlug(raw: unknown): string {
+  return String(raw ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
+}
+
+function cleanSlot(raw: unknown): string {
+  return String(raw ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 80);
+}
+
 function safeToolSegment(raw: unknown): string {
   return String(raw ?? '')
     .trim()
@@ -148,4 +195,26 @@ function safeToolSegment(raw: unknown): string {
 
 function cleanText(raw: unknown, fallback = ''): string {
   return String(raw ?? fallback).trim().slice(0, 4000);
+}
+
+function cleanLongText(raw: unknown, maxChars: number): string {
+  return String(raw ?? '').trim().slice(0, maxChars);
+}
+
+function parseToolNames(raw: unknown): string[] {
+  const values = Array.isArray(raw)
+    ? raw
+    : String(raw ?? '')
+        .split(/[\s,]+/g)
+        .filter(Boolean);
+  return [...new Set(values.map(safeSkillToolName).filter(Boolean))].slice(0, 40);
+}
+
+function safeSkillToolName(raw: unknown): string {
+  return String(raw ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 128);
 }

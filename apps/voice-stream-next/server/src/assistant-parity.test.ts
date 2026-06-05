@@ -7,6 +7,7 @@ import {
   promptAssistantThread,
   resolveAssistantApproval,
   sanitizeArtifactPath,
+  setAssistantExecutionTargetProvider,
   setAssistantExternalToolApprovalEvaluator,
   setAssistantExternalToolExecutor,
 } from './assistant-parity.js';
@@ -40,6 +41,7 @@ describe('assistant parity runtime', () => {
     delete process.env.VOICE_STREAM_NEXT_OPENAI_API_KEY;
     setAssistantExternalToolApprovalEvaluator(null);
     setAssistantExternalToolExecutor(null);
+    setAssistantExecutionTargetProvider(null);
     globalThis.fetch = originalFetch;
   });
 
@@ -246,6 +248,88 @@ describe('assistant parity runtime', () => {
     expect(result.targetKind).toBe('any_device');
     const toolResult = db.listMessages(user.id, thread.id).find((message) => message.role === 'toolResult' && message.toolName === toolName);
     expect(toolResult?.content).toContain('hello extension');
+  });
+
+  test('stores extension-provided skills in the normal skill catalog', () => {
+    const db = tempDb('assistant-extension-skills');
+    dbs.push(db);
+    const user = testUser(db);
+    const readToolName = extensionToolName('workspace', 'read_file');
+
+    db.upsertAssistantExtensionManifest(user.id, {
+      id: 'workspace',
+      name: 'Workspace',
+      version: '0.1.0',
+      tools: [{
+        name: 'read_file',
+        label: 'Read file',
+        description: 'Read a workspace file.',
+        inputSchema: { type: 'object', properties: {}, required: [], additionalProperties: false },
+        approval: 'never',
+        supportedTargets: ['device'],
+        defaultTarget: 'device',
+        targetSlot: 'workspace',
+      }],
+      skills: [{
+        slug: 'workspace',
+        name: 'Workspace',
+        description: 'Inspect and edit workspace files.',
+        markdownBody: 'Prefer read_file before editing.',
+        toolNames: [readToolName],
+        disableModelInvocation: false,
+      }],
+    });
+
+    const snapshot = assistantSnapshot(db, user.id);
+    const skill = snapshot.skills.find((item) => item.slug === 'workspace');
+    expect(skill?.managedByExtensionId).toBe('workspace');
+    expect(skill?.toolNames).toEqual([readToolName]);
+  });
+
+  test('uses thread execution target routes for workspace extension tools', async () => {
+    const db = tempDb('assistant-extension-targets');
+    dbs.push(db);
+    const user = testUser(db);
+    const desktop = db.registerDevice(user.id, { deviceType: 'desktop', displayName: 'Desktop' }).device;
+    const phone = db.registerDevice(user.id, { deviceType: 'android', displayName: 'Phone' }).device;
+    const manifest = db.upsertAssistantExtensionManifest(user.id, {
+      id: 'workspace',
+      name: 'Workspace',
+      version: '0.1.0',
+      tools: [{
+        name: 'read_file',
+        label: 'Read file',
+        description: 'Read a workspace file.',
+        inputSchema: {
+          type: 'object',
+          properties: { path: { type: 'string' } },
+          required: ['path'],
+          additionalProperties: false,
+        },
+        approval: 'never',
+        supportedTargets: ['device'],
+        defaultTarget: 'device',
+        targetSlot: 'workspace',
+      }],
+    });
+    const toolName = extensionToolName(manifest.extensionId, 'read_file');
+    db.upsertAssistantExtensionToolRoute(user.id, { toolName, enabled: true, targetKind: 'device', targetDeviceId: phone.id });
+    const thread = db.createThread(user.id, { title: 'Workspace target', enabledTools: [toolName] });
+    db.upsertAssistantThreadExecutionTarget(user.id, thread.id, { slot: 'workspace', targetKind: 'device', targetDeviceId: desktop.id });
+    process.env.VOICE_STREAM_NEXT_TEST_MODEL_TOOL_CALLS = JSON.stringify([
+      { name: toolName, arguments: { path: 'README.md' } },
+    ]);
+    setAssistantExternalToolExecutor(async (input) => ({
+      ok: true,
+      targetKind: input.route?.targetKind,
+      targetDeviceId: input.route?.targetDeviceId,
+    }));
+
+    await promptAssistantThread(db, user.id, thread.id, { prompt: 'Read the file.' }, () => undefined);
+
+    const result = JSON.parse(db.listToolCalls(user.id, thread.id)[0]!.resultJson || '{}');
+    expect(result.targetKind).toBe('device');
+    expect(result.targetDeviceId).toBe(desktop.id);
   });
 
   test('includes extension tools in provider instructions and timing logs', async () => {
