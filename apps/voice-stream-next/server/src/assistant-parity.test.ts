@@ -406,7 +406,7 @@ describe('assistant parity runtime', () => {
     expect(requestStartLog?.detailsJson).toContain(toolName);
   });
 
-  test('hands-free mode hides approval-gated tools from provider requests', async () => {
+  test('hands-free mode hides always-approval tools but keeps dynamic tools in provider requests', async () => {
     const db = tempDb('assistant-hands-free-tools');
     dbs.push(db);
     const user = testUser(db);
@@ -457,7 +457,7 @@ describe('assistant parity runtime', () => {
     const toolNames = (requestBody?.tools ?? []).map((tool: any) => tool.name);
     expect(toolNames).toContain('get_system_prompt');
     expect(toolNames).not.toContain('update_system_prompt');
-    expect(toolNames).not.toContain(dynamicToolName);
+    expect(toolNames).toContain(dynamicToolName);
     expect(JSON.stringify(requestBody)).toContain('Hands-free mode is on');
   });
 
@@ -497,6 +497,84 @@ describe('assistant parity runtime', () => {
 
     expect(snapshot.pendingApprovals).toHaveLength(0);
     expect(db.listToolCalls(user.id, thread.id)[0]?.status).toBe('completed');
+  });
+
+  test('hands-free mode allows dynamic tool calls that do not need approval', async () => {
+    const db = tempDb('assistant-hands-free-dynamic-allowed');
+    dbs.push(db);
+    const user = testUser(db);
+    const manifest = db.upsertAssistantExtensionManifest(user.id, {
+      id: 'test-extension',
+      name: 'Test Extension',
+      version: '0.1.0',
+      tools: [{
+        name: 'send',
+        label: 'Send',
+        description: 'Send through an extension runner.',
+        inputSchema: {
+          type: 'object',
+          properties: { target: { type: 'string' } },
+          required: ['target'],
+          additionalProperties: false,
+        },
+        approval: 'dynamic',
+        supportedTargets: ['device', 'any_device'],
+        defaultTarget: 'any_device',
+      }],
+    });
+    const toolName = extensionToolName(manifest.extensionId, 'send');
+    db.upsertAssistantExtensionToolRoute(user.id, { toolName, enabled: true, targetKind: 'any_device' });
+    const thread = db.createThread(user.id, { title: 'Hands-free dynamic allowed', handsFreeMode: true, enabledTools: [toolName] });
+    process.env.VOICE_STREAM_NEXT_TEST_MODEL_TOOL_CALLS = JSON.stringify([
+      { name: toolName, arguments: { target: 'created-by-extension' } },
+    ]);
+    setAssistantExternalToolApprovalEvaluator(async () => false);
+    setAssistantExternalToolExecutor(async (input) => ({ ok: true, args: input.args }));
+
+    const snapshot = await promptAssistantThread(db, user.id, thread.id, { prompt: 'Use the extension.' }, () => undefined);
+
+    expect(snapshot.pendingApprovals).toHaveLength(0);
+    expect(db.thread(user.id, thread.id)?.status).toBe('idle');
+    expect(db.listToolCalls(user.id, thread.id)[0]?.status).toBe('completed');
+  });
+
+  test('hands-free mode blocks dynamic tool calls that need approval', async () => {
+    const db = tempDb('assistant-hands-free-dynamic-blocked');
+    dbs.push(db);
+    const user = testUser(db);
+    const manifest = db.upsertAssistantExtensionManifest(user.id, {
+      id: 'test-extension',
+      name: 'Test Extension',
+      version: '0.1.0',
+      tools: [{
+        name: 'send',
+        label: 'Send',
+        description: 'Send through an extension runner.',
+        inputSchema: {
+          type: 'object',
+          properties: { target: { type: 'string' } },
+          required: ['target'],
+          additionalProperties: false,
+        },
+        approval: 'dynamic',
+        supportedTargets: ['device', 'any_device'],
+        defaultTarget: 'any_device',
+      }],
+    });
+    const toolName = extensionToolName(manifest.extensionId, 'send');
+    db.upsertAssistantExtensionToolRoute(user.id, { toolName, enabled: true, targetKind: 'any_device' });
+    const thread = db.createThread(user.id, { title: 'Hands-free dynamic blocked', handsFreeMode: true, enabledTools: [toolName] });
+    process.env.VOICE_STREAM_NEXT_TEST_MODEL_TOOL_CALLS = JSON.stringify([
+      { name: toolName, arguments: { target: 'external-drone' } },
+    ]);
+    setAssistantExternalToolApprovalEvaluator(async () => true);
+
+    const snapshot = await promptAssistantThread(db, user.id, thread.id, { prompt: 'Use the extension.' }, () => undefined);
+
+    expect(snapshot.pendingApprovals).toHaveLength(0);
+    expect(db.thread(user.id, thread.id)?.status).toBe('error');
+    expect(db.listToolCalls(user.id, thread.id)).toHaveLength(0);
+    expect(db.listMessages(user.id, thread.id).find((message) => message.isError)?.content).toContain('needs approval for this request');
   });
 
   test('executes model-requested artifact tool calls without slash commands', async () => {
