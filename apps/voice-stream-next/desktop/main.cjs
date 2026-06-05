@@ -1092,6 +1092,8 @@ function createExtensionApi(extensionConfig, manifest, tools) {
         supportedTargets: cleanExtensionTargets(value.supportedTargets || value.targets),
         defaultTarget: cleanExtensionTarget(value.defaultTarget, 'device'),
       };
+      const targetSlot = safeExtensionToolSegment(value.targetSlot || '');
+      if (targetSlot) toolManifest.targetSlot = targetSlot;
       if (!toolManifest.supportedTargets.includes(toolManifest.defaultTarget)) {
         toolManifest.defaultTarget = toolManifest.supportedTargets[0] || 'device';
       }
@@ -1102,6 +1104,31 @@ function createExtensionApi(extensionConfig, manifest, tools) {
         fullName,
         execute: value.execute,
         approval: approvalEvaluator,
+      });
+    },
+    registerSkill(skill) {
+      const value = skill && typeof skill === 'object' ? skill : {};
+      const name = String(value.name || '').trim();
+      const slug = String(value.slug || name)
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 80);
+      if (!name || !slug) throw new Error(`extension ${extensionConfig.id} registered a skill without a name`);
+      const rawToolNames = Array.isArray(value.toolNames) ? value.toolNames : [];
+      const toolNames = [...new Set(rawToolNames.map((toolName) => {
+        const text = String(toolName || '').trim();
+        if (!text) return '';
+        return text.includes('__') ? normalizeExtensionSkillToolName(text) : extensionToolName(extensionConfig.id, text);
+      }).filter(Boolean))];
+      manifest.skills.push({
+        slug,
+        name,
+        description: String(value.description || `${name} extension skill`).trim(),
+        markdownBody: String(value.markdownBody || value.instructions || '').trim(),
+        toolNames,
+        disableModelInvocation: value.disableModelInvocation === true,
       });
     },
     assistant: {
@@ -1134,6 +1161,15 @@ function normalizeExtensionInputSchema(schema) {
     required: Array.isArray(value.required) ? value.required.map((item) => String(item)).filter(Boolean) : [],
     additionalProperties: value.additionalProperties === true,
   };
+}
+
+function normalizeExtensionSkillToolName(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 128);
 }
 
 function cleanExtensionApproval(value) {
@@ -1174,6 +1210,88 @@ function assertLoadableExtensionPath(filePath) {
   const ext = path.extname(resolved).toLowerCase();
   if (ext !== '.cjs' && ext !== '.js') throw new Error('Extension file must be a .cjs or .js file.');
   return resolved;
+}
+
+function bundledWorkspaceExtensionPath() {
+  return path.resolve(__dirname, 'extensions', 'workspace-extension.cjs');
+}
+
+function workspaceExtensionEntry(existing = {}) {
+  const existingConfig = existing.config && typeof existing.config === 'object' && !Array.isArray(existing.config) ? existing.config : {};
+  return {
+    id: 'workspace',
+    name: 'Workspace',
+    path: bundledWorkspaceExtensionPath(),
+    enabled: true,
+    config: {
+      ...existingConfig,
+      workspaceRoots: uniqueWorkspaceRoots(existingConfig.workspaceRoots),
+    },
+  };
+}
+
+function uniqueWorkspaceRoots(values) {
+  const rawValues = Array.isArray(values) ? values : [];
+  const seen = new Set();
+  const roots = [];
+  for (const value of rawValues) {
+    const text = String(value || '').trim();
+    if (!text) continue;
+    const resolved = path.resolve(text);
+    if (seen.has(resolved)) continue;
+    seen.add(resolved);
+    roots.push(resolved);
+  }
+  return roots;
+}
+
+async function enableWorkspaceExtension() {
+  const config = readConfig();
+  const extensions = Array.isArray(config.extensions) ? [...config.extensions] : [];
+  const existingIndex = extensions.findIndex((entry) => String(entry?.id || '') === 'workspace');
+  const existing = existingIndex >= 0 && extensions[existingIndex] && typeof extensions[existingIndex] === 'object'
+    ? extensions[existingIndex]
+    : {};
+  const entry = workspaceExtensionEntry(existing);
+  if (existingIndex >= 0) extensions[existingIndex] = entry;
+  else extensions.unshift(entry);
+  const savedConfig = writeConfig({ ...config, extensions });
+  return { entry, ...(await reloadExtensionsAfterConfigSave(savedConfig)) };
+}
+
+async function addWorkspaceRootToConfig(rootPath) {
+  const cleanRoot = String(rootPath || '').trim();
+  if (!cleanRoot) throw new Error('Workspace root path is required.');
+  const resolvedRoot = path.resolve(cleanRoot);
+  const stat = fs.existsSync(resolvedRoot) ? fs.statSync(resolvedRoot) : null;
+  if (!stat?.isDirectory()) throw new Error('Workspace root must be an existing directory.');
+  const config = readConfig();
+  const extensions = Array.isArray(config.extensions) ? [...config.extensions] : [];
+  const existingIndex = extensions.findIndex((entry) => String(entry?.id || '') === 'workspace');
+  const existing = existingIndex >= 0 && extensions[existingIndex] && typeof extensions[existingIndex] === 'object'
+    ? extensions[existingIndex]
+    : {};
+  const entry = workspaceExtensionEntry(existing);
+  entry.config.workspaceRoots = uniqueWorkspaceRoots([...(entry.config.workspaceRoots || []), resolvedRoot]);
+  if (existingIndex >= 0) extensions[existingIndex] = entry;
+  else extensions.unshift(entry);
+  const savedConfig = writeConfig({ ...config, extensions });
+  return { entry, ...(await reloadExtensionsAfterConfigSave(savedConfig)) };
+}
+
+async function saveWorkspaceRootsToConfig(roots) {
+  const config = readConfig();
+  const extensions = Array.isArray(config.extensions) ? [...config.extensions] : [];
+  const existingIndex = extensions.findIndex((entry) => String(entry?.id || '') === 'workspace');
+  const existing = existingIndex >= 0 && extensions[existingIndex] && typeof extensions[existingIndex] === 'object'
+    ? extensions[existingIndex]
+    : {};
+  const entry = workspaceExtensionEntry(existing);
+  entry.config.workspaceRoots = uniqueWorkspaceRoots(roots);
+  if (existingIndex >= 0) extensions[existingIndex] = entry;
+  else extensions.unshift(entry);
+  const savedConfig = writeConfig({ ...config, extensions });
+  return { entry, ...(await reloadExtensionsAfterConfigSave(savedConfig)) };
 }
 
 async function reloadExtensionsAfterConfigSave(savedConfig) {
@@ -1233,7 +1351,7 @@ async function loadDesktopExtensions(options = {}) {
     const extensionIds = new Set();
     for (const extensionConfig of configs) {
       if (!extensionConfig.enabled) {
-        statuses.push({ id: extensionConfig.id, name: extensionConfig.name, enabled: false, ok: true, toolCount: 0 });
+        statuses.push({ id: extensionConfig.id, name: extensionConfig.name, enabled: false, ok: true, toolCount: 0, skillCount: 0 });
         continue;
       }
       const manifest = {
@@ -1241,6 +1359,7 @@ async function loadDesktopExtensions(options = {}) {
         name: extensionConfig.name,
         version: '0.0.0',
         tools: [],
+        skills: [],
       };
       const existingToolNames = new Set(tools.keys());
       try {
@@ -1254,17 +1373,17 @@ async function loadDesktopExtensions(options = {}) {
         const deactivate = extensionModule?.deactivate || extensionModule?.default?.deactivate;
         if (typeof activate !== 'function') throw new Error('extension must export activate(api)');
         await activate(createExtensionApi(extensionConfig, manifest, tools));
-        if (manifest.tools.length === 0) throw new Error('extension did not register any tools');
+        if (manifest.tools.length === 0 && manifest.skills.length === 0) throw new Error('extension did not register any tools or skills');
         if (typeof deactivate === 'function') {
           extensionHost.deactivators.push({ extensionId: extensionConfig.id, deactivate });
         }
         manifests.push(manifest);
-        statuses.push({ id: extensionConfig.id, name: extensionConfig.name, enabled: true, ok: true, toolCount: manifest.tools.length });
+        statuses.push({ id: extensionConfig.id, name: extensionConfig.name, enabled: true, ok: true, toolCount: manifest.tools.length, skillCount: manifest.skills.length });
       } catch (error) {
         for (const toolName of tools.keys()) {
           if (!existingToolNames.has(toolName)) tools.delete(toolName);
         }
-        statuses.push({ id: extensionConfig.id, name: extensionConfig.name, enabled: true, ok: false, error: error?.message || String(error), toolCount: 0 });
+        statuses.push({ id: extensionConfig.id, name: extensionConfig.name, enabled: true, ok: false, error: error?.message || String(error), toolCount: 0, skillCount: 0 });
         windowDebugLog('extension:loadFailed', { extensionId: extensionConfig.id, path: extensionConfig.path, error: error?.message || String(error) });
       }
     }
@@ -1660,6 +1779,17 @@ if (!gotSingleInstanceLock) {
     return { ok: true, statuses: extensionHost.statuses, manifests: extensionHost.manifests };
   });
   ipcMain.handle('extensions:addFile', async (_event, filePath) => addExtensionFileToConfig(filePath));
+  ipcMain.handle('extensions:enableWorkspace', async () => enableWorkspaceExtension());
+  ipcMain.handle('extensions:saveWorkspaceRoots', async (_event, roots) => saveWorkspaceRootsToConfig(roots));
+  ipcMain.handle('extensions:addWorkspaceRoot', async (event) => {
+    const owner = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+    const result = await dialog.showOpenDialog(owner, {
+      title: 'Add workspace root',
+      properties: ['openDirectory'],
+    });
+    if (result.canceled || !result.filePaths[0]) return { ok: false, canceled: true };
+    return addWorkspaceRootToConfig(result.filePaths[0]);
+  });
   ipcMain.handle('extensions:chooseFile', async (event) => {
     const owner = BrowserWindow.fromWebContents(event.sender) || mainWindow;
     const result = await dialog.showOpenDialog(owner, {

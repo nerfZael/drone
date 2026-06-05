@@ -27,11 +27,13 @@ import {
   type AssistantSkillRecord,
   type AssistantThread,
   type AssistantThreadCapabilities,
+  type AssistantThreadExecutionTargetRecord,
   type AssistantToolCallRecord,
   type VoiceStreamNextDb,
 } from './db.js';
 import {
   extensionToolDefinition,
+  extensionToolName,
   extensionToolSummary,
   type AssistantExtensionApprovalPolicy,
   type AssistantExtensionToolRoute,
@@ -87,9 +89,20 @@ export type AssistantThreadView = AssistantThread & {
   toolCalls: AssistantToolCallRecord[];
   artifactsCount: number;
   loadedSkills: AssistantLoadedSkillView[];
+  executionTargets: AssistantExecutionTargetView[];
 };
 
 export type AssistantLoadedSkillView = Pick<AssistantSkillRecord, 'id' | 'slug' | 'name'>;
+
+export type AssistantExecutionTargetView = {
+  slot: string;
+  targetKind: AssistantThreadExecutionTargetRecord['targetKind'];
+  targetDeviceId: string | null;
+  targetDeviceName: string | null;
+  targetDeviceMissing: boolean;
+  targetDeviceRevoked: boolean;
+  updatedAt: string;
+};
 
 export type AssistantApprovalView = AssistantApprovalRecord & {
   args: unknown;
@@ -171,6 +184,20 @@ const ASSISTANT_TOOLS: AssistantToolSummary[] = [
     description: 'Open a fresh assistant thread. In voice mode, future recordings use the new voice thread by default.',
     approval: 'never',
   },
+  {
+    name: 'list_execution_targets',
+    label: 'List execution targets',
+    category: 'settings',
+    description: 'List connected devices that can run extension tools, optionally filtered by slot or extension.',
+    approval: 'never',
+  },
+  {
+    name: 'set_execution_target',
+    label: 'Set execution target',
+    category: 'settings',
+    description: 'Select the device this thread should use for a named extension execution slot.',
+    approval: 'always',
+  },
 ];
 
 const MODEL_OPTIONS: AssistantModelOption[] = [
@@ -214,9 +241,26 @@ export type AssistantExternalToolExecution = {
 
 export type AssistantExternalToolExecutor = (input: AssistantExternalToolExecution) => Promise<unknown>;
 export type AssistantExternalToolApprovalEvaluator = (input: Omit<AssistantExternalToolExecution, 'runId' | 'toolCallId'>) => Promise<boolean>;
+export type AssistantExecutionTargetProvider = (input: {
+  db: VoiceStreamNextDb;
+  userId: string;
+  thread: AssistantThread;
+  slot?: string;
+  extensionId?: string;
+}) => Promise<{ devices: AssistantExecutionTargetDevice[] }> | { devices: AssistantExecutionTargetDevice[] };
+
+export type AssistantExecutionTargetDevice = {
+  deviceId: string;
+  deviceType: string;
+  displayName: string;
+  connected: boolean;
+  connectedAt?: string;
+  manifests: Array<{ id: string; name: string; toolNames: string[]; slots: string[] }>;
+};
 
 let externalToolExecutor: AssistantExternalToolExecutor | null = null;
 let externalToolApprovalEvaluator: AssistantExternalToolApprovalEvaluator | null = null;
+let executionTargetProvider: AssistantExecutionTargetProvider | null = null;
 
 export function setAssistantExternalToolExecutor(executor: AssistantExternalToolExecutor | null): void {
   externalToolExecutor = executor;
@@ -224,6 +268,10 @@ export function setAssistantExternalToolExecutor(executor: AssistantExternalTool
 
 export function setAssistantExternalToolApprovalEvaluator(evaluator: AssistantExternalToolApprovalEvaluator | null): void {
   externalToolApprovalEvaluator = evaluator;
+}
+
+export function setAssistantExecutionTargetProvider(provider: AssistantExecutionTargetProvider | null): void {
+  executionTargetProvider = provider;
 }
 
 export function assistantToolSummaries(): AssistantToolSummary[] {
@@ -279,6 +327,9 @@ export function assistantSnapshot(db: VoiceStreamNextDb, userId: string, activeT
       toolCalls: db.listToolCalls(userId, thread.id),
       artifactsCount: db.listArtifacts(userId, thread.id).length,
       loadedSkills: db.listThreadSkills(userId, thread.id).map(skillLoadedView),
+      executionTargets: db
+        .listAssistantThreadExecutionTargets(userId, thread.id)
+        .map((target) => executionTargetView(db, userId, target)),
     };
   });
   return {
@@ -1200,6 +1251,41 @@ function responseToolDefinitions(
         strict: true,
       });
     }
+    if (toolName === 'list_execution_targets') {
+      definitions.push({
+        type: 'function',
+        name: 'list_execution_targets',
+        description: 'List devices that can run extension tools for this thread. Use before choosing a workspace or device execution target.',
+        parameters: {
+          type: 'object',
+          properties: {
+            slot: { type: 'string', description: 'Optional execution slot, such as workspace. Use an empty string for all slots.' },
+            extensionId: { type: 'string', description: 'Optional extension id, such as workspace. Use an empty string for all extensions.' },
+          },
+          required: ['slot', 'extensionId'],
+          additionalProperties: false,
+        },
+        strict: true,
+      });
+    }
+    if (toolName === 'set_execution_target') {
+      definitions.push({
+        type: 'function',
+        name: 'set_execution_target',
+        description: 'Select the device this thread should use for extension tools in a named slot. Use only after the user asks to work on a device or after listing targets.',
+        parameters: {
+          type: 'object',
+          properties: {
+            slot: { type: 'string', description: 'Execution slot to set, such as workspace.' },
+            extensionId: { type: 'string', description: 'Extension id the target is for, such as workspace. Use an empty string if not extension-specific.' },
+            deviceId: { type: 'string', description: 'Device id returned by list_execution_targets.' },
+          },
+          required: ['slot', 'extensionId', 'deviceId'],
+          additionalProperties: false,
+        },
+        strict: true,
+      });
+    }
     if (toolName === 'web_search' && thread.capabilities.externalCalls) {
       definitions.push({
         type: 'function',
@@ -1309,6 +1395,23 @@ function approvalView(approval: AssistantApprovalRecord): AssistantApprovalView 
 
 function skillLoadedView(skill: AssistantSkillRecord): AssistantLoadedSkillView {
   return { id: skill.id, slug: skill.slug, name: skill.name };
+}
+
+function executionTargetView(
+  db: VoiceStreamNextDb,
+  userId: string,
+  target: AssistantThreadExecutionTargetRecord,
+): AssistantExecutionTargetView {
+  const device = target.targetDeviceId ? db.deviceForUser(userId, target.targetDeviceId) : null;
+  return {
+    slot: target.slot,
+    targetKind: target.targetKind,
+    targetDeviceId: target.targetDeviceId,
+    targetDeviceName: device?.displayName ?? null,
+    targetDeviceMissing: Boolean(target.targetDeviceId && !device),
+    targetDeviceRevoked: Boolean(device?.revokedAt),
+    updatedAt: target.updatedAt,
+  };
 }
 
 function cleanProvider(raw: unknown): string {
@@ -1627,6 +1730,19 @@ async function executeApprovedTool(
       voiceDefaultForRecordings: created.voiceEnabled,
     };
   }
+  if (toolName === 'list_execution_targets') {
+    return listExecutionTargets(db, userId, thread, {
+      slot: String(parsed.slot ?? '').trim(),
+      extensionId: String(parsed.extensionId ?? '').trim(),
+    });
+  }
+  if (toolName === 'set_execution_target') {
+    return setExecutionTarget(db, userId, thread, {
+      slot: String(parsed.slot ?? '').trim(),
+      extensionId: String(parsed.extensionId ?? '').trim(),
+      deviceId: String(parsed.deviceId ?? '').trim(),
+    });
+  }
   if (toolName === 'web_search') {
     const credential = resolveExaCredential(db, userId);
     if (!credential) throw Object.assign(new Error('Exa API key is not configured. Add your Exa key in assistant settings or ask an admin to enable platform credits.'), { statusCode: 400 });
@@ -1654,7 +1770,7 @@ async function executeApprovedTool(
   }
   const manifestTool = db.assistantExtensionToolManifest(userId, toolName);
   if (manifestTool) {
-    const route = db.assistantExtensionToolRoute(userId, toolName);
+    const route = assistantExtensionRouteForThread(db, userId, thread, toolName);
     if (!route?.enabled) throw Object.assign(new Error(`${toolLabel(toolName, db, userId)} is not configured`), { statusCode: 403 });
     if (!externalToolExecutor) throw Object.assign(new Error('assistant extension executor is not configured'), { statusCode: 500 });
     return externalToolExecutor({
@@ -1669,6 +1785,156 @@ async function executeApprovedTool(
     });
   }
   throw Object.assign(new Error(`unknown assistant tool: ${toolName}`), { statusCode: 400 });
+}
+
+async function listExecutionTargets(
+  db: VoiceStreamNextDb,
+  userId: string,
+  thread: AssistantThread,
+  input: { slot?: string; extensionId?: string },
+): Promise<unknown> {
+  const slot = cleanExecutionSlot(input.slot);
+  const extensionId = cleanExtensionId(input.extensionId);
+  const activeTargets = db.listAssistantThreadExecutionTargets(userId, thread.id);
+  const provided = executionTargetProvider
+    ? await executionTargetProvider({ db, userId, thread, slot, extensionId })
+    : fallbackExecutionTargets(db, userId);
+  const devices = provided.devices
+    .map((device) => ({
+      ...device,
+      manifests: device.manifests
+        .filter((manifest) => !extensionId || manifest.id === extensionId)
+        .map((manifest) => ({
+          ...manifest,
+          toolNames: manifest.toolNames.filter((toolName) => toolMatchesSlot(db, userId, toolName, slot)),
+          slots: slot ? manifest.slots.filter((item) => item === slot) : manifest.slots,
+        }))
+        .filter((manifest) => manifest.toolNames.length > 0 || manifest.slots.length > 0),
+    }))
+    .filter((device) => device.manifests.length > 0);
+  return {
+    ok: true,
+    slot,
+    extensionId,
+    activeTargets,
+    devices,
+  };
+}
+
+async function setExecutionTarget(
+  db: VoiceStreamNextDb,
+  userId: string,
+  thread: AssistantThread,
+  input: { slot: string; extensionId?: string; deviceId: string },
+): Promise<unknown> {
+  const slot = cleanExecutionSlot(input.slot);
+  if (!slot) throw Object.assign(new Error('execution target slot is required'), { statusCode: 400 });
+  const extensionId = cleanExtensionId(input.extensionId);
+  const deviceId = String(input.deviceId ?? '').trim();
+  if (!deviceId) throw Object.assign(new Error('target device id is required'), { statusCode: 400 });
+  const device = db.deviceForUser(userId, deviceId);
+  if (!device) throw Object.assign(new Error('unknown target device'), { statusCode: 404 });
+  const matchingTools = db.listAssistantExtensionManifests(userId)
+    .filter((record) => !extensionId || record.extensionId === extensionId)
+    .flatMap((record) => record.manifest.tools
+      .filter((tool) => tool.targetSlot === slot && tool.supportedTargets.includes('device'))
+      .map((tool) => extensionToolName(record.extensionId, tool.name)));
+  if (extensionId && matchingTools.length === 0) {
+    throw Object.assign(new Error(`extension ${extensionId} does not expose tools for ${slot}`), { statusCode: 400 });
+  }
+  if (executionTargetProvider) {
+    const provided = await executionTargetProvider({ db, userId, thread, slot, extensionId });
+    const connectedTarget = provided.devices.find((item) =>
+      item.deviceId === device.id &&
+      item.connected &&
+      item.manifests.some((manifest) =>
+        (!extensionId || manifest.id === extensionId) &&
+        (manifest.slots.includes(slot) || manifest.toolNames.some((toolName) => matchingTools.includes(toolName))),
+      ),
+    );
+    if (!connectedTarget) {
+      throw Object.assign(new Error(`${device.displayName} is not connected for ${slot}`), { statusCode: 409 });
+    }
+  }
+  const target = db.upsertAssistantThreadExecutionTarget(userId, thread.id, {
+    slot,
+    targetKind: 'device',
+    targetDeviceId: device.id,
+  });
+  return {
+    ok: true,
+    target,
+    device: {
+      id: device.id,
+      displayName: device.displayName,
+      deviceType: device.deviceType,
+    },
+    extensionId,
+    toolNames: matchingTools,
+  };
+}
+
+function fallbackExecutionTargets(db: VoiceStreamNextDb, userId: string): { devices: AssistantExecutionTargetDevice[] } {
+  const manifests = db.listAssistantExtensionManifests(userId).map((record) => ({
+    id: record.extensionId,
+    name: record.name,
+    toolNames: record.manifest.tools.map((tool) => extensionToolName(record.extensionId, tool.name)),
+    slots: [...new Set(record.manifest.tools.map((tool) => tool.targetSlot).filter(Boolean) as string[])],
+  }));
+  return {
+    devices: db.listDevices(userId).map((device) => ({
+      deviceId: device.id,
+      deviceType: device.deviceType,
+      displayName: device.displayName,
+      connected: false,
+      manifests,
+    })),
+  };
+}
+
+function assistantExtensionRouteForThread(
+  db: VoiceStreamNextDb,
+  userId: string,
+  thread: AssistantThread,
+  toolName: string,
+): AssistantExtensionToolRoute | null {
+  const route = db.assistantExtensionToolRoute(userId, toolName);
+  const manifestTool = db.assistantExtensionToolManifest(userId, toolName);
+  const slot = manifestTool?.tool.targetSlot;
+  if (!route || !slot) return route;
+  const target = db.assistantThreadExecutionTarget(userId, thread.id, slot);
+  if (!target) return route;
+  if (!manifestTool.tool.supportedTargets.includes(target.targetKind)) return route;
+  return {
+    ...route,
+    targetKind: target.targetKind,
+    targetDeviceId: target.targetKind === 'device' ? target.targetDeviceId : null,
+    updatedAt: target.updatedAt,
+  };
+}
+
+function toolMatchesSlot(db: VoiceStreamNextDb, userId: string, toolName: string, slot: string): boolean {
+  if (!slot) return true;
+  const manifestTool = db.assistantExtensionToolManifest(userId, toolName);
+  return manifestTool?.tool.targetSlot === slot;
+}
+
+function cleanExecutionSlot(raw: unknown): string {
+  return String(raw ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 80);
+}
+
+function cleanExtensionId(raw: unknown): string {
+  return String(raw ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64);
 }
 
 function executeArtifactTool(db: VoiceStreamNextDb, userId: string, threadId: string, args: Record<string, unknown>): unknown {
@@ -1756,7 +2022,7 @@ async function approvalRequiredFor(db: VoiceStreamNextDb, userId: string, thread
   if (approval === 'always') return true;
   if (approval === 'normal_threads') return !thread.voiceEnabled;
   if (approval === 'dynamic') {
-    const route = db.assistantExtensionToolRoute(userId, toolName);
+    const route = assistantExtensionRouteForThread(db, userId, thread, toolName);
     if (!route?.enabled || !externalToolApprovalEvaluator) return true;
     try {
       return await externalToolApprovalEvaluator({ db, userId, thread, toolName, args, route });
