@@ -921,7 +921,11 @@ async function createAgentToolCallRecord(context: AgentRunContext, call: Pick<To
   const toolName = normalizeModelToolName(call.name);
   ensureToolEnabled(context.thread, toolName, context.loadedSkillToolNames);
   ensureCapability(context.thread, toolName);
+  ensureHandsFreeToolAvailable(context.db, context.userId, context.thread, toolName);
   const args = call.arguments ?? {};
+  if (await dynamicToolBlockedByHandsFreeMode(context.db, context.userId, context.thread, toolName, args)) {
+    throw Object.assign(new Error(`${toolLabel(toolName, context.db, context.userId)} needs approval for this request and is unavailable while hands-free mode is on`), { statusCode: 403 });
+  }
   const needsApproval = await approvalRequiredFor(context.db, context.userId, context.thread, toolName, args);
   const toolCall = context.db.createToolCall(context.userId, context.threadId, {
     runId: context.run.id,
@@ -1115,7 +1119,8 @@ function skillCatalogInstruction(db: VoiceStreamNextDb, userId: string, thread: 
   return [
     'Available skills:',
     ...skills.map((skill) => {
-      const tools = skill.toolNames.length > 0 ? ` Tools enabled after load: ${skill.toolNames.join(', ')}.` : '';
+      const visibleToolNames = availableSkillToolNames(db, userId, thread, skill.toolNames);
+      const tools = visibleToolNames.length > 0 ? ` Tools enabled after load: ${visibleToolNames.join(', ')}.` : '';
       return `- ${skill.name} (${skill.slug}): ${skill.description}${tools}`;
     }),
     'Use the load_skill tool before following a skill. Do not invent skill content.',
@@ -1134,6 +1139,7 @@ function responseToolDefinitions(
     ...Array.from(options.loadedSkillToolNames ?? []),
   ];
   for (const toolName of [...new Set(toolNames)]) {
+    if (toolHiddenByHandsFreeMode(db, userId, thread, toolName)) continue;
     if (toolName === 'assistant_artifacts' && thread.capabilities.artifacts) {
       definitions.push({
         type: 'function',
@@ -1356,6 +1362,9 @@ function modelInstructions(input: {
     input.thread.systemPrompt ? `Thread system prompt:\n${input.thread.systemPrompt}` : '',
     input.skillInstruction,
     input.allowToolCalls ? input.toolInstruction : '',
+    input.allowToolCalls && input.thread.handsFreeMode
+      ? 'Hands-free mode is on. Tools that always require approval are hidden this turn. Some tools decide per request; if a specific request needs approval, it will be unavailable until hands-free mode is turned off.'
+      : '',
     input.allowToolCalls
       ? 'You may call the provided assistant tools when they help. Prefer tools for artifacts, spoken replies, web searches, fetched URL content, prompt reads/updates, and thread settings instead of describing those actions. Use web_search for current information, documentation, news, prices, or facts that may have changed. Use fetch_content when the user gives a direct URL to read, inspect, summarize, or analyze. Cite source URLs in the final answer. Never write XML, JSON, or pseudo function-call syntax in normal assistant text; use the API tool call channel for tool calls.'
       : 'No assistant tools are available in this follow-up response. Use the already executed tool outputs to answer the user concisely, and do not write XML, JSON, or pseudo function-call syntax for tool calls.',
@@ -1387,6 +1396,42 @@ function normalizeModelToolName(raw: string): string {
 
 function isBuiltInTool(toolName: string): boolean {
   return ASSISTANT_TOOLS.some((tool) => tool.name === toolName);
+}
+
+function approvalPolicyForTool(db: VoiceStreamNextDb, userId: string, toolName: string): AssistantExtensionApprovalPolicy {
+  const summary = ASSISTANT_TOOLS.find((tool) => tool.name === toolName);
+  if (summary) return summary.approval;
+  return db.assistantExtensionToolManifest(userId, toolName)?.tool.approval ?? 'always';
+}
+
+function toolHiddenByHandsFreeMode(db: VoiceStreamNextDb, userId: string, thread: AssistantThread, toolName: string): boolean {
+  if (!thread.handsFreeMode) return false;
+  const approval = approvalPolicyForTool(db, userId, toolName);
+  if (approval === 'always') return true;
+  if (approval === 'normal_threads') return !thread.voiceEnabled;
+  return false;
+}
+
+function ensureHandsFreeToolAvailable(db: VoiceStreamNextDb, userId: string, thread: AssistantThread, toolName: string): void {
+  if (!toolHiddenByHandsFreeMode(db, userId, thread, toolName)) return;
+  throw Object.assign(new Error(`${toolLabel(toolName, db, userId)} is hidden while hands-free mode is on`), { statusCode: 403 });
+}
+
+async function dynamicToolBlockedByHandsFreeMode(
+  db: VoiceStreamNextDb,
+  userId: string,
+  thread: AssistantThread,
+  toolName: string,
+  args: unknown,
+): Promise<boolean> {
+  if (!thread.handsFreeMode || approvalPolicyForTool(db, userId, toolName) !== 'dynamic') return false;
+  const route = assistantExtensionRouteForThread(db, userId, thread, toolName);
+  if (!route?.enabled || !externalToolApprovalEvaluator) return true;
+  try {
+    return await externalToolApprovalEvaluator({ db, userId, thread, toolName, args, route });
+  } catch {
+    return true;
+  }
 }
 
 function approvalView(approval: AssistantApprovalRecord): AssistantApprovalView {
@@ -1572,6 +1617,7 @@ async function executeCommand(
   const toolName = toolNameForCommand(command);
   ensureToolEnabled(thread, toolName);
   ensureCapability(thread, toolName);
+  ensureHandsFreeToolAvailable(db, userId, thread, toolName);
   const args = argsForCommand(command);
   const needsApproval = await approvalRequiredFor(db, userId, thread, toolName, args);
   const toolCall = db.createToolCall(userId, threadId, {
@@ -2016,9 +2062,7 @@ function ensureCapability(thread: AssistantThread, toolName: string): void {
 async function approvalRequiredFor(db: VoiceStreamNextDb, userId: string, thread: AssistantThread, toolName: string, args: unknown): Promise<boolean> {
   if (thread.autoApprove) return false;
   if (!thread.capabilities.approvals) return false;
-  const summary = ASSISTANT_TOOLS.find((tool) => tool.name === toolName);
-  const extension = summary ? null : db.assistantExtensionToolManifest(userId, toolName);
-  const approval = summary?.approval ?? (extension ? extension.tool.approval ?? 'always' : 'never');
+  const approval = approvalPolicyForTool(db, userId, toolName);
   if (approval === 'always') return true;
   if (approval === 'normal_threads') return !thread.voiceEnabled;
   if (approval === 'dynamic') {
