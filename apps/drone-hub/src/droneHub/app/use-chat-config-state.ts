@@ -11,14 +11,14 @@ type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
 type UseChatConfigStateArgs = {
   selectedDrone: string | null;
   selectedChat: string;
-  drones: DroneSummary[];
+  droneById: Record<string, DroneSummary>;
   requestJson: RequestJsonFn;
 };
 
 export function useChatConfigState({
   selectedDrone,
   selectedChat,
-  drones,
+  droneById,
   requestJson,
 }: UseChatConfigStateArgs) {
   const [chatInfo, setChatInfo] = React.useState<ChatInfo | null>(null);
@@ -45,10 +45,7 @@ export function useChatConfigState({
     | 'pi'
     | null = chatInfo?.agent?.kind === 'builtin' ? chatInfo.agent.id : null;
 
-  const selectedDroneSummary = React.useMemo(
-    () => (selectedDrone ? drones.find((d) => d.id === selectedDrone) ?? null : null),
-    [drones, selectedDrone],
-  );
+  const selectedDroneSummary = selectedDrone ? droneById[selectedDrone] ?? null : null;
   const hasSelectedDroneSummary = selectedDroneSummary !== null;
   const selectedDroneHubPhase = selectedDroneSummary?.hubPhase ?? null;
   const selectedDroneProvisioning = isDroneStartingOrSeeding(selectedDroneHubPhase);

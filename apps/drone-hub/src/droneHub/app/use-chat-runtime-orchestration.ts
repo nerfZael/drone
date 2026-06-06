@@ -26,7 +26,7 @@ type UseChatRuntimeOrchestrationArgs = {
   chatInfo: ChatInfo | null;
   currentDrone: DroneSummary | null;
   currentDroneLabel: string;
-  drones: DroneSummary[];
+  droneById: Record<string, DroneSummary>;
   outputView: 'screen' | 'log';
   optimisticPendingPrompts: PendingPrompt[];
   queuedPromptsByDroneChat: Record<string, QueuedPrompt[]>;
@@ -70,7 +70,7 @@ export function useChatRuntimeOrchestration({
   chatInfo,
   currentDrone,
   currentDroneLabel,
-  drones,
+  droneById,
   outputView,
   optimisticPendingPrompts,
   queuedPromptsByDroneChat,
@@ -193,12 +193,21 @@ export function useChatRuntimeOrchestration({
     setStopResponseError(null);
   }, [selectedDrone, selectedChat, setOptimisticPendingPrompts]);
 
-  const selectedDroneSummary = React.useMemo(
-    () => (selectedDrone ? drones.find((x) => x.id === selectedDrone) ?? null : null),
-    [drones, selectedDrone],
-  );
+  const selectedDroneSummary = selectedDrone ? droneById[selectedDrone] ?? null : null;
   const hasSelectedDroneSummary = selectedDroneSummary !== null;
   const selectedDroneHubPhase = selectedDroneSummary?.hubPhase ?? null;
+  const selectedDroneChatsKey = React.useMemo(() => {
+    if (!Array.isArray(selectedDroneSummary?.chats)) return '';
+    return selectedDroneSummary.chats
+      .map((chat) => String(chat ?? '').trim())
+      .filter(Boolean)
+      .join('\u0000');
+  }, [selectedDroneSummary?.chats]);
+  const selectedDroneHasSelectedChat = React.useMemo(() => {
+    const chat = String(selectedChat ?? '').trim();
+    if (!chat || !selectedDroneChatsKey) return false;
+    return selectedDroneChatsKey.split('\u0000').includes(chat);
+  }, [selectedChat, selectedDroneChatsKey]);
   const startupSeedForSelectedDrone = React.useMemo(
     () => (selectedDrone ? startupSeedByDrone[selectedDrone] ?? null : null),
     [selectedDrone, startupSeedByDrone],
@@ -408,7 +417,7 @@ export function useChatRuntimeOrchestration({
     for (const key of keys) {
       const parsed = parseDroneChatQueueKey(key);
       if (!parsed) continue;
-      const drone = drones.find((d) => d.id === parsed.droneId) ?? null;
+      const drone = droneById[parsed.droneId] ?? null;
       if (!drone) continue;
       if (isDroneStartingOrSeeding(drone.hubPhase) || drone.hubPhase === 'error') continue;
       if (flushingQueuedKeysRef.current.has(key)) continue;
@@ -460,7 +469,7 @@ export function useChatRuntimeOrchestration({
     addOptimisticPendingPrompt,
     bumpCliTyping,
     chatUiMode,
-    drones,
+    droneById,
     flushingQueuedKeysRef,
     patchQueuedPrompt,
     queuedPromptsByDroneChat,
@@ -711,14 +720,12 @@ export function useChatRuntimeOrchestration({
       if (!selectedDrone || !selectedChat || busy) return;
       busy = true;
       let keepLoading = false;
-      const d = drones.find((x) => x.id === selectedDrone) ?? null;
-      if (isDroneStartingOrSeeding(d?.hubPhase)) {
+      if (isDroneStartingOrSeeding(selectedDroneHubPhase)) {
         if (mounted) resetSessionOutputState();
         busy = false;
         return;
       }
-      const chatExists = Boolean(d && Array.isArray(d.chats) && d.chats.includes(selectedChat));
-      if (!chatExists) {
+      if (!hasSelectedDroneSummary || !selectedDroneHasSelectedChat) {
         if (mounted) resetSessionOutputState();
         busy = false;
         return;
@@ -806,7 +813,20 @@ export function useChatRuntimeOrchestration({
       clearTimer();
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [chatUiMode, drones, outputView, resetSessionOutputState, selectedChat, selectedDrone, setLoadingSession, setSessionError, setSessionText, bumpCliTyping]);
+  }, [
+    chatUiMode,
+    hasSelectedDroneSummary,
+    outputView,
+    resetSessionOutputState,
+    selectedChat,
+    selectedDrone,
+    selectedDroneHasSelectedChat,
+    selectedDroneHubPhase,
+    setLoadingSession,
+    setSessionError,
+    setSessionText,
+    bumpCliTyping,
+  ]);
 
   return {
     cancelPendingPromptErrorById,

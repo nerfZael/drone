@@ -24,8 +24,8 @@ type UseDroneSelectionStateArgs = {
   kanbanBoardOpen: boolean;
   playbookRunsOpen: boolean;
   draftChat: { prompt: unknown | null } | null;
-  drones: DroneSummary[];
-  dronesFilteredByRepo: DroneSummary[];
+  droneById: Record<string, DroneSummary>;
+  dronesFilteredByRepoIdSet: Set<string>;
   visibleDronesFilteredByRepo: DroneSummary[];
   startupSeedByDrone: Record<string, StartupSeedState>;
   selectionAnchorRef: React.MutableRefObject<string | null>;
@@ -56,8 +56,8 @@ export function useDroneSelectionState({
   kanbanBoardOpen,
   playbookRunsOpen,
   draftChat,
-  drones,
-  dronesFilteredByRepo,
+  droneById,
+  dronesFilteredByRepoIdSet,
   visibleDronesFilteredByRepo,
   startupSeedByDrone,
   selectionAnchorRef,
@@ -98,10 +98,10 @@ export function useDroneSelectionState({
     (droneIdRaw: string) =>
       resolveSelectedChatForDrone({
         droneId: droneIdRaw,
-        drones,
+        droneById,
         lastSelectedChatByDrone: lastSelectedChatByDroneRef.current,
       }),
-    [drones],
+    [droneById],
   );
 
   React.useEffect(() => {
@@ -115,14 +115,14 @@ export function useDroneSelectionState({
     const droneId = String(selectedDrone ?? '').trim();
     const chatName = String(selectedChat ?? '').trim() || 'default';
     if (!droneId) return;
-    const drone = drones.find((item) => item.id === droneId) ?? null;
+    const drone = droneById[droneId] ?? null;
     const chats = normalizedDroneChats(drone, { includeDefaultWhenEmpty: true });
     if (chatName !== 'default' && !chats.includes(chatName)) {
       pendingSelectedChatUntilByDroneRef.current[droneId] = Date.now() + PENDING_SELECTED_CHAT_GRACE_MS;
       return;
     }
     delete pendingSelectedChatUntilByDroneRef.current[droneId];
-  }, [drones, selectedChat, selectedDrone]);
+  }, [droneById, selectedChat, selectedDrone]);
 
   const selectDroneCard = React.useCallback(
     (droneIdRaw: string, opts?: { toggle?: boolean; range?: boolean }) => {
@@ -260,7 +260,7 @@ export function useDroneSelectionState({
       }
       return;
     }
-    const selectedExistsInRepo = Boolean(selectedDrone && dronesFilteredByRepo.some((d) => d.id === selectedDrone));
+    const selectedExistsInRepo = Boolean(selectedDrone && dronesFilteredByRepoIdSet.has(selectedDrone));
     if (visibleDronesFilteredByRepo.length === 0) {
       if (selectedExistsInRepo) return;
       clearSelectedDroneState();
@@ -302,7 +302,7 @@ export function useDroneSelectionState({
     clearSelectedDroneState,
     draftChat,
     fleetDashboardOpen,
-    dronesFilteredByRepo,
+    dronesFilteredByRepoIdSet,
     visibleDronesFilteredByRepo,
     kanbanBoardOpen,
     playbookRunsOpen,
@@ -317,7 +317,7 @@ export function useDroneSelectionState({
   // Fall back if selected chat disappears.
   React.useEffect(() => {
     if (!selectedDrone) return;
-    const d = drones.find((x) => x.id === selectedDrone);
+    const d = droneById[selectedDrone] ?? null;
     const chats = d?.chats ?? [];
     if (chats.length === 0) return;
     if (selectedChat && chats.includes(selectedChat)) return;
@@ -331,7 +331,7 @@ export function useDroneSelectionState({
       return;
     }
     setSelectedChat(chats.includes('default') ? 'default' : chats[0]);
-  }, [drones, selectedDrone, selectedChat, setSelectedChat]);
+  }, [droneById, selectedDrone, selectedChat, setSelectedChat]);
 
   return { selectDroneCard, selectDroneChat };
 }

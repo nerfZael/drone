@@ -81,6 +81,7 @@ export type SidebarDroneTreeListProps = {
   groupOrderKey?: string | null;
   groupName?: string | null;
   showGroup?: boolean;
+  sidebarDndEnabled: boolean;
 };
 
 export type SidebarDroneTreeListSharedProps = Omit<SidebarDroneTreeListProps, 'tree'>;
@@ -94,6 +95,7 @@ type SidebarDroneRowProps = {
   renamingDrones: Record<string, boolean>;
   settingBaseImages: Record<string, boolean>;
   movingDroneGroups: boolean;
+  sidebarDndEnabled: boolean;
   sidebarOptimisticDroneIdSet: Set<string>;
   busy: boolean;
   unread: boolean;
@@ -122,6 +124,7 @@ type SidebarChatRowProps = {
   deleting: boolean;
   canDelete: boolean;
   movingDroneGroups: boolean;
+  sidebarDndEnabled: boolean;
   isOptimistic: boolean;
   dragOverPlacement: SidebarGroupDropPlacement | null;
   uiDroneName: (nameRaw: string) => string;
@@ -248,7 +251,7 @@ function currentReorderTargetFromEvent(
   return normalizeSidebarReorderTarget(entries, overIdRaw, currentPlacementFromEvent(event));
 }
 
-function SidebarDroneRow({
+const SidebarDroneRow = React.memo(function SidebarDroneRow({
   drone,
   sidebarDensityMode,
   selectedDroneIds,
@@ -257,6 +260,7 @@ function SidebarDroneRow({
   renamingDrones,
   settingBaseImages,
   movingDroneGroups,
+  sidebarDndEnabled,
   sidebarOptimisticDroneIdSet,
   busy,
   unread,
@@ -276,9 +280,11 @@ function SidebarDroneRow({
 }: SidebarDroneRowProps) {
   const densityClasses = sidebarTreeDensityClasses(sidebarDensityMode);
   const isOptimistic = sidebarOptimisticDroneIdSet.has(drone.id);
-  const dragDisabled = movingDroneGroups || isOptimistic;
-  const selectedDragDroneIds =
-    selectedDroneSet.has(drone.id) && selectedDroneIds.length > 0 ? selectedDroneIds.slice() : [drone.id];
+  const dragDisabled = !sidebarDndEnabled || movingDroneGroups || isOptimistic;
+  const selectedDragDroneIds = React.useMemo(
+    () => (selectedDroneSet.has(drone.id) && selectedDroneIds.length > 0 ? selectedDroneIds : [drone.id]),
+    [drone.id, selectedDroneIds, selectedDroneSet],
+  );
   const dragData = React.useMemo<SidebarDroneDragData>(
     () => ({
       type: 'sidebar-drone',
@@ -379,9 +385,9 @@ function SidebarDroneRow({
       </div>
     </div>
   );
-}
+});
 
-function SidebarChatRow({
+const SidebarChatRow = React.memo(function SidebarChatRow({
   drone,
   sidebarDensityMode,
   chatName,
@@ -391,6 +397,7 @@ function SidebarChatRow({
   deleting,
   canDelete,
   movingDroneGroups,
+  sidebarDndEnabled,
   isOptimistic,
   dragOverPlacement,
   uiDroneName,
@@ -409,6 +416,25 @@ function SidebarChatRow({
 }: SidebarChatRowProps) {
   const densityClasses = sidebarTreeDensityClasses(sidebarDensityMode);
   const chatKey = `${drone.id}:${chatName}`;
+  const chatDragData = React.useMemo(
+    () => createSidebarChatDragData(drone.id, chatName, `${uiDroneName(drone.name)} / ${chatName}`),
+    [chatName, drone.id, drone.name, uiDroneName],
+  );
+  const { attributes, listeners, isDragging, setNodeRef: setDragNodeRef } = useDraggable({
+    id: `sidebar-chat:${chatKey}`,
+    data: chatDragData ?? undefined,
+    disabled: editing || !sidebarDndEnabled || !chatDragData || movingDroneGroups || isOptimistic,
+  });
+  const { setNodeRef } = useDroppable({
+    id: createChatReorderDropId(drone.id, chatName),
+    data: {
+      type: 'sidebar-chat-reorder',
+      droneId: drone.id,
+      chatName,
+    },
+    disabled: editing || !sidebarDndEnabled || movingDroneGroups || isOptimistic,
+  });
+
   if (editing) {
     return (
       <div className="flex flex-col gap-0.5">
@@ -437,24 +463,6 @@ function SidebarChatRow({
       </div>
     );
   }
-  const chatDragData = React.useMemo(
-    () => createSidebarChatDragData(drone.id, chatName, `${uiDroneName(drone.name)} / ${chatName}`),
-    [chatName, drone.id, drone.name, uiDroneName],
-  );
-  const { attributes, listeners, isDragging, setNodeRef: setDragNodeRef } = useDraggable({
-    id: `sidebar-chat:${chatKey}`,
-    data: chatDragData ?? undefined,
-    disabled: !chatDragData || movingDroneGroups || isOptimistic,
-  });
-  const { setNodeRef } = useDroppable({
-    id: createChatReorderDropId(drone.id, chatName),
-    data: {
-      type: 'sidebar-chat-reorder',
-      droneId: drone.id,
-      chatName,
-    },
-    disabled: movingDroneGroups || isOptimistic,
-  });
 
   return (
     <div key={chatKey} ref={setNodeRef} className="relative flex items-stretch gap-1 group/chat-row">
@@ -468,7 +476,7 @@ function SidebarChatRow({
           event.stopPropagation();
           onSelectDroneChat(drone.id, chatName);
         }}
-        className={`flex-1 rounded border text-left transition-all flex items-center gap-1.5 min-w-0 ${densityClasses.chatRow} ${
+        className={`flex-1 rounded border text-left transition-colors flex items-center gap-1.5 min-w-0 ${densityClasses.chatRow} ${
           selected
             ? 'border-[var(--accent-muted)] bg-[var(--selected)] text-[var(--fg)]'
             : 'border-transparent text-[var(--muted)] hover:border-[var(--border-subtle)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -501,7 +509,7 @@ function SidebarChatRow({
             }}
             onPointerDown={(event) => event.stopPropagation()}
             onMouseDown={(event) => event.stopPropagation()}
-            className={`inline-flex ${densityClasses.chatDeleteWidth} flex-shrink-0 items-center justify-center rounded border transition-all opacity-0 pointer-events-none group-hover/chat-row:opacity-100 group-hover/chat-row:pointer-events-auto bg-[rgba(80,130,255,.10)] border-[rgba(90,140,255,.22)] text-[rgb(124,170,255)] hover:bg-[rgba(80,130,255,.16)]`}
+            className={`inline-flex ${densityClasses.chatDeleteWidth} flex-shrink-0 items-center justify-center rounded border transition-opacity opacity-0 pointer-events-none group-hover/chat-row:opacity-100 group-hover/chat-row:pointer-events-auto bg-[rgba(80,130,255,.10)] border-[rgba(90,140,255,.22)] text-[rgb(124,170,255)] hover:bg-[rgba(80,130,255,.16)]`}
             title={`Rename chat "${chatName}"`}
             aria-label={`Rename chat "${chatName}"`}
           >
@@ -518,7 +526,7 @@ function SidebarChatRow({
             onPointerDown={(event) => event.stopPropagation()}
             onMouseDown={(event) => event.stopPropagation()}
             disabled={deleting}
-            className={`inline-flex ${densityClasses.chatDeleteWidth} flex-shrink-0 items-center justify-center rounded border transition-all ${
+            className={`inline-flex ${densityClasses.chatDeleteWidth} flex-shrink-0 items-center justify-center rounded border transition-opacity ${
               deleting
                 ? 'bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
                 : 'opacity-0 pointer-events-none group-hover/chat-row:opacity-100 group-hover/chat-row:pointer-events-auto bg-[var(--red-subtle)] border-[rgba(255,90,90,.2)] text-[var(--red)] hover:bg-[rgba(255,90,90,.15)]'
@@ -534,7 +542,7 @@ function SidebarChatRow({
       </div>
     </div>
   );
-}
+});
 
 function SidebarDroneChildrenSection({
   droneId,
@@ -590,6 +598,7 @@ function SidebarDroneNode({
   renamingDrones,
   settingBaseImages,
   movingDroneGroups,
+  sidebarDndEnabled,
   sidebarOptimisticDroneIdSet,
   collapsedDroneSections,
   setCollapsedDroneSections,
@@ -688,6 +697,7 @@ function SidebarDroneNode({
         renamingDrones={renamingDrones}
         settingBaseImages={settingBaseImages}
         movingDroneGroups={movingDroneGroups}
+        sidebarDndEnabled={sidebarDndEnabled}
         sidebarOptimisticDroneIdSet={sidebarOptimisticDroneIdSet}
         busy={showDroneBusy}
         unread={showDroneUnread}
@@ -750,6 +760,7 @@ function SidebarDroneNode({
                 deleting={Boolean(deletingChats[chatKey])}
                 canDelete={chatName !== 'default'}
                 movingDroneGroups={movingDroneGroups}
+                sidebarDndEnabled={sidebarDndEnabled}
                 isOptimistic={isOptimistic}
                 dragOverPlacement={dragOverChat?.key === chatKey ? dragOverChat.placement : null}
                 uiDroneName={uiDroneName}
@@ -798,6 +809,7 @@ function SidebarDroneNode({
               renamingDrones={renamingDrones}
               settingBaseImages={settingBaseImages}
               movingDroneGroups={movingDroneGroups}
+              sidebarDndEnabled={sidebarDndEnabled}
               sidebarOptimisticDroneIdSet={sidebarOptimisticDroneIdSet}
               collapsedDroneSections={collapsedDroneSections}
               setCollapsedDroneSections={setCollapsedDroneSections}
@@ -855,6 +867,7 @@ export function SidebarDroneTreeList({
   renamingDrones,
   settingBaseImages,
   movingDroneGroups,
+  sidebarDndEnabled,
   sidebarOptimisticDroneIdSet,
   collapsedDroneSections,
   setCollapsedDroneSections,
@@ -1263,6 +1276,7 @@ export function SidebarDroneTreeList({
           renamingDrones={renamingDrones}
           settingBaseImages={settingBaseImages}
           movingDroneGroups={movingDroneGroups}
+          sidebarDndEnabled={sidebarDndEnabled}
           sidebarOptimisticDroneIdSet={sidebarOptimisticDroneIdSet}
           collapsedDroneSections={collapsedDroneSections}
           setCollapsedDroneSections={setCollapsedDroneSections}
