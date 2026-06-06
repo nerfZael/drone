@@ -122,7 +122,10 @@ export function useTranscriptTldrState({
 
   const handleAgentMessageHover = React.useCallback(
     (t: TranscriptItem | null) => {
-      setHoveredAgentMessageId(t ? transcriptMessageId(t) : null);
+      const next = t ? transcriptMessageId(t) : null;
+      if (hoveredAgentMessageIdRef.current === next) return;
+      hoveredAgentMessageIdRef.current = next;
+      setHoveredAgentMessageId(next);
     },
     [transcriptMessageId],
   );

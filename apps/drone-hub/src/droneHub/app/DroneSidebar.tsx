@@ -50,6 +50,7 @@ const SIDEBAR_COLLAPSED_RAIL_WIDTH_PX = 40;
 const AUTO_MINIMIZE_COLLAPSE_DELAY_MS = 90;
 const AUTO_MINIMIZE_EXPAND_DELAY_MS = 120;
 const AUTO_MINIMIZE_REOPEN_GUARD_MS = 220;
+const SIDEBAR_DND_IDLE_DISABLE_DELAY_MS = 1500;
 const SIDEBAR_DENSITY_MODE_ORDER: SidebarDensityMode[] = ['compact', 'default', 'comfortable'];
 type SidebarIconButtonProps = {
   title: string;
@@ -199,10 +200,11 @@ function SidebarGroupSection({
       droneIds,
     };
   }, [actualItems, groupLabel, groupRef]);
+  const sidebarDndEnabled = sharedDroneTreeListProps.sidebarDndEnabled;
   const { attributes, listeners, setNodeRef: setDraggableNodeRef } = useDraggable({
     id: `sidebar-group:${groupToken}`,
     data: groupDragData ?? undefined,
-    disabled: !groupDragData,
+    disabled: !sidebarDndEnabled || !groupDragData,
   });
   const { setNodeRef: setReorderDropNodeRef } = useDroppable({
     id: `sidebar-group-reorder:${groupToken}`,
@@ -210,7 +212,7 @@ function SidebarGroupSection({
       type: 'sidebar-group-reorder',
       groupRef,
     },
-    disabled: !groupDragData,
+    disabled: !sidebarDndEnabled || !groupDragData,
   });
   const { setNodeRef: setMoveDropNodeRef } = useDroppable({
     id: `sidebar-group-move:${groupToken}`,
@@ -219,7 +221,7 @@ function SidebarGroupSection({
       group: groupRef.group,
       kind: groupRef.kind,
     },
-    disabled: isVirtualGroup,
+    disabled: !sidebarDndEnabled || isVirtualGroup,
   });
   const setHeaderNodeRef = React.useCallback(
     (node: HTMLDivElement | null) => {
@@ -490,9 +492,11 @@ function SidebarFolderTreeNode({
     }),
     [groupRef, node.path],
   );
+  const sidebarDndEnabled = sharedDroneTreeListProps.sidebarDndEnabled;
   const { attributes, listeners, setNodeRef: setDraggableNodeRef } = useDraggable({
     id: `sidebar-folder:${groupToken}`,
     data: dragData,
+    disabled: !sidebarDndEnabled,
   });
   const { setNodeRef: setMoveDropNodeRef } = useDroppable({
     id: `sidebar-group-move:${groupToken}`,
@@ -501,6 +505,7 @@ function SidebarFolderTreeNode({
       group: node.path,
       kind: 'group',
     },
+    disabled: !sidebarDndEnabled,
   });
   const setHeaderNodeRef = React.useCallback(
     (element: HTMLDivElement | null) => {
@@ -923,10 +928,13 @@ export function DroneSidebar({
   const footerOptionsMenuRef = React.useRef<HTMLDivElement | null>(null);
   const collapseTimerRef = React.useRef<number | null>(null);
   const expandTimerRef = React.useRef<number | null>(null);
+  const sidebarDndIdleTimerRef = React.useRef<number | null>(null);
   const lastAutoCollapsedAtRef = React.useRef<number>(0);
   const sidebarDockDragStartXRef = React.useRef<number | null>(null);
   const [headerActionsMenuOpen, setHeaderActionsMenuOpen] = React.useState(false);
   const [footerOptionsMenuOpen, setFooterOptionsMenuOpen] = React.useState(false);
+  const [sidebarInteractionDndEnabled, setSidebarInteractionDndEnabled] = React.useState(false);
+  const sidebarDndEnabled = sidebarInteractionDndEnabled || Boolean(activeDrag);
   const [sidebarDockDragActive, setSidebarDockDragActive] = React.useState(false);
   const [sidebarDockDragPreviewSide, setSidebarDockDragPreviewSide] = React.useState<'left' | 'right' | null>(null);
   const hiddenSidebarGroupTokenSet = React.useMemo(() => new Set(hiddenSidebarGroups), [hiddenSidebarGroups]);
@@ -1193,18 +1201,68 @@ export function DroneSidebar({
     }, AUTO_MINIMIZE_EXPAND_DELAY_MS);
   }, [clearExpandTimer, setSidebarCollapsed, sidebarAutoMinimize, sidebarCollapsed]);
 
+  const clearSidebarDndIdleTimer = React.useCallback(() => {
+    if (sidebarDndIdleTimerRef.current == null) return;
+    window.clearTimeout(sidebarDndIdleTimerRef.current);
+    sidebarDndIdleTimerRef.current = null;
+  }, []);
+
+  const enableSidebarDndForInteraction = React.useCallback(() => {
+    clearSidebarDndIdleTimer();
+    setSidebarInteractionDndEnabled(true);
+  }, [clearSidebarDndIdleTimer]);
+
+  const queueSidebarDndIdleDisable = React.useCallback(() => {
+    clearSidebarDndIdleTimer();
+    if (activeDrag) return;
+    sidebarDndIdleTimerRef.current = window.setTimeout(() => {
+      sidebarDndIdleTimerRef.current = null;
+      setSidebarInteractionDndEnabled(false);
+    }, SIDEBAR_DND_IDLE_DISABLE_DELAY_MS);
+  }, [activeDrag, clearSidebarDndIdleTimer]);
+
+  React.useEffect(
+    () => () => {
+      clearSidebarDndIdleTimer();
+    },
+    [clearSidebarDndIdleTimer],
+  );
+
+  React.useEffect(() => {
+    if (activeDrag) {
+      enableSidebarDndForInteraction();
+      return;
+    }
+    const sidebar = document.querySelector('[data-drone-sidebar-root="true"]');
+    const sidebarActive =
+      sidebar instanceof HTMLElement &&
+      (sidebar.matches(':hover') || sidebar.contains(document.activeElement));
+    if (!sidebarActive) queueSidebarDndIdleDisable();
+  }, [activeDrag, enableSidebarDndForInteraction, queueSidebarDndIdleDisable]);
+
   const onSidebarPointerEnter = React.useCallback(() => {
     clearCollapseTimer();
     clearExpandTimer();
-  }, [clearCollapseTimer, clearExpandTimer]);
+    enableSidebarDndForInteraction();
+  }, [clearCollapseTimer, clearExpandTimer, enableSidebarDndForInteraction]);
 
   const onSidebarPointerLeave = React.useCallback(
     (event: React.PointerEvent<HTMLElement>) => {
       const related = event.relatedTarget;
       if (related instanceof Node && event.currentTarget.contains(related)) return;
       queueAutoCollapse();
+      queueSidebarDndIdleDisable();
     },
-    [queueAutoCollapse],
+    [queueAutoCollapse, queueSidebarDndIdleDisable],
+  );
+
+  const onSidebarBlurCapture = React.useCallback(
+    (event: React.FocusEvent<HTMLElement>) => {
+      const related = event.relatedTarget;
+      if (related instanceof Node && event.currentTarget.contains(related)) return;
+      queueSidebarDndIdleDisable();
+    },
+    [queueSidebarDndIdleDisable],
   );
 
   const onCollapsedRailPointerEnter = React.useCallback(() => {
@@ -1237,47 +1295,82 @@ export function DroneSidebar({
   const { setNodeRef: setUngroupedDropNodeRef } = useDroppable({
     id: 'sidebar-ungrouped-drop',
     data: { type: 'sidebar-ungrouped-drop' },
-    disabled: !showExternalMoveTargets || sidebarHasUngroupedGroup,
+    disabled: !sidebarDndEnabled || !showExternalMoveTargets || sidebarHasUngroupedGroup,
   });
   const { setNodeRef: setCreateGroupDropNodeRef } = useDroppable({
     id: 'sidebar-create-group-drop',
     data: { type: 'sidebar-create-group-drop' },
-    disabled: isRepoGroupingMode,
+    disabled: !sidebarDndEnabled || isRepoGroupingMode,
   });
   const sidebarVisibleDroneCount = sidebarVisibleDrones.length;
   const sidebarVisibleMultiChatActive = selectedGroupMultiChat === SIDEBAR_VISIBLE_MULTI_CHAT_GROUP;
-  const sharedDroneTreeListProps = {
-    droneById: sidebarDroneById,
-    sidebarDensityMode,
-    draftSidebarPlaceholderId: DRAFT_SIDEBAR_PLACEHOLDER_ID,
-    selectedDroneIds,
-    selectedDroneSet,
-    selectedDrone,
-    activeChatName,
-    busyChatNodeIdSet,
-    unreadAgentMessageByChatNodeId,
-    deletingDrones,
-    renamingDrones,
-    settingBaseImages,
-    movingDroneGroups,
-    sidebarOptimisticDroneIdSet,
-    collapsedDroneSections,
-    setCollapsedDroneSections,
-    uiDroneName,
-    onToggleSection: toggleDroneSection,
-    onSelectDroneCard,
-    onSelectDroneChat,
-    onDeleteDroneChat,
-    onOpenCloneModal,
-    onCreateDroneChat,
-    onRenameDroneChat,
-    onRenameDrone,
-    onSetDroneBaseImage,
-    onDeleteDrone,
-    onOpenDroneErrorModal,
-    onPrepareDroneDragStart,
-    onReparentDronesToParent: runOptimisticReparentDronesToParent,
-  } satisfies SidebarDroneTreeListSharedProps;
+  const sharedDroneTreeListProps = React.useMemo<SidebarDroneTreeListSharedProps>(
+    () => ({
+      droneById: sidebarDroneById,
+      sidebarDensityMode,
+      draftSidebarPlaceholderId: DRAFT_SIDEBAR_PLACEHOLDER_ID,
+      selectedDroneIds,
+      selectedDroneSet,
+      selectedDrone,
+      activeChatName,
+      sidebarDndEnabled,
+      busyChatNodeIdSet,
+      unreadAgentMessageByChatNodeId,
+      deletingDrones,
+      renamingDrones,
+      settingBaseImages,
+      movingDroneGroups,
+      sidebarOptimisticDroneIdSet,
+      collapsedDroneSections,
+      setCollapsedDroneSections,
+      uiDroneName,
+      onToggleSection: toggleDroneSection,
+      onSelectDroneCard,
+      onSelectDroneChat,
+      onDeleteDroneChat,
+      onOpenCloneModal,
+      onCreateDroneChat,
+      onRenameDroneChat,
+      onRenameDrone,
+      onSetDroneBaseImage,
+      onDeleteDrone,
+      onOpenDroneErrorModal,
+      onPrepareDroneDragStart,
+      onReparentDronesToParent: runOptimisticReparentDronesToParent,
+    }),
+    [
+      activeChatName,
+      busyChatNodeIdSet,
+      collapsedDroneSections,
+      deletingDrones,
+      movingDroneGroups,
+      onCreateDroneChat,
+      onDeleteDrone,
+      onDeleteDroneChat,
+      onOpenCloneModal,
+      onOpenDroneErrorModal,
+      onPrepareDroneDragStart,
+      onRenameDrone,
+      onRenameDroneChat,
+      onSelectDroneCard,
+      onSelectDroneChat,
+      onSetDroneBaseImage,
+      renamingDrones,
+      runOptimisticReparentDronesToParent,
+      selectedDrone,
+      selectedDroneIds,
+      selectedDroneSet,
+      sidebarDndEnabled,
+      setCollapsedDroneSections,
+      settingBaseImages,
+      sidebarDensityMode,
+      sidebarDroneById,
+      sidebarOptimisticDroneIdSet,
+      toggleDroneSection,
+      uiDroneName,
+      unreadAgentMessageByChatNodeId,
+    ],
+  );
 
   const onSidebarWheel = React.useCallback(
     (event: React.WheelEvent<HTMLElement>) => {
@@ -1405,6 +1498,9 @@ export function DroneSidebar({
         style={{ width: sidebarCollapsed ? 0 : SIDEBAR_EXPANDED_WIDTH_PX }}
         onPointerEnter={onSidebarPointerEnter}
         onPointerLeave={onSidebarPointerLeave}
+        onPointerDownCapture={enableSidebarDndForInteraction}
+        onFocusCapture={enableSidebarDndForInteraction}
+        onBlurCapture={onSidebarBlurCapture}
         onWheel={onSidebarWheel}
       >
         <div
@@ -1708,6 +1804,7 @@ export function DroneSidebar({
                   sidebarDensityMode={sidebarDensityMode}
                   sidebarFolderTree={sidebarFolderTree}
                   sidebarGroupOrder={sidebarGroupOrder}
+                  sidebarDndEnabled={sidebarDndEnabled}
                   repoScopedGroupPathsByRepoGroup={repoScopedGroupPathsByRepoGroup}
                   sidebarDroneOrderByGroup={sidebarDroneOrderByGroup}
                   sidebarNodeOrderByParent={sidebarNodeOrderByParent}
