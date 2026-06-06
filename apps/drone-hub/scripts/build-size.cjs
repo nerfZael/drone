@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
-const { gzipSync } = require('node:zlib');
+const { spawnSync } = require('node:child_process');
 const { readdirSync, readFileSync } = require('node:fs');
 const { extname, join, relative } = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { gzipSync } = require('node:zlib');
 
 const appRoot = join(__dirname, '..');
 const distDir = join(appRoot, 'dist');
@@ -40,6 +40,13 @@ function printBuildOutput(result) {
   }
 }
 
+function getChunkName(filePath) {
+  const fileName = filePath.split('/').pop() ?? filePath;
+  const extension = extname(fileName);
+  const baseName = fileName.slice(0, -extension.length);
+  return baseName.replace(/-[a-zA-Z0-9_-]{8}$/, '');
+}
+
 function collectAssets(dir) {
   const entries = readdirSync(dir, { withFileTypes: true });
   const assets = [];
@@ -58,8 +65,10 @@ function collectAssets(dir) {
     }
 
     const buffer = readFileSync(path);
+    const filePath = relative(appRoot, path);
     assets.push({
-      path: relative(appRoot, path),
+      chunk: getChunkName(filePath),
+      path: filePath,
       type: extension.slice(1).toUpperCase(),
       rawBytes: buffer.length,
       gzipBytes: gzipSync(buffer).length,
@@ -89,10 +98,11 @@ function pad(value, width, align = 'left') {
 
 function printTable(assets) {
   const rows = [...assets]
-    .sort((a, b) => b.rawBytes - a.rawBytes)
+    .sort((a, b) => b.rawBytes - a.rawBytes || a.path.localeCompare(b.path))
     .map((asset, index) => ({
       mark: index < largestCount ? '*' : '',
       type: asset.type,
+      chunk: asset.chunk,
       raw: formatBytes(asset.rawBytes),
       gzip: formatBytes(asset.gzipBytes),
       path: asset.path,
@@ -101,6 +111,7 @@ function printTable(assets) {
   const columns = {
     mark: Math.max(1, ...rows.map((row) => row.mark.length)),
     type: Math.max(4, ...rows.map((row) => row.type.length)),
+    chunk: Math.max(5, ...rows.map((row) => row.chunk.length)),
     raw: Math.max(3, ...rows.map((row) => row.raw.length)),
     gzip: Math.max(4, ...rows.map((row) => row.gzip.length)),
   };
@@ -114,6 +125,7 @@ function printTable(assets) {
     [
       pad('', columns.mark),
       pad('Type', columns.type),
+      pad('Chunk', columns.chunk),
       pad('Raw', columns.raw, 'right'),
       pad('Gzip', columns.gzip, 'right'),
       'File',
@@ -123,6 +135,7 @@ function printTable(assets) {
     [
       '-'.repeat(columns.mark),
       '-'.repeat(columns.type),
+      '-'.repeat(columns.chunk),
       '-'.repeat(columns.raw),
       '-'.repeat(columns.gzip),
       '----',
@@ -134,14 +147,36 @@ function printTable(assets) {
       [
         pad(row.mark, columns.mark),
         pad(row.type, columns.type),
+        pad(row.chunk, columns.chunk),
         pad(row.raw, columns.raw, 'right'),
         pad(row.gzip, columns.gzip, 'right'),
         row.path,
       ].join('  '),
     );
   }
+}
 
-  const totals = assets.reduce(
+function printTotals(assets) {
+  const totalsByType = new Map();
+  for (const asset of assets) {
+    const current = totalsByType.get(asset.type) ?? { count: 0, rawBytes: 0, gzipBytes: 0 };
+    current.count += 1;
+    current.rawBytes += asset.rawBytes;
+    current.gzipBytes += asset.gzipBytes;
+    totalsByType.set(asset.type, current);
+  }
+
+  console.log('');
+  for (const type of ['JS', 'CSS']) {
+    const total = totalsByType.get(type) ?? { count: 0, rawBytes: 0, gzipBytes: 0 };
+    console.log(
+      `Total ${type}: ${formatBytes(total.rawBytes)} raw, ${formatBytes(
+        total.gzipBytes,
+      )} gzip across ${total.count} file${total.count === 1 ? '' : 's'}`,
+    );
+  }
+
+  const total = assets.reduce(
     (sum, asset) => ({
       rawBytes: sum.rawBytes + asset.rawBytes,
       gzipBytes: sum.gzipBytes + asset.gzipBytes,
@@ -149,9 +184,7 @@ function printTable(assets) {
     { rawBytes: 0, gzipBytes: 0 },
   );
 
-  console.log(
-    `\nTotal JS/CSS: ${formatBytes(totals.rawBytes)} raw, ${formatBytes(totals.gzipBytes)} gzip`,
-  );
+  console.log(`Total JS/CSS: ${formatBytes(total.rawBytes)} raw, ${formatBytes(total.gzipBytes)} gzip`);
 }
 
 runBuild();
@@ -164,3 +197,4 @@ if (assets.length === 0) {
 }
 
 printTable(assets);
+printTotals(assets);

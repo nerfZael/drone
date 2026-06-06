@@ -68,7 +68,16 @@ Or from the monorepo root:
 bun run --filter drone-hub build:size
 ```
 
-The script runs the normal production build into `dist`, lists generated JS and CSS chunks with raw and gzip sizes, and marks the largest chunks. Successful Vite build output is hidden so the report is easier to diff; failed builds still print the build output. To compare a change, capture a baseline before editing, then capture another report after the change:
+The script runs the normal production build into `dist`, lists generated JS and CSS chunks with raw and gzip sizes, and marks the largest chunks. Successful Vite build output is hidden so the report is easier to diff; failed builds still print the build output. Read the table like this:
+
+- `Chunk` is the stable chunk name with the Vite content hash removed.
+- `Raw` is the uncompressed file size in `dist/assets`.
+- `Gzip` is a closer estimate of transfer size for normal static hosting.
+- `Total JS`, `Total CSS`, and `Total JS/CSS` are the main before/after numbers to compare.
+- The `File` hash changes when content changes; compare `Chunk`, `Raw`, `Gzip`, and totals instead.
+- Direct Vite builds may print a large-chunk warning; use this table to measure whether that warning is getting better or worse.
+
+To compare a change, capture a baseline before editing, then capture another report after the change:
 
 ```bash
 bun run build:size | tee /tmp/drone-hub-size-before.txt
@@ -78,3 +87,22 @@ diff -u /tmp/drone-hub-size-before.txt /tmp/drone-hub-size-after.txt
 ```
 
 This is intended as a local regression check for work such as lazy-loading Monaco, xterm, changes, assistant, and canvas code. It is not part of the required monorepo-wide checks.
+
+Current baseline from June 6, 2026:
+
+```text
+   Type  Chunk                         Raw       Gzip  File
+-  ----  ----------------------  ---------  ---------  ----
+*  JS    index                   956.2 KiB  267.6 KiB  dist/assets/index-BXY32sT4.js
+*  JS    DroneChangesDock        762.0 KiB  263.6 KiB  dist/assets/DroneChangesDock-CeTfMxaH.js
+*  JS    SelectedDroneWorkspace  391.4 KiB   91.3 KiB  dist/assets/SelectedDroneWorkspace-Dn06cLL7.js
+*  JS    DroneTerminalDock       343.9 KiB   88.3 KiB  dist/assets/DroneTerminalDock-ugn4-tDe.js
+*  JS    SettingsView            189.2 KiB   32.7 KiB  dist/assets/SettingsView-BTqUHFF5.js
+*  CSS   index                   102.4 KiB   18.3 KiB  dist/assets/index-CSB1i22O.css
+*  JS    AssistantDock           100.7 KiB   22.2 KiB  dist/assets/AssistantDock-7vXcPumD.js
+*  CSS   SelectedDroneWorkspace   97.4 KiB    8.2 KiB  dist/assets/SelectedDroneWorkspace-Dcp4S-jV.css
+
+Total JS: 3136.4 KiB raw, 881.0 KiB gzip across 40 files
+Total CSS: 209.3 KiB raw, 29.2 KiB gzip across 4 files
+Total JS/CSS: 3345.7 KiB raw, 910.2 KiB gzip
+```
