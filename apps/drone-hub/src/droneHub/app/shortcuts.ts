@@ -90,13 +90,13 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   },
   {
     id: 'toggleRightPanelOpen',
-    label: 'Toggle side panel visibility',
-    description: 'Shows or hides the right side panel.',
+    label: 'Toggle workspace panes',
+    description: 'Shows or hides workspace tool pane controls.',
   },
   {
     id: 'toggleRightPanelWidth',
-    label: 'Toggle side panel width',
-    description: 'Cycles the right panel width between full, two-thirds, and one-third of workspace width.',
+    label: 'Focus workspace pane',
+    description: 'Reopens or focuses the active workspace tool pane.',
   },
   {
     id: 'toggleTldr',
@@ -111,32 +111,32 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   {
     id: 'openPullRequestsTab',
     label: 'Open PRs tab',
-    description: 'Opens the right-panel PRs tab (top pane by default, hovered bottom pane in split mode).',
+    description: 'Opens the PRs workspace pane.',
   },
   {
     id: 'openChangesTab',
     label: 'Open Changes tab',
-    description: 'Opens the right-panel Changes tab (top pane by default, hovered bottom pane in split mode).',
+    description: 'Opens the Changes workspace pane.',
   },
   {
     id: 'openCanvasTab',
     label: 'Open Canvas tab',
-    description: 'Opens the right-panel Canvas tab (top pane by default, hovered bottom pane in split mode).',
+    description: 'Opens the Canvas workspace pane.',
   },
   {
     id: 'openBrowserTab',
     label: 'Open Browser tab',
-    description: 'Opens the right-panel Browser tab (top pane by default, hovered bottom pane in split mode).',
+    description: 'Opens the Browser workspace pane.',
   },
   {
     id: 'openFilesTab',
     label: 'Open Files tab',
-    description: 'Opens the right-panel Files tab (top pane by default, hovered bottom pane in split mode).',
+    description: 'Opens the Files workspace pane.',
   },
   {
     id: 'openTerminalTab',
     label: 'Open Terminal tab',
-    description: 'Opens the right-panel Terminal tab (top pane by default, hovered bottom pane in split mode).',
+    description: 'Opens the Terminal workspace pane.',
   },
 ];
 

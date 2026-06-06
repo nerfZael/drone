@@ -22,17 +22,24 @@ import type {
   RepoPullRequestsPayload,
   TranscriptItem,
 } from '../types';
-import { IconChat, IconChevron, IconCursorApp, IconDrone, IconFolder, IconSidebarExpand } from './icons';
-import { RightPanel } from './RightPanel';
-import { RIGHT_PANEL_MIN_WIDTH_PX, type RightPanelTab } from './app-config';
+import { IconAutoMinimize, IconChat, IconChevron, IconCursorApp, IconDrone, IconFolder, IconSidebarExpand, IconTune } from './icons';
+import {
+  DockableDroneWorkspace,
+  WORKSPACE_LAYOUT_SCOPES,
+  readWorkspaceLayoutScope,
+  readWorkspacePaneHeaderMode,
+  writeWorkspaceLayoutScope,
+  writeWorkspacePaneHeaderMode,
+  type WorkspaceLayoutScope,
+  type WorkspacePaneHeaderMode,
+} from './DockableDroneWorkspace';
+import { type RightPanelTab } from './app-config';
 import type { AgentSuggestionState, StartupSeedState, TldrState } from './app-types';
 import type { RepoOpErrorMeta } from './helpers';
-import type { RightPanelWidthMode } from './right-panel-width';
 import type { DroneDeleteMode } from './settings-types';
 import { requestChangesPullRequest } from '../changes/navigation';
 import { copyText, downloadTextFile } from './clipboard';
 import { chatInputDraftKeyForDroneChat, droneHomePath, isDroneStartingOrSeeding, resolveChatNameForDrone } from './helpers';
-import { resolvePreviewHostPane } from './locked-preview-host-pane';
 import { openDroneTabFromLastPreview, resolveDroneOpenTabUrl } from './quick-actions';
 import { cn } from '../../ui/cn';
 import { dropdownMenuItemBaseClass, dropdownPanelBaseClass, useDropdownDismiss } from '../../ui/dropdown';
@@ -42,7 +49,6 @@ import { currentPromptAutomationDisplayStatus } from './prompt-automation-displa
 import { repoPathLabel } from './repo-path-label';
 import { useDroneHubUiStore, useSelectedDroneWorkspaceUiState } from './use-drone-hub-ui-store';
 import { usePromptAutomationState } from './use-prompt-automation-state';
-import { HeaderPullRequestShortcuts } from './HeaderPullRequestShortcuts';
 import { CliPendingPromptStrip } from './CliPendingPromptStrip';
 import { buildChatTimelineBlocks } from './chat-timeline-blocks';
 import { buildPendingTimelineBlocks } from './pending-timeline-blocks';
@@ -149,8 +155,6 @@ type SelectedDroneWorkspaceProps = {
   rightPanelTab: RightPanelTab;
   setRightPanelTab: React.Dispatch<React.SetStateAction<RightPanelTab>>;
   rightPanelTabLabels: Record<RightPanelTab, string>;
-  resetRightPanelWidth: () => void;
-  rightPanelWidthIsDefault: boolean;
   transcripts: TranscriptItem[] | null;
   visiblePendingPromptsWithStartup: PendingPrompt[];
   transcriptMessageId: (item: TranscriptItem) => string;
@@ -192,13 +196,8 @@ type SelectedDroneWorkspaceProps = {
   openedEditorFileOpenFailureMessage: string | null;
   openedEditorFileOpenFailureAt: number | null;
   onOpenMarkdownFileReference: (ref: MarkdownFileReference) => void;
-  rightPanelWidth: number;
-  rightPanelWidthMode: RightPanelWidthMode;
-  rightPanelWidthMax: number;
-  rightPanelResizing: boolean;
   rightPanelBottomTab: RightPanelTab;
-  setRightPanelBottomTab: React.Dispatch<React.SetStateAction<RightPanelTab>>;
-  startRightPanelResize: React.MouseEventHandler<HTMLDivElement>;
+  rightPanelOpenRequestSeq: number;
   renderRightPanelTabContent: (drone: DroneSummary, tab: RightPanelTab, pane: 'single' | 'top' | 'bottom') => React.ReactNode;
   onPersistentPreviewHostChange?: (state: {
     style: React.CSSProperties;
@@ -275,8 +274,6 @@ export function SelectedDroneWorkspace({
   rightPanelTab,
   setRightPanelTab,
   rightPanelTabLabels,
-  resetRightPanelWidth,
-  rightPanelWidthIsDefault,
   transcripts,
   visiblePendingPromptsWithStartup,
   transcriptMessageId,
@@ -313,13 +310,8 @@ export function SelectedDroneWorkspace({
   openedEditorFileOpenFailureMessage,
   openedEditorFileOpenFailureAt,
   onOpenMarkdownFileReference,
-  rightPanelWidth,
-  rightPanelWidthMode,
-  rightPanelWidthMax,
-  rightPanelResizing,
   rightPanelBottomTab,
-  setRightPanelBottomTab,
-  startRightPanelResize,
+  rightPanelOpenRequestSeq,
   renderRightPanelTabContent,
   onPersistentPreviewHostChange,
 }: SelectedDroneWorkspaceProps) {
@@ -742,6 +734,10 @@ export function SelectedDroneWorkspace({
     transcripts,
     visiblePendingPromptsWithStartup.length,
   ]);
+  const [workspaceLayoutResetNonce, setWorkspaceLayoutResetNonce] = React.useState(0);
+  const [workspaceLayoutScope, setWorkspaceLayoutScopeState] = React.useState<WorkspaceLayoutScope>(() => readWorkspaceLayoutScope());
+  const [workspacePaneHeaderMode, setWorkspacePaneHeaderModeState] = React.useState<WorkspacePaneHeaderMode>(() => readWorkspacePaneHeaderMode());
+  const [droneControlsExpanded, setDroneControlsExpanded] = React.useState(false);
 
   const openPullRequestsTab = React.useCallback(() => {
     setRightPanelOpen(true);
@@ -749,17 +745,11 @@ export function SelectedDroneWorkspace({
   }, [setRightPanelOpen, setRightPanelTab]);
   const quickOpenTabUrl = resolveDroneOpenTabUrl(currentDrone);
   const quickOpenTabDisabled = isDroneStartingOrSeeding(currentDrone.hubPhase) || !quickOpenTabUrl;
-  const previewVisible = !rightPanelSplit ? rightPanelTab === 'preview' : rightPanelTab === 'preview' || rightPanelBottomTab === 'preview';
-  const persistentPreviewHostPane = resolvePreviewHostPane({
-    previewVisible,
-    rightPanelSplit,
-    rightPanelTab,
-    rightPanelBottomTab,
-  });
   const [fileOpenToast, setFileOpenToast] = React.useState<{ id: number; message: string } | null>(null);
   const [transcriptExportToast, setTranscriptExportToast] = React.useState<string | null>(null);
   const transcriptExportToastTimerRef = React.useRef<number | null>(null);
   const repoIdentityRef = React.useRef<{ owner: string; repo: string } | null>(null);
+  const [openPullRequestCount, setOpenPullRequestCount] = React.useState<number | null>(null);
   const availableTranscriptItems = React.useMemo(() => (Array.isArray(transcripts) ? transcripts : []), [transcripts]);
   const transcriptExportDisabled = chatUiMode !== 'transcript' || loadingTranscript || availableTranscriptItems.length === 0;
 
@@ -832,24 +822,36 @@ export function SelectedDroneWorkspace({
 
   React.useEffect(() => {
     repoIdentityRef.current = null;
+    setOpenPullRequestCount(null);
     if (!currentDroneRepoAttached) return;
     if (isDroneStartingOrSeeding(currentDrone.hubPhase)) return;
     let cancelled = false;
-    void requestJson<Extract<RepoPullRequestsPayload, { ok: true }>>(
-      `/api/drones/${encodeURIComponent(currentDrone.id)}/repo/pull-requests?state=open`,
-    )
-      .then((data) => {
+    let timer: number | null = null;
+
+    const loadPullRequestSummary = async () => {
+      try {
+        const data = await requestJson<Extract<RepoPullRequestsPayload, { ok: true }>>(
+          `/api/drones/${encodeURIComponent(currentDrone.id)}/repo/pull-requests?state=open`,
+        );
         if (cancelled) return;
         const owner = String(data?.github?.owner ?? '').trim().toLowerCase();
         const repo = String(data?.github?.repo ?? '').trim().toLowerCase();
-        if (!owner || !repo) return;
-        repoIdentityRef.current = { owner, repo };
-      })
-      .catch(() => {
-        // ignore; fallback behavior below is still safe
-      });
+        repoIdentityRef.current = owner && repo ? { owner, repo } : null;
+        const count = Number(data?.count ?? 0);
+        setOpenPullRequestCount(Number.isFinite(count) && count > 0 ? Math.floor(count) : 0);
+      } catch {
+        if (!cancelled) setOpenPullRequestCount(null);
+      }
+    };
+
+    void loadPullRequestSummary();
+    timer = window.setInterval(() => {
+      void loadPullRequestSummary();
+    }, 20_000);
+
     return () => {
       cancelled = true;
+      if (timer != null) window.clearInterval(timer);
     };
   }, [currentDrone.hubPhase, currentDrone.id, currentDroneRepoAttached]);
 
@@ -879,9 +881,41 @@ export function SelectedDroneWorkspace({
     [currentDrone.hubPhase, currentDrone.id, currentDroneRepoAttached, setRightPanelOpen, setRightPanelTab],
   );
 
+  const openWorkspacePane = React.useCallback(
+    (tab: RightPanelTab) => {
+      setRightPanelOpen(true);
+      setRightPanelTab(tab);
+    },
+    [setRightPanelOpen, setRightPanelTab],
+  );
+
+  const resetWorkspaceLayout = React.useCallback(() => {
+    setWorkspaceLayoutResetNonce((nonce) => nonce + 1);
+  }, []);
+  const setWorkspaceLayoutScope = React.useCallback((next: WorkspaceLayoutScope) => {
+    setWorkspaceLayoutScopeState(next);
+    writeWorkspaceLayoutScope(next);
+  }, []);
+  const setWorkspacePaneHeaderMode = React.useCallback((next: WorkspacePaneHeaderMode) => {
+    setWorkspacePaneHeaderModeState(next);
+    writeWorkspacePaneHeaderMode(next);
+  }, []);
+  const toggleDroneControlsExpanded = React.useCallback(() => {
+    setDroneControlsExpanded((expanded) => {
+      const next = !expanded;
+      if (!next) {
+        setAgentMenuOpen(false);
+        setTerminalMenuOpen(false);
+        setHeaderOverflowOpen(false);
+        setSyncMenuOpen(false);
+      }
+      return next;
+    });
+  }, [setAgentMenuOpen, setHeaderOverflowOpen, setTerminalMenuOpen]);
+
   return (
     <>
-      {/* Header — spans full width (chat + right panel) */}
+      {/* Header — spans full workspace width */}
       <div className="flex-shrink-0 bg-[var(--panel-alt)] border-b border-[var(--border)] relative">
         <div className="px-5 py-3">
           <div className="flex items-center justify-between gap-4">
@@ -963,7 +997,7 @@ export function SelectedDroneWorkspace({
                 )}
               </div>
             </div>
-            {/* Status indicators + right panel toggle */}
+            {/* Status indicators */}
             <div className="flex items-center gap-2 flex-shrink-0">
               {chatUiMode === 'cli' ? (
                 <>
@@ -1034,246 +1068,298 @@ export function SelectedDroneWorkspace({
                   Command copied{launchHint.launcher ? ` • ${launchHint.launcher.split(' ')[0]}` : ''}
                 </span>
               )}
-              <HeaderPullRequestShortcuts
-                droneId={currentDrone.id}
-                repoPath={currentDrone.repoPath}
-                repoAttached={currentDroneRepoAttached}
-                disabled={isDroneStartingOrSeeding(currentDrone.hubPhase)}
-                onOpenPullRequestsTab={openPullRequestsTab}
-              />
             </div>
           </div>
         </div>
         {/* Tier 2: Toolbar */}
-        <div className="px-5 pb-2.5 flex items-center gap-2 flex-wrap">
-          {/* Agent selector */}
-          {hasChats ? (
-            <div data-onboarding-id="chat.toolbar.agent" className="flex items-center gap-1.5">
-              <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                Agent
-              </span>
-              <UiMenuSelect
-                variant="toolbar"
-                value={currentAgentKey}
-                onValueChange={pickAgentValue}
-                entries={toolbarAgentMenuEntries}
-                open={agentMenuOpen}
-                onOpenChange={(open) => {
-                  if (open) {
-                    setTerminalMenuOpen(false);
-                    setHeaderOverflowOpen(false);
-                  }
-                  setAgentMenuOpen(open);
-                }}
-                disabled={agentDisabled}
-                title="Choose agent implementation for this chat."
-                triggerLabel={agentLabel}
-                chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
-                panelClassName="w-[260px]"
-                header="Choose agent"
-                headerStyle={{ fontFamily: 'var(--display)' }}
-              />
-            </div>
-          ) : null}
-          {hasChats && modelControlEnabled ? (
-            <div data-onboarding-id="chat.toolbar.model" className="flex items-center gap-1.5">
-              <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                Model
-              </span>
-              {availableChatModels.length > 0 ? (
-                <UiMenuSelect
-                  variant="toolbar"
-                  value={currentModel ?? ''}
-                  onValueChange={(next) => {
-                    void setChatModel(next || null).catch((err: any) => setChatInfoError(err?.message ?? String(err)));
-                  }}
-                  entries={modelMenuEntries}
-                  disabled={modelDisabled}
-                  triggerClassName="min-w-[170px] max-w-[240px]"
-                  title="Choose model for this chat."
-                  triggerLabel={modelLabel}
-                  chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
-                  panelClassName="w-[260px]"
-                />
-              ) : (
-                <>
-                  <input
-                    value={manualChatModelInput}
-                    onChange={(e) => setManualChatModelInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key !== 'Enter') return;
-                      e.preventDefault();
-                      applyManualChatModel();
+        <div
+          className={
+            droneControlsExpanded
+              ? 'px-5 pb-2.5 flex items-center justify-end gap-2 flex-wrap'
+              : 'absolute right-5 top-1/2 flex max-w-[calc(100%-22rem)] -translate-y-1/2 flex-wrap items-center justify-end gap-2'
+          }
+        >
+          {droneControlsExpanded ? (
+            <>
+              {/* Agent selector */}
+              {hasChats ? (
+                <div data-onboarding-id="chat.toolbar.agent" className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+                    Agent
+                  </span>
+                  <UiMenuSelect
+                    variant="toolbar"
+                    value={currentAgentKey}
+                    onValueChange={pickAgentValue}
+                    entries={toolbarAgentMenuEntries}
+                    open={agentMenuOpen}
+                    onOpenChange={(open) => {
+                      if (open) {
+                        setTerminalMenuOpen(false);
+                        setHeaderOverflowOpen(false);
+                      }
+                      setAgentMenuOpen(open);
                     }}
-                    disabled={modelDisabled}
-                    placeholder="Model id (optional)"
-                    className={`h-[28px] w-[170px] rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[11px] text-[var(--muted)] placeholder:text-[var(--muted-dim)] focus:outline-none transition-all ${
-                      modelDisabled ? 'opacity-40 cursor-not-allowed' : 'hover:text-[var(--fg-secondary)] hover:border-[var(--border)]'
-                    }`}
-                    title="Type a model id and press Enter."
+                    disabled={agentDisabled}
+                    title="Choose agent implementation for this chat."
+                    triggerLabel={agentLabel}
+                    chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
+                    panelClassName="w-[260px]"
+                    header="Choose agent"
+                    headerStyle={{ fontFamily: 'var(--display)' }}
                   />
+                </div>
+              ) : null}
+              {hasChats && modelControlEnabled ? (
+                <div data-onboarding-id="chat.toolbar.model" className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+                    Model
+                  </span>
+                  {availableChatModels.length > 0 ? (
+                    <UiMenuSelect
+                      variant="toolbar"
+                      value={currentModel ?? ''}
+                      onValueChange={(next) => {
+                        void setChatModel(next || null).catch((err: any) => setChatInfoError(err?.message ?? String(err)));
+                      }}
+                      entries={modelMenuEntries}
+                      disabled={modelDisabled}
+                      triggerClassName="min-w-[170px] max-w-[240px]"
+                      title="Choose model for this chat."
+                      triggerLabel={modelLabel}
+                      chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
+                      panelClassName="w-[260px]"
+                    />
+                  ) : (
+                    <>
+                      <input
+                        value={manualChatModelInput}
+                        onChange={(e) => setManualChatModelInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key !== 'Enter') return;
+                          e.preventDefault();
+                          applyManualChatModel();
+                        }}
+                        disabled={modelDisabled}
+                        placeholder="Model id (optional)"
+                        className={`h-[28px] w-[170px] rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[11px] text-[var(--muted)] placeholder:text-[var(--muted-dim)] focus:outline-none transition-all ${
+                          modelDisabled ? 'opacity-40 cursor-not-allowed' : 'hover:text-[var(--fg-secondary)] hover:border-[var(--border)]'
+                        }`}
+                        title="Type a model id and press Enter."
+                      />
+                      <button
+                        type="button"
+                        onClick={applyManualChatModel}
+                        disabled={modelDisabled}
+                        className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
+                          modelDisabled
+                            ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
+                            : 'bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                        }`}
+                        style={{ fontFamily: 'var(--display)' }}
+                        title="Apply typed model for this chat"
+                      >
+                        Set
+                      </button>
+                    </>
+                  )}
                   <button
                     type="button"
-                    onClick={applyManualChatModel}
-                    disabled={modelDisabled}
+                    onClick={() => setChatModelsRefreshNonce((n) => n + 1)}
+                    disabled={modelDisabled || loadingChatModels}
                     className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
-                      modelDisabled
+                      modelDisabled || loadingChatModels
                         ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
                         : 'bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
                     }`}
                     style={{ fontFamily: 'var(--display)' }}
-                    title="Apply typed model for this chat"
+                    title="Refresh model list from the agent CLI in this drone"
                   >
-                    Set
+                    {loadingChatModels ? 'Loading' : 'Refresh'}
                   </button>
-                </>
-              )}
-              <button
-                type="button"
-                onClick={() => setChatModelsRefreshNonce((n) => n + 1)}
-                disabled={modelDisabled || loadingChatModels}
-                className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
-                  modelDisabled || loadingChatModels
-                    ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
-                    : 'bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
-                }`}
-                style={{ fontFamily: 'var(--display)' }}
-                title="Refresh model list from the agent CLI in this drone"
-              >
-                {loadingChatModels ? 'Loading' : 'Refresh'}
-              </button>
-              {chatModelsError && (
-                <span className="text-[10px] text-[var(--muted-dim)]" title={chatModelsError}>
-                  unavailable
-                </span>
-              )}
-            </div>
-          ) : null}
-          {hasChats && chatUiMode === 'transcript' ? (
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                Auto-continue
-              </span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={agentMessageAutoContinueEnabled}
-                onClick={() => {
-                  void setAgentMessageAutoContinueEnabled(!agentMessageAutoContinueEnabled).catch((err: any) =>
-                    setChatInfoError(err?.message ?? String(err)),
-                  );
-                }}
-                disabled={loadingChatInfo}
-                className={`inline-flex items-center gap-2 h-[28px] px-2 rounded border text-[10px] font-semibold tracking-wide uppercase transition-all ${
-                  loadingChatInfo
-                    ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                    : agentMessageAutoContinueEnabled
-                      ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
-                      : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                }`}
-                style={{ fontFamily: 'var(--display)' }}
-                title="Monitor agent messages in this chat and auto-send the configured continue prompt when the agent appears to have stopped mid-task."
-              >
-                <span
-                  className={`relative inline-flex h-3.5 w-6 rounded-full transition-colors ${
-                    agentMessageAutoContinueEnabled ? 'bg-[var(--accent)]' : 'bg-[rgba(148,163,184,.3)]'
-                  }`}
-                >
-                  <span
-                    className={`absolute top-[1px] h-3 w-3 rounded-full bg-white transition-transform ${
-                      agentMessageAutoContinueEnabled ? 'translate-x-[11px]' : 'translate-x-[1px]'
+                  {chatModelsError && (
+                    <span className="text-[10px] text-[var(--muted-dim)]" title={chatModelsError}>
+                      unavailable
+                    </span>
+                  )}
+                </div>
+              ) : null}
+              {hasChats && chatUiMode === 'transcript' ? (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+                    Auto-continue
+                  </span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={agentMessageAutoContinueEnabled}
+                    onClick={() => {
+                      void setAgentMessageAutoContinueEnabled(!agentMessageAutoContinueEnabled).catch((err: any) =>
+                        setChatInfoError(err?.message ?? String(err)),
+                      );
+                    }}
+                    disabled={loadingChatInfo}
+                    className={`inline-flex items-center gap-2 h-[28px] px-2 rounded border text-[10px] font-semibold tracking-wide uppercase transition-all ${
+                      loadingChatInfo
+                        ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                        : agentMessageAutoContinueEnabled
+                          ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
+                          : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
                     }`}
-                  />
-                </span>
-                {agentMessageAutoContinueEnabled ? 'On' : 'Off'}
-              </button>
-            </div>
-          ) : null}
-          {hasChats && chatUiMode === 'transcript' ? (
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                Assistant suggestion
-              </span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={agentSuggestionEnabled}
-                onClick={() => {
-                  void setAgentSuggestionEnabled(!agentSuggestionEnabled).catch((err: any) =>
-                    setChatInfoError(err?.message ?? String(err)),
-                  );
-                }}
-                disabled={loadingChatInfo}
-                className={`inline-flex items-center gap-2 h-[28px] px-2 rounded border text-[10px] font-semibold tracking-wide uppercase transition-all ${
-                  loadingChatInfo
-                    ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                    : agentSuggestionEnabled
-                      ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
-                      : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                }`}
-                style={{ fontFamily: 'var(--display)' }}
-                title="Suggest a likely next user reply for new assistant messages in this transcript chat."
-              >
-                <span
-                  className={`relative inline-flex h-3.5 w-6 rounded-full transition-colors ${
-                    agentSuggestionEnabled ? 'bg-[var(--accent)]' : 'bg-[rgba(148,163,184,.3)]'
-                  }`}
-                >
-                  <span
-                    className={`absolute top-[1px] h-3 w-3 rounded-full bg-white transition-transform ${
-                      agentSuggestionEnabled ? 'translate-x-[11px]' : 'translate-x-[1px]'
+                    style={{ fontFamily: 'var(--display)' }}
+                    title="Monitor agent messages in this chat and auto-send the configured continue prompt when the agent appears to have stopped mid-task."
+                  >
+                    <span
+                      className={`relative inline-flex h-3.5 w-6 rounded-full transition-colors ${
+                        agentMessageAutoContinueEnabled ? 'bg-[var(--accent)]' : 'bg-[rgba(148,163,184,.3)]'
+                      }`}
+                    >
+                      <span
+                        className={`absolute top-[1px] h-3 w-3 rounded-full bg-white transition-transform ${
+                          agentMessageAutoContinueEnabled ? 'translate-x-[11px]' : 'translate-x-[1px]'
+                        }`}
+                      />
+                    </span>
+                    {agentMessageAutoContinueEnabled ? 'On' : 'Off'}
+                  </button>
+                </div>
+              ) : null}
+              {hasChats && chatUiMode === 'transcript' ? (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+                    Assistant suggestion
+                  </span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={agentSuggestionEnabled}
+                    onClick={() => {
+                      void setAgentSuggestionEnabled(!agentSuggestionEnabled).catch((err: any) =>
+                        setChatInfoError(err?.message ?? String(err)),
+                      );
+                    }}
+                    disabled={loadingChatInfo}
+                    className={`inline-flex items-center gap-2 h-[28px] px-2 rounded border text-[10px] font-semibold tracking-wide uppercase transition-all ${
+                      loadingChatInfo
+                        ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                        : agentSuggestionEnabled
+                          ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
+                          : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
                     }`}
+                    style={{ fontFamily: 'var(--display)' }}
+                    title="Suggest a likely next user reply for new assistant messages in this transcript chat."
+                  >
+                    <span
+                      className={`relative inline-flex h-3.5 w-6 rounded-full transition-colors ${
+                        agentSuggestionEnabled ? 'bg-[var(--accent)]' : 'bg-[rgba(148,163,184,.3)]'
+                      }`}
+                    >
+                      <span
+                        className={`absolute top-[1px] h-3 w-3 rounded-full bg-white transition-transform ${
+                          agentSuggestionEnabled ? 'translate-x-[11px]' : 'translate-x-[1px]'
+                        }`}
+                      />
+                    </span>
+                    {agentSuggestionEnabled ? 'On' : 'Off'}
+                  </button>
+                </div>
+              ) : null}
+              {/* Repo (read-only for repo-attached drones only) */}
+              {currentDroneRepoAttached && (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+                    Repo
+                  </span>
+                  <UiMenuSelect
+                    variant="toolbar"
+                    value={currentDroneRepoPath}
+                    onValueChange={() => {}}
+                    entries={createRepoMenuEntries}
+                    disabled={true}
+                    triggerClassName="min-w-[220px] max-w-[420px]"
+                    panelClassName="w-[380px] max-w-[calc(100vw-3rem)]"
+                    menuClassName="max-h-[240px] overflow-y-auto"
+                    title={currentDroneRepoPath || 'No repo'}
+                    triggerLabel={currentDroneRepoPath ? repoPathLabel(currentDroneRepoPath) : 'No repo'}
+                    triggerLabelClassName={currentDroneRepoPath ? 'font-mono text-[11px]' : undefined}
+                    chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
                   />
-                </span>
-                {agentSuggestionEnabled ? 'On' : 'Off'}
-              </button>
-            </div>
+                </div>
+              )}
+              {/* View mode */}
+              {chatUiMode === 'cli' ? (
+                <button
+                  onClick={() => setOutputView(outputView === 'screen' ? 'log' : 'screen')}
+                  className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]"
+                  style={{ fontFamily: 'var(--display)' }}
+                  title={outputView === 'screen' ? 'Click for raw log view' : 'Click for screen capture view'}
+                >
+                  {outputView === 'screen' ? 'Screen' : 'Log'}
+                </button>
+              ) : null}
+              {/* Separator */}
+              <div className="w-px h-4 bg-[var(--border-subtle)]" />
+              <div
+                className="inline-flex items-center gap-1.5 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
+                style={{ fontFamily: 'var(--display)' }}
+                title={`Open chat: ${activeChatName}`}
+              >
+                Chat
+                <span className="font-mono normal-case tracking-normal text-[11px] text-[var(--fg-secondary)]">{activeChatName}</span>
+              </div>
+              <div className="inline-flex items-center gap-1.5">
+                <div
+                  className="inline-flex items-center rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] p-0.5"
+                  style={{ fontFamily: 'var(--display)' }}
+                  title="Choose where this workspace layout is saved."
+                >
+                  {WORKSPACE_LAYOUT_SCOPES.map((scope) => (
+                    <button
+                      key={scope}
+                      type="button"
+                      onClick={() => setWorkspaceLayoutScope(scope)}
+                      className={`h-5 rounded px-1.5 text-[9px] font-semibold uppercase tracking-wide border transition-all ${
+                        workspaceLayoutScope === scope
+                          ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                          : 'border-transparent text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)]'
+                      }`}
+                      title={`Save this workspace layout for ${scope === 'global' ? 'all drones' : scope === 'drone' ? 'this drone' : 'this chat'}.`}
+                    >
+                      {scope}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setWorkspacePaneHeaderMode(workspacePaneHeaderMode === 'compact' ? 'normal' : 'compact')}
+                  aria-pressed={workspacePaneHeaderMode === 'compact'}
+                  className={`inline-flex h-6 w-6 items-center justify-center rounded border transition-all ${
+                    workspacePaneHeaderMode === 'compact'
+                      ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                      : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:border-[var(--border)] hover:text-[var(--muted)]'
+                  }`}
+                  title={workspacePaneHeaderMode === 'compact' ? 'Use normal pane headers' : 'Use compact pane headers'}
+                  aria-label={workspacePaneHeaderMode === 'compact' ? 'Use normal pane headers' : 'Use compact pane headers'}
+                >
+                  <IconAutoMinimize className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </>
           ) : null}
-          {/* Repo (read-only for repo-attached drones only) */}
-          {currentDroneRepoAttached && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                Repo
-              </span>
-              <UiMenuSelect
-                variant="toolbar"
-                value={currentDroneRepoPath}
-                onValueChange={() => {}}
-                entries={createRepoMenuEntries}
-                disabled={true}
-                triggerClassName="min-w-[220px] max-w-[420px]"
-                panelClassName="w-[380px] max-w-[calc(100vw-3rem)]"
-                menuClassName="max-h-[240px] overflow-y-auto"
-                title={currentDroneRepoPath || 'No repo'}
-                triggerLabel={currentDroneRepoPath ? repoPathLabel(currentDroneRepoPath) : 'No repo'}
-                triggerLabelClassName={currentDroneRepoPath ? 'font-mono text-[11px]' : undefined}
-                chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
-              />
-            </div>
-          )}
-          {/* View mode */}
-          {chatUiMode === 'cli' ? (
-            <button
-              onClick={() => setOutputView(outputView === 'screen' ? 'log' : 'screen')}
-              className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]"
-              style={{ fontFamily: 'var(--display)' }}
-              title={outputView === 'screen' ? 'Click for raw log view' : 'Click for screen capture view'}
-            >
-              {outputView === 'screen' ? 'Screen' : 'Log'}
-            </button>
-          ) : null}
-          {/* Separator */}
-          <div className="w-px h-4 bg-[var(--border-subtle)]" />
-          <div
-            className="inline-flex items-center gap-1.5 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
-            style={{ fontFamily: 'var(--display)' }}
-            title={`Open chat: ${activeChatName}`}
+          <button
+            type="button"
+            onClick={toggleDroneControlsExpanded}
+            className={`inline-flex h-7 w-7 items-center justify-center rounded border transition-all ${
+              droneControlsExpanded
+                ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:border-[var(--border)] hover:text-[var(--muted)]'
+            }`}
+            title={droneControlsExpanded ? 'Hide drone controls' : 'Show drone controls'}
+            aria-label={droneControlsExpanded ? 'Hide drone controls' : 'Show drone controls'}
+            aria-expanded={droneControlsExpanded}
           >
-            Chat
-            <span className="font-mono normal-case tracking-normal text-[11px] text-[var(--fg-secondary)]">{activeChatName}</span>
-          </div>
-          {/* Spacer */}
-          <div className="flex-1" />
+            <IconTune className="h-3.5 w-3.5" />
+          </button>
           {/* Primary actions */}
           <button
             onClick={() => openDroneTerminal('ssh')}
@@ -1550,14 +1636,14 @@ export function SelectedDroneWorkspace({
               </div>
             )}
           </div>
-          {/* Panel tabs (right side of toolbar) */}
+          {/* Workspace pane controls */}
           {rightPanelOpen && (
             <>
               <div className="w-px h-4 bg-[var(--border-subtle)] ml-1" />
               <div
                 className="inline-flex items-center rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] p-0.5"
                 style={{ fontFamily: 'var(--display)' }}
-                title="Choose right panel layout mode."
+                title="Choose how the next workspace pane opens."
               >
                 <button
                   type="button"
@@ -1567,7 +1653,7 @@ export function SelectedDroneWorkspace({
                       ? 'text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)] border-transparent'
                       : 'bg-[var(--accent-subtle)] text-[var(--accent)] border-[var(--accent-muted)]'
                   }`}
-                  title="Use one right panel pane"
+                  title="Open one workspace tool pane at a time"
                 >
                   Single
                 </button>
@@ -1579,51 +1665,57 @@ export function SelectedDroneWorkspace({
                       ? 'bg-[var(--accent-subtle)] text-[var(--accent)] border-[var(--accent-muted)]'
                       : 'text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)] border-transparent'
                   }`}
-                  title="Split right panel into top and bottom panes"
+                  title="Open the selected pane plus the secondary pane"
                 >
                   Split
                 </button>
               </div>
-              {!rightPanelSplit && (
-                <div className="flex items-center gap-0.5">
-                  {rightPanelTabs.map((tab) => {
-                    const active = rightPanelTab === tab;
-                    return (
-                      <button
-                        key={tab}
-                        type="button"
-                        onClick={() => setRightPanelTab(tab)}
-                        data-onboarding-id={tab === 'changes' ? 'rightPanel.tab.changes' : undefined}
-                        className={`px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase transition-all ${
-                          active
-                            ? 'bg-[var(--accent-subtle)] text-[var(--accent)] border border-[var(--accent-muted)]'
-                            : 'text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)] border border-transparent'
-                        }`}
-                        style={{ fontFamily: 'var(--display)' }}
-                      >
-                        {rightPanelTabLabels[tab]}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
+              <div className="flex items-center gap-0.5">
+                {rightPanelTabs.map((tab) => {
+                  const active = rightPanelTab === tab || (rightPanelSplit && rightPanelBottomTab === tab);
+                  const prCount = tab === 'prs' ? Number(openPullRequestCount ?? 0) : 0;
+                  return (
+                    <button
+                      key={tab}
+                      type="button"
+                      onClick={() => openWorkspacePane(tab)}
+                      data-onboarding-id={tab === 'changes' ? 'rightPanel.tab.changes' : undefined}
+                      className={`inline-flex items-center px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase transition-all ${
+                        active
+                          ? 'bg-[var(--accent-subtle)] text-[var(--accent)] border border-[var(--accent-muted)]'
+                          : 'text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)] border border-transparent'
+                      }`}
+                      style={{ fontFamily: 'var(--display)' }}
+                      title={
+                        tab === 'prs' && prCount > 0
+                          ? `Open ${rightPanelTabLabels[tab]} pane (${prCount} open)`
+                          : `Open ${rightPanelTabLabels[tab]} pane`
+                      }
+                    >
+                      <span>{rightPanelTabLabels[tab]}</span>
+                      {tab === 'prs' && prCount > 0 ? (
+                        <span className="ml-1 inline-flex min-w-[14px] items-center justify-center rounded-full border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-1 text-[9px] leading-3 text-[var(--accent)]">
+                          {prCount > 99 ? '99+' : prCount}
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
             </>
           )}
           {rightPanelOpen && (
             <button
               type="button"
-              onClick={resetRightPanelWidth}
-              disabled={rightPanelWidthIsDefault}
+              onClick={resetWorkspaceLayout}
               className={`inline-flex items-center h-7 px-2 rounded border text-[10px] font-semibold tracking-wide uppercase transition-all ${
-                rightPanelWidthIsDefault
-                  ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] opacity-40 cursor-not-allowed'
-                  : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
               }`}
               style={{ fontFamily: 'var(--display)' }}
-              title="Reset right panel width"
-              aria-label="Reset right panel width"
+              title={`Reset the saved ${workspaceLayoutScope} workspace layout`}
+              aria-label="Reset workspace layout"
             >
-              Reset size
+              Reset layout
             </button>
           )}
           <button
@@ -1635,8 +1727,8 @@ export function SelectedDroneWorkspace({
                 ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                 : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
             }`}
-            title={rightPanelOpen ? 'Hide panel' : 'Show panel'}
-            aria-label="Toggle right panel"
+            title={rightPanelOpen ? 'Keep existing panes and stop opening tool panes automatically' : 'Open workspace panes'}
+            aria-label="Toggle workspace panes"
           >
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <rect x="2" y="2" width="12" height="12" rx="2" />
@@ -1646,9 +1738,22 @@ export function SelectedDroneWorkspace({
         </div>
       </div>
 
-      {/* Body row: chat + right panel */}
-      <div className="flex-1 flex min-h-0">
-        {/* Chat area */}
+      <DockableDroneWorkspace
+        currentDrone={currentDrone}
+        activeChatName={activeChatName}
+        layoutScope={workspaceLayoutScope}
+        paneHeaderMode={workspacePaneHeaderMode}
+        toolPaneOpen={rightPanelOpen}
+        activeToolTab={rightPanelTab}
+        secondaryToolTab={rightPanelBottomTab}
+        splitToolPane={rightPanelSplit}
+        openRequestNonce={rightPanelOpenRequestSeq}
+        resetLayoutNonce={workspaceLayoutResetNonce}
+        renderToolPane={(tab, paneKey) => renderRightPanelTabContent(currentDrone, tab, paneKey)}
+        previewTab="preview"
+        onActiveToolTabChange={setRightPanelTab}
+        onPreviewHostChange={onPersistentPreviewHostChange}
+        chatContent={
         <div
           ref={setFleetDropNodeRef}
           data-fleet-assignment-drop-zone="1"
@@ -2050,28 +2155,8 @@ export function SelectedDroneWorkspace({
           ) : null}
           </div>
         </div>
-        <RightPanel
-          currentDrone={currentDrone}
-          visible={rightPanelOpen}
-          rightPanelWidth={rightPanelWidth}
-          rightPanelWidthMode={rightPanelWidthMode}
-          rightPanelWidthMax={rightPanelWidthMax}
-          rightPanelMinWidth={RIGHT_PANEL_MIN_WIDTH_PX}
-          rightPanelResizing={rightPanelResizing}
-          rightPanelSplit={rightPanelSplit}
-          rightPanelTab={rightPanelTab}
-          rightPanelBottomTab={rightPanelBottomTab}
-          rightPanelTabs={rightPanelTabs}
-          rightPanelTabLabels={rightPanelTabLabels}
-          onRightPanelTabChange={setRightPanelTab}
-          onRightPanelBottomTabChange={setRightPanelBottomTab}
-          onStartResize={startRightPanelResize}
-          onResetWidth={resetRightPanelWidth}
-          renderTabContent={renderRightPanelTabContent}
-          persistentPreviewHostPane={persistentPreviewHostPane}
-          onPersistentPreviewHostChange={onPersistentPreviewHostChange}
-        />
-      </div>
+        }
+      />
     </>
   );
 }

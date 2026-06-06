@@ -3,7 +3,6 @@ import type { DroneSummary, PendingPrompt, TranscriptItem } from '../types';
 import type { DraftChatState, DroneErrorModalState, StartupSeedState } from './app-types';
 import type { RightPanelTab } from './app-config';
 import { isStartupSeedFresh } from './app-config';
-import { resolveNextRightPanelShortcutWidth } from './right-panel-shortcut-width';
 import { isUngroupedGroupName } from '../../domain';
 import type { ShortcutActionId, ShortcutBindingMap } from './shortcuts';
 import { SHORTCUT_DEFINITIONS, isShortcutMatch } from './shortcuts';
@@ -67,12 +66,7 @@ type UseDroneHubLifecycleEffectsArgs = {
   rightPanelSplit: boolean;
   rightPanelBottomTab: RightPanelTab;
   setRightPanelOpen: Setter<boolean>;
-  rightPanelWidth: number;
-  rightPanelWidthMode: string;
-  rightPanelWidthMax: number;
-  setRightPanelWidth: Setter<number>;
   setRightPanelTab: Setter<RightPanelTab>;
-  setRightPanelBottomTab: Setter<RightPanelTab>;
   setSidebarCollapsed: Setter<boolean>;
   shortcutBindings: ShortcutBindingMap;
   llmSettings: LlmSettingsLike;
@@ -142,11 +136,7 @@ export function useDroneHubLifecycleEffects({
   rightPanelSplit,
   rightPanelBottomTab,
   setRightPanelOpen,
-  rightPanelWidth,
-  rightPanelWidthMax,
-  setRightPanelWidth,
   setRightPanelTab,
-  setRightPanelBottomTab,
   setSidebarCollapsed,
   shortcutBindings,
   llmSettings,
@@ -222,13 +212,6 @@ export function useDroneHubLifecycleEffects({
     const openRightPanelTabFromShortcut = (tab: RightPanelTab) => {
       if (!currentDrone) return;
       setRightPanelOpen(true);
-      if (rightPanelSplit) {
-        const bottomPaneHovered = Boolean(document.querySelector('[data-right-panel-pane="bottom"]:hover'));
-        if (bottomPaneHovered) {
-          setRightPanelBottomTab(tab);
-          return;
-        }
-      }
       setRightPanelTab(tab);
     };
 
@@ -344,8 +327,7 @@ export function useDroneHubLifecycleEffects({
       },
       toggleRightPanelWidth: () => {
         setRightPanelOpen(true);
-        const nextWidth = resolveNextRightPanelShortcutWidth(rightPanelWidth, rightPanelWidthMax);
-        setRightPanelWidth(nextWidth);
+        setRightPanelTab(rightPanelTab);
         return true;
       },
       openHoveredGroupMultiChat: () => {
@@ -478,12 +460,8 @@ export function useDroneHubLifecycleEffects({
     rightPanelOpen,
     rightPanelSplit,
     rightPanelTab,
-    rightPanelWidth,
-    rightPanelWidthMax,
-    setRightPanelBottomTab,
     setRightPanelOpen,
     setRightPanelTab,
-    setRightPanelWidth,
     setSidebarCollapsed,
     shortcutBindings,
     onDeleteSelectedDroneFromInputShortcut,

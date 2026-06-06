@@ -141,6 +141,22 @@ export function IconGrip({ className }: { className?: string }) {
   );
 }
 
+export function IconTune({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M2 4h3" />
+      <path d="M8 4h6" />
+      <circle cx="6.5" cy="4" r="1.5" />
+      <path d="M2 8h7" />
+      <path d="M12 8h2" />
+      <circle cx="10.5" cy="8" r="1.5" />
+      <path d="M2 12h2" />
+      <path d="M7 12h7" />
+      <circle cx="5.5" cy="12" r="1.5" />
+    </svg>
+  );
+}
+
 export function IconEye({ className }: { className?: string }) {
   return (
     <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
