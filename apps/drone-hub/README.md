@@ -13,7 +13,7 @@ From the monorepo root:
 bun install
 
 # build the UI bundle
-bun --filter drone-hub run build
+bun run --filter drone-hub build
 ```
 
 `drone-hub` is a web app and does not install a standalone shell command.
@@ -37,7 +37,7 @@ If you run the UI directly, set `DRONE_HUB_API_PORT` so Vite can proxy `/api`:
 
 ```bash
 export DRONE_HUB_API_PORT=8787
-bun --filter drone-hub run dev -- --port 5174 --strictPort
+bun run --filter drone-hub dev -- --port 5174 --strictPort
 ```
 
 The default `drone hub` API port is also `8787`. Pass `--api-port 0` only if you explicitly want an ephemeral port.
@@ -45,5 +45,11 @@ The default `drone hub` API port is also `8787`. Pass `--api-port 0` only if you
 ## Build
 
 ```bash
-bun --filter drone-hub run build
+bun run --filter drone-hub build
+```
+
+Production builds do not emit sourcemaps by default. For a debug build with sourcemaps:
+
+```bash
+DRONE_HUB_SOURCEMAP=1 bun run --filter drone-hub build
 ```
