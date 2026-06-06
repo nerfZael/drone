@@ -28,7 +28,6 @@ import {
   normalizePendingPromptState,
   reconcileOptimisticPendingPrompt,
 } from './optimistic-pending-prompts';
-import { DirtyDroneApplyModal } from './DirtyDroneApplyModal';
 import {
   dirtyDroneApplyRequestBody,
   reconcileDirtyDroneApplyModal,
@@ -38,6 +37,11 @@ import { parseIsoDateMs, type GroupMultiChatColumnRuntimeState } from './group-m
 import { openDroneTabFromLastPreview, resolveDroneOpenTabUrl } from './quick-actions';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 import { fetchDroneChatTranscriptCached, sameTranscriptItems, sendDroneChatPrompt } from './chat-api';
+
+const DirtyDroneApplyModal = React.lazy(async () => {
+  const { DirtyDroneApplyModal } = await import('./DirtyDroneApplyModal');
+  return { default: DirtyDroneApplyModal };
+});
 
 export type GroupMultiChatColumnProps = {
   drone: DroneSummary;
@@ -741,17 +745,19 @@ export function GroupMultiChatColumn({
         onSend={sendPrompt}
       />
       {dirtyDroneApplyModal ? (
-        <DirtyDroneApplyModal
-          dirtyDroneApplyModal={dirtyDroneApplyModal}
-          busy={quickActionBusy === 'pull'}
-          onCancel={() => setDirtyDroneApplyModal(null)}
-          onKeepDirtyAndApply={() => {
-            void continueDirtyDroneApply('keep');
-          }}
-          onCommitAndApply={() => {
-            void continueDirtyDroneApply('commit');
-          }}
-        />
+        <React.Suspense fallback={null}>
+          <DirtyDroneApplyModal
+            dirtyDroneApplyModal={dirtyDroneApplyModal}
+            busy={quickActionBusy === 'pull'}
+            onCancel={() => setDirtyDroneApplyModal(null)}
+            onKeepDirtyAndApply={() => {
+              void continueDirtyDroneApply('keep');
+            }}
+            onCommitAndApply={() => {
+              void continueDirtyDroneApply('commit');
+            }}
+          />
+        </React.Suspense>
       ) : null}
     </section>
   );

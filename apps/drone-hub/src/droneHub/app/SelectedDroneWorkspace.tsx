@@ -20,7 +20,6 @@ import { requestJson } from '../http';
 import type {
   DroneSummary,
   PendingPrompt,
-  RepoPullRequestsPayload,
   TranscriptItem,
 } from '../types';
 import { IconAutoMinimize, IconChat, IconChevron, IconCursorApp, IconFolder, IconSidebarExpand, IconTune } from './icons';
@@ -65,6 +64,7 @@ import type { RepoTransferActionResult, RepoTransferPeer } from './use-workspace
 import {
   parseGithubPullRequestHref,
 } from './selected-drone-workspace-utils';
+import { useHeaderRepoPullRequestSummary } from './HeaderPullRequestShortcuts';
 import { useFleetAssignmentDropState } from './use-fleet-assignment-drop-state';
 import {
   buildTranscriptExportFilename,
@@ -809,7 +809,16 @@ export function SelectedDroneWorkspace({
   const [transcriptExportToast, setTranscriptExportToast] = React.useState<string | null>(null);
   const transcriptExportToastTimerRef = React.useRef<number | null>(null);
   const repoIdentityRef = React.useRef<{ owner: string; repo: string } | null>(null);
-  const [openPullRequestCount, setOpenPullRequestCount] = React.useState<number | null>(null);
+  const pullRequestSummary = useHeaderRepoPullRequestSummary({
+    droneId: currentDrone.id,
+    repoPath: currentDroneRepoPath,
+    repoAttached: currentDroneRepoAttached,
+    disabled: isDroneStartingOrSeeding(currentDrone.hubPhase),
+  });
+  const openPullRequestCount = React.useMemo(() => {
+    const count = Number(pullRequestSummary.pullRequestsData?.count ?? 0);
+    return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+  }, [pullRequestSummary.pullRequestsData]);
   const availableTranscriptItems = React.useMemo(() => (Array.isArray(transcripts) ? transcripts : []), [transcripts]);
   const transcriptExportDisabled = chatUiMode !== 'transcript' || loadingTranscript || availableTranscriptItems.length === 0;
 
@@ -881,39 +890,19 @@ export function SelectedDroneWorkspace({
   }, [openedEditorFileOpenFailureAt, openedEditorFileOpenFailureMessage]);
 
   React.useEffect(() => {
-    repoIdentityRef.current = null;
-    setOpenPullRequestCount(null);
-    if (!currentDroneRepoAttached) return;
-    if (isDroneStartingOrSeeding(currentDrone.hubPhase)) return;
-    let cancelled = false;
-    let timer: number | null = null;
-
-    const loadPullRequestSummary = async () => {
-      try {
-        const data = await requestJson<Extract<RepoPullRequestsPayload, { ok: true }>>(
-          `/api/drones/${encodeURIComponent(currentDrone.id)}/repo/pull-requests?state=open`,
-        );
-        if (cancelled) return;
-        const owner = String(data?.github?.owner ?? '').trim().toLowerCase();
-        const repo = String(data?.github?.repo ?? '').trim().toLowerCase();
-        repoIdentityRef.current = owner && repo ? { owner, repo } : null;
-        const count = Number(data?.count ?? 0);
-        setOpenPullRequestCount(Number.isFinite(count) && count > 0 ? Math.floor(count) : 0);
-      } catch {
-        if (!cancelled) setOpenPullRequestCount(null);
-      }
-    };
-
-    void loadPullRequestSummary();
-    timer = window.setInterval(() => {
-      void loadPullRequestSummary();
-    }, 20_000);
-
-    return () => {
-      cancelled = true;
-      if (timer != null) window.clearInterval(timer);
-    };
-  }, [currentDrone.hubPhase, currentDrone.id, currentDroneRepoAttached]);
+    if (!currentDroneRepoAttached || isDroneStartingOrSeeding(currentDrone.hubPhase) || !currentDroneRepoPath.trim()) {
+      repoIdentityRef.current = null;
+      return;
+    }
+    const data = pullRequestSummary.pullRequestsData;
+    if (!data) {
+      repoIdentityRef.current = null;
+      return;
+    }
+    const owner = String(data?.github?.owner ?? '').trim().toLowerCase();
+    const repo = String(data?.github?.repo ?? '').trim().toLowerCase();
+    repoIdentityRef.current = owner && repo ? { owner, repo } : null;
+  }, [currentDrone.hubPhase, currentDroneRepoAttached, currentDroneRepoPath, pullRequestSummary.pullRequestsData]);
 
   React.useEffect(
     () => () => {

@@ -4,6 +4,7 @@ import { useShallow } from 'zustand/react/shallow';
 import type { ChatAgentConfig } from '../../domain';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
 import type { DroneSummary } from '../types';
+import { IconTune } from '../app/icons';
 import {
   createCanvasChatNodeId,
   parseCanvasChatNodeId,
@@ -458,6 +459,7 @@ export function DroneCanvasDock({
   const [inlineRenameDraft, setInlineRenameDraft] = React.useState('');
   const [inlineRenameBusy, setInlineRenameBusy] = React.useState(false);
   const [deletingChatNodeById, setDeletingChatNodeById] = React.useState<Record<string, boolean>>({});
+  const [canvasControlsExpanded, setCanvasControlsExpanded] = React.useState(false);
   const [messageBarExpanded, setMessageBarExpanded] = React.useState(false);
   const [messageDraft, setMessageDraft] = React.useState('');
   const [draftSpawnCount, setDraftSpawnCount] = React.useState('1');
@@ -1182,20 +1184,6 @@ export function DroneCanvasDock({
     [panX, panY, scale, setViewport],
   );
 
-  const zoomIn = React.useCallback(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-    const rect = viewport.getBoundingClientRect();
-    applyZoomAt(scale * 1.14, rect.left + rect.width / 2, rect.top + rect.height / 2);
-  }, [applyZoomAt, scale]);
-
-  const zoomOut = React.useCallback(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-    const rect = viewport.getBoundingClientRect();
-    applyZoomAt(scale / 1.14, rect.left + rect.width / 2, rect.top + rect.height / 2);
-  }, [applyZoomAt, scale]);
-
   const openMessageBar = React.useCallback(() => {
     if (selectedDroneIds.length === 0) return;
     setMessageBarExpanded(true);
@@ -1897,215 +1885,203 @@ export function DroneCanvasDock({
 
   return (
     <div className="w-full h-full min-h-0 bg-[var(--panel-alt)] flex flex-col overflow-hidden">
-      <div className="px-3 py-2 border-b border-[var(--border-subtle)] flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2 flex-wrap min-w-0">
-          <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.12em] uppercase" style={{ fontFamily: 'var(--display)' }}>
-            Canvas
+      <div className="flex-shrink-0 border-b border-[var(--border-subtle)]">
+        <div className="px-3 py-2 flex items-center gap-2 overflow-x-auto">
+          <button
+            type="button"
+            onClick={() => setCanvasControlsExpanded((expanded) => !expanded)}
+            className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded border transition-all ${
+              canvasControlsExpanded
+                ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:border-[var(--border)] hover:text-[var(--muted)]'
+            }`}
+            title={canvasControlsExpanded ? 'Hide canvas creation controls' : 'Show canvas creation controls'}
+            aria-label={canvasControlsExpanded ? 'Hide canvas creation controls' : 'Show canvas creation controls'}
+            aria-expanded={canvasControlsExpanded}
+          >
+            <IconTune className="h-3.5 w-3.5" />
+          </button>
+          <div className="flex min-w-0 flex-1 items-center gap-1">
+            <label
+              className="inline-flex h-7 flex-shrink-0 cursor-pointer items-center gap-1.5 rounded border border-[var(--border-subtle)] px-2 text-[10px] font-semibold text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+              style={{ fontFamily: 'var(--display)' }}
+              title="Show the latest agent reply above canvas nodes."
+            >
+              <input
+                type="checkbox"
+                checked={showCanvasLastMessagePreviews}
+                onChange={(event) => setShowCanvasLastMessagePreviews(event.target.checked)}
+                className="h-3.5 w-3.5 accent-[var(--accent)]"
+              />
+              Last msgs
+            </label>
           </div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-              Agent
-            </span>
-            <UiMenuSelect
-              variant="toolbar"
-              value={normalizedSpawnAgentKey}
-              onValueChange={onSpawnAgentKeyChange}
-              entries={spawnAgentMenuEntries}
-              disabled={controlsDisabled}
-              triggerClassName="min-w-[140px] max-w-[210px]"
-              panelClassName="w-[300px]"
-              title="Choose agent for canvas-created drones."
-            />
+          <div className="ml-auto flex flex-shrink-0 items-center gap-1">
             <button
               type="button"
-              onClick={onOpenCustomAgentModal}
-              disabled={controlsDisabled}
-              className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
-                controlsDisabled
-                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
-                  : 'bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
-              }`}
-              style={{ fontFamily: 'var(--display)' }}
-              title="Manage custom agents"
+              onClick={resetViewport}
+              className="h-7 rounded border border-[var(--border-subtle)] px-2 text-[10px] font-semibold text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+              title="Reset canvas view"
             >
-              Custom
+              Reset
             </button>
+            <span className="w-[48px] text-right text-[10px] font-mono text-[var(--muted-dim)]" title="Current zoom">
+              {Math.round(scale * 100)}%
+            </span>
           </div>
-          {spawnAgentConfig.kind === 'builtin' ? (
+        </div>
+        {canvasControlsExpanded ? (
+          <div className="px-3 pb-2 flex items-center gap-2 flex-wrap">
             <div className="flex items-center gap-1.5">
               <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                Model
+                Agent
               </span>
               <UiMenuSelect
                 variant="toolbar"
-                value={normalizedSpawnModel}
-                onValueChange={onSpawnModelChange}
-                entries={spawnModelMenuEntries}
-                disabled={spawnModelMenuDisabled}
-                triggerClassName="min-w-[130px] max-w-[180px]"
-                panelClassName="w-[320px]"
-                menuClassName="max-h-[220px] overflow-y-auto"
-                title="Choose from models already seen in existing drones."
-                triggerLabel={spawnModelTriggerLabel}
-                triggerLabelClassName="font-mono"
-              />
-              <input
-                value={normalizedSpawnModel}
-                onChange={(event) => onSpawnModelChange(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Escape') event.currentTarget.blur();
-                }}
+                value={normalizedSpawnAgentKey}
+                onValueChange={onSpawnAgentKeyChange}
+                entries={spawnAgentMenuEntries}
                 disabled={controlsDisabled}
-                placeholder="Default model"
-                className={`h-[28px] w-[150px] rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[11px] text-[var(--muted)] placeholder:text-[var(--muted-dim)] focus:outline-none transition-all font-mono ${
-                  controlsDisabled
-                    ? 'opacity-40 cursor-not-allowed'
-                    : 'hover:text-[var(--fg-secondary)] hover:border-[var(--border)]'
-                }`}
-                title="Set default model for canvas-created drones."
+                triggerClassName="min-w-[140px] max-w-[210px]"
+                panelClassName="w-[300px]"
+                title="Choose agent for canvas-created drones."
               />
               <button
                 type="button"
-                onClick={() => onSpawnModelChange('')}
-                disabled={controlsDisabled || !normalizedSpawnModel.trim()}
+                onClick={onOpenCustomAgentModal}
+                disabled={controlsDisabled}
                 className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
-                  controlsDisabled || !normalizedSpawnModel.trim()
+                  controlsDisabled
                     ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
                     : 'bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
-                title="Clear model override"
+                title="Manage custom agents"
+              >
+                Custom
+              </button>
+            </div>
+            {spawnAgentConfig.kind === 'builtin' ? (
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+                  Model
+                </span>
+                <UiMenuSelect
+                  variant="toolbar"
+                  value={normalizedSpawnModel}
+                  onValueChange={onSpawnModelChange}
+                  entries={spawnModelMenuEntries}
+                  disabled={spawnModelMenuDisabled}
+                  triggerClassName="min-w-[130px] max-w-[180px]"
+                  panelClassName="w-[320px]"
+                  menuClassName="max-h-[220px] overflow-y-auto"
+                  title="Choose from models already seen in existing drones."
+                  triggerLabel={spawnModelTriggerLabel}
+                  triggerLabelClassName="font-mono"
+                />
+                <input
+                  value={normalizedSpawnModel}
+                  onChange={(event) => onSpawnModelChange(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') event.currentTarget.blur();
+                  }}
+                  disabled={controlsDisabled}
+                  placeholder="Default model"
+                  className={`h-[28px] w-[150px] rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[11px] text-[var(--muted)] placeholder:text-[var(--muted-dim)] focus:outline-none transition-all font-mono ${
+                    controlsDisabled
+                      ? 'opacity-40 cursor-not-allowed'
+                      : 'hover:text-[var(--fg-secondary)] hover:border-[var(--border)]'
+                  }`}
+                  title="Set default model for canvas-created drones."
+                />
+                <button
+                  type="button"
+                  onClick={() => onSpawnModelChange('')}
+                  disabled={controlsDisabled || !normalizedSpawnModel.trim()}
+                  className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
+                    controlsDisabled || !normalizedSpawnModel.trim()
+                      ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
+                      : 'bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                  }`}
+                  style={{ fontFamily: 'var(--display)' }}
+                  title="Clear model override"
+                >
+                  Clear
+                </button>
+              </div>
+            ) : null}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+                Repo
+              </span>
+              <UiMenuSelect
+                variant="toolbar"
+                value={normalizedCreateRepoPath}
+                onValueChange={onCreateRepoPathChange}
+                entries={createRepoMenuEntries}
+                disabled={controlsDisabled}
+                triggerClassName="min-w-[170px] max-w-[280px]"
+                panelClassName="w-[380px] max-w-[calc(100vw-3rem)]"
+                menuClassName="max-h-[220px] overflow-y-auto"
+                title={normalizedCreateRepoPath || 'No repo'}
+                triggerLabel={normalizedCreateRepoPath ? repoPathLabel(normalizedCreateRepoPath) : 'No repo'}
+                triggerLabelClassName={normalizedCreateRepoPath ? 'font-mono text-[11px]' : undefined}
+              />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+                Group
+              </span>
+              <input
+                value={normalizedCreateGroup}
+                onChange={(event) => onCreateGroupChange(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') event.currentTarget.blur();
+                }}
+                disabled={controlsDisabled}
+                placeholder="Optional group"
+                className={`h-[28px] w-[150px] rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[11px] text-[var(--muted)] placeholder:text-[var(--muted-dim)] focus:outline-none transition-all ${
+                  controlsDisabled
+                    ? 'opacity-40 cursor-not-allowed'
+                    : 'hover:text-[var(--fg-secondary)] hover:border-[var(--border)]'
+                }`}
+                title="Set group for canvas-created drones."
+              />
+              <button
+                type="button"
+                onClick={() => onCreateGroupChange('')}
+                disabled={controlsDisabled || !normalizedCreateGroup.trim()}
+                className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
+                  controlsDisabled || !normalizedCreateGroup.trim()
+                    ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
+                    : 'bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                }`}
+                style={{ fontFamily: 'var(--display)' }}
+                title="Clear group"
               >
                 Clear
               </button>
             </div>
-          ) : null}
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-              Repo
-            </span>
-            <UiMenuSelect
-              variant="toolbar"
-              value={normalizedCreateRepoPath}
-              onValueChange={onCreateRepoPathChange}
-              entries={createRepoMenuEntries}
-              disabled={controlsDisabled}
-              triggerClassName="min-w-[170px] max-w-[280px]"
-              panelClassName="w-[380px] max-w-[calc(100vw-3rem)]"
-              menuClassName="max-h-[220px] overflow-y-auto"
-              title={normalizedCreateRepoPath || 'No repo'}
-              triggerLabel={normalizedCreateRepoPath ? repoPathLabel(normalizedCreateRepoPath) : 'No repo'}
-              triggerLabelClassName={normalizedCreateRepoPath ? 'font-mono text-[11px]' : undefined}
-            />
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-              Group
-            </span>
-            <input
-              value={normalizedCreateGroup}
-              onChange={(event) => onCreateGroupChange(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Escape') event.currentTarget.blur();
-              }}
-              disabled={controlsDisabled}
-              placeholder="Optional group"
-              className={`h-[28px] w-[150px] rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[11px] text-[var(--muted)] placeholder:text-[var(--muted-dim)] focus:outline-none transition-all ${
+            <label
+              className={`inline-flex items-center gap-1.5 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
                 controlsDisabled
-                  ? 'opacity-40 cursor-not-allowed'
-                  : 'hover:text-[var(--fg-secondary)] hover:border-[var(--border)]'
-              }`}
-              title="Set group for canvas-created drones."
-            />
-            <button
-              type="button"
-              onClick={() => onCreateGroupChange('')}
-              disabled={controlsDisabled || !normalizedCreateGroup.trim()}
-              className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
-                controlsDisabled || !normalizedCreateGroup.trim()
                   ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
-                  : 'bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                  : 'bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] cursor-pointer'
               }`}
               style={{ fontFamily: 'var(--display)' }}
-              title="Clear group"
+              title="Before creating a repo-attached drone, run a host git pull --ff-only on the current branch."
             >
-              Clear
-            </button>
+              <input
+                type="checkbox"
+                checked={pullHostBranchBeforeCreate}
+                onChange={(event) => onPullHostBranchBeforeCreateChange(event.target.checked)}
+                disabled={controlsDisabled}
+                className="h-3.5 w-3.5 accent-[var(--accent)]"
+              />
+              Pull host branch
+            </label>
           </div>
-          <label
-            className={`inline-flex items-center gap-1.5 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
-              controlsDisabled
-                ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
-                : 'bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] cursor-pointer'
-            }`}
-            style={{ fontFamily: 'var(--display)' }}
-            title="Before creating a repo-attached drone, run a host git pull --ff-only on the current branch."
-          >
-            <input
-              type="checkbox"
-              checked={pullHostBranchBeforeCreate}
-              onChange={(event) => onPullHostBranchBeforeCreateChange(event.target.checked)}
-              disabled={controlsDisabled}
-              className="h-3.5 w-3.5 accent-[var(--accent)]"
-            />
-            Pull host branch
-          </label>
-        </div>
-        <div className="flex items-center gap-1 ml-auto">
-          <label
-            className="inline-flex items-center gap-1.5 h-7 px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] transition-colors cursor-pointer"
-            style={{ fontFamily: 'var(--display)' }}
-            title="Show the latest agent reply above canvas nodes."
-          >
-            <input
-              type="checkbox"
-              checked={showCanvasLastMessagePreviews}
-              onChange={(event) => setShowCanvasLastMessagePreviews(event.target.checked)}
-              className="h-3.5 w-3.5 accent-[var(--accent)]"
-            />
-            Last msgs
-          </label>
-          <span className="px-2 text-[10px] font-mono text-[var(--muted-dim)]" title="Selected chats">
-            {selectedDroneIds.length} sel
-          </span>
-          <button
-            type="button"
-            onClick={zoomOut}
-            disabled={scale <= MIN_CANVAS_SCALE + 0.001}
-            className={`h-7 px-2 rounded border text-[10px] font-semibold transition-colors ${
-              scale <= MIN_CANVAS_SCALE + 0.001
-                ? 'opacity-50 cursor-not-allowed border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                : 'border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
-            }`}
-            title="Zoom out"
-          >
-            -
-          </button>
-          <button
-            type="button"
-            onClick={zoomIn}
-            disabled={scale >= MAX_CANVAS_SCALE - 0.001}
-            className={`h-7 px-2 rounded border text-[10px] font-semibold transition-colors ${
-              scale >= MAX_CANVAS_SCALE - 0.001
-                ? 'opacity-50 cursor-not-allowed border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                : 'border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
-            }`}
-            title="Zoom in"
-          >
-            +
-          </button>
-          <button
-            type="button"
-            onClick={resetViewport}
-            className="h-7 px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] transition-colors"
-            title="Reset canvas view"
-          >
-            Reset view
-          </button>
-          <span className="w-[58px] text-right text-[10px] font-mono text-[var(--muted-dim)]" title="Current zoom">
-            {Math.round(scale * 100)}%
-          </span>
-        </div>
+        ) : null}
       </div>
 
       <div
