@@ -45,17 +45,7 @@ import { useTaskPlaybookButtonSettings } from './droneHub/app/use-task-playbook-
 import { useUiPreferencesSettings } from './droneHub/app/use-ui-preferences-settings';
 import { removeDroneIdsFromSidebarNodeOrderByParent } from './droneHub/app/sidebar-node-order';
 import { useDeleteActionSettings } from './droneHub/app/use-delete-action-settings';
-import { useFilesystemSettings } from './droneHub/app/use-filesystem-settings';
-import { useDesktopVoiceModelSettings } from './droneHub/app/use-desktop-voice-model-settings';
-import { useVoiceApprovalSettings } from './droneHub/app/use-voice-approval-settings';
-import { useAgentMessageAutoContinueSettings } from './droneHub/app/use-agent-message-auto-continue-settings';
-import { useAgentSuggestionSettings } from './droneHub/app/use-agent-suggestion-settings';
-import { useGithubSettings } from './droneHub/app/use-github-settings';
-import { useAgentsSettings } from './droneHub/app/use-agents-settings';
-import { useProfileSettings } from './droneHub/app/use-profile-settings';
 import { useSetupStatus } from './droneHub/app/use-setup-status';
-import { useSkillLibrary } from './droneHub/app/use-skill-library';
-import { useSyncSets } from './droneHub/app/use-sync-sets';
 import type { ProfileSettingsResponse } from './droneHub/app/settings-types';
 import { shellTerminalPrewarmKey, shouldPrewarmShellTerminal } from './droneHub/app/terminal-prewarm';
 import { useQueuedPromptsState } from './droneHub/app/use-queued-prompts-state';
@@ -579,17 +569,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   });
   useUiPreferencesSettings({ requestJson });
   const deleteActionSettingsState = useDeleteActionSettings(requestJson);
-  const githubSettingsState = useGithubSettings(requestJson);
-  const agentsSettingsState = useAgentsSettings(requestJson);
-  const filesystemSettingsState = useFilesystemSettings(requestJson);
-  const desktopVoiceModelSettingsState = useDesktopVoiceModelSettings(requestJson);
-  const voiceApprovalSettingsState = useVoiceApprovalSettings(requestJson);
-  const agentMessageAutoContinueSettingsState = useAgentMessageAutoContinueSettings(requestJson);
-  const agentSuggestionSettingsState = useAgentSuggestionSettings(requestJson);
-  const syncSetsState = useSyncSets(requestJson);
-  const profileSettingsState = useProfileSettings(requestJson);
   const setupStatusState = useSetupStatus(requestJson);
-  const skillLibraryState = useSkillLibrary(requestJson);
   const { llmSettings } = llmSettingsState;
 
   React.useEffect(() => {
@@ -1482,6 +1462,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     removeQueuedPrompt,
     requestJson,
   });
+  const [agentSuggestionPolicyFingerprint, setAgentSuggestionPolicyFingerprint] = React.useState('');
   const {
     latestAgentSuggestionTarget,
     latestAgentSuggestionState,
@@ -1493,9 +1474,17 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     requestJson,
     transcriptMessageId,
     enabled: chatInfo?.agentSuggestionEnabled === true,
-    currentPolicyFingerprint:
-      agentSuggestionSettingsState.agentSuggestionSettings?.agentSuggestion.policyFingerprint ?? '',
+    currentPolicyFingerprint: agentSuggestionPolicyFingerprint,
   });
+
+  React.useEffect(() => {
+    const next =
+      latestAgentSuggestionState?.status === 'ready' || latestAgentSuggestionState?.status === 'suppressed'
+        ? String(latestAgentSuggestionState.policyFingerprint ?? '').trim()
+        : '';
+    if (!next) return;
+    setAgentSuggestionPolicyFingerprint((prev) => (prev === next ? prev : next));
+  }, [latestAgentSuggestionState]);
 
   React.useEffect(() => {
     if (!selectedDrone) return;
@@ -3286,18 +3275,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const workspaceContentProps: DroneHubWorkspaceContentProps = useDroneHubWorkspaceContentProps({
     appView,
     llmSettingsState,
-    githubSettingsState,
-    skillLibraryState,
-    agentsSettingsState,
     deleteActionSettingsState,
-    filesystemSettingsState,
-    desktopVoiceModelSettingsState,
-    voiceApprovalSettingsState,
-    agentMessageAutoContinueSettingsState,
-    agentSuggestionSettingsState,
-    syncSetsState,
-    profileSettingsState,
     setupStatusState,
+    requestJson,
     hubLogsState,
     hubLogsTailLines: HUB_LOGS_TAIL_LINES,
     hubLogsMaxBytes: HUB_LOGS_MAX_BYTES,
