@@ -8,8 +8,10 @@ import {
 } from './assistant-activity';
 
 const FLOATING_ASSISTANT_OPEN_STORAGE_KEY = 'droneHub.assistant.floatingOpen';
-const ASSISTANT_ACTIVITY_IDLE_REFRESH_INTERVAL_MS = 2_500;
+const FLOATING_ASSISTANT_ACTIVITY_ENABLED_STORAGE_KEY = 'droneHub.assistant.floatingActivityEnabled';
+const ASSISTANT_ACTIVITY_IDLE_REFRESH_INTERVAL_MS = 15_000;
 const ASSISTANT_ACTIVITY_ACTIVE_REFRESH_INTERVAL_MS = 1_000;
+const ASSISTANT_ACTIVITY_HIDDEN_ACTIVE_REFRESH_INTERVAL_MS = 30_000;
 const ASSISTANT_ACTIVITY_EVENT_REFRESH_DEBOUNCE_MS = 150;
 
 const LazyAssistantDock = React.lazy(async () => ({
@@ -21,18 +23,73 @@ function readInitialOpen(): boolean {
   return window.localStorage.getItem(FLOATING_ASSISTANT_OPEN_STORAGE_KEY) === '1';
 }
 
-function useMinimizedAssistantActivity(enabled: boolean): AssistantActivityCounts {
+function readInitialActivityEnabled(): boolean {
+  if (typeof window === 'undefined') return false;
+  return (
+    window.localStorage.getItem(FLOATING_ASSISTANT_ACTIVITY_ENABLED_STORAGE_KEY) === '1' ||
+    window.localStorage.getItem(FLOATING_ASSISTANT_OPEN_STORAGE_KEY) === '1'
+  );
+}
+
+function isDocumentHidden(): boolean {
+  if (typeof document === 'undefined') return false;
+  return document.visibilityState === 'hidden';
+}
+
+export function minimizedAssistantActivityPollingIntervalMs({
+  activeCount,
+  documentHidden,
+  eventsConnected,
+}: {
+  activeCount: number;
+  documentHidden: boolean;
+  eventsConnected: boolean;
+}): number | null {
+  if (eventsConnected) return null;
+  if (documentHidden) return activeCount > 0 ? ASSISTANT_ACTIVITY_HIDDEN_ACTIVE_REFRESH_INTERVAL_MS : null;
+  return activeCount > 0 ? ASSISTANT_ACTIVITY_ACTIVE_REFRESH_INTERVAL_MS : ASSISTANT_ACTIVITY_IDLE_REFRESH_INTERVAL_MS;
+}
+
+export function shouldConnectMinimizedAssistantEvents({
+  activeCount,
+  activityEnabled,
+  documentHidden,
+  enabled,
+  eventSourceAvailable,
+}: {
+  activeCount: number;
+  activityEnabled: boolean;
+  documentHidden: boolean;
+  enabled: boolean;
+  eventSourceAvailable: boolean;
+}): boolean {
+  return enabled && eventSourceAvailable && !documentHidden && (activityEnabled || activeCount > 0);
+}
+
+function useMinimizedAssistantActivity(enabled: boolean, activityEnabled: boolean): AssistantActivityCounts {
   const [counts, setCounts] = React.useState<AssistantActivityCounts>({ normal: 0, voice: 0, total: 0 });
   const [eventsConnected, setEventsConnected] = React.useState(false);
+  const [documentHidden, setDocumentHidden] = React.useState(isDocumentHidden);
   const enabledRef = React.useRef(enabled);
+  const countsRef = React.useRef(counts);
+  const documentHiddenRef = React.useRef(documentHidden);
   const refreshTimerRef = React.useRef<number | null>(null);
 
   React.useEffect(() => {
     enabledRef.current = enabled;
   }, [enabled]);
 
+  React.useEffect(() => {
+    countsRef.current = counts;
+  }, [counts]);
+
+  React.useEffect(() => {
+    documentHiddenRef.current = documentHidden;
+  }, [documentHidden]);
+
   const refresh = React.useCallback(async () => {
-    if (!enabled) return;
+    if (!enabledRef.current) return;
+    if (documentHiddenRef.current && countsRef.current.total <= 0) return;
     try {
       const snapshot = await requestJson<AssistantActivitySnapshot>('/api/assistant/threads');
       if (!enabledRef.current) return;
@@ -41,10 +98,18 @@ function useMinimizedAssistantActivity(enabled: boolean): AssistantActivityCount
       if (!enabledRef.current) return;
       setCounts({ normal: 0, voice: 0, total: 0 });
     }
-  }, [enabled]);
+  }, []);
+
+  React.useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const handleVisibilityChange = () => setDocumentHidden(isDocumentHidden());
+    handleVisibilityChange();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
 
   const scheduleRefresh = React.useCallback(() => {
-    if (!enabled || typeof window === 'undefined') return;
+    if (!enabledRef.current || typeof window === 'undefined') return;
     if (refreshTimerRef.current != null) {
       window.clearTimeout(refreshTimerRef.current);
     }
@@ -52,7 +117,7 @@ function useMinimizedAssistantActivity(enabled: boolean): AssistantActivityCount
       refreshTimerRef.current = null;
       void refresh();
     }, ASSISTANT_ACTIVITY_EVENT_REFRESH_DEBOUNCE_MS);
-  }, [enabled, refresh]);
+  }, [refresh]);
 
   React.useEffect(() => {
     if (!enabled) {
@@ -63,11 +128,22 @@ function useMinimizedAssistantActivity(enabled: boolean): AssistantActivityCount
       setCounts({ normal: 0, voice: 0, total: 0 });
       return;
     }
-    void refresh();
-  }, [enabled, refresh]);
+    if (!documentHidden) {
+      void refresh();
+    }
+  }, [documentHidden, enabled, refresh]);
 
   React.useEffect(() => {
-    if (!enabled || typeof window === 'undefined' || typeof window.EventSource === 'undefined') {
+    const eventSourceAvailable = typeof window !== 'undefined' && typeof window.EventSource !== 'undefined';
+    if (
+      !shouldConnectMinimizedAssistantEvents({
+        activeCount: counts.total,
+        activityEnabled,
+        documentHidden,
+        enabled,
+        eventSourceAvailable,
+      })
+    ) {
       setEventsConnected(false);
       return;
     }
@@ -94,16 +170,21 @@ function useMinimizedAssistantActivity(enabled: boolean): AssistantActivityCount
       closed = true;
       source.close();
     };
-  }, [enabled, scheduleRefresh]);
+  }, [activityEnabled, counts.total, documentHidden, enabled, scheduleRefresh]);
 
   React.useEffect(() => {
-    if (!enabled || eventsConnected) return;
-    const intervalMs = counts.total > 0 ? ASSISTANT_ACTIVITY_ACTIVE_REFRESH_INTERVAL_MS : ASSISTANT_ACTIVITY_IDLE_REFRESH_INTERVAL_MS;
+    if (!enabled || typeof window === 'undefined') return;
+    const intervalMs = minimizedAssistantActivityPollingIntervalMs({
+      activeCount: counts.total,
+      documentHidden,
+      eventsConnected,
+    });
+    if (intervalMs == null) return;
     const timer = window.setInterval(() => {
       void refresh();
     }, intervalMs);
     return () => window.clearInterval(timer);
-  }, [counts.total, enabled, eventsConnected, refresh]);
+  }, [counts.total, documentHidden, enabled, eventsConnected, refresh]);
 
   React.useEffect(() => {
     return () => {
@@ -152,12 +233,23 @@ function MinimizedAssistantActivityBadge({
 
 export function FloatingAssistantDock({ embeddedVisible }: { embeddedVisible: boolean }) {
   const [open, setOpen] = React.useState(readInitialOpen);
-  const activityCounts = useMinimizedAssistantActivity(!embeddedVisible && !open);
+  const [activityEnabled, setActivityEnabled] = React.useState(readInitialActivityEnabled);
+  const activityCounts = useMinimizedAssistantActivity(!embeddedVisible && !open, activityEnabled);
+
+  const markActivityEnabled = React.useCallback(() => {
+    setActivityEnabled(true);
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(FLOATING_ASSISTANT_ACTIVITY_ENABLED_STORAGE_KEY, '1');
+  }, []);
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(FLOATING_ASSISTANT_OPEN_STORAGE_KEY, open ? '1' : '0');
   }, [open]);
+
+  React.useEffect(() => {
+    if (open) markActivityEnabled();
+  }, [markActivityEnabled, open]);
 
   if (embeddedVisible) return null;
 
@@ -167,7 +259,10 @@ export function FloatingAssistantDock({ embeddedVisible }: { embeddedVisible: bo
         <DesktopVoiceFloatingIndicator />
         <button
           type="button"
-          onClick={() => setOpen(true)}
+          onClick={() => {
+            markActivityEnabled();
+            setOpen(true);
+          }}
           className={`group flex h-10 items-center gap-2 rounded border bg-[var(--panel-alt)] px-3 text-[11px] font-semibold uppercase tracking-wide shadow-[0_16px_40px_rgba(0,0,0,.35)] transition-all hover:bg-[var(--accent-subtle)] ${
             activityCounts.total > 0
               ? 'border-[var(--accent)] text-[var(--accent)] shadow-[0_0_0_1px_rgba(59,130,246,.24),0_0_24px_rgba(59,130,246,.26),0_16px_40px_rgba(0,0,0,.35)]'
