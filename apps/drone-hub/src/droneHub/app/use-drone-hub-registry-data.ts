@@ -97,6 +97,160 @@ function sameDroneResponse(
   return true;
 }
 
+function mergeDroneListByIdentity(
+  previousRaw: DroneSummary[] | null | undefined,
+  nextRaw: DroneSummary[],
+): DroneSummary[] {
+  const previous = Array.isArray(previousRaw) ? previousRaw : [];
+  const previousById = new Map(previous.map((drone) => [drone.id, drone] as const));
+  let changed = previous.length !== nextRaw.length;
+  const next = nextRaw.map((drone) => {
+    const existing = previousById.get(drone.id);
+    if (existing && sameDroneSummary(existing, drone)) return existing;
+    changed = true;
+    return drone;
+  });
+  if (!changed) {
+    for (let i = 0; i < previous.length; i++) {
+      if (previous[i] !== next[i]) {
+        changed = true;
+        break;
+      }
+    }
+  }
+  return changed ? next : previous;
+}
+
+function mergeDroneResponse(
+  previous: { ok: true; drones: DroneSummary[] } | null,
+  next: { ok: true; drones: DroneSummary[] },
+): { ok: true; drones: DroneSummary[] } {
+  const drones = mergeDroneListByIdentity(previous?.drones, Array.isArray(next?.drones) ? next.drones : []);
+  return previous && drones === previous.drones ? previous : { ok: true, drones };
+}
+
+function applyDroneDelta(
+  previous: { ok: true; drones: DroneSummary[] } | null,
+  delta: { upserts?: DroneSummary[]; removedIds?: string[]; order?: string[] },
+): { ok: true; drones: DroneSummary[] } {
+  const current = Array.isArray(previous?.drones) ? previous.drones : [];
+  const removedIds = new Set((Array.isArray(delta?.removedIds) ? delta.removedIds : []).map((id) => String(id ?? '').trim()).filter(Boolean));
+  const upserts = Array.isArray(delta?.upserts) ? delta.upserts : [];
+  const upsertById = new Map(upserts.map((drone) => [drone.id, drone] as const));
+  let changed = removedIds.size > 0 || upserts.length > 0;
+  const next: DroneSummary[] = [];
+
+  for (const existing of current) {
+    if (removedIds.has(existing.id)) continue;
+    const incoming = upsertById.get(existing.id);
+    if (!incoming) {
+      next.push(existing);
+      continue;
+    }
+    next.push(sameDroneSummary(existing, incoming) ? existing : incoming);
+    upsertById.delete(existing.id);
+  }
+
+  for (const incoming of upsertById.values()) next.push(incoming);
+  const order = Array.isArray(delta?.order) ? delta.order.map((id) => String(id ?? '').trim()).filter(Boolean) : [];
+  if (order.length > 0) {
+    const byId = new Map(next.map((drone) => [drone.id, drone] as const));
+    const ordered: DroneSummary[] = [];
+    for (const id of order) {
+      const drone = byId.get(id);
+      if (!drone) continue;
+      ordered.push(drone);
+      byId.delete(id);
+    }
+    for (const drone of byId.values()) ordered.push(drone);
+    return { ok: true, drones: ordered };
+  }
+  if (!changed) return previous ?? { ok: true, drones: [] };
+  return { ok: true, drones: next };
+}
+
+function useDroneRegistryEvents(): {
+  value: { ok: true; drones: DroneSummary[] } | null;
+  error: string | null;
+  loading: boolean;
+  connected: boolean;
+} {
+  const [value, setValue] = React.useState<{ ok: true; drones: DroneSummary[] } | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [connected, setConnected] = React.useState(false);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') {
+      setLoading(false);
+      setConnected(false);
+      return;
+    }
+
+    let closed = false;
+    const source = new window.EventSource('/api/drones/events');
+    const markOpen = () => {
+      if (closed) return;
+      setConnected(true);
+      setError(null);
+    };
+
+    source.addEventListener('connected', markOpen);
+    source.addEventListener('snapshot', (event) => {
+      if (closed) return;
+      try {
+        const data = JSON.parse((event as MessageEvent).data || '{}') as { ok?: boolean; drones?: DroneSummary[] };
+        if (data?.ok !== true || !Array.isArray(data.drones)) throw new Error('Invalid drone registry snapshot.');
+        setValue((prev) => mergeDroneResponse(prev, { ok: true, drones: data.drones ?? [] }));
+        setConnected(true);
+        setError(null);
+      } catch (e: any) {
+        setError(e?.message ?? String(e));
+      } finally {
+        setLoading(false);
+      }
+    });
+    source.addEventListener('delta', (event) => {
+      if (closed) return;
+      try {
+        const data = JSON.parse((event as MessageEvent).data || '{}') as { upserts?: DroneSummary[]; removedIds?: string[]; order?: string[] };
+        setValue((prev) => applyDroneDelta(prev, data));
+        setConnected(true);
+        setError(null);
+      } catch (e: any) {
+        setError(e?.message ?? String(e));
+      } finally {
+        setLoading(false);
+      }
+    });
+    source.addEventListener('stream-error', (event) => {
+      if (closed) return;
+      try {
+        const data = JSON.parse((event as MessageEvent).data || '{}') as { error?: string };
+        setError(String(data?.error ?? '').trim() || 'Drone registry event stream failed.');
+      } catch {
+        setError('Drone registry event stream failed.');
+      } finally {
+        setConnected(false);
+        setLoading(false);
+      }
+    });
+    source.onerror = () => {
+      if (closed) return;
+      setConnected(false);
+      setLoading(false);
+      setError((prev) => prev ?? 'Drone registry event stream disconnected.');
+    };
+
+    return () => {
+      closed = true;
+      source.close();
+    };
+  }, []);
+
+  return { value, error, loading, connected: connected && Boolean(value) };
+}
+
 function sameRepoResponse(
   left: { ok: true; repos: RepoSummary[] },
   right: { ok: true; repos: RepoSummary[] },
@@ -138,12 +292,17 @@ export function useDroneHubRegistryData({
   setActiveRepoPath,
   setChatHeaderRepoPath,
 }: UseDroneHubRegistryDataArgs) {
-  const { value: dronesResp, error: dronesError, loading: dronesLoading } = usePoll<{ ok: true; drones: DroneSummary[] }>(
+  const droneEvents = useDroneRegistryEvents();
+  const dronePollIntervalMs = droneEvents.connected ? 15_000 : 2_000;
+  const { value: polledDronesResp, error: dronesPollError, loading: dronesPollLoading } = usePoll<{ ok: true; drones: DroneSummary[] }>(
     () => fetchJson('/api/drones'),
-    2000,
-    [],
+    dronePollIntervalMs,
+    [droneEvents.connected],
     { isEqual: sameDroneResponse },
   );
+  const dronesResp = droneEvents.connected ? droneEvents.value : polledDronesResp ?? droneEvents.value;
+  const dronesError = dronesResp ? null : dronesPollError ?? droneEvents.error;
+  const dronesLoading = !dronesResp && (droneEvents.loading || dronesPollLoading);
   const dronesErrorUi = dronesResp ? null : dronesError;
   const polledDrones = dronesResp?.drones ?? [];
 
