@@ -16,6 +16,11 @@ import { RIGHT_PANEL_TAB_LABELS, type RightPanelTab } from './app-config';
 export type WorkspaceLayoutScope = 'global' | 'drone' | 'chat';
 export type WorkspacePaneHeaderMode = 'normal' | 'compact';
 type WorkspacePaneKey = 'single' | 'top' | 'bottom';
+type PreviewHostState = {
+  style: React.CSSProperties;
+  activeDroneId: string | null;
+  previewVisible: boolean;
+};
 
 type DockableDroneWorkspaceProps = {
   currentDrone: DroneSummary;
@@ -30,11 +35,7 @@ type DockableDroneWorkspaceProps = {
   renderToolPane: (tab: RightPanelTab, paneKey: WorkspacePaneKey) => React.ReactNode;
   previewTab: RightPanelTab;
   onActiveToolTabChange?: (tab: RightPanelTab) => void;
-  onPreviewHostChange?: (state: {
-    style: React.CSSProperties;
-    activeDroneId: string | null;
-    previewVisible: boolean;
-  }) => void;
+  onPreviewHostChange?: (state: PreviewHostState) => void;
   onVisibleToolTabsChange?: (tabs: RightPanelTab[]) => void;
 };
 
@@ -45,6 +46,17 @@ const LAYOUT_SCOPE_STORAGE_KEY = profileStorageKey('droneHub.workspaceLayoutScop
 const PANE_HEADER_MODE_STORAGE_KEY = profileStorageKey('droneHub.workspacePaneHeaderMode');
 const LAYOUT_STORAGE_PREFIX = profileStorageKey('droneHub.workspaceLayout');
 const PREVIEW_HOST_SELECTOR = '[data-dockview-preview-host="1"]';
+
+function previewHostStatesEqual(a: PreviewHostState, b: PreviewHostState): boolean {
+  return (
+    a.activeDroneId === b.activeDroneId &&
+    a.previewVisible === b.previewVisible &&
+    a.style.left === b.style.left &&
+    a.style.top === b.style.top &&
+    a.style.width === b.style.width &&
+    a.style.height === b.style.height
+  );
+}
 
 function toolPanelId(tab: RightPanelTab): string {
   return `${TOOL_PANEL_PREFIX}${tab}`;
@@ -171,11 +183,12 @@ function ToolPanel({ api, params }: IDockviewPanelProps<{ tab?: RightPanelTab; p
   const tab = params.tab && params.tab in RIGHT_PANEL_TAB_LABELS ? params.tab : tabFromPanelId(api.id);
   const paneKey = params.paneKey ?? 'single';
   const previewHostedHere = Boolean(tab && tab === ctx.previewTab);
+  const onPreviewHostChanged = ctx.onPreviewHostChanged;
 
   React.useLayoutEffect(() => {
     if (!previewHostedHere) return;
-    ctx.onPreviewHostChanged();
-  }, [ctx, previewHostedHere]);
+    onPreviewHostChanged();
+  }, [onPreviewHostChanged, previewHostedHere]);
 
   if (!tab) return null;
 
@@ -240,9 +253,19 @@ export function DockableDroneWorkspace({
   const lastLoadedKeyRef = React.useRef<string>('');
   const [previewHostVersion, setPreviewHostVersion] = React.useState(0);
   const [workspacePanelCount, setWorkspacePanelCount] = React.useState(1);
+  const lastReportedPreviewHostRef = React.useRef<PreviewHostState | null>(null);
   const markPreviewHostChanged = React.useCallback(() => {
     setPreviewHostVersion((version) => version + 1);
   }, []);
+  const reportPreviewHostChange = React.useCallback(
+    (state: PreviewHostState) => {
+      const lastState = lastReportedPreviewHostRef.current;
+      if (lastState && previewHostStatesEqual(lastState, state)) return;
+      lastReportedPreviewHostRef.current = state;
+      onPreviewHostChange?.(state);
+    },
+    [onPreviewHostChange],
+  );
   const updateWorkspacePanelState = React.useCallback(() => {
     const api = apiRef.current;
     setWorkspacePanelCount(Math.max(1, api?.totalPanels ?? 1));
@@ -390,7 +413,7 @@ export function DockableDroneWorkspace({
     const workspaceRoot = document.querySelector<HTMLElement>('[data-drone-workspace-root="1"]');
     const previewHost = document.querySelector<HTMLElement>(PREVIEW_HOST_SELECTOR);
     if (!workspaceRoot || !previewHost) {
-      onPreviewHostChange?.({
+      reportPreviewHostChange({
         style: { left: 0, top: 0, width: 0, height: 0 },
         activeDroneId: null,
         previewVisible: false,
@@ -401,7 +424,7 @@ export function DockableDroneWorkspace({
     const updatePosition = () => {
       const workspaceRect = workspaceRoot.getBoundingClientRect();
       const paneRect = previewHost.getBoundingClientRect();
-      onPreviewHostChange?.({
+      reportPreviewHostChange({
         style: {
           left: paneRect.left - workspaceRect.left,
           top: paneRect.top - workspaceRect.top,
@@ -427,17 +450,17 @@ export function DockableDroneWorkspace({
       resizeObserver?.disconnect();
       window.removeEventListener('resize', updatePosition);
     };
-  }, [currentDrone.id, onPreviewHostChange, previewHostVersion, activeToolTab, storageKey]);
+  }, [currentDrone.id, reportPreviewHostChange, previewHostVersion, activeToolTab, storageKey]);
 
   React.useEffect(() => {
     return () => {
-      onPreviewHostChange?.({
+      reportPreviewHostChange({
         style: { left: 0, top: 0, width: 0, height: 0 },
         activeDroneId: null,
         previewVisible: false,
       });
     };
-  }, [onPreviewHostChange]);
+  }, [reportPreviewHostChange]);
 
   return (
     <DockableDroneWorkspaceContext.Provider value={contextValue}>
