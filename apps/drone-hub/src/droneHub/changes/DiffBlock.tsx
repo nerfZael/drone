@@ -8,6 +8,8 @@ import type { DiffExpansionRange, DiffState, DiffViewType } from './types';
 
 const GAP_STEP_SMALL = 10;
 const GAP_STEP_MEDIUM = 20;
+export const DIFF_HIGHLIGHT_MAX_RAW_CHARS = 200_000;
+export const DIFF_HIGHLIGHT_MAX_CHANGED_LINES = 4_000;
 
 type HiddenBlockKind = 'top' | 'middle' | 'bottom';
 
@@ -15,7 +17,8 @@ type HiddenBlockAction = {
   key: string;
   label: string;
   title: string;
-  range: DiffExpansionRange;
+  range: DiffExpansionRange | null;
+  fallbackStart?: number;
 };
 
 function normalizeDiffFilePath(rawPath: string | null | undefined): string | null {
@@ -41,7 +44,13 @@ function splitSourceLines(source: string): string[] {
   return lines;
 }
 
+export async function loadDiffExpansionSourceLines(loadExpansionSource: () => Promise<string | null>): Promise<string[]> {
+  const source = await loadExpansionSource();
+  return typeof source === 'string' ? splitSourceLines(source) : [];
+}
+
 function tokenizeDiffFile(file: FileData, fallbackPath: string | null | undefined): HunkTokens | null {
+  if (!Array.isArray(file.hunks) || file.hunks.length === 0) return null;
   const language = diffLanguageForPath(pathForParsedDiffFile(file, fallbackPath) ?? '');
   if (!language) return null;
   try {
@@ -56,11 +65,28 @@ function tokenizeDiffFile(file: FileData, fallbackPath: string | null | undefine
   }
 }
 
+export function changedLineCountForDiffFiles(files: FileData[]): number {
+  return files.reduce((fileTotal, file) => {
+    if (!Array.isArray(file.hunks)) return fileTotal;
+    return (
+      fileTotal +
+      file.hunks.reduce((hunkTotal, hunk) => {
+        if (!Array.isArray(hunk.changes)) return hunkTotal;
+        return hunkTotal + hunk.changes.filter((change) => change.type === 'insert' || change.type === 'delete').length;
+      }, 0)
+    );
+  }, 0);
+}
+
+export function shouldHighlightDiff(rawText: string, files: FileData[]): boolean {
+  return rawText.length <= DIFF_HIGHLIGHT_MAX_RAW_CHARS && changedLineCountForDiffFiles(files) <= DIFF_HIGHLIGHT_MAX_CHANGED_LINES;
+}
+
 function dedupeHiddenBlockActions(actions: HiddenBlockAction[]): HiddenBlockAction[] {
   const seen = new Set<string>();
   const output: HiddenBlockAction[] = [];
   for (const action of actions) {
-    const key = `${action.range.start}:${action.range.end}`;
+    const key = action.range ? `${action.range.start}:${action.range.end}` : `fallback:${action.fallbackStart ?? action.key}`;
     if (seen.has(key)) continue;
     seen.add(key);
     output.push(action);
@@ -168,18 +194,19 @@ function GapRow({
   actions,
   onAction,
 }: {
-  hiddenLines: number;
+  hiddenLines: number | null;
   loading: boolean;
   actions: HiddenBlockAction[];
   onAction: (action: HiddenBlockAction) => void;
 }) {
+  const hiddenLineLabel = hiddenLines === null ? 'Hidden lines' : `${hiddenLines} hidden line${hiddenLines === 1 ? '' : 's'}`;
   return (
     <div className="w-full flex items-center justify-between gap-2 rounded-md px-2 py-1 text-[10px] text-[var(--muted)]">
       <div className="flex items-center gap-2 min-w-0">
         <span className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[10px] leading-none text-[var(--muted-dim)]">
           +
         </span>
-        <span className="truncate text-[var(--muted-dim)]">{loading ? 'Expanding...' : `${hiddenLines} hidden line${hiddenLines === 1 ? '' : 's'}`}</span>
+        <span className="truncate text-[var(--muted-dim)]">{loading ? 'Expanding...' : hiddenLineLabel}</span>
       </div>
       <div className="inline-flex items-center gap-1 shrink-0">
         {actions.map((action) => (
@@ -256,9 +283,8 @@ export function DiffBlock({
       if (!loadExpansionSource) return null;
       if (sourceLoadRef.current) return sourceLoadRef.current;
 
-      const request = Promise.resolve(loadExpansionSource())
-        .then((source) => {
-          const next = typeof source === 'string' ? splitSourceLines(source) : [];
+      const request = loadDiffExpansionSourceLines(loadExpansionSource)
+        .then((next) => {
           setSourceLines(next);
           return next;
         })
@@ -278,12 +304,6 @@ export function DiffBlock({
     [loadExpansionSource, sourceLines],
   );
 
-  React.useEffect(() => {
-    if (!loadExpansionSource || parsed.length === 0) return;
-    if (!parsed.some((file) => file.type !== 'add' && Array.isArray(file.hunks) && file.hunks.length > 0)) return;
-    void ensureSourceLines(false);
-  }, [ensureSourceLines, loadExpansionSource, parsed]);
-
   const renderedFiles = React.useMemo<FileData[]>(
     () =>
       parsed.map((file) => {
@@ -297,10 +317,12 @@ export function DiffBlock({
     [expansionRanges, parsed, sourceLines],
   );
 
-  const tokensByFile = React.useMemo<Array<HunkTokens | null>>(
-    () => renderedFiles.map((file) => tokenizeDiffFile(file, filePath ?? null)),
-    [renderedFiles, filePath],
-  );
+  const highlightDiff = React.useMemo(() => shouldHighlightDiff(rawText, renderedFiles), [rawText, renderedFiles]);
+
+  const tokensByFile = React.useMemo<Array<HunkTokens | null>>(() => {
+    if (!highlightDiff) return renderedFiles.map(() => null);
+    return renderedFiles.map((file) => tokenizeDiffFile(file, filePath ?? null));
+  }, [highlightDiff, renderedFiles, filePath]);
 
   const hasRenderableHunks = React.useMemo(
     () => renderedFiles.some((file) => Array.isArray(file.hunks) && file.hunks.length > 0),
@@ -321,7 +343,13 @@ export function DiffBlock({
       try {
         const lines = await ensureSourceLines(true);
         if (!lines) return;
-        onAddExpansionRange(action.range);
+        const range =
+          action.range ??
+          (typeof action.fallbackStart === 'number' && lines.length >= action.fallbackStart
+            ? { start: action.fallbackStart, end: lines.length + 1 }
+            : null);
+        if (!range || range.end <= range.start) return;
+        onAddExpansionRange(range);
       } finally {
         setExpandingActionKey((prev) => (prev === actionKey ? null : prev));
       }
@@ -364,12 +392,18 @@ export function DiffBlock({
               ? Math.max(0, sourceLines.length - start + 1)
               : null;
 
-      if (hiddenLines === null || hiddenLines <= 0 || end === null || end <= start) return null;
+      if (kind !== 'bottom' && (hiddenLines === null || hiddenLines <= 0 || end === null || end <= start)) return null;
+      if (kind === 'bottom' && sourceLines !== null && (hiddenLines === null || hiddenLines <= 0 || end === null || end <= start)) {
+        return null;
+      }
 
-      const actions = buildHiddenBlockActions(kind, start, end);
+      const actions =
+        kind === 'bottom' && sourceLines === null
+          ? [{ key: `all-bottom:${start}`, label: 'All', range: null, title: 'Expand hidden lines below this hunk', fallbackStart: start }]
+          : buildHiddenBlockActions(kind, start, end ?? start);
       if (actions.length === 0) return null;
 
-      const actionKeyBase = `${fileKey}\u0000${kind}\u0000${start}\u0000${end}`;
+      const actionKeyBase = `${fileKey}\u0000${kind}\u0000${start}\u0000${end ?? 'unknown'}`;
       const loading = expandingActionKey !== null && expandingActionKey.startsWith(actionKeyBase);
       return (
         <Decoration key={actionKeyBase}>
@@ -468,7 +502,7 @@ export function DiffBlock({
                   if (middle) elements.push(middle);
                 }
               });
-              if (canExpand && hunks.length > 0 && sourceLines !== null) {
+              if (canExpand && hunks.length > 0) {
                 const bottom = renderCollapsedDecoration({
                   file,
                   fileKey,
