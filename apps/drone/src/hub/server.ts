@@ -23,7 +23,7 @@ import {
   renameProfile as renameManagedProfile,
   useProfile as useManagedProfile,
 } from '../host/profile-manager';
-import { loadRegistry, updateRegistry } from '../host/registry';
+import { loadRegistry, updateRegistry as updateHostRegistry } from '../host/registry';
 import {
   buildContainerDroneDaemonLaunchScript,
   DRONE_DAEMON_SESSION_NAME,
@@ -350,6 +350,17 @@ import {
 const HUB_API_LOADED_AT = new Date().toISOString();
 const HUB_API_BUILD_ID = crypto.randomBytes(6).toString('hex');
 const requireForHub = createRequire(__filename);
+
+let notifyDroneRegistryWrite: (() => void) | null = null;
+
+async function updateRegistry<T>(
+  mutator: (reg: any) => T | Promise<T>,
+  opts?: { timeoutMs?: number; staleAfterMs?: number },
+): Promise<T> {
+  const result = await updateHostRegistry(mutator as any, opts as any);
+  notifyDroneRegistryWrite?.();
+  return result as T;
+}
 
 const HUB_SETTINGS_LOG_DEFAULT_TAIL_LINES = 600;
 const HUB_SETTINGS_LOG_MAX_TAIL_LINES = 5000;
@@ -11525,11 +11536,114 @@ export async function startDroneHubApiServer(opts: {
     res.write(`data: ${JSON.stringify(data)}\n\n`);
   }
 
-  async function buildDroneRegistryEventSnapshot(): Promise<{ ok: true; drones: any[] }> {
-    triggerArchiveCleanup('api:drones-events');
-    const regAny: any = await loadRegistry();
-    enqueueProvisioningForAllPending(regAny);
+  type DroneRegistrySnapshot = { ok: true; drones: any[] };
+  type CachedDroneStatusSummary = {
+    hostPort: number | null;
+    statusOk: boolean;
+    status: any;
+    statusError: string | null;
+  };
 
+  const DRONE_STATUS_CACHE_OK_TTL_MS = 5_000;
+  const DRONE_STATUS_CACHE_ERROR_TTL_MS = 2_000;
+  const droneStatusSummaryCache = new Map<string, { expiresAt: number; value: CachedDroneStatusSummary }>();
+
+  function pruneDroneStatusSummaryCache(nowMs: number): void {
+    if (droneStatusSummaryCache.size <= 500) return;
+    for (const [key, entry] of droneStatusSummaryCache.entries()) {
+      if (entry.expiresAt <= nowMs) droneStatusSummaryCache.delete(key);
+    }
+  }
+
+  function buildDroneStatusSummaryCacheKey(d: any): string {
+    const runtime = normalizeDroneRuntime(d?.runtime);
+    const droneId = normalizeDroneIdentity(d?.id) || '';
+    const containerName = String(d?.containerName ?? d?.name ?? '').trim();
+    const hostPort = typeof d?.hostPort === 'number' && Number.isFinite(d.hostPort) ? String(d.hostPort) : '';
+    const containerPort = String(Number(d?.containerPort ?? 7777) || 7777);
+    const token = typeof d?.token === 'string' ? d.token : '';
+    return [droneId, runtime, containerName, hostPort, containerPort, token].join('\0');
+  }
+
+  async function resolveDroneStatusSummaryUncached(d: any): Promise<CachedDroneStatusSummary> {
+    const runtime = normalizeDroneRuntime(d?.runtime);
+    const containerName = String(d?.containerName ?? d?.name ?? '').trim();
+    const hostPort =
+      typeof d.hostPort === 'number' && Number.isFinite(d.hostPort)
+        ? d.hostPort
+        : runtime === 'host'
+          ? null
+          : await resolveHostPort(containerName || String(d.name ?? ''), d.containerPort);
+
+    let statusOk = false;
+    let status: any = null;
+    let statusError: string | null = null;
+    const droneId = normalizeDroneIdentity(d?.id);
+    const token = typeof d.token === 'string' ? d.token : '';
+    if (hostPort && token) {
+      try {
+        status = await droneStatus(makeClient(hostPort, token));
+        statusOk = true;
+      } catch (e: any) {
+        const firstErr = e?.message ?? String(e);
+        if (runtime !== 'host' && looksLikeUnauthorizedDaemonError(firstErr)) {
+          try {
+            const refreshedToken = droneId ? await refreshRegistryTokenFromContainer({ droneId }) : null;
+            if (refreshedToken && refreshedToken !== token) {
+              status = await droneStatus(makeClient(hostPort, refreshedToken));
+              statusOk = true;
+              statusError = null;
+              hubLog('warn', 'refreshed stale drone token after unauthorized status', {
+                droneName: d.name,
+                hadId: Boolean(droneId),
+              });
+            } else {
+              statusError = firstErr;
+            }
+          } catch (e2: any) {
+            statusError = e2?.message ?? String(e2);
+          }
+        } else if (runtime !== 'host') {
+          try {
+            await ensureContainerDroneDaemonSession({
+              containerName,
+              containerPort: Number(d?.containerPort ?? 7777),
+            });
+            status = await droneStatus(makeClient(hostPort, token));
+            statusOk = true;
+            statusError = null;
+          } catch (recoveryError: any) {
+            statusError = recoveryError?.message ?? firstErr;
+          }
+        } else {
+          statusError = firstErr;
+        }
+      }
+    } else if (!hostPort) {
+      statusError = runtime === 'host' ? 'no host port mapped' : 'no host port mapped (container likely stopped)';
+    } else {
+      statusError = 'missing token (still starting?)';
+    }
+
+    return { hostPort: hostPort ?? null, statusOk, status, statusError };
+  }
+
+  async function resolveCachedDroneStatusSummary(d: any): Promise<CachedDroneStatusSummary> {
+    const nowMs = Date.now();
+    pruneDroneStatusSummaryCache(nowMs);
+    const cacheKey = buildDroneStatusSummaryCacheKey(d);
+    const cached = droneStatusSummaryCache.get(cacheKey);
+    if (cached && cached.expiresAt > nowMs) return cached.value;
+    const value = await resolveDroneStatusSummaryUncached(d);
+    droneStatusSummaryCache.set(cacheKey, {
+      expiresAt: nowMs + (value.statusOk ? DRONE_STATUS_CACHE_OK_TTL_MS : DRONE_STATUS_CACHE_ERROR_TTL_MS),
+      value,
+    });
+    return value;
+  }
+
+  function enqueueDroneRegistryReconcilers(regAny: any): void {
+    enqueueProvisioningForAllPending(regAny);
     try {
       for (const [droneId, d] of Object.entries(regAny.drones ?? {})) {
         const id = normalizeDroneIdentity(droneId);
@@ -11543,159 +11657,265 @@ export async function startDroneHubApiServer(opts: {
     } catch {
       // ignore
     }
+  }
 
-    const pendingList: any[] = Object.values(regAny?.pending ?? {});
-    const pendingSummaries = pendingList.map((p) => {
-      const runtime = normalizeDroneRuntime(p?.runtime);
-      const repoAttached = Boolean(String(p?.repoPath ?? '').trim());
-      const phase = String(p?.phase ?? 'starting') as PendingPhase;
-      const seed = p?.seed;
-      const activity = summarizeDroneActivity(p);
-      const hasSeed =
-        seed &&
-        typeof seed === 'object' &&
-        (Boolean((seed as any)?.agent) ||
-          Boolean(String((seed as any)?.prompt ?? '').trim()) ||
-          Boolean(String((seed as any)?.chatName ?? '').trim()) ||
-          Boolean(String((seed as any)?.cwd ?? '').trim()));
-      const message =
-        typeof p?.message === 'string' ? p.message : phase === 'error' ? 'Failed' : hasSeed ? 'Seeding…' : 'Starting…';
-      const err = typeof p?.error === 'string' ? p.error : null;
-      const hubPhase: any = phase === 'error' ? 'error' : phase === 'seeding' ? 'seeding' : 'starting';
-      return {
-        id: normalizeDroneIdentity(p?.id) || null,
-        name: String(p?.name ?? ''),
-        group: typeof p?.group === 'string' && p.group.trim() ? p.group.trim() : null,
-        kind: normalizeDroneEntryKind(p?.kind),
-        visibility: normalizeDroneEntryVisibility(p?.visibility),
-        playbook: playbookMetaFromEntry(p?.playbook),
-        createdAt: String(p?.createdAt ?? nowIso()),
-        lastActivityAt: activity.lastActivityAt,
-        lastMessageAt: activity.lastMessageAt,
-        lastActivityChat: activity.lastActivityChat,
-        fleetParentId: resolveStableDroneOrPendingIdFromRef(regAny, fleetActorConfig(p).createdBy),
-        fleetAssignedIds: normalizeFleetAssignedRefsForSummary(regAny, p?.id, fleetActorConfig(p).assigned),
-        runtime,
-        repoAttached,
-        repoPath: repoAttached ? String(p?.repoPath ?? '') : '',
-        repoBranch: String(p?.repo?.branch ?? '').trim() || null,
-        cwd: normalizeDroneCwdForRuntime(p, null),
-        containerPort: typeof p?.containerPort === 'number' && Number.isFinite(p.containerPort) ? p.containerPort : 7777,
-        hostPort: null,
-        statusOk: false,
-        status: null,
-        statusError: phase === 'error' ? (err ?? message ?? 'failed') : null,
-        chats: [],
-        busyChats: [],
-        hubPhase,
-        hubMessage: phase === 'error' ? (err ?? message ?? null) : message,
-        busy: false,
-      };
-    });
+  async function reconcileSeedingPromptCompletion(regAny: any): Promise<void> {
+    const hubPatches: Array<{ id: string; hub: any | null }> = [];
+    for (const [droneId, d] of Object.entries(regAny.drones ?? {}) as any[]) {
+      const hub = d?.hub;
+      if (!hub || String(hub?.phase ?? '') !== 'seeding') continue;
+      const id = normalizeDroneIdentity(droneId);
+      if (!id) continue;
+      let changedForDrone = false;
+      let nextHub: any = hub;
+      let promptId = String(nextHub?.promptId ?? '').trim();
 
-    const realSummaries = await Promise.all(
-      Object.values(regAny.drones ?? {}).map(async (d: any) => {
-        const runtime = normalizeDroneRuntime(d?.runtime);
+      if (!promptId) {
+        const chats = d?.chats && typeof d.chats === 'object' ? Object.values(d.chats) : [];
+        for (const entry of chats as any[]) {
+          const pending = Array.isArray(entry?.pendingPrompts) ? entry.pendingPrompts : [];
+          const candidate = pending.find((p: any) => {
+            const pendingId = String(p?.id ?? '').trim();
+            const st = String(p?.state ?? '').trim();
+            return Boolean(pendingId) && st !== 'failed';
+          });
+          const candidateId = String(candidate?.id ?? '').trim();
+          if (!candidateId) continue;
+          promptId = candidateId;
+          nextHub = { ...nextHub, promptId };
+          changedForDrone = true;
+          break;
+        }
+      }
+
+      if (nextHub && promptId) {
+        const token = typeof d.token === 'string' ? d.token : '';
         const containerName = String(d?.containerName ?? d?.name ?? '').trim();
-        const activity = summarizeDroneActivity(d);
         const hostPort =
           typeof d.hostPort === 'number' && Number.isFinite(d.hostPort)
             ? d.hostPort
-            : runtime === 'host'
-              ? null
-              : await resolveHostPort(containerName || String(d.name ?? ''), d.containerPort);
-
-        const hubPhase = typeof d?.hub?.phase === 'string' ? String(d.hub.phase) : null;
-        const hubMessage = typeof d?.hub?.message === 'string' ? String(d.hub.message) : null;
-        const repoPath = String(d?.repoPath ?? '').trim();
-        const repoBranch = String(d?.repo?.branch ?? '').trim() || null;
-        const repoAttached =
-          Boolean(repoPath) ||
-          Boolean(String(d?.repo?.dest ?? '').trim()) ||
-          Boolean(String(d?.repo?.seededAt ?? '').trim());
-
-        let statusOk = false;
-        let status: any = null;
-        let statusError: string | null = null;
-        const droneId = normalizeDroneIdentity(d?.id);
-        const busyChats = droneId ? busyChatNamesForDrone(d, droneId) : [];
-        const token = typeof d.token === 'string' ? d.token : '';
+            : await resolveHostPort(containerName || String(d.name ?? ''), d.containerPort);
         if (hostPort && token) {
           try {
-            status = await droneStatus(makeClient(hostPort, token));
-            statusOk = true;
-          } catch (e: any) {
-            const firstErr = e?.message ?? String(e);
-            if (runtime !== 'host' && looksLikeUnauthorizedDaemonError(firstErr)) {
-              try {
-                const refreshedToken = droneId ? await refreshRegistryTokenFromContainer({ droneId }) : null;
-                if (refreshedToken && refreshedToken !== token) {
-                  status = await droneStatus(makeClient(hostPort, refreshedToken));
-                  statusOk = true;
-                  statusError = null;
-                  hubLog('warn', 'refreshed stale drone token after unauthorized status', {
-                    droneName: d.name,
-                    hadId: Boolean(droneId),
-                  });
-                } else {
-                  statusError = firstErr;
-                }
-              } catch (e2: any) {
-                statusError = e2?.message ?? String(e2);
-              }
-            } else if (runtime !== 'host') {
-              try {
-                await ensureContainerDroneDaemonSession({
-                  containerName,
-                  containerPort: Number(d?.containerPort ?? 7777),
-                });
-                status = await droneStatus(makeClient(hostPort, token));
-                statusOk = true;
-                statusError = null;
-              } catch (recoveryError: any) {
-                statusError = recoveryError?.message ?? firstErr;
-              }
-            } else {
-              statusError = firstErr;
+            const r: any = await dronePromptGet(makeClient(hostPort, token), promptId);
+            const job = r?.job ?? null;
+            const st = String(job?.state ?? '').trim();
+            if (st === 'done') {
+              nextHub = null;
+              changedForDrone = true;
+            } else if (st === 'failed') {
+              nextHub = { phase: 'error', message: String(job?.error ?? 'Seed failed'), updatedAt: nowIso() };
+              changedForDrone = true;
             }
+          } catch {
+            // ignore; keep seeding
           }
-        } else if (!hostPort) {
-          statusError = runtime === 'host' ? 'no host port mapped' : 'no host port mapped (container likely stopped)';
+        }
+      }
+
+      if (changedForDrone) {
+        if (nextHub == null) {
+          delete d.hub;
         } else {
-          statusError = 'missing token (still starting?)';
+          d.hub = nextHub;
+        }
+        hubPatches.push({ id, hub: nextHub ?? null });
+      }
+    }
+    if (hubPatches.length === 0) return;
+    try {
+      await updateRegistry((regLatest: any) => {
+        for (const p of hubPatches) {
+          const id = normalizeDroneIdentity(p?.id);
+          if (!id) continue;
+          const d = regLatest?.drones?.[id];
+          if (!d) continue;
+          if (p.hub == null) {
+            delete d.hub;
+          } else {
+            d.hub = p.hub;
+          }
+          regLatest.drones = regLatest.drones ?? {};
+          regLatest.drones[id] = d;
+        }
+      });
+    } catch {
+      // ignore
+    }
+  }
+
+  async function autoClearStaleRepoConflictHubErrors(regAny: any): Promise<void> {
+    const autoClearedConflictErrors = new Map<string, 'pull' | 'push'>();
+    for (const [droneIdRaw, d] of Object.entries(regAny.drones ?? {}) as any[]) {
+      const droneId = normalizeDroneIdentity(droneIdRaw);
+      if (!droneId) continue;
+      if (String(d?.hub?.phase ?? '').trim().toLowerCase() !== 'error') continue;
+      const lastPullMode = String(d?.repo?.lastPull?.mode ?? '').trim().toLowerCase();
+      const lastPushMode = String(d?.repo?.lastPush?.mode ?? '').trim().toLowerCase();
+      const conflictMode: 'pull' | 'push' | null =
+        lastPushMode === 'drone-conflicts-ready' ? 'push' : lastPullMode === 'host-conflicts-ready' ? 'pull' : null;
+      if (!conflictMode) continue;
+
+      try {
+        let resolved = false;
+        if (conflictMode === 'pull') {
+          const repoPathRaw = String(d?.repoPath ?? '').trim();
+          if (!repoPathRaw) continue;
+          const repoRoot = await gitTopLevel(repoPathRaw);
+          const changes = await gitRepoChangesSummary(repoRoot);
+          resolved = Number(changes?.counts?.conflicted ?? 0) === 0;
+        } else {
+          const name = String(d?.name ?? '').trim() || droneId;
+          const repoPathInContainer = droneRepoPathInContainer(d);
+          const unmerged = await withLockedDroneContainer(
+            { requestedDroneName: name, droneEntry: d },
+            async ({ containerName }) => {
+              return await droneUnmergedFiles({ containerName, repoPathInContainer });
+            },
+          );
+          resolved = unmerged.length === 0;
         }
 
-        return {
-          id: normalizeDroneIdentity(d?.id) || null,
-          name: d.name,
-          group: d.group ?? null,
-          kind: normalizeDroneEntryKind(d?.kind),
-          visibility: normalizeDroneEntryVisibility(d?.visibility),
-          playbook: playbookMetaFromEntry(d?.playbook),
-          createdAt: d.createdAt,
-          lastActivityAt: activity.lastActivityAt,
-          lastMessageAt: activity.lastMessageAt,
-          lastActivityChat: activity.lastActivityChat,
-          fleetParentId: resolveStableDroneOrPendingIdFromRef(regAny, fleetActorConfig(d).createdBy),
-          fleetAssignedIds: normalizeFleetAssignedRefsForSummary(regAny, d?.id, fleetActorConfig(d).assigned),
-          runtime,
-          repoAttached,
-          repoPath: repoAttached ? repoPath : '',
-          repoBranch,
-          cwd: normalizeDroneCwdForRuntime(d, null),
-          containerPort: d.containerPort,
-          hostPort: hostPort ?? null,
-          statusOk,
-          status,
-          statusError,
-          chats: Object.keys(d.chats ?? {}),
-          busyChats,
-          hubPhase,
-          hubMessage,
-          busy: busyChats.length > 0,
-        };
-      }),
-    );
+        if (resolved) {
+          delete d.hub;
+          d.repo = d.repo ?? {};
+          if (conflictMode === 'pull') d.repo.lastPullError = null;
+          else d.repo.lastPushError = null;
+          autoClearedConflictErrors.set(droneId, conflictMode);
+        }
+      } catch {
+        // ignore; keep current hub error until we can verify repo state
+      }
+    }
+    if (autoClearedConflictErrors.size === 0) return;
+    try {
+      const cleared = Array.from(autoClearedConflictErrors.entries());
+      await updateRegistry((regLatest: any) => {
+        for (const [rawDroneId, conflictMode] of cleared) {
+          const droneId = normalizeDroneIdentity(rawDroneId);
+          if (!droneId) continue;
+          const d = regLatest?.drones?.[droneId];
+          if (!d) continue;
+          if (String(d?.hub?.phase ?? '').trim().toLowerCase() === 'error') delete d.hub;
+          d.repo = d.repo ?? {};
+          if (conflictMode === 'pull' && typeof d.repo.lastPullError === 'string') d.repo.lastPullError = null;
+          if (conflictMode === 'push' && typeof d.repo.lastPushError === 'string') d.repo.lastPushError = null;
+          regLatest.drones = regLatest.drones ?? {};
+          regLatest.drones[droneId] = d;
+        }
+      });
+    } catch {
+      // ignore
+    }
+  }
+
+  async function loadPreparedDroneRegistryForSummary(source: string): Promise<any> {
+    triggerArchiveCleanup(source);
+    const regAny: any = await loadRegistry();
+    enqueueDroneRegistryReconcilers(regAny);
+    await reconcileSeedingPromptCompletion(regAny);
+    await autoClearStaleRepoConflictHubErrors(regAny);
+    return regAny;
+  }
+
+  function buildPendingDroneSummary(regAny: any, p: any): any {
+    const runtime = normalizeDroneRuntime(p?.runtime);
+    const repoAttached = Boolean(String(p?.repoPath ?? '').trim());
+    const phase = String(p?.phase ?? 'starting') as PendingPhase;
+    const seed = p?.seed;
+    const activity = summarizeDroneActivity(p);
+    const hasSeed =
+      seed &&
+      typeof seed === 'object' &&
+      (Boolean((seed as any)?.agent) ||
+        Boolean(String((seed as any)?.prompt ?? '').trim()) ||
+        Boolean(String((seed as any)?.chatName ?? '').trim()) ||
+        Boolean(String((seed as any)?.cwd ?? '').trim()));
+    const message =
+      typeof p?.message === 'string' ? p.message : phase === 'error' ? 'Failed' : hasSeed ? 'Seeding…' : 'Starting…';
+    const err = typeof p?.error === 'string' ? p.error : null;
+    const hubPhase: any = phase === 'error' ? 'error' : phase === 'seeding' ? 'seeding' : 'starting';
+    return {
+      id: normalizeDroneIdentity(p?.id) || null,
+      name: String(p?.name ?? ''),
+      group: typeof p?.group === 'string' && p.group.trim() ? p.group.trim() : null,
+      kind: normalizeDroneEntryKind(p?.kind),
+      visibility: normalizeDroneEntryVisibility(p?.visibility),
+      playbook: playbookMetaFromEntry(p?.playbook),
+      createdAt: String(p?.createdAt ?? nowIso()),
+      lastActivityAt: activity.lastActivityAt,
+      lastMessageAt: activity.lastMessageAt,
+      lastActivityChat: activity.lastActivityChat,
+      fleetParentId: resolveStableDroneOrPendingIdFromRef(regAny, fleetActorConfig(p).createdBy),
+      fleetAssignedIds: normalizeFleetAssignedRefsForSummary(regAny, p?.id, fleetActorConfig(p).assigned),
+      runtime,
+      repoAttached,
+      repoPath: repoAttached ? String(p?.repoPath ?? '') : '',
+      repoBranch: String(p?.repo?.branch ?? '').trim() || null,
+      cwd: normalizeDroneCwdForRuntime(p, null),
+      containerPort: typeof p?.containerPort === 'number' && Number.isFinite(p.containerPort) ? p.containerPort : 7777,
+      hostPort: null,
+      statusOk: false,
+      status: null,
+      statusError: phase === 'error' ? (err ?? message ?? 'failed') : null,
+      chats: [],
+      busyChats: [],
+      hubPhase,
+      hubMessage: phase === 'error' ? (err ?? message ?? null) : message,
+      busy: false,
+    };
+  }
+
+  async function buildRealDroneSummary(regAny: any, d: any): Promise<any> {
+    const runtime = normalizeDroneRuntime(d?.runtime);
+    const activity = summarizeDroneActivity(d);
+    const hubPhase = typeof d?.hub?.phase === 'string' ? String(d.hub.phase) : null;
+    const hubMessage = typeof d?.hub?.message === 'string' ? String(d.hub.message) : null;
+    const repoPath = String(d?.repoPath ?? '').trim();
+    const repoBranch = String(d?.repo?.branch ?? '').trim() || null;
+    const repoAttached =
+      Boolean(repoPath) ||
+      Boolean(String(d?.repo?.dest ?? '').trim()) ||
+      Boolean(String(d?.repo?.seededAt ?? '').trim());
+    const droneId = normalizeDroneIdentity(d?.id);
+    const busyChats = droneId ? busyChatNamesForDrone(d, droneId) : [];
+    const { hostPort, statusOk, status, statusError } = await resolveCachedDroneStatusSummary(d);
+
+    return {
+      id: normalizeDroneIdentity(d?.id) || null,
+      name: d.name,
+      group: d.group ?? null,
+      kind: normalizeDroneEntryKind(d?.kind),
+      visibility: normalizeDroneEntryVisibility(d?.visibility),
+      playbook: playbookMetaFromEntry(d?.playbook),
+      createdAt: d.createdAt,
+      lastActivityAt: activity.lastActivityAt,
+      lastMessageAt: activity.lastMessageAt,
+      lastActivityChat: activity.lastActivityChat,
+      fleetParentId: resolveStableDroneOrPendingIdFromRef(regAny, fleetActorConfig(d).createdBy),
+      fleetAssignedIds: normalizeFleetAssignedRefsForSummary(regAny, d?.id, fleetActorConfig(d).assigned),
+      runtime,
+      repoAttached,
+      repoPath: repoAttached ? repoPath : '',
+      repoBranch,
+      cwd: normalizeDroneCwdForRuntime(d, null),
+      containerPort: d.containerPort,
+      hostPort: hostPort ?? null,
+      statusOk,
+      status,
+      statusError,
+      chats: Object.keys(d.chats ?? {}),
+      busyChats,
+      hubPhase,
+      hubMessage,
+      busy: busyChats.length > 0,
+    };
+  }
+
+  async function buildDroneRegistrySnapshot(source: string): Promise<DroneRegistrySnapshot> {
+    const regAny = await loadPreparedDroneRegistryForSummary(source);
+    const pendingSummaries = Object.values(regAny?.pending ?? {}).map((p) => buildPendingDroneSummary(regAny, p));
+    const realSummaries = await Promise.all(Object.values(regAny.drones ?? {}).map((d) => buildRealDroneSummary(regAny, d)));
 
     const byId = new Map<string, any>();
     for (const p of pendingSummaries) {
@@ -11714,6 +11934,7 @@ export async function startDroneHubApiServer(opts: {
   let droneRegistrySseLastById = new Map<string, string>();
   let droneRegistrySseLastSnapshot: { ok: true; drones: any[] } | null = null;
   let droneRegistrySseRefreshTimer: ReturnType<typeof setInterval> | null = null;
+  let droneRegistrySseRefreshTimeout: ReturnType<typeof setTimeout> | null = null;
   let droneRegistrySseKeepAliveTimer: ReturnType<typeof setInterval> | null = null;
   let droneRegistrySseBusy = false;
 
@@ -11733,6 +11954,10 @@ export async function startDroneHubApiServer(opts: {
       clearInterval(droneRegistrySseRefreshTimer);
       droneRegistrySseRefreshTimer = null;
     }
+    if (droneRegistrySseRefreshTimeout) {
+      clearTimeout(droneRegistrySseRefreshTimeout);
+      droneRegistrySseRefreshTimeout = null;
+    }
     if (droneRegistrySseKeepAliveTimer) {
       clearInterval(droneRegistrySseKeepAliveTimer);
       droneRegistrySseKeepAliveTimer = null;
@@ -11744,7 +11969,7 @@ export async function startDroneHubApiServer(opts: {
     if (droneRegistrySseBusy) return droneRegistrySseLastSnapshot;
     droneRegistrySseBusy = true;
     try {
-      const snapshot = await buildDroneRegistryEventSnapshot();
+      const snapshot = await buildDroneRegistrySnapshot('api:drones-events');
       const nextById = new Map(
         snapshot.drones
           .map((drone) => [String(drone?.id ?? '').trim(), JSON.stringify(drone)] as const)
@@ -11789,11 +12014,21 @@ export async function startDroneHubApiServer(opts: {
     }
   }
 
+  function scheduleDroneRegistryBroadcasterRefresh(delayMs = 150): void {
+    if (droneRegistrySseClients.size === 0) return;
+    if (droneRegistrySseRefreshTimeout) return;
+    droneRegistrySseRefreshTimeout = setTimeout(() => {
+      droneRegistrySseRefreshTimeout = null;
+      void refreshDroneRegistryBroadcasterSnapshot();
+    }, Math.max(0, delayMs));
+    (droneRegistrySseRefreshTimeout as any).unref?.();
+  }
+
   function startDroneRegistryBroadcaster(): void {
     if (!droneRegistrySseRefreshTimer) {
       droneRegistrySseRefreshTimer = setInterval(() => {
         void refreshDroneRegistryBroadcasterSnapshot();
-      }, 2000);
+      }, 15_000);
       (droneRegistrySseRefreshTimer as any).unref?.();
     }
     if (!droneRegistrySseKeepAliveTimer) {
@@ -11810,6 +12045,10 @@ export async function startDroneHubApiServer(opts: {
       (droneRegistrySseKeepAliveTimer as any).unref?.();
     }
   }
+
+  notifyDroneRegistryWrite = () => {
+    scheduleDroneRegistryBroadcasterRefresh();
+  };
 
   const server = http.createServer(async (req, res) => {
     try {
@@ -15447,6 +15686,7 @@ export async function startDroneHubApiServer(opts: {
         writeHubSseEvent(res, 'connected', { ok: true, at: nowIso() });
         if (droneRegistrySseLastSnapshot) {
           writeHubSseEvent(res, 'snapshot', droneRegistrySseLastSnapshot);
+          scheduleDroneRegistryBroadcasterRefresh(0);
         } else {
           void refreshDroneRegistryBroadcasterSnapshot({ broadcastSnapshot: true });
         }
@@ -15455,352 +15695,7 @@ export async function startDroneHubApiServer(opts: {
 
       // GET /api/drones
       if (method === 'GET' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'drones') {
-        triggerArchiveCleanup('api:drones');
-        const regAny: any = await loadRegistry();
-
-        // Best-effort: if the Hub restarted while drones were pending, resume provisioning.
-        // This endpoint is polled frequently, so it serves as a natural "self-heal" hook.
-        enqueueProvisioningForAllPending(regAny);
-
-        // Best-effort: keep the "typing" badge accurate even when a drone isn't selected.
-        // We don't await this work; it updates registry in the background and will be reflected
-        // in the next polls.
-        try {
-          for (const [droneId, d] of Object.entries(regAny.drones ?? {})) {
-            const id = normalizeDroneIdentity(droneId);
-            if (!id) continue;
-            if (!d || typeof d !== 'object') continue;
-            if (!(d as any)?.chats || typeof (d as any).chats !== 'object') continue;
-            for (const [chatName, entry] of Object.entries((d as any).chats)) {
-              if (chatHasReconcilablePendingPrompts(entry)) enqueueReconcile(id, String(chatName));
-            }
-          }
-        } catch {
-          // ignore
-        }
-
-        // Reconcile seeding prompt completion (restart-resumable).
-        // If a seed prompt finished in the drone daemon, clear hub.seeding (or surface error).
-        const hubPatches: Array<{ id: string; hub: any | null }> = [];
-        for (const [droneId, d] of Object.entries(regAny.drones ?? {}) as any[]) {
-          const hub = d?.hub;
-          if (!hub || String(hub?.phase ?? '') !== 'seeding') continue;
-          const id = normalizeDroneIdentity(droneId);
-          if (!id) continue;
-          let changedForDrone = false;
-          let nextHub: any = hub;
-          let promptId = String(nextHub?.promptId ?? '').trim();
-
-          if (!promptId) {
-            const chats = d?.chats && typeof d.chats === 'object' ? Object.values(d.chats) : [];
-            for (const entry of chats as any[]) {
-              const pending = Array.isArray(entry?.pendingPrompts) ? entry.pendingPrompts : [];
-              const candidate = pending.find((p: any) => {
-                const id = String(p?.id ?? '').trim();
-                const st = String(p?.state ?? '').trim();
-                return Boolean(id) && st !== 'failed';
-              });
-              const id = String(candidate?.id ?? '').trim();
-              if (!id) continue;
-              promptId = id;
-              nextHub = { ...nextHub, promptId };
-              changedForDrone = true;
-              break;
-            }
-          }
-
-          if (nextHub && promptId) {
-            const token = typeof d.token === 'string' ? d.token : '';
-            const containerName = String(d?.containerName ?? d?.name ?? '').trim();
-            const hostPort =
-              typeof d.hostPort === 'number' && Number.isFinite(d.hostPort)
-                ? d.hostPort
-                : await resolveHostPort(containerName || String(d.name ?? ''), d.containerPort);
-            if (hostPort && token) {
-              try {
-                // eslint-disable-next-line no-await-in-loop
-                const r: any = await dronePromptGet(makeClient(hostPort, token), promptId);
-                const job = r?.job ?? null;
-                const st = String(job?.state ?? '').trim();
-                if (st === 'done') {
-                  nextHub = null;
-                  changedForDrone = true;
-                } else if (st === 'failed') {
-                  nextHub = { phase: 'error', message: String(job?.error ?? 'Seed failed'), updatedAt: nowIso() };
-                  changedForDrone = true;
-                }
-              } catch {
-                // ignore; keep seeding
-              }
-            }
-          }
-
-          if (changedForDrone) {
-            if (nextHub == null) {
-              delete d.hub;
-            } else {
-              d.hub = nextHub;
-            }
-            hubPatches.push({ id, hub: nextHub ?? null });
-          }
-        }
-        if (hubPatches.length > 0) {
-          // NOTE: Apply patches under a lock to avoid clobbering concurrent registry writers.
-          try {
-            await updateRegistry((regLatest: any) => {
-              for (const p of hubPatches) {
-                const id = normalizeDroneIdentity(p?.id);
-                if (!id) continue;
-                const d = regLatest?.drones?.[id];
-                if (!d) continue;
-                if (p.hub == null) {
-                  delete d.hub;
-                } else {
-                  d.hub = p.hub;
-                }
-                regLatest.drones = regLatest.drones ?? {};
-                regLatest.drones[id] = d;
-              }
-            });
-          } catch {
-            // ignore
-          }
-        }
-
-        // Auto-clear stale repo conflict hub errors once no merge conflicts remain.
-        // Pull conflict state is resolved in the host repo; push conflict state is resolved in the drone repo.
-        const autoClearedConflictErrors = new Map<string, 'pull' | 'push'>();
-        for (const [droneIdRaw, d] of Object.entries(regAny.drones ?? {}) as any[]) {
-          const droneId = normalizeDroneIdentity(droneIdRaw);
-          if (!droneId) continue;
-          if (String(d?.hub?.phase ?? '').trim().toLowerCase() !== 'error') continue;
-          const lastPullMode = String(d?.repo?.lastPull?.mode ?? '').trim().toLowerCase();
-          const lastPushMode = String(d?.repo?.lastPush?.mode ?? '').trim().toLowerCase();
-          const conflictMode: 'pull' | 'push' | null =
-            lastPushMode === 'drone-conflicts-ready' ? 'push' : lastPullMode === 'host-conflicts-ready' ? 'pull' : null;
-          if (!conflictMode) continue;
-
-          try {
-            let resolved = false;
-            if (conflictMode === 'pull') {
-              const repoPathRaw = String(d?.repoPath ?? '').trim();
-              if (!repoPathRaw) continue;
-              // eslint-disable-next-line no-await-in-loop
-              const repoRoot = await gitTopLevel(repoPathRaw);
-              // eslint-disable-next-line no-await-in-loop
-              const changes = await gitRepoChangesSummary(repoRoot);
-              resolved = Number(changes?.counts?.conflicted ?? 0) === 0;
-            } else {
-              const name = String(d?.name ?? '').trim() || droneId;
-              const repoPathInContainer = droneRepoPathInContainer(d);
-              const unmerged = await withLockedDroneContainer(
-                { requestedDroneName: name, droneEntry: d },
-                async ({ containerName }) => {
-                  return await droneUnmergedFiles({ containerName, repoPathInContainer });
-                },
-              );
-              resolved = unmerged.length === 0;
-            }
-
-            if (resolved) {
-              delete d.hub;
-              d.repo = d.repo ?? {};
-              if (conflictMode === 'pull') d.repo.lastPullError = null;
-              else d.repo.lastPushError = null;
-              autoClearedConflictErrors.set(droneId, conflictMode);
-            }
-          } catch {
-            // ignore; keep current hub error until we can verify repo state
-          }
-        }
-        if (autoClearedConflictErrors.size > 0) {
-          try {
-            const cleared = Array.from(autoClearedConflictErrors.entries());
-            await updateRegistry((regLatest: any) => {
-              for (const [rawDroneId, conflictMode] of cleared) {
-                const droneId = normalizeDroneIdentity(rawDroneId);
-                if (!droneId) continue;
-                const d = regLatest?.drones?.[droneId];
-                if (!d) continue;
-                if (String(d?.hub?.phase ?? '').trim().toLowerCase() === 'error') delete d.hub;
-                d.repo = d.repo ?? {};
-                if (conflictMode === 'pull' && typeof d.repo.lastPullError === 'string') d.repo.lastPullError = null;
-                if (conflictMode === 'push' && typeof d.repo.lastPushError === 'string') d.repo.lastPushError = null;
-                regLatest.drones = regLatest.drones ?? {};
-                regLatest.drones[droneId] = d;
-              }
-            });
-          } catch {
-            // ignore
-          }
-        }
-        const pendingList: any[] = Object.values(regAny?.pending ?? {});
-
-        const pendingSummaries = pendingList.map((p) => {
-          const runtime = normalizeDroneRuntime(p?.runtime);
-          const repoAttached = Boolean(String(p?.repoPath ?? '').trim());
-          const phase = String(p?.phase ?? 'starting') as PendingPhase;
-          const seed = p?.seed;
-          const activity = summarizeDroneActivity(p);
-          const hasSeed =
-            seed &&
-            typeof seed === 'object' &&
-            (Boolean((seed as any)?.agent) ||
-              Boolean(String((seed as any)?.prompt ?? '').trim()) ||
-              Boolean(String((seed as any)?.chatName ?? '').trim()) ||
-              Boolean(String((seed as any)?.cwd ?? '').trim()));
-          const message =
-            typeof p?.message === 'string' ? p.message : phase === 'error' ? 'Failed' : hasSeed ? 'Seeding…' : 'Starting…';
-          const err = typeof p?.error === 'string' ? p.error : null;
-          // Important: pending entries with a seed prompt are not necessarily *currently* "seeding".
-          // They can still be creating the container, so reflect the actual phase to avoid confusion.
-          const hubPhase: any = phase === 'error' ? 'error' : phase === 'seeding' ? 'seeding' : 'starting';
-          return {
-            id: normalizeDroneIdentity(p?.id) || null,
-            name: String(p?.name ?? ''),
-            group: typeof p?.group === 'string' && p.group.trim() ? p.group.trim() : null,
-            kind: normalizeDroneEntryKind(p?.kind),
-            visibility: normalizeDroneEntryVisibility(p?.visibility),
-            playbook: playbookMetaFromEntry(p?.playbook),
-            createdAt: String(p?.createdAt ?? nowIso()),
-            lastActivityAt: activity.lastActivityAt,
-            lastMessageAt: activity.lastMessageAt,
-            lastActivityChat: activity.lastActivityChat,
-            fleetParentId: resolveStableDroneOrPendingIdFromRef(regAny, fleetActorConfig(p).createdBy),
-            fleetAssignedIds: normalizeFleetAssignedRefsForSummary(regAny, p?.id, fleetActorConfig(p).assigned),
-            runtime,
-            repoAttached,
-            repoPath: repoAttached ? String(p?.repoPath ?? '') : '',
-            repoBranch: String(p?.repo?.branch ?? '').trim() || null,
-            cwd: normalizeDroneCwdForRuntime(p, null),
-            containerPort: typeof p?.containerPort === 'number' && Number.isFinite(p.containerPort) ? p.containerPort : 7777,
-            hostPort: null,
-            statusOk: false,
-            status: null,
-            statusError: phase === 'error' ? (err ?? message ?? 'failed') : null,
-            chats: [],
-            busyChats: [],
-            hubPhase,
-            hubMessage: phase === 'error' ? (err ?? message ?? null) : message,
-            busy: false,
-          };
-        });
-
-        const realSummaries = await Promise.all(
-          Object.values(regAny.drones ?? {}).map(async (d: any) => {
-            const runtime = normalizeDroneRuntime(d?.runtime);
-            const containerName = String(d?.containerName ?? d?.name ?? '').trim();
-            const activity = summarizeDroneActivity(d);
-            const hostPort =
-              typeof d.hostPort === 'number' && Number.isFinite(d.hostPort)
-                ? d.hostPort
-                : runtime === 'host'
-                  ? null
-                  : await resolveHostPort(containerName || String(d.name ?? ''), d.containerPort);
-
-            const hubPhase = typeof d?.hub?.phase === 'string' ? String(d.hub.phase) : null;
-            const hubMessage = typeof d?.hub?.message === 'string' ? String(d.hub.message) : null;
-            const repoPath = String(d?.repoPath ?? '').trim();
-            const repoBranch = String(d?.repo?.branch ?? '').trim() || null;
-            const repoAttached =
-              Boolean(repoPath) ||
-              Boolean(String(d?.repo?.dest ?? '').trim()) ||
-              Boolean(String(d?.repo?.seededAt ?? '').trim());
-
-            let statusOk = false;
-            let status: any = null;
-            let statusError: string | null = null;
-            const droneId = normalizeDroneIdentity(d?.id);
-            const busyChats = droneId ? busyChatNamesForDrone(d, droneId) : [];
-            const token = typeof d.token === 'string' ? d.token : '';
-            if (hostPort && token) {
-              try {
-                status = await droneStatus(makeClient(hostPort, token));
-                statusOk = true;
-              } catch (e: any) {
-                const firstErr = e?.message ?? String(e);
-                if (runtime !== 'host' && looksLikeUnauthorizedDaemonError(firstErr)) {
-                  try {
-                    const refreshedToken = droneId ? await refreshRegistryTokenFromContainer({ droneId }) : null;
-                    if (refreshedToken && refreshedToken !== token) {
-                      status = await droneStatus(makeClient(hostPort, refreshedToken));
-                      statusOk = true;
-                      statusError = null;
-                      hubLog('warn', 'refreshed stale drone token after unauthorized status', {
-                        droneName: d.name,
-                        hadId: Boolean(droneId),
-                      });
-                    } else {
-                      statusError = firstErr;
-                    }
-                  } catch (e2: any) {
-                    statusError = e2?.message ?? String(e2);
-                  }
-                } else if (runtime !== 'host') {
-                  try {
-                    await ensureContainerDroneDaemonSession({
-                      containerName,
-                      containerPort: Number(d?.containerPort ?? 7777),
-                    });
-                    status = await droneStatus(makeClient(hostPort, token));
-                    statusOk = true;
-                    statusError = null;
-                  } catch (recoveryError: any) {
-                    statusError = recoveryError?.message ?? firstErr;
-                  }
-                } else {
-                  statusError = firstErr;
-                }
-              }
-            } else if (!hostPort) {
-              statusError = runtime === 'host' ? 'no host port mapped' : 'no host port mapped (container likely stopped)';
-            } else {
-              statusError = 'missing token (still starting?)';
-            }
-
-            return {
-              id: normalizeDroneIdentity(d?.id) || null,
-              name: d.name,
-              group: d.group ?? null,
-              kind: normalizeDroneEntryKind(d?.kind),
-              visibility: normalizeDroneEntryVisibility(d?.visibility),
-              playbook: playbookMetaFromEntry(d?.playbook),
-              createdAt: d.createdAt,
-              lastActivityAt: activity.lastActivityAt,
-              lastMessageAt: activity.lastMessageAt,
-              lastActivityChat: activity.lastActivityChat,
-              fleetParentId: resolveStableDroneOrPendingIdFromRef(regAny, fleetActorConfig(d).createdBy),
-              fleetAssignedIds: normalizeFleetAssignedRefsForSummary(regAny, d?.id, fleetActorConfig(d).assigned),
-              runtime,
-              repoAttached,
-              repoPath: repoAttached ? repoPath : '',
-              repoBranch,
-              cwd: normalizeDroneCwdForRuntime(d, null),
-              containerPort: d.containerPort,
-              hostPort: hostPort ?? null,
-              statusOk,
-              status,
-              statusError,
-              chats: Object.keys(d.chats ?? {}),
-              busyChats,
-              hubPhase,
-              hubMessage,
-              busy: busyChats.length > 0,
-            };
-          })
-        );
-
-        // Deduplicate by id (prefer real drone over pending).
-        const byId = new Map<string, any>();
-        for (const p of pendingSummaries) {
-          const id = String(p?.id ?? '').trim();
-          if (id) byId.set(id, p);
-        }
-        for (const d of realSummaries) {
-          const id = String(d?.id ?? '').trim();
-          if (id) byId.set(id, d);
-        }
-        const drones = Array.from(byId.values()).filter((x) => x?.id && x?.name);
+        const { drones } = await buildDroneRegistrySnapshot('api:drones');
 
         json(res, 200, { ok: true, drones });
         return;

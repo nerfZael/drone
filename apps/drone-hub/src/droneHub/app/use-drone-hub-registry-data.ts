@@ -311,6 +311,15 @@ export function useDroneHubRegistryData({
     if (hiddenNames.length === 0) return polledDrones;
     return polledDrones.filter((d) => !optimisticallyDeletedDrones[d.id]);
   }, [optimisticallyDeletedDrones, polledDrones]);
+  const droneById = React.useMemo(() => {
+    const out: Record<string, DroneSummary> = {};
+    for (const drone of drones) {
+      const id = String(drone?.id ?? '').trim();
+      if (!id) continue;
+      out[id] = drone;
+    }
+    return out;
+  }, [drones]);
 
   React.useEffect(() => {
     if (Object.keys(optimisticallyDeletedDrones).length === 0) return;
@@ -382,6 +391,11 @@ export function useDroneHubRegistryData({
     if (!targetRepo) return drones;
     return drones.filter((d) => String(d?.repoPath ?? '').trim() === targetRepo);
   }, [activeRepoPath, drones]);
+  const dronesFilteredByRepoIdSet = React.useMemo(() => {
+    const out = new Set<string>();
+    for (const drone of dronesFilteredByRepo) out.add(drone.id);
+    return out;
+  }, [dronesFilteredByRepo]);
 
   const sidebarDronesBase = React.useMemo(
     () => drones.filter((drone) => !isHiddenDrone(drone)),
@@ -433,6 +447,7 @@ export function useDroneHubRegistryData({
   return {
     polledDrones,
     drones,
+    droneById,
     dronesError: dronesErrorUi,
     dronesLoading,
     repos,
@@ -442,6 +457,7 @@ export function useDroneHubRegistryData({
     registeredRepoPathSet,
     registryGroupNames,
     dronesFilteredByRepo,
+    dronesFilteredByRepoIdSet,
     sidebarDronesFilteredByRepoBase,
     droneCountByRepoPath,
     groups,

@@ -26,7 +26,7 @@ type UseChatRuntimeOrchestrationArgs = {
   chatInfo: ChatInfo | null;
   currentDrone: DroneSummary | null;
   currentDroneLabel: string;
-  drones: DroneSummary[];
+  droneById: Record<string, DroneSummary>;
   outputView: 'screen' | 'log';
   optimisticPendingPrompts: PendingPrompt[];
   queuedPromptsByDroneChat: Record<string, QueuedPrompt[]>;
@@ -70,7 +70,7 @@ export function useChatRuntimeOrchestration({
   chatInfo,
   currentDrone,
   currentDroneLabel,
-  drones,
+  droneById,
   outputView,
   optimisticPendingPrompts,
   queuedPromptsByDroneChat,
@@ -193,10 +193,7 @@ export function useChatRuntimeOrchestration({
     setStopResponseError(null);
   }, [selectedDrone, selectedChat, setOptimisticPendingPrompts]);
 
-  const selectedDroneSummary = React.useMemo(
-    () => (selectedDrone ? drones.find((x) => x.id === selectedDrone) ?? null : null),
-    [drones, selectedDrone],
-  );
+  const selectedDroneSummary = selectedDrone ? droneById[selectedDrone] ?? null : null;
   const hasSelectedDroneSummary = selectedDroneSummary !== null;
   const selectedDroneHubPhase = selectedDroneSummary?.hubPhase ?? null;
   const startupSeedForSelectedDrone = React.useMemo(
@@ -408,7 +405,7 @@ export function useChatRuntimeOrchestration({
     for (const key of keys) {
       const parsed = parseDroneChatQueueKey(key);
       if (!parsed) continue;
-      const drone = drones.find((d) => d.id === parsed.droneId) ?? null;
+      const drone = droneById[parsed.droneId] ?? null;
       if (!drone) continue;
       if (isDroneStartingOrSeeding(drone.hubPhase) || drone.hubPhase === 'error') continue;
       if (flushingQueuedKeysRef.current.has(key)) continue;
@@ -460,7 +457,7 @@ export function useChatRuntimeOrchestration({
     addOptimisticPendingPrompt,
     bumpCliTyping,
     chatUiMode,
-    drones,
+    droneById,
     flushingQueuedKeysRef,
     patchQueuedPrompt,
     queuedPromptsByDroneChat,
@@ -711,7 +708,7 @@ export function useChatRuntimeOrchestration({
       if (!selectedDrone || !selectedChat || busy) return;
       busy = true;
       let keepLoading = false;
-      const d = drones.find((x) => x.id === selectedDrone) ?? null;
+      const d = selectedDrone ? droneById[selectedDrone] ?? null : null;
       if (isDroneStartingOrSeeding(d?.hubPhase)) {
         if (mounted) resetSessionOutputState();
         busy = false;
@@ -806,7 +803,7 @@ export function useChatRuntimeOrchestration({
       clearTimer();
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [chatUiMode, drones, outputView, resetSessionOutputState, selectedChat, selectedDrone, setLoadingSession, setSessionError, setSessionText, bumpCliTyping]);
+  }, [chatUiMode, droneById, outputView, resetSessionOutputState, selectedChat, selectedDrone, setLoadingSession, setSessionError, setSessionText, bumpCliTyping]);
 
   return {
     cancelPendingPromptErrorById,

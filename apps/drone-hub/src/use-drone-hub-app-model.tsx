@@ -250,6 +250,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const {
     polledDrones,
     drones,
+    droneById,
     dronesError,
     dronesLoading,
     repos,
@@ -259,6 +260,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     registeredRepoPathSet,
     registryGroupNames,
     dronesFilteredByRepo,
+    dronesFilteredByRepoIdSet,
     droneCountByRepoPath,
     groups,
   } = useDroneHubRegistryData({
@@ -400,15 +402,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     }
     return out;
   }, [drones, uiDroneName]);
-  const droneById = React.useMemo(() => {
-    const out: Record<string, DroneSummary> = {};
-    for (const drone of drones) {
-      const id = String(drone?.id ?? '').trim();
-      if (!id) continue;
-      out[id] = drone;
-    }
-    return out;
-  }, [drones]);
   const droneRepoById = React.useMemo(() => {
     const out: Record<string, string> = {};
     for (const drone of drones) {
@@ -638,7 +631,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   } = useChatConfigState({
     selectedDrone,
     selectedChat,
-    drones,
+    droneById,
     requestJson,
   });
 
@@ -1213,8 +1206,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     kanbanBoardOpen,
     playbookRunsOpen,
     draftChat,
-    drones,
-    dronesFilteredByRepo,
+    droneById,
+    dronesFilteredByRepoIdSet,
     visibleDronesFilteredByRepo: sidebarDronesFilteredByRepo,
     startupSeedByDrone,
     selectionAnchorRef,
@@ -1325,7 +1318,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     void cloneDrone(source);
   }, [cloneDrone]);
 
-  const currentDrone = selectedDrone ? drones.find((d) => d.id === selectedDrone) ?? null : null;
+  const currentDrone = selectedDrone ? droneById[selectedDrone] ?? null : null;
   const currentDroneLabel = currentDrone ? uiDroneName(currentDrone.name) : '';
   const [droneDropActionModal, setDroneDropActionModal] = React.useState<DroneDropActionModalState | null>(null);
   const openDroneDropActionModal = React.useCallback(
@@ -1438,7 +1431,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     chatInfo,
     currentDrone,
     currentDroneLabel,
-    drones,
+    droneById,
     outputView,
     optimisticPendingPrompts,
     queuedPromptsByDroneChat,
