@@ -11,6 +11,7 @@ describe('drone hub ui store migration', () => {
     const migrated = migrateDroneHubUiPersistedState(
       {
         sidebarGroupingMode: 'repos',
+        sidebarDockSide: 'right',
         autoDelete: true,
         showCanvasLastMessagePreviews: true,
         seenModelIds: ['gpt-5.4', 'o3'],
@@ -33,6 +34,7 @@ describe('drone hub ui store migration', () => {
 
     expect(migrated).toMatchObject({
       sidebarGroupingMode: 'repos',
+      sidebarDockSide: 'right',
       autoDelete: true,
       showCanvasLastMessagePreviews: true,
       seenModelIds: ['gpt-5.4', 'o3'],
@@ -54,6 +56,12 @@ describe('drone hub ui store migration', () => {
   test('returns an empty object for invalid persisted payloads', () => {
     expect(migrateDroneHubUiPersistedState(null, 5)).toEqual({});
     expect(migrateDroneHubUiPersistedState('invalid', 5)).toEqual({});
+  });
+
+  test('normalizes invalid persisted sidebar dock sides to left', () => {
+    expect(migrateDroneHubUiPersistedState({ sidebarDockSide: 'floating' }, 13)).toMatchObject({
+      sidebarDockSide: 'left',
+    });
   });
 
   test('migrates legacy global spawn defaults into the non-repo bucket', () => {

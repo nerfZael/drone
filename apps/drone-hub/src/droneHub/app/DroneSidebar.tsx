@@ -110,6 +110,11 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return target.isContentEditable || tag === 'input' || tag === 'textarea' || tag === 'select';
 }
 
+function isHeaderActionTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return Boolean(target.closest('button,a,input,textarea,select,[role="button"],[role="menuitem"]'));
+}
+
 type SidebarGroupSectionProps = {
   groupRef: SidebarDragGroupRef;
   groupLabel: string;
@@ -891,6 +896,7 @@ export function DroneSidebar({
     sidebarReposCollapsed,
     sidebarAutoMinimize,
     autoDelete,
+    sidebarDockSide,
     sidebarGroupOrder,
     sidebarRepoScopedGroupByPath,
     sidebarDroneOrderByGroup,
@@ -902,6 +908,7 @@ export function DroneSidebar({
     setViewMode,
     setSidebarGroupingMode,
     setSidebarDensityMode,
+    setSidebarDockSide,
     setCollapsedGroups,
     setSidebarGroupOrder,
     setSidebarRepoScopedGroupByPath,
@@ -923,10 +930,13 @@ export function DroneSidebar({
   const expandTimerRef = React.useRef<number | null>(null);
   const sidebarDndIdleTimerRef = React.useRef<number | null>(null);
   const lastAutoCollapsedAtRef = React.useRef<number>(0);
+  const sidebarDockDragStartXRef = React.useRef<number | null>(null);
   const [headerActionsMenuOpen, setHeaderActionsMenuOpen] = React.useState(false);
   const [footerOptionsMenuOpen, setFooterOptionsMenuOpen] = React.useState(false);
   const [sidebarInteractionDndEnabled, setSidebarInteractionDndEnabled] = React.useState(false);
   const sidebarDndEnabled = sidebarInteractionDndEnabled || Boolean(activeDrag);
+  const [sidebarDockDragActive, setSidebarDockDragActive] = React.useState(false);
+  const [sidebarDockDragPreviewSide, setSidebarDockDragPreviewSide] = React.useState<'left' | 'right' | null>(null);
   const hiddenSidebarGroupTokenSet = React.useMemo(() => new Set(hiddenSidebarGroups), [hiddenSidebarGroups]);
   const isRepoGroupingMode = sidebarGroupingMode === 'repos';
   const repoScopedGroupPathsByRepoGroup = React.useMemo(
@@ -1372,6 +1382,50 @@ export function DroneSidebar({
     },
     [setSidebarDensityMode],
   );
+  const toggleSidebarDockSide = React.useCallback(() => {
+    setSidebarDockSide((current) => (current === 'right' ? 'left' : 'right'));
+  }, [setSidebarDockSide]);
+  const resolveSidebarDockSideFromPointerX = React.useCallback((clientX: number): 'left' | 'right' => {
+    if (typeof window === 'undefined') return sidebarDockSide;
+    return clientX > window.innerWidth / 2 ? 'right' : 'left';
+  }, [sidebarDockSide]);
+  const onSidebarDockHeaderPointerDown = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (isHeaderActionTarget(event.target)) return;
+    sidebarDockDragStartXRef.current = event.clientX;
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }, []);
+  const onSidebarDockHeaderPointerMove = React.useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const startX = sidebarDockDragStartXRef.current;
+      if (startX == null) return;
+      if (!sidebarDockDragActive && Math.abs(event.clientX - startX) < 8) return;
+      setSidebarDockDragActive(true);
+      setSidebarDockDragPreviewSide(resolveSidebarDockSideFromPointerX(event.clientX));
+    },
+    [resolveSidebarDockSideFromPointerX, sidebarDockDragActive],
+  );
+  const onSidebarDockHeaderPointerUp = React.useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (sidebarDockDragActive) {
+        setSidebarDockSide(resolveSidebarDockSideFromPointerX(event.clientX));
+      }
+      sidebarDockDragStartXRef.current = null;
+      setSidebarDockDragActive(false);
+      setSidebarDockDragPreviewSide(null);
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+    },
+    [resolveSidebarDockSideFromPointerX, setSidebarDockSide, sidebarDockDragActive],
+  );
+  const onSidebarDockHeaderPointerCancel = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    sidebarDockDragStartXRef.current = null;
+    setSidebarDockDragActive(false);
+    setSidebarDockDragPreviewSide(null);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }, []);
 
   React.useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1418,12 +1472,29 @@ export function DroneSidebar({
     startRenameFolder,
     visibleSidebarFolderPathSet,
   ]);
+  const sidebarBorderClass = sidebarDockSide === 'right' ? 'border-l' : 'border-r';
+  const collapsedRailBorderClass = sidebarDockSide === 'right' ? 'border-l' : 'border-r';
+  const sidebarDockTargetLabel = sidebarDockSide === 'right' ? 'left' : 'right';
+  const sidebarDockActionLabel = `Move sidebar to ${sidebarDockTargetLabel}`;
+  const sidebarHeaderTitle = `Drag header to dock sidebar left or right.`;
+  const sidebarDirectionalIconClass = sidebarDockSide === 'right' ? 'rotate-180' : '';
+  const sidebarDockPreviewSide = sidebarDockDragPreviewSide ?? sidebarDockSide;
 
   return (
     <>
+      {sidebarDockDragActive ? (
+        <div className="pointer-events-none fixed inset-0 z-[10000]" aria-hidden="true">
+          <div
+            className={`absolute top-0 h-full w-[280px] border bg-[rgba(148,163,184,0.1)] border-[rgba(148,163,184,0.32)] shadow-[inset_0_0_0_1px_rgba(255,255,255,.025)] ${
+              sidebarDockPreviewSide === 'right' ? 'right-0' : 'left-0'
+            }`}
+          />
+        </div>
+      ) : null}
       <aside
         data-drone-sidebar-root="true"
-        className="bg-[var(--panel-alt)] border-r border-[var(--border)] flex flex-col min-h-0 relative dh-dot-grid flex-shrink-0 overflow-hidden transition-[width] duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)] [will-change:width]"
+        data-sidebar-dock-side={sidebarDockSide}
+        className={`bg-[var(--panel-alt)] ${sidebarBorderClass} border-[var(--border)] flex flex-col min-h-0 relative dh-dot-grid flex-shrink-0 overflow-hidden transition-[width] duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)] [will-change:width]`}
         style={{ width: sidebarCollapsed ? 0 : SIDEBAR_EXPANDED_WIDTH_PX }}
         onPointerEnter={onSidebarPointerEnter}
         onPointerLeave={onSidebarPointerLeave}
@@ -1432,7 +1503,16 @@ export function DroneSidebar({
         onBlurCapture={onSidebarBlurCapture}
         onWheel={onSidebarWheel}
       >
-        <div className="flex h-[52px] flex-shrink-0 items-center px-3 border-b border-[var(--border)] relative">
+        <div
+          className={`flex h-[52px] flex-shrink-0 items-center px-3 border-b border-[var(--border)] relative select-none touch-none ${
+            sidebarDockDragActive ? 'cursor-grabbing' : 'cursor-grab'
+          }`}
+          title={sidebarHeaderTitle}
+          onPointerDown={onSidebarDockHeaderPointerDown}
+          onPointerMove={onSidebarDockHeaderPointerMove}
+          onPointerUp={onSidebarDockHeaderPointerUp}
+          onPointerCancel={onSidebarDockHeaderPointerCancel}
+        >
           <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-[var(--accent)] via-[var(--accent-muted)] to-transparent opacity-40" />
           <div className="flex w-full items-center justify-between gap-2">
             <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -1928,7 +2008,7 @@ export function DroneSidebar({
                 title="Collapse sidebar"
                 ariaLabel="Collapse sidebar"
               >
-                <IconSidebarCollapse />
+                <IconSidebarCollapse className={sidebarDirectionalIconClass} />
               </SidebarIconButton>
               {footerOptionsMenuOpen ? (
                 <div className={`absolute right-0 bottom-full mb-2 w-[240px] z-50 ${dropdownPanelBaseClass}`} role="menu">
@@ -1950,6 +2030,18 @@ export function DroneSidebar({
                     >
                       <span>{viewMode === 'grouped' ? 'Switch to flat list' : 'Switch to grouped folders'}</span>
                       {viewMode === 'flat' ? <IconList className="opacity-80 text-[var(--accent)]" /> : <IconTreeView className="opacity-65" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFooterOptionsMenuOpen(false);
+                        toggleSidebarDockSide();
+                      }}
+                      className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
+                      role="menuitem"
+                    >
+                      <span>{sidebarDockActionLabel}</span>
+                      <IconSidebarExpand className={`opacity-65 ${sidebarDockSide === 'right' ? 'rotate-180' : ''}`} />
                     </button>
                     <div className="my-1 border-t border-[var(--border-subtle)]" />
                     <button
@@ -2055,7 +2147,8 @@ export function DroneSidebar({
 
       <div
         data-drone-sidebar-root="true"
-        className={`flex-shrink-0 bg-[var(--panel-alt)] border-r flex flex-col items-center pt-3 gap-2 overflow-hidden transition-[width,opacity,border-color] duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
+        data-sidebar-dock-side={sidebarDockSide}
+        className={`flex-shrink-0 bg-[var(--panel-alt)] ${collapsedRailBorderClass} flex flex-col items-center pt-3 gap-2 overflow-hidden transition-[width,opacity,border-color] duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
           sidebarCollapsed
             ? 'opacity-100 border-[var(--border)]'
             : 'opacity-0 border-transparent pointer-events-none'
@@ -2073,7 +2166,7 @@ export function DroneSidebar({
           disabled={!collapsedRailInteractive}
           tabIndex={collapsedRailInteractive ? 0 : -1}
         >
-          <IconSidebarExpand />
+          <IconSidebarExpand className={sidebarDirectionalIconClass} />
         </SidebarIconButton>
         <SidebarIconButton
           onClick={() => { setSidebarCollapsed(false); onOpenDraftChatComposer(); }}
