@@ -117,6 +117,7 @@ const defaultConfig = {
   deviceName: 'Desktop voice client',
   inputDeviceId: '',
   outputDeviceId: '',
+  suppressWakeDuringPlayback: false,
   transcriptionShortcut: defaultTranscriptionShortcut,
   awakeSleepToggleShortcut: defaultAwakeSleepToggleShortcut,
   turnOffShortcut: defaultTurnOffShortcut,
@@ -169,6 +170,7 @@ function createInstallationId() {
 
 function normalizeConfig(nextConfig) {
   const config = { ...defaultConfig, ...nextConfig };
+  config.suppressWakeDuringPlayback = config.suppressWakeDuringPlayback === true;
   config.transcriptionShortcut = sanitizeShortcutBinding(config.transcriptionShortcut, defaultTranscriptionShortcut);
   config.awakeSleepToggleShortcut = sanitizeShortcutBinding(config.awakeSleepToggleShortcut, defaultAwakeSleepToggleShortcut);
   config.turnOffShortcut = sanitizeShortcutBinding(config.turnOffShortcut, defaultTurnOffShortcut);

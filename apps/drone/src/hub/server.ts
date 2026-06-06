@@ -8479,6 +8479,7 @@ async function enqueuePrompt(opts: {
       });
     } else {
       await updatePendingPrompt({ droneId, chatName, id, patch: { state: 'sent' } });
+      enqueueReconcile(droneId, chatName);
     }
   } catch (e: any) {
     await updatePendingPrompt({

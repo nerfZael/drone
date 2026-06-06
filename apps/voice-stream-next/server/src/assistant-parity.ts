@@ -923,6 +923,9 @@ async function createAgentToolCallRecord(context: AgentRunContext, call: Pick<To
   ensureCapability(context.thread, toolName);
   ensureHandsFreeToolAvailable(context.db, context.userId, context.thread, toolName);
   const args = call.arguments ?? {};
+  if (await dynamicToolBlockedByHandsFreeMode(context.db, context.userId, context.thread, toolName, args)) {
+    throw Object.assign(new Error(`${toolLabel(toolName, context.db, context.userId)} needs approval for this request and is unavailable while hands-free mode is on`), { statusCode: 403 });
+  }
   const needsApproval = await approvalRequiredFor(context.db, context.userId, context.thread, toolName, args);
   const toolCall = context.db.createToolCall(context.userId, context.threadId, {
     runId: context.run.id,
@@ -1360,7 +1363,7 @@ function modelInstructions(input: {
     input.skillInstruction,
     input.allowToolCalls ? input.toolInstruction : '',
     input.allowToolCalls && input.thread.handsFreeMode
-      ? 'Hands-free mode is on. Tools that require approval are hidden this turn. Keep working with the available tools; if the user asks for a hidden action, say it needs hands-free mode turned off.'
+      ? 'Hands-free mode is on. Tools that always require approval are hidden this turn. Some tools decide per request; if a specific request needs approval, it will be unavailable until hands-free mode is turned off.'
       : '',
     input.allowToolCalls
       ? 'You may call the provided assistant tools when they help. Prefer tools for artifacts, spoken replies, web searches, fetched URL content, prompt reads/updates, and thread settings instead of describing those actions. Use web_search for current information, documentation, news, prices, or facts that may have changed. Use fetch_content when the user gives a direct URL to read, inspect, summarize, or analyze. Cite source URLs in the final answer. Never write XML, JSON, or pseudo function-call syntax in normal assistant text; use the API tool call channel for tool calls.'
@@ -1404,7 +1407,7 @@ function approvalPolicyForTool(db: VoiceStreamNextDb, userId: string, toolName: 
 function toolHiddenByHandsFreeMode(db: VoiceStreamNextDb, userId: string, thread: AssistantThread, toolName: string): boolean {
   if (!thread.handsFreeMode) return false;
   const approval = approvalPolicyForTool(db, userId, toolName);
-  if (approval === 'always' || approval === 'dynamic') return true;
+  if (approval === 'always') return true;
   if (approval === 'normal_threads') return !thread.voiceEnabled;
   return false;
 }
@@ -1412,6 +1415,23 @@ function toolHiddenByHandsFreeMode(db: VoiceStreamNextDb, userId: string, thread
 function ensureHandsFreeToolAvailable(db: VoiceStreamNextDb, userId: string, thread: AssistantThread, toolName: string): void {
   if (!toolHiddenByHandsFreeMode(db, userId, thread, toolName)) return;
   throw Object.assign(new Error(`${toolLabel(toolName, db, userId)} is hidden while hands-free mode is on`), { statusCode: 403 });
+}
+
+async function dynamicToolBlockedByHandsFreeMode(
+  db: VoiceStreamNextDb,
+  userId: string,
+  thread: AssistantThread,
+  toolName: string,
+  args: unknown,
+): Promise<boolean> {
+  if (!thread.handsFreeMode || approvalPolicyForTool(db, userId, toolName) !== 'dynamic') return false;
+  const route = assistantExtensionRouteForThread(db, userId, thread, toolName);
+  if (!route?.enabled || !externalToolApprovalEvaluator) return true;
+  try {
+    return await externalToolApprovalEvaluator({ db, userId, thread, toolName, args, route });
+  } catch {
+    return true;
+  }
 }
 
 function approvalView(approval: AssistantApprovalRecord): AssistantApprovalView {

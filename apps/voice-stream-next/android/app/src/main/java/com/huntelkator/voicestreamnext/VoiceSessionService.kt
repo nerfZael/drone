@@ -577,8 +577,9 @@ class VoiceSessionService : Service() {
         return when {
             lower.contains("missing") || lower.contains("failed") || lower.contains("error") -> Constants.MODE_ERROR
             lower.contains("sleeping") || lower.startsWith("sleep") || lower.startsWith("unlock:") -> Constants.MODE_SLEEPING
-            lower.contains("waking") || lower.contains("starting") || lower.contains("reconnecting") || lower.contains("thinking") || lower.contains("queued") || lower.contains("waiting for approval") -> Constants.MODE_LOADING
+            lower.contains("waking") || lower.contains("starting") || lower.contains("reconnecting") -> Constants.MODE_LOADING
             lower.contains("assistant replied") || lower.contains("transcript received") || lower.contains("audio received") -> Constants.MODE_AWAKE
+            lower.contains("thinking") || lower.contains("queued") || lower.contains("waiting for approval") -> Constants.MODE_AWAKE
             lower.contains("assistant audio") -> Constants.MODE_AWAKE
             lower.contains("waiting") || lower.contains("listening") || lower.contains("copied voice transcription") || lower.contains("no voice transcription") -> Constants.MODE_AWAKE
             lower.contains("closed") || lower == "off" -> Constants.MODE_OFF
