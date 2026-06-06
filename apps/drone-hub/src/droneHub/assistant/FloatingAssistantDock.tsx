@@ -1,6 +1,5 @@
 import React from 'react';
 import { requestJson } from '../http';
-import { AssistantDock } from './AssistantDock';
 import { DesktopVoiceFloatingIndicator } from './DesktopVoiceFloatingIndicator';
 import {
   summarizeAssistantActivity,
@@ -12,6 +11,10 @@ const FLOATING_ASSISTANT_OPEN_STORAGE_KEY = 'droneHub.assistant.floatingOpen';
 const ASSISTANT_ACTIVITY_IDLE_REFRESH_INTERVAL_MS = 2_500;
 const ASSISTANT_ACTIVITY_ACTIVE_REFRESH_INTERVAL_MS = 1_000;
 const ASSISTANT_ACTIVITY_EVENT_REFRESH_DEBOUNCE_MS = 150;
+
+const LazyAssistantDock = React.lazy(async () => ({
+  default: (await import('./AssistantDock')).AssistantDock,
+}));
 
 function readInitialOpen(): boolean {
   if (typeof window === 'undefined') return false;
@@ -208,7 +211,15 @@ export function FloatingAssistantDock({ embeddedVisible }: { embeddedVisible: bo
         </button>
       </div>
       <div className="min-h-0 flex-1">
-        <AssistantDock />
+        <React.Suspense
+          fallback={
+            <div className="flex h-full min-h-0 items-center justify-center bg-[var(--panel-alt)] px-3 text-[12px] text-[var(--muted)]">
+              Loading assistant...
+            </div>
+          }
+        >
+          <LazyAssistantDock />
+        </React.Suspense>
       </div>
     </div>
   );

@@ -8,7 +8,7 @@ import { SelectedDroneWorkspace } from './SelectedDroneWorkspace';
 import { SettingsView } from './SettingsView';
 import { SetupWelcomeView } from './SetupWelcomeView';
 import type { AppView } from './app-types';
-import { FloatingAssistantDock } from '../assistant';
+import { FloatingAssistantDock } from '../assistant/FloatingAssistantDock';
 
 export type DroneHubWorkspaceContentProps = {
   appView: AppView;
