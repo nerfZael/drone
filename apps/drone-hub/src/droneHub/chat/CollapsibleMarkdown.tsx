@@ -2,14 +2,6 @@ import React from 'react';
 import { MarkdownMessage, type MarkdownFileReference } from './MarkdownMessage';
 import { IconChevron } from './icons';
 
-function containsWideMarkdownBlocks(rawText: string): boolean {
-  const text = String(rawText ?? '');
-  if (!text) return false;
-  if (/^\s{0,3}(?:```|~~~)/m.test(text)) return true;
-  if (/!\[[^\]]*]\([^)]+\)/.test(text)) return true;
-  return /^\|.+\|\s*$/m.test(text) && /^\|\s*[-:| ]+\|\s*$/m.test(text);
-}
-
 function parseFenceMarker(line: string): { markerChar: '`' | '~'; markerLength: number } | null {
   const match = /^\s{0,3}(`{3,}|~{3,})(.*)$/.exec(line);
   if (!match) return null;
@@ -50,6 +42,19 @@ function findLeadParagraphBreak(rawText: string): number {
   return -1;
 }
 
+function previewCollapsedMarkdown(rawText: string, collapseAfterLines: number): string {
+  const text = String(rawText ?? '').replace(/\r\n/g, '\n');
+  const leadBreak = findLeadParagraphBreak(text);
+  if (leadBreak > 0) return text.slice(0, leadBreak).trimEnd();
+
+  const lines = text.split('\n');
+  if (lines.length > collapseAfterLines) {
+    return lines.slice(0, Math.max(1, Math.min(12, collapseAfterLines))).join('\n').trimEnd();
+  }
+
+  return text.slice(0, 1200).trimEnd();
+}
+
 export function CollapsibleMarkdown({
   text,
   className,
@@ -72,7 +77,6 @@ export function CollapsibleMarkdown({
   const normalizedText = React.useMemo(() => text.replace(/\r\n/g, '\n'), [text]);
   const totalLines = React.useMemo(() => normalizedText.split('\n').length, [normalizedText]);
   const isLong = totalLines > collapseAfterLines || text.length > 2000;
-  const hasWideBlocks = React.useMemo(() => containsWideMarkdownBlocks(normalizedText), [normalizedText]);
   const [collapsed, setCollapsed] = React.useState(isLong);
   const leadSplit = React.useMemo(() => {
     if (!preserveLeadParagraph) return null;
@@ -83,7 +87,11 @@ export function CollapsibleMarkdown({
     if (!lead || !rest) return null;
     return { lead, rest };
   }, [normalizedText, preserveLeadParagraph]);
-  const collapseRestCompletely = isLong && Boolean(leadSplit) && hasWideBlocks;
+  const collapsedPreviewText = React.useMemo(
+    () => (leadSplit ? leadSplit.lead : previewCollapsedMarkdown(normalizedText, collapseAfterLines)),
+    [collapseAfterLines, leadSplit, normalizedText],
+  );
+  const shouldDeferHiddenMarkdown = isLong && collapsed;
 
   React.useEffect(() => {
     setCollapsed(isLong);
@@ -99,16 +107,7 @@ export function CollapsibleMarkdown({
       {isLong && leadSplit ? (
         <>
           <MarkdownMessage text={leadSplit.lead} className={className} onOpenFileReference={onOpenFileReference} onOpenLink={onOpenLink} />
-          {collapseRestCompletely ? (
-            collapsed ? null : (
-              <MarkdownMessage
-                text={leadSplit.rest}
-                className={className}
-                onOpenFileReference={onOpenFileReference}
-                onOpenLink={onOpenLink}
-              />
-            )
-          ) : (
+          {!collapsed ? (
             <div className={`output-collapse ${collapsed ? 'collapsed' : ''}`} style={style}>
               <MarkdownMessage
                 text={leadSplit.rest}
@@ -117,8 +116,17 @@ export function CollapsibleMarkdown({
                 onOpenLink={onOpenLink}
               />
             </div>
-          )}
+          ) : null}
         </>
+      ) : shouldDeferHiddenMarkdown ? (
+        <div className="output-collapse collapsed" style={style}>
+          <MarkdownMessage
+            text={collapsedPreviewText}
+            className={className}
+            onOpenFileReference={onOpenFileReference}
+            onOpenLink={onOpenLink}
+          />
+        </div>
       ) : (
         <div className={`output-collapse ${isLong && collapsed ? 'collapsed' : ''}`} style={style}>
           <MarkdownMessage text={text} className={className} onOpenFileReference={onOpenFileReference} onOpenLink={onOpenLink} />
