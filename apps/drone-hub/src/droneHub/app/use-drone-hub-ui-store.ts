@@ -323,6 +323,9 @@ type DroneHubUiPersistedState = Pick<
   | 'hiddenSidebarGroups'
   | 'autoDelete'
   | 'terminalEmulator'
+  | 'selectedDrone'
+  | 'selectedDroneIds'
+  | 'selectedChat'
   | 'groupMultiChatColumnWidth'
   | 'groupMultiChatStatusSort'
   | 'outputView'
@@ -1029,6 +1032,9 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         hiddenSidebarGroups: state.hiddenSidebarGroups,
         autoDelete: state.autoDelete,
         terminalEmulator: state.terminalEmulator,
+        selectedDrone: state.selectedDrone,
+        selectedDroneIds: state.selectedDroneIds,
+        selectedChat: state.selectedChat,
         groupMultiChatColumnWidth: state.groupMultiChatColumnWidth,
         groupMultiChatStatusSort: state.groupMultiChatStatusSort,
         outputView: state.outputView,
@@ -1121,6 +1127,9 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           hiddenSidebarGroups: normalizeSidebarGroupOrder(
             persisted.hiddenSidebarGroups ?? currentState.hiddenSidebarGroups,
           ),
+          selectedDrone: normalizeTrimmedString(persisted.selectedDrone) || null,
+          selectedDroneIds: normalizeSidebarGroupOrder(persisted.selectedDroneIds),
+          selectedChat: normalizeTrimmedString(persisted.selectedChat) || currentState.selectedChat,
           groupMultiChatColumnWidth: clampGroupMultiChatColumnWidthPx(
             Number(persisted.groupMultiChatColumnWidth ?? currentState.groupMultiChatColumnWidth),
           ),

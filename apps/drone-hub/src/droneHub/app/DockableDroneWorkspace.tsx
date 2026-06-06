@@ -24,8 +24,6 @@ type DockableDroneWorkspaceProps = {
   paneHeaderMode: WorkspacePaneHeaderMode;
   toolPaneOpen: boolean;
   activeToolTab: RightPanelTab;
-  secondaryToolTab: RightPanelTab;
-  splitToolPane: boolean;
   openRequestNonce: number;
   resetLayoutNonce: number;
   chatContent: React.ReactNode;
@@ -37,6 +35,7 @@ type DockableDroneWorkspaceProps = {
     activeDroneId: string | null;
     previewVisible: boolean;
   }) => void;
+  onVisibleToolTabsChange?: (tabs: RightPanelTab[]) => void;
 };
 
 const CHAT_PANEL_ID = 'agent-chat';
@@ -56,10 +55,13 @@ function tabFromPanelId(panelId: string): RightPanelTab | null {
   return raw && raw in RIGHT_PANEL_TAB_LABELS ? (raw as RightPanelTab) : null;
 }
 
-function paneKeyForTab(tab: RightPanelTab, activeToolTab: RightPanelTab, secondaryToolTab: RightPanelTab): WorkspacePaneKey {
-  if (tab === secondaryToolTab && tab !== activeToolTab) return 'bottom';
-  if (tab === activeToolTab) return 'top';
-  return 'single';
+function visibleToolTabs(api: DockviewApi): RightPanelTab[] {
+  const tabs: RightPanelTab[] = [];
+  for (const panel of api.panels) {
+    const tab = tabFromPanelId(panel.id);
+    if (tab) tabs.push(tab);
+  }
+  return tabs;
 }
 
 export function readWorkspaceLayoutScope(): WorkspaceLayoutScope {
@@ -147,19 +149,12 @@ function ensureChatPanel(api: DockviewApi): void {
 function createDefaultLayout(
   api: DockviewApi,
   activeToolTab: RightPanelTab,
-  secondaryToolTab: RightPanelTab,
-  splitToolPane: boolean,
   toolPaneOpen: boolean,
 ): void {
   api.clear();
   ensureChatPanel(api);
   if (!toolPaneOpen) return;
-
-  const firstPaneKey: WorkspacePaneKey = splitToolPane ? 'top' : 'single';
-  ensurePanel(api, activeToolTab, firstPaneKey);
-  if (splitToolPane && secondaryToolTab !== activeToolTab) {
-    ensurePanel(api, secondaryToolTab, 'bottom', toolPanelId(activeToolTab));
-  }
+  ensurePanel(api, activeToolTab, 'single');
 }
 
 function ChatPanel({ containerApi }: IDockviewPanelProps) {
@@ -174,7 +169,7 @@ function ChatPanel({ containerApi }: IDockviewPanelProps) {
 function ToolPanel({ api, params }: IDockviewPanelProps<{ tab?: RightPanelTab; paneKey?: WorkspacePaneKey }>) {
   const ctx = React.useContext(DockableDroneWorkspaceContext);
   const tab = params.tab && params.tab in RIGHT_PANEL_TAB_LABELS ? params.tab : tabFromPanelId(api.id);
-  const paneKey = tab ? params.paneKey ?? paneKeyForTab(tab, ctx.activeToolTab, ctx.secondaryToolTab) : 'single';
+  const paneKey = params.paneKey ?? 'single';
   const previewHostedHere = Boolean(tab && tab === ctx.previewTab);
 
   React.useLayoutEffect(() => {
@@ -210,14 +205,12 @@ const DockableDroneWorkspaceContext = React.createContext<{
   chatContent: React.ReactNode;
   renderToolPane: (tab: RightPanelTab, paneKey: WorkspacePaneKey) => React.ReactNode;
   activeToolTab: RightPanelTab;
-  secondaryToolTab: RightPanelTab;
   previewTab: RightPanelTab;
   onPreviewHostChanged: () => void;
 }>({
   chatContent: null,
   renderToolPane: () => null,
   activeToolTab: 'files',
-  secondaryToolTab: 'terminal',
   previewTab: 'preview',
   onPreviewHostChanged: () => {},
 });
@@ -229,8 +222,6 @@ export function DockableDroneWorkspace({
   paneHeaderMode,
   toolPaneOpen,
   activeToolTab,
-  secondaryToolTab,
-  splitToolPane,
   openRequestNonce,
   resetLayoutNonce,
   chatContent,
@@ -238,20 +229,25 @@ export function DockableDroneWorkspace({
   previewTab,
   onActiveToolTabChange,
   onPreviewHostChange,
+  onVisibleToolTabsChange,
 }: DockableDroneWorkspaceProps) {
   const apiRef = React.useRef<DockviewApi | null>(null);
   const disposablesRef = React.useRef<Array<{ dispose: () => void }>>([]);
   const suppressSaveRef = React.useRef(false);
   const lastAppliedOpenRequestRef = React.useRef<number>(-1);
   const lastAppliedToolTabRef = React.useRef<RightPanelTab | null>(null);
-  const lastAppliedSecondaryToolTabRef = React.useRef<RightPanelTab | null>(null);
-  const lastAppliedSplitToolPaneRef = React.useRef<boolean | null>(null);
   const lastAppliedOpenStateRef = React.useRef<boolean | null>(null);
   const lastLoadedKeyRef = React.useRef<string>('');
   const [previewHostVersion, setPreviewHostVersion] = React.useState(0);
+  const [workspacePanelCount, setWorkspacePanelCount] = React.useState(1);
   const markPreviewHostChanged = React.useCallback(() => {
     setPreviewHostVersion((version) => version + 1);
   }, []);
+  const updateWorkspacePanelState = React.useCallback(() => {
+    const api = apiRef.current;
+    setWorkspacePanelCount(Math.max(1, api?.totalPanels ?? 1));
+    onVisibleToolTabsChange?.(api ? visibleToolTabs(api) : []);
+  }, [onVisibleToolTabsChange]);
   const storageKey = React.useMemo(
     () => layoutStorageKey(layoutScope, currentDrone.id, activeChatName),
     [activeChatName, currentDrone.id, layoutScope],
@@ -261,11 +257,10 @@ export function DockableDroneWorkspace({
       chatContent,
       renderToolPane,
       activeToolTab,
-      secondaryToolTab,
       previewTab,
       onPreviewHostChanged: markPreviewHostChanged,
     }),
-    [activeToolTab, chatContent, markPreviewHostChanged, previewTab, renderToolPane, secondaryToolTab],
+    [activeToolTab, chatContent, markPreviewHostChanged, previewTab, renderToolPane],
   );
   const components = React.useMemo(() => ({ chat: ChatPanel, tool: ToolPanel }), []);
 
@@ -289,21 +284,20 @@ export function DockableDroneWorkspace({
         api.fromJSON(stored, { reuseExistingPanels: true });
         ensureChatPanel(api);
       } else {
-        createDefaultLayout(api, activeToolTab, secondaryToolTab, splitToolPane, toolPaneOpen);
+        createDefaultLayout(api, activeToolTab, toolPaneOpen);
       }
       lastLoadedKeyRef.current = storageKey;
       lastAppliedOpenRequestRef.current = openRequestNonce;
       lastAppliedToolTabRef.current = activeToolTab;
-      lastAppliedSecondaryToolTabRef.current = secondaryToolTab;
-      lastAppliedSplitToolPaneRef.current = splitToolPane;
       lastAppliedOpenStateRef.current = toolPaneOpen;
     } catch {
-      createDefaultLayout(api, activeToolTab, secondaryToolTab, splitToolPane, toolPaneOpen);
+      createDefaultLayout(api, activeToolTab, toolPaneOpen);
     } finally {
       suppressSaveRef.current = false;
+      updateWorkspacePanelState();
       persistCurrentLayout();
     }
-  }, [activeToolTab, openRequestNonce, persistCurrentLayout, secondaryToolTab, splitToolPane, storageKey, toolPaneOpen]);
+  }, [activeToolTab, openRequestNonce, persistCurrentLayout, storageKey, toolPaneOpen, updateWorkspacePanelState]);
 
   const handleReady = React.useCallback(
     (event: DockviewReadyEvent) => {
@@ -311,6 +305,7 @@ export function DockableDroneWorkspace({
       loadLayout();
 
       const layoutDisposable = event.api.onDidLayoutChange(() => {
+        updateWorkspacePanelState();
         persistCurrentLayout();
       });
       const activePanelDisposable = event.api.onDidActivePanelChange((panel) => {
@@ -323,8 +318,8 @@ export function DockableDroneWorkspace({
           const tab = tabFromPanelId(panel.id);
           if (tab) {
             lastAppliedToolTabRef.current = null;
-            lastAppliedSecondaryToolTabRef.current = null;
           }
+          updateWorkspacePanelState();
           return;
         }
         window.setTimeout(() => {
@@ -332,14 +327,16 @@ export function DockableDroneWorkspace({
           if (!api) return;
           suppressSaveRef.current = true;
           ensureChatPanel(api);
+          updateWorkspacePanelState();
           suppressSaveRef.current = false;
           persistCurrentLayout();
         }, 0);
       });
+      updateWorkspacePanelState();
       disposablesRef.current.forEach((disposable) => disposable.dispose());
       disposablesRef.current = [layoutDisposable, activePanelDisposable, removeDisposable];
     },
-    [loadLayout, onActiveToolTabChange, persistCurrentLayout],
+    [loadLayout, onActiveToolTabChange, persistCurrentLayout, updateWorkspacePanelState],
   );
 
   React.useEffect(() => {
@@ -361,40 +358,33 @@ export function DockableDroneWorkspace({
     if (resetLayoutNonce <= 0) return;
     removeStoredLayout(storageKey);
     suppressSaveRef.current = true;
-    createDefaultLayout(api, activeToolTab, secondaryToolTab, splitToolPane, toolPaneOpen);
+    createDefaultLayout(api, activeToolTab, toolPaneOpen);
     suppressSaveRef.current = false;
+    updateWorkspacePanelState();
     persistCurrentLayout();
-  }, [activeToolTab, persistCurrentLayout, resetLayoutNonce, secondaryToolTab, splitToolPane, storageKey, toolPaneOpen]);
+  }, [activeToolTab, persistCurrentLayout, resetLayoutNonce, storageKey, toolPaneOpen, updateWorkspacePanelState]);
 
   React.useEffect(() => {
     const api = apiRef.current;
     if (!api) return;
     if (!toolPaneOpen) return;
     const toolTabChanged = activeToolTab !== lastAppliedToolTabRef.current;
-    const secondaryToolTabChanged = secondaryToolTab !== lastAppliedSecondaryToolTabRef.current;
-    const splitToolPaneChanged = splitToolPane !== lastAppliedSplitToolPaneRef.current;
     const openedFromClosed = lastAppliedOpenStateRef.current === false && toolPaneOpen;
     if (
       openRequestNonce === lastAppliedOpenRequestRef.current &&
       !toolTabChanged &&
-      !secondaryToolTabChanged &&
-      !splitToolPaneChanged &&
       !openedFromClosed
     ) {
       return;
     }
     lastAppliedOpenRequestRef.current = openRequestNonce;
     lastAppliedToolTabRef.current = activeToolTab;
-    lastAppliedSecondaryToolTabRef.current = secondaryToolTab;
-    lastAppliedSplitToolPaneRef.current = splitToolPane;
     lastAppliedOpenStateRef.current = toolPaneOpen;
     ensureChatPanel(api);
-    ensurePanel(api, activeToolTab, splitToolPane ? 'top' : 'single');
-    if (splitToolPane && secondaryToolTab !== activeToolTab) {
-      ensurePanel(api, secondaryToolTab, 'bottom', toolPanelId(activeToolTab));
-    }
+    ensurePanel(api, activeToolTab, 'single');
+    updateWorkspacePanelState();
     persistCurrentLayout();
-  }, [activeToolTab, openRequestNonce, persistCurrentLayout, secondaryToolTab, splitToolPane, toolPaneOpen]);
+  }, [activeToolTab, openRequestNonce, persistCurrentLayout, toolPaneOpen, updateWorkspacePanelState]);
 
   React.useLayoutEffect(() => {
     const workspaceRoot = document.querySelector<HTMLElement>('[data-drone-workspace-root="1"]');
@@ -437,7 +427,7 @@ export function DockableDroneWorkspace({
       resizeObserver?.disconnect();
       window.removeEventListener('resize', updatePosition);
     };
-  }, [currentDrone.id, onPreviewHostChange, previewHostVersion, activeToolTab, secondaryToolTab, splitToolPane, storageKey]);
+  }, [currentDrone.id, onPreviewHostChange, previewHostVersion, activeToolTab, storageKey]);
 
   React.useEffect(() => {
     return () => {
@@ -454,7 +444,7 @@ export function DockableDroneWorkspace({
       <div
         className={`flex-1 min-h-0 min-w-0 overflow-hidden dh-dockable-workspace ${
           paneHeaderMode === 'compact' ? 'dh-dockable-workspace--compact-headers' : ''
-        }`}
+        } ${workspacePanelCount <= 1 ? 'dh-dockable-workspace--single-panel' : ''}`}
       >
         <DockviewReact
           className="dockview-theme-dark dh-dockview"

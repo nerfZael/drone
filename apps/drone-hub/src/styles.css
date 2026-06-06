@@ -1053,6 +1053,10 @@ select:disabled optgroup {
   font-family: var(--display);
 }
 
+.dh-dockable-workspace--single-panel .dv-tabs-and-actions-container {
+  display: none;
+}
+
 .dh-dockable-workspace .dv-tab {
   height: 100%;
   margin: 0;

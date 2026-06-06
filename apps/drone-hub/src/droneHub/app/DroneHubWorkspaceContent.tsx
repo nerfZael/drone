@@ -44,11 +44,16 @@ export function DroneHubWorkspaceContent({
     activeDroneId: null,
     previewVisible: false,
   });
-  const assistantEmbeddedVisible = Boolean(
-    selectedDroneWorkspaceProps?.rightPanelOpen &&
-      (selectedDroneWorkspaceProps.rightPanelTab === 'assistant' ||
-        (selectedDroneWorkspaceProps.rightPanelSplit && selectedDroneWorkspaceProps.rightPanelBottomTab === 'assistant')),
-  );
+  const [embeddedAssistantPanelVisible, setEmbeddedAssistantPanelVisible] = React.useState(false);
+  const selectedWorkspaceDroneId = selectedDroneWorkspaceProps?.currentDrone.id ?? null;
+  React.useEffect(() => {
+    setEmbeddedAssistantPanelVisible(false);
+  }, [selectedWorkspaceDroneId]);
+  React.useEffect(() => {
+    if (selectedDroneWorkspaceProps?.rightPanelOpen) return;
+    setEmbeddedAssistantPanelVisible(false);
+  }, [selectedDroneWorkspaceProps?.rightPanelOpen]);
+  const assistantEmbeddedVisible = Boolean(selectedDroneWorkspaceProps?.rightPanelOpen && embeddedAssistantPanelVisible);
 
   return (
     <div data-drone-workspace-root="1" className="relative flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden bg-[var(--panel)]">
@@ -65,7 +70,11 @@ export function DroneHubWorkspaceContent({
       ) : groupMultiChatWorkspaceProps ? (
         <GroupMultiChatWorkspace {...groupMultiChatWorkspaceProps} />
       ) : selectedDroneWorkspaceProps ? (
-        <SelectedDroneWorkspace {...selectedDroneWorkspaceProps} onPersistentPreviewHostChange={setPreviewHostState} />
+        <SelectedDroneWorkspace
+          {...selectedDroneWorkspaceProps}
+          onPersistentPreviewHostChange={setPreviewHostState}
+          onEmbeddedAssistantVisibleChange={setEmbeddedAssistantPanelVisible}
+        />
       ) : (
         <NoDroneSelectedState {...noDroneSelectedStateProps} />
       )}

@@ -25,6 +25,5 @@ export function shouldPrewarmShellTerminal(opts: {
   if (isDroneStartingOrSeeding(drone.hubPhase)) return false;
   if (!String(opts.cwd ?? '').trim()) return false;
   if (opts.rightPanelTab === 'terminal') return false;
-  if (opts.rightPanelSplit && opts.rightPanelBottomTab === 'terminal') return false;
   return true;
 }

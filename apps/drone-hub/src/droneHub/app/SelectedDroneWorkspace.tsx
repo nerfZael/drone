@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import {
   PromptLoopTranscriptGroup,
   AutomationLaneStatusCard,
@@ -22,7 +23,7 @@ import type {
   RepoPullRequestsPayload,
   TranscriptItem,
 } from '../types';
-import { IconAutoMinimize, IconChat, IconChevron, IconCursorApp, IconDrone, IconFolder, IconSidebarExpand, IconTune } from './icons';
+import { IconAutoMinimize, IconChat, IconChevron, IconCursorApp, IconFolder, IconSidebarExpand, IconTune } from './icons';
 import {
   DockableDroneWorkspace,
   WORKSPACE_LAYOUT_SCOPES,
@@ -87,6 +88,54 @@ type VoicePatchStatus = {
   chatName: string | null;
 };
 
+function HeaderDropdownPortal({
+  open,
+  anchorRef,
+  width,
+  children,
+}: {
+  open: boolean;
+  anchorRef: React.RefObject<HTMLElement | null>;
+  width: number;
+  children: React.ReactNode;
+}) {
+  const [position, setPosition] = React.useState<{ top: number; left: number }>({ top: 0, left: 0 });
+
+  React.useLayoutEffect(() => {
+    if (!open) return;
+    const updatePosition = () => {
+      const anchor = anchorRef.current;
+      if (!anchor) return;
+      const rect = anchor.getBoundingClientRect();
+      const viewportWidth = window.innerWidth || document.documentElement.clientWidth || width;
+      const left = Math.max(8, Math.min(rect.right - width, viewportWidth - width - 8));
+      setPosition({ top: rect.bottom + 8, left });
+    };
+
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [anchorRef, open, width]);
+
+  if (!open || typeof document === 'undefined') return null;
+
+  return createPortal(
+    <div
+      className={cn('fixed z-[11000]', dropdownPanelBaseClass)}
+      style={{ top: position.top, left: position.left, width }}
+      onMouseDown={(event) => event.stopPropagation()}
+      role="menu"
+    >
+      {children}
+    </div>,
+    document.body,
+  );
+}
+
 type SelectedDroneWorkspaceProps = {
   currentDrone: DroneSummary;
   deleteMode: DroneDeleteMode;
@@ -149,7 +198,6 @@ type SelectedDroneWorkspaceProps = {
   terminalOptions: Array<{ id: string; label: string }>;
   rightPanelOpen: boolean;
   setRightPanelOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  setRightPanelSplitMode: (next: boolean) => void;
   rightPanelSplit: boolean;
   rightPanelTabs: RightPanelTab[];
   rightPanelTab: RightPanelTab;
@@ -204,6 +252,7 @@ type SelectedDroneWorkspaceProps = {
     activeDroneId: string | null;
     previewVisible: boolean;
   }) => void;
+  onEmbeddedAssistantVisibleChange?: (visible: boolean) => void;
 };
 
 export function SelectedDroneWorkspace({
@@ -268,8 +317,6 @@ export function SelectedDroneWorkspace({
   terminalOptions,
   rightPanelOpen,
   setRightPanelOpen,
-  setRightPanelSplitMode,
-  rightPanelSplit,
   rightPanelTabs,
   rightPanelTab,
   setRightPanelTab,
@@ -310,10 +357,10 @@ export function SelectedDroneWorkspace({
   openedEditorFileOpenFailureMessage,
   openedEditorFileOpenFailureAt,
   onOpenMarkdownFileReference,
-  rightPanelBottomTab,
   rightPanelOpenRequestSeq,
   renderRightPanelTabContent,
   onPersistentPreviewHostChange,
+  onEmbeddedAssistantVisibleChange,
 }: SelectedDroneWorkspaceProps) {
   const {
     sidebarCollapsed,
@@ -451,11 +498,24 @@ export function SelectedDroneWorkspace({
     setRightPanelOpen,
     setRightPanelTab,
   });
+  const compactRepoPath = String(currentDrone.repoPath ?? '').trim();
+  const compactRepoLabel = compactRepoPath ? repoPathLabel(compactRepoPath) : '';
+  const showFleetBadge =
+    fleetBadgeAssigning ||
+    fleetBadgeDropActive ||
+    Boolean(fleetBadgeError) ||
+    /\b[1-9]\d*\b/.test(fleetBadgeSummaryText);
   const openChatErrorDetails = React.useCallback(() => {
     const message = String(chatInfoError ?? '').trim();
     if (!message) return;
     openDroneErrorModal(currentDrone, message, null);
   }, [chatInfoError, currentDrone, openDroneErrorModal]);
+  const handleVisibleWorkspaceToolTabsChange = React.useCallback(
+    (tabs: RightPanelTab[]) => {
+      onEmbeddedAssistantVisibleChange?.(tabs.includes('assistant'));
+    },
+    [onEmbeddedAssistantVisibleChange],
+  );
   const reportChatMutationError = React.useCallback(
     (action: string, error: unknown) => {
       const status = Number((error as any)?.status ?? 0);
@@ -917,9 +977,9 @@ export function SelectedDroneWorkspace({
     <>
       {/* Header — spans full workspace width */}
       <div className="flex-shrink-0 bg-[var(--panel-alt)] border-b border-[var(--border)] relative">
-        <div className="px-5 py-3">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3 min-w-0">
+        <div className="flex h-[52px] items-center px-4">
+          <div className="flex w-full items-center justify-between gap-3">
+            <div className="flex items-center gap-2 min-w-0">
               {sidebarCollapsed && (
                 <button
                   type="button"
@@ -930,28 +990,9 @@ export function SelectedDroneWorkspace({
                   <IconSidebarExpand />
                 </button>
               )}
-              <div
-                className={`w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0 border ${
-                  isDroneStartingOrSeeding(currentDrone.hubPhase)
-                    ? 'bg-[var(--yellow-subtle)] border-[rgba(255,178,36,.15)]'
-                    : currentDrone.statusOk
-                      ? 'bg-[var(--accent-subtle)] border-[rgba(167,139,250,.15)] shadow-[0_0_12px_rgba(167,139,250,.08)]'
-                      : 'bg-[var(--red-subtle)] border-[rgba(255,90,90,.15)]'
-                }`}
-              >
-                <IconDrone
-                  className={
-                    isDroneStartingOrSeeding(currentDrone.hubPhase)
-                      ? 'text-[var(--yellow)]'
-                      : currentDrone.statusOk
-                        ? 'text-[var(--accent)]'
-                        : 'text-[var(--red)]'
-                  }
-                />
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2.5">
-                  <span className="font-semibold text-sm tracking-tight" style={{ fontFamily: 'var(--display)' }}>
+              <div className="flex min-w-0 flex-col justify-center gap-0.5">
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <span className="max-w-[min(34vw,360px)] truncate font-semibold text-[13px] tracking-tight" style={{ fontFamily: 'var(--display)' }}>
                     {currentDroneLabel}
                   </span>
                   {showRespondingAsStatusInHeader ? (
@@ -962,39 +1003,36 @@ export function SelectedDroneWorkspace({
                     <StatusBadge ok={currentDrone.statusOk} error={currentDrone.statusError} hubPhase={currentDrone.hubPhase} hubMessage={currentDrone.hubMessage} />
                   )}
                   {currentDrone.group && <GroupBadge group={currentDrone.group} />}
-                  <button
-                    type="button"
-                    onClick={openFleetTab}
-                    className={cn(
-                      'inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] font-semibold transition-all',
-                      fleetBadgeDropActive
-                        ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--fg-secondary)] shadow-[0_0_0_1px_rgba(167,139,250,.18)]'
-                        : fleetBadgeError
-                          ? 'border-[rgba(255,90,90,.28)] bg-[rgba(52,18,20,.75)] text-[var(--red)] hover:border-[rgba(255,90,90,.4)]'
-                          : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--fg-secondary)]',
-                    )}
-                    title={fleetBadgeError ? `${fleetBadgeTitle} ${fleetBadgeError}` : fleetBadgeTitle}
-                    aria-label={`${fleetBadgeSummaryText}. Open Fleet tab or drop drones here to choose assign or sync actions.`}
-                  >
-                    <span className="uppercase tracking-[0.12em]" style={{ fontFamily: 'var(--display)' }}>
-                      Fleet
-                    </span>
-                    <span className="font-mono text-[10px] text-inherit">
-                      {fleetBadgeAssigning ? 'Opening…' : fleetBadgeSummaryText}
-                    </span>
-                  </button>
+                  {showFleetBadge ? (
+                    <button
+                      type="button"
+                      onClick={openFleetTab}
+                      className={cn(
+                        'inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] font-semibold transition-all',
+                        fleetBadgeDropActive
+                          ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--fg-secondary)] shadow-[0_0_0_1px_rgba(167,139,250,.18)]'
+                          : fleetBadgeError
+                            ? 'border-[rgba(255,90,90,.28)] bg-[rgba(52,18,20,.75)] text-[var(--red)] hover:border-[rgba(255,90,90,.4)]'
+                            : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--fg-secondary)]',
+                      )}
+                      title={fleetBadgeError ? `${fleetBadgeTitle} ${fleetBadgeError}` : fleetBadgeTitle}
+                      aria-label={`${fleetBadgeSummaryText}. Open Fleet tab or drop drones here to choose assign or sync actions.`}
+                    >
+                      <span className="uppercase tracking-[0.12em]" style={{ fontFamily: 'var(--display)' }}>
+                        Fleet
+                      </span>
+                      <span className="font-mono text-[10px] text-inherit">
+                        {fleetBadgeAssigning ? 'Opening…' : fleetBadgeSummaryText}
+                      </span>
+                    </button>
+                  ) : null}
                 </div>
-                {String(currentDrone.repoPath ?? '').trim() ? (
-                  <div className="text-[10px] text-[var(--muted)] truncate flex items-center gap-1.5 font-mono mt-0.5" title={currentDrone.repoPath}>
-                    <IconFolder className="flex-shrink-0 opacity-40 w-3 h-3" />
-                    {currentDrone.repoPath}
-                  </div>
-                ) : (
-                  <div className="text-[10px] text-[var(--muted-dim)] truncate flex items-center gap-1.5 mt-0.5" title="No repo attached">
-                    <IconFolder className="flex-shrink-0 opacity-30 w-3 h-3" />
-                    No repo attached
-                  </div>
-                )}
+                {compactRepoPath ? (
+                  <span className="hidden min-w-0 max-w-[min(34vw,420px)] items-center gap-1.5 truncate text-[10px] text-[var(--muted)] lg:inline-flex" title={compactRepoPath}>
+                    <IconFolder className="flex-shrink-0 opacity-35 w-3 h-3" />
+                    <span className="min-w-0 truncate font-mono text-[var(--muted)]">{compactRepoLabel}</span>
+                  </span>
+                ) : null}
               </div>
             </div>
             {/* Status indicators */}
@@ -1428,7 +1466,7 @@ export function SelectedDroneWorkspace({
                 <IconChevron down={!syncMenuOpen} className="text-[var(--muted-dim)] opacity-60" />
               </button>
               {syncMenuOpen && !syncDisabled ? (
-                <div className={cn('absolute right-0 mt-2 w-[280px] z-50', dropdownPanelBaseClass)} role="menu">
+                <HeaderDropdownPortal open={syncMenuOpen} anchorRef={syncMenuRef} width={280}>
                   <div className="py-1">
                     <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]">Host</div>
                     <button
@@ -1499,7 +1537,7 @@ export function SelectedDroneWorkspace({
                       <div className="px-3 py-2 text-[11px] text-[var(--muted)]">No peer drones on the same repo are available.</div>
                     )}
                   </div>
-                </div>
+                </HeaderDropdownPortal>
               ) : null}
             </div>
           )}
@@ -1525,7 +1563,7 @@ export function SelectedDroneWorkspace({
               </svg>
             </button>
             {headerOverflowOpen && (
-              <div className={cn('absolute right-0 mt-2 w-[220px] z-50', dropdownPanelBaseClass)} role="menu">
+              <HeaderDropdownPortal open={headerOverflowOpen} anchorRef={headerOverflowRef} width={220}>
                 <div className="py-1">
                   <button
                     type="button"
@@ -1633,46 +1671,16 @@ export function SelectedDroneWorkspace({
                     )}
                   </div>
                 </div>
-              </div>
+              </HeaderDropdownPortal>
             )}
           </div>
           {/* Workspace pane controls */}
           {rightPanelOpen && (
             <>
               <div className="w-px h-4 bg-[var(--border-subtle)] ml-1" />
-              <div
-                className="inline-flex items-center rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] p-0.5"
-                style={{ fontFamily: 'var(--display)' }}
-                title="Choose how the next workspace pane opens."
-              >
-                <button
-                  type="button"
-                  onClick={() => setRightPanelSplitMode(false)}
-                  className={`px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase transition-all border ${
-                    rightPanelSplit
-                      ? 'text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)] border-transparent'
-                      : 'bg-[var(--accent-subtle)] text-[var(--accent)] border-[var(--accent-muted)]'
-                  }`}
-                  title="Open one workspace tool pane at a time"
-                >
-                  Single
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRightPanelSplitMode(true)}
-                  className={`px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase transition-all border ${
-                    rightPanelSplit
-                      ? 'bg-[var(--accent-subtle)] text-[var(--accent)] border-[var(--accent-muted)]'
-                      : 'text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)] border-transparent'
-                  }`}
-                  title="Open the selected pane plus the secondary pane"
-                >
-                  Split
-                </button>
-              </div>
               <div className="flex items-center gap-0.5">
                 {rightPanelTabs.map((tab) => {
-                  const active = rightPanelTab === tab || (rightPanelSplit && rightPanelBottomTab === tab);
+                  const active = rightPanelTab === tab;
                   const prCount = tab === 'prs' ? Number(openPullRequestCount ?? 0) : 0;
                   return (
                     <button
@@ -1745,14 +1753,13 @@ export function SelectedDroneWorkspace({
         paneHeaderMode={workspacePaneHeaderMode}
         toolPaneOpen={rightPanelOpen}
         activeToolTab={rightPanelTab}
-        secondaryToolTab={rightPanelBottomTab}
-        splitToolPane={rightPanelSplit}
         openRequestNonce={rightPanelOpenRequestSeq}
         resetLayoutNonce={workspaceLayoutResetNonce}
         renderToolPane={(tab, paneKey) => renderRightPanelTabContent(currentDrone, tab, paneKey)}
         previewTab="preview"
         onActiveToolTabChange={setRightPanelTab}
         onPreviewHostChange={onPersistentPreviewHostChange}
+        onVisibleToolTabsChange={handleVisibleWorkspaceToolTabsChange}
         chatContent={
         <div
           ref={setFleetDropNodeRef}
