@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react';
 
 const apiPort = String(process.env.DRONE_HUB_API_PORT ?? '').trim();
 const apiToken = String(process.env.DRONE_HUB_API_TOKEN ?? '').trim();
+const sourcemapEnabled = String(process.env.DRONE_HUB_SOURCEMAP ?? '').trim() === '1';
 
 export default defineConfig({
   plugins: [react()],
@@ -14,7 +15,7 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: true
+    sourcemap: sourcemapEnabled,
   },
   server: {
     port: 5174,
