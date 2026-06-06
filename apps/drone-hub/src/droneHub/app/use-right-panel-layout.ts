@@ -29,6 +29,7 @@ type RightPanelLayoutState = {
   rightPanelTab: RightPanelTab;
   rightPanelSplit: boolean;
   rightPanelBottomTab: RightPanelTab;
+  rightPanelOpenRequestSeq: number;
   setRightPanelOpen: (next: Updater<boolean>) => void;
   setRightPanelWidth: (next: Updater<number>) => void;
   setRightPanelWidthMode: (next: Updater<RightPanelWidthMode>) => void;
@@ -83,7 +84,16 @@ const useRightPanelLayoutStore = create<RightPanelLayoutState>()(
       rightPanelTab: 'files',
       rightPanelSplit: true,
       rightPanelBottomTab: 'terminal',
-      setRightPanelOpen: (next) => set((s) => ({ rightPanelOpen: resolveNext(s.rightPanelOpen, next) })),
+      rightPanelOpenRequestSeq: 0,
+      setRightPanelOpen: (next) =>
+        set((s) => {
+          const rightPanelOpen = resolveNext(s.rightPanelOpen, next);
+          if (s.rightPanelOpen === rightPanelOpen) return s;
+          return {
+            rightPanelOpen,
+            rightPanelOpenRequestSeq: rightPanelOpen ? s.rightPanelOpenRequestSeq + 1 : s.rightPanelOpenRequestSeq,
+          };
+        }),
       setRightPanelWidth: (next) =>
         set((s) => ({
           rightPanelWidth: clampCustomRightPanelWidthPx(resolveNext(s.rightPanelWidth, next)),
@@ -91,9 +101,14 @@ const useRightPanelLayoutStore = create<RightPanelLayoutState>()(
       setRightPanelWidthMode: (next) => set((s) => ({ rightPanelWidthMode: resolveNext(s.rightPanelWidthMode, next) })),
       setRightPanelResizing: (next) => set((s) => ({ rightPanelResizing: resolveNext(s.rightPanelResizing, next) })),
       setRightPanelTab: (next) =>
-        set((s) => ({
-          rightPanelTab: parseRightPanelTab(resolveNext(s.rightPanelTab, next), s.rightPanelTab),
-        })),
+        set((s) => {
+          const rightPanelTab = parseRightPanelTab(resolveNext(s.rightPanelTab, next), s.rightPanelTab);
+          if (s.rightPanelTab === rightPanelTab) return s;
+          return {
+            rightPanelTab,
+            rightPanelOpenRequestSeq: s.rightPanelOpenRequestSeq + 1,
+          };
+        }),
       setRightPanelSplitMode: (next) =>
         set((s) => {
           if (s.rightPanelSplit === next) return s;
@@ -102,12 +117,18 @@ const useRightPanelLayoutStore = create<RightPanelLayoutState>()(
             rightPanelBottomTab: next
               ? resolveDistinctBottomTab(s.rightPanelTab, s.rightPanelBottomTab)
               : s.rightPanelBottomTab,
+            rightPanelOpenRequestSeq: s.rightPanelOpenRequestSeq + 1,
           };
         }),
       setRightPanelBottomTab: (next) =>
-        set((s) => ({
-          rightPanelBottomTab: parseRightPanelTab(resolveNext(s.rightPanelBottomTab, next), s.rightPanelBottomTab),
-        })),
+        set((s) => {
+          const rightPanelBottomTab = parseRightPanelTab(resolveNext(s.rightPanelBottomTab, next), s.rightPanelBottomTab);
+          if (s.rightPanelBottomTab === rightPanelBottomTab) return s;
+          return {
+            rightPanelBottomTab,
+            rightPanelOpenRequestSeq: s.rightPanelOpenRequestSeq + 1,
+          };
+        }),
       resetRightPanelWidth: () =>
         set({
           rightPanelWidth: clampCustomRightPanelWidthPx(RIGHT_PANEL_DEFAULT_WIDTH_PX),
@@ -167,6 +188,7 @@ export function useRightPanelLayout() {
     rightPanelTab,
     rightPanelSplit,
     rightPanelBottomTab,
+    rightPanelOpenRequestSeq,
     setRightPanelOpen,
     setRightPanelWidth: setRightPanelWidthStore,
     setRightPanelWidthMode: setRightPanelWidthModeStore,
@@ -183,6 +205,7 @@ export function useRightPanelLayout() {
       rightPanelTab: s.rightPanelTab,
       rightPanelSplit: s.rightPanelSplit,
       rightPanelBottomTab: s.rightPanelBottomTab,
+      rightPanelOpenRequestSeq: s.rightPanelOpenRequestSeq,
       setRightPanelOpen: s.setRightPanelOpen,
       setRightPanelWidth: s.setRightPanelWidth,
       setRightPanelWidthMode: s.setRightPanelWidthMode,
@@ -299,6 +322,7 @@ export function useRightPanelLayout() {
     setRightPanelSplitMode,
     rightPanelBottomTab,
     setRightPanelBottomTab,
+    rightPanelOpenRequestSeq,
     resetRightPanelWidth,
     startRightPanelResize,
     rightPanelWidthIsDefault,
