@@ -293,7 +293,7 @@ export function useDroneHubRegistryData({
   setChatHeaderRepoPath,
 }: UseDroneHubRegistryDataArgs) {
   const droneEvents = useDroneRegistryEvents();
-  const dronePollIntervalMs = droneEvents.connected ? 15_000 : 2_000;
+  const dronePollIntervalMs = droneEvents.connected ? 60_000 : 2_000;
   const { value: polledDronesResp, error: dronesPollError, loading: dronesPollLoading } = usePoll<{ ok: true; drones: DroneSummary[] }>(
     () => fetchJson('/api/drones'),
     dronePollIntervalMs,

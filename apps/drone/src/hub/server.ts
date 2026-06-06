@@ -11546,7 +11546,27 @@ export async function startDroneHubApiServer(opts: {
 
   const DRONE_STATUS_CACHE_OK_TTL_MS = 5_000;
   const DRONE_STATUS_CACHE_ERROR_TTL_MS = 2_000;
+  const DRONE_STATUS_SUMMARY_CONCURRENCY = 16;
   const droneStatusSummaryCache = new Map<string, { expiresAt: number; value: CachedDroneStatusSummary }>();
+
+  async function mapDroneRegistrySummaryConcurrent<T, R>(
+    items: T[],
+    limitRaw: number,
+    fn: (item: T, index: number) => Promise<R>,
+  ): Promise<R[]> {
+    const limit = Math.max(1, Math.floor(limitRaw || 1));
+    const results = new Array<R>(items.length);
+    let nextIndex = 0;
+    const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (nextIndex < items.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        results[index] = await fn(items[index], index);
+      }
+    });
+    await Promise.all(workers);
+    return results;
+  }
 
   function pruneDroneStatusSummaryCache(nowMs: number): void {
     if (droneStatusSummaryCache.size <= 500) return;
@@ -11915,7 +11935,12 @@ export async function startDroneHubApiServer(opts: {
   async function buildDroneRegistrySnapshot(source: string): Promise<DroneRegistrySnapshot> {
     const regAny = await loadPreparedDroneRegistryForSummary(source);
     const pendingSummaries = Object.values(regAny?.pending ?? {}).map((p) => buildPendingDroneSummary(regAny, p));
-    const realSummaries = await Promise.all(Object.values(regAny.drones ?? {}).map((d) => buildRealDroneSummary(regAny, d)));
+    const realDrones = Object.values(regAny.drones ?? {});
+    const realSummaries = await mapDroneRegistrySummaryConcurrent(
+      realDrones,
+      DRONE_STATUS_SUMMARY_CONCURRENCY,
+      async (d) => buildRealDroneSummary(regAny, d),
+    );
 
     const byId = new Map<string, any>();
     for (const p of pendingSummaries) {

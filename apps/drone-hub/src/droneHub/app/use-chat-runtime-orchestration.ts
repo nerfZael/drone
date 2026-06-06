@@ -196,6 +196,18 @@ export function useChatRuntimeOrchestration({
   const selectedDroneSummary = selectedDrone ? droneById[selectedDrone] ?? null : null;
   const hasSelectedDroneSummary = selectedDroneSummary !== null;
   const selectedDroneHubPhase = selectedDroneSummary?.hubPhase ?? null;
+  const selectedDroneChatsKey = React.useMemo(() => {
+    if (!Array.isArray(selectedDroneSummary?.chats)) return '';
+    return selectedDroneSummary.chats
+      .map((chat) => String(chat ?? '').trim())
+      .filter(Boolean)
+      .join('\u0000');
+  }, [selectedDroneSummary?.chats]);
+  const selectedDroneHasSelectedChat = React.useMemo(() => {
+    const chat = String(selectedChat ?? '').trim();
+    if (!chat || !selectedDroneChatsKey) return false;
+    return selectedDroneChatsKey.split('\u0000').includes(chat);
+  }, [selectedChat, selectedDroneChatsKey]);
   const startupSeedForSelectedDrone = React.useMemo(
     () => (selectedDrone ? startupSeedByDrone[selectedDrone] ?? null : null),
     [selectedDrone, startupSeedByDrone],
@@ -708,14 +720,12 @@ export function useChatRuntimeOrchestration({
       if (!selectedDrone || !selectedChat || busy) return;
       busy = true;
       let keepLoading = false;
-      const d = selectedDrone ? droneById[selectedDrone] ?? null : null;
-      if (isDroneStartingOrSeeding(d?.hubPhase)) {
+      if (isDroneStartingOrSeeding(selectedDroneHubPhase)) {
         if (mounted) resetSessionOutputState();
         busy = false;
         return;
       }
-      const chatExists = Boolean(d && Array.isArray(d.chats) && d.chats.includes(selectedChat));
-      if (!chatExists) {
+      if (!hasSelectedDroneSummary || !selectedDroneHasSelectedChat) {
         if (mounted) resetSessionOutputState();
         busy = false;
         return;
@@ -803,7 +813,20 @@ export function useChatRuntimeOrchestration({
       clearTimer();
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [chatUiMode, droneById, outputView, resetSessionOutputState, selectedChat, selectedDrone, setLoadingSession, setSessionError, setSessionText, bumpCliTyping]);
+  }, [
+    chatUiMode,
+    hasSelectedDroneSummary,
+    outputView,
+    resetSessionOutputState,
+    selectedChat,
+    selectedDrone,
+    selectedDroneHasSelectedChat,
+    selectedDroneHubPhase,
+    setLoadingSession,
+    setSessionError,
+    setSessionText,
+    bumpCliTyping,
+  ]);
 
   return {
     cancelPendingPromptErrorById,
