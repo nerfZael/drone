@@ -11,7 +11,8 @@ import {
   normalizePendingPromptState,
   reconcileOptimisticPendingPrompt,
 } from './optimistic-pending-prompts';
-import { fetchDroneChatTranscriptCached, sameTranscriptItems, sendDroneChatPrompt } from './chat-api';
+import { droneChatEventMatches, fetchDroneChatTranscriptCached, sameTranscriptItems, sendDroneChatPrompt } from './chat-api';
+import { subscribeDroneChatEvents } from './chat-events';
 import { droneChatQueueKey, isDroneStartingOrSeeding, parseDroneChatQueueKey } from './helpers';
 import { fetchJson, isNotFoundError, resolvePollIntervalMs, usePoll } from './hooks';
 import { beginRecordBusyKey, removeRecordKey } from './keyed-record-state';
@@ -21,6 +22,7 @@ type RequestJson = <T>(url: string, init?: RequestInit) => Promise<T>;
 
 const STOPPED_BY_USER_ERROR = 'Stopped by user.';
 const STOPPED_BEFORE_SUBMISSION_ERROR = 'Stopped before submission.';
+const INITIAL_TRANSCRIPT_TAIL_TURNS = 50;
 
 type UseChatRuntimeOrchestrationArgs = {
   chatInfo: ChatInfo | null;
@@ -103,9 +105,12 @@ export function useChatRuntimeOrchestration({
   const [stoppingResponse, setStoppingResponse] = React.useState(false);
   const [stopResponseError, setStopResponseError] = React.useState<string | null>(null);
   const [cliTyping, setCliTyping] = React.useState(false);
+  const [chatEventsConnected, setChatEventsConnected] = React.useState(false);
+  const [chatEventsNonce, setChatEventsNonce] = React.useState(0);
   const cliTypingTimerRef = React.useRef<any>(null);
   const sessionOffsetRef = React.useRef<number | null>(null);
   const transcriptEtagRef = React.useRef<string | null>(null);
+  const fullTranscriptLoadedRef = React.useRef(false);
   const screenLoadedRef = React.useRef(false);
   const transcriptsRef = React.useRef<TranscriptItem[] | null>(transcripts);
   const transcriptErrorRef = React.useRef<string | null>(transcriptError);
@@ -237,6 +242,7 @@ export function useChatRuntimeOrchestration({
     const shouldPrimeSessionLoading = chatUiMode === 'cli' && Boolean(selectedDrone && selectedChat);
     resetSessionOutputState();
     transcriptEtagRef.current = null;
+    fullTranscriptLoadedRef.current = false;
     setLoadingTranscript(shouldPrimeTranscriptLoading);
     setTranscripts(null);
     setTranscriptError(null);
@@ -489,8 +495,8 @@ export function useChatRuntimeOrchestration({
         `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(selectedChat || 'default')}/pending`,
       );
     },
-    1000,
-    [selectedDrone, selectedChat, hasSelectedDroneSummary, selectedDroneHubPhase],
+    chatEventsConnected ? 60_000 : 1000,
+    [selectedDrone, selectedChat, hasSelectedDroneSummary, selectedDroneHubPhase, chatEventsConnected, chatEventsNonce],
   );
 
   const pendingPrompts: PendingPrompt[] = React.useMemo(() => {
@@ -628,33 +634,90 @@ export function useChatRuntimeOrchestration({
     let mounted = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let busy = false;
+    let backgroundFullBusy = false;
+    let loadedInitialTail = false;
+    let eventsConnected = false;
+    let reloadAfterCurrentLoad = false;
+    let reloadAfterBackgroundFull = false;
     const clearTimer = () => {
       if (timer == null) return;
       clearTimeout(timer);
       timer = null;
     };
+    const loadFullTranscript = async (): Promise<void> => {
+      const data = await fetchDroneChatTranscriptCached({
+        droneId: selectedDrone || '',
+        chatName: selectedChat || 'default',
+        turn: 'all',
+        etag: transcriptEtagRef.current,
+      });
+      if (!mounted) return;
+      if (data.notModified) {
+        setTranscriptError(null);
+        return;
+      }
+      transcriptEtagRef.current = data.etag;
+      fullTranscriptLoadedRef.current = true;
+      setTranscripts((prev) => (sameTranscriptItems(prev, data.transcripts) ? prev : data.transcripts));
+      setTranscriptError(null);
+    };
+    const startBackgroundFullLoad = () => {
+      if (backgroundFullBusy) return;
+      backgroundFullBusy = true;
+      void loadFullTranscript()
+        .catch((e: any) => {
+          if (!mounted) return;
+          if (isNotFoundError(e)) {
+            transcriptEtagRef.current = null;
+            setTranscripts((prev) => (Array.isArray(prev) && prev.length === 0 ? prev : []));
+            setTranscriptError(null);
+            return;
+          }
+          if (isTransientDroneStartupError(e)) return;
+          setTranscriptError(e?.message ?? String(e));
+        })
+        .finally(() => {
+          backgroundFullBusy = false;
+          if (reloadAfterBackgroundFull && mounted) {
+            reloadAfterBackgroundFull = false;
+            clearTimer();
+            void load();
+          }
+        });
+    };
     const load = async () => {
-      if (!selectedDrone || !selectedChat || busy) return;
+      if (!selectedDrone || !selectedChat) return;
+      if (busy) {
+        reloadAfterCurrentLoad = true;
+        return;
+      }
       if (isDroneStartingOrSeeding(selectedDroneHubPhase)) return;
       busy = true;
       let keepLoading = false;
+      const shouldLoadTailFirst = !loadedInitialTail && !fullTranscriptLoadedRef.current;
       const initial = transcriptsRef.current === null && !transcriptErrorRef.current;
-      if (initial && mounted) setLoadingTranscript(true);
+      if ((initial || shouldLoadTailFirst) && mounted) setLoadingTranscript(true);
       try {
-        const data = await fetchDroneChatTranscriptCached({
-          droneId: selectedDrone,
-          chatName: selectedChat,
-          turn: 'all',
-          etag: transcriptEtagRef.current,
-        });
-        if (!mounted) return;
-        if (data.notModified) {
+        if (shouldLoadTailFirst) {
+          const data = await fetchDroneChatTranscriptCached({
+            droneId: selectedDrone,
+            chatName: selectedChat,
+            turn: 'all',
+            tail: INITIAL_TRANSCRIPT_TAIL_TURNS,
+          });
+          if (!mounted) return;
+          loadedInitialTail = true;
+          setTranscripts((prev) => (sameTranscriptItems(prev, data.transcripts) ? prev : data.transcripts));
           setTranscriptError(null);
+          setLoadingTranscript(false);
+          startBackgroundFullLoad();
           return;
         }
-        transcriptEtagRef.current = data.etag;
-        setTranscripts((prev) => (sameTranscriptItems(prev, data.transcripts) ? prev : data.transcripts));
-        setTranscriptError(null);
+        if (backgroundFullBusy) {
+          reloadAfterBackgroundFull = true;
+          return;
+        }
+        await loadFullTranscript();
       } catch (e: any) {
         if (!mounted) return;
         if (isNotFoundError(e)) {
@@ -674,10 +737,16 @@ export function useChatRuntimeOrchestration({
         if (mounted && !keepLoading) setLoadingTranscript(false);
         busy = false;
         if (mounted) {
+          if (reloadAfterCurrentLoad) {
+            reloadAfterCurrentLoad = false;
+            clearTimer();
+            void load();
+            return;
+          }
           clearTimer();
           timer = setTimeout(() => {
             void load();
-          }, resolvePollIntervalMs(2000, 10_000));
+          }, eventsConnected ? resolvePollIntervalMs(60_000, 60_000) : resolvePollIntervalMs(2000, 10_000));
         }
       }
     };
@@ -687,10 +756,25 @@ export function useChatRuntimeOrchestration({
       clearTimer();
       void load();
     };
+    const unsubscribeChatEvents = subscribeDroneChatEvents({
+      onConnectedChange: (connected) => {
+        eventsConnected = connected;
+        if (mounted) setChatEventsConnected(connected);
+      },
+      onDelta: (data) => {
+        if (!mounted) return;
+        if (!droneChatEventMatches(data, selectedDrone, selectedChat || 'default')) return;
+        setChatEventsNonce((value) => value + 1);
+        clearTimer();
+        void load();
+      },
+    });
     load();
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
       mounted = false;
+      setChatEventsConnected(false);
+      unsubscribeChatEvents();
       clearTimer();
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };

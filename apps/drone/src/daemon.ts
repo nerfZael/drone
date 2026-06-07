@@ -183,6 +183,38 @@ async function savePromptIndex(promptsDir: string, idx: PromptIndex): Promise<vo
   await writeJsonFileAtomic(path.join(promptsDir, 'queue.json'), idx);
 }
 
+function promptJobEventSummary(job: PromptJob) {
+  return {
+    id: job.id,
+    kind: job.kind,
+    state: job.state,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    ...(job.startedAt ? { startedAt: job.startedAt } : {}),
+    ...(job.finishedAt ? { finishedAt: job.finishedAt } : {}),
+    ...(typeof job.exitCode === 'number' ? { exitCode: job.exitCode } : {}),
+    ...(job.error ? { error: job.error } : {}),
+  };
+}
+
+async function buildPromptJobEventSnapshot(promptsDir: string): Promise<Map<string, string>> {
+  const idx = await loadPromptIndex(promptsDir);
+  const order = Array.isArray(idx.order) ? idx.order.map(String).filter(Boolean) : [];
+  const next = new Map<string, string>();
+  for (const id of order) {
+    const job = await loadPromptJob(promptsDir, id);
+    if (!job) continue;
+    next.set(id, JSON.stringify(promptJobEventSummary(job)));
+  }
+  return next;
+}
+
+function writeSseEvent(res: http.ServerResponse, event: string, data: any): void {
+  if (res.destroyed || res.writableEnded) return;
+  res.write(`event: ${event}\n`);
+  res.write(`data: ${JSON.stringify(data)}\n\n`);
+}
+
 async function loadFleetRequestIndex(fleetDir: string): Promise<FleetRequestIndex> {
   const raw = await readJsonFile(path.join(fleetDir, 'requests.json'), { order: [], idempotency: {} as Record<string, string> });
   return {
@@ -1436,6 +1468,75 @@ async function main() {
         await savePromptIndex(promptsDir, idx);
         void pumpPrompts();
         json(res, 202, { ok: true, id, state: 'queued' });
+        return;
+      }
+
+      if (method === 'GET' && pathname === '/v1/prompts/events') {
+        res.statusCode = 200;
+        res.setHeader('content-type', 'text/event-stream; charset=utf-8');
+        res.setHeader('cache-control', 'no-cache, no-transform');
+        res.setHeader('connection', 'keep-alive');
+        writeSseEvent(res, 'ready', { ok: true, at: nowIso() });
+
+        let closed = false;
+        let lastById = new Map<string, string>();
+        let initialized = false;
+        const emitChanges = async (snapshot = false) => {
+          await pumpPrompts();
+          const nextById = await buildPromptJobEventSnapshot(promptsDir);
+          if (snapshot || !initialized) {
+            lastById = nextById;
+            initialized = true;
+            const jobs = Array.from(nextById.values()).flatMap((raw) => {
+              try {
+                return [JSON.parse(raw)];
+              } catch {
+                return [];
+              }
+            });
+            writeSseEvent(res, 'snapshot', { ok: true, jobs, at: nowIso() });
+            return;
+          }
+
+          for (const [id, serialized] of nextById.entries()) {
+            if (lastById.get(id) === serialized) continue;
+            try {
+              writeSseEvent(res, 'job', { ok: true, job: JSON.parse(serialized), at: nowIso() });
+            } catch {
+              // ignore malformed local state
+            }
+          }
+          lastById = nextById;
+        };
+
+        const keepAlive = setInterval(() => {
+          if (res.destroyed || res.writableEnded) return;
+          res.write(': keepalive\n\n');
+        }, 25_000);
+        (keepAlive as any).unref?.();
+
+        req.on('close', () => {
+          closed = true;
+          clearInterval(keepAlive);
+        });
+        res.on('close', () => {
+          closed = true;
+          clearInterval(keepAlive);
+        });
+
+        try {
+          await emitChanges(true);
+          while (!closed) {
+            await sleep(250);
+            if (closed) break;
+            await emitChanges();
+          }
+        } catch (e: any) {
+          writeSseEvent(res, 'stream-error', { ok: false, error: e?.message ?? String(e) });
+          closed = true;
+          clearInterval(keepAlive);
+          if (!res.destroyed && !res.writableEnded) res.end();
+        }
         return;
       }
 

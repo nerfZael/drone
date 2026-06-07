@@ -5172,14 +5172,17 @@ async function enqueueTranscriptPrompt(opts: {
       : Math.max(daemonReadyTimeoutMs, UPGRADE_DAEMON_READY_TIMEOUT_MS);
   const client = makeClient(hostPort, token);
   await waitForDroneDaemonReady(client, daemonReadyTimeoutMs);
+  const droneId = normalizeDroneIdentity(d?.id) || String(d?.name ?? '');
   try {
     await dronePromptEnqueue(client, { id: String(opts.id ?? ''), kind: opts.kind, cmd: 'bash', args: ['-lc', opts.script] });
+    ensureDaemonPromptEventSubscription(droneId);
   } catch (e: any) {
     const msg = e?.message ?? String(e);
     if (isNotFoundErrorMessage(msg)) {
       await upgradeDroneDaemonInContainer({ containerName, containerPort: d.containerPort });
       await waitForDroneDaemonReady(client, daemonReadyAfterUpgradeTimeoutMs);
       await dronePromptEnqueue(client, { id: String(opts.id ?? ''), kind: opts.kind, cmd: 'bash', args: ['-lc', opts.script] });
+      ensureDaemonPromptEventSubscription(droneId);
       return;
     }
     throw e;
@@ -5426,6 +5429,8 @@ const RECONCILE_TASKS = new Map<string, Promise<void>>();
 const RECONCILE_QUEUE: Array<{ droneName: string; chatName: string }> = [];
 const RECONCILE_QUEUED = new Set<string>();
 const RECONCILE_RETRY_TIMERS = new Map<string, ReturnType<typeof setTimeout>>();
+const DAEMON_PROMPT_EVENT_MONITORS = new Map<string, { abort: AbortController; task: Promise<void> }>();
+const DAEMON_PROMPT_EVENT_IDLE_TIMEOUT_MS = 70_000;
 let RECONCILE_ACTIVE = 0;
 let RECONCILE_PUMPING = false;
 
@@ -5481,6 +5486,142 @@ function enqueueReconcile(droneIdRaw: string, chatName: string) {
   RECONCILE_QUEUED.add(key);
   RECONCILE_QUEUE.push({ droneName: dn, chatName: cn });
   pumpReconcileQueue();
+}
+
+function isTerminalDaemonPromptState(stateRaw: unknown): boolean {
+  const state = String(stateRaw ?? '').trim();
+  return state === 'done' || state === 'failed' || state === 'canceled';
+}
+
+async function enqueueReconcileForDaemonPromptEvent(droneIdRaw: string, promptIdRaw: string): Promise<void> {
+  const droneId = normalizeDroneIdentity(droneIdRaw);
+  const promptId = String(promptIdRaw ?? '').trim();
+  if (!droneId || !promptId) return;
+  const regAny: any = await loadRegistry();
+  const chats = regAny?.drones?.[droneId]?.chats;
+  if (!chats || typeof chats !== 'object') return;
+  for (const [chatNameRaw, entry] of Object.entries(chats) as Array<[string, any]>) {
+    const chatName = normalizeChatName(chatNameRaw);
+    if (!chatName) continue;
+    const pending = Array.isArray(entry?.pendingPrompts) ? entry.pendingPrompts : [];
+    if (!pending.some((item: any) => String(item?.id ?? '').trim() === promptId)) continue;
+    enqueueReconcile(droneId, chatName);
+    enqueuePendingPromptPump(droneId, chatName);
+  }
+}
+
+function handleDaemonPromptSseEvent(droneId: string, eventName: string, dataText: string): void {
+  let data: any = null;
+  try {
+    data = JSON.parse(dataText || '{}');
+  } catch {
+    return;
+  }
+  const jobs = eventName === 'snapshot' && Array.isArray(data?.jobs)
+    ? data.jobs
+    : data?.job
+      ? [data.job]
+      : [];
+  for (const job of jobs) {
+    if (!isTerminalDaemonPromptState(job?.state)) continue;
+    const promptId = String(job?.id ?? '').trim();
+    if (!promptId) continue;
+    void enqueueReconcileForDaemonPromptEvent(droneId, promptId).catch(() => {});
+  }
+}
+
+async function readDaemonPromptEventStream(opts: {
+  droneId: string;
+  client: ReturnType<typeof makeClient>;
+  signal: AbortSignal;
+}): Promise<void> {
+  const url = new URL('/v1/prompts/events', opts.client.baseUrl);
+  const res = await fetch(url.toString(), {
+    headers: {
+      authorization: `Bearer ${opts.client.token}`,
+      accept: 'text/event-stream',
+    },
+    signal: opts.signal,
+  });
+  if (!res.ok || !res.body) {
+    throw new Error(`daemon prompt event stream failed: ${res.status} ${res.statusText}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let sseBuffer = '';
+  while (!opts.signal.aborted) {
+    let idleTimer: ReturnType<typeof setTimeout> | null = null;
+    let readResult: Awaited<ReturnType<typeof reader.read>> | null;
+    try {
+      readResult = await Promise.race([
+        reader.read(),
+        new Promise<null>((resolve) => {
+          idleTimer = setTimeout(() => resolve(null), DAEMON_PROMPT_EVENT_IDLE_TIMEOUT_MS);
+          (idleTimer as any).unref?.();
+        }),
+      ]);
+    } finally {
+      if (idleTimer) clearTimeout(idleTimer);
+    }
+    if (readResult === null) {
+      await reader.cancel().catch(() => {});
+      throw new Error('daemon prompt event stream idle timeout');
+    }
+    const { value, done } = readResult;
+    if (done) break;
+    sseBuffer += decoder.decode(value, { stream: true });
+
+    let sepIdx = sseBuffer.indexOf('\n\n');
+    while (sepIdx !== -1) {
+      const frame = sseBuffer.slice(0, sepIdx);
+      sseBuffer = sseBuffer.slice(sepIdx + 2);
+      let eventName = 'message';
+      const dataLines: string[] = [];
+      for (const rawLine of frame.split('\n')) {
+        const line = rawLine.replace(/\r$/, '');
+        if (!line) continue;
+        if (line.startsWith(':')) continue;
+        if (line.startsWith('event:')) {
+          eventName = line.slice('event:'.length).trim();
+          continue;
+        }
+        if (line.startsWith('data:')) dataLines.push(line.slice('data:'.length).trimStart());
+      }
+      if (dataLines.length > 0) handleDaemonPromptSseEvent(opts.droneId, eventName, dataLines.join('\n'));
+      sepIdx = sseBuffer.indexOf('\n\n');
+    }
+  }
+  if (!opts.signal.aborted) throw new Error('daemon prompt event stream ended');
+}
+
+function ensureDaemonPromptEventSubscription(droneIdRaw: string): void {
+  const droneId = normalizeDroneIdentity(droneIdRaw);
+  if (!droneId || DAEMON_PROMPT_EVENT_MONITORS.has(droneId)) return;
+  const abort = new AbortController();
+  const task = (async () => {
+    let attempt = 0;
+    while (!abort.signal.aborted) {
+      try {
+        const regAny: any = await loadRegistry();
+        const drone = regAny?.drones?.[droneId] ?? null;
+        if (!drone) return;
+        const daemon = await resolveDroneDaemonClientForEntry(drone);
+        if (!daemon) throw new Error(`daemon unavailable for ${droneId}`);
+        await readDaemonPromptEventStream({ droneId, client: daemon.client, signal: abort.signal });
+        attempt = 0;
+      } catch {
+        if (abort.signal.aborted) break;
+        attempt = Math.min(8, attempt + 1);
+        await sleepMs(Math.min(30_000, 500 * 2 ** attempt));
+      }
+    }
+  })().finally(() => {
+    const current = DAEMON_PROMPT_EVENT_MONITORS.get(droneId);
+    if (current?.abort === abort) DAEMON_PROMPT_EVENT_MONITORS.delete(droneId);
+  });
+  DAEMON_PROMPT_EVENT_MONITORS.set(droneId, { abort, task });
+  void task;
 }
 
 function clearScheduledReconcileRetryByKey(key: string): void {
@@ -10317,7 +10458,16 @@ async function copyChatAttachmentsToHost(opts: {
   }
 }
 
-function parseTurnSelection(selRaw: string, turnsLen: number): number[] {
+function parseTurnSelection(selRaw: string, turnsLen: number, tailRaw?: string | null): number[] {
+  const tailText = String(tailRaw ?? '').trim();
+  if (tailText) {
+    const tail = Number(tailText);
+    if (!Number.isFinite(tail) || tail < 1 || Math.floor(tail) !== tail) {
+      throw new Error('invalid tail (expected positive integer)');
+    }
+    const start = Math.max(0, turnsLen - tail);
+    return Array.from({ length: turnsLen - start }, (_, i) => start + i);
+  }
   const sel = String(selRaw || 'last').trim().toLowerCase();
   if (sel === 'all') return Array.from({ length: turnsLen }, (_, i) => i);
   if (sel === 'last') return turnsLen > 0 ? [turnsLen - 1] : [];
@@ -11671,7 +11821,10 @@ export async function startDroneHubApiServer(opts: {
         if (!d || typeof d !== 'object') continue;
         if (!(d as any)?.chats || typeof (d as any).chats !== 'object') continue;
         for (const [chatName, entry] of Object.entries((d as any).chats)) {
-          if (chatHasReconcilablePendingPrompts(entry)) enqueueReconcile(id, String(chatName));
+          if (chatHasReconcilablePendingPrompts(entry)) {
+            ensureDaemonPromptEventSubscription(id);
+            enqueueReconcile(id, String(chatName));
+          }
         }
       }
     } catch {
@@ -11962,6 +12115,11 @@ export async function startDroneHubApiServer(opts: {
   let droneRegistrySseRefreshTimeout: ReturnType<typeof setTimeout> | null = null;
   let droneRegistrySseKeepAliveTimer: ReturnType<typeof setInterval> | null = null;
   let droneRegistrySseBusy = false;
+  const droneChatSseClients = new Set<http.ServerResponse>();
+  let droneChatSseLastByKey = new Map<string, string>();
+  let droneChatSseRefreshTimeout: ReturnType<typeof setTimeout> | null = null;
+  let droneChatSseKeepAliveTimer: ReturnType<typeof setInterval> | null = null;
+  let droneChatSseBusy = false;
 
   function broadcastDroneRegistryEvent(event: string, data: any): void {
     for (const client of Array.from(droneRegistrySseClients)) {
@@ -11988,6 +12146,146 @@ export async function startDroneHubApiServer(opts: {
       droneRegistrySseKeepAliveTimer = null;
     }
     droneRegistrySseBusy = false;
+  }
+
+  function droneChatEventKey(droneIdRaw: string, chatNameRaw: string): string {
+    return `${normalizeDroneIdentity(droneIdRaw)}\u0000${normalizeChatName(chatNameRaw)}`;
+  }
+
+  function parseDroneChatEventKey(key: string): { droneId: string; chatName: string } | null {
+    const [droneIdRaw, chatNameRaw] = String(key ?? '').split('\u0000');
+    const droneId = normalizeDroneIdentity(droneIdRaw);
+    const chatName = normalizeChatName(chatNameRaw);
+    if (!droneId || !chatName) return null;
+    return { droneId, chatName };
+  }
+
+  function chatEventFingerprint(chatEntry: any): string {
+    const turns = Array.isArray(chatEntry?.turns) ? chatEntry.turns : [];
+    const lastTurn = turns.length > 0 ? turns[turns.length - 1] : null;
+    const pendingPrompts = Array.isArray(chatEntry?.pendingPrompts) ? chatEntry.pendingPrompts : [];
+    return JSON.stringify({
+      turnCount: turns.length,
+      lastTurn: lastTurn
+        ? {
+            id: String(lastTurn?.id ?? ''),
+            at: String(lastTurn?.at ?? ''),
+            completedAt: String(lastTurn?.completedAt ?? ''),
+            ok: lastTurn?.ok === true,
+            outputLength: String(lastTurn?.output ?? '').length,
+            outputTail: String(lastTurn?.output ?? '').slice(-256),
+          }
+        : null,
+      pendingPrompts: pendingPrompts.map((item: any) => ({
+        id: String(item?.id ?? ''),
+        state: String(item?.state ?? ''),
+        error: String(item?.error ?? ''),
+        updatedAt: String(item?.updatedAt ?? ''),
+      })),
+    });
+  }
+
+  async function buildDroneChatEventSnapshot(): Promise<Map<string, string>> {
+    const regAny: any = await loadRegistry();
+    const next = new Map<string, string>();
+    for (const [droneIdRaw, drone] of Object.entries(regAny?.drones ?? {}) as Array<[string, any]>) {
+      const droneId = normalizeDroneIdentity(droneIdRaw || drone?.id);
+      if (!droneId) continue;
+      for (const [chatNameRaw, chatEntry] of Object.entries(drone?.chats ?? {}) as Array<[string, any]>) {
+        const chatName = normalizeChatName(chatNameRaw);
+        if (!chatName) continue;
+        next.set(droneChatEventKey(droneId, chatName), chatEventFingerprint(chatEntry));
+      }
+    }
+    return next;
+  }
+
+  function broadcastDroneChatEvent(event: string, data: any): void {
+    for (const client of Array.from(droneChatSseClients)) {
+      if (client.destroyed || client.writableEnded) {
+        droneChatSseClients.delete(client);
+        continue;
+      }
+      writeHubSseEvent(client, event, data);
+    }
+  }
+
+  function stopDroneChatBroadcasterIfIdle(): void {
+    if (droneChatSseClients.size > 0) return;
+    if (droneChatSseRefreshTimeout) {
+      clearTimeout(droneChatSseRefreshTimeout);
+      droneChatSseRefreshTimeout = null;
+    }
+    if (droneChatSseKeepAliveTimer) {
+      clearInterval(droneChatSseKeepAliveTimer);
+      droneChatSseKeepAliveTimer = null;
+    }
+    droneChatSseBusy = false;
+  }
+
+  async function refreshDroneChatEventSnapshot(opts?: { broadcastSnapshot?: boolean }): Promise<void> {
+    if (droneChatSseClients.size === 0 || droneChatSseBusy) return;
+    droneChatSseBusy = true;
+    try {
+      const nextByKey = await buildDroneChatEventSnapshot();
+      if (opts?.broadcastSnapshot || droneChatSseLastByKey.size === 0) {
+        droneChatSseLastByKey = nextByKey;
+        broadcastDroneChatEvent('snapshot', {
+          ok: true,
+          chats: Array.from(nextByKey.keys()).map(parseDroneChatEventKey).filter(Boolean),
+          at: nowIso(),
+        });
+        return;
+      }
+
+      const chats: Array<{ droneId: string; chatName: string }> = [];
+      const removed: Array<{ droneId: string; chatName: string }> = [];
+      for (const [key, fingerprint] of nextByKey.entries()) {
+        if (droneChatSseLastByKey.get(key) === fingerprint) continue;
+        const parsed = parseDroneChatEventKey(key);
+        if (parsed) chats.push(parsed);
+      }
+      for (const key of droneChatSseLastByKey.keys()) {
+        if (nextByKey.has(key)) continue;
+        const parsed = parseDroneChatEventKey(key);
+        if (parsed) removed.push(parsed);
+      }
+
+      droneChatSseLastByKey = nextByKey;
+      if (chats.length > 0 || removed.length > 0) {
+        broadcastDroneChatEvent('chat_delta', { ok: true, chats, removed, at: nowIso() });
+      }
+    } catch (e: any) {
+      broadcastDroneChatEvent('stream-error', { ok: false, error: e?.message ?? String(e) });
+    } finally {
+      droneChatSseBusy = false;
+    }
+  }
+
+  function scheduleDroneChatEventRefresh(delayMs = 100): void {
+    if (droneChatSseClients.size === 0) return;
+    if (droneChatSseRefreshTimeout) return;
+    droneChatSseRefreshTimeout = setTimeout(() => {
+      droneChatSseRefreshTimeout = null;
+      void refreshDroneChatEventSnapshot();
+    }, Math.max(0, delayMs));
+    (droneChatSseRefreshTimeout as any).unref?.();
+  }
+
+  function startDroneChatBroadcaster(): void {
+    if (!droneChatSseKeepAliveTimer) {
+      droneChatSseKeepAliveTimer = setInterval(() => {
+        for (const client of Array.from(droneChatSseClients)) {
+          if (client.destroyed || client.writableEnded) {
+            droneChatSseClients.delete(client);
+            continue;
+          }
+          client.write(': keepalive\n\n');
+        }
+        stopDroneChatBroadcasterIfIdle();
+      }, 25_000);
+      (droneChatSseKeepAliveTimer as any).unref?.();
+    }
   }
 
   async function refreshDroneRegistryBroadcasterSnapshot(opts?: { broadcastSnapshot?: boolean }): Promise<{ ok: true; drones: any[] } | null> {
@@ -12073,6 +12371,7 @@ export async function startDroneHubApiServer(opts: {
 
   notifyDroneRegistryWrite = () => {
     scheduleDroneRegistryBroadcasterRefresh();
+    scheduleDroneChatEventRefresh();
   };
 
   const server = http.createServer(async (req, res) => {
@@ -15715,6 +16014,31 @@ export async function startDroneHubApiServer(opts: {
         } else {
           void refreshDroneRegistryBroadcasterSnapshot({ broadcastSnapshot: true });
         }
+        return;
+      }
+
+      // GET /api/drones/chat-events
+      if (method === 'GET' && parts.length === 3 && parts[0] === 'api' && parts[1] === 'drones' && parts[2] === 'chat-events') {
+        res.statusCode = 200;
+        res.setHeader('content-type', 'text/event-stream; charset=utf-8');
+        res.setHeader('cache-control', 'no-cache, no-transform');
+        res.setHeader('connection', 'keep-alive');
+        req.socket.setTimeout(0);
+        (res as any).flushHeaders?.();
+
+        let cleanedUp = false;
+        droneChatSseClients.add(res);
+        const cleanup = () => {
+          if (cleanedUp) return;
+          cleanedUp = true;
+          droneChatSseClients.delete(res);
+          stopDroneChatBroadcasterIfIdle();
+        };
+        req.on('close', cleanup);
+        res.on('close', cleanup);
+        startDroneChatBroadcaster();
+        writeHubSseEvent(res, 'connected', { ok: true, at: nowIso() });
+        void refreshDroneChatEventSnapshot({ broadcastSnapshot: droneChatSseLastByKey.size === 0 });
         return;
       }
 
@@ -23192,7 +23516,7 @@ export async function startDroneHubApiServer(opts: {
             })
             .map((x) => x.t);
           const sel = u.searchParams.get('turn') ?? 'last';
-          const idxs = parseTurnSelection(sel, list.length);
+          const idxs = parseTurnSelection(sel, list.length, u.searchParams.get('tail'));
 
           const transcripts: any[] = [];
           for (const i of idxs) {
