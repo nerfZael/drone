@@ -13,6 +13,7 @@ export type SendDroneChatPromptResponse = {
 
 export type FetchDroneChatTranscriptResult = {
   transcripts: TranscriptItem[];
+  pending: PendingPrompt[] | null;
   etag: string | null;
   notModified: boolean;
 };
@@ -240,7 +241,7 @@ export async function fetchDroneChatTranscriptCached(opts: {
   if (etag) headers.set('if-none-match', etag);
   const response = await fetch(url, { headers });
   if (response.status === 304) {
-    return { transcripts: [], etag: etag || null, notModified: true };
+    return { transcripts: [], pending: null, etag: etag || null, notModified: true };
   }
   const text = await response.text();
   const contentType = String(response.headers.get('content-type') ?? '').toLowerCase();
@@ -278,6 +279,7 @@ export async function fetchDroneChatTranscriptCached(opts: {
   }
   return {
     transcripts: Array.isArray(data?.transcripts) ? data.transcripts : [],
+    pending: Array.isArray(data?.pending) ? data.pending : null,
     etag: response.headers.get('etag'),
     notModified: false,
   };

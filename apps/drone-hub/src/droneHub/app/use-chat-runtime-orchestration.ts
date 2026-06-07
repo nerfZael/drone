@@ -553,6 +553,16 @@ export function useChatRuntimeOrchestration({
     writeChatRuntimeCache(chatPendingCache, selectedChatCacheKey, { pending: pendingResp.pending });
   }, [pendingResp, selectedChatCacheKey]);
 
+  const applyPendingForSelectedChat = React.useCallback(
+    (pendingRaw: PendingPrompt[] | null | undefined) => {
+      if (!selectedChatCacheKey || !Array.isArray(pendingRaw)) return;
+      const next = { key: selectedChatCacheKey, pending: pendingRaw };
+      setPendingRespForChat(next);
+      writeChatRuntimeCache(chatPendingCache, selectedChatCacheKey, { pending: pendingRaw });
+    },
+    [selectedChatCacheKey],
+  );
+
   const pendingPrompts: PendingPrompt[] = React.useMemo(() => {
     const cachedPending = readFreshChatRuntimeCache(chatPendingCache, selectedChatCacheKey);
     const server = pendingRespForChat?.key === selectedChatCacheKey ? pendingRespForChat.pending : (cachedPending?.pending ?? []);
@@ -713,6 +723,7 @@ export function useChatRuntimeOrchestration({
       }
       transcriptEtagRef.current = data.etag;
       fullTranscriptLoadedRef.current = true;
+      applyPendingForSelectedChat(data.pending);
       writeChatRuntimeCache(chatTranscriptCache, selectedChatCacheKey, {
         etag: data.etag,
         fullLoaded: true,
@@ -767,6 +778,7 @@ export function useChatRuntimeOrchestration({
           });
           if (!mounted) return;
           loadedInitialTail = true;
+          applyPendingForSelectedChat(data.pending);
           writeChatRuntimeCache(chatTranscriptCache, selectedChatCacheKey, {
             etag: data.etag,
             fullLoaded: false,
@@ -848,6 +860,7 @@ export function useChatRuntimeOrchestration({
     selectedDrone,
     selectedChat,
     selectedChatCacheKey,
+    applyPendingForSelectedChat,
     hasSelectedDroneSummary,
     selectedDroneHubPhase,
     requestJson,

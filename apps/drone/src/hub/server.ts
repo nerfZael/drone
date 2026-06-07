@@ -23475,7 +23475,8 @@ export async function startDroneHubApiServer(opts: {
           if (resolved.kind === 'pending') {
             const droneName = String(resolved.pending?.name ?? droneRef).trim() || droneRef;
             const sel = u.searchParams.get('turn') ?? 'last';
-            jsonWithEtag(req, res, 200, { ok: true, id: resolved.id, name: droneName, chat: chatName, selection: sel, transcripts: [] });
+            const pending = await readPendingStartupPrompts({ droneId: resolved.id, chatName });
+            jsonWithEtag(req, res, 200, { ok: true, id: resolved.id, name: droneName, chat: chatName, selection: sel, transcripts: [], pending });
             return;
           }
           const droneId = resolved.id;
@@ -23505,6 +23506,7 @@ export async function startDroneHubApiServer(opts: {
             ensureDaemonPromptEventSubscription(droneId);
             enqueueReconcile(droneId, chatName);
           }
+          const pending = pendingPromptsFromChatEntry(c, { keepRecentlyCompleted: true }).slice(-50);
 
           const turns = (c as any).turns as TranscriptTurn[] | undefined;
           const rawList = Array.isArray(turns) ? turns : [];
@@ -23561,7 +23563,7 @@ export async function startDroneHubApiServer(opts: {
             });
           }
 
-          jsonWithEtag(req, res, 200, { ok: true, id: droneId, name: droneName, chat: chatName, selection: sel, transcripts, agent });
+          jsonWithEtag(req, res, 200, { ok: true, id: droneId, name: droneName, chat: chatName, selection: sel, transcripts, pending, agent });
           return;
         } catch (e: any) {
           json(res, 500, { ok: false, error: e?.message ?? String(e) });
