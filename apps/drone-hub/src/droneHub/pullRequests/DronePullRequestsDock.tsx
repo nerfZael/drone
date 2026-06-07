@@ -19,6 +19,8 @@ import {
 import { profileStorageKey } from '../../profile-storage';
 
 const PR_MERGE_METHOD_STORAGE_KEY = profileStorageKey('droneHub.prMergeMethod');
+const PR_LIST_CACHE_TTL_MS = 12_000;
+const PR_LIST_POLL_INTERVAL_MS = 20_000;
 
 type PullRequestListDiagnostics = {
   repoRoot: string | null;
@@ -31,6 +33,29 @@ type BulkActionState = {
   total: number;
   done: number;
 };
+
+type PullRequestListCacheEntry = {
+  atMs: number;
+  payload: Extract<RepoPullRequestsPayload, { ok: true }>;
+};
+
+const pullRequestListCache = new Map<string, PullRequestListCacheEntry>();
+
+function normalizePullRequestListCacheKey(repoPath: string, droneId: string): string {
+  return String(repoPath ?? '').trim() || `drone:${String(droneId ?? '').trim()}`;
+}
+
+function freshPullRequestListCache(repoCacheKey: string): Extract<RepoPullRequestsPayload, { ok: true }> | null {
+  const cached = pullRequestListCache.get(repoCacheKey);
+  if (!cached || Date.now() - cached.atMs >= PR_LIST_CACHE_TTL_MS) return null;
+  return cached.payload;
+}
+
+function writePullRequestListCache(repoCacheKey: string, payload: Extract<RepoPullRequestsPayload, { ok: true }>): void {
+  if (!repoCacheKey) return;
+  if (pullRequestListCache.size > 100) pullRequestListCache.clear();
+  pullRequestListCache.set(repoCacheKey, { atMs: Date.now(), payload });
+}
 
 function normalizePullRequestListDiagnostics(raw: any): PullRequestListDiagnostics | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -204,6 +229,9 @@ export function DronePullRequestsDock({
   const [actionNotice, setActionNotice] = React.useState<string | null>(null);
   const [busyByPullNumber, setBusyByPullNumber] = React.useState<Record<number, 'merge' | 'close'>>({});
   const [bulkAction, setBulkAction] = React.useState<BulkActionState | null>(null);
+  const lastRefreshNonceRef = React.useRef(refreshNonce);
+  const repoCacheKey = React.useMemo(() => normalizePullRequestListCacheKey(repoPath, droneId), [droneId, repoPath]);
+  const lastRepoCacheKeyRef = React.useRef(repoCacheKey);
   const [mergeMethod, setMergeMethod] = React.useState<RepoPullRequestMergeMethod>(() => {
     try {
       const raw = localStorage.getItem(PR_MERGE_METHOD_STORAGE_KEY);
@@ -260,16 +288,47 @@ export function DronePullRequestsDock({
     }
 
     let mounted = true;
-    let timer: any = null;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const forceInitialLoad = refreshNonce !== lastRefreshNonceRef.current;
+    lastRefreshNonceRef.current = refreshNonce;
+    const repoChanged = repoCacheKey !== lastRepoCacheKeyRef.current;
+    lastRepoCacheKeyRef.current = repoCacheKey;
+    const cached = forceInitialLoad ? null : freshPullRequestListCache(repoCacheKey);
+    if (cached) {
+      setListData(cached);
+      setListError(null);
+      setListErrorCode(null);
+      setListErrorDiagnostics(null);
+      setListLoading(false);
+      startup.markReady();
+    } else if (repoChanged) {
+      setListData(null);
+      setListError(null);
+      setListErrorCode(null);
+      setListErrorDiagnostics(null);
+    }
 
-    const load = async (silent: boolean) => {
+    const load = async (silent: boolean, force = false) => {
       if (!mounted) return;
+      if (!force) {
+        const fresh = freshPullRequestListCache(repoCacheKey);
+        if (fresh) {
+          setListData(fresh);
+          setListError(null);
+          setListErrorCode(null);
+          setListErrorDiagnostics(null);
+          setListLoading(false);
+          startup.markReady();
+          return;
+        }
+      }
       if (!silent) setListLoading(true);
       try {
         const data = await requestJson<Extract<RepoPullRequestsPayload, { ok: true }>>(
           `/api/drones/${encodeURIComponent(droneId)}/repo/pull-requests?state=open`,
         );
         if (!mounted) return;
+        writePullRequestListCache(repoCacheKey, data);
         setListData(data);
         setListError(null);
         setListErrorCode(null);
@@ -292,16 +351,16 @@ export function DronePullRequestsDock({
       }
     };
 
-    void load(false);
+    void load(Boolean(cached) && !forceInitialLoad, Boolean(cached) || forceInitialLoad);
     timer = setInterval(() => {
       void load(true);
-    }, 20_000);
+    }, PR_LIST_POLL_INTERVAL_MS);
 
     return () => {
       mounted = false;
       if (timer) clearInterval(timer);
     };
-  }, [disabled, droneId, refreshNonce, repoAttached, startup.markReady, startup.suppressErrors]);
+  }, [disabled, droneId, refreshNonce, repoAttached, repoCacheKey, startup.markReady, startup.suppressErrors]);
 
   const pullRequests = listData?.pullRequests ?? [];
   const anyBusy = bulkAction != null || Object.keys(busyByPullNumber).length > 0;
