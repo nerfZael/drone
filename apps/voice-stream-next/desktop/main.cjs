@@ -1,8 +1,10 @@
 const { app, BrowserWindow, ipcMain, screen, shell, Menu, Tray, nativeImage, clipboard, dialog, globalShortcut } = require('electron');
 const { fork } = require('node:child_process');
-const { randomUUID } = require('node:crypto');
+const { createHmac, randomBytes, randomUUID, timingSafeEqual } = require('node:crypto');
 const fs = require('node:fs');
+const http = require('node:http');
 const { createRequire } = require('node:module');
+const os = require('node:os');
 const path = require('node:path');
 const vm = require('node:vm');
 
@@ -17,6 +19,7 @@ let normalWindowBounds = null;
 let tray = null;
 let isQuitting = false;
 let trayStatus = { mode: 'off', status: 'Off.' };
+let localDesktopAuth = { server: null, callbackUrls: [], secret: '', deviceToken: '', expiresAt: 0, expiryTimer: null };
 let extensionBridge = { socket: null, reconnectTimer: null, stopped: false, reconnectDelayMs: 1000 };
 const extensionHost = {
   loading: null,
@@ -41,6 +44,7 @@ const fullWindow = {
   minWidth: 960,
   minHeight: 680,
 };
+const LOCAL_DESKTOP_AUTH_TTL_MS = 2 * 60 * 1000;
 const compactWindow = {
   width: 268,
   height: 72,
@@ -336,6 +340,191 @@ function writeConfig(nextConfig) {
   const config = normalizeConfig(nextConfig);
   persistConfig(config);
   return config;
+}
+
+function newLocalSecret(bytes = 24) {
+  return randomBytes(bytes).toString('base64url');
+}
+
+function localNetworkHosts() {
+  const hosts = [];
+  for (const entries of Object.values(os.networkInterfaces())) {
+    for (const entry of entries || []) {
+      if (entry && entry.family === 'IPv4' && !entry.internal && entry.address && !hosts.includes(entry.address)) {
+        hosts.push(entry.address);
+      }
+    }
+  }
+  return hosts.length ? hosts : ['127.0.0.1'];
+}
+
+function parseJsonRequest(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let bytes = 0;
+    req.on('data', (chunk) => {
+      bytes += chunk.byteLength;
+      if (bytes > 16_384) {
+        reject(new Error('request too large'));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      try {
+        resolve(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'));
+      } catch {
+        reject(new Error('invalid JSON'));
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+function sendJson(res, statusCode, body) {
+  res.writeHead(statusCode, {
+    'content-type': 'application/json',
+    'access-control-allow-origin': '*',
+  });
+  res.end(JSON.stringify(body));
+}
+
+function stopLocalDesktopAuthServer() {
+  if (localDesktopAuth.expiryTimer) {
+    clearTimeout(localDesktopAuth.expiryTimer);
+  }
+  if (localDesktopAuth.server) {
+    localDesktopAuth.server.close();
+  }
+  localDesktopAuth = { server: null, callbackUrls: [], secret: '', deviceToken: '', expiresAt: 0, expiryTimer: null };
+}
+
+function desktopAuthPayloadUrl(input) {
+  const payload = new URL('voicestream://desktop-auth');
+  payload.searchParams.set('callbackUrl', input.callbackUrls[0] || '');
+  payload.searchParams.set('callbackUrls', JSON.stringify(input.callbackUrls));
+  payload.searchParams.set('callbackSecret', input.secret);
+  payload.searchParams.set('deviceToken', input.deviceToken);
+  payload.searchParams.set('displayName', input.displayName);
+  payload.searchParams.set('installationId', input.installationId);
+  payload.searchParams.set('expiresAt', new Date(input.expiresAt).toISOString());
+  payload.searchParams.set('minClientVersion', '1');
+  return payload.toString();
+}
+
+function cleanHttpBaseUrl(raw) {
+  const value = String(raw || '').trim().replace(/\/+$/, '');
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('invalid protocol');
+    if (!url.hostname) throw new Error('missing host');
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    throw new Error('server URL must be an http(s) URL');
+  }
+}
+
+function desktopClaimProof(token, claim) {
+  return createHmac('sha256', token)
+    .update(JSON.stringify({
+      serverUrl: claim.serverUrl,
+      deviceId: claim.deviceId,
+      displayName: claim.displayName,
+    }))
+    .digest('base64url');
+}
+
+function proofMatches(actual, expected) {
+  const actualBuffer = Buffer.from(String(actual || ''), 'utf8');
+  const expectedBuffer = Buffer.from(String(expected || ''), 'utf8');
+  return actualBuffer.byteLength === expectedBuffer.byteLength && timingSafeEqual(actualBuffer, expectedBuffer);
+}
+
+async function startLocalDesktopAuthServer(input = {}) {
+  stopLocalDesktopAuthServer();
+  const config = readConfig();
+  const displayName = String(input.displayName || config.deviceName || 'Desktop voice client').trim() || 'Desktop voice client';
+  const installationId = String(input.installationId || config.installationId || '').trim();
+  const secret = newLocalSecret();
+  const deviceToken = newLocalSecret(32);
+  const expiresAt = Date.now() + LOCAL_DESKTOP_AUTH_TTL_MS;
+  const server = http.createServer(async (req, res) => {
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, {
+        'access-control-allow-origin': '*',
+        'access-control-allow-methods': 'POST, OPTIONS',
+        'access-control-allow-headers': 'content-type',
+      });
+      res.end();
+      return;
+    }
+    if (req.method !== 'POST' || req.url !== '/desktop-auth/claim') {
+      sendJson(res, 404, { ok: false, error: 'not found' });
+      return;
+    }
+    try {
+      if (Date.now() > localDesktopAuth.expiresAt) {
+        sendJson(res, 410, { ok: false, error: 'desktop sign-in QR expired' });
+        return;
+      }
+      const body = await parseJsonRequest(req);
+      if (String(body.callbackSecret || '') !== localDesktopAuth.secret) {
+        sendJson(res, 401, { ok: false, error: 'invalid desktop sign-in QR' });
+        return;
+      }
+      const serverUrl = cleanHttpBaseUrl(body.serverUrl);
+      const deviceId = String(body.deviceId || '').trim();
+      const claimedName = String(body.displayName || displayName).trim() || displayName;
+      if (!serverUrl || !deviceId) {
+        sendJson(res, 400, { ok: false, error: 'server URL and device id are required' });
+        return;
+      }
+      const expectedProof = desktopClaimProof(localDesktopAuth.deviceToken, {
+        serverUrl,
+        deviceId,
+        displayName: claimedName,
+      });
+      if (!proofMatches(body.claimProof, expectedProof)) {
+        sendJson(res, 401, { ok: false, error: 'invalid desktop claim proof' });
+        return;
+      }
+      const saved = writeConfig({
+        ...readConfig(),
+        serverUrl,
+        deviceId,
+        deviceToken: localDesktopAuth.deviceToken,
+        deviceName: claimedName,
+      });
+      restartExtensionBridge();
+      sendJson(res, 200, { ok: true });
+      stopLocalDesktopAuthServer();
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('desktop-auth:claimed', saved);
+      }
+    } catch (error) {
+      sendJson(res, 400, { ok: false, error: error?.message || 'desktop sign-in failed' });
+    }
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '0.0.0.0', () => {
+      server.off('error', reject);
+      resolve();
+    });
+  });
+  const port = server.address().port;
+  const callbackUrls = localNetworkHosts().map((host) => `http://${host}:${port}/desktop-auth/claim`);
+  const expiryTimer = setTimeout(stopLocalDesktopAuthServer, Math.max(0, expiresAt - Date.now()));
+  expiryTimer.unref?.();
+  localDesktopAuth = { server, callbackUrls, secret, deviceToken, expiresAt, expiryTimer };
+  return {
+    ok: true,
+    payload: desktopAuthPayloadUrl({ callbackUrls, secret, deviceToken, displayName, installationId, expiresAt }),
+    callbackUrl: callbackUrls[0] || '',
+    callbackUrls,
+    expiresAt: new Date(expiresAt).toISOString(),
+  };
 }
 
 function windowDebugLog(message, details = {}) {
@@ -1807,6 +1996,23 @@ if (!gotSingleInstanceLock) {
   ipcMain.handle('clipboard:writeText', (_event, text) => {
     clipboard.writeText(String(text || ''));
     return { ok: true };
+  });
+  ipcMain.handle('desktopAuth:qrPayload', (_event, config) => startLocalDesktopAuthServer(config || {}));
+  ipcMain.handle('desktopAuth:stopQr', () => {
+    stopLocalDesktopAuthServer();
+    return { ok: true };
+  });
+  ipcMain.handle('qr:dataUrl', async (_event, text) => {
+    const QRCode = require('qrcode');
+    return QRCode.toDataURL(String(text || ''), {
+      errorCorrectionLevel: 'M',
+      margin: 1,
+      scale: 8,
+      color: {
+        dark: '#101216',
+        light: '#ffffff',
+      },
+    });
   });
   ipcMain.handle('debug:window', (_event, message, details) => {
     windowDebugLog(String(message || 'renderer'), { renderer: details || {}, snapshot: windowSnapshot(mainWindow) });

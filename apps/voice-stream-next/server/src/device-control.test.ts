@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -655,6 +656,116 @@ describe('voice session device validation', () => {
       expect(built.db.listDevices().filter((device) => device.installationId === 'android_install_browser_1')).toHaveLength(1);
       expect(built.db.verifyDeviceToken(claimed.device.id, request.deviceToken).ok).toBe(false);
       expect(built.db.verifyDeviceToken(claimed.device.id, secondRequest.deviceToken).ok).toBe(true);
+    } finally {
+      await built.app.close();
+      built.db.db.close();
+      delete process.env.VOICE_STREAM_NEXT_DATA_DIR;
+    }
+  });
+
+  test('auto-connects desktop from Android QR claim and returns phone backend URL', async () => {
+    const dataDir = path.join(process.cwd(), 'server', 'data', 'tests', crypto.randomUUID());
+    process.env.VOICE_STREAM_NEXT_DATA_DIR = dataDir;
+    const built = await buildApp({ logger: false });
+    try {
+      const phoneResponse = await built.app.inject({
+        method: 'POST',
+        url: '/api/devices',
+        headers: {
+          'content-type': 'application/json',
+          'x-voice-dev-user-email': 'phone-owner@example.local',
+          'x-voice-dev-user-name': 'Phone Owner',
+          'x-voice-dev-admin': '0',
+        },
+        payload: JSON.stringify({ deviceType: 'android', displayName: 'Pixel' }),
+      });
+      expect(phoneResponse.statusCode).toBe(200);
+      const phone = phoneResponse.json();
+      const oldDesktop = built.db.registerDeviceWithToken(phone.device.userId, {
+        deviceType: 'desktop',
+        displayName: 'Old QR Desktop',
+        token: 'old-desktop-token',
+        installationId: 'desktop_install_qr_1',
+      });
+
+      const requestResponse = await built.app.inject({
+        method: 'POST',
+        url: '/api/desktop-auth/requests',
+        headers: { 'content-type': 'application/json' },
+        payload: JSON.stringify({ displayName: 'QR Desktop', installationId: 'desktop_install_qr_1' }),
+      });
+      expect(requestResponse.statusCode).toBe(200);
+      const request = requestResponse.json();
+
+      const claimOnPhoneBackend = await built.app.inject({
+        method: 'POST',
+        url: `/api/devices/${encodeURIComponent(phone.device.id)}/desktop-auth/claims`,
+        headers: {
+          'content-type': 'application/json',
+          'x-voice-device-token': phone.token,
+        },
+        payload: JSON.stringify({
+          displayName: 'QR Desktop',
+          deviceToken: request.deviceToken,
+          installationId: 'desktop_install_qr_1',
+          serverUrl: 'https://phone-backend.example.test',
+        }),
+      });
+      expect(claimOnPhoneBackend.statusCode).toBe(200);
+      const claimedOnPhone = claimOnPhoneBackend.json();
+      expect(claimedOnPhone.device.deviceType).toBe('desktop');
+      expect(claimedOnPhone.claimProof).toBe(
+        crypto
+          .createHmac('sha256', request.deviceToken)
+          .update(JSON.stringify({
+            serverUrl: 'https://phone-backend.example.test',
+            deviceId: claimedOnPhone.device.id,
+            displayName: claimedOnPhone.device.displayName,
+          }))
+          .digest('base64url'),
+      );
+      expect(built.db.listDevices(phone.device.userId).some((device) => device.id === claimedOnPhone.device.id)).toBe(false);
+      expect(built.db.listDevices(phone.device.userId).some((device) => device.id === oldDesktop.id)).toBe(true);
+
+      const remoteClaimResponse = await built.app.inject({
+        method: 'POST',
+        url: '/api/desktop-auth/remote-claim',
+        headers: { 'content-type': 'application/json' },
+        payload: JSON.stringify({
+          requestId: request.requestId,
+          secret: request.secret,
+          serverUrl: 'https://phone-backend.example.test',
+          deviceId: claimedOnPhone.device.id,
+          displayName: claimedOnPhone.device.displayName,
+          deviceToken: request.deviceToken,
+          claimProof: claimedOnPhone.claimProof,
+        }),
+      });
+      expect(remoteClaimResponse.statusCode).toBe(200);
+      expect(remoteClaimResponse.json().serverUrl).toBe('https://phone-backend.example.test');
+
+      const resultResponse = await built.app.inject({
+        method: 'POST',
+        url: '/api/desktop-auth/result',
+        headers: { 'content-type': 'application/json' },
+        payload: JSON.stringify({ requestId: request.requestId, secret: request.secret }),
+      });
+      expect(resultResponse.statusCode).toBe(200);
+      const result = resultResponse.json();
+      expect(result.status).toBe('claimed');
+      expect(result.serverUrl).toBe('https://phone-backend.example.test');
+      expect(result.device.id).toBe(claimedOnPhone.device.id);
+      expect(built.db.listDevices(phone.device.userId).some((device) => device.id === claimedOnPhone.device.id)).toBe(false);
+      expect(built.db.verifyDeviceToken(claimedOnPhone.device.id, request.deviceToken).ok).toBe(true);
+      expect(built.db.listDevices(phone.device.userId).some((device) => device.id === claimedOnPhone.device.id)).toBe(true);
+      expect(built.db.listDevices(phone.device.userId).some((device) => device.id === oldDesktop.id)).toBe(false);
+
+      const bootstrapResponse = await built.app.inject({
+        method: 'GET',
+        url: `/api/devices/${encodeURIComponent(claimedOnPhone.device.id)}/bootstrap`,
+        headers: { 'x-voice-device-token': request.deviceToken },
+      });
+      expect(bootstrapResponse.statusCode).toBe(200);
     } finally {
       await built.app.close();
       built.db.db.close();

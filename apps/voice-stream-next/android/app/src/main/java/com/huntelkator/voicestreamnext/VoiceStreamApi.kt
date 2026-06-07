@@ -36,6 +36,11 @@ data class BrowserAuthResult(
     val deviceId: String?,
     val deviceName: String?,
 )
+data class DesktopQrClaimResult(
+    val deviceId: String,
+    val displayName: String,
+    val serverUrl: String,
+)
 data class WebViewHandoffResult(
     val url: String,
     val expiresAt: String,
@@ -266,6 +271,84 @@ class VoiceStreamApi(private val context: Context) {
             deviceId = device?.optString("id")?.takeIf { it.isNotBlank() },
             deviceName = device?.optString("displayName")?.takeIf { it.isNotBlank() },
         )
+    }
+
+    fun claimDesktopQr(config: DesktopAuthConfig): DesktopQrClaimResult {
+        val saved = loadConfig()
+        val sourceDeviceId = pairedDeviceId()
+        val sourceDeviceToken = pairedDeviceToken()
+        if (sourceDeviceId.isBlank() || sourceDeviceToken.isBlank()) {
+            throw IOException("Sign in on this phone before scanning a desktop sign-in QR.")
+        }
+        val displayName = config.displayName ?: "Desktop voice client"
+        val serverUrl = saved.serverUrl.trimEnd('/')
+        val registerJson = deviceRequest(
+            "POST",
+            "/api/devices/$sourceDeviceId/desktop-auth/claims",
+            JSONObject()
+                .put("displayName", displayName)
+                .put("deviceToken", config.deviceToken)
+                .put("installationId", config.installationId.orEmpty())
+                .put("serverUrl", serverUrl)
+                .put("clientVersion", BuildConfig.VERSION_CODE)
+        )
+        val device = registerJson.getJSONObject("device")
+        val deviceId = device.getString("id")
+        val returnedDisplayName = device.optString("displayName", displayName)
+        val claimProof = registerJson.getString("claimProof")
+        try {
+            val callbackUrls = config.callbackUrls.ifEmpty {
+                listOfNotNull(config.callbackUrl?.takeIf { it.isNotBlank() })
+            }
+            if (callbackUrls.isNotEmpty() && !config.callbackSecret.isNullOrBlank()) {
+                postDesktopAuthCallbacks(
+                    callbackUrls,
+                    JSONObject()
+                        .put("callbackSecret", config.callbackSecret)
+                        .put("serverUrl", serverUrl)
+                        .put("deviceId", deviceId)
+                        .put("displayName", returnedDisplayName)
+                        .put("claimProof", claimProof)
+                )
+            } else {
+                postAbsoluteJson(
+                    "${config.requestServerUrl!!.trimEnd('/')}/api/desktop-auth/remote-claim",
+                    JSONObject()
+                        .put("requestId", config.requestId)
+                        .put("secret", config.secret)
+                        .put("serverUrl", serverUrl)
+                        .put("deviceId", deviceId)
+                        .put("displayName", returnedDisplayName)
+                        .put("deviceToken", config.deviceToken)
+                        .put("claimProof", claimProof)
+                )
+            }
+        } catch (error: Exception) {
+            runCatching { revokeDesktopQrClaim(sourceDeviceId, deviceId) }
+            throw error
+        }
+        return DesktopQrClaimResult(deviceId, returnedDisplayName, serverUrl)
+    }
+
+    private fun revokeDesktopQrClaim(sourceDeviceId: String, desktopDeviceId: String) {
+        deviceRequest(
+            "POST",
+            "/api/devices/$sourceDeviceId/desktop-auth/claims/$desktopDeviceId/revoke",
+            JSONObject().put("clientVersion", BuildConfig.VERSION_CODE)
+        )
+    }
+
+    private fun postDesktopAuthCallbacks(urls: List<String>, body: JSONObject) {
+        var lastError: Exception? = null
+        for (url in urls) {
+            try {
+                postAbsoluteJson(url, body)
+                return
+            } catch (error: Exception) {
+                lastError = error
+            }
+        }
+        throw lastError ?: IOException("Desktop callback URL was not reachable.")
     }
 
     fun createWebViewHandoff(redirectUrl: String): WebViewHandoffResult {
@@ -639,6 +722,20 @@ class VoiceStreamApi(private val context: Context) {
                 throw IOException(ApiJsonResponse.errorMessage(text, "HTTP ${response.code}"))
             }
             return ApiJsonResponse.parseObject(text, method, path)
+        }
+    }
+
+    private fun postAbsoluteJson(url: String, body: JSONObject): JSONObject {
+        val builder = Request.Builder()
+            .url(url)
+            .header("content-type", "application/json")
+            .method("POST", body.toString().toRequestBody(JSON))
+        client.newCall(builder.build()).execute().use { response ->
+            val text = response.body.string()
+            if (!response.isSuccessful) {
+                throw IOException(ApiJsonResponse.errorMessage(text, "HTTP ${response.code}"))
+            }
+            return ApiJsonResponse.parseObject(text, "POST", url)
         }
     }
 

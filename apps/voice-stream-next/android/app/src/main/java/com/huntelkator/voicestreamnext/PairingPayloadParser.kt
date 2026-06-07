@@ -3,6 +3,7 @@ package com.huntelkator.voicestreamnext
 import java.net.URI
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
+import org.json.JSONArray
 
 data class PairingConfig(
     val serverUrl: String,
@@ -19,6 +20,20 @@ data class PairingConfig(
 data class UpdateConfig(
     val versionCode: Long,
     val apkUrl: String? = null,
+)
+
+data class DesktopAuthConfig(
+    val requestServerUrl: String? = null,
+    val requestId: String? = null,
+    val secret: String? = null,
+    val callbackUrl: String? = null,
+    val callbackUrls: List<String> = emptyList(),
+    val callbackSecret: String? = null,
+    val deviceToken: String,
+    val displayName: String? = null,
+    val installationId: String? = null,
+    val expiresAt: String? = null,
+    val minClientVersion: Long? = null,
 )
 
 object PairingPayloadParser {
@@ -39,6 +54,11 @@ object PairingPayloadParser {
         uri.scheme.equals("voicestream", ignoreCase = true) && uri.host.equals("update", ignoreCase = true)
     }.getOrDefault(false)
 
+    fun isDesktopAuthPayload(payload: String): Boolean = runCatching {
+        val uri = URI(payload.trim())
+        uri.scheme.equals("voicestream", ignoreCase = true) && uri.host.equals("desktop-auth", ignoreCase = true)
+    }.getOrDefault(false)
+
     fun parseUpdate(payload: String): Result<UpdateConfig> = runCatching {
         val trimmed = payload.trim()
         if (trimmed.isBlank()) throw IllegalArgumentException("Update QR is empty")
@@ -56,6 +76,41 @@ object PairingPayloadParser {
         }
 
         UpdateConfig(versionCode, params["apk"]?.takeIf { it.isNotBlank() })
+    }
+
+    fun parseDesktopAuth(payload: String): Result<DesktopAuthConfig> = runCatching {
+        val trimmed = payload.trim()
+        if (trimmed.isBlank()) throw IllegalArgumentException("Desktop sign-in QR is empty")
+
+        val uri = URI(trimmed)
+        if (!uri.scheme.equals("voicestream", ignoreCase = true) || !uri.host.equals("desktop-auth", ignoreCase = true)) {
+            throw IllegalArgumentException("QR does not contain desktop sign-in data")
+        }
+
+        val params = parseQuery(uri.rawQuery)
+        val requestServerUrl = params["requestServerUrl"]?.trimEnd('/')?.takeIf { it.isNotBlank() }
+        val requestId = params["requestId"]?.takeIf { it.isNotBlank() }
+        val secret = params["secret"]?.takeIf { it.isNotBlank() }
+        val callbackUrl = params["callbackUrl"]?.takeIf { it.isNotBlank() }
+        val callbackUrls = parseCallbackUrls(params["callbackUrls"], callbackUrl)
+        val callbackSecret = params["callbackSecret"]?.takeIf { it.isNotBlank() }
+        if ((callbackUrls.isEmpty() || callbackSecret == null) && (requestServerUrl == null || requestId == null || secret == null)) {
+            throw IllegalArgumentException("Desktop sign-in QR does not contain a callback or request server")
+        }
+        DesktopAuthConfig(
+            requestServerUrl = requestServerUrl,
+            requestId = requestId,
+            secret = secret,
+            callbackUrl = callbackUrl,
+            callbackUrls = callbackUrls,
+            callbackSecret = callbackSecret,
+            deviceToken = params["deviceToken"]?.takeIf { it.isNotBlank() }
+                ?: throw IllegalArgumentException("Desktop sign-in QR does not contain a device token"),
+            displayName = params["displayName"]?.takeIf { it.isNotBlank() },
+            installationId = params["installationId"]?.takeIf { it.isNotBlank() },
+            expiresAt = params["expiresAt"]?.takeIf { it.isNotBlank() },
+            minClientVersion = params["minClientVersion"]?.toLongOrNull(),
+        )
     }
 
     fun webSocketToHttpUrl(rawUrl: String): String {
@@ -138,4 +193,20 @@ object PairingPayloadParser {
 
     private fun decode(value: String): String =
         URLDecoder.decode(value, StandardCharsets.UTF_8.name())
+
+    private fun parseCallbackUrls(raw: String?, fallback: String?): List<String> {
+        val urls = mutableListOf<String>()
+        if (!raw.isNullOrBlank()) {
+            runCatching {
+                val parsed = JSONArray(raw)
+                for (index in 0 until parsed.length()) {
+                    parsed.optString(index).takeIf { it.isNotBlank() }?.let { urls.add(it) }
+                }
+            }.onFailure {
+                raw.split(",").map { it.trim() }.filter { it.isNotBlank() }.forEach { urls.add(it) }
+            }
+        }
+        if (!fallback.isNullOrBlank()) urls.add(fallback)
+        return urls.distinct()
+    }
 }

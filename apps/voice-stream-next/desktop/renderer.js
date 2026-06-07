@@ -110,6 +110,7 @@ const els = {
   accountDetail: document.querySelector('#accountDetail'),
   openWebButton: document.querySelector('#openWebButton'),
   signInButton: document.querySelector('#signInButton'),
+  refreshQrButton: document.querySelector('#refreshQrButton'),
   signOutButton: document.querySelector('#signOutButton'),
   authCloseButton: document.querySelector('#authCloseButton'),
   compactButton: document.querySelector('#compactButton'),
@@ -119,6 +120,9 @@ const els = {
   serverUrlInput: document.querySelector('#serverUrlInput'),
   deviceNameInput: document.querySelector('#deviceNameInput'),
   authStatus: document.querySelector('#authStatus'),
+  desktopAuthQrImage: document.querySelector('#desktopAuthQrImage'),
+  desktopAuthQrPlaceholder: document.querySelector('#desktopAuthQrPlaceholder'),
+  desktopAuthQrStatus: document.querySelector('#desktopAuthQrStatus'),
   pairingMessage: document.querySelector('#pairingMessage'),
   voiceAuthStatus: document.querySelector('#voiceAuthStatus'),
   voicePairingMessage: document.querySelector('#voicePairingMessage'),
@@ -1490,7 +1494,54 @@ async function pairDevice() {
 }
 
 async function signInWithBrowser() {
+  await startDesktopAuthRequest({ openBrowser: true });
+}
+
+function setDesktopAuthQrStatus(message, kind = 'muted') {
+  if (!els.desktopAuthQrStatus) return;
+  els.desktopAuthQrStatus.textContent = message;
+  els.desktopAuthQrStatus.className = kind === 'error' ? 'error' : kind === 'ok' ? 'ok' : '';
+}
+
+function clearDesktopAuthQr(message = 'Use browser sign-in or refresh the QR.') {
+  if (els.desktopAuthQrImage) {
+    els.desktopAuthQrImage.hidden = true;
+    els.desktopAuthQrImage.removeAttribute('src');
+  }
+  if (els.desktopAuthQrPlaceholder) {
+    els.desktopAuthQrPlaceholder.hidden = false;
+  }
+  setDesktopAuthQrStatus(message, 'muted');
+}
+
+async function renderDesktopAuthQrPayload(payload, statusMessage) {
+  if (!desktop.qrDataUrl || !els.desktopAuthQrImage) return;
+  const dataUrl = await desktop.qrDataUrl(payload);
+  els.desktopAuthQrImage.src = dataUrl;
+  els.desktopAuthQrImage.hidden = false;
+  if (els.desktopAuthQrPlaceholder) els.desktopAuthQrPlaceholder.hidden = true;
+  setDesktopAuthQrStatus(statusMessage || 'Scan this with the signed-in Android app.', 'ok');
+}
+
+async function startLocalDesktopAuthQr() {
   clearDesktopAuthPoll();
+  const saved = await desktop.writeConfig(authSessionFields(readFormConfig()));
+  applyConfig(saved);
+  if (!desktop.desktopAuthQrPayload) throw new Error('Desktop QR sign-in is not available in this build.');
+  const result = await desktop.desktopAuthQrPayload({
+    displayName: saved.deviceName,
+    installationId: saved.installationId,
+  });
+  await renderDesktopAuthQrPayload(result.payload, 'Scan this with the signed-in Android app.');
+  updateAuthStatus('idle', 'Scan the QR from the signed-in Android app to connect this desktop.');
+}
+
+async function startDesktopAuthRequest({ openBrowser = false } = {}) {
+  clearDesktopAuthPoll();
+  if (openBrowser && desktop.stopDesktopAuthQr) {
+    await desktop.stopDesktopAuthQr().catch(() => undefined);
+    clearDesktopAuthQr('QR sign-in paused while browser sign-in is active.');
+  }
   const saved = await desktop.writeConfig(authSessionFields(readFormConfig()));
   applyConfig(saved);
   const authBaseUrl = deriveWebUrl(saved) || saved.serverUrl;
@@ -1502,18 +1553,24 @@ async function signInWithBrowser() {
     method: 'POST',
     body: JSON.stringify({ displayName: saved.deviceName, protocolVersion: 1, installationId: saved.installationId }),
   });
-  const authUrl = new URL(authBaseUrl);
-  authUrl.searchParams.set('desktopAuthRequest', data.requestId);
-  authUrl.searchParams.set('desktopAuthSecret', data.secret);
-  authUrl.searchParams.set('desktopName', saved.deviceName);
-  void desktop.openExternal(authUrl.toString());
-  startDesktopAuthPoll({
+  const auth = {
     requestId: data.requestId,
     secret: data.secret,
     deviceToken: data.deviceToken,
     expiresAt: data.expiresAt,
-  });
-  updateAuthStatus('idle', 'Opened browser sign in. This desktop will connect automatically after login.');
+    minClientVersion: data.minClientVersion,
+  };
+  if (openBrowser) {
+    const authUrl = new URL(authBaseUrl);
+    authUrl.searchParams.set('desktopAuthRequest', data.requestId);
+    authUrl.searchParams.set('desktopAuthSecret', data.secret);
+    authUrl.searchParams.set('desktopName', saved.deviceName);
+    void desktop.openExternal(authUrl.toString());
+    updateAuthStatus('idle', 'Opened browser sign in. This desktop will connect automatically after login.');
+  } else {
+    updateAuthStatus('idle', 'Scan the QR from the signed-in Android app to connect this desktop.');
+  }
+  startDesktopAuthPoll(auth);
 }
 
 function clearDesktopAuthPoll() {
@@ -1542,8 +1599,10 @@ function startDesktopAuthPoll(auth) {
       if (data.status === 'claimed' && data.device?.id) {
         clearDesktopAuthPoll();
         const current = readFormConfig();
+        const claimedServerUrl = data.serverUrl ? trimSlash(data.serverUrl) : trimSlash(current.serverUrl);
         const paired = await desktop.writeConfig({
           ...current,
+          serverUrl: claimedServerUrl,
           deviceId: data.device.id,
           deviceToken: auth.deviceToken,
           deviceName: data.device.displayName || current.deviceName,
@@ -1551,13 +1610,14 @@ function startDesktopAuthPoll(auth) {
         applyConfig(paired);
         void desktop.expandWindow?.().then(applyWindowState);
         ensureControlSocket();
-        updateAuthStatus('ok', 'Desktop connected through browser sign in.');
-        showPairingMessage('Desktop connected through browser sign in.');
+        const switchedServers = claimedServerUrl && claimedServerUrl !== trimSlash(current.serverUrl);
+        updateAuthStatus('ok', switchedServers ? `Desktop connected to ${claimedServerUrl}.` : 'Desktop connected through sign in.');
+        showPairingMessage(switchedServers ? `Desktop connected to ${claimedServerUrl}.` : 'Desktop connected through sign in.');
         showStatus('Desktop connected.');
         await loadDashboard().catch((err) => showStatus(err.message));
         return;
       }
-      updateAuthStatus('idle', 'Waiting for browser sign in to finish.');
+      updateAuthStatus('idle', 'Waiting for QR scan or browser sign in to finish.');
     } catch (err) {
       clearDesktopAuthPoll();
       updateAuthStatus('error', err?.message || 'Desktop sign in failed.');
@@ -1577,6 +1637,7 @@ function configuredDeviceIsKnown() {
 
 async function clearSavedDevice(reason) {
   clearDesktopAuthPoll();
+  if (desktop.stopDesktopAuthQr) await desktop.stopDesktopAuthQr().catch(() => undefined);
   const config = readFormConfig();
   const nextConfig = await desktop.writeConfig({ ...config, deviceId: '', deviceToken: '' });
   applyConfig(nextConfig);
@@ -3170,6 +3231,14 @@ els.openWebButton.addEventListener('click', () => {
 els.signInButton.addEventListener('click', () => {
   void signInWithBrowser().catch((err) => updateAuthStatus('error', err?.message || 'Could not start sign in.'));
 });
+if (els.refreshQrButton) {
+  els.refreshQrButton.addEventListener('click', () => {
+    void startLocalDesktopAuthQr().catch((err) => {
+      updateAuthStatus('error', err?.message || 'Could not refresh QR.');
+      setDesktopAuthQrStatus(err?.message || 'Could not refresh QR.', 'error');
+    });
+  });
+}
 if (els.inputDeviceButton) {
   els.inputDeviceButton.addEventListener('click', () => toggleDevicePicker(els.inputDeviceSelect));
 }
@@ -3458,6 +3527,18 @@ if (desktop.windowState) {
   desktop.windowState().then(applyWindowState).catch(() => applyWindowState({ compact: true }));
 }
 
+if (desktop.onDesktopAuthClaimed) {
+  desktop.onDesktopAuthClaimed((config) => {
+    applyConfig(config);
+    void desktop.expandWindow?.().then(applyWindowState);
+    ensureControlSocket();
+    updateAuthStatus('ok', `Desktop connected to ${trimSlash(config.serverUrl)}.`);
+    showPairingMessage(`Desktop connected to ${trimSlash(config.serverUrl)}.`);
+    showStatus('Desktop connected.');
+    void loadDashboard().catch((err) => showStatus(err.message));
+  });
+}
+
 desktop.readConfig().then((config) => {
   applyConfig(config);
   void refreshExtensionStatus();
@@ -3472,7 +3553,11 @@ desktop.readConfig().then((config) => {
   if (!config.deviceId || !config.deviceToken) {
     updateVoiceButtons();
     showStatus('Sign in to start voice.');
-    showPairingMessage('Browser sign-in will connect this desktop automatically.');
+    showPairingMessage('Scan the QR with Android or use browser sign-in to connect this desktop.');
+    void startLocalDesktopAuthQr().catch((err) => {
+      updateAuthStatus('error', err?.message || 'Could not create sign-in QR.');
+      setDesktopAuthQrStatus(err?.message || 'Could not create sign-in QR.', 'error');
+    });
     return null;
   }
   ensureControlSocket();

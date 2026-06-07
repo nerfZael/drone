@@ -19,8 +19,19 @@
           </div>
         </div>
         <p id="authStatus" class="auth-status muted">Sign in with your browser to connect this desktop.</p>
+        <div class="auth-qr-panel" aria-label="Phone sign-in QR">
+          <div id="desktopAuthQrFrame" class="auth-qr-frame">
+            <span id="desktopAuthQrPlaceholder">QR</span>
+            <img id="desktopAuthQrImage" alt="Desktop sign-in QR code" hidden />
+          </div>
+          <div class="auth-qr-copy">
+            <strong>Scan with your phone</strong>
+            <span id="desktopAuthQrStatus">Use the signed-in Android app to connect this desktop.</span>
+          </div>
+        </div>
         <div class="auth-actions">
           <button id="signInButton" type="button">Sign in</button>
+          <button id="refreshQrButton" class="secondary" type="button">Refresh QR</button>
           <button id="openWebButton" class="secondary" type="button">Open web</button>
         </div>
       </div>

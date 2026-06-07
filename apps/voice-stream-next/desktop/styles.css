@@ -220,6 +220,59 @@ body.is-signed-in .auth-screen {
   gap: 10px;
 }
 
+.auth-qr-panel {
+  display: grid;
+  grid-template-columns: 164px minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .025);
+}
+
+.auth-qr-frame {
+  display: grid;
+  place-items: center;
+  width: 164px;
+  aspect-ratio: 1;
+  border: 1px solid rgba(255, 255, 255, .14);
+  border-radius: 8px;
+  background: #fff;
+  color: #101216;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.auth-qr-frame img {
+  display: block;
+  width: 148px;
+  height: 148px;
+}
+
+.auth-qr-copy {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.auth-qr-copy strong {
+  font-size: 14px;
+  color: var(--fg);
+}
+
+.auth-qr-copy span {
+  color: var(--muted);
+}
+
+.auth-qr-copy span.ok {
+  color: var(--green);
+}
+
+.auth-qr-copy span.error {
+  color: var(--red);
+}
+
 #signInButton:hover,
 #signInButton:focus-visible {
   border-color: rgba(167, 139, 250, .52);

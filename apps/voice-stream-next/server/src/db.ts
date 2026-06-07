@@ -44,6 +44,7 @@ export type DeviceRecord = {
   lastSeenAt: string;
   createdAt: string;
   revokedAt: string | null;
+  pendingAuthExpiresAt: string | null;
 };
 
 export type PairingSessionRecord = {
@@ -81,6 +82,9 @@ export type DesktopAuthRequestRecord = {
   claimedAt: string | null;
   userId: string | null;
   deviceId: string | null;
+  claimedServerUrl: string | null;
+  claimedDeviceId: string | null;
+  claimedDeviceDisplayName: string | null;
   createdAt: string;
 };
 
@@ -90,8 +94,12 @@ export type DesktopAuthClaimResult =
 
 export type DesktopAuthPollResult =
   | { ok: true; status: 'pending'; request: DesktopAuthRequestRecord }
-  | { ok: true; status: 'claimed'; request: DesktopAuthRequestRecord; device: DeviceRecord }
+  | { ok: true; status: 'claimed'; request: DesktopAuthRequestRecord; device: DeviceRecord; serverUrl: string | null }
   | { ok: false; reason: 'not_found' | 'invalid_secret' | 'expired' };
+
+export type DesktopAuthRemoteClaimResult =
+  | Exclude<DesktopAuthPollResult, { ok: false }>
+  | { ok: false; reason: 'not_found' | 'invalid_secret' | 'expired' | 'claimed' | 'invalid_claim' };
 
 export type WebViewHandoffRecord = {
   id: string;
@@ -541,6 +549,17 @@ function sha256(value: string): string {
   return new Bun.CryptoHasher('sha256').update(value).digest('hex');
 }
 
+function desktopClaimProof(token: string, claim: { serverUrl: string; deviceId: string; displayName: string }): string {
+  return crypto
+    .createHmac('sha256', token)
+    .update(JSON.stringify({
+      serverUrl: claim.serverUrl,
+      deviceId: claim.deviceId,
+      displayName: claim.displayName,
+    }))
+    .digest('base64url');
+}
+
 function cleanAssistantApiKeyProvider(raw: unknown): AssistantApiKeyProvider {
   const value = String(raw ?? '').trim().toLowerCase();
   if (value === 'openai' || value === 'exa' || value === 'groq') return value;
@@ -803,6 +822,7 @@ function rowDevice(row: any): DeviceRecord {
     lastSeenAt: String(row.last_seen_at),
     createdAt: String(row.created_at),
     revokedAt: row.revoked_at == null ? null : String(row.revoked_at),
+    pendingAuthExpiresAt: row.pending_auth_expires_at == null ? null : String(row.pending_auth_expires_at),
   };
 }
 
@@ -838,6 +858,9 @@ function rowDesktopAuthRequest(row: any): DesktopAuthRequestRecord {
     claimedAt: row.claimed_at == null ? null : String(row.claimed_at),
     userId: row.user_id == null ? null : String(row.user_id),
     deviceId: row.device_id == null ? null : String(row.device_id),
+    claimedServerUrl: row.claimed_server_url == null ? null : String(row.claimed_server_url),
+    claimedDeviceId: row.claimed_device_id == null ? null : String(row.claimed_device_id),
+    claimedDeviceDisplayName: row.claimed_device_display_name == null ? null : String(row.claimed_device_display_name),
     createdAt: String(row.created_at),
   };
 }
@@ -2390,10 +2413,77 @@ export class VoiceStreamNextDb {
     if (String((row as any).secret_hash) !== sha256(secret)) return { ok: false, reason: 'invalid_secret' };
     const request = rowDesktopAuthRequest(row);
     if (Date.parse(request.expiresAt) < Date.now() && !request.claimedAt) return { ok: false, reason: 'expired' };
+    if (request.claimedDeviceId) {
+      return {
+        ok: true,
+        status: 'claimed',
+        request,
+        serverUrl: request.claimedServerUrl,
+        device: {
+          id: request.claimedDeviceId,
+          userId: request.userId ?? '',
+          deviceType: request.deviceType,
+          displayName: request.claimedDeviceDisplayName || request.displayName,
+          installationId: request.installationId,
+          tokenHint: String((row as any).device_token_hint ?? ''),
+          lastSeenAt: request.createdAt,
+          revokedAt: null,
+          createdAt: request.createdAt,
+          pendingAuthExpiresAt: null,
+        },
+      };
+    }
     if (!request.deviceId) return { ok: true, status: 'pending', request };
     const deviceRow = this.db.query('SELECT * FROM devices WHERE id = $id').get({ $id: request.deviceId });
     if (!deviceRow) return { ok: true, status: 'pending', request };
-    return { ok: true, status: 'claimed', request, device: rowDevice(deviceRow) };
+    return { ok: true, status: 'claimed', request, device: rowDevice(deviceRow), serverUrl: null };
+  }
+
+  completeRemoteDesktopAuthRequest(input: {
+    requestId: string;
+    secret: string;
+    serverUrl: string;
+    deviceId: string;
+    displayName: string;
+    deviceToken: string;
+    claimProof: string;
+  }): DesktopAuthRemoteClaimResult {
+    const row = this.db.query('SELECT * FROM desktop_auth_requests WHERE id = $id').get({ $id: input.requestId });
+    if (!row) return { ok: false, reason: 'not_found' };
+    if (String((row as any).secret_hash) !== sha256(input.secret)) return { ok: false, reason: 'invalid_secret' };
+    const request = rowDesktopAuthRequest(row);
+    if (request.claimedAt) return { ok: false, reason: 'claimed' };
+    if (Date.parse(request.expiresAt) < Date.now()) return { ok: false, reason: 'expired' };
+    const deviceTokenHash = String((row as any).device_token_hash ?? '');
+    if (!input.deviceToken || !deviceTokenHash || sha256(input.deviceToken) !== deviceTokenHash) {
+      return { ok: false, reason: 'invalid_claim' };
+    }
+    const expectedProof = desktopClaimProof(input.deviceToken, {
+      serverUrl: input.serverUrl,
+      deviceId: input.deviceId,
+      displayName: input.displayName,
+    });
+    if (input.claimProof !== expectedProof) return { ok: false, reason: 'invalid_claim' };
+    const claimedAt = nowIso();
+    this.db
+      .query(
+        `
+        UPDATE desktop_auth_requests
+        SET claimed_at = $claimedAt,
+            claimed_server_url = $serverUrl,
+            claimed_device_id = $deviceId,
+            claimed_device_display_name = $displayName
+        WHERE id = $id AND claimed_at IS NULL
+      `,
+      )
+      .run({
+        $claimedAt: claimedAt,
+        $serverUrl: input.serverUrl,
+        $deviceId: input.deviceId,
+        $displayName: input.displayName,
+        $id: request.id,
+      });
+    return this.desktopAuthRequestResult(input.requestId, input.secret);
   }
 
   createWebViewHandoff(input: { userId: string; deviceId: string; redirectUrl: string; expiresAt: string }): { handoff: WebViewHandoffRecord; secret: string } {
@@ -2552,14 +2642,29 @@ export class VoiceStreamNextDb {
     return { device, token };
   }
 
+  registerDeviceWithToken(
+    userId: string,
+    input: { deviceType: string; displayName: string; token: string; installationId?: string | null; pendingAuthExpiresAt?: string | null },
+  ): DeviceRecord {
+    return this.registerDeviceWithTokenHash(userId, {
+      deviceType: input.deviceType,
+      displayName: input.displayName,
+      tokenHash: sha256(input.token),
+      tokenHint: input.token.slice(0, 6),
+      installationId: input.installationId,
+      pendingAuthExpiresAt: input.pendingAuthExpiresAt,
+    });
+  }
+
   registerDeviceWithTokenHash(
     userId: string,
-    input: { deviceType: string; displayName: string; tokenHash: string; tokenHint: string; installationId?: string | null },
+    input: { deviceType: string; displayName: string; tokenHash: string; tokenHint: string; installationId?: string | null; pendingAuthExpiresAt?: string | null },
   ): DeviceRecord {
     const at = nowIso();
     const id = newId('dev');
     const installationId = cleanInstallationId(input.installationId);
-    if (installationId) {
+    const pendingAuthExpiresAt = input.pendingAuthExpiresAt ?? null;
+    if (installationId && !pendingAuthExpiresAt) {
       const existing = this.updateDeviceByInstallationId(userId, {
         deviceType: input.deviceType,
         displayName: input.displayName,
@@ -2567,14 +2672,39 @@ export class VoiceStreamNextDb {
         tokenHash: input.tokenHash,
         tokenHint: input.tokenHint,
         lastSeenAt: at,
+        pendingAuthExpiresAt,
       });
       if (existing) return existing;
     }
     this.db
       .query(
         `
-        INSERT INTO devices (id, user_id, device_type, display_name, installation_id, token_hash, token_hint, last_seen_at, created_at)
-        VALUES ($id, $userId, $deviceType, $displayName, $installationId, $tokenHash, $tokenHint, $lastSeenAt, $createdAt)
+        INSERT INTO devices (
+          id,
+          user_id,
+          device_type,
+          display_name,
+          installation_id,
+          token_hash,
+          token_hint,
+          last_seen_at,
+          created_at,
+          pending_auth_expires_at,
+          pending_auth_installation_id
+        )
+        VALUES (
+          $id,
+          $userId,
+          $deviceType,
+          $displayName,
+          $installationId,
+          $tokenHash,
+          $tokenHint,
+          $lastSeenAt,
+          $createdAt,
+          $pendingAuthExpiresAt,
+          $pendingAuthInstallationId
+        )
       `,
       )
       .run({
@@ -2582,11 +2712,13 @@ export class VoiceStreamNextDb {
         $userId: userId,
         $deviceType: input.deviceType,
         $displayName: input.displayName,
-        $installationId: installationId,
+        $installationId: pendingAuthExpiresAt ? null : installationId,
         $tokenHash: input.tokenHash,
         $tokenHint: input.tokenHint,
         $lastSeenAt: at,
         $createdAt: at,
+        $pendingAuthExpiresAt: pendingAuthExpiresAt,
+        $pendingAuthInstallationId: pendingAuthExpiresAt ? installationId : null,
       });
     const row = this.db.query('SELECT * FROM devices WHERE id = $id').get({ $id: id });
     if (!row) {
@@ -2604,6 +2736,7 @@ export class VoiceStreamNextDb {
       tokenHash: string;
       tokenHint: string;
       lastSeenAt: string;
+      pendingAuthExpiresAt?: string | null;
     },
   ): DeviceRecord | null {
     const row = this.db
@@ -2631,7 +2764,9 @@ export class VoiceStreamNextDb {
             token_hash = $tokenHash,
             token_hint = $tokenHint,
             last_seen_at = $lastSeenAt,
-            revoked_at = NULL
+            revoked_at = NULL,
+            pending_auth_expires_at = $pendingAuthExpiresAt,
+            pending_auth_installation_id = NULL
         WHERE id = $deviceId
       `,
       )
@@ -2640,6 +2775,7 @@ export class VoiceStreamNextDb {
         $tokenHash: input.tokenHash,
         $tokenHint: input.tokenHint,
         $lastSeenAt: input.lastSeenAt,
+        $pendingAuthExpiresAt: input.pendingAuthExpiresAt ?? null,
         $deviceId: String((row as any).id),
       });
     const updated = this.db.query('SELECT * FROM devices WHERE id = $deviceId').get({ $deviceId: String((row as any).id) });
@@ -2648,12 +2784,14 @@ export class VoiceStreamNextDb {
 
   listDevices(userId?: string, includeRevoked = false): DeviceRecord[] {
     this.pruneExpiredUnclaimedPairingDevices();
+    this.pruneExpiredPendingAuthDevices();
+    const activeFilter = includeRevoked ? '' : 'AND revoked_at IS NULL AND pending_auth_expires_at IS NULL';
     const rows = userId
       ? this.db
           .query(
             `
             SELECT * FROM devices
-            WHERE user_id = $userId ${includeRevoked ? '' : 'AND revoked_at IS NULL'}
+            WHERE user_id = $userId ${activeFilter}
             ORDER BY last_seen_at DESC, created_at DESC
           `,
           )
@@ -2662,7 +2800,7 @@ export class VoiceStreamNextDb {
           .query(
             `
             SELECT * FROM devices
-            ${includeRevoked ? '' : 'WHERE revoked_at IS NULL'}
+            ${includeRevoked ? '' : 'WHERE revoked_at IS NULL AND pending_auth_expires_at IS NULL'}
             ORDER BY last_seen_at DESC, created_at DESC
           `,
           )
@@ -2695,6 +2833,23 @@ export class VoiceStreamNextDb {
       `,
       )
       .run({ $now: at });
+    return Number(update.changes ?? 0);
+  }
+
+  pruneExpiredPendingAuthDevices(at = nowIso()): number {
+    const update = this.db
+      .query(
+        `
+        UPDATE devices
+        SET revoked_at = $revokedAt,
+            pending_auth_expires_at = NULL,
+            pending_auth_installation_id = NULL
+        WHERE revoked_at IS NULL
+          AND pending_auth_expires_at IS NOT NULL
+          AND pending_auth_expires_at < $now
+      `,
+      )
+      .run({ $revokedAt: at, $now: at }) as { changes?: number };
     return Number(update.changes ?? 0);
   }
 
@@ -2754,7 +2909,9 @@ export class VoiceStreamNextDb {
               token_hash = $tokenHash,
               token_hint = $tokenHint,
               last_seen_at = $lastSeenAt,
-              revoked_at = NULL
+              revoked_at = NULL,
+              pending_auth_expires_at = NULL,
+              pending_auth_installation_id = NULL
           WHERE user_id = $userId
             AND id = $conflictDeviceId
         `,
@@ -2800,6 +2957,14 @@ export class VoiceStreamNextDb {
     const row = this.db.query('SELECT * FROM devices WHERE id = $id').get({ $id: deviceId });
     if (!row) return { ok: false, reason: 'not_found' };
     if ((row as any).revoked_at != null) return { ok: false, reason: 'revoked' };
+    const pendingAuthExpiresAt = (row as any).pending_auth_expires_at == null ? '' : String((row as any).pending_auth_expires_at);
+    if (pendingAuthExpiresAt && Date.parse(pendingAuthExpiresAt) < Date.now()) {
+      const at = nowIso();
+      this.db
+        .query('UPDATE devices SET revoked_at = $revokedAt, pending_auth_expires_at = NULL, pending_auth_installation_id = NULL WHERE id = $id AND revoked_at IS NULL')
+        .run({ $revokedAt: at, $id: deviceId });
+      return { ok: false, reason: 'revoked' };
+    }
     const tokenHash = sha256(token);
     if (String((row as any).token_hash) !== tokenHash) return { ok: false, reason: 'invalid_token' };
 
@@ -2814,9 +2979,54 @@ export class VoiceStreamNextDb {
     }
 
     const at = nowIso();
-    this.db.query('UPDATE devices SET last_seen_at = $lastSeenAt WHERE id = $id').run({ $lastSeenAt: at, $id: deviceId });
+    const pendingAuthInstallationId = (row as any).pending_auth_installation_id == null
+      ? ''
+      : String((row as any).pending_auth_installation_id);
+    if (pendingAuthExpiresAt && pendingAuthInstallationId) {
+      this.db
+        .query(
+          `
+          UPDATE devices
+          SET revoked_at = $revokedAt,
+              installation_id = NULL
+          WHERE user_id = $userId
+            AND device_type = $deviceType
+            AND installation_id = $installationId
+            AND id != $deviceId
+            AND revoked_at IS NULL
+        `,
+        )
+        .run({
+          $revokedAt: at,
+          $userId: String((row as any).user_id),
+          $deviceType: String((row as any).device_type),
+          $installationId: pendingAuthInstallationId,
+          $deviceId: deviceId,
+        });
+    }
+    this.db
+      .query(
+        `
+        UPDATE devices
+        SET last_seen_at = $lastSeenAt,
+            installation_id = COALESCE($installationId, installation_id),
+            pending_auth_expires_at = NULL,
+            pending_auth_installation_id = NULL
+        WHERE id = $id
+      `,
+      )
+      .run({ $lastSeenAt: at, $installationId: pendingAuthInstallationId || null, $id: deviceId });
     if (pairing && !pairing.claimedAt) this.claimPairingSession(deviceId);
-    return { ok: true, device: rowDevice({ ...(row as any), last_seen_at: at }) };
+    return {
+      ok: true,
+      device: rowDevice({
+        ...(row as any),
+        last_seen_at: at,
+        installation_id: pendingAuthInstallationId || (row as any).installation_id,
+        pending_auth_expires_at: null,
+        pending_auth_installation_id: null,
+      }),
+    };
   }
 
   revokeDevice(userId: string, deviceId: string): DeviceRecord | null {
