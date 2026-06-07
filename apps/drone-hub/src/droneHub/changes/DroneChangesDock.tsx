@@ -110,6 +110,35 @@ const COMMIT_LIST_DEFAULT_WIDTH_PX = 300;
 const COMMIT_LIST_MAX_WIDTH_PX = 460;
 const COMMIT_LIST_MAX_RATIO = 0.42;
 const COMMIT_DETAIL_MIN_WIDTH_PX = 420;
+const CHANGES_CACHE_TTL_MS = 12_000;
+const WORKING_TREE_CHANGES_POLL_INTERVAL_MS = 5_000;
+const PULL_PREVIEW_CHANGES_POLL_INTERVAL_MS = 10_000;
+
+type ChangesCacheMap<T> = Map<string, { atMs: number; payload: T }>;
+
+const workingTreeChangesCache: ChangesCacheMap<Extract<RepoChangesPayload, { ok: true }>> = new Map();
+const pullPreviewChangesCache: ChangesCacheMap<Extract<RepoPullChangesPayload, { ok: true }>> = new Map();
+const pullRequestChangesCache: ChangesCacheMap<Extract<RepoPullRequestChangesPayload, { ok: true }>> = new Map();
+const branchCommitListCache: ChangesCacheMap<Extract<RepoCommitListPayload, { ok: true }>> = new Map();
+const pullRequestCommitListCache: ChangesCacheMap<Extract<RepoPullRequestCommitListPayload, { ok: true }>> = new Map();
+const branchCommitDetailsCache: ChangesCacheMap<Extract<RepoCommitChangesPayload, { ok: true }>> = new Map();
+const pullRequestCommitDetailsCache: ChangesCacheMap<Extract<RepoPullRequestCommitChangesPayload, { ok: true }>> = new Map();
+
+function changesCacheKey(...parts: Array<string | number | null | undefined>): string {
+  return parts.map((part) => String(part ?? '').trim()).join('\u0000');
+}
+
+function readFreshChangesCache<T>(cache: ChangesCacheMap<T>, key: string): T | null {
+  const cached = cache.get(key);
+  if (!cached || Date.now() - cached.atMs >= CHANGES_CACHE_TTL_MS) return null;
+  return cached.payload;
+}
+
+function writeChangesCache<T>(cache: ChangesCacheMap<T>, key: string, payload: T): void {
+  if (!key) return;
+  if (cache.size > 150) cache.clear();
+  cache.set(key, { atMs: Date.now(), payload });
+}
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -278,6 +307,20 @@ export function DroneChangesDock({
     'pull-preview': null,
     'pull-request': null,
   });
+  const workingTreeRefreshNonceRef = React.useRef(refreshNonce);
+  const pullPreviewRefreshNonceRef = React.useRef(refreshNonce);
+  const pullRequestRefreshNonceRef = React.useRef(refreshNonce);
+  const branchCommitListRefreshNonceRef = React.useRef(refreshNonce);
+  const pullRequestCommitListRefreshNonceRef = React.useRef(refreshNonce);
+  const branchCommitDetailsRefreshNonceRef = React.useRef(refreshNonce);
+  const pullRequestCommitDetailsRefreshNonceRef = React.useRef(refreshNonce);
+  const workingTreeCacheKeyRef = React.useRef('');
+  const pullPreviewCacheKeyRef = React.useRef('');
+  const pullRequestCacheKeyRef = React.useRef('');
+  const branchCommitListCacheKeyRef = React.useRef('');
+  const pullRequestCommitListCacheKeyRef = React.useRef('');
+  const branchCommitDetailsCacheKeyRef = React.useRef('');
+  const pullRequestCommitDetailsCacheKeyRef = React.useRef('');
   const [contextModeState, setContextModeState] = React.useState<ChangesContextMode>(() => {
     if (fixedContextMode) return fixedContextMode;
     return initialRequestedPullNumberRef.current && initialRequestedPullNumberRef.current > 0
@@ -524,25 +567,58 @@ export function DroneChangesDock({
   }, [pullRequestActionNotice]);
 
   React.useEffect(() => {
-    if (!repoAttached || disabled || primaryView !== 'changes' || dataMode !== 'working-tree') {
+    if (!repoAttached || disabled) {
       changesRef.current = null;
       setChanges(null);
       setChangesError(null);
       setChangesLoading(false);
       return;
     }
+    if (primaryView !== 'changes' || dataMode !== 'working-tree') {
+      setChangesLoading(false);
+      return;
+    }
 
     let mounted = true;
-    let timer: any = null;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const cacheKey = changesCacheKey('working-tree', droneId, repoPath);
+    const forceInitialLoad = refreshNonce !== workingTreeRefreshNonceRef.current;
+    workingTreeRefreshNonceRef.current = refreshNonce;
+    const cacheKeyChanged = workingTreeCacheKeyRef.current !== cacheKey;
+    workingTreeCacheKeyRef.current = cacheKey;
+    const cached = forceInitialLoad ? null : readFreshChangesCache(workingTreeChangesCache, cacheKey);
+    if (cached) {
+      changesRef.current = cached;
+      setChanges(cached);
+      setChangesError(null);
+      setChangesLoading(false);
+      startup.markReady();
+    } else if (cacheKeyChanged) {
+      changesRef.current = null;
+      setChanges(null);
+      setChangesError(null);
+    }
 
-    const load = async (silent: boolean) => {
+    const load = async (silent: boolean, force = false) => {
       if (!mounted) return;
+      if (!force) {
+        const fresh = readFreshChangesCache(workingTreeChangesCache, cacheKey);
+        if (fresh) {
+          changesRef.current = fresh;
+          setChanges(fresh);
+          setChangesError(null);
+          setChangesLoading(false);
+          startup.markReady();
+          return;
+        }
+      }
       if (!silent) setChangesLoading(true);
       try {
         const data = await requestJson<Extract<RepoChangesPayload, { ok: true }>>(
           `/api/drones/${encodeURIComponent(droneId)}/repo/changes`,
         );
         if (!mounted) return;
+        writeChangesCache(workingTreeChangesCache, cacheKey, data);
         if (!sameRepoChangesPayload(changesRef.current, data)) {
           changesRef.current = data;
           setChanges(data);
@@ -558,37 +634,68 @@ export function DroneChangesDock({
       }
     };
 
-    void load(false);
+    void load(Boolean(cached) && !forceInitialLoad, Boolean(cached) || forceInitialLoad);
     timer = setInterval(() => {
-      void load(true);
-    }, 5000);
+      void load(true, true);
+    }, WORKING_TREE_CHANGES_POLL_INTERVAL_MS);
 
     return () => {
       mounted = false;
       if (timer) clearInterval(timer);
     };
-  }, [dataMode, disabled, droneId, markModeRefreshed, primaryView, refreshNonce, repoAttached, startup.markReady]);
+  }, [dataMode, disabled, droneId, markModeRefreshed, primaryView, refreshNonce, repoAttached, repoPath, startup.markReady]);
 
   React.useEffect(() => {
-    if (!repoAttached || disabled || primaryView !== 'changes' || dataMode !== 'pull-preview') {
+    if (!repoAttached || disabled) {
       pullChangesRef.current = null;
       setPullChanges(null);
       setPullError(null);
       setPullLoading(false);
       return;
     }
+    if (primaryView !== 'changes' || dataMode !== 'pull-preview') {
+      setPullLoading(false);
+      return;
+    }
 
     let mounted = true;
-    let timer: any = null;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const cacheKey = changesCacheKey('pull-preview', droneId, repoPath);
+    const forceInitialLoad = refreshNonce !== pullPreviewRefreshNonceRef.current;
+    pullPreviewRefreshNonceRef.current = refreshNonce;
+    const cacheKeyChanged = pullPreviewCacheKeyRef.current !== cacheKey;
+    pullPreviewCacheKeyRef.current = cacheKey;
+    const cached = forceInitialLoad ? null : readFreshChangesCache(pullPreviewChangesCache, cacheKey);
+    if (cached) {
+      pullChangesRef.current = cached;
+      setPullChanges(cached);
+      setPullError(null);
+      setPullLoading(false);
+    } else if (cacheKeyChanged) {
+      pullChangesRef.current = null;
+      setPullChanges(null);
+      setPullError(null);
+    }
 
-    const load = async (silent: boolean) => {
+    const load = async (silent: boolean, force = false) => {
       if (!mounted) return;
+      if (!force) {
+        const fresh = readFreshChangesCache(pullPreviewChangesCache, cacheKey);
+        if (fresh) {
+          pullChangesRef.current = fresh;
+          setPullChanges(fresh);
+          setPullError(null);
+          setPullLoading(false);
+          return;
+        }
+      }
       if (!silent) setPullLoading(true);
       try {
         const data = await requestJson<Extract<RepoPullChangesPayload, { ok: true }>>(
           `/api/drones/${encodeURIComponent(droneId)}/repo/pull/changes`,
         );
         if (!mounted) return;
+        writeChangesCache(pullPreviewChangesCache, cacheKey, data);
         if (!sameRepoPullChangesPayload(pullChangesRef.current, data)) {
           pullChangesRef.current = data;
           setPullChanges(data);
@@ -603,22 +710,26 @@ export function DroneChangesDock({
       }
     };
 
-    void load(false);
+    void load(Boolean(cached) && !forceInitialLoad, Boolean(cached) || forceInitialLoad);
     timer = setInterval(() => {
-      void load(true);
-    }, 10000);
+      void load(true, true);
+    }, PULL_PREVIEW_CHANGES_POLL_INTERVAL_MS);
 
     return () => {
       mounted = false;
       if (timer) clearInterval(timer);
     };
-  }, [dataMode, disabled, droneId, markModeRefreshed, primaryView, refreshNonce, repoAttached]);
+  }, [dataMode, disabled, droneId, markModeRefreshed, primaryView, refreshNonce, repoAttached, repoPath]);
 
   React.useEffect(() => {
-    if (!repoAttached || disabled || dataMode !== 'pull-request' || !pullRequestNumber) {
+    if (!repoAttached || disabled) {
       pullRequestChangesRef.current = null;
       setPullRequestChanges(null);
       setPullRequestError(null);
+      setPullRequestLoading(false);
+      return;
+    }
+    if (dataMode !== 'pull-request' || !pullRequestNumber) {
       setPullRequestLoading(false);
       return;
     }
@@ -630,15 +741,42 @@ export function DroneChangesDock({
 
     let mounted = true;
     const activePullNumber = pullRequestNumber;
+    const cacheKey = changesCacheKey('pull-request', droneId, repoPath, activePullNumber);
+    const forceInitialLoad = refreshNonce !== pullRequestRefreshNonceRef.current;
+    pullRequestRefreshNonceRef.current = refreshNonce;
+    const cacheKeyChanged = pullRequestCacheKeyRef.current !== cacheKey;
+    pullRequestCacheKeyRef.current = cacheKey;
+    const cached = forceInitialLoad ? null : readFreshChangesCache(pullRequestChangesCache, cacheKey);
+    if (cached) {
+      pullRequestChangesRef.current = cached;
+      setPullRequestChanges(cached);
+      setPullRequestError(null);
+      setPullRequestLoading(false);
+    } else if (cacheKeyChanged) {
+      pullRequestChangesRef.current = null;
+      setPullRequestChanges(null);
+      setPullRequestError(null);
+    }
 
-    const load = async (silent: boolean) => {
+    const load = async (silent: boolean, force = false) => {
       if (!mounted) return;
+      if (!force) {
+        const fresh = readFreshChangesCache(pullRequestChangesCache, cacheKey);
+        if (fresh) {
+          pullRequestChangesRef.current = fresh;
+          setPullRequestChanges(fresh);
+          setPullRequestError(null);
+          setPullRequestLoading(false);
+          return;
+        }
+      }
       if (!silent) setPullRequestLoading(true);
       try {
         const data = await requestJson<Extract<RepoPullRequestChangesPayload, { ok: true }>>(
           `/api/drones/${encodeURIComponent(droneId)}/repo/pull-requests/${activePullNumber}/changes`,
         );
         if (!mounted) return;
+        writeChangesCache(pullRequestChangesCache, cacheKey, data);
         if (!sameRepoPullRequestChangesPayload(pullRequestChangesRef.current, data)) {
           pullRequestChangesRef.current = data;
           setPullRequestChanges(data);
@@ -660,30 +798,61 @@ export function DroneChangesDock({
       }
     };
 
-    void load(false);
+    void load(Boolean(cached) && !forceInitialLoad, Boolean(cached) || forceInitialLoad);
 
     return () => {
       mounted = false;
     };
-  }, [dataMode, disabled, droneId, markModeRefreshed, pullRequestNumber, refreshNonce, repoAttached]);
+  }, [dataMode, disabled, droneId, markModeRefreshed, pullRequestNumber, refreshNonce, repoAttached, repoPath]);
 
   React.useEffect(() => {
-    if (!repoAttached || disabled || primaryView !== 'commits' || contextMode !== 'branch') {
+    if (!repoAttached || disabled) {
       branchCommitListRef.current = null;
       setBranchCommitList(null);
       setBranchCommitListError(null);
       setBranchCommitListLoading(false);
       return;
     }
+    if (primaryView !== 'commits' || contextMode !== 'branch') {
+      setBranchCommitListLoading(false);
+      return;
+    }
     let mounted = true;
-    const load = async () => {
+    const cacheKey = changesCacheKey('branch-commits', droneId, repoPath);
+    const forceInitialLoad = refreshNonce !== branchCommitListRefreshNonceRef.current;
+    branchCommitListRefreshNonceRef.current = refreshNonce;
+    const cacheKeyChanged = branchCommitListCacheKeyRef.current !== cacheKey;
+    branchCommitListCacheKeyRef.current = cacheKey;
+    const cached = forceInitialLoad ? null : readFreshChangesCache(branchCommitListCache, cacheKey);
+    if (cached) {
+      branchCommitListRef.current = cached;
+      setBranchCommitList(cached);
+      setBranchCommitListError(null);
+      setBranchCommitListLoading(false);
+    } else if (cacheKeyChanged) {
+      branchCommitListRef.current = null;
+      setBranchCommitList(null);
+      setBranchCommitListError(null);
+    }
+    const load = async (silent: boolean, force = false) => {
       if (!mounted) return;
-      setBranchCommitListLoading(true);
+      if (!force) {
+        const fresh = readFreshChangesCache(branchCommitListCache, cacheKey);
+        if (fresh) {
+          branchCommitListRef.current = fresh;
+          setBranchCommitList(fresh);
+          setBranchCommitListError(null);
+          setBranchCommitListLoading(false);
+          return;
+        }
+      }
+      if (!silent) setBranchCommitListLoading(true);
       try {
         const data = await requestJson<Extract<RepoCommitListPayload, { ok: true }>>(
           `/api/drones/${encodeURIComponent(droneId)}/repo/commits?limit=100`,
         );
         if (!mounted) return;
+        writeChangesCache(branchCommitListCache, cacheKey, data);
         if (!sameRepoCommitListPayload(branchCommitListRef.current, data)) {
           branchCommitListRef.current = data;
           setBranchCommitList(data);
@@ -693,33 +862,64 @@ export function DroneChangesDock({
         if (!mounted) return;
         setBranchCommitListError(e?.message ?? String(e));
       } finally {
-        if (mounted) setBranchCommitListLoading(false);
+        if (mounted && !silent) setBranchCommitListLoading(false);
       }
     };
-    void load();
+    void load(Boolean(cached) && !forceInitialLoad, Boolean(cached) || forceInitialLoad);
     return () => {
       mounted = false;
     };
-  }, [contextMode, disabled, droneId, primaryView, refreshNonce, repoAttached]);
+  }, [contextMode, disabled, droneId, primaryView, refreshNonce, repoAttached, repoPath]);
 
   React.useEffect(() => {
-    if (!repoAttached || disabled || primaryView !== 'commits' || contextMode !== 'pull-request' || !pullRequestNumber) {
+    if (!repoAttached || disabled) {
       pullRequestCommitListRef.current = null;
       setPullRequestCommitList(null);
       setPullRequestCommitListError(null);
       setPullRequestCommitListLoading(false);
       return;
     }
+    if (primaryView !== 'commits' || contextMode !== 'pull-request' || !pullRequestNumber) {
+      setPullRequestCommitListLoading(false);
+      return;
+    }
     let mounted = true;
     const activePullNumber = pullRequestNumber;
-    const load = async () => {
+    const cacheKey = changesCacheKey('pull-request-commits', droneId, repoPath, activePullNumber);
+    const forceInitialLoad = refreshNonce !== pullRequestCommitListRefreshNonceRef.current;
+    pullRequestCommitListRefreshNonceRef.current = refreshNonce;
+    const cacheKeyChanged = pullRequestCommitListCacheKeyRef.current !== cacheKey;
+    pullRequestCommitListCacheKeyRef.current = cacheKey;
+    const cached = forceInitialLoad ? null : readFreshChangesCache(pullRequestCommitListCache, cacheKey);
+    if (cached) {
+      pullRequestCommitListRef.current = cached;
+      setPullRequestCommitList(cached);
+      setPullRequestCommitListError(null);
+      setPullRequestCommitListLoading(false);
+    } else if (cacheKeyChanged) {
+      pullRequestCommitListRef.current = null;
+      setPullRequestCommitList(null);
+      setPullRequestCommitListError(null);
+    }
+    const load = async (silent: boolean, force = false) => {
       if (!mounted) return;
-      setPullRequestCommitListLoading(true);
+      if (!force) {
+        const fresh = readFreshChangesCache(pullRequestCommitListCache, cacheKey);
+        if (fresh) {
+          pullRequestCommitListRef.current = fresh;
+          setPullRequestCommitList(fresh);
+          setPullRequestCommitListError(null);
+          setPullRequestCommitListLoading(false);
+          return;
+        }
+      }
+      if (!silent) setPullRequestCommitListLoading(true);
       try {
         const data = await requestJson<Extract<RepoPullRequestCommitListPayload, { ok: true }>>(
           `/api/drones/${encodeURIComponent(droneId)}/repo/pull-requests/${activePullNumber}/commits`,
         );
         if (!mounted) return;
+        writeChangesCache(pullRequestCommitListCache, cacheKey, data);
         if (!sameRepoPullRequestCommitListPayload(pullRequestCommitListRef.current, data)) {
           pullRequestCommitListRef.current = data;
           setPullRequestCommitList(data);
@@ -729,33 +929,64 @@ export function DroneChangesDock({
         if (!mounted) return;
         setPullRequestCommitListError(e?.message ?? String(e));
       } finally {
-        if (mounted) setPullRequestCommitListLoading(false);
+        if (mounted && !silent) setPullRequestCommitListLoading(false);
       }
     };
-    void load();
+    void load(Boolean(cached) && !forceInitialLoad, Boolean(cached) || forceInitialLoad);
     return () => {
       mounted = false;
     };
-  }, [contextMode, disabled, droneId, primaryView, pullRequestNumber, refreshNonce, repoAttached]);
+  }, [contextMode, disabled, droneId, primaryView, pullRequestNumber, refreshNonce, repoAttached, repoPath]);
 
   React.useEffect(() => {
-    if (!repoAttached || disabled || primaryView !== 'commits' || contextMode !== 'branch' || !selectedCommitSha) {
+    if (!repoAttached || disabled) {
       branchCommitDetailsRef.current = null;
       setBranchCommitDetails(null);
       setBranchCommitDetailsError(null);
       setBranchCommitDetailsLoading(false);
       return;
     }
+    if (primaryView !== 'commits' || contextMode !== 'branch' || !selectedCommitSha) {
+      setBranchCommitDetailsLoading(false);
+      return;
+    }
     let mounted = true;
     const sha = selectedCommitSha;
-    const load = async () => {
+    const cacheKey = changesCacheKey('branch-commit-details', droneId, repoPath, sha);
+    const forceInitialLoad = refreshNonce !== branchCommitDetailsRefreshNonceRef.current;
+    branchCommitDetailsRefreshNonceRef.current = refreshNonce;
+    const cacheKeyChanged = branchCommitDetailsCacheKeyRef.current !== cacheKey;
+    branchCommitDetailsCacheKeyRef.current = cacheKey;
+    const cached = forceInitialLoad ? null : readFreshChangesCache(branchCommitDetailsCache, cacheKey);
+    if (cached) {
+      branchCommitDetailsRef.current = cached;
+      setBranchCommitDetails(cached);
+      setBranchCommitDetailsError(null);
+      setBranchCommitDetailsLoading(false);
+    } else if (cacheKeyChanged) {
+      branchCommitDetailsRef.current = null;
+      setBranchCommitDetails(null);
+      setBranchCommitDetailsError(null);
+    }
+    const load = async (silent: boolean, force = false) => {
       if (!mounted) return;
-      setBranchCommitDetailsLoading(true);
+      if (!force) {
+        const fresh = readFreshChangesCache(branchCommitDetailsCache, cacheKey);
+        if (fresh) {
+          branchCommitDetailsRef.current = fresh;
+          setBranchCommitDetails(fresh);
+          setBranchCommitDetailsError(null);
+          setBranchCommitDetailsLoading(false);
+          return;
+        }
+      }
+      if (!silent) setBranchCommitDetailsLoading(true);
       try {
         const data = await requestJson<Extract<RepoCommitChangesPayload, { ok: true }>>(
           `/api/drones/${encodeURIComponent(droneId)}/repo/commits/${encodeURIComponent(sha)}/changes`,
         );
         if (!mounted) return;
+        writeChangesCache(branchCommitDetailsCache, cacheKey, data);
         if (!sameRepoCommitChangesPayload(branchCommitDetailsRef.current, data)) {
           branchCommitDetailsRef.current = data;
           setBranchCommitDetails(data);
@@ -765,34 +996,65 @@ export function DroneChangesDock({
         if (!mounted) return;
         setBranchCommitDetailsError(e?.message ?? String(e));
       } finally {
-        if (mounted) setBranchCommitDetailsLoading(false);
+        if (mounted && !silent) setBranchCommitDetailsLoading(false);
       }
     };
-    void load();
+    void load(Boolean(cached) && !forceInitialLoad, Boolean(cached) || forceInitialLoad);
     return () => {
       mounted = false;
     };
-  }, [contextMode, disabled, droneId, primaryView, refreshNonce, repoAttached, selectedCommitSha]);
+  }, [contextMode, disabled, droneId, primaryView, refreshNonce, repoAttached, repoPath, selectedCommitSha]);
 
   React.useEffect(() => {
-    if (!repoAttached || disabled || primaryView !== 'commits' || contextMode !== 'pull-request' || !pullRequestNumber || !selectedCommitSha) {
+    if (!repoAttached || disabled) {
       pullRequestCommitDetailsRef.current = null;
       setPullRequestCommitDetails(null);
       setPullRequestCommitDetailsError(null);
       setPullRequestCommitDetailsLoading(false);
       return;
     }
+    if (primaryView !== 'commits' || contextMode !== 'pull-request' || !pullRequestNumber || !selectedCommitSha) {
+      setPullRequestCommitDetailsLoading(false);
+      return;
+    }
     let mounted = true;
     const activePullNumber = pullRequestNumber;
     const sha = selectedCommitSha;
-    const load = async () => {
+    const cacheKey = changesCacheKey('pull-request-commit-details', droneId, repoPath, activePullNumber, sha);
+    const forceInitialLoad = refreshNonce !== pullRequestCommitDetailsRefreshNonceRef.current;
+    pullRequestCommitDetailsRefreshNonceRef.current = refreshNonce;
+    const cacheKeyChanged = pullRequestCommitDetailsCacheKeyRef.current !== cacheKey;
+    pullRequestCommitDetailsCacheKeyRef.current = cacheKey;
+    const cached = forceInitialLoad ? null : readFreshChangesCache(pullRequestCommitDetailsCache, cacheKey);
+    if (cached) {
+      pullRequestCommitDetailsRef.current = cached;
+      setPullRequestCommitDetails(cached);
+      setPullRequestCommitDetailsError(null);
+      setPullRequestCommitDetailsLoading(false);
+    } else if (cacheKeyChanged) {
+      pullRequestCommitDetailsRef.current = null;
+      setPullRequestCommitDetails(null);
+      setPullRequestCommitDetailsError(null);
+    }
+    const load = async (silent: boolean, force = false) => {
       if (!mounted) return;
-      setPullRequestCommitDetailsLoading(true);
+      if (!force) {
+        const fresh = readFreshChangesCache(pullRequestCommitDetailsCache, cacheKey);
+        if (fresh) {
+          pullRequestCommitDetailsRef.current = fresh;
+          setPullRequestCommitDetails(fresh);
+          setPullRequestCommitDetailsError(null);
+          setPullRequestCommitDetailsLoading(false);
+          return;
+        }
+      }
+      if (!silent) setPullRequestCommitDetailsLoading(true);
       try {
         const data = await requestJson<Extract<RepoPullRequestCommitChangesPayload, { ok: true }>>(
           `/api/drones/${encodeURIComponent(droneId)}/repo/pull-requests/${activePullNumber}/commits/${encodeURIComponent(sha)}/changes`,
         );
         if (!mounted) return;
+        writeChangesCache(pullRequestCommitDetailsCache, cacheKey, data);
         if (!sameRepoPullRequestCommitChangesPayload(pullRequestCommitDetailsRef.current, data)) {
           pullRequestCommitDetailsRef.current = data;
           setPullRequestCommitDetails(data);
@@ -802,14 +1064,14 @@ export function DroneChangesDock({
         if (!mounted) return;
         setPullRequestCommitDetailsError(e?.message ?? String(e));
       } finally {
-        if (mounted) setPullRequestCommitDetailsLoading(false);
+        if (mounted && !silent) setPullRequestCommitDetailsLoading(false);
       }
     };
-    void load();
+    void load(Boolean(cached) && !forceInitialLoad, Boolean(cached) || forceInitialLoad);
     return () => {
       mounted = false;
     };
-  }, [contextMode, disabled, droneId, primaryView, pullRequestNumber, refreshNonce, repoAttached, selectedCommitSha]);
+  }, [contextMode, disabled, droneId, primaryView, pullRequestNumber, refreshNonce, repoAttached, repoPath, selectedCommitSha]);
 
   const workingTreeEntries = React.useMemo(() => sortRepoChangeEntries(changes?.entries ?? []), [changes?.entries]);
 
@@ -1903,6 +2165,7 @@ export function DroneChangesDock({
             ? { ...prev, pullRequest: { ...prev.pullRequest, state: 'merged' } }
             : prev,
         );
+        pullRequestChangesCache.delete(changesCacheKey('pull-request', droneId, repoPath, activePullRequestNumber));
       }
       setPullRequestActionNotice(merged.message || `Merged PR #${activePullRequestNumber}.`);
       setRefreshNonce((n) => n + 1);
@@ -1912,7 +2175,7 @@ export function DroneChangesDock({
     } finally {
       if (mountedRef.current) setPullRequestActionBusy(null);
     }
-  }, [activePullRequestIsFinalState, activePullRequestNumber, droneId, pullRequestActionBusy]);
+  }, [activePullRequestIsFinalState, activePullRequestNumber, droneId, pullRequestActionBusy, repoPath]);
 
   const closeActivePullRequest = React.useCallback(async () => {
     if (!activePullRequestNumber || pullRequestActionBusy || activePullRequestIsFinalState) return;
@@ -1937,9 +2200,10 @@ export function DroneChangesDock({
                 title: String(closed.title ?? prev.pullRequest.title).trim() || prev.pullRequest.title,
                 htmlUrl: closed.htmlUrl ?? prev.pullRequest.htmlUrl,
               },
-            }
+          }
           : prev,
       );
+      pullRequestChangesCache.delete(changesCacheKey('pull-request', droneId, repoPath, activePullRequestNumber));
       setPullRequestActionNotice(`Closed PR #${closed.number}.`);
       setRefreshNonce((n) => n + 1);
     } catch (e: any) {
@@ -1948,7 +2212,7 @@ export function DroneChangesDock({
     } finally {
       if (mountedRef.current) setPullRequestActionBusy(null);
     }
-  }, [activePullRequestIsFinalState, activePullRequestNumber, droneId, pullRequestActionBusy]);
+  }, [activePullRequestIsFinalState, activePullRequestNumber, droneId, pullRequestActionBusy, repoPath]);
 
   const openEntryInEditor = React.useCallback(
     (entry: RepoChangeEntry | null) => {
