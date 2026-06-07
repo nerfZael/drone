@@ -6,12 +6,44 @@ import { IconChevron, iconForFilePath } from '../icons';
 import type { DroneFsEntry, DroneFsListPayload, DroneFsUploadPayload } from '../types';
 import { OpenedDroneFilePanel } from './OpenedDroneFilePanel';
 import type { DroneOpenedFileState } from './opened-file-types';
+import { DRONE_FILE_WINDOW_SAVED_EVENT } from './open-drone-file-window';
 import { buildFileExplorerTree, type FileExplorerNode } from './tree';
+
+const CHILD_DIRECTORY_CACHE_MAX_AGE_MS = 5 * 60_000;
+
+type ChildDirectoryCacheEntry = {
+  atMs: number;
+  entries: DroneFsEntry[];
+};
+
+const childDirectoryCache = new Map<string, ChildDirectoryCacheEntry>();
+
+function childDirectoryCacheKey(droneIdRaw: string, dirPathRaw: string): string {
+  return `${String(droneIdRaw ?? '').trim()}\u0000${normalizeContainerPathInput(dirPathRaw)}`;
+}
+
+function readChildDirectoryCache(cacheKey: string): DroneFsEntry[] | null {
+  const cached = childDirectoryCache.get(cacheKey);
+  if (!cached || Date.now() - cached.atMs > CHILD_DIRECTORY_CACHE_MAX_AGE_MS) return null;
+  return cached.entries;
+}
+
+function writeChildDirectoryCache(cacheKey: string, entries: DroneFsEntry[]): void {
+  if (!cacheKey) return;
+  if (childDirectoryCache.size > 500) childDirectoryCache.clear();
+  childDirectoryCache.set(cacheKey, { atMs: Date.now(), entries });
+}
 
 function normalizeContainerPathInput(raw: string): string {
   const trimmed = String(raw ?? '').trim();
   if (!trimmed) return '/';
   return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+}
+
+function parentContainerPath(raw: string): string {
+  const normalized = normalizeContainerPathInput(raw);
+  const slash = normalized.lastIndexOf('/');
+  return slash > 0 ? normalized.slice(0, slash) : '/';
 }
 
 function formatLocalDateTime(ms: number | null | undefined): string {
@@ -83,6 +115,7 @@ export function DroneFilesDock({
   onSetViewMode: _onSetViewMode,
   onOpenPath,
   onOpenFile,
+  onOpenFileInWindow,
   onOpenFileTarget,
   onRefresh,
   onRefreshOpenedFile,
@@ -104,6 +137,7 @@ export function DroneFilesDock({
   onSetViewMode: (next: 'list' | 'thumb') => void;
   onOpenPath: (nextPath: string) => void;
   onOpenFile: (entry: DroneFsEntry) => void;
+  onOpenFileInWindow?: (entry: DroneFsEntry) => boolean;
   onOpenFileTarget?: (next: { path: string; name: string; line?: number | null; column?: number | null }) => void;
   onRefresh: () => void;
   onRefreshOpenedFile?: () => void;
@@ -187,11 +221,23 @@ export function DroneFilesDock({
       const dirPath = normalizeContainerPathInput(dirPathRaw);
       if (!dirPath || dirPath === normalizedPath) return;
       if (childLoadingByPath[dirPath]) return;
-      if (!opts?.force && Object.prototype.hasOwnProperty.call(childEntriesByPath, dirPath)) return;
+      const cacheKey = childDirectoryCacheKey(droneId, dirPath);
+      const cached = opts?.force ? null : readChildDirectoryCache(cacheKey);
+      if (!opts?.force && Object.prototype.hasOwnProperty.call(childEntriesByPath, dirPath) && !cached) return;
+      if (cached) {
+        setChildEntriesByPath((prev) => {
+          if (sameFsEntries(prev[dirPath], cached)) return prev;
+          return { ...prev, [dirPath]: cached };
+        });
+        setChildErrorByPath((prev) => {
+          if (prev[dirPath] == null) return prev;
+          return { ...prev, [dirPath]: null };
+        });
+      }
 
       const seq = (childRequestSeqRef.current[dirPath] ?? 0) + 1;
       childRequestSeqRef.current[dirPath] = seq;
-      setChildLoadingByPath((prev) => ({ ...prev, [dirPath]: true }));
+      if (!cached) setChildLoadingByPath((prev) => ({ ...prev, [dirPath]: true }));
       setChildErrorByPath((prev) => ({ ...prev, [dirPath]: null }));
 
       try {
@@ -203,6 +249,7 @@ export function DroneFilesDock({
         }
         if (childRequestSeqRef.current[dirPath] !== seq) return;
         const nextEntries = Array.isArray((data as any).entries) ? (((data as any).entries as DroneFsEntry[]) ?? []) : [];
+        writeChildDirectoryCache(cacheKey, nextEntries);
         setChildEntriesByPath((prev) => {
           if (sameFsEntries(prev[dirPath], nextEntries)) return prev;
           return { ...prev, [dirPath]: nextEntries };
@@ -246,6 +293,27 @@ export function DroneFilesDock({
       void loadDirectory(dirPath, { force: true });
     }
   }, [expandedDirs, loadDirectory, onRefresh, onRefreshOpenedFile]);
+
+  React.useEffect(() => {
+    const onFileWindowSaved = (event: Event) => {
+      const detail = (event as CustomEvent<{ droneId?: string; path?: string }>).detail;
+      if (String(detail?.droneId ?? '') !== String(droneId)) return;
+      const filePath = String(detail?.path ?? '').trim();
+      if (!filePath) return;
+      const parentPath = parentContainerPath(filePath);
+      childDirectoryCache.delete(childDirectoryCacheKey(droneId, parentPath));
+      if (parentPath === normalizedPath) {
+        onRefresh();
+        return;
+      }
+      const childKnown = Object.prototype.hasOwnProperty.call(childEntriesByPath, parentPath);
+      if (expandedDirs[parentPath] === true || childKnown) {
+        void loadDirectory(parentPath, { force: true });
+      }
+    };
+    window.addEventListener(DRONE_FILE_WINDOW_SAVED_EVENT, onFileWindowSaved);
+    return () => window.removeEventListener(DRONE_FILE_WINDOW_SAVED_EVENT, onFileWindowSaved);
+  }, [childEntriesByPath, droneId, expandedDirs, loadDirectory, normalizedPath, onRefresh]);
 
   const uploadFilesToCurrentPath = React.useCallback(
     async (dropped: FileList | File[] | null | undefined) => {
@@ -375,6 +443,15 @@ export function DroneFilesDock({
     [onOpenFile, onOpenFileTarget],
   );
 
+  const openFileEntry = React.useCallback(
+    (entry: DroneFsEntry) => {
+      if (entry.kind !== 'file') return;
+      if (onOpenFileInWindow?.(entry)) return;
+      onOpenFile(entry);
+    },
+    [onOpenFile, onOpenFileInWindow],
+  );
+
   const renderDownloadButton = React.useCallback(
     (entry: DroneFsEntry, className: string) => {
       if (entry.kind !== 'directory' && entry.kind !== 'file') return null;
@@ -490,7 +567,7 @@ export function DroneFilesDock({
             {openable ? (
               <button
                 type="button"
-                onClick={() => onOpenFile(entry)}
+                onClick={() => openFileEntry(entry)}
                 className={`flex-1 min-w-0 text-left px-1 rounded border transition-all flex items-center gap-0.5 ${
                   active
                     ? 'border-transparent bg-[rgba(255,255,255,.04)]'
@@ -527,7 +604,7 @@ export function DroneFilesDock({
             {openable ? (
               <button
                 type="button"
-                onClick={() => onOpenFile(entry)}
+                onClick={() => openFileEntry(entry)}
                 className={`${actionButtonClassName} opacity-0 group-hover/file:opacity-100 focus:opacity-100 transition-opacity`}
                 title={`Open ${entry.path}`}
               >
