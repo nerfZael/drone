@@ -18,6 +18,9 @@ contextBridge.exposeInMainWorld('voiceStreamDesktop', {
   readCommandLogs: () => ipcRenderer.invoke('commandLog:read'),
   clearCommandLogs: () => ipcRenderer.invoke('commandLog:clear'),
   writeClipboard: (text) => ipcRenderer.invoke('clipboard:writeText', text),
+  qrDataUrl: (text) => ipcRenderer.invoke('qr:dataUrl', text),
+  desktopAuthQrPayload: (config) => ipcRenderer.invoke('desktopAuth:qrPayload', config),
+  stopDesktopAuthQr: () => ipcRenderer.invoke('desktopAuth:stopQr'),
   windowState: () => ipcRenderer.invoke('window:state'),
   compactWindow: () => ipcRenderer.invoke('window:compact'),
   expandWindow: () => ipcRenderer.invoke('window:expand'),
@@ -59,6 +62,11 @@ contextBridge.exposeInMainWorld('voiceStreamDesktop', {
     const listener = (_event, status) => callback(status);
     ipcRenderer.on('window:state', listener);
     return () => ipcRenderer.removeListener('window:state', listener);
+  },
+  onDesktopAuthClaimed: (callback) => {
+    const listener = (_event, config) => callback(config);
+    ipcRenderer.on('desktop-auth:claimed', listener);
+    return () => ipcRenderer.removeListener('desktop-auth:claimed', listener);
   },
   voskStatus: () => ipcRenderer.invoke('vosk:status'),
   startVosk: () => ipcRenderer.invoke('vosk:start'),

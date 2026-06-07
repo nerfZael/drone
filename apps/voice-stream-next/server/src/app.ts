@@ -212,6 +212,29 @@ function cleanPairableDeviceType(raw: unknown, fallback: 'desktop' | 'android'):
   return value === 'android' || value === 'desktop' ? value : fallback;
 }
 
+function cleanHttpBaseUrl(raw: unknown): string {
+  const value = cleanText(raw).replace(/\/+$/, '');
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('invalid protocol');
+    if (!url.hostname) throw new Error('missing host');
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    throw Object.assign(new Error('serverUrl must be an http(s) URL'), { statusCode: 400 });
+  }
+}
+
+function desktopClaimProof(token: string, claim: { serverUrl: string; deviceId: string; displayName: string }): string {
+  return crypto
+    .createHmac('sha256', token)
+    .update(JSON.stringify({
+      serverUrl: claim.serverUrl,
+      deviceId: claim.deviceId,
+      displayName: claim.displayName,
+    }))
+    .digest('base64url');
+}
+
 function speakTextFromResult(result: unknown): string {
   if (!result || typeof result !== 'object') return '';
   return cleanText((result as any).text);
@@ -250,6 +273,10 @@ function desktopAuthExpiresAt(from = Date.now()): string {
   const raw = Number(process.env.VOICE_STREAM_NEXT_DESKTOP_AUTH_TTL_MS ?? 10 * 60 * 1000);
   const ttlMs = Number.isInteger(raw) && raw > 0 ? raw : 10 * 60 * 1000;
   return new Date(from + ttlMs).toISOString();
+}
+
+function desktopPendingAuthExpiresAt(from = Date.now()): string {
+  return new Date(from + 5 * 60 * 1000).toISOString();
 }
 
 function webViewHandoffExpiresAt(from = Date.now()): string {
@@ -1753,6 +1780,32 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     }),
   );
 
+  app.post('/api/desktop-auth/remote-claim', async (req, reply) => {
+    const body = jsonBody(req);
+    const requestId = cleanText(body.requestId);
+    const secret = cleanText(body.secret);
+    const serverUrl = cleanHttpBaseUrl(body.serverUrl);
+    const deviceId = cleanText(body.deviceId);
+    const displayName = cleanText(body.displayName, 'Desktop voice client') || 'Desktop voice client';
+    const deviceToken = cleanText(body.deviceToken);
+    const claimProof = cleanText(body.claimProof);
+    if (!requestId || !secret || !deviceId) {
+      reply.code(400).send({ ok: false, error: 'desktop auth request, secret, and device id are required' });
+      return undefined;
+    }
+    const result = db.completeRemoteDesktopAuthRequest({ requestId, secret, serverUrl, deviceId, displayName, deviceToken, claimProof });
+    if (!result.ok) {
+      const status = result.reason === 'expired' || result.reason === 'claimed' ? 409 : result.reason === 'invalid_secret' || result.reason === 'invalid_claim' ? 401 : 404;
+      reply.code(status).send({ ok: false, error: `desktop auth request ${result.reason.replace('_', ' ')}` });
+      return undefined;
+    }
+    if (result.status !== 'claimed') {
+      reply.code(409).send({ ok: false, error: 'desktop auth request was not claimed' });
+      return undefined;
+    }
+    return { ok: true, status: result.status, device: result.device, serverUrl: result.serverUrl, minClientVersion: minClientVersion() };
+  });
+
   app.post('/api/desktop-auth/result', async (req, reply) => {
     try {
       const body = jsonBody(req);
@@ -1773,6 +1826,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         status: result.status,
         request: result.request,
         device: result.status === 'claimed' ? result.device : undefined,
+        serverUrl: result.status === 'claimed' ? result.serverUrl : undefined,
         minClientVersion: minClientVersion(),
       };
     } catch (error: any) {
@@ -1855,6 +1909,72 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       return { ok: true, ...result };
     }),
   );
+
+  app.post('/api/devices/:deviceId/desktop-auth/claims', async (req, reply) => {
+    const body = jsonBody(req);
+    const sourceDeviceId = cleanText((req.params as any).deviceId);
+    const sourceToken = cleanText(req.headers['x-voice-device-token'] || body.token);
+    const auth = verifyDeviceAuth(db, sourceDeviceId, sourceToken, parseClientVersion(body.clientVersion, parseClientVersion(body.protocolVersion, null)));
+    if (!auth.ok) {
+      reply.code(auth.reason === 'client_too_old' ? 426 : 401).send({ ok: false, error: deviceAuthFailureMessage(auth), reason: auth.reason, minClientVersion: auth.reason === 'client_too_old' ? auth.minClientVersion : undefined });
+      return undefined;
+    }
+    const displayName = cleanText(body.displayName, 'Desktop voice client') || 'Desktop voice client';
+    const desktopToken = cleanText(body.deviceToken);
+    const installationId = cleanText(body.installationId) || null;
+    const serverUrl = cleanHttpBaseUrl(body.serverUrl || serverPublicUrl(req));
+    if (!desktopToken) {
+      reply.code(400).send({ ok: false, error: 'desktop device token is required' });
+      return undefined;
+    }
+    const device = db.registerDeviceWithToken(auth.device.userId, {
+      deviceType: 'desktop',
+      displayName,
+      token: desktopToken,
+      installationId,
+      pendingAuthExpiresAt: desktopPendingAuthExpiresAt(),
+    });
+    addLog(auth.device.userId, {
+      deviceId: device.id,
+      source: 'android',
+      level: 'info',
+      message: `Desktop QR connected: ${displayName}`,
+      detailsJson: JSON.stringify({ sourceDeviceId: auth.device.id, installationId, pendingAuth: true }),
+    });
+    emitAppEvent(auth.device.userId, 'device_changed', { deviceId: device.id, reason: 'desktop_qr_claimed' });
+    return {
+      ok: true,
+      device,
+      claimProof: desktopClaimProof(desktopToken, { serverUrl, deviceId: device.id, displayName: device.displayName }),
+      minClientVersion: minClientVersion(),
+    };
+  });
+
+  app.post('/api/devices/:deviceId/desktop-auth/claims/:desktopDeviceId/revoke', async (req, reply) => {
+    const body = jsonBody(req);
+    const sourceDeviceId = cleanText((req.params as any).deviceId);
+    const desktopDeviceId = cleanText((req.params as any).desktopDeviceId);
+    const sourceToken = cleanText(req.headers['x-voice-device-token'] || body.token);
+    const auth = verifyDeviceAuth(db, sourceDeviceId, sourceToken, parseClientVersion(body.clientVersion, parseClientVersion(body.protocolVersion, null)));
+    if (!auth.ok) {
+      reply.code(auth.reason === 'client_too_old' ? 426 : 401).send({ ok: false, error: deviceAuthFailureMessage(auth), reason: auth.reason, minClientVersion: auth.reason === 'client_too_old' ? auth.minClientVersion : undefined });
+      return undefined;
+    }
+    const revoked = db.revokeDevice(auth.device.userId, desktopDeviceId);
+    if (!revoked) {
+      reply.code(404).send({ ok: false, error: 'desktop device not found' });
+      return undefined;
+    }
+    addLog(auth.device.userId, {
+      deviceId: revoked.id,
+      source: 'android',
+      level: 'warn',
+      message: `Desktop QR claim rolled back: ${revoked.displayName}`,
+      detailsJson: JSON.stringify({ sourceDeviceId: auth.device.id }),
+    });
+    emitAppEvent(auth.device.userId, 'device_changed', { deviceId: revoked.id, reason: 'desktop_qr_claim_rolled_back' });
+    return { ok: true, device: revoked, minClientVersion: minClientVersion() };
+  });
 
   app.post('/api/pairing/payload', async (req, reply) =>
     withUser(req, reply, db, clerkEnabled, async (ctx) => {

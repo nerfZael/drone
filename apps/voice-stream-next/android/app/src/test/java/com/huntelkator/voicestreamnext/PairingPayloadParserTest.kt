@@ -59,6 +59,40 @@ class PairingPayloadParserTest {
     }
 
     @Test
+    fun parsesDesktopAuthPayload() {
+        val requestServerUrl = "https://desktop-request.example.test"
+        val payload =
+            "voicestream://desktop-auth?requestServerUrl=${encode(requestServerUrl)}&requestId=dauth_123&secret=secret-1&deviceToken=token-1&displayName=Desktop&installationId=desktop-install&expiresAt=2099-01-01T00%3A00%3A00.000Z&minClientVersion=3"
+
+        val config = PairingPayloadParser.parseDesktopAuth(payload).getOrThrow()
+
+        assertTrue(PairingPayloadParser.isDesktopAuthPayload(payload))
+        assertEquals(requestServerUrl, config.requestServerUrl)
+        assertEquals("dauth_123", config.requestId)
+        assertEquals("secret-1", config.secret)
+        assertEquals("token-1", config.deviceToken)
+        assertEquals("Desktop", config.displayName)
+        assertEquals("desktop-install", config.installationId)
+        assertEquals(3L, config.minClientVersion)
+    }
+
+    @Test
+    fun parsesDesktopAuthCallbackPayload() {
+        val callbackUrl = "http://192.168.1.40:49152/desktop-auth/claim"
+        val callbackUrl2 = "http://10.0.0.12:49152/desktop-auth/claim"
+        val payload =
+            "voicestream://desktop-auth?callbackUrl=${encode(callbackUrl)}&callbackUrls=${encode("[\"$callbackUrl2\",\"$callbackUrl\"]")}&callbackSecret=callback-secret&deviceToken=token-2&displayName=Desktop&installationId=desktop-install"
+
+        val config = PairingPayloadParser.parseDesktopAuth(payload).getOrThrow()
+
+        assertEquals(callbackUrl, config.callbackUrl)
+        assertEquals(listOf(callbackUrl2, callbackUrl), config.callbackUrls)
+        assertEquals("callback-secret", config.callbackSecret)
+        assertEquals("token-2", config.deviceToken)
+        assertEquals("Desktop", config.displayName)
+    }
+
+    @Test
     fun rejectsUpdatePayloadWithoutVersion() {
         val result = PairingPayloadParser.parseUpdate("voicestream://update?apk=https%3A%2F%2Fexample.test%2Fapp.apk")
 

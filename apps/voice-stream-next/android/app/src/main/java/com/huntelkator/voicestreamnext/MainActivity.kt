@@ -1111,6 +1111,15 @@ class MainActivity : ComponentActivity() {
             return
         }
 
+        if (PairingPayloadParser.isDesktopAuthPayload(payload)) {
+            val config = PairingPayloadParser.parseDesktopAuth(payload).getOrElse { error ->
+                showPairingMessage("Desktop sign-in failed: ${error.message}")
+                return
+            }
+            confirmDesktopQr(config)
+            return
+        }
+
         if (PairingPayloadParser.isUpdatePayload(payload)) {
             val config = PairingPayloadParser.parseUpdate(payload).getOrElse { error ->
                 showPairingMessage("Update check failed: ${error.message}")
@@ -1153,6 +1162,36 @@ class MainActivity : ComponentActivity() {
         showStatus("Paired ${config.deviceId.take(14)} from QR payload.")
         renderAuthState()
         checkForAppUpdate(force = true)
+    }
+
+    private fun confirmDesktopQr(config: DesktopAuthConfig) {
+        val backend = api.loadConfig().serverUrl.ifBlank { Constants.DEFAULT_SERVER_URL }
+        val desktopName = config.displayName ?: "this desktop"
+        AlertDialog.Builder(this)
+            .setTitle("Connect desktop?")
+            .setMessage("Connect $desktopName to $backend using this signed-in phone.")
+            .setPositiveButton("Connect") { _, _ -> claimDesktopQr(config) }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun claimDesktopQr(config: DesktopAuthConfig) = runApi("Connecting desktop") {
+        val minClientVersion = config.minClientVersion ?: 1L
+        if (BuildConfig.VERSION_CODE.toLong() < minClientVersion) {
+            showPairingMessage("Update this Android app before using this desktop sign-in QR.")
+            return@runApi
+        }
+        config.expiresAt?.let { expiresAt ->
+            runCatching { Instant.parse(expiresAt) }.getOrNull()?.let { expiry ->
+                if (expiry.isBefore(Instant.now())) {
+                    showPairingMessage("Desktop sign-in QR expired at $expiresAt.")
+                    return@runApi
+                }
+            }
+        }
+        val result = api.claimDesktopQr(config)
+        showPairingMessage("Desktop connected to ${result.serverUrl}.")
+        showStatus("Connected ${result.displayName}.")
     }
 
     private fun isAndroidSetupUrl(payload: String): Boolean = runCatching {
