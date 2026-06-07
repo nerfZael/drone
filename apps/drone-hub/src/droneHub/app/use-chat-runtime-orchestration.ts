@@ -23,6 +23,46 @@ type RequestJson = <T>(url: string, init?: RequestInit) => Promise<T>;
 const STOPPED_BY_USER_ERROR = 'Stopped by user.';
 const STOPPED_BEFORE_SUBMISSION_ERROR = 'Stopped before submission.';
 const INITIAL_TRANSCRIPT_TAIL_TURNS = 50;
+const CHAT_RUNTIME_CACHE_TTL_MS = 30_000;
+const CHAT_RUNTIME_CACHE_MAX_ENTRIES = 200;
+
+type ChatRuntimeCacheMap<T> = Map<string, { atMs: number; value: T }>;
+
+type ChatTranscriptCacheValue = {
+  etag: string | null;
+  fullLoaded: boolean;
+  transcripts: TranscriptItem[];
+};
+
+type ChatPendingCacheValue = {
+  pending: PendingPrompt[];
+};
+
+type PendingPromptResponseForChat = {
+  key: string;
+  pending: PendingPrompt[];
+};
+
+const chatTranscriptCache: ChatRuntimeCacheMap<ChatTranscriptCacheValue> = new Map();
+const chatPendingCache: ChatRuntimeCacheMap<ChatPendingCacheValue> = new Map();
+
+function chatRuntimeCacheKey(droneIdRaw: string | null | undefined, chatNameRaw: string | null | undefined): string {
+  const droneId = String(droneIdRaw ?? '').trim();
+  const chatName = String(chatNameRaw ?? '').trim() || 'default';
+  return droneId ? `${droneId}\u0000${chatName}` : '';
+}
+
+function readFreshChatRuntimeCache<T>(cache: ChatRuntimeCacheMap<T>, key: string): T | null {
+  const cached = key ? cache.get(key) : null;
+  if (!cached || Date.now() - cached.atMs >= CHAT_RUNTIME_CACHE_TTL_MS) return null;
+  return cached.value;
+}
+
+function writeChatRuntimeCache<T>(cache: ChatRuntimeCacheMap<T>, key: string, value: T): void {
+  if (!key) return;
+  if (cache.size > CHAT_RUNTIME_CACHE_MAX_ENTRIES) cache.clear();
+  cache.set(key, { atMs: Date.now(), value });
+}
 
 type UseChatRuntimeOrchestrationArgs = {
   chatInfo: ChatInfo | null;
@@ -107,6 +147,7 @@ export function useChatRuntimeOrchestration({
   const [cliTyping, setCliTyping] = React.useState(false);
   const [chatEventsConnected, setChatEventsConnected] = React.useState(false);
   const [chatEventsNonce, setChatEventsNonce] = React.useState(0);
+  const [pendingRespForChat, setPendingRespForChat] = React.useState<PendingPromptResponseForChat | null>(null);
   const cliTypingTimerRef = React.useRef<any>(null);
   const sessionOffsetRef = React.useRef<number | null>(null);
   const transcriptEtagRef = React.useRef<string | null>(null);
@@ -117,6 +158,7 @@ export function useChatRuntimeOrchestration({
   const sessionTextRef = React.useRef<string>('');
   const selectedDroneRef = React.useRef(selectedDrone);
   const selectedChatRef = React.useRef(selectedChat);
+  const selectedChatCacheKey = React.useMemo(() => chatRuntimeCacheKey(selectedDrone, selectedChat || 'default'), [selectedChat, selectedDrone]);
 
   React.useEffect(() => {
     selectedDroneRef.current = selectedDrone;
@@ -240,11 +282,13 @@ export function useChatRuntimeOrchestration({
     // Use stable drone identity so in-place renames don't wipe the current chat/output pane.
     const shouldPrimeTranscriptLoading = chatUiMode === 'transcript' && Boolean(selectedDrone && selectedChat);
     const shouldPrimeSessionLoading = chatUiMode === 'cli' && Boolean(selectedDrone && selectedChat);
+    const cachedTranscript = shouldPrimeTranscriptLoading ? readFreshChatRuntimeCache(chatTranscriptCache, selectedChatCacheKey) : null;
     resetSessionOutputState();
-    transcriptEtagRef.current = null;
-    fullTranscriptLoadedRef.current = false;
-    setLoadingTranscript(shouldPrimeTranscriptLoading);
-    setTranscripts(null);
+    transcriptEtagRef.current = cachedTranscript?.etag ?? null;
+    fullTranscriptLoadedRef.current = cachedTranscript?.fullLoaded === true;
+    setLoadingTranscript(shouldPrimeTranscriptLoading && !cachedTranscript);
+    transcriptsRef.current = cachedTranscript?.transcripts ?? null;
+    setTranscripts(cachedTranscript?.transcripts ?? null);
     setTranscriptError(null);
     setLoadingSession(shouldPrimeSessionLoading);
     // pending prompts are chat-scoped and loaded in the chat selection effect
@@ -254,6 +298,7 @@ export function useChatRuntimeOrchestration({
     resetSessionOutputState,
     selectedDrone,
     selectedChat,
+    selectedChatCacheKey,
     selectedDroneIdentity,
     setLoadingSession,
     setLoadingTranscript,
@@ -486,21 +531,31 @@ export function useChatRuntimeOrchestration({
     selectedDrone,
   ]);
 
-  const { value: pendingResp } = usePoll<{ ok: true; pending: PendingPrompt[] }>(
+  const { value: pendingResp } = usePoll<PendingPromptResponseForChat>(
     async () => {
-      if (!selectedDrone || !selectedChat) return { ok: true, pending: [] };
-      if (!hasSelectedDroneSummary) return { ok: true, pending: [] };
-      if (isDroneStartingOrSeeding(selectedDroneHubPhase)) return { ok: true, pending: [] };
-      return await fetchJson<{ ok: true; pending: PendingPrompt[] }>(
+      const key = selectedChatCacheKey;
+      if (!selectedDrone || !selectedChat) return { key, pending: [] };
+      if (!hasSelectedDroneSummary) return { key, pending: [] };
+      if (isDroneStartingOrSeeding(selectedDroneHubPhase)) return { key, pending: [] };
+      const data = await fetchJson<{ ok: true; pending: PendingPrompt[] }>(
         `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(selectedChat || 'default')}/pending`,
       );
+      return { key, pending: Array.isArray(data?.pending) ? data.pending : [] };
     },
     chatEventsConnected ? 60_000 : 1000,
-    [selectedDrone, selectedChat, hasSelectedDroneSummary, selectedDroneHubPhase, chatEventsConnected, chatEventsNonce],
+    [selectedDrone, selectedChat, selectedChatCacheKey, hasSelectedDroneSummary, selectedDroneHubPhase, chatEventsConnected, chatEventsNonce],
   );
 
+  React.useEffect(() => {
+    if (!selectedChatCacheKey) return;
+    if (pendingResp?.key !== selectedChatCacheKey) return;
+    setPendingRespForChat(pendingResp);
+    writeChatRuntimeCache(chatPendingCache, selectedChatCacheKey, { pending: pendingResp.pending });
+  }, [pendingResp, selectedChatCacheKey]);
+
   const pendingPrompts: PendingPrompt[] = React.useMemo(() => {
-    const server = Array.isArray(pendingResp?.pending) ? pendingResp.pending : [];
+    const cachedPending = readFreshChatRuntimeCache(chatPendingCache, selectedChatCacheKey);
+    const server = pendingRespForChat?.key === selectedChatCacheKey ? pendingRespForChat.pending : (cachedPending?.pending ?? []);
     const byId = new Map<string, PendingPrompt>();
     for (const p of server) {
       if (p?.id) byId.set(p.id, p);
@@ -509,7 +564,7 @@ export function useChatRuntimeOrchestration({
       if (p?.id && !byId.has(p.id)) byId.set(p.id, p);
     }
     return Array.from(byId.values()).slice(-60);
-  }, [optimisticPendingPrompts, pendingResp]);
+  }, [optimisticPendingPrompts, pendingRespForChat, selectedChatCacheKey]);
 
   const visiblePendingPrompts = React.useMemo(() => {
     if (chatUiMode !== 'transcript') return pendingPrompts;
@@ -635,7 +690,7 @@ export function useChatRuntimeOrchestration({
     let timer: ReturnType<typeof setTimeout> | null = null;
     let busy = false;
     let backgroundFullBusy = false;
-    let loadedInitialTail = false;
+    let loadedInitialTail = Boolean(readFreshChatRuntimeCache(chatTranscriptCache, selectedChatCacheKey));
     let eventsConnected = false;
     let reloadAfterCurrentLoad = false;
     let reloadAfterBackgroundFull = false;
@@ -649,7 +704,7 @@ export function useChatRuntimeOrchestration({
         droneId: selectedDrone || '',
         chatName: selectedChat || 'default',
         turn: 'all',
-        etag: transcriptEtagRef.current,
+        etag: fullTranscriptLoadedRef.current ? transcriptEtagRef.current : null,
       });
       if (!mounted) return;
       if (data.notModified) {
@@ -658,6 +713,11 @@ export function useChatRuntimeOrchestration({
       }
       transcriptEtagRef.current = data.etag;
       fullTranscriptLoadedRef.current = true;
+      writeChatRuntimeCache(chatTranscriptCache, selectedChatCacheKey, {
+        etag: data.etag,
+        fullLoaded: true,
+        transcripts: data.transcripts,
+      });
       setTranscripts((prev) => (sameTranscriptItems(prev, data.transcripts) ? prev : data.transcripts));
       setTranscriptError(null);
     };
@@ -707,6 +767,11 @@ export function useChatRuntimeOrchestration({
           });
           if (!mounted) return;
           loadedInitialTail = true;
+          writeChatRuntimeCache(chatTranscriptCache, selectedChatCacheKey, {
+            etag: data.etag,
+            fullLoaded: false,
+            transcripts: data.transcripts,
+          });
           setTranscripts((prev) => (sameTranscriptItems(prev, data.transcripts) ? prev : data.transcripts));
           setTranscriptError(null);
           setLoadingTranscript(false);
@@ -782,6 +847,7 @@ export function useChatRuntimeOrchestration({
     chatUiMode,
     selectedDrone,
     selectedChat,
+    selectedChatCacheKey,
     hasSelectedDroneSummary,
     selectedDroneHubPhase,
     requestJson,
