@@ -22510,8 +22510,13 @@ export async function startDroneHubApiServer(opts: {
           const drone = real.drone;
           const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
           await ensureChatEntry({ droneId, chatName });
-          await reconcileChatFromDaemon({ droneId, chatName });
-          const list = await readPendingPrompts({ droneId, chatName });
+          const reg = await loadRegistry();
+          const entry = (reg as any)?.drones?.[droneId]?.chats?.[chatName] ?? null;
+          if (chatHasReconcilablePendingPrompts(entry)) {
+            ensureDaemonPromptEventSubscription(droneId);
+            enqueueReconcile(droneId, chatName);
+          }
+          const list = pendingPromptsFromChatEntry(entry, { keepRecentlyCompleted: true }).slice(-50);
           json(res, 200, { ok: true, id: droneId, name: droneName, chat: chatName, pending: list });
           return;
         } catch (e: any) {
@@ -23476,7 +23481,6 @@ export async function startDroneHubApiServer(opts: {
           const droneId = resolved.id;
           const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
           await ensureChatEntry({ droneId, chatName });
-          await reconcileChatFromDaemon({ droneId, chatName });
           const reg = await loadRegistry();
           const d = (reg as any).drones?.[droneId] ?? null;
           if (!d) {
@@ -23496,6 +23500,10 @@ export async function startDroneHubApiServer(opts: {
               agent,
             });
             return;
+          }
+          if (chatHasReconcilablePendingPrompts(c)) {
+            ensureDaemonPromptEventSubscription(droneId);
+            enqueueReconcile(droneId, chatName);
           }
 
           const turns = (c as any).turns as TranscriptTurn[] | undefined;
