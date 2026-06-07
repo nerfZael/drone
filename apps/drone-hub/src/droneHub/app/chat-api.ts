@@ -17,6 +17,29 @@ export type FetchDroneChatTranscriptResult = {
   notModified: boolean;
 };
 
+export type DroneChatEventRef = {
+  droneId?: string;
+  chatName?: string;
+};
+
+export type DroneChatDeltaEvent = {
+  ok?: boolean;
+  chats?: DroneChatEventRef[];
+  removed?: DroneChatEventRef[];
+};
+
+function normalizeEventText(raw: unknown): string {
+  return String(raw ?? '').trim();
+}
+
+export function droneChatEventMatches(data: DroneChatDeltaEvent, droneIdRaw: string | null | undefined, chatNameRaw: string | null | undefined): boolean {
+  const droneId = normalizeEventText(droneIdRaw);
+  const chatName = normalizeEventText(chatNameRaw) || 'default';
+  if (!droneId || !chatName) return false;
+  const refs = [...(Array.isArray(data?.chats) ? data.chats : []), ...(Array.isArray(data?.removed) ? data.removed : [])];
+  return refs.some((ref) => normalizeEventText(ref?.droneId) === droneId && (normalizeEventText(ref?.chatName) || 'default') === chatName);
+}
+
 function buildUnexpectedHtmlError(url: string): string {
   const path = String(url ?? '').trim();
   if (path.startsWith('/api/')) {
@@ -181,15 +204,18 @@ export async function fetchDroneChatTranscript(
     droneId: string;
     chatName: string;
     turn?: 'all' | 'last' | number;
+    tail?: number;
   },
 ): Promise<TranscriptItem[]> {
   const droneId = String(opts.droneId ?? '').trim();
   const chatName = String(opts.chatName ?? '').trim() || 'default';
   const turn = opts.turn ?? 'all';
+  const qs = new URLSearchParams({ turn: String(turn) });
+  if (typeof opts.tail === 'number' && Number.isFinite(opts.tail) && opts.tail > 0) {
+    qs.set('tail', String(Math.floor(opts.tail)));
+  }
   const data = await requestJson<{ ok: true; transcripts: TranscriptItem[] }>(
-    `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/transcript?turn=${encodeURIComponent(
-      String(turn),
-    )}`,
+    `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/transcript?${qs.toString()}`,
   );
   return Array.isArray(data?.transcripts) ? data.transcripts : [];
 }
@@ -198,14 +224,17 @@ export async function fetchDroneChatTranscriptCached(opts: {
   droneId: string;
   chatName: string;
   turn?: 'all' | 'last' | number;
+  tail?: number;
   etag?: string | null;
 }): Promise<FetchDroneChatTranscriptResult> {
   const droneId = String(opts.droneId ?? '').trim();
   const chatName = String(opts.chatName ?? '').trim() || 'default';
   const turn = opts.turn ?? 'all';
-  const url = `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/transcript?turn=${encodeURIComponent(
-    String(turn),
-  )}`;
+  const qs = new URLSearchParams({ turn: String(turn) });
+  if (typeof opts.tail === 'number' && Number.isFinite(opts.tail) && opts.tail > 0) {
+    qs.set('tail', String(Math.floor(opts.tail)));
+  }
+  const url = `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/transcript?${qs.toString()}`;
   const headers = new Headers();
   const etag = String(opts.etag ?? '').trim();
   if (etag) headers.set('if-none-match', etag);
