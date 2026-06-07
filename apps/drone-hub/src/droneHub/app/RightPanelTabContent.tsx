@@ -192,6 +192,7 @@ type RightPanelTabContentProps = {
   agentLabel: string;
   portRows: DronePortMapping[];
   onOpenFileInEditor: (entry: DroneFsEntry) => void;
+  onOpenFileInWindow: (entry: DroneFsEntry) => boolean;
   onOpenFileTargetInEditor: (next: { path: string; name: string; line?: number | null; column?: number | null }) => void;
   openedFile: DroneOpenedFileState;
   onOpenedEditorFileContentChange: (next: string) => void;
@@ -271,6 +272,7 @@ export function RightPanelTabContent({
   agentLabel,
   portRows,
   onOpenFileInEditor,
+  onOpenFileInWindow,
   onOpenFileTargetInEditor,
   openedFile,
   onOpenedEditorFileContentChange,
@@ -411,6 +413,7 @@ export function RightPanelTabContent({
             onRefresh={refreshFsList}
             onRefreshOpenedFile={onRefreshOpenedEditorFile}
             onOpenFile={onOpenFileInEditor}
+            onOpenFileInWindow={onOpenFileInWindow}
             onOpenFileTarget={onOpenFileTargetInEditor}
             openedFile={openedFile}
             onOpenedFileContentChange={onOpenedEditorFileContentChange}

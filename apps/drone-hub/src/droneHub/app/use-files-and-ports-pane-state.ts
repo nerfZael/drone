@@ -38,6 +38,42 @@ import {
   usePoll,
 } from './hooks';
 
+const FS_LIST_CACHE_MAX_AGE_MS = 5 * 60_000;
+const FS_LIST_POLL_LOADING_MS = 8_000;
+const FS_LIST_POLL_IDLE_MS = 30_000;
+
+type FsListCacheEntry = {
+  atMs: number;
+  payload: Extract<DroneFsListPayload, { ok: true }>;
+};
+
+const fsListCache = new Map<string, FsListCacheEntry>();
+
+function fsListCacheKey(droneIdRaw: string, pathRaw: string): string {
+  return `${String(droneIdRaw ?? '').trim()}\u0000${String(pathRaw ?? '').trim() || '/'}`;
+}
+
+function readFsListCache(cacheKey: string): Extract<DroneFsListPayload, { ok: true }> | null {
+  const cached = fsListCache.get(cacheKey);
+  if (!cached || Date.now() - cached.atMs > FS_LIST_CACHE_MAX_AGE_MS) return null;
+  return cached.payload;
+}
+
+function writeFsListCache(cacheKey: string, payload: Extract<DroneFsListPayload, { ok: true }>): void {
+  if (!cacheKey) return;
+  if (fsListCache.size > 300) fsListCache.clear();
+  fsListCache.set(cacheKey, { atMs: Date.now(), payload });
+}
+
+export function invalidateFsListCacheForPath(droneIdRaw: string, pathRaw: string): void {
+  const droneId = String(droneIdRaw ?? '').trim();
+  const filePath = String(pathRaw ?? '').trim();
+  if (!droneId || !filePath) return;
+  const slash = filePath.lastIndexOf('/');
+  const parentPath = slash > 0 ? filePath.slice(0, slash) : '/';
+  fsListCache.delete(fsListCacheKey(droneId, parentPath || '/'));
+}
+
 type UseFilesAndPortsPaneStateArgs = {
   currentDrone: DroneSummary | null;
   requestJson: <T>(url: string, init?: RequestInit) => Promise<T>;
@@ -53,6 +89,10 @@ export function useFilesAndPortsPaneState({
 }: UseFilesAndPortsPaneStateArgs) {
   const [fsPathByDrone, setFsPathByDrone] = React.useState<Record<string, string>>({});
   const [fsRefreshNonce, setFsRefreshNonce] = React.useState(0);
+  const [fsResp, setFsResp] = React.useState<DroneFsListPayload | null>(null);
+  const [fsError, setFsError] = React.useState<string | null>(null);
+  const [fsLoading, setFsLoading] = React.useState(true);
+  const lastFsRefreshNonceRef = React.useRef(fsRefreshNonce);
 
   const defaultFsPathForCurrentDrone = React.useMemo(() => {
     if (!currentDrone) return '/';
@@ -89,20 +129,117 @@ export function useFilesAndPortsPaneState({
     setFsRefreshNonce((n) => n + 1);
   }, []);
 
-  const fsPollIntervalMs = currentDrone ? 8000 : 60000;
-  const {
-    value: fsResp,
-    error: fsError,
-    loading: fsLoading,
-  } = usePoll<DroneFsListPayload>(
-    () =>
-      currentDrone && !isDroneStartingOrSeeding(currentDrone.hubPhase)
-        ? requestJson(`/api/drones/${encodeURIComponent(currentDrone.id)}/fs/list?path=${encodeURIComponent(currentFsPath)}`)
-        : Promise.resolve({ ok: true, id: '', name: '', path: '/', entries: [] }),
-    fsPollIntervalMs,
-    [currentDrone?.id, currentDrone?.name, currentDrone?.hubPhase, currentFsPath, fsRefreshNonce],
-    { enabled: filesEnabled },
-  );
+  React.useEffect(() => {
+    if (!filesEnabled) {
+      setFsLoading(false);
+      return;
+    }
+    const droneId = String(currentDrone?.id ?? '').trim();
+    if (!currentDrone || !droneId || isDroneStartingOrSeeding(currentDrone.hubPhase)) {
+      setFsResp({ ok: true, id: '', name: '', path: '/', entries: [] });
+      setFsError(null);
+      setFsLoading(false);
+      return;
+    }
+
+    let mounted = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let busy = false;
+    let forceAfterBusy = false;
+    let hasLoadedData = false;
+    const forceInitialLoad = fsRefreshNonce !== lastFsRefreshNonceRef.current;
+    lastFsRefreshNonceRef.current = fsRefreshNonce;
+    const cacheKey = fsListCacheKey(droneId, currentFsPath);
+    const cached = forceInitialLoad ? null : readFsListCache(cacheKey);
+    if (cached) {
+      hasLoadedData = true;
+      setFsResp(cached);
+      setFsError(null);
+      setFsLoading(false);
+    } else {
+      setFsResp(null);
+      setFsError(null);
+      setFsLoading(true);
+    }
+
+    const clearTimer = () => {
+      if (timer == null) return;
+      clearTimeout(timer);
+      timer = null;
+    };
+    const scheduleNext = () => {
+      clearTimer();
+      timer = setTimeout(() => {
+        void load(true, true);
+      }, hasLoadedData ? FS_LIST_POLL_IDLE_MS : FS_LIST_POLL_LOADING_MS);
+      (timer as any).unref?.();
+    };
+
+    const load = async (silent: boolean, force = false): Promise<void> => {
+      if (!mounted) return;
+      if (busy) {
+        if (force) forceAfterBusy = true;
+        return;
+      }
+      if (!force) {
+        const fresh = readFsListCache(cacheKey);
+        if (fresh) {
+          hasLoadedData = true;
+          setFsResp(fresh);
+          setFsError(null);
+          setFsLoading(false);
+          scheduleNext();
+          return;
+        }
+      }
+      busy = true;
+      if (!silent) setFsLoading(true);
+      try {
+        const data = await requestJson<DroneFsListPayload>(
+          `/api/drones/${encodeURIComponent(droneId)}/fs/list?path=${encodeURIComponent(currentFsPath)}`,
+        );
+        if (!mounted) return;
+        if ((data as any)?.ok !== true) {
+          throw new Error(String((data as any)?.error ?? 'filesystem request failed'));
+        }
+        hasLoadedData = true;
+        const payload = data as Extract<DroneFsListPayload, { ok: true }>;
+        writeFsListCache(cacheKey, payload);
+        setFsResp(payload);
+        setFsError(null);
+      } catch (e: any) {
+        if (!mounted) return;
+        setFsError(e?.message ?? String(e));
+      } finally {
+        busy = false;
+        if (mounted) {
+          setFsLoading(false);
+          if (forceAfterBusy) {
+            forceAfterBusy = false;
+            void load(false, true);
+            return;
+          }
+          scheduleNext();
+        }
+      }
+    };
+
+    const onVisibilityChange = () => {
+      if (!mounted || typeof document === 'undefined') return;
+      if (document.visibilityState !== 'visible') return;
+      clearTimer();
+      void load(true, true);
+    };
+
+    void load(Boolean(cached) && !forceInitialLoad, Boolean(cached) || forceInitialLoad);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      mounted = false;
+      clearTimer();
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [currentDrone?.id, currentDrone?.name, currentDrone?.hubPhase, currentFsPath, filesEnabled, fsRefreshNonce, requestJson]);
+
   const fsPayloadError =
     fsResp && (fsResp as any).ok === false ? String((fsResp as any)?.error ?? 'filesystem request failed') : null;
   const fsErrorCombined = fsError ?? fsPayloadError;
