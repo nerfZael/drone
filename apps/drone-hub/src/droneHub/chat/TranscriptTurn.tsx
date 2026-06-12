@@ -12,7 +12,7 @@ import type { DroneHubTask } from './drone-hub-task-parser';
 import type { DroneHubTaskSpawnMode } from './drone-hub-task-spawn';
 import { extractAgentCopilotFromAgentMessage } from './agent-copilot-parser';
 import { extractDroneHubTasksFromAgentMessage } from './drone-hub-task-parser';
-import { IconAlert, IconBot, IconCheck, IconCopy, IconImage, IconJobs, IconSpinner, IconTldr, IconUser } from './icons';
+import { IconAlert, IconBot, IconCheck, IconCopy, IconImage, IconJobs, IconSnapshot, IconSpinner, IconTldr, IconUser } from './icons';
 
 type TldrState =
   | { status: 'idle' }
@@ -307,6 +307,7 @@ export const TranscriptTurn = React.memo(
     tldr,
     showTldr,
     onToggleTldr,
+    onRollbackDockerSnapshot,
     onHoverAgentMessage,
     onOpenFileReference,
     onOpenLink,
@@ -322,6 +323,7 @@ export const TranscriptTurn = React.memo(
     tldr: TldrState | null;
     showTldr: boolean;
     onToggleTldr: (item: TranscriptItem) => void;
+    onRollbackDockerSnapshot?: (item: TranscriptItem) => void | Promise<void>;
     onHoverAgentMessage: (item: TranscriptItem | null) => void;
     onOpenFileReference?: (ref: MarkdownFileReference) => void;
     onOpenLink?: (href: string) => boolean;
@@ -353,6 +355,9 @@ export const TranscriptTurn = React.memo(
     const promptIso = item.promptAt || item.at;
     const agentIso = item.completedAt || item.at;
     const autoContinueBadge = resolveAutoContinueBadge(item.agentMessageAutoContinue);
+    const dockerSnapshot = item.dockerSnapshot;
+    const dockerSnapshotBusy = dockerSnapshot?.status === 'creating' || dockerSnapshot?.status === 'restoring';
+    const canRollbackDockerSnapshot = Boolean(item.ok && dockerSnapshot?.id && dockerSnapshot.status === 'ready' && onRollbackDockerSnapshot);
     const tldrStatus = tldr?.status ?? 'idle';
     const tldrLoading = tldrStatus === 'loading';
     const tldrError = tldr && tldr.status === 'error' ? tldr.error : '';
@@ -656,6 +661,40 @@ export const TranscriptTurn = React.memo(
                     {parsingJobs ? <IconSpinner className="w-3.5 h-3.5 text-[var(--accent)]" /> : <IconJobs className="w-3.5 h-3.5 opacity-90" />}
                   </button>
                 )}
+                {item.ok && dockerSnapshot && (dockerSnapshotBusy || dockerSnapshot.status === 'failed' || onRollbackDockerSnapshot) ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (canRollbackDockerSnapshot) void onRollbackDockerSnapshot?.(item);
+                    }}
+                    disabled={!canRollbackDockerSnapshot || dockerSnapshotBusy}
+                    className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-opacity ${
+                      dockerSnapshotBusy ? 'opacity-100 cursor-wait' : 'opacity-0 group-hover:opacity-100'
+                    } ${
+                      canRollbackDockerSnapshot
+                        ? 'bg-[rgba(0,0,0,.15)] border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[rgba(0,0,0,.25)]'
+                        : dockerSnapshot.status === 'failed'
+                          ? 'bg-[rgba(0,0,0,.15)] border-[rgba(255,90,90,.25)] text-[var(--red)]'
+                          : 'bg-[rgba(0,0,0,.15)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                    }`}
+                    title={
+                      dockerSnapshot.status === 'creating'
+                        ? 'Creating Docker snapshot'
+                        : dockerSnapshot.status === 'restoring'
+                          ? 'Rolling back to this Docker snapshot'
+                          : dockerSnapshot.status === 'failed'
+                            ? `Docker snapshot failed: ${dockerSnapshot.error || 'unknown error'}`
+                            : 'Roll back this drone to this Docker snapshot'
+                    }
+                    aria-label="Roll back to Docker snapshot"
+                  >
+                    {dockerSnapshotBusy ? (
+                      <IconSpinner className="w-3.5 h-3.5 text-[var(--accent)]" />
+                    ) : (
+                      <IconSnapshot className="w-3.5 h-3.5 opacity-90" />
+                    )}
+                  </button>
+                ) : null}
               </div>
             </div>
           </div>
@@ -686,11 +725,17 @@ export const TranscriptTurn = React.memo(
     ((a.tldr && a.tldr.status === 'ready' ? a.tldr.summary : '') === (b.tldr && b.tldr.status === 'ready' ? b.tldr.summary : '')) &&
     ((a.tldr && a.tldr.status === 'error' ? a.tldr.error : '') === (b.tldr && b.tldr.status === 'error' ? b.tldr.error : '')) &&
     a.onToggleTldr === b.onToggleTldr &&
+    a.onRollbackDockerSnapshot === b.onRollbackDockerSnapshot &&
     a.onHoverAgentMessage === b.onHoverAgentMessage &&
     a.onOpenFileReference === b.onOpenFileReference &&
     a.onOpenLink === b.onOpenLink &&
     (a.droneId ?? '') === (b.droneId ?? '') &&
     (a.droneHomePath ?? '') === (b.droneHomePath ?? '') &&
     sameAttachments((a.item as any).attachments, (b.item as any).attachments) &&
+    (a.item.dockerSnapshot?.id ?? '') === (b.item.dockerSnapshot?.id ?? '') &&
+    (a.item.dockerSnapshot?.status ?? '') === (b.item.dockerSnapshot?.status ?? '') &&
+    (a.item.dockerSnapshot?.readyAt ?? '') === (b.item.dockerSnapshot?.readyAt ?? '') &&
+    (a.item.dockerSnapshot?.restoredAt ?? '') === (b.item.dockerSnapshot?.restoredAt ?? '') &&
+    (a.item.dockerSnapshot?.error ?? '') === (b.item.dockerSnapshot?.error ?? '') &&
     (a.showRoleIcons ?? true) === (b.showRoleIcons ?? true),
 );

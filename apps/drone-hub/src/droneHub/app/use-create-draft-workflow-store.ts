@@ -12,6 +12,7 @@ type CreateDraftWorkflowState = {
   creating: boolean;
   createMode: CreateMode;
   createRuntime: CreateRuntime;
+  createPersistVolume: boolean;
   cloneSourceId: string | null;
   cloneIncludeChats: boolean;
   createError: string | null;
@@ -34,6 +35,7 @@ type CreateDraftWorkflowState = {
   setCreating: (next: Updater<boolean>) => void;
   setCreateMode: (next: Updater<CreateMode>) => void;
   setCreateRuntime: (next: Updater<CreateRuntime>) => void;
+  setCreatePersistVolume: (next: Updater<boolean>) => void;
   setCloneSourceId: (next: Updater<string | null>) => void;
   setCloneIncludeChats: (next: Updater<boolean>) => void;
   setCreateError: (next: Updater<string | null>) => void;
@@ -63,6 +65,7 @@ const useCreateDraftWorkflowStore = create<CreateDraftWorkflowState>((set) => ({
   creating: false,
   createMode: 'create',
   createRuntime: 'container',
+  createPersistVolume: false,
   cloneSourceId: null,
   cloneIncludeChats: true,
   createError: null,
@@ -85,6 +88,7 @@ const useCreateDraftWorkflowStore = create<CreateDraftWorkflowState>((set) => ({
   setCreating: (next) => set((s) => ({ creating: resolveNext(s.creating, next) })),
   setCreateMode: (next) => set((s) => ({ createMode: resolveNext(s.createMode, next) })),
   setCreateRuntime: (next) => set((s) => ({ createRuntime: resolveNext(s.createRuntime, next) })),
+  setCreatePersistVolume: (next) => set((s) => ({ createPersistVolume: resolveNext(s.createPersistVolume, next) })),
   setCloneSourceId: (next) => set((s) => ({ cloneSourceId: resolveNext(s.cloneSourceId, next) })),
   setCloneIncludeChats: (next) => set((s) => ({ cloneIncludeChats: resolveNext(s.cloneIncludeChats, next) })),
   setCreateError: (next) => set((s) => ({ createError: resolveNext(s.createError, next) })),
@@ -113,6 +117,7 @@ export function useCreateDraftWorkflowState() {
       creating: s.creating,
       createMode: s.createMode,
       createRuntime: s.createRuntime,
+      createPersistVolume: s.createPersistVolume,
       cloneSourceId: s.cloneSourceId,
       cloneIncludeChats: s.cloneIncludeChats,
       createError: s.createError,
@@ -135,6 +140,7 @@ export function useCreateDraftWorkflowState() {
       setCreating: s.setCreating,
       setCreateMode: s.setCreateMode,
       setCreateRuntime: s.setCreateRuntime,
+      setCreatePersistVolume: s.setCreatePersistVolume,
       setCloneSourceId: s.setCloneSourceId,
       setCloneIncludeChats: s.setCloneIncludeChats,
       setCreateError: s.setCreateError,

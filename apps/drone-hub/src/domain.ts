@@ -9,6 +9,7 @@ export type ChatInfo = {
   model: string | null;
   agentMessageAutoContinueEnabled: boolean;
   agentSuggestionEnabled: boolean;
+  dockerSnapshotAfterAgentMessageEnabled: boolean;
   sessionName: string;
   createdAt: string;
 };
@@ -81,6 +82,7 @@ export function normalizeChatInfoPayload(data: any): ChatInfo {
   const model = modelRaw || null;
   const sessionName = String(data?.sessionName ?? '').trim() || `drone-hub-chat-${chat}`;
   const createdAt = String(data?.createdAt ?? '').trim() || new Date().toISOString();
+  const dockerSnapshotAfterAgentMessageEnabled = data?.dockerSnapshotAfterAgentMessageEnabled === true;
 
   const raw = data?.agent;
   const normalizeBuiltin = (v: any): 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi' | null => {
@@ -105,6 +107,7 @@ export function normalizeChatInfoPayload(data: any): ChatInfo {
       model,
       agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true,
       agentSuggestionEnabled: data?.agentSuggestionEnabled === true,
+      dockerSnapshotAfterAgentMessageEnabled,
       sessionName,
       createdAt,
       agent: { kind: 'builtin', id: builtinId },
@@ -121,6 +124,7 @@ export function normalizeChatInfoPayload(data: any): ChatInfo {
         model,
         agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true,
         agentSuggestionEnabled: data?.agentSuggestionEnabled === true,
+        dockerSnapshotAfterAgentMessageEnabled,
         sessionName,
         createdAt,
         agent: { kind: 'custom', id, label, command },
@@ -135,6 +139,7 @@ export function normalizeChatInfoPayload(data: any): ChatInfo {
       model,
       agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true,
       agentSuggestionEnabled: data?.agentSuggestionEnabled === true,
+      dockerSnapshotAfterAgentMessageEnabled,
       sessionName,
       createdAt,
       agent: { kind: 'builtin', id: 'claude' },
@@ -147,19 +152,20 @@ export function normalizeChatInfoPayload(data: any): ChatInfo {
       model,
       agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true,
       agentSuggestionEnabled: data?.agentSuggestionEnabled === true,
+      dockerSnapshotAfterAgentMessageEnabled,
       sessionName,
       createdAt,
       agent: { kind: 'builtin', id: 'opencode' },
     };
   }
   if (String(data?.piSessionId ?? '').trim()) {
-    return { name, chat, model, agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true, agentSuggestionEnabled: data?.agentSuggestionEnabled === true, sessionName, createdAt, agent: { kind: 'builtin', id: 'pi' } };
+    return { name, chat, model, agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true, agentSuggestionEnabled: data?.agentSuggestionEnabled === true, dockerSnapshotAfterAgentMessageEnabled, sessionName, createdAt, agent: { kind: 'builtin', id: 'pi' } };
   }
   if (String(data?.codexThreadId ?? '').trim()) {
-    return { name, chat, model, agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true, agentSuggestionEnabled: data?.agentSuggestionEnabled === true, sessionName, createdAt, agent: { kind: 'builtin', id: 'codex' } };
+    return { name, chat, model, agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true, agentSuggestionEnabled: data?.agentSuggestionEnabled === true, dockerSnapshotAfterAgentMessageEnabled, sessionName, createdAt, agent: { kind: 'builtin', id: 'codex' } };
   }
   if (String(data?.chatId ?? '').trim()) {
-    return { name, chat, model, agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true, agentSuggestionEnabled: data?.agentSuggestionEnabled === true, sessionName, createdAt, agent: { kind: 'builtin', id: 'cursor' } };
+    return { name, chat, model, agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true, agentSuggestionEnabled: data?.agentSuggestionEnabled === true, dockerSnapshotAfterAgentMessageEnabled, sessionName, createdAt, agent: { kind: 'builtin', id: 'cursor' } };
   }
   return {
     name,
@@ -167,6 +173,7 @@ export function normalizeChatInfoPayload(data: any): ChatInfo {
     model,
     agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true,
     agentSuggestionEnabled: data?.agentSuggestionEnabled === true,
+    dockerSnapshotAfterAgentMessageEnabled,
     sessionName,
     createdAt,
     agent: { kind: 'builtin', id: 'cursor' },

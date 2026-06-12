@@ -19,6 +19,8 @@ type CreateDronesModalProps = {
   createMode: 'create' | 'clone';
   createRuntime: 'container' | 'host';
   onCreateRuntimeChange: (value: 'container' | 'host') => void;
+  createPersistVolume: boolean;
+  onCreatePersistVolumeChange: (checked: boolean) => void;
   cloneSourceId: string | null;
   createNameEntries: string[];
   drones: DroneSummary[];
@@ -75,6 +77,8 @@ export function CreateDronesModal({
   createMode,
   createRuntime,
   onCreateRuntimeChange,
+  createPersistVolume,
+  onCreatePersistVolumeChange,
   cloneSourceId,
   createNameEntries,
   drones,
@@ -279,6 +283,26 @@ export function CreateDronesModal({
                     : 'Container drones run inside managed containers.'}
               </span>
             </div>
+
+            {createRuntime === 'container' && (
+              <div className="mb-4">
+                <label className="flex items-center gap-2 select-none">
+                  <input
+                    type="checkbox"
+                    className="accent-[var(--accent)]"
+                    checked={createPersistVolume}
+                    onChange={(e) => onCreatePersistVolumeChange(e.target.checked)}
+                    disabled={creating}
+                  />
+                  <span className="text-[11px] text-[var(--muted)]">Persist volume</span>
+                </label>
+                <span className="text-[10px] text-[var(--muted-dim)] block mt-1">
+                  {createPersistVolume
+                    ? 'Mounts /dvm-data on a Docker volume.'
+                    : '/dvm-data stays in the container image layer.'}
+                </span>
+              </div>
+            )}
 
             <div className="mb-4">
               <div className="text-[10px] font-semibold text-[var(--muted-dim)] mb-1.5 tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>

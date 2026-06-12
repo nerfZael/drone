@@ -116,6 +116,7 @@ type CreateCommandOptions = {
   repo?: string;
   droneId?: string;
   cloneContainer?: string;
+  persistVolume?: boolean;
 };
 
 type ParsedCreateOptions = {
@@ -127,6 +128,7 @@ type ParsedCreateOptions = {
   repoPath: string;
   droneId?: string;
   cloneContainer?: string;
+  persistVolume?: boolean;
 };
 
 function addCreateOptions(command: Command): Command {
@@ -138,6 +140,7 @@ function addCreateOptions(command: Command): Command {
     .option('--mkdir', 'Create --cwd if it does not exist (mkdir -p)', false)
     .option('--drone-id <id>', 'Stable drone identity (internal; advanced use)')
     .option('--clone-container <name>', 'Clone this existing container into the new drone container before provisioning')
+    .option('--no-persist-volume', 'Do not mount a DVM persistence volume at /dvm-data; keep /dvm-data in the container image layer')
     .option(
       '--repo <path>',
       'Host repo path associated with this drone (Hub metadata only). Use "-" for no repo.',
@@ -203,7 +206,8 @@ function parseCreateOptions(options: CreateCommandOptions): ParsedCreateOptions 
   const droneId = normalizeDroneIdentity(options.droneId);
   const cloneContainerRaw = String(options.cloneContainer ?? '').trim();
   const cloneContainer = cloneContainerRaw || undefined;
-  return { group, containerPort, runtime, cwd, mkdir: Boolean(options.mkdir), repoPath, droneId, cloneContainer };
+  const persistVolume = options.persistVolume === false ? false : undefined;
+  return { group, containerPort, runtime, cwd, mkdir: Boolean(options.mkdir), repoPath, droneId, cloneContainer, persistVolume };
 }
 
 const DRONE_DISPLAY_NAME_MAX_LEN = 80;
@@ -1056,7 +1060,7 @@ const createCommand = addCreateOptions(
 createCommand
   .option('--no-build', 'Skip checking daemon build output')
   .action(async (name, options) => {
-    const { repoPath, group, containerPort, runtime, cwd, mkdir, droneId, cloneContainer } = parseCreateOptions(options);
+    const { repoPath, group, containerPort, runtime, cwd, mkdir, droneId, cloneContainer, persistVolume } = parseCreateOptions(options);
 
     if (options.build) await ensureDaemonBuilt(repoPath);
 
@@ -1161,6 +1165,7 @@ createCommand
           await dvmClone(cloneContainer, containerName, {
             start: true,
             copyPersistenceVolume: true,
+            ...(typeof persistVolume === 'boolean' ? { persistVolume } : {}),
             ports: [
               { hostPort: hostPortDaemon, containerPort },
               { hostPort: hostPortRdp, containerPort: 3389 },
@@ -1191,6 +1196,7 @@ createCommand
           const [hostPortDaemon, hostPortRdp, hostPortNoVnc, hostPort3000, hostPort3001, hostPort5173, hostPort5174] =
             await getUniqueFreeTcpPorts(7);
           await dvmCreate(containerName, {
+            ...(persistVolume === false ? { persist: false } : {}),
             ports: [
               { hostPort: hostPortDaemon, containerPort },
               { hostPort: hostPortRdp, containerPort: 3389 },
@@ -1274,6 +1280,7 @@ createCommand
         containerPort,
         token,
         repoPath,
+        ...(persistVolume === false ? { persistVolume: false } : {}),
         createdAt: at,
       };
     });
@@ -1298,7 +1305,7 @@ const importCommand = addCreateOptions(
 importCommand
   .option('--container <name>', 'Existing container name to import (defaults to derived from --drone-id when provided)')
   .action(async (name, options) => {
-    const { repoPath, group, containerPort, runtime, cwd, mkdir, droneId } = parseCreateOptions(options);
+    const { repoPath, group, containerPort, runtime, cwd, mkdir, droneId, persistVolume } = parseCreateOptions(options);
     if (runtime !== 'container') {
       throw new Error('drone import currently supports only container runtime');
     }
@@ -1354,6 +1361,7 @@ importCommand
         containerPort,
         token,
         repoPath,
+        ...(persistVolume === false ? { persistVolume: false } : {}),
         createdAt: at,
       };
     });

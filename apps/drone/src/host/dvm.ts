@@ -104,6 +104,7 @@ export async function dvmClone(
     start?: boolean;
     reuseNamedVolumes?: boolean;
     copyPersistenceVolume?: boolean;
+    persistVolume?: boolean;
     ports?: Array<{ hostPort: number; containerPort: number }>;
   }
 ): Promise<void> {

@@ -30,6 +30,7 @@ type UseWorkspaceNavigationActionsArgs = {
   setDraftNameSuggesting: React.Dispatch<React.SetStateAction<boolean>>;
   setCreateMode: React.Dispatch<React.SetStateAction<'create' | 'clone'>>;
   setCreateRuntime: React.Dispatch<React.SetStateAction<'container' | 'host'>>;
+  setCreatePersistVolume: React.Dispatch<React.SetStateAction<boolean>>;
   setCloneSourceId: React.Dispatch<React.SetStateAction<string | null>>;
   setCreateName: React.Dispatch<React.SetStateAction<string>>;
   setCreateGroup: React.Dispatch<React.SetStateAction<string>>;
@@ -80,6 +81,7 @@ export function useWorkspaceNavigationActions({
   setDraftNameSuggesting,
   setCreateMode,
   setCreateRuntime,
+  setCreatePersistVolume,
   setCloneSourceId,
   setCreateName,
   setCreateGroup,
@@ -140,6 +142,7 @@ export function useWorkspaceNavigationActions({
     }
     setCreateMode('create');
     setCreateRuntime('container');
+    setCreatePersistVolume(false);
     setCloneSourceId(null);
     setCreateRepoPath(normalizeCreateRepoPath(activeRepoPath || ''));
     setCreateInitialMessage('');
@@ -161,6 +164,7 @@ export function useWorkspaceNavigationActions({
     setCreateInitialMessage,
     setCreateMessageSuffixRows,
     setCreateMode,
+    setCreatePersistVolume,
     setCreateRuntime,
     setCreateName,
     setCreateOpen,
@@ -196,6 +200,7 @@ export function useWorkspaceNavigationActions({
     setDraftNameSuggestionError(null);
     setDraftNameSuggesting(false);
     setCreateRuntime('container');
+    setCreatePersistVolume(false);
     resetDraftNameSuggestSeq();
     setDraftChat({ droneId: '', droneName: '', prompt: null, queuedPrompts: [], focusKey: newDraftChatFocusKey() });
     clearSidebarSelection();
@@ -212,6 +217,7 @@ export function useWorkspaceNavigationActions({
     setFleetDashboardOpen,
     setCreateError,
     setCreateOpen,
+    setCreatePersistVolume,
     setCreateRuntime,
     setDraftAutoRenaming,
     setDraftChat,
@@ -239,6 +245,7 @@ export function useWorkspaceNavigationActions({
       setCreateError(null);
       setCreateMode('clone');
       setCreateRuntime('container');
+      setCreatePersistVolume(source.persistVolume !== false);
       setCloneSourceId(source.id);
       setCreateName(suggestCloneName(source.name));
       setCreateGroup(source.group ?? '');
@@ -271,6 +278,7 @@ export function useWorkspaceNavigationActions({
       setCreateInitialMessage,
       setCreateMessageSuffixRows,
       setCreateMode,
+      setCreatePersistVolume,
       setCreateRuntime,
       setCreateName,
       setCreateOpen,

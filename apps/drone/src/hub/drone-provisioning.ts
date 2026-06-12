@@ -127,6 +127,7 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
     const group = typeof pending.group === 'string' ? pending.group.trim() : '';
     const runtime = normalizeDroneRuntime((pending as any)?.runtime);
     const build = Boolean(pending.build);
+    const persistVolume = (pending as any)?.persistVolume === false ? false : undefined;
     const containerPort = typeof pending.containerPort === 'number' && Number.isFinite(pending.containerPort) ? pending.containerPort : null;
     const cloneFrom = typeof pending.cloneFrom === 'string' ? pending.cloneFrom.trim() : '';
     const cloneChats = pending.cloneChats !== false;
@@ -161,6 +162,7 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
     if (group) args.push('--group', group);
     if (!build) args.push('--no-build');
     if (containerPort != null) args.push('--container-port', String(containerPort));
+    if (runtime === 'container' && persistVolume === false) args.push('--no-persist-volume');
     if (runtime === 'container' && cloneSourceContainerName) args.push('--clone-container', cloneSourceContainerName);
     if (runtime === 'container' && !repoPath) args.push('--cwd', deps.NON_REPO_HOME_CWD, '--mkdir');
 
@@ -172,6 +174,7 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
         const impArgs: string[] = [droneCli, 'import', displayName, '--runtime', 'container', '--repo', repoArg, '--drone-id', pendingDroneId];
         if (group) impArgs.push('--group', group);
         if (containerPort != null) impArgs.push('--container-port', String(containerPort));
+        if (persistVolume === false) impArgs.push('--no-persist-volume');
         if (!repoPath) impArgs.push('--cwd', deps.NON_REPO_HOME_CWD, '--mkdir');
         const imp = await deps.runNodeCli(impArgs);
         if (imp.code !== 0) {

@@ -20,6 +20,8 @@ type DvmExportManifestV1 = {
   notes?: string[];
 };
 
+type ResolvedPersistence = { enabled: boolean; volumeName: string | null; mountPath: string };
+
 export class ContainerManager {
   public docker: DockerClient;
   private guiInstaller: GuiInstaller;
@@ -42,8 +44,10 @@ export class ContainerManager {
 
   private resolvePersistenceFromInspect(
     inspect: Docker.ContainerInspectInfo
-  ): { volumeName: string | null; mountPath: string } {
+  ): ResolvedPersistence {
     const labels = inspect?.Config?.Labels ?? {};
+    const hasPersistenceVolumeLabel = Object.prototype.hasOwnProperty.call(labels, DockerClient.DVM_PERSISTENCE_VOLUME_LABEL_KEY);
+    const hasPersistencePathLabel = Object.prototype.hasOwnProperty.call(labels, DockerClient.DVM_PERSISTENCE_PATH_LABEL_KEY);
     const labeledVolume = String(labels[DockerClient.DVM_PERSISTENCE_VOLUME_LABEL_KEY] ?? '').trim();
     const labeledPath = String(labels[DockerClient.DVM_PERSISTENCE_PATH_LABEL_KEY] ?? '').trim();
     const mounts = Array.isArray(inspect?.Mounts) ? inspect.Mounts : [];
@@ -69,7 +73,8 @@ export class ContainerManager {
 
     const volumeName = labeledVolume || (matchedMount?.Name ? String(matchedMount.Name).trim() : '');
     const mountPath = labeledPath || (matchedMount?.Destination ? String(matchedMount.Destination).trim() : '') || '/dvm-data';
-    return { volumeName: volumeName || null, mountPath };
+    const explicitNoVolume = (hasPersistenceVolumeLabel || hasPersistencePathLabel) && !volumeName;
+    return { enabled: !explicitNoVolume && Boolean(volumeName), volumeName: volumeName || null, mountPath };
   }
 
   async createContainer(
@@ -169,6 +174,12 @@ export class ContainerManager {
        * Default: true.
        */
       copyPersistenceVolume?: boolean;
+      /**
+       * If false, the clone does not mount a DVM persistence volume and keeps
+       * /dvm-data in the container writable/image layer. Defaults to preserving
+       * the source container's storage mode.
+       */
+      persistVolume?: boolean;
     }
   ): Promise<void> {
     const start = options?.start !== false;
@@ -216,6 +227,8 @@ export class ContainerManager {
     const sourcePersistence = this.resolvePersistenceFromInspect(inspect);
     const sourcePersistenceVolumeName = sourcePersistence.volumeName;
     const persistencePath = sourcePersistence.mountPath;
+    const destPersistenceEnabled =
+      typeof options?.persistVolume === 'boolean' ? options.persistVolume : sourcePersistence.enabled;
 
     for (const m of inspect.Mounts || []) {
       if (!m || !m.Type) continue;
@@ -238,12 +251,13 @@ export class ContainerManager {
           : sourcePorts.map((port) => ({ containerPort: port.containerPort })),
       environment: inspect.Config?.Env,
       volumes: volumes.length > 0 ? volumes : undefined,
-      // Always create a fresh persistence volume for the clone.
-      persistence: { enabled: true, path: persistencePath },
+      persistence: { enabled: destPersistenceEnabled, path: persistencePath },
     };
 
     // When copying persistence data, create the clone stopped first so the
     // restored volume snapshot is deterministic before startup.
+    const copyToDestPersistenceVolume = copyPersistenceVolume && destPersistenceEnabled;
+    const copyToContainerFilesystem = copyPersistenceVolume && !destPersistenceEnabled && Boolean(sourcePersistenceVolumeName);
     const startAtCreate = copyPersistenceVolume ? false : start;
     let clonedPersistenceVolumeName: string | null = null;
     let containerCreated = false;
@@ -251,36 +265,43 @@ export class ContainerManager {
       // Create a "pure" clone: no in-container installs/provisioning.
       await this.createContainer(config, startAtCreate, { skipProvisioning: true });
       containerCreated = true;
-      if (copyPersistenceVolume) {
+      if (copyToDestPersistenceVolume) {
         clonedPersistenceVolumeName = String(config.persistence?.volumeName || '').trim() || `dvm-${newName}-data`;
       }
 
       if (copyPersistenceVolume && sourcePersistenceVolumeName) {
         const hasSourcePersistenceVolume = await this.docker.volumeExists(sourcePersistenceVolumeName);
         if (hasSourcePersistenceVolume) {
-          const clonedContainer = await this.docker.getContainer(newName);
-          if (!clonedContainer) {
-            throw new Error(`Cloned container ${newName} not found after create`);
-          }
-          const clonedInspect = await clonedContainer.inspect();
-          const clonedPersistence = this.resolvePersistenceFromInspect(clonedInspect);
-          clonedPersistenceVolumeName = clonedPersistence.volumeName || clonedPersistenceVolumeName;
-          if (!clonedPersistenceVolumeName) {
-            throw new Error(`Unable to resolve persistence volume for cloned container ${newName}`);
-          }
-
           const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dvm-clone-volume-'));
           const archivePath = path.join(tmpDir, 'volume.tar.gz');
           try {
             await this.docker.exportVolumeToTarGz(sourcePersistenceVolumeName, archivePath);
-            await this.docker.importVolumeFromTarGz(clonedPersistenceVolumeName, archivePath);
+            if (copyToDestPersistenceVolume) {
+              const clonedContainer = await this.docker.getContainer(newName);
+              if (!clonedContainer) {
+                throw new Error(`Cloned container ${newName} not found after create`);
+              }
+              const clonedInspect = await clonedContainer.inspect();
+              const clonedPersistence = this.resolvePersistenceFromInspect(clonedInspect);
+              clonedPersistenceVolumeName = clonedPersistence.volumeName || clonedPersistenceVolumeName;
+              if (!clonedPersistenceVolumeName) {
+                throw new Error(`Unable to resolve persistence volume for cloned container ${newName}`);
+              }
+              await this.docker.importVolumeFromTarGz(clonedPersistenceVolumeName, archivePath);
+            } else if (copyToContainerFilesystem) {
+              await this.docker.startContainer(newName);
+              await this.docker.importTarGzToContainerPath(newName, archivePath, persistencePath);
+              if (!start) {
+                await this.docker.stopContainer(newName);
+              }
+            }
           } finally {
             fs.rmSync(tmpDir, { recursive: true, force: true });
           }
         }
       }
 
-      if (copyPersistenceVolume && start) {
+      if (copyToDestPersistenceVolume && start) {
         await this.docker.startContainer(newName);
       }
 

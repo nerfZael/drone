@@ -811,12 +811,14 @@ program
   .argument('<name>', 'New container name')
   .option('--no-start', 'Do not start the cloned container')
   .option('--no-copy-persistence', 'Do not copy dvm persistence volume contents from the source container')
+  .option('--no-persist-volume', 'Do not mount a dvm persistence volume on the cloned container')
   .option('--reuse-named-volumes', 'Also reuse named volumes from the source (besides dvm persistence)')
   .action(safeAction(async (source, name, options) => {
     console.log(chalk.blue(`Cloning container ${source} -> ${name}...`));
     await manager.cloneContainer(source, name, {
       start: options.start,
       copyPersistenceVolume: Boolean(options.copyPersistence),
+      ...(options.persistVolume === false ? { persistVolume: false } : {}),
       reuseNamedVolumes: Boolean(options.reuseNamedVolumes),
     });
     console.log(chalk.green(`Container ${name} cloned successfully!`));

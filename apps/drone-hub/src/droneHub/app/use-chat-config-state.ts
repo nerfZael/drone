@@ -223,6 +223,7 @@ export function useChatConfigState({
         model: prev?.model ?? null,
         agentMessageAutoContinueEnabled: prev?.agentMessageAutoContinueEnabled === true,
         agentSuggestionEnabled: prev?.agentSuggestionEnabled === true,
+        dockerSnapshotAfterAgentMessageEnabled: prev?.dockerSnapshotAfterAgentMessageEnabled === true,
         sessionName: prev?.sessionName ?? `drone-hub-chat-${chat}`,
         createdAt: prev?.createdAt ?? new Date().toISOString(),
       }));
@@ -253,6 +254,7 @@ export function useChatConfigState({
         model: normalized,
         agentMessageAutoContinueEnabled: prev?.agentMessageAutoContinueEnabled === true,
         agentSuggestionEnabled: prev?.agentSuggestionEnabled === true,
+        dockerSnapshotAfterAgentMessageEnabled: prev?.dockerSnapshotAfterAgentMessageEnabled === true,
         sessionName: prev?.sessionName ?? `drone-hub-chat-${chat}`,
         createdAt: prev?.createdAt ?? new Date().toISOString(),
       }));
@@ -283,6 +285,7 @@ export function useChatConfigState({
         model: prev?.model ?? null,
         agentMessageAutoContinueEnabled: enabled,
         agentSuggestionEnabled: prev?.agentSuggestionEnabled === true,
+        dockerSnapshotAfterAgentMessageEnabled: prev?.dockerSnapshotAfterAgentMessageEnabled === true,
         sessionName: prev?.sessionName ?? `drone-hub-chat-${chat}`,
         createdAt: prev?.createdAt ?? new Date().toISOString(),
       }));
@@ -312,6 +315,37 @@ export function useChatConfigState({
         model: prev?.model ?? null,
         agentMessageAutoContinueEnabled: prev?.agentMessageAutoContinueEnabled === true,
         agentSuggestionEnabled: enabled,
+        dockerSnapshotAfterAgentMessageEnabled: prev?.dockerSnapshotAfterAgentMessageEnabled === true,
+        sessionName: prev?.sessionName ?? `drone-hub-chat-${chat}`,
+        createdAt: prev?.createdAt ?? new Date().toISOString(),
+      }));
+      setChatInfoError(null);
+    },
+    [requestJson, selectedChat, selectedDrone],
+  );
+
+  const setDockerSnapshotAfterAgentMessageEnabled = React.useCallback(
+    async (enabled: boolean) => {
+      if (!selectedDrone) return;
+      const chat = selectedChat || 'default';
+      await requestJson(
+        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(
+          chat,
+        )}/config`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ dockerSnapshotAfterAgentMessageEnabled: enabled }),
+        },
+      );
+      setChatInfo((prev) => ({
+        name: selectedDrone,
+        chat,
+        agent: prev?.agent ?? ({ kind: 'builtin', id: 'cursor' } as ChatAgentConfig),
+        model: prev?.model ?? null,
+        agentMessageAutoContinueEnabled: prev?.agentMessageAutoContinueEnabled === true,
+        agentSuggestionEnabled: prev?.agentSuggestionEnabled === true,
+        dockerSnapshotAfterAgentMessageEnabled: enabled,
         sessionName: prev?.sessionName ?? `drone-hub-chat-${chat}`,
         createdAt: prev?.createdAt ?? new Date().toISOString(),
       }));
@@ -347,6 +381,7 @@ export function useChatConfigState({
     setChatModel,
     setAgentMessageAutoContinueEnabled,
     setAgentSuggestionEnabled,
+    setDockerSnapshotAfterAgentMessageEnabled,
     handleSetAgentFailure,
   };
 }

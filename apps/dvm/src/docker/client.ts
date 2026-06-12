@@ -53,6 +53,10 @@ export interface ExecCommandResult {
   stderr: string;
 }
 
+function shellQuote(raw: string): string {
+  return `'${String(raw ?? '').replace(/'/g, `'\\''`)}'`;
+}
+
 export class DockerClient {
   private docker: Docker;
   static readonly DEFAULT_RESTART_POLICY_NAME = 'unless-stopped';
@@ -801,5 +805,34 @@ export class DockerClient {
       // Extract into /data (fresh volume normally). Don't fail on empty archives.
       `tar -xzf /in/${JSON.stringify(base)} -C /data`,
     ]);
+  }
+
+  async importTarGzToContainerPath(containerName: string, inTarGzPath: string, containerPath: string): Promise<void> {
+    const abs = path.resolve(inTarGzPath);
+    const base = path.basename(abs);
+    const container = await this.getContainer(containerName);
+    if (!container) {
+      throw new Error(`Container ${containerName} not found`);
+    }
+
+    const tmpPath = `/tmp/dvm-import-${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}-${base}`;
+    await this.copyToContainer(containerName, abs, tmpPath);
+    try {
+      await this.execCommand(containerName, [
+        'sh',
+        '-lc',
+        [
+          `mkdir -p ${shellQuote(containerPath)}`,
+          `tar -xzf ${shellQuote(tmpPath)} -C ${shellQuote(containerPath)}`,
+          `rm -f ${shellQuote(tmpPath)}`,
+        ].join('\n'),
+      ]);
+    } finally {
+      try {
+        await this.execCommand(containerName, ['sh', '-lc', `rm -f ${shellQuote(tmpPath)} || true`]);
+      } catch {
+        // ignore cleanup errors
+      }
+    }
   }
 }

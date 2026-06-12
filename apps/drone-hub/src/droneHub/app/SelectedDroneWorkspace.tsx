@@ -56,6 +56,7 @@ import {
 import { resolveRunningPromptLoopIdentity } from './prompt-loop-running-identity';
 import type { RepoTransferActionResult, RepoTransferPeer } from './use-workspace-actions';
 import {
+  formatBytes,
   parseGithubPullRequestHref,
 } from './selected-drone-workspace-utils';
 import { useFleetAssignmentDropState } from './use-fleet-assignment-drop-state';
@@ -103,6 +104,8 @@ type SelectedDroneWorkspaceProps = {
   setAgentMessageAutoContinueEnabled: (enabled: boolean) => Promise<void>;
   agentSuggestionEnabled: boolean;
   setAgentSuggestionEnabled: (enabled: boolean) => Promise<void>;
+  dockerSnapshotAfterAgentMessageEnabled: boolean;
+  setDockerSnapshotAfterAgentMessageEnabled: (enabled: boolean) => Promise<void>;
   setChatInfoError: React.Dispatch<React.SetStateAction<string | null>>;
   modelMenuEntries: UiMenuSelectEntry[];
   modelDisabled: boolean;
@@ -229,6 +232,8 @@ export function SelectedDroneWorkspace({
   setAgentMessageAutoContinueEnabled,
   agentSuggestionEnabled,
   setAgentSuggestionEnabled,
+  dockerSnapshotAfterAgentMessageEnabled,
+  setDockerSnapshotAfterAgentMessageEnabled,
   setChatInfoError,
   modelMenuEntries,
   modelDisabled,
@@ -359,6 +364,15 @@ export function SelectedDroneWorkspace({
     setSyncMenuOpen(false);
   }, [currentDrone.id, repoOp?.kind]);
   const hostRuntime = String(currentDrone.runtime ?? '').trim().toLowerCase() === 'host';
+  const dockerSnapshotSupported = !hostRuntime && currentDrone.persistVolume === false;
+  const dockerSize = currentDrone.dockerSize ?? null;
+  const dockerSizeTitle = dockerSize
+    ? `Docker size: ${formatBytes(dockerSize.totalBytes)} total. Container writable layer: ${formatBytes(
+        dockerSize.containerWritableBytes,
+      )}. Snapshots: ${formatBytes(dockerSize.snapshotBytes)} across ${dockerSize.snapshotCount} snapshot${
+        dockerSize.snapshotCount === 1 ? '' : 's'
+      }.`
+    : 'Docker size unavailable.';
   const repoSyncBusyLabel =
     repoOp?.kind === 'pull'
       ? 'Applying...'
@@ -443,6 +457,14 @@ export function SelectedDroneWorkspace({
     () => buildTranscriptRenderBlocks(transcripts ?? []),
     [transcripts],
   );
+  const selectedChatDockerSnapshotBusy = React.useMemo(
+    () =>
+      (transcripts ?? []).some((item) => {
+        const status = String(item?.dockerSnapshot?.status ?? '').trim();
+        return status === 'creating' || status === 'restoring';
+      }),
+    [transcripts],
+  );
   const latestAgentSuggestionMessageId = React.useMemo(
     () => (latestAgentSuggestionTarget ? transcriptMessageId(latestAgentSuggestionTarget) : null),
     [latestAgentSuggestionTarget, transcriptMessageId],
@@ -489,6 +511,27 @@ export function SelectedDroneWorkspace({
       );
     },
     [activeChatName, currentDrone.id],
+  );
+  const rollbackDockerSnapshot = React.useCallback(
+    async (item: TranscriptItem): Promise<void> => {
+      const promptId = String(item?.id ?? '').trim();
+      const snapshotId = String(item?.dockerSnapshot?.id ?? '').trim();
+      if (!promptId || !snapshotId) return;
+      try {
+        setChatInfoError(null);
+        await requestJson(
+          `/api/drones/${encodeURIComponent(currentDrone.id)}/chats/${encodeURIComponent(activeChatName)}/transcript/${encodeURIComponent(
+            promptId,
+          )}/docker-snapshot/${encodeURIComponent(snapshotId)}/rollback`,
+          { method: 'POST' },
+        );
+      } catch (err: any) {
+        const message = String(err?.message ?? err ?? '').trim() || 'Snapshot rollback failed.';
+        setChatInfoError(message);
+        openDroneErrorModal(currentDrone, message, null);
+      }
+    },
+    [activeChatName, currentDrone, openDroneErrorModal, setChatInfoError],
   );
   const sendAgentSuggestionDirectly = React.useCallback(async (): Promise<void> => {
     if (
@@ -1082,6 +1125,60 @@ export function SelectedDroneWorkspace({
                   unavailable
                 </span>
               )}
+            </div>
+          ) : null}
+          {!hostRuntime ? (
+            <span
+              className="inline-flex items-center h-[28px] px-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]"
+              style={{ fontFamily: 'var(--display)' }}
+              title={dockerSizeTitle}
+            >
+              Docker {formatBytes(dockerSize?.totalBytes)}
+            </span>
+          ) : null}
+          {hasChats && chatUiMode === 'transcript' ? (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+                Snapshots
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={dockerSnapshotAfterAgentMessageEnabled}
+                onClick={() => {
+                  if (!dockerSnapshotSupported) return;
+                  void setDockerSnapshotAfterAgentMessageEnabled(!dockerSnapshotAfterAgentMessageEnabled).catch((err: any) =>
+                    setChatInfoError(err?.message ?? String(err)),
+                  );
+                }}
+                disabled={loadingChatInfo || !dockerSnapshotSupported}
+                className={`inline-flex items-center gap-2 h-[28px] px-2 rounded border text-[10px] font-semibold tracking-wide uppercase transition-all ${
+                  loadingChatInfo || !dockerSnapshotSupported
+                    ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                    : dockerSnapshotAfterAgentMessageEnabled
+                      ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
+                      : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                }`}
+                style={{ fontFamily: 'var(--display)' }}
+                title={
+                  dockerSnapshotSupported
+                    ? 'Commit a Docker image snapshot after each new agent message in this chat.'
+                    : 'Snapshots require a container drone created with Persist volume off.'
+                }
+              >
+                <span
+                  className={`relative inline-flex h-3.5 w-6 rounded-full transition-colors ${
+                    dockerSnapshotAfterAgentMessageEnabled ? 'bg-[var(--accent)]' : 'bg-[rgba(148,163,184,.3)]'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-[1px] h-3 w-3 rounded-full bg-white transition-transform ${
+                      dockerSnapshotAfterAgentMessageEnabled ? 'translate-x-[11px]' : 'translate-x-[1px]'
+                    }`}
+                  />
+                </span>
+                {dockerSnapshotAfterAgentMessageEnabled ? 'On' : 'Off'}
+              </button>
             </div>
           ) : null}
           {hasChats && chatUiMode === 'transcript' ? (
@@ -1684,6 +1781,7 @@ export function SelectedDroneWorkspace({
                             tldr={tldrByMessageId[messageId] ?? null}
                             showTldr={Boolean(showTldrByMessageId[messageId])}
                             onToggleTldr={toggleTldrForAgentMessage}
+                            onRollbackDockerSnapshot={rollbackDockerSnapshot}
                             onHoverAgentMessage={handleAgentMessageHover}
                             onOpenFileReference={onOpenMarkdownFileReference}
                             onOpenLink={tryOpenMarkdownPullRequest}
@@ -1938,9 +2036,10 @@ export function SelectedDroneWorkspace({
             sending={sendingPrompt}
             waiting={
               chatUiMode === 'transcript'
-                ? visiblePendingPromptsWithStartup.some((p) => p.state !== 'failed')
+                ? selectedChatDockerSnapshotBusy || visiblePendingPromptsWithStartup.some((p) => p.state !== 'failed')
                 : (showRespondingAsStatusInHeader || canStopResponse)
             }
+            disabled={selectedChatDockerSnapshotBusy}
             automationActions={chatAutomationActions}
             lockComposerWhileAutomationActive={false}
             autoFocus={shouldAutoFocusInput}
