@@ -4980,6 +4980,11 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                             <span className="rounded border border-[var(--border-subtle)] px-1.5 py-0.5 font-display text-[9px] font-bold uppercase text-[var(--muted)]">
                               {formatBytes(recording.sizeBytes)}
                             </span>
+                            {recording.sessionEndedAt == null ? (
+                              <span className="rounded border border-[rgba(88,166,255,.32)] bg-[rgba(88,166,255,.10)] px-1.5 py-0.5 font-display text-[9px] font-bold uppercase text-[var(--accent)]">
+                                Live
+                              </span>
+                            ) : null}
                           </div>
                           <time className="text-[11px] text-[var(--muted)]" title={exactTimeLabel(recording.createdAt)}>
                             {timeLabel(recording.createdAt)}
@@ -4997,7 +5002,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                           ) : null}
                         </div>
                         <div className="max-h-[120px] overflow-y-auto rounded border border-[var(--border-subtle)] bg-black/[.10] p-2 text-xs leading-relaxed text-[var(--fg-secondary)]">
-                          {recording.transcriptText ? recording.transcriptText : <span className="text-[var(--muted)]">No paired transcript.</span>}
+                          {recording.transcriptText ? recording.transcriptText : <span className="text-[var(--muted)]">{recording.sessionEndedAt == null ? 'Waiting for live transcript.' : 'No paired transcript.'}</span>}
                         </div>
                       </article>
                     ))}

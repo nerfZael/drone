@@ -482,6 +482,7 @@ export type VoiceRecordingRecord = {
   channels: number;
   transcriptId: string | null;
   transcriptText: string | null;
+  transcriptFinal: boolean;
   transcriptCreatedAt: string | null;
   sessionStartedAt: string;
   sessionEndedAt: string | null;
@@ -1251,6 +1252,7 @@ function rowVoiceRecording(row: any): VoiceRecordingRecord {
     channels: Number(row.channels ?? 1),
     transcriptId: row.transcript_id == null ? null : String(row.transcript_id),
     transcriptText: row.transcript_text == null ? null : String(row.transcript_text),
+    transcriptFinal: asBool(row.transcript_final),
     transcriptCreatedAt: row.transcript_created_at == null ? null : String(row.transcript_created_at),
     sessionStartedAt: String(row.session_started_at ?? row.created_at),
     sessionEndedAt: row.session_ended_at == null ? null : String(row.session_ended_at),
@@ -5181,6 +5183,58 @@ export class VoiceStreamNextDb {
       .run({ $id: newId('trn'), $voiceSessionId: voiceSessionId, $userId: userId, $text: trimmed, $createdAt: nowIso() });
   }
 
+  setTranscript(userId: string, voiceSessionId: string, text: string, final = true): void {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const at = nowIso();
+    const existing = this.db
+      .query(
+        `
+        SELECT id
+        FROM transcripts
+        WHERE user_id = $userId AND voice_session_id = $voiceSessionId
+        ORDER BY created_at DESC
+        LIMIT 1
+      `,
+      )
+      .get({ $userId: userId, $voiceSessionId: voiceSessionId }) as { id?: string } | null;
+    if (existing?.id) {
+      this.db
+        .query(
+          `
+          UPDATE transcripts
+          SET text = $text,
+              final = $final,
+              created_at = $createdAt
+          WHERE id = $id AND user_id = $userId
+        `,
+        )
+        .run({
+          $text: trimmed,
+          $final: final ? 1 : 0,
+          $createdAt: at,
+          $id: existing.id,
+          $userId: userId,
+        });
+      return;
+    }
+    this.db
+      .query(
+        `
+        INSERT INTO transcripts (id, voice_session_id, user_id, text, final, created_at)
+        VALUES ($id, $voiceSessionId, $userId, $text, $final, $createdAt)
+      `,
+      )
+      .run({
+        $id: newId('trn'),
+        $voiceSessionId: voiceSessionId,
+        $userId: userId,
+        $text: trimmed,
+        $final: final ? 1 : 0,
+        $createdAt: at,
+      });
+  }
+
   addVoiceRecording(
     userId: string,
     input: {
@@ -5288,6 +5342,94 @@ export class VoiceStreamNextDb {
     const row = this.voiceRecordingRow(userId, input.voiceSessionId);
     if (!row) throw new Error('Stored recording was not found');
     return rowVoiceRecording(row);
+  }
+
+  updateVoiceRecordingMetrics(
+    userId: string,
+    recordingId: string,
+    input: { sizeBytes: number; durationMs: number },
+  ): VoiceRecordingRecord | null {
+    this.db
+      .query(
+        `
+        UPDATE voice_recordings
+        SET size_bytes = $sizeBytes,
+            duration_ms = $durationMs
+        WHERE user_id = $userId AND id = $recordingId
+      `,
+      )
+      .run({
+        $sizeBytes: Math.max(0, Math.floor(input.sizeBytes)),
+        $durationMs: Math.max(0, Math.floor(input.durationMs)),
+        $userId: userId,
+        $recordingId: recordingId,
+      });
+    return this.voiceRecording(userId, recordingId);
+  }
+
+  addVoiceRecordingSegment(
+    userId: string,
+    input: {
+      recordingId: string;
+      voiceSessionId: string;
+      sequence: number;
+      startMs: number;
+      endMs: number;
+      text: string;
+      provider: string | null;
+      model: string | null;
+      final: boolean;
+    },
+  ): void {
+    const text = input.text.trim();
+    if (!text) return;
+    this.db
+      .query(
+        `
+        INSERT OR REPLACE INTO voice_recording_segments (
+          id,
+          recording_id,
+          voice_session_id,
+          user_id,
+          sequence,
+          start_ms,
+          end_ms,
+          text,
+          provider,
+          model,
+          final,
+          created_at
+        )
+        VALUES (
+          COALESCE((SELECT id FROM voice_recording_segments WHERE recording_id = $recordingId AND sequence = $sequence), $id),
+          $recordingId,
+          $voiceSessionId,
+          $userId,
+          $sequence,
+          $startMs,
+          $endMs,
+          $text,
+          $provider,
+          $model,
+          $final,
+          $createdAt
+        )
+      `,
+      )
+      .run({
+        $id: newId('vrs'),
+        $recordingId: input.recordingId,
+        $voiceSessionId: input.voiceSessionId,
+        $userId: userId,
+        $sequence: Math.max(0, Math.floor(input.sequence)),
+        $startMs: Math.max(0, Math.floor(input.startMs)),
+        $endMs: Math.max(0, Math.floor(input.endMs)),
+        $text: text,
+        $provider: input.provider,
+        $model: input.model,
+        $final: input.final ? 1 : 0,
+        $createdAt: nowIso(),
+      });
   }
 
   listVoiceRecordings(
@@ -5413,6 +5555,7 @@ export class VoiceStreamNextDb {
       voice_sessions.ended_at AS session_ended_at,
       transcripts.id AS transcript_id,
       transcripts.text AS transcript_text,
+      transcripts.final AS transcript_final,
       transcripts.created_at AS transcript_created_at
     `;
   }

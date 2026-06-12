@@ -443,6 +443,7 @@ export type VoiceRecordingRecord = {
   channels: number;
   transcriptId: string | null;
   transcriptText: string | null;
+  transcriptFinal: boolean;
   transcriptCreatedAt: string | null;
   sessionStartedAt: string;
   sessionEndedAt: string | null;

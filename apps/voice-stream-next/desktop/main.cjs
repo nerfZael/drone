@@ -609,10 +609,15 @@ function clearCommandLogs() {
 
 const callRecorderState = {
   child: null,
-  filePath: '',
+  sessionId: '',
   recordingId: '',
   audioUrl: '',
   transcriptUrl: '',
+  uploadBuffer: Buffer.alloc(0),
+  uploadQueue: Promise.resolve(),
+  uploadError: null,
+  uploadedBytes: 0,
+  transcriptText: '',
   startedAt: 0,
   stderr: '',
   sources: [],
@@ -621,23 +626,18 @@ const callRecorderState = {
   error: '',
 };
 
-function callRecordingDir() {
-  return path.join(app.getPath('userData'), 'call-recordings');
-}
-
-function callRecordingStamp(date = new Date()) {
-  return date.toISOString().replace(/\.\d{3}Z$/, 'Z').replace(/[:.]/g, '-');
-}
-
 function callRecorderStatus(extra = {}) {
   return {
     ok: true,
     mode: callRecorderState.mode,
     message: callRecorderState.message,
     error: callRecorderState.error || null,
+    sessionId: callRecorderState.sessionId || null,
     recordingId: callRecorderState.recordingId || null,
     audioUrl: callRecorderState.audioUrl || null,
     transcriptUrl: callRecorderState.transcriptUrl || null,
+    uploadedBytes: callRecorderState.uploadedBytes || 0,
+    transcriptText: callRecorderState.transcriptText || '',
     startedAt: callRecorderState.startedAt ? new Date(callRecorderState.startedAt).toISOString() : null,
     durationMs: callRecorderState.startedAt && callRecorderState.mode === 'recording' ? Date.now() - callRecorderState.startedAt : null,
     sources: callRecorderState.sources,
@@ -697,7 +697,7 @@ function defaultCallRecorderSources() {
   return sources.filter((source) => source.input);
 }
 
-function callRecorderFfmpegArgs(filePath, sources) {
+function callRecorderFfmpegArgs(sources) {
   const args = ['-y', '-hide_banner', '-loglevel', 'error'];
   for (const source of sources) args.push(...callRecorderInputArgs(source));
   if (sources.length > 1) {
@@ -711,22 +711,8 @@ function callRecorderFfmpegArgs(filePath, sources) {
   } else {
     args.push('-map', '0:a');
   }
-  args.push('-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', '-f', 'wav', filePath);
+  args.push('-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', '-f', 's16le', 'pipe:1');
   return args;
-}
-
-function resetCallRecorderState(mode = 'idle', message = 'Ready to record computer audio.') {
-  callRecorderState.child = null;
-  callRecorderState.filePath = '';
-  callRecorderState.recordingId = '';
-  callRecorderState.audioUrl = '';
-  callRecorderState.transcriptUrl = '';
-  callRecorderState.startedAt = 0;
-  callRecorderState.stderr = '';
-  callRecorderState.sources = [];
-  callRecorderState.mode = mode;
-  callRecorderState.message = message;
-  callRecorderState.error = '';
 }
 
 async function startCallRecording() {
@@ -737,16 +723,20 @@ async function startCallRecording() {
   if (sources.length === 0) {
     throw new Error('No call recording audio sources are configured.');
   }
-  fs.mkdirSync(callRecordingDir(), { recursive: true });
-  const filePath = path.join(callRecordingDir(), `call-${callRecordingStamp()}.wav`);
+  const liveSession = await startLiveCallRecordingSession();
   const command = callRecorderFfmpegCommand();
-  const args = callRecorderFfmpegArgs(filePath, sources);
-  const child = spawn(command, args, { stdio: ['pipe', 'ignore', 'pipe'] });
+  const args = callRecorderFfmpegArgs(sources);
+  const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'] });
   callRecorderState.child = child;
-  callRecorderState.filePath = filePath;
-  callRecorderState.recordingId = '';
-  callRecorderState.audioUrl = '';
+  callRecorderState.sessionId = liveSession.sessionId || '';
+  callRecorderState.recordingId = liveSession.recording?.id || '';
+  callRecorderState.audioUrl = callRecorderState.recordingId ? `/api/voice/recordings/${encodeURIComponent(callRecorderState.recordingId)}/audio` : '';
   callRecorderState.transcriptUrl = '';
+  callRecorderState.uploadBuffer = Buffer.alloc(0);
+  callRecorderState.uploadQueue = Promise.resolve();
+  callRecorderState.uploadError = null;
+  callRecorderState.uploadedBytes = 0;
+  callRecorderState.transcriptText = '';
   callRecorderState.startedAt = Date.now();
   callRecorderState.stderr = '';
   callRecorderState.sources = sources.map((source) => ({
@@ -762,8 +752,12 @@ async function startCallRecording() {
   child.stderr?.on('data', (chunk) => {
     callRecorderState.stderr = `${callRecorderState.stderr}${String(chunk || '')}`.slice(-4000);
   });
+  child.stdout?.on('data', (chunk) => {
+    bufferCallRecorderAudio(chunk);
+  });
   child.on('error', (error) => {
     if (callRecorderState.child === child) callRecorderState.child = null;
+    void finalizeCallRecorderAfterQueuedUploads();
     callRecorderState.mode = 'error';
     callRecorderState.error = error?.message || String(error);
     callRecorderState.message = `Call recording failed: ${callRecorderState.error}`;
@@ -777,6 +771,7 @@ async function startCallRecording() {
       const detail = callRecorderState.stderr.trim() || `ffmpeg exited ${code ?? signal ?? 'unknown'}`;
       callRecorderState.error = detail;
       callRecorderState.message = `Call recording stopped unexpectedly: ${detail}`;
+      void finalizeCallRecorderAfterQueuedUploads();
       sendCallRecorderStatus();
     }
   });
@@ -815,20 +810,16 @@ function waitForCallRecorderExit(child) {
   });
 }
 
-async function transcribeCallRecording(filePath) {
-  const config = readConfig();
-  if (!config.deviceId || !config.deviceToken) throw new Error('Sign in before transcribing a call recording.');
-  const response = await fetch(`${trimSlash(config.serverUrl)}/api/voice/local-recordings/transcribe`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/octet-stream',
-      'x-voice-device-id': config.deviceId,
-      'x-voice-device-token': config.deviceToken,
-      'x-voice-installation-id': config.installationId || '',
-      'x-voice-client-version': '1',
-    },
-    body: fs.readFileSync(filePath),
-  });
+function callRecorderAuthHeaders(config) {
+  return {
+    'x-voice-device-id': config.deviceId,
+    'x-voice-device-token': config.deviceToken,
+    'x-voice-installation-id': config.installationId || '',
+    'x-voice-client-version': '1',
+  };
+}
+
+async function parseCallRecorderResponse(response) {
   const text = await response.text();
   let body = null;
   try {
@@ -837,53 +828,124 @@ async function transcribeCallRecording(filePath) {
     body = { error: text };
   }
   if (!response.ok) throw new Error(body?.error || `${response.status} ${response.statusText}`);
-  return body || { ok: true, text: '' };
+  return body || { ok: true };
+}
+
+async function startLiveCallRecordingSession() {
+  const config = readConfig();
+  if (!config.deviceId || !config.deviceToken) throw new Error('Sign in before recording computer audio.');
+  const response = await fetch(`${trimSlash(config.serverUrl)}/api/voice/live-recordings/start`, {
+    method: 'POST',
+    headers: {
+      ...callRecorderAuthHeaders(config),
+    },
+  });
+  return parseCallRecorderResponse(response);
+}
+
+async function uploadLiveCallRecordingChunk(chunk, final = false) {
+  if (!callRecorderState.sessionId || (!final && chunk.byteLength === 0)) return { ok: true };
+  const config = readConfig();
+  const suffix = final ? '/stop' : '/chunk';
+  const response = await fetch(`${trimSlash(config.serverUrl)}/api/voice/live-recordings/${encodeURIComponent(callRecorderState.sessionId)}${suffix}`, {
+    method: 'POST',
+    headers: {
+      ...callRecorderAuthHeaders(config),
+      'content-type': 'application/octet-stream',
+    },
+    body: chunk,
+  });
+  const body = await parseCallRecorderResponse(response);
+  if (body.recording?.id) callRecorderState.recordingId = String(body.recording.id);
+  if (body.recording?.transcriptText || body.text) callRecorderState.transcriptText = String(body.recording?.transcriptText || body.text || '');
+  if (body.audioUrl) callRecorderState.audioUrl = body.audioUrl;
+  if (body.transcriptUrl) callRecorderState.transcriptUrl = body.transcriptUrl;
+  callRecorderState.uploadedBytes += chunk.byteLength;
+  return body;
+}
+
+function enqueueCallRecorderUpload(chunk, final = false) {
+  if (!chunk || chunk.byteLength === 0) return callRecorderState.uploadQueue;
+  const uploadChunk = Buffer.from(chunk);
+  callRecorderState.uploadQueue = callRecorderState.uploadQueue
+    .then(() => uploadLiveCallRecordingChunk(uploadChunk, final))
+    .catch((error) => {
+      callRecorderState.uploadError = error;
+      throw error;
+    });
+  return callRecorderState.uploadQueue;
+}
+
+function finalizeCallRecorderAfterQueuedUploads() {
+  return callRecorderState.uploadQueue
+    .catch(() => null)
+    .then(() => uploadLiveCallRecordingChunk(Buffer.alloc(0), true))
+    .catch(() => null);
+}
+
+function bufferCallRecorderAudio(chunk) {
+  if (!chunk || chunk.byteLength === 0 || callRecorderState.uploadError) return;
+  callRecorderState.uploadBuffer = Buffer.concat([callRecorderState.uploadBuffer, Buffer.from(chunk)]);
+  const flushBytes = 32_000;
+  if (callRecorderState.uploadBuffer.byteLength < flushBytes) return;
+  const flush = callRecorderState.uploadBuffer;
+  callRecorderState.uploadBuffer = Buffer.alloc(0);
+  void enqueueCallRecorderUpload(flush).catch((error) => {
+    if (callRecorderState.child) {
+      try {
+        callRecorderState.child.kill('SIGTERM');
+      } catch {
+        // Ignore stop races after upload failure.
+      }
+    }
+    callRecorderState.mode = 'error';
+    callRecorderState.error = error?.message || String(error);
+    callRecorderState.message = `Live recording upload failed: ${callRecorderState.error}`;
+    sendCallRecorderStatus();
+  });
 }
 
 async function stopCallRecording() {
   const child = callRecorderState.child;
   if (!child || callRecorderState.mode !== 'recording') return callRecorderStatus();
-  const filePath = callRecorderState.filePath;
   callRecorderState.mode = 'transcribing';
-  callRecorderState.message = 'Stopping recording and saving it to the server.';
+  callRecorderState.message = 'Stopping recording and finalizing the live transcript.';
   sendCallRecorderStatus();
   callRecorderState.child = null;
   await waitForCallRecorderExit(child);
 
-  const size = fs.existsSync(filePath) ? fs.statSync(filePath).size : 0;
-  if (size <= 44) {
+  const finalChunk = callRecorderState.uploadBuffer;
+  callRecorderState.uploadBuffer = Buffer.alloc(0);
+  if (callRecorderState.uploadedBytes + finalChunk.byteLength === 0) {
+    await uploadLiveCallRecordingChunk(Buffer.alloc(0), true).catch(() => null);
     callRecorderState.mode = 'error';
     callRecorderState.error = callRecorderState.stderr.trim() || 'Recorded audio file is empty.';
     callRecorderState.message = `Call recording failed: ${callRecorderState.error}`;
-    const status = callRecorderStatus({ sizeBytes: size });
+    const status = callRecorderStatus({ sizeBytes: 0 });
     sendCallRecorderStatus(status);
     return status;
   }
 
   try {
-    const transcription = await transcribeCallRecording(filePath);
-    const transcriptText = String(transcription.text || '').trim();
-    const recordingId = String(transcription.recording?.id || '');
+    await callRecorderState.uploadQueue;
+    const finalized = await uploadLiveCallRecordingChunk(finalChunk, true);
+    const transcriptText = String(finalized.recording?.transcriptText || finalized.text || callRecorderState.transcriptText || '').trim();
+    const recordingId = String(finalized.recording?.id || callRecorderState.recordingId || '');
     callRecorderState.recordingId = recordingId;
-    callRecorderState.audioUrl = transcription.audioUrl || (recordingId ? `/api/voice/recordings/${encodeURIComponent(recordingId)}/audio` : '');
-    callRecorderState.transcriptUrl = transcription.transcriptUrl || '';
+    callRecorderState.audioUrl = finalized.audioUrl || (recordingId ? `/api/voice/recordings/${encodeURIComponent(recordingId)}/audio` : callRecorderState.audioUrl);
+    callRecorderState.transcriptUrl = finalized.transcriptUrl || callRecorderState.transcriptUrl || '';
+    callRecorderState.transcriptText = transcriptText;
     callRecorderState.mode = 'saved';
     callRecorderState.message = transcriptText
-      ? `Saved recording to history with transcript (${transcriptText.length.toLocaleString()} characters).`
+      ? `Saved live recording with transcript (${transcriptText.length.toLocaleString()} characters).`
       : 'Saved recording to history. Transcription returned no text.';
     callRecorderState.error = '';
-    try {
-      fs.unlinkSync(filePath);
-      callRecorderState.filePath = '';
-    } catch {
-      // The server copy succeeded; temporary local cleanup is best-effort.
-    }
     const status = callRecorderStatus({
-      sizeBytes: size,
+      sizeBytes: 44 + callRecorderState.uploadedBytes,
       transcriptText,
-      provider: transcription.provider || null,
-      model: transcription.model || null,
-      audioDurationMs: transcription.audioDurationMs || null,
+      provider: finalized.provider || null,
+      model: finalized.model || null,
+      audioDurationMs: finalized.recording?.durationMs || null,
       recordingId: callRecorderState.recordingId || null,
       audioUrl: callRecorderState.audioUrl || null,
       transcriptUrl: callRecorderState.transcriptUrl || null,
@@ -891,10 +953,11 @@ async function stopCallRecording() {
     sendCallRecorderStatus(status);
     return status;
   } catch (error) {
+    await uploadLiveCallRecordingChunk(Buffer.alloc(0), true).catch(() => null);
     callRecorderState.mode = 'error';
     callRecorderState.error = error?.message || String(error);
-    callRecorderState.message = `Transcription failed: ${callRecorderState.error}`;
-    const status = callRecorderStatus({ sizeBytes: size });
+    callRecorderState.message = `Live recording finalization failed: ${callRecorderState.error}`;
+    const status = callRecorderStatus({ sizeBytes: 44 + callRecorderState.uploadedBytes });
     sendCallRecorderStatus(status);
     return status;
   }

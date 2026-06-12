@@ -870,9 +870,12 @@ function normalizeCallRecorderStatus(status) {
     mode: ['idle', 'recording', 'transcribing', 'saved', 'error'].includes(mode) ? mode : 'idle',
     message: String(status?.message || ''),
     error: status?.error ? String(status.error) : '',
+    sessionId: status?.sessionId ? String(status.sessionId) : '',
     recordingId: status?.recordingId ? String(status.recordingId) : '',
     audioUrl: status?.audioUrl ? String(status.audioUrl) : '',
     transcriptUrl: status?.transcriptUrl ? String(status.transcriptUrl) : '',
+    uploadedBytes: Number(status?.uploadedBytes || 0),
+    transcriptText: status?.transcriptText ? String(status.transcriptText) : '',
     sources: Array.isArray(status?.sources) ? status.sources : [],
   };
 }
@@ -886,14 +889,14 @@ function renderCallRecorderStatus(status = state.callRecorder) {
     els.callRecorderButton.classList.toggle('is-error', current.mode === 'error');
     els.callRecorderButton.disabled = current.mode === 'transcribing' || state.mode === 'recording' || state.mode === 'paused' || state.mode === 'transcribing';
     els.callRecorderButton.title = current.mode === 'recording'
-      ? 'Stop recording and transcribe'
-      : 'Record microphone and computer audio, then save it to the server with a Groq transcript.';
+      ? 'Stop recording and finalize the live transcript'
+      : 'Record microphone and computer audio to server-side history with a live Groq transcript.';
   }
   if (els.callRecorderAction) {
     els.callRecorderAction.textContent = current.mode === 'recording'
-      ? 'Stop and transcribe'
+      ? 'Stop and finalize'
       : current.mode === 'transcribing'
-        ? 'Transcribing...'
+        ? 'Finalizing...'
         : 'Record computer audio';
   }
   if (els.callRecorderStatus) {
@@ -905,7 +908,7 @@ function renderCallRecorderStatus(status = state.callRecorder) {
     els.callRecorderStatus.className = `call-recorder-status ${current.mode === 'error' ? 'error' : current.mode === 'saved' ? 'ok' : ''}`.trim();
   }
   if (els.callRecorderOpenButton) {
-    els.callRecorderOpenButton.hidden = !(current.mode === 'saved' && current.recordingId);
+    els.callRecorderOpenButton.hidden = !current.recordingId;
   }
   if (els.primaryVoiceButton) updateVoiceButtons();
 }
@@ -2893,7 +2896,7 @@ async function toggleCallRecorder() {
     return;
   }
   if (current.mode === 'recording') {
-    renderCallRecorderStatus({ ...current, mode: 'transcribing', message: 'Stopping recording and sending audio to Groq.' });
+    renderCallRecorderStatus({ ...current, mode: 'transcribing', message: 'Stopping recording and finalizing the live transcript.' });
     const status = await desktop.stopCallRecorder();
     renderCallRecorderStatus(status);
     if (status?.mode === 'saved') {

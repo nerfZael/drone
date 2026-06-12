@@ -61,7 +61,7 @@ Voice speech runtime is server-side. Local wake detection runs on-device with Vo
 
 ## Desktop Computer Audio Recording
 
-The Electron desktop app can record microphone plus computer audio and save it to the Voice Stream Next server. It uses `ffmpeg` from the desktop machine, records a temporary 16 kHz mono WAV, uploads that WAV to the server, transcribes it with the configured Groq runtime, and stores the audio plus transcript in the server recording history. The web app and desktop history link both use `/settings/recordings`, where transcripts can be downloaded as `.txt` files.
+The Electron desktop app can record microphone plus computer audio and save it to the Voice Stream Next server. It uses `ffmpeg` from the desktop machine, streams 16 kHz mono PCM chunks to the server while recording, and the server keeps a downloadable WAV plus a live Groq transcript in recording history. Transcription runs in rolling windows with overlap so long recordings do not need to stop before text appears. The web app and desktop history link both use `/settings/recordings`, where transcripts can be downloaded as `.txt` files.
 
 Linux defaults to Pulse/PipeWire sources:
 
