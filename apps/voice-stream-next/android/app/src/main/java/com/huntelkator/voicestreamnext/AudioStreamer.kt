@@ -148,7 +148,6 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
 
     fun enterSleep(): Boolean {
         val onStatus = currentOnStatus
-        AssistantAudioPlayer.stopAll()
         if (!awakeMode) {
             active.set(false)
             recording.set(false)
@@ -188,15 +187,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
     }
 
     fun canPlayAssistantAudio(): Boolean {
-        return active.get() && !sleeping && (awakeMode || recording.get())
-    }
-
-    fun canPlayQueuedAssistantAudio(): Boolean {
-        return active.get() && !sleeping
-    }
-
-    fun isRecordingAudio(): Boolean {
-        return recording.get()
+        return active.get()
     }
 
     fun stop() {
@@ -213,7 +204,6 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
         resetApprovalCollection()
         wakeDetector?.release()
         wakeDetector = null
-        AssistantAudioPlayer.stopAll()
         closeSocket("stopped", sendEnd = true)
         runCatching { recorder?.stop() }
     }
@@ -234,7 +224,6 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
 
     private fun beginRecording(target: String, onStatus: (String) -> Unit) {
         if (!recording.compareAndSet(false, true)) return
-        AssistantAudioPlayer.pausePlayback(requeueActive = true)
         currentTarget = cleanTarget(target)
         outgoingReady.set(false)
         reconnectAttempt = 0
@@ -266,7 +255,6 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
         recordingAlreadyStarted: Boolean = false,
     ) {
         if (!recordingAlreadyStarted && recording.getAndSet(true)) return
-        AssistantAudioPlayer.pausePlayback(requeueActive = true)
         currentTarget = cleanTarget(target)
         outgoingReady.set(false)
         reconnectAttempt = 0
@@ -399,7 +387,6 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
             }
             commandType == "sleep" -> {
                 sleeping = true
-                AssistantAudioPlayer.stopAll()
                 resetApprovalCollection()
                 applyWakeDetectorSettingsIfReady()
                 refreshApprovalSettings { applyWakeDetectorSettingsIfReady() }
@@ -463,7 +450,6 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
         closeSocket("server sleep", sendEnd = false)
         val wasSleeping = sleeping
         sleeping = true
-        AssistantAudioPlayer.stopAll()
         resetApprovalCollection()
         applyWakeDetectorSettingsIfReady()
         refreshApprovalSettings { applyWakeDetectorSettingsIfReady() }
@@ -631,7 +617,6 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
                 wakeDetector?.reset()
                 if (sleeping) return
                 sleeping = true
-                AssistantAudioPlayer.stopAll()
                 resetApprovalCollection()
                 applyWakeDetectorSettingsIfReady()
                 refreshApprovalSettings { applyWakeDetectorSettingsIfReady() }
@@ -746,7 +731,6 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
             sleeping -> onStatus(sleepingStatus())
             code == settings.lockCode -> {
                 sleeping = true
-                AssistantAudioPlayer.stopAll()
                 resetApprovalCollection()
                 applyWakeDetectorSettingsIfReady()
                 refreshApprovalSettings { applyWakeDetectorSettingsIfReady() }

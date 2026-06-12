@@ -411,6 +411,26 @@ function messageText(message: AssistantMessage | undefined): string {
   return (textFromParts || String(message.content ?? '')).trim();
 }
 
+function messageJson(message: AssistantMessage | undefined): Record<string, unknown> | null {
+  const parsed = safeJsonText(message?.contentJson);
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
+}
+
+function speakPlaybackLabel(result: AssistantMessage | undefined): string {
+  if (result?.toolName !== 'speak') return '';
+  const payload = messageJson(result);
+  const playback = payload?.playback && typeof payload.playback === 'object' && !Array.isArray(payload.playback)
+    ? payload.playback as Record<string, unknown>
+    : null;
+  const label = String(playback?.label ?? '').trim();
+  if (label) return label;
+  const surface = String(playback?.surface ?? '').trim().toLowerCase();
+  if (surface === 'web') return 'App';
+  if (surface === 'desktop') return 'Desktop';
+  if (surface === 'android') return 'Android';
+  return '';
+}
+
 function toolCallsForMessage(message: AssistantMessage): AssistantToolCall[] {
   const calls = messageParts(message).filter((item) => ['modelToolCall', 'toolCall'].includes(String(item.type)));
   return calls
@@ -661,10 +681,12 @@ function AssistantMessageRow({ message, streaming = false }: { message: Assistan
 
 function ToolDisclosure({
   title,
+  meta,
   status,
   children,
 }: {
   title: string;
+  meta?: string;
   status?: 'ok' | 'error';
   children: React.ReactNode;
 }) {
@@ -688,6 +710,11 @@ function ToolDisclosure({
           </span>
         ) : null}
         <span className="min-w-0 flex-1 truncate">{title}</span>
+        {meta ? (
+          <span className="max-w-[45%] flex-shrink-0 truncate rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.025)] px-1.5 py-0.5 text-[9px] text-[var(--fg-secondary)]">
+            {meta}
+          </span>
+        ) : null}
       </button>
       {open ? <div className="border-t border-[var(--border-subtle)] px-2 py-1.5">{children}</div> : null}
     </div>
@@ -730,9 +757,10 @@ function ToolPayloadDetails({ call, result }: { call?: AssistantToolCall; result
 
 function ToolActivityMessage({ call, result }: { call?: AssistantToolCall; result?: AssistantMessage }) {
   const title = toolLabel(call?.name || result?.toolName || undefined);
+  const playbackLabel = speakPlaybackLabel(result);
   return (
     <div className="mx-3">
-      <ToolDisclosure title={title} status={result ? (result.isError ? 'error' : 'ok') : undefined}>
+      <ToolDisclosure title={title} meta={playbackLabel || undefined} status={result ? (result.isError ? 'error' : 'ok') : undefined}>
         <ToolPayloadDetails call={call} result={result} />
       </ToolDisclosure>
     </div>

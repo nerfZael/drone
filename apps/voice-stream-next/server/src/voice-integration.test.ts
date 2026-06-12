@@ -145,10 +145,11 @@ describe('voice integration', () => {
     }
   });
 
-  test('defers backend speech while a connected voice client is recording', async () => {
+  test('delivers backend speech while a connected voice client is recording', async () => {
     const originalFetch = globalThis.fetch;
     let socket: WebSocket | null = null;
     process.env.GROQ_TTS_API_KEY = 'test-tts-key';
+    process.env.VOICE_STREAM_NEXT_SECRETS_KEY = 'voice-integration-test-secret';
     (globalThis as any).fetch = async (input: any, init?: any) => {
       const url = typeof input === 'string' ? input : input?.url ? String(input.url) : String(input);
       if (url.includes('/openai/v1/audio/speech')) {
@@ -192,6 +193,7 @@ describe('voice integration', () => {
 
       const user = db.userByClerkId('dev_voice_integration_example_local');
       expect(user).toBeTruthy();
+      db.upsertAssistantApiKey(user!.id, 'groq', 'test-tts-key');
       await waitForCondition('recording status', () =>
         db.listClientStatuses(user!.id).some((entry) => entry.deviceId === registered.device.id && entry.mode === 'recording'),
       );
@@ -199,30 +201,26 @@ describe('voice integration', () => {
       const thread = await fetch(`${baseUrl}/api/assistant/threads`, {
         method: 'POST',
         headers: devHeaders,
-        body: JSON.stringify({ title: 'Deferred speech thread', source: 'voice', voiceEnabled: true }),
+        body: JSON.stringify({ title: 'Immediate speech thread', source: 'voice', voiceEnabled: true }),
       }).then((response) => response.json());
-      await fetch(`${baseUrl}/api/assistant/threads/${thread.thread.id}/prompt`, {
+      const promptResponse = await fetch(`${baseUrl}/api/assistant/threads/${thread.thread.id}/prompt`, {
         method: 'POST',
         headers: devHeaders,
-        body: JSON.stringify({ prompt: '/speak Wait until recording stops.' }),
+        body: JSON.stringify({ prompt: '/speak Speak while recording.' }),
       }).then((response) => response.json());
 
-      await new Promise((resolve) => setTimeout(resolve, 250));
-      expect(messages.some((message) => message.type === 'speech_audio')).toBe(false);
-
-      controlSocket.send(JSON.stringify({
-        type: 'client_status',
-        mode: 'paused',
-        status: 'Voice request paused',
-        microphone: 'Desktop microphone',
-        protocolVersion: 1,
-        appVersion: 'test',
-        reportedAt: new Date().toISOString(),
-      }));
-      await waitForCondition('deferred speech audio', () => messages.some((message) => message.type === 'speech_audio'));
+      await waitForCondition('speech audio during recording', () => messages.some((message) => message.type === 'speech_audio'));
+      const toolResult = promptResponse.snapshot.threads[0]?.messages.find((message: any) =>
+        message.role === 'toolResult' && message.toolName === 'speak'
+      );
+      const resultPayload = JSON.parse(toolResult?.contentJson || '{}');
+      expect(resultPayload.playback?.surface).toBe('desktop');
+      expect(resultPayload.playback?.label).toBe('Speech Desktop');
+      expect(resultPayload.delivered).toBe(true);
     } finally {
       globalThis.fetch = originalFetch;
       delete process.env.GROQ_TTS_API_KEY;
+      delete process.env.VOICE_STREAM_NEXT_SECRETS_KEY;
       if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) socket.close();
     }
   });
