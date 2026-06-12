@@ -1060,6 +1060,82 @@ h2 {
   display: none;
 }
 
+.call-recorder-panel {
+  display: grid;
+  grid-template-columns: auto auto;
+  grid-template-areas:
+    "button open"
+    "status status";
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: min(560px, 86vw);
+}
+
+.call-recorder-button {
+  grid-area: button;
+  display: inline-grid;
+  grid-template-columns: 18px minmax(0, auto);
+  align-items: center;
+  gap: 8px;
+  min-width: 220px;
+  min-height: 38px;
+  color: var(--fg-secondary);
+}
+
+.call-recorder-button.is-recording {
+  border-color: rgba(255, 178, 36, .58);
+  background: rgba(255, 178, 36, .10);
+  color: #ffd28a;
+}
+
+.call-recorder-button.is-transcribing {
+  border-color: rgba(167, 139, 250, .58);
+  background: rgba(167, 139, 250, .12);
+  color: var(--accent);
+}
+
+.call-recorder-button.is-error {
+  border-color: rgba(255, 90, 90, .50);
+  background: rgba(255, 90, 90, .10);
+  color: #ffb4b4;
+}
+
+.call-recorder-icon,
+.call-recorder-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.call-recorder-icon svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+}
+
+.call-recorder-status {
+  grid-area: status;
+  width: min(560px, 86vw);
+  min-height: 18px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.call-recorder-status.ok {
+  color: var(--green);
+}
+
+.call-recorder-status.error {
+  color: var(--red);
+}
+
+#callRecorderOpenButton {
+  grid-area: open;
+}
+
 @keyframes pulse-ring {
   0%, 100% { transform: scale(1); opacity: .72; }
   50% { transform: scale(1.08); opacity: .22; }
@@ -1114,6 +1190,7 @@ body.is-compact .shell::before,
 body.is-compact .topbar,
 body.is-compact .voice-copy,
 body.is-compact .voice-device-panel,
+body.is-compact .call-recorder-panel,
 body.is-compact .meter-shell,
 body.is-compact .voice-status {
   display: none;

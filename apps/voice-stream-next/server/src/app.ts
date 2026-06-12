@@ -16,7 +16,7 @@ import {
   type TerminalCommand,
 } from './streaming-transcription.js';
 import { approvalCodeFromText } from './approval-code.js';
-import { pcm16ToWav } from './wav.js';
+import { pcm16ToWav, wavPcm16Data } from './wav.js';
 import { parseVoiceApprovalSettings, voiceApprovalSettingsResponse } from './voice-approval-settings.js';
 import {
   assistantAvailableToolSummaries,
@@ -799,11 +799,11 @@ function safePathPart(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 120) || 'unknown';
 }
 
-function voiceRecordingDir(db: VoiceStreamNextDb, userId: string, mode: 'assistant' | 'clipboard'): string {
+function voiceRecordingDir(db: VoiceStreamNextDb, userId: string, mode: string): string {
   return path.join(path.dirname(db.path), 'voice-recordings', safePathPart(userId), mode);
 }
 
-function voiceRecordingFilePath(db: VoiceStreamNextDb, userId: string, mode: 'assistant' | 'clipboard', sessionId: string): string {
+function voiceRecordingFilePath(db: VoiceStreamNextDb, userId: string, mode: string, sessionId: string): string {
   return path.join(voiceRecordingDir(db, userId, mode), `${safePathPart(sessionId)}.wav`);
 }
 
@@ -848,6 +848,40 @@ function saveVoiceRecording(opts: {
     channels: VOICE_RECORDING_CHANNELS,
   });
   const pruned = opts.db.pruneVoiceRecordings(opts.userId, opts.mode, VOICE_RECORDING_RETENTION_PER_MODE);
+  for (const recording of pruned) deleteRecordingFile(recording.filePath);
+  return { recording, pruned };
+}
+
+function saveVoiceRecordingWav(opts: {
+  db: VoiceStreamNextDb;
+  userId: string;
+  sessionId: string;
+  deviceId: string;
+  assistantThreadId: string;
+  mode: string;
+  wav: Uint8Array;
+  durationMs: number;
+  sampleRateHz: number;
+  channels: number;
+  pruneKeep?: number | null;
+}): { recording: VoiceRecordingRecord; pruned: VoiceRecordingRecord[] } | null {
+  if (opts.wav.byteLength === 0) return null;
+  const filePath = voiceRecordingFilePath(opts.db, opts.userId, opts.mode, opts.sessionId);
+  mkdirSync(path.dirname(filePath), { recursive: true });
+  writeFileSync(filePath, opts.wav);
+  const recording = opts.db.addVoiceRecording(opts.userId, {
+    voiceSessionId: opts.sessionId,
+    deviceId: opts.deviceId,
+    assistantThreadId: opts.assistantThreadId,
+    mode: opts.mode,
+    filePath,
+    mimeType: 'audio/wav',
+    sizeBytes: opts.wav.byteLength,
+    durationMs: opts.durationMs,
+    sampleRateHz: opts.sampleRateHz,
+    channels: opts.channels,
+  });
+  const pruned = opts.pruneKeep == null ? [] : opts.db.pruneVoiceRecordings(opts.userId, opts.mode, opts.pruneKeep);
   for (const recording of pruned) deleteRecordingFile(recording.filePath);
   return { recording, pruned };
 }
@@ -2319,18 +2353,21 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     withUser(req, reply, db, clerkEnabled, async (ctx) => {
       const query = (req.query ?? {}) as Record<string, unknown>;
       const mode = cleanText(query.mode).toLowerCase();
-      const validMode = mode === 'assistant' || mode === 'clipboard' ? mode : undefined;
+      const validMode = mode === 'assistant' || mode === 'clipboard' || mode === 'computer' ? mode : undefined;
       const limitRaw = Number(query.limit);
       const limit = Number.isInteger(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 40) : 20;
+      const offsetRaw = Number(query.offset);
+      const offset = Number.isInteger(offsetRaw) && offsetRaw > 0 ? offsetRaw : 0;
       const recordings = validMode
-        ? db.listVoiceRecordings(ctx.user.id, limit, { mode: validMode })
-        : [
-            ...db.listVoiceRecordings(ctx.user.id, VOICE_RECORDING_RETENTION_PER_MODE, { mode: 'assistant' }),
-            ...db.listVoiceRecordings(ctx.user.id, VOICE_RECORDING_RETENTION_PER_MODE, { mode: 'clipboard' }),
-          ];
+        ? db.listVoiceRecordings(ctx.user.id, limit, { mode: validMode, offset })
+        : db.listVoiceRecordings(ctx.user.id, limit, { offset });
+      const total = validMode ? db.countVoiceRecordings(ctx.user.id, { mode: validMode }) : db.countVoiceRecordings(ctx.user.id);
       return {
         ok: true,
         retentionPerMode: VOICE_RECORDING_RETENTION_PER_MODE,
+        limit,
+        offset,
+        total,
         recordings,
       };
     }),
@@ -2356,6 +2393,143 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       return reply.send(createReadStream(recording.filePath));
     }),
   );
+
+  app.get('/api/voice/recordings/:recordingId/transcript', async (req, reply) =>
+    withUser(req, reply, db, clerkEnabled, async (ctx) => {
+      const recordingId = cleanText((req.params as any).recordingId);
+      const recording = db.voiceRecording(ctx.user.id, recordingId);
+      const transcriptText = recording?.transcriptText?.trim();
+      if (!recording || !transcriptText) {
+        reply.code(404).send({ ok: false, error: 'transcript not found' });
+        return;
+      }
+      const download = queryValue((req.query as any)?.download) === '1';
+      reply.header('content-type', 'text/plain; charset=utf-8');
+      reply.header('cache-control', 'private, max-age=60');
+      if (download) {
+        const fileName = `voice-${recording.mode}-${recording.createdAt.replace(/[^0-9T-]+/g, '-')}.txt`;
+        reply.header('content-disposition', `attachment; filename="${fileName}"`);
+      }
+      return `${transcriptText}\n`;
+    }),
+  );
+
+  app.post('/api/voice/local-recordings/transcribe', async (req, reply) => {
+    const query = (req.query ?? {}) as Record<string, unknown>;
+    const deviceId = cleanText(req.headers['x-voice-device-id'] || query.deviceId);
+    const token = cleanText(req.headers['x-voice-device-token'] || query.token);
+    const installationId = cleanText(req.headers['x-voice-installation-id'] || query.installationId) || null;
+    const clientVersion = parseClientVersion(req.headers['x-voice-client-version'], parseClientVersion(query.clientVersion, parseClientVersion(query.protocolVersion, null)));
+    const auth = verifyDeviceAuth(db, deviceId, token, clientVersion);
+    if (!auth.ok) {
+      reply.code(auth.reason === 'client_too_old' ? 426 : 401).send({
+        ok: false,
+        error: deviceAuthFailureMessage(auth),
+        reason: auth.reason,
+        minClientVersion: auth.reason === 'client_too_old' ? auth.minClientVersion : undefined,
+      });
+      return;
+    }
+    const device = resolveDeviceInstallation(db, auth.device, installationId, token);
+    const body = req.body;
+    const wav = Buffer.isBuffer(body)
+      ? new Uint8Array(body)
+      : body instanceof Uint8Array
+        ? body
+        : null;
+    if (!wav || wav.byteLength === 0) {
+      reply.code(400).send({ ok: false, error: 'audio upload is empty' });
+      return;
+    }
+
+    try {
+      const { pcm, sampleRate, channels } = wavPcm16Data(wav);
+      const groqCredential = resolveGroqCredential(db, device.userId);
+      if (groqCredential?.source === 'platform_groq_key' && pcm.byteLength >= 1600) {
+        db.requirePositiveCreditBalance(device.userId, 'Groq local recording transcription');
+      }
+      const transcription = await transcribePcm16(pcm, {
+        apiKey: groqCredential?.apiKey,
+        credentialSource: groqCredential?.source,
+      });
+      const session = db.createVoiceSession(device.userId, device.id, 'computer');
+      const transcriptText = cleanText(transcription.text);
+      if (transcriptText) addTranscript(device.userId, session.id, transcriptText);
+      db.endVoiceSession(device.userId, session.id);
+      const saved = saveVoiceRecordingWav({
+        db,
+        userId: device.userId,
+        sessionId: session.id,
+        deviceId: device.id,
+        assistantThreadId: session.assistantThreadId,
+        mode: 'computer',
+        wav,
+        durationMs: transcription.audioDurationMs || pcmDurationMs(pcm.byteLength, sampleRate, channels),
+        sampleRateHz: sampleRate,
+        channels,
+        pruneKeep: null,
+      });
+      if (!saved) throw new Error('Recording upload is empty.');
+      emitAppEvent(device.userId, 'voice_recording_changed', {
+        recordingId: saved.recording.id,
+        voiceSessionId: session.id,
+        deviceId: device.id,
+        mode: 'computer',
+        prunedCount: 0,
+      });
+      recordGroqTranscriptionUsage(device.userId, transcription, {
+        deviceId: device.id,
+        voiceSessionId: session.id,
+        assistantThreadId: session.assistantThreadId,
+        source: 'desktop_local_recording',
+      });
+      addLog(device.userId, {
+        deviceId: device.id,
+        source: 'desktop',
+        level: transcription.text ? 'info' : 'warn',
+        message: transcription.text ? 'Desktop local recording transcribed' : 'Desktop local recording transcription returned no text',
+        detailsJson: JSON.stringify({
+          bytes: wav.byteLength,
+          pcmBytes: pcm.byteLength,
+          durationMs: transcription.audioDurationMs,
+          provider: transcription.provider,
+          model: transcription.model,
+          recordingId: saved.recording.id,
+        }),
+      });
+      return {
+        ok: true,
+        text: transcriptText,
+        provider: transcription.provider,
+        credentialSource: transcription.credentialSource,
+        model: transcription.model,
+        audioDurationMs: transcription.audioDurationMs,
+        sampleRateHz: sampleRate,
+        channels,
+        recording: saved.recording,
+        audioUrl: `/api/voice/recordings/${encodeURIComponent(saved.recording.id)}/audio`,
+        transcriptUrl: transcriptText ? `/api/voice/recordings/${encodeURIComponent(saved.recording.id)}/transcript?download=1` : null,
+      };
+    } catch (error: any) {
+      const message = error?.message ?? String(error);
+      const explicitStatus = Number(error?.statusCode);
+      const status = explicitStatus >= 400 && explicitStatus < 600
+        ? explicitStatus
+        : /credit/i.test(message)
+          ? 402
+          : /wav|audio|pcm|sample|mono|chunk/i.test(message)
+            ? 400
+            : 502;
+      addLog(device.userId, {
+        deviceId: device.id,
+        source: 'desktop',
+        level: 'error',
+        message: 'Desktop local recording transcription failed',
+        detailsJson: JSON.stringify({ error: message, bytes: wav.byteLength }),
+      });
+      reply.code(status).send({ ok: false, error: message });
+    }
+  });
 
   app.post('/api/devices/:deviceId/status', async (req, reply) => {
     const deviceId = String((req.params as any).deviceId ?? '');

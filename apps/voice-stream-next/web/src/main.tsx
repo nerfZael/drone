@@ -775,6 +775,16 @@ const ASSISTANT_TOOL_CATEGORY_LABELS: Record<string, string> = {
   extensions: 'Extensions',
 };
 
+type VoiceRecordingsMode = 'computer' | 'assistant' | 'clipboard';
+
+const VOICE_RECORDING_PAGE_SIZE = 10;
+
+const VOICE_RECORDING_MODE_ENTRIES: Array<{ id: VoiceRecordingsMode; label: string }> = [
+  { id: 'computer', label: 'Computer' },
+  { id: 'assistant', label: 'Assistant' },
+  { id: 'clipboard', label: 'Clipboard' },
+];
+
 function AssistantToolsPanel({
   tools,
   enabledTools,
@@ -1254,8 +1264,12 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const [emailCreditGrantDraft, setEmailCreditGrantDraft] = React.useState({ email: '', amountCredits: '', reason: '' });
   const [assistantExtensions, setAssistantExtensions] = React.useState<AssistantExtensionsResponse | null>(null);
   const [voiceRecordings, setVoiceRecordings] = React.useState<VoiceRecordingRecord[]>([]);
+  const [voiceRecordingsMode, setVoiceRecordingsMode] = React.useState<VoiceRecordingsMode>('computer');
+  const [voiceRecordingsOffset, setVoiceRecordingsOffset] = React.useState(0);
+  const [voiceRecordingsTotal, setVoiceRecordingsTotal] = React.useState(0);
   const [voiceRecordingsLoading, setVoiceRecordingsLoading] = React.useState(false);
   const [voiceRecordingsError, setVoiceRecordingsError] = React.useState<string | null>(null);
+  const voiceRecordingsQueryRef = React.useRef<{ mode: VoiceRecordingsMode; offset: number }>({ mode: 'computer', offset: 0 });
   const [androidSetupInfo, setAndroidSetupInfo] = React.useState<AndroidSetupInfo | null>(null);
   const [androidSetupQr, setAndroidSetupQr] = React.useState('');
   const [pairingText, setPairingText] = React.useState('');
@@ -1566,18 +1580,36 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     }
   }, [client]);
 
-  const loadVoiceRecordings = React.useCallback(async () => {
+  const loadVoiceRecordings = React.useCallback(async (mode: VoiceRecordingsMode, offset: number) => {
     setVoiceRecordingsLoading(true);
     setVoiceRecordingsError(null);
     try {
-      const data = await client.request<{ ok: true; retentionPerMode: number; recordings: VoiceRecordingRecord[] }>('/api/voice/recordings');
+      const query = new URLSearchParams({
+        mode,
+        limit: String(VOICE_RECORDING_PAGE_SIZE),
+        offset: String(Math.max(0, offset)),
+      });
+      const data = await client.request<{
+        ok: true;
+        retentionPerMode: number;
+        limit: number;
+        offset: number;
+        total: number;
+        recordings: VoiceRecordingRecord[];
+      }>(`/api/voice/recordings?${query.toString()}`);
       setVoiceRecordings(data.recordings);
+      setVoiceRecordingsOffset(data.offset);
+      setVoiceRecordingsTotal(data.total);
     } catch (err: any) {
       setVoiceRecordingsError(err?.message ?? String(err));
     } finally {
       setVoiceRecordingsLoading(false);
     }
   }, [client]);
+
+  React.useEffect(() => {
+    voiceRecordingsQueryRef.current = { mode: voiceRecordingsMode, offset: voiceRecordingsOffset };
+  }, [voiceRecordingsMode, voiceRecordingsOffset]);
 
   const refreshAndroidSetup = React.useCallback(async () => {
     try {
@@ -1675,8 +1707,8 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   }, [loadDesktopAppInfo]);
 
   React.useEffect(() => {
-    if (activeView === 'settings' && settingsPane === 'recordings') void loadVoiceRecordings();
-  }, [activeView, settingsPane, loadVoiceRecordings]);
+    if (activeView === 'settings' && settingsPane === 'recordings') void loadVoiceRecordings(voiceRecordingsMode, voiceRecordingsOffset);
+  }, [activeView, settingsPane, loadVoiceRecordings, voiceRecordingsMode, voiceRecordingsOffset]);
 
   React.useEffect(() => {
     void refreshAndroidSetup();
@@ -1710,7 +1742,8 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
       }
       if (event.type === 'voice_recording_changed') {
         scheduleDashboardEventRefreshRef.current();
-        void loadVoiceRecordings();
+        const query = voiceRecordingsQueryRef.current;
+        void loadVoiceRecordings(query.mode, query.offset);
         return;
       }
       scheduleDashboardEventRefreshRef.current();
@@ -3073,8 +3106,11 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const canGrantCreditsByEmail = emailCreditGrantDraft.email.trim().includes('@') && Number(emailCreditGrantDraft.amountCredits) > 0;
   const wakeListenerLogs = logs.filter(isVoskUtteranceLog);
   const activityLogs = activityLogFilter === 'wake-listener' ? wakeListenerLogs : logs;
-  const assistantRecordings = voiceRecordings.filter((recording) => recording.mode === 'assistant');
-  const clipboardRecordings = voiceRecordings.filter((recording) => recording.mode === 'clipboard');
+  const voiceRecordingsModeLabel = VOICE_RECORDING_MODE_ENTRIES.find((entry) => entry.id === voiceRecordingsMode)?.label ?? 'Recordings';
+  const voiceRecordingsPageStart = voiceRecordingsTotal === 0 ? 0 : voiceRecordingsOffset + 1;
+  const voiceRecordingsPageEnd = Math.min(voiceRecordingsOffset + voiceRecordings.length, voiceRecordingsTotal);
+  const voiceRecordingsCanPrevious = voiceRecordingsOffset > 0;
+  const voiceRecordingsCanNext = voiceRecordingsOffset + VOICE_RECORDING_PAGE_SIZE < voiceRecordingsTotal;
   const speechPlayback = dashboard?.speechPlayback;
   const speechPlaybackTarget = dashboard?.settings.speechPlaybackTarget ?? speechPlayback?.preferredTarget ?? 'auto';
   const pendingApprovals = assistantSnapshotData?.pendingApprovals ?? [];
@@ -4886,57 +4922,90 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                   <div className={assistantPanelHeaderClass}>
                     <div>
                       <span className={assistantKickerClass}>Voice</span>
-                      <h2 className={assistantPanelTitleClass}>Recent Recordings</h2>
+                      <h2 className={assistantPanelTitleClass}>Recording History</h2>
                     </div>
-                    <button type="button" className={assistantActionButtonClass} disabled={voiceRecordingsLoading} onClick={() => void loadVoiceRecordings()}>
+                    <button type="button" className={assistantActionButtonClass} disabled={voiceRecordingsLoading} onClick={() => void loadVoiceRecordings(voiceRecordingsMode, voiceRecordingsOffset)}>
                       Refresh
                     </button>
                   </div>
                   {voiceRecordingsError ? <div className="mb-2 rounded border border-[rgba(255,90,90,.24)] bg-[var(--red-subtle)] p-2 text-xs text-[var(--red)]">{voiceRecordingsError}</div> : null}
-                  <div className="grid gap-3 xl:grid-cols-2">
-                    {([
-                      ['assistant', assistantRecordings],
-                      ['clipboard', clipboardRecordings],
-                    ] as Array<['assistant' | 'clipboard', VoiceRecordingRecord[]]>).map(([mode, recordings]) => (
-                      <div key={mode} className="grid content-start gap-2">
-                        <div className="flex min-w-0 items-center justify-between gap-2">
-                          <h3 className="m-0 font-display text-[12px] font-bold uppercase text-[var(--fg)]">{mode === 'assistant' ? 'Assistant' : 'Clipboard'}</h3>
-                          <span className="text-[11px] text-[var(--muted)]">{recordings.length} / 10</span>
-                        </div>
-                        {recordings.map((recording) => (
-                          <article key={recording.id} className={cn(assistantRowClass, 'grid gap-2 p-2.5')}>
-                            <div className="grid gap-1">
-                              <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                                <strong className="min-w-0 truncate text-xs text-[var(--fg)]">{recording.deviceName || recording.deviceId || 'Voice device'}</strong>
-                                <span className="rounded border border-[var(--border-subtle)] px-1.5 py-0.5 font-display text-[9px] font-bold uppercase text-[var(--muted)]">
-                                  {formatDurationMs(recording.durationMs)}
-                                </span>
-                                <span className="rounded border border-[var(--border-subtle)] px-1.5 py-0.5 font-display text-[9px] font-bold uppercase text-[var(--muted)]">
-                                  {formatBytes(recording.sizeBytes)}
-                                </span>
-                              </div>
-                              <time className="text-[11px] text-[var(--muted)]" title={exactTimeLabel(recording.createdAt)}>
-                                {timeLabel(recording.createdAt)}
-                              </time>
-                            </div>
-                            <audio controls preload="metadata" src={recordingAudioUrl(recording.id)} className="h-8 w-full" />
-                            <div className="flex flex-wrap gap-1.5">
-                              <a className={assistantActionButtonClass} href={recordingAudioUrl(recording.id, true)} download>
-                                Download
-                              </a>
-                            </div>
-                            <div className="max-h-[120px] overflow-y-auto rounded border border-[var(--border-subtle)] bg-black/[.10] p-2 text-xs leading-relaxed text-[var(--fg-secondary)]">
-                              {recording.transcriptText ? recording.transcriptText : <span className="text-[var(--muted)]">No paired transcript.</span>}
-                            </div>
-                          </article>
-                        ))}
-                        {recordings.length === 0 ? (
-                          <div className={assistantEmptyClass}>
-                            {voiceRecordingsLoading ? 'Loading recordings.' : `No ${mode} recordings yet.`}
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap gap-1.5">
+                      {VOICE_RECORDING_MODE_ENTRIES.map((entry) => (
+                        <button
+                          key={entry.id}
+                          type="button"
+                          className={cn(assistantActionButtonClass, voiceRecordingsMode === entry.id && 'border-[var(--accent)] text-[var(--fg)]')}
+                          aria-pressed={voiceRecordingsMode === entry.id}
+                          onClick={() => {
+                            setVoiceRecordingsMode(entry.id);
+                            setVoiceRecordingsOffset(0);
+                          }}
+                        >
+                          {entry.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-2 text-[11px] text-[var(--muted)]">
+                      <span>
+                        {voiceRecordingsTotal === 0 ? `No ${voiceRecordingsModeLabel.toLowerCase()} recordings` : `${voiceRecordingsPageStart}-${voiceRecordingsPageEnd} of ${voiceRecordingsTotal}`}
+                      </span>
+                      <button
+                        type="button"
+                        className={assistantActionButtonClass}
+                        disabled={voiceRecordingsLoading || !voiceRecordingsCanPrevious}
+                        onClick={() => setVoiceRecordingsOffset(Math.max(0, voiceRecordingsOffset - VOICE_RECORDING_PAGE_SIZE))}
+                      >
+                        Previous
+                      </button>
+                      <button
+                        type="button"
+                        className={assistantActionButtonClass}
+                        disabled={voiceRecordingsLoading || !voiceRecordingsCanNext}
+                        onClick={() => setVoiceRecordingsOffset(voiceRecordingsOffset + VOICE_RECORDING_PAGE_SIZE)}
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                  <div className="grid gap-2">
+                    {voiceRecordings.map((recording) => (
+                      <article key={recording.id} className={cn(assistantRowClass, 'grid gap-2 p-2.5')}>
+                        <div className="grid gap-1">
+                          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                            <strong className="min-w-0 truncate text-xs text-[var(--fg)]">{recording.deviceName || recording.deviceId || 'Voice device'}</strong>
+                            <span className="rounded border border-[var(--border-subtle)] px-1.5 py-0.5 font-display text-[9px] font-bold uppercase text-[var(--muted)]">
+                              {formatDurationMs(recording.durationMs)}
+                            </span>
+                            <span className="rounded border border-[var(--border-subtle)] px-1.5 py-0.5 font-display text-[9px] font-bold uppercase text-[var(--muted)]">
+                              {formatBytes(recording.sizeBytes)}
+                            </span>
                           </div>
-                        ) : null}
-                      </div>
+                          <time className="text-[11px] text-[var(--muted)]" title={exactTimeLabel(recording.createdAt)}>
+                            {timeLabel(recording.createdAt)}
+                          </time>
+                        </div>
+                        <audio controls preload="metadata" src={recordingAudioUrl(recording.id)} className="h-8 w-full" />
+                        <div className="flex flex-wrap gap-1.5">
+                          <a className={assistantActionButtonClass} href={recordingAudioUrl(recording.id, true)} download>
+                            Download audio
+                          </a>
+                          {recording.transcriptText ? (
+                            <a className={assistantActionButtonClass} href={recordingTranscriptUrl(recording.id, true)} download>
+                              Download transcript
+                            </a>
+                          ) : null}
+                        </div>
+                        <div className="max-h-[120px] overflow-y-auto rounded border border-[var(--border-subtle)] bg-black/[.10] p-2 text-xs leading-relaxed text-[var(--fg-secondary)]">
+                          {recording.transcriptText ? recording.transcriptText : <span className="text-[var(--muted)]">No paired transcript.</span>}
+                        </div>
+                      </article>
                     ))}
+                    {voiceRecordings.length === 0 ? (
+                      <div className={assistantEmptyClass}>
+                        {voiceRecordingsLoading ? 'Loading recordings.' : `No ${voiceRecordingsModeLabel.toLowerCase()} recordings yet.`}
+                      </div>
+                    ) : null}
                   </div>
                 </section>
               ) : null}
@@ -6186,6 +6255,11 @@ function voskUtteranceMode(log: LogRecord): string {
 function recordingAudioUrl(recordingId: string, download = false): string {
   const query = download ? '?download=1' : '';
   return `/api/voice/recordings/${encodeURIComponent(recordingId)}/audio${query}`;
+}
+
+function recordingTranscriptUrl(recordingId: string, download = false): string {
+  const query = download ? '?download=1' : '';
+  return `/api/voice/recordings/${encodeURIComponent(recordingId)}/transcript${query}`;
 }
 
 function SignedOutDownloadLinks() {

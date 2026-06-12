@@ -94,6 +94,7 @@ const state = {
   sleepPhraseCandidate: null,
   sleepPhraseTimer: null,
   commandLogs: [],
+  callRecorder: null,
   approvalRecognizer: new ApprovalCodeRecognizer(),
   approvalFinalizeTimer: null,
   analyser: null,
@@ -171,6 +172,10 @@ const els = {
   refreshCommandLogsButton: document.querySelector('#refreshCommandLogsButton'),
   copyCommandLogsButton: document.querySelector('#copyCommandLogsButton'),
   clearCommandLogsButton: document.querySelector('#clearCommandLogsButton'),
+  callRecorderButton: document.querySelector('#callRecorderButton'),
+  callRecorderAction: document.querySelector('#callRecorderAction'),
+  callRecorderOpenButton: document.querySelector('#callRecorderOpenButton'),
+  callRecorderStatus: document.querySelector('#callRecorderStatus'),
   extensionsConfigInput: document.querySelector('#extensionsConfigInput'),
   addExtensionFileButton: document.querySelector('#addExtensionFileButton'),
   extensionDropzone: document.querySelector('#extensionDropzone'),
@@ -858,6 +863,62 @@ function showStatus(message) {
   els.micStatus.textContent = message;
 }
 
+function normalizeCallRecorderStatus(status) {
+  const mode = String(status?.mode || 'idle');
+  return {
+    ok: status?.ok !== false,
+    mode: ['idle', 'recording', 'transcribing', 'saved', 'error'].includes(mode) ? mode : 'idle',
+    message: String(status?.message || ''),
+    error: status?.error ? String(status.error) : '',
+    recordingId: status?.recordingId ? String(status.recordingId) : '',
+    audioUrl: status?.audioUrl ? String(status.audioUrl) : '',
+    transcriptUrl: status?.transcriptUrl ? String(status.transcriptUrl) : '',
+    sources: Array.isArray(status?.sources) ? status.sources : [],
+  };
+}
+
+function renderCallRecorderStatus(status = state.callRecorder) {
+  const current = normalizeCallRecorderStatus(status);
+  state.callRecorder = current;
+  if (els.callRecorderButton) {
+    els.callRecorderButton.classList.toggle('is-recording', current.mode === 'recording');
+    els.callRecorderButton.classList.toggle('is-transcribing', current.mode === 'transcribing');
+    els.callRecorderButton.classList.toggle('is-error', current.mode === 'error');
+    els.callRecorderButton.disabled = current.mode === 'transcribing' || state.mode === 'recording' || state.mode === 'paused' || state.mode === 'transcribing';
+    els.callRecorderButton.title = current.mode === 'recording'
+      ? 'Stop recording and transcribe'
+      : 'Record microphone and computer audio, then save it to the server with a Groq transcript.';
+  }
+  if (els.callRecorderAction) {
+    els.callRecorderAction.textContent = current.mode === 'recording'
+      ? 'Stop and transcribe'
+      : current.mode === 'transcribing'
+        ? 'Transcribing...'
+        : 'Record computer audio';
+  }
+  if (els.callRecorderStatus) {
+    const hasSystemSource = current.sources.some((source) => String(source?.label || '') === 'system');
+    const fallback = hasSystemSource
+      ? 'Ready to record microphone and computer audio.'
+      : 'Records microphone audio. Configure a system loopback source to include computer audio.';
+    els.callRecorderStatus.textContent = current.error || current.message || fallback;
+    els.callRecorderStatus.className = `call-recorder-status ${current.mode === 'error' ? 'error' : current.mode === 'saved' ? 'ok' : ''}`.trim();
+  }
+  if (els.callRecorderOpenButton) {
+    els.callRecorderOpenButton.hidden = !(current.mode === 'saved' && current.recordingId);
+  }
+  if (els.primaryVoiceButton) updateVoiceButtons();
+}
+
+async function refreshCallRecorderStatus() {
+  if (!desktop.callRecorderStatus) return;
+  try {
+    renderCallRecorderStatus(await desktop.callRecorderStatus());
+  } catch {
+    // Local recorder status is optional in non-desktop runtimes.
+  }
+}
+
 function serverConnectionErrorMessage(serverUrl = readFormConfig().serverUrl) {
   const url = trimSlash(serverUrl) || 'the configured server';
   return `Cannot reach Voice Stream Next server at ${url}. Start the VSN server and try again.`;
@@ -910,6 +971,7 @@ function setMode(mode, status) {
   }
   void reportClientStatus(mode, status || els.micStatus.textContent || mode);
   if (!speechPlaybackBlocked()) void drainSpeechPlaybackQueue();
+  renderCallRecorderStatus();
 }
 
 async function reportClientStatus(mode, status) {
@@ -1054,6 +1116,8 @@ function handleRemoteControlCommand(message, socket) {
 
 function updateVoiceButtons() {
   const streaming = Boolean(state.voiceSocket || state.stream);
+  const callRecorderMode = normalizeCallRecorderStatus(state.callRecorder).mode;
+  const callRecorderBusy = callRecorderMode === 'recording' || callRecorderMode === 'transcribing';
   const labels = {
     off: ['Off', 'Start voice'],
     awake: ['Awake', 'Sleep'],
@@ -1072,7 +1136,7 @@ function updateVoiceButtons() {
       : labels[state.mode] || ['Voice', 'Toggle'];
   els.primaryVoiceMode.textContent = modeLabel;
   els.primaryVoiceAction.textContent = actionLabel;
-  els.primaryVoiceButton.disabled = state.mode === 'transcribing';
+  els.primaryVoiceButton.disabled = state.mode === 'transcribing' || callRecorderBusy;
   els.primaryVoiceButton.className = `voice-orb is-${state.mode}`;
   els.primaryVoiceButton.setAttribute('aria-label', `${actionLabel} desktop voice`);
   els.primaryVoiceButton.setAttribute('aria-pressed', String(streaming || state.mode === 'awake'));
@@ -2814,6 +2878,36 @@ async function togglePauseResumeRecording() {
   showStatus('No active recording to pause.');
 }
 
+async function toggleCallRecorder() {
+  const current = normalizeCallRecorderStatus(state.callRecorder);
+  if (current.mode === 'transcribing') {
+    showStatus('Computer audio transcription is already running.');
+    return;
+  }
+  if (!state.config?.deviceId || !state.config?.deviceToken) {
+    showStatus('Connect this desktop before recording computer audio.');
+    return;
+  }
+  if (state.mode === 'recording' || state.mode === 'paused' || state.mode === 'transcribing') {
+    showStatus('Stop the current voice recording before starting computer audio recording.');
+    return;
+  }
+  if (current.mode === 'recording') {
+    renderCallRecorderStatus({ ...current, mode: 'transcribing', message: 'Stopping recording and sending audio to Groq.' });
+    const status = await desktop.stopCallRecorder();
+    renderCallRecorderStatus(status);
+    if (status?.mode === 'saved') {
+      showStatus('Computer audio recording saved with transcript.');
+    } else if (status?.mode === 'error') {
+      showStatus(status.error || status.message || 'Computer audio recording failed.');
+    }
+    return;
+  }
+  const status = await desktop.startCallRecorder();
+  renderCallRecorderStatus(status);
+  showStatus(status?.message || 'Recording computer audio.');
+}
+
 async function processApprovalCode(code) {
   const settings = await loadVoiceSettings();
   if (state.mode === 'sleeping') {
@@ -3207,6 +3301,19 @@ if (els.pairButton) {
 }
 els.primaryVoiceButton.addEventListener('click', () => togglePrimaryVoice().catch((err) => showStatus(err.message)));
 els.offButton.addEventListener('click', () => turnOff().catch((err) => showStatus(err.message)));
+if (els.callRecorderButton) {
+  els.callRecorderButton.addEventListener('click', () => {
+    void toggleCallRecorder().catch((err) => {
+      renderCallRecorderStatus({ mode: 'error', error: err?.message || String(err), message: err?.message || 'Computer audio recording failed.' });
+      showStatus(err?.message || 'Computer audio recording failed.');
+    });
+  });
+}
+if (els.callRecorderOpenButton) {
+  els.callRecorderOpenButton.addEventListener('click', () => {
+    if (desktop.openCallRecorderFile) void desktop.openCallRecorderFile().catch((err) => showStatus(err?.message || 'Could not open recording history.'));
+  });
+}
 els.compactButton.addEventListener('click', () => {
   if (desktop.compactWindow) void desktop.compactWindow().then(applyWindowState);
 });
@@ -3523,6 +3630,12 @@ if (desktop.onShortcutStatus) {
   });
 }
 
+if (desktop.onCallRecorderStatus) {
+  desktop.onCallRecorderStatus((status) => {
+    renderCallRecorderStatus(status);
+  });
+}
+
 if (desktop.windowState) {
   desktop.windowState().then(applyWindowState).catch(() => applyWindowState({ compact: true }));
 }
@@ -3543,6 +3656,7 @@ desktop.readConfig().then((config) => {
   applyConfig(config);
   void refreshExtensionStatus();
   void refreshAudioDevicePickers();
+  void refreshCallRecorderStatus();
   if (desktop.shortcutStatus) {
     void desktop.shortcutStatus().then((status) => {
       state.shortcutStatus = normalizeShortcutStatusPayload(status);

@@ -5293,18 +5293,19 @@ export class VoiceStreamNextDb {
   listVoiceRecordings(
     userId: string,
     limit = 20,
-    options: { mode?: string; includePatch?: boolean } = {},
+    options: { mode?: string; includePatch?: boolean; offset?: number } = {},
   ): VoiceRecordingRecord[] {
     const filters = ['voice_recordings.user_id = $userId'];
-    const params: { $userId: string; $limit: number; $mode?: string } = {
+    const params: { $userId: string; $limit: number; $offset: number; $mode?: string } = {
       $userId: userId,
       $limit: Math.max(1, Math.floor(limit)),
+      $offset: Math.max(0, Math.floor(options.offset ?? 0)),
     };
     if (options.mode) {
       filters.push('voice_recordings.mode = $mode');
       params.$mode = options.mode;
     } else if (!options.includePatch) {
-      filters.push("voice_recordings.mode IN ('assistant', 'clipboard')");
+      filters.push("voice_recordings.mode IN ('assistant', 'clipboard', 'computer')");
     }
     return this.db
       .query(
@@ -5323,10 +5324,29 @@ export class VoiceStreamNextDb {
         WHERE ${filters.join(' AND ')}
         ORDER BY voice_recordings.created_at DESC
         LIMIT $limit
+        OFFSET $offset
       `,
       )
       .all(params)
       .map(rowVoiceRecording);
+  }
+
+  countVoiceRecordings(
+    userId: string,
+    options: { mode?: string; includePatch?: boolean } = {},
+  ): number {
+    const filters = ['user_id = $userId'];
+    const params: { $userId: string; $mode?: string } = { $userId: userId };
+    if (options.mode) {
+      filters.push('mode = $mode');
+      params.$mode = options.mode;
+    } else if (!options.includePatch) {
+      filters.push("mode IN ('assistant', 'clipboard', 'computer')");
+    }
+    const row = this.db
+      .query(`SELECT COUNT(*) AS count FROM voice_recordings WHERE ${filters.join(' AND ')}`)
+      .get(params) as { count?: number } | null;
+    return Math.max(0, Number(row?.count ?? 0));
   }
 
   voiceRecording(userId: string, recordingId: string): VoiceRecordingRecord | null {
