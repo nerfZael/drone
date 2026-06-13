@@ -1,5 +1,4 @@
 import React from 'react';
-import { IconSidebarExpand } from '../droneHub/app/icons';
 import { useDroneHubUiStore } from '../droneHub/app/use-drone-hub-ui-store';
 import type { DroneSummary } from '../droneHub/types';
 import { RemoteHubSidebar } from './RemoteHubSidebar';
@@ -44,28 +43,11 @@ export function RemoteMobileSidebarDrawer({
   onSelectChat,
 }: RemoteMobileSidebarDrawerProps) {
   const setSidebarCollapsed = useDroneHubUiStore((state) => state.setSidebarCollapsed);
-  const edgeSwipeStartRef = React.useRef<TouchPoint | null>(null);
   const drawerSwipeStartRef = React.useRef<TouchPoint | null>(null);
 
   React.useEffect(() => {
     if (open) setSidebarCollapsed(false);
   }, [open, setSidebarCollapsed]);
-
-  const beginEdgeSwipe = React.useCallback((event: React.TouchEvent) => {
-    const touch = event.touches[0];
-    edgeSwipeStartRef.current = touch ? touchPoint(touch) : null;
-  }, []);
-
-  const endEdgeSwipe = React.useCallback(
-    (event: React.TouchEvent) => {
-      const touch = event.changedTouches[0];
-      if (touch && isHorizontalSwipe(edgeSwipeStartRef.current, touchPoint(touch), 'right')) {
-        onOpenChange(true);
-      }
-      edgeSwipeStartRef.current = null;
-    },
-    [onOpenChange],
-  );
 
   const beginDrawerSwipe = React.useCallback((event: React.TouchEvent) => {
     const touch = event.touches[0];
@@ -103,22 +85,6 @@ export function RemoteMobileSidebarDrawer({
 
   return (
     <div className="md:hidden">
-      <div
-        className="fixed bottom-24 left-0 z-40 flex h-16 w-8 items-center justify-center"
-        onTouchStart={beginEdgeSwipe}
-        onTouchEnd={endEdgeSwipe}
-      >
-        <button
-          type="button"
-          onClick={() => onOpenChange(true)}
-          className="flex h-12 w-7 items-center justify-center rounded-r-md border border-l-0 border-[var(--border-subtle)] bg-[var(--panel-raised)] text-[var(--muted)] shadow-[0_12px_34px_rgba(0,0,0,.3)]"
-          aria-label="Open sidebar"
-          title="Open sidebar"
-        >
-          <IconSidebarExpand className="h-3.5 w-3.5" />
-        </button>
-      </div>
-
       <div
         className={`fixed inset-0 z-50 transition-opacity duration-200 ${
           open ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'
