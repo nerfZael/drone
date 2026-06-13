@@ -2,11 +2,13 @@ package com.huntelkator.voicestreamnext
 
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
 import android.media.MediaPlayer
+import android.os.Build
 import android.os.SystemClock
 import java.io.File
 import java.util.ArrayDeque
@@ -261,8 +263,39 @@ object AssistantAudioPlayer {
         return runCatching {
             val volume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
             val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-            "mode=${audioManager.mode} musicVolume=$volume/$maxVolume speaker=${audioManager.isSpeakerphoneOn} bluetoothSco=${audioManager.isBluetoothScoOn}"
+            "mode=${audioManager.mode} musicVolume=$volume/$maxVolume ${communicationRouteSummary(audioManager)}"
         }.getOrDefault("audioRoute=unavailable")
+    }
+
+    private fun communicationRouteSummary(audioManager: AudioManager): String {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val device = runCatching { audioManager.communicationDevice }.getOrNull()
+            return "communicationDevice=${device?.audioRouteLabel() ?: "default"}"
+        }
+
+        val outputs = runCatching {
+            audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                .filter { it.isSink }
+                .map { it.audioRouteLabel() }
+                .distinct()
+                .joinToString(",")
+        }.getOrDefault("")
+        return if (outputs.isBlank()) "outputs=unavailable" else "outputs=$outputs"
+    }
+
+    private fun AudioDeviceInfo.audioRouteLabel(): String {
+        val typeLabel = when (type) {
+            AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "speaker"
+            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+            AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "bluetooth"
+            AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+            AudioDeviceInfo.TYPE_WIRED_HEADSET -> "wired"
+            AudioDeviceInfo.TYPE_USB_DEVICE,
+            AudioDeviceInfo.TYPE_USB_HEADSET -> "usb"
+            else -> "type-$type"
+        }
+        val name = runCatching { productName?.toString().orEmpty().trim() }.getOrDefault("")
+        return if (name.isBlank()) typeLabel else "$typeLabel:$name"
     }
 
     private fun abandonAudioFocus(context: Context, request: AudioFocusRequest?) {

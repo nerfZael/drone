@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.graphics.BitmapFactory
+import android.graphics.drawable.Icon
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
@@ -575,7 +576,13 @@ class VoiceSessionService : Service() {
             .setContentTitle("VoiceStream")
             .setContentText(text)
             .setOngoing(true)
-            .addAction(android.R.drawable.ic_media_pause, "Stop", stopPendingIntent)
+            .addAction(
+                Notification.Action.Builder(
+                    Icon.createWithResource(this, android.R.drawable.ic_media_pause),
+                    "Stop",
+                    stopPendingIntent
+                ).build()
+            )
             .build()
     }
 

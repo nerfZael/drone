@@ -26,7 +26,6 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
-import android.view.WindowInsetsController
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
@@ -41,6 +40,8 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import com.journeyapps.barcodescanner.ScanContract
@@ -610,23 +611,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun configureSystemBars() {
-        window.statusBarColor = COLOR_SYSTEM_BAR
-        window.navigationBarColor = COLOR_BACKGROUND
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            window.insetsController?.setSystemBarsAppearance(
-                0,
-                WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
-                    WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
-            )
-        } else {
-            @Suppress("DEPRECATION")
-            var flags = window.decorView.systemUiVisibility and View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv()
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                flags = flags and View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR.inv()
-            }
-            @Suppress("DEPRECATION")
-            window.decorView.systemUiVisibility = flags
-        }
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(COLOR_SYSTEM_BAR),
+            navigationBarStyle = SystemBarStyle.dark(COLOR_BACKGROUND),
+        )
     }
 
     private fun buildSettingsContent(): LinearLayout {
