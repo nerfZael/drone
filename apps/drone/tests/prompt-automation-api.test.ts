@@ -78,6 +78,61 @@ describeSocketSuite('prompt automation api', () => {
     throw new Error(`timed out after ${timeoutMs}ms (${label})`);
   };
 
+  const readSseEvent = async (
+    reader: ReadableStreamDefaultReader<Uint8Array>,
+    state: { buffer: string; decoder: TextDecoder },
+    timeoutMs: number = 5_000,
+  ): Promise<{ event: string; data: any }> => {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const sep = state.buffer.indexOf('\n\n');
+      if (sep >= 0) {
+        const frame = state.buffer.slice(0, sep);
+        state.buffer = state.buffer.slice(sep + 2);
+        const lines = frame.split('\n').map((line) => line.trimEnd());
+        if (lines.length === 0 || lines.every((line) => line === '' || line.startsWith(':'))) continue;
+        let event = 'message';
+        let dataText = '';
+        for (const line of lines) {
+          if (line.startsWith('event:')) event = line.slice('event:'.length).trim();
+          if (line.startsWith('data:')) dataText += line.slice('data:'.length).trimStart();
+        }
+        let data: any = null;
+        try {
+          data = dataText ? JSON.parse(dataText) : null;
+        } catch {
+          data = dataText;
+        }
+        return { event, data };
+      }
+
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new Error('timed out waiting for SSE event');
+      const result = await Promise.race([
+        reader.read(),
+        new Promise<{ timeout: true }>((resolve) => setTimeout(() => resolve({ timeout: true }), remaining)),
+      ]);
+      if ('timeout' in result) throw new Error('timed out waiting for SSE event');
+      if (result.done) throw new Error('SSE stream ended');
+      state.buffer += state.decoder.decode(result.value, { stream: true });
+    }
+  };
+
+  const readSseUntil = async (
+    reader: ReadableStreamDefaultReader<Uint8Array>,
+    state: { buffer: string; decoder: TextDecoder },
+    predicate: (event: { event: string; data: any }) => boolean,
+    label: string,
+    timeoutMs: number = 5_000,
+  ): Promise<{ event: string; data: any }> => {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const event = await readSseEvent(reader, state, Math.max(1, deadline - Date.now()));
+      if (predicate(event)) return event;
+      if (Date.now() >= deadline) throw new Error(`timed out waiting for SSE event (${label})`);
+    }
+  };
+
   const setPendingPromptState = async (opts: {
     droneId: string;
     chatName: string;
@@ -2184,5 +2239,81 @@ describeSocketSuite('prompt automation api', () => {
     const finalJobKey = String(finalRows[finalRows.length - 1]?.automation?.jobKey ?? '');
     expect(mainJobKey.length).toBeGreaterThan(0);
     expect(finalJobKey).toBe(mainJobKey);
+  });
+
+  test('streams prompt automation status events', async () => {
+    if (!mockDaemon) throw new Error('mock daemon not initialized');
+    const droneId = 'drone-automation-sse-status';
+    const now = new Date().toISOString();
+    await updateRegistry((reg: any) => {
+      reg.drones = reg.drones ?? {};
+      reg.drones[droneId] = {
+        id: droneId,
+        name: droneId,
+        hostPort: mockDaemon?.port,
+        token: 'mock-token',
+        containerPort: 7777,
+        repoPath: '',
+        createdAt: now,
+        chats: {
+          default: {
+            createdAt: now,
+            agent: { kind: 'builtin', id: 'claude' },
+            turns: [],
+            pendingPrompts: [],
+          },
+        },
+      };
+    });
+
+    const controller = new AbortController();
+    const response = await fetch(
+      `${baseUrl}/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/events`,
+      {
+        headers: { authorization: `Bearer ${token}` },
+        signal: controller.signal,
+      },
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type') ?? '').toContain('text/event-stream');
+    if (!response.body) throw new Error('missing SSE response body');
+    const reader = response.body.getReader();
+    const streamState = { buffer: '', decoder: new TextDecoder() };
+
+    try {
+      await readSseUntil(reader, streamState, (event) => event.event === 'connected', 'connected');
+      const snapshot = await readSseUntil(reader, streamState, (event) => event.event === 'snapshot', 'snapshot');
+      expect(snapshot.data?.job?.status).toBe('idle');
+
+      const started = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          automationId: 'sse-review',
+          automationLabel: 'SSE Review',
+          prompt: 'check status through sse',
+          runs: 1,
+        }),
+      });
+      expect(started.r.status).toBe(202);
+
+      const status = await readSseUntil(
+        reader,
+        streamState,
+        (event) => event.event === 'status' && event.data?.job?.automationId === 'sse-review',
+        'automation status',
+        10_000,
+      );
+      expect(status.data?.job?.runsTotal).toBe(1);
+      expect(['running', 'completed'].includes(String(status.data?.job?.status ?? ''))).toBe(true);
+
+      await pollUntil(async () => {
+        const current = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
+        return current.data?.job?.running === false;
+      }, 10_000);
+    } finally {
+      controller.abort();
+      await reader.cancel().catch(() => undefined);
+    }
   });
 });

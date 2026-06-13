@@ -363,6 +363,7 @@ const HUB_API_BUILD_ID = crypto.randomBytes(6).toString('hex');
 const requireForHub = createRequire(__filename);
 
 let notifyDroneRegistryWrite: (() => void) | null = null;
+let notifyPromptAutomationLaneChange: ((droneId: string, chatName: string) => void) | null = null;
 
 async function updateRegistry<T>(
   mutator: (reg: any) => T | Promise<T>,
@@ -6063,6 +6064,32 @@ async function stopTranscriptPendingPrompts(opts: {
   };
 }
 
+async function activePromptAutomationPendingPromptIds(opts: {
+  droneId: string;
+  chatName: string;
+  jobKey?: string | null;
+}): Promise<string[]> {
+  const droneId = normalizeDroneIdentity(opts.droneId);
+  const chatName = normalizeChatName(opts.chatName);
+  const jobKey = String(opts.jobKey ?? '').trim();
+  if (!droneId || !chatName || !jobKey) return [];
+  const pending = await readPendingPrompts({ droneId, chatName }).catch(() => []);
+  return pending
+    .filter((item) => {
+      const id = String(item?.id ?? '').trim();
+      if (!id) return false;
+      const state = String(item?.state ?? '').trim();
+      if (state !== 'queued' && state !== 'sending' && state !== 'sent') return false;
+      const automation = (item as any)?.automation ?? null;
+      if (String(automation?.kind ?? '') !== 'prompt-loop') return false;
+      if (String(automation?.stage ?? '') !== 'run') return false;
+      if (String(automation?.jobKey ?? '').trim() !== jobKey) return false;
+      return true;
+    })
+    .map((item) => String(item?.id ?? '').trim())
+    .filter(Boolean);
+}
+
 type DroneChatStopReason = 'archive' | 'delete' | 'stop' | 'restart';
 type DroneChatStopPlan = {
   chatNames: string[];
@@ -6556,6 +6583,18 @@ async function stopChatResponse(opts: {
 }
 
 const PROMPT_AUTOMATION_LANES = new Map<string, PromptAutomationLaneState>();
+
+function notifyPromptAutomationLaneChanged(lane: PromptAutomationLaneState | null | undefined): void {
+  if (!lane) return;
+  notifyPromptAutomationLaneChange?.(lane.droneId, lane.chatName);
+}
+
+function notifyPromptAutomationChatChanged(droneIdRaw: string, chatNameRaw: string): void {
+  const droneId = normalizeDroneIdentity(droneIdRaw);
+  const chatName = normalizeChatName(chatNameRaw);
+  if (!droneId || !chatName) return;
+  notifyPromptAutomationLaneChange?.(droneId, chatName);
+}
 
 function promptAutomationJobKey(droneIdRaw: string, chatNameRaw: string): string {
   const droneId = normalizeDroneIdentity(droneIdRaw);
@@ -7478,6 +7517,7 @@ async function runPromptAutomationJob(job: PromptAutomationJobState): Promise<vo
         if (enqueued.kind === 'error') throw new Error(enqueued.error);
         job.lastPromptId = enqueued.id;
         job.updatedAt = nowIso();
+        notifyPromptAutomationChatChanged(job.droneId, job.chatName);
 
         await waitForPromptAutomationPromptCompletion({
           droneId: job.droneId,
@@ -7488,6 +7528,7 @@ async function runPromptAutomationJob(job: PromptAutomationJobState): Promise<vo
         });
         job.runsCompleted += 1;
         job.updatedAt = nowIso();
+        notifyPromptAutomationChatChanged(job.droneId, job.chatName);
 
         if (job.stopPhrase) {
           let output = '';
@@ -7512,6 +7553,7 @@ async function runPromptAutomationJob(job: PromptAutomationJobState): Promise<vo
             job.finishedEarlyRunIndex = job.runsCompleted;
             job.runsTotal = job.runsCompleted;
             job.updatedAt = nowIso();
+            notifyPromptAutomationChatChanged(job.droneId, job.chatName);
             break;
           }
         }
@@ -7521,6 +7563,7 @@ async function runPromptAutomationJob(job: PromptAutomationJobState): Promise<vo
         hadRunFailure = true;
         lastRunError = msg || 'automation run failed';
         job.updatedAt = nowIso();
+        notifyPromptAutomationChatChanged(job.droneId, job.chatName);
       }
 
       if (job.finishedEarly) break;
@@ -7531,6 +7574,7 @@ async function runPromptAutomationJob(job: PromptAutomationJobState): Promise<vo
           signal: waitSignal,
         });
         job.updatedAt = nowIso();
+        notifyPromptAutomationChatChanged(job.droneId, job.chatName);
       }
     }
 
@@ -7558,6 +7602,7 @@ async function runPromptAutomationJob(job: PromptAutomationJobState): Promise<vo
       job.error = null;
     }
     job.updatedAt = nowIso();
+    notifyPromptAutomationChatChanged(job.droneId, job.chatName);
   } catch (e: any) {
     const msg = String(e?.message ?? e ?? '').trim();
     if (job.abortController?.signal.aborted || /automation stopped/i.test(msg)) {
@@ -7583,16 +7628,19 @@ async function runPromptAutomationJob(job: PromptAutomationJobState): Promise<vo
           job.error = null;
         }
         job.updatedAt = nowIso();
+        notifyPromptAutomationChatChanged(job.droneId, job.chatName);
         return;
       }
       job.status = 'stopped';
       job.error = null;
       job.updatedAt = nowIso();
+      notifyPromptAutomationChatChanged(job.droneId, job.chatName);
       return;
     }
     job.status = 'failed';
     job.error = msg || 'automation failed';
     job.updatedAt = nowIso();
+    notifyPromptAutomationChatChanged(job.droneId, job.chatName);
   } finally {
     job.stopMode = null;
     job.abortController = null;
@@ -7625,6 +7673,7 @@ function queuePromptAutomationLaneJob(lane: PromptAutomationLaneState, cfg: Prom
     enqueuedAt: nowIso(),
   });
   lane.updatedAt = nowIso();
+  notifyPromptAutomationLaneChanged(lane);
 }
 
 function finalizePromptAutomationLaneJob(lane: PromptAutomationLaneState, job: PromptAutomationJobState): void {
@@ -7632,6 +7681,7 @@ function finalizePromptAutomationLaneJob(lane: PromptAutomationLaneState, job: P
   lane.runningJob = null;
   lane.lastJob = job;
   lane.updatedAt = nowIso();
+  notifyPromptAutomationLaneChanged(lane);
   const next = lane.queued.shift() ?? null;
   if (next) {
     lane.updatedAt = nowIso();
@@ -7766,6 +7816,7 @@ function startPromptAutomationLaneJob(
   };
   lane.runningJob = job;
   lane.updatedAt = nowIso();
+  notifyPromptAutomationLaneChanged(lane);
   job.task = runPromptAutomationJob(job).finally(() => {
     finalizePromptAutomationLaneJob(lane, job);
   });
@@ -7849,6 +7900,7 @@ function stopPromptAutomationJob(opts: {
   if (!promptAutomationLaneBusy(lane, { includeQueued: true })) {
     enqueuePendingPromptPump(lane.droneId, lane.chatName);
   }
+  notifyPromptAutomationLaneChanged(lane);
   return lane;
 }
 
@@ -7873,6 +7925,7 @@ function cancelQueuedPromptAutomationRun(opts: {
     if (!promptAutomationLaneBusy(lane, { includeQueued: true })) {
       enqueuePendingPromptPump(lane.droneId, lane.chatName);
     }
+    notifyPromptAutomationLaneChanged(lane);
     return { lane, status: 'cancelled' };
   }
 
@@ -8065,7 +8118,8 @@ function clearInMemoryChatStateForDelete(opts: { droneId: string; chatName: stri
   const key = droneChatMapKey(opts.droneId, opts.chatName);
   if (!key) return;
 
-  PROMPT_AUTOMATION_LANES.delete(key);
+  const hadAutomationLane = PROMPT_AUTOMATION_LANES.delete(key);
+  if (hadAutomationLane) notifyPromptAutomationChatChanged(opts.droneId, opts.chatName);
 
   clearScheduledReconcileRetryByKey(key);
   RECONCILE_QUEUED.delete(key);
@@ -8092,6 +8146,7 @@ function migrateInMemoryChatStateForRename(opts: { droneId: string; fromChatName
   const lane = PROMPT_AUTOMATION_LANES.get(fromKey);
   if (lane) {
     PROMPT_AUTOMATION_LANES.delete(fromKey);
+    notifyPromptAutomationChatChanged(opts.droneId, opts.fromChatName);
     lane.key = toKey;
     lane.chatName = normalizeChatName(opts.toChatName);
     if (lane.runningJob) {
@@ -8103,6 +8158,7 @@ function migrateInMemoryChatStateForRename(opts: { droneId: string; fromChatName
       lane.lastJob.chatName = lane.chatName;
     }
     PROMPT_AUTOMATION_LANES.set(toKey, lane);
+    notifyPromptAutomationLaneChanged(lane);
   }
 
   clearScheduledReconcileRetryByKey(fromKey);
@@ -12873,6 +12929,13 @@ export async function startDroneHubApiServer(opts: {
   let droneChatSseRefreshTimeout: ReturnType<typeof setTimeout> | null = null;
   let droneChatSseKeepAliveTimer: ReturnType<typeof setInterval> | null = null;
   let droneChatSseBusy = false;
+  const promptAutomationSseClientsByKey = new Map<string, Set<http.ServerResponse>>();
+  const promptAutomationSseLastByKey = new Map<string, string>();
+  const promptAutomationSseMetaByKey = new Map<string, { droneId: string; chatName: string; name: string }>();
+  const promptAutomationSseRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const promptAutomationSseBusyKeys = new Set<string>();
+  let promptAutomationSseKeepAliveTimer: ReturnType<typeof setInterval> | null = null;
+  let promptAutomationSseRecoveryTimer: ReturnType<typeof setInterval> | null = null;
 
   function broadcastDroneRegistryEvent(event: string, data: any): void {
     for (const client of Array.from(droneRegistrySseClients)) {
@@ -13041,6 +13104,155 @@ export async function startDroneHubApiServer(opts: {
     }
   }
 
+  function promptAutomationEventKey(droneIdRaw: string, chatNameRaw: string): string {
+    return promptAutomationJobKey(droneIdRaw, chatNameRaw);
+  }
+
+  function promptAutomationClientCount(): number {
+    let count = 0;
+    for (const clients of promptAutomationSseClientsByKey.values()) count += clients.size;
+    return count;
+  }
+
+  function broadcastPromptAutomationEvent(key: string, event: string, data: any): void {
+    const clients = promptAutomationSseClientsByKey.get(key);
+    if (!clients) return;
+    for (const client of Array.from(clients)) {
+      if (client.destroyed || client.writableEnded) {
+        clients.delete(client);
+        continue;
+      }
+      writeHubSseEvent(client, event, data);
+    }
+    if (clients.size === 0) {
+      promptAutomationSseClientsByKey.delete(key);
+      promptAutomationSseLastByKey.delete(key);
+      promptAutomationSseMetaByKey.delete(key);
+      const timer = promptAutomationSseRefreshTimers.get(key);
+      if (timer) clearTimeout(timer);
+      promptAutomationSseRefreshTimers.delete(key);
+    }
+  }
+
+  function stopPromptAutomationBroadcasterIfIdle(): void {
+    if (promptAutomationClientCount() > 0) return;
+    for (const timer of promptAutomationSseRefreshTimers.values()) clearTimeout(timer);
+    promptAutomationSseRefreshTimers.clear();
+    promptAutomationSseBusyKeys.clear();
+    if (promptAutomationSseKeepAliveTimer) {
+      clearInterval(promptAutomationSseKeepAliveTimer);
+      promptAutomationSseKeepAliveTimer = null;
+    }
+    if (promptAutomationSseRecoveryTimer) {
+      clearInterval(promptAutomationSseRecoveryTimer);
+      promptAutomationSseRecoveryTimer = null;
+    }
+  }
+
+  async function buildPromptAutomationStatusPayload(meta: { droneId: string; chatName: string; name: string }) {
+    let lane = getPromptAutomationLane(meta.droneId, meta.chatName);
+    await recoverStalledPromptAutomationLane(lane);
+    lane = getPromptAutomationLane(meta.droneId, meta.chatName);
+    return {
+      ok: true,
+      automation: 'prompt-loop',
+      id: meta.droneId,
+      name: meta.name || meta.droneId,
+      chat: meta.chatName,
+      job: promptAutomationJobResponse(lane),
+    };
+  }
+
+  async function refreshPromptAutomationEventKey(
+    key: string,
+    opts?: { event?: 'snapshot' | 'status'; force?: boolean },
+  ): Promise<void> {
+    const clients = promptAutomationSseClientsByKey.get(key);
+    if (!clients || clients.size === 0) return;
+    if (promptAutomationSseBusyKeys.has(key)) {
+      schedulePromptAutomationEventRefreshByKey(key, 100);
+      return;
+    }
+    const meta = promptAutomationSseMetaByKey.get(key);
+    if (!meta) return;
+    promptAutomationSseBusyKeys.add(key);
+    try {
+      const payload = await buildPromptAutomationStatusPayload(meta);
+      const fingerprint = JSON.stringify(payload.job);
+      if (opts?.force || promptAutomationSseLastByKey.get(key) !== fingerprint) {
+        promptAutomationSseLastByKey.set(key, fingerprint);
+        broadcastPromptAutomationEvent(key, opts?.event ?? 'status', payload);
+      }
+    } catch (e: any) {
+      broadcastPromptAutomationEvent(key, 'stream-error', { ok: false, error: e?.message ?? String(e) });
+    } finally {
+      promptAutomationSseBusyKeys.delete(key);
+      stopPromptAutomationBroadcasterIfIdle();
+    }
+  }
+
+  function schedulePromptAutomationEventRefreshByKey(key: string, delayMs = 0): void {
+    const clients = promptAutomationSseClientsByKey.get(key);
+    if (!clients || clients.size === 0) return;
+    if (promptAutomationSseRefreshTimers.has(key)) return;
+    const timer = setTimeout(() => {
+      promptAutomationSseRefreshTimers.delete(key);
+      void refreshPromptAutomationEventKey(key);
+    }, Math.max(0, delayMs));
+    (timer as any).unref?.();
+    promptAutomationSseRefreshTimers.set(key, timer);
+  }
+
+  function schedulePromptAutomationEventRefresh(droneIdRaw: string, chatNameRaw: string, delayMs = 0): void {
+    const droneId = normalizeDroneIdentity(droneIdRaw);
+    const chatName = normalizeChatName(chatNameRaw);
+    if (!droneId || !chatName) return;
+    const key = promptAutomationEventKey(droneId, chatName);
+    const clients = promptAutomationSseClientsByKey.get(key);
+    if (!clients || clients.size === 0) return;
+    const existing = promptAutomationSseMetaByKey.get(key);
+    promptAutomationSseMetaByKey.set(key, {
+      droneId,
+      chatName,
+      name: existing?.name || droneId,
+    });
+    schedulePromptAutomationEventRefreshByKey(key, delayMs);
+  }
+
+  function startPromptAutomationBroadcaster(): void {
+    if (!promptAutomationSseKeepAliveTimer) {
+      promptAutomationSseKeepAliveTimer = setInterval(() => {
+        for (const [key, clients] of Array.from(promptAutomationSseClientsByKey.entries())) {
+          for (const client of Array.from(clients)) {
+            if (client.destroyed || client.writableEnded) {
+              clients.delete(client);
+              continue;
+            }
+            client.write(': keepalive\n\n');
+          }
+          if (clients.size === 0) {
+            promptAutomationSseClientsByKey.delete(key);
+            promptAutomationSseLastByKey.delete(key);
+            promptAutomationSseMetaByKey.delete(key);
+            const timer = promptAutomationSseRefreshTimers.get(key);
+            if (timer) clearTimeout(timer);
+            promptAutomationSseRefreshTimers.delete(key);
+          }
+        }
+        stopPromptAutomationBroadcasterIfIdle();
+      }, 25_000);
+      (promptAutomationSseKeepAliveTimer as any).unref?.();
+    }
+    if (!promptAutomationSseRecoveryTimer) {
+      promptAutomationSseRecoveryTimer = setInterval(() => {
+        for (const key of promptAutomationSseClientsByKey.keys()) {
+          schedulePromptAutomationEventRefreshByKey(key);
+        }
+      }, 5_000);
+      (promptAutomationSseRecoveryTimer as any).unref?.();
+    }
+  }
+
   async function refreshDroneRegistryBroadcasterSnapshot(opts?: { broadcastSnapshot?: boolean }): Promise<{ ok: true; drones: any[] } | null> {
     if (droneRegistrySseBusy) return droneRegistrySseLastSnapshot;
     droneRegistrySseBusy = true;
@@ -13125,6 +13337,9 @@ export async function startDroneHubApiServer(opts: {
   notifyDroneRegistryWrite = () => {
     scheduleDroneRegistryBroadcasterRefresh();
     scheduleDroneChatEventRefresh();
+  };
+  notifyPromptAutomationLaneChange = (droneId, chatName) => {
+    schedulePromptAutomationEventRefresh(droneId, chatName);
   };
 
   const server = http.createServer(async (req, res) => {
@@ -22925,6 +23140,63 @@ export async function startDroneHubApiServer(opts: {
         return;
       }
 
+      // GET /api/drones/:id/chats/:chat/automations/events
+      if (
+        method === 'GET' &&
+        parts.length === 7 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'chats' &&
+        parts[5] === 'automations' &&
+        parts[6] === 'events'
+      ) {
+        const droneRef = decodeURIComponent(parts[2]);
+        const chatName = normalizeChatName(decodeURIComponent(parts[4]));
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        const droneId = resolved.id;
+        const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+        const key = promptAutomationEventKey(droneId, chatName);
+
+        res.statusCode = 200;
+        res.setHeader('content-type', 'text/event-stream; charset=utf-8');
+        res.setHeader('cache-control', 'no-cache, no-transform');
+        res.setHeader('connection', 'keep-alive');
+        req.socket.setTimeout(0);
+        (res as any).flushHeaders?.();
+
+        let clients = promptAutomationSseClientsByKey.get(key);
+        if (!clients) {
+          clients = new Set<http.ServerResponse>();
+          promptAutomationSseClientsByKey.set(key, clients);
+        }
+        clients.add(res);
+        promptAutomationSseMetaByKey.set(key, { droneId, chatName, name: droneName });
+
+        let cleanedUp = false;
+        const cleanup = () => {
+          if (cleanedUp) return;
+          cleanedUp = true;
+          const active = promptAutomationSseClientsByKey.get(key);
+          active?.delete(res);
+          if (active && active.size === 0) {
+            promptAutomationSseClientsByKey.delete(key);
+            promptAutomationSseLastByKey.delete(key);
+            promptAutomationSseMetaByKey.delete(key);
+            const timer = promptAutomationSseRefreshTimers.get(key);
+            if (timer) clearTimeout(timer);
+            promptAutomationSseRefreshTimers.delete(key);
+          }
+          stopPromptAutomationBroadcasterIfIdle();
+        };
+        req.on('close', cleanup);
+        res.on('close', cleanup);
+        startPromptAutomationBroadcaster();
+        writeHubSseEvent(res, 'connected', { ok: true, at: nowIso() });
+        void refreshPromptAutomationEventKey(key, { event: 'snapshot', force: true });
+        return;
+      }
+
       // GET /api/drones/:id/chats/:chat/automations/status
       if (
         method === 'GET' &&
@@ -23057,14 +23329,22 @@ export async function startDroneHubApiServer(opts: {
           if (!resolved) return;
           const droneId = resolved.id;
           const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
-          const runningPromptId = String(getPromptAutomationLane(droneId, chatName)?.runningJob?.lastPromptId ?? '').trim();
+          const runningJob = getPromptAutomationLane(droneId, chatName)?.runningJob ?? null;
+          const runningPromptId = String(runningJob?.lastPromptId ?? '').trim();
+          const runningJobKey = String(runningJob?.executionKey ?? '').trim();
           const lane = stopPromptAutomationJob({ droneId, chatName, stopMode, clearQueued });
-          if (stopMode === 'all' && runningPromptId) {
+          const promptIds =
+            stopMode === 'all'
+              ? runningPromptId
+                ? [runningPromptId]
+                : await activePromptAutomationPendingPromptIds({ droneId, chatName, jobKey: runningJobKey })
+              : [];
+          if (promptIds.length > 0) {
             await stopTranscriptPendingPrompts({
               droneId,
               chatName,
               droneEntry: resolved.drone,
-              promptIds: [runningPromptId],
+              promptIds,
               includeAutomation: true,
             });
           }

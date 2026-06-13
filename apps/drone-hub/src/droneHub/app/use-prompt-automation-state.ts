@@ -10,7 +10,8 @@ import {
 } from './automation-config';
 import { beginRecordBusyKey, removeRecordKey } from './keyed-record-state';
 
-const PROMPT_AUTOMATION_STATUS_POLL_MS = 1200;
+const PROMPT_AUTOMATION_STATUS_FALLBACK_POLL_MS = 10_000;
+const PROMPT_AUTOMATION_STATUS_FALLBACK_RETRY_MS = 2_500;
 const PROMPT_AUTOMATION_ERROR_HINT_MAX_CHARS = 120;
 const PROMPT_AUTOMATION_STATUS_HINT_MAX_CHARS = 96;
 
@@ -232,27 +233,100 @@ export function usePromptAutomationState({
 
   React.useEffect(() => {
     let mounted = true;
-    let timer: ReturnType<typeof setInterval> | null = null;
+    let source: EventSource | null = null;
+    let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+    let fallbackPolling = false;
+    let fallbackLoadInFlight = false;
+
+    const clearFallbackTimer = () => {
+      if (!fallbackTimer) return;
+      clearTimeout(fallbackTimer);
+      fallbackTimer = null;
+    };
+
+    const stopFallbackPoll = () => {
+      fallbackPolling = false;
+      clearFallbackTimer();
+    };
+
+    const applyStatusResponse = (data: PromptAutomationStatusResponse) => {
+      if (!mounted) return;
+      setPromptAutomationJob(data.job);
+      setPromptAutomationStatusError(null);
+    };
+
     const load = async () => {
       try {
         const data = await requestJson<PromptAutomationStatusResponse>(
           promptAutomationApiPath(droneId, chatName, 'status'),
         );
-        if (!mounted) return;
-        setPromptAutomationJob(data.job);
-        setPromptAutomationStatusError(null);
+        applyStatusResponse(data);
       } catch (e: any) {
         if (!mounted) return;
         setPromptAutomationStatusError(e?.message ?? String(e));
       }
     };
-    void load();
-    timer = setInterval(() => {
-      void load();
-    }, PROMPT_AUTOMATION_STATUS_POLL_MS);
+
+    const scheduleFallbackPoll = (delayMs: number) => {
+      if (!mounted || fallbackTimer || fallbackLoadInFlight) return;
+      fallbackPolling = true;
+      fallbackTimer = setTimeout(() => {
+        fallbackTimer = null;
+        fallbackLoadInFlight = true;
+        void load().finally(() => {
+          fallbackLoadInFlight = false;
+          if (mounted && fallbackPolling) scheduleFallbackPoll(PROMPT_AUTOMATION_STATUS_FALLBACK_POLL_MS);
+        });
+      }, Math.max(0, delayMs));
+    };
+
+    const handleStatusEvent = (event: Event) => {
+      let data: PromptAutomationStatusResponse;
+      try {
+        data = JSON.parse((event as MessageEvent).data || '{}') as PromptAutomationStatusResponse;
+      } catch {
+        return;
+      }
+      stopFallbackPoll();
+      applyStatusResponse(data);
+    };
+
+    if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') {
+      void load().finally(() => {
+        if (mounted) scheduleFallbackPoll(PROMPT_AUTOMATION_STATUS_FALLBACK_POLL_MS);
+      });
+    } else {
+      source = new window.EventSource(promptAutomationApiPath(droneId, chatName, 'events'));
+      source.addEventListener('connected', () => {
+        if (!mounted) return;
+        stopFallbackPoll();
+        setPromptAutomationStatusError(null);
+      });
+      source.addEventListener('snapshot', handleStatusEvent);
+      source.addEventListener('status', handleStatusEvent);
+      source.addEventListener('stream-error', (event) => {
+        if (!mounted) return;
+        let error = 'Automation status stream error.';
+        try {
+          const data = JSON.parse((event as MessageEvent).data || '{}') as { error?: string };
+          error = data.error || error;
+        } catch {
+          // ignore malformed stream errors
+        }
+        setPromptAutomationStatusError(error);
+        scheduleFallbackPoll(PROMPT_AUTOMATION_STATUS_FALLBACK_RETRY_MS);
+      });
+      source.onerror = () => {
+        if (!mounted) return;
+        setPromptAutomationStatusError('Automation status stream disconnected.');
+        scheduleFallbackPoll(PROMPT_AUTOMATION_STATUS_FALLBACK_RETRY_MS);
+      };
+    }
+
     return () => {
       mounted = false;
-      if (timer) clearInterval(timer);
+      source?.close();
+      stopFallbackPoll();
     };
   }, [chatName, droneId]);
 
