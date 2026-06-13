@@ -23,12 +23,10 @@ object AssistantAudioPlayer {
     @Volatile private var activePlayer: MediaPlayer? = null
     @Volatile private var activeRequest: PlaybackRequest? = null
     @Volatile private var workerRunning = false
-    @Volatile private var playbackPaused = false
     @Volatile private var lastCompletedWav: ByteArray? = null
 
     fun stopAll() {
         generation.incrementAndGet()
-        playbackPaused = false
         synchronized(lock) {
             queue.clear()
         }
@@ -42,31 +40,6 @@ object AssistantAudioPlayer {
 
     fun isPlaybackActive(): Boolean {
         return activeRequest != null || activeTrack != null || activePlayer != null
-    }
-
-    fun pausePlayback(requeueActive: Boolean = true) {
-        playbackPaused = true
-        val current = activeRequest
-        val request = current?.copy(wav = current.wav.copyOf())
-        generation.incrementAndGet()
-        releaseActivePlayback()
-        if (requeueActive && request != null) {
-            synchronized(lock) {
-                queue.addFirst(request)
-            }
-        }
-    }
-
-    fun resumePlayback() {
-        playbackPaused = false
-        var restart = false
-        synchronized(lock) {
-            if (queue.isNotEmpty() && !workerRunning) {
-                workerRunning = true
-                restart = true
-            }
-        }
-        if (restart) startWorker()
     }
 
     fun repeatLast(context: Context, onStatus: ((String) -> Unit)? = null): Boolean {
@@ -85,7 +58,7 @@ object AssistantAudioPlayer {
     fun playWav(context: Context, wav: ByteArray, rememberOnComplete: Boolean = true, onStatus: ((String) -> Unit)? = null) {
         synchronized(lock) {
             queue.add(PlaybackRequest(context.applicationContext, wav, onStatus, rememberOnComplete))
-            if (workerRunning || playbackPaused) return
+            if (workerRunning) return
             workerRunning = true
         }
         startWorker()
@@ -124,7 +97,7 @@ object AssistantAudioPlayer {
                     if (workerRunning) {
                         workerRunning = false
                     }
-                    if (queue.isNotEmpty() && !playbackPaused) {
+                    if (queue.isNotEmpty()) {
                         workerRunning = true
                         restart = true
                     }
