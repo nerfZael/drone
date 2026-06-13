@@ -31,6 +31,7 @@ type RightPanelLayoutState = {
   rightPanelBottomTab: RightPanelTab;
   rightPanelOpenRequestSeq: number;
   setRightPanelOpen: (next: Updater<boolean>) => void;
+  requestRightPanelTab: (tab: RightPanelTab) => void;
   setRightPanelWidth: (next: Updater<number>) => void;
   setRightPanelWidthMode: (next: Updater<RightPanelWidthMode>) => void;
   setRightPanelResizing: (next: Updater<boolean>) => void;
@@ -88,16 +89,19 @@ const useRightPanelLayoutStore = create<RightPanelLayoutState>()(
       setRightPanelOpen: (next) =>
         set((s) => {
           const rightPanelOpen = resolveNext(s.rightPanelOpen, next);
-          if (s.rightPanelOpen === rightPanelOpen) {
-            if (!rightPanelOpen) return s;
-            return {
-              rightPanelOpen,
-              rightPanelOpenRequestSeq: s.rightPanelOpenRequestSeq + 1,
-            };
-          }
+          if (s.rightPanelOpen === rightPanelOpen) return s;
           return {
             rightPanelOpen,
             rightPanelOpenRequestSeq: rightPanelOpen ? s.rightPanelOpenRequestSeq + 1 : s.rightPanelOpenRequestSeq,
+          };
+        }),
+      requestRightPanelTab: (tab) =>
+        set((s) => {
+          const rightPanelTab = parseRightPanelTab(tab, s.rightPanelTab);
+          return {
+            rightPanelOpen: true,
+            rightPanelTab,
+            rightPanelOpenRequestSeq: s.rightPanelOpenRequestSeq + 1,
           };
         }),
       setRightPanelWidth: (next) =>
@@ -196,6 +200,7 @@ export function useRightPanelLayout() {
     rightPanelBottomTab,
     rightPanelOpenRequestSeq,
     setRightPanelOpen,
+    requestRightPanelTab,
     setRightPanelWidth: setRightPanelWidthStore,
     setRightPanelWidthMode: setRightPanelWidthModeStore,
     setRightPanelResizing,
@@ -213,6 +218,7 @@ export function useRightPanelLayout() {
       rightPanelBottomTab: s.rightPanelBottomTab,
       rightPanelOpenRequestSeq: s.rightPanelOpenRequestSeq,
       setRightPanelOpen: s.setRightPanelOpen,
+      requestRightPanelTab: s.requestRightPanelTab,
       setRightPanelWidth: s.setRightPanelWidth,
       setRightPanelWidthMode: s.setRightPanelWidthMode,
       setRightPanelResizing: s.setRightPanelResizing,
@@ -318,6 +324,7 @@ export function useRightPanelLayout() {
   return {
     rightPanelOpen,
     setRightPanelOpen,
+    requestRightPanelTab,
     rightPanelWidth,
     rightPanelWidthMode,
     setRightPanelWidth,

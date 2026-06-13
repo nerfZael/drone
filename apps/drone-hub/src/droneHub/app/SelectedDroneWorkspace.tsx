@@ -203,6 +203,7 @@ type SelectedDroneWorkspaceProps = {
   terminalOptions: Array<{ id: string; label: string }>;
   rightPanelOpen: boolean;
   setRightPanelOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  requestRightPanelTab: (tab: RightPanelTab) => void;
   rightPanelSplit: boolean;
   rightPanelTabs: RightPanelTab[];
   rightPanelTab: RightPanelTab;
@@ -330,6 +331,7 @@ export function SelectedDroneWorkspace({
   terminalOptions,
   rightPanelOpen,
   setRightPanelOpen,
+  requestRightPanelTab,
   rightPanelTabs,
   rightPanelTab,
   setRightPanelTab,
@@ -542,8 +544,7 @@ export function SelectedDroneWorkspace({
     currentDroneLabel,
     openDroneErrorModal,
     onRequestDropActions,
-    setRightPanelOpen,
-    setRightPanelTab,
+    requestRightPanelTab,
   });
   const compactRepoPath = String(currentDrone.repoPath ?? '').trim();
   const compactRepoLabel = compactRepoPath ? repoPathLabel(compactRepoPath) : '';
@@ -876,9 +877,8 @@ export function SelectedDroneWorkspace({
   const [droneControlsExpanded, setDroneControlsExpanded] = React.useState(false);
 
   const openPullRequestsTab = React.useCallback(() => {
-    setRightPanelOpen(true);
-    setRightPanelTab('prs');
-  }, [setRightPanelOpen, setRightPanelTab]);
+    requestRightPanelTab('prs');
+  }, [requestRightPanelTab]);
   const quickOpenTabUrl = resolveDroneOpenTabUrl(currentDrone);
   const quickOpenTabDisabled = isDroneStartingOrSeeding(currentDrone.hubPhase) || !quickOpenTabUrl;
   const [fileOpenToast, setFileOpenToast] = React.useState<{ id: number; message: string } | null>(null);
@@ -998,20 +998,18 @@ export function SelectedDroneWorkspace({
       if (isDroneStartingOrSeeding(currentDrone.hubPhase)) return false;
       const knownRepo = repoIdentityRef.current;
       if (knownRepo && (knownRepo.owner !== parsed.owner || knownRepo.repo !== parsed.repo)) return false;
-      setRightPanelOpen(true);
-      setRightPanelTab('prs');
+      requestRightPanelTab('prs');
       requestChangesPullRequest({ droneId: currentDrone.id, pullNumber: parsed.pullNumber });
       return true;
     },
-    [currentDrone.hubPhase, currentDrone.id, currentDroneRepoAttached, setRightPanelOpen, setRightPanelTab],
+    [currentDrone.hubPhase, currentDrone.id, currentDroneRepoAttached, requestRightPanelTab],
   );
 
   const openWorkspacePane = React.useCallback(
     (tab: RightPanelTab) => {
-      setRightPanelOpen(true);
-      setRightPanelTab(tab);
+      requestRightPanelTab(tab);
     },
-    [setRightPanelOpen, setRightPanelTab],
+    [requestRightPanelTab],
   );
 
   const resetWorkspaceLayout = React.useCallback(() => {

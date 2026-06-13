@@ -66,7 +66,7 @@ type UseDroneHubLifecycleEffectsArgs = {
   rightPanelSplit: boolean;
   rightPanelBottomTab: RightPanelTab;
   setRightPanelOpen: Setter<boolean>;
-  setRightPanelTab: Setter<RightPanelTab>;
+  requestRightPanelTab: (tab: RightPanelTab) => void;
   setSidebarCollapsed: Setter<boolean>;
   shortcutBindings: ShortcutBindingMap;
   llmSettings: LlmSettingsLike;
@@ -136,7 +136,7 @@ export function useDroneHubLifecycleEffects({
   rightPanelSplit,
   rightPanelBottomTab,
   setRightPanelOpen,
-  setRightPanelTab,
+  requestRightPanelTab,
   setSidebarCollapsed,
   shortcutBindings,
   llmSettings,
@@ -211,8 +211,7 @@ export function useDroneHubLifecycleEffects({
 
     const openRightPanelTabFromShortcut = (tab: RightPanelTab) => {
       if (!currentDrone) return;
-      setRightPanelOpen(true);
-      setRightPanelTab(tab);
+      requestRightPanelTab(tab);
     };
 
     const getHoveredSidebarGroup = (): string | null => {
@@ -326,8 +325,7 @@ export function useDroneHubLifecycleEffects({
         return true;
       },
       toggleRightPanelWidth: () => {
-        setRightPanelOpen(true);
-        setRightPanelTab(rightPanelTab);
+        requestRightPanelTab(rightPanelTab);
         return true;
       },
       openHoveredGroupMultiChat: () => {
@@ -460,8 +458,8 @@ export function useDroneHubLifecycleEffects({
     rightPanelOpen,
     rightPanelSplit,
     rightPanelTab,
+    requestRightPanelTab,
     setRightPanelOpen,
-    setRightPanelTab,
     setSidebarCollapsed,
     shortcutBindings,
     onDeleteSelectedDroneFromInputShortcut,
