@@ -170,6 +170,17 @@ class VoiceStreamApi(private val context: Context) {
             .apply()
     }
 
+    fun assistantSpeechPlaybackEnabled(): Boolean {
+        return context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(Constants.PREF_ASSISTANT_SPEECH_PLAYBACK_ENABLED, true)
+    }
+
+    fun saveAssistantSpeechPlaybackEnabled(enabled: Boolean) {
+        context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE).edit()
+            .putBoolean(Constants.PREF_ASSISTANT_SPEECH_PLAYBACK_ENABLED, enabled)
+            .apply()
+    }
+
     fun suppressWakeDuringPlaybackEnabled(): Boolean {
         return context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
             .getBoolean(Constants.PREF_SUPPRESS_WAKE_DURING_PLAYBACK, false)

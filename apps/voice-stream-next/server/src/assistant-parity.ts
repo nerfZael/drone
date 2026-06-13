@@ -241,6 +241,22 @@ export type AssistantExternalToolExecution = {
 
 export type AssistantExternalToolExecutor = (input: AssistantExternalToolExecution) => Promise<unknown>;
 export type AssistantExternalToolApprovalEvaluator = (input: Omit<AssistantExternalToolExecution, 'runId' | 'toolCallId'>) => Promise<boolean>;
+export type AssistantSpeakPlaybackResult = {
+  surface: 'web' | 'desktop' | 'android' | null;
+  label: string;
+  deviceId?: string | null;
+  deviceName?: string | null;
+  delivered: boolean;
+  error?: string | null;
+};
+export type AssistantSpeakPlaybackResolver = (input: {
+  db: VoiceStreamNextDb;
+  userId: string;
+  thread: AssistantThread;
+  text: string;
+  runId?: string | null;
+  toolCallId?: string;
+}) => Promise<AssistantSpeakPlaybackResult> | AssistantSpeakPlaybackResult;
 export type AssistantExecutionTargetProvider = (input: {
   db: VoiceStreamNextDb;
   userId: string;
@@ -260,6 +276,7 @@ export type AssistantExecutionTargetDevice = {
 
 let externalToolExecutor: AssistantExternalToolExecutor | null = null;
 let externalToolApprovalEvaluator: AssistantExternalToolApprovalEvaluator | null = null;
+let speakPlaybackResolver: AssistantSpeakPlaybackResolver | null = null;
 let executionTargetProvider: AssistantExecutionTargetProvider | null = null;
 
 export function setAssistantExternalToolExecutor(executor: AssistantExternalToolExecutor | null): void {
@@ -268,6 +285,10 @@ export function setAssistantExternalToolExecutor(executor: AssistantExternalTool
 
 export function setAssistantExternalToolApprovalEvaluator(evaluator: AssistantExternalToolApprovalEvaluator | null): void {
   externalToolApprovalEvaluator = evaluator;
+}
+
+export function setAssistantSpeakPlaybackResolver(resolver: AssistantSpeakPlaybackResolver | null): void {
+  speakPlaybackResolver = resolver;
 }
 
 export function setAssistantExecutionTargetProvider(provider: AssistantExecutionTargetProvider | null): void {
@@ -1729,7 +1750,16 @@ async function executeApprovedTool(
   if (toolName === 'speak') {
     const text = String(parsed.text ?? '').trim();
     if (!text) throw Object.assign(new Error('speak text is required'), { statusCode: 400 });
-    return { ok: true, text, delivered: false, queuedForVoiceClient: thread.voiceEnabled };
+    const playback = speakPlaybackResolver
+      ? await speakPlaybackResolver({ db, userId, thread, text, runId: context.runId, toolCallId: context.toolCallId })
+      : null;
+    return {
+      ok: true,
+      text,
+      delivered: Boolean(playback?.delivered),
+      queuedForVoiceClient: Boolean(playback) || thread.voiceEnabled,
+      playback,
+    };
   }
   if (toolName === 'update_system_prompt') {
     const prompt = String(parsed.prompt ?? '').trim();

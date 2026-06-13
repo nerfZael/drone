@@ -255,7 +255,10 @@ export function FloatingAssistantDock({ embeddedVisible }: { embeddedVisible: bo
 
   if (!open) {
     return (
-      <div className="absolute bottom-4 right-4 z-30 flex flex-col items-end gap-2.5 pointer-events-auto">
+      <div
+        data-floating-assistant-dock="minimized"
+        className="absolute bottom-4 right-4 z-30 flex flex-col items-end gap-2.5 pointer-events-auto"
+      >
         <DesktopVoiceFloatingIndicator />
         <button
           type="button"
@@ -281,7 +284,8 @@ export function FloatingAssistantDock({ embeddedVisible }: { embeddedVisible: bo
               <span className="h-2 w-2 rounded-full bg-[var(--muted-dim)] opacity-60" />
             )}
           </span>
-          <span>Assistant</span>
+          <span data-floating-assistant-label="true">Assistant</span>
+          <span data-floating-assistant-compact-label="true" className="hidden">AI</span>
           <MinimizedAssistantActivityBadge label="assistant threads" count={activityCounts.normal} tone="normal" />
           <MinimizedAssistantActivityBadge label="voice assistant threads" count={activityCounts.voice} tone="voice" />
         </button>
@@ -290,7 +294,10 @@ export function FloatingAssistantDock({ embeddedVisible }: { embeddedVisible: bo
   }
 
   return (
-    <div className="absolute bottom-4 right-4 z-30 flex h-[min(720px,calc(100%-2rem))] w-[min(440px,calc(100%-2rem))] flex-col overflow-hidden rounded border border-[var(--border)] bg-[var(--panel-alt)] shadow-[0_24px_70px_rgba(0,0,0,.48)] pointer-events-auto">
+    <div
+      data-floating-assistant-dock="open"
+      className="absolute bottom-4 right-4 z-30 flex h-[min(720px,calc(100%-2rem))] w-[min(440px,calc(100%-2rem))] flex-col overflow-hidden rounded border border-[var(--border)] bg-[var(--panel-alt)] shadow-[0_24px_70px_rgba(0,0,0,.48)] pointer-events-auto"
+    >
       <div className="flex h-9 flex-shrink-0 items-center justify-between border-b border-[var(--border)] bg-[rgba(255,255,255,.025)] px-2">
         <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
           Global Assistant

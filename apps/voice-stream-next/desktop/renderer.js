@@ -132,6 +132,7 @@ const els = {
   primaryVoiceMode: document.querySelector('#primaryVoiceMode'),
   primaryVoiceAction: document.querySelector('#primaryVoiceAction'),
   offButton: document.querySelector('#offButton'),
+  assistantSpeechPlaybackButton: document.querySelector('#assistantSpeechPlaybackButton'),
   micStatus: document.querySelector('#micStatus'),
   meterBar: document.querySelector('#meterBar'),
   inputDeviceSelect: document.querySelector('#inputDeviceSelect'),
@@ -272,6 +273,7 @@ function readFormConfig() {
     deviceName: els.deviceNameInput?.value.trim() || state.config?.deviceName || 'Desktop voice client',
     inputDeviceId: els.inputDeviceSelect?.value ?? state.config?.inputDeviceId ?? '',
     outputDeviceId: els.outputDeviceSelect?.value ?? state.config?.outputDeviceId ?? '',
+    assistantSpeechPlaybackEnabled: state.config?.assistantSpeechPlaybackEnabled !== false,
     suppressWakeDuringPlayback: els.suppressWakeDuringPlaybackCheckbox?.checked === true,
     transcriptionShortcut: sanitizeShortcutBinding(state.config?.transcriptionShortcut, DEFAULT_TRANSCRIPTION_SHORTCUT),
     awakeSleepToggleShortcut: sanitizeShortcutBinding(state.config?.awakeSleepToggleShortcut, DEFAULT_AWAKE_SLEEP_TOGGLE_SHORTCUT),
@@ -590,12 +592,14 @@ function applyConfig(config) {
     awakeSleepToggleShortcut: sanitizeShortcutBinding(config?.awakeSleepToggleShortcut, DEFAULT_AWAKE_SLEEP_TOGGLE_SHORTCUT),
     turnOffShortcut: sanitizeShortcutBinding(config?.turnOffShortcut, DEFAULT_TURN_OFF_SHORTCUT),
     pauseResumeShortcut: sanitizeShortcutBinding(config?.pauseResumeShortcut, DEFAULT_PAUSE_RESUME_SHORTCUT),
+    assistantSpeechPlaybackEnabled: config?.assistantSpeechPlaybackEnabled !== false,
     suppressWakeDuringPlayback: config?.suppressWakeDuringPlayback === true,
   };
   if (els.serverUrlInput) els.serverUrlInput.value = config.serverUrl;
   if (els.deviceNameInput) els.deviceNameInput.value = config.deviceName;
   if (els.inputDeviceSelect) els.inputDeviceSelect.value = config.inputDeviceId || '';
   if (els.outputDeviceSelect) els.outputDeviceSelect.value = config.outputDeviceId || '';
+  renderAssistantSpeechPlaybackButton();
   if (els.suppressWakeDuringPlaybackCheckbox) els.suppressWakeDuringPlaybackCheckbox.checked = state.config.suppressWakeDuringPlayback === true;
   if (els.extensionsConfigInput) els.extensionsConfigInput.value = extensionConfigText(config);
   renderWorkspaceExtensionConfig(config);
@@ -965,8 +969,6 @@ function applyWindowState(windowState) {
 function setMode(mode, status) {
   if (state.mode !== mode || mode !== 'sleeping') resetSleepPhraseCandidate();
   state.mode = mode;
-  if (mode === 'sleeping' || mode === 'off') stopSpeechPlayback({ clearQueue: true });
-  if (speechPlaybackBlocked()) stopSpeechPlayback({ clearQueue: false, requeueActive: true });
   if (status) showStatus(status);
   updateVoiceButtons();
   if (desktop.setTrayStatus) {
@@ -1145,6 +1147,36 @@ function updateVoiceButtons() {
   els.primaryVoiceButton.setAttribute('aria-pressed', String(streaming || state.mode === 'awake'));
   els.offButton.hidden = state.mode === 'off';
   els.offButton.disabled = state.mode === 'transcribing';
+  renderAssistantSpeechPlaybackButton();
+}
+
+function assistantSpeechPlaybackEnabled() {
+  return state.config?.assistantSpeechPlaybackEnabled !== false;
+}
+
+function renderAssistantSpeechPlaybackButton() {
+  const button = els.assistantSpeechPlaybackButton;
+  if (!button) return;
+  const enabled = assistantSpeechPlaybackEnabled();
+  button.textContent = enabled ? 'Speech on' : 'Speech off';
+  button.classList.toggle('is-muted', !enabled);
+  button.setAttribute('aria-pressed', String(enabled));
+  button.title = enabled ? 'Turn off assistant speech playback' : 'Turn on assistant speech playback';
+}
+
+async function toggleAssistantSpeechPlayback() {
+  const enabled = !assistantSpeechPlaybackEnabled();
+  const saved = await desktop.writeConfig(authSessionFields({
+    ...readFormConfig(),
+    assistantSpeechPlaybackEnabled: enabled,
+  }));
+  applyConfig(saved);
+  if (!enabled) {
+    stopSpeechPlayback({ clearQueue: true });
+  } else {
+    void drainSpeechPlaybackQueue();
+  }
+  showStatus(enabled ? 'Assistant speech playback enabled.' : 'Assistant speech playback disabled.');
 }
 
 function clearVoiceReconnectTimer() {
@@ -2343,7 +2375,6 @@ function completeStoppedVoice(nextMode = 'awake', status = '') {
 }
 
 async function enterStoppedSleep(status = 'Sleeping.') {
-  stopSpeechPlayback({ clearQueue: true });
   resetApprovalCollection();
   setMode('sleeping', status || 'Sleeping.');
   const settings = await loadVoiceSettings(true).catch((err) => {
@@ -2504,15 +2535,11 @@ let lastCompletedSpeechPlaybackData = null;
 let speechPlaybackSuppressWakeUntil = 0;
 
 function canPlaySpeechAudio() {
-  return canQueueSpeechAudio() && !speechPlaybackBlocked();
+  return canQueueSpeechAudio();
 }
 
 function canQueueSpeechAudio() {
-  return ['awake', 'recording', 'paused', 'transcribing'].includes(state.mode);
-}
-
-function speechPlaybackBlocked() {
-  return state.mode === 'recording' || state.mode === 'transcribing';
+  return assistantSpeechPlaybackEnabled();
 }
 
 function playWav(data) {
@@ -2537,7 +2564,6 @@ async function drainSpeechPlaybackQueue() {
   speechPlaybackActive = true;
   try {
     while (speechPlaybackQueue.length > 0) {
-      if (speechPlaybackBlocked()) break;
       if (!canPlaySpeechAudio()) {
         speechPlaybackQueue.length = 0;
         break;
@@ -2605,6 +2631,7 @@ function stopSpeechPlayback(options = {}) {
 }
 
 function repeatLastSpeechPlayback() {
+  if (!assistantSpeechPlaybackEnabled()) return false;
   if (!lastCompletedSpeechPlaybackData) return false;
   stopSpeechPlayback({ clearQueue: false });
   speechPlaybackQueue.unshift(lastCompletedSpeechPlaybackData);
@@ -2803,7 +2830,6 @@ async function enterAwake() {
 }
 
 async function enterSleep() {
-  stopSpeechPlayback({ clearQueue: true });
   if (state.mode === 'sleeping' && !state.voiceSocket && !state.stream) {
     return;
   }
@@ -2824,7 +2850,6 @@ async function enterSleep() {
 }
 
 async function turnOff(options = {}) {
-  stopSpeechPlayback({ clearQueue: true });
   if (state.voiceSocket || state.stream) {
     await stopMic('off', { cue: options.cue || 'stop_button' });
     return;
@@ -3315,6 +3340,11 @@ if (els.callRecorderButton) {
 if (els.callRecorderOpenButton) {
   els.callRecorderOpenButton.addEventListener('click', () => {
     if (desktop.openCallRecorderFile) void desktop.openCallRecorderFile().catch((err) => showStatus(err?.message || 'Could not open recording history.'));
+  });
+}
+if (els.assistantSpeechPlaybackButton) {
+  els.assistantSpeechPlaybackButton.addEventListener('click', () => {
+    void toggleAssistantSpeechPlayback().catch((err) => showStatus(err?.message || 'Could not save assistant speech setting.'));
   });
 }
 els.compactButton.addEventListener('click', () => {

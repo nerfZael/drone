@@ -23,7 +23,6 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
 import java.net.URLEncoder
-import java.util.ArrayDeque
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 
@@ -46,9 +45,6 @@ class VoiceSessionService : Service() {
     @Volatile private var serviceActive = false
     @Volatile private var controlReconnectAttempt = 0
     @Volatile private var controlReconnectRunnable: Runnable? = null
-    private val deferredSpeechAudio = ArrayDeque<ByteArray>()
-    private val deferredSpeechAudioLock = Any()
-
     private val audioDeviceCallback = object : AudioDeviceCallback() {
         override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) {
             refreshMicrophoneAfterDeviceChange()
@@ -107,6 +103,7 @@ class VoiceSessionService : Service() {
                 }
             }
             Constants.ACTION_STOP_VOICE -> stopVoice()
+            Constants.ACTION_VOICE_OFF -> enterOffMode()
             Constants.ACTION_STOP_RECORDING -> {
                 if (!streamer.stopRecordingToAwake()) {
                     if (serviceActive) startAwake() else stopSelf(startId)
@@ -221,10 +218,19 @@ class VoiceSessionService : Service() {
     }
 
     private fun enterSleep() {
-        AssistantAudioPlayer.stopAll()
         if (!streamer.enterSleep()) {
             stopVoice()
         }
+    }
+
+    private fun enterOffMode() {
+        serviceActive = true
+        mainHandler.removeCallbacks(logUploadRunnable)
+        streamer.stop()
+        releaseWakeLock()
+        publishStatus("Off", Constants.MODE_OFF, currentMicrophone, lastApprovalStatus)
+        startForeground(NOTIFICATION_ID, notification("Off"))
+        connectControlChannel()
     }
 
     private fun setMicrophone(deviceKey: String) {
@@ -298,11 +304,6 @@ class VoiceSessionService : Service() {
                     )
                 }
             }
-        }
-        if (mode == Constants.MODE_OFF || mode == Constants.MODE_SLEEPING) {
-            clearDeferredSpeechAudio()
-        } else {
-            drainDeferredSpeechAudioIfReady()
         }
     }
 
@@ -428,7 +429,7 @@ class VoiceSessionService : Service() {
         controlReconnectRunnable = null
     }
 
-    private fun shouldMaintainControlChannel(): Boolean = serviceActive && lastMode != Constants.MODE_OFF
+    private fun shouldMaintainControlChannel(): Boolean = serviceActive
 
     private fun isTerminalControlCloseCode(code: Int): Boolean = code == 4401 || code == 4403 || code == 4406 || code == 4408
 
@@ -454,38 +455,12 @@ class VoiceSessionService : Service() {
     }
 
     private fun queueOrPlaySpeechAudio(audio: ByteArray) {
-        if (speechPlaybackBlocked() || streamer.isRecordingAudio()) {
-            synchronized(deferredSpeechAudioLock) {
-                deferredSpeechAudio.add(audio)
-            }
-            ClientLog.i("Service", "Assistant audio deferred while voice recording is active mode=$lastMode")
-            return
-        }
-        if (!streamer.canPlayQueuedAssistantAudio()) {
-            ClientLog.i("Service", "Assistant audio received but playback skipped mode=$lastMode")
+        if (!api.assistantSpeechPlaybackEnabled()) {
+            AssistantAudioPlayer.stopAll()
+            ClientLog.i("Service", "Assistant audio received but playback is disabled")
             return
         }
         playSpeechAudio(audio)
-    }
-
-    private fun drainDeferredSpeechAudioIfReady() {
-        if (speechPlaybackBlocked() || streamer.isRecordingAudio() || !streamer.canPlayQueuedAssistantAudio()) return
-        AssistantAudioPlayer.resumePlayback()
-        val queued = ArrayList<ByteArray>()
-        synchronized(deferredSpeechAudioLock) {
-            while (!deferredSpeechAudio.isEmpty()) {
-                queued.add(deferredSpeechAudio.removeFirst())
-            }
-        }
-        if (queued.isEmpty()) return
-        ClientLog.i("Service", "Playing ${queued.size} deferred assistant audio item(s)")
-        queued.forEach { audio -> playSpeechAudio(audio) }
-    }
-
-    private fun clearDeferredSpeechAudio() {
-        synchronized(deferredSpeechAudioLock) {
-            deferredSpeechAudio.clear()
-        }
     }
 
     private fun playSpeechAudio(audio: ByteArray) {
@@ -493,10 +468,6 @@ class VoiceSessionService : Service() {
             publishStatus(status, lastMode, currentMicrophone, lastApprovalStatus)
         }
         publishStatus("Assistant audio received.", lastMode, currentMicrophone, lastApprovalStatus)
-    }
-
-    private fun speechPlaybackBlocked(): Boolean {
-        return lastMode == Constants.MODE_RECORDING || lastMode == "transcribing"
     }
 
     private fun handleSettingsChanged(message: JSONObject) {
@@ -549,7 +520,7 @@ class VoiceSessionService : Service() {
                 ack(true, Constants.MODE_SLEEPING, lastStatus)
             }
             "off" -> {
-                stopVoice()
+                enterOffMode()
                 ack(true, Constants.MODE_OFF, "Off.")
             }
             "awake" -> {

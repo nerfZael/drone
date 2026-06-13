@@ -1136,6 +1136,26 @@ h2 {
   grid-area: open;
 }
 
+.speech-playback-button {
+  min-width: 112px;
+  min-height: 36px;
+  padding: 0 14px;
+  border-color: rgba(74, 222, 128, .30);
+  background: rgba(74, 222, 128, .08);
+  color: #95f5b6;
+}
+
+.speech-playback-button:hover {
+  border-color: rgba(74, 222, 128, .48);
+  background: rgba(74, 222, 128, .12);
+}
+
+.speech-playback-button.is-muted {
+  border-color: rgba(136, 145, 168, .28);
+  background: rgba(136, 145, 168, .08);
+  color: var(--muted);
+}
+
 @keyframes pulse-ring {
   0%, 100% { transform: scale(1); opacity: .72; }
   50% { transform: scale(1.08); opacity: .22; }
@@ -1192,6 +1212,7 @@ body.is-compact .voice-copy,
 body.is-compact .voice-device-panel,
 body.is-compact .call-recorder-panel,
 body.is-compact .meter-shell,
+body.is-compact .speech-playback-button,
 body.is-compact .voice-status {
   display: none;
 }

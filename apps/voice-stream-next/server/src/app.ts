@@ -27,6 +27,8 @@ import {
   setAssistantExecutionTargetProvider,
   setAssistantExternalToolApprovalEvaluator,
   setAssistantExternalToolExecutor,
+  setAssistantSpeakPlaybackResolver,
+  type AssistantSpeakPlaybackResult,
 } from './assistant-parity.js';
 import {
   cleanTargetKind,
@@ -88,9 +90,6 @@ const VOICE_RECORDING_CHANNELS = 1;
 const LIVE_RECORDING_TARGET_MS = 20_000;
 const LIVE_RECORDING_OVERLAP_MS = 3_000;
 const LIVE_RECORDING_MIN_FINAL_MS = 1_000;
-const SPEECH_PLAYBACK_DEFER_POLL_MS = 100;
-const SPEECH_PLAYBACK_BLOCKER_STALE_MS = MAX_STREAM_DURATION_MS + 30_000;
-const SPEECH_PLAYBACK_BLOCKED_MODES = new Set(['recording', 'transcribing']);
 const MICROCREDITS_PER_CREDIT = 1_000_000;
 const USD_MICROS_PER_DOLLAR = 1_000_000;
 const MICROCREDITS_PER_DOLLAR = 100 * MICROCREDITS_PER_CREDIT;
@@ -259,38 +258,9 @@ function desktopClaimProof(token: string, claim: { serverUrl: string; deviceId: 
     .digest('base64url');
 }
 
-function speakTextFromResult(result: unknown): string {
-  if (!result || typeof result !== 'object') return '';
-  return cleanText((result as any).text);
-}
-
-function speakTextFromArgsJson(raw: unknown): string {
-  try {
-    return speakTextFromResult(JSON.parse(String(raw ?? '{}')));
-  } catch {
-    return '';
-  }
-}
-
 function cleanDeviceMode(raw: unknown): string {
   const mode = cleanText(raw, 'off').toLowerCase();
   return ['off', 'awake', 'sleeping', 'recording', 'paused', 'transcribing', 'error'].includes(mode) ? mode : 'error';
-}
-
-function speechPlaybackBlockedMode(raw: unknown): boolean {
-  return SPEECH_PLAYBACK_BLOCKED_MODES.has(cleanText(raw).toLowerCase());
-}
-
-function speechPlaybackBlockerIsFresh(updatedAt: string): boolean {
-  const at = Date.parse(updatedAt);
-  return Number.isFinite(at) && Date.now() - at <= SPEECH_PLAYBACK_BLOCKER_STALE_MS;
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    (timer as any).unref?.();
-  });
 }
 
 function desktopAuthExpiresAt(from = Date.now()): string {
@@ -1133,7 +1103,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           slots: [...new Set(manifest.tools.map((tool) => tool.targetSlot).filter(Boolean) as string[])],
         }))
         .filter((manifest) => manifest.toolNames.length > 0 || manifest.slots.length > 0),
-    })),
+      })),
   }));
 
   const writeSseEvent = (res: any, event: string, data: unknown) => {
@@ -1362,23 +1332,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     clientId?: string;
     activityAt: string;
   };
-  const speechQueues = new Map<string, Promise<void>>();
-
-  const connectedSpeechPlaybackBlockers = (userId: string) => db
-    .listClientStatuses(userId)
-    .filter((status) =>
-      controlChannels.isConnected(status.deviceId) &&
-      speechPlaybackBlockedMode(status.mode) &&
-      speechPlaybackBlockerIsFresh(status.updatedAt),
-    );
-
-  const waitForSpeechPlaybackReady = async (userId: string) => {
-    let blockers = connectedSpeechPlaybackBlockers(userId);
-    while (blockers.length > 0) {
-      await delay(SPEECH_PLAYBACK_DEFER_POLL_MS);
-      blockers = connectedSpeechPlaybackBlockers(userId);
-    }
-  };
+  const speechQueues = new Map<string, Promise<AssistantSpeakPlaybackResult>>();
 
   const latestSpeechClientForUser = (userId: string): SpeechDestination | null => {
     let latest: SpeechDestination | null = null;
@@ -1430,6 +1384,28 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       .sort((a, b) => Date.parse(b.activityAt) - Date.parse(a.activityAt))[0]!;
   };
 
+  const speechDestinationResult = (
+    userId: string,
+    destination: SpeechDestination | null,
+    delivered: boolean,
+    error?: string | null,
+  ): AssistantSpeakPlaybackResult => {
+    if (!destination) {
+      return { surface: null, label: 'No target', delivered, error: error ?? null };
+    }
+    if (destination.surface === 'web') return { surface: 'web', label: 'App', delivered, error: error ?? null };
+    const device = destination.deviceId ? db.deviceForUser(userId, destination.deviceId) : null;
+    const fallback = destination.surface === 'android' ? 'Android' : 'Desktop';
+    return {
+      surface: destination.surface,
+      label: device?.displayName || fallback,
+      deviceId: destination.deviceId ?? null,
+      deviceName: device?.displayName ?? null,
+      delivered,
+      error: error ?? null,
+    };
+  };
+
   const speechPlaybackStatus = (userId: string) => {
     const destinations = connectedSpeechDestinations(userId);
     const selected = selectSpeechDestination(userId);
@@ -1454,27 +1430,9 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     userId: string,
     text: string,
     metadata: { source: string; threadId?: string; messageId?: string },
-  ): Promise<void> => {
+  ): Promise<AssistantSpeakPlaybackResult> => {
     const clean = cleanText(text).slice(0, 4096);
-    if (!clean) return;
-    const initialBlockers = connectedSpeechPlaybackBlockers(userId);
-    if (initialBlockers.length > 0) {
-      addLog(userId, {
-        source: 'speech',
-        level: 'info',
-        message: 'Speech playback deferred while voice recording is active',
-        detailsJson: JSON.stringify({
-          source: metadata.source,
-          blockedDevices: initialBlockers.map((status) => ({
-            deviceId: status.deviceId,
-            mode: status.mode,
-            deviceType: status.deviceType,
-          })),
-          chars: clean.length,
-        }),
-      });
-      await waitForSpeechPlaybackReady(userId);
-    }
+    if (!clean) return { surface: null, label: 'No speech', delivered: false, error: 'empty speech text' };
     const destination = selectSpeechDestination(userId);
     if (!destination) {
       addLog(userId, {
@@ -1483,7 +1441,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         message: 'Speech playback skipped: no connected playback target',
         detailsJson: JSON.stringify({ source: metadata.source, chars: clean.length }),
       });
-      return;
+      return speechDestinationResult(userId, null, false, 'no connected playback target');
     }
     try {
       const thread = metadata.threadId ? db.thread(userId, metadata.threadId) : null;
@@ -1502,7 +1460,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           message: 'Speech playback skipped: TTS is not configured',
           detailsJson: JSON.stringify({ source: metadata.source, target: destination.surface, chars: clean.length }),
         });
-        return;
+        return speechDestinationResult(userId, destination, false, 'TTS is not configured');
       }
       recordGroqTtsUsage(userId, speech, metadata);
       const payload: SpeechAudioCommand = {
@@ -1526,6 +1484,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         message: delivered ? `Speech playback queued on ${destination.surface}` : `Speech playback failed for ${destination.surface}`,
         detailsJson: JSON.stringify({ source: metadata.source, target: destination.surface, assistantProfileId: profile?.id ?? null, ttsVoice: profile?.ttsVoice ?? null, chars: clean.length, bytes: speech.audio.byteLength }),
       });
+      return speechDestinationResult(userId, destination, delivered, delivered ? null : 'playback delivery failed');
     } catch (error: any) {
       addLog(userId, {
         deviceId: destination.deviceId ?? null,
@@ -1534,6 +1493,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         message: 'Speech synthesis failed',
         detailsJson: JSON.stringify({ source: metadata.source, target: destination.surface, error: error?.message ?? String(error) }),
       });
+      return speechDestinationResult(userId, destination, false, error?.message ?? String(error));
     }
   };
 
@@ -1541,33 +1501,34 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     userId: string,
     text: string,
     metadata: { source: string; threadId?: string; messageId?: string },
-  ): void => {
-    const previous = speechQueues.get(userId) ?? Promise.resolve();
-    let next: Promise<void>;
+  ): Promise<AssistantSpeakPlaybackResult> => {
+    const previous = speechQueues.get(userId) ?? Promise.resolve({ surface: null, label: 'No target', delivered: false });
+    let next: Promise<AssistantSpeakPlaybackResult>;
     next = previous
-      .catch(() => undefined)
+      .catch(() => ({ surface: null, label: 'No target', delivered: false }))
       .then(() => emitSpeechAudio(userId, text, metadata))
       .finally(() => {
         if (speechQueues.get(userId) === next) speechQueues.delete(userId);
       });
     speechQueues.set(userId, next);
+    return next;
   };
 
-  const handleSpeakToolResult = (userId: string, threadId: string, event: any) => {
-    if (event?.type !== 'tool_result' || event.toolCall?.toolName !== 'speak') return;
-    const text = speakTextFromResult(event.result);
-    if (!text) return;
-    enqueueSpeechAudio(userId, text, { source: 'assistant', threadId, messageId: String(event.toolCall?.id ?? '') || undefined });
-  };
+  setAssistantSpeakPlaybackResolver(async (input) =>
+    enqueueSpeechAudio(input.userId, input.text, {
+      source: 'assistant',
+      threadId: input.thread.id,
+      messageId: input.toolCallId,
+    }));
 
   app.addHook('onClose', async () => {
     setAssistantExternalToolExecutor(null);
     setAssistantExternalToolApprovalEvaluator(null);
+    setAssistantSpeakPlaybackResolver(null);
     setAssistantExecutionTargetProvider(null);
   });
 
   const handleAssistantPromptEvent = (userId: string, threadId: string, event: any) => {
-    handleSpeakToolResult(userId, threadId, event);
     if (['snapshot', 'message', 'queued', 'tool_call', 'tool_result', 'approval_pending', 'done', 'error'].includes(String(event?.type ?? ''))) {
       emitAssistantChange(`assistant_${String(event.type)}`, threadId, userId);
     }
@@ -3838,12 +3799,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
   app.post('/api/assistant/approvals/:approvalId/approve', async (req, reply) =>
     withUser(req, reply, db, clerkEnabled, async (ctx) => {
       const approvalId = String((req.params as any).approvalId ?? '');
-      const pending = db.pendingApproval(ctx.user.id, approvalId);
-      const pendingSpeakText = pending?.toolName === 'speak' ? speakTextFromArgsJson(pending.argsJson) : '';
       const snapshot = await resolveAssistantApproval(db, ctx.user.id, approvalId, true, ctx.user.email || ctx.user.displayName || 'user');
-      if (pendingSpeakText && pending) {
-        enqueueSpeechAudio(ctx.user.id, pendingSpeakText, { source: 'assistant', threadId: pending.threadId, messageId: pending.toolCallId });
-      }
       emitAssistantChange('approval_resolved', snapshot.activeThreadId ?? undefined, ctx.user.id);
       return { ok: true, snapshot };
     }),
