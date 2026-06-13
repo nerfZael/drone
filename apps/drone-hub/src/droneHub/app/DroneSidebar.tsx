@@ -52,6 +52,36 @@ const AUTO_MINIMIZE_EXPAND_DELAY_MS = 120;
 const AUTO_MINIMIZE_REOPEN_GUARD_MS = 220;
 const SIDEBAR_DND_IDLE_DISABLE_DELAY_MS = 1500;
 const SIDEBAR_DENSITY_MODE_ORDER: SidebarDensityMode[] = ['compact', 'default', 'comfortable'];
+export type DroneSidebarCapabilities = {
+  actions: boolean;
+  createDrones: boolean;
+  dragAndDrop: boolean;
+  headerActions: boolean;
+  repoFooter: boolean;
+  sidebarOptions: boolean;
+  collapseControl: boolean;
+  collapsedRailActions: boolean;
+};
+const DEFAULT_DRONE_SIDEBAR_CAPABILITIES: DroneSidebarCapabilities = {
+  actions: true,
+  createDrones: true,
+  dragAndDrop: true,
+  headerActions: true,
+  repoFooter: true,
+  sidebarOptions: true,
+  collapseControl: true,
+  collapsedRailActions: true,
+};
+
+function resolveDroneSidebarCapabilities(
+  capabilities: Partial<DroneSidebarCapabilities> | undefined,
+): DroneSidebarCapabilities {
+  return {
+    ...DEFAULT_DRONE_SIDEBAR_CAPABILITIES,
+    ...(capabilities ?? {}),
+  };
+}
+
 type SidebarIconButtonProps = {
   title: string;
   ariaLabel?: string;
@@ -824,6 +854,7 @@ export type DroneSidebarProps = {
   ) => Promise<boolean> | boolean;
   onPrepareDroneDragStart: (droneId: string) => void;
   onOpenReposModal: () => void;
+  capabilities?: Partial<DroneSidebarCapabilities>;
 };
 
 export function DroneSidebar({
@@ -879,7 +910,9 @@ export function DroneSidebar({
   onDeleteGroup,
   onPrepareDroneDragStart,
   onOpenReposModal,
+  capabilities,
 }: DroneSidebarProps) {
+  const sidebarCapabilities = React.useMemo(() => resolveDroneSidebarCapabilities(capabilities), [capabilities]);
   const {
     sidebarCollapsed,
     selectedDroneIds,
@@ -934,7 +967,7 @@ export function DroneSidebar({
   const [headerActionsMenuOpen, setHeaderActionsMenuOpen] = React.useState(false);
   const [footerOptionsMenuOpen, setFooterOptionsMenuOpen] = React.useState(false);
   const [sidebarInteractionDndEnabled, setSidebarInteractionDndEnabled] = React.useState(false);
-  const sidebarDndEnabled = sidebarInteractionDndEnabled || Boolean(activeDrag);
+  const sidebarDndEnabled = sidebarCapabilities.dragAndDrop && (sidebarInteractionDndEnabled || Boolean(activeDrag));
   const [sidebarDockDragActive, setSidebarDockDragActive] = React.useState(false);
   const [sidebarDockDragPreviewSide, setSidebarDockDragPreviewSide] = React.useState<'left' | 'right' | null>(null);
   const hiddenSidebarGroupTokenSet = React.useMemo(() => new Set(hiddenSidebarGroups), [hiddenSidebarGroups]);
@@ -1337,12 +1370,14 @@ export function DroneSidebar({
       onOpenDroneErrorModal,
       onPrepareDroneDragStart,
       onReparentDronesToParent: runOptimisticReparentDronesToParent,
+      actionsEnabled: sidebarCapabilities.actions,
     }),
     [
       activeChatName,
       busyChatNodeIdSet,
       collapsedDroneSections,
       deletingDrones,
+      sidebarCapabilities.actions,
       movingDroneGroups,
       onCreateDroneChat,
       onDeleteDrone,
@@ -1442,7 +1477,7 @@ export function DroneSidebar({
       if (!selectedFolderPath || !visibleSidebarFolderPathSet.has(selectedFolderPath)) return;
       if (folderEditor) return;
 
-      if (!isRepoGroupingMode && event.key === 'F2') {
+      if (sidebarCapabilities.actions && !isRepoGroupingMode && event.key === 'F2') {
         event.preventDefault();
         startRenameFolder(selectedFolderPath);
         return;
@@ -1468,6 +1503,7 @@ export function DroneSidebar({
     folderEditor,
     isRepoGroupingMode,
     onToggleGroupCollapsed,
+    sidebarCapabilities.actions,
     selectedFolderPath,
     startRenameFolder,
     visibleSidebarFolderPathSet,
@@ -1500,8 +1536,8 @@ export function DroneSidebar({
         style={{ width: sidebarCollapsed ? 0 : `min(${SIDEBAR_EXPANDED_WIDTH_PX}px, 100vw)` }}
         onPointerEnter={onSidebarPointerEnter}
         onPointerLeave={onSidebarPointerLeave}
-        onPointerDownCapture={enableSidebarDndForInteraction}
-        onFocusCapture={enableSidebarDndForInteraction}
+        onPointerDownCapture={sidebarCapabilities.dragAndDrop ? enableSidebarDndForInteraction : undefined}
+        onFocusCapture={sidebarCapabilities.dragAndDrop ? enableSidebarDndForInteraction : undefined}
         onBlurCapture={onSidebarBlurCapture}
         onWheel={onSidebarWheel}
       >
@@ -1531,7 +1567,7 @@ export function DroneSidebar({
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-1 flex-shrink-0">
+            {sidebarCapabilities.headerActions ? <div className="flex items-center gap-1 flex-shrink-0">
               <button
                 type="button"
                 onClick={onOpenVisibleMultiChat}
@@ -1611,7 +1647,7 @@ export function DroneSidebar({
                   </div>
                 ) : null}
               </div>
-            </div>
+            </div> : null}
           </div>
         </div>
 
@@ -1644,71 +1680,83 @@ export function DroneSidebar({
               >
                 No drones registered
               </div>
-              <div className="mt-4 mx-auto max-w-[240px] flex flex-col gap-2">
-                <button
-                  type="button"
-                  onClick={onOpenDraftChatComposer}
-                  className="w-full inline-flex items-center gap-2 h-[30px] px-3 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[11px] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] transition-all"
-                  title="Create new drone"
-                  aria-label="Create new drone"
-                >
-                  <IconPlus className="opacity-80" />
-                  <span className="font-semibold tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                    Create new drone
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={onOpenCreateModal}
-                  className="w-full inline-flex items-center gap-2 h-[30px] px-3 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[11px] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] transition-all"
-                  title="Create multiple drones"
-                  aria-label="Create multiple drones"
-                >
-                  <IconPlusDouble className="opacity-80" />
-                  <span className="font-semibold tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                    Create multiple drones
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={onOpenKanbanBoard}
-                  className={`w-full inline-flex items-center gap-2 h-[30px] px-3 rounded border transition-all ${
-                    kanbanBoardOpen
-                      ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                      : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
-                  }`}
-                  title="Open task board"
-                  aria-label="Open task board"
-                >
-                  <IconBoard className="opacity-80" />
-                  <span className="font-semibold tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                    Open task board
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={onOpenPlaybookRuns}
-                  className={`w-full inline-flex items-center gap-2 h-[30px] px-3 rounded border transition-all ${
-                    playbookRunsOpen
-                      ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                      : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
-                  }`}
-                  title="Open playbook runs"
-                  aria-label="Open playbook runs"
-                >
-                  <IconList className="opacity-80" />
-                  <span className="font-semibold tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                    Open playbook runs
-                  </span>
-                </button>
-              </div>
-              <div className="text-[var(--muted-dim)] text-[10px] mt-4">
-                Or run{' '}
-                <code className="px-1.5 py-0.5 rounded bg-[rgba(167,139,250,.06)] border border-[rgba(167,139,250,.08)] text-[#C4B5FD] text-[10px]">
-                  drone create &lt;name&gt;
-                </code>{' '}
-                in your terminal.
-              </div>
+              {sidebarCapabilities.createDrones || sidebarCapabilities.headerActions ? (
+                <div className="mx-auto mt-4 flex max-w-[240px] flex-col gap-2">
+                  {sidebarCapabilities.createDrones ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={onOpenDraftChatComposer}
+                        className="inline-flex h-[30px] w-full items-center gap-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 text-[11px] text-[var(--muted)] transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]"
+                        title="Create new drone"
+                        aria-label="Create new drone"
+                      >
+                        <IconPlus className="opacity-80" />
+                        <span className="font-semibold uppercase tracking-wide" style={{ fontFamily: 'var(--display)' }}>
+                          Create new drone
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={onOpenCreateModal}
+                        className="inline-flex h-[30px] w-full items-center gap-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 text-[11px] text-[var(--muted)] transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]"
+                        title="Create multiple drones"
+                        aria-label="Create multiple drones"
+                      >
+                        <IconPlusDouble className="opacity-80" />
+                        <span className="font-semibold uppercase tracking-wide" style={{ fontFamily: 'var(--display)' }}>
+                          Create multiple drones
+                        </span>
+                      </button>
+                    </>
+                  ) : null}
+                  {sidebarCapabilities.headerActions ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={onOpenKanbanBoard}
+                        className={`inline-flex h-[30px] w-full items-center gap-2 rounded border px-3 text-[11px] transition-all ${
+                          kanbanBoardOpen
+                            ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                            : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]'
+                        }`}
+                        title="Open task board"
+                        aria-label="Open task board"
+                      >
+                        <IconBoard className="opacity-80" />
+                        <span className="font-semibold uppercase tracking-wide" style={{ fontFamily: 'var(--display)' }}>
+                          Open task board
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={onOpenPlaybookRuns}
+                        className={`inline-flex h-[30px] w-full items-center gap-2 rounded border px-3 text-[11px] transition-all ${
+                          playbookRunsOpen
+                            ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                            : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]'
+                        }`}
+                        title="Open playbook runs"
+                        aria-label="Open playbook runs"
+                      >
+                        <IconList className="opacity-80" />
+                        <span className="font-semibold uppercase tracking-wide" style={{ fontFamily: 'var(--display)' }}>
+                          Open playbook runs
+                        </span>
+                      </button>
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
+              {sidebarCapabilities.createDrones ? (
+                <div className="mt-4 text-[10px] text-[var(--muted-dim)]">
+                  Or run{' '}
+                  <code className="rounded border border-[rgba(167,139,250,.08)] bg-[rgba(167,139,250,.06)] px-1.5 py-0.5 text-[10px] text-[#C4B5FD]">
+                    drone create &lt;name&gt;
+                  </code>{' '}
+                  in your terminal.
+                </div>
+              ) : null}
             </div>
           )}
           {!dronesLoading && sidebarDrones.length > 0 && sidebarDronesFilteredByRepo.length === 0 && activeRepoPath && !visibleDraftSidebarPlaceholder && !dronesError && (
@@ -1724,7 +1772,7 @@ export function DroneSidebar({
               </div>
             </div>
           )}
-          {(dronesLoading || sidebarDrones.length > 0 || Boolean(visibleDraftSidebarPlaceholder) || Boolean(activeRepoPath)) && (
+          {sidebarCapabilities.createDrones && (dronesLoading || sidebarDrones.length > 0 || Boolean(visibleDraftSidebarPlaceholder) || Boolean(activeRepoPath)) && (
             <div className="mb-1.5 flex items-center gap-2 px-1">
               <button
                 type="button"
@@ -1755,7 +1803,7 @@ export function DroneSidebar({
               <>
                 <div className="flex flex-col gap-1.5">
                   <>
-                    {!isRepoGroupingMode ? (
+                    {sidebarCapabilities.actions && !isRepoGroupingMode ? (
                       <>
                       <div className="mb-1 flex items-center gap-2 px-1">
                         <button
@@ -1870,9 +1918,10 @@ export function DroneSidebar({
                   onOpenDroneErrorModal={onOpenDroneErrorModal}
                   onPrepareDroneDragStart={onPrepareDroneDragStart}
                   onReparentDronesToParent={runOptimisticReparentDronesToParent}
+                  actionsEnabled={sidebarCapabilities.actions}
                 />
                   </>
-                {!isRepoGroupingMode && !sidebarHasUngroupedGroup && showExternalMoveTargets && (
+                {sidebarCapabilities.dragAndDrop && !isRepoGroupingMode && !sidebarHasUngroupedGroup && showExternalMoveTargets && (
                   <div
                     ref={setUngroupedDropNodeRef}
                     className={`rounded-md border border-dashed px-3 py-2 text-[10px] font-semibold tracking-wide uppercase transition-colors ${
@@ -1886,7 +1935,7 @@ export function DroneSidebar({
                   </div>
                 )}
                 </div>
-                {!isRepoGroupingMode &&
+                {sidebarCapabilities.actions && !isRepoGroupingMode &&
                   (showExternalMoveTargets ||
                     (createGroupTargetDroneIds && createGroupTargetDroneIds.length > 0)) && (
                   <div
@@ -1957,9 +2006,9 @@ export function DroneSidebar({
           </div>
         </div>
 
-        <div className="flex-shrink-0 border-t border-[var(--border)] bg-[rgba(0,0,0,.12)]">
+        {sidebarCapabilities.repoFooter || sidebarCapabilities.sidebarOptions || sidebarCapabilities.collapseControl ? <div className="flex-shrink-0 border-t border-[var(--border)] bg-[rgba(0,0,0,.12)]">
           <div className="px-2.5 py-1.5 flex items-center gap-1.5">
-            <button
+            {sidebarCapabilities.repoFooter ? <button
               type="button"
               onClick={() => setSidebarReposCollapsed((prev) => !prev)}
               className="flex-1 min-w-0 inline-flex items-center gap-2 px-1.5 py-1 rounded text-left text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)] transition-all"
@@ -1975,9 +2024,9 @@ export function DroneSidebar({
                   Filtered
                 </span>
               ) : null}
-            </button>
+            </button> : null}
             <div ref={footerOptionsMenuRef} className="relative flex flex-shrink-0 items-center gap-1">
-              <button
+              {sidebarCapabilities.sidebarOptions ? <button
                 type="button"
                 onClick={() => {
                   setHeaderActionsMenuOpen(false);
@@ -1994,8 +2043,8 @@ export function DroneSidebar({
                 aria-expanded={footerOptionsMenuOpen}
               >
                 <IconMore className="opacity-85" />
-              </button>
-              <button
+              </button> : null}
+              {sidebarCapabilities.repoFooter ? <button
                 type="button"
                 onClick={onOpenReposModal}
                 className="inline-flex items-center justify-center w-7 h-7 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-all"
@@ -2003,16 +2052,16 @@ export function DroneSidebar({
                 aria-label="Manage repos"
               >
                 <IconSettings className="opacity-70" />
-              </button>
-              <SidebarIconButton
+              </button> : null}
+              {sidebarCapabilities.collapseControl ? <SidebarIconButton
                 onClick={collapseSidebarWithGuard}
                 className="border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] hover:bg-[var(--hover)]"
                 title="Collapse sidebar"
                 ariaLabel="Collapse sidebar"
               >
                 <IconSidebarCollapse className={sidebarDirectionalIconClass} />
-              </SidebarIconButton>
-              {footerOptionsMenuOpen ? (
+              </SidebarIconButton> : null}
+              {sidebarCapabilities.sidebarOptions && footerOptionsMenuOpen ? (
                 <div className={`absolute right-0 bottom-full mb-2 w-[240px] z-50 ${dropdownPanelBaseClass}`} role="menu">
                   <div className="py-1">
                     <button
@@ -2081,7 +2130,7 @@ export function DroneSidebar({
               ) : null}
             </div>
           </div>
-          {!sidebarReposCollapsed && (
+          {sidebarCapabilities.repoFooter && !sidebarReposCollapsed && (
             <div className="max-h-[190px] overflow-y-auto px-2 pb-2 flex flex-col gap-0.5">
               <button
                 type="button"
@@ -2143,7 +2192,7 @@ export function DroneSidebar({
               )}
             </div>
           )}
-        </div>
+        </div> : null}
 
       </aside>
 
@@ -2172,7 +2221,7 @@ export function DroneSidebar({
         >
           <IconSidebarExpand className={sidebarDirectionalIconClass} />
         </SidebarIconButton>
-        <SidebarIconButton
+        {sidebarCapabilities.collapsedRailActions && sidebarCapabilities.createDrones ? <SidebarIconButton
           onClick={() => { setSidebarCollapsed(false); onOpenDraftChatComposer(); }}
           className="border border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]"
           title="Create drone"
@@ -2181,8 +2230,8 @@ export function DroneSidebar({
           tabIndex={collapsedRailInteractive ? 0 : -1}
         >
           <IconPlus className="opacity-80" />
-        </SidebarIconButton>
-        <SidebarIconButton
+        </SidebarIconButton> : null}
+        {sidebarCapabilities.collapsedRailActions && sidebarCapabilities.createDrones ? <SidebarIconButton
           onClick={() => { setSidebarCollapsed(false); onOpenCreateModal(); }}
           className="border border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]"
           title="Create multiple drones (S)"
@@ -2191,8 +2240,8 @@ export function DroneSidebar({
           tabIndex={collapsedRailInteractive ? 0 : -1}
         >
           <IconPlusDouble className="opacity-80" />
-        </SidebarIconButton>
-        <SidebarIconButton
+        </SidebarIconButton> : null}
+        {sidebarCapabilities.collapsedRailActions && sidebarCapabilities.headerActions ? <SidebarIconButton
           onClick={() => { setSidebarCollapsed(false); onOpenKanbanBoard(); }}
           className={`border ${
             kanbanBoardOpen
@@ -2205,8 +2254,8 @@ export function DroneSidebar({
           tabIndex={collapsedRailInteractive ? 0 : -1}
         >
           <IconBoard className="opacity-80" />
-        </SidebarIconButton>
-        <SidebarIconButton
+        </SidebarIconButton> : null}
+        {sidebarCapabilities.collapsedRailActions && sidebarCapabilities.headerActions ? <SidebarIconButton
           onClick={() => { setSidebarCollapsed(false); onOpenPlaybookRuns(); }}
           className={`border ${
             playbookRunsOpen
@@ -2219,8 +2268,8 @@ export function DroneSidebar({
           tabIndex={collapsedRailInteractive ? 0 : -1}
         >
           <IconList className="opacity-80" />
-        </SidebarIconButton>
-        <SidebarIconButton
+        </SidebarIconButton> : null}
+        {sidebarCapabilities.collapsedRailActions && sidebarCapabilities.headerActions ? <SidebarIconButton
           onClick={() => { setSidebarCollapsed(false); onOpenVisibleMultiChat(); }}
           className={`border ${
             sidebarVisibleDroneCount === 0
@@ -2235,7 +2284,7 @@ export function DroneSidebar({
           tabIndex={collapsedRailInteractive && sidebarVisibleDroneCount > 0 ? 0 : -1}
         >
           <IconColumns className="opacity-80" />
-        </SidebarIconButton>
+        </SidebarIconButton> : null}
       </div>
     </>
   );

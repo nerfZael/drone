@@ -66,7 +66,7 @@ export function RemoteDroneHubApp() {
               <div className="text-[11px] text-[var(--muted)]">Container-only remote surface</div>
             </div>
           </div>
-          <button className="md:hidden rounded border border-[var(--border-subtle)] px-2 py-1 text-[11px] text-[var(--muted)]" onClick={() => void model.logout()}>
+          <button className="rounded border border-[var(--border-subtle)] px-2 py-1 text-[11px] text-[var(--muted)] hover:bg-[var(--hover)]" onClick={() => void model.logout()}>
             Log out
           </button>
         </div>
@@ -162,26 +162,15 @@ export function RemoteDroneHubApp() {
         onSelectChat={model.setSelectedChat}
       />
 
-      <aside className="hidden w-[300px] shrink-0 border-r border-[var(--border)] bg-[var(--sidebar)] p-3 md:flex md:flex-col">
-        <div className="mb-3 flex items-center justify-between">
-          <div>
-            <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--muted-dim)] font-semibold" style={{ fontFamily: 'var(--display)' }}>Remote</div>
-            <div className="text-[17px] font-semibold" style={{ fontFamily: 'var(--display)' }}>Drone Hub</div>
-          </div>
-          <button className="rounded border border-[var(--border-subtle)] px-2 py-1 text-[11px] text-[var(--muted)] hover:bg-[var(--hover)]" onClick={() => void model.logout()}>
-            Log out
-          </button>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <RemoteHubSidebar
-            drones={model.drones}
-            selectedDroneId={model.selectedDrone?.id ?? null}
-            activeChatName={model.selectedChat}
-            onSelectDrone={model.setSelectedDroneId}
-            onSelectChat={model.setSelectedChat}
-          />
-        </div>
-      </aside>
+      <div className="hidden md:contents">
+        <RemoteHubSidebar
+          drones={model.drones}
+          selectedDroneId={model.selectedDrone?.id ?? null}
+          activeChatName={model.selectedChat}
+          onSelectDrone={model.setSelectedDroneId}
+          onSelectChat={model.setSelectedChat}
+        />
+      </div>
 
       <section className="flex min-w-0 flex-1 flex-col">
         {model.selectedDrone ? (

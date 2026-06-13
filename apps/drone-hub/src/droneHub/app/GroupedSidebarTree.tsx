@@ -148,6 +148,7 @@ type GroupedSidebarTreeProps = {
     droneIds: string[],
     opts?: { targetGroup?: string | null },
   ) => Promise<{ ok: boolean; error?: string | null; reparentedIds?: string[]; rollbackOptimistic?: () => void }>;
+  actionsEnabled?: boolean;
 };
 
 type TreeDropPlacement = SidebarGroupDropPlacement | 'into';
@@ -395,6 +396,7 @@ const GroupedSidebarChatRow = React.memo(function GroupedSidebarChatRow({ drone,
     deletingChats,
     handleDeleteChat,
     shouldSuppressClick,
+    actionsEnabled = true,
   } = useGroupedSidebarTreeContext();
   const densityClasses = groupedSidebarDensityClasses(sidebarDensityMode);
   const chatNodeId = createCanvasChatNodeId(drone.id, chatName);
@@ -480,7 +482,7 @@ const GroupedSidebarChatRow = React.memo(function GroupedSidebarChatRow({ drone,
               : active
                 ? 'border-[rgba(255,255,255,.06)] bg-[rgba(255,255,255,.025)] text-[var(--fg-secondary)]'
                 : 'border-transparent text-[var(--muted)] hover:border-[rgba(255,255,255,.06)] hover:bg-[rgba(255,255,255,.03)] hover:text-[var(--fg-secondary)]'
-          } ${isDragging ? 'opacity-35' : ''} ${movingDroneGroups || isOptimistic ? '' : 'cursor-grab touch-none active:cursor-grabbing'}`}
+          } ${isDragging ? 'opacity-35' : ''} {!sidebarDndEnabled || movingDroneGroups || isOptimistic ? '' : 'cursor-grab touch-none active:cursor-grabbing'}`}
           title={`${uiDroneName(drone.name)} / ${chatName}`}
         >
           {active ? (
@@ -501,7 +503,7 @@ const GroupedSidebarChatRow = React.memo(function GroupedSidebarChatRow({ drone,
             </span>
           ) : null}
         </button>
-        {chatName !== 'default' ? (
+        {actionsEnabled && chatName !== 'default' ? (
           <>
             <button
               type="button"
@@ -578,6 +580,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
     dragOverTreeTarget,
     nodeTree,
     shouldSuppressClick,
+    actionsEnabled = true,
   } = useGroupedSidebarTreeContext();
   const densityClasses = groupedSidebarDensityClasses(sidebarDensityMode);
   const drone = droneById[node.droneId];
@@ -682,11 +685,11 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
             dragging={isDragging}
             dragAttributes={attributes as unknown as Record<string, unknown>}
             dragListeners={listeners as unknown as Record<string, unknown>}
-            onCreateChat={() => onOpenCreateDroneChat(drone)}
-            onClone={() => onOpenCloneModal(drone)}
-            onRename={() => onRenameDrone(drone.id)}
-            onSetBaseImage={() => onSetDroneBaseImage(drone.id)}
-            onDelete={() => onDeleteDrone(drone.id)}
+            onCreateChat={actionsEnabled ? () => onOpenCreateDroneChat(drone) : undefined}
+            onClone={actionsEnabled ? () => onOpenCloneModal(drone) : undefined}
+            onRename={actionsEnabled ? () => onRenameDrone(drone.id) : undefined}
+            onSetBaseImage={actionsEnabled ? () => onSetDroneBaseImage(drone.id) : undefined}
+            onDelete={actionsEnabled ? () => onDeleteDrone(drone.id) : undefined}
             onErrorClick={onOpenDroneErrorModal}
             cloneDisabled={
               isOptimistic ||
@@ -837,6 +840,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
     selectedGroupMultiChat,
     onDeleteGroup,
     shouldSuppressClick,
+    actionsEnabled = true,
   } = useGroupedSidebarTreeContext();
   const densityClasses = groupedSidebarDensityClasses(sidebarDensityMode);
   const folderPath = folderGroupPath(node) ?? node.path;
@@ -950,13 +954,13 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
           </button>
           <div
             className={`relative ml-2 flex flex-shrink-0 items-center justify-end transition-[min-width] duration-150 ${
-              isVirtualGroup ? 'group-hover/folder-row:min-w-[72px]' : 'group-hover/folder-row:min-w-[112px]'
+              actionsEnabled ? (isVirtualGroup ? 'group-hover/folder-row:min-w-[72px]' : 'group-hover/folder-row:min-w-[112px]') : ''
             }`}
           >
-            <div className="absolute inset-0 flex items-center justify-end pr-1 text-[10px] font-mono text-[var(--muted-dim)] transition-opacity duration-150 group-hover/folder-row:opacity-0">
+            <div className={`absolute inset-0 flex items-center justify-end pr-1 text-[10px] font-mono text-[var(--muted-dim)] transition-opacity duration-150 ${actionsEnabled ? 'group-hover/folder-row:opacity-0' : ''}`}>
               {node.totalDroneCount}
             </div>
-            <div className="absolute inset-y-0 right-0 flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover/folder-row:opacity-100">
+            {actionsEnabled ? <div className="absolute inset-y-0 right-0 flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover/folder-row:opacity-100">
               <button
                 type="button"
                 onClick={() =>
@@ -1027,7 +1031,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
               >
                 {deletingGroups[folderPath] ? <IconSpinner className="opacity-90" /> : <IconTrash className="opacity-90" />}
               </button>
-            </div>
+            </div> : null}
           </div>
         </div>
       </div>
@@ -1037,7 +1041,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
           disabled={!sidebarDndEnabled || isVirtualGroup}
           className={`${densityClasses.folderBody} ${intoState ? 'border-[var(--accent-muted)] bg-[rgba(167,139,250,.03)]' : 'border-[rgba(255,255,255,.06)]'}`}
         >
-          {showCreateInline ? (
+          {actionsEnabled && showCreateInline ? (
             <div className={`flex items-center gap-2 rounded-md border border-dashed border-[var(--accent-muted)] bg-[var(--accent-subtle)] shadow-[0_0_0_1px_rgba(167,139,250,.12)] ${densityClasses.folderCreateBody}`}>
               <IconFolder className={`${densityClasses.icon} flex-shrink-0 text-[var(--accent)] opacity-80`} />
               <input
@@ -1060,13 +1064,13 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
               />
             </div>
           ) : null}
-          {!showCreateInline && childIds.length === 0 ? (
+          {(!actionsEnabled || !showCreateInline) && childIds.length === 0 ? (
             isVirtualGroup && node.totalDroneCount === 0 ? (
               <div className={densityClasses.emptyHint}>
                 <IconFolder className={densityClasses.icon} />
                 <span className="truncate">No drones in this repo yet.</span>
               </div>
-            ) : (
+            ) : actionsEnabled ? (
               <button
                 type="button"
                 onClick={() =>
@@ -1087,6 +1091,11 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
                   {isVirtualGroup ? 'Create a top-level folder' : 'Empty folder. Create a subfolder or drop drones here.'}
                 </span>
               </button>
+            ) : (
+              <div className={densityClasses.emptyHint}>
+                <IconFolder className={densityClasses.icon} />
+                <span className="truncate">No drones in this folder.</span>
+              </div>
             )
           ) : null}
           {childIds.map((childId) => (
