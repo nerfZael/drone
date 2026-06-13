@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Drone Hub">
+  <rect width="512" height="512" rx="104" fill="#0f131d"/>
+  <path d="M128 176h256v160H128z" fill="#161d2b" stroke="#7bbcff" stroke-width="18"/>
+  <path d="M176 176v-48h160v48M176 336v48h160v-48" fill="none" stroke="#a78bfa" stroke-width="18" stroke-linecap="round"/>
+  <circle cx="176" cy="256" r="34" fill="#7bbcff"/>
+  <circle cx="336" cy="256" r="34" fill="#a78bfa"/>
+  <path d="M214 256h84" stroke="#e5e7eb" stroke-width="18" stroke-linecap="round"/>
+  <path d="M64 144h72M376 144h72M64 368h72M376 368h72" stroke="#7bbcff" stroke-width="18" stroke-linecap="round"/>
+  <circle cx="64" cy="144" r="24" fill="#a78bfa"/>
+  <circle cx="448" cy="144" r="24" fill="#a78bfa"/>
+  <circle cx="64" cy="368" r="24" fill="#7bbcff"/>
+  <circle cx="448" cy="368" r="24" fill="#7bbcff"/>
+</svg>

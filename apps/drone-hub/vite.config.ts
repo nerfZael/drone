@@ -8,6 +8,7 @@ const sourcemapEnabled = String(process.env.DRONE_HUB_SOURCEMAP ?? '').trim() ==
 
 export default defineConfig({
   plugins: [react()],
+  publicDir: 'pwa',
   resolve: {
     dedupe: ['react', 'react-dom'],
   },
