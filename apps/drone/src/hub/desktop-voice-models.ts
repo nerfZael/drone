@@ -5,6 +5,7 @@ import path from 'node:path';
 
 import { droneRootPath } from '../host/paths';
 import { updateRegistry } from '../host/registry';
+import { readRegistryJsonFromSqlite } from '../host/sqlite-registry-store';
 
 export type DesktopVoiceModelInstallState = 'missing' | 'installed' | 'installing' | 'error';
 
@@ -116,7 +117,7 @@ function modelDirForEntry(entry: DesktopVoiceModelCatalogEntry): string | null {
 
 function readSelectedModelIdSync(): string {
   try {
-    const raw = fsSync.readFileSync(droneRootPath('registry.json'), 'utf8');
+    const raw = readRegistryJsonFromSqlite() ?? fsSync.readFileSync(droneRootPath('registry.json'), 'utf8');
     const parsed = JSON.parse(raw);
     const modelId = String(parsed?.settings?.desktopVoice?.modelId ?? '').trim();
     return catalogEntry(modelId) ? modelId : DEFAULT_MODEL_ID;

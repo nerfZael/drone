@@ -34,6 +34,7 @@ import {
   writeActiveProfileName,
 } from './host/profiles';
 import { loadRegistry, registryHasDisplayName, updateRegistry } from './host/registry';
+import { readRegistryJsonFromSqlitePath } from './host/sqlite-registry-store';
 import {
   hostDroneDaemonDataPath,
   hostDroneDaemonLogPath,
@@ -52,6 +53,7 @@ import { ensureHubSetupState } from './host/setup-state';
 import { resolveDetachedCliLaunchSpec } from './hub/hub-launch';
 import { parseHubRunnerProcessesFromPsOutput, selectHubRunnerPidsToStop } from './hub/orphan-hub-runners';
 import { startDroneHubApiServer } from './hub/server';
+import { importTranscriptTurnsFromRegistry } from './hub/transcript-store';
 import {
   resolveEffectiveVoiceTranscriptionSettings,
   resolveGroqApiKeySettings,
@@ -300,8 +302,11 @@ async function recordChatTurn(opts: {
   promptAt?: string;
   completedAt?: string;
 }): Promise<void> {
+  let syncedDroneId = '';
+  let syncedTurns: any[] | null = null;
   await updateRegistry((reg) => {
     const { key, drone: d } = resolveDroneFromRegistry(reg as any, opts.droneName);
+    syncedDroneId = String((d as any)?.id ?? key ?? opts.droneName).trim() || opts.droneName;
     d.chats = d.chats ?? {};
     d.chats[opts.chatName] = d.chats[opts.chatName] ?? { chatId: '', createdAt: new Date().toISOString() };
     const entry: any = d.chats[opts.chatName];
@@ -318,7 +323,11 @@ async function recordChatTurn(opts: {
     });
     d.chats[opts.chatName] = entry;
     (reg as any).drones[key] = d;
+    syncedTurns = entry.turns;
   });
+  if (syncedDroneId && syncedTurns) {
+    importTranscriptTurnsFromRegistry({ droneId: syncedDroneId, chatName: opts.chatName, turns: syncedTurns });
+  }
 }
 
 async function followOutput(opts: {
@@ -793,7 +802,7 @@ async function stopHubAtRootIfRunning(rootDir: string): Promise<boolean> {
 
 async function readRegistrySnapshotAtRoot(rootDir: string): Promise<any> {
   try {
-    const raw = await fs.readFile(path.join(rootDir, 'registry.json'), 'utf8');
+    const raw = readRegistryJsonFromSqlitePath(path.join(rootDir, 'hub.sqlite')) ?? (await fs.readFile(path.join(rootDir, 'registry.json'), 'utf8'));
     const parsed = JSON.parse(raw);
     return parsed && typeof parsed === 'object' ? parsed : null;
   } catch {
@@ -2010,6 +2019,8 @@ async function hubRun(options: any) {
           ...process.env,
           DRONE_HUB_API_PORT: String(api.port),
           DRONE_HUB_API_TOKEN: apiToken,
+          VITE_DRONE_HUB_DIRECT_API_BASE: `http://127.0.0.1:${api.port}`,
+          VITE_DRONE_HUB_DIRECT_API_TOKEN: apiToken,
           ...(activeProfile ? { VITE_DRONE_PROFILE_ID: activeProfile } : {}),
         },
       })

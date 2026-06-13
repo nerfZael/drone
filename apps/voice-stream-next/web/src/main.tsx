@@ -169,6 +169,8 @@ const assistantFieldLabelClass = 'grid gap-1.5 text-[10px] font-extrabold upperc
 const assistantRowClass = 'rounded-[7px] border border-[var(--border-subtle)] bg-white/[.025] text-[var(--fg-secondary)]';
 const assistantSkillBadgeClass =
   'inline-flex max-w-[130px] items-center rounded border border-[rgba(74,222,128,.22)] bg-[rgba(74,222,128,.07)] px-1.5 py-0.5 font-display text-[9px] font-semibold uppercase leading-none text-[var(--green)]';
+const assistantProfileBadgeClass =
+  'inline-flex max-w-[130px] items-center rounded border border-[rgba(96,165,250,.24)] bg-[rgba(96,165,250,.08)] px-1.5 py-0.5 font-display text-[9px] font-semibold uppercase leading-none text-[#93c5fd]';
 const ASSISTANT_MESSAGES_BOTTOM_THRESHOLD_PX = 1;
 const COMPACT_VIEWPORT_QUERY = '(max-width: 880px)';
 
@@ -372,6 +374,14 @@ function profileDraftFromAssistantProfile(profile: AssistantProfile): AssistantP
     enabledTools: profile.enabledTools ? [...profile.enabledTools] : null,
     defaultHandsFreeMode: profile.defaultHandsFreeMode,
   };
+}
+
+function assistantProfileForThread(thread: Pick<AssistantThread, 'assistantProfileId'> | null | undefined, profiles: AssistantProfile[]): AssistantProfile | null {
+  if (!thread) return null;
+  return profiles.find((profile) => profile.id === thread.assistantProfileId) ??
+    profiles.find((profile) => profile.enabled) ??
+    profiles[0] ??
+    null;
 }
 
 function assistantProfilePayloadFromDraft(draft: AssistantProfileDraft): Record<string, unknown> {
@@ -3304,6 +3314,8 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
             const loadedSkills = (thread as AssistantThreadView).loadedSkills ?? [];
             const workspaceTarget = ((thread as AssistantThreadView).executionTargets ?? []).find((target) => target.slot === 'workspace') ?? null;
             const workspaceTargetState = workspaceTargetMeta(workspaceTarget);
+            const threadAssistantProfile = assistantProfileForThread(thread, assistantProfiles);
+            const threadAssistantProfileLabel = threadAssistantProfile?.name ?? 'Assistant profile';
             return (
               <div
                 key={thread.id}
@@ -3330,8 +3342,13 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                     {messageCount ? ` · ${messageCount}` : ''}
                     {queuedCount ? ` · ${queuedCount} queued` : ''}
                   </small>
-                  {loadedSkills.length > 0 || workspaceTarget ? (
+                  {threadAssistantProfile || loadedSkills.length > 0 || workspaceTarget ? (
                     <span className="flex min-w-0 flex-wrap gap-1 pr-1">
+                      {threadAssistantProfile ? (
+                        <span className={assistantProfileBadgeClass} title={`Assistant profile: ${threadAssistantProfileLabel}`}>
+                          <span className="truncate">{threadAssistantProfileLabel}</span>
+                        </span>
+                      ) : null}
                       {workspaceTarget ? (
                         <span className={workspaceTargetState.className} title={`Workspace target: ${workspaceTargetState.label}`}>
                           <span className="truncate">Workspace: {workspaceTargetState.label}</span>

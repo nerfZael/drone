@@ -23,6 +23,7 @@
     "clean": "rimraf dist",
     "dev": "ts-node src/cli.ts",
     "test": "bun test --timeout 20000 --max-concurrency 1 tests",
+    "test:node": "bun run build && node --test tests/node/*.test.cjs",
     "test:coverage": "bun test --timeout 20000 --max-concurrency 1 --coverage tests",
     "test:auto-continue-eval": "bun test ./evals/agent-message-auto-continue.eval.ts",
     "test:agent-suggestion-eval": "bun test ./evals/agent-suggestion.eval.ts",
@@ -36,6 +37,7 @@
     "@mariozechner/pi-agent-core": "workspace:*",
     "@mariozechner/pi-ai": "workspace:*",
     "ai": "^6.0.77",
+    "better-sqlite3": "^12.10.0",
     "commander": "^12.1.0",
     "dotenv": "^17.2.4",
     "dvm": "workspace:*",
@@ -46,6 +48,7 @@
     "vosk": "^0.3.39"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.7.4",
     "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^8.8.1",

@@ -20,6 +20,7 @@ import {
 import { dvmRemove } from './dvm';
 import { normalizeDroneRuntime } from './runtime';
 import { clearWelcomeDismissedAtForScope, resolveHubSetupScopeKey } from './setup-state';
+import { readRegistryJsonFromSqlitePath } from './sqlite-registry-store';
 
 export type HubLaunchEnvSnapshot = {
   llmProvider: 'openai' | 'gemini' | null;
@@ -336,7 +337,7 @@ async function stopHubAtRootIfRunning(rootDir: string): Promise<boolean> {
 
 async function readRegistrySnapshotAtRoot(rootDir: string): Promise<any> {
   try {
-    const raw = await fs.readFile(path.join(rootDir, 'registry.json'), 'utf8');
+    const raw = readRegistryJsonFromSqlitePath(path.join(rootDir, 'hub.sqlite')) ?? (await fs.readFile(path.join(rootDir, 'registry.json'), 'utf8'));
     const parsed = JSON.parse(raw);
     return parsed && typeof parsed === 'object' ? parsed : null;
   } catch {

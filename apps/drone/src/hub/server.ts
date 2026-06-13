@@ -82,6 +82,15 @@ import {
 } from './agent-message-auto-continue';
 import { suggestReplyToAgentMessage } from './agent-suggestion';
 import { resolveTranscriptPromptAt } from './transcript-order';
+import {
+  importChatFromRegistry,
+  importDroneChatsFromRegistry,
+  importTranscriptTurnsFromRegistry,
+  listChatsFromStore,
+  readChatFromStore,
+  readTranscriptTurnsFromStore,
+  transcriptTurnsSourceHash,
+} from './transcript-store';
 import { extractAgentCopilotFromAgentMessage, type AgentCopilotRequest } from './agent-copilot-parser';
 import { cloneChatEntryForDroneClone, maybeBootstrapPromptFromTranscript } from './chat-clone';
 import {
@@ -576,6 +585,10 @@ function json(res: http.ServerResponse, status: number, body: any) {
   res.end(data);
 }
 
+function stableResponseFingerprint(value: unknown): string {
+  return crypto.createHash('sha256').update(JSON.stringify(value ?? null), 'utf8').digest('base64url');
+}
+
 function jsonWithEtag(req: http.IncomingMessage, res: http.ServerResponse, status: number, body: any) {
   const data = JSON.stringify(body, null, 2);
   const etag = `"sha256-${crypto.createHash('sha256').update(data).digest('base64url')}"`;
@@ -593,6 +606,59 @@ function jsonWithEtag(req: http.IncomingMessage, res: http.ServerResponse, statu
   res.statusCode = status;
   res.setHeader('content-type', 'application/json; charset=utf-8');
   res.end(data);
+}
+
+function jsonWithKnownEtag(req: http.IncomingMessage, res: http.ServerResponse, status: number, body: any, etag: string) {
+  const safeEtag = etag.startsWith('"') ? etag : `"${etag.replace(/"/g, '')}"`;
+  res.setHeader('etag', safeEtag);
+  res.setHeader('cache-control', 'no-store');
+  if (status === 200) {
+    const ifNoneMatch = String(req.headers['if-none-match'] ?? '');
+    const requestedEtags = ifNoneMatch.split(',').map((item) => item.trim());
+    if (requestedEtags.includes(safeEtag) || requestedEtags.includes('*')) {
+      res.statusCode = 304;
+      res.end();
+      return;
+    }
+  }
+  const data = JSON.stringify(body, null, 2);
+  res.statusCode = status;
+  res.setHeader('content-type', 'application/json; charset=utf-8');
+  res.end(data);
+}
+
+function createRequestTimer() {
+  const start = process.hrtime.bigint();
+  let last = start;
+  const items: Array<{ name: string; dur: number }> = [];
+  return {
+    mark(name: string) {
+      const now = process.hrtime.bigint();
+      items.push({ name, dur: Number(now - last) / 1_000_000 });
+      last = now;
+    },
+    total(): number {
+      return Number(process.hrtime.bigint() - start) / 1_000_000;
+    },
+    setHeader(res: http.ServerResponse) {
+      if (res.headersSent || items.length === 0) return;
+      const total = Number(process.hrtime.bigint() - start) / 1_000_000;
+      const header = [
+        ...items.map((item) => `${item.name};dur=${Math.max(0, item.dur).toFixed(1)}`),
+        `total;dur=${Math.max(0, total).toFixed(1)}`,
+      ].join(', ');
+      res.setHeader('server-timing', header);
+    },
+  };
+}
+
+function logSlowHubRequest(label: string, timer: ReturnType<typeof createRequestTimer>, meta?: Record<string, unknown>) {
+  const totalMs = timer.total();
+  if (totalMs < 250) return;
+  hubLog('warn', `slow ${label} request`, {
+    ...(meta ?? {}),
+    durationMs: Math.round(totalMs),
+  });
 }
 
 async function readManagedHubStateAtRoot(rootDir: string): Promise<ManagedHubState> {
@@ -8475,6 +8541,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
       regLatest.drones = regLatest.drones ?? {};
       regLatest.drones[droneId] = dLatest;
     });
+    importTranscriptTurnsFromRegistry({ droneId, chatName, turns });
 
     // Best-effort: session ids may have been established (codexThreadId/openCodeSessionId/piSessionId)
     // or a prior prompt may have completed/failed, unblocking queued follow-ups.
@@ -10252,10 +10319,13 @@ async function ensureHubSessionRunning(opts: {
 async function ensureChatEntry(opts: { droneId: string; chatName: string }): Promise<void> {
   const autoContinueEnabledByDefault = (await resolveEffectiveAgentMessageAutoContinueSettings()).enabledByDefault;
   const agentSuggestionEnabledByDefault = (await resolveEffectiveAgentSuggestionSettings()).enabledByDefault;
+  let syncedDroneId = '';
+  let syncedChats: any = null;
   await updateRegistry((reg: any) => {
     const droneId = normalizeDroneIdentity(opts.droneId);
     const d = droneId ? reg?.drones?.[droneId] : null;
     if (!d) throw new Error(`unknown drone: ${opts.droneId}`);
+    syncedDroneId = droneId;
     d.chats = d.chats ?? {};
     if (!d.chats[opts.chatName]) {
       // Fleet-created drones default to Codex; other drones keep Cursor.
@@ -10269,7 +10339,9 @@ async function ensureChatEntry(opts: { droneId: string; chatName: string }): Pro
       reg.drones = reg.drones ?? {};
       reg.drones[droneId] = d;
     }
+    syncedChats = d.chats;
   });
+  if (syncedDroneId && syncedChats) importDroneChatsFromRegistry({ droneId: syncedDroneId, chats: syncedChats });
 }
 
 async function ensureChatEntryCopiedFromChat(opts: {
@@ -10279,14 +10351,20 @@ async function ensureChatEntryCopiedFromChat(opts: {
 }): Promise<void> {
   const autoContinueEnabledByDefault = (await resolveEffectiveAgentMessageAutoContinueSettings()).enabledByDefault;
   const agentSuggestionEnabledByDefault = (await resolveEffectiveAgentSuggestionSettings()).enabledByDefault;
+  let syncedDroneId = '';
+  let syncedChats: any = null;
   await updateRegistry((reg: any) => {
     const droneId = normalizeDroneIdentity(opts.droneId);
     const chatName = parseChatNameForMutation(opts.chatName, 'chat name');
     const copyFromChatName = normalizeChatName(opts.copyFromChatName);
     const d = droneId ? reg?.drones?.[droneId] : null;
     if (!d) throw new Error(`unknown drone: ${opts.droneId}`);
+    syncedDroneId = droneId;
     d.chats = d.chats ?? {};
-    if (d.chats[chatName]) return;
+    if (d.chats[chatName]) {
+      syncedChats = d.chats;
+      return;
+    }
     const createdAt = nowIso();
     if (copyFromChatName && !d.chats[copyFromChatName]) {
       if (copyFromChatName === 'default' && Object.keys(d.chats).length === 0) {
@@ -10320,7 +10398,9 @@ async function ensureChatEntryCopiedFromChat(opts: {
     d.chats[chatName] = entry;
     reg.drones = reg.drones ?? {};
     reg.drones[droneId] = d;
+    syncedChats = d.chats;
   });
+  if (syncedDroneId && syncedChats) importDroneChatsFromRegistry({ droneId: syncedDroneId, chats: syncedChats });
 }
 
 function inferChatAgent(entry: any, droneEntry?: any): ChatAgentConfig {
@@ -10348,6 +10428,19 @@ async function getChatEntry(opts: { droneId: string; chatName: string }) {
   return { reg, d, chat, droneId };
 }
 
+function importResolvedDroneChatsToStore(droneId: string, droneEntry: any): string[] {
+  const chats = droneEntry?.chats && typeof droneEntry.chats === 'object' ? droneEntry.chats : {};
+  const imported = importDroneChatsFromRegistry({ droneId, chats });
+  if (imported.available) return imported.chats;
+  return Object.keys(chats);
+}
+
+function importResolvedChatToStore(droneId: string, chatName: string, chatEntry: any): any {
+  importChatFromRegistry({ droneId, chatName, chatEntry });
+  const read = readChatFromStore({ droneId, chatName });
+  return read.available ? read.chat : chatEntry;
+}
+
 async function setChatAgentConfig(opts: {
   droneId: string;
   chatName: string;
@@ -10359,10 +10452,15 @@ async function setChatAgentConfig(opts: {
   setAgentSuggestionEnabled?: boolean;
   agentSuggestionEnabled?: boolean;
 }) {
+  let syncedDroneId = '';
+  let syncedChatName = '';
+  let syncedChat: any = null;
   await updateRegistry((reg: any) => {
     const droneId = normalizeDroneIdentity(opts.droneId);
     const d = droneId ? reg?.drones?.[droneId] : null;
     if (!d) throw new Error(`unknown drone: ${opts.droneId}`);
+    syncedDroneId = droneId;
+    syncedChatName = opts.chatName;
     d.chats = d.chats ?? {};
     const cur = d.chats?.[opts.chatName];
     if (!cur) throw new Error(`unknown chat: ${opts.chatName}`);
@@ -10414,7 +10512,11 @@ async function setChatAgentConfig(opts: {
     d.chats[opts.chatName] = cur;
     reg.drones = reg.drones ?? {};
     reg.drones[droneId] = d;
+    syncedChat = cur;
   });
+  if (syncedDroneId && syncedChatName && syncedChat) {
+    importChatFromRegistry({ droneId: syncedDroneId, chatName: syncedChatName, chatEntry: syncedChat });
+  }
 }
 
 async function resolveChatTmuxCommand(opts: { droneId: string; chatName: string }): Promise<string> {
@@ -10675,9 +10777,12 @@ async function recordTranscriptTurn(opts: {
   turn: { at: string; id?: string; prompt: string; ok: boolean; output: string; error?: string };
   agentPatch?: Partial<{ codexThreadId: string; claudeSessionId: string; openCodeSessionId: string; piSessionId: string }>;
 }): Promise<void> {
+  let syncedDroneId = '';
+  let syncedTurns: any[] | null = null;
   await updateRegistry((reg: any) => {
     const d = reg?.drones?.[opts.droneName];
     if (!d) throw new Error(`unknown drone: ${opts.droneName}`);
+    syncedDroneId = String(d?.id ?? opts.droneName).trim() || opts.droneName;
     d.chats = d.chats ?? {};
     const chat = d.chats?.[opts.chatName];
     if (!chat) throw new Error(`unknown chat: ${opts.chatName}`);
@@ -10698,7 +10803,11 @@ async function recordTranscriptTurn(opts: {
     d.chats[opts.chatName] = chat;
     reg.drones = reg.drones ?? {};
     reg.drones[opts.droneName] = d;
+    syncedTurns = chat.turns;
   });
+  if (syncedDroneId && syncedTurns) {
+    importTranscriptTurnsFromRegistry({ droneId: syncedDroneId, chatName: opts.chatName, turns: syncedTurns });
+  }
 }
 
 async function updateTranscriptTurnById(opts: {
@@ -10708,6 +10817,7 @@ async function updateTranscriptTurnById(opts: {
   update: (turn: TranscriptTurn) => TranscriptTurn;
 }): Promise<boolean> {
   let changed = false;
+  let syncedTurns: TranscriptTurn[] | null = null;
   await updateRegistry((reg: any) => {
     const droneId = normalizeDroneIdentity(opts.droneId);
     const chatName = normalizeChatName(opts.chatName);
@@ -10719,8 +10829,16 @@ async function updateTranscriptTurnById(opts: {
     if (!current) return;
     turns[index] = opts.update(current);
     chat.turns = turns;
+    syncedTurns = turns;
     changed = true;
   });
+  if (changed && syncedTurns) {
+    importTranscriptTurnsFromRegistry({
+      droneId: normalizeDroneIdentity(opts.droneId),
+      chatName: normalizeChatName(opts.chatName),
+      turns: syncedTurns,
+    });
+  }
   return changed;
 }
 
@@ -22493,15 +22611,22 @@ export async function startDroneHubApiServer(opts: {
       ) {
         const droneRef = decodeURIComponent(parts[2]);
         const chatName = normalizeChatName(decodeURIComponent(parts[4]));
+        const timer = createRequestTimer();
         try {
           const resolved = await resolveDroneOrPendingForReadRef(droneRef);
+          timer.mark('resolve');
           if (!resolved) {
+            timer.setHeader(res);
+            logSlowHubRequest('chat pending', timer, { droneRef, chatName, status: 404 });
             json(res, 404, { ok: false, error: `unknown drone: ${droneRef}` });
             return;
           }
           if (resolved.kind === 'pending') {
             const droneName = String(resolved.pending?.name ?? droneRef).trim() || droneRef;
             const pendingList = await readPendingStartupPrompts({ droneId: resolved.id, chatName });
+            timer.mark('read');
+            timer.setHeader(res);
+            logSlowHubRequest('chat pending', timer, { droneId: resolved.id, chatName, kind: 'pending', status: 200 });
             json(res, 200, { ok: true, id: resolved.id, name: droneName, chat: chatName, pending: pendingList });
             return;
           }
@@ -22509,19 +22634,30 @@ export async function startDroneHubApiServer(opts: {
           const droneId = real.id;
           const drone = real.drone;
           const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
-          await ensureChatEntry({ droneId, chatName });
-          const reg = await loadRegistry();
-          const entry = (reg as any)?.drones?.[droneId]?.chats?.[chatName] ?? null;
+          const registryEntry = (drone as any)?.chats?.[chatName] ?? null;
+          if (!registryEntry) {
+            timer.setHeader(res);
+            logSlowHubRequest('chat pending', timer, { droneId, chatName, status: 404 });
+            json(res, 404, { ok: false, error: `unknown chat: ${chatName}` });
+            return;
+          }
+          const entry = importResolvedChatToStore(droneId, chatName, registryEntry) ?? registryEntry;
+          timer.mark('import');
           if (chatHasReconcilablePendingPrompts(entry)) {
             ensureDaemonPromptEventSubscription(droneId);
             enqueueReconcile(droneId, chatName);
           }
           const list = pendingPromptsFromChatEntry(entry, { keepRecentlyCompleted: true }).slice(-50);
+          timer.mark('format');
+          timer.setHeader(res);
+          logSlowHubRequest('chat pending', timer, { droneId, chatName, status: 200 });
           json(res, 200, { ok: true, id: droneId, name: droneName, chat: chatName, pending: list });
           return;
         } catch (e: any) {
           const msg = e?.message ?? String(e);
           const code = /still starting/i.test(msg) ? 409 : /unknown drone/i.test(msg) ? 404 : 500;
+          timer.setHeader(res);
+          logSlowHubRequest('chat pending', timer, { droneRef, chatName, status: code, error: msg });
           json(res, code, { ok: false, error: msg });
           return;
         }
@@ -23229,8 +23365,10 @@ export async function startDroneHubApiServer(opts: {
         if (!resolved) return;
         const droneId = resolved.id;
         const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
-        const chats = (resolved.drone as any)?.chats ?? {};
-        json(res, 200, { ok: true, id: droneId, name: droneName, chats: Object.keys(chats) });
+        const importedChats = importResolvedDroneChatsToStore(droneId, resolved.drone);
+        const storeChats = listChatsFromStore({ droneId });
+        const chats = storeChats.available ? storeChats.chats : importedChats;
+        json(res, 200, { ok: true, id: droneId, name: droneName, chats });
         return;
       }
 
@@ -23247,19 +23385,20 @@ export async function startDroneHubApiServer(opts: {
           json(res, 404, { ok: false, error: `unknown chat: ${chatName}` });
           return;
         }
-        const agent = inferChatAgent(c as any, resolved.drone);
+        const chatEntry = importResolvedChatToStore(droneId, chatName, c) ?? c;
+        const agent = inferChatAgent(chatEntry as any, resolved.drone);
         json(res, 200, {
           ok: true,
           id: droneId,
           name: droneName,
           chat: chatName,
           agent,
-          model: (c as any).model ?? null,
-          agentMessageAutoContinueEnabled: (c as any).agentMessageAutoContinueEnabled === true,
-          agentSuggestionEnabled: (c as any).agentSuggestionEnabled === true,
-          turns: (c as any).turns ?? [],
+          model: (chatEntry as any).model ?? null,
+          agentMessageAutoContinueEnabled: (chatEntry as any).agentMessageAutoContinueEnabled === true,
+          agentSuggestionEnabled: (chatEntry as any).agentSuggestionEnabled === true,
+          turns: (chatEntry as any).turns ?? [],
           sessionName: hubChatSessionName(chatName || 'default'),
-          createdAt: c.createdAt,
+          createdAt: chatEntry.createdAt,
         });
         return;
       }
@@ -23466,34 +23605,45 @@ export async function startDroneHubApiServer(opts: {
       ) {
         const droneRef = decodeURIComponent(parts[2]);
         const chatName = decodeURIComponent(parts[4]) || 'default';
+        const timer = createRequestTimer();
         try {
           const resolved = await resolveDroneOrPendingForReadRef(droneRef);
+          timer.mark('resolve');
           if (!resolved) {
+            timer.setHeader(res);
+            logSlowHubRequest('chat transcript', timer, { droneRef, chatName, status: 404 });
             json(res, 404, { ok: false, error: `unknown drone: ${droneRef}` });
             return;
           }
           if (resolved.kind === 'pending') {
             const droneName = String(resolved.pending?.name ?? droneRef).trim() || droneRef;
             const sel = u.searchParams.get('turn') ?? 'last';
+            timer.mark('format');
+            timer.setHeader(res);
+            logSlowHubRequest('chat transcript', timer, { droneId: resolved.id, chatName, kind: 'pending', status: 200 });
             jsonWithEtag(req, res, 200, { ok: true, id: resolved.id, name: droneName, chat: chatName, selection: sel, transcripts: [] });
             return;
           }
           const droneId = resolved.id;
           const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
-          await ensureChatEntry({ droneId, chatName });
-          const reg = await loadRegistry();
-          const d = (reg as any).drones?.[droneId] ?? null;
+          const d = resolved.drone;
           if (!d) {
+            timer.setHeader(res);
+            logSlowHubRequest('chat transcript', timer, { droneId, chatName, status: 404 });
             json(res, 404, { ok: false, error: `unknown drone: ${droneId}` });
             return;
           }
           const c = d.chats?.[chatName];
           if (!c) {
+            timer.setHeader(res);
+            logSlowHubRequest('chat transcript', timer, { droneId, chatName, status: 404 });
             json(res, 404, { ok: false, error: `unknown chat: ${chatName}` });
             return;
           }
           const agent = inferChatAgent(c as any, d);
           if (agent.kind === 'custom') {
+            timer.setHeader(res);
+            logSlowHubRequest('chat transcript', timer, { droneId, chatName, status: 410 });
             json(res, 410, {
               ok: false,
               error: 'transcript is only available for builtin agents (cursor/codex/claude/opencode/pi). Use /output for custom agents.',
@@ -23508,6 +23658,9 @@ export async function startDroneHubApiServer(opts: {
 
           const turns = (c as any).turns as TranscriptTurn[] | undefined;
           const rawList = Array.isArray(turns) ? turns : [];
+          const sourceHash = transcriptTurnsSourceHash(rawList);
+          const imported = importTranscriptTurnsFromRegistry({ droneId, chatName, turns: rawList, sourceHash });
+          timer.mark('import');
           // Sort by prompt time (promptAt/at) so "last" means most recent chronologically,
           // even if reconciliation appends older completions later.
           const list = rawList
@@ -23525,10 +23678,31 @@ export async function startDroneHubApiServer(opts: {
             .map((x) => x.t);
           const sel = u.searchParams.get('turn') ?? 'last';
           const idxs = parseTurnSelection(sel, list.length, u.searchParams.get('tail'));
+          const etagSeed = stableResponseFingerprint({
+            droneId,
+            droneName,
+            chatName,
+            selection: sel,
+            tail: u.searchParams.get('tail') ?? '',
+            sourceHash,
+            transcriptVersion: imported.transcriptVersion,
+            agent,
+          });
+          const etag = `"transcript-${etagSeed}"`;
+          timer.mark('etag');
+
+          const storeRead = imported.available
+            ? readTranscriptTurnsFromStore({ droneId, chatName, indexes: idxs })
+            : { available: false as const, turns: [] };
+          timer.mark('store');
+          const selectedTurns = storeRead.available
+            ? storeRead.turns.map((item) => ({ i: item.index, t: item.turn as any }))
+            : idxs.map((i) => ({ i, t: list[i] as any }));
 
           const transcripts: any[] = [];
-          for (const i of idxs) {
-            const t: any = list[i];
+          for (const item of selectedTurns) {
+            const i = item.i;
+            const t: any = item.t;
             const at = String(t?.at ?? new Date().toISOString());
             const promptAt = typeof t?.promptAt === 'string' && t.promptAt.trim() ? String(t.promptAt).trim() : undefined;
             const completedAt =
@@ -23561,9 +23735,14 @@ export async function startDroneHubApiServer(opts: {
             });
           }
 
-          jsonWithEtag(req, res, 200, { ok: true, id: droneId, name: droneName, chat: chatName, selection: sel, transcripts, agent });
+          timer.mark('format');
+          timer.setHeader(res);
+          logSlowHubRequest('chat transcript', timer, { droneId, chatName, selection: sel, turnCount: rawList.length, status: 200 });
+          jsonWithKnownEtag(req, res, 200, { ok: true, id: droneId, name: droneName, chat: chatName, selection: sel, transcripts, agent }, etag);
           return;
         } catch (e: any) {
+          timer.setHeader(res);
+          logSlowHubRequest('chat transcript', timer, { droneRef, chatName, status: 500, error: e?.message ?? String(e) });
           json(res, 500, { ok: false, error: e?.message ?? String(e) });
           return;
         }

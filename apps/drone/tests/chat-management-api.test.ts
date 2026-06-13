@@ -442,6 +442,61 @@ describeSocketSuite('chat management api', () => {
     expect(String(after.data?.transcripts?.[0]?.agentSuggestion?.suggestionHash ?? '')).toHaveLength(24);
   });
 
+  test('returns conditional transcript reads as 304 when unchanged', async () => {
+    const droneId = 'drone-chat-transcript-etag';
+    await seedDrone(droneId);
+
+    const completedAt = new Date().toISOString();
+    await updateRegistry((reg: any) => {
+      const entry = reg?.drones?.[droneId]?.chats?.default;
+      if (!entry) throw new Error('missing seeded chat entry');
+      entry.turns = [
+        {
+          id: 'prompt-1',
+          at: completedAt,
+          promptAt: completedAt,
+          completedAt,
+          prompt: 'hello',
+          ok: true,
+          output: 'done',
+        },
+      ];
+    });
+
+    const first = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/transcript?turn=all`);
+    expect(first.r.status).toBe(200);
+    const etag = first.r.headers.get('etag');
+    expect(etag).toMatch(/^"transcript-/);
+
+    const second = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/transcript?turn=all`, {
+      headers: { 'if-none-match': etag ?? '' },
+    });
+    expect(second.r.status).toBe(304);
+    expect(second.data).toBeNull();
+  });
+
+  test('transcript reads do not create missing chats', async () => {
+    const droneId = 'drone-chat-transcript-read-only';
+    await seedDrone(droneId);
+
+    const missing = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/review/transcript?turn=all`);
+    expect(missing.r.status).toBe(404);
+
+    const reg: any = await loadRegistry();
+    expect(reg?.drones?.[droneId]?.chats?.review).toBeUndefined();
+  });
+
+  test('pending reads do not create missing chats', async () => {
+    const droneId = 'drone-chat-pending-read-only';
+    await seedDrone(droneId);
+
+    const missing = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/review/pending`);
+    expect(missing.r.status).toBe(404);
+
+    const reg: any = await loadRegistry();
+    expect(reg?.drones?.[droneId]?.chats?.review).toBeUndefined();
+  });
+
   test('archives chats when delete mode is archive and supports restore/delete-now', async () => {
     const droneId = 'drone-chat-archive';
     await seedDrone(droneId);

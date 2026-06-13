@@ -52,7 +52,11 @@
     "regression": "bun run build && bun run smoke && bun run test"
   },
   "devDependencies": {
+    "lru-cache": "^11.1.0",
     "turbo": "^2.0.0"
   },
+  "trustedDependencies": [
+    "better-sqlite3"
+  ],
   "packageManager": "bun@1.2.23"
 }
