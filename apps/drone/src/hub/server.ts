@@ -176,6 +176,8 @@ import {
 import { isHubApiAuthorized, isHubApiAuthorizedForWebSocket, rejectWebSocketUpgrade } from './hub-auth';
 import { bashQuote, encodeRemotePath, hexEncodeUtf8, normalizeContainerPath, parseBoolParam, shellQuoteIfNeeded } from './hub-format';
 import { readJsonBody, readRawBody, withCors } from './hub-http';
+import { pidIsRunning as remotePidIsRunning, readRemoteHubState } from './remote-state';
+import { createRemoteHubPairing, redactRemoteHubState, startRemoteHubDetached, stopRemoteHubDetached } from './remote-control';
 import { GROQ_TRANSCRIPTION_MAX_BYTES, transcribeAudioWithGroq } from './groq-transcription';
 import { buildGroqTtsConfig, synthesizeTextWavWithGroq } from './groq-tts';
 import { DesktopVoiceService } from './desktop-voice-service';
@@ -13252,6 +13254,58 @@ export async function startDroneHubApiServer(opts: {
           const message = e?.message ?? String(e);
           const status = /too large/i.test(message) ? 413 : /GROQ API key is not configured/i.test(message) ? 400 : 502;
           json(res, status, { ok: false, error: message });
+        }
+        return;
+      }
+
+      if (pathname === '/api/remote-access/status' && method === 'GET') {
+        const remoteState = await readRemoteHubState();
+        const running = Boolean(remoteState && remotePidIsRunning(remoteState.pid));
+        json(res, 200, {
+          ok: true,
+          running,
+          state: running && remoteState ? redactRemoteHubState(remoteState) : null,
+        });
+        return;
+      }
+
+      if (pathname === '/api/remote-access/start' && method === 'POST') {
+        try {
+          const body = await readJsonBody(req);
+          const result = await startRemoteHubDetached({
+            port: body?.port ?? 8790,
+            host: body?.host ?? '127.0.0.1',
+            publicUrl: body?.publicUrl ?? null,
+            cliFilename: process.argv[1],
+            force: body?.force === true,
+          });
+          json(res, 200, { ok: true, ...result });
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+        }
+        return;
+      }
+
+      if (pathname === '/api/remote-access/stop' && method === 'POST') {
+        try {
+          const result = await stopRemoteHubDetached();
+          json(res, 200, { ok: true, ...result });
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+        }
+        return;
+      }
+
+      if (pathname === '/api/remote-access/pairing' && method === 'POST') {
+        const remoteState = await readRemoteHubState();
+        if (!remoteState || !remotePidIsRunning(remoteState.pid)) {
+          json(res, 409, { ok: false, error: 'remote Hub is not running' });
+          return;
+        }
+        try {
+          json(res, 200, await createRemoteHubPairing(remoteState));
+        } catch (e: any) {
+          json(res, 502, { ok: false, error: e?.message ?? String(e) });
         }
         return;
       }

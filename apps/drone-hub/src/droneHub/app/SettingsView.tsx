@@ -5,6 +5,7 @@ import { ArchiveSettingsTab } from './ArchiveSettingsTab';
 import { GeneralSettingsTab } from './GeneralSettingsTab';
 import { PlaybookSettingsSection } from './PlaybookSettingsSection';
 import { ProfilesSettingsTab } from './ProfilesSettingsTab';
+import { RemoteAccessSettingsTab } from './RemoteAccessSettingsTab';
 import { ShortcutSettingsSection } from './ShortcutSettingsSection';
 import { SkillLibrarySection } from './SkillLibrarySection';
 import { SyncSettingsTab } from './SyncSettingsTab';
@@ -191,6 +192,7 @@ export function SettingsView({
         />
       );
     }
+    if (activeTab === 'remote') return <RemoteAccessSettingsTab requestJson={requestJson} />;
     if (activeTab === 'sync') return <SyncSettingsTab syncSets={syncSets} />;
     if (activeTab === 'voice') return <VoiceApprovalSettingsTab voiceApproval={voiceApproval} />;
     if (activeTab === 'profiles') return <ProfilesSettingsTab profile={profile} />;

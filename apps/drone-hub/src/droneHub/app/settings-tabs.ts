@@ -1,4 +1,4 @@
-export type SettingsTabId = 'general' | 'voice' | 'sync' | 'profiles' | 'trash' | 'archive' | 'shortcuts' | 'automations' | 'playbooks' | 'skills' | 'agents' | 'system';
+export type SettingsTabId = 'general' | 'remote' | 'voice' | 'sync' | 'profiles' | 'trash' | 'archive' | 'shortcuts' | 'automations' | 'playbooks' | 'skills' | 'agents' | 'system';
 
 export const SETTINGS_TABS: Array<{
   id: SettingsTabId;
@@ -11,6 +11,12 @@ export const SETTINGS_TABS: Array<{
     label: 'General',
     title: 'General settings',
     description: 'GitHub readiness, LLM providers, filesystem uploads, transcript defaults, and onboarding controls.',
+  },
+  {
+    id: 'remote',
+    label: 'Remote',
+    title: 'Remote access',
+    description: 'Pair a phone or remote browser to the trimmed container-drone Hub.',
   },
   {
     id: 'voice',
