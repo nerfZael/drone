@@ -1,4 +1,5 @@
 import React from 'react';
+import type { ChatSendPayload } from '../droneHub/chat';
 import type { DroneSummary, PendingPrompt, TranscriptItem } from '../droneHub/types';
 import {
   remoteRequestJson,
@@ -129,8 +130,8 @@ export function useRemoteHubModel() {
     };
   }, [authenticated, effectiveDroneId, errorMessage, loadChatState, selectedChat]);
 
-  const sendPrompt = React.useCallback(async () => {
-    const prompt = draft.trim();
+  const sendPrompt = React.useCallback(async (payload?: ChatSendPayload) => {
+    const prompt = String(payload?.prompt ?? draft).trim();
     if (!effectiveDroneId || !selectedChat || !prompt) return;
     setSending(true);
     try {
@@ -141,8 +142,10 @@ export function useRemoteHubModel() {
       });
       setDraft('');
       await loadChatState(effectiveDroneId, selectedChat);
+      return true;
     } catch (err: any) {
       setError(errorMessage(err));
+      return false;
     } finally {
       setSending(false);
     }
