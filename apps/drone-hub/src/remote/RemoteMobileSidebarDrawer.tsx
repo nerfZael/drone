@@ -1,0 +1,166 @@
+import React from 'react';
+import { IconSidebarCollapse, IconSidebarExpand } from '../droneHub/app/icons';
+import type { DroneSummary } from '../droneHub/types';
+import { RemoteHubSidebar } from './RemoteHubSidebar';
+
+type RemoteMobileSidebarDrawerProps = {
+  open: boolean;
+  drones: DroneSummary[];
+  selectedDroneId: string | null;
+  activeChatName: string;
+  onOpenChange: (open: boolean) => void;
+  onSelectDrone: (droneId: string) => void;
+  onSelectChat: (chatName: string) => void;
+};
+
+type TouchPoint = {
+  x: number;
+  y: number;
+};
+
+const SWIPE_DISTANCE_PX = 56;
+const SWIPE_VERTICAL_TOLERANCE_PX = 72;
+
+function touchPoint(touch: React.Touch): TouchPoint {
+  return { x: touch.clientX, y: touch.clientY };
+}
+
+function isHorizontalSwipe(start: TouchPoint | null, end: TouchPoint, direction: 'left' | 'right'): boolean {
+  if (!start) return false;
+  const deltaX = end.x - start.x;
+  const deltaY = Math.abs(end.y - start.y);
+  if (deltaY > SWIPE_VERTICAL_TOLERANCE_PX) return false;
+  return direction === 'right' ? deltaX >= SWIPE_DISTANCE_PX : deltaX <= -SWIPE_DISTANCE_PX;
+}
+
+export function RemoteMobileSidebarDrawer({
+  open,
+  drones,
+  selectedDroneId,
+  activeChatName,
+  onOpenChange,
+  onSelectDrone,
+  onSelectChat,
+}: RemoteMobileSidebarDrawerProps) {
+  const edgeSwipeStartRef = React.useRef<TouchPoint | null>(null);
+  const drawerSwipeStartRef = React.useRef<TouchPoint | null>(null);
+
+  const beginEdgeSwipe = React.useCallback((event: React.TouchEvent) => {
+    const touch = event.touches[0];
+    edgeSwipeStartRef.current = touch ? touchPoint(touch) : null;
+  }, []);
+
+  const endEdgeSwipe = React.useCallback(
+    (event: React.TouchEvent) => {
+      const touch = event.changedTouches[0];
+      if (touch && isHorizontalSwipe(edgeSwipeStartRef.current, touchPoint(touch), 'right')) {
+        onOpenChange(true);
+      }
+      edgeSwipeStartRef.current = null;
+    },
+    [onOpenChange],
+  );
+
+  const beginDrawerSwipe = React.useCallback((event: React.TouchEvent) => {
+    const touch = event.touches[0];
+    drawerSwipeStartRef.current = touch ? touchPoint(touch) : null;
+  }, []);
+
+  const endDrawerSwipe = React.useCallback(
+    (event: React.TouchEvent) => {
+      const touch = event.changedTouches[0];
+      if (touch && isHorizontalSwipe(drawerSwipeStartRef.current, touchPoint(touch), 'left')) {
+        onOpenChange(false);
+      }
+      drawerSwipeStartRef.current = null;
+    },
+    [onOpenChange],
+  );
+
+  const selectDrone = React.useCallback(
+    (droneId: string) => {
+      onSelectDrone(droneId);
+      const drone = drones.find((item) => item.id === droneId);
+      const chats = Array.isArray(drone?.chats) && drone.chats.length > 0 ? drone.chats : ['default'];
+      if (chats.length <= 1) onOpenChange(false);
+    },
+    [drones, onOpenChange, onSelectDrone],
+  );
+
+  const selectChat = React.useCallback(
+    (chatName: string) => {
+      onSelectChat(chatName);
+      onOpenChange(false);
+    },
+    [onOpenChange, onSelectChat],
+  );
+
+  return (
+    <div className="md:hidden">
+      <div
+        className="fixed bottom-24 left-0 z-40 flex h-16 w-8 items-center justify-center"
+        onTouchStart={beginEdgeSwipe}
+        onTouchEnd={endEdgeSwipe}
+      >
+        <button
+          type="button"
+          onClick={() => onOpenChange(true)}
+          className="flex h-12 w-7 items-center justify-center rounded-r-md border border-l-0 border-[var(--border-subtle)] bg-[var(--panel-raised)] text-[var(--muted)] shadow-[0_12px_34px_rgba(0,0,0,.3)]"
+          aria-label="Open sidebar"
+          title="Open sidebar"
+        >
+          <IconSidebarExpand className="h-3.5 w-3.5" />
+        </button>
+      </div>
+
+      <div
+        className={`fixed inset-0 z-50 transition-opacity duration-200 ${
+          open ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'
+        }`}
+      >
+        <button
+          type="button"
+          className="absolute inset-0 bg-black/45"
+          aria-label="Close sidebar"
+          onClick={() => onOpenChange(false)}
+        />
+        <aside
+          className={`absolute inset-y-0 left-0 flex w-[min(86vw,320px)] flex-col border-r border-[var(--border)] bg-[var(--sidebar)] p-3 shadow-[18px_0_60px_rgba(0,0,0,.36)] transition-transform duration-200 ease-out ${
+            open ? 'translate-x-0' : '-translate-x-full'
+          }`}
+          onTouchStart={beginDrawerSwipe}
+          onTouchEnd={endDrawerSwipe}
+        >
+          <div className="mb-3 flex items-center justify-between">
+            <div>
+              <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+                Remote
+              </div>
+              <div className="text-[17px] font-semibold" style={{ fontFamily: 'var(--display)' }}>
+                Drone Hub
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => onOpenChange(false)}
+              className="inline-flex h-8 w-8 items-center justify-center rounded border border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)]"
+              aria-label="Close sidebar"
+              title="Close sidebar"
+            >
+              <IconSidebarCollapse className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <RemoteHubSidebar
+              drones={drones}
+              selectedDroneId={selectedDroneId}
+              activeChatName={activeChatName}
+              onSelectDrone={selectDrone}
+              onSelectChat={selectChat}
+            />
+          </div>
+        </aside>
+      </div>
+    </div>
+  );
+}
