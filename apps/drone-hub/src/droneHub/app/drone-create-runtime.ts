@@ -43,6 +43,7 @@ type BuildDraftDroneCreatePayloadArgs = {
   fleetParentId?: string | null;
   repoSeedFromDroneId?: string | null;
   runtime: CreateRuntime;
+  persistVolume?: boolean | null;
   repoBranchSelection: RepoBranchSelectionState;
   seedAgent: ChatAgentConfig | null;
   seedModel?: string | null;
@@ -56,6 +57,7 @@ export function buildDraftDroneCreatePayload({
   fleetParentId,
   repoSeedFromDroneId,
   runtime,
+  persistVolume,
   repoBranchSelection,
   seedAgent,
   seedModel,
@@ -78,6 +80,7 @@ export function buildDraftDroneCreatePayload({
     ...(trimmedFleetParentId ? { fleetParentId: trimmedFleetParentId } : {}),
     ...(trimmedRepoSeedFromDroneId ? { repoSeedFromDroneId: trimmedRepoSeedFromDroneId } : {}),
     runtime,
+    ...(runtime === 'container' && typeof persistVolume === 'boolean' ? { persistVolume } : {}),
     pullHostBranchBeforeCreate: repoBranchSelection.pullHostBranchBeforeCreate,
     repoBranchSource,
     ...(repoBranchSource === 'remote' && remoteBranch ? { remoteBranch } : {}),

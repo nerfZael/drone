@@ -453,6 +453,12 @@ function parseCreateRuntime(raw: unknown): DroneRuntime {
   throw new Error('invalid runtime (expected container|host)');
 }
 
+function parsePersistVolume(raw: unknown): boolean | undefined {
+  if (raw == null) return undefined;
+  if (typeof raw === 'boolean') return raw;
+  throw new Error('invalid persistVolume (expected boolean)');
+}
+
 function formatPullHostBranchBeforeCreateError(error: unknown): {
   status: number;
   message: string;
@@ -3666,6 +3672,17 @@ type TranscriptTurn = {
     suggestionHash?: string;
     policyFingerprint?: string;
     updatedAt?: string;
+  };
+  dockerSnapshot?: {
+    id: string;
+    status: 'creating' | 'ready' | 'failed' | 'restoring';
+    imageRef?: string;
+    imageId?: string;
+    createdAt: string;
+    readyAt?: string;
+    restoredAt?: string;
+    error?: string;
+    sizeBytes?: number;
   };
 };
 
@@ -8124,7 +8141,8 @@ function busyChatNamesForDrone(d: any, droneIdRaw: string): string[] {
     if (!chatName || out.includes(chatName)) continue;
     const hasPending = chatHasActivePendingPromptsForSummary(entry);
     const automationBusy = promptAutomationLaneBusy(getPromptAutomationLane(droneId, chatName), { includeQueued: true });
-    if (hasPending || automationBusy) out.push(chatName);
+    const snapshotBusy = chatHasActiveDockerSnapshot(entry);
+    if (hasPending || automationBusy || snapshotBusy) out.push(chatName);
   }
   return out;
 }
@@ -8196,6 +8214,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
 
   const client = makeClient(hostPort, token);
   let changed = false;
+  const completedTurnIdsForSnapshot: string[] = [];
   for (let i = 0; i < pendingList.length; i++) {
     const p = pendingList[i] ?? {};
     const id = String(p?.id ?? '').trim();
@@ -8331,6 +8350,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           output,
         });
         transcriptIds.add(id);
+        completedTurnIdsForSnapshot.push(id);
         pendingList[i] = { ...p, state: 'sent', updatedAt: nowIso() };
         changed = true;
         continue;
@@ -8360,6 +8380,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           output,
         });
         transcriptIds.add(id);
+        completedTurnIdsForSnapshot.push(id);
         pendingList[i] = { ...p, state: 'sent', updatedAt: nowIso() };
         changed = true;
         continue;
@@ -8398,6 +8419,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
         output: output || '(no output)',
       });
       transcriptIds.add(id);
+      completedTurnIdsForSnapshot.push(id);
       pendingList[i] = { ...p, state: 'sent', updatedAt: nowIso() };
       changed = true;
       continue;
@@ -8436,6 +8458,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
             output,
           });
           transcriptIds.add(id);
+          completedTurnIdsForSnapshot.push(id);
           pendingList[i] = { ...p, state: 'sent', error: undefined, updatedAt: nowIso() };
           changed = true;
           continue;
@@ -8470,6 +8493,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
             output,
           });
           transcriptIds.add(id);
+          completedTurnIdsForSnapshot.push(id);
           pendingList[i] = { ...p, state: 'sent', error: undefined, updatedAt: nowIso() };
           changed = true;
           continue;
@@ -8543,6 +8567,23 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
     });
     importTranscriptTurnsFromRegistry({ droneId, chatName, turns });
 
+  }
+
+  for (const promptId of completedTurnIdsForSnapshot) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      await maybeStartDockerSnapshotForTranscriptTurn({ droneId, chatName, promptId });
+    } catch (error: any) {
+      hubLog('warn', 'failed starting docker snapshot for transcript turn', {
+        droneId,
+        chatName,
+        promptId,
+        error: String(error?.message ?? error ?? 'unknown error'),
+      });
+    }
+  }
+
+  if (changed) {
     // Best-effort: session ids may have been established (codexThreadId/openCodeSessionId/piSessionId)
     // or a prior prompt may have completed/failed, unblocking queued follow-ups.
     enqueuePendingPromptPump(droneId, chatName);
@@ -8818,12 +8859,24 @@ async function createOrEnqueuePromptUnified(opts: {
     regSnap = await loadRegistry();
   }
   if (regSnap?.drones?.[droneId]) {
+    await failStaleDockerSnapshotsForChat({ droneId, chatName });
+    regSnap = await loadRegistry();
+    const liveDroneEntry = regSnap?.drones?.[droneId] ?? null;
+    if (!liveDroneEntry) return { kind: 'error', status: 404, error: `unknown drone: ${droneId}` };
+    const chatEntry = liveDroneEntry?.chats?.[chatName] ?? null;
+    if (chatHasActiveDockerSnapshot(chatEntry)) {
+      return {
+        kind: 'error',
+        status: 409,
+        error: 'Docker snapshot is in progress for this chat; wait for it to finish before sending another message',
+      };
+    }
     if (opts.allowQueued === false) {
       const disposition = getPromptEnqueueDisposition({
         droneId,
         chatName,
-        droneEntry: regSnap.drones[droneId],
-        chatEntry: regSnap.drones[droneId]?.chats?.[chatName] ?? null,
+        droneEntry: liveDroneEntry,
+        chatEntry,
         automation: opts.automation,
       });
       if (disposition.defer) {
@@ -8835,8 +8888,8 @@ async function createOrEnqueuePromptUnified(opts: {
       }
     }
     try {
-      await syncSkillLibraryForDrone({ droneId, droneEntry: regSnap.drones[droneId] });
-      await syncRepoAgentsInstructionsForDrone({ droneId, droneEntry: regSnap.drones[droneId] });
+      await syncSkillLibraryForDrone({ droneId, droneEntry: liveDroneEntry });
+      await syncRepoAgentsInstructionsForDrone({ droneId, droneEntry: liveDroneEntry });
     } catch (e: any) {
       const error = String(e?.message ?? String(e));
       const warningKey = `${droneId}\u0000${error}`;
@@ -9041,6 +9094,194 @@ async function dockerContainerId(name: string): Promise<string> {
   const id = String(r.stdout || '').trim();
   if (!/^[0-9a-f]{12,64}$/i.test(id)) throw new Error(`unexpected docker id: ${id || '(empty)'}`);
   return id;
+}
+
+async function runDocker(args: string[], opts?: { timeoutMs?: number }): Promise<{ code: number; stdout: string; stderr: string }> {
+  const timeoutMs =
+    typeof opts?.timeoutMs === 'number' && Number.isFinite(opts.timeoutMs) && opts.timeoutMs > 0
+      ? opts.timeoutMs
+      : 2 * 60_000;
+  return await new Promise((resolve) => {
+    const child = spawn('docker', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    const timer = setTimeout(() => {
+      child.kill('SIGTERM');
+      setTimeout(() => child.kill('SIGKILL'), 1500).unref();
+    }, timeoutMs);
+    child.stdout.on('data', (d) => (stdout += d.toString('utf8')));
+    child.stderr.on('data', (d) => (stderr += d.toString('utf8')));
+    child.once('error', (err: any) => {
+      clearTimeout(timer);
+      resolve({ code: 127, stdout, stderr: `${stderr}${err?.message ?? String(err)}` });
+    });
+    child.once('close', (code) => {
+      clearTimeout(timer);
+      resolve({ code: typeof code === 'number' ? code : 1, stdout, stderr });
+    });
+  });
+}
+
+async function runDockerOrThrow(args: string[], opts?: { timeoutMs?: number }): Promise<string> {
+  const result = await runDocker(args, opts);
+  if (result.code !== 0) {
+    throw new Error((result.stderr || result.stdout || `docker ${args.join(' ')} failed`).trim());
+  }
+  return result.stdout;
+}
+
+async function dockerInspectOne(ref: string): Promise<any | null> {
+  const name = String(ref ?? '').trim();
+  if (!name) return null;
+  const stdout = await runDockerOrThrow(['inspect', name], { timeoutMs: 30_000 });
+  const parsed = JSON.parse(stdout);
+  return Array.isArray(parsed) ? parsed[0] ?? null : null;
+}
+
+async function dockerImageSizeBytes(imageRef: string): Promise<number | null> {
+  try {
+    const stdout = await runDockerOrThrow(['image', 'inspect', imageRef, '--format', '{{json .Size}}'], {
+      timeoutMs: 30_000,
+    });
+    const value = Number(JSON.parse(String(stdout ?? '').trim() || 'null'));
+    return Number.isFinite(value) && value >= 0 ? Math.floor(value) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function dockerContainerSizeBytes(containerName: string): Promise<number | null> {
+  try {
+    const stdout = await runDockerOrThrow(['inspect', '--size', containerName, '--format', '{{json .SizeRw}}'], {
+      timeoutMs: 2500,
+    });
+    const value = Number(JSON.parse(String(stdout ?? '').trim() || 'null'));
+    return Number.isFinite(value) && value >= 0 ? Math.floor(value) : null;
+  } catch {
+    return null;
+  }
+}
+
+function dockerSnapshotImageRef(opts: { droneId: string; chatName: string; promptId: string }): string {
+  const droneId = normalizeDroneIdentity(opts.droneId) || crypto.createHash('sha1').update(String(opts.droneId ?? '')).digest('hex').slice(0, 12);
+  const chatHash = crypto.createHash('sha1').update(String(opts.chatName ?? 'default')).digest('hex').slice(0, 10);
+  const promptId = String(opts.promptId ?? '').trim().toLowerCase().replace(/[^a-z0-9_.-]/g, '-').slice(0, 48) || 'turn';
+  return `drone-hub-snapshot-${droneId}-${chatHash}:${promptId}`;
+}
+
+function normalizeDockerSnapshot(raw: any): TranscriptTurn['dockerSnapshot'] | undefined {
+  const id = String(raw?.id ?? '').trim();
+  const status = String(raw?.status ?? '').trim();
+  if (!id) return undefined;
+  if (status !== 'creating' && status !== 'ready' && status !== 'failed' && status !== 'restoring') return undefined;
+  const createdAt = String(raw?.createdAt ?? '').trim() || nowIso();
+  const out: NonNullable<TranscriptTurn['dockerSnapshot']> = { id, status, createdAt };
+  const imageRef = String(raw?.imageRef ?? '').trim();
+  const imageId = String(raw?.imageId ?? '').trim();
+  const readyAt = String(raw?.readyAt ?? '').trim();
+  const restoredAt = String(raw?.restoredAt ?? '').trim();
+  const error = String(raw?.error ?? '').trim();
+  const sizeBytes = Number(raw?.sizeBytes);
+  if (imageRef) out.imageRef = imageRef;
+  if (imageId) out.imageId = imageId;
+  if (readyAt) out.readyAt = readyAt;
+  if (restoredAt) out.restoredAt = restoredAt;
+  if (error) out.error = error;
+  if (Number.isFinite(sizeBytes) && sizeBytes >= 0) out.sizeBytes = Math.floor(sizeBytes);
+  return out;
+}
+
+function chatHasActiveDockerSnapshot(entry: any): boolean {
+  const turns = Array.isArray(entry?.turns) ? entry.turns : [];
+  return turns.some((turn: any) => {
+    const status = String(turn?.dockerSnapshot?.status ?? '').trim();
+    return status === 'creating' || status === 'restoring';
+  });
+}
+
+const DOCKER_SNAPSHOT_ACTIVE_STALE_MS = 30 * 60_000;
+
+async function failStaleDockerSnapshotsForChat(opts: { droneId: string; chatName: string }): Promise<void> {
+  const droneId = normalizeDroneIdentity(opts.droneId);
+  const chatName = normalizeChatName(opts.chatName);
+  if (!droneId || !chatName) return;
+  const cutoffMs = Date.now() - DOCKER_SNAPSHOT_ACTIVE_STALE_MS;
+  await updateRegistry((reg: any) => {
+    const chat = reg?.drones?.[droneId]?.chats?.[chatName];
+    const turns: TranscriptTurn[] = Array.isArray(chat?.turns) ? chat.turns : [];
+    let changed = false;
+    for (let i = 0; i < turns.length; i += 1) {
+      const turn: any = turns[i];
+      const snap = normalizeDockerSnapshot(turn?.dockerSnapshot);
+      if (!snap || (snap.status !== 'creating' && snap.status !== 'restoring')) continue;
+      const createdMs = Date.parse(String(snap.createdAt ?? ''));
+      if (!Number.isFinite(createdMs) || createdMs > cutoffMs) continue;
+      turn.dockerSnapshot = {
+        ...snap,
+        status: 'failed',
+        error: `${snap.status === 'restoring' ? 'Rollback' : 'Snapshot'} did not finish before Hub lost track of it`,
+      };
+      turns[i] = turn;
+      changed = true;
+    }
+    if (changed) chat.turns = turns;
+  });
+}
+
+function dockerSnapshotTotalsForDroneEntry(droneEntry: any): { count: number; sizeBytes: number } {
+  let count = 0;
+  let sizeBytes = 0;
+  const visitChat = (chat: any) => {
+    const turns = Array.isArray(chat?.turns) ? chat.turns : [];
+    for (const turn of turns) {
+      const snap = normalizeDockerSnapshot((turn as any)?.dockerSnapshot);
+      if (!snap || snap.status !== 'ready') continue;
+      count += 1;
+      const size = Number(snap.sizeBytes);
+      if (Number.isFinite(size) && size > 0) sizeBytes += Math.floor(size);
+    }
+  };
+  for (const chat of Object.values(droneEntry?.chats ?? {})) visitChat(chat);
+  for (const chat of Object.values(droneEntry?.archivedChats ?? {})) visitChat(chat);
+  return { count, sizeBytes };
+}
+
+function collectDockerSnapshotImageRefsFromChatEntry(chatEntry: any): string[] {
+  const out: string[] = [];
+  const turns = Array.isArray(chatEntry?.turns) ? chatEntry.turns : [];
+  for (const turn of turns) {
+    const imageRef = String((turn as any)?.dockerSnapshot?.imageRef ?? '').trim();
+    if (imageRef && !out.includes(imageRef)) out.push(imageRef);
+  }
+  return out;
+}
+
+function collectDockerSnapshotImageRefsFromDroneEntry(droneEntry: any): string[] {
+  const out: string[] = [];
+  const add = (refs: string[]) => {
+    for (const ref of refs) {
+      if (ref && !out.includes(ref)) out.push(ref);
+    }
+  };
+  for (const chat of Object.values(droneEntry?.chats ?? {})) add(collectDockerSnapshotImageRefsFromChatEntry(chat));
+  for (const chat of Object.values(droneEntry?.archivedChats ?? {})) add(collectDockerSnapshotImageRefsFromChatEntry(chat));
+  return out;
+}
+
+async function removeDockerSnapshotImagesBestEffort(imageRefs: string[], context: Record<string, unknown>): Promise<void> {
+  const refs = Array.from(new Set(imageRefs.map((x) => String(x ?? '').trim()).filter(Boolean)));
+  for (const imageRef of refs) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      await runDockerOrThrow(['image', 'rm', '-f', imageRef], { timeoutMs: 60_000 });
+    } catch (e: any) {
+      hubLog('warn', 'failed removing docker snapshot image', {
+        ...context,
+        imageRef,
+        error: String(e?.message ?? e ?? 'unknown error'),
+      });
+    }
+  }
 }
 
 async function fileExists(p: string): Promise<boolean> {
@@ -9354,6 +9595,7 @@ async function removeDroneById(opts: { id: string; keepVolume: boolean; forget: 
   // Only forget registry metadata once the container is actually gone.
   // Otherwise we can strand a drone in an "offline but still present" state that is harder to delete by group.
   if (hadEntry && opts.forget && containerGone) {
+    const snapshotImageRefs = collectDockerSnapshotImageRefsFromDroneEntry(droneEntry);
     removedRegistry = await updateRegistry((reg: any) => {
       if (reg?.drones?.[droneId]) {
         delete reg.drones[droneId];
@@ -9363,6 +9605,9 @@ async function removeDroneById(opts: { id: string; keepVolume: boolean; forget: 
       }
       return false;
     });
+    if (removedRegistry) {
+      await removeDockerSnapshotImagesBestEffort(snapshotImageRefs, { droneId, reason: 'delete-drone' });
+    }
   }
 
   return { hadEntry, removedRegistry, removeErr };
@@ -9701,7 +9946,8 @@ async function deleteArchivedChatById(opts: {
     };
   }
 
-  return await updateRegistry((regAny: any) => {
+  let snapshotImageRefs: string[] = [];
+  const result = await updateRegistry((regAny: any) => {
     const droneEntry = regAny?.drones?.[droneId];
     if (!droneEntry) {
       return {
@@ -9722,6 +9968,7 @@ async function deleteArchivedChatById(opts: {
         chatName: archivedChatName,
       };
     }
+    snapshotImageRefs = collectDockerSnapshotImageRefsFromChatEntry(droneEntry.archivedChats[archivedChatName]);
     delete droneEntry.archivedChats[archivedChatName];
     if (Object.keys(droneEntry.archivedChats).length === 0) delete droneEntry.archivedChats;
     regAny.drones = regAny.drones ?? {};
@@ -9734,6 +9981,10 @@ async function deleteArchivedChatById(opts: {
       chatName: archivedChatName,
     };
   });
+  if (result.deleted) {
+    await removeDockerSnapshotImagesBestEffort(snapshotImageRefs, { droneId, chatName: archivedChatName, reason: 'delete-archived-chat' });
+  }
+  return result;
 }
 
 async function cleanupExpiredArchivedChats(opts?: { reason?: string }): Promise<void> {
@@ -10004,12 +10255,16 @@ async function removeArchivedDroneById(opts: { id: string; keepVolume: boolean }
 
   let removedArchive = false;
   if (containerGone) {
+    const snapshotImageRefs = collectDockerSnapshotImageRefsFromDroneEntry(archivedEntry);
     removedArchive = await updateRegistry((regAny: any) => {
       if (!regAny?.archived?.[droneId]) return false;
       delete regAny.archived[droneId];
       if (Object.keys(regAny.archived).length === 0) delete regAny.archived;
       return true;
     });
+    if (removedArchive) {
+      await removeDockerSnapshotImagesBestEffort(snapshotImageRefs, { droneId, reason: 'delete-archived-drone' });
+    }
   }
 
   return { hadEntry, removedArchive, id: droneId, name, removeErr };
@@ -10451,6 +10706,8 @@ async function setChatAgentConfig(opts: {
   agentMessageAutoContinueEnabled?: boolean;
   setAgentSuggestionEnabled?: boolean;
   agentSuggestionEnabled?: boolean;
+  setDockerSnapshotAfterAgentMessageEnabled?: boolean;
+  dockerSnapshotAfterAgentMessageEnabled?: boolean;
 }) {
   let syncedDroneId = '';
   let syncedChatName = '';
@@ -10478,6 +10735,27 @@ async function setChatAgentConfig(opts: {
       );
       error.statusCode = 400;
       throw error;
+    }
+    if (opts.setDockerSnapshotAfterAgentMessageEnabled && opts.dockerSnapshotAfterAgentMessageEnabled) {
+      if (droneRuntime(d) === 'host') {
+        const error: Error & { statusCode?: number } = new Error('Docker snapshots are only supported for container drones');
+        error.statusCode = 400;
+        throw error;
+      }
+      if (d?.persistVolume !== false) {
+        const error: Error & { statusCode?: number } = new Error(
+          'Docker snapshots require this drone to be created with Persist volume off',
+        );
+        error.statusCode = 400;
+        throw error;
+      }
+      if (effectiveAgent.kind !== 'builtin') {
+        const error: Error & { statusCode?: number } = new Error(
+          'Docker snapshots are only supported for builtin transcript chats',
+        );
+        error.statusCode = 400;
+        throw error;
+      }
     }
     if (opts.agent) {
       assertChatAgentSupportedForDrone(d, opts.agent);
@@ -10507,6 +10785,20 @@ async function setChatAgentConfig(opts: {
       } else {
         delete cur.agentSuggestionEnabled;
         delete cur.agentSuggestionEnabledAt;
+      }
+    }
+    if (opts.setDockerSnapshotAfterAgentMessageEnabled) {
+      if (opts.dockerSnapshotAfterAgentMessageEnabled) {
+        cur.dockerSnapshotAfterAgentMessageEnabled = true;
+        if (
+          typeof cur.dockerSnapshotAfterAgentMessageEnabledAt !== 'string' ||
+          !String(cur.dockerSnapshotAfterAgentMessageEnabledAt).trim()
+        ) {
+          cur.dockerSnapshotAfterAgentMessageEnabledAt = nowIso();
+        }
+      } else {
+        delete cur.dockerSnapshotAfterAgentMessageEnabled;
+        delete cur.dockerSnapshotAfterAgentMessageEnabledAt;
       }
     }
     d.chats[opts.chatName] = cur;
@@ -10840,6 +11132,334 @@ async function updateTranscriptTurnById(opts: {
     });
   }
   return changed;
+}
+
+async function beginDockerSnapshotForTranscriptTurn(opts: {
+  droneId: string;
+  chatName: string;
+  promptId: string;
+}): Promise<{ snapshotId: string; imageRef: string; containerName: string } | null> {
+  const droneId = normalizeDroneIdentity(opts.droneId);
+  const chatName = normalizeChatName(opts.chatName);
+  const promptId = String(opts.promptId ?? '').trim();
+  if (!droneId || !chatName || !promptId) return null;
+
+  let started: { snapshotId: string; imageRef: string; containerName: string } | null = null;
+  await updateRegistry((reg: any) => {
+    const d = reg?.drones?.[droneId];
+    const chat = d?.chats?.[chatName];
+    if (!d || !chat) return;
+    if (droneRuntime(d) === 'host') return;
+    if (d?.persistVolume !== false) return;
+    if (chat?.dockerSnapshotAfterAgentMessageEnabled !== true) return;
+    const turns: TranscriptTurn[] = Array.isArray(chat.turns) ? chat.turns : [];
+    const index = turns.findIndex((turn: any) => String(turn?.id ?? '').trim() === promptId && turn?.ok === true);
+    if (index < 0) return;
+    const turn: any = turns[index];
+    const existing = normalizeDockerSnapshot(turn?.dockerSnapshot);
+    if (existing && existing.status !== 'failed') return;
+    const snapshotId = crypto.randomBytes(8).toString('hex');
+    const imageRef = dockerSnapshotImageRef({ droneId, chatName, promptId });
+    const containerName = String(d?.containerName ?? d?.name ?? `drone-${droneId}`).trim() || `drone-${droneId}`;
+    turn.dockerSnapshot = {
+      id: snapshotId,
+      status: 'creating',
+      imageRef,
+      createdAt: nowIso(),
+    };
+    turns[index] = turn;
+    chat.turns = turns;
+    d.chats = d.chats ?? {};
+    d.chats[chatName] = chat;
+    reg.drones = reg.drones ?? {};
+    reg.drones[droneId] = d;
+    started = { snapshotId, imageRef, containerName };
+  });
+  return started;
+}
+
+async function finishDockerSnapshotForTranscriptTurn(opts: {
+  droneId: string;
+  chatName: string;
+  promptId: string;
+  snapshotId: string;
+  imageRef: string;
+  containerName: string;
+}): Promise<void> {
+  try {
+    const stdout = await runDockerOrThrow(['commit', opts.containerName, opts.imageRef], { timeoutMs: 10 * 60_000 });
+    const imageId = String(stdout ?? '').trim();
+    const sizeBytes = await dockerImageSizeBytes(opts.imageRef);
+    await updateTranscriptTurnById({
+      droneId: opts.droneId,
+      chatName: opts.chatName,
+      promptId: opts.promptId,
+      update: (turn) => {
+        const current = normalizeDockerSnapshot((turn as any).dockerSnapshot);
+        if (!current || current.id !== opts.snapshotId) return turn;
+        return {
+          ...turn,
+          dockerSnapshot: {
+            ...current,
+            status: 'ready',
+            imageRef: opts.imageRef,
+            ...(imageId ? { imageId } : {}),
+            ...(typeof sizeBytes === 'number' ? { sizeBytes } : {}),
+            readyAt: nowIso(),
+          },
+        };
+      },
+    });
+  } catch (e: any) {
+    const error = String(e?.message ?? e ?? 'snapshot failed');
+    await updateTranscriptTurnById({
+      droneId: opts.droneId,
+      chatName: opts.chatName,
+      promptId: opts.promptId,
+      update: (turn) => {
+        const current = normalizeDockerSnapshot((turn as any).dockerSnapshot);
+        if (!current || current.id !== opts.snapshotId) return turn;
+        return {
+          ...turn,
+          dockerSnapshot: {
+            ...current,
+            status: 'failed',
+            error,
+          },
+        };
+      },
+    });
+    hubLog('warn', 'docker snapshot failed', {
+      droneId: opts.droneId,
+      chatName: opts.chatName,
+      promptId: opts.promptId,
+      imageRef: opts.imageRef,
+      error,
+    });
+  }
+}
+
+async function maybeStartDockerSnapshotForTranscriptTurn(opts: {
+  droneId: string;
+  chatName: string;
+  promptId: string;
+}): Promise<void> {
+  const started = await beginDockerSnapshotForTranscriptTurn(opts);
+  if (!started) return;
+  void finishDockerSnapshotForTranscriptTurn({
+    ...opts,
+    snapshotId: started.snapshotId,
+    imageRef: started.imageRef,
+    containerName: started.containerName,
+  });
+}
+
+function dockerPortBindingArgs(inspect: any): string[] {
+  const bindings = inspect?.HostConfig?.PortBindings ?? {};
+  const args: string[] = [];
+  for (const [containerPort, rawList] of Object.entries(bindings)) {
+    const list = Array.isArray(rawList) ? rawList : [];
+    for (const binding of list) {
+      const hostPort = String((binding as any)?.HostPort ?? '').trim();
+      if (!hostPort) continue;
+      const hostIp = String((binding as any)?.HostIp ?? '').trim();
+      args.push('-p', hostIp && hostIp !== '0.0.0.0' ? `${hostIp}:${hostPort}:${containerPort}` : `${hostPort}:${containerPort}`);
+    }
+  }
+  return args;
+}
+
+function dockerBindMountArgs(inspect: any): string[] {
+  const mounts = Array.isArray(inspect?.Mounts) ? inspect.Mounts : [];
+  const args: string[] = [];
+  for (const mount of mounts) {
+    if (String(mount?.Type ?? '').trim() !== 'bind') continue;
+    const source = String(mount?.Source ?? '').trim();
+    const target = String(mount?.Destination ?? '').trim();
+    if (!source || !target || target === '/dvm-data') continue;
+    const readonly = mount?.RW === false;
+    args.push('--mount', `type=bind,src=${source},dst=${target}${readonly ? ',readonly' : ''}`);
+  }
+  return args;
+}
+
+function dockerNetworkArgs(inspect: any): string[] {
+  const networks = inspect?.NetworkSettings?.Networks && typeof inspect.NetworkSettings.Networks === 'object'
+    ? Object.keys(inspect.NetworkSettings.Networks)
+    : [];
+  const preferred = networks.find((name) => name && name !== 'bridge' && name !== 'host' && name !== 'none');
+  return preferred ? ['--network', preferred] : [];
+}
+
+async function recreateDroneContainerFromSnapshot(opts: {
+  droneId: string;
+  droneEntry: any;
+  imageRef: string;
+}): Promise<void> {
+  const droneId = normalizeDroneIdentity(opts.droneId);
+  if (!droneId) throw new Error('missing drone id');
+  if (droneRuntime(opts.droneEntry) === 'host') throw new Error('Docker snapshots are only supported for container drones');
+  if (opts.droneEntry?.persistVolume !== false) {
+    throw new Error('Docker snapshots require this drone to be created with Persist volume off');
+  }
+  const containerName = String(opts.droneEntry?.containerName ?? opts.droneEntry?.name ?? `drone-${droneId}`).trim() || `drone-${droneId}`;
+  const backupName = `${containerName}-rollback-backup-${crypto.randomBytes(5).toString('hex')}`;
+  const inspect = await dockerInspectOne(containerName);
+  if (!inspect) throw new Error(`container "${containerName}" does not exist`);
+
+  await stopAllDroneChatActivity({
+    droneId,
+    droneEntry: opts.droneEntry,
+    reason: 'restart',
+    updateLiveRegistry: true,
+  });
+
+  let renamed = false;
+  let createdReplacement = false;
+  try {
+    await runDocker(['stop', containerName], { timeoutMs: 60_000 });
+    await runDockerOrThrow(['rename', containerName, backupName], { timeoutMs: 30_000 });
+    renamed = true;
+
+    const createArgs = [
+      'create',
+      '--name',
+      containerName,
+      ...dockerNetworkArgs(inspect),
+      ...dockerPortBindingArgs(inspect),
+      ...dockerBindMountArgs(inspect),
+      opts.imageRef,
+    ];
+    await runDockerOrThrow(createArgs, { timeoutMs: 60_000 });
+    createdReplacement = true;
+    await runDockerOrThrow(['start', containerName], { timeoutMs: 60_000 });
+    await ensureContainerDroneDaemonSession({
+      containerName,
+      containerPort: Number(opts.droneEntry?.containerPort ?? 7777),
+    });
+    const hostPort =
+      typeof opts.droneEntry?.hostPort === 'number' && Number.isFinite(opts.droneEntry.hostPort)
+        ? opts.droneEntry.hostPort
+        : await resolveHostPort(containerName, opts.droneEntry?.containerPort);
+    const token = typeof opts.droneEntry?.token === 'string' ? opts.droneEntry.token : '';
+    if (hostPort && token) await droneStatus(makeClient(hostPort, token));
+    await runDocker(['rm', '-f', backupName], { timeoutMs: 60_000 });
+  } catch (e) {
+    if (createdReplacement) {
+      await runDocker(['rm', '-f', containerName], { timeoutMs: 60_000 });
+    }
+    if (renamed) {
+      await runDocker(['rename', backupName, containerName], { timeoutMs: 30_000 });
+      await runDocker(['start', containerName], { timeoutMs: 60_000 });
+    } else {
+      await runDocker(['start', containerName], { timeoutMs: 60_000 });
+    }
+    throw e;
+  }
+}
+
+async function restoreDockerSnapshotForTranscriptTurn(opts: {
+  droneId: string;
+  chatName: string;
+  promptId: string;
+  snapshotId: string;
+}): Promise<void> {
+  const droneId = normalizeDroneIdentity(opts.droneId);
+  const chatName = normalizeChatName(opts.chatName);
+  const promptId = String(opts.promptId ?? '').trim();
+  const snapshotId = String(opts.snapshotId ?? '').trim();
+  if (!droneId || !chatName || !promptId || !snapshotId) throw new Error('missing snapshot target');
+
+  let imageRef = '';
+  let droneEntry: any = null;
+  await updateRegistry((reg: any) => {
+    const d = reg?.drones?.[droneId];
+    const chat = d?.chats?.[chatName];
+    const turns: TranscriptTurn[] = Array.isArray(chat?.turns) ? chat.turns : [];
+    const index = turns.findIndex((turn: any) => String(turn?.id ?? '').trim() === promptId);
+    const turn: any = index >= 0 ? turns[index] : null;
+    const snap = normalizeDockerSnapshot(turn?.dockerSnapshot);
+    if (chatHasActivePendingPromptsForSummary(chat) || promptAutomationLaneBusy(getPromptAutomationLane(droneId, chatName), { includeQueued: true })) {
+      const error: Error & { statusCode?: number } = new Error('chat is busy; wait for the current work to finish before rolling back');
+      error.statusCode = 409;
+      throw error;
+    }
+    const hasOtherActiveSnapshot = turns.some((candidate: any) => {
+      if (String(candidate?.id ?? '').trim() === promptId) return false;
+      const status = String(candidate?.dockerSnapshot?.status ?? '').trim();
+      return status === 'creating' || status === 'restoring';
+    });
+    if (hasOtherActiveSnapshot) {
+      const error: Error & { statusCode?: number } = new Error('another Docker snapshot is still in progress for this chat');
+      error.statusCode = 409;
+      throw error;
+    }
+    if (!d || !chat || !turn || !snap || snap.id !== snapshotId || snap.status !== 'ready' || !snap.imageRef) {
+      const error: Error & { statusCode?: number } = new Error('snapshot is not available for rollback');
+      error.statusCode = 404;
+      throw error;
+    }
+    imageRef = snap.imageRef;
+    droneEntry = { ...d };
+    turn.dockerSnapshot = { ...snap, status: 'restoring' };
+    turns[index] = turn;
+    chat.turns = turns;
+    d.chats[chatName] = chat;
+    reg.drones = reg.drones ?? {};
+    reg.drones[droneId] = d;
+  });
+
+  try {
+    await recreateDroneContainerFromSnapshot({ droneId, droneEntry, imageRef });
+  } catch (e: any) {
+    const error = String(e?.message ?? e ?? 'rollback failed');
+    await updateTranscriptTurnById({
+      droneId,
+      chatName,
+      promptId,
+      update: (turn) => {
+        const snap = normalizeDockerSnapshot((turn as any).dockerSnapshot);
+        if (!snap || snap.id !== snapshotId) return turn;
+        return {
+          ...turn,
+          dockerSnapshot: {
+            ...snap,
+            status: 'ready',
+            error,
+          },
+        };
+      },
+    });
+    throw e;
+  }
+
+  const prunedImageRefs: string[] = [];
+  await updateRegistry((reg: any) => {
+    const d = reg?.drones?.[droneId];
+    const chat = d?.chats?.[chatName];
+    const turns: TranscriptTurn[] = Array.isArray(chat?.turns) ? chat.turns : [];
+    const index = turns.findIndex((turn: any) => String(turn?.id ?? '').trim() === promptId);
+    if (!d || !chat || index < 0) return;
+    const removed = turns.slice(index + 1);
+    for (const turn of removed as any[]) {
+      const ref = String(turn?.dockerSnapshot?.imageRef ?? '').trim();
+      if (ref) prunedImageRefs.push(ref);
+    }
+    const kept = turns.slice(0, index + 1);
+    const turn: any = kept[index];
+    const snap = normalizeDockerSnapshot(turn?.dockerSnapshot);
+    if (snap && snap.id === snapshotId) {
+      turn.dockerSnapshot = { ...snap, status: 'ready', restoredAt: nowIso() };
+      kept[index] = turn;
+    }
+    chat.turns = kept;
+    chat.pendingPrompts = [];
+    d.chats[chatName] = chat;
+    reg.drones = reg.drones ?? {};
+    reg.drones[droneId] = d;
+  });
+  await removeDockerSnapshotImagesBestEffort(prunedImageRefs, { droneId, chatName, reason: 'rollback-pruned-turns' });
+  enqueuePendingPromptPump(droneId, chatName);
 }
 
 async function runNodeCli(args: string[], opts?: { cwd?: string; timeoutMs?: number }) {
@@ -12144,6 +12764,7 @@ export async function startDroneHubApiServer(opts: {
       repoPath: repoAttached ? String(p?.repoPath ?? '') : '',
       repoBranch: String(p?.repo?.branch ?? '').trim() || null,
       cwd: normalizeDroneCwdForRuntime(p, null),
+      ...(runtime === 'container' ? { persistVolume: p?.persistVolume !== false } : {}),
       containerPort: typeof p?.containerPort === 'number' && Number.isFinite(p.containerPort) ? p.containerPort : 7777,
       hostPort: null,
       statusOk: false,
@@ -12151,6 +12772,7 @@ export async function startDroneHubApiServer(opts: {
       statusError: phase === 'error' ? (err ?? message ?? 'failed') : null,
       chats: [],
       busyChats: [],
+      dockerSize: { totalBytes: 0, containerWritableBytes: 0, snapshotBytes: 0, snapshotCount: 0 },
       hubPhase,
       hubMessage: phase === 'error' ? (err ?? message ?? null) : message,
       busy: false,
@@ -12171,6 +12793,10 @@ export async function startDroneHubApiServer(opts: {
     const droneId = normalizeDroneIdentity(d?.id);
     const busyChats = droneId ? busyChatNamesForDrone(d, droneId) : [];
     const { hostPort, statusOk, status, statusError } = await resolveCachedDroneStatusSummary(d);
+    const containerName = String(d?.containerName ?? d?.name ?? '').trim();
+    const snapshotTotals = dockerSnapshotTotalsForDroneEntry(d);
+    const containerWritableBytes =
+      runtime === 'container' && containerName ? await dockerContainerSizeBytes(containerName) : null;
 
     return {
       id: normalizeDroneIdentity(d?.id) || null,
@@ -12190,6 +12816,7 @@ export async function startDroneHubApiServer(opts: {
       repoPath: repoAttached ? repoPath : '',
       repoBranch,
       cwd: normalizeDroneCwdForRuntime(d, null),
+      ...(runtime === 'container' ? { persistVolume: d?.persistVolume !== false } : {}),
       containerPort: d.containerPort,
       hostPort: hostPort ?? null,
       statusOk,
@@ -12197,6 +12824,12 @@ export async function startDroneHubApiServer(opts: {
       statusError,
       chats: Object.keys(d.chats ?? {}),
       busyChats,
+      dockerSize: {
+        totalBytes: (containerWritableBytes ?? 0) + snapshotTotals.sizeBytes,
+        containerWritableBytes,
+        snapshotBytes: snapshotTotals.sizeBytes,
+        snapshotCount: snapshotTotals.count,
+      },
       hubPhase,
       hubMessage,
       busy: busyChats.length > 0,
@@ -15568,6 +16201,17 @@ export async function startDroneHubApiServer(opts: {
           json(res, 400, { ok: false, error: e?.message ?? String(e) });
           return;
         }
+        let persistVolume: boolean | undefined;
+        try {
+          persistVolume = parsePersistVolume(body?.persistVolume);
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          return;
+        }
+        if (runtime === 'host' && persistVolume === false) {
+          json(res, 400, { ok: false, error: 'persistVolume is only supported for container runtime drones' });
+          return;
+        }
 
         const droneCli = resolveDroneCliPath();
         if (!(await fileExists(droneCli))) {
@@ -15714,6 +16358,7 @@ export async function startDroneHubApiServer(opts: {
             phase: 'starting',
             message: 'Starting…',
             environment: createdEnvironment,
+            ...(runtime === 'container' && typeof persistVolume === 'boolean' ? { persistVolume } : {}),
             ...(repoPath && !cloneFrom ? { repoSeedSource: repoBranchSource } : {}),
             ...(repoPath && repoBranchSource === 'remote' && remoteBranch && !cloneFrom ? { repoSeedRemoteBranch: remoteBranch } : {}),
             ...(repoPath && repoSeedFromDroneId && !cloneFrom ? { repoSeedFromDroneId } : {}),
@@ -15975,6 +16620,17 @@ export async function startDroneHubApiServer(opts: {
               }
               const build = raw?.build === true;
               const createdEnvironment = deriveCreatedDroneEnvironmentConfig(regAny, { repoPath, runtime });
+              let persistVolume: boolean | undefined;
+              try {
+                persistVolume = parsePersistVolume(raw?.persistVolume);
+              } catch (e: any) {
+                rejected.push({ name, error: e?.message ?? String(e), status: 400 });
+                continue;
+              }
+              if (runtime === 'host' && persistVolume === false) {
+                rejected.push({ name, error: 'persistVolume is only supported for container runtime drones', status: 400 });
+                continue;
+              }
 
               const seedPrompt = String(raw?.seedPrompt ?? raw?.initialMessage ?? raw?.seed?.prompt ?? '').trim();
               const seedChatName = normalizeChatName(raw?.seedChat ?? raw?.seed?.chatName ?? raw?.seed?.chat ?? 'default');
@@ -16054,6 +16710,7 @@ export async function startDroneHubApiServer(opts: {
                 phase: 'starting',
                 message: 'Starting…',
                 environment: createdEnvironment,
+                ...(runtime === 'container' && typeof persistVolume === 'boolean' ? { persistVolume } : {}),
                 ...(repoPath && !cloneFromId ? { repoSeedSource: repoBranchSource } : {}),
                 ...(repoPath && repoBranchSource === 'remote' && remoteBranch && !cloneFromId
                   ? { repoSeedRemoteBranch: remoteBranch }
@@ -23323,11 +23980,13 @@ export async function startDroneHubApiServer(opts: {
             return;
           }
 
+          let snapshotImageRefs: string[] = [];
           const chats = await updateRegistry((regAny: any) => {
             const d = regAny?.drones?.[droneId];
             if (!d) throw new Error(`unknown drone: ${droneId}`);
             d.chats = d.chats ?? {};
             if (!d.chats?.[chatName]) throw new Error(`unknown chat: ${chatName}`);
+            snapshotImageRefs = collectDockerSnapshotImageRefsFromChatEntry(d.chats[chatName]);
             delete d.chats[chatName];
             if (Object.keys(d.chats).length === 0) {
               d.chats.default = buildNewChatEntry({
@@ -23341,6 +24000,7 @@ export async function startDroneHubApiServer(opts: {
             regAny.drones[droneId] = d;
             return Object.keys(d.chats ?? {});
           });
+          await removeDockerSnapshotImagesBestEffort(snapshotImageRefs, { droneId, chatName, reason: 'delete-chat' });
 
           json(res, 200, {
             ok: true,
@@ -23396,6 +24056,7 @@ export async function startDroneHubApiServer(opts: {
           model: (chatEntry as any).model ?? null,
           agentMessageAutoContinueEnabled: (chatEntry as any).agentMessageAutoContinueEnabled === true,
           agentSuggestionEnabled: (chatEntry as any).agentSuggestionEnabled === true,
+          dockerSnapshotAfterAgentMessageEnabled: (chatEntry as any).dockerSnapshotAfterAgentMessageEnabled === true,
           turns: (chatEntry as any).turns ?? [],
           sessionName: hubChatSessionName(chatName || 'default'),
           createdAt: chatEntry.createdAt,
@@ -23437,9 +24098,12 @@ export async function startDroneHubApiServer(opts: {
           Boolean(body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, 'agentMessageAutoContinueEnabled'));
         const hasAgentSuggestionField =
           Boolean(body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, 'agentSuggestionEnabled'));
+        const hasDockerSnapshotField =
+          Boolean(body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, 'dockerSnapshotAfterAgentMessageEnabled'));
         let model: string | null = null;
         let agentMessageAutoContinueEnabled = false;
         let agentSuggestionEnabled = false;
+        let dockerSnapshotAfterAgentMessageEnabled = false;
         if (hasModelField) {
           try {
             model = parseChatModelForUpdate(
@@ -23466,6 +24130,13 @@ export async function startDroneHubApiServer(opts: {
           }
           agentSuggestionEnabled = body.agentSuggestionEnabled === true;
         }
+        if (hasDockerSnapshotField) {
+          if (body?.dockerSnapshotAfterAgentMessageEnabled !== true && body?.dockerSnapshotAfterAgentMessageEnabled !== false) {
+            json(res, 400, { ok: false, error: 'dockerSnapshotAfterAgentMessageEnabled must be a boolean' });
+            return;
+          }
+          dockerSnapshotAfterAgentMessageEnabled = body.dockerSnapshotAfterAgentMessageEnabled === true;
+        }
         try {
           await ensureChatEntry({ droneId, chatName });
           const builtinId = normalizeBuiltinAgentId(kind === 'builtin' ? agentRaw?.id : kind);
@@ -23481,6 +24152,8 @@ export async function startDroneHubApiServer(opts: {
               agentMessageAutoContinueEnabled,
               setAgentSuggestionEnabled: hasAgentSuggestionField,
               agentSuggestionEnabled,
+              setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
+              dockerSnapshotAfterAgentMessageEnabled,
             });
             json(res, 200, {
               ok: true,
@@ -23491,6 +24164,7 @@ export async function startDroneHubApiServer(opts: {
               ...(hasModelField ? { model } : {}),
               ...(hasAutoContinueField ? { agentMessageAutoContinueEnabled } : {}),
               ...(hasAgentSuggestionField ? { agentSuggestionEnabled } : {}),
+              ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
             });
             return;
           }
@@ -23512,6 +24186,8 @@ export async function startDroneHubApiServer(opts: {
               agentMessageAutoContinueEnabled,
               setAgentSuggestionEnabled: hasAgentSuggestionField,
               agentSuggestionEnabled,
+              setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
+              dockerSnapshotAfterAgentMessageEnabled,
             });
             json(res, 200, {
               ok: true,
@@ -23522,6 +24198,7 @@ export async function startDroneHubApiServer(opts: {
               ...(hasModelField ? { model } : {}),
               ...(hasAutoContinueField ? { agentMessageAutoContinueEnabled } : {}),
               ...(hasAgentSuggestionField ? { agentSuggestionEnabled } : {}),
+              ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
             });
             return;
           }
@@ -23535,6 +24212,8 @@ export async function startDroneHubApiServer(opts: {
               agentMessageAutoContinueEnabled,
               setAgentSuggestionEnabled: hasAgentSuggestionField,
               agentSuggestionEnabled,
+              setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
+              dockerSnapshotAfterAgentMessageEnabled,
             });
             json(res, 200, {
               ok: true,
@@ -23544,6 +24223,7 @@ export async function startDroneHubApiServer(opts: {
               model,
               ...(hasAutoContinueField ? { agentMessageAutoContinueEnabled } : {}),
               ...(hasAgentSuggestionField ? { agentSuggestionEnabled } : {}),
+              ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
             });
             return;
           }
@@ -23555,6 +24235,8 @@ export async function startDroneHubApiServer(opts: {
               agentMessageAutoContinueEnabled,
               setAgentSuggestionEnabled: hasAgentSuggestionField,
               agentSuggestionEnabled,
+              setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
+              dockerSnapshotAfterAgentMessageEnabled,
             });
             json(res, 200, {
               ok: true,
@@ -23563,6 +24245,7 @@ export async function startDroneHubApiServer(opts: {
               chat: chatName,
               agentMessageAutoContinueEnabled,
               ...(hasAgentSuggestionField ? { agentSuggestionEnabled } : {}),
+              ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
             });
             return;
           }
@@ -23572,6 +24255,8 @@ export async function startDroneHubApiServer(opts: {
               chatName,
               setAgentSuggestionEnabled: true,
               agentSuggestionEnabled,
+              setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
+              dockerSnapshotAfterAgentMessageEnabled,
             });
             json(res, 200, {
               ok: true,
@@ -23579,12 +24264,29 @@ export async function startDroneHubApiServer(opts: {
               name: droneName,
               chat: chatName,
               agentSuggestionEnabled,
+              ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
+            });
+            return;
+          }
+          if (hasDockerSnapshotField) {
+            await setChatAgentConfig({
+              droneId,
+              chatName,
+              setDockerSnapshotAfterAgentMessageEnabled: true,
+              dockerSnapshotAfterAgentMessageEnabled,
+            });
+            json(res, 200, {
+              ok: true,
+              id: droneId,
+              name: droneName,
+              chat: chatName,
+              dockerSnapshotAfterAgentMessageEnabled,
             });
             return;
           }
           json(res, 400, {
             ok: false,
-            error: `invalid request (expected agent cursor|codex|claude|opencode|pi|custom, model, agentMessageAutoContinueEnabled, or agentSuggestionEnabled)`,
+            error: `invalid request (expected agent cursor|codex|claude|opencode|pi|custom, model, agentMessageAutoContinueEnabled, agentSuggestionEnabled, or dockerSnapshotAfterAgentMessageEnabled)`,
           });
           return;
         } catch (e: any) {
@@ -23626,7 +24328,11 @@ export async function startDroneHubApiServer(opts: {
           }
           const droneId = resolved.id;
           const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
-          const d = resolved.drone;
+          await ensureChatEntry({ droneId, chatName });
+          await reconcileChatFromDaemon({ droneId, chatName });
+          await failStaleDockerSnapshotsForChat({ droneId, chatName });
+          const reg = await loadRegistry();
+          const d = (reg as any).drones?.[droneId] ?? null;
           if (!d) {
             timer.setHeader(res);
             logSlowHubRequest('chat transcript', timer, { droneId, chatName, status: 404 });
@@ -23715,6 +24421,7 @@ export async function startDroneHubApiServer(opts: {
               (t as any)?.agentMessageAutoContinue,
             );
             const agentSuggestion = normalizeAgentSuggestionTurnState((t as any)?.agentSuggestion);
+            const dockerSnapshot = normalizeDockerSnapshot((t as any)?.dockerSnapshot);
             const ok = Boolean(t?.ok);
             const output = ok ? String(t?.output ?? '') : '';
             const error = ok ? undefined : String(t?.error ?? 'failed');
@@ -23729,6 +24436,19 @@ export async function startDroneHubApiServer(opts: {
               ...(automation ? { automation } : {}),
               ...(agentMessageAutoContinue ? { agentMessageAutoContinue } : {}),
               ...(agentSuggestion ? { agentSuggestion } : {}),
+              ...(dockerSnapshot
+                ? {
+                    dockerSnapshot: {
+                      id: dockerSnapshot.id,
+                      status: dockerSnapshot.status,
+                      createdAt: dockerSnapshot.createdAt,
+                      ...(dockerSnapshot.readyAt ? { readyAt: dockerSnapshot.readyAt } : {}),
+                      ...(dockerSnapshot.restoredAt ? { restoredAt: dockerSnapshot.restoredAt } : {}),
+                      ...(dockerSnapshot.error ? { error: dockerSnapshot.error } : {}),
+                      ...(typeof dockerSnapshot.sizeBytes === 'number' ? { sizeBytes: dockerSnapshot.sizeBytes } : {}),
+                    },
+                  }
+                : {}),
               ...((t as any)?.inheritedFromClone === true ? { inheritedFromClone: true } : {}),
               ok,
               ...(ok ? { output } : { output: '', error }),
@@ -23744,6 +24464,47 @@ export async function startDroneHubApiServer(opts: {
           timer.setHeader(res);
           logSlowHubRequest('chat transcript', timer, { droneRef, chatName, status: 500, error: e?.message ?? String(e) });
           json(res, 500, { ok: false, error: e?.message ?? String(e) });
+          return;
+        }
+      }
+
+      // POST /api/drones/:id/chats/:chat/transcript/:promptId/docker-snapshot/:snapshotId/rollback
+      if (
+        method === 'POST' &&
+        parts.length === 10 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'chats' &&
+        parts[5] === 'transcript' &&
+        parts[7] === 'docker-snapshot' &&
+        parts[9] === 'rollback'
+      ) {
+        const droneRef = decodeURIComponent(parts[2]);
+        const chatName = decodeURIComponent(parts[4]) || 'default';
+        const promptId = String(decodeURIComponent(parts[6] ?? '')).trim();
+        const snapshotId = String(decodeURIComponent(parts[8] ?? '')).trim();
+        if (!isSafePromptId(promptId)) {
+          json(res, 400, { ok: false, error: 'invalid promptId' });
+          return;
+        }
+        if (!/^[0-9a-f]{8,64}$/i.test(snapshotId)) {
+          json(res, 400, { ok: false, error: 'invalid snapshotId' });
+          return;
+        }
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        try {
+          await restoreDockerSnapshotForTranscriptTurn({
+            droneId: resolved.id,
+            chatName,
+            promptId,
+            snapshotId,
+          });
+          json(res, 200, { ok: true, id: resolved.id, name: resolved.drone?.name ?? droneRef, chat: chatName, promptId, snapshotId });
+          return;
+        } catch (e: any) {
+          const status = Number((e as any)?.statusCode ?? 0);
+          json(res, status > 0 ? status : 500, { ok: false, error: e?.message ?? String(e) });
           return;
         }
       }

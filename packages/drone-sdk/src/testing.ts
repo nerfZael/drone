@@ -86,6 +86,7 @@ export function createMockTransport(options: MockTransportOptions = {}): DroneTr
         name: input.name,
         group: input.group,
         runtime: input.runtime ?? 'container',
+        persistVolume: input.persistVolume,
         createdAt: new Date().toISOString(),
         repoPath: input.repoPath,
         cwd: input.cwd,

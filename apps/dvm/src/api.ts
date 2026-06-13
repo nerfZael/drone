@@ -27,6 +27,7 @@ export type DvmCloneContainerOptions = {
   start?: boolean;
   reuseNamedVolumes?: boolean;
   copyPersistenceVolume?: boolean;
+  persistVolume?: boolean;
   ports?: PortMapping[];
 };
 
@@ -307,6 +308,7 @@ export class DvmApi {
     await this.manager.cloneContainer(sourceName, containerName, {
       start: options.start,
       copyPersistenceVolume: options.copyPersistenceVolume,
+      persistVolume: options.persistVolume,
       reuseNamedVolumes: options.reuseNamedVolumes,
       ports: options.ports,
     });

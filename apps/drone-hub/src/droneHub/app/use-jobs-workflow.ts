@@ -11,6 +11,7 @@ type DroneQueueSpec = {
   group?: string;
   repoPath?: string;
   build?: boolean;
+  persistVolume?: boolean;
   seedAgent?: ChatAgentConfig;
   seedModel?: string | null;
   seedChat?: string;

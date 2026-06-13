@@ -25,6 +25,7 @@ export type DroneSummary = {
   fleetParentId?: string | null;
   fleetAssignedIds?: string[] | null;
   runtime?: 'container' | 'host';
+  persistVolume?: boolean;
   repoAttached?: boolean;
   repoPath: string;
   repoBranch?: string | null;
@@ -35,6 +36,12 @@ export type DroneSummary = {
   statusError: string | null;
   chats: string[];
   busyChats?: string[];
+  dockerSize?: {
+    totalBytes: number;
+    containerWritableBytes: number | null;
+    snapshotBytes: number;
+    snapshotCount: number;
+  };
   hubPhase?: 'creating' | 'starting' | 'seeding' | 'error' | null;
   hubMessage?: string | null;
   busy?: boolean;
@@ -512,6 +519,15 @@ export type TranscriptItem = {
     suggestionHash?: string;
     policyFingerprint?: string;
     updatedAt?: string;
+  };
+  dockerSnapshot?: {
+    id: string;
+    status: 'creating' | 'ready' | 'failed' | 'restoring';
+    createdAt: string;
+    readyAt?: string;
+    restoredAt?: string;
+    error?: string;
+    sizeBytes?: number;
   };
 };
 

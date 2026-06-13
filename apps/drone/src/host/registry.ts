@@ -439,6 +439,7 @@ type DroneRegistryV1 = {
       containerPort: number;
       token: string;
       repoPath: string;
+      persistVolume?: boolean;
       createdAt: string;
       /**
        * Hub-specific lifecycle metadata. This is UI-facing state only.

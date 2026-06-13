@@ -48,7 +48,7 @@ export type DraftAutomationStartInput = {
 };
 
 type UseDroneCreationActionsArgs = {
-  drones: Array<Pick<DroneSummary, 'id' | 'name' | 'runtime' | 'repoPath' | 'repoAttached'>>;
+  drones: Array<Pick<DroneSummary, 'id' | 'name' | 'runtime' | 'repoPath' | 'repoAttached' | 'persistVolume'>>;
   creating: boolean;
   createNameRows: string[];
   createMessageSuffixRows: string[];
@@ -60,6 +60,7 @@ type UseDroneCreationActionsArgs = {
   pullHostBranchBeforeCreate: boolean;
   createMode: 'create' | 'clone';
   createRuntime: 'container' | 'host';
+  createPersistVolume: boolean;
   cloneSourceId: string | null;
   cloneIncludeChats: boolean;
   spawnAgentKey: string;
@@ -105,6 +106,7 @@ type UseDroneCreationActionsArgs = {
   setCreateOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setCreateMode: React.Dispatch<React.SetStateAction<'create' | 'clone'>>;
   setCreateRuntime: React.Dispatch<React.SetStateAction<'container' | 'host'>>;
+  setCreatePersistVolume: React.Dispatch<React.SetStateAction<boolean>>;
   setCloneSourceId: React.Dispatch<React.SetStateAction<string | null>>;
   setCreateGroup: React.Dispatch<React.SetStateAction<string>>;
   setCreateRepoPath: React.Dispatch<React.SetStateAction<string>>;
@@ -166,6 +168,7 @@ export function useDroneCreationActions({
   pullHostBranchBeforeCreate,
   createMode,
   createRuntime,
+  createPersistVolume,
   cloneSourceId,
   cloneIncludeChats,
   spawnAgentKey,
@@ -195,6 +198,7 @@ export function useDroneCreationActions({
   setCreateOpen,
   setCreateMode,
   setCreateRuntime,
+  setCreatePersistVolume,
   setCloneSourceId,
   setCreateGroup,
   setCreateRepoPath,
@@ -263,6 +267,7 @@ export function useDroneCreationActions({
         source && (source.repoAttached ?? Boolean(String(source.repoPath ?? '').trim()))
           ? String(source.repoPath ?? '').trim()
           : '';
+      const persistVolume = source.persistVolume !== false;
 
       setCreating(true);
       cloneDronePendingRef.current = true;
@@ -287,6 +292,7 @@ export function useDroneCreationActions({
                 runtime: 'container',
                 ...(group ? { group } : {}),
                 ...(repoPath ? { repoPath } : {}),
+                persistVolume,
                 cloneFrom: sourceId,
                 cloneChats: true,
               },
@@ -378,6 +384,7 @@ export function useDroneCreationActions({
     const seedPrompt = createInitialMessage.trim();
     const isClone = createMode === 'clone' && Boolean(cloneSourceId);
     const runtime = createMode === 'clone' ? 'container' : createRuntime;
+    const persistVolume = runtime === 'container' ? createPersistVolume : undefined;
     const remoteBranch = repoCreateRemoteBranch.trim();
     const effectiveRepoBranchSource: RepoBranchSourceMode = runtime === 'host' ? 'host' : repoBranchSource;
     const repoBranchSelection: RepoBranchSelectionState = {
@@ -455,6 +462,7 @@ export function useDroneCreationActions({
             runtime,
             ...(group ? { group } : {}),
             ...(repoPath ? { repoPath } : {}),
+            ...(typeof persistVolume === 'boolean' ? { persistVolume } : {}),
             pullHostBranchBeforeCreate: repoBranchSelection.pullHostBranchBeforeCreate,
             repoBranchSource: repoBranchSelection.repoBranchSource,
             ...(repoBranchSelection.repoBranchSource === 'remote' && repoBranchSelection.remoteBranch
@@ -534,6 +542,7 @@ export function useDroneCreationActions({
       setCreateOpen(false);
       setCreateMode('create');
       setCreateRuntime('container');
+      setCreatePersistVolume(false);
       setCloneSourceId(null);
       setCreateName('');
       setCreateGroup('');
@@ -554,6 +563,7 @@ export function useDroneCreationActions({
     createMessageSuffixRows,
     createMode,
     createRuntime,
+    createPersistVolume,
     createNameRows,
     createRepoPath,
     addOptimisticStartupSeeds,
@@ -576,6 +586,7 @@ export function useDroneCreationActions({
     setCreateInitialMessage,
     setCreateMessageSuffixRows,
     setCreateMode,
+    setCreatePersistVolume,
     setCreateRuntime,
     setCreateName,
     setCreateOpen,
@@ -627,6 +638,7 @@ export function useDroneCreationActions({
       const group = String(opts?.group ?? draftCreateGroup ?? '').trim();
       const fleetParentId = String(draftCreateParentDroneId ?? '').trim();
       const runtime = createRuntime;
+      const persistVolume = runtime === 'container' ? createPersistVolume : undefined;
       const repoPath = String(draftCreateRepoPath ?? '').trim();
       const repoSeedFromDroneId = resolveRepoSeedFromParentDroneId({
         drones,
@@ -693,6 +705,7 @@ export function useDroneCreationActions({
           fleetParentId,
           repoSeedFromDroneId,
           runtime,
+          persistVolume,
           repoBranchSelection: {
             repoBranchSource: effectiveRepoBranchSource,
             pullHostBranchBeforeCreate,
@@ -861,6 +874,7 @@ export function useDroneCreationActions({
       draftCreateName,
       draftCreateParentDroneId,
       createRuntime,
+      createPersistVolume,
       drones,
       addOptimisticStartupSeeds,
       clearOptimisticStartupSeeds,

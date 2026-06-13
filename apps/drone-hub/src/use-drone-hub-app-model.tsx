@@ -275,6 +275,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     creating,
     createMode,
     createRuntime,
+    createPersistVolume,
     cloneSourceId,
     cloneIncludeChats,
     createError,
@@ -297,6 +298,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setCreating,
     setCreateMode,
     setCreateRuntime,
+    setCreatePersistVolume,
     setCloneSourceId,
     setCloneIncludeChats,
     setCreateError,
@@ -627,6 +629,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setChatModel,
     setAgentMessageAutoContinueEnabled,
     setAgentSuggestionEnabled,
+    setDockerSnapshotAfterAgentMessageEnabled,
     handleSetAgentFailure,
   } = useChatConfigState({
     selectedDrone,
@@ -753,6 +756,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     containerPort?: number;
     cloneFrom?: string;
     cloneChats?: boolean;
+    persistVolume?: boolean;
     seedAgent?: ChatAgentConfig;
     seedModel?: string | null;
     seedChat?: string;
@@ -761,6 +765,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   };
 
   const queueDrones = React.useCallback(async (list: DroneQueueSpec[]) => {
+    const drones = list.map((item) => {
+      const runtime = item.runtime ?? 'container';
+      if (runtime !== 'container' || typeof item.persistVolume === 'boolean') return item;
+      return { ...item, persistVolume: false };
+    });
     return await requestJson<{
       ok: true;
       accepted: Array<{ id: string; name: string; phase: 'starting' }>;
@@ -769,7 +778,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     }>(`/api/drones/batch`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ drones: list, pullHostBranchBeforeCreate }),
+      body: JSON.stringify({ drones, pullHostBranchBeforeCreate }),
     });
   }, [pullHostBranchBeforeCreate, requestJson]);
 
@@ -983,6 +992,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setDraftNameSuggesting,
       setCreateMode,
       setCreateRuntime,
+      setCreatePersistVolume,
       setCloneSourceId,
       setCreateName,
       setCreateGroup,
@@ -1262,6 +1272,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       pullHostBranchBeforeCreate,
       createMode,
       createRuntime,
+      createPersistVolume,
       cloneSourceId,
       cloneIncludeChats,
       spawnAgentKey,
@@ -1291,6 +1302,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setCreateOpen,
       setCreateMode,
       setCreateRuntime,
+      setCreatePersistVolume,
       setCloneSourceId,
       setCreateGroup,
       setCreateRepoPath,
@@ -1315,8 +1327,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       preferredSelectedDroneHoldUntilRef,
     });
   const openCloneModal = React.useCallback((source: DroneSummary) => {
+    setCreatePersistVolume(source.persistVolume !== false);
     void cloneDrone(source);
-  }, [cloneDrone]);
+  }, [cloneDrone, setCreatePersistVolume]);
 
   const currentDrone = selectedDrone ? droneById[selectedDrone] ?? null : null;
   const currentDroneLabel = currentDrone ? uiDroneName(currentDrone.name) : '';
@@ -1797,6 +1810,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           model: startupSeedForCurrentDrone.model ?? null,
           agentMessageAutoContinueEnabled: false,
           agentSuggestionEnabled: false,
+          dockerSnapshotAfterAgentMessageEnabled: false,
           sessionName: `drone-hub-chat-${startupSeedForCurrentDrone.chatName || selectedChat || 'default'}`,
           createdAt: startupSeedForCurrentDrone.at || new Date().toISOString(),
         }
@@ -1959,9 +1973,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           seedModel,
           repoDefaults: repoSpawnDefaults,
         });
-        const response = await queueDrones([
-          queueSpec,
-        ]);
+        const response = await queueDrones([queueSpec as DroneQueueSpec]);
         const accepted = Array.isArray(response?.accepted) ? response.accepted[0] : null;
         if (!accepted?.id) {
           const rejected = Array.isArray(response?.rejected) ? response.rejected[0] : null;
@@ -3169,7 +3181,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     creating,
     createMode,
     createRuntime,
+    createPersistVolume,
     setCreateRuntime,
+    setCreatePersistVolume,
     cloneSourceId,
     createNameEntries,
     drones,
@@ -3405,6 +3419,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setAgentMessageAutoContinueEnabled,
     agentSuggestionEnabled: effectiveChatInfo?.agentSuggestionEnabled === true,
     setAgentSuggestionEnabled,
+    dockerSnapshotAfterAgentMessageEnabled: effectiveChatInfo?.dockerSnapshotAfterAgentMessageEnabled === true,
+    setDockerSnapshotAfterAgentMessageEnabled,
     setChatInfoError,
     modelMenuEntries,
     modelDisabled,

@@ -149,6 +149,31 @@ describeSocketSuite('create runtime api', () => {
     expect(String(resp.data?.rejected?.[0]?.error ?? '')).toContain('unknown fleet parent drone');
   });
 
+  test('batch create persists no-volume container option', async () => {
+    const resp = await apiFetch('/api/drones/batch', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        drones: [{ name: 'no-volume-batch', runtime: 'container', persistVolume: false }],
+      }),
+    });
+    expect(resp.r.status).toBe(202);
+    expect(resp.data?.ok).toBe(true);
+    expect((resp.data?.accepted ?? []).length).toBe(1);
+    const droneId = String(resp.data?.accepted?.[0]?.id ?? '').trim();
+    expect(droneId).not.toBe('');
+
+    const regAny: any = await loadRegistry();
+    expect(regAny?.pending?.[droneId]?.persistVolume).toBe(false);
+
+    const listResp = await apiFetch('/api/drones');
+    expect(listResp.r.status).toBe(200);
+    const pending = Array.isArray(listResp.data?.drones)
+      ? listResp.data.drones.find((item: any) => String(item?.id ?? '').trim() === droneId)
+      : null;
+    expect(pending?.persistVolume).toBe(false);
+  });
+
   test('single create persists repo seed source drone references', async () => {
     const now = new Date().toISOString();
     await updateRegistry((reg: any) => {
@@ -175,6 +200,7 @@ describeSocketSuite('create runtime api', () => {
         name: 'seed-child',
         runtime: 'container',
         repoPath: '/work/repo',
+        pullHostBranchBeforeCreate: false,
         fleetParentId: 'seed-parent',
         repoSeedFromDroneId: 'seed-parent',
       }),

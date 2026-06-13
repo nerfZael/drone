@@ -197,6 +197,7 @@ function toDroneRecord(drone: any): DroneRecord {
     name: String(drone?.name ?? ''),
     group: typeof drone?.group === 'string' && drone.group.trim() ? String(drone.group).trim() : undefined,
     runtime: 'container',
+    persistVolume: typeof drone?.persistVolume === 'boolean' ? drone.persistVolume : undefined,
     createdAt: typeof drone?.createdAt === 'string' ? drone.createdAt : undefined,
     repoPath: typeof drone?.repoPath === 'string' ? drone.repoPath : undefined,
     cwd: typeof drone?.cwd === 'string' ? drone.cwd : undefined,
@@ -263,6 +264,7 @@ export function hubTransport(options: HubTransportOptions): DroneTransport {
       if (input.group) body.group = input.group;
       if (input.cwd) body.cwd = input.cwd;
       if (input.repoPath) body.repoPath = input.repoPath;
+      if (typeof input.persistVolume === 'boolean') body.persistVolume = input.persistVolume;
       if (input.cloneFrom) body.cloneFrom = input.cloneFrom;
       if (typeof input.cloneChats === 'boolean') body.cloneChats = input.cloneChats;
       const response = await requestJson<any>(
@@ -276,6 +278,7 @@ export function hubTransport(options: HubTransportOptions): DroneTransport {
         name: String(response?.name ?? input.name),
         group: input.group,
         runtime: input.runtime ?? 'container',
+        persistVolume: input.persistVolume,
       };
     },
 
@@ -293,6 +296,7 @@ export function hubTransport(options: HubTransportOptions): DroneTransport {
               ...(item.group ? { group: item.group } : {}),
               ...(item.cwd ? { cwd: item.cwd } : {}),
               ...(item.repoPath ? { repoPath: item.repoPath } : {}),
+              ...(typeof item.persistVolume === 'boolean' ? { persistVolume: item.persistVolume } : {}),
               ...(item.cloneFrom ? { cloneFrom: item.cloneFrom } : {}),
               ...(typeof item.cloneChats === 'boolean' ? { cloneChats: item.cloneChats } : {}),
             })),
@@ -306,6 +310,7 @@ export function hubTransport(options: HubTransportOptions): DroneTransport {
               id: String(item?.id ?? ''),
               name: String(item?.name ?? ''),
               runtime: 'container',
+              persistVolume: typeof item?.persistVolume === 'boolean' ? item.persistVolume : undefined,
             }))
           : [],
         rejected: Array.isArray(response?.rejected)

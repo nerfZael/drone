@@ -31,6 +31,7 @@ function createControllerHarness(opts?: { agentSuggestionEnabledByDefault?: bool
   const syncSkillLibraryCalls: any[] = [];
   const syncSharedPathsCalls: any[] = [];
   const syncTaskStateCalls: any[] = [];
+  const runNodeCliCalls: string[][] = [];
   const pendingPromptPumpCalls: any[] = [];
   const events: string[] = [];
 
@@ -69,6 +70,7 @@ function createControllerHarness(opts?: { agentSuggestionEnabledByDefault?: bool
     resolveDroneCliPath: () => '/mock/drone-cli.js',
     resolvePendingDroneDisplayName: pendingStateHelpers.resolvePendingDroneDisplayName,
     runNodeCli: async (args) => {
+      runNodeCliCalls.push([...args]);
       const displayName = String(args[2] ?? '').trim();
       const droneIdIndex = args.indexOf('--drone-id');
       const droneId = droneIdIndex >= 0 ? String(args[droneIdIndex + 1] ?? '').trim() : '';
@@ -116,6 +118,7 @@ function createControllerHarness(opts?: { agentSuggestionEnabledByDefault?: bool
     syncSkillLibraryCalls,
     syncSharedPathsCalls,
     syncTaskStateCalls,
+    runNodeCliCalls,
     pendingPromptPumpCalls,
     events,
   };
@@ -303,6 +306,39 @@ describe('drone provisioning controller', () => {
         },
       ]);
       expect(harness.enqueuePromptCalls).toHaveLength(0);
+    });
+  });
+
+  test('passes no-persist-volume when provisioning a no-volume container drone', async () => {
+    await withTempDroneDataDir('drone-provisioning-', async () => {
+      await updateRegistry((reg: any) => {
+        reg.pending = {
+          'drone-no-volume': {
+            id: 'drone-no-volume',
+            name: 'no-volume',
+            runtime: 'container',
+            repoPath: '',
+            build: false,
+            persistVolume: false,
+            containerPort: 7777,
+            createdAt: '2026-03-26T11:00:00.000Z',
+            updatedAt: '2026-03-26T11:00:00.000Z',
+            phase: 'starting',
+            message: 'Starting...',
+          },
+        };
+      });
+
+      const harness = createControllerHarness();
+      harness.controller.enqueueProvisioning('drone-no-volume');
+
+      await waitFor(async () => {
+        const reg: any = await loadRegistry();
+        return !reg?.pending?.['drone-no-volume'] && Boolean(reg?.drones?.['drone-no-volume']);
+      });
+
+      expect(harness.runNodeCliCalls).toHaveLength(1);
+      expect(harness.runNodeCliCalls[0]).toContain('--no-persist-volume');
     });
   });
 
