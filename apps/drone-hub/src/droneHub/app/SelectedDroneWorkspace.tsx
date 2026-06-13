@@ -34,6 +34,7 @@ import {
   type WorkspaceLayoutScope,
   type WorkspacePaneHeaderMode,
 } from './DockableDroneWorkspace';
+import { DroneWorkspaceHeaderFrame } from './DroneWorkspaceHeaderFrame';
 import { type RightPanelTab } from './app-config';
 import type { AgentSuggestionState, StartupSeedState, TldrState } from './app-types';
 import type { RepoOpErrorMeta } from './helpers';
@@ -1008,8 +1009,8 @@ export function SelectedDroneWorkspace({
 
   return (
     <>
-      {/* Header — spans full workspace width */}
-      <div data-drone-selected-header="true" className="flex-shrink-0 bg-[var(--panel-alt)] border-b border-[var(--border)] relative">
+      {/* Header - spans full workspace width */}
+      <DroneWorkspaceHeaderFrame selectedHeader>
         <div className="flex h-[52px] items-center px-4">
           <div className="flex w-full items-center justify-between gap-3">
             <div className="flex items-center gap-2 min-w-0">
@@ -1142,7 +1143,7 @@ export function SelectedDroneWorkspace({
             </div>
           </div>
         </div>
-        {/* Tier 2: Toolbar */}
+      {/* Tier 2: Toolbar */}
         <div
           data-drone-header-toolbar="true"
           className={
@@ -1832,7 +1833,7 @@ export function SelectedDroneWorkspace({
             </svg>
           </button>
         </div>
-      </div>
+      </DroneWorkspaceHeaderFrame>
 
       <DockableDroneWorkspace
         currentDrone={currentDrone}
