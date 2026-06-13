@@ -975,7 +975,11 @@ function setMode(mode, status) {
     void desktop.setTrayStatus({ mode, status: status || els.micStatus.textContent || mode }).catch(() => undefined);
   }
   void reportClientStatus(mode, status || els.micStatus.textContent || mode);
-  if (!speechPlaybackBlocked()) void drainSpeechPlaybackQueue();
+  if (speechPlaybackBlocked()) {
+    stopSpeechPlayback({ clearQueue: false, requeueActive: true });
+  } else {
+    void drainSpeechPlaybackQueue();
+  }
   renderCallRecorderStatus();
 }
 
@@ -1152,6 +1156,10 @@ function updateVoiceButtons() {
 
 function assistantSpeechPlaybackEnabled() {
   return state.config?.assistantSpeechPlaybackEnabled !== false;
+}
+
+function speechPlaybackBlocked() {
+  return state.mode === 'recording' || state.mode === 'transcribing';
 }
 
 function renderAssistantSpeechPlaybackButton() {
@@ -2535,7 +2543,7 @@ let lastCompletedSpeechPlaybackData = null;
 let speechPlaybackSuppressWakeUntil = 0;
 
 function canPlaySpeechAudio() {
-  return canQueueSpeechAudio();
+  return canQueueSpeechAudio() && !speechPlaybackBlocked();
 }
 
 function canQueueSpeechAudio() {
@@ -2564,6 +2572,7 @@ async function drainSpeechPlaybackQueue() {
   speechPlaybackActive = true;
   try {
     while (speechPlaybackQueue.length > 0) {
+      if (speechPlaybackBlocked()) break;
       if (!canPlaySpeechAudio()) {
         speechPlaybackQueue.length = 0;
         break;
