@@ -176,7 +176,7 @@ import {
 import { isHubApiAuthorized, isHubApiAuthorizedForWebSocket, rejectWebSocketUpgrade } from './hub-auth';
 import { bashQuote, encodeRemotePath, hexEncodeUtf8, normalizeContainerPath, parseBoolParam, shellQuoteIfNeeded } from './hub-format';
 import { readJsonBody, readRawBody, withCors } from './hub-http';
-import { pidIsRunning as remotePidIsRunning, readRemoteHubState } from './remote-state';
+import { normalizeRemotePublicUrl, pidIsRunning as remotePidIsRunning, readRemoteHubState } from './remote-state';
 import { createRemoteHubPairing, redactRemoteHubState, startRemoteHubDetached, stopRemoteHubDetached } from './remote-control';
 import { GROQ_TRANSCRIPTION_MAX_BYTES, transcribeAudioWithGroq } from './groq-transcription';
 import { buildGroqTtsConfig, synthesizeTextWavWithGroq } from './groq-tts';
@@ -13481,6 +13481,47 @@ export async function startDroneHubApiServer(opts: {
           running,
           state: running && remoteState ? redactRemoteHubState(remoteState) : null,
         });
+        return;
+      }
+
+      if (pathname === '/api/remote-access/ngrok-url' && method === 'GET') {
+        const port = Number(u.searchParams.get('port') ?? 8790);
+        if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+          json(res, 400, { ok: false, error: 'invalid port' });
+          return;
+        }
+
+        const addrMatchesPort = (rawAddr: unknown): boolean => {
+          const addr = String(rawAddr ?? '').trim();
+          if (!addr) return false;
+          try {
+            const parsed = new URL(addr.includes('://') ? addr : `http://${addr}`);
+            return Number(parsed.port) === port;
+          } catch {
+            return new RegExp(`(^|:)${port}($|/)`).test(addr);
+          }
+        };
+
+        try {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 1200);
+          const response = await fetch('http://127.0.0.1:4040/api/tunnels', { signal: controller.signal });
+          clearTimeout(timeout);
+          const data = await response.json() as any;
+          const tunnels: any[] = Array.isArray(data?.tunnels) ? data.tunnels : [];
+          const matches = tunnels
+            .filter((tunnel) => addrMatchesPort(tunnel?.config?.addr))
+            .map((tunnel) => normalizeRemotePublicUrl(tunnel?.public_url))
+            .filter(Boolean) as string[];
+          const https = matches.find((candidate) => candidate.startsWith('https://'));
+          json(res, 200, { ok: true, url: https ?? matches[0] ?? null });
+        } catch (e: any) {
+          json(res, 200, {
+            ok: true,
+            url: null,
+            error: `ngrok inspector not reachable at http://127.0.0.1:4040 (${e?.message ?? String(e)})`,
+          });
+        }
         return;
       }
 

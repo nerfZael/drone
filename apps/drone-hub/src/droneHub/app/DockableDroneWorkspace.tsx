@@ -44,10 +44,11 @@ type DockableDroneWorkspaceProps = {
 
 const CHAT_PANEL_ID = 'agent-chat';
 const TOOL_PANEL_PREFIX = 'tool:';
-const DEFAULT_NEW_TOOL_PANEL_WIDTH = 560;
+const DEFAULT_NEW_TOOL_PANEL_WIDTH = 720;
 const DEFAULT_NEW_TOOL_PANEL_HEIGHT = 320;
 const NEW_TOOL_PANEL_MIN_WIDTH = 360;
-const NEW_TOOL_PANEL_MAX_WIDTH = 760;
+const NEW_TOOL_PANEL_MAX_WIDTH = 1200;
+const NEW_TOOL_PANEL_WIDTH_RATIO = 0.5;
 export const WORKSPACE_LAYOUT_SCOPES: WorkspaceLayoutScope[] = ['global', 'drone', 'chat'];
 const LAYOUT_SCOPE_STORAGE_KEY = profileStorageKey('droneHub.workspaceLayoutScope');
 const PANE_HEADER_MODE_STORAGE_KEY = profileStorageKey('droneHub.workspacePaneHeaderMode');
@@ -118,15 +119,12 @@ function clampNewToolPanelWidth(width: number): number {
   return Math.max(NEW_TOOL_PANEL_MIN_WIDTH, Math.min(NEW_TOOL_PANEL_MAX_WIDTH, safe));
 }
 
-function newToolPanelWidth(api: DockviewApi, tab: RightPanelTab, referencePanelId: string): number {
+function newToolPanelWidth(api: DockviewApi, referencePanelId: string): number {
   const workspaceWidth = Math.round(Number(api.width ?? 0));
   const referenceGroup = api.groups.find((group) => group.panels.some((panel) => panel.id === referencePanelId));
   const referenceWidth = Math.round(Number(referenceGroup?.width ?? 0));
-  if (tab === 'editor') {
-    const availableWidth = workspaceWidth > 0 ? workspaceWidth : referenceWidth;
-    if (availableWidth > 0) return clampNewToolPanelWidth(availableWidth * 0.5);
-  }
-  if (workspaceWidth > 0) return clampNewToolPanelWidth(workspaceWidth * 0.38);
+  const availableWidth = workspaceWidth > 0 ? workspaceWidth : referenceWidth;
+  if (availableWidth > 0) return clampNewToolPanelWidth(availableWidth * NEW_TOOL_PANEL_WIDTH_RATIO);
   return DEFAULT_NEW_TOOL_PANEL_WIDTH;
 }
 
@@ -188,7 +186,7 @@ function ensurePanel(api: DockviewApi, tab: RightPanelTab, paneKey: WorkspacePan
   }
 
   const editorReferencePanel = tab === 'editor' && api.getPanel(toolPanelId('files')) ? toolPanelId('files') : referencePanel;
-  const initialWidth = newToolPanelWidth(api, tab, editorReferencePanel);
+  const initialWidth = newToolPanelWidth(api, editorReferencePanel);
   api.addPanel({
     id,
     component: 'tool',

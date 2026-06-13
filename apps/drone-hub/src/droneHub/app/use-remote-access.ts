@@ -23,6 +23,12 @@ export type RemoteAccessPairing = {
   expiresAt: string;
 };
 
+type RemoteAccessNgrokUrl = {
+  ok: true;
+  url: string | null;
+  error?: string | null;
+};
+
 export function useRemoteAccess(requestJson: RequestJsonFn) {
   const [status, setStatus] = React.useState<RemoteAccessStatus | null>(null);
   const [pairing, setPairing] = React.useState<RemoteAccessPairing | null>(null);
@@ -32,7 +38,9 @@ export function useRemoteAccess(requestJson: RequestJsonFn) {
   const [starting, setStarting] = React.useState(false);
   const [stopping, setStopping] = React.useState(false);
   const [creatingPairing, setCreatingPairing] = React.useState(false);
+  const [detectingNgrok, setDetectingNgrok] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const autoDetectedNgrokPortRef = React.useRef<string | null>(null);
   const parsedPort = Number(port);
   const portValid = Number.isInteger(parsedPort) && parsedPort > 0 && parsedPort <= 65535;
 
@@ -52,6 +60,27 @@ export function useRemoteAccess(requestJson: RequestJsonFn) {
       setLoading(false);
     }
   }, [requestJson]);
+
+  const detectNgrokPublicUrl = React.useCallback(async (silent = false) => {
+    if (!portValid) {
+      if (!silent) setError('Enter a valid local port before detecting ngrok.');
+      return;
+    }
+    setDetectingNgrok(true);
+    try {
+      const next = await requestJson<RemoteAccessNgrokUrl>(`/api/remote-access/ngrok-url?port=${encodeURIComponent(String(parsedPort))}`);
+      if (next.url) {
+        setPublicUrl(next.url);
+        setError(null);
+      } else if (!silent) {
+        setError(next.error ?? `No ngrok tunnel found for local port ${parsedPort}.`);
+      }
+    } catch (err: any) {
+      if (!silent) setError(err?.message ?? String(err));
+    } finally {
+      setDetectingNgrok(false);
+    }
+  }, [parsedPort, portValid, requestJson]);
 
   const createPairing = React.useCallback(async () => {
     setCreatingPairing(true);
@@ -114,6 +143,13 @@ export function useRemoteAccess(requestJson: RequestJsonFn) {
     void loadStatus();
   }, [loadStatus]);
 
+  React.useEffect(() => {
+    if (loading || !portValid || publicUrl.trim()) return;
+    if (autoDetectedNgrokPortRef.current === port) return;
+    autoDetectedNgrokPortRef.current = port;
+    void detectNgrokPublicUrl(true);
+  }, [detectNgrokPublicUrl, loading, port, portValid, publicUrl]);
+
   return {
     status,
     pairing,
@@ -126,8 +162,10 @@ export function useRemoteAccess(requestJson: RequestJsonFn) {
     starting,
     stopping,
     creatingPairing,
+    detectingNgrok,
     error,
     loadStatus,
+    detectNgrokPublicUrl,
     startRemote,
     stopRemote,
     createPairing,
