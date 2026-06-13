@@ -965,7 +965,7 @@ export function SelectedDroneWorkspace({
   return (
     <>
       {/* Header — spans full workspace width */}
-      <div className="flex-shrink-0 bg-[var(--panel-alt)] border-b border-[var(--border)] relative">
+      <div data-drone-selected-header="true" className="flex-shrink-0 bg-[var(--panel-alt)] border-b border-[var(--border)] relative">
         <div className="flex h-[52px] items-center px-4">
           <div className="flex w-full items-center justify-between gap-3">
             <div className="flex items-center gap-2 min-w-0">
@@ -1025,7 +1025,7 @@ export function SelectedDroneWorkspace({
               </div>
             </div>
             {/* Status indicators */}
-            <div className="flex items-center gap-2 flex-shrink-0">
+            <div data-drone-header-status="true" className="flex items-center gap-2 flex-shrink-0">
               {chatUiMode === 'cli' ? (
                 <>
                   {loadingSession && (
@@ -1100,6 +1100,7 @@ export function SelectedDroneWorkspace({
         </div>
         {/* Tier 2: Toolbar */}
         <div
+          data-drone-header-toolbar="true"
           className={
             droneControlsExpanded
               ? 'px-5 pb-2.5 flex items-center justify-end gap-2 flex-wrap'

@@ -68,6 +68,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var pairingMessageText: TextView
     private lateinit var primaryActionButton: Button
     private lateinit var offButton: Button
+    private lateinit var assistantSpeechPlaybackButton: Button
     private lateinit var root: LinearLayout
     private lateinit var signedOutPanel: View
     private lateinit var voicePanel: LinearLayout
@@ -369,6 +370,13 @@ class MainActivity : ComponentActivity() {
             setOnClickListener { turnOff() }
         }
         hero.addView(offButton, LinearLayout.LayoutParams(148.dp(), 48.dp()).apply { topMargin = 18.dp() })
+        assistantSpeechPlaybackButton = Button(this).apply {
+            isAllCaps = false
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+            setOnClickListener { toggleAssistantSpeechPlayback() }
+        }
+        hero.addView(assistantSpeechPlaybackButton, LinearLayout.LayoutParams(148.dp(), 44.dp()).apply { topMargin = 10.dp() })
         speechHistoryPanel = buildSpeechHistoryPanel()
         hero.addView(speechHistoryPanel, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             topMargin = 22.dp()
@@ -491,6 +499,7 @@ class MainActivity : ComponentActivity() {
             setBackgroundColor(COLOR_BACKGROUND)
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
+            settings.mediaPlaybackRequiresUserGesture = false
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                     return false
@@ -712,6 +721,7 @@ class MainActivity : ComponentActivity() {
         renderAssistantActivity(status)
         primaryActionButton.stylePrimaryButton(mode)
         offButton.visibility = if (mode == SessionMode.OFF || mode == SessionMode.ERROR) View.GONE else View.VISIBLE
+        updateAssistantSpeechPlaybackButton()
         if (mode == SessionMode.OFF) updateApprovalUi("")
         if (status.contains("assistant replied", ignoreCase = true) ||
             status.contains("artifact", ignoreCase = true) ||
@@ -738,6 +748,21 @@ class MainActivity : ComponentActivity() {
             assistantActivityText.visibility = View.VISIBLE
             assistantActivityText.text = text
         }
+    }
+
+    private fun toggleAssistantSpeechPlayback() {
+        val enabled = !api.assistantSpeechPlaybackEnabled()
+        api.saveAssistantSpeechPlaybackEnabled(enabled)
+        if (!enabled) AssistantAudioPlayer.stopAll()
+        updateAssistantSpeechPlaybackButton()
+        showStatus(if (enabled) "Assistant speech playback enabled." else "Assistant speech playback disabled.")
+    }
+
+    private fun updateAssistantSpeechPlaybackButton() {
+        if (!::assistantSpeechPlaybackButton.isInitialized) return
+        val enabled = api.assistantSpeechPlaybackEnabled()
+        assistantSpeechPlaybackButton.text = if (enabled) "Speech on" else "Speech off"
+        assistantSpeechPlaybackButton.styleAssistantSpeechPlaybackButton(enabled)
     }
 
     private fun refreshAssistantThreadSummary() {
@@ -1024,6 +1049,7 @@ class MainActivity : ComponentActivity() {
         if (::suppressWakeDuringPlaybackCheckbox.isInitialized) {
             suppressWakeDuringPlaybackCheckbox.isChecked = api.suppressWakeDuringPlaybackEnabled()
         }
+        updateAssistantSpeechPlaybackButton()
         updatePairingMessage()
     }
 
@@ -1051,6 +1077,7 @@ class MainActivity : ComponentActivity() {
         if (::suppressWakeDuringPlaybackCheckbox.isInitialized) {
             api.saveSuppressWakeDuringPlaybackEnabled(suppressWakeDuringPlaybackCheckbox.isChecked)
         }
+        updateAssistantSpeechPlaybackButton()
         showStatus(
             if (echoSettingChanged && sessionMode != SessionMode.OFF) {
                 "Settings saved. Restart listening to apply echo canceler."
@@ -1417,7 +1444,6 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun enterSleep() {
-        AssistantAudioPlayer.stopAll()
         startService(Intent(this, VoiceSessionService::class.java).apply { action = Constants.ACTION_SLEEP })
         wakeController.toggleAwakeSleep()
         showStatus("Sleeping.")
@@ -1425,8 +1451,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun turnOff() {
-        AssistantAudioPlayer.stopAll()
-        startService(Intent(this, VoiceSessionService::class.java).apply { action = Constants.ACTION_STOP_VOICE })
+        startService(Intent(this, VoiceSessionService::class.java).apply { action = Constants.ACTION_VOICE_OFF })
         wakeController.stopAll()
         cuePlayer.play(LocalCue.STOP_BUTTON)
         showStatus("Off.")
@@ -1794,6 +1819,16 @@ class MainActivity : ComponentActivity() {
         typeface = Typeface.DEFAULT_BOLD
         isAllCaps = false
         background = rounded(COLOR_FLOATING, 24.dp(), COLOR_STROKE)
+        minHeight = 0
+        minimumHeight = 0
+    }
+
+    private fun Button.styleAssistantSpeechPlaybackButton(enabled: Boolean) {
+        setTextColor(if (enabled) COLOR_GREEN else COLOR_MUTED)
+        textSize = 13f
+        typeface = Typeface.DEFAULT_BOLD
+        isAllCaps = false
+        background = rounded(if (enabled) 0xff14261c.toInt() else COLOR_FLOATING, 22.dp(), if (enabled) COLOR_GREEN else COLOR_STROKE)
         minHeight = 0
         minimumHeight = 0
     }

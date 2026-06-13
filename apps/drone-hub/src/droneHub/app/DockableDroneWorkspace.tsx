@@ -12,6 +12,7 @@ import 'dockview/dist/styles/dockview.css';
 import type { DroneSummary } from '../types';
 import { profileStorageKey } from '../../profile-storage';
 import { RIGHT_PANEL_TAB_LABELS, type RightPanelTab } from './app-config';
+import { useMobileViewport } from './use-mobile-viewport';
 
 export type WorkspaceLayoutScope = 'global' | 'drone' | 'chat';
 export type WorkspacePaneHeaderMode = 'normal' | 'compact';
@@ -289,6 +290,8 @@ export function DockableDroneWorkspace({
   const [previewHostVersion, setPreviewHostVersion] = React.useState(0);
   const [workspacePanelCount, setWorkspacePanelCount] = React.useState(1);
   const lastReportedPreviewHostRef = React.useRef<PreviewHostState | null>(null);
+  const isMobileViewport = useMobileViewport();
+  const [mobileActivePanel, setMobileActivePanel] = React.useState<'chat' | 'tool'>('chat');
   const markPreviewHostChanged = React.useCallback(() => {
     setPreviewHostVersion((version) => version + 1);
   }, []);
@@ -321,6 +324,16 @@ export function DockableDroneWorkspace({
     [activeToolTab, chatContent, markPreviewHostChanged, previewTab, renderToolPane],
   );
   const components = React.useMemo(() => ({ chat: ChatPanel, tool: ToolPanel }), []);
+
+  React.useEffect(() => {
+    if (!isMobileViewport) return;
+    setMobileActivePanel(toolPaneOpen ? 'tool' : 'chat');
+  }, [activeToolTab, isMobileViewport, openRequestNonce, toolPaneOpen]);
+
+  React.useEffect(() => {
+    if (!isMobileViewport) return;
+    onVisibleToolTabsChange?.(toolPaneOpen ? [activeToolTab] : []);
+  }, [activeToolTab, isMobileViewport, onVisibleToolTabsChange, toolPaneOpen]);
 
   const persistCurrentLayout = React.useCallback(() => {
     const api = apiRef.current;
@@ -511,7 +524,16 @@ export function DockableDroneWorkspace({
       resizeObserver?.disconnect();
       window.removeEventListener('resize', updatePosition);
     };
-  }, [currentDrone.id, reportPreviewHostChange, previewHostVersion, activeToolTab, storageKey]);
+  }, [
+    activeToolTab,
+    currentDrone.id,
+    isMobileViewport,
+    mobileActivePanel,
+    previewHostVersion,
+    reportPreviewHostChange,
+    storageKey,
+    toolPaneOpen,
+  ]);
 
   React.useEffect(() => {
     return () => {
@@ -525,24 +547,78 @@ export function DockableDroneWorkspace({
 
   return (
     <DockableDroneWorkspaceContext.Provider value={contextValue}>
-      <div
-        className={`flex-1 min-h-0 min-w-0 overflow-hidden dh-dockable-workspace ${
-          paneHeaderMode === 'compact' ? 'dh-dockable-workspace--compact-headers' : ''
-        } ${workspacePanelCount <= 1 ? 'dh-dockable-workspace--single-panel' : ''}`}
-      >
-        <DockviewReact
-          className="dockview-theme-dark dh-dockview"
-          components={components}
-          defaultTabComponent={WorkspaceTab}
-          watermarkComponent={WorkspaceWatermark}
-          onReady={handleReady}
-          singleTabMode="fullwidth"
-          floatingGroupBounds="boundedWithinViewport"
-          getTabContextMenuItems={({ panel }) =>
-            panel.id === CHAT_PANEL_ID ? [] : ['close', 'closeOthers', 'closeAll']
-          }
-        />
-      </div>
+      {isMobileViewport ? (
+        <div className="dh-mobile-workspace flex-1 min-h-0 min-w-0 overflow-hidden bg-[var(--panel)] flex flex-col">
+          {toolPaneOpen ? (
+            <div className="dh-mobile-workspace-tabs flex flex-shrink-0 items-center gap-1 overflow-x-auto border-b border-[var(--border)] bg-[var(--panel-alt)] px-2 py-1.5">
+              <button
+                type="button"
+                onClick={() => setMobileActivePanel('chat')}
+                className={`inline-flex h-8 items-center rounded-md border px-3 text-[10px] font-semibold uppercase tracking-wide transition-all ${
+                  mobileActivePanel === 'chat'
+                    ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                    : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)]'
+                }`}
+                style={{ fontFamily: 'var(--display)' }}
+              >
+                Chat
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileActivePanel('tool');
+                  onActiveToolTabChange?.(activeToolTab);
+                }}
+                className={`inline-flex h-8 items-center rounded-md border px-3 text-[10px] font-semibold uppercase tracking-wide transition-all ${
+                  mobileActivePanel === 'tool'
+                    ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                    : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)]'
+                }`}
+                style={{ fontFamily: 'var(--display)' }}
+              >
+                {RIGHT_PANEL_TAB_LABELS[activeToolTab]}
+              </button>
+            </div>
+          ) : null}
+          <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
+            {mobileActivePanel === 'tool' && toolPaneOpen ? (
+              activeToolTab === previewTab ? (
+                <div
+                  data-dockview-preview-host="1"
+                  className="h-full min-w-0 min-h-0 overflow-hidden bg-[var(--panel-alt)] relative flex flex-col"
+                >
+                  <div className="absolute inset-0 min-h-0 overflow-hidden" aria-hidden="true" />
+                </div>
+              ) : (
+                <div className="h-full min-w-0 min-h-0 overflow-hidden bg-[var(--panel-alt)]">
+                  {renderToolPane(activeToolTab, 'single')}
+                </div>
+              )
+            ) : (
+              <div className="h-full min-w-0 min-h-0 overflow-hidden bg-[var(--panel)] flex flex-col">{chatContent}</div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div
+          className={`flex-1 min-h-0 min-w-0 overflow-hidden dh-dockable-workspace ${
+            paneHeaderMode === 'compact' ? 'dh-dockable-workspace--compact-headers' : ''
+          } ${workspacePanelCount <= 1 ? 'dh-dockable-workspace--single-panel' : ''}`}
+        >
+          <DockviewReact
+            className="dockview-theme-dark dh-dockview"
+            components={components}
+            defaultTabComponent={WorkspaceTab}
+            watermarkComponent={WorkspaceWatermark}
+            onReady={handleReady}
+            singleTabMode="fullwidth"
+            floatingGroupBounds="boundedWithinViewport"
+            getTabContextMenuItems={({ panel }) =>
+              panel.id === CHAT_PANEL_ID ? [] : ['close', 'closeOthers', 'closeAll']
+            }
+          />
+        </div>
+      )}
     </DockableDroneWorkspaceContext.Provider>
   );
 }

@@ -1493,9 +1493,11 @@ export function DroneSidebar({
       ) : null}
       <aside
         data-drone-sidebar-root="true"
+        data-drone-sidebar-shell="expanded"
         data-sidebar-dock-side={sidebarDockSide}
+        data-sidebar-collapsed={sidebarCollapsed ? 'true' : 'false'}
         className={`bg-[var(--panel-alt)] ${sidebarBorderClass} border-[var(--border)] flex flex-col min-h-0 relative dh-dot-grid flex-shrink-0 overflow-hidden transition-[width] duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)] [will-change:width]`}
-        style={{ width: sidebarCollapsed ? 0 : SIDEBAR_EXPANDED_WIDTH_PX }}
+        style={{ width: sidebarCollapsed ? 0 : `min(${SIDEBAR_EXPANDED_WIDTH_PX}px, 100vw)` }}
         onPointerEnter={onSidebarPointerEnter}
         onPointerLeave={onSidebarPointerLeave}
         onPointerDownCapture={enableSidebarDndForInteraction}
@@ -2147,7 +2149,9 @@ export function DroneSidebar({
 
       <div
         data-drone-sidebar-root="true"
+        data-drone-sidebar-shell="rail"
         data-sidebar-dock-side={sidebarDockSide}
+        data-sidebar-collapsed={sidebarCollapsed ? 'true' : 'false'}
         className={`flex-shrink-0 bg-[var(--panel-alt)] ${collapsedRailBorderClass} flex flex-col items-center pt-3 gap-2 overflow-hidden transition-[width,opacity,border-color] duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
           sidebarCollapsed
             ? 'opacity-100 border-[var(--border)]'
