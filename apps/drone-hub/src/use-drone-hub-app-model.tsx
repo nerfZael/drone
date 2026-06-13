@@ -34,10 +34,7 @@ import { useChatRuntimeOrchestration } from './droneHub/app/use-chat-runtime-orc
 import { useDroneErrorModalActions } from './droneHub/app/use-drone-error-modal-actions';
 import { useRepoBranchOptions } from './droneHub/app/use-repo-branch-options';
 import { useDroneMutationActions } from './droneHub/app/use-drone-mutation-actions';
-import {
-  invalidateFsListCacheForPath,
-  useFilesAndPortsPaneState,
-} from './droneHub/app/use-files-and-ports-pane-state';
+import { useFilesAndPortsPaneState } from './droneHub/app/use-files-and-ports-pane-state';
 import { useFileEditorState } from './droneHub/app/use-file-editor-state';
 import { useGroupBroadcast } from './droneHub/app/use-group-broadcast';
 import { useGroupManagement } from './droneHub/app/use-group-management';
@@ -70,7 +67,6 @@ import { useTranscriptTldrState } from './droneHub/app/use-transcript-tldr-state
 import { useAgentSuggestionState } from './droneHub/app/use-agent-suggestion-state';
 import { useWorkspaceNavigationActions } from './droneHub/app/use-workspace-navigation-actions';
 import { useWorkspaceActions } from './droneHub/app/use-workspace-actions';
-import { DRONE_FILE_WINDOW_SAVED_EVENT, openDroneFileWindow } from './droneHub/files/open-drone-file-window';
 import {
   resolveNewDroneContextFromCurrentSelection,
   shouldInheritNewDroneContextFromCurrentSelection,
@@ -2167,7 +2163,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [focusFilesPane, openEditorFile, setCurrentFsPath],
   );
-  const openFileInWindowFromFilesPane = React.useCallback(
+  const openFileInPanelFromFilesPane = React.useCallback(
     (next: { path: string; name: string; line?: number | null; column?: number | null }): boolean => {
       const droneId = String(currentDrone?.id ?? '').trim();
       const containerPath = String(next.path ?? '').trim();
@@ -2175,30 +2171,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const slash = containerPath.lastIndexOf('/');
       const parentPath = slash > 0 ? containerPath.slice(0, slash) : '/';
       setCurrentFsPath(parentPath || '/');
-      const openedWindow = openDroneFileWindow({
-        droneId,
-        path: containerPath,
-        name: next.name,
-        line: next.line,
-        column: next.column,
-        onSaved: (savedPath) => {
-          const savedFilePath = String(savedPath ?? '').trim() || containerPath;
-          invalidateFsListCacheForPath(droneId, savedFilePath);
-          window.dispatchEvent(
-            new CustomEvent(DRONE_FILE_WINDOW_SAVED_EVENT, {
-              detail: { droneId, path: savedFilePath },
-            }),
-          );
-        },
-      });
-      if (openedWindow) {
-        closeEditorFile();
-        return true;
-      }
+      focusFilesPane();
       openEditorFile(next);
-      return false;
+      return true;
     },
-    [closeEditorFile, currentDrone?.id, openEditorFile, setCurrentFsPath],
+    [currentDrone?.id, focusFilesPane, openEditorFile, setCurrentFsPath],
   );
   const [pendingPlaybookArtifact, setPendingPlaybookArtifact] = React.useState<{
     droneId: string;
@@ -2959,9 +2936,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             if (entry.kind !== 'file') return;
             openFileInFilesPane({ path: entry.path, name: entry.name });
           }}
-          onOpenFileInWindow={(entry) => {
+          onOpenFileInPanel={(entry) => {
             if (entry.kind !== 'file') return false;
-            return openFileInWindowFromFilesPane({ path: entry.path, name: entry.name });
+            return openFileInPanelFromFilesPane({ path: entry.path, name: entry.name });
           }}
           onOpenFileTargetInEditor={openFileInFilesPane}
           openedFile={{
@@ -3063,7 +3040,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       uiDroneName,
       openChangesFileInEditor,
       openFileInFilesPane,
-      openFileInWindowFromFilesPane,
+      openFileInPanelFromFilesPane,
       openedEditorFile,
       openedEditorFileContent,
       openedEditorFileDirty,

@@ -6,7 +6,6 @@ import { IconChevron, iconForFilePath } from '../icons';
 import type { DroneFsEntry, DroneFsListPayload, DroneFsUploadPayload } from '../types';
 import { OpenedDroneFilePanel } from './OpenedDroneFilePanel';
 import type { DroneOpenedFileState } from './opened-file-types';
-import { DRONE_FILE_WINDOW_SAVED_EVENT } from './open-drone-file-window';
 import { buildFileExplorerTree, type FileExplorerNode } from './tree';
 
 const CHILD_DIRECTORY_CACHE_MAX_AGE_MS = 5 * 60_000;
@@ -38,12 +37,6 @@ function normalizeContainerPathInput(raw: string): string {
   const trimmed = String(raw ?? '').trim();
   if (!trimmed) return '/';
   return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
-}
-
-function parentContainerPath(raw: string): string {
-  const normalized = normalizeContainerPathInput(raw);
-  const slash = normalized.lastIndexOf('/');
-  return slash > 0 ? normalized.slice(0, slash) : '/';
 }
 
 function formatLocalDateTime(ms: number | null | undefined): string {
@@ -115,7 +108,7 @@ export function DroneFilesDock({
   onSetViewMode: _onSetViewMode,
   onOpenPath,
   onOpenFile,
-  onOpenFileInWindow,
+  onOpenFileInPanel,
   onOpenFileTarget,
   onRefresh,
   onRefreshOpenedFile,
@@ -137,7 +130,7 @@ export function DroneFilesDock({
   onSetViewMode: (next: 'list' | 'thumb') => void;
   onOpenPath: (nextPath: string) => void;
   onOpenFile: (entry: DroneFsEntry) => void;
-  onOpenFileInWindow?: (entry: DroneFsEntry) => boolean;
+  onOpenFileInPanel?: (entry: DroneFsEntry) => boolean;
   onOpenFileTarget?: (next: { path: string; name: string; line?: number | null; column?: number | null }) => void;
   onRefresh: () => void;
   onRefreshOpenedFile?: () => void;
@@ -294,27 +287,6 @@ export function DroneFilesDock({
     }
   }, [expandedDirs, loadDirectory, onRefresh, onRefreshOpenedFile]);
 
-  React.useEffect(() => {
-    const onFileWindowSaved = (event: Event) => {
-      const detail = (event as CustomEvent<{ droneId?: string; path?: string }>).detail;
-      if (String(detail?.droneId ?? '') !== String(droneId)) return;
-      const filePath = String(detail?.path ?? '').trim();
-      if (!filePath) return;
-      const parentPath = parentContainerPath(filePath);
-      childDirectoryCache.delete(childDirectoryCacheKey(droneId, parentPath));
-      if (parentPath === normalizedPath) {
-        onRefresh();
-        return;
-      }
-      const childKnown = Object.prototype.hasOwnProperty.call(childEntriesByPath, parentPath);
-      if (expandedDirs[parentPath] === true || childKnown) {
-        void loadDirectory(parentPath, { force: true });
-      }
-    };
-    window.addEventListener(DRONE_FILE_WINDOW_SAVED_EVENT, onFileWindowSaved);
-    return () => window.removeEventListener(DRONE_FILE_WINDOW_SAVED_EVENT, onFileWindowSaved);
-  }, [childEntriesByPath, droneId, expandedDirs, loadDirectory, normalizedPath, onRefresh]);
-
   const uploadFilesToCurrentPath = React.useCallback(
     async (dropped: FileList | File[] | null | undefined) => {
       const files = Array.from(dropped ?? []);
@@ -446,10 +418,10 @@ export function DroneFilesDock({
   const openFileEntry = React.useCallback(
     (entry: DroneFsEntry) => {
       if (entry.kind !== 'file') return;
-      if (onOpenFileInWindow?.(entry)) return;
+      if (onOpenFileInPanel?.(entry)) return;
       onOpenFile(entry);
     },
-    [onOpenFile, onOpenFileInWindow],
+    [onOpenFile, onOpenFileInPanel],
   );
 
   const renderDownloadButton = React.useCallback(
