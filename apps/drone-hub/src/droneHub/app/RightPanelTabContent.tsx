@@ -425,7 +425,7 @@ export function RightPanelTabContent({
     case 'editor':
       return (
         <LazyPane tab={tab}>
-          <div className="h-full min-h-0 overflow-hidden bg-[var(--panel-alt)] p-2.5">
+          <div className="h-full min-h-0 overflow-hidden bg-[var(--panel-alt)]">
             {openedFile.path ? (
               <LazyOpenedDroneFilePanel
                 droneId={drone.id}
@@ -436,7 +436,7 @@ export function RightPanelTabContent({
                 onOpenResolvedFile={onOpenFileTargetInEditor}
               />
             ) : (
-              <div className="h-full rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] flex items-center justify-center px-4 text-center text-[12px] text-[var(--muted)]">
+              <div className="h-full flex items-center justify-center px-4 text-center text-[12px] text-[var(--muted)]">
                 Open a file from Files, Changes, PRs, or a chat reference.
               </div>
             )}

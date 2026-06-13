@@ -171,13 +171,13 @@ export function OpenedDroneFilePanel({
     `h-7 px-2 rounded-md border text-[10px] font-semibold transition-colors ${
       active
         ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-        : 'border-[var(--border-subtle)] bg-[var(--panel)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
+        : 'border-[var(--border-subtle)] bg-transparent text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
     } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`;
 
   return (
-    <div className="h-full min-h-0 overflow-hidden">
-      <div className="min-w-0 h-full min-h-0 rounded-md border border-[var(--border-subtle)] bg-[var(--panel)] flex flex-col">
-        <div className="px-3 py-2 border-b border-[var(--border-subtle)] flex items-center justify-between gap-3">
+    <div className="h-full min-h-0 overflow-hidden bg-[var(--panel-alt)]">
+      <div className="min-w-0 h-full min-h-0 bg-[var(--panel-alt)] flex flex-col">
+        <div className="px-4 py-2.5 border-b border-[var(--border-subtle)] bg-[rgba(255,255,255,.025)] flex items-center justify-between gap-3">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 min-w-0">
               <div className="truncate text-[13px] font-medium text-[var(--fg-secondary)]">{fileName || activeFilePath || 'File'}</div>
@@ -219,7 +219,7 @@ export function OpenedDroneFilePanel({
                 disabled={Boolean(fileLoading) || Boolean(fileSaving) || !fileDirty || !onSaveFile}
                 className={`h-7 px-2.5 rounded-md border text-[10px] font-semibold transition-colors ${
                   fileLoading || fileSaving || !fileDirty || !onSaveFile
-                    ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] opacity-50 cursor-not-allowed'
+                    ? 'border-[var(--border-subtle)] bg-transparent text-[var(--muted-dim)] opacity-50 cursor-not-allowed'
                     : 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:shadow-[var(--glow-accent)]'
                 }`}
                 title="Save file (Ctrl/Cmd+S)"
@@ -230,7 +230,7 @@ export function OpenedDroneFilePanel({
             <button
               type="button"
               onClick={onCloseFile}
-              className="h-7 px-2.5 rounded-md border border-[var(--border-subtle)] bg-[var(--panel)] text-[10px] font-semibold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] whitespace-nowrap"
+              className="h-7 px-2.5 rounded-md border border-[var(--border-subtle)] bg-transparent text-[10px] font-semibold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] whitespace-nowrap"
               title="Close file"
             >
               Done
@@ -242,7 +242,7 @@ export function OpenedDroneFilePanel({
             {fileError}
           </div>
         ) : null}
-        <div className="flex-1 min-h-[360px] border-t border-[var(--border-subtle)]">
+        <div className="flex-1 min-h-[360px]">
           {fileLoading ? (
             <div className="h-full w-full flex items-center justify-center text-[12px] text-[var(--muted)]">Loading file...</div>
           ) : fileKind === 'image' && openedFileMediaSrc ? (
