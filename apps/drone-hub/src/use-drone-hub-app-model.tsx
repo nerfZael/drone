@@ -1650,7 +1650,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const filesPaneActive = Boolean(
     currentDrone &&
       rightPanelOpen &&
-      (rightPanelTab === 'files' || (rightPanelSplit && rightPanelBottomTab === 'files')),
+      (
+        rightPanelTab === 'files' ||
+        rightPanelTab === 'editor' ||
+        (rightPanelSplit && (rightPanelBottomTab === 'files' || rightPanelBottomTab === 'editor'))
+      ),
   );
   const portsPaneActive = Boolean(
     currentDrone &&
@@ -2153,16 +2157,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setNewCustomAgentCommand,
     setCustomAgentModalOpen,
   });
-  const focusFilesPane = React.useCallback(() => {
+  const focusEditorPane = React.useCallback(() => {
     setRightPanelOpen(true);
-    if (!rightPanelSplit) {
-      setRightPanelTab('files');
-      return;
-    }
-    if (rightPanelTab === 'files') return;
-    if (rightPanelBottomTab === 'files') return;
-    setRightPanelTab('files');
-  }, [rightPanelBottomTab, rightPanelSplit, rightPanelTab, setRightPanelOpen, setRightPanelTab]);
+    if (rightPanelTab === 'editor') return;
+    setRightPanelTab('editor');
+  }, [rightPanelTab, setRightPanelOpen, setRightPanelTab]);
   const openFileInFilesPane = React.useCallback(
     (next: { path: string; name: string; line?: number | null; column?: number | null }) => {
       const containerPath = String(next.path ?? '').trim();
@@ -2170,10 +2169,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const slash = containerPath.lastIndexOf('/');
       const parentPath = slash > 0 ? containerPath.slice(0, slash) : '/';
       setCurrentFsPath(parentPath || '/');
-      focusFilesPane();
       openEditorFile(next);
+      focusEditorPane();
     },
-    [focusFilesPane, openEditorFile, setCurrentFsPath],
+    [focusEditorPane, openEditorFile, setCurrentFsPath],
   );
   const openFileInPanelFromFilesPane = React.useCallback(
     (next: { path: string; name: string; line?: number | null; column?: number | null }): boolean => {
@@ -2183,11 +2182,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const slash = containerPath.lastIndexOf('/');
       const parentPath = slash > 0 ? containerPath.slice(0, slash) : '/';
       setCurrentFsPath(parentPath || '/');
-      focusFilesPane();
       openEditorFile(next);
+      focusEditorPane();
       return true;
     },
-    [currentDrone?.id, focusFilesPane, openEditorFile, setCurrentFsPath],
+    [currentDrone?.id, focusEditorPane, openEditorFile, setCurrentFsPath],
   );
   const [pendingPlaybookArtifact, setPendingPlaybookArtifact] = React.useState<{
     droneId: string;

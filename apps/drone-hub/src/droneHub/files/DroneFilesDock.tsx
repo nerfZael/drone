@@ -4,7 +4,6 @@ import { formatBytes } from '../app/selected-drone-workspace-utils';
 import { requestJson } from '../http';
 import { IconChevron, iconForFilePath } from '../icons';
 import type { DroneFsEntry, DroneFsListPayload, DroneFsUploadPayload } from '../types';
-import { OpenedDroneFilePanel } from './OpenedDroneFilePanel';
 import type { DroneOpenedFileState } from './opened-file-types';
 import { buildFileExplorerTree, type FileExplorerNode } from './tree';
 
@@ -109,13 +108,9 @@ export function DroneFilesDock({
   onOpenPath,
   onOpenFile,
   onOpenFileInPanel,
-  onOpenFileTarget,
   onRefresh,
   onRefreshOpenedFile,
   openedFile,
-  onOpenedFileContentChange,
-  onSaveOpenedFile,
-  onCloseOpenedFile,
 }: {
   droneId: string;
   droneName: string;
@@ -131,13 +126,9 @@ export function DroneFilesDock({
   onOpenPath: (nextPath: string) => void;
   onOpenFile: (entry: DroneFsEntry) => void;
   onOpenFileInPanel?: (entry: DroneFsEntry) => boolean;
-  onOpenFileTarget?: (next: { path: string; name: string; line?: number | null; column?: number | null }) => void;
   onRefresh: () => void;
   onRefreshOpenedFile?: () => void;
   openedFile: DroneOpenedFileState;
-  onOpenedFileContentChange?: (next: string) => void;
-  onSaveOpenedFile?: (contentOverride?: string) => Promise<boolean>;
-  onCloseOpenedFile?: () => void;
 }) {
   const shownName = String(droneLabel ?? droneName).trim() || droneName;
   const normalizedPath = normalizeContainerPathInput(path);
@@ -395,26 +386,6 @@ export function DroneFilesDock({
     [droneId],
   );
 
-  const openResolvedFile = React.useCallback(
-    (next: { path: string; name: string; line?: number | null; column?: number | null }) => {
-      if (onOpenFileTarget) {
-        onOpenFileTarget(next);
-        return;
-      }
-      onOpenFile({
-        name: next.name,
-        path: next.path,
-        kind: 'file',
-        size: null,
-        mtimeMs: null,
-        ext: null,
-        isImage: false,
-        isVideo: false,
-      });
-    },
-    [onOpenFile, onOpenFileTarget],
-  );
-
   const openFileEntry = React.useCallback(
     (entry: DroneFsEntry) => {
       if (entry.kind !== 'file') return;
@@ -594,7 +565,6 @@ export function DroneFilesDock({
   }
 
   const showStartupPlaceholder = Boolean(startup?.waiting) && !error && entries.length === 0;
-  const hasOpenedFile = activeOpenedFilePath.length > 0;
   const startupLabel = startup?.hubPhase === 'seeding' ? 'Seeding' : 'Starting';
   const startupDetail = String(startup?.hubMessage ?? '').trim();
   const startupText = startup?.timedOut
@@ -703,24 +673,7 @@ export function DroneFilesDock({
       ) : null}
 
       <div className="flex-1 min-h-0 flex overflow-hidden">
-        {hasOpenedFile ? (
-          <div className="flex-1 min-w-0 min-h-0 p-2.5 overflow-hidden">
-            <OpenedDroneFilePanel
-              droneId={droneId}
-              file={openedFile}
-              onFileContentChange={onOpenedFileContentChange}
-              onSaveFile={onSaveOpenedFile}
-              onCloseFile={onCloseOpenedFile}
-              onOpenResolvedFile={openResolvedFile}
-            />
-          </div>
-        ) : null}
-
-        <div
-          className={`shrink-0 bg-[var(--panel)] flex flex-col ${
-            hasOpenedFile ? 'w-[300px] border-l border-[var(--border-subtle)]' : 'w-full'
-          }`}
-        >
+        <div className="w-full bg-[var(--panel)] flex flex-col">
           <div className="flex-1 min-h-0 overflow-auto px-1.5 py-1">
             {showStartupPlaceholder ? (
               <div className="rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3 text-[12px] text-[var(--muted)]">

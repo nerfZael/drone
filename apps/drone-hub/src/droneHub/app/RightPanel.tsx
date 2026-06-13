@@ -6,6 +6,7 @@ export type RightPanelTabId =
   | 'terminal'
   | 'env'
   | 'files'
+  | 'editor'
   | 'preview'
   | 'links'
   | 'fleet'

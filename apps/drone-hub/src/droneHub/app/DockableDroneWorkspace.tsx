@@ -38,12 +38,16 @@ type DockableDroneWorkspaceProps = {
   onActiveToolTabChange?: (tab: RightPanelTab) => void;
   onPreviewHostChange?: (state: PreviewHostState) => void;
   onVisibleToolTabsChange?: (tabs: RightPanelTab[]) => void;
+  onBeforeWorkspaceMouseDown?: () => void;
+  onAfterToolPanelRemove?: () => void;
 };
 
 const CHAT_PANEL_ID = 'agent-chat';
 const TOOL_PANEL_PREFIX = 'tool:';
-const DEFAULT_NEW_TOOL_PANEL_WIDTH = 460;
+const DEFAULT_NEW_TOOL_PANEL_WIDTH = 560;
 const DEFAULT_NEW_TOOL_PANEL_HEIGHT = 320;
+const NEW_TOOL_PANEL_MIN_WIDTH = 360;
+const NEW_TOOL_PANEL_MAX_WIDTH = 760;
 export const WORKSPACE_LAYOUT_SCOPES: WorkspaceLayoutScope[] = ['global', 'drone', 'chat'];
 const LAYOUT_SCOPE_STORAGE_KEY = profileStorageKey('droneHub.workspaceLayoutScope');
 const PANE_HEADER_MODE_STORAGE_KEY = profileStorageKey('droneHub.workspacePaneHeaderMode');
@@ -109,6 +113,23 @@ function restoreGridGroupSizes(api: DockviewApi, snapshot: GroupSizeSnapshot): v
   }
 }
 
+function clampNewToolPanelWidth(width: number): number {
+  const safe = Number.isFinite(width) ? Math.round(width) : DEFAULT_NEW_TOOL_PANEL_WIDTH;
+  return Math.max(NEW_TOOL_PANEL_MIN_WIDTH, Math.min(NEW_TOOL_PANEL_MAX_WIDTH, safe));
+}
+
+function newToolPanelWidth(api: DockviewApi, tab: RightPanelTab, referencePanelId: string): number {
+  const workspaceWidth = Math.round(Number(api.width ?? 0));
+  const referenceGroup = api.groups.find((group) => group.panels.some((panel) => panel.id === referencePanelId));
+  const referenceWidth = Math.round(Number(referenceGroup?.width ?? 0));
+  if (tab === 'editor') {
+    const availableWidth = workspaceWidth > 0 ? workspaceWidth : referenceWidth;
+    if (availableWidth > 0) return clampNewToolPanelWidth(availableWidth * 0.5);
+  }
+  if (workspaceWidth > 0) return clampNewToolPanelWidth(workspaceWidth * 0.38);
+  return DEFAULT_NEW_TOOL_PANEL_WIDTH;
+}
+
 export function readWorkspaceLayoutScope(): WorkspaceLayoutScope {
   if (typeof localStorage === 'undefined') return 'global';
   const raw = localStorage.getItem(LAYOUT_SCOPE_STORAGE_KEY);
@@ -166,6 +187,8 @@ function ensurePanel(api: DockviewApi, tab: RightPanelTab, paneKey: WorkspacePan
     return;
   }
 
+  const editorReferencePanel = tab === 'editor' && api.getPanel(toolPanelId('files')) ? toolPanelId('files') : referencePanel;
+  const initialWidth = newToolPanelWidth(api, tab, editorReferencePanel);
   api.addPanel({
     id,
     component: 'tool',
@@ -173,9 +196,9 @@ function ensurePanel(api: DockviewApi, tab: RightPanelTab, paneKey: WorkspacePan
     params: { tab, paneKey },
     position: {
       direction: paneKey === 'bottom' ? 'below' : 'right',
-      referencePanel,
+      referencePanel: editorReferencePanel,
     },
-    initialWidth: DEFAULT_NEW_TOOL_PANEL_WIDTH,
+    initialWidth,
     initialHeight: DEFAULT_NEW_TOOL_PANEL_HEIGHT,
     minimumWidth: 260,
     minimumHeight: 180,
@@ -278,6 +301,8 @@ export function DockableDroneWorkspace({
   onActiveToolTabChange,
   onPreviewHostChange,
   onVisibleToolTabsChange,
+  onBeforeWorkspaceMouseDown,
+  onAfterToolPanelRemove,
 }: DockableDroneWorkspaceProps) {
   const apiRef = React.useRef<DockviewApi | null>(null);
   const disposablesRef = React.useRef<Array<{ dispose: () => void }>>([]);
@@ -287,6 +312,8 @@ export function DockableDroneWorkspace({
   const lastAppliedToolTabRef = React.useRef<RightPanelTab | null>(null);
   const lastAppliedOpenStateRef = React.useRef<boolean | null>(null);
   const lastLoadedKeyRef = React.useRef<string>('');
+  const workspaceMouseDragActiveRef = React.useRef(false);
+  const workspaceMouseDragClearTimerRef = React.useRef<number | null>(null);
   const [previewHostVersion, setPreviewHostVersion] = React.useState(0);
   const [workspacePanelCount, setWorkspacePanelCount] = React.useState(1);
   const lastReportedPreviewHostRef = React.useRef<PreviewHostState | null>(null);
@@ -344,12 +371,16 @@ export function DockableDroneWorkspace({
       // Ignore layout persistence failures; the active workspace can keep running.
     }
   }, [storageKey]);
-  const restorePreviousGridGroupSizes = React.useCallback((snapshot: GroupSizeSnapshot) => {
+  const restorePreviousGridGroupSizes = React.useCallback((snapshot: GroupSizeSnapshot, afterRestore?: () => void) => {
     const api = apiRef.current;
     if (!api) return;
     window.setTimeout(() => {
       const currentApi = apiRef.current;
       if (!currentApi) return;
+      if (workspaceMouseDragActiveRef.current) {
+        afterRestore?.();
+        return;
+      }
       suppressSaveRef.current = true;
       try {
         restoreGridGroupSizes(currentApi, snapshot);
@@ -357,6 +388,7 @@ export function DockableDroneWorkspace({
         suppressSaveRef.current = false;
         lastGridGroupSizesRef.current = captureGridGroupSizes(currentApi);
         persistCurrentLayout();
+        afterRestore?.();
       }
     }, 0);
   }, [persistCurrentLayout]);
@@ -412,7 +444,7 @@ export function DockableDroneWorkspace({
             lastAppliedToolTabRef.current = null;
           }
           updateWorkspacePanelState();
-          restorePreviousGridGroupSizes(previousSizes);
+          restorePreviousGridGroupSizes(previousSizes, onAfterToolPanelRemove);
           return;
         }
         window.setTimeout(() => {
@@ -430,15 +462,47 @@ export function DockableDroneWorkspace({
       disposablesRef.current.forEach((disposable) => disposable.dispose());
       disposablesRef.current = [layoutDisposable, activePanelDisposable, removeDisposable];
     },
-    [loadLayout, onActiveToolTabChange, persistCurrentLayout, restorePreviousGridGroupSizes, updateWorkspacePanelState],
+    [loadLayout, onActiveToolTabChange, onAfterToolPanelRemove, persistCurrentLayout, restorePreviousGridGroupSizes, updateWorkspacePanelState],
   );
 
   React.useEffect(() => {
     return () => {
       disposablesRef.current.forEach((disposable) => disposable.dispose());
       disposablesRef.current = [];
+      if (workspaceMouseDragClearTimerRef.current != null) {
+        window.clearTimeout(workspaceMouseDragClearTimerRef.current);
+        workspaceMouseDragClearTimerRef.current = null;
+      }
     };
   }, []);
+
+  const handleWorkspaceMouseDownCapture = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    onBeforeWorkspaceMouseDown?.();
+    const startX = event.clientX;
+    const startY = event.clientY;
+    workspaceMouseDragActiveRef.current = false;
+    if (workspaceMouseDragClearTimerRef.current != null) {
+      window.clearTimeout(workspaceMouseDragClearTimerRef.current);
+      workspaceMouseDragClearTimerRef.current = null;
+    }
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      if (Math.abs(moveEvent.clientX - startX) + Math.abs(moveEvent.clientY - startY) < 4) return;
+      workspaceMouseDragActiveRef.current = true;
+    };
+    const onMouseUp = () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+      workspaceMouseDragClearTimerRef.current = window.setTimeout(() => {
+        workspaceMouseDragActiveRef.current = false;
+        workspaceMouseDragClearTimerRef.current = null;
+      }, 150);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  }, [onBeforeWorkspaceMouseDown]);
 
   React.useEffect(() => {
     if (!apiRef.current) return;
@@ -604,6 +668,7 @@ export function DockableDroneWorkspace({
           className={`flex-1 min-h-0 min-w-0 overflow-hidden dh-dockable-workspace ${
             paneHeaderMode === 'compact' ? 'dh-dockable-workspace--compact-headers' : ''
           } ${workspacePanelCount <= 1 ? 'dh-dockable-workspace--single-panel' : ''}`}
+          onMouseDownCapture={handleWorkspaceMouseDownCapture}
         >
           <DockviewReact
             className="dockview-theme-dark dh-dockview"

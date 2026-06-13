@@ -36,6 +36,9 @@ const LazyDroneFleetDock = React.lazy(async () => ({
 const LazyDroneFilesDock = React.lazy(async () => ({
   default: (await import('../files/DroneFilesDock')).DroneFilesDock,
 }));
+const LazyOpenedDroneFilePanel = React.lazy(async () => ({
+  default: (await import('../files/OpenedDroneFilePanel')).OpenedDroneFilePanel,
+}));
 const LazyDroneLinksDock = React.lazy(async () => ({
   default: (await import('../overview/DroneLinksDock')).DroneLinksDock,
 }));
@@ -414,12 +417,30 @@ export function RightPanelTabContent({
             onRefreshOpenedFile={onRefreshOpenedEditorFile}
             onOpenFile={onOpenFileInEditor}
             onOpenFileInPanel={onOpenFileInPanel}
-            onOpenFileTarget={onOpenFileTargetInEditor}
             openedFile={openedFile}
-            onOpenedFileContentChange={onOpenedEditorFileContentChange}
-            onSaveOpenedFile={onSaveOpenedEditorFile}
-            onCloseOpenedFile={onCloseOpenedEditorFile}
           />
+        </LazyPane>
+      );
+
+    case 'editor':
+      return (
+        <LazyPane tab={tab}>
+          <div className="h-full min-h-0 overflow-hidden bg-[var(--panel-alt)] p-2.5">
+            {openedFile.path ? (
+              <LazyOpenedDroneFilePanel
+                droneId={drone.id}
+                file={openedFile}
+                onFileContentChange={onOpenedEditorFileContentChange}
+                onSaveFile={onSaveOpenedEditorFile}
+                onCloseFile={onCloseOpenedEditorFile}
+                onOpenResolvedFile={onOpenFileTargetInEditor}
+              />
+            ) : (
+              <div className="h-full rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] flex items-center justify-center px-4 text-center text-[12px] text-[var(--muted)]">
+                Open a file from Files, Changes, PRs, or a chat reference.
+              </div>
+            )}
+          </div>
         </LazyPane>
       );
 
