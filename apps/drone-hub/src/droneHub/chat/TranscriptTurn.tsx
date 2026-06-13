@@ -314,6 +314,7 @@ export const TranscriptTurn = React.memo(
     droneId,
     droneHomePath,
     showRoleIcons = true,
+    actionsEnabled = true,
   }: {
     item: TranscriptItem;
     parsingJobs: boolean;
@@ -330,6 +331,7 @@ export const TranscriptTurn = React.memo(
     droneId?: string;
     droneHomePath?: string;
     showRoleIcons?: boolean;
+    actionsEnabled?: boolean;
   }) {
     const transcriptInlineImages = useDroneHubUiStore((s) => s.transcriptInlineImages);
     const inlineImagesOverride = useDroneHubUiStore((s) => s.transcriptInlineImageOverrides[messageId]);
@@ -566,7 +568,7 @@ export const TranscriptTurn = React.memo(
                   onOpenLink={onOpenLink}
                 />
               ) : null}
-              {item.ok && droneHubTasks.length > 0 ? (
+              {actionsEnabled && item.ok && droneHubTasks.length > 0 ? (
                 <DroneHubTaskList tasks={droneHubTasks} onSpawnTask={onSpawnDroneHubTask} />
               ) : null}
               {showInlineImages && (
@@ -624,28 +626,30 @@ export const TranscriptTurn = React.memo(
                     <IconImage className="w-3.5 h-3.5 opacity-90" />
                   </button>
                 )}
-                <button
-                  type="button"
-                  onClick={() => onToggleTldr(item)}
-                  disabled={false}
-                  className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-opacity ${
-                    tldrLoading ? 'opacity-100 cursor-wait' : 'opacity-0 group-hover:opacity-100'
-                  } ${
-                    showingTldr ? 'text-[var(--accent)] border-[var(--accent-muted)] bg-[rgba(0,0,0,.25)]' : 'text-[var(--muted)] border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)]'
-                  } hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[rgba(0,0,0,.25)]`}
-                  title={
-                    tldrStatus === 'error'
-                      ? `TLDR failed: ${tldrError || 'unknown error'}`
-                      : showingTldr
-                        ? 'Show original (W)'
-                        : 'Generate/show TLDR (W)'
-                  }
-                  aria-label="Toggle TLDR"
-                >
-                  {tldrLoading ? <IconSpinner className="w-3.5 h-3.5 text-[var(--accent)]" /> : <IconTldr className="w-3.5 h-3.5 opacity-90" />}
-                </button>
+                {actionsEnabled ? (
+                  <button
+                    type="button"
+                    onClick={() => onToggleTldr(item)}
+                    disabled={false}
+                    className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-opacity ${
+                      tldrLoading ? 'opacity-100 cursor-wait' : 'opacity-0 group-hover:opacity-100'
+                    } ${
+                      showingTldr ? 'text-[var(--accent)] border-[var(--accent-muted)] bg-[rgba(0,0,0,.25)]' : 'text-[var(--muted)] border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)]'
+                    } hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[rgba(0,0,0,.25)]`}
+                    title={
+                      tldrStatus === 'error'
+                        ? `TLDR failed: ${tldrError || 'unknown error'}`
+                        : showingTldr
+                          ? 'Show original (W)'
+                          : 'Generate/show TLDR (W)'
+                    }
+                    aria-label="Toggle TLDR"
+                  >
+                    {tldrLoading ? <IconSpinner className="w-3.5 h-3.5 text-[var(--accent)]" /> : <IconTldr className="w-3.5 h-3.5 opacity-90" />}
+                  </button>
+                ) : null}
 
-                {item.ok && (
+                {actionsEnabled && item.ok && (
                   <button
                     type="button"
                     onClick={() => onCreateJobs({ turn: item.turn, message: cleanedAgentMessage })}
@@ -661,7 +665,7 @@ export const TranscriptTurn = React.memo(
                     {parsingJobs ? <IconSpinner className="w-3.5 h-3.5 text-[var(--accent)]" /> : <IconJobs className="w-3.5 h-3.5 opacity-90" />}
                   </button>
                 )}
-                {item.ok && dockerSnapshot && (dockerSnapshotBusy || dockerSnapshot.status === 'failed' || onRollbackDockerSnapshot) ? (
+                {actionsEnabled && item.ok && dockerSnapshot && (dockerSnapshotBusy || dockerSnapshot.status === 'failed' || onRollbackDockerSnapshot) ? (
                   <button
                     type="button"
                     onClick={() => {
@@ -737,5 +741,6 @@ export const TranscriptTurn = React.memo(
     (a.item.dockerSnapshot?.readyAt ?? '') === (b.item.dockerSnapshot?.readyAt ?? '') &&
     (a.item.dockerSnapshot?.restoredAt ?? '') === (b.item.dockerSnapshot?.restoredAt ?? '') &&
     (a.item.dockerSnapshot?.error ?? '') === (b.item.dockerSnapshot?.error ?? '') &&
-    (a.showRoleIcons ?? true) === (b.showRoleIcons ?? true),
+    (a.showRoleIcons ?? true) === (b.showRoleIcons ?? true) &&
+    (a.actionsEnabled ?? true) === (b.actionsEnabled ?? true),
 );

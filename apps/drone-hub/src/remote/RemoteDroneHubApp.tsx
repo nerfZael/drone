@@ -1,5 +1,6 @@
 import React from 'react';
-import { MarkdownMessage } from '../droneHub/chat/MarkdownMessage';
+import { ChatInput, EmptyState, PendingTranscriptTurn, TranscriptTurn, type ChatSendPayload, type DroneHubTask, type DroneHubTaskSpawnMode } from '../droneHub/chat';
+import { IconBot } from '../droneHub/chat/icons';
 import { useRemoteHubModel } from './useRemoteHubModel';
 
 function StatusPill({ label, tone }: { label: string; tone: 'good' | 'muted' | 'busy' | 'bad' }) {
@@ -34,6 +35,23 @@ function PairingRequired() {
 
 export function RemoteDroneHubApp() {
   const model = useRemoteHubModel();
+  const transcriptMessageId = React.useCallback((turn: any) => String(turn?.id ?? `${turn?.turn ?? ''}:${turn?.at ?? ''}`), []);
+  const noopCreateJobs = React.useCallback(() => {}, []);
+  const noopSpawnTask = React.useCallback(async (_mode: DroneHubTaskSpawnMode, _task: DroneHubTask) => {
+    return { ok: false, error: 'Task spawning is not available in remote Hub.' };
+  }, []);
+  const noopToggleTldr = React.useCallback(() => {}, []);
+  const noopHoverAgentMessage = React.useCallback(() => {}, []);
+  const openExternalLink = React.useCallback((href: string) => {
+    const url = String(href ?? '').trim();
+    if (!/^https?:\/\//i.test(url)) return false;
+    window.open(url, '_blank', 'noopener,noreferrer');
+    return true;
+  }, []);
+  const sendPrompt = React.useCallback(async (payload: ChatSendPayload) => {
+    return Boolean(await model.sendPrompt(payload));
+  }, [model]);
+
   if (model.loading) {
     return (
       <main className="fixed inset-0 flex items-center justify-center bg-[var(--panel)] text-[var(--muted)]">
@@ -115,49 +133,67 @@ export function RemoteDroneHubApp() {
         {model.error ? <div className="border-b border-[rgba(248,113,113,.35)] bg-[rgba(248,113,113,.08)] px-3 py-2 text-[12px] text-[var(--red)]">{model.error}</div> : null}
 
         <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-          <div className="mx-auto max-w-4xl space-y-3">
+          <div className="mx-auto flex max-w-[1170px] flex-col gap-6 px-2 py-2">
             {model.transcripts.map((turn) => (
-              <article key={turn.id ?? `${turn.turn}-${turn.at}`} className="rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-alt)] overflow-hidden">
-                <div className="border-b border-[var(--border-subtle)] px-3 py-2">
-                  <div className="text-[10px] uppercase tracking-wide text-[var(--muted-dim)] font-semibold">Prompt</div>
-                  <div className="mt-1 whitespace-pre-wrap text-[13px] text-[var(--fg)]">{turn.prompt}</div>
-                </div>
-                <div className="px-3 py-3">
-                  <div className="mb-2 flex items-center gap-2">
-                    <StatusPill label={turn.ok ? 'OK' : 'Error'} tone={turn.ok ? 'good' : 'bad'} />
-                    <span className="text-[11px] text-[var(--muted-dim)]">{turn.completedAt ?? turn.at}</span>
-                  </div>
-                  <div className="prose prose-invert max-w-none text-[13px]">
-                    <MarkdownMessage text={turn.output || turn.error || ''} />
-                  </div>
-                </div>
-              </article>
+              <TranscriptTurn
+                key={turn.id ?? `${turn.turn}-${turn.at}`}
+                item={turn}
+                parsingJobs={false}
+                onCreateJobs={noopCreateJobs}
+                onSpawnDroneHubTask={noopSpawnTask}
+                messageId={transcriptMessageId(turn)}
+                tldr={null}
+                showTldr={false}
+                onToggleTldr={noopToggleTldr}
+                onHoverAgentMessage={noopHoverAgentMessage}
+                onOpenLink={openExternalLink}
+                droneId={model.selectedDrone?.id}
+                droneHomePath={undefined}
+                showRoleIcons={false}
+                actionsEnabled={false}
+              />
             ))}
             {model.pending.length > 0 ? (
-              <div className="rounded-lg border border-[rgba(250,204,21,.35)] bg-[rgba(250,204,21,.08)] px-3 py-2 text-[12px] text-[var(--yellow)]">
-                {model.pending.length} prompt{model.pending.length === 1 ? '' : 's'} pending
+              model.pending.map((item) => (
+                <PendingTranscriptTurn
+                  key={item.id}
+                  item={item}
+                  showRoleIcons={false}
+                  droneId={model.selectedDrone?.id}
+                  droneHomePath={undefined}
+                  onOpenLink={openExternalLink}
+                />
+              ))
+            ) : null}
+            {model.transcripts.length === 0 && model.pending.length === 0 ? (
+              <div className="min-h-[280px]">
+                <EmptyState
+                  icon={<IconBot className="h-8 w-8 text-[var(--muted)]" />}
+                  title="No messages yet"
+                  description={model.selectedDrone ? `Send a prompt to ${model.selectedDrone.name} to see the conversation here.` : 'No container drone is selected.'}
+                />
               </div>
             ) : null}
-            {model.transcripts.length === 0 ? <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-alt)] px-4 py-8 text-center text-[13px] text-[var(--muted)]">No transcript yet.</div> : null}
           </div>
         </div>
 
         <footer className="border-t border-[var(--border)] bg-[var(--panel-alt)] p-3">
-          <div className="mx-auto flex max-w-4xl gap-2">
-            <textarea
-              value={model.draft}
-              onChange={(event) => model.setDraft(event.target.value)}
-              placeholder="Send a prompt to this container drone..."
-              className="min-h-[72px] flex-1 resize-none rounded border border-[var(--border)] bg-[var(--input)] px-3 py-2 text-[13px] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]"
+          <div className="mx-auto max-w-[1170px]">
+            <ChatInput
+              resetKey={`${model.selectedDrone?.id ?? 'none'}:${model.selectedChat}`}
+              droneName={model.selectedDrone?.name ?? 'remote drone'}
+              draftValue={model.draft}
+              onDraftValueChange={model.setDraft}
+              promptError={model.error}
+              sending={model.sending}
+              waiting={model.pending.some((item) => item.state !== 'failed')}
+              disabled={!model.selectedDrone}
+              attachmentsEnabled={false}
+              automationActions={[]}
+              focusTargetId="remote-primary-chat"
+              onStop={model.selectedDrone ? () => model.stopChat() : undefined}
+              onSend={sendPrompt}
             />
-            <div className="flex w-[96px] flex-col gap-2">
-              <button className="flex-1 rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[12px] font-semibold disabled:opacity-50" disabled={!model.draft.trim() || model.sending || !model.selectedDrone} onClick={() => void model.sendPrompt()}>
-                Send
-              </button>
-              <button className="rounded border border-[var(--border-subtle)] px-3 py-2 text-[12px] text-[var(--muted)] hover:bg-[var(--hover)]" disabled={!model.selectedDrone} onClick={() => void model.stopChat()}>
-                Stop
-              </button>
-            </div>
           </div>
         </footer>
       </section>
