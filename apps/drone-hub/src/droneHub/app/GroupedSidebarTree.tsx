@@ -39,6 +39,8 @@ import type { SidebarDensityMode } from './settings-types';
 import type { MoveDronesToGroupResult } from './use-group-management';
 import type { SidebarGroup } from './use-sidebar-view-model';
 
+const GROUPED_FOLDER_SINGLE_CLICK_DELAY_MS = 180;
+
 type FolderEditorState = {
   mode: 'create' | 'rename';
   parentPath: string | null;
@@ -811,6 +813,7 @@ function GroupedSidebarFolderBodyDropZone({
 }
 
 function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
+  const clickTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeDrag = useDroneHubActiveDrag();
   const {
     sidebarDensityMode,
@@ -891,6 +894,46 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
           ? 'pb-3'
           : ''
       : '';
+  const clearClickTimer = React.useCallback(() => {
+    if (clickTimerRef.current) {
+      clearTimeout(clickTimerRef.current);
+      clickTimerRef.current = null;
+    }
+  }, []);
+  React.useEffect(() => clearClickTimer, [clearClickTimer]);
+  const runFolderSingleClick = React.useCallback(() => {
+    if (shouldSuppressClick()) return;
+    if (isSelected) {
+      onToggleGroupCollapsed(folderPath);
+      return;
+    }
+    setSelectedSidebarNodeId(node.id);
+    onSelectFolder(folderPath);
+  }, [folderPath, isSelected, node.id, onSelectFolder, onToggleGroupCollapsed, setSelectedSidebarNodeId, shouldSuppressClick]);
+  const scheduleFolderSingleClick = React.useCallback(() => {
+    clearClickTimer();
+    clickTimerRef.current = setTimeout(() => {
+      clickTimerRef.current = null;
+      runFolderSingleClick();
+    }, GROUPED_FOLDER_SINGLE_CLICK_DELAY_MS);
+  }, [clearClickTimer, runFolderSingleClick]);
+  const handleFolderDoubleClick = React.useCallback(
+    (event: React.MouseEvent<HTMLElement>) => {
+      if (
+        event.target instanceof Element &&
+        (event.target.closest('[data-sidebar-folder-actions="true"]') || event.target.closest('input,textarea,select'))
+      ) {
+        return;
+      }
+      if (shouldSuppressClick()) return;
+      event.preventDefault();
+      clearClickTimer();
+      setSelectedSidebarNodeId(node.id);
+      onSelectFolder(folderPath);
+      onToggleGroupCollapsed(folderPath);
+    },
+    [clearClickTimer, folderPath, node.id, onSelectFolder, onToggleGroupCollapsed, setSelectedSidebarNodeId, shouldSuppressClick],
+  );
 
   return (
     <div className={`flex flex-col gap-0.5 transition-[margin] duration-150 ${reorderPreviewClass}`}>
@@ -908,20 +951,15 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
                 : 'border border-transparent hover:border-[rgba(255,255,255,.06)] hover:bg-[rgba(255,255,255,.03)]'
           } ${isDragging ? 'opacity-60' : isHiddenGroup ? 'opacity-70' : ''}`}
           style={{ paddingLeft: `${Math.max(0, node.depth) * densityClasses.folderDepthPaddingPx}px` }}
+          onDoubleClick={handleFolderDoubleClick}
         >
           <button
             type="button"
             className={`min-w-0 flex-1 rounded text-left ${densityClasses.folderPaddingX}`}
-            onClick={() => {
-              if (shouldSuppressClick()) return;
-              if (isSelected) {
-                onToggleGroupCollapsed(folderPath);
-                return;
-              }
-              setSelectedSidebarNodeId(node.id);
-              onSelectFolder(folderPath);
+            onClick={(event) => {
+              if (event.detail > 1) return;
+              scheduleFolderSingleClick();
             }}
-            onDoubleClick={() => onToggleGroupCollapsed(folderPath)}
             {...(attributes as unknown as Record<string, unknown>)}
             {...(listeners as unknown as Record<string, unknown>)}
           >
@@ -960,7 +998,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
             <div className={`absolute inset-0 flex items-center justify-end pr-1 text-[10px] font-mono text-[var(--muted-dim)] transition-opacity duration-150 ${actionsEnabled ? 'group-hover/folder-row:opacity-0' : ''}`}>
               {node.totalDroneCount}
             </div>
-            {actionsEnabled ? <div className="absolute inset-y-0 right-0 flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover/folder-row:opacity-100">
+            {actionsEnabled ? <div data-sidebar-folder-actions="true" className="absolute inset-y-0 right-0 flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover/folder-row:opacity-100">
               <button
                 type="button"
                 onClick={() =>

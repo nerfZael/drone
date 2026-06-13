@@ -47,6 +47,7 @@ import { useSidebarRootDnd } from './use-sidebar-root-dnd';
 
 const SIDEBAR_EXPANDED_WIDTH_PX = 280;
 const SIDEBAR_COLLAPSED_RAIL_WIDTH_PX = 40;
+const GROUP_HEADER_SINGLE_CLICK_DELAY_MS = 180;
 const AUTO_MINIMIZE_COLLAPSE_DELAY_MS = 90;
 const AUTO_MINIMIZE_EXPAND_DELAY_MS = 120;
 const AUTO_MINIMIZE_REOPEN_GUARD_MS = 220;
@@ -214,6 +215,7 @@ function SidebarGroupSection({
   onOpenGroupMultiChat,
   onDeleteGroup,
 }: SidebarGroupSectionProps) {
+  const clickTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const groupDragData = React.useMemo<SidebarGroupDragData | null>(() => {
     const droneIds = Array.from(
       new Set(
@@ -268,6 +270,29 @@ function SidebarGroupSection({
     : 'opacity-100 group-hover/group-header:opacity-0 group-hover/group-header:pointer-events-none';
   const actionRailWidthClass = canRenameGroup ? 'group-hover/group-header:w-[124px]' : 'group-hover/group-header:w-[92px]';
   const pinnedActionRailWidthClass = canRenameGroup ? 'w-[124px]' : 'w-[92px]';
+  const clearClickTimer = React.useCallback(() => {
+    if (clickTimerRef.current) {
+      clearTimeout(clickTimerRef.current);
+      clickTimerRef.current = null;
+    }
+  }, []);
+  React.useEffect(() => clearClickTimer, [clearClickTimer]);
+  const scheduleToggleGroupCollapsed = React.useCallback(() => {
+    clearClickTimer();
+    clickTimerRef.current = setTimeout(() => {
+      clickTimerRef.current = null;
+      onToggleGroupCollapsed(groupRef.group);
+    }, GROUP_HEADER_SINGLE_CLICK_DELAY_MS);
+  }, [clearClickTimer, groupRef.group, onToggleGroupCollapsed]);
+  const handleGroupHeaderDoubleClick = React.useCallback(
+    (event: React.MouseEvent<HTMLElement>) => {
+      if (event.target instanceof Element && event.target.closest('[data-group-drag-block="true"]')) return;
+      event.preventDefault();
+      clearClickTimer();
+      onToggleGroupCollapsed(groupRef.group);
+    },
+    [clearClickTimer, groupRef.group, onToggleGroupCollapsed],
+  );
 
   return (
     <div
@@ -287,12 +312,16 @@ function SidebarGroupSection({
         className={`group/group-header relative w-full px-3 py-2 flex items-center justify-between gap-2 border-b border-[var(--border-subtle)] transition-colors ${
           isDropTarget ? 'bg-[var(--accent-subtle)]' : 'hover:bg-[var(--hover)]'
         } ${sidebarDndEnabled && groupDragData ? 'cursor-grab touch-none active:cursor-grabbing' : ''}`}
+        onDoubleClick={handleGroupHeaderDoubleClick}
         {...(attributes as unknown as Record<string, unknown>)}
         {...(listeners as unknown as Record<string, unknown>)}
       >
         <button
           type="button"
-          onClick={() => onToggleGroupCollapsed(groupRef.group)}
+          onClick={(event) => {
+            if (event.detail > 1) return;
+            scheduleToggleGroupCollapsed();
+          }}
           className="flex items-center gap-2 min-w-0 text-left flex-1"
           title={collapsed ? 'Expand group' : 'Collapse group'}
         >
