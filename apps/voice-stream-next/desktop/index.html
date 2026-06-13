@@ -214,6 +214,20 @@
         <button id="offButton" class="off-button" type="button">Off</button>
         <button id="assistantSpeechPlaybackButton" class="speech-playback-button" type="button" aria-pressed="true">Speech on</button>
 
+        <div class="call-recorder-panel" aria-label="Computer audio recorder">
+          <button id="callRecorderButton" class="secondary call-recorder-button" type="button">
+            <span class="call-recorder-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <circle cx="12" cy="12" r="7"></circle>
+                <circle cx="12" cy="12" r="2.4"></circle>
+              </svg>
+            </span>
+            <span id="callRecorderAction">Record computer audio</span>
+          </button>
+          <button id="callRecorderOpenButton" class="secondary mini-button" type="button" hidden>Open history</button>
+          <p id="callRecorderStatus" class="call-recorder-status">Records microphone plus computer audio when a loopback source is available.</p>
+        </div>
+
         <div class="meter-shell" aria-hidden="true">
           <div id="meterBar" class="meter-bar"></div>
         </div>

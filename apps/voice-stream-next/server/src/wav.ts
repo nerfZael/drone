@@ -55,6 +55,55 @@ export function normalizeWavChunkSizes(wav: Uint8Array): Uint8Array {
   return output;
 }
 
+export function wavPcm16Data(wav: Uint8Array): { pcm: Uint8Array; sampleRate: number; channels: number } {
+  if (wav.byteLength < 44 || ascii(wav, 0, 4) !== 'RIFF' || ascii(wav, 8, 4) !== 'WAVE') {
+    throw new Error('audio must be a WAV file');
+  }
+
+  const view = new DataView(wav.buffer, wav.byteOffset, wav.byteLength);
+  let offset = 12;
+  let formatCode = 0;
+  let channels = 0;
+  let sampleRate = 0;
+  let bitsPerSample = 0;
+  let dataStart = -1;
+  let dataSize = 0;
+
+  while (offset + 8 <= wav.byteLength) {
+    const chunkId = ascii(wav, offset, 4);
+    const chunkSize = view.getUint32(offset + 4, true);
+    const chunkDataStart = offset + 8;
+    if (chunkSize === 0xffffffff || chunkDataStart + chunkSize > wav.byteLength) {
+      throw new Error('WAV file has an invalid chunk size');
+    }
+
+    if (chunkId === 'fmt ') {
+      if (chunkSize < 16) throw new Error('WAV fmt chunk is too short');
+      formatCode = view.getUint16(chunkDataStart, true);
+      channels = view.getUint16(chunkDataStart + 2, true);
+      sampleRate = view.getUint32(chunkDataStart + 4, true);
+      bitsPerSample = view.getUint16(chunkDataStart + 14, true);
+    } else if (chunkId === 'data') {
+      dataStart = chunkDataStart;
+      dataSize = chunkSize;
+    }
+
+    offset = chunkDataStart + chunkSize + (chunkSize % 2);
+  }
+
+  if (formatCode !== 1) throw new Error('WAV file must use PCM audio');
+  if (bitsPerSample !== 16) throw new Error('WAV file must use 16-bit samples');
+  if (sampleRate !== 16_000) throw new Error('WAV file must use a 16 kHz sample rate');
+  if (channels !== 1) throw new Error('WAV file must be mono');
+  if (dataStart < 0) throw new Error('WAV file is missing audio data');
+
+  return {
+    pcm: wav.slice(dataStart, dataStart + dataSize),
+    sampleRate,
+    channels,
+  };
+}
+
 function writeAscii(view: DataView, offset: number, value: string): void {
   for (let index = 0; index < value.length; index += 1) {
     view.setUint8(offset + index, value.charCodeAt(index));

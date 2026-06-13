@@ -17,6 +17,10 @@ contextBridge.exposeInMainWorld('voiceStreamDesktop', {
   appendCommandLog: (entry) => ipcRenderer.invoke('commandLog:append', entry),
   readCommandLogs: () => ipcRenderer.invoke('commandLog:read'),
   clearCommandLogs: () => ipcRenderer.invoke('commandLog:clear'),
+  callRecorderStatus: () => ipcRenderer.invoke('callRecorder:status'),
+  startCallRecorder: () => ipcRenderer.invoke('callRecorder:start'),
+  stopCallRecorder: () => ipcRenderer.invoke('callRecorder:stop'),
+  openCallRecorderFile: () => ipcRenderer.invoke('callRecorder:open'),
   writeClipboard: (text) => ipcRenderer.invoke('clipboard:writeText', text),
   qrDataUrl: (text) => ipcRenderer.invoke('qr:dataUrl', text),
   desktopAuthQrPayload: (config) => ipcRenderer.invoke('desktopAuth:qrPayload', config),
@@ -57,6 +61,11 @@ contextBridge.exposeInMainWorld('voiceStreamDesktop', {
     const listener = (_event, status) => callback(status);
     ipcRenderer.on('shortcut:status', listener);
     return () => ipcRenderer.removeListener('shortcut:status', listener);
+  },
+  onCallRecorderStatus: (callback) => {
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on('callRecorder:status', listener);
+    return () => ipcRenderer.removeListener('callRecorder:status', listener);
   },
   onWindowState: (callback) => {
     const listener = (_event, status) => callback(status);
