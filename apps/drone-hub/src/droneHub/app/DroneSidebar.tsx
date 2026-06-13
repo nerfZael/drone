@@ -286,7 +286,7 @@ function SidebarGroupSection({
         ref={setHeaderNodeRef}
         className={`group/group-header relative w-full px-3 py-2 flex items-center justify-between gap-2 border-b border-[var(--border-subtle)] transition-colors ${
           isDropTarget ? 'bg-[var(--accent-subtle)]' : 'hover:bg-[var(--hover)]'
-        } ${groupDragData ? 'cursor-grab touch-none active:cursor-grabbing' : ''}`}
+        } ${sidebarDndEnabled && groupDragData ? 'cursor-grab touch-none active:cursor-grabbing' : ''}`}
         {...(attributes as unknown as Record<string, unknown>)}
         {...(listeners as unknown as Record<string, unknown>)}
       >
@@ -577,7 +577,7 @@ function SidebarFolderTreeNode({
         >
           <button
             type="button"
-            className={`min-w-0 flex-1 rounded px-1 py-1 text-left ${dragData ? 'cursor-grab touch-none active:cursor-grabbing' : ''}`}
+            className={`min-w-0 flex-1 rounded px-1 py-1 text-left ${sidebarDndEnabled ? 'cursor-grab touch-none active:cursor-grabbing' : ''}`}
             onClick={() => {
               if (selectedFolderPath === node.path) {
                 onToggleGroupCollapsed(node.path);
@@ -855,6 +855,8 @@ export type DroneSidebarProps = {
   onPrepareDroneDragStart: (droneId: string) => void;
   onOpenReposModal: () => void;
   capabilities?: Partial<DroneSidebarCapabilities>;
+  sidebarGroupingModeOverride?: SidebarGroupingMode;
+  viewModeOverride?: 'grouped' | 'flat';
 };
 
 export function DroneSidebar({
@@ -911,6 +913,8 @@ export function DroneSidebar({
   onPrepareDroneDragStart,
   onOpenReposModal,
   capabilities,
+  sidebarGroupingModeOverride,
+  viewModeOverride,
 }: DroneSidebarProps) {
   const sidebarCapabilities = React.useMemo(() => resolveDroneSidebarCapabilities(capabilities), [capabilities]);
   const {
@@ -971,7 +975,9 @@ export function DroneSidebar({
   const [sidebarDockDragActive, setSidebarDockDragActive] = React.useState(false);
   const [sidebarDockDragPreviewSide, setSidebarDockDragPreviewSide] = React.useState<'left' | 'right' | null>(null);
   const hiddenSidebarGroupTokenSet = React.useMemo(() => new Set(hiddenSidebarGroups), [hiddenSidebarGroups]);
-  const isRepoGroupingMode = sidebarGroupingMode === 'repos';
+  const effectiveSidebarGroupingMode = sidebarGroupingModeOverride ?? sidebarGroupingMode;
+  const effectiveViewMode = viewModeOverride ?? viewMode;
+  const isRepoGroupingMode = effectiveSidebarGroupingMode === 'repos';
   const repoScopedGroupPathsByRepoGroup = React.useMemo(
     () => groupSidebarRepoScopedGroupsByRepoGroup(sidebarRepoScopedGroupByPath),
     [sidebarRepoScopedGroupByPath],
@@ -1100,7 +1106,7 @@ export function DroneSidebar({
     repoScopedGroupPathsByRepoGroup,
     showHiddenSidebarGroups,
     sidebarGroupOrder,
-    sidebarGroupingMode,
+    sidebarGroupingMode: effectiveSidebarGroupingMode,
   });
   const {
     blurChatEditor,
@@ -1797,7 +1803,7 @@ export function DroneSidebar({
             </div>
           )}
           <div className="flex flex-col gap-0.5 select-none">
-            {viewMode === 'flat' ? (
+            {effectiveViewMode === 'flat' ? (
               <SidebarDroneTreeList {...sharedDroneTreeListProps} tree={flatSidebarTree} />
             ) : (
               <>

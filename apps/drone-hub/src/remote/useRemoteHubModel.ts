@@ -11,6 +11,15 @@ import {
   type TranscriptResponse,
 } from './remote-api';
 
+type RemoteChatState = {
+  transcripts: TranscriptItem[];
+  pending: PendingPrompt[];
+};
+
+function remoteChatStateKey(droneId: string, chatName: string): string {
+  return `${droneId}\u0000${chatName}`;
+}
+
 export function useRemoteHubModel() {
   const [session, setSession] = React.useState<RemoteSession | null>(null);
   const [drones, setDrones] = React.useState<DroneSummary[]>([]);
@@ -21,12 +30,19 @@ export function useRemoteHubModel() {
   const [pending, setPending] = React.useState<PendingPrompt[]>([]);
   const [draft, setDraft] = React.useState('');
   const [loading, setLoading] = React.useState(true);
+  const [chatStateLoading, setChatStateLoading] = React.useState(false);
   const [sending, setSending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const activeChatStateKeyRef = React.useRef<string | null>(null);
+  const loadedChatStateKeyRef = React.useRef<string | null>(null);
 
   const authenticated = session?.authenticated === true;
   const selectedDrone = drones.find((drone) => drone.id === selectedDroneId) ?? drones[0] ?? null;
   const effectiveDroneId = selectedDrone?.id ?? null;
+
+  React.useEffect(() => {
+    activeChatStateKeyRef.current = effectiveDroneId && selectedChat ? remoteChatStateKey(effectiveDroneId, selectedChat) : null;
+  }, [effectiveDroneId, selectedChat]);
 
   const markUnauthenticated = React.useCallback(() => {
     setRemoteCsrf(null);
@@ -36,6 +52,9 @@ export function useRemoteHubModel() {
     setChats([]);
     setTranscripts([]);
     setPending([]);
+    setChatStateLoading(false);
+    activeChatStateKeyRef.current = null;
+    loadedChatStateKeyRef.current = null;
   }, []);
 
   const errorMessage = React.useCallback((err: any) => {
@@ -60,21 +79,36 @@ export function useRemoteHubModel() {
     setSelectedDroneId((current) => (current && nextDrones.some((drone) => drone.id === current) ? current : nextDrones[0]?.id ?? null));
   }, []);
 
-  const loadChats = React.useCallback(async (droneId: string) => {
+  const fetchChats = React.useCallback(async (droneId: string) => {
     const data = await remoteRequestJson<ChatListResponse>(`/api/drones/${encodeURIComponent(droneId)}/chats`);
-    const nextChats = (Array.isArray(data.chats) ? data.chats : []).map((item) => String(item.chat ?? item.name ?? '')).filter(Boolean);
-    setChats(nextChats.length > 0 ? nextChats : ['default']);
-    setSelectedChat((current) => (nextChats.includes(current) ? current : nextChats[0] ?? 'default'));
+    return (Array.isArray(data.chats) ? data.chats : []).map((item) => String(item.chat ?? item.name ?? '')).filter(Boolean);
   }, []);
 
-  const loadChatState = React.useCallback(async (droneId: string, chatName: string) => {
+  const fetchChatState = React.useCallback(async (droneId: string, chatName: string): Promise<RemoteChatState> => {
     const [transcriptData, pendingData] = await Promise.all([
       remoteRequestJson<TranscriptResponse>(`/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/transcript?turn=all`),
       remoteRequestJson<PendingResponse>(`/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/pending`),
     ]);
-    setTranscripts(Array.isArray(transcriptData.transcripts) ? transcriptData.transcripts : []);
-    setPending(Array.isArray(pendingData.pending) ? pendingData.pending : []);
+    return {
+      transcripts: Array.isArray(transcriptData.transcripts) ? transcriptData.transcripts : [],
+      pending: Array.isArray(pendingData.pending) ? pendingData.pending : [],
+    };
   }, []);
+
+  const applyChatState = React.useCallback((droneId: string, chatName: string, next: RemoteChatState) => {
+    const key = remoteChatStateKey(droneId, chatName);
+    if (activeChatStateKeyRef.current !== key) return false;
+    setTranscripts(next.transcripts);
+    setPending(next.pending);
+    loadedChatStateKeyRef.current = key;
+    setChatStateLoading(false);
+    return true;
+  }, []);
+
+  const loadChatState = React.useCallback(async (droneId: string, chatName: string) => {
+    const next = await fetchChatState(droneId, chatName);
+    applyChatState(droneId, chatName, next);
+  }, [applyChatState, fetchChatState]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -99,24 +133,47 @@ export function useRemoteHubModel() {
 
   React.useEffect(() => {
     if (!authenticated || !effectiveDroneId) return;
-    void loadChats(effectiveDroneId).catch((err: any) => setError(errorMessage(err)));
-  }, [authenticated, effectiveDroneId, errorMessage, loadChats]);
+    let cancelled = false;
+    const droneId = effectiveDroneId;
+    const run = async () => {
+      try {
+        const nextChats = await fetchChats(droneId);
+        if (cancelled) return;
+        setChats(nextChats.length > 0 ? nextChats : ['default']);
+        setSelectedChat((current) => (nextChats.includes(current) ? current : nextChats[0] ?? 'default'));
+      } catch (err: any) {
+        if (!cancelled) setError(errorMessage(err));
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [authenticated, effectiveDroneId, errorMessage, fetchChats]);
 
   React.useEffect(() => {
     if (authenticated && effectiveDroneId) return;
     setChats([]);
     setTranscripts([]);
     setPending([]);
+    setChatStateLoading(false);
+    loadedChatStateKeyRef.current = null;
   }, [authenticated, effectiveDroneId]);
 
   React.useEffect(() => {
     if (!authenticated || !effectiveDroneId || !selectedChat) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    const droneId = effectiveDroneId;
+    const chatName = selectedChat;
+    const key = remoteChatStateKey(droneId, chatName);
+    if (loadedChatStateKeyRef.current !== key) {
+      setChatStateLoading(true);
+    }
     const tick = async () => {
       try {
-        await loadChatState(effectiveDroneId, selectedChat);
-        if (!cancelled) setError(null);
+        const next = await fetchChatState(droneId, chatName);
+        if (!cancelled && applyChatState(droneId, chatName, next)) setError(null);
       } catch (err: any) {
         if (!cancelled) setError(errorMessage(err));
       } finally {
@@ -128,7 +185,7 @@ export function useRemoteHubModel() {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [authenticated, effectiveDroneId, errorMessage, loadChatState, selectedChat]);
+  }, [applyChatState, authenticated, effectiveDroneId, errorMessage, fetchChatState, selectedChat]);
 
   const sendPrompt = React.useCallback(async (payload?: ChatSendPayload) => {
     const prompt = String(payload?.prompt ?? draft).trim();
@@ -185,6 +242,7 @@ export function useRemoteHubModel() {
     draft,
     setDraft,
     loading,
+    chatStateLoading,
     sending,
     error,
     sendPrompt,

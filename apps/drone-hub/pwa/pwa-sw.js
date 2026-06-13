@@ -35,9 +35,13 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith('/api/')) return;
+  if (url.pathname === '/version.json') {
+    event.respondWith(fetch(request, { cache: 'no-store' }));
+    return;
+  }
 
   event.respondWith(
-    fetch(request)
+    fetch(request, request.mode === 'navigate' ? { cache: 'no-store' } : undefined)
       .then((response) => {
         if (!response || response.status !== 200) return response;
         const copy = response.clone();

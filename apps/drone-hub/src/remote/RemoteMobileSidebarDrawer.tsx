@@ -97,9 +97,10 @@ export function RemoteMobileSidebarDrawer({
           onClick={() => onOpenChange(false)}
         />
         <div
-          className={`absolute inset-y-0 left-0 flex max-w-[86vw] overflow-hidden shadow-[18px_0_60px_rgba(0,0,0,.36)] transition-transform duration-200 ease-out ${
+          className={`absolute inset-y-0 left-0 flex overflow-hidden shadow-[18px_0_60px_rgba(0,0,0,.36)] transition-transform duration-200 ease-out ${
             open ? 'translate-x-0' : '-translate-x-full'
           }`}
+          style={{ width: 'min(88vw, 320px)', maxWidth: 'calc(100vw - 44px)', touchAction: 'pan-y' }}
           onTouchStart={beginDrawerSwipe}
           onTouchEnd={endDrawerSwipe}
         >

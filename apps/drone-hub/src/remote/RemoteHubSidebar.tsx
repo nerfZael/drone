@@ -78,9 +78,7 @@ export function RemoteHubSidebar({
       setSelectedDroneIds: state.setSelectedDroneIds,
       showHiddenSidebarGroups: state.showHiddenSidebarGroups,
       sidebarDroneOrderByGroup: state.sidebarDroneOrderByGroup,
-      sidebarGroupingMode: state.sidebarGroupingMode,
       sidebarGroupOrder: state.sidebarGroupOrder,
-      viewMode: state.viewMode,
     })),
   );
   const { setSelectedChat, setSelectedDrone, setSelectedDroneIds } = sidebarState;
@@ -123,8 +121,8 @@ export function RemoteHubSidebar({
 
   const viewModel = useSidebarViewModel({
     selectedDroneIds: sidebarState.selectedDroneIds,
-    viewMode: sidebarState.viewMode,
-    sidebarGroupingMode: sidebarState.sidebarGroupingMode,
+    viewMode: 'grouped',
+    sidebarGroupingMode: 'repos',
     collapsedGroups: sidebarState.collapsedGroups,
     deletingGroups: EMPTY_RECORD,
     sidebarGroupOrder: sidebarState.sidebarGroupOrder,
@@ -230,6 +228,8 @@ export function RemoteHubSidebar({
       onPrepareDroneDragStart={NOOP}
       onOpenReposModal={NOOP}
       capabilities={REMOTE_DRONE_SIDEBAR_CAPABILITIES}
+      sidebarGroupingModeOverride="repos"
+      viewModeOverride="grouped"
     />
   );
 }

@@ -56,7 +56,9 @@ async function readRawBody(req: http.IncomingMessage, maxBytes = 1024 * 1024): P
   return Buffer.concat(chunks);
 }
 
-function sanitizeDroneSummary(raw: any): any {
+export function sanitizeDroneSummary(raw: any): any {
+  const repoPath = String(raw?.repoPath ?? '').trim();
+  const repoAttached = raw?.repoAttached === true || repoPath.length > 0;
   return {
     id: String(raw?.id ?? ''),
     name: String(raw?.name ?? ''),
@@ -72,9 +74,9 @@ function sanitizeDroneSummary(raw: any): any {
     fleetAssignedIds: [],
     runtime: 'container',
     persistVolume: false,
-    repoAttached: false,
-    repoPath: '',
-    repoBranch: null,
+    repoAttached,
+    repoPath: repoAttached ? repoPath : '',
+    repoBranch: typeof raw?.repoBranch === 'string' && raw.repoBranch.trim() ? raw.repoBranch.trim() : null,
     cwd: undefined,
     containerPort: Number(raw?.containerPort ?? 7777) || 7777,
     hostPort: null,

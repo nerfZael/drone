@@ -1,4 +1,5 @@
 import React from 'react';
+import { FrontendUpdatePrompt } from '../FrontendUpdatePrompt';
 import { DockableDroneWorkspace } from '../droneHub/app/DockableDroneWorkspace';
 import { DroneWorkspaceHeaderFrame } from '../droneHub/app/DroneWorkspaceHeaderFrame';
 import { useDroneHubUiStore } from '../droneHub/app/use-drone-hub-ui-store';
@@ -130,7 +131,8 @@ export function RemoteDroneHubApp() {
 
       <div className="min-h-0 flex-1">
         <ChatTranscriptFrame
-          loading={false}
+          loading={model.chatStateLoading}
+          loadingMessage={`Loading ${model.selectedDrone?.name ?? 'remote drone'} / ${model.selectedChat}...`}
           hasContent={model.transcripts.length > 0 || model.pending.length > 0}
           emptyState={
             <EmptyState
@@ -184,7 +186,7 @@ export function RemoteDroneHubApp() {
             promptError={model.error}
             sending={model.sending}
             waiting={model.pending.some((item) => item.state !== 'failed')}
-            disabled={!model.selectedDrone}
+            disabled={!model.selectedDrone || model.chatStateLoading}
             attachmentsEnabled={REMOTE_HUB_CAPABILITIES.attachments}
             automationActions={[]}
             focusTargetId="remote-primary-chat"
@@ -250,6 +252,7 @@ export function RemoteDroneHubApp() {
           chatContent
         )}
       </section>
+      <FrontendUpdatePrompt />
     </main>
   );
 }

@@ -1,4 +1,5 @@
 import React from 'react';
+import { FrontendUpdatePrompt } from './FrontendUpdatePrompt';
 import { GuidedOnboarding } from './onboarding/GuidedOnboarding';
 import { DroneSidebar } from './droneHub/app/DroneSidebar';
 import { DroneHubOverlays } from './droneHub/app/DroneHubOverlays';
@@ -45,6 +46,7 @@ export default function DroneHubApp() {
         )}
         <DroneHubOverlays {...overlaysProps} />
         <GuidedOnboarding />
+        <FrontendUpdatePrompt />
       </div>
     </DroneHubDndProvider>
   );
