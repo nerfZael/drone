@@ -30,7 +30,17 @@ export function RemoteAccessSettingsTab({ requestJson }: RemoteAccessSettingsTab
 
         <div className="mt-4 grid gap-3">
           <label className="grid gap-1">
-            <span className="text-[10px] uppercase tracking-wide text-[var(--muted-dim)] font-semibold">ngrok public URL</span>
+            <span className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-[10px] uppercase tracking-wide text-[var(--muted-dim)] font-semibold">ngrok public URL</span>
+              <button
+                type="button"
+                onClick={() => void remote.detectNgrokPublicUrl()}
+                disabled={remote.detectingNgrok || !remote.portValid}
+                className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] disabled:opacity-50"
+              >
+                {remote.detectingNgrok ? 'Detecting...' : 'Detect ngrok'}
+              </button>
+            </span>
             <input
               value={remote.publicUrl}
               onChange={(event) => remote.setPublicUrl(event.target.value)}
