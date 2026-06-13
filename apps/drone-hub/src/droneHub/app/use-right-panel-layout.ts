@@ -88,7 +88,13 @@ const useRightPanelLayoutStore = create<RightPanelLayoutState>()(
       setRightPanelOpen: (next) =>
         set((s) => {
           const rightPanelOpen = resolveNext(s.rightPanelOpen, next);
-          if (s.rightPanelOpen === rightPanelOpen) return s;
+          if (s.rightPanelOpen === rightPanelOpen) {
+            if (!rightPanelOpen) return s;
+            return {
+              rightPanelOpen,
+              rightPanelOpenRequestSeq: s.rightPanelOpenRequestSeq + 1,
+            };
+          }
           return {
             rightPanelOpen,
             rightPanelOpenRequestSeq: rightPanelOpen ? s.rightPanelOpenRequestSeq + 1 : s.rightPanelOpenRequestSeq,

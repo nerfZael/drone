@@ -260,6 +260,12 @@ type SelectedDroneWorkspaceProps = {
   onEmbeddedAssistantVisibleChange?: (visible: boolean) => void;
 };
 
+type ChatScrollSnapshot = {
+  mode: 'transcript' | 'cli';
+  scrollTop: number;
+  scrollHeight: number;
+};
+
 export function SelectedDroneWorkspace({
   currentDrone,
   deleteMode,
@@ -385,6 +391,31 @@ export function SelectedDroneWorkspace({
     setSelectedChat,
     setTerminalEmulator,
   } = useSelectedDroneWorkspaceUiState();
+  const transcriptScrollRef = React.useRef<HTMLDivElement | null>(null);
+  const workspaceChatScrollSnapshotRef = React.useRef<ChatScrollSnapshot | null>(null);
+  const captureWorkspaceChatScroll = React.useCallback(() => {
+    const mode = chatUiMode === 'transcript' ? 'transcript' : 'cli';
+    const node = mode === 'transcript' ? transcriptScrollRef.current : outputScrollRef.current;
+    if (!node) return;
+    workspaceChatScrollSnapshotRef.current = {
+      mode,
+      scrollTop: node.scrollTop,
+      scrollHeight: node.scrollHeight,
+    };
+  }, [chatUiMode, outputScrollRef]);
+  const restoreWorkspaceChatScroll = React.useCallback(() => {
+    const snapshot = workspaceChatScrollSnapshotRef.current;
+    if (!snapshot) return;
+    requestAnimationFrame(() => {
+      const node = snapshot.mode === 'transcript' ? transcriptScrollRef.current : outputScrollRef.current;
+      workspaceChatScrollSnapshotRef.current = null;
+      if (!node) return;
+      const heightDelta = node.scrollHeight - snapshot.scrollHeight;
+      const maxScrollTop = Math.max(0, node.scrollHeight - node.clientHeight);
+      node.scrollTop = Math.min(maxScrollTop, Math.max(0, snapshot.scrollTop + heightDelta));
+      updatePinned(node);
+    });
+  }, [outputScrollRef, updatePinned]);
   const explicitSelectedChat = String(selectedChat ?? '').trim();
   const activeChatName = React.useMemo(
     () => explicitSelectedChat || resolveChatNameForDrone(currentDrone, selectedChat),
@@ -1849,6 +1880,8 @@ export function SelectedDroneWorkspace({
         onActiveToolTabChange={setRightPanelTab}
         onPreviewHostChange={onPersistentPreviewHostChange}
         onVisibleToolTabsChange={handleVisibleWorkspaceToolTabsChange}
+        onBeforeWorkspaceMouseDown={captureWorkspaceChatScroll}
+        onAfterToolPanelRemove={restoreWorkspaceChatScroll}
         chatContent={
         <div
           ref={setFleetDropNodeRef}
@@ -1894,6 +1927,7 @@ export function SelectedDroneWorkspace({
           <div className="flex-1 min-h-0 relative">
             {chatUiMode === 'transcript' ? (
               <ChatTranscriptFrame
+                ref={transcriptScrollRef}
                 loading={loadingTranscript && !transcripts && visiblePendingPromptsWithStartup.length === 0}
                 hasContent={Boolean((transcripts && transcripts.length > 0) || visiblePendingPromptsWithStartup.length > 0)}
                 emptyState={

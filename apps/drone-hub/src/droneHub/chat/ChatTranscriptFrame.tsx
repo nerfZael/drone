@@ -9,15 +9,18 @@ type ChatTranscriptFrameProps = {
   children: React.ReactNode;
 };
 
-export function ChatTranscriptFrame({
-  loading,
-  loadingMessage = 'Loading chat messages...',
-  hasContent,
-  emptyState,
-  children,
-}: ChatTranscriptFrameProps) {
+export const ChatTranscriptFrame = React.forwardRef<HTMLDivElement, ChatTranscriptFrameProps>(function ChatTranscriptFrame(
+  {
+    loading,
+    loadingMessage = 'Loading chat messages...',
+    hasContent,
+    emptyState,
+    children,
+  },
+  ref,
+) {
   return (
-    <div className="h-full min-h-0 min-w-0 overflow-auto">
+    <div ref={ref} className="h-full min-h-0 min-w-0 overflow-auto">
       {loading ? (
         <TranscriptSkeleton message={loadingMessage} />
       ) : hasContent ? (
@@ -29,4 +32,4 @@ export function ChatTranscriptFrame({
       )}
     </div>
   );
-}
+});
