@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { resolve } from 'node:path';
 
 const apiPort = String(process.env.DRONE_HUB_API_PORT ?? '').trim();
 const apiToken = String(process.env.DRONE_HUB_API_TOKEN ?? '').trim();
@@ -16,6 +17,12 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: sourcemapEnabled,
+    rollupOptions: {
+      input: {
+        index: resolve(__dirname, 'index.html'),
+        remote: resolve(__dirname, 'remote.html'),
+      },
+    },
   },
   server: {
     port: 5174,
