@@ -19,15 +19,13 @@ export function useFleetAssignmentDropState({
   currentDroneLabel,
   openDroneErrorModal,
   onRequestDropActions,
-  setRightPanelOpen,
-  setRightPanelTab,
+  requestRightPanelTab,
 }: {
   currentDrone: DroneSummary;
   currentDroneLabel: string;
   openDroneErrorModal: (drone: DroneSummary, message: string, meta: null) => void;
   onRequestDropActions: (targetDroneId: string, sourceDroneIds: string[]) => { ok: boolean; error?: string | null };
-  setRightPanelOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  setRightPanelTab: React.Dispatch<React.SetStateAction<RightPanelTab>>;
+  requestRightPanelTab: (tab: RightPanelTab) => void;
 }) {
   const activeSidebarDrag = useDroneHubActiveDrag();
   const fleetDropId = React.useMemo(() => `fleet-assignment-drop:${currentDrone.id}`, [currentDrone.id]);
@@ -81,9 +79,8 @@ export function useFleetAssignmentDropState({
   );
 
   const openFleetTab = React.useCallback(() => {
-    setRightPanelOpen(true);
-    setRightPanelTab('fleet');
-  }, [setRightPanelOpen, setRightPanelTab]);
+    requestRightPanelTab('fleet');
+  }, [requestRightPanelTab]);
 
   React.useEffect(() => {
     fleetBadgeDataRef.current = fleetBadgeData;

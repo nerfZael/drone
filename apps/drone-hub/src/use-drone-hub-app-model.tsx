@@ -522,6 +522,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const {
     rightPanelOpen,
     setRightPanelOpen,
+    requestRightPanelTab,
     rightPanelTab,
     setRightPanelTab,
     rightPanelSplit,
@@ -2158,10 +2159,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setCustomAgentModalOpen,
   });
   const focusEditorPane = React.useCallback(() => {
-    setRightPanelOpen(true);
-    if (rightPanelTab === 'editor') return;
-    setRightPanelTab('editor');
-  }, [rightPanelTab, setRightPanelOpen, setRightPanelTab]);
+    requestRightPanelTab('editor');
+  }, [requestRightPanelTab]);
   const openFileInFilesPane = React.useCallback(
     (next: { path: string; name: string; line?: number | null; column?: number | null }) => {
       const containerPath = String(next.path ?? '').trim();
@@ -2265,11 +2264,14 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const slash = containerPath.lastIndexOf('/');
       const parentPath = slash > 0 ? containerPath.slice(0, slash) : '/';
       setCurrentFsPath(parentPath);
-      setRightPanelOpen(true);
-      if (pane === 'bottom') setRightPanelBottomTab('files');
-      else setRightPanelTab('files');
+      if (pane === 'bottom') {
+        setRightPanelBottomTab('files');
+        setRightPanelOpen(true);
+      } else {
+        requestRightPanelTab('files');
+      }
     },
-    [resolveCurrentDroneRepoFilePath, setCurrentFsPath, setRightPanelBottomTab, setRightPanelOpen, setRightPanelTab],
+    [requestRightPanelTab, resolveCurrentDroneRepoFilePath, setCurrentFsPath, setRightPanelBottomTab, setRightPanelOpen],
   );
   const onActivateChatFromCanvas = React.useCallback(
     (droneIdRaw: string, chatNameRaw: string) => {
@@ -2699,7 +2701,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     rightPanelSplit,
     rightPanelBottomTab,
     setRightPanelOpen,
-    setRightPanelTab,
+    requestRightPanelTab,
     setSidebarCollapsed,
     shortcutBindings,
     llmSettings,
@@ -2974,9 +2976,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           onRevealChangesFileInFiles={revealChangesFileInFiles}
           onOpenChangesFileInEditor={openChangesFileInEditor}
           onOpenPullRequest={(pane, _pullRequest) => {
-            setRightPanelOpen(true);
-            if (pane === 'bottom') setRightPanelBottomTab('prs');
-            else setRightPanelTab('prs');
+            if (pane === 'bottom') {
+              setRightPanelBottomTab('prs');
+              setRightPanelOpen(true);
+              return;
+            }
+            requestRightPanelTab('prs');
           }}
         />
       );
@@ -3454,6 +3459,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     terminalOptions,
     rightPanelOpen,
     setRightPanelOpen,
+    requestRightPanelTab,
     setRightPanelSplitMode,
     rightPanelSplit,
     rightPanelTabs,
