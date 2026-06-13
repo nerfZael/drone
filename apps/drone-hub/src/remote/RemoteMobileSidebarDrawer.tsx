@@ -1,5 +1,6 @@
 import React from 'react';
-import { IconSidebarCollapse, IconSidebarExpand } from '../droneHub/app/icons';
+import { IconSidebarExpand } from '../droneHub/app/icons';
+import { useDroneHubUiStore } from '../droneHub/app/use-drone-hub-ui-store';
 import type { DroneSummary } from '../droneHub/types';
 import { RemoteHubSidebar } from './RemoteHubSidebar';
 
@@ -42,8 +43,13 @@ export function RemoteMobileSidebarDrawer({
   onSelectDrone,
   onSelectChat,
 }: RemoteMobileSidebarDrawerProps) {
+  const setSidebarCollapsed = useDroneHubUiStore((state) => state.setSidebarCollapsed);
   const edgeSwipeStartRef = React.useRef<TouchPoint | null>(null);
   const drawerSwipeStartRef = React.useRef<TouchPoint | null>(null);
+
+  React.useEffect(() => {
+    if (open) setSidebarCollapsed(false);
+  }, [open, setSidebarCollapsed]);
 
   const beginEdgeSwipe = React.useCallback((event: React.TouchEvent) => {
     const touch = event.touches[0];
@@ -124,42 +130,21 @@ export function RemoteMobileSidebarDrawer({
           aria-label="Close sidebar"
           onClick={() => onOpenChange(false)}
         />
-        <aside
-          className={`absolute inset-y-0 left-0 flex w-[min(86vw,320px)] flex-col border-r border-[var(--border)] bg-[var(--sidebar)] p-3 shadow-[18px_0_60px_rgba(0,0,0,.36)] transition-transform duration-200 ease-out ${
+        <div
+          className={`absolute inset-y-0 left-0 flex max-w-[86vw] overflow-hidden shadow-[18px_0_60px_rgba(0,0,0,.36)] transition-transform duration-200 ease-out ${
             open ? 'translate-x-0' : '-translate-x-full'
           }`}
           onTouchStart={beginDrawerSwipe}
           onTouchEnd={endDrawerSwipe}
         >
-          <div className="mb-3 flex items-center justify-between">
-            <div>
-              <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
-                Remote
-              </div>
-              <div className="text-[17px] font-semibold" style={{ fontFamily: 'var(--display)' }}>
-                Drone Hub
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => onOpenChange(false)}
-              className="inline-flex h-8 w-8 items-center justify-center rounded border border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)]"
-              aria-label="Close sidebar"
-              title="Close sidebar"
-            >
-              <IconSidebarCollapse className="h-3.5 w-3.5" />
-            </button>
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            <RemoteHubSidebar
-              drones={drones}
-              selectedDroneId={selectedDroneId}
-              activeChatName={activeChatName}
-              onSelectDrone={selectDrone}
-              onSelectChat={selectChat}
-            />
-          </div>
-        </aside>
+          <RemoteHubSidebar
+            drones={drones}
+            selectedDroneId={selectedDroneId}
+            activeChatName={activeChatName}
+            onSelectDrone={selectDrone}
+            onSelectChat={selectChat}
+          />
+        </div>
       </div>
     </div>
   );

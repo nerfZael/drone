@@ -1,7 +1,8 @@
 import React from 'react';
 import { DockableDroneWorkspace } from '../droneHub/app/DockableDroneWorkspace';
+import { DroneWorkspaceHeaderFrame } from '../droneHub/app/DroneWorkspaceHeaderFrame';
 import { IconSidebarExpand } from '../droneHub/app/icons';
-import { ChatInput, EmptyState, PendingTranscriptTurn, TranscriptTurn, type ChatSendPayload, type DroneHubTask, type DroneHubTaskSpawnMode } from '../droneHub/chat';
+import { ChatInput, ChatTranscriptFrame, EmptyState, PendingTranscriptTurn, TranscriptTurn, type ChatSendPayload, type DroneHubTask, type DroneHubTaskSpawnMode } from '../droneHub/chat';
 import { IconBot } from '../droneHub/chat/icons';
 import { RemoteMobileSidebarDrawer } from './RemoteMobileSidebarDrawer';
 import { RemoteHubSidebar } from './RemoteHubSidebar';
@@ -49,33 +50,45 @@ export function RemoteDroneHubApp() {
 
   const chatContent = (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <header className="border-b border-[var(--border)] bg-[var(--panel-alt)] px-3 py-2">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-2">
-            <button
-              type="button"
-              className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] md:hidden"
-              onClick={() => setMobileSidebarOpen(true)}
-              aria-label="Open sidebar"
-              title="Open sidebar"
-            >
-              <IconSidebarExpand className="h-3.5 w-3.5" />
-            </button>
-            <div className="min-w-0">
-              <div className="truncate text-[15px] font-semibold" style={{ fontFamily: 'var(--display)' }}>{model.selectedDrone?.name ?? 'No drone selected'}</div>
-              <div className="text-[11px] text-[var(--muted)]">Container-only remote surface</div>
+      <DroneWorkspaceHeaderFrame>
+        <div className="flex h-[52px] items-center px-4">
+          <div className="flex w-full items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <button
+                type="button"
+                className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] md:hidden"
+                onClick={() => setMobileSidebarOpen(true)}
+                aria-label="Open sidebar"
+                title="Open sidebar"
+              >
+                <IconSidebarExpand className="h-3.5 w-3.5" />
+              </button>
+              <div className="min-w-0">
+                <div className="truncate text-[15px] font-semibold" style={{ fontFamily: 'var(--display)' }}>{model.selectedDrone?.name ?? 'No drone selected'}</div>
+                <div className="text-[11px] text-[var(--muted)]">Container-only remote surface</div>
+              </div>
             </div>
+            <button className="rounded border border-[var(--border-subtle)] px-2 py-1 text-[11px] text-[var(--muted)] hover:bg-[var(--hover)]" onClick={() => void model.logout()}>
+              Log out
+            </button>
           </div>
-          <button className="md:hidden rounded border border-[var(--border-subtle)] px-2 py-1 text-[11px] text-[var(--muted)]" onClick={() => void model.logout()}>
-            Log out
-          </button>
         </div>
-      </header>
+      </DroneWorkspaceHeaderFrame>
 
       {model.error ? <div className="border-b border-[rgba(248,113,113,.35)] bg-[rgba(248,113,113,.08)] px-3 py-2 text-[12px] text-[var(--red)]">{model.error}</div> : null}
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-        <div className="mx-auto flex max-w-[1170px] flex-col gap-6 px-2 py-2">
+      <div className="min-h-0 flex-1">
+        <ChatTranscriptFrame
+          loading={false}
+          hasContent={model.transcripts.length > 0 || model.pending.length > 0}
+          emptyState={
+            <EmptyState
+              icon={<IconBot className="h-8 w-8 text-[var(--muted)]" />}
+              title="No messages yet"
+              description={model.selectedDrone ? `Send a prompt to ${model.selectedDrone.name} to see the conversation here.` : 'No container drone is selected.'}
+            />
+          }
+        >
           {model.transcripts.map((turn) => (
             <TranscriptTurn
               key={turn.id ?? `${turn.turn}-${turn.at}`}
@@ -107,16 +120,7 @@ export function RemoteDroneHubApp() {
               />
             ))
           ) : null}
-          {model.transcripts.length === 0 && model.pending.length === 0 ? (
-            <div className="min-h-[280px]">
-              <EmptyState
-                icon={<IconBot className="h-8 w-8 text-[var(--muted)]" />}
-                title="No messages yet"
-                description={model.selectedDrone ? `Send a prompt to ${model.selectedDrone.name} to see the conversation here.` : 'No container drone is selected.'}
-              />
-            </div>
-          ) : null}
-        </div>
+        </ChatTranscriptFrame>
       </div>
 
       <footer className="border-t border-[var(--border)] bg-[var(--panel-alt)] p-3">
@@ -162,26 +166,15 @@ export function RemoteDroneHubApp() {
         onSelectChat={model.setSelectedChat}
       />
 
-      <aside className="hidden w-[300px] shrink-0 border-r border-[var(--border)] bg-[var(--sidebar)] p-3 md:flex md:flex-col">
-        <div className="mb-3 flex items-center justify-between">
-          <div>
-            <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--muted-dim)] font-semibold" style={{ fontFamily: 'var(--display)' }}>Remote</div>
-            <div className="text-[17px] font-semibold" style={{ fontFamily: 'var(--display)' }}>Drone Hub</div>
-          </div>
-          <button className="rounded border border-[var(--border-subtle)] px-2 py-1 text-[11px] text-[var(--muted)] hover:bg-[var(--hover)]" onClick={() => void model.logout()}>
-            Log out
-          </button>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <RemoteHubSidebar
-            drones={model.drones}
-            selectedDroneId={model.selectedDrone?.id ?? null}
-            activeChatName={model.selectedChat}
-            onSelectDrone={model.setSelectedDroneId}
-            onSelectChat={model.setSelectedChat}
-          />
-        </div>
-      </aside>
+      <div className="hidden md:contents">
+        <RemoteHubSidebar
+          drones={model.drones}
+          selectedDroneId={model.selectedDrone?.id ?? null}
+          activeChatName={model.selectedChat}
+          onSelectDrone={model.setSelectedDroneId}
+          onSelectChat={model.setSelectedChat}
+        />
+      </div>
 
       <section className="flex min-w-0 flex-1 flex-col">
         {model.selectedDrone ? (
