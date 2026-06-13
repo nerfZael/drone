@@ -82,6 +82,7 @@ export type SidebarDroneTreeListProps = {
   groupName?: string | null;
   showGroup?: boolean;
   sidebarDndEnabled: boolean;
+  actionsEnabled?: boolean;
 };
 
 export type SidebarDroneTreeListSharedProps = Omit<SidebarDroneTreeListProps, 'tree'>;
@@ -112,6 +113,7 @@ type SidebarDroneRowProps = {
   onSetDroneBaseImage: (droneId: string) => void;
   onDeleteDrone: (droneId: string) => void;
   onOpenDroneErrorModal: (drone: DroneSummary, message: string) => void;
+  actionsEnabled?: boolean;
 };
 
 type SidebarChatRowProps = {
@@ -133,6 +135,7 @@ type SidebarChatRowProps = {
   editorError: string | null;
   editorPending: boolean;
   canRename: boolean;
+  actionsEnabled?: boolean;
   onSelectDroneChat: (droneId: string, chatName: string) => void;
   onRenameChatClick: (droneId: string, chatName: string) => void;
   onEditorValueChange: (next: string) => void;
@@ -277,6 +280,7 @@ const SidebarDroneRow = React.memo(function SidebarDroneRow({
   onSetDroneBaseImage,
   onDeleteDrone,
   onOpenDroneErrorModal,
+  actionsEnabled = true,
 }: SidebarDroneRowProps) {
   const densityClasses = sidebarTreeDensityClasses(sidebarDensityMode);
   const isOptimistic = sidebarOptimisticDroneIdSet.has(drone.id);
@@ -338,11 +342,11 @@ const SidebarDroneRow = React.memo(function SidebarDroneRow({
           dragging={isDragging}
           dragAttributes={attributes as unknown as Record<string, unknown>}
           dragListeners={listeners as unknown as Record<string, unknown>}
-          onClone={() => onOpenCloneModal(drone)}
-          onCreateChat={() => onOpenCreateDroneChat(drone)}
-          onRename={() => onRenameDrone(drone.id)}
-          onSetBaseImage={() => onSetDroneBaseImage(drone.id)}
-          onDelete={() => onDeleteDrone(drone.id)}
+          onClone={actionsEnabled ? () => onOpenCloneModal(drone) : undefined}
+          onCreateChat={actionsEnabled ? () => onOpenCreateDroneChat(drone) : undefined}
+          onRename={actionsEnabled ? () => onRenameDrone(drone.id) : undefined}
+          onSetBaseImage={actionsEnabled ? () => onSetDroneBaseImage(drone.id) : undefined}
+          onDelete={actionsEnabled ? () => onDeleteDrone(drone.id) : undefined}
           onErrorClick={onOpenDroneErrorModal}
           cloneDisabled={
             isOptimistic ||
@@ -406,6 +410,7 @@ const SidebarChatRow = React.memo(function SidebarChatRow({
   editorError,
   editorPending,
   canRename,
+  actionsEnabled = true,
   onSelectDroneChat,
   onRenameChatClick,
   onEditorValueChange,
@@ -480,7 +485,7 @@ const SidebarChatRow = React.memo(function SidebarChatRow({
           selected
             ? 'border-[var(--accent-muted)] bg-[var(--selected)] text-[var(--fg)]'
             : 'border-transparent text-[var(--muted)] hover:border-[var(--border-subtle)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-        } ${movingDroneGroups || isOptimistic ? '' : 'cursor-grab touch-none active:cursor-grabbing'} ${
+        } {!sidebarDndEnabled || movingDroneGroups || isOptimistic ? '' : 'cursor-grab touch-none active:cursor-grabbing'} ${
           isDragging ? 'opacity-35' : ''
         }`}
         title={`${uiDroneName(drone.name)} / ${chatName}`}
@@ -500,7 +505,7 @@ const SidebarChatRow = React.memo(function SidebarChatRow({
         ) : null}
       </button>
       <div className="flex items-center gap-1">
-        {canRename ? (
+        {actionsEnabled && canRename ? (
           <button
             type="button"
             onClick={(event) => {
@@ -516,7 +521,7 @@ const SidebarChatRow = React.memo(function SidebarChatRow({
             <IconPencil className="opacity-90" />
           </button>
         ) : null}
-        {canDelete ? (
+        {actionsEnabled && canDelete ? (
           <button
             type="button"
             onClick={(event) => {
@@ -536,7 +541,7 @@ const SidebarChatRow = React.memo(function SidebarChatRow({
           >
             {deleting ? <IconSpinner className="opacity-90" /> : <IconTrash className="opacity-90" />}
           </button>
-        ) : canRename ? null : (
+        ) : actionsEnabled && canRename ? null : (
           <span className={`${densityClasses.chatPlaceholderWidth} flex-shrink-0`} />
         )}
       </div>
@@ -548,6 +553,7 @@ function SidebarDroneChildrenSection({
   droneId,
   highlighted,
   movingDroneGroups,
+  sidebarDndEnabled,
   isOptimistic,
   groupOrderKey,
   className,
@@ -556,6 +562,7 @@ function SidebarDroneChildrenSection({
   droneId: string;
   highlighted: boolean;
   movingDroneGroups: boolean;
+  sidebarDndEnabled: boolean;
   isOptimistic: boolean;
   groupOrderKey?: string | null;
   className: string;
@@ -568,7 +575,7 @@ function SidebarDroneChildrenSection({
       droneId,
       groupOrderKey: groupOrderKey ?? null,
     },
-    disabled: movingDroneGroups || isOptimistic,
+    disabled: !sidebarDndEnabled || movingDroneGroups || isOptimistic,
   });
 
   return (
@@ -635,6 +642,7 @@ function SidebarDroneNode({
   onSubmitChatEditor,
   onBlurChatEditor,
   onCancelChatEditor,
+  actionsEnabled = true,
 }: SidebarDroneNodeProps) {
   const densityClasses = sidebarTreeDensityClasses(sidebarDensityMode);
   if (ancestorDroneIds?.has(droneId)) return null;
@@ -714,6 +722,7 @@ function SidebarDroneNode({
         onSetDroneBaseImage={onSetDroneBaseImage}
         onDeleteDrone={onDeleteDrone}
         onOpenDroneErrorModal={onOpenDroneErrorModal}
+        actionsEnabled={actionsEnabled}
       />
       {hasChatSection || showCreateChatEditor ? (
         <div className={`${densityClasses.childIndent} mr-1 flex flex-col gap-0.5`}>
@@ -776,6 +785,7 @@ function SidebarDroneNode({
                 onEditorBlur={onBlurChatEditor}
                 onEditorCancel={onCancelChatEditor}
                 onDeleteChatClick={onDeleteChatClick}
+                actionsEnabled={actionsEnabled}
               />
             );
           })}
@@ -786,6 +796,7 @@ function SidebarDroneNode({
           droneId={drone.id}
           highlighted={dragOverParentDroneId === drone.id}
           movingDroneGroups={movingDroneGroups}
+          sidebarDndEnabled={sidebarDndEnabled}
           isOptimistic={isOptimistic}
           groupOrderKey={groupOrderKey}
           className={`${densityClasses.childIndent} mr-1 flex flex-col gap-0.5`}
@@ -844,6 +855,7 @@ function SidebarDroneNode({
               onSubmitChatEditor={onSubmitChatEditor}
               onBlurChatEditor={onBlurChatEditor}
               onCancelChatEditor={onCancelChatEditor}
+              actionsEnabled={actionsEnabled}
             />
           ))}
         </SidebarDroneChildrenSection>
@@ -888,6 +900,7 @@ export function SidebarDroneTreeList({
   groupOrderKey,
   groupName,
   showGroup,
+  actionsEnabled = true,
 }: SidebarDroneTreeListProps) {
   const {
     sidebarChatOrderByDrone,
@@ -1313,6 +1326,7 @@ export function SidebarDroneTreeList({
           onSubmitChatEditor={submitChatEditor}
           onBlurChatEditor={blurChatEditor}
           onCancelChatEditor={cancelChatEditor}
+          actionsEnabled={actionsEnabled}
         />
       ))}
     </>
