@@ -1798,7 +1798,6 @@ export function SelectedDroneWorkspace({
               <div className="w-px h-4 bg-[var(--border-subtle)] ml-1" />
               <div className="flex items-center gap-0.5">
                 {rightPanelTabs.map((tab) => {
-                  const active = rightPanelTab === tab;
                   const prCount = tab === 'prs' ? Number(openPullRequestCount ?? 0) : 0;
                   return (
                     <button
@@ -1806,11 +1805,7 @@ export function SelectedDroneWorkspace({
                       type="button"
                       onClick={() => openWorkspacePane(tab)}
                       data-onboarding-id={tab === 'changes' ? 'rightPanel.tab.changes' : undefined}
-                      className={`inline-flex items-center px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase transition-all ${
-                        active
-                          ? 'bg-[var(--accent-subtle)] text-[var(--accent)] border border-[var(--accent-muted)]'
-                          : 'text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)] border border-transparent'
-                      }`}
+                      className="inline-flex items-center rounded border border-transparent px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)] transition-all hover:border-[var(--border-subtle)] hover:bg-[var(--hover)] hover:text-[var(--muted)]"
                       style={{ fontFamily: 'var(--display)' }}
                       title={
                         tab === 'prs' && prCount > 0
