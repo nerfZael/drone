@@ -33,6 +33,8 @@ export function useRemoteAccess(requestJson: RequestJsonFn) {
   const [stopping, setStopping] = React.useState(false);
   const [creatingPairing, setCreatingPairing] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const parsedPort = Number(port);
+  const portValid = Number.isInteger(parsedPort) && parsedPort > 0 && parsedPort <= 65535;
 
   const loadStatus = React.useCallback(async () => {
     setLoading(true);
@@ -69,12 +71,16 @@ export function useRemoteAccess(requestJson: RequestJsonFn) {
   }, [requestJson]);
 
   const startRemote = React.useCallback(async (force = false) => {
+    if (!portValid) {
+      setError('Enter a valid local port.');
+      return;
+    }
     setStarting(true);
     try {
       const next = await requestJson<{ ok: true; state: RemoteAccessStatus['state']; alreadyRunning: boolean }>('/api/remote-access/start', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ port: Number(port), publicUrl: publicUrl.trim() || null, force }),
+        body: JSON.stringify({ port: parsedPort, publicUrl: publicUrl.trim() || null, force }),
       });
       setStatus({ ok: true, running: true, state: next.state });
       setPairing(null);
@@ -84,7 +90,7 @@ export function useRemoteAccess(requestJson: RequestJsonFn) {
     } finally {
       setStarting(false);
     }
-  }, [port, publicUrl, requestJson]);
+  }, [parsedPort, portValid, publicUrl, requestJson]);
 
   const stopRemote = React.useCallback(async () => {
     setStopping(true);
@@ -115,6 +121,7 @@ export function useRemoteAccess(requestJson: RequestJsonFn) {
     setPort,
     publicUrl,
     setPublicUrl,
+    portValid,
     loading,
     starting,
     stopping,

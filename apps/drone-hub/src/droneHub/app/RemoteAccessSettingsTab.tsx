@@ -70,7 +70,7 @@ export function RemoteAccessSettingsTab({ requestJson }: RemoteAccessSettingsTab
             type="button"
             className="rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-3 py-2 text-[12px] font-semibold text-[var(--fg)] hover:bg-[var(--accent-soft)] disabled:opacity-50"
             onClick={() => void remote.startRemote(running)}
-            disabled={remote.starting || !remote.port.trim()}
+            disabled={remote.starting || !remote.portValid}
           >
             {remote.starting ? 'Starting...' : running ? 'Restart with settings' : 'Start remote Hub'}
           </button>

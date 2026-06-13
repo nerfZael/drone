@@ -27,6 +27,24 @@ export function useRemoteHubModel() {
   const selectedDrone = drones.find((drone) => drone.id === selectedDroneId) ?? drones[0] ?? null;
   const effectiveDroneId = selectedDrone?.id ?? null;
 
+  const markUnauthenticated = React.useCallback(() => {
+    setRemoteCsrf(null);
+    setSession({ ok: true, authenticated: false, csrf: null });
+    setDrones([]);
+    setSelectedDroneId(null);
+    setChats([]);
+    setTranscripts([]);
+    setPending([]);
+  }, []);
+
+  const errorMessage = React.useCallback((err: any) => {
+    if (err?.status === 401) {
+      markUnauthenticated();
+      return 'Pairing required';
+    }
+    return err?.message ?? String(err);
+  }, [markUnauthenticated]);
+
   const loadSession = React.useCallback(async () => {
     const next = await remoteRequestJson<RemoteSession>('/api/remote/session');
     setRemoteCsrf(next.csrf);
@@ -67,7 +85,7 @@ export function useRemoteHubModel() {
         if (next.authenticated) await loadDrones();
         setError(null);
       } catch (err: any) {
-        if (!cancelled) setError(err?.message ?? String(err));
+        if (!cancelled) setError(errorMessage(err));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -76,12 +94,19 @@ export function useRemoteHubModel() {
     return () => {
       cancelled = true;
     };
-  }, [loadDrones, loadSession]);
+  }, [errorMessage, loadDrones, loadSession]);
 
   React.useEffect(() => {
     if (!authenticated || !effectiveDroneId) return;
-    void loadChats(effectiveDroneId).catch((err: any) => setError(err?.message ?? String(err)));
-  }, [authenticated, effectiveDroneId, loadChats]);
+    void loadChats(effectiveDroneId).catch((err: any) => setError(errorMessage(err)));
+  }, [authenticated, effectiveDroneId, errorMessage, loadChats]);
+
+  React.useEffect(() => {
+    if (authenticated && effectiveDroneId) return;
+    setChats([]);
+    setTranscripts([]);
+    setPending([]);
+  }, [authenticated, effectiveDroneId]);
 
   React.useEffect(() => {
     if (!authenticated || !effectiveDroneId || !selectedChat) return;
@@ -92,7 +117,7 @@ export function useRemoteHubModel() {
         await loadChatState(effectiveDroneId, selectedChat);
         if (!cancelled) setError(null);
       } catch (err: any) {
-        if (!cancelled) setError(err?.message ?? String(err));
+        if (!cancelled) setError(errorMessage(err));
       } finally {
         if (!cancelled) timer = setTimeout(tick, document.visibilityState === 'hidden' ? 8000 : 2500);
       }
@@ -102,7 +127,7 @@ export function useRemoteHubModel() {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [authenticated, effectiveDroneId, loadChatState, selectedChat]);
+  }, [authenticated, effectiveDroneId, errorMessage, loadChatState, selectedChat]);
 
   const sendPrompt = React.useCallback(async () => {
     const prompt = draft.trim();
@@ -117,27 +142,30 @@ export function useRemoteHubModel() {
       setDraft('');
       await loadChatState(effectiveDroneId, selectedChat);
     } catch (err: any) {
-      setError(err?.message ?? String(err));
+      setError(errorMessage(err));
     } finally {
       setSending(false);
     }
-  }, [draft, effectiveDroneId, loadChatState, selectedChat]);
+  }, [draft, effectiveDroneId, errorMessage, loadChatState, selectedChat]);
 
   const stopChat = React.useCallback(async () => {
     if (!effectiveDroneId || !selectedChat) return;
-    await remoteRequestJson(`/api/drones/${encodeURIComponent(effectiveDroneId)}/chats/${encodeURIComponent(selectedChat)}/stop`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({}),
-    });
-    await loadChatState(effectiveDroneId, selectedChat);
-  }, [effectiveDroneId, loadChatState, selectedChat]);
+    try {
+      await remoteRequestJson(`/api/drones/${encodeURIComponent(effectiveDroneId)}/chats/${encodeURIComponent(selectedChat)}/stop`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      await loadChatState(effectiveDroneId, selectedChat);
+    } catch (err: any) {
+      setError(errorMessage(err));
+    }
+  }, [effectiveDroneId, errorMessage, loadChatState, selectedChat]);
 
   const logout = React.useCallback(async () => {
-    await remoteRequestJson('/api/remote/logout', { method: 'POST' });
-    setRemoteCsrf(null);
-    setSession({ ok: true, authenticated: false, csrf: null, activeSessions: 0 });
-  }, []);
+    await remoteRequestJson('/api/remote/logout', { method: 'POST' }).catch(() => {});
+    markUnauthenticated();
+  }, [markUnauthenticated]);
 
   return {
     authenticated,

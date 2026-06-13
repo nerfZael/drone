@@ -4,7 +4,6 @@ export type RemoteSession = {
   ok: true;
   authenticated: boolean;
   csrf: string | null;
-  activeSessions: number;
 };
 
 export type DroneListResponse = { ok: true; drones: DroneSummary[] };

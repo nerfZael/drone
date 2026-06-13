@@ -61,7 +61,7 @@ import {
   writeRemoteHubState,
 } from './hub/remote-state';
 import { startRemoteHubServer } from './hub/remote-server';
-import { createRemoteHubPairing, startRemoteHubDetached, stopRemoteHubDetached } from './hub/remote-control';
+import { createRemoteHubPairing, redactRemoteHubState, startRemoteHubDetached, stopRemoteHubDetached } from './hub/remote-control';
 import { startDroneHubApiServer } from './hub/server';
 import { importTranscriptTurnsFromRegistry } from './hub/transcript-store';
 import {
@@ -2354,7 +2354,7 @@ async function remoteHubStatus() {
   const state = await readRemoteHubState();
   const running = Boolean(state && remotePidIsRunning(state.pid));
   // eslint-disable-next-line no-console
-  console.log(JSON.stringify({ ok: true, running, state: state ? { ...state, controlToken: undefined } : null }, null, 2));
+  console.log(JSON.stringify({ ok: true, running, state: running && state ? redactRemoteHubState(state) : null }, null, 2));
 }
 
 async function remoteHubPair() {

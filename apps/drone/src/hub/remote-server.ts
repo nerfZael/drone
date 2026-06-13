@@ -37,9 +37,10 @@ const HOP_BY_HOP_HEADERS = new Set([
   'transfer-encoding',
   'upgrade',
 ]);
+const PROXY_RESPONSE_HEADER_BLOCKLIST = new Set([...HOP_BY_HOP_HEADERS, 'set-cookie']);
 
 function json(res: http.ServerResponse, status: number, body: unknown): void {
-  res.writeHead(status, JSON_HEADERS);
+  res.writeHead(status, { ...JSON_HEADERS, 'cache-control': 'no-store' });
   res.end(JSON.stringify(body));
 }
 
@@ -136,13 +137,10 @@ function routeAllowed(method: string, pathname: string): boolean {
   if (method === 'GET' && pathname === '/api/drones') return true;
   if (parts.length < 3 || parts[0] !== 'api' || parts[1] !== 'drones') return false;
   if (method === 'GET' && parts.length === 4 && parts[3] === 'chats') return true;
-  if (method === 'GET' && parts.length === 5 && parts[3] === 'chats') return true;
   if (method === 'POST' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'prompt') return true;
   if (method === 'POST' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'stop') return true;
   if (method === 'GET' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'pending') return true;
-  if (method === 'GET' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'output') return true;
   if (method === 'GET' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'transcript') return true;
-  if (method === 'DELETE' && parts.length === 7 && parts[3] === 'chats' && parts[5] === 'pending') return true;
   return false;
 }
 
@@ -182,7 +180,7 @@ async function proxyAllowedRequest(opts: StartRemoteHubServerOptions, req: http.
 
   res.statusCode = response.status;
   response.headers.forEach((value, key) => {
-    if (!HOP_BY_HOP_HEADERS.has(key.toLowerCase())) res.setHeader(key, value);
+    if (!PROXY_RESPONSE_HEADER_BLOCKLIST.has(key.toLowerCase())) res.setHeader(key, value);
   });
   if (!response.body) {
     res.end();
@@ -228,7 +226,6 @@ export async function startRemoteHubServer(opts: StartRemoteHubServerOptions): P
           ok: true,
           authenticated: Boolean(session),
           csrf: session?.csrf ?? null,
-          activeSessions: auth.activeSessionCount(),
         });
         return;
       }

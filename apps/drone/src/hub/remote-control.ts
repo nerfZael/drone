@@ -40,6 +40,14 @@ function normalizeRemoteHost(raw: unknown): string {
   return String(raw || '127.0.0.1').trim() || '127.0.0.1';
 }
 
+function parseOptionalPublicUrl(raw: unknown): string | null {
+  const value = String(raw ?? '').trim();
+  if (!value) return null;
+  const url = normalizeRemotePublicUrl(value);
+  if (!url) throw new Error('invalid remote public URL');
+  return url;
+}
+
 function resolveCliFilename(raw: unknown): string {
   const value = String(raw ?? '').trim();
   if (value) return value;
@@ -129,7 +137,7 @@ export async function startRemoteHubDetached(options: StartRemoteHubDetachedOpti
 
   const port = normalizeRemotePort(options.port);
   const host = normalizeRemoteHost(options.host);
-  const publicUrl = normalizeRemotePublicUrl(options.publicUrl);
+  const publicUrl = parseOptionalPublicUrl(options.publicUrl);
   const controlToken = crypto.randomBytes(32).toString('base64url');
   const logPath = remoteHubLogPath();
   await fs.mkdir(path.dirname(logPath), { recursive: true });
@@ -152,10 +160,15 @@ export async function startRemoteHubDetached(options: StartRemoteHubDetachedOpti
       ],
       { detached: true, stdio: ['ignore', logHandle.fd, logHandle.fd], env: { ...process.env, DRONE_HUB_REMOTE_DAEMON: '1' } },
     );
+    let spawnError: Error | null = null;
+    child.once('error', (error) => {
+      spawnError = error;
+    });
     child.unref();
 
     let state: RemoteHubState | null = null;
     for (let i = 0; i < 60; i++) {
+      if (spawnError) throw spawnError;
       const next = await readRemoteHubState();
       if (next && next.pid === child.pid) {
         state = next;

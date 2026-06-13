@@ -31,7 +31,12 @@ function parseCookies(req: IncomingMessage): Record<string, string> {
     if (idx === -1) continue;
     const key = part.slice(0, idx).trim();
     const value = part.slice(idx + 1).trim();
-    if (key) out[key] = decodeURIComponent(value);
+    if (!key) continue;
+    try {
+      out[key] = decodeURIComponent(value);
+    } catch {
+      out[key] = value;
+    }
   }
   return out;
 }
@@ -99,11 +104,6 @@ export class RemoteAuthStore {
     const id = parseCookies(req)[SESSION_COOKIE];
     if (id) this.sessions.delete(id);
     res.setHeader('set-cookie', `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${cookieSecureFlag(req)}`);
-  }
-
-  activeSessionCount(nowMs = Date.now()): number {
-    this.prune(nowMs);
-    return this.sessions.size;
   }
 
   private prune(nowMs: number): void {

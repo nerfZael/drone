@@ -13264,7 +13264,7 @@ export async function startDroneHubApiServer(opts: {
         json(res, 200, {
           ok: true,
           running,
-          state: remoteState ? redactRemoteHubState(remoteState) : null,
+          state: running && remoteState ? redactRemoteHubState(remoteState) : null,
         });
         return;
       }
