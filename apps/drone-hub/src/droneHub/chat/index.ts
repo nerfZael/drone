@@ -1,5 +1,6 @@
 export { ChatTabs } from './ChatTabs';
 export { ChatInput } from './ChatInput';
+export { ChatTranscriptFrame } from './ChatTranscriptFrame';
 export type {
   ChatDraftAutomationPayload,
   ChatImageAttachmentPayload,

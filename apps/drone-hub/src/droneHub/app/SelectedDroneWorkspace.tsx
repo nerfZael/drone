@@ -4,6 +4,7 @@ import {
   PromptLoopTranscriptGroup,
   AutomationLaneStatusCard,
   ChatInput,
+  ChatTranscriptFrame,
   type DroneHubTask,
   type DroneHubTaskSpawnMode,
   type ChatSendPayload,
@@ -1891,11 +1892,23 @@ export function SelectedDroneWorkspace({
           >
           <div className="flex-1 min-h-0 relative">
             {chatUiMode === 'transcript' ? (
-              <div className="h-full min-w-0 min-h-0 overflow-auto">
-                {loadingTranscript && !transcripts && visiblePendingPromptsWithStartup.length === 0 ? (
-                  <TranscriptSkeleton message="Loading chat messages..." />
-                ) : (transcripts && transcripts.length > 0) || visiblePendingPromptsWithStartup.length > 0 ? (
-                  <div className="max-w-[1170px] mx-auto px-6 py-5 flex flex-col gap-6">
+              <ChatTranscriptFrame
+                loading={loadingTranscript && !transcripts && visiblePendingPromptsWithStartup.length === 0}
+                hasContent={Boolean((transcripts && transcripts.length > 0) || visiblePendingPromptsWithStartup.length > 0)}
+                emptyState={
+                  <EmptyState
+                    icon={<IconChat className="h-8 w-8 text-[var(--muted)]" />}
+                    title="No messages yet"
+                    description={
+                      transcriptError
+                        ? `Error: ${transcriptError}`
+                        : hasChats
+                          ? `Send a prompt to ${currentDroneLabel} to see the conversation here.`
+                          : `${currentDroneLabel} has no chats yet. Send the first prompt or click New to create one.`
+                    }
+                  />
+                }
+              >
                     {chatTimelineBlocks.map((entry) => {
                       if (entry.source === 'transcript') {
                         const block = entry.block;
@@ -2033,21 +2046,7 @@ export function SelectedDroneWorkspace({
                       );
                     })}
                     <div ref={chatEndRef as React.RefObject<HTMLDivElement>} />
-                  </div>
-                ) : (
-                  <EmptyState
-                    icon={<IconChat className="w-8 h-8 text-[var(--muted)]" />}
-                    title="No messages yet"
-                    description={
-                      transcriptError
-                        ? `Error: ${transcriptError}`
-                        : hasChats
-                          ? `Send a prompt to ${currentDroneLabel} to see the conversation here.`
-                          : `${currentDroneLabel} has no chats yet. Send the first prompt or click New to create one.`
-                    }
-                  />
-                )}
-              </div>
+              </ChatTranscriptFrame>
             ) : (
               <div
                 ref={outputScrollRef as React.RefObject<HTMLDivElement>}

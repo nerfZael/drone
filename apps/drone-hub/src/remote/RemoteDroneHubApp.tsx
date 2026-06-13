@@ -1,7 +1,7 @@
 import React from 'react';
 import { DockableDroneWorkspace } from '../droneHub/app/DockableDroneWorkspace';
 import { IconSidebarExpand } from '../droneHub/app/icons';
-import { ChatInput, EmptyState, PendingTranscriptTurn, TranscriptTurn, type ChatSendPayload, type DroneHubTask, type DroneHubTaskSpawnMode } from '../droneHub/chat';
+import { ChatInput, ChatTranscriptFrame, EmptyState, PendingTranscriptTurn, TranscriptTurn, type ChatSendPayload, type DroneHubTask, type DroneHubTaskSpawnMode } from '../droneHub/chat';
 import { IconBot } from '../droneHub/chat/icons';
 import { RemoteMobileSidebarDrawer } from './RemoteMobileSidebarDrawer';
 import { RemoteHubSidebar } from './RemoteHubSidebar';
@@ -74,8 +74,18 @@ export function RemoteDroneHubApp() {
 
       {model.error ? <div className="border-b border-[rgba(248,113,113,.35)] bg-[rgba(248,113,113,.08)] px-3 py-2 text-[12px] text-[var(--red)]">{model.error}</div> : null}
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-        <div className="mx-auto flex max-w-[1170px] flex-col gap-6 px-2 py-2">
+      <div className="min-h-0 flex-1">
+        <ChatTranscriptFrame
+          loading={false}
+          hasContent={model.transcripts.length > 0 || model.pending.length > 0}
+          emptyState={
+            <EmptyState
+              icon={<IconBot className="h-8 w-8 text-[var(--muted)]" />}
+              title="No messages yet"
+              description={model.selectedDrone ? `Send a prompt to ${model.selectedDrone.name} to see the conversation here.` : 'No container drone is selected.'}
+            />
+          }
+        >
           {model.transcripts.map((turn) => (
             <TranscriptTurn
               key={turn.id ?? `${turn.turn}-${turn.at}`}
@@ -107,16 +117,7 @@ export function RemoteDroneHubApp() {
               />
             ))
           ) : null}
-          {model.transcripts.length === 0 && model.pending.length === 0 ? (
-            <div className="min-h-[280px]">
-              <EmptyState
-                icon={<IconBot className="h-8 w-8 text-[var(--muted)]" />}
-                title="No messages yet"
-                description={model.selectedDrone ? `Send a prompt to ${model.selectedDrone.name} to see the conversation here.` : 'No container drone is selected.'}
-              />
-            </div>
-          ) : null}
-        </div>
+        </ChatTranscriptFrame>
       </div>
 
       <footer className="border-t border-[var(--border)] bg-[var(--panel-alt)] p-3">
