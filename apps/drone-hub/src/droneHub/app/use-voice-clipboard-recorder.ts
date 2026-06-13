@@ -1,4 +1,8 @@
 import React from 'react';
+import {
+  ASSISTANT_DESKTOP_VOICE_CLIPBOARD_RESULT_EVENT,
+  ASSISTANT_DESKTOP_VOICE_STATUS_EVENT,
+} from '../assistant/desktop-assistant-voice';
 import { playLocalVoiceCue } from '../assistant/local-voice-cues';
 import { copyText } from './clipboard';
 
@@ -178,26 +182,21 @@ export function useVoiceClipboardRecorder(opts: {
   }, [runToggleAction, showClipboardStatus]);
 
   React.useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') return;
-    const source = new window.EventSource('/api/assistant/desktop-voice/events');
-    source.addEventListener('desktop_voice_status', (event) => {
-      try {
-        const status = JSON.parse((event as MessageEvent).data) as DesktopVoiceStatus;
-        clipboardModeRef.current = status.clipboard?.mode ?? clipboardModeRef.current;
-        updateRecordingToast(status);
-      } catch {
-        // Ignore malformed desktop voice status events.
-      }
-    });
-    source.addEventListener('desktop_voice_clipboard_result', (event) => {
-      try {
-        const data = JSON.parse((event as MessageEvent).data);
-        handleClipboardResult(String(data?.text ?? ''));
-      } catch {
-        // Ignore malformed clipboard result events.
-      }
-    });
-    return () => source.close();
+    if (typeof window === 'undefined') return;
+    const onStatus = (event: Event) => {
+      const status = (event as CustomEvent<DesktopVoiceStatus>).detail;
+      clipboardModeRef.current = status.clipboard?.mode ?? clipboardModeRef.current;
+      updateRecordingToast(status);
+    };
+    const onClipboardResult = (event: Event) => {
+      handleClipboardResult(String((event as CustomEvent<string>).detail ?? ''));
+    };
+    window.addEventListener(ASSISTANT_DESKTOP_VOICE_STATUS_EVENT, onStatus);
+    window.addEventListener(ASSISTANT_DESKTOP_VOICE_CLIPBOARD_RESULT_EVENT, onClipboardResult);
+    return () => {
+      window.removeEventListener(ASSISTANT_DESKTOP_VOICE_STATUS_EVENT, onStatus);
+      window.removeEventListener(ASSISTANT_DESKTOP_VOICE_CLIPBOARD_RESULT_EVENT, onClipboardResult);
+    };
   }, [handleClipboardResult, updateRecordingToast]);
 
   return { toggleVoiceClipboardRecording };

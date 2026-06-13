@@ -90,6 +90,7 @@ export function desktopAssistantVoiceControlTitle(status: DesktopAssistantVoiceS
 export const ASSISTANT_DESKTOP_VOICE_TOGGLE_EVENT = 'droneHub:assistantDesktopVoiceToggle';
 export const ASSISTANT_DESKTOP_VOICE_STATUS_EVENT = 'droneHub:assistantDesktopVoiceStatus';
 export const ASSISTANT_DESKTOP_VOICE_TRANSCRIPT_SEGMENT_EVENT = 'droneHub:assistantDesktopVoiceTranscriptSegment';
+export const ASSISTANT_DESKTOP_VOICE_CLIPBOARD_RESULT_EVENT = 'droneHub:assistantDesktopVoiceClipboardResult';
 
 let latestStatus: DesktopAssistantVoiceStatus | null = null;
 let lastCueKey = '';
@@ -239,6 +240,11 @@ export function dispatchAssistantDesktopVoiceTranscriptSegment(text: string): vo
   window.dispatchEvent(new CustomEvent<string>(ASSISTANT_DESKTOP_VOICE_TRANSCRIPT_SEGMENT_EVENT, { detail: text }));
 }
 
+export function dispatchAssistantDesktopVoiceClipboardResult(text: string): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent<string>(ASSISTANT_DESKTOP_VOICE_CLIPBOARD_RESULT_EVENT, { detail: text }));
+}
+
 export function subscribeAssistantDesktopVoiceStatus(listener: (status: DesktopAssistantVoiceStatus) => void): () => void {
   if (typeof window === 'undefined') return () => {};
   const handler = (event: Event) => {
@@ -270,6 +276,14 @@ export function subscribeAssistantDesktopVoiceStatus(listener: (status: DesktopA
         const data = JSON.parse((event as MessageEvent).data);
         const text = String(data?.text ?? '').trim();
         if (text) dispatchAssistantDesktopVoiceTranscriptSegment(text);
+      } catch {
+        // Ignore malformed event payloads.
+      }
+    });
+    nextSource.addEventListener('desktop_voice_clipboard_result', (event) => {
+      try {
+        const data = JSON.parse((event as MessageEvent).data);
+        dispatchAssistantDesktopVoiceClipboardResult(String(data?.text ?? ''));
       } catch {
         // Ignore malformed event payloads.
       }
