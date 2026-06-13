@@ -31,6 +31,8 @@ type DraftChatWorkspaceProps = {
   draftChat: DraftChatState;
   createRuntime: CreateRuntime;
   onCreateRuntimeChange: (value: CreateRuntime) => void;
+  createPersistVolume: boolean;
+  onCreatePersistVolumeChange: (value: boolean) => void;
   draftCreateMode: 'with-chat' | 'without-chat';
   onDraftCreateModeChange: (value: 'with-chat' | 'without-chat') => void;
   spawnAgentMenuEntries: UiMenuSelectEntry[];
@@ -72,6 +74,8 @@ export function DraftChatWorkspace({
   draftChat,
   createRuntime,
   onCreateRuntimeChange,
+  createPersistVolume,
+  onCreatePersistVolumeChange,
   draftCreateMode,
   onDraftCreateModeChange,
   spawnAgentMenuEntries,
@@ -250,6 +254,46 @@ export function DraftChatWorkspace({
           onChange={onCreateRuntimeChange}
           disabled={controlsLocked}
         />
+        {createRuntime === 'container' ? (
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+              Persist volume
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={createPersistVolume}
+              onClick={() => onCreatePersistVolumeChange(!createPersistVolume)}
+              disabled={controlsLocked}
+              className={`inline-flex items-center gap-2 h-[28px] px-2 rounded border text-[10px] font-semibold tracking-wide uppercase transition-all ${
+                controlsLocked
+                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                  : createPersistVolume
+                    ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
+                    : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+              }`}
+              style={{ fontFamily: 'var(--display)' }}
+              title={
+                createPersistVolume
+                  ? 'Mount /dvm-data on a Docker volume for this new drone.'
+                  : 'Keep /dvm-data in the container image layer for this new drone.'
+              }
+            >
+              <span
+                className={`relative inline-flex h-3.5 w-6 rounded-full transition-colors ${
+                  createPersistVolume ? 'bg-[var(--accent)]' : 'bg-[rgba(148,163,184,.3)]'
+                }`}
+              >
+                <span
+                  className={`absolute top-[1px] h-3 w-3 rounded-full bg-white transition-transform ${
+                    createPersistVolume ? 'translate-x-[11px]' : 'translate-x-[1px]'
+                  }`}
+                />
+              </span>
+              {createPersistVolume ? 'On' : 'Off'}
+            </button>
+          </div>
+        ) : null}
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
         <div className="flex items-center gap-1.5">
