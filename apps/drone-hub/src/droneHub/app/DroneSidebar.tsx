@@ -141,7 +141,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
 }
 
 function isHeaderActionTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
+  if (!(target instanceof Element)) return false;
   return Boolean(target.closest('button,a,input,textarea,select,[role="button"],[role="menuitem"]'));
 }
 

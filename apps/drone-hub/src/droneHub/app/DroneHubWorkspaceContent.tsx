@@ -1,11 +1,11 @@
 import React from 'react';
 import { NoDroneSelectedState } from './NoDroneSelectedState';
+import { SettingsView } from './SettingsView';
 import type { DraftChatWorkspace as DraftChatWorkspaceComponent } from './DraftChatWorkspace';
 import type { GroupMultiChatWorkspace as GroupMultiChatWorkspaceComponent } from './GroupMultiChatWorkspace';
 import type { KanbanBoardWorkspace as KanbanBoardWorkspaceComponent } from './KanbanBoardWorkspace';
 import type { PlaybookRunsWorkspace as PlaybookRunsWorkspaceComponent } from './PlaybookRunsWorkspace';
 import type { SelectedDroneWorkspace as SelectedDroneWorkspaceComponent } from './SelectedDroneWorkspace';
-import type { SettingsView as SettingsViewComponent } from './SettingsView';
 import type { SetupWelcomeView as SetupWelcomeViewComponent } from './SetupWelcomeView';
 import type { AppView } from './app-types';
 import { FloatingAssistantDock } from '../assistant/FloatingAssistantDock';
@@ -13,11 +13,6 @@ import { FloatingAssistantDock } from '../assistant/FloatingAssistantDock';
 const SetupWelcomeView = React.lazy(async () => {
   const module = await import('./SetupWelcomeView');
   return { default: module.SetupWelcomeView };
-});
-
-const SettingsView = React.lazy(async () => {
-  const module = await import('./SettingsView');
-  return { default: module.SettingsView };
 });
 
 const DraftChatWorkspace = React.lazy(async () => {
@@ -48,7 +43,7 @@ const SelectedDroneWorkspace = React.lazy(async () => {
 export type DroneHubWorkspaceContentProps = {
   appView: AppView;
   setupWelcomeProps: React.ComponentProps<typeof SetupWelcomeViewComponent> | null;
-  settingsViewProps: React.ComponentProps<typeof SettingsViewComponent>;
+  settingsViewProps: React.ComponentProps<typeof SettingsView>;
   draftChatWorkspaceProps: React.ComponentProps<typeof DraftChatWorkspaceComponent> | null;
   kanbanBoardWorkspaceProps: React.ComponentProps<typeof KanbanBoardWorkspaceComponent> | null;
   playbookRunsWorkspaceProps: React.ComponentProps<typeof PlaybookRunsWorkspaceComponent> | null;
