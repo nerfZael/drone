@@ -21,7 +21,7 @@ const NOOP = () => {};
 const REMOTE_DRONE_SIDEBAR_CAPABILITIES = {
   actions: REMOTE_HUB_CAPABILITIES.sidebarActions,
   collapsedRailActions: false,
-  collapseControl: true,
+  collapseControl: false,
   createDrones: false,
   dragAndDrop: REMOTE_HUB_CAPABILITIES.sidebarDnd,
   headerActions: false,
