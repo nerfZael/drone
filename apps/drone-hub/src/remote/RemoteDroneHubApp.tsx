@@ -1,13 +1,38 @@
 import React from 'react';
 import { DockableDroneWorkspace } from '../droneHub/app/DockableDroneWorkspace';
 import { DroneWorkspaceHeaderFrame } from '../droneHub/app/DroneWorkspaceHeaderFrame';
-import { IconSidebarExpand } from '../droneHub/app/icons';
+import { useDroneHubUiStore } from '../droneHub/app/use-drone-hub-ui-store';
+import { useMobileViewport } from '../droneHub/app/use-mobile-viewport';
 import { ChatInput, ChatTranscriptFrame, EmptyState, PendingTranscriptTurn, TranscriptTurn, type ChatSendPayload, type DroneHubTask, type DroneHubTaskSpawnMode } from '../droneHub/chat';
 import { IconBot } from '../droneHub/chat/icons';
 import { RemoteMobileSidebarDrawer } from './RemoteMobileSidebarDrawer';
 import { RemoteHubSidebar } from './RemoteHubSidebar';
 import { REMOTE_HUB_CAPABILITIES } from './remote-capabilities';
 import { useRemoteHubModel } from './useRemoteHubModel';
+
+type TouchPoint = {
+  x: number;
+  y: number;
+};
+
+const MOBILE_SIDEBAR_SWIPE_DISTANCE_PX = 56;
+const MOBILE_SIDEBAR_SWIPE_VERTICAL_TOLERANCE_PX = 72;
+
+function touchPoint(touch: React.Touch): TouchPoint {
+  return { x: touch.clientX, y: touch.clientY };
+}
+
+function isMobileSidebarOpenSwipe(start: TouchPoint | null, end: TouchPoint): boolean {
+  if (!start) return false;
+  const deltaX = end.x - start.x;
+  const deltaY = Math.abs(end.y - start.y);
+  return deltaX >= MOBILE_SIDEBAR_SWIPE_DISTANCE_PX && deltaY <= MOBILE_SIDEBAR_SWIPE_VERTICAL_TOLERANCE_PX;
+}
+
+function isSwipeIgnoredTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  return Boolean(target.closest('button,a,input,textarea,select,[role="button"],[role="menuitem"]'));
+}
 
 function PairingRequired() {
   return (
@@ -29,7 +54,17 @@ function PairingRequired() {
 
 export function RemoteDroneHubApp() {
   const model = useRemoteHubModel();
+  const isMobileViewport = useMobileViewport();
+  const setSidebarCollapsed = useDroneHubUiStore((state) => state.setSidebarCollapsed);
   const [mobileSidebarOpen, setMobileSidebarOpen] = React.useState(false);
+  const mobileSidebarSwipeStartRef = React.useRef<TouchPoint | null>(null);
+  const setRemoteMobileSidebarOpen = React.useCallback(
+    (open: boolean) => {
+      if (open) setSidebarCollapsed(false);
+      setMobileSidebarOpen(open);
+    },
+    [setSidebarCollapsed],
+  );
   const transcriptMessageId = React.useCallback((turn: any) => String(turn?.id ?? `${turn?.turn ?? ''}:${turn?.at ?? ''}`), []);
   const noopCreateJobs = React.useCallback(() => {}, []);
   const noopSpawnTask = React.useCallback(async (_mode: DroneHubTaskSpawnMode, _task: DroneHubTask) => {
@@ -47,6 +82,31 @@ export function RemoteDroneHubApp() {
     return Boolean(await model.sendPrompt(payload));
   }, [model]);
   const renderRemoteToolPane = React.useCallback(() => null, []);
+  const beginMobileOpenSwipe = React.useCallback(
+    (event: React.TouchEvent) => {
+      if (!isMobileViewport || mobileSidebarOpen || isSwipeIgnoredTarget(event.target)) {
+        mobileSidebarSwipeStartRef.current = null;
+        return;
+      }
+      const touch = event.touches[0];
+      mobileSidebarSwipeStartRef.current = touch ? touchPoint(touch) : null;
+    },
+    [isMobileViewport, mobileSidebarOpen],
+  );
+  const endMobileOpenSwipe = React.useCallback(
+    (event: React.TouchEvent) => {
+      if (!isMobileViewport || mobileSidebarOpen) {
+        mobileSidebarSwipeStartRef.current = null;
+        return;
+      }
+      const touch = event.changedTouches[0];
+      if (touch && isMobileSidebarOpenSwipe(mobileSidebarSwipeStartRef.current, touchPoint(touch))) {
+        setRemoteMobileSidebarOpen(true);
+      }
+      mobileSidebarSwipeStartRef.current = null;
+    },
+    [isMobileViewport, mobileSidebarOpen, setRemoteMobileSidebarOpen],
+  );
 
   const chatContent = (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -54,15 +114,6 @@ export function RemoteDroneHubApp() {
         <div className="flex h-[52px] items-center px-4">
           <div className="flex w-full items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2">
-              <button
-                type="button"
-                className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] md:hidden"
-                onClick={() => setMobileSidebarOpen(true)}
-                aria-label="Open sidebar"
-                title="Open sidebar"
-              >
-                <IconSidebarExpand className="h-3.5 w-3.5" />
-              </button>
               <div className="min-w-0">
                 <div className="truncate text-[15px] font-semibold" style={{ fontFamily: 'var(--display)' }}>{model.selectedDrone?.name ?? 'No drone selected'}</div>
                 <div className="text-[11px] text-[var(--muted)]">Container-only remote surface</div>
@@ -155,13 +206,17 @@ export function RemoteDroneHubApp() {
   if (!model.authenticated) return <PairingRequired />;
 
   return (
-    <main className="fixed inset-0 flex bg-[var(--panel)] text-[var(--fg)]">
+    <main
+      className="fixed inset-0 flex bg-[var(--panel)] text-[var(--fg)]"
+      onTouchStart={beginMobileOpenSwipe}
+      onTouchEnd={endMobileOpenSwipe}
+    >
       <RemoteMobileSidebarDrawer
         open={mobileSidebarOpen}
         drones={model.drones}
         selectedDroneId={model.selectedDrone?.id ?? null}
         activeChatName={model.selectedChat}
-        onOpenChange={setMobileSidebarOpen}
+        onOpenChange={setRemoteMobileSidebarOpen}
         onSelectDrone={model.setSelectedDroneId}
         onSelectChat={model.setSelectedChat}
       />
