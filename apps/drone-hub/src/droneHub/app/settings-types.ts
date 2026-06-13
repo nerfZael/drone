@@ -2,7 +2,7 @@ import type { AutomationConfig } from './automation-config';
 import type { KanbanBoardState } from './kanban-board-state';
 import type { TaskPlaybookButton } from '../types';
 
-export type LlmProviderId = 'openai' | 'gemini';
+export type LlmProviderId = 'openai' | 'gemini' | 'codex';
 export type DroneDeleteMode = 'permanent' | 'archive';
 export type ArchiveRetentionId = '1h' | '8h' | '1d' | '1w';
 export type ArchiveRuntimePolicy = 'keep-running' | 'stop';
@@ -28,6 +28,118 @@ export type LlmSettingsResponse = {
   };
   openai: Omit<ApiKeySettingsResponse, 'ok'>;
   gemini: Omit<ApiKeySettingsResponse, 'ok'>;
+  codex: Omit<ApiKeySettingsResponse, 'ok'>;
+  groq: Omit<ApiKeySettingsResponse, 'ok'>;
+  voiceStreamPairingPassword: {
+    hasPassword: boolean;
+    source: 'settings' | 'environment' | null;
+    passwordHint: string | null;
+    updatedAt: string | null;
+  };
+};
+
+export type VoiceStreamPairingPasswordSettingsResponse = {
+  ok: true;
+  hasPassword: boolean;
+  source: 'settings' | 'environment' | null;
+  passwordHint: string | null;
+  updatedAt: string | null;
+  password?: string | null;
+};
+
+export type DesktopVoiceModelCatalogEntry = {
+  id: string;
+  label: string;
+  language: string;
+  size: string;
+  bundled: boolean;
+  url: string;
+  archiveName: string;
+  extractedDirName: string;
+  sourceUrl: string;
+};
+
+export type DesktopVoiceModelSettingsResponse = {
+  ok: true;
+  state: 'missing' | 'installed' | 'installing' | 'error';
+  installed: boolean;
+  modelDir: string | null;
+  message: string;
+  error: string | null;
+  installing: boolean;
+  installingModelId: string | null;
+  selectedModelId: string;
+  effectiveModelId: string | null;
+  startedAt: string | null;
+  updatedAt: string | null;
+  catalog: DesktopVoiceModelCatalogEntry[];
+};
+
+export type VoiceApprovalSettings = {
+  triggerPhrase: string;
+  unlockCode: string;
+  lockCode: string;
+  lockedOffCode: string;
+  minDigits: number;
+  maxDigits: number;
+  stableMs: number;
+  collectTimeoutMs: number;
+  duplicateCooldownMs: number;
+  finalizeCheckIntervalMs: number;
+  postPromptCommandSuppressionMs: number;
+};
+
+export type VoiceTranscriptionFinalMode = 'full-recording' | 'segments';
+export type VoiceTranscriptionSettings = {
+  finalMode: VoiceTranscriptionFinalMode;
+};
+
+export type VoiceActivationSettings = {
+  normalAliases: string[];
+  realTimeAliases: string[];
+};
+
+export type VoiceApprovalSettingsResponse = {
+  ok: true;
+  profile: {
+    activeProfile: string | null;
+    scoped: true;
+  };
+  voiceApproval: VoiceApprovalSettings & {
+    source: 'settings' | 'default';
+    updatedAt: string | null;
+  };
+  voiceTranscription: VoiceTranscriptionSettings & {
+    source: 'settings' | 'default';
+    updatedAt: string | null;
+  };
+  voiceActivation: VoiceActivationSettings & {
+    source: 'settings' | 'default';
+    updatedAt: string | null;
+  };
+  defaults: VoiceApprovalSettings;
+  transcriptionDefaults: VoiceTranscriptionSettings;
+  activationDefaults: VoiceActivationSettings;
+  limits: {
+    triggerPhraseMaxChars: number;
+    codeMaxDigits: number;
+    minDigitsMin: number;
+    minDigitsMax: number;
+    maxDigitsMin: number;
+    maxDigitsMax: number;
+    stableMsMin: number;
+    stableMsMax: number;
+    collectTimeoutMsMin: number;
+    collectTimeoutMsMax: number;
+    duplicateCooldownMsMin: number;
+    duplicateCooldownMsMax: number;
+    finalizeCheckIntervalMsMin: number;
+    finalizeCheckIntervalMsMax: number;
+    postPromptCommandSuppressionMsMin: number;
+    postPromptCommandSuppressionMsMax: number;
+    activationAliasMaxChars: number;
+    activationAliasMaxCount: number;
+  };
 };
 
 export type HubLogsResponse = {

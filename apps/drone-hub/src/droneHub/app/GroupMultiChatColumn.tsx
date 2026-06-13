@@ -28,7 +28,6 @@ import {
   normalizePendingPromptState,
   reconcileOptimisticPendingPrompt,
 } from './optimistic-pending-prompts';
-import { DirtyDroneApplyModal } from './DirtyDroneApplyModal';
 import {
   dirtyDroneApplyRequestBody,
   reconcileDirtyDroneApplyModal,
@@ -37,7 +36,15 @@ import {
 import { parseIsoDateMs, type GroupMultiChatColumnRuntimeState } from './group-multi-chat-sort';
 import { openDroneTabFromLastPreview, resolveDroneOpenTabUrl } from './quick-actions';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
-import { fetchDroneChatTranscript, sendDroneChatPrompt } from './chat-api';
+import { droneChatEventMatches, fetchDroneChatTranscriptCached, sameTranscriptItems, sendDroneChatPrompt } from './chat-api';
+import { subscribeDroneChatEvents } from './chat-events';
+
+const DirtyDroneApplyModal = React.lazy(async () => {
+  const { DirtyDroneApplyModal } = await import('./DirtyDroneApplyModal');
+  return { default: DirtyDroneApplyModal };
+});
+
+const INITIAL_TRANSCRIPT_TAIL_TURNS = 50;
 
 export type GroupMultiChatColumnProps = {
   drone: DroneSummary;
@@ -81,10 +88,13 @@ export function GroupMultiChatColumn({
   const [stoppingResponse, setStoppingResponse] = React.useState(false);
   const [localWaitingStartedAtMs, setLocalWaitingStartedAtMs] = React.useState<number | null>(null);
   const [optimisticPendingPrompts, setOptimisticPendingPrompts] = React.useState<PendingPrompt[]>([]);
+  const [chatEventsConnected, setChatEventsConnected] = React.useState(false);
+  const [chatEventsNonce, setChatEventsNonce] = React.useState(0);
   const [quickActionBusy, setQuickActionBusy] = React.useState<null | 'ssh' | 'pull' | 'push'>(null);
   const [quickActionError, setQuickActionError] = React.useState<string | null>(null);
   const [dirtyDroneApplyModal, setDirtyDroneApplyModal] = React.useState<DirtyDroneApplyModalState | null>(null);
   const columnScrollRef = React.useRef<HTMLDivElement | null>(null);
+  const transcriptEtagRef = React.useRef<string | null>(null);
   const draftKey = React.useMemo(() => chatInputDraftKeyForDroneChat(drone.id, chatName), [drone.id, chatName]);
   const draftValue = useDroneHubUiStore((s) => s.chatInputDrafts[draftKey] ?? '');
   const setChatInputDraft = useDroneHubUiStore((s) => s.setChatInputDraft);
@@ -93,6 +103,7 @@ export function GroupMultiChatColumn({
   const repoAttached = Boolean(drone.repoAttached ?? Boolean(String(drone.repoPath ?? '').trim()));
   const quickOpenTabUrl = resolveDroneOpenTabUrl(drone);
   const disabledByProvisioning = isDroneStartingOrSeeding(drone.hubPhase);
+  const fullTranscriptLoadedRef = React.useRef(false);
 
   const scrollColumnToBottom = React.useCallback(() => {
     const el = columnScrollRef.current;
@@ -104,6 +115,10 @@ export function GroupMultiChatColumn({
     let mounted = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let busy = false;
+    let loadedInitialTail = false;
+    let eventsConnected = false;
+    let reloadAfterCurrentLoad = false;
+    let reloadAfterBackgroundFull = false;
     const clearTimer = () => {
       if (timer == null) return;
       clearTimeout(timer);
@@ -111,34 +126,96 @@ export function GroupMultiChatColumn({
     };
 
     setTranscripts(null);
+    transcriptEtagRef.current = null;
+    fullTranscriptLoadedRef.current = false;
     setError(null);
     setLoading(true);
+    let backgroundFullBusy = false;
 
-    const load = async () => {
-      if (busy) return;
+    const loadFullTranscript = async (): Promise<void> => {
+      const data = await fetchDroneChatTranscriptCached({
+        droneId: drone.id,
+        chatName,
+        turn: 'all',
+        etag: transcriptEtagRef.current,
+      });
+      if (!mounted) return;
+      if (data.notModified) {
+        setError(null);
+        return;
+      }
+      transcriptEtagRef.current = data.etag;
+      fullTranscriptLoadedRef.current = true;
+      setTranscripts((prev) => (sameTranscriptItems(prev, data.transcripts) ? prev : data.transcripts));
+      setError(null);
+    };
+
+    const startBackgroundFullLoad = () => {
+      if (backgroundFullBusy) return;
+      backgroundFullBusy = true;
+      void loadFullTranscript()
+        .catch((err: any) => {
+          if (!mounted) return;
+          if (isNotFoundError(err)) {
+            transcriptEtagRef.current = null;
+            setTranscripts((prev) => (Array.isArray(prev) && prev.length === 0 ? prev : []));
+            setError(null);
+            return;
+          }
+          setError(err?.message ?? String(err));
+        })
+        .finally(() => {
+          backgroundFullBusy = false;
+          if (reloadAfterBackgroundFull && mounted) {
+            reloadAfterBackgroundFull = false;
+            clearTimer();
+            void loop();
+          }
+        });
+    };
+
+    const load = async (): Promise<boolean> => {
+      if (busy) {
+        reloadAfterCurrentLoad = true;
+        return false;
+      }
       const isStarting = isDroneStartingOrSeeding(drone.hubPhase);
       if (isStarting) {
         if (mounted) {
-          setTranscripts([]);
+          setTranscripts((prev) => (Array.isArray(prev) && prev.length === 0 ? prev : []));
           setError(null);
           setLoading(false);
         }
-        return;
+        return true;
       }
       busy = true;
+      let scheduleNext = true;
       try {
-        const data = await fetchDroneChatTranscript(requestJson, {
-          droneId: drone.id,
-          chatName,
-          turn: 'all',
-        });
-        if (!mounted) return;
-        setTranscripts(data);
-        setError(null);
+        const shouldLoadTailFirst = !loadedInitialTail && !fullTranscriptLoadedRef.current;
+        if (shouldLoadTailFirst) {
+          const data = await fetchDroneChatTranscriptCached({
+            droneId: drone.id,
+            chatName,
+            turn: 'all',
+            tail: INITIAL_TRANSCRIPT_TAIL_TURNS,
+          });
+          if (!mounted) return false;
+          loadedInitialTail = true;
+          setTranscripts((prev) => (sameTranscriptItems(prev, data.transcripts) ? prev : data.transcripts));
+          setError(null);
+          setLoading(false);
+          startBackgroundFullLoad();
+        } else if (backgroundFullBusy) {
+          reloadAfterBackgroundFull = true;
+          scheduleNext = false;
+        } else {
+          await loadFullTranscript();
+        }
       } catch (err: any) {
-        if (!mounted) return;
+        if (!mounted) return false;
         if (isNotFoundError(err)) {
-          setTranscripts([]);
+          transcriptEtagRef.current = null;
+          setTranscripts((prev) => (Array.isArray(prev) && prev.length === 0 ? prev : []));
           setError(null);
         } else {
           setError(err?.message ?? String(err));
@@ -146,16 +223,23 @@ export function GroupMultiChatColumn({
       } finally {
         busy = false;
         if (mounted) setLoading(false);
+        if (reloadAfterCurrentLoad && mounted) {
+          reloadAfterCurrentLoad = false;
+          scheduleNext = false;
+          clearTimer();
+          void loop();
+        }
       }
+      return scheduleNext;
     };
 
     const loop = async () => {
-      await load();
-      if (!mounted) return;
+      const scheduleNext = await load();
+      if (!mounted || !scheduleNext) return;
       clearTimer();
       timer = setTimeout(() => {
         void loop();
-      }, resolvePollIntervalMs(4000, 15_000));
+      }, eventsConnected ? resolvePollIntervalMs(60_000, 60_000) : resolvePollIntervalMs(4000, 15_000));
     };
 
     const onVisibilityChange = () => {
@@ -164,11 +248,26 @@ export function GroupMultiChatColumn({
       clearTimer();
       void loop();
     };
+    const unsubscribeChatEvents = subscribeDroneChatEvents({
+      onConnectedChange: (connected) => {
+        eventsConnected = connected;
+        if (mounted) setChatEventsConnected(connected);
+      },
+      onDelta: (data) => {
+        if (!mounted) return;
+        if (!droneChatEventMatches(data, drone.id, chatName)) return;
+        setChatEventsNonce((value) => value + 1);
+        clearTimer();
+        void loop();
+      },
+    });
 
     void loop();
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
       mounted = false;
+      setChatEventsConnected(false);
+      unsubscribeChatEvents();
       clearTimer();
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
@@ -181,8 +280,8 @@ export function GroupMultiChatColumn({
         `/api/drones/${encodeURIComponent(drone.id)}/chats/${encodeURIComponent(chatName)}/pending`,
       );
     },
-    1000,
-    [chatName, drone.hubPhase, drone.id],
+    chatEventsConnected ? 60_000 : 1000,
+    [chatName, drone.hubPhase, drone.id, chatEventsConnected, chatEventsNonce],
   );
 
   const pendingPrompts = React.useMemo(() => {
@@ -448,7 +547,7 @@ export function GroupMultiChatColumn({
         const conflictFiles = Array.isArray(result.data?.conflictFiles)
           ? result.data.conflictFiles.map((f: any) => String(f ?? '').trim()).filter(Boolean)
           : [];
-        const preview = conflictFiles.slice(0, 8);
+        const preview: string[] = conflictFiles.slice(0, 8);
         const suffix = conflictFiles.length > preview.length ? `\n- and ${conflictFiles.length - preview.length} more` : '';
         const confirmed = window.confirm(
           [
@@ -732,17 +831,19 @@ export function GroupMultiChatColumn({
         onSend={sendPrompt}
       />
       {dirtyDroneApplyModal ? (
-        <DirtyDroneApplyModal
-          dirtyDroneApplyModal={dirtyDroneApplyModal}
-          busy={quickActionBusy === 'pull'}
-          onCancel={() => setDirtyDroneApplyModal(null)}
-          onKeepDirtyAndApply={() => {
-            void continueDirtyDroneApply('keep');
-          }}
-          onCommitAndApply={() => {
-            void continueDirtyDroneApply('commit');
-          }}
-        />
+        <React.Suspense fallback={null}>
+          <DirtyDroneApplyModal
+            dirtyDroneApplyModal={dirtyDroneApplyModal}
+            busy={quickActionBusy === 'pull'}
+            onCancel={() => setDirtyDroneApplyModal(null)}
+            onKeepDirtyAndApply={() => {
+              void continueDirtyDroneApply('keep');
+            }}
+            onCommitAndApply={() => {
+              void continueDirtyDroneApply('commit');
+            }}
+          />
+        </React.Suspense>
       ) : null}
     </section>
   );

@@ -13,7 +13,6 @@ import {
   BUILTIN_AGENT_OPTIONS,
   HUB_LOGS_MAX_BYTES,
   HUB_LOGS_TAIL_LINES,
-  RIGHT_PANEL_MIN_WIDTH_PX,
   RIGHT_PANEL_TAB_LABELS,
   rightPanelTabsForRuntime,
   STARTUP_SEED_MISSING_GRACE_MS,
@@ -35,7 +34,10 @@ import { useChatRuntimeOrchestration } from './droneHub/app/use-chat-runtime-orc
 import { useDroneErrorModalActions } from './droneHub/app/use-drone-error-modal-actions';
 import { useRepoBranchOptions } from './droneHub/app/use-repo-branch-options';
 import { useDroneMutationActions } from './droneHub/app/use-drone-mutation-actions';
-import { useFilesAndPortsPaneState } from './droneHub/app/use-files-and-ports-pane-state';
+import {
+  invalidateFsListCacheForPath,
+  useFilesAndPortsPaneState,
+} from './droneHub/app/use-files-and-ports-pane-state';
 import { useFileEditorState } from './droneHub/app/use-file-editor-state';
 import { useGroupBroadcast } from './droneHub/app/use-group-broadcast';
 import { useGroupManagement } from './droneHub/app/use-group-management';
@@ -46,15 +48,7 @@ import { useTaskPlaybookButtonSettings } from './droneHub/app/use-task-playbook-
 import { useUiPreferencesSettings } from './droneHub/app/use-ui-preferences-settings';
 import { removeDroneIdsFromSidebarNodeOrderByParent } from './droneHub/app/sidebar-node-order';
 import { useDeleteActionSettings } from './droneHub/app/use-delete-action-settings';
-import { useFilesystemSettings } from './droneHub/app/use-filesystem-settings';
-import { useAgentMessageAutoContinueSettings } from './droneHub/app/use-agent-message-auto-continue-settings';
-import { useAgentSuggestionSettings } from './droneHub/app/use-agent-suggestion-settings';
-import { useGithubSettings } from './droneHub/app/use-github-settings';
-import { useAgentsSettings } from './droneHub/app/use-agents-settings';
-import { useProfileSettings } from './droneHub/app/use-profile-settings';
 import { useSetupStatus } from './droneHub/app/use-setup-status';
-import { useSkillLibrary } from './droneHub/app/use-skill-library';
-import { useSyncSets } from './droneHub/app/use-sync-sets';
 import type { ProfileSettingsResponse } from './droneHub/app/settings-types';
 import { shellTerminalPrewarmKey, shouldPrewarmShellTerminal } from './droneHub/app/terminal-prewarm';
 import { useQueuedPromptsState } from './droneHub/app/use-queued-prompts-state';
@@ -71,10 +65,12 @@ import { useDroneHubRuntimeState } from './droneHub/app/use-drone-hub-runtime-st
 import { useDroneHubLifecycleEffects } from './droneHub/app/use-drone-hub-lifecycle-effects';
 import { useDroneHubRegistryData } from './droneHub/app/use-drone-hub-registry-data';
 import { useDroneHubToolbarMenuState } from './droneHub/app/use-drone-hub-toolbar-menu-state';
+import { useVoiceClipboardRecorder } from './droneHub/app/use-voice-clipboard-recorder';
 import { useTranscriptTldrState } from './droneHub/app/use-transcript-tldr-state';
 import { useAgentSuggestionState } from './droneHub/app/use-agent-suggestion-state';
 import { useWorkspaceNavigationActions } from './droneHub/app/use-workspace-navigation-actions';
 import { useWorkspaceActions } from './droneHub/app/use-workspace-actions';
+import { DRONE_FILE_WINDOW_SAVED_EVENT, openDroneFileWindow } from './droneHub/files/open-drone-file-window';
 import {
   resolveNewDroneContextFromCurrentSelection,
   shouldInheritNewDroneContextFromCurrentSelection,
@@ -258,6 +254,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const {
     polledDrones,
     drones,
+    droneById,
     dronesError,
     dronesLoading,
     repos,
@@ -267,6 +264,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     registeredRepoPathSet,
     registryGroupNames,
     dronesFilteredByRepo,
+    dronesFilteredByRepoIdSet,
     droneCountByRepoPath,
     groups,
   } = useDroneHubRegistryData({
@@ -410,15 +408,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     }
     return out;
   }, [drones, uiDroneName]);
-  const droneById = React.useMemo(() => {
-    const out: Record<string, DroneSummary> = {};
-    for (const drone of drones) {
-      const id = String(drone?.id ?? '').trim();
-      if (!id) continue;
-      out[id] = drone;
-    }
-    return out;
-  }, [drones]);
   const droneRepoById = React.useMemo(() => {
     const out: Record<string, string> = {};
     for (const drone of drones) {
@@ -537,20 +526,13 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const {
     rightPanelOpen,
     setRightPanelOpen,
-    rightPanelWidth,
-    rightPanelWidthMode,
-    setRightPanelWidth,
-    rightPanelResizing,
     rightPanelTab,
     setRightPanelTab,
     rightPanelSplit,
     setRightPanelSplitMode,
     rightPanelBottomTab,
     setRightPanelBottomTab,
-    resetRightPanelWidth,
-    startRightPanelResize,
-    rightPanelWidthIsDefault,
-    rightPanelWidthMax,
+    rightPanelOpenRequestSeq,
   } = useRightPanelLayout();
   const headerOverflowRef = React.useRef<HTMLDivElement | null>(null);
   const preferredSelectedDroneRef = React.useRef<string | null>(null);
@@ -586,15 +568,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   });
   useUiPreferencesSettings({ requestJson });
   const deleteActionSettingsState = useDeleteActionSettings(requestJson);
-  const githubSettingsState = useGithubSettings(requestJson);
-  const agentsSettingsState = useAgentsSettings(requestJson);
-  const filesystemSettingsState = useFilesystemSettings(requestJson);
-  const agentMessageAutoContinueSettingsState = useAgentMessageAutoContinueSettings(requestJson);
-  const agentSuggestionSettingsState = useAgentSuggestionSettings(requestJson);
-  const syncSetsState = useSyncSets(requestJson);
-  const profileSettingsState = useProfileSettings(requestJson);
   const setupStatusState = useSetupStatus(requestJson);
-  const skillLibraryState = useSkillLibrary(requestJson);
   const { llmSettings } = llmSettingsState;
 
   React.useEffect(() => {
@@ -620,7 +594,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const description = String(descriptionRaw ?? '').trim();
       if (!description) return null;
       const selectedProvider = llmSettings?.provider?.selected ?? 'openai';
-      const selectedSettings = selectedProvider === 'gemini' ? llmSettings?.gemini : llmSettings?.openai;
+      const selectedSettings = selectedProvider === 'gemini' ? llmSettings?.gemini : selectedProvider === 'codex' ? llmSettings?.codex : llmSettings?.openai;
       if (!selectedSettings?.hasKey) return null;
       const data = await requestJson<{ ok: true; title: string }>('/api/tasks/title-from-message', {
         method: 'POST',
@@ -664,7 +638,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   } = useChatConfigState({
     selectedDrone,
     selectedChat,
-    drones,
+    droneById,
     requestJson,
   });
 
@@ -870,6 +844,53 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setNameSuggestToast((cur) => (cur?.id === id ? null : cur));
     }, 6000);
   }, []);
+
+  const showShortcutToast = React.useCallback(
+    (
+      message: string,
+      title: string,
+      tone: 'success' | 'error' = 'error',
+      opts: { voiceActive?: boolean; voiceLevel?: number; autoDismissMs?: number | null } = {},
+    ) => {
+      const text = String(message ?? '').trim();
+      if (!text) return null;
+      const id = makeId();
+      setNameSuggestToast({
+        id,
+        title,
+        message: text,
+        tone,
+        voiceActive: opts.voiceActive,
+        voiceLevel: opts.voiceLevel,
+      });
+      if (opts.autoDismissMs !== null) {
+        window.setTimeout(() => {
+          setNameSuggestToast((current) => (current?.id === id ? null : current));
+        }, opts.autoDismissMs ?? 5000);
+      }
+      return id;
+    },
+    [setNameSuggestToast],
+  );
+  const updateShortcutVoiceToast = React.useCallback(
+    (id: string, voiceLevel: number, patch: { message?: string; title?: string; tone?: 'success' | 'error'; voiceActive?: boolean } = {}) => {
+      setNameSuggestToast((current) => {
+        if (!current || current.id !== id) return current;
+        return {
+          ...current,
+          ...patch,
+          voiceLevel: Math.max(0, Math.min(1, Number(voiceLevel) || 0)),
+        };
+      });
+    },
+    [setNameSuggestToast],
+  );
+
+  const { toggleVoiceClipboardRecording } = useVoiceClipboardRecorder({
+    requestJson,
+    showToast: showShortcutToast,
+    updateVoiceToast: updateShortcutVoiceToast,
+  });
   const {
     deletingDrones,
     renamingDrones,
@@ -1199,8 +1220,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     kanbanBoardOpen,
     playbookRunsOpen,
     draftChat,
-    drones,
-    dronesFilteredByRepo,
+    droneById,
+    dronesFilteredByRepoIdSet,
     visibleDronesFilteredByRepo: sidebarDronesFilteredByRepo,
     startupSeedByDrone,
     selectionAnchorRef,
@@ -1314,7 +1335,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     void cloneDrone(source);
   }, [cloneDrone, setCreatePersistVolume]);
 
-  const currentDrone = selectedDrone ? drones.find((d) => d.id === selectedDrone) ?? null : null;
+  const currentDrone = selectedDrone ? droneById[selectedDrone] ?? null : null;
   const currentDroneLabel = currentDrone ? uiDroneName(currentDrone.name) : '';
   const [droneDropActionModal, setDroneDropActionModal] = React.useState<DroneDropActionModalState | null>(null);
   const openDroneDropActionModal = React.useCallback(
@@ -1341,6 +1362,20 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const closeDroneDropActionModal = React.useCallback(() => {
     setDroneDropActionModal(null);
   }, []);
+  React.useEffect(() => {
+    void fetch('/api/assistant/context', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        activeDroneId: currentDrone?.id ?? null,
+        activeDroneName: currentDrone?.name ?? null,
+        activeChatName: currentDrone ? (String(selectedChat ?? '').trim() || 'default') : null,
+        appView,
+      }),
+    }).catch(() => {
+      // Context reporting is best effort; assistant chat still works without it.
+    });
+  }, [appView, currentDrone?.id, currentDrone?.name, selectedChat]);
   React.useEffect(() => {
     const selectedNodeId = createCanvasChatNodeId(String(selectedDrone ?? '').trim(), String(selectedChat ?? '').trim() || 'default');
     if (!selectedNodeId) return;
@@ -1413,7 +1448,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     chatInfo,
     currentDrone,
     currentDroneLabel,
-    drones,
+    droneById,
     outputView,
     optimisticPendingPrompts,
     queuedPromptsByDroneChat,
@@ -1437,6 +1472,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     removeQueuedPrompt,
     requestJson,
   });
+  const [agentSuggestionPolicyFingerprint, setAgentSuggestionPolicyFingerprint] = React.useState('');
   const {
     latestAgentSuggestionTarget,
     latestAgentSuggestionState,
@@ -1448,9 +1484,17 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     requestJson,
     transcriptMessageId,
     enabled: chatInfo?.agentSuggestionEnabled === true,
-    currentPolicyFingerprint:
-      agentSuggestionSettingsState.agentSuggestionSettings?.agentSuggestion.policyFingerprint ?? '',
+    currentPolicyFingerprint: agentSuggestionPolicyFingerprint,
   });
+
+  React.useEffect(() => {
+    const next =
+      latestAgentSuggestionState?.status === 'ready' || latestAgentSuggestionState?.status === 'suppressed'
+        ? String(latestAgentSuggestionState.policyFingerprint ?? '').trim()
+        : '';
+    if (!next) return;
+    setAgentSuggestionPolicyFingerprint((prev) => (prev === next ? prev : next));
+  }, [latestAgentSuggestionState]);
 
   React.useEffect(() => {
     if (!selectedDrone) return;
@@ -2135,6 +2179,39 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [focusFilesPane, openEditorFile, setCurrentFsPath],
   );
+  const openFileInWindowFromFilesPane = React.useCallback(
+    (next: { path: string; name: string; line?: number | null; column?: number | null }): boolean => {
+      const droneId = String(currentDrone?.id ?? '').trim();
+      const containerPath = String(next.path ?? '').trim();
+      if (!droneId || !containerPath) return false;
+      const slash = containerPath.lastIndexOf('/');
+      const parentPath = slash > 0 ? containerPath.slice(0, slash) : '/';
+      setCurrentFsPath(parentPath || '/');
+      const openedWindow = openDroneFileWindow({
+        droneId,
+        path: containerPath,
+        name: next.name,
+        line: next.line,
+        column: next.column,
+        onSaved: (savedPath) => {
+          const savedFilePath = String(savedPath ?? '').trim() || containerPath;
+          invalidateFsListCacheForPath(droneId, savedFilePath);
+          window.dispatchEvent(
+            new CustomEvent(DRONE_FILE_WINDOW_SAVED_EVENT, {
+              detail: { droneId, path: savedFilePath },
+            }),
+          );
+        },
+      });
+      if (openedWindow) {
+        closeEditorFile();
+        return true;
+      }
+      openEditorFile(next);
+      return false;
+    },
+    [closeEditorFile, currentDrone?.id, openEditorFile, setCurrentFsPath],
+  );
   const [pendingPlaybookArtifact, setPendingPlaybookArtifact] = React.useState<{
     droneId: string;
     path: string;
@@ -2624,6 +2701,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     openGroupMultiChat,
     openSidebarVisibleMultiChat,
     toggleTldrFromShortcut,
+    toggleVoiceClipboardRecording,
     createOpen,
     setCreateRepoMenuOpen,
     createNameRef,
@@ -2645,12 +2723,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     rightPanelSplit,
     rightPanelBottomTab,
     setRightPanelOpen,
-    rightPanelWidth,
-    rightPanelWidthMode,
-    rightPanelWidthMax,
-    setRightPanelWidth,
     setRightPanelTab,
-    setRightPanelBottomTab,
     setSidebarCollapsed,
     shortcutBindings,
     llmSettings,
@@ -2898,6 +2971,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             if (entry.kind !== 'file') return;
             openFileInFilesPane({ path: entry.path, name: entry.name });
           }}
+          onOpenFileInWindow={(entry) => {
+            if (entry.kind !== 'file') return false;
+            return openFileInWindowFromFilesPane({ path: entry.path, name: entry.name });
+          }}
           onOpenFileTargetInEditor={openFileInFilesPane}
           openedFile={{
             path: openedEditorFile?.path ?? null,
@@ -2998,6 +3075,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       uiDroneName,
       openChangesFileInEditor,
       openFileInFilesPane,
+      openFileInWindowFromFilesPane,
       openedEditorFile,
       openedEditorFileContent,
       openedEditorFileDirty,
@@ -3246,16 +3324,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const workspaceContentProps: DroneHubWorkspaceContentProps = useDroneHubWorkspaceContentProps({
     appView,
     llmSettingsState,
-    githubSettingsState,
-    skillLibraryState,
-    agentsSettingsState,
     deleteActionSettingsState,
-    filesystemSettingsState,
-    agentMessageAutoContinueSettingsState,
-    agentSuggestionSettingsState,
-    syncSetsState,
-    profileSettingsState,
     setupStatusState,
+    requestJson,
     hubLogsState,
     hubLogsTailLines: HUB_LOGS_TAIL_LINES,
     hubLogsMaxBytes: HUB_LOGS_MAX_BYTES,
@@ -3411,8 +3482,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     rightPanelTab,
     setRightPanelTab,
     rightPanelTabLabels: RIGHT_PANEL_TAB_LABELS,
-    resetRightPanelWidth,
-    rightPanelWidthIsDefault,
     transcripts,
     visiblePendingPromptsWithStartup,
     transcriptMessageId,
@@ -3464,14 +3533,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     onOpenedEditorFileContentChange: setOpenedFileContent,
     onSaveOpenedEditorFile: saveOpenedFile,
     onCloseOpenedEditorFile: closeEditorFile,
-    rightPanelWidth,
-    rightPanelWidthMode,
-    rightPanelWidthMax,
-    rightPanelMinWidth: RIGHT_PANEL_MIN_WIDTH_PX,
-    rightPanelResizing,
     rightPanelBottomTab,
-    setRightPanelBottomTab,
-    startRightPanelResize,
+    rightPanelOpenRequestSeq,
     renderRightPanelTabContent,
     renderPersistentPreviewContent,
     setKanbanBoardOpen,

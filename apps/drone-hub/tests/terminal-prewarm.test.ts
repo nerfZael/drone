@@ -80,4 +80,17 @@ describe('terminal prewarm helpers', () => {
       }),
     ).toBe(false);
   });
+
+  test('ignores stale split bottom tab state after split mode is removed', () => {
+    expect(
+      shouldPrewarmShellTerminal({
+        drone: makeDrone(),
+        cwd: '/work/repo',
+        rightPanelOpen: true,
+        rightPanelTab: 'preview',
+        rightPanelSplit: true,
+        rightPanelBottomTab: 'terminal',
+      }),
+    ).toBe(true);
+  });
 });

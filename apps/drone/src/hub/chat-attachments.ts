@@ -121,11 +121,30 @@ function sanitizeAttachmentFileName(nameRaw: string, fallbackBase: string, ext: 
   return cleaned || `${fallbackBase}.${ext || 'png'}`;
 }
 
+function uniqueAttachmentFileName(fileNameRaw: string, usedNames: Set<string>): string {
+  const fileName = String(fileNameRaw ?? '').trim() || 'attachment.bin';
+  let candidate = fileName;
+  let n = 2;
+  const keyFor = (value: string) => value.toLowerCase();
+  while (usedNames.has(keyFor(candidate))) {
+    const parsed = path.posix.parse(fileName);
+    const ext = parsed.ext || '';
+    const suffix = `-${n}`;
+    const maxBaseLength = Math.max(1, 96 - ext.length - suffix.length);
+    const base = (parsed.name || 'attachment').slice(0, maxBaseLength).replace(/[-.]+$/g, '') || 'attachment';
+    candidate = `${base}${suffix}${ext}`;
+    n += 1;
+  }
+  usedNames.add(keyFor(candidate));
+  return candidate;
+}
+
 export function normalizeChatImageAttachments(raw: unknown): ChatImageAttachment[] {
   if (raw == null) return [];
   if (!Array.isArray(raw)) throw new Error('attachments must be an array');
 
   const out: ChatImageAttachment[] = [];
+  const usedFileNames = new Set<string>();
   let total = 0;
 
   for (let i = 0; i < raw.length; i++) {
@@ -162,7 +181,7 @@ export function normalizeChatImageAttachments(raw: unknown): ChatImageAttachment
     const ext = extForAttachmentMime(mime);
     const fallbackBase = isImageAttachmentMime(mime) ? `image-${out.length + 1}` : `text-${out.length + 1}`;
     const name = String(item.name ?? '').trim() || `${fallbackBase}.${ext}`;
-    const fileName = sanitizeAttachmentFileName(name, fallbackBase, ext);
+    const fileName = uniqueAttachmentFileName(sanitizeAttachmentFileName(name, fallbackBase, ext), usedFileNames);
 
     out.push({ name, mime, size: effectiveSize, dataBase64, fileName });
   }
@@ -199,6 +218,17 @@ export function promptWithImageAttachments(
   }
   const block = blocks.join('\n\n');
   return prompt ? `${prompt}\n\n${block}` : block;
+}
+
+export function codexImageAttachmentFlags(files: Array<{ mime: string; path: string }>): string {
+  const paths = (Array.isArray(files) ? files : [])
+    .filter((item) => isImageAttachmentMime(item?.mime))
+    .map((item) => normalizeContainerPath(String(item?.path ?? '').trim()))
+    .filter((item) => item && item !== '/');
+  if (paths.length === 0) return '';
+  // Codex CLI treats `--image <FILE>...` as variadic, so terminate options before
+  // the positional prompt/session args that the caller appends after these flags.
+  return `${paths.map((filePath) => ` --image ${bashQuote(filePath)}`).join('')} --`;
 }
 
 export function buildChatAttachmentsDirectory(opts: {

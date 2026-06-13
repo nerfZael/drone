@@ -1,43 +1,8 @@
-import { DEFAULT_GEMINI_FLASH_MODEL_ID } from './llm-models';
-
-export type LlmProviderId = 'openai' | 'gemini';
-
-type LlmRuntime = {
-  provider: LlmProviderId;
-  z: any;
-  generateObject: any;
-  modelFactory: (modelId: string) => any;
-};
-
-function normalizeProvider(raw: unknown): LlmProviderId {
-  return String(raw ?? '').trim().toLowerCase() === 'gemini' ? 'gemini' : 'openai';
-}
-
-function providerDisplayName(provider: LlmProviderId): string {
-  return provider === 'openai' ? 'OpenAI' : 'Gemini';
-}
+import type { LlmProviderId } from './hub-settings';
+import { defaultHubLlmModelId, providerDisplayName, resolveHubLlmRuntime } from './llm-runtime';
 
 function defaultTldrModelId(provider: LlmProviderId): string {
-  return provider === 'openai' ? 'gpt-4o' : DEFAULT_GEMINI_FLASH_MODEL_ID;
-}
-
-async function resolveLlmRuntime(opts?: { provider?: LlmProviderId; apiKey?: string }): Promise<LlmRuntime> {
-  const provider = normalizeProvider(opts?.provider);
-  const apiKey = String(opts?.apiKey ?? '').trim();
-  if (!apiKey) throw new Error(`Missing ${providerDisplayName(provider)} API key. Configure it in Settings.`);
-
-  // Dynamic imports keep this file compatible with the existing CommonJS build.
-  const [{ generateObject }, { z }] = await Promise.all([import('ai'), import('zod')]);
-
-  if (provider === 'gemini') {
-    const { createGoogleGenerativeAI } = await import('@ai-sdk/google');
-    const google = createGoogleGenerativeAI({ apiKey });
-    return { provider, z, generateObject, modelFactory: google };
-  }
-
-  const { createOpenAI } = await import('@ai-sdk/openai');
-  const openai = createOpenAI({ apiKey });
-  return { provider, z, generateObject, modelFactory: openai };
+  return defaultHubLlmModelId(provider, 'standard');
 }
 
 function normalizeNewlines(s: string): string {
@@ -61,7 +26,7 @@ export async function tldrFromAgentMessage(
   const response = String(opts?.response ?? '').trim();
   if (!response) throw new Error('missing response');
 
-  const runtime = await resolveLlmRuntime(llm);
+  const runtime = await resolveHubLlmRuntime(llm);
   const modelId = String(process.env.DRONE_HUB_TLDR_MODEL ?? '').trim() || defaultTldrModelId(runtime.provider);
 
   const schema = runtime.z.object({

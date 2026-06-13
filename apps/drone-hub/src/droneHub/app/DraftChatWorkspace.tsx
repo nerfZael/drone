@@ -465,6 +465,7 @@ export function DraftChatWorkspace({
       {createWithChat || draftChat.prompt ? (
         <ChatInput
           resetKey={draftChatInputResetKey(draftChat)}
+          focusTargetId="primary-chat"
           droneName="new drone"
           promptError={draftCreateError}
           sending={false}

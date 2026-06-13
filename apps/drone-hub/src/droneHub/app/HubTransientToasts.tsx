@@ -5,6 +5,8 @@ type NameSuggestToast = {
   title?: string;
   message: string;
   tone?: 'success' | 'error';
+  voiceLevel?: number;
+  voiceActive?: boolean;
 };
 
 type HubTransientToastsProps = {
@@ -27,6 +29,7 @@ export function HubTransientToasts({
     nameSuggestToastTone === 'success' ? 'border-[rgba(74,222,128,.28)]' : 'border-[rgba(255,90,90,.2)]';
   const nameSuggestToastLabelClass =
     nameSuggestToastTone === 'success' ? 'text-[var(--green)]' : 'text-[var(--red)]';
+  const voiceLevel = Math.max(0, Math.min(1, Number(nameSuggestToast?.voiceLevel ?? 0)));
 
   return (
     <>
@@ -43,6 +46,7 @@ export function HubTransientToasts({
               <div className={`text-[10px] font-semibold mb-1 tracking-wide uppercase ${nameSuggestToastLabelClass}`} style={{ fontFamily: 'var(--display)' }}>
                 {nameSuggestToast.title ?? (nameSuggestToastTone === 'success' ? 'Action completed' : 'Action failed')}
               </div>
+              {nameSuggestToast.voiceActive ? <VoiceLevelBars level={voiceLevel} /> : null}
               <div className="text-[11px] text-[var(--muted)] whitespace-pre-wrap">{nameSuggestToast.message}</div>
             </div>
             <button
@@ -69,5 +73,26 @@ export function HubTransientToasts({
         </div>
       )}
     </>
+  );
+}
+
+function VoiceLevelBars({ level }: { level: number }) {
+  const bars = [0.28, 0.5, 0.72, 0.94, 0.64, 0.42, 0.8];
+  return (
+    <div className="mb-2 flex h-8 items-end gap-1" aria-hidden="true">
+      {bars.map((base, index) => {
+        const lift = Math.max(0.12, Math.min(1, base * 0.35 + level * (0.65 + (index % 3) * 0.1)));
+        return (
+          <span
+            key={index}
+            className="w-1.5 rounded-full bg-[var(--green)] opacity-80 shadow-[0_0_10px_rgba(74,222,128,.18)] transition-[height,opacity] duration-100 ease-out"
+            style={{
+              height: `${Math.round(6 + lift * 22)}px`,
+              opacity: 0.35 + level * 0.6,
+            }}
+          />
+        );
+      })}
+    </div>
   );
 }

@@ -1,12 +1,4 @@
 import React from 'react';
-import { DroneCanvasDock } from '../canvas';
-import { DroneChangesDock } from '../changes';
-import { DroneEnvDock } from '../env';
-import { DroneFleetDock } from '../fleet';
-import { DroneFilesDock } from '../files';
-import { DroneLinksDock, DronePreviewDock } from '../overview';
-import { DronePullRequestsDock } from '../pullRequests';
-import { DroneTerminalDock } from '../terminal';
 import type { TerminalPaneSessionsState } from '../terminal/terminal-tabs-state';
 import type { ChatAgentConfig } from '../../domain';
 import type { UiMenuSelectEntry } from '../../ui/menuSelect';
@@ -18,8 +10,71 @@ import type {
   PortReachabilityByHostPort,
 } from '../types';
 import type { DroneOpenedFileState } from '../files/opened-file-types';
-import { repoUnavailableReasonForRuntime, type RightPanelTab } from './app-config';
+import {
+  RIGHT_PANEL_TAB_LABELS,
+  RIGHT_PANEL_TABS,
+  repoUnavailableReasonForRuntime,
+  type RightPanelTab,
+} from './app-config';
 import { isDroneStartingOrSeeding } from './helpers';
+
+const LazyAssistantDock = React.lazy(async () => ({
+  default: (await import('../assistant/AssistantDock')).AssistantDock,
+}));
+const LazyDroneCanvasDock = React.lazy(async () => ({
+  default: (await import('../canvas/DroneCanvasDock')).DroneCanvasDock,
+}));
+const LazyDroneChangesDock = React.lazy(async () => ({
+  default: (await import('../changes/DroneChangesDock')).DroneChangesDock,
+}));
+const LazyDroneEnvDock = React.lazy(async () => ({
+  default: (await import('../env/DroneEnvDock')).DroneEnvDock,
+}));
+const LazyDroneFleetDock = React.lazy(async () => ({
+  default: (await import('../fleet/DroneFleetDock')).DroneFleetDock,
+}));
+const LazyDroneFilesDock = React.lazy(async () => ({
+  default: (await import('../files/DroneFilesDock')).DroneFilesDock,
+}));
+const LazyDroneLinksDock = React.lazy(async () => ({
+  default: (await import('../overview/DroneLinksDock')).DroneLinksDock,
+}));
+const LazyDronePreviewDock = React.lazy(async () => ({
+  default: (await import('../overview/DronePreviewDock')).DronePreviewDock,
+}));
+const LazyDronePullRequestsDock = React.lazy(async () => ({
+  default: (await import('../pullRequests/DronePullRequestsDock')).DronePullRequestsDock,
+}));
+const LazyDroneTerminalDock = React.lazy(async () => ({
+  default: (await import('../terminal/DroneTerminalDock')).DroneTerminalDock,
+}));
+
+export const LAZY_RIGHT_PANEL_TABS: ReadonlySet<RightPanelTab> = new Set(RIGHT_PANEL_TABS);
+
+export function isRightPanelTabLazyLoaded(tab: RightPanelTab): boolean {
+  return LAZY_RIGHT_PANEL_TABS.has(tab);
+}
+
+export function RightPanelPaneLoadingFallback({ tab }: { tab: RightPanelTab }) {
+  const label = RIGHT_PANEL_TAB_LABELS[tab] ?? 'Pane';
+  const loadingLabel = label === 'ENV' ? 'environment' : label.toLowerCase();
+  return (
+    <div className="w-full h-full min-h-0 bg-[var(--panel-alt)] overflow-hidden flex items-start px-2.5 py-2">
+      <div className="w-full rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3 text-[12px] text-[var(--muted)]">
+        <div className="text-[11px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+          {label}
+        </div>
+        <div className="mt-1" aria-live="polite">
+          Loading {loadingLabel}...
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LazyPane({ tab, children }: { tab: RightPanelTab; children: React.ReactNode }) {
+  return <React.Suspense fallback={<RightPanelPaneLoadingFallback tab={tab} />}>{children}</React.Suspense>;
+}
 
 type PaneReadinessState = {
   waiting: boolean;
@@ -137,6 +192,7 @@ type RightPanelTabContentProps = {
   agentLabel: string;
   portRows: DronePortMapping[];
   onOpenFileInEditor: (entry: DroneFsEntry) => void;
+  onOpenFileInWindow: (entry: DroneFsEntry) => boolean;
   onOpenFileTargetInEditor: (next: { path: string; name: string; line?: number | null; column?: number | null }) => void;
   openedFile: DroneOpenedFileState;
   onOpenedEditorFileContentChange: (next: string) => void;
@@ -216,6 +272,7 @@ export function RightPanelTabContent({
   agentLabel,
   portRows,
   onOpenFileInEditor,
+  onOpenFileInWindow,
   onOpenFileTargetInEditor,
   openedFile,
   onOpenedEditorFileContentChange,
@@ -225,6 +282,14 @@ export function RightPanelTabContent({
   onRevealChangesFileInFiles,
   onOpenChangesFileInEditor,
 }: RightPanelTabContentProps) {
+  if (tab === 'assistant') {
+    return (
+      <LazyPane tab={tab}>
+        <LazyAssistantDock />
+      </LazyPane>
+    );
+  }
+
   const disabled = isDroneStartingOrSeeding(drone.hubPhase);
   const repoFeaturesEnabled = Boolean(drone.repoAttached ?? Boolean(String(drone.repoPath ?? '').trim()));
   const repoUnavailableReason = repoUnavailableReasonForRuntime(drone.runtime);
@@ -234,194 +299,213 @@ export function RightPanelTabContent({
   switch (tab) {
     case 'canvas':
       return (
-        <DroneCanvasDock
-          droneById={droneById}
-          droneNameById={droneNameById}
-          sidebarOrderedChatNodeIds={orderedCanvasChatNodeIds}
-          sidebarSelectedChatNodeId={currentCanvasChatNodeId}
-          droneRepoById={droneRepoById}
-          fleetParentIdByDroneId={fleetParentIdByDroneId}
-          fleetAssignedIdsByDroneId={fleetAssignedIdsByDroneId}
-          draftRepoLabel={draftRepoLabel}
-          chatNodeStateById={chatNodeStateById}
-          onActivateChat={onActivateChatFromCanvas}
-          onAssignDronesToOwner={onAssignCanvasDronesToOwner}
-          onSendCanvasPrompt={onSendCanvasPrompt}
-          onCreateCanvasDroneFromDraft={onCreateCanvasDroneFromDraft}
-          onRenameChat={onRenameCanvasChat}
-          onDeleteChat={onDeleteCanvasChat}
-          onCloneDrone={onCloneCanvasDrone}
-          spawnAgentMenuEntries={canvasSpawnAgentMenuEntries}
-          spawnAgentKey={canvasSpawnAgentKey}
-          onSpawnAgentKeyChange={onCanvasSpawnAgentKeyChange}
-          onOpenCustomAgentModal={onOpenCanvasCustomAgentModal}
-          spawnAgentConfig={canvasSpawnAgentConfig}
-          spawnModel={canvasSpawnModel}
-          onSpawnModelChange={onCanvasSpawnModelChange}
-          createRepoMenuEntries={canvasCreateRepoMenuEntries}
-          createRepoPath={canvasCreateRepoPath}
-          onCreateRepoPathChange={onCanvasCreateRepoPathChange}
-          createGroup={canvasCreateGroup}
-          onCreateGroupChange={onCanvasCreateGroupChange}
-          pullHostBranchBeforeCreate={canvasPullHostBranchBeforeCreate}
-          onPullHostBranchBeforeCreateChange={onCanvasPullHostBranchBeforeCreateChange}
-        />
+        <LazyPane tab={tab}>
+          <LazyDroneCanvasDock
+            droneById={droneById}
+            droneNameById={droneNameById}
+            sidebarOrderedChatNodeIds={orderedCanvasChatNodeIds}
+            sidebarSelectedChatNodeId={currentCanvasChatNodeId}
+            droneRepoById={droneRepoById}
+            fleetParentIdByDroneId={fleetParentIdByDroneId}
+            fleetAssignedIdsByDroneId={fleetAssignedIdsByDroneId}
+            draftRepoLabel={draftRepoLabel}
+            chatNodeStateById={chatNodeStateById}
+            onActivateChat={onActivateChatFromCanvas}
+            onAssignDronesToOwner={onAssignCanvasDronesToOwner}
+            onSendCanvasPrompt={onSendCanvasPrompt}
+            onCreateCanvasDroneFromDraft={onCreateCanvasDroneFromDraft}
+            onRenameChat={onRenameCanvasChat}
+            onDeleteChat={onDeleteCanvasChat}
+            onCloneDrone={onCloneCanvasDrone}
+            spawnAgentMenuEntries={canvasSpawnAgentMenuEntries}
+            spawnAgentKey={canvasSpawnAgentKey}
+            onSpawnAgentKeyChange={onCanvasSpawnAgentKeyChange}
+            onOpenCustomAgentModal={onOpenCanvasCustomAgentModal}
+            spawnAgentConfig={canvasSpawnAgentConfig}
+            spawnModel={canvasSpawnModel}
+            onSpawnModelChange={onCanvasSpawnModelChange}
+            createRepoMenuEntries={canvasCreateRepoMenuEntries}
+            createRepoPath={canvasCreateRepoPath}
+            onCreateRepoPathChange={onCanvasCreateRepoPathChange}
+            createGroup={canvasCreateGroup}
+            onCreateGroupChange={onCanvasCreateGroupChange}
+            pullHostBranchBeforeCreate={canvasPullHostBranchBeforeCreate}
+            onPullHostBranchBeforeCreateChange={onCanvasPullHostBranchBeforeCreateChange}
+          />
+        </LazyPane>
       );
 
     case 'terminal':
       return (
-        <DroneTerminalDock
-          key={`${paneKey}-terminal`}
-          droneId={drone.id}
-          droneName={drone.name}
-          chatName={chatName}
-          defaultCwd={defaultFsPathForCurrentDrone}
-          paneKey={paneKey}
-          sessionsState={terminalSessionsState}
-          onEnsureSessions={onEnsureTerminalSessions}
-          onCreateSession={onCreateTerminalSession}
-          onActivateSession={onActivateTerminalSession}
-          onResolveSessionName={onResolveTerminalSessionName}
-          onCloseSession={onCloseTerminalSession}
-          disabled={disabled}
-          hubPhase={drone.hubPhase}
-          hubMessage={drone.hubMessage}
-        />
+        <LazyPane tab={tab}>
+          <LazyDroneTerminalDock
+            key={`${paneKey}-terminal`}
+            droneId={drone.id}
+            droneName={drone.name}
+            chatName={chatName}
+            defaultCwd={defaultFsPathForCurrentDrone}
+            paneKey={paneKey}
+            sessionsState={terminalSessionsState}
+            onEnsureSessions={onEnsureTerminalSessions}
+            onCreateSession={onCreateTerminalSession}
+            onActivateSession={onActivateTerminalSession}
+            onResolveSessionName={onResolveTerminalSessionName}
+            onCloseSession={onCloseTerminalSession}
+            disabled={disabled}
+            hubPhase={drone.hubPhase}
+            hubMessage={drone.hubMessage}
+          />
+        </LazyPane>
       );
 
     case 'env':
       return (
-        <DroneEnvDock
-          droneId={drone.id}
-          droneName={drone.name}
-          disabled={disabled}
-          hubPhase={drone.hubPhase}
-          hubMessage={drone.hubMessage}
-        />
+        <LazyPane tab={tab}>
+          <LazyDroneEnvDock
+            droneId={drone.id}
+            droneName={drone.name}
+            disabled={disabled}
+            hubPhase={drone.hubPhase}
+            hubMessage={drone.hubMessage}
+          />
+        </LazyPane>
       );
 
     case 'fleet':
       return (
-        <DroneFleetDock
-          droneId={drone.id}
-          droneName={drone.name}
-          disabled={disabled}
-          hubPhase={drone.hubPhase}
-          hubMessage={drone.hubMessage}
-        />
+        <LazyPane tab={tab}>
+          <LazyDroneFleetDock
+            droneId={drone.id}
+            droneName={drone.name}
+            disabled={disabled}
+            hubPhase={drone.hubPhase}
+            hubMessage={drone.hubMessage}
+          />
+        </LazyPane>
       );
 
     case 'files':
       return (
-        <DroneFilesDock
-          key={`${paneKey}-files`}
-          droneId={drone.id}
-          droneName={drone.name}
-          droneLabel={uiDroneName(drone.name)}
-          path={currentFsPath}
-          homePath={defaultFsPathForCurrentDrone}
-          entries={fsEntries}
-          loading={fsLoading}
-          error={isCurrent ? fsErrorUi : fsError}
-          startup={
-            isCurrent
-              ? {
-                  waiting: filesPane.waiting,
-                  timedOut: filesPane.timedOut,
-                  hubPhase: drone.hubPhase,
-                  hubMessage: drone.hubMessage,
-                }
-              : null
-          }
-          viewMode={fsExplorerView}
-          onSetViewMode={setFsExplorerView}
-          onOpenPath={setCurrentFsPath}
-          onRefresh={refreshFsList}
-          onRefreshOpenedFile={onRefreshOpenedEditorFile}
-          onOpenFile={onOpenFileInEditor}
-          onOpenFileTarget={onOpenFileTargetInEditor}
-          openedFile={openedFile}
-          onOpenedFileContentChange={onOpenedEditorFileContentChange}
-          onSaveOpenedFile={onSaveOpenedEditorFile}
-          onCloseOpenedFile={onCloseOpenedEditorFile}
-        />
+        <LazyPane tab={tab}>
+          <LazyDroneFilesDock
+            key={`${paneKey}-files`}
+            droneId={drone.id}
+            droneName={drone.name}
+            droneLabel={uiDroneName(drone.name)}
+            path={currentFsPath}
+            homePath={defaultFsPathForCurrentDrone}
+            entries={fsEntries}
+            loading={fsLoading}
+            error={isCurrent ? fsErrorUi : fsError}
+            startup={
+              isCurrent
+                ? {
+                    waiting: filesPane.waiting,
+                    timedOut: filesPane.timedOut,
+                    hubPhase: drone.hubPhase,
+                    hubMessage: drone.hubMessage,
+                  }
+                : null
+            }
+            viewMode={fsExplorerView}
+            onSetViewMode={setFsExplorerView}
+            onOpenPath={setCurrentFsPath}
+            onRefresh={refreshFsList}
+            onRefreshOpenedFile={onRefreshOpenedEditorFile}
+            onOpenFile={onOpenFileInEditor}
+            onOpenFileInWindow={onOpenFileInWindow}
+            onOpenFileTarget={onOpenFileTargetInEditor}
+            openedFile={openedFile}
+            onOpenedFileContentChange={onOpenedEditorFileContentChange}
+            onSaveOpenedFile={onSaveOpenedEditorFile}
+            onCloseOpenedFile={onCloseOpenedEditorFile}
+          />
+        </LazyPane>
       );
 
     case 'preview':
       return (
-        <DronePreviewDock
-          key={`${paneKey}-preview`}
-          selectedPort={selectedPreviewPort}
-          portRows={portRows}
-          portReachabilityByHostPort={currentPortReachability}
-          portsLoading={portsLoading}
-          portsError={isCurrent ? portsErrorUi : portsError}
-          startup={
-            isCurrent
-              ? {
-                  waiting: portsPane.waiting,
-                  timedOut: portsPane.timedOut,
-                  hubPhase: drone.hubPhase,
-                  hubMessage: drone.hubMessage,
-                }
-              : null
-          }
-          defaultPreviewUrl={selectedPreviewDefaultUrl}
-          previewUrlOverride={selectedPreviewUrlOverride}
-          onSetPreviewUrlOverride={setSelectedPreviewUrlOverride}
-          locked={previewLocked}
-          onToggleLocked={onTogglePreviewLocked}
-        />
+        <LazyPane tab={tab}>
+          <LazyDronePreviewDock
+            key={`${paneKey}-preview`}
+            selectedPort={selectedPreviewPort}
+            portRows={portRows}
+            portReachabilityByHostPort={currentPortReachability}
+            portsLoading={portsLoading}
+            portsError={isCurrent ? portsErrorUi : portsError}
+            startup={
+              isCurrent
+                ? {
+                    waiting: portsPane.waiting,
+                    timedOut: portsPane.timedOut,
+                    hubPhase: drone.hubPhase,
+                    hubMessage: drone.hubMessage,
+                  }
+                : null
+            }
+            defaultPreviewUrl={selectedPreviewDefaultUrl}
+            previewUrlOverride={selectedPreviewUrlOverride}
+            onSetPreviewUrlOverride={setSelectedPreviewUrlOverride}
+            locked={previewLocked}
+            onToggleLocked={onTogglePreviewLocked}
+          />
+        </LazyPane>
       );
 
     case 'links':
       return (
-        <DroneLinksDock
-          key={`${paneKey}-links`}
-          droneId={drone.id}
-          droneName={drone.name}
-          agentLabel={agentLabel}
-          chatName={chatName}
-          portRows={portRows}
-          portReachabilityByHostPort={currentPortReachability}
-          portsLoading={portsLoading}
-          portsError={isCurrent ? portsErrorUi : portsError}
-        />
+        <LazyPane tab={tab}>
+          <LazyDroneLinksDock
+            key={`${paneKey}-links`}
+            droneId={drone.id}
+            droneName={drone.name}
+            agentLabel={agentLabel}
+            chatName={chatName}
+            portRows={portRows}
+            portReachabilityByHostPort={currentPortReachability}
+            portsLoading={portsLoading}
+            portsError={isCurrent ? portsErrorUi : portsError}
+          />
+        </LazyPane>
       );
 
     case 'changes':
       return (
-        <DroneChangesDock
-          key={`${paneKey}-${drone.id}-changes`}
-          droneId={drone.id}
-          repoAttached={repoFeaturesEnabled}
-          repoPath={drone.repoPath}
-          repoUnavailableReason={repoUnavailableReason}
-          fixedContextMode="branch"
-          disabled={disabled}
-          hubPhase={drone.hubPhase}
-          hubMessage={drone.hubMessage}
-          onRevealFileInFiles={(repoRelativePath) => onRevealChangesFileInFiles(paneKey, repoRelativePath)}
-          onOpenFileInEditor={onOpenChangesFileInEditor}
-        />
+        <LazyPane tab={tab}>
+          <LazyDroneChangesDock
+            key={`${paneKey}-${drone.id}-changes`}
+            droneId={drone.id}
+            repoAttached={repoFeaturesEnabled}
+            repoPath={drone.repoPath}
+            repoUnavailableReason={repoUnavailableReason}
+            fixedContextMode="branch"
+            disabled={disabled}
+            hubPhase={drone.hubPhase}
+            hubMessage={drone.hubMessage}
+            onRevealFileInFiles={(repoRelativePath) => onRevealChangesFileInFiles(paneKey, repoRelativePath)}
+            onOpenFileInEditor={onOpenChangesFileInEditor}
+          />
+        </LazyPane>
       );
 
     case 'prs':
       return (
-        <DronePullRequestsDock
-          key={`${paneKey}-${drone.id}-prs`}
-          droneId={drone.id}
-          droneName={drone.name}
-          repoAttached={repoFeaturesEnabled}
-          repoPath={drone.repoPath}
-          repoUnavailableReason={repoUnavailableReason}
-          disabled={disabled}
-          hubPhase={drone.hubPhase}
-          hubMessage={drone.hubMessage}
-          onOpenPullRequest={(pullRequest) => onOpenPullRequest(paneKey, pullRequest)}
-          onRevealFileInFiles={(repoRelativePath) => onRevealChangesFileInFiles(paneKey, repoRelativePath)}
-          onOpenFileInEditor={onOpenChangesFileInEditor}
-        />
+        <LazyPane tab={tab}>
+          <LazyDronePullRequestsDock
+            key={`${paneKey}-${drone.id}-prs`}
+            droneId={drone.id}
+            droneName={drone.name}
+            repoAttached={repoFeaturesEnabled}
+            repoPath={drone.repoPath}
+            repoUnavailableReason={repoUnavailableReason}
+            disabled={disabled}
+            hubPhase={drone.hubPhase}
+            hubMessage={drone.hubMessage}
+            onOpenPullRequest={(pullRequest) => onOpenPullRequest(paneKey, pullRequest)}
+            onRevealFileInFiles={(repoRelativePath) => onRevealChangesFileInFiles(paneKey, repoRelativePath)}
+            onOpenFileInEditor={onOpenChangesFileInEditor}
+          />
+        </LazyPane>
       );
 
     default:

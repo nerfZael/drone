@@ -19,6 +19,9 @@ export type DroneSummary = {
     }>;
   } | null;
   createdAt: string;
+  lastActivityAt?: string | null;
+  lastMessageAt?: string | null;
+  lastActivityChat?: string | null;
   fleetParentId?: string | null;
   fleetAssignedIds?: string[] | null;
   runtime?: 'container' | 'host';
@@ -256,6 +259,13 @@ export type RepoPullChangesPayload =
         changed: number;
       };
       entries: RepoPullChangeEntry[];
+      applyPreview?: {
+        mode: 'host-merge' | 'drone-range';
+        counts: {
+          changed: number;
+        };
+        entries: RepoPullChangeEntry[];
+      };
     }
   | { ok: false; error: string; code?: string };
 

@@ -33,12 +33,17 @@
   "dependencies": {
     "@ai-sdk/google": "^3.0.29",
     "@ai-sdk/openai": "^3.0.26",
+    "@mariozechner/pi-agent-core": "workspace:*",
+    "@mariozechner/pi-ai": "workspace:*",
     "ai": "^6.0.77",
     "commander": "^12.1.0",
-    "dvm": "workspace:*",
     "dotenv": "^17.2.4",
+    "dvm": "workspace:*",
     "ws": "^8.19.0",
     "zod": "^4.3.6"
+  },
+  "optionalDependencies": {
+    "vosk": "^0.3.39"
   },
   "devDependencies": {
     "@types/node": "^22.7.4",

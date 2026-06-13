@@ -9,6 +9,7 @@ pnpm-debug.log*
 dist/
 build/
 out/
+apps/voice-stream-next/release/
 *.tsbuildinfo
 
 # Runtime data
@@ -16,6 +17,10 @@ pids
 *.pid
 *.seed
 *.pid.lock
+apps/voice-stream-next/server/data/
+apps/voice-stream-next/server/.data/
+server/data/
+server/.data/
 
 # Coverage directory used by tools like istanbul
 coverage/
@@ -69,6 +74,8 @@ jspm_packages/
 
 # dotenv environment variable files
 .env
+.env.debug
+.env.release
 .env.development.local
 .env.test.local
 .env.production.local
@@ -147,6 +154,11 @@ data/
 
 .turbo/
 artifacts/
+
+# Android / local app runtime
+.gradle/
+local.properties
+**/.runtime/
 
 
 AGENTS.md

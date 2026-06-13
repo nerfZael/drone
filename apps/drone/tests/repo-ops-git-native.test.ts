@@ -4,8 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, test } from 'bun:test';
 import {
+  applyBranchMergeNoCommitToMainWorkingTree,
   applyBranchDiffToMainWorkingTree,
   buildWorkingTreeRepoChangeReviewToken,
+  createHostAuthoredMirrorCommit,
   gitPullHostBranchBeforeCreate,
   gitListRemoteBranches,
   gitRepoChangesSummary,
@@ -14,6 +16,7 @@ import {
   HostRepoPullBeforeCreateError,
   importBundleHeadToHostRef,
   RepoPatchApplyError,
+  updateHostRef,
 } from '../src/hub/repoOps';
 
 function run(cmd: string, args: string[], cwd?: string): { code: number; stdout: string; stderr: string } {
@@ -210,6 +213,107 @@ describe('repoOps git-native pull helpers', () => {
       expect(importedSha).toBe(head);
       const refSha = runOrThrow('git', ['rev-parse', refName], repoRoot).trim();
       expect(refSha).toBe(head);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('host-authored mirror merge leaves a pending merge without drone-authored host history', async () => {
+    const { repoRoot, cleanup } = mkRepo();
+    try {
+      runOrThrow('git', ['config', 'user.name', 'Host User'], repoRoot);
+      runOrThrow('git', ['config', 'user.email', 'host@example.com'], repoRoot);
+      writeAndCommit(repoRoot, 'base.txt', 'base\n', 'init');
+      runOrThrow('git', ['checkout', '-b', 'drone'], repoRoot);
+      runOrThrow('git', ['config', 'user.name', 'Drone User'], repoRoot);
+      runOrThrow('git', ['config', 'user.email', 'drone@example.com'], repoRoot);
+      writeAndCommit(repoRoot, 'feature.txt', 'feature\n', 'drone feature');
+      const droneHead = runOrThrow('git', ['rev-parse', 'HEAD'], repoRoot).trim();
+      runOrThrow('git', ['checkout', 'main'], repoRoot);
+      runOrThrow('git', ['config', 'user.name', 'Host User'], repoRoot);
+      runOrThrow('git', ['config', 'user.email', 'host@example.com'], repoRoot);
+
+      const mirrorSha = await createHostAuthoredMirrorCommit({
+        repoRoot,
+        sourceRef: droneHead,
+        parentRef: 'HEAD',
+        message: 'mirror drone feature',
+      });
+      await updateHostRef({ repoRoot, refName: 'refs/drone/mirrors/test/candidate', target: mirrorSha });
+
+      await applyBranchMergeNoCommitToMainWorkingTree({ repoRoot, branch: 'refs/drone/mirrors/test/candidate' });
+
+      const mergeHead = runOrThrow('git', ['rev-parse', 'MERGE_HEAD'], repoRoot).trim();
+      expect(mergeHead).toBe(mirrorSha);
+      runOrThrow('git', ['commit', '-m', 'apply mirrored drone feature'], repoRoot);
+
+      const parents = runOrThrow('git', ['rev-list', '--parents', '-n', '1', 'HEAD'], repoRoot)
+        .trim()
+        .split(/\s+/);
+      expect(parents).toHaveLength(3);
+      const originalDroneAncestor = run('git', ['merge-base', '--is-ancestor', droneHead, 'HEAD'], repoRoot);
+      expect(originalDroneAncestor.code).toBe(1);
+      const authorEmails = runOrThrow('git', ['log', '--format=%ae', 'HEAD'], repoRoot)
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+      expect(authorEmails).not.toContain('drone@example.com');
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('host-authored mirror ancestry keeps host edits when later drone work is unrelated', async () => {
+    const { repoRoot, cleanup } = mkRepo();
+    try {
+      runOrThrow('git', ['config', 'user.name', 'Host User'], repoRoot);
+      runOrThrow('git', ['config', 'user.email', 'host@example.com'], repoRoot);
+      writeAndCommit(repoRoot, 'picker.txt', 'Boxes\nModels\n', 'init');
+      const baseSha = runOrThrow('git', ['rev-parse', 'HEAD'], repoRoot).trim();
+
+      runOrThrow('git', ['checkout', '-b', 'drone'], repoRoot);
+      runOrThrow('git', ['config', 'user.name', 'Drone User'], repoRoot);
+      runOrThrow('git', ['config', 'user.email', 'drone@example.com'], repoRoot);
+      writeAndCommit(repoRoot, 'feature.txt', 'first drone feature\n', 'drone feature');
+      const firstDroneHead = runOrThrow('git', ['rev-parse', 'HEAD'], repoRoot).trim();
+      runOrThrow('git', ['checkout', 'main'], repoRoot);
+      runOrThrow('git', ['config', 'user.name', 'Host User'], repoRoot);
+      runOrThrow('git', ['config', 'user.email', 'host@example.com'], repoRoot);
+
+      const firstMirrorSha = await createHostAuthoredMirrorCommit({
+        repoRoot,
+        sourceRef: firstDroneHead,
+        parentRef: baseSha,
+        message: 'mirror first drone feature',
+      });
+      await updateHostRef({ repoRoot, refName: 'refs/drone/mirrors/test/applied', target: firstMirrorSha });
+      await applyBranchMergeNoCommitToMainWorkingTree({ repoRoot, branch: 'refs/drone/mirrors/test/applied' });
+      fs.writeFileSync(path.join(repoRoot, 'picker.txt'), 'Plus\nAdd Models\n', 'utf8');
+      runOrThrow('git', ['add', 'picker.txt'], repoRoot);
+      runOrThrow('git', ['commit', '-m', 'apply first drone feature with host UI edit'], repoRoot);
+
+      runOrThrow('git', ['checkout', 'drone'], repoRoot);
+      writeAndCommit(repoRoot, 'unrelated.txt', 'later drone work\n', 'later unrelated drone work');
+      const secondDroneHead = runOrThrow('git', ['rev-parse', 'HEAD'], repoRoot).trim();
+      runOrThrow('git', ['checkout', 'main'], repoRoot);
+
+      const secondMirrorSha = await createHostAuthoredMirrorCommit({
+        repoRoot,
+        sourceRef: secondDroneHead,
+        parentRef: firstMirrorSha,
+        message: 'mirror later drone work',
+      });
+      await updateHostRef({ repoRoot, refName: 'refs/drone/mirrors/test/candidate', target: secondMirrorSha });
+      await applyBranchMergeNoCommitToMainWorkingTree({ repoRoot, branch: 'refs/drone/mirrors/test/candidate' });
+
+      expect(fs.readFileSync(path.join(repoRoot, 'picker.txt'), 'utf8')).toBe('Plus\nAdd Models\n');
+      expect(fs.readFileSync(path.join(repoRoot, 'unrelated.txt'), 'utf8')).toBe('later drone work\n');
+      runOrThrow('git', ['commit', '-m', 'apply later drone work'], repoRoot);
+      const authorEmails = runOrThrow('git', ['log', '--format=%ae', 'HEAD'], repoRoot)
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+      expect(authorEmails).not.toContain('drone@example.com');
     } finally {
       cleanup();
     }

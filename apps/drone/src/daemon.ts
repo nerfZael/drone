@@ -1,8 +1,11 @@
 import crypto from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
+import { createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
+import readline from 'node:readline';
 import { URL } from 'node:url';
 import { promisify } from 'node:util';
 
@@ -14,6 +17,7 @@ import {
   type FleetRequestState,
   type FleetRequestType,
 } from './fleet/contracts';
+import { parseBuiltinPromptJobTranscriptLines, type BuiltinPromptJobTranscript } from './hub/builtin-transcript-sessions';
 import { preferredTerminalSessionLogsRoot } from './host/session-logs';
 import { missingHostDependencyMessage } from './host/runtime';
 import {
@@ -60,11 +64,22 @@ type PromptJob = {
   stdoutPath: string;
   stderrPath: string;
   exitPath: string;
+  wrapperPath?: string;
   startedAt?: string;
   finishedAt?: string;
   exitCode?: number;
+  exitStatusSource?: 'exit-file' | 'missing-exit-file';
   stdout?: string;
   stderr?: string;
+  wrapperLog?: string;
+  stdoutBytes?: number;
+  stderrBytes?: number;
+  wrapperBytes?: number;
+  stdoutTruncated?: boolean;
+  stderrTruncated?: boolean;
+  wrapperTruncated?: boolean;
+  transcript?: BuiltinPromptJobTranscript;
+  failureReason?: string;
   error?: string;
 };
 
@@ -85,14 +100,38 @@ async function fileExists(p: string): Promise<boolean> {
   }
 }
 
-async function readTextSafe(p: string, maxBytes = 2 * 1024 * 1024): Promise<string> {
+async function readTextSafeDetailed(
+  p: string,
+  opts?: { maxBytes?: number },
+): Promise<{ text: string; bytes: number; truncated: boolean }> {
+  let handle: FileHandle | null = null;
   try {
-    const buf = await fs.readFile(p);
-    if (buf.length <= maxBytes) return buf.toString('utf8');
-    return `${buf.subarray(0, maxBytes).toString('utf8')}\n\n…(truncated)…`;
+    const maxBytes = Math.max(1, Math.floor(opts?.maxBytes ?? 2 * 1024 * 1024));
+    handle = await fs.open(p, 'r');
+    const stat = await handle.stat();
+    const bytes = Number.isFinite(stat.size) && stat.size > 0 ? Math.floor(stat.size) : 0;
+    const readBytes = Math.min(bytes, maxBytes);
+    const buf = Buffer.alloc(readBytes);
+    const read = readBytes > 0 ? await handle.read(buf, 0, readBytes, 0) : { bytesRead: 0 };
+    const head = buf.subarray(0, read.bytesRead).toString('utf8');
+    if (bytes <= maxBytes) {
+      return { text: head, bytes, truncated: false };
+    }
+    const text = `${head}\n\n…(truncated)…`;
+    return {
+      text,
+      bytes,
+      truncated: true,
+    };
   } catch {
-    return '';
+    return { text: '', bytes: 0, truncated: false };
+  } finally {
+    await handle?.close().catch(() => {});
   }
+}
+
+async function readTextSafe(p: string, maxBytes = 2 * 1024 * 1024): Promise<string> {
+  return (await readTextSafeDetailed(p, { maxBytes })).text;
 }
 
 async function readIntSafe(p: string): Promise<number | null> {
@@ -142,6 +181,38 @@ async function loadPromptIndex(promptsDir: string): Promise<PromptIndex> {
 
 async function savePromptIndex(promptsDir: string, idx: PromptIndex): Promise<void> {
   await writeJsonFileAtomic(path.join(promptsDir, 'queue.json'), idx);
+}
+
+function promptJobEventSummary(job: PromptJob) {
+  return {
+    id: job.id,
+    kind: job.kind,
+    state: job.state,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    ...(job.startedAt ? { startedAt: job.startedAt } : {}),
+    ...(job.finishedAt ? { finishedAt: job.finishedAt } : {}),
+    ...(typeof job.exitCode === 'number' ? { exitCode: job.exitCode } : {}),
+    ...(job.error ? { error: job.error } : {}),
+  };
+}
+
+async function buildPromptJobEventSnapshot(promptsDir: string): Promise<Map<string, string>> {
+  const idx = await loadPromptIndex(promptsDir);
+  const order = Array.isArray(idx.order) ? idx.order.map(String).filter(Boolean) : [];
+  const next = new Map<string, string>();
+  for (const id of order) {
+    const job = await loadPromptJob(promptsDir, id);
+    if (!job) continue;
+    next.set(id, JSON.stringify(promptJobEventSummary(job)));
+  }
+  return next;
+}
+
+function writeSseEvent(res: http.ServerResponse, event: string, data: any): void {
+  if (res.destroyed || res.writableEnded) return;
+  res.write(`event: ${event}\n`);
+  res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
 async function loadFleetRequestIndex(fleetDir: string): Promise<FleetRequestIndex> {
@@ -313,6 +384,8 @@ async function startPromptJob(job: PromptJob): Promise<void> {
   const quotedStdoutPath = bashQuote(job.stdoutPath);
   const quotedStderrPath = bashQuote(job.stderrPath);
   const quotedExitPath = bashQuote(job.exitPath);
+  const wrapperPath = job.wrapperPath ?? path.join(path.dirname(job.stdoutPath), `${job.id}.wrapper.log`);
+  const quotedWrapperPath = bashQuote(wrapperPath);
   const cd = job.cwd ? `cd ${bashQuote(job.cwd)}\n` : '';
   const envLines =
     job.env && Object.keys(job.env).length > 0
@@ -322,15 +395,36 @@ async function startPromptJob(job: PromptJob): Promise<void> {
       : '';
   const script = [
     'set +e',
+    `stdout_path=${quotedStdoutPath}`,
+    `stderr_path=${quotedStderrPath}`,
+    `exit_path=${quotedExitPath}`,
+    `wrapper_path=${quotedWrapperPath}`,
+    'wrote_exit=0',
+    'printf \'%s\\n\' "prompt wrapper: started at $(date -Is) pid $$" > "$wrapper_path" 2>/dev/null || true',
+    'record_wrapper_exit() {',
+    '  wrapper_code=$?',
+    '  if [ "$wrote_exit" != "1" ]; then',
+    '    printf \'%s\\n\' "prompt wrapper: exited before command exit capture at $(date -Is) with wrapper code $wrapper_code" >> "$wrapper_path" 2>/dev/null || true',
+    '    if [ ! -e "$exit_path" ]; then',
+    '      printf %s "$wrapper_code" > "$exit_path" 2>/dev/null || true',
+    '    fi',
+    '  fi',
+    '}',
+    'trap record_wrapper_exit EXIT',
+    'trap \'printf \'\\\'\'%s\\n\'\\\'\' "prompt wrapper: received SIGHUP at $(date -Is)" >> "$wrapper_path" 2>/dev/null || true; exit 129\' HUP',
+    'trap \'printf \'\\\'\'%s\\n\'\\\'\' "prompt wrapper: received SIGINT at $(date -Is)" >> "$wrapper_path" 2>/dev/null || true; exit 130\' INT',
+    'trap \'printf \'\\\'\'%s\\n\'\\\'\' "prompt wrapper: received SIGTERM at $(date -Is)" >> "$wrapper_path" 2>/dev/null || true; exit 143\' TERM',
     cd.trimEnd(),
     envLines.trimEnd(),
     // Run and capture exit code.
     `${quotedCmd} ${quotedArgs} > ${quotedStdoutPath} 2> ${quotedStderrPath}`,
     'code=$?',
+    'printf \'%s\\n\' "prompt wrapper: command exited at $(date -Is) with code $code" >> "$wrapper_path" 2>/dev/null || true',
     `if [ "$code" -ne 0 ] && [ ! -s ${quotedStdoutPath} ] && [ ! -s ${quotedStderrPath} ]; then`,
     `  printf '%s\n' "prompt wrapper: command exited with code $code without writing stdout/stderr" >> ${quotedStderrPath}`,
     'fi',
     `printf %s \"$code\" > ${quotedExitPath}`,
+    'wrote_exit=1',
     'exit 0',
   ]
     .filter(Boolean)
@@ -343,21 +437,52 @@ async function startPromptJob(job: PromptJob): Promise<void> {
   await startSession({ session: job.session, cmd: 'bash', args: [scriptPath] });
 }
 
+function promptJobSupportsTranscript(kindRaw: unknown): boolean {
+  const kind = String(kindRaw ?? '').trim();
+  return kind === 'codex' || kind === 'pi';
+}
+
+async function parsePromptJobTranscriptFromFile(
+  job: PromptJob,
+  stdoutRead: { bytes: number; truncated: boolean },
+  parsedAt: string,
+): Promise<BuiltinPromptJobTranscript | null> {
+  if (!promptJobSupportsTranscript(job.kind)) return null;
+  const stream = createReadStream(job.stdoutPath, { encoding: 'utf8' });
+  const lines = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  try {
+    return await parseBuiltinPromptJobTranscriptLines(job.kind, lines, {
+      stdoutBytes: stdoutRead.bytes,
+      stdoutTruncated: stdoutRead.truncated,
+      parsedAt,
+    });
+  } catch {
+    return null;
+  } finally {
+    lines.close();
+    stream.destroy();
+  }
+}
+
 async function finalizePromptJob(job: PromptJob): Promise<PromptJob> {
   // Some CLIs (notably Codex JSON mode) may continue appending output briefly
   // after the tmux session has exited. Wait for output/exit artifacts to settle.
   let exitCode = await readIntSafe(job.exitPath);
-  let stdout = await readTextSafe(job.stdoutPath);
-  let stderr = await readTextSafe(job.stderrPath);
+  let stdoutRead = await readTextSafeDetailed(job.stdoutPath);
+  let stderrRead = await readTextSafeDetailed(job.stderrPath);
+  let wrapperRead = await readTextSafeDetailed(job.wrapperPath ?? path.join(path.dirname(job.stdoutPath), `${job.id}.wrapper.log`));
+  let stdout = stdoutRead.text;
+  let stderr = stderrRead.text;
+  let wrapperLog = wrapperRead.text;
 
   const startedLikeCodexTurn =
-    /"type":"thread\.started"/.test(stdout) &&
-    /"type":"turn\.started"/.test(stdout);
+    /"type":"thread\.started"/.test(stdoutRead.text) &&
+    /"type":"turn\.started"/.test(stdoutRead.text);
   const hasCodexTerminalEvent =
-    /"type":"turn\.completed"/.test(stdout) ||
-    /"type":"response\.completed"/.test(stdout) ||
-    /"type":"response\.failed"/.test(stdout) ||
-    /"type":"error"/.test(stdout);
+    /"type":"turn\.completed"/.test(stdoutRead.text) ||
+    /"type":"response\.completed"/.test(stdoutRead.text) ||
+    /"type":"response\.failed"/.test(stdoutRead.text) ||
+    /"type":"error"/.test(stdoutRead.text);
   const shouldWaitForCodexFlush =
     job.kind === 'codex' &&
     startedLikeCodexTurn &&
@@ -381,13 +506,17 @@ async function finalizePromptJob(job: PromptJob): Promise<PromptJob> {
       }
 
       exitCode = await readIntSafe(job.exitPath);
-      stdout = await readTextSafe(job.stdoutPath);
-      stderr = await readTextSafe(job.stderrPath);
+      stdoutRead = await readTextSafeDetailed(job.stdoutPath);
+      stderrRead = await readTextSafeDetailed(job.stderrPath);
+      wrapperRead = await readTextSafeDetailed(job.wrapperPath ?? path.join(path.dirname(job.stdoutPath), `${job.id}.wrapper.log`));
+      stdout = stdoutRead.text;
+      stderr = stderrRead.text;
+      wrapperLog = wrapperRead.text;
       const codexNowTerminal =
-        /"type":"turn\.completed"/.test(stdout) ||
-        /"type":"response\.completed"/.test(stdout) ||
-        /"type":"response\.failed"/.test(stdout) ||
-        /"type":"error"/.test(stdout);
+        /"type":"turn\.completed"/.test(stdoutRead.text) ||
+        /"type":"response\.completed"/.test(stdoutRead.text) ||
+        /"type":"response\.failed"/.test(stdoutRead.text) ||
+        /"type":"error"/.test(stdoutRead.text);
       if (shouldWaitForCodexFlush && codexNowTerminal && (exitCode != null || stableReads >= 2)) break;
       if (exitCode != null && stableReads >= 2) break;
     }
@@ -395,16 +524,63 @@ async function finalizePromptJob(job: PromptJob): Promise<PromptJob> {
 
   const ok = exitCode === 0;
   const finishedAt = nowIso();
+  const transcript = await parsePromptJobTranscriptFromFile(job, stdoutRead, finishedAt);
+  const exitStatusSource = exitCode == null ? 'missing-exit-file' : 'exit-file';
+  const failureReason =
+    ok
+      ? undefined
+      : exitCode == null
+        ? 'prompt wrapper ended without writing an exit code; the tmux session may have been killed or the wrapper terminated before command exit capture'
+        : undefined;
   return {
     ...job,
     updatedAt: finishedAt,
     finishedAt,
     exitCode: exitCode ?? undefined,
+    exitStatusSource,
     stdout,
     stderr,
+    wrapperLog,
+    stdoutBytes: stdoutRead.bytes,
+    stderrBytes: stderrRead.bytes,
+    wrapperBytes: wrapperRead.bytes,
+    stdoutTruncated: stdoutRead.truncated,
+    stderrTruncated: stderrRead.truncated,
+    wrapperTruncated: wrapperRead.truncated,
+    ...(transcript ? { transcript } : {}),
     state: ok ? 'done' : 'failed',
-    error: ok ? undefined : (stderr.trim() || stdout.trim() || job.error || 'failed'),
+    failureReason,
+    error: ok ? undefined : (failureReason || stderr.trim() || stdout.trim() || job.error || 'failed'),
   };
+}
+
+async function refreshPromptJobTranscript(job: PromptJob): Promise<PromptJob> {
+  if (!promptJobSupportsTranscript(job.kind)) return job;
+  const stdoutRead = await readTextSafeDetailed(job.stdoutPath);
+  const stderrRead = await readTextSafeDetailed(job.stderrPath);
+  const wrapperRead = await readTextSafeDetailed(job.wrapperPath ?? path.join(path.dirname(job.stdoutPath), `${job.id}.wrapper.log`));
+  const nextTranscript = await parsePromptJobTranscriptFromFile(job, stdoutRead, nowIso());
+  if (!nextTranscript) return job;
+  return {
+    ...job,
+    stdout: stdoutRead.text,
+    stderr: stderrRead.text,
+    wrapperLog: wrapperRead.text,
+    stdoutBytes: stdoutRead.bytes,
+    stderrBytes: stderrRead.bytes,
+    wrapperBytes: wrapperRead.bytes,
+    stdoutTruncated: stdoutRead.truncated,
+    stderrTruncated: stderrRead.truncated,
+    wrapperTruncated: wrapperRead.truncated,
+    transcript: nextTranscript,
+  };
+}
+
+function promptJobHasParsedTranscript(job: PromptJob): boolean {
+  const transcript = job.transcript;
+  if (!transcript || typeof transcript !== 'object') return false;
+  if (String((transcript as any).kind ?? '').trim() !== String(job.kind ?? '').trim()) return false;
+  return Object.prototype.hasOwnProperty.call(transcript, 'message');
 }
 
 async function cancelPromptJob(job: PromptJob): Promise<PromptJob> {
@@ -1265,6 +1441,7 @@ async function main() {
         const stdoutPath = path.join(promptOutDir, `${id}.stdout.txt`);
         const stderrPath = path.join(promptOutDir, `${id}.stderr.txt`);
         const exitPath = path.join(promptOutDir, `${id}.exit.txt`);
+        const wrapperPath = path.join(promptOutDir, `${id}.wrapper.log`);
 
         const createdAt = nowIso();
         const job: PromptJob = {
@@ -1281,6 +1458,7 @@ async function main() {
           stdoutPath,
           stderrPath,
           exitPath,
+          wrapperPath,
         };
         await savePromptJob(promptsDir, job);
         const idx = await loadPromptIndex(promptsDir);
@@ -1290,6 +1468,75 @@ async function main() {
         await savePromptIndex(promptsDir, idx);
         void pumpPrompts();
         json(res, 202, { ok: true, id, state: 'queued' });
+        return;
+      }
+
+      if (method === 'GET' && pathname === '/v1/prompts/events') {
+        res.statusCode = 200;
+        res.setHeader('content-type', 'text/event-stream; charset=utf-8');
+        res.setHeader('cache-control', 'no-cache, no-transform');
+        res.setHeader('connection', 'keep-alive');
+        writeSseEvent(res, 'ready', { ok: true, at: nowIso() });
+
+        let closed = false;
+        let lastById = new Map<string, string>();
+        let initialized = false;
+        const emitChanges = async (snapshot = false) => {
+          await pumpPrompts();
+          const nextById = await buildPromptJobEventSnapshot(promptsDir);
+          if (snapshot || !initialized) {
+            lastById = nextById;
+            initialized = true;
+            const jobs = Array.from(nextById.values()).flatMap((raw) => {
+              try {
+                return [JSON.parse(raw)];
+              } catch {
+                return [];
+              }
+            });
+            writeSseEvent(res, 'snapshot', { ok: true, jobs, at: nowIso() });
+            return;
+          }
+
+          for (const [id, serialized] of nextById.entries()) {
+            if (lastById.get(id) === serialized) continue;
+            try {
+              writeSseEvent(res, 'job', { ok: true, job: JSON.parse(serialized), at: nowIso() });
+            } catch {
+              // ignore malformed local state
+            }
+          }
+          lastById = nextById;
+        };
+
+        const keepAlive = setInterval(() => {
+          if (res.destroyed || res.writableEnded) return;
+          res.write(': keepalive\n\n');
+        }, 25_000);
+        (keepAlive as any).unref?.();
+
+        req.on('close', () => {
+          closed = true;
+          clearInterval(keepAlive);
+        });
+        res.on('close', () => {
+          closed = true;
+          clearInterval(keepAlive);
+        });
+
+        try {
+          await emitChanges(true);
+          while (!closed) {
+            await sleep(250);
+            if (closed) break;
+            await emitChanges();
+          }
+        } catch (e: any) {
+          writeSseEvent(res, 'stream-error', { ok: false, error: e?.message ?? String(e) });
+          closed = true;
+          clearInterval(keepAlive);
+          if (!res.destroyed && !res.writableEnded) res.end();
+        }
         return;
       }
 
@@ -1306,6 +1553,14 @@ async function main() {
           const alive = await sessionExists(job.session);
           if (!alive) {
             const next = await finalizePromptJob(job);
+            await savePromptJob(promptsDir, next);
+            json(res, 200, { ok: true, job: next });
+            return;
+          }
+        }
+        if ((job.state === 'done' || job.state === 'failed') && !promptJobHasParsedTranscript(job)) {
+          const next = await refreshPromptJobTranscript(job);
+          if (next !== job) {
             await savePromptJob(promptsDir, next);
             json(res, 200, { ok: true, job: next });
             return;

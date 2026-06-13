@@ -60,4 +60,23 @@ describe('CollapsibleMarkdown', () => {
     expect(html).toContain('Show more');
     expect(html).not.toContain('Follow-up explanation that should stay behind the collapse.');
   });
+
+  test('does not render the full body for collapsed long content without a lead paragraph', () => {
+    const hiddenTail = 'this tail should not be rendered while collapsed';
+    const text = [
+      ...Array.from({ length: 50 }, (_, i) => `line ${i + 1}`),
+      hiddenTail,
+    ].join('\n');
+    const html = renderToStaticMarkup(
+      React.createElement(CollapsibleMarkdown, {
+        text,
+        fadeTo: 'var(--accent-subtle)',
+        collapseAfterLines: 8,
+      }),
+    );
+
+    expect(html).toContain('line 1');
+    expect(html).toContain('Show more');
+    expect(html).not.toContain(hiddenTail);
+  });
 });

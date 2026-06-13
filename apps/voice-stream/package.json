@@ -1,0 +1,26 @@
+{
+  "name": "voice-stream",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx server/src/index.ts",
+    "build": "tsc -p server/tsconfig.json",
+    "start": "node server/dist/index.js",
+    "typecheck": "tsc -p server/tsconfig.json --noEmit",
+    "test": "tsx server/test/wav.test.ts",
+    "apk": "./gradlew :android:app:assembleDebug",
+    "android:assembleDebug": "./gradlew :android:app:assembleDebug"
+  },
+  "dependencies": {
+    "@types/qrcode": "^1.5.6",
+    "qrcode": "^1.5.4",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

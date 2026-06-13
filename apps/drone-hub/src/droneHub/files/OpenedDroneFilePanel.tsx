@@ -1,10 +1,19 @@
 import React from 'react';
-import Editor from '@monaco-editor/react';
 import { MarkdownMessage } from '../chat/MarkdownMessage';
 import { defaultTextFileViewModeForFile, editorLanguageForPath, isMarkdownFile, type TextFileViewMode } from '../code-languages';
 import { formatBytes, formatEditorMtime } from '../app/selected-drone-workspace-utils';
 import { resolveMarkdownPreviewLinkTarget } from './markdown-preview-link-utils';
 import type { DroneOpenedFileState } from './opened-file-types';
+
+type MonacoEditorComponent = typeof import('@monaco-editor/react')['default'];
+type MonacoEditorProps = React.ComponentProps<MonacoEditorComponent>;
+type MonacoEditorMountHandler = NonNullable<MonacoEditorProps['onMount']>;
+type MonacoEditorInstance = Parameters<MonacoEditorMountHandler>[0];
+
+const MonacoEditor = React.lazy(async (): Promise<{ default: MonacoEditorComponent }> => {
+  const module = await import('@monaco-editor/react');
+  return { default: module.default };
+});
 
 type OpenedDroneFilePanelProps = {
   droneId: string;
@@ -45,7 +54,7 @@ export function OpenedDroneFilePanel({
   const [openedTextMode, setOpenedTextMode] = React.useState<TextFileViewMode>(() =>
     activeFilePath && openedEditorIsText ? defaultTextFileViewModeForFile(activeFilePath, fileMime) : 'edit',
   );
-  const editorRef = React.useRef<any>(null);
+  const editorRef = React.useRef<MonacoEditorInstance | null>(null);
   const [openedFileImageZoom, setOpenedFileImageZoom] = React.useState(1);
   const [openedFileImagePan, setOpenedFileImagePan] = React.useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [openedFileImagePanning, setOpenedFileImagePanning] = React.useState(false);
@@ -96,7 +105,7 @@ export function OpenedDroneFilePanel({
   }, [openedFileImagePanning]);
 
   const openedFileShowsMarkdownPreview = openedFileIsMarkdown && openedTextMode === 'preview';
-  const openedFileEditorVisible = openedEditorIsText && !openedFileShowsMarkdownPreview;
+  const openedFileEditorVisible = openedEditorIsText && Boolean(activeFilePath) && !openedFileShowsMarkdownPreview;
   const headerStatusText = React.useMemo(() => {
     if (openedEditorIsText) {
       if (fileSaving) return 'Saving...';
@@ -308,33 +317,43 @@ export function OpenedDroneFilePanel({
                 preferOpenLinkBeforeModifiedClick
               />
             </div>
+          ) : openedFileEditorVisible ? (
+            <React.Suspense
+              fallback={
+                <div className="h-full w-full flex items-center justify-center text-[12px] text-[var(--muted)]">
+                  Loading editor...
+                </div>
+              }
+            >
+              <MonacoEditor
+                path={activeFilePath || undefined}
+                language={editorLanguageForPath(activeFilePath)}
+                value={fileContent ?? ''}
+                onChange={(next) => onFileContentChange?.(next ?? '')}
+                onMount={(editor, monaco) => {
+                  editorRef.current = editor;
+                  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+                    void onSaveFile?.(editor.getValue());
+                  });
+                  applyEditorCursorTarget();
+                }}
+                theme="vs-dark"
+                options={{
+                  readOnly: Boolean(fileSaving),
+                  fontSize: 12,
+                  minimap: { enabled: false },
+                  wordWrap: 'on',
+                  scrollBeyondLastLine: false,
+                  automaticLayout: true,
+                  padding: { top: 12, bottom: 12 },
+                  'semanticHighlighting.enabled': true,
+                  bracketPairColorization: { enabled: true },
+                  guides: { bracketPairs: true },
+                }}
+              />
+            </React.Suspense>
           ) : (
-            <Editor
-              path={activeFilePath || undefined}
-              language={editorLanguageForPath(activeFilePath)}
-              value={fileContent ?? ''}
-              onChange={(next) => onFileContentChange?.(next ?? '')}
-              onMount={(editor, monaco) => {
-                editorRef.current = editor;
-                editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-                  void onSaveFile?.(editor.getValue());
-                });
-                applyEditorCursorTarget();
-              }}
-              theme="vs-dark"
-              options={{
-                readOnly: Boolean(fileSaving),
-                fontSize: 12,
-                minimap: { enabled: false },
-                wordWrap: 'on',
-                scrollBeyondLastLine: false,
-                automaticLayout: true,
-                padding: { top: 12, bottom: 12 },
-                'semanticHighlighting.enabled': true,
-                bracketPairColorization: { enabled: true },
-                guides: { bracketPairs: true },
-              }}
-            />
+            <div className="h-full w-full flex items-center justify-center text-[12px] text-[var(--muted)]">No file selected.</div>
           )}
         </div>
       </div>

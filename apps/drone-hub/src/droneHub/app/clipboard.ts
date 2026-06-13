@@ -1,14 +1,15 @@
-export async function copyText(text: string): Promise<void> {
+export async function copyText(text: string): Promise<boolean> {
   const t = String(text ?? '');
-  if (!t) return;
+  if (!t) return false;
   try {
     await navigator.clipboard.writeText(t);
-    return;
+    return true;
   } catch {
     // ignore; fall back below
   }
+  let ta: HTMLTextAreaElement | null = null;
   try {
-    const ta = document.createElement('textarea');
+    ta = document.createElement('textarea');
     ta.value = t;
     ta.style.position = 'fixed';
     ta.style.left = '-9999px';
@@ -16,10 +17,11 @@ export async function copyText(text: string): Promise<void> {
     document.body.appendChild(ta);
     ta.focus();
     ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
+    return document.execCommand('copy');
   } catch {
-    // ignore
+    return false;
+  } finally {
+    if (ta?.parentNode) ta.parentNode.removeChild(ta);
   }
 }
 

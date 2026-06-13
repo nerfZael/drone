@@ -11,7 +11,8 @@ export type RightPanelTabId =
   | 'fleet'
   | 'changes'
   | 'prs'
-  | 'canvas';
+  | 'canvas'
+  | 'assistant';
 export type RightPanelPaneId = 'single' | 'top' | 'bottom';
 
 export type RightPanelProps = {

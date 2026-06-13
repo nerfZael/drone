@@ -211,10 +211,10 @@ export function resolveBundleImportSourceRefFromListHeads(raw: string): string {
 async function runLocal(
   cmd: string,
   args: string[],
-  opts?: { cwd?: string }
+  opts?: { cwd?: string; env?: NodeJS.ProcessEnv }
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return await new Promise((resolve) => {
-    const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], cwd: opts?.cwd });
+    const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], cwd: opts?.cwd, env: opts?.env ?? process.env });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (d) => (stdout += d.toString('utf8')));
@@ -224,7 +224,7 @@ async function runLocal(
   });
 }
 
-async function runLocalOrThrow(cmd: string, args: string[], opts?: { cwd?: string }): Promise<string> {
+async function runLocalOrThrow(cmd: string, args: string[], opts?: { cwd?: string; env?: NodeJS.ProcessEnv }): Promise<string> {
   const r = await runLocal(cmd, args, opts);
   if (r.code !== 0) {
     const msg = (r.stderr || r.stdout || `${cmd} failed (exit ${r.code})`).trim();
@@ -875,6 +875,75 @@ export async function gitIsAncestor(repoRoot: string, ancestorRef: string, desce
   if (r.code === 0) return true;
   if (r.code === 1) return false;
   return false;
+}
+
+export async function gitResolveCommitSha(repoRoot: string, ref: string): Promise<string | null> {
+  const root = String(repoRoot ?? '').trim();
+  const target = String(ref ?? '').trim();
+  if (!root || !target) return null;
+  const r = await runLocal('git', ['-C', root, 'rev-parse', '--verify', `${target}^{commit}`]);
+  if (r.code !== 0) return null;
+  const sha = String(r.stdout ?? '').trim().toLowerCase();
+  return /^[0-9a-f]{40}$/.test(sha) ? sha : null;
+}
+
+async function gitRequiredConfig(repoRoot: string, key: string): Promise<string> {
+  const value = (await runLocalOrThrow('git', ['-C', repoRoot, 'config', '--get', key])).trim();
+  if (!value) throw new Error(`Host git config ${key} is not set.`);
+  return value;
+}
+
+async function hostCommitEnv(repoRoot: string): Promise<NodeJS.ProcessEnv> {
+  const [name, email] = await Promise.all([gitRequiredConfig(repoRoot, 'user.name'), gitRequiredConfig(repoRoot, 'user.email')]);
+  return {
+    ...process.env,
+    GIT_AUTHOR_NAME: name,
+    GIT_AUTHOR_EMAIL: email,
+    GIT_COMMITTER_NAME: name,
+    GIT_COMMITTER_EMAIL: email,
+  };
+}
+
+export async function createHostAuthoredMirrorCommit(opts: {
+  repoRoot: string;
+  sourceRef: string;
+  parentRef: string;
+  message?: string;
+}): Promise<string> {
+  const repoRoot = String(opts.repoRoot ?? '').trim();
+  const sourceRef = String(opts.sourceRef ?? '').trim();
+  const parentRef = String(opts.parentRef ?? '').trim();
+  const message = String(opts.message ?? '').trim() || 'chore(drone): mirror drone changes for host apply';
+  if (!repoRoot) throw new Error('missing repoRoot');
+  if (!sourceRef) throw new Error('missing sourceRef');
+  if (!parentRef) throw new Error('missing parentRef');
+
+  const tree = (await runLocalOrThrow('git', ['-C', repoRoot, 'rev-parse', `${sourceRef}^{tree}`])).trim();
+  if (!/^[0-9a-f]{40}$/.test(tree)) throw new Error(`Failed resolving tree for ${sourceRef}.`);
+
+  const parentSha = await gitResolveCommitSha(repoRoot, parentRef);
+  if (!parentSha) throw new Error(`Failed resolving mirror parent ${parentRef}.`);
+
+  const commit = await runLocal('git', ['-C', repoRoot, 'commit-tree', tree, '-p', parentSha, '-m', message], {
+    env: await hostCommitEnv(repoRoot),
+  });
+  if (commit.code !== 0) {
+    const details = (commit.stderr || commit.stdout || `git commit-tree failed (exit ${commit.code})`).trim();
+    throw new Error(`Failed creating host-authored mirror commit for ${sourceRef}.\n\n${details}`);
+  }
+  const sha = String(commit.stdout ?? '').trim().toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error(`Failed parsing host-authored mirror commit SHA: ${commit.stdout || '(empty)'}`);
+  return sha;
+}
+
+export async function updateHostRef(opts: { repoRoot: string; refName: string; target: string }): Promise<void> {
+  const repoRoot = String(opts.repoRoot ?? '').trim();
+  const refName = String(opts.refName ?? '').trim();
+  const target = String(opts.target ?? '').trim();
+  if (!repoRoot) throw new Error('missing repoRoot');
+  if (!refName) throw new Error('missing refName');
+  if (!target) throw new Error('missing target');
+  await runLocalOrThrow('git', ['-C', repoRoot, 'update-ref', refName, target]);
 }
 
 export async function gitIsClean(repoRoot: string): Promise<boolean> {
@@ -1555,6 +1624,125 @@ async function applyBranchMergeToMainWorkingTree(opts: { repoRoot: string; branc
     if (mergeStateShouldBeCleared) {
       await clearGitMergeStateBestEffort(repoRoot);
     }
+  }
+}
+
+async function mergeBranchNoCommitToMainWorkingTree(opts: { repoRoot: string; branch: string }): Promise<void> {
+  const repoRoot = String(opts.repoRoot ?? '').trim();
+  const branch = String(opts.branch ?? '').trim();
+  if (!repoRoot) throw new Error('missing repoRoot');
+  if (!branch) throw new Error('missing branch');
+
+  const merge = await runLocal('git', ['-C', repoRoot, 'merge', '--no-commit', '--no-ff', branch]);
+  const combined = `${String(merge.stderr ?? '')}\n${String(merge.stdout ?? '')}`.trim();
+  const conflictFiles = Array.from(new Set([...parsePatchConflictFiles(combined), ...(await gitUnmergedFiles(repoRoot))])).sort((a, b) =>
+    a.localeCompare(b)
+  );
+  const looksLikeConflict =
+    conflictFiles.length > 0 ||
+    /CONFLICT|Automatic merge failed|fix conflicts and then commit the result/i.test(combined);
+
+  if (merge.code === 0) return;
+
+  if (looksLikeConflict) {
+    const details = (merge.stderr || merge.stdout || `git merge failed (exit ${merge.code})`).trim();
+    throw new RepoPatchApplyError({
+      kind: 'patch_apply_conflict',
+      patchName: branch,
+      conflictFiles,
+      stdout: merge.stdout,
+      stderr: merge.stderr,
+      appliedToHost: true,
+      message: `Host repo has conflicts while applying ${branch}.\n\n${details}`,
+    });
+  }
+
+  const details = (merge.stderr || merge.stdout || `git merge failed (exit ${merge.code})`).trim();
+  throw new RepoPatchApplyError({
+    kind: 'patch_apply_failed',
+    patchName: branch,
+    conflictFiles,
+    stdout: merge.stdout,
+    stderr: merge.stderr,
+    appliedToHost: false,
+    message: `Failed applying imported branch ${branch} to host repo.\n\n${details}`,
+  });
+}
+
+export async function applyBranchMergeNoCommitToMainWorkingTree(opts: {
+  repoRoot: string;
+  branch: string;
+  applyConflictsToHost?: boolean;
+}): Promise<void> {
+  const repoRoot = String(opts.repoRoot ?? '').trim();
+  const branch = String(opts.branch ?? '').trim();
+  const applyConflictsToHost = opts.applyConflictsToHost === true;
+  if (!repoRoot) throw new Error('missing repoRoot');
+  if (!branch) throw new Error('missing branch');
+
+  const hostHeadRef = (await runLocalOrThrow('git', ['-C', repoRoot, 'rev-parse', 'HEAD'])).trim();
+  const runId = `${Date.now().toString(36)}-${crypto.randomBytes(4).toString('hex')}`;
+  const safeBranch = safeSlug(branch);
+  const worktreePath = path.join(defaultWorktreeRootDir(), repoKeyFromGitRoot(repoRoot), `host-merge-${safeBranch}-${runId}`);
+  const tempBranch = `drone-host-merge/${safeBranch}-${runId}`;
+
+  try {
+    await ensureQuarantineWorktree({
+      repoRoot,
+      worktreePath,
+      branch: tempBranch,
+      fromRef: hostHeadRef,
+    });
+
+    const merge = await runLocal('git', ['-C', worktreePath, 'merge', '--no-commit', '--no-ff', branch]);
+    const combined = `${String(merge.stderr ?? '')}\n${String(merge.stdout ?? '')}`.trim();
+    const conflictFiles = Array.from(new Set([...parsePatchConflictFiles(combined), ...(await gitUnmergedFiles(worktreePath))])).sort((a, b) =>
+      a.localeCompare(b)
+    );
+    const looksLikeConflict =
+      conflictFiles.length > 0 ||
+      /CONFLICT|Automatic merge failed|fix conflicts and then commit the result/i.test(combined);
+
+    if (merge.code === 0) {
+      await mergeBranchNoCommitToMainWorkingTree({ repoRoot, branch });
+      return;
+    }
+
+    if (looksLikeConflict) {
+      const details = (merge.stderr || merge.stdout || `git merge failed (exit ${merge.code})`).trim();
+      if (!applyConflictsToHost) {
+        throw new RepoPatchApplyError({
+          kind: 'patch_apply_conflict',
+          patchName: branch,
+          conflictFiles,
+          stdout: merge.stdout,
+          stderr: merge.stderr,
+          appliedToHost: false,
+          message: `Host repo would have conflicts while applying ${branch}. Host repo was not modified.\n\n${details}`,
+        });
+      }
+      await mergeBranchNoCommitToMainWorkingTree({ repoRoot, branch });
+      return;
+    }
+
+    const details = (merge.stderr || merge.stdout || `git merge failed (exit ${merge.code})`).trim();
+    throw new RepoPatchApplyError({
+      kind: 'patch_apply_failed',
+      patchName: branch,
+      conflictFiles,
+      stdout: merge.stdout,
+      stderr: merge.stderr,
+      appliedToHost: false,
+      message: `Failed preparing host apply for ${branch}. Host repo was not modified.\n\n${details}`,
+    });
+  } finally {
+    await cleanupQuarantineWorktree({
+      repoRoot,
+      worktreePath,
+      branch: tempBranch,
+    }).catch(() => {
+      // ignore cleanup failures
+    });
   }
 }
 

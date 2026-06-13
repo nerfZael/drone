@@ -12,7 +12,7 @@ export function usePoll<T>(
   fn: () => Promise<T>,
   intervalMs: number,
   deps: any[] = [],
-  opts?: { enabled?: boolean },
+  opts?: { enabled?: boolean; isEqual?: (prev: T, next: T) => boolean },
 ) {
   const [value, setValue] = React.useState<T | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -54,7 +54,7 @@ export function usePoll<T>(
       try {
         const v = await fn();
         if (!mounted) return;
-        setValue(v);
+        setValue((prev) => (prev && opts?.isEqual?.(prev, v) ? prev : v));
         setError(null);
       } catch (e: any) {
         if (!mounted) return;

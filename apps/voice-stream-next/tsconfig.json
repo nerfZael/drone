@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["bun-types", "node", "react", "react-dom"],
+    "noEmit": true
+  },
+  "include": ["server/src/**/*.ts", "web/src/**/*.ts", "web/src/**/*.tsx", "vite.config.ts"]
+}

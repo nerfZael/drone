@@ -11,6 +11,42 @@ import { profileStorageKey } from '../../profile-storage';
 
 const PR_MERGE_METHOD_STORAGE_KEY = profileStorageKey('droneHub.prMergeMethod');
 const HEADER_REPO_PR_CACHE_TTL_MS = 12_000;
+const HEADER_REPO_PR_POLL_INTERVAL_MS = 20_000;
+
+type RepoPullRequestSummarySnapshot = {
+  pullRequestsData: Extract<RepoPullRequestsPayload, { ok: true }> | null;
+  loading: boolean;
+  error: string | null;
+};
+
+type RepoPullRequestSummaryResource = {
+  droneId: string;
+  repoCacheKey: string;
+  snapshot: RepoPullRequestSummarySnapshot;
+  subscribers: Set<() => void>;
+  timer: ReturnType<typeof setInterval> | null;
+  generation: number;
+  loadingPromise: Promise<void> | null;
+  queuedForceRefresh: boolean;
+  subscribe: (callback: () => void, droneId: string) => () => void;
+  load: (silent: boolean, force?: boolean) => Promise<void>;
+  refresh: () => void;
+  stop: () => void;
+};
+
+type RepoPullRequestSummaryOptions = {
+  droneId: string;
+  repoPath: string;
+  repoAttached: boolean;
+  disabled: boolean;
+};
+
+const EMPTY_PULL_REQUEST_SUMMARY_SNAPSHOT: RepoPullRequestSummarySnapshot = {
+  pullRequestsData: null,
+  loading: false,
+  error: null,
+};
+
 const headerRepoPullRequestSummaryCache = new Map<
   string,
   {
@@ -18,6 +54,217 @@ const headerRepoPullRequestSummaryCache = new Map<
     payload: Extract<RepoPullRequestsPayload, { ok: true }>;
   }
 >();
+const repoPullRequestSummaryResources = new Map<string, RepoPullRequestSummaryResource>();
+
+function normalizeRepoPullRequestSummaryCacheKey(repoPath: string): string {
+  return String(repoPath ?? '').trim();
+}
+
+function freshHeaderRepoPullRequestSummaryCache(
+  repoCacheKey: string,
+): Extract<RepoPullRequestsPayload, { ok: true }> | null {
+  const cached = headerRepoPullRequestSummaryCache.get(repoCacheKey);
+  if (!cached || Date.now() - cached.atMs >= HEADER_REPO_PR_CACHE_TTL_MS) return null;
+  return cached.payload;
+}
+
+function emitRepoPullRequestSummaryResource(resource: RepoPullRequestSummaryResource): void {
+  for (const callback of resource.subscribers) callback();
+}
+
+function createRepoPullRequestSummaryResource(repoCacheKey: string, droneId: string): RepoPullRequestSummaryResource {
+  const resource: RepoPullRequestSummaryResource = {
+    droneId,
+    repoCacheKey,
+    snapshot: { ...EMPTY_PULL_REQUEST_SUMMARY_SNAPSHOT },
+    subscribers: new Set(),
+    timer: null,
+    generation: 0,
+    loadingPromise: null,
+    queuedForceRefresh: false,
+    subscribe(callback, nextDroneId) {
+      resource.droneId = nextDroneId;
+      resource.subscribers.add(callback);
+      if (resource.subscribers.size === 1) {
+        resource.generation += 1;
+        void resource.load(false);
+        resource.timer = setInterval(() => {
+          void resource.load(true);
+        }, HEADER_REPO_PR_POLL_INTERVAL_MS);
+      }
+      callback();
+      return () => {
+        resource.subscribers.delete(callback);
+        if (resource.subscribers.size === 0) resource.stop();
+      };
+    },
+    async load(silent, force = false) {
+      if (resource.subscribers.size === 0) return;
+      if (resource.loadingPromise) {
+        if (force) resource.queuedForceRefresh = true;
+        await resource.loadingPromise;
+        return;
+      }
+      const cached = force ? null : freshHeaderRepoPullRequestSummaryCache(resource.repoCacheKey);
+      if (cached) {
+        resource.snapshot = {
+          pullRequestsData: cached,
+          loading: false,
+          error: null,
+        };
+        emitRepoPullRequestSummaryResource(resource);
+        return;
+      }
+      if (!silent) {
+        resource.snapshot = {
+          ...resource.snapshot,
+          loading: true,
+        };
+        emitRepoPullRequestSummaryResource(resource);
+      }
+
+      const requestGeneration = resource.generation;
+      const requestDroneId = resource.droneId;
+      resource.loadingPromise = requestJson<Extract<RepoPullRequestsPayload, { ok: true }>>(
+        `/api/drones/${encodeURIComponent(requestDroneId)}/repo/pull-requests?state=open`,
+      )
+        .then((data) => {
+          if (
+            resource.subscribers.size === 0 ||
+            resource.generation !== requestGeneration ||
+            repoPullRequestSummaryResources.get(resource.repoCacheKey) !== resource
+          ) {
+            return;
+          }
+          headerRepoPullRequestSummaryCache.set(resource.repoCacheKey, { atMs: Date.now(), payload: data });
+          resource.snapshot = {
+            pullRequestsData: data,
+            loading: false,
+            error: null,
+          };
+          emitRepoPullRequestSummaryResource(resource);
+        })
+        .catch((e: any) => {
+          if (
+            resource.subscribers.size === 0 ||
+            resource.generation !== requestGeneration ||
+            repoPullRequestSummaryResources.get(resource.repoCacheKey) !== resource
+          ) {
+            return;
+          }
+          resource.snapshot = {
+            ...resource.snapshot,
+            loading: false,
+            error: e?.message ?? String(e),
+          };
+          emitRepoPullRequestSummaryResource(resource);
+        })
+        .finally(() => {
+          if (resource.loadingPromise) resource.loadingPromise = null;
+          if (resource.queuedForceRefresh && resource.subscribers.size > 0) {
+            resource.queuedForceRefresh = false;
+            void resource.load(false, true);
+          }
+        });
+      await resource.loadingPromise;
+    },
+    refresh() {
+      if (resource.subscribers.size === 0) return;
+      void resource.load(false, true);
+    },
+    stop() {
+      resource.generation += 1;
+      if (resource.timer) clearInterval(resource.timer);
+      resource.timer = null;
+      resource.loadingPromise = null;
+      resource.queuedForceRefresh = false;
+      repoPullRequestSummaryResources.delete(resource.repoCacheKey);
+    },
+  };
+  return resource;
+}
+
+function repoPullRequestSummaryResource(repoCacheKey: string, droneId: string): RepoPullRequestSummaryResource {
+  const existing = repoPullRequestSummaryResources.get(repoCacheKey);
+  if (existing) {
+    existing.droneId = droneId;
+    return existing;
+  }
+  const next = createRepoPullRequestSummaryResource(repoCacheKey, droneId);
+  repoPullRequestSummaryResources.set(repoCacheKey, next);
+  return next;
+}
+
+export function invalidateHeaderRepoPullRequestSummaryCache(repoPath: string): void {
+  const repoCacheKey = normalizeRepoPullRequestSummaryCacheKey(repoPath);
+  if (!repoCacheKey) return;
+  headerRepoPullRequestSummaryCache.delete(repoCacheKey);
+  repoPullRequestSummaryResources.get(repoCacheKey)?.refresh();
+}
+
+export function subscribeHeaderRepoPullRequestSummary(
+  { droneId, repoPath, repoAttached, disabled }: RepoPullRequestSummaryOptions,
+  callback: (snapshot: RepoPullRequestSummarySnapshot) => void,
+): () => void {
+  const repoCacheKey = normalizeRepoPullRequestSummaryCacheKey(repoPath);
+  if (!repoAttached || disabled || !repoCacheKey) {
+    callback(EMPTY_PULL_REQUEST_SUMMARY_SNAPSHOT);
+    return () => {};
+  }
+
+  const resource = repoPullRequestSummaryResource(repoCacheKey, droneId);
+  return resource.subscribe(() => callback(resource.snapshot), droneId);
+}
+
+export function refreshHeaderRepoPullRequestSummary({
+  droneId,
+  repoPath,
+  repoAttached,
+  disabled,
+}: RepoPullRequestSummaryOptions): void {
+  const repoCacheKey = normalizeRepoPullRequestSummaryCacheKey(repoPath);
+  if (!repoAttached || disabled || !repoCacheKey) return;
+  repoPullRequestSummaryResource(repoCacheKey, droneId).refresh();
+}
+
+export function resetHeaderRepoPullRequestSummaryForTests(): void {
+  for (const resource of repoPullRequestSummaryResources.values()) {
+    resource.stop();
+  }
+  repoPullRequestSummaryResources.clear();
+  headerRepoPullRequestSummaryCache.clear();
+}
+
+export function headerRepoPullRequestSummaryResourceCountForTests(): number {
+  return repoPullRequestSummaryResources.size;
+}
+
+export function useHeaderRepoPullRequestSummary({
+  droneId,
+  repoPath,
+  repoAttached,
+  disabled,
+}: RepoPullRequestSummaryOptions): RepoPullRequestSummarySnapshot & { refresh: () => void } {
+  const repoCacheKey = React.useMemo(() => normalizeRepoPullRequestSummaryCacheKey(repoPath), [repoPath]);
+  const [snapshotState, setSnapshotState] = React.useState<{
+    repoCacheKey: string;
+    snapshot: RepoPullRequestSummarySnapshot;
+  }>({ repoCacheKey: '', snapshot: EMPTY_PULL_REQUEST_SUMMARY_SNAPSHOT });
+
+  React.useEffect(() => {
+    return subscribeHeaderRepoPullRequestSummary(
+      { droneId, repoPath: repoCacheKey, repoAttached, disabled },
+      (snapshot) => setSnapshotState({ repoCacheKey, snapshot }),
+    );
+  }, [disabled, droneId, repoAttached, repoCacheKey]);
+
+  const refresh = React.useCallback(() => {
+    refreshHeaderRepoPullRequestSummary({ droneId, repoPath: repoCacheKey, repoAttached, disabled });
+  }, [disabled, droneId, repoAttached, repoCacheKey]);
+
+  const snapshot = snapshotState.repoCacheKey === repoCacheKey ? snapshotState.snapshot : EMPTY_PULL_REQUEST_SUMMARY_SNAPSHOT;
+  return React.useMemo(() => ({ ...snapshot, refresh }), [refresh, snapshot]);
+}
 
 function headerPrMergeMethod(): RepoPullRequestMergeMethod {
   try {
@@ -108,60 +355,24 @@ export function HeaderPullRequestShortcuts({
   disabled: boolean;
   onOpenPullRequestsTab: () => void;
 }) {
-  const [refreshNonce, setRefreshNonce] = React.useState(0);
-  const [pullRequestsData, setPullRequestsData] = React.useState<Extract<RepoPullRequestsPayload, { ok: true }> | null>(null);
-  const [loading, setLoading] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
+  const {
+    pullRequestsData,
+    loading,
+    error: summaryError,
+  } = useHeaderRepoPullRequestSummary({
+    droneId,
+    repoPath,
+    repoAttached,
+    disabled,
+  });
+  const [actionError, setActionError] = React.useState<string | null>(null);
   const [busyAction, setBusyAction] = React.useState<{ kind: 'merge' | 'close'; prNumber: number } | null>(null);
-  const repoCacheKey = String(repoPath ?? '').trim();
+  const repoCacheKey = normalizeRepoPullRequestSummaryCacheKey(repoPath);
+  const error = actionError ?? summaryError;
 
   React.useEffect(() => {
-    if (!repoAttached || disabled || !repoCacheKey) {
-      setPullRequestsData(null);
-      setLoading(false);
-      setError(null);
-      return;
-    }
-
-    let mounted = true;
-    let timer: any = null;
-
-    const load = async (silent: boolean) => {
-      if (!mounted) return;
-      const cached = headerRepoPullRequestSummaryCache.get(repoCacheKey);
-      if (cached && Date.now() - cached.atMs < HEADER_REPO_PR_CACHE_TTL_MS) {
-        setPullRequestsData(cached.payload);
-        setError(null);
-        if (!silent) setLoading(false);
-        return;
-      }
-      if (!silent) setLoading(true);
-      try {
-        const data = await requestJson<Extract<RepoPullRequestsPayload, { ok: true }>>(
-          `/api/drones/${encodeURIComponent(droneId)}/repo/pull-requests?state=open`,
-        );
-        if (!mounted) return;
-        headerRepoPullRequestSummaryCache.set(repoCacheKey, { atMs: Date.now(), payload: data });
-        setPullRequestsData(data);
-        setError(null);
-      } catch (e: any) {
-        if (!mounted) return;
-        setError(e?.message ?? String(e));
-      } finally {
-        if (mounted && !silent) setLoading(false);
-      }
-    };
-
-    void load(false);
-    timer = setInterval(() => {
-      void load(true);
-    }, 20_000);
-
-    return () => {
-      mounted = false;
-      if (timer) clearInterval(timer);
-    };
-  }, [disabled, droneId, refreshNonce, repoAttached, repoCacheKey]);
+    setActionError(null);
+  }, [disabled, repoAttached, repoCacheKey]);
 
   const count = Number(pullRequestsData?.count ?? 0);
   const previewRows = (pullRequestsData?.pullRequests ?? []).slice(0, 2);
@@ -175,7 +386,7 @@ export function HeaderPullRequestShortcuts({
     const method = headerPrMergeMethod();
     if (!window.confirm(`Merge PR #${prNumber} using "${method}"?`)) return;
     setBusyAction({ kind: 'merge', prNumber });
-    setError(null);
+    setActionError(null);
     try {
       await requestJson<Extract<RepoPullRequestMergePayload, { ok: true }>>(
         `/api/drones/${encodeURIComponent(droneId)}/repo/pull-requests/${prNumber}/merge`,
@@ -185,10 +396,9 @@ export function HeaderPullRequestShortcuts({
           body: JSON.stringify({ method }),
         },
       );
-      if (repoCacheKey) headerRepoPullRequestSummaryCache.delete(repoCacheKey);
-      setRefreshNonce((n) => n + 1);
+      invalidateHeaderRepoPullRequestSummaryCache(repoCacheKey);
     } catch (e: any) {
-      setError(e?.message ?? String(e));
+      setActionError(e?.message ?? String(e));
     } finally {
       setBusyAction(null);
     }
@@ -201,16 +411,15 @@ export function HeaderPullRequestShortcuts({
     if (busyAction) return;
     if (!window.confirm(`Close PR #${prNumber} without merging?`)) return;
     setBusyAction({ kind: 'close', prNumber });
-    setError(null);
+    setActionError(null);
     try {
       await requestJson<Extract<RepoPullRequestClosePayload, { ok: true }>>(
         `/api/drones/${encodeURIComponent(droneId)}/repo/pull-requests/${prNumber}/close`,
         { method: 'POST' },
       );
-      if (repoCacheKey) headerRepoPullRequestSummaryCache.delete(repoCacheKey);
-      setRefreshNonce((n) => n + 1);
+      invalidateHeaderRepoPullRequestSummaryCache(repoCacheKey);
     } catch (e: any) {
-      setError(e?.message ?? String(e));
+      setActionError(e?.message ?? String(e));
     } finally {
       setBusyAction(null);
     }

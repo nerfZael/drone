@@ -23,7 +23,7 @@ import {
   renameProfile as renameManagedProfile,
   useProfile as useManagedProfile,
 } from '../host/profile-manager';
-import { loadRegistry, updateRegistry } from '../host/registry';
+import { loadRegistry, updateRegistry as updateHostRegistry } from '../host/registry';
 import {
   buildContainerDroneDaemonLaunchScript,
   DRONE_DAEMON_SESSION_NAME,
@@ -87,8 +87,8 @@ import { cloneChatEntryForDroneClone, maybeBootstrapPromptFromTranscript } from 
 import {
   formatTranscriptJobFailure,
   hasKnownBuiltinTranscriptSession,
-  parseCodexJsonl,
-  parsePiJsonl,
+  parseCodexJobTranscript,
+  parsePiJobTranscript,
   readBuiltinTranscriptSessionId,
 } from './builtin-transcript-sessions';
 import {
@@ -134,8 +134,10 @@ import { createSyncSetService } from './sync-set-service';
 import { hasActivePriorPendingPrompt, shouldDeferQueuedTranscriptPrompt, stalePendingPromptState } from './pendingPromptEnqueue';
 import {
   applyBranchDiffToMainWorkingTree,
+  applyBranchMergeNoCommitToMainWorkingTree,
   buildReviewScopeId,
   cleanupQuarantineWorktree,
+  createHostAuthoredMirrorCommit,
   deleteHostRefBestEffort,
   gitRepoCommitDetails,
   gitRepoCommitDiffForPath,
@@ -143,6 +145,7 @@ import {
   gitCurrentBranchOrSha,
   gitPullHostBranchBeforeCreate,
   gitRepoDiffForPath,
+  gitResolveCommitSha,
   gitIsClean,
   gitIsAncestor,
   gitMergeBase,
@@ -159,10 +162,16 @@ import {
   isRepoPatchApplyError,
   repoChangeReviewKey,
   quarantineWorktreePath,
+  updateHostRef,
 } from './repoOps';
 import { isHubApiAuthorized, isHubApiAuthorizedForWebSocket, rejectWebSocketUpgrade } from './hub-auth';
 import { bashQuote, encodeRemotePath, hexEncodeUtf8, normalizeContainerPath, parseBoolParam, shellQuoteIfNeeded } from './hub-format';
-import { readJsonBody, withCors } from './hub-http';
+import { readJsonBody, readRawBody, withCors } from './hub-http';
+import { GROQ_TRANSCRIPTION_MAX_BYTES, transcribeAudioWithGroq } from './groq-transcription';
+import { buildGroqTtsConfig, synthesizeTextWavWithGroq } from './groq-tts';
+import { DesktopVoiceService } from './desktop-voice-service';
+import { desktopVoiceModelStatus, removeDesktopVoiceModel, startDesktopVoiceModelInstall } from './desktop-voice-models';
+import { assertDroneDaemonRuntimeReady, resolveDroneDaemonRuntimeDir } from './drone-daemon-runtime';
 import {
   createHubShellSessionName,
   hubChatSessionName,
@@ -175,6 +184,7 @@ import {
 import {
   buildChatAttachmentsDirectory,
   buildChatImageAttachmentRefs,
+  codexImageAttachmentFlags,
   copyChatAttachmentsToContainer,
   normalizeChatImageAttachments,
   promptWithImageAttachments,
@@ -211,6 +221,7 @@ import {
 import {
   archiveRetentionMs,
   clearStoredProviderApiKey,
+  clearVoiceStreamPairingPassword,
   collectProviderApiKeyDiagnostics,
   FILESYSTEM_UPLOAD_MAX_BYTES_MAX,
   FILESYSTEM_UPLOAD_MAX_BYTES_MIN,
@@ -235,11 +246,17 @@ import {
   resolveEffectiveFilesystemSettings,
   resolveEffectiveDeleteActionSettings,
   resolveEffectiveLlmProvider,
+  resolveEffectiveVoiceApprovalSettings,
+  resolveEffectiveVoiceTranscriptionSettings,
   resolveFilesystemSettingsResponse,
   resolveEffectiveProviderApiKeySettings,
+  resolveExaApiKeySettings,
+  resolveGroqApiKeySettings,
+  resolveVoiceStreamPairingPasswordSettings,
   resolveLlmSettingsResponse,
   resolveTaskPlaybookButtonSettingsResponse,
   resolveUiPreferencesSettingsResponse,
+  resolveVoiceApprovalSettingsResponse,
   upsertStoredDeleteActionSettings,
   upsertStoredFilesystemSettings,
   upsertStoredKanbanBoardSettings,
@@ -247,11 +264,17 @@ import {
   upsertStoredAgentSuggestionSettings,
   upsertStoredLlmProvider,
   upsertStoredProviderApiKey,
+  upsertStoredVoiceApprovalSettings,
+  upsertStoredVoiceActivationSettings,
+  upsertStoredVoiceTranscriptionSettings,
+  upsertVoiceStreamPairingPassword,
   upsertStoredTaskPlaybookButtonSettings,
   upsertStoredUiPreferencesSettings,
   type ArchiveRetentionId,
   type ArchiveRuntimePolicy,
   type LlmProviderId,
+  type StoredApiKeyProviderId,
+  voiceStreamPairingPasswordSettingsResponse,
 } from './hub-settings';
 import {
   createSkill,
@@ -314,10 +337,30 @@ import {
 } from './drone-pending-state';
 import { createDronePendingPromptStore, type PendingPrompt } from './drone-pending-prompts';
 import { createDroneProvisioningController } from './drone-provisioning';
+import {
+  HubAssistantService,
+  summarizeAssistantChatIdle,
+  type AssistantCreateChatResult,
+  type AssistantCreateDroneResult,
+  type AssistantDroneSummary,
+  type AssistantSetDroneGroupResult,
+  type AssistantVoiceSource,
+} from './assistant';
 
 const HUB_API_LOADED_AT = new Date().toISOString();
 const HUB_API_BUILD_ID = crypto.randomBytes(6).toString('hex');
 const requireForHub = createRequire(__filename);
+
+let notifyDroneRegistryWrite: (() => void) | null = null;
+
+async function updateRegistry<T>(
+  mutator: (reg: any) => T | Promise<T>,
+  opts?: { timeoutMs?: number; staleAfterMs?: number },
+): Promise<T> {
+  const result = await updateHostRegistry(mutator as any, opts as any);
+  notifyDroneRegistryWrite?.();
+  return result as T;
+}
 
 const HUB_SETTINGS_LOG_DEFAULT_TAIL_LINES = 600;
 const HUB_SETTINGS_LOG_MAX_TAIL_LINES = 5000;
@@ -436,7 +479,7 @@ function formatPullHostBranchBeforeCreateError(error: unknown): {
   };
 }
 
-async function readHubLogTail(opts: {
+async function readLogTail(logPath: string, opts: {
   tailLines: number;
   maxBytes: number;
 }): Promise<{
@@ -447,8 +490,6 @@ async function readHubLogTail(opts: {
   bytesRead: number;
   updatedAt: string | null;
 }> {
-  const logPath = droneRootPath('hub.log');
-
   let fileSize = 0;
   let updatedAt: string | null = null;
   try {
@@ -507,11 +548,56 @@ async function readHubLogTail(opts: {
   };
 }
 
+async function readHubLogTail(opts: {
+  tailLines: number;
+  maxBytes: number;
+}) {
+  return await readLogTail(droneRootPath('hub.log'), opts);
+}
+
+function resolveAndroidVoiceLogPath(): string {
+  const configured = String(process.env.DRONE_ANDROID_LOG_PATH ?? '').trim();
+  if (configured) return path.resolve(configured);
+
+  const candidates = [
+    path.resolve(process.cwd(), '..', 'voice-stream', 'server', '.runtime', 'android-logs', 'drone-android.log'),
+    path.resolve(process.cwd(), 'apps', 'voice-stream', 'server', '.runtime', 'android-logs', 'drone-android.log'),
+    path.resolve(__dirname, '..', '..', '..', 'voice-stream', 'server', '.runtime', 'android-logs', 'drone-android.log'),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0];
+}
+
+async function readAndroidVoiceLogTail(opts: {
+  tailLines: number;
+  maxBytes: number;
+}) {
+  return await readLogTail(resolveAndroidVoiceLogPath(), opts);
+}
+
 function json(res: http.ServerResponse, status: number, body: any) {
   const data = JSON.stringify(body, null, 2);
   res.statusCode = status;
   res.setHeader('content-type', 'application/json; charset=utf-8');
   res.setHeader('cache-control', 'no-store');
+  res.end(data);
+}
+
+function jsonWithEtag(req: http.IncomingMessage, res: http.ServerResponse, status: number, body: any) {
+  const data = JSON.stringify(body, null, 2);
+  const etag = `"sha256-${crypto.createHash('sha256').update(data).digest('base64url')}"`;
+  res.setHeader('etag', etag);
+  res.setHeader('cache-control', 'no-store');
+  if (status === 200) {
+    const ifNoneMatch = String(req.headers['if-none-match'] ?? '');
+    const requestedEtags = ifNoneMatch.split(',').map((item) => item.trim());
+    if (requestedEtags.includes(etag) || requestedEtags.includes('*')) {
+      res.statusCode = 304;
+      res.end();
+      return;
+    }
+  }
+  res.statusCode = status;
+  res.setHeader('content-type', 'application/json; charset=utf-8');
   res.end(data);
 }
 
@@ -534,10 +620,20 @@ async function readManagedHubStateAtRoot(rootDir: string): Promise<ManagedHubSta
     apiHost: typeof parsed.apiHost === 'string' ? parsed.apiHost : '127.0.0.1',
     apiPort,
     uiPort,
+    voiceStream: parseManagedHubVoiceStreamState(parsed.voiceStream),
     startedAt: typeof parsed.startedAt === 'string' ? parsed.startedAt : new Date().toISOString(),
     logPath: typeof parsed.logPath === 'string' ? parsed.logPath : path.join(rootDir, 'hub.log'),
     launchEnv: parsed.launchEnv ?? null,
   };
+}
+
+function parseManagedHubVoiceStreamState(raw: unknown): ManagedHubState['voiceStream'] {
+  if (!raw || typeof raw !== 'object') return null;
+  const value = raw as any;
+  const port = Number(value.port);
+  const url = typeof value.url === 'string' ? value.url : '';
+  if (!Number.isFinite(port) || port <= 0 || !url) return null;
+  return { port, url };
 }
 
 function profileSettingsErrorStatus(error: unknown): number {
@@ -607,7 +703,8 @@ async function resolveSetupStatusResponse(): Promise<any> {
   const repoCount = Object.keys(reposObj).length;
   const llmSettings = await resolveLlmSettingsResponse();
   const activeProvider = llmSettings.provider.selected;
-  const activeProviderSettings = activeProvider === 'gemini' ? llmSettings.gemini : llmSettings.openai;
+  const activeProviderSettings =
+    activeProvider === 'gemini' ? llmSettings.gemini : activeProvider === 'codex' ? llmSettings.codex : llmSettings.openai;
   const dockerCommand = await checkHostCommand('docker');
   let dockerStatus: { status: 'ready' | 'missing' | 'warning'; detail: string | null } = {
     status: dockerCommand.available ? 'ready' : 'missing',
@@ -655,8 +752,10 @@ async function resolveSetupStatusResponse(): Promise<any> {
       blocking: !activeProviderSettings.hasKey,
       requiredFor: 'agent chats',
       detail: activeProviderSettings.hasKey
-        ? `${activeProvider === 'gemini' ? 'Gemini' : 'OpenAI'} is configured.`
-        : `Configure a ${activeProvider === 'gemini' ? 'Gemini' : 'OpenAI'} key before sending prompts.`,
+        ? `${providerDisplayName(activeProvider)} is configured.`
+        : activeProvider === 'codex'
+          ? 'Run Codex CLI login on the Hub host before sending prompts.'
+          : `Configure a ${providerDisplayName(activeProvider)} key before sending prompts.`,
     },
     {
       id: 'base-image',
@@ -1713,6 +1812,15 @@ function isRepoAttachedDrone(drone: any): boolean {
   );
 }
 
+function safeDroneRefSegment(raw: unknown, fallback = 'drone'): string {
+  return (
+    String(raw ?? '')
+      .toLowerCase()
+      .replace(/[^a-z0-9_.-]+/g, '-')
+      .replace(/^-+|-+$/g, '') || fallback
+  );
+}
+
 function unsupportedHostCustomAgentError(): Error & { statusCode?: number } {
   const err = new Error('custom agents are not yet supported for host runtime') as Error & { statusCode?: number };
   err.statusCode = 400;
@@ -2147,10 +2255,17 @@ const VIDEO_FILE_EXTENSIONS = new Set(['mp4', 'webm', 'mov', 'm4v', 'ogv', 'ogg'
 const FS_THUMB_MAX_BYTES = 8 * 1024 * 1024;
 const FS_MEDIA_MAX_BYTES = 96 * 1024 * 1024;
 const FS_EDITOR_MAX_BYTES = 512 * 1024;
+const ASSISTANT_BASH_DEFAULT_TIMEOUT_MS = 30_000;
+const ASSISTANT_BASH_MAX_TIMEOUT_MS = 120_000;
+const ASSISTANT_BASH_MAX_OUTPUT_BYTES = 64 * 1024;
+const ASSISTANT_BASH_MAX_COMMAND_BYTES = 20 * 1024;
+const ASSISTANT_SEARCH_MAX_CONTEXT_LINES = 10;
+const ASSISTANT_CHANGED_FILES_LIMIT = 200;
 
 type ContainerFsEntry = {
   name: string;
   path: string;
+  relativePath?: string | null;
   kind: 'directory' | 'file' | 'other';
   size: number | null;
   mtimeMs: number | null;
@@ -2419,6 +2534,807 @@ async function readHostFileBytes(opts: {
     size,
     mtimeMs: Number.isFinite(st.mtimeMs) ? Math.max(0, Math.floor(st.mtimeMs)) : null,
     mime,
+  };
+}
+
+function normalizeAssistantFsPathForRuntime(drone: any, raw: unknown, opts?: { fallbackToHome?: boolean }): string {
+  const text = typeof raw === 'string' ? String(raw).trim() : '';
+  if (!text && opts?.fallbackToHome === false) return '';
+  const runtime = droneRuntime(drone);
+  if (runtime === 'host') return normalizeDroneCwdForRuntime(drone, text || null);
+  const fallback = defaultDroneHomeCwd(drone);
+  if (!text) return normalizeContainerPath(fallback || NON_REPO_HOME_CWD);
+  if (text.startsWith('/')) return normalizeContainerPath(text);
+  return normalizeContainerPath(path.posix.join(fallback || NON_REPO_HOME_CWD, text));
+}
+
+function assistantRelativePathForDrone(drone: any, targetPathRaw: unknown, rootPathRaw?: unknown): string | null {
+  const runtime = droneRuntime(drone);
+  if (runtime === 'host') {
+    const root = path.resolve(String(rootPathRaw ?? '').trim() || defaultDroneHomeCwd(drone));
+    const target = path.resolve(String(targetPathRaw ?? '').trim());
+    const rel = path.relative(root, target);
+    if (!rel) return '.';
+    if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) return null;
+    return rel.split(path.sep).join('/');
+  }
+
+  const root = normalizeContainerPath(String(rootPathRaw ?? '').trim() || defaultDroneHomeCwd(drone));
+  const target = normalizeContainerPath(String(targetPathRaw ?? '').trim());
+  const rel = path.posix.relative(root, target);
+  if (!rel) return '.';
+  if (rel === '..' || rel.startsWith('../') || path.posix.isAbsolute(rel)) return null;
+  return rel;
+}
+
+function withAssistantRelativePath<T extends { path: string }>(drone: any, item: T, rootPath?: unknown): T & { relativePath: string | null } {
+  return {
+    ...item,
+    relativePath: assistantRelativePathForDrone(drone, item.path, rootPath),
+  };
+}
+
+async function resolveAssistantDroneFsTarget(opts: {
+  droneId: string;
+  path?: unknown;
+  fallbackToHome?: boolean;
+}): Promise<{ id: string; drone: any; name: string; runtime: DroneRuntime; targetPath: string }> {
+  const ref = String(opts.droneId ?? '').trim();
+  if (!ref) throw new Error('missing droneId');
+  let resolvedError = '';
+  const resolved = await resolveDroneFromRegistryRef(ref, {
+    onStillStarting: () => {
+      resolvedError = `drone "${ref}" is still starting`;
+    },
+    onUnknown: () => {
+      resolvedError = `unknown drone: ${ref}`;
+    },
+  });
+  if (!resolved) throw new Error(resolvedError || `unknown drone: ${ref}`);
+  const targetPath = normalizeAssistantFsPathForRuntime(resolved.drone, opts.path ?? '', { fallbackToHome: opts.fallbackToHome });
+  const name = String(resolved.drone?.name ?? resolved.id).trim() || resolved.id;
+  return { id: resolved.id, drone: resolved.drone, name, runtime: droneRuntime(resolved.drone), targetPath };
+}
+
+function ensureAssistantTextFile(pathRaw: string, buf: Buffer, mimeRaw: string | null): void {
+  const mime = String(mimeRaw ?? '').trim().toLowerCase();
+  if (!isLikelyTextMimeType(mime) || bufferLooksBinary(buf)) {
+    throw new Error(`file is not text: ${pathRaw}`);
+  }
+}
+
+function normalizeOptionalPositiveLineNumber(raw: unknown, label: string): number | undefined {
+  if (raw == null || raw === '') return undefined;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1) throw new Error(`${label} must be a positive integer`);
+  return n;
+}
+
+function normalizeAssistantSearchContext(raw: unknown, label: string): number {
+  if (raw == null || raw === '') return 0;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0) throw new Error(`${label} must be a non-negative integer`);
+  return Math.min(ASSISTANT_SEARCH_MAX_CONTEXT_LINES, n);
+}
+
+function splitTextLinesPreserveEndings(content: string): string[] {
+  if (!content) return [];
+  const parts = content.split('\n');
+  const lineCount = content.endsWith('\n') ? parts.length - 1 : parts.length;
+  const lines: string[] = [];
+  for (let index = 0; index < lineCount; index += 1) {
+    lines.push(`${parts[index] ?? ''}${index < parts.length - 1 ? '\n' : ''}`);
+  }
+  return lines;
+}
+
+function applyAssistantReadLineRange(
+  content: string,
+  opts: { startLine?: unknown; endLine?: unknown },
+): { content: string; lineRange?: { startLine: number; endLine: number; totalLines: number; returnedLines: number } } {
+  const requested = opts.startLine != null || opts.endLine != null;
+  if (!requested) return { content };
+  const startLine = normalizeOptionalPositiveLineNumber(opts.startLine, 'startLine') ?? 1;
+  const requestedEndLine = normalizeOptionalPositiveLineNumber(opts.endLine, 'endLine');
+  if (requestedEndLine != null && startLine > requestedEndLine) throw new Error('startLine must be less than or equal to endLine');
+
+  const lines = splitTextLinesPreserveEndings(content);
+  const totalLines = lines.length;
+  if (totalLines === 0) {
+    return {
+      content: '',
+      lineRange: { startLine: 1, endLine: 0, totalLines: 0, returnedLines: 0 },
+    };
+  }
+  if (startLine > totalLines) throw new Error(`startLine exceeds file line count (${totalLines})`);
+  const endLine = Math.min(requestedEndLine ?? totalLines, totalLines);
+  const selected = lines.slice(startLine - 1, endLine);
+  return {
+    content: selected.join(''),
+    lineRange: {
+      startLine,
+      endLine,
+      totalLines,
+      returnedLines: selected.length,
+    },
+  };
+}
+
+function clampAssistantBashTimeoutMs(raw: unknown): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return ASSISTANT_BASH_DEFAULT_TIMEOUT_MS;
+  return Math.min(ASSISTANT_BASH_MAX_TIMEOUT_MS, Math.max(1000, Math.floor(n)));
+}
+
+function truncateUtf8Bytes(textRaw: unknown, maxBytes: number): { text: string; truncated: boolean } {
+  const text = String(textRaw ?? '');
+  const buf = Buffer.from(text, 'utf8');
+  if (buf.length <= maxBytes) return { text, truncated: false };
+  return {
+    text: `${buf.subarray(0, maxBytes).toString('utf8')}\n[truncated to ${maxBytes} bytes]`,
+    truncated: true,
+  };
+}
+
+async function assistantStatDronePath(opts: { droneId: string; path: string }): Promise<any> {
+  const target = await resolveAssistantDroneFsTarget({ droneId: opts.droneId, path: opts.path, fallbackToHome: false });
+  if (!target.targetPath || target.targetPath === '/') throw new Error('missing path');
+  if (target.runtime === 'host') {
+    const resolvedPath = path.resolve(target.targetPath);
+    try {
+      const st = await fs.lstat(resolvedPath);
+      return {
+        droneId: target.id,
+        path: resolvedPath,
+        exists: true,
+        kind: st.isDirectory() ? 'directory' : st.isFile() ? 'file' : 'other',
+        size: Number.isFinite(st.size) ? Math.max(0, Math.floor(st.size)) : null,
+        mtimeMs: Number.isFinite(st.mtimeMs) ? Math.max(0, Math.floor(st.mtimeMs)) : null,
+      };
+    } catch (e: any) {
+      const code = String(e?.code ?? '').trim().toUpperCase();
+      if (code === 'ENOENT' || code === 'ENOTDIR') return { droneId: target.id, path: resolvedPath, exists: false };
+      throw e;
+    }
+  }
+
+  const script = [
+    'set -euo pipefail',
+    `target=${bashQuote(target.targetPath)}`,
+    'if [ ! -e "$target" ]; then echo "__MISSING__"; exit 0; fi',
+    'kind=o',
+    'if [ -d "$target" ]; then kind=d; elif [ -f "$target" ]; then kind=f; fi',
+    'size=$(stat -c %s -- "$target" 2>/dev/null || echo 0)',
+    'mtime=$(stat -c %Y -- "$target" 2>/dev/null || echo 0)',
+    'printf "__META__\t%s\t%s\t%s\n" "$kind" "$size" "$mtime"',
+  ].join('\n');
+  const r = await withLockedDroneContainer({ requestedDroneName: target.name, droneEntry: target.drone }, async ({ containerName }) => {
+    return await dvmExec(containerName, 'bash', ['-lc', script]);
+  });
+  if (r.code !== 0) throw new Error((r.stderr || r.stdout || 'failed reading path metadata').trim());
+  const stdout = String(r.stdout ?? '').trim();
+  if (stdout === '__MISSING__') return { droneId: target.id, path: target.targetPath, exists: false };
+  const meta = stdout.split('\t');
+  if (meta.length < 4 || meta[0] !== '__META__') throw new Error('path metadata missing');
+  const sizeNum = Number(meta[2] ?? 0);
+  const mtimeSec = Number(meta[3] ?? 0);
+  return {
+    droneId: target.id,
+    path: target.targetPath,
+    exists: true,
+    kind: meta[1] === 'd' ? 'directory' : meta[1] === 'f' ? 'file' : 'other',
+    size: Number.isFinite(sizeNum) ? Math.max(0, Math.floor(sizeNum)) : null,
+    mtimeMs: Number.isFinite(mtimeSec) ? Math.max(0, Math.floor(mtimeSec * 1000)) : null,
+  };
+}
+
+async function assistantListDroneFiles(opts: { droneId: string; path?: string }): Promise<any> {
+  const target = await resolveAssistantDroneFsTarget({ droneId: opts.droneId, path: opts.path, fallbackToHome: true });
+  if (target.runtime === 'host') {
+    const parsed = await listHostFsDirectory(target.targetPath);
+    return {
+      droneId: target.id,
+      path: parsed.resolvedPath,
+      relativePath: assistantRelativePathForDrone(target.drone, parsed.resolvedPath),
+      entries: parsed.entries.map((entry) => withAssistantRelativePath(target.drone, entry)),
+    };
+  }
+
+  const script = [
+    'set -euo pipefail',
+    `target=${bashQuote(target.targetPath)}`,
+    `if [ "$target" = ${bashQuote(NON_REPO_HOME_CWD)} ]; then mkdir -p ${bashQuote(NON_REPO_HOME_CWD)} 2>/dev/null || true; fi`,
+    'if [ ! -d "$target" ]; then echo "__ERR__\tnot-dir"; exit 3; fi',
+    'cd "$target"',
+    'resolved=$(pwd -P)',
+    'printf "__PATH__\t%s\n" "$resolved"',
+    'shopt -s dotglob nullglob',
+    'for p in ./*; do',
+    '  [ -e "$p" ] || continue',
+    '  name=$(basename -- "$p")',
+    '  kind=o',
+    '  if [ -d "$p" ]; then kind=d; elif [ -f "$p" ]; then kind=f; fi',
+    '  size=$(stat -c %s -- "$p" 2>/dev/null || echo 0)',
+    '  mtime=$(stat -c %Y -- "$p" 2>/dev/null || echo 0)',
+    '  printf "%s\t%s\t%s\t%s\n" "$name" "$kind" "$size" "$mtime"',
+    'done',
+  ].join('\n');
+  const r = await withLockedDroneContainer({ requestedDroneName: target.name, droneEntry: target.drone }, async ({ containerName }) => {
+    return await dvmExec(containerName, 'bash', ['-lc', script]);
+  });
+  if (r.code !== 0) {
+    const out = `${r.stdout || ''}\n${r.stderr || ''}`;
+    if (/\bnot-dir\b/i.test(out)) throw new Error(`path is not a directory: ${target.targetPath}`);
+    throw new Error((r.stderr || r.stdout || 'failed to list files').trim());
+  }
+  const parsed = parseContainerFsListOutput(r.stdout || '');
+  return {
+    droneId: target.id,
+    path: parsed.resolvedPath,
+    relativePath: assistantRelativePathForDrone(target.drone, parsed.resolvedPath),
+    entries: parsed.entries.map((entry) => withAssistantRelativePath(target.drone, entry)),
+  };
+}
+
+async function assistantReadDroneFile(opts: { droneId: string; path: string; startLine?: number; endLine?: number }): Promise<any> {
+  const target = await resolveAssistantDroneFsTarget({ droneId: opts.droneId, path: opts.path, fallbackToHome: false });
+  if (!target.targetPath || target.targetPath === '/') throw new Error('missing file path');
+  if (target.runtime === 'host') {
+    const read = await readHostFileBytes({ targetPath: target.targetPath, maxBytes: FS_EDITOR_MAX_BYTES });
+    ensureAssistantTextFile(target.targetPath, read.buf, read.mime);
+    const ranged = applyAssistantReadLineRange(read.buf.toString('utf8'), opts);
+    return {
+      droneId: target.id,
+      path: path.resolve(target.targetPath),
+      relativePath: assistantRelativePathForDrone(target.drone, target.targetPath),
+      kind: 'text',
+      content: ranged.content,
+      size: read.size,
+      mtimeMs: read.mtimeMs,
+      ...(ranged.lineRange ? { lineRange: ranged.lineRange } : {}),
+    };
+  }
+
+  const script = [
+    'set -euo pipefail',
+    `target=${bashQuote(target.targetPath)}`,
+    `max=${String(FS_EDITOR_MAX_BYTES)}`,
+    'if [ ! -f "$target" ]; then echo "__ERR__\tnot-file"; exit 3; fi',
+    'size=$(wc -c < "$target" | tr -d "[:space:]")',
+    'if [ -z "$size" ]; then size=0; fi',
+    'if [ "$size" -gt "$max" ]; then printf "__ERR__\ttoo-large\t%s\n" "$size"; exit 4; fi',
+    'mtime=$(stat -c %Y -- "$target" 2>/dev/null || echo 0)',
+    'mime=""',
+    'if command -v file >/dev/null 2>&1; then mime=$(file -Lb --mime-type -- "$target" 2>/dev/null || true); fi',
+    'printf "__META__\t%s\t%s\t%s\n" "$mime" "$size" "$mtime"',
+    'base64 < "$target" | tr -d "\\n"',
+  ].join('\n');
+  const r = await withLockedDroneContainer({ requestedDroneName: target.name, droneEntry: target.drone }, async ({ containerName }) => {
+    return await dvmExec(containerName, 'bash', ['-lc', script]);
+  });
+  const out = `${String(r.stdout ?? '')}\n${String(r.stderr ?? '')}`;
+  if (r.code !== 0) {
+    if (/__ERR__\s+not-file\b/i.test(out)) throw new Error(`file not found: ${target.targetPath}`);
+    const large = out.match(/__ERR__\s+too-large\s+(\d+)/i);
+    if (large) throw new Error(`file too large (${large[1]} bytes, max ${FS_EDITOR_MAX_BYTES})`);
+    throw new Error((r.stderr || r.stdout || 'failed reading file').trim());
+  }
+  const stdout = String(r.stdout ?? '');
+  const firstNl = stdout.indexOf('\n');
+  if (firstNl < 0) throw new Error('file response malformed');
+  const meta = stdout.slice(0, firstNl).split('\t');
+  if (meta.length < 4 || meta[0] !== '__META__') throw new Error('file metadata missing');
+  const buf = Buffer.from(stdout.slice(firstNl + 1).trim(), 'base64');
+  ensureAssistantTextFile(target.targetPath, buf, String(meta[1] ?? ''));
+  const sizeNum = Number(meta[2] ?? 0);
+  const mtimeSec = Number(meta[3] ?? 0);
+  const ranged = applyAssistantReadLineRange(buf.toString('utf8'), opts);
+  return {
+    droneId: target.id,
+    path: target.targetPath,
+    relativePath: assistantRelativePathForDrone(target.drone, target.targetPath),
+    kind: 'text',
+    content: ranged.content,
+    size: Number.isFinite(sizeNum) ? Math.max(0, Math.floor(sizeNum)) : 0,
+    mtimeMs: Number.isFinite(mtimeSec) ? Math.max(0, Math.floor(mtimeSec * 1000)) : null,
+    ...(ranged.lineRange ? { lineRange: ranged.lineRange } : {}),
+  };
+}
+
+async function assistantWriteDroneFile(opts: { droneId: string; path: string; content: string }): Promise<any> {
+  const target = await resolveAssistantDroneFsTarget({ droneId: opts.droneId, path: opts.path, fallbackToHome: false });
+  if (!target.targetPath || target.targetPath === '/') throw new Error('missing file path');
+  const content = String(opts.content ?? '');
+  const nextBytes = Buffer.byteLength(content, 'utf8');
+  if (nextBytes > FS_EDITOR_MAX_BYTES) throw new Error(`file too large (${nextBytes} bytes, max ${FS_EDITOR_MAX_BYTES})`);
+
+  if (target.runtime === 'host') {
+    const resolvedPath = path.resolve(target.targetPath);
+    await fs.mkdir(path.dirname(resolvedPath), { recursive: true });
+    await fs.writeFile(resolvedPath, content, 'utf8');
+    const after = await fs.stat(resolvedPath);
+    return {
+      droneId: target.id,
+      path: resolvedPath,
+      relativePath: assistantRelativePathForDrone(target.drone, resolvedPath),
+      size: Number.isFinite(after.size) ? Math.max(0, Math.floor(after.size)) : 0,
+      mtimeMs: Number.isFinite(after.mtimeMs) ? Math.max(0, Math.floor(after.mtimeMs)) : null,
+    };
+  }
+
+  const contentBase64 = Buffer.from(content, 'utf8').toString('base64');
+  const script = [
+    'set -euo pipefail',
+    `target=${bashQuote(target.targetPath)}`,
+    `data=${bashQuote(contentBase64)}`,
+    'mkdir -p "$(dirname -- "$target")"',
+    'printf "%s" "$data" | base64 -d > "$target"',
+    'size=$(stat -c %s -- "$target" 2>/dev/null || echo 0)',
+    'mtime=$(stat -c %Y -- "$target" 2>/dev/null || echo 0)',
+    'printf "__META__\t%s\t%s\n" "$size" "$mtime"',
+  ].join('\n');
+  const r = await withLockedDroneContainer({ requestedDroneName: target.name, droneEntry: target.drone }, async ({ containerName }) => {
+    return await dvmExec(containerName, 'bash', ['-lc', script]);
+  });
+  if (r.code !== 0) throw new Error((r.stderr || r.stdout || 'failed writing file').trim());
+  const meta = String(r.stdout ?? '').trim().split('\t');
+  const sizeNum = Number(meta[1] ?? 0);
+  const mtimeSec = Number(meta[2] ?? 0);
+  return {
+    droneId: target.id,
+    path: target.targetPath,
+    relativePath: assistantRelativePathForDrone(target.drone, target.targetPath),
+    size: Number.isFinite(sizeNum) ? Math.max(0, Math.floor(sizeNum)) : nextBytes,
+    mtimeMs: Number.isFinite(mtimeSec) ? Math.max(0, Math.floor(mtimeSec * 1000)) : null,
+  };
+}
+
+async function assistantDeleteDroneFile(opts: { droneId: string; path: string }): Promise<any> {
+  const target = await resolveAssistantDroneFsTarget({ droneId: opts.droneId, path: opts.path, fallbackToHome: false });
+  if (!target.targetPath || target.targetPath === '/') throw new Error('missing file path');
+  if (target.runtime === 'host') {
+    const resolvedPath = path.resolve(target.targetPath);
+    const st = await fs.stat(resolvedPath);
+    if (!st.isFile()) throw new Error(`file not found: ${resolvedPath}`);
+    await fs.rm(resolvedPath);
+    return { droneId: target.id, path: resolvedPath, deleted: true };
+  }
+  const script = [
+    'set -euo pipefail',
+    `target=${bashQuote(target.targetPath)}`,
+    'if [ ! -f "$target" ]; then echo "__ERR__\tnot-file"; exit 3; fi',
+    'rm -- "$target"',
+  ].join('\n');
+  const r = await withLockedDroneContainer({ requestedDroneName: target.name, droneEntry: target.drone }, async ({ containerName }) => {
+    return await dvmExec(containerName, 'bash', ['-lc', script]);
+  });
+  if (r.code !== 0) {
+    const out = `${r.stdout || ''}\n${r.stderr || ''}`;
+    if (/__ERR__\s+not-file\b/i.test(out)) throw new Error(`file not found: ${target.targetPath}`);
+    throw new Error((r.stderr || r.stdout || 'failed deleting file').trim());
+  }
+  return { droneId: target.id, path: target.targetPath, deleted: true };
+}
+
+async function assistantMoveDroneFile(opts: { droneId: string; fromPath: string; toPath: string }): Promise<any> {
+  const from = await resolveAssistantDroneFsTarget({ droneId: opts.droneId, path: opts.fromPath, fallbackToHome: false });
+  const to = await resolveAssistantDroneFsTarget({ droneId: opts.droneId, path: opts.toPath, fallbackToHome: false });
+  if (!from.targetPath || from.targetPath === '/' || !to.targetPath || to.targetPath === '/') throw new Error('missing file path');
+  if (from.runtime === 'host') {
+    const fromPath = path.resolve(from.targetPath);
+    const toPath = path.resolve(to.targetPath);
+    await fs.mkdir(path.dirname(toPath), { recursive: true });
+    await fs.rename(fromPath, toPath);
+    return { droneId: from.id, path: fromPath, movedTo: toPath };
+  }
+  const script = [
+    'set -euo pipefail',
+    `from_path=${bashQuote(from.targetPath)}`,
+    `to_path=${bashQuote(to.targetPath)}`,
+    'if [ ! -f "$from_path" ]; then echo "__ERR__\tnot-file"; exit 3; fi',
+    'mkdir -p "$(dirname -- "$to_path")"',
+    'mv -- "$from_path" "$to_path"',
+  ].join('\n');
+  const r = await withLockedDroneContainer({ requestedDroneName: from.name, droneEntry: from.drone }, async ({ containerName }) => {
+    return await dvmExec(containerName, 'bash', ['-lc', script]);
+  });
+  if (r.code !== 0) {
+    const out = `${r.stdout || ''}\n${r.stderr || ''}`;
+    if (/__ERR__\s+not-file\b/i.test(out)) throw new Error(`file not found: ${from.targetPath}`);
+    throw new Error((r.stderr || r.stdout || 'failed moving file').trim());
+  }
+  return { droneId: from.id, path: from.targetPath, movedTo: to.targetPath };
+}
+
+function parseAssistantSearchOutput(text: string, limit: number): Array<{ path: string; line: number | null; text: string }> {
+  return String(text ?? '')
+    .split('\n')
+    .map((line) => line.replace(/\r$/, ''))
+    .filter(Boolean)
+    .slice(0, limit)
+    .flatMap((line) => {
+      const match = /^(.+?):(\d+):(.*)$/.exec(line);
+      if (!match) return [];
+      return [{ path: match[1] ?? '', line: Number(match[2] ?? NaN) || null, text: match[3] ?? '' }];
+    });
+}
+
+function parseAssistantSearchContextOutput(
+  text: string,
+  limit: number,
+): Array<{ path: string; line: number | null; text: string; context: Array<{ line: number; kind: 'before' | 'match' | 'after'; text: string }> }> {
+  const matches: Array<{
+    path: string;
+    line: number | null;
+    text: string;
+    context: Array<{ line: number; kind: 'before' | 'match' | 'after'; text: string }>;
+  }> = [];
+  const byId = new Map<string, (typeof matches)[number]>();
+  for (const rawLine of String(text ?? '').split('\n')) {
+    const line = rawLine.replace(/\r$/, '');
+    if (!line) continue;
+    const parts = line.split('\t');
+    if (parts[0] === '__MATCH__' && parts.length >= 5) {
+      if (matches.length >= limit) continue;
+      const id = String(parts[1] ?? '');
+      const filePath = Buffer.from(parts[2] ?? '', 'base64').toString('utf8');
+      const lineNumber = Number(parts[3] ?? NaN);
+      const match = {
+        path: filePath,
+        line: Number.isFinite(lineNumber) ? Math.floor(lineNumber) : null,
+        text: Buffer.from(parts[4] ?? '', 'base64').toString('utf8'),
+        context: [],
+      };
+      matches.push(match);
+      byId.set(id, match);
+      continue;
+    }
+    if (parts[0] !== '__CONTEXT__' || parts.length < 6) continue;
+    const match = byId.get(String(parts[1] ?? ''));
+    if (!match) continue;
+    const contextLine = Number(parts[3] ?? NaN);
+    const kindRaw = parts[4] ?? '';
+    const kind = kindRaw === 'before' || kindRaw === 'after' || kindRaw === 'match' ? kindRaw : null;
+    if (!Number.isFinite(contextLine) || !kind) continue;
+    match.context.push({
+      line: Math.floor(contextLine),
+      kind,
+      text: Buffer.from(parts[5] ?? '', 'base64').toString('utf8'),
+    });
+  }
+  return matches;
+}
+
+function parseAssistantFindOutput(text: string, limit: number): ContainerFsEntry[] {
+  const entries: ContainerFsEntry[] = [];
+  for (const line of String(text ?? '').split('\n')) {
+    if (!line.trim()) continue;
+    const parts = line.replace(/\r$/, '').split('\t');
+    if (parts.length < 4) continue;
+    const pathText = parts[0] ?? '';
+    const kindRaw = parts[1] ?? '';
+    const sizeRaw = parts[2] ?? '';
+    const mtimeRaw = parts[3] ?? '';
+    const kind: ContainerFsEntry['kind'] = kindRaw === 'd' ? 'directory' : kindRaw === 'f' ? 'file' : 'other';
+    const sizeNum = Number(sizeRaw);
+    const mtimeSec = Number(mtimeRaw);
+    const name = path.basename(pathText) || pathText;
+    entries.push({
+      name,
+      path: pathText,
+      kind,
+      size: Number.isFinite(sizeNum) ? Math.max(0, Math.floor(sizeNum)) : null,
+      mtimeMs: Number.isFinite(mtimeSec) ? Math.max(0, Math.floor(mtimeSec * 1000)) : null,
+      ext: kind === 'file' ? extensionLower(name) || null : null,
+      isImage: kind === 'file' ? isLikelyImagePath(name) : false,
+      isVideo: kind === 'file' ? isLikelyVideoPath(name) : false,
+    });
+    if (entries.length >= limit) break;
+  }
+  sortFsEntries(entries);
+  return entries;
+}
+
+async function assistantSearchDroneFiles(opts: {
+  droneId: string;
+  path?: string;
+  query: string;
+  limit?: number;
+  contextBefore?: number;
+  contextAfter?: number;
+}): Promise<any> {
+  const query = String(opts.query ?? '').trim();
+  if (!query) throw new Error('missing query');
+  const limit = Number.isFinite(Number(opts.limit)) ? Math.max(1, Math.min(100, Math.floor(Number(opts.limit)))) : 20;
+  const contextBefore = normalizeAssistantSearchContext(opts.contextBefore, 'contextBefore');
+  const contextAfter = normalizeAssistantSearchContext(opts.contextAfter, 'contextAfter');
+  const scanLimit = limit + 1;
+  const target = await resolveAssistantDroneFsTarget({ droneId: opts.droneId, path: opts.path, fallbackToHome: true });
+  const script =
+    contextBefore > 0 || contextAfter > 0
+      ? [
+          'set -euo pipefail',
+          `root=${bashQuote(target.targetPath)}`,
+          `query=${bashQuote(query)}`,
+          `limit=${String(scanLimit)}`,
+          `before=${String(contextBefore)}`,
+          `after=${String(contextAfter)}`,
+          'if [ ! -e "$root" ]; then echo "__ERR__\tnot-found"; exit 3; fi',
+          'if command -v rg >/dev/null 2>&1; then',
+          '  search_cmd() { rg -n -I --hidden --glob "!node_modules/**" --glob "!.git/**" -- "$query" "$root" || true; }',
+          'else',
+          '  search_cmd() { grep -RInI --exclude-dir=.git --exclude-dir=node_modules -- "$query" "$root" 2>/dev/null || true; }',
+          'fi',
+          'match_id=0',
+          'search_cmd | head -n "$limit" | while IFS= read -r hit; do',
+          '  [ -n "$hit" ] || continue',
+          '  file=${hit%%:*}',
+          '  rest=${hit#*:}',
+          '  line_no=${rest%%:*}',
+          '  match_text=${rest#*:}',
+          '  case "$line_no" in ""|*[!0-9]*) continue ;; esac',
+          '  [ -f "$file" ] || continue',
+          '  start=$((line_no - before))',
+          '  if [ "$start" -lt 1 ]; then start=1; fi',
+          '  end=$((line_no + after))',
+          '  file_b64=$(printf "%s" "$file" | base64 | tr -d "\\n")',
+          '  match_b64=$(printf "%s" "$match_text" | base64 | tr -d "\\n")',
+          '  match_id=$((match_id + 1))',
+          '  printf "__MATCH__\\t%s\\t%s\\t%s\\t%s\\n" "$match_id" "$file_b64" "$line_no" "$match_b64"',
+          '  current=$start',
+          '  sed -n "${start},${end}p" "$file" | while IFS= read -r context_text || [ -n "$context_text" ]; do',
+          '    kind=match',
+          '    if [ "$current" -lt "$line_no" ]; then kind=before; fi',
+          '    if [ "$current" -gt "$line_no" ]; then kind=after; fi',
+          '    context_b64=$(printf "%s" "$context_text" | base64 | tr -d "\\n")',
+          '    printf "__CONTEXT__\\t%s\\t%s\\t%s\\t%s\\t%s\\n" "$match_id" "$file_b64" "$current" "$kind" "$context_b64"',
+          '    current=$((current + 1))',
+          '  done',
+          'done',
+        ].join('\n')
+      : [
+          'set -euo pipefail',
+          `root=${bashQuote(target.targetPath)}`,
+          `query=${bashQuote(query)}`,
+          `limit=${String(scanLimit)}`,
+          'if [ ! -e "$root" ]; then echo "__ERR__\tnot-found"; exit 3; fi',
+          'if command -v rg >/dev/null 2>&1; then',
+          '  rg -n -I --hidden --glob "!node_modules/**" --glob "!.git/**" -- "$query" "$root" | head -n "$limit" || true',
+          'else',
+          '  grep -RInI --exclude-dir=.git --exclude-dir=node_modules -- "$query" "$root" 2>/dev/null | head -n "$limit" || true',
+          'fi',
+        ].join('\n');
+  const r =
+    target.runtime === 'host'
+      ? await runHostCommand('bash', ['-lc', script], { timeoutMs: 10_000 })
+      : await withLockedDroneContainer({ requestedDroneName: target.name, droneEntry: target.drone }, async ({ containerName }) => {
+          return await dvmExec(containerName, 'bash', ['-lc', script]);
+        });
+  if (r.code !== 0) {
+    const out = `${r.stdout || ''}\n${r.stderr || ''}`;
+    if (/__ERR__\s+not-found\b/i.test(out)) throw new Error(`path not found: ${target.targetPath}`);
+    throw new Error((r.stderr || r.stdout || 'failed searching files').trim());
+  }
+  const parsedMatches =
+    contextBefore > 0 || contextAfter > 0
+      ? parseAssistantSearchContextOutput(r.stdout || '', limit)
+      : parseAssistantSearchOutput(r.stdout || '', limit);
+  const rawMatchCount =
+    contextBefore > 0 || contextAfter > 0
+      ? String(r.stdout || '').split('\n').filter((line) => line.startsWith('__MATCH__\t')).length
+      : String(r.stdout || '').split('\n').filter(Boolean).length;
+  const matches = parsedMatches.map((match) => withAssistantRelativePath(target.drone, match));
+  return {
+    droneId: target.id,
+    path: target.targetPath,
+    relativePath: assistantRelativePathForDrone(target.drone, target.targetPath),
+    query,
+    limit,
+    ...(contextBefore > 0 || contextAfter > 0 ? { contextBefore, contextAfter } : {}),
+    caps: {
+      limit,
+      maxContextBefore: ASSISTANT_SEARCH_MAX_CONTEXT_LINES,
+      maxContextAfter: ASSISTANT_SEARCH_MAX_CONTEXT_LINES,
+    },
+    truncated: rawMatchCount > limit,
+    matches,
+  };
+}
+
+async function assistantFindDroneFiles(opts: { droneId: string; path?: string; pattern?: string; limit?: number }): Promise<any> {
+  const pattern = String(opts.pattern ?? '*').trim() || '*';
+  const limit = Number.isFinite(Number(opts.limit)) ? Math.max(1, Math.min(500, Math.floor(Number(opts.limit)))) : 100;
+  const scanLimit = limit + 1;
+  const target = await resolveAssistantDroneFsTarget({ droneId: opts.droneId, path: opts.path, fallbackToHome: true });
+  const script = [
+    'set -euo pipefail',
+    `root=${bashQuote(target.targetPath)}`,
+    `pattern=${bashQuote(pattern)}`,
+    `limit=${String(scanLimit)}`,
+    'if [ ! -d "$root" ]; then echo "__ERR__\tnot-dir"; exit 3; fi',
+    'case "$pattern" in',
+    '  *"*"*|*"?"*|*"["*) effective="$pattern" ;;',
+    '  *) effective="*$pattern*" ;;',
+    'esac',
+    'if [ "$pattern" = "*" ]; then effective="*"; fi',
+    'find "$root" \\( -path "*/.git" -o -path "*/node_modules" \\) -prune -o \\( -name "$effective" -o -path "$root/$effective" \\) -print | head -n "$limit" | while IFS= read -r p; do',
+    '  [ -e "$p" ] || continue',
+    '  kind=o',
+    '  if [ -d "$p" ]; then kind=d; elif [ -f "$p" ]; then kind=f; fi',
+    '  size=$(stat -c %s -- "$p" 2>/dev/null || echo 0)',
+    '  mtime=$(stat -c %Y -- "$p" 2>/dev/null || echo 0)',
+    '  printf "%s\t%s\t%s\t%s\n" "$p" "$kind" "$size" "$mtime"',
+    'done',
+  ].join('\n');
+  const r =
+    target.runtime === 'host'
+      ? await runHostCommand('bash', ['-lc', script], { timeoutMs: 10_000 })
+      : await withLockedDroneContainer({ requestedDroneName: target.name, droneEntry: target.drone }, async ({ containerName }) => {
+          return await dvmExec(containerName, 'bash', ['-lc', script]);
+        });
+  if (r.code !== 0) {
+    const out = `${r.stdout || ''}\n${r.stderr || ''}`;
+    if (/__ERR__\s+not-dir\b/i.test(out)) throw new Error(`path is not a directory: ${target.targetPath}`);
+    throw new Error((r.stderr || r.stdout || 'failed finding files').trim());
+  }
+  return {
+    droneId: target.id,
+    path: target.targetPath,
+    relativePath: assistantRelativePathForDrone(target.drone, target.targetPath),
+    pattern,
+    limit,
+    truncated: String(r.stdout || '').split('\n').filter(Boolean).length > limit,
+    matches: parseAssistantFindOutput(r.stdout || '', limit).map((entry) => withAssistantRelativePath(target.drone, entry)),
+  };
+}
+
+function assistantChangedFileStatus(entry: any): string {
+  if (entry?.isConflicted) return 'conflicted';
+  if (entry?.isUntracked) return 'untracked';
+  const status = entry?.stagedType ?? entry?.unstagedType;
+  return status == null ? 'unknown' : String(status);
+}
+
+function assistantChangedFilePathForRuntime(drone: any, repoRoot: string, relativePath: string): string {
+  if (droneRuntime(drone) === 'host') return path.resolve(repoRoot, relativePath);
+  return normalizeContainerPath(path.posix.join(repoRoot, relativePath));
+}
+
+function formatAssistantChangedFilesResult(opts: { droneId: string; drone: any; repoRoot: string; summary: any }): any {
+  const entries = Array.isArray(opts.summary?.entries) ? opts.summary.entries : [];
+  const allFiles = entries.map((entry: any) => {
+    const relativePath = String(entry?.path ?? '').trim();
+    const originalRelativePath = String(entry?.originalPath ?? '').trim() || null;
+    return {
+      path: assistantChangedFilePathForRuntime(opts.drone, opts.repoRoot, relativePath),
+      relativePath,
+      ...(originalRelativePath
+        ? {
+            originalPath: assistantChangedFilePathForRuntime(opts.drone, opts.repoRoot, originalRelativePath),
+            originalRelativePath,
+          }
+        : {}),
+      status: assistantChangedFileStatus(entry),
+      staged: Boolean(entry?.stagedChar && entry.stagedChar !== '.' && entry.stagedChar !== '?' && entry.stagedChar !== '!'),
+      unstaged: Boolean(entry?.unstagedChar && entry.unstagedChar !== '.' && entry.unstagedChar !== '!'),
+      untracked: Boolean(entry?.isUntracked),
+      conflicted: Boolean(entry?.isConflicted),
+      stagedStatus: entry?.stagedType ?? null,
+      unstagedStatus: entry?.unstagedType ?? null,
+      stagedChar: String(entry?.stagedChar ?? '.'),
+      unstagedChar: String(entry?.unstagedChar ?? '.'),
+    };
+  });
+  const files = allFiles.slice(0, ASSISTANT_CHANGED_FILES_LIMIT);
+  return {
+    droneId: opts.droneId,
+    repoRoot: opts.repoRoot,
+    files,
+    counts: opts.summary?.counts ?? {
+      changed: entries.length,
+      staged: allFiles.filter((file: any) => file.staged).length,
+      unstaged: allFiles.filter((file: any) => file.unstaged).length,
+      untracked: allFiles.filter((file: any) => file.untracked).length,
+      conflicted: allFiles.filter((file: any) => file.conflicted).length,
+    },
+    limit: ASSISTANT_CHANGED_FILES_LIMIT,
+    truncated: entries.length > ASSISTANT_CHANGED_FILES_LIMIT,
+  };
+}
+
+async function assistantListDroneChangedFiles(opts: { droneId: string }): Promise<any> {
+  const target = await resolveAssistantDroneFsTarget({ droneId: opts.droneId, fallbackToHome: true });
+  if (!isRepoAttachedDrone(target.drone)) throw new Error(`drone is not repo-attached: ${target.name}`);
+
+  if (target.runtime === 'host') {
+    const repoPathRaw = String(target.drone?.repoPath ?? '').trim();
+    if (!repoPathRaw) throw new Error(`drone has no host repo path: ${target.name}`);
+    const repoRoot = await gitTopLevel(repoPathRaw);
+    const summary = await gitRepoChangesSummary(repoRoot);
+    return formatAssistantChangedFilesResult({ droneId: target.id, drone: target.drone, repoRoot, summary });
+  }
+
+  const repoPathInContainer = droneRepoPathInContainer(target.drone);
+  const result = await withLockedDroneContainer({ requestedDroneName: target.name, droneEntry: target.drone }, async ({ containerName }) => {
+    return await droneRepoChangesSummary({ container: containerName, repoPathInContainer });
+  });
+  return formatAssistantChangedFilesResult({ droneId: target.id, drone: target.drone, repoRoot: result.repoRoot, summary: result.summary });
+}
+
+async function assistantRunDroneBash(opts: { droneId: string; command: string; cwd?: string; timeoutMs?: number }): Promise<any> {
+  const command = String(opts.command ?? '');
+  if (!command.trim()) throw new Error('missing command');
+  const commandBytes = Buffer.byteLength(command, 'utf8');
+  if (commandBytes > ASSISTANT_BASH_MAX_COMMAND_BYTES) {
+    throw new Error(`command too large (${commandBytes} bytes, max ${ASSISTANT_BASH_MAX_COMMAND_BYTES})`);
+  }
+  const timeoutMs = clampAssistantBashTimeoutMs(opts.timeoutMs);
+  const target = await resolveAssistantDroneFsTarget({ droneId: opts.droneId, path: opts.cwd, fallbackToHome: true });
+  if (target.runtime !== 'container') throw new Error('bash is only supported for container drones');
+
+  const script = [
+    'set -uo pipefail',
+    `cwd=${bashQuote(target.targetPath)}`,
+    `cmd=${bashQuote(command)}`,
+    `max=${String(ASSISTANT_BASH_MAX_OUTPUT_BYTES)}`,
+    `timeout_s=${String(Math.max(1, Math.ceil(timeoutMs / 1000)))}`,
+    'if [ ! -d "$cwd" ]; then echo "__ERR__\tnot-dir"; exit 3; fi',
+    'cd "$cwd" || exit 3',
+    'resolved=$(pwd -P)',
+    'tmp=$(mktemp -d "${TMPDIR:-/tmp}/assistant-bash.XXXXXX")',
+    'cleanup() { rm -rf "$tmp"; }',
+    'trap cleanup EXIT',
+    'stdout_file="$tmp/stdout"',
+    'stderr_file="$tmp/stderr"',
+    'if command -v timeout >/dev/null 2>&1; then',
+    '  timeout -k 2s "${timeout_s}s" bash -lc "$cmd" >"$stdout_file" 2>"$stderr_file"',
+    '  code=$?',
+    'else',
+    '  bash -lc "$cmd" >"$stdout_file" 2>"$stderr_file"',
+    '  code=$?',
+    'fi',
+    'stdout_size=$(wc -c < "$stdout_file" | tr -d "[:space:]")',
+    'stderr_size=$(wc -c < "$stderr_file" | tr -d "[:space:]")',
+    'cwd_b64=$(printf "%s" "$resolved" | base64 | tr -d "\\n")',
+    'stdout_b64=$(head -c "$max" "$stdout_file" | base64 | tr -d "\\n")',
+    'stderr_b64=$(head -c "$max" "$stderr_file" | base64 | tr -d "\\n")',
+    'printf "__META__\t%s\t%s\t%s\t%s\n" "$cwd_b64" "$code" "${stdout_size:-0}" "${stderr_size:-0}"',
+    'printf "__STDOUT_B64__\t%s\n" "$stdout_b64"',
+    'printf "__STDERR_B64__\t%s\n" "$stderr_b64"',
+    'exit 0',
+  ].join('\n');
+  const r = await withLockedDroneContainer({ requestedDroneName: target.name, droneEntry: target.drone }, async ({ containerName }) => {
+    return await dvmExec(containerName, 'bash', ['-lc', script], { timeoutMs: timeoutMs + 5000 });
+  });
+  const stdoutRaw = String(r.stdout ?? '');
+  const combinedOut = `${stdoutRaw}\n${String(r.stderr ?? '')}`;
+  if (r.code === 3 && /__ERR__\s+not-dir\b/i.test(combinedOut)) throw new Error(`cwd is not a directory: ${target.targetPath}`);
+  const lines = stdoutRaw.split('\n');
+  const meta = (lines.find((line) => line.startsWith('__META__\t')) ?? '').split('\t');
+  const stdoutB64 = (lines.find((line) => line.startsWith('__STDOUT_B64__\t')) ?? '').slice('__STDOUT_B64__\t'.length);
+  const stderrB64 = (lines.find((line) => line.startsWith('__STDERR_B64__\t')) ?? '').slice('__STDERR_B64__\t'.length);
+  const hasStructuredOutput = meta.length >= 5 && meta[0] === '__META__';
+  const cwd = hasStructuredOutput ? Buffer.from(meta[1] ?? '', 'base64').toString('utf8') || target.targetPath : target.targetPath;
+  const code = hasStructuredOutput ? Number(meta[2] ?? 1) : r.code;
+  const stdoutSize = hasStructuredOutput ? Number(meta[3] ?? 0) : Buffer.byteLength(stdoutRaw, 'utf8');
+  const stderrSize = hasStructuredOutput ? Number(meta[4] ?? 0) : Buffer.byteLength(String(r.stderr ?? ''), 'utf8');
+  const structuredStdout = hasStructuredOutput ? Buffer.from(stdoutB64, 'base64').toString('utf8') : stdoutRaw;
+  const structuredStderr = hasStructuredOutput ? Buffer.from(stderrB64, 'base64').toString('utf8') : String(r.stderr ?? '');
+  const stdout = truncateUtf8Bytes(structuredStdout, ASSISTANT_BASH_MAX_OUTPUT_BYTES);
+  const stderr = truncateUtf8Bytes(structuredStderr, ASSISTANT_BASH_MAX_OUTPUT_BYTES);
+  const timedOut = code === 124 || code === 137 || r.code === 124 || /Timed out after/i.test(String(r.stderr ?? ''));
+  return {
+    ok: true,
+    droneId: target.id,
+    cwd,
+    command,
+    code: Number.isFinite(code) ? Math.floor(code) : r.code,
+    stdout: stdout.text,
+    stderr: stderr.text,
+    timeoutMs,
+    timedOut,
+    stdoutTruncated: stdout.truncated || stdoutSize > ASSISTANT_BASH_MAX_OUTPUT_BYTES,
+    stderrTruncated: stderr.truncated || stderrSize > ASSISTANT_BASH_MAX_OUTPUT_BYTES,
   };
 }
 
@@ -2779,6 +3695,133 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+async function reconcilePendingHostMirrorApply(opts: {
+  droneId: string;
+  droneName: string;
+  droneEntry: any;
+  repoRoot: string;
+  repoPathInContainer: string;
+}): Promise<{
+  promoted: boolean;
+  cleanedAbortedCandidate: boolean;
+  hostMirrorRef: string | null;
+  hostMirrorSha: string | null;
+  droneHeadSha: string | null;
+  error: string | null;
+}> {
+  const d = opts.droneEntry;
+  const lastPull = d?.repo?.lastPull && typeof d.repo.lastPull === 'object' ? d.repo.lastPull : null;
+  const mode = String((lastPull as any)?.mode ?? '').trim().toLowerCase();
+  const pendingRef = String((lastPull as any)?.hostMirrorCandidateRef ?? '').trim();
+  const pendingSha = String((lastPull as any)?.hostMirrorCandidateSha ?? '').trim().toLowerCase();
+  const droneHeadSha = String((lastPull as any)?.exportedHeadSha ?? '').trim().toLowerCase();
+  const currentMirrorRef = String((lastPull as any)?.hostMirrorRef ?? '').trim() || null;
+  const currentMirrorSha = String((lastPull as any)?.hostMirrorSha ?? '').trim().toLowerCase() || null;
+
+  if (mode !== 'host-mirror-merge-pending' || !pendingRef || !/^[0-9a-f]{40}$/.test(pendingSha)) {
+    return {
+      promoted: false,
+      cleanedAbortedCandidate: false,
+      hostMirrorRef: currentMirrorRef,
+      hostMirrorSha: currentMirrorSha,
+      droneHeadSha: /^[0-9a-f]{40}$/.test(droneHeadSha) ? droneHeadSha : null,
+      error: null,
+    };
+  }
+
+  const clean = await gitIsClean(opts.repoRoot).catch(() => false);
+  if (!clean) {
+    return {
+      promoted: false,
+      cleanedAbortedCandidate: false,
+      hostMirrorRef: currentMirrorRef,
+      hostMirrorSha: currentMirrorSha,
+      droneHeadSha: /^[0-9a-f]{40}$/.test(droneHeadSha) ? droneHeadSha : null,
+      error: null,
+    };
+  }
+
+  const isCommitted = /^[0-9a-f]{40}$/.test(droneHeadSha) && (await gitIsAncestor(opts.repoRoot, pendingSha, 'HEAD'));
+  if (!isCommitted) {
+    await deleteHostRefBestEffort({ repoRoot: opts.repoRoot, refName: pendingRef });
+    await updateRegistry((reg2: any) => {
+      const dd = reg2?.drones?.[opts.droneId];
+      if (!dd) return;
+      dd.repo = dd.repo ?? {};
+      const previousLastPull = dd.repo.lastPull && typeof dd.repo.lastPull === 'object' ? dd.repo.lastPull : {};
+      dd.repo.lastPullAt = nowIso();
+      dd.repo.lastPullError = null;
+      dd.repo.lastPull = {
+        ...previousLastPull,
+        mode: 'host-mirror-merge-aborted',
+        hostMirrorRef: currentMirrorRef,
+        hostMirrorSha: currentMirrorSha,
+        hostMirrorCandidateRef: null,
+        hostMirrorCandidateSha: null,
+        mergeSourceRef: null,
+        baseAdvanced: false,
+        baseAdvanceError: null,
+      };
+      reg2.drones = reg2.drones ?? {};
+      reg2.drones[opts.droneId] = dd;
+    });
+    return {
+      promoted: false,
+      cleanedAbortedCandidate: true,
+      hostMirrorRef: currentMirrorRef,
+      hostMirrorSha: currentMirrorSha,
+      droneHeadSha: /^[0-9a-f]{40}$/.test(droneHeadSha) ? droneHeadSha : null,
+      error: null,
+    };
+  }
+
+  const appliedRef = `refs/drone/mirrors/${safeDroneRefSegment(opts.droneName)}/applied`;
+  try {
+    await withLockedDroneContainer({ requestedDroneName: opts.droneName, droneEntry: d }, async ({ containerName }) => {
+      await dvmRepoSetBaseSha({ container: containerName, repoPathInContainer: opts.repoPathInContainer, baseSha: droneHeadSha });
+    });
+    await updateHostRef({ repoRoot: opts.repoRoot, refName: appliedRef, target: pendingSha });
+    if (pendingRef !== appliedRef) {
+      await deleteHostRefBestEffort({ repoRoot: opts.repoRoot, refName: pendingRef });
+    }
+    await updateRegistry((reg2: any) => {
+      const dd = reg2?.drones?.[opts.droneId];
+      if (!dd) return;
+      dd.repo = dd.repo ?? {};
+      const previousLastPull = dd.repo.lastPull && typeof dd.repo.lastPull === 'object' ? dd.repo.lastPull : {};
+      dd.repo.lastPull = {
+        ...previousLastPull,
+        mode: 'host-mirror-merge-committed',
+        hostMirrorRef: appliedRef,
+        hostMirrorSha: pendingSha,
+        hostMirrorCandidateRef: null,
+        hostMirrorCandidateSha: null,
+        baseAdvanced: true,
+        baseAdvanceError: null,
+      };
+      reg2.drones = reg2.drones ?? {};
+      reg2.drones[opts.droneId] = dd;
+    });
+    return {
+      promoted: true,
+      cleanedAbortedCandidate: false,
+      hostMirrorRef: appliedRef,
+      hostMirrorSha: pendingSha,
+      droneHeadSha,
+      error: null,
+    };
+  } catch (e: any) {
+    return {
+      promoted: false,
+      cleanedAbortedCandidate: false,
+      hostMirrorRef: currentMirrorRef,
+      hostMirrorSha: currentMirrorSha,
+      droneHeadSha,
+      error: e?.message ?? String(e),
+    };
+  }
+}
+
 function buildTaskTemplateContext(task: ReturnType<typeof findScopedTaskById>): TaskTemplateContext | null {
   if (!task) return null;
   return {
@@ -3033,6 +4076,60 @@ function lastTranscriptTurnFromEntry(entry: any): any | null {
 function parseIsoOrZero(raw: unknown): number {
   const ms = Date.parse(String(raw ?? '').trim());
   return Number.isFinite(ms) ? ms : 0;
+}
+
+function summarizeDroneActivity(entry: any): {
+  lastActivityAt: string | null;
+  lastMessageAt: string | null;
+  lastActivityChat: string | null;
+} {
+  let lastActivityMs = Math.max(
+    parseIsoOrZero(entry?.createdAt),
+    parseIsoOrZero(entry?.updatedAt),
+    parseIsoOrZero(entry?.hub?.updatedAt),
+  );
+  let lastMessageMs = 0;
+  let lastActivityChat: string | null = null;
+  let lastMessageChat: string | null = null;
+
+  const chats = entry?.chats && typeof entry.chats === 'object' ? entry.chats : {};
+  for (const [chatName, chatEntry] of Object.entries(chats) as Array<[string, any]>) {
+    const turns = Array.isArray(chatEntry?.turns) ? chatEntry.turns : [];
+    for (const turn of turns) {
+      const turnMs = Math.max(
+        parseIsoOrZero((turn as any)?.completedAt),
+        parseIsoOrZero((turn as any)?.promptAt),
+        parseIsoOrZero((turn as any)?.at),
+      );
+      if (turnMs > lastMessageMs) {
+        lastMessageMs = turnMs;
+        lastMessageChat = chatName;
+      }
+      if (turnMs > lastActivityMs) {
+        lastActivityMs = turnMs;
+        lastActivityChat = chatName;
+      }
+    }
+
+    const pendingPrompts = Array.isArray(chatEntry?.pendingPrompts) ? chatEntry.pendingPrompts : [];
+    for (const prompt of pendingPrompts) {
+      const promptMs = Math.max(
+        parseIsoOrZero((prompt as any)?.updatedAt),
+        parseIsoOrZero((prompt as any)?.at),
+        parseIsoOrZero((prompt as any)?.createdAt),
+      );
+      if (promptMs > lastActivityMs) {
+        lastActivityMs = promptMs;
+        lastActivityChat = chatName;
+      }
+    }
+  }
+
+  return {
+    lastActivityAt: lastActivityMs > 0 ? new Date(lastActivityMs).toISOString() : null,
+    lastMessageAt: lastMessageMs > 0 ? new Date(lastMessageMs).toISOString() : null,
+    lastActivityChat: lastActivityChat ?? (lastActivityMs === lastMessageMs ? lastMessageChat : null),
+  };
 }
 
 function summarizePlaybookRunEntry(args: {
@@ -4092,14 +5189,17 @@ async function enqueueTranscriptPrompt(opts: {
       : Math.max(daemonReadyTimeoutMs, UPGRADE_DAEMON_READY_TIMEOUT_MS);
   const client = makeClient(hostPort, token);
   await waitForDroneDaemonReady(client, daemonReadyTimeoutMs);
+  const droneId = normalizeDroneIdentity(d?.id) || String(d?.name ?? '');
   try {
     await dronePromptEnqueue(client, { id: String(opts.id ?? ''), kind: opts.kind, cmd: 'bash', args: ['-lc', opts.script] });
+    ensureDaemonPromptEventSubscription(droneId);
   } catch (e: any) {
     const msg = e?.message ?? String(e);
     if (isNotFoundErrorMessage(msg)) {
       await upgradeDroneDaemonInContainer({ containerName, containerPort: d.containerPort });
       await waitForDroneDaemonReady(client, daemonReadyAfterUpgradeTimeoutMs);
       await dronePromptEnqueue(client, { id: String(opts.id ?? ''), kind: opts.kind, cmd: 'bash', args: ['-lc', opts.script] });
+      ensureDaemonPromptEventSubscription(droneId);
       return;
     }
     throw e;
@@ -4169,6 +5269,7 @@ async function sendPromptToChat(opts: {
             storageRoot: attachmentsStorageRoot,
           });
     const effectivePrompt = promptWithImageAttachments(opts.prompt, attachmentsForPrompt);
+    const codexImageArgs = codexImageAttachmentFlags(attachmentsForPrompt);
     const promptWithHistory =
       agent.kind === 'builtin'
         ? maybeBootstrapPromptFromTranscript({
@@ -4222,7 +5323,7 @@ async function sendPromptToChat(opts: {
           ...managedEnvLines,
           `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
           cdCommand,
-          `codex --ask-for-approval never exec${modelArg} --skip-git-repo-check --sandbox danger-full-access --json --color never ${bashQuote(promptWithHistory)}`,
+          `codex --ask-for-approval never exec${modelArg} --skip-git-repo-check --sandbox danger-full-access --json --color never${codexImageArgs} ${bashQuote(promptWithHistory)}`,
         ].join('\n');
         await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'codex', script });
         return { ok: true as const, agent, mode: 'transcript' as const, chat: normalizedChat, codexThreadId: null, turnOk: true as const };
@@ -4234,7 +5335,7 @@ async function sendPromptToChat(opts: {
         ...managedEnvLines,
         `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
         cdCommand,
-        `codex --ask-for-approval never exec${modelArg} --skip-git-repo-check --sandbox danger-full-access --json --color never resume ${bashQuote(existingThreadId)} ${bashQuote(promptWithHistory)}`,
+        `codex --ask-for-approval never exec${modelArg} --skip-git-repo-check --sandbox danger-full-access --json --color never resume${codexImageArgs} ${bashQuote(existingThreadId)} ${bashQuote(promptWithHistory)}`,
       ].join('\n');
       await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'codex', script });
       return {
@@ -4345,6 +5446,8 @@ const RECONCILE_TASKS = new Map<string, Promise<void>>();
 const RECONCILE_QUEUE: Array<{ droneName: string; chatName: string }> = [];
 const RECONCILE_QUEUED = new Set<string>();
 const RECONCILE_RETRY_TIMERS = new Map<string, ReturnType<typeof setTimeout>>();
+const DAEMON_PROMPT_EVENT_MONITORS = new Map<string, { abort: AbortController; task: Promise<void> }>();
+const DAEMON_PROMPT_EVENT_IDLE_TIMEOUT_MS = 70_000;
 let RECONCILE_ACTIVE = 0;
 let RECONCILE_PUMPING = false;
 
@@ -4400,6 +5503,142 @@ function enqueueReconcile(droneIdRaw: string, chatName: string) {
   RECONCILE_QUEUED.add(key);
   RECONCILE_QUEUE.push({ droneName: dn, chatName: cn });
   pumpReconcileQueue();
+}
+
+function isTerminalDaemonPromptState(stateRaw: unknown): boolean {
+  const state = String(stateRaw ?? '').trim();
+  return state === 'done' || state === 'failed' || state === 'canceled';
+}
+
+async function enqueueReconcileForDaemonPromptEvent(droneIdRaw: string, promptIdRaw: string): Promise<void> {
+  const droneId = normalizeDroneIdentity(droneIdRaw);
+  const promptId = String(promptIdRaw ?? '').trim();
+  if (!droneId || !promptId) return;
+  const regAny: any = await loadRegistry();
+  const chats = regAny?.drones?.[droneId]?.chats;
+  if (!chats || typeof chats !== 'object') return;
+  for (const [chatNameRaw, entry] of Object.entries(chats) as Array<[string, any]>) {
+    const chatName = normalizeChatName(chatNameRaw);
+    if (!chatName) continue;
+    const pending = Array.isArray(entry?.pendingPrompts) ? entry.pendingPrompts : [];
+    if (!pending.some((item: any) => String(item?.id ?? '').trim() === promptId)) continue;
+    enqueueReconcile(droneId, chatName);
+    enqueuePendingPromptPump(droneId, chatName);
+  }
+}
+
+function handleDaemonPromptSseEvent(droneId: string, eventName: string, dataText: string): void {
+  let data: any = null;
+  try {
+    data = JSON.parse(dataText || '{}');
+  } catch {
+    return;
+  }
+  const jobs = eventName === 'snapshot' && Array.isArray(data?.jobs)
+    ? data.jobs
+    : data?.job
+      ? [data.job]
+      : [];
+  for (const job of jobs) {
+    if (!isTerminalDaemonPromptState(job?.state)) continue;
+    const promptId = String(job?.id ?? '').trim();
+    if (!promptId) continue;
+    void enqueueReconcileForDaemonPromptEvent(droneId, promptId).catch(() => {});
+  }
+}
+
+async function readDaemonPromptEventStream(opts: {
+  droneId: string;
+  client: ReturnType<typeof makeClient>;
+  signal: AbortSignal;
+}): Promise<void> {
+  const url = new URL('/v1/prompts/events', opts.client.baseUrl);
+  const res = await fetch(url.toString(), {
+    headers: {
+      authorization: `Bearer ${opts.client.token}`,
+      accept: 'text/event-stream',
+    },
+    signal: opts.signal,
+  });
+  if (!res.ok || !res.body) {
+    throw new Error(`daemon prompt event stream failed: ${res.status} ${res.statusText}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let sseBuffer = '';
+  while (!opts.signal.aborted) {
+    let idleTimer: ReturnType<typeof setTimeout> | null = null;
+    let readResult: Awaited<ReturnType<typeof reader.read>> | null;
+    try {
+      readResult = await Promise.race([
+        reader.read(),
+        new Promise<null>((resolve) => {
+          idleTimer = setTimeout(() => resolve(null), DAEMON_PROMPT_EVENT_IDLE_TIMEOUT_MS);
+          (idleTimer as any).unref?.();
+        }),
+      ]);
+    } finally {
+      if (idleTimer) clearTimeout(idleTimer);
+    }
+    if (readResult === null) {
+      await reader.cancel().catch(() => {});
+      throw new Error('daemon prompt event stream idle timeout');
+    }
+    const { value, done } = readResult;
+    if (done) break;
+    sseBuffer += decoder.decode(value, { stream: true });
+
+    let sepIdx = sseBuffer.indexOf('\n\n');
+    while (sepIdx !== -1) {
+      const frame = sseBuffer.slice(0, sepIdx);
+      sseBuffer = sseBuffer.slice(sepIdx + 2);
+      let eventName = 'message';
+      const dataLines: string[] = [];
+      for (const rawLine of frame.split('\n')) {
+        const line = rawLine.replace(/\r$/, '');
+        if (!line) continue;
+        if (line.startsWith(':')) continue;
+        if (line.startsWith('event:')) {
+          eventName = line.slice('event:'.length).trim();
+          continue;
+        }
+        if (line.startsWith('data:')) dataLines.push(line.slice('data:'.length).trimStart());
+      }
+      if (dataLines.length > 0) handleDaemonPromptSseEvent(opts.droneId, eventName, dataLines.join('\n'));
+      sepIdx = sseBuffer.indexOf('\n\n');
+    }
+  }
+  if (!opts.signal.aborted) throw new Error('daemon prompt event stream ended');
+}
+
+function ensureDaemonPromptEventSubscription(droneIdRaw: string): void {
+  const droneId = normalizeDroneIdentity(droneIdRaw);
+  if (!droneId || DAEMON_PROMPT_EVENT_MONITORS.has(droneId)) return;
+  const abort = new AbortController();
+  const task = (async () => {
+    let attempt = 0;
+    while (!abort.signal.aborted) {
+      try {
+        const regAny: any = await loadRegistry();
+        const drone = regAny?.drones?.[droneId] ?? null;
+        if (!drone) return;
+        const daemon = await resolveDroneDaemonClientForEntry(drone);
+        if (!daemon) throw new Error(`daemon unavailable for ${droneId}`);
+        await readDaemonPromptEventStream({ droneId, client: daemon.client, signal: abort.signal });
+        attempt = 0;
+      } catch {
+        if (abort.signal.aborted) break;
+        attempt = Math.min(8, attempt + 1);
+        await sleepMs(Math.min(30_000, 500 * 2 ** attempt));
+      }
+    }
+  })().finally(() => {
+    const current = DAEMON_PROMPT_EVENT_MONITORS.get(droneId);
+    if (current?.abort === abort) DAEMON_PROMPT_EVENT_MONITORS.delete(droneId);
+  });
+  DAEMON_PROMPT_EVENT_MONITORS.set(droneId, { abort, task });
+  void task;
 }
 
 function clearScheduledReconcileRetryByKey(key: string): void {
@@ -6849,7 +8088,12 @@ function chatHasReconcilablePendingPrompts(entry: any): boolean {
   const doneIds = new Set(turns.map((t: any) => String(t?.id ?? '').trim()).filter(Boolean));
   for (const p of pending) {
     const st = String(p?.state ?? '');
-    if (st === 'failed') continue;
+    if (st === 'failed') {
+      const error = String(p?.error ?? '').trim().toLowerCase();
+      if (!error.includes('finished but no') || !error.includes('message was parsed')) continue;
+      const failedAtMs = Date.parse(String(p?.updatedAt ?? p?.at ?? ''));
+      if (Number.isFinite(failedAtMs) && Date.now() - failedAtMs > 10 * 60_000) continue;
+    }
     // `queued` entries haven't been enqueued into the daemon yet, so there's nothing
     // to reconcile from daemon → transcript for them.
     if (st === 'queued') continue;
@@ -6922,7 +8166,10 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
       }
       continue;
     }
-    if (state === 'failed' && agent.id !== 'codex') continue;
+    if (state === 'failed' && agent.id !== 'codex' && agent.id !== 'pi') {
+      const error = String(p?.error ?? '').trim().toLowerCase();
+      if (!error.includes('finished but no') || !error.includes('message was parsed')) continue;
+    }
 
     let jobResp: any = null;
     try {
@@ -6967,8 +8214,11 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
       });
       if (staleState !== 'sent') continue;
 
-      // Auto-recover stale "running forever" prompt jobs by closing the prompt tmux session.
-      // This mirrors manual unstick behavior so users do not need to unstick routine stalls.
+      // A running prompt can legitimately exceed the enqueue timeout. Do not kill
+      // active agent work here; cancellation has to preserve an explicit cause.
+      if (jobState === 'running') continue;
+
+      // Auto-recover stale queued prompt jobs by closing any leftover prompt tmux session.
       const recovered = await recoverStalePromptJobSession({ droneId, droneEntry: d, promptId: id });
       if (recovered.jobState && recovered.job) {
         job = recovered.job;
@@ -6989,6 +8239,8 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
       continue;
     }
 
+    const jobKind = normalizeBuiltinAgentId(job?.kind) ?? agent.id;
+
     if (jobState === 'done') {
       const stdout = typeof job?.stdout === 'string' ? job.stdout : '';
       const stderr = typeof job?.stderr === 'string' ? job.stderr : '';
@@ -6998,19 +8250,26 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
         jobStartedAt: job?.startedAt,
         finishedAt,
       });
-      if (agent.id === 'codex') {
-        const parsed = parseCodexJsonl(stdout || '');
+      if (jobKind === 'codex') {
+        const parsed = parseCodexJobTranscript(job);
         const threadId = parsed.threadId;
         const msg = parsed.message;
+        const output = String(msg ?? '').trimEnd();
+        if (!output) {
+          const error = formatTranscriptJobFailure({
+            agentId: jobKind,
+            stdoutRaw: stdout,
+            stderrRaw: stderr,
+            fallbackRaw: 'codex finished but no message was parsed',
+            exitCode: 0,
+          });
+          pendingList[i] = { ...p, state: 'failed', error, updatedAt: nowIso() };
+          changed = true;
+          continue;
+        }
         if (threadId) {
           entry.codexThreadId = threadId;
           changed = true;
-        }
-        const output = String(msg ?? '').trimEnd();
-        if (!output) {
-          pendingList[i] = { ...p, state: 'failed', error: 'codex finished but no message was parsed', updatedAt: nowIso() };
-          changed = true;
-          continue;
         }
         // Record transcript turn (success).
         turns.push({
@@ -7031,8 +8290,8 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
         continue;
       }
 
-      if (agent.id === 'pi') {
-        const parsed = parsePiJsonl(stdout || '');
+      if (jobKind === 'pi') {
+        const parsed = parsePiJobTranscript(job);
         if (parsed.sessionId && String(parsed.sessionId).trim() && String(entry?.piSessionId ?? '').trim() !== parsed.sessionId) {
           entry.piSessionId = parsed.sessionId;
           changed = true;
@@ -7062,7 +8321,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
       }
 
       if (
-        agent.id === 'opencode' &&
+        jobKind === 'opencode' &&
         !(typeof entry?.openCodeSessionId === 'string' && String(entry.openCodeSessionId).trim())
       ) {
         // Best-effort: discover session id after first successful run, so future turns
@@ -7101,10 +8360,10 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
     }
 
     if (jobState === 'failed') {
-      if (agent.id === 'codex') {
+      if (jobKind === 'codex') {
         const stdout = String(job?.stdout ?? '');
         const stderr = String(job?.stderr ?? '');
-        const parsed = parseCodexJsonl(stdout);
+        const parsed = parseCodexJobTranscript(job);
         const output = String(parsed.message ?? '').trimEnd();
         const finishedAt = typeof job?.finishedAt === 'string' ? job.finishedAt : nowIso();
         const promptAt = resolveTranscriptPromptAt({
@@ -7112,13 +8371,15 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           jobStartedAt: job?.startedAt,
           finishedAt,
         });
-        if (parsed.threadId) {
-          entry.codexThreadId = parsed.threadId;
-          changed = true;
-        }
-        // Self-heal false failed states (daemon finalized too early) by trusting
-        // completed Codex output when it is present in the persisted job payload.
-        if (output) {
+        // Self-heal false failed states only when Codex emitted a terminal
+        // completion event. An in-flight status update is not a final answer.
+        const terminalEvent = String(parsed.terminalEvent ?? '').trim();
+        const hasCompletedTurn = terminalEvent === 'turn.completed' || terminalEvent === 'response.completed';
+        if (output && hasCompletedTurn) {
+          if (parsed.threadId) {
+            entry.codexThreadId = parsed.threadId;
+            changed = true;
+          }
           turns.push({
             at: promptAt,
             promptAt,
@@ -7137,9 +8398,9 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           continue;
         }
       }
-      if (agent.id === 'pi') {
+      if (jobKind === 'pi') {
         const stdout = String(job?.stdout ?? '');
-        const parsed = parsePiJsonl(stdout);
+        const parsed = parsePiJobTranscript(job);
         const output = String(parsed.message ?? '').trimEnd();
         const finishedAt = typeof job?.finishedAt === 'string' ? job.finishedAt : nowIso();
         const promptAt = resolveTranscriptPromptAt({
@@ -7177,7 +8438,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           ? Math.floor(job.exitCode)
           : null;
       let errText = formatTranscriptJobFailure({
-        agentId: agent.id,
+        agentId: jobKind,
         stdoutRaw: String(job?.stdout ?? ''),
         stderrRaw: String(job?.stderr ?? ''),
         fallbackRaw:
@@ -7411,6 +8672,7 @@ async function enqueuePrompt(opts: {
       });
     } else {
       await updatePendingPrompt({ droneId, chatName, id, patch: { state: 'sent' } });
+      enqueueReconcile(droneId, chatName);
     }
   } catch (e: any) {
     await updatePendingPrompt({
@@ -7686,27 +8948,49 @@ function resolveDroneCliPath(): string {
   return path.resolve(__dirname, '..', 'cli.ts');
 }
 
-function resolveDroneDaemonJsPath(): string {
-  // dist/hub -> dist/daemon.js
-  return path.resolve(__dirname, '..', 'daemon.js');
-}
-
-function resolveDroneDaemonRuntimeDir(): string {
-  return path.dirname(resolveDroneDaemonJsPath());
-}
-
 function isNotFoundErrorMessage(msg: string): boolean {
   const s = String(msg ?? '').trim().toLowerCase();
   return s.startsWith('404') || s === 'not found' || s.includes('not found');
 }
 
 async function upgradeDroneDaemonInContainer(opts: { containerName: string; containerPort: number }) {
-  // Install the built daemon runtime tree so relative requires continue to resolve.
-  const clearDaemonRuntime = await dvmExec(opts.containerName, 'bash', ['-lc', 'mkdir -p /dvm-data/drone && rm -rf /dvm-data/drone/dist']);
-  if (clearDaemonRuntime.code !== 0) {
-    throw new Error(clearDaemonRuntime.stderr || clearDaemonRuntime.stdout || 'failed clearing daemon runtime in container');
+  // Stage the built daemon runtime first. Do not remove the active runtime until
+  // the replacement has a runnable daemon.js.
+  const runtimeDir = resolveDroneDaemonRuntimeDir();
+  await assertDroneDaemonRuntimeReady(runtimeDir);
+
+  const clearStagedDaemonRuntime = await dvmExec(opts.containerName, 'bash', [
+    '-lc',
+    'mkdir -p /dvm-data/drone && rm -rf /dvm-data/drone/dist.next',
+  ]);
+  if (clearStagedDaemonRuntime.code !== 0) {
+    throw new Error(clearStagedDaemonRuntime.stderr || clearStagedDaemonRuntime.stdout || 'failed clearing staged daemon runtime in container');
   }
-  await dvmCopyToContainer(opts.containerName, resolveDroneDaemonRuntimeDir(), '/dvm-data/drone/dist', { clean: false });
+  await dvmCopyToContainer(opts.containerName, runtimeDir, '/dvm-data/drone/dist.next', { clean: false });
+  const verifyStagedDaemonRuntime = await dvmExec(opts.containerName, 'bash', [
+    '-lc',
+    'test -f /dvm-data/drone/dist.next/daemon.js || { echo "staged daemon runtime is missing /dvm-data/drone/dist.next/daemon.js" 1>&2; exit 1; }',
+  ]);
+  if (verifyStagedDaemonRuntime.code !== 0) {
+    throw new Error(verifyStagedDaemonRuntime.stderr || verifyStagedDaemonRuntime.stdout || 'staged daemon runtime verification failed');
+  }
+  const activateStagedDaemonRuntime = await dvmExec(opts.containerName, 'bash', [
+    '-lc',
+    [
+      'set -euo pipefail',
+      'cd /dvm-data/drone',
+      'rm -rf dist.prev',
+      'if [ -d dist ]; then mv dist dist.prev; fi',
+      'if ! mv dist.next dist; then',
+      '  if [ -d dist.prev ] && [ ! -d dist ]; then mv dist.prev dist; fi',
+      '  exit 1',
+      'fi',
+      'rm -rf dist.prev',
+    ].join('\n'),
+  ]);
+  if (activateStagedDaemonRuntime.code !== 0) {
+    throw new Error(activateStagedDaemonRuntime.stderr || activateStagedDaemonRuntime.stdout || 'failed activating staged daemon runtime in container');
+  }
   const installFleetCli = await dvmExec(opts.containerName, 'bash', ['-lc', installFleetCliScript()]);
   if (installFleetCli.code !== 0) {
     throw new Error(installFleetCli.stderr || installFleetCli.stdout || 'failed installing fleet CLI in container');
@@ -9466,7 +10750,16 @@ async function copyChatAttachmentsToHost(opts: {
   }
 }
 
-function parseTurnSelection(selRaw: string, turnsLen: number): number[] {
+function parseTurnSelection(selRaw: string, turnsLen: number, tailRaw?: string | null): number[] {
+  const tailText = String(tailRaw ?? '').trim();
+  if (tailText) {
+    const tail = Number(tailText);
+    if (!Number.isFinite(tail) || tail < 1 || Math.floor(tail) !== tail) {
+      throw new Error('invalid tail (expected positive integer)');
+    }
+    const start = Math.max(0, turnsLen - tail);
+    return Array.from({ length: turnsLen - start }, (_, i) => start + i);
+  }
   const sel = String(selRaw || 'last').trim().toLowerCase();
   if (sel === 'all') return Array.from({ length: turnsLen }, (_, i) => i);
   if (sel === 'last') return turnsLen > 0 ? [turnsLen - 1] : [];
@@ -10142,19 +11435,31 @@ async function logProviderApiKeyResolution(
 }
 
 async function logHubLlmStartupSnapshot() {
-  const [openai, gemini] = await Promise.all([
+  const [openai, gemini, codex] = await Promise.all([
     collectProviderApiKeyDiagnostics('openai'),
     collectProviderApiKeyDiagnostics('gemini'),
+    collectProviderApiKeyDiagnostics('codex'),
   ]);
   hubLog('info', 'hub llm configuration snapshot', {
     ...llmProviderEnvLogMeta(),
     cwd: process.cwd(),
     openai,
     gemini,
+    codex,
   });
 }
 
-export async function startDroneHubApiServer(opts: { port: number; host?: string; apiToken: string; allowedOrigins?: string[] }) {
+export async function startDroneHubApiServer(opts: {
+  port: number;
+  host?: string;
+  apiToken: string;
+  voiceStreamUrl?: string | null;
+  allowedOrigins?: string[];
+  onGroqApiKeySettingsChanged?: () => void | Promise<void>;
+  onVoiceStreamPairingPasswordSettingsChanged?: () => void | Promise<void>;
+  onVoiceApprovalSettingsChanged?: () => void | Promise<void>;
+  onVoiceTranscriptionSettingsChanged?: () => void | Promise<void>;
+}) {
   for (const timer of RECONCILE_RETRY_TIMERS.values()) {
     try {
       clearTimeout(timer);
@@ -10170,6 +11475,40 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
   const host = opts.host ?? '127.0.0.1';
   const apiToken = String(opts.apiToken ?? '').trim();
   if (!apiToken) throw new Error('missing hub API token');
+  const voiceStreamUrl = String(opts.voiceStreamUrl ?? '').trim().replace(/\/+$/, '');
+
+  const notifyGroqApiKeySettingsChanged = () => {
+    if (!opts.onGroqApiKeySettingsChanged) return;
+    void Promise.resolve(opts.onGroqApiKeySettingsChanged()).catch((error: any) => {
+      hubLog('warn', 'Groq settings change hook failed', {
+        error: String(error?.message ?? error ?? ''),
+      });
+    });
+  };
+  const notifyVoiceStreamPairingPasswordSettingsChanged = () => {
+    if (!opts.onVoiceStreamPairingPasswordSettingsChanged) return;
+    void Promise.resolve(opts.onVoiceStreamPairingPasswordSettingsChanged()).catch((error: any) => {
+      hubLog('warn', 'Voice Stream pairing password settings change hook failed', {
+        error: String(error?.message ?? error ?? ''),
+      });
+    });
+  };
+  const notifyVoiceApprovalSettingsChanged = () => {
+    if (!opts.onVoiceApprovalSettingsChanged) return;
+    void Promise.resolve(opts.onVoiceApprovalSettingsChanged()).catch((error: any) => {
+      hubLog('warn', 'Voice approval settings change hook failed', {
+        error: String(error?.message ?? error ?? ''),
+      });
+    });
+  };
+  const notifyVoiceTranscriptionSettingsChanged = () => {
+    if (!opts.onVoiceTranscriptionSettingsChanged) return;
+    void Promise.resolve(opts.onVoiceTranscriptionSettingsChanged()).catch((error: any) => {
+      hubLog('warn', 'Voice transcription settings change hook failed', {
+        error: String(error?.message ?? error ?? ''),
+      });
+    });
+  };
 
   const allowedOrigins = new Set<string>();
   for (const o of opts.allowedOrigins ?? []) {
@@ -10550,6 +11889,1124 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
     void sendReadyAndStart();
   });
 
+  const callLocalHubApi = async (pathname: string, body: any): Promise<any> => {
+    const response = await fetch(`http://127.0.0.1:${opts.port}${pathname}`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${apiToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body ?? {}),
+    });
+    const text = await response.text();
+    let data: any = null;
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = { error: text };
+      }
+    }
+    if (!response.ok) throw new Error(data?.error ?? `${response.status} ${response.statusText}`);
+    return data;
+  };
+
+  const callVoiceStreamApi = async (pathname: string, body: any): Promise<any> => {
+    if (!voiceStreamUrl) throw new Error('Voice Stream server is not running.');
+    const response = await fetch(`${voiceStreamUrl}${pathname}`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${apiToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body ?? {}),
+    });
+    const text = await response.text();
+    let data: any = null;
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = { error: text };
+      }
+    }
+    if (!response.ok) {
+      const error = new Error(data?.error ?? `${response.status} ${response.statusText}`) as Error & { status?: number; data?: any };
+      error.status = response.status;
+      error.data = data;
+      throw error;
+    }
+    return data;
+  };
+
+  const voiceStreamMonitorWebSocketUrl = (): string => {
+    if (!voiceStreamUrl) throw new Error('Voice Stream server is not running.');
+    const u = new URL(voiceStreamUrl);
+    u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
+    u.pathname = '/monitor';
+    u.search = '';
+    u.hash = '';
+    return u.toString();
+  };
+
+  const voiceStreamPairingUrl = (): string => {
+    if (!voiceStreamUrl) throw new Error('Voice Stream server is not running.');
+    const u = new URL(voiceStreamUrl);
+    u.pathname = '/pair';
+    u.search = '';
+    u.hash = '';
+    return u.toString();
+  };
+
+  let desktopVoiceService!: DesktopVoiceService;
+  const speakToDesktopVoice = async (text: string): Promise<{ ok: true; target: 'desktop' }> => {
+    if (!await desktopVoiceService.speak(text)) throw new Error('Desktop voice frontend is not connected.');
+    return { ok: true, target: 'desktop' };
+  };
+  const isAndroidSpeakUnavailable = (error: unknown): boolean => {
+    const anyError = error as any;
+    const message = String(anyError?.message ?? error ?? '');
+    const causeMessage = String(anyError?.cause?.message ?? '');
+    const causeCode = String(anyError?.cause?.code ?? '');
+    return message.includes('Voice Stream server is not running') ||
+      message.includes('fetch failed') ||
+      /ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ENETUNREACH|ETIMEDOUT/.test(causeCode) ||
+      /ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ENETUNREACH|ETIMEDOUT/.test(causeMessage) ||
+      (Number(anyError?.status) === 409 && /no android control client/i.test(message));
+  };
+  const speakToVoiceTarget = async ({ threadId, text, source }: { threadId: string; text: string; source?: AssistantVoiceSource | null }) => {
+    if (source === 'desktop') {
+      try {
+        return await speakToDesktopVoice(text);
+      } catch (desktopError) {
+        try {
+          const result = await callVoiceStreamApi('/speak', { threadId, text });
+          return { ok: true, target: 'android', fallbackFrom: 'desktop', result };
+        } catch {
+          throw desktopError;
+        }
+      }
+    }
+    try {
+      const result = await callVoiceStreamApi('/speak', { threadId, text });
+      return { ok: true, target: 'android', result };
+    } catch (error) {
+      if ((source === 'android' || source == null) && isAndroidSpeakUnavailable(error)) return await speakToDesktopVoice(text);
+      throw error;
+    }
+  };
+
+  const assistantService = new HubAssistantService({
+    listDrones: async (): Promise<AssistantDroneSummary[]> => {
+      const regAny: any = await loadRegistry();
+      const out: AssistantDroneSummary[] = [];
+      const drones = regAny?.drones && typeof regAny.drones === 'object' ? regAny.drones : {};
+      for (const [idRaw, d] of Object.entries(drones) as any[]) {
+        const id = normalizeDroneIdentity((d as any)?.id) || normalizeDroneIdentity(idRaw);
+        if (!id) continue;
+        const chatObj = (d as any)?.chats && typeof (d as any).chats === 'object' ? (d as any).chats : {};
+        const chats = Object.keys(chatObj);
+        if (chats.length === 0) chats.push('default');
+        out.push({
+          id,
+          name: String((d as any)?.name ?? id).trim() || id,
+          group: String((d as any)?.group ?? '').trim() || null,
+          runtime: normalizeDroneRuntime((d as any)?.runtime),
+          repoPath: String((d as any)?.repoPath ?? '').trim(),
+          status: String((d as any)?.hub?.phase ?? 'ready').trim() || 'ready',
+          chats,
+        });
+      }
+      const pending = regAny?.pending && typeof regAny.pending === 'object' ? regAny.pending : {};
+      for (const [idRaw, d] of Object.entries(pending) as any[]) {
+        const id = normalizeDroneIdentity((d as any)?.id) || normalizeDroneIdentity(idRaw);
+        if (!id || out.some((item) => item.id === id)) continue;
+        out.push({
+          id,
+          name: String((d as any)?.name ?? id).trim() || id,
+          group: String((d as any)?.group ?? '').trim() || null,
+          runtime: normalizeDroneRuntime((d as any)?.runtime),
+          repoPath: String((d as any)?.repoPath ?? '').trim(),
+          status: String((d as any)?.phase ?? 'starting').trim() || 'starting',
+          chats: ['default'],
+        });
+      }
+      return out.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+    },
+    createDrone: async (request): Promise<AssistantCreateDroneResult> => {
+      const data = await callLocalHubApi('/api/drones', request);
+      return {
+        id: String(data?.id ?? '').trim(),
+        name: String(data?.name ?? '').trim(),
+        runtime: String(data?.runtime ?? request?.runtime ?? 'container').trim() || 'container',
+        phase: String(data?.phase ?? 'starting').trim() || 'starting',
+        request,
+      };
+    },
+    createChat: async ({ droneId, chatName }): Promise<AssistantCreateChatResult> => {
+      const data = await callLocalHubApi(`/api/drones/${encodeURIComponent(droneId)}/chats`, { name: chatName });
+      return {
+        droneId: String(data?.id ?? droneId).trim() || droneId,
+        droneName: String(data?.name ?? droneId).trim() || droneId,
+        chatName: String(data?.chat ?? chatName).trim() || chatName,
+        chats: Array.isArray(data?.chats) ? data.chats.map((chat: any) => String(chat ?? '').trim()).filter(Boolean) : [],
+      };
+    },
+    setDroneGroup: async ({ droneIds, group }): Promise<AssistantSetDroneGroupResult> => {
+      const data = await callLocalHubApi('/api/drones/group-set', { droneIds, group });
+      return {
+        group: typeof data?.group === 'string' && data.group.trim() ? data.group.trim() : null,
+        moved: Array.isArray(data?.moved) ? data.moved : [],
+        rejected: Array.isArray(data?.rejected) ? data.rejected : [],
+        total: Number.isFinite(Number(data?.total)) ? Number(data.total) : 0,
+      };
+    },
+    messageDrone: async ({ droneId, chatName, prompt }) => {
+      const resolved = await resolveDroneOrPendingForReadRef(droneId);
+      if (!resolved) throw new Error(`unknown drone: ${droneId}`);
+      const id = resolved.id;
+      const chat = normalizeChatName(chatName || 'default');
+      const message = String(prompt ?? '').trim();
+      if (!message) throw new Error('missing prompt');
+      if (resolved.kind === 'pending') {
+        const pendingPromptId = crypto.randomBytes(9).toString('hex');
+        const queuedStatus = await pushPendingStartupPrompt({
+          droneId: id,
+          chatName: chat,
+          pending: {
+            id: pendingPromptId,
+            at: nowIso(),
+            prompt: message,
+            state: 'queued',
+            updatedAt: nowIso(),
+          },
+        });
+        if (queuedStatus !== 'queued') {
+          const r = await createOrEnqueuePromptUnified({ id: pendingPromptId, droneId: id, chatName: chat, prompt: message, cwd: null });
+          if (r.kind === 'error') throw new Error(r.error);
+          return { promptId: r.id, pendingState: r.pendingState, blockedByAutomation: r.blockedByAutomation };
+        }
+        return { promptId: pendingPromptId, pendingState: 'queued', blockedByAutomation: false };
+      }
+      const r = await createOrEnqueuePromptUnified({ droneId: id, chatName: chat, prompt: message, cwd: null });
+      if (r.kind === 'error') throw new Error(r.error);
+      return { promptId: r.id, pendingState: r.pendingState, blockedByAutomation: r.blockedByAutomation };
+    },
+    speak: speakToVoiceTarget,
+    listDroneFiles: async ({ droneId, path }) => await assistantListDroneFiles({ droneId, path }),
+    readDroneFile: async ({ droneId, path, startLine, endLine }) => await assistantReadDroneFile({ droneId, path, startLine, endLine }),
+    writeDroneFile: async ({ droneId, path, content }) => await assistantWriteDroneFile({ droneId, path, content }),
+    deleteDroneFile: async ({ droneId, path }) => await assistantDeleteDroneFile({ droneId, path }),
+    moveDroneFile: async ({ droneId, fromPath, toPath }) => await assistantMoveDroneFile({ droneId, fromPath, toPath }),
+    searchDroneFiles: async ({ droneId, path, query, limit, contextBefore, contextAfter }) =>
+      await assistantSearchDroneFiles({ droneId, path, query, limit, contextBefore, contextAfter }),
+    findDroneFiles: async ({ droneId, path, pattern, limit }) => await assistantFindDroneFiles({ droneId, path, pattern, limit }),
+    statDronePath: async ({ droneId, path }) => await assistantStatDronePath({ droneId, path }),
+    runDroneBash: async ({ droneId, command, cwd, timeoutMs }) => await assistantRunDroneBash({ droneId, command, cwd, timeoutMs }),
+    listDroneChangedFiles: async ({ droneId }) => await assistantListDroneChangedFiles({ droneId }),
+  });
+  let desktopVoicePatchSessionId: string | null = null;
+  desktopVoiceService = new DesktopVoiceService({
+    transcribeWav: async (wav) => {
+      const groqSettings = await resolveGroqApiKeySettings();
+      if (!groqSettings.apiKey) throw new Error('GROQ API key is not configured. Add it in Drone Hub settings.');
+      return await transcribeAudioWithGroq({ audio: wav, apiKey: groqSettings.apiKey, mimeType: 'audio/wav' });
+    },
+    submitAssistantPrompt: async (prompt) => {
+      await assistantService.submitVoicePrompt({ prompt, title: 'Desktop voice thread', source: 'desktop' });
+    },
+    startChatPatch: async () => {
+      desktopVoicePatchSessionId = beginVoicePatchSession('desktop').sessionId;
+    },
+    submitChatPatch: async (prompt) => {
+      const sessionId = desktopVoicePatchSessionId;
+      desktopVoicePatchSessionId = null;
+      await submitVoicePatchPrompt(prompt, 'desktop', sessionId);
+    },
+    abortChatPatch: async () => {
+      const sessionId = desktopVoicePatchSessionId;
+      desktopVoicePatchSessionId = null;
+      endVoicePatchSession('desktop', 'aborted', sessionId);
+    },
+    synthesizeSpeechWav: async (text) => {
+      const groqSettings = await resolveGroqApiKeySettings();
+      const apiKey = String(process.env.GROQ_TTS_API_KEY ?? '').trim() || groqSettings.apiKey;
+      if (!apiKey) throw new Error('GROQ API key is not configured. Add it in Drone Hub settings.');
+      return await synthesizeTextWavWithGroq(text.slice(0, 4_000), buildGroqTtsConfig({ apiKey }));
+    },
+  });
+  const reloadDesktopVoiceApprovalSettings = async () => {
+    desktopVoiceService.setApprovalSettings(await resolveEffectiveVoiceApprovalSettings());
+  };
+  const reloadDesktopVoiceTranscriptionSettings = async () => {
+    desktopVoiceService.setVoiceTranscriptionSettings(await resolveEffectiveVoiceTranscriptionSettings());
+  };
+  void reloadDesktopVoiceApprovalSettings().catch((error: any) => {
+    hubLog('warn', 'Failed to apply desktop voice approval settings', { error: String(error?.message ?? error ?? '') });
+  });
+  void reloadDesktopVoiceTranscriptionSettings().catch((error: any) => {
+    hubLog('warn', 'Failed to apply desktop voice transcription settings', { error: String(error?.message ?? error ?? '') });
+  });
+
+  type VoicePatchState = {
+    active: boolean;
+    sessionId: string | null;
+    source: string | null;
+    droneId: string | null;
+    droneName: string | null;
+    chatName: string | null;
+    startedAt: string | null;
+    updatedAt: string;
+    message: string;
+  };
+
+  let activeAssistantContext: {
+    activeDroneId: string | null;
+    activeDroneName: string | null;
+    activeChatName: string | null;
+    appView: string | null;
+  } = {
+    activeDroneId: null,
+    activeDroneName: null,
+    activeChatName: null,
+    appView: null,
+  };
+  let voicePatchState: VoicePatchState = {
+    active: false,
+    sessionId: null,
+    source: null,
+    droneId: null,
+    droneName: null,
+    chatName: null,
+    startedAt: null,
+    updatedAt: nowIso(),
+    message: 'Voice patch is idle.',
+  };
+  const voicePatchSessions = new Map<string, VoicePatchState>();
+  const voicePatchSubscribers = new Set<http.ServerResponse>();
+
+  function emitVoicePatchState(): void {
+    for (const subscriber of Array.from(voicePatchSubscribers)) {
+      if (subscriber.destroyed || subscriber.writableEnded) {
+        voicePatchSubscribers.delete(subscriber);
+        continue;
+      }
+      subscriber.write(`event: voice_patch_status\n`);
+      subscriber.write(`data: ${JSON.stringify(voicePatchState)}\n\n`);
+    }
+  }
+
+  function setVoicePatchState(next: VoicePatchState): VoicePatchState {
+    voicePatchState = next;
+    emitVoicePatchState();
+    return voicePatchState;
+  }
+
+  function latestVoicePatchSession(): VoicePatchState | null {
+    let latest: VoicePatchState | null = null;
+    for (const session of voicePatchSessions.values()) {
+      latest = session;
+    }
+    return latest;
+  }
+
+  function beginVoicePatchSession(sourceRaw: unknown, sessionIdRaw?: unknown): VoicePatchState {
+    const droneId = String(activeAssistantContext.activeDroneId ?? '').trim();
+    const droneName = String(activeAssistantContext.activeDroneName ?? '').trim();
+    const chatName = String(activeAssistantContext.activeChatName ?? '').trim() || 'default';
+    if (!droneId) throw new Error('No active drone chat is open.');
+    const source = String(sourceRaw ?? '').trim() || 'unknown';
+    const sessionId = String(sessionIdRaw ?? '').trim() || crypto.randomUUID();
+    const at = nowIso();
+    const next = {
+      active: true,
+      sessionId,
+      source,
+      droneId,
+      droneName: droneName || droneId,
+      chatName,
+      startedAt: at,
+      updatedAt: at,
+      message: `Patching into ${droneName || droneId} / ${chatName}.`,
+    };
+    voicePatchSessions.set(sessionId, next);
+    return setVoicePatchState(next);
+  }
+
+  function endVoicePatchSession(sourceRaw: unknown, reason = 'idle', sessionIdRaw?: unknown): VoicePatchState {
+    const sessionId = String(sessionIdRaw ?? '').trim();
+    const target = sessionId ? voicePatchSessions.get(sessionId) : voicePatchState;
+    if (sessionId) {
+      voicePatchSessions.delete(sessionId);
+    } else if (voicePatchState.sessionId) {
+      voicePatchSessions.delete(voicePatchState.sessionId);
+    }
+    if (sessionId && voicePatchState.sessionId !== sessionId) {
+      return voicePatchState;
+    }
+    const remainingActive = latestVoicePatchSession();
+    if (remainingActive) return setVoicePatchState(remainingActive);
+    const source = String(sourceRaw ?? '').trim() || target?.source || voicePatchState.source || 'unknown';
+    const at = nowIso();
+    return setVoicePatchState({
+      active: false,
+      sessionId: target?.sessionId ?? voicePatchState.sessionId,
+      source,
+      droneId: target?.droneId ?? voicePatchState.droneId,
+      droneName: target?.droneName ?? voicePatchState.droneName,
+      chatName: target?.chatName ?? voicePatchState.chatName,
+      startedAt: target?.startedAt ?? voicePatchState.startedAt,
+      updatedAt: at,
+      message:
+        reason === 'sent'
+          ? 'Voice patch sent.'
+          : reason === 'aborted'
+            ? 'Voice patch cancelled.'
+            : reason === 'closed'
+              ? 'Voice patch stream closed.'
+              : 'Voice patch is idle.',
+    });
+  }
+
+  async function submitVoicePatchPrompt(promptRaw: unknown, sourceRaw: unknown, sessionIdRaw?: unknown): Promise<{ ok: true; droneId: string; chatName: string; promptId: string; pendingState?: string | null; blockedByAutomation?: boolean }> {
+    const prompt = String(promptRaw ?? '').trim();
+    if (!prompt) throw new Error('Patch transcript is empty.');
+    const sessionId = String(sessionIdRaw ?? '').trim();
+    const target = sessionId
+      ? voicePatchSessions.get(sessionId)
+      : voicePatchState.active
+        ? voicePatchState
+        : null;
+    if (!target) throw new Error('Voice patch session is no longer active.');
+    const droneId = String(target.droneId ?? '').trim();
+    const chatName = String(target.chatName ?? '').trim() || 'default';
+    if (!droneId) throw new Error('No active drone chat is open.');
+    const result = await createOrEnqueuePromptUnified({ droneId, chatName, prompt, cwd: null });
+    if (result.kind === 'error') throw new Error(result.error);
+    endVoicePatchSession(sourceRaw, 'sent', target.sessionId);
+    return {
+      ok: true,
+      droneId,
+      chatName,
+      promptId: result.id,
+      pendingState: result.pendingState,
+      blockedByAutomation: result.blockedByAutomation,
+    };
+  }
+
+  function writeAssistantSseEvent(res: http.ServerResponse, event: string, data: any): void {
+    if (res.destroyed || res.writableEnded) return;
+    res.write(`event: ${event}\n`);
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  }
+
+  function writeHubSseEvent(res: http.ServerResponse, event: string, data: any): void {
+    if (res.destroyed || res.writableEnded) return;
+    res.write(`event: ${event}\n`);
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  }
+
+  type DroneRegistrySnapshot = { ok: true; drones: any[] };
+  type CachedDroneStatusSummary = {
+    hostPort: number | null;
+    statusOk: boolean;
+    status: any;
+    statusError: string | null;
+  };
+
+  const DRONE_STATUS_CACHE_OK_TTL_MS = 5_000;
+  const DRONE_STATUS_CACHE_ERROR_TTL_MS = 2_000;
+  const DRONE_STATUS_SUMMARY_CONCURRENCY = 16;
+  const droneStatusSummaryCache = new Map<string, { expiresAt: number; value: CachedDroneStatusSummary }>();
+
+  async function mapDroneRegistrySummaryConcurrent<T, R>(
+    items: T[],
+    limitRaw: number,
+    fn: (item: T, index: number) => Promise<R>,
+  ): Promise<R[]> {
+    const limit = Math.max(1, Math.floor(limitRaw || 1));
+    const results = new Array<R>(items.length);
+    let nextIndex = 0;
+    const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (nextIndex < items.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        results[index] = await fn(items[index], index);
+      }
+    });
+    await Promise.all(workers);
+    return results;
+  }
+
+  function pruneDroneStatusSummaryCache(nowMs: number): void {
+    if (droneStatusSummaryCache.size <= 500) return;
+    for (const [key, entry] of droneStatusSummaryCache.entries()) {
+      if (entry.expiresAt <= nowMs) droneStatusSummaryCache.delete(key);
+    }
+  }
+
+  function buildDroneStatusSummaryCacheKey(d: any): string {
+    const runtime = normalizeDroneRuntime(d?.runtime);
+    const droneId = normalizeDroneIdentity(d?.id) || '';
+    const containerName = String(d?.containerName ?? d?.name ?? '').trim();
+    const hostPort = typeof d?.hostPort === 'number' && Number.isFinite(d.hostPort) ? String(d.hostPort) : '';
+    const containerPort = String(Number(d?.containerPort ?? 7777) || 7777);
+    const token = typeof d?.token === 'string' ? d.token : '';
+    return [droneId, runtime, containerName, hostPort, containerPort, token].join('\0');
+  }
+
+  async function resolveDroneStatusSummaryUncached(d: any): Promise<CachedDroneStatusSummary> {
+    const runtime = normalizeDroneRuntime(d?.runtime);
+    const containerName = String(d?.containerName ?? d?.name ?? '').trim();
+    const hostPort =
+      typeof d.hostPort === 'number' && Number.isFinite(d.hostPort)
+        ? d.hostPort
+        : runtime === 'host'
+          ? null
+          : await resolveHostPort(containerName || String(d.name ?? ''), d.containerPort);
+
+    let statusOk = false;
+    let status: any = null;
+    let statusError: string | null = null;
+    const droneId = normalizeDroneIdentity(d?.id);
+    const token = typeof d.token === 'string' ? d.token : '';
+    if (hostPort && token) {
+      try {
+        status = await droneStatus(makeClient(hostPort, token));
+        statusOk = true;
+      } catch (e: any) {
+        const firstErr = e?.message ?? String(e);
+        if (runtime !== 'host' && looksLikeUnauthorizedDaemonError(firstErr)) {
+          try {
+            const refreshedToken = droneId ? await refreshRegistryTokenFromContainer({ droneId }) : null;
+            if (refreshedToken && refreshedToken !== token) {
+              status = await droneStatus(makeClient(hostPort, refreshedToken));
+              statusOk = true;
+              statusError = null;
+              hubLog('warn', 'refreshed stale drone token after unauthorized status', {
+                droneName: d.name,
+                hadId: Boolean(droneId),
+              });
+            } else {
+              statusError = firstErr;
+            }
+          } catch (e2: any) {
+            statusError = e2?.message ?? String(e2);
+          }
+        } else if (runtime !== 'host') {
+          try {
+            await ensureContainerDroneDaemonSession({
+              containerName,
+              containerPort: Number(d?.containerPort ?? 7777),
+            });
+            status = await droneStatus(makeClient(hostPort, token));
+            statusOk = true;
+            statusError = null;
+          } catch (recoveryError: any) {
+            statusError = recoveryError?.message ?? firstErr;
+          }
+        } else {
+          statusError = firstErr;
+        }
+      }
+    } else if (!hostPort) {
+      statusError = runtime === 'host' ? 'no host port mapped' : 'no host port mapped (container likely stopped)';
+    } else {
+      statusError = 'missing token (still starting?)';
+    }
+
+    return { hostPort: hostPort ?? null, statusOk, status, statusError };
+  }
+
+  async function resolveCachedDroneStatusSummary(d: any): Promise<CachedDroneStatusSummary> {
+    const nowMs = Date.now();
+    pruneDroneStatusSummaryCache(nowMs);
+    const cacheKey = buildDroneStatusSummaryCacheKey(d);
+    const cached = droneStatusSummaryCache.get(cacheKey);
+    if (cached && cached.expiresAt > nowMs) return cached.value;
+    const value = await resolveDroneStatusSummaryUncached(d);
+    droneStatusSummaryCache.set(cacheKey, {
+      expiresAt: nowMs + (value.statusOk ? DRONE_STATUS_CACHE_OK_TTL_MS : DRONE_STATUS_CACHE_ERROR_TTL_MS),
+      value,
+    });
+    return value;
+  }
+
+  function enqueueDroneRegistryReconcilers(regAny: any): void {
+    enqueueProvisioningForAllPending(regAny);
+    try {
+      for (const [droneId, d] of Object.entries(regAny.drones ?? {})) {
+        const id = normalizeDroneIdentity(droneId);
+        if (!id) continue;
+        if (!d || typeof d !== 'object') continue;
+        if (!(d as any)?.chats || typeof (d as any).chats !== 'object') continue;
+        for (const [chatName, entry] of Object.entries((d as any).chats)) {
+          if (chatHasReconcilablePendingPrompts(entry)) {
+            ensureDaemonPromptEventSubscription(id);
+            enqueueReconcile(id, String(chatName));
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  async function reconcileSeedingPromptCompletion(regAny: any): Promise<void> {
+    const hubPatches: Array<{ id: string; hub: any | null }> = [];
+    for (const [droneId, d] of Object.entries(regAny.drones ?? {}) as any[]) {
+      const hub = d?.hub;
+      if (!hub || String(hub?.phase ?? '') !== 'seeding') continue;
+      const id = normalizeDroneIdentity(droneId);
+      if (!id) continue;
+      let changedForDrone = false;
+      let nextHub: any = hub;
+      let promptId = String(nextHub?.promptId ?? '').trim();
+
+      if (!promptId) {
+        const chats = d?.chats && typeof d.chats === 'object' ? Object.values(d.chats) : [];
+        for (const entry of chats as any[]) {
+          const pending = Array.isArray(entry?.pendingPrompts) ? entry.pendingPrompts : [];
+          const candidate = pending.find((p: any) => {
+            const pendingId = String(p?.id ?? '').trim();
+            const st = String(p?.state ?? '').trim();
+            return Boolean(pendingId) && st !== 'failed';
+          });
+          const candidateId = String(candidate?.id ?? '').trim();
+          if (!candidateId) continue;
+          promptId = candidateId;
+          nextHub = { ...nextHub, promptId };
+          changedForDrone = true;
+          break;
+        }
+      }
+
+      if (nextHub && promptId) {
+        const token = typeof d.token === 'string' ? d.token : '';
+        const containerName = String(d?.containerName ?? d?.name ?? '').trim();
+        const hostPort =
+          typeof d.hostPort === 'number' && Number.isFinite(d.hostPort)
+            ? d.hostPort
+            : await resolveHostPort(containerName || String(d.name ?? ''), d.containerPort);
+        if (hostPort && token) {
+          try {
+            const r: any = await dronePromptGet(makeClient(hostPort, token), promptId);
+            const job = r?.job ?? null;
+            const st = String(job?.state ?? '').trim();
+            if (st === 'done') {
+              nextHub = null;
+              changedForDrone = true;
+            } else if (st === 'failed') {
+              nextHub = { phase: 'error', message: String(job?.error ?? 'Seed failed'), updatedAt: nowIso() };
+              changedForDrone = true;
+            }
+          } catch {
+            // ignore; keep seeding
+          }
+        }
+      }
+
+      if (changedForDrone) {
+        if (nextHub == null) {
+          delete d.hub;
+        } else {
+          d.hub = nextHub;
+        }
+        hubPatches.push({ id, hub: nextHub ?? null });
+      }
+    }
+    if (hubPatches.length === 0) return;
+    try {
+      await updateRegistry((regLatest: any) => {
+        for (const p of hubPatches) {
+          const id = normalizeDroneIdentity(p?.id);
+          if (!id) continue;
+          const d = regLatest?.drones?.[id];
+          if (!d) continue;
+          if (p.hub == null) {
+            delete d.hub;
+          } else {
+            d.hub = p.hub;
+          }
+          regLatest.drones = regLatest.drones ?? {};
+          regLatest.drones[id] = d;
+        }
+      });
+    } catch {
+      // ignore
+    }
+  }
+
+  async function autoClearStaleRepoConflictHubErrors(regAny: any): Promise<void> {
+    const autoClearedConflictErrors = new Map<string, 'pull' | 'push'>();
+    for (const [droneIdRaw, d] of Object.entries(regAny.drones ?? {}) as any[]) {
+      const droneId = normalizeDroneIdentity(droneIdRaw);
+      if (!droneId) continue;
+      if (String(d?.hub?.phase ?? '').trim().toLowerCase() !== 'error') continue;
+      const lastPullMode = String(d?.repo?.lastPull?.mode ?? '').trim().toLowerCase();
+      const lastPushMode = String(d?.repo?.lastPush?.mode ?? '').trim().toLowerCase();
+      const conflictMode: 'pull' | 'push' | null =
+        lastPushMode === 'drone-conflicts-ready' ? 'push' : lastPullMode === 'host-conflicts-ready' ? 'pull' : null;
+      if (!conflictMode) continue;
+
+      try {
+        let resolved = false;
+        if (conflictMode === 'pull') {
+          const repoPathRaw = String(d?.repoPath ?? '').trim();
+          if (!repoPathRaw) continue;
+          const repoRoot = await gitTopLevel(repoPathRaw);
+          const changes = await gitRepoChangesSummary(repoRoot);
+          resolved = Number(changes?.counts?.conflicted ?? 0) === 0;
+        } else {
+          const name = String(d?.name ?? '').trim() || droneId;
+          const repoPathInContainer = droneRepoPathInContainer(d);
+          const unmerged = await withLockedDroneContainer(
+            { requestedDroneName: name, droneEntry: d },
+            async ({ containerName }) => {
+              return await droneUnmergedFiles({ containerName, repoPathInContainer });
+            },
+          );
+          resolved = unmerged.length === 0;
+        }
+
+        if (resolved) {
+          delete d.hub;
+          d.repo = d.repo ?? {};
+          if (conflictMode === 'pull') d.repo.lastPullError = null;
+          else d.repo.lastPushError = null;
+          autoClearedConflictErrors.set(droneId, conflictMode);
+        }
+      } catch {
+        // ignore; keep current hub error until we can verify repo state
+      }
+    }
+    if (autoClearedConflictErrors.size === 0) return;
+    try {
+      const cleared = Array.from(autoClearedConflictErrors.entries());
+      await updateRegistry((regLatest: any) => {
+        for (const [rawDroneId, conflictMode] of cleared) {
+          const droneId = normalizeDroneIdentity(rawDroneId);
+          if (!droneId) continue;
+          const d = regLatest?.drones?.[droneId];
+          if (!d) continue;
+          if (String(d?.hub?.phase ?? '').trim().toLowerCase() === 'error') delete d.hub;
+          d.repo = d.repo ?? {};
+          if (conflictMode === 'pull' && typeof d.repo.lastPullError === 'string') d.repo.lastPullError = null;
+          if (conflictMode === 'push' && typeof d.repo.lastPushError === 'string') d.repo.lastPushError = null;
+          regLatest.drones = regLatest.drones ?? {};
+          regLatest.drones[droneId] = d;
+        }
+      });
+    } catch {
+      // ignore
+    }
+  }
+
+  async function loadPreparedDroneRegistryForSummary(source: string): Promise<any> {
+    triggerArchiveCleanup(source);
+    const regAny: any = await loadRegistry();
+    enqueueDroneRegistryReconcilers(regAny);
+    await reconcileSeedingPromptCompletion(regAny);
+    await autoClearStaleRepoConflictHubErrors(regAny);
+    return regAny;
+  }
+
+  function buildPendingDroneSummary(regAny: any, p: any): any {
+    const runtime = normalizeDroneRuntime(p?.runtime);
+    const repoAttached = Boolean(String(p?.repoPath ?? '').trim());
+    const phase = String(p?.phase ?? 'starting') as PendingPhase;
+    const seed = p?.seed;
+    const activity = summarizeDroneActivity(p);
+    const hasSeed =
+      seed &&
+      typeof seed === 'object' &&
+      (Boolean((seed as any)?.agent) ||
+        Boolean(String((seed as any)?.prompt ?? '').trim()) ||
+        Boolean(String((seed as any)?.chatName ?? '').trim()) ||
+        Boolean(String((seed as any)?.cwd ?? '').trim()));
+    const message =
+      typeof p?.message === 'string' ? p.message : phase === 'error' ? 'Failed' : hasSeed ? 'Seeding…' : 'Starting…';
+    const err = typeof p?.error === 'string' ? p.error : null;
+    const hubPhase: any = phase === 'error' ? 'error' : phase === 'seeding' ? 'seeding' : 'starting';
+    return {
+      id: normalizeDroneIdentity(p?.id) || null,
+      name: String(p?.name ?? ''),
+      group: typeof p?.group === 'string' && p.group.trim() ? p.group.trim() : null,
+      kind: normalizeDroneEntryKind(p?.kind),
+      visibility: normalizeDroneEntryVisibility(p?.visibility),
+      playbook: playbookMetaFromEntry(p?.playbook),
+      createdAt: String(p?.createdAt ?? nowIso()),
+      lastActivityAt: activity.lastActivityAt,
+      lastMessageAt: activity.lastMessageAt,
+      lastActivityChat: activity.lastActivityChat,
+      fleetParentId: resolveStableDroneOrPendingIdFromRef(regAny, fleetActorConfig(p).createdBy),
+      fleetAssignedIds: normalizeFleetAssignedRefsForSummary(regAny, p?.id, fleetActorConfig(p).assigned),
+      runtime,
+      repoAttached,
+      repoPath: repoAttached ? String(p?.repoPath ?? '') : '',
+      repoBranch: String(p?.repo?.branch ?? '').trim() || null,
+      cwd: normalizeDroneCwdForRuntime(p, null),
+      ...(runtime === 'container' ? { persistVolume: p?.persistVolume !== false } : {}),
+      containerPort: typeof p?.containerPort === 'number' && Number.isFinite(p.containerPort) ? p.containerPort : 7777,
+      hostPort: null,
+      statusOk: false,
+      status: null,
+      statusError: phase === 'error' ? (err ?? message ?? 'failed') : null,
+      chats: [],
+      busyChats: [],
+      dockerSize: { totalBytes: 0, containerWritableBytes: 0, snapshotBytes: 0, snapshotCount: 0 },
+      hubPhase,
+      hubMessage: phase === 'error' ? (err ?? message ?? null) : message,
+      busy: false,
+    };
+  }
+
+  async function buildRealDroneSummary(regAny: any, d: any): Promise<any> {
+    const runtime = normalizeDroneRuntime(d?.runtime);
+    const activity = summarizeDroneActivity(d);
+    const hubPhase = typeof d?.hub?.phase === 'string' ? String(d.hub.phase) : null;
+    const hubMessage = typeof d?.hub?.message === 'string' ? String(d.hub.message) : null;
+    const repoPath = String(d?.repoPath ?? '').trim();
+    const repoBranch = String(d?.repo?.branch ?? '').trim() || null;
+    const repoAttached =
+      Boolean(repoPath) ||
+      Boolean(String(d?.repo?.dest ?? '').trim()) ||
+      Boolean(String(d?.repo?.seededAt ?? '').trim());
+    const droneId = normalizeDroneIdentity(d?.id);
+    const busyChats = droneId ? busyChatNamesForDrone(d, droneId) : [];
+    const { hostPort, statusOk, status, statusError } = await resolveCachedDroneStatusSummary(d);
+    const containerName = String(d?.containerName ?? d?.name ?? '').trim();
+    const snapshotTotals = dockerSnapshotTotalsForDroneEntry(d);
+    const containerWritableBytes =
+      runtime === 'container' && containerName ? await dockerContainerSizeBytes(containerName) : null;
+
+    return {
+      id: normalizeDroneIdentity(d?.id) || null,
+      name: d.name,
+      group: d.group ?? null,
+      kind: normalizeDroneEntryKind(d?.kind),
+      visibility: normalizeDroneEntryVisibility(d?.visibility),
+      playbook: playbookMetaFromEntry(d?.playbook),
+      createdAt: d.createdAt,
+      lastActivityAt: activity.lastActivityAt,
+      lastMessageAt: activity.lastMessageAt,
+      lastActivityChat: activity.lastActivityChat,
+      fleetParentId: resolveStableDroneOrPendingIdFromRef(regAny, fleetActorConfig(d).createdBy),
+      fleetAssignedIds: normalizeFleetAssignedRefsForSummary(regAny, d?.id, fleetActorConfig(d).assigned),
+      runtime,
+      repoAttached,
+      repoPath: repoAttached ? repoPath : '',
+      repoBranch,
+      cwd: normalizeDroneCwdForRuntime(d, null),
+      ...(runtime === 'container' ? { persistVolume: d?.persistVolume !== false } : {}),
+      containerPort: d.containerPort,
+      hostPort: hostPort ?? null,
+      statusOk,
+      status,
+      statusError,
+      chats: Object.keys(d.chats ?? {}),
+      busyChats,
+      dockerSize: {
+        totalBytes: (containerWritableBytes ?? 0) + snapshotTotals.sizeBytes,
+        containerWritableBytes,
+        snapshotBytes: snapshotTotals.sizeBytes,
+        snapshotCount: snapshotTotals.count,
+      },
+      hubPhase,
+      hubMessage,
+      busy: busyChats.length > 0,
+    };
+  }
+
+  async function buildDroneRegistrySnapshot(source: string): Promise<DroneRegistrySnapshot> {
+    const regAny = await loadPreparedDroneRegistryForSummary(source);
+    const pendingSummaries = Object.values(regAny?.pending ?? {}).map((p) => buildPendingDroneSummary(regAny, p));
+    const realDrones = Object.values(regAny.drones ?? {});
+    const realSummaries = await mapDroneRegistrySummaryConcurrent(
+      realDrones,
+      DRONE_STATUS_SUMMARY_CONCURRENCY,
+      async (d) => buildRealDroneSummary(regAny, d),
+    );
+
+    const byId = new Map<string, any>();
+    for (const p of pendingSummaries) {
+      const id = String(p?.id ?? '').trim();
+      if (id) byId.set(id, p);
+    }
+    for (const d of realSummaries) {
+      const id = String(d?.id ?? '').trim();
+      if (id) byId.set(id, d);
+    }
+    const drones = Array.from(byId.values()).filter((x) => x?.id && x?.name);
+    return { ok: true, drones };
+  }
+
+  const droneRegistrySseClients = new Set<http.ServerResponse>();
+  let droneRegistrySseLastById = new Map<string, string>();
+  let droneRegistrySseLastSnapshot: { ok: true; drones: any[] } | null = null;
+  let droneRegistrySseRefreshTimer: ReturnType<typeof setInterval> | null = null;
+  let droneRegistrySseRefreshTimeout: ReturnType<typeof setTimeout> | null = null;
+  let droneRegistrySseKeepAliveTimer: ReturnType<typeof setInterval> | null = null;
+  let droneRegistrySseBusy = false;
+  const droneChatSseClients = new Set<http.ServerResponse>();
+  let droneChatSseLastByKey = new Map<string, string>();
+  let droneChatSseRefreshTimeout: ReturnType<typeof setTimeout> | null = null;
+  let droneChatSseKeepAliveTimer: ReturnType<typeof setInterval> | null = null;
+  let droneChatSseBusy = false;
+
+  function broadcastDroneRegistryEvent(event: string, data: any): void {
+    for (const client of Array.from(droneRegistrySseClients)) {
+      if (client.destroyed || client.writableEnded) {
+        droneRegistrySseClients.delete(client);
+        continue;
+      }
+      writeHubSseEvent(client, event, data);
+    }
+  }
+
+  function stopDroneRegistryBroadcasterIfIdle(): void {
+    if (droneRegistrySseClients.size > 0) return;
+    if (droneRegistrySseRefreshTimer) {
+      clearInterval(droneRegistrySseRefreshTimer);
+      droneRegistrySseRefreshTimer = null;
+    }
+    if (droneRegistrySseRefreshTimeout) {
+      clearTimeout(droneRegistrySseRefreshTimeout);
+      droneRegistrySseRefreshTimeout = null;
+    }
+    if (droneRegistrySseKeepAliveTimer) {
+      clearInterval(droneRegistrySseKeepAliveTimer);
+      droneRegistrySseKeepAliveTimer = null;
+    }
+    droneRegistrySseBusy = false;
+  }
+
+  function droneChatEventKey(droneIdRaw: string, chatNameRaw: string): string {
+    return `${normalizeDroneIdentity(droneIdRaw)}\u0000${normalizeChatName(chatNameRaw)}`;
+  }
+
+  function parseDroneChatEventKey(key: string): { droneId: string; chatName: string } | null {
+    const [droneIdRaw, chatNameRaw] = String(key ?? '').split('\u0000');
+    const droneId = normalizeDroneIdentity(droneIdRaw);
+    const chatName = normalizeChatName(chatNameRaw);
+    if (!droneId || !chatName) return null;
+    return { droneId, chatName };
+  }
+
+  function chatEventFingerprint(chatEntry: any): string {
+    const turns = Array.isArray(chatEntry?.turns) ? chatEntry.turns : [];
+    const lastTurn = turns.length > 0 ? turns[turns.length - 1] : null;
+    const pendingPrompts = Array.isArray(chatEntry?.pendingPrompts) ? chatEntry.pendingPrompts : [];
+    return JSON.stringify({
+      turnCount: turns.length,
+      lastTurn: lastTurn
+        ? {
+            id: String(lastTurn?.id ?? ''),
+            at: String(lastTurn?.at ?? ''),
+            completedAt: String(lastTurn?.completedAt ?? ''),
+            ok: lastTurn?.ok === true,
+            outputLength: String(lastTurn?.output ?? '').length,
+            outputTail: String(lastTurn?.output ?? '').slice(-256),
+          }
+        : null,
+      pendingPrompts: pendingPrompts.map((item: any) => ({
+        id: String(item?.id ?? ''),
+        state: String(item?.state ?? ''),
+        error: String(item?.error ?? ''),
+        updatedAt: String(item?.updatedAt ?? ''),
+      })),
+    });
+  }
+
+  async function buildDroneChatEventSnapshot(): Promise<Map<string, string>> {
+    const regAny: any = await loadRegistry();
+    const next = new Map<string, string>();
+    for (const [droneIdRaw, drone] of Object.entries(regAny?.drones ?? {}) as Array<[string, any]>) {
+      const droneId = normalizeDroneIdentity(droneIdRaw || drone?.id);
+      if (!droneId) continue;
+      for (const [chatNameRaw, chatEntry] of Object.entries(drone?.chats ?? {}) as Array<[string, any]>) {
+        const chatName = normalizeChatName(chatNameRaw);
+        if (!chatName) continue;
+        next.set(droneChatEventKey(droneId, chatName), chatEventFingerprint(chatEntry));
+      }
+    }
+    return next;
+  }
+
+  function broadcastDroneChatEvent(event: string, data: any): void {
+    for (const client of Array.from(droneChatSseClients)) {
+      if (client.destroyed || client.writableEnded) {
+        droneChatSseClients.delete(client);
+        continue;
+      }
+      writeHubSseEvent(client, event, data);
+    }
+  }
+
+  function stopDroneChatBroadcasterIfIdle(): void {
+    if (droneChatSseClients.size > 0) return;
+    if (droneChatSseRefreshTimeout) {
+      clearTimeout(droneChatSseRefreshTimeout);
+      droneChatSseRefreshTimeout = null;
+    }
+    if (droneChatSseKeepAliveTimer) {
+      clearInterval(droneChatSseKeepAliveTimer);
+      droneChatSseKeepAliveTimer = null;
+    }
+    droneChatSseBusy = false;
+  }
+
+  async function refreshDroneChatEventSnapshot(opts?: { broadcastSnapshot?: boolean }): Promise<void> {
+    if (droneChatSseClients.size === 0 || droneChatSseBusy) return;
+    droneChatSseBusy = true;
+    try {
+      const nextByKey = await buildDroneChatEventSnapshot();
+      if (opts?.broadcastSnapshot || droneChatSseLastByKey.size === 0) {
+        droneChatSseLastByKey = nextByKey;
+        broadcastDroneChatEvent('snapshot', {
+          ok: true,
+          chats: Array.from(nextByKey.keys()).map(parseDroneChatEventKey).filter(Boolean),
+          at: nowIso(),
+        });
+        return;
+      }
+
+      const chats: Array<{ droneId: string; chatName: string }> = [];
+      const removed: Array<{ droneId: string; chatName: string }> = [];
+      for (const [key, fingerprint] of nextByKey.entries()) {
+        if (droneChatSseLastByKey.get(key) === fingerprint) continue;
+        const parsed = parseDroneChatEventKey(key);
+        if (parsed) chats.push(parsed);
+      }
+      for (const key of droneChatSseLastByKey.keys()) {
+        if (nextByKey.has(key)) continue;
+        const parsed = parseDroneChatEventKey(key);
+        if (parsed) removed.push(parsed);
+      }
+
+      droneChatSseLastByKey = nextByKey;
+      if (chats.length > 0 || removed.length > 0) {
+        broadcastDroneChatEvent('chat_delta', { ok: true, chats, removed, at: nowIso() });
+      }
+    } catch (e: any) {
+      broadcastDroneChatEvent('stream-error', { ok: false, error: e?.message ?? String(e) });
+    } finally {
+      droneChatSseBusy = false;
+    }
+  }
+
+  function scheduleDroneChatEventRefresh(delayMs = 100): void {
+    if (droneChatSseClients.size === 0) return;
+    if (droneChatSseRefreshTimeout) return;
+    droneChatSseRefreshTimeout = setTimeout(() => {
+      droneChatSseRefreshTimeout = null;
+      void refreshDroneChatEventSnapshot();
+    }, Math.max(0, delayMs));
+    (droneChatSseRefreshTimeout as any).unref?.();
+  }
+
+  function startDroneChatBroadcaster(): void {
+    if (!droneChatSseKeepAliveTimer) {
+      droneChatSseKeepAliveTimer = setInterval(() => {
+        for (const client of Array.from(droneChatSseClients)) {
+          if (client.destroyed || client.writableEnded) {
+            droneChatSseClients.delete(client);
+            continue;
+          }
+          client.write(': keepalive\n\n');
+        }
+        stopDroneChatBroadcasterIfIdle();
+      }, 25_000);
+      (droneChatSseKeepAliveTimer as any).unref?.();
+    }
+  }
+
+  async function refreshDroneRegistryBroadcasterSnapshot(opts?: { broadcastSnapshot?: boolean }): Promise<{ ok: true; drones: any[] } | null> {
+    if (droneRegistrySseBusy) return droneRegistrySseLastSnapshot;
+    droneRegistrySseBusy = true;
+    try {
+      const snapshot = await buildDroneRegistrySnapshot('api:drones-events');
+      const nextById = new Map(
+        snapshot.drones
+          .map((drone) => [String(drone?.id ?? '').trim(), JSON.stringify(drone)] as const)
+          .filter(([id]) => Boolean(id)),
+      );
+
+      if (opts?.broadcastSnapshot || !droneRegistrySseLastSnapshot) {
+        droneRegistrySseLastSnapshot = snapshot;
+        droneRegistrySseLastById = nextById;
+        broadcastDroneRegistryEvent('snapshot', snapshot);
+        return snapshot;
+      }
+
+      const upserts: any[] = [];
+      const removedIds: string[] = [];
+      for (const drone of snapshot.drones) {
+        const id = String(drone?.id ?? '').trim();
+        if (!id) continue;
+        const serialized = nextById.get(id);
+        if (serialized && droneRegistrySseLastById.get(id) !== serialized) upserts.push(drone);
+      }
+      for (const id of droneRegistrySseLastById.keys()) {
+        if (!nextById.has(id)) removedIds.push(id);
+      }
+
+      droneRegistrySseLastSnapshot = snapshot;
+      droneRegistrySseLastById = nextById;
+      if (upserts.length > 0 || removedIds.length > 0) {
+        broadcastDroneRegistryEvent('delta', {
+          ok: true,
+          upserts,
+          removedIds,
+          order: snapshot.drones.map((drone) => String(drone?.id ?? '').trim()).filter(Boolean),
+        });
+      }
+      return snapshot;
+    } catch (e: any) {
+      broadcastDroneRegistryEvent('stream-error', { ok: false, error: e?.message ?? String(e) });
+      return null;
+    } finally {
+      droneRegistrySseBusy = false;
+    }
+  }
+
+  function scheduleDroneRegistryBroadcasterRefresh(delayMs = 150): void {
+    if (droneRegistrySseClients.size === 0) return;
+    if (droneRegistrySseRefreshTimeout) return;
+    droneRegistrySseRefreshTimeout = setTimeout(() => {
+      droneRegistrySseRefreshTimeout = null;
+      void refreshDroneRegistryBroadcasterSnapshot();
+    }, Math.max(0, delayMs));
+    (droneRegistrySseRefreshTimeout as any).unref?.();
+  }
+
+  function startDroneRegistryBroadcaster(): void {
+    if (!droneRegistrySseRefreshTimer) {
+      droneRegistrySseRefreshTimer = setInterval(() => {
+        void refreshDroneRegistryBroadcasterSnapshot();
+      }, 15_000);
+      (droneRegistrySseRefreshTimer as any).unref?.();
+    }
+    if (!droneRegistrySseKeepAliveTimer) {
+      droneRegistrySseKeepAliveTimer = setInterval(() => {
+        for (const client of Array.from(droneRegistrySseClients)) {
+          if (client.destroyed || client.writableEnded) {
+            droneRegistrySseClients.delete(client);
+            continue;
+          }
+          client.write(': keepalive\n\n');
+        }
+        stopDroneRegistryBroadcasterIfIdle();
+      }, 25_000);
+      (droneRegistrySseKeepAliveTimer as any).unref?.();
+    }
+  }
+
+  notifyDroneRegistryWrite = () => {
+    scheduleDroneRegistryBroadcasterRefresh();
+    scheduleDroneChatEventRefresh();
+  };
+
   const server = http.createServer(async (req, res) => {
     try {
       const method = (req.method ?? 'GET').toUpperCase();
@@ -10614,6 +13071,712 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         return;
       }
 
+      if (pathname === '/api/chats/idle/status' && method === 'POST') {
+        let body: any = null;
+        try {
+          body = await readJsonBody(req);
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          return;
+        }
+        const mode = String(body?.mode ?? 'all').trim().toLowerCase() === 'any' ? 'any' : 'all';
+        const rawTargets = Array.isArray(body?.targets) ? body.targets : [];
+        if (rawTargets.length === 0) {
+          json(res, 400, { ok: false, error: 'targets are required' });
+          return;
+        }
+        const targets: Array<{ droneId: string; chatName: string }> = [];
+        const seenTargets = new Set<string>();
+        for (const rawTarget of rawTargets.slice(0, 20)) {
+          const droneRef = String(rawTarget?.droneId ?? rawTarget?.drone ?? rawTarget?.id ?? '').trim();
+          if (!droneRef) {
+            json(res, 400, { ok: false, error: 'target drone is required' });
+            return;
+          }
+          const chatName = String(rawTarget?.chatName ?? rawTarget?.chat ?? 'default').trim() || 'default';
+          const resolved = await resolveDroneOrPendingForReadRef(droneRef);
+          if (!resolved) {
+            json(res, 404, { ok: false, error: `unknown drone: ${droneRef}` });
+            return;
+          }
+          const key = `${resolved.id}\u0000${chatName}`;
+          if (seenTargets.has(key)) continue;
+          seenTargets.add(key);
+          targets.push({ droneId: resolved.id, chatName });
+        }
+        if (targets.length === 0) {
+          json(res, 400, { ok: false, error: 'targets are required' });
+          return;
+        }
+        try {
+          const regAny: any = await loadRegistry();
+          const statuses = targets.map((target) => summarizeAssistantChatIdle(regAny, target, { requireChat: true }));
+          const matched = mode === 'any' ? statuses.some((status) => status.idle) : statuses.every((status) => status.idle);
+          json(res, 200, { ok: true, mode, matched, targets: statuses });
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+        }
+        return;
+      }
+
+      if (pathname === '/api/audio/transcriptions' && method === 'POST') {
+        try {
+          const groqSettings = await resolveGroqApiKeySettings();
+          if (!groqSettings.apiKey) {
+            json(res, 400, { ok: false, error: 'GROQ API key is not configured. Add it in Drone Hub settings.' });
+            return;
+          }
+          const audio = await readRawBody(req, { maxBytes: GROQ_TRANSCRIPTION_MAX_BYTES });
+          const mimeType = String(req.headers['content-type'] ?? '').split(';')[0]?.trim() || 'audio/webm';
+          const transcription = await transcribeAudioWithGroq({ audio, apiKey: groqSettings.apiKey, mimeType });
+          json(res, 200, { ok: true, ...transcription });
+        } catch (e: any) {
+          const message = e?.message ?? String(e);
+          const status = /too large/i.test(message) ? 413 : /GROQ API key is not configured/i.test(message) ? 400 : 502;
+          json(res, status, { ok: false, error: message });
+        }
+        return;
+      }
+
+      if (pathname === '/api/assistant/desktop-voice/status' && method === 'GET') {
+        json(res, 200, desktopVoiceService.snapshot());
+        return;
+      }
+
+      if (pathname === '/api/assistant/desktop-voice/toggle' && method === 'POST') {
+        try {
+          json(res, 200, desktopVoiceService.toggle());
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+        }
+        return;
+      }
+
+      if (pathname === '/api/assistant/desktop-voice/clipboard-toggle' && method === 'POST') {
+        const apiReceivedUnixMs = Date.now();
+        const requestId = String(req.headers['x-drone-voice-clipboard-request-id'] ?? '').trim() || undefined;
+        const clientUnixMsRaw = Number.parseInt(String(req.headers['x-drone-voice-clipboard-client-unix-ms'] ?? ''), 10);
+        const clientUnixMs = Number.isFinite(clientUnixMsRaw) ? clientUnixMsRaw : undefined;
+        console.log('[desktop-voice] clipboard-toggle api received', {
+          requestId: requestId ?? null,
+          clientToApiMs: clientUnixMs ? apiReceivedUnixMs - clientUnixMs : null,
+        });
+        try {
+          const status = await desktopVoiceService.toggleClipboardRecording({ requestId, clientUnixMs, apiReceivedUnixMs });
+          console.log('[desktop-voice] clipboard-toggle api responding', {
+            requestId: requestId ?? null,
+            elapsedMs: Date.now() - apiReceivedUnixMs,
+            mode: status.clipboard.mode,
+            message: status.clipboard.message,
+          });
+          json(res, 200, status);
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+        }
+        return;
+      }
+
+      if (pathname === '/api/assistant/desktop-voice/clipboard-cancel' && method === 'POST') {
+        const apiReceivedUnixMs = Date.now();
+        const requestId = String(req.headers['x-drone-voice-clipboard-request-id'] ?? '').trim() || undefined;
+        const clientUnixMsRaw = Number.parseInt(String(req.headers['x-drone-voice-clipboard-client-unix-ms'] ?? ''), 10);
+        const clientUnixMs = Number.isFinite(clientUnixMsRaw) ? clientUnixMsRaw : undefined;
+        console.log('[desktop-voice] clipboard-cancel api received', {
+          requestId: requestId ?? null,
+          clientToApiMs: clientUnixMs ? apiReceivedUnixMs - clientUnixMs : null,
+        });
+        try {
+          const status = desktopVoiceService.cancelClipboardRecording();
+          console.log('[desktop-voice] clipboard-cancel api responding', {
+            requestId: requestId ?? null,
+            elapsedMs: Date.now() - apiReceivedUnixMs,
+            mode: status.clipboard.mode,
+          });
+          json(res, 200, status);
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+        }
+        return;
+      }
+
+      if (pathname === '/api/assistant/desktop-voice/stop' && method === 'POST') {
+        json(res, 200, desktopVoiceService.stop());
+        return;
+      }
+
+      if (pathname === '/api/assistant/desktop-voice/events' && method === 'GET') {
+        res.statusCode = 200;
+        res.setHeader('content-type', 'text/event-stream; charset=utf-8');
+        res.setHeader('cache-control', 'no-cache, no-transform');
+        res.setHeader('connection', 'keep-alive');
+        req.socket.setTimeout(0);
+        (res as any).flushHeaders?.();
+        writeAssistantSseEvent(res, 'connected', { ok: true, at: new Date().toISOString() });
+        const unsubscribe = desktopVoiceService.subscribe((event) => {
+          if (event.type === 'desktop_voice_local_cue') {
+            writeAssistantSseEvent(res, event.type, { cue: event.cue });
+          } else if (event.type === 'desktop_voice_clipboard_result') {
+            writeAssistantSseEvent(res, event.type, { text: event.text });
+          } else if (event.type === 'desktop_voice_transcript_segment') {
+            writeAssistantSseEvent(res, event.type, { text: event.text });
+          } else if (event.type === 'desktop_voice_speak') {
+            writeAssistantSseEvent(res, event.type, { text: event.text });
+          } else if (event.type === 'desktop_voice_speak_audio') {
+            writeAssistantSseEvent(res, event.type, {
+              text: event.text,
+              contentType: event.contentType,
+              audioBase64: event.audioBase64,
+            });
+          } else {
+            writeAssistantSseEvent(res, event.type, event.status);
+          }
+        });
+        const keepAlive = setInterval(() => {
+          if (res.destroyed || res.writableEnded) return;
+          res.write(': keepalive\n\n');
+        }, 25_000);
+        (keepAlive as any).unref?.();
+        let cleanedUp = false;
+        const cleanup = () => {
+          if (cleanedUp) return;
+          cleanedUp = true;
+          clearInterval(keepAlive);
+          unsubscribe();
+        };
+        req.on('close', cleanup);
+        res.on('close', cleanup);
+        return;
+      }
+
+      if (pathname === '/api/assistant/system-prompt') {
+        if (method === 'GET') {
+          json(res, 200, await assistantService.systemPromptSettings());
+          return;
+        }
+
+        if (method === 'POST') {
+          let body: any = null;
+          try {
+            body = await readJsonBody(req);
+          } catch (e: any) {
+            json(res, 400, { ok: false, error: e?.message ?? String(e) });
+            return;
+          }
+          try {
+            json(res, 200, await assistantService.updateSystemPrompt(body ?? {}));
+          } catch (e: any) {
+            json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          }
+          return;
+        }
+      }
+
+      if (pathname === '/api/assistant/overview-prompt') {
+        if (method === 'GET') {
+          json(res, 200, await assistantService.overviewPromptSettings());
+          return;
+        }
+
+        if (method === 'POST') {
+          let body: any = null;
+          try {
+            body = await readJsonBody(req);
+          } catch (e: any) {
+            json(res, 400, { ok: false, error: e?.message ?? String(e) });
+            return;
+          }
+          try {
+            json(res, 200, await assistantService.updateOverviewPrompt(body ?? {}));
+          } catch (e: any) {
+            json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          }
+          return;
+        }
+      }
+
+      if (pathname === '/api/assistant/threads' && method === 'GET') {
+        json(res, 200, await assistantService.snapshot());
+        return;
+      }
+
+      if (pathname === '/api/assistant/events' && method === 'GET') {
+        res.statusCode = 200;
+        res.setHeader('content-type', 'text/event-stream; charset=utf-8');
+        res.setHeader('cache-control', 'no-cache, no-transform');
+        res.setHeader('connection', 'keep-alive');
+        req.socket.setTimeout(0);
+        (res as any).flushHeaders?.();
+        writeAssistantSseEvent(res, 'connected', { ok: true, at: new Date().toISOString() });
+        const unsubscribe = assistantService.subscribeChanges((event) => {
+          writeAssistantSseEvent(res, 'assistant_change', event);
+        });
+        const keepAlive = setInterval(() => {
+          if (res.destroyed || res.writableEnded) return;
+          res.write(': keepalive\n\n');
+        }, 25_000);
+        (keepAlive as any).unref?.();
+        let cleanedUp = false;
+        const cleanup = () => {
+          if (cleanedUp) return;
+          cleanedUp = true;
+          clearInterval(keepAlive);
+          unsubscribe();
+        };
+        req.on('close', cleanup);
+        res.on('close', cleanup);
+        return;
+      }
+
+      if (pathname === '/api/assistant/voice/pairing-url' && method === 'GET') {
+        if (!voiceStreamUrl) {
+          json(res, 503, { ok: false, error: 'Voice Stream server is not running.' });
+          return;
+        }
+        json(res, 200, { ok: true, url: voiceStreamPairingUrl() });
+        return;
+      }
+
+      if (pathname === '/api/assistant/voice/transcript/events' && method === 'GET') {
+        if (!voiceStreamUrl) {
+          json(res, 503, { ok: false, error: 'Voice Stream server is not running.' });
+          return;
+        }
+        res.statusCode = 200;
+        res.setHeader('content-type', 'text/event-stream; charset=utf-8');
+        res.setHeader('cache-control', 'no-cache, no-transform');
+        res.setHeader('connection', 'keep-alive');
+        req.socket.setTimeout(0);
+        (res as any).flushHeaders?.();
+        writeAssistantSseEvent(res, 'connected', { ok: true, at: new Date().toISOString() });
+
+        let cleanedUp = false;
+        let monitor: WebSocket | null = null;
+        const keepAlive = setInterval(() => {
+          if (res.destroyed || res.writableEnded) return;
+          res.write(': keepalive\n\n');
+        }, 25_000);
+        (keepAlive as any).unref?.();
+        const cleanup = () => {
+          if (cleanedUp) return;
+          cleanedUp = true;
+          clearInterval(keepAlive);
+          try {
+            monitor?.close(1000, 'Hub SSE closed');
+          } catch {
+            // ignore
+          }
+        };
+
+        try {
+          monitor = new WebSocket(voiceStreamMonitorWebSocketUrl());
+        } catch (e: any) {
+          writeAssistantSseEvent(res, 'voice_transcript_status', {
+            type: 'transcript_status',
+            configured: false,
+            status: 'error',
+            message: e?.message ?? String(e),
+          });
+          cleanup();
+          res.end();
+          return;
+        }
+
+        monitor.on('open', () => {
+          writeAssistantSseEvent(res, 'voice_transcript_status', {
+            type: 'transcript_status',
+            configured: true,
+            status: 'connected',
+            message: 'Connected to Voice Stream transcript monitor.',
+          });
+        });
+        monitor.on('message', (data, isBinary) => {
+          if (isBinary) return;
+          let message: any = null;
+          try {
+            message = JSON.parse(data.toString('utf8'));
+          } catch {
+            return;
+          }
+          if (message?.type === 'transcript_segment') {
+            writeAssistantSseEvent(res, 'voice_transcript_segment', message);
+            return;
+          }
+          if (message?.type === 'transcript_status') {
+            writeAssistantSseEvent(res, 'voice_transcript_status', message);
+            return;
+          }
+          if (message?.type === 'android_status') {
+            writeAssistantSseEvent(res, 'voice_android_status', message);
+          }
+        });
+        monitor.on('error', (error) => {
+          writeAssistantSseEvent(res, 'voice_transcript_status', {
+            type: 'transcript_status',
+            configured: false,
+            status: 'error',
+            message: String((error as any)?.message ?? error ?? 'Voice Stream monitor failed.'),
+          });
+        });
+        monitor.on('close', () => {
+          if (!cleanedUp) {
+            writeAssistantSseEvent(res, 'voice_transcript_status', {
+              type: 'transcript_status',
+              configured: false,
+              status: 'disconnected',
+              message: 'Voice Stream transcript monitor disconnected.',
+            });
+            cleanup();
+            res.end();
+          }
+        });
+        req.on('close', cleanup);
+        res.on('close', cleanup);
+        return;
+      }
+
+      if (pathname === '/api/assistant/voice/connect' && method === 'POST') {
+        let body: any = null;
+        try {
+          body = await readJsonBody(req);
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          return;
+        }
+        try {
+          json(res, 200, await assistantService.ensureLatestVoiceThread({ title: body?.title }));
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+        }
+        return;
+      }
+
+      if (pathname === '/api/assistant/voice/message' && method === 'POST') {
+        let body: any = null;
+        try {
+          body = await readJsonBody(req);
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          return;
+        }
+        try {
+          json(res, 202, await assistantService.submitVoicePrompt({ prompt: body?.prompt ?? body?.message, title: body?.title, source: 'android', deliveryMode: body?.deliveryMode }));
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+        }
+        return;
+      }
+
+      if (pathname === '/api/assistant/voice/patch-status' && method === 'GET') {
+        json(res, 200, { ok: true, patch: voicePatchState });
+        return;
+      }
+
+      if (pathname === '/api/assistant/voice/patch-status/events' && method === 'GET') {
+        res.statusCode = 200;
+        res.setHeader('content-type', 'text/event-stream; charset=utf-8');
+        res.setHeader('cache-control', 'no-cache, no-transform');
+        res.setHeader('connection', 'keep-alive');
+        req.socket.setTimeout(0);
+        (res as any).flushHeaders?.();
+        voicePatchSubscribers.add(res);
+        res.write(`event: connected\n`);
+        res.write(`data: ${JSON.stringify({ ok: true, at: nowIso() })}\n\n`);
+        res.write(`event: voice_patch_status\n`);
+        res.write(`data: ${JSON.stringify(voicePatchState)}\n\n`);
+        const keepAlive = setInterval(() => {
+          if (res.destroyed || res.writableEnded) return;
+          res.write(': keepalive\n\n');
+        }, 25_000);
+        (keepAlive as any).unref?.();
+        const cleanup = () => {
+          clearInterval(keepAlive);
+          voicePatchSubscribers.delete(res);
+        };
+        req.on('close', cleanup);
+        res.on('close', cleanup);
+        return;
+      }
+
+      if (pathname === '/api/assistant/voice/patch-state' && method === 'POST') {
+        let body: any = null;
+        try {
+          body = await readJsonBody(req);
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          return;
+        }
+        try {
+          const active = Boolean(body?.active);
+          const reason = String(body?.reason ?? '').trim() || 'aborted';
+          const sessionId = String(body?.sessionId ?? '').trim();
+          const patch = active
+            ? beginVoicePatchSession(body?.source, body?.sessionId)
+            : sessionId || voicePatchState.active
+              ? endVoicePatchSession(body?.source, reason, body?.sessionId)
+              : voicePatchState;
+          json(res, 200, { ok: true, ...patch });
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+        }
+        return;
+      }
+
+      if (pathname === '/api/assistant/voice/patch-message' && method === 'POST') {
+        let body: any = null;
+        try {
+          body = await readJsonBody(req);
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          return;
+        }
+        try {
+          json(res, 202, await submitVoicePatchPrompt(body?.prompt ?? body?.message, body?.source, body?.sessionId));
+        } catch (e: any) {
+          endVoicePatchSession(body?.source, 'aborted', body?.sessionId);
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+        }
+        return;
+      }
+
+      if (pathname === '/api/assistant/threads' && method === 'POST') {
+        let body: any = null;
+        try {
+          body = await readJsonBody(req);
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          return;
+        }
+        json(res, 201, await assistantService.createThread(body ?? {}));
+        return;
+      }
+
+      if (pathname === '/api/assistant/context' && method === 'POST') {
+        let body: any = null;
+        try {
+          body = await readJsonBody(req);
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          return;
+        }
+        activeAssistantContext = {
+          activeDroneId: String(body?.activeDroneId ?? '').trim() || null,
+          activeDroneName: String(body?.activeDroneName ?? '').trim() || null,
+          activeChatName: String(body?.activeChatName ?? '').trim() || null,
+          appView: String(body?.appView ?? '').trim() || null,
+        };
+        assistantService.updateAppContext(body ?? {});
+        json(res, 200, { ok: true });
+        return;
+      }
+
+      if (pathname === '/api/assistant/scope' && method === 'POST') {
+        let body: any = null;
+        try {
+          body = await readJsonBody(req);
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          return;
+        }
+        try {
+          const accessScope = await assistantService.updateAccessScope(body ?? {});
+          json(res, 200, { ok: true, accessScope });
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          return;
+        }
+        return;
+      }
+
+      {
+        const assistantParts = pathname.split('/').filter(Boolean);
+        if (
+          assistantParts.length >= 4 &&
+          assistantParts[0] === 'api' &&
+          assistantParts[1] === 'assistant' &&
+          assistantParts[2] === 'threads'
+        ) {
+          const threadId = decodeURIComponent(assistantParts[3] ?? '');
+
+          if (assistantParts.length === 4 && method === 'GET') {
+            const snapshot = await assistantService.snapshot();
+            const thread = snapshot.threads.find((item) => item.id === threadId);
+            if (!thread) {
+              json(res, 404, { ok: false, error: `unknown assistant thread: ${threadId}` });
+              return;
+            }
+            json(res, 200, snapshot);
+            return;
+          }
+
+          if (assistantParts.length === 4 && method === 'PATCH') {
+            let body: any = null;
+            try {
+              body = await readJsonBody(req);
+            } catch (e: any) {
+              json(res, 400, { ok: false, error: e?.message ?? String(e) });
+              return;
+            }
+            try {
+              json(res, 200, await assistantService.updateThread(threadId, body ?? {}));
+            } catch (e: any) {
+              json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, { ok: false, error: e?.message ?? String(e) });
+            }
+            return;
+          }
+
+          if (assistantParts.length === 4 && method === 'DELETE') {
+            try {
+              json(res, 200, await assistantService.deleteThread(threadId));
+            } catch (e: any) {
+              json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, { ok: false, error: e?.message ?? String(e) });
+            }
+            return;
+          }
+
+          if (assistantParts.length === 5 && assistantParts[4] === 'stop' && method === 'POST') {
+            try {
+              json(res, 200, await assistantService.stopThread(threadId));
+            } catch (e: any) {
+              json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, { ok: false, error: e?.message ?? String(e) });
+            }
+            return;
+          }
+
+          if (assistantParts.length === 5 && assistantParts[4] === 'system-prompt') {
+            if (method === 'GET') {
+              try {
+                json(res, 200, await assistantService.threadSystemPromptSettings(threadId));
+              } catch (e: any) {
+                json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, { ok: false, error: e?.message ?? String(e) });
+              }
+              return;
+            }
+
+            if (method === 'POST') {
+              let body: any = null;
+              try {
+                body = await readJsonBody(req);
+              } catch (e: any) {
+                json(res, 400, { ok: false, error: e?.message ?? String(e) });
+                return;
+              }
+              try {
+                json(res, 200, await assistantService.updateThreadSystemPrompt(threadId, body ?? {}));
+              } catch (e: any) {
+                json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, { ok: false, error: e?.message ?? String(e) });
+              }
+              return;
+            }
+          }
+
+          if (assistantParts.length === 5 && assistantParts[4] === 'promote-system-prompt' && method === 'POST') {
+            let body: any = null;
+            try {
+              body = await readJsonBody(req);
+            } catch (e: any) {
+              json(res, 400, { ok: false, error: e?.message ?? String(e) });
+              return;
+            }
+            try {
+              json(res, 200, await assistantService.promoteThreadSystemPrompt(threadId, body ?? {}));
+            } catch (e: any) {
+              json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, { ok: false, error: e?.message ?? String(e) });
+            }
+            return;
+          }
+
+          if (assistantParts.length === 5 && assistantParts[4] === 'overview' && method === 'POST') {
+            let body: any = null;
+            try {
+              body = await readJsonBody(req);
+            } catch (e: any) {
+              json(res, 400, { ok: false, error: e?.message ?? String(e) });
+              return;
+            }
+            try {
+              json(res, 200, await assistantService.generateThreadOverview(threadId, body ?? {}));
+            } catch (e: any) {
+              json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, { ok: false, error: e?.message ?? String(e) });
+            }
+            return;
+          }
+
+          if (assistantParts.length === 5 && assistantParts[4] === 'artifacts' && method === 'GET') {
+            try {
+              json(res, 200, { ok: true, threadId, files: await assistantService.listArtifactFiles(threadId) });
+            } catch (e: any) {
+              const statusCode = Number(e?.statusCode ?? 0) || (/unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400);
+              json(res, statusCode, { ok: false, error: e?.message ?? String(e) });
+            }
+            return;
+          }
+
+          if (assistantParts.length === 6 && assistantParts[4] === 'artifacts' && assistantParts[5] === 'file' && method === 'GET') {
+            try {
+              const artifactPath = u.searchParams.get('path') ?? '';
+              json(res, 200, { ok: true, threadId, file: await assistantService.readArtifactFile(threadId, artifactPath) });
+            } catch (e: any) {
+              const statusCode = Number(e?.statusCode ?? 0) || (/unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400);
+              json(res, statusCode, { ok: false, error: e?.message ?? String(e) });
+            }
+            return;
+          }
+
+          if (assistantParts.length === 6 && assistantParts[4] === 'queued' && method === 'DELETE') {
+            const queuedPromptId = decodeURIComponent(assistantParts[5] ?? '');
+            try {
+              json(res, 200, await assistantService.cancelQueuedPrompt(threadId, queuedPromptId));
+            } catch (e: any) {
+              json(res, /unknown (assistant thread|queued assistant message)/i.test(String(e?.message ?? e)) ? 404 : 400, { ok: false, error: e?.message ?? String(e) });
+            }
+            return;
+          }
+
+          if (assistantParts.length === 5 && assistantParts[4] === 'prompt' && method === 'POST') {
+            let body: any = null;
+            try {
+              body = await readJsonBody(req);
+            } catch (e: any) {
+              json(res, 400, { ok: false, error: e?.message ?? String(e) });
+              return;
+            }
+
+            res.statusCode = 200;
+            res.setHeader('content-type', 'application/x-ndjson; charset=utf-8');
+            res.setHeader('cache-control', 'no-cache, no-transform');
+            res.setHeader('connection', 'keep-alive');
+            const writeEvent = (event: any) => {
+              if (res.destroyed) return;
+              res.write(`${JSON.stringify(event)}\n`);
+            };
+            try {
+              await assistantService.promptThread(threadId, body ?? {}, writeEvent);
+              writeEvent({ type: 'done' });
+            } catch (e: any) {
+              writeEvent({ type: 'error', error: e?.message ?? String(e) });
+            } finally {
+              res.end();
+            }
+            return;
+          }
+
+          if (
+            assistantParts.length === 7 &&
+            assistantParts[4] === 'approvals' &&
+            (assistantParts[6] === 'approve' || assistantParts[6] === 'deny') &&
+            method === 'POST'
+          ) {
+            const approvalId = decodeURIComponent(assistantParts[5] ?? '');
+            try {
+              json(res, 200, await assistantService.approve(approvalId, assistantParts[6] === 'approve'));
+            } catch (e: any) {
+              json(res, /unknown approval/i.test(String(e?.message ?? e)) ? 404 : 400, { ok: false, error: e?.message ?? String(e) });
+            }
+            return;
+          }
+        }
+      }
+
       if (pathname === '/api/setup/status' && method === 'GET') {
         json(res, 200, await resolveSetupStatusResponse());
         return;
@@ -10630,25 +13793,41 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         return;
       }
 
-      if (pathname === '/api/settings/openai' || pathname === '/api/settings/gemini') {
-        const provider: LlmProviderId = pathname.endsWith('/gemini') ? 'gemini' : 'openai';
+      if (pathname === '/api/settings/openai' || pathname === '/api/settings/gemini' || pathname === '/api/settings/codex' || pathname === '/api/settings/groq' || pathname === '/api/settings/exa') {
+        const provider = pathname.endsWith('/gemini')
+          ? 'gemini'
+          : pathname.endsWith('/codex')
+            ? 'codex'
+            : pathname.endsWith('/groq')
+              ? 'groq'
+              : pathname.endsWith('/exa')
+                ? 'exa'
+                : 'openai';
         if (method === 'GET') {
-          const resolved = await resolveEffectiveProviderApiKeySettings(provider);
+          const resolved = provider === 'groq'
+            ? await resolveGroqApiKeySettings()
+            : provider === 'exa'
+              ? await resolveExaApiKeySettings()
+              : await resolveEffectiveProviderApiKeySettings(provider as LlmProviderId);
           const revealApiKey = u.searchParams.get('reveal') === '1';
-          if (!resolved.apiKey) {
-            await logProviderApiKeyResolution('warn', 'settings provider lookup resolved without API key', provider, {
+          if (!resolved.apiKey && provider !== 'groq' && provider !== 'exa') {
+            await logProviderApiKeyResolution('warn', 'settings provider lookup resolved without API key', provider as LlmProviderId, {
               pathname,
               method,
             });
           }
           json(res, 200, {
             ok: true,
-            ...providerKeySettingsResponse(resolved, { includeApiKey: revealApiKey }),
+            ...providerKeySettingsResponse(resolved, { includeApiKey: provider !== 'codex' && revealApiKey }),
           });
           return;
         }
 
         if (method === 'POST') {
+          if (provider === 'codex') {
+            json(res, 400, { ok: false, error: 'Codex uses local Codex CLI authentication. Run `codex` on the Hub host to sign in.' });
+            return;
+          }
           let body: any = null;
           try {
             body = await readJsonBody(req);
@@ -10661,8 +13840,13 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             json(res, 400, { ok: false, error: 'API key is required.' });
             return;
           }
-          await upsertStoredProviderApiKey(provider, apiKey);
-          const resolved = await resolveEffectiveProviderApiKeySettings(provider);
+          await upsertStoredProviderApiKey(provider as StoredApiKeyProviderId, apiKey);
+          const resolved = provider === 'groq'
+            ? await resolveGroqApiKeySettings()
+            : provider === 'exa'
+              ? await resolveExaApiKeySettings()
+              : await resolveEffectiveProviderApiKeySettings(provider as LlmProviderId);
+          if (provider === 'groq') notifyGroqApiKeySettingsChanged();
           json(res, 200, {
             ok: true,
             ...providerKeySettingsResponse(resolved),
@@ -10671,8 +13855,17 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         }
 
         if (method === 'DELETE') {
-          await clearStoredProviderApiKey(provider);
-          const resolved = await resolveEffectiveProviderApiKeySettings(provider);
+          if (provider === 'codex') {
+            json(res, 400, { ok: false, error: 'Codex credentials are managed by the Codex CLI.' });
+            return;
+          }
+          await clearStoredProviderApiKey(provider as StoredApiKeyProviderId);
+          const resolved = provider === 'groq'
+            ? await resolveGroqApiKeySettings()
+            : provider === 'exa'
+              ? await resolveExaApiKeySettings()
+              : await resolveEffectiveProviderApiKeySettings(provider as LlmProviderId);
+          if (provider === 'groq') notifyGroqApiKeySettingsChanged();
           json(res, 200, {
             ok: true,
             ...providerKeySettingsResponse(resolved),
@@ -10681,11 +13874,90 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         }
       }
 
+      if (pathname === '/api/settings/voice-stream/pairing-password') {
+        if (method === 'GET') {
+          const resolved = await resolveVoiceStreamPairingPasswordSettings();
+          json(res, 200, {
+            ok: true,
+            ...voiceStreamPairingPasswordSettingsResponse(resolved, { includePassword: u.searchParams.get('reveal') === '1' }),
+          });
+          return;
+        }
+        if (method === 'POST') {
+          let body: any = null;
+          try {
+            body = await readJsonBody(req);
+          } catch (e: any) {
+            json(res, 400, { ok: false, error: e?.message ?? String(e) });
+            return;
+          }
+          const password = normalizeApiKey(body?.password);
+          if (!password) {
+            json(res, 400, { ok: false, error: 'Pairing password is required.' });
+            return;
+          }
+          await upsertVoiceStreamPairingPassword(password);
+          const resolved = await resolveVoiceStreamPairingPasswordSettings();
+          notifyVoiceStreamPairingPasswordSettingsChanged();
+          json(res, 200, {
+            ok: true,
+            ...voiceStreamPairingPasswordSettingsResponse(resolved),
+          });
+          return;
+        }
+        if (method === 'DELETE') {
+          await clearVoiceStreamPairingPassword();
+          const resolved = await resolveVoiceStreamPairingPasswordSettings();
+          notifyVoiceStreamPairingPasswordSettingsChanged();
+          json(res, 200, {
+            ok: true,
+            ...voiceStreamPairingPasswordSettingsResponse(resolved),
+          });
+          return;
+        }
+      }
+
+      if (pathname === '/api/settings/desktop-voice/model') {
+        if (method === 'GET') {
+          json(res, 200, desktopVoiceModelStatus());
+          return;
+        }
+        if (method === 'POST') {
+          let body: any = null;
+          try {
+            body = await readJsonBody(req);
+          } catch {
+            body = {};
+          }
+          try {
+            json(res, 202, await startDesktopVoiceModelInstall(String(body?.modelId ?? '').trim() || undefined));
+          } catch (e: any) {
+            json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          }
+          return;
+        }
+        if (method === 'DELETE') {
+          try {
+            let body: any = null;
+            try {
+              body = await readJsonBody(req);
+            } catch {
+              body = {};
+            }
+            json(res, 200, await removeDesktopVoiceModel(String(body?.modelId ?? '').trim() || undefined));
+          } catch (e: any) {
+            json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          }
+          return;
+        }
+      }
+
       if (pathname === '/api/settings/llm') {
         if (method === 'GET') {
           const data = await resolveLlmSettingsResponse();
           const selectedProvider = data.provider.selected;
-          const selectedProviderSettings = selectedProvider === 'openai' ? data.openai : data.gemini;
+          const selectedProviderSettings =
+            selectedProvider === 'openai' ? data.openai : selectedProvider === 'gemini' ? data.gemini : data.codex;
           if (!selectedProviderSettings.hasKey) {
             await logProviderApiKeyResolution('warn', 'settings llm lookup resolved without selected provider key', selectedProvider, {
               pathname,
@@ -10707,7 +13979,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           }
           const provider = parseLlmProvider(body?.provider);
           if (!provider) {
-            json(res, 400, { ok: false, error: 'provider must be openai or gemini' });
+            json(res, 400, { ok: false, error: 'provider must be openai, gemini, or codex' });
             return;
           }
           await upsertStoredLlmProvider(provider);
@@ -10786,6 +14058,47 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           }
           await upsertStoredFilesystemSettings({ uploadMaxBytes });
           json(res, 200, await resolveFilesystemSettingsResponse());
+          return;
+        }
+      }
+
+      if (pathname === '/api/settings/voice-approval') {
+        if (method === 'GET') {
+          json(res, 200, await resolveVoiceApprovalSettingsResponse());
+          return;
+        }
+
+        if (method === 'POST') {
+          let body: any = null;
+          try {
+            body = await readJsonBody(req);
+          } catch (e: any) {
+            json(res, 400, { ok: false, error: e?.message ?? String(e) });
+            return;
+          }
+          try {
+            const voiceApprovalPayload = body?.voiceApproval ?? (body?.voiceTranscription == null ? body : null);
+            if (voiceApprovalPayload != null) {
+              await upsertStoredVoiceApprovalSettings(voiceApprovalPayload);
+              await reloadDesktopVoiceApprovalSettings();
+              notifyVoiceApprovalSettingsChanged();
+            }
+            if (body?.voiceTranscription != null) {
+              await upsertStoredVoiceTranscriptionSettings(body.voiceTranscription);
+              await reloadDesktopVoiceTranscriptionSettings();
+              notifyVoiceTranscriptionSettingsChanged();
+            }
+            if (body?.voiceActivation != null) {
+              await upsertStoredVoiceActivationSettings(body.voiceActivation);
+              notifyVoiceApprovalSettingsChanged();
+            }
+            if (voiceApprovalPayload == null && body?.voiceTranscription == null && body?.voiceActivation == null) {
+              throw new Error('No voice settings payload provided');
+            }
+            json(res, 200, await resolveVoiceApprovalSettingsResponse());
+          } catch (e: any) {
+            json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          }
           return;
         }
       }
@@ -11139,6 +14452,10 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                 previousRootDir,
               },
             });
+            await reloadDesktopVoiceApprovalSettings();
+            await reloadDesktopVoiceTranscriptionSettings();
+            notifyVoiceApprovalSettingsChanged();
+            notifyVoiceTranscriptionSettingsChanged();
             json(res, 200, {
               ok: true,
               ...(await listProfilesState()),
@@ -11294,6 +14611,30 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           );
           try {
             const out = await readHubLogTail({ maxBytes, tailLines });
+            json(res, 200, { ok: true, ...out, maxBytes, tailLines });
+          } catch (e: any) {
+            json(res, 500, { ok: false, error: e?.message ?? String(e) });
+          }
+          return;
+        }
+      }
+
+      if (pathname === '/api/settings/android/logs') {
+        if (method === 'GET') {
+          const maxBytes = clampIntParam(
+            u.searchParams.get('maxBytes'),
+            HUB_SETTINGS_LOG_DEFAULT_MAX_BYTES,
+            1,
+            HUB_SETTINGS_LOG_MAX_BYTES,
+          );
+          const tailLines = clampIntParam(
+            u.searchParams.get('tail'),
+            HUB_SETTINGS_LOG_DEFAULT_TAIL_LINES,
+            1,
+            HUB_SETTINGS_LOG_MAX_TAIL_LINES,
+          );
+          try {
+            const out = await readAndroidVoiceLogTail({ maxBytes, tailLines });
             json(res, 200, { ok: true, ...out, maxBytes, tailLines });
           } catch (e: any) {
             json(res, 500, { ok: false, error: e?.message ?? String(e) });
@@ -13303,358 +16644,64 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         return;
       }
 
+      // GET /api/drones/events
+      if (method === 'GET' && parts.length === 3 && parts[0] === 'api' && parts[1] === 'drones' && parts[2] === 'events') {
+        res.statusCode = 200;
+        res.setHeader('content-type', 'text/event-stream; charset=utf-8');
+        res.setHeader('cache-control', 'no-cache, no-transform');
+        res.setHeader('connection', 'keep-alive');
+        req.socket.setTimeout(0);
+        (res as any).flushHeaders?.();
+
+        let cleanedUp = false;
+        droneRegistrySseClients.add(res);
+        const cleanup = () => {
+          if (cleanedUp) return;
+          cleanedUp = true;
+          droneRegistrySseClients.delete(res);
+          stopDroneRegistryBroadcasterIfIdle();
+        };
+        req.on('close', cleanup);
+        res.on('close', cleanup);
+        startDroneRegistryBroadcaster();
+        writeHubSseEvent(res, 'connected', { ok: true, at: nowIso() });
+        if (droneRegistrySseLastSnapshot) {
+          writeHubSseEvent(res, 'snapshot', droneRegistrySseLastSnapshot);
+          scheduleDroneRegistryBroadcasterRefresh(0);
+        } else {
+          void refreshDroneRegistryBroadcasterSnapshot({ broadcastSnapshot: true });
+        }
+        return;
+      }
+
+      // GET /api/drones/chat-events
+      if (method === 'GET' && parts.length === 3 && parts[0] === 'api' && parts[1] === 'drones' && parts[2] === 'chat-events') {
+        res.statusCode = 200;
+        res.setHeader('content-type', 'text/event-stream; charset=utf-8');
+        res.setHeader('cache-control', 'no-cache, no-transform');
+        res.setHeader('connection', 'keep-alive');
+        req.socket.setTimeout(0);
+        (res as any).flushHeaders?.();
+
+        let cleanedUp = false;
+        droneChatSseClients.add(res);
+        const cleanup = () => {
+          if (cleanedUp) return;
+          cleanedUp = true;
+          droneChatSseClients.delete(res);
+          stopDroneChatBroadcasterIfIdle();
+        };
+        req.on('close', cleanup);
+        res.on('close', cleanup);
+        startDroneChatBroadcaster();
+        writeHubSseEvent(res, 'connected', { ok: true, at: nowIso() });
+        void refreshDroneChatEventSnapshot({ broadcastSnapshot: droneChatSseLastByKey.size === 0 });
+        return;
+      }
+
       // GET /api/drones
       if (method === 'GET' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'drones') {
-        triggerArchiveCleanup('api:drones');
-        const regAny: any = await loadRegistry();
-
-        // Best-effort: if the Hub restarted while drones were pending, resume provisioning.
-        // This endpoint is polled frequently, so it serves as a natural "self-heal" hook.
-        enqueueProvisioningForAllPending(regAny);
-
-        // Best-effort: keep the "typing" badge accurate even when a drone isn't selected.
-        // We don't await this work; it updates registry in the background and will be reflected
-        // in the next polls.
-        try {
-          for (const [droneId, d] of Object.entries(regAny.drones ?? {})) {
-            const id = normalizeDroneIdentity(droneId);
-            if (!id) continue;
-            if (!d || typeof d !== 'object') continue;
-            if (!(d as any)?.chats || typeof (d as any).chats !== 'object') continue;
-            for (const [chatName, entry] of Object.entries((d as any).chats)) {
-              if (chatHasReconcilablePendingPrompts(entry)) enqueueReconcile(id, String(chatName));
-            }
-          }
-        } catch {
-          // ignore
-        }
-
-        // Reconcile seeding prompt completion (restart-resumable).
-        // If a seed prompt finished in the drone daemon, clear hub.seeding (or surface error).
-        const hubPatches: Array<{ id: string; hub: any | null }> = [];
-        for (const [droneId, d] of Object.entries(regAny.drones ?? {}) as any[]) {
-          const hub = d?.hub;
-          if (!hub || String(hub?.phase ?? '') !== 'seeding') continue;
-          const id = normalizeDroneIdentity(droneId);
-          if (!id) continue;
-          let changedForDrone = false;
-          let nextHub: any = hub;
-          let promptId = String(nextHub?.promptId ?? '').trim();
-
-          if (!promptId) {
-            const chats = d?.chats && typeof d.chats === 'object' ? Object.values(d.chats) : [];
-            for (const entry of chats as any[]) {
-              const pending = Array.isArray(entry?.pendingPrompts) ? entry.pendingPrompts : [];
-              const candidate = pending.find((p: any) => {
-                const id = String(p?.id ?? '').trim();
-                const st = String(p?.state ?? '').trim();
-                return Boolean(id) && st !== 'failed';
-              });
-              const id = String(candidate?.id ?? '').trim();
-              if (!id) continue;
-              promptId = id;
-              nextHub = { ...nextHub, promptId };
-              changedForDrone = true;
-              break;
-            }
-          }
-
-          if (nextHub && promptId) {
-            const token = typeof d.token === 'string' ? d.token : '';
-            const containerName = String(d?.containerName ?? d?.name ?? '').trim();
-            const hostPort =
-              typeof d.hostPort === 'number' && Number.isFinite(d.hostPort)
-                ? d.hostPort
-                : await resolveHostPort(containerName || String(d.name ?? ''), d.containerPort);
-            if (hostPort && token) {
-              try {
-                // eslint-disable-next-line no-await-in-loop
-                const r: any = await dronePromptGet(makeClient(hostPort, token), promptId);
-                const job = r?.job ?? null;
-                const st = String(job?.state ?? '').trim();
-                if (st === 'done') {
-                  nextHub = null;
-                  changedForDrone = true;
-                } else if (st === 'failed') {
-                  nextHub = { phase: 'error', message: String(job?.error ?? 'Seed failed'), updatedAt: nowIso() };
-                  changedForDrone = true;
-                }
-              } catch {
-                // ignore; keep seeding
-              }
-            }
-          }
-
-          if (changedForDrone) {
-            if (nextHub == null) {
-              delete d.hub;
-            } else {
-              d.hub = nextHub;
-            }
-            hubPatches.push({ id, hub: nextHub ?? null });
-          }
-        }
-        if (hubPatches.length > 0) {
-          // NOTE: Apply patches under a lock to avoid clobbering concurrent registry writers.
-          try {
-            await updateRegistry((regLatest: any) => {
-              for (const p of hubPatches) {
-                const id = normalizeDroneIdentity(p?.id);
-                if (!id) continue;
-                const d = regLatest?.drones?.[id];
-                if (!d) continue;
-                if (p.hub == null) {
-                  delete d.hub;
-                } else {
-                  d.hub = p.hub;
-                }
-                regLatest.drones = regLatest.drones ?? {};
-                regLatest.drones[id] = d;
-              }
-            });
-          } catch {
-            // ignore
-          }
-        }
-
-        // Auto-clear stale repo conflict hub errors once no merge conflicts remain.
-        // Pull conflict state is resolved in the host repo; push conflict state is resolved in the drone repo.
-        const autoClearedConflictErrors = new Map<string, 'pull' | 'push'>();
-        for (const [droneIdRaw, d] of Object.entries(regAny.drones ?? {}) as any[]) {
-          const droneId = normalizeDroneIdentity(droneIdRaw);
-          if (!droneId) continue;
-          if (String(d?.hub?.phase ?? '').trim().toLowerCase() !== 'error') continue;
-          const lastPullMode = String(d?.repo?.lastPull?.mode ?? '').trim().toLowerCase();
-          const lastPushMode = String(d?.repo?.lastPush?.mode ?? '').trim().toLowerCase();
-          const conflictMode: 'pull' | 'push' | null =
-            lastPushMode === 'drone-conflicts-ready' ? 'push' : lastPullMode === 'host-conflicts-ready' ? 'pull' : null;
-          if (!conflictMode) continue;
-
-          try {
-            let resolved = false;
-            if (conflictMode === 'pull') {
-              const repoPathRaw = String(d?.repoPath ?? '').trim();
-              if (!repoPathRaw) continue;
-              // eslint-disable-next-line no-await-in-loop
-              const repoRoot = await gitTopLevel(repoPathRaw);
-              // eslint-disable-next-line no-await-in-loop
-              const changes = await gitRepoChangesSummary(repoRoot);
-              resolved = Number(changes?.counts?.conflicted ?? 0) === 0;
-            } else {
-              const name = String(d?.name ?? '').trim() || droneId;
-              const repoPathInContainer = droneRepoPathInContainer(d);
-              const unmerged = await withLockedDroneContainer(
-                { requestedDroneName: name, droneEntry: d },
-                async ({ containerName }) => {
-                  return await droneUnmergedFiles({ containerName, repoPathInContainer });
-                },
-              );
-              resolved = unmerged.length === 0;
-            }
-
-            if (resolved) {
-              delete d.hub;
-              d.repo = d.repo ?? {};
-              if (conflictMode === 'pull') d.repo.lastPullError = null;
-              else d.repo.lastPushError = null;
-              autoClearedConflictErrors.set(droneId, conflictMode);
-            }
-          } catch {
-            // ignore; keep current hub error until we can verify repo state
-          }
-        }
-        if (autoClearedConflictErrors.size > 0) {
-          try {
-            const cleared = Array.from(autoClearedConflictErrors.entries());
-            await updateRegistry((regLatest: any) => {
-              for (const [rawDroneId, conflictMode] of cleared) {
-                const droneId = normalizeDroneIdentity(rawDroneId);
-                if (!droneId) continue;
-                const d = regLatest?.drones?.[droneId];
-                if (!d) continue;
-                if (String(d?.hub?.phase ?? '').trim().toLowerCase() === 'error') delete d.hub;
-                d.repo = d.repo ?? {};
-                if (conflictMode === 'pull' && typeof d.repo.lastPullError === 'string') d.repo.lastPullError = null;
-                if (conflictMode === 'push' && typeof d.repo.lastPushError === 'string') d.repo.lastPushError = null;
-                regLatest.drones = regLatest.drones ?? {};
-                regLatest.drones[droneId] = d;
-              }
-            });
-          } catch {
-            // ignore
-          }
-        }
-        const pendingList: any[] = Object.values(regAny?.pending ?? {});
-
-        const pendingSummaries = pendingList.map((p) => {
-          const runtime = normalizeDroneRuntime(p?.runtime);
-          const repoAttached = Boolean(String(p?.repoPath ?? '').trim());
-          const phase = String(p?.phase ?? 'starting') as PendingPhase;
-          const seed = p?.seed;
-          const hasSeed =
-            seed &&
-            typeof seed === 'object' &&
-            (Boolean((seed as any)?.agent) ||
-              Boolean(String((seed as any)?.prompt ?? '').trim()) ||
-              Boolean(String((seed as any)?.chatName ?? '').trim()) ||
-              Boolean(String((seed as any)?.cwd ?? '').trim()));
-          const message =
-            typeof p?.message === 'string' ? p.message : phase === 'error' ? 'Failed' : hasSeed ? 'Seeding…' : 'Starting…';
-          const err = typeof p?.error === 'string' ? p.error : null;
-          // Important: pending entries with a seed prompt are not necessarily *currently* "seeding".
-          // They can still be creating the container, so reflect the actual phase to avoid confusion.
-          const hubPhase: any = phase === 'error' ? 'error' : phase === 'seeding' ? 'seeding' : 'starting';
-          return {
-            id: normalizeDroneIdentity(p?.id) || null,
-            name: String(p?.name ?? ''),
-            group: typeof p?.group === 'string' && p.group.trim() ? p.group.trim() : null,
-            kind: normalizeDroneEntryKind(p?.kind),
-            visibility: normalizeDroneEntryVisibility(p?.visibility),
-            playbook: playbookMetaFromEntry(p?.playbook),
-            createdAt: String(p?.createdAt ?? nowIso()),
-            fleetParentId: resolveStableDroneOrPendingIdFromRef(regAny, fleetActorConfig(p).createdBy),
-            fleetAssignedIds: normalizeFleetAssignedRefsForSummary(regAny, p?.id, fleetActorConfig(p).assigned),
-            runtime,
-            repoAttached,
-            repoPath: repoAttached ? String(p?.repoPath ?? '') : '',
-            repoBranch: String(p?.repo?.branch ?? '').trim() || null,
-            cwd: normalizeDroneCwdForRuntime(p, null),
-            ...(runtime === 'container' ? { persistVolume: p?.persistVolume !== false } : {}),
-            containerPort: typeof p?.containerPort === 'number' && Number.isFinite(p.containerPort) ? p.containerPort : 7777,
-            hostPort: null,
-            statusOk: false,
-            status: null,
-            statusError: phase === 'error' ? (err ?? message ?? 'failed') : null,
-            chats: [],
-            busyChats: [],
-            dockerSize: { totalBytes: 0, containerWritableBytes: 0, snapshotBytes: 0, snapshotCount: 0 },
-            hubPhase,
-            hubMessage: phase === 'error' ? (err ?? message ?? null) : message,
-            busy: false,
-          };
-        });
-
-        const realSummaries = await Promise.all(
-          Object.values(regAny.drones ?? {}).map(async (d: any) => {
-            const runtime = normalizeDroneRuntime(d?.runtime);
-            const containerName = String(d?.containerName ?? d?.name ?? '').trim();
-            const hostPort =
-              typeof d.hostPort === 'number' && Number.isFinite(d.hostPort)
-                ? d.hostPort
-                : runtime === 'host'
-                  ? null
-                  : await resolveHostPort(containerName || String(d.name ?? ''), d.containerPort);
-
-            const hubPhase = typeof d?.hub?.phase === 'string' ? String(d.hub.phase) : null;
-            const hubMessage = typeof d?.hub?.message === 'string' ? String(d.hub.message) : null;
-            const repoPath = String(d?.repoPath ?? '').trim();
-            const repoBranch = String(d?.repo?.branch ?? '').trim() || null;
-            const repoAttached =
-              Boolean(repoPath) ||
-              Boolean(String(d?.repo?.dest ?? '').trim()) ||
-              Boolean(String(d?.repo?.seededAt ?? '').trim());
-
-            let statusOk = false;
-            let status: any = null;
-            let statusError: string | null = null;
-            const droneId = normalizeDroneIdentity(d?.id);
-            const busyChats = droneId ? busyChatNamesForDrone(d, droneId) : [];
-            const token = typeof d.token === 'string' ? d.token : '';
-            const snapshotTotals = dockerSnapshotTotalsForDroneEntry(d);
-            const containerWritableBytes =
-              runtime === 'container' && containerName ? await dockerContainerSizeBytes(containerName) : null;
-            if (hostPort && token) {
-              try {
-                status = await droneStatus(makeClient(hostPort, token));
-                statusOk = true;
-              } catch (e: any) {
-                const firstErr = e?.message ?? String(e);
-                if (runtime !== 'host' && looksLikeUnauthorizedDaemonError(firstErr)) {
-                  try {
-                    const refreshedToken = droneId ? await refreshRegistryTokenFromContainer({ droneId }) : null;
-                    if (refreshedToken && refreshedToken !== token) {
-                      status = await droneStatus(makeClient(hostPort, refreshedToken));
-                      statusOk = true;
-                      statusError = null;
-                      hubLog('warn', 'refreshed stale drone token after unauthorized status', {
-                        droneName: d.name,
-                        hadId: Boolean(droneId),
-                      });
-                    } else {
-                      statusError = firstErr;
-                    }
-                  } catch (e2: any) {
-                    statusError = e2?.message ?? String(e2);
-                  }
-                } else if (runtime !== 'host') {
-                  try {
-                    await ensureContainerDroneDaemonSession({
-                      containerName,
-                      containerPort: Number(d?.containerPort ?? 7777),
-                    });
-                    status = await droneStatus(makeClient(hostPort, token));
-                    statusOk = true;
-                    statusError = null;
-                  } catch (recoveryError: any) {
-                    statusError = recoveryError?.message ?? firstErr;
-                  }
-                } else {
-                  statusError = firstErr;
-                }
-              }
-            } else if (!hostPort) {
-              statusError = runtime === 'host' ? 'no host port mapped' : 'no host port mapped (container likely stopped)';
-            } else {
-              statusError = 'missing token (still starting?)';
-            }
-
-            return {
-              id: normalizeDroneIdentity(d?.id) || null,
-              name: d.name,
-              group: d.group ?? null,
-              kind: normalizeDroneEntryKind(d?.kind),
-              visibility: normalizeDroneEntryVisibility(d?.visibility),
-              playbook: playbookMetaFromEntry(d?.playbook),
-              createdAt: d.createdAt,
-              fleetParentId: resolveStableDroneOrPendingIdFromRef(regAny, fleetActorConfig(d).createdBy),
-              fleetAssignedIds: normalizeFleetAssignedRefsForSummary(regAny, d?.id, fleetActorConfig(d).assigned),
-              runtime,
-              repoAttached,
-              repoPath: repoAttached ? repoPath : '',
-              repoBranch,
-              cwd: normalizeDroneCwdForRuntime(d, null),
-              ...(runtime === 'container' ? { persistVolume: d?.persistVolume !== false } : {}),
-              containerPort: d.containerPort,
-              hostPort: hostPort ?? null,
-              statusOk,
-              status,
-              statusError,
-              chats: Object.keys(d.chats ?? {}),
-              busyChats,
-              dockerSize: {
-                totalBytes: (containerWritableBytes ?? 0) + snapshotTotals.sizeBytes,
-                containerWritableBytes,
-                snapshotBytes: snapshotTotals.sizeBytes,
-                snapshotCount: snapshotTotals.count,
-              },
-              hubPhase,
-              hubMessage,
-              busy: busyChats.length > 0,
-            };
-          })
-        );
-
-        // Deduplicate by id (prefer real drone over pending).
-        const byId = new Map<string, any>();
-        for (const p of pendingSummaries) {
-          const id = String(p?.id ?? '').trim();
-          if (id) byId.set(id, p);
-        }
-        for (const d of realSummaries) {
-          const id = String(d?.id ?? '').trim();
-          if (id) byId.set(id, d);
-        }
-        const drones = Array.from(byId.values()).filter((x) => x?.id && x?.name);
+        const { drones } = await buildDroneRegistrySnapshot('api:drones');
 
         json(res, 200, { ok: true, drones });
         return;
@@ -15450,6 +18497,36 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           }
         }
         try {
+          let reconciledHostMirrorRef: string | null = null;
+          let reconciledHostMirrorSha: string | null = null;
+          let reconciledHostMirrorCacheState = '';
+          if (repoPathRaw) {
+            try {
+              const repoRoot = await gitTopLevel(repoPathRaw);
+              const reconciled = await reconcilePendingHostMirrorApply({
+                droneId,
+                droneName,
+                droneEntry: d,
+                repoRoot,
+                repoPathInContainer,
+              });
+              reconciledHostMirrorRef = reconciled.hostMirrorRef;
+              reconciledHostMirrorSha = reconciled.hostMirrorSha;
+              reconciledHostMirrorCacheState = [
+                reconciled.promoted ? 'promoted' : '',
+                reconciled.cleanedAbortedCandidate ? 'aborted' : '',
+                reconciled.hostMirrorRef ?? '',
+                reconciled.hostMirrorSha ?? '',
+                reconciled.droneHeadSha ?? '',
+              ].join('\u0000');
+            } catch (e: any) {
+              hubLog('warn', 'Pull preview pending mirror reconciliation failed; using current drone base', {
+                droneName,
+                repoPathRaw,
+                error: e?.message ?? String(e),
+              });
+            }
+          }
           let summary = await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: d }, async ({ containerName }) => {
             return await droneRepoPullChangesSummary({
               container: containerName,
@@ -15506,7 +18583,15 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
               const hostHeadSha = String(hostSummary.branch.oid ?? '').trim().toLowerCase();
               if (/^[0-9a-f]{40}$/.test(hostHeadSha)) {
                 hostHeadShaForReview = hostHeadSha;
-                const cacheKey = [droneId, repoRoot, hostHeadSha, summary.baseSha, summary.headSha].join('\u0000');
+                const mirrorCacheState = [
+                  String((lastPullAny as any)?.mode ?? '').trim().toLowerCase(),
+                  String((lastPullAny as any)?.hostMirrorRef ?? '').trim(),
+                  String((lastPullAny as any)?.hostMirrorSha ?? '').trim().toLowerCase(),
+                  String((lastPullAny as any)?.hostMirrorCandidateRef ?? '').trim(),
+                  String((lastPullAny as any)?.hostMirrorCandidateSha ?? '').trim().toLowerCase(),
+                  reconciledHostMirrorCacheState,
+                ].join('\u0000');
+                const cacheKey = [droneId, repoRoot, hostHeadSha, summary.baseSha, summary.headSha, mirrorCacheState].join('\u0000');
                 const now = Date.now();
                 const cached = pullPreviewHostMergeCache.get(cacheKey);
                 if (cached && now - cached.atMs < PULL_PREVIEW_HOST_MERGE_CACHE_TTL_MS) {
@@ -15514,26 +18599,23 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                 } else {
                   let exportPath = '';
                   let importRefName = '';
+                  let mirrorPreviewRefName = '';
                   try {
                     const patchesOutRoot = droneRootPath('repo-exports');
                     await fs.mkdir(patchesOutRoot, { recursive: true });
-                    const safeDroneRefSeg =
-                      String(droneName ?? '')
-                        .toLowerCase()
-                        .replace(/[^a-z0-9_.-]+/g, '-')
-                        .replace(/^-+|-+$/g, '') || 'drone';
+                    const safeDroneRefSeg = safeDroneRefSegment(droneName);
                     const importRunId = `${Date.now().toString(36)}-${crypto.randomBytes(4).toString('hex')}`;
                     importRefName = `refs/drone/imports/${safeDroneRefSeg}/preview-${importRunId}`;
+                    mirrorPreviewRefName = `refs/drone/mirrors/${safeDroneRefSeg}/preview/${importRunId}`;
                     try {
                       const exported = await withLockedDroneContainer(
                         { requestedDroneName: droneName, droneEntry: d },
                         async ({ containerName }) => {
-                          return await dvmRepoExport({
-                            container: containerName,
+                          return await exportFullHeadBundleFromDrone({
                             repoPathInContainer,
                             outDir: patchesOutRoot,
-                            format: 'bundle',
-                            base: summary.baseSha,
+                            containerName,
+                            label: droneName,
                           });
                         },
                       );
@@ -15549,10 +18631,25 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
 
                     if (exportPath) {
                       await importBundleHeadToHostRef({ repoRoot, bundlePath: exportPath, refName: importRefName });
+                      const storedMirrorRef = reconciledHostMirrorRef || String((lastPullAny as any)?.hostMirrorRef ?? '').trim();
+                      const storedMirrorSha = reconciledHostMirrorSha || String((lastPullAny as any)?.hostMirrorSha ?? '').trim().toLowerCase();
+                      const mirrorParentRef =
+                        storedMirrorRef && /^[0-9a-f]{40}$/.test(storedMirrorSha) && (await gitResolveCommitSha(repoRoot, storedMirrorRef))
+                          ? storedMirrorRef
+                          : summary.baseSha;
+                      const mirrorParentSha = (await gitResolveCommitSha(repoRoot, mirrorParentRef)) ?? '';
+                      if (!mirrorParentSha) throw new Error('Host repo is missing the mirror parent for pull preview.');
+                      const mirrorPreviewSha = await createHostAuthoredMirrorCommit({
+                        repoRoot,
+                        sourceRef: importRefName,
+                        parentRef: mirrorParentSha,
+                        message: `chore(drone): preview ${droneName} changes for host apply`,
+                      });
+                      await updateHostRef({ repoRoot, refName: mirrorPreviewRefName, target: mirrorPreviewSha });
                       const mergedNameStatus = await gitMergePreviewNameStatusEntries({
                         repoRoot,
                         oursRef: 'HEAD',
-                        theirsRef: importRefName,
+                        theirsRef: mirrorPreviewRefName,
                       });
                       entriesForPreview = mergedNameStatus.map((entry) => ({
                         path: entry.path,
@@ -15574,6 +18671,9 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                     }
                     if (importRefName) {
                       await deleteHostRefBestEffort({ repoRoot, refName: importRefName });
+                    }
+                    if (mirrorPreviewRefName) {
+                      await deleteHostRefBestEffort({ repoRoot, refName: mirrorPreviewRefName });
                     }
                   }
                 }
@@ -15609,8 +18709,13 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             ]),
             baseSha: summary.baseSha,
             headSha: summary.headSha,
-            counts: { changed: entriesForPreview.length },
-            entries: attachReviewMetadataToPullEntries(entriesForPreview),
+            counts: { changed: summary.entries.length },
+            entries: attachReviewMetadataToPullEntries(summary.entries),
+            applyPreview: {
+              mode: repoPathRaw ? 'host-merge' : 'drone-range',
+              counts: { changed: entriesForPreview.length },
+              entries: attachReviewMetadataToPullEntries(entriesForPreview),
+            },
             branchContext: {
               hostCurrent: hostBranchHead,
               droneCurrent: summary.branchHead,
@@ -16818,12 +19923,19 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
         let exportPath = '';
         let importRefName = '';
         let importRefSha = '';
+        let mirrorParentRef = '';
+        let mirrorParentSha = '';
+        let mirrorCandidateRef = '';
+        let mirrorCandidateSha = '';
+        let mirrorAppliedToHost = false;
+        let pendingMirrorPromoted = false;
         const repoPathInContainer = String(d?.repo?.dest ?? '/work/repo').trim() || '/work/repo';
         const containerName = String((d as any)?.containerName ?? (d as any)?.name ?? droneName).trim() || droneName;
         let stashed = false;
         let stashPopOk: boolean | null = null;
         let stashPopText: string | null = null;
         let exportedHeadSha: string | null = null;
+        let droneBaseShaForApply: string | null = null;
         let baseAdvanced = false;
         let baseAdvanceError: string | null = null;
         let prePullBaseSha: string | null = null;
@@ -16860,6 +19972,24 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             });
             return;
           }
+
+          const lastPullBeforeApply = d?.repo?.lastPull && typeof d.repo.lastPull === 'object' ? d.repo.lastPull : null;
+          const mirrorReconcile = await reconcilePendingHostMirrorApply({
+            droneId,
+            droneName,
+            droneEntry: d,
+            repoRoot,
+            repoPathInContainer,
+          });
+          pendingMirrorPromoted = mirrorReconcile.promoted;
+          if (mirrorReconcile.promoted && mirrorReconcile.droneHeadSha) {
+            prePullBaseSha = mirrorReconcile.droneHeadSha;
+            prePullBaseAdvanced = true;
+          }
+          if (mirrorReconcile.error) {
+            prePullBaseAdvanceError = mirrorReconcile.error;
+          }
+
           const dronePrepare = await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: d }, async ({ containerName }) => {
             const status = await runGitInDroneOrThrow({
               container: containerName,
@@ -16979,23 +20109,35 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           } catch (e: any) {
             baseAdvanceError = e?.message ?? String(e);
           }
+          try {
+            droneBaseShaForApply = await droneRepoBaseSha({ container: containerName, repoPathInContainer });
+          } catch (e: any) {
+            if (!baseAdvanceError) baseAdvanceError = e?.message ?? String(e);
+          }
 
-          // Export container repo delta as a git bundle, then import to a temporary host ref.
+          if (
+            exportedHeadSha &&
+            droneBaseShaForApply &&
+            exportedHeadSha.toLowerCase() === droneBaseShaForApply.toLowerCase()
+          ) {
+            noChangesToPull = true;
+          }
+
+          // Export the full container repo HEAD as a git bundle, then import to a
+          // temporary host ref. The host-authored mirror commit uses only the
+          // imported tree, so original drone commits are not kept in host history.
           const patchesOutRoot = droneRootPath('repo-exports');
           await fs.mkdir(patchesOutRoot, { recursive: true });
-          try {
-            const exported = await dvmRepoExport({
-              container: containerName,
-              repoPathInContainer,
-              outDir: patchesOutRoot,
-              format: 'bundle',
-            });
-            exportPath = exported.exportedPath;
-          } catch (e: any) {
-            const exportMsg = e?.message ?? String(e);
-            if (looksLikeEmptyBundleExportError(exportMsg)) {
-              noChangesToPull = true;
-            } else {
+          if (!noChangesToPull) {
+            try {
+              const exported = await exportFullHeadBundleFromDrone({
+                containerName,
+                repoPathInContainer,
+                outDir: patchesOutRoot,
+                label: droneName,
+              });
+              exportPath = exported.exportedPath;
+            } catch (e: any) {
               throw e;
             }
           }
@@ -17018,6 +20160,12 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                 importedRef: null,
                 importedRefSha: null,
                 mergeSourceRef: null,
+                hostMirrorRef: pendingMirrorPromoted
+                  ? mirrorReconcile.hostMirrorRef
+                  : String((lastPullBeforeApply as any)?.hostMirrorRef ?? '').trim() || null,
+                hostMirrorSha: pendingMirrorPromoted
+                  ? mirrorReconcile.hostMirrorSha
+                  : String((lastPullBeforeApply as any)?.hostMirrorSha ?? '').trim() || null,
                 stashed,
                 stashPopOk,
                 stashPopText,
@@ -17126,11 +20274,36 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             throw e;
           }
 
-          // Preview imported drone changes in a temp worktree first. Clean merges apply
-          // directly to the host branch. Conflicts only touch host when explicitly requested.
-          await applyBranchDiffToMainWorkingTree({ repoRoot, branch: importRefName, applyConflictsToHost });
+          const lastPullForMirror = d?.repo?.lastPull && typeof d.repo.lastPull === 'object' ? d.repo.lastPull : null;
+          const storedMirrorRef = pendingMirrorPromoted
+            ? String(mirrorReconcile.hostMirrorRef ?? '').trim()
+            : String((lastPullForMirror as any)?.hostMirrorRef ?? '').trim();
+          const storedMirrorSha = pendingMirrorPromoted
+            ? String(mirrorReconcile.hostMirrorSha ?? '').trim().toLowerCase()
+            : String((lastPullForMirror as any)?.hostMirrorSha ?? '').trim().toLowerCase();
+          mirrorParentRef =
+            storedMirrorRef && /^[0-9a-f]{40}$/.test(storedMirrorSha) && (await gitResolveCommitSha(repoRoot, storedMirrorRef))
+              ? storedMirrorRef
+              : String(droneBaseShaForApply ?? '').trim();
+          mirrorParentSha = (await gitResolveCommitSha(repoRoot, mirrorParentRef)) ?? '';
+          if (!mirrorParentSha) {
+            throw new Error('Host repo is missing the mirror parent for this drone apply. Re-seed the drone and apply again.');
+          }
 
-          await tryAdvanceContainerExportBase();
+          mirrorCandidateRef = `refs/drone/mirrors/${safeDroneRefSeg}/candidate/${importRunId}`;
+          mirrorCandidateSha = await createHostAuthoredMirrorCommit({
+            repoRoot,
+            sourceRef: importRefName,
+            parentRef: mirrorParentSha,
+            message: `chore(drone): mirror ${droneName} changes for host apply`,
+          });
+          await updateHostRef({ repoRoot, refName: mirrorCandidateRef, target: mirrorCandidateSha });
+
+          // Preview the host-authored mirror in a temp worktree first. Clean merges
+          // are left as a real pending merge in the host repo; conflicts only touch
+          // host when explicitly requested.
+          await applyBranchMergeNoCommitToMainWorkingTree({ repoRoot, branch: mirrorCandidateRef, applyConflictsToHost });
+          mirrorAppliedToHost = true;
 
           await updateRegistry((reg2: any) => {
             const dd = reg2?.drones?.[droneId];
@@ -17142,12 +20315,16 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             dd.repo.lastPullAt = nowIso();
             dd.repo.lastPullError = null;
             dd.repo.lastPull = {
-              mode: 'bundle-apply-no-commit',
+              mode: 'host-mirror-merge-pending',
               exportFormat: 'bundle',
               exportPath,
-              importedRef: importRefName,
+              importedRef: null,
               importedRefSha: importRefSha || null,
-              mergeSourceRef: importRefName,
+              mergeSourceRef: mirrorCandidateRef,
+              hostMirrorParentRef: mirrorParentRef,
+              hostMirrorParentSha: mirrorParentSha || null,
+              hostMirrorCandidateRef: mirrorCandidateRef,
+              hostMirrorCandidateSha: mirrorCandidateSha || null,
               quarantineBranch: null,
               worktreePath: null,
               stashed,
@@ -17171,14 +20348,18 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           json(res, 200, {
             ok: true,
             name: droneName,
-            mode: 'bundle-apply-no-commit',
+            mode: 'host-mirror-merge-pending',
             repoRoot,
             fromRef,
             exportFormat: 'bundle',
             exportPath,
-            importedRef: importRefName,
+            importedRef: null,
             importedRefSha: importRefSha || null,
-            mergeSourceRef: importRefName,
+            mergeSourceRef: mirrorCandidateRef,
+            hostMirrorParentRef: mirrorParentRef,
+            hostMirrorParentSha: mirrorParentSha || null,
+            hostMirrorCandidateRef: mirrorCandidateRef,
+            hostMirrorCandidateSha: mirrorCandidateSha || null,
             stashed,
             stashPopOk,
             stashPopText,
@@ -17222,9 +20403,13 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                   mode: 'bundle-prepare-conflict',
                   exportFormat: 'bundle',
                   exportPath: exportPath || null,
-                  importedRef: importRefName || null,
+                  importedRef: null,
                   importedRefSha: importRefSha || null,
-                  mergeSourceRef: importRefName || null,
+                  mergeSourceRef: mirrorCandidateRef || null,
+                  hostMirrorParentRef: mirrorParentRef || null,
+                  hostMirrorParentSha: mirrorParentSha || null,
+                  hostMirrorCandidateRef: mirrorCandidateRef || null,
+                  hostMirrorCandidateSha: mirrorCandidateSha || null,
                   quarantineBranch: null,
                   worktreePath: null,
                   stashed,
@@ -17264,7 +20449,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
 
             const guidance = [
               'Conflicts were applied to your host repo as normal Git conflict markers.',
-              'Conflict marker mapping: <<<<<<< ours is your current host branch; >>>>>>> theirs is the pulled drone branch.',
+              'Conflict marker mapping: <<<<<<< ours is your current host branch; >>>>>>> theirs is the host-authored drone mirror.',
               'Resolve conflicts in your current branch, then stage and commit as usual.',
               stashed
                 ? 'Your previous local changes were auto-stashed and left in stash. After resolving pull conflicts, run `git stash pop` when ready.'
@@ -17289,9 +20474,13 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
                 mode: 'host-conflicts-ready',
                 exportFormat: 'bundle',
                 exportPath: exportPath || null,
-                importedRef: importRefName || null,
+                importedRef: null,
                 importedRefSha: importRefSha || null,
-                mergeSourceRef: importRefName || null,
+                mergeSourceRef: mirrorCandidateRef || null,
+                hostMirrorParentRef: mirrorParentRef || null,
+                hostMirrorParentSha: mirrorParentSha || null,
+                hostMirrorCandidateRef: mirrorCandidateRef || null,
+                hostMirrorCandidateSha: mirrorCandidateSha || null,
                 patchesDir: null,
                 diffPath: null,
                 quarantineBranch: null,
@@ -17394,6 +20583,9 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           }
           if (repoRoot && importRefName) {
             await deleteHostRefBestEffort({ repoRoot, refName: importRefName });
+          }
+          if (repoRoot && mirrorCandidateRef && !mirrorAppliedToHost && !hostConflictState) {
+            await deleteHostRefBestEffort({ repoRoot, refName: mirrorCandidateRef });
           }
         }
       }
@@ -19975,8 +23167,13 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           const drone = real.drone;
           const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
           await ensureChatEntry({ droneId, chatName });
-          await reconcileChatFromDaemon({ droneId, chatName });
-          const list = await readPendingPrompts({ droneId, chatName });
+          const reg = await loadRegistry();
+          const entry = (reg as any)?.drones?.[droneId]?.chats?.[chatName] ?? null;
+          if (chatHasReconcilablePendingPrompts(entry)) {
+            ensureDaemonPromptEventSubscription(droneId);
+            enqueueReconcile(droneId, chatName);
+          }
+          const list = pendingPromptsFromChatEntry(entry, { keepRecentlyCompleted: true }).slice(-50);
           json(res, 200, { ok: true, id: droneId, name: droneName, chat: chatName, pending: list });
           return;
         } catch (e: any) {
@@ -20980,7 +24177,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
           if (resolved.kind === 'pending') {
             const droneName = String(resolved.pending?.name ?? droneRef).trim() || droneRef;
             const sel = u.searchParams.get('turn') ?? 'last';
-            json(res, 200, { ok: true, id: resolved.id, name: droneName, chat: chatName, selection: sel, transcripts: [] });
+            jsonWithEtag(req, res, 200, { ok: true, id: resolved.id, name: droneName, chat: chatName, selection: sel, transcripts: [] });
             return;
           }
           const droneId = resolved.id;
@@ -21008,6 +24205,10 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             });
             return;
           }
+          if (chatHasReconcilablePendingPrompts(c)) {
+            ensureDaemonPromptEventSubscription(droneId);
+            enqueueReconcile(droneId, chatName);
+          }
 
           const turns = (c as any).turns as TranscriptTurn[] | undefined;
           const rawList = Array.isArray(turns) ? turns : [];
@@ -21027,7 +24228,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             })
             .map((x) => x.t);
           const sel = u.searchParams.get('turn') ?? 'last';
-          const idxs = parseTurnSelection(sel, list.length);
+          const idxs = parseTurnSelection(sel, list.length, u.searchParams.get('tail'));
 
           const transcripts: any[] = [];
           for (const i of idxs) {
@@ -21078,7 +24279,7 @@ export async function startDroneHubApiServer(opts: { port: number; host?: string
             });
           }
 
-          json(res, 200, { ok: true, id: droneId, name: droneName, chat: chatName, selection: sel, transcripts, agent });
+          jsonWithEtag(req, res, 200, { ok: true, id: droneId, name: droneName, chat: chatName, selection: sel, transcripts, agent });
           return;
         } catch (e: any) {
           json(res, 500, { ok: false, error: e?.message ?? String(e) });

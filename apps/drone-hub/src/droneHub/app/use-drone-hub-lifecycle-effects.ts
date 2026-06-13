@@ -3,13 +3,13 @@ import type { DroneSummary, PendingPrompt, TranscriptItem } from '../types';
 import type { DraftChatState, DroneErrorModalState, StartupSeedState } from './app-types';
 import type { RightPanelTab } from './app-config';
 import { isStartupSeedFresh } from './app-config';
-import { resolveNextRightPanelShortcutWidth } from './right-panel-shortcut-width';
 import { isUngroupedGroupName } from '../../domain';
 import type { ShortcutActionId, ShortcutBindingMap } from './shortcuts';
 import { SHORTCUT_DEFINITIONS, isShortcutMatch } from './shortcuts';
 import { isDroneStartingOrSeeding } from './helpers';
 import { computeTranscriptAutoScrollDecision, shouldDispatchEditableShortcutAction } from './lifecycle-effect-helpers';
 import { useDropdownDismiss } from '../../ui/dropdown';
+import { dispatchAssistantDesktopVoiceToggle } from '../assistant/desktop-assistant-voice';
 
 type Updater<T> = T | ((prev: T) => T);
 type Setter<T> = (next: Updater<T>) => void;
@@ -20,6 +20,7 @@ type LlmSettingsLike =
       provider?: { selected?: string };
       openai?: { hasKey?: boolean };
       gemini?: { hasKey?: boolean };
+      codex?: { hasKey?: boolean };
     }
   | null
   | undefined;
@@ -43,6 +44,7 @@ type UseDroneHubLifecycleEffectsArgs = {
   openGroupMultiChat: (group: string) => void;
   openSidebarVisibleMultiChat: () => void;
   toggleTldrFromShortcut: () => void;
+  toggleVoiceClipboardRecording: () => boolean;
   createOpen: boolean;
   setCreateRepoMenuOpen: Setter<boolean>;
   createNameRef: React.RefObject<HTMLInputElement | null>;
@@ -64,12 +66,7 @@ type UseDroneHubLifecycleEffectsArgs = {
   rightPanelSplit: boolean;
   rightPanelBottomTab: RightPanelTab;
   setRightPanelOpen: Setter<boolean>;
-  rightPanelWidth: number;
-  rightPanelWidthMode: string;
-  rightPanelWidthMax: number;
-  setRightPanelWidth: Setter<number>;
   setRightPanelTab: Setter<RightPanelTab>;
-  setRightPanelBottomTab: Setter<RightPanelTab>;
   setSidebarCollapsed: Setter<boolean>;
   shortcutBindings: ShortcutBindingMap;
   llmSettings: LlmSettingsLike;
@@ -117,6 +114,7 @@ export function useDroneHubLifecycleEffects({
   openGroupMultiChat,
   openSidebarVisibleMultiChat,
   toggleTldrFromShortcut,
+  toggleVoiceClipboardRecording,
   createOpen,
   setCreateRepoMenuOpen,
   createNameRef,
@@ -138,11 +136,7 @@ export function useDroneHubLifecycleEffects({
   rightPanelSplit,
   rightPanelBottomTab,
   setRightPanelOpen,
-  rightPanelWidth,
-  rightPanelWidthMax,
-  setRightPanelWidth,
   setRightPanelTab,
-  setRightPanelBottomTab,
   setSidebarCollapsed,
   shortcutBindings,
   llmSettings,
@@ -218,13 +212,6 @@ export function useDroneHubLifecycleEffects({
     const openRightPanelTabFromShortcut = (tab: RightPanelTab) => {
       if (!currentDrone) return;
       setRightPanelOpen(true);
-      if (rightPanelSplit) {
-        const bottomPaneHovered = Boolean(document.querySelector('[data-right-panel-pane="bottom"]:hover'));
-        if (bottomPaneHovered) {
-          setRightPanelBottomTab(tab);
-          return;
-        }
-      }
       setRightPanelTab(tab);
     };
 
@@ -324,6 +311,11 @@ export function useDroneHubLifecycleEffects({
         return true;
       },
       focusPrimaryChatInput: () => focusPrimaryChatInput(),
+      toggleVoiceClipboardRecording: () => toggleVoiceClipboardRecording(),
+      toggleAssistantVoiceSession: () => {
+        dispatchAssistantDesktopVoiceToggle();
+        return true;
+      },
       markSelectedDronesUnread: () => onMarkSelectedDronesUnreadShortcut(),
       toggleSidebarCollapsed: () => {
         setSidebarCollapsed((prev) => !prev);
@@ -335,8 +327,7 @@ export function useDroneHubLifecycleEffects({
       },
       toggleRightPanelWidth: () => {
         setRightPanelOpen(true);
-        const nextWidth = resolveNextRightPanelShortcutWidth(rightPanelWidth, rightPanelWidthMax);
-        setRightPanelWidth(nextWidth);
+        setRightPanelTab(rightPanelTab);
         return true;
       },
       openHoveredGroupMultiChat: () => {
@@ -394,6 +385,11 @@ export function useDroneHubLifecycleEffects({
       return Boolean(target.closest('[data-canvas-message-input="1"]'));
     };
 
+    const isAssistantChatInputTarget = (target: EventTarget | null): boolean => {
+      if (!(target instanceof HTMLElement)) return false;
+      return Boolean(target.closest('[data-chat-input-focus-id="assistant-chat"]'));
+    };
+
     const isInteractiveTarget = (target: EventTarget | null): boolean => {
       if (!(target instanceof HTMLElement)) return false;
       return Boolean(target.closest('button, a[href], summary, [role="button"], [role="menuitem"], [role="tab"]'));
@@ -430,6 +426,7 @@ export function useDroneHubLifecycleEffects({
           matchedActionId: matched?.id ?? null,
           targetInPrimaryChatInput: isPrimaryChatInputTarget(e.target),
           targetInCanvasMessageInput: isCanvasMessageInputTarget(e.target),
+          targetInAssistantChatInput: isAssistantChatInputTarget(e.target),
         });
         if (!allowEditableShortcut || !matched) return;
         const handled = runShortcutAction(matched.id, e);
@@ -463,17 +460,14 @@ export function useDroneHubLifecycleEffects({
     rightPanelOpen,
     rightPanelSplit,
     rightPanelTab,
-    rightPanelWidth,
-    rightPanelWidthMax,
-    setRightPanelBottomTab,
     setRightPanelOpen,
     setRightPanelTab,
-    setRightPanelWidth,
     setSidebarCollapsed,
     shortcutBindings,
     onDeleteSelectedDroneFromInputShortcut,
     onMarkSelectedDronesUnreadShortcut,
     toggleTldrFromShortcut,
+    toggleVoiceClipboardRecording,
   ]);
 
   React.useEffect(() => {
@@ -533,7 +527,7 @@ export function useDroneHubLifecycleEffects({
     const prompt = String(draftChat?.prompt?.prompt ?? '').trim();
     if (!prompt) return;
     const selectedProvider = llmSettings?.provider?.selected ?? 'openai';
-    const selectedSettings = selectedProvider === 'gemini' ? llmSettings?.gemini : llmSettings?.openai;
+    const selectedSettings = selectedProvider === 'gemini' ? llmSettings?.gemini : selectedProvider === 'codex' ? llmSettings?.codex : llmSettings?.openai;
     if (!selectedSettings?.hasKey) return;
     let mounted = true;
     const seq = draftNameSuggestSeqRef.current + 1;

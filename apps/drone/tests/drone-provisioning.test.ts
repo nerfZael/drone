@@ -32,6 +32,8 @@ function createControllerHarness(opts?: { agentSuggestionEnabledByDefault?: bool
   const syncSharedPathsCalls: any[] = [];
   const syncTaskStateCalls: any[] = [];
   const runNodeCliCalls: string[][] = [];
+  const pendingPromptPumpCalls: any[] = [];
+  const events: string[] = [];
 
   const controller = createDroneProvisioningController({
     NON_REPO_HOME_CWD: '/dvm-data/home',
@@ -46,7 +48,10 @@ function createControllerHarness(opts?: { agentSuggestionEnabledByDefault?: bool
       enqueuePromptCalls.push(opts);
       return { id: String(opts.id ?? 'generated'), pendingState: 'queued', blockedByAutomation: false };
     },
-    enqueuePendingPromptPump: () => {},
+    enqueuePendingPromptPump: (droneId, chatName) => {
+      pendingPromptPumpCalls.push({ droneId, chatName });
+      events.push(`pump:${droneId}:${chatName}`);
+    },
     hubLog: () => {},
     inferChatAgent: (entry: any) => entry?.agent ?? { kind: 'builtin', id: 'cursor' },
     isSafePromptId: (raw: string) => /^[A-Za-z0-9._-]+$/.test(String(raw ?? '').trim()),
@@ -88,15 +93,19 @@ function createControllerHarness(opts?: { agentSuggestionEnabledByDefault?: bool
     startupPromptToPendingPrompt: pendingStateHelpers.startupPromptToPendingPrompt,
     syncRepoAgentsInstructionsForDrone: async (opts) => {
       syncRepoAgentsCalls.push(opts);
+      events.push('sync:repo-agents');
     },
     syncSkillLibraryForDrone: async (opts) => {
       syncSkillLibraryCalls.push(opts);
+      events.push('sync:skills');
     },
     syncSharedPathsToDrone: async (opts) => {
       syncSharedPathsCalls.push(opts);
+      events.push('sync:shared-paths');
     },
     syncTaskStateSnapshotToDrone: async (droneId, droneEntry) => {
       syncTaskStateCalls.push({ droneId, droneEntry });
+      events.push('sync:task-state');
     },
   });
 
@@ -110,6 +119,8 @@ function createControllerHarness(opts?: { agentSuggestionEnabledByDefault?: bool
     syncSharedPathsCalls,
     syncTaskStateCalls,
     runNodeCliCalls,
+    pendingPromptPumpCalls,
+    events,
   };
 }
 
@@ -227,6 +238,66 @@ describe('drone provisioning controller', () => {
         {
           droneId: 'drone-2',
           chatName: 'ops',
+          agent: { kind: 'builtin', id: 'codex' },
+          setModel: true,
+          model: 'gpt-5.4',
+          setAgentSuggestionEnabled: true,
+          agentSuggestionEnabled: false,
+        },
+      ]);
+      expect(harness.enqueuePromptCalls).toHaveLength(0);
+      expect(harness.pendingPromptPumpCalls).toEqual([{ droneId: 'drone-2', chatName: 'ops' }]);
+      expect(harness.events.indexOf('sync:repo-agents')).toBeGreaterThan(-1);
+      expect(harness.events.indexOf('pump:drone-2:ops')).toBeGreaterThan(harness.events.indexOf('sync:repo-agents'));
+    });
+  });
+
+  test('materializes seed chat config before post-create sync without startup prompts', async () => {
+    await withTempDroneDataDir('drone-provisioning-', async () => {
+      await updateRegistry((reg: any) => {
+        reg.pending = {
+          'drone-image-first': {
+            id: 'drone-image-first',
+            name: 'image-first',
+            runtime: 'host',
+            repoPath: '',
+            build: false,
+            createdAt: '2026-03-26T11:00:00.000Z',
+            updatedAt: '2026-03-26T11:00:00.000Z',
+            phase: 'starting',
+            message: 'Starting...',
+            seed: {
+              chatName: 'default',
+              agent: { kind: 'builtin', id: 'codex' },
+              model: 'gpt-5.4',
+            },
+          },
+        };
+      });
+
+      const harness = createControllerHarness();
+      harness.controller.enqueueProvisioning('drone-image-first');
+
+      await waitFor(async () => {
+        const reg: any = await loadRegistry();
+        return !reg?.pending?.['drone-image-first'] && Boolean(reg?.drones?.['drone-image-first']);
+      });
+
+      const reg: any = await loadRegistry();
+      expect(reg?.drones?.['drone-image-first']?.chats?.default).toMatchObject({
+        agent: { kind: 'builtin', id: 'codex' },
+        model: 'gpt-5.4',
+      });
+      expect(harness.syncTaskStateCalls).toHaveLength(1);
+      expect(harness.syncTaskStateCalls[0]?.droneEntry?.chats?.default).toMatchObject({
+        agent: { kind: 'builtin', id: 'codex' },
+        model: 'gpt-5.4',
+      });
+      expect(harness.ensureChatEntryCalls).toEqual([{ droneId: 'drone-image-first', chatName: 'default' }]);
+      expect(harness.setChatAgentConfigCalls).toEqual([
+        {
+          droneId: 'drone-image-first',
+          chatName: 'default',
           agent: { kind: 'builtin', id: 'codex' },
           setModel: true,
           model: 'gpt-5.4',

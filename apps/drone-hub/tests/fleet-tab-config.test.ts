@@ -6,4 +6,10 @@ describe('fleet tab config', () => {
     expect(RIGHT_PANEL_TABS).toContain('fleet');
     expect(RIGHT_PANEL_TAB_LABELS.fleet).toBe('Fleet');
   });
+
+  test('keeps assistant files inside the assistant tab', () => {
+    expect(RIGHT_PANEL_TABS).toContain('assistant');
+    expect(RIGHT_PANEL_TABS).not.toContain('artifacts');
+    expect(RIGHT_PANEL_TAB_LABELS.assistant).toBe('Assistant');
+  });
 });

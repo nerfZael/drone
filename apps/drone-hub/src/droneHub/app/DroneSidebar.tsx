@@ -3,7 +3,7 @@ import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { isUngroupedGroupName } from '../../domain';
 import type { DroneSummary, RepoSummary } from '../types';
 import { dropdownMenuItemBaseClass, dropdownPanelBaseClass, useDropdownDismiss } from '../../ui/dropdown';
-import { IconAutoMinimize, IconBoard, IconChevron, IconColumns, IconEye, IconEyeOff, IconFolder, IconList, IconMore, IconPencil, IconPlus, IconPlusDouble, IconSettings, IconSidebarCollapse, IconSidebarExpand, IconSpinner, IconTrash, IconTreeView, SkeletonLine } from './icons';
+import { IconAutoMinimize, IconBoard, IconChevron, IconColumns, IconDrone, IconEye, IconEyeOff, IconFolder, IconList, IconMore, IconPencil, IconPlus, IconPlusDouble, IconSettings, IconSidebarCollapse, IconSidebarExpand, IconSpinner, IconTrash, IconTreeView, SkeletonLine } from './icons';
 import { SidebarDroneTreeList, type SidebarDroneTreeListSharedProps } from './SidebarDroneTreeList';
 import { GroupedSidebarTree } from './GroupedSidebarTree';
 import { SidebarReorderDropIndicator } from './sidebar-reorder-ui';
@@ -50,6 +50,7 @@ const SIDEBAR_COLLAPSED_RAIL_WIDTH_PX = 40;
 const AUTO_MINIMIZE_COLLAPSE_DELAY_MS = 90;
 const AUTO_MINIMIZE_EXPAND_DELAY_MS = 120;
 const AUTO_MINIMIZE_REOPEN_GUARD_MS = 220;
+const SIDEBAR_DND_IDLE_DISABLE_DELAY_MS = 1500;
 const SIDEBAR_DENSITY_MODE_ORDER: SidebarDensityMode[] = ['compact', 'default', 'comfortable'];
 type SidebarIconButtonProps = {
   title: string;
@@ -107,6 +108,11 @@ function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName.toLowerCase();
   return target.isContentEditable || tag === 'input' || tag === 'textarea' || tag === 'select';
+}
+
+function isHeaderActionTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return Boolean(target.closest('button,a,input,textarea,select,[role="button"],[role="menuitem"]'));
 }
 
 type SidebarGroupSectionProps = {
@@ -194,10 +200,11 @@ function SidebarGroupSection({
       droneIds,
     };
   }, [actualItems, groupLabel, groupRef]);
+  const sidebarDndEnabled = sharedDroneTreeListProps.sidebarDndEnabled;
   const { attributes, listeners, setNodeRef: setDraggableNodeRef } = useDraggable({
     id: `sidebar-group:${groupToken}`,
     data: groupDragData ?? undefined,
-    disabled: !groupDragData,
+    disabled: !sidebarDndEnabled || !groupDragData,
   });
   const { setNodeRef: setReorderDropNodeRef } = useDroppable({
     id: `sidebar-group-reorder:${groupToken}`,
@@ -205,7 +212,7 @@ function SidebarGroupSection({
       type: 'sidebar-group-reorder',
       groupRef,
     },
-    disabled: !groupDragData,
+    disabled: !sidebarDndEnabled || !groupDragData,
   });
   const { setNodeRef: setMoveDropNodeRef } = useDroppable({
     id: `sidebar-group-move:${groupToken}`,
@@ -214,7 +221,7 @@ function SidebarGroupSection({
       group: groupRef.group,
       kind: groupRef.kind,
     },
-    disabled: isVirtualGroup,
+    disabled: !sidebarDndEnabled || isVirtualGroup,
   });
   const setHeaderNodeRef = React.useCallback(
     (node: HTMLDivElement | null) => {
@@ -485,9 +492,11 @@ function SidebarFolderTreeNode({
     }),
     [groupRef, node.path],
   );
+  const sidebarDndEnabled = sharedDroneTreeListProps.sidebarDndEnabled;
   const { attributes, listeners, setNodeRef: setDraggableNodeRef } = useDraggable({
     id: `sidebar-folder:${groupToken}`,
     data: dragData,
+    disabled: !sidebarDndEnabled,
   });
   const { setNodeRef: setMoveDropNodeRef } = useDroppable({
     id: `sidebar-group-move:${groupToken}`,
@@ -496,6 +505,7 @@ function SidebarFolderTreeNode({
       group: node.path,
       kind: 'group',
     },
+    disabled: !sidebarDndEnabled,
   });
   const setHeaderNodeRef = React.useCallback(
     (element: HTMLDivElement | null) => {
@@ -886,6 +896,7 @@ export function DroneSidebar({
     sidebarReposCollapsed,
     sidebarAutoMinimize,
     autoDelete,
+    sidebarDockSide,
     sidebarGroupOrder,
     sidebarRepoScopedGroupByPath,
     sidebarDroneOrderByGroup,
@@ -897,6 +908,7 @@ export function DroneSidebar({
     setViewMode,
     setSidebarGroupingMode,
     setSidebarDensityMode,
+    setSidebarDockSide,
     setCollapsedGroups,
     setSidebarGroupOrder,
     setSidebarRepoScopedGroupByPath,
@@ -916,9 +928,15 @@ export function DroneSidebar({
   const footerOptionsMenuRef = React.useRef<HTMLDivElement | null>(null);
   const collapseTimerRef = React.useRef<number | null>(null);
   const expandTimerRef = React.useRef<number | null>(null);
+  const sidebarDndIdleTimerRef = React.useRef<number | null>(null);
   const lastAutoCollapsedAtRef = React.useRef<number>(0);
+  const sidebarDockDragStartXRef = React.useRef<number | null>(null);
   const [headerActionsMenuOpen, setHeaderActionsMenuOpen] = React.useState(false);
   const [footerOptionsMenuOpen, setFooterOptionsMenuOpen] = React.useState(false);
+  const [sidebarInteractionDndEnabled, setSidebarInteractionDndEnabled] = React.useState(false);
+  const sidebarDndEnabled = sidebarInteractionDndEnabled || Boolean(activeDrag);
+  const [sidebarDockDragActive, setSidebarDockDragActive] = React.useState(false);
+  const [sidebarDockDragPreviewSide, setSidebarDockDragPreviewSide] = React.useState<'left' | 'right' | null>(null);
   const hiddenSidebarGroupTokenSet = React.useMemo(() => new Set(hiddenSidebarGroups), [hiddenSidebarGroups]);
   const isRepoGroupingMode = sidebarGroupingMode === 'repos';
   const repoScopedGroupPathsByRepoGroup = React.useMemo(
@@ -1183,18 +1201,68 @@ export function DroneSidebar({
     }, AUTO_MINIMIZE_EXPAND_DELAY_MS);
   }, [clearExpandTimer, setSidebarCollapsed, sidebarAutoMinimize, sidebarCollapsed]);
 
+  const clearSidebarDndIdleTimer = React.useCallback(() => {
+    if (sidebarDndIdleTimerRef.current == null) return;
+    window.clearTimeout(sidebarDndIdleTimerRef.current);
+    sidebarDndIdleTimerRef.current = null;
+  }, []);
+
+  const enableSidebarDndForInteraction = React.useCallback(() => {
+    clearSidebarDndIdleTimer();
+    setSidebarInteractionDndEnabled(true);
+  }, [clearSidebarDndIdleTimer]);
+
+  const queueSidebarDndIdleDisable = React.useCallback(() => {
+    clearSidebarDndIdleTimer();
+    if (activeDrag) return;
+    sidebarDndIdleTimerRef.current = window.setTimeout(() => {
+      sidebarDndIdleTimerRef.current = null;
+      setSidebarInteractionDndEnabled(false);
+    }, SIDEBAR_DND_IDLE_DISABLE_DELAY_MS);
+  }, [activeDrag, clearSidebarDndIdleTimer]);
+
+  React.useEffect(
+    () => () => {
+      clearSidebarDndIdleTimer();
+    },
+    [clearSidebarDndIdleTimer],
+  );
+
+  React.useEffect(() => {
+    if (activeDrag) {
+      enableSidebarDndForInteraction();
+      return;
+    }
+    const sidebar = document.querySelector('[data-drone-sidebar-root="true"]');
+    const sidebarActive =
+      sidebar instanceof HTMLElement &&
+      (sidebar.matches(':hover') || sidebar.contains(document.activeElement));
+    if (!sidebarActive) queueSidebarDndIdleDisable();
+  }, [activeDrag, enableSidebarDndForInteraction, queueSidebarDndIdleDisable]);
+
   const onSidebarPointerEnter = React.useCallback(() => {
     clearCollapseTimer();
     clearExpandTimer();
-  }, [clearCollapseTimer, clearExpandTimer]);
+    enableSidebarDndForInteraction();
+  }, [clearCollapseTimer, clearExpandTimer, enableSidebarDndForInteraction]);
 
   const onSidebarPointerLeave = React.useCallback(
     (event: React.PointerEvent<HTMLElement>) => {
       const related = event.relatedTarget;
       if (related instanceof Node && event.currentTarget.contains(related)) return;
       queueAutoCollapse();
+      queueSidebarDndIdleDisable();
     },
-    [queueAutoCollapse],
+    [queueAutoCollapse, queueSidebarDndIdleDisable],
+  );
+
+  const onSidebarBlurCapture = React.useCallback(
+    (event: React.FocusEvent<HTMLElement>) => {
+      const related = event.relatedTarget;
+      if (related instanceof Node && event.currentTarget.contains(related)) return;
+      queueSidebarDndIdleDisable();
+    },
+    [queueSidebarDndIdleDisable],
   );
 
   const onCollapsedRailPointerEnter = React.useCallback(() => {
@@ -1227,47 +1295,82 @@ export function DroneSidebar({
   const { setNodeRef: setUngroupedDropNodeRef } = useDroppable({
     id: 'sidebar-ungrouped-drop',
     data: { type: 'sidebar-ungrouped-drop' },
-    disabled: !showExternalMoveTargets || sidebarHasUngroupedGroup,
+    disabled: !sidebarDndEnabled || !showExternalMoveTargets || sidebarHasUngroupedGroup,
   });
   const { setNodeRef: setCreateGroupDropNodeRef } = useDroppable({
     id: 'sidebar-create-group-drop',
     data: { type: 'sidebar-create-group-drop' },
-    disabled: isRepoGroupingMode,
+    disabled: !sidebarDndEnabled || isRepoGroupingMode,
   });
   const sidebarVisibleDroneCount = sidebarVisibleDrones.length;
   const sidebarVisibleMultiChatActive = selectedGroupMultiChat === SIDEBAR_VISIBLE_MULTI_CHAT_GROUP;
-  const sharedDroneTreeListProps = {
-    droneById: sidebarDroneById,
-    sidebarDensityMode,
-    draftSidebarPlaceholderId: DRAFT_SIDEBAR_PLACEHOLDER_ID,
-    selectedDroneIds,
-    selectedDroneSet,
-    selectedDrone,
-    activeChatName,
-    busyChatNodeIdSet,
-    unreadAgentMessageByChatNodeId,
-    deletingDrones,
-    renamingDrones,
-    settingBaseImages,
-    movingDroneGroups,
-    sidebarOptimisticDroneIdSet,
-    collapsedDroneSections,
-    setCollapsedDroneSections,
-    uiDroneName,
-    onToggleSection: toggleDroneSection,
-    onSelectDroneCard,
-    onSelectDroneChat,
-    onDeleteDroneChat,
-    onOpenCloneModal,
-    onCreateDroneChat,
-    onRenameDroneChat,
-    onRenameDrone,
-    onSetDroneBaseImage,
-    onDeleteDrone,
-    onOpenDroneErrorModal,
-    onPrepareDroneDragStart,
-    onReparentDronesToParent: runOptimisticReparentDronesToParent,
-  } satisfies SidebarDroneTreeListSharedProps;
+  const sharedDroneTreeListProps = React.useMemo<SidebarDroneTreeListSharedProps>(
+    () => ({
+      droneById: sidebarDroneById,
+      sidebarDensityMode,
+      draftSidebarPlaceholderId: DRAFT_SIDEBAR_PLACEHOLDER_ID,
+      selectedDroneIds,
+      selectedDroneSet,
+      selectedDrone,
+      activeChatName,
+      sidebarDndEnabled,
+      busyChatNodeIdSet,
+      unreadAgentMessageByChatNodeId,
+      deletingDrones,
+      renamingDrones,
+      settingBaseImages,
+      movingDroneGroups,
+      sidebarOptimisticDroneIdSet,
+      collapsedDroneSections,
+      setCollapsedDroneSections,
+      uiDroneName,
+      onToggleSection: toggleDroneSection,
+      onSelectDroneCard,
+      onSelectDroneChat,
+      onDeleteDroneChat,
+      onOpenCloneModal,
+      onCreateDroneChat,
+      onRenameDroneChat,
+      onRenameDrone,
+      onSetDroneBaseImage,
+      onDeleteDrone,
+      onOpenDroneErrorModal,
+      onPrepareDroneDragStart,
+      onReparentDronesToParent: runOptimisticReparentDronesToParent,
+    }),
+    [
+      activeChatName,
+      busyChatNodeIdSet,
+      collapsedDroneSections,
+      deletingDrones,
+      movingDroneGroups,
+      onCreateDroneChat,
+      onDeleteDrone,
+      onDeleteDroneChat,
+      onOpenCloneModal,
+      onOpenDroneErrorModal,
+      onPrepareDroneDragStart,
+      onRenameDrone,
+      onRenameDroneChat,
+      onSelectDroneCard,
+      onSelectDroneChat,
+      onSetDroneBaseImage,
+      renamingDrones,
+      runOptimisticReparentDronesToParent,
+      selectedDrone,
+      selectedDroneIds,
+      selectedDroneSet,
+      sidebarDndEnabled,
+      setCollapsedDroneSections,
+      settingBaseImages,
+      sidebarDensityMode,
+      sidebarDroneById,
+      sidebarOptimisticDroneIdSet,
+      toggleDroneSection,
+      uiDroneName,
+      unreadAgentMessageByChatNodeId,
+    ],
+  );
 
   const onSidebarWheel = React.useCallback(
     (event: React.WheelEvent<HTMLElement>) => {
@@ -1279,6 +1382,50 @@ export function DroneSidebar({
     },
     [setSidebarDensityMode],
   );
+  const toggleSidebarDockSide = React.useCallback(() => {
+    setSidebarDockSide((current) => (current === 'right' ? 'left' : 'right'));
+  }, [setSidebarDockSide]);
+  const resolveSidebarDockSideFromPointerX = React.useCallback((clientX: number): 'left' | 'right' => {
+    if (typeof window === 'undefined') return sidebarDockSide;
+    return clientX > window.innerWidth / 2 ? 'right' : 'left';
+  }, [sidebarDockSide]);
+  const onSidebarDockHeaderPointerDown = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (isHeaderActionTarget(event.target)) return;
+    sidebarDockDragStartXRef.current = event.clientX;
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }, []);
+  const onSidebarDockHeaderPointerMove = React.useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const startX = sidebarDockDragStartXRef.current;
+      if (startX == null) return;
+      if (!sidebarDockDragActive && Math.abs(event.clientX - startX) < 8) return;
+      setSidebarDockDragActive(true);
+      setSidebarDockDragPreviewSide(resolveSidebarDockSideFromPointerX(event.clientX));
+    },
+    [resolveSidebarDockSideFromPointerX, sidebarDockDragActive],
+  );
+  const onSidebarDockHeaderPointerUp = React.useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (sidebarDockDragActive) {
+        setSidebarDockSide(resolveSidebarDockSideFromPointerX(event.clientX));
+      }
+      sidebarDockDragStartXRef.current = null;
+      setSidebarDockDragActive(false);
+      setSidebarDockDragPreviewSide(null);
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+    },
+    [resolveSidebarDockSideFromPointerX, setSidebarDockSide, sidebarDockDragActive],
+  );
+  const onSidebarDockHeaderPointerCancel = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    sidebarDockDragStartXRef.current = null;
+    setSidebarDockDragActive(false);
+    setSidebarDockDragPreviewSide(null);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }, []);
 
   React.useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1325,27 +1472,59 @@ export function DroneSidebar({
     startRenameFolder,
     visibleSidebarFolderPathSet,
   ]);
+  const sidebarBorderClass = sidebarDockSide === 'right' ? 'border-l' : 'border-r';
+  const collapsedRailBorderClass = sidebarDockSide === 'right' ? 'border-l' : 'border-r';
+  const sidebarDockTargetLabel = sidebarDockSide === 'right' ? 'left' : 'right';
+  const sidebarDockActionLabel = `Move sidebar to ${sidebarDockTargetLabel}`;
+  const sidebarHeaderTitle = `Drag header to dock sidebar left or right.`;
+  const sidebarDirectionalIconClass = sidebarDockSide === 'right' ? 'rotate-180' : '';
+  const sidebarDockPreviewSide = sidebarDockDragPreviewSide ?? sidebarDockSide;
 
   return (
     <>
+      {sidebarDockDragActive ? (
+        <div className="pointer-events-none fixed inset-0 z-[10000]" aria-hidden="true">
+          <div
+            className={`absolute top-0 h-full w-[280px] border bg-[rgba(148,163,184,0.1)] border-[rgba(148,163,184,0.32)] shadow-[inset_0_0_0_1px_rgba(255,255,255,.025)] ${
+              sidebarDockPreviewSide === 'right' ? 'right-0' : 'left-0'
+            }`}
+          />
+        </div>
+      ) : null}
       <aside
         data-drone-sidebar-root="true"
-        className="bg-[var(--panel-alt)] border-r border-[var(--border)] flex flex-col min-h-0 relative dh-dot-grid flex-shrink-0 overflow-hidden transition-[width] duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)] [will-change:width]"
-        style={{ width: sidebarCollapsed ? 0 : SIDEBAR_EXPANDED_WIDTH_PX }}
+        data-drone-sidebar-shell="expanded"
+        data-sidebar-dock-side={sidebarDockSide}
+        data-sidebar-collapsed={sidebarCollapsed ? 'true' : 'false'}
+        className={`bg-[var(--panel-alt)] ${sidebarBorderClass} border-[var(--border)] flex flex-col min-h-0 relative dh-dot-grid flex-shrink-0 overflow-hidden transition-[width] duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)] [will-change:width]`}
+        style={{ width: sidebarCollapsed ? 0 : `min(${SIDEBAR_EXPANDED_WIDTH_PX}px, 100vw)` }}
         onPointerEnter={onSidebarPointerEnter}
         onPointerLeave={onSidebarPointerLeave}
+        onPointerDownCapture={enableSidebarDndForInteraction}
+        onFocusCapture={enableSidebarDndForInteraction}
+        onBlurCapture={onSidebarBlurCapture}
         onWheel={onSidebarWheel}
       >
-        <div className="flex-shrink-0 px-3 py-3 border-b border-[var(--border)] relative">
+        <div
+          className={`flex h-[52px] flex-shrink-0 items-center px-3 border-b border-[var(--border)] relative select-none touch-none ${
+            sidebarDockDragActive ? 'cursor-grabbing' : 'cursor-grab'
+          }`}
+          title={sidebarHeaderTitle}
+          onPointerDown={onSidebarDockHeaderPointerDown}
+          onPointerMove={onSidebarDockHeaderPointerMove}
+          onPointerUp={onSidebarDockHeaderPointerUp}
+          onPointerCancel={onSidebarDockHeaderPointerCancel}
+        >
           <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-[var(--accent)] via-[var(--accent-muted)] to-transparent opacity-40" />
-          <div className="flex items-start justify-between gap-2">
-            <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
-              <span
-                className="max-w-full truncate font-semibold text-[13px] text-[var(--fg)]"
-                style={{ fontFamily: 'var(--display)' }}
+          <div className="flex w-full items-center justify-between gap-2">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <div
+                className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md border border-[rgba(167,139,250,.18)] bg-[var(--accent-subtle)] text-[var(--accent)] shadow-[0_0_12px_rgba(167,139,250,.08)]"
+                title="Drone Hub"
+                aria-label="Drone Hub"
               >
-                Drone Hub
-              </span>
+                <IconDrone />
+              </div>
               {selectedDroneIds.length > 1 && (
                 <span className="max-w-full truncate text-[10px] text-[var(--accent)]" title={`${selectedDroneIds.length} drones selected`}>
                   {selectedDroneIds.length} selected
@@ -1627,6 +1806,7 @@ export function DroneSidebar({
                   sidebarDensityMode={sidebarDensityMode}
                   sidebarFolderTree={sidebarFolderTree}
                   sidebarGroupOrder={sidebarGroupOrder}
+                  sidebarDndEnabled={sidebarDndEnabled}
                   repoScopedGroupPathsByRepoGroup={repoScopedGroupPathsByRepoGroup}
                   sidebarDroneOrderByGroup={sidebarDroneOrderByGroup}
                   sidebarNodeOrderByParent={sidebarNodeOrderByParent}
@@ -1796,15 +1976,110 @@ export function DroneSidebar({
                 </span>
               ) : null}
             </button>
-            <button
-              type="button"
-              onClick={onOpenReposModal}
-              className="inline-flex items-center justify-center w-7 h-7 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-all"
-              title={`Manage repos (${repos.length})`}
-              aria-label="Manage repos"
-            >
-              <IconSettings className="opacity-70" />
-            </button>
+            <div ref={footerOptionsMenuRef} className="relative flex flex-shrink-0 items-center gap-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setHeaderActionsMenuOpen(false);
+                  setFooterOptionsMenuOpen((prev) => !prev);
+                }}
+                className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
+                  footerOptionsMenuOpen
+                    ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                    : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                }`}
+                title="Sidebar options"
+                aria-label="Sidebar options"
+                aria-haspopup="menu"
+                aria-expanded={footerOptionsMenuOpen}
+              >
+                <IconMore className="opacity-85" />
+              </button>
+              <button
+                type="button"
+                onClick={onOpenReposModal}
+                className="inline-flex items-center justify-center w-7 h-7 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-all"
+                title={`Manage repos (${repos.length})`}
+                aria-label="Manage repos"
+              >
+                <IconSettings className="opacity-70" />
+              </button>
+              <SidebarIconButton
+                onClick={collapseSidebarWithGuard}
+                className="border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] hover:bg-[var(--hover)]"
+                title="Collapse sidebar"
+                ariaLabel="Collapse sidebar"
+              >
+                <IconSidebarCollapse className={sidebarDirectionalIconClass} />
+              </SidebarIconButton>
+              {footerOptionsMenuOpen ? (
+                <div className={`absolute right-0 bottom-full mb-2 w-[240px] z-50 ${dropdownPanelBaseClass}`} role="menu">
+                  <div className="py-1">
+                    <button
+                      type="button"
+                      onClick={() => setSidebarGroupingMode((prev) => (prev === 'groups' ? 'repos' : 'groups'))}
+                      className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
+                      role="menuitem"
+                    >
+                      <span>{isRepoGroupingMode ? 'Show real groups' : 'Show repos as groups'}</span>
+                      <IconFolder className={!isRepoGroupingMode ? 'opacity-80 text-[var(--accent)]' : 'opacity-65'} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setViewMode((prev) => (prev === 'grouped' ? 'flat' : 'grouped'))}
+                      className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
+                      role="menuitem"
+                    >
+                      <span>{viewMode === 'grouped' ? 'Switch to flat list' : 'Switch to grouped folders'}</span>
+                      {viewMode === 'flat' ? <IconList className="opacity-80 text-[var(--accent)]" /> : <IconTreeView className="opacity-65" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFooterOptionsMenuOpen(false);
+                        toggleSidebarDockSide();
+                      }}
+                      className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
+                      role="menuitem"
+                    >
+                      <span>{sidebarDockActionLabel}</span>
+                      <IconSidebarExpand className={`opacity-65 ${sidebarDockSide === 'right' ? 'rotate-180' : ''}`} />
+                    </button>
+                    <div className="my-1 border-t border-[var(--border-subtle)]" />
+                    <button
+                      type="button"
+                      onClick={() => setShowHiddenSidebarGroups((prev) => !prev)}
+                      className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
+                      role="menuitem"
+                    >
+                      <span>
+                        {showHiddenSidebarGroups ? 'Hide hidden groups' : 'Show hidden groups'}
+                        {sidebarHiddenGroupCount > 0 ? ` (${sidebarHiddenGroupCount})` : ''}
+                      </span>
+                      {showHiddenSidebarGroups ? <IconEyeOff className="opacity-80 text-[var(--accent)]" /> : <IconEye className="opacity-65" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAutoDelete((prev) => !prev)}
+                      className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
+                      role="menuitem"
+                    >
+                      <span>{autoDelete ? 'Delete confirm off' : 'Delete confirm on'}</span>
+                      <IconTrash className={autoDelete ? 'opacity-80 text-[var(--accent)]' : 'opacity-65'} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSidebarAutoMinimize((prev) => !prev)}
+                      className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
+                      role="menuitem"
+                    >
+                      <span>{sidebarAutoMinimize ? 'Disable auto-minimize' : 'Enable auto-minimize'}</span>
+                      <IconAutoMinimize className={sidebarAutoMinimize ? 'opacity-80 text-[var(--accent)]' : 'opacity-65'} />
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
           </div>
           {!sidebarReposCollapsed && (
             <div className="max-h-[190px] overflow-y-auto px-2 pb-2 flex flex-col gap-0.5">
@@ -1870,125 +2145,14 @@ export function DroneSidebar({
           )}
         </div>
 
-        <div className="flex-shrink-0 px-3 py-2 border-t border-[var(--border)] flex items-center justify-between gap-2">
-          <div className="flex min-w-0 flex-1 items-center gap-1.5">
-            {(sidebarHiddenGroupCount > 0 || showHiddenSidebarGroups) && (
-              <div
-                className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] ${
-                  showHiddenSidebarGroups
-                    ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                    : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
-                }`}
-                style={{ fontFamily: 'var(--display)' }}
-                title={
-                  showHiddenSidebarGroups
-                    ? `Showing hidden groups${sidebarHiddenGroupCount > 0 ? ` (${sidebarHiddenGroupCount})` : ''}`
-                    : `${sidebarHiddenGroupCount} hidden group${sidebarHiddenGroupCount === 1 ? '' : 's'}`
-                }
-              >
-                <span>{showHiddenSidebarGroups ? 'Hidden visible' : 'Hidden'}</span>
-                {sidebarHiddenGroupCount > 0 ? <span>{sidebarHiddenGroupCount}</span> : null}
-              </div>
-            )}
-          </div>
-          <div className="flex items-center gap-1">
-            <SidebarIconButton
-              onClick={() => setSidebarGroupingMode((prev) => (prev === 'groups' ? 'repos' : 'groups'))}
-              aria-pressed={!isRepoGroupingMode}
-              className={`border ${
-                !isRepoGroupingMode
-                  ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                  : 'border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] hover:bg-[var(--hover)]'
-              }`}
-              title={isRepoGroupingMode ? 'Show real groups in sidebar' : 'Show repos as virtual groups'}
-              ariaLabel={isRepoGroupingMode ? 'Show real groups in sidebar' : 'Show repos as virtual groups'}
-            >
-              <IconFolder className="opacity-90" />
-            </SidebarIconButton>
-            <SidebarIconButton
-              onClick={() => setViewMode((prev) => (prev === 'grouped' ? 'flat' : 'grouped'))}
-              aria-pressed={viewMode === 'flat'}
-              className={`border ${
-                viewMode === 'flat'
-                  ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                  : 'border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] hover:bg-[var(--hover)]'
-              }`}
-              title={viewMode === 'grouped' ? 'Switch to flat list' : 'Switch to grouped folders'}
-              ariaLabel={viewMode === 'grouped' ? 'Switch to flat list' : 'Switch to grouped folders'}
-            >
-              {viewMode === 'grouped' ? <IconTreeView className="opacity-90" /> : <IconList className="opacity-90" />}
-            </SidebarIconButton>
-            <div ref={footerOptionsMenuRef} className="relative">
-              <button
-                type="button"
-                onClick={() => {
-                  setHeaderActionsMenuOpen(false);
-                  setFooterOptionsMenuOpen((prev) => !prev);
-                }}
-                className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
-                  footerOptionsMenuOpen
-                    ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                    : 'border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] hover:bg-[var(--hover)]'
-                }`}
-                title="Sidebar options"
-                aria-label="Sidebar options"
-                aria-haspopup="menu"
-                aria-expanded={footerOptionsMenuOpen}
-              >
-                <IconMore className="opacity-85" />
-              </button>
-              {footerOptionsMenuOpen ? (
-                <div className={`absolute right-0 bottom-full mb-2 w-[240px] z-50 ${dropdownPanelBaseClass}`} role="menu">
-                  <div className="py-1">
-                    <button
-                      type="button"
-                      onClick={() => setShowHiddenSidebarGroups((prev) => !prev)}
-                      className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
-                      role="menuitem"
-                    >
-                      <span>
-                        {showHiddenSidebarGroups ? 'Hide hidden groups' : 'Show hidden groups'}
-                        {sidebarHiddenGroupCount > 0 ? ` (${sidebarHiddenGroupCount})` : ''}
-                      </span>
-                      {showHiddenSidebarGroups ? <IconEyeOff className="opacity-80 text-[var(--accent)]" /> : <IconEye className="opacity-65" />}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setAutoDelete((prev) => !prev)}
-                      className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
-                      role="menuitem"
-                    >
-                      <span>{autoDelete ? 'Delete confirm off' : 'Delete confirm on'}</span>
-                      <IconTrash className={autoDelete ? 'opacity-80 text-[var(--accent)]' : 'opacity-65'} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSidebarAutoMinimize((prev) => !prev)}
-                      className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
-                      role="menuitem"
-                    >
-                      <span>{sidebarAutoMinimize ? 'Disable auto-minimize' : 'Enable auto-minimize'}</span>
-                      <IconAutoMinimize className={sidebarAutoMinimize ? 'opacity-80 text-[var(--accent)]' : 'opacity-65'} />
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-            <SidebarIconButton
-              onClick={collapseSidebarWithGuard}
-              className="text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)]"
-              title="Collapse sidebar"
-              ariaLabel="Collapse sidebar"
-            >
-              <IconSidebarCollapse />
-            </SidebarIconButton>
-          </div>
-        </div>
       </aside>
 
       <div
         data-drone-sidebar-root="true"
-        className={`flex-shrink-0 bg-[var(--panel-alt)] border-r flex flex-col items-center pt-3 gap-2 overflow-hidden transition-[width,opacity,border-color] duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
+        data-drone-sidebar-shell="rail"
+        data-sidebar-dock-side={sidebarDockSide}
+        data-sidebar-collapsed={sidebarCollapsed ? 'true' : 'false'}
+        className={`flex-shrink-0 bg-[var(--panel-alt)] ${collapsedRailBorderClass} flex flex-col items-center pt-3 gap-2 overflow-hidden transition-[width,opacity,border-color] duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
           sidebarCollapsed
             ? 'opacity-100 border-[var(--border)]'
             : 'opacity-0 border-transparent pointer-events-none'
@@ -2006,7 +2170,7 @@ export function DroneSidebar({
           disabled={!collapsedRailInteractive}
           tabIndex={collapsedRailInteractive ? 0 : -1}
         >
-          <IconSidebarExpand />
+          <IconSidebarExpand className={sidebarDirectionalIconClass} />
         </SidebarIconButton>
         <SidebarIconButton
           onClick={() => { setSidebarCollapsed(false); onOpenDraftChatComposer(); }}

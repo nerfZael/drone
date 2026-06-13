@@ -107,6 +107,28 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
     return removed;
   }
 
+  function materializeSeedChatConfigOnDroneEntry(droneEntry: any, seedRaw: any) {
+    if (!droneEntry || typeof droneEntry !== 'object' || !seedRaw || typeof seedRaw !== 'object') return;
+    const seedAgent = deps.parseSeedAgent(seedRaw?.agent);
+    const hasSeedModel = Object.prototype.hasOwnProperty.call(seedRaw, 'model');
+    if (!seedAgent && !hasSeedModel) return;
+
+    const chatName = deps.normalizeChatName(seedRaw?.chatName ?? 'default');
+    const seedModel = deps.normalizeChatModel(seedRaw?.model);
+    droneEntry.chats = droneEntry.chats && typeof droneEntry.chats === 'object' ? droneEntry.chats : {};
+    const entry =
+      droneEntry.chats[chatName] && typeof droneEntry.chats[chatName] === 'object'
+        ? droneEntry.chats[chatName]
+        : { createdAt: deps.nowIso() };
+    if (!(typeof entry.createdAt === 'string' && entry.createdAt.trim())) entry.createdAt = deps.nowIso();
+    if (seedAgent) entry.agent = seedAgent;
+    if (hasSeedModel) {
+      if (seedModel) entry.model = seedModel;
+      else delete entry.model;
+    }
+    droneEntry.chats[chatName] = entry;
+  }
+
   async function provisionDroneFromPending(name: string) {
     const regAny: any = await loadRegistry();
     const pending = regAny?.pending?.[name];
@@ -254,6 +276,7 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
             }
           }
         }
+        materializeSeedChatConfigOnDroneEntry(d, pendingLatest?.seed);
         regLatest.drones[found.key] = d;
       });
     } catch {
@@ -413,8 +436,9 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
       }
     }
 
+    let startupQueuedPromptChats: string[] = [];
     if (startupQueuedPrompts.length > 0) {
-      const touchedChats = await updateRegistry((reg4Any: any) => {
+      startupQueuedPromptChats = await updateRegistry((reg4Any: any) => {
         const found = findDroneEntryByIdentity(reg4Any, pendingDroneId);
         if (!found) return [] as string[];
         const d: any = found.entry;
@@ -445,10 +469,6 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
         reg4Any.drones[found.key] = d;
         return Array.from(touched.values());
       });
-
-      for (const chatName of touchedChats) {
-        deps.enqueuePendingPromptPump(pendingDroneId, String(chatName));
-      }
     }
 
     try {
@@ -465,6 +485,10 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
         droneId: pendingDroneId,
         error: String(e?.message ?? String(e)),
       });
+    }
+
+    for (const chatName of startupQueuedPromptChats) {
+      deps.enqueuePendingPromptPump(pendingDroneId, String(chatName));
     }
 
     if (!seed) return;

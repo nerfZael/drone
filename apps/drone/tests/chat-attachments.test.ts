@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   buildChatAttachmentsDirectory,
   buildChatImageAttachmentRefs,
+  codexImageAttachmentFlags,
   normalizeChatImageAttachments,
   promptWithImageAttachments,
   type ChatImageAttachment,
@@ -92,6 +93,23 @@ describe('promptWithImageAttachments', () => {
   });
 });
 
+describe('codexImageAttachmentFlags', () => {
+  test('builds Codex image flags for image attachments only', () => {
+    const flags = codexImageAttachmentFlags([
+      {
+        mime: 'image/png',
+        path: '/work/repo/.drone-hub/attachments/default/prompt-123/screenshot one.png',
+      },
+      {
+        mime: 'text/plain',
+        path: '/work/repo/.drone-hub/attachments/default/prompt-123/pasted-text.txt',
+      },
+    ]);
+
+    expect(flags).toBe(" --image '/work/repo/.drone-hub/attachments/default/prompt-123/screenshot one.png' --");
+  });
+});
+
 describe('normalizeChatImageAttachments', () => {
   test('accepts text attachments alongside images', () => {
     const attachments = normalizeChatImageAttachments([
@@ -102,5 +120,15 @@ describe('normalizeChatImageAttachments', () => {
     expect(attachments).toHaveLength(2);
     expect(attachments[0]?.mime).toBe('text/plain');
     expect(attachments[1]?.mime).toBe('image/png');
+  });
+
+  test('deduplicates staged filenames for attachments with the same name', () => {
+    const attachments = normalizeChatImageAttachments([
+      { name: 'image.png', mime: 'image/png', size: 5, dataBase64: 'aGVsbG8=' },
+      { name: 'image.png', mime: 'image/png', size: 5, dataBase64: 'd29ybGQ=' },
+      { name: 'IMAGE.png', mime: 'image/png', size: 1, dataBase64: 'IQ==' },
+    ]);
+
+    expect(attachments.map((attachment) => attachment.fileName)).toEqual(['image.png', 'image-2.png', 'IMAGE-3.png']);
   });
 });

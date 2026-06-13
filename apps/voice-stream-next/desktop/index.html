@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Drone Desktop</title>
+    <link rel="icon" href="../assets/app-icon.png" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body class="is-signed-out">
+    <section class="auth-screen" aria-labelledby="auth-title">
+      <button id="authCloseButton" class="secondary window-button auth-close" type="button" aria-label="Close Drone">x</button>
+      <div class="auth-panel">
+        <div class="brand-lockup auth-brand">
+          <span class="brand-mark"></span>
+          <div>
+            <p class="eyebrow">Drone</p>
+            <h1 id="auth-title">Sign in to Drone</h1>
+          </div>
+        </div>
+        <p id="authStatus" class="auth-status muted">Sign in with your browser to connect this desktop.</p>
+        <div class="auth-qr-panel" aria-label="Phone sign-in QR">
+          <div id="desktopAuthQrFrame" class="auth-qr-frame">
+            <span id="desktopAuthQrPlaceholder">QR</span>
+            <img id="desktopAuthQrImage" alt="Desktop sign-in QR code" hidden />
+          </div>
+          <div class="auth-qr-copy">
+            <strong>Scan with your phone</strong>
+            <span id="desktopAuthQrStatus">Use the signed-in Android app to connect this desktop.</span>
+          </div>
+        </div>
+        <div class="auth-actions">
+          <button id="signInButton" type="button">Sign in</button>
+          <button id="refreshQrButton" class="secondary" type="button">Refresh QR</button>
+          <button id="openWebButton" class="secondary" type="button">Open web</button>
+        </div>
+      </div>
+    </section>
+    <main class="shell">
+      <header class="topbar">
+        <div class="brand-lockup">
+          <span class="brand-mark"></span>
+          <div>
+            <h1>Drone</h1>
+          </div>
+        </div>
+
+        <div class="topbar-actions">
+          <div class="status-account-block">
+            <span id="connectionDot" class="dot"></span>
+            <div>
+              <strong id="connectionLabel">Disconnected</strong>
+              <span id="deviceLabel">No device connected</span>
+              <span class="sr-only" id="accountLabel">Connected</span>
+              <span class="sr-only" id="accountDetail">Desktop voice</span>
+            </div>
+            <button id="signOutButton" class="secondary" type="button">Log out</button>
+          </div>
+          <div class="settings-popover">
+            <button id="settingsButton" class="secondary window-button icon-button" type="button" aria-label="Settings" aria-expanded="false" title="Settings">
+              <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"></path>
+                <path d="M19.4 15a1.8 1.8 0 0 0 .36 1.98l.05.05a2.1 2.1 0 0 1-2.97 2.97l-.05-.05a1.8 1.8 0 0 0-1.98-.36 1.8 1.8 0 0 0-1.1 1.65V21a2.1 2.1 0 0 1-4.2 0v-.08a1.8 1.8 0 0 0-1.18-1.65 1.8 1.8 0 0 0-1.98.36l-.05.05a2.1 2.1 0 0 1-2.97-2.97l.05-.05A1.8 1.8 0 0 0 3.74 15a1.8 1.8 0 0 0-1.65-1.1H2a2.1 2.1 0 0 1 0-4.2h.08a1.8 1.8 0 0 0 1.65-1.18 1.8 1.8 0 0 0-.36-1.98l-.05-.05a2.1 2.1 0 0 1 2.97-2.97l.05.05a1.8 1.8 0 0 0 1.98.36H8.4a1.8 1.8 0 0 0 1.1-1.65V2a2.1 2.1 0 0 1 4.2 0v.08a1.8 1.8 0 0 0 1.1 1.65 1.8 1.8 0 0 0 1.98-.36l.05-.05a2.1 2.1 0 0 1 2.97 2.97l-.05.05a1.8 1.8 0 0 0-.36 1.98v.08a1.8 1.8 0 0 0 1.65 1.1H22a2.1 2.1 0 0 1 0 4.2h-.08A1.8 1.8 0 0 0 19.4 15Z"></path>
+              </svg>
+            </button>
+            <div id="settingsPanel" class="settings-panel" hidden>
+              <div class="settings-tabs" role="tablist" aria-label="Settings sections">
+                <button id="audioSettingsTab" class="settings-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="audioSettingsPanel">Audio</button>
+                <button id="shortcutsSettingsTab" class="settings-tab" type="button" role="tab" aria-selected="false" aria-controls="shortcutsSettingsPanel">Shortcuts</button>
+                <button id="logsSettingsTab" class="settings-tab" type="button" role="tab" aria-selected="false" aria-controls="logsSettingsPanel">Logs</button>
+              </div>
+              <div id="audioSettingsPanel" class="settings-tab-panel is-active" role="tabpanel" aria-labelledby="audioSettingsTab">
+                <div class="voice-device-panel" aria-label="Audio devices">
+                  <div class="device-picker">
+                    <span class="device-picker-title">Input</span>
+                    <button id="inputDeviceButton" class="device-picker-button" type="button" aria-haspopup="listbox" aria-expanded="false">
+                      <span id="inputDeviceLabel">System default</span>
+                      <span class="device-picker-chevron" aria-hidden="true"></span>
+                    </button>
+                    <div id="inputDeviceMenu" class="device-picker-menu" role="listbox" hidden></div>
+                    <select id="inputDeviceSelect" class="device-select-hidden" tabindex="-1" aria-hidden="true"></select>
+                  </div>
+                  <div class="device-picker">
+                    <span class="device-picker-title">Output</span>
+                    <button id="outputDeviceButton" class="device-picker-button" type="button" aria-haspopup="listbox" aria-expanded="false">
+                      <span id="outputDeviceLabel">System default</span>
+                      <span class="device-picker-chevron" aria-hidden="true"></span>
+                    </button>
+                    <div id="outputDeviceMenu" class="device-picker-menu" role="listbox" hidden></div>
+                    <select id="outputDeviceSelect" class="device-select-hidden" tabindex="-1" aria-hidden="true"></select>
+                  </div>
+                </div>
+                <label class="settings-check-row">
+                  <input id="suppressWakeDuringPlaybackCheckbox" type="checkbox">
+                  <span>
+                    <span class="device-picker-title">Pause commands during playback</span>
+                    <span class="shortcut-help">Ignore wake commands while assistant audio is playing on this desktop.</span>
+                  </span>
+                </label>
+                <div class="extensions-config-panel" aria-label="Local extensions">
+                  <div class="extensions-config-header">
+                    <span class="device-picker-title">Extensions</span>
+                    <button id="reloadExtensionsButton" class="secondary mini-button" type="button">Reload</button>
+                  </div>
+                  <div class="workspace-extension-row" aria-label="Workspace extension">
+                    <div>
+                      <span class="workspace-extension-title">Workspace</span>
+                      <span id="workspaceRootsStatus" class="workspace-extension-status">Not enabled.</span>
+                    </div>
+                    <div class="workspace-extension-actions">
+                      <button id="enableWorkspaceExtensionButton" class="secondary mini-button" type="button">Enable</button>
+                      <button id="addWorkspaceRootButton" class="secondary mini-button" type="button">Add root</button>
+                    </div>
+                  </div>
+                  <div id="workspaceRootsList" class="workspace-roots-list" aria-label="Workspace roots"></div>
+                  <div id="extensionDropzone" class="extension-dropzone" tabindex="0" aria-label="Local extension file drop area">
+                    <button id="addExtensionFileButton" class="secondary mini-button" type="button">Add file</button>
+                    <span>Drop .cjs or .js file</span>
+                  </div>
+                  <textarea id="extensionsConfigInput" spellcheck="false" placeholder='[{"id":"drone-hub","name":"Drone Hub","path":"/absolute/path/to/index.cjs","enabled":true}]'></textarea>
+                  <p class="extensions-warning">Local extensions run code on this computer. Use absolute paths and only load files you trust.</p>
+                  <div class="extensions-config-actions">
+                    <button id="saveExtensionsButton" class="secondary mini-button" type="button">Save extensions</button>
+                  </div>
+                  <div id="extensionsStatus" class="extensions-status muted">No local extensions configured.</div>
+                </div>
+              </div>
+              <div id="shortcutsSettingsPanel" class="settings-tab-panel" role="tabpanel" aria-labelledby="shortcutsSettingsTab" hidden>
+                <div class="shortcut-panel" aria-label="Keyboard shortcuts">
+                  <div>
+                    <span class="device-picker-title">Activate transcription</span>
+                    <p class="shortcut-help">Use this global shortcut to record dictation, then press it again to stop and copy the transcription.</p>
+                  </div>
+                  <div class="shortcut-row">
+                    <button id="transcriptionShortcutCapture" class="shortcut-capture" type="button" data-shortcut-capture="true">Ctrl/Cmd+Shift+Space</button>
+                    <button id="transcriptionShortcutClear" class="secondary mini-button" type="button">Clear</button>
+                    <button id="transcriptionShortcutReset" class="secondary mini-button" type="button">Reset</button>
+                  </div>
+                  <p id="transcriptionShortcutStatus" class="shortcut-status muted">Checking shortcut registration.</p>
+                  <div>
+                    <span class="device-picker-title">Toggle awake and sleep</span>
+                    <p class="shortcut-help">From off, this turns voice on awake. When awake it goes to sleep; when sleeping it goes back to awake.</p>
+                  </div>
+                  <div class="shortcut-row">
+                    <button id="awakeSleepToggleShortcutCapture" class="shortcut-capture" type="button" data-shortcut-capture="true">Ctrl/Cmd+Shift+A</button>
+                    <button id="awakeSleepToggleShortcutClear" class="secondary mini-button" type="button">Clear</button>
+                    <button id="awakeSleepToggleShortcutReset" class="secondary mini-button" type="button">Reset</button>
+                  </div>
+                  <p id="awakeSleepToggleShortcutStatus" class="shortcut-status muted">Checking shortcut registration.</p>
+                  <div>
+                    <span class="device-picker-title">Turn voice off</span>
+                    <p class="shortcut-help">Stops listening and turns voice off from any awake or sleep state.</p>
+                  </div>
+                  <div class="shortcut-row">
+                    <button id="turnOffShortcutCapture" class="shortcut-capture" type="button" data-shortcut-capture="true">Ctrl/Cmd+Shift+O</button>
+                    <button id="turnOffShortcutClear" class="secondary mini-button" type="button">Clear</button>
+                    <button id="turnOffShortcutReset" class="secondary mini-button" type="button">Reset</button>
+                  </div>
+                  <p id="turnOffShortcutStatus" class="shortcut-status muted">Checking shortcut registration.</p>
+                  <div>
+                    <span class="device-picker-title">Pause or resume recording</span>
+                    <p class="shortcut-help">Temporarily pauses the current recording without submitting or cancelling it.</p>
+                  </div>
+                  <div class="shortcut-row">
+                    <button id="pauseResumeShortcutCapture" class="shortcut-capture" type="button" data-shortcut-capture="true">Ctrl/Cmd+Shift+P</button>
+                    <button id="pauseResumeShortcutClear" class="secondary mini-button" type="button">Clear</button>
+                    <button id="pauseResumeShortcutReset" class="secondary mini-button" type="button">Reset</button>
+                  </div>
+                  <p id="pauseResumeShortcutStatus" class="shortcut-status muted">Checking shortcut registration.</p>
+                </div>
+              </div>
+              <div id="logsSettingsPanel" class="settings-tab-panel" role="tabpanel" aria-labelledby="logsSettingsTab" hidden>
+                <div class="command-log-panel" aria-label="Voice command logs">
+                  <div class="command-log-actions">
+                    <span class="device-picker-title">Voice commands</span>
+                    <div>
+                      <button id="refreshCommandLogsButton" class="secondary mini-button" type="button">Refresh</button>
+                      <button id="copyCommandLogsButton" class="secondary mini-button" type="button">Copy</button>
+                      <button id="clearCommandLogsButton" class="secondary mini-button" type="button">Clear</button>
+                    </div>
+                  </div>
+                  <div id="commandLogList" class="command-log-list" aria-live="polite"></div>
+                  <p id="commandLogStatus" class="shortcut-status muted">No local command logs loaded.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <button id="compactButton" class="secondary window-button" type="button" aria-label="Minimize to voice controls">Minimize</button>
+          <button id="closeButton" class="secondary window-button" type="button" aria-label="Close Drone">x</button>
+        </div>
+      </header>
+
+      <section class="voice-stage" aria-label="Voice controls">
+        <button id="expandButton" class="expand-button" type="button" aria-label="Expand Drone">Open</button>
+
+        <div class="voice-copy">
+          <p id="voiceAuthStatus" class="auth-status muted">Checking session.</p>
+        </div>
+
+        <button id="primaryVoiceButton" class="voice-orb is-off" type="button" aria-label="Start desktop voice">
+          <span class="orb-ring"></span>
+          <span class="mic-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <rect x="9" y="3" width="6" height="11" rx="3"></rect>
+              <path d="M5 11a7 7 0 0 0 14 0"></path>
+              <path d="M12 18v3"></path>
+              <path d="M8 21h8"></path>
+            </svg>
+          </span>
+          <strong id="primaryVoiceMode">Off</strong>
+          <span id="primaryVoiceAction">Start voice</span>
+        </button>
+
+        <button id="offButton" class="off-button" type="button">Off</button>
+        <button id="assistantSpeechPlaybackButton" class="speech-playback-button" type="button" aria-pressed="true">Speech on</button>
+
+        <div class="meter-shell" aria-hidden="true">
+          <div id="meterBar" class="meter-bar"></div>
+        </div>
+
+        <p id="micStatus" class="voice-status">Connect this desktop, then start voice.</p>
+      </section>
+
+    </main>
+    <script src="../shared/approval-code.js"></script>
+    <script src="../shared/voice-phrases.js"></script>
+    <script src="../shared/pcm-capture-buffer.js"></script>
+    <script src="../shared/local-voice-cues.js"></script>
+    <script src="../shared/pairing-payload-parser.js"></script>
+    <script src="./renderer.js"></script>
+  </body>
+</html>

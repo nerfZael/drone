@@ -142,7 +142,7 @@ function formatRepoPullSuccessMessage(data: any, currentDrone: DroneSummary | nu
   const suffix: string[] = [];
   if (autoCommitSha) suffix.push(`Snapshot commit ${autoCommitSha} captured prior drone edits.`);
   if (keptDirtyChanges) suffix.push('Uncommitted drone edits remain in the drone workspace and were not applied.');
-  suffix.push('Review the host working tree and commit when ready.');
+  suffix.push('Review the pending host merge and commit or abort when ready.');
 
   return {
     title: 'Drone changes applied to host',
@@ -439,7 +439,7 @@ export function useWorkspaceActions({
         const conflictFiles = Array.isArray(response.data?.conflictFiles)
           ? response.data.conflictFiles.map((f: any) => String(f ?? '').trim()).filter(Boolean)
           : [];
-        const preview = conflictFiles.slice(0, 8);
+        const preview: string[] = conflictFiles.slice(0, 8);
         const suffix = conflictFiles.length > preview.length ? `\n- and ${conflictFiles.length - preview.length} more` : '';
         const confirmed = window.confirm(
           [

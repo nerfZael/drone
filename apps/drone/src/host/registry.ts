@@ -141,7 +141,7 @@ type DroneRegistryV1 = {
       updatedAt?: string;
     };
     llm?: {
-      provider?: 'openai' | 'gemini';
+      provider?: 'openai' | 'gemini' | 'codex';
       updatedAt?: string;
     };
     openai?: {
@@ -150,6 +150,45 @@ type DroneRegistryV1 = {
     };
     gemini?: {
       apiKey?: string;
+      updatedAt?: string;
+    };
+    groq?: {
+      apiKey?: string;
+      updatedAt?: string;
+    };
+    exa?: {
+      apiKey?: string;
+      updatedAt?: string;
+    };
+    voiceStream?: {
+      pairingPassword?: string;
+      updatedAt?: string;
+    };
+    desktopVoice?: {
+      modelId?: string;
+      updatedAt?: string;
+    };
+    voiceApproval?: {
+      triggerPhrase?: string;
+      unlockCode?: string;
+      lockCode?: string;
+      lockedOffCode?: string;
+      minDigits?: number;
+      maxDigits?: number;
+      stableMs?: number;
+      collectTimeoutMs?: number;
+      duplicateCooldownMs?: number;
+      finalizeCheckIntervalMs?: number;
+      postPromptCommandSuppressionMs?: number;
+      updatedAt?: string;
+    };
+    voiceTranscription?: {
+      finalMode?: 'full-recording' | 'segments';
+      updatedAt?: string;
+    };
+    voiceActivation?: {
+      normalAliases?: string[];
+      realTimeAliases?: string[];
       updatedAt?: string;
     };
     filesystem?: {
@@ -164,6 +203,13 @@ type DroneRegistryV1 = {
     agentSuggestion?: {
       policyMarkdown?: string;
       enabledByDefault?: boolean;
+      updatedAt?: string;
+    };
+    assistant?: {
+      activeThreadId?: string | null;
+      threads?: unknown[];
+      systemPrompt?: string;
+      systemPromptUpdatedAt?: string;
       updatedAt?: string;
     };
     agents?: {

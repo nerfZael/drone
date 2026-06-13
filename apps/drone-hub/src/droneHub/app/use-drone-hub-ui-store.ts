@@ -34,9 +34,17 @@ import { profileStorageKey } from '../../profile-storage';
 
 type Updater<T> = T | ((prev: T) => T);
 
-type NameSuggestToast = null | { id: string; title?: string; message: string; tone?: 'success' | 'error' };
+type NameSuggestToast = null | {
+  id: string;
+  title?: string;
+  message: string;
+  tone?: 'success' | 'error';
+  voiceLevel?: number;
+  voiceActive?: boolean;
+};
 type ViewMode = 'grouped' | 'flat';
 type SidebarGroupingMode = 'groups' | 'repos';
+export type SidebarDockSide = 'left' | 'right';
 type FsExplorerView = 'list' | 'thumb';
 type OutputView = 'screen' | 'log';
 type KanbanBoardViewMode = 'board' | 'table';
@@ -78,6 +86,7 @@ type DroneHubUiState = {
   sidebarAutoMinimize: boolean;
   sidebarGroupingMode: SidebarGroupingMode;
   sidebarDensityMode: SidebarDensityMode;
+  sidebarDockSide: SidebarDockSide;
   appView: AppView;
   viewMode: ViewMode;
   collapsedGroups: Record<string, boolean>;
@@ -146,6 +155,7 @@ type DroneHubUiState = {
   setSidebarAutoMinimize: (next: Updater<boolean>) => void;
   setSidebarGroupingMode: (next: Updater<SidebarGroupingMode>) => void;
   setSidebarDensityMode: (next: Updater<SidebarDensityMode>) => void;
+  setSidebarDockSide: (next: Updater<SidebarDockSide>) => void;
   setAppView: (next: Updater<AppView>) => void;
   setViewMode: (next: Updater<ViewMode>) => void;
   setCollapsedGroups: (next: Updater<Record<string, boolean>>) => void;
@@ -305,6 +315,7 @@ type DroneHubUiPersistedState = Pick<
   | 'sidebarAutoMinimize'
   | 'sidebarGroupingMode'
   | 'sidebarDensityMode'
+  | 'sidebarDockSide'
   | 'appView'
   | 'viewMode'
   | 'collapsedGroups'
@@ -316,6 +327,9 @@ type DroneHubUiPersistedState = Pick<
   | 'hiddenSidebarGroups'
   | 'autoDelete'
   | 'terminalEmulator'
+  | 'selectedDrone'
+  | 'selectedDroneIds'
+  | 'selectedChat'
   | 'groupMultiChatColumnWidth'
   | 'groupMultiChatStatusSort'
   | 'outputView'
@@ -340,6 +354,9 @@ export function migrateDroneHubUiPersistedState(
 ): Partial<DroneHubUiPersistedState> {
   if (!persistedState || typeof persistedState !== 'object' || Array.isArray(persistedState)) return {};
   const migrated = { ...(persistedState as Partial<DroneHubUiPersistedState>) };
+  if (Object.prototype.hasOwnProperty.call(migrated, 'sidebarDockSide')) {
+    migrated.sidebarDockSide = normalizeSidebarDockSide(migrated.sidebarDockSide);
+  }
   const migratedShortcutBindings = migrateLegacyShortcutBindings(migrated.shortcutBindings);
   if (migratedShortcutBindings !== undefined) {
     migrated.shortcutBindings = migratedShortcutBindings as ShortcutBindingMap;
@@ -417,6 +434,10 @@ function normalizeSidebarGroupingMode(value: unknown): SidebarGroupingMode {
 
 function normalizeSidebarDensityMode(value: unknown): SidebarDensityMode {
   return value === 'compact' || value === 'comfortable' ? value : 'default';
+}
+
+function normalizeSidebarDockSide(value: unknown): SidebarDockSide {
+  return value === 'right' ? 'right' : 'left';
 }
 
 function normalizeOutputView(value: unknown): OutputView {
@@ -657,6 +678,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       sidebarAutoMinimize: false,
       sidebarGroupingMode: 'repos',
       sidebarDensityMode: 'default',
+      sidebarDockSide: 'left',
       appView: 'workspace',
       viewMode: 'grouped',
       collapsedGroups: {},
@@ -737,6 +759,8 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       setSidebarGroupingMode: (next) => set((s) => ({ sidebarGroupingMode: resolveNext(s.sidebarGroupingMode, next) })),
       setSidebarDensityMode: (next) =>
         set((s) => ({ sidebarDensityMode: normalizeSidebarDensityMode(resolveNext(s.sidebarDensityMode, next)) })),
+      setSidebarDockSide: (next) =>
+        set((s) => ({ sidebarDockSide: normalizeSidebarDockSide(resolveNext(s.sidebarDockSide, next)) })),
       setAppView: (next) => set((s) => ({ appView: resolveNext(s.appView, next) })),
       setViewMode: (next) => set((s) => ({ viewMode: resolveNext(s.viewMode, next) })),
       setCollapsedGroups: (next) => set((s) => ({ collapsedGroups: resolveNext(s.collapsedGroups, next) })),
@@ -1011,6 +1035,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         sidebarAutoMinimize: state.sidebarAutoMinimize,
         sidebarGroupingMode: state.sidebarGroupingMode,
         sidebarDensityMode: state.sidebarDensityMode,
+        sidebarDockSide: state.sidebarDockSide,
         appView: state.appView,
         viewMode: state.viewMode,
         collapsedGroups: state.collapsedGroups,
@@ -1022,6 +1047,9 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         hiddenSidebarGroups: state.hiddenSidebarGroups,
         autoDelete: state.autoDelete,
         terminalEmulator: state.terminalEmulator,
+        selectedDrone: state.selectedDrone,
+        selectedDroneIds: state.selectedDroneIds,
+        selectedChat: state.selectedChat,
         groupMultiChatColumnWidth: state.groupMultiChatColumnWidth,
         groupMultiChatStatusSort: state.groupMultiChatStatusSort,
         outputView: state.outputView,
@@ -1094,6 +1122,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           sidebarDensityMode: normalizeSidebarDensityMode(
             persisted.sidebarDensityMode ?? currentState.sidebarDensityMode,
           ),
+          sidebarDockSide: normalizeSidebarDockSide(persisted.sidebarDockSide ?? currentState.sidebarDockSide),
           viewMode: normalizeViewMode(persisted.viewMode ?? currentState.viewMode),
           collapsedGroups: normalizeCollapsedGroups(persisted.collapsedGroups ?? currentState.collapsedGroups),
           sidebarGroupOrder: normalizeSidebarGroupOrder(
@@ -1114,6 +1143,9 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           hiddenSidebarGroups: normalizeSidebarGroupOrder(
             persisted.hiddenSidebarGroups ?? currentState.hiddenSidebarGroups,
           ),
+          selectedDrone: normalizeTrimmedString(persisted.selectedDrone) || null,
+          selectedDroneIds: normalizeSidebarGroupOrder(persisted.selectedDroneIds),
+          selectedChat: normalizeTrimmedString(persisted.selectedChat) || currentState.selectedChat,
           groupMultiChatColumnWidth: clampGroupMultiChatColumnWidthPx(
             Number(persisted.groupMultiChatColumnWidth ?? currentState.groupMultiChatColumnWidth),
           ),
@@ -1174,6 +1206,7 @@ export function useDroneHubAppModelUiState() {
       viewMode: s.viewMode,
       sidebarGroupingMode: s.sidebarGroupingMode,
       sidebarDensityMode: s.sidebarDensityMode,
+      sidebarDockSide: s.sidebarDockSide,
       collapsedGroups: s.collapsedGroups,
       sidebarGroupOrder: s.sidebarGroupOrder,
       sidebarDroneOrderByGroup: s.sidebarDroneOrderByGroup,
@@ -1200,6 +1233,7 @@ export function useDroneHubAppModelUiState() {
       fsExplorerView: s.fsExplorerView,
       showCanvasLastMessagePreviews: s.showCanvasLastMessagePreviews,
       spawnContextRepoPath: s.spawnContextRepoPath,
+      spawnContextByRepoKey: s.spawnContextByRepoKey,
       spawnAgentKey: s.spawnAgentKey,
       spawnModel: s.spawnModel,
       seenModelIds: s.seenModelIds,
@@ -1229,6 +1263,7 @@ export function useDroneHubAppModelUiState() {
       setAppView: s.setAppView,
       setSidebarGroupingMode: s.setSidebarGroupingMode,
       setSidebarDensityMode: s.setSidebarDensityMode,
+      setSidebarDockSide: s.setSidebarDockSide,
       setCollapsedGroups: s.setCollapsedGroups,
       setSidebarGroupOrder: s.setSidebarGroupOrder,
       setSidebarDroneOrderByGroup: s.setSidebarDroneOrderByGroup,
@@ -1294,6 +1329,7 @@ export function useDroneSidebarUiState() {
       sidebarAutoMinimize: s.sidebarAutoMinimize,
       sidebarGroupingMode: s.sidebarGroupingMode,
       sidebarDensityMode: s.sidebarDensityMode,
+      sidebarDockSide: s.sidebarDockSide,
       sidebarGroupOrder: s.sidebarGroupOrder,
       sidebarRepoScopedGroupByPath: s.sidebarRepoScopedGroupByPath,
       sidebarDroneOrderByGroup: s.sidebarDroneOrderByGroup,
@@ -1308,6 +1344,7 @@ export function useDroneSidebarUiState() {
       setSidebarAutoMinimize: s.setSidebarAutoMinimize,
       setSidebarGroupingMode: s.setSidebarGroupingMode,
       setSidebarDensityMode: s.setSidebarDensityMode,
+      setSidebarDockSide: s.setSidebarDockSide,
       setCollapsedGroups: s.setCollapsedGroups,
       setSidebarGroupOrder: s.setSidebarGroupOrder,
       setSidebarRepoScopedGroupByPath: s.setSidebarRepoScopedGroupByPath,

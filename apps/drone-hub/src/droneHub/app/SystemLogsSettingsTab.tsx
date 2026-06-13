@@ -1,12 +1,164 @@
 import React from 'react';
 import { IconChevron, IconCopy } from './icons';
 import type { UseHubLogsResult } from './use-hub-logs';
+import type { HubLogsResponse } from './settings-types';
 
 type SystemLogsSettingsTabProps = {
   hubLogsState: UseHubLogsResult;
   hubLogsTailLines: number;
   hubLogsMaxBytes: number;
 };
+
+type LogPanelProps = {
+  title: string;
+  description: string;
+  emptyLabel: string;
+  loadingLabel: string;
+  copyTitle: string;
+  refreshTitle: string;
+  expandedLabel: string;
+  collapsedLabel: string;
+  copiedNotice: string | null;
+  logs: HubLogsResponse | null;
+  loading: boolean;
+  error: string | null;
+  expanded: boolean;
+  textareaRef: React.RefObject<HTMLTextAreaElement>;
+  setExpanded: React.Dispatch<React.SetStateAction<boolean>>;
+  loadLogs: () => Promise<void>;
+  copyLogs: () => Promise<void>;
+  handleScroll: (e: React.UIEvent<HTMLTextAreaElement>) => void;
+  fallbackTailLines: number;
+  fallbackMaxBytes: number;
+};
+
+function LogPanel({
+  title,
+  description,
+  emptyLabel,
+  loadingLabel,
+  copyTitle,
+  refreshTitle,
+  expandedLabel,
+  collapsedLabel,
+  copiedNotice,
+  logs,
+  loading,
+  error,
+  expanded,
+  textareaRef,
+  setExpanded,
+  loadLogs,
+  copyLogs,
+  handleScroll,
+  fallbackTailLines,
+  fallbackMaxBytes,
+}: LogPanelProps) {
+  return (
+    <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => setExpanded((v) => !v)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setExpanded((v) => !v);
+          }
+        }}
+        className="flex flex-wrap items-center justify-between gap-2 rounded px-1 py-0.5 hover:bg-[var(--hover)] transition-colors cursor-pointer"
+        aria-expanded={expanded}
+        aria-label={expanded ? expandedLabel : collapsedLabel}
+      >
+        <div className="inline-flex items-center gap-2 min-w-0">
+          <IconChevron down={expanded} className="text-[var(--muted-dim)] opacity-80" />
+          <div>
+            <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+              {title}
+            </div>
+            <div className="text-[11px] text-[var(--muted-dim)] mt-1">{description}</div>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              void loadLogs();
+            }}
+            disabled={loading}
+            className={`h-8 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+              loading
+                ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+            }`}
+            style={{ fontFamily: 'var(--display)' }}
+            title={refreshTitle}
+          >
+            {loading ? 'Refreshing...' : 'Refresh'}
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              void copyLogs();
+            }}
+            disabled={loading || !String(logs?.text ?? '').trim()}
+            className={`h-8 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all inline-flex items-center gap-1.5 ${
+              loading || !String(logs?.text ?? '').trim()
+                ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+            }`}
+            style={{ fontFamily: 'var(--display)' }}
+            title={copyTitle}
+          >
+            <IconCopy className="opacity-80" />
+            Copy
+          </button>
+        </div>
+      </div>
+
+      {expanded && (
+        <>
+          {error && (
+            <div className="rounded border border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
+              {error}
+            </div>
+          )}
+          {copiedNotice && (
+            <div className="rounded border border-[rgba(52,211,153,.2)] bg-[rgba(16,185,129,.08)] px-3 py-2 text-[12px] text-[#34d399]">
+              {copiedNotice}
+            </div>
+          )}
+
+          <div className="text-[11px] text-[var(--muted-dim)] leading-relaxed">
+            {logs?.logPath ? (
+              <>
+                <span className="font-mono text-[var(--fg-secondary)]">{logs.logPath}</span>
+                {logs.updatedAt ? ` • Updated ${new Date(logs.updatedAt).toLocaleString()}` : ''}
+                {logs.truncated ? ' • Tail view (truncated)' : ''}
+              </>
+            ) : (
+              emptyLabel
+            )}
+          </div>
+
+          <textarea
+            ref={textareaRef}
+            readOnly
+            value={logs?.text ?? ''}
+            onScroll={handleScroll}
+            placeholder={loading ? loadingLabel : emptyLabel}
+            className="w-full min-h-[220px] max-h-[55vh] rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-3 py-2 text-[12px] leading-relaxed text-[var(--fg-secondary)] font-mono resize-y focus:outline-none"
+          />
+          <div className="text-[10px] text-[var(--muted-dim)]">
+            Showing up to {(logs?.tailLines ?? fallbackTailLines).toLocaleString()} lines and {(logs?.maxBytes ?? fallbackMaxBytes).toLocaleString()} bytes.
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 export function SystemLogsSettingsTab({
   hubLogsState,
@@ -24,110 +176,64 @@ export function SystemLogsSettingsTab({
     loadHubLogs,
     copyHubLogs,
     handleHubLogsScroll,
+    androidLogs,
+    androidLogsLoading,
+    androidLogsError,
+    androidLogsNotice,
+    androidLogsExpanded,
+    androidLogsTextareaRef,
+    setAndroidLogsExpanded,
+    loadAndroidLogs,
+    copyAndroidLogs,
+    handleAndroidLogsScroll,
   } = hubLogsState;
 
   return (
-    <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={() => setHubLogsExpanded((v) => !v)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            setHubLogsExpanded((v) => !v);
-          }
-        }}
-        className="flex flex-wrap items-center justify-between gap-2 rounded px-1 py-0.5 hover:bg-[var(--hover)] transition-colors cursor-pointer"
-        aria-expanded={hubLogsExpanded}
-        aria-label={hubLogsExpanded ? 'Collapse hub logs' : 'Expand hub logs'}
-      >
-        <div className="inline-flex items-center gap-2 min-w-0">
-          <IconChevron down={hubLogsExpanded} className="text-[var(--muted-dim)] opacity-80" />
-          <div>
-            <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
-              Hub logs
-            </div>
-            <div className="text-[11px] text-[var(--muted-dim)] mt-1">Recent output from the Drone Hub process log.</div>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              void loadHubLogs();
-            }}
-            disabled={hubLogsLoading}
-            className={`h-8 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
-              hubLogsLoading
-                ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-            }`}
-            style={{ fontFamily: 'var(--display)' }}
-            title="Refresh hub logs"
-          >
-            {hubLogsLoading ? 'Refreshing…' : 'Refresh'}
-          </button>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              void copyHubLogs();
-            }}
-            disabled={hubLogsLoading || !String(hubLogs?.text ?? '').trim()}
-            className={`h-8 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all inline-flex items-center gap-1.5 ${
-              hubLogsLoading || !String(hubLogs?.text ?? '').trim()
-                ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-            }`}
-            style={{ fontFamily: 'var(--display)' }}
-            title="Copy hub logs"
-          >
-            <IconCopy className="opacity-80" />
-            Copy
-          </button>
-        </div>
-      </div>
-
-      {hubLogsExpanded && (
-        <>
-          {hubLogsError && (
-            <div className="rounded border border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
-              {hubLogsError}
-            </div>
-          )}
-          {hubLogsNotice && (
-            <div className="rounded border border-[rgba(52,211,153,.2)] bg-[rgba(16,185,129,.08)] px-3 py-2 text-[12px] text-[#34d399]">
-              {hubLogsNotice}
-            </div>
-          )}
-
-          <div className="text-[11px] text-[var(--muted-dim)] leading-relaxed">
-            {hubLogs?.logPath ? (
-              <>
-                <span className="font-mono text-[var(--fg-secondary)]">{hubLogs.logPath}</span>
-                {hubLogs.updatedAt ? ` • Updated ${new Date(hubLogs.updatedAt).toLocaleString()}` : ''}
-                {hubLogs.truncated ? ' • Tail view (truncated)' : ''}
-              </>
-            ) : (
-              'No hub log file found yet.'
-            )}
-          </div>
-
-          <textarea
-            ref={hubLogsTextareaRef}
-            readOnly
-            value={hubLogs?.text ?? ''}
-            onScroll={handleHubLogsScroll}
-            placeholder={hubLogsLoading ? 'Loading logs…' : 'No hub logs available yet.'}
-            className="w-full min-h-[220px] max-h-[55vh] rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-3 py-2 text-[12px] leading-relaxed text-[var(--fg-secondary)] font-mono resize-y focus:outline-none"
-          />
-          <div className="text-[10px] text-[var(--muted-dim)]">
-            Showing up to {(hubLogs?.tailLines ?? hubLogsTailLines).toLocaleString()} lines and {(hubLogs?.maxBytes ?? hubLogsMaxBytes).toLocaleString()} bytes.
-          </div>
-        </>
-      )}
+    <div className="flex flex-col gap-3">
+      <LogPanel
+        title="Hub logs"
+        description="Recent output from the Drone Hub process log."
+        emptyLabel="No hub log file found yet."
+        loadingLabel="Loading hub logs..."
+        copyTitle="Copy hub logs"
+        refreshTitle="Refresh hub logs"
+        expandedLabel="Collapse hub logs"
+        collapsedLabel="Expand hub logs"
+        copiedNotice={hubLogsNotice}
+        logs={hubLogs}
+        loading={hubLogsLoading}
+        error={hubLogsError}
+        expanded={hubLogsExpanded}
+        textareaRef={hubLogsTextareaRef}
+        setExpanded={setHubLogsExpanded}
+        loadLogs={loadHubLogs}
+        copyLogs={copyHubLogs}
+        handleScroll={handleHubLogsScroll}
+        fallbackTailLines={hubLogsTailLines}
+        fallbackMaxBytes={hubLogsMaxBytes}
+      />
+      <LogPanel
+        title="Android voice logs"
+        description="Recent diagnostics uploaded by the Android Voice Stream app."
+        emptyLabel="No Android voice log file found yet."
+        loadingLabel="Loading Android voice logs..."
+        copyTitle="Copy Android voice logs"
+        refreshTitle="Refresh Android voice logs"
+        expandedLabel="Collapse Android voice logs"
+        collapsedLabel="Expand Android voice logs"
+        copiedNotice={androidLogsNotice}
+        logs={androidLogs}
+        loading={androidLogsLoading}
+        error={androidLogsError}
+        expanded={androidLogsExpanded}
+        textareaRef={androidLogsTextareaRef}
+        setExpanded={setAndroidLogsExpanded}
+        loadLogs={loadAndroidLogs}
+        copyLogs={copyAndroidLogs}
+        handleScroll={handleAndroidLogsScroll}
+        fallbackTailLines={hubLogsTailLines}
+        fallbackMaxBytes={hubLogsMaxBytes}
+      />
     </div>
   );
 }

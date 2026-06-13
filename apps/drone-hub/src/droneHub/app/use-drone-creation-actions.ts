@@ -602,6 +602,7 @@ export function useDroneCreationActions({
   const createDroneFromDraft = React.useCallback(
     async (opts?: {
       prompt?: string;
+      attachments?: ChatSendPayload['attachments'];
       name?: string;
       group?: string;
       createMode?: 'with-chat' | 'without-chat';
@@ -614,7 +615,7 @@ export function useDroneCreationActions({
       const effectiveCreateMode = opts?.createMode ?? draftCreateMode;
       const createWithoutChat = effectiveCreateMode === 'without-chat';
       const prompt = String(opts?.prompt ?? pending?.prompt ?? '').trim();
-      const draftAttachments = normalizeChatImageAttachmentPayloads(pending?.attachmentPayloads ?? []);
+      const draftAttachments = normalizeChatImageAttachmentPayloads(opts?.attachments ?? pending?.attachmentPayloads ?? []);
       const hasDraftAttachments = draftAttachments.length > 0;
       const shouldSeedPromptViaCreate = !createWithoutChat && !hasDraftAttachments && prompt.length > 0;
       const automationStartRaw = opts?.automationStart ?? null;
@@ -954,7 +955,7 @@ export function useDroneCreationActions({
       setDraftAutoRenaming(false);
       setDraftCreateOpen(false);
 
-      return await createDroneFromDraft({ prompt, autoRename: !draftCreateName.trim() });
+      return await createDroneFromDraft({ prompt, attachments, autoRename: !draftCreateName.trim() });
     },
     [
       createDroneFromDraft,

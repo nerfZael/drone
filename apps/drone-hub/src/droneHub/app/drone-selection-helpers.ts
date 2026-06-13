@@ -3,12 +3,12 @@ import type { DroneSummary } from '../types';
 
 export function resolveSelectedChatForDrone(args: {
   droneId: string;
-  drones: DroneSummary[];
+  droneById: Record<string, DroneSummary>;
   lastSelectedChatByDrone: Record<string, string>;
 }): string {
   const droneId = String(args.droneId ?? '').trim();
   if (!droneId) return 'default';
-  const drone = args.drones.find((item) => item.id === droneId) ?? null;
+  const drone = args.droneById[droneId] ?? null;
   const chats = normalizedDroneChats(drone);
   const remembered = String(args.lastSelectedChatByDrone[droneId] ?? '').trim();
   if (remembered && chats.includes(remembered)) return remembered;

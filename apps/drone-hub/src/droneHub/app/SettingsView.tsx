@@ -10,31 +10,29 @@ import { SkillLibrarySection } from './SkillLibrarySection';
 import { SyncSettingsTab } from './SyncSettingsTab';
 import { SystemLogsSettingsTab } from './SystemLogsSettingsTab';
 import { TrashBehaviorSettingsTab } from './TrashBehaviorSettingsTab';
+import { VoiceApprovalSettingsTab } from './VoiceApprovalSettingsTab';
 import { SETTINGS_TABS, type SettingsTabId } from './settings-tabs';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
+import { useAgentMessageAutoContinueSettings } from './use-agent-message-auto-continue-settings';
+import { useAgentSuggestionSettings } from './use-agent-suggestion-settings';
+import { useAgentsSettings } from './use-agents-settings';
 import type { UseDeleteActionSettingsResult } from './use-delete-action-settings';
-import type { UseAgentsSettingsResult } from './use-agents-settings';
-import type { UseAgentMessageAutoContinueSettingsResult } from './use-agent-message-auto-continue-settings';
-import type { UseAgentSuggestionSettingsResult } from './use-agent-suggestion-settings';
-import type { UseFilesystemSettingsResult } from './use-filesystem-settings';
-import type { UseGithubSettingsResult } from './use-github-settings';
+import { useDesktopVoiceModelSettings } from './use-desktop-voice-model-settings';
+import { useFilesystemSettings } from './use-filesystem-settings';
+import { useGithubSettings } from './use-github-settings';
 import type { UseHubLogsResult } from './use-hub-logs';
 import type { UseLlmSettingsResult } from './use-llm-settings';
-import type { UseProfileSettingsResult } from './use-profile-settings';
-import type { UseSkillLibraryResult } from './use-skill-library';
-import type { UseSyncSetsResult } from './use-sync-sets';
+import { useProfileSettings } from './use-profile-settings';
+import { useSkillLibrary } from './use-skill-library';
+import { useSyncSets } from './use-sync-sets';
+import { useVoiceApprovalSettings } from './use-voice-approval-settings';
+
+type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
 
 type SettingsViewProps = {
-  github: UseGithubSettingsResult;
+  requestJson: RequestJsonFn;
   llm: UseLlmSettingsResult;
-  agentMessageAutoContinue: UseAgentMessageAutoContinueSettingsResult;
-  agentSuggestion: UseAgentSuggestionSettingsResult;
-  agents: UseAgentsSettingsResult;
-  skillLibrary: UseSkillLibraryResult;
   deleteAction: UseDeleteActionSettingsResult;
-  filesystem: UseFilesystemSettingsResult;
-  syncSets: UseSyncSetsResult;
-  profile: UseProfileSettingsResult;
   hubLogsState: UseHubLogsResult;
   hubLogsTailLines: number;
   hubLogsMaxBytes: number;
@@ -56,16 +54,9 @@ function settingsNavButtonClass(active: boolean) {
 }
 
 export function SettingsView({
-  github,
+  requestJson,
   llm,
-  agentMessageAutoContinue,
-  agentSuggestion,
-  agents,
-  skillLibrary,
   deleteAction,
-  filesystem,
-  syncSets,
-  profile,
   hubLogsState,
   hubLogsTailLines,
   hubLogsMaxBytes,
@@ -80,15 +71,28 @@ export function SettingsView({
   const transcriptInlineImages = useDroneHubUiStore((s) => s.transcriptInlineImages);
   const setTranscriptInlineImages = useDroneHubUiStore((s) => s.setTranscriptInlineImages);
   const settingsScrollRef = React.useRef<HTMLDivElement>(null);
+  const github = useGithubSettings(requestJson);
+  const agentMessageAutoContinue = useAgentMessageAutoContinueSettings(requestJson);
+  const agentSuggestion = useAgentSuggestionSettings(requestJson);
+  const agents = useAgentsSettings(requestJson);
+  const skillLibrary = useSkillLibrary(requestJson);
+  const filesystem = useFilesystemSettings(requestJson);
+  const desktopVoiceModel = useDesktopVoiceModelSettings(requestJson);
+  const voiceApproval = useVoiceApprovalSettings(requestJson);
+  const syncSets = useSyncSets(requestJson);
+  const profile = useProfileSettings(requestJson);
 
   const settingsBusy =
     hubLogsState.hubLogsLoading ||
+    hubLogsState.androidLogsLoading ||
     github.githubSettingsLoading ||
     llm.llmSettingsLoading ||
     agentMessageAutoContinue.agentMessageAutoContinueSettingsLoading ||
     agentSuggestion.agentSuggestionSettingsLoading ||
     deleteAction.deleteSettingsLoading ||
     filesystem.filesystemSettingsLoading ||
+    desktopVoiceModel.desktopVoiceModelSettingsLoading ||
+    voiceApproval.voiceApprovalSettingsLoading ||
     syncSets.syncSetsLoading ||
     profile.profileSettingsLoading ||
     deleteAction.archivedDronesLoading ||
@@ -97,6 +101,10 @@ export function SettingsView({
     llm.clearingOpenAiSettings ||
     llm.savingGeminiSettings ||
     llm.clearingGeminiSettings ||
+    llm.savingGroqSettings ||
+    llm.clearingGroqSettings ||
+    llm.savingVoiceStreamPairingPassword ||
+    llm.clearingVoiceStreamPairingPassword ||
     llm.savingLlmProvider ||
     agentMessageAutoContinue.savingAgentMessageAutoContinueSettings ||
     agentSuggestion.savingAgentSuggestionSettings ||
@@ -110,6 +118,9 @@ export function SettingsView({
     skillLibrary.skillsDeleting ||
     deleteAction.savingDeleteSettings ||
     filesystem.savingFilesystemSettings ||
+    desktopVoiceModel.installingDesktopVoiceModel ||
+    desktopVoiceModel.removingDesktopVoiceModel ||
+    voiceApproval.savingVoiceApprovalSettings ||
     syncSets.creatingSyncSet ||
     Boolean(syncSets.savingSyncSetId) ||
     Boolean(syncSets.deletingSyncSetId) ||
@@ -150,15 +161,18 @@ export function SettingsView({
     void github.loadGithubSettings();
     void deleteAction.loadDeleteSettings();
     void filesystem.loadFilesystemSettings();
+    void desktopVoiceModel.loadDesktopVoiceModelSettings();
+    void voiceApproval.loadVoiceApprovalSettings();
     void syncSets.loadSyncSets();
     void agents.loadAgentsSettings();
     void deleteAction.loadArchivedDrones();
     void deleteAction.loadArchivedChats();
     void profile.loadProfileSettings();
     void hubLogsState.loadHubLogs();
+    void hubLogsState.loadAndroidLogs();
     void skillLibrary.loadSkills();
     void skillLibrary.loadSkillSources();
-  }, [agentMessageAutoContinue, agentSuggestion, agents, agentsDraftDirty, deleteAction, filesystem, github, hubLogsState, llm, profile, skillLibrary, syncSets]);
+  }, [agentMessageAutoContinue, agentSuggestion, agents, agentsDraftDirty, deleteAction, desktopVoiceModel, filesystem, github, hubLogsState, llm, profile, skillLibrary, syncSets, voiceApproval]);
 
   const renderActiveTab = () => {
     if (activeTab === 'general') {
@@ -167,6 +181,7 @@ export function SettingsView({
           github={github}
           llm={llm}
           filesystem={filesystem}
+          desktopVoiceModel={desktopVoiceModel}
           agentMessageAutoContinue={agentMessageAutoContinue}
           agentSuggestion={agentSuggestion}
           transcriptInlineImages={transcriptInlineImages}
@@ -177,6 +192,7 @@ export function SettingsView({
       );
     }
     if (activeTab === 'sync') return <SyncSettingsTab syncSets={syncSets} />;
+    if (activeTab === 'voice') return <VoiceApprovalSettingsTab voiceApproval={voiceApproval} />;
     if (activeTab === 'profiles') return <ProfilesSettingsTab profile={profile} />;
     if (activeTab === 'trash') return <TrashBehaviorSettingsTab deleteAction={deleteAction} />;
     if (activeTab === 'archive') return <ArchiveSettingsTab deleteAction={deleteAction} />;

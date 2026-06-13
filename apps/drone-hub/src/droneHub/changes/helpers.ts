@@ -581,6 +581,9 @@ export function sameRepoPullChangesPayload(
     a.branchContext.droneConfigured === b.branchContext.droneConfigured &&
     a.branchContext.droneFromRef === b.branchContext.droneFromRef &&
     a.counts.changed === b.counts.changed &&
+    String(a.applyPreview?.mode ?? '') === String(b.applyPreview?.mode ?? '') &&
+    Number(a.applyPreview?.counts.changed ?? -1) === Number(b.applyPreview?.counts.changed ?? -1) &&
+    sameUnorderedArray(a.applyPreview?.entries ?? [], b.applyPreview?.entries ?? [], repoPullChangeEntrySignature) &&
     sameUnorderedArray(a.entries, b.entries, repoPullChangeEntrySignature)
   );
 }

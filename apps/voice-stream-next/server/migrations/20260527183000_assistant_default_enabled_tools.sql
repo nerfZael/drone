@@ -1,0 +1,1 @@
+ALTER TABLE assistant_settings ADD COLUMN default_enabled_tools_json TEXT NOT NULL DEFAULT '["assistant_artifacts","speak","get_system_prompt","update_system_prompt","set_thinking_level","web_search","fetch_content"]';

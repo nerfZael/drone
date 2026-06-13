@@ -23,7 +23,7 @@ export function buildDroneHubTaskQueueSpec(args: {
   seedAgent: ChatAgentConfig | null;
   seedModel: string | null;
   repoDefaults: DroneHubTaskRepoDefaults;
-}): Record<string, unknown> {
+}): { name: string } & Record<string, unknown> {
   const requestedName = String(args.requestedName ?? '').trim();
   const taskDescription = String(args.taskDescription ?? '').trim();
   const sourceDroneId = String(args.sourceDroneId ?? '').trim();
@@ -56,15 +56,18 @@ export function buildDroneHubTaskQueueSpec(args: {
         : '',
   };
 
-  return buildDraftDroneCreatePayload({
+  return {
     name: requestedName,
-    ...(group ? { group } : {}),
-    ...(repoPath ? { repoPath } : {}),
-    fleetParentId: sourceDroneId,
-    runtime: 'container',
-    repoBranchSelection,
-    seedAgent: args.seedAgent,
-    seedModel,
-    prompt: taskDescription,
-  });
+    ...buildDraftDroneCreatePayload({
+      name: requestedName,
+      ...(group ? { group } : {}),
+      ...(repoPath ? { repoPath } : {}),
+      fleetParentId: sourceDroneId,
+      runtime: 'container',
+      repoBranchSelection,
+      seedAgent: args.seedAgent,
+      seedModel,
+      prompt: taskDescription,
+    }),
+  };
 }

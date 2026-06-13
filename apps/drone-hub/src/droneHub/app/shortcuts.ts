@@ -5,6 +5,8 @@ export type ShortcutActionId =
   | 'createDroneChat'
   | 'openKanbanBoard'
   | 'focusPrimaryChatInput'
+  | 'toggleVoiceClipboardRecording'
+  | 'toggleAssistantVoiceSession'
   | 'markSelectedDronesUnread'
   | 'toggleSidebarCollapsed'
   | 'toggleRightPanelOpen'
@@ -67,6 +69,16 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     description: 'Focuses the primary chat input.',
   },
   {
+    id: 'toggleVoiceClipboardRecording',
+    label: 'Record voice to clipboard',
+    description: 'Starts or stops a microphone recording, transcribes it with GROQ, and copies the result.',
+  },
+  {
+    id: 'toggleAssistantVoiceSession',
+    label: 'Toggle assistant voice',
+    description: 'Starts desktop assistant voice listening, begins recording, or stops and sends the current voice prompt.',
+  },
+  {
     id: 'markSelectedDronesUnread',
     label: 'Mark selected drones unread',
     description: 'Marks the selected chat(s) unread, or the active chat for each selected drone, so unread indicators are shown.',
@@ -78,13 +90,13 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   },
   {
     id: 'toggleRightPanelOpen',
-    label: 'Toggle side panel visibility',
-    description: 'Shows or hides the right side panel.',
+    label: 'Toggle workspace panes',
+    description: 'Shows or hides workspace tool pane controls.',
   },
   {
     id: 'toggleRightPanelWidth',
-    label: 'Toggle side panel width',
-    description: 'Cycles the right panel width between full, two-thirds, and one-third of workspace width.',
+    label: 'Focus workspace pane',
+    description: 'Reopens or focuses the active workspace tool pane.',
   },
   {
     id: 'toggleTldr',
@@ -99,32 +111,32 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   {
     id: 'openPullRequestsTab',
     label: 'Open PRs tab',
-    description: 'Opens the right-panel PRs tab (top pane by default, hovered bottom pane in split mode).',
+    description: 'Opens the PRs workspace pane.',
   },
   {
     id: 'openChangesTab',
     label: 'Open Changes tab',
-    description: 'Opens the right-panel Changes tab (top pane by default, hovered bottom pane in split mode).',
+    description: 'Opens the Changes workspace pane.',
   },
   {
     id: 'openCanvasTab',
     label: 'Open Canvas tab',
-    description: 'Opens the right-panel Canvas tab (top pane by default, hovered bottom pane in split mode).',
+    description: 'Opens the Canvas workspace pane.',
   },
   {
     id: 'openBrowserTab',
     label: 'Open Browser tab',
-    description: 'Opens the right-panel Browser tab (top pane by default, hovered bottom pane in split mode).',
+    description: 'Opens the Browser workspace pane.',
   },
   {
     id: 'openFilesTab',
     label: 'Open Files tab',
-    description: 'Opens the right-panel Files tab (top pane by default, hovered bottom pane in split mode).',
+    description: 'Opens the Files workspace pane.',
   },
   {
     id: 'openTerminalTab',
     label: 'Open Terminal tab',
-    description: 'Opens the right-panel Terminal tab (top pane by default, hovered bottom pane in split mode).',
+    description: 'Opens the Terminal workspace pane.',
   },
 ];
 
@@ -135,6 +147,8 @@ const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   createDroneChat: { key: 'w', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openKanbanBoard: { key: 'y', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   focusPrimaryChatInput: { key: 'enter', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  toggleVoiceClipboardRecording: { key: '`', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  toggleAssistantVoiceSession: { key: '`', mod: false, ctrl: false, meta: false, alt: false, shift: true },
   markSelectedDronesUnread: { key: 'z', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleSidebarCollapsed: { key: 'a', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleRightPanelOpen: { key: 'd', mod: false, ctrl: false, meta: false, alt: false, shift: false },
@@ -206,6 +220,8 @@ export function cloneDefaultShortcutBindings(): ShortcutBindingMap {
     createDroneChat: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createDroneChat),
     openKanbanBoard: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openKanbanBoard),
     focusPrimaryChatInput: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.focusPrimaryChatInput),
+    toggleVoiceClipboardRecording: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleVoiceClipboardRecording),
+    toggleAssistantVoiceSession: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleAssistantVoiceSession),
     markSelectedDronesUnread: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.markSelectedDronesUnread),
     toggleSidebarCollapsed: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleSidebarCollapsed),
     toggleRightPanelOpen: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleRightPanelOpen),

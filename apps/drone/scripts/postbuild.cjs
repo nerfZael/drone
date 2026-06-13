@@ -47,10 +47,24 @@ async function chmodExecutableBestEffort(targetPath) {
   }
 }
 
+async function copyDesktopVoiceVoskModel(root) {
+  const source = path.resolve(root, '..', 'voice-stream', 'android', 'app', 'src', 'main', 'assets', 'model-en-us');
+  const target = path.join(root, 'dist', 'assets', 'vosk-model-en-us');
+  try {
+    await fs.access(path.join(source, 'am', 'final.mdl'));
+  } catch {
+    return;
+  }
+  await fs.rm(target, { recursive: true, force: true });
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.cp(source, target, { recursive: true });
+}
+
 async function main() {
   const root = path.resolve(__dirname, '..');
   runOrThrow('bun', fleetBundleArgs(root), { cwd: root });
   runOrThrow('bun', tasksBundleArgs(root), { cwd: root });
+  await copyDesktopVoiceVoskModel(root);
   await chmodExecutableBestEffort(path.join(root, 'dist', 'cli.js'));
   await chmodExecutableBestEffort(path.join(root, 'dist', 'daemon.js'));
   await chmodExecutableBestEffort(path.join(root, 'dist', 'fleet.js'));

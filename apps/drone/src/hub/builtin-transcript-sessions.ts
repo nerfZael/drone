@@ -25,76 +25,137 @@ function takeStringText(raw: any): string | null {
   return null;
 }
 
+function extractContentText(raw: any): string | null {
+  if (typeof raw === 'string') return raw || null;
+  if (!Array.isArray(raw)) return null;
+  const parts: string[] = [];
+  for (const c of raw) {
+    if (!c || typeof c !== 'object') continue;
+    const t = takeStringText((c as any).text) ?? takeStringText((c as any).output_text);
+    if (t) parts.push(t);
+  }
+  if (parts.length === 0) return null;
+  return parts.join('\n');
+}
+
+function contentHasOutputText(raw: any): boolean {
+  if (!Array.isArray(raw)) return false;
+  return raw.some((c) => {
+    if (!c || typeof c !== 'object') return false;
+    const type = String((c as any).type ?? '').trim();
+    return type === 'output_text' || typeof (c as any).output_text === 'string';
+  });
+}
+
 function parseUuid(text: string): string | null {
   const match = String(text).match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
   return match ? match[0] : null;
 }
 
-export function parseCodexJsonl(stdout: string): { threadId: string | null; message: string | null } {
+type CodexTerminalEvent = 'turn.completed' | 'response.completed' | 'response.failed' | 'error';
+type CodexJsonlParseResult = { threadId: string | null; message: string | null; terminalEvent?: CodexTerminalEvent };
+type PiJsonlParseResult = { sessionId: string | null; message: string | null };
+
+function createCodexJsonlParser(): { pushLine: (line: string) => void; result: () => CodexJsonlParseResult } {
   let threadId: string | null = null;
   let lastMsg: string | null = null;
   let streamedMsg = '';
+  let terminalEvent: CodexTerminalEvent | null = null;
 
   function extractItemText(item: any): string | null {
     if (!item || typeof item !== 'object') return null;
-    const direct = takeStringText(item.text) ?? takeStringText(item.output_text);
+    const direct =
+      takeStringText(item.text) ??
+      takeStringText(item.output_text) ??
+      takeStringText(item.message) ??
+      takeStringText(item.last_agent_message);
     if (direct) return direct;
-    const content = item.content;
-    if (!Array.isArray(content)) return null;
-    const parts: string[] = [];
-    for (const c of content) {
-      if (!c || typeof c !== 'object') continue;
-      const t = takeStringText((c as any).text) ?? takeStringText((c as any).output_text);
-      if (t) parts.push(t);
-    }
-    if (parts.length === 0) return null;
-    return parts.join('\n');
+    return extractContentText(item.content);
   }
 
-  const lines = String(stdout || '')
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean);
-  for (const line of lines) {
-    let obj: any = null;
-    try {
-      obj = JSON.parse(line);
-    } catch {
-      continue;
+  function isAssistantItem(item: any): boolean {
+    if (!item || typeof item !== 'object') return false;
+    const itemType = String(item.type ?? '').trim();
+    const role = String(item.role ?? '').trim();
+    return (
+      itemType === 'agent_message' ||
+      itemType === 'assistant_message' ||
+      role === 'assistant' ||
+      itemType === 'assistant' ||
+      (itemType === 'message' && role !== 'user' && contentHasOutputText(item.content))
+    );
+  }
+
+  function considerAssistantItem(item: any) {
+    if (!isAssistantItem(item)) return;
+    const text = extractItemText(item);
+    if (text) lastMsg = text;
+  }
+
+  function considerResponse(response: any) {
+    const responseText = takeStringText(response?.output_text);
+    if (responseText) {
+      lastMsg = responseText;
+      return;
     }
-    if (!obj || typeof obj !== 'object') continue;
-    if (obj.type === 'thread.started' && typeof obj.thread_id === 'string') {
-      threadId = obj.thread_id;
-      continue;
-    }
-    if ((obj.type === 'item.completed' || obj.type === 'item.started') && obj.item && typeof obj.item === 'object') {
-      const itemType = String(obj.item.type ?? '');
-      const text = extractItemText(obj.item);
-      if (text && (itemType === 'agent_message' || itemType === 'assistant_message')) {
-        lastMsg = text;
+    if (!Array.isArray(response?.output)) return;
+    for (const item of response.output) considerAssistantItem(item);
+  }
+
+  return {
+    pushLine(lineRaw: string) {
+      const line = String(lineRaw ?? '').trim();
+      if (!line) return;
+      let obj: any = null;
+      try {
+        obj = JSON.parse(line);
+      } catch {
+        return;
       }
-      continue;
-    }
+      if (!obj || typeof obj !== 'object') return;
+      const type = String(obj.type ?? '').trim();
+      if (type === 'turn.completed' || type === 'response.completed' || type === 'response.failed' || type === 'error') {
+        terminalEvent = type;
+      }
+      if (obj.type === 'thread.started' && typeof obj.thread_id === 'string') {
+        threadId = obj.thread_id;
+        return;
+      }
+      if ((obj.type === 'item.completed' || obj.type === 'item.started') && obj.item && typeof obj.item === 'object') {
+        considerAssistantItem(obj.item);
+        return;
+      }
 
-    if (obj.type === 'response.output_text.delta') {
-      const delta = takeStringText(obj.delta);
-      if (delta) streamedMsg += delta;
-      continue;
-    }
-    if (obj.type === 'response.output_text.done') {
-      const text = takeStringText(obj.text);
-      if (text) lastMsg = text;
-      continue;
-    }
+      if (obj.type === 'response.output_text.delta') {
+        const delta = takeStringText(obj.delta);
+        if (delta) streamedMsg += delta;
+        return;
+      }
+      if (obj.type === 'response.output_text.done') {
+        const text = takeStringText(obj.text);
+        if (text) lastMsg = text;
+        return;
+      }
+      if (obj.type === 'turn.completed') {
+        const text = takeStringText(obj.last_agent_message) ?? takeStringText(obj.message);
+        if (text) lastMsg = text;
+      }
 
-    const responseText = takeStringText(obj?.response?.output_text);
-    if (responseText) lastMsg = responseText;
-  }
-  if (!lastMsg && streamedMsg) lastMsg = streamedMsg;
-  return { threadId, message: lastMsg };
+      considerAssistantItem(obj);
+      considerAssistantItem(obj.message);
+      considerResponse(obj?.response);
+    },
+    result() {
+      return {
+        threadId,
+        message: lastMsg ?? (streamedMsg ? streamedMsg : null),
+        ...(terminalEvent ? { terminalEvent } : {}),
+      };
+    },
+  };
 }
 
-export function parsePiJsonl(stdout: string): { sessionId: string | null; message: string | null } {
+function createPiJsonlParser(): { pushLine: (line: string) => void; result: () => PiJsonlParseResult } {
   let sessionId: string | null = null;
   let lastMsg: string | null = null;
 
@@ -122,29 +183,182 @@ export function parsePiJsonl(stdout: string): { sessionId: string | null; messag
     if (text) lastMsg = text;
   };
 
-  const lines = String(stdout || '')
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean);
-  for (const line of lines) {
-    let obj: any = null;
-    try {
-      obj = JSON.parse(line);
-    } catch {
-      continue;
+  return {
+    pushLine(lineRaw: string) {
+      const line = String(lineRaw ?? '').trim();
+      if (!line) return;
+      let obj: any = null;
+      try {
+        obj = JSON.parse(line);
+      } catch {
+        return;
+      }
+      if (!obj || typeof obj !== 'object') return;
+      if (obj.type === 'session') {
+        const parsedId = parseUuid(String(obj.id ?? obj.sessionId ?? obj.session_id ?? '').trim());
+        if (parsedId) sessionId = parsedId;
+      }
+      considerMessage(obj.message);
+      if (Array.isArray(obj.messages)) {
+        for (const message of obj.messages) considerMessage(message);
+      }
+    },
+    result() {
+      return { sessionId, message: lastMsg };
+    },
+  };
+}
+
+export function parseCodexJsonl(stdout: string): CodexJsonlParseResult {
+  const parser = createCodexJsonlParser();
+  for (const line of String(stdout || '').split('\n')) parser.pushLine(line);
+  return parser.result();
+}
+
+export async function parseCodexJsonlLines(lines: AsyncIterable<string> | Iterable<string>): Promise<CodexJsonlParseResult> {
+  const parser = createCodexJsonlParser();
+  for await (const line of lines) parser.pushLine(line);
+  return parser.result();
+}
+
+export function parsePiJsonl(stdout: string): PiJsonlParseResult {
+  const parser = createPiJsonlParser();
+  for (const line of String(stdout || '').split('\n')) parser.pushLine(line);
+  return parser.result();
+}
+
+export async function parsePiJsonlLines(lines: AsyncIterable<string> | Iterable<string>): Promise<PiJsonlParseResult> {
+  const parser = createPiJsonlParser();
+  for await (const line of lines) parser.pushLine(line);
+  return parser.result();
+}
+
+export type BuiltinPromptJobTranscript =
+  | {
+      kind: 'codex';
+      message: string | null;
+      threadId: string | null;
+      terminalEvent?: CodexTerminalEvent;
+      stdoutBytes?: number;
+      stdoutTruncated?: boolean;
+      parsedAt?: string;
     }
-    if (!obj || typeof obj !== 'object') continue;
-    if (obj.type === 'session') {
-      const parsedId = parseUuid(String(obj.id ?? obj.sessionId ?? obj.session_id ?? '').trim());
-      if (parsedId) sessionId = parsedId;
-    }
-    considerMessage(obj.message);
-    if (Array.isArray(obj.messages)) {
-      for (const message of obj.messages) considerMessage(message);
+  | {
+      kind: 'pi';
+      message: string | null;
+      sessionId: string | null;
+      stdoutBytes?: number;
+      stdoutTruncated?: boolean;
+      parsedAt?: string;
+    };
+
+function optionalString(raw: any): string | null {
+  return typeof raw === 'string' && raw.trim() ? raw : null;
+}
+
+function promptJobTranscriptMeta(opts?: {
+  stdoutBytes?: number;
+  stdoutTruncated?: boolean;
+  parsedAt?: string;
+}): { stdoutBytes?: number; stdoutTruncated?: boolean; parsedAt?: string } {
+  return {
+    ...(typeof opts?.stdoutBytes === 'number' && Number.isFinite(opts.stdoutBytes)
+      ? { stdoutBytes: Math.max(0, Math.floor(opts.stdoutBytes)) }
+      : {}),
+    ...(typeof opts?.stdoutTruncated === 'boolean' ? { stdoutTruncated: opts.stdoutTruncated } : {}),
+    ...(typeof opts?.parsedAt === 'string' && opts.parsedAt.trim() ? { parsedAt: opts.parsedAt.trim() } : {}),
+  };
+}
+
+export function parseBuiltinPromptJobTranscript(
+  kindRaw: unknown,
+  stdout: string,
+  opts?: { stdoutBytes?: number; stdoutTruncated?: boolean; parsedAt?: string },
+): BuiltinPromptJobTranscript | null {
+  const kind = String(kindRaw ?? '').trim();
+  if (kind === 'codex') {
+    const parsed = parseCodexJsonl(stdout);
+    return {
+      kind: 'codex',
+      message: parsed.message,
+      threadId: parsed.threadId,
+      ...(parsed.terminalEvent ? { terminalEvent: parsed.terminalEvent } : {}),
+      ...promptJobTranscriptMeta(opts),
+    };
+  }
+  if (kind === 'pi') {
+    const parsed = parsePiJsonl(stdout);
+    return {
+      kind: 'pi',
+      message: parsed.message,
+      sessionId: parsed.sessionId,
+      ...promptJobTranscriptMeta(opts),
+    };
+  }
+  return null;
+}
+
+export async function parseBuiltinPromptJobTranscriptLines(
+  kindRaw: unknown,
+  lines: AsyncIterable<string> | Iterable<string>,
+  opts?: { stdoutBytes?: number; stdoutTruncated?: boolean; parsedAt?: string },
+): Promise<BuiltinPromptJobTranscript | null> {
+  const kind = String(kindRaw ?? '').trim();
+  if (kind === 'codex') {
+    const parsed = await parseCodexJsonlLines(lines);
+    return {
+      kind: 'codex',
+      message: parsed.message,
+      threadId: parsed.threadId,
+      ...(parsed.terminalEvent ? { terminalEvent: parsed.terminalEvent } : {}),
+      ...promptJobTranscriptMeta(opts),
+    };
+  }
+  if (kind === 'pi') {
+    const parsed = await parsePiJsonlLines(lines);
+    return {
+      kind: 'pi',
+      message: parsed.message,
+      sessionId: parsed.sessionId,
+      ...promptJobTranscriptMeta(opts),
+    };
+  }
+  return null;
+}
+
+export function parseCodexJobTranscript(job: any): { threadId: string | null; message: string | null; terminalEvent?: CodexTerminalEvent } {
+  const transcript = job?.transcript;
+  if (transcript && typeof transcript === 'object' && String(transcript.kind ?? '').trim() === 'codex') {
+    if (Object.prototype.hasOwnProperty.call(transcript, 'message')) {
+      const terminalEventRaw = String(transcript.terminalEvent ?? '').trim();
+      const terminalEvent =
+        terminalEventRaw === 'turn.completed' ||
+        terminalEventRaw === 'response.completed' ||
+        terminalEventRaw === 'response.failed' ||
+        terminalEventRaw === 'error'
+          ? terminalEventRaw
+          : undefined;
+      return {
+        threadId: optionalString(transcript.threadId),
+        message: optionalString(transcript.message),
+        ...(terminalEvent ? { terminalEvent } : {}),
+      };
     }
   }
+  return parseCodexJsonl(String(job?.stdout ?? ''));
+}
 
-  return { sessionId, message: lastMsg };
+export function parsePiJobTranscript(job: any): { sessionId: string | null; message: string | null } {
+  const transcript = job?.transcript;
+  if (transcript && typeof transcript === 'object' && String(transcript.kind ?? '').trim() === 'pi') {
+    if (Object.prototype.hasOwnProperty.call(transcript, 'message')) {
+      return {
+        sessionId: optionalString(transcript.sessionId),
+        message: optionalString(transcript.message),
+      };
+    }
+  }
+  return parsePiJsonl(String(job?.stdout ?? ''));
 }
 
 export function formatCodexJobFailure(stdoutRaw: string, stderrRaw: string, fallbackRaw: string): string {

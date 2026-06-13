@@ -1,4 +1,4 @@
-export type SettingsTabId = 'general' | 'sync' | 'profiles' | 'trash' | 'archive' | 'shortcuts' | 'automations' | 'playbooks' | 'skills' | 'agents' | 'system';
+export type SettingsTabId = 'general' | 'voice' | 'sync' | 'profiles' | 'trash' | 'archive' | 'shortcuts' | 'automations' | 'playbooks' | 'skills' | 'agents' | 'system';
 
 export const SETTINGS_TABS: Array<{
   id: SettingsTabId;
@@ -11,6 +11,12 @@ export const SETTINGS_TABS: Array<{
     label: 'General',
     title: 'General settings',
     description: 'GitHub readiness, LLM providers, filesystem uploads, transcript defaults, and onboarding controls.',
+  },
+  {
+    id: 'voice',
+    label: 'Voice',
+    title: 'Voice approval',
+    description: 'Tune approval phrase, unlock/off codes, and collection timing for desktop and Android voice.',
   },
   {
     id: 'sync',

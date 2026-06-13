@@ -1,4 +1,5 @@
-import { DEFAULT_GEMINI_FLASH_MODEL_ID } from './llm-models';
+import type { LlmProviderId } from './hub-settings';
+import { defaultHubLlmModelId, providerDisplayName, resolveHubLlmRuntime } from './llm-runtime';
 
 export type JobSpec = {
   name: string;
@@ -11,52 +12,16 @@ export type JobsPlan = {
   jobs: JobSpec[];
 };
 
-export type LlmProviderId = 'openai' | 'gemini';
-
-type LlmRuntime = {
-  provider: LlmProviderId;
-  z: any;
-  generateObject: any;
-  modelFactory: (modelId: string) => any;
-};
-
-function normalizeProvider(raw: unknown): LlmProviderId {
-  return String(raw ?? '').trim().toLowerCase() === 'gemini' ? 'gemini' : 'openai';
-}
-
-function providerDisplayName(provider: LlmProviderId): string {
-  return provider === 'openai' ? 'OpenAI' : 'Gemini';
-}
-
 function defaultJobsModelId(provider: LlmProviderId): string {
-  return provider === 'openai' ? 'gpt-4o' : DEFAULT_GEMINI_FLASH_MODEL_ID;
+  return defaultHubLlmModelId(provider, 'standard');
 }
 
 function defaultDroneNameModelId(provider: LlmProviderId): string {
-  return provider === 'openai' ? 'gpt-4o' : DEFAULT_GEMINI_FLASH_MODEL_ID;
+  return defaultHubLlmModelId(provider, 'standard');
 }
 
 function defaultTaskTitleModelId(provider: LlmProviderId): string {
-  return provider === 'openai' ? 'gpt-4o-mini' : DEFAULT_GEMINI_FLASH_MODEL_ID;
-}
-
-async function resolveLlmRuntime(opts?: { provider?: LlmProviderId; apiKey?: string }): Promise<LlmRuntime> {
-  const provider = normalizeProvider(opts?.provider);
-  const apiKey = String(opts?.apiKey ?? '').trim();
-  if (!apiKey) throw new Error(`Missing ${providerDisplayName(provider)} API key. Configure it in Settings.`);
-
-  // Dynamic imports keep this file compatible with the existing CommonJS build.
-  const [{ generateObject }, { z }] = await Promise.all([import('ai'), import('zod')]);
-
-  if (provider === 'gemini') {
-    const { createGoogleGenerativeAI } = await import('@ai-sdk/google');
-    const google = createGoogleGenerativeAI({ apiKey });
-    return { provider, z, generateObject, modelFactory: google };
-  }
-
-  const { createOpenAI } = await import('@ai-sdk/openai');
-  const openai = createOpenAI({ apiKey });
-  return { provider, z, generateObject, modelFactory: openai };
+  return defaultHubLlmModelId(provider, 'small');
 }
 
 function toDashCase(raw: string): string {
@@ -192,7 +157,7 @@ export async function jobsPlanFromAgentMessage(
     .map((l, i) => `${i + 1}|${l}`)
     .join('\n');
 
-  const runtime = await resolveLlmRuntime(opts);
+  const runtime = await resolveHubLlmRuntime(opts);
   const modelId = String(process.env.DRONE_HUB_JOBS_MODEL ?? '').trim() || defaultJobsModelId(runtime.provider);
 
   const outputSchema = runtime.z.object({
@@ -312,7 +277,7 @@ export async function suggestDroneNameFromMessage(
   const text = String(message ?? '').trim();
   if (!text) throw new Error('missing message');
 
-  const runtime = await resolveLlmRuntime(opts);
+  const runtime = await resolveHubLlmRuntime(opts);
   const modelId = String(process.env.DRONE_HUB_DRONE_NAME_MODEL ?? '').trim() || defaultDroneNameModelId(runtime.provider);
   const outputSchema = runtime.z.object({
     name: runtime.z.string().min(1).describe('Drone name in dash-case (letters/numbers/single hyphens), max 48 chars.'),
@@ -357,7 +322,7 @@ export async function suggestTaskTitleFromMessage(
   const text = String(message ?? '').trim();
   if (!text) throw new Error('missing message');
 
-  const runtime = await resolveLlmRuntime(opts);
+  const runtime = await resolveHubLlmRuntime(opts);
   const modelId = String(process.env.DRONE_HUB_TASK_TITLE_MODEL ?? '').trim() || defaultTaskTitleModelId(runtime.provider);
   const outputSchema = runtime.z.object({
     title: runtime.z.string().min(1).describe('Short human-readable task title, max 72 chars.'),

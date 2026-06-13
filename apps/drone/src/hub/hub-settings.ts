@@ -1,9 +1,12 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 
 import dotenv from 'dotenv';
 
 import { loadRegistry, updateRegistry } from '../host/registry';
+import { readActiveProfileName } from '../host/profiles';
 import {
   persistTaskBoardState,
   normalizeTaskTypeId,
@@ -13,6 +16,8 @@ import {
   type TaskBoardState as KanbanBoardSettings,
   type TaskBoardTaskType as KanbanBoardTaskType,
 } from './task-board';
+
+const dynamicImport = new Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<any>;
 
 let HUB_ENV_LOADED = false;
 export function loadHubEnv() {
@@ -57,10 +62,16 @@ export function hubLog(level: 'info' | 'warn' | 'error', message: string, meta?:
   console.log(`[DroneHub] ${message}`, payload);
 }
 
-export type LlmProviderId = 'openai' | 'gemini';
-export type ApiKeySettingsSource = 'settings' | 'environment' | null;
+export type LlmProviderId = 'openai' | 'gemini' | 'codex';
+export type StoredApiKeyProviderId = 'openai' | 'gemini' | 'groq' | 'exa';
+export type ApiKeySettingsSource = 'settings' | 'environment' | 'codex-cli' | null;
 export type EffectiveProviderApiKeySettings = {
   apiKey: string | null;
+  source: ApiKeySettingsSource;
+  updatedAt: string | null;
+};
+export type EffectiveVoiceStreamPairingPasswordSettings = {
+  password: string | null;
   source: ApiKeySettingsSource;
   updatedAt: string | null;
 };
@@ -73,7 +84,7 @@ export type SecretValueDiagnostics = {
 };
 export type ProviderApiKeyResolutionDiagnostics = {
   provider: LlmProviderId;
-  envVar: 'OPENAI_API_KEY' | 'GEMINI_API_KEY';
+  envVar: 'OPENAI_API_KEY' | 'GEMINI_API_KEY' | 'DRONE_HUB_CODEX_AUTH_FILE';
   env: SecretValueDiagnostics;
   stored: {
     hasValue: boolean;
@@ -127,6 +138,42 @@ export type EffectiveAgentSuggestionSettings = {
   updatedAt: string | null;
   policyFingerprint: string;
 };
+export type VoiceApprovalSettingsSource = 'settings' | 'default';
+export type VoiceTranscriptionFinalMode = 'full-recording' | 'segments';
+export type VoiceTranscriptionSettingsSource = 'settings' | 'default';
+export type VoiceActivationSettingsSource = 'settings' | 'default';
+export type VoiceApprovalSettings = {
+  triggerPhrase: string;
+  unlockCode: string;
+  lockCode: string;
+  lockedOffCode: string;
+  minDigits: number;
+  maxDigits: number;
+  stableMs: number;
+  collectTimeoutMs: number;
+  duplicateCooldownMs: number;
+  finalizeCheckIntervalMs: number;
+  postPromptCommandSuppressionMs: number;
+};
+export type EffectiveVoiceApprovalSettings = VoiceApprovalSettings & {
+  source: VoiceApprovalSettingsSource;
+  updatedAt: string | null;
+};
+export type VoiceTranscriptionSettings = {
+  finalMode: VoiceTranscriptionFinalMode;
+};
+export type EffectiveVoiceTranscriptionSettings = VoiceTranscriptionSettings & {
+  source: VoiceTranscriptionSettingsSource;
+  updatedAt: string | null;
+};
+export type VoiceActivationSettings = {
+  normalAliases: string[];
+  realTimeAliases: string[];
+};
+export type EffectiveVoiceActivationSettings = VoiceActivationSettings & {
+  source: VoiceActivationSettingsSource;
+  updatedAt: string | null;
+};
 export type { KanbanBoardTaskType, KanbanBoardCard, KanbanBoardLane, KanbanBoardSettings };
 export type TaskPlaybookButtonSettings = Array<{
   id: string;
@@ -176,6 +223,46 @@ export const AGENT_MESSAGE_AUTO_CONTINUE_PROMPT_DEFAULT = 'continue';
 export const AGENT_MESSAGE_AUTO_CONTINUE_PROMPT_MAX_CHARS = 200;
 export const AGENT_SUGGESTION_ENABLED_BY_DEFAULT = false;
 export const AGENT_SUGGESTION_POLICY_MAX_CHARS = 20_000;
+export const VOICE_APPROVAL_SETTINGS_DEFAULT: VoiceApprovalSettings = {
+  triggerPhrase: 'approval code',
+  unlockCode: '1234',
+  lockCode: '4321',
+  lockedOffCode: '0000',
+  minDigits: 4,
+  maxDigits: 8,
+  stableMs: 900,
+  collectTimeoutMs: 5_000,
+  duplicateCooldownMs: 4_000,
+  finalizeCheckIntervalMs: 250,
+  postPromptCommandSuppressionMs: 1_800,
+};
+export const VOICE_TRANSCRIPTION_SETTINGS_DEFAULT: VoiceTranscriptionSettings = {
+  finalMode: 'full-recording',
+};
+export const VOICE_ACTIVATION_SETTINGS_DEFAULT: VoiceActivationSettings = {
+  normalAliases: ['hey Sebastian', 'hay Sebastian'],
+  realTimeAliases: ['Sebastian enter real-time mode', 'Sebastian enter realtime mode'],
+};
+export const VOICE_APPROVAL_SETTINGS_LIMITS = {
+  triggerPhraseMaxChars: 64,
+  codeMaxDigits: 8,
+  minDigitsMin: 1,
+  minDigitsMax: 8,
+  maxDigitsMin: 1,
+  maxDigitsMax: 12,
+  stableMsMin: 250,
+  stableMsMax: 3_000,
+  collectTimeoutMsMin: 1_000,
+  collectTimeoutMsMax: 15_000,
+  duplicateCooldownMsMin: 0,
+  duplicateCooldownMsMax: 15_000,
+  finalizeCheckIntervalMsMin: 100,
+  finalizeCheckIntervalMsMax: 1_000,
+  postPromptCommandSuppressionMsMin: 0,
+  postPromptCommandSuppressionMsMax: 5_000,
+  activationAliasMaxChars: 80,
+  activationAliasMaxCount: 12,
+} as const;
 export const AGENT_SUGGESTION_POLICY_DEFAULT = `# Assistant Suggestion Policy
 
 Suggest the most likely next user reply in this developer chat after an assistant message.
@@ -232,7 +319,8 @@ export function parseLlmProvider(raw: unknown): LlmProviderId | null {
   const s = String(raw ?? '')
     .trim()
     .toLowerCase();
-  if (s === 'openai' || s === 'gemini') return s;
+  if (s === 'openai' || s === 'gemini' || s === 'codex') return s;
+  if (s === 'openai-codex' || s === 'chatgpt' || s === 'chatgpt-codex') return 'codex';
   return null;
 }
 
@@ -285,6 +373,168 @@ export function parseFilesystemUploadMaxBytes(raw: unknown): number | null {
   const i = Math.floor(n);
   if (i < FILESYSTEM_UPLOAD_MAX_BYTES_MIN || i > FILESYSTEM_UPLOAD_MAX_BYTES_MAX) return null;
   return i;
+}
+
+function normalizeVoiceApprovalTriggerPhrase(raw: unknown): string {
+  const text = typeof raw === 'string' ? raw.trim().replace(/\s+/g, ' ') : '';
+  if (!text) return '';
+  return text.length > VOICE_APPROVAL_SETTINGS_LIMITS.triggerPhraseMaxChars
+    ? text.slice(0, VOICE_APPROVAL_SETTINGS_LIMITS.triggerPhraseMaxChars).trim()
+    : text;
+}
+
+function normalizeVoiceApprovalCode(raw: unknown): string {
+  const text = typeof raw === 'string' || typeof raw === 'number' ? String(raw).replace(/\D/g, '') : '';
+  if (!text) return '';
+  return text.slice(0, VOICE_APPROVAL_SETTINGS_LIMITS.codeMaxDigits);
+}
+
+function parseIntegerInRange(raw: unknown, min: number, max: number): number | null {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return null;
+  const i = Math.floor(n);
+  if (i < min || i > max) return null;
+  return i;
+}
+
+function parseVoiceApprovalSettings(raw: unknown): VoiceApprovalSettings | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const value = raw as Record<string, unknown>;
+  const triggerPhrase = normalizeVoiceApprovalTriggerPhrase(value.triggerPhrase);
+  const unlockCode = normalizeVoiceApprovalCode(value.unlockCode);
+  const lockCode = normalizeVoiceApprovalCode(value.lockCode);
+  const lockedOffCode = normalizeVoiceApprovalCode(value.lockedOffCode);
+  const minDigits = parseIntegerInRange(value.minDigits, VOICE_APPROVAL_SETTINGS_LIMITS.minDigitsMin, VOICE_APPROVAL_SETTINGS_LIMITS.minDigitsMax);
+  const maxDigits = parseIntegerInRange(value.maxDigits, VOICE_APPROVAL_SETTINGS_LIMITS.maxDigitsMin, VOICE_APPROVAL_SETTINGS_LIMITS.maxDigitsMax);
+  const stableMs = parseIntegerInRange(value.stableMs, VOICE_APPROVAL_SETTINGS_LIMITS.stableMsMin, VOICE_APPROVAL_SETTINGS_LIMITS.stableMsMax);
+  const collectTimeoutMs = parseIntegerInRange(
+    value.collectTimeoutMs,
+    VOICE_APPROVAL_SETTINGS_LIMITS.collectTimeoutMsMin,
+    VOICE_APPROVAL_SETTINGS_LIMITS.collectTimeoutMsMax,
+  );
+  const duplicateCooldownMs = parseIntegerInRange(
+    value.duplicateCooldownMs,
+    VOICE_APPROVAL_SETTINGS_LIMITS.duplicateCooldownMsMin,
+    VOICE_APPROVAL_SETTINGS_LIMITS.duplicateCooldownMsMax,
+  );
+  const finalizeCheckIntervalMs = parseIntegerInRange(
+    value.finalizeCheckIntervalMs,
+    VOICE_APPROVAL_SETTINGS_LIMITS.finalizeCheckIntervalMsMin,
+    VOICE_APPROVAL_SETTINGS_LIMITS.finalizeCheckIntervalMsMax,
+  );
+  const postPromptCommandSuppressionMs = parseIntegerInRange(
+    value.postPromptCommandSuppressionMs ?? VOICE_APPROVAL_SETTINGS_DEFAULT.postPromptCommandSuppressionMs,
+    VOICE_APPROVAL_SETTINGS_LIMITS.postPromptCommandSuppressionMsMin,
+    VOICE_APPROVAL_SETTINGS_LIMITS.postPromptCommandSuppressionMsMax,
+  );
+  if (
+    !triggerPhrase ||
+    !unlockCode ||
+    !lockCode ||
+    !lockedOffCode ||
+    minDigits == null ||
+    maxDigits == null ||
+    stableMs == null ||
+    collectTimeoutMs == null ||
+    duplicateCooldownMs == null ||
+    finalizeCheckIntervalMs == null ||
+    postPromptCommandSuppressionMs == null
+  ) return null;
+  if (maxDigits < minDigits) return null;
+  const codeSet = new Set([unlockCode, lockCode, lockedOffCode]);
+  if (codeSet.size !== 3) return null;
+  const codeLengths = [unlockCode, lockCode, lockedOffCode].map((code) => code.length);
+  const effectiveMinDigits = Math.min(minDigits, ...codeLengths);
+  const effectiveMaxDigits = Math.max(maxDigits, ...codeLengths);
+  if (effectiveMaxDigits > VOICE_APPROVAL_SETTINGS_LIMITS.maxDigitsMax) return null;
+  return {
+    triggerPhrase,
+    unlockCode,
+    lockCode,
+    lockedOffCode,
+    minDigits: effectiveMinDigits,
+    maxDigits: effectiveMaxDigits,
+    stableMs,
+    collectTimeoutMs,
+    duplicateCooldownMs,
+    finalizeCheckIntervalMs,
+    postPromptCommandSuppressionMs,
+  };
+}
+
+function parseVoiceTranscriptionFinalMode(raw: unknown): VoiceTranscriptionFinalMode | null {
+  const text = String(raw ?? '').trim().toLowerCase();
+  if (text === 'full-recording' || text === 'full_clip' || text === 'full-clip' || text === 'full') return 'full-recording';
+  if (text === 'segments' || text === 'chunks' || text === 'chunked') return 'segments';
+  return null;
+}
+
+function parseVoiceTranscriptionSettings(raw: unknown): VoiceTranscriptionSettings | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const value = raw as Record<string, unknown>;
+  const finalMode = parseVoiceTranscriptionFinalMode(value.finalMode);
+  if (!finalMode) return null;
+  return { finalMode };
+}
+
+function normalizeVoiceActivationAlias(raw: unknown): string {
+  const text = typeof raw === 'string' ? raw.trim().replace(/\s+/g, ' ') : '';
+  if (!text) return '';
+  return text.length > VOICE_APPROVAL_SETTINGS_LIMITS.activationAliasMaxChars
+    ? text.slice(0, VOICE_APPROVAL_SETTINGS_LIMITS.activationAliasMaxChars).trim()
+    : text;
+}
+
+function normalizeVoiceActivationAliases(raw: unknown, fallback: string[], opts?: { fallbackEmpty?: boolean }): string[] {
+  const values = Array.isArray(raw) ? raw : [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of values) {
+    const alias = normalizeVoiceActivationAlias(item);
+    const key = alias.toLowerCase();
+    if (!alias || seen.has(key)) continue;
+    seen.add(key);
+    out.push(alias);
+    if (out.length >= VOICE_APPROVAL_SETTINGS_LIMITS.activationAliasMaxCount) break;
+  }
+  return out.length > 0 ? out : opts?.fallbackEmpty === false ? [] : fallback;
+}
+
+function parseVoiceActivationSettings(raw: unknown, opts?: { fallbackEmpty?: boolean }): VoiceActivationSettings | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const value = raw as Record<string, unknown>;
+  const normalAliases = normalizeVoiceActivationAliases(value.normalAliases, VOICE_ACTIVATION_SETTINGS_DEFAULT.normalAliases, opts);
+  const realTimeAliases = normalizeVoiceActivationAliases(value.realTimeAliases, VOICE_ACTIVATION_SETTINGS_DEFAULT.realTimeAliases, opts);
+  if (normalAliases.length === 0 || realTimeAliases.length === 0) return null;
+  return { normalAliases, realTimeAliases };
+}
+
+function voiceApprovalSettingsEqual(a: VoiceApprovalSettings, b: VoiceApprovalSettings): boolean {
+  return (
+    a.triggerPhrase === b.triggerPhrase &&
+    a.unlockCode === b.unlockCode &&
+    a.lockCode === b.lockCode &&
+    a.lockedOffCode === b.lockedOffCode &&
+    a.minDigits === b.minDigits &&
+    a.maxDigits === b.maxDigits &&
+    a.stableMs === b.stableMs &&
+    a.collectTimeoutMs === b.collectTimeoutMs &&
+    a.duplicateCooldownMs === b.duplicateCooldownMs &&
+    a.finalizeCheckIntervalMs === b.finalizeCheckIntervalMs &&
+    a.postPromptCommandSuppressionMs === b.postPromptCommandSuppressionMs
+  );
+}
+
+function voiceTranscriptionSettingsEqual(a: VoiceTranscriptionSettings, b: VoiceTranscriptionSettings): boolean {
+  return a.finalMode === b.finalMode;
+}
+
+function stringArraysEqual(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
+function voiceActivationSettingsEqual(a: VoiceActivationSettings, b: VoiceActivationSettings): boolean {
+  return stringArraysEqual(a.normalAliases, b.normalAliases) && stringArraysEqual(a.realTimeAliases, b.realTimeAliases);
 }
 
 export function normalizeAgentMessageAutoContinuePrompt(raw: unknown): string {
@@ -476,17 +726,25 @@ function apiKeyHint(apiKey: string | null): string | null {
   return `${key.slice(0, 4)}...${key.slice(-4)}`;
 }
 
-function providerApiKeyEnvVar(provider: LlmProviderId): 'OPENAI_API_KEY' | 'GEMINI_API_KEY' {
+function providerApiKeyEnvVar(provider: LlmProviderId): 'OPENAI_API_KEY' | 'GEMINI_API_KEY' | 'DRONE_HUB_CODEX_AUTH_FILE' {
+  if (provider === 'codex') return 'DRONE_HUB_CODEX_AUTH_FILE';
   return provider === 'openai' ? 'OPENAI_API_KEY' : 'GEMINI_API_KEY';
 }
 
 export function providerDisplayName(provider: LlmProviderId): string {
+  if (provider === 'codex') return 'Codex';
   return provider === 'openai' ? 'OpenAI' : 'Gemini';
 }
 
-async function getStoredProviderApiKey(provider: LlmProviderId): Promise<{ apiKey: string; updatedAt: string | null } | null> {
+async function getStoredProviderApiKey(provider: StoredApiKeyProviderId): Promise<{ apiKey: string; updatedAt: string | null } | null> {
   const reg = await loadRegistry();
-  const block = provider === 'openai' ? reg.settings?.openai : reg.settings?.gemini;
+  const block = provider === 'openai'
+    ? reg.settings?.openai
+    : provider === 'gemini'
+      ? reg.settings?.gemini
+      : provider === 'groq'
+        ? reg.settings?.groq
+        : reg.settings?.exa;
   const apiKey = normalizeApiKey(block?.apiKey);
   if (!apiKey) return null;
   const updatedAtRaw = block?.updatedAt;
@@ -494,32 +752,162 @@ async function getStoredProviderApiKey(provider: LlmProviderId): Promise<{ apiKe
   return { apiKey, updatedAt };
 }
 
-export async function upsertStoredProviderApiKey(provider: LlmProviderId, apiKeyRaw: string): Promise<void> {
+export async function upsertStoredProviderApiKey(provider: StoredApiKeyProviderId, apiKeyRaw: string): Promise<void> {
   const apiKey = normalizeApiKey(apiKeyRaw);
   if (!apiKey) throw new Error('API key is required.');
   const updatedAt = new Date().toISOString();
   await updateRegistry((reg) => {
     reg.settings ??= {};
     if (provider === 'openai') reg.settings.openai = { apiKey, updatedAt };
-    else reg.settings.gemini = { apiKey, updatedAt };
+    else if (provider === 'gemini') reg.settings.gemini = { apiKey, updatedAt };
+    else if (provider === 'groq') reg.settings.groq = { apiKey, updatedAt };
+    else reg.settings.exa = { apiKey, updatedAt };
   });
 }
 
-export async function clearStoredProviderApiKey(provider: LlmProviderId): Promise<void> {
+export async function clearStoredProviderApiKey(provider: StoredApiKeyProviderId): Promise<void> {
   await updateRegistry((reg) => {
     if (!reg.settings) return;
     if (provider === 'openai') {
       if (!reg.settings.openai) return;
       delete reg.settings.openai;
-    } else {
+    } else if (provider === 'gemini') {
       if (!reg.settings.gemini) return;
       delete reg.settings.gemini;
+    } else {
+      if (provider === 'groq') {
+        if (!reg.settings.groq) return;
+        delete reg.settings.groq;
+      } else {
+        if (!reg.settings.exa) return;
+        delete reg.settings.exa;
+      }
     }
     if (Object.keys(reg.settings).length === 0) delete reg.settings;
   });
 }
 
+async function getStoredVoiceStreamPairingPassword(): Promise<{ password: string; updatedAt: string | null } | null> {
+  const reg = await loadRegistry();
+  const password = normalizeApiKey(reg.settings?.voiceStream?.pairingPassword);
+  if (!password) return null;
+  const updatedAtRaw = reg.settings?.voiceStream?.updatedAt;
+  const updatedAt = typeof updatedAtRaw === 'string' && updatedAtRaw.trim() ? updatedAtRaw : null;
+  return { password, updatedAt };
+}
+
+export async function upsertVoiceStreamPairingPassword(passwordRaw: string): Promise<void> {
+  const pairingPassword = normalizeApiKey(passwordRaw);
+  if (!pairingPassword) throw new Error('Pairing password is required.');
+  const updatedAt = new Date().toISOString();
+  await updateRegistry((reg) => {
+    reg.settings ??= {};
+    reg.settings.voiceStream = { pairingPassword, updatedAt };
+  });
+}
+
+export async function clearVoiceStreamPairingPassword(): Promise<void> {
+  await updateRegistry((reg) => {
+    if (!reg.settings?.voiceStream) return;
+    delete reg.settings.voiceStream;
+    if (Object.keys(reg.settings).length === 0) delete reg.settings;
+  });
+}
+
+function codexAuthFilePath(): string {
+  const configured = normalizeApiKey(process.env.DRONE_HUB_CODEX_AUTH_FILE);
+  if (configured) return configured;
+  return path.join(os.homedir(), '.codex', 'auth.json');
+}
+
+function decodeJwtPayload(token: string): any | null {
+  try {
+    const parts = String(token ?? '').split('.');
+    if (parts.length !== 3) return null;
+    const raw = parts[1] ?? '';
+    const padded = `${raw}${'='.repeat((4 - (raw.length % 4)) % 4)}`;
+    return JSON.parse(Buffer.from(padded.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function codexAccessTokenExpiresAt(accessToken: string): number | null {
+  const exp = Number(decodeJwtPayload(accessToken)?.exp);
+  if (!Number.isFinite(exp) || exp <= 0) return null;
+  return exp * 1000;
+}
+
+function codexCredentialsFromAuthJson(parsed: any): {
+  access: string;
+  refresh: string;
+  accountId: string | null;
+  lastRefresh: string | null;
+  expires: number | null;
+} | null {
+  const tokens = parsed?.tokens && typeof parsed.tokens === 'object' ? parsed.tokens : {};
+  const access = normalizeApiKey(tokens.access_token);
+  const refresh = normalizeApiKey(tokens.refresh_token);
+  if (!access || !refresh) return null;
+  const accountId = normalizeApiKey(tokens.account_id) || null;
+  const lastRefresh = normalizeApiKey(parsed?.last_refresh) || null;
+  return {
+    access,
+    refresh,
+    accountId,
+    lastRefresh,
+    expires: codexAccessTokenExpiresAt(access),
+  };
+}
+
+async function refreshCodexCliAuthFile(authPath: string, parsed: any, refreshToken: string): Promise<{ apiKey: string; updatedAt: string | null }> {
+  const { refreshOpenAICodexToken } = await dynamicImport('@mariozechner/pi-ai/oauth');
+  const refreshed = await refreshOpenAICodexToken(refreshToken);
+  const updatedAt = new Date().toISOString();
+  const next = {
+    ...parsed,
+    auth_mode: typeof parsed?.auth_mode === 'string' && parsed.auth_mode.trim() ? parsed.auth_mode : 'chatgpt',
+    tokens: {
+      ...(parsed?.tokens && typeof parsed.tokens === 'object' ? parsed.tokens : {}),
+      access_token: refreshed.access,
+      refresh_token: refreshed.refresh,
+      account_id: typeof refreshed.accountId === 'string' ? refreshed.accountId : (parsed?.tokens?.account_id ?? undefined),
+    },
+    last_refresh: updatedAt,
+  };
+  await fs.writeFile(authPath, JSON.stringify(next, null, 2), 'utf8');
+  await fs.chmod(authPath, 0o600).catch(() => {});
+  return { apiKey: refreshed.access, updatedAt };
+}
+
+async function resolveCodexCliAuthSettings(): Promise<EffectiveProviderApiKeySettings> {
+  const authPath = codexAuthFilePath();
+  try {
+    const parsed = JSON.parse(await fs.readFile(authPath, 'utf8'));
+    const credentials = codexCredentialsFromAuthJson(parsed);
+    if (!credentials) return { apiKey: null, source: null, updatedAt: null };
+
+    const refreshAt = credentials.expires ? credentials.expires - 5 * 60 * 1000 : null;
+    if (refreshAt && Date.now() >= refreshAt) {
+      try {
+        const refreshed = await refreshCodexCliAuthFile(authPath, parsed, credentials.refresh);
+        return { apiKey: refreshed.apiKey, source: 'codex-cli', updatedAt: refreshed.updatedAt };
+      } catch {
+        if (credentials.expires && Date.now() >= credentials.expires) {
+          return { apiKey: null, source: null, updatedAt: credentials.lastRefresh };
+        }
+      }
+    }
+
+    return { apiKey: credentials.access, source: 'codex-cli', updatedAt: credentials.lastRefresh };
+  } catch {
+    return { apiKey: null, source: null, updatedAt: null };
+  }
+}
+
 export async function resolveEffectiveProviderApiKeySettings(provider: LlmProviderId): Promise<EffectiveProviderApiKeySettings> {
+  if (provider === 'codex') return await resolveCodexCliAuthSettings();
+
   const stored = await getStoredProviderApiKey(provider);
   if (stored) {
     return {
@@ -544,9 +932,53 @@ export async function resolveEffectiveProviderApiKeySettings(provider: LlmProvid
   };
 }
 
+export async function resolveGroqApiKeySettings(): Promise<EffectiveProviderApiKeySettings> {
+  const stored = await getStoredProviderApiKey('groq');
+  if (!stored) return { apiKey: null, source: null, updatedAt: null };
+  return {
+    apiKey: stored.apiKey,
+    source: 'settings',
+    updatedAt: stored.updatedAt,
+  };
+}
+
+export async function resolveExaApiKeySettings(): Promise<EffectiveProviderApiKeySettings> {
+  const stored = await getStoredProviderApiKey('exa');
+  if (!stored) return { apiKey: null, source: null, updatedAt: null };
+  return {
+    apiKey: stored.apiKey,
+    source: 'settings',
+    updatedAt: stored.updatedAt,
+  };
+}
+
+export async function resolveVoiceStreamPairingPasswordSettings(): Promise<EffectiveVoiceStreamPairingPasswordSettings> {
+  const stored = await getStoredVoiceStreamPairingPassword();
+  if (stored) {
+    return {
+      password: stored.password,
+      source: 'settings',
+      updatedAt: stored.updatedAt,
+    };
+  }
+  const envPassword = normalizeApiKey(process.env.DRONE_PAIR_PASSWORD);
+  if (envPassword) {
+    return {
+      password: envPassword,
+      source: 'environment',
+      updatedAt: null,
+    };
+  }
+  return {
+    password: null,
+    source: null,
+    updatedAt: null,
+  };
+}
+
 export async function collectProviderApiKeyDiagnostics(provider: LlmProviderId): Promise<ProviderApiKeyResolutionDiagnostics> {
   const envVar = providerApiKeyEnvVar(provider);
-  const stored = await getStoredProviderApiKey(provider);
+  const stored = provider === 'codex' ? null : await getStoredProviderApiKey(provider);
   const effective = await resolveEffectiveProviderApiKeySettings(provider);
   return {
     provider,
@@ -606,22 +1038,50 @@ export function providerKeySettingsResponse(
   };
 }
 
+export function voiceStreamPairingPasswordSettingsResponse(
+  settings: EffectiveVoiceStreamPairingPasswordSettings,
+  options?: { includePassword?: boolean },
+): {
+  hasPassword: boolean;
+  source: ApiKeySettingsSource;
+  passwordHint: string | null;
+  updatedAt: string | null;
+  password?: string | null;
+} {
+  return {
+    hasPassword: Boolean(settings.password),
+    source: settings.source,
+    passwordHint: apiKeyHint(settings.password),
+    updatedAt: settings.source === 'settings' ? settings.updatedAt : null,
+    ...(options?.includePassword ? { password: settings.password } : {}),
+  };
+}
+
 export async function resolveLlmSettingsResponse(): Promise<{
   ok: true;
   provider: { selected: LlmProviderId; source: LlmProviderSource };
   openai: { hasKey: boolean; source: ApiKeySettingsSource; keyHint: string | null; updatedAt: string | null };
   gemini: { hasKey: boolean; source: ApiKeySettingsSource; keyHint: string | null; updatedAt: string | null };
+  codex: { hasKey: boolean; source: ApiKeySettingsSource; keyHint: string | null; updatedAt: string | null };
+  groq: { hasKey: boolean; source: ApiKeySettingsSource; keyHint: string | null; updatedAt: string | null };
+  voiceStreamPairingPassword: { hasPassword: boolean; source: ApiKeySettingsSource; passwordHint: string | null; updatedAt: string | null };
 }> {
-  const [provider, openai, gemini] = await Promise.all([
+  const [provider, openai, gemini, codex, groq, voiceStreamPairingPassword] = await Promise.all([
     resolveEffectiveLlmProvider(),
     resolveEffectiveProviderApiKeySettings('openai'),
     resolveEffectiveProviderApiKeySettings('gemini'),
+    resolveEffectiveProviderApiKeySettings('codex'),
+    resolveGroqApiKeySettings(),
+    resolveVoiceStreamPairingPasswordSettings(),
   ]);
   return {
     ok: true,
     provider: { selected: provider.provider, source: provider.source },
     openai: providerKeySettingsResponse(openai),
     gemini: providerKeySettingsResponse(gemini),
+    codex: providerKeySettingsResponse(codex),
+    groq: providerKeySettingsResponse(groq),
+    voiceStreamPairingPassword: voiceStreamPairingPasswordSettingsResponse(voiceStreamPairingPassword),
   };
 }
 
@@ -765,6 +1225,165 @@ export async function resolveFilesystemSettingsResponse(): Promise<{
       maxUploadMaxBytes: FILESYSTEM_UPLOAD_MAX_BYTES_MAX,
       defaultUploadMaxBytes: FILESYSTEM_UPLOAD_MAX_BYTES_DEFAULT,
     },
+  };
+}
+
+async function getStoredVoiceApprovalSettings(): Promise<{
+  settings: VoiceApprovalSettings | null;
+  updatedAt: string | null;
+}> {
+  const reg = await loadRegistry();
+  const raw = reg.settings?.voiceApproval;
+  const settings = parseVoiceApprovalSettings(raw);
+  const updatedAtRaw = raw?.updatedAt;
+  return {
+    settings,
+    updatedAt: typeof updatedAtRaw === 'string' && updatedAtRaw.trim() ? updatedAtRaw.trim() : null,
+  };
+}
+
+export async function upsertStoredVoiceApprovalSettings(settingsRaw: unknown): Promise<void> {
+  const settings = parseVoiceApprovalSettings(settingsRaw);
+  if (!settings) {
+    throw new Error('Invalid voice approval settings.');
+  }
+  const updatedAt = new Date().toISOString();
+  await updateRegistry((reg) => {
+    reg.settings ??= {};
+    if (voiceApprovalSettingsEqual(settings, VOICE_APPROVAL_SETTINGS_DEFAULT)) {
+      delete reg.settings.voiceApproval;
+      if (Object.keys(reg.settings).length === 0) delete reg.settings;
+      return;
+    }
+    reg.settings.voiceApproval = {
+      ...settings,
+      updatedAt,
+    };
+  });
+}
+
+export async function resolveEffectiveVoiceApprovalSettings(): Promise<EffectiveVoiceApprovalSettings> {
+  const stored = await getStoredVoiceApprovalSettings();
+  return {
+    ...(stored.settings ?? VOICE_APPROVAL_SETTINGS_DEFAULT),
+    source: stored.settings ? 'settings' : 'default',
+    updatedAt: stored.settings ? stored.updatedAt : null,
+  };
+}
+
+export async function resolveVoiceApprovalSettingsResponse(): Promise<{
+  ok: true;
+  profile: {
+    activeProfile: string | null;
+    scoped: true;
+  };
+  voiceApproval: EffectiveVoiceApprovalSettings;
+  voiceTranscription: EffectiveVoiceTranscriptionSettings;
+  voiceActivation: EffectiveVoiceActivationSettings;
+  defaults: VoiceApprovalSettings;
+  transcriptionDefaults: VoiceTranscriptionSettings;
+  activationDefaults: VoiceActivationSettings;
+  limits: typeof VOICE_APPROVAL_SETTINGS_LIMITS;
+}> {
+  return {
+    ok: true,
+    profile: {
+      activeProfile: await readActiveProfileName(),
+      scoped: true,
+    },
+    voiceApproval: await resolveEffectiveVoiceApprovalSettings(),
+    voiceTranscription: await resolveEffectiveVoiceTranscriptionSettings(),
+    voiceActivation: await resolveEffectiveVoiceActivationSettings(),
+    defaults: VOICE_APPROVAL_SETTINGS_DEFAULT,
+    transcriptionDefaults: VOICE_TRANSCRIPTION_SETTINGS_DEFAULT,
+    activationDefaults: VOICE_ACTIVATION_SETTINGS_DEFAULT,
+    limits: VOICE_APPROVAL_SETTINGS_LIMITS,
+  };
+}
+
+async function getStoredVoiceTranscriptionSettings(): Promise<{
+  settings: VoiceTranscriptionSettings | null;
+  updatedAt: string | null;
+}> {
+  const reg = await loadRegistry();
+  const raw = reg.settings?.voiceTranscription;
+  const settings = parseVoiceTranscriptionSettings(raw);
+  const updatedAtRaw = raw?.updatedAt;
+  return {
+    settings,
+    updatedAt: typeof updatedAtRaw === 'string' && updatedAtRaw.trim() ? updatedAtRaw.trim() : null,
+  };
+}
+
+export async function upsertStoredVoiceTranscriptionSettings(settingsRaw: unknown): Promise<void> {
+  const settings = parseVoiceTranscriptionSettings(settingsRaw);
+  if (!settings) {
+    throw new Error('Invalid voice transcription settings.');
+  }
+  const updatedAt = new Date().toISOString();
+  await updateRegistry((reg) => {
+    reg.settings ??= {};
+    if (voiceTranscriptionSettingsEqual(settings, VOICE_TRANSCRIPTION_SETTINGS_DEFAULT)) {
+      delete reg.settings.voiceTranscription;
+      if (Object.keys(reg.settings).length === 0) delete reg.settings;
+      return;
+    }
+    reg.settings.voiceTranscription = {
+      ...settings,
+      updatedAt,
+    };
+  });
+}
+
+export async function resolveEffectiveVoiceTranscriptionSettings(): Promise<EffectiveVoiceTranscriptionSettings> {
+  const stored = await getStoredVoiceTranscriptionSettings();
+  return {
+    ...(stored.settings ?? VOICE_TRANSCRIPTION_SETTINGS_DEFAULT),
+    source: stored.settings ? 'settings' : 'default',
+    updatedAt: stored.settings ? stored.updatedAt : null,
+  };
+}
+
+async function getStoredVoiceActivationSettings(): Promise<{
+  settings: VoiceActivationSettings | null;
+  updatedAt: string | null;
+}> {
+  const reg = await loadRegistry();
+  const raw = reg.settings?.voiceActivation;
+  const settings = parseVoiceActivationSettings(raw);
+  const updatedAtRaw = raw?.updatedAt;
+  return {
+    settings,
+    updatedAt: typeof updatedAtRaw === 'string' && updatedAtRaw.trim() ? updatedAtRaw.trim() : null,
+  };
+}
+
+export async function upsertStoredVoiceActivationSettings(settingsRaw: unknown): Promise<void> {
+  const settings = parseVoiceActivationSettings(settingsRaw, { fallbackEmpty: false });
+  if (!settings) {
+    throw new Error('Voice activation settings require at least one normal alias and one real-time alias.');
+  }
+  const updatedAt = new Date().toISOString();
+  await updateRegistry((reg) => {
+    reg.settings ??= {};
+    if (voiceActivationSettingsEqual(settings, VOICE_ACTIVATION_SETTINGS_DEFAULT)) {
+      delete reg.settings.voiceActivation;
+      if (Object.keys(reg.settings).length === 0) delete reg.settings;
+      return;
+    }
+    reg.settings.voiceActivation = {
+      ...settings,
+      updatedAt,
+    };
+  });
+}
+
+export async function resolveEffectiveVoiceActivationSettings(): Promise<EffectiveVoiceActivationSettings> {
+  const stored = await getStoredVoiceActivationSettings();
+  return {
+    ...(stored.settings ?? VOICE_ACTIVATION_SETTINGS_DEFAULT),
+    source: stored.settings ? 'settings' : 'default',
+    updatedAt: stored.settings ? stored.updatedAt : null,
   };
 }
 

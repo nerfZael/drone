@@ -20,6 +20,7 @@ type EditableShortcutDispatchArgs = {
   matchedActionId: ShortcutActionId | null;
   targetInPrimaryChatInput: boolean;
   targetInCanvasMessageInput: boolean;
+  targetInAssistantChatInput: boolean;
 };
 
 export function computeTranscriptAutoScrollDecision({
@@ -71,9 +72,12 @@ export function computeTranscriptAutoScrollDecision({
 }
 
 export function shouldDispatchEditableShortcutAction(_args: EditableShortcutDispatchArgs): boolean {
-  const { matchedActionId, targetInPrimaryChatInput, targetInCanvasMessageInput } = _args;
-  if (matchedActionId === 'createDraftDrone') {
-    return targetInPrimaryChatInput || targetInCanvasMessageInput;
+  const { matchedActionId, targetInPrimaryChatInput, targetInCanvasMessageInput, targetInAssistantChatInput } = _args;
+  const inDraftShortcutChatInput = targetInPrimaryChatInput || targetInCanvasMessageInput;
+  const inVoiceShortcutChatInput = inDraftShortcutChatInput || targetInAssistantChatInput;
+  if (matchedActionId === 'createDraftDrone') return inDraftShortcutChatInput;
+  if (matchedActionId === 'toggleVoiceClipboardRecording' || matchedActionId === 'toggleAssistantVoiceSession') {
+    return inVoiceShortcutChatInput;
   }
   return false;
 }
