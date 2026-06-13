@@ -1,5 +1,5 @@
 const { app, BrowserWindow, ipcMain, screen, shell, Menu, Tray, nativeImage, clipboard, dialog, globalShortcut } = require('electron');
-const { fork } = require('node:child_process');
+const { fork, spawn } = require('node:child_process');
 const { createHmac, randomBytes, randomUUID, timingSafeEqual } = require('node:crypto');
 const fs = require('node:fs');
 const http = require('node:http');
@@ -607,6 +607,386 @@ function clearCommandLogs() {
     // Ignore missing or temporarily unavailable log files.
   }
   return { ok: true, logs: [] };
+}
+
+const callRecorderState = {
+  child: null,
+  sessionId: '',
+  recordingId: '',
+  audioUrl: '',
+  transcriptUrl: '',
+  uploadBuffer: Buffer.alloc(0),
+  uploadQueue: Promise.resolve(),
+  uploadError: null,
+  uploadedBytes: 0,
+  transcriptText: '',
+  startedAt: 0,
+  stderr: '',
+  sources: [],
+  mode: 'idle',
+  message: 'Ready to record computer audio.',
+  error: '',
+};
+
+function callRecorderStatus(extra = {}) {
+  return {
+    ok: true,
+    mode: callRecorderState.mode,
+    message: callRecorderState.message,
+    error: callRecorderState.error || null,
+    sessionId: callRecorderState.sessionId || null,
+    recordingId: callRecorderState.recordingId || null,
+    audioUrl: callRecorderState.audioUrl || null,
+    transcriptUrl: callRecorderState.transcriptUrl || null,
+    uploadedBytes: callRecorderState.uploadedBytes || 0,
+    transcriptText: callRecorderState.transcriptText || '',
+    startedAt: callRecorderState.startedAt ? new Date(callRecorderState.startedAt).toISOString() : null,
+    durationMs: callRecorderState.startedAt && callRecorderState.mode === 'recording' ? Date.now() - callRecorderState.startedAt : null,
+    sources: callRecorderState.sources,
+    ...extra,
+  };
+}
+
+function sendCallRecorderStatus(status = callRecorderStatus()) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send('callRecorder:status', status);
+}
+
+function callRecorderFfmpegCommand() {
+  return String(process.env.VOICE_STREAM_NEXT_CALL_RECORDER_FFMPEG || process.env.FFMPEG_PATH || 'ffmpeg').trim() || 'ffmpeg';
+}
+
+function parseCallRecorderSource(raw, fallbackFormat, fallbackInput, label) {
+  const value = String(raw || '').trim();
+  const text = value || `${fallbackFormat}:${fallbackInput}`;
+  const match = /^(pulse|alsa|avfoundation|dshow|wasapi):(.*)$/i.exec(text);
+  if (match) {
+    return { label, format: match[1].toLowerCase(), input: match[2] };
+  }
+  return { label, format: fallbackFormat, input: text };
+}
+
+function callRecorderInputArgs(source) {
+  if (source.format === 'pulse') return ['-f', 'pulse', '-thread_queue_size', '4096', '-i', source.input];
+  if (source.format === 'alsa') return ['-f', 'alsa', '-thread_queue_size', '4096', '-i', source.input];
+  if (source.format === 'avfoundation') return ['-f', 'avfoundation', '-thread_queue_size', '4096', '-i', source.input];
+  if (source.format === 'dshow') return ['-f', 'dshow', '-thread_queue_size', '4096', '-i', source.input];
+  if (source.format === 'wasapi') return ['-f', 'wasapi', '-thread_queue_size', '4096', '-i', source.input];
+  throw new Error(`Unsupported call recorder source format: ${source.format}`);
+}
+
+function defaultCallRecorderSources() {
+  const micDisabled = /^(0|false|no)$/i.test(String(process.env.VOICE_STREAM_NEXT_CALL_RECORDER_MIC_ENABLED ?? '1').trim());
+  const systemDisabled = /^(0|false|no)$/i.test(String(process.env.VOICE_STREAM_NEXT_CALL_RECORDER_SYSTEM_ENABLED ?? '1').trim());
+  const sources = [];
+  if (!micDisabled) {
+    if (process.platform === 'darwin') {
+      sources.push(parseCallRecorderSource(process.env.VOICE_STREAM_NEXT_CALL_RECORDER_MIC_SOURCE, 'avfoundation', ':0', 'microphone'));
+    } else if (process.platform === 'win32') {
+      sources.push(parseCallRecorderSource(process.env.VOICE_STREAM_NEXT_CALL_RECORDER_MIC_SOURCE, 'dshow', 'audio=default', 'microphone'));
+    } else {
+      sources.push(parseCallRecorderSource(process.env.VOICE_STREAM_NEXT_CALL_RECORDER_MIC_SOURCE, 'pulse', 'default', 'microphone'));
+    }
+  }
+  if (!systemDisabled) {
+    if (process.platform === 'linux') {
+      sources.push(parseCallRecorderSource(process.env.VOICE_STREAM_NEXT_CALL_RECORDER_SYSTEM_SOURCE, 'pulse', '@DEFAULT_MONITOR@', 'system'));
+    } else if (process.env.VOICE_STREAM_NEXT_CALL_RECORDER_SYSTEM_SOURCE) {
+      const fallbackFormat = process.platform === 'darwin' ? 'avfoundation' : process.platform === 'win32' ? 'wasapi' : 'pulse';
+      sources.push(parseCallRecorderSource(process.env.VOICE_STREAM_NEXT_CALL_RECORDER_SYSTEM_SOURCE, fallbackFormat, '', 'system'));
+    }
+  }
+  return sources.filter((source) => source.input);
+}
+
+function callRecorderFfmpegArgs(sources) {
+  const args = ['-y', '-hide_banner', '-loglevel', 'error'];
+  for (const source of sources) args.push(...callRecorderInputArgs(source));
+  if (sources.length > 1) {
+    const inputs = sources.map((_source, index) => `[${index}:a]`).join('');
+    args.push(
+      '-filter_complex',
+      `${inputs}amix=inputs=${sources.length}:duration=longest:dropout_transition=0:normalize=1,aresample=16000,pan=mono|c0=c0[a]`,
+      '-map',
+      '[a]',
+    );
+  } else {
+    args.push('-map', '0:a');
+  }
+  args.push('-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', '-f', 's16le', 'pipe:1');
+  return args;
+}
+
+async function startCallRecording() {
+  if (callRecorderState.child || callRecorderState.mode === 'transcribing') {
+    return callRecorderStatus();
+  }
+  const sources = defaultCallRecorderSources();
+  if (sources.length === 0) {
+    throw new Error('No call recording audio sources are configured.');
+  }
+  const liveSession = await startLiveCallRecordingSession();
+  const command = callRecorderFfmpegCommand();
+  const args = callRecorderFfmpegArgs(sources);
+  const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+  callRecorderState.child = child;
+  callRecorderState.sessionId = liveSession.sessionId || '';
+  callRecorderState.recordingId = liveSession.recording?.id || '';
+  callRecorderState.audioUrl = callRecorderState.recordingId ? `/api/voice/recordings/${encodeURIComponent(callRecorderState.recordingId)}/audio` : '';
+  callRecorderState.transcriptUrl = '';
+  callRecorderState.uploadBuffer = Buffer.alloc(0);
+  callRecorderState.uploadQueue = Promise.resolve();
+  callRecorderState.uploadError = null;
+  callRecorderState.uploadedBytes = 0;
+  callRecorderState.transcriptText = '';
+  callRecorderState.startedAt = Date.now();
+  callRecorderState.stderr = '';
+  callRecorderState.sources = sources.map((source) => ({
+    label: source.label,
+    format: source.format,
+    input: source.input,
+  }));
+  callRecorderState.mode = 'recording';
+  callRecorderState.message = sources.some((source) => source.label === 'system')
+    ? 'Recording microphone and computer audio.'
+    : 'Recording microphone audio. Configure a system loopback source to include computer audio.';
+  callRecorderState.error = '';
+  child.stderr?.on('data', (chunk) => {
+    callRecorderState.stderr = `${callRecorderState.stderr}${String(chunk || '')}`.slice(-4000);
+  });
+  child.stdout?.on('data', (chunk) => {
+    bufferCallRecorderAudio(chunk);
+  });
+  child.on('error', (error) => {
+    if (callRecorderState.child === child) callRecorderState.child = null;
+    void finalizeCallRecorderAfterQueuedUploads();
+    callRecorderState.mode = 'error';
+    callRecorderState.error = error?.message || String(error);
+    callRecorderState.message = `Call recording failed: ${callRecorderState.error}`;
+    sendCallRecorderStatus();
+  });
+  child.on('exit', (code, signal) => {
+    if (callRecorderState.child !== child) return;
+    callRecorderState.child = null;
+    if (callRecorderState.mode === 'recording') {
+      callRecorderState.mode = 'error';
+      const detail = callRecorderState.stderr.trim() || `ffmpeg exited ${code ?? signal ?? 'unknown'}`;
+      callRecorderState.error = detail;
+      callRecorderState.message = `Call recording stopped unexpectedly: ${detail}`;
+      void finalizeCallRecorderAfterQueuedUploads();
+      sendCallRecorderStatus();
+    }
+  });
+  const status = callRecorderStatus();
+  sendCallRecorderStatus(status);
+  return status;
+}
+
+function waitForCallRecorderExit(child) {
+  return new Promise((resolve) => {
+    if (!child || child.exitCode !== null || child.signalCode !== null) {
+      resolve();
+      return;
+    }
+    const timer = setTimeout(() => {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        // Ignore kill races while stopping ffmpeg.
+      }
+    }, 2500);
+    child.once('exit', () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    try {
+      child.stdin?.write('q');
+      child.stdin?.end();
+    } catch {
+      try {
+        child.kill('SIGTERM');
+      } catch {
+        // Ignore stale child cleanup.
+      }
+    }
+  });
+}
+
+function callRecorderAuthHeaders(config) {
+  return {
+    'x-voice-device-id': config.deviceId,
+    'x-voice-device-token': config.deviceToken,
+    'x-voice-installation-id': config.installationId || '',
+    'x-voice-client-version': '1',
+  };
+}
+
+async function parseCallRecorderResponse(response) {
+  const text = await response.text();
+  let body = null;
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch {
+    body = { error: text };
+  }
+  if (!response.ok) throw new Error(body?.error || `${response.status} ${response.statusText}`);
+  return body || { ok: true };
+}
+
+async function startLiveCallRecordingSession() {
+  const config = readConfig();
+  if (!config.deviceId || !config.deviceToken) throw new Error('Sign in before recording computer audio.');
+  const response = await fetch(`${trimSlash(config.serverUrl)}/api/voice/live-recordings/start`, {
+    method: 'POST',
+    headers: {
+      ...callRecorderAuthHeaders(config),
+    },
+  });
+  return parseCallRecorderResponse(response);
+}
+
+async function uploadLiveCallRecordingChunk(chunk, final = false) {
+  if (!callRecorderState.sessionId || (!final && chunk.byteLength === 0)) return { ok: true };
+  const config = readConfig();
+  const suffix = final ? '/stop' : '/chunk';
+  const response = await fetch(`${trimSlash(config.serverUrl)}/api/voice/live-recordings/${encodeURIComponent(callRecorderState.sessionId)}${suffix}`, {
+    method: 'POST',
+    headers: {
+      ...callRecorderAuthHeaders(config),
+      'content-type': 'application/octet-stream',
+    },
+    body: chunk,
+  });
+  const body = await parseCallRecorderResponse(response);
+  if (body.recording?.id) callRecorderState.recordingId = String(body.recording.id);
+  if (body.recording?.transcriptText || body.text) callRecorderState.transcriptText = String(body.recording?.transcriptText || body.text || '');
+  if (body.audioUrl) callRecorderState.audioUrl = body.audioUrl;
+  if (body.transcriptUrl) callRecorderState.transcriptUrl = body.transcriptUrl;
+  callRecorderState.uploadedBytes += chunk.byteLength;
+  return body;
+}
+
+function enqueueCallRecorderUpload(chunk, final = false) {
+  if (!chunk || chunk.byteLength === 0) return callRecorderState.uploadQueue;
+  const uploadChunk = Buffer.from(chunk);
+  callRecorderState.uploadQueue = callRecorderState.uploadQueue
+    .then(() => uploadLiveCallRecordingChunk(uploadChunk, final))
+    .catch((error) => {
+      callRecorderState.uploadError = error;
+      throw error;
+    });
+  return callRecorderState.uploadQueue;
+}
+
+function finalizeCallRecorderAfterQueuedUploads() {
+  return callRecorderState.uploadQueue
+    .catch(() => null)
+    .then(() => uploadLiveCallRecordingChunk(Buffer.alloc(0), true))
+    .catch(() => null);
+}
+
+function bufferCallRecorderAudio(chunk) {
+  if (!chunk || chunk.byteLength === 0 || callRecorderState.uploadError) return;
+  callRecorderState.uploadBuffer = Buffer.concat([callRecorderState.uploadBuffer, Buffer.from(chunk)]);
+  const flushBytes = 32_000;
+  if (callRecorderState.uploadBuffer.byteLength < flushBytes) return;
+  const flush = callRecorderState.uploadBuffer;
+  callRecorderState.uploadBuffer = Buffer.alloc(0);
+  void enqueueCallRecorderUpload(flush).catch((error) => {
+    if (callRecorderState.child) {
+      try {
+        callRecorderState.child.kill('SIGTERM');
+      } catch {
+        // Ignore stop races after upload failure.
+      }
+    }
+    callRecorderState.mode = 'error';
+    callRecorderState.error = error?.message || String(error);
+    callRecorderState.message = `Live recording upload failed: ${callRecorderState.error}`;
+    sendCallRecorderStatus();
+  });
+}
+
+async function stopCallRecording() {
+  const child = callRecorderState.child;
+  if (!child || callRecorderState.mode !== 'recording') return callRecorderStatus();
+  callRecorderState.mode = 'transcribing';
+  callRecorderState.message = 'Stopping recording and finalizing the live transcript.';
+  sendCallRecorderStatus();
+  callRecorderState.child = null;
+  await waitForCallRecorderExit(child);
+
+  const finalChunk = callRecorderState.uploadBuffer;
+  callRecorderState.uploadBuffer = Buffer.alloc(0);
+  if (callRecorderState.uploadedBytes + finalChunk.byteLength === 0) {
+    await uploadLiveCallRecordingChunk(Buffer.alloc(0), true).catch(() => null);
+    callRecorderState.mode = 'error';
+    callRecorderState.error = callRecorderState.stderr.trim() || 'Recorded audio file is empty.';
+    callRecorderState.message = `Call recording failed: ${callRecorderState.error}`;
+    const status = callRecorderStatus({ sizeBytes: 0 });
+    sendCallRecorderStatus(status);
+    return status;
+  }
+
+  try {
+    await callRecorderState.uploadQueue;
+    const finalized = await uploadLiveCallRecordingChunk(finalChunk, true);
+    const transcriptText = String(finalized.recording?.transcriptText || finalized.text || callRecorderState.transcriptText || '').trim();
+    const recordingId = String(finalized.recording?.id || callRecorderState.recordingId || '');
+    callRecorderState.recordingId = recordingId;
+    callRecorderState.audioUrl = finalized.audioUrl || (recordingId ? `/api/voice/recordings/${encodeURIComponent(recordingId)}/audio` : callRecorderState.audioUrl);
+    callRecorderState.transcriptUrl = finalized.transcriptUrl || callRecorderState.transcriptUrl || '';
+    callRecorderState.transcriptText = transcriptText;
+    callRecorderState.mode = 'saved';
+    callRecorderState.message = transcriptText
+      ? `Saved live recording with transcript (${transcriptText.length.toLocaleString()} characters).`
+      : 'Saved recording to history. Transcription returned no text.';
+    callRecorderState.error = '';
+    const status = callRecorderStatus({
+      sizeBytes: 44 + callRecorderState.uploadedBytes,
+      transcriptText,
+      provider: finalized.provider || null,
+      model: finalized.model || null,
+      audioDurationMs: finalized.recording?.durationMs || null,
+      recordingId: callRecorderState.recordingId || null,
+      audioUrl: callRecorderState.audioUrl || null,
+      transcriptUrl: callRecorderState.transcriptUrl || null,
+    });
+    sendCallRecorderStatus(status);
+    return status;
+  } catch (error) {
+    await uploadLiveCallRecordingChunk(Buffer.alloc(0), true).catch(() => null);
+    callRecorderState.mode = 'error';
+    callRecorderState.error = error?.message || String(error);
+    callRecorderState.message = `Live recording finalization failed: ${callRecorderState.error}`;
+    const status = callRecorderStatus({ sizeBytes: 44 + callRecorderState.uploadedBytes });
+    sendCallRecorderStatus(status);
+    return status;
+  }
+}
+
+function desktopWebUrl(config) {
+  if (config.webUrl) return trimSlash(config.webUrl);
+  const serverUrl = trimSlash(config.serverUrl);
+  if (!serverUrl) return '';
+  try {
+    const url = new URL(serverUrl);
+    if (url.port === '3299') {
+      url.port = '5185';
+      return trimSlash(url.toString());
+    }
+  } catch {
+    // Fall back to the server URL when it is not a valid absolute URL.
+  }
+  return serverUrl;
+}
+
+function openCallRecordingLocation() {
+  const config = readConfig();
+  const baseUrl = desktopWebUrl(config) || trimSlash(config.serverUrl);
+  if (!baseUrl) return { ok: false };
+  shell.openExternal(`${baseUrl}/settings/recordings`);
+  return { ok: true };
 }
 
 function windowSnapshot(win) {
@@ -2023,6 +2403,10 @@ if (!gotSingleInstanceLock) {
   ipcMain.handle('commandLog:append', (_event, entry) => appendCommandLog(entry));
   ipcMain.handle('commandLog:read', () => ({ ok: true, logs: readCommandLogEntries() }));
   ipcMain.handle('commandLog:clear', () => clearCommandLogs());
+  ipcMain.handle('callRecorder:status', () => callRecorderStatus());
+  ipcMain.handle('callRecorder:start', () => startCallRecording());
+  ipcMain.handle('callRecorder:stop', () => stopCallRecording());
+  ipcMain.handle('callRecorder:open', () => openCallRecordingLocation());
   ipcMain.handle('window:state', () => windowStatePayload());
   ipcMain.handle('window:compact', (event) => applyCompactMode(windowFromEvent(event)));
   ipcMain.handle('window:expand', (event) => applyExpandedMode(windowFromEvent(event)));
@@ -2087,6 +2471,13 @@ if (!gotSingleInstanceLock) {
 
   app.on('before-quit', () => {
     isQuitting = true;
+    if (callRecorderState.child) {
+      try {
+        callRecorderState.child.kill('SIGTERM');
+      } catch {
+        // Ignore recorder cleanup during quit.
+      }
+    }
     stopExtensionBridge();
     void deactivateDesktopExtensions();
     globalShortcut.unregisterAll();

@@ -58,3 +58,16 @@ The server defaults to `http://127.0.0.1:3299`, the web dashboard defaults to `h
 Clerk-backed server auth is enabled when `CLERK_SECRET_KEY` is set. Local development can use the built-in dev headers. Android initializes the Clerk SDK when `VOICE_STREAM_NEXT_ANDROID_CLERK_PUBLISHABLE_KEY` is present at build time.
 
 Voice speech runtime is server-side. Local wake detection runs on-device with Vosk. Speech-to-text and TTS use the user's Groq key from dashboard API key settings when configured; otherwise they use server Groq keys (`GROQ_API_KEY`, optionally `GROQ_STT_API_KEY` / `GROQ_TTS_API_KEY`) and platform credits. Assistant OpenAI, Exa, and Groq keys are stored per user from the dashboard and encrypted with `VOICE_STREAM_NEXT_SECRETS_KEY`.
+
+## Desktop Computer Audio Recording
+
+The Electron desktop app can record microphone plus computer audio and save it to the Voice Stream Next server. It uses `ffmpeg` from the desktop machine, streams 16 kHz mono PCM chunks to the server while recording, and the server keeps a downloadable WAV plus a live Groq transcript in recording history. Transcription runs in rolling windows with overlap so long recordings do not need to stop before text appears. The web app and desktop history link both use `/settings/recordings`, where transcripts can be downloaded as `.txt` files.
+
+Linux defaults to Pulse/PipeWire sources:
+
+```bash
+VOICE_STREAM_NEXT_CALL_RECORDER_MIC_SOURCE=pulse:default
+VOICE_STREAM_NEXT_CALL_RECORDER_SYSTEM_SOURCE=pulse:@DEFAULT_MONITOR@
+```
+
+macOS and Windows usually need a virtual loopback device for system audio. Set `VOICE_STREAM_NEXT_CALL_RECORDER_SYSTEM_SOURCE` to an ffmpeg input spec such as `avfoundation:<device>` on macOS, `dshow:<device>` on Windows, or `wasapi:<device>` when your ffmpeg build supports it. Set `VOICE_STREAM_NEXT_CALL_RECORDER_FFMPEG` when `ffmpeg` is not on `PATH`.

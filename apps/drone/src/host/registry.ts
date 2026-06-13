@@ -5,6 +5,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { droneRootPath, legacyDroneRootDirs } from './paths';
 import { normalizeDroneRuntime, type DroneRuntime } from './runtime';
+import {
+  getSqliteRegistryStoreUnavailableReason,
+  hubSqlitePath,
+  readRegistryJsonFromSqlite,
+  recordSqliteRegistryMigration,
+  writeRegistryToSqlite,
+} from './sqlite-registry-store';
 
 type DroneRegistryDroneKind = 'standard' | 'playbook-run';
 type DroneRegistryDroneVisibility = 'visible' | 'hidden';
@@ -993,6 +1000,12 @@ function parseRegistry(raw: string): DroneRegistry | null {
   }
 }
 
+function normalizeRegistryForPersistence(reg: DroneRegistry): DroneRegistry {
+  const cloned = JSON.parse(JSON.stringify(reg ?? { version: 2, drones: {}, pending: {} }));
+  const parsed = parseRegistry(JSON.stringify(cloned));
+  return parsed ?? { version: 2, drones: {}, pending: {} };
+}
+
 async function readRegistryFromPath(p: string): Promise<DroneRegistry | null> {
   try {
     const raw = await fs.readFile(p, 'utf8');
@@ -1073,6 +1086,55 @@ async function archiveLegacyRegistryBestEffort(legacyPath: string): Promise<void
   }
 }
 
+async function backupRegistryBeforeSqliteMigrationBestEffort(p: string): Promise<string | null> {
+  if (!(await pathExists(p))) return null;
+  const dir = path.dirname(p);
+  const ts = new Date().toISOString().replace(/[:.]/g, '-');
+  const backupPath = path.join(dir, `registry.backup-before-sqlite-${ts}.json`);
+  try {
+    await fs.copyFile(p, backupPath, fsConstants.COPYFILE_EXCL);
+    await setPrivateFileModeBestEffort(backupPath);
+    return backupPath;
+  } catch {
+    return null;
+  }
+}
+
+async function backupAndRemoveRegistryJsonBestEffort(p: string): Promise<string | null> {
+  if (!(await pathExists(p))) return null;
+  const dir = path.dirname(p);
+  const ts = new Date().toISOString().replace(/[:.]/g, '-');
+  const backupPath = path.join(dir, `registry.backup-before-json-removal-${ts}.json`);
+  try {
+    await fs.copyFile(p, backupPath, fsConstants.COPYFILE_EXCL);
+    await setPrivateFileModeBestEffort(backupPath);
+  } catch {
+    return null;
+  }
+  try {
+    await fs.rm(p, { force: true });
+  } catch {
+    // ignore; a future successful save will try again
+  }
+  return backupPath;
+}
+
+async function removeRegistryJsonWithExistingBackupBestEffort(p: string, existingBackupPath: string | null): Promise<void> {
+  if (existingBackupPath) {
+    await removePathBestEffort(p);
+    return;
+  }
+  try {
+    await backupAndRemoveRegistryJsonBestEffort(p);
+  } catch {
+    // ignore; if backup/removal fails, keep the JSON file in place
+  }
+}
+
+async function sqlitePrimaryExists(): Promise<boolean> {
+  return await pathExists(hubSqlitePath());
+}
+
 async function consolidateRegistryPaths(): Promise<DroneRegistry | null> {
   const preferredPath = registryPath();
   const preferred = await readRegistryFromPath(preferredPath);
@@ -1116,18 +1178,47 @@ async function consolidateRegistryPaths(): Promise<DroneRegistry | null> {
 }
 
 export async function loadRegistry(): Promise<DroneRegistry> {
-  const consolidated = await consolidateRegistryPaths();
-  if (consolidated) return consolidated;
+  const sqliteRaw = readRegistryJsonFromSqlite();
+  if (sqliteRaw === undefined && (await sqlitePrimaryExists())) {
+    const reason = getSqliteRegistryStoreUnavailableReason();
+    throw new Error(`hub SQLite registry exists but could not be opened${reason ? `: ${reason}` : ''}`);
+  }
+  if (typeof sqliteRaw === 'string') {
+    const sqliteRegistry = parseRegistry(sqliteRaw);
+    if (sqliteRegistry) return sqliteRegistry;
+    throw new Error('hub SQLite registry state is invalid');
+  }
 
-  return { version: 2, drones: {}, pending: {} };
+  const consolidated = await consolidateRegistryPaths();
+  const registry = consolidated ?? { version: 2, drones: {}, pending: {} };
+  const normalized = normalizeRegistryForPersistence(registry);
+  const sourcePath = registryPath();
+  const backupPath = await backupRegistryBeforeSqliteMigrationBestEffort(sourcePath);
+  const migratedAt = new Date().toISOString();
+  if (writeRegistryToSqlite(normalized, { sourcePath, migratedAt })) {
+    recordSqliteRegistryMigration({ sourcePath, backupPath, registry: normalized, createdAt: migratedAt });
+    await removeRegistryJsonWithExistingBackupBestEffort(sourcePath, backupPath);
+    return normalized;
+  }
+
+  return normalized;
 }
 
 export async function saveRegistry(reg: DroneRegistry): Promise<void> {
-  await saveRegistryAtPath(registryPath(), reg);
+  const normalized = normalizeRegistryForPersistence(reg);
+  if (writeRegistryToSqlite(normalized, { sourcePath: registryPath() })) {
+    await backupAndRemoveRegistryJsonBestEffort(registryPath());
+  } else {
+    if (await sqlitePrimaryExists()) {
+      const reason = getSqliteRegistryStoreUnavailableReason();
+      throw new Error(`hub SQLite registry exists but could not be opened${reason ? `: ${reason}` : ''}`);
+    }
+    await saveRegistryAtPath(registryPath(), normalized);
+  }
   for (const legacyPath of legacyRegistryPaths()) {
     const legacy = await readRegistryFromPath(legacyPath);
     if (!legacy) continue;
-    if (registriesEqual(reg, legacy) || !hasMeaningfulRegistryData(legacy)) {
+    if (registriesEqual(normalized, legacy) || !hasMeaningfulRegistryData(legacy)) {
       await removePathBestEffort(legacyPath);
       continue;
     }

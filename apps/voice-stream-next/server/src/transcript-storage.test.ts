@@ -77,6 +77,26 @@ describe('transcript storage', () => {
     expect(db.listTranscripts(user.id)).toHaveLength(0);
   });
 
+  test('updates a live transcript row without creating duplicates', () => {
+    const db = tempDb('transcript-live');
+    dbs.push(db);
+    const user = db.upsertUser({
+      clerkUserId: 'clerk_live_transcript',
+      displayName: 'Live User',
+      email: 'live@example.local',
+      admin: false,
+    });
+    const device = db.registerDevice(user.id, { deviceType: 'desktop', displayName: 'Live desk' });
+    const session = db.createVoiceSession(user.id, device.device.id, 'computer');
+    db.setTranscript(user.id, session.id, 'First live chunk', false);
+    db.setTranscript(user.id, session.id, 'First live chunk second live chunk', true);
+
+    const transcripts = db.listTranscripts(user.id, 20, { voiceSessionId: session.id });
+    expect(transcripts).toHaveLength(1);
+    expect(transcripts[0]?.text).toBe('First live chunk second live chunk');
+    expect(transcripts[0]?.final).toBe(true);
+  });
+
   test('stores voice recording metadata with paired transcript and prunes per mode', () => {
     const db = tempDb('voice-recordings');
     dbs.push(db);
