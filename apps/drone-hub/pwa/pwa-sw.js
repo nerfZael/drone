@@ -5,7 +5,9 @@ const SHELL_ASSETS = [
   '/remote.html',
   '/manifest.webmanifest',
   '/remote-manifest.webmanifest',
-  '/icons/drone-hub.svg',
+  '/icons/drone-app-icon-32.png',
+  '/icons/drone-app-icon-256.png',
+  '/icons/drone-app-icon-512.png',
 ];
 
 self.addEventListener('install', (event) => {
