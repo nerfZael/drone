@@ -52,6 +52,16 @@ import {
 import { ensureHubSetupState } from './host/setup-state';
 import { resolveDetachedCliLaunchSpec } from './hub/hub-launch';
 import { parseHubRunnerProcessesFromPsOutput, selectHubRunnerPidsToStop } from './hub/orphan-hub-runners';
+import {
+  normalizeRemotePublicUrl,
+  pidIsRunning as remotePidIsRunning,
+  readRemoteHubState,
+  remoteHubLogPath,
+  removeRemoteHubStateIfOwnedByPid,
+  writeRemoteHubState,
+} from './hub/remote-state';
+import { startRemoteHubServer } from './hub/remote-server';
+import { createRemoteHubPairing, startRemoteHubDetached, stopRemoteHubDetached } from './hub/remote-control';
 import { startDroneHubApiServer } from './hub/server';
 import { importTranscriptTurnsFromRegistry } from './hub/transcript-store';
 import {
@@ -2254,6 +2264,106 @@ async function hubStop() {
   console.log(JSON.stringify({ ok: true, stopped: true, pid }, null, 2));
 }
 
+async function remoteHubRun(options: any) {
+  const portRaw = Number(options.port ?? 0);
+  const port = portRaw === 0 ? await getFreeTcpPort() : portRaw;
+  if (!Number.isFinite(port) || port <= 0) throw new Error('invalid --port');
+  const host = String(options.host || '127.0.0.1').trim() || '127.0.0.1';
+  const publicUrl = normalizeRemotePublicUrl(options.publicUrl);
+  const hubState = await readHubState();
+  if (!hubState || !pidIsRunning(hubState.pid)) {
+    throw new Error('Drone Hub must be running before starting remote Hub (run `drone hub start`).');
+  }
+  const hubApiToken = await ensureHubApiToken();
+  const controlToken = String(options.controlToken ?? '').trim() || crypto.randomBytes(32).toString('base64url');
+  const repoRoot = resolveRepoRootFromDroneCliDir();
+  const staticDir = path.join(repoRoot, 'apps', 'drone-hub', 'dist');
+  const server = await startRemoteHubServer({
+    port,
+    host,
+    publicUrl,
+    controlToken,
+    staticDir,
+    hubBaseUrl: `http://${hubState.apiHost}:${hubState.apiPort}`,
+    hubApiToken,
+  });
+
+  await writeRemoteHubState({
+    version: 1,
+    pid: process.pid,
+    host: server.host,
+    port: server.port,
+    publicUrl,
+    controlToken,
+    startedAt: new Date().toISOString(),
+    logPath: remoteHubLogPath(),
+  });
+
+  let stopping = false;
+  const shutdown = async () => {
+    if (stopping) return;
+    stopping = true;
+    await server.close().catch(() => {});
+    await removeRemoteHubStateIfOwnedByPid(process.pid);
+  };
+  process.once('SIGINT', () => void shutdown());
+  process.once('SIGTERM', () => void shutdown());
+
+  // eslint-disable-next-line no-console
+  console.log(`Remote Drone Hub: http://${server.host}:${server.port}${publicUrl ? ` (${publicUrl})` : ''}`);
+  await new Promise<void>((resolve) => {
+    process.once('SIGINT', resolve);
+    process.once('SIGTERM', resolve);
+  });
+  await shutdown();
+}
+
+async function remoteHubStart(options: any) {
+  const result = await startRemoteHubDetached({
+    port: options.port ?? 0,
+    host: options.host,
+    publicUrl: options.publicUrl,
+    cliFilename: __filename,
+    createPairing: true,
+  });
+  // eslint-disable-next-line no-console
+  console.log(
+    JSON.stringify(
+      {
+        ok: true,
+        alreadyRunning: result.alreadyRunning,
+        pid: result.state.pid,
+        url: result.state.url,
+        localUrl: `http://${result.state.host}:${result.state.port}`,
+        logPath: result.state.logPath,
+        ...(result.pairing ? { pairingUrl: result.pairing.url, pairingExpiresAt: result.pairing.expiresAt } : {}),
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+async function remoteHubStop() {
+  const result = await stopRemoteHubDetached();
+  // eslint-disable-next-line no-console
+  console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+}
+
+async function remoteHubStatus() {
+  const state = await readRemoteHubState();
+  const running = Boolean(state && remotePidIsRunning(state.pid));
+  // eslint-disable-next-line no-console
+  console.log(JSON.stringify({ ok: true, running, state: state ? { ...state, controlToken: undefined } : null }, null, 2));
+}
+
+async function remoteHubPair() {
+  const state = await readRemoteHubState();
+  const pairing = await createRemoteHubPairing(state);
+  // eslint-disable-next-line no-console
+  console.log(JSON.stringify({ ok: true, ...pairing }, null, 2));
+}
+
 async function profileListCommand() {
   // eslint-disable-next-line no-console
   console.log(JSON.stringify({ ok: true, ...(await listProfilesState()) }, null, 2));
@@ -2355,6 +2465,48 @@ hub.command('run')
   .option('--no-voice-stream', 'Do not start the Voice Stream companion server')
   .action(async (options) => {
     await hubRun(options);
+  });
+hub.command('remote-run')
+  .description('Run the remote Hub in the current process (internal)')
+  .option('--port <port>', 'Remote Hub port; pass 0 for auto', '0')
+  .option('--host <host>', 'Bind host for remote Hub server', '127.0.0.1')
+  .option('--public-url <url>', 'Public ngrok URL for pairing links')
+  .option('--control-token <token>', 'Private local control token')
+  .action(async (options) => {
+    await remoteHubRun(options);
+  });
+const remoteHub = hub.command('remote').description('Manage the QR-paired remote Drone Hub');
+remoteHub.command('start')
+  .description('Start the remote Hub in detached mode')
+  .option('--port <port>', 'Remote Hub port; pass 0 for auto', '0')
+  .option('--host <host>', 'Bind host for remote Hub server', '127.0.0.1')
+  .option('--public-url <url>', 'Public ngrok URL for pairing links')
+  .action(async (options) => {
+    await remoteHubStart(options);
+  });
+remoteHub.command('stop')
+  .description('Stop the detached remote Hub')
+  .action(async () => {
+    await remoteHubStop();
+  });
+remoteHub.command('restart')
+  .description('Restart the detached remote Hub')
+  .option('--port <port>', 'Remote Hub port; pass 0 for auto', '0')
+  .option('--host <host>', 'Bind host for remote Hub server', '127.0.0.1')
+  .option('--public-url <url>', 'Public ngrok URL for pairing links')
+  .action(async (options) => {
+    await remoteHubStop();
+    await remoteHubStart(options);
+  });
+remoteHub.command('status')
+  .description('Show remote Hub status')
+  .action(async () => {
+    await remoteHubStatus();
+  });
+remoteHub.command('pair')
+  .description('Create a one-time remote Hub pairing URL')
+  .action(async () => {
+    await remoteHubPair();
   });
 hub.action(async () => {
   // `drone hub` defaults to detached start.

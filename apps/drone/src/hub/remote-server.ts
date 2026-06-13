@@ -1,0 +1,314 @@
+import crypto from 'node:crypto';
+import { createReadStream, existsSync } from 'node:fs';
+import http from 'node:http';
+import path from 'node:path';
+import { Readable } from 'node:stream';
+import { URL } from 'node:url';
+
+import QRCode from 'qrcode';
+
+import { RemoteAuthStore } from './remote-auth';
+import { normalizeRemotePublicUrl } from './remote-state';
+
+type StartRemoteHubServerOptions = {
+  port: number;
+  host?: string;
+  hubBaseUrl: string;
+  hubApiToken: string;
+  publicUrl?: string | null;
+  controlToken: string;
+  staticDir: string;
+};
+
+type RemoteHubServer = {
+  host: string;
+  port: number;
+  close: () => Promise<void>;
+};
+
+const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
+const HOP_BY_HOP_HEADERS = new Set([
+  'connection',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+]);
+
+function json(res: http.ServerResponse, status: number, body: unknown): void {
+  res.writeHead(status, JSON_HEADERS);
+  res.end(JSON.stringify(body));
+}
+
+async function readRawBody(req: http.IncomingMessage, maxBytes = 1024 * 1024): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of req) {
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+    total += buf.length;
+    if (total > maxBytes) throw new Error(`request body too large (max ${maxBytes} bytes)`);
+    chunks.push(buf);
+  }
+  return Buffer.concat(chunks);
+}
+
+function sanitizeDroneSummary(raw: any): any {
+  return {
+    id: String(raw?.id ?? ''),
+    name: String(raw?.name ?? ''),
+    group: raw?.group == null ? null : String(raw.group),
+    kind: raw?.kind === 'playbook-run' ? 'playbook-run' : 'standard',
+    visibility: raw?.visibility === 'hidden' ? 'hidden' : 'visible',
+    playbook: null,
+    createdAt: String(raw?.createdAt ?? ''),
+    lastActivityAt: raw?.lastActivityAt ?? null,
+    lastMessageAt: raw?.lastMessageAt ?? null,
+    lastActivityChat: raw?.lastActivityChat ?? null,
+    fleetParentId: null,
+    fleetAssignedIds: [],
+    runtime: 'container',
+    persistVolume: false,
+    repoAttached: false,
+    repoPath: '',
+    repoBranch: null,
+    cwd: undefined,
+    containerPort: Number(raw?.containerPort ?? 7777) || 7777,
+    hostPort: null,
+    statusOk: raw?.statusOk === true,
+    statusError: raw?.statusOk === true ? null : 'unavailable',
+    chats: Array.isArray(raw?.chats) ? raw.chats.map(String) : [],
+    busyChats: Array.isArray(raw?.busyChats) ? raw.busyChats.map(String) : [],
+    hubPhase: raw?.hubPhase ?? null,
+    hubMessage: raw?.hubMessage ?? null,
+    busy: raw?.busy === true,
+  };
+}
+
+function isContainerDrone(raw: any): boolean {
+  return String(raw?.runtime ?? 'container') === 'container';
+}
+
+function splitPathname(pathname: string): string[] {
+  return pathname.split('/').filter(Boolean).map((part) => decodeURIComponent(part));
+}
+
+function contentTypeFor(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === '.html') return 'text/html; charset=utf-8';
+  if (ext === '.js' || ext === '.mjs') return 'text/javascript; charset=utf-8';
+  if (ext === '.css') return 'text/css; charset=utf-8';
+  if (ext === '.svg') return 'image/svg+xml';
+  if (ext === '.json') return 'application/json; charset=utf-8';
+  if (ext === '.woff2') return 'font/woff2';
+  return 'application/octet-stream';
+}
+
+function safeStaticPath(staticDir: string, pathname: string): string | null {
+  const clean = decodeURIComponent(pathname.split('?')[0] ?? '/');
+  const rel = clean === '/' ? 'remote.html' : clean.replace(/^\/+/, '');
+  const resolved = path.resolve(staticDir, rel);
+  const root = path.resolve(staticDir);
+  if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) return null;
+  return resolved;
+}
+
+async function fetchJsonFromHub<T>(opts: StartRemoteHubServerOptions, pathname: string): Promise<T> {
+  const response = await fetch(new URL(pathname, opts.hubBaseUrl).toString(), {
+    headers: { authorization: `Bearer ${opts.hubApiToken}` },
+  });
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!response.ok) throw new Error(data?.error ?? `${response.status} ${response.statusText}`);
+  return data as T;
+}
+
+async function resolveContainerDrone(opts: StartRemoteHubServerOptions, droneId: string): Promise<any | null> {
+  const data = await fetchJsonFromHub<{ ok: true; drones: any[] }>(opts, '/api/drones');
+  const drones = Array.isArray(data?.drones) ? data.drones : [];
+  return drones.find((drone) => String(drone?.id ?? '') === droneId && isContainerDrone(drone)) ?? null;
+}
+
+function routeAllowed(method: string, pathname: string): boolean {
+  const parts = splitPathname(pathname);
+  if (method === 'GET' && pathname === '/api/drones') return true;
+  if (parts.length < 3 || parts[0] !== 'api' || parts[1] !== 'drones') return false;
+  if (method === 'GET' && parts.length === 4 && parts[3] === 'chats') return true;
+  if (method === 'GET' && parts.length === 5 && parts[3] === 'chats') return true;
+  if (method === 'POST' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'prompt') return true;
+  if (method === 'POST' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'stop') return true;
+  if (method === 'GET' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'pending') return true;
+  if (method === 'GET' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'output') return true;
+  if (method === 'GET' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'transcript') return true;
+  if (method === 'DELETE' && parts.length === 7 && parts[3] === 'chats' && parts[5] === 'pending') return true;
+  return false;
+}
+
+async function proxyAllowedRequest(opts: StartRemoteHubServerOptions, req: http.IncomingMessage, res: http.ServerResponse, pathname: string): Promise<void> {
+  const method = String(req.method ?? 'GET').toUpperCase();
+  if (!routeAllowed(method, pathname)) {
+    json(res, 404, { ok: false, error: 'not available in remote Hub' });
+    return;
+  }
+
+  const parts = splitPathname(pathname);
+  if (parts[0] === 'api' && parts[1] === 'drones' && parts[2]) {
+    const drone = await resolveContainerDrone(opts, parts[2]);
+    if (!drone) {
+      json(res, 404, { ok: false, error: 'unknown container drone' });
+      return;
+    }
+  }
+
+  if (method === 'GET' && pathname === '/api/drones') {
+    const data = await fetchJsonFromHub<{ ok: true; drones: any[] }>(opts, '/api/drones');
+    json(res, 200, { ok: true, drones: (data.drones ?? []).filter(isContainerDrone).map(sanitizeDroneSummary) });
+    return;
+  }
+
+  const body = method === 'GET' || method === 'HEAD' ? undefined : await readRawBody(req, 1024 * 1024);
+  const target = new URL(`${pathname}${new URL(req.url ?? '/', 'http://remote.local').search}`, opts.hubBaseUrl);
+  const response = await fetch(target.toString(), {
+    method,
+    headers: {
+      authorization: `Bearer ${opts.hubApiToken}`,
+      'content-type': String(req.headers['content-type'] ?? 'application/json'),
+      ...(req.headers['if-none-match'] ? { 'if-none-match': String(req.headers['if-none-match']) } : {}),
+    },
+    body: body as any,
+  });
+
+  res.statusCode = response.status;
+  response.headers.forEach((value, key) => {
+    if (!HOP_BY_HOP_HEADERS.has(key.toLowerCase())) res.setHeader(key, value);
+  });
+  if (!response.body) {
+    res.end();
+    return;
+  }
+  Readable.fromWeb(response.body as any).pipe(res);
+}
+
+async function serveStatic(opts: StartRemoteHubServerOptions, res: http.ServerResponse, pathname: string): Promise<void> {
+  const resolved = safeStaticPath(opts.staticDir, pathname);
+  const fallback = path.join(opts.staticDir, 'remote.html');
+  const filePath = resolved && existsSync(resolved) ? resolved : fallback;
+  if (!existsSync(filePath)) {
+    json(res, 503, {
+      ok: false,
+      error: 'remote Hub UI is not built yet; run `bun run --filter drone-hub build`',
+    });
+    return;
+  }
+  res.statusCode = 200;
+  res.setHeader('content-type', contentTypeFor(filePath));
+  createReadStream(filePath).pipe(res);
+}
+
+export async function startRemoteHubServer(opts: StartRemoteHubServerOptions): Promise<RemoteHubServer> {
+  const auth = new RemoteAuthStore();
+  const host = String(opts.host ?? '127.0.0.1').trim() || '127.0.0.1';
+  const publicUrl = normalizeRemotePublicUrl(opts.publicUrl);
+  const hubBaseUrl = String(opts.hubBaseUrl ?? '').trim().replace(/\/+$/, '');
+  if (!hubBaseUrl) throw new Error('missing Hub base URL');
+  if (!String(opts.hubApiToken ?? '').trim()) throw new Error('missing Hub API token');
+  if (!String(opts.controlToken ?? '').trim()) throw new Error('missing remote control token');
+
+  const server = http.createServer(async (req, res) => {
+    try {
+      const method = String(req.method ?? 'GET').toUpperCase();
+      const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'remote.local'}`);
+      const pathname = url.pathname;
+
+      if (method === 'GET' && pathname === '/api/remote/session') {
+        const session = auth.resolveSession(req);
+        json(res, 200, {
+          ok: true,
+          authenticated: Boolean(session),
+          csrf: session?.csrf ?? null,
+          activeSessions: auth.activeSessionCount(),
+        });
+        return;
+      }
+
+      if (method === 'POST' && pathname === '/api/remote/logout') {
+        auth.clearSession(req, res);
+        json(res, 200, { ok: true });
+        return;
+      }
+
+      if (method === 'POST' && pathname === '/api/local/pairings') {
+        const authHeader = String(req.headers.authorization ?? '');
+        if (authHeader !== `Bearer ${opts.controlToken}`) {
+          json(res, 401, { ok: false, error: 'unauthorized' });
+          return;
+        }
+        const pairing = auth.createPairing();
+        const base = publicUrl || `http://${host}:${opts.port}`;
+        const pairingUrl = `${base}/pair/${encodeURIComponent(pairing.token)}`;
+        const qrSvg = await QRCode.toString(pairingUrl, {
+          type: 'svg',
+          errorCorrectionLevel: 'M',
+          margin: 1,
+          width: 256,
+          color: { dark: '#111827', light: '#ffffff' },
+        });
+        json(res, 200, {
+          ok: true,
+          url: pairingUrl,
+          qrSvg,
+          expiresAt: new Date(pairing.expiresAtMs).toISOString(),
+        });
+        return;
+      }
+
+      if (method === 'GET' && pathname.startsWith('/pair/')) {
+        const token = decodeURIComponent(pathname.slice('/pair/'.length));
+        const session = auth.consumePairing(token, req, res);
+        if (!session) {
+          res.statusCode = 401;
+          res.setHeader('content-type', 'text/html; charset=utf-8');
+          res.end('<!doctype html><title>Pairing expired</title><p>Pairing link expired or was already used.</p>');
+          return;
+        }
+        res.statusCode = 302;
+        res.setHeader('location', '/');
+        res.end();
+        return;
+      }
+
+      if (pathname.startsWith('/api/')) {
+        const session = auth.resolveSession(req);
+        if (!session) {
+          json(res, 401, { ok: false, error: 'pairing required' });
+          return;
+        }
+        if (!auth.requireCsrf(req, session)) {
+          json(res, 403, { ok: false, error: 'invalid csrf token' });
+          return;
+        }
+        await proxyAllowedRequest({ ...opts, hubBaseUrl }, req, res, pathname);
+        return;
+      }
+
+      await serveStatic(opts, res, pathname);
+    } catch (error: any) {
+      const requestId = crypto.randomBytes(4).toString('hex');
+      console.warn('[RemoteHub] request failed', { requestId, error: error?.message ?? String(error) });
+      json(res, 500, { ok: false, error: error?.message ?? String(error), requestId });
+    }
+  });
+
+  await new Promise<void>((resolve) => server.listen(opts.port, host, resolve));
+  const address = server.address();
+  const actualPort = typeof address === 'object' && address ? address.port : opts.port;
+  return {
+    host,
+    port: actualPort,
+    close: async () => {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    },
+  };
+}
