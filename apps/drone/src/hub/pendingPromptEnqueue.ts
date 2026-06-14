@@ -7,6 +7,48 @@ export type PendingPromptLike = {
   state: PendingPromptState | string;
 };
 
+const FAILED_PROMPT_RETRY_WINDOW_MS = 10 * 60_000;
+
+function parseTimestampMs(raw: string | null | undefined): number | null {
+  const s = String(raw ?? '').trim();
+  if (!s) return null;
+  const ms = Date.parse(s);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function looksLikeTerminalFailedPromptError(raw: unknown): boolean {
+  const msg = String(raw ?? '').trim().toLowerCase();
+  if (!msg) return false;
+  return (
+    msg.includes('access token could not be refreshed') ||
+    msg.includes('refresh token was already used') ||
+    msg.includes('please log out and sign in again') ||
+    msg.includes('authentication failed') ||
+    msg.includes('unauthorized')
+  );
+}
+
+function looksLikeRecoverableTranscriptParseFailure(raw: unknown): boolean {
+  const msg = String(raw ?? '').trim().toLowerCase();
+  if (!msg) return false;
+  return msg.includes('finished but no') && msg.includes('message was parsed');
+}
+
+export function shouldRetryFailedPendingPrompt(opts: {
+  error?: unknown;
+  updatedAt?: string | null;
+  at?: string | null;
+  nowMs?: number;
+}): boolean {
+  if (looksLikeTerminalFailedPromptError(opts.error)) return false;
+  if (!looksLikeRecoverableTranscriptParseFailure(opts.error)) return false;
+  const tsMs = parseTimestampMs(opts.updatedAt ?? opts.at);
+  if (!Number.isFinite(tsMs)) return true;
+  const nowMs = typeof opts.nowMs === 'number' && Number.isFinite(opts.nowMs) ? opts.nowMs : Date.now();
+  const ageMs = nowMs - Number(tsMs);
+  return !Number.isFinite(ageMs) || ageMs < 0 || ageMs <= FAILED_PROMPT_RETRY_WINDOW_MS;
+}
+
 /**
  * Returns true when there is any earlier pending prompt that is still active
  * (not failed and not yet present in the transcript).
@@ -37,13 +79,6 @@ type PendingPromptStalenessOpts = {
 
 const MIN_SENDING_STALE_MS = 180_000;
 const MIN_SENT_STALE_MS = 10 * 60_000;
-
-function parseTimestampMs(raw: string | null | undefined): number | null {
-  const s = String(raw ?? '').trim();
-  if (!s) return null;
-  const ms = Date.parse(s);
-  return Number.isFinite(ms) ? ms : null;
-}
 
 /**
  * Returns the stale pending state when a prompt has been waiting too long to

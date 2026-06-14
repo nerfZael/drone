@@ -85,7 +85,7 @@ export function createDronePendingPromptStore(deps: {
 
   function pendingPromptsFromChatEntry(entry: any, opts?: { keepRecentlyCompleted?: boolean }): PendingPrompt[] {
     const list = Array.isArray(entry?.pendingPrompts) ? entry.pendingPrompts : [];
-    return pruneCompletedPendingPrompts(
+    const pending = pruneCompletedPendingPrompts(
       list
         .map((p: any) => ({
           id: String(p?.id ?? '').trim(),
@@ -108,6 +108,35 @@ export function createDronePendingPromptStore(deps: {
       entry?.turns,
       { keepRecentlyCompleted: opts?.keepRecentlyCompleted === true },
     );
+    if (opts?.keepRecentlyCompleted !== true) return pending;
+
+    const seen = new Set(pending.map((item) => item.id));
+    const nowMs = Date.now();
+    const turns = Array.isArray(entry?.turns) ? entry.turns : [];
+    for (const turn of turns) {
+      const id = String((turn as any)?.id ?? '').trim();
+      if (!id || seen.has(id)) continue;
+      const automation = deps.normalizePromptAutomationMeta((turn as any)?.automation);
+      if (!automation) continue;
+      const completedMs = Math.max(
+        parseRecentPendingPromptIsoMs((turn as any)?.completedAt),
+        parseRecentPendingPromptIsoMs((turn as any)?.promptAt),
+        parseRecentPendingPromptIsoMs((turn as any)?.at),
+      );
+      if (!completedMs || nowMs - completedMs > RECENT_COMPLETED_PENDING_PROMPT_GRACE_MS) continue;
+      const prompt = deps.normalizePendingPromptText((turn as any)?.prompt);
+      if (!prompt.trim()) continue;
+      pending.push({
+        id,
+        at: String((turn as any)?.promptAt ?? (turn as any)?.at ?? deps.nowIso()),
+        prompt,
+        automation,
+        state: 'sent',
+        updatedAt: String((turn as any)?.completedAt ?? (turn as any)?.at ?? deps.nowIso()),
+      });
+      seen.add(id);
+    }
+    return pending.slice(-60);
   }
 
   function isSafePromptId(raw: string): boolean {

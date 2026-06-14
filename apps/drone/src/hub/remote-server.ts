@@ -27,6 +27,7 @@ type RemoteHubServer = {
 };
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
+const DRONE_VALIDATION_CACHE_TTL_MS = 5_000;
 const HOP_BY_HOP_HEADERS = new Set([
   'connection',
   'keep-alive',
@@ -38,6 +39,7 @@ const HOP_BY_HOP_HEADERS = new Set([
   'upgrade',
 ]);
 const PROXY_RESPONSE_HEADER_BLOCKLIST = new Set([...HOP_BY_HOP_HEADERS, 'set-cookie']);
+const DRONE_VALIDATION_CACHE = new Map<string, { expiresAt: number; drone: any | null }>();
 
 function json(res: http.ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { ...JSON_HEADERS, 'cache-control': 'no-store' });
@@ -130,9 +132,14 @@ async function fetchJsonFromHub<T>(opts: StartRemoteHubServerOptions, pathname: 
 }
 
 async function resolveContainerDrone(opts: StartRemoteHubServerOptions, droneId: string): Promise<any | null> {
+  const cacheKey = `${opts.hubBaseUrl}\u0000${droneId}`;
+  const cached = DRONE_VALIDATION_CACHE.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.drone;
   const data = await fetchJsonFromHub<{ ok: true; drones: any[] }>(opts, '/api/drones');
   const drones = Array.isArray(data?.drones) ? data.drones : [];
-  return drones.find((drone) => String(drone?.id ?? '') === droneId && isContainerDrone(drone)) ?? null;
+  const drone = drones.find((item) => String(item?.id ?? '') === droneId && isContainerDrone(item)) ?? null;
+  DRONE_VALIDATION_CACHE.set(cacheKey, { expiresAt: Date.now() + DRONE_VALIDATION_CACHE_TTL_MS, drone });
+  return drone;
 }
 
 function routeAllowed(method: string, pathname: string): boolean {

@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { hasActivePriorPendingPrompt, shouldDeferQueuedTranscriptPrompt, stalePendingPromptState } from '../src/hub/pendingPromptEnqueue';
+import {
+  hasActivePriorPendingPrompt,
+  shouldDeferQueuedTranscriptPrompt,
+  shouldRetryFailedPendingPrompt,
+  stalePendingPromptState,
+} from '../src/hub/pendingPromptEnqueue';
 
 describe('shouldDeferQueuedTranscriptPrompt', () => {
   test('does not defer for cursor/claude', () => {
@@ -117,6 +122,38 @@ describe('hasActivePriorPendingPrompt', () => {
       hasActivePriorPendingPrompt({
         priorPendingPrompts: [{ id: 'done', state: 'sent' }],
         transcriptDoneIds: new Set(['done']),
+      }),
+    ).toBe(false);
+  });
+});
+
+describe('shouldRetryFailedPendingPrompt', () => {
+  test('does not retry terminal auth failures', () => {
+    expect(
+      shouldRetryFailedPendingPrompt({
+        error: 'Your access token could not be refreshed because your refresh token was already used. Please log out and sign in again.',
+        updatedAt: '2026-06-13T23:41:42.221Z',
+        nowMs: Date.parse('2026-06-13T23:42:00.000Z'),
+      }),
+    ).toBe(false);
+  });
+
+  test('retries recent transcript parse failures', () => {
+    expect(
+      shouldRetryFailedPendingPrompt({
+        error: 'codex finished but no message was parsed',
+        updatedAt: '2026-06-13T23:40:00.000Z',
+        nowMs: Date.parse('2026-06-13T23:45:00.000Z'),
+      }),
+    ).toBe(true);
+  });
+
+  test('stops retrying old transcript parse failures', () => {
+    expect(
+      shouldRetryFailedPendingPrompt({
+        error: 'codex finished but no message was parsed',
+        updatedAt: '2026-06-13T23:20:00.000Z',
+        nowMs: Date.parse('2026-06-13T23:45:00.000Z'),
       }),
     ).toBe(false);
   });

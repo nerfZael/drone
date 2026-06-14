@@ -86,7 +86,7 @@ export function useRemoteHubModel() {
 
   const fetchChatState = React.useCallback(async (droneId: string, chatName: string): Promise<RemoteChatState> => {
     const [transcriptData, pendingData] = await Promise.all([
-      remoteRequestJson<TranscriptResponse>(`/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/transcript?turn=all`),
+      remoteRequestJson<TranscriptResponse>(`/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/transcript?turn=all&tail=50`),
       remoteRequestJson<PendingResponse>(`/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/pending`),
     ]);
     return {

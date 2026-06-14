@@ -140,7 +140,12 @@ import {
   type ParsedSyncSetMutationInput,
 } from './sync-sets';
 import { createSyncSetService } from './sync-set-service';
-import { hasActivePriorPendingPrompt, shouldDeferQueuedTranscriptPrompt, stalePendingPromptState } from './pendingPromptEnqueue';
+import {
+  hasActivePriorPendingPrompt,
+  shouldDeferQueuedTranscriptPrompt,
+  shouldRetryFailedPendingPrompt,
+  stalePendingPromptState,
+} from './pendingPromptEnqueue';
 import {
   applyBranchDiffToMainWorkingTree,
   applyBranchMergeNoCommitToMainWorkingTree,
@@ -3579,9 +3584,6 @@ const UPGRADE_DAEMON_READY_TIMEOUT_MS = 30_000;
 const DEFAULT_REPO_SEED_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_SEED_BOOTSTRAP_TIMEOUT_MS = 45_000;
 const DEFAULT_PROMPT_ENQUEUE_TIMEOUT_MS = 180_000;
-const DAEMON_UPGRADED_BY_CONTAINER = new Set<string>();
-const DAEMON_UPGRADE_TASKS = new Map<string, Promise<void>>();
-
 function defaultDaemonReadyTimeoutMs(): number {
   const raw = String(process.env.DRONE_HUB_DAEMON_READY_TIMEOUT_MS ?? '').trim();
   const n = raw ? Number(raw) : NaN;
@@ -4816,11 +4818,11 @@ const PROMPT_AUTOMATION_SLEEP_BETWEEN_RUNS_SECONDS_MIN = 0;
 const PROMPT_AUTOMATION_SLEEP_BETWEEN_RUNS_SECONDS_MAX = 10 * 365 * 24 * 60 * 60;
 const PROMPT_AUTOMATION_SLEEP_BETWEEN_RUNS_SECONDS_DEFAULT = 0;
 const PROMPT_AUTOMATION_STOP_PHRASE_MAX_CHARS = 320;
-const PROMPT_AUTOMATION_WAIT_POLL_MS = 1000;
+const PROMPT_AUTOMATION_WAIT_POLL_MS = 120;
 const PROMPT_AUTOMATION_WAIT_FOR_IDLE_TIMEOUT_MS = 30 * 60_000;
 const PROMPT_AUTOMATION_WAIT_FOR_PROMPT_TIMEOUT_MS = 30 * 60_000;
 const PROMPT_AUTOMATION_ON_FAILURE_PROMPT_MAX_CHARS = 8_000;
-const PROMPT_AUTOMATION_INTER_RUN_SLEEP_CHUNK_MS = 5_000;
+const PROMPT_AUTOMATION_INTER_RUN_SLEEP_CHUNK_MS = 120;
 const AGENT_COPILOT_HANDLED_CAP = 500;
 const AGENT_COPILOT_IN_FLIGHT = new Set<string>();
 const AGENT_MESSAGE_AUTO_CONTINUE_IN_FLIGHT = new Set<string>();
@@ -5211,37 +5213,7 @@ async function enqueueTranscriptPrompt(opts: {
   script: string;
 }) {
   const d = opts.drone;
-  const runtime = droneRuntime(d);
   const containerName = String(d?.containerName ?? d?.name ?? '').trim();
-  // After hub restarts, a container may still run an older daemon.js.
-  // Best-effort upgrade once per container so new prompt behavior is consistent.
-  const daemonKey = `${containerName}:${Number(d?.containerPort ?? 0)}`;
-  if (runtime === 'container' && daemonKey && !DAEMON_UPGRADED_BY_CONTAINER.has(daemonKey)) {
-    const existingTask = DAEMON_UPGRADE_TASKS.get(daemonKey);
-    if (existingTask) {
-      try {
-        await existingTask;
-      } catch {
-        // ignore; we can still try with current daemon
-      }
-    } else {
-      const task = (async () => {
-        await upgradeDroneDaemonInContainer({
-          containerName,
-          containerPort: Number(d?.containerPort ?? 7777),
-        });
-      })();
-      DAEMON_UPGRADE_TASKS.set(daemonKey, task);
-      try {
-        await task;
-        DAEMON_UPGRADED_BY_CONTAINER.add(daemonKey);
-      } catch {
-        // ignore; fallback path below can still work with existing daemon
-      } finally {
-        DAEMON_UPGRADE_TASKS.delete(daemonKey);
-      }
-    }
-  }
   const token = typeof d.token === 'string' ? d.token : '';
   const hostPort =
     typeof d.hostPort === 'number' && Number.isFinite(d.hostPort)
@@ -5284,6 +5256,8 @@ async function sendPromptToChat(opts: {
   attachmentRefs?: ChatImageAttachmentRef[];
   cwd?: string | null;
   waitForDaemonMs?: number;
+  skipManagedRepoSync?: boolean;
+  mark?: (name: string) => void;
 }) {
   const droneId = normalizeDroneIdentity(opts.droneId);
   if (!droneId) throw new Error('missing droneId');
@@ -5294,6 +5268,25 @@ async function sendPromptToChat(opts: {
   }
   const dSeed = (regAny as any).drones?.[droneId];
   if (!dSeed) throw new Error(`unknown drone: ${droneId}`);
+
+  if (opts.skipManagedRepoSync !== true) {
+    try {
+      await syncSkillLibraryForDrone({ droneId, droneEntry: dSeed });
+      await syncRepoAgentsInstructionsForDrone({ droneId, droneEntry: dSeed });
+      opts.mark?.('skillSync');
+    } catch (e: any) {
+      const error = String(e?.message ?? String(e));
+      const warningKey = `${droneId}\u0000${error}`;
+      if (!PROMPT_SKILL_SYNC_WARNINGS.has(warningKey)) {
+        PROMPT_SKILL_SYNC_WARNINGS.add(warningKey);
+        hubLog('warn', 'managed repo sync failed before prompt enqueue; continuing', {
+          droneId,
+          chatName: opts.chatName || 'default',
+          error,
+        });
+      }
+    }
+  }
 
   const lockKey = `drone:${droneId}`;
 
@@ -6719,6 +6712,81 @@ function promptAutomationJobResponse(lane: PromptAutomationLaneState | null) {
   };
 }
 
+function appendPromptAutomationHistoryRows(
+  list: PendingPrompt[],
+  lane: PromptAutomationLaneState | null,
+): PendingPrompt[] {
+  const job = lane?.runningJob ?? lane?.lastJob ?? null;
+  if (!job) return list;
+  let out = list;
+  const existingRunIndexes = new Set<number>();
+  for (const item of out) {
+    const automation = normalizePromptAutomationMeta((item as any)?.automation);
+    if (
+      automation &&
+      String(automation.kind ?? '') === 'prompt-loop' &&
+      String(automation.stage ?? '') === 'run' &&
+      String(automation.jobKey ?? '') === job.executionKey &&
+      typeof automation.runIndex === 'number'
+    ) {
+      existingRunIndexes.add(automation.runIndex);
+    }
+  }
+  const updatedAt = String(job.updatedAt ?? nowIso());
+  const safeJobId = job.executionKey.replace(/[^A-Za-z0-9._-]+/g, '-').slice(-48) || 'automation';
+  for (let runIndex = 1; runIndex <= job.runsCompleted; runIndex += 1) {
+    if (existingRunIndexes.has(runIndex)) continue;
+    out = [
+      ...out,
+      {
+        id: `${safeJobId}-run-${runIndex}`,
+        at: updatedAt,
+        prompt: job.prompt,
+        automation: {
+          kind: 'prompt-loop',
+          stage: 'run',
+          jobKey: job.executionKey,
+          automationId: job.automationId,
+          automationLabel: job.automationLabel,
+          runIndex,
+          runsTotal: job.runsTotal,
+          sleepBetweenRunsSeconds: job.sleepBetweenRunsSeconds,
+          ...(job.stopPhrase ? { stopPhrase: job.stopPhrase } : {}),
+          ...(job.stopPhraseCaseSensitive ? { stopPhraseCaseSensitive: true } : {}),
+          promptPreview: previewPromptAutomationPrompt(job.prompt),
+        },
+        state: 'sent',
+        updatedAt,
+      },
+    ];
+  }
+
+  if (!job.onFailurePrompt || job.runsCompleted <= 0) return out.slice(-50);
+  const id = String(job.lastPromptId ?? '').trim();
+  if (!id || out.some((item) => item.id === id)) return out.slice(-50);
+  const finalRow: PendingPrompt = {
+    id,
+    at: updatedAt,
+    prompt: job.onFailurePrompt,
+    automation: {
+      kind: 'prompt-loop',
+      stage: 'final-message',
+      jobKey: job.executionKey,
+      automationId: job.automationId,
+      automationLabel: job.automationLabel,
+      runsTotal: job.runsTotal,
+      sleepBetweenRunsSeconds: job.sleepBetweenRunsSeconds,
+      ...(job.stopPhrase ? { stopPhrase: job.stopPhrase } : {}),
+      ...(job.stopPhraseCaseSensitive ? { stopPhraseCaseSensitive: true } : {}),
+      ...(typeof job.finishedEarlyRunIndex === 'number' ? { stopMatchedRunIndex: job.finishedEarlyRunIndex } : {}),
+      promptPreview: previewPromptAutomationPrompt(job.onFailurePrompt),
+    },
+    state: 'sent',
+    updatedAt,
+  };
+  return [...out, finalRow].slice(-50);
+}
+
 function parsePromptAutomationIsoMs(raw: string | null | undefined): number {
   const ms = Date.parse(String(raw ?? '').trim());
   return Number.isFinite(ms) ? ms : 0;
@@ -6830,8 +6898,10 @@ async function waitForPromptAutomationPromptCompletion(opts: {
   promptId: string;
   timeoutMs: number;
   signal: AbortSignal;
+  requireTranscript?: boolean;
 }): Promise<void> {
   const timeoutMs = Math.max(10_000, Math.floor(opts.timeoutMs || PROMPT_AUTOMATION_WAIT_FOR_PROMPT_TIMEOUT_MS));
+  const requireTranscript = opts.requireTranscript !== false;
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     if (opts.signal.aborted) throw new Error('automation stopped');
@@ -6841,12 +6911,13 @@ async function waitForPromptAutomationPromptCompletion(opts: {
     if (target) {
       if (target.state === 'failed') throw new Error(target.error || `prompt ${opts.promptId} failed`);
       if (target.state === 'sent') {
+        if (!requireTranscript) return;
         const regAny: any = await loadRegistry();
         if (chatHasTranscriptTurn(regAny, opts)) return;
       }
     } else {
       const regAny: any = await loadRegistry();
-      if (chatHasTranscriptTurn(regAny, opts)) return;
+      if (!requireTranscript || chatHasTranscriptTurn(regAny, opts)) return;
     }
     await sleepMs(PROMPT_AUTOMATION_WAIT_POLL_MS);
   }
@@ -7439,6 +7510,28 @@ function promptAutomationOutputContainsStopPhrase(opts: {
   return output.toLowerCase().includes(lowerPhrase) || normalizedOutput.toLowerCase().includes(lowerPhrase);
 }
 
+async function preservePromptAutomationPendingHistory(opts: {
+  droneId: string;
+  chatName: string;
+  promptId: string;
+  prompt: string;
+  automation: PromptAutomationMeta;
+}): Promise<void> {
+  const now = nowIso();
+  await pushPendingPrompt({
+    droneId: opts.droneId,
+    chatName: opts.chatName,
+    pending: {
+      id: opts.promptId,
+      at: now,
+      prompt: opts.prompt,
+      automation: normalizePromptAutomationMeta(opts.automation),
+      state: 'sent',
+      updatedAt: now,
+    },
+  }).catch(() => {});
+}
+
 async function sendPromptAutomationFinalMessage(
   job: PromptAutomationJobState,
   opts?: { ignoreAbortSignal?: boolean },
@@ -7450,23 +7543,24 @@ async function sendPromptAutomationFinalMessage(
     ? null
     : job.abortController?.signal;
   if (!ignoreAbortSignal && signal?.aborted) return;
+  const automation: PromptAutomationMeta = {
+    kind: 'prompt-loop',
+    stage: 'final-message',
+    jobKey: job.executionKey,
+    automationId: job.automationId,
+    automationLabel: job.automationLabel,
+    runsTotal: job.runsTotal,
+    sleepBetweenRunsSeconds: job.sleepBetweenRunsSeconds,
+    ...(job.stopPhrase ? { stopPhrase: job.stopPhrase } : {}),
+    ...(job.stopPhraseCaseSensitive ? { stopPhraseCaseSensitive: true } : {}),
+    ...(typeof job.finishedEarlyRunIndex === 'number' ? { stopMatchedRunIndex: job.finishedEarlyRunIndex } : {}),
+    promptPreview: previewPromptAutomationPrompt(finalPrompt),
+  };
   const enqueued = await createOrEnqueuePromptUnified({
     droneId: job.droneId,
     chatName: job.chatName,
     prompt: finalPrompt,
-    automation: {
-      kind: 'prompt-loop',
-      stage: 'final-message',
-      jobKey: job.executionKey,
-      automationId: job.automationId,
-      automationLabel: job.automationLabel,
-      runsTotal: job.runsTotal,
-      sleepBetweenRunsSeconds: job.sleepBetweenRunsSeconds,
-      ...(job.stopPhrase ? { stopPhrase: job.stopPhrase } : {}),
-      ...(job.stopPhraseCaseSensitive ? { stopPhraseCaseSensitive: true } : {}),
-      ...(typeof job.finishedEarlyRunIndex === 'number' ? { stopMatchedRunIndex: job.finishedEarlyRunIndex } : {}),
-      promptPreview: previewPromptAutomationPrompt(finalPrompt),
-    },
+    automation,
   });
   if (enqueued.kind === 'error') throw new Error(enqueued.error);
   job.lastPromptId = enqueued.id;
@@ -7477,6 +7571,14 @@ async function sendPromptAutomationFinalMessage(
     promptId: enqueued.id,
     timeoutMs: PROMPT_AUTOMATION_WAIT_FOR_PROMPT_TIMEOUT_MS,
     signal: signal ?? new AbortController().signal,
+    requireTranscript: false,
+  });
+  await preservePromptAutomationPendingHistory({
+    droneId: job.droneId,
+    chatName: job.chatName,
+    promptId: enqueued.id,
+    prompt: finalPrompt,
+    automation,
   });
   job.updatedAt = nowIso();
 }
@@ -7496,23 +7598,24 @@ async function runPromptAutomationJob(job: PromptAutomationJobState): Promise<vo
           signal: signal ?? new AbortController().signal,
         });
 
+        const automation: PromptAutomationMeta = {
+          kind: 'prompt-loop',
+          stage: 'run',
+          jobKey: job.executionKey,
+          automationId: job.automationId,
+          automationLabel: job.automationLabel,
+          runIndex: runIdx + 1,
+          runsTotal: job.runsTotal,
+          sleepBetweenRunsSeconds: job.sleepBetweenRunsSeconds,
+          ...(job.stopPhrase ? { stopPhrase: job.stopPhrase } : {}),
+          ...(job.stopPhraseCaseSensitive ? { stopPhraseCaseSensitive: true } : {}),
+          promptPreview: previewPromptAutomationPrompt(job.prompt),
+        };
         const enqueued = await createOrEnqueuePromptUnified({
           droneId: job.droneId,
           chatName: job.chatName,
           prompt: job.prompt,
-          automation: {
-            kind: 'prompt-loop',
-            stage: 'run',
-            jobKey: job.executionKey,
-            automationId: job.automationId,
-            automationLabel: job.automationLabel,
-            runIndex: runIdx + 1,
-            runsTotal: job.runsTotal,
-            sleepBetweenRunsSeconds: job.sleepBetweenRunsSeconds,
-            ...(job.stopPhrase ? { stopPhrase: job.stopPhrase } : {}),
-            ...(job.stopPhraseCaseSensitive ? { stopPhraseCaseSensitive: true } : {}),
-            promptPreview: previewPromptAutomationPrompt(job.prompt),
-          },
+          automation,
         });
         if (enqueued.kind === 'error') throw new Error(enqueued.error);
         job.lastPromptId = enqueued.id;
@@ -7525,6 +7628,13 @@ async function runPromptAutomationJob(job: PromptAutomationJobState): Promise<vo
           promptId: enqueued.id,
           timeoutMs: PROMPT_AUTOMATION_WAIT_FOR_PROMPT_TIMEOUT_MS,
           signal: signal ?? new AbortController().signal,
+        });
+        await preservePromptAutomationPendingHistory({
+          droneId: job.droneId,
+          chatName: job.chatName,
+          promptId: enqueued.id,
+          prompt: job.prompt,
+          automation,
         });
         job.runsCompleted += 1;
         job.updatedAt = nowIso();
@@ -7583,6 +7693,13 @@ async function runPromptAutomationJob(job: PromptAutomationJobState): Promise<vo
         await sendPromptAutomationFinalMessage(job);
       } catch (followupError: any) {
         const followupMsg = String(followupError?.message ?? followupError ?? '').trim() || 'failed sending final message';
+        hubLog('warn', 'prompt automation final message failed', {
+          droneId: job.droneId,
+          chatName: job.chatName,
+          automationId: job.automationId,
+          jobKey: job.executionKey,
+          error: followupMsg,
+        });
         if (!hadRunFailure) {
           hadRunFailure = true;
           lastRunError = `final message failed: ${followupMsg}`;
@@ -8028,6 +8145,7 @@ async function pumpQueuedPendingPromptsForChat(opts: { droneId: string; chatName
           attachmentRefs: normalizeChatImageAttachmentRefs(p?.attachments),
           cwd,
           waitForDaemonMs: undefined,
+          skipManagedRepoSync: String((p as any)?.automation?.kind ?? '').trim() === 'prompt-loop',
         }),
         enqueueTimeoutMs,
         `queued prompt enqueue failed for ${droneId}/${chatName}`,
@@ -8088,6 +8206,27 @@ function pumpPendingPromptQueue() {
   } finally {
     PENDING_PROMPT_PUMP_PUMPING = false;
   }
+}
+
+export async function resetPromptAutomationStateForTests(): Promise<void> {
+  const automationTasks: Promise<void>[] = [];
+  for (const lane of PROMPT_AUTOMATION_LANES.values()) {
+    lane.queued = [];
+    const running = lane.runningJob;
+    if (!running) continue;
+    running.stopMode = 'all';
+    running.abortController?.abort();
+    if (running.task) automationTasks.push(running.task.catch(() => {}));
+  }
+  await Promise.allSettled(automationTasks);
+  PROMPT_AUTOMATION_LANES.clear();
+  PENDING_PROMPT_PUMP_QUEUE.length = 0;
+  PENDING_PROMPT_PUMP_QUEUED.clear();
+  PENDING_PROMPT_PUMP_RETRY.clear();
+  await Promise.allSettled(Array.from(PENDING_PROMPT_PUMP_TASKS.values()).map((task) => task.catch(() => {})));
+  PENDING_PROMPT_PUMP_TASKS.clear();
+  PENDING_PROMPT_PUMP_ACTIVE = 0;
+  PENDING_PROMPT_PUMP_PUMPING = false;
 }
 
 function enqueuePendingPromptPump(droneIdRaw: string, chatName: string) {
@@ -8213,10 +8352,15 @@ function chatHasReconcilablePendingPrompts(entry: any): boolean {
   for (const p of pending) {
     const st = String(p?.state ?? '');
     if (st === 'failed') {
-      const error = String(p?.error ?? '').trim().toLowerCase();
-      if (!error.includes('finished but no') || !error.includes('message was parsed')) continue;
-      const failedAtMs = Date.parse(String(p?.updatedAt ?? p?.at ?? ''));
-      if (Number.isFinite(failedAtMs) && Date.now() - failedAtMs > 10 * 60_000) continue;
+      if (
+        !shouldRetryFailedPendingPrompt({
+          error: p?.error,
+          updatedAt: typeof p?.updatedAt === 'string' ? p.updatedAt : null,
+          at: typeof p?.at === 'string' ? p.at : null,
+        })
+      ) {
+        continue;
+      }
     }
     // `queued` entries haven't been enqueued into the daemon yet, so there's nothing
     // to reconcile from daemon → transcript for them.
@@ -8290,9 +8434,16 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
       }
       continue;
     }
-    if (state === 'failed' && agent.id !== 'codex' && agent.id !== 'pi') {
-      const error = String(p?.error ?? '').trim().toLowerCase();
-      if (!error.includes('finished but no') || !error.includes('message was parsed')) continue;
+    if (state === 'failed') {
+      if (
+        !shouldRetryFailedPendingPrompt({
+          error: p?.error,
+          updatedAt: typeof p?.updatedAt === 'string' ? p.updatedAt : null,
+          at: typeof p?.at === 'string' ? p.at : null,
+        })
+      ) {
+        continue;
+      }
     }
 
     let jobResp: any = null;
@@ -8678,6 +8829,8 @@ async function enqueuePrompt(opts: {
   automation?: PromptAutomationMeta | null;
   cwd?: string | null;
   waitForDaemonMs?: number;
+  deliveryMode?: 'background' | 'immediate';
+  mark?: (name: string) => void;
 }): Promise<{ id: string; pendingState: PendingPromptState; blockedByAutomation: boolean }> {
   const preferredIdRaw = typeof opts.id === 'string' ? opts.id.trim() : '';
   if (preferredIdRaw && !isSafePromptId(preferredIdRaw)) {
@@ -8691,6 +8844,7 @@ async function enqueuePrompt(opts: {
 
   // Make sure chat exists before we write pending state.
   await ensureChatEntry({ droneId, chatName });
+  opts.mark?.('ensureChat');
   const { d, chat } = await getChatEntry({ droneId, chatName });
   const runtime = droneRuntime(d);
   const disposition = getPromptEnqueueDisposition({
@@ -8701,6 +8855,7 @@ async function enqueuePrompt(opts: {
     automation: opts.automation,
   });
   const { defer, blockedByAutomation } = disposition;
+  opts.mark?.('disposition');
 
   const cwd = normalizeDroneCwdForRuntime(d, typeof opts.cwd === 'string' ? opts.cwd : null);
   const rawAttachments = Array.isArray(opts.attachments) ? opts.attachments : [];
@@ -8724,12 +8879,13 @@ async function enqueuePrompt(opts: {
       ...(attachmentsForPending.length > 0 ? { attachments: attachmentsForPending } : {}),
       ...(opts.automation ? { automation: normalizePromptAutomationMeta(opts.automation) } : {}),
       ...(blockedByAutomation ? { blockedByAutomation: true } : {}),
-      state: defer ? 'queued' : 'sending',
+      state: defer || opts.deliveryMode === 'background' ? 'queued' : 'sending',
       updatedAt: at,
     },
   });
+  opts.mark?.('persistPending');
 
-  if (defer) {
+  if (defer || opts.deliveryMode === 'background') {
     if (rawAttachments.length > 0 && attachmentsForPending.length > 0) {
       const attachmentsDir = buildChatAttachmentsDirectory({
         cwd,
@@ -8751,6 +8907,7 @@ async function enqueuePrompt(opts: {
             attachments: rawAttachments,
           });
         }
+        opts.mark?.('attachments');
       } catch (e: any) {
         const errText = e?.message ?? String(e);
         await updatePendingPrompt({
@@ -8762,8 +8919,9 @@ async function enqueuePrompt(opts: {
         throw new Error(`failed staging queued attachments: ${errText}`);
       }
     }
-    // Persisted as queued; a reconcile/update that establishes session id will pump it.
+    // Persisted as queued; the background pump will claim it when the chat is deliverable.
     enqueuePendingPromptPump(droneId, chatName);
+    opts.mark?.('queuePump');
     return { id, pendingState: 'queued', blockedByAutomation };
   }
 
@@ -8784,10 +8942,13 @@ async function enqueuePrompt(opts: {
         attachments: rawAttachments,
         cwd: opts.cwd ?? null,
         waitForDaemonMs: opts.waitForDaemonMs,
+        skipManagedRepoSync: Boolean(opts.automation && String((opts.automation as any)?.kind ?? '').trim() === 'prompt-loop'),
+        mark: opts.mark,
       }),
       enqueueTimeoutMs,
       `prompt enqueue failed for ${droneId}/${chatName}`,
     );
+    opts.mark?.('daemonEnqueue');
     if (r?.turnOk === false) {
       await updatePendingPrompt({
         droneId,
@@ -8799,6 +8960,7 @@ async function enqueuePrompt(opts: {
       await updatePendingPrompt({ droneId, chatName, id, patch: { state: 'sent' } });
       enqueueReconcile(droneId, chatName);
     }
+    opts.mark?.('persistDelivery');
   } catch (e: any) {
     await updatePendingPrompt({
       droneId,
@@ -8895,6 +9057,7 @@ async function createOrEnqueuePromptUnified(opts: {
   automation?: PromptAutomationMeta | null;
   cwd?: string | null;
   allowQueued?: boolean;
+  mark?: (name: string) => void;
 }): Promise<
   | { kind: 'enqueued'; id: string; pendingState: PendingPromptState; blockedByAutomation: boolean }
   | { kind: 'error'; status: number; error: string }
@@ -8912,16 +9075,26 @@ async function createOrEnqueuePromptUnified(opts: {
   if (!droneId) return { kind: 'error', status: 400, error: 'missing drone id' };
   if (!prompt) return { kind: 'error', status: 400, error: 'missing prompt' };
 
+  const isAutomationPrompt = Boolean(opts.automation && String((opts.automation as any)?.kind ?? '').trim() === 'prompt-loop');
   let regSnap: any = await loadRegistry();
+  opts.mark?.('loadRegistry');
   if (opts.allowQueued === false && regSnap?.pending?.[droneId] && !regSnap?.drones?.[droneId]) {
     regSnap = await loadRegistry();
+    opts.mark?.('reloadRegistry');
   }
   if (regSnap?.drones?.[droneId]) {
-    await failStaleDockerSnapshotsForChat({ droneId, chatName });
-    regSnap = await loadRegistry();
-    const liveDroneEntry = regSnap?.drones?.[droneId] ?? null;
+    let liveDroneEntry = regSnap?.drones?.[droneId] ?? null;
     if (!liveDroneEntry) return { kind: 'error', status: 404, error: `unknown drone: ${droneId}` };
-    const chatEntry = liveDroneEntry?.chats?.[chatName] ?? null;
+    let chatEntry = liveDroneEntry?.chats?.[chatName] ?? null;
+    if (chatHasActiveDockerSnapshot(chatEntry)) {
+      await failStaleDockerSnapshotsForChat({ droneId, chatName });
+      opts.mark?.('snapshotMaintenance');
+      regSnap = await loadRegistry();
+      opts.mark?.('reloadRegistry');
+      liveDroneEntry = regSnap?.drones?.[droneId] ?? null;
+      if (!liveDroneEntry) return { kind: 'error', status: 404, error: `unknown drone: ${droneId}` };
+      chatEntry = liveDroneEntry?.chats?.[chatName] ?? null;
+    }
     if (chatHasActiveDockerSnapshot(chatEntry)) {
       return {
         kind: 'error',
@@ -8945,21 +9118,6 @@ async function createOrEnqueuePromptUnified(opts: {
         };
       }
     }
-    try {
-      await syncSkillLibraryForDrone({ droneId, droneEntry: liveDroneEntry });
-      await syncRepoAgentsInstructionsForDrone({ droneId, droneEntry: liveDroneEntry });
-    } catch (e: any) {
-      const error = String(e?.message ?? String(e));
-      const warningKey = `${droneId}\u0000${error}`;
-      if (!PROMPT_SKILL_SYNC_WARNINGS.has(warningKey)) {
-        PROMPT_SKILL_SYNC_WARNINGS.add(warningKey);
-        hubLog('warn', 'managed repo sync failed before prompt enqueue; continuing', {
-          droneId,
-          chatName,
-          error,
-        });
-      }
-    }
     const r = await enqueuePrompt({
       id: fallbackId,
       droneId,
@@ -8968,6 +9126,8 @@ async function createOrEnqueuePromptUnified(opts: {
       attachments,
       automation: opts.automation,
       cwd: opts.cwd ?? null,
+      deliveryMode: opts.allowQueued === false || isAutomationPrompt ? 'immediate' : 'background',
+      mark: opts.mark,
     });
     return {
       kind: 'enqueued',
@@ -9012,6 +9172,8 @@ async function createOrEnqueuePromptUnified(opts: {
         attachments,
         automation: opts.automation ?? null,
         cwd: opts.cwd ?? null,
+        deliveryMode: isAutomationPrompt ? 'immediate' : 'background',
+        mark: opts.mark,
       });
       return {
         kind: 'enqueued',
@@ -23472,10 +23634,14 @@ export async function startDroneHubApiServer(opts: {
       ) {
         const droneRef = decodeURIComponent(parts[2]);
         const chatName = decodeURIComponent(parts[4]);
+        const timer = createRequestTimer();
         let body: any = null;
         try {
           body = await readJsonBody(req);
+          timer.mark('body');
         } catch (e: any) {
+          timer.setHeader(res);
+          logSlowHubRequest('chat prompt', timer, { droneRef, chatName, status: 400, error: e?.message ?? String(e) });
           json(res, 400, { ok: false, error: e?.message ?? String(e) });
           return;
         }
@@ -23484,11 +23650,16 @@ export async function startDroneHubApiServer(opts: {
         let attachments: ChatImageAttachment[] = [];
         try {
           attachments = normalizeChatImageAttachments(body?.attachments);
+          timer.mark('validate');
         } catch (e: any) {
+          timer.setHeader(res);
+          logSlowHubRequest('chat prompt', timer, { droneRef, chatName, status: 400, error: e?.message ?? String(e) });
           json(res, 400, { ok: false, error: e?.message ?? String(e) });
           return;
         }
         if (!prompt && attachments.length === 0) {
+          timer.setHeader(res);
+          logSlowHubRequest('chat prompt', timer, { droneRef, chatName, status: 400, error: 'missing prompt' });
           json(res, 400, { ok: false, error: 'missing prompt' });
           return;
         }
@@ -23498,7 +23669,10 @@ export async function startDroneHubApiServer(opts: {
 
         try {
           const resolved = await resolveDroneOrPendingForReadRef(droneRef);
+          timer.mark('resolve');
           if (!resolved) {
+            timer.setHeader(res);
+            logSlowHubRequest('chat prompt', timer, { droneRef, chatName, status: 404 });
             json(res, 404, { ok: false, error: `unknown drone: ${droneRef}` });
             return;
           }
@@ -23508,6 +23682,8 @@ export async function startDroneHubApiServer(opts: {
           const chat = normalizeChatName(chatName);
           const promptIdRaw = String(body?.promptId ?? body?.prompt_id ?? body?.id ?? '').trim();
           if (promptIdRaw && !isSafePromptId(promptIdRaw)) {
+            timer.setHeader(res);
+            logSlowHubRequest('chat prompt', timer, { droneId, chatName: chat, status: 400, error: 'invalid promptId' });
             json(res, 400, { ok: false, error: 'invalid promptId' });
             return;
           }
@@ -23551,6 +23727,7 @@ export async function startDroneHubApiServer(opts: {
                   prompt,
                   attachments,
                   cwd: typeof body?.cwd === 'string' ? body.cwd : null,
+                  mark: (name) => timer.mark(name),
                 });
               }
             }
@@ -23562,13 +23739,26 @@ export async function startDroneHubApiServer(opts: {
               prompt,
               attachments,
               cwd: typeof body?.cwd === 'string' ? body.cwd : null,
+              mark: (name) => timer.mark(name),
             });
           }
+          timer.mark('enqueue');
 
           if (r.kind === 'error') {
+            timer.setHeader(res);
+            logSlowHubRequest('chat prompt', timer, { droneId, chatName: chat, status: r.status, error: r.error });
             json(res, r.status, { ok: false, error: r.error });
             return;
           }
+          timer.mark('format');
+          timer.setHeader(res);
+          logSlowHubRequest('chat prompt', timer, {
+            droneId,
+            chatName: chat,
+            pendingState: r.pendingState,
+            blockedByAutomation: r.blockedByAutomation,
+            status: 202,
+          });
           json(res, 202, {
             ok: true,
             accepted: true,
@@ -23583,6 +23773,8 @@ export async function startDroneHubApiServer(opts: {
         } catch (e: any) {
           const msg = e?.message ?? String(e);
           const code = /still starting/i.test(msg) ? 409 : /unknown drone/i.test(msg) ? 404 : /invalid promptId/i.test(msg) ? 400 : 500;
+          timer.setHeader(res);
+          logSlowHubRequest('chat prompt', timer, { droneRef, chatName, status: code, error: msg });
           json(res, code, { ok: false, error: msg });
           return;
         }
@@ -23679,7 +23871,10 @@ export async function startDroneHubApiServer(opts: {
             ensureDaemonPromptEventSubscription(droneId);
             enqueueReconcile(droneId, chatName);
           }
-          const list = pendingPromptsFromChatEntry(entry, { keepRecentlyCompleted: true }).slice(-50);
+          const list = appendPromptAutomationHistoryRows(
+            pendingPromptsFromChatEntry(entry, { keepRecentlyCompleted: true }).slice(-50),
+            getPromptAutomationLane(droneId, chatName),
+          );
           timer.mark('format');
           timer.setHeader(res);
           logSlowHubRequest('chat pending', timer, { droneId, chatName, status: 200 });
@@ -24703,10 +24898,8 @@ export async function startDroneHubApiServer(opts: {
           }
           const droneId = resolved.id;
           const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
-          await ensureChatEntry({ droneId, chatName });
-          await reconcileChatFromDaemon({ droneId, chatName });
-          await failStaleDockerSnapshotsForChat({ droneId, chatName });
           const reg = await loadRegistry();
+          timer.mark('load');
           const d = (reg as any).drones?.[droneId] ?? null;
           if (!d) {
             timer.setHeader(res);
@@ -24735,6 +24928,15 @@ export async function startDroneHubApiServer(opts: {
           if (chatHasReconcilablePendingPrompts(c)) {
             ensureDaemonPromptEventSubscription(droneId);
             enqueueReconcile(droneId, chatName);
+          }
+          if (chatHasActiveDockerSnapshot(c)) {
+            void failStaleDockerSnapshotsForChat({ droneId, chatName }).catch((error: any) => {
+              hubLog('warn', 'failed stale docker snapshot maintenance after transcript read', {
+                droneId,
+                chatName,
+                error: String(error?.message ?? error ?? 'unknown error'),
+              });
+            });
           }
 
           const turns = (c as any).turns as TranscriptTurn[] | undefined;

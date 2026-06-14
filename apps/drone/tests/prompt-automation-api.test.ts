@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
-import { startDroneHubApiServer } from '../src/hub/server';
+import { resetPromptAutomationStateForTests, startDroneHubApiServer } from '../src/hub/server';
 import { resetDroneRootDirForTests } from '../src/host/paths';
 import { loadRegistry, updateRegistry } from '../src/host/registry';
 import { getSocketListenSupport } from './socket-listen-support';
@@ -228,6 +228,7 @@ describeSocketSuite('prompt automation api', () => {
   });
 
   afterEach(async () => {
+    await resetPromptAutomationStateForTests();
     mockPromptOutputOverride = null;
     mockPromptJobs.clear();
     await updateRegistry((reg: any) => {
