@@ -1545,6 +1545,7 @@ export function DroneSidebar({
   ]);
   const sidebarBorderClass = sidebarDockSide === 'right' ? 'border-l' : 'border-r';
   const collapsedRailBorderClass = sidebarDockSide === 'right' ? 'border-l' : 'border-r';
+  const sidebarDockDragEnabled = sidebarCapabilities.collapseControl;
   const sidebarDockTargetLabel = sidebarDockSide === 'right' ? 'left' : 'right';
   const sidebarDockActionLabel = `Move sidebar to ${sidebarDockTargetLabel}`;
   const sidebarHeaderTitle = `Drag header to dock sidebar left or right.`;
@@ -1577,14 +1578,14 @@ export function DroneSidebar({
         onWheel={onSidebarWheel}
       >
         <div
-          className={`flex h-[52px] flex-shrink-0 items-center px-3 border-b border-[var(--border)] relative select-none touch-none ${
-            sidebarDockDragActive ? 'cursor-grabbing' : 'cursor-grab'
+          className={`flex h-[52px] flex-shrink-0 items-center px-3 border-b border-[var(--border)] relative select-none ${
+            sidebarDockDragEnabled ? `touch-none ${sidebarDockDragActive ? 'cursor-grabbing' : 'cursor-grab'}` : ''
           }`}
-          title={sidebarHeaderTitle}
-          onPointerDown={onSidebarDockHeaderPointerDown}
-          onPointerMove={onSidebarDockHeaderPointerMove}
-          onPointerUp={onSidebarDockHeaderPointerUp}
-          onPointerCancel={onSidebarDockHeaderPointerCancel}
+          title={sidebarDockDragEnabled ? sidebarHeaderTitle : undefined}
+          onPointerDown={sidebarDockDragEnabled ? onSidebarDockHeaderPointerDown : undefined}
+          onPointerMove={sidebarDockDragEnabled ? onSidebarDockHeaderPointerMove : undefined}
+          onPointerUp={sidebarDockDragEnabled ? onSidebarDockHeaderPointerUp : undefined}
+          onPointerCancel={sidebarDockDragEnabled ? onSidebarDockHeaderPointerCancel : undefined}
         >
           <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-[var(--accent)] via-[var(--accent-muted)] to-transparent opacity-40" />
           <div className="flex w-full items-center justify-between gap-2">
@@ -1686,7 +1687,14 @@ export function DroneSidebar({
           </div>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto px-2 py-1.5">
+        <div
+          className="flex-1 min-h-0 overflow-y-auto px-2 py-1.5"
+          style={{
+            WebkitOverflowScrolling: 'touch',
+            overscrollBehaviorY: 'contain',
+            touchAction: 'pan-y',
+          }}
+        >
           {dronesError && (
             <div className="mx-2 mb-2 p-3 rounded border border-[rgba(255,90,90,.15)] bg-[var(--red-subtle)] text-xs text-[var(--red)]">
               Failed to load drones: {dronesError}
