@@ -749,6 +749,52 @@ h2 {
   color: var(--red);
 }
 
+.shortcut-section-header {
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.assistant-shortcut-list {
+  display: grid;
+  gap: 8px;
+}
+
+.assistant-shortcut-item {
+  display: grid;
+  gap: 7px;
+  padding: 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .025);
+}
+
+.assistant-shortcut-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.assistant-shortcut-name {
+  min-width: 0;
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-shortcut-kind {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
 .command-log-panel {
   display: grid;
   gap: 10px;

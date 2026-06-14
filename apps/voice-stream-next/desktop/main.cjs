@@ -87,6 +87,15 @@ const defaultPauseResumeShortcut = {
   shift: true,
 };
 
+const defaultAssistantRecordingShortcut = {
+  key: 'r',
+  mod: true,
+  ctrl: false,
+  meta: false,
+  alt: false,
+  shift: true,
+};
+
 const sampleRate = 16_000;
 const voicePhrases = loadSharedClassicScript('voice-phrases.js');
 const defaultVoicePhraseSettings = voicePhrases.VOICE_PHRASE_DEFAULTS;
@@ -127,6 +136,14 @@ const defaultConfig = {
   awakeSleepToggleShortcut: defaultAwakeSleepToggleShortcut,
   turnOffShortcut: defaultTurnOffShortcut,
   pauseResumeShortcut: defaultPauseResumeShortcut,
+  assistantRecordingShortcuts: [
+    {
+      id: 'default',
+      assistantProfileId: null,
+      label: 'Default assistant',
+      binding: defaultAssistantRecordingShortcut,
+    },
+  ],
   extensionBridgeEnabled: true,
   extensions: [],
   authSavedAt: '',
@@ -181,6 +198,7 @@ function normalizeConfig(nextConfig) {
   config.awakeSleepToggleShortcut = sanitizeShortcutBinding(config.awakeSleepToggleShortcut, defaultAwakeSleepToggleShortcut);
   config.turnOffShortcut = sanitizeShortcutBinding(config.turnOffShortcut, defaultTurnOffShortcut);
   config.pauseResumeShortcut = sanitizeShortcutBinding(config.pauseResumeShortcut, defaultPauseResumeShortcut);
+  config.assistantRecordingShortcuts = sanitizeAssistantRecordingShortcuts(config.assistantRecordingShortcuts);
   if (!String(config.installationId || '').trim()) {
     config.installationId = createInstallationId();
   }
@@ -223,6 +241,39 @@ function sanitizeShortcutBinding(value, fallback = null) {
 
 function cloneShortcutBinding(binding) {
   return binding ? { ...binding } : null;
+}
+
+function assistantRecordingShortcutId(assistantProfileId) {
+  const profileId = String(assistantProfileId || '').trim();
+  return profileId ? `profile:${profileId}` : 'default';
+}
+
+function sanitizeAssistantRecordingShortcuts(value) {
+  const entries = Array.isArray(value) ? value : defaultConfig.assistantRecordingShortcuts;
+  const seen = new Set();
+  const shortcuts = [];
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const assistantProfileId = String(entry.assistantProfileId || '').trim() || null;
+    const id = String(entry.id || assistantRecordingShortcutId(assistantProfileId)).trim() || assistantRecordingShortcutId(assistantProfileId);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    shortcuts.push({
+      id,
+      assistantProfileId,
+      label: String(entry.label || '').trim(),
+      binding: sanitizeShortcutBinding(entry.binding, id === 'default' ? defaultAssistantRecordingShortcut : null),
+    });
+  }
+  if (!seen.has('default')) {
+    shortcuts.unshift({
+      id: 'default',
+      assistantProfileId: null,
+      label: 'Default assistant',
+      binding: cloneShortcutBinding(defaultAssistantRecordingShortcut),
+    });
+  }
+  return shortcuts;
 }
 
 function shortcutKeyLabel(key) {
@@ -1354,12 +1405,84 @@ function createShortcutRegistration({ defaultBinding, configKey, onTrigger }) {
   return { register, getStatus: () => status, defaultBinding, configKey };
 }
 
+function createAssistantRecordingShortcutRegistration() {
+  let registeredAccelerators = new Map();
+  let statuses = {};
+
+  function register() {
+    if (!app.isReady()) return statuses;
+    for (const accelerator of registeredAccelerators.values()) {
+      globalShortcut.unregister(accelerator);
+    }
+    registeredAccelerators = new Map();
+    statuses = {};
+
+    const shortcuts = sanitizeAssistantRecordingShortcuts(readConfig().assistantRecordingShortcuts);
+    const seenAccelerators = new Set(registeredShortcutAccelerators([
+      transcriptionShortcutRegistration,
+      awakeSleepToggleShortcutRegistration,
+      turnOffShortcutRegistration,
+      pauseResumeShortcutRegistration,
+    ]));
+    for (const shortcut of shortcuts) {
+      const binding = sanitizeShortcutBinding(shortcut.binding, shortcut.id === 'default' ? defaultAssistantRecordingShortcut : null);
+      const accelerator = shortcutBindingToAccelerator(binding);
+      const label = formatShortcutBinding(binding);
+      const baseStatus = {
+        id: shortcut.id,
+        assistantProfileId: shortcut.assistantProfileId || null,
+        shortcutLabel: shortcut.label || '',
+        registered: false,
+        accelerator: '',
+        label,
+        error: '',
+      };
+      if (!binding || !accelerator) {
+        statuses[shortcut.id] = {
+          ...baseStatus,
+          error: binding ? unsupportedShortcutRegistrationError(binding) : '',
+        };
+        continue;
+      }
+      if (seenAccelerators.has(accelerator)) {
+        statuses[shortcut.id] = {
+          ...baseStatus,
+          accelerator,
+          error: 'Another Drone desktop shortcut is already using this key.',
+        };
+        continue;
+      }
+      seenAccelerators.add(accelerator);
+      const registered = globalShortcut.register(accelerator, () => triggerAssistantRecordingShortcut(shortcut.assistantProfileId || null));
+      if (registered) registeredAccelerators.set(shortcut.id, accelerator);
+      statuses[shortcut.id] = {
+        ...baseStatus,
+        registered,
+        accelerator,
+        error: registered ? '' : 'The operating system or another app is already using this shortcut.',
+      };
+    }
+
+    sendShortcutStatuses();
+    return statuses;
+  }
+
+  return { register, getStatus: () => statuses };
+}
+
+function registeredShortcutAccelerators(registrations) {
+  return registrations
+    .map((registration) => registration.getStatus()?.accelerator)
+    .filter(Boolean);
+}
+
 function allShortcutStatuses() {
   return {
     transcription: transcriptionShortcutRegistration.getStatus(),
     awakeSleepToggle: awakeSleepToggleShortcutRegistration.getStatus(),
     turnOff: turnOffShortcutRegistration.getStatus(),
     pauseResume: pauseResumeShortcutRegistration.getStatus(),
+    assistantRecording: assistantRecordingShortcutRegistration.getStatus(),
   };
 }
 
@@ -1373,6 +1496,7 @@ function registerAllGlobalShortcuts() {
   awakeSleepToggleShortcutRegistration.register();
   turnOffShortcutRegistration.register();
   pauseResumeShortcutRegistration.register();
+  assistantRecordingShortcutRegistration.register();
   return allShortcutStatuses();
 }
 
@@ -1427,6 +1551,19 @@ function triggerPauseResumeShortcut() {
   }
 }
 
+function triggerAssistantRecordingShortcut(assistantProfileId = null) {
+  const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow({ compactShowInactive: true });
+  if (!win.isVisible() || win.isMinimized()) applyCompactMode(win, { inactive: true });
+  const send = () => {
+    if (!win.isDestroyed()) win.webContents.send('shortcut:assistantRecording', { assistantProfileId: assistantProfileId || null });
+  };
+  if (win.webContents.isLoading()) {
+    win.webContents.once('did-finish-load', send);
+  } else {
+    send();
+  }
+}
+
 const transcriptionShortcutRegistration = createShortcutRegistration({
   defaultBinding: defaultTranscriptionShortcut,
   configKey: 'transcriptionShortcut',
@@ -1450,6 +1587,8 @@ const pauseResumeShortcutRegistration = createShortcutRegistration({
   configKey: 'pauseResumeShortcut',
   onTrigger: triggerPauseResumeShortcut,
 });
+
+const assistantRecordingShortcutRegistration = createAssistantRecordingShortcutRegistration();
 
 function restoreTemporaryOverlay(win, restoreWindowMode) {
   if (!win || win.isDestroyed()) return windowStatePayload();
