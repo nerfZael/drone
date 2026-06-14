@@ -276,11 +276,15 @@ export const DroneCard = React.memo(function DroneCard({
           {hasActions && (
             <div
               data-onboarding-id="sidebar.droneCard.actions"
-              className={`absolute right-0 z-10 flex items-center gap-1 rounded-md py-0.5 pl-3 transition-opacity duration-150 before:absolute before:inset-y-0 before:-left-5 before:w-5 before:bg-gradient-to-l before:from-[var(--panel)] before:to-transparent ${
+              className={`absolute right-0 z-10 flex items-center gap-1 rounded-md border border-[rgba(255,255,255,.08)] py-0.5 pl-3 pr-0.5 shadow-[0_4px_12px_rgba(0,0,0,.28)] transition-opacity duration-150 before:absolute before:inset-y-0 before:-left-5 before:w-5 before:bg-gradient-to-l before:from-[rgb(19,25,34)] before:to-transparent ${
                 pinActionsVisible
                   ? 'opacity-100 pointer-events-auto'
                   : 'opacity-0 pointer-events-none group-hover/drone:opacity-100 group-hover/drone:pointer-events-auto'
-              } ${selected ? 'bg-[var(--selected)] before:from-[var(--selected)]' : 'bg-[var(--panel)] group-hover/drone:bg-[rgb(19,25,34)] group-hover/drone:before:from-[rgb(19,25,34)]'}`}
+              } ${
+                selected
+                  ? 'bg-[rgb(30,26,43)] before:from-[rgb(30,26,43)]'
+                  : 'bg-[rgb(19,25,34)] before:from-[rgb(19,25,34)]'
+              }`}
             >
               {canCreateChat && (
                 <button
