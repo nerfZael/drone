@@ -197,6 +197,47 @@ describe('StreamingTranscriptionManager', () => {
     expect(commands[0]?.type).toBe('abort');
     expect(commands[0]?.transcriptText).toBe('');
   });
+
+  test('emits transcript segments while terminal command detection stays enabled', async () => {
+    const previous = process.env.VOICE_STREAM_NEXT_TEST_TRANSCRIPT;
+    process.env.VOICE_STREAM_NEXT_TEST_TRANSCRIPT = 'Keep this speech segment.';
+    const config = {
+      ...buildStreamingTranscriptionConfigFromEnv(process.env),
+      finalTranscriptionMode: 'segments' as const,
+    };
+    const commands: Array<{ type: string; transcriptText: string }> = [];
+    const segments: Array<{ text: string }> = [];
+    const manager = new StreamingTranscriptionManager(config, (command) => {
+      commands.push({ type: command.type, transcriptText: command.transcriptText });
+    }, undefined, {
+      onSegment: (segment) => {
+        segments.push({ text: segment.text });
+      },
+    });
+
+    const speechChunk = speechLikeChunk();
+    const silenceChunk = silentChunk();
+    for (let index = 0; index < 8; index += 1) {
+      manager.appendPcm(speechChunk);
+    }
+    for (let index = 0; index < 12; index += 1) {
+      manager.appendPcm(silenceChunk);
+    }
+    manager.flushPending();
+
+    const startedAt = Date.now();
+    while (segments.length === 0 && Date.now() - startedAt < 5_000) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    manager.stop();
+
+    if (previous == null) delete process.env.VOICE_STREAM_NEXT_TEST_TRANSCRIPT;
+    else process.env.VOICE_STREAM_NEXT_TEST_TRANSCRIPT = previous;
+
+    expect(commands).toHaveLength(0);
+    expect(segments).toHaveLength(1);
+    expect(segments[0]?.text).toBe('Keep this speech segment.');
+  });
 });
 
 function speechLikeChunk(): Uint8Array {
