@@ -51,6 +51,14 @@ const DEFAULT_PAUSE_RESUME_SHORTCUT = {
   alt: false,
   shift: true,
 };
+const DEFAULT_ASSISTANT_RECORDING_SHORTCUT = {
+  key: 'r',
+  mod: true,
+  ctrl: false,
+  meta: false,
+  alt: false,
+  shift: true,
+};
 const MODIFIER_ONLY_SHORTCUT_KEYS = new Set(['shift', 'control', 'ctrl', 'alt', 'meta', 'os']);
 
 const preRollBuffer = new PcmCaptureBuffer(PRE_ROLL_MAX_BYTES);
@@ -182,6 +190,7 @@ const els = {
   pauseResumeShortcutClear: document.querySelector('#pauseResumeShortcutClear'),
   pauseResumeShortcutReset: document.querySelector('#pauseResumeShortcutReset'),
   pauseResumeShortcutStatus: document.querySelector('#pauseResumeShortcutStatus'),
+  assistantRecordingShortcutList: document.querySelector('#assistantRecordingShortcutList'),
   commandLogList: document.querySelector('#commandLogList'),
   commandLogStatus: document.querySelector('#commandLogStatus'),
   refreshCommandLogsButton: document.querySelector('#refreshCommandLogsButton'),
@@ -301,6 +310,7 @@ function readFormConfig() {
     awakeSleepToggleShortcut: sanitizeShortcutBinding(state.config?.awakeSleepToggleShortcut, DEFAULT_AWAKE_SLEEP_TOGGLE_SHORTCUT),
     turnOffShortcut: sanitizeShortcutBinding(state.config?.turnOffShortcut, DEFAULT_TURN_OFF_SHORTCUT),
     pauseResumeShortcut: sanitizeShortcutBinding(state.config?.pauseResumeShortcut, DEFAULT_PAUSE_RESUME_SHORTCUT),
+    assistantRecordingShortcuts: sanitizeAssistantRecordingShortcuts(state.config?.assistantRecordingShortcuts),
   };
 }
 
@@ -335,6 +345,64 @@ function sanitizeShortcutBinding(value, fallback = null) {
     altGraph: value.altGraph === true,
     shift: value.shift === true,
   };
+}
+
+function assistantRecordingShortcutId(assistantProfileId) {
+  const profileId = String(assistantProfileId || '').trim();
+  return profileId ? `profile:${profileId}` : 'default';
+}
+
+function sanitizeAssistantRecordingShortcuts(value) {
+  const entries = Array.isArray(value)
+    ? value
+    : [{ id: 'default', assistantProfileId: null, label: 'Default assistant', binding: DEFAULT_ASSISTANT_RECORDING_SHORTCUT }];
+  const seen = new Set();
+  const shortcuts = [];
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const assistantProfileId = String(entry.assistantProfileId || '').trim() || null;
+    const id = String(entry.id || assistantRecordingShortcutId(assistantProfileId)).trim() || assistantRecordingShortcutId(assistantProfileId);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    shortcuts.push({
+      id,
+      assistantProfileId,
+      label: String(entry.label || '').trim(),
+      binding: sanitizeShortcutBinding(entry.binding, id === 'default' ? DEFAULT_ASSISTANT_RECORDING_SHORTCUT : null),
+    });
+  }
+  if (!seen.has('default')) {
+    shortcuts.unshift({
+      id: 'default',
+      assistantProfileId: null,
+      label: 'Default assistant',
+      binding: cloneShortcutBinding(DEFAULT_ASSISTANT_RECORDING_SHORTCUT),
+    });
+  }
+  return shortcuts;
+}
+
+function assistantRecordingShortcutForProfile(assistantProfileId = null) {
+  const id = assistantRecordingShortcutId(assistantProfileId);
+  const shortcuts = sanitizeAssistantRecordingShortcuts(state.config?.assistantRecordingShortcuts);
+  return shortcuts.find((entry) => entry.id === id) || {
+    id,
+    assistantProfileId: assistantProfileId || null,
+    label: '',
+    binding: id === 'default' ? cloneShortcutBinding(DEFAULT_ASSISTANT_RECORDING_SHORTCUT) : null,
+  };
+}
+
+function enabledAssistantProfiles() {
+  const profiles = Array.isArray(state.voiceSettings?.assistantProfiles) ? state.voiceSettings.assistantProfiles : [];
+  return profiles.filter((profile) => profile?.enabled !== false);
+}
+
+function assistantProfileName(assistantProfileId) {
+  const profileId = String(assistantProfileId || '').trim();
+  if (!profileId) return 'default assistant';
+  const profile = enabledAssistantProfiles().find((entry) => String(entry?.id || '') === profileId);
+  return profile?.name || 'assistant profile';
 }
 
 function numpadShortcutKeyFromCode(code) {
@@ -615,6 +683,7 @@ function applyConfig(config) {
     awakeSleepToggleShortcut: sanitizeShortcutBinding(config?.awakeSleepToggleShortcut, DEFAULT_AWAKE_SLEEP_TOGGLE_SHORTCUT),
     turnOffShortcut: sanitizeShortcutBinding(config?.turnOffShortcut, DEFAULT_TURN_OFF_SHORTCUT),
     pauseResumeShortcut: sanitizeShortcutBinding(config?.pauseResumeShortcut, DEFAULT_PAUSE_RESUME_SHORTCUT),
+    assistantRecordingShortcuts: sanitizeAssistantRecordingShortcuts(config?.assistantRecordingShortcuts),
     assistantSpeechPlaybackEnabled: config?.assistantSpeechPlaybackEnabled !== false,
     suppressWakeDuringPlayback: config?.suppressWakeDuringPlayback === true,
   };
@@ -655,7 +724,7 @@ function applyConfig(config) {
 
 function normalizeShortcutStatusPayload(status) {
   if (!status) return null;
-  if (status.transcription || status.smartTranscription || status.awakeSleepToggle || status.turnOff || status.pauseResume) return status;
+  if (status.transcription || status.smartTranscription || status.awakeSleepToggle || status.turnOff || status.pauseResume || status.assistantRecording) return status;
   if (typeof status.registered === 'boolean') return { transcription: status };
   return status;
 }
@@ -717,18 +786,19 @@ function renderShortcutSettings() {
     if (spec.clearEl) spec.clearEl.disabled = !binding;
     renderShortcutStatusEl(spec.statusEl, binding, statuses?.[spec.statusKey], spec.disabledLabel);
   }
+  renderAssistantRecordingShortcutSettings(statuses?.assistantRecording || {});
 }
 
 function renderShortcutStatusEl(statusEl, binding, status, disabledLabel) {
   if (!statusEl) return;
-  if (!status) {
-    statusEl.className = 'shortcut-status muted';
-    statusEl.textContent = 'Checking shortcut registration.';
-    return;
-  }
   if (!binding) {
     statusEl.className = 'shortcut-status muted';
     statusEl.textContent = disabledLabel;
+    return;
+  }
+  if (!status) {
+    statusEl.className = 'shortcut-status muted';
+    statusEl.textContent = 'Checking shortcut registration.';
     return;
   }
   if (status.registered) {
@@ -738,6 +808,133 @@ function renderShortcutStatusEl(statusEl, binding, status, disabledLabel) {
   }
   statusEl.className = 'shortcut-status error';
   statusEl.textContent = status.error || 'Shortcut could not be registered globally.';
+}
+
+function assistantRecordingShortcutRows() {
+  const rows = [
+    {
+      id: 'default',
+      assistantProfileId: null,
+      name: 'Default assistant',
+      kind: 'Default',
+      binding: assistantRecordingShortcutForProfile(null).binding,
+    },
+  ];
+  for (const profile of enabledAssistantProfiles()) {
+    const profileId = String(profile?.id || '').trim();
+    if (!profileId) continue;
+    const shortcut = assistantRecordingShortcutForProfile(profileId);
+    rows.push({
+      id: assistantRecordingShortcutId(profileId),
+      assistantProfileId: profileId,
+      name: profile.name || profile.wakePhrase || 'Assistant profile',
+      kind: 'Profile',
+      binding: shortcut.binding,
+    });
+  }
+  return rows;
+}
+
+function renderAssistantRecordingShortcutSettings(statuses = {}) {
+  if (!els.assistantRecordingShortcutList) return;
+  els.assistantRecordingShortcutList.replaceChildren();
+  for (const row of assistantRecordingShortcutRows()) {
+    const configKey = `assistantRecordingShortcuts:${row.id}`;
+    const item = document.createElement('div');
+    item.className = 'assistant-shortcut-item';
+
+    const title = document.createElement('div');
+    title.className = 'assistant-shortcut-title';
+    const name = document.createElement('span');
+    name.className = 'assistant-shortcut-name';
+    name.textContent = row.name;
+    const kind = document.createElement('span');
+    kind.className = 'assistant-shortcut-kind';
+    kind.textContent = row.kind;
+    title.append(name, kind);
+
+    const shortcutRow = document.createElement('div');
+    shortcutRow.className = 'shortcut-row';
+    const capture = document.createElement('button');
+    capture.className = 'shortcut-capture';
+    capture.type = 'button';
+    capture.dataset.shortcutCapture = 'true';
+    capture.dataset.shortcutId = row.id;
+    capture.textContent = state.capturingShortcutKey === configKey ? 'Press keys...' : formatShortcutBinding(row.binding);
+    if (state.capturingShortcutKey === configKey) capture.classList.add('is-capturing');
+
+    const clear = document.createElement('button');
+    clear.className = 'secondary mini-button';
+    clear.type = 'button';
+    clear.textContent = 'Clear';
+    clear.disabled = !row.binding;
+
+    const reset = document.createElement('button');
+    reset.className = 'secondary mini-button';
+    reset.type = 'button';
+    reset.textContent = row.id === 'default' ? 'Reset' : 'Unset';
+    reset.disabled = row.id !== 'default' && !row.binding;
+
+    shortcutRow.append(capture, clear, reset);
+
+    const status = document.createElement('p');
+    status.className = 'shortcut-status muted';
+    const disabledLabel = row.id === 'default'
+      ? 'Assistant recording shortcut is disabled.'
+      : `${row.name} recording shortcut is disabled.`;
+    renderShortcutStatusEl(status, row.binding, statuses?.[row.id], disabledLabel);
+
+    item.append(title, shortcutRow, status);
+    els.assistantRecordingShortcutList.append(item);
+
+    capture.addEventListener('click', () => {
+      state.capturingShortcutKey = configKey;
+      renderShortcutSettings();
+      focusAssistantShortcutCapture(row.id);
+    });
+    capture.addEventListener('blur', () => {
+      if (state.capturingShortcutKey !== configKey) return;
+      state.capturingShortcutKey = null;
+      renderShortcutSettings();
+    });
+    capture.addEventListener('keydown', (event) => {
+      if (state.capturingShortcutKey !== configKey) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.key === 'Escape') {
+        state.capturingShortcutKey = null;
+        renderShortcutSettings();
+        return;
+      }
+      if (event.key === 'Backspace' || event.key === 'Delete') {
+        state.capturingShortcutKey = null;
+        void saveAssistantRecordingShortcut(row.assistantProfileId, null, row.name).catch((err) => showStatus(err?.message || 'Could not save shortcut.'));
+        return;
+      }
+      const next = shortcutBindingFromKeyboardEvent(event);
+      if (!next) return;
+      state.capturingShortcutKey = null;
+      void saveAssistantRecordingShortcut(row.assistantProfileId, next, row.name).catch((err) => showStatus(err?.message || 'Could not save shortcut.'));
+    });
+    clear.addEventListener('click', () => {
+      void saveAssistantRecordingShortcut(row.assistantProfileId, null, row.name).catch((err) => showStatus(err?.message || 'Could not clear shortcut.'));
+    });
+    reset.addEventListener('click', () => {
+      const nextBinding = row.id === 'default' ? DEFAULT_ASSISTANT_RECORDING_SHORTCUT : null;
+      void saveAssistantRecordingShortcut(row.assistantProfileId, nextBinding, row.name).catch((err) => showStatus(err?.message || 'Could not reset shortcut.'));
+    });
+  }
+}
+
+function focusAssistantShortcutCapture(rowId) {
+  if (!els.assistantRecordingShortcutList) return;
+  const buttons = els.assistantRecordingShortcutList.querySelectorAll('.shortcut-capture');
+  for (const button of buttons) {
+    if (button.dataset.shortcutId === rowId) {
+      button.focus();
+      return;
+    }
+  }
 }
 
 async function saveConfigShortcut(configKey, binding) {
@@ -751,6 +948,70 @@ async function saveConfigShortcut(configKey, binding) {
     state.shortcutStatus = await desktop.shortcutStatus().catch(() => state.shortcutStatus);
     renderShortcutSettings();
   }
+}
+
+async function saveAssistantRecordingShortcut(assistantProfileId, binding, label = '') {
+  if (!state.config) return;
+  const id = assistantRecordingShortcutId(assistantProfileId);
+  const sanitizedBinding = sanitizeShortcutBinding(binding, null);
+  const existing = sanitizeAssistantRecordingShortcuts(state.config.assistantRecordingShortcuts)
+    .filter((entry) => entry.id !== id);
+  const nextShortcuts = [
+    ...existing,
+    {
+      id,
+      assistantProfileId: assistantProfileId || null,
+      label: label || (assistantProfileId ? assistantProfileName(assistantProfileId) : 'Default assistant'),
+      binding: sanitizedBinding,
+    },
+  ];
+  const next = await desktop.writeConfig({
+    ...state.config,
+    assistantRecordingShortcuts: normalizeAssistantRecordingShortcutsForProfiles(nextShortcuts),
+  });
+  applyConfig(next);
+  if (desktop.shortcutStatus) {
+    state.shortcutStatus = await desktop.shortcutStatus().catch(() => state.shortcutStatus);
+    renderShortcutSettings();
+  }
+}
+
+function normalizeAssistantRecordingShortcutsForProfiles(shortcuts = sanitizeAssistantRecordingShortcuts(state.config?.assistantRecordingShortcuts)) {
+  const byId = new Map(sanitizeAssistantRecordingShortcuts(shortcuts).map((entry) => [entry.id, entry]));
+  const next = [];
+  const defaultEntry = byId.get('default') || {
+    id: 'default',
+    assistantProfileId: null,
+    label: 'Default assistant',
+    binding: DEFAULT_ASSISTANT_RECORDING_SHORTCUT,
+  };
+  next.push({ ...defaultEntry, label: 'Default assistant', assistantProfileId: null });
+  for (const profile of enabledAssistantProfiles()) {
+    const profileId = String(profile?.id || '').trim();
+    if (!profileId) continue;
+    const id = assistantRecordingShortcutId(profileId);
+    const existing = byId.get(id);
+    if (existing) {
+      next.push({
+        ...existing,
+        id,
+        assistantProfileId: profileId,
+        label: profile.name || existing.label || 'Assistant profile',
+      });
+    }
+  }
+  return next;
+}
+
+async function syncAssistantRecordingShortcutsWithProfiles() {
+  if (!state.config) return;
+  const current = sanitizeAssistantRecordingShortcuts(state.config.assistantRecordingShortcuts);
+  const nextShortcuts = normalizeAssistantRecordingShortcutsForProfiles(current);
+  if (JSON.stringify(current) === JSON.stringify(nextShortcuts)) return;
+  applyConfig(await desktop.writeConfig({
+    ...state.config,
+    assistantRecordingShortcuts: nextShortcuts,
+  }));
 }
 
 async function saveTranscriptionShortcut(binding) {
@@ -1527,6 +1788,8 @@ async function loadDashboard() {
           finalizeCheckIntervalMs: state.voiceSettings.finalizeCheckIntervalMs,
         });
       }
+      await syncAssistantRecordingShortcutsWithProfiles();
+      renderShortcutSettings();
       updateConnection('ok', 'Connected', `${state.config.deviceName} · ${state.config.deviceId.slice(0, 12)}`);
       if (els.accountLabel) els.accountLabel.textContent = data.device.displayName || state.config.deviceName || 'Connected';
       if (els.accountDetail) els.accountDetail.textContent = `Device ${state.config.deviceId.slice(0, 12)}`;
@@ -1547,6 +1810,8 @@ async function loadDashboard() {
         finalizeCheckIntervalMs: state.voiceSettings.finalizeCheckIntervalMs,
       });
     }
+    await syncAssistantRecordingShortcutsWithProfiles();
+    renderShortcutSettings();
     updateConnection('ok', 'Connected', state.config.deviceId ? `${state.config.deviceName} · ${state.config.deviceId.slice(0, 12)}` : `${dashboard.user.displayName}`);
     showPairingMessage(state.config.deviceId ? 'Desktop connected.' : `Signed in as ${dashboard.user.displayName}. Connect this desktop before recording.`);
   } catch (err) {
@@ -1664,6 +1929,8 @@ async function loadVoiceSettings(forceReload = false) {
     duplicateCooldownMs: settings.duplicateCooldownMs,
     finalizeCheckIntervalMs: settings.finalizeCheckIntervalMs,
   });
+  await syncAssistantRecordingShortcutsWithProfiles();
+  renderShortcutSettings();
   return state.voiceSettings;
 }
 
@@ -3156,6 +3423,48 @@ async function togglePauseResumeRecording() {
   showStatus('No active recording to pause.');
 }
 
+function assistantRecordingShortcutFromEvent(event) {
+  for (const shortcut of sanitizeAssistantRecordingShortcuts(state.config?.assistantRecordingShortcuts)) {
+    if (isShortcutMatch(shortcut.binding, event)) return shortcut;
+  }
+  return null;
+}
+
+async function startAssistantRecordingShortcut(payload = {}) {
+  if (!state.config?.deviceId || !state.config?.deviceToken) {
+    showStatus('Connect this desktop before recording with an assistant shortcut.');
+    return;
+  }
+  if (state.voiceStreamStarting) {
+    showStatus('Assistant voice recording is already starting.');
+    return;
+  }
+  if (state.mode === 'transcribing') {
+    showStatus('Voice transcription is already running.');
+    return;
+  }
+  if (state.mode === 'recording' || state.mode === 'paused') {
+    showStatus('Stop the current recording before starting another assistant recording.');
+    return;
+  }
+
+  const assistantProfileId = String(payload?.assistantProfileId || '').trim() || null;
+  const settings = await loadVoiceSettings().catch((err) => {
+    showStatus(err?.message || 'Could not load assistant profiles.');
+    return null;
+  });
+  if (!settings) return;
+  if (assistantProfileId) {
+    const profile = enabledAssistantProfiles().find((entry) => String(entry?.id || '') === assistantProfileId);
+    if (!profile) {
+      showStatus('That assistant profile is unavailable or disabled.');
+      return;
+    }
+  }
+
+  await startMic('assistant', { cue: 'wake', assistantProfileId });
+}
+
 async function toggleCallRecorder() {
   const current = normalizeCallRecorderStatus(state.callRecorder);
   if (current.mode === 'transcribing') {
@@ -3891,6 +4200,12 @@ document.addEventListener('keydown', (event) => {
     void toggleSmartTranscription().catch((err) => showStatus(err?.message || 'Could not toggle smart transcription.'));
     return;
   }
+  const assistantRecordingShortcut = assistantRecordingShortcutFromEvent(event);
+  if (assistantRecordingShortcut) {
+    event.preventDefault();
+    void startAssistantRecordingShortcut({ assistantProfileId: assistantRecordingShortcut.assistantProfileId }).catch((err) => showStatus(err?.message || 'Could not start assistant recording.'));
+    return;
+  }
   if (!isShortcutMatch(state.config?.transcriptionShortcut, event)) return;
   event.preventDefault();
   void (async () => {
@@ -3941,6 +4256,12 @@ if (desktop.onTurnOffShortcut) {
 if (desktop.onPauseResumeShortcut) {
   desktop.onPauseResumeShortcut(() => {
     void togglePauseResumeRecording().catch((err) => showStatus(err?.message || 'Could not pause or resume recording.'));
+  });
+}
+
+if (desktop.onAssistantRecordingShortcut) {
+  desktop.onAssistantRecordingShortcut((payload) => {
+    void startAssistantRecordingShortcut(payload).catch((err) => showStatus(err?.message || 'Could not start assistant recording.'));
   });
 }
 

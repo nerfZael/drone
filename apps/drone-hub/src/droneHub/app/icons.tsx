@@ -77,6 +77,17 @@ export function IconBoard({ className }: { className?: string }) {
   );
 }
 
+export function IconRemote({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="5.25" y="7.25" width="5.5" height="6.25" rx="1.25" />
+      <path d="M8 7.25V4" />
+      <path d="M5 4.75a4.25 4.25 0 016 0" />
+      <path d="M3 2.75a7.1 7.1 0 0110 0" />
+      <path d="M7 10.25h2" />
+    </svg>
+  );
+}
 
 export function IconTreeView({ className }: { className?: string }) {
   return (

@@ -258,6 +258,9 @@ export function DroneChangesDock({
   repoPath,
   repoUnavailableReason,
   fixedContextMode = null,
+  initialViewMode = null,
+  initialDiffViewType = null,
+  persistViewPreferences = true,
   disabled,
   hubPhase,
   hubMessage,
@@ -269,6 +272,9 @@ export function DroneChangesDock({
   repoPath: string;
   repoUnavailableReason?: string | null;
   fixedContextMode?: ChangesContextMode | null;
+  initialViewMode?: ChangesViewMode | null;
+  initialDiffViewType?: DiffViewType | null;
+  persistViewPreferences?: boolean;
   disabled: boolean;
   hubPhase?: 'creating' | 'starting' | 'seeding' | 'error' | null;
   hubMessage?: string | null;
@@ -341,10 +347,12 @@ export function DroneChangesDock({
   const dataMode: ChangesDataMode = contextMode === 'pull-request' ? 'pull-request' : branchChangesMode;
 
   const [viewMode, setViewMode] = React.useState<ChangesViewMode>(() => {
+    if (initialViewMode) return initialViewMode;
     const raw = readChangesStorage(CHANGES_VIEW_STORAGE_KEY);
     return raw === 'split' ? 'split' : 'stacked';
   });
   const [diffViewType, setDiffViewType] = React.useState<DiffViewType>(() => {
+    if (initialDiffViewType) return initialDiffViewType;
     const raw = readChangesStorage(CHANGES_DIFF_VIEW_STORAGE_KEY);
     return raw === 'split' ? 'split' : 'unified';
   });
@@ -473,11 +481,13 @@ export function DroneChangesDock({
   }, [pullRequestCommitDetails]);
 
   React.useEffect(() => {
+    if (!persistViewPreferences) return;
     writeChangesStorage(CHANGES_VIEW_STORAGE_KEY, viewMode);
-  }, [viewMode]);
+  }, [persistViewPreferences, viewMode]);
   React.useEffect(() => {
+    if (!persistViewPreferences) return;
     writeChangesStorage(CHANGES_DIFF_VIEW_STORAGE_KEY, diffViewType);
-  }, [diffViewType]);
+  }, [diffViewType, persistViewPreferences]);
   React.useEffect(() => {
     if (fixedContextMode) return;
     writeChangesStorage(CHANGES_CONTEXT_STORAGE_KEY, contextMode);

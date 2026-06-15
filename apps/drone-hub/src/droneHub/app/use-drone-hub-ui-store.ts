@@ -1078,6 +1078,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           ...persistedRest,
           settingsActiveTab:
             persisted.settingsActiveTab === 'general' ||
+            persisted.settingsActiveTab === 'remote' ||
             persisted.settingsActiveTab === 'sync' ||
             persisted.settingsActiveTab === 'profiles' ||
             persisted.settingsActiveTab === 'trash' ||
@@ -1316,6 +1317,7 @@ export function useDroneSidebarUiState() {
       sidebarCollapsed: s.sidebarCollapsed,
       selectedDroneIds: s.selectedDroneIds,
       draftChat: s.draftChat,
+      settingsActiveTab: s.settingsActiveTab,
       appView: s.appView,
       viewMode: s.viewMode,
       activeRepoPath: s.activeRepoPath,
@@ -1338,6 +1340,7 @@ export function useDroneSidebarUiState() {
       hiddenSidebarGroups: s.hiddenSidebarGroups,
       showHiddenSidebarGroups: s.showHiddenSidebarGroups,
       autoDelete: s.autoDelete,
+      setSettingsActiveTab: s.setSettingsActiveTab,
       setAppView: s.setAppView,
       setViewMode: s.setViewMode,
       setSidebarReposCollapsed: s.setSidebarReposCollapsed,

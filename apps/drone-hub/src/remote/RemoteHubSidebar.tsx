@@ -1,7 +1,8 @@
 import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { createCanvasChatNodeId } from '../droneHub/app/app-config';
-import { DroneSidebar } from '../droneHub/app/DroneSidebar';
+import { DroneSidebar, type DroneSidebarReadOnlyMode } from '../droneHub/app/DroneSidebar';
+import { IconPlus } from '../droneHub/app/icons';
 import { useDroneHubUiStore } from '../droneHub/app/use-drone-hub-ui-store';
 import { useSidebarViewModel } from '../droneHub/app/use-sidebar-view-model';
 import type { DroneSummary, RepoSummary } from '../droneHub/types';
@@ -13,6 +14,8 @@ type RemoteHubSidebarProps = {
   activeChatName: string;
   onSelectDrone: (droneId: string) => void;
   onSelectChat: (chatName: string) => void;
+  onOpenCreateDrone?: () => void;
+  fillContainer?: boolean;
 };
 
 const EMPTY_RECORD: Record<string, never> = {};
@@ -31,11 +34,7 @@ const REMOTE_DRONE_SIDEBAR_CAPABILITIES = {
 
 function remoteSidebarRepos(drones: DroneSummary[]): RepoSummary[] {
   const paths = Array.from(
-    new Set(
-      drones
-        .map((drone) => String(drone.repoPath ?? '').trim())
-        .filter(Boolean),
-    ),
+    new Set(drones.map((drone) => String(drone.repoPath ?? '').trim()).filter(Boolean)),
   ).sort((a, b) => a.localeCompare(b));
   return paths.map((path) => ({ path, addedAt: null, remoteUrl: null, github: null }));
 }
@@ -52,20 +51,20 @@ function remoteDroneCountByRepoPath(drones: DroneSummary[]): Map<string, number>
 
 function remoteRegistryGroupNames(drones: DroneSummary[]): string[] {
   return Array.from(
-    new Set(
-      drones
-        .map((drone) => String(drone.group ?? '').trim())
-        .filter(Boolean),
-    ),
+    new Set(drones.map((drone) => String(drone.group ?? '').trim()).filter(Boolean)),
   ).sort((a, b) => a.localeCompare(b));
 }
 
-export function RemoteHubSidebar({
+const REMOTE_SIDEBAR_MODE: DroneSidebarReadOnlyMode = 'read-only-chats';
+
+function RemoteHubSidebarComponent({
   drones,
   selectedDroneId,
   activeChatName,
   onSelectDrone,
   onSelectChat,
+  onOpenCreateDrone,
+  fillContainer,
 }: RemoteHubSidebarProps) {
   const sidebarState = useDroneHubUiStore(
     useShallow((state) => ({
@@ -73,6 +72,7 @@ export function RemoteHubSidebar({
       collapsedGroups: state.collapsedGroups,
       hiddenSidebarGroups: state.hiddenSidebarGroups,
       selectedDroneIds: state.selectedDroneIds,
+      setCollapsedGroups: state.setCollapsedGroups,
       setSelectedChat: state.setSelectedChat,
       setSelectedDrone: state.setSelectedDrone,
       setSelectedDroneIds: state.setSelectedDroneIds,
@@ -81,7 +81,8 @@ export function RemoteHubSidebar({
       sidebarGroupOrder: state.sidebarGroupOrder,
     })),
   );
-  const { setSelectedChat, setSelectedDrone, setSelectedDroneIds } = sidebarState;
+  const { setCollapsedGroups, setSelectedChat, setSelectedDrone, setSelectedDroneIds } =
+    sidebarState;
 
   React.useEffect(() => {
     setSelectedDrone(selectedDroneId);
@@ -143,12 +144,21 @@ export function RemoteHubSidebar({
       onSelectDrone(droneId);
       setSelectedDrone(droneId);
       setSelectedDroneIds((prev) => (prev.length === 1 && prev[0] === droneId ? prev : [droneId]));
-      const chats = Array.isArray(drone?.chats) && drone.chats.length > 0 ? drone.chats : ['default'];
-      const nextChat = chats.includes(activeChatName) ? activeChatName : chats[0] ?? 'default';
+      const chats =
+        Array.isArray(drone?.chats) && drone.chats.length > 0 ? drone.chats : ['default'];
+      const nextChat = chats.includes(activeChatName) ? activeChatName : (chats[0] ?? 'default');
       onSelectChat(nextChat);
       setSelectedChat(nextChat);
     },
-    [activeChatName, droneById, onSelectChat, onSelectDrone, setSelectedChat, setSelectedDrone, setSelectedDroneIds],
+    [
+      activeChatName,
+      droneById,
+      onSelectChat,
+      onSelectDrone,
+      setSelectedChat,
+      setSelectedDrone,
+      setSelectedDroneIds,
+    ],
   );
 
   const selectDroneChat = React.useCallback(
@@ -162,16 +172,54 @@ export function RemoteHubSidebar({
     [onSelectChat, onSelectDrone, setSelectedChat, setSelectedDrone, setSelectedDroneIds],
   );
 
-  const noopDeleteChat = React.useCallback(async () => ({ ok: false, error: 'Remote Hub cannot delete chats.' }), []);
-  const noopCreateChat = React.useCallback(async () => ({ ok: false, error: 'Remote Hub cannot create chats.' }), []);
-  const noopRenameChat = React.useCallback(async () => ({ ok: false, error: 'Remote Hub cannot rename chats.' }), []);
-  const noopReparent = React.useCallback(async () => ({ ok: false, error: 'Remote Hub cannot move drones.' }), []);
-  const noopMoveGroup = React.useCallback(async () => ({ ok: false, error: 'Remote Hub cannot move drones.' }), []);
-  const noopCreateGroup = React.useCallback(async () => ({ ok: false, error: 'Remote Hub cannot create groups.' }), []);
+  const toggleGroupCollapsed = React.useCallback(
+    (group: string) => {
+      const groupKey = String(group ?? '').trim();
+      if (!groupKey) return;
+      setCollapsedGroups((prev) => ({ ...prev, [groupKey]: !prev[groupKey] }));
+    },
+    [setCollapsedGroups],
+  );
+
+  const noopDeleteChat = React.useCallback(
+    async () => ({ ok: false, error: 'Remote Hub cannot delete chats.' }),
+    [],
+  );
+  const noopCreateChat = React.useCallback(
+    async () => ({ ok: false, error: 'Remote Hub cannot create chats.' }),
+    [],
+  );
+  const noopRenameChat = React.useCallback(
+    async () => ({ ok: false, error: 'Remote Hub cannot rename chats.' }),
+    [],
+  );
+  const noopReparent = React.useCallback(
+    async () => ({ ok: false, error: 'Remote Hub cannot move drones.' }),
+    [],
+  );
+  const noopMoveGroup = React.useCallback(
+    async () => ({ ok: false, error: 'Remote Hub cannot move drones.' }),
+    [],
+  );
+  const noopCreateGroup = React.useCallback(
+    async () => ({ ok: false, error: 'Remote Hub cannot create groups.' }),
+    [],
+  );
   const noopBool = React.useCallback(() => false, []);
   const openDroneError = React.useCallback((drone: DroneSummary, message: string) => {
     window.alert(`${drone.name}: ${message}`);
   }, []);
+  const headerAccessory = onOpenCreateDrone ? (
+    <button
+      type="button"
+      onClick={onOpenCreateDrone}
+      className="inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]"
+      title="Create new drone"
+      aria-label="Create new drone"
+    >
+      <IconPlus className="opacity-80" />
+    </button>
+  ) : null;
 
   return (
     <DroneSidebar
@@ -220,7 +268,7 @@ export function RemoteHubSidebar({
       onMoveDronesToGroup={noopMoveGroup}
       onCreateGroup={noopCreateGroup}
       onCreateGroupAndMove={noopMoveGroup}
-      onToggleGroupCollapsed={NOOP}
+      onToggleGroupCollapsed={toggleGroupCollapsed}
       onRenameGroup={noopBool}
       onOpenGroupMultiChat={NOOP}
       onOpenVisibleMultiChat={NOOP}
@@ -230,6 +278,11 @@ export function RemoteHubSidebar({
       capabilities={REMOTE_DRONE_SIDEBAR_CAPABILITIES}
       sidebarGroupingModeOverride="repos"
       viewModeOverride="grouped"
+      fillContainer={fillContainer}
+      readOnlyMode={REMOTE_SIDEBAR_MODE}
+      headerAccessory={headerAccessory}
     />
   );
 }
+
+export const RemoteHubSidebar = React.memo(RemoteHubSidebarComponent);

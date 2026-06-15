@@ -7,10 +7,13 @@ import { resolveDetachedCliLaunchSpec } from './hub-launch';
 import {
   normalizeRemotePublicUrl,
   pidIsRunning,
+  readRemoteHubDesiredState,
   readRemoteHubState,
   remoteHubLogPath,
+  remoteNgrokLogPath,
   removeRemoteHubStateIfOwnedByPid,
   type RemoteHubState,
+  writeRemoteHubDesiredState,
 } from './remote-state';
 
 type StartRemoteHubDetachedOptions = {
@@ -22,9 +25,26 @@ type StartRemoteHubDetachedOptions = {
   force?: boolean;
 };
 
+type EnsureRemoteHubDetachedOptions = {
+  cliFilename?: string;
+  force?: boolean;
+};
+
 export type RedactedRemoteHubState = Omit<RemoteHubState, 'controlToken'> & {
   url: string;
 };
+
+type EnsureRemoteHubDetachedResult = {
+  desired: boolean;
+  started: boolean;
+  alreadyRunning: boolean;
+  state: RedactedRemoteHubState | null;
+  error?: string;
+};
+
+let ensureDesiredRemoteHubPromise: Promise<EnsureRemoteHubDetachedResult> | null = null;
+let ensureDesiredRemoteHubRetryAtMs = 0;
+let ensureDesiredRemoteHubLastError: string | null = null;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -32,7 +52,8 @@ function sleep(ms: number): Promise<void> {
 
 function normalizeRemotePort(raw: unknown): number {
   const port = Number(raw ?? 8790);
-  if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('invalid remote Hub port');
+  if (!Number.isInteger(port) || port < 0 || port > 65535)
+    throw new Error('invalid remote Hub port');
   return port;
 }
 
@@ -121,6 +142,35 @@ export async function createRemoteHubPairing(state: RemoteHubState | null): Prom
   return data;
 }
 
+export async function getRemoteHubPairingStatus(
+  state: RemoteHubState | null,
+  tokenRaw: unknown,
+): Promise<{ ok: true; active: boolean; expiresAt: string | null }> {
+  if (!state || !pidIsRunning(state.pid)) throw new Error('remote Hub is not running');
+  const token = String(tokenRaw ?? '').trim();
+  if (!token) throw new Error('pairing token is required');
+  const response = await fetch(
+    `http://127.0.0.1:${state.port}/api/local/pairings/${encodeURIComponent(token)}/status`,
+    {
+      method: 'GET',
+      headers: { authorization: `Bearer ${state.controlToken}` },
+    },
+  );
+  const text = await response.text();
+  let data: any = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = { error: text };
+  }
+  if (!response.ok) throw new Error(data?.error ?? `${response.status} ${response.statusText}`);
+  return {
+    ok: true,
+    active: data?.active === true,
+    expiresAt: typeof data?.expiresAt === 'string' ? data.expiresAt : null,
+  };
+}
+
 export async function startRemoteHubDetached(options: StartRemoteHubDetachedOptions = {}): Promise<{
   alreadyRunning: boolean;
   state: RedactedRemoteHubState;
@@ -129,8 +179,16 @@ export async function startRemoteHubDetached(options: StartRemoteHubDetachedOpti
   const current = await readRemoteHubState();
   if (current && pidIsRunning(current.pid)) {
     if (options.force) {
-      await stopRemoteHubDetached();
+      await stopRemoteHubDetached({ disableDesired: false });
     } else {
+      await writeRemoteHubDesiredState({
+        version: 1,
+        enabled: true,
+        host: current.host,
+        port: current.port,
+        publicUrl: current.publicUrl,
+        updatedAt: new Date().toISOString(),
+      });
       return { alreadyRunning: true, state: redactRemoteHubState(current) };
     }
   }
@@ -143,7 +201,9 @@ export async function startRemoteHubDetached(options: StartRemoteHubDetachedOpti
   await fs.mkdir(path.dirname(logPath), { recursive: true });
   const logHandle = await fs.open(logPath, 'a');
   try {
-    const launch = resolveDetachedCliLaunchSpec({ cliFilename: resolveCliFilename(options.cliFilename) });
+    const launch = resolveDetachedCliLaunchSpec({
+      cliFilename: resolveCliFilename(options.cliFilename),
+    });
     const child = spawn(
       launch.command,
       [
@@ -158,7 +218,11 @@ export async function startRemoteHubDetached(options: StartRemoteHubDetachedOpti
         controlToken,
         ...(publicUrl ? ['--public-url', publicUrl] : []),
       ],
-      { detached: true, stdio: ['ignore', logHandle.fd, logHandle.fd], env: { ...process.env, DRONE_HUB_REMOTE_DAEMON: '1' } },
+      {
+        detached: true,
+        stdio: ['ignore', logHandle.fd, logHandle.fd],
+        env: { ...process.env, DRONE_HUB_REMOTE_DAEMON: '1' },
+      },
     );
     let spawnError: Error | null = null;
     child.once('error', (error) => {
@@ -179,7 +243,17 @@ export async function startRemoteHubDetached(options: StartRemoteHubDetachedOpti
     if (!state) {
       throw new Error(`remote Hub did not start; see ${logPath}`);
     }
-    const pairing = options.createPairing ? await createRemoteHubPairing(state).catch(() => null) : null;
+    await writeRemoteHubDesiredState({
+      version: 1,
+      enabled: true,
+      host,
+      port: state.port,
+      publicUrl,
+      updatedAt: new Date().toISOString(),
+    });
+    const pairing = options.createPairing
+      ? await createRemoteHubPairing(state).catch(() => null)
+      : null;
     return {
       alreadyRunning: false,
       state: redactRemoteHubState(state),
@@ -190,7 +264,32 @@ export async function startRemoteHubDetached(options: StartRemoteHubDetachedOpti
   }
 }
 
-export async function stopRemoteHubDetached(): Promise<{ stopped: boolean; pid?: number; reason?: string }> {
+export async function stopRemoteHubDetached(): Promise<{
+  stopped: boolean;
+  pid?: number;
+  reason?: string;
+}>;
+export async function stopRemoteHubDetached(options: { disableDesired?: boolean }): Promise<{
+  stopped: boolean;
+  pid?: number;
+  reason?: string;
+}>;
+export async function stopRemoteHubDetached(options: { disableDesired?: boolean } = {}): Promise<{
+  stopped: boolean;
+  pid?: number;
+  reason?: string;
+}> {
+  const current = await readRemoteHubState();
+  if (options.disableDesired !== false) {
+    await writeRemoteHubDesiredState({
+      version: 1,
+      enabled: false,
+      host: current?.host ?? '127.0.0.1',
+      port: current?.port ?? 8790,
+      publicUrl: current?.publicUrl ?? null,
+      updatedAt: new Date().toISOString(),
+    });
+  }
   const state = await readRemoteHubState();
   if (!state) return { stopped: false, reason: 'not running' };
   if (pidIsRunning(state.pid)) {
@@ -198,4 +297,102 @@ export async function stopRemoteHubDetached(): Promise<{ stopped: boolean; pid?:
   }
   await removeRemoteHubStateIfOwnedByPid(state.pid);
   return { stopped: true, pid: state.pid };
+}
+
+export async function ensureDesiredRemoteHubDetached(
+  options: EnsureRemoteHubDetachedOptions = {},
+): Promise<EnsureRemoteHubDetachedResult> {
+  const desired = await readRemoteHubDesiredState();
+  if (!desired?.enabled) {
+    const current = await readRemoteHubState();
+    const running = Boolean(current && pidIsRunning(current.pid));
+    return {
+      desired: false,
+      started: false,
+      alreadyRunning: running,
+      state: running && current ? redactRemoteHubState(current) : null,
+    };
+  }
+  const current = await readRemoteHubState();
+  if (!options.force && current && pidIsRunning(current.pid)) {
+    ensureDesiredRemoteHubRetryAtMs = 0;
+    ensureDesiredRemoteHubLastError = null;
+    return {
+      desired: true,
+      started: false,
+      alreadyRunning: true,
+      state: redactRemoteHubState(current),
+    };
+  }
+  if (ensureDesiredRemoteHubPromise) return ensureDesiredRemoteHubPromise;
+  if (ensureDesiredRemoteHubRetryAtMs > Date.now()) {
+    return {
+      desired: true,
+      started: false,
+      alreadyRunning: false,
+      state: null,
+      ...(ensureDesiredRemoteHubLastError ? { error: ensureDesiredRemoteHubLastError } : {}),
+    };
+  }
+  const promise: Promise<EnsureRemoteHubDetachedResult> = (async () => {
+    try {
+      const result = await startRemoteHubDetached({
+        port: desired.port,
+        host: desired.host,
+        publicUrl: desired.publicUrl,
+        cliFilename: options.cliFilename,
+        force: options.force,
+      });
+      ensureDesiredRemoteHubRetryAtMs = 0;
+      ensureDesiredRemoteHubLastError = null;
+      return {
+        desired: true,
+        started: !result.alreadyRunning,
+        alreadyRunning: result.alreadyRunning,
+        state: result.state,
+      };
+    } catch (error: any) {
+      ensureDesiredRemoteHubLastError = error?.message ?? String(error);
+      ensureDesiredRemoteHubRetryAtMs = Date.now() + 10_000;
+      return {
+        desired: true,
+        started: false,
+        alreadyRunning: false,
+        state: null,
+        error: ensureDesiredRemoteHubLastError ?? 'remote Hub start failed',
+      };
+    } finally {
+      ensureDesiredRemoteHubPromise = null;
+    }
+  })();
+  ensureDesiredRemoteHubPromise = promise;
+  return promise;
+}
+
+export async function startRemoteNgrokTunnel(portRaw: unknown): Promise<{
+  ok: true;
+  logPath: string;
+}> {
+  const port = normalizeRemotePort(portRaw);
+  if (port <= 0) throw new Error('ngrok requires a fixed local port');
+  const logPath = remoteNgrokLogPath();
+  await fs.mkdir(path.dirname(logPath), { recursive: true });
+  const logHandle = await fs.open(logPath, 'a');
+  try {
+    const child = spawn('ngrok', ['http', String(port)], {
+      detached: true,
+      stdio: ['ignore', logHandle.fd, logHandle.fd],
+      env: process.env,
+    });
+    let spawnError: Error | null = null;
+    child.once('error', (error) => {
+      spawnError = error;
+    });
+    child.unref();
+    await sleep(250);
+    if (spawnError) throw spawnError;
+    return { ok: true, logPath };
+  } finally {
+    await logHandle.close().catch(() => {});
+  }
 }

@@ -109,6 +109,11 @@ type AppEventType =
   | 'release_changed'
   | 'setup_changed';
 
+type FileByteRange = {
+  start: number;
+  end: number;
+};
+
 type ReleaseUploadPlatform = 'android' | 'desktop';
 
 type ReleaseUploadSession = {
@@ -287,6 +292,34 @@ function webViewSessionMaxAgeSeconds(expiresAt: string): number {
 
 function queryValue(value: unknown): string {
   return Array.isArray(value) ? String(value[0] ?? '') : String(value ?? '');
+}
+
+function parseFileByteRange(rawRange: unknown, fileSize: number): FileByteRange | null | 'invalid' {
+  const range = String(Array.isArray(rawRange) ? rawRange[0] : rawRange ?? '').trim();
+  if (!range) return null;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+  if (!match || fileSize <= 0) return 'invalid';
+  const [, rawStart, rawEnd] = match;
+  if (!rawStart && !rawEnd) return 'invalid';
+
+  if (!rawStart) {
+    const suffixLength = Number(rawEnd);
+    if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) return 'invalid';
+    return {
+      start: Math.max(0, fileSize - suffixLength),
+      end: fileSize - 1,
+    };
+  }
+
+  const start = Number(rawStart);
+  const requestedEnd = rawEnd ? Number(rawEnd) : fileSize - 1;
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(requestedEnd) || start < 0 || requestedEnd < start || start >= fileSize) {
+    return 'invalid';
+  }
+  return {
+    start,
+    end: Math.min(requestedEnd, fileSize - 1),
+  };
 }
 
 function voiceStreamDataDir(): string {
@@ -2617,13 +2650,27 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       }
       const download = queryValue((req.query as any)?.download) === '1';
       const stat = statSync(recording.filePath);
+      const range = parseFileByteRange(req.headers.range, stat.size);
       reply.header('content-type', recording.mimeType || 'audio/wav');
-      reply.header('content-length', String(stat.size));
+      reply.header('accept-ranges', 'bytes');
       reply.header('cache-control', 'private, max-age=60');
       if (download) {
         const fileName = `voice-${recording.mode}-${recording.createdAt.replace(/[^0-9T-]+/g, '-')}.wav`;
         reply.header('content-disposition', `attachment; filename="${fileName}"`);
       }
+      if (range === 'invalid') {
+        reply.header('content-range', `bytes */${stat.size}`);
+        reply.header('content-length', '0');
+        reply.code(416);
+        return reply.send();
+      }
+      if (range) {
+        reply.code(206);
+        reply.header('content-range', `bytes ${range.start}-${range.end}/${stat.size}`);
+        reply.header('content-length', String(range.end - range.start + 1));
+        return reply.send(createReadStream(recording.filePath, { start: range.start, end: range.end }));
+      }
+      reply.header('content-length', String(stat.size));
       return reply.send(createReadStream(recording.filePath));
     }),
   );

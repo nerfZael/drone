@@ -222,14 +222,15 @@ function ActiveDragPreview({ data }: { data: DroneHubDragData }) {
   );
 }
 
-export function DroneHubDndProvider({ children }: { children: React.ReactNode }) {
-  const sensors = useSensors(
+export function DroneHubDndProvider({ children, enabled = true }: { children: React.ReactNode; enabled?: boolean }) {
+  const pointerSensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
         distance: 4,
       },
     }),
   );
+  const sensors = enabled ? pointerSensors : [];
   const [activeDrag, setActiveDrag] = React.useState<DroneHubDragData | null>(null);
 
   const clearActiveDrag = React.useCallback(() => {
@@ -237,8 +238,8 @@ export function DroneHubDndProvider({ children }: { children: React.ReactNode })
   }, []);
 
   const onDragStart = React.useCallback((event: DragStartEvent) => {
-    setActiveDrag(parseDroneHubDragData(event.active.data.current));
-  }, []);
+    if (enabled) setActiveDrag(parseDroneHubDragData(event.active.data.current));
+  }, [enabled]);
 
   const onDragEnd = React.useCallback((event: DragEndEvent) => {
     void event;
@@ -249,7 +250,7 @@ export function DroneHubDndProvider({ children }: { children: React.ReactNode })
     <DndContext
       sensors={sensors}
       collisionDetection={pointerWithin}
-      onDragStart={onDragStart}
+      onDragStart={enabled ? onDragStart : undefined}
       onDragCancel={clearActiveDrag}
       onDragEnd={onDragEnd}
     >

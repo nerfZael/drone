@@ -3,6 +3,7 @@ import { createReadStream, existsSync } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { URL } from 'node:url';
 
 import QRCode from 'qrcode';
@@ -79,6 +80,12 @@ export function sanitizeDroneSummary(raw: any): any {
     repoAttached,
     repoPath: repoAttached ? repoPath : '',
     repoBranch: typeof raw?.repoBranch === 'string' && raw.repoBranch.trim() ? raw.repoBranch.trim() : null,
+    repoSeedSource:
+      raw?.repoSeedSource === 'remote' ? 'remote' : raw?.repoSeedSource === 'host' ? 'host' : undefined,
+    repoSeedRemoteBranch:
+      typeof raw?.repoSeedRemoteBranch === 'string' && raw.repoSeedRemoteBranch.trim()
+        ? raw.repoSeedRemoteBranch.trim()
+        : null,
     cwd: undefined,
     containerPort: Number(raw?.containerPort ?? 7777) || 7777,
     hostPort: null,
@@ -100,6 +107,20 @@ function splitPathname(pathname: string): string[] {
   return pathname.split('/').filter(Boolean).map((part) => decodeURIComponent(part));
 }
 
+function repoReadRouteAllowed(parts: string[]): boolean {
+  if (parts.length < 5 || parts[0] !== 'api' || parts[1] !== 'drones' || parts[3] !== 'repo') return false;
+  if (parts.length === 5 && (parts[4] === 'changes' || parts[4] === 'source' || parts[4] === 'diff' || parts[4] === 'commits')) {
+    return true;
+  }
+  if (parts.length === 6 && parts[4] === 'pull' && (parts[5] === 'changes' || parts[5] === 'diff')) {
+    return true;
+  }
+  if (parts.length === 7 && parts[4] === 'commits' && (parts[6] === 'changes' || parts[6] === 'diff')) {
+    return true;
+  }
+  return false;
+}
+
 function contentTypeFor(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase();
   if (ext === '.html') return 'text/html; charset=utf-8';
@@ -119,6 +140,12 @@ function safeStaticPath(staticDir: string, pathname: string): string | null {
   const root = path.resolve(staticDir);
   if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) return null;
   return resolved;
+}
+
+export function shouldServeRemoteHtmlFallback(pathname: string): boolean {
+  const clean = decodeURIComponent(pathname.split('?')[0] ?? '/');
+  if (clean === '/' || clean === '/remote.html') return true;
+  return !path.posix.extname(clean);
 }
 
 async function fetchJsonFromHub<T>(opts: StartRemoteHubServerOptions, pathname: string): Promise<T> {
@@ -145,12 +172,20 @@ async function resolveContainerDrone(opts: StartRemoteHubServerOptions, droneId:
 function routeAllowed(method: string, pathname: string): boolean {
   const parts = splitPathname(pathname);
   if (method === 'GET' && pathname === '/api/drones') return true;
+  if (method === 'POST' && pathname === '/api/drones') return true;
+  if (method === 'GET' && pathname === '/api/drones/chat-events') return true;
+  if (method === 'GET' && pathname === '/api/repos') return true;
+  if (method === 'GET' && pathname === '/api/repos/branches') return true;
   if (parts.length < 3 || parts[0] !== 'api' || parts[1] !== 'drones') return false;
   if (method === 'GET' && parts.length === 4 && parts[3] === 'chats') return true;
+  if (method === 'POST' && parts.length === 4 && parts[3] === 'chats') return true;
+  if (method === 'POST' && parts.length === 4 && parts[3] === 'rename') return true;
+  if (method === 'GET' && parts.length === 5 && parts[3] === 'chats') return true;
   if (method === 'POST' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'prompt') return true;
   if (method === 'POST' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'stop') return true;
   if (method === 'GET' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'pending') return true;
   if (method === 'GET' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'transcript') return true;
+  if (method === 'GET' && repoReadRouteAllowed(parts)) return true;
   return false;
 }
 
@@ -162,7 +197,7 @@ async function proxyAllowedRequest(opts: StartRemoteHubServerOptions, req: http.
   }
 
   const parts = splitPathname(pathname);
-  if (parts[0] === 'api' && parts[1] === 'drones' && parts[2]) {
+  if (parts[0] === 'api' && parts[1] === 'drones' && parts[2] && pathname !== '/api/drones/chat-events') {
     const drone = await resolveContainerDrone(opts, parts[2]);
     if (!drone) {
       json(res, 404, { ok: false, error: 'unknown container drone' });
@@ -196,13 +231,21 @@ async function proxyAllowedRequest(opts: StartRemoteHubServerOptions, req: http.
     res.end();
     return;
   }
-  Readable.fromWeb(response.body as any).pipe(res);
+  try {
+    await pipeline(Readable.fromWeb(response.body as any), res);
+  } catch (error: any) {
+    if (!res.destroyed) res.destroy(error);
+  }
 }
 
 async function serveStatic(opts: StartRemoteHubServerOptions, res: http.ServerResponse, pathname: string): Promise<void> {
   const resolved = safeStaticPath(opts.staticDir, pathname);
   const fallback = path.join(opts.staticDir, 'remote.html');
-  const filePath = resolved && existsSync(resolved) ? resolved : fallback;
+  const filePath = resolved && existsSync(resolved) ? resolved : shouldServeRemoteHtmlFallback(pathname) ? fallback : null;
+  if (!filePath) {
+    json(res, 404, { ok: false, error: 'static asset not found' });
+    return;
+  }
   if (!existsSync(filePath)) {
     json(res, 503, {
       ok: false,
@@ -212,6 +255,12 @@ async function serveStatic(opts: StartRemoteHubServerOptions, res: http.ServerRe
   }
   res.statusCode = 200;
   res.setHeader('content-type', contentTypeFor(filePath));
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === '.html' || path.basename(filePath) === 'pwa-sw.js' || path.basename(filePath) === 'version.json') {
+    res.setHeader('cache-control', 'no-store');
+  } else if (pathname.startsWith('/assets/')) {
+    res.setHeader('cache-control', 'public, max-age=31536000, immutable');
+  }
   createReadStream(filePath).pipe(res);
 }
 
@@ -267,6 +316,27 @@ export async function startRemoteHubServer(opts: StartRemoteHubServerOptions): P
           url: pairingUrl,
           qrSvg,
           expiresAt: new Date(pairing.expiresAtMs).toISOString(),
+        });
+        return;
+      }
+
+      if (method === 'GET' && pathname.startsWith('/api/local/pairings/')) {
+        const authHeader = String(req.headers.authorization ?? '');
+        if (authHeader !== `Bearer ${opts.controlToken}`) {
+          json(res, 401, { ok: false, error: 'unauthorized' });
+          return;
+        }
+        const suffix = pathname.slice('/api/local/pairings/'.length);
+        if (!suffix.endsWith('/status')) {
+          json(res, 404, { ok: false, error: 'not found' });
+          return;
+        }
+        const token = decodeURIComponent(suffix.slice(0, -'/status'.length));
+        const status = auth.pairingStatus(token);
+        json(res, 200, {
+          ok: true,
+          active: status.active,
+          expiresAt: status.expiresAtMs ? new Date(status.expiresAtMs).toISOString() : null,
         });
         return;
       }

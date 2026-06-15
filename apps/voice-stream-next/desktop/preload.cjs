@@ -63,6 +63,11 @@ contextBridge.exposeInMainWorld('voiceStreamDesktop', {
     ipcRenderer.on('shortcut:pauseResume', listener);
     return () => ipcRenderer.removeListener('shortcut:pauseResume', listener);
   },
+  onAssistantRecordingShortcut: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('shortcut:assistantRecording', listener);
+    return () => ipcRenderer.removeListener('shortcut:assistantRecording', listener);
+  },
   onShortcutStatus: (callback) => {
     const listener = (_event, status) => callback(status);
     ipcRenderer.on('shortcut:status', listener);
