@@ -373,7 +373,9 @@ function TreeDropGuide({ placement }: { placement: SidebarGroupDropPlacement }) 
   return <SidebarReorderDropIndicator placement={placement} />;
 }
 
-const GroupedSidebarChatRow = React.memo(function GroupedSidebarChatRow({ drone, chatName, isOptimistic }: { drone: DroneSummary; chatName: string; isOptimistic: boolean }) {
+type GroupedSidebarChatRowProps = { drone: DroneSummary; chatName: string; isOptimistic: boolean };
+
+const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ drone, chatName, isOptimistic }: GroupedSidebarChatRowProps) {
   const activeDrag = useDroneHubActiveDrag();
   const {
     sidebarDensityMode,
@@ -407,11 +409,13 @@ const GroupedSidebarChatRow = React.memo(function GroupedSidebarChatRow({ drone,
     () => createSidebarChatDragData(drone.id, chatName, `${uiDroneName(drone.name)} / ${chatName}`),
     [chatName, drone.id, drone.name, uiDroneName],
   );
+  const chatDndDisabled = !sidebarDndEnabled || !chatDragData || movingDroneGroups || isOptimistic;
   const { attributes, listeners, isDragging, setNodeRef: setDragNodeRef } = useDraggable({
     id: `sidebar-grouped-chat:${drone.id}:${chatName}`,
     data: chatDragData ?? undefined,
-    disabled: !sidebarDndEnabled || !chatDragData || movingDroneGroups || isOptimistic,
+    disabled: chatDndDisabled,
   });
+  const chatDropDisabled = chatDndDisabled || activeDrag?.type !== 'sidebar-chat';
   const { setNodeRef: setDropNodeRef } = useDroppable({
     id: chatReorderDropId(drone.id, chatName),
     data: {
@@ -419,7 +423,7 @@ const GroupedSidebarChatRow = React.memo(function GroupedSidebarChatRow({ drone,
       droneId: drone.id,
       chatName,
     },
-    disabled: !sidebarDndEnabled || movingDroneGroups || isOptimistic || activeDrag?.type !== 'sidebar-chat',
+    disabled: chatDropDisabled,
   });
   const active = selectedDrone === drone.id && activeChatName === chatName;
   const selected = selectedSidebarNodeId === sidebarChatId;
@@ -464,14 +468,14 @@ const GroupedSidebarChatRow = React.memo(function GroupedSidebarChatRow({ drone,
   }
 
   return (
-    <div ref={setDropNodeRef} className={`flex flex-col gap-0.5 transition-[margin] duration-150 ${reorderPreviewClass}`}>
+    <div ref={chatDropDisabled ? undefined : setDropNodeRef} className={`flex flex-col gap-0.5 transition-[margin] duration-150 ${reorderPreviewClass}`}>
       <div className="relative flex items-stretch gap-1 group/chat-row">
         {dragOverChat?.key === `${drone.id}:${chatName}` ? <TreeDropGuide placement={dragOverChat.placement} /> : null}
         <button
-          ref={setDragNodeRef}
+          ref={chatDndDisabled ? undefined : setDragNodeRef}
           type="button"
-          {...(attributes as unknown as Record<string, unknown>)}
-          {...(listeners as unknown as Record<string, unknown>)}
+          {...(chatDndDisabled ? {} : attributes as unknown as Record<string, unknown>)}
+          {...(chatDndDisabled ? {} : listeners as unknown as Record<string, unknown>)}
           onClick={(event) => {
             event.stopPropagation();
             if (shouldSuppressClick()) return;
@@ -545,6 +549,76 @@ const GroupedSidebarChatRow = React.memo(function GroupedSidebarChatRow({ drone,
   );
 });
 
+const GroupedSidebarChatRowStatic = React.memo(function GroupedSidebarChatRowStatic({ drone, chatName }: GroupedSidebarChatRowProps) {
+  const {
+    sidebarDensityMode,
+    uiDroneName,
+    busyChatNodeIdSet,
+    unreadAgentMessageByChatNodeId,
+    selectedDrone,
+    activeChatName,
+    selectedSidebarNodeId,
+    setSelectedSidebarNodeId,
+    onSelectDroneChat,
+    shouldSuppressClick,
+    actionsEnabled = true,
+  } = useGroupedSidebarTreeContext();
+  const densityClasses = groupedSidebarDensityClasses(sidebarDensityMode);
+  const chatNodeId = createCanvasChatNodeId(drone.id, chatName);
+  const sidebarChatId = sidebarChatSidebarNodeId(drone.id, chatName);
+  const active = selectedDrone === drone.id && activeChatName === chatName;
+  const selected = selectedSidebarNodeId === sidebarChatId;
+  return (
+    <div className="flex flex-col gap-0.5">
+      <div className="relative flex items-stretch gap-1 group/chat-row">
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            if (shouldSuppressClick()) return;
+            setSelectedSidebarNodeId(sidebarChatId);
+            onSelectDroneChat(drone.id, chatName);
+          }}
+          className={`relative flex flex-1 items-center gap-1.5 rounded border text-left transition-colors ${densityClasses.chatRow} ${
+            selected
+              ? 'border-[rgba(255,255,255,.08)] bg-[rgba(255,255,255,.045)] text-[var(--fg)]'
+              : active
+                ? 'border-[rgba(255,255,255,.06)] bg-[rgba(255,255,255,.025)] text-[var(--fg-secondary)]'
+                : 'border-transparent text-[var(--muted)] hover:border-[rgba(255,255,255,.06)] hover:bg-[rgba(255,255,255,.03)] hover:text-[var(--fg-secondary)]'
+          }`}
+          title={`${uiDroneName(drone.name)} / ${chatName}`}
+        >
+          {active ? <span className="absolute left-0 top-1 bottom-1 w-[2px] rounded-full bg-[var(--accent)]" /> : null}
+          <span className="inline-flex flex-shrink-0 items-center">
+            <IconChatThread className={densityClasses.icon} />
+          </span>
+          {!active && !busyChatNodeIdSet.has(chatNodeId) && unreadAgentMessageByChatNodeId[chatNodeId] ? (
+            <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--yellow)]" />
+          ) : (
+            <span className="h-1.5 w-1.5 flex-shrink-0" />
+          )}
+          <span className="min-w-0 flex-1 truncate font-mono">{chatName}</span>
+          {busyChatNodeIdSet.has(chatNodeId) ? (
+            <span className="inline-flex items-center flex-shrink-0" title="Agent responding">
+              <TypingDots color="var(--yellow)" />
+            </span>
+          ) : null}
+        </button>
+        {actionsEnabled && chatName !== 'default' ? (
+          <span className={`${densityClasses.chatPlaceholderWidth} flex-shrink-0`} />
+        ) : (
+          <span className={`${densityClasses.chatPlaceholderWidth} flex-shrink-0`} />
+        )}
+      </div>
+    </div>
+  );
+});
+
+const GroupedSidebarChatRow = React.memo(function GroupedSidebarChatRow(props: GroupedSidebarChatRowProps) {
+  const { sidebarDndEnabled } = useGroupedSidebarTreeContext();
+  return sidebarDndEnabled ? <GroupedSidebarChatRowDnd {...props} /> : <GroupedSidebarChatRowStatic {...props} />;
+});
+
 const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node, groupPath, nested = false }: { node: SidebarTreeDroneNode; groupPath: string | null; nested?: boolean }) {
   const activeDrag = useDroneHubActiveDrag();
   const {
@@ -598,6 +672,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
     data: dragData,
     disabled: dragDisabled,
   });
+  const droneDropDisabled = !sidebarDndEnabled;
   const { setNodeRef: setDropNodeRef } = useDroppable({
     id: `sidebar-tree-node:${node.id}`,
     data: {
@@ -606,13 +681,14 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
       kind: 'drone',
       parentId: node.parentId,
     },
-    disabled: !sidebarDndEnabled,
+    disabled: droneDropDisabled,
   });
   const chats = orderSidebarEntries(
     normalizedDroneChats(drone),
     sidebarChatOrderByDrone[drone.id] ?? [],
     (chat) => chat,
   );
+  const chatTailDropDisabled = !sidebarDndEnabled || chats.length <= 1;
   const { setNodeRef: setChatTailDropNodeRef, isOver: isChatTailOver } = useDroppable({
     id: `sidebar-tree-drone-tail:${node.id}`,
     data: {
@@ -620,7 +696,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
       nodeId: node.id,
       parentId: node.parentId,
     },
-    disabled: !sidebarDndEnabled || chats.length <= 1,
+    disabled: chatTailDropDisabled,
   });
   const hasOnlyDefaultChat = chats.length === 1 && chats[0] === 'default';
   const showCreateChatEditor = chatEditor?.mode === 'create' && chatEditor.droneId === drone.id;
@@ -653,7 +729,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
 
   return (
     <div className={`flex flex-col gap-0.5 transition-[margin] duration-150 ${nested ? densityClasses.nestedDroneIndent : ''} ${reorderPreviewClass}`}>
-      <div ref={setDropNodeRef} data-sidebar-node-anchor-id={node.id} className="relative">
+      <div ref={droneDropDisabled ? undefined : setDropNodeRef} data-sidebar-node-anchor-id={node.id} className="relative">
         {dragOverTreeTarget?.nodeId === node.id &&
         (dragOverTreeTarget.placement === 'before' || dragOverTreeTarget.placement === 'after') ? (
           <TreeDropGuide placement={dragOverTreeTarget.placement} />
@@ -682,11 +758,11 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
               setSelectedSidebarNodeId(node.id);
               onSelectDroneCard(drone.id, rowOpts);
             }}
-            dragNodeRef={setDragNodeRef}
+            dragNodeRef={dragDisabled ? undefined : setDragNodeRef}
             draggable={!dragDisabled}
             dragging={isDragging}
-            dragAttributes={attributes as unknown as Record<string, unknown>}
-            dragListeners={listeners as unknown as Record<string, unknown>}
+            dragAttributes={dragDisabled ? undefined : attributes as unknown as Record<string, unknown>}
+            dragListeners={dragDisabled ? undefined : listeners as unknown as Record<string, unknown>}
             onCreateChat={actionsEnabled ? () => onOpenCreateDroneChat(drone) : undefined}
             onClone={actionsEnabled ? () => onOpenCloneModal(drone) : undefined}
             onRename={actionsEnabled ? () => onRenameDrone(drone.id) : undefined}
@@ -734,7 +810,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
         </div>
       </div>
       {chats.length > 1 || showCreateChatEditor ? (
-        <div ref={setChatTailDropNodeRef} className={`${densityClasses.chatBlockIndent} flex flex-col gap-0.5`}>
+        <div ref={chatTailDropDisabled ? undefined : setChatTailDropNodeRef} className={`${densityClasses.chatBlockIndent} flex flex-col gap-0.5`}>
           {showCreateChatEditor ? (
             <div className="flex flex-col gap-0.5">
               <div className={`flex items-center gap-1.5 rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] ${densityClasses.chatRow}`}>
@@ -796,17 +872,18 @@ function GroupedSidebarFolderBodyDropZone({
   className: string;
   children: React.ReactNode;
 }) {
+  const dropDisabled = disabled;
   const { setNodeRef } = useDroppable({
     id: `sidebar-tree-folder-body:${nodeId}`,
     data: {
       type: 'sidebar-tree-folder-body',
       nodeId,
     },
-    disabled,
+    disabled: dropDisabled,
   });
 
   return (
-    <div ref={setNodeRef} data-sidebar-folder-body={nodeId} className={className}>
+    <div ref={dropDisabled ? undefined : setNodeRef} data-sidebar-folder-body={nodeId} className={className}>
       {children}
     </div>
   );
@@ -866,6 +943,8 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
     data: groupedFolderDragData({ nodeId: node.id, folderPath, groupKind: node.groupKind, label: node.label }),
     disabled: !sidebarDndEnabled,
   });
+  const folderDndDisabled = !sidebarDndEnabled;
+  const folderDropDisabled = !sidebarDndEnabled || (isVirtualGroup ? !allowVirtualRepoReorderDrop : false);
   const { setNodeRef: setDropNodeRef } = useDroppable({
     id: `sidebar-tree-node:${node.id}`,
     data: {
@@ -874,14 +953,14 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
       kind: 'folder',
       parentId: node.parentId,
     },
-    disabled: !sidebarDndEnabled || (isVirtualGroup ? !allowVirtualRepoReorderDrop : false),
+    disabled: folderDropDisabled,
   });
   const setHeaderRef = React.useCallback(
     (element: HTMLDivElement | null) => {
-      setDragNodeRef(element);
-      setDropNodeRef(element);
+      if (!folderDndDisabled) setDragNodeRef(element);
+      if (!folderDropDisabled) setDropNodeRef(element);
     },
-    [setDragNodeRef, setDropNodeRef],
+    [folderDndDisabled, folderDropDisabled, setDragNodeRef, setDropNodeRef],
   );
   const intoState =
     dragOverFolderBodyId === node.id ||
@@ -960,8 +1039,8 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
               if (event.detail > 1) return;
               scheduleFolderSingleClick();
             }}
-            {...(attributes as unknown as Record<string, unknown>)}
-            {...(listeners as unknown as Record<string, unknown>)}
+            {...(folderDndDisabled ? {} : attributes as unknown as Record<string, unknown>)}
+            {...(folderDndDisabled ? {} : listeners as unknown as Record<string, unknown>)}
           >
             <div className="flex min-w-0 items-center gap-1.5">
               <IconFolder className={`flex-shrink-0 ${densityClasses.icon}`} />
@@ -1473,18 +1552,21 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
     [clearDragState, droneById, nodeTree, normalizeChatReorderTarget, normalizeTreeReorderTarget],
   );
 
-  useDndMonitor({
-    onDragStart: (event) => {
-      const active = parseDroneHubDragData(event.active.data.current);
-      if (active?.type === 'sidebar-drone') onPrepareDroneDragStart(active.droneId);
-    },
-    onDragMove: updateTreeDragState,
-    onDragOver: updateTreeDragState,
-    onDragCancel: () => {
-      suppressClicksUntilRef.current = Date.now() + 180;
-      clearDragState();
-    },
-    onDragEnd: (event) => {
+  const dndMonitorHandlers = React.useMemo(
+    () =>
+      props.sidebarDndEnabled
+        ? {
+            onDragStart: (event: DragEndEvent) => {
+              const active = parseDroneHubDragData(event.active.data.current);
+              if (active?.type === 'sidebar-drone') onPrepareDroneDragStart(active.droneId);
+            },
+            onDragMove: updateTreeDragState,
+            onDragOver: updateTreeDragState,
+            onDragCancel: () => {
+              suppressClicksUntilRef.current = Date.now() + 180;
+              clearDragState();
+            },
+            onDragEnd: (event: DragEndEvent) => {
       suppressClicksUntilRef.current = Date.now() + 180;
       const active = parseDroneHubDragData(event.active.data.current);
       const activeRaw = event.active.data.current as Record<string, unknown> | undefined;
@@ -1850,7 +1932,28 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
 
       clearDragState();
     },
-  });
+          }
+        : {},
+    [
+      clearDragState,
+      completeDroneTreeMove,
+      dragOverChat,
+      dragOverTreeTarget,
+      droneById,
+      moveFolder,
+      nodeTree,
+      normalizeChatReorderTarget,
+      normalizeTreeReorderTarget,
+      onPrepareDroneDragStart,
+      props,
+      setSidebarChatOrderByDrone,
+      setSidebarNodeOrderByParent,
+      sidebarChatOrderByDrone,
+      sidebarNodeOrderByParent,
+      updateTreeDragState,
+    ],
+  );
+  useDndMonitor(dndMonitorHandlers);
 
   const contextValue = React.useMemo<GroupedSidebarTreeContextValue>(
     () => ({

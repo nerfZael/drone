@@ -7,6 +7,9 @@ import { useMobileViewport } from '../droneHub/app/use-mobile-viewport';
 import { ChatInput, ChatTranscriptFrame, EmptyState, PendingTranscriptTurn, TranscriptTurn, type ChatSendPayload, type DroneHubTask, type DroneHubTaskSpawnMode } from '../droneHub/chat';
 import { IconBot } from '../droneHub/chat/icons';
 import { RemoteMobileSidebarDrawer } from './RemoteMobileSidebarDrawer';
+import { RemoteMobileToolDrawer } from './RemoteMobileToolDrawer';
+import { RemoteCreateDroneModal } from './RemoteCreateDroneModal';
+import { RemoteHeaderActions } from './RemoteHeaderActions';
 import { RemoteHubSidebar } from './RemoteHubSidebar';
 import { REMOTE_HUB_CAPABILITIES } from './remote-capabilities';
 import { useRemoteHubModel } from './useRemoteHubModel';
@@ -28,6 +31,13 @@ function isMobileSidebarOpenSwipe(start: TouchPoint | null, end: TouchPoint): bo
   const deltaX = end.x - start.x;
   const deltaY = Math.abs(end.y - start.y);
   return deltaX >= MOBILE_SIDEBAR_SWIPE_DISTANCE_PX && deltaY <= MOBILE_SIDEBAR_SWIPE_VERTICAL_TOLERANCE_PX;
+}
+
+function isMobileToolOpenSwipe(start: TouchPoint | null, end: TouchPoint): boolean {
+  if (!start) return false;
+  const deltaX = end.x - start.x;
+  const deltaY = Math.abs(end.y - start.y);
+  return deltaX <= -MOBILE_SIDEBAR_SWIPE_DISTANCE_PX && deltaY <= MOBILE_SIDEBAR_SWIPE_VERTICAL_TOLERANCE_PX;
 }
 
 function isSwipeIgnoredTarget(target: EventTarget | null): boolean {
@@ -54,18 +64,27 @@ function PairingRequired() {
 }
 
 export function RemoteDroneHubApp() {
-  const model = useRemoteHubModel();
   const isMobileViewport = useMobileViewport();
   const setSidebarCollapsed = useDroneHubUiStore((state) => state.setSidebarCollapsed);
   const [mobileSidebarOpen, setMobileSidebarOpen] = React.useState(false);
+  const [mobileToolOpen, setMobileToolOpen] = React.useState(false);
+  const [createDroneOpen, setCreateDroneOpen] = React.useState(false);
+  const model = useRemoteHubModel({ pauseChatPolling: isMobileViewport && (mobileSidebarOpen || mobileToolOpen) });
   const mobileSidebarSwipeStartRef = React.useRef<TouchPoint | null>(null);
   const setRemoteMobileSidebarOpen = React.useCallback(
     (open: boolean) => {
-      if (open) setSidebarCollapsed(false);
+      if (open) {
+        setSidebarCollapsed(false);
+        setMobileToolOpen(false);
+      }
       setMobileSidebarOpen(open);
     },
     [setSidebarCollapsed],
   );
+  const setRemoteMobileToolOpen = React.useCallback((open: boolean) => {
+    if (open) setMobileSidebarOpen(false);
+    setMobileToolOpen(open);
+  }, []);
   const transcriptMessageId = React.useCallback((turn: any) => String(turn?.id ?? `${turn?.turn ?? ''}:${turn?.at ?? ''}`), []);
   const noopCreateJobs = React.useCallback(() => {}, []);
   const noopSpawnTask = React.useCallback(async (_mode: DroneHubTaskSpawnMode, _task: DroneHubTask) => {
@@ -83,30 +102,46 @@ export function RemoteDroneHubApp() {
     return Boolean(await model.sendPrompt(payload));
   }, [model]);
   const renderRemoteToolPane = React.useCallback(() => null, []);
+  const openCreateDrone = React.useCallback(() => {
+    setCreateDroneOpen(true);
+    setRemoteMobileSidebarOpen(false);
+    setRemoteMobileToolOpen(false);
+  }, [setRemoteMobileSidebarOpen, setRemoteMobileToolOpen]);
+  const handleCreatedDrone = React.useCallback(
+    (droneId: string) => {
+      void model.reloadDrones(droneId);
+    },
+    [model],
+  );
   const beginMobileOpenSwipe = React.useCallback(
     (event: React.TouchEvent) => {
-      if (!isMobileViewport || mobileSidebarOpen || isSwipeIgnoredTarget(event.target)) {
+      if (!isMobileViewport || mobileSidebarOpen || mobileToolOpen || isSwipeIgnoredTarget(event.target)) {
         mobileSidebarSwipeStartRef.current = null;
         return;
       }
       const touch = event.touches[0];
       mobileSidebarSwipeStartRef.current = touch ? touchPoint(touch) : null;
     },
-    [isMobileViewport, mobileSidebarOpen],
+    [isMobileViewport, mobileSidebarOpen, mobileToolOpen],
   );
   const endMobileOpenSwipe = React.useCallback(
     (event: React.TouchEvent) => {
-      if (!isMobileViewport || mobileSidebarOpen) {
+      if (!isMobileViewport || mobileSidebarOpen || mobileToolOpen) {
         mobileSidebarSwipeStartRef.current = null;
         return;
       }
       const touch = event.changedTouches[0];
-      if (touch && isMobileSidebarOpenSwipe(mobileSidebarSwipeStartRef.current, touchPoint(touch))) {
-        setRemoteMobileSidebarOpen(true);
+      if (touch) {
+        const end = touchPoint(touch);
+        if (isMobileSidebarOpenSwipe(mobileSidebarSwipeStartRef.current, end)) {
+          setRemoteMobileSidebarOpen(true);
+        } else if (model.selectedDrone && isMobileToolOpenSwipe(mobileSidebarSwipeStartRef.current, end)) {
+          setRemoteMobileToolOpen(true);
+        }
       }
       mobileSidebarSwipeStartRef.current = null;
     },
-    [isMobileViewport, mobileSidebarOpen, setRemoteMobileSidebarOpen],
+    [isMobileViewport, mobileSidebarOpen, mobileToolOpen, model.selectedDrone, setRemoteMobileSidebarOpen, setRemoteMobileToolOpen],
   );
 
   const chatContent = (
@@ -120,9 +155,13 @@ export function RemoteDroneHubApp() {
                 <div className="text-[11px] text-[var(--muted)]">Container-only remote surface</div>
               </div>
             </div>
-            <button className="rounded border border-[var(--border-subtle)] px-2 py-1 text-[11px] text-[var(--muted)] hover:bg-[var(--hover)]" onClick={() => void model.logout()}>
-              Log out
-            </button>
+            <RemoteHeaderActions
+              selectedDrone={model.selectedDrone}
+              onCreateChat={model.createChat}
+              onCloneDrone={model.cloneDrone}
+              onRenameDrone={model.renameDrone}
+              onLogout={model.logout}
+            />
           </div>
         </div>
       </DroneWorkspaceHeaderFrame>
@@ -210,8 +249,8 @@ export function RemoteDroneHubApp() {
   return (
     <main
       className="fixed inset-0 flex bg-[var(--panel)] text-[var(--fg)]"
-      onTouchStart={beginMobileOpenSwipe}
-      onTouchEnd={endMobileOpenSwipe}
+      onTouchStart={mobileSidebarOpen || mobileToolOpen ? undefined : beginMobileOpenSwipe}
+      onTouchEnd={mobileSidebarOpen || mobileToolOpen ? undefined : endMobileOpenSwipe}
     >
       <RemoteMobileSidebarDrawer
         open={mobileSidebarOpen}
@@ -221,6 +260,12 @@ export function RemoteDroneHubApp() {
         onOpenChange={setRemoteMobileSidebarOpen}
         onSelectDrone={model.setSelectedDroneId}
         onSelectChat={model.setSelectedChat}
+        onOpenCreateDrone={openCreateDrone}
+      />
+      <RemoteMobileToolDrawer
+        open={mobileToolOpen}
+        drone={model.selectedDrone}
+        onOpenChange={setRemoteMobileToolOpen}
       />
 
       <div className="hidden md:contents">
@@ -230,6 +275,7 @@ export function RemoteDroneHubApp() {
           activeChatName={model.selectedChat}
           onSelectDrone={model.setSelectedDroneId}
           onSelectChat={model.setSelectedChat}
+          onOpenCreateDrone={openCreateDrone}
         />
       </div>
 
@@ -252,6 +298,14 @@ export function RemoteDroneHubApp() {
           chatContent
         )}
       </section>
+      <RemoteCreateDroneModal
+        open={createDroneOpen}
+        drones={model.drones}
+        selectedDrone={model.selectedDrone}
+        selectedChat={model.selectedChat}
+        onClose={() => setCreateDroneOpen(false)}
+        onCreated={handleCreatedDrone}
+      />
       <FrontendUpdatePrompt />
     </main>
   );

@@ -61,7 +61,7 @@ export function installDirectApiFetch(): void {
   const currentFetch = window.fetch.bind(window);
   if ((window.fetch as any).__droneHubDirectApiInstalled) return;
 
-  const patchedFetch: typeof window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+  const patchedFetch = ((input: RequestInfo | URL, init?: RequestInit) => {
     if (input instanceof Request) {
       const rewritten = rewriteApiUrl(input.url);
       if (!rewritten) return currentFetch(input, init);
@@ -84,7 +84,7 @@ export function installDirectApiFetch(): void {
       mode: 'cors',
       credentials: 'omit',
     });
-  };
+  }) as typeof window.fetch;
   (patchedFetch as any).__droneHubDirectApiInstalled = true;
   window.fetch = patchedFetch;
 }

@@ -61,7 +61,7 @@ import {
   writeRemoteHubState,
 } from './hub/remote-state';
 import { startRemoteHubServer } from './hub/remote-server';
-import { createRemoteHubPairing, redactRemoteHubState, startRemoteHubDetached, stopRemoteHubDetached } from './hub/remote-control';
+import { createRemoteHubPairing, ensureDesiredRemoteHubDetached, redactRemoteHubState, startRemoteHubDetached, stopRemoteHubDetached } from './hub/remote-control';
 import { startDroneHubApiServer } from './hub/server';
 import { importTranscriptTurnsFromRegistry } from './hub/transcript-store';
 import {
@@ -2016,6 +2016,16 @@ async function hubRun(options: any) {
     launchEnv: captureHubLaunchEnvSnapshot(),
   });
   await writeHubApiToken(apiToken);
+
+  void ensureDesiredRemoteHubDetached({ cliFilename: __filename, force: true }).then((result) => {
+    if (result.error) {
+      // eslint-disable-next-line no-console
+      console.warn(`Remote Hub auto-start failed: ${result.error}`);
+    }
+  }).catch((error: any) => {
+    // eslint-disable-next-line no-console
+    console.warn(`Remote Hub auto-start failed: ${error?.message ?? String(error)}`);
+  });
 
   // Start the drone-hub Vite dev server and proxy /api → Hub API server.
   const hubDir = path.join(repoRoot, 'apps', 'drone-hub');

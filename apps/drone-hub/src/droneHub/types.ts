@@ -29,6 +29,8 @@ export type DroneSummary = {
   repoAttached?: boolean;
   repoPath: string;
   repoBranch?: string | null;
+  repoSeedSource?: 'host' | 'remote';
+  repoSeedRemoteBranch?: string | null;
   cwd?: string;
   containerPort: number;
   hostPort: number | null;

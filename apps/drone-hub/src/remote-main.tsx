@@ -12,7 +12,7 @@ if (!container) throw new Error('Root container not found');
 
 createRoot(container).render(
   <React.StrictMode>
-    <DroneHubDndProvider>
+    <DroneHubDndProvider enabled={false}>
       <RemoteDroneHubApp />
     </DroneHubDndProvider>
   </React.StrictMode>,

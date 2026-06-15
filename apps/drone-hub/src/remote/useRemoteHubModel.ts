@@ -1,4 +1,6 @@
 import React from 'react';
+import { droneChatEventMatches } from '../droneHub/app/chat-api';
+import { subscribeDroneChatEvents } from '../droneHub/app/chat-events';
 import type { ChatSendPayload } from '../droneHub/chat';
 import type { DroneSummary, PendingPrompt, TranscriptItem } from '../droneHub/types';
 import {
@@ -16,11 +18,16 @@ type RemoteChatState = {
   pending: PendingPrompt[];
 };
 
+type UseRemoteHubModelOptions = {
+  pauseChatPolling?: boolean;
+};
+
 function remoteChatStateKey(droneId: string, chatName: string): string {
   return `${droneId}\u0000${chatName}`;
 }
 
-export function useRemoteHubModel() {
+export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
+  const pauseChatPolling = options.pauseChatPolling === true;
   const [session, setSession] = React.useState<RemoteSession | null>(null);
   const [drones, setDrones] = React.useState<DroneSummary[]>([]);
   const [selectedDroneId, setSelectedDroneId] = React.useState<string | null>(null);
@@ -33,6 +40,8 @@ export function useRemoteHubModel() {
   const [chatStateLoading, setChatStateLoading] = React.useState(false);
   const [sending, setSending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [chatEventsConnected, setChatEventsConnected] = React.useState(false);
+  const [chatEventsNonce, setChatEventsNonce] = React.useState(0);
   const activeChatStateKeyRef = React.useRef<string | null>(null);
   const loadedChatStateKeyRef = React.useRef<string | null>(null);
 
@@ -53,6 +62,7 @@ export function useRemoteHubModel() {
     setTranscripts([]);
     setPending([]);
     setChatStateLoading(false);
+    setChatEventsConnected(false);
     activeChatStateKeyRef.current = null;
     loadedChatStateKeyRef.current = null;
   }, []);
@@ -78,16 +88,32 @@ export function useRemoteHubModel() {
     setDrones(nextDrones);
     setSelectedDroneId((current) => (current && nextDrones.some((drone) => drone.id === current) ? current : nextDrones[0]?.id ?? null));
   }, []);
+  const reloadDrones = React.useCallback(async (preferredDroneId?: string | null) => {
+    const data = await remoteRequestJson<DroneListResponse>('/api/drones');
+    const nextDrones = Array.isArray(data.drones) ? data.drones : [];
+    const preferred = String(preferredDroneId ?? '').trim();
+    setDrones(nextDrones);
+    setSelectedDroneId((current) => {
+      if (preferred && nextDrones.some((drone) => drone.id === preferred)) return preferred;
+      return current && nextDrones.some((drone) => drone.id === current) ? current : nextDrones[0]?.id ?? null;
+    });
+  }, []);
 
   const fetchChats = React.useCallback(async (droneId: string) => {
     const data = await remoteRequestJson<ChatListResponse>(`/api/drones/${encodeURIComponent(droneId)}/chats`);
     return (Array.isArray(data.chats) ? data.chats : []).map((item) => String(item.chat ?? item.name ?? '')).filter(Boolean);
   }, []);
 
-  const fetchChatState = React.useCallback(async (droneId: string, chatName: string): Promise<RemoteChatState> => {
+  const fetchChatState = React.useCallback(async (droneId: string, chatName: string, signal?: AbortSignal): Promise<RemoteChatState> => {
     const [transcriptData, pendingData] = await Promise.all([
-      remoteRequestJson<TranscriptResponse>(`/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/transcript?turn=all&tail=50`),
-      remoteRequestJson<PendingResponse>(`/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/pending`),
+      remoteRequestJson<TranscriptResponse>(
+        `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/transcript?turn=all&tail=50`,
+        signal ? { signal } : undefined,
+      ),
+      remoteRequestJson<PendingResponse>(
+        `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/pending`,
+        signal ? { signal } : undefined,
+      ),
     ]);
     return {
       transcripts: Array.isArray(transcriptData.transcripts) ? transcriptData.transcripts : [],
@@ -157,13 +183,36 @@ export function useRemoteHubModel() {
     setTranscripts([]);
     setPending([]);
     setChatStateLoading(false);
+    setChatEventsConnected(false);
     loadedChatStateKeyRef.current = null;
   }, [authenticated, effectiveDroneId]);
 
   React.useEffect(() => {
     if (!authenticated || !effectiveDroneId || !selectedChat) return;
+    if (pauseChatPolling) return;
+    let mounted = true;
+    const unsubscribe = subscribeDroneChatEvents({
+      onConnectedChange: (connected) => {
+        if (mounted) setChatEventsConnected(connected);
+      },
+      onDelta: (data) => {
+        if (!droneChatEventMatches(data, effectiveDroneId, selectedChat)) return;
+        setChatEventsNonce((value) => value + 1);
+      },
+    });
+    return () => {
+      mounted = false;
+      setChatEventsConnected(false);
+      unsubscribe();
+    };
+  }, [authenticated, effectiveDroneId, pauseChatPolling, selectedChat]);
+
+  React.useEffect(() => {
+    if (!authenticated || !effectiveDroneId || !selectedChat) return;
+    if (pauseChatPolling) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    const controller = new AbortController();
     const droneId = effectiveDroneId;
     const chatName = selectedChat;
     const key = remoteChatStateKey(droneId, chatName);
@@ -172,20 +221,35 @@ export function useRemoteHubModel() {
     }
     const tick = async () => {
       try {
-        const next = await fetchChatState(droneId, chatName);
+        const next = await fetchChatState(droneId, chatName, controller.signal);
         if (!cancelled && applyChatState(droneId, chatName, next)) setError(null);
       } catch (err: any) {
+        if (err?.name === 'AbortError') return;
         if (!cancelled) setError(errorMessage(err));
       } finally {
-        if (!cancelled) timer = setTimeout(tick, document.visibilityState === 'hidden' ? 8000 : 2500);
+        if (!cancelled) {
+          const intervalMs = document.visibilityState === 'hidden' ? 60_000 : chatEventsConnected ? 60_000 : 30_000;
+          timer = setTimeout(tick, intervalMs);
+        }
       }
     };
     void tick();
     return () => {
       cancelled = true;
+      controller.abort();
       if (timer) clearTimeout(timer);
     };
-  }, [applyChatState, authenticated, effectiveDroneId, errorMessage, fetchChatState, selectedChat]);
+  }, [
+    applyChatState,
+    authenticated,
+    chatEventsConnected,
+    chatEventsNonce,
+    effectiveDroneId,
+    errorMessage,
+    fetchChatState,
+    pauseChatPolling,
+    selectedChat,
+  ]);
 
   const sendPrompt = React.useCallback(async (payload?: ChatSendPayload) => {
     const prompt = String(payload?.prompt ?? draft).trim();
@@ -222,6 +286,69 @@ export function useRemoteHubModel() {
     }
   }, [effectiveDroneId, errorMessage, loadChatState, selectedChat]);
 
+  const createChat = React.useCallback(async (chatNameRaw: string) => {
+    const chatName = String(chatNameRaw ?? '').trim();
+    if (!effectiveDroneId || !chatName) return false;
+    try {
+      await remoteRequestJson(`/api/drones/${encodeURIComponent(effectiveDroneId)}/chats`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: chatName }),
+      });
+      const nextChats = await fetchChats(effectiveDroneId);
+      setChats(nextChats.length > 0 ? nextChats : ['default']);
+      setSelectedChat(chatName);
+      setError(null);
+      return true;
+    } catch (err: any) {
+      setError(errorMessage(err));
+      return false;
+    }
+  }, [effectiveDroneId, errorMessage, fetchChats]);
+
+  const renameDrone = React.useCallback(async (newNameRaw: string) => {
+    const newName = String(newNameRaw ?? '').trim();
+    if (!effectiveDroneId || !newName) return false;
+    try {
+      await remoteRequestJson(`/api/drones/${encodeURIComponent(effectiveDroneId)}/rename`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ newName }),
+      });
+      await reloadDrones(effectiveDroneId);
+      setError(null);
+      return true;
+    } catch (err: any) {
+      setError(errorMessage(err));
+      return false;
+    }
+  }, [effectiveDroneId, errorMessage, reloadDrones]);
+
+  const cloneDrone = React.useCallback(async (cloneNameRaw: string) => {
+    const cloneName = String(cloneNameRaw ?? '').trim();
+    if (!effectiveDroneId || !selectedDrone || !cloneName) return false;
+    try {
+      const response = await remoteRequestJson<{ ok: true; id: string }>('/api/drones', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: cloneName,
+          runtime: 'container',
+          cloneFrom: effectiveDroneId,
+          cloneChats: true,
+          persistVolume: selectedDrone.persistVolume !== false,
+          group: String(selectedDrone.group ?? '').trim(),
+        }),
+      });
+      await reloadDrones(String(response.id ?? '').trim());
+      setError(null);
+      return true;
+    } catch (err: any) {
+      setError(errorMessage(err));
+      return false;
+    }
+  }, [effectiveDroneId, errorMessage, reloadDrones, selectedDrone]);
+
   const logout = React.useCallback(async () => {
     await remoteRequestJson('/api/remote/logout', { method: 'POST' }).catch(() => {});
     markUnauthenticated();
@@ -247,6 +374,10 @@ export function useRemoteHubModel() {
     error,
     sendPrompt,
     stopChat,
+    createChat,
+    renameDrone,
+    cloneDrone,
     logout,
+    reloadDrones,
   };
 }

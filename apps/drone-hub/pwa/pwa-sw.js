@@ -1,4 +1,4 @@
-const DRONE_HUB_CACHE = 'drone-hub-shell-v1';
+const DRONE_HUB_CACHE = 'drone-hub-shell-v2';
 const SHELL_ASSETS = [
   '/',
   '/index.html',

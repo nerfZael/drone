@@ -182,7 +182,7 @@ import { isHubApiAuthorized, isHubApiAuthorizedForWebSocket, rejectWebSocketUpgr
 import { bashQuote, encodeRemotePath, hexEncodeUtf8, normalizeContainerPath, parseBoolParam, shellQuoteIfNeeded } from './hub-format';
 import { readJsonBody, readRawBody, withCors } from './hub-http';
 import { normalizeRemotePublicUrl, pidIsRunning as remotePidIsRunning, readRemoteHubState } from './remote-state';
-import { createRemoteHubPairing, redactRemoteHubState, startRemoteHubDetached, stopRemoteHubDetached } from './remote-control';
+import { createRemoteHubPairing, ensureDesiredRemoteHubDetached, getRemoteHubPairingStatus, redactRemoteHubState, startRemoteHubDetached, startRemoteNgrokTunnel, stopRemoteHubDetached } from './remote-control';
 import { GROQ_TRANSCRIPTION_MAX_BYTES, transcribeAudioWithGroq } from './groq-transcription';
 import { buildGroqTtsConfig, synthesizeTextWavWithGroq } from './groq-tts';
 import { DesktopVoiceService } from './desktop-voice-service';
@@ -13636,12 +13636,16 @@ export async function startDroneHubApiServer(opts: {
       }
 
       if (pathname === '/api/remote-access/status' && method === 'GET') {
-        const remoteState = await readRemoteHubState();
-        const running = Boolean(remoteState && remotePidIsRunning(remoteState.pid));
+        const ensured = await ensureDesiredRemoteHubDetached({ cliFilename: process.argv[1] });
+        const remoteState = ensured.state ? null : await readRemoteHubState();
+        const running = Boolean(ensured.state || (remoteState && remotePidIsRunning(remoteState.pid)));
         json(res, 200, {
           ok: true,
           running,
-          state: running && remoteState ? redactRemoteHubState(remoteState) : null,
+          desired: ensured.desired === true,
+          ensuring: ensured.started === true,
+          error: ensured.error ?? null,
+          state: ensured.state ?? (running && remoteState ? redactRemoteHubState(remoteState) : null),
         });
         return;
       }
@@ -13687,6 +13691,17 @@ export async function startDroneHubApiServer(opts: {
         return;
       }
 
+      if (pathname === '/api/remote-access/ngrok/start' && method === 'POST') {
+        try {
+          const body = await readJsonBody(req);
+          const result = await startRemoteNgrokTunnel(body?.port ?? 8790);
+          json(res, 200, result);
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+        }
+        return;
+      }
+
       if (pathname === '/api/remote-access/start' && method === 'POST') {
         try {
           const body = await readJsonBody(req);
@@ -13722,6 +13737,21 @@ export async function startDroneHubApiServer(opts: {
         }
         try {
           json(res, 200, await createRemoteHubPairing(remoteState));
+        } catch (e: any) {
+          json(res, 502, { ok: false, error: e?.message ?? String(e) });
+        }
+        return;
+      }
+
+      if (pathname === '/api/remote-access/pairing-status' && method === 'POST') {
+        const remoteState = await readRemoteHubState();
+        if (!remoteState || !remotePidIsRunning(remoteState.pid)) {
+          json(res, 409, { ok: false, error: 'remote Hub is not running' });
+          return;
+        }
+        try {
+          const body = await readJsonBody(req);
+          json(res, 200, await getRemoteHubPairingStatus(remoteState, body?.token));
         } catch (e: any) {
           json(res, 502, { ok: false, error: e?.message ?? String(e) });
         }

@@ -2,14 +2,44 @@ import React from 'react';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { isUngroupedGroupName } from '../../domain';
 import type { DroneSummary, RepoSummary } from '../types';
-import { dropdownMenuItemBaseClass, dropdownPanelBaseClass, useDropdownDismiss } from '../../ui/dropdown';
-import { IconAutoMinimize, IconBoard, IconChevron, IconColumns, IconDrone, IconEye, IconEyeOff, IconFolder, IconList, IconMore, IconPencil, IconPlus, IconPlusDouble, IconSettings, IconSidebarCollapse, IconSidebarExpand, IconSpinner, IconTrash, IconTreeView, SkeletonLine } from './icons';
+import { DroneCard } from '../overview';
+import {
+  dropdownMenuItemBaseClass,
+  dropdownPanelBaseClass,
+  useDropdownDismiss,
+} from '../../ui/dropdown';
+import {
+  IconAutoMinimize,
+  IconBoard,
+  IconChatThread,
+  IconChevron,
+  IconColumns,
+  IconDrone,
+  IconEye,
+  IconEyeOff,
+  IconFolder,
+  IconList,
+  IconMore,
+  IconPencil,
+  IconPlus,
+  IconPlusDouble,
+  IconRemote,
+  IconSettings,
+  IconSidebarCollapse,
+  IconSidebarExpand,
+  IconSpinner,
+  IconTrash,
+  IconTreeView,
+  SkeletonLine,
+} from './icons';
 import { SidebarDroneTreeList, type SidebarDroneTreeListSharedProps } from './SidebarDroneTreeList';
 import { GroupedSidebarTree } from './GroupedSidebarTree';
+import { createCanvasChatNodeId } from './app-config';
 import { SidebarReorderDropIndicator } from './sidebar-reorder-ui';
 import { buildSidebarDroneTree } from './sidebar-drone-tree';
 import { useDroneSidebarUiState } from './use-drone-hub-ui-store';
 import {
+  orderSidebarEntries,
   orderSidebarGroups,
   sidebarGroupOrderToken,
   type SidebarGroupDropPlacement,
@@ -21,22 +51,33 @@ import {
   sidebarFolderDisplayLabel,
   type SidebarFolderNode,
 } from './sidebar-folder-tree';
-import { buildSidebarNodeTree } from './sidebar-node-tree';
+import {
+  buildSidebarNodeTree,
+  type SidebarNodeTreeModel,
+  type SidebarTreeDroneNode,
+  type SidebarTreeFolderNode,
+  type SidebarTreeNode,
+} from './sidebar-node-tree';
 import {
   groupSidebarRepoScopedGroupsByRepoGroup,
   removeSidebarRepoScopedGroupMapKeysByPrefix,
   rewriteSidebarRepoScopedGroupMapKeysByPrefix,
 } from './sidebar-repo-scoped-groups';
 import {
+  SIDEBAR_ROOT_PARENT_ID,
   sidebarChatSidebarNodeId,
   sidebarDroneNodeId,
   sidebarFolderNodeId,
 } from './sidebar-node-order';
-import { useDroneHubActiveDrag, type SidebarDragGroupRef, type SidebarGroupDragData } from './drone-hub-dnd';
+import {
+  useDroneHubActiveDrag,
+  type SidebarDragGroupRef,
+  type SidebarGroupDragData,
+} from './drone-hub-dnd';
 import { SIDEBAR_VISIBLE_MULTI_CHAT_GROUP, type SidebarGroup } from './use-sidebar-view-model';
 import { useSidebarOptimisticGroups } from './use-sidebar-optimistic-groups';
 import type { MoveDronesToGroupResult } from './use-group-management';
-import type { SidebarDensityMode } from './settings-types';
+import type { SidebarDensityMode, SidebarGroupingMode } from './settings-types';
 import { useSidebarReadModel } from './use-sidebar-read-model';
 import {
   useSidebarInteractions,
@@ -63,6 +104,11 @@ export type DroneSidebarCapabilities = {
   collapseControl: boolean;
   collapsedRailActions: boolean;
 };
+export type DroneSidebarReadOnlyMode =
+  | 'read-only'
+  | 'read-only-chats'
+  | 'static-tree'
+  | 'grouped-tree';
 const DEFAULT_DRONE_SIDEBAR_CAPABILITIES: DroneSidebarCapabilities = {
   actions: true,
   createDrones: true,
@@ -94,10 +140,16 @@ type SidebarIconButtonProps = {
   tabIndex?: number;
 };
 
-function stepSidebarDensityMode(current: SidebarDensityMode, direction: -1 | 1): SidebarDensityMode {
+function stepSidebarDensityMode(
+  current: SidebarDensityMode,
+  direction: -1 | 1,
+): SidebarDensityMode {
   const currentIndex = SIDEBAR_DENSITY_MODE_ORDER.indexOf(current);
   const safeIndex = currentIndex >= 0 ? currentIndex : 1;
-  const nextIndex = Math.max(0, Math.min(SIDEBAR_DENSITY_MODE_ORDER.length - 1, safeIndex + direction));
+  const nextIndex = Math.max(
+    0,
+    Math.min(SIDEBAR_DENSITY_MODE_ORDER.length - 1, safeIndex + direction),
+  );
   return SIDEBAR_DENSITY_MODE_ORDER[nextIndex] ?? 'default';
 }
 
@@ -135,6 +187,378 @@ type DraftSidebarPlaceholder = {
 
 const DRAFT_SIDEBAR_PLACEHOLDER_ID = '__draft-sidebar-placeholder__';
 
+function readOnlyDroneChats(drone: DroneSummary): string[] {
+  const chats = Array.isArray(drone?.chats)
+    ? drone.chats.map((item) => String(item ?? '').trim()).filter(Boolean)
+    : [];
+  return chats.length > 0 ? chats : ['default'];
+}
+
+function ReadOnlySidebarGroups({
+  sidebarGroups,
+  sidebarDensityMode,
+  selectedDrone,
+  activeChatName,
+  showAllChats,
+  collapsedGroups,
+  uiDroneName,
+  onSelectDroneCard,
+  onSelectDroneChat,
+  onToggleGroupCollapsed,
+}: {
+  sidebarGroups: SidebarGroup[];
+  sidebarDensityMode: SidebarDensityMode;
+  selectedDrone: string | null;
+  activeChatName: string;
+  showAllChats: boolean;
+  collapsedGroups: Record<string, boolean>;
+  uiDroneName: (nameRaw: string) => string;
+  onSelectDroneCard: (droneId: string, opts?: { toggle?: boolean; range?: boolean }) => void;
+  onSelectDroneChat: (droneId: string, chatName: string) => void;
+  onToggleGroupCollapsed: (group: string) => void;
+}) {
+  const lastToggleRef = React.useRef<{ groupKey: string; timestamp: number } | null>(null);
+  const toggleGroupCollapsed = React.useCallback(
+    (groupKey: string) => {
+      const now = window.performance.now();
+      const lastToggle = lastToggleRef.current;
+      if (lastToggle?.groupKey === groupKey && now - lastToggle.timestamp < 350) return;
+      lastToggleRef.current = { groupKey, timestamp: now };
+      onToggleGroupCollapsed(groupKey);
+    },
+    [onToggleGroupCollapsed],
+  );
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      {sidebarGroups.map((group) => {
+        const groupKey = String(group.group ?? '').trim();
+        const collapsed = Boolean(groupKey && collapsedGroups[groupKey]);
+        return (
+          <section key={`${group.kind}:${group.group}`} className="flex flex-col gap-0.5">
+            <button
+              type="button"
+              className="relative flex min-h-8 w-full items-center gap-1 rounded-md border border-transparent px-1.5 pr-2 text-left"
+              onClick={() => {
+                if (groupKey) toggleGroupCollapsed(groupKey);
+              }}
+              aria-expanded={!collapsed}
+              title={group.group}
+            >
+              <IconFolder className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted-dim)] opacity-80" />
+              <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-[var(--fg-secondary)]">
+                {group.label}
+              </span>
+              <span className="flex-shrink-0 text-[10px] font-mono text-[var(--muted-dim)]">
+                {group.items.length}
+              </span>
+            </button>
+            {!collapsed ? (
+              <div className="flex flex-col gap-0.5">
+                {group.items.map((drone) => {
+                  const droneId = String(drone?.id ?? '').trim();
+                  const chats = readOnlyDroneChats(drone);
+                  const selected = droneId === selectedDrone;
+                  const busy =
+                    Boolean(drone?.busy) ||
+                    (Array.isArray(drone?.busyChats) && drone.busyChats.length > 0);
+                  const displayName = uiDroneName(drone.name) || drone.name || droneId;
+                  const hasOnlyDefaultChat = chats.length === 1 && chats[0] === 'default';
+                  const showChatRows = chats.length > 1 && (showAllChats || selected);
+                  return (
+                    <div key={droneId || displayName} className="flex flex-col gap-0.5">
+                      <DroneCard
+                        drone={drone}
+                        density={sidebarDensityMode}
+                        displayName={displayName}
+                        selected={selected}
+                        active={selected && hasOnlyDefaultChat && activeChatName === 'default'}
+                        activeIndicatorStyle="edge"
+                        leadingIcon={
+                          <IconDrone className="h-3.5 w-3.5 text-[var(--muted-dim)] opacity-72" />
+                        }
+                        selectionTone="muted"
+                        showSelectionEdge={false}
+                        busy={busy && hasOnlyDefaultChat}
+                        unreadAgentMessage={false}
+                        onClick={() => {
+                          if (droneId) onSelectDroneCard(droneId);
+                        }}
+                        draggable={false}
+                        dragging={false}
+                      />
+                      {showChatRows ? (
+                        <div className="ml-[14px] mr-1 flex flex-col gap-0.5">
+                          {chats.map((chatName) => {
+                            const active = activeChatName === chatName;
+                            const chatBusy =
+                              Array.isArray(drone?.busyChats) && drone.busyChats.includes(chatName);
+                            return (
+                              <button
+                                key={chatName}
+                                type="button"
+                                className={`relative flex h-[25px] items-center gap-1.5 rounded border px-1.5 text-left text-[10.5px] transition-colors ${
+                                  active
+                                    ? 'border-[rgba(255,255,255,.08)] bg-[rgba(255,255,255,.045)] text-[var(--fg)]'
+                                    : 'border-transparent text-[var(--muted)] hover:border-[rgba(255,255,255,.06)] hover:bg-[rgba(255,255,255,.03)] hover:text-[var(--fg-secondary)]'
+                                }`}
+                                onClick={() => {
+                                  if (droneId) onSelectDroneChat(droneId, chatName);
+                                }}
+                                title={`${displayName} / ${chatName}`}
+                              >
+                                {active ? (
+                                  <span className="absolute left-0 top-1 bottom-1 w-[2px] rounded-full bg-[var(--accent)]" />
+                                ) : null}
+                                <IconChatThread className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted-dim)] opacity-72" />
+                                <span
+                                  className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${chatBusy ? 'bg-[var(--yellow)]' : 'bg-transparent'}`}
+                                />
+                                <span className="min-w-0 flex-1 truncate font-mono">
+                                  {chatName}
+                                </span>
+                                {chatBusy ? (
+                                  <span
+                                    className="inline-flex items-center flex-shrink-0"
+                                    title="Agent responding"
+                                  >
+                                    <span className="h-1.5 w-1.5 rounded-full bg-[var(--yellow)]" />
+                                  </span>
+                                ) : null}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+function readOnlyTreeDensityClasses(sidebarDensityMode: SidebarDensityMode): {
+  folderRow: string;
+  folderLabel: string;
+  folderDepthPaddingPx: number;
+  icon: string;
+  chatRow: string;
+  chatIndent: string;
+} {
+  if (sidebarDensityMode === 'compact') {
+    return {
+      folderRow: 'min-h-6',
+      folderLabel: 'text-[10px]',
+      folderDepthPaddingPx: 4,
+      icon: 'h-3 w-3',
+      chatRow: 'h-6 px-1.5 text-[10px]',
+      chatIndent: 'ml-3 mr-1',
+    };
+  }
+  if (sidebarDensityMode === 'comfortable') {
+    return {
+      folderRow: 'min-h-8',
+      folderLabel: 'text-[11px]',
+      folderDepthPaddingPx: 6,
+      icon: 'h-[15px] w-[15px]',
+      chatRow: 'h-7 px-2 text-[11px]',
+      chatIndent: 'ml-[18px] mr-1',
+    };
+  }
+  return {
+    folderRow: 'min-h-7',
+    folderLabel: 'text-[10.5px]',
+    folderDepthPaddingPx: 5,
+    icon: 'h-3.5 w-3.5',
+    chatRow: 'h-[25px] px-1.5 text-[10.5px]',
+    chatIndent: 'ml-[14px] mr-1',
+  };
+}
+
+function staticTreeFolderPath(node: SidebarTreeFolderNode): string {
+  return String(node.groupPath ?? node.path ?? '').trim();
+}
+
+function StaticReadOnlySidebarTree({
+  nodeTree,
+  sidebarDensityMode,
+  droneById,
+  sidebarChatOrderByDrone,
+  selectedDrone,
+  activeChatName,
+  busyChatNodeIdSet,
+  unreadAgentMessageByChatNodeId,
+  collapsedGroups,
+  uiDroneName,
+  onSelectDroneCard,
+  onSelectDroneChat,
+  onToggleGroupCollapsed,
+}: {
+  nodeTree: SidebarNodeTreeModel;
+  sidebarDensityMode: SidebarDensityMode;
+  droneById: Record<string, DroneSummary>;
+  sidebarChatOrderByDrone: Record<string, string[]>;
+  selectedDrone: string | null;
+  activeChatName: string;
+  busyChatNodeIdSet: Set<string>;
+  unreadAgentMessageByChatNodeId: Record<string, boolean>;
+  collapsedGroups: Record<string, boolean>;
+  uiDroneName: (nameRaw: string) => string;
+  onSelectDroneCard: (droneId: string, opts?: { toggle?: boolean; range?: boolean }) => void;
+  onSelectDroneChat: (droneId: string, chatName: string) => void;
+  onToggleGroupCollapsed: (group: string) => void;
+}) {
+  const densityClasses = readOnlyTreeDensityClasses(sidebarDensityMode);
+
+  const renderDrone = (
+    node: SidebarTreeDroneNode,
+    ancestorNodeIds: Set<string>,
+  ): React.ReactNode => {
+    const drone = droneById[node.droneId];
+    if (!drone) return null;
+    const chats = orderSidebarEntries(
+      readOnlyDroneChats(drone),
+      sidebarChatOrderByDrone[drone.id] ?? [],
+      (chat) => chat,
+    );
+    const hasOnlyDefaultChat = chats.length === 1 && chats[0] === 'default';
+    const selected = selectedDrone === drone.id;
+    const defaultChatNodeId = createCanvasChatNodeId(drone.id, 'default');
+    const defaultChatBusy =
+      (Array.isArray(drone.busyChats) && drone.busyChats.includes('default')) ||
+      busyChatNodeIdSet.has(defaultChatNodeId);
+    const busy = Boolean(drone.busy) || defaultChatBusy;
+    const childIds = nodeTree.childIdsByParent[node.id] ?? [];
+    return (
+      <div key={node.id} className="flex flex-col gap-0.5">
+        <DroneCard
+          drone={drone}
+          density={sidebarDensityMode}
+          displayName={uiDroneName(drone.name)}
+          selected={selected}
+          active={selected && hasOnlyDefaultChat && activeChatName === 'default'}
+          activeIndicatorStyle="edge"
+          leadingIcon={
+            <IconDrone className={`${densityClasses.icon} text-[var(--muted-dim)] opacity-72`} />
+          }
+          selectionTone="muted"
+          showSelectionEdge={false}
+          busy={busy && hasOnlyDefaultChat}
+          unreadAgentMessage={
+            hasOnlyDefaultChat && unreadAgentMessageByChatNodeId[defaultChatNodeId] === true
+          }
+          onClick={() => onSelectDroneCard(drone.id)}
+          draggable={false}
+          dragging={false}
+        />
+        {chats.length > 1 ? (
+          <div className={`${densityClasses.chatIndent} flex flex-col gap-0.5`}>
+            {chats.map((chatName) => {
+              const active = selected && activeChatName === chatName;
+              const chatNodeId = createCanvasChatNodeId(drone.id, chatName);
+              const chatBusy =
+                (Array.isArray(drone.busyChats) && drone.busyChats.includes(chatName)) ||
+                busyChatNodeIdSet.has(chatNodeId);
+              return (
+                <button
+                  key={chatName}
+                  type="button"
+                  className={`relative flex items-center gap-1.5 rounded border text-left transition-colors ${densityClasses.chatRow} ${
+                    active
+                      ? 'border-[rgba(255,255,255,.08)] bg-[rgba(255,255,255,.045)] text-[var(--fg)]'
+                      : 'border-transparent text-[var(--muted)] hover:border-[rgba(255,255,255,.06)] hover:bg-[rgba(255,255,255,.03)] hover:text-[var(--fg-secondary)]'
+                  }`}
+                  onClick={() => onSelectDroneChat(drone.id, chatName)}
+                  title={`${uiDroneName(drone.name)} / ${chatName}`}
+                >
+                  {active ? (
+                    <span className="absolute left-0 top-1 bottom-1 w-[2px] rounded-full bg-[var(--accent)]" />
+                  ) : null}
+                  <IconChatThread
+                    className={`${densityClasses.icon} flex-shrink-0 text-[var(--muted-dim)] opacity-72`}
+                  />
+                  {chatBusy || unreadAgentMessageByChatNodeId[chatNodeId] ? (
+                    <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--yellow)]" />
+                  ) : (
+                    <span className="h-1.5 w-1.5 flex-shrink-0" />
+                  )}
+                  <span className="min-w-0 flex-1 truncate font-mono">{chatName}</span>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+        {childIds.length > 0 ? (
+          <div className="ml-2.5 flex flex-col gap-0.5 border-l border-[var(--border-subtle)] pl-1.5">
+            {childIds.map((childId) => renderNode(childId, ancestorNodeIds))}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
+  const renderFolder = (
+    node: SidebarTreeFolderNode,
+    ancestorNodeIds: Set<string>,
+  ): React.ReactNode => {
+    const folderPath = staticTreeFolderPath(node);
+    const collapsed = Boolean(folderPath && collapsedGroups[folderPath]);
+    const childIds = nodeTree.childIdsByParent[node.id] ?? [];
+    return (
+      <div key={node.id} className="flex flex-col gap-0.5">
+        <button
+          type="button"
+          className={`relative flex items-center gap-1 rounded-md border border-transparent pr-2 text-left text-[var(--fg-secondary)] hover:border-[rgba(255,255,255,.06)] hover:bg-[rgba(255,255,255,.03)] ${densityClasses.folderRow}`}
+          style={{
+            paddingLeft: `${Math.max(0, node.depth) * densityClasses.folderDepthPaddingPx + 4}px`,
+          }}
+          onClick={() => {
+            if (folderPath) onToggleGroupCollapsed(folderPath);
+          }}
+          title={folderPath || node.label}
+        >
+          <IconFolder
+            className={`${densityClasses.icon} flex-shrink-0 text-[var(--muted-dim)] opacity-80`}
+          />
+          <span className={`min-w-0 flex-1 truncate font-medium ${densityClasses.folderLabel}`}>
+            {node.label}
+          </span>
+          <span className="flex-shrink-0 text-[10px] font-mono text-[var(--muted-dim)]">
+            {node.totalDroneCount}
+          </span>
+        </button>
+        {!collapsed && childIds.length > 0 ? (
+          <div className="flex flex-col gap-0.5">
+            {childIds.map((childId) => renderNode(childId, ancestorNodeIds))}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
+  const renderNode = (nodeId: string, ancestorNodeIds: Set<string>): React.ReactNode => {
+    if (ancestorNodeIds.has(nodeId)) return null;
+    const node: SidebarTreeNode | undefined = nodeTree.nodesById[nodeId];
+    if (!node) return null;
+    const nextAncestorNodeIds = new Set(ancestorNodeIds);
+    nextAncestorNodeIds.add(nodeId);
+    return node.kind === 'folder'
+      ? renderFolder(node, nextAncestorNodeIds)
+      : renderDrone(node, nextAncestorNodeIds);
+  };
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      {nodeTree.rootChildIds.map((nodeId) => renderNode(nodeId, new Set()))}
+    </div>
+  );
+}
+
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName.toLowerCase();
@@ -143,7 +567,9 @@ function isEditableTarget(target: EventTarget | null): boolean {
 
 function isHeaderActionTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
-  return Boolean(target.closest('button,a,input,textarea,select,[role="button"],[role="menuitem"]'));
+  return Boolean(
+    target.closest('button,a,input,textarea,select,[role="button"],[role="menuitem"]'),
+  );
 }
 
 type SidebarGroupSectionProps = {
@@ -218,11 +644,7 @@ function SidebarGroupSection({
   const clickTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const groupDragData = React.useMemo<SidebarGroupDragData | null>(() => {
     const droneIds = Array.from(
-      new Set(
-        actualItems
-          .map((item) => String(item?.id ?? '').trim())
-          .filter(Boolean),
-      ),
+      new Set(actualItems.map((item) => String(item?.id ?? '').trim()).filter(Boolean)),
     );
     if (droneIds.length === 0) return null;
     return {
@@ -233,7 +655,11 @@ function SidebarGroupSection({
     };
   }, [actualItems, groupLabel, groupRef]);
   const sidebarDndEnabled = sharedDroneTreeListProps.sidebarDndEnabled;
-  const { attributes, listeners, setNodeRef: setDraggableNodeRef } = useDraggable({
+  const {
+    attributes,
+    listeners,
+    setNodeRef: setDraggableNodeRef,
+  } = useDraggable({
     id: `sidebar-group:${groupToken}`,
     data: groupDragData ?? undefined,
     disabled: !sidebarDndEnabled || !groupDragData,
@@ -268,7 +694,9 @@ function SidebarGroupSection({
   const countVisibleClass = pinGroupActionsVisible
     ? 'opacity-0 pointer-events-none'
     : 'opacity-100 group-hover/group-header:opacity-0 group-hover/group-header:pointer-events-none';
-  const actionRailWidthClass = canRenameGroup ? 'group-hover/group-header:w-[124px]' : 'group-hover/group-header:w-[92px]';
+  const actionRailWidthClass = canRenameGroup
+    ? 'group-hover/group-header:w-[124px]'
+    : 'group-hover/group-header:w-[92px]';
   const pinnedActionRailWidthClass = canRenameGroup ? 'w-[124px]' : 'w-[92px]';
   const clearClickTimer = React.useCallback(() => {
     if (clickTimerRef.current) {
@@ -286,7 +714,8 @@ function SidebarGroupSection({
   }, [clearClickTimer, groupRef.group, onToggleGroupCollapsed]);
   const handleGroupHeaderDoubleClick = React.useCallback(
     (event: React.MouseEvent<HTMLElement>) => {
-      if (event.target instanceof Element && event.target.closest('[data-group-drag-block="true"]')) return;
+      if (event.target instanceof Element && event.target.closest('[data-group-drag-block="true"]'))
+        return;
       event.preventDefault();
       clearClickTimer();
       onToggleGroupCollapsed(groupRef.group);
@@ -301,7 +730,9 @@ function SidebarGroupSection({
       data-drone-sidebar-group-name={hoveredGroupName || undefined}
       data-drone-sidebar-repo-path={hoveredRepoPath || undefined}
       className={`relative rounded-md border bg-[rgba(0,0,0,.15)] overflow-hidden transition-colors ${
-        isDropTarget ? 'border-[var(--accent-muted)] ring-1 ring-[var(--accent-muted)]' : 'border-[var(--border-subtle)]'
+        isDropTarget
+          ? 'border-[var(--accent-muted)] ring-1 ring-[var(--accent-muted)]'
+          : 'border-[var(--border-subtle)]'
       } ${isReorderDragging ? 'opacity-70' : isHiddenGroup ? 'opacity-75' : ''}`}
     >
       {isReorderTarget && dragOverSidebarGroup ? (
@@ -361,10 +792,22 @@ function SidebarGroupSection({
                     ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
                     : 'bg-[rgba(167,139,250,.08)] border-[rgba(167,139,250,.18)] text-[var(--accent)] hover:bg-[rgba(167,139,250,.12)]'
                 }`}
-                title={isRenamingGroup ? `Renaming group "${groupLabel}"…` : `Rename group "${groupLabel}"`}
-                aria-label={isRenamingGroup ? `Renaming group "${groupLabel}"` : `Rename group "${groupLabel}"`}
+                title={
+                  isRenamingGroup
+                    ? `Renaming group "${groupLabel}"…`
+                    : `Rename group "${groupLabel}"`
+                }
+                aria-label={
+                  isRenamingGroup
+                    ? `Renaming group "${groupLabel}"`
+                    : `Rename group "${groupLabel}"`
+                }
               >
-                {isRenamingGroup ? <IconSpinner className="opacity-90" /> : <IconPencil className="opacity-90" />}
+                {isRenamingGroup ? (
+                  <IconSpinner className="opacity-90" />
+                ) : (
+                  <IconPencil className="opacity-90" />
+                )}
               </button>
             ) : null}
             {!placeholderOnly ? (
@@ -383,7 +826,11 @@ function SidebarGroupSection({
                   title={isHiddenGroup ? `Unhide "${groupLabel}"` : `Hide "${groupLabel}"`}
                   aria-label={isHiddenGroup ? `Unhide "${groupLabel}"` : `Hide "${groupLabel}"`}
                 >
-                  {isHiddenGroup ? <IconEye className="opacity-90" /> : <IconEyeOff className="opacity-90" />}
+                  {isHiddenGroup ? (
+                    <IconEye className="opacity-90" />
+                  ) : (
+                    <IconEyeOff className="opacity-90" />
+                  )}
                 </button>
                 <button
                   type="button"
@@ -432,7 +879,11 @@ function SidebarGroupSection({
                         : `Delete group "${groupLabel}" (and all drones inside)`
                   }
                 >
-                  {isDeletingGroup ? <IconSpinner className="opacity-90" /> : <IconTrash className="opacity-90" />}
+                  {isDeletingGroup ? (
+                    <IconSpinner className="opacity-90" />
+                  ) : (
+                    <IconTrash className="opacity-90" />
+                  )}
                 </button>
               </>
             ) : null}
@@ -453,7 +904,9 @@ function SidebarGroupSection({
         <div
           ref={setMoveDropNodeRef}
           className={`px-3 py-2 text-[10px] font-semibold tracking-wide uppercase transition-colors ${
-            isDropTarget ? 'bg-[var(--accent-subtle)] text-[var(--accent)]' : 'text-[var(--muted-dim)]'
+            isDropTarget
+              ? 'bg-[var(--accent-subtle)] text-[var(--accent)]'
+              : 'text-[var(--muted-dim)]'
           }`}
           style={{ fontFamily: 'var(--display)' }}
         >
@@ -528,7 +981,10 @@ function SidebarFolderTreeNode({
   onOpenGroupMultiChat,
   onDeleteGroup,
 }: SidebarFolderTreeNodeProps) {
-  const groupRef = React.useMemo<SidebarDragGroupRef>(() => ({ group: node.path, kind: 'group' }), [node.path]);
+  const groupRef = React.useMemo<SidebarDragGroupRef>(
+    () => ({ group: node.path, kind: 'group' }),
+    [node.path],
+  );
   const groupToken = React.useMemo(() => sidebarGroupOrderToken(groupRef), [groupRef]);
   const groupLabel = sidebarFolderDisplayLabel(node);
   const collapsed = Boolean(collapsedGroups[node.path]);
@@ -541,7 +997,9 @@ function SidebarFolderTreeNode({
   const canRenameGroup = !isUngroupedGroupName(node.path);
   const canDeleteGroup = !isUngroupedGroupName(node.path);
   const showEditorInline = folderEditor?.targetPath === node.path && folderEditor.mode === 'rename';
-  const showCreateInline = (folderEditor?.anchorPath ?? folderEditor?.parentPath) === node.path && folderEditor?.mode === 'create';
+  const showCreateInline =
+    (folderEditor?.anchorPath ?? folderEditor?.parentPath) === node.path &&
+    folderEditor?.mode === 'create';
   const dragData = React.useMemo<SidebarGroupDragData>(
     () => ({
       type: 'sidebar-group',
@@ -552,7 +1010,11 @@ function SidebarFolderTreeNode({
     [groupRef, node.path],
   );
   const sidebarDndEnabled = sharedDroneTreeListProps.sidebarDndEnabled;
-  const { attributes, listeners, setNodeRef: setDraggableNodeRef } = useDraggable({
+  const {
+    attributes,
+    listeners,
+    setNodeRef: setDraggableNodeRef,
+  } = useDraggable({
     id: `sidebar-folder:${groupToken}`,
     data: dragData,
     disabled: !sidebarDndEnabled,
@@ -650,7 +1112,9 @@ function SidebarFolderTreeNode({
             </div>
           </button>
           <div className="relative w-[120px] flex-shrink-0">
-            <div className={`absolute inset-0 flex items-center justify-end pr-1 text-[10px] font-mono text-[var(--muted-dim)] transition-opacity duration-150 ${countVisibleClass}`}>
+            <div
+              className={`absolute inset-0 flex items-center justify-end pr-1 text-[10px] font-mono text-[var(--muted-dim)] transition-opacity duration-150 ${countVisibleClass}`}
+            >
               {node.totalDroneCount}
             </div>
             <div
@@ -681,7 +1145,11 @@ function SidebarFolderTreeNode({
                   title={`Rename folder "${groupLabel}"`}
                   aria-label={`Rename folder "${groupLabel}"`}
                 >
-                  {isRenamingGroup ? <IconSpinner className="opacity-90" /> : <IconPencil className="opacity-90" />}
+                  {isRenamingGroup ? (
+                    <IconSpinner className="opacity-90" />
+                  ) : (
+                    <IconPencil className="opacity-90" />
+                  )}
                 </button>
               ) : null}
               <button
@@ -695,7 +1163,11 @@ function SidebarFolderTreeNode({
                 title={isHiddenGroup ? `Unhide "${groupLabel}"` : `Hide "${groupLabel}"`}
                 aria-label={isHiddenGroup ? `Unhide "${groupLabel}"` : `Hide "${groupLabel}"`}
               >
-                {isHiddenGroup ? <IconEye className="opacity-90" /> : <IconEyeOff className="opacity-90" />}
+                {isHiddenGroup ? (
+                  <IconEye className="opacity-90" />
+                ) : (
+                  <IconEyeOff className="opacity-90" />
+                )}
               </button>
               <button
                 type="button"
@@ -713,7 +1185,12 @@ function SidebarFolderTreeNode({
               {canDeleteGroup ? (
                 <button
                   type="button"
-                  onClick={() => onDeleteGroup(node.path, node.totalDroneCount, { kind: 'group', label: node.path })}
+                  onClick={() =>
+                    onDeleteGroup(node.path, node.totalDroneCount, {
+                      kind: 'group',
+                      label: node.path,
+                    })
+                  }
                   disabled={isDeletingGroup || isRenamingGroup}
                   className={`inline-flex h-6 w-6 items-center justify-center rounded border transition-all ${
                     isDeletingGroup || isRenamingGroup
@@ -723,7 +1200,11 @@ function SidebarFolderTreeNode({
                   title={`Delete folder "${groupLabel}"`}
                   aria-label={`Delete folder "${groupLabel}"`}
                 >
-                  {isDeletingGroup ? <IconSpinner className="opacity-90" /> : <IconTrash className="opacity-90" />}
+                  {isDeletingGroup ? (
+                    <IconSpinner className="opacity-90" />
+                  ) : (
+                    <IconTrash className="opacity-90" />
+                  )}
                 </button>
               ) : null}
             </div>
@@ -801,11 +1282,16 @@ function SidebarFolderTreeNode({
           ) : null}
         </div>
       ) : showMoveDropZone ? (
-        <div className={`ml-5 rounded-md px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${isDropTarget ? 'bg-[var(--accent-subtle)] text-[var(--accent)]' : 'text-[var(--muted-dim)]'}`} style={{ fontFamily: 'var(--display)' }}>
+        <div
+          className={`ml-5 rounded-md px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${isDropTarget ? 'bg-[var(--accent-subtle)] text-[var(--accent)]' : 'text-[var(--muted-dim)]'}`}
+          style={{ fontFamily: 'var(--display)' }}
+        >
           Drop into {groupLabel}
         </div>
       ) : null}
-      {showEditorInline && folderEditor?.error ? <div className="ml-5 text-[10px] text-[var(--red)]">{folderEditor.error}</div> : null}
+      {showEditorInline && folderEditor?.error ? (
+        <div className="ml-5 text-[10px] text-[var(--red)]">{folderEditor.error}</div>
+      ) : null}
     </div>
   );
 }
@@ -867,7 +1353,9 @@ export type DroneSidebarProps = {
     droneIds: string[],
   ) => Promise<{ ok: boolean; error?: string | null; reparentedIds?: string[] }>;
   onMoveDronesToGroup: (group: string, droneIds: string[]) => Promise<MoveDronesToGroupResult>;
-  onCreateGroup: (group: string) => Promise<{ ok: boolean; error: string | null }> | { ok: boolean; error: string | null };
+  onCreateGroup: (
+    group: string,
+  ) => Promise<{ ok: boolean; error: string | null }> | { ok: boolean; error: string | null };
   onCreateGroupAndMove: (
     group: string,
     droneIds: string[],
@@ -886,6 +1374,9 @@ export type DroneSidebarProps = {
   capabilities?: Partial<DroneSidebarCapabilities>;
   sidebarGroupingModeOverride?: SidebarGroupingMode;
   viewModeOverride?: 'grouped' | 'flat';
+  fillContainer?: boolean;
+  readOnlyMode?: DroneSidebarReadOnlyMode;
+  headerAccessory?: React.ReactNode;
 };
 
 export function DroneSidebar({
@@ -944,11 +1435,18 @@ export function DroneSidebar({
   capabilities,
   sidebarGroupingModeOverride,
   viewModeOverride,
+  fillContainer,
+  readOnlyMode = 'read-only',
+  headerAccessory,
 }: DroneSidebarProps) {
-  const sidebarCapabilities = React.useMemo(() => resolveDroneSidebarCapabilities(capabilities), [capabilities]);
+  const sidebarCapabilities = React.useMemo(
+    () => resolveDroneSidebarCapabilities(capabilities),
+    [capabilities],
+  );
   const {
     sidebarCollapsed,
     selectedDroneIds,
+    settingsActiveTab,
     appView,
     viewMode,
     sidebarGroupingMode,
@@ -970,6 +1468,7 @@ export function DroneSidebar({
     sidebarChatOrderByDrone,
     hiddenSidebarGroups,
     showHiddenSidebarGroups,
+    setSettingsActiveTab,
     setAppView,
     setViewMode,
     setSidebarGroupingMode,
@@ -1000,10 +1499,16 @@ export function DroneSidebar({
   const [headerActionsMenuOpen, setHeaderActionsMenuOpen] = React.useState(false);
   const [footerOptionsMenuOpen, setFooterOptionsMenuOpen] = React.useState(false);
   const [sidebarInteractionDndEnabled, setSidebarInteractionDndEnabled] = React.useState(false);
-  const sidebarDndEnabled = sidebarCapabilities.dragAndDrop && (sidebarInteractionDndEnabled || Boolean(activeDrag));
+  const sidebarDndEnabled =
+    sidebarCapabilities.dragAndDrop && (sidebarInteractionDndEnabled || Boolean(activeDrag));
   const [sidebarDockDragActive, setSidebarDockDragActive] = React.useState(false);
-  const [sidebarDockDragPreviewSide, setSidebarDockDragPreviewSide] = React.useState<'left' | 'right' | null>(null);
-  const hiddenSidebarGroupTokenSet = React.useMemo(() => new Set(hiddenSidebarGroups), [hiddenSidebarGroups]);
+  const [sidebarDockDragPreviewSide, setSidebarDockDragPreviewSide] = React.useState<
+    'left' | 'right' | null
+  >(null);
+  const hiddenSidebarGroupTokenSet = React.useMemo(
+    () => new Set(hiddenSidebarGroups),
+    [hiddenSidebarGroups],
+  );
   const effectiveSidebarGroupingMode = sidebarGroupingModeOverride ?? sidebarGroupingMode;
   const effectiveViewMode = viewModeOverride ?? viewMode;
   const isRepoGroupingMode = effectiveSidebarGroupingMode === 'repos';
@@ -1039,7 +1544,9 @@ export function DroneSidebar({
       const ok = await onRenameGroup(group, nextName);
       const targetGroup = String(nextName ?? '').trim();
       if (!ok || !targetGroup) return ok;
-      setSidebarRepoScopedGroupByPath((prev) => rewriteSidebarRepoScopedGroupMapKeysByPrefix(prev, group, targetGroup));
+      setSidebarRepoScopedGroupByPath((prev) =>
+        rewriteSidebarRepoScopedGroupMapKeysByPrefix(prev, group, targetGroup),
+      );
       return ok;
     },
     [onRenameGroup, setSidebarRepoScopedGroupByPath],
@@ -1052,7 +1559,9 @@ export function DroneSidebar({
     ) => {
       const ok = await onDeleteGroup(group, count, opts);
       if (!ok || opts?.kind === 'repo') return ok;
-      setSidebarRepoScopedGroupByPath((prev) => removeSidebarRepoScopedGroupMapKeysByPrefix(prev, group));
+      setSidebarRepoScopedGroupByPath((prev) =>
+        removeSidebarRepoScopedGroupMapKeysByPrefix(prev, group),
+      );
       return ok;
     },
     [onDeleteGroup, setSidebarRepoScopedGroupByPath],
@@ -1137,6 +1646,25 @@ export function DroneSidebar({
     sidebarGroupOrder,
     sidebarGroupingMode: effectiveSidebarGroupingMode,
   });
+  const staticReadOnlyNodeTree = React.useMemo(
+    () =>
+      buildSidebarNodeTree({
+        sidebarFolderTree,
+        sidebarGroups: renderSidebarGroups,
+        sidebarGroupOrder,
+        repoScopedGroupPathsByRepoGroup,
+        sidebarDroneOrderByGroup,
+        sidebarNodeOrderByParent,
+      }),
+    [
+      renderSidebarGroups,
+      repoScopedGroupPathsByRepoGroup,
+      sidebarDroneOrderByGroup,
+      sidebarFolderTree,
+      sidebarGroupOrder,
+      sidebarNodeOrderByParent,
+    ],
+  );
   const {
     blurChatEditor,
     blurFolderEditor,
@@ -1297,6 +1825,7 @@ export function DroneSidebar({
   );
 
   React.useEffect(() => {
+    if (!sidebarCapabilities.dragAndDrop) return;
     if (activeDrag) {
       enableSidebarDndForInteraction();
       return;
@@ -1306,7 +1835,12 @@ export function DroneSidebar({
       sidebar instanceof HTMLElement &&
       (sidebar.matches(':hover') || sidebar.contains(document.activeElement));
     if (!sidebarActive) queueSidebarDndIdleDisable();
-  }, [activeDrag, enableSidebarDndForInteraction, queueSidebarDndIdleDisable]);
+  }, [
+    activeDrag,
+    enableSidebarDndForInteraction,
+    queueSidebarDndIdleDisable,
+    sidebarCapabilities.dragAndDrop,
+  ]);
 
   const onSidebarPointerEnter = React.useCallback(() => {
     clearCollapseTimer();
@@ -1455,15 +1989,21 @@ export function DroneSidebar({
   const toggleSidebarDockSide = React.useCallback(() => {
     setSidebarDockSide((current) => (current === 'right' ? 'left' : 'right'));
   }, [setSidebarDockSide]);
-  const resolveSidebarDockSideFromPointerX = React.useCallback((clientX: number): 'left' | 'right' => {
-    if (typeof window === 'undefined') return sidebarDockSide;
-    return clientX > window.innerWidth / 2 ? 'right' : 'left';
-  }, [sidebarDockSide]);
-  const onSidebarDockHeaderPointerDown = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (isHeaderActionTarget(event.target)) return;
-    sidebarDockDragStartXRef.current = event.clientX;
-    event.currentTarget.setPointerCapture(event.pointerId);
-  }, []);
+  const resolveSidebarDockSideFromPointerX = React.useCallback(
+    (clientX: number): 'left' | 'right' => {
+      if (typeof window === 'undefined') return sidebarDockSide;
+      return clientX > window.innerWidth / 2 ? 'right' : 'left';
+    },
+    [sidebarDockSide],
+  );
+  const onSidebarDockHeaderPointerDown = React.useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (isHeaderActionTarget(event.target)) return;
+      sidebarDockDragStartXRef.current = event.clientX;
+      event.currentTarget.setPointerCapture(event.pointerId);
+    },
+    [],
+  );
   const onSidebarDockHeaderPointerMove = React.useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
       const startX = sidebarDockDragStartXRef.current;
@@ -1488,19 +2028,24 @@ export function DroneSidebar({
     },
     [resolveSidebarDockSideFromPointerX, setSidebarDockSide, sidebarDockDragActive],
   );
-  const onSidebarDockHeaderPointerCancel = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    sidebarDockDragStartXRef.current = null;
-    setSidebarDockDragActive(false);
-    setSidebarDockDragPreviewSide(null);
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-  }, []);
+  const onSidebarDockHeaderPointerCancel = React.useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      sidebarDockDragStartXRef.current = null;
+      setSidebarDockDragActive(false);
+      setSidebarDockDragPreviewSide(null);
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+    },
+    [],
+  );
 
   React.useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (isEditableTarget(event.target)) return;
-      const sidebarHovered = Boolean(document.querySelector('[data-drone-sidebar-root="true"]:hover'));
+      const sidebarHovered = Boolean(
+        document.querySelector('[data-drone-sidebar-root="true"]:hover'),
+      );
       if (!sidebarHovered) return;
 
       if (event.key === 'Escape' && folderEditor) {
@@ -1546,6 +2091,20 @@ export function DroneSidebar({
   const sidebarBorderClass = sidebarDockSide === 'right' ? 'border-l' : 'border-r';
   const collapsedRailBorderClass = sidebarDockSide === 'right' ? 'border-l' : 'border-r';
   const sidebarDockDragEnabled = sidebarCapabilities.collapseControl;
+  const sidebarPointerInteractionsEnabled =
+    sidebarCapabilities.collapseControl || sidebarCapabilities.dragAndDrop;
+  const sidebarWidthTransitionClass = sidebarCapabilities.collapseControl
+    ? 'transition-[width] duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)] [will-change:width]'
+    : '';
+  const sidebarListSelectClass =
+    sidebarCapabilities.dragAndDrop || sidebarCapabilities.actions ? 'select-none' : '';
+  const readOnlySidebar =
+    !sidebarCapabilities.actions &&
+    !sidebarCapabilities.createDrones &&
+    !sidebarCapabilities.dragAndDrop &&
+    !sidebarCapabilities.headerActions &&
+    !sidebarCapabilities.sidebarOptions;
+  const useReadOnlySidebarBranch = readOnlySidebar && readOnlyMode !== 'grouped-tree';
   const sidebarDockTargetLabel = sidebarDockSide === 'right' ? 'left' : 'right';
   const sidebarDockActionLabel = `Move sidebar to ${sidebarDockTargetLabel}`;
   const sidebarHeaderTitle = `Drag header to dock sidebar left or right.`;
@@ -1568,18 +2127,30 @@ export function DroneSidebar({
         data-drone-sidebar-shell="expanded"
         data-sidebar-dock-side={sidebarDockSide}
         data-sidebar-collapsed={sidebarCollapsed ? 'true' : 'false'}
-        className={`bg-[var(--panel-alt)] ${sidebarBorderClass} border-[var(--border)] flex flex-col min-h-0 relative dh-dot-grid flex-shrink-0 overflow-hidden transition-[width] duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)] [will-change:width]`}
-        style={{ width: sidebarCollapsed ? 0 : `min(${SIDEBAR_EXPANDED_WIDTH_PX}px, 100vw)` }}
-        onPointerEnter={onSidebarPointerEnter}
-        onPointerLeave={onSidebarPointerLeave}
-        onPointerDownCapture={sidebarCapabilities.dragAndDrop ? enableSidebarDndForInteraction : undefined}
-        onFocusCapture={sidebarCapabilities.dragAndDrop ? enableSidebarDndForInteraction : undefined}
-        onBlurCapture={onSidebarBlurCapture}
-        onWheel={onSidebarWheel}
+        className={`bg-[var(--panel-alt)] ${sidebarBorderClass} border-[var(--border)] flex flex-col min-h-0 relative dh-dot-grid flex-shrink-0 overflow-hidden ${sidebarWidthTransitionClass}`}
+        style={{
+          width: sidebarCollapsed
+            ? 0
+            : fillContainer
+              ? '100%'
+              : `min(${SIDEBAR_EXPANDED_WIDTH_PX}px, 100vw)`,
+        }}
+        onPointerEnter={sidebarPointerInteractionsEnabled ? onSidebarPointerEnter : undefined}
+        onPointerLeave={sidebarPointerInteractionsEnabled ? onSidebarPointerLeave : undefined}
+        onPointerDownCapture={
+          sidebarCapabilities.dragAndDrop ? enableSidebarDndForInteraction : undefined
+        }
+        onFocusCapture={
+          sidebarCapabilities.dragAndDrop ? enableSidebarDndForInteraction : undefined
+        }
+        onBlurCapture={sidebarCapabilities.dragAndDrop ? onSidebarBlurCapture : undefined}
+        onWheel={sidebarCapabilities.sidebarOptions ? onSidebarWheel : undefined}
       >
         <div
           className={`flex h-[52px] flex-shrink-0 items-center px-3 border-b border-[var(--border)] relative select-none ${
-            sidebarDockDragEnabled ? `touch-none ${sidebarDockDragActive ? 'cursor-grabbing' : 'cursor-grab'}` : ''
+            sidebarDockDragEnabled
+              ? `touch-none ${sidebarDockDragActive ? 'cursor-grabbing' : 'cursor-grab'}`
+              : ''
           }`}
           title={sidebarDockDragEnabled ? sidebarHeaderTitle : undefined}
           onPointerDown={sidebarDockDragEnabled ? onSidebarDockHeaderPointerDown : undefined}
@@ -1598,92 +2169,134 @@ export function DroneSidebar({
                 <IconDrone />
               </div>
               {selectedDroneIds.length > 1 && (
-                <span className="max-w-full truncate text-[10px] text-[var(--accent)]" title={`${selectedDroneIds.length} drones selected`}>
+                <span
+                  className="max-w-full truncate text-[10px] text-[var(--accent)]"
+                  title={`${selectedDroneIds.length} drones selected`}
+                >
                   {selectedDroneIds.length} selected
                 </span>
               )}
             </div>
-            {sidebarCapabilities.headerActions ? <div className="flex items-center gap-1 flex-shrink-0">
-              <button
-                type="button"
-                onClick={onOpenVisibleMultiChat}
-                disabled={sidebarVisibleDroneCount === 0}
-                className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
-                  sidebarVisibleDroneCount === 0
-                    ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] opacity-50 cursor-not-allowed'
-                    : sidebarVisibleMultiChatActive
-                      ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                      : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
-                }`}
-                title={`Open multi-chat for ${sidebarVisibleDroneCount} visible drone${sidebarVisibleDroneCount === 1 ? '' : 's'}`}
-                aria-label={`Open multi-chat for ${sidebarVisibleDroneCount} visible drone${sidebarVisibleDroneCount === 1 ? '' : 's'}`}
-              >
-                <IconColumns className="opacity-80" />
-              </button>
-              <button
-                type="button"
-                onClick={onOpenKanbanBoard}
-                className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
-                  kanbanBoardOpen
-                    ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                    : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
-                }`}
-                title="Open task board"
-                aria-label="Open task board"
-              >
-                <IconBoard className="opacity-80" />
-              </button>
-              <div ref={headerActionsMenuRef} className="relative">
+            {headerAccessory ? (
+              <div className="flex items-center gap-1 flex-shrink-0">{headerAccessory}</div>
+            ) : null}
+            {sidebarCapabilities.headerActions ? (
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={onOpenVisibleMultiChat}
+                  disabled={sidebarVisibleDroneCount === 0}
+                  className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
+                    sidebarVisibleDroneCount === 0
+                      ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] opacity-50 cursor-not-allowed'
+                      : sidebarVisibleMultiChatActive
+                        ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                        : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
+                  }`}
+                  title={`Open multi-chat for ${sidebarVisibleDroneCount} visible drone${sidebarVisibleDroneCount === 1 ? '' : 's'}`}
+                  aria-label={`Open multi-chat for ${sidebarVisibleDroneCount} visible drone${sidebarVisibleDroneCount === 1 ? '' : 's'}`}
+                >
+                  <IconColumns className="opacity-80" />
+                </button>
                 <button
                   type="button"
                   onClick={() => {
-                    setFooterOptionsMenuOpen(false);
-                    setHeaderActionsMenuOpen((prev) => !prev);
+                    setSettingsActiveTab('remote');
+                    setAppView('settings');
                   }}
                   className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
-                    headerActionsMenuOpen
+                    appView === 'settings' && settingsActiveTab === 'remote'
                       ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                       : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
                   }`}
-                  title="More sidebar actions"
-                  aria-label="More sidebar actions"
-                  aria-haspopup="menu"
-                  aria-expanded={headerActionsMenuOpen}
+                  title="Remote settings"
+                  aria-label="Remote settings"
                 >
-                  <IconMore className="opacity-85" />
+                  <IconRemote className="opacity-80" />
                 </button>
-                {headerActionsMenuOpen ? (
-                  <div className={`absolute right-0 mt-2 w-[220px] z-50 ${dropdownPanelBaseClass}`} role="menu">
-                    <div className="py-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setHeaderActionsMenuOpen(false);
-                          onOpenPlaybookRuns();
-                        }}
-                        className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
-                        role="menuitem"
-                      >
-                        <span>Playbook runs</span>
-                        <IconList className={playbookRunsOpen ? 'opacity-80 text-[var(--accent)]' : 'opacity-65'} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setHeaderActionsMenuOpen(false);
-                          setAppView((prev) => (prev === 'settings' ? 'workspace' : 'settings'));
-                        }}
-                        className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
-                        role="menuitem"
-                      >
-                        <span>{appView === 'settings' ? 'Back to workspace' : 'Open settings'}</span>
-                        <IconSettings className={appView === 'settings' ? 'opacity-80 text-[var(--accent)]' : 'opacity-65'} />
-                      </button>
+                <div ref={headerActionsMenuRef} className="relative">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFooterOptionsMenuOpen(false);
+                      setHeaderActionsMenuOpen((prev) => !prev);
+                    }}
+                    className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
+                      headerActionsMenuOpen
+                        ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                        : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
+                    }`}
+                    title="More sidebar actions"
+                    aria-label="More sidebar actions"
+                    aria-haspopup="menu"
+                    aria-expanded={headerActionsMenuOpen}
+                  >
+                    <IconMore className="opacity-85" />
+                  </button>
+                  {headerActionsMenuOpen ? (
+                    <div
+                      className={`absolute right-0 mt-2 w-[220px] z-50 ${dropdownPanelBaseClass}`}
+                      role="menu"
+                    >
+                      <div className="py-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setHeaderActionsMenuOpen(false);
+                            onOpenKanbanBoard();
+                          }}
+                          className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
+                          role="menuitem"
+                        >
+                          <span>Open task board</span>
+                          <IconBoard
+                            className={
+                              kanbanBoardOpen ? 'opacity-80 text-[var(--accent)]' : 'opacity-65'
+                            }
+                          />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setHeaderActionsMenuOpen(false);
+                            onOpenPlaybookRuns();
+                          }}
+                          className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
+                          role="menuitem"
+                        >
+                          <span>Playbook runs</span>
+                          <IconList
+                            className={
+                              playbookRunsOpen ? 'opacity-80 text-[var(--accent)]' : 'opacity-65'
+                            }
+                          />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setHeaderActionsMenuOpen(false);
+                            setAppView((prev) => (prev === 'settings' ? 'workspace' : 'settings'));
+                          }}
+                          className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
+                          role="menuitem"
+                        >
+                          <span>
+                            {appView === 'settings' ? 'Back to workspace' : 'Open settings'}
+                          </span>
+                          <IconSettings
+                            className={
+                              appView === 'settings'
+                                ? 'opacity-80 text-[var(--accent)]'
+                                : 'opacity-65'
+                            }
+                          />
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ) : null}
+                  ) : null}
+                </div>
               </div>
-            </div> : null}
+            ) : null}
           </div>
         </div>
 
@@ -1715,132 +2328,188 @@ export function DroneSidebar({
               ))}
             </div>
           )}
-          {!dronesLoading && sidebarDrones.length === 0 && !visibleDraftSidebarPlaceholder && !dronesError && (
-            <div className="px-3 py-10 text-center">
-              <div
-                className="text-[var(--muted-dim)] text-[11px] tracking-wide uppercase"
-                style={{ fontFamily: 'var(--display)' }}
-              >
-                No drones registered
-              </div>
-              {sidebarCapabilities.createDrones || sidebarCapabilities.headerActions ? (
-                <div className="mx-auto mt-4 flex max-w-[240px] flex-col gap-2">
-                  {sidebarCapabilities.createDrones ? (
-                    <>
-                      <button
-                        type="button"
-                        onClick={onOpenDraftChatComposer}
-                        className="inline-flex h-[30px] w-full items-center gap-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 text-[11px] text-[var(--muted)] transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]"
-                        title="Create new drone"
-                        aria-label="Create new drone"
-                      >
-                        <IconPlus className="opacity-80" />
-                        <span className="font-semibold uppercase tracking-wide" style={{ fontFamily: 'var(--display)' }}>
-                          Create new drone
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={onOpenCreateModal}
-                        className="inline-flex h-[30px] w-full items-center gap-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 text-[11px] text-[var(--muted)] transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]"
-                        title="Create multiple drones"
-                        aria-label="Create multiple drones"
-                      >
-                        <IconPlusDouble className="opacity-80" />
-                        <span className="font-semibold uppercase tracking-wide" style={{ fontFamily: 'var(--display)' }}>
-                          Create multiple drones
-                        </span>
-                      </button>
-                    </>
-                  ) : null}
-                  {sidebarCapabilities.headerActions ? (
-                    <>
-                      <button
-                        type="button"
-                        onClick={onOpenKanbanBoard}
-                        className={`inline-flex h-[30px] w-full items-center gap-2 rounded border px-3 text-[11px] transition-all ${
-                          kanbanBoardOpen
-                            ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                            : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]'
-                        }`}
-                        title="Open task board"
-                        aria-label="Open task board"
-                      >
-                        <IconBoard className="opacity-80" />
-                        <span className="font-semibold uppercase tracking-wide" style={{ fontFamily: 'var(--display)' }}>
-                          Open task board
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={onOpenPlaybookRuns}
-                        className={`inline-flex h-[30px] w-full items-center gap-2 rounded border px-3 text-[11px] transition-all ${
-                          playbookRunsOpen
-                            ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                            : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]'
-                        }`}
-                        title="Open playbook runs"
-                        aria-label="Open playbook runs"
-                      >
-                        <IconList className="opacity-80" />
-                        <span className="font-semibold uppercase tracking-wide" style={{ fontFamily: 'var(--display)' }}>
-                          Open playbook runs
-                        </span>
-                      </button>
-                    </>
-                  ) : null}
+          {!dronesLoading &&
+            sidebarDrones.length === 0 &&
+            !visibleDraftSidebarPlaceholder &&
+            !dronesError && (
+              <div className="px-3 py-10 text-center">
+                <div
+                  className="text-[var(--muted-dim)] text-[11px] tracking-wide uppercase"
+                  style={{ fontFamily: 'var(--display)' }}
+                >
+                  No drones registered
                 </div>
-              ) : null}
-              {sidebarCapabilities.createDrones ? (
-                <div className="mt-4 text-[10px] text-[var(--muted-dim)]">
-                  Or run{' '}
-                  <code className="rounded border border-[rgba(167,139,250,.08)] bg-[rgba(167,139,250,.06)] px-1.5 py-0.5 text-[10px] text-[#C4B5FD]">
-                    drone create &lt;name&gt;
-                  </code>{' '}
-                  in your terminal.
+                {sidebarCapabilities.createDrones || sidebarCapabilities.headerActions ? (
+                  <div className="mx-auto mt-4 flex max-w-[240px] flex-col gap-2">
+                    {sidebarCapabilities.createDrones ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={onOpenDraftChatComposer}
+                          className="inline-flex h-[30px] w-full items-center gap-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 text-[11px] text-[var(--muted)] transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]"
+                          title="Create new drone"
+                          aria-label="Create new drone"
+                        >
+                          <IconPlus className="opacity-80" />
+                          <span
+                            className="font-semibold uppercase tracking-wide"
+                            style={{ fontFamily: 'var(--display)' }}
+                          >
+                            Create new drone
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={onOpenCreateModal}
+                          className="inline-flex h-[30px] w-full items-center gap-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 text-[11px] text-[var(--muted)] transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]"
+                          title="Create multiple drones"
+                          aria-label="Create multiple drones"
+                        >
+                          <IconPlusDouble className="opacity-80" />
+                          <span
+                            className="font-semibold uppercase tracking-wide"
+                            style={{ fontFamily: 'var(--display)' }}
+                          >
+                            Create multiple drones
+                          </span>
+                        </button>
+                      </>
+                    ) : null}
+                    {sidebarCapabilities.headerActions ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={onOpenKanbanBoard}
+                          className={`inline-flex h-[30px] w-full items-center gap-2 rounded border px-3 text-[11px] transition-all ${
+                            kanbanBoardOpen
+                              ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                              : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]'
+                          }`}
+                          title="Open task board"
+                          aria-label="Open task board"
+                        >
+                          <IconBoard className="opacity-80" />
+                          <span
+                            className="font-semibold uppercase tracking-wide"
+                            style={{ fontFamily: 'var(--display)' }}
+                          >
+                            Open task board
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={onOpenPlaybookRuns}
+                          className={`inline-flex h-[30px] w-full items-center gap-2 rounded border px-3 text-[11px] transition-all ${
+                            playbookRunsOpen
+                              ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                              : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]'
+                          }`}
+                          title="Open playbook runs"
+                          aria-label="Open playbook runs"
+                        >
+                          <IconList className="opacity-80" />
+                          <span
+                            className="font-semibold uppercase tracking-wide"
+                            style={{ fontFamily: 'var(--display)' }}
+                          >
+                            Open playbook runs
+                          </span>
+                        </button>
+                      </>
+                    ) : null}
+                  </div>
+                ) : null}
+                {sidebarCapabilities.createDrones ? (
+                  <div className="mt-4 text-[10px] text-[var(--muted-dim)]">
+                    Or run{' '}
+                    <code className="rounded border border-[rgba(167,139,250,.08)] bg-[rgba(167,139,250,.06)] px-1.5 py-0.5 text-[10px] text-[#C4B5FD]">
+                      drone create &lt;name&gt;
+                    </code>{' '}
+                    in your terminal.
+                  </div>
+                ) : null}
+              </div>
+            )}
+          {!dronesLoading &&
+            sidebarDrones.length > 0 &&
+            sidebarDronesFilteredByRepo.length === 0 &&
+            activeRepoPath &&
+            !visibleDraftSidebarPlaceholder &&
+            !dronesError && (
+              <div className="px-3 py-10 text-center">
+                <div
+                  className="text-[var(--muted-dim)] text-[11px] tracking-wide uppercase"
+                  style={{ fontFamily: 'var(--display)' }}
+                >
+                  No drones for selected repo
                 </div>
-              ) : null}
-            </div>
-          )}
-          {!dronesLoading && sidebarDrones.length > 0 && sidebarDronesFilteredByRepo.length === 0 && activeRepoPath && !visibleDraftSidebarPlaceholder && !dronesError && (
-            <div className="px-3 py-10 text-center">
-              <div
-                className="text-[var(--muted-dim)] text-[11px] tracking-wide uppercase"
-                style={{ fontFamily: 'var(--display)' }}
-              >
-                No drones for selected repo
+                <div
+                  className="text-[var(--muted-dim)] text-[10px] mt-2 font-mono truncate"
+                  title={activeRepoPath}
+                >
+                  {activeRepoPath}
+                </div>
               </div>
-              <div className="text-[var(--muted-dim)] text-[10px] mt-2 font-mono truncate" title={activeRepoPath}>
-                {activeRepoPath}
+            )}
+          {sidebarCapabilities.createDrones &&
+            (dronesLoading ||
+              sidebarDrones.length > 0 ||
+              Boolean(visibleDraftSidebarPlaceholder) ||
+              Boolean(activeRepoPath)) && (
+              <div className="mb-1.5 flex items-center gap-2 px-1">
+                <button
+                  type="button"
+                  onClick={onOpenDraftChatComposer}
+                  className="inline-flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--muted)] transition-all hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]"
+                  style={{ fontFamily: 'var(--display)' }}
+                  title="Create drone"
+                  aria-label="Create drone"
+                >
+                  <IconPlus className="opacity-90" />
+                  <span className="min-w-0 truncate">New drone</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={onOpenCreateModal}
+                  className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] transition-all hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]"
+                  title="Create multiple drones"
+                  aria-label="Create multiple drones"
+                >
+                  <IconPlusDouble className="opacity-90" />
+                </button>
               </div>
-            </div>
-          )}
-          {sidebarCapabilities.createDrones && (dronesLoading || sidebarDrones.length > 0 || Boolean(visibleDraftSidebarPlaceholder) || Boolean(activeRepoPath)) && (
-            <div className="mb-1.5 flex items-center gap-2 px-1">
-              <button
-                type="button"
-                onClick={onOpenDraftChatComposer}
-                className="inline-flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--muted)] transition-all hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]"
-                style={{ fontFamily: 'var(--display)' }}
-                title="Create drone"
-                aria-label="Create drone"
-              >
-                <IconPlus className="opacity-90" />
-                <span className="min-w-0 truncate">New drone</span>
-              </button>
-              <button
-                type="button"
-                onClick={onOpenCreateModal}
-                className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] transition-all hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]"
-                title="Create multiple drones"
-                aria-label="Create multiple drones"
-              >
-                <IconPlusDouble className="opacity-90" />
-              </button>
-            </div>
-          )}
-          <div className="flex flex-col gap-0.5 select-none">
-            {effectiveViewMode === 'flat' ? (
+            )}
+          <div className={`flex flex-col gap-0.5 ${sidebarListSelectClass}`}>
+            {useReadOnlySidebarBranch && readOnlyMode === 'static-tree' ? (
+              <StaticReadOnlySidebarTree
+                nodeTree={staticReadOnlyNodeTree}
+                sidebarDensityMode={sidebarDensityMode}
+                droneById={sidebarDroneById}
+                sidebarChatOrderByDrone={sidebarChatOrderByDrone}
+                selectedDrone={selectedDrone}
+                activeChatName={activeChatName}
+                busyChatNodeIdSet={busyChatNodeIdSet}
+                unreadAgentMessageByChatNodeId={unreadAgentMessageByChatNodeId}
+                collapsedGroups={collapsedGroups}
+                uiDroneName={uiDroneName}
+                onSelectDroneCard={onSelectDroneCard}
+                onSelectDroneChat={onSelectDroneChat}
+                onToggleGroupCollapsed={onToggleGroupCollapsed}
+              />
+            ) : useReadOnlySidebarBranch ? (
+              <ReadOnlySidebarGroups
+                sidebarGroups={renderSidebarGroups}
+                sidebarDensityMode={sidebarDensityMode}
+                selectedDrone={selectedDrone}
+                activeChatName={activeChatName}
+                showAllChats={readOnlyMode === 'read-only-chats'}
+                collapsedGroups={collapsedGroups}
+                uiDroneName={uiDroneName}
+                onSelectDroneCard={onSelectDroneCard}
+                onSelectDroneChat={onSelectDroneChat}
+                onToggleGroupCollapsed={onToggleGroupCollapsed}
+              />
+            ) : effectiveViewMode === 'flat' ? (
               <SidebarDroneTreeList {...sharedDroneTreeListProps} tree={flatSidebarTree} />
             ) : (
               <>
@@ -1848,395 +2517,470 @@ export function DroneSidebar({
                   <>
                     {sidebarCapabilities.actions && !isRepoGroupingMode ? (
                       <>
-                      <div className="mb-1 flex items-center gap-2 px-1">
-                        <button
-                          type="button"
-                          onClick={() => openFolderCreate(null)}
-                          className="inline-flex h-7 items-center gap-1.5 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)] transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]"
-                          style={{ fontFamily: 'var(--display)' }}
-                        >
-                          <IconPlus className="opacity-80" />
-                          New folder
-                        </button>
-                        {selectedFolderPath ? (
-                          <span className="min-w-0 truncate text-[10px] font-mono text-[var(--muted-dim)]" title={selectedFolderPath}>
-                            {selectedFolderPath}
-                          </span>
-                        ) : null}
-                      </div>
-                      {folderEditor?.mode === 'create' && folderEditor.parentPath === null && folderEditor.anchorPath === null ? (
-                        <div className="mb-1 flex items-center gap-2 rounded-md border border-dashed border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 py-1.5">
-                          <IconFolder className="h-3.5 w-3.5 flex-shrink-0 text-[var(--accent)] opacity-80" />
-                          <input
-                            ref={folderEditorInputRef}
-                            value={folderEditor.value}
-                            onChange={(event) => updateFolderEditorValue(event.target.value)}
-                            onBlur={blurFolderEditor}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter') {
-                                event.preventDefault();
-                                submitFolderEditor();
-                              } else if (event.key === 'Escape') {
-                                event.preventDefault();
-                                closeFolderEditor();
-                              }
-                            }}
-                            maxLength={64}
-                            placeholder="Folder name"
-                            className="min-w-0 flex-1 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-2 py-1 text-[11px] text-[var(--fg)] focus:border-[var(--accent-muted)] focus:outline-none"
-                          />
-                        </div>
-                      ) : null}
-                      {folderEditor?.mode === 'create' && folderEditor.parentPath === null && folderEditor.anchorPath === null && folderEditor.error ? (
-                        <div className="mb-1 px-1 text-[10px] text-[var(--red)]">{folderEditor.error}</div>
-                      ) : null}
-                      </>
-                    ) : null}
-                <GroupedSidebarTree
-                  sidebarGroups={renderSidebarGroups}
-                  sidebarDensityMode={sidebarDensityMode}
-                  sidebarFolderTree={sidebarFolderTree}
-                  sidebarGroupOrder={sidebarGroupOrder}
-                  sidebarDndEnabled={sidebarDndEnabled}
-                  repoScopedGroupPathsByRepoGroup={repoScopedGroupPathsByRepoGroup}
-                  sidebarDroneOrderByGroup={sidebarDroneOrderByGroup}
-                  sidebarNodeOrderByParent={sidebarNodeOrderByParent}
-                  setSidebarGroupOrder={setSidebarGroupOrder}
-                  setSidebarNodeOrderByParent={setSidebarNodeOrderByParent}
-                  sidebarChatOrderByDrone={sidebarChatOrderByDrone}
-                  setSidebarChatOrderByDrone={setSidebarChatOrderByDrone}
-                  droneById={sidebarDroneById}
-                  selectedDroneIds={selectedDroneIds}
-                  selectedDroneSet={selectedDroneSet}
-                  selectedDrone={selectedDrone}
-                  activeChatName={activeChatName}
-                  selectedSidebarNodeId={selectedSidebarNodeId}
-                  selectedFolderPath={selectedFolderPath}
-                  setSelectedSidebarNodeId={setSelectedSidebarNodeId}
-                  onSelectFolder={handleGroupedSelectFolder}
-                  onSelectDroneCard={handleGroupedSelectDroneCard}
-                  onSelectDroneChat={handleGroupedSelectDroneChat}
-                  onMoveDronesToGroup={runOptimisticMoveDronesToGroup}
-                  onRenameGroup={runOptimisticRenameGroup}
-                  onToggleGroupCollapsed={onToggleGroupCollapsed}
-                  collapsedGroups={collapsedGroups}
-                  deletingGroups={deletingGroups}
-                  renamingGroups={renamingGroups}
-                  hiddenSidebarGroupTokenSet={hiddenSidebarGroupTokenSet}
-                  selectedGroupMultiChat={selectedGroupMultiChat}
-                  onOpenFolderCreate={openFolderCreate}
-                  onStartRenameFolder={startRenameFolder}
-                  onFolderEditorValueChange={updateFolderEditorValue}
-                  onSubmitFolderEditor={submitFolderEditor}
-                  onBlurFolderEditor={blurFolderEditor}
-                  onCancelFolderEditor={closeFolderEditor}
-                  folderEditor={folderEditor}
-                  folderEditorInputRef={folderEditorInputRef}
-                  toggleSidebarGroupHidden={toggleSidebarGroupHidden}
-                  onOpenGroupMultiChat={onOpenGroupMultiChat}
-                  onDeleteGroup={handleDeleteGroup}
-                  busyChatNodeIdSet={busyChatNodeIdSet}
-                  unreadAgentMessageByChatNodeId={unreadAgentMessageByChatNodeId}
-                  deletingDrones={deletingDrones}
-                  renamingDrones={renamingDrones}
-                  settingBaseImages={settingBaseImages}
-                  movingDroneGroups={movingDroneGroups}
-                  sidebarOptimisticDroneIdSet={sidebarOptimisticDroneIdSet}
-                  uiDroneName={uiDroneName}
-                  onDeleteDroneChat={onDeleteDroneChat}
-                  onOpenCloneModal={onOpenCloneModal}
-                  onCreateDroneChat={onCreateDroneChat}
-                  onRenameDroneChat={onRenameDroneChat}
-                  chatEditor={chatEditor}
-                  chatEditorInputRef={chatEditorInputRef}
-                  onOpenCreateDroneChat={openDroneChatCreate}
-                  onStartRenameDroneChat={startRenameDroneChat}
-                  onChatEditorValueChange={updateChatEditorValue}
-                  onSubmitChatEditor={submitChatEditor}
-                  onBlurChatEditor={blurChatEditor}
-                  onCancelChatEditor={closeChatEditor}
-                  onRenameDrone={onRenameDrone}
-                  onSetDroneBaseImage={onSetDroneBaseImage}
-                  onDeleteDrone={onDeleteDrone}
-                  onOpenDroneErrorModal={onOpenDroneErrorModal}
-                  onPrepareDroneDragStart={onPrepareDroneDragStart}
-                  onReparentDronesToParent={runOptimisticReparentDronesToParent}
-                  actionsEnabled={sidebarCapabilities.actions}
-                />
-                  </>
-                {sidebarCapabilities.dragAndDrop && !isRepoGroupingMode && !sidebarHasUngroupedGroup && showExternalMoveTargets && (
-                  <div
-                    ref={setUngroupedDropNodeRef}
-                    className={`rounded-md border border-dashed px-3 py-2 text-[10px] font-semibold tracking-wide uppercase transition-colors ${
-                      dragOverUngrouped
-                        ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                        : 'border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                    }`}
-                    style={{ fontFamily: 'var(--display)' }}
-                  >
-                    Drop here to move to Ungrouped
-                  </div>
-                )}
-                </div>
-                {sidebarCapabilities.actions && !isRepoGroupingMode &&
-                  (showExternalMoveTargets ||
-                    (createGroupTargetDroneIds && createGroupTargetDroneIds.length > 0)) && (
-                  <div
-                    ref={setCreateGroupDropNodeRef}
-                    className={`mt-1 rounded-md border border-dashed px-3 py-2 transition-colors ${
-                      dragOverCreateGroup || (createGroupTargetDroneIds && createGroupTargetDroneIds.length > 0)
-                        ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)]'
-                        : 'border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)]'
-                    }`}
-                  >
-                    <div
-                      className="text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]"
-                      style={{ fontFamily: 'var(--display)' }}
-                    >
-                      {createGroupTargetDroneIds && createGroupTargetDroneIds.length > 0
-                        ? `Create new folder (${createGroupTargetDroneIds.length} drone${createGroupTargetDroneIds.length === 1 ? '' : 's'})`
-                        : 'Drop here to create a new folder'}
-                    </div>
-                    {createGroupTargetDroneIds && createGroupTargetDroneIds.length > 0 && (
-                      <form className="mt-2 flex flex-col gap-2" onSubmit={onSubmitCreateGroupInline}>
-                        <input
-                          ref={createGroupInputRef}
-                          value={createGroupName}
-                          onChange={(event) => setCreateGroupName(event.target.value)}
-                          disabled={creatingGroupMove}
-                          maxLength={64}
-                          placeholder="Folder name"
-                          className="w-full rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-2 py-1.5 text-[11px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
-                        />
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="submit"
-                            disabled={creatingGroupMove}
-                            className={`inline-flex h-7 items-center rounded px-2 text-[10px] font-semibold tracking-wide uppercase transition-all ${
-                              creatingGroupMove
-                                ? 'cursor-not-allowed border border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                                : 'border border-[var(--accent-muted)] bg-[rgba(167,139,250,.12)] text-[var(--accent)] hover:bg-[rgba(167,139,250,.18)]'
-                            }`}
-                            style={{ fontFamily: 'var(--display)' }}
-                          >
-                            {creatingGroupMove ? 'Creating…' : 'Create & move'}
-                          </button>
+                        <div className="mb-1 flex items-center gap-2 px-1">
                           <button
                             type="button"
-                            onClick={closeCreateGroupInline}
-                            disabled={creatingGroupMove}
-                            className={`inline-flex h-7 items-center rounded px-2 text-[10px] font-semibold tracking-wide uppercase transition-all ${
-                              creatingGroupMove
-                                ? 'cursor-not-allowed border border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                                : 'border border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
-                            }`}
+                            onClick={() => openFolderCreate(null)}
+                            className="inline-flex h-7 items-center gap-1.5 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)] transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]"
                             style={{ fontFamily: 'var(--display)' }}
                           >
-                            Cancel
+                            <IconPlus className="opacity-80" />
+                            New folder
                           </button>
+                          {selectedFolderPath ? (
+                            <span
+                              className="min-w-0 truncate text-[10px] font-mono text-[var(--muted-dim)]"
+                              title={selectedFolderPath}
+                            >
+                              {selectedFolderPath}
+                            </span>
+                          ) : null}
                         </div>
-                        {createGroupInlineError && (
-                          <div className="text-[10px] text-[var(--red)]">
-                            {createGroupInlineError}
+                        {folderEditor?.mode === 'create' &&
+                        folderEditor.parentPath === null &&
+                        folderEditor.anchorPath === null ? (
+                          <div className="mb-1 flex items-center gap-2 rounded-md border border-dashed border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 py-1.5">
+                            <IconFolder className="h-3.5 w-3.5 flex-shrink-0 text-[var(--accent)] opacity-80" />
+                            <input
+                              ref={folderEditorInputRef}
+                              value={folderEditor.value}
+                              onChange={(event) => updateFolderEditorValue(event.target.value)}
+                              onBlur={blurFolderEditor}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter') {
+                                  event.preventDefault();
+                                  submitFolderEditor();
+                                } else if (event.key === 'Escape') {
+                                  event.preventDefault();
+                                  closeFolderEditor();
+                                }
+                              }}
+                              maxLength={64}
+                              placeholder="Folder name"
+                              className="min-w-0 flex-1 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-2 py-1 text-[11px] text-[var(--fg)] focus:border-[var(--accent-muted)] focus:outline-none"
+                            />
                           </div>
-                        )}
-                      </form>
+                        ) : null}
+                        {folderEditor?.mode === 'create' &&
+                        folderEditor.parentPath === null &&
+                        folderEditor.anchorPath === null &&
+                        folderEditor.error ? (
+                          <div className="mb-1 px-1 text-[10px] text-[var(--red)]">
+                            {folderEditor.error}
+                          </div>
+                        ) : null}
+                      </>
+                    ) : null}
+                    <GroupedSidebarTree
+                      sidebarGroups={renderSidebarGroups}
+                      sidebarDensityMode={sidebarDensityMode}
+                      sidebarFolderTree={sidebarFolderTree}
+                      sidebarGroupOrder={sidebarGroupOrder}
+                      sidebarDndEnabled={sidebarDndEnabled}
+                      repoScopedGroupPathsByRepoGroup={repoScopedGroupPathsByRepoGroup}
+                      sidebarDroneOrderByGroup={sidebarDroneOrderByGroup}
+                      sidebarNodeOrderByParent={sidebarNodeOrderByParent}
+                      setSidebarGroupOrder={setSidebarGroupOrder}
+                      setSidebarNodeOrderByParent={setSidebarNodeOrderByParent}
+                      sidebarChatOrderByDrone={sidebarChatOrderByDrone}
+                      setSidebarChatOrderByDrone={setSidebarChatOrderByDrone}
+                      droneById={sidebarDroneById}
+                      selectedDroneIds={selectedDroneIds}
+                      selectedDroneSet={selectedDroneSet}
+                      selectedDrone={selectedDrone}
+                      activeChatName={activeChatName}
+                      selectedSidebarNodeId={selectedSidebarNodeId}
+                      selectedFolderPath={selectedFolderPath}
+                      setSelectedSidebarNodeId={setSelectedSidebarNodeId}
+                      onSelectFolder={handleGroupedSelectFolder}
+                      onSelectDroneCard={handleGroupedSelectDroneCard}
+                      onSelectDroneChat={handleGroupedSelectDroneChat}
+                      onMoveDronesToGroup={runOptimisticMoveDronesToGroup}
+                      onRenameGroup={runOptimisticRenameGroup}
+                      onToggleGroupCollapsed={onToggleGroupCollapsed}
+                      collapsedGroups={collapsedGroups}
+                      deletingGroups={deletingGroups}
+                      renamingGroups={renamingGroups}
+                      hiddenSidebarGroupTokenSet={hiddenSidebarGroupTokenSet}
+                      selectedGroupMultiChat={selectedGroupMultiChat}
+                      onOpenFolderCreate={openFolderCreate}
+                      onStartRenameFolder={startRenameFolder}
+                      onFolderEditorValueChange={updateFolderEditorValue}
+                      onSubmitFolderEditor={submitFolderEditor}
+                      onBlurFolderEditor={blurFolderEditor}
+                      onCancelFolderEditor={closeFolderEditor}
+                      folderEditor={folderEditor}
+                      folderEditorInputRef={folderEditorInputRef}
+                      toggleSidebarGroupHidden={toggleSidebarGroupHidden}
+                      onOpenGroupMultiChat={onOpenGroupMultiChat}
+                      onDeleteGroup={handleDeleteGroup}
+                      busyChatNodeIdSet={busyChatNodeIdSet}
+                      unreadAgentMessageByChatNodeId={unreadAgentMessageByChatNodeId}
+                      deletingDrones={deletingDrones}
+                      renamingDrones={renamingDrones}
+                      settingBaseImages={settingBaseImages}
+                      movingDroneGroups={movingDroneGroups}
+                      sidebarOptimisticDroneIdSet={sidebarOptimisticDroneIdSet}
+                      uiDroneName={uiDroneName}
+                      onDeleteDroneChat={onDeleteDroneChat}
+                      onOpenCloneModal={onOpenCloneModal}
+                      onCreateDroneChat={onCreateDroneChat}
+                      onRenameDroneChat={onRenameDroneChat}
+                      chatEditor={chatEditor}
+                      chatEditorInputRef={chatEditorInputRef}
+                      onOpenCreateDroneChat={openDroneChatCreate}
+                      onStartRenameDroneChat={startRenameDroneChat}
+                      onChatEditorValueChange={updateChatEditorValue}
+                      onSubmitChatEditor={submitChatEditor}
+                      onBlurChatEditor={blurChatEditor}
+                      onCancelChatEditor={closeChatEditor}
+                      onRenameDrone={onRenameDrone}
+                      onSetDroneBaseImage={onSetDroneBaseImage}
+                      onDeleteDrone={onDeleteDrone}
+                      onOpenDroneErrorModal={onOpenDroneErrorModal}
+                      onPrepareDroneDragStart={onPrepareDroneDragStart}
+                      onReparentDronesToParent={runOptimisticReparentDronesToParent}
+                      actionsEnabled={sidebarCapabilities.actions}
+                    />
+                  </>
+                  {sidebarCapabilities.dragAndDrop &&
+                    !isRepoGroupingMode &&
+                    !sidebarHasUngroupedGroup &&
+                    showExternalMoveTargets && (
+                      <div
+                        ref={setUngroupedDropNodeRef}
+                        className={`rounded-md border border-dashed px-3 py-2 text-[10px] font-semibold tracking-wide uppercase transition-colors ${
+                          dragOverUngrouped
+                            ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                            : 'border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                        }`}
+                        style={{ fontFamily: 'var(--display)' }}
+                      >
+                        Drop here to move to Ungrouped
+                      </div>
                     )}
-                  </div>
-                )}
+                </div>
+                {sidebarCapabilities.actions &&
+                  !isRepoGroupingMode &&
+                  (showExternalMoveTargets ||
+                    (createGroupTargetDroneIds && createGroupTargetDroneIds.length > 0)) && (
+                    <div
+                      ref={setCreateGroupDropNodeRef}
+                      className={`mt-1 rounded-md border border-dashed px-3 py-2 transition-colors ${
+                        dragOverCreateGroup ||
+                        (createGroupTargetDroneIds && createGroupTargetDroneIds.length > 0)
+                          ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)]'
+                          : 'border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)]'
+                      }`}
+                    >
+                      <div
+                        className="text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]"
+                        style={{ fontFamily: 'var(--display)' }}
+                      >
+                        {createGroupTargetDroneIds && createGroupTargetDroneIds.length > 0
+                          ? `Create new folder (${createGroupTargetDroneIds.length} drone${createGroupTargetDroneIds.length === 1 ? '' : 's'})`
+                          : 'Drop here to create a new folder'}
+                      </div>
+                      {createGroupTargetDroneIds && createGroupTargetDroneIds.length > 0 && (
+                        <form
+                          className="mt-2 flex flex-col gap-2"
+                          onSubmit={onSubmitCreateGroupInline}
+                        >
+                          <input
+                            ref={createGroupInputRef}
+                            value={createGroupName}
+                            onChange={(event) => setCreateGroupName(event.target.value)}
+                            disabled={creatingGroupMove}
+                            maxLength={64}
+                            placeholder="Folder name"
+                            className="w-full rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-2 py-1.5 text-[11px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
+                          />
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="submit"
+                              disabled={creatingGroupMove}
+                              className={`inline-flex h-7 items-center rounded px-2 text-[10px] font-semibold tracking-wide uppercase transition-all ${
+                                creatingGroupMove
+                                  ? 'cursor-not-allowed border border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                                  : 'border border-[var(--accent-muted)] bg-[rgba(167,139,250,.12)] text-[var(--accent)] hover:bg-[rgba(167,139,250,.18)]'
+                              }`}
+                              style={{ fontFamily: 'var(--display)' }}
+                            >
+                              {creatingGroupMove ? 'Creating…' : 'Create & move'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={closeCreateGroupInline}
+                              disabled={creatingGroupMove}
+                              className={`inline-flex h-7 items-center rounded px-2 text-[10px] font-semibold tracking-wide uppercase transition-all ${
+                                creatingGroupMove
+                                  ? 'cursor-not-allowed border border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                                  : 'border border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
+                              }`}
+                              style={{ fontFamily: 'var(--display)' }}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                          {createGroupInlineError && (
+                            <div className="text-[10px] text-[var(--red)]">
+                              {createGroupInlineError}
+                            </div>
+                          )}
+                        </form>
+                      )}
+                    </div>
+                  )}
               </>
             )}
           </div>
         </div>
 
-        {sidebarCapabilities.repoFooter || sidebarCapabilities.sidebarOptions || sidebarCapabilities.collapseControl ? <div className="flex-shrink-0 border-t border-[var(--border)] bg-[rgba(0,0,0,.12)]">
-          <div className="px-2.5 py-1.5 flex items-center gap-1.5">
-            {sidebarCapabilities.repoFooter ? <button
-              type="button"
-              onClick={() => setSidebarReposCollapsed((prev) => !prev)}
-              className="flex-1 min-w-0 inline-flex items-center gap-2 px-1.5 py-1 rounded text-left text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)] transition-all"
-              style={{ fontFamily: 'var(--display)' }}
-              title={sidebarReposCollapsed ? 'Expand repos list' : 'Collapse repos list'}
-              aria-label={sidebarReposCollapsed ? 'Expand repos list' : 'Collapse repos list'}
-            >
-              <IconChevron down={!sidebarReposCollapsed} className="opacity-70" />
-              <IconFolder className="opacity-60 w-3 h-3" />
-              <span className="truncate">Repos {repos.length > 0 ? repos.length : ''}</span>
-              {activeRepoPath ? (
-                <span className="ml-auto px-1.5 py-0.5 rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[9px] text-[var(--accent)]">
-                  Filtered
-                </span>
+        {sidebarCapabilities.repoFooter ||
+        sidebarCapabilities.sidebarOptions ||
+        sidebarCapabilities.collapseControl ? (
+          <div className="flex-shrink-0 border-t border-[var(--border)] bg-[rgba(0,0,0,.12)]">
+            <div className="px-2.5 py-1.5 flex items-center gap-1.5">
+              {sidebarCapabilities.repoFooter ? (
+                <button
+                  type="button"
+                  onClick={() => setSidebarReposCollapsed((prev) => !prev)}
+                  className="flex-1 min-w-0 inline-flex items-center gap-2 px-1.5 py-1 rounded text-left text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)] transition-all"
+                  style={{ fontFamily: 'var(--display)' }}
+                  title={sidebarReposCollapsed ? 'Expand repos list' : 'Collapse repos list'}
+                  aria-label={sidebarReposCollapsed ? 'Expand repos list' : 'Collapse repos list'}
+                >
+                  <IconChevron down={!sidebarReposCollapsed} className="opacity-70" />
+                  <IconFolder className="opacity-60 w-3 h-3" />
+                  <span className="truncate">Repos {repos.length > 0 ? repos.length : ''}</span>
+                  {activeRepoPath ? (
+                    <span className="ml-auto px-1.5 py-0.5 rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[9px] text-[var(--accent)]">
+                      Filtered
+                    </span>
+                  ) : null}
+                </button>
               ) : null}
-            </button> : null}
-            <div ref={footerOptionsMenuRef} className="relative flex flex-shrink-0 items-center gap-1">
-              {sidebarCapabilities.sidebarOptions ? <button
-                type="button"
-                onClick={() => {
-                  setHeaderActionsMenuOpen(false);
-                  setFooterOptionsMenuOpen((prev) => !prev);
-                }}
-                className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
-                  footerOptionsMenuOpen
-                    ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                    : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
-                }`}
-                title="Sidebar options"
-                aria-label="Sidebar options"
-                aria-haspopup="menu"
-                aria-expanded={footerOptionsMenuOpen}
+              <div
+                ref={footerOptionsMenuRef}
+                className="relative flex flex-shrink-0 items-center gap-1"
               >
-                <IconMore className="opacity-85" />
-              </button> : null}
-              {sidebarCapabilities.repoFooter ? <button
-                type="button"
-                onClick={onOpenReposModal}
-                className="inline-flex items-center justify-center w-7 h-7 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-all"
-                title={`Manage repos (${repos.length})`}
-                aria-label="Manage repos"
-              >
-                <IconSettings className="opacity-70" />
-              </button> : null}
-              {sidebarCapabilities.collapseControl ? <SidebarIconButton
-                onClick={collapseSidebarWithGuard}
-                className="border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] hover:bg-[var(--hover)]"
-                title="Collapse sidebar"
-                ariaLabel="Collapse sidebar"
-              >
-                <IconSidebarCollapse className={sidebarDirectionalIconClass} />
-              </SidebarIconButton> : null}
-              {sidebarCapabilities.sidebarOptions && footerOptionsMenuOpen ? (
-                <div className={`absolute right-0 bottom-full mb-2 w-[240px] z-50 ${dropdownPanelBaseClass}`} role="menu">
-                  <div className="py-1">
-                    <button
-                      type="button"
-                      onClick={() => setSidebarGroupingMode((prev) => (prev === 'groups' ? 'repos' : 'groups'))}
-                      className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
-                      role="menuitem"
-                    >
-                      <span>{isRepoGroupingMode ? 'Show real groups' : 'Show repos as groups'}</span>
-                      <IconFolder className={!isRepoGroupingMode ? 'opacity-80 text-[var(--accent)]' : 'opacity-65'} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setViewMode((prev) => (prev === 'grouped' ? 'flat' : 'grouped'))}
-                      className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
-                      role="menuitem"
-                    >
-                      <span>{viewMode === 'grouped' ? 'Switch to flat list' : 'Switch to grouped folders'}</span>
-                      {viewMode === 'flat' ? <IconList className="opacity-80 text-[var(--accent)]" /> : <IconTreeView className="opacity-65" />}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setFooterOptionsMenuOpen(false);
-                        toggleSidebarDockSide();
-                      }}
-                      className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
-                      role="menuitem"
-                    >
-                      <span>{sidebarDockActionLabel}</span>
-                      <IconSidebarExpand className={`opacity-65 ${sidebarDockSide === 'right' ? 'rotate-180' : ''}`} />
-                    </button>
-                    <div className="my-1 border-t border-[var(--border-subtle)]" />
-                    <button
-                      type="button"
-                      onClick={() => setShowHiddenSidebarGroups((prev) => !prev)}
-                      className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
-                      role="menuitem"
-                    >
-                      <span>
-                        {showHiddenSidebarGroups ? 'Hide hidden groups' : 'Show hidden groups'}
-                        {sidebarHiddenGroupCount > 0 ? ` (${sidebarHiddenGroupCount})` : ''}
-                      </span>
-                      {showHiddenSidebarGroups ? <IconEyeOff className="opacity-80 text-[var(--accent)]" /> : <IconEye className="opacity-65" />}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setAutoDelete((prev) => !prev)}
-                      className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
-                      role="menuitem"
-                    >
-                      <span>{autoDelete ? 'Delete confirm off' : 'Delete confirm on'}</span>
-                      <IconTrash className={autoDelete ? 'opacity-80 text-[var(--accent)]' : 'opacity-65'} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSidebarAutoMinimize((prev) => !prev)}
-                      className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
-                      role="menuitem"
-                    >
-                      <span>{sidebarAutoMinimize ? 'Disable auto-minimize' : 'Enable auto-minimize'}</span>
-                      <IconAutoMinimize className={sidebarAutoMinimize ? 'opacity-80 text-[var(--accent)]' : 'opacity-65'} />
-                    </button>
+                {sidebarCapabilities.sidebarOptions ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHeaderActionsMenuOpen(false);
+                      setFooterOptionsMenuOpen((prev) => !prev);
+                    }}
+                    className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
+                      footerOptionsMenuOpen
+                        ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                        : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                    }`}
+                    title="Sidebar options"
+                    aria-label="Sidebar options"
+                    aria-haspopup="menu"
+                    aria-expanded={footerOptionsMenuOpen}
+                  >
+                    <IconMore className="opacity-85" />
+                  </button>
+                ) : null}
+                {sidebarCapabilities.repoFooter ? (
+                  <button
+                    type="button"
+                    onClick={onOpenReposModal}
+                    className="inline-flex items-center justify-center w-7 h-7 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-all"
+                    title={`Manage repos (${repos.length})`}
+                    aria-label="Manage repos"
+                  >
+                    <IconSettings className="opacity-70" />
+                  </button>
+                ) : null}
+                {sidebarCapabilities.collapseControl ? (
+                  <SidebarIconButton
+                    onClick={collapseSidebarWithGuard}
+                    className="border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] hover:bg-[var(--hover)]"
+                    title="Collapse sidebar"
+                    ariaLabel="Collapse sidebar"
+                  >
+                    <IconSidebarCollapse className={sidebarDirectionalIconClass} />
+                  </SidebarIconButton>
+                ) : null}
+                {sidebarCapabilities.sidebarOptions && footerOptionsMenuOpen ? (
+                  <div
+                    className={`absolute right-0 bottom-full mb-2 w-[240px] z-50 ${dropdownPanelBaseClass}`}
+                    role="menu"
+                  >
+                    <div className="py-1">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSidebarGroupingMode((prev) => (prev === 'groups' ? 'repos' : 'groups'))
+                        }
+                        className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
+                        role="menuitem"
+                      >
+                        <span>
+                          {isRepoGroupingMode ? 'Show real groups' : 'Show repos as groups'}
+                        </span>
+                        <IconFolder
+                          className={
+                            !isRepoGroupingMode ? 'opacity-80 text-[var(--accent)]' : 'opacity-65'
+                          }
+                        />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setViewMode((prev) => (prev === 'grouped' ? 'flat' : 'grouped'))
+                        }
+                        className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
+                        role="menuitem"
+                      >
+                        <span>
+                          {viewMode === 'grouped'
+                            ? 'Switch to flat list'
+                            : 'Switch to grouped folders'}
+                        </span>
+                        {viewMode === 'flat' ? (
+                          <IconList className="opacity-80 text-[var(--accent)]" />
+                        ) : (
+                          <IconTreeView className="opacity-65" />
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFooterOptionsMenuOpen(false);
+                          toggleSidebarDockSide();
+                        }}
+                        className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
+                        role="menuitem"
+                      >
+                        <span>{sidebarDockActionLabel}</span>
+                        <IconSidebarExpand
+                          className={`opacity-65 ${sidebarDockSide === 'right' ? 'rotate-180' : ''}`}
+                        />
+                      </button>
+                      <div className="my-1 border-t border-[var(--border-subtle)]" />
+                      <button
+                        type="button"
+                        onClick={() => setShowHiddenSidebarGroups((prev) => !prev)}
+                        className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
+                        role="menuitem"
+                      >
+                        <span>
+                          {showHiddenSidebarGroups ? 'Hide hidden groups' : 'Show hidden groups'}
+                          {sidebarHiddenGroupCount > 0 ? ` (${sidebarHiddenGroupCount})` : ''}
+                        </span>
+                        {showHiddenSidebarGroups ? (
+                          <IconEyeOff className="opacity-80 text-[var(--accent)]" />
+                        ) : (
+                          <IconEye className="opacity-65" />
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAutoDelete((prev) => !prev)}
+                        className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
+                        role="menuitem"
+                      >
+                        <span>{autoDelete ? 'Delete confirm off' : 'Delete confirm on'}</span>
+                        <IconTrash
+                          className={autoDelete ? 'opacity-80 text-[var(--accent)]' : 'opacity-65'}
+                        />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSidebarAutoMinimize((prev) => !prev)}
+                        className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
+                        role="menuitem"
+                      >
+                        <span>
+                          {sidebarAutoMinimize ? 'Disable auto-minimize' : 'Enable auto-minimize'}
+                        </span>
+                        <IconAutoMinimize
+                          className={
+                            sidebarAutoMinimize ? 'opacity-80 text-[var(--accent)]' : 'opacity-65'
+                          }
+                        />
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ) : null}
+                ) : null}
+              </div>
             </div>
-          </div>
-          {sidebarCapabilities.repoFooter && !sidebarReposCollapsed && (
-            <div className="max-h-[190px] overflow-y-auto px-2 pb-2 flex flex-col gap-0.5">
-              <button
-                type="button"
-                onClick={() => setActiveRepoPath('')}
-                className={`w-full text-left px-2.5 py-2 rounded border transition-all ${
-                  !activeRepoPath
-                    ? 'bg-[var(--selected)] border-[var(--accent-muted)]'
-                    : 'border-transparent hover:border-[var(--border-subtle)] hover:bg-[var(--hover)]'
-                }`}
-                title="Show drones from all repos"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[11px] text-[var(--fg-secondary)]">All repos</span>
-                  <span className="text-[10px] font-mono text-[var(--muted-dim)]">{dronesCount}</span>
-                </div>
-              </button>
-              {repos
-                .slice()
-                .sort((a, b) => a.path.localeCompare(b.path))
-                .map((r) => {
-                  const p = String(r.path ?? '').trim();
-                  if (!p) return null;
-                  const selected = p === activeRepoPath;
-                  const base = r.github
-                    ? `${r.github.owner}/${r.github.repo}`
-                    : p.split(/[\\/]/).filter(Boolean).pop() || p;
-                  const droneCount = droneCountByRepoPath.get(p) ?? 0;
-                  return (
-                    <button
-                      key={p}
-                      type="button"
-                      onClick={() => setActiveRepoPath((prev) => (prev === p ? '' : p))}
-                      className={`w-full text-left px-2.5 py-2 rounded border transition-all ${
-                        selected
-                          ? 'bg-[var(--selected)] border-[var(--accent-muted)] shadow-[0_0_8px_rgba(167,139,250,.06)]'
-                          : 'border-transparent hover:border-[var(--border-subtle)] hover:bg-[var(--hover)]'
-                      }`}
-                      title={p}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <div className="text-[11px] text-[var(--fg-secondary)] truncate">{base}</div>
-                          <div className="text-[10px] text-[var(--muted-dim)] truncate font-mono mt-0.5">{p}</div>
+            {sidebarCapabilities.repoFooter && !sidebarReposCollapsed && (
+              <div className="max-h-[190px] overflow-y-auto px-2 pb-2 flex flex-col gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => setActiveRepoPath('')}
+                  className={`w-full text-left px-2.5 py-2 rounded border transition-all ${
+                    !activeRepoPath
+                      ? 'bg-[var(--selected)] border-[var(--accent-muted)]'
+                      : 'border-transparent hover:border-[var(--border-subtle)] hover:bg-[var(--hover)]'
+                  }`}
+                  title="Show drones from all repos"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-[var(--fg-secondary)]">All repos</span>
+                    <span className="text-[10px] font-mono text-[var(--muted-dim)]">
+                      {dronesCount}
+                    </span>
+                  </div>
+                </button>
+                {repos
+                  .slice()
+                  .sort((a, b) => a.path.localeCompare(b.path))
+                  .map((r) => {
+                    const p = String(r.path ?? '').trim();
+                    if (!p) return null;
+                    const selected = p === activeRepoPath;
+                    const base = r.github
+                      ? `${r.github.owner}/${r.github.repo}`
+                      : p.split(/[\\/]/).filter(Boolean).pop() || p;
+                    const droneCount = droneCountByRepoPath.get(p) ?? 0;
+                    return (
+                      <button
+                        key={p}
+                        type="button"
+                        onClick={() => setActiveRepoPath((prev) => (prev === p ? '' : p))}
+                        className={`w-full text-left px-2.5 py-2 rounded border transition-all ${
+                          selected
+                            ? 'bg-[var(--selected)] border-[var(--accent-muted)] shadow-[0_0_8px_rgba(167,139,250,.06)]'
+                            : 'border-transparent hover:border-[var(--border-subtle)] hover:bg-[var(--hover)]'
+                        }`}
+                        title={p}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="text-[11px] text-[var(--fg-secondary)] truncate">
+                              {base}
+                            </div>
+                            <div className="text-[10px] text-[var(--muted-dim)] truncate font-mono mt-0.5">
+                              {p}
+                            </div>
+                          </div>
+                          <span className="text-[10px] font-mono text-[var(--muted-dim)] mt-0.5">
+                            {droneCount}
+                          </span>
                         </div>
-                        <span className="text-[10px] font-mono text-[var(--muted-dim)] mt-0.5">{droneCount}</span>
-                      </div>
-                    </button>
-                  );
-                })}
-              {!reposLoading && repos.length === 0 && !reposError && (
-                <div className="px-2.5 py-3 text-[10px] text-[var(--muted-dim)]">
-                  No repos registered yet.
-                </div>
-              )}
-              {reposError && (
-                <div className="px-2.5 py-3 text-[10px] text-[var(--red)]">
-                  Failed to load repos.
-                </div>
-              )}
-            </div>
-          )}
-        </div> : null}
-
+                      </button>
+                    );
+                  })}
+                {!reposLoading && repos.length === 0 && !reposError && (
+                  <div className="px-2.5 py-3 text-[10px] text-[var(--muted-dim)]">
+                    No repos registered yet.
+                  </div>
+                )}
+                {reposError && (
+                  <div className="px-2.5 py-3 text-[10px] text-[var(--red)]">
+                    Failed to load repos.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ) : null}
       </aside>
 
       <div
@@ -2264,70 +3008,95 @@ export function DroneSidebar({
         >
           <IconSidebarExpand className={sidebarDirectionalIconClass} />
         </SidebarIconButton>
-        {sidebarCapabilities.collapsedRailActions && sidebarCapabilities.createDrones ? <SidebarIconButton
-          onClick={() => { setSidebarCollapsed(false); onOpenDraftChatComposer(); }}
-          className="border border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]"
-          title="Create drone"
-          ariaLabel="Create drone"
-          disabled={!collapsedRailInteractive}
-          tabIndex={collapsedRailInteractive ? 0 : -1}
-        >
-          <IconPlus className="opacity-80" />
-        </SidebarIconButton> : null}
-        {sidebarCapabilities.collapsedRailActions && sidebarCapabilities.createDrones ? <SidebarIconButton
-          onClick={() => { setSidebarCollapsed(false); onOpenCreateModal(); }}
-          className="border border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]"
-          title="Create multiple drones (S)"
-          ariaLabel="Create multiple drones"
-          disabled={!collapsedRailInteractive}
-          tabIndex={collapsedRailInteractive ? 0 : -1}
-        >
-          <IconPlusDouble className="opacity-80" />
-        </SidebarIconButton> : null}
-        {sidebarCapabilities.collapsedRailActions && sidebarCapabilities.headerActions ? <SidebarIconButton
-          onClick={() => { setSidebarCollapsed(false); onOpenKanbanBoard(); }}
-          className={`border ${
-            kanbanBoardOpen
-              ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-              : 'border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
-          }`}
-          title="Open task board"
-          ariaLabel="Open task board"
-          disabled={!collapsedRailInteractive}
-          tabIndex={collapsedRailInteractive ? 0 : -1}
-        >
-          <IconBoard className="opacity-80" />
-        </SidebarIconButton> : null}
-        {sidebarCapabilities.collapsedRailActions && sidebarCapabilities.headerActions ? <SidebarIconButton
-          onClick={() => { setSidebarCollapsed(false); onOpenPlaybookRuns(); }}
-          className={`border ${
-            playbookRunsOpen
-              ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-              : 'border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
-          }`}
-          title="Open playbook runs"
-          ariaLabel="Open playbook runs"
-          disabled={!collapsedRailInteractive}
-          tabIndex={collapsedRailInteractive ? 0 : -1}
-        >
-          <IconList className="opacity-80" />
-        </SidebarIconButton> : null}
-        {sidebarCapabilities.collapsedRailActions && sidebarCapabilities.headerActions ? <SidebarIconButton
-          onClick={() => { setSidebarCollapsed(false); onOpenVisibleMultiChat(); }}
-          className={`border ${
-            sidebarVisibleDroneCount === 0
-              ? 'border-[var(--border-subtle)] text-[var(--muted-dim)] opacity-50 cursor-not-allowed'
-              : sidebarVisibleMultiChatActive
+        {sidebarCapabilities.collapsedRailActions && sidebarCapabilities.createDrones ? (
+          <SidebarIconButton
+            onClick={() => {
+              setSidebarCollapsed(false);
+              onOpenDraftChatComposer();
+            }}
+            className="border border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]"
+            title="Create drone"
+            ariaLabel="Create drone"
+            disabled={!collapsedRailInteractive}
+            tabIndex={collapsedRailInteractive ? 0 : -1}
+          >
+            <IconPlus className="opacity-80" />
+          </SidebarIconButton>
+        ) : null}
+        {sidebarCapabilities.collapsedRailActions && sidebarCapabilities.createDrones ? (
+          <SidebarIconButton
+            onClick={() => {
+              setSidebarCollapsed(false);
+              onOpenCreateModal();
+            }}
+            className="border border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]"
+            title="Create multiple drones (S)"
+            ariaLabel="Create multiple drones"
+            disabled={!collapsedRailInteractive}
+            tabIndex={collapsedRailInteractive ? 0 : -1}
+          >
+            <IconPlusDouble className="opacity-80" />
+          </SidebarIconButton>
+        ) : null}
+        {sidebarCapabilities.collapsedRailActions && sidebarCapabilities.headerActions ? (
+          <SidebarIconButton
+            onClick={() => {
+              setSidebarCollapsed(false);
+              onOpenKanbanBoard();
+            }}
+            className={`border ${
+              kanbanBoardOpen
                 ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                 : 'border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
-          }`}
-          title={`Open multi-chat for ${sidebarVisibleDroneCount} visible drone${sidebarVisibleDroneCount === 1 ? '' : 's'}`}
-          ariaLabel={`Open multi-chat for ${sidebarVisibleDroneCount} visible drone${sidebarVisibleDroneCount === 1 ? '' : 's'}`}
-          disabled={!collapsedRailInteractive || sidebarVisibleDroneCount === 0}
-          tabIndex={collapsedRailInteractive && sidebarVisibleDroneCount > 0 ? 0 : -1}
-        >
-          <IconColumns className="opacity-80" />
-        </SidebarIconButton> : null}
+            }`}
+            title="Open task board"
+            ariaLabel="Open task board"
+            disabled={!collapsedRailInteractive}
+            tabIndex={collapsedRailInteractive ? 0 : -1}
+          >
+            <IconBoard className="opacity-80" />
+          </SidebarIconButton>
+        ) : null}
+        {sidebarCapabilities.collapsedRailActions && sidebarCapabilities.headerActions ? (
+          <SidebarIconButton
+            onClick={() => {
+              setSidebarCollapsed(false);
+              onOpenPlaybookRuns();
+            }}
+            className={`border ${
+              playbookRunsOpen
+                ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                : 'border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
+            }`}
+            title="Open playbook runs"
+            ariaLabel="Open playbook runs"
+            disabled={!collapsedRailInteractive}
+            tabIndex={collapsedRailInteractive ? 0 : -1}
+          >
+            <IconList className="opacity-80" />
+          </SidebarIconButton>
+        ) : null}
+        {sidebarCapabilities.collapsedRailActions && sidebarCapabilities.headerActions ? (
+          <SidebarIconButton
+            onClick={() => {
+              setSidebarCollapsed(false);
+              onOpenVisibleMultiChat();
+            }}
+            className={`border ${
+              sidebarVisibleDroneCount === 0
+                ? 'border-[var(--border-subtle)] text-[var(--muted-dim)] opacity-50 cursor-not-allowed'
+                : sidebarVisibleMultiChatActive
+                  ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                  : 'border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
+            }`}
+            title={`Open multi-chat for ${sidebarVisibleDroneCount} visible drone${sidebarVisibleDroneCount === 1 ? '' : 's'}`}
+            ariaLabel={`Open multi-chat for ${sidebarVisibleDroneCount} visible drone${sidebarVisibleDroneCount === 1 ? '' : 's'}`}
+            disabled={!collapsedRailInteractive || sidebarVisibleDroneCount === 0}
+            tabIndex={collapsedRailInteractive && sidebarVisibleDroneCount > 0 ? 0 : -1}
+          >
+            <IconColumns className="opacity-80" />
+          </SidebarIconButton>
+        ) : null}
       </div>
     </>
   );

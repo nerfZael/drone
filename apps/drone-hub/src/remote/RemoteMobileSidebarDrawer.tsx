@@ -11,6 +11,7 @@ type RemoteMobileSidebarDrawerProps = {
   onOpenChange: (open: boolean) => void;
   onSelectDrone: (droneId: string) => void;
   onSelectChat: (chatName: string) => void;
+  onOpenCreateDrone: () => void;
 };
 
 type TouchPoint = {
@@ -21,8 +22,8 @@ type TouchPoint = {
 const SWIPE_DISTANCE_PX = 56;
 const SWIPE_VERTICAL_TOLERANCE_PX = 72;
 
-function touchPoint(touch: React.Touch): TouchPoint {
-  return { x: touch.clientX, y: touch.clientY };
+function pointerPoint(event: React.PointerEvent): TouchPoint {
+  return { x: event.clientX, y: event.clientY };
 }
 
 function isHorizontalSwipe(start: TouchPoint | null, end: TouchPoint, direction: 'left' | 'right'): boolean {
@@ -33,7 +34,7 @@ function isHorizontalSwipe(start: TouchPoint | null, end: TouchPoint, direction:
   return direction === 'right' ? deltaX >= SWIPE_DISTANCE_PX : deltaX <= -SWIPE_DISTANCE_PX;
 }
 
-export function RemoteMobileSidebarDrawer({
+function RemoteMobileSidebarDrawerComponent({
   open,
   drones,
   selectedDroneId,
@@ -41,6 +42,7 @@ export function RemoteMobileSidebarDrawer({
   onOpenChange,
   onSelectDrone,
   onSelectChat,
+  onOpenCreateDrone,
 }: RemoteMobileSidebarDrawerProps) {
   const setSidebarCollapsed = useDroneHubUiStore((state) => state.setSidebarCollapsed);
   const drawerSwipeStartRef = React.useRef<TouchPoint | null>(null);
@@ -49,15 +51,17 @@ export function RemoteMobileSidebarDrawer({
     if (open) setSidebarCollapsed(false);
   }, [open, setSidebarCollapsed]);
 
-  const beginDrawerSwipe = React.useCallback((event: React.TouchEvent) => {
-    const touch = event.touches[0];
-    drawerSwipeStartRef.current = touch ? touchPoint(touch) : null;
+  const beginDrawerPointerSwipe = React.useCallback((event: React.PointerEvent) => {
+    if (event.pointerType !== 'touch' && event.pointerType !== 'pen') {
+      drawerSwipeStartRef.current = null;
+      return;
+    }
+    drawerSwipeStartRef.current = pointerPoint(event);
   }, []);
 
-  const endDrawerSwipe = React.useCallback(
-    (event: React.TouchEvent) => {
-      const touch = event.changedTouches[0];
-      if (touch && isHorizontalSwipe(drawerSwipeStartRef.current, touchPoint(touch), 'left')) {
+  const endDrawerPointerSwipe = React.useCallback(
+    (event: React.PointerEvent) => {
+      if ((event.pointerType === 'touch' || event.pointerType === 'pen') && isHorizontalSwipe(drawerSwipeStartRef.current, pointerPoint(event), 'left')) {
         onOpenChange(false);
       }
       drawerSwipeStartRef.current = null;
@@ -97,18 +101,17 @@ export function RemoteMobileSidebarDrawer({
           onClick={() => onOpenChange(false)}
         />
         <div
-          className={`absolute inset-y-0 left-0 flex overflow-hidden shadow-[18px_0_60px_rgba(0,0,0,.36)] transition-transform duration-200 ease-out ${
-            open ? 'translate-x-0' : '-translate-x-full'
-          }`}
+          className="absolute inset-y-0 left-0 flex overflow-hidden shadow-[18px_0_60px_rgba(0,0,0,.36)] transition-transform duration-200 ease-out"
           style={{
-            width: 'min(88vw, 320px)',
-            maxWidth: 'calc(100vw - 44px)',
+            width: '100vw',
+            maxWidth: '100vw',
             touchAction: 'pan-y',
             overscrollBehavior: 'contain',
+            transform: open ? 'none' : 'translate3d(-100%, 0, 0)',
           }}
-          onTouchStart={beginDrawerSwipe}
-          onTouchEnd={endDrawerSwipe}
-          onTouchCancel={() => {
+          onPointerDown={beginDrawerPointerSwipe}
+          onPointerUp={endDrawerPointerSwipe}
+          onPointerCancel={() => {
             drawerSwipeStartRef.current = null;
           }}
         >
@@ -118,9 +121,13 @@ export function RemoteMobileSidebarDrawer({
             activeChatName={activeChatName}
             onSelectDrone={selectDrone}
             onSelectChat={selectChat}
+            onOpenCreateDrone={onOpenCreateDrone}
+            fillContainer={true}
           />
         </div>
       </div>
     </div>
   );
 }
+
+export const RemoteMobileSidebarDrawer = React.memo(RemoteMobileSidebarDrawerComponent);

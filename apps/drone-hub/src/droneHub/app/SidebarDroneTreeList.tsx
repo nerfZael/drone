@@ -304,6 +304,7 @@ const SidebarDroneRow = React.memo(function SidebarDroneRow({
     data: dragData,
     disabled: dragDisabled,
   });
+  const reorderDropDisabled = !groupOrderKey || dragDisabled;
   const { setNodeRef } = useDroppable({
     id: groupOrderKey ? createDroneReorderDropId(groupOrderKey, drone.id) : `sidebar-drone-static:${drone.id}`,
     data: groupOrderKey
@@ -314,7 +315,7 @@ const SidebarDroneRow = React.memo(function SidebarDroneRow({
           groupName: groupName ?? null,
         }
       : undefined,
-    disabled: !groupOrderKey || dragDisabled,
+    disabled: reorderDropDisabled,
   });
 
   return (
@@ -322,7 +323,7 @@ const SidebarDroneRow = React.memo(function SidebarDroneRow({
       className={`relative flex items-stretch gap-1 rounded-md transition-colors ${
         dragOverParenting ? 'bg-[rgba(80,130,255,.10)] ring-1 ring-[rgba(90,140,255,.34)]' : ''
       }`}
-      ref={setNodeRef}
+      ref={reorderDropDisabled ? undefined : setNodeRef}
     >
       {dragOverPlacement ? <SidebarReorderDropIndicator placement={dragOverPlacement} /> : null}
       <div className="min-w-0 flex-1">
@@ -337,11 +338,11 @@ const SidebarDroneRow = React.memo(function SidebarDroneRow({
           showGroup={showGroup}
           leadingIcon={<IconDrone className={densityClasses.leadingIcon} />}
           onClick={(rowOpts) => onSelectDroneCard(drone.id, rowOpts)}
-          dragNodeRef={setDragNodeRef}
+          dragNodeRef={dragDisabled ? undefined : setDragNodeRef}
           draggable={!dragDisabled}
           dragging={isDragging}
-          dragAttributes={attributes as unknown as Record<string, unknown>}
-          dragListeners={listeners as unknown as Record<string, unknown>}
+          dragAttributes={dragDisabled ? undefined : attributes as unknown as Record<string, unknown>}
+          dragListeners={dragDisabled ? undefined : listeners as unknown as Record<string, unknown>}
           onClone={actionsEnabled ? () => onOpenCloneModal(drone) : undefined}
           onCreateChat={actionsEnabled ? () => onOpenCreateDroneChat(drone) : undefined}
           onRename={actionsEnabled ? () => onRenameDrone(drone.id) : undefined}
@@ -425,10 +426,11 @@ const SidebarChatRow = React.memo(function SidebarChatRow({
     () => createSidebarChatDragData(drone.id, chatName, `${uiDroneName(drone.name)} / ${chatName}`),
     [chatName, drone.id, drone.name, uiDroneName],
   );
+  const chatDndDisabled = editing || !sidebarDndEnabled || !chatDragData || movingDroneGroups || isOptimistic;
   const { attributes, listeners, isDragging, setNodeRef: setDragNodeRef } = useDraggable({
     id: `sidebar-chat:${chatKey}`,
     data: chatDragData ?? undefined,
-    disabled: editing || !sidebarDndEnabled || !chatDragData || movingDroneGroups || isOptimistic,
+    disabled: chatDndDisabled,
   });
   const { setNodeRef } = useDroppable({
     id: createChatReorderDropId(drone.id, chatName),
@@ -437,7 +439,7 @@ const SidebarChatRow = React.memo(function SidebarChatRow({
       droneId: drone.id,
       chatName,
     },
-    disabled: editing || !sidebarDndEnabled || movingDroneGroups || isOptimistic,
+    disabled: chatDndDisabled,
   });
 
   if (editing) {
@@ -470,13 +472,13 @@ const SidebarChatRow = React.memo(function SidebarChatRow({
   }
 
   return (
-    <div key={chatKey} ref={setNodeRef} className="relative flex items-stretch gap-1 group/chat-row">
+    <div key={chatKey} ref={chatDndDisabled ? undefined : setNodeRef} className="relative flex items-stretch gap-1 group/chat-row">
       {dragOverPlacement ? <SidebarReorderDropIndicator placement={dragOverPlacement} /> : null}
       <button
-        ref={setDragNodeRef}
+        ref={chatDndDisabled ? undefined : setDragNodeRef}
         type="button"
-        {...(attributes as unknown as Record<string, unknown>)}
-        {...(listeners as unknown as Record<string, unknown>)}
+        {...(chatDndDisabled ? {} : attributes as unknown as Record<string, unknown>)}
+        {...(chatDndDisabled ? {} : listeners as unknown as Record<string, unknown>)}
         onClick={(event) => {
           event.stopPropagation();
           onSelectDroneChat(drone.id, chatName);
@@ -568,6 +570,7 @@ function SidebarDroneChildrenSection({
   className: string;
   children: React.ReactNode;
 }) {
+  const dropDisabled = !sidebarDndEnabled || movingDroneGroups || isOptimistic;
   const { setNodeRef } = useDroppable({
     id: createDroneChildrenDropId(droneId),
     data: {
@@ -575,12 +578,12 @@ function SidebarDroneChildrenSection({
       droneId,
       groupOrderKey: groupOrderKey ?? null,
     },
-    disabled: !sidebarDndEnabled || movingDroneGroups || isOptimistic,
+    disabled: dropDisabled,
   });
 
   return (
     <div
-      ref={setNodeRef}
+      ref={dropDisabled ? undefined : setNodeRef}
       className={`${className} rounded-md transition-colors ${
         highlighted ? 'bg-[rgba(80,130,255,.08)] ring-1 ring-[rgba(90,140,255,.24)]' : ''
       }`}
