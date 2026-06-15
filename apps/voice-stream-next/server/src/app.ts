@@ -221,8 +221,8 @@ function cleanCode(raw: unknown, label: string): string {
   return value;
 }
 
-function cleanVoiceStreamMode(raw: string): 'assistant' | 'patch' | 'clipboard' {
-  return raw === 'patch' || raw === 'clipboard' ? raw : 'assistant';
+function cleanVoiceStreamMode(raw: string): 'assistant' | 'patch' | 'clipboard' | 'smart' {
+  return raw === 'patch' || raw === 'clipboard' || raw === 'smart' ? raw : 'assistant';
 }
 
 function cleanSpeechPlaybackTarget(raw: unknown): SpeechPlaybackTarget {
@@ -776,7 +776,7 @@ function resolveGroqTtsCredential(db: VoiceStreamNextDb, userId: string): GroqCr
 }
 
 function requireVoiceSessionSpeechReadiness(db: VoiceStreamNextDb, userId: string, mode: string): void {
-  if (mode !== 'assistant' && mode !== 'clipboard') return;
+  if (mode !== 'assistant' && mode !== 'clipboard' && mode !== 'smart') return;
   const credential = resolveGroqCredential(db, userId);
   if (!credential || credential.source !== 'platform_groq_key') return;
   if (db.creditBalanceMicrocredits(userId) > 0) return;
@@ -3926,15 +3926,23 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     let finalized = false;
     let terminalFinalize: TerminalCommand | null = null;
     const chunks: Uint8Array[] = [];
+    const smartTranscriptSegments: string[] = [];
     const startedAt = Date.now();
     let pausedAt: number | null = null;
     let accumulatedPausedMs = 0;
     let durationLimit: ReturnType<typeof setTimeout> | null = null;
     const streamingEnabled = streamingTranscriptionEnabled() || Boolean(groqSpeechCredential);
+    const smartTranscriptionEnabled = streamMode === 'smart' && streamingEnabled;
     const commandDetectionEnabled = streamingEnabled && !ignoreCommands;
+    const storeRawAudioChunks = streamMode !== 'smart';
     const transcriptionConfig = buildStreamingTranscriptionConfigFromEnv();
-    const streamingManager = commandDetectionEnabled
-      ? new StreamingTranscriptionManager(transcriptionConfig, (command) => {
+    let discardRecording = false;
+    const streamingManager = commandDetectionEnabled || smartTranscriptionEnabled
+      ? new StreamingTranscriptionManager({
+          ...transcriptionConfig,
+          detectTerminalCommands: commandDetectionEnabled,
+          finalTranscriptionMode: smartTranscriptionEnabled ? 'segments' : transcriptionConfig.finalTranscriptionMode,
+        }, (command) => {
           if (finalized || terminalFinalize) return;
           terminalFinalize = command;
           if ((socket as any).readyState === 1) {
@@ -3976,6 +3984,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           void finalizeVoiceStream();
         }, (detection) => {
           if (finalized || terminalFinalize) return;
+          if (smartTranscriptionEnabled) return;
           if ((socket as any).readyState === 1) {
             socket.send(
               JSON.stringify({
@@ -4031,6 +4040,20 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
               deviceId: device.id,
               source: `voice_stream_${source}`,
             });
+          },
+          onSegment: (segment) => {
+            if (!smartTranscriptionEnabled || finalized) return;
+            smartTranscriptSegments.push(segment.text);
+            if ((socket as any).readyState === 1) {
+              socket.send(JSON.stringify({
+                type: 'transcript_segment',
+                mode: streamMode,
+                text: segment.text,
+                audioMs: segment.audioMs,
+                sequence: segment.sequence,
+                receivedAt: segment.receivedAt,
+              }));
+            }
           },
         })
       : null;
@@ -4151,6 +4174,17 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           resumeVoiceStream(parsed.reason);
           return;
         }
+        if (parsed.type === 'cancel') {
+          discardRecording = true;
+          terminalFinalize = {
+            type: 'abort',
+            phrase: parsed.reason || 'cancelled',
+            detectedAt: new Date().toISOString(),
+            transcriptText: '',
+          };
+          void finalizeVoiceStream();
+          return;
+        }
         if (parsed.type === 'end') {
           void finalizeVoiceStream();
         }
@@ -4166,10 +4200,12 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       }
       const chunk = binaryChunk(data);
       if (chunk) {
-        const copy = new Uint8Array(chunk);
-        chunks.push(copy);
-        storedBytes += copy.byteLength;
-        streamingManager?.appendPcm(copy);
+        if (storeRawAudioChunks) {
+          const storedChunk = new Uint8Array(chunk);
+          chunks.push(storedChunk);
+          storedBytes += storedChunk.byteLength;
+        }
+        streamingManager?.appendPcm(chunk);
       }
     });
 
@@ -4202,6 +4238,8 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           transcript = '';
         } else if (terminalFinalize?.transcriptText) {
           transcript = terminalFinalize.transcriptText.trim();
+        } else if (streamMode === 'smart') {
+          transcript = smartTranscriptSegments.join(' ').trim();
         } else {
           if (groqSpeechCredential?.source === 'platform_groq_key' && recordingPcm.byteLength >= 1600) {
             db.requirePositiveCreditBalance(device.userId, 'Groq speech transcription');
@@ -4225,7 +4263,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           if (approvalCode) {
             addApprovalCode(device.userId, { voiceSessionId: session.id, code: approvalCode, source: device.deviceType });
           }
-          if (streamMode === 'clipboard') {
+          if (streamMode === 'clipboard' || streamMode === 'smart') {
             if ((socket as any).readyState === 1) {
               if (terminalFinalize?.type !== 'finish') {
                 socket.send(JSON.stringify({ type: 'finish', mode: streamMode, transcriptText: transcript }));
@@ -4303,7 +4341,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           }
         } else if (terminalFinalize?.type === 'abort' && (socket as any).readyState === 1) {
           socket.send(JSON.stringify({ type: 'abort', mode: streamMode, transcriptText: '' }));
-        } else if (!terminalFinalize && streamMode === 'clipboard' && (socket as any).readyState === 1) {
+        } else if (!terminalFinalize && (streamMode === 'clipboard' || streamMode === 'smart') && (socket as any).readyState === 1) {
           socket.send(JSON.stringify({ type: 'finish', mode: streamMode, transcriptText: '' }));
         }
       } catch (error: any) {
@@ -4318,7 +4356,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           socket.send(JSON.stringify({ type: 'assistant_error', error: error?.message ?? String(error) }));
         }
       } finally {
-        if (recordingMode) {
+        if (recordingMode && !discardRecording) {
           try {
             const saved = saveVoiceRecording({
               db,

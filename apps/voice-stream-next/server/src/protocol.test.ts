@@ -41,7 +41,7 @@ describe('parseControlClientMessage', () => {
 });
 
 describe('parseVoiceClientMessage', () => {
-  test('accepts pause and resume messages', () => {
+  test('accepts pause, resume, and cancel messages', () => {
     expect(parseVoiceClientMessage(JSON.stringify({ type: 'pause', reason: 'thinking' }))).toEqual({
       type: 'pause',
       reason: 'thinking',
@@ -49,6 +49,10 @@ describe('parseVoiceClientMessage', () => {
     expect(parseVoiceClientMessage(JSON.stringify({ type: 'resume', reason: 'ready' }))).toEqual({
       type: 'resume',
       reason: 'ready',
+    });
+    expect(parseVoiceClientMessage(JSON.stringify({ type: 'cancel', reason: 'discard draft' }))).toEqual({
+      type: 'cancel',
+      reason: 'discard draft',
     });
   });
 

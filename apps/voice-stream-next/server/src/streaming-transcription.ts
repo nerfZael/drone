@@ -31,6 +31,7 @@ export type StreamingTranscriptionConfig = {
   sampleRateHz: number;
   channels: number;
   ignoreEmptyFinishCommands: boolean;
+  detectTerminalCommands: boolean;
   finalTranscriptionMode: 'full-recording' | 'segments';
   maxSessionAudioBytes: number;
 };
@@ -39,6 +40,7 @@ export type StreamingTranscriptionHooks = {
   transcribe?: (pcm: Uint8Array) => Promise<RuntimeResult>;
   beforeTranscription?: (pcm: Uint8Array, source: 'segment' | 'final') => void;
   onTranscription?: (result: RuntimeResult, source: 'segment' | 'final') => void;
+  onSegment?: (segment: { text: string; audioMs: number; sequence: number; receivedAt: string }) => void;
 };
 
 type QueuedSegment = {
@@ -78,6 +80,7 @@ export function buildStreamingTranscriptionConfigFromEnv(env: NodeJS.ProcessEnv 
     sampleRateHz: 16_000,
     channels: 1,
     ignoreEmptyFinishCommands: env.VOICE_STREAM_NEXT_IGNORE_EMPTY_FINISH_COMMANDS === '1' || env.VOICE_STREAM_NEXT_IGNORE_EMPTY_SLEEP_COMMANDS === '1',
+    detectTerminalCommands: true,
     finalTranscriptionMode: parseFinalTranscriptionMode(env.VOICE_STREAM_NEXT_FINAL_TRANSCRIPTION_MODE),
     maxSessionAudioBytes: parsePositiveInteger(env.VOICE_STREAM_NEXT_MAX_SESSION_AUDIO_BYTES, 80 * 1024 * 1024),
   };
@@ -161,6 +164,20 @@ export class StreamingTranscriptionManager {
     this.hooks.onTranscription?.(result, 'segment');
     if (this.stopped || this.terminalCommandDetected) return;
 
+    if (!this.config.detectTerminalCommands) {
+      const text = normalizeTranscriptWhitespace(result.text);
+      if (hasTranscriptContent(text)) {
+        this.rememberTranscript(text);
+        this.hooks.onSegment?.({
+          text,
+          audioMs: segment.audioMs,
+          sequence: segment.sequence,
+          receivedAt: new Date().toISOString(),
+        });
+      }
+      return;
+    }
+
     const commandResult = stripTranscriptCommands(result.text);
     if (commandResult.abortDetected) {
       this.enterTerminalCommandState({ clearContext: true });
@@ -227,6 +244,12 @@ export class StreamingTranscriptionManager {
 
     if (hasTranscriptContent(commandResult.text)) {
       this.rememberTranscript(commandResult.text);
+      this.hooks.onSegment?.({
+        text: commandResult.text,
+        audioMs: segment.audioMs,
+        sequence: segment.sequence,
+        receivedAt: new Date().toISOString(),
+      });
     }
   }
 

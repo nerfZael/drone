@@ -19,6 +19,14 @@ const DEFAULT_TRANSCRIPTION_SHORTCUT = {
   alt: false,
   shift: true,
 };
+const DEFAULT_SMART_TRANSCRIPTION_SHORTCUT = {
+  key: 's',
+  mod: true,
+  ctrl: false,
+  meta: false,
+  alt: true,
+  shift: false,
+};
 const DEFAULT_AWAKE_SLEEP_TOGGLE_SHORTCUT = {
   key: 'a',
   mod: true,
@@ -77,6 +85,8 @@ const state = {
   transcriptionReturnMode: null,
   transcriptionReturnStatus: '',
   transcriptionOverlayRestore: null,
+  smartTranscriptText: '',
+  smartRestarting: false,
   mode: 'off',
   voiceSettings: null,
   recognition: null,
@@ -156,6 +166,10 @@ const els = {
   transcriptionShortcutClear: document.querySelector('#transcriptionShortcutClear'),
   transcriptionShortcutReset: document.querySelector('#transcriptionShortcutReset'),
   transcriptionShortcutStatus: document.querySelector('#transcriptionShortcutStatus'),
+  smartTranscriptionShortcutCapture: document.querySelector('#smartTranscriptionShortcutCapture'),
+  smartTranscriptionShortcutClear: document.querySelector('#smartTranscriptionShortcutClear'),
+  smartTranscriptionShortcutReset: document.querySelector('#smartTranscriptionShortcutReset'),
+  smartTranscriptionShortcutStatus: document.querySelector('#smartTranscriptionShortcutStatus'),
   awakeSleepToggleShortcutCapture: document.querySelector('#awakeSleepToggleShortcutCapture'),
   awakeSleepToggleShortcutClear: document.querySelector('#awakeSleepToggleShortcutClear'),
   awakeSleepToggleShortcutReset: document.querySelector('#awakeSleepToggleShortcutReset'),
@@ -177,6 +191,13 @@ const els = {
   callRecorderAction: document.querySelector('#callRecorderAction'),
   callRecorderOpenButton: document.querySelector('#callRecorderOpenButton'),
   callRecorderStatus: document.querySelector('#callRecorderStatus'),
+  smartTranscriptionButton: document.querySelector('#smartTranscriptionButton'),
+  smartTranscriptionAction: document.querySelector('#smartTranscriptionAction'),
+  smartTranscriptPanel: document.querySelector('#smartTranscriptPanel'),
+  smartTranscriptMeta: document.querySelector('#smartTranscriptMeta'),
+  smartTranscriptText: document.querySelector('#smartTranscriptText'),
+  smartTranscriptCancelButton: document.querySelector('#smartTranscriptCancelButton'),
+  smartTranscriptSubmitButton: document.querySelector('#smartTranscriptSubmitButton'),
   extensionsConfigInput: document.querySelector('#extensionsConfigInput'),
   addExtensionFileButton: document.querySelector('#addExtensionFileButton'),
   extensionDropzone: document.querySelector('#extensionDropzone'),
@@ -276,6 +297,7 @@ function readFormConfig() {
     assistantSpeechPlaybackEnabled: state.config?.assistantSpeechPlaybackEnabled !== false,
     suppressWakeDuringPlayback: els.suppressWakeDuringPlaybackCheckbox?.checked === true,
     transcriptionShortcut: sanitizeShortcutBinding(state.config?.transcriptionShortcut, DEFAULT_TRANSCRIPTION_SHORTCUT),
+    smartTranscriptionShortcut: sanitizeShortcutBinding(state.config?.smartTranscriptionShortcut, DEFAULT_SMART_TRANSCRIPTION_SHORTCUT),
     awakeSleepToggleShortcut: sanitizeShortcutBinding(state.config?.awakeSleepToggleShortcut, DEFAULT_AWAKE_SLEEP_TOGGLE_SHORTCUT),
     turnOffShortcut: sanitizeShortcutBinding(state.config?.turnOffShortcut, DEFAULT_TURN_OFF_SHORTCUT),
     pauseResumeShortcut: sanitizeShortcutBinding(state.config?.pauseResumeShortcut, DEFAULT_PAUSE_RESUME_SHORTCUT),
@@ -589,6 +611,7 @@ function applyConfig(config) {
   state.config = {
     ...config,
     transcriptionShortcut: sanitizeShortcutBinding(config?.transcriptionShortcut, DEFAULT_TRANSCRIPTION_SHORTCUT),
+    smartTranscriptionShortcut: sanitizeShortcutBinding(config?.smartTranscriptionShortcut, DEFAULT_SMART_TRANSCRIPTION_SHORTCUT),
     awakeSleepToggleShortcut: sanitizeShortcutBinding(config?.awakeSleepToggleShortcut, DEFAULT_AWAKE_SLEEP_TOGGLE_SHORTCUT),
     turnOffShortcut: sanitizeShortcutBinding(config?.turnOffShortcut, DEFAULT_TURN_OFF_SHORTCUT),
     pauseResumeShortcut: sanitizeShortcutBinding(config?.pauseResumeShortcut, DEFAULT_PAUSE_RESUME_SHORTCUT),
@@ -632,7 +655,7 @@ function applyConfig(config) {
 
 function normalizeShortcutStatusPayload(status) {
   if (!status) return null;
-  if (status.transcription || status.awakeSleepToggle || status.turnOff || status.pauseResume) return status;
+  if (status.transcription || status.smartTranscription || status.awakeSleepToggle || status.turnOff || status.pauseResume) return status;
   if (typeof status.registered === 'boolean') return { transcription: status };
   return status;
 }
@@ -647,6 +670,15 @@ function renderShortcutSettings() {
       statusEl: els.transcriptionShortcutStatus,
       statusKey: 'transcription',
       disabledLabel: 'Background transcription shortcut is disabled.',
+    },
+    {
+      configKey: 'smartTranscriptionShortcut',
+      defaultBinding: DEFAULT_SMART_TRANSCRIPTION_SHORTCUT,
+      captureEl: els.smartTranscriptionShortcutCapture,
+      clearEl: els.smartTranscriptionShortcutClear,
+      statusEl: els.smartTranscriptionShortcutStatus,
+      statusKey: 'smartTranscription',
+      disabledLabel: 'Smart transcription shortcut is disabled.',
     },
     {
       configKey: 'awakeSleepToggleShortcut',
@@ -1127,6 +1159,7 @@ function updateVoiceButtons() {
   const streaming = Boolean(state.voiceSocket || state.stream);
   const callRecorderMode = normalizeCallRecorderStatus(state.callRecorder).mode;
   const callRecorderBusy = callRecorderMode === 'recording' || callRecorderMode === 'transcribing';
+  const smartActive = state.voiceTarget === 'smart' && ['recording', 'paused', 'transcribing'].includes(state.mode);
   const labels = {
     off: ['Off', 'Start voice'],
     awake: ['Awake', 'Sleep'],
@@ -1136,7 +1169,13 @@ function updateVoiceButtons() {
     transcribing: ['Working', 'Please wait'],
     error: ['Voice error', 'Retry'],
   };
-  const [modeLabel, actionLabel] = state.voiceTarget === 'clipboard' && state.mode === 'recording'
+  const [modeLabel, actionLabel] = state.voiceTarget === 'smart' && state.mode === 'recording'
+    ? ['Smart', 'Listening']
+    : state.voiceTarget === 'smart' && state.mode === 'paused'
+      ? ['Smart paused', 'Resume']
+    : state.voiceTarget === 'smart' && state.mode === 'transcribing'
+      ? ['Smart', 'Saving']
+    : state.voiceTarget === 'clipboard' && state.mode === 'recording'
     ? ['Recording', 'Transcription']
     : state.voiceTarget === 'clipboard' && state.mode === 'paused'
       ? ['Paused', 'Resume']
@@ -1151,6 +1190,15 @@ function updateVoiceButtons() {
   els.primaryVoiceButton.setAttribute('aria-pressed', String(streaming || state.mode === 'awake'));
   els.offButton.hidden = state.mode === 'off';
   els.offButton.disabled = state.mode === 'transcribing';
+  if (els.smartTranscriptionButton) {
+    els.smartTranscriptionButton.classList.toggle('is-active', smartActive);
+    els.smartTranscriptionButton.disabled = callRecorderBusy || (['recording', 'paused', 'transcribing'].includes(state.mode) && state.voiceTarget !== 'smart');
+    els.smartTranscriptionButton.setAttribute('aria-pressed', String(smartActive));
+  }
+  if (els.smartTranscriptionAction) {
+    els.smartTranscriptionAction.textContent = smartActive ? 'Stop smart transcription' : 'Smart transcription';
+  }
+  renderSmartTranscriptPanel();
   renderAssistantSpeechPlaybackButton();
 }
 
@@ -1170,6 +1218,38 @@ function renderAssistantSpeechPlaybackButton() {
   button.classList.toggle('is-muted', !enabled);
   button.setAttribute('aria-pressed', String(enabled));
   button.title = enabled ? 'Turn off assistant speech playback' : 'Turn on assistant speech playback';
+}
+
+function smartTranscriptionActive() {
+  return state.voiceTarget === 'smart' && ['recording', 'paused', 'transcribing'].includes(state.mode);
+}
+
+function renderSmartTranscriptPanel() {
+  const active = smartTranscriptionActive();
+  document.body.classList.toggle('is-smart-transcribing', active);
+  if (els.smartTranscriptPanel) {
+    els.smartTranscriptPanel.hidden = !active;
+  }
+  const text = state.smartTranscriptText.trim();
+  if (els.smartTranscriptText) {
+    els.smartTranscriptText.textContent = text || 'No speech captured yet.';
+    els.smartTranscriptText.scrollTop = els.smartTranscriptText.scrollHeight;
+  }
+  if (els.smartTranscriptMeta) {
+    els.smartTranscriptMeta.textContent = state.mode === 'transcribing'
+      ? 'Resetting'
+      : state.mode === 'paused'
+        ? 'Paused'
+      : text
+        ? `${text.length} chars`
+        : 'Listening';
+  }
+  if (els.smartTranscriptSubmitButton) {
+    els.smartTranscriptSubmitButton.disabled = !active || !text || state.mode === 'transcribing';
+  }
+  if (els.smartTranscriptCancelButton) {
+    els.smartTranscriptCancelButton.disabled = !active || state.mode === 'transcribing';
+  }
 }
 
 async function toggleAssistantSpeechPlayback() {
@@ -2016,7 +2096,7 @@ async function createVoiceSession(target, assistantProfileId = null) {
     deviceId: state.config.deviceId,
     token: state.config.deviceToken,
     installationId: state.config.installationId || '',
-    mode: target,
+    mode: target === 'smart' ? 'clipboard' : target,
     protocolVersion: 1,
   };
   if (assistantProfileId) body.assistantProfileId = assistantProfileId;
@@ -2160,6 +2240,48 @@ async function stopMic(nextMode = 'awake', options = {}) {
   await loadDashboard().catch(() => {});
 }
 
+async function cancelMic(nextMode = 'off', status = 'Off.', options = {}) {
+  state.voiceStreamEnding = true;
+  clearVoiceReconnectTimer();
+  clearVoiceFinalizeTimer();
+  const localSocket = state.voiceSocket;
+  if (localSocket) {
+    const sendCancel = () => {
+      try {
+        localSocket.send(JSON.stringify({ type: 'cancel', reason: options.reason || 'desktop cancelled' }));
+      } catch {
+        // The socket may have closed before the cancel frame could be sent.
+      }
+    };
+    if (localSocket.readyState === WebSocket.OPEN) {
+      sendCancel();
+    } else if (localSocket.readyState === WebSocket.CONNECTING) {
+      localSocket.addEventListener('open', sendCancel, { once: true });
+    }
+  }
+  await cleanupLocalCapture();
+  state.voiceOutgoingReady = false;
+  pendingStreamBuffer.clear();
+  if (options.cue !== null) {
+    playLocalVoiceCue(options.cue ?? 'stop_button');
+  }
+  completeStoppedVoice(nextMode, status);
+  await api('/api/logs', {
+    method: 'POST',
+    suppressAuthGuidance: true,
+    body: JSON.stringify({
+      deviceId: state.config.deviceId,
+      token: state.config.deviceToken,
+      installationId: state.config.installationId || '',
+      source: 'desktop',
+      level: 'info',
+      message: 'Desktop microphone capture cancelled',
+      details: { target: state.voiceTarget },
+      protocolVersion: 1,
+    }),
+  }).catch(() => {});
+}
+
 function openVoiceSocket(target) {
   const config = readFormConfig();
   const url = new URL('/api/voice/stream', trimSlash(config.serverUrl));
@@ -2171,6 +2293,7 @@ function openVoiceSocket(target) {
   if (state.voiceAssistantProfileId) url.searchParams.set('assistantProfileId', state.voiceAssistantProfileId);
   if (state.voiceSuppressCommands) url.searchParams.set('ignoreCommands', '1');
   url.searchParams.set('mode', target);
+  if (target === 'smart') url.searchParams.set('smartTranscription', '1');
   const socket = new WebSocket(url.toString());
   let terminalMessageReceived = false;
   socket.binaryType = 'arraybuffer';
@@ -2212,12 +2335,20 @@ function openVoiceSocket(target) {
         state.voicePostStopMode = returnTarget.mode;
         await finishMicFromServer();
       }
+      if (message.type === 'transcript_segment') {
+        if (target === 'smart') {
+          appendSmartTranscript(message.text || '');
+        }
+      }
       if (message.type === 'terminal_detected') {
         await handleTerminalDetected(message, socket, target);
       }
       if (message.type === 'finish') {
         terminalMessageReceived = true;
-        if (target === 'clipboard') {
+        if (target === 'smart') {
+          await finishSmartDraftFromServer(message.transcriptText || '');
+          return;
+        } else if (target === 'clipboard') {
           const transcriptText = message.transcriptText || '';
           const copied = await copyText(transcriptText);
           void logDesktopEvent(copied ? 'info' : 'warn', copied ? 'Clipboard transcription copied' : 'Clipboard transcription copy failed', {
@@ -2347,6 +2478,23 @@ async function finishMicFromServer() {
   const nextStatus = state.voicePostStopStatus || els.micStatus.textContent || 'Awake. Waiting for voice command.';
   completeStoppedVoice(nextMode, nextStatus);
   await loadDashboard().catch(() => {});
+}
+
+async function finishSmartDraftFromServer(transcriptText) {
+  const text = String(transcriptText || state.smartTranscriptText || '').trim();
+  if (text) {
+    state.smartTranscriptText = text;
+    renderSmartTranscriptPanel();
+  }
+  const copied = await copyText(text);
+  if (copied) playLocalVoiceCue('clipboard_transcription_success');
+  const status = copied ? 'Smart transcription copied.' : 'No smart transcription detected.';
+  state.voiceStreamEnding = true;
+  clearVoiceReconnectTimer();
+  await cleanupLocalCapture();
+  completeStoppedVoice('off', status);
+  clearSmartTranscript();
+  await startMic('smart', { cue: null });
 }
 
 function completeStoppedVoice(nextMode = 'awake', status = '') {
@@ -2480,17 +2628,19 @@ function resampleFloat32(input, sourceSampleRate, targetSampleRate) {
 }
 
 function cleanVoiceTarget(target) {
-  return target === 'patch' || target === 'clipboard' ? target : 'assistant';
+  return target === 'patch' || target === 'clipboard' || target === 'smart' ? target : 'assistant';
 }
 
 function recordingStatus(target) {
   if (target === 'patch') return 'Patching voice transcript into chat.';
   if (target === 'clipboard') return 'Recording clipboard transcription.';
+  if (target === 'smart') return 'Smart transcription is listening.';
   return 'Streaming microphone frames to the Drone service.';
 }
 
 function pausedStatus(target = state.voiceTarget) {
   if (target === 'clipboard') return 'Clipboard transcription paused.';
+  if (target === 'smart') return 'Smart transcription paused.';
   if (target === 'patch') return 'Voice patch recording paused.';
   return 'Voice request recording paused.';
 }
@@ -2514,6 +2664,20 @@ function sendVoiceStreamControl(type, reason = 'desktop shortcut') {
     return;
   }
   socket.addEventListener('open', send, { once: true });
+}
+
+function appendSmartTranscript(text) {
+  const clean = String(text || '').trim();
+  if (!clean) return;
+  state.smartTranscriptText = state.smartTranscriptText
+    ? `${state.smartTranscriptText}\n${clean}`
+    : clean;
+  renderSmartTranscriptPanel();
+}
+
+function clearSmartTranscript() {
+  state.smartTranscriptText = '';
+  renderSmartTranscriptPanel();
 }
 
 async function copyText(text) {
@@ -2860,6 +3024,11 @@ async function enterSleep() {
 
 async function turnOff(options = {}) {
   if (state.voiceSocket || state.stream) {
+    if (state.voiceTarget === 'smart') {
+      clearSmartTranscript();
+      await cancelMic('off', 'Off.', { cue: options.cue || 'stop_button', reason: 'smart transcription stopped' });
+      return;
+    }
     await stopMic('off', { cue: options.cue || 'stop_button' });
     return;
   }
@@ -2868,6 +3037,78 @@ async function turnOff(options = {}) {
   preRollBuffer.clear();
   playLocalVoiceCue(options.cue || 'stop_button');
   setMode('off', 'Off.');
+}
+
+async function startSmartTranscription() {
+  if (!state.config?.deviceId || !state.config?.deviceToken) {
+    showStatus('Connect this desktop before starting smart transcription.');
+    return;
+  }
+  if (state.mode === 'transcribing') {
+    showStatus('Voice transcription is finishing.');
+    return;
+  }
+  if ((state.voiceSocket || state.stream) && state.voiceTarget !== 'smart') {
+    showStatus('Stop the current voice recording before starting smart transcription.');
+    return;
+  }
+  if (state.voiceTarget === 'smart' && (state.voiceSocket || state.stream)) {
+    return;
+  }
+  clearSmartTranscript();
+  await startMic('smart', { cue: 'clipboard_recording_start' });
+}
+
+async function stopSmartTranscription() {
+  if (state.voiceTarget !== 'smart' || (!state.voiceSocket && !state.stream)) {
+    clearSmartTranscript();
+    setMode('off', 'Off.');
+    return;
+  }
+  clearSmartTranscript();
+  await cancelMic('off', 'Off.', { cue: 'stop_button', reason: 'smart transcription toggled off' });
+}
+
+async function restartSmartTranscription(status) {
+  if (state.smartRestarting) return;
+  state.smartRestarting = true;
+  try {
+    if (state.voiceTarget === 'smart' && (state.voiceSocket || state.stream)) {
+      await cancelMic('off', status || 'Smart transcription reset.', { cue: null, reason: 'smart transcription reset' });
+    }
+    clearSmartTranscript();
+    await startMic('smart', { cue: null });
+  } finally {
+    state.smartRestarting = false;
+  }
+}
+
+async function cancelSmartDraft() {
+  if (state.voiceTarget !== 'smart') {
+    await startSmartTranscription();
+    return;
+  }
+  await restartSmartTranscription('Smart transcription cancelled.');
+}
+
+async function submitSmartDraft() {
+  const text = state.smartTranscriptText.trim();
+  if (!text) {
+    showStatus('No smart transcription to submit.');
+    return;
+  }
+  const copied = await copyText(text);
+  playLocalVoiceCue(copied ? 'clipboard_transcription_success' : 'stop_button');
+  showStatus(copied ? 'Smart transcription copied.' : 'Smart transcription was empty.');
+  await restartSmartTranscription(copied ? 'Smart transcription copied.' : 'Smart transcription reset.');
+}
+
+async function toggleSmartTranscription() {
+  if (state.voiceTarget === 'smart' && (state.voiceSocket || state.stream)) {
+    await stopSmartTranscription();
+    return;
+  }
+  await startSmartTranscription();
 }
 
 function pauseRecording() {
@@ -3265,6 +3506,10 @@ async function togglePrimaryVoice() {
     return;
   }
   if (state.mode === 'recording' || state.mode === 'transcribing') {
+    if (state.voiceTarget === 'smart') {
+      await stopSmartTranscription();
+      return;
+    }
     if (state.transcriptionShortcutActive && state.voiceTarget === 'clipboard') {
       await stopMic(transcriptionReturnMode(), { finalStatus: transcriptionReturnStatus() });
     } else {
@@ -3344,6 +3589,21 @@ if (els.callRecorderButton) {
       renderCallRecorderStatus({ mode: 'error', error: err?.message || String(err), message: err?.message || 'Computer audio recording failed.' });
       showStatus(err?.message || 'Computer audio recording failed.');
     });
+  });
+}
+if (els.smartTranscriptionButton) {
+  els.smartTranscriptionButton.addEventListener('click', () => {
+    void toggleSmartTranscription().catch((err) => showStatus(err?.message || 'Could not toggle smart transcription.'));
+  });
+}
+if (els.smartTranscriptCancelButton) {
+  els.smartTranscriptCancelButton.addEventListener('click', () => {
+    void cancelSmartDraft().catch((err) => showStatus(err?.message || 'Could not cancel smart transcription.'));
+  });
+}
+if (els.smartTranscriptSubmitButton) {
+  els.smartTranscriptSubmitButton.addEventListener('click', () => {
+    void submitSmartDraft().catch((err) => showStatus(err?.message || 'Could not submit smart transcription.'));
   });
 }
 if (els.callRecorderOpenButton) {
@@ -3429,6 +3689,14 @@ bindShortcutControls({
   clearEl: els.transcriptionShortcutClear,
   resetEl: els.transcriptionShortcutReset,
   resetInvoker: desktop.resetTranscriptionShortcut ? () => desktop.resetTranscriptionShortcut() : null,
+});
+bindShortcutControls({
+  configKey: 'smartTranscriptionShortcut',
+  defaultBinding: DEFAULT_SMART_TRANSCRIPTION_SHORTCUT,
+  captureEl: els.smartTranscriptionShortcutCapture,
+  clearEl: els.smartTranscriptionShortcutClear,
+  resetEl: els.smartTranscriptionShortcutReset,
+  resetInvoker: desktop.resetSmartTranscriptionShortcut ? () => desktop.resetSmartTranscriptionShortcut() : null,
 });
 bindShortcutControls({
   configKey: 'awakeSleepToggleShortcut',
@@ -3618,6 +3886,11 @@ document.addEventListener('keydown', (event) => {
     void togglePauseResumeRecording().catch((err) => showStatus(err?.message || 'Could not pause or resume recording.'));
     return;
   }
+  if (isShortcutMatch(state.config?.smartTranscriptionShortcut, event)) {
+    event.preventDefault();
+    void toggleSmartTranscription().catch((err) => showStatus(err?.message || 'Could not toggle smart transcription.'));
+    return;
+  }
   if (!isShortcutMatch(state.config?.transcriptionShortcut, event)) return;
   event.preventDefault();
   void (async () => {
@@ -3644,6 +3917,12 @@ if (desktop.onWindowState) {
 if (desktop.onTranscriptionShortcut) {
   desktop.onTranscriptionShortcut((payload) => {
     void toggleTranscriptionShortcut(payload).catch((err) => showStatus(err?.message || 'Could not toggle transcription.'));
+  });
+}
+
+if (desktop.onSmartTranscriptionShortcut) {
+  desktop.onSmartTranscriptionShortcut(() => {
+    void toggleSmartTranscription().catch((err) => showStatus(err?.message || 'Could not toggle smart transcription.'));
   });
 }
 

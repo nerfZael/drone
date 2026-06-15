@@ -138,6 +138,16 @@
                   </div>
                   <p id="transcriptionShortcutStatus" class="shortcut-status muted">Checking shortcut registration.</p>
                   <div>
+                    <span class="device-picker-title">Toggle smart transcription</span>
+                    <p class="shortcut-help">Keeps listening, transcribes speech after pauses, and lets you submit or cancel each draft.</p>
+                  </div>
+                  <div class="shortcut-row">
+                    <button id="smartTranscriptionShortcutCapture" class="shortcut-capture" type="button" data-shortcut-capture="true">Ctrl/Cmd+Alt+S</button>
+                    <button id="smartTranscriptionShortcutClear" class="secondary mini-button" type="button">Clear</button>
+                    <button id="smartTranscriptionShortcutReset" class="secondary mini-button" type="button">Reset</button>
+                  </div>
+                  <p id="smartTranscriptionShortcutStatus" class="shortcut-status muted">Checking shortcut registration.</p>
+                  <div>
                     <span class="device-picker-title">Toggle awake and sleep</span>
                     <p class="shortcut-help">From off, this turns voice on awake. When awake it goes to sleep; when sleeping it goes back to awake.</p>
                   </div>
@@ -213,6 +223,20 @@
 
         <button id="offButton" class="off-button" type="button">Off</button>
         <button id="assistantSpeechPlaybackButton" class="speech-playback-button" type="button" aria-pressed="true">Speech on</button>
+        <button id="smartTranscriptionButton" class="secondary smart-transcription-button" type="button" aria-pressed="false">
+          <span id="smartTranscriptionAction">Smart transcription</span>
+        </button>
+        <div id="smartTranscriptPanel" class="smart-transcript-panel" hidden>
+          <div class="smart-transcript-header">
+            <strong>Smart transcription</strong>
+            <span id="smartTranscriptMeta">Listening</span>
+          </div>
+          <div id="smartTranscriptText" class="smart-transcript-text" aria-live="polite"></div>
+          <div class="smart-transcript-actions">
+            <button id="smartTranscriptCancelButton" class="secondary mini-button" type="button">Cancel</button>
+            <button id="smartTranscriptSubmitButton" class="mini-button" type="button">Submit</button>
+          </div>
+        </div>
 
         <div class="call-recorder-panel" aria-label="Computer audio recorder">
           <button id="callRecorderButton" class="secondary call-recorder-button" type="button">
