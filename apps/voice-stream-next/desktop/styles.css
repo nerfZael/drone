@@ -704,6 +704,10 @@ h2 {
 .shortcut-panel {
   display: grid;
   gap: 12px;
+  max-height: calc(100vh - 140px);
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
   text-align: left;
 }
 
