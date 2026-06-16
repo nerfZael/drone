@@ -21,6 +21,7 @@ export type StoredTranscriptTurn = {
   inheritedFromClone?: boolean;
   agentMessageAutoContinue?: unknown;
   agentSuggestion?: unknown;
+  dockerSnapshot?: unknown;
 };
 
 type TranscriptStoreRow = {
@@ -154,6 +155,7 @@ function normalizeTurn(raw: any): StoredTranscriptTurn {
       ? { agentMessageAutoContinue: raw.agentMessageAutoContinue }
       : {}),
     ...(raw?.agentSuggestion && typeof raw.agentSuggestion === 'object' ? { agentSuggestion: raw.agentSuggestion } : {}),
+    ...(raw?.dockerSnapshot && typeof raw.dockerSnapshot === 'object' ? { dockerSnapshot: raw.dockerSnapshot } : {}),
   };
 }
 

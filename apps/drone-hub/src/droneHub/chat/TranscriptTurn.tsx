@@ -315,6 +315,7 @@ export const TranscriptTurn = React.memo(
     droneHomePath,
     showRoleIcons = true,
     actionsEnabled = true,
+    dockerSnapshotsEnabled = false,
   }: {
     item: TranscriptItem;
     parsingJobs: boolean;
@@ -332,6 +333,7 @@ export const TranscriptTurn = React.memo(
     droneHomePath?: string;
     showRoleIcons?: boolean;
     actionsEnabled?: boolean;
+    dockerSnapshotsEnabled?: boolean;
   }) {
     const transcriptInlineImages = useDroneHubUiStore((s) => s.transcriptInlineImages);
     const inlineImagesOverride = useDroneHubUiStore((s) => s.transcriptInlineImageOverrides[messageId]);
@@ -545,19 +547,6 @@ export const TranscriptTurn = React.memo(
                   Copied
                 </div>
               ) : null}
-              {agentCopyText.length > 0 ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    void copyText(agentCopyText).then(() => showCopiedToast('agent'));
-                  }}
-                  className="absolute top-2 right-2 z-10 inline-flex items-center justify-center w-7 h-7 rounded border transition-opacity pointer-events-none opacity-0 group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto bg-[rgba(0,0,0,.15)] border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[rgba(0,0,0,.25)]"
-                  title="Copy agent message"
-                  aria-label="Copy agent message"
-                >
-                  <IconCopy className="w-3.5 h-3.5 opacity-90" />
-                </button>
-              ) : null}
               {displayedText ? (
                 <CollapsibleMarkdown
                   text={displayedText}
@@ -607,6 +596,19 @@ export const TranscriptTurn = React.memo(
               )}
 
               <div className="absolute bottom-2 right-2 flex items-center gap-1">
+                {agentCopyText.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void copyText(agentCopyText).then(() => showCopiedToast('agent'));
+                    }}
+                    className="inline-flex items-center justify-center w-7 h-7 rounded border transition-opacity opacity-0 group-hover:opacity-100 focus-visible:opacity-100 bg-[rgba(0,0,0,.15)] border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[rgba(0,0,0,.25)]"
+                    title="Copy agent message"
+                    aria-label="Copy agent message"
+                  >
+                    <IconCopy className="w-3.5 h-3.5 opacity-90" />
+                  </button>
+                ) : null}
                 {inlineImages.length > 0 && (
                   <button
                     type="button"
@@ -698,6 +700,16 @@ export const TranscriptTurn = React.memo(
                       <IconSnapshot className="w-3.5 h-3.5 opacity-90" />
                     )}
                   </button>
+                ) : actionsEnabled && item.ok && dockerSnapshotsEnabled ? (
+                  <button
+                    type="button"
+                    disabled
+                    className="inline-flex items-center justify-center w-7 h-7 rounded border transition-opacity opacity-0 group-hover:opacity-100 focus-visible:opacity-100 bg-[rgba(0,0,0,.15)] border-[var(--border-subtle)] text-[var(--muted-dim)] cursor-not-allowed"
+                    title="No Docker snapshot exists for this message. Only messages completed after snapshots were enabled can be rolled back."
+                    aria-label="No Docker snapshot for this message"
+                  >
+                    <IconSnapshot className="w-3.5 h-3.5 opacity-80" />
+                  </button>
                 ) : null}
               </div>
             </div>
@@ -735,6 +747,7 @@ export const TranscriptTurn = React.memo(
     a.onOpenLink === b.onOpenLink &&
     (a.droneId ?? '') === (b.droneId ?? '') &&
     (a.droneHomePath ?? '') === (b.droneHomePath ?? '') &&
+    (a.dockerSnapshotsEnabled ?? false) === (b.dockerSnapshotsEnabled ?? false) &&
     sameAttachments((a.item as any).attachments, (b.item as any).attachments) &&
     (a.item.dockerSnapshot?.id ?? '') === (b.item.dockerSnapshot?.id ?? '') &&
     (a.item.dockerSnapshot?.status ?? '') === (b.item.dockerSnapshot?.status ?? '') &&

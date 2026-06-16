@@ -48,7 +48,7 @@ type ReadTerminalOutputResponse = {
 type TerminalStreamServerMessage =
   | { type: 'ready'; offsetBytes?: number }
   | { type: 'output'; offsetBytes?: number; text?: string }
-  | { type: 'error'; error?: string }
+  | { type: 'error'; error?: string; code?: string }
   | { type: 'pong' };
 
 type CloseTerminalResponse = {
@@ -70,6 +70,14 @@ function sanitizeTerminalReplayText(rawText: string): string {
     .filter((line) => !/^\[dvm session [^\]]+\] started .+$/.test(line.trim()))
     .join('\n');
   return filtered.replace(/^\n+/, '');
+}
+
+function isStaleTerminalSessionError(error: unknown): boolean {
+  const anyError = error as any;
+  const code = String(anyError?.data?.code ?? anyError?.code ?? '').trim();
+  if (code === 'STALE_TERMINAL_SESSION') return true;
+  const msg = String(anyError?.message ?? anyError?.error ?? error ?? '').trim();
+  return /terminal session was interrupted/i.test(msg) || /no such exec/i.test(msg) || /no such exec instance/i.test(msg);
 }
 
 export function DroneTerminalDock({
@@ -130,6 +138,7 @@ export function DroneTerminalDock({
     typeof window !== 'undefined' && typeof window.WebSocket !== 'undefined' ? 'ws' : 'poll',
   );
   const [closingSessionId, setClosingSessionId] = React.useState<string | null>(null);
+  const [terminalReopenNonce, setTerminalReopenNonce] = React.useState(0);
 
   const terminalHostRef = React.useRef<HTMLDivElement | null>(null);
   const terminalRef = React.useRef<Terminal | null>(null);
@@ -188,6 +197,20 @@ export function DroneTerminalDock({
     emptyStreakRef.current = 0;
   }, []);
 
+  const requestTerminalReopen = React.useCallback((errorLike: unknown): boolean => {
+    if (!isStaleTerminalSessionError(errorLike)) return false;
+    inputBufferRef.current = '';
+    outputOffsetRef.current = null;
+    activeTargetRef.current = null;
+    emptyStreakRef.current = 0;
+    errorStreakRef.current = 0;
+    setError('Reopening terminal after container restart...');
+    setSessionName('');
+    setStreamMode(typeof window !== 'undefined' && typeof window.WebSocket !== 'undefined' ? 'ws' : 'poll');
+    setTerminalReopenNonce((n) => n + 1);
+    return true;
+  }, []);
+
   const flushInputBuffer = React.useCallback(async () => {
     const target = activeTargetRef.current;
     if (!target) return;
@@ -238,6 +261,7 @@ export function DroneTerminalDock({
         pollNowRef.current?.();
       }, 80);
     } catch (e: any) {
+      if (requestTerminalReopen(e)) return;
       setError(formatDroneRuntimeError(e));
     } finally {
       flushingInputRef.current = false;
@@ -245,7 +269,7 @@ export function DroneTerminalDock({
         void flushInputBuffer();
       }
     }
-  }, []);
+  }, [requestTerminalReopen]);
 
   const scheduleFlushInput = React.useCallback(() => {
     if (inputFlushTimerRef.current != null) return;
@@ -453,6 +477,7 @@ export function DroneTerminalDock({
     void open()
       .catch((e: any) => {
         if (cancelled) return;
+        if (requestTerminalReopen(e)) return;
         setSessionName('');
         activeTargetRef.current = null;
         setError(formatDroneRuntimeError(e));
@@ -461,7 +486,20 @@ export function DroneTerminalDock({
     return () => {
       cancelled = true;
     };
-  }, [activeSessionCwd, activeSessionId, chatName, disabled, droneId, droneName, onResolveSessionName, paneKey, queueInput, shouldOpenDefaultShellSession]);
+  }, [
+    activeSessionCwd,
+    activeSessionId,
+    chatName,
+    disabled,
+    droneId,
+    droneName,
+    onResolveSessionName,
+    paneKey,
+    queueInput,
+    requestTerminalReopen,
+    shouldOpenDefaultShellSession,
+    terminalReopenNonce,
+  ]);
 
   React.useEffect(() => {
     const el = dockRootRef.current;
@@ -549,6 +587,7 @@ export function DroneTerminalDock({
         if (!msg) return;
 
         if (msg.type === 'error') {
+          if (requestTerminalReopen({ code: msg.code, error: msg.error, message: msg.error })) return;
           setError(formatDroneRuntimeError(msg.error ?? 'terminal stream error'));
           errorStreakRef.current = Math.min(20, errorStreakRef.current + 1);
           return;
@@ -603,6 +642,7 @@ export function DroneTerminalDock({
       })
       .catch((e: any) => {
         if (!mounted) return;
+        if (requestTerminalReopen(e)) return;
         setError(formatDroneRuntimeError(e));
         setStreamMode('poll');
       });
@@ -620,7 +660,7 @@ export function DroneTerminalDock({
         wsRef.current = null;
       }
     };
-  }, [droneId, sessionName, disabled, streamMode, queueInput, applyServerOutput]);
+  }, [droneId, sessionName, disabled, streamMode, queueInput, applyServerOutput, requestTerminalReopen]);
 
   React.useEffect(() => {
     if (!droneName || !sessionName || disabled || streamMode !== 'poll') return;
@@ -688,6 +728,7 @@ export function DroneTerminalDock({
         applyServerOutput(nextText);
       } catch (e: any) {
         if (!mounted) return;
+        if (requestTerminalReopen(e)) return;
         setError(formatDroneRuntimeError(e));
         errorStreakRef.current = Math.min(20, errorStreakRef.current + 1);
       } finally {
@@ -720,7 +761,7 @@ export function DroneTerminalDock({
         postInputPollTimerRef.current = null;
       }
     };
-  }, [droneId, sessionName, disabled, streamMode, applyServerOutput, queueInput]);
+  }, [droneId, sessionName, disabled, streamMode, applyServerOutput, queueInput, requestTerminalReopen]);
 
   React.useEffect(() => {
     return () => {

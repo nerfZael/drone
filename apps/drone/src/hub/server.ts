@@ -9370,6 +9370,96 @@ async function dockerImageSizeBytes(imageRef: string): Promise<number | null> {
   }
 }
 
+type DockerImageDiskUsage = {
+  virtualBytes: number | null;
+  sharedBytes: number | null;
+  uniqueBytes: number | null;
+};
+
+let dockerImageDiskUsageCache: { at: number; usage: Map<string, DockerImageDiskUsage> } | null = null;
+const DOCKER_IMAGE_DISK_USAGE_CACHE_MS = 5000;
+
+function parseDockerDfSizeBytes(raw: unknown): number | null {
+  if (typeof raw === 'number') return Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : null;
+  const text = String(raw ?? '').trim();
+  if (!text || text.toLowerCase() === 'n/a') return null;
+  const match = text.match(/^([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z]+)?$/);
+  if (!match) return null;
+  const value = Number(match[1]);
+  if (!Number.isFinite(value) || value < 0) return null;
+  const unit = String(match[2] ?? 'B').toLowerCase();
+  const multipliers: Record<string, number> = {
+    b: 1,
+    kb: 1000,
+    mb: 1000 ** 2,
+    gb: 1000 ** 3,
+    tb: 1000 ** 4,
+  };
+  const multiplier = multipliers[unit];
+  if (!multiplier) return null;
+  return Math.floor(value * multiplier);
+}
+
+function dockerDfImageKeys(raw: any): string[] {
+  const keys: string[] = [];
+  const repo = String(raw?.Repository ?? raw?.Repo ?? '').trim();
+  const tag = String(raw?.Tag ?? '').trim();
+  if (repo && repo !== '<none>' && tag && tag !== '<none>') keys.push(`${repo}:${tag}`);
+  const id = String(raw?.ID ?? raw?.ImageID ?? '').trim();
+  if (id) {
+    keys.push(id);
+    if (id.startsWith('sha256:')) keys.push(id.slice('sha256:'.length));
+  }
+  return Array.from(new Set(keys));
+}
+
+function dockerDfImageDiskUsage(raw: any): DockerImageDiskUsage {
+  return {
+    virtualBytes: parseDockerDfSizeBytes(raw?.Size),
+    sharedBytes: parseDockerDfSizeBytes(raw?.SharedSize),
+    uniqueBytes: parseDockerDfSizeBytes(raw?.UniqueSize),
+  };
+}
+
+async function dockerImageDiskUsageByRef(): Promise<Map<string, DockerImageDiskUsage>> {
+  const now = Date.now();
+  if (dockerImageDiskUsageCache && now - dockerImageDiskUsageCache.at < DOCKER_IMAGE_DISK_USAGE_CACHE_MS) {
+    return dockerImageDiskUsageCache.usage;
+  }
+  const usage = new Map<string, DockerImageDiskUsage>();
+  try {
+    const stdout = await runDockerOrThrow(['system', 'df', '-v', '--format', '{{json .}}'], { timeoutMs: 10_000 });
+    const trimmed = String(stdout ?? '').trim();
+    if (trimmed) {
+      const payloads: any[] = [];
+      try {
+        payloads.push(JSON.parse(trimmed));
+      } catch {
+        for (const line of trimmed.split(/\r?\n/)) {
+          const clean = line.trim();
+          if (!clean) continue;
+          try {
+            payloads.push(JSON.parse(clean));
+          } catch {
+            // Ignore malformed lines from older Docker versions.
+          }
+        }
+      }
+      for (const payload of payloads) {
+        const images = Array.isArray(payload?.Images) ? payload.Images : payload?.Repository ? [payload] : [];
+        for (const image of images) {
+          const entry = dockerDfImageDiskUsage(image);
+          for (const key of dockerDfImageKeys(image)) usage.set(key, entry);
+        }
+      }
+    }
+  } catch {
+    // Fall back to the stored virtual image sizes below.
+  }
+  dockerImageDiskUsageCache = { at: now, usage };
+  return usage;
+}
+
 async function dockerContainerSizeBytes(containerName: string): Promise<number | null> {
   try {
     const stdout = await runDockerOrThrow(['inspect', '--size', containerName, '--format', '{{json .SizeRw}}'], {
@@ -9411,12 +9501,28 @@ function normalizeDockerSnapshot(raw: any): TranscriptTurn['dockerSnapshot'] | u
   return out;
 }
 
+function dockerSnapshotAfterAgentMessageEnabledForChat(droneEntry: any, chatEntry: any): boolean {
+  if (droneRuntime(droneEntry) === 'host') return false;
+  if (droneEntry?.persistVolume !== false) return false;
+  const raw = chatEntry?.dockerSnapshotAfterAgentMessageEnabled;
+  if (raw === false) return false;
+  const agent = inferChatAgent(chatEntry, droneEntry);
+  if (agent.kind !== 'builtin') return false;
+  return raw === true || raw == null;
+}
+
 function chatHasActiveDockerSnapshot(entry: any): boolean {
   const turns = Array.isArray(entry?.turns) ? entry.turns : [];
   return turns.some((turn: any) => {
     const status = String(turn?.dockerSnapshot?.status ?? '').trim();
     return status === 'creating' || status === 'restoring';
   });
+}
+
+function isStaleDockerExecErrorMessage(raw: unknown): boolean {
+  const msg = String(raw ?? '').trim();
+  if (!msg) return false;
+  return /no such exec/i.test(msg) || /no such exec instance/i.test(msg);
 }
 
 const DOCKER_SNAPSHOT_ACTIVE_STALE_MS = 30 * 60_000;
@@ -9448,22 +9554,52 @@ async function failStaleDockerSnapshotsForChat(opts: { droneId: string; chatName
   });
 }
 
-function dockerSnapshotTotalsForDroneEntry(droneEntry: any): { count: number; sizeBytes: number } {
+async function dockerSnapshotTotalsForDroneEntry(
+  droneEntry: any,
+): Promise<{ count: number; sizeBytes: number; virtualSizeBytes: number | null }> {
   let count = 0;
   let sizeBytes = 0;
+  let virtualSizeBytes = 0;
+  let hasVirtualSize = false;
+  const imageRefs: string[] = [];
+  const fallbackVirtualSizes = new Map<string, number>();
   const visitChat = (chat: any) => {
     const turns = Array.isArray(chat?.turns) ? chat.turns : [];
     for (const turn of turns) {
       const snap = normalizeDockerSnapshot((turn as any)?.dockerSnapshot);
       if (!snap || snap.status !== 'ready') continue;
       count += 1;
+      const imageRef = String(snap.imageRef ?? '').trim();
       const size = Number(snap.sizeBytes);
-      if (Number.isFinite(size) && size > 0) sizeBytes += Math.floor(size);
+      if (imageRef) {
+        imageRefs.push(imageRef);
+        if (Number.isFinite(size) && size > 0) fallbackVirtualSizes.set(imageRef, Math.floor(size));
+      } else if (Number.isFinite(size) && size > 0) {
+        sizeBytes += Math.floor(size);
+        virtualSizeBytes += Math.floor(size);
+        hasVirtualSize = true;
+      }
     }
   };
   for (const chat of Object.values(droneEntry?.chats ?? {})) visitChat(chat);
   for (const chat of Object.values(droneEntry?.archivedChats ?? {})) visitChat(chat);
-  return { count, sizeBytes };
+  const usageByRef = imageRefs.length ? await dockerImageDiskUsageByRef() : new Map<string, DockerImageDiskUsage>();
+  for (const imageRef of Array.from(new Set(imageRefs))) {
+    const usage = usageByRef.get(imageRef);
+    const fallback = fallbackVirtualSizes.get(imageRef) ?? null;
+    const unique = usage?.uniqueBytes ?? null;
+    const virtual = usage?.virtualBytes ?? fallback;
+    if (unique != null && Number.isFinite(unique) && unique >= 0) {
+      sizeBytes += Math.floor(unique);
+    } else if (fallback != null) {
+      sizeBytes += fallback;
+    }
+    if (virtual != null && Number.isFinite(virtual) && virtual >= 0) {
+      virtualSizeBytes += Math.floor(virtual);
+      hasVirtualSize = true;
+    }
+  }
+  return { count, sizeBytes, virtualSizeBytes: hasVirtualSize ? virtualSizeBytes : null };
 }
 
 function collectDockerSnapshotImageRefsFromChatEntry(chatEntry: any): string[] {
@@ -11017,7 +11153,7 @@ async function setChatAgentConfig(opts: {
           cur.dockerSnapshotAfterAgentMessageEnabledAt = nowIso();
         }
       } else {
-        delete cur.dockerSnapshotAfterAgentMessageEnabled;
+        cur.dockerSnapshotAfterAgentMessageEnabled = false;
         delete cur.dockerSnapshotAfterAgentMessageEnabledAt;
       }
     }
@@ -11370,8 +11506,7 @@ async function beginDockerSnapshotForTranscriptTurn(opts: {
     const chat = d?.chats?.[chatName];
     if (!d || !chat) return;
     if (droneRuntime(d) === 'host') return;
-    if (d?.persistVolume !== false) return;
-    if (chat?.dockerSnapshotAfterAgentMessageEnabled !== true) return;
+    if (!dockerSnapshotAfterAgentMessageEnabledForChat(d, chat)) return;
     const turns: TranscriptTurn[] = Array.isArray(chat.turns) ? chat.turns : [];
     const index = turns.findIndex((turn: any) => String(turn?.id ?? '').trim() === promptId && turn?.ok === true);
     if (index < 0) return;
@@ -12024,7 +12159,12 @@ export async function startDroneHubApiServer(opts: {
       try {
         await droneTerminalInput(ctx.client, { session: ctx.sessionName, data: chunk });
       } catch (e: any) {
-        wsSendJson({ type: 'error', error: e?.message ?? String(e) });
+        const error = e?.message ?? String(e);
+        wsSendJson({
+          type: 'error',
+          error,
+          ...(isStaleDockerExecErrorMessage(error) ? { code: 'STALE_TERMINAL_SESSION' } : {}),
+        });
       } finally {
         flushingInput = false;
         if (inputBuffer) void flushInput();
@@ -12056,7 +12196,12 @@ export async function startDroneHubApiServer(opts: {
       }
 
       if (eventName === 'error') {
-        wsSendJson({ type: 'error', error: String(payload?.error ?? 'terminal stream error') });
+        const error = String(payload?.error ?? 'terminal stream error');
+        wsSendJson({
+          type: 'error',
+          error,
+          ...(isStaleDockerExecErrorMessage(error) ? { code: 'STALE_TERMINAL_SESSION' } : {}),
+        });
       }
     };
 
@@ -12992,7 +13137,13 @@ export async function startDroneHubApiServer(opts: {
       statusError: phase === 'error' ? (err ?? message ?? 'failed') : null,
       chats: [],
       busyChats: [],
-      dockerSize: { totalBytes: 0, containerWritableBytes: 0, snapshotBytes: 0, snapshotCount: 0 },
+      dockerSize: {
+        totalBytes: 0,
+        containerWritableBytes: 0,
+        snapshotBytes: 0,
+        snapshotVirtualBytes: null,
+        snapshotCount: 0,
+      },
       hubPhase,
       hubMessage: phase === 'error' ? (err ?? message ?? null) : message,
       busy: false,
@@ -13014,7 +13165,7 @@ export async function startDroneHubApiServer(opts: {
     const busyChats = droneId ? busyChatNamesForDrone(d, droneId) : [];
     const { hostPort, statusOk, status, statusError } = await resolveCachedDroneStatusSummary(d);
     const containerName = String(d?.containerName ?? d?.name ?? '').trim();
-    const snapshotTotals = dockerSnapshotTotalsForDroneEntry(d);
+    const snapshotTotals = await dockerSnapshotTotalsForDroneEntry(d);
     const containerWritableBytes =
       runtime === 'container' && containerName ? await dockerContainerSizeBytes(containerName) : null;
 
@@ -13048,6 +13199,7 @@ export async function startDroneHubApiServer(opts: {
         totalBytes: (containerWritableBytes ?? 0) + snapshotTotals.sizeBytes,
         containerWritableBytes,
         snapshotBytes: snapshotTotals.sizeBytes,
+        snapshotVirtualBytes: snapshotTotals.virtualSizeBytes,
         snapshotCount: snapshotTotals.count,
       },
       hubPhase,
@@ -23046,6 +23198,18 @@ export async function startDroneHubApiServer(opts: {
           return;
         } catch (e: any) {
           const msg = e?.message ?? String(e);
+          if (isStaleDockerExecErrorMessage(msg)) {
+            json(res, 409, {
+              ok: false,
+              code: 'STALE_TERMINAL_SESSION',
+              error: 'Terminal session was interrupted by a container restart. Reopen the terminal session.',
+              detail: msg,
+              id: droneId,
+              name: droneName,
+              sessionName,
+            });
+            return;
+          }
           const code = /Session not found:/i.test(msg) ? 404 : 500;
           json(res, code, { ok: false, error: msg, id: droneId, name: droneName, sessionName });
           return;
@@ -23116,6 +23280,18 @@ export async function startDroneHubApiServer(opts: {
           return;
         } catch (e: any) {
           const msg = e?.message ?? String(e);
+          if (isStaleDockerExecErrorMessage(msg)) {
+            json(res, 409, {
+              ok: false,
+              code: 'STALE_TERMINAL_SESSION',
+              error: 'Terminal session was interrupted by a container restart. Reopen the terminal session.',
+              detail: msg,
+              id: droneId,
+              name: droneName,
+              sessionName,
+            });
+            return;
+          }
           const code = /Session not found:/i.test(msg) ? 404 : 500;
           json(res, code, { ok: false, error: msg, id: droneId, name: droneName, sessionName });
           return;
@@ -24242,7 +24418,20 @@ export async function startDroneHubApiServer(opts: {
           });
           return;
         } catch (e: any) {
-          json(res, 500, { ok: false, error: e?.message ?? String(e), name: droneRef, chat: normalizedChat, sessionName });
+          const msg = e?.message ?? String(e);
+          if (isStaleDockerExecErrorMessage(msg)) {
+            json(res, 409, {
+              ok: false,
+              code: 'STALE_TERMINAL_SESSION',
+              error: 'Terminal session was interrupted by a container restart. Reopen the terminal session.',
+              detail: msg,
+              name: droneRef,
+              chat: normalizedChat,
+              sessionName,
+            });
+            return;
+          }
+          json(res, 500, { ok: false, error: msg, name: droneRef, chat: normalizedChat, sessionName });
           return;
         }
       }
@@ -24656,7 +24845,7 @@ export async function startDroneHubApiServer(opts: {
           model: (chatEntry as any).model ?? null,
           agentMessageAutoContinueEnabled: (chatEntry as any).agentMessageAutoContinueEnabled === true,
           agentSuggestionEnabled: (chatEntry as any).agentSuggestionEnabled === true,
-          dockerSnapshotAfterAgentMessageEnabled: (chatEntry as any).dockerSnapshotAfterAgentMessageEnabled === true,
+          dockerSnapshotAfterAgentMessageEnabled: dockerSnapshotAfterAgentMessageEnabledForChat(resolved.drone, chatEntry),
           turns: (chatEntry as any).turns ?? [],
           sessionName: hubChatSessionName(chatName || 'default'),
           createdAt: chatEntry.createdAt,

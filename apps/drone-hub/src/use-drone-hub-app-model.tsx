@@ -1815,7 +1815,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           model: startupSeedForCurrentDrone.model ?? null,
           agentMessageAutoContinueEnabled: false,
           agentSuggestionEnabled: false,
-          dockerSnapshotAfterAgentMessageEnabled: false,
+          dockerSnapshotAfterAgentMessageEnabled:
+            String(currentDrone.runtime ?? 'container').trim().toLowerCase() !== 'host' &&
+            currentDrone.persistVolume === false &&
+            startupSeedForCurrentDrone.agent.kind === 'builtin',
           sessionName: `drone-hub-chat-${startupSeedForCurrentDrone.chatName || selectedChat || 'default'}`,
           createdAt: startupSeedForCurrentDrone.at || new Date().toISOString(),
         }

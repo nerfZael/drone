@@ -42,6 +42,7 @@ export type DroneSummary = {
     totalBytes: number;
     containerWritableBytes: number | null;
     snapshotBytes: number;
+    snapshotVirtualBytes?: number | null;
     snapshotCount: number;
   };
   hubPhase?: 'creating' | 'starting' | 'seeding' | 'error' | null;

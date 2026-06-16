@@ -508,9 +508,13 @@ export function SelectedDroneWorkspace({
   const dockerSizeTitle = dockerSize
     ? `Docker size: ${formatBytes(dockerSize.totalBytes)} total. Container writable layer: ${formatBytes(
         dockerSize.containerWritableBytes,
-      )}. Snapshots: ${formatBytes(dockerSize.snapshotBytes)} across ${dockerSize.snapshotCount} snapshot${
-        dockerSize.snapshotCount === 1 ? '' : 's'
-      }.`
+      )}. Snapshot unique layers: ${formatBytes(dockerSize.snapshotBytes)} across ${
+        dockerSize.snapshotCount
+      } snapshot${dockerSize.snapshotCount === 1 ? '' : 's'}${
+        dockerSize.snapshotVirtualBytes != null
+          ? ` (${formatBytes(dockerSize.snapshotVirtualBytes)} virtual image size).`
+          : '.'
+      }`
     : 'Docker size unavailable.';
   const repoSyncBusyLabel =
     repoOp?.kind === 'pull'
@@ -1996,6 +2000,7 @@ export function SelectedDroneWorkspace({
                             droneId={currentDrone.id}
                             droneHomePath={currentDroneHomePath}
                             showRoleIcons={false}
+                            dockerSnapshotsEnabled={dockerSnapshotAfterAgentMessageEnabled}
                           />
                         );
                       }

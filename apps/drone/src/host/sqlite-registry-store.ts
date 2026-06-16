@@ -78,6 +78,7 @@ function normalizeTurn(raw: any): any {
       ? { agentMessageAutoContinue: raw.agentMessageAutoContinue }
       : {}),
     ...(raw?.agentSuggestion && typeof raw.agentSuggestion === 'object' ? { agentSuggestion: raw.agentSuggestion } : {}),
+    ...(raw?.dockerSnapshot && typeof raw.dockerSnapshot === 'object' ? { dockerSnapshot: raw.dockerSnapshot } : {}),
   };
 }
 

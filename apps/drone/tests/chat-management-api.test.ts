@@ -46,13 +46,16 @@ describeSocketSuite('chat management api', () => {
     return { r, data };
   };
 
-  const seedDrone = async (id: string) => {
+  const seedDrone = async (id: string, opts?: { runtime?: 'container' | 'host'; persistVolume?: boolean }) => {
     const now = new Date().toISOString();
     await updateRegistry((reg: any) => {
       reg.drones = reg.drones ?? {};
+      const runtime = opts?.runtime ?? 'container';
       reg.drones[id] = {
         id,
         name: id,
+        runtime,
+        ...(runtime === 'container' && typeof opts?.persistVolume === 'boolean' ? { persistVolume: opts.persistVolume } : {}),
         hostPort: 1,
         token: 'mock-token',
         containerPort: 7777,
@@ -178,6 +181,34 @@ describeSocketSuite('chat management api', () => {
       body: JSON.stringify({ enabledByDefault: false }),
     });
     expect(settingsReset.r.status).toBe(200);
+  });
+
+  test('defaults docker snapshots on for no-volume container chats and preserves explicit off', async () => {
+    const droneId = 'drone-chat-snapshot-default';
+    await seedDrone(droneId, { runtime: 'container', persistVolume: false });
+
+    const initial = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default`);
+    expect(initial.r.status).toBe(200);
+    expect(initial.data?.dockerSnapshotAfterAgentMessageEnabled).toBe(true);
+
+    let regAny: any = await loadRegistry();
+    expect(regAny?.drones?.[droneId]?.chats?.default?.dockerSnapshotAfterAgentMessageEnabled).toBeUndefined();
+
+    const disabled = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/config`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ dockerSnapshotAfterAgentMessageEnabled: false }),
+    });
+    expect(disabled.r.status).toBe(200);
+    expect(disabled.data?.dockerSnapshotAfterAgentMessageEnabled).toBe(false);
+
+    const after = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default`);
+    expect(after.r.status).toBe(200);
+    expect(after.data?.dockerSnapshotAfterAgentMessageEnabled).toBe(false);
+
+    regAny = await loadRegistry();
+    expect(regAny?.drones?.[droneId]?.chats?.default?.dockerSnapshotAfterAgentMessageEnabled).toBe(false);
+    expect(regAny?.drones?.[droneId]?.chats?.default?.dockerSnapshotAfterAgentMessageEnabledAt).toBeUndefined();
   });
 
   test('creates a chat from the implicit default on legacy drones without chats', async () => {

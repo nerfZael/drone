@@ -94,6 +94,14 @@ test('Node Hub transcript API uses SQLite read model and cheap conditional ETags
         prompt: 'second',
         ok: true,
         output: 'two',
+        dockerSnapshot: {
+          id: 'snapshot-newer',
+          status: 'ready',
+          createdAt: '2026-01-01T00:03:01.000Z',
+          imageRef: 'drone-hub-snapshot-node-transcript-sqlite-default:newer',
+          sizeBytes: 123456,
+          readyAt: '2026-01-01T00:03:02.000Z',
+        },
       },
       {
         id: 'older',
@@ -123,6 +131,8 @@ test('Node Hub transcript API uses SQLite read model and cheap conditional ETags
   );
   assert.equal(first.response.status, 200, first.text);
   assert.equal(first.data.ok, true);
+  assert.equal(first.data.transcripts[1].dockerSnapshot.id, 'snapshot-newer');
+  assert.equal(first.data.transcripts[1].dockerSnapshot.status, 'ready');
   assert.deepEqual(
     first.data.transcripts.map((turn) => turn.prompt),
     ['first', 'second'],
@@ -154,6 +164,7 @@ test('Node Hub transcript API uses SQLite read model and cheap conditional ETags
     storeRead.turns.map((item) => item.turn.prompt),
     ['first', 'second'],
   );
+  assert.equal(storeRead.turns[1].turn.dockerSnapshot.id, 'snapshot-newer');
 
   const second = await apiFetch(
     baseUrl,
