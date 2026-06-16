@@ -60,6 +60,15 @@ const defaultTranscriptionShortcut = {
   shift: true,
 };
 
+const defaultSmartTranscriptionShortcut = {
+  key: 's',
+  mod: true,
+  ctrl: false,
+  meta: false,
+  alt: true,
+  shift: false,
+};
+
 const defaultAwakeSleepToggleShortcut = {
   key: 'a',
   mod: true,
@@ -133,6 +142,7 @@ const defaultConfig = {
   assistantSpeechPlaybackEnabled: true,
   suppressWakeDuringPlayback: false,
   transcriptionShortcut: defaultTranscriptionShortcut,
+  smartTranscriptionShortcut: defaultSmartTranscriptionShortcut,
   awakeSleepToggleShortcut: defaultAwakeSleepToggleShortcut,
   turnOffShortcut: defaultTurnOffShortcut,
   pauseResumeShortcut: defaultPauseResumeShortcut,
@@ -195,6 +205,7 @@ function normalizeConfig(nextConfig) {
   config.assistantSpeechPlaybackEnabled = config.assistantSpeechPlaybackEnabled !== false;
   config.suppressWakeDuringPlayback = config.suppressWakeDuringPlayback === true;
   config.transcriptionShortcut = sanitizeShortcutBinding(config.transcriptionShortcut, defaultTranscriptionShortcut);
+  config.smartTranscriptionShortcut = sanitizeShortcutBinding(config.smartTranscriptionShortcut, defaultSmartTranscriptionShortcut);
   config.awakeSleepToggleShortcut = sanitizeShortcutBinding(config.awakeSleepToggleShortcut, defaultAwakeSleepToggleShortcut);
   config.turnOffShortcut = sanitizeShortcutBinding(config.turnOffShortcut, defaultTurnOffShortcut);
   config.pauseResumeShortcut = sanitizeShortcutBinding(config.pauseResumeShortcut, defaultPauseResumeShortcut);
@@ -1479,6 +1490,7 @@ function registeredShortcutAccelerators(registrations) {
 function allShortcutStatuses() {
   return {
     transcription: transcriptionShortcutRegistration.getStatus(),
+    smartTranscription: smartTranscriptionShortcutRegistration.getStatus(),
     awakeSleepToggle: awakeSleepToggleShortcutRegistration.getStatus(),
     turnOff: turnOffShortcutRegistration.getStatus(),
     pauseResume: pauseResumeShortcutRegistration.getStatus(),
@@ -1493,6 +1505,7 @@ function sendShortcutStatuses(win = mainWindow) {
 
 function registerAllGlobalShortcuts() {
   transcriptionShortcutRegistration.register();
+  smartTranscriptionShortcutRegistration.register();
   awakeSleepToggleShortcutRegistration.register();
   turnOffShortcutRegistration.register();
   pauseResumeShortcutRegistration.register();
@@ -1533,6 +1546,20 @@ function triggerAwakeSleepToggleShortcut() {
   triggerRendererShortcut('shortcut:toggleAwakeSleep');
 }
 
+function triggerSmartTranscriptionShortcut() {
+  const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow({ compactShowInactive: true });
+  const shouldShowCompact = !win.isVisible() || win.isMinimized();
+  if (shouldShowCompact) applyCompactMode(win, { inactive: true });
+  const send = () => {
+    if (!win.isDestroyed()) win.webContents.send('shortcut:smartTranscription');
+  };
+  if (win.webContents.isLoading()) {
+    win.webContents.once('did-finish-load', send);
+  } else {
+    send();
+  }
+}
+
 function triggerTurnOffShortcut() {
   triggerRendererShortcut('shortcut:turnOff');
 }
@@ -1568,6 +1595,12 @@ const transcriptionShortcutRegistration = createShortcutRegistration({
   defaultBinding: defaultTranscriptionShortcut,
   configKey: 'transcriptionShortcut',
   onTrigger: triggerTranscriptionShortcut,
+});
+
+const smartTranscriptionShortcutRegistration = createShortcutRegistration({
+  defaultBinding: defaultSmartTranscriptionShortcut,
+  configKey: 'smartTranscriptionShortcut',
+  onTrigger: triggerSmartTranscriptionShortcut,
 });
 
 const awakeSleepToggleShortcutRegistration = createShortcutRegistration({
@@ -2559,6 +2592,11 @@ if (!gotSingleInstanceLock) {
   ipcMain.handle('shortcut:status', () => allShortcutStatuses());
   ipcMain.handle('shortcut:resetTranscription', () => {
     const config = writeConfig({ ...readConfig(), transcriptionShortcut: defaultTranscriptionShortcut });
+    registerAllGlobalShortcuts();
+    return { ok: true, config, status: allShortcutStatuses() };
+  });
+  ipcMain.handle('shortcut:resetSmartTranscription', () => {
+    const config = writeConfig({ ...readConfig(), smartTranscriptionShortcut: defaultSmartTranscriptionShortcut });
     registerAllGlobalShortcuts();
     return { ok: true, config, status: allShortcutStatuses() };
   });

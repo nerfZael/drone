@@ -1206,6 +1206,67 @@ h2 {
   color: var(--muted);
 }
 
+.smart-transcription-button {
+  min-width: 176px;
+  min-height: 36px;
+  border-color: rgba(74, 222, 128, .30);
+  color: #a7f3d0;
+}
+
+.smart-transcription-button.is-active {
+  border-color: rgba(74, 222, 128, .58);
+  background: rgba(74, 222, 128, .12);
+  color: #c7f9db;
+}
+
+.smart-transcript-panel {
+  display: grid;
+  gap: 10px;
+  width: min(640px, 86vw);
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  text-align: left;
+}
+
+.smart-transcript-panel[hidden] {
+  display: none;
+}
+
+.smart-transcript-header,
+.smart-transcript-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.smart-transcript-header strong {
+  font-size: 12px;
+}
+
+.smart-transcript-header span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.smart-transcript-text {
+  min-height: 70px;
+  max-height: 190px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  padding: 10px;
+  background: rgba(255, 255, 255, .025);
+  color: var(--fg-secondary);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 @keyframes pulse-ring {
   0%, 100% { transform: scale(1); opacity: .72; }
   50% { transform: scale(1.08); opacity: .22; }
@@ -1261,6 +1322,8 @@ body.is-compact .topbar,
 body.is-compact .voice-copy,
 body.is-compact .voice-device-panel,
 body.is-compact .call-recorder-panel,
+body.is-compact .smart-transcription-button,
+body.is-compact .smart-transcript-panel,
 body.is-compact .meter-shell,
 body.is-compact .speech-playback-button,
 body.is-compact .voice-status {

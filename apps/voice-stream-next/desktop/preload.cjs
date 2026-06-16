@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('voiceStreamDesktop', {
   setTrayStatus: (status) => ipcRenderer.invoke('tray:status', status),
   shortcutStatus: () => ipcRenderer.invoke('shortcut:status'),
   resetTranscriptionShortcut: () => ipcRenderer.invoke('shortcut:resetTranscription'),
+  resetSmartTranscriptionShortcut: () => ipcRenderer.invoke('shortcut:resetSmartTranscription'),
   resetAwakeSleepToggleShortcut: () => ipcRenderer.invoke('shortcut:resetAwakeSleepToggle'),
   resetTurnOffShortcut: () => ipcRenderer.invoke('shortcut:resetTurnOff'),
   resetPauseResumeShortcut: () => ipcRenderer.invoke('shortcut:resetPauseResume'),
@@ -41,6 +42,11 @@ contextBridge.exposeInMainWorld('voiceStreamDesktop', {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('shortcut:transcription', listener);
     return () => ipcRenderer.removeListener('shortcut:transcription', listener);
+  },
+  onSmartTranscriptionShortcut: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on('shortcut:smartTranscription', listener);
+    return () => ipcRenderer.removeListener('shortcut:smartTranscription', listener);
   },
   onAwakeSleepToggleShortcut: (callback) => {
     const listener = () => callback();
