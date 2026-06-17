@@ -86,4 +86,5 @@ export interface RunBlipOptions {
   forkSessionId?: string;
   jsonl?: boolean;
   reasoning?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+  getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
 }

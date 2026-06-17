@@ -1,11 +1,16 @@
 #!/usr/bin/env node
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import process from "node:process";
 import { defaultToolProfile, compactSession, runBlipTask, SessionStore, type BlipRuntimeEvent } from "@blip/core";
 import type { PermissionMode, ToolProfile } from "@blip/tools";
-import "@mariozechner/pi-ai";
+import { getModels } from "@mariozechner/pi-ai";
+import { getOAuthApiKey, refreshOpenAICodexToken, type OAuthCredentials } from "@mariozechner/pi-ai/oauth";
 
-const DEFAULT_PROVIDER = "openai";
+const DEFAULT_PROVIDER = "openai-codex";
 const DEFAULT_MODEL = "gpt-5.3-codex";
+const OPENAI_CODEX_PROVIDER = "openai-codex";
 
 type CliOptions = {
   promptParts: string[];
@@ -20,6 +25,7 @@ type CliOptions = {
   sessionId?: string;
   forkSessionId?: string;
   listSessions: boolean;
+  listModels: boolean;
   compact: boolean;
   help: boolean;
   reasoning?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
@@ -36,7 +42,7 @@ Usage:
 
 Options:
   --jsonl                    Emit runtime events as JSONL on stdout
-  --provider <provider>      Model provider (default: BLIP_PROVIDER or openai)
+  --provider <provider>      Model provider (default: BLIP_PROVIDER or openai-codex)
   --model <model>            Model id, or provider/model
   --reasoning <level>        off|minimal|low|medium|high|xhigh
   --workspace <path>         Workspace root (default: cwd)
@@ -47,12 +53,14 @@ Options:
   --session <id>             Resume an exact session
   --fork <id>                Fork an existing session
   --list-sessions            List sessions for this workspace
+  --list-models              List known models for the selected provider
   --compact                  Compact a session
   -h, --help                 Show help
 
 Environment:
   BLIP_PROVIDER              Default provider
   BLIP_MODEL                 Default model id or provider/model
+  BLIP_CODEX_AUTH_FILE       Override Codex auth file path
 `;
 }
 
@@ -63,6 +71,7 @@ function parseArgs(argv: string[]): CliOptions {
     continueLatest: false,
     resumeLatest: false,
     listSessions: false,
+    listModels: false,
     compact: false,
     help: false,
   };
@@ -87,6 +96,7 @@ function parseArgs(argv: string[]): CliOptions {
     else if (arg === "--session") options.sessionId = next();
     else if (arg === "--fork") options.forkSessionId = next();
     else if (arg === "--list-sessions") options.listSessions = true;
+    else if (arg === "--list-models") options.listModels = true;
     else if (arg === "--compact") options.compact = true;
     else if (arg === "-h" || arg === "--help") options.help = true;
     else if (arg === "--") options.promptParts.push(...argv.slice(index + 1));
@@ -135,6 +145,121 @@ function resolveProviderModel(options: CliOptions): { provider: string; model: s
   return { provider, model };
 }
 
+function jwtExpiresAtMs(token: string): number | undefined {
+  try {
+    const payload = token.split(".")[1];
+    if (!payload) return undefined;
+    const json = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { exp?: unknown };
+    const exp = typeof json.exp === "number" ? json.exp : NaN;
+    return Number.isFinite(exp) && exp > 0 ? exp * 1000 : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseExpiresAtMs(raw: unknown): number | undefined {
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return raw > 10_000_000_000 ? raw : raw * 1000;
+  }
+  if (typeof raw !== "string") return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  const numeric = Number(trimmed);
+  if (Number.isFinite(numeric)) return numeric > 10_000_000_000 ? numeric : numeric * 1000;
+  const parsed = Date.parse(trimmed);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function shouldRefresh(expiresMs: number | undefined): boolean {
+  if (!expiresMs) return false;
+  return Date.now() >= expiresMs - 60_000;
+}
+
+function readJsonFile(filePath: string): any | null {
+  try {
+    if (!existsSync(filePath)) return null;
+    return JSON.parse(readFileSync(filePath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function writeJsonFile(filePath: string, value: unknown): void {
+  try {
+    writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  } catch {
+    // A refreshed token can still be used for this run even if persisting it fails.
+  }
+}
+
+function codexAuthFileCandidates(): string[] {
+  const explicit = String(process.env.BLIP_CODEX_AUTH_FILE ?? "").trim();
+  const candidates = [
+    explicit,
+    path.join(os.homedir(), ".codex", "auth.json"),
+    path.resolve(process.cwd(), "auth.json"),
+  ].filter(Boolean);
+  return Array.from(new Set(candidates));
+}
+
+async function resolvePiAiCodexAuth(filePath: string, raw: any): Promise<string | undefined> {
+  const entry = raw?.[OPENAI_CODEX_PROVIDER];
+  if (!entry || typeof entry !== "object") return undefined;
+  const result = await getOAuthApiKey(OPENAI_CODEX_PROVIDER, { [OPENAI_CODEX_PROVIDER]: entry as OAuthCredentials });
+  if (!result?.apiKey) return undefined;
+  if (result.newCredentials !== entry) {
+    raw[OPENAI_CODEX_PROVIDER] = { ...entry, ...result.newCredentials };
+    writeJsonFile(filePath, raw);
+  }
+  return result.apiKey;
+}
+
+async function resolveCodexCliAuth(filePath: string, raw: any): Promise<string | undefined> {
+  const tokens = raw?.tokens;
+  if (!tokens || typeof tokens !== "object") return undefined;
+  let access = String(tokens.access_token ?? tokens.access ?? "").trim();
+  const refresh = String(tokens.refresh_token ?? tokens.refresh ?? "").trim();
+  const expires =
+    parseExpiresAtMs(tokens.expires_at ?? tokens.expiresAt ?? tokens.expires) ?? jwtExpiresAtMs(access);
+  if (!access && !refresh) return undefined;
+  if (refresh && shouldRefresh(expires)) {
+    const refreshed = await refreshOpenAICodexToken(refresh);
+    access = refreshed.access;
+    raw.tokens = {
+      ...tokens,
+      access_token: refreshed.access,
+      refresh_token: refreshed.refresh,
+      account_id: refreshed.accountId ?? tokens.account_id,
+      expires_at: new Date(refreshed.expires).toISOString(),
+    };
+    raw.last_refresh = new Date().toISOString();
+    writeJsonFile(filePath, raw);
+  }
+  return access || undefined;
+}
+
+function createApiKeyResolver(): (provider: string) => Promise<string | undefined> {
+  const cache = new Map<string, Promise<string | undefined>>();
+  return async (provider: string) => {
+    if (provider !== OPENAI_CODEX_PROVIDER) return undefined;
+    const cached = cache.get(provider);
+    if (cached) return cached;
+    const task = (async () => {
+      for (const filePath of codexAuthFileCandidates()) {
+        const raw = readJsonFile(filePath);
+        if (!raw || typeof raw !== "object") continue;
+        const fromCodexCli = await resolveCodexCliAuth(filePath, raw);
+        if (fromCodexCli) return fromCodexCli;
+        const fromPiAi = await resolvePiAiCodexAuth(filePath, raw);
+        if (fromPiAi) return fromPiAi;
+      }
+      return undefined;
+    })();
+    cache.set(provider, task);
+    return task;
+  };
+}
+
 function renderHuman(event: BlipRuntimeEvent): void {
   if (event.type === "session_started") {
     console.error(`Blip session ${event.sessionId} ${event.resumed ? "resumed" : "started"} (${event.model}, ${event.toolProfile})`);
@@ -168,10 +293,26 @@ async function listSessions(workspaceRoot: string): Promise<void> {
   }
 }
 
+function listModels(provider: string, currentModel: string): void {
+  const models = getModels(provider as any).map((model) => ({
+    id: model.id,
+    label: model.name || model.id,
+    ...(model.id === DEFAULT_MODEL && provider === DEFAULT_PROVIDER ? { default: true } : {}),
+    ...(model.id === currentModel ? { current: true } : {}),
+  }));
+  console.log(JSON.stringify({ models }, null, 2));
+}
+
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) {
     console.log(helpText());
+    return;
+  }
+
+  const { provider, model } = resolveProviderModel(options);
+  if (options.listModels) {
+    listModels(provider, model);
     return;
   }
 
@@ -181,7 +322,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const { provider, model } = resolveProviderModel(options);
+  const getApiKey = createApiKeyResolver();
   const permissionMode = options.permission ?? "workspace-write";
   const toolProfile = options.profile ?? defaultToolProfile(permissionMode, true);
   if (permissionMode === "read-only" && toolProfile !== "read-only") {
@@ -194,7 +335,7 @@ async function main(): Promise<void> {
   };
 
   if (options.compact) {
-    await compactSession({ workspaceRoot, sessionId: options.sessionId, trigger: "manual", onEvent: emit });
+    await compactSession({ workspaceRoot, sessionId: options.sessionId, trigger: "manual", getApiKey, onEvent: emit });
     return;
   }
 
@@ -220,6 +361,7 @@ async function main(): Promise<void> {
       forkSessionId: options.forkSessionId,
       jsonl: options.jsonl,
       reasoning: options.reasoning,
+      getApiKey,
     },
     emit,
   );

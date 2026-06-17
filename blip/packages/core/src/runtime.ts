@@ -115,6 +115,7 @@ export async function compactSession(input: {
   settings?: CompactionSettings;
   model?: Model<any>;
   reasoning?: RunBlipOptions["reasoning"];
+  getApiKey?: RunBlipOptions["getApiKey"];
   onEvent?: RuntimeSink;
 }): Promise<BlipSessionState> {
   const store = new SessionStore(input.workspaceRoot);
@@ -126,6 +127,7 @@ export async function compactSession(input: {
   await input.onEvent?.(started);
   const entries = await store.readTranscript(session);
   const model = input.model ?? resolveModel(session.modelProvider, session.modelId);
+  const apiKey = await input.getApiKey?.(model.provider);
   const compaction = await createCompaction({
     session,
     entries,
@@ -133,6 +135,7 @@ export async function compactSession(input: {
     settings: input.settings,
     model,
     reasoning: input.reasoning,
+    apiKey,
   });
   if (!compaction) {
     const skipped: BlipRuntimeEvent = { ...eventBase(session.id, turnId), type: "compaction_skipped", reason: "nothing to compact yet" };
@@ -171,6 +174,7 @@ export async function runBlipTask(options: RunBlipOptions, onEvent?: RuntimeSink
       settings: DEFAULT_COMPACTION_SETTINGS,
       model,
       reasoning: options.reasoning,
+      getApiKey: options.getApiKey,
       onEvent,
     });
     Object.assign(session, compacted);
@@ -204,6 +208,7 @@ export async function runBlipTask(options: RunBlipOptions, onEvent?: RuntimeSink
     },
     sessionId: session.id,
     toolExecution: "sequential",
+    getApiKey: options.getApiKey,
   });
 
   async function emit(event: BlipRuntimeEvent): Promise<void> {

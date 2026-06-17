@@ -297,7 +297,12 @@ Rules:
 - Do not mention the summary process.`;
 }
 
-async function modelSummary(input: { model: Model<any>; plan: CompactionPlan; reasoning?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" }): Promise<string> {
+async function modelSummary(input: {
+  model: Model<any>;
+  plan: CompactionPlan;
+  reasoning?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+  apiKey?: string;
+}): Promise<string> {
   const maxTokens = Math.min(Math.floor(input.plan.settings.reserveTokens * 0.8), input.model.maxTokens > 0 ? input.model.maxTokens : Number.POSITIVE_INFINITY);
   const response = await completeSimple(
     input.model,
@@ -305,7 +310,9 @@ async function modelSummary(input: { model: Model<any>; plan: CompactionPlan; re
       systemPrompt: SUMMARY_SYSTEM_PROMPT,
       messages: [{ role: "user", content: summaryPrompt(input.plan), timestamp: Date.now() }],
     },
-    input.model.reasoning && input.reasoning && input.reasoning !== "off" ? { maxTokens, reasoning: input.reasoning } : { maxTokens },
+    input.model.reasoning && input.reasoning && input.reasoning !== "off"
+      ? { maxTokens, reasoning: input.reasoning, apiKey: input.apiKey }
+      : { maxTokens, apiKey: input.apiKey },
   );
   if (response.stopReason === "error" || response.stopReason === "aborted") {
     throw new Error(response.errorMessage || `summary generation ${response.stopReason}`);
@@ -334,13 +341,16 @@ export async function createCompaction(input: {
   settings?: CompactionSettings;
   model?: Model<any>;
   reasoning?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+  apiKey?: string;
 }): Promise<CompactionEntry | undefined> {
   const plan = prepareCompaction({ session: input.session, entries: input.entries, settings: input.settings });
   if (!plan) return undefined;
 
   let summary: string;
   try {
-    summary = input.model ? await modelSummary({ model: input.model, plan, reasoning: input.reasoning }) : deterministicSummary({ session: input.session, plan });
+    summary = input.model
+      ? await modelSummary({ model: input.model, plan, reasoning: input.reasoning, apiKey: input.apiKey })
+      : deterministicSummary({ session: input.session, plan });
   } catch {
     summary = deterministicSummary({ session: input.session, plan });
   }

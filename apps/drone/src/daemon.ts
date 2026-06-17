@@ -439,7 +439,7 @@ async function startPromptJob(job: PromptJob): Promise<void> {
 
 function promptJobSupportsTranscript(kindRaw: unknown): boolean {
   const kind = String(kindRaw ?? '').trim();
-  return kind === 'codex' || kind === 'pi';
+  return kind === 'codex' || kind === 'pi' || kind === 'blip';
 }
 
 async function parsePromptJobTranscriptFromFile(

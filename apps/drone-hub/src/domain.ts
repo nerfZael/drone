@@ -1,5 +1,5 @@
 export type ChatAgentConfig =
-  | { kind: 'builtin'; id: 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi' }
+  | { kind: 'builtin'; id: 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi' | 'blip' }
   | { kind: 'custom'; id: string; label: string; command: string };
 
 export type ChatInfo = {
@@ -85,11 +85,11 @@ export function normalizeChatInfoPayload(data: any): ChatInfo {
   const dockerSnapshotAfterAgentMessageEnabled = data?.dockerSnapshotAfterAgentMessageEnabled === true;
 
   const raw = data?.agent;
-  const normalizeBuiltin = (v: any): 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi' | null => {
+  const normalizeBuiltin = (v: any): 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi' | 'blip' | null => {
     const id = String(v ?? '')
       .trim()
       .toLowerCase();
-    if (id === 'cursor' || id === 'codex' || id === 'claude' || id === 'opencode' || id === 'pi') return id;
+    if (id === 'cursor' || id === 'codex' || id === 'claude' || id === 'opencode' || id === 'pi' || id === 'blip') return id;
     if (id === 'cloud') return 'claude';
     if (id === 'open-code' || id === 'open_code') return 'opencode';
     if (id === 'pi-agent' || id === 'pi_agent') return 'pi';
@@ -160,6 +160,9 @@ export function normalizeChatInfoPayload(data: any): ChatInfo {
   }
   if (String(data?.piSessionId ?? '').trim()) {
     return { name, chat, model, agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true, agentSuggestionEnabled: data?.agentSuggestionEnabled === true, dockerSnapshotAfterAgentMessageEnabled, sessionName, createdAt, agent: { kind: 'builtin', id: 'pi' } };
+  }
+  if (String(data?.blipSessionId ?? '').trim()) {
+    return { name, chat, model, agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true, agentSuggestionEnabled: data?.agentSuggestionEnabled === true, sessionName, createdAt, agent: { kind: 'builtin', id: 'blip' } };
   }
   if (String(data?.codexThreadId ?? '').trim()) {
     return { name, chat, model, agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true, agentSuggestionEnabled: data?.agentSuggestionEnabled === true, dockerSnapshotAfterAgentMessageEnabled, sessionName, createdAt, agent: { kind: 'builtin', id: 'codex' } };
