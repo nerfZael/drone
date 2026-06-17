@@ -44,6 +44,7 @@ export function buildDroneHubTaskQueueSpec(args: {
       ...(seedModel ? { seedModel } : {}),
       seedChat: 'default',
       seedPrompt: taskDescription,
+      ...(taskDescription ? { seedSubmittedAt: new Date().toISOString() } : {}),
     };
   }
 

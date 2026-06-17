@@ -475,6 +475,7 @@ export function useDroneCreationActions({
             ...(seedAgent ? { seedAgent } : {}),
             ...(seedModel ? { seedModel } : {}),
             ...(combinedSeedPrompt ? { seedPrompt: combinedSeedPrompt } : {}),
+            ...(combinedSeedPrompt ? { seedSubmittedAt: new Date().toISOString() } : {}),
           };
         }),
       );

@@ -1492,9 +1492,13 @@ repoCommand
   .action(safeAction(async (name, options) => {
     let tmpDir: string | null = null;
     let tmpBundle: string | null = null;
+    let tmpSeedBranch: string | null = null;
+    let tmpSeedRef: string | null = null;
+    let hostRepoPathForCleanup: string | null = null;
     try {
       const containerName = String(name);
       const hostRepoPath = path.resolve(String(options.path || process.cwd()));
+      hostRepoPathForCleanup = hostRepoPath;
       const dest = normalizeContainerPath(String(options.dest || '/work/repo'));
       const bundlePathInContainer = normalizeContainerPath(String(options.bundle || '/tmp/dvm-repo.bundle'));
 
@@ -1507,7 +1511,10 @@ repoCommand
       // Create a temporary git bundle (single file, no build artifacts).
       tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), `dvm-bundle-${safeSlug(containerName)}-`));
       tmpBundle = path.join(tmpDir, 'repo.bundle');
-      await runLocal('git', ['-C', hostRepoPath, 'bundle', 'create', tmpBundle, '--all']);
+      tmpSeedBranch = `dvm-seed/${safeSlug(containerName)}-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`;
+      tmpSeedRef = `refs/heads/${tmpSeedBranch}`;
+      await runLocal('git', ['-C', hostRepoPath, 'update-ref', tmpSeedRef, baseSha]);
+      await runLocal('git', ['-C', hostRepoPath, 'bundle', 'create', tmpBundle, tmpSeedRef]);
 
       // Ensure container is running and has git.
       // NOTE: create-if-missing is default here (opt-out with --no-create).
@@ -1524,25 +1531,30 @@ repoCommand
 
       // Clone from bundle into dest.
       const branch = options.branch ? String(options.branch) : '';
-      const branchCmd = branch
+      const checkoutCmd = branch
         ? `cd ${JSON.stringify(dest)} && git checkout ${options.forceBranch ? '-B' : '-b'} ${JSON.stringify(branch)} ${JSON.stringify(baseSha)}`
-        : '';
+        : `cd ${JSON.stringify(dest)} && git checkout --detach ${JSON.stringify(baseSha)}`;
       const remoteCmd = hostRemoteUrl
         ? `cd ${JSON.stringify(dest)} && git remote set-url origin ${JSON.stringify(hostRemoteUrl)}`
         : '';
+      const cleanupBundleCmd = `rm -f ${JSON.stringify(bundlePathInContainer)}`;
+      const cleanupSeedBranchCmd = `cd ${JSON.stringify(dest)} && git branch -D ${JSON.stringify(tmpSeedBranch)} >/dev/null 2>&1 || true`;
 
       const cloneScript = [
         'set -euo pipefail',
+        `trap ${JSON.stringify(`${cleanupBundleCmd} || true`)} EXIT`,
         options.clean
           ? `rm -rf ${JSON.stringify(dest)}`
           : `if [ -e ${JSON.stringify(dest)} ]; then echo "Destination exists: ${dest}" >&2; exit 2; fi`,
         `mkdir -p ${JSON.stringify(path.posix.dirname(dest))}`,
-        `git clone ${JSON.stringify(bundlePathInContainer)} ${JSON.stringify(dest)}`,
+        `git clone --branch ${JSON.stringify(tmpSeedBranch)} ${JSON.stringify(bundlePathInContainer)} ${JSON.stringify(dest)}`,
+        cleanupBundleCmd,
         // Record base SHA in git config (untracked; cannot accidentally be committed).
         `cd ${JSON.stringify(dest)} && git config dvm.baseSha ${JSON.stringify(baseSha)}`,
         // Preserve host remote so PR tooling can work directly inside the container repo.
         remoteCmd,
-        branchCmd,
+        checkoutCmd,
+        cleanupSeedBranchCmd,
       ]
         .filter(Boolean)
         .join('\n');
@@ -1568,6 +1580,9 @@ repoCommand
       }
     } finally {
       // Best-effort cleanup.
+      try {
+        if (tmpSeedRef && hostRepoPathForCleanup) await runLocal('git', ['-C', hostRepoPathForCleanup, 'update-ref', '-d', tmpSeedRef]);
+      } catch {}
       try {
         if (tmpBundle) await fs.promises.rm(tmpBundle, { force: true });
       } catch {}

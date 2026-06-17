@@ -3766,6 +3766,13 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+function normalizeSubmittedAtIso(raw: unknown, fallback: string = nowIso()): string {
+  const text = typeof raw === 'string' ? raw.trim() : '';
+  if (!text) return fallback;
+  const ms = Date.parse(text);
+  return Number.isFinite(ms) ? text : fallback;
+}
+
 async function reconcilePendingHostMirrorApply(opts: {
   droneId: string;
   droneName: string;
@@ -8828,6 +8835,7 @@ async function enqueuePrompt(opts: {
   attachments?: ChatImageAttachment[];
   automation?: PromptAutomationMeta | null;
   cwd?: string | null;
+  submittedAt?: string | null;
   waitForDaemonMs?: number;
   deliveryMode?: 'background' | 'immediate';
   mark?: (name: string) => void;
@@ -8837,7 +8845,7 @@ async function enqueuePrompt(opts: {
     throw new Error('invalid promptId');
   }
   const id = preferredIdRaw || crypto.randomBytes(9).toString('hex');
-  const at = nowIso();
+  const at = normalizeSubmittedAtIso(opts.submittedAt);
   const chatName = normalizeChatName(opts.chatName);
   const droneId = normalizeDroneIdentity(opts.droneId);
   if (!droneId) throw new Error('missing droneId');
@@ -9056,6 +9064,7 @@ async function createOrEnqueuePromptUnified(opts: {
   attachments?: ChatImageAttachment[];
   automation?: PromptAutomationMeta | null;
   cwd?: string | null;
+  submittedAt?: string | null;
   allowQueued?: boolean;
   mark?: (name: string) => void;
 }): Promise<
@@ -9126,6 +9135,7 @@ async function createOrEnqueuePromptUnified(opts: {
       attachments,
       automation: opts.automation,
       cwd: opts.cwd ?? null,
+      submittedAt: opts.submittedAt ?? null,
       deliveryMode: opts.allowQueued === false || isAutomationPrompt ? 'immediate' : 'background',
       mark: opts.mark,
     });
@@ -9154,13 +9164,14 @@ async function createOrEnqueuePromptUnified(opts: {
         error: `drone "${droneId}" is still starting (attachments require an active drone)`,
       };
     }
+    const submittedAt = normalizeSubmittedAtIso(opts.submittedAt);
     const queuedPending: PendingPrompt = {
       id: fallbackId,
-      at: nowIso(),
+      at: submittedAt,
       prompt,
       ...(opts.cwd != null ? { cwd: opts.cwd } : {}),
       state: 'queued',
-      updatedAt: nowIso(),
+      updatedAt: submittedAt,
     };
     const queuedStatus = await pushPendingStartupPrompt({ droneId, chatName, pending: queuedPending });
     if (queuedStatus === 'active') {
@@ -9172,6 +9183,7 @@ async function createOrEnqueuePromptUnified(opts: {
         attachments,
         automation: opts.automation ?? null,
         cwd: opts.cwd ?? null,
+        submittedAt: opts.submittedAt ?? null,
         deliveryMode: isAutomationPrompt ? 'immediate' : 'background',
         mark: opts.mark,
       });
@@ -11542,6 +11554,7 @@ async function finishDockerSnapshotForTranscriptTurn(opts: {
   containerName: string;
 }): Promise<void> {
   try {
+    await cleanupContainerBeforeDockerSnapshot(opts.containerName);
     const stdout = await runDockerOrThrow(['commit', opts.containerName, opts.imageRef], { timeoutMs: 10 * 60_000 });
     const imageId = String(stdout ?? '').trim();
     const sizeBytes = await dockerImageSizeBytes(opts.imageRef);
@@ -11590,6 +11603,24 @@ async function finishDockerSnapshotForTranscriptTurn(opts: {
       promptId: opts.promptId,
       imageRef: opts.imageRef,
       error,
+    });
+  }
+}
+
+async function cleanupContainerBeforeDockerSnapshot(containerName: string): Promise<void> {
+  const name = String(containerName ?? '').trim();
+  if (!name) return;
+  const script = [
+    'rm -f /tmp/dvm-repo.bundle',
+    'rm -rf /tmp/yarn--* /tmp/node-compile-cache /tmp/v8-compile-cache-*',
+    'rm -rf /root/.npm/_cacache /root/.cache/node /root/.cache/cursor-compile-cache',
+    'rm -rf /usr/local/share/.cache/yarn',
+  ].join('\n');
+  const result = await runDocker(['exec', name, 'sh', '-lc', script], { timeoutMs: 60_000 });
+  if (result.code !== 0) {
+    hubLog('warn', 'docker snapshot pre-cleanup failed', {
+      containerName: name,
+      error: (result.stderr || result.stdout || `docker exec cleanup failed with code ${result.code}`).trim(),
     });
   }
 }
@@ -12517,13 +12548,18 @@ export async function startDroneHubApiServer(opts: {
       return out.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
     },
     createDrone: async (request): Promise<AssistantCreateDroneResult> => {
-      const data = await callLocalHubApi('/api/drones', request);
+      const seedPrompt = String(request?.seedPrompt ?? request?.initialMessage ?? request?.seed?.prompt ?? '').trim();
+      const submittedRequest =
+        seedPrompt && !String(request?.seedSubmittedAt ?? request?.submittedAt ?? request?.seed?.submittedAt ?? request?.seed?.clientSubmittedAt ?? '').trim()
+          ? { ...request, seedSubmittedAt: nowIso() }
+          : request;
+      const data = await callLocalHubApi('/api/drones', submittedRequest);
       return {
         id: String(data?.id ?? '').trim(),
         name: String(data?.name ?? '').trim(),
-        runtime: String(data?.runtime ?? request?.runtime ?? 'container').trim() || 'container',
+        runtime: String(data?.runtime ?? submittedRequest?.runtime ?? 'container').trim() || 'container',
         phase: String(data?.phase ?? 'starting').trim() || 'starting',
-        request,
+        request: submittedRequest,
       };
     },
     createChat: async ({ droneId, chatName }): Promise<AssistantCreateChatResult> => {
@@ -12551,6 +12587,7 @@ export async function startDroneHubApiServer(opts: {
       const chat = normalizeChatName(chatName || 'default');
       const message = String(prompt ?? '').trim();
       if (!message) throw new Error('missing prompt');
+      const submittedAt = nowIso();
       if (resolved.kind === 'pending') {
         const pendingPromptId = crypto.randomBytes(9).toString('hex');
         const queuedStatus = await pushPendingStartupPrompt({
@@ -12558,20 +12595,20 @@ export async function startDroneHubApiServer(opts: {
           chatName: chat,
           pending: {
             id: pendingPromptId,
-            at: nowIso(),
+            at: submittedAt,
             prompt: message,
             state: 'queued',
-            updatedAt: nowIso(),
+            updatedAt: submittedAt,
           },
         });
         if (queuedStatus !== 'queued') {
-          const r = await createOrEnqueuePromptUnified({ id: pendingPromptId, droneId: id, chatName: chat, prompt: message, cwd: null });
+          const r = await createOrEnqueuePromptUnified({ id: pendingPromptId, droneId: id, chatName: chat, prompt: message, cwd: null, submittedAt });
           if (r.kind === 'error') throw new Error(r.error);
           return { promptId: r.id, pendingState: r.pendingState, blockedByAutomation: r.blockedByAutomation };
         }
         return { promptId: pendingPromptId, pendingState: 'queued', blockedByAutomation: false };
       }
-      const r = await createOrEnqueuePromptUnified({ droneId: id, chatName: chat, prompt: message, cwd: null });
+      const r = await createOrEnqueuePromptUnified({ droneId: id, chatName: chat, prompt: message, cwd: null, submittedAt });
       if (r.kind === 'error') throw new Error(r.error);
       return { promptId: r.id, pendingState: r.pendingState, blockedByAutomation: r.blockedByAutomation };
     },
@@ -16890,6 +16927,9 @@ export async function startDroneHubApiServer(opts: {
         const seedPrompt = String(body?.seedPrompt ?? body?.initialMessage ?? body?.seed?.prompt ?? '').trim();
         const seedChatName = normalizeChatName(body?.seedChat ?? body?.seed?.chatName ?? body?.seed?.chat ?? 'default');
         const seedAgent = parseSeedAgent(body?.seedAgent ?? body?.agent ?? body?.seed?.agent);
+        const seedSubmittedAt = normalizeSubmittedAtIso(
+          body?.seedSubmittedAt ?? body?.submittedAt ?? body?.seed?.submittedAt ?? body?.seed?.clientSubmittedAt,
+        );
         let seedModel: string | null = null;
         try {
           seedModel = parseChatModelForUpdate(body?.seedModel ?? body?.seed?.model);
@@ -17036,6 +17076,7 @@ export async function startDroneHubApiServer(opts: {
                     chatName: seedChatName,
                     ...(seedModel ? { model: seedModel } : {}),
                     ...(seedPrompt ? { prompt: seedPrompt } : {}),
+                    ...(seedPrompt ? { submittedAt: seedSubmittedAt } : {}),
                     ...(seedCwdRaw ? { cwd: String(seedCwdRaw) } : {}),
                     ...(seedAgent ? { agent: seedAgent } : {}),
                   },
@@ -17289,6 +17330,9 @@ export async function startDroneHubApiServer(opts: {
               const seedPrompt = String(raw?.seedPrompt ?? raw?.initialMessage ?? raw?.seed?.prompt ?? '').trim();
               const seedChatName = normalizeChatName(raw?.seedChat ?? raw?.seed?.chatName ?? raw?.seed?.chat ?? 'default');
               const seedAgent = parseSeedAgent(raw?.seedAgent ?? raw?.agent ?? raw?.seed?.agent);
+              const seedSubmittedAt = normalizeSubmittedAtIso(
+                raw?.seedSubmittedAt ?? raw?.submittedAt ?? raw?.seed?.submittedAt ?? raw?.seed?.clientSubmittedAt,
+              );
               let seedModel: string | null = null;
               try {
                 seedModel = parseChatModelForUpdate(raw?.seedModel ?? raw?.seed?.model);
@@ -17390,6 +17434,7 @@ export async function startDroneHubApiServer(opts: {
                         chatName: seedChatName,
                         ...(seedModel ? { model: seedModel } : {}),
                         ...(seedPrompt ? { prompt: seedPrompt } : {}),
+                        ...(seedPrompt ? { submittedAt: seedSubmittedAt } : {}),
                         ...(seedCwdRaw ? { cwd: String(seedCwdRaw) } : {}),
                         ...(seedAgent ? { agent: seedAgent } : {}),
                       },
@@ -23894,6 +23939,7 @@ export async function startDroneHubApiServer(opts: {
             return;
           }
 
+          const submittedAt = normalizeSubmittedAtIso(body?.submittedAt ?? body?.clientSubmittedAt ?? body?.at);
           let r:
             | { kind: 'enqueued'; id: string; pendingState: PendingPromptState; blockedByAutomation: boolean }
             | { kind: 'error'; status: number; error: string };
@@ -23911,11 +23957,11 @@ export async function startDroneHubApiServer(opts: {
                 chatName: chat,
                 pending: {
                   id: pendingPromptId,
-                  at: nowIso(),
+                  at: submittedAt,
                   prompt,
                   ...(typeof body?.cwd === 'string' ? { cwd: body.cwd } : {}),
                   state: 'queued',
-                  updatedAt: nowIso(),
+                  updatedAt: submittedAt,
                 },
               });
               if (queuedStatus === 'queued') {
@@ -23933,6 +23979,7 @@ export async function startDroneHubApiServer(opts: {
                   prompt,
                   attachments,
                   cwd: typeof body?.cwd === 'string' ? body.cwd : null,
+                  submittedAt,
                   mark: (name) => timer.mark(name),
                 });
               }
@@ -23945,6 +23992,7 @@ export async function startDroneHubApiServer(opts: {
               prompt,
               attachments,
               cwd: typeof body?.cwd === 'string' ? body.cwd : null,
+              submittedAt,
               mark: (name) => timer.mark(name),
             });
           }

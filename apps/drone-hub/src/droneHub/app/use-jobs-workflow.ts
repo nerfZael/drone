@@ -173,6 +173,7 @@ export function useJobsWorkflow({
             ...(seedModel ? { seedModel } : {}),
             seedChat: 'default',
             ...(seedPrompt.trim() ? { seedPrompt } : {}),
+            ...(seedPrompt.trim() ? { seedSubmittedAt: new Date().toISOString() } : {}),
           },
         ]);
 
@@ -282,6 +283,7 @@ export function useJobsWorkflow({
           ...(seedModel ? { seedModel } : {}),
           seedChat: 'default',
           ...(seedPrompt.trim() ? { seedPrompt } : {}),
+          ...(seedPrompt.trim() ? { seedSubmittedAt: new Date().toISOString() } : {}),
         });
       }
 

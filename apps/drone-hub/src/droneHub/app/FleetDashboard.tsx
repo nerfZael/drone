@@ -315,6 +315,7 @@ function useFleetDashboardState({
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({
               prompt: item.prompt,
+              submittedAt: new Date().toISOString(),
               ...(typeof item.cwd === 'string' ? { cwd: item.cwd } : {}),
             }),
           });

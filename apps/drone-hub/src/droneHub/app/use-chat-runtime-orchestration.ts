@@ -489,6 +489,7 @@ export function useChatRuntimeOrchestration({
               chatName: parsed.chatName,
               prompt: head.prompt,
               attachments: head.attachmentPayloads ?? [],
+              submittedAt: head.at,
             });
 
             const id = String((data as any)?.promptId ?? '').trim();

@@ -121,6 +121,23 @@ function sameAgentSuggestion(
   );
 }
 
+function sameDockerSnapshot(
+  left: TranscriptItem['dockerSnapshot'],
+  right: TranscriptItem['dockerSnapshot'],
+): boolean {
+  if (!left && !right) return true;
+  if (!left || !right) return false;
+  return (
+    sameOptionalText(left.id, right.id) &&
+    sameOptionalText(left.status, right.status) &&
+    sameOptionalText(left.createdAt, right.createdAt) &&
+    sameOptionalText(left.readyAt, right.readyAt) &&
+    sameOptionalText(left.restoredAt, right.restoredAt) &&
+    sameOptionalText(left.error, right.error) &&
+    left.sizeBytes === right.sizeBytes
+  );
+}
+
 export function sameTranscriptItem(left: TranscriptItem, right: TranscriptItem): boolean {
   return (
     left.turn === right.turn &&
@@ -138,7 +155,8 @@ export function sameTranscriptItem(left: TranscriptItem, right: TranscriptItem):
     sameAttachments(left.attachments, right.attachments) &&
     sameAutomation(left.automation, right.automation) &&
     sameAgentMessageAutoContinue(left.agentMessageAutoContinue, right.agentMessageAutoContinue) &&
-    sameAgentSuggestion(left.agentSuggestion, right.agentSuggestion)
+    sameAgentSuggestion(left.agentSuggestion, right.agentSuggestion) &&
+    sameDockerSnapshot(left.dockerSnapshot, right.dockerSnapshot)
   );
 }
 
@@ -182,18 +200,20 @@ export async function sendDroneChatPrompt(
     chatName: string;
     prompt: string;
     attachments?: ChatSendPayload['attachments'];
+    submittedAt?: string;
   },
 ): Promise<SendDroneChatPromptResponse> {
   const droneId = String(opts.droneId ?? '').trim();
   const chatName = String(opts.chatName ?? '').trim() || 'default';
   const prompt = String(opts.prompt ?? '');
   const attachments = Array.isArray(opts.attachments) ? opts.attachments : [];
+  const submittedAt = String(opts.submittedAt ?? '').trim() || new Date().toISOString();
   return await requestJson<SendDroneChatPromptResponse>(
     `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/prompt`,
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ prompt, attachments }),
+      body: JSON.stringify({ prompt, attachments, submittedAt }),
     },
   );
 }

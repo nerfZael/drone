@@ -259,7 +259,7 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
       await remoteRequestJson(`/api/drones/${encodeURIComponent(effectiveDroneId)}/chats/${encodeURIComponent(selectedChat)}/prompt`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ prompt, submittedAt: new Date().toISOString() }),
       });
       setDraft('');
       await loadChatState(effectiveDroneId, selectedChat);

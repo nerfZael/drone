@@ -25,11 +25,12 @@ describe('repoSeed checkout target', () => {
     });
 
     const baseSha = 'c6df507a1f66b3f579507bc5868aff1c32909d3b';
-    jest.spyOn(api as any, 'runLocal').mockImplementation(async (...rawArgs: unknown[]) => {
+    const runLocalSpy = jest.spyOn(api as any, 'runLocal').mockImplementation(async (...rawArgs: unknown[]) => {
       const [_cmd, args] = rawArgs as [string, string[]];
       if (args.includes('--is-inside-work-tree')) return 'true\n';
       if (args.includes('remote') && args.includes('get-url')) return 'git@github.com:Planet-Mojo/StorySpark.git\n';
       if (args[args.length - 2] === 'rev-parse' && args[args.length - 1] === 'dev') return `${baseSha}\n`;
+      if (args.includes('update-ref')) return '';
       if (args.includes('bundle') && args.includes('create')) return '';
       if (args[args.length - 1] === 'remote') return 'origin\n';
       throw new Error(`Unexpected runLocal call: ${args.join(' ')}`);
@@ -44,18 +45,64 @@ describe('repoSeed checkout target', () => {
       clean: true,
     });
 
-    expect(execCommand).toHaveBeenLastCalledWith('demo', [
-      'bash',
-      '-lc',
-      expect.stringContaining(`git checkout -b "dvm/work" "${baseSha}"`),
+    const cloneCall = (execCommand.mock.calls as unknown[][]).find((call) => {
+      const args = call[1] as string[] | undefined;
+      if (!Array.isArray(args)) return false;
+      return args[0] === 'bash' && args[1] === '-lc' && String(args[2] ?? '').includes('git clone');
+    });
+    expect(cloneCall).toBeTruthy();
+    expect(cloneCall).toEqual([
+      'demo',
+      [
+        'bash',
+        '-lc',
+        expect.stringContaining(`git checkout -b "dvm/work" "${baseSha}"`),
+      ],
     ]);
-    expect(execCommand).toHaveBeenLastCalledWith(
+    expect(cloneCall).toEqual([
+      'demo',
+      expect.arrayContaining([
+        expect.any(String),
+        expect.any(String),
+        expect.stringContaining('git clone --branch "dvm-seed/demo-'),
+      ]),
+    ]);
+    expect(cloneCall).toEqual([
       'demo',
       expect.arrayContaining([
         expect.any(String),
         expect.any(String),
         expect.not.stringContaining('git checkout -b "dvm/work" "dev"'),
       ]),
+    ]);
+    expect(cloneCall).toEqual([
+      'demo',
+      expect.arrayContaining([
+        expect.any(String),
+        expect.any(String),
+        expect.stringContaining('trap "rm -f \\"/tmp/dvm-repo.bundle\\" || true" EXIT'),
+      ]),
+    ]);
+    expect(cloneCall).toEqual([
+      'demo',
+      expect.arrayContaining([
+        expect.any(String),
+        expect.any(String),
+        expect.stringContaining('rm -f "/tmp/dvm-repo.bundle"'),
+      ]),
+    ]);
+
+    const bundleCreateCall = runLocalSpy.mock.calls.find((call) => {
+      const args = call[1] as string[] | undefined;
+      return Array.isArray(args) && args.includes('bundle') && args.includes('create');
+    });
+    expect(bundleCreateCall).toBeTruthy();
+    const bundleArgs = bundleCreateCall?.[1] as string[];
+    expect(bundleArgs).not.toContain('--all');
+    expect(bundleArgs[bundleArgs.length - 1]).toMatch(/^refs\/heads\/dvm-seed\/demo-/);
+    expect(runLocalSpy).toHaveBeenCalledWith(
+      'git',
+      expect.arrayContaining(['update-ref', '-d', expect.stringMatching(/^refs\/heads\/dvm-seed\/demo-/)])
     );
   });
 });

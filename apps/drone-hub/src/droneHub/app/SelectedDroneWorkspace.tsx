@@ -506,13 +506,13 @@ export function SelectedDroneWorkspace({
   const dockerSnapshotSupported = !hostRuntime && currentDrone.persistVolume === false;
   const dockerSize = currentDrone.dockerSize ?? null;
   const dockerSizeTitle = dockerSize
-    ? `Docker size: ${formatBytes(dockerSize.totalBytes)} total. Container writable layer: ${formatBytes(
+    ? `Docker tracked size: ${formatBytes(dockerSize.totalBytes)} current writable + unique snapshot layers. Current container writable layer: ${formatBytes(
         dockerSize.containerWritableBytes,
       )}. Snapshot unique layers: ${formatBytes(dockerSize.snapshotBytes)} across ${
         dockerSize.snapshotCount
       } snapshot${dockerSize.snapshotCount === 1 ? '' : 's'}${
         dockerSize.snapshotVirtualBytes != null
-          ? ` (${formatBytes(dockerSize.snapshotVirtualBytes)} virtual image size).`
+          ? ` (${formatBytes(dockerSize.snapshotVirtualBytes)} summed virtual image size; virtual sizes include shared base layers repeatedly).`
           : '.'
       }`
     : 'Docker size unavailable.';
@@ -1296,7 +1296,7 @@ export function SelectedDroneWorkspace({
                   style={{ fontFamily: 'var(--display)' }}
                   title={dockerSizeTitle}
                 >
-                  Docker {formatBytes(dockerSize?.totalBytes)}
+                  Docker used {formatBytes(dockerSize?.totalBytes)}
                 </span>
               ) : null}
               {hasChats && chatUiMode === 'transcript' ? (
@@ -2238,7 +2238,6 @@ export function SelectedDroneWorkspace({
                 ? selectedChatDockerSnapshotBusy || visiblePendingPromptsWithStartup.some((p) => p.state !== 'failed')
                 : (showRespondingAsStatusInHeader || canStopResponse)
             }
-            disabled={selectedChatDockerSnapshotBusy}
             automationActions={chatAutomationActions}
             lockComposerWhileAutomationActive={false}
             voicePatchActive={voicePatchActiveForCurrentChat}

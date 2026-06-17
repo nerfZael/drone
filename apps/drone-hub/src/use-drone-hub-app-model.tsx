@@ -2357,7 +2357,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ prompt, attachments: [] }),
+              body: JSON.stringify({ prompt, attachments: [], submittedAt: new Date().toISOString() }),
             },
           );
         }),
@@ -2417,6 +2417,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const remoteBranch = String(repoCreateRemoteBranch ?? '').trim();
 
       try {
+        const seedSubmittedAt = new Date().toISOString();
         const body: any = {
           ...(group ? { group } : {}),
           ...(repoPath ? { repoPath } : {}),
@@ -2427,6 +2428,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           ...(seedAgent ? { seedAgent } : {}),
           ...(seedModel ? { seedModel } : {}),
           seedPrompt: prompt,
+          seedSubmittedAt,
         };
         const data = await requestJson<{ ok: true; id: string; name: string; phase: 'starting' }>(
           '/api/drones',

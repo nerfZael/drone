@@ -214,7 +214,11 @@ describe('drone provisioning controller', () => {
 
       await waitFor(async () => {
         const reg: any = await loadRegistry();
-        return !reg?.pending?.['drone-2'] && Boolean(reg?.drones?.['drone-2']?.chats?.ops);
+        return (
+          !reg?.pending?.['drone-2'] &&
+          Boolean(reg?.drones?.['drone-2']?.chats?.ops) &&
+          harness.pendingPromptPumpCalls.length > 0
+        );
       });
 
       const reg: any = await loadRegistry();
@@ -252,6 +256,89 @@ describe('drone provisioning controller', () => {
     });
   });
 
+  test('materializes seed prompts into the startup queue before pumping', async () => {
+    await withTempDroneDataDir('drone-provisioning-', async () => {
+      await updateRegistry((reg: any) => {
+        reg.pending = {
+          'drone-seed-order': {
+            id: 'drone-seed-order',
+            name: 'seed-order',
+            runtime: 'host',
+            repoPath: '',
+            build: false,
+            createdAt: '2026-03-26T11:00:00.000Z',
+            updatedAt: '2026-03-26T11:00:00.000Z',
+            phase: 'starting',
+            message: 'Starting...',
+            seed: {
+              chatName: 'default',
+              agent: { kind: 'builtin', id: 'codex' },
+              submittedAt: '2026-03-26T11:03:00.000Z',
+              prompt: 'seed prompt',
+            },
+            startupQueuedPrompts: [
+              {
+                id: 'startup-earlier',
+                chatName: 'default',
+                at: '2026-03-26T11:02:00.000Z',
+                prompt: 'queued while starting',
+                state: 'queued',
+              },
+              {
+                id: 'startup-later',
+                chatName: 'default',
+                at: '2026-03-26T11:04:00.000Z',
+                prompt: 'queued after seed',
+                state: 'queued',
+              },
+            ],
+          },
+        };
+      });
+
+      const harness = createControllerHarness();
+      harness.controller.enqueueProvisioning('drone-seed-order');
+
+      await waitFor(async () => {
+        const reg: any = await loadRegistry();
+        return (
+          !reg?.pending?.['drone-seed-order'] &&
+          Array.isArray(reg?.drones?.['drone-seed-order']?.chats?.default?.pendingPrompts) &&
+          reg.drones['drone-seed-order'].chats.default.pendingPrompts.length === 3 &&
+          harness.pendingPromptPumpCalls.length > 0
+        );
+      });
+
+      const reg: any = await loadRegistry();
+      expect(reg?.drones?.['drone-seed-order']?.chats?.default?.pendingPrompts).toEqual([
+        {
+          id: 'startup-earlier',
+          at: '2026-03-26T11:02:00.000Z',
+          prompt: 'queued while starting',
+          state: 'queued',
+          updatedAt: '2026-03-26T12:00:00.000Z',
+        },
+        {
+          id: expect.any(String),
+          at: '2026-03-26T11:03:00.000Z',
+          prompt: 'seed prompt',
+          state: 'queued',
+          updatedAt: '2026-03-26T11:03:00.000Z',
+        },
+        {
+          id: 'startup-later',
+          at: '2026-03-26T11:04:00.000Z',
+          prompt: 'queued after seed',
+          state: 'queued',
+          updatedAt: '2026-03-26T12:00:00.000Z',
+        },
+      ]);
+      expect(harness.enqueuePromptCalls).toHaveLength(0);
+      expect(harness.pendingPromptPumpCalls).toEqual([{ droneId: 'drone-seed-order', chatName: 'default' }]);
+      expect(harness.events.indexOf('pump:drone-seed-order:default')).toBeGreaterThan(harness.events.indexOf('sync:repo-agents'));
+    });
+  });
+
   test('materializes seed chat config before post-create sync without startup prompts', async () => {
     await withTempDroneDataDir('drone-provisioning-', async () => {
       await updateRegistry((reg: any) => {
@@ -280,7 +367,7 @@ describe('drone provisioning controller', () => {
 
       await waitFor(async () => {
         const reg: any = await loadRegistry();
-        return !reg?.pending?.['drone-image-first'] && Boolean(reg?.drones?.['drone-image-first']);
+        return !reg?.pending?.['drone-image-first'] && Boolean(reg?.drones?.['drone-image-first']) && harness.syncTaskStateCalls.length > 0;
       });
 
       const reg: any = await loadRegistry();

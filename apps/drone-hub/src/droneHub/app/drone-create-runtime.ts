@@ -88,5 +88,6 @@ export function buildDraftDroneCreatePayload({
     ...(seedAgent ? { seedAgent } : {}),
     ...(trimmedModel ? { seedModel: trimmedModel } : {}),
     ...(trimmedPrompt ? { seedPrompt: trimmedPrompt } : {}),
+    ...(trimmedPrompt ? { seedSubmittedAt: new Date().toISOString() } : {}),
   };
 }

@@ -67,6 +67,13 @@ type DroneProvisioningControllerDeps = {
   syncTaskStateSnapshotToDrone: (droneId: string, droneEntry: any) => Promise<void>;
 };
 
+function normalizeIsoTimestamp(raw: unknown, fallback: string): string {
+  const text = typeof raw === 'string' ? raw.trim() : '';
+  if (!text) return fallback;
+  const ms = Date.parse(text);
+  return Number.isFinite(ms) ? text : fallback;
+}
+
 export function createDroneProvisioningController(deps: DroneProvisioningControllerDeps) {
   const PROVISIONING_TASKS = new Map<string, Promise<void>>();
   const PROVISION_QUEUE: string[] = [];
@@ -387,8 +394,9 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
       const pendingEntry = regLatest?.pending?.[name] ?? pending ?? null;
       const seed = pendingEntry?.seed ?? null;
       const startupQueuedPrompts = deps.normalizePendingStartupPrompts((pendingEntry as any)?.startupQueuedPrompts);
+      const createdAt = typeof pendingEntry?.createdAt === 'string' && pendingEntry.createdAt.trim() ? String(pendingEntry.createdAt) : deps.nowIso();
       if (regLatest?.pending?.[name]) delete regLatest.pending[name];
-      return { seed, startupQueuedPrompts };
+      return { seed, startupQueuedPrompts, createdAt };
     });
     const seed = pendingTransition?.seed ?? null;
     const startupQueuedPrompts = Array.isArray(pendingTransition?.startupQueuedPrompts)
@@ -397,6 +405,44 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
     const seedChatName = deps.normalizeChatName(seed?.chatName ?? 'default');
     const seedAgent = deps.parseSeedAgent(seed?.agent);
     const seedModel = deps.normalizeChatModel(seed?.model);
+    const seedPrompt = String(seed?.prompt ?? '').trim();
+    const seedPromptIdRaw = typeof (seed as any)?.promptId === 'string' ? String((seed as any).promptId).trim() : '';
+    const seedPromptId =
+      seedPrompt && seedPromptIdRaw && deps.isSafePromptId(seedPromptIdRaw)
+        ? seedPromptIdRaw
+        : seedPrompt
+          ? crypto.randomBytes(9).toString('hex')
+          : undefined;
+    const seedPromptAt = normalizeIsoTimestamp(
+      (seed as any)?.submittedAt ?? (seed as any)?.clientSubmittedAt ?? (seed as any)?.promptAt ?? (seed as any)?.at,
+      String(pendingTransition?.createdAt ?? deps.nowIso()),
+    );
+    const queuedPromptsForMaterialization = [
+      ...startupQueuedPrompts,
+      ...(seedPrompt && seedPromptId
+        ? [
+            {
+              id: seedPromptId,
+              chatName: seedChatName,
+              at: seedPromptAt,
+              prompt: seedPrompt,
+              ...(typeof seed?.cwd === 'string' ? { cwd: seed.cwd } : {}),
+              state: 'queued' as const,
+              updatedAt: seedPromptAt,
+            },
+          ]
+        : []),
+    ]
+      .map((prompt, index) => ({ prompt, index }))
+      .sort((a, b) => {
+        const aa = Date.parse(a.prompt.at);
+        const bb = Date.parse(b.prompt.at);
+        const aMs = Number.isFinite(aa) ? aa : 0;
+        const bMs = Number.isFinite(bb) ? bb : 0;
+        if (aMs !== bMs) return aMs - bMs;
+        return a.index - b.index;
+      })
+      .map((item) => item.prompt);
 
     if (cloneFrom && cloneChats) {
       const agentSuggestionEnabledByDefault = await deps.resolveAgentSuggestionEnabledByDefault();
@@ -437,14 +483,14 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
     }
 
     let startupQueuedPromptChats: string[] = [];
-    if (startupQueuedPrompts.length > 0) {
+    if (queuedPromptsForMaterialization.length > 0) {
       startupQueuedPromptChats = await updateRegistry((reg4Any: any) => {
         const found = findDroneEntryByIdentity(reg4Any, pendingDroneId);
         if (!found) return [] as string[];
         const d: any = found.entry;
         d.chats = d.chats ?? {};
         const touched = new Set<string>();
-        for (const queued of startupQueuedPrompts) {
+        for (const queued of queuedPromptsForMaterialization) {
           const chatName = deps.normalizeChatName(queued.chatName);
           const entry = d.chats[chatName] ?? { createdAt: deps.nowIso() };
           if (chatName === seedChatName && (seedAgent || Object.prototype.hasOwnProperty.call(seed ?? {}, 'model'))) {
@@ -471,6 +517,42 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
       });
     }
 
+    if (seed && (seedAgent || seedModel || seedPrompt)) {
+      const chatName = seedChatName;
+      const prompt = seedPrompt;
+
+      await setDroneHubMetaByIdentity({
+        droneId: pendingDroneId,
+        hub: {
+          phase: 'seeding',
+          message: prompt ? 'Seeding initial message…' : 'Configuring agent…',
+          ...(seedPromptId ? { promptId: seedPromptId } : {}),
+        },
+      });
+      try {
+        if (seedAgent || seedModel) {
+          const agentSuggestionEnabledByDefault = await deps.resolveAgentSuggestionEnabledByDefault();
+          await deps.ensureChatEntry({ droneId: pendingDroneId, chatName });
+          await deps.setChatAgentConfig({
+            droneId: pendingDroneId,
+            chatName,
+            ...(seedAgent ? { agent: seedAgent } : {}),
+            setModel: true,
+            model: seedModel,
+            setAgentSuggestionEnabled: true,
+            agentSuggestionEnabled: agentSuggestionEnabledByDefault && seedAgent?.kind !== 'custom',
+          });
+        }
+        await setDroneHubMetaByIdentity({ droneId: pendingDroneId, hub: null });
+      } catch (e: any) {
+        await setDroneHubMetaByIdentity({
+          droneId: pendingDroneId,
+          hub: { phase: 'error', message: e?.message ?? String(e) },
+        });
+        return;
+      }
+    }
+
     try {
       const regAfterCreate: any = await loadRegistry();
       const createdDrone = findDroneEntryByIdentity(regAfterCreate, pendingDroneId)?.entry ?? null;
@@ -487,59 +569,8 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
       });
     }
 
-    for (const chatName of startupQueuedPromptChats) {
-      deps.enqueuePendingPromptPump(pendingDroneId, String(chatName));
-    }
-
-    if (!seed) return;
-
-    const chatName = seedChatName;
-    const prompt = String(seed.prompt ?? '').trim();
-    const seedPromptIdRaw = typeof (seed as any).promptId === 'string' ? String((seed as any).promptId).trim() : '';
-    const seedPromptId =
-      prompt && seedPromptIdRaw && deps.isSafePromptId(seedPromptIdRaw)
-        ? seedPromptIdRaw
-        : prompt
-          ? crypto.randomBytes(9).toString('hex')
-          : undefined;
-
-    if (!seedAgent && !seedModel && !prompt) return;
-
-    await setDroneHubMetaByIdentity({
-      droneId: pendingDroneId,
-      hub: {
-        phase: 'seeding',
-        message: prompt ? 'Seeding initial message…' : 'Configuring agent…',
-        ...(seedPromptId ? { promptId: seedPromptId } : {}),
-      },
-    });
-    try {
-      if (seedAgent || seedModel) {
-        const agentSuggestionEnabledByDefault = await deps.resolveAgentSuggestionEnabledByDefault();
-        await deps.ensureChatEntry({ droneId: pendingDroneId, chatName });
-        await deps.setChatAgentConfig({
-          droneId: pendingDroneId,
-          chatName,
-          ...(seedAgent ? { agent: seedAgent } : {}),
-          setModel: true,
-          model: seedModel,
-          setAgentSuggestionEnabled: true,
-          agentSuggestionEnabled: agentSuggestionEnabledByDefault && seedAgent?.kind !== 'custom',
-        });
-      }
-      if (prompt) {
-        const cwd = typeof seed.cwd === 'string' ? seed.cwd : null;
-        const seedPromptWaitMs = Math.max(deps.defaultDaemonReadyTimeoutMs(), 120_000);
-        await deps.enqueuePrompt({ id: seedPromptId, droneId: pendingDroneId, chatName, prompt, cwd, waitForDaemonMs: seedPromptWaitMs });
-        await setDroneHubMetaByIdentity({ droneId: pendingDroneId, hub: null });
-        return;
-      }
-      await setDroneHubMetaByIdentity({ droneId: pendingDroneId, hub: null });
-    } catch (e: any) {
-      await setDroneHubMetaByIdentity({
-        droneId: pendingDroneId,
-        hub: { phase: 'error', message: e?.message ?? String(e) },
-      });
+    for (const chatNameToPump of startupQueuedPromptChats) {
+      deps.enqueuePendingPromptPump(pendingDroneId, String(chatNameToPump));
     }
   }
 

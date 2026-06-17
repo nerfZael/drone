@@ -30,6 +30,7 @@ describe('drone hub task spawn queue spec', () => {
       seedModel: 'gpt-5.4',
       seedChat: 'default',
       seedPrompt: 'Trace the callback path.',
+      seedSubmittedAt: expect.any(String),
     });
   });
 
@@ -62,6 +63,7 @@ describe('drone hub task spawn queue spec', () => {
       seedAgent: { kind: 'builtin', id: 'codex' },
       seedModel: 'gpt-5.4',
       seedPrompt: 'Trace the callback path.',
+      seedSubmittedAt: expect.any(String),
     });
   });
 
@@ -90,6 +92,7 @@ describe('drone hub task spawn queue spec', () => {
       seedChat: 'default',
       seedAgent: { kind: 'builtin', id: 'cursor' },
       seedPrompt: 'Write the README update.',
+      seedSubmittedAt: expect.any(String),
     });
   });
 });

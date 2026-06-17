@@ -278,7 +278,7 @@ export function PlaybookRunsWorkspace({
         await requestJson(`/api/drones/${encodeURIComponent(run.droneId)}/chats/${encodeURIComponent(run.chatName)}/prompt`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ prompt }),
+          body: JSON.stringify({ prompt, submittedAt: new Date().toISOString() }),
         });
       }
       setRefreshNonce((prev) => prev + 1);

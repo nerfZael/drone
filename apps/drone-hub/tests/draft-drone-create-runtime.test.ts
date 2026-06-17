@@ -33,6 +33,7 @@ describe('draft drone create runtime support', () => {
       seedAgent: { kind: 'builtin', id: 'cursor' },
       seedModel: 'gpt-5',
       seedPrompt: 'boot',
+      seedSubmittedAt: expect.any(String),
     });
   });
 

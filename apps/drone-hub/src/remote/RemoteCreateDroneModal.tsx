@@ -231,6 +231,7 @@ export function RemoteCreateDroneModal({
     setCreating(true);
     setError(null);
     try {
+      const trimmedSeedPrompt = String(initialMessage ?? '').trim();
       const response = await remoteRequestJson<{ ok: true; id: string; name: string }>('/api/drones', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -246,7 +247,8 @@ export function RemoteCreateDroneModal({
           seedAgent,
           seedModel: seedAgent.kind === 'builtin' ? String(seedModel ?? '').trim() : null,
           seedChat: 'default',
-          seedPrompt: String(initialMessage ?? '').trim(),
+          seedPrompt: trimmedSeedPrompt,
+          ...(trimmedSeedPrompt ? { seedSubmittedAt: new Date().toISOString() } : {}),
         }),
       });
       const droneId = String(response.id ?? '').trim();

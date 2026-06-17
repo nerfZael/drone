@@ -579,9 +579,13 @@ export class DvmApi {
   async repoSeed(options: DvmRepoSeedOptions): Promise<{ baseSha: string; destinationPath: string }> {
     let tmpDir: string | null = null;
     let tmpBundle: string | null = null;
+    let tmpSeedBranch: string | null = null;
+    let tmpSeedRef: string | null = null;
+    let hostRepoPathForCleanup: string | null = null;
     try {
       const containerName = String(options.containerName);
       const hostRepoPath = path.resolve(String(options.hostRepoPath || process.cwd()));
+      hostRepoPathForCleanup = hostRepoPath;
       const dest = this.normalizeContainerPath(String(options.destinationPath || '/work/repo'));
       const bundlePathInContainer = this.normalizeContainerPath(String(options.bundlePathInContainer || '/tmp/dvm-repo.bundle'));
 
@@ -591,7 +595,10 @@ export class DvmApi {
 
       tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), `dvm-bundle-${this.safeSlug(containerName)}-`));
       tmpBundle = path.join(tmpDir, 'repo.bundle');
-      await this.runLocal('git', ['-C', hostRepoPath, 'bundle', 'create', tmpBundle, '--all']);
+      tmpSeedBranch = `dvm-seed/${this.safeSlug(containerName)}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      tmpSeedRef = `refs/heads/${tmpSeedBranch}`;
+      await this.runLocal('git', ['-C', hostRepoPath, 'update-ref', tmpSeedRef, baseSha]);
+      await this.runLocal('git', ['-C', hostRepoPath, 'bundle', 'create', tmpBundle, tmpSeedRef]);
 
       await this.ensureContainerExistsOrCreate(containerName, options.createIfMissing !== false, options.createOptions);
       await this.manager.ensureGit(containerName);
@@ -604,26 +611,28 @@ export class DvmApi {
       await this.manager.docker.copyToContainer(containerName, tmpBundle, bundlePathInContainer);
 
       const branch = options.branch ? String(options.branch) : '';
-      const checkoutRef = String(options.baseRef || 'HEAD').trim() || 'HEAD';
-      const branchCmd = branch
+      const checkoutCmd = branch
         ? `cd ${JSON.stringify(dest)} && git checkout ${options.forceBranch ? '-B' : '-b'} ${JSON.stringify(branch)} ${JSON.stringify(baseSha)}`
-        : checkoutRef !== 'HEAD'
-          ? `cd ${JSON.stringify(dest)} && git checkout ${JSON.stringify(checkoutRef)}`
-          : '';
+        : `cd ${JSON.stringify(dest)} && git checkout --detach ${JSON.stringify(baseSha)}`;
       const remoteCmd = hostRemoteUrl
         ? `cd ${JSON.stringify(dest)} && git remote set-url origin ${JSON.stringify(hostRemoteUrl)}`
         : '';
+      const cleanupBundleCmd = `rm -f ${JSON.stringify(bundlePathInContainer)}`;
+      const cleanupSeedBranchCmd = `cd ${JSON.stringify(dest)} && git branch -D ${JSON.stringify(tmpSeedBranch)} >/dev/null 2>&1 || true`;
 
       const cloneScript = [
         'set -euo pipefail',
+        `trap ${JSON.stringify(`${cleanupBundleCmd} || true`)} EXIT`,
         options.clean
           ? `rm -rf ${JSON.stringify(dest)}`
           : `if [ -e ${JSON.stringify(dest)} ]; then echo "Destination exists: ${dest}" >&2; exit 2; fi`,
         `mkdir -p ${JSON.stringify(path.posix.dirname(dest))}`,
-        `git clone ${JSON.stringify(bundlePathInContainer)} ${JSON.stringify(dest)}`,
+        `git clone --branch ${JSON.stringify(tmpSeedBranch)} ${JSON.stringify(bundlePathInContainer)} ${JSON.stringify(dest)}`,
+        cleanupBundleCmd,
         `cd ${JSON.stringify(dest)} && git config dvm.baseSha ${JSON.stringify(baseSha)}`,
         remoteCmd,
-        branchCmd,
+        checkoutCmd,
+        cleanupSeedBranchCmd,
       ]
         .filter(Boolean)
         .join('\n');
@@ -631,6 +640,11 @@ export class DvmApi {
       await this.manager.docker.execCommand(containerName, ['bash', '-lc', cloneScript]);
       return { baseSha, destinationPath: dest };
     } finally {
+      try {
+        if (tmpSeedRef && hostRepoPathForCleanup) await this.runLocal('git', ['-C', hostRepoPathForCleanup, 'update-ref', '-d', tmpSeedRef]);
+      } catch {
+        // ignore
+      }
       try {
         if (tmpBundle) await fs.promises.rm(tmpBundle, { force: true });
       } catch {
