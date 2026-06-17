@@ -147,6 +147,39 @@ test('Node Hub transcript API uses SQLite read model and cheap conditional ETags
   assert.equal(fs.existsSync(sqlitePath), true);
   assert.equal(getTranscriptStoreUnavailableReason(), null);
 
+  const orderedImport = importDroneChatsFromRegistry({
+    droneId: 'ordering-drone',
+    chats: {
+      default: {
+        createdAt: '2026-01-01T00:00:00.000Z',
+        pendingPrompts: [
+          {
+            id: 'delayed-start',
+            at: '2026-01-01T00:00:30.000Z',
+            updatedAt: '2026-01-01T00:05:30.000Z',
+            prompt: 'submitted before daemon start',
+            state: 'sent',
+          },
+        ],
+        turns: [
+          {
+            id: 'delayed-start',
+            at: '2026-01-01T00:05:00.000Z',
+            promptAt: '2026-01-01T00:05:00.000Z',
+            completedAt: '2026-01-01T00:05:30.000Z',
+            prompt: 'submitted before daemon start',
+            ok: true,
+            output: 'done',
+          },
+        ],
+      },
+    },
+  });
+  assert.equal(orderedImport.available, true);
+  const orderedRead = readTranscriptTurnsFromStore({ droneId: 'ordering-drone', chatName: 'default', indexes: [0] });
+  assert.equal(orderedRead.available, true);
+  assert.equal(orderedRead.turns[0].turn.promptAt, '2026-01-01T00:00:30.000Z');
+
   const chats = await apiFetch(baseUrl, token, `/api/drones/${encodeURIComponent(droneId)}/chats`);
   assert.equal(chats.response.status, 200, chats.text);
   assert.deepEqual(chats.data.chats, ['default']);

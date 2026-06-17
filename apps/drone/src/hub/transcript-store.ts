@@ -845,34 +845,41 @@ class TranscriptStore {
   private upsertTurn(droneId: string, chatName: string, turn: StoredTranscriptTurn) {
     const id = turn.id ? String(turn.id).trim() : '';
     if (!id) return;
+    const existing = this.readPendingPrompt(droneId, chatName, id);
+    const submittedAt = typeof existing?.at === 'string' && existing.at.trim() ? existing.at.trim() : '';
+    const storedTurn = submittedAt ? { ...turn, at: submittedAt, promptAt: submittedAt } : turn;
     this.upsertTurnStmt.run(
       droneId,
       chatName,
       id,
-      turn.at,
-      turn.promptAt ?? null,
-      turn.completedAt ?? null,
-      turn.prompt,
-      turn.ok ? 1 : 0,
-      turn.output,
-      turn.error ?? null,
-      stableJson(turn),
+      storedTurn.at,
+      storedTurn.promptAt ?? null,
+      storedTurn.completedAt ?? null,
+      storedTurn.prompt,
+      storedTurn.ok ? 1 : 0,
+      storedTurn.output,
+      storedTurn.error ?? null,
+      stableJson(storedTurn),
     );
-    const existing = this.readPendingPrompt(droneId, chatName, id);
     if (!existing) {
       const p = normalizePendingPrompt({
         id,
-        at: turn.promptAt ?? turn.at,
-        prompt: turn.prompt,
-        attachments: turn.attachments,
-        automation: turn.automation,
-        state: turn.ok ? 'sent' : 'failed',
-        error: turn.ok ? undefined : turn.error,
-        updatedAt: turn.completedAt ?? turn.at,
+        at: storedTurn.promptAt ?? storedTurn.at,
+        prompt: storedTurn.prompt,
+        attachments: storedTurn.attachments,
+        automation: storedTurn.automation,
+        state: storedTurn.ok ? 'sent' : 'failed',
+        error: storedTurn.ok ? undefined : storedTurn.error,
+        updatedAt: storedTurn.completedAt ?? storedTurn.at,
       });
       if (p) this.upsertPrompt(droneId, chatName, p);
-    } else if (existing.state !== 'sent' && turn.ok) {
-      this.updatePendingPrompt({ droneId, chatName, id, patch: { state: 'sent', error: undefined, updatedAt: turn.completedAt ?? turn.at } });
+    } else if (existing.state !== 'sent' && storedTurn.ok) {
+      this.updatePendingPrompt({
+        droneId,
+        chatName,
+        id,
+        patch: { state: 'sent', error: undefined, updatedAt: storedTurn.completedAt ?? storedTurn.at },
+      });
     }
   }
 
