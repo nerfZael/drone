@@ -47,7 +47,7 @@ export function normalizePlaybookAgent(value: unknown): ChatAgentConfig {
       const id = String((value as any).id ?? '')
         .trim()
         .toLowerCase();
-      if (id === 'cursor' || id === 'codex' || id === 'claude' || id === 'opencode' || id === 'pi') {
+      if (id === 'cursor' || id === 'codex' || id === 'claude' || id === 'opencode' || id === 'pi' || id === 'blip') {
         return { kind: 'builtin', id };
       }
     }

@@ -2,6 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import {
   formatTranscriptJobFailure,
   parseBuiltinPromptJobTranscript,
+  parseBlipJobTranscript,
+  parseBlipJsonl,
   parseCodexJobTranscript,
   parseCodexJsonl,
 } from '../src/hub/builtin-transcript-sessions';
@@ -95,6 +97,39 @@ describe('parseCodexJsonl', () => {
   });
 });
 
+describe('parseBlipJsonl', () => {
+  test('parses Blip session and assistant message events', () => {
+    expect(
+      parseBlipJsonl(
+        [
+          '{"version":1,"type":"session_started","sessionId":"sess_blip","timestamp":"2026-06-17T00:00:00.000Z"}',
+          '{"version":1,"type":"assistant_message","sessionId":"sess_blip","timestamp":"2026-06-17T00:00:01.000Z","messageId":"msg_1","text":"Hello from Blip."}',
+          '{"version":1,"type":"session_finished","sessionId":"sess_blip","timestamp":"2026-06-17T00:00:02.000Z","status":"completed","changedFiles":[],"durationMs":1000}',
+        ].join('\n'),
+      ),
+    ).toEqual({
+      sessionId: 'sess_blip',
+      message: 'Hello from Blip.',
+      terminalEvent: 'session_finished',
+    });
+  });
+
+  test('falls back to streamed Blip deltas', () => {
+    expect(
+      parseBlipJsonl(
+        [
+          '{"version":1,"type":"session_started","sessionId":"sess_blip","timestamp":"2026-06-17T00:00:00.000Z"}',
+          '{"version":1,"type":"assistant_delta","sessionId":"sess_blip","timestamp":"2026-06-17T00:00:01.000Z","text":"Hel"}',
+          '{"version":1,"type":"assistant_delta","sessionId":"sess_blip","timestamp":"2026-06-17T00:00:01.000Z","text":"lo"}',
+        ].join('\n'),
+      ),
+    ).toEqual({
+      sessionId: 'sess_blip',
+      message: 'Hello',
+    });
+  });
+});
+
 describe('prompt job transcript metadata', () => {
   test('preserves the final Codex message even when persisted stdout is truncated earlier', () => {
     const fullStdout = [
@@ -129,6 +164,33 @@ describe('prompt job transcript metadata', () => {
       threadId: '019e1922-047b-74b1-bab8-0eaceadf4062',
       message: 'Final report.',
       terminalEvent: 'turn.completed',
+    });
+  });
+
+  test('preserves the final Blip message when stored as parsed transcript metadata', () => {
+    const transcript = parseBuiltinPromptJobTranscript(
+      'blip',
+      [
+        '{"version":1,"type":"session_started","sessionId":"sess_blip","timestamp":"2026-06-17T00:00:00.000Z"}',
+        '{"version":1,"type":"assistant_message","sessionId":"sess_blip","timestamp":"2026-06-17T00:00:01.000Z","text":"Final Blip report."}',
+        '{"version":1,"type":"session_finished","sessionId":"sess_blip","timestamp":"2026-06-17T00:00:02.000Z","status":"completed","changedFiles":[],"durationMs":1000}',
+      ].join('\n'),
+      { stdoutBytes: 1024, stdoutTruncated: false, parsedAt: '2026-06-17T00:00:03.000Z' },
+    );
+
+    expect(transcript).toEqual({
+      kind: 'blip',
+      message: 'Final Blip report.',
+      sessionId: 'sess_blip',
+      terminalEvent: 'session_finished',
+      stdoutBytes: 1024,
+      stdoutTruncated: false,
+      parsedAt: '2026-06-17T00:00:03.000Z',
+    });
+    expect(parseBlipJobTranscript({ transcript, stdout: '' })).toEqual({
+      sessionId: 'sess_blip',
+      message: 'Final Blip report.',
+      terminalEvent: 'session_finished',
     });
   });
 

@@ -27,6 +27,7 @@ import { loadRegistry, updateRegistry as updateHostRegistry } from '../host/regi
 import {
   buildContainerDroneDaemonLaunchScript,
   DRONE_DAEMON_SESSION_NAME,
+  installBlipCliScript,
   installFleetCliScript,
   installTasksCliScript,
   normalizeDroneRuntime,
@@ -99,6 +100,7 @@ import { cloneChatEntryForDroneClone, maybeBootstrapPromptFromTranscript } from 
 import {
   formatTranscriptJobFailure,
   hasKnownBuiltinTranscriptSession,
+  parseBlipJobTranscript,
   parseCodexJobTranscript,
   parsePiJobTranscript,
   readBuiltinTranscriptSessionId,
@@ -3626,7 +3628,7 @@ function isValidDroneNameDashCase(raw: string): boolean {
   return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(s);
 }
 
-type BuiltinAgentId = 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi';
+type BuiltinAgentId = 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi' | 'blip';
 
 type ChatAgentConfig =
   | { kind: 'builtin'; id: BuiltinAgentId }
@@ -4755,7 +4757,7 @@ function normalizeBuiltinAgentId(raw: any): BuiltinAgentId | null {
   const id = String(raw ?? '')
     .trim()
     .toLowerCase();
-  if (id === 'cursor' || id === 'codex' || id === 'claude' || id === 'opencode' || id === 'pi') return id;
+  if (id === 'cursor' || id === 'codex' || id === 'claude' || id === 'opencode' || id === 'pi' || id === 'blip') return id;
   if (id === 'cloud' || id === 'claude-code' || id === 'claude_code') return 'claude';
   if (id === 'open-code' || id === 'open_code') return 'opencode';
   if (id === 'pi-agent' || id === 'pi_agent') return 'pi';
@@ -5059,6 +5061,8 @@ function parseCodexModelsCache(raw: string): DiscoveredModelOption[] {
 }
 async function discoverModelsForBuiltinAgent(opts: {
   containerName: string;
+  containerPort?: number;
+  runtime?: DroneRuntime;
   droneName: string;
   chatName: string;
   agentId: BuiltinAgentId;
@@ -5082,10 +5086,42 @@ async function discoverModelsForBuiltinAgent(opts: {
     claude: 'claude',
     opencode: 'opencode',
     pi: 'pi',
+    blip: 'blip',
   };
   const bin = binByAgent[opts.agentId];
+  const runtime = opts.runtime ?? 'container';
 
-  const exists = await dvmExec(opts.containerName, 'bash', ['-lc', `command -v ${bin} >/dev/null 2>&1`]);
+  if (runtime === 'host') {
+    if (opts.agentId !== 'blip') {
+      const error = `${bin} model discovery is not supported for host runtime`;
+      chatModelDiscoveryCache.set(key, { atMs: now, models: [], error });
+      return { models: [], source: 'none', discoveredAt: new Date(now).toISOString(), error };
+    }
+    const r = await runHostCommand('bash', ['-lc', `${resolveBlipPromptCommand('host')} --list-models`], {
+      timeoutMs: defaultSeedBootstrapTimeoutMs(),
+    });
+    const parsed = parseDiscoveredModelsFromOutput(`${r.stdout || ''}\n${r.stderr || ''}`);
+    if (parsed.length > 0) {
+      chatModelDiscoveryCache.set(key, { atMs: now, models: parsed });
+      return { models: parsed, source: 'live', discoveredAt: new Date(now).toISOString() };
+    }
+    const error = r.stderr || r.stdout || 'failed discovering Blip models';
+    chatModelDiscoveryCache.set(key, { atMs: now, models: [], error });
+    return { models: [], source: 'none', discoveredAt: new Date(now).toISOString(), error };
+  }
+
+  let exists = await dvmExec(opts.containerName, 'bash', ['-lc', `command -v ${bin} >/dev/null 2>&1`]);
+  if (exists.code !== 0 && opts.agentId === 'blip') {
+    try {
+      await upgradeDroneDaemonInContainer({
+        containerName: opts.containerName,
+        containerPort: Number(opts.containerPort ?? 7777),
+      });
+      exists = await dvmExec(opts.containerName, 'bash', ['-lc', `command -v ${bin} >/dev/null 2>&1`]);
+    } catch {
+      // Fall through to the normal "not installed" response below.
+    }
+  }
   if (exists.code !== 0) {
     const error = `${bin} is not installed in this drone`;
     chatModelDiscoveryCache.set(key, { atMs: now, models: [], error });
@@ -5128,6 +5164,9 @@ async function discoverModelsForBuiltinAgent(opts: {
   }
   if (opts.agentId === 'pi') {
     candidates.push('pi --list-models');
+  }
+  if (opts.agentId === 'blip') {
+    candidates.push('blip --list-models');
   }
 
   const deduped = Array.from(new Set(candidates.map((c) => c.trim()).filter(Boolean)));
@@ -5501,6 +5540,30 @@ async function sendPromptToChat(opts: {
         mode: 'transcript' as const,
         chat: normalizedChat,
         piSessionId: piSessionId || null,
+        turnOk: true as const,
+      };
+    }
+
+    if (agent.kind === 'builtin' && agent.id === 'blip') {
+      const modelArg = chatModel ? ` --model ${bashQuote(chatModel)}` : '';
+      const blipSessionId = readBuiltinTranscriptSessionId(chat, 'blip');
+      const sessionArg = blipSessionId ? ` --session ${bashQuote(blipSessionId)}` : '';
+      const blipCommand = resolveBlipPromptCommand(runtime);
+      const script = [
+        'set -euo pipefail',
+        ...buildContainerManagedEnvLines(d),
+        ...managedEnvLines,
+        `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
+        cdCommand,
+        `${blipCommand} --jsonl --permission full-access --profile local-trusted-write${modelArg}${sessionArg} ${bashQuote(promptWithHistory)}`,
+      ].join('\n');
+      await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'blip', script });
+      return {
+        ok: true as const,
+        agent,
+        mode: 'transcript' as const,
+        chat: normalizedChat,
+        blipSessionId: blipSessionId || null,
         turnOk: true as const,
       };
     }
@@ -8629,6 +8692,35 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
         continue;
       }
 
+      if (jobKind === 'blip') {
+        const parsed = parseBlipJobTranscript(job);
+        if (parsed.sessionId && String(parsed.sessionId).trim() && String(entry?.blipSessionId ?? '').trim() !== parsed.sessionId) {
+          entry.blipSessionId = parsed.sessionId;
+          changed = true;
+        }
+        const output = String(parsed.message ?? '').trimEnd();
+        if (!output) {
+          pendingList[i] = { ...p, state: 'failed', error: 'blip finished but no assistant message was parsed', updatedAt: nowIso() };
+          changed = true;
+          continue;
+        }
+        turns.push({
+          at: promptAt,
+          promptAt,
+          completedAt: finishedAt,
+          id,
+          prompt: String(p?.prompt ?? ''),
+          ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
+          ...(promptAutomation ? { automation: promptAutomation } : {}),
+          ok: true,
+          output,
+        });
+        transcriptIds.add(id);
+        pendingList[i] = { ...p, state: 'sent', updatedAt: nowIso() };
+        changed = true;
+        continue;
+      }
+
       if (
         jobKind === 'opencode' &&
         !(typeof entry?.openCodeSessionId === 'string' && String(entry.openCodeSessionId).trim())
@@ -8742,6 +8834,37 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           continue;
         }
       }
+      if (jobKind === 'blip') {
+        const parsed = parseBlipJobTranscript(job);
+        const output = String(parsed.message ?? '').trimEnd();
+        const finishedAt = typeof job?.finishedAt === 'string' ? job.finishedAt : nowIso();
+        const promptAt = resolveTranscriptPromptAt({
+          pendingAt: p?.at,
+          jobStartedAt: job?.startedAt,
+          finishedAt,
+        });
+        if (parsed.sessionId && String(parsed.sessionId).trim() && String(entry?.blipSessionId ?? '').trim() !== parsed.sessionId) {
+          entry.blipSessionId = parsed.sessionId;
+          changed = true;
+        }
+        if (output && parsed.terminalEvent === 'session_finished') {
+          turns.push({
+            at: promptAt,
+            promptAt,
+            completedAt: finishedAt,
+            id,
+            prompt: String(p?.prompt ?? ''),
+            ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
+            ...(promptAutomation ? { automation: promptAutomation } : {}),
+            ok: true,
+            output,
+          });
+          transcriptIds.add(id);
+          pendingList[i] = { ...p, state: 'sent', error: undefined, updatedAt: nowIso() };
+          changed = true;
+          continue;
+        }
+      }
       const exitCode =
         typeof job?.exitCode === 'number' && Number.isFinite(job.exitCode)
           ? Math.floor(job.exitCode)
@@ -8813,6 +8936,9 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
       if (committedEntry && typeof committedEntry === 'object' && typeof (committedEntry as any).piSessionId === 'string' && String((committedEntry as any).piSessionId).trim()) {
         cur.piSessionId = String((committedEntry as any).piSessionId).trim();
       }
+      if (committedEntry && typeof committedEntry === 'object' && typeof (committedEntry as any).blipSessionId === 'string' && String((committedEntry as any).blipSessionId).trim()) {
+        cur.blipSessionId = String((committedEntry as any).blipSessionId).trim();
+      }
       dLatest.chats[chatName] = cur;
       regLatest.drones = regLatest.drones ?? {};
       regLatest.drones[droneId] = dLatest;
@@ -8836,7 +8962,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
   }
 
   if (changed) {
-    // Best-effort: session ids may have been established (codexThreadId/openCodeSessionId/piSessionId)
+    // Best-effort: session ids may have been established (codexThreadId/openCodeSessionId/piSessionId/blipSessionId)
     // or a prior prompt may have completed/failed, unblocking queued follow-ups.
     enqueuePendingPromptPump(droneId, chatName);
   }
@@ -9333,6 +9459,10 @@ async function upgradeDroneDaemonInContainer(opts: { containerName: string; cont
   const installTasksCli = await dvmExec(opts.containerName, 'bash', ['-lc', installTasksCliScript()]);
   if (installTasksCli.code !== 0) {
     throw new Error(installTasksCli.stderr || installTasksCli.stdout || 'failed installing tasks CLI in container');
+  }
+  const installBlipCli = await dvmExec(opts.containerName, 'bash', ['-lc', installBlipCliScript()]);
+  if (installBlipCli.code !== 0) {
+    throw new Error(installBlipCli.stderr || installBlipCli.stdout || 'failed installing blip CLI in container');
   }
 
   // Restart daemon session so new code is loaded.
@@ -10847,7 +10977,17 @@ function resolveBuiltinTmuxCommand(agent: ChatAgentConfig['id']): string {
   if (agent === 'pi') {
     return String(process.env.DRONE_HUB_PI_CMD ?? '').trim() || 'pi';
   }
+  if (agent === 'blip') {
+    return String(process.env.DRONE_HUB_BLIP_CMD ?? '').trim() || 'blip';
+  }
   return resolveHubAgentCommand();
+}
+
+function resolveBlipPromptCommand(runtime: DroneRuntime): string {
+  if (runtime === 'host') {
+    return `node ${bashQuote(path.join(resolveDroneDaemonRuntimeDir(), 'blip.js'))}`;
+  }
+  return 'blip';
 }
 
 function resolveHubTerminalShellCommand(): string {
@@ -11488,7 +11628,7 @@ async function recordTranscriptTurn(opts: {
   droneName: string;
   chatName: string;
   turn: { at: string; id?: string; prompt: string; ok: boolean; output: string; error?: string };
-  agentPatch?: Partial<{ codexThreadId: string; claudeSessionId: string; openCodeSessionId: string; piSessionId: string }>;
+  agentPatch?: Partial<{ codexThreadId: string; claudeSessionId: string; openCodeSessionId: string; piSessionId: string; blipSessionId: string }>;
 }): Promise<void> {
   let syncedDroneId = '';
   let syncedTurns: any[] | null = null;
@@ -11512,6 +11652,9 @@ async function recordTranscriptTurn(opts: {
     }
     if (opts.agentPatch?.piSessionId) {
       chat.piSessionId = opts.agentPatch.piSessionId;
+    }
+    if (opts.agentPatch?.blipSessionId) {
+      chat.blipSessionId = opts.agentPatch.blipSessionId;
     }
     d.chats[opts.chatName] = chat;
     reg.drones = reg.drones ?? {};
@@ -23934,7 +24077,7 @@ export async function startDroneHubApiServer(opts: {
       }
 
       // POST /api/drones/:id/chats/:chat/prompt
-      // Chat input. For builtin transcript agents (cursor/codex/claude/opencode/pi):
+      // Chat input. For builtin transcript agents (cursor/codex/claude/opencode/pi/blip):
       // record a clean transcript turn.
       // For custom agents: send input into a tmux session (full CLI view).
       if (
@@ -24583,6 +24726,8 @@ export async function startDroneHubApiServer(opts: {
           }
           const discovered = await discoverModelsForBuiltinAgent({
             containerName: String((d as any)?.containerName ?? (d as any)?.name ?? droneId).trim() || droneId,
+            containerPort: Number((d as any)?.containerPort ?? 7777),
+            runtime: droneRuntime(d),
             droneName: droneId,
             chatName,
             agentId: agent.id,
@@ -25185,7 +25330,7 @@ export async function startDroneHubApiServer(opts: {
           }
           json(res, 400, {
             ok: false,
-            error: `invalid request (expected agent cursor|codex|claude|opencode|pi|custom, model, agentMessageAutoContinueEnabled, agentSuggestionEnabled, or dockerSnapshotAfterAgentMessageEnabled)`,
+            error: `invalid request (expected agent cursor|codex|claude|opencode|pi|blip|custom, model, agentMessageAutoContinueEnabled, agentSuggestionEnabled, or dockerSnapshotAfterAgentMessageEnabled)`,
           });
           return;
         } catch (e: any) {
@@ -25250,7 +25395,7 @@ export async function startDroneHubApiServer(opts: {
             logSlowHubRequest('chat transcript', timer, { droneId, chatName, status: 410 });
             json(res, 410, {
               ok: false,
-              error: 'transcript is only available for builtin agents (cursor/codex/claude/opencode/pi). Use /output for custom agents.',
+              error: 'transcript is only available for builtin agents (cursor/codex/claude/opencode/pi/blip). Use /output for custom agents.',
               agent,
             });
             return;

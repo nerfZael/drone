@@ -2,7 +2,7 @@ import type { BuiltinTranscriptAgentId } from './pendingPromptEnqueue';
 
 export function readBuiltinTranscriptSessionId(
   chatEntry: any,
-  agentId: Extract<BuiltinTranscriptAgentId, 'codex' | 'opencode' | 'pi'>,
+  agentId: Extract<BuiltinTranscriptAgentId, 'codex' | 'opencode' | 'pi' | 'blip'>,
 ): string {
   if (agentId === 'codex') {
     return typeof chatEntry?.codexThreadId === 'string' ? String(chatEntry.codexThreadId).trim() : '';
@@ -10,11 +10,14 @@ export function readBuiltinTranscriptSessionId(
   if (agentId === 'opencode') {
     return typeof chatEntry?.openCodeSessionId === 'string' ? String(chatEntry.openCodeSessionId).trim() : '';
   }
-  return typeof chatEntry?.piSessionId === 'string' ? String(chatEntry.piSessionId).trim() : '';
+  if (agentId === 'pi') {
+    return typeof chatEntry?.piSessionId === 'string' ? String(chatEntry.piSessionId).trim() : '';
+  }
+  return typeof chatEntry?.blipSessionId === 'string' ? String(chatEntry.blipSessionId).trim() : '';
 }
 
 export function hasKnownBuiltinTranscriptSession(chatEntry: any, agentId: BuiltinTranscriptAgentId): boolean {
-  if (agentId === 'codex' || agentId === 'opencode' || agentId === 'pi') {
+  if (agentId === 'codex' || agentId === 'opencode' || agentId === 'pi' || agentId === 'blip') {
     return Boolean(readBuiltinTranscriptSessionId(chatEntry, agentId));
   }
   return true;
@@ -55,6 +58,7 @@ function parseUuid(text: string): string | null {
 type CodexTerminalEvent = 'turn.completed' | 'response.completed' | 'response.failed' | 'error';
 type CodexJsonlParseResult = { threadId: string | null; message: string | null; terminalEvent?: CodexTerminalEvent };
 type PiJsonlParseResult = { sessionId: string | null; message: string | null };
+type BlipJsonlParseResult = { sessionId: string | null; message: string | null; terminalEvent?: 'session_finished' | 'session_error' };
 
 function createCodexJsonlParser(): { pushLine: (line: string) => void; result: () => CodexJsonlParseResult } {
   let threadId: string | null = null;
@@ -209,6 +213,50 @@ function createPiJsonlParser(): { pushLine: (line: string) => void; result: () =
   };
 }
 
+function createBlipJsonlParser(): { pushLine: (line: string) => void; result: () => BlipJsonlParseResult } {
+  let sessionId: string | null = null;
+  let lastMsg: string | null = null;
+  let streamedMsg = '';
+  let terminalEvent: BlipJsonlParseResult['terminalEvent'];
+
+  return {
+    pushLine(lineRaw: string) {
+      const line = String(lineRaw ?? '').trim();
+      if (!line) return;
+      let obj: any = null;
+      try {
+        obj = JSON.parse(line);
+      } catch {
+        return;
+      }
+      if (!obj || typeof obj !== 'object') return;
+      const parsedSessionId = String(obj.sessionId ?? '').trim();
+      if (parsedSessionId) sessionId = parsedSessionId;
+      const type = String(obj.type ?? '').trim();
+      if (type === 'assistant_delta') {
+        const delta = takeStringText(obj.text);
+        if (delta) streamedMsg += delta;
+        return;
+      }
+      if (type === 'assistant_message') {
+        const text = takeStringText(obj.text) ?? takeStringText(obj.message);
+        if (text) lastMsg = text;
+        return;
+      }
+      if (type === 'session_finished') {
+        terminalEvent = 'session_finished';
+        return;
+      }
+      if (type === 'session_error') {
+        terminalEvent = 'session_error';
+      }
+    },
+    result() {
+      return { sessionId, message: lastMsg ?? (streamedMsg ? streamedMsg : null), ...(terminalEvent ? { terminalEvent } : {}) };
+    },
+  };
+}
+
 export function parseCodexJsonl(stdout: string): CodexJsonlParseResult {
   const parser = createCodexJsonlParser();
   for (const line of String(stdout || '').split('\n')) parser.pushLine(line);
@@ -227,30 +275,51 @@ export function parsePiJsonl(stdout: string): PiJsonlParseResult {
   return parser.result();
 }
 
+export function parseBlipJsonl(stdout: string): BlipJsonlParseResult {
+  const parser = createBlipJsonlParser();
+  for (const line of String(stdout || '').split('\n')) parser.pushLine(line);
+  return parser.result();
+}
+
 export async function parsePiJsonlLines(lines: AsyncIterable<string> | Iterable<string>): Promise<PiJsonlParseResult> {
   const parser = createPiJsonlParser();
   for await (const line of lines) parser.pushLine(line);
   return parser.result();
 }
 
+export async function parseBlipJsonlLines(lines: AsyncIterable<string> | Iterable<string>): Promise<BlipJsonlParseResult> {
+  const parser = createBlipJsonlParser();
+  for await (const line of lines) parser.pushLine(line);
+  return parser.result();
+}
+
 export type BuiltinPromptJobTranscript =
-  | {
-      kind: 'codex';
-      message: string | null;
-      threadId: string | null;
-      terminalEvent?: CodexTerminalEvent;
-      stdoutBytes?: number;
-      stdoutTruncated?: boolean;
-      parsedAt?: string;
-    }
-  | {
-      kind: 'pi';
-      message: string | null;
-      sessionId: string | null;
-      stdoutBytes?: number;
-      stdoutTruncated?: boolean;
-      parsedAt?: string;
-    };
+	  | {
+	      kind: 'codex';
+	      message: string | null;
+	      threadId: string | null;
+	      terminalEvent?: CodexTerminalEvent;
+	      stdoutBytes?: number;
+	      stdoutTruncated?: boolean;
+	      parsedAt?: string;
+	    }
+	  | {
+	      kind: 'pi';
+	      message: string | null;
+	      sessionId: string | null;
+	      stdoutBytes?: number;
+	      stdoutTruncated?: boolean;
+	      parsedAt?: string;
+	    }
+	  | {
+	      kind: 'blip';
+	      message: string | null;
+	      sessionId: string | null;
+	      terminalEvent?: 'session_finished' | 'session_error';
+	      stdoutBytes?: number;
+	      stdoutTruncated?: boolean;
+	      parsedAt?: string;
+	    };
 
 function optionalString(raw: any): string | null {
   return typeof raw === 'string' && raw.trim() ? raw : null;
@@ -295,6 +364,16 @@ export function parseBuiltinPromptJobTranscript(
       ...promptJobTranscriptMeta(opts),
     };
   }
+  if (kind === 'blip') {
+    const parsed = parseBlipJsonl(stdout);
+    return {
+      kind: 'blip',
+      message: parsed.message,
+      sessionId: parsed.sessionId,
+      ...(parsed.terminalEvent ? { terminalEvent: parsed.terminalEvent } : {}),
+      ...promptJobTranscriptMeta(opts),
+    };
+  }
   return null;
 }
 
@@ -320,6 +399,16 @@ export async function parseBuiltinPromptJobTranscriptLines(
       kind: 'pi',
       message: parsed.message,
       sessionId: parsed.sessionId,
+      ...promptJobTranscriptMeta(opts),
+    };
+  }
+  if (kind === 'blip') {
+    const parsed = await parseBlipJsonlLines(lines);
+    return {
+      kind: 'blip',
+      message: parsed.message,
+      sessionId: parsed.sessionId,
+      ...(parsed.terminalEvent ? { terminalEvent: parsed.terminalEvent } : {}),
       ...promptJobTranscriptMeta(opts),
     };
   }
@@ -359,6 +448,23 @@ export function parsePiJobTranscript(job: any): { sessionId: string | null; mess
     }
   }
   return parsePiJsonl(String(job?.stdout ?? ''));
+}
+
+export function parseBlipJobTranscript(job: any): { sessionId: string | null; message: string | null; terminalEvent?: 'session_finished' | 'session_error' } {
+  const transcript = job?.transcript;
+  if (transcript && typeof transcript === 'object' && String(transcript.kind ?? '').trim() === 'blip') {
+    if (Object.prototype.hasOwnProperty.call(transcript, 'message')) {
+      const terminalEventRaw = String(transcript.terminalEvent ?? '').trim();
+      const terminalEvent =
+        terminalEventRaw === 'session_finished' || terminalEventRaw === 'session_error' ? terminalEventRaw : undefined;
+      return {
+        sessionId: optionalString(transcript.sessionId),
+        message: optionalString(transcript.message),
+        ...(terminalEvent ? { terminalEvent } : {}),
+      };
+    }
+  }
+  return parseBlipJsonl(String(job?.stdout ?? ''));
 }
 
 export function formatCodexJobFailure(stdoutRaw: string, stderrRaw: string, fallbackRaw: string): string {

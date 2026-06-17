@@ -4,7 +4,8 @@
   "version": "0.1.0",
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "packages/*",
+    "blip/packages/*"
   ],
   "scripts": {
     "build": "turbo run build",
@@ -19,6 +20,7 @@
     "smoke:docker": "node scripts/smoke/smoke-docker-all.cjs",
     "dvm": "bun run --filter dvm dev --",
     "drone": "bun run --filter drone dev --",
+    "blip": "bun run --filter @blip/cli dev --",
     "drone-hub": "bun run --filter drone-hub dev",
     "voice-stream": "bun run --filter voice-stream dev",
     "vsn": "bun run --filter voice-stream-next dev",

@@ -43,6 +43,7 @@ export function useChatConfigState({
     | 'claude'
     | 'opencode'
     | 'pi'
+    | 'blip'
     | null = chatInfo?.agent?.kind === 'builtin' ? chatInfo.agent.id : null;
 
   const selectedDroneSummary = selectedDrone ? droneById[selectedDrone] ?? null : null;

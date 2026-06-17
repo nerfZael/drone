@@ -24,7 +24,7 @@ describe('shouldDeferQueuedTranscriptPrompt', () => {
     ).toBe(false);
   });
 
-  test('defers codex/opencode/pi when session unknown and a prior prompt is enqueued', () => {
+  test('defers codex/opencode/pi/blip when session unknown and a prior prompt is enqueued', () => {
     expect(
       shouldDeferQueuedTranscriptPrompt({
         agentId: 'codex',
@@ -42,6 +42,13 @@ describe('shouldDeferQueuedTranscriptPrompt', () => {
     expect(
       shouldDeferQueuedTranscriptPrompt({
         agentId: 'pi',
+        sessionKnown: false,
+        priorPendingPrompts: [{ id: 'p1', state: 'sent' }],
+      }),
+    ).toBe(true);
+    expect(
+      shouldDeferQueuedTranscriptPrompt({
+        agentId: 'blip',
         sessionKnown: false,
         priorPendingPrompts: [{ id: 'p1', state: 'sent' }],
       }),

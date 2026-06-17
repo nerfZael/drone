@@ -88,14 +88,14 @@ function normalizePrompt(message: MessageInput): string {
   return value;
 }
 
-type BuiltinSeedAgentId = 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi';
+type BuiltinSeedAgentId = 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi' | 'blip';
 type SeedAgentBody =
   | { kind: 'builtin'; id: BuiltinSeedAgentId }
   | { kind: 'custom'; id: string; label: string; command: string };
 
 function normalizeBuiltinSeedAgentId(raw: unknown): BuiltinSeedAgentId | null {
   const id = String(raw ?? '').trim().toLowerCase();
-  if (id === 'cursor' || id === 'codex' || id === 'claude' || id === 'opencode' || id === 'pi') return id;
+  if (id === 'cursor' || id === 'codex' || id === 'claude' || id === 'opencode' || id === 'pi' || id === 'blip') return id;
   return null;
 }
 

@@ -43,6 +43,7 @@ import {
   hostDroneWorkspacePath,
   buildContainerDroneDaemonLaunchScript,
   DRONE_DAEMON_SESSION_NAME,
+  installBlipCliScript,
   installFleetCliScript,
   installTasksCliScript,
   missingHostDependencyMessage,
@@ -964,12 +965,15 @@ function parseGithubSlug(remoteUrl: string | null): { owner: string; repo: strin
 }
 
 async function ensureDaemonBuilt(_repoPath: string) {
-  const daemonPath = resolveDroneDaemonJsPath();
-  try {
-    await fs.stat(daemonPath);
-  } catch {
-    const repoRoot = path.resolve(__dirname, '..', '..', '..');
-    throw new Error(`Missing ${daemonPath}. Run: cd ${repoRoot}/apps/drone && bun run build`);
+  const runtimeDir = resolveDroneDaemonRuntimeDir();
+  for (const fileName of ['daemon.js', 'fleet.js', 'tasks.js', 'blip.js']) {
+    const filePath = path.join(runtimeDir, fileName);
+    try {
+      await fs.stat(filePath);
+    } catch {
+      const repoRoot = path.resolve(__dirname, '..', '..', '..');
+      throw new Error(`Missing ${filePath}. Run: cd ${repoRoot}/apps/drone && bun run build`);
+    }
   }
 }
 
@@ -1377,6 +1381,10 @@ createCommand
     const installTasksCli = await dvmExec(containerName, 'bash', ['-lc', installTasksCliScript()]);
     if (installTasksCli.code !== 0) {
       throw new Error(installTasksCli.stderr || installTasksCli.stdout || 'failed installing tasks CLI in container');
+    }
+    const installBlipCli = await dvmExec(containerName, 'bash', ['-lc', installBlipCliScript()]);
+    if (installBlipCli.code !== 0) {
+      throw new Error(installBlipCli.stderr || installBlipCli.stdout || 'failed installing blip CLI in container');
     }
 
     await dvmSessionStart(
