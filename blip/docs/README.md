@@ -1,28 +1,34 @@
 # Blip Docs
 
-Blip is a standalone CLI coding agent.
+These docs describe the Blip implementation in this repository.
 
-## Planning
+Blip is a local CLI coding agent built from three workspace packages:
+
+- `@blip/tools`: workspace-safe tools and tool profiles.
+- `@blip/core`: sessions, runtime events, prompt assembly, and compaction.
+- `@blip/cli`: the command-line interface.
+
+## Core Documents
 
 - [Design Matrix](design-matrix.md)
-- [Sessions, Threads, Chats, And Conversations](sessions.md)
-- [Runtime Events And JSONL](runtime-events.md)
 - [Permissions And Sandboxing](permissions.md)
-- [Prompts And Repository Instructions](prompts-and-instructions.md)
+- [Prompts And Instructions](prompts-and-instructions.md)
+- [Runtime Events And JSONL](runtime-events.md)
+- [Sessions](sessions.md)
 - [Context Compaction](compaction.md)
 
-## Tool Docs
+## Tool Documents
 
-These docs describe tool capabilities. Blip should expose a smaller model-facing tool set for each run based on the active profile in [Permissions And Sandboxing](permissions.md).
+Tool availability depends on the active profile. The default trusted local profile exposes a small set: `bash`, `apply_patch`, `read_file`, `search_files`, and `list_files`. The no-shell write profile exposes structured filesystem mutation tools instead of `bash`.
 
-- [`list_files`](tools/list-files.md)
-- [`search_files`](tools/search-files.md)
-- [`read_file`](tools/read-file.md)
-- [`write_file`](tools/write-file.md)
-- [`apply_patch`](tools/apply-patch.md)
-- [`bash`](tools/bash.md)
-- [`delete_file`](tools/delete-file.md)
-- [`create_directory`](tools/create-directory.md)
-- [`delete_directory`](tools/delete-directory.md)
-- [`move_path`](tools/move-path.md)
-- [`get_working_tree_status`](tools/get-working-tree-status.md)
+- [bash](tools/bash.md)
+- [apply_patch](tools/apply-patch.md)
+- [read_file](tools/read-file.md)
+- [search_files](tools/search-files.md)
+- [list_files](tools/list-files.md)
+- [write_file](tools/write-file.md)
+- [delete_file](tools/delete-file.md)
+- [create_directory](tools/create-directory.md)
+- [delete_directory](tools/delete-directory.md)
+- [move_path](tools/move-path.md)
+- [get_working_tree_status](tools/get-working-tree-status.md)
