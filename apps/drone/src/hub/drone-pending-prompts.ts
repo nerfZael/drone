@@ -2,6 +2,14 @@ import { loadRegistry, updateRegistry } from '../host/registry';
 import { normalizeDroneIdentity } from './drone-lifecycle-registry';
 import type { PendingPromptState, PendingStartupPrompt } from './drone-pending-state';
 import type { ChatImageAttachmentRef } from './chat-attachments';
+import {
+  cancelQueuedPendingPromptInStore,
+  claimQueuedPendingPromptInStore,
+  importChatFromRegistry,
+  readChatFromStore,
+  updatePendingPromptInStore,
+  upsertPendingPromptInStore,
+} from './transcript-store';
 
 export type PendingPrompt = {
   id: string;
@@ -156,6 +164,13 @@ export function createDronePendingPromptStore(deps: {
     }
     const chatName = opts.chatName || 'default';
     const entry = drone?.chats?.[chatName];
+    if (entry) {
+      importChatFromRegistry({ droneId, chatName, chatEntry: entry });
+      const read = readChatFromStore({ droneId, chatName });
+      if (read.available && read.chat) {
+        return pendingPromptsFromChatEntry(read.chat, { keepRecentlyCompleted: true }).slice(-50);
+      }
+    }
     return pendingPromptsFromChatEntry(entry, { keepRecentlyCompleted: true }).slice(-50);
   }
 
@@ -168,6 +183,11 @@ export function createDronePendingPromptStore(deps: {
   }
 
   async function pushPendingPrompt(opts: { droneId: string; chatName: string; pending: PendingPrompt }): Promise<void> {
+    const droneIdForStore = normalizeDroneIdentity(opts.droneId);
+    const chatNameForStore = opts.chatName || 'default';
+    if (droneIdForStore) {
+      upsertPendingPromptInStore({ droneId: droneIdForStore, chatName: chatNameForStore, pending: opts.pending });
+    }
     await updateRegistry((regAny: any) => {
       const droneId = normalizeDroneIdentity(opts.droneId);
       const drone = droneId ? regAny?.drones?.[droneId] : null;
@@ -241,6 +261,16 @@ export function createDronePendingPromptStore(deps: {
     id: string;
     patch: Partial<Pick<PendingPrompt, 'state' | 'error' | 'updatedAt'>>;
   }): Promise<void> {
+    const droneIdForStore = normalizeDroneIdentity(opts.droneId);
+    const chatNameForStore = opts.chatName || 'default';
+    if (droneIdForStore) {
+      updatePendingPromptInStore({
+        droneId: droneIdForStore,
+        chatName: chatNameForStore,
+        id: opts.id,
+        patch: opts.patch,
+      });
+    }
     await updateRegistry((regAny: any) => {
       const droneId = normalizeDroneIdentity(opts.droneId);
       const drone = droneId ? regAny?.drones?.[droneId] : null;
@@ -261,6 +291,15 @@ export function createDronePendingPromptStore(deps: {
   }
 
   async function claimQueuedPendingPromptForSending(opts: { droneId: string; chatName: string; id: string }): Promise<boolean> {
+    const droneIdForStore = normalizeDroneIdentity(opts.droneId);
+    const chatNameForStore = opts.chatName || 'default';
+    let storeClaimed = false;
+    if (droneIdForStore) {
+      const storeClaim = claimQueuedPendingPromptInStore({ droneId: droneIdForStore, chatName: chatNameForStore, id: opts.id });
+      if (storeClaim.available && !storeClaim.claimed && storeClaim.state) return false;
+      storeClaimed = storeClaim.available && storeClaim.claimed;
+    }
+    let claimedPending: PendingPrompt | null = null;
     const claimed = await updateRegistry((regAny: any) => {
       const droneId = normalizeDroneIdentity(opts.droneId);
       const drone = droneId ? regAny?.drones?.[droneId] : null;
@@ -273,6 +312,7 @@ export function createDronePendingPromptStore(deps: {
       const current = list[idx] ?? {};
       if (String(current?.state ?? '') !== 'queued') return false;
       list[idx] = { ...current, state: 'sending', error: undefined, updatedAt: deps.nowIso() };
+      claimedPending = list[idx] as PendingPrompt;
       entry.pendingPrompts = list;
       drone.chats = drone.chats ?? {};
       drone.chats[chatName] = entry;
@@ -280,7 +320,10 @@ export function createDronePendingPromptStore(deps: {
       regAny.drones[droneId] = drone;
       return true;
     });
-    return Boolean(claimed);
+    if (!storeClaimed && claimed && droneIdForStore && claimedPending) {
+      upsertPendingPromptInStore({ droneId: droneIdForStore, chatName: chatNameForStore, pending: claimedPending });
+    }
+    return storeClaimed || Boolean(claimed);
   }
 
   async function cancelQueuedPendingPrompt(opts: {
@@ -292,6 +335,28 @@ export function createDronePendingPromptStore(deps: {
     const chatName = deps.normalizeChatName(opts.chatName);
     const promptId = String(opts.promptId ?? '').trim();
     if (!droneId || !chatName || !promptId) return { status: 'not-found', pendingState: null };
+
+    const storeCancel = cancelQueuedPendingPromptInStore({ droneId, chatName, id: promptId });
+    if (storeCancel.available) {
+      if (storeCancel.cancelled) {
+        await updateRegistry((regAny: any) => {
+          const drone = regAny?.drones?.[droneId] ?? null;
+          const entry = drone?.chats?.[chatName] ?? null;
+          const list = Array.isArray(entry?.pendingPrompts) ? entry.pendingPrompts : [];
+          const idx = list.findIndex((item: any) => String(item?.id ?? '').trim() === promptId);
+          if (idx >= 0) {
+            list.splice(idx, 1);
+            entry.pendingPrompts = list;
+            drone.chats = drone.chats ?? {};
+            drone.chats[chatName] = entry;
+            regAny.drones = regAny.drones ?? {};
+            regAny.drones[droneId] = drone;
+          }
+        });
+        return { status: 'cancelled', pendingState: 'queued' };
+      }
+      if (storeCancel.state) return { status: 'already-submitted', pendingState: storeCancel.state as PendingPromptState };
+    }
 
     const result = await updateRegistry((regAny: any) => {
       const drone = regAny?.drones?.[droneId] ?? null;

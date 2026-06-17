@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { updateRegistry } from '../src/host/registry';
 import { createDronePendingPromptStore } from '../src/hub/drone-pending-prompts';
 import { createPendingDroneStateHelpers } from '../src/hub/drone-pending-state';
+import { resetTranscriptStoreForTests } from '../src/hub/transcript-store';
 import { withTempDroneDataDir } from './test-helpers';
 
 const pendingStateHelpers = createPendingDroneStateHelpers({
@@ -65,6 +66,43 @@ describe('drone pending prompt store', () => {
       expect(claimed).toBe(true);
       const afterClaim = await pendingPromptStore.readPendingPrompts({ droneId: 'drone-1', chatName: 'default' });
       expect(afterClaim[0]).toMatchObject({ id: 'prompt-1', state: 'sending' });
+    });
+  });
+
+  test('claims legacy registry-only queued prompts and backfills the store', async () => {
+    await withTempDroneDataDir('drone-pending-prompts-', async () => {
+      await updateRegistry((reg: any) => {
+        reg.drones = {
+          'drone-legacy': {
+            id: 'drone-legacy',
+            name: 'drone-legacy',
+            chats: {
+              default: {
+                createdAt: '2026-03-26T09:00:00.000Z',
+                pendingPrompts: [
+                  {
+                    id: 'legacy-queued',
+                    at: '2026-03-26T09:01:00.000Z',
+                    prompt: 'legacy queued',
+                    state: 'queued',
+                  },
+                ],
+              },
+            },
+          },
+        };
+      });
+      resetTranscriptStoreForTests();
+
+      const claimed = await pendingPromptStore.claimQueuedPendingPromptForSending({
+        droneId: 'drone-legacy',
+        chatName: 'default',
+        id: 'legacy-queued',
+      });
+
+      expect(claimed).toBe(true);
+      const afterClaim = await pendingPromptStore.readPendingPrompts({ droneId: 'drone-legacy', chatName: 'default' });
+      expect(afterClaim[0]).toMatchObject({ id: 'legacy-queued', state: 'sending' });
     });
   });
 

@@ -9,7 +9,10 @@ const { loadRegistry, updateRegistry } = require('../../dist/host/registry');
 const { startDroneHubApiServer } = require('../../dist/hub/server');
 const {
   getTranscriptStoreUnavailableReason,
+  importDroneChatsFromRegistry,
+  readChatFromStore,
   readTranscriptTurnsFromStore,
+  upsertTranscriptTurnInStore,
 } = require('../../dist/hub/transcript-store');
 
 async function apiFetch(baseUrl, token, pathname, init = {}) {
@@ -174,6 +177,56 @@ test('Node Hub transcript API uses SQLite read model and cheap conditional ETags
   );
   assert.equal(second.response.status, 304);
   assert.equal(second.text, '');
+
+  const orphanWrite = upsertTranscriptTurnInStore({
+    droneId,
+    chatName: 'default',
+    turn: {
+      id: 'markdown-doc',
+      at: '2026-01-01T00:05:00.000Z',
+      promptAt: '2026-01-01T00:05:00.000Z',
+      completedAt: '2026-01-01T00:05:30.000Z',
+      prompt: 'create a markdown document',
+      ok: true,
+      output: '# Document\n',
+    },
+  });
+  assert.equal(orphanWrite.available, true);
+
+  const afterOrphan = await apiFetch(
+    baseUrl,
+    token,
+    `/api/drones/${encodeURIComponent(droneId)}/chats/default/transcript?turn=all`,
+    { headers: { 'if-none-match': etag ?? '' } },
+  );
+  assert.equal(afterOrphan.response.status, 200, afterOrphan.text);
+  assert.notEqual(afterOrphan.response.headers.get('etag'), etag);
+  assert.deepEqual(
+    afterOrphan.data.transcripts.map((turn) => turn.prompt),
+    ['first', 'second', 'create a markdown document'],
+  );
+
+  const deletedChats = importDroneChatsFromRegistry({ droneId, chats: {} });
+  assert.equal(deletedChats.available, true);
+  const deletedChatRead = readChatFromStore({ droneId, chatName: 'default' });
+  assert.equal(deletedChatRead.available, true);
+  assert.equal(deletedChatRead.chat, null);
+
+  const recreatedChats = importDroneChatsFromRegistry({
+    droneId,
+    chats: {
+      default: {
+        createdAt: '2026-01-01T00:06:00.000Z',
+        turns: [],
+        pendingPrompts: [],
+      },
+    },
+  });
+  assert.equal(recreatedChats.available, true);
+  const recreatedChatRead = readChatFromStore({ droneId, chatName: 'default' });
+  assert.equal(recreatedChatRead.available, true);
+  assert.equal(recreatedChatRead.chat.turns.length, 0);
+  assert.equal(recreatedChatRead.chat.pendingPrompts.length, 0);
 
   const missing = await apiFetch(
     baseUrl,

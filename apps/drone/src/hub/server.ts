@@ -83,13 +83,16 @@ import {
 import { suggestReplyToAgentMessage } from './agent-suggestion';
 import { resolveTranscriptPromptAt } from './transcript-order';
 import {
+  countTranscriptTurnsFromStore,
   importChatFromRegistry,
   importDroneChatsFromRegistry,
   importTranscriptTurnsFromRegistry,
   listChatsFromStore,
   readChatFromStore,
   readTranscriptTurnsFromStore,
+  resetTranscriptStoreForTests,
   transcriptTurnsSourceHash,
+  upsertTranscriptTurnInStore,
 } from './transcript-store';
 import { extractAgentCopilotFromAgentMessage, type AgentCopilotRequest } from './agent-copilot-parser';
 import { cloneChatEntryForDroneClone, maybeBootstrapPromptFromTranscript } from './chat-clone';
@@ -5218,6 +5221,7 @@ async function enqueueTranscriptPrompt(opts: {
   waitForDaemonMs?: number;
   kind: string;
   script: string;
+  prompt?: string;
 }) {
   const d = opts.drone;
   const containerName = String(d?.containerName ?? d?.name ?? '').trim();
@@ -5239,14 +5243,26 @@ async function enqueueTranscriptPrompt(opts: {
   await waitForDroneDaemonReady(client, daemonReadyTimeoutMs);
   const droneId = normalizeDroneIdentity(d?.id) || String(d?.name ?? '');
   try {
-    await dronePromptEnqueue(client, { id: String(opts.id ?? ''), kind: opts.kind, cmd: 'bash', args: ['-lc', opts.script] });
+    await dronePromptEnqueue(client, {
+      id: String(opts.id ?? ''),
+      kind: opts.kind,
+      cmd: 'bash',
+      args: ['-lc', opts.script],
+      ...(typeof opts.prompt === 'string' ? { prompt: opts.prompt } : {}),
+    });
     ensureDaemonPromptEventSubscription(droneId);
   } catch (e: any) {
     const msg = e?.message ?? String(e);
     if (isNotFoundErrorMessage(msg)) {
       await upgradeDroneDaemonInContainer({ containerName, containerPort: d.containerPort });
       await waitForDroneDaemonReady(client, daemonReadyAfterUpgradeTimeoutMs);
-      await dronePromptEnqueue(client, { id: String(opts.id ?? ''), kind: opts.kind, cmd: 'bash', args: ['-lc', opts.script] });
+      await dronePromptEnqueue(client, {
+        id: String(opts.id ?? ''),
+        kind: opts.kind,
+        cmd: 'bash',
+        args: ['-lc', opts.script],
+        ...(typeof opts.prompt === 'string' ? { prompt: opts.prompt } : {}),
+      });
       ensureDaemonPromptEventSubscription(droneId);
       return;
     }
@@ -5368,6 +5384,7 @@ async function sendPromptToChat(opts: {
         chatName: normalizedChat,
         runtime,
         cwd,
+        promptId,
       });
       const modelArg = chatModel ? ` --model ${bashQuote(chatModel)}` : '';
       const script = [
@@ -5378,7 +5395,7 @@ async function sendPromptToChat(opts: {
         cdCommand,
         `agent${modelArg} --resume ${bashQuote(chatId)} -f --approve-mcps --print ${bashQuote(promptWithHistory)}`,
       ].join('\n');
-      await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'cursor', script });
+      await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'cursor', script, prompt: effectivePrompt });
       return { ok: true as const, agent, mode: 'transcript' as const, chat: normalizedChat, turnOk: true as const };
     }
 
@@ -5394,7 +5411,7 @@ async function sendPromptToChat(opts: {
           cdCommand,
           `codex --ask-for-approval never exec${modelArg} --skip-git-repo-check --sandbox danger-full-access --json --color never${codexImageArgs} ${bashQuote(promptWithHistory)}`,
         ].join('\n');
-        await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'codex', script });
+        await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'codex', script, prompt: effectivePrompt });
         return { ok: true as const, agent, mode: 'transcript' as const, chat: normalizedChat, codexThreadId: null, turnOk: true as const };
       }
 
@@ -5406,7 +5423,7 @@ async function sendPromptToChat(opts: {
         cdCommand,
         `codex --ask-for-approval never exec${modelArg} --skip-git-repo-check --sandbox danger-full-access --json --color never resume${codexImageArgs} ${bashQuote(existingThreadId)} ${bashQuote(promptWithHistory)}`,
       ].join('\n');
-      await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'codex', script });
+      await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'codex', script, prompt: effectivePrompt });
       return {
         ok: true as const,
         agent,
@@ -5429,7 +5446,7 @@ async function sendPromptToChat(opts: {
         cdCommand,
         `claude --print --dangerously-skip-permissions --output-format text${modelArg} --session-id ${bashQuote(claudeSessionId)} ${bashQuote(promptWithHistory)}`,
       ].join('\n');
-      await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'claude', script });
+      await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'claude', script, prompt: effectivePrompt });
       return {
         ok: true as const,
         agent,
@@ -5454,7 +5471,7 @@ async function sendPromptToChat(opts: {
         cdCommand,
         `opencode run --format default --title ${bashQuote(title)}${modelArg}${resumeArg} ${bashQuote(promptWithHistory)}`,
       ].join('\n');
-      await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'opencode', script });
+      await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'opencode', script, prompt: effectivePrompt });
       return {
         ok: true as const,
         agent,
@@ -5477,7 +5494,7 @@ async function sendPromptToChat(opts: {
         cdCommand,
         `pi --mode json${modelArg}${sessionArg} ${bashQuote(promptWithHistory)}`,
       ].join('\n');
-      await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'pi', script });
+      await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'pi', script, prompt: effectivePrompt });
       return {
         ok: true as const,
         agent,
@@ -6889,11 +6906,11 @@ async function waitForPromptAutomationChatIdle(opts: {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     if (opts.signal.aborted) throw new Error('automation stopped');
-    await reconcileChatFromDaemon({ droneId: opts.droneId, chatName: opts.chatName }).catch(() => {});
     const regAny: any = await loadRegistry();
     const entry = regAny?.drones?.[opts.droneId]?.chats?.[opts.chatName] ?? null;
     if (!entry) return;
     if (!chatHasActivePendingPrompts(entry, { ignoreQueuedBlockedByAutomation: true })) return;
+    await reconcileChatFromDaemon({ droneId: opts.droneId, chatName: opts.chatName }).catch(() => {});
     await sleepMs(PROMPT_AUTOMATION_WAIT_POLL_MS);
   }
   throw new Error('timed out waiting for chat to become idle');
@@ -8170,6 +8187,12 @@ async function pumpQueuedPendingPromptsForChat(opts: { droneId: string; chatName
         enqueueReconcile(droneId, chatName);
       }
     } catch (e: any) {
+      hubLog('warn', 'queued pending prompt enqueue failed', {
+        droneId,
+        chatName,
+        promptId: id,
+        error: String(e?.message ?? e ?? 'unknown error'),
+      });
       await updatePendingPrompt({
         droneId,
         chatName,
@@ -8234,6 +8257,7 @@ export async function resetPromptAutomationStateForTests(): Promise<void> {
   PENDING_PROMPT_PUMP_TASKS.clear();
   PENDING_PROMPT_PUMP_ACTIVE = 0;
   PENDING_PROMPT_PUMP_PUMPING = false;
+  resetTranscriptStoreForTests();
 }
 
 function enqueuePendingPromptPump(droneIdRaw: string, chatName: string) {
@@ -8393,8 +8417,11 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
       : await resolveHostPort(containerName, d.containerPort);
   if (!hostPort || !token) return;
 
-  const entry = d?.chats?.[chatName];
-  if (!entry) return;
+  const registryEntry = d?.chats?.[chatName];
+  if (!registryEntry) return;
+  importChatFromRegistry({ droneId, chatName, chatEntry: registryEntry });
+  const projectedEntry = readChatFromStore({ droneId, chatName });
+  const entry = projectedEntry.available && projectedEntry.chat ? projectedEntry.chat : registryEntry;
   const agent = inferChatAgent(entry, d);
   if (!agent || agent.kind !== 'builtin') return;
 
@@ -8754,8 +8781,17 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
   if (changed) {
     entry.turns = turns;
     entry.pendingPrompts = pendingList;
+    importChatFromRegistry({ droneId, chatName, chatEntry: entry });
+    const projected = readChatFromStore({ droneId, chatName });
+    const committedEntry = projected.available && projected.chat ? projected.chat : entry;
+    const committedTurns: any[] = Array.isArray(committedEntry?.turns) ? committedEntry.turns : turns;
+    const committedPendingList: any[] = Array.isArray(committedEntry?.pendingPrompts) ? committedEntry.pendingPrompts : pendingList;
+    pendingList.length = 0;
+    pendingList.push(...committedPendingList);
+    turns.length = 0;
+    turns.push(...committedTurns);
     d.chats = d.chats ?? {};
-    d.chats[chatName] = entry;
+    d.chats[chatName] = committedEntry;
     regAny.drones[droneId] = d;
     await updateRegistry((regLatest: any) => {
       const dLatest = regLatest?.drones?.[droneId];
@@ -8763,25 +8799,25 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
       dLatest.chats = dLatest.chats ?? {};
       const cur = dLatest.chats[chatName] ?? { createdAt: nowIso() };
       // Preserve other chat metadata, but apply transcript + pending updates atomically.
-      cur.turns = turns;
-      cur.pendingPrompts = pendingList;
-      if (entry && typeof entry === 'object' && typeof (entry as any).codexThreadId === 'string' && String((entry as any).codexThreadId).trim()) {
-        cur.codexThreadId = String((entry as any).codexThreadId).trim();
+      cur.turns = committedTurns;
+      cur.pendingPrompts = committedPendingList;
+      if (committedEntry && typeof committedEntry === 'object' && typeof (committedEntry as any).codexThreadId === 'string' && String((committedEntry as any).codexThreadId).trim()) {
+        cur.codexThreadId = String((committedEntry as any).codexThreadId).trim();
       }
-      if (entry && typeof entry === 'object' && typeof (entry as any).claudeSessionId === 'string' && String((entry as any).claudeSessionId).trim()) {
-        cur.claudeSessionId = String((entry as any).claudeSessionId).trim();
+      if (committedEntry && typeof committedEntry === 'object' && typeof (committedEntry as any).claudeSessionId === 'string' && String((committedEntry as any).claudeSessionId).trim()) {
+        cur.claudeSessionId = String((committedEntry as any).claudeSessionId).trim();
       }
-      if (entry && typeof entry === 'object' && typeof (entry as any).openCodeSessionId === 'string' && String((entry as any).openCodeSessionId).trim()) {
-        cur.openCodeSessionId = String((entry as any).openCodeSessionId).trim();
+      if (committedEntry && typeof committedEntry === 'object' && typeof (committedEntry as any).openCodeSessionId === 'string' && String((committedEntry as any).openCodeSessionId).trim()) {
+        cur.openCodeSessionId = String((committedEntry as any).openCodeSessionId).trim();
       }
-      if (entry && typeof entry === 'object' && typeof (entry as any).piSessionId === 'string' && String((entry as any).piSessionId).trim()) {
-        cur.piSessionId = String((entry as any).piSessionId).trim();
+      if (committedEntry && typeof committedEntry === 'object' && typeof (committedEntry as any).piSessionId === 'string' && String((committedEntry as any).piSessionId).trim()) {
+        cur.piSessionId = String((committedEntry as any).piSessionId).trim();
       }
       dLatest.chats[chatName] = cur;
       regLatest.drones = regLatest.drones ?? {};
       regLatest.drones[droneId] = dLatest;
     });
-    importTranscriptTurnsFromRegistry({ droneId, chatName, turns });
+    importTranscriptTurnsFromRegistry({ droneId, chatName, turns: committedTurns });
 
   }
 
@@ -11048,7 +11084,9 @@ async function getChatEntry(opts: { droneId: string; chatName: string }) {
   if (!d) throw new Error(`unknown drone: ${opts.droneId}`);
   const chat = d.chats?.[opts.chatName];
   if (!chat) throw new Error(`unknown chat: ${opts.chatName}`);
-  return { reg, d, chat, droneId };
+  importChatFromRegistry({ droneId, chatName: opts.chatName, chatEntry: chat });
+  const read = readChatFromStore({ droneId, chatName: opts.chatName });
+  return { reg, d, chat: read.available && read.chat ? read.chat : chat, droneId };
 }
 
 function importResolvedDroneChatsToStore(droneId: string, droneEntry: any): string[] {
@@ -11256,30 +11294,45 @@ async function ensureCursorChatId(opts: {
   chatName: string;
   runtime: DroneRuntime;
   cwd?: string | null;
+  promptId?: string | null;
 }): Promise<string> {
   const { chat } = await getChatEntry({ droneId: opts.droneId, chatName: opts.chatName });
   const existing = typeof (chat as any).chatId === 'string' ? String((chat as any).chatId).trim() : '';
   if (existing) return existing;
-  const r =
-    opts.runtime === 'host'
-      ? await runHostCommand('bash', ['-lc', 'agent create-chat'], {
-          cwd: String(opts.cwd ?? '').trim() || undefined,
-          timeoutMs: defaultSeedBootstrapTimeoutMs(),
-        })
-      : await dvmExec(
-          opts.containerName,
-          'bash',
-          [
-            '-lc',
-            [...buildContainerManagedEnvLines({ runtime: 'container', cwd: opts.cwd ?? null }), 'agent create-chat'].join('\n'),
-          ],
-          {
+  let id = '';
+  try {
+    const r =
+      opts.runtime === 'host'
+        ? await runHostCommand('bash', ['-lc', 'agent create-chat'], {
+            cwd: String(opts.cwd ?? '').trim() || undefined,
             timeoutMs: defaultSeedBootstrapTimeoutMs(),
-          },
-        );
-  if (r.code !== 0) throw new Error((r.stderr || r.stdout || 'agent create-chat failed').trim());
-  const id = parseUuid(`${r.stdout}\n${r.stderr}`);
-  if (!id) throw new Error(`failed to parse chatId from agent create-chat output: ${r.stdout || r.stderr || '(empty)'}`);
+          })
+        : await dvmExec(
+            opts.containerName,
+            'bash',
+            [
+              '-lc',
+              [...buildContainerManagedEnvLines({ runtime: 'container', cwd: opts.cwd ?? null }), 'agent create-chat'].join('\n'),
+            ],
+            {
+              timeoutMs: defaultSeedBootstrapTimeoutMs(),
+            },
+          );
+    if (r.code !== 0) throw new Error((r.stderr || r.stdout || 'agent create-chat failed').trim());
+    id = parseUuid(`${r.stdout}\n${r.stderr}`) ?? '';
+    if (!id) throw new Error(`failed to parse chatId from agent create-chat output: ${r.stdout || r.stderr || '(empty)'}`);
+  } catch (error: any) {
+    const promptId = String(opts.promptId ?? '').trim();
+    if (!promptId.startsWith('agent-copilot-')) throw error;
+    id = crypto.randomUUID();
+    hubLog('warn', 'cursor chat id creation failed; using generated chat id', {
+      droneId: opts.droneId,
+      chatName: opts.chatName,
+      promptId,
+      runtime: opts.runtime,
+      error: String(error?.message ?? error ?? 'unknown error'),
+    });
+  }
   const finalId = await updateRegistry((reg: any) => {
     const droneId = normalizeDroneIdentity(opts.droneId);
     const d = droneId ? reg?.drones?.[droneId] : null;
@@ -11467,6 +11520,7 @@ async function recordTranscriptTurn(opts: {
   });
   if (syncedDroneId && syncedTurns) {
     importTranscriptTurnsFromRegistry({ droneId: syncedDroneId, chatName: opts.chatName, turns: syncedTurns });
+    upsertTranscriptTurnInStore({ droneId: syncedDroneId, chatName: opts.chatName, turn: opts.turn });
   }
 }
 
@@ -11498,6 +11552,14 @@ async function updateTranscriptTurnById(opts: {
       chatName: normalizeChatName(opts.chatName),
       turns: syncedTurns,
     });
+    const updated = (syncedTurns as TranscriptTurn[]).find((turn: any) => String(turn?.id ?? '').trim() === opts.promptId);
+    if (updated) {
+      upsertTranscriptTurnInStore({
+        droneId: normalizeDroneIdentity(opts.droneId),
+        chatName: normalizeChatName(opts.chatName),
+        turn: updated,
+      });
+    }
   }
   return changed;
 }
@@ -25174,13 +25236,14 @@ export async function startDroneHubApiServer(opts: {
             json(res, 404, { ok: false, error: `unknown drone: ${droneId}` });
             return;
           }
-          const c = d.chats?.[chatName];
-          if (!c) {
+          const cRaw = d.chats?.[chatName];
+          if (!cRaw) {
             timer.setHeader(res);
             logSlowHubRequest('chat transcript', timer, { droneId, chatName, status: 404 });
             json(res, 404, { ok: false, error: `unknown chat: ${chatName}` });
             return;
           }
+          const c = importResolvedChatToStore(droneId, chatName, cRaw) ?? cRaw;
           const agent = inferChatAgent(c as any, d);
           if (agent.kind === 'custom') {
             timer.setHeader(res);
@@ -25227,15 +25290,21 @@ export async function startDroneHubApiServer(opts: {
             })
             .map((x) => x.t);
           const sel = u.searchParams.get('turn') ?? 'last';
-          const idxs = parseTurnSelection(sel, list.length, u.searchParams.get('tail'));
+          const storeCount = imported.available
+            ? countTranscriptTurnsFromStore({ droneId, chatName })
+            : { available: false as const, count: list.length, transcriptVersion: imported.transcriptVersion, sourceHash };
+          const effectiveTurnCount = storeCount.available ? storeCount.count : list.length;
+          const effectiveSourceHash = storeCount.available ? storeCount.sourceHash : imported.sourceHash || sourceHash;
+          const effectiveTranscriptVersion = storeCount.available ? storeCount.transcriptVersion : imported.transcriptVersion;
+          const idxs = parseTurnSelection(sel, effectiveTurnCount, u.searchParams.get('tail'));
           const etagSeed = stableResponseFingerprint({
             droneId,
             droneName,
             chatName,
             selection: sel,
             tail: u.searchParams.get('tail') ?? '',
-            sourceHash,
-            transcriptVersion: imported.transcriptVersion,
+            sourceHash: effectiveSourceHash,
+            transcriptVersion: effectiveTranscriptVersion,
             agent,
           });
           const etag = `"transcript-${etagSeed}"`;
@@ -25301,7 +25370,7 @@ export async function startDroneHubApiServer(opts: {
 
           timer.mark('format');
           timer.setHeader(res);
-          logSlowHubRequest('chat transcript', timer, { droneId, chatName, selection: sel, turnCount: rawList.length, status: 200 });
+          logSlowHubRequest('chat transcript', timer, { droneId, chatName, selection: sel, turnCount: effectiveTurnCount, status: 200 });
           jsonWithKnownEtag(req, res, 200, { ok: true, id: droneId, name: droneName, chat: chatName, selection: sel, transcripts, agent }, etag);
           return;
         } catch (e: any) {
