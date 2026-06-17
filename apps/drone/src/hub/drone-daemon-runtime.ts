@@ -21,10 +21,12 @@ export function resolveDroneDaemonRuntimeDir(baseDir: string = __dirname): strin
 }
 
 export async function assertDroneDaemonRuntimeReady(runtimeDir: string): Promise<void> {
-  const daemonPath = path.join(runtimeDir, 'daemon.js');
-  try {
-    await fs.promises.access(daemonPath, fs.constants.R_OK);
-  } catch {
-    throw new Error(`Missing ${daemonPath}. Run: bun run --filter drone build`);
+  for (const fileName of ['daemon.js', 'fleet.js', 'tasks.js', 'blip.js']) {
+    const filePath = path.join(runtimeDir, fileName);
+    try {
+      await fs.promises.access(filePath, fs.constants.R_OK);
+    } catch {
+      throw new Error(`Missing ${filePath}. Run: bun run --filter drone build`);
+    }
   }
 }

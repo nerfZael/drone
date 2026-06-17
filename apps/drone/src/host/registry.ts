@@ -15,7 +15,7 @@ import {
 
 type DroneRegistryDroneKind = 'standard' | 'playbook-run';
 type DroneRegistryDroneVisibility = 'visible' | 'hidden';
-type DroneRegistryBuiltinAgentId = 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi';
+type DroneRegistryBuiltinAgentId = 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi' | 'blip';
 type DroneRegistryChatAgentConfig =
   | { kind: 'builtin'; id: DroneRegistryBuiltinAgentId }
   | { kind: 'custom'; id: string; label: string; command: string };
@@ -93,6 +93,7 @@ type DroneRegistryChatEntry = {
   claudeSessionId?: string;
   openCodeSessionId?: string;
   piSessionId?: string;
+  blipSessionId?: string;
   turns?: Array<{
     at: string;
     id?: string;
@@ -378,7 +379,7 @@ type DroneRegistryV1 = {
         prompt?: string;
         cwd?: string;
         agent?:
-          | { kind: 'builtin'; id: 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi' }
+          | { kind: 'builtin'; id: 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi' | 'blip' }
           | { kind: 'custom'; id: string; label: string; command: string };
       };
       environment?: {
@@ -513,7 +514,7 @@ function normalizeRegistryBuiltinAgentId(raw: unknown): DroneRegistryBuiltinAgen
   const id = String(raw ?? '')
     .trim()
     .toLowerCase();
-  if (id === 'cursor' || id === 'codex' || id === 'claude' || id === 'opencode' || id === 'pi') return id;
+  if (id === 'cursor' || id === 'codex' || id === 'claude' || id === 'opencode' || id === 'pi' || id === 'blip') return id;
   if (id === 'cloud') return 'claude';
   if (id === 'open-code' || id === 'open_code') return 'opencode';
   if (id === 'pi-agent' || id === 'pi_agent') return 'pi';

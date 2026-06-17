@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import path from 'node:path';
 
-const { fleetBundleArgs, tasksBundleArgs } = require('../scripts/postbuild.cjs');
+const { blipBundleArgs, fleetBundleArgs, tasksBundleArgs } = require('../scripts/postbuild.cjs');
 
 describe('postbuild bundles', () => {
   test('bundles fleet for Node into dist/fleet.js', () => {
@@ -23,6 +23,17 @@ describe('postbuild bundles', () => {
       '--target=node',
       '--format=cjs',
       `--outfile=${path.join(root, 'dist', 'tasks.js')}`,
+    ]);
+  });
+
+  test('bundles blip for Node into dist/blip.js', () => {
+    const root = path.resolve(__dirname, '..');
+    expect(blipBundleArgs(root)).toEqual([
+      'build',
+      path.resolve(root, '..', '..', 'blip', 'packages', 'cli', 'src', 'cli.ts'),
+      '--target=node',
+      '--format=cjs',
+      `--outfile=${path.join(root, 'dist', 'blip.js')}`,
     ]);
   });
 });

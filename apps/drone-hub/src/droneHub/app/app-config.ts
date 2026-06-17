@@ -10,6 +10,7 @@ export const BUILTIN_AGENT_OPTIONS: Array<{ key: string; label: string; agent: C
   { key: 'builtin:claude', label: 'Claude Code', agent: { kind: 'builtin', id: 'claude' } },
   { key: 'builtin:opencode', label: 'OpenCode', agent: { kind: 'builtin', id: 'opencode' } },
   { key: 'builtin:pi', label: 'Pi', agent: { kind: 'builtin', id: 'pi' } },
+  { key: 'builtin:blip', label: 'Blip', agent: { kind: 'builtin', id: 'blip' } },
 ];
 
 export const PORT_PREVIEW_STORAGE_KEY = profileStorageKey('droneHub.portPreviewByDrone');

@@ -91,6 +91,13 @@ describe('drone hub domain helpers', () => {
     });
     expect(pi.agent).toEqual({ kind: 'builtin', id: 'pi' });
 
+    const blip = normalizeChatInfoPayload({
+      name: 'auth-drone',
+      chat: 'default',
+      agent: { kind: 'builtin', id: 'Blip' },
+    });
+    expect(blip.agent).toEqual({ kind: 'builtin', id: 'blip' });
+
     const inferred = normalizeChatInfoPayload({
       name: 'auth-drone',
       chat: 'default',
@@ -119,6 +126,13 @@ describe('drone hub domain helpers', () => {
     });
     expect(inferredPi.agent).toEqual({ kind: 'builtin', id: 'pi' });
     expect(inferredPi.agentSuggestionEnabled).toBe(false);
+
+    const inferredBlip = normalizeChatInfoPayload({
+      name: 'auth-drone',
+      chat: 'default',
+      blipSessionId: 'blip-session-id',
+    });
+    expect(inferredBlip.agent).toEqual({ kind: 'builtin', id: 'blip' });
   });
 
   test('formats relative time in readable UI buckets', () => {

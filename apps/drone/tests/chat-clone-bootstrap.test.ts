@@ -72,6 +72,7 @@ describe('chat clone transcript bootstrap', () => {
       claudeSessionId: 'claude-session-id',
       openCodeSessionId: 'opencode-session-id',
       piSessionId: '550e8400-e29b-41d4-a716-446655440000',
+      blipSessionId: 'blip-session-id',
       turns: [{ at: '2026-03-17T10:00:00.000Z', prompt: 'hi', ok: true, output: 'hello' }],
       pendingPrompts: [{ id: 'queued', at: '2026-03-17T10:01:00.000Z', prompt: 'later', state: 'queued' }],
       nested: { keep: true },
@@ -82,6 +83,7 @@ describe('chat clone transcript bootstrap', () => {
     expect(cloned.claudeSessionId).toBe('claude-session-id');
     expect(cloned.openCodeSessionId).toBe('opencode-session-id');
     expect(cloned.piSessionId).toBe('550e8400-e29b-41d4-a716-446655440000');
+    expect(cloned.blipSessionId).toBe('blip-session-id');
     expect(cloned.turns).toEqual([
       {
         at: '2026-03-17T10:00:00.000Z',

@@ -85,6 +85,21 @@ export function installTasksCliScript(opts?: { runtimeDir?: string; binPath?: st
   ].join('\n');
 }
 
+export function installBlipCliScript(opts?: { runtimeDir?: string; binPath?: string }): string {
+  const runtimeDir = String(opts?.runtimeDir ?? '/dvm-data/drone/dist').trim() || '/dvm-data/drone/dist';
+  const binPath = String(opts?.binPath ?? '/usr/local/bin/blip').trim() || '/usr/local/bin/blip';
+  const blipJs = path.posix.join(runtimeDir, 'blip.js');
+  return [
+    'set -euo pipefail',
+    `mkdir -p ${shellQuote(path.posix.dirname(binPath))}`,
+    `cat > ${shellQuote(binPath)} <<'EOF'`,
+    '#!/usr/bin/env bash',
+    `exec node ${shellQuote(blipJs)} "$@"`,
+    'EOF',
+    `chmod 755 ${shellQuote(binPath)}`,
+  ].join('\n');
+}
+
 export function buildContainerDroneDaemonLaunchScript(
   containerPortRaw: number,
   opts?: {

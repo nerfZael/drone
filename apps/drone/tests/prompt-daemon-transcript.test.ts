@@ -167,4 +167,62 @@ console.log(JSON.stringify({ type: 'turn.completed' }));
     },
     20_000,
   );
+
+  test(
+    'persists the final Blip transcript message when stored stdout is truncated',
+    async () => {
+      const port = await allocatePort();
+      const dataDir = path.join(tempRoot, `daemon-${port}`);
+      fs.mkdirSync(dataDir, { recursive: true });
+      const scriptPath = path.join(tempRoot, `large-blip-jsonl-${port}.js`);
+      fs.writeFileSync(
+        scriptPath,
+        `
+const filler = 'x'.repeat(2 * 1024 * 1024 + 1024);
+console.log(JSON.stringify({ type: 'session_started', sessionId: 'blip-session-1' }));
+console.log(JSON.stringify({ type: 'assistant_message', sessionId: 'blip-session-1', text: 'Interim status.' }));
+console.log(JSON.stringify({ type: 'tool_result', sessionId: 'blip-session-1', text: filler }));
+console.log(JSON.stringify({ type: 'assistant_message', sessionId: 'blip-session-1', text: 'Final Blip report.' }));
+console.log(JSON.stringify({ type: 'session_finished', sessionId: 'blip-session-1' }));
+`,
+        'utf8',
+      );
+
+      const token = 'daemon-token';
+      const daemon = Bun.spawn([process.execPath, daemonEntry, '--host', '127.0.0.1', '--port', String(port), '--data-dir', dataDir, '--token', token], {
+        cwd: process.cwd(),
+        stdout: 'ignore',
+        stderr: 'pipe',
+      });
+      processes.push(daemon);
+      const baseUrl = `http://127.0.0.1:${port}`;
+      await waitForHealth(baseUrl, token, daemon);
+
+      const id = `large-blip-jsonl-${port}`;
+      const enqueue = await fetch(`${baseUrl}/v1/prompts/enqueue`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ id, kind: 'blip', cmd: process.execPath, args: [scriptPath] }),
+      });
+      expect(enqueue.status).toBe(202);
+
+      const job = await waitForPromptJob(baseUrl, token, id);
+      expect(job.exitStatusSource).toBe('exit-file');
+      expect(job.stdoutTruncated).toBe(true);
+      expect(String(job.stdout ?? '')).toContain('Interim status.');
+      expect(String(job.stdout ?? '')).not.toContain('Final Blip report.');
+      expect(job.transcript).toMatchObject({
+        kind: 'blip',
+        sessionId: 'blip-session-1',
+        message: 'Final Blip report.',
+        terminalEvent: 'session_finished',
+        stdoutTruncated: true,
+      });
+      expect(job.transcript.stdoutBytes).toBe(job.stdoutBytes);
+    },
+    20_000,
+  );
 });

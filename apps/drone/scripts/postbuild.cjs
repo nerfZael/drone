@@ -23,6 +23,16 @@ function tasksBundleArgs(root) {
   ];
 }
 
+function blipBundleArgs(root) {
+  return [
+    'build',
+    path.resolve(root, '..', '..', 'blip', 'packages', 'cli', 'src', 'cli.ts'),
+    '--target=node',
+    '--format=cjs',
+    `--outfile=${path.join(root, 'dist', 'blip.js')}`,
+  ];
+}
+
 function runOrThrow(cmd, args, opts = {}) {
   const result = spawnSync(cmd, args, {
     cwd: opts.cwd,
@@ -64,7 +74,9 @@ async function main() {
   const root = path.resolve(__dirname, '..');
   runOrThrow('bun', fleetBundleArgs(root), { cwd: root });
   runOrThrow('bun', tasksBundleArgs(root), { cwd: root });
+  runOrThrow('bun', blipBundleArgs(root), { cwd: root });
   await copyDesktopVoiceVoskModel(root);
+  await chmodExecutableBestEffort(path.join(root, 'dist', 'blip.js'));
   await chmodExecutableBestEffort(path.join(root, 'dist', 'cli.js'));
   await chmodExecutableBestEffort(path.join(root, 'dist', 'daemon.js'));
   await chmodExecutableBestEffort(path.join(root, 'dist', 'fleet.js'));
@@ -72,6 +84,7 @@ async function main() {
 }
 
 module.exports = {
+  blipBundleArgs,
   fleetBundleArgs,
   tasksBundleArgs,
 };
