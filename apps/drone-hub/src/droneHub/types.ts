@@ -584,6 +584,11 @@ export type PendingPrompt = {
   // `queued` is a local-only UI state used when a drone is still provisioning.
   state: 'queued' | 'sending' | 'sent' | 'failed';
   error?: string;
+  blipClones?: {
+    status: 'running';
+    count: number;
+    tasks: string[];
+  };
   updatedAt?: string;
 };
 

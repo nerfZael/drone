@@ -21,19 +21,20 @@ const PATCH_RULES = `Patch rules:
 - Do not overwrite unrelated user changes.
 - For local CLI cleanup or generated content, bash may be used when the active profile exposes it.`;
 
-function toolRules(profile: ToolProfile): string {
+function toolRules(profile: ToolProfile, clonesEnabled: boolean): string {
+  const cloneTool = clonesEnabled ? "\ncreate_clones is also available for parallel independent subtasks." : "";
   if (profile === "local-trusted-write") {
     return `Tool profile: local-trusted-write.
-Available tools are intentionally small: bash, apply_patch, read_file, search_files, and list_files.
+Available tools are intentionally small: bash, apply_patch, read_file, search_files, and list_files.${cloneTool}
 Use bash for git status, simple file moves/deletes/directories, package scripts, tests, and builds.
 Use read_file/search_files/list_files when structured bounded output is clearer than shell output.`;
   }
   if (profile === "read-only") {
     return `Tool profile: read-only.
-Only inspection tools are available. Do not try to mutate files. Bash is unavailable.`;
+Only inspection tools are available. Do not try to mutate files. Bash is unavailable.${cloneTool}`;
   }
   return `Tool profile: no-shell-workspace-write.
-Bash is unavailable. Use structured file tools for filesystem mutations and get_working_tree_status for git state.`;
+Bash is unavailable. Use structured file tools for filesystem mutations and get_working_tree_status for git state.${cloneTool}`;
 }
 
 function permissionRules(): string {
@@ -42,6 +43,14 @@ function permissionRules(): string {
 - Do not access files outside the workspace.
 - The active tool profile controls which tools exist.
 - Bash has no OS sandbox in v1 and is only available in trusted local write sessions.`;
+}
+
+function cloneRules(maxClones: number): string {
+  return `Clone rules:
+- Use create_clones when up to ${maxClones} independent subtasks can run in parallel.
+- Give each clone a focused task string with enough context to work alone.
+- Do not use clones for tightly coupled edits that are likely to conflict.
+- The original session waits while clones run, then receives each clone's final message as the tool result.`;
 }
 
 async function readOptional(pathname: string): Promise<string | undefined> {
@@ -57,12 +66,16 @@ async function readOptional(pathname: string): Promise<string | undefined> {
 export async function assembleSystemPrompt(input: {
   workspaceRoot: string;
   toolProfile: ToolProfile;
+  clonesEnabled?: boolean;
+  maxClones?: number;
 }): Promise<string> {
   const repoInstructions = await readOptional(path.join(input.workspaceRoot, "AGENTS.md"));
+  const clonesEnabled = input.clonesEnabled === true;
   const sections = [
     IDENTITY,
     WORKFLOW,
-    toolRules(input.toolProfile),
+    toolRules(input.toolProfile, clonesEnabled),
+    clonesEnabled ? cloneRules(input.maxClones ?? 4) : undefined,
     PATCH_RULES,
     permissionRules(),
     repoInstructions ? `Repository instructions from AGENTS.md:\n${repoInstructions}` : undefined,

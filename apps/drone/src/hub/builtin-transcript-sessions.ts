@@ -58,7 +58,18 @@ function parseUuid(text: string): string | null {
 type CodexTerminalEvent = 'turn.completed' | 'response.completed' | 'response.failed' | 'error';
 type CodexJsonlParseResult = { threadId: string | null; message: string | null; terminalEvent?: CodexTerminalEvent };
 type PiJsonlParseResult = { sessionId: string | null; message: string | null };
-type BlipJsonlParseResult = { sessionId: string | null; message: string | null; terminalEvent?: 'session_finished' | 'session_error' };
+export type BlipCloneActivity = {
+  status: 'running';
+  count: number;
+  tasks: string[];
+};
+
+type BlipJsonlParseResult = {
+  sessionId: string | null;
+  message: string | null;
+  terminalEvent?: 'session_finished' | 'session_error';
+  cloneActivity?: BlipCloneActivity;
+};
 
 function createCodexJsonlParser(): { pushLine: (line: string) => void; result: () => CodexJsonlParseResult } {
   let threadId: string | null = null;
@@ -213,11 +224,29 @@ function createPiJsonlParser(): { pushLine: (line: string) => void; result: () =
   };
 }
 
+function normalizeBlipCloneActivity(raw: any): BlipCloneActivity | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const tasksRaw = Array.isArray(raw.tasks) ? raw.tasks : [];
+  const tasks = tasksRaw.map((task: any) => String(task ?? '').trim()).filter(Boolean).slice(0, 8);
+  if (tasks.length === 0) return undefined;
+  const countRaw = Number(raw.count);
+  const count = Number.isFinite(countRaw) && countRaw > 0 ? Math.floor(countRaw) : tasks.length;
+  return { status: 'running', count: Math.max(1, count), tasks };
+}
+
+function cloneActivityFromArgs(args: any): BlipCloneActivity | undefined {
+  const tasksRaw = args && typeof args === 'object' && Array.isArray(args.tasks) ? args.tasks : [];
+  const tasks = tasksRaw.map((task: any) => String(task ?? '').trim()).filter(Boolean).slice(0, 8);
+  if (tasks.length === 0) return undefined;
+  return { status: 'running', count: tasks.length, tasks };
+}
+
 function createBlipJsonlParser(): { pushLine: (line: string) => void; result: () => BlipJsonlParseResult } {
   let sessionId: string | null = null;
   let lastMsg: string | null = null;
   let streamedMsg = '';
   let terminalEvent: BlipJsonlParseResult['terminalEvent'];
+  const activeCloneCalls = new Map<string, BlipCloneActivity>();
 
   return {
     pushLine(lineRaw: string) {
@@ -233,6 +262,17 @@ function createBlipJsonlParser(): { pushLine: (line: string) => void; result: ()
       const parsedSessionId = String(obj.sessionId ?? '').trim();
       if (parsedSessionId) sessionId = parsedSessionId;
       const type = String(obj.type ?? '').trim();
+      const tool = String(obj.tool ?? '').trim();
+      const callId = String(obj.callId ?? '').trim();
+      if (tool === 'create_clones' && type === 'tool_call_started') {
+        const cloneActivity = cloneActivityFromArgs(obj.args);
+        if (callId && cloneActivity) activeCloneCalls.set(callId, cloneActivity);
+        return;
+      }
+      if (tool === 'create_clones' && (type === 'tool_call_completed' || type === 'tool_call_failed')) {
+        if (callId) activeCloneCalls.delete(callId);
+        return;
+      }
       if (type === 'assistant_delta') {
         const delta = takeStringText(obj.text);
         if (delta) streamedMsg += delta;
@@ -252,7 +292,14 @@ function createBlipJsonlParser(): { pushLine: (line: string) => void; result: ()
       }
     },
     result() {
-      return { sessionId, message: lastMsg ?? (streamedMsg ? streamedMsg : null), ...(terminalEvent ? { terminalEvent } : {}) };
+      const activeCloneActivities = Array.from(activeCloneCalls.values());
+      const cloneActivity = activeCloneActivities[activeCloneActivities.length - 1];
+      return {
+        sessionId,
+        message: lastMsg ?? (streamedMsg ? streamedMsg : null),
+        ...(terminalEvent ? { terminalEvent } : {}),
+        ...(cloneActivity ? { cloneActivity } : {}),
+      };
     },
   };
 }
@@ -316,6 +363,7 @@ export type BuiltinPromptJobTranscript =
 	      message: string | null;
 	      sessionId: string | null;
 	      terminalEvent?: 'session_finished' | 'session_error';
+	      cloneActivity?: BlipCloneActivity;
 	      stdoutBytes?: number;
 	      stdoutTruncated?: boolean;
 	      parsedAt?: string;
@@ -371,6 +419,7 @@ export function parseBuiltinPromptJobTranscript(
       message: parsed.message,
       sessionId: parsed.sessionId,
       ...(parsed.terminalEvent ? { terminalEvent: parsed.terminalEvent } : {}),
+      ...(parsed.cloneActivity ? { cloneActivity: parsed.cloneActivity } : {}),
       ...promptJobTranscriptMeta(opts),
     };
   }
@@ -409,6 +458,7 @@ export async function parseBuiltinPromptJobTranscriptLines(
       message: parsed.message,
       sessionId: parsed.sessionId,
       ...(parsed.terminalEvent ? { terminalEvent: parsed.terminalEvent } : {}),
+      ...(parsed.cloneActivity ? { cloneActivity: parsed.cloneActivity } : {}),
       ...promptJobTranscriptMeta(opts),
     };
   }
@@ -450,17 +500,24 @@ export function parsePiJobTranscript(job: any): { sessionId: string | null; mess
   return parsePiJsonl(String(job?.stdout ?? ''));
 }
 
-export function parseBlipJobTranscript(job: any): { sessionId: string | null; message: string | null; terminalEvent?: 'session_finished' | 'session_error' } {
+export function parseBlipJobTranscript(job: any): {
+  sessionId: string | null;
+  message: string | null;
+  terminalEvent?: 'session_finished' | 'session_error';
+  cloneActivity?: BlipCloneActivity;
+} {
   const transcript = job?.transcript;
   if (transcript && typeof transcript === 'object' && String(transcript.kind ?? '').trim() === 'blip') {
     if (Object.prototype.hasOwnProperty.call(transcript, 'message')) {
       const terminalEventRaw = String(transcript.terminalEvent ?? '').trim();
       const terminalEvent =
         terminalEventRaw === 'session_finished' || terminalEventRaw === 'session_error' ? terminalEventRaw : undefined;
+      const cloneActivity = normalizeBlipCloneActivity((transcript as any).cloneActivity);
       return {
         sessionId: optionalString(transcript.sessionId),
         message: optionalString(transcript.message),
         ...(terminalEvent ? { terminalEvent } : {}),
+        ...(cloneActivity ? { cloneActivity } : {}),
       };
     }
   }
