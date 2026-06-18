@@ -1557,6 +1557,9 @@ async function main() {
             json(res, 200, { ok: true, job: next });
             return;
           }
+          const next = await refreshPromptJobTranscript(job);
+          json(res, 200, { ok: true, job: next });
+          return;
         }
         if ((job.state === 'done' || job.state === 'failed') && !promptJobHasParsedTranscript(job)) {
           const next = await refreshPromptJobTranscript(job);

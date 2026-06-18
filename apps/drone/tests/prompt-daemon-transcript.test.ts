@@ -95,6 +95,24 @@ async function waitForPromptJob(baseUrl: string, token: string, id: string): Pro
   throw new Error(`timed out waiting for prompt job ${id}: ${JSON.stringify(lastJob)}`);
 }
 
+async function waitForRunningPromptJob(baseUrl: string, token: string, id: string, predicate: (job: any) => boolean): Promise<any> {
+  const startedAt = Date.now();
+  let lastJob: any = null;
+  while (Date.now() - startedAt < 10_000) {
+    const response = await fetch(`${baseUrl}/v1/prompts/${encodeURIComponent(id)}`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const data: any = await response.json();
+    lastJob = data?.job ?? data;
+    if (lastJob?.state === 'failed') {
+      throw new Error(`prompt job failed: ${String(lastJob?.error ?? lastJob?.stderr ?? 'unknown error')}`);
+    }
+    if (lastJob?.state === 'running' && predicate(lastJob)) return lastJob;
+    await Bun.sleep(100);
+  }
+  throw new Error(`timed out waiting for running prompt job ${id}: ${JSON.stringify(lastJob)}`);
+}
+
 describeRuntimeSuite('prompt daemon transcripts', () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-prompt-daemon-transcript-'));
   const processes: Array<ReturnType<typeof Bun.spawn>> = [];
@@ -222,6 +240,74 @@ console.log(JSON.stringify({ type: 'session_finished', sessionId: 'blip-session-
         stdoutTruncated: true,
       });
       expect(job.transcript.stdoutBytes).toBe(job.stdoutBytes);
+    },
+    20_000,
+  );
+
+  test(
+    'returns live Blip clone activity while a prompt job is still running',
+    async () => {
+      const port = await allocatePort();
+      const dataDir = path.join(tempRoot, `daemon-${port}`);
+      fs.mkdirSync(dataDir, { recursive: true });
+      const scriptPath = path.join(tempRoot, `running-blip-clones-${port}.sh`);
+      fs.writeFileSync(
+        scriptPath,
+        `
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' '{"type":"session_started","sessionId":"blip-session-running"}'
+printf '%s\n' '{"type":"tool_call_started","sessionId":"blip-session-running","callId":"call_clones","tool":"create_clones","args":{"tasks":["build cli app one","build cli app two","build cli app three"]}}'
+sleep 5
+printf '%s\n' '{"type":"tool_call_completed","sessionId":"blip-session-running","callId":"call_clones","tool":"create_clones","result":{"maxClones":8,"clones":[]}}'
+printf '%s\n' '{"type":"assistant_message","sessionId":"blip-session-running","text":"Done."}'
+printf '%s\n' '{"type":"session_finished","sessionId":"blip-session-running"}'
+`,
+        'utf8',
+      );
+      fs.chmodSync(scriptPath, 0o700);
+
+      const token = 'daemon-token';
+      const daemon = Bun.spawn([process.execPath, daemonEntry, '--host', '127.0.0.1', '--port', String(port), '--data-dir', dataDir, '--token', token], {
+        cwd: process.cwd(),
+        stdout: 'ignore',
+        stderr: 'pipe',
+      });
+      processes.push(daemon);
+      const baseUrl = `http://127.0.0.1:${port}`;
+      await waitForHealth(baseUrl, token, daemon);
+
+      const id = `running-blip-clones-${port}`;
+      const enqueue = await fetch(`${baseUrl}/v1/prompts/enqueue`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ id, kind: 'blip', cmd: '/bin/bash', args: [scriptPath] }),
+      });
+      expect(enqueue.status).toBe(202);
+
+      const running = await waitForRunningPromptJob(baseUrl, token, id, (job) => job?.transcript?.cloneActivity?.count === 3);
+      expect(running.transcript).toMatchObject({
+        kind: 'blip',
+        sessionId: 'blip-session-running',
+        message: null,
+        cloneActivity: {
+          status: 'running',
+          count: 3,
+          tasks: ['build cli app one', 'build cli app two', 'build cli app three'],
+        },
+      });
+
+      const done = await waitForPromptJob(baseUrl, token, id);
+      expect(done.transcript).toMatchObject({
+        kind: 'blip',
+        sessionId: 'blip-session-running',
+        message: 'Done.',
+        terminalEvent: 'session_finished',
+      });
+      expect(done.transcript).not.toHaveProperty('cloneActivity');
     },
     20_000,
   );
