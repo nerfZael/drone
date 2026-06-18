@@ -14,11 +14,15 @@ const DEFAULT_MODEL = "gpt-5.5";
 const DEFAULT_REASONING: NonNullable<CliOptions["reasoning"]> = "high";
 const OPENAI_CODEX_PROVIDER = "openai-codex";
 const BLIP_CONFIG_FILE_ENV = "BLIP_CONFIG_FILE";
+const REASONING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 
 type CliConfig = {
   provider?: string;
   model?: string;
+  reasoning?: ReasoningLevel;
 };
+
+type ReasoningLevel = (typeof REASONING_LEVELS)[number];
 
 type CliOptions = {
   promptParts: string[];
@@ -51,9 +55,9 @@ Usage:
 
 Options:
   --jsonl                    Emit runtime events as JSONL on stdout
-  --provider <provider>      Model provider (default: BLIP_PROVIDER or openai-codex)
-  --model <model>            Model id, or provider/model
-  --reasoning <level>        off|minimal|low|medium|high|xhigh (default: BLIP_REASONING or high)
+  --provider <provider>      Model provider (default: BLIP_PROVIDER, saved config, or openai-codex)
+  --model <model>            Model id, or provider/model (default: BLIP_MODEL, saved config, or gpt-5.5)
+  --reasoning <level>        off|minimal|low|medium|high|xhigh (default: BLIP_REASONING, saved config, or high)
   --workspace <path>         Workspace root (default: cwd)
   --permission <mode>        read-only|workspace-write|full-access
   --profile <profile>        local-trusted-write|read-only|no-shell-workspace-write
@@ -68,7 +72,7 @@ Options:
 
 Interactive:
   Run "blip" with no prompt to open an interactive session.
-  Commands: /model [id|provider/id], /exit, /quit
+  Commands: /model [id|provider/id], /reasoning [level], /exit, /quit
 
 Environment:
   BLIP_PROVIDER              Default provider
@@ -133,9 +137,7 @@ function parseProfile(value: string): ToolProfile {
 }
 
 function parseReasoning(value: string): NonNullable<CliOptions["reasoning"]> {
-  if (value === "off" || value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "xhigh") {
-    return value;
-  }
+  if (REASONING_LEVELS.includes(value as ReasoningLevel)) return value as ReasoningLevel;
   throw new Error("invalid reasoning level");
 }
 
@@ -159,15 +161,24 @@ function blipConfigFilePath(): string {
 function readCliConfig(): CliConfig {
   const raw = readJsonFile(blipConfigFilePath());
   if (!raw || typeof raw !== "object") return {};
+  const reasoning = typeof raw.reasoning === "string" && REASONING_LEVELS.includes(raw.reasoning as ReasoningLevel)
+    ? (raw.reasoning as ReasoningLevel)
+    : undefined;
   return {
     ...(typeof raw.provider === "string" && raw.provider.trim() ? { provider: raw.provider.trim() } : {}),
     ...(typeof raw.model === "string" && raw.model.trim() ? { model: raw.model.trim() } : {}),
+    ...(reasoning ? { reasoning } : {}),
   };
 }
 
 function saveDefaultModel(provider: string, model: string): void {
   const current = readCliConfig();
   writeJsonFile(blipConfigFilePath(), { ...current, provider, model });
+}
+
+function saveDefaultReasoning(reasoning: ReasoningLevel): void {
+  const current = readCliConfig();
+  writeJsonFile(blipConfigFilePath(), { ...current, reasoning });
 }
 
 function splitProviderModel(rawModel: string, fallbackProvider: string): { provider: string; model: string } {
@@ -189,7 +200,8 @@ function resolveProviderModel(options: CliOptions): { provider: string; model: s
 }
 
 function resolveReasoning(options: CliOptions): NonNullable<CliOptions["reasoning"]> {
-  return options.reasoning ?? parseReasoning(process.env.BLIP_REASONING || DEFAULT_REASONING);
+  const config = readCliConfig();
+  return options.reasoning ?? parseReasoning(process.env.BLIP_REASONING || config.reasoning || DEFAULT_REASONING);
 }
 
 function jwtExpiresAtMs(token: string): number | undefined {
@@ -358,7 +370,7 @@ type RunContext = {
   model: string;
   permissionMode: PermissionMode;
   toolProfile: ToolProfile;
-  reasoning?: CliOptions["reasoning"];
+  reasoning: ReasoningLevel;
   getApiKey: (provider: string) => Promise<string | undefined>;
   emit: (event: BlipRuntimeEvent) => void;
 };
@@ -396,7 +408,7 @@ async function runInteractive(context: RunContext, options: CliOptions): Promise
   let resumeLatest = options.resumeLatest;
   let forkSessionId = options.forkSessionId;
 
-  console.error(`Blip interactive (${context.provider}/${context.model}). Type /exit to quit.`);
+  console.error(`Blip interactive (${context.provider}/${context.model}, reasoning ${context.reasoning}). Type /exit to quit.`);
   try {
     while (true) {
       let raw: string;
@@ -410,6 +422,10 @@ async function runInteractive(context: RunContext, options: CliOptions): Promise
       if (prompt === "/exit" || prompt === "/quit") break;
       if (prompt === "/model" || prompt.startsWith("/model ")) {
         await chooseInteractiveModel(prompt.slice("/model".length).trim(), context, rl);
+        continue;
+      }
+      if (prompt === "/reasoning" || prompt.startsWith("/reasoning ")) {
+        await chooseInteractiveReasoning(prompt.slice("/reasoning".length).trim(), context, rl);
         continue;
       }
 
@@ -481,6 +497,36 @@ async function chooseInteractiveModel(
   context.model = next.model;
   saveDefaultModel(next.provider, next.model);
   console.error(`Default model set to ${formatModelLabel(next.provider, next.model)}`);
+}
+
+async function chooseInteractiveReasoning(
+  rawSelection: string,
+  context: RunContext,
+  rl: ReturnType<typeof createInterface>,
+): Promise<void> {
+  let selection = rawSelection.trim();
+  if (!selection) {
+    console.error(`Current reasoning: ${context.reasoning}`);
+    console.error(`Reasoning levels: ${REASONING_LEVELS.join(", ")}`);
+    try {
+      selection = (await rl.question("reasoning> ")).trim();
+    } catch {
+      return;
+    }
+    if (!selection) return;
+  }
+
+  let reasoning: ReasoningLevel;
+  try {
+    reasoning = parseReasoning(selection);
+  } catch {
+    console.error(`Unknown reasoning level: ${selection}`);
+    return;
+  }
+
+  context.reasoning = reasoning;
+  saveDefaultReasoning(reasoning);
+  console.error(`Default reasoning set to ${reasoning}`);
 }
 
 async function main(): Promise<void> {
