@@ -40,7 +40,7 @@ function messageText(message: AgentMessage): string {
       : message.content.map((item) => (item.type === "text" ? item.text : `[${item.type}]`)).join("\n");
   }
   if (message.role === "assistant") {
-    return message.content.map((item) => (item.type === "text" ? item.text : item.type === "toolCall" ? `[tool:${item.name}]` : "")).join("\n");
+    return message.content.map((item) => (item.type === "text" ? item.text : "")).filter(Boolean).join("\n");
   }
   if (message.role === "toolResult") {
     return message.content.map((item) => (item.type === "text" ? item.text : `[${item.type}]`)).join("\n");
@@ -512,12 +512,15 @@ export async function runBlipTask(options: RunBlipOptions, onEvent?: RuntimeSink
     } else if (event.type === "message_end") {
       await store.appendMessage(session, event.message);
       if (event.message.role === "assistant") {
-        await emit({
-          ...eventBase(session.id, turnId),
-          type: "assistant_message",
-          messageId: randomUUID(),
-          text: messageText(event.message),
-        });
+        const text = messageText(event.message);
+        if (text.trim()) {
+          await emit({
+            ...eventBase(session.id, turnId),
+            type: "assistant_message",
+            messageId: randomUUID(),
+            text,
+          });
+        }
         const assistantError = assistantFailureMessage(event.message);
         if (assistantError) await recordFailure(assistantError);
       }

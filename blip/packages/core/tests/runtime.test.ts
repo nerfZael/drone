@@ -32,6 +32,7 @@ describe("Blip runtime", () => {
     ]);
 
     const events: string[] = [];
+    const assistantMessages: string[] = [];
     const session = await runBlipTask(
       {
         prompt: "Read hello.txt",
@@ -41,11 +42,16 @@ describe("Blip runtime", () => {
         permissionMode: "workspace-write",
         toolProfile: "no-shell-workspace-write",
       },
-      (event) => events.push(event.type),
+      (event) => {
+        events.push(event.type);
+        if (event.type === "assistant_message") assistantMessages.push(event.text);
+      },
     );
 
     expect(events).toContain("tool_call_started");
     expect(events).toContain("tool_call_completed");
+    expect(assistantMessages).toEqual(["I read hello.txt."]);
+    expect(assistantMessages.join("\n")).not.toContain("[tool:");
     expect(session.readFiles).toEqual(["hello.txt"]);
     const transcript = await readFile(session.transcriptPath, "utf8");
     expect(transcript).toContain("I read hello.txt.");
