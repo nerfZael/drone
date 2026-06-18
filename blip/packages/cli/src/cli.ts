@@ -1,5 +1,15 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  createReadStream,
+  createWriteStream,
+  existsSync,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -141,14 +151,24 @@ function parseReasoning(value: string): NonNullable<CliOptions["reasoning"]> {
   throw new Error("invalid reasoning level");
 }
 
-async function readStdinIfNeeded(promptParts: string[]): Promise<string> {
+async function readStdinIfNeeded(promptParts: string[]): Promise<{ prompt: string; readFromStdin: boolean }> {
   const prompt = promptParts.join(" ").trim();
-  if (prompt) return prompt;
-  if (process.stdin.isTTY) return "";
+  if (prompt) return { prompt, readFromStdin: false };
+  if (!shouldReadStdinForPrompt()) return { prompt: "", readFromStdin: false };
   process.stdin.setEncoding("utf8");
   const chunks: string[] = [];
   for await (const chunk of process.stdin) chunks.push(String(chunk));
-  return chunks.join("").trim();
+  return { prompt: chunks.join("").trim(), readFromStdin: true };
+}
+
+function shouldReadStdinForPrompt(): boolean {
+  if (process.stdin.isTTY) return false;
+  try {
+    const stat = fstatSync(0);
+    return stat.isFIFO() || stat.isFile() || stat.isSocket();
+  } catch {
+    return true;
+  }
 }
 
 function blipConfigFilePath(): string {
@@ -370,8 +390,44 @@ type RunContext = {
   emit: (event: BlipRuntimeEvent) => void;
 };
 
+type InteractiveReadline = {
+  rl: ReturnType<typeof createInterface>;
+  close: () => void;
+};
+
 function formatModelLabel(provider: string, model: string): string {
   return provider === DEFAULT_PROVIDER ? model : `${provider}/${model}`;
+}
+
+function createInteractiveReadline(): InteractiveReadline | null {
+  if (process.stdin.isTTY) {
+    const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+    return { rl, close: () => rl.close() };
+  }
+
+  if (process.platform === "win32") return null;
+
+  let inputFd: number | undefined;
+  let outputFd: number | undefined;
+  try {
+    inputFd = openSync("/dev/tty", "r");
+    outputFd = openSync("/dev/tty", "w");
+    const input = createReadStream("/dev/tty", { fd: inputFd, autoClose: true });
+    const output = createWriteStream("/dev/tty", { fd: outputFd, autoClose: true });
+    const rl = createInterface({ input, output, terminal: true });
+    return {
+      rl,
+      close() {
+        rl.close();
+        input.close();
+        output.close();
+      },
+    };
+  } catch {
+    if (outputFd !== undefined) closeSync(outputFd);
+    if (inputFd !== undefined) closeSync(inputFd);
+    return null;
+  }
 }
 
 async function runPrompt(prompt: string, context: RunContext, options: CliOptions): Promise<string> {
@@ -397,7 +453,9 @@ async function runPrompt(prompt: string, context: RunContext, options: CliOption
 }
 
 async function runInteractive(context: RunContext, options: CliOptions): Promise<void> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+  const interactive = createInteractiveReadline();
+  if (!interactive) throw new Error("missing prompt");
+  const { rl } = interactive;
   let sessionId = options.sessionId;
   let continueLatest = options.continueLatest;
   let resumeLatest = options.resumeLatest;
@@ -436,7 +494,7 @@ async function runInteractive(context: RunContext, options: CliOptions): Promise
       }
     }
   } finally {
-    rl.close();
+    interactive.close();
   }
 }
 
@@ -560,7 +618,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const prompt = await readStdinIfNeeded(options.promptParts);
+  const { prompt, readFromStdin } = await readStdinIfNeeded(options.promptParts);
   const sessionModes = [options.continueLatest, options.resumeLatest, Boolean(options.sessionId), Boolean(options.forkSessionId)].filter(Boolean);
   if (sessionModes.length > 1) {
     throw new Error("--continue, --resume, --session, and --fork are mutually exclusive");
@@ -578,7 +636,7 @@ async function main(): Promise<void> {
   };
 
   if (!prompt) {
-    if (process.stdin.isTTY && !options.jsonl) {
+    if (!options.jsonl && !readFromStdin) {
       await runInteractive(context, options);
       return;
     }
