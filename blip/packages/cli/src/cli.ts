@@ -1,8 +1,6 @@
 #!/usr/bin/env node
 import {
   closeSync,
-  createReadStream,
-  createWriteStream,
   existsSync,
   fstatSync,
   mkdirSync,
@@ -14,6 +12,7 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { createInterface } from "node:readline/promises";
+import { ReadStream as TtyReadStream, WriteStream as TtyWriteStream } from "node:tty";
 import { defaultToolProfile, compactSession, runBlipTask, SessionStore, type BlipRuntimeEvent } from "@blip/core";
 import type { PermissionMode, ToolProfile } from "@blip/tools";
 import { getModels } from "@mariozechner/pi-ai";
@@ -100,7 +99,7 @@ Options:
 
 Interactive:
   Run "blip" with no prompt to open an interactive session.
-  Commands: /model [id|provider/id], /clones on|off, /exit, /quit
+  Commands: /model [id|provider/id], /reasoning [level], /clones on|off, /exit, /quit
 
 Environment:
   BLIP_PROVIDER              Default provider
@@ -480,9 +479,127 @@ type RunContext = {
 
 type InteractiveReadline = {
   rl: ReturnType<typeof createInterface>;
+  input: NodeJS.ReadableStream;
+  output: NodeJS.WritableStream;
   write: (text: string) => void;
   close: () => void;
 };
+
+type SelectChoice<T extends string> = {
+  name: string;
+  value: T;
+  short?: string;
+};
+
+function resetInteractiveReadline(interactive: InteractiveReadline): void {
+  interactive.rl = createInterface({
+    input: interactive.input as NodeJS.ReadableStream,
+    output: interactive.output as NodeJS.WritableStream,
+    terminal: true,
+  });
+}
+
+function renderSelectPrompt<T extends string>(
+  output: NodeJS.WritableStream,
+  message: string,
+  choices: SelectChoice<T>[],
+  selectedIndex: number,
+  rendered: boolean,
+): void {
+  if (rendered && supportsAnsi()) output.write(`\x1b[${choices.length + 1}A\r\x1b[J`);
+  output.write(`? ${message} ${gray("(Use arrow keys)")}\n`);
+  for (let index = 0; index < choices.length; index += 1) {
+    const choice = choices[index];
+    const prefix = index === selectedIndex ? "❯" : " ";
+    const label = index === selectedIndex ? green(choice.name) : choice.name;
+    output.write(`${prefix} ${label}\n`);
+  }
+}
+
+function clearSelectPrompt(output: NodeJS.WritableStream, lineCount: number): void {
+  if (!supportsAnsi()) return;
+  output.write(`\x1b[${lineCount}A\r\x1b[J`);
+}
+
+async function promptList<T extends string>(
+  interactive: InteractiveReadline,
+  message: string,
+  choices: SelectChoice<T>[],
+  defaultValue: T | undefined,
+): Promise<T> {
+  if (choices.length === 0) throw new Error("no choices available");
+  interactive.rl.close();
+  const input = interactive.input as NodeJS.ReadStream & {
+    isRaw?: boolean;
+    setRawMode?: (mode: boolean) => void;
+  };
+  const output = interactive.output;
+  const initialIndex = defaultValue ? choices.findIndex((choice) => choice.value === defaultValue) : -1;
+  let selectedIndex = initialIndex >= 0 ? initialIndex : 0;
+  let rendered = false;
+  let pendingSequence = "";
+  const wasRaw = Boolean(input.isRaw);
+
+  return await new Promise<T>((resolve, reject) => {
+    const cleanup = () => {
+      input.off("data", onData);
+      if (input.setRawMode) input.setRawMode(wasRaw);
+      clearSelectPrompt(output, choices.length + 1);
+      resetInteractiveReadline(interactive);
+    };
+    const finish = (value: T) => {
+      cleanup();
+      resolve(value);
+    };
+    const cancel = () => {
+      cleanup();
+      reject(new Error("selection cancelled"));
+    };
+    const move = (offset: number) => {
+      selectedIndex = (selectedIndex + offset + choices.length) % choices.length;
+      renderSelectPrompt(output, message, choices, selectedIndex, rendered);
+      rendered = true;
+    };
+    const onData = (chunk: Buffer) => {
+      const text = pendingSequence + chunk.toString("utf8");
+      pendingSequence = "";
+      for (let index = 0; index < text.length; index += 1) {
+        const tail = text.slice(index);
+        if (tail.startsWith("\x1b") && tail.length < 3) {
+          pendingSequence = tail;
+          return;
+        } else if (tail.startsWith("\x1b[A") || tail.startsWith("\x1bOA")) {
+          move(-1);
+          index += 2;
+        } else if (tail.startsWith("\x1b[B") || tail.startsWith("\x1bOB")) {
+          move(1);
+          index += 2;
+        } else if (text[index] === "k") {
+          move(-1);
+        } else if (text[index] === "j") {
+          move(1);
+        } else if (text[index] === "\r" || text[index] === "\n") {
+          finish(choices[selectedIndex]!.value);
+          return;
+        } else if (text[index] === "\x03" || text[index] === "\x1b") {
+          cancel();
+          return;
+        }
+      }
+    };
+
+    try {
+      if (input.setRawMode) input.setRawMode(true);
+      input.resume();
+      input.on("data", onData);
+      renderSelectPrompt(output, message, choices, selectedIndex, rendered);
+      rendered = true;
+    } catch (error) {
+      cleanup();
+      reject(error);
+    }
+  });
+}
 
 function formatModelLabel(provider: string, model: string): string {
   return provider === DEFAULT_PROVIDER ? model : `${provider}/${model}`;
@@ -513,7 +630,7 @@ function renderInteractiveHeader(context: RunContext, write: (text: string) => v
   line(`${gray("clones:")}    ${green(clones)}  ${cyan("/clones")} ${gray("to change")}`);
   line(`${gray("directory:")} ${cyan(directory)}`);
   write(`${dim(`╰${"─".repeat(width + 2)}╯`)}\n\n`);
-  write(`${bold("Tip:")} ${gray("Use /model to switch models, /clones to toggle clones, /exit to quit.")}\n\n`);
+  write(`${bold("Tip:")} ${gray("Use /model to switch models, /reasoning to change reasoning, /clones to toggle clones, /exit to quit.")}\n\n`);
 }
 
 function clearSubmittedPromptLine(write: (text: string) => void): void {
@@ -616,7 +733,13 @@ function createInteractiveRenderer(
 function createInteractiveReadline(): InteractiveReadline | null {
   if (process.stdin.isTTY) {
     const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-    return { rl, write: (text) => process.stdout.write(text), close: () => rl.close() };
+    return {
+      rl,
+      input: process.stdin,
+      output: process.stdout,
+      write: (text) => process.stdout.write(text),
+      close: () => rl.close(),
+    };
   }
 
   if (process.platform === "win32") return null;
@@ -626,16 +749,18 @@ function createInteractiveReadline(): InteractiveReadline | null {
   try {
     inputFd = openSync("/dev/tty", "r");
     outputFd = openSync("/dev/tty", "w");
-    const input = createReadStream("/dev/tty", { fd: inputFd, autoClose: true });
-    const output = createWriteStream("/dev/tty", { fd: outputFd, autoClose: true });
+    const input = new TtyReadStream(inputFd);
+    const output = new TtyWriteStream(outputFd);
     const rl = createInterface({ input, output, terminal: true });
     return {
       rl,
+      input,
+      output,
       write: (text) => output.write(text),
       close() {
         rl.close();
-        input.close();
-        output.close();
+        input.destroy();
+        output.end();
       },
     };
   } catch {
@@ -671,7 +796,7 @@ async function runPrompt(prompt: string, context: RunContext, options: CliOption
 async function runInteractive(context: RunContext, options: CliOptions): Promise<void> {
   const interactive = createInteractiveReadline();
   if (!interactive) throw new Error("missing prompt");
-  const { rl, write } = interactive;
+  const { write } = interactive;
   let sessionId = options.sessionId;
   let continueLatest = options.continueLatest;
   let resumeLatest = options.resumeLatest;
@@ -683,7 +808,7 @@ async function runInteractive(context: RunContext, options: CliOptions): Promise
       let raw: string;
       try {
         prepareInputLine(write);
-        raw = await rl.question(inputLinePrefix());
+        raw = await interactive.rl.question(inputLinePrefix());
       } catch {
         break;
       }
@@ -698,7 +823,16 @@ async function runInteractive(context: RunContext, options: CliOptions): Promise
       }
       if (prompt === "/model" || prompt.startsWith("/model ")) {
         repaintSubmittedPrompt(prompt, write);
-        await chooseInteractiveModel(prompt.slice("/model".length).trim(), context, rl);
+        await chooseInteractiveModel(prompt.slice("/model".length).trim(), context, interactive);
+        continue;
+      }
+      if (prompt === "/reasoning" || prompt.startsWith("/reasoning ")) {
+        repaintSubmittedPrompt(prompt, write);
+        const changed = await chooseInteractiveReasoning(prompt.slice("/reasoning".length).trim(), context, interactive);
+        if (changed) {
+          saveDefaultModelSetup(context.provider, context.model, context.reasoning);
+          write(`${green("Default reasoning set")} ${context.reasoning}\n\n`);
+        }
         continue;
       }
       if (prompt === "/clones" || prompt.startsWith("/clones ")) {
@@ -735,7 +869,7 @@ async function runInteractive(context: RunContext, options: CliOptions): Promise
 async function chooseInteractiveModel(
   rawSelection: string,
   context: RunContext,
-  rl: ReturnType<typeof createInterface>,
+  interactive: InteractiveReadline,
 ): Promise<void> {
   let selection = rawSelection.trim();
   const models = getModels(context.provider as any);
@@ -744,14 +878,17 @@ async function chooseInteractiveModel(
       console.error(`${yellow("No known models")} for ${context.provider}. Use /model provider/model to set one directly.`);
       return;
     }
-    console.error(`${gray("current model")} ${green(formatModelLabel(context.provider, context.model))}`);
-    for (let index = 0; index < models.length; index += 1) {
-      const model = models[index];
-      const active = model.id === context.model ? " (current)" : "";
-      console.error(`${gray(String(index + 1).padStart(2, " "))}. ${model.id} ${gray(model.name || model.id)}${green(active)}`);
-    }
     try {
-      selection = (await rl.question(`${gray("model")} › `)).trim();
+      selection = await promptList(
+        interactive,
+        "model",
+        models.map((model) => ({
+          name: `${model.id}${model.name && model.name !== model.id ? ` ${gray(model.name)}` : ""}`,
+          value: model.id,
+          short: model.id,
+        })),
+        models.some((model) => model.id === context.model) ? context.model : models[0]?.id,
+      );
     } catch {
       return;
     }
@@ -778,7 +915,7 @@ async function chooseInteractiveModel(
 
   context.provider = next.provider;
   context.model = next.model;
-  await chooseInteractiveReasoningForModel(context, rl);
+  await chooseInteractiveReasoning("", context, interactive);
   saveDefaultModelSetup(next.provider, next.model, context.reasoning);
   console.error(`${green("Default model set")} ${formatModelLabel(next.provider, next.model)} ${gray(`with ${context.reasoning} reasoning`)}`);
 }
@@ -801,26 +938,36 @@ function chooseInteractiveClones(rawSelection: string, context: RunContext): voi
   console.error(`Blip clones ${clonesEnabled ? "enabled" : "disabled"}`);
 }
 
-async function chooseInteractiveReasoningForModel(
+async function chooseInteractiveReasoning(
+  rawSelection: string,
   context: RunContext,
-  rl: ReturnType<typeof createInterface>,
-): Promise<void> {
-  console.error(`${gray("reasoning levels")} ${REASONING_LEVELS.join(", ")}`);
-  while (true) {
-    let selection = "";
-    try {
-      selection = (await rl.question(`${gray(`reasoning [${context.reasoning}]`)} › `)).trim();
-    } catch {
-      return;
-    }
-    if (!selection) return;
-
+  interactive: InteractiveReadline,
+): Promise<boolean> {
+  const selection = rawSelection.trim();
+  if (selection) {
     try {
       context.reasoning = parseReasoning(selection);
-      return;
+      return true;
     } catch {
       console.error(`${red("Unknown reasoning level:")} ${selection}`);
+      return false;
     }
+  }
+
+  try {
+    context.reasoning = await promptList(
+      interactive,
+      "reasoning",
+      REASONING_LEVELS.map((level) => ({
+        name: `${level}${level === context.reasoning ? ` ${green("(current)")}` : ""}`,
+        value: level,
+        short: level,
+      })),
+      context.reasoning,
+    );
+    return true;
+  } catch {
+    return false;
   }
 }
 

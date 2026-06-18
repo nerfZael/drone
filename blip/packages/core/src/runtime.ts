@@ -277,7 +277,7 @@ async function runCloneSession(input: {
       messages,
     },
     sessionId: clone.id,
-    toolExecution: "sequential",
+    toolExecution: "parallel",
     getApiKey: input.getApiKey,
   });
 
@@ -369,7 +369,6 @@ function createClonesTool(input: {
         description: "Clone tasks to run in parallel.",
       }),
     }),
-    executionMode: "sequential",
     async execute(toolCallId, params: any) {
       const tasks = normalizeCloneTasks(params);
       const results = await Promise.all(
@@ -467,7 +466,7 @@ export async function runBlipTask(options: RunBlipOptions, onEvent?: RuntimeSink
       messages,
     },
     sessionId: session.id,
-    toolExecution: "sequential",
+    toolExecution: "parallel",
     getApiKey: options.getApiKey,
   });
 

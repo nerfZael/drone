@@ -5,6 +5,7 @@ import path from "node:path";
 import { Type } from "@mariozechner/pi-ai";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { createApplyPatchTool } from "./apply-patch.js";
+import { withMutationLocks } from "./mutation-locks.js";
 import { assertWorkspacePath, clampInt, isLikelyBinary, toWorkspaceRelative, truncateText } from "./path-utils.js";
 import { textResult } from "./result.js";
 import type { BlipTool, BlipToolContext, ToolProfile } from "./types.js";
@@ -259,7 +260,6 @@ export function createBashTool(context: BlipToolContext): BlipTool {
       cwd: Type.Optional(Type.String({ description: "Workspace-relative working directory." })),
       timeoutMs: Type.Optional(Type.Number({ minimum: 1000, description: "Timeout in milliseconds." })),
     }),
-    executionMode: "sequential",
     async execute(_toolCallId, params: any, signal) {
       if (context.profile !== "local-trusted-write") throw new Error("bash is only available in local-trusted-write");
       const cwd = assertWorkspacePath(context.workspaceRoot, params.cwd ?? ".");
@@ -295,24 +295,25 @@ export function createWriteFileTool(context: BlipToolContext): BlipTool {
       mode: Type.Union([Type.Literal("create"), Type.Literal("overwrite")]),
       baseHash: Type.Optional(Type.String({ description: "Optional previous sha256 hash." })),
     }),
-    executionMode: "sequential",
     async execute(_toolCallId, params: any) {
       const target = assertWorkspacePath(context.workspaceRoot, params.path);
-      let exists = true;
-      try {
-        const current = await readFile(target);
-        if (params.baseHash && hashBuffer(current) !== params.baseHash) throw new Error("baseHash does not match");
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") exists = false;
-        else throw error;
-      }
-      if (params.mode === "create" && exists) throw new Error("file already exists");
-      if (params.mode === "overwrite" && !exists) throw new Error("file does not exist");
-      if (params.mode === "create") await mkdir(path.dirname(target), { recursive: true });
-      await writeFile(target, params.content);
-      const relative = toWorkspaceRelative(context.workspaceRoot, target);
-      context.onFileOperation?.("modified", relative);
-      return textResult(`wrote ${relative}`, { path: relative, bytes: Buffer.byteLength(params.content), created: !exists });
+      return withMutationLocks([target], async () => {
+        let exists = true;
+        try {
+          const current = await readFile(target);
+          if (params.baseHash && hashBuffer(current) !== params.baseHash) throw new Error("baseHash does not match");
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") exists = false;
+          else throw error;
+        }
+        if (params.mode === "create" && exists) throw new Error("file already exists");
+        if (params.mode === "overwrite" && !exists) throw new Error("file does not exist");
+        if (params.mode === "create") await mkdir(path.dirname(target), { recursive: true });
+        await writeFile(target, params.content);
+        const relative = toWorkspaceRelative(context.workspaceRoot, target);
+        context.onFileOperation?.("modified", relative);
+        return textResult(`wrote ${relative}`, { path: relative, bytes: Buffer.byteLength(params.content), created: !exists });
+      });
     },
   });
 }
@@ -326,17 +327,18 @@ export function createDeleteFileTool(context: BlipToolContext): BlipTool {
       path: Type.String({ description: "Workspace-relative file path." }),
       baseHash: Type.Optional(Type.String({ description: "Optional current sha256 hash." })),
     }),
-    executionMode: "sequential",
     async execute(_toolCallId, params: any) {
       const target = assertWorkspacePath(context.workspaceRoot, params.path);
-      const info = await stat(target);
-      if (info.isDirectory()) throw new Error("path is a directory");
-      const current = await readFile(target);
-      if (params.baseHash && hashBuffer(current) !== params.baseHash) throw new Error("baseHash does not match");
-      await rm(target);
-      const relative = toWorkspaceRelative(context.workspaceRoot, target);
-      context.onFileOperation?.("modified", relative);
-      return textResult(`deleted ${relative}`, { path: relative, size: info.size, sha256: hashBuffer(current) });
+      return withMutationLocks([target], async () => {
+        const info = await stat(target);
+        if (info.isDirectory()) throw new Error("path is a directory");
+        const current = await readFile(target);
+        if (params.baseHash && hashBuffer(current) !== params.baseHash) throw new Error("baseHash does not match");
+        await rm(target);
+        const relative = toWorkspaceRelative(context.workspaceRoot, target);
+        context.onFileOperation?.("modified", relative);
+        return textResult(`deleted ${relative}`, { path: relative, size: info.size, sha256: hashBuffer(current) });
+      });
     },
   });
 }
@@ -350,13 +352,14 @@ export function createDirectoryTool(context: BlipToolContext): BlipTool {
       path: Type.String({ description: "Workspace-relative directory path." }),
       recursive: Type.Optional(Type.Boolean({ description: "Create missing parents." })),
     }),
-    executionMode: "sequential",
     async execute(_toolCallId, params: any) {
       const target = assertWorkspacePath(context.workspaceRoot, params.path);
-      await mkdir(target, { recursive: params.recursive === true });
-      const relative = toWorkspaceRelative(context.workspaceRoot, target);
-      context.onFileOperation?.("modified", relative);
-      return textResult(`created directory ${relative}`, { path: relative, recursive: params.recursive === true });
+      return withMutationLocks([target], async () => {
+        await mkdir(target, { recursive: params.recursive === true });
+        const relative = toWorkspaceRelative(context.workspaceRoot, target);
+        context.onFileOperation?.("modified", relative);
+        return textResult(`created directory ${relative}`, { path: relative, recursive: params.recursive === true });
+      });
     },
   });
 }
@@ -370,16 +373,17 @@ export function deleteDirectoryTool(context: BlipToolContext): BlipTool {
       path: Type.String({ description: "Workspace-relative directory path." }),
       recursive: Type.Optional(Type.Boolean({ description: "Delete non-empty directories." })),
     }),
-    executionMode: "sequential",
     async execute(_toolCallId, params: any) {
       const target = assertWorkspacePath(context.workspaceRoot, params.path);
-      const info = await stat(target);
-      if (!info.isDirectory()) throw new Error("path is not a directory");
-      if (params.recursive === true) await rm(target, { recursive: true, force: false });
-      else await rmdir(target);
-      const relative = toWorkspaceRelative(context.workspaceRoot, target);
-      context.onFileOperation?.("modified", relative);
-      return textResult(`deleted directory ${relative}`, { path: relative, recursive: params.recursive === true });
+      return withMutationLocks([target], async () => {
+        const info = await stat(target);
+        if (!info.isDirectory()) throw new Error("path is not a directory");
+        if (params.recursive === true) await rm(target, { recursive: true, force: false });
+        else await rmdir(target);
+        const relative = toWorkspaceRelative(context.workspaceRoot, target);
+        context.onFileOperation?.("modified", relative);
+        return textResult(`deleted directory ${relative}`, { path: relative, recursive: params.recursive === true });
+      });
     },
   });
 }
@@ -394,24 +398,25 @@ export function createMovePathTool(context: BlipToolContext): BlipTool {
       to: Type.String({ description: "Workspace-relative destination path." }),
       overwrite: Type.Optional(Type.Boolean({ description: "Overwrite destination if it exists." })),
     }),
-    executionMode: "sequential",
     async execute(_toolCallId, params: any) {
       const from = assertWorkspacePath(context.workspaceRoot, params.from);
       const to = assertWorkspacePath(context.workspaceRoot, params.to);
-      await stat(from);
-      try {
-        await stat(to);
-        if (params.overwrite !== true) throw new Error("destination exists");
-        await rm(to, { recursive: true, force: true });
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      }
-      await rename(from, to);
-      const fromRel = toWorkspaceRelative(context.workspaceRoot, from);
-      const toRel = toWorkspaceRelative(context.workspaceRoot, to);
-      context.onFileOperation?.("modified", fromRel);
-      context.onFileOperation?.("modified", toRel);
-      return textResult(`moved ${fromRel} -> ${toRel}`, { from: fromRel, to: toRel, overwritten: params.overwrite === true });
+      return withMutationLocks([from, to], async () => {
+        await stat(from);
+        try {
+          await stat(to);
+          if (params.overwrite !== true) throw new Error("destination exists");
+          await rm(to, { recursive: true, force: true });
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+        await rename(from, to);
+        const fromRel = toWorkspaceRelative(context.workspaceRoot, from);
+        const toRel = toWorkspaceRelative(context.workspaceRoot, to);
+        context.onFileOperation?.("modified", fromRel);
+        context.onFileOperation?.("modified", toRel);
+        return textResult(`moved ${fromRel} -> ${toRel}`, { from: fromRel, to: toRel, overwritten: params.overwrite === true });
+      });
     },
   });
 }

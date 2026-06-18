@@ -34,6 +34,17 @@ describe("Blip tools", () => {
     expect(tools).toEqual(["bash", "apply_patch", "read_file", "search_files", "list_files"]);
   });
 
+  test("profile tools do not force sequential batches", () => {
+    for (const profile of ["local-trusted-write", "read-only", "no-shell-workspace-write"] as const) {
+      const tools = createProfileTools({
+        workspaceRoot: process.cwd(),
+        permissionMode: "workspace-write",
+        profile,
+      });
+      for (const entry of tools) expect(entry.executionMode).not.toBe("sequential");
+    }
+  });
+
   test("read_file rejects workspace traversal", async () => {
     const workspace = await tempWorkspace();
     const read = tool(workspace, "read_file");
@@ -64,6 +75,20 @@ describe("Blip tools", () => {
     } as never);
 
     expect(await readFile(path.join(workspace, "src/example.txt"), "utf8")).toBe("hello\nblip");
+  });
+
+  test("same-path concurrent creates are serialized", async () => {
+    const workspace = await tempWorkspace();
+    const write = tool(workspace, "write_file");
+
+    const results = await Promise.allSettled([
+      write.execute("call_1", { path: "race.txt", content: "one", mode: "create" } as never),
+      write.execute("call_2", { path: "race.txt", content: "two", mode: "create" } as never),
+    ]);
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect(["one", "two"]).toContain(await readFile(path.join(workspace, "race.txt"), "utf8"));
   });
 
   test("search_files finds content", async () => {

@@ -52,6 +52,122 @@ describe("Blip runtime", () => {
     faux.unregister();
   });
 
+  test("executes parallel-safe tool batches concurrently", async () => {
+    const workspace = await tempWorkspace();
+    await writeFile(path.join(workspace, "alpha.txt"), "alpha\n");
+    await writeFile(path.join(workspace, "beta.txt"), "beta\n");
+    const faux = registerFauxProvider({ api: "faux", provider: "faux", tokensPerSecond: 0 });
+    faux.setResponses([
+      fauxAssistantMessage(
+        [
+          fauxToolCall("read_file", { path: "alpha.txt" }, { id: "call_alpha" }),
+          fauxToolCall("read_file", { path: "beta.txt" }, { id: "call_beta" }),
+        ],
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage("I read both files."),
+    ]);
+
+    const toolEvents: Array<{ type: string; callId: string }> = [];
+    const session = await runBlipTask(
+      {
+        prompt: "Read both files",
+        workspaceRoot: workspace,
+        provider: "faux",
+        model: faux.getModel().id,
+        permissionMode: "workspace-write",
+        toolProfile: "no-shell-workspace-write",
+      },
+      (event) => {
+        if (event.type === "tool_call_started" || event.type === "tool_call_completed") {
+          toolEvents.push({ type: event.type, callId: event.callId });
+        }
+      },
+    );
+
+    expect(toolEvents.slice(0, 2)).toEqual([
+      { type: "tool_call_started", callId: "call_alpha" },
+      { type: "tool_call_started", callId: "call_beta" },
+    ]);
+    expect(toolEvents.map((event) => event.type)).toEqual([
+      "tool_call_started",
+      "tool_call_started",
+      "tool_call_completed",
+      "tool_call_completed",
+    ]);
+    expect(session.readFiles).toEqual(["alpha.txt", "beta.txt"]);
+    faux.unregister();
+  });
+
+  test("executes bash tool batches concurrently", async () => {
+    const workspace = await tempWorkspace();
+    const faux = registerFauxProvider({ api: "faux", provider: "faux", tokensPerSecond: 0 });
+    faux.setResponses([
+      fauxAssistantMessage(
+        [
+          fauxToolCall("bash", { command: "sleep 0.4 && echo alpha" }, { id: "call_alpha" }),
+          fauxToolCall("bash", { command: "sleep 0.4 && echo beta" }, { id: "call_beta" }),
+        ],
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage("I ran both commands."),
+    ]);
+
+    const toolEvents: Array<{ type: string; callId: string }> = [];
+    const startedAt = Date.now();
+    await runBlipTask(
+      {
+        prompt: "Run both commands",
+        workspaceRoot: workspace,
+        provider: "faux",
+        model: faux.getModel().id,
+        permissionMode: "workspace-write",
+        toolProfile: "local-trusted-write",
+      },
+      (event) => {
+        if (event.type === "tool_call_started" || event.type === "tool_call_completed") {
+          toolEvents.push({ type: event.type, callId: event.callId });
+        }
+      },
+    );
+    const durationMs = Date.now() - startedAt;
+
+    expect(durationMs).toBeLessThan(750);
+    expect(toolEvents.filter((event) => event.type === "tool_call_completed")).toHaveLength(2);
+    faux.unregister();
+  });
+
+  test("executes independent mutation tool batches successfully", async () => {
+    const workspace = await tempWorkspace();
+    const faux = registerFauxProvider({ api: "faux", provider: "faux", tokensPerSecond: 0 });
+    faux.setResponses([
+      fauxAssistantMessage(
+        [
+          fauxToolCall("write_file", { path: "alpha.txt", content: "alpha\n", mode: "create" }, { id: "call_alpha" }),
+          fauxToolCall("write_file", { path: "beta.txt", content: "beta\n", mode: "create" }, { id: "call_beta" }),
+        ],
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage("I wrote both files."),
+    ]);
+
+    const session = await runBlipTask(
+      {
+        prompt: "Write both files",
+        workspaceRoot: workspace,
+        provider: "faux",
+        model: faux.getModel().id,
+        permissionMode: "workspace-write",
+        toolProfile: "no-shell-workspace-write",
+      },
+    );
+
+    expect(session.changedFiles).toEqual(["alpha.txt", "beta.txt"]);
+    expect(await readFile(path.join(workspace, "alpha.txt"), "utf8")).toBe("alpha\n");
+    expect(await readFile(path.join(workspace, "beta.txt"), "utf8")).toBe("beta\n");
+    faux.unregister();
+  });
+
   test("surfaces assistant error messages in runtime events", async () => {
     const workspace = await tempWorkspace();
     const faux = registerFauxProvider({ api: "faux", provider: "faux", tokensPerSecond: 0 });

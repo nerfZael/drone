@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Type } from "@mariozechner/pi-ai";
+import { withMutationLocks } from "./mutation-locks.js";
 import { assertWorkspacePath, toWorkspaceRelative } from "./path-utils.js";
 import { textResult } from "./result.js";
 import type { BlipTool, BlipToolContext } from "./types.js";
@@ -129,76 +130,87 @@ export function createApplyPatchTool(context: BlipToolContext): BlipTool {
       patch: Type.String({ description: "Strict patch envelope." }),
       baseHash: Type.Optional(Type.String({ description: "Optional stale workspace marker." })),
     }),
-    executionMode: "sequential",
     async execute(_toolCallId, params: any) {
       const operations = parsePatch(params.patch);
-      const planned: Array<{
-        operation: PatchOperation;
-        source?: string;
-        target?: string;
-        content?: string;
-      }> = [];
+      const lockPaths = operations.flatMap((operation) => {
+        if (operation.type === "update" && operation.moveTo) {
+          return [
+            assertWorkspacePath(context.workspaceRoot, operation.path),
+            assertWorkspacePath(context.workspaceRoot, operation.moveTo),
+          ];
+        }
+        return [assertWorkspacePath(context.workspaceRoot, operation.path)];
+      });
 
-      for (const operation of operations) {
-        if (operation.type === "add") {
-          const target = assertWorkspacePath(context.workspaceRoot, operation.path);
-          try {
-            await stat(target);
-            throw new Error(`file already exists: ${operation.path}`);
-          } catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-          }
-          planned.push({ operation, target, content: operation.lines.join("\n") });
-        } else if (operation.type === "delete") {
-          const target = assertWorkspacePath(context.workspaceRoot, operation.path);
-          const info = await stat(target);
-          if (info.isDirectory()) throw new Error(`Delete File target is a directory: ${operation.path}`);
-          planned.push({ operation, target });
-        } else {
-          const source = assertWorkspacePath(context.workspaceRoot, operation.path);
-          const current = await readFile(source, "utf8");
-          const content = operation.hunks.length > 0 ? applyHunks(current, operation.hunks, operation.path) : current;
-          const target = operation.moveTo ? assertWorkspacePath(context.workspaceRoot, operation.moveTo) : source;
-          if (operation.moveTo) {
+      return withMutationLocks(lockPaths, async () => {
+        const planned: Array<{
+          operation: PatchOperation;
+          source?: string;
+          target?: string;
+          content?: string;
+        }> = [];
+
+        for (const operation of operations) {
+          if (operation.type === "add") {
+            const target = assertWorkspacePath(context.workspaceRoot, operation.path);
             try {
               await stat(target);
-              throw new Error(`move destination exists: ${operation.moveTo}`);
+              throw new Error(`file already exists: ${operation.path}`);
             } catch (error) {
               if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
             }
+            planned.push({ operation, target, content: operation.lines.join("\n") });
+          } else if (operation.type === "delete") {
+            const target = assertWorkspacePath(context.workspaceRoot, operation.path);
+            const info = await stat(target);
+            if (info.isDirectory()) throw new Error(`Delete File target is a directory: ${operation.path}`);
+            planned.push({ operation, target });
+          } else {
+            const source = assertWorkspacePath(context.workspaceRoot, operation.path);
+            const current = await readFile(source, "utf8");
+            const content = operation.hunks.length > 0 ? applyHunks(current, operation.hunks, operation.path) : current;
+            const target = operation.moveTo ? assertWorkspacePath(context.workspaceRoot, operation.moveTo) : source;
+            if (operation.moveTo) {
+              try {
+                await stat(target);
+                throw new Error(`move destination exists: ${operation.moveTo}`);
+              } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+              }
+            }
+            planned.push({ operation, source, target, content });
           }
-          planned.push({ operation, source, target, content });
         }
-      }
 
-      const changedPaths: string[] = [];
-      for (const item of planned) {
-        if (item.operation.type === "add") {
-          if (!item.target || item.content === undefined) throw new Error("invalid planned add");
-          await mkdir(path.dirname(item.target), { recursive: true });
-          await writeFile(item.target, item.content);
-          changedPaths.push(toWorkspaceRelative(context.workspaceRoot, item.target));
-        } else if (item.operation.type === "delete") {
-          if (!item.target) throw new Error("invalid planned delete");
-          await rm(item.target);
-          changedPaths.push(toWorkspaceRelative(context.workspaceRoot, item.target));
-        } else {
-          if (!item.source || !item.target || item.content === undefined) throw new Error("invalid planned update");
-          if (item.operation.moveTo) {
+        const changedPaths: string[] = [];
+        for (const item of planned) {
+          if (item.operation.type === "add") {
+            if (!item.target || item.content === undefined) throw new Error("invalid planned add");
             await mkdir(path.dirname(item.target), { recursive: true });
-            await rename(item.source, item.target);
+            await writeFile(item.target, item.content);
+            changedPaths.push(toWorkspaceRelative(context.workspaceRoot, item.target));
+          } else if (item.operation.type === "delete") {
+            if (!item.target) throw new Error("invalid planned delete");
+            await rm(item.target);
+            changedPaths.push(toWorkspaceRelative(context.workspaceRoot, item.target));
+          } else {
+            if (!item.source || !item.target || item.content === undefined) throw new Error("invalid planned update");
+            if (item.operation.moveTo) {
+              await mkdir(path.dirname(item.target), { recursive: true });
+              await rename(item.source, item.target);
+            }
+            await writeFile(item.target, item.content);
+            changedPaths.push(toWorkspaceRelative(context.workspaceRoot, item.source));
+            changedPaths.push(toWorkspaceRelative(context.workspaceRoot, item.target));
           }
-          await writeFile(item.target, item.content);
-          changedPaths.push(toWorkspaceRelative(context.workspaceRoot, item.source));
-          changedPaths.push(toWorkspaceRelative(context.workspaceRoot, item.target));
         }
-      }
 
-      const uniqueChanged = Array.from(new Set(changedPaths));
-      for (const filePath of uniqueChanged) context.onFileOperation?.("modified", filePath);
-      return textResult(`applied patch\n${uniqueChanged.join("\n")}`, {
-        changedPaths: uniqueChanged,
-        operations: operations.map((operation) => operation.type),
+        const uniqueChanged = Array.from(new Set(changedPaths));
+        for (const filePath of uniqueChanged) context.onFileOperation?.("modified", filePath);
+        return textResult(`applied patch\n${uniqueChanged.join("\n")}`, {
+          changedPaths: uniqueChanged,
+          operations: operations.map((operation) => operation.type),
+        });
       });
     },
   };
