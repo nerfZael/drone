@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { createInterface } from "node:readline/promises";
 import { defaultToolProfile, compactSession, runBlipTask, SessionStore, type BlipRuntimeEvent } from "@blip/core";
 import type { PermissionMode, ToolProfile } from "@blip/tools";
 import { getModels } from "@mariozechner/pi-ai";
@@ -11,6 +12,12 @@ import { getOAuthApiKey, refreshOpenAICodexToken, type OAuthCredentials } from "
 const DEFAULT_PROVIDER = "openai-codex";
 const DEFAULT_MODEL = "gpt-5.3-codex";
 const OPENAI_CODEX_PROVIDER = "openai-codex";
+const BLIP_CONFIG_FILE_ENV = "BLIP_CONFIG_FILE";
+
+type CliConfig = {
+  provider?: string;
+  model?: string;
+};
 
 type CliOptions = {
   promptParts: string[];
@@ -35,6 +42,7 @@ function helpText(): string {
   return `Blip CLI coding agent
 
 Usage:
+  blip
   blip [options] "task prompt"
   blip --jsonl "task prompt"
   blip --continue "next task"
@@ -57,9 +65,14 @@ Options:
   --compact                  Compact a session
   -h, --help                 Show help
 
+Interactive:
+  Run "blip" with no prompt to open an interactive session.
+  Commands: /model [id|provider/id], /exit, /quit
+
 Environment:
   BLIP_PROVIDER              Default provider
   BLIP_MODEL                 Default model id or provider/model
+  BLIP_CONFIG_FILE           Override Blip CLI config file path
   BLIP_CODEX_AUTH_FILE       Override Codex auth file path
 `;
 }
@@ -134,15 +147,43 @@ async function readStdinIfNeeded(promptParts: string[]): Promise<string> {
   return chunks.join("").trim();
 }
 
-function resolveProviderModel(options: CliOptions): { provider: string; model: string } {
-  let provider = options.provider || process.env.BLIP_PROVIDER || DEFAULT_PROVIDER;
-  let model = options.model || process.env.BLIP_MODEL || DEFAULT_MODEL;
+function blipConfigFilePath(): string {
+  const explicit = String(process.env[BLIP_CONFIG_FILE_ENV] ?? "").trim();
+  if (explicit) return path.resolve(explicit);
+  const configHome = String(process.env.XDG_CONFIG_HOME ?? "").trim() || path.join(os.homedir(), ".config");
+  return path.join(configHome, "blip", "config.json");
+}
+
+function readCliConfig(): CliConfig {
+  const raw = readJsonFile(blipConfigFilePath());
+  if (!raw || typeof raw !== "object") return {};
+  return {
+    ...(typeof raw.provider === "string" && raw.provider.trim() ? { provider: raw.provider.trim() } : {}),
+    ...(typeof raw.model === "string" && raw.model.trim() ? { model: raw.model.trim() } : {}),
+  };
+}
+
+function saveDefaultModel(provider: string, model: string): void {
+  const current = readCliConfig();
+  writeJsonFile(blipConfigFilePath(), { ...current, provider, model });
+}
+
+function splitProviderModel(rawModel: string, fallbackProvider: string): { provider: string; model: string } {
+  let provider = fallbackProvider;
+  let model = rawModel;
   if (model.includes("/")) {
     const [modelProvider, ...rest] = model.split("/");
     provider = modelProvider;
     model = rest.join("/");
   }
   return { provider, model };
+}
+
+function resolveProviderModel(options: CliOptions): { provider: string; model: string } {
+  const config = readCliConfig();
+  const provider = options.provider || process.env.BLIP_PROVIDER || config.provider || DEFAULT_PROVIDER;
+  const model = options.model || process.env.BLIP_MODEL || config.model || DEFAULT_MODEL;
+  return splitProviderModel(model, provider);
 }
 
 function jwtExpiresAtMs(token: string): number | undefined {
@@ -186,6 +227,7 @@ function readJsonFile(filePath: string): any | null {
 
 function writeJsonFile(filePath: string, value: unknown): void {
   try {
+    mkdirSync(path.dirname(filePath), { recursive: true });
     writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
   } catch {
     // A refreshed token can still be used for this run even if persisting it fails.
@@ -303,6 +345,137 @@ function listModels(provider: string, currentModel: string): void {
   console.log(JSON.stringify({ models }, null, 2));
 }
 
+type RunContext = {
+  workspaceRoot: string;
+  provider: string;
+  model: string;
+  permissionMode: PermissionMode;
+  toolProfile: ToolProfile;
+  reasoning?: CliOptions["reasoning"];
+  getApiKey: (provider: string) => Promise<string | undefined>;
+  emit: (event: BlipRuntimeEvent) => void;
+};
+
+function formatModelLabel(provider: string, model: string): string {
+  return provider === DEFAULT_PROVIDER ? model : `${provider}/${model}`;
+}
+
+async function runPrompt(prompt: string, context: RunContext, options: CliOptions): Promise<string> {
+  const session = await runBlipTask(
+    {
+      prompt,
+      workspaceRoot: context.workspaceRoot,
+      provider: context.provider,
+      model: context.model,
+      permissionMode: context.permissionMode,
+      toolProfile: context.toolProfile,
+      sessionId: options.sessionId,
+      continueLatest: options.continueLatest,
+      resumeLatest: options.resumeLatest,
+      forkSessionId: options.forkSessionId,
+      jsonl: options.jsonl,
+      reasoning: context.reasoning,
+      getApiKey: context.getApiKey,
+    },
+    context.emit,
+  );
+  return session.id;
+}
+
+async function runInteractive(context: RunContext, options: CliOptions): Promise<void> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+  let sessionId = options.sessionId;
+  let continueLatest = options.continueLatest;
+  let resumeLatest = options.resumeLatest;
+  let forkSessionId = options.forkSessionId;
+
+  console.error(`Blip interactive (${context.provider}/${context.model}). Type /exit to quit.`);
+  try {
+    while (true) {
+      let raw: string;
+      try {
+        raw = await rl.question("blip> ");
+      } catch {
+        break;
+      }
+      const prompt = raw.trim();
+      if (!prompt) continue;
+      if (prompt === "/exit" || prompt === "/quit") break;
+      if (prompt === "/model" || prompt.startsWith("/model ")) {
+        await chooseInteractiveModel(prompt.slice("/model".length).trim(), context, rl);
+        continue;
+      }
+
+      try {
+        sessionId = await runPrompt(prompt, context, {
+          ...options,
+          sessionId,
+          continueLatest,
+          resumeLatest,
+          forkSessionId,
+        });
+        continueLatest = false;
+        resumeLatest = false;
+        forkSessionId = undefined;
+      } catch (error) {
+        console.error(error instanceof Error ? error.message : String(error));
+      }
+    }
+  } finally {
+    rl.close();
+  }
+}
+
+async function chooseInteractiveModel(
+  rawSelection: string,
+  context: RunContext,
+  rl: ReturnType<typeof createInterface>,
+): Promise<void> {
+  let selection = rawSelection.trim();
+  const models = getModels(context.provider as any);
+  if (!selection) {
+    if (models.length === 0) {
+      console.error(`No known models for ${context.provider}. Use /model provider/model to set one directly.`);
+      return;
+    }
+    console.error(`Current model: ${formatModelLabel(context.provider, context.model)}`);
+    for (let index = 0; index < models.length; index += 1) {
+      const model = models[index];
+      const active = model.id === context.model ? " (current)" : "";
+      console.error(`${index + 1}. ${model.id} - ${model.name || model.id}${active}`);
+    }
+    try {
+      selection = (await rl.question("model> ")).trim();
+    } catch {
+      return;
+    }
+    if (!selection) return;
+  }
+
+  let next: { provider: string; model: string };
+  if (/^\d+$/.test(selection) && models.length > 0) {
+    const index = Number(selection) - 1;
+    if (index < 0 || index >= models.length) {
+      console.error(`Unknown model number: ${selection}`);
+      return;
+    }
+    next = { provider: context.provider, model: models[index].id };
+  } else {
+    next = splitProviderModel(selection, context.provider);
+  }
+
+  const knownModels = getModels(next.provider as any);
+  if (knownModels.length > 0 && !knownModels.some((model) => model.id === next.model)) {
+    console.error(`Unknown model for ${next.provider}: ${next.model}`);
+    return;
+  }
+
+  context.provider = next.provider;
+  context.model = next.model;
+  saveDefaultModel(next.provider, next.model);
+  console.error(`Default model set to ${formatModelLabel(next.provider, next.model)}`);
+}
+
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) {
@@ -340,31 +513,31 @@ async function main(): Promise<void> {
   }
 
   const prompt = await readStdinIfNeeded(options.promptParts);
-  if (!prompt) throw new Error("missing prompt");
-
   const sessionModes = [options.continueLatest, options.resumeLatest, Boolean(options.sessionId), Boolean(options.forkSessionId)].filter(Boolean);
   if (sessionModes.length > 1) {
     throw new Error("--continue, --resume, --session, and --fork are mutually exclusive");
   }
 
-  await runBlipTask(
-    {
-      prompt,
-      workspaceRoot,
-      provider,
-      model,
-      permissionMode,
-      toolProfile,
-      sessionId: options.sessionId,
-      continueLatest: options.continueLatest,
-      resumeLatest: options.resumeLatest,
-      forkSessionId: options.forkSessionId,
-      jsonl: options.jsonl,
-      reasoning: options.reasoning,
-      getApiKey,
-    },
+  const context: RunContext = {
+    workspaceRoot,
+    provider,
+    model,
+    permissionMode,
+    toolProfile,
+    reasoning: options.reasoning,
+    getApiKey,
     emit,
-  );
+  };
+
+  if (!prompt) {
+    if (process.stdin.isTTY && !options.jsonl) {
+      await runInteractive(context, options);
+      return;
+    }
+    throw new Error("missing prompt");
+  }
+
+  await runPrompt(prompt, context, options);
 }
 
 main().catch((error) => {
