@@ -9,8 +9,16 @@ A session stores model settings, workspace root, permission mode, active tool pr
 Sessions live under:
 
 ```text
-.blip/sessions/<workspace-hash>/<session-id>/
+<blip-data-dir>/sessions/<workspace-hash>/<session-id>/
 ```
+
+The default data directory is platform-specific:
+
+- Linux: `$XDG_DATA_HOME/blip`, or `~/.local/share/blip` when `XDG_DATA_HOME` is unset.
+- macOS: `~/Library/Application Support/blip`.
+- Windows: `%LOCALAPPDATA%\blip`, falling back to `%APPDATA%\blip` and then `~/AppData/Local/blip`.
+
+Set `BLIP_DATA_DIR` to override the root explicitly.
 
 Each session has:
 

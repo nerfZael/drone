@@ -1,9 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { PermissionMode, ToolProfile } from "@blip/tools";
 import type { BlipRuntimeEvent, BlipSessionState, TranscriptEntry } from "./types.js";
+
+const BLIP_DATA_DIR_ENV = "BLIP_DATA_DIR";
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -17,6 +20,22 @@ function workspaceHash(workspaceRoot: string): string {
   return createHash("sha256").update(path.resolve(workspaceRoot)).digest("hex").slice(0, 16);
 }
 
+function defaultDataRoot(): string {
+  const explicit = String(process.env[BLIP_DATA_DIR_ENV] ?? "").trim();
+  if (explicit) return path.resolve(explicit);
+
+  if (process.platform === "darwin") {
+    return path.join(os.homedir(), "Library", "Application Support", "blip");
+  }
+  if (process.platform === "win32") {
+    const localAppData = String(process.env.LOCALAPPDATA ?? process.env.APPDATA ?? "").trim();
+    return path.join(localAppData || path.join(os.homedir(), "AppData", "Local"), "blip");
+  }
+
+  const xdgDataHome = String(process.env.XDG_DATA_HOME ?? "").trim();
+  return path.join(xdgDataHome || path.join(os.homedir(), ".local", "share"), "blip");
+}
+
 export class SessionStore {
   readonly workspaceRoot: string;
   readonly rootDir: string;
@@ -24,7 +43,7 @@ export class SessionStore {
 
   constructor(workspaceRoot: string) {
     this.workspaceRoot = path.resolve(workspaceRoot);
-    this.rootDir = path.join(this.workspaceRoot, ".blip", "sessions");
+    this.rootDir = path.join(defaultDataRoot(), "sessions");
     this.workspaceDir = path.join(this.rootDir, workspaceHash(this.workspaceRoot));
   }
 
