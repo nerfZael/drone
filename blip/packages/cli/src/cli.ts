@@ -211,10 +211,6 @@ function visibleLength(text: string): number {
   return text.replace(/\x1b\[[0-9;]*m/g, "").length;
 }
 
-function terminalColumns(): number {
-  return Math.max(20, process.stdout.columns || 80);
-}
-
 async function readStdinIfNeeded(promptParts: string[]): Promise<{ prompt: string; readFromStdin: boolean }> {
   const prompt = promptParts.join(" ").trim();
   if (prompt) return { prompt, readFromStdin: false };
@@ -490,9 +486,9 @@ function renderInteractiveHeader(context: RunContext, write: (text: string) => v
   write(`${bold("Tip:")} ${gray("Use /model to switch models, /exit to quit.")}\n\n`);
 }
 
-function clearCurrentTerminalLine(write: (text: string) => void): void {
-  if (process.env.TERM === "dumb") return;
-  write(`${ANSI.reset}\r\x1b[2K`);
+function clearSubmittedPromptLine(write: (text: string) => void): void {
+  if (!supportsAnsi()) return;
+  write(`${ANSI.reset}\x1b[1A\r\x1b[2K`);
 }
 
 function inputLinePrefix(): string {
@@ -502,22 +498,24 @@ function inputLinePrefix(): string {
 
 function prepareInputLine(write: (text: string) => void): void {
   if (!supportsAnsi()) return;
-  write(`\r\x1b[2K${ANSI.inputBackground}${" ".repeat(terminalColumns())}${ANSI.reset}\r`);
+  write(`\r${ANSI.inputBackground}\x1b[2K${ANSI.reset}\r`);
 }
 
-function renderUserPromptBlock(prompt: string, write: (text: string) => void): void {
-  const lines = prompt.split(/\r?\n/);
+function renderInputRow(text: string, write: (text: string) => void): void {
   if (!supportsAnsi()) {
-    write(`› ${prompt}\n`);
+    write(`${text}\n`);
     return;
   }
+  write(`${ANSI.inputBackground}${text}\x1b[K${ANSI.reset}\n`);
+}
 
-  const columns = terminalColumns();
+function repaintSubmittedPrompt(prompt: string, write: (text: string) => void): void {
+  const lines = prompt.split(/\r?\n/);
+  if (supportsAnsi()) write(`${ANSI.reset}\x1b[1A\r\x1b[2K`);
+
   for (let index = 0; index < lines.length; index += 1) {
     const prefix = index === 0 ? foreground(ANSI.gray, "› ") : "  ";
-    const content = `${prefix}${lines[index]}`;
-    const padding = " ".repeat(Math.max(0, columns - visibleLength(content)));
-    write(`${ANSI.inputBackground}${content}${padding}${ANSI.reset}\n`);
+    renderInputRow(`${prefix}${lines[index]}`, write);
   }
 }
 
@@ -658,15 +656,21 @@ async function runInteractive(context: RunContext, options: CliOptions): Promise
       } catch {
         break;
       }
-      clearCurrentTerminalLine(write);
       const prompt = raw.trim();
-      if (!prompt) continue;
-      if (prompt === "/exit" || prompt === "/quit") break;
+      if (!prompt) {
+        clearSubmittedPromptLine(write);
+        continue;
+      }
+      if (prompt === "/exit" || prompt === "/quit") {
+        clearSubmittedPromptLine(write);
+        break;
+      }
       if (prompt === "/model" || prompt.startsWith("/model ")) {
+        repaintSubmittedPrompt(prompt, write);
         await chooseInteractiveModel(prompt.slice("/model".length).trim(), context, rl);
         continue;
       }
-      renderUserPromptBlock(prompt, write);
+      repaintSubmittedPrompt(prompt, write);
 
       const renderState: InteractiveRenderState = { sawError: false };
       try {
