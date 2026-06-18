@@ -9,7 +9,9 @@ import { getSocketListenSupport } from './socket-listen-support';
 const listenSupport = getSocketListenSupport();
 const tmuxSupport = getTmuxSupport();
 if (!listenSupport.ok && process.env.CI) {
-  throw new Error(`prompt daemon transcript tests require local socket binding support: ${listenSupport.detail}`);
+  throw new Error(
+    `prompt daemon transcript tests require local socket binding support: ${listenSupport.detail}`,
+  );
 }
 if (!tmuxSupport.ok && process.env.CI) {
   throw new Error(`prompt daemon transcript tests require tmux: ${tmuxSupport.detail}`);
@@ -32,10 +34,17 @@ function getTmuxSupport(): { ok: boolean; detail: string } {
     timeout: 5000,
   });
   if (result.status === 0) return { ok: true, detail: '' };
-  const detail = [String(result.stdout ?? '').trim(), String(result.stderr ?? '').trim(), result.error?.message ?? '']
+  const detail = [
+    String(result.stdout ?? '').trim(),
+    String(result.stderr ?? '').trim(),
+    result.error?.message ?? '',
+  ]
     .filter(Boolean)
     .join(' | ');
-  return { ok: false, detail: detail || `tmux -V exited with status ${String(result.status ?? 'unknown')}` };
+  return {
+    ok: false,
+    detail: detail || `tmux -V exited with status ${String(result.status ?? 'unknown')}`,
+  };
 }
 
 async function allocatePort(): Promise<number> {
@@ -61,7 +70,7 @@ async function allocatePort(): Promise<number> {
 async function waitForHealth(baseUrl: string, token: string, daemon: ReturnType<typeof Bun.spawn>) {
   const startedAt = Date.now();
   let lastError = '';
-  while (Date.now() - startedAt < 10_000) {
+  while (Date.now() - startedAt < 15_000) {
     try {
       const response = await fetch(`${baseUrl}/v1/health`, {
         headers: { authorization: `Bearer ${token}` },
@@ -88,24 +97,33 @@ async function waitForPromptJob(baseUrl: string, token: string, id: string): Pro
     lastJob = data?.job ?? data;
     if (lastJob?.state === 'done') return lastJob;
     if (lastJob?.state === 'failed') {
-      throw new Error(`prompt job failed: ${String(lastJob?.error ?? lastJob?.stderr ?? 'unknown error')}`);
+      throw new Error(
+        `prompt job failed: ${String(lastJob?.error ?? lastJob?.stderr ?? 'unknown error')}`,
+      );
     }
     await Bun.sleep(150);
   }
   throw new Error(`timed out waiting for prompt job ${id}: ${JSON.stringify(lastJob)}`);
 }
 
-async function waitForRunningPromptJob(baseUrl: string, token: string, id: string, predicate: (job: any) => boolean): Promise<any> {
+async function waitForRunningPromptJob(
+  baseUrl: string,
+  token: string,
+  id: string,
+  predicate: (job: any) => boolean,
+): Promise<any> {
   const startedAt = Date.now();
   let lastJob: any = null;
-  while (Date.now() - startedAt < 10_000) {
+  while (Date.now() - startedAt < 15_000) {
     const response = await fetch(`${baseUrl}/v1/prompts/${encodeURIComponent(id)}`, {
       headers: { authorization: `Bearer ${token}` },
     });
     const data: any = await response.json();
     lastJob = data?.job ?? data;
     if (lastJob?.state === 'failed') {
-      throw new Error(`prompt job failed: ${String(lastJob?.error ?? lastJob?.stderr ?? 'unknown error')}`);
+      throw new Error(
+        `prompt job failed: ${String(lastJob?.error ?? lastJob?.stderr ?? 'unknown error')}`,
+      );
     }
     if (lastJob?.state === 'running' && predicate(lastJob)) return lastJob;
     await Bun.sleep(100);
@@ -125,16 +143,14 @@ describeRuntimeSuite('prompt daemon transcripts', () => {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   });
 
-  test(
-    'persists the final Codex transcript message when stored stdout is truncated',
-    async () => {
-      const port = await allocatePort();
-      const dataDir = path.join(tempRoot, `daemon-${port}`);
-      fs.mkdirSync(dataDir, { recursive: true });
-      const scriptPath = path.join(tempRoot, `large-codex-jsonl-${port}.js`);
-      fs.writeFileSync(
-        scriptPath,
-        `
+  test('persists the final Codex transcript message when stored stdout is truncated', async () => {
+    const port = await allocatePort();
+    const dataDir = path.join(tempRoot, `daemon-${port}`);
+    fs.mkdirSync(dataDir, { recursive: true });
+    const scriptPath = path.join(tempRoot, `large-codex-jsonl-${port}.js`);
+    fs.writeFileSync(
+      scriptPath,
+      `
 const filler = 'x'.repeat(2 * 1024 * 1024 + 1024);
 console.log(JSON.stringify({ type: 'thread.started', thread_id: '019e1922-047b-74b1-bab8-0eaceadf4062' }));
 console.log(JSON.stringify({ type: 'item.completed', item: { id: 'item_1', type: 'agent_message', text: 'Interim status.' } }));
@@ -142,60 +158,70 @@ console.log(JSON.stringify({ type: 'item.completed', item: { id: 'tool_1', type:
 console.log(JSON.stringify({ type: 'item.completed', item: { id: 'item_2', type: 'agent_message', text: 'Final report.' } }));
 console.log(JSON.stringify({ type: 'turn.completed' }));
 `,
-        'utf8',
-      );
+      'utf8',
+    );
 
-      const token = 'daemon-token';
-      const daemon = Bun.spawn([process.execPath, daemonEntry, '--host', '127.0.0.1', '--port', String(port), '--data-dir', dataDir, '--token', token], {
+    const token = 'daemon-token';
+    const daemon = Bun.spawn(
+      [
+        process.execPath,
+        daemonEntry,
+        '--host',
+        '127.0.0.1',
+        '--port',
+        String(port),
+        '--data-dir',
+        dataDir,
+        '--token',
+        token,
+      ],
+      {
         cwd: process.cwd(),
         stdout: 'ignore',
         stderr: 'pipe',
-      });
-      processes.push(daemon);
-      const baseUrl = `http://127.0.0.1:${port}`;
-      await waitForHealth(baseUrl, token, daemon);
+      },
+    );
+    processes.push(daemon);
+    const baseUrl = `http://127.0.0.1:${port}`;
+    await waitForHealth(baseUrl, token, daemon);
 
-      const id = `large-codex-jsonl-${port}`;
-      const enqueue = await fetch(`${baseUrl}/v1/prompts/enqueue`, {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${token}`,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({ id, kind: 'codex', cmd: process.execPath, args: [scriptPath] }),
-      });
-      expect(enqueue.status).toBe(202);
+    const id = `large-codex-jsonl-${port}`;
+    const enqueue = await fetch(`${baseUrl}/v1/prompts/enqueue`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ id, kind: 'codex', cmd: process.execPath, args: [scriptPath] }),
+    });
+    expect(enqueue.status).toBe(202);
 
-      const job = await waitForPromptJob(baseUrl, token, id);
-      expect(job.exitStatusSource).toBe('exit-file');
-      expect(String(job.wrapperLog ?? '')).toContain('prompt wrapper: command exited');
-      expect(job.stdoutTruncated).toBe(true);
-      expect(job.stdoutBytes).toBeGreaterThan(2 * 1024 * 1024);
-      expect(String(job.stdout ?? '')).toContain('Interim status.');
-      expect(String(job.stdout ?? '')).toContain('truncated');
-      expect(String(job.stdout ?? '')).not.toContain('Final report.');
-      expect(job.transcript).toMatchObject({
-        kind: 'codex',
-        threadId: '019e1922-047b-74b1-bab8-0eaceadf4062',
-        message: 'Final report.',
-        terminalEvent: 'turn.completed',
-        stdoutTruncated: true,
-      });
-      expect(job.transcript.stdoutBytes).toBe(job.stdoutBytes);
-    },
-    20_000,
-  );
+    const job = await waitForPromptJob(baseUrl, token, id);
+    expect(job.exitStatusSource).toBe('exit-file');
+    expect(String(job.wrapperLog ?? '')).toContain('prompt wrapper: command exited');
+    expect(job.stdoutTruncated).toBe(true);
+    expect(job.stdoutBytes).toBeGreaterThan(2 * 1024 * 1024);
+    expect(String(job.stdout ?? '')).toContain('Interim status.');
+    expect(String(job.stdout ?? '')).toContain('truncated');
+    expect(String(job.stdout ?? '')).not.toContain('Final report.');
+    expect(job.transcript).toMatchObject({
+      kind: 'codex',
+      threadId: '019e1922-047b-74b1-bab8-0eaceadf4062',
+      message: 'Final report.',
+      terminalEvent: 'turn.completed',
+      stdoutTruncated: true,
+    });
+    expect(job.transcript.stdoutBytes).toBe(job.stdoutBytes);
+  }, 20_000);
 
-  test(
-    'persists the final Blip transcript message when stored stdout is truncated',
-    async () => {
-      const port = await allocatePort();
-      const dataDir = path.join(tempRoot, `daemon-${port}`);
-      fs.mkdirSync(dataDir, { recursive: true });
-      const scriptPath = path.join(tempRoot, `large-blip-jsonl-${port}.js`);
-      fs.writeFileSync(
-        scriptPath,
-        `
+  test('persists the final Blip transcript message when stored stdout is truncated', async () => {
+    const port = await allocatePort();
+    const dataDir = path.join(tempRoot, `daemon-${port}`);
+    fs.mkdirSync(dataDir, { recursive: true });
+    const scriptPath = path.join(tempRoot, `large-blip-jsonl-${port}.js`);
+    fs.writeFileSync(
+      scriptPath,
+      `
 const filler = 'x'.repeat(2 * 1024 * 1024 + 1024);
 console.log(JSON.stringify({ type: 'session_started', sessionId: 'blip-session-1' }));
 console.log(JSON.stringify({ type: 'assistant_message', sessionId: 'blip-session-1', text: 'Interim status.' }));
@@ -203,112 +229,226 @@ console.log(JSON.stringify({ type: 'tool_result', sessionId: 'blip-session-1', t
 console.log(JSON.stringify({ type: 'assistant_message', sessionId: 'blip-session-1', text: 'Final Blip report.' }));
 console.log(JSON.stringify({ type: 'session_finished', sessionId: 'blip-session-1' }));
 `,
-        'utf8',
-      );
+      'utf8',
+    );
 
-      const token = 'daemon-token';
-      const daemon = Bun.spawn([process.execPath, daemonEntry, '--host', '127.0.0.1', '--port', String(port), '--data-dir', dataDir, '--token', token], {
+    const token = 'daemon-token';
+    const daemon = Bun.spawn(
+      [
+        process.execPath,
+        daemonEntry,
+        '--host',
+        '127.0.0.1',
+        '--port',
+        String(port),
+        '--data-dir',
+        dataDir,
+        '--token',
+        token,
+      ],
+      {
         cwd: process.cwd(),
         stdout: 'ignore',
         stderr: 'pipe',
-      });
-      processes.push(daemon);
-      const baseUrl = `http://127.0.0.1:${port}`;
-      await waitForHealth(baseUrl, token, daemon);
+      },
+    );
+    processes.push(daemon);
+    const baseUrl = `http://127.0.0.1:${port}`;
+    await waitForHealth(baseUrl, token, daemon);
 
-      const id = `large-blip-jsonl-${port}`;
-      const enqueue = await fetch(`${baseUrl}/v1/prompts/enqueue`, {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${token}`,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({ id, kind: 'blip', cmd: process.execPath, args: [scriptPath] }),
-      });
-      expect(enqueue.status).toBe(202);
+    const id = `large-blip-jsonl-${port}`;
+    const enqueue = await fetch(`${baseUrl}/v1/prompts/enqueue`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ id, kind: 'blip', cmd: process.execPath, args: [scriptPath] }),
+    });
+    expect(enqueue.status).toBe(202);
 
-      const job = await waitForPromptJob(baseUrl, token, id);
-      expect(job.exitStatusSource).toBe('exit-file');
-      expect(job.stdoutTruncated).toBe(true);
-      expect(String(job.stdout ?? '')).toContain('Interim status.');
-      expect(String(job.stdout ?? '')).not.toContain('Final Blip report.');
-      expect(job.transcript).toMatchObject({
-        kind: 'blip',
-        sessionId: 'blip-session-1',
-        message: 'Final Blip report.',
-        terminalEvent: 'session_finished',
-        stdoutTruncated: true,
-      });
-      expect(job.transcript.stdoutBytes).toBe(job.stdoutBytes);
-    },
-    20_000,
-  );
+    const job = await waitForPromptJob(baseUrl, token, id);
+    expect(job.exitStatusSource).toBe('exit-file');
+    expect(job.stdoutTruncated).toBe(true);
+    expect(String(job.stdout ?? '')).toContain('Interim status.');
+    expect(String(job.stdout ?? '')).not.toContain('Final Blip report.');
+    expect(job.transcript).toMatchObject({
+      kind: 'blip',
+      sessionId: 'blip-session-1',
+      message: 'Final Blip report.',
+      terminalEvent: 'session_finished',
+      stdoutTruncated: true,
+    });
+    expect(job.transcript.stdoutBytes).toBe(job.stdoutBytes);
+  }, 20_000);
 
-  test(
-    'returns live Blip clone activity while a prompt job is still running',
-    async () => {
-      const port = await allocatePort();
-      const dataDir = path.join(tempRoot, `daemon-${port}`);
-      fs.mkdirSync(dataDir, { recursive: true });
-      const scriptPath = path.join(tempRoot, `running-blip-clones-${port}.sh`);
-      fs.writeFileSync(
-        scriptPath,
-        `
+  test('records Blip terminal-to-wrapper lag when the command keeps running after session_finished', async () => {
+    const port = await allocatePort();
+    const dataDir = path.join(tempRoot, `daemon-${port}`);
+    fs.mkdirSync(dataDir, { recursive: true });
+    const scriptPath = path.join(tempRoot, `blip-terminal-lag-${port}.js`);
+    fs.writeFileSync(
+      scriptPath,
+      `
+function emit(event) {
+  console.log(JSON.stringify(event));
+}
+
+(async () => {
+  emit({ type: 'session_started', sessionId: 'blip-session-lag', timestamp: new Date().toISOString() });
+  emit({ type: 'assistant_message', sessionId: 'blip-session-lag', timestamp: new Date().toISOString(), text: 'Done.' });
+  emit({
+    type: 'session_finished',
+    sessionId: 'blip-session-lag',
+    timestamp: new Date().toISOString(),
+    status: 'completed',
+    durationMs: 50,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 1600));
+})();
+`,
+      'utf8',
+    );
+
+    const token = 'daemon-token';
+    const daemon = Bun.spawn(
+      [
+        process.execPath,
+        daemonEntry,
+        '--host',
+        '127.0.0.1',
+        '--port',
+        String(port),
+        '--data-dir',
+        dataDir,
+        '--token',
+        token,
+      ],
+      {
+        cwd: process.cwd(),
+        stdout: 'ignore',
+        stderr: 'pipe',
+      },
+    );
+    processes.push(daemon);
+    const baseUrl = `http://127.0.0.1:${port}`;
+    await waitForHealth(baseUrl, token, daemon);
+
+    const id = `blip-terminal-lag-${port}`;
+    const enqueue = await fetch(`${baseUrl}/v1/prompts/enqueue`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ id, kind: 'blip', cmd: process.execPath, args: [scriptPath] }),
+    });
+    expect(enqueue.status).toBe(202);
+
+    const job = await waitForPromptJob(baseUrl, token, id);
+    expect(job.transcript).toMatchObject({
+      kind: 'blip',
+      sessionId: 'blip-session-lag',
+      message: 'Done.',
+      terminalEvent: 'session_finished',
+      terminalStatus: 'completed',
+      durationMs: 50,
+      eventCounts: {
+        session_started: 1,
+        assistant_message: 1,
+        session_finished: 1,
+      },
+    });
+    expect(typeof job.transcript.terminalEventAt).toBe('string');
+    expect(job.diagnostics).toMatchObject({
+      transcriptTerminalEventAt: job.transcript.terminalEventAt,
+      transcriptParsedAt: job.transcript.parsedAt,
+    });
+    expect(job.diagnostics.transcriptTerminalEventLagMs).toBeGreaterThanOrEqual(900);
+    expect(job.diagnostics.wrapperExitAfterTranscriptTerminalMs).toBeGreaterThanOrEqual(500);
+    expect(job.diagnostics.wrapperRuntimeMs).toBeGreaterThanOrEqual(500);
+  }, 20_000);
+
+  test('returns live Blip clone activity while a prompt job is still running', async () => {
+    const port = await allocatePort();
+    const dataDir = path.join(tempRoot, `daemon-${port}`);
+    fs.mkdirSync(dataDir, { recursive: true });
+    const scriptPath = path.join(tempRoot, `running-blip-clones-${port}.sh`);
+    fs.writeFileSync(
+      scriptPath,
+      `
 #!/usr/bin/env bash
 set -euo pipefail
-printf '%s\n' '{"type":"session_started","sessionId":"blip-session-running"}'
-printf '%s\n' '{"type":"tool_call_started","sessionId":"blip-session-running","callId":"call_clones","tool":"create_clones","args":{"tasks":["build cli app one","build cli app two","build cli app three"]}}'
-sleep 5
-printf '%s\n' '{"type":"tool_call_completed","sessionId":"blip-session-running","callId":"call_clones","tool":"create_clones","result":{"maxClones":8,"clones":[]}}'
-printf '%s\n' '{"type":"assistant_message","sessionId":"blip-session-running","text":"Done."}'
-printf '%s\n' '{"type":"session_finished","sessionId":"blip-session-running"}'
+/usr/bin/env printf '%s\n' '{"type":"session_started","sessionId":"blip-session-running"}'
+/usr/bin/env printf '%s\n' '{"type":"tool_call_started","sessionId":"blip-session-running","callId":"call_clones","tool":"create_clones","args":{"tasks":["build cli app one","build cli app two","build cli app three"]}}'
+sleep 8
+/usr/bin/env printf '%s\n' '{"type":"tool_call_completed","sessionId":"blip-session-running","callId":"call_clones","tool":"create_clones","result":{"maxClones":8,"clones":[]}}'
+/usr/bin/env printf '%s\n' '{"type":"assistant_message","sessionId":"blip-session-running","text":"Done."}'
+/usr/bin/env printf '%s\n' '{"type":"session_finished","sessionId":"blip-session-running"}'
 `,
-        'utf8',
-      );
-      fs.chmodSync(scriptPath, 0o700);
+      'utf8',
+    );
+    fs.chmodSync(scriptPath, 0o700);
 
-      const token = 'daemon-token';
-      const daemon = Bun.spawn([process.execPath, daemonEntry, '--host', '127.0.0.1', '--port', String(port), '--data-dir', dataDir, '--token', token], {
+    const token = 'daemon-token';
+    const daemon = Bun.spawn(
+      [
+        process.execPath,
+        daemonEntry,
+        '--host',
+        '127.0.0.1',
+        '--port',
+        String(port),
+        '--data-dir',
+        dataDir,
+        '--token',
+        token,
+      ],
+      {
         cwd: process.cwd(),
         stdout: 'ignore',
         stderr: 'pipe',
-      });
-      processes.push(daemon);
-      const baseUrl = `http://127.0.0.1:${port}`;
-      await waitForHealth(baseUrl, token, daemon);
+      },
+    );
+    processes.push(daemon);
+    const baseUrl = `http://127.0.0.1:${port}`;
+    await waitForHealth(baseUrl, token, daemon);
 
-      const id = `running-blip-clones-${port}`;
-      const enqueue = await fetch(`${baseUrl}/v1/prompts/enqueue`, {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${token}`,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({ id, kind: 'blip', cmd: '/bin/bash', args: [scriptPath] }),
-      });
-      expect(enqueue.status).toBe(202);
+    const id = `running-blip-clones-${port}`;
+    const enqueue = await fetch(`${baseUrl}/v1/prompts/enqueue`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ id, kind: 'blip', cmd: '/bin/bash', args: [scriptPath] }),
+    });
+    expect(enqueue.status).toBe(202);
 
-      const running = await waitForRunningPromptJob(baseUrl, token, id, (job) => job?.transcript?.cloneActivity?.count === 3);
-      expect(running.transcript).toMatchObject({
-        kind: 'blip',
-        sessionId: 'blip-session-running',
-        message: null,
-        cloneActivity: {
-          status: 'running',
-          count: 3,
-          tasks: ['build cli app one', 'build cli app two', 'build cli app three'],
-        },
-      });
+    const running = await waitForRunningPromptJob(
+      baseUrl,
+      token,
+      id,
+      (job) => job?.transcript?.cloneActivity?.count === 3,
+    );
+    expect(running.transcript).toMatchObject({
+      kind: 'blip',
+      sessionId: 'blip-session-running',
+      message: null,
+      cloneActivity: {
+        status: 'running',
+        count: 3,
+        tasks: ['build cli app one', 'build cli app two', 'build cli app three'],
+      },
+    });
 
-      const done = await waitForPromptJob(baseUrl, token, id);
-      expect(done.transcript).toMatchObject({
-        kind: 'blip',
-        sessionId: 'blip-session-running',
-        message: 'Done.',
-        terminalEvent: 'session_finished',
-      });
-      expect(done.transcript).not.toHaveProperty('cloneActivity');
-    },
-    20_000,
-  );
+    const done = await waitForPromptJob(baseUrl, token, id);
+    expect(done.transcript).toMatchObject({
+      kind: 'blip',
+      sessionId: 'blip-session-running',
+      message: 'Done.',
+      terminalEvent: 'session_finished',
+    });
+    expect(done.transcript).not.toHaveProperty('cloneActivity');
+  }, 25_000);
 });

@@ -42,6 +42,7 @@ Supported operations:
 - All paths are workspace-relative.
 - Parent directories are created for added files and moves.
 - Updates require matching context.
+- Missing update context errors include the expected context and nearby matching file content when available.
 - Modified files are reported to the runtime for session metadata.
 
 ## Current Gaps

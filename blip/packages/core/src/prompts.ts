@@ -9,6 +9,7 @@ Work inside the user's repository. Inspect before editing. Keep changes focused.
 const WORKFLOW = `Workflow:
 - Understand the task from the current prompt and repository context.
 - Use targeted tools to inspect files before changing them.
+- Batch independent read_file/search_files/list_files/bash calls in the same assistant turn when they can run in parallel.
 - Prefer apply_patch for code edits.
 - Use bash for local trusted CLI commands, tests, builds, and git inspection when available.
 - Do not commit or stage unless the user explicitly asks.
@@ -48,6 +49,7 @@ function permissionRules(): string {
 function cloneRules(maxClones: number): string {
   return `Clone rules:
 - Use create_clones when up to ${maxClones} independent subtasks can run in parallel.
+- If the user explicitly permits parallel work and the task has separable lanes, strongly prefer starting with create_clones.
 - Give each clone a focused task string with enough context to work alone.
 - Do not use clones for tightly coupled edits that are likely to conflict.
 - The original session waits while clones run, then receives each clone's final message as the tool result.`;
@@ -63,22 +65,9 @@ async function readOptional(pathname: string): Promise<string | undefined> {
   }
 }
 
-export async function assembleSystemPrompt(input: {
-  workspaceRoot: string;
-  toolProfile: ToolProfile;
-  clonesEnabled?: boolean;
-  maxClones?: number;
-}): Promise<string> {
+export async function assembleSystemPrompt(input: { workspaceRoot: string; toolProfile: ToolProfile; clonesEnabled?: boolean; maxClones?: number }): Promise<string> {
   const repoInstructions = await readOptional(path.join(input.workspaceRoot, "AGENTS.md"));
   const clonesEnabled = input.clonesEnabled === true;
-  const sections = [
-    IDENTITY,
-    WORKFLOW,
-    toolRules(input.toolProfile, clonesEnabled),
-    clonesEnabled ? cloneRules(input.maxClones ?? 4) : undefined,
-    PATCH_RULES,
-    permissionRules(),
-    repoInstructions ? `Repository instructions from AGENTS.md:\n${repoInstructions}` : undefined,
-  ];
+  const sections = [IDENTITY, WORKFLOW, toolRules(input.toolProfile, clonesEnabled), clonesEnabled ? cloneRules(input.maxClones ?? 4) : undefined, PATCH_RULES, permissionRules(), repoInstructions ? `Repository instructions from AGENTS.md:\n${repoInstructions}` : undefined];
   return sections.filter(Boolean).join("\n\n");
 }

@@ -17,7 +17,10 @@ import {
   type FleetRequestState,
   type FleetRequestType,
 } from './fleet/contracts';
-import { parseBuiltinPromptJobTranscriptLines, type BuiltinPromptJobTranscript } from './hub/builtin-transcript-sessions';
+import {
+  parseBuiltinPromptJobTranscriptLines,
+  type BuiltinPromptJobTranscript,
+} from './hub/builtin-transcript-sessions';
 import { preferredTerminalSessionLogsRoot } from './host/session-logs';
 import { missingHostDependencyMessage } from './host/runtime';
 import {
@@ -50,6 +53,17 @@ type DroneState = {
 
 type PromptJobState = 'queued' | 'running' | 'done' | 'failed' | 'canceled';
 
+type PromptJobDiagnostics = {
+  transcriptTerminalEventAt?: string;
+  transcriptParsedAt?: string;
+  transcriptTerminalEventLagMs?: number;
+  wrapperStartedAt?: string;
+  wrapperCommandExitedAt?: string;
+  wrapperRuntimeMs?: number;
+  wrapperExitAfterTranscriptTerminalMs?: number;
+  jobRuntimeMs?: number;
+};
+
 type PromptJob = {
   id: string;
   kind: string;
@@ -79,6 +93,7 @@ type PromptJob = {
   stderrTruncated?: boolean;
   wrapperTruncated?: boolean;
   transcript?: BuiltinPromptJobTranscript;
+  diagnostics?: PromptJobDiagnostics;
   failureReason?: string;
   error?: string;
 };
@@ -193,6 +208,7 @@ function promptJobEventSummary(job: PromptJob) {
     ...(job.startedAt ? { startedAt: job.startedAt } : {}),
     ...(job.finishedAt ? { finishedAt: job.finishedAt } : {}),
     ...(typeof job.exitCode === 'number' ? { exitCode: job.exitCode } : {}),
+    ...(job.diagnostics ? { diagnostics: job.diagnostics } : {}),
     ...(job.error ? { error: job.error } : {}),
   };
 }
@@ -216,12 +232,17 @@ function writeSseEvent(res: http.ServerResponse, event: string, data: any): void
 }
 
 async function loadFleetRequestIndex(fleetDir: string): Promise<FleetRequestIndex> {
-  const raw = await readJsonFile(path.join(fleetDir, 'requests.json'), { order: [], idempotency: {} as Record<string, string> });
+  const raw = await readJsonFile(path.join(fleetDir, 'requests.json'), {
+    order: [],
+    idempotency: {} as Record<string, string>,
+  });
   return {
     order: Array.isArray(raw?.order) ? raw.order.map(String).filter(Boolean) : [],
     idempotency:
       raw?.idempotency && typeof raw.idempotency === 'object' && !Array.isArray(raw.idempotency)
-        ? (Object.fromEntries(Object.entries(raw.idempotency).map(([key, value]) => [String(key), String(value)])) as Record<string, string>)
+        ? (Object.fromEntries(
+            Object.entries(raw.idempotency).map(([key, value]) => [String(key), String(value)]),
+          ) as Record<string, string>)
         : {},
   };
 }
@@ -230,7 +251,10 @@ async function saveFleetRequestIndex(fleetDir: string, idx: FleetRequestIndex): 
   await writeJsonFileAtomic(path.join(fleetDir, 'requests.json'), idx);
 }
 
-async function loadFleetRequest(fleetDir: string, idRaw: string): Promise<FleetRequestRecord | null> {
+async function loadFleetRequest(
+  fleetDir: string,
+  idRaw: string,
+): Promise<FleetRequestRecord | null> {
   const id = String(idRaw ?? '').trim();
   if (!id) return null;
   const p = path.join(fleetDir, 'requests', `${id}.json`);
@@ -242,7 +266,10 @@ async function saveFleetRequest(fleetDir: string, request: FleetRequestRecord): 
   await writeJsonFileAtomic(path.join(fleetDir, 'requests', `${request.id}.json`), request);
 }
 
-async function listFleetRequests(fleetDir: string, state?: FleetRequestState): Promise<FleetRequestRecord[]> {
+async function listFleetRequests(
+  fleetDir: string,
+  state?: FleetRequestState,
+): Promise<FleetRequestRecord[]> {
   const idx = await loadFleetRequestIndex(fleetDir);
   const items: FleetRequestRecord[] = [];
   for (const id of idx.order) {
@@ -268,11 +295,17 @@ async function loadFleetPolicySnapshot(fleetDir: string): Promise<FleetPolicySna
   };
   const raw = await readJsonFile(path.join(fleetDir, 'policy.json'), fallback);
   return {
-    apiVersion: typeof raw?.apiVersion === 'string' && raw.apiVersion.trim() ? raw.apiVersion.trim() : fallback.apiVersion,
+    apiVersion:
+      typeof raw?.apiVersion === 'string' && raw.apiVersion.trim()
+        ? raw.apiVersion.trim()
+        : fallback.apiVersion,
     enabled: raw?.enabled === true,
     actor: {
       id: typeof raw?.actor?.id === 'string' && raw.actor.id.trim() ? raw.actor.id.trim() : null,
-      name: typeof raw?.actor?.name === 'string' && raw.actor.name.trim() ? raw.actor.name.trim() : null,
+      name:
+        typeof raw?.actor?.name === 'string' && raw.actor.name.trim()
+          ? raw.actor.name.trim()
+          : null,
     },
     relationships: {
       children: Array.isArray(raw?.relationships?.children)
@@ -292,9 +325,15 @@ async function loadFleetPolicySnapshot(fleetDir: string): Promise<FleetPolicySna
             .filter((item: { id: string; name: string }) => item.id)
         : [],
     },
-    capabilities: Array.isArray(raw?.capabilities) ? raw.capabilities.map(String).filter(Boolean) : [],
-    readScopes: Array.isArray(raw?.readScopes) ? raw.readScopes.map(String).filter(Boolean) : fallback.readScopes,
-    sendScopes: Array.isArray(raw?.sendScopes) ? raw.sendScopes.map(String).filter(Boolean) : fallback.sendScopes,
+    capabilities: Array.isArray(raw?.capabilities)
+      ? raw.capabilities.map(String).filter(Boolean)
+      : [],
+    readScopes: Array.isArray(raw?.readScopes)
+      ? raw.readScopes.map(String).filter(Boolean)
+      : fallback.readScopes,
+    sendScopes: Array.isArray(raw?.sendScopes)
+      ? raw.sendScopes.map(String).filter(Boolean)
+      : fallback.sendScopes,
     limits:
       raw?.limits && typeof raw.limits === 'object' && !Array.isArray(raw.limits)
         ? (Object.fromEntries(
@@ -303,11 +342,17 @@ async function loadFleetPolicySnapshot(fleetDir: string): Promise<FleetPolicySna
               .filter(([, value]) => Number.isFinite(value)),
           ) as Record<string, number>)
         : {},
-    updatedAt: typeof raw?.updatedAt === 'string' && raw.updatedAt.trim() ? raw.updatedAt.trim() : fallback.updatedAt,
+    updatedAt:
+      typeof raw?.updatedAt === 'string' && raw.updatedAt.trim()
+        ? raw.updatedAt.trim()
+        : fallback.updatedAt,
   };
 }
 
-async function saveFleetPolicySnapshot(fleetDir: string, snapshot: FleetPolicySnapshot): Promise<void> {
+async function saveFleetPolicySnapshot(
+  fleetDir: string,
+  snapshot: FleetPolicySnapshot,
+): Promise<void> {
   await writeJsonFileAtomic(path.join(fleetDir, 'policy.json'), snapshot);
 }
 
@@ -332,36 +377,59 @@ async function withTaskStateMutationLock<T>(fn: () => Promise<T>): Promise<T> {
 
 async function loadPendingTaskCreates(dataDir: string): Promise<PendingTaskCreateRequest[]> {
   const raw = await readJsonFile(path.join(dataDir, 'task-create-queue.json'), []);
-  return (Array.isArray(raw) ? raw : []).map(normalizePendingTaskCreateRequest).filter(Boolean) as PendingTaskCreateRequest[];
+  return (Array.isArray(raw) ? raw : [])
+    .map(normalizePendingTaskCreateRequest)
+    .filter(Boolean) as PendingTaskCreateRequest[];
 }
 
-async function savePendingTaskCreates(dataDir: string, list: PendingTaskCreateRequest[]): Promise<void> {
+async function savePendingTaskCreates(
+  dataDir: string,
+  list: PendingTaskCreateRequest[],
+): Promise<void> {
   await writeJsonFileAtomic(path.join(dataDir, 'task-create-queue.json'), list);
 }
 
 async function loadPendingTaskDeletes(dataDir: string): Promise<PendingTaskDeleteRequest[]> {
   const raw = await readJsonFile(path.join(dataDir, 'task-delete-queue.json'), []);
-  return (Array.isArray(raw) ? raw : []).map(normalizePendingTaskDeleteRequest).filter(Boolean) as PendingTaskDeleteRequest[];
+  return (Array.isArray(raw) ? raw : [])
+    .map(normalizePendingTaskDeleteRequest)
+    .filter(Boolean) as PendingTaskDeleteRequest[];
 }
 
-async function savePendingTaskDeletes(dataDir: string, list: PendingTaskDeleteRequest[]): Promise<void> {
+async function savePendingTaskDeletes(
+  dataDir: string,
+  list: PendingTaskDeleteRequest[],
+): Promise<void> {
   await writeJsonFileAtomic(path.join(dataDir, 'task-delete-queue.json'), list);
 }
 
 function normalizeFleetRequestState(raw: unknown): FleetRequestState | null {
-  const value = String(raw ?? '').trim().toLowerCase();
-  if (value === 'queued' || value === 'running' || value === 'done' || value === 'failed') return value;
+  const value = String(raw ?? '')
+    .trim()
+    .toLowerCase();
+  if (value === 'queued' || value === 'running' || value === 'done' || value === 'failed')
+    return value;
   return null;
 }
 
 function normalizeFleetRequestType(raw: unknown): FleetRequestType | null {
-  const value = String(raw ?? '').trim().toLowerCase();
-  if (value === 'create_child' || value === 'send_message' || value === 'read_messages' || value === 'stop_chat') return value;
+  const value = String(raw ?? '')
+    .trim()
+    .toLowerCase();
+  if (
+    value === 'create_child' ||
+    value === 'send_message' ||
+    value === 'read_messages' ||
+    value === 'stop_chat'
+  )
+    return value;
   return null;
 }
 
 function promptSessionName(id: string): string {
-  const cleaned = String(id).replace(/[^A-Za-z0-9._-]+/g, '-').slice(0, 48);
+  const cleaned = String(id)
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .slice(0, 48);
   return `drone-prompt-${cleaned || 'job'}`;
 }
 
@@ -384,13 +452,17 @@ async function startPromptJob(job: PromptJob): Promise<void> {
   const quotedStdoutPath = bashQuote(job.stdoutPath);
   const quotedStderrPath = bashQuote(job.stderrPath);
   const quotedExitPath = bashQuote(job.exitPath);
-  const wrapperPath = job.wrapperPath ?? path.join(path.dirname(job.stdoutPath), `${job.id}.wrapper.log`);
+  const wrapperPath =
+    job.wrapperPath ?? path.join(path.dirname(job.stdoutPath), `${job.id}.wrapper.log`);
   const quotedWrapperPath = bashQuote(wrapperPath);
   const cd = job.cwd ? `cd ${bashQuote(job.cwd)}\n` : '';
   const envLines =
     job.env && Object.keys(job.env).length > 0
       ? Object.entries(job.env)
-          .map(([k, v]) => `export ${String(k).replace(/[^A-Za-z0-9_]/g, '_')}=${bashQuote(String(v))}`)
+          .map(
+            ([k, v]) =>
+              `export ${String(k).replace(/[^A-Za-z0-9_]/g, '_')}=${bashQuote(String(v))}`,
+          )
           .join('\n') + '\n'
       : '';
   const script = [
@@ -411,9 +483,9 @@ async function startPromptJob(job: PromptJob): Promise<void> {
     '  fi',
     '}',
     'trap record_wrapper_exit EXIT',
-    'trap \'printf \'\\\'\'%s\\n\'\\\'\' "prompt wrapper: received SIGHUP at $(date -Is)" >> "$wrapper_path" 2>/dev/null || true; exit 129\' HUP',
-    'trap \'printf \'\\\'\'%s\\n\'\\\'\' "prompt wrapper: received SIGINT at $(date -Is)" >> "$wrapper_path" 2>/dev/null || true; exit 130\' INT',
-    'trap \'printf \'\\\'\'%s\\n\'\\\'\' "prompt wrapper: received SIGTERM at $(date -Is)" >> "$wrapper_path" 2>/dev/null || true; exit 143\' TERM',
+    "trap 'printf '\\''%s\\n'\\'' \"prompt wrapper: received SIGHUP at $(date -Is)\" >> \"$wrapper_path\" 2>/dev/null || true; exit 129' HUP",
+    "trap 'printf '\\''%s\\n'\\'' \"prompt wrapper: received SIGINT at $(date -Is)\" >> \"$wrapper_path\" 2>/dev/null || true; exit 130' INT",
+    "trap 'printf '\\''%s\\n'\\'' \"prompt wrapper: received SIGTERM at $(date -Is)\" >> \"$wrapper_path\" 2>/dev/null || true; exit 143' TERM",
     cd.trimEnd(),
     envLines.trimEnd(),
     // Run and capture exit code.
@@ -448,7 +520,21 @@ async function parsePromptJobTranscriptFromFile(
   parsedAt: string,
 ): Promise<BuiltinPromptJobTranscript | null> {
   if (!promptJobSupportsTranscript(job.kind)) return null;
-  const stream = createReadStream(job.stdoutPath, { encoding: 'utf8' });
+  if (stdoutRead.bytes <= 0) {
+    return await parseBuiltinPromptJobTranscriptLines(job.kind, [], {
+      stdoutBytes: stdoutRead.bytes,
+      stdoutTruncated: stdoutRead.truncated,
+      parsedAt,
+    });
+  }
+  // Bound the stream to the file size we just observed. In Bun/Node a read
+  // against a concurrently written file can otherwise wait for later writes,
+  // which makes live transcript polling miss transient running states.
+  const stream = createReadStream(job.stdoutPath, {
+    encoding: 'utf8',
+    start: 0,
+    end: stdoutRead.bytes - 1,
+  });
   const lines = readline.createInterface({ input: stream, crlfDelay: Infinity });
   try {
     return await parseBuiltinPromptJobTranscriptLines(job.kind, lines, {
@@ -464,13 +550,79 @@ async function parsePromptJobTranscriptFromFile(
   }
 }
 
+function parseIsoLikeMs(raw: unknown): number | null {
+  const text = typeof raw === 'string' ? raw.trim() : '';
+  if (!text) return null;
+  const ms = Date.parse(text);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function parsePromptWrapperTimestamps(wrapperLog: string): {
+  startedAt?: string;
+  commandExitedAt?: string;
+} {
+  const raw = String(wrapperLog ?? '');
+  const startedAt = raw.match(/prompt wrapper: started at ([^\n]+?) pid\b/)?.[1]?.trim();
+  const commandExitedAt = raw
+    .match(/prompt wrapper: command exited at ([^\n]+?) with code\b/)?.[1]
+    ?.trim();
+  return {
+    ...(startedAt ? { startedAt } : {}),
+    ...(commandExitedAt ? { commandExitedAt } : {}),
+  };
+}
+
+function buildPromptJobDiagnostics(
+  job: PromptJob,
+  transcript: BuiltinPromptJobTranscript | null,
+  wrapperLog: string,
+): PromptJobDiagnostics | undefined {
+  const diagnostics: PromptJobDiagnostics = {};
+  const terminalEventAt =
+    transcript && String((transcript as any).kind ?? '').trim() === 'blip'
+      ? String((transcript as any).terminalEventAt ?? '').trim()
+      : '';
+  const parsedAt = String((transcript as any)?.parsedAt ?? '').trim();
+  if (terminalEventAt) diagnostics.transcriptTerminalEventAt = terminalEventAt;
+  if (parsedAt) diagnostics.transcriptParsedAt = parsedAt;
+
+  const terminalMs = parseIsoLikeMs(terminalEventAt);
+  const parsedMs = parseIsoLikeMs(parsedAt);
+  if (terminalMs != null && parsedMs != null)
+    diagnostics.transcriptTerminalEventLagMs = Math.max(0, Math.round(parsedMs - terminalMs));
+
+  const wrapper = parsePromptWrapperTimestamps(wrapperLog);
+  if (wrapper.startedAt) diagnostics.wrapperStartedAt = wrapper.startedAt;
+  if (wrapper.commandExitedAt) diagnostics.wrapperCommandExitedAt = wrapper.commandExitedAt;
+  const wrapperStartedMs = parseIsoLikeMs(wrapper.startedAt);
+  const wrapperExitedMs = parseIsoLikeMs(wrapper.commandExitedAt);
+  if (wrapperStartedMs != null && wrapperExitedMs != null) {
+    diagnostics.wrapperRuntimeMs = Math.max(0, Math.round(wrapperExitedMs - wrapperStartedMs));
+  }
+  if (terminalMs != null && wrapperExitedMs != null) {
+    diagnostics.wrapperExitAfterTranscriptTerminalMs = Math.max(
+      0,
+      Math.round(wrapperExitedMs - terminalMs),
+    );
+  }
+
+  const jobStartedMs = parseIsoLikeMs(job.startedAt);
+  const jobFinishedMs = parseIsoLikeMs(job.finishedAt);
+  if (jobStartedMs != null && jobFinishedMs != null)
+    diagnostics.jobRuntimeMs = Math.max(0, Math.round(jobFinishedMs - jobStartedMs));
+
+  return Object.keys(diagnostics).length > 0 ? diagnostics : undefined;
+}
+
 async function finalizePromptJob(job: PromptJob): Promise<PromptJob> {
   // Some CLIs (notably Codex JSON mode) may continue appending output briefly
   // after the tmux session has exited. Wait for output/exit artifacts to settle.
   let exitCode = await readIntSafe(job.exitPath);
   let stdoutRead = await readTextSafeDetailed(job.stdoutPath);
   let stderrRead = await readTextSafeDetailed(job.stderrPath);
-  let wrapperRead = await readTextSafeDetailed(job.wrapperPath ?? path.join(path.dirname(job.stdoutPath), `${job.id}.wrapper.log`));
+  let wrapperRead = await readTextSafeDetailed(
+    job.wrapperPath ?? path.join(path.dirname(job.stdoutPath), `${job.id}.wrapper.log`),
+  );
   let stdout = stdoutRead.text;
   let stderr = stderrRead.text;
   let wrapperLog = wrapperRead.text;
@@ -484,9 +636,7 @@ async function finalizePromptJob(job: PromptJob): Promise<PromptJob> {
     /"type":"response\.failed"/.test(stdoutRead.text) ||
     /"type":"error"/.test(stdoutRead.text);
   const shouldWaitForCodexFlush =
-    job.kind === 'codex' &&
-    startedLikeCodexTurn &&
-    !hasCodexTerminalEvent;
+    job.kind === 'codex' && startedLikeCodexTurn && !hasCodexTerminalEvent;
 
   if (exitCode == null || shouldWaitForCodexFlush) {
     const settleDeadline = Date.now() + 10_000;
@@ -508,7 +658,9 @@ async function finalizePromptJob(job: PromptJob): Promise<PromptJob> {
       exitCode = await readIntSafe(job.exitPath);
       stdoutRead = await readTextSafeDetailed(job.stdoutPath);
       stderrRead = await readTextSafeDetailed(job.stderrPath);
-      wrapperRead = await readTextSafeDetailed(job.wrapperPath ?? path.join(path.dirname(job.stdoutPath), `${job.id}.wrapper.log`));
+      wrapperRead = await readTextSafeDetailed(
+        job.wrapperPath ?? path.join(path.dirname(job.stdoutPath), `${job.id}.wrapper.log`),
+      );
       stdout = stdoutRead.text;
       stderr = stderrRead.text;
       wrapperLog = wrapperRead.text;
@@ -517,7 +669,8 @@ async function finalizePromptJob(job: PromptJob): Promise<PromptJob> {
         /"type":"response\.completed"/.test(stdoutRead.text) ||
         /"type":"response\.failed"/.test(stdoutRead.text) ||
         /"type":"error"/.test(stdoutRead.text);
-      if (shouldWaitForCodexFlush && codexNowTerminal && (exitCode != null || stableReads >= 2)) break;
+      if (shouldWaitForCodexFlush && codexNowTerminal && (exitCode != null || stableReads >= 2))
+        break;
       if (exitCode != null && stableReads >= 2) break;
     }
   }
@@ -525,13 +678,13 @@ async function finalizePromptJob(job: PromptJob): Promise<PromptJob> {
   const ok = exitCode === 0;
   const finishedAt = nowIso();
   const transcript = await parsePromptJobTranscriptFromFile(job, stdoutRead, finishedAt);
+  const diagnostics = buildPromptJobDiagnostics({ ...job, finishedAt }, transcript, wrapperLog);
   const exitStatusSource = exitCode == null ? 'missing-exit-file' : 'exit-file';
-  const failureReason =
-    ok
-      ? undefined
-      : exitCode == null
-        ? 'prompt wrapper ended without writing an exit code; the tmux session may have been killed or the wrapper terminated before command exit capture'
-        : undefined;
+  const failureReason = ok
+    ? undefined
+    : exitCode == null
+      ? 'prompt wrapper ended without writing an exit code; the tmux session may have been killed or the wrapper terminated before command exit capture'
+      : undefined;
   return {
     ...job,
     updatedAt: finishedAt,
@@ -548,9 +701,12 @@ async function finalizePromptJob(job: PromptJob): Promise<PromptJob> {
     stderrTruncated: stderrRead.truncated,
     wrapperTruncated: wrapperRead.truncated,
     ...(transcript ? { transcript } : {}),
+    ...(diagnostics ? { diagnostics } : {}),
     state: ok ? 'done' : 'failed',
     failureReason,
-    error: ok ? undefined : (failureReason || stderr.trim() || stdout.trim() || job.error || 'failed'),
+    error: ok
+      ? undefined
+      : failureReason || stderr.trim() || stdout.trim() || job.error || 'failed',
   };
 }
 
@@ -558,9 +714,12 @@ async function refreshPromptJobTranscript(job: PromptJob): Promise<PromptJob> {
   if (!promptJobSupportsTranscript(job.kind)) return job;
   const stdoutRead = await readTextSafeDetailed(job.stdoutPath);
   const stderrRead = await readTextSafeDetailed(job.stderrPath);
-  const wrapperRead = await readTextSafeDetailed(job.wrapperPath ?? path.join(path.dirname(job.stdoutPath), `${job.id}.wrapper.log`));
+  const wrapperRead = await readTextSafeDetailed(
+    job.wrapperPath ?? path.join(path.dirname(job.stdoutPath), `${job.id}.wrapper.log`),
+  );
   const nextTranscript = await parsePromptJobTranscriptFromFile(job, stdoutRead, nowIso());
   if (!nextTranscript) return job;
+  const diagnostics = buildPromptJobDiagnostics(job, nextTranscript, wrapperRead.text);
   return {
     ...job,
     stdout: stdoutRead.text,
@@ -573,6 +732,7 @@ async function refreshPromptJobTranscript(job: PromptJob): Promise<PromptJob> {
     stderrTruncated: stderrRead.truncated,
     wrapperTruncated: wrapperRead.truncated,
     transcript: nextTranscript,
+    ...(diagnostics ? { diagnostics } : {}),
   };
 }
 
@@ -762,7 +922,9 @@ async function sendKeys(session: string, keys: string[]): Promise<void> {
 
 async function tmuxLoadBufferFromStdin(bufferName: string, text: string): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    const child = spawn('tmux', ['load-buffer', '-b', bufferName, '-'], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn('tmux', ['load-buffer', '-b', bufferName, '-'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
     let stderr = '';
     child.stderr.on('data', (d) => (stderr += d.toString('utf8')));
     child.once('error', (err) => reject(wrapTmuxError(err)));
@@ -771,7 +933,9 @@ async function tmuxLoadBufferFromStdin(bufferName: string, text: string): Promis
         resolve();
         return;
       }
-      reject(new Error((stderr || `tmux load-buffer failed with code ${String(code ?? 1)}`).trim()));
+      reject(
+        new Error((stderr || `tmux load-buffer failed with code ${String(code ?? 1)}`).trim()),
+      );
     });
     try {
       child.stdin.end(text, 'utf8');
@@ -799,7 +963,16 @@ async function capturePromptLine(session: string): Promise<string> {
     const cur = await tmux(['display-message', '-p', '-t', target, '#{cursor_y}']);
     const cursorY = Number(String(cur.stdout ?? '').trim());
     if (Number.isFinite(cursorY) && cursorY >= 0) {
-      const { stdout } = await tmux(['capture-pane', '-p', '-t', target, '-S', String(Math.floor(cursorY)), '-E', String(Math.floor(cursorY))]);
+      const { stdout } = await tmux([
+        'capture-pane',
+        '-p',
+        '-t',
+        target,
+        '-S',
+        String(Math.floor(cursorY)),
+        '-E',
+        String(Math.floor(cursorY)),
+      ]);
       const line = String(stdout ?? '').replace(/\r?\n$/, '');
       if (line) return line;
     }
@@ -876,7 +1049,11 @@ async function sessionLogPathFor(session: string): Promise<string> {
   return path.join(root, session, 'output.log');
 }
 
-async function readSessionLogChunk(logPath: string, sinceRaw: number, maxRaw: number): Promise<{ chunk: string; nextOffset: number }> {
+async function readSessionLogChunk(
+  logPath: string,
+  sinceRaw: number,
+  maxRaw: number,
+): Promise<{ chunk: string; nextOffset: number }> {
   const max = Math.max(1, Math.min(1024 * 1024, Math.floor(maxRaw || 65536)));
   let fileSize = 0;
   try {
@@ -1050,7 +1227,10 @@ async function main() {
           json(res, 409, { error: 'task CLI is not enabled for this drone' });
           return;
         }
-        const typeIds = u.searchParams.getAll('type').map((item) => String(item ?? '').trim()).filter(Boolean);
+        const typeIds = u.searchParams
+          .getAll('type')
+          .map((item) => String(item ?? '').trim())
+          .filter(Boolean);
         json(res, 200, taskSummaryForResponse(snapshot, filterTasksByTypeIds(snapshot, typeIds)));
         return;
       }
@@ -1066,7 +1246,10 @@ async function main() {
           json(res, 400, { error: 'missing search query' });
           return;
         }
-        const typeIds = u.searchParams.getAll('type').map((item) => String(item ?? '').trim()).filter(Boolean);
+        const typeIds = u.searchParams
+          .getAll('type')
+          .map((item) => String(item ?? '').trim())
+          .filter(Boolean);
         json(res, 200, {
           ...taskSummaryForResponse(snapshot, []),
           query,
@@ -1158,7 +1341,10 @@ async function main() {
           const pending = await loadPendingTaskDeletes(dataDir);
           const existing = pending.find((item) => item.taskId === task.id) ?? null;
           if (existing) {
-            return { status: 202, body: { ok: true, queued: true, duplicate: true, request: existing } };
+            return {
+              status: 202,
+              body: { ok: true, queued: true, duplicate: true, request: existing },
+            };
           }
           const request: PendingTaskDeleteRequest = {
             id: crypto.randomUUID(),
@@ -1192,7 +1378,11 @@ async function main() {
         return;
       }
 
-      if (method === 'POST' && pathname.startsWith('/v1/tasks/pending-creates/') && pathname.endsWith('/ack')) {
+      if (
+        method === 'POST' &&
+        pathname.startsWith('/v1/tasks/pending-creates/') &&
+        pathname.endsWith('/ack')
+      ) {
         const match = pathname.match(/^\/v1\/tasks\/pending-creates\/([^/]+)\/ack$/);
         const requestId = match ? decodeURIComponent(match[1] ?? '').trim() : '';
         if (!requestId) {
@@ -1209,7 +1399,11 @@ async function main() {
         return;
       }
 
-      if (method === 'POST' && pathname.startsWith('/v1/tasks/pending-deletes/') && pathname.endsWith('/ack')) {
+      if (
+        method === 'POST' &&
+        pathname.startsWith('/v1/tasks/pending-deletes/') &&
+        pathname.endsWith('/ack')
+      ) {
         const match = pathname.match(/^\/v1\/tasks\/pending-deletes\/([^/]+)\/ack$/);
         const requestId = match ? decodeURIComponent(match[1] ?? '').trim() : '';
         if (!requestId) {
@@ -1232,8 +1426,12 @@ async function main() {
         await withTaskStateMutationLock(async () => {
           await saveTaskStateSnapshot(dataDir, snapshot);
           const pendingCreates = await loadPendingTaskCreates(dataDir);
-          const knownTypeIds = new Set(snapshot.taskTypes.filter((item) => item.active !== false).map((item) => item.id));
-          const filteredCreates = pendingCreates.filter((item) => knownTypeIds.size === 0 || knownTypeIds.has(item.typeId));
+          const knownTypeIds = new Set(
+            snapshot.taskTypes.filter((item) => item.active !== false).map((item) => item.id),
+          );
+          const filteredCreates = pendingCreates.filter(
+            (item) => knownTypeIds.size === 0 || knownTypeIds.has(item.typeId),
+          );
           if (filteredCreates.length !== pendingCreates.length) {
             await savePendingTaskCreates(dataDir, filteredCreates);
           }
@@ -1251,11 +1449,20 @@ async function main() {
       if (method === 'POST' && pathname === '/v1/fleet/policy') {
         const body = await readJson(req);
         const nextSnapshot: FleetPolicySnapshot = {
-          apiVersion: typeof body?.apiVersion === 'string' && body.apiVersion.trim() ? body.apiVersion.trim() : FLEET_API_VERSION,
+          apiVersion:
+            typeof body?.apiVersion === 'string' && body.apiVersion.trim()
+              ? body.apiVersion.trim()
+              : FLEET_API_VERSION,
           enabled: body?.enabled === true,
           actor: {
-            id: typeof body?.actor?.id === 'string' && body.actor.id.trim() ? body.actor.id.trim() : null,
-            name: typeof body?.actor?.name === 'string' && body.actor.name.trim() ? body.actor.name.trim() : null,
+            id:
+              typeof body?.actor?.id === 'string' && body.actor.id.trim()
+                ? body.actor.id.trim()
+                : null,
+            name:
+              typeof body?.actor?.name === 'string' && body.actor.name.trim()
+                ? body.actor.name.trim()
+                : null,
           },
           relationships: {
             children: Array.isArray(body?.relationships?.children)
@@ -1275,9 +1482,15 @@ async function main() {
                   .filter((item: { id: string; name: string }) => item.id)
               : [],
           },
-          capabilities: Array.isArray(body?.capabilities) ? body.capabilities.map(String).filter(Boolean) : [],
-          readScopes: Array.isArray(body?.readScopes) ? body.readScopes.map(String).filter(Boolean) : ['children'],
-          sendScopes: Array.isArray(body?.sendScopes) ? body.sendScopes.map(String).filter(Boolean) : ['children', 'assigned'],
+          capabilities: Array.isArray(body?.capabilities)
+            ? body.capabilities.map(String).filter(Boolean)
+            : [],
+          readScopes: Array.isArray(body?.readScopes)
+            ? body.readScopes.map(String).filter(Boolean)
+            : ['children'],
+          sendScopes: Array.isArray(body?.sendScopes)
+            ? body.sendScopes.map(String).filter(Boolean)
+            : ['children', 'assigned'],
           limits:
             body?.limits && typeof body.limits === 'object' && !Array.isArray(body.limits)
               ? (Object.fromEntries(
@@ -1297,7 +1510,9 @@ async function main() {
         const body = await readJson(req);
         const type = normalizeFleetRequestType(body?.type);
         if (!type) {
-          json(res, 400, { error: 'invalid type (expected create_child|send_message|read_messages|stop_chat)' });
+          json(res, 400, {
+            error: 'invalid type (expected create_child|send_message|read_messages|stop_chat)',
+          });
           return;
         }
         const payload =
@@ -1309,7 +1524,8 @@ async function main() {
           return;
         }
 
-        const idempotencyKeyRaw = typeof body?.idempotencyKey === 'string' ? body.idempotencyKey.trim() : '';
+        const idempotencyKeyRaw =
+          typeof body?.idempotencyKey === 'string' ? body.idempotencyKey.trim() : '';
         const idx = await loadFleetRequestIndex(fleetDir);
         if (idempotencyKeyRaw) {
           const existingId = idx.idempotency[idempotencyKeyRaw];
@@ -1404,7 +1620,12 @@ async function main() {
           state,
           updatedAt: nowIso(),
           result: state === 'done' ? body?.result : undefined,
-          error: state === 'failed' ? (typeof body?.error === 'string' && body.error.trim() ? body.error.trim() : 'failed') : undefined,
+          error:
+            state === 'failed'
+              ? typeof body?.error === 'string' && body.error.trim()
+                ? body.error.trim()
+                : 'failed'
+              : undefined,
         };
         await saveFleetRequest(fleetDir, next);
         json(res, 200, { ok: true, request: next });
@@ -1423,12 +1644,16 @@ async function main() {
           json(res, 400, { error: 'missing cmd' });
           return;
         }
-        const args = Array.isArray(body?.args) ? body.args.filter((x: any) => typeof x === 'string') : [];
+        const args = Array.isArray(body?.args)
+          ? body.args.filter((x: any) => typeof x === 'string')
+          : [];
         const cwd = typeof body?.cwd === 'string' && body.cwd.trim() ? body.cwd.trim() : undefined;
         const kind = String(body?.kind ?? 'shell').trim() || 'shell';
         const env =
           body?.env && typeof body.env === 'object' && !Array.isArray(body.env)
-            ? (Object.fromEntries(Object.entries(body.env).filter(([, v]) => typeof v === 'string')) as Record<string, string>)
+            ? (Object.fromEntries(
+                Object.entries(body.env).filter(([, v]) => typeof v === 'string'),
+              ) as Record<string, string>)
             : undefined;
 
         const existing = await loadPromptJob(promptsDir, id);
@@ -1561,7 +1786,10 @@ async function main() {
           json(res, 200, { ok: true, job: next });
           return;
         }
-        if ((job.state === 'done' || job.state === 'failed') && !promptJobHasParsedTranscript(job)) {
+        if (
+          (job.state === 'done' || job.state === 'failed') &&
+          !promptJobHasParsedTranscript(job)
+        ) {
           const next = await refreshPromptJobTranscript(job);
           if (next !== job) {
             await savePromptJob(promptsDir, next);
@@ -1607,12 +1835,17 @@ async function main() {
           json(res, 400, { error: 'missing cmd' });
           return;
         }
-        const args = Array.isArray(body?.args) ? body.args.filter((x: any) => typeof x === 'string') : [];
+        const args = Array.isArray(body?.args)
+          ? body.args.filter((x: any) => typeof x === 'string')
+          : [];
         const cwd = typeof body?.cwd === 'string' ? body.cwd : undefined;
-        const session = typeof body?.session === 'string' && body.session ? body.session : 'drone-main';
+        const session =
+          typeof body?.session === 'string' && body.session ? body.session : 'drone-main';
         const env =
           body?.env && typeof body.env === 'object' && !Array.isArray(body.env)
-            ? (Object.fromEntries(Object.entries(body.env).filter(([, v]) => typeof v === 'string')) as Record<string, string>)
+            ? (Object.fromEntries(
+                Object.entries(body.env).filter(([, v]) => typeof v === 'string'),
+              ) as Record<string, string>)
             : undefined;
         const force = body?.force === true;
         const terminal = body?.terminal === true;
@@ -1632,14 +1865,24 @@ async function main() {
           await killSession(session);
         }
 
-        const logPath = terminal ? await sessionLogPathFor(session) : path.join(logsDir, `${session}.log`);
+        const logPath = terminal
+          ? await sessionLogPathFor(session)
+          : path.join(logsDir, `${session}.log`);
         await fs.mkdir(path.dirname(logPath), { recursive: true });
         await fs.writeFile(logPath, '', 'utf8');
 
         await startSession({ session, cmd, args, cwd, env });
         await pipePaneToFile(session, logPath);
 
-        const processInfo = { session, cmd, args, cwd, env, logPath, startedAt: new Date().toISOString() };
+        const processInfo = {
+          session,
+          cmd,
+          args,
+          cwd,
+          env,
+          logPath,
+          startedAt: new Date().toISOString(),
+        };
         if (!terminal) {
           const next: DroneState = {
             process: processInfo,
@@ -1654,7 +1897,8 @@ async function main() {
       if (method === 'POST' && pathname === '/v1/process/stop') {
         const body = await readJson(req);
         const state = await readState();
-        const target = typeof body?.session === 'string' && body.session ? body.session : state.process?.session;
+        const target =
+          typeof body?.session === 'string' && body.session ? body.session : state.process?.session;
         if (!target) {
           json(res, 400, { error: 'no process to stop' });
           return;
@@ -1676,7 +1920,8 @@ async function main() {
         }
         const enter = body?.enter !== false;
         const state = await readState();
-        const target = typeof body?.session === 'string' && body.session ? body.session : state.process?.session;
+        const target =
+          typeof body?.session === 'string' && body.session ? body.session : state.process?.session;
         if (!target) {
           json(res, 400, { error: 'no active process' });
           return;
@@ -1688,13 +1933,16 @@ async function main() {
 
       if (method === 'POST' && pathname === '/v1/keys') {
         const body = await readJson(req);
-        const keys = Array.isArray(body?.keys) ? body.keys.filter((x: any) => typeof x === 'string') : [];
+        const keys = Array.isArray(body?.keys)
+          ? body.keys.filter((x: any) => typeof x === 'string')
+          : [];
         if (keys.length === 0) {
           json(res, 400, { error: 'missing keys' });
           return;
         }
         const state = await readState();
-        const target = typeof body?.session === 'string' && body.session ? body.session : state.process?.session;
+        const target =
+          typeof body?.session === 'string' && body.session ? body.session : state.process?.session;
         if (!target) {
           json(res, 400, { error: 'no active process' });
           return;
@@ -1736,7 +1984,9 @@ async function main() {
           json(res, 400, { error: 'invalid session' });
           return;
         }
-        const view = String(u.searchParams.get('view') ?? 'log').trim().toLowerCase();
+        const view = String(u.searchParams.get('view') ?? 'log')
+          .trim()
+          .toLowerCase();
         const since = Number(u.searchParams.get('since') ?? '0');
         const max = Number(u.searchParams.get('max') ?? '65536');
         const tail = Number(u.searchParams.get('tail') ?? '200');
@@ -1755,11 +2005,25 @@ async function main() {
             nextOffset = 0;
           }
           const text = await captureScreenText(session, tail);
-          json(res, 200, { ok: true, session, view, chunk: text, nextOffset, logPath, tailLines: tail });
+          json(res, 200, {
+            ok: true,
+            session,
+            view,
+            chunk: text,
+            nextOffset,
+            logPath,
+            tailLines: tail,
+          });
           return;
         }
         const out = await readSessionLogChunk(logPath, since, max);
-        json(res, 200, { ok: true, session, chunk: out.chunk, nextOffset: out.nextOffset, logPath });
+        json(res, 200, {
+          ok: true,
+          session,
+          chunk: out.chunk,
+          nextOffset: out.nextOffset,
+          logPath,
+        });
         return;
       }
 
@@ -1788,14 +2052,20 @@ async function main() {
         const hasSince = u.searchParams.has('since');
         const since = Number(u.searchParams.get('since') ?? '0');
         const logPath = await sessionLogPathFor(session);
-        const initial = await readSessionLogChunk(logPath, hasSince ? since : Number.MAX_SAFE_INTEGER, 1);
+        const initial = await readSessionLogChunk(
+          logPath,
+          hasSince ? since : Number.MAX_SAFE_INTEGER,
+          1,
+        );
         let offset = initial.nextOffset;
 
         res.statusCode = 200;
         res.setHeader('content-type', 'text/event-stream; charset=utf-8');
         res.setHeader('cache-control', 'no-cache');
         res.setHeader('connection', 'keep-alive');
-        res.write(`event: ready\ndata: ${JSON.stringify({ ok: true, session, since: offset })}\n\n`);
+        res.write(
+          `event: ready\ndata: ${JSON.stringify({ ok: true, session, since: offset })}\n\n`,
+        );
 
         let closed = false;
         req.on('close', () => {
@@ -1807,7 +2077,9 @@ async function main() {
             const out = await readSessionLogChunk(logPath, offset, 128 * 1024);
             if (out.chunk) {
               offset = out.nextOffset;
-              res.write(`event: output\ndata: ${JSON.stringify({ chunk: out.chunk, nextOffset: offset })}\n\n`);
+              res.write(
+                `event: output\ndata: ${JSON.stringify({ chunk: out.chunk, nextOffset: offset })}\n\n`,
+              );
             } else {
               offset = out.nextOffset;
             }
@@ -1836,7 +2108,12 @@ async function main() {
             const buf = Buffer.alloc(max);
             const { bytesRead } = await fh.read(buf, 0, max, offset);
             const chunk = buf.subarray(0, bytesRead).toString('utf8');
-            json(res, 200, { ok: true, chunk, nextOffset: offset + bytesRead, logPath: proc.logPath });
+            json(res, 200, {
+              ok: true,
+              chunk,
+              nextOffset: offset + bytesRead,
+              logPath: proc.logPath,
+            });
           } finally {
             await fh.close();
           }
@@ -1877,7 +2154,9 @@ async function main() {
               if (bytesRead > 0) {
                 const chunk = buf.subarray(0, bytesRead).toString('utf8');
                 offset += bytesRead;
-                res.write(`event: output\ndata: ${JSON.stringify({ chunk, nextOffset: offset })}\n\n`);
+                res.write(
+                  `event: output\ndata: ${JSON.stringify({ chunk, nextOffset: offset })}\n\n`,
+                );
               }
             } finally {
               await fh.close();

@@ -63,15 +63,7 @@ describe("Blip tools", () => {
     expect(await readFile(path.join(workspace, "src/example.txt"), "utf8")).toBe("hello\nworld");
 
     await applyPatch.execute("call_2", {
-      patch: [
-        "*** Begin Patch",
-        "*** Update File: src/example.txt",
-        "@@",
-        " hello",
-        "-world",
-        "+blip",
-        "*** End Patch",
-      ].join("\n"),
+      patch: ["*** Begin Patch", "*** Update File: src/example.txt", "@@", " hello", "-world", "+blip", "*** End Patch"].join("\n"),
     } as never);
 
     expect(await readFile(path.join(workspace, "src/example.txt"), "utf8")).toBe("hello\nblip");
@@ -81,10 +73,7 @@ describe("Blip tools", () => {
     const workspace = await tempWorkspace();
     const write = tool(workspace, "write_file");
 
-    const results = await Promise.allSettled([
-      write.execute("call_1", { path: "race.txt", content: "one", mode: "create" } as never),
-      write.execute("call_2", { path: "race.txt", content: "two", mode: "create" } as never),
-    ]);
+    const results = await Promise.allSettled([write.execute("call_1", { path: "race.txt", content: "one", mode: "create" } as never), write.execute("call_2", { path: "race.txt", content: "two", mode: "create" } as never)]);
 
     expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
     expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
@@ -99,5 +88,36 @@ describe("Blip tools", () => {
     const result = await search.execute("call_1", { mode: "content", query: "needle" } as never);
     expect(result.content[0]?.type).toBe("text");
     expect(result.content[0]?.type === "text" ? result.content[0].text : "").toContain("note.txt");
+  });
+
+  test("search_files uses smart-case matching for names and content", async () => {
+    const workspace = await tempWorkspace();
+    await writeFile(path.join(workspace, "VoiceSettings.ts"), "export const LanguageCode = 'en';\n");
+    const search = tool(workspace, "search_files");
+
+    const nameResult = await search.execute("call_1", {
+      mode: "name",
+      query: "voicesettings",
+    } as never);
+    expect(nameResult.content[0]?.type === "text" ? nameResult.content[0].text : "").toContain("VoiceSettings.ts");
+
+    const contentResult = await search.execute("call_2", {
+      mode: "content",
+      query: "languagecode",
+    } as never);
+    expect(contentResult.content[0]?.type === "text" ? contentResult.content[0].text : "").toContain("LanguageCode");
+    expect(contentResult.details).toMatchObject({ smartCase: true });
+  });
+
+  test("apply_patch context failures include expected and nearby content", async () => {
+    const workspace = await tempWorkspace();
+    await writeFile(path.join(workspace, "example.txt"), "alpha\nneedle current\nomega\n");
+    const applyPatch = tool(workspace, "apply_patch");
+
+    await expect(
+      applyPatch.execute("call_1", {
+        patch: ["*** Begin Patch", "*** Update File: example.txt", "@@", " alpha", "-needle stale", "+needle updated", " omega", "*** End Patch"].join("\n"),
+      } as never),
+    ).rejects.toThrow(/Patch expected this existing context:[\s\S]*needle stale[\s\S]*Nearest matching file content:[\s\S]*needle current/);
   });
 });

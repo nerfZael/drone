@@ -6,10 +6,7 @@ import { assertWorkspacePath, toWorkspaceRelative } from "./path-utils.js";
 import { textResult } from "./result.js";
 import type { BlipTool, BlipToolContext } from "./types.js";
 
-type PatchOperation =
-  | { type: "add"; path: string; lines: string[] }
-  | { type: "delete"; path: string }
-  | { type: "update"; path: string; moveTo?: string; hunks: PatchLine[][] };
+type PatchOperation = { type: "add"; path: string; lines: string[] } | { type: "delete"; path: string } | { type: "update"; path: string; moveTo?: string; hunks: PatchLine[][] };
 
 type PatchLine = {
   kind: "context" | "remove" | "add";
@@ -103,6 +100,32 @@ function findSubsequence(haystack: string[], needle: string[], fromIndex: number
   return -1;
 }
 
+function formatNumberedLines(lines: string[], startLine: number): string {
+  return lines.map((line, index) => `${String(startLine + index).padStart(6, " ")} | ${line}`).join("\n");
+}
+
+function bestContextWindow(lines: string[], oldLines: string[]): { startLine: number; lines: string[] } | undefined {
+  const anchors = oldLines.map((line) => line.trim()).filter(Boolean);
+  for (const anchor of anchors) {
+    const index = lines.findIndex((line) => line.includes(anchor));
+    if (index >= 0) {
+      const start = Math.max(0, index - 3);
+      const end = Math.min(lines.length, index + 4);
+      return { startLine: start + 1, lines: lines.slice(start, end) };
+    }
+  }
+  return undefined;
+}
+
+function patchContextFailureMessage(lines: string[], oldLines: string[], filePath: string): string {
+  const expected = oldLines.slice(0, 12);
+  const expectedText = expected.length > 0 ? formatNumberedLines(expected, 1) : "(empty context)";
+  const nearby = bestContextWindow(lines, oldLines);
+  const nearbyText = nearby ? formatNumberedLines(nearby.lines, nearby.startLine) : "(no nearby exact line match found)";
+  const suffix = oldLines.length > expected.length ? `\n... ${oldLines.length - expected.length} more expected lines omitted` : "";
+  return [`could not find patch context in ${filePath}`, "Patch expected this existing context:", expectedText + suffix, "Nearest matching file content:", nearbyText, "Read the current file around the target area and retry with fresh context."].join("\n");
+}
+
 function applyHunks(original: string, hunks: PatchLine[][], filePath: string): string {
   let lines = original.split(/\r?\n/);
   let searchFrom = 0;
@@ -112,7 +135,7 @@ function applyHunks(original: string, hunks: PatchLine[][], filePath: string): s
     const newLines = hunk.filter((line) => line.kind !== "remove").map((line) => line.text);
     const found = findSubsequence(lines, oldLines, searchFrom);
     if (found < 0) {
-      throw new Error(`could not find patch context in ${filePath}`);
+      throw new Error(patchContextFailureMessage(lines, oldLines, filePath));
     }
     lines = [...lines.slice(0, found), ...newLines, ...lines.slice(found + oldLines.length)];
     searchFrom = found + newLines.length;
@@ -134,10 +157,7 @@ export function createApplyPatchTool(context: BlipToolContext): BlipTool {
       const operations = parsePatch(params.patch);
       const lockPaths = operations.flatMap((operation) => {
         if (operation.type === "update" && operation.moveTo) {
-          return [
-            assertWorkspacePath(context.workspaceRoot, operation.path),
-            assertWorkspacePath(context.workspaceRoot, operation.moveTo),
-          ];
+          return [assertWorkspacePath(context.workspaceRoot, operation.path), assertWorkspacePath(context.workspaceRoot, operation.moveTo)];
         }
         return [assertWorkspacePath(context.workspaceRoot, operation.path)];
       });

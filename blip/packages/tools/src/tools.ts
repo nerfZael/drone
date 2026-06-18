@@ -96,8 +96,24 @@ async function walkFiles(root: string, start: string, limit: number): Promise<st
 
 function simpleGlobMatch(value: string, glob?: string): boolean {
   if (!glob) return true;
-  const escaped = glob.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");
+  const escaped = glob
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, ".*")
+    .replace(/\?/g, ".");
   return new RegExp(`^${escaped}$`).test(value);
+}
+
+function smartCaseIncludes(value: string, query: string): boolean {
+  if (/[A-Z]/.test(query)) return value.includes(query);
+  return value.toLowerCase().includes(query.toLowerCase());
+}
+
+function searchLineMatches(line: string, query: string): boolean {
+  try {
+    return new RegExp(query, /[A-Z]/.test(query) ? "" : "i").test(line);
+  } catch {
+    return smartCaseIncludes(line, query);
+  }
 }
 
 export function createListFilesTool(context: BlipToolContext): BlipTool {
@@ -106,7 +122,11 @@ export function createListFilesTool(context: BlipToolContext): BlipTool {
     label: "List Files",
     description: "List direct child files and directories inside the workspace with bounded structured output.",
     parameters: Type.Object({
-      path: Type.Optional(Type.String({ description: "Workspace-relative directory path. Defaults to workspace root." })),
+      path: Type.Optional(
+        Type.String({
+          description: "Workspace-relative directory path. Defaults to workspace root.",
+        }),
+      ),
       includeHidden: Type.Optional(Type.Boolean({ description: "Whether to include dotfiles." })),
       limit: Type.Optional(Type.Number({ minimum: 1, maximum: 500, description: "Maximum number of entries." })),
     }),
@@ -133,7 +153,10 @@ export function createListFilesTool(context: BlipToolContext): BlipTool {
         }),
       );
       const text = details.map((entry) => `${entry.type === "directory" ? "dir " : "file"} ${entry.path}`).join("\n");
-      return textResult(text || "(empty)", { entries: details, truncated: entries.length === limit });
+      return textResult(text || "(empty)", {
+        entries: details,
+        truncated: entries.length === limit,
+      });
     },
   });
 }
@@ -163,17 +186,14 @@ export function createReadFileTool(context: BlipToolContext): BlipTool {
       const truncated = offset + limit < lines.length;
       const relative = toWorkspaceRelative(context.workspaceRoot, target);
       context.onFileOperation?.("read", relative);
-      return textResult(
-        `${numbered.join("\n")}${truncated ? `\n[continue with offset ${offset + limit}]` : ""}`,
-        {
-          path: relative,
-          offset,
-          lineCount: lines.length,
-          returnedLines: selected.length,
-          truncated,
-          sha256: hashBuffer(buffer),
-        },
-      );
+      return textResult(`${numbered.join("\n")}${truncated ? `\n[continue with offset ${offset + limit}]` : ""}`, {
+        path: relative,
+        offset,
+        lineCount: lines.length,
+        returnedLines: selected.length,
+        truncated,
+        sha256: hashBuffer(buffer),
+      });
     },
   });
 }
@@ -185,7 +205,9 @@ export function createSearchFilesTool(context: BlipToolContext): BlipTool {
     description: "Search workspace files by relative path or content.",
     parameters: Type.Object({
       query: Type.String({ description: "Text or pattern to search for." }),
-      mode: Type.Union([Type.Literal("name"), Type.Literal("content")], { description: "Search names or content." }),
+      mode: Type.Union([Type.Literal("name"), Type.Literal("content")], {
+        description: "Search names or content.",
+      }),
       path: Type.Optional(Type.String({ description: "Workspace-relative search root." })),
       includeGlob: Type.Optional(Type.String({ description: "Optional include glob." })),
       excludeGlob: Type.Optional(Type.String({ description: "Optional exclude glob." })),
@@ -197,55 +219,67 @@ export function createSearchFilesTool(context: BlipToolContext): BlipTool {
       if (params.mode === "name") {
         const files = await walkFiles(context.workspaceRoot, searchRoot, 10_000);
         const matches = files
-          .filter((file) => file.includes(params.query))
+          .filter((file) => smartCaseIncludes(file, String(params.query ?? "")))
           .filter((file) => simpleGlobMatch(file, params.includeGlob))
           .filter((file) => !params.excludeGlob || !simpleGlobMatch(file, params.excludeGlob))
           .slice(0, limit);
         const text = matches.join("\n") || "(no matches)";
-        return textResult(text, { matches, truncated: matches.length === limit });
+        return textResult(text, {
+          matches,
+          truncated: matches.length === limit,
+          engine: "walk",
+          smartCase: true,
+        });
       }
 
-      const rgArgs = ["--line-number", "--no-heading", "--color", "never"];
+      const rgArgs = ["--line-number", "--no-heading", "--color", "never", "--smart-case"];
       if (params.includeGlob) rgArgs.push("--glob", params.includeGlob);
       if (params.excludeGlob) rgArgs.push("--glob", `!${params.excludeGlob}`);
-      rgArgs.push(params.query, ".");
+      rgArgs.push("--", params.query, ".");
       try {
         const result = await runCommand(`rg ${rgArgs.map((arg) => JSON.stringify(arg)).join(" ")}`, searchRoot, 30_000, signal);
-        const lines = result.stdout.split(/\r?\n/).filter(Boolean).slice(0, limit);
-        const matches = lines.map((line) => {
-          const [file = "", lineNumber = "", ...previewParts] = line.split(":");
-          const absolute = path.resolve(searchRoot, file);
-          return {
-            path: toWorkspaceRelative(context.workspaceRoot, absolute),
-            line: Number(lineNumber) || undefined,
-            preview: previewParts.join(":").trim(),
-          };
-        });
-        for (const match of matches) context.onFileOperation?.("read", match.path);
-        return textResult(lines.join("\n") || "(no matches)", { matches, truncated: lines.length === limit });
+        if (result.exitCode === 0 || result.exitCode === 1) {
+          const lines = result.stdout.split(/\r?\n/).filter(Boolean).slice(0, limit);
+          const matches = lines.map((line) => {
+            const [file = "", lineNumber = "", ...previewParts] = line.split(":");
+            const absolute = path.resolve(searchRoot, file);
+            return {
+              path: toWorkspaceRelative(context.workspaceRoot, absolute),
+              line: Number(lineNumber) || undefined,
+              preview: previewParts.join(":").trim(),
+            };
+          });
+          for (const match of matches) context.onFileOperation?.("read", match.path);
+          return textResult(lines.join("\n") || "(no matches)", {
+            matches,
+            truncated: lines.length === limit,
+            engine: "rg",
+            smartCase: true,
+            exitCode: result.exitCode,
+          });
+        }
       } catch {
-        const files = await walkFiles(context.workspaceRoot, searchRoot, 10_000);
-        const matches: Array<{ path: string; line: number; preview: string }> = [];
-        for (const file of files) {
-          if (matches.length >= limit) break;
-          if (!simpleGlobMatch(file, params.includeGlob)) continue;
-          if (params.excludeGlob && simpleGlobMatch(file, params.excludeGlob)) continue;
-          const absolute = assertWorkspacePath(context.workspaceRoot, file);
-          const buffer = await readFile(absolute);
-          if (isLikelyBinary(buffer)) continue;
-          const lines = buffer.toString("utf8").split(/\r?\n/);
-          for (let index = 0; index < lines.length && matches.length < limit; index += 1) {
-            if (lines[index].includes(params.query)) {
-              matches.push({ path: file, line: index + 1, preview: lines[index].trim() });
-              context.onFileOperation?.("read", file);
-            }
+        // Fall through to the built-in walker below.
+      }
+
+      const files = await walkFiles(context.workspaceRoot, searchRoot, 10_000);
+      const matches: Array<{ path: string; line: number; preview: string }> = [];
+      for (const file of files) {
+        if (matches.length >= limit) break;
+        if (!simpleGlobMatch(file, params.includeGlob)) continue;
+        if (params.excludeGlob && simpleGlobMatch(file, params.excludeGlob)) continue;
+        const absolute = assertWorkspacePath(context.workspaceRoot, file);
+        const buffer = await readFile(absolute);
+        if (isLikelyBinary(buffer)) continue;
+        const lines = buffer.toString("utf8").split(/\r?\n/);
+        for (let index = 0; index < lines.length && matches.length < limit; index += 1) {
+          if (searchLineMatches(lines[index], String(params.query ?? ""))) {
+            matches.push({ path: file, line: index + 1, preview: lines[index].trim() });
+            context.onFileOperation?.("read", file);
           }
         }
-        return textResult(
-          matches.map((match) => `${match.path}:${match.line}:${match.preview}`).join("\n") || "(no matches)",
-          { matches, truncated: matches.length === limit },
-        );
       }
+      return textResult(matches.map((match) => `${match.path}:${match.line}:${match.preview}`).join("\n") || "(no matches)", { matches, truncated: matches.length === limit, engine: "walk", smartCase: true });
     },
   });
 }
@@ -267,11 +301,7 @@ export function createBashTool(context: BlipToolContext): BlipTool {
       const result = await runCommand(params.command, cwd, timeoutMs, signal);
       const stdout = truncateText(result.stdout, DEFAULT_OUTPUT_LIMIT);
       const stderr = truncateText(result.stderr, DEFAULT_OUTPUT_LIMIT);
-      const textParts = [
-        `exitCode: ${result.exitCode}${result.timedOut ? " (timed out)" : ""}`,
-        stdout.text ? `stdout:\n${stdout.text}` : "",
-        stderr.text ? `stderr:\n${stderr.text}` : "",
-      ].filter(Boolean);
+      const textParts = [`exitCode: ${result.exitCode}${result.timedOut ? " (timed out)" : ""}`, stdout.text ? `stdout:\n${stdout.text}` : "", stderr.text ? `stderr:\n${stderr.text}` : ""].filter(Boolean);
       return textResult(textParts.join("\n\n"), {
         ...result,
         cwd: toWorkspaceRelative(context.workspaceRoot, cwd),
@@ -312,7 +342,11 @@ export function createWriteFileTool(context: BlipToolContext): BlipTool {
         await writeFile(target, params.content);
         const relative = toWorkspaceRelative(context.workspaceRoot, target);
         context.onFileOperation?.("modified", relative);
-        return textResult(`wrote ${relative}`, { path: relative, bytes: Buffer.byteLength(params.content), created: !exists });
+        return textResult(`wrote ${relative}`, {
+          path: relative,
+          bytes: Buffer.byteLength(params.content),
+          created: !exists,
+        });
       });
     },
   });
@@ -337,7 +371,11 @@ export function createDeleteFileTool(context: BlipToolContext): BlipTool {
         await rm(target);
         const relative = toWorkspaceRelative(context.workspaceRoot, target);
         context.onFileOperation?.("modified", relative);
-        return textResult(`deleted ${relative}`, { path: relative, size: info.size, sha256: hashBuffer(current) });
+        return textResult(`deleted ${relative}`, {
+          path: relative,
+          size: info.size,
+          sha256: hashBuffer(current),
+        });
       });
     },
   });
@@ -358,7 +396,10 @@ export function createDirectoryTool(context: BlipToolContext): BlipTool {
         await mkdir(target, { recursive: params.recursive === true });
         const relative = toWorkspaceRelative(context.workspaceRoot, target);
         context.onFileOperation?.("modified", relative);
-        return textResult(`created directory ${relative}`, { path: relative, recursive: params.recursive === true });
+        return textResult(`created directory ${relative}`, {
+          path: relative,
+          recursive: params.recursive === true,
+        });
       });
     },
   });
@@ -382,7 +423,10 @@ export function deleteDirectoryTool(context: BlipToolContext): BlipTool {
         else await rmdir(target);
         const relative = toWorkspaceRelative(context.workspaceRoot, target);
         context.onFileOperation?.("modified", relative);
-        return textResult(`deleted directory ${relative}`, { path: relative, recursive: params.recursive === true });
+        return textResult(`deleted directory ${relative}`, {
+          path: relative,
+          recursive: params.recursive === true,
+        });
       });
     },
   });
@@ -415,7 +459,11 @@ export function createMovePathTool(context: BlipToolContext): BlipTool {
         const toRel = toWorkspaceRelative(context.workspaceRoot, to);
         context.onFileOperation?.("modified", fromRel);
         context.onFileOperation?.("modified", toRel);
-        return textResult(`moved ${fromRel} -> ${toRel}`, { from: fromRel, to: toRel, overwritten: params.overwrite === true });
+        return textResult(`moved ${fromRel} -> ${toRel}`, {
+          from: fromRel,
+          to: toRel,
+          overwritten: params.overwrite === true,
+        });
       });
     },
   });
@@ -451,16 +499,7 @@ export function createProfileTools(context: BlipToolContext): BlipTool[] {
     return [...common, createGetWorkingTreeStatusTool(context)];
   }
   if (context.profile === "no-shell-workspace-write") {
-    return [
-      createApplyPatchTool(context),
-      ...common,
-      createWriteFileTool(context),
-      createDeleteFileTool(context),
-      createDirectoryTool(context),
-      deleteDirectoryTool(context),
-      createMovePathTool(context),
-      createGetWorkingTreeStatusTool(context),
-    ];
+    return [createApplyPatchTool(context), ...common, createWriteFileTool(context), createDeleteFileTool(context), createDirectoryTool(context), deleteDirectoryTool(context), createMovePathTool(context), createGetWorkingTreeStatusTool(context)];
   }
   return [createBashTool(context), createApplyPatchTool(context), ...common];
 }
@@ -468,18 +507,7 @@ export function createProfileTools(context: BlipToolContext): BlipTool[] {
 export function toolsForProfile(profile: ToolProfile): string[] {
   if (profile === "read-only") return ["read_file", "search_files", "list_files", "get_working_tree_status"];
   if (profile === "no-shell-workspace-write") {
-    return [
-      "apply_patch",
-      "read_file",
-      "search_files",
-      "list_files",
-      "write_file",
-      "delete_file",
-      "create_directory",
-      "delete_directory",
-      "move_path",
-      "get_working_tree_status",
-    ];
+    return ["apply_patch", "read_file", "search_files", "list_files", "write_file", "delete_file", "create_directory", "delete_directory", "move_path", "get_working_tree_status"];
   }
   return ["bash", "apply_patch", "read_file", "search_files", "list_files"];
 }

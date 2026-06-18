@@ -27,7 +27,9 @@ describe("Blip runtime", () => {
     await writeFile(path.join(workspace, "hello.txt"), "hello blip\n");
     const faux = registerFauxProvider({ api: "faux", provider: "faux", tokensPerSecond: 0 });
     faux.setResponses([
-      fauxAssistantMessage(fauxToolCall("read_file", { path: "hello.txt" }, { id: "call_read" }), { stopReason: "toolUse" }),
+      fauxAssistantMessage(fauxToolCall("read_file", { path: "hello.txt" }, { id: "call_read" }), {
+        stopReason: "toolUse",
+      }),
       fauxAssistantMessage("I read hello.txt."),
     ]);
 
@@ -63,16 +65,7 @@ describe("Blip runtime", () => {
     await writeFile(path.join(workspace, "alpha.txt"), "alpha\n");
     await writeFile(path.join(workspace, "beta.txt"), "beta\n");
     const faux = registerFauxProvider({ api: "faux", provider: "faux", tokensPerSecond: 0 });
-    faux.setResponses([
-      fauxAssistantMessage(
-        [
-          fauxToolCall("read_file", { path: "alpha.txt" }, { id: "call_alpha" }),
-          fauxToolCall("read_file", { path: "beta.txt" }, { id: "call_beta" }),
-        ],
-        { stopReason: "toolUse" },
-      ),
-      fauxAssistantMessage("I read both files."),
-    ]);
+    faux.setResponses([fauxAssistantMessage([fauxToolCall("read_file", { path: "alpha.txt" }, { id: "call_alpha" }), fauxToolCall("read_file", { path: "beta.txt" }, { id: "call_beta" })], { stopReason: "toolUse" }), fauxAssistantMessage("I read both files.")]);
 
     const toolEvents: Array<{ type: string; callId: string }> = [];
     const session = await runBlipTask(
@@ -95,12 +88,7 @@ describe("Blip runtime", () => {
       { type: "tool_call_started", callId: "call_alpha" },
       { type: "tool_call_started", callId: "call_beta" },
     ]);
-    expect(toolEvents.map((event) => event.type)).toEqual([
-      "tool_call_started",
-      "tool_call_started",
-      "tool_call_completed",
-      "tool_call_completed",
-    ]);
+    expect(toolEvents.map((event) => event.type)).toEqual(["tool_call_started", "tool_call_started", "tool_call_completed", "tool_call_completed"]);
     expect(session.readFiles).toEqual(["alpha.txt", "beta.txt"]);
     faux.unregister();
   });
@@ -108,16 +96,7 @@ describe("Blip runtime", () => {
   test("executes bash tool batches concurrently", async () => {
     const workspace = await tempWorkspace();
     const faux = registerFauxProvider({ api: "faux", provider: "faux", tokensPerSecond: 0 });
-    faux.setResponses([
-      fauxAssistantMessage(
-        [
-          fauxToolCall("bash", { command: "sleep 0.4 && echo alpha" }, { id: "call_alpha" }),
-          fauxToolCall("bash", { command: "sleep 0.4 && echo beta" }, { id: "call_beta" }),
-        ],
-        { stopReason: "toolUse" },
-      ),
-      fauxAssistantMessage("I ran both commands."),
-    ]);
+    faux.setResponses([fauxAssistantMessage([fauxToolCall("bash", { command: "sleep 0.4 && echo alpha" }, { id: "call_alpha" }), fauxToolCall("bash", { command: "sleep 0.4 && echo beta" }, { id: "call_beta" })], { stopReason: "toolUse" }), fauxAssistantMessage("I ran both commands.")]);
 
     const toolEvents: Array<{ type: string; callId: string }> = [];
     const startedAt = Date.now();
@@ -146,27 +125,16 @@ describe("Blip runtime", () => {
   test("executes independent mutation tool batches successfully", async () => {
     const workspace = await tempWorkspace();
     const faux = registerFauxProvider({ api: "faux", provider: "faux", tokensPerSecond: 0 });
-    faux.setResponses([
-      fauxAssistantMessage(
-        [
-          fauxToolCall("write_file", { path: "alpha.txt", content: "alpha\n", mode: "create" }, { id: "call_alpha" }),
-          fauxToolCall("write_file", { path: "beta.txt", content: "beta\n", mode: "create" }, { id: "call_beta" }),
-        ],
-        { stopReason: "toolUse" },
-      ),
-      fauxAssistantMessage("I wrote both files."),
-    ]);
+    faux.setResponses([fauxAssistantMessage([fauxToolCall("write_file", { path: "alpha.txt", content: "alpha\n", mode: "create" }, { id: "call_alpha" }), fauxToolCall("write_file", { path: "beta.txt", content: "beta\n", mode: "create" }, { id: "call_beta" })], { stopReason: "toolUse" }), fauxAssistantMessage("I wrote both files.")]);
 
-    const session = await runBlipTask(
-      {
-        prompt: "Write both files",
-        workspaceRoot: workspace,
-        provider: "faux",
-        model: faux.getModel().id,
-        permissionMode: "workspace-write",
-        toolProfile: "no-shell-workspace-write",
-      },
-    );
+    const session = await runBlipTask({
+      prompt: "Write both files",
+      workspaceRoot: workspace,
+      provider: "faux",
+      model: faux.getModel().id,
+      permissionMode: "workspace-write",
+      toolProfile: "no-shell-workspace-write",
+    });
 
     expect(session.changedFiles).toEqual(["alpha.txt", "beta.txt"]);
     expect(await readFile(path.join(workspace, "alpha.txt"), "utf8")).toBe("alpha\n");
@@ -193,7 +161,74 @@ describe("Blip runtime", () => {
     );
 
     expect(events).toContainEqual(expect.objectContaining({ type: "session_error", error: "Codex auth token expired" }));
-    expect(events).toContainEqual(expect.objectContaining({ type: "session_finished", status: "error", error: "Codex auth token expired" }));
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "session_finished",
+        status: "error",
+        error: "Codex auth token expired",
+      }),
+    );
+    faux.unregister();
+  });
+
+  test("keeps recovered tool failures separate from final session status", async () => {
+    const workspace = await tempWorkspace();
+    const faux = registerFauxProvider({ api: "faux", provider: "faux", tokensPerSecond: 0 });
+    faux.setResponses([fauxAssistantMessage(fauxToolCall("read_file", { path: "missing.txt" }, { id: "call_missing" }), { stopReason: "toolUse" }), fauxAssistantMessage("Recovered after the missing file.")]);
+
+    const events: any[] = [];
+    await runBlipTask(
+      {
+        prompt: "Read missing.txt and recover",
+        workspaceRoot: workspace,
+        provider: "faux",
+        model: faux.getModel().id,
+        permissionMode: "workspace-write",
+        toolProfile: "no-shell-workspace-write",
+      },
+      (event) => events.push(event),
+    );
+
+    expect(events).toContainEqual(expect.objectContaining({ type: "tool_call_failed", tool: "read_file" }));
+    expect(events).not.toContainEqual(expect.objectContaining({ type: "session_error" }));
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "session_finished",
+        status: "completed",
+        toolFailures: [expect.objectContaining({ callId: "call_missing", tool: "read_file" })],
+      }),
+    );
+    faux.unregister();
+  });
+
+  test("emits opt-in process diagnostics after session finish if process remains alive", async () => {
+    const workspace = await tempWorkspace();
+    const faux = registerFauxProvider({ api: "faux", provider: "faux", tokensPerSecond: 0 });
+    faux.setResponses([fauxAssistantMessage("done")]);
+
+    const events: any[] = [];
+    await runBlipTask(
+      {
+        prompt: "Say done",
+        workspaceRoot: workspace,
+        provider: "faux",
+        model: faux.getModel().id,
+        permissionMode: "workspace-write",
+        toolProfile: "no-shell-workspace-write",
+        processExitDiagnosticsDelayMs: 5,
+      },
+      (event) => events.push(event),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "process_diagnostics",
+        reason: expect.stringContaining("process still alive"),
+        activeHandles: expect.any(Array),
+        activeRequests: expect.any(Array),
+      }),
+    );
     faux.unregister();
   });
 
@@ -308,11 +343,26 @@ describe("Blip runtime", () => {
     const second = assistant("second") as AgentMessage & { role: "assistant" };
     second.usage = { ...second.usage, totalTokens: 2_000 };
     const entries = [
-      { type: "message" as const, id: "u1", timestamp: new Date().toISOString(), message: user("old " + "x".repeat(10_000)) },
+      {
+        type: "message" as const,
+        id: "u1",
+        timestamp: new Date().toISOString(),
+        message: user("old " + "x".repeat(10_000)),
+      },
       { type: "message" as const, id: "a1", timestamp: new Date().toISOString(), message: first },
-      { type: "message" as const, id: "u2", timestamp: new Date().toISOString(), message: user("middle") },
+      {
+        type: "message" as const,
+        id: "u2",
+        timestamp: new Date().toISOString(),
+        message: user("middle"),
+      },
       { type: "message" as const, id: "a2", timestamp: new Date().toISOString(), message: second },
-      { type: "message" as const, id: "u3", timestamp: new Date().toISOString(), message: user("tail") },
+      {
+        type: "message" as const,
+        id: "u3",
+        timestamp: new Date().toISOString(),
+        message: user("tail"),
+      },
     ];
 
     const rawEstimate = estimateEntriesTokens(entries);

@@ -32,17 +32,17 @@ Name mode:
 
 - Walks workspace files under `path`.
 - Skips common large directories such as `.git`, `node_modules`, `dist`, `build`, and `.turbo`.
-- Matches paths containing `query`.
+- Matches paths containing `query` with smart-case behavior.
 
 Content mode:
 
-- Uses `rg` when available.
-- Falls back to a TypeScript file walk and substring search.
+- Uses `rg --smart-case` when available.
+- Falls back to a TypeScript file walk with smart-case regex matching. If `query` is not a valid regular expression, fallback uses smart-case substring matching.
 - Skips likely binary files in fallback mode.
 - Records matched files as read in session metadata.
+- Includes search diagnostics such as `engine` and `smartCase` in tool result details.
 
 ## Current Gaps
 
 - Glob support is simple and not a full minimatch implementation.
-- Content fallback is substring search, not regex search.
 - Name and content search are combined in one tool.

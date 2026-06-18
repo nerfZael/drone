@@ -75,7 +75,9 @@ describe('parseCodexJsonl', () => {
   });
 
   test('parses final assistant text from completed turn metadata', () => {
-    expect(parseCodexJsonl('{"type":"turn.completed","last_agent_message":"Completed turn answer."}')).toEqual({
+    expect(
+      parseCodexJsonl('{"type":"turn.completed","last_agent_message":"Completed turn answer."}'),
+    ).toEqual({
       threadId: null,
       message: 'Completed turn answer.',
       terminalEvent: 'turn.completed',
@@ -111,6 +113,16 @@ describe('parseBlipJsonl', () => {
       sessionId: 'sess_blip',
       message: 'Hello from Blip.',
       terminalEvent: 'session_finished',
+      firstEventAt: '2026-06-17T00:00:00.000Z',
+      lastEventAt: '2026-06-17T00:00:02.000Z',
+      terminalEventAt: '2026-06-17T00:00:02.000Z',
+      terminalStatus: 'completed',
+      durationMs: 1000,
+      eventCounts: {
+        session_started: 1,
+        assistant_message: 1,
+        session_finished: 1,
+      },
     });
   });
 
@@ -126,6 +138,12 @@ describe('parseBlipJsonl', () => {
     ).toEqual({
       sessionId: 'sess_blip',
       message: 'Hello',
+      firstEventAt: '2026-06-17T00:00:00.000Z',
+      lastEventAt: '2026-06-17T00:00:01.000Z',
+      eventCounts: {
+        session_started: 1,
+        assistant_delta: 2,
+      },
     });
   });
 });
@@ -183,6 +201,16 @@ describe('prompt job transcript metadata', () => {
       message: 'Final Blip report.',
       sessionId: 'sess_blip',
       terminalEvent: 'session_finished',
+      firstEventAt: '2026-06-17T00:00:00.000Z',
+      lastEventAt: '2026-06-17T00:00:02.000Z',
+      terminalEventAt: '2026-06-17T00:00:02.000Z',
+      terminalStatus: 'completed',
+      durationMs: 1000,
+      eventCounts: {
+        session_started: 1,
+        assistant_message: 1,
+        session_finished: 1,
+      },
       stdoutBytes: 1024,
       stdoutTruncated: false,
       parsedAt: '2026-06-17T00:00:03.000Z',
@@ -191,6 +219,16 @@ describe('prompt job transcript metadata', () => {
       sessionId: 'sess_blip',
       message: 'Final Blip report.',
       terminalEvent: 'session_finished',
+      firstEventAt: '2026-06-17T00:00:00.000Z',
+      lastEventAt: '2026-06-17T00:00:02.000Z',
+      terminalEventAt: '2026-06-17T00:00:02.000Z',
+      terminalStatus: 'completed',
+      durationMs: 1000,
+      eventCounts: {
+        session_started: 1,
+        assistant_message: 1,
+        session_finished: 1,
+      },
     });
   });
 
@@ -205,6 +243,13 @@ describe('prompt job transcript metadata', () => {
     ).toEqual({
       sessionId: 'sess_blip',
       message: null,
+      firstEventAt: '2026-06-17T00:00:00.000Z',
+      lastEventAt: '2026-06-17T00:00:01.000Z',
+      eventCounts: {
+        session_started: 1,
+        tool_call_started: 1,
+      },
+      toolCallCount: 1,
       cloneActivity: {
         status: 'running',
         count: 2,
@@ -226,6 +271,24 @@ describe('prompt job transcript metadata', () => {
     ).toEqual({
       sessionId: 'sess_blip',
       message: 'Final Blip report.',
+      firstEventAt: '2026-06-17T00:00:00.000Z',
+      lastEventAt: '2026-06-17T00:00:03.000Z',
+      eventCounts: {
+        session_started: 1,
+        tool_call_started: 1,
+        tool_call_completed: 1,
+        assistant_message: 1,
+      },
+      toolCallCount: 1,
+      toolCallCompletedCount: 1,
+      longestToolCall: {
+        callId: 'call_clones',
+        tool: 'create_clones',
+        status: 'completed',
+        startedAt: '2026-06-17T00:00:01.000Z',
+        completedAt: '2026-06-17T00:00:02.000Z',
+        durationMs: 1000,
+      },
     });
   });
 

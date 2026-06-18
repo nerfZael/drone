@@ -1,13 +1,5 @@
 #!/usr/bin/env node
-import {
-  closeSync,
-  existsSync,
-  fstatSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
+import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -34,8 +26,6 @@ const ANSI = {
   green: "\x1b[32m",
   yellow: "\x1b[33m",
   cyan: "\x1b[36m",
-  defaultForeground: "\x1b[39m",
-  inputBackground: "\x1b[48;5;236m",
   gray: "\x1b[90m",
 };
 
@@ -188,11 +178,6 @@ function supportsAnsi(): boolean {
   return !process.env.NO_COLOR && process.env.TERM !== "dumb";
 }
 
-function foreground(code: string, text: string): string {
-  if (!supportsAnsi()) return text;
-  return `${code}${text}${ANSI.defaultForeground}`;
-}
-
 function bold(text: string): string {
   return ansi(ANSI.bold, text);
 }
@@ -255,9 +240,7 @@ function blipConfigFilePath(): string {
 function readCliConfig(): CliConfig {
   const raw = readJsonFile(blipConfigFilePath());
   if (!raw || typeof raw !== "object") return {};
-  const reasoning = typeof raw.reasoning === "string" && REASONING_LEVELS.includes(raw.reasoning as ReasoningLevel)
-    ? (raw.reasoning as ReasoningLevel)
-    : undefined;
+  const reasoning = typeof raw.reasoning === "string" && REASONING_LEVELS.includes(raw.reasoning as ReasoningLevel) ? (raw.reasoning as ReasoningLevel) : undefined;
   return {
     ...(typeof raw.provider === "string" && raw.provider.trim() ? { provider: raw.provider.trim() } : {}),
     ...(typeof raw.model === "string" && raw.model.trim() ? { model: raw.model.trim() } : {}),
@@ -302,14 +285,16 @@ function resolveReasoning(options: CliOptions): NonNullable<CliOptions["reasonin
 function resolveClonesEnabled(options: CliOptions): boolean {
   const config = readCliConfig();
   const env = String(process.env.BLIP_CLONES ?? "").trim();
-  return options.clonesEnabled ?? (env ? parseBooleanSetting(env) : config.clonesEnabled ?? DEFAULT_CLONES_ENABLED);
+  return options.clonesEnabled ?? (env ? parseBooleanSetting(env) : (config.clonesEnabled ?? DEFAULT_CLONES_ENABLED));
 }
 
 function jwtExpiresAtMs(token: string): number | undefined {
   try {
     const payload = token.split(".")[1];
     if (!payload) return undefined;
-    const json = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { exp?: unknown };
+    const json = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as {
+      exp?: unknown;
+    };
     const exp = typeof json.exp === "number" ? json.exp : NaN;
     return Number.isFinite(exp) && exp > 0 ? exp * 1000 : undefined;
   } catch {
@@ -347,7 +332,10 @@ function readJsonFile(filePath: string): any | null {
 function writeJsonFile(filePath: string, value: unknown): void {
   try {
     mkdirSync(path.dirname(filePath), { recursive: true });
-    writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
   } catch {
     // A refreshed token can still be used for this run even if persisting it fails.
   }
@@ -355,18 +343,16 @@ function writeJsonFile(filePath: string, value: unknown): void {
 
 function codexAuthFileCandidates(): string[] {
   const explicit = String(process.env.BLIP_CODEX_AUTH_FILE ?? "").trim();
-  const candidates = [
-    explicit,
-    path.join(os.homedir(), ".codex", "auth.json"),
-    path.resolve(process.cwd(), "auth.json"),
-  ].filter(Boolean);
+  const candidates = [explicit, path.join(os.homedir(), ".codex", "auth.json"), path.resolve(process.cwd(), "auth.json")].filter(Boolean);
   return Array.from(new Set(candidates));
 }
 
 async function resolvePiAiCodexAuth(filePath: string, raw: any): Promise<string | undefined> {
   const entry = raw?.[OPENAI_CODEX_PROVIDER];
   if (!entry || typeof entry !== "object") return undefined;
-  const result = await getOAuthApiKey(OPENAI_CODEX_PROVIDER, { [OPENAI_CODEX_PROVIDER]: entry as OAuthCredentials });
+  const result = await getOAuthApiKey(OPENAI_CODEX_PROVIDER, {
+    [OPENAI_CODEX_PROVIDER]: entry as OAuthCredentials,
+  });
   if (!result?.apiKey) return undefined;
   if (result.newCredentials !== entry) {
     raw[OPENAI_CODEX_PROVIDER] = { ...entry, ...result.newCredentials };
@@ -380,8 +366,7 @@ async function resolveCodexCliAuth(filePath: string, raw: any): Promise<string |
   if (!tokens || typeof tokens !== "object") return undefined;
   let access = String(tokens.access_token ?? tokens.access ?? "").trim();
   const refresh = String(tokens.refresh_token ?? tokens.refresh ?? "").trim();
-  const expires =
-    parseExpiresAtMs(tokens.expires_at ?? tokens.expiresAt ?? tokens.expires) ?? jwtExpiresAtMs(access);
+  const expires = parseExpiresAtMs(tokens.expires_at ?? tokens.expiresAt ?? tokens.expires) ?? jwtExpiresAtMs(access);
   if (!access && !refresh) return undefined;
   if (refresh && shouldRefresh(expires)) {
     const refreshed = await refreshOpenAICodexToken(refresh);
@@ -436,6 +421,8 @@ function renderHuman(event: BlipRuntimeEvent): void {
     process.stdout.write("\n");
     const detail = event.status === "error" && event.error ? `: ${event.error}` : "";
     console.error(`Blip finished: ${event.status}${detail}${event.changedFiles.length ? `; changed ${event.changedFiles.join(", ")}` : ""}`);
+  } else if (event.type === "process_diagnostics") {
+    console.error(`[process diagnostics] ${event.reason}; handles=${JSON.stringify(event.activeHandles)} requests=${JSON.stringify(event.activeRequests)}`);
   } else if (event.type === "compaction_completed") {
     console.error(`Compacted session: ${event.summaryId}`);
   } else if (event.type === "compaction_skipped") {
@@ -473,6 +460,7 @@ type RunContext = {
   toolProfile: ToolProfile;
   reasoning: ReasoningLevel;
   clonesEnabled: boolean;
+  processExitDiagnosticsDelayMs: number;
   getApiKey: (provider: string) => Promise<string | undefined>;
   emit: (event: BlipRuntimeEvent) => void;
 };
@@ -499,13 +487,7 @@ function resetInteractiveReadline(interactive: InteractiveReadline): void {
   });
 }
 
-function renderSelectPrompt<T extends string>(
-  output: NodeJS.WritableStream,
-  message: string,
-  choices: SelectChoice<T>[],
-  selectedIndex: number,
-  rendered: boolean,
-): void {
+function renderSelectPrompt<T extends string>(output: NodeJS.WritableStream, message: string, choices: SelectChoice<T>[], selectedIndex: number, rendered: boolean): void {
   if (rendered && supportsAnsi()) output.write(`\x1b[${choices.length + 1}A\r\x1b[J`);
   output.write(`? ${message} ${gray("(Use arrow keys)")}\n`);
   for (let index = 0; index < choices.length; index += 1) {
@@ -521,12 +503,7 @@ function clearSelectPrompt(output: NodeJS.WritableStream, lineCount: number): vo
   output.write(`\x1b[${lineCount}A\r\x1b[J`);
 }
 
-async function promptList<T extends string>(
-  interactive: InteractiveReadline,
-  message: string,
-  choices: SelectChoice<T>[],
-  defaultValue: T | undefined,
-): Promise<T> {
+async function promptList<T extends string>(interactive: InteractiveReadline, message: string, choices: SelectChoice<T>[], defaultValue: T | undefined): Promise<T> {
   if (choices.length === 0) throw new Error("no choices available");
   interactive.rl.close();
   const input = interactive.input as NodeJS.ReadStream & {
@@ -633,47 +610,15 @@ function renderInteractiveHeader(context: RunContext, write: (text: string) => v
   write(`${bold("Tip:")} ${gray("Use /model to switch models, /reasoning to change reasoning, /clones to toggle clones, /exit to quit.")}\n\n`);
 }
 
-function clearSubmittedPromptLine(write: (text: string) => void): void {
-  if (!supportsAnsi()) return;
-  write(`${ANSI.reset}\x1b[1A\r\x1b[2K`);
-}
-
 function inputLinePrefix(): string {
-  if (!supportsAnsi()) return "› ";
-  return `${ANSI.inputBackground}${foreground(ANSI.gray, "› ")}`;
-}
-
-function prepareInputLine(write: (text: string) => void): void {
-  if (!supportsAnsi()) return;
-  write(`\r${ANSI.inputBackground}\x1b[2K${ANSI.reset}\r`);
-}
-
-function renderInputRow(text: string, write: (text: string) => void): void {
-  if (!supportsAnsi()) {
-    write(`${text}\n`);
-    return;
-  }
-  write(`${ANSI.inputBackground}${text}\x1b[K${ANSI.reset}\n`);
-}
-
-function repaintSubmittedPrompt(prompt: string, write: (text: string) => void): void {
-  const lines = prompt.split(/\r?\n/);
-  if (supportsAnsi()) write(`${ANSI.reset}\x1b[1A\r\x1b[2K`);
-
-  for (let index = 0; index < lines.length; index += 1) {
-    const prefix = index === 0 ? foreground(ANSI.gray, "› ") : "  ";
-    renderInputRow(`${prefix}${lines[index]}`, write);
-  }
+  return "› ";
 }
 
 type InteractiveRenderState = {
   sawError: boolean;
 };
 
-function createInteractiveRenderer(
-  write: (text: string) => void,
-  state: InteractiveRenderState,
-): (event: BlipRuntimeEvent) => void {
+function createInteractiveRenderer(write: (text: string) => void, state: InteractiveRenderState): (event: BlipRuntimeEvent) => void {
   let wroteAssistantText = false;
   let lastEventWasTool = false;
   let lastError = "";
@@ -719,6 +664,11 @@ function createInteractiveRenderer(
       write("\n");
       wroteAssistantText = false;
       lastEventWasTool = false;
+      return;
+    }
+
+    if (event.type === "process_diagnostics") {
+      write(`${gray("process diagnostics")} ${event.reason}; handles=${JSON.stringify(event.activeHandles)} requests=${JSON.stringify(event.activeRequests)}\n`);
       return;
     }
 
@@ -770,7 +720,7 @@ function createInteractiveReadline(): InteractiveReadline | null {
   }
 }
 
-async function runPrompt(prompt: string, context: RunContext, options: CliOptions): Promise<string> {
+async function runPrompt(prompt: string, context: RunContext, options: CliOptions, processExitDiagnosticsDelayMs = context.processExitDiagnosticsDelayMs): Promise<string> {
   const session = await runBlipTask(
     {
       prompt,
@@ -786,6 +736,7 @@ async function runPrompt(prompt: string, context: RunContext, options: CliOption
       jsonl: options.jsonl,
       reasoning: context.reasoning,
       clonesEnabled: context.clonesEnabled,
+      processExitDiagnosticsDelayMs,
       getApiKey: context.getApiKey,
     },
     context.emit,
@@ -807,27 +758,22 @@ async function runInteractive(context: RunContext, options: CliOptions): Promise
     while (true) {
       let raw: string;
       try {
-        prepareInputLine(write);
         raw = await interactive.rl.question(inputLinePrefix());
       } catch {
         break;
       }
       const prompt = raw.trim();
       if (!prompt) {
-        clearSubmittedPromptLine(write);
         continue;
       }
       if (prompt === "/exit" || prompt === "/quit") {
-        clearSubmittedPromptLine(write);
         break;
       }
       if (prompt === "/model" || prompt.startsWith("/model ")) {
-        repaintSubmittedPrompt(prompt, write);
         await chooseInteractiveModel(prompt.slice("/model".length).trim(), context, interactive);
         continue;
       }
       if (prompt === "/reasoning" || prompt.startsWith("/reasoning ")) {
-        repaintSubmittedPrompt(prompt, write);
         const changed = await chooseInteractiveReasoning(prompt.slice("/reasoning".length).trim(), context, interactive);
         if (changed) {
           saveDefaultModelSetup(context.provider, context.model, context.reasoning);
@@ -836,22 +782,25 @@ async function runInteractive(context: RunContext, options: CliOptions): Promise
         continue;
       }
       if (prompt === "/clones" || prompt.startsWith("/clones ")) {
-        repaintSubmittedPrompt(prompt, write);
         chooseInteractiveClones(prompt.slice("/clones".length).trim(), context);
         continue;
       }
-      repaintSubmittedPrompt(prompt, write);
 
       const renderState: InteractiveRenderState = { sawError: false };
       try {
         context.emit = createInteractiveRenderer(write, renderState);
-        sessionId = await runPrompt(prompt, context, {
-          ...options,
-          sessionId,
-          continueLatest,
-          resumeLatest,
-          forkSessionId,
-        });
+        sessionId = await runPrompt(
+          prompt,
+          context,
+          {
+            ...options,
+            sessionId,
+            continueLatest,
+            resumeLatest,
+            forkSessionId,
+          },
+          0,
+        );
         continueLatest = false;
         resumeLatest = false;
         forkSessionId = undefined;
@@ -866,11 +815,7 @@ async function runInteractive(context: RunContext, options: CliOptions): Promise
   }
 }
 
-async function chooseInteractiveModel(
-  rawSelection: string,
-  context: RunContext,
-  interactive: InteractiveReadline,
-): Promise<void> {
+async function chooseInteractiveModel(rawSelection: string, context: RunContext, interactive: InteractiveReadline): Promise<void> {
   let selection = rawSelection.trim();
   const models = getModels(context.provider as any);
   if (!selection) {
@@ -938,11 +883,7 @@ function chooseInteractiveClones(rawSelection: string, context: RunContext): voi
   console.error(`Blip clones ${clonesEnabled ? "enabled" : "disabled"}`);
 }
 
-async function chooseInteractiveReasoning(
-  rawSelection: string,
-  context: RunContext,
-  interactive: InteractiveReadline,
-): Promise<boolean> {
+async function chooseInteractiveReasoning(rawSelection: string, context: RunContext, interactive: InteractiveReadline): Promise<boolean> {
   const selection = rawSelection.trim();
   if (selection) {
     try {
@@ -1014,7 +955,14 @@ async function main(): Promise<void> {
   };
 
   if (options.compact) {
-    await compactSession({ workspaceRoot, sessionId: options.sessionId, trigger: "manual", reasoning, getApiKey, onEvent: emit });
+    await compactSession({
+      workspaceRoot,
+      sessionId: options.sessionId,
+      trigger: "manual",
+      reasoning,
+      getApiKey,
+      onEvent: emit,
+    });
     return;
   }
 
@@ -1032,6 +980,7 @@ async function main(): Promise<void> {
     toolProfile,
     reasoning,
     clonesEnabled,
+    processExitDiagnosticsDelayMs: 5_000,
     getApiKey,
     emit: emitAndTrack,
   };

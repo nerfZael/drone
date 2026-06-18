@@ -58,10 +58,37 @@ export type BlipRuntimeEvent =
   | (BlipRuntimeEventBase & { type: "turn_started"; prompt?: string })
   | (BlipRuntimeEventBase & { type: "assistant_delta"; text: string })
   | (BlipRuntimeEventBase & { type: "assistant_message"; messageId: string; text: string })
-  | (BlipRuntimeEventBase & { type: "tool_call_started"; callId: string; tool: string; args: unknown })
-  | (BlipRuntimeEventBase & { type: "tool_call_progress"; callId: string; tool: string; message: string; details?: unknown })
-  | (BlipRuntimeEventBase & { type: "tool_call_completed"; callId: string; tool: string; result: unknown })
-  | (BlipRuntimeEventBase & { type: "tool_call_failed"; callId: string; tool: string; error: string })
+  | (BlipRuntimeEventBase & {
+      type: "tool_call_started";
+      callId: string;
+      tool: string;
+      args: unknown;
+    })
+  | (BlipRuntimeEventBase & {
+      type: "tool_call_progress";
+      callId: string;
+      tool: string;
+      message: string;
+      details?: unknown;
+    })
+  | (BlipRuntimeEventBase & {
+      type: "tool_call_completed";
+      callId: string;
+      tool: string;
+      result: unknown;
+    })
+  | (BlipRuntimeEventBase & {
+      type: "tool_call_failed";
+      callId: string;
+      tool: string;
+      error: string;
+    })
+  | (BlipRuntimeEventBase & {
+      type: "process_diagnostics";
+      reason: string;
+      activeHandles: Array<{ type: string; count: number }>;
+      activeRequests: Array<{ type: string; count: number }>;
+    })
   | (BlipRuntimeEventBase & { type: "compaction_started"; reason: string })
   | (BlipRuntimeEventBase & { type: "compaction_skipped"; reason: string })
   | (BlipRuntimeEventBase & {
@@ -71,7 +98,14 @@ export type BlipRuntimeEvent =
       tokensAfter: number;
     })
   | (BlipRuntimeEventBase & { type: "session_error"; error: string; recoverable: boolean })
-  | (BlipRuntimeEventBase & { type: "session_finished"; status: BlipSessionStatus; changedFiles: string[]; durationMs: number; error?: string });
+  | (BlipRuntimeEventBase & {
+      type: "session_finished";
+      status: BlipSessionStatus;
+      changedFiles: string[];
+      durationMs: number;
+      error?: string;
+      toolFailures?: Array<{ callId: string; tool: string; error: string }>;
+    });
 
 export interface RunBlipOptions {
   prompt: string;
@@ -87,5 +121,6 @@ export interface RunBlipOptions {
   jsonl?: boolean;
   reasoning?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
   clonesEnabled?: boolean;
+  processExitDiagnosticsDelayMs?: number;
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
 }

@@ -5,10 +5,14 @@ export function readBuiltinTranscriptSessionId(
   agentId: Extract<BuiltinTranscriptAgentId, 'codex' | 'opencode' | 'pi' | 'blip'>,
 ): string {
   if (agentId === 'codex') {
-    return typeof chatEntry?.codexThreadId === 'string' ? String(chatEntry.codexThreadId).trim() : '';
+    return typeof chatEntry?.codexThreadId === 'string'
+      ? String(chatEntry.codexThreadId).trim()
+      : '';
   }
   if (agentId === 'opencode') {
-    return typeof chatEntry?.openCodeSessionId === 'string' ? String(chatEntry.openCodeSessionId).trim() : '';
+    return typeof chatEntry?.openCodeSessionId === 'string'
+      ? String(chatEntry.openCodeSessionId).trim()
+      : '';
   }
   if (agentId === 'pi') {
     return typeof chatEntry?.piSessionId === 'string' ? String(chatEntry.piSessionId).trim() : '';
@@ -16,7 +20,10 @@ export function readBuiltinTranscriptSessionId(
   return typeof chatEntry?.blipSessionId === 'string' ? String(chatEntry.blipSessionId).trim() : '';
 }
 
-export function hasKnownBuiltinTranscriptSession(chatEntry: any, agentId: BuiltinTranscriptAgentId): boolean {
+export function hasKnownBuiltinTranscriptSession(
+  chatEntry: any,
+  agentId: BuiltinTranscriptAgentId,
+): boolean {
   if (agentId === 'codex' || agentId === 'opencode' || agentId === 'pi' || agentId === 'blip') {
     return Boolean(readBuiltinTranscriptSessionId(chatEntry, agentId));
   }
@@ -56,7 +63,11 @@ function parseUuid(text: string): string | null {
 }
 
 type CodexTerminalEvent = 'turn.completed' | 'response.completed' | 'response.failed' | 'error';
-type CodexJsonlParseResult = { threadId: string | null; message: string | null; terminalEvent?: CodexTerminalEvent };
+type CodexJsonlParseResult = {
+  threadId: string | null;
+  message: string | null;
+  terminalEvent?: CodexTerminalEvent;
+};
 type PiJsonlParseResult = { sessionId: string | null; message: string | null };
 export type BlipCloneActivity = {
   status: 'running';
@@ -64,14 +75,39 @@ export type BlipCloneActivity = {
   tasks: string[];
 };
 
+export type BlipToolCallSummary = {
+  callId?: string;
+  tool: string;
+  status: 'completed' | 'failed';
+  startedAt?: string;
+  completedAt?: string;
+  durationMs: number;
+  exitCode?: number;
+  error?: string;
+};
+
 type BlipJsonlParseResult = {
   sessionId: string | null;
   message: string | null;
   terminalEvent?: 'session_finished' | 'session_error';
+  firstEventAt?: string;
+  lastEventAt?: string;
+  terminalEventAt?: string;
+  terminalStatus?: string;
+  terminalError?: string;
+  durationMs?: number;
+  eventCounts?: Record<string, number>;
+  toolCallCount?: number;
+  toolCallCompletedCount?: number;
+  toolCallFailedCount?: number;
+  longestToolCall?: BlipToolCallSummary;
   cloneActivity?: BlipCloneActivity;
 };
 
-function createCodexJsonlParser(): { pushLine: (line: string) => void; result: () => CodexJsonlParseResult } {
+function createCodexJsonlParser(): {
+  pushLine: (line: string) => void;
+  result: () => CodexJsonlParseResult;
+} {
   let threadId: string | null = null;
   let lastMsg: string | null = null;
   let streamedMsg = '';
@@ -129,14 +165,23 @@ function createCodexJsonlParser(): { pushLine: (line: string) => void; result: (
       }
       if (!obj || typeof obj !== 'object') return;
       const type = String(obj.type ?? '').trim();
-      if (type === 'turn.completed' || type === 'response.completed' || type === 'response.failed' || type === 'error') {
+      if (
+        type === 'turn.completed' ||
+        type === 'response.completed' ||
+        type === 'response.failed' ||
+        type === 'error'
+      ) {
         terminalEvent = type;
       }
       if (obj.type === 'thread.started' && typeof obj.thread_id === 'string') {
         threadId = obj.thread_id;
         return;
       }
-      if ((obj.type === 'item.completed' || obj.type === 'item.started') && obj.item && typeof obj.item === 'object') {
+      if (
+        (obj.type === 'item.completed' || obj.type === 'item.started') &&
+        obj.item &&
+        typeof obj.item === 'object'
+      ) {
         considerAssistantItem(obj.item);
         return;
       }
@@ -170,7 +215,10 @@ function createCodexJsonlParser(): { pushLine: (line: string) => void; result: (
   };
 }
 
-function createPiJsonlParser(): { pushLine: (line: string) => void; result: () => PiJsonlParseResult } {
+function createPiJsonlParser(): {
+  pushLine: (line: string) => void;
+  result: () => PiJsonlParseResult;
+} {
   let sessionId: string | null = null;
   let lastMsg: string | null = null;
 
@@ -227,7 +275,10 @@ function createPiJsonlParser(): { pushLine: (line: string) => void; result: () =
 function normalizeBlipCloneActivity(raw: any): BlipCloneActivity | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const tasksRaw = Array.isArray(raw.tasks) ? raw.tasks : [];
-  const tasks = tasksRaw.map((task: any) => String(task ?? '').trim()).filter(Boolean).slice(0, 8);
+  const tasks = tasksRaw
+    .map((task: any) => String(task ?? '').trim())
+    .filter(Boolean)
+    .slice(0, 8);
   if (tasks.length === 0) return undefined;
   const countRaw = Number(raw.count);
   const count = Number.isFinite(countRaw) && countRaw > 0 ? Math.floor(countRaw) : tasks.length;
@@ -236,16 +287,73 @@ function normalizeBlipCloneActivity(raw: any): BlipCloneActivity | undefined {
 
 function cloneActivityFromArgs(args: any): BlipCloneActivity | undefined {
   const tasksRaw = args && typeof args === 'object' && Array.isArray(args.tasks) ? args.tasks : [];
-  const tasks = tasksRaw.map((task: any) => String(task ?? '').trim()).filter(Boolean).slice(0, 8);
+  const tasks = tasksRaw
+    .map((task: any) => String(task ?? '').trim())
+    .filter(Boolean)
+    .slice(0, 8);
   if (tasks.length === 0) return undefined;
   return { status: 'running', count: tasks.length, tasks };
 }
 
-function createBlipJsonlParser(): { pushLine: (line: string) => void; result: () => BlipJsonlParseResult } {
+function optionalBlipTimestamp(raw: any): string | null {
+  const text = typeof raw === 'string' ? raw.trim() : '';
+  if (!text) return null;
+  return Number.isFinite(Date.parse(text)) ? text : null;
+}
+
+function optionalFiniteDurationMs(raw: any): number | null {
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n) : null;
+}
+
+function optionalToolExitCode(raw: any): number | null {
+  const n = Number(raw);
+  return Number.isFinite(n) ? Math.trunc(n) : null;
+}
+
+function truncateBlipDiagnosticText(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= 500) return trimmed;
+  return `${trimmed.slice(0, 497)}...`;
+}
+
+function extractBlipErrorText(raw: any): string | null {
+  if (typeof raw === 'string' && raw.trim()) return truncateBlipDiagnosticText(raw);
+  if (!raw || typeof raw !== 'object') return null;
+  const direct =
+    takeStringText(raw.message) ?? takeStringText(raw.error) ?? takeStringText(raw.detail);
+  if (direct) return truncateBlipDiagnosticText(direct);
+  try {
+    const json = JSON.stringify(raw);
+    return json ? truncateBlipDiagnosticText(json) : null;
+  } catch {
+    return null;
+  }
+}
+
+function createBlipJsonlParser(): {
+  pushLine: (line: string) => void;
+  result: () => BlipJsonlParseResult;
+} {
   let sessionId: string | null = null;
   let lastMsg: string | null = null;
   let streamedMsg = '';
   let terminalEvent: BlipJsonlParseResult['terminalEvent'];
+  let firstEventAt: string | null = null;
+  let lastEventAt: string | null = null;
+  let terminalEventAt: string | null = null;
+  let terminalStatus: string | null = null;
+  let terminalError: string | null = null;
+  let durationMs: number | null = null;
+  let toolCallCount = 0;
+  let toolCallCompletedCount = 0;
+  let toolCallFailedCount = 0;
+  let longestToolCall: BlipToolCallSummary | null = null;
+  const eventCounts: Record<string, number> = {};
+  const activeToolCalls = new Map<
+    string,
+    { tool: string; startedAt?: string; startedAtMs?: number }
+  >();
   const activeCloneCalls = new Map<string, BlipCloneActivity>();
 
   return {
@@ -262,14 +370,61 @@ function createBlipJsonlParser(): { pushLine: (line: string) => void; result: ()
       const parsedSessionId = String(obj.sessionId ?? '').trim();
       if (parsedSessionId) sessionId = parsedSessionId;
       const type = String(obj.type ?? '').trim();
+      if (type) eventCounts[type] = (eventCounts[type] ?? 0) + 1;
+      const timestamp = optionalBlipTimestamp(obj.timestamp);
+      if (timestamp) {
+        if (!firstEventAt) firstEventAt = timestamp;
+        lastEventAt = timestamp;
+      }
       const tool = String(obj.tool ?? '').trim();
       const callId = String(obj.callId ?? '').trim();
+      if (type === 'tool_call_started') {
+        toolCallCount += 1;
+        if (callId) {
+          activeToolCalls.set(callId, {
+            tool: tool || 'unknown',
+            ...(timestamp ? { startedAt: timestamp, startedAtMs: Date.parse(timestamp) } : {}),
+          });
+        }
+      }
+      if (type === 'tool_call_completed' || type === 'tool_call_failed') {
+        if (type === 'tool_call_completed') toolCallCompletedCount += 1;
+        else toolCallFailedCount += 1;
+        const started = callId ? activeToolCalls.get(callId) : undefined;
+        const completedAtMs = timestamp ? Date.parse(timestamp) : null;
+        const explicitDurationMs = optionalFiniteDurationMs(obj.durationMs);
+        const computedDurationMs =
+          explicitDurationMs ??
+          (started?.startedAtMs != null && completedAtMs != null
+            ? Math.max(0, Math.round(completedAtMs - started.startedAtMs))
+            : null);
+        if (computedDurationMs != null) {
+          const summary: BlipToolCallSummary = {
+            ...(callId ? { callId } : {}),
+            tool: tool || started?.tool || 'unknown',
+            status: type === 'tool_call_completed' ? 'completed' : 'failed',
+            ...(started?.startedAt ? { startedAt: started.startedAt } : {}),
+            ...(timestamp ? { completedAt: timestamp } : {}),
+            durationMs: computedDurationMs,
+            ...(optionalToolExitCode(obj.exitCode) != null
+              ? { exitCode: optionalToolExitCode(obj.exitCode)! }
+              : {}),
+            ...(extractBlipErrorText(obj.error) ? { error: extractBlipErrorText(obj.error)! } : {}),
+          };
+          if (!longestToolCall || summary.durationMs > longestToolCall.durationMs)
+            longestToolCall = summary;
+        }
+        if (callId) activeToolCalls.delete(callId);
+      }
       if (tool === 'create_clones' && type === 'tool_call_started') {
         const cloneActivity = cloneActivityFromArgs(obj.args);
         if (callId && cloneActivity) activeCloneCalls.set(callId, cloneActivity);
         return;
       }
-      if (tool === 'create_clones' && (type === 'tool_call_completed' || type === 'tool_call_failed')) {
+      if (
+        tool === 'create_clones' &&
+        (type === 'tool_call_completed' || type === 'tool_call_failed')
+      ) {
         if (callId) activeCloneCalls.delete(callId);
         return;
       }
@@ -285,19 +440,39 @@ function createBlipJsonlParser(): { pushLine: (line: string) => void; result: ()
       }
       if (type === 'session_finished') {
         terminalEvent = 'session_finished';
+        terminalEventAt = timestamp;
+        terminalStatus = String(obj.status ?? '').trim() || null;
+        terminalError = extractBlipErrorText(obj.error);
+        durationMs = optionalFiniteDurationMs(obj.durationMs);
         return;
       }
       if (type === 'session_error') {
         terminalEvent = 'session_error';
+        terminalEventAt = timestamp;
+        terminalStatus = String(obj.status ?? '').trim() || null;
+        terminalError = extractBlipErrorText(obj.error);
+        durationMs = optionalFiniteDurationMs(obj.durationMs);
       }
     },
     result() {
       const activeCloneActivities = Array.from(activeCloneCalls.values());
       const cloneActivity = activeCloneActivities[activeCloneActivities.length - 1];
+      const eventCountsOut = Object.keys(eventCounts).length > 0 ? eventCounts : null;
       return {
         sessionId,
         message: lastMsg ?? (streamedMsg ? streamedMsg : null),
         ...(terminalEvent ? { terminalEvent } : {}),
+        ...(firstEventAt ? { firstEventAt } : {}),
+        ...(lastEventAt ? { lastEventAt } : {}),
+        ...(terminalEventAt ? { terminalEventAt } : {}),
+        ...(terminalStatus ? { terminalStatus } : {}),
+        ...(terminalError ? { terminalError } : {}),
+        ...(durationMs != null ? { durationMs } : {}),
+        ...(eventCountsOut ? { eventCounts: eventCountsOut } : {}),
+        ...(toolCallCount > 0 ? { toolCallCount } : {}),
+        ...(toolCallCompletedCount > 0 ? { toolCallCompletedCount } : {}),
+        ...(toolCallFailedCount > 0 ? { toolCallFailedCount } : {}),
+        ...(longestToolCall ? { longestToolCall } : {}),
         ...(cloneActivity ? { cloneActivity } : {}),
       };
     },
@@ -310,7 +485,9 @@ export function parseCodexJsonl(stdout: string): CodexJsonlParseResult {
   return parser.result();
 }
 
-export async function parseCodexJsonlLines(lines: AsyncIterable<string> | Iterable<string>): Promise<CodexJsonlParseResult> {
+export async function parseCodexJsonlLines(
+  lines: AsyncIterable<string> | Iterable<string>,
+): Promise<CodexJsonlParseResult> {
   const parser = createCodexJsonlParser();
   for await (const line of lines) parser.pushLine(line);
   return parser.result();
@@ -328,46 +505,61 @@ export function parseBlipJsonl(stdout: string): BlipJsonlParseResult {
   return parser.result();
 }
 
-export async function parsePiJsonlLines(lines: AsyncIterable<string> | Iterable<string>): Promise<PiJsonlParseResult> {
+export async function parsePiJsonlLines(
+  lines: AsyncIterable<string> | Iterable<string>,
+): Promise<PiJsonlParseResult> {
   const parser = createPiJsonlParser();
   for await (const line of lines) parser.pushLine(line);
   return parser.result();
 }
 
-export async function parseBlipJsonlLines(lines: AsyncIterable<string> | Iterable<string>): Promise<BlipJsonlParseResult> {
+export async function parseBlipJsonlLines(
+  lines: AsyncIterable<string> | Iterable<string>,
+): Promise<BlipJsonlParseResult> {
   const parser = createBlipJsonlParser();
   for await (const line of lines) parser.pushLine(line);
   return parser.result();
 }
 
 export type BuiltinPromptJobTranscript =
-	  | {
-	      kind: 'codex';
-	      message: string | null;
-	      threadId: string | null;
-	      terminalEvent?: CodexTerminalEvent;
-	      stdoutBytes?: number;
-	      stdoutTruncated?: boolean;
-	      parsedAt?: string;
-	    }
-	  | {
-	      kind: 'pi';
-	      message: string | null;
-	      sessionId: string | null;
-	      stdoutBytes?: number;
-	      stdoutTruncated?: boolean;
-	      parsedAt?: string;
-	    }
-	  | {
-	      kind: 'blip';
-	      message: string | null;
-	      sessionId: string | null;
-	      terminalEvent?: 'session_finished' | 'session_error';
-	      cloneActivity?: BlipCloneActivity;
-	      stdoutBytes?: number;
-	      stdoutTruncated?: boolean;
-	      parsedAt?: string;
-	    };
+  | {
+      kind: 'codex';
+      message: string | null;
+      threadId: string | null;
+      terminalEvent?: CodexTerminalEvent;
+      stdoutBytes?: number;
+      stdoutTruncated?: boolean;
+      parsedAt?: string;
+    }
+  | {
+      kind: 'pi';
+      message: string | null;
+      sessionId: string | null;
+      stdoutBytes?: number;
+      stdoutTruncated?: boolean;
+      parsedAt?: string;
+    }
+  | {
+      kind: 'blip';
+      message: string | null;
+      sessionId: string | null;
+      terminalEvent?: 'session_finished' | 'session_error';
+      firstEventAt?: string;
+      lastEventAt?: string;
+      terminalEventAt?: string;
+      terminalStatus?: string;
+      terminalError?: string;
+      durationMs?: number;
+      eventCounts?: Record<string, number>;
+      toolCallCount?: number;
+      toolCallCompletedCount?: number;
+      toolCallFailedCount?: number;
+      longestToolCall?: BlipToolCallSummary;
+      cloneActivity?: BlipCloneActivity;
+      stdoutBytes?: number;
+      stdoutTruncated?: boolean;
+      parsedAt?: string;
+    };
 
 function optionalString(raw: any): string | null {
   return typeof raw === 'string' && raw.trim() ? raw : null;
@@ -382,8 +574,36 @@ function promptJobTranscriptMeta(opts?: {
     ...(typeof opts?.stdoutBytes === 'number' && Number.isFinite(opts.stdoutBytes)
       ? { stdoutBytes: Math.max(0, Math.floor(opts.stdoutBytes)) }
       : {}),
-    ...(typeof opts?.stdoutTruncated === 'boolean' ? { stdoutTruncated: opts.stdoutTruncated } : {}),
-    ...(typeof opts?.parsedAt === 'string' && opts.parsedAt.trim() ? { parsedAt: opts.parsedAt.trim() } : {}),
+    ...(typeof opts?.stdoutTruncated === 'boolean'
+      ? { stdoutTruncated: opts.stdoutTruncated }
+      : {}),
+    ...(typeof opts?.parsedAt === 'string' && opts.parsedAt.trim()
+      ? { parsedAt: opts.parsedAt.trim() }
+      : {}),
+  };
+}
+
+function blipTranscriptDiagnostics(
+  parsed: BlipJsonlParseResult,
+): Partial<Extract<BuiltinPromptJobTranscript, { kind: 'blip' }>> {
+  return {
+    ...(parsed.firstEventAt ? { firstEventAt: parsed.firstEventAt } : {}),
+    ...(parsed.lastEventAt ? { lastEventAt: parsed.lastEventAt } : {}),
+    ...(parsed.terminalEventAt ? { terminalEventAt: parsed.terminalEventAt } : {}),
+    ...(parsed.terminalStatus ? { terminalStatus: parsed.terminalStatus } : {}),
+    ...(parsed.terminalError ? { terminalError: parsed.terminalError } : {}),
+    ...(typeof parsed.durationMs === 'number' && Number.isFinite(parsed.durationMs)
+      ? { durationMs: parsed.durationMs }
+      : {}),
+    ...(parsed.eventCounts ? { eventCounts: parsed.eventCounts } : {}),
+    ...(typeof parsed.toolCallCount === 'number' ? { toolCallCount: parsed.toolCallCount } : {}),
+    ...(typeof parsed.toolCallCompletedCount === 'number'
+      ? { toolCallCompletedCount: parsed.toolCallCompletedCount }
+      : {}),
+    ...(typeof parsed.toolCallFailedCount === 'number'
+      ? { toolCallFailedCount: parsed.toolCallFailedCount }
+      : {}),
+    ...(parsed.longestToolCall ? { longestToolCall: parsed.longestToolCall } : {}),
   };
 }
 
@@ -419,6 +639,7 @@ export function parseBuiltinPromptJobTranscript(
       message: parsed.message,
       sessionId: parsed.sessionId,
       ...(parsed.terminalEvent ? { terminalEvent: parsed.terminalEvent } : {}),
+      ...blipTranscriptDiagnostics(parsed),
       ...(parsed.cloneActivity ? { cloneActivity: parsed.cloneActivity } : {}),
       ...promptJobTranscriptMeta(opts),
     };
@@ -458,6 +679,7 @@ export async function parseBuiltinPromptJobTranscriptLines(
       message: parsed.message,
       sessionId: parsed.sessionId,
       ...(parsed.terminalEvent ? { terminalEvent: parsed.terminalEvent } : {}),
+      ...blipTranscriptDiagnostics(parsed),
       ...(parsed.cloneActivity ? { cloneActivity: parsed.cloneActivity } : {}),
       ...promptJobTranscriptMeta(opts),
     };
@@ -465,9 +687,17 @@ export async function parseBuiltinPromptJobTranscriptLines(
   return null;
 }
 
-export function parseCodexJobTranscript(job: any): { threadId: string | null; message: string | null; terminalEvent?: CodexTerminalEvent } {
+export function parseCodexJobTranscript(job: any): {
+  threadId: string | null;
+  message: string | null;
+  terminalEvent?: CodexTerminalEvent;
+} {
   const transcript = job?.transcript;
-  if (transcript && typeof transcript === 'object' && String(transcript.kind ?? '').trim() === 'codex') {
+  if (
+    transcript &&
+    typeof transcript === 'object' &&
+    String(transcript.kind ?? '').trim() === 'codex'
+  ) {
     if (Object.prototype.hasOwnProperty.call(transcript, 'message')) {
       const terminalEventRaw = String(transcript.terminalEvent ?? '').trim();
       const terminalEvent =
@@ -487,9 +717,16 @@ export function parseCodexJobTranscript(job: any): { threadId: string | null; me
   return parseCodexJsonl(String(job?.stdout ?? ''));
 }
 
-export function parsePiJobTranscript(job: any): { sessionId: string | null; message: string | null } {
+export function parsePiJobTranscript(job: any): {
+  sessionId: string | null;
+  message: string | null;
+} {
   const transcript = job?.transcript;
-  if (transcript && typeof transcript === 'object' && String(transcript.kind ?? '').trim() === 'pi') {
+  if (
+    transcript &&
+    typeof transcript === 'object' &&
+    String(transcript.kind ?? '').trim() === 'pi'
+  ) {
     if (Object.prototype.hasOwnProperty.call(transcript, 'message')) {
       return {
         sessionId: optionalString(transcript.sessionId),
@@ -504,19 +741,37 @@ export function parseBlipJobTranscript(job: any): {
   sessionId: string | null;
   message: string | null;
   terminalEvent?: 'session_finished' | 'session_error';
+  firstEventAt?: string;
+  lastEventAt?: string;
+  terminalEventAt?: string;
+  terminalStatus?: string;
+  terminalError?: string;
+  durationMs?: number;
+  eventCounts?: Record<string, number>;
+  toolCallCount?: number;
+  toolCallCompletedCount?: number;
+  toolCallFailedCount?: number;
+  longestToolCall?: BlipToolCallSummary;
   cloneActivity?: BlipCloneActivity;
 } {
   const transcript = job?.transcript;
-  if (transcript && typeof transcript === 'object' && String(transcript.kind ?? '').trim() === 'blip') {
+  if (
+    transcript &&
+    typeof transcript === 'object' &&
+    String(transcript.kind ?? '').trim() === 'blip'
+  ) {
     if (Object.prototype.hasOwnProperty.call(transcript, 'message')) {
       const terminalEventRaw = String(transcript.terminalEvent ?? '').trim();
       const terminalEvent =
-        terminalEventRaw === 'session_finished' || terminalEventRaw === 'session_error' ? terminalEventRaw : undefined;
+        terminalEventRaw === 'session_finished' || terminalEventRaw === 'session_error'
+          ? terminalEventRaw
+          : undefined;
       const cloneActivity = normalizeBlipCloneActivity((transcript as any).cloneActivity);
       return {
         sessionId: optionalString(transcript.sessionId),
         message: optionalString(transcript.message),
         ...(terminalEvent ? { terminalEvent } : {}),
+        ...blipTranscriptDiagnostics(transcript as any),
         ...(cloneActivity ? { cloneActivity } : {}),
       };
     }
@@ -524,7 +779,11 @@ export function parseBlipJobTranscript(job: any): {
   return parseBlipJsonl(String(job?.stdout ?? ''));
 }
 
-export function formatCodexJobFailure(stdoutRaw: string, stderrRaw: string, fallbackRaw: string): string {
+export function formatCodexJobFailure(
+  stdoutRaw: string,
+  stderrRaw: string,
+  fallbackRaw: string,
+): string {
   const stdout = String(stdoutRaw ?? '').trim();
   const stderr = String(stderrRaw ?? '').trim();
   const fallback = String(fallbackRaw ?? '').trim() || 'Codex turn failed.';

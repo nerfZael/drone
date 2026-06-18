@@ -11,9 +11,10 @@ The system prompt currently includes:
 1. Blip identity and basic coding-agent behavior.
 2. Workflow rules.
 3. Tool-profile-specific rules.
-4. Patch rules.
-5. Permission and safety rules.
-6. Repository instructions from `<workspace>/AGENTS.md`, when that file exists.
+4. Clone rules, when clones are enabled.
+5. Patch rules.
+6. Permission and safety rules.
+7. Repository instructions from `<workspace>/AGENTS.md`, when that file exists.
 
 Compaction summaries are not injected into the system prompt. They are added to model-visible message history as a synthetic user message with the prefix `Summary of earlier conversation:`.
 
@@ -35,6 +36,10 @@ Tool rules depend on the active profile:
 - `local-trusted-write`: tells the model that `bash`, `apply_patch`, `read_file`, `search_files`, and `list_files` are available.
 - `read-only`: tells the model that only inspection tools are available and mutation is not allowed.
 - `no-shell-workspace-write`: tells the model that bash is unavailable and structured file tools are used.
+
+The workflow prompt asks the model to batch independent read/search/list/bash calls in one assistant turn when they can run in parallel.
+
+When clones are enabled, the prompt asks the model to prefer `create_clones` for separable work, especially when the user explicitly permits parallelization.
 
 ## Current Gaps
 

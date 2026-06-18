@@ -18,6 +18,13 @@ type CloneRunResult = {
   status: "completed" | "error";
   message: string;
   error?: string;
+  toolFailures?: ToolFailure[];
+};
+
+type ToolFailure = {
+  callId: string;
+  tool: string;
+  error: string;
 };
 
 function nowIso(): string {
@@ -35,12 +42,13 @@ function eventBase(sessionId: string, turnId?: string): Pick<BlipRuntimeEvent, "
 
 function messageText(message: AgentMessage): string {
   if (message.role === "user") {
-    return typeof message.content === "string"
-      ? message.content
-      : message.content.map((item) => (item.type === "text" ? item.text : `[${item.type}]`)).join("\n");
+    return typeof message.content === "string" ? message.content : message.content.map((item) => (item.type === "text" ? item.text : `[${item.type}]`)).join("\n");
   }
   if (message.role === "assistant") {
-    return message.content.map((item) => (item.type === "text" ? item.text : "")).filter(Boolean).join("\n");
+    return message.content
+      .map((item) => (item.type === "text" ? item.text : ""))
+      .filter(Boolean)
+      .join("\n");
   }
   if (message.role === "toolResult") {
     return message.content.map((item) => (item.type === "text" ? item.text : `[${item.type}]`)).join("\n");
@@ -55,6 +63,28 @@ function assistantFailureMessage(message: AgentMessage): string | undefined {
   const errorMessage = String((message as { errorMessage?: unknown }).errorMessage ?? "").trim();
   if (errorMessage) return errorMessage;
   return stopReason === "aborted" ? "Assistant run was aborted" : "Assistant run failed without an error message";
+}
+
+function summarizeProcessItems(items: unknown[]): Array<{ type: string; count: number }> {
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    const type = item && typeof item === "object" && (item as { constructor?: { name?: string } }).constructor?.name ? String((item as { constructor: { name: string } }).constructor.name) : typeof item;
+    counts.set(type, (counts.get(type) ?? 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([type, count]) => ({ type, count }));
+}
+
+function collectProcessDiagnostics(): Pick<Extract<BlipRuntimeEvent, { type: "process_diagnostics" }>, "activeHandles" | "activeRequests"> {
+  const processWithDiagnostics = process as typeof process & {
+    _getActiveHandles?: () => unknown[];
+    _getActiveRequests?: () => unknown[];
+  };
+  return {
+    activeHandles: summarizeProcessItems(processWithDiagnostics._getActiveHandles?.() ?? []),
+    activeRequests: summarizeProcessItems(processWithDiagnostics._getActiveRequests?.() ?? []),
+  };
 }
 
 function resolveModel(provider: string, modelId: string): Model<any> {
@@ -74,7 +104,9 @@ function resolveModel(provider: string, modelId: string): Model<any> {
       maxTokens: 16_384,
     } satisfies Model<any>;
   }
-  const available = getModels(provider as any).map((item) => item.id).slice(0, 10);
+  const available = getModels(provider as any)
+    .map((item) => item.id)
+    .slice(0, 10);
   throw new Error(`unknown model ${provider}/${modelId}${available.length ? `; examples: ${available.join(", ")}` : ""}`);
 }
 
@@ -158,21 +190,16 @@ async function resolveSession(store: SessionStore, options: RunBlipOptions): Pro
   };
 }
 
-export async function compactSession(input: {
-  workspaceRoot: string;
-  sessionId?: string;
-  trigger?: "manual" | "auto";
-  settings?: CompactionSettings;
-  model?: Model<any>;
-  reasoning?: RunBlipOptions["reasoning"];
-  getApiKey?: RunBlipOptions["getApiKey"];
-  onEvent?: RuntimeSink;
-}): Promise<BlipSessionState> {
+export async function compactSession(input: { workspaceRoot: string; sessionId?: string; trigger?: "manual" | "auto"; settings?: CompactionSettings; model?: Model<any>; reasoning?: RunBlipOptions["reasoning"]; getApiKey?: RunBlipOptions["getApiKey"]; onEvent?: RuntimeSink }): Promise<BlipSessionState> {
   const store = new SessionStore(input.workspaceRoot);
-  const session = input.sessionId ? await store.load(input.sessionId) : (await store.latest());
+  const session = input.sessionId ? await store.load(input.sessionId) : await store.latest();
   if (!session) throw new Error("no session found to compact");
   const turnId = `t_${randomUUID().slice(0, 8)}`;
-  const started: BlipRuntimeEvent = { ...eventBase(session.id, turnId), type: "compaction_started", reason: input.trigger ?? "manual" };
+  const started: BlipRuntimeEvent = {
+    ...eventBase(session.id, turnId),
+    type: "compaction_started",
+    reason: input.trigger ?? "manual",
+  };
   await store.appendRuntimeEvent(session, started);
   await input.onEvent?.(started);
   const entries = await store.readTranscript(session);
@@ -188,7 +215,11 @@ export async function compactSession(input: {
     apiKey,
   });
   if (!compaction) {
-    const skipped: BlipRuntimeEvent = { ...eventBase(session.id, turnId), type: "compaction_skipped", reason: "nothing to compact yet" };
+    const skipped: BlipRuntimeEvent = {
+      ...eventBase(session.id, turnId),
+      type: "compaction_skipped",
+      reason: "nothing to compact yet",
+    };
     await store.appendRuntimeEvent(session, skipped);
     await input.onEvent?.(skipped);
     return session;
@@ -208,22 +239,7 @@ export async function compactSession(input: {
   return session;
 }
 
-async function runCloneSession(input: {
-  store: SessionStore;
-  sourceSession: BlipSessionState;
-  workspaceRoot: string;
-  provider: string;
-  modelId: string;
-  model: Model<any>;
-  permissionMode: PermissionMode;
-  toolProfile: ToolProfile;
-  reasoning?: RunBlipOptions["reasoning"];
-  getApiKey?: RunBlipOptions["getApiKey"];
-  toolCallId: string;
-  task: string;
-  index: number;
-  total: number;
-}): Promise<CloneRunResult> {
+async function runCloneSession(input: { store: SessionStore; sourceSession: BlipSessionState; workspaceRoot: string; provider: string; modelId: string; model: Model<any>; permissionMode: PermissionMode; toolProfile: ToolProfile; reasoning?: RunBlipOptions["reasoning"]; getApiKey?: RunBlipOptions["getApiKey"]; toolCallId: string; task: string; index: number; total: number }): Promise<CloneRunResult> {
   const clone = await input.store.fork(input.sourceSession, {
     provider: input.provider,
     model: input.modelId,
@@ -283,6 +299,7 @@ async function runCloneSession(input: {
 
   let failed = false;
   let failureMessage = "";
+  const toolFailures: ToolFailure[] = [];
   let lastAssistantMessage = "";
   agent.subscribe(async (event: AgentEvent) => {
     if (event.type === "message_end") {
@@ -296,8 +313,7 @@ async function runCloneSession(input: {
         }
       }
     } else if (event.type === "tool_execution_end" && event.isError) {
-      failed = true;
-      failureMessage ||= messageText({
+      const toolError = messageText({
         role: "toolResult",
         toolCallId: event.toolCallId,
         toolName: event.toolName,
@@ -306,6 +322,7 @@ async function runCloneSession(input: {
         isError: true,
         timestamp: Date.now(),
       });
+      toolFailures.push({ callId: event.toolCallId, tool: event.toolName, error: toolError });
     } else if (event.type === "agent_end") {
       for (const message of event.messages) {
         const assistantError = assistantFailureMessage(message);
@@ -333,6 +350,7 @@ async function runCloneSession(input: {
       changedFiles: clone.changedFiles,
       durationMs: Date.now() - startedAt,
       ...(failureMessage ? { error: failureMessage } : {}),
+      ...(toolFailures.length > 0 ? { toolFailures } : {}),
     });
   }
 
@@ -343,21 +361,11 @@ async function runCloneSession(input: {
     status: failed ? "error" : "completed",
     message: lastAssistantMessage || failureMessage,
     ...(failureMessage ? { error: failureMessage } : {}),
+    ...(toolFailures.length > 0 ? { toolFailures } : {}),
   };
 }
 
-function createClonesTool(input: {
-  store: SessionStore;
-  session: BlipSessionState;
-  workspaceRoot: string;
-  provider: string;
-  modelId: string;
-  model: Model<any>;
-  permissionMode: PermissionMode;
-  toolProfile: ToolProfile;
-  reasoning?: RunBlipOptions["reasoning"];
-  getApiKey?: RunBlipOptions["getApiKey"];
-}): AgentTool<any, any> {
+function createClonesTool(input: { store: SessionStore; session: BlipSessionState; workspaceRoot: string; provider: string; modelId: string; model: Model<any>; permissionMode: PermissionMode; toolProfile: ToolProfile; reasoning?: RunBlipOptions["reasoning"]; getApiKey?: RunBlipOptions["getApiKey"] }): AgentTool<any, any> {
   return {
     name: "create_clones",
     label: "Create Clones",
@@ -407,7 +415,13 @@ export async function runBlipTask(options: RunBlipOptions, onEvent?: RuntimeSink
   const turnId = `t_${randomUUID().slice(0, 8)}`;
 
   const transcript = await store.readTranscript(session);
-  if (shouldAutoCompact({ entries: transcript, contextWindow: model.contextWindow, settings: DEFAULT_COMPACTION_SETTINGS })) {
+  if (
+    shouldAutoCompact({
+      entries: transcript,
+      contextWindow: model.contextWindow,
+      settings: DEFAULT_COMPACTION_SETTINGS,
+    })
+  ) {
     const compacted = await compactSession({
       workspaceRoot: options.workspaceRoot,
       sessionId: session.id,
@@ -489,6 +503,7 @@ export async function runBlipTask(options: RunBlipOptions, onEvent?: RuntimeSink
   let failed = false;
   let failureMessage = "";
   let emittedFailureMessage = "";
+  const toolFailures: ToolFailure[] = [];
   async function recordFailure(error: string, recoverable = false): Promise<void> {
     const message = String(error ?? "").trim() || "Blip failed without an error message";
     failed = true;
@@ -505,10 +520,18 @@ export async function runBlipTask(options: RunBlipOptions, onEvent?: RuntimeSink
 
   agent.subscribe(async (event: AgentEvent) => {
     if (event.type === "turn_start") {
-      await emit({ ...eventBase(session.id, turnId), type: "turn_started", ...(currentTurnStarted ? {} : { prompt: options.prompt }) });
+      await emit({
+        ...eventBase(session.id, turnId),
+        type: "turn_started",
+        ...(currentTurnStarted ? {} : { prompt: options.prompt }),
+      });
       currentTurnStarted = true;
     } else if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
-      await emit({ ...eventBase(session.id, turnId), type: "assistant_delta", text: event.assistantMessageEvent.delta });
+      await emit({
+        ...eventBase(session.id, turnId),
+        type: "assistant_delta",
+        text: event.assistantMessageEvent.delta,
+      });
     } else if (event.type === "message_end") {
       await store.appendMessage(session, event.message);
       if (event.message.role === "assistant") {
@@ -552,7 +575,7 @@ export async function runBlipTask(options: RunBlipOptions, onEvent?: RuntimeSink
           isError: true,
           timestamp: Date.now(),
         });
-        failed = true;
+        toolFailures.push({ callId: event.toolCallId, tool: event.toolName, error: toolError });
         await emit({
           ...eventBase(session.id, turnId),
           type: "tool_call_failed",
@@ -560,7 +583,6 @@ export async function runBlipTask(options: RunBlipOptions, onEvent?: RuntimeSink
           tool: event.toolName,
           error: toolError,
         });
-        failureMessage ||= toolError;
       } else {
         await emit({
           ...eventBase(session.id, turnId),
@@ -587,14 +609,31 @@ export async function runBlipTask(options: RunBlipOptions, onEvent?: RuntimeSink
     session.readFiles = Array.from(readFiles).sort();
     session.changedFiles = Array.from(changedFiles).sort();
     await store.save(session);
-    await emit({
+    const finishedEvent: BlipRuntimeEvent = {
       ...eventBase(session.id, turnId),
       type: "session_finished",
       status: failed ? "error" : "completed",
       changedFiles: session.changedFiles,
       durationMs: Date.now() - startedAt,
       ...(failureMessage ? { error: failureMessage } : {}),
-    });
+      ...(toolFailures.length > 0 ? { toolFailures } : {}),
+    };
+    await emit(finishedEvent);
+    const diagnosticsDelayMs = typeof options.processExitDiagnosticsDelayMs === "number" && Number.isFinite(options.processExitDiagnosticsDelayMs) ? Math.max(0, Math.floor(options.processExitDiagnosticsDelayMs)) : 0;
+    if (diagnosticsDelayMs > 0) {
+      const timer = setTimeout(() => {
+        const diagnostics = collectProcessDiagnostics();
+        void emit({
+          ...eventBase(session.id, turnId),
+          type: "process_diagnostics",
+          reason: `process still alive ${diagnosticsDelayMs}ms after session_finished`,
+          ...diagnostics,
+        }).catch(() => {
+          // Diagnostics must never turn a completed run into an unhandled rejection.
+        });
+      }, diagnosticsDelayMs);
+      timer.unref?.();
+    }
   }
 
   return session;

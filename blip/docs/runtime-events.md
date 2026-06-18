@@ -28,6 +28,7 @@ Session lifecycle:
 - `assistant_message`
 - `session_error`
 - `session_finished`
+- `process_diagnostics`
 
 Tool lifecycle:
 
@@ -57,9 +58,16 @@ The CLI currently renders a small subset of events:
 - Tool start and tool failure.
 - Session errors.
 - Session finish.
+- Process diagnostics emitted after session finish when the process remains alive past the watchdog delay.
 - Compaction completion or skip.
 
 Other events are still available in JSONL mode.
+
+## Status Semantics
+
+`tool_call_failed` records an individual failed tool call. A failed tool does not by itself make the session fail if the model recovers and produces a final answer. Recovered tool failures are included on `session_finished.toolFailures`.
+
+`session_finished.status` is `error` for assistant/model/runtime failures that prevent a clean completion.
 
 ## Current Gaps
 
