@@ -49,6 +49,29 @@ describe("Blip runtime", () => {
     faux.unregister();
   });
 
+  test("surfaces assistant error messages in runtime events", async () => {
+    const workspace = await tempWorkspace();
+    const faux = registerFauxProvider({ api: "faux", provider: "faux", tokensPerSecond: 0 });
+    faux.setResponses([fauxAssistantMessage("", { stopReason: "error", errorMessage: "Codex auth token expired" })]);
+
+    const events: Array<{ type: string; error?: string; status?: string }> = [];
+    await runBlipTask(
+      {
+        prompt: "Say hi",
+        workspaceRoot: workspace,
+        provider: "faux",
+        model: faux.getModel().id,
+        permissionMode: "workspace-write",
+        toolProfile: "no-shell-workspace-write",
+      },
+      (event) => events.push(event),
+    );
+
+    expect(events).toContainEqual(expect.objectContaining({ type: "session_error", error: "Codex auth token expired" }));
+    expect(events).toContainEqual(expect.objectContaining({ type: "session_finished", status: "error", error: "Codex auth token expired" }));
+    faux.unregister();
+  });
+
   test("reconstructs model context as compaction summary plus retained tail", async () => {
     const workspace = await tempWorkspace();
     const store = new SessionStore(workspace);

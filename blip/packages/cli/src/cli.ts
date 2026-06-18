@@ -9,7 +9,8 @@ import { getModels } from "@mariozechner/pi-ai";
 import { getOAuthApiKey, refreshOpenAICodexToken, type OAuthCredentials } from "@mariozechner/pi-ai/oauth";
 
 const DEFAULT_PROVIDER = "openai-codex";
-const DEFAULT_MODEL = "gpt-5.3-codex";
+const DEFAULT_MODEL = "gpt-5.5";
+const DEFAULT_REASONING: NonNullable<CliOptions["reasoning"]> = "high";
 const OPENAI_CODEX_PROVIDER = "openai-codex";
 
 type CliOptions = {
@@ -44,7 +45,7 @@ Options:
   --jsonl                    Emit runtime events as JSONL on stdout
   --provider <provider>      Model provider (default: BLIP_PROVIDER or openai-codex)
   --model <model>            Model id, or provider/model
-  --reasoning <level>        off|minimal|low|medium|high|xhigh
+  --reasoning <level>        off|minimal|low|medium|high|xhigh (default: BLIP_REASONING or high)
   --workspace <path>         Workspace root (default: cwd)
   --permission <mode>        read-only|workspace-write|full-access
   --profile <profile>        local-trusted-write|read-only|no-shell-workspace-write
@@ -60,6 +61,7 @@ Options:
 Environment:
   BLIP_PROVIDER              Default provider
   BLIP_MODEL                 Default model id or provider/model
+  BLIP_REASONING             Default reasoning level
   BLIP_CODEX_AUTH_FILE       Override Codex auth file path
 `;
 }
@@ -143,6 +145,10 @@ function resolveProviderModel(options: CliOptions): { provider: string; model: s
     model = rest.join("/");
   }
   return { provider, model };
+}
+
+function resolveReasoning(options: CliOptions): NonNullable<CliOptions["reasoning"]> {
+  return options.reasoning ?? parseReasoning(process.env.BLIP_REASONING || DEFAULT_REASONING);
 }
 
 function jwtExpiresAtMs(token: string): number | undefined {
@@ -273,7 +279,8 @@ function renderHuman(event: BlipRuntimeEvent): void {
     console.error(`[error] ${event.error}`);
   } else if (event.type === "session_finished") {
     process.stdout.write("\n");
-    console.error(`Blip finished: ${event.status}${event.changedFiles.length ? `; changed ${event.changedFiles.join(", ")}` : ""}`);
+    const detail = event.status === "error" && event.error ? `: ${event.error}` : "";
+    console.error(`Blip finished: ${event.status}${detail}${event.changedFiles.length ? `; changed ${event.changedFiles.join(", ")}` : ""}`);
   } else if (event.type === "compaction_completed") {
     console.error(`Compacted session: ${event.summaryId}`);
   } else if (event.type === "compaction_skipped") {
@@ -311,6 +318,7 @@ async function main(): Promise<void> {
   }
 
   const { provider, model } = resolveProviderModel(options);
+  const reasoning = resolveReasoning(options);
   if (options.listModels) {
     listModels(provider, model);
     return;
@@ -333,9 +341,18 @@ async function main(): Promise<void> {
     if (options.jsonl) console.log(JSON.stringify(event));
     else renderHuman(event);
   };
+  let finishedStatus: "completed" | "cancelled" | "error" | undefined;
+  let finishedError = "";
+  const emitAndTrack = (event: BlipRuntimeEvent) => {
+    if (event.type === "session_finished") {
+      finishedStatus = event.status;
+      finishedError = event.error ?? "";
+    }
+    emit(event);
+  };
 
   if (options.compact) {
-    await compactSession({ workspaceRoot, sessionId: options.sessionId, trigger: "manual", getApiKey, onEvent: emit });
+    await compactSession({ workspaceRoot, sessionId: options.sessionId, trigger: "manual", reasoning, getApiKey, onEvent: emit });
     return;
   }
 
@@ -360,11 +377,15 @@ async function main(): Promise<void> {
       resumeLatest: options.resumeLatest,
       forkSessionId: options.forkSessionId,
       jsonl: options.jsonl,
-      reasoning: options.reasoning,
+      reasoning,
       getApiKey,
     },
-    emit,
+    emitAndTrack,
   );
+  if (finishedStatus === "error") {
+    if (options.jsonl && finishedError) console.error(finishedError);
+    process.exitCode = 1;
+  }
 }
 
 main().catch((error) => {
