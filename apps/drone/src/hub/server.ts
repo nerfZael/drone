@@ -5546,6 +5546,7 @@ async function sendPromptToChat(opts: {
 
     if (agent.kind === 'builtin' && agent.id === 'blip') {
       const modelArg = chatModel ? ` --model ${bashQuote(chatModel)}` : '';
+      const clonesArg = (chat as any)?.blipClonesEnabled === false ? ' --no-clones' : ' --clones';
       const blipSessionId = readBuiltinTranscriptSessionId(chat, 'blip');
       const sessionArg = blipSessionId ? ` --session ${bashQuote(blipSessionId)}` : '';
       const blipCommand = resolveBlipPromptCommand(runtime);
@@ -5555,7 +5556,7 @@ async function sendPromptToChat(opts: {
         ...managedEnvLines,
         `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
         cdCommand,
-        `${blipCommand} --jsonl --permission full-access --profile local-trusted-write${modelArg}${sessionArg} ${bashQuote(promptWithHistory)}`,
+        `${blipCommand} --jsonl --permission full-access --profile local-trusted-write${clonesArg}${modelArg}${sessionArg} ${bashQuote(promptWithHistory)}`,
       ].join('\n');
       await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'blip', script });
       return {
@@ -11027,6 +11028,9 @@ function buildNewChatEntry(opts: {
     entry.agentSuggestionEnabled = true;
     entry.agentSuggestionEnabledAt = opts.createdAt;
   }
+  if (agent.kind === 'builtin' && agent.id === 'blip' && opts.sourceChatEntry?.blipClonesEnabled === false) {
+    entry.blipClonesEnabled = false;
+  }
   return entry;
 }
 
@@ -11254,6 +11258,8 @@ async function setChatAgentConfig(opts: {
   agentSuggestionEnabled?: boolean;
   setDockerSnapshotAfterAgentMessageEnabled?: boolean;
   dockerSnapshotAfterAgentMessageEnabled?: boolean;
+  setBlipClonesEnabled?: boolean;
+  blipClonesEnabled?: boolean;
 }) {
   let syncedDroneId = '';
   let syncedChatName = '';
@@ -11303,6 +11309,16 @@ async function setChatAgentConfig(opts: {
         throw error;
       }
     }
+    if (opts.setBlipClonesEnabled && effectiveAgent.kind !== 'builtin') {
+      const error: Error & { statusCode?: number } = new Error('Blip clones are only supported for Blip chats');
+      error.statusCode = 400;
+      throw error;
+    }
+    if (opts.setBlipClonesEnabled && effectiveAgent.kind === 'builtin' && effectiveAgent.id !== 'blip') {
+      const error: Error & { statusCode?: number } = new Error('Blip clones are only supported for Blip chats');
+      error.statusCode = 400;
+      throw error;
+    }
     if (opts.agent) {
       assertChatAgentSupportedForDrone(d, opts.agent);
       cur.agent = opts.agent as any;
@@ -11346,6 +11362,9 @@ async function setChatAgentConfig(opts: {
         cur.dockerSnapshotAfterAgentMessageEnabled = false;
         delete cur.dockerSnapshotAfterAgentMessageEnabledAt;
       }
+    }
+    if (opts.setBlipClonesEnabled) {
+      cur.blipClonesEnabled = opts.blipClonesEnabled !== false;
     }
     d.chats[opts.chatName] = cur;
     reg.drones = reg.drones ?? {};
@@ -25101,6 +25120,7 @@ export async function startDroneHubApiServer(opts: {
           agentMessageAutoContinueEnabled: (chatEntry as any).agentMessageAutoContinueEnabled === true,
           agentSuggestionEnabled: (chatEntry as any).agentSuggestionEnabled === true,
           dockerSnapshotAfterAgentMessageEnabled: dockerSnapshotAfterAgentMessageEnabledForChat(resolved.drone, chatEntry),
+          blipClonesEnabled: (chatEntry as any).blipClonesEnabled !== false,
           turns: (chatEntry as any).turns ?? [],
           sessionName: hubChatSessionName(chatName || 'default'),
           createdAt: chatEntry.createdAt,
@@ -25144,10 +25164,13 @@ export async function startDroneHubApiServer(opts: {
           Boolean(body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, 'agentSuggestionEnabled'));
         const hasDockerSnapshotField =
           Boolean(body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, 'dockerSnapshotAfterAgentMessageEnabled'));
+        const hasBlipClonesField =
+          Boolean(body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, 'blipClonesEnabled'));
         let model: string | null = null;
         let agentMessageAutoContinueEnabled = false;
         let agentSuggestionEnabled = false;
         let dockerSnapshotAfterAgentMessageEnabled = false;
+        let blipClonesEnabled = true;
         if (hasModelField) {
           try {
             model = parseChatModelForUpdate(
@@ -25181,6 +25204,13 @@ export async function startDroneHubApiServer(opts: {
           }
           dockerSnapshotAfterAgentMessageEnabled = body.dockerSnapshotAfterAgentMessageEnabled === true;
         }
+        if (hasBlipClonesField) {
+          if (body?.blipClonesEnabled !== true && body?.blipClonesEnabled !== false) {
+            json(res, 400, { ok: false, error: 'blipClonesEnabled must be a boolean' });
+            return;
+          }
+          blipClonesEnabled = body.blipClonesEnabled !== false;
+        }
         try {
           await ensureChatEntry({ droneId, chatName });
           const builtinId = normalizeBuiltinAgentId(kind === 'builtin' ? agentRaw?.id : kind);
@@ -25198,6 +25228,8 @@ export async function startDroneHubApiServer(opts: {
               agentSuggestionEnabled,
               setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
               dockerSnapshotAfterAgentMessageEnabled,
+              setBlipClonesEnabled: hasBlipClonesField,
+              blipClonesEnabled,
             });
             json(res, 200, {
               ok: true,
@@ -25209,6 +25241,7 @@ export async function startDroneHubApiServer(opts: {
               ...(hasAutoContinueField ? { agentMessageAutoContinueEnabled } : {}),
               ...(hasAgentSuggestionField ? { agentSuggestionEnabled } : {}),
               ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
+              ...(hasBlipClonesField ? { blipClonesEnabled } : {}),
             });
             return;
           }
@@ -25232,6 +25265,8 @@ export async function startDroneHubApiServer(opts: {
               agentSuggestionEnabled,
               setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
               dockerSnapshotAfterAgentMessageEnabled,
+              setBlipClonesEnabled: hasBlipClonesField,
+              blipClonesEnabled,
             });
             json(res, 200, {
               ok: true,
@@ -25243,6 +25278,7 @@ export async function startDroneHubApiServer(opts: {
               ...(hasAutoContinueField ? { agentMessageAutoContinueEnabled } : {}),
               ...(hasAgentSuggestionField ? { agentSuggestionEnabled } : {}),
               ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
+              ...(hasBlipClonesField ? { blipClonesEnabled } : {}),
             });
             return;
           }
@@ -25258,6 +25294,8 @@ export async function startDroneHubApiServer(opts: {
               agentSuggestionEnabled,
               setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
               dockerSnapshotAfterAgentMessageEnabled,
+              setBlipClonesEnabled: hasBlipClonesField,
+              blipClonesEnabled,
             });
             json(res, 200, {
               ok: true,
@@ -25268,6 +25306,7 @@ export async function startDroneHubApiServer(opts: {
               ...(hasAutoContinueField ? { agentMessageAutoContinueEnabled } : {}),
               ...(hasAgentSuggestionField ? { agentSuggestionEnabled } : {}),
               ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
+              ...(hasBlipClonesField ? { blipClonesEnabled } : {}),
             });
             return;
           }
@@ -25281,6 +25320,8 @@ export async function startDroneHubApiServer(opts: {
               agentSuggestionEnabled,
               setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
               dockerSnapshotAfterAgentMessageEnabled,
+              setBlipClonesEnabled: hasBlipClonesField,
+              blipClonesEnabled,
             });
             json(res, 200, {
               ok: true,
@@ -25290,6 +25331,7 @@ export async function startDroneHubApiServer(opts: {
               agentMessageAutoContinueEnabled,
               ...(hasAgentSuggestionField ? { agentSuggestionEnabled } : {}),
               ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
+              ...(hasBlipClonesField ? { blipClonesEnabled } : {}),
             });
             return;
           }
@@ -25301,6 +25343,8 @@ export async function startDroneHubApiServer(opts: {
               agentSuggestionEnabled,
               setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
               dockerSnapshotAfterAgentMessageEnabled,
+              setBlipClonesEnabled: hasBlipClonesField,
+              blipClonesEnabled,
             });
             json(res, 200, {
               ok: true,
@@ -25309,6 +25353,7 @@ export async function startDroneHubApiServer(opts: {
               chat: chatName,
               agentSuggestionEnabled,
               ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
+              ...(hasBlipClonesField ? { blipClonesEnabled } : {}),
             });
             return;
           }
@@ -25318,6 +25363,8 @@ export async function startDroneHubApiServer(opts: {
               chatName,
               setDockerSnapshotAfterAgentMessageEnabled: true,
               dockerSnapshotAfterAgentMessageEnabled,
+              setBlipClonesEnabled: hasBlipClonesField,
+              blipClonesEnabled,
             });
             json(res, 200, {
               ok: true,
@@ -25325,12 +25372,29 @@ export async function startDroneHubApiServer(opts: {
               name: droneName,
               chat: chatName,
               dockerSnapshotAfterAgentMessageEnabled,
+              ...(hasBlipClonesField ? { blipClonesEnabled } : {}),
+            });
+            return;
+          }
+          if (hasBlipClonesField) {
+            await setChatAgentConfig({
+              droneId,
+              chatName,
+              setBlipClonesEnabled: true,
+              blipClonesEnabled,
+            });
+            json(res, 200, {
+              ok: true,
+              id: droneId,
+              name: droneName,
+              chat: chatName,
+              blipClonesEnabled,
             });
             return;
           }
           json(res, 400, {
             ok: false,
-            error: `invalid request (expected agent cursor|codex|claude|opencode|pi|blip|custom, model, agentMessageAutoContinueEnabled, agentSuggestionEnabled, or dockerSnapshotAfterAgentMessageEnabled)`,
+            error: `invalid request (expected agent cursor|codex|claude|opencode|pi|blip|custom, model, agentMessageAutoContinueEnabled, agentSuggestionEnabled, dockerSnapshotAfterAgentMessageEnabled, or blipClonesEnabled)`,
           });
           return;
         } catch (e: any) {

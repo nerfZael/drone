@@ -12,6 +12,7 @@ import { getOAuthApiKey, refreshOpenAICodexToken, type OAuthCredentials } from "
 const DEFAULT_PROVIDER = "openai-codex";
 const DEFAULT_MODEL = "gpt-5.5";
 const DEFAULT_REASONING: NonNullable<CliOptions["reasoning"]> = "high";
+const DEFAULT_CLONES_ENABLED = true;
 const OPENAI_CODEX_PROVIDER = "openai-codex";
 const BLIP_CONFIG_FILE_ENV = "BLIP_CONFIG_FILE";
 const REASONING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
@@ -20,6 +21,7 @@ type CliConfig = {
   provider?: string;
   model?: string;
   reasoning?: ReasoningLevel;
+  clonesEnabled?: boolean;
 };
 
 type ReasoningLevel = (typeof REASONING_LEVELS)[number];
@@ -41,6 +43,7 @@ type CliOptions = {
   compact: boolean;
   help: boolean;
   reasoning?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+  clonesEnabled?: boolean;
 };
 
 function helpText(): string {
@@ -58,6 +61,8 @@ Options:
   --provider <provider>      Model provider (default: BLIP_PROVIDER, saved config, or openai-codex)
   --model <model>            Model id, or provider/model (default: BLIP_MODEL, saved config, or gpt-5.5)
   --reasoning <level>        off|minimal|low|medium|high|xhigh (default: BLIP_REASONING, saved config, or high)
+  --clones                   Enable clone tool support
+  --no-clones                Disable clone tool support
   --workspace <path>         Workspace root (default: cwd)
   --permission <mode>        read-only|workspace-write|full-access
   --profile <profile>        local-trusted-write|read-only|no-shell-workspace-write
@@ -72,13 +77,14 @@ Options:
 
 Interactive:
   Run "blip" with no prompt to open an interactive session.
-  Commands: /model [id|provider/id], /exit, /quit
+  Commands: /model [id|provider/id], /clones on|off, /exit, /quit
 
 Environment:
   BLIP_PROVIDER              Default provider
   BLIP_MODEL                 Default model id or provider/model
   BLIP_CONFIG_FILE           Override Blip CLI config file path
   BLIP_REASONING             Default reasoning level
+  BLIP_CLONES                Default clone support: on|off
   BLIP_CODEX_AUTH_FILE       Override Codex auth file path
 `;
 }
@@ -107,6 +113,8 @@ function parseArgs(argv: string[]): CliOptions {
     else if (arg === "--provider") options.provider = next();
     else if (arg === "--model") options.model = next();
     else if (arg === "--reasoning") options.reasoning = parseReasoning(next());
+    else if (arg === "--clones") options.clonesEnabled = true;
+    else if (arg === "--no-clones") options.clonesEnabled = false;
     else if (arg === "--workspace") options.workspace = next();
     else if (arg === "--permission") options.permission = parsePermission(next());
     else if (arg === "--profile") options.profile = parseProfile(next());
@@ -141,6 +149,13 @@ function parseReasoning(value: string): NonNullable<CliOptions["reasoning"]> {
   throw new Error("invalid reasoning level");
 }
 
+function parseBooleanSetting(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "1" || normalized === "true" || normalized === "on" || normalized === "yes" || normalized === "enabled") return true;
+  if (normalized === "0" || normalized === "false" || normalized === "off" || normalized === "no" || normalized === "disabled") return false;
+  throw new Error("invalid boolean setting");
+}
+
 async function readStdinIfNeeded(promptParts: string[]): Promise<string> {
   const prompt = promptParts.join(" ").trim();
   if (prompt) return prompt;
@@ -168,12 +183,18 @@ function readCliConfig(): CliConfig {
     ...(typeof raw.provider === "string" && raw.provider.trim() ? { provider: raw.provider.trim() } : {}),
     ...(typeof raw.model === "string" && raw.model.trim() ? { model: raw.model.trim() } : {}),
     ...(reasoning ? { reasoning } : {}),
+    ...(typeof raw.clonesEnabled === "boolean" ? { clonesEnabled: raw.clonesEnabled } : {}),
   };
 }
 
 function saveDefaultModelSetup(provider: string, model: string, reasoning: ReasoningLevel): void {
   const current = readCliConfig();
   writeJsonFile(blipConfigFilePath(), { ...current, provider, model, reasoning });
+}
+
+function saveClonesEnabled(clonesEnabled: boolean): void {
+  const current = readCliConfig();
+  writeJsonFile(blipConfigFilePath(), { ...current, clonesEnabled });
 }
 
 function splitProviderModel(rawModel: string, fallbackProvider: string): { provider: string; model: string } {
@@ -197,6 +218,12 @@ function resolveProviderModel(options: CliOptions): { provider: string; model: s
 function resolveReasoning(options: CliOptions): NonNullable<CliOptions["reasoning"]> {
   const config = readCliConfig();
   return options.reasoning ?? parseReasoning(process.env.BLIP_REASONING || config.reasoning || DEFAULT_REASONING);
+}
+
+function resolveClonesEnabled(options: CliOptions): boolean {
+  const config = readCliConfig();
+  const env = String(process.env.BLIP_CLONES ?? "").trim();
+  return options.clonesEnabled ?? (env ? parseBooleanSetting(env) : config.clonesEnabled ?? DEFAULT_CLONES_ENABLED);
 }
 
 function jwtExpiresAtMs(token: string): number | undefined {
@@ -366,6 +393,7 @@ type RunContext = {
   permissionMode: PermissionMode;
   toolProfile: ToolProfile;
   reasoning: ReasoningLevel;
+  clonesEnabled: boolean;
   getApiKey: (provider: string) => Promise<string | undefined>;
   emit: (event: BlipRuntimeEvent) => void;
 };
@@ -389,6 +417,7 @@ async function runPrompt(prompt: string, context: RunContext, options: CliOption
       forkSessionId: options.forkSessionId,
       jsonl: options.jsonl,
       reasoning: context.reasoning,
+      clonesEnabled: context.clonesEnabled,
       getApiKey: context.getApiKey,
     },
     context.emit,
@@ -403,7 +432,11 @@ async function runInteractive(context: RunContext, options: CliOptions): Promise
   let resumeLatest = options.resumeLatest;
   let forkSessionId = options.forkSessionId;
 
-  console.error(`Blip interactive (${context.provider}/${context.model}, reasoning ${context.reasoning}). Type /exit to quit.`);
+  console.error(
+    `Blip interactive (${context.provider}/${context.model}, reasoning ${context.reasoning}, clones ${
+      context.clonesEnabled ? "on" : "off"
+    }). Type /exit to quit.`,
+  );
   try {
     while (true) {
       let raw: string;
@@ -417,6 +450,10 @@ async function runInteractive(context: RunContext, options: CliOptions): Promise
       if (prompt === "/exit" || prompt === "/quit") break;
       if (prompt === "/model" || prompt.startsWith("/model ")) {
         await chooseInteractiveModel(prompt.slice("/model".length).trim(), context, rl);
+        continue;
+      }
+      if (prompt === "/clones" || prompt.startsWith("/clones ")) {
+        chooseInteractiveClones(prompt.slice("/clones".length).trim(), context);
         continue;
       }
 
@@ -491,6 +528,24 @@ async function chooseInteractiveModel(
   console.error(`Default model set to ${formatModelLabel(next.provider, next.model)} with ${context.reasoning} reasoning`);
 }
 
+function chooseInteractiveClones(rawSelection: string, context: RunContext): void {
+  const selection = rawSelection.trim();
+  if (!selection) {
+    console.error(`Blip clones are ${context.clonesEnabled ? "on" : "off"}. Use /clones on or /clones off.`);
+    return;
+  }
+  let clonesEnabled: boolean;
+  try {
+    clonesEnabled = parseBooleanSetting(selection);
+  } catch {
+    console.error(`Unknown clones setting: ${selection}`);
+    return;
+  }
+  context.clonesEnabled = clonesEnabled;
+  saveClonesEnabled(clonesEnabled);
+  console.error(`Blip clones ${clonesEnabled ? "enabled" : "disabled"}`);
+}
+
 async function chooseInteractiveReasoningForModel(
   context: RunContext,
   rl: ReturnType<typeof createInterface>,
@@ -523,6 +578,7 @@ async function main(): Promise<void> {
 
   const { provider, model } = resolveProviderModel(options);
   const reasoning = resolveReasoning(options);
+  const clonesEnabled = resolveClonesEnabled(options);
   if (options.listModels) {
     listModels(provider, model);
     return;
@@ -573,6 +629,7 @@ async function main(): Promise<void> {
     permissionMode,
     toolProfile,
     reasoning,
+    clonesEnabled,
     getApiKey,
     emit: emitAndTrack,
   };

@@ -72,6 +72,50 @@ describe("Blip runtime", () => {
     faux.unregister();
   });
 
+  test("runs clone sessions in parallel and returns their final messages", async () => {
+    const workspace = await tempWorkspace();
+    const faux = registerFauxProvider({ api: "faux", provider: "faux", tokensPerSecond: 0 });
+    faux.setResponses([
+      fauxAssistantMessage(fauxToolCall("create_clones", { tasks: ["inspect alpha", "inspect beta"] }, { id: "call_clones" }), {
+        stopReason: "toolUse",
+      }),
+      fauxAssistantMessage("alpha result"),
+      fauxAssistantMessage("beta result"),
+      fauxAssistantMessage("original saw clone results"),
+    ]);
+
+    const events: Array<{ type: string; tool?: string }> = [];
+    const session = await runBlipTask(
+      {
+        prompt: "Use clones",
+        workspaceRoot: workspace,
+        provider: "faux",
+        model: faux.getModel().id,
+        permissionMode: "workspace-write",
+        toolProfile: "no-shell-workspace-write",
+        clonesEnabled: true,
+      },
+      (event) => events.push(event),
+    );
+
+    expect(events).toContainEqual(expect.objectContaining({ type: "tool_call_started", tool: "create_clones" }));
+    expect(events).toContainEqual(expect.objectContaining({ type: "tool_call_completed", tool: "create_clones" }));
+    const store = new SessionStore(workspace);
+    const sessions = await store.list();
+    const clones = sessions.filter((item) => item.parentSessionId === session.id);
+    expect(clones).toHaveLength(2);
+    const cloneTranscripts = await Promise.all(clones.map((clone) => readFile(clone.transcriptPath, "utf8")));
+    expect(cloneTranscripts.join("\n")).toContain("You are a Blip clone");
+    expect(cloneTranscripts.join("\n")).toContain("inspect alpha");
+    expect(cloneTranscripts.join("\n")).toContain("inspect beta");
+
+    const transcript = await readFile(session.transcriptPath, "utf8");
+    expect(transcript).toContain("alpha result");
+    expect(transcript).toContain("beta result");
+    expect(transcript).toContain("original saw clone results");
+    faux.unregister();
+  });
+
   test("reconstructs model context as compaction summary plus retained tail", async () => {
     const workspace = await tempWorkspace();
     const store = new SessionStore(workspace);
