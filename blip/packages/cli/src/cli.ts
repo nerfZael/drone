@@ -1,5 +1,15 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  createReadStream,
+  createWriteStream,
+  existsSync,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -15,7 +25,20 @@ const DEFAULT_REASONING: NonNullable<CliOptions["reasoning"]> = "high";
 const DEFAULT_CLONES_ENABLED = true;
 const OPENAI_CODEX_PROVIDER = "openai-codex";
 const BLIP_CONFIG_FILE_ENV = "BLIP_CONFIG_FILE";
+const CLI_VERSION = "0.1.0";
 const REASONING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+const ANSI = {
+  reset: "\x1b[0m",
+  bold: "\x1b[1m",
+  dim: "\x1b[2m",
+  red: "\x1b[31m",
+  green: "\x1b[32m",
+  yellow: "\x1b[33m",
+  cyan: "\x1b[36m",
+  defaultForeground: "\x1b[39m",
+  inputBackground: "\x1b[48;5;236m",
+  gray: "\x1b[90m",
+};
 
 type CliConfig = {
   provider?: string;
@@ -83,6 +106,7 @@ Environment:
   BLIP_PROVIDER              Default provider
   BLIP_MODEL                 Default model id or provider/model
   BLIP_CONFIG_FILE           Override Blip CLI config file path
+  BLIP_DATA_DIR              Override Blip session data directory
   BLIP_REASONING             Default reasoning level
   BLIP_CLONES                Default clone support: on|off
   BLIP_CODEX_AUTH_FILE       Override Codex auth file path
@@ -156,14 +180,74 @@ function parseBooleanSetting(value: string): boolean {
   throw new Error("invalid boolean setting");
 }
 
-async function readStdinIfNeeded(promptParts: string[]): Promise<string> {
+function ansi(code: string, text: string): string {
+  if (!supportsAnsi()) return text;
+  return `${code}${text}${ANSI.reset}`;
+}
+
+function supportsAnsi(): boolean {
+  return !process.env.NO_COLOR && process.env.TERM !== "dumb";
+}
+
+function foreground(code: string, text: string): string {
+  if (!supportsAnsi()) return text;
+  return `${code}${text}${ANSI.defaultForeground}`;
+}
+
+function bold(text: string): string {
+  return ansi(ANSI.bold, text);
+}
+
+function dim(text: string): string {
+  return ansi(ANSI.dim, text);
+}
+
+function cyan(text: string): string {
+  return ansi(ANSI.cyan, text);
+}
+
+function green(text: string): string {
+  return ansi(ANSI.green, text);
+}
+
+function yellow(text: string): string {
+  return ansi(ANSI.yellow, text);
+}
+
+function red(text: string): string {
+  return ansi(ANSI.red, text);
+}
+
+function gray(text: string): string {
+  return ansi(ANSI.gray, text);
+}
+
+function visibleLength(text: string): number {
+  return text.replace(/\x1b\[[0-9;]*m/g, "").length;
+}
+
+function terminalColumns(): number {
+  return Math.max(20, process.stdout.columns || 80);
+}
+
+async function readStdinIfNeeded(promptParts: string[]): Promise<{ prompt: string; readFromStdin: boolean }> {
   const prompt = promptParts.join(" ").trim();
-  if (prompt) return prompt;
-  if (process.stdin.isTTY) return "";
+  if (prompt) return { prompt, readFromStdin: false };
+  if (!shouldReadStdinForPrompt()) return { prompt: "", readFromStdin: false };
   process.stdin.setEncoding("utf8");
   const chunks: string[] = [];
   for await (const chunk of process.stdin) chunks.push(String(chunk));
-  return chunks.join("").trim();
+  return { prompt: chunks.join("").trim(), readFromStdin: true };
+}
+
+function shouldReadStdinForPrompt(): boolean {
+  if (process.stdin.isTTY) return false;
+  try {
+    const stat = fstatSync(0);
+    return stat.isFIFO() || stat.isFile() || stat.isSocket();
+  } catch {
+    return true;
+  }
 }
 
 function blipConfigFilePath(): string {
@@ -398,8 +482,169 @@ type RunContext = {
   emit: (event: BlipRuntimeEvent) => void;
 };
 
+type InteractiveReadline = {
+  rl: ReturnType<typeof createInterface>;
+  write: (text: string) => void;
+  close: () => void;
+};
+
 function formatModelLabel(provider: string, model: string): string {
   return provider === DEFAULT_PROVIDER ? model : `${provider}/${model}`;
+}
+
+function displayPath(filePath: string): string {
+  const resolved = path.resolve(filePath);
+  const home = os.homedir();
+  if (resolved === home) return "~";
+  if (resolved.startsWith(`${home}${path.sep}`)) return `~${path.sep}${path.relative(home, resolved)}`;
+  return resolved;
+}
+
+function renderInteractiveHeader(context: RunContext, write: (text: string) => void): void {
+  const model = `${formatModelLabel(context.provider, context.model)} ${context.reasoning}`;
+  const clones = context.clonesEnabled ? "on" : "off";
+  const directory = displayPath(context.workspaceRoot);
+  const width = Math.max(42, visibleLength(directory) + 13, visibleLength(model) + 29, visibleLength(clones) + 28);
+  const line = (content = "") => {
+    const padding = " ".repeat(Math.max(0, width - visibleLength(content)));
+    write(`${dim("│")} ${content}${padding} ${dim("│")}\n`);
+  };
+
+  write(`${dim(`╭${"─".repeat(width + 2)}╮`)}\n`);
+  line(`${bold("Blip")} ${gray(`(v${CLI_VERSION})`)}`);
+  line();
+  line(`${gray("model:")}     ${green(model)}  ${cyan("/model")} ${gray("to change")}`);
+  line(`${gray("clones:")}    ${green(clones)}  ${cyan("/clones")} ${gray("to change")}`);
+  line(`${gray("directory:")} ${cyan(directory)}`);
+  write(`${dim(`╰${"─".repeat(width + 2)}╯`)}\n\n`);
+  write(`${bold("Tip:")} ${gray("Use /model to switch models, /clones to toggle clones, /exit to quit.")}\n\n`);
+}
+
+function clearCurrentTerminalLine(write: (text: string) => void): void {
+  if (process.env.TERM === "dumb") return;
+  write(`${ANSI.reset}\r\x1b[2K`);
+}
+
+function inputLinePrefix(): string {
+  if (!supportsAnsi()) return "› ";
+  return `${ANSI.inputBackground}${foreground(ANSI.gray, "› ")}`;
+}
+
+function prepareInputLine(write: (text: string) => void): void {
+  if (!supportsAnsi()) return;
+  write(`\r\x1b[2K${ANSI.inputBackground}${" ".repeat(terminalColumns())}${ANSI.reset}\r`);
+}
+
+function renderUserPromptBlock(prompt: string, write: (text: string) => void): void {
+  const lines = prompt.split(/\r?\n/);
+  if (!supportsAnsi()) {
+    write(`› ${prompt}\n`);
+    return;
+  }
+
+  const columns = terminalColumns();
+  for (let index = 0; index < lines.length; index += 1) {
+    const prefix = index === 0 ? foreground(ANSI.gray, "› ") : "  ";
+    const content = `${prefix}${lines[index]}`;
+    const padding = " ".repeat(Math.max(0, columns - visibleLength(content)));
+    write(`${ANSI.inputBackground}${content}${padding}${ANSI.reset}\n`);
+  }
+}
+
+type InteractiveRenderState = {
+  sawError: boolean;
+};
+
+function createInteractiveRenderer(
+  write: (text: string) => void,
+  state: InteractiveRenderState,
+): (event: BlipRuntimeEvent) => void {
+  let wroteAssistantText = false;
+  let lastEventWasTool = false;
+  let lastError = "";
+
+  return (event: BlipRuntimeEvent) => {
+    if (event.type === "assistant_delta") {
+      if (!wroteAssistantText) {
+        write(`\n${cyan("•")} `);
+        wroteAssistantText = true;
+      }
+      write(event.text);
+      lastEventWasTool = false;
+      return;
+    }
+
+    if (event.type === "tool_call_started") {
+      write(`${wroteAssistantText ? "\n" : "\n"}${gray("↳")} ${gray("tool")} ${event.tool}\n`);
+      lastEventWasTool = true;
+      return;
+    }
+
+    if (event.type === "tool_call_failed") {
+      write(`${red("tool failed")} ${event.tool}: ${event.error}\n`);
+      lastEventWasTool = true;
+      return;
+    }
+
+    if (event.type === "session_error") {
+      state.sawError = true;
+      lastError = event.error;
+      write(`${wroteAssistantText || lastEventWasTool ? "\n" : ""}${red("Error:")} ${event.error}\n`);
+      return;
+    }
+
+    if (event.type === "session_finished") {
+      if (wroteAssistantText) write("\n");
+      if (event.status === "error" && event.error && event.error !== lastError) {
+        state.sawError = true;
+        lastError = event.error;
+        write(`${red("Error:")} ${event.error}\n`);
+      }
+      if (event.changedFiles.length) write(`${gray("changed")} ${event.changedFiles.join(", ")}\n`);
+      write("\n");
+      wroteAssistantText = false;
+      lastEventWasTool = false;
+      return;
+    }
+
+    if (event.type === "compaction_completed") {
+      write(`${gray("compacted")} ${event.summaryId}\n`);
+    } else if (event.type === "compaction_skipped") {
+      write(`${gray("compaction skipped")} ${event.reason}\n`);
+    }
+  };
+}
+
+function createInteractiveReadline(): InteractiveReadline | null {
+  if (process.stdin.isTTY) {
+    const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+    return { rl, write: (text) => process.stdout.write(text), close: () => rl.close() };
+  }
+
+  if (process.platform === "win32") return null;
+
+  let inputFd: number | undefined;
+  let outputFd: number | undefined;
+  try {
+    inputFd = openSync("/dev/tty", "r");
+    outputFd = openSync("/dev/tty", "w");
+    const input = createReadStream("/dev/tty", { fd: inputFd, autoClose: true });
+    const output = createWriteStream("/dev/tty", { fd: outputFd, autoClose: true });
+    const rl = createInterface({ input, output, terminal: true });
+    return {
+      rl,
+      write: (text) => output.write(text),
+      close() {
+        rl.close();
+        input.close();
+        output.close();
+      },
+    };
+  } catch {
+    if (outputFd !== undefined) closeSync(outputFd);
+    if (inputFd !== undefined) closeSync(inputFd);
+    return null;
+  }
 }
 
 async function runPrompt(prompt: string, context: RunContext, options: CliOptions): Promise<string> {
@@ -426,25 +671,25 @@ async function runPrompt(prompt: string, context: RunContext, options: CliOption
 }
 
 async function runInteractive(context: RunContext, options: CliOptions): Promise<void> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+  const interactive = createInteractiveReadline();
+  if (!interactive) throw new Error("missing prompt");
+  const { rl, write } = interactive;
   let sessionId = options.sessionId;
   let continueLatest = options.continueLatest;
   let resumeLatest = options.resumeLatest;
   let forkSessionId = options.forkSessionId;
 
-  console.error(
-    `Blip interactive (${context.provider}/${context.model}, reasoning ${context.reasoning}, clones ${
-      context.clonesEnabled ? "on" : "off"
-    }). Type /exit to quit.`,
-  );
+  renderInteractiveHeader(context, write);
   try {
     while (true) {
       let raw: string;
       try {
-        raw = await rl.question("blip> ");
+        prepareInputLine(write);
+        raw = await rl.question(inputLinePrefix());
       } catch {
         break;
       }
+      clearCurrentTerminalLine(write);
       const prompt = raw.trim();
       if (!prompt) continue;
       if (prompt === "/exit" || prompt === "/quit") break;
@@ -456,8 +701,11 @@ async function runInteractive(context: RunContext, options: CliOptions): Promise
         chooseInteractiveClones(prompt.slice("/clones".length).trim(), context);
         continue;
       }
+      renderUserPromptBlock(prompt, write);
 
+      const renderState: InteractiveRenderState = { sawError: false };
       try {
+        context.emit = createInteractiveRenderer(write, renderState);
         sessionId = await runPrompt(prompt, context, {
           ...options,
           sessionId,
@@ -469,11 +717,13 @@ async function runInteractive(context: RunContext, options: CliOptions): Promise
         resumeLatest = false;
         forkSessionId = undefined;
       } catch (error) {
-        console.error(error instanceof Error ? error.message : String(error));
+        if (!renderState.sawError) {
+          write(`${red("Error:")} ${error instanceof Error ? error.message : String(error)}\n\n`);
+        }
       }
     }
   } finally {
-    rl.close();
+    interactive.close();
   }
 }
 
@@ -486,17 +736,17 @@ async function chooseInteractiveModel(
   const models = getModels(context.provider as any);
   if (!selection) {
     if (models.length === 0) {
-      console.error(`No known models for ${context.provider}. Use /model provider/model to set one directly.`);
+      console.error(`${yellow("No known models")} for ${context.provider}. Use /model provider/model to set one directly.`);
       return;
     }
-    console.error(`Current model: ${formatModelLabel(context.provider, context.model)}`);
+    console.error(`${gray("current model")} ${green(formatModelLabel(context.provider, context.model))}`);
     for (let index = 0; index < models.length; index += 1) {
       const model = models[index];
       const active = model.id === context.model ? " (current)" : "";
-      console.error(`${index + 1}. ${model.id} - ${model.name || model.id}${active}`);
+      console.error(`${gray(String(index + 1).padStart(2, " "))}. ${model.id} ${gray(model.name || model.id)}${green(active)}`);
     }
     try {
-      selection = (await rl.question("model> ")).trim();
+      selection = (await rl.question(`${gray("model")} › `)).trim();
     } catch {
       return;
     }
@@ -507,7 +757,7 @@ async function chooseInteractiveModel(
   if (/^\d+$/.test(selection) && models.length > 0) {
     const index = Number(selection) - 1;
     if (index < 0 || index >= models.length) {
-      console.error(`Unknown model number: ${selection}`);
+      console.error(`${red("Unknown model number:")} ${selection}`);
       return;
     }
     next = { provider: context.provider, model: models[index].id };
@@ -517,7 +767,7 @@ async function chooseInteractiveModel(
 
   const knownModels = getModels(next.provider as any);
   if (knownModels.length > 0 && !knownModels.some((model) => model.id === next.model)) {
-    console.error(`Unknown model for ${next.provider}: ${next.model}`);
+    console.error(`${red("Unknown model for")} ${next.provider}: ${next.model}`);
     return;
   }
 
@@ -525,7 +775,7 @@ async function chooseInteractiveModel(
   context.model = next.model;
   await chooseInteractiveReasoningForModel(context, rl);
   saveDefaultModelSetup(next.provider, next.model, context.reasoning);
-  console.error(`Default model set to ${formatModelLabel(next.provider, next.model)} with ${context.reasoning} reasoning`);
+  console.error(`${green("Default model set")} ${formatModelLabel(next.provider, next.model)} ${gray(`with ${context.reasoning} reasoning`)}`);
 }
 
 function chooseInteractiveClones(rawSelection: string, context: RunContext): void {
@@ -550,11 +800,11 @@ async function chooseInteractiveReasoningForModel(
   context: RunContext,
   rl: ReturnType<typeof createInterface>,
 ): Promise<void> {
-  console.error(`Reasoning levels: ${REASONING_LEVELS.join(", ")}`);
+  console.error(`${gray("reasoning levels")} ${REASONING_LEVELS.join(", ")}`);
   while (true) {
     let selection = "";
     try {
-      selection = (await rl.question(`reasoning [${context.reasoning}]> `)).trim();
+      selection = (await rl.question(`${gray(`reasoning [${context.reasoning}]`)} › `)).trim();
     } catch {
       return;
     }
@@ -564,7 +814,7 @@ async function chooseInteractiveReasoningForModel(
       context.reasoning = parseReasoning(selection);
       return;
     } catch {
-      console.error(`Unknown reasoning level: ${selection}`);
+      console.error(`${red("Unknown reasoning level:")} ${selection}`);
     }
   }
 }
@@ -616,7 +866,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const prompt = await readStdinIfNeeded(options.promptParts);
+  const { prompt, readFromStdin } = await readStdinIfNeeded(options.promptParts);
   const sessionModes = [options.continueLatest, options.resumeLatest, Boolean(options.sessionId), Boolean(options.forkSessionId)].filter(Boolean);
   if (sessionModes.length > 1) {
     throw new Error("--continue, --resume, --session, and --fork are mutually exclusive");
@@ -635,7 +885,7 @@ async function main(): Promise<void> {
   };
 
   if (!prompt) {
-    if (process.stdin.isTTY && !options.jsonl) {
+    if (!options.jsonl && !readFromStdin) {
       await runInteractive(context, options);
       return;
     }

@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync } from "node:fs";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@mariozechner/pi-ai";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import { compactSession, createLocalCompaction, estimateEntriesTokens, estimateModelContextTokens, runBlipTask, SessionStore } from "../src/index";
+
+process.env.BLIP_DATA_DIR = mkdtempSync(path.join(os.tmpdir(), "blip-core-data-"));
 
 async function tempWorkspace(): Promise<string> {
   return mkdtemp(path.join(os.tmpdir(), "blip-core-"));

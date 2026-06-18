@@ -32,7 +32,7 @@ Root workspace wiring includes `blip/packages/*`, and the root script `bun run b
 | Area | Pi | OpenCode | Codex | Current Blip | Current Gaps |
 | --- | --- | --- | --- | --- | --- |
 | Canonical conversation term | Session. | Session/chat terminology. | Thread/session/conversation terms across layers. | Uses `session` in CLI, code, and storage. | `providerSessionId` and `providerThreadId` exist but are not actively integrated. |
-| Storage | Local/session abstractions. | Session database/state. | Rollout/history model. | Local `.blip/sessions/<workspace-hash>/<session-id>` directory with `session.json` and `transcript.jsonl`. | No alternate storage backend. |
+| Storage | Local/session abstractions. | Session database/state. | Rollout/history model. | OS user data directory (`<blip-data-dir>/sessions/<workspace-hash>/<session-id>`) with `session.json` and `transcript.jsonl`. | `BLIP_DATA_DIR` can override the data root; no database backend. |
 | Continue/resume | Local session continuation. | Session resume in richer UI. | Thread continuation. | `--continue`, `--resume`, and `--session` load existing sessions. | `--resume` has no interactive picker; it behaves like latest-session resume. |
 | Fork | Session/tree concepts in Pi ecosystem. | Session branching concepts. | Thread/history manipulation. | `--fork <id>` creates a new session seeded with the source transcript and records parent metadata. | No fork-from-entry CLI. No in-place tree navigation. |
 | Runtime events | Evented agent core. | Event/session stream. | Protocol events. | TypeScript runtime events plus CLI JSONL mode. | No generated JSON Schema. No server protocol. |
