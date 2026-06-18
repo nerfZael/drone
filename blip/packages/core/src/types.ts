@@ -71,7 +71,7 @@ export type BlipRuntimeEvent =
       tokensAfter: number;
     })
   | (BlipRuntimeEventBase & { type: "session_error"; error: string; recoverable: boolean })
-  | (BlipRuntimeEventBase & { type: "session_finished"; status: BlipSessionStatus; changedFiles: string[]; durationMs: number });
+  | (BlipRuntimeEventBase & { type: "session_finished"; status: BlipSessionStatus; changedFiles: string[]; durationMs: number; error?: string });
 
 export interface RunBlipOptions {
   prompt: string;

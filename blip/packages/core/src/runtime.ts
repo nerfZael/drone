@@ -37,6 +37,15 @@ function messageText(message: AgentMessage): string {
   return "";
 }
 
+function assistantFailureMessage(message: AgentMessage): string | undefined {
+  if (!message || typeof message !== "object" || (message as { role?: unknown }).role !== "assistant") return undefined;
+  const stopReason = String((message as { stopReason?: unknown }).stopReason ?? "").trim();
+  if (stopReason !== "error" && stopReason !== "aborted") return undefined;
+  const errorMessage = String((message as { errorMessage?: unknown }).errorMessage ?? "").trim();
+  if (errorMessage) return errorMessage;
+  return stopReason === "aborted" ? "Assistant run was aborted" : "Assistant run failed without an error message";
+}
+
 function resolveModel(provider: string, modelId: string): Model<any> {
   const model = getModel(provider as any, modelId as any);
   if (model) return model as Model<any>;
@@ -228,6 +237,22 @@ export async function runBlipTask(options: RunBlipOptions, onEvent?: RuntimeSink
 
   let currentTurnStarted = false;
   let failed = false;
+  let failureMessage = "";
+  let emittedFailureMessage = "";
+  async function recordFailure(error: string, recoverable = false): Promise<void> {
+    const message = String(error ?? "").trim() || "Blip failed without an error message";
+    failed = true;
+    failureMessage = message;
+    if (message === emittedFailureMessage) return;
+    emittedFailureMessage = message;
+    await emit({
+      ...eventBase(session.id, turnId),
+      type: "session_error",
+      error: message,
+      recoverable,
+    });
+  }
+
   agent.subscribe(async (event: AgentEvent) => {
     if (event.type === "turn_start") {
       await emit({ ...eventBase(session.id, turnId), type: "turn_started", ...(currentTurnStarted ? {} : { prompt: options.prompt }) });
@@ -243,7 +268,8 @@ export async function runBlipTask(options: RunBlipOptions, onEvent?: RuntimeSink
           messageId: randomUUID(),
           text: messageText(event.message),
         });
-        if (event.message.stopReason === "error" || event.message.stopReason === "aborted") failed = true;
+        const assistantError = assistantFailureMessage(event.message);
+        if (assistantError) await recordFailure(assistantError);
       }
     } else if (event.type === "tool_execution_start") {
       await emit({
@@ -264,14 +290,24 @@ export async function runBlipTask(options: RunBlipOptions, onEvent?: RuntimeSink
       });
     } else if (event.type === "tool_execution_end") {
       if (event.isError) {
+        const toolError = messageText({
+          role: "toolResult",
+          toolCallId: event.toolCallId,
+          toolName: event.toolName,
+          content: event.result.content,
+          details: event.result.details,
+          isError: true,
+          timestamp: Date.now(),
+        });
         failed = true;
         await emit({
           ...eventBase(session.id, turnId),
           type: "tool_call_failed",
           callId: event.toolCallId,
           tool: event.toolName,
-          error: messageText({ role: "toolResult", toolCallId: event.toolCallId, toolName: event.toolName, content: event.result.content, details: event.result.details, isError: true, timestamp: Date.now() }),
+          error: toolError,
         });
+        failureMessage ||= toolError;
       } else {
         await emit({
           ...eventBase(session.id, turnId),
@@ -281,19 +317,18 @@ export async function runBlipTask(options: RunBlipOptions, onEvent?: RuntimeSink
           result: event.result.details,
         });
       }
+    } else if (event.type === "agent_end") {
+      for (const message of event.messages) {
+        const assistantError = assistantFailureMessage(message);
+        if (assistantError) await recordFailure(assistantError);
+      }
     }
   });
 
   try {
     await agent.prompt(options.prompt);
   } catch (error) {
-    failed = true;
-    await emit({
-      ...eventBase(session.id, turnId),
-      type: "session_error",
-      error: error instanceof Error ? error.message : String(error),
-      recoverable: false,
-    });
+    await recordFailure(error instanceof Error ? error.message : String(error));
     throw error;
   } finally {
     session.readFiles = Array.from(readFiles).sort();
@@ -305,6 +340,7 @@ export async function runBlipTask(options: RunBlipOptions, onEvent?: RuntimeSink
       status: failed ? "error" : "completed",
       changedFiles: session.changedFiles,
       durationMs: Date.now() - startedAt,
+      ...(failureMessage ? { error: failureMessage } : {}),
     });
   }
 
