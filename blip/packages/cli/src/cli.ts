@@ -72,7 +72,7 @@ Options:
 
 Interactive:
   Run "blip" with no prompt to open an interactive session.
-  Commands: /model [id|provider/id], /reasoning [level], /exit, /quit
+  Commands: /model [id|provider/id], /exit, /quit
 
 Environment:
   BLIP_PROVIDER              Default provider
@@ -171,14 +171,9 @@ function readCliConfig(): CliConfig {
   };
 }
 
-function saveDefaultModel(provider: string, model: string): void {
+function saveDefaultModelSetup(provider: string, model: string, reasoning: ReasoningLevel): void {
   const current = readCliConfig();
-  writeJsonFile(blipConfigFilePath(), { ...current, provider, model });
-}
-
-function saveDefaultReasoning(reasoning: ReasoningLevel): void {
-  const current = readCliConfig();
-  writeJsonFile(blipConfigFilePath(), { ...current, reasoning });
+  writeJsonFile(blipConfigFilePath(), { ...current, provider, model, reasoning });
 }
 
 function splitProviderModel(rawModel: string, fallbackProvider: string): { provider: string; model: string } {
@@ -424,10 +419,6 @@ async function runInteractive(context: RunContext, options: CliOptions): Promise
         await chooseInteractiveModel(prompt.slice("/model".length).trim(), context, rl);
         continue;
       }
-      if (prompt === "/reasoning" || prompt.startsWith("/reasoning ")) {
-        await chooseInteractiveReasoning(prompt.slice("/reasoning".length).trim(), context, rl);
-        continue;
-      }
 
       try {
         sessionId = await runPrompt(prompt, context, {
@@ -495,38 +486,32 @@ async function chooseInteractiveModel(
 
   context.provider = next.provider;
   context.model = next.model;
-  saveDefaultModel(next.provider, next.model);
-  console.error(`Default model set to ${formatModelLabel(next.provider, next.model)}`);
+  await chooseInteractiveReasoningForModel(context, rl);
+  saveDefaultModelSetup(next.provider, next.model, context.reasoning);
+  console.error(`Default model set to ${formatModelLabel(next.provider, next.model)} with ${context.reasoning} reasoning`);
 }
 
-async function chooseInteractiveReasoning(
-  rawSelection: string,
+async function chooseInteractiveReasoningForModel(
   context: RunContext,
   rl: ReturnType<typeof createInterface>,
 ): Promise<void> {
-  let selection = rawSelection.trim();
-  if (!selection) {
-    console.error(`Current reasoning: ${context.reasoning}`);
-    console.error(`Reasoning levels: ${REASONING_LEVELS.join(", ")}`);
+  console.error(`Reasoning levels: ${REASONING_LEVELS.join(", ")}`);
+  while (true) {
+    let selection = "";
     try {
-      selection = (await rl.question("reasoning> ")).trim();
+      selection = (await rl.question(`reasoning [${context.reasoning}]> `)).trim();
     } catch {
       return;
     }
     if (!selection) return;
-  }
 
-  let reasoning: ReasoningLevel;
-  try {
-    reasoning = parseReasoning(selection);
-  } catch {
-    console.error(`Unknown reasoning level: ${selection}`);
-    return;
+    try {
+      context.reasoning = parseReasoning(selection);
+      return;
+    } catch {
+      console.error(`Unknown reasoning level: ${selection}`);
+    }
   }
-
-  context.reasoning = reasoning;
-  saveDefaultReasoning(reasoning);
-  console.error(`Default reasoning set to ${reasoning}`);
 }
 
 async function main(): Promise<void> {
