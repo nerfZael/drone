@@ -81,6 +81,11 @@ export type StoredPendingPrompt = {
   blockedByAutomation?: boolean;
   state: string;
   error?: string;
+  blipClones?: {
+    status: 'running';
+    count: number;
+    tasks: string[];
+  };
   updatedAt?: string;
 };
 
@@ -250,6 +255,7 @@ function normalizePendingPrompt(raw: any): StoredPendingPrompt | null {
   const updatedAt = typeof raw?.updatedAt === 'string' && raw.updatedAt.trim() ? String(raw.updatedAt).trim() : at;
   const stateRaw = String(raw?.state ?? '').trim();
   const state = stateRaw === 'queued' || stateRaw === 'sending' || stateRaw === 'sent' || stateRaw === 'failed' ? stateRaw : 'sending';
+  const blipClones = normalizeStoredBlipClones(raw?.blipClones);
   return {
     id,
     at,
@@ -261,8 +267,19 @@ function normalizePendingPrompt(raw: any): StoredPendingPrompt | null {
     ...(raw?.blockedByAutomation === true ? { blockedByAutomation: true } : {}),
     state,
     ...(typeof raw?.error === 'string' ? { error: raw.error } : {}),
+    ...(blipClones ? { blipClones } : {}),
     updatedAt,
   };
+}
+
+function normalizeStoredBlipClones(raw: any): StoredPendingPrompt['blipClones'] | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  if (String(raw.status ?? '').trim() !== 'running') return undefined;
+  const tasks = Array.isArray(raw.tasks) ? raw.tasks.map((task: any) => String(task ?? '').trim()).filter(Boolean).slice(0, 8) : [];
+  if (tasks.length === 0) return undefined;
+  const countRaw = Number(raw.count);
+  const count = Number.isFinite(countRaw) && countRaw > 0 ? Math.floor(countRaw) : tasks.length;
+  return { status: 'running', count: Math.max(1, count), tasks };
 }
 
 function promptFromRow(row: any): StoredPendingPrompt | null {
@@ -731,7 +748,7 @@ class TranscriptStore {
     droneId: string;
     chatName: string;
     id: string;
-    patch: Partial<Pick<StoredPendingPrompt, 'state' | 'error' | 'updatedAt'>>;
+    patch: Partial<Pick<StoredPendingPrompt, 'state' | 'error' | 'blipClones' | 'updatedAt'>>;
   }): { updated: boolean } {
     const current = this.readPendingPrompt(opts.droneId, opts.chatName, opts.id);
     if (!current) return { updated: false };
@@ -1174,7 +1191,7 @@ export function updatePendingPromptInStore(opts: {
   droneId: string;
   chatName: string;
   id: string;
-  patch: Partial<Pick<StoredPendingPrompt, 'state' | 'error' | 'updatedAt'>>;
+  patch: Partial<Pick<StoredPendingPrompt, 'state' | 'error' | 'blipClones' | 'updatedAt'>>;
 }): { available: boolean; updated: boolean } {
   const store = getTranscriptStore();
   if (!store) {

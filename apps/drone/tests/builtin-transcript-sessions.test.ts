@@ -194,6 +194,41 @@ describe('prompt job transcript metadata', () => {
     });
   });
 
+  test('tracks active Blip clone tasks while create_clones is running', () => {
+    expect(
+      parseBlipJsonl(
+        [
+          '{"version":1,"type":"session_started","sessionId":"sess_blip","timestamp":"2026-06-17T00:00:00.000Z"}',
+          '{"version":1,"type":"tool_call_started","sessionId":"sess_blip","timestamp":"2026-06-17T00:00:01.000Z","callId":"call_clones","tool":"create_clones","args":{"tasks":["inspect api","check ui"]}}',
+        ].join('\n'),
+      ),
+    ).toEqual({
+      sessionId: 'sess_blip',
+      message: null,
+      cloneActivity: {
+        status: 'running',
+        count: 2,
+        tasks: ['inspect api', 'check ui'],
+      },
+    });
+  });
+
+  test('clears Blip clone tasks after create_clones completes', () => {
+    expect(
+      parseBlipJsonl(
+        [
+          '{"version":1,"type":"session_started","sessionId":"sess_blip","timestamp":"2026-06-17T00:00:00.000Z"}',
+          '{"version":1,"type":"tool_call_started","sessionId":"sess_blip","timestamp":"2026-06-17T00:00:01.000Z","callId":"call_clones","tool":"create_clones","args":{"tasks":["inspect api","check ui"]}}',
+          '{"version":1,"type":"tool_call_completed","sessionId":"sess_blip","timestamp":"2026-06-17T00:00:02.000Z","callId":"call_clones","tool":"create_clones","result":{"maxClones":8,"clones":[]}}',
+          '{"version":1,"type":"assistant_message","sessionId":"sess_blip","timestamp":"2026-06-17T00:00:03.000Z","text":"Final Blip report."}',
+        ].join('\n'),
+      ),
+    ).toEqual({
+      sessionId: 'sess_blip',
+      message: 'Final Blip report.',
+    });
+  });
+
   test('does not mark an intermediary Codex status message as terminal', () => {
     const parsed = parseCodexJobTranscript({
       state: 'failed',

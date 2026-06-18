@@ -5546,6 +5546,7 @@ async function sendPromptToChat(opts: {
 
     if (agent.kind === 'builtin' && agent.id === 'blip') {
       const modelArg = chatModel ? ` --model ${bashQuote(chatModel)}` : '';
+      const clonesArg = (chat as any)?.blipClonesEnabled === false ? ' --no-clones' : ' --clones';
       const blipSessionId = readBuiltinTranscriptSessionId(chat, 'blip');
       const sessionArg = blipSessionId ? ` --session ${bashQuote(blipSessionId)}` : '';
       const blipCommand = resolveBlipPromptCommand(runtime);
@@ -5555,7 +5556,7 @@ async function sendPromptToChat(opts: {
         ...managedEnvLines,
         `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
         cdCommand,
-        `${blipCommand} --jsonl --permission full-access --profile local-trusted-write${modelArg}${sessionArg} ${bashQuote(promptWithHistory)}`,
+        `${blipCommand} --jsonl --permission full-access --profile local-trusted-write${clonesArg}${modelArg}${sessionArg} ${bashQuote(promptWithHistory)}`,
       ].join('\n');
       await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'blip', script });
       return {
@@ -8466,6 +8467,25 @@ function chatHasReconcilablePendingPrompts(entry: any): boolean {
   return false;
 }
 
+function normalizePendingBlipClones(raw: any): { status: 'running'; count: number; tasks: string[] } | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  if (String(raw.status ?? '').trim() !== 'running') return undefined;
+  const tasks = Array.isArray(raw.tasks) ? raw.tasks.map((task: any) => String(task ?? '').trim()).filter(Boolean).slice(0, 8) : [];
+  if (tasks.length === 0) return undefined;
+  const countRaw = Number(raw.count);
+  const count = Number.isFinite(countRaw) && countRaw > 0 ? Math.floor(countRaw) : tasks.length;
+  return { status: 'running', count: Math.max(1, count), tasks };
+}
+
+function samePendingBlipClones(leftRaw: any, rightRaw: any): boolean {
+  const left = normalizePendingBlipClones(leftRaw);
+  const right = normalizePendingBlipClones(rightRaw);
+  if (!left && !right) return true;
+  if (!left || !right) return false;
+  if (left.count !== right.count || left.tasks.length !== right.tasks.length) return false;
+  return left.tasks.every((task, index) => task === right.tasks[index]);
+}
+
 async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string }): Promise<void> {
   const regAny: any = await loadRegistry();
   const droneId = normalizeDroneIdentity(opts.droneId);
@@ -8572,9 +8592,17 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
     }
     let job = jobResp?.job ?? null;
     let jobState = String(job?.state ?? '').trim();
+    let jobKind = normalizeBuiltinAgentId(job?.kind) ?? agent.id;
     if (jobState === 'queued' || jobState === 'running') {
-      if (state !== 'sent') {
-        pendingList[i] = { ...p, state: 'sent', updatedAt: nowIso() };
+      const parsedBlip = jobKind === 'blip' && jobState === 'running' ? parseBlipJobTranscript(job) : null;
+      if (parsedBlip?.sessionId && String(parsedBlip.sessionId).trim() && String(entry?.blipSessionId ?? '').trim() !== parsedBlip.sessionId) {
+        entry.blipSessionId = parsedBlip.sessionId;
+        changed = true;
+      }
+      const nextBlipClones = parsedBlip?.cloneActivity;
+      const blipClonesChanged = jobKind === 'blip' && !samePendingBlipClones((p as any).blipClones, nextBlipClones);
+      if (state !== 'sent' || blipClonesChanged) {
+        pendingList[i] = { ...p, state: 'sent', blipClones: nextBlipClones, updatedAt: nowIso() };
         changed = true;
         continue;
       }
@@ -8595,6 +8623,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
       if (recovered.jobState && recovered.job) {
         job = recovered.job;
         jobState = recovered.jobState;
+        jobKind = normalizeBuiltinAgentId(job?.kind) ?? agent.id;
       } else {
         pendingList[i] = {
           ...p,
@@ -8610,8 +8639,6 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
     if (jobState === 'queued' || jobState === 'running') {
       continue;
     }
-
-    const jobKind = normalizeBuiltinAgentId(job?.kind) ?? agent.id;
 
     if (jobState === 'done') {
       const stdout = typeof job?.stdout === 'string' ? job.stdout : '';
@@ -8635,7 +8662,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
             fallbackRaw: 'codex finished but no message was parsed',
             exitCode: 0,
           });
-          pendingList[i] = { ...p, state: 'failed', error, updatedAt: nowIso() };
+          pendingList[i] = { ...p, state: 'failed', error, blipClones: undefined, updatedAt: nowIso() };
           changed = true;
           continue;
         }
@@ -8657,7 +8684,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
         });
         transcriptIds.add(id);
         completedTurnIdsForSnapshot.push(id);
-        pendingList[i] = { ...p, state: 'sent', updatedAt: nowIso() };
+        pendingList[i] = { ...p, state: 'sent', blipClones: undefined, updatedAt: nowIso() };
         changed = true;
         continue;
       }
@@ -8670,7 +8697,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
         }
         const output = String(parsed.message ?? '').trimEnd();
         if (!output) {
-          pendingList[i] = { ...p, state: 'failed', error: 'pi finished but no assistant message was parsed', updatedAt: nowIso() };
+          pendingList[i] = { ...p, state: 'failed', error: 'pi finished but no assistant message was parsed', blipClones: undefined, updatedAt: nowIso() };
           changed = true;
           continue;
         }
@@ -8687,7 +8714,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
         });
         transcriptIds.add(id);
         completedTurnIdsForSnapshot.push(id);
-        pendingList[i] = { ...p, state: 'sent', updatedAt: nowIso() };
+        pendingList[i] = { ...p, state: 'sent', blipClones: undefined, updatedAt: nowIso() };
         changed = true;
         continue;
       }
@@ -8700,7 +8727,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
         }
         const output = String(parsed.message ?? '').trimEnd();
         if (!output) {
-          pendingList[i] = { ...p, state: 'failed', error: 'blip finished but no assistant message was parsed', updatedAt: nowIso() };
+          pendingList[i] = { ...p, state: 'failed', error: 'blip finished but no assistant message was parsed', blipClones: undefined, updatedAt: nowIso() };
           changed = true;
           continue;
         }
@@ -8716,7 +8743,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           output,
         });
         transcriptIds.add(id);
-        pendingList[i] = { ...p, state: 'sent', updatedAt: nowIso() };
+        pendingList[i] = { ...p, state: 'sent', blipClones: undefined, updatedAt: nowIso() };
         changed = true;
         continue;
       }
@@ -8755,7 +8782,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
       });
       transcriptIds.add(id);
       completedTurnIdsForSnapshot.push(id);
-      pendingList[i] = { ...p, state: 'sent', updatedAt: nowIso() };
+      pendingList[i] = { ...p, state: 'sent', blipClones: undefined, updatedAt: nowIso() };
       changed = true;
       continue;
     }
@@ -8794,7 +8821,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           });
           transcriptIds.add(id);
           completedTurnIdsForSnapshot.push(id);
-          pendingList[i] = { ...p, state: 'sent', error: undefined, updatedAt: nowIso() };
+          pendingList[i] = { ...p, state: 'sent', error: undefined, blipClones: undefined, updatedAt: nowIso() };
           changed = true;
           continue;
         }
@@ -8829,7 +8856,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           });
           transcriptIds.add(id);
           completedTurnIdsForSnapshot.push(id);
-          pendingList[i] = { ...p, state: 'sent', error: undefined, updatedAt: nowIso() };
+          pendingList[i] = { ...p, state: 'sent', error: undefined, blipClones: undefined, updatedAt: nowIso() };
           changed = true;
           continue;
         }
@@ -8860,7 +8887,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
             output,
           });
           transcriptIds.add(id);
-          pendingList[i] = { ...p, state: 'sent', error: undefined, updatedAt: nowIso() };
+          pendingList[i] = { ...p, state: 'sent', error: undefined, blipClones: undefined, updatedAt: nowIso() };
           changed = true;
           continue;
         }
@@ -8880,13 +8907,13 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           '',
         exitCode,
       });
-      pendingList[i] = { ...p, state: 'failed', error: errText, updatedAt: nowIso() };
+      pendingList[i] = { ...p, state: 'failed', error: errText, blipClones: undefined, updatedAt: nowIso() };
       changed = true;
       continue;
     }
 
     if (jobState === 'canceled') {
-      pendingList[i] = { ...p, state: 'failed', error: STOPPED_BY_USER_ERROR, updatedAt: nowIso() };
+      pendingList[i] = { ...p, state: 'failed', error: STOPPED_BY_USER_ERROR, blipClones: undefined, updatedAt: nowIso() };
       changed = true;
       continue;
     }
@@ -11027,6 +11054,9 @@ function buildNewChatEntry(opts: {
     entry.agentSuggestionEnabled = true;
     entry.agentSuggestionEnabledAt = opts.createdAt;
   }
+  if (agent.kind === 'builtin' && agent.id === 'blip' && opts.sourceChatEntry?.blipClonesEnabled === false) {
+    entry.blipClonesEnabled = false;
+  }
   return entry;
 }
 
@@ -11254,6 +11284,8 @@ async function setChatAgentConfig(opts: {
   agentSuggestionEnabled?: boolean;
   setDockerSnapshotAfterAgentMessageEnabled?: boolean;
   dockerSnapshotAfterAgentMessageEnabled?: boolean;
+  setBlipClonesEnabled?: boolean;
+  blipClonesEnabled?: boolean;
 }) {
   let syncedDroneId = '';
   let syncedChatName = '';
@@ -11303,6 +11335,16 @@ async function setChatAgentConfig(opts: {
         throw error;
       }
     }
+    if (opts.setBlipClonesEnabled && effectiveAgent.kind !== 'builtin') {
+      const error: Error & { statusCode?: number } = new Error('Blip clones are only supported for Blip chats');
+      error.statusCode = 400;
+      throw error;
+    }
+    if (opts.setBlipClonesEnabled && effectiveAgent.kind === 'builtin' && effectiveAgent.id !== 'blip') {
+      const error: Error & { statusCode?: number } = new Error('Blip clones are only supported for Blip chats');
+      error.statusCode = 400;
+      throw error;
+    }
     if (opts.agent) {
       assertChatAgentSupportedForDrone(d, opts.agent);
       cur.agent = opts.agent as any;
@@ -11346,6 +11388,9 @@ async function setChatAgentConfig(opts: {
         cur.dockerSnapshotAfterAgentMessageEnabled = false;
         delete cur.dockerSnapshotAfterAgentMessageEnabledAt;
       }
+    }
+    if (opts.setBlipClonesEnabled) {
+      cur.blipClonesEnabled = opts.blipClonesEnabled !== false;
     }
     d.chats[opts.chatName] = cur;
     reg.drones = reg.drones ?? {};
@@ -13552,6 +13597,7 @@ export async function startDroneHubApiServer(opts: {
         id: String(item?.id ?? ''),
         state: String(item?.state ?? ''),
         error: String(item?.error ?? ''),
+        blipClones: normalizePendingBlipClones(item?.blipClones) ?? null,
         updatedAt: String(item?.updatedAt ?? ''),
       })),
     });
@@ -25101,6 +25147,7 @@ export async function startDroneHubApiServer(opts: {
           agentMessageAutoContinueEnabled: (chatEntry as any).agentMessageAutoContinueEnabled === true,
           agentSuggestionEnabled: (chatEntry as any).agentSuggestionEnabled === true,
           dockerSnapshotAfterAgentMessageEnabled: dockerSnapshotAfterAgentMessageEnabledForChat(resolved.drone, chatEntry),
+          blipClonesEnabled: (chatEntry as any).blipClonesEnabled !== false,
           turns: (chatEntry as any).turns ?? [],
           sessionName: hubChatSessionName(chatName || 'default'),
           createdAt: chatEntry.createdAt,
@@ -25144,10 +25191,13 @@ export async function startDroneHubApiServer(opts: {
           Boolean(body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, 'agentSuggestionEnabled'));
         const hasDockerSnapshotField =
           Boolean(body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, 'dockerSnapshotAfterAgentMessageEnabled'));
+        const hasBlipClonesField =
+          Boolean(body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, 'blipClonesEnabled'));
         let model: string | null = null;
         let agentMessageAutoContinueEnabled = false;
         let agentSuggestionEnabled = false;
         let dockerSnapshotAfterAgentMessageEnabled = false;
+        let blipClonesEnabled = true;
         if (hasModelField) {
           try {
             model = parseChatModelForUpdate(
@@ -25181,6 +25231,13 @@ export async function startDroneHubApiServer(opts: {
           }
           dockerSnapshotAfterAgentMessageEnabled = body.dockerSnapshotAfterAgentMessageEnabled === true;
         }
+        if (hasBlipClonesField) {
+          if (body?.blipClonesEnabled !== true && body?.blipClonesEnabled !== false) {
+            json(res, 400, { ok: false, error: 'blipClonesEnabled must be a boolean' });
+            return;
+          }
+          blipClonesEnabled = body.blipClonesEnabled !== false;
+        }
         try {
           await ensureChatEntry({ droneId, chatName });
           const builtinId = normalizeBuiltinAgentId(kind === 'builtin' ? agentRaw?.id : kind);
@@ -25198,6 +25255,8 @@ export async function startDroneHubApiServer(opts: {
               agentSuggestionEnabled,
               setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
               dockerSnapshotAfterAgentMessageEnabled,
+              setBlipClonesEnabled: hasBlipClonesField,
+              blipClonesEnabled,
             });
             json(res, 200, {
               ok: true,
@@ -25209,6 +25268,7 @@ export async function startDroneHubApiServer(opts: {
               ...(hasAutoContinueField ? { agentMessageAutoContinueEnabled } : {}),
               ...(hasAgentSuggestionField ? { agentSuggestionEnabled } : {}),
               ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
+              ...(hasBlipClonesField ? { blipClonesEnabled } : {}),
             });
             return;
           }
@@ -25232,6 +25292,8 @@ export async function startDroneHubApiServer(opts: {
               agentSuggestionEnabled,
               setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
               dockerSnapshotAfterAgentMessageEnabled,
+              setBlipClonesEnabled: hasBlipClonesField,
+              blipClonesEnabled,
             });
             json(res, 200, {
               ok: true,
@@ -25243,6 +25305,7 @@ export async function startDroneHubApiServer(opts: {
               ...(hasAutoContinueField ? { agentMessageAutoContinueEnabled } : {}),
               ...(hasAgentSuggestionField ? { agentSuggestionEnabled } : {}),
               ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
+              ...(hasBlipClonesField ? { blipClonesEnabled } : {}),
             });
             return;
           }
@@ -25258,6 +25321,8 @@ export async function startDroneHubApiServer(opts: {
               agentSuggestionEnabled,
               setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
               dockerSnapshotAfterAgentMessageEnabled,
+              setBlipClonesEnabled: hasBlipClonesField,
+              blipClonesEnabled,
             });
             json(res, 200, {
               ok: true,
@@ -25268,6 +25333,7 @@ export async function startDroneHubApiServer(opts: {
               ...(hasAutoContinueField ? { agentMessageAutoContinueEnabled } : {}),
               ...(hasAgentSuggestionField ? { agentSuggestionEnabled } : {}),
               ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
+              ...(hasBlipClonesField ? { blipClonesEnabled } : {}),
             });
             return;
           }
@@ -25281,6 +25347,8 @@ export async function startDroneHubApiServer(opts: {
               agentSuggestionEnabled,
               setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
               dockerSnapshotAfterAgentMessageEnabled,
+              setBlipClonesEnabled: hasBlipClonesField,
+              blipClonesEnabled,
             });
             json(res, 200, {
               ok: true,
@@ -25290,6 +25358,7 @@ export async function startDroneHubApiServer(opts: {
               agentMessageAutoContinueEnabled,
               ...(hasAgentSuggestionField ? { agentSuggestionEnabled } : {}),
               ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
+              ...(hasBlipClonesField ? { blipClonesEnabled } : {}),
             });
             return;
           }
@@ -25301,6 +25370,8 @@ export async function startDroneHubApiServer(opts: {
               agentSuggestionEnabled,
               setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
               dockerSnapshotAfterAgentMessageEnabled,
+              setBlipClonesEnabled: hasBlipClonesField,
+              blipClonesEnabled,
             });
             json(res, 200, {
               ok: true,
@@ -25309,6 +25380,7 @@ export async function startDroneHubApiServer(opts: {
               chat: chatName,
               agentSuggestionEnabled,
               ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
+              ...(hasBlipClonesField ? { blipClonesEnabled } : {}),
             });
             return;
           }
@@ -25318,6 +25390,8 @@ export async function startDroneHubApiServer(opts: {
               chatName,
               setDockerSnapshotAfterAgentMessageEnabled: true,
               dockerSnapshotAfterAgentMessageEnabled,
+              setBlipClonesEnabled: hasBlipClonesField,
+              blipClonesEnabled,
             });
             json(res, 200, {
               ok: true,
@@ -25325,12 +25399,29 @@ export async function startDroneHubApiServer(opts: {
               name: droneName,
               chat: chatName,
               dockerSnapshotAfterAgentMessageEnabled,
+              ...(hasBlipClonesField ? { blipClonesEnabled } : {}),
+            });
+            return;
+          }
+          if (hasBlipClonesField) {
+            await setChatAgentConfig({
+              droneId,
+              chatName,
+              setBlipClonesEnabled: true,
+              blipClonesEnabled,
+            });
+            json(res, 200, {
+              ok: true,
+              id: droneId,
+              name: droneName,
+              chat: chatName,
+              blipClonesEnabled,
             });
             return;
           }
           json(res, 400, {
             ok: false,
-            error: `invalid request (expected agent cursor|codex|claude|opencode|pi|blip|custom, model, agentMessageAutoContinueEnabled, agentSuggestionEnabled, or dockerSnapshotAfterAgentMessageEnabled)`,
+            error: `invalid request (expected agent cursor|codex|claude|opencode|pi|blip|custom, model, agentMessageAutoContinueEnabled, agentSuggestionEnabled, dockerSnapshotAfterAgentMessageEnabled, or blipClonesEnabled)`,
           });
           return;
         } catch (e: any) {

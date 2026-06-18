@@ -22,6 +22,11 @@ export type PendingPrompt = {
   blockedByAutomation?: boolean;
   state: PendingPromptState;
   error?: string;
+  blipClones?: {
+    status: 'running';
+    count: number;
+    tasks: string[];
+  };
   updatedAt?: string;
 };
 
@@ -109,6 +114,7 @@ export function createDronePendingPromptStore(deps: {
               ? (p.state as PendingPromptState)
               : 'sending',
           error: typeof p?.error === 'string' ? p.error : undefined,
+          blipClones: normalizeBlipClones((p as any)?.blipClones),
           updatedAt: typeof p?.updatedAt === 'string' ? p.updatedAt : undefined,
         }))
         .filter((p: PendingPrompt) => p.id && p.prompt.trim())
@@ -145,6 +151,18 @@ export function createDronePendingPromptStore(deps: {
       seen.add(id);
     }
     return pending.slice(-60);
+  }
+
+  function normalizeBlipClones(raw: unknown): PendingPrompt['blipClones'] | undefined {
+    if (!raw || typeof raw !== 'object') return undefined;
+    if (String((raw as any).status ?? '').trim() !== 'running') return undefined;
+    const tasks = Array.isArray((raw as any).tasks)
+      ? (raw as any).tasks.map((task: any) => String(task ?? '').trim()).filter(Boolean).slice(0, 8)
+      : [];
+    if (tasks.length === 0) return undefined;
+    const countRaw = Number((raw as any).count);
+    const count = Number.isFinite(countRaw) && countRaw > 0 ? Math.floor(countRaw) : tasks.length;
+    return { status: 'running', count: Math.max(1, count), tasks };
   }
 
   function isSafePromptId(raw: string): boolean {
@@ -259,7 +277,7 @@ export function createDronePendingPromptStore(deps: {
     droneId: string;
     chatName: string;
     id: string;
-    patch: Partial<Pick<PendingPrompt, 'state' | 'error' | 'updatedAt'>>;
+    patch: Partial<Pick<PendingPrompt, 'state' | 'error' | 'blipClones' | 'updatedAt'>>;
   }): Promise<void> {
     const droneIdForStore = normalizeDroneIdentity(opts.droneId);
     const chatNameForStore = opts.chatName || 'default';
