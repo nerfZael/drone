@@ -1372,7 +1372,7 @@ export function SelectedDroneWorkspace({
                           : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
                     }`}
                     style={{ fontFamily: 'var(--display)' }}
-                    title="Allow Blip to run up to four cloned sessions in parallel for independent subtasks."
+                    title="Allow Blip to run up to eight cloned sessions in parallel for independent subtasks."
                   >
                     <span
                       className={`relative inline-flex h-3.5 w-6 rounded-full transition-colors ${

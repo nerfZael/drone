@@ -9,7 +9,7 @@ import type { BlipRuntimeEvent, BlipSessionState, RunBlipOptions } from "./types
 
 type RuntimeSink = (event: BlipRuntimeEvent) => Promise<void> | void;
 
-export const BLIP_MAX_CLONES = 4;
+export const BLIP_MAX_CLONES = 8;
 
 type CloneRunResult = {
   index: number;

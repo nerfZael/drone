@@ -8467,6 +8467,25 @@ function chatHasReconcilablePendingPrompts(entry: any): boolean {
   return false;
 }
 
+function normalizePendingBlipClones(raw: any): { status: 'running'; count: number; tasks: string[] } | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  if (String(raw.status ?? '').trim() !== 'running') return undefined;
+  const tasks = Array.isArray(raw.tasks) ? raw.tasks.map((task: any) => String(task ?? '').trim()).filter(Boolean).slice(0, 8) : [];
+  if (tasks.length === 0) return undefined;
+  const countRaw = Number(raw.count);
+  const count = Number.isFinite(countRaw) && countRaw > 0 ? Math.floor(countRaw) : tasks.length;
+  return { status: 'running', count: Math.max(1, count), tasks };
+}
+
+function samePendingBlipClones(leftRaw: any, rightRaw: any): boolean {
+  const left = normalizePendingBlipClones(leftRaw);
+  const right = normalizePendingBlipClones(rightRaw);
+  if (!left && !right) return true;
+  if (!left || !right) return false;
+  if (left.count !== right.count || left.tasks.length !== right.tasks.length) return false;
+  return left.tasks.every((task, index) => task === right.tasks[index]);
+}
+
 async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string }): Promise<void> {
   const regAny: any = await loadRegistry();
   const droneId = normalizeDroneIdentity(opts.droneId);
@@ -8573,9 +8592,17 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
     }
     let job = jobResp?.job ?? null;
     let jobState = String(job?.state ?? '').trim();
+    let jobKind = normalizeBuiltinAgentId(job?.kind) ?? agent.id;
     if (jobState === 'queued' || jobState === 'running') {
-      if (state !== 'sent') {
-        pendingList[i] = { ...p, state: 'sent', updatedAt: nowIso() };
+      const parsedBlip = jobKind === 'blip' && jobState === 'running' ? parseBlipJobTranscript(job) : null;
+      if (parsedBlip?.sessionId && String(parsedBlip.sessionId).trim() && String(entry?.blipSessionId ?? '').trim() !== parsedBlip.sessionId) {
+        entry.blipSessionId = parsedBlip.sessionId;
+        changed = true;
+      }
+      const nextBlipClones = parsedBlip?.cloneActivity;
+      const blipClonesChanged = jobKind === 'blip' && !samePendingBlipClones((p as any).blipClones, nextBlipClones);
+      if (state !== 'sent' || blipClonesChanged) {
+        pendingList[i] = { ...p, state: 'sent', blipClones: nextBlipClones, updatedAt: nowIso() };
         changed = true;
         continue;
       }
@@ -8596,6 +8623,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
       if (recovered.jobState && recovered.job) {
         job = recovered.job;
         jobState = recovered.jobState;
+        jobKind = normalizeBuiltinAgentId(job?.kind) ?? agent.id;
       } else {
         pendingList[i] = {
           ...p,
@@ -8611,8 +8639,6 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
     if (jobState === 'queued' || jobState === 'running') {
       continue;
     }
-
-    const jobKind = normalizeBuiltinAgentId(job?.kind) ?? agent.id;
 
     if (jobState === 'done') {
       const stdout = typeof job?.stdout === 'string' ? job.stdout : '';
@@ -8636,7 +8662,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
             fallbackRaw: 'codex finished but no message was parsed',
             exitCode: 0,
           });
-          pendingList[i] = { ...p, state: 'failed', error, updatedAt: nowIso() };
+          pendingList[i] = { ...p, state: 'failed', error, blipClones: undefined, updatedAt: nowIso() };
           changed = true;
           continue;
         }
@@ -8658,7 +8684,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
         });
         transcriptIds.add(id);
         completedTurnIdsForSnapshot.push(id);
-        pendingList[i] = { ...p, state: 'sent', updatedAt: nowIso() };
+        pendingList[i] = { ...p, state: 'sent', blipClones: undefined, updatedAt: nowIso() };
         changed = true;
         continue;
       }
@@ -8671,7 +8697,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
         }
         const output = String(parsed.message ?? '').trimEnd();
         if (!output) {
-          pendingList[i] = { ...p, state: 'failed', error: 'pi finished but no assistant message was parsed', updatedAt: nowIso() };
+          pendingList[i] = { ...p, state: 'failed', error: 'pi finished but no assistant message was parsed', blipClones: undefined, updatedAt: nowIso() };
           changed = true;
           continue;
         }
@@ -8688,7 +8714,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
         });
         transcriptIds.add(id);
         completedTurnIdsForSnapshot.push(id);
-        pendingList[i] = { ...p, state: 'sent', updatedAt: nowIso() };
+        pendingList[i] = { ...p, state: 'sent', blipClones: undefined, updatedAt: nowIso() };
         changed = true;
         continue;
       }
@@ -8701,7 +8727,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
         }
         const output = String(parsed.message ?? '').trimEnd();
         if (!output) {
-          pendingList[i] = { ...p, state: 'failed', error: 'blip finished but no assistant message was parsed', updatedAt: nowIso() };
+          pendingList[i] = { ...p, state: 'failed', error: 'blip finished but no assistant message was parsed', blipClones: undefined, updatedAt: nowIso() };
           changed = true;
           continue;
         }
@@ -8717,7 +8743,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           output,
         });
         transcriptIds.add(id);
-        pendingList[i] = { ...p, state: 'sent', updatedAt: nowIso() };
+        pendingList[i] = { ...p, state: 'sent', blipClones: undefined, updatedAt: nowIso() };
         changed = true;
         continue;
       }
@@ -8756,7 +8782,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
       });
       transcriptIds.add(id);
       completedTurnIdsForSnapshot.push(id);
-      pendingList[i] = { ...p, state: 'sent', updatedAt: nowIso() };
+      pendingList[i] = { ...p, state: 'sent', blipClones: undefined, updatedAt: nowIso() };
       changed = true;
       continue;
     }
@@ -8795,7 +8821,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           });
           transcriptIds.add(id);
           completedTurnIdsForSnapshot.push(id);
-          pendingList[i] = { ...p, state: 'sent', error: undefined, updatedAt: nowIso() };
+          pendingList[i] = { ...p, state: 'sent', error: undefined, blipClones: undefined, updatedAt: nowIso() };
           changed = true;
           continue;
         }
@@ -8830,7 +8856,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           });
           transcriptIds.add(id);
           completedTurnIdsForSnapshot.push(id);
-          pendingList[i] = { ...p, state: 'sent', error: undefined, updatedAt: nowIso() };
+          pendingList[i] = { ...p, state: 'sent', error: undefined, blipClones: undefined, updatedAt: nowIso() };
           changed = true;
           continue;
         }
@@ -8861,7 +8887,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
             output,
           });
           transcriptIds.add(id);
-          pendingList[i] = { ...p, state: 'sent', error: undefined, updatedAt: nowIso() };
+          pendingList[i] = { ...p, state: 'sent', error: undefined, blipClones: undefined, updatedAt: nowIso() };
           changed = true;
           continue;
         }
@@ -8881,13 +8907,13 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           '',
         exitCode,
       });
-      pendingList[i] = { ...p, state: 'failed', error: errText, updatedAt: nowIso() };
+      pendingList[i] = { ...p, state: 'failed', error: errText, blipClones: undefined, updatedAt: nowIso() };
       changed = true;
       continue;
     }
 
     if (jobState === 'canceled') {
-      pendingList[i] = { ...p, state: 'failed', error: STOPPED_BY_USER_ERROR, updatedAt: nowIso() };
+      pendingList[i] = { ...p, state: 'failed', error: STOPPED_BY_USER_ERROR, blipClones: undefined, updatedAt: nowIso() };
       changed = true;
       continue;
     }
@@ -13571,6 +13597,7 @@ export async function startDroneHubApiServer(opts: {
         id: String(item?.id ?? ''),
         state: String(item?.state ?? ''),
         error: String(item?.error ?? ''),
+        blipClones: normalizePendingBlipClones(item?.blipClones) ?? null,
         updatedAt: String(item?.updatedAt ?? ''),
       })),
     });

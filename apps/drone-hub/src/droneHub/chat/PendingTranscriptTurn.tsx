@@ -67,6 +67,12 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
     Boolean(onRequestUnstick);
   const canCancelQueued = item.state === 'queued' && !item.automation && Boolean(onCancelQueued);
   const showAgentPendingBubble = !(item.state === 'queued' && !isFailed);
+  const blipCloneTasks =
+    item.blipClones?.status === 'running' && Array.isArray(item.blipClones.tasks)
+      ? item.blipClones.tasks.map((task) => String(task ?? '').trim()).filter(Boolean).slice(0, 8)
+      : [];
+  const blipCloneCount = item.blipClones?.status === 'running' ? Math.max(item.blipClones.count || blipCloneTasks.length, blipCloneTasks.length) : 0;
+  const showBlipClones = blipCloneTasks.length > 0;
   const userCopyText = String(promptText ?? '');
   const agentCopyText = isFailed
     ? stripAnsi(item.error || 'failed to send')
@@ -258,12 +264,26 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
                 <>
                   <div className="text-[12.5px] leading-[1.6] text-[var(--muted)] flex items-center gap-2">
                     <TypingDots color="var(--accent)" />
-                    {item.state === 'sending'
-                      ? 'Sending…'
-                      : item.state === 'sent'
-                        ? 'Waiting…'
-                        : 'Typing…'}
+                    {showBlipClones
+                      ? `${blipCloneCount} Blip ${blipCloneCount === 1 ? 'clone' : 'clones'} running…`
+                      : item.state === 'sending'
+                        ? 'Sending…'
+                        : item.state === 'sent'
+                          ? 'Waiting…'
+                          : 'Typing…'}
                   </div>
+                  {showBlipClones ? (
+                    <div className="mt-2 border-t border-[var(--border-subtle)] pt-2">
+                      <ol className="space-y-1.5">
+                        {blipCloneTasks.map((task, index) => (
+                          <li key={`${index}:${task}`} className="grid grid-cols-[18px_minmax(0,1fr)] gap-2 text-[11px] leading-[1.45]">
+                            <span className="text-[var(--accent)] font-mono tabular-nums">{index + 1}</span>
+                            <span className="text-[var(--fg-secondary)] break-words">{task}</span>
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  ) : null}
                   {canRequestUnstick ? (
                     <div className="mt-2 pt-2 border-t border-[var(--border-subtle)] flex items-center justify-between gap-2">
                       <span className="text-[10px] text-[var(--muted-dim)]">Still waiting for agent completion.</span>
