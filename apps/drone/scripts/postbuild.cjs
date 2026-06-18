@@ -57,6 +57,22 @@ async function chmodExecutableBestEffort(targetPath) {
   }
 }
 
+async function removeFileBestEffort(targetPath) {
+  try {
+    await fs.rm(targetPath, { force: true });
+  } catch {
+    // Best-effort only; the subsequent build will fail if the path cannot be overwritten.
+  }
+}
+
+async function assertBlipBundleHasErrorDetails(root) {
+  const bundlePath = path.join(root, 'dist', 'blip.js');
+  const content = await fs.readFile(bundlePath, 'utf8');
+  if (!content.includes('finishedStatus === "error"') || !content.includes('Blip finished: ${') || !content.includes('detail')) {
+    throw new Error(`stale Blip bundle: ${bundlePath} is missing detailed error rendering`);
+  }
+}
+
 async function copyDesktopVoiceVoskModel(root) {
   const source = path.resolve(root, '..', 'voice-stream', 'android', 'app', 'src', 'main', 'assets', 'model-en-us');
   const target = path.join(root, 'dist', 'assets', 'vosk-model-en-us');
@@ -72,9 +88,13 @@ async function copyDesktopVoiceVoskModel(root) {
 
 async function main() {
   const root = path.resolve(__dirname, '..');
+  await removeFileBestEffort(path.join(root, 'dist', 'fleet.js'));
   runOrThrow('bun', fleetBundleArgs(root), { cwd: root });
+  await removeFileBestEffort(path.join(root, 'dist', 'tasks.js'));
   runOrThrow('bun', tasksBundleArgs(root), { cwd: root });
+  await removeFileBestEffort(path.join(root, 'dist', 'blip.js'));
   runOrThrow('bun', blipBundleArgs(root), { cwd: root });
+  await assertBlipBundleHasErrorDetails(root);
   await copyDesktopVoiceVoskModel(root);
   await chmodExecutableBestEffort(path.join(root, 'dist', 'blip.js'));
   await chmodExecutableBestEffort(path.join(root, 'dist', 'cli.js'));
