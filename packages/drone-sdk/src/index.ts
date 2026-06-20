@@ -24,6 +24,7 @@ export type {
   RunResult,
   RunStatus,
   SendOptions,
+  SetDroneGroupResult,
   StreamOptions,
   SubscribeMessagesInput,
   WaitOptions,

@@ -293,6 +293,15 @@ function droneAliases(value) {
   return [...new Set(aliases)];
 }
 
+async function resolveDroneIdsForGroupSet(hub, refs) {
+  const response = await requestJson(hub, '/api/drones', { method: 'GET' });
+  const drones = Array.isArray(response?.drones) ? response.drones.map(droneSummary) : [];
+  return refs.map((ref) => {
+    const match = drones.find((drone) => drone.id === ref || drone.name === ref);
+    return match?.id || ref;
+  });
+}
+
 async function createdDroneRecords(api) {
   const records = await api.state.get(CREATED_DRONES_STATE_KEY, []);
   return Array.isArray(records) ? records.filter((record) => record && typeof record === 'object') : [];
@@ -593,6 +602,49 @@ exports.activate = async function activate(api) {
     async execute() {
       const response = await requestJson(connection(), '/api/groups', { method: 'GET' });
       return { ok: true, groups: Array.isArray(response?.groups) ? response.groups : [] };
+    },
+  });
+
+  registerTool(api, {
+    name: 'set_drone_group',
+    label: 'Set drone group',
+    description: 'Move one or more Drone Hub drones into a group, or clear their group.',
+    approval: 'never',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        drones: { type: 'array', items: { type: 'string' } },
+        drone: { type: 'string' },
+        group: { type: 'string' },
+        clearGroup: { type: 'boolean' },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+    async execute(args) {
+      const rawDrones = Array.isArray(args.drones) ? args.drones : [];
+      const fallbackDrone = cleanString(args.drone);
+      const drones = [...new Set([
+        ...rawDrones.map((item) => cleanString(item)).filter(Boolean),
+        ...(fallbackDrone ? [fallbackDrone] : []),
+      ])];
+      if (drones.length === 0) throw new Error('at least one drone is required');
+      const group = args.clearGroup === true ? null : cleanString(args.group) || null;
+      if (group == null && args.clearGroup !== true) throw new Error('group is required unless clearGroup is true');
+      const hub = connection();
+      const droneIds = await resolveDroneIdsForGroupSet(hub, drones);
+      const response = await requestJson(
+        hub,
+        '/api/drones/group-set',
+        { method: 'POST', body: JSON.stringify({ droneIds, group }) },
+      );
+      return {
+        ok: true,
+        group: cleanString(response?.group) || null,
+        moved: Array.isArray(response?.moved) ? response.moved : [],
+        rejected: Array.isArray(response?.rejected) ? response.rejected : [],
+        total: Number.isFinite(Number(response?.total)) ? Number(response.total) : drones.length,
+      };
     },
   });
 
