@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createDroneSDK } from '../src';
+import { hubTransport } from '../src/hub';
 import { createMockTransport } from '../src/testing';
 
 describe('drone-sdk core', () => {
@@ -183,6 +184,76 @@ describe('drone-sdk core', () => {
 
     expect([a.group, b.group, c.group]).toEqual(['experimental', 'experimental', 'experimental']);
     expect(listed.map((drone) => drone.name).sort()).toEqual(['a', 'b', 'c']);
+  });
+
+  test('moves one or more drones between groups', async () => {
+    const sdk = createDroneSDK({
+      transport: createMockTransport(),
+    });
+
+    const alpha = await sdk.drones.create('alpha', { group: 'triage' });
+    const beta = await sdk.drones.create('beta');
+    const moved = await sdk.drones.setGroup([alpha, beta.id], 'builders');
+    const listed = await sdk.groups.get('builders').list();
+
+    expect(moved.group).toBe('builders');
+    expect(moved.moved.map((drone) => drone.name).sort()).toEqual(['alpha', 'beta']);
+    expect(listed.map((drone) => drone.name).sort()).toEqual(['alpha', 'beta']);
+
+    await alpha.setGroup(null);
+    await alpha.refresh();
+
+    expect(alpha.group).toBeUndefined();
+    expect((await sdk.groups.get('builders').list()).map((drone) => drone.name)).toEqual(['beta']);
+  });
+
+  test('sends group fields through hub transport create and group-set requests', async () => {
+    const requests: Array<{ pathname: string; body: any }> = [];
+    const transport = hubTransport({
+      baseUrl: 'http://127.0.0.1:8787',
+      token: 'test-token',
+      fetch: (async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+        requests.push({
+          pathname: new URL(String(input)).pathname,
+          body: init?.body ? JSON.parse(String(init.body)) : null,
+        });
+        const pathname = new URL(String(input)).pathname;
+        if (pathname === '/api/drones/batch') {
+          return new Response(JSON.stringify({
+            ok: true,
+            accepted: [{ id: 'drone-1', name: 'alpha', phase: 'starting' }],
+            rejected: [],
+            total: 1,
+          }), { status: 202, headers: { 'content-type': 'application/json' } });
+        }
+        if (pathname === '/api/drones/group-set') {
+          return new Response(JSON.stringify({
+            ok: true,
+            group: 'builders',
+            moved: [{ id: 'drone-1', name: 'alpha', previousGroup: 'triage', group: 'builders' }],
+            rejected: [],
+            total: 1,
+          }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }) as typeof fetch,
+    });
+
+    const created = await transport.createDrones([{ name: 'alpha', group: 'triage' }]);
+    const moved = await transport.setDroneGroup(['drone-1'], 'builders');
+
+    expect(created.accepted[0]?.group).toBe('triage');
+    expect(moved.group).toBe('builders');
+    expect(requests).toEqual([
+      {
+        pathname: '/api/drones/batch',
+        body: { drones: [{ name: 'alpha', runtime: 'container', group: 'triage' }] },
+      },
+      {
+        pathname: '/api/drones/group-set',
+        body: { droneIds: ['drone-1'], group: 'builders' },
+      },
+    ]);
   });
 
   test('supports cloning one or many drones', async () => {

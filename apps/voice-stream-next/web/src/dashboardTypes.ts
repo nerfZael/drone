@@ -506,6 +506,17 @@ export type ApiClient = {
   upload(path: string, init: RequestInit, onProgress?: (progress: { loaded: number; total: number | null }) => void): Promise<Response>;
 };
 
+export type WebRecordingTranscriptionResponse = {
+  ok: true;
+  text: string;
+  provider: 'groq' | 'fallback';
+  credentialSource: 'platform_groq_key' | 'user_groq_key' | null;
+  model: string | null;
+  audioDurationMs: number;
+  sampleRateHz: number;
+  channels: number;
+};
+
 export type DevUser = {
   email: string;
   name: string;

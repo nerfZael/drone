@@ -39,6 +39,7 @@ import type {
   VoiceRecordingRecord,
   VoiceApprovalFormState,
   VoiceSettings,
+  WebRecordingTranscriptionResponse,
 } from './dashboardTypes.js';
 import { exactTimeLabel, relativeTimeAgo, timeLabel } from './time.js';
 import { AssistantFilesPanel, type ArtifactPanelMode } from './assistant/AssistantFilesPanel.js';
@@ -64,6 +65,8 @@ const SLEEP_PHRASE_MAX_GAP_MS = 1_500;
 const MICROCREDITS_PER_CREDIT = 1_000_000;
 const VOICE_PCM_SAMPLE_RATE_HZ = 16_000;
 const VOICE_PENDING_STREAM_MAX_BYTES = pcmBytesForMs(5_000);
+const COMPOSER_RECORDING_SAMPLE_RATE_HZ = 16_000;
+const COMPOSER_RECORDING_CHANNELS = 1;
 
 const ASSISTANT_PROVIDERS: Array<{ id: 'codex' | 'openai'; label: string; title: string }> = [
   { id: 'codex', label: 'Codex', title: 'Use connected Codex ChatGPT authentication for Codex models.' },
@@ -308,6 +311,17 @@ type AppToast = {
 type AssistantStreamingDraft = {
   reply: string;
   thinking: string;
+};
+
+type ComposerRecordingStatus = 'idle' | 'starting' | 'recording' | 'transcribing';
+
+type ComposerRecordingCapture = {
+  stream: MediaStream;
+  context: AudioContext;
+  processor: ScriptProcessorNode;
+  source: MediaStreamAudioSourceNode;
+  chunks: ArrayBuffer[];
+  totalBytes: number;
 };
 
 const TOOL_LABELS: Record<string, string> = {
@@ -1281,6 +1295,8 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     phase: 'uploading' | 'processing';
   } | null>(null);
   const [messageDraft, setMessageDraft] = React.useState('');
+  const [messageSubmitInFlight, setMessageSubmitInFlight] = React.useState(false);
+  const [composerRecordingStatus, setComposerRecordingStatus] = React.useState<ComposerRecordingStatus>('idle');
   const [threadTitleDraft, setThreadTitleDraft] = React.useState('');
   const [threadDeleteCandidate, setThreadDeleteCandidate] = React.useState<AssistantThread | null>(null);
   const [artifactDeleteCandidate, setArtifactDeleteCandidate] = React.useState<AssistantArtifactRecord | null>(null);
@@ -1336,6 +1352,12 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const messageScrollSignatureRef = React.useRef('');
   const activeThreadIdRef = React.useRef<string | null>(null);
   const messageDraftRef = React.useRef('');
+  const composerRecordingStatusRef = React.useRef<ComposerRecordingStatus>('idle');
+  const composerRecordingRef = React.useRef<ComposerRecordingCapture | null>(null);
+  const composerRecordingStopPromiseRef = React.useRef<Promise<string> | null>(null);
+  const composerRecordingStartIdRef = React.useRef(0);
+  const composerRecordingThreadIdRef = React.useRef<string | null>(null);
+  const sendMessageInFlightRef = React.useRef(false);
 
   const replaceDashboardRoute = React.useCallback((view: DashboardView, pane: SettingsPane) => {
     const path = dashboardRoutePath(view, pane);
@@ -1376,6 +1398,11 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   React.useEffect(() => {
     messageDraftRef.current = messageDraft;
   }, [messageDraft]);
+
+  React.useEffect(() => () => {
+    stopComposerCapture(composerRecordingRef.current);
+    composerRecordingRef.current = null;
+  }, []);
 
   React.useEffect(() => {
     const media = window.matchMedia(COMPACT_VIEWPORT_QUERY);
@@ -1424,6 +1451,19 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const streamingReply = activeThreadStreaming?.reply ?? '';
   const streamingThinking = activeThreadStreaming?.thinking ?? '';
   const activePromptSubmitting = activeThread ? Boolean(promptSubmittingByThreadId[activeThread.id]) : false;
+  const composerRecordingActive = composerRecordingStatus !== 'idle';
+  const composerSendDisabled = !activeThread || activePromptSubmitting || messageSubmitInFlight || (!messageDraft.trim() && !composerRecordingActive);
+
+  React.useEffect(() => {
+    if (composerRecordingStatusRef.current === 'idle') return;
+    if (composerRecordingThreadIdRef.current === (activeThread?.id ?? null)) return;
+    composerRecordingStartIdRef.current += 1;
+    composerRecordingStopPromiseRef.current = null;
+    stopComposerCapture(composerRecordingRef.current);
+    composerRecordingRef.current = null;
+    composerRecordingThreadIdRef.current = null;
+    setComposerRecordingStatusValue('idle');
+  }, [activeThread?.id]);
   const updateMessagesStickToBottom = React.useCallback((node: HTMLDivElement | null) => {
     if (!node) return;
     const gap = node.scrollHeight - node.scrollTop - node.clientHeight;
@@ -1977,14 +2017,157 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     }
   }
 
+  function setComposerRecordingStatusValue(status: ComposerRecordingStatus) {
+    composerRecordingStatusRef.current = status;
+    setComposerRecordingStatus(status);
+  }
+
+  function setMessageDraftValue(value: string) {
+    messageDraftRef.current = value;
+    setMessageDraft(value);
+  }
+
+  function appendComposerTranscript(transcript: string): string {
+    const nextDraft = mergeDraftWithTranscript(messageDraftRef.current, transcript);
+    setMessageDraftValue(nextDraft);
+    return nextDraft;
+  }
+
+  async function startComposerRecording() {
+    if (!activeThread || activePromptSubmitting || composerRecordingStatusRef.current !== 'idle') return;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setError('Browser microphone recording is not available here.');
+      return;
+    }
+    const startId = composerRecordingStartIdRef.current + 1;
+    composerRecordingStartIdRef.current = startId;
+    composerRecordingThreadIdRef.current = activeThread.id;
+    setComposerRecordingStatusValue('starting');
+    setError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const context = new AudioContext({ sampleRate: COMPOSER_RECORDING_SAMPLE_RATE_HZ });
+      const source = context.createMediaStreamSource(stream);
+      const processor = context.createScriptProcessor(4096, COMPOSER_RECORDING_CHANNELS, COMPOSER_RECORDING_CHANNELS);
+      const capture: ComposerRecordingCapture = {
+        stream,
+        context,
+        processor,
+        source,
+        chunks: [],
+        totalBytes: 0,
+      };
+      processor.onaudioprocess = (event) => {
+        const frame = floatToPcm16(event.inputBuffer.getChannelData(0), event.inputBuffer.sampleRate);
+        capture.chunks.push(frame.slice(0));
+        capture.totalBytes += frame.byteLength;
+      };
+      if (composerRecordingStartIdRef.current !== startId) {
+        stopComposerCapture(capture);
+        return;
+      }
+      source.connect(processor);
+      processor.connect(context.destination);
+      composerRecordingRef.current = capture;
+      setComposerRecordingStatusValue('recording');
+    } catch (err: any) {
+      stopComposerCapture(composerRecordingRef.current);
+      composerRecordingRef.current = null;
+      if (composerRecordingStartIdRef.current === startId) {
+        composerRecordingThreadIdRef.current = null;
+        setComposerRecordingStatusValue('idle');
+        setError(voiceStartFailureStatus(err));
+      }
+    }
+  }
+
+  async function discardComposerRecording() {
+    composerRecordingStartIdRef.current += 1;
+    composerRecordingStopPromiseRef.current = null;
+    stopComposerCapture(composerRecordingRef.current);
+    composerRecordingRef.current = null;
+    composerRecordingThreadIdRef.current = null;
+    setComposerRecordingStatusValue('idle');
+  }
+
+  async function stopComposerRecordingForTranscript(): Promise<string> {
+    if (composerRecordingStopPromiseRef.current) return composerRecordingStopPromiseRef.current;
+    const promise = transcribeComposerRecording();
+    composerRecordingStopPromiseRef.current = promise;
+    try {
+      return await promise;
+    } finally {
+      composerRecordingStopPromiseRef.current = null;
+    }
+  }
+
+  async function transcribeComposerRecording(): Promise<string> {
+    const capture = composerRecordingRef.current;
+    if (!capture) {
+      composerRecordingStartIdRef.current += 1;
+      composerRecordingThreadIdRef.current = null;
+      setComposerRecordingStatusValue('idle');
+      return '';
+    }
+    composerRecordingRef.current = null;
+    stopComposerCapture(capture);
+    setComposerRecordingStatusValue('transcribing');
+    setError(null);
+    try {
+      if (capture.totalBytes <= 0) return '';
+      const pcm = concatArrayBuffers(capture.chunks, capture.totalBytes);
+      const wav = pcm16ToWav(pcm, COMPOSER_RECORDING_SAMPLE_RATE_HZ, COMPOSER_RECORDING_CHANNELS);
+      const result = await client.request<WebRecordingTranscriptionResponse>('/api/voice/web-recordings/transcribe', {
+        method: 'POST',
+        headers: { 'content-type': 'application/octet-stream' },
+        body: wav,
+      });
+      return result.text.trim();
+    } catch (err: any) {
+      setError(err?.message ?? String(err));
+      return '';
+    } finally {
+      composerRecordingThreadIdRef.current = null;
+      setComposerRecordingStatusValue('idle');
+    }
+  }
+
+  async function stopComposerRecordingAndFillDraft() {
+    const transcript = await stopComposerRecordingForTranscript();
+    if (transcript) {
+      appendComposerTranscript(transcript);
+    } else {
+      setNotice('No speech detected.');
+    }
+  }
+
   async function sendMessage(event?: React.FormEvent) {
     event?.preventDefault();
-    const content = messageDraft.trim();
-    const submittedDraft = messageDraft;
     const targetThread = activeThread as AssistantThreadView | null;
-    if (!targetThread || !content) return;
+    if (!targetThread || sendMessageInFlightRef.current) return;
     const targetThreadId = targetThread.id;
     if (promptSubmittingThreadIdsRef.current[targetThreadId]) return;
+    sendMessageInFlightRef.current = true;
+    setMessageSubmitInFlight(true);
+    let content = messageDraftRef.current.trim();
+    let submittedDraft = messageDraftRef.current;
+    const stoppedRecordingForSend = composerRecordingStatusRef.current !== 'idle';
+    if (stoppedRecordingForSend) {
+      const transcript = await stopComposerRecordingForTranscript();
+      if (transcript) {
+        submittedDraft = appendComposerTranscript(transcript);
+        content = submittedDraft.trim();
+      } else {
+        submittedDraft = messageDraftRef.current;
+        content = submittedDraft.trim();
+      }
+    }
+    if (!content) {
+      sendMessageInFlightRef.current = false;
+      setMessageSubmitInFlight(false);
+      if (stoppedRecordingForSend) setNotice('No speech detected.');
+      return;
+    }
     const ownsStreamingState = !streamingRequestThreadIdsRef.current[targetThreadId];
     if (ownsStreamingState) {
       streamingRequestThreadIdsRef.current = { ...streamingRequestThreadIdsRef.current, [targetThreadId]: true };
@@ -2066,6 +2249,8 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
         delete next[targetThreadId];
         streamingRequestThreadIdsRef.current = next;
       }
+      sendMessageInFlightRef.current = false;
+      setMessageSubmitInFlight(false);
     }
   }
 
@@ -4069,21 +4254,75 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                     onKeyDown={(event) => {
                       if (event.key === 'Enter' && !event.shiftKey) {
                         event.preventDefault();
-                        if (activeThread && messageDraft.trim() && !activePromptSubmitting) {
+                        if (activeThread && !composerSendDisabled) {
                           void sendMessage();
                         }
                       }
                     }}
                     placeholder={activeRuns.length > 0 ? ((activeThread?.promptDeliveryMode ?? 'queue') === 'asap' ? 'Send at next turn' : 'Queue a message') : 'Ask the assistant'}
                     disabled={!activeThread}
-                    className="assistant-chat-composer-input block min-h-[92px] max-h-[180px] w-full resize-y border-0 bg-transparent px-2.5 pb-9 pt-2 text-xs leading-relaxed text-[var(--fg)] outline-none max-[620px]:min-h-[42px] max-[620px]:max-h-[132px] max-[620px]:resize-none max-[620px]:py-2 max-[620px]:pr-[68px]"
+                    className="assistant-chat-composer-input block min-h-[92px] max-h-[180px] w-full resize-y border-0 bg-transparent px-2.5 pb-9 pt-2 text-xs leading-relaxed text-[var(--fg)] outline-none max-[620px]:min-h-[42px] max-[620px]:max-h-[132px] max-[620px]:resize-none max-[620px]:pb-9 max-[620px]:pt-2 max-[620px]:pr-[68px]"
                   />
                   {activeRunningModel ? (
-                    <span className="absolute bottom-2 left-2.5 max-w-[calc(100%-106px)] truncate text-[10px] text-[var(--muted-dim)] max-[620px]:hidden" title={`Running model: ${activeRunningModelLabel}`}>
+                    <span
+                      className={cn(
+                        'absolute bottom-2 max-w-[calc(100%-148px)] truncate text-[10px] text-[var(--muted-dim)] max-[620px]:hidden',
+                        composerRecordingActive ? 'left-[84px]' : 'left-[44px]',
+                      )}
+                      title={`Running model: ${activeRunningModelLabel}`}
+                    >
                       Running {compactModelSelectionLabel(activeRunningModelLabel)}
                     </span>
                   ) : null}
-                  <button type="submit" className="absolute bottom-2 right-2 h-7 border-[rgba(74,222,128,.28)] bg-[rgba(74,222,128,.08)] px-2.5 font-display text-[10px] font-bold uppercase text-[var(--green)]" disabled={!activeThread || !messageDraft.trim() || activePromptSubmitting}>
+                  {composerRecordingStatus === 'idle' ? (
+                    <button
+                      type="button"
+                      className="absolute bottom-2 left-2 flex h-7 w-7 items-center justify-center rounded border border-[var(--border-subtle)] bg-white/[.02] p-0 text-[var(--muted)] transition hover:bg-white/[.05] hover:text-[var(--fg-secondary)] disabled:pointer-events-none disabled:opacity-50"
+                      disabled={!activeThread || activePromptSubmitting}
+                      onClick={() => void startComposerRecording()}
+                      title="Record voice message"
+                      aria-label="Record voice message"
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true" className={assistantIconSvgClass}>
+                        <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" />
+                        <path d="M5 11a7 7 0 0 0 14 0" />
+                        <path d="M12 18v3" />
+                        <path d="M8 21h8" />
+                      </svg>
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="absolute bottom-2 left-2 flex h-7 w-7 items-center justify-center rounded border border-[rgba(248,113,113,.45)] bg-[rgba(248,113,113,.10)] p-0 text-[#fca5a5] transition hover:bg-[rgba(248,113,113,.16)] disabled:pointer-events-none disabled:opacity-50"
+                        disabled={composerRecordingStatus === 'transcribing'}
+                        onClick={() => void discardComposerRecording()}
+                        title="Discard recording"
+                        aria-label="Discard recording"
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true" className={assistantIconSvgClass}>
+                          <path d="M6 6l12 12" />
+                          <path d="M18 6L6 18" />
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        className="absolute bottom-2 left-10 flex h-7 w-7 items-center justify-center rounded border border-[rgba(74,222,128,.28)] bg-[rgba(74,222,128,.08)] p-0 text-[var(--green)] transition hover:bg-[rgba(74,222,128,.13)] disabled:pointer-events-none disabled:opacity-50"
+                        disabled={composerRecordingStatus !== 'recording'}
+                        onClick={() => void stopComposerRecordingAndFillDraft()}
+                        title="Stop recording and transcribe"
+                        aria-label="Stop recording and transcribe"
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true" className={assistantIconSvgClass}>
+                          <path d="M7 7h10v10H7Z" />
+                        </svg>
+                      </button>
+                      <span className="absolute bottom-2 left-[76px] max-w-[calc(100%-148px)] truncate font-display text-[10px] font-bold uppercase text-[var(--muted)] max-[620px]:hidden">
+                        {composerRecordingStatus === 'recording' ? 'Recording' : composerRecordingStatus === 'starting' ? 'Starting' : 'Transcribing'}
+                      </span>
+                    </>
+                  )}
+                  <button type="submit" className="absolute bottom-2 right-2 h-7 border-[rgba(74,222,128,.28)] bg-[rgba(74,222,128,.08)] px-2.5 font-display text-[10px] font-bold uppercase text-[var(--green)]" disabled={composerSendDisabled}>
                     Send
                   </button>
                 </div>
@@ -6035,6 +6274,60 @@ async function copyText(text: string): Promise<boolean> {
   const copied = document.execCommand('copy');
   textarea.remove();
   return copied;
+}
+
+function stopComposerCapture(capture: ComposerRecordingCapture | null): void {
+  if (!capture) return;
+  capture.processor.disconnect();
+  capture.source.disconnect();
+  capture.stream.getTracks().forEach((track) => track.stop());
+  void capture.context.close().catch(() => undefined);
+}
+
+function mergeDraftWithTranscript(draft: string, transcript: string): string {
+  const cleanTranscript = transcript.trim();
+  if (!cleanTranscript) return draft;
+  const cleanDraft = draft.trimEnd();
+  if (!cleanDraft) return cleanTranscript;
+  return `${cleanDraft}\n${cleanTranscript}`;
+}
+
+function concatArrayBuffers(chunks: ArrayBuffer[], totalBytes: number): ArrayBuffer {
+  const output = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    output.set(new Uint8Array(chunk), offset);
+    offset += chunk.byteLength;
+  }
+  return output.buffer;
+}
+
+function pcm16ToWav(pcm: ArrayBuffer, sampleRate = COMPOSER_RECORDING_SAMPLE_RATE_HZ, channels = COMPOSER_RECORDING_CHANNELS): ArrayBuffer {
+  const bytesPerSample = 2;
+  const dataSize = pcm.byteLength;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+  writeAscii(view, 0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeAscii(view, 8, 'WAVE');
+  writeAscii(view, 12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, channels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * channels * bytesPerSample, true);
+  view.setUint16(32, channels * bytesPerSample, true);
+  view.setUint16(34, 16, true);
+  writeAscii(view, 36, 'data');
+  view.setUint32(40, dataSize, true);
+  new Uint8Array(buffer, 44).set(new Uint8Array(pcm));
+  return buffer;
+}
+
+function writeAscii(view: DataView, offset: number, value: string): void {
+  for (let index = 0; index < value.length; index += 1) {
+    view.setUint8(offset + index, value.charCodeAt(index));
+  }
 }
 
 function openDesktopVoiceSocket(device: { id: string; token: string }, sessionId: string, target: VoiceStreamTarget, assistantProfileId?: string | null): WebSocket {

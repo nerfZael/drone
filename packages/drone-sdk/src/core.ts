@@ -27,6 +27,7 @@ import type {
   RunResult,
   RunStatus,
   SendOptions,
+  SetDroneGroupResult,
   StreamOptions,
   SubscribeMessagesInput,
   WaitOptions,
@@ -51,6 +52,7 @@ export type DroneCollection = {
   cloneMany(inputs: CloneDroneInput[]): Promise<CreateManyResult>;
   get(idOrName: string): Promise<Drone | null>;
   list(input?: ListDronesInput): Promise<DroneSummary[]>;
+  setGroup(targets: Array<string | Drone | DroneSummary>, group: string | null): Promise<SetDroneGroupResult>;
 };
 
 export type GroupCollection = {
@@ -88,6 +90,7 @@ export type Drone = {
   readonly runtime: DroneRecord['runtime'];
   refresh(): Promise<Drone>;
   rename(nextName: string): Promise<Drone>;
+  setGroup(group: string | null): Promise<Drone>;
   archive(input?: RequestOptions): Promise<void>;
   remove(input?: RemoveDroneInput): Promise<void>;
   delete(input?: RemoveDroneInput): Promise<void>;
@@ -191,6 +194,19 @@ function normalizeCloneSource(source: CloneSource): string {
   const name = String((source as any)?.name ?? '').trim();
   if (name) return name;
   throw new ValidationError('clone source must include an id or name');
+}
+
+function normalizeDroneTarget(target: string | Drone | DroneSummary): string {
+  if (typeof target === 'string') {
+    const value = target.trim();
+    if (!value) throw new ValidationError('drone target cannot be empty');
+    return value;
+  }
+  const id = String((target as any)?.id ?? '').trim();
+  if (id) return id;
+  const name = String((target as any)?.name ?? '').trim();
+  if (name) return name;
+  throw new ValidationError('drone target must include an id or name');
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -501,6 +517,17 @@ class DroneCollectionImpl implements DroneCollection {
   async list(input?: ListDronesInput): Promise<DroneSummary[]> {
     return await this.ctx.transport.listDrones(input, this.ctx.defaults);
   }
+
+  async setGroup(targets: Array<string | Drone | DroneSummary>, group: string | null): Promise<SetDroneGroupResult> {
+    if (group === undefined) throw new ValidationError('group is required; pass null to clear a drone group');
+    const droneIds = [...new Set(await Promise.all(targets.map(async (target) => {
+      const ref = normalizeDroneTarget(target);
+      if (typeof target !== 'string') return ref;
+      return (await this.ctx.transport.getDrone(ref, this.ctx.defaults))?.id ?? ref;
+    })))];
+    if (droneIds.length === 0) throw new ValidationError('at least one drone target is required');
+    return await this.ctx.transport.setDroneGroup(droneIds, group ?? null, this.ctx.defaults);
+  }
 }
 
 class GroupCollectionImpl implements GroupCollection {
@@ -604,6 +631,15 @@ class DroneImpl implements Drone {
 
   async rename(nextName: string): Promise<Drone> {
     this.record = await this.ctx.transport.renameDrone(this.id, nextName, this.ctx.defaults);
+    return this;
+  }
+
+  async setGroup(group: string | null): Promise<Drone> {
+    if (group === undefined) throw new ValidationError('group is required; pass null to clear a drone group');
+    const result = await this.ctx.transport.setDroneGroup([this.id], group ?? null, this.ctx.defaults);
+    const moved = result.moved.find((item) => item.id === this.id);
+    if (!moved && result.rejected.length > 0) throw new Error(result.rejected[0]?.error ?? `failed to set group for drone: ${this.id}`);
+    if (moved) this.record = { ...this.record, group: moved.group ?? undefined };
     return this;
   }
 
