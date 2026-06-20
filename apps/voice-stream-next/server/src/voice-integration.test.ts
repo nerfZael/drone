@@ -4,6 +4,7 @@ import path from 'node:path';
 import { buildApp } from './app.js';
 import { extensionToolName } from './assistant-extensions.js';
 import { VoiceStreamNextDb } from './db.js';
+import { pcm16ToWav } from './wav.js';
 
 const devHeaders = {
   'content-type': 'application/json',
@@ -87,6 +88,26 @@ describe('voice integration', () => {
 
     const dashboard = await fetch(`${baseUrl}/api/dashboard`, { headers: devHeaders }).then((response) => response.json());
     expect(dashboard.clientStatuses.some((entry: any) => entry.deviceId === registered.device.id && entry.status === 'Ready for commands')).toBe(true);
+  });
+
+  test('transcribes authenticated web chat recordings', async () => {
+    const wav = pcm16ToWav(new Uint8Array(samplePcmChunk()));
+
+    const response = await fetch(`${baseUrl}/api/voice/web-recordings/transcribe`, {
+      method: 'POST',
+      headers: {
+        ...devHeaders,
+        'content-type': 'application/octet-stream',
+      },
+      body: Buffer.from(wav),
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.ok).toBe(true);
+    expect(body.text).toBe('finalize this transcript');
+    expect(body.sampleRateHz).toBe(16_000);
+    expect(body.channels).toBe(1);
   });
 
   test('rejects billable voice transcription sessions when the user has no credits', async () => {
