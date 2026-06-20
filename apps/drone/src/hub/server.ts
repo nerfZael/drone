@@ -5546,7 +5546,7 @@ async function sendPromptToChat(opts: {
 
     if (agent.kind === 'builtin' && agent.id === 'blip') {
       const modelArg = chatModel ? ` --model ${bashQuote(chatModel)}` : '';
-      const clonesArg = (chat as any)?.blipClonesEnabled === false ? ' --no-clones' : ' --clones';
+      const agentsArg = (chat as any)?.blipClonesEnabled === false ? ' --no-agents' : ' --agents';
       const blipSessionId = readBuiltinTranscriptSessionId(chat, 'blip');
       const sessionArg = blipSessionId ? ` --session ${bashQuote(blipSessionId)}` : '';
       const blipCommand = resolveBlipPromptCommand(runtime);
@@ -5556,7 +5556,7 @@ async function sendPromptToChat(opts: {
         ...managedEnvLines,
         `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
         cdCommand,
-        `${blipCommand} --jsonl --permission full-access --profile local-trusted-write${clonesArg}${modelArg}${sessionArg} ${bashQuote(promptWithHistory)}`,
+        `${blipCommand} --jsonl --permission full-access --profile local-trusted-write${agentsArg}${modelArg}${sessionArg} ${bashQuote(promptWithHistory)}`,
       ].join('\n');
       await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'blip', script });
       return {
@@ -11336,12 +11336,12 @@ async function setChatAgentConfig(opts: {
       }
     }
     if (opts.setBlipClonesEnabled && effectiveAgent.kind !== 'builtin') {
-      const error: Error & { statusCode?: number } = new Error('Blip clones are only supported for Blip chats');
+      const error: Error & { statusCode?: number } = new Error('Blip agents are only supported for Blip chats');
       error.statusCode = 400;
       throw error;
     }
     if (opts.setBlipClonesEnabled && effectiveAgent.kind === 'builtin' && effectiveAgent.id !== 'blip') {
-      const error: Error & { statusCode?: number } = new Error('Blip clones are only supported for Blip chats');
+      const error: Error & { statusCode?: number } = new Error('Blip agents are only supported for Blip chats');
       error.statusCode = 400;
       throw error;
     }

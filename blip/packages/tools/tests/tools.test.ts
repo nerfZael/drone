@@ -90,6 +90,26 @@ describe("Blip tools", () => {
     expect(result.content[0]?.type === "text" ? result.content[0].text : "").toContain("note.txt");
   });
 
+  test("search_files searches a file path in content mode", async () => {
+    const workspace = await tempWorkspace();
+    await writeFile(path.join(workspace, "note.txt"), "alpha\nneedle\nomega\n");
+    const search = tool(workspace, "search_files");
+
+    const result = await search.execute("call_1", { mode: "content", query: "needle", path: "note.txt" } as never);
+    expect(result.content[0]?.type === "text" ? result.content[0].text : "").toContain("note.txt:2:needle");
+    expect(result.details).toMatchObject({ engine: "file", smartCase: true });
+  });
+
+  test("search_files searches a file path in name mode", async () => {
+    const workspace = await tempWorkspace();
+    await writeFile(path.join(workspace, "VoiceSettings.ts"), "export const LanguageCode = 'en';\n");
+    const search = tool(workspace, "search_files");
+
+    const result = await search.execute("call_1", { mode: "name", query: "voicesettings", path: "VoiceSettings.ts" } as never);
+    expect(result.content[0]?.type === "text" ? result.content[0].text : "").toContain("VoiceSettings.ts");
+    expect(result.details).toMatchObject({ engine: "file", smartCase: true });
+  });
+
   test("search_files uses smart-case matching for names and content", async () => {
     const workspace = await tempWorkspace();
     await writeFile(path.join(workspace, "VoiceSettings.ts"), "export const LanguageCode = 'en';\n");

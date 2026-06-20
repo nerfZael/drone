@@ -23,20 +23,22 @@ Profiles:
 }
 ```
 
-- `path` is workspace-relative and defaults to the workspace root.
+- `path` is workspace-relative and defaults to the workspace root. It can point to a directory or a single file.
 - `limit` defaults to 100 and is capped at 500.
 
 ## Behavior
 
 Name mode:
 
-- Walks workspace files under `path`.
+- Walks workspace files under `path` when `path` is a directory.
+- If `path` is a file, matches that single workspace-relative path.
 - Skips common large directories such as `.git`, `node_modules`, `dist`, `build`, and `.turbo`.
 - Matches paths containing `query` with smart-case behavior.
 
 Content mode:
 
-- Uses `rg --smart-case` when available.
+- Uses `rg --smart-case` when available for directory searches.
+- If `path` is a file, searches only that file.
 - Falls back to a TypeScript file walk with smart-case regex matching. If `query` is not a valid regular expression, fallback uses smart-case substring matching.
 - Skips likely binary files in fallback mode.
 - Records matched files as read in session metadata.

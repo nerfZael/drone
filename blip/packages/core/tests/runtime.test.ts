@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -68,6 +69,7 @@ describe("Blip runtime", () => {
     faux.setResponses([fauxAssistantMessage([fauxToolCall("read_file", { path: "alpha.txt" }, { id: "call_alpha" }), fauxToolCall("read_file", { path: "beta.txt" }, { id: "call_beta" })], { stopReason: "toolUse" }), fauxAssistantMessage("I read both files.")]);
 
     const toolEvents: Array<{ type: string; callId: string }> = [];
+    let finishedEvent: any;
     const session = await runBlipTask(
       {
         prompt: "Read both files",
@@ -81,6 +83,7 @@ describe("Blip runtime", () => {
         if (event.type === "tool_call_started" || event.type === "tool_call_completed") {
           toolEvents.push({ type: event.type, callId: event.callId });
         }
+        if (event.type === "session_finished") finishedEvent = event;
       },
     );
 
@@ -90,6 +93,31 @@ describe("Blip runtime", () => {
     ]);
     expect(toolEvents.map((event) => event.type)).toEqual(["tool_call_started", "tool_call_started", "tool_call_completed", "tool_call_completed"]);
     expect(session.readFiles).toEqual(["alpha.txt", "beta.txt"]);
+    expect(finishedEvent.timing).toEqual(
+      expect.objectContaining({
+        toolCallCount: 2,
+        toolCallCompletedCount: 2,
+        toolCallFailedCount: 0,
+        toolTurnCount: 1,
+        singleToolTurnCount: 0,
+        parallelToolTurnCount: 1,
+        maxToolsInTurn: 2,
+      }),
+    );
+    expect(finishedEvent.timing.toolCallsByName.read_file).toEqual(
+      expect.objectContaining({
+        count: 2,
+        completed: 2,
+        failed: 0,
+      }),
+    );
+    expect(finishedEvent.contextUsage).toEqual(
+      expect.objectContaining({
+        contextWindow: faux.getModel().contextWindow,
+      }),
+    );
+    expect(finishedEvent.contextUsage.tokens).toBeGreaterThan(0);
+    expect(finishedEvent.contextUsage.percent).toBeGreaterThan(0);
     faux.unregister();
   });
 
@@ -122,6 +150,49 @@ describe("Blip runtime", () => {
     faux.unregister();
   });
 
+  test("records non-zero bash exits as recovered tool failures", async () => {
+    const workspace = await tempWorkspace();
+    const faux = registerFauxProvider({ api: "faux", provider: "faux", tokensPerSecond: 0 });
+    faux.setResponses([fauxAssistantMessage(fauxToolCall("bash", { command: "echo nope >&2; exit 2" }, { id: "call_bash_fail" }), { stopReason: "toolUse" }), fauxAssistantMessage("Recovered after bash failed.")]);
+
+    const events: any[] = [];
+    await runBlipTask(
+      {
+        prompt: "Run a failing command and recover",
+        workspaceRoot: workspace,
+        provider: "faux",
+        model: faux.getModel().id,
+        permissionMode: "workspace-write",
+        toolProfile: "local-trusted-write",
+      },
+      (event) => events.push(event),
+    );
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "tool_call_failed",
+        callId: "call_bash_fail",
+        tool: "bash",
+        error: expect.stringContaining("bash exited with code 2"),
+      }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "session_finished",
+        status: "completed",
+        toolFailures: [expect.objectContaining({ callId: "call_bash_fail", tool: "bash", error: expect.stringContaining("exitCode: 2") })],
+        timing: expect.objectContaining({
+          toolCallCompletedCount: 0,
+          toolCallFailedCount: 1,
+          toolCallsByName: expect.objectContaining({
+            bash: expect.objectContaining({ count: 1, completed: 0, failed: 1 }),
+          }),
+        }),
+      }),
+    );
+    faux.unregister();
+  });
+
   test("executes independent mutation tool batches successfully", async () => {
     const workspace = await tempWorkspace();
     const faux = registerFauxProvider({ api: "faux", provider: "faux", tokensPerSecond: 0 });
@@ -139,6 +210,26 @@ describe("Blip runtime", () => {
     expect(session.changedFiles).toEqual(["alpha.txt", "beta.txt"]);
     expect(await readFile(path.join(workspace, "alpha.txt"), "utf8")).toBe("alpha\n");
     expect(await readFile(path.join(workspace, "beta.txt"), "utf8")).toBe("beta\n");
+    faux.unregister();
+  });
+
+  test("includes newly untracked git files created by bash in changed files", async () => {
+    const workspace = await tempWorkspace();
+    execFileSync("git", ["init"], { cwd: workspace, stdio: "ignore" });
+    const faux = registerFauxProvider({ api: "faux", provider: "faux", tokensPerSecond: 0 });
+    faux.setResponses([fauxAssistantMessage(fauxToolCall("bash", { command: "printf 'hello\\n' > created.txt" }, { id: "call_create" }), { stopReason: "toolUse" }), fauxAssistantMessage("I created the file.")]);
+
+    const session = await runBlipTask({
+      prompt: "Create an untracked file",
+      workspaceRoot: workspace,
+      provider: "faux",
+      model: faux.getModel().id,
+      permissionMode: "workspace-write",
+      toolProfile: "local-trusted-write",
+    });
+
+    expect(session.changedFiles).toContain("created.txt");
+    expect(await readFile(path.join(workspace, "created.txt"), "utf8")).toBe("hello\n");
     faux.unregister();
   });
 
@@ -232,47 +323,508 @@ describe("Blip runtime", () => {
     faux.unregister();
   });
 
-  test("runs clone sessions in parallel and returns their final messages", async () => {
+  test("runs blocking agents in parallel and returns structured final messages", async () => {
     const workspace = await tempWorkspace();
     const faux = registerFauxProvider({ api: "faux", provider: "faux", tokensPerSecond: 0 });
     faux.setResponses([
-      fauxAssistantMessage(fauxToolCall("create_clones", { tasks: ["inspect alpha", "inspect beta"] }, { id: "call_clones" }), {
+      fauxAssistantMessage(fauxToolCall("agent", { action: "run", wait: true, agents: [{ task: "inspect alpha", authority: "read_only", context: "clone" }, { task: "inspect beta", authority: "read_only", context: "none" }] }, { id: "call_agents" }), {
         stopReason: "toolUse",
       }),
       fauxAssistantMessage("alpha result"),
       fauxAssistantMessage("beta result"),
-      fauxAssistantMessage("original saw clone results"),
+      fauxAssistantMessage("original saw agent results"),
     ]);
 
-    const events: Array<{ type: string; tool?: string }> = [];
+    const events: any[] = [];
     const session = await runBlipTask(
       {
-        prompt: "Use clones",
+        prompt: "Use agents",
         workspaceRoot: workspace,
         provider: "faux",
         model: faux.getModel().id,
         permissionMode: "workspace-write",
         toolProfile: "no-shell-workspace-write",
-        clonesEnabled: true,
+        agentsEnabled: true,
       },
       (event) => events.push(event),
     );
 
-    expect(events).toContainEqual(expect.objectContaining({ type: "tool_call_started", tool: "create_clones" }));
-    expect(events).toContainEqual(expect.objectContaining({ type: "tool_call_completed", tool: "create_clones" }));
+    expect(events).toContainEqual(expect.objectContaining({ type: "tool_call_started", tool: "agent" }));
+    expect(events).toContainEqual(expect.objectContaining({ type: "tool_call_completed", tool: "agent" }));
+    const agentResult = events.find((event) => event.type === "tool_call_completed" && event.tool === "agent")?.result;
+    expect(agentResult.agents).toHaveLength(2);
+    expect(agentResult.agents.map((agent: any) => agent.result.message).sort()).toEqual(["alpha result", "beta result"]);
     const store = new SessionStore(workspace);
     const sessions = await store.list();
-    const clones = sessions.filter((item) => item.parentSessionId === session.id);
-    expect(clones).toHaveLength(2);
-    const cloneTranscripts = await Promise.all(clones.map((clone) => readFile(clone.transcriptPath, "utf8")));
-    expect(cloneTranscripts.join("\n")).toContain("You are a Blip clone");
-    expect(cloneTranscripts.join("\n")).toContain("inspect alpha");
-    expect(cloneTranscripts.join("\n")).toContain("inspect beta");
+    const agents = sessions.filter((item) => item.parentSessionId === session.id);
+    expect(agents).toHaveLength(2);
+    const agentTranscripts = await Promise.all(agents.map((agent) => readFile(agent.transcriptPath, "utf8")));
+    expect(agentTranscripts.join("\n")).toContain("You are Blip agent");
+    expect(agentTranscripts.join("\n")).toContain("inspect alpha");
+    expect(agentTranscripts.join("\n")).toContain("inspect beta");
 
     const transcript = await readFile(session.transcriptPath, "utf8");
     expect(transcript).toContain("alpha result");
     expect(transcript).toContain("beta result");
-    expect(transcript).toContain("original saw clone results");
+    expect(transcript).toContain("original saw agent results");
+    faux.unregister();
+  });
+
+  test("emits runtime-generated agent coverage progress from child tool activity", async () => {
+    const workspace = await tempWorkspace();
+    await writeFile(path.join(workspace, "alpha.txt"), "alpha\n");
+    const faux = registerFauxProvider({ api: "faux", provider: "faux", tokensPerSecond: 0 });
+    faux.setResponses([
+      fauxAssistantMessage(fauxToolCall("agent", { action: "run", wait: true, agents: [{ task: "inspect alpha file", authority: "read_only", context: "none" }] }, { id: "call_agents" }), {
+        stopReason: "toolUse",
+      }),
+      fauxAssistantMessage(fauxToolCall("read_file", { path: "alpha.txt" }, { id: "call_child_read" }), {
+        stopReason: "toolUse",
+      }),
+      fauxAssistantMessage("alpha inspected"),
+      fauxAssistantMessage("parent saw coverage"),
+    ]);
+
+    const events: any[] = [];
+    await runBlipTask(
+      {
+        prompt: "Use an agent to inspect alpha",
+        workspaceRoot: workspace,
+        provider: "faux",
+        model: faux.getModel().id,
+        permissionMode: "workspace-write",
+        toolProfile: "no-shell-workspace-write",
+        agentsEnabled: true,
+      },
+      (event) => events.push(event),
+    );
+
+    const progress = events.find((event) => event.type === "tool_call_progress" && event.tool === "agent");
+    expect(progress).toEqual(
+      expect.objectContaining({
+        message: expect.stringContaining("read 1 file"),
+        details: expect.objectContaining({
+          coverage: expect.objectContaining({
+            readFiles: ["alpha.txt"],
+          }),
+        }),
+      }),
+    );
+    const completion = events.find((event) => event.type === "tool_call_completed" && event.tool === "agent");
+    expect(completion.result.agents[0].coverage.readFiles).toEqual(["alpha.txt"]);
+    expect(completion.result.agents[0].result.coverage.readFiles).toEqual(["alpha.txt"]);
+    faux.unregister();
+  });
+
+  test("runs scratch agents without mutating the parent workspace", async () => {
+    const workspace = await tempWorkspace();
+    await writeFile(path.join(workspace, "parent.txt"), "original\n");
+    const faux = registerFauxProvider({ api: "faux", provider: "faux", tokensPerSecond: 0 });
+    faux.setResponses([
+      fauxAssistantMessage(fauxToolCall("agent", { action: "run", wait: true, agents: [{ task: "try editing parent.txt", authority: "scratch", context: "none", output: "patch_plan" }] }, { id: "call_agents" }), {
+        stopReason: "toolUse",
+      }),
+      fauxAssistantMessage(fauxToolCall("bash", { command: "printf 'scratch\\n' > parent.txt" }, { id: "call_scratch_write" }), {
+        stopReason: "toolUse",
+      }),
+      fauxAssistantMessage("scratch edit ready"),
+      fauxAssistantMessage("original saw scratch result"),
+    ]);
+
+    const events: any[] = [];
+    await runBlipTask(
+      {
+        prompt: "Use a scratch agent",
+        workspaceRoot: workspace,
+        provider: "faux",
+        model: faux.getModel().id,
+        permissionMode: "workspace-write",
+        toolProfile: "local-trusted-write",
+        agentsEnabled: true,
+      },
+      (event) => events.push(event),
+    );
+
+    expect(await readFile(path.join(workspace, "parent.txt"), "utf8")).toBe("original\n");
+    const result = events.find((event) => event.type === "tool_call_completed" && event.tool === "agent")?.result;
+    expect(result.agents[0].result.changedFiles).toEqual(["parent.txt"]);
+    expect(result.agents[0].result.scratch.diff).toContain("scratch");
+    faux.unregister();
+  });
+
+  test("starts non-blocking agents and collects results later", async () => {
+    const workspace = await tempWorkspace();
+    const faux = registerFauxProvider({ api: "faux", provider: "faux", tokensPerSecond: 0 });
+    faux.setResponses([
+      fauxAssistantMessage(fauxToolCall("agent", { action: "run", wait: false, agents: [{ task: "inspect later", authority: "read_only", context: "none" }] }, { id: "call_agents_start" }), {
+        stopReason: "toolUse",
+      }),
+      fauxAssistantMessage(fauxToolCall("agent", { action: "collect", wait: true }, { id: "call_agents_collect" }), {
+        stopReason: "toolUse",
+      }),
+      fauxAssistantMessage("background result"),
+      fauxAssistantMessage("parent collected result"),
+    ]);
+
+    const events: any[] = [];
+    await runBlipTask(
+      {
+        prompt: "Start an agent and collect later",
+        workspaceRoot: workspace,
+        provider: "faux",
+        model: faux.getModel().id,
+        permissionMode: "workspace-write",
+        toolProfile: "no-shell-workspace-write",
+        agentsEnabled: true,
+      },
+      (event) => {
+        events.push(event);
+      },
+    );
+
+    const agentCompletions = events.filter((event) => event.type === "tool_call_completed" && event.tool === "agent");
+    expect(agentCompletions[0].result.status).toBe("running");
+    expect(agentCompletions[1].result.status).toBe("completed");
+    expect(agentCompletions[1].result.agents[0].result.message).toBe("background result");
+    faux.unregister();
+  });
+
+  test("preserves non-blocking agent coverage for later collect", async () => {
+    const workspace = await tempWorkspace();
+    await writeFile(path.join(workspace, "alpha.txt"), "alpha\n");
+    const faux = registerFauxProvider({ api: "faux", provider: "faux", tokensPerSecond: 0 });
+    faux.setResponses([
+      fauxAssistantMessage(fauxToolCall("agent", { action: "run", wait: false, agents: [{ task: "inspect alpha later", authority: "read_only", context: "none" }] }, { id: "call_agents_start" }), {
+        stopReason: "toolUse",
+      }),
+      fauxAssistantMessage(fauxToolCall("agent", { action: "collect", wait: true }, { id: "call_agents_collect" }), {
+        stopReason: "toolUse",
+      }),
+      fauxAssistantMessage(fauxToolCall("read_file", { path: "alpha.txt" }, { id: "call_child_read" }), {
+        stopReason: "toolUse",
+      }),
+      fauxAssistantMessage("alpha inspected later"),
+      fauxAssistantMessage("parent collected coverage"),
+    ]);
+
+    const events: any[] = [];
+    await runBlipTask(
+      {
+        prompt: "Start an agent and collect its coverage later",
+        workspaceRoot: workspace,
+        provider: "faux",
+        model: faux.getModel().id,
+        permissionMode: "workspace-write",
+        toolProfile: "no-shell-workspace-write",
+        agentsEnabled: true,
+      },
+      (event) => events.push(event),
+    );
+
+    const agentCompletions = events.filter((event) => event.type === "tool_call_completed" && event.tool === "agent");
+    expect(agentCompletions[0].result.status).toBe("running");
+    expect(agentCompletions[1].result.status).toBe("completed");
+    expect(agentCompletions[1].result.agents[0].coverage.readFiles).toEqual(["alpha.txt"]);
+    expect(agentCompletions[1].result.agents[0].result.coverage.readFiles).toEqual(["alpha.txt"]);
+    faux.unregister();
+  });
+
+  test("injects active agent status digest into parent model context", async () => {
+    const workspace = await tempWorkspace();
+    await writeFile(path.join(workspace, "alpha.txt"), "alpha\n");
+    const faux = registerFauxProvider({ api: "faux", provider: "faux", tokensPerSecond: 0 });
+    let childReadIssued = false;
+    let parentCollectIssued = false;
+    let parentWaitCount = 0;
+    let sawDigest = false;
+
+    const routeResponse = (context: any) => {
+      const toolNames = new Set((context.tools ?? []).map((tool: any) => tool.name));
+      const messagesText = (context.messages ?? [])
+        .map((message: any) => (typeof message.content === "string" ? message.content : ""))
+        .join("\n");
+      const isParent = toolNames.has("agent");
+
+      if (!isParent) {
+        if (!childReadIssued) {
+          childReadIssued = true;
+          return fauxAssistantMessage(fauxToolCall("read_file", { path: "alpha.txt" }, { id: "call_child_read" }), {
+            stopReason: "toolUse",
+          });
+        }
+        return fauxAssistantMessage("alpha inspected");
+      }
+
+      if (!parentCollectIssued) {
+        if (messagesText.includes("Blip runtime agent status")) {
+          sawDigest = true;
+          parentCollectIssued = true;
+          expect(messagesText).toContain("alpha.txt");
+          expect(messagesText).toContain("agent collect");
+          return fauxAssistantMessage(fauxToolCall("agent", { action: "collect", wait: true }, { id: "call_agents_collect" }), {
+            stopReason: "toolUse",
+          });
+        }
+        parentWaitCount += 1;
+        return fauxAssistantMessage(fauxToolCall("bash", { command: "sleep 0.15" }, { id: `call_parent_wait_${parentWaitCount}` }), {
+          stopReason: "toolUse",
+        });
+      }
+
+      return fauxAssistantMessage("parent collected status");
+    };
+
+    faux.setResponses([
+      fauxAssistantMessage(fauxToolCall("agent", { action: "run", wait: false, agents: [{ task: "inspect alpha later", authority: "read_only", context: "none" }] }, { id: "call_agents_start" }), {
+        stopReason: "toolUse",
+      }),
+      routeResponse,
+      routeResponse,
+      routeResponse,
+      routeResponse,
+      routeResponse,
+      routeResponse,
+    ]);
+
+    await runBlipTask({
+      prompt: "Start an agent and use its injected status",
+      workspaceRoot: workspace,
+      provider: "faux",
+      model: faux.getModel().id,
+      permissionMode: "workspace-write",
+      toolProfile: "local-trusted-write",
+      agentsEnabled: true,
+    });
+
+    expect(sawDigest).toBe(true);
+    expect(parentCollectIssued).toBe(true);
+    faux.unregister();
+  });
+
+  test("auto-delivers completed non-blocking agent results into parent model context", async () => {
+    const workspace = await tempWorkspace();
+    await writeFile(path.join(workspace, "alpha.txt"), "alpha\n");
+    const faux = registerFauxProvider({ api: "faux", provider: "faux", tokensPerSecond: 0 });
+    let childReadIssued = false;
+    let sawDeliveredResults = false;
+    let parentWaitCount = 0;
+
+    const routeResponse = (context: any) => {
+      const toolNames = new Set((context.tools ?? []).map((tool: any) => tool.name));
+      const messagesText = (context.messages ?? [])
+        .map((message: any) => (typeof message.content === "string" ? message.content : ""))
+        .join("\n");
+      const isParent = toolNames.has("agent");
+
+      if (!isParent) {
+        if (!childReadIssued) {
+          childReadIssued = true;
+          return fauxAssistantMessage(fauxToolCall("read_file", { path: "alpha.txt" }, { id: "call_child_read" }), {
+            stopReason: "toolUse",
+          });
+        }
+        return fauxAssistantMessage("alpha inspected by background agent");
+      }
+
+      if (messagesText.includes("Blip runtime delivered completed agent results")) {
+        sawDeliveredResults = true;
+        expect(messagesText).toContain("alpha inspected by background agent");
+        expect(messagesText).toContain("Full details remain available with agent collect runId");
+        return fauxAssistantMessage("parent used delivered results");
+      }
+
+      parentWaitCount += 1;
+      return fauxAssistantMessage(fauxToolCall("bash", { command: "sleep 0.1" }, { id: `call_parent_wait_${parentWaitCount}` }), {
+        stopReason: "toolUse",
+      });
+    };
+
+    faux.setResponses([
+      fauxAssistantMessage(fauxToolCall("agent", { action: "run", wait: false, agents: [{ task: "inspect alpha in background", authority: "read_only", context: "none" }] }, { id: "call_agents_start" }), {
+        stopReason: "toolUse",
+      }),
+      routeResponse,
+      routeResponse,
+      routeResponse,
+      routeResponse,
+      routeResponse,
+      routeResponse,
+      routeResponse,
+      routeResponse,
+      routeResponse,
+      routeResponse,
+      routeResponse,
+      routeResponse,
+      routeResponse,
+      routeResponse,
+      routeResponse,
+      routeResponse,
+      routeResponse,
+      routeResponse,
+    ]);
+
+    const events: any[] = [];
+    await runBlipTask(
+      {
+        prompt: "Start an agent and use auto-delivered results",
+        workspaceRoot: workspace,
+        provider: "faux",
+        model: faux.getModel().id,
+        permissionMode: "workspace-write",
+        toolProfile: "local-trusted-write",
+        agentsEnabled: true,
+      },
+      (event) => events.push(event),
+    );
+
+    expect(sawDeliveredResults).toBe(true);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "agent_results_delivered",
+        status: "completed",
+        agentCount: 1,
+        message: expect.stringContaining("alpha inspected by background agent"),
+      }),
+    );
+    expect(events.filter((event) => event.type === "tool_call_completed" && event.tool === "agent")).toHaveLength(1);
+    faux.unregister();
+  });
+
+  test("removes completed non-blocking agent runs from implicit collect lookup", async () => {
+    const workspace = await tempWorkspace();
+    const faux = registerFauxProvider({ api: "faux", provider: "faux", tokensPerSecond: 0 });
+    let parentStep = 0;
+
+    const routeResponse = (context: any) => {
+      const toolNames = new Set((context.tools ?? []).map((tool: any) => tool.name));
+      const messagesText = (context.messages ?? [])
+        .map((message: any) => (typeof message.content === "string" ? message.content : ""))
+        .join("\n");
+      const isParent = toolNames.has("agent");
+
+      if (!isParent) {
+        return fauxAssistantMessage(messagesText.includes("inspect first") ? "first background result" : "second background result");
+      }
+
+      parentStep += 1;
+      if (parentStep === 1) {
+        return fauxAssistantMessage(fauxToolCall("agent", { action: "run", wait: false, agents: [{ task: "inspect first", authority: "read_only", context: "none" }] }, { id: "call_agents_start_1" }), {
+          stopReason: "toolUse",
+        });
+      }
+      if (parentStep === 2) {
+        return fauxAssistantMessage(fauxToolCall("agent", { action: "collect", wait: true }, { id: "call_agents_collect_1" }), {
+          stopReason: "toolUse",
+        });
+      }
+      if (parentStep === 3) {
+        return fauxAssistantMessage(fauxToolCall("agent", { action: "run", wait: false, agents: [{ task: "inspect second", authority: "read_only", context: "none" }] }, { id: "call_agents_start_2" }), {
+          stopReason: "toolUse",
+        });
+      }
+      if (parentStep === 4) {
+        return fauxAssistantMessage(fauxToolCall("agent", { action: "collect", wait: true }, { id: "call_agents_collect_2" }), {
+          stopReason: "toolUse",
+        });
+      }
+      return fauxAssistantMessage("parent collected both");
+    };
+
+    faux.setResponses([
+      routeResponse,
+      routeResponse,
+      routeResponse,
+      routeResponse,
+      routeResponse,
+      routeResponse,
+      routeResponse,
+    ]);
+
+    const events: any[] = [];
+    await runBlipTask(
+      {
+        prompt: "Start, collect, then start and collect another agent",
+        workspaceRoot: workspace,
+        provider: "faux",
+        model: faux.getModel().id,
+        permissionMode: "workspace-write",
+        toolProfile: "no-shell-workspace-write",
+        agentsEnabled: true,
+      },
+      (event) => events.push(event),
+    );
+
+    const agentCompletions = events.filter((event) => event.type === "tool_call_completed" && event.tool === "agent");
+    expect(agentCompletions.map((event) => event.result.status)).toEqual(["running", "completed", "running", "completed"]);
+    expect(agentCompletions[1].result.agents[0].result.message).toBe("first background result");
+    expect(agentCompletions[3].result.agents[0].result.message).toBe("second background result");
+    faux.unregister();
+  });
+
+  test("reports agent run summaries as error when any agent fails", async () => {
+    const workspace = await tempWorkspace();
+    const faux = registerFauxProvider({ api: "faux", provider: "faux", tokensPerSecond: 0 });
+    faux.setResponses([
+      fauxAssistantMessage(fauxToolCall("agent", { action: "run", wait: true, agents: [{ task: "fail in agent", authority: "read_only", context: "none" }] }, { id: "call_agents" }), {
+        stopReason: "toolUse",
+      }),
+      fauxAssistantMessage("", { stopReason: "error", errorMessage: "nested agent failed" }),
+      fauxAssistantMessage("parent saw agent error"),
+    ]);
+
+    const events: any[] = [];
+    await runBlipTask(
+      {
+        prompt: "Run a failing agent",
+        workspaceRoot: workspace,
+        provider: "faux",
+        model: faux.getModel().id,
+        permissionMode: "workspace-write",
+        toolProfile: "no-shell-workspace-write",
+        agentsEnabled: true,
+      },
+      (event) => events.push(event),
+    );
+
+    const agentCompletion = events.find((event) => event.type === "tool_call_completed" && event.tool === "agent");
+    expect(agentCompletion.result.status).toBe("error");
+    expect(agentCompletion.result.agents[0].result.status).toBe("error");
+    expect(agentCompletion.result.agents[0].result.error).toBe("nested agent failed");
+    faux.unregister();
+  });
+
+  test("cancels queued non-blocking agents", async () => {
+    const workspace = await tempWorkspace();
+    const faux = registerFauxProvider({ api: "faux", provider: "faux", tokensPerSecond: 0 });
+    faux.setResponses([
+      fauxAssistantMessage(fauxToolCall("agent", { action: "run", wait: false, agents: [{ task: "do cancellable work", authority: "read_only", context: "none" }] }, { id: "call_agents_start" }), {
+        stopReason: "toolUse",
+      }),
+      fauxAssistantMessage(fauxToolCall("agent", { action: "cancel" }, { id: "call_agents_cancel" }), {
+        stopReason: "toolUse",
+      }),
+      fauxAssistantMessage("parent saw cancellation"),
+    ]);
+
+    const events: any[] = [];
+    await runBlipTask(
+      {
+        prompt: "Start an agent and cancel it",
+        workspaceRoot: workspace,
+        provider: "faux",
+        model: faux.getModel().id,
+        permissionMode: "workspace-write",
+        toolProfile: "no-shell-workspace-write",
+        agentsEnabled: true,
+      },
+      (event) => events.push(event),
+    );
+
+    const agentCompletions = events.filter((event) => event.type === "tool_call_completed" && event.tool === "agent");
+    expect(agentCompletions[0].result.status).toBe("running");
+    expect(agentCompletions[1].result.status).toBe("cancelled");
+    expect(agentCompletions[1].result.agents[0].result.status).toBe("cancelled");
+    expect(agentCompletions[1].result.agents[0].result.message).toContain("cancelled");
     faux.unregister();
   });
 

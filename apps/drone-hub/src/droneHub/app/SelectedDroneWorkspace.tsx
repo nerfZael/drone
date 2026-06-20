@@ -1352,7 +1352,7 @@ export function SelectedDroneWorkspace({
               {hasChats && chatUiMode === 'transcript' && blipClonesSupported ? (
                 <div className="flex items-center gap-1.5">
                   <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                    Blip clones
+                    Blip agents
                   </span>
                   <button
                     type="button"
@@ -1372,7 +1372,7 @@ export function SelectedDroneWorkspace({
                           : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
                     }`}
                     style={{ fontFamily: 'var(--display)' }}
-                    title="Allow Blip to run up to eight cloned sessions in parallel for independent subtasks."
+                    title="Allow Blip to run up to eight parallel agents for independent subtasks."
                   >
                     <span
                       className={`relative inline-flex h-3.5 w-6 rounded-full transition-colors ${

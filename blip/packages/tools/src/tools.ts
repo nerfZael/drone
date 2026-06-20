@@ -116,6 +116,26 @@ function searchLineMatches(line: string, query: string): boolean {
   }
 }
 
+function filePassesGlobs(file: string, includeGlob?: string, excludeGlob?: string): boolean {
+  if (!simpleGlobMatch(file, includeGlob)) return false;
+  if (excludeGlob && simpleGlobMatch(file, excludeGlob)) return false;
+  return true;
+}
+
+async function searchFileContent(root: string, absolute: string, query: string, limit: number): Promise<Array<{ path: string; line: number; preview: string }>> {
+  const relative = toWorkspaceRelative(root, absolute);
+  const buffer = await readFile(absolute);
+  if (isLikelyBinary(buffer)) return [];
+  const lines = buffer.toString("utf8").split(/\r?\n/);
+  const matches: Array<{ path: string; line: number; preview: string }> = [];
+  for (let index = 0; index < lines.length && matches.length < limit; index += 1) {
+    if (searchLineMatches(lines[index], query)) {
+      matches.push({ path: relative, line: index + 1, preview: lines[index].trim() });
+    }
+  }
+  return matches;
+}
+
 export function createListFilesTool(context: BlipToolContext): BlipTool {
   return textTool({
     name: "list_files",
@@ -215,13 +235,39 @@ export function createSearchFilesTool(context: BlipToolContext): BlipTool {
     }),
     async execute(_toolCallId, params: any, signal) {
       const searchRoot = assertWorkspacePath(context.workspaceRoot, params.path ?? ".");
+      const searchRootInfo = await stat(searchRoot);
       const limit = clampInt(params.limit, 100, 1, 500);
+      const query = String(params.query ?? "");
+      if (searchRootInfo.isFile()) {
+        const relative = toWorkspaceRelative(context.workspaceRoot, searchRoot);
+        if (params.mode === "name") {
+          const matches = filePassesGlobs(relative, params.includeGlob, params.excludeGlob) && smartCaseIncludes(relative, query) ? [relative] : [];
+          return textResult(matches.join("\n") || "(no matches)", {
+            matches,
+            truncated: false,
+            engine: "file",
+            smartCase: true,
+          });
+        }
+
+        if (!filePassesGlobs(relative, params.includeGlob, params.excludeGlob)) {
+          return textResult("(no matches)", { matches: [], truncated: false, engine: "file", smartCase: true });
+        }
+        const matches = await searchFileContent(context.workspaceRoot, searchRoot, query, limit);
+        for (const match of matches) context.onFileOperation?.("read", match.path);
+        return textResult(matches.map((match) => `${match.path}:${match.line}:${match.preview}`).join("\n") || "(no matches)", {
+          matches,
+          truncated: matches.length === limit,
+          engine: "file",
+          smartCase: true,
+        });
+      }
+      if (!searchRootInfo.isDirectory()) throw new Error("path is not a file or directory");
       if (params.mode === "name") {
         const files = await walkFiles(context.workspaceRoot, searchRoot, 10_000);
         const matches = files
-          .filter((file) => smartCaseIncludes(file, String(params.query ?? "")))
-          .filter((file) => simpleGlobMatch(file, params.includeGlob))
-          .filter((file) => !params.excludeGlob || !simpleGlobMatch(file, params.excludeGlob))
+          .filter((file) => smartCaseIncludes(file, query))
+          .filter((file) => filePassesGlobs(file, params.includeGlob, params.excludeGlob))
           .slice(0, limit);
         const text = matches.join("\n") || "(no matches)";
         return textResult(text, {
@@ -235,7 +281,7 @@ export function createSearchFilesTool(context: BlipToolContext): BlipTool {
       const rgArgs = ["--line-number", "--no-heading", "--color", "never", "--smart-case"];
       if (params.includeGlob) rgArgs.push("--glob", params.includeGlob);
       if (params.excludeGlob) rgArgs.push("--glob", `!${params.excludeGlob}`);
-      rgArgs.push("--", params.query, ".");
+      rgArgs.push("--", query, ".");
       try {
         const result = await runCommand(`rg ${rgArgs.map((arg) => JSON.stringify(arg)).join(" ")}`, searchRoot, 30_000, signal);
         if (result.exitCode === 0 || result.exitCode === 1) {
@@ -266,17 +312,12 @@ export function createSearchFilesTool(context: BlipToolContext): BlipTool {
       const matches: Array<{ path: string; line: number; preview: string }> = [];
       for (const file of files) {
         if (matches.length >= limit) break;
-        if (!simpleGlobMatch(file, params.includeGlob)) continue;
-        if (params.excludeGlob && simpleGlobMatch(file, params.excludeGlob)) continue;
+        if (!filePassesGlobs(file, params.includeGlob, params.excludeGlob)) continue;
         const absolute = assertWorkspacePath(context.workspaceRoot, file);
-        const buffer = await readFile(absolute);
-        if (isLikelyBinary(buffer)) continue;
-        const lines = buffer.toString("utf8").split(/\r?\n/);
-        for (let index = 0; index < lines.length && matches.length < limit; index += 1) {
-          if (searchLineMatches(lines[index], String(params.query ?? ""))) {
-            matches.push({ path: file, line: index + 1, preview: lines[index].trim() });
-            context.onFileOperation?.("read", file);
-          }
+        const fileMatches = await searchFileContent(context.workspaceRoot, absolute, query, limit - matches.length);
+        for (const match of fileMatches) {
+          matches.push(match);
+          context.onFileOperation?.("read", match.path);
         }
       }
       return textResult(matches.map((match) => `${match.path}:${match.line}:${match.preview}`).join("\n") || "(no matches)", { matches, truncated: matches.length === limit, engine: "walk", smartCase: true });

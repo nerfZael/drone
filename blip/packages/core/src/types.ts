@@ -46,6 +46,43 @@ export interface BlipRuntimeEventBase {
   timestamp: string;
 }
 
+export type BlipSessionTiming = {
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  turnCount: number;
+  toolTurnCount: number;
+  singleToolTurnCount: number;
+  parallelToolTurnCount: number;
+  maxToolsInTurn: number;
+  toolCallCount: number;
+  toolCallCompletedCount: number;
+  toolCallFailedCount: number;
+  toolCallSumMs: number;
+  toolCallWallMs: number;
+  nonToolWallMs: number;
+  longestToolCall?: {
+    callId: string;
+    tool: string;
+    durationMs: number;
+  };
+  toolCallsByName: Record<
+    string,
+    {
+      count: number;
+      completed: number;
+      failed: number;
+      sumMs: number;
+    }
+  >;
+};
+
+export type BlipContextUsage = {
+  tokens: number;
+  contextWindow: number;
+  percent: number;
+};
+
 export type BlipRuntimeEvent =
   | (BlipRuntimeEventBase & {
       type: "session_started";
@@ -84,6 +121,14 @@ export type BlipRuntimeEvent =
       error: string;
     })
   | (BlipRuntimeEventBase & {
+      type: "agent_results_delivered";
+      runId: string;
+      status: "completed" | "error" | "cancelled";
+      agentCount: number;
+      message: string;
+      details?: unknown;
+    })
+  | (BlipRuntimeEventBase & {
       type: "process_diagnostics";
       reason: string;
       activeHandles: Array<{ type: string; count: number }>;
@@ -103,6 +148,8 @@ export type BlipRuntimeEvent =
       status: BlipSessionStatus;
       changedFiles: string[];
       durationMs: number;
+      timing?: BlipSessionTiming;
+      contextUsage?: BlipContextUsage;
       error?: string;
       toolFailures?: Array<{ callId: string; tool: string; error: string }>;
     });
@@ -120,7 +167,7 @@ export interface RunBlipOptions {
   forkSessionId?: string;
   jsonl?: boolean;
   reasoning?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
-  clonesEnabled?: boolean;
+  agentsEnabled?: boolean;
   processExitDiagnosticsDelayMs?: number;
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
 }

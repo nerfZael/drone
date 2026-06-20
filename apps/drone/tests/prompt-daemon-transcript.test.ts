@@ -80,7 +80,7 @@ async function waitForHealth(baseUrl: string, token: string, daemon: ReturnType<
     } catch (error: any) {
       lastError = error?.message ?? String(error);
     }
-    await Bun.sleep(100);
+    await Bun.sleep(50);
   }
   const stderr = await new Response(daemon.stderr).text().catch(() => '');
   throw new Error(`timed out waiting for daemon health: ${lastError || stderr || 'unknown error'}`);
@@ -369,22 +369,22 @@ function emit(event) {
     expect(job.diagnostics.wrapperRuntimeMs).toBeGreaterThanOrEqual(500);
   }, 20_000);
 
-  test('returns live Blip clone activity while a prompt job is still running', async () => {
+  test('parses Blip agent tool activity from a prompt job transcript', async () => {
     const port = await allocatePort();
     const dataDir = path.join(tempRoot, `daemon-${port}`);
     fs.mkdirSync(dataDir, { recursive: true });
-    const scriptPath = path.join(tempRoot, `running-blip-clones-${port}.sh`);
+    const scriptPath = path.join(tempRoot, `running-blip-agents-${port}.sh`);
     fs.writeFileSync(
       scriptPath,
       `
 #!/usr/bin/env bash
 set -euo pipefail
-/usr/bin/env printf '%s\n' '{"type":"session_started","sessionId":"blip-session-running"}'
-/usr/bin/env printf '%s\n' '{"type":"tool_call_started","sessionId":"blip-session-running","callId":"call_clones","tool":"create_clones","args":{"tasks":["build cli app one","build cli app two","build cli app three"]}}'
-sleep 8
-/usr/bin/env printf '%s\n' '{"type":"tool_call_completed","sessionId":"blip-session-running","callId":"call_clones","tool":"create_clones","result":{"maxClones":8,"clones":[]}}'
-/usr/bin/env printf '%s\n' '{"type":"assistant_message","sessionId":"blip-session-running","text":"Done."}'
-/usr/bin/env printf '%s\n' '{"type":"session_finished","sessionId":"blip-session-running"}'
+/usr/bin/env printf '%s\n' '{"type":"session_started","sessionId":"blip-session-running","timestamp":"2026-06-17T00:00:00.000Z"}'
+/usr/bin/env printf '%s\n' '{"type":"tool_call_started","sessionId":"blip-session-running","timestamp":"2026-06-17T00:00:01.000Z","callId":"call_agents","tool":"agent","args":{"action":"run","agents":[{"task":"build cli app one"},{"task":"build cli app two"},{"task":"build cli app three"}]}}'
+sleep 1
+/usr/bin/env printf '%s\n' '{"type":"tool_call_completed","sessionId":"blip-session-running","timestamp":"2026-06-17T00:00:02.000Z","callId":"call_agents","tool":"agent","result":{"runId":"ar_test","status":"completed","agents":[]}}'
+/usr/bin/env printf '%s\n' '{"type":"assistant_message","sessionId":"blip-session-running","timestamp":"2026-06-17T00:00:03.000Z","text":"Done."}'
+/usr/bin/env printf '%s\n' '{"type":"session_finished","sessionId":"blip-session-running","timestamp":"2026-06-17T00:00:04.000Z"}'
 `,
       'utf8',
     );
@@ -414,7 +414,7 @@ sleep 8
     const baseUrl = `http://127.0.0.1:${port}`;
     await waitForHealth(baseUrl, token, daemon);
 
-    const id = `running-blip-clones-${port}`;
+    const id = `running-blip-agents-${port}`;
     const enqueue = await fetch(`${baseUrl}/v1/prompts/enqueue`, {
       method: 'POST',
       headers: {
@@ -425,29 +425,19 @@ sleep 8
     });
     expect(enqueue.status).toBe(202);
 
-    const running = await waitForRunningPromptJob(
-      baseUrl,
-      token,
-      id,
-      (job) => job?.transcript?.cloneActivity?.count === 3,
-    );
-    expect(running.transcript).toMatchObject({
-      kind: 'blip',
-      sessionId: 'blip-session-running',
-      message: null,
-      cloneActivity: {
-        status: 'running',
-        count: 3,
-        tasks: ['build cli app one', 'build cli app two', 'build cli app three'],
-      },
-    });
-
     const done = await waitForPromptJob(baseUrl, token, id);
     expect(done.transcript).toMatchObject({
       kind: 'blip',
       sessionId: 'blip-session-running',
       message: 'Done.',
       terminalEvent: 'session_finished',
+      toolCallCount: 1,
+      toolCallCompletedCount: 1,
+      longestToolCall: expect.objectContaining({
+        callId: 'call_agents',
+        tool: 'agent',
+        status: 'completed',
+      }),
     });
     expect(done.transcript).not.toHaveProperty('cloneActivity');
   }, 25_000);

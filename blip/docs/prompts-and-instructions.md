@@ -11,7 +11,7 @@ The system prompt currently includes:
 1. Blip identity and basic coding-agent behavior.
 2. Workflow rules.
 3. Tool-profile-specific rules.
-4. Clone rules, when clones are enabled.
+4. Agent rules, when the agent tool is enabled.
 5. Patch rules.
 6. Permission and safety rules.
 7. Repository instructions from `<workspace>/AGENTS.md`, when that file exists.
@@ -39,7 +39,7 @@ Tool rules depend on the active profile:
 
 The workflow prompt asks the model to batch independent read/search/list/bash calls in one assistant turn when they can run in parallel.
 
-When clones are enabled, the prompt asks the model to prefer `create_clones` for separable work, especially when the user explicitly permits parallelization.
+When agents are enabled, the prompt exposes the `agent` tool for bounded parallel agents with explicit context and authority. It tells the model not to use agents for simple discovery that can be handled with parallel read/search/list/bash calls, to prefer `read_only` authority for discovery and review, to use `scratch` for isolated patch candidates, and to use `wait:false` only when the parent can continue useful work before collecting results. It also tells the parent to avoid overlapping broad discovery while agents are running and to use agent progress/coverage updates before repeating work in the same lane. At runtime, completed non-blocking agent results may also be auto-delivered into the parent model context without a model-authored `agent collect` tool call.
 
 ## Current Gaps
 

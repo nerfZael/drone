@@ -286,7 +286,12 @@ function normalizeBlipCloneActivity(raw: any): BlipCloneActivity | undefined {
 }
 
 function cloneActivityFromArgs(args: any): BlipCloneActivity | undefined {
-  const tasksRaw = args && typeof args === 'object' && Array.isArray(args.tasks) ? args.tasks : [];
+  const tasksRaw =
+    args && typeof args === 'object' && Array.isArray(args.agents)
+      ? args.agents.map((agent: any) => agent?.task)
+      : args && typeof args === 'object' && Array.isArray(args.tasks)
+        ? args.tasks
+        : [];
   const tasks = tasksRaw
     .map((task: any) => String(task ?? '').trim())
     .filter(Boolean)
@@ -354,7 +359,8 @@ function createBlipJsonlParser(): {
     string,
     { tool: string; startedAt?: string; startedAtMs?: number }
   >();
-  const activeCloneCalls = new Map<string, BlipCloneActivity>();
+  const activeAgentCallActivities = new Map<string, BlipCloneActivity>();
+  const activeAgentRunActivities = new Map<string, BlipCloneActivity>();
 
   return {
     pushLine(lineRaw: string) {
@@ -416,16 +422,31 @@ function createBlipJsonlParser(): {
         }
         if (callId) activeToolCalls.delete(callId);
       }
-      if (tool === 'create_clones' && type === 'tool_call_started') {
+      if (
+        tool === 'agent' &&
+        type === 'tool_call_started' &&
+        String(obj.args?.action ?? 'run') !== 'collect' &&
+        String(obj.args?.action ?? 'run') !== 'cancel'
+      ) {
         const cloneActivity = cloneActivityFromArgs(obj.args);
-        if (callId && cloneActivity) activeCloneCalls.set(callId, cloneActivity);
+        if (callId && cloneActivity) activeAgentCallActivities.set(callId, cloneActivity);
         return;
       }
       if (
-        tool === 'create_clones' &&
+        tool === 'agent' &&
         (type === 'tool_call_completed' || type === 'tool_call_failed')
       ) {
-        if (callId) activeCloneCalls.delete(callId);
+        const callActivity = callId ? activeAgentCallActivities.get(callId) : undefined;
+        if (callId) activeAgentCallActivities.delete(callId);
+        const runId = String(obj.result?.runId ?? '').trim();
+        const status = String(obj.result?.status ?? '').trim();
+        if (type === 'tool_call_completed' && status === 'running' && runId && callActivity) {
+          activeAgentRunActivities.set(runId, callActivity);
+        } else if (runId) {
+          activeAgentRunActivities.delete(runId);
+        } else if (type === 'tool_call_failed' || status === 'completed' || status === 'cancelled' || status === 'error') {
+          activeAgentRunActivities.clear();
+        }
         return;
       }
       if (type === 'assistant_delta') {
@@ -455,7 +476,10 @@ function createBlipJsonlParser(): {
       }
     },
     result() {
-      const activeCloneActivities = Array.from(activeCloneCalls.values());
+      const activeCloneActivities = [
+        ...Array.from(activeAgentRunActivities.values()),
+        ...Array.from(activeAgentCallActivities.values()),
+      ];
       const cloneActivity = activeCloneActivities[activeCloneActivities.length - 1];
       const eventCountsOut = Object.keys(eventCounts).length > 0 ? eventCounts : null;
       return {
