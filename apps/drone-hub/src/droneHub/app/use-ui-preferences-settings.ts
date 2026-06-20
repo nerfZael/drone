@@ -29,6 +29,14 @@ function normalizeSidebarDensityMode(value: unknown): SidebarDensityMode {
   return value === 'compact' || value === 'comfortable' ? value : 'default';
 }
 
+function normalizeRepoBranchSource(value: unknown): 'host' | 'remote' {
+  return value === 'remote' ? 'remote' : 'host';
+}
+
+function normalizeTrimmedText(value: unknown, maxChars: number): string {
+  return String(value ?? '').trim().slice(0, maxChars);
+}
+
 function normalizeOrderedStringList(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   const out: string[] = [];
@@ -66,6 +74,11 @@ function normalizeUiPreferencesSnapshot(value: Partial<UiPreferencesSnapshot> | 
     hiddenSidebarGroups: normalizeOrderedStringList(value?.hiddenSidebarGroups),
     autoDelete: value?.autoDelete === true,
     automations: normalizeAutomationConfigs(value?.automations),
+    spawnAgentKey: normalizeTrimmedText(value?.spawnAgentKey, 200) || 'builtin:cursor',
+    spawnModel: normalizeTrimmedText(value?.spawnModel, 200),
+    repoBranchSource: normalizeRepoBranchSource(value?.repoBranchSource),
+    repoCreateRemoteBranch: normalizeTrimmedText(value?.repoCreateRemoteBranch, 400),
+    pullHostBranchBeforeCreate: value?.pullHostBranchBeforeCreate !== false,
   };
 }
 
@@ -83,7 +96,12 @@ function hasMeaningfulUiPreferencesSnapshot(value: UiPreferencesSnapshot): boole
     Object.keys(value.sidebarChatOrderByDrone).length > 0 ||
     value.hiddenSidebarGroups.length > 0 ||
     value.autoDelete ||
-    value.automations.length > 0
+    value.automations.length > 0 ||
+    value.spawnAgentKey !== 'builtin:cursor' ||
+    value.spawnModel.length > 0 ||
+    value.repoBranchSource !== 'host' ||
+    value.repoCreateRemoteBranch.length > 0 ||
+    value.pullHostBranchBeforeCreate !== true
   );
 }
 
@@ -101,6 +119,12 @@ function mergeUiPreferencesForRecovery(base: UiPreferencesSnapshot, rescue: UiPr
     hiddenSidebarGroups: base.hiddenSidebarGroups.length > 0 ? base.hiddenSidebarGroups : rescue.hiddenSidebarGroups,
     autoDelete: base.autoDelete || rescue.autoDelete,
     automations: base.automations.length > 0 ? base.automations : rescue.automations,
+    spawnAgentKey: base.spawnAgentKey !== 'builtin:cursor' ? base.spawnAgentKey : rescue.spawnAgentKey,
+    spawnModel: base.spawnModel || rescue.spawnModel,
+    repoBranchSource: base.repoBranchSource !== 'host' ? base.repoBranchSource : rescue.repoBranchSource,
+    repoCreateRemoteBranch: base.repoCreateRemoteBranch || rescue.repoCreateRemoteBranch,
+    pullHostBranchBeforeCreate:
+      base.pullHostBranchBeforeCreate === false ? base.pullHostBranchBeforeCreate : rescue.pullHostBranchBeforeCreate,
   });
 }
 
@@ -139,6 +163,11 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
     hiddenSidebarGroups,
     autoDelete,
     automations,
+    spawnAgentKey,
+    spawnModel,
+    repoBranchSource,
+    repoCreateRemoteBranch,
+    pullHostBranchBeforeCreate,
     setSidebarGroupingMode,
     setSidebarDensityMode,
     setSidebarGroupOrder,
@@ -148,6 +177,11 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
     setHiddenSidebarGroups,
     setAutoDelete,
     setAutomations,
+    setSpawnAgentKey,
+    setSpawnModel,
+    setRepoBranchSource,
+    setRepoCreateRemoteBranch,
+    setPullHostBranchBeforeCreate,
   } = useDroneHubUiStore(
     useShallow((s) => ({
       sidebarGroupingMode: s.sidebarGroupingMode,
@@ -159,6 +193,11 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
       hiddenSidebarGroups: s.hiddenSidebarGroups,
       autoDelete: s.autoDelete,
       automations: s.automations,
+      spawnAgentKey: s.spawnAgentKey,
+      spawnModel: s.spawnModel,
+      repoBranchSource: s.repoBranchSource,
+      repoCreateRemoteBranch: s.repoCreateRemoteBranch,
+      pullHostBranchBeforeCreate: s.pullHostBranchBeforeCreate,
       setSidebarGroupingMode: s.setSidebarGroupingMode,
       setSidebarDensityMode: s.setSidebarDensityMode,
       setSidebarGroupOrder: s.setSidebarGroupOrder,
@@ -168,6 +207,11 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
       setHiddenSidebarGroups: s.setHiddenSidebarGroups,
       setAutoDelete: s.setAutoDelete,
       setAutomations: s.setAutomations,
+      setSpawnAgentKey: s.setSpawnAgentKey,
+      setSpawnModel: s.setSpawnModel,
+      setRepoBranchSource: s.setRepoBranchSource,
+      setRepoCreateRemoteBranch: s.setRepoCreateRemoteBranch,
+      setPullHostBranchBeforeCreate: s.setPullHostBranchBeforeCreate,
     })),
   );
 
@@ -188,11 +232,19 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
       setHiddenSidebarGroups(normalized.hiddenSidebarGroups);
       setAutoDelete(normalized.autoDelete);
       setAutomations(normalized.automations);
+      setSpawnAgentKey(normalized.spawnAgentKey);
+      setSpawnModel(normalized.spawnModel);
+      setRepoBranchSource(normalized.repoBranchSource);
+      setRepoCreateRemoteBranch(normalized.repoCreateRemoteBranch);
+      setPullHostBranchBeforeCreate(normalized.pullHostBranchBeforeCreate);
       return normalized;
     },
     [
       setAutoDelete,
       setAutomations,
+      setPullHostBranchBeforeCreate,
+      setRepoBranchSource,
+      setRepoCreateRemoteBranch,
       setSidebarDensityMode,
       setHiddenSidebarGroups,
       setSidebarChatOrderByDrone,
@@ -200,6 +252,8 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
       setSidebarNodeOrderByParent,
       setSidebarGroupOrder,
       setSidebarGroupingMode,
+      setSpawnAgentKey,
+      setSpawnModel,
     ],
   );
 
@@ -223,17 +277,27 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
         hiddenSidebarGroups,
         autoDelete,
         automations,
+        spawnAgentKey,
+        spawnModel,
+        repoBranchSource,
+        repoCreateRemoteBranch,
+        pullHostBranchBeforeCreate,
       }),
     [
       autoDelete,
       automations,
       hiddenSidebarGroups,
+      pullHostBranchBeforeCreate,
+      repoBranchSource,
+      repoCreateRemoteBranch,
       sidebarDensityMode,
       sidebarChatOrderByDrone,
       sidebarDroneOrderByGroup,
       sidebarNodeOrderByParent,
       sidebarGroupOrder,
       sidebarGroupingMode,
+      spawnAgentKey,
+      spawnModel,
     ],
   );
 

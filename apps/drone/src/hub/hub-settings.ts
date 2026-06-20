@@ -203,6 +203,11 @@ export type UiPreferencesSettings = {
   hiddenSidebarGroups: string[];
   autoDelete: boolean;
   automations: UiAutomationConfig[];
+  spawnAgentKey: string;
+  spawnModel: string;
+  repoBranchSource: 'host' | 'remote';
+  repoCreateRemoteBranch: string;
+  pullHostBranchBeforeCreate: boolean;
 };
 
 const ARCHIVE_RETENTION_MS_MAP: Record<ArchiveRetentionId, number> = {
@@ -216,6 +221,9 @@ const DEFAULT_ARCHIVE_RETENTION: ArchiveRetentionId = '1d';
 const DEFAULT_ARCHIVE_RUNTIME_POLICY: ArchiveRuntimePolicy = 'keep-running';
 const DEFAULT_SIDEBAR_GROUPING_MODE: SidebarGroupingMode = 'groups';
 const DEFAULT_SIDEBAR_DENSITY_MODE: UiPreferencesSettings['sidebarDensityMode'] = 'default';
+const DEFAULT_SPAWN_AGENT_KEY = 'builtin:cursor';
+const DEFAULT_REPO_BRANCH_SOURCE: UiPreferencesSettings['repoBranchSource'] = 'host';
+const DEFAULT_PULL_HOST_BRANCH_BEFORE_CREATE = true;
 export const FILESYSTEM_UPLOAD_MAX_BYTES_MIN = 1 * 1024 * 1024;
 export const FILESYSTEM_UPLOAD_MAX_BYTES_MAX = 8 * 1024 * 1024 * 1024;
 export const FILESYSTEM_UPLOAD_MAX_BYTES_DEFAULT = 2 * 1024 * 1024 * 1024;
@@ -361,6 +369,13 @@ function parseSidebarDensityMode(raw: unknown): UiPreferencesSettings['sidebarDe
     .trim()
     .toLowerCase();
   return s === 'compact' || s === 'comfortable' || s === 'default' ? s : null;
+}
+
+function parseRepoBranchSource(raw: unknown): UiPreferencesSettings['repoBranchSource'] | null {
+  const s = String(raw ?? '')
+    .trim()
+    .toLowerCase();
+  return s === 'host' || s === 'remote' ? s : null;
 }
 
 export function archiveRetentionMs(retention: ArchiveRetentionId): number {
@@ -674,6 +689,10 @@ function normalizeUiAutomationConfigs(value: unknown): UiAutomationConfig[] {
   return out;
 }
 
+function normalizeUiPreferenceText(value: unknown, maxChars: number): string {
+  return String(value ?? '').trim().slice(0, maxChars);
+}
+
 function sanitizeUiPreferencesSettings(value: unknown): UiPreferencesSettings {
   const raw = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
   return {
@@ -686,6 +705,14 @@ function sanitizeUiPreferencesSettings(value: unknown): UiPreferencesSettings {
     hiddenSidebarGroups: normalizeOrderedStringList(raw.hiddenSidebarGroups),
     autoDelete: raw.autoDelete === true,
     automations: normalizeUiAutomationConfigs(raw.automations),
+    spawnAgentKey: normalizeUiPreferenceText(raw.spawnAgentKey, 200) || DEFAULT_SPAWN_AGENT_KEY,
+    spawnModel: normalizeUiPreferenceText(raw.spawnModel, 200),
+    repoBranchSource: parseRepoBranchSource(raw.repoBranchSource) ?? DEFAULT_REPO_BRANCH_SOURCE,
+    repoCreateRemoteBranch: normalizeUiPreferenceText(raw.repoCreateRemoteBranch, 400),
+    pullHostBranchBeforeCreate:
+      typeof raw.pullHostBranchBeforeCreate === 'boolean'
+        ? raw.pullHostBranchBeforeCreate
+        : DEFAULT_PULL_HOST_BRANCH_BEFORE_CREATE,
   };
 }
 
@@ -1692,6 +1719,11 @@ export async function upsertStoredUiPreferencesSettings(valueRaw: unknown): Prom
         stopPhrase: automation.stopPhrase,
         stopPhraseCaseSensitive: automation.stopPhraseCaseSensitive,
       })),
+      spawnAgentKey: uiPreferences.spawnAgentKey,
+      spawnModel: uiPreferences.spawnModel,
+      repoBranchSource: uiPreferences.repoBranchSource,
+      repoCreateRemoteBranch: uiPreferences.repoCreateRemoteBranch,
+      pullHostBranchBeforeCreate: uiPreferences.pullHostBranchBeforeCreate,
       updatedAt,
     };
   });

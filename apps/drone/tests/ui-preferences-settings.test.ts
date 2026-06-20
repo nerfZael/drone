@@ -16,6 +16,11 @@ describe('ui preferences settings persistence', () => {
       expect(resolved.uiPreferences.sidebarGroupOrder).toEqual([]);
       expect(resolved.uiPreferences.autoDelete).toBe(false);
       expect(resolved.uiPreferences.automations).toEqual([]);
+      expect(resolved.uiPreferences.spawnAgentKey).toBe('builtin:cursor');
+      expect(resolved.uiPreferences.spawnModel).toBe('');
+      expect(resolved.uiPreferences.repoBranchSource).toBe('host');
+      expect(resolved.uiPreferences.repoCreateRemoteBranch).toBe('');
+      expect(resolved.uiPreferences.pullHostBranchBeforeCreate).toBe(true);
     });
   });
 
@@ -33,6 +38,11 @@ describe('ui preferences settings persistence', () => {
         },
         hiddenSidebarGroups: ['archive', 'archive', ''],
         autoDelete: true,
+        spawnAgentKey: 'builtin:codex',
+        spawnModel: 'gpt-5.5',
+        repoBranchSource: 'remote',
+        repoCreateRemoteBranch: 'origin/feature/voice',
+        pullHostBranchBeforeCreate: false,
         automations: [
           {
             id: 'automation-a',
@@ -63,6 +73,11 @@ describe('ui preferences settings persistence', () => {
       });
       expect(resolved.uiPreferences.hiddenSidebarGroups).toEqual(['archive']);
       expect(resolved.uiPreferences.autoDelete).toBe(true);
+      expect(resolved.uiPreferences.spawnAgentKey).toBe('builtin:codex');
+      expect(resolved.uiPreferences.spawnModel).toBe('gpt-5.5');
+      expect(resolved.uiPreferences.repoBranchSource).toBe('remote');
+      expect(resolved.uiPreferences.repoCreateRemoteBranch).toBe('origin/feature/voice');
+      expect(resolved.uiPreferences.pullHostBranchBeforeCreate).toBe(false);
       expect(resolved.uiPreferences.automations).toHaveLength(1);
       expect(resolved.uiPreferences.automations[0]).toMatchObject({
         id: 'automation-a',
@@ -78,6 +93,8 @@ describe('ui preferences settings persistence', () => {
       const registryPath = path.join(droneDataDir, 'registry.json');
       const registry = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
       expect(registry?.settings?.uiPreferences?.autoDelete).toBe(true);
+      expect(registry?.settings?.uiPreferences?.repoBranchSource).toBe('remote');
+      expect(registry?.settings?.uiPreferences?.pullHostBranchBeforeCreate).toBe(false);
       expect(registry?.settings?.uiPreferences?.automations).toHaveLength(1);
     });
   });
