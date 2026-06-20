@@ -15,6 +15,7 @@ import type {
   RunStatus,
   SendOptions,
   RemoveDroneInput,
+  SetDroneGroupResult,
 } from './types';
 
 type HubTransportOptions = {
@@ -204,6 +205,27 @@ function toDroneRecord(drone: any): DroneRecord {
   };
 }
 
+function toSetDroneGroupResult(response: any): SetDroneGroupResult {
+  return {
+    group: typeof response?.group === 'string' && response.group.trim() ? response.group.trim() : null,
+    moved: Array.isArray(response?.moved)
+      ? response.moved.map((item: any) => ({
+          id: String(item?.id ?? ''),
+          name: String(item?.name ?? ''),
+          previousGroup: typeof item?.previousGroup === 'string' && item.previousGroup.trim() ? String(item.previousGroup).trim() : null,
+          group: typeof item?.group === 'string' && item.group.trim() ? String(item.group).trim() : null,
+        }))
+      : [],
+    rejected: Array.isArray(response?.rejected)
+      ? response.rejected.map((item: any) => ({
+          id: String(item?.id ?? ''),
+          error: String(item?.error ?? 'rejected'),
+        }))
+      : [],
+    total: Number.isFinite(Number(response?.total)) ? Number(response.total) : 0,
+  };
+}
+
 function transcriptToMessages(chatName: string, transcripts: any[]): ChatMessage[] {
   const messages: ChatMessage[] = [];
   for (const transcript of transcripts) {
@@ -309,6 +331,9 @@ export function hubTransport(options: HubTransportOptions): DroneTransport {
           ? response.accepted.map((item: any) => ({
               id: String(item?.id ?? ''),
               name: String(item?.name ?? ''),
+              group: typeof item?.group === 'string' && item.group.trim()
+                ? String(item.group).trim()
+                : inputs.find((input) => input.name === String(item?.name ?? ''))?.group,
               runtime: 'container',
               persistVolume: typeof item?.persistVolume === 'boolean' ? item.persistVolume : undefined,
             }))
@@ -346,6 +371,16 @@ export function hubTransport(options: HubTransportOptions): DroneTransport {
             count: Number(group?.totalCount ?? 0),
           }))
         : [];
+    },
+
+    async setDroneGroup(droneIds: string[], group: string | null, requestOptions?: RequestOptions): Promise<SetDroneGroupResult> {
+      const response = await requestJson<any>(
+        options,
+        '/api/drones/group-set',
+        { method: 'POST', body: JSON.stringify({ droneIds, group: group ?? null }) },
+        requestOptions,
+      );
+      return toSetDroneGroupResult(response);
     },
 
     async renameDrone(idOrName: string, nextName: string, requestOptions?: RequestOptions): Promise<DroneRecord> {

@@ -22260,6 +22260,14 @@ export async function startDroneHubApiServer(opts: {
         }
         const groupValue = String(groupRaw ?? '').trim();
         const nextGroup = !groupValue || isUngroupedGroupName(groupValue) ? null : groupValue;
+        if (nextGroup) {
+          try {
+            validateGroupNameOrThrow(nextGroup);
+          } catch (e: any) {
+            json(res, 400, { ok: false, error: e?.message ?? String(e) });
+            return;
+          }
+        }
 
         const result = await updateRegistry((regAny: any) => {
           const at = nowIso();
