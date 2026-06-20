@@ -135,6 +135,7 @@ export function ChatInput({
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const automationPanelRef = React.useRef<HTMLDivElement | null>(null);
   const voiceActionInFlightRef = React.useRef(false);
+  const voiceActionTokenRef = React.useRef(0);
   const controlledDraftEnabled = typeof draftValue === 'string' && typeof onDraftValueChange === 'function';
   const draft = controlledDraftEnabled ? draftValue : uncontrolledDraft;
   const draftRef = React.useRef(draft);
@@ -300,12 +301,18 @@ export function ChatInput({
   }, [draftAutomationEnabled, supportsDraftAutomation]);
 
   React.useEffect(() => {
+    voiceActionTokenRef.current += 1;
+    voiceActionInFlightRef.current = false;
+    setVoiceActionInFlight(false);
     void discardVoiceRecording();
   }, [discardVoiceRecording, resetKey]);
 
   React.useEffect(() => {
     if (!voiceRecordingActive) return;
     if (!composerLocked && !showStopAction) return;
+    voiceActionTokenRef.current += 1;
+    voiceActionInFlightRef.current = false;
+    setVoiceActionInFlight(false);
     void discardVoiceRecording();
   }, [composerLocked, discardVoiceRecording, showStopAction, voiceRecordingActive]);
 
@@ -465,8 +472,24 @@ export function ChatInput({
     }
   }
 
-  async function stopVoiceRecordingAndAppendDraft(): Promise<string> {
+  function beginVoiceAction(): number | null {
+    if (voiceActionInFlightRef.current) return null;
+    const token = voiceActionTokenRef.current + 1;
+    voiceActionTokenRef.current = token;
+    voiceActionInFlightRef.current = true;
+    setVoiceActionInFlight(true);
+    return token;
+  }
+
+  function endVoiceAction(token: number) {
+    if (voiceActionTokenRef.current !== token) return;
+    voiceActionInFlightRef.current = false;
+    setVoiceActionInFlight(false);
+  }
+
+  async function stopVoiceRecordingAndAppendDraft(actionToken: number): Promise<string | null> {
     const transcript = await stopVoiceRecordingForTranscript();
+    if (voiceActionTokenRef.current !== actionToken) return null;
     if (!transcript) return draftRef.current;
     const nextDraft = mergeDraftWithVoiceTranscript(draftRef.current, transcript);
     setDraft(nextDraft);
@@ -474,30 +497,29 @@ export function ChatInput({
   }
 
   async function stopVoiceRecordingAndFillDraft() {
-    if (voiceActionInFlightRef.current) return;
-    voiceActionInFlightRef.current = true;
-    setVoiceActionInFlight(true);
+    const actionToken = beginVoiceAction();
+    if (actionToken == null) return;
     try {
       const before = draftRef.current;
-      const nextDraft = await stopVoiceRecordingAndAppendDraft();
+      const nextDraft = await stopVoiceRecordingAndAppendDraft(actionToken);
+      if (nextDraft == null) return;
       if (nextDraft === before) {
         setAttachmentError((current) => current || 'No speech detected.');
       } else {
         window.requestAnimationFrame(() => textareaRef.current?.focus());
       }
     } finally {
-      voiceActionInFlightRef.current = false;
-      setVoiceActionInFlight(false);
+      endVoiceAction(actionToken);
     }
   }
 
   const sendNow = () => {
-    if (voiceActionInFlightRef.current) return;
+    const actionToken = beginVoiceAction();
+    if (actionToken == null) return;
     void (async () => {
-      voiceActionInFlightRef.current = true;
-      setVoiceActionInFlight(true);
       try {
-        const promptDraft = voiceRecordingActive ? await stopVoiceRecordingAndAppendDraft() : draftRef.current;
+        const promptDraft = voiceRecordingActive ? await stopVoiceRecordingAndAppendDraft(actionToken) : draftRef.current;
+        if (promptDraft == null) return;
         const snapshotAttachments = attachmentsRef.current.slice();
         const prompt = promptDraft.trim();
         if (voiceRecordingActive && !prompt && snapshotAttachments.length === 0) {
@@ -506,8 +528,7 @@ export function ChatInput({
         }
         await submitPromptSnapshot(prompt, snapshotAttachments);
       } finally {
-        voiceActionInFlightRef.current = false;
-        setVoiceActionInFlight(false);
+        endVoiceAction(actionToken);
       }
     })();
   };
