@@ -651,7 +651,7 @@ exports.activate = async function activate(api) {
   registerTool(api, {
     name: 'create_drone',
     label: 'Create drone',
-    description: 'Create a new Drone Hub drone.',
+    description: 'Create a new Drone Hub drone, optionally starting its default chat with an initial message.',
     approval: 'never',
     inputSchema: {
       type: 'object',
@@ -662,12 +662,14 @@ exports.activate = async function activate(api) {
         model: { type: 'string' },
         cwd: { type: 'string' },
         repoPath: { type: 'string' },
+        initialMessage: { type: 'string', description: 'Optional first message to send to the new drone default chat.' },
       },
       required: ['name'],
       additionalProperties: false,
     },
     async execute(args) {
       const seedAgent = normalizeAgent(args.agent);
+      const initialMessage = cleanString(args.initialMessage);
       const body = {
         name: cleanString(args.name),
         runtime: 'container',
@@ -676,6 +678,7 @@ exports.activate = async function activate(api) {
         ...(cleanString(args.model) ? { seedModel: cleanString(args.model) } : {}),
         ...(cleanString(args.cwd) ? { cwd: cleanString(args.cwd) } : {}),
         ...(cleanString(args.repoPath) ? { repoPath: cleanString(args.repoPath) } : {}),
+        ...(initialMessage ? { seedPrompt: initialMessage, seedSubmittedAt: new Date().toISOString() } : {}),
       };
       if (!body.name) throw new Error('name is required');
       const response = await requestJson(connection(), '/api/drones', { method: 'POST', body: JSON.stringify(body) }, 30_000);
