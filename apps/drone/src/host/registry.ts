@@ -271,6 +271,11 @@ type DroneRegistryV1 = {
       sidebarChatOrderByDrone?: Record<string, string[]>;
       hiddenSidebarGroups?: string[];
       autoDelete?: boolean;
+      spawnAgentKey?: string;
+      spawnModel?: string;
+      repoBranchSource?: 'host' | 'remote';
+      repoCreateRemoteBranch?: string;
+      pullHostBranchBeforeCreate?: boolean;
       automations?: Array<{
         id?: string;
         label?: string;

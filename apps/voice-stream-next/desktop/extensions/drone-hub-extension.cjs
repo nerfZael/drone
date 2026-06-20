@@ -13,6 +13,13 @@ const MAX_IDLE_EXPIRES_IN_MS = 24 * 60 * 60 * 1000;
 const MAX_IDLE_TARGETS = 20;
 const CREATED_DRONES_STATE_KEY = 'createdDrones';
 const MAX_TRACKED_CREATED_DRONES = 500;
+const DEFAULT_CREATE_DRONE_PREFERENCES = {
+  spawnAgentKey: 'builtin:cursor',
+  spawnModel: '',
+  repoBranchSource: 'host',
+  repoCreateRemoteBranch: '',
+  pullHostBranchBeforeCreate: true,
+};
 
 const idleSubscriptions = new Map();
 let idleSubscriptionSequence = 0;
@@ -213,6 +220,57 @@ function normalizeAgent(value) {
     throw new Error(`Unsupported built-in agent: ${value}`);
   }
   return { kind: 'builtin', id };
+}
+
+function normalizeRepoBranchSource(value, fallback = 'host') {
+  const source = cleanString(value).toLowerCase();
+  if (source === 'remote' || source === 'host') return source;
+  return fallback === 'remote' ? 'remote' : 'host';
+}
+
+function normalizeSpawnAgentKey(value, fallback = DEFAULT_CREATE_DRONE_PREFERENCES.spawnAgentKey) {
+  const key = cleanString(value, fallback);
+  const builtin = key.startsWith('builtin:') ? key.slice('builtin:'.length) : key;
+  try {
+    return normalizeAgent(builtin) ? `builtin:${builtin.toLowerCase()}` : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+async function createDronePreferences(hub) {
+  try {
+    const response = await requestJson(hub, '/api/settings/ui-preferences', { method: 'GET' });
+    const prefs = response?.uiPreferences && typeof response.uiPreferences === 'object' ? response.uiPreferences : {};
+    const repoBranchSource = normalizeRepoBranchSource(
+      prefs.repoBranchSource,
+      DEFAULT_CREATE_DRONE_PREFERENCES.repoBranchSource,
+    );
+    return {
+      ...DEFAULT_CREATE_DRONE_PREFERENCES,
+      spawnAgentKey: normalizeSpawnAgentKey(prefs.spawnAgentKey),
+      spawnModel: cleanString(prefs.spawnModel),
+      repoBranchSource,
+      repoCreateRemoteBranch: cleanString(prefs.repoCreateRemoteBranch),
+      pullHostBranchBeforeCreate:
+        typeof prefs.pullHostBranchBeforeCreate === 'boolean'
+          ? prefs.pullHostBranchBeforeCreate
+          : DEFAULT_CREATE_DRONE_PREFERENCES.pullHostBranchBeforeCreate,
+      source: response?.updatedAt ? 'drone_hub_ui_preferences' : 'default',
+      updatedAt: cleanIsoTimestamp(response?.updatedAt),
+    };
+  } catch (error) {
+    return {
+      ...DEFAULT_CREATE_DRONE_PREFERENCES,
+      source: 'default',
+      updatedAt: null,
+      warning: error?.message || String(error),
+    };
+  }
+}
+
+function agentFromPreferenceKey(value) {
+  return normalizeAgent(String(value || '').replace(/^builtin:/, ''));
 }
 
 function summarizeStatusObject(status) {
@@ -597,9 +655,28 @@ exports.activate = async function activate(api) {
   });
 
   registerTool(api, {
+    name: 'get_create_drone_defaults',
+    label: 'Get create drone defaults',
+    description:
+      'Read the Drone Hub defaults normally used when manually creating a drone, including agent, model, branch source, remote branch, and whether the host branch is pulled before create.',
+    approval: 'never',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      required: [],
+      additionalProperties: false,
+    },
+    async execute() {
+      const defaults = await createDronePreferences(connection());
+      return { ok: true, defaults };
+    },
+  });
+
+  registerTool(api, {
     name: 'create_drone',
     label: 'Create drone',
-    description: 'Create a new Drone Hub drone.',
+    description:
+      'Create a new Drone Hub container drone. Omitted agent, model, branch source, remote branch, and pull-before-create values use the same defaults Drone Hub remembers from manual drone creation. Use repoBranchSource=host for the local/current host branch, optionally with pullHostBranchBeforeCreate. Use repoBranchSource=remote with remoteBranch to seed from a specific remote branch.',
     approval: 'never',
     inputSchema: {
       type: 'object',
@@ -610,26 +687,57 @@ exports.activate = async function activate(api) {
         model: { type: 'string' },
         cwd: { type: 'string' },
         repoPath: { type: 'string' },
+        repoBranchSource: { type: 'string', enum: ['host', 'remote'] },
+        remoteBranch: { type: 'string' },
+        pullHostBranchBeforeCreate: { type: 'boolean' },
       },
       required: ['name'],
       additionalProperties: false,
     },
     async execute(args) {
-      const seedAgent = normalizeAgent(args.agent);
+      const hub = connection();
+      const defaults = await createDronePreferences(hub);
+      const seedAgent = args.agent == null ? agentFromPreferenceKey(defaults.spawnAgentKey) : normalizeAgent(args.agent);
+      const seedModel = args.model == null ? defaults.spawnModel : cleanString(args.model);
+      const repoPath = cleanString(args.repoPath);
+      const repoBranchSource = normalizeRepoBranchSource(args.repoBranchSource, defaults.repoBranchSource);
+      const remoteBranch = args.remoteBranch == null ? defaults.repoCreateRemoteBranch : cleanString(args.remoteBranch);
+      const pullHostBranchBeforeCreate =
+        typeof args.pullHostBranchBeforeCreate === 'boolean'
+          ? args.pullHostBranchBeforeCreate
+          : defaults.pullHostBranchBeforeCreate;
       const body = {
         name: cleanString(args.name),
         runtime: 'container',
         ...(cleanString(args.group) ? { group: cleanString(args.group) } : {}),
         ...(seedAgent ? { seedAgent } : {}),
-        ...(cleanString(args.model) ? { seedModel: cleanString(args.model) } : {}),
+        ...(seedModel ? { seedModel } : {}),
         ...(cleanString(args.cwd) ? { cwd: cleanString(args.cwd) } : {}),
-        ...(cleanString(args.repoPath) ? { repoPath: cleanString(args.repoPath) } : {}),
+        ...(repoPath ? { repoPath } : {}),
+        ...(repoPath ? { repoBranchSource } : {}),
+        ...(repoPath && repoBranchSource === 'host' ? { pullHostBranchBeforeCreate } : {}),
+        ...(repoPath && repoBranchSource === 'remote' && remoteBranch ? { remoteBranch } : {}),
       };
       if (!body.name) throw new Error('name is required');
-      const response = await requestJson(connection(), '/api/drones', { method: 'POST', body: JSON.stringify(body) }, 30_000);
+      if (repoPath && repoBranchSource === 'remote' && !remoteBranch) {
+        throw new Error('remoteBranch is required when repoBranchSource is remote');
+      }
+      const response = await requestJson(hub, '/api/drones', { method: 'POST', body: JSON.stringify(body) }, 30_000);
       const drone = droneSummary({ ...body, ...response });
       await rememberCreatedDrone(api, drone, 'create_drone');
-      return { ok: true, drone, createdByExtension: true };
+      return {
+        ok: true,
+        drone,
+        createdByExtension: true,
+        createDefaults: defaults,
+        branch: repoPath
+          ? {
+              repoBranchSource,
+              remoteBranch: repoBranchSource === 'remote' ? remoteBranch : null,
+              pullHostBranchBeforeCreate: repoBranchSource === 'host' ? pullHostBranchBeforeCreate : null,
+            }
+          : null,
+      };
     },
   });
 

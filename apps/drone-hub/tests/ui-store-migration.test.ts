@@ -128,6 +128,21 @@ describe('drone hub ui store migration', () => {
     });
   });
 
+  test('keeps pull-before-create enabled when old spawn defaults omit it', () => {
+    const byRepo = normalizeSpawnContextByRepoKey({
+      __no_repo__: {
+        spawnAgentKey: 'builtin:cursor',
+        spawnModel: '',
+        repoBranchSource: 'host',
+        repoCreateRemoteBranch: '',
+      },
+    });
+
+    expect(resolveSpawnContextPreferencesForRepo(byRepo, '')).toMatchObject({
+      pullHostBranchBeforeCreate: true,
+    });
+  });
+
   test('restores automations from the raw localStorage envelope when backend settings are still empty', () => {
     const restored = restoreUiPreferencesFromPersistedStorage(
       {
@@ -138,10 +153,20 @@ describe('drone hub ui store migration', () => {
         hiddenSidebarGroups: [],
         autoDelete: false,
         automations: [],
+        spawnAgentKey: 'builtin:cursor',
+        spawnModel: '',
+        repoBranchSource: 'host',
+        repoCreateRemoteBranch: '',
+        pullHostBranchBeforeCreate: true,
       },
       JSON.stringify({
         state: {
           autoDelete: true,
+          spawnAgentKey: 'builtin:codex',
+          spawnModel: 'gpt-5.5',
+          repoBranchSource: 'remote',
+          repoCreateRemoteBranch: 'origin/voice',
+          pullHostBranchBeforeCreate: false,
           automations: [
             {
               id: 'automation-a',
@@ -157,6 +182,11 @@ describe('drone hub ui store migration', () => {
 
     expect(restored.restored).toBe(true);
     expect(restored.snapshot.autoDelete).toBe(true);
+    expect(restored.snapshot.spawnAgentKey).toBe('builtin:codex');
+    expect(restored.snapshot.spawnModel).toBe('gpt-5.5');
+    expect(restored.snapshot.repoBranchSource).toBe('remote');
+    expect(restored.snapshot.repoCreateRemoteBranch).toBe('origin/voice');
+    expect(restored.snapshot.pullHostBranchBeforeCreate).toBe(false);
     expect(restored.snapshot.automations).toHaveLength(1);
     expect(restored.snapshot.automations[0]).toMatchObject({
       id: 'automation-a',
