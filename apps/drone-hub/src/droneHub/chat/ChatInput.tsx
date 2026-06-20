@@ -29,6 +29,7 @@ import {
   textByteLength,
   type DraftChatAttachment,
 } from './chat-input-attachments';
+import { mergeDraftWithVoiceTranscript, useChatVoiceRecorder } from './use-chat-voice-recorder';
 
 const CHAT_INPUT_TEXTAREA_MIN_HEIGHT_PX = 36;
 const CHAT_INPUT_TEXTAREA_MAX_HEIGHT_PX = 160;
@@ -124,6 +125,7 @@ export function ChatInput({
   const [selectedAutomationActionId, setSelectedAutomationActionId] = React.useState('');
   const [automationRunsDraft, setAutomationRunsDraft] = React.useState('');
   const [draftAutomationEnabled, setDraftAutomationEnabled] = React.useState(false);
+  const [voiceActionInFlight, setVoiceActionInFlight] = React.useState(false);
   const [draftAutomationRunsDraft, setDraftAutomationRunsDraft] = React.useState(String(AUTOMATION_RUNS_DEFAULT));
   const [draftAutomationSleepAmountDraft, setDraftAutomationSleepAmountDraft] =
     React.useState(String(AUTOMATION_SLEEP_AMOUNT_DEFAULT));
@@ -132,9 +134,11 @@ export function ChatInput({
   const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const automationPanelRef = React.useRef<HTMLDivElement | null>(null);
+  const voiceActionInFlightRef = React.useRef(false);
   const controlledDraftEnabled = typeof draftValue === 'string' && typeof onDraftValueChange === 'function';
   const draft = controlledDraftEnabled ? draftValue : uncontrolledDraft;
   const draftRef = React.useRef(draft);
+  const attachmentsRef = React.useRef(attachments);
   const availableAutomationActions = React.useMemo(
     () =>
       (Array.isArray(automationActions) ? automationActions : []).filter(
@@ -180,6 +184,10 @@ export function ChatInput({
     draftRef.current = draft;
   }, [draft]);
 
+  React.useEffect(() => {
+    attachmentsRef.current = attachments;
+  }, [attachments]);
+
   const setDraft = React.useCallback(
     (next: React.SetStateAction<string>) => {
       const resolved = typeof next === 'function' ? (next as (prev: string) => string)(draftRef.current) : next;
@@ -191,6 +199,17 @@ export function ChatInput({
     },
     [controlledDraftEnabled, onDraftValueChange],
   );
+
+  const {
+    status: voiceRecordingStatus,
+    startRecording: startVoiceRecording,
+    discardRecording: discardVoiceRecording,
+    stopRecordingForTranscript: stopVoiceRecordingForTranscript,
+  } = useChatVoiceRecorder({
+    onError: React.useCallback((message) => {
+      setAttachmentError(message.trim() ? message : null);
+    }, []),
+  });
 
   const resizeTextarea = React.useCallback(() => {
     const el = textareaRef.current;
@@ -265,17 +284,30 @@ export function ChatInput({
     };
   }, [automationPanelOpen]);
 
-  const trimmed = draft.trim();
-  const sendDisabled = composerLocked || (trimmed.length === 0 && attachments.length === 0);
   const showStopAction = waiting && typeof onStop === 'function';
   const hasModeHint = modeHint.trim().length > 0;
   const supportsDraftAutomation = typeof onSendAutomation === 'function';
   const draftAutomationActive = draftAutomationEnabled && supportsDraftAutomation;
+  const voiceRecordingActive = voiceRecordingStatus !== 'idle';
+  const voiceRecordButtonDisabled = composerLocked || sending || showStopAction || voiceActionInFlight;
+  const voiceStopButtonDisabled = voiceRecordingStatus !== 'recording' || voiceActionInFlight;
+  const trimmed = draft.trim();
+  const sendDisabled = composerLocked || voiceActionInFlight || (trimmed.length === 0 && attachments.length === 0 && !voiceRecordingActive);
 
   React.useEffect(() => {
     if (supportsDraftAutomation || !draftAutomationEnabled) return;
     setDraftAutomationEnabled(false);
   }, [draftAutomationEnabled, supportsDraftAutomation]);
+
+  React.useEffect(() => {
+    void discardVoiceRecording();
+  }, [discardVoiceRecording, resetKey]);
+
+  React.useEffect(() => {
+    if (!voiceRecordingActive) return;
+    if (!composerLocked && !showStopAction) return;
+    void discardVoiceRecording();
+  }, [composerLocked, discardVoiceRecording, showStopAction, voiceRecordingActive]);
 
   function openPicker() {
     if (!attachmentsOn) return;
@@ -371,9 +403,7 @@ export function ChatInput({
     });
   }
 
-  const sendNow = () => {
-    const prompt = draft.trim();
-    const snapshotAttachments = attachments.slice();
+  async function submitPromptSnapshot(prompt: string, snapshotAttachments: DraftChatAttachment[]) {
     if (!prompt && snapshotAttachments.length === 0) return;
     if (draftAutomationActive && snapshotAttachments.length > 0) {
       setAttachmentError('Recurring chat automations do not support attachments yet.');
@@ -382,57 +412,102 @@ export function ChatInput({
     setDraft('');
     setAttachments([]);
     setAttachmentError(null);
-    void (async () => {
-      if (draftAutomationActive && onSendAutomation) {
-        const ok = await onSendAutomation({
-          prompt,
-          attachments: [],
-          runs: normalizeAutomationRuns(draftAutomationRunsDraft),
-          sleepAmount: normalizeAutomationSleepAmount(draftAutomationSleepAmountDraft),
-          sleepUnit: draftAutomationSleepUnit,
-        });
-        if (!ok) {
-          setDraft((cur) => (cur.trim().length === 0 ? prompt : cur));
-          setAttachments((cur) => (cur.length === 0 ? snapshotAttachments : cur));
-        }
-        return;
-      }
-      let encoded: ChatAttachmentPayload[] = [];
-      try {
-        encoded = await Promise.all(
-          snapshotAttachments.map(async (a) =>
-            a.kind === 'image'
-              ? {
-                  name: a.name,
-                  mime: a.mime,
-                  size: a.size,
-                  dataBase64: await fileToBase64(a.file),
-                }
-              : {
-                  name: a.name,
-                  mime: a.mime,
-                  size: a.size,
-                  dataBase64: await blobToBase64(new Blob([a.text], { type: a.mime })),
-                },
-          ),
-        );
-      } catch (e: any) {
-        const msg = e?.message ?? String(e);
-        setAttachmentError(`Failed to read attachment: ${msg}`);
-        // Restore state (best-effort).
-        setDraft((cur) => (cur.trim().length === 0 ? prompt : cur));
-        setAttachments((cur) => (cur.length === 0 ? snapshotAttachments : cur));
-        return;
-      }
-
-      const ok = await onSend({ prompt, attachments: encoded });
+    if (draftAutomationActive && onSendAutomation) {
+      const ok = await onSendAutomation({
+        prompt,
+        attachments: [],
+        runs: normalizeAutomationRuns(draftAutomationRunsDraft),
+        sleepAmount: normalizeAutomationSleepAmount(draftAutomationSleepAmountDraft),
+        sleepUnit: draftAutomationSleepUnit,
+      });
       if (!ok) {
-        // Don't clobber any new text the user started typing.
         setDraft((cur) => (cur.trim().length === 0 ? prompt : cur));
         setAttachments((cur) => (cur.length === 0 ? snapshotAttachments : cur));
+      }
+      return;
+    }
+    let encoded: ChatAttachmentPayload[] = [];
+    try {
+      encoded = await Promise.all(
+        snapshotAttachments.map(async (a) =>
+          a.kind === 'image'
+            ? {
+                name: a.name,
+                mime: a.mime,
+                size: a.size,
+                dataBase64: await fileToBase64(a.file),
+              }
+            : {
+                name: a.name,
+                mime: a.mime,
+                size: a.size,
+                dataBase64: await blobToBase64(new Blob([a.text], { type: a.mime })),
+              },
+        ),
+      );
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      setAttachmentError(`Failed to read attachment: ${msg}`);
+      // Restore state (best-effort).
+      setDraft((cur) => (cur.trim().length === 0 ? prompt : cur));
+      setAttachments((cur) => (cur.length === 0 ? snapshotAttachments : cur));
+      return;
+    }
+
+    const ok = await onSend({ prompt, attachments: encoded });
+    if (!ok) {
+      // Don't clobber any new text the user started typing.
+      setDraft((cur) => (cur.trim().length === 0 ? prompt : cur));
+      setAttachments((cur) => (cur.length === 0 ? snapshotAttachments : cur));
+    } else {
+      // Sent: revoke preview URLs for the snapshot attachments.
+      revokeDraftImagePreviewUrls(snapshotAttachments);
+    }
+  }
+
+  async function stopVoiceRecordingAndAppendDraft(): Promise<string> {
+    const transcript = await stopVoiceRecordingForTranscript();
+    if (!transcript) return draftRef.current;
+    const nextDraft = mergeDraftWithVoiceTranscript(draftRef.current, transcript);
+    setDraft(nextDraft);
+    return nextDraft;
+  }
+
+  async function stopVoiceRecordingAndFillDraft() {
+    if (voiceActionInFlightRef.current) return;
+    voiceActionInFlightRef.current = true;
+    setVoiceActionInFlight(true);
+    try {
+      const before = draftRef.current;
+      const nextDraft = await stopVoiceRecordingAndAppendDraft();
+      if (nextDraft === before) {
+        setAttachmentError((current) => current || 'No speech detected.');
       } else {
-        // Sent: revoke preview URLs for the snapshot attachments.
-        revokeDraftImagePreviewUrls(snapshotAttachments);
+        window.requestAnimationFrame(() => textareaRef.current?.focus());
+      }
+    } finally {
+      voiceActionInFlightRef.current = false;
+      setVoiceActionInFlight(false);
+    }
+  }
+
+  const sendNow = () => {
+    if (voiceActionInFlightRef.current) return;
+    void (async () => {
+      voiceActionInFlightRef.current = true;
+      setVoiceActionInFlight(true);
+      try {
+        const promptDraft = voiceRecordingActive ? await stopVoiceRecordingAndAppendDraft() : draftRef.current;
+        const snapshotAttachments = attachmentsRef.current.slice();
+        const prompt = promptDraft.trim();
+        if (voiceRecordingActive && !prompt && snapshotAttachments.length === 0) {
+          setAttachmentError((current) => current || 'No speech detected.');
+          return;
+        }
+        await submitPromptSnapshot(prompt, snapshotAttachments);
+      } finally {
+        voiceActionInFlightRef.current = false;
+        setVoiceActionInFlight(false);
       }
     })();
   };
@@ -482,7 +557,21 @@ export function ChatInput({
     [draftAutomationSleepAmount, draftAutomationSleepUnit],
   );
   const sendButtonLabel =
-    showStopAction ? (stopping ? 'Stopping...' : 'Stop') : sending ? 'Sending...' : waiting ? 'Waiting...' : draftAutomationActive ? 'Start loop' : 'Send';
+    showStopAction
+      ? stopping
+        ? 'Stopping...'
+        : 'Stop'
+      : voiceActionInFlight
+        ? voiceRecordingStatus === 'transcribing'
+          ? 'Transcribing...'
+          : 'Sending...'
+        : sending
+          ? 'Sending...'
+          : waiting
+            ? 'Waiting...'
+            : draftAutomationActive
+              ? 'Start loop'
+              : 'Send';
 
   return (
     <div
@@ -622,7 +711,7 @@ export function ChatInput({
             </div>
           )}
 
-          <div className="flex items-end gap-3 p-3">
+          <div className="flex flex-wrap items-end gap-2 p-3 sm:flex-nowrap">
             {attachmentsOn && (
               <>
                 <input
@@ -658,6 +747,69 @@ export function ChatInput({
                 </button>
               </>
             )}
+            {voiceRecordingStatus === 'idle' ? (
+              <button
+                type="button"
+                onClick={() => void startVoiceRecording()}
+                disabled={voiceRecordButtonDisabled}
+                className={`inline-flex h-[44px] w-[44px] flex-shrink-0 items-center justify-center rounded-md border transition-all ${
+                  voiceRecordButtonDisabled
+                    ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                    : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)]'
+                }`}
+                title="Record voice message"
+                aria-label="Record voice message"
+              >
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" />
+                  <path d="M5 11a7 7 0 0 0 14 0" />
+                  <path d="M12 18v3" />
+                  <path d="M8 21h8" />
+                </svg>
+              </button>
+            ) : (
+              <div className="flex h-[44px] flex-shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => void discardVoiceRecording()}
+                  disabled={voiceRecordingStatus === 'transcribing' || voiceActionInFlight}
+                  className={`inline-flex h-9 w-9 items-center justify-center rounded-md border transition-all ${
+                    voiceRecordingStatus === 'transcribing' || voiceActionInFlight
+                      ? 'opacity-40 cursor-not-allowed border-[rgba(248,113,113,.18)] bg-[rgba(248,113,113,.05)] text-[rgba(252,165,165,.55)]'
+                      : 'border-[rgba(248,113,113,.45)] bg-[rgba(248,113,113,.10)] text-[#fca5a5] hover:bg-[rgba(248,113,113,.16)]'
+                  }`}
+                  title="Discard recording"
+                  aria-label="Discard recording"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M6 6l12 12" />
+                    <path d="M18 6L6 18" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void stopVoiceRecordingAndFillDraft()}
+                  disabled={voiceStopButtonDisabled}
+                  className={`inline-flex h-9 w-9 items-center justify-center rounded-md border transition-all ${
+                    voiceStopButtonDisabled
+                      ? 'opacity-40 cursor-not-allowed border-[rgba(74,222,128,.16)] bg-[rgba(74,222,128,.04)] text-[rgba(74,222,128,.55)]'
+                      : 'border-[rgba(74,222,128,.28)] bg-[rgba(74,222,128,.08)] text-[var(--green)] hover:bg-[rgba(74,222,128,.13)]'
+                  }`}
+                  title="Stop recording and transcribe"
+                  aria-label="Stop recording and transcribe"
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M7 7h10v10H7Z" />
+                  </svg>
+                </button>
+                <span
+                  className="hidden max-w-[88px] truncate text-[9px] font-semibold uppercase tracking-wide text-[var(--muted-dim)] md:inline"
+                  style={{ fontFamily: 'var(--display)' }}
+                >
+                  {voiceRecordingStatus === 'recording' ? 'Recording' : voiceRecordingStatus === 'starting' ? 'Starting' : 'Transcribing'}
+                </span>
+              </div>
+            )}
             <textarea
               ref={textareaRef}
               data-chat-input-focus-id={focusTargetId || undefined}
@@ -691,7 +843,7 @@ export function ChatInput({
               }}
               rows={1}
               placeholder="Message..."
-              className="flex-1 resize-none rounded-md border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] px-3 py-2 text-[13px] leading-[1.35] text-[var(--fg)] placeholder:text-[11px] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--user-muted)] transition-colors"
+              className="min-w-[180px] flex-1 resize-none rounded-md border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] px-3 py-2 text-[13px] leading-[1.35] text-[var(--fg)] placeholder:text-[11px] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--user-muted)] transition-colors"
               style={{ minHeight: CHAT_INPUT_TEXTAREA_MIN_HEIGHT_PX }}
               disabled={composerLocked}
               autoFocus={Boolean(autoFocus)}
