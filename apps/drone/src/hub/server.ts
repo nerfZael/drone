@@ -12760,42 +12760,54 @@ export async function startDroneHubApiServer(opts: {
     }
   };
 
+  function buildAssistantDroneSummariesFromRegistry(regAny: any): AssistantDroneSummary[] {
+    const out: AssistantDroneSummary[] = [];
+    const drones = regAny?.drones && typeof regAny.drones === 'object' ? regAny.drones : {};
+    for (const [idRaw, d] of Object.entries(drones) as any[]) {
+      const id = normalizeDroneIdentity((d as any)?.id) || normalizeDroneIdentity(idRaw);
+      if (!id) continue;
+      const chatObj = (d as any)?.chats && typeof (d as any).chats === 'object' ? (d as any).chats : {};
+      const chats = Object.keys(chatObj);
+      if (chats.length === 0) chats.push('default');
+      const activity = summarizeDroneActivity(d);
+      out.push({
+        id,
+        name: String((d as any)?.name ?? id).trim() || id,
+        group: String((d as any)?.group ?? '').trim() || null,
+        runtime: normalizeDroneRuntime((d as any)?.runtime),
+        repoPath: String((d as any)?.repoPath ?? '').trim(),
+        status: String((d as any)?.hub?.phase ?? 'ready').trim() || 'ready',
+        chats,
+        ...(activity.lastActivityAt ? { lastActivityAt: activity.lastActivityAt } : {}),
+        ...(activity.lastMessageAt ? { lastMessageAt: activity.lastMessageAt } : {}),
+        ...(activity.lastActivityChat ? { lastActivityChat: activity.lastActivityChat } : {}),
+      } as AssistantDroneSummary);
+    }
+    const pending = regAny?.pending && typeof regAny.pending === 'object' ? regAny.pending : {};
+    for (const [idRaw, d] of Object.entries(pending) as any[]) {
+      const id = normalizeDroneIdentity((d as any)?.id) || normalizeDroneIdentity(idRaw);
+      if (!id || out.some((item) => item.id === id)) continue;
+      const activity = summarizeDroneActivity(d);
+      out.push({
+        id,
+        name: String((d as any)?.name ?? id).trim() || id,
+        group: String((d as any)?.group ?? '').trim() || null,
+        runtime: normalizeDroneRuntime((d as any)?.runtime),
+        repoPath: String((d as any)?.repoPath ?? '').trim(),
+        status: String((d as any)?.phase ?? 'starting').trim() || 'starting',
+        chats: ['default'],
+        ...(activity.lastActivityAt ? { lastActivityAt: activity.lastActivityAt } : {}),
+        ...(activity.lastMessageAt ? { lastMessageAt: activity.lastMessageAt } : {}),
+        ...(activity.lastActivityChat ? { lastActivityChat: activity.lastActivityChat } : {}),
+      } as AssistantDroneSummary);
+    }
+    return out.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  }
+
   const assistantService = new HubAssistantService({
     listDrones: async (): Promise<AssistantDroneSummary[]> => {
       const regAny: any = await loadRegistry();
-      const out: AssistantDroneSummary[] = [];
-      const drones = regAny?.drones && typeof regAny.drones === 'object' ? regAny.drones : {};
-      for (const [idRaw, d] of Object.entries(drones) as any[]) {
-        const id = normalizeDroneIdentity((d as any)?.id) || normalizeDroneIdentity(idRaw);
-        if (!id) continue;
-        const chatObj = (d as any)?.chats && typeof (d as any).chats === 'object' ? (d as any).chats : {};
-        const chats = Object.keys(chatObj);
-        if (chats.length === 0) chats.push('default');
-        out.push({
-          id,
-          name: String((d as any)?.name ?? id).trim() || id,
-          group: String((d as any)?.group ?? '').trim() || null,
-          runtime: normalizeDroneRuntime((d as any)?.runtime),
-          repoPath: String((d as any)?.repoPath ?? '').trim(),
-          status: String((d as any)?.hub?.phase ?? 'ready').trim() || 'ready',
-          chats,
-        });
-      }
-      const pending = regAny?.pending && typeof regAny.pending === 'object' ? regAny.pending : {};
-      for (const [idRaw, d] of Object.entries(pending) as any[]) {
-        const id = normalizeDroneIdentity((d as any)?.id) || normalizeDroneIdentity(idRaw);
-        if (!id || out.some((item) => item.id === id)) continue;
-        out.push({
-          id,
-          name: String((d as any)?.name ?? id).trim() || id,
-          group: String((d as any)?.group ?? '').trim() || null,
-          runtime: normalizeDroneRuntime((d as any)?.runtime),
-          repoPath: String((d as any)?.repoPath ?? '').trim(),
-          status: String((d as any)?.phase ?? 'starting').trim() || 'starting',
-          chats: ['default'],
-        });
-      }
-      return out.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+      return buildAssistantDroneSummariesFromRegistry(regAny);
     },
     createDrone: async (request): Promise<AssistantCreateDroneResult> => {
       const seedPrompt = String(request?.seedPrompt ?? request?.initialMessage ?? request?.seed?.prompt ?? '').trim();
@@ -17764,6 +17776,15 @@ export async function startDroneHubApiServer(opts: {
         startDroneChatBroadcaster();
         writeHubSseEvent(res, 'connected', { ok: true, at: nowIso() });
         void refreshDroneChatEventSnapshot({ broadcastSnapshot: droneChatSseLastByKey.size === 0 });
+        return;
+      }
+
+      // GET /api/drones/summary
+      // Registry-only summaries for assistant/extension tooling. This avoids live
+      // daemon status probes, Docker size checks, and container recovery work.
+      if (method === 'GET' && parts.length === 3 && parts[0] === 'api' && parts[1] === 'drones' && parts[2] === 'summary') {
+        const regAny: any = await loadRegistry();
+        json(res, 200, { ok: true, drones: buildAssistantDroneSummariesFromRegistry(regAny) });
         return;
       }
 

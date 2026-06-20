@@ -79,7 +79,7 @@ function readText(filePath) {
 }
 
 function extensionRepoRoot() {
-  return path.resolve(__dirname, '..', '..', '..', '..', '..');
+  return path.resolve(__dirname, '..', '..', '..', '..');
 }
 
 function normalizeProfileName(value) {
@@ -138,9 +138,25 @@ function readHubStateSnapshot(filePath) {
   };
 }
 
+function discoverHubConnection(config, configuredBaseUrl = '') {
+  for (const dir of candidateDataDirs(config)) {
+    const state = readHubStateSnapshot(path.join(dir, 'hub.json'));
+    const token = readText(path.join(dir, 'hub.token')) || cleanString(state?.apiToken);
+    if (!token) continue;
+    return {
+      baseUrl: state ? `http://${state.apiHost}:${state.apiPort}` : configuredBaseUrl || DEFAULT_HUB_BASE_URL,
+      token,
+      source: dir,
+    };
+  }
+  return null;
+}
+
 function resolveHubConnection(config) {
   const configuredBaseUrl = cleanString(config.baseUrl || process.env.DRONE_HUB_BASE_URL);
   const configuredToken = cleanString(config.token || process.env.DRONE_TOKEN || process.env.DRONE_HUB_API_TOKEN);
+  const discovered = discoverHubConnection(config, configuredBaseUrl);
+  if (discovered && !configuredBaseUrl) return discovered;
   if (configuredToken) {
     return {
       baseUrl: configuredBaseUrl || DEFAULT_HUB_BASE_URL,
@@ -149,26 +165,7 @@ function resolveHubConnection(config) {
     };
   }
 
-  for (const dir of candidateDataDirs(config)) {
-    const token = readText(path.join(dir, 'hub.token'));
-    if (token) {
-      const state = readHubStateSnapshot(path.join(dir, 'hub.json'));
-      return {
-        baseUrl: state ? `http://${state.apiHost}:${state.apiPort}` : configuredBaseUrl || DEFAULT_HUB_BASE_URL,
-        token,
-        source: dir,
-      };
-    }
-
-    const state = readHubStateSnapshot(path.join(dir, 'hub.json'));
-    if (state?.apiToken) {
-      return {
-        baseUrl: `http://${state.apiHost}:${state.apiPort}`,
-        token: state.apiToken,
-        source: dir,
-      };
-    }
-  }
+  if (discovered) return discovered;
 
   throw new Error('Drone Hub connection not found. Start Drone Hub, or set config.baseUrl and config.token.');
 }
@@ -182,8 +179,12 @@ async function requestJson(connection, pathname, init = {}, timeoutMs = DEFAULT_
   if (typeof fetch !== 'function') throw new Error('fetch is not available in this desktop runtime');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const method = cleanString(init.method, 'GET').toUpperCase();
+  const url = joinUrl(connection.baseUrl, pathname);
+  const requestLabel = `${method} ${pathname}`;
+  const connectionLabel = `${connection.baseUrl}${connection.source ? ` (source: ${connection.source})` : ''}`;
   try {
-    const response = await fetch(joinUrl(connection.baseUrl, pathname), {
+    const response = await fetch(url, {
       ...init,
       signal: controller.signal,
       headers: {
@@ -200,13 +201,16 @@ async function requestJson(connection, pathname, init = {}, timeoutMs = DEFAULT_
       data = null;
     }
     if (!response.ok) {
-      const error = new Error(cleanString(data?.error || text, `${init.method || 'GET'} ${pathname} failed with ${response.status}`));
+      const detail = cleanString(data?.error || text, `HTTP ${response.status}`);
+      const error = new Error(`Drone Hub request failed: ${requestLabel} via ${connectionLabel} returned ${response.status}: ${detail}`);
       error.status = response.status;
       throw error;
     }
     return data;
   } catch (error) {
-    if (error?.name === 'AbortError') throw new Error(`Drone Hub request timed out after ${timeoutMs}ms`);
+    if (error?.name === 'AbortError') {
+      throw new Error(`Drone Hub request timed out after ${timeoutMs}ms: ${requestLabel} via ${connectionLabel}`);
+    }
     throw error;
   } finally {
     clearTimeout(timer);
@@ -351,8 +355,17 @@ function droneAliases(value) {
   return [...new Set(aliases)];
 }
 
+async function requestDroneSummaries(hub) {
+  try {
+    return await requestJson(hub, '/api/drones/summary', { method: 'GET' });
+  } catch (error) {
+    if (error?.status !== 404) throw error;
+    return await requestJson(hub, '/api/drones', { method: 'GET' });
+  }
+}
+
 async function resolveDroneIdsForGroupSet(hub, refs) {
-  const response = await requestJson(hub, '/api/drones', { method: 'GET' });
+  const response = await requestDroneSummaries(hub);
   const drones = Array.isArray(response?.drones) ? response.drones.map(droneSummary) : [];
   return refs.map((ref) => {
     const match = drones.find((drone) => drone.id === ref || drone.name === ref);
@@ -608,12 +621,12 @@ exports.activate = async function activate(api) {
     },
     async execute() {
       const hub = connection();
-      const response = await requestJson(hub, '/api/drones', { method: 'GET' });
+      const response = await requestJson(hub, '/api/health', { method: 'GET' });
       return {
         ok: true,
         baseUrl: hub.baseUrl,
         source: hub.source,
-        droneCount: Array.isArray(response?.drones) ? response.drones.length : 0,
+        health: response && typeof response === 'object' ? response : { ok: true },
       };
     },
   });
@@ -634,7 +647,7 @@ exports.activate = async function activate(api) {
       additionalProperties: false,
     },
     async execute(args) {
-      const response = await requestJson(connection(), '/api/drones', { method: 'GET' });
+      const response = await requestDroneSummaries(connection());
       const wantedNames = new Set(Array.isArray(args.names) ? args.names.map((item) => cleanString(item)).filter(Boolean) : []);
       const group = cleanString(args.group);
       const limit = cleanPositiveInt(args.limit, 50, 200);
