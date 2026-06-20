@@ -2984,6 +2984,77 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     }
   });
 
+  app.post('/api/voice/web-recordings/transcribe', async (req, reply) =>
+    withUser(req, reply, db, clerkEnabled, async (ctx) => {
+      const body = req.body;
+      const wav = Buffer.isBuffer(body)
+        ? new Uint8Array(body)
+        : body instanceof Uint8Array
+          ? body
+          : null;
+      if (!wav || wav.byteLength === 0) {
+        throw Object.assign(new Error('audio upload is empty'), { statusCode: 400 });
+      }
+
+      try {
+        const { pcm, sampleRate, channels } = wavPcm16Data(wav);
+        const groqCredential = resolveGroqCredential(db, ctx.user.id);
+        if (groqCredential?.source === 'platform_groq_key' && pcm.byteLength >= 1600) {
+          db.requirePositiveCreditBalance(ctx.user.id, 'Groq web recording transcription');
+        }
+        const transcription = await transcribePcm16(pcm, {
+          apiKey: groqCredential?.apiKey,
+          credentialSource: groqCredential?.source,
+        });
+        recordGroqTranscriptionUsage(ctx.user.id, transcription, {
+          source: 'web_chat_composer',
+        });
+        addLog(ctx.user.id, {
+          deviceId: null,
+          source: 'web',
+          level: transcription.text ? 'info' : 'warn',
+          message: transcription.text ? 'Web chat recording transcribed' : 'Web chat recording transcription returned no text',
+          detailsJson: JSON.stringify({
+            bytes: wav.byteLength,
+            pcmBytes: pcm.byteLength,
+            durationMs: transcription.audioDurationMs,
+            provider: transcription.provider,
+            model: transcription.model,
+          }),
+        });
+        return {
+          ok: true,
+          text: cleanText(transcription.text),
+          provider: transcription.provider,
+          credentialSource: transcription.credentialSource,
+          model: transcription.model,
+          audioDurationMs: transcription.audioDurationMs,
+          sampleRateHz: sampleRate,
+          channels,
+        };
+      } catch (error: any) {
+        const message = error?.message ?? String(error);
+        const explicitStatus = Number(error?.statusCode);
+        const status = explicitStatus >= 400 && explicitStatus < 600
+          ? explicitStatus
+          : /credit/i.test(message)
+            ? 402
+            : /wav|audio|pcm|sample|mono|chunk/i.test(message)
+              ? 400
+              : 502;
+        addLog(ctx.user.id, {
+          deviceId: null,
+          source: 'web',
+          level: 'error',
+          message: 'Web chat recording transcription failed',
+          detailsJson: JSON.stringify({ error: message, bytes: wav.byteLength }),
+        });
+        reply.code(status).send({ ok: false, error: message });
+        return undefined;
+      }
+    }),
+  );
+
   app.post('/api/devices/:deviceId/status', async (req, reply) => {
     const deviceId = String((req.params as any).deviceId ?? '');
     const body = jsonBody(req);

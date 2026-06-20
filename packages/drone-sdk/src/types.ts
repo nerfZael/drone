@@ -135,6 +135,21 @@ export type CreateManyResult = {
   }>;
 };
 
+export type SetDroneGroupResult = {
+  group: string | null;
+  moved: Array<{
+    id: string;
+    name: string;
+    previousGroup: string | null;
+    group: string | null;
+  }>;
+  rejected: Array<{
+    id: string;
+    error: string;
+  }>;
+  total: number;
+};
+
 export type DroneRecord = DroneSummary & {
   repoPath?: string;
   cwd?: string;
@@ -157,6 +172,7 @@ export type DroneTransport = {
   getDrone(idOrName: string, options?: RequestOptions): Promise<DroneRecord | null>;
   listDrones(input?: ListDronesInput, options?: RequestOptions): Promise<DroneRecord[]>;
   listGroups(options?: RequestOptions): Promise<DroneGroupSummary[]>;
+  setDroneGroup(droneIds: string[], group: string | null, options?: RequestOptions): Promise<SetDroneGroupResult>;
   renameDrone(idOrName: string, nextName: string, options?: RequestOptions): Promise<DroneRecord>;
   archiveDrone(idOrName: string, options?: RequestOptions): Promise<void>;
   removeDrone(idOrName: string, input?: RemoveDroneInput, options?: RequestOptions): Promise<void>;

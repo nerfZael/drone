@@ -229,6 +229,10 @@ function normalizeRepoBranchSourceMode(value: unknown): RepoBranchSourceMode {
   return value === 'remote' ? 'remote' : 'host';
 }
 
+function normalizePullHostBranchBeforeCreate(value: unknown): boolean {
+  return typeof value === 'boolean' ? value : DEFAULT_SPAWN_CONTEXT_PREFERENCES.pullHostBranchBeforeCreate;
+}
+
 function normalizeSpawnContextRepoPath(value: unknown): string {
   return typeof value === 'string' ? value.trim() : String(value ?? '').trim();
 }
@@ -246,7 +250,7 @@ function normalizeSpawnContextPreferences(
     spawnModel: normalizeTrimmedString(value?.spawnModel),
     repoBranchSource: normalizeRepoBranchSourceMode(value?.repoBranchSource),
     repoCreateRemoteBranch: normalizeTrimmedString(value?.repoCreateRemoteBranch),
-    pullHostBranchBeforeCreate: normalizeBoolean(value?.pullHostBranchBeforeCreate),
+    pullHostBranchBeforeCreate: normalizePullHostBranchBeforeCreate(value?.pullHostBranchBeforeCreate),
   };
 }
 

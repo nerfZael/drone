@@ -141,4 +141,35 @@ describeSocketSuite('groups api (decoupled from drone count)', () => {
     const persist2 = (after.data?.groups ?? []).find((g: any) => g?.name === 'persist');
     expect(persist2?.totalCount).toBe(0);
   });
+
+  test('can assign drones to groups and validates group names', async () => {
+    await updateRegistry((reg: any) => {
+      reg.drones = reg.drones ?? {};
+      reg.drones['group-move-drone'] = {
+        id: 'group-move-drone',
+        name: 'group-move-drone',
+        containerPort: 7777,
+        token: 'x',
+        repoPath: '',
+        createdAt: new Date().toISOString(),
+      };
+    });
+
+    const moved = await apiFetch('/api/drones/group-set', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ droneIds: ['group-move-drone'], group: 'assigned' }),
+    });
+    expect(moved.r.status).toBe(200);
+    expect(moved.data?.group).toBe('assigned');
+    expect(moved.data?.moved?.[0]?.id).toBe('group-move-drone');
+
+    const invalid = await apiFetch('/api/drones/group-set', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ droneIds: ['group-move-drone'], group: 'x'.repeat(65) }),
+    });
+    expect(invalid.r.status).toBe(400);
+    expect(String(invalid.data?.error ?? '')).toContain('max 64 chars');
+  });
 });

@@ -15,6 +15,7 @@ import type {
   RunStatus,
   SendOptions,
   RemoveDroneInput,
+  SetDroneGroupResult,
 } from './types';
 
 type MockTransportOptions = {
@@ -124,6 +125,24 @@ export function createMockTransport(options: MockTransportOptions = {}): DroneTr
         counts.set(drone.group, (counts.get(drone.group) ?? 0) + 1);
       }
       return Array.from(counts.entries()).map(([name, count]) => ({ name, count }));
+    },
+
+    async setDroneGroup(droneIds: string[], group: string | null): Promise<SetDroneGroupResult> {
+      const nextGroup = String(group ?? '').trim() || null;
+      const moved: SetDroneGroupResult['moved'] = [];
+      const rejected: SetDroneGroupResult['rejected'] = [];
+      for (const idOrName of droneIds) {
+        try {
+          const drone = getDroneOrThrow(idOrName);
+          const previousGroup = drone.group ?? null;
+          if (nextGroup) drone.group = nextGroup;
+          else delete drone.group;
+          moved.push({ id: drone.id, name: drone.name, previousGroup, group: nextGroup });
+        } catch (error) {
+          rejected.push({ id: idOrName, error: error instanceof Error ? error.message : String(error) });
+        }
+      }
+      return { group: nextGroup, moved, rejected, total: droneIds.length };
     },
 
     async renameDrone(idOrName: string, nextName: string): Promise<DroneRecord> {

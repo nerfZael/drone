@@ -255,6 +255,11 @@ export type UiPreferencesSettingsResponse = {
     hiddenSidebarGroups: string[];
     autoDelete: boolean;
     automations: AutomationConfig[];
+    spawnAgentKey: string;
+    spawnModel: string;
+    repoBranchSource: 'host' | 'remote';
+    repoCreateRemoteBranch: string;
+    pullHostBranchBeforeCreate: boolean;
   };
   updatedAt: string | null;
 };
