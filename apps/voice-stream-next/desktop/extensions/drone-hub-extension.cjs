@@ -307,6 +307,9 @@ function droneStatusSummary(drone) {
 
   if (drone?.busy === true || (Array.isArray(drone?.busyChats) && drone.busyChats.length > 0)) return 'busy';
 
+  const phase = cleanString(drone?.phase);
+  if (phase) return phase;
+
   if (typeof drone?.status === 'string') return cleanString(drone.status) || null;
   if (drone?.status && typeof drone.status === 'object') return summarizeStatusObject(drone.status);
   if (drone?.statusOk === true) return 'ready';
@@ -600,6 +603,20 @@ function compareDronesByRecentActivity(a, b) {
   if (aValid && !bValid) return -1;
   if (!aValid && bValid) return 1;
   return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+}
+
+function initialMessageSummary(response, fallbackChat = 'default') {
+  const initial = response?.initialMessage && typeof response.initialMessage === 'object' ? response.initialMessage : null;
+  const promptId = cleanString(initial?.promptId || initial?.runId || response?.seedPromptId || response?.promptId);
+  if (!promptId) return null;
+  const status = cleanString(initial?.pendingState || initial?.status || response?.pendingState, 'queued');
+  return {
+    chat: chatName(initial?.chat || initial?.chatName || fallbackChat),
+    runId: promptId,
+    promptId,
+    pendingState: status,
+    status,
+  };
 }
 
 function droneAliases(value) {
@@ -1118,11 +1135,21 @@ exports.activate = async function activate(api) {
       }
       const response = await requestJson(hub, '/api/drones', { method: 'POST', body: JSON.stringify(body) }, 30_000);
       const drone = droneSummary({ ...body, ...response });
+      const initialMessageState = initialMessage
+        ? initialMessageSummary(response, 'default') ?? {
+            chat: 'default',
+            runId: null,
+            promptId: null,
+            pendingState: 'queued',
+            status: 'queued',
+          }
+        : null;
       await rememberCreatedDrone(api, drone, 'create_drone');
       const groupOrder = group ? await insertNewGroupAtParentTop(hub, group, beforeGroups) : { updated: false, group: null };
       return {
         ok: true,
         drone,
+        ...(initialMessageState ? { initialMessage: initialMessageState, inProgress: true } : {}),
         createdByExtension: true,
         groupOrder,
         createDefaults: defaults,
