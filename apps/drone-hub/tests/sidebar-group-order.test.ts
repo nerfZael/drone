@@ -126,6 +126,49 @@ describe('sidebar-group-order', () => {
     ).toEqual(['group:alpha', 'group:alpha/a', 'group:alpha/b', 'group:alpha/c', 'group:beta']);
   });
 
+  test('can insert a new child folder at the top of its visible siblings', () => {
+    expect(
+      insertSidebarGroupOrderToken(
+        ['group:alpha', 'group:alpha/a', 'group:alpha/b', 'group:beta'],
+        [
+          { group: 'alpha', kind: 'group' as const },
+          { group: 'alpha/a', kind: 'group' as const },
+          { group: 'alpha/b', kind: 'group' as const },
+          { group: 'beta', kind: 'group' as const },
+        ],
+        { group: 'alpha/c', kind: 'group' },
+        'start',
+      ),
+    ).toEqual(['group:alpha', 'group:alpha/c', 'group:alpha/a', 'group:alpha/b', 'group:beta']);
+  });
+
+  test('can insert a first child folder under its parent', () => {
+    expect(
+      insertSidebarGroupOrderToken(
+        ['group:alpha', 'group:beta'],
+        [
+          { group: 'alpha', kind: 'group' as const },
+          { group: 'beta', kind: 'group' as const },
+        ],
+        { group: 'alpha/first', kind: 'group' },
+        'start',
+      ),
+    ).toEqual(['group:alpha', 'group:alpha/first', 'group:beta']);
+  });
+
+  test('can insert missing ancestor folder tokens before a new child folder', () => {
+    expect(
+      insertSidebarGroupOrderToken(
+        ['group:beta'],
+        [
+          { group: 'beta', kind: 'group' as const },
+        ],
+        { group: 'alpha/first', kind: 'group' },
+        'start',
+      ),
+    ).toEqual(['group:alpha', 'group:alpha/first', 'group:beta']);
+  });
+
   test('can remove only the failed optimistic folder token without resetting newer order changes', () => {
     expect(
       removeSidebarGroupOrderToken(
