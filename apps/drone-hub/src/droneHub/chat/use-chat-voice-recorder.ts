@@ -3,7 +3,7 @@ import React from 'react';
 const CHAT_VOICE_SAMPLE_RATE_HZ = 16_000;
 const CHAT_VOICE_CHANNELS = 1;
 
-export type ChatVoiceRecordingStatus = 'idle' | 'starting' | 'recording' | 'transcribing';
+export type ChatVoiceRecordingStatus = 'idle' | 'starting' | 'recording' | 'paused' | 'transcribing';
 
 type ChatVoiceCapture = {
   stream: MediaStream;
@@ -184,6 +184,7 @@ export function useChatVoiceRecorder({ onError }: { onError: (message: string) =
         totalBytes: 0,
       };
       processor.onaudioprocess = (event) => {
+        if (statusRef.current === 'paused') return;
         const frame = floatToPcm16(event.inputBuffer.getChannelData(0), event.inputBuffer.sampleRate);
         capture.chunks.push(frame.slice(0));
         capture.totalBytes += frame.byteLength;
@@ -210,6 +211,16 @@ export function useChatVoiceRecorder({ onError }: { onError: (message: string) =
       }
     }
   }, [onError, setStatusValue, stopCapture]);
+
+  const toggleRecordingPause = React.useCallback(() => {
+    if (statusRef.current === 'recording') {
+      setStatusValue('paused');
+      return;
+    }
+    if (statusRef.current === 'paused') {
+      setStatusValue('recording');
+    }
+  }, [setStatusValue]);
 
   const transcribeRecording = React.useCallback(async (): Promise<string> => {
     const capture = captureRef.current;
@@ -250,6 +261,7 @@ export function useChatVoiceRecorder({ onError }: { onError: (message: string) =
   return {
     status,
     startRecording,
+    toggleRecordingPause,
     discardRecording,
     stopRecordingForTranscript,
   };
