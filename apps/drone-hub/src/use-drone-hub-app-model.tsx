@@ -50,6 +50,7 @@ import type { ProfileSettingsResponse } from './droneHub/app/settings-types';
 import { shellTerminalPrewarmKey, shouldPrewarmShellTerminal } from './droneHub/app/terminal-prewarm';
 import { useQueuedPromptsState } from './droneHub/app/use-queued-prompts-state';
 import { useRightPanelLayout } from './droneHub/app/use-right-panel-layout';
+import { type DroneSelectionClickOptions } from './droneHub/app/drone-selection-helpers';
 import { useDroneSelectionState } from './droneHub/app/use-drone-selection-state';
 import { SIDEBAR_VISIBLE_MULTI_CHAT_GROUP, useSidebarViewModel } from './droneHub/app/use-sidebar-view-model';
 import { useChatConfigState } from './droneHub/app/use-chat-config-state';
@@ -1204,8 +1205,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const droneId = String(droneIdRaw ?? '').trim();
       if (!droneId) return;
       setGroupMoveError(null);
-      if (!selectedDroneSet.has(droneId)) setSelectedDroneIds([droneId]);
-      selectionAnchorRef.current = droneId;
+      if (!selectedDroneSet.has(droneId)) {
+        setSelectedDroneIds([droneId]);
+        selectionAnchorRef.current = droneId;
+      }
     },
     [movingDroneGroups, selectedDroneSet, selectionAnchorRef, setGroupMoveError, setSelectedDroneIds],
   );
@@ -1241,7 +1244,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setSelectedChat,
   });
   const selectDroneCard = React.useCallback(
-    (droneIdRaw: string, opts?: { toggle?: boolean; range?: boolean }) => {
+    (droneIdRaw: string, opts?: DroneSelectionClickOptions) => {
       selectDroneCardBase(droneIdRaw, opts);
     },
     [selectDroneCardBase],
