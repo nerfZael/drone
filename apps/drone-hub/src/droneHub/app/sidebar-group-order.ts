@@ -65,6 +65,17 @@ export function insertSidebarGroupOrderToken<T extends SidebarGroupOrderRef>(
 
   const stabilizedOrder = mergeVisibleSidebarGroupOrder(order, groups);
   if (stabilizedOrder.includes(nextToken)) return stabilizedOrder;
+  const missingAncestorTokens =
+    group.kind === 'group'
+      ? String(group.group ?? '')
+          .trim()
+          .split('/')
+          .map((_, index, parts) => parts.slice(0, index + 1).join('/'))
+          .slice(0, -1)
+          .map((ancestor) => sidebarGroupOrderToken({ group: ancestor, kind: group.kind }))
+          .filter((token) => token && !stabilizedOrder.includes(token))
+      : [];
+  const tokensToInsert = normalizeSidebarGroupOrder([...missingAncestorTokens, nextToken]);
 
   const visibleTokens = groups.map((entry) => sidebarGroupOrderToken(entry));
   const visibleTokenSet = new Set(visibleTokens);
@@ -79,10 +90,6 @@ export function insertSidebarGroupOrderToken<T extends SidebarGroupOrderRef>(
     })
     .map((entry) => sidebarGroupOrderToken(entry));
 
-  if (siblingTokens.length === 0) {
-    return normalizeSidebarGroupOrder([...visibleOrder, nextToken, ...hiddenTokens]);
-  }
-
   const siblingTokenSet = new Set(siblingTokens);
   let anchorIndex = -1;
   if (placement === 'start') {
@@ -96,11 +103,23 @@ export function insertSidebarGroupOrderToken<T extends SidebarGroupOrderRef>(
   }
 
   if (anchorIndex < 0) {
-    return normalizeSidebarGroupOrder([...visibleOrder, nextToken, ...hiddenTokens]);
+    if (group.kind === 'group') {
+      const parentPath = sidebarGroupParentPath(group.group);
+      if (parentPath) {
+        const parentToken = sidebarGroupOrderToken({ group: parentPath, kind: group.kind });
+        const parentIndex = visibleOrder.indexOf(parentToken);
+        if (parentIndex >= 0) {
+          const nextVisibleOrder = visibleOrder.slice();
+          nextVisibleOrder.splice(parentIndex + 1, 0, ...tokensToInsert);
+          return normalizeSidebarGroupOrder([...nextVisibleOrder, ...hiddenTokens]);
+        }
+      }
+    }
+    return normalizeSidebarGroupOrder([...tokensToInsert, ...visibleOrder, ...hiddenTokens]);
   }
 
   const nextVisibleOrder = visibleOrder.slice();
-  nextVisibleOrder.splice(placement === 'start' ? anchorIndex : anchorIndex + 1, 0, nextToken);
+  nextVisibleOrder.splice(placement === 'start' ? anchorIndex : anchorIndex + 1, 0, ...tokensToInsert);
   return normalizeSidebarGroupOrder([...nextVisibleOrder, ...hiddenTokens]);
 }
 

@@ -313,7 +313,7 @@ type AssistantStreamingDraft = {
   thinking: string;
 };
 
-type ComposerRecordingStatus = 'idle' | 'starting' | 'recording' | 'transcribing';
+type ComposerRecordingStatus = 'idle' | 'starting' | 'recording' | 'paused' | 'transcribing';
 
 type ComposerRecordingCapture = {
   stream: MediaStream;
@@ -1452,6 +1452,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const streamingThinking = activeThreadStreaming?.thinking ?? '';
   const activePromptSubmitting = activeThread ? Boolean(promptSubmittingByThreadId[activeThread.id]) : false;
   const composerRecordingActive = composerRecordingStatus !== 'idle';
+  const composerRecordingCanPauseOrStop = composerRecordingStatus === 'recording' || composerRecordingStatus === 'paused';
   const composerSendDisabled = !activeThread || activePromptSubmitting || messageSubmitInFlight || (!messageDraft.trim() && !composerRecordingActive);
 
   React.useEffect(() => {
@@ -2044,9 +2045,16 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     composerRecordingThreadIdRef.current = activeThread.id;
     setComposerRecordingStatusValue('starting');
     setError(null);
+    let pendingStream: MediaStream | null = null;
+    let pendingContext: AudioContext | null = null;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const context = new AudioContext({ sampleRate: COMPOSER_RECORDING_SAMPLE_RATE_HZ });
+      pendingStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      pendingContext = new AudioContext({ sampleRate: COMPOSER_RECORDING_SAMPLE_RATE_HZ });
+      const stream = pendingStream;
+      const context = pendingContext;
+      if (context.state === 'suspended') {
+        await context.resume().catch(() => undefined);
+      }
       const source = context.createMediaStreamSource(stream);
       const processor = context.createScriptProcessor(4096, COMPOSER_RECORDING_CHANNELS, COMPOSER_RECORDING_CHANNELS);
       const capture: ComposerRecordingCapture = {
@@ -2058,6 +2066,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
         totalBytes: 0,
       };
       processor.onaudioprocess = (event) => {
+        if (composerRecordingStatusRef.current === 'paused') return;
         const frame = floatToPcm16(event.inputBuffer.getChannelData(0), event.inputBuffer.sampleRate);
         capture.chunks.push(frame.slice(0));
         capture.totalBytes += frame.byteLength;
@@ -2069,8 +2078,12 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
       source.connect(processor);
       processor.connect(context.destination);
       composerRecordingRef.current = capture;
+      pendingStream = null;
+      pendingContext = null;
       setComposerRecordingStatusValue('recording');
     } catch (err: any) {
+      pendingStream?.getTracks().forEach((track) => track.stop());
+      if (pendingContext) void pendingContext.close().catch(() => undefined);
       stopComposerCapture(composerRecordingRef.current);
       composerRecordingRef.current = null;
       if (composerRecordingStartIdRef.current === startId) {
@@ -2078,6 +2091,16 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
         setComposerRecordingStatusValue('idle');
         setError(voiceStartFailureStatus(err));
       }
+    }
+  }
+
+  function toggleComposerRecordingPause() {
+    if (composerRecordingStatusRef.current === 'recording') {
+      setComposerRecordingStatusValue('paused');
+      return;
+    }
+    if (composerRecordingStatusRef.current === 'paused') {
+      setComposerRecordingStatusValue('recording');
     }
   }
 
@@ -4266,8 +4289,8 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                   {activeRunningModel ? (
                     <span
                       className={cn(
-                        'absolute bottom-2 max-w-[calc(100%-148px)] truncate text-[10px] text-[var(--muted-dim)] max-[620px]:hidden',
-                        composerRecordingActive ? 'left-[84px]' : 'left-[44px]',
+                        'absolute bottom-2 truncate text-[10px] text-[var(--muted-dim)] max-[620px]:hidden',
+                        composerRecordingActive ? 'left-[116px] max-w-[calc(100%-220px)]' : 'left-[44px] max-w-[calc(100%-148px)]',
                       )}
                       title={`Running model: ${activeRunningModelLabel}`}
                     >
@@ -4307,8 +4330,32 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                       </button>
                       <button
                         type="button"
-                        className="absolute bottom-2 left-10 flex h-7 w-7 items-center justify-center rounded border border-[rgba(74,222,128,.28)] bg-[rgba(74,222,128,.08)] p-0 text-[var(--green)] transition hover:bg-[rgba(74,222,128,.13)] disabled:pointer-events-none disabled:opacity-50"
-                        disabled={composerRecordingStatus !== 'recording'}
+                        className={cn(
+                          'absolute bottom-2 left-10 flex h-7 w-7 items-center justify-center rounded border p-0 transition disabled:pointer-events-none disabled:opacity-50',
+                          composerRecordingStatus === 'paused'
+                            ? 'border-[rgba(167,139,250,.38)] bg-[rgba(167,139,250,.10)] text-[var(--accent)] hover:bg-[rgba(167,139,250,.16)]'
+                            : 'border-[rgba(74,222,128,.28)] bg-[rgba(74,222,128,.08)] text-[var(--green)] hover:bg-[rgba(74,222,128,.13)]',
+                        )}
+                        disabled={!composerRecordingCanPauseOrStop}
+                        onClick={() => toggleComposerRecordingPause()}
+                        title={composerRecordingStatus === 'paused' ? 'Resume recording' : 'Pause recording'}
+                        aria-label={composerRecordingStatus === 'paused' ? 'Resume recording' : 'Pause recording'}
+                      >
+                        {composerRecordingStatus === 'paused' ? (
+                          <svg viewBox="0 0 24 24" aria-hidden="true" className={assistantIconSvgClass}>
+                            <path d="M8 5v14l11-7Z" />
+                          </svg>
+                        ) : (
+                          <svg viewBox="0 0 24 24" aria-hidden="true" className={assistantIconSvgClass}>
+                            <path d="M9 5v14" />
+                            <path d="M15 5v14" />
+                          </svg>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        className="absolute bottom-2 left-[76px] flex h-7 w-7 items-center justify-center rounded border border-[rgba(74,222,128,.28)] bg-[rgba(74,222,128,.08)] p-0 text-[var(--green)] transition hover:bg-[rgba(74,222,128,.13)] disabled:pointer-events-none disabled:opacity-50"
+                        disabled={!composerRecordingCanPauseOrStop}
                         onClick={() => void stopComposerRecordingAndFillDraft()}
                         title="Stop recording and transcribe"
                         aria-label="Stop recording and transcribe"
@@ -4317,9 +4364,6 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                           <path d="M7 7h10v10H7Z" />
                         </svg>
                       </button>
-                      <span className="absolute bottom-2 left-[76px] max-w-[calc(100%-148px)] truncate font-display text-[10px] font-bold uppercase text-[var(--muted)] max-[620px]:hidden">
-                        {composerRecordingStatus === 'recording' ? 'Recording' : composerRecordingStatus === 'starting' ? 'Starting' : 'Transcribing'}
-                      </span>
                     </>
                   )}
                   <button type="submit" className="absolute bottom-2 right-2 h-7 border-[rgba(74,222,128,.28)] bg-[rgba(74,222,128,.08)] px-2.5 font-display text-[10px] font-bold uppercase text-[var(--green)]" disabled={composerSendDisabled}>

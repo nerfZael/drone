@@ -17193,6 +17193,17 @@ export async function startDroneHubApiServer(opts: {
         const seedSubmittedAt = normalizeSubmittedAtIso(
           body?.seedSubmittedAt ?? body?.submittedAt ?? body?.seed?.submittedAt ?? body?.seed?.clientSubmittedAt,
         );
+        const seedPromptIdRaw =
+          typeof body?.seedPromptId === 'string'
+            ? body.seedPromptId.trim()
+            : typeof body?.seed?.promptId === 'string'
+              ? body.seed.promptId.trim()
+              : '';
+        if (seedPrompt && seedPromptIdRaw && !isSafePromptId(seedPromptIdRaw)) {
+          json(res, 400, { ok: false, error: 'invalid seedPromptId' });
+          return;
+        }
+        const seedPromptId = seedPrompt ? seedPromptIdRaw || crypto.randomBytes(9).toString('hex') : '';
         let seedModel: string | null = null;
         try {
           seedModel = parseChatModelForUpdate(body?.seedModel ?? body?.seed?.model);
@@ -17338,6 +17349,7 @@ export async function startDroneHubApiServer(opts: {
                   seed: {
                     chatName: seedChatName,
                     ...(seedModel ? { model: seedModel } : {}),
+                    ...(seedPromptId ? { promptId: seedPromptId } : {}),
                     ...(seedPrompt ? { prompt: seedPrompt } : {}),
                     ...(seedPrompt ? { submittedAt: seedSubmittedAt } : {}),
                     ...(seedCwdRaw ? { cwd: String(seedCwdRaw) } : {}),
@@ -17356,7 +17368,23 @@ export async function startDroneHubApiServer(opts: {
         // Queue provisioning (bounded concurrency).
         enqueueProvisioning(droneId);
 
-        json(res, 202, { ok: true, id: droneId, name, runtime, phase: 'starting' });
+        json(res, 202, {
+          ok: true,
+          id: droneId,
+          name,
+          runtime,
+          phase: 'starting',
+          ...(seedPromptId
+            ? {
+                initialMessage: {
+                  chat: seedChatName,
+                  promptId: seedPromptId,
+                  pendingState: 'queued',
+                  status: 'queued',
+                },
+              }
+            : {}),
+        });
         return;
       }
 

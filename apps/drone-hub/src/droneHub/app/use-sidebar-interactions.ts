@@ -4,6 +4,7 @@ import type { DroneSummary } from '../types';
 import { joinSidebarGroupPath, isSameOrDescendantSidebarGroupPath, sidebarGroupBaseName, sidebarGroupParentPath } from './sidebar-group-paths';
 import { sidebarInlineSectionKey, type SidebarInlineSectionKind } from './sidebar-inline-sections';
 import { sidebarChatSidebarNodeId, sidebarDroneNodeId, sidebarFolderNodeId } from './sidebar-node-order';
+import type { DroneSelectionClickOptions } from './drone-selection-helpers';
 import type { MoveDronesToGroupResult } from './use-group-management';
 
 export type FolderEditorState = {
@@ -46,7 +47,7 @@ type UseSidebarInteractionsArgs = {
     chatName: string,
     newName: string,
   ) => Promise<{ ok: boolean; chatName?: string; error?: string | null }>;
-  onSelectDroneCard: (droneId: string, opts?: { toggle?: boolean; range?: boolean }) => void;
+  onSelectDroneCard: (droneId: string, opts?: DroneSelectionClickOptions) => void;
   onSelectDroneChat: (droneId: string, chatName: string) => void;
   onToggleGroupCollapsed: (group: string) => void;
   optimisticSidebarDronesFilteredByRepo: DroneSummary[];
@@ -289,7 +290,7 @@ export function useSidebarInteractions({
     setFolderEditor((prev: FolderEditorState | null) => (prev ? { ...prev, pending: true, error: null } : prev));
     if (draft.mode === 'create') {
       const result = await runOptimisticCreateGroup(nextPath, {
-        placement: draft.parentPath ? 'end' : 'start',
+        placement: 'start',
       });
       if (!result.ok) {
         setFolderEditor((prev: FolderEditorState | null) => (prev ? { ...prev, pending: false, error: result.error || 'Create folder failed.' } : prev));
@@ -417,7 +418,7 @@ export function useSidebarInteractions({
   }, []);
 
   const handleGroupedSelectDroneCard = React.useCallback(
-    (droneId: string, opts?: { toggle?: boolean; range?: boolean }) => {
+    (droneId: string, opts?: DroneSelectionClickOptions) => {
       setSelectedFolderPath(null);
       setSelectedSidebarNodeId(sidebarDroneNodeId(droneId));
       onSelectDroneCard(droneId, opts);

@@ -93,6 +93,66 @@ describeSocketSuite('create runtime api', () => {
     expect(String(resp.data?.rejected?.[0]?.error ?? '')).toContain('invalid runtime');
   });
 
+  test('single create returns and persists initial message run state', async () => {
+    const resp = await apiFetch('/api/drones', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'seeded-create-state',
+        runtime: 'container',
+        seedPrompt: 'Start this work',
+        seedSubmittedAt: '2026-06-21T12:00:00.000Z',
+      }),
+    });
+    expect(resp.r.status).toBe(202);
+    expect(resp.data?.ok).toBe(true);
+    const droneId = String(resp.data?.id ?? '').trim();
+    const promptId = String(resp.data?.initialMessage?.promptId ?? '').trim();
+    expect(droneId).not.toBe('');
+    expect(resp.data?.initialMessage).toMatchObject({
+      chat: 'default',
+      pendingState: 'queued',
+      status: 'queued',
+    });
+    expect(promptId).not.toBe('');
+
+    const regAny: any = await loadRegistry();
+    expect(regAny?.pending?.[droneId]?.seed).toMatchObject({
+      chatName: 'default',
+      prompt: 'Start this work',
+      promptId,
+      submittedAt: '2026-06-21T12:00:00.000Z',
+    });
+  });
+
+  test('single create honors and validates supplied seed prompt ids', async () => {
+    const resp = await apiFetch('/api/drones', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'seeded-create-supplied-id',
+        runtime: 'container',
+        seedPrompt: 'Use this id',
+        seedPromptId: 'voice-seed-1',
+      }),
+    });
+    expect(resp.r.status).toBe(202);
+    expect(resp.data?.initialMessage?.promptId).toBe('voice-seed-1');
+
+    const invalid = await apiFetch('/api/drones', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'seeded-create-invalid-id',
+        runtime: 'container',
+        seedPrompt: 'Bad id',
+        seedPromptId: '../bad',
+      }),
+    });
+    expect(invalid.r.status).toBe(400);
+    expect(String(invalid.data?.error ?? '')).toContain('invalid seedPromptId');
+  });
+
   test('batch create persists requested fleet parent lineage', async () => {
     const now = new Date().toISOString();
     await updateRegistry((reg: any) => {

@@ -599,6 +599,51 @@ describe('assistant parity runtime', () => {
     expect(db.listMessages(user.id, thread.id).some((message) => message.contentJson?.includes('modelToolCall'))).toBe(true);
   });
 
+  test('errors voice model turns that finish without calling speak', async () => {
+    const db = tempDb('assistant-required-speak-missing');
+    dbs.push(db);
+    const user = testUser(db);
+    const thread = db.createThread(user.id, { title: 'Required speak missing' });
+    process.env.VOICE_STREAM_NEXT_TEST_MODEL_TOOL_CALLS = JSON.stringify([
+      {
+        name: 'set_thinking_level',
+        arguments: { thinkingLevel: 'low' },
+      },
+    ]);
+    const events: any[] = [];
+
+    await promptAssistantThread(db, user.id, thread.id, { prompt: 'Answer out loud.' }, (event) => events.push(event));
+    const messages = db.listMessages(user.id, thread.id);
+
+    expect(db.thread(user.id, thread.id)?.status).toBe('error');
+    expect(db.listToolCalls(user.id, thread.id).some((toolCall) => toolCall.toolName === 'speak')).toBe(false);
+    expect(messages.every((message) => message.spokenText == null)).toBe(true);
+    expect(messages.some((message) => message.role === 'assistant' && message.content === 'Thinking level set to low.')).toBe(false);
+    expect(events.some((event) => event.type === 'delta')).toBe(false);
+    expect(messages.find((message) => message.isError)?.content).toContain('without using the speak tool');
+    expect(events.some((event) => event.type === 'error' && event.error.includes('speak tool'))).toBe(true);
+  });
+
+  test('allows voice model turns that call speak before finishing', async () => {
+    const db = tempDb('assistant-required-speak-used');
+    dbs.push(db);
+    const user = testUser(db);
+    const thread = db.createThread(user.id, { title: 'Required speak used' });
+    process.env.VOICE_STREAM_NEXT_TEST_MODEL_TOOL_CALLS = JSON.stringify([
+      {
+        name: 'speak',
+        arguments: { text: 'Hello from the speak tool.' },
+      },
+    ]);
+
+    await promptAssistantThread(db, user.id, thread.id, { prompt: 'Answer out loud.' }, () => undefined);
+
+    expect(db.thread(user.id, thread.id)?.status).toBe('idle');
+    expect(db.listToolCalls(user.id, thread.id).some((toolCall) => toolCall.toolName === 'speak' && toolCall.status === 'completed')).toBe(true);
+    expect(db.listMessages(user.id, thread.id).some((message) => message.toolName === 'speak' && message.content.includes('Hello from the speak tool.'))).toBe(true);
+    expect(db.listMessages(user.id, thread.id).filter((message) => message.role === 'assistant').every((message) => message.spokenText == null)).toBe(true);
+  });
+
   test('executes model-requested web search tool calls', async () => {
     const db = tempDb('assistant-web-search');
     dbs.push(db);
@@ -803,7 +848,10 @@ describe('assistant parity runtime', () => {
     const db = tempDb('assistant-approval-continue');
     dbs.push(db);
     const user = testUser(db);
-    const thread = db.createThread(user.id, { title: 'Continue approval' });
+    const thread = db.createThread(user.id, {
+      title: 'Continue approval',
+      enabledTools: ['update_system_prompt'],
+    });
     process.env.VOICE_STREAM_NEXT_TEST_MODEL_TOOL_CALLS = JSON.stringify([
       {
         name: 'update_system_prompt',

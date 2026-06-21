@@ -39,6 +39,7 @@ type UseGroupManagementArgs = {
 export type MoveDronesToGroupResult = {
   ok: boolean;
   error: string | null;
+  groupCreated?: boolean;
 };
 
 type DeleteGroupOptions = {
@@ -407,21 +408,24 @@ export function useGroupManagement({
       }
 
       setGroupMoveError(null);
+      let groupCreated = false;
       try {
         await requestJson<{ ok: true; name: string; createdAt: string }>(`/api/groups`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ name: target }),
         });
+        groupCreated = true;
       } catch (e: any) {
         const msg = String(e?.message ?? e ?? '').trim();
         if (!/group already exists/i.test(msg)) {
           setGroupMoveError(msg || 'Create group failed.');
-          return { ok: false, error: msg || 'Create group failed.' } as MoveDronesToGroupResult;
+          return { ok: false, error: msg || 'Create group failed.', groupCreated: false } as MoveDronesToGroupResult;
         }
       }
 
-      return await moveDronesToGroup(target, requested);
+      const result = await moveDronesToGroup(target, requested);
+      return { ...result, groupCreated };
     },
     [moveDronesToGroup],
   );

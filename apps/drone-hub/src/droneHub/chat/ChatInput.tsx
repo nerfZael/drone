@@ -204,6 +204,7 @@ export function ChatInput({
   const {
     status: voiceRecordingStatus,
     startRecording: startVoiceRecording,
+    toggleRecordingPause: toggleVoiceRecordingPause,
     discardRecording: discardVoiceRecording,
     stopRecordingForTranscript: stopVoiceRecordingForTranscript,
   } = useChatVoiceRecorder({
@@ -290,8 +291,10 @@ export function ChatInput({
   const supportsDraftAutomation = typeof onSendAutomation === 'function';
   const draftAutomationActive = draftAutomationEnabled && supportsDraftAutomation;
   const voiceRecordingActive = voiceRecordingStatus !== 'idle';
+  const voiceRecordingCanPauseOrStop = voiceRecordingStatus === 'recording' || voiceRecordingStatus === 'paused';
   const voiceRecordButtonDisabled = composerLocked || sending || showStopAction || voiceActionInFlight;
-  const voiceStopButtonDisabled = voiceRecordingStatus !== 'recording' || voiceActionInFlight;
+  const voicePauseButtonDisabled = !voiceRecordingCanPauseOrStop || voiceActionInFlight;
+  const voiceStopButtonDisabled = !voiceRecordingCanPauseOrStop || voiceActionInFlight;
   const trimmed = draft.trim();
   const sendDisabled = composerLocked || voiceActionInFlight || (trimmed.length === 0 && attachments.length === 0 && !voiceRecordingActive);
 
@@ -809,6 +812,31 @@ export function ChatInput({
                 </button>
                 <button
                   type="button"
+                  onClick={() => toggleVoiceRecordingPause()}
+                  disabled={voicePauseButtonDisabled}
+                  className={`inline-flex h-9 w-9 items-center justify-center rounded-md border transition-all ${
+                    voicePauseButtonDisabled
+                      ? 'opacity-40 cursor-not-allowed border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
+                      : voiceRecordingStatus === 'paused'
+                        ? 'border-[rgba(167,139,250,.38)] bg-[rgba(167,139,250,.10)] text-[var(--accent)] hover:bg-[rgba(167,139,250,.16)]'
+                        : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--accent)]'
+                  }`}
+                  title={voiceRecordingStatus === 'paused' ? 'Resume recording' : 'Pause recording'}
+                  aria-label={voiceRecordingStatus === 'paused' ? 'Resume recording' : 'Pause recording'}
+                >
+                  {voiceRecordingStatus === 'paused' ? (
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M8 5v14l11-7Z" />
+                    </svg>
+                  ) : (
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M9 5v14" />
+                      <path d="M15 5v14" />
+                    </svg>
+                  )}
+                </button>
+                <button
+                  type="button"
                   onClick={() => void stopVoiceRecordingAndFillDraft()}
                   disabled={voiceStopButtonDisabled}
                   className={`inline-flex h-9 w-9 items-center justify-center rounded-md border transition-all ${
@@ -823,12 +851,6 @@ export function ChatInput({
                     <path d="M7 7h10v10H7Z" />
                   </svg>
                 </button>
-                <span
-                  className="hidden max-w-[88px] truncate text-[9px] font-semibold uppercase tracking-wide text-[var(--muted-dim)] md:inline"
-                  style={{ fontFamily: 'var(--display)' }}
-                >
-                  {voiceRecordingStatus === 'recording' ? 'Recording' : voiceRecordingStatus === 'starting' ? 'Starting' : 'Transcribing'}
-                </span>
               </div>
             )}
             <textarea
