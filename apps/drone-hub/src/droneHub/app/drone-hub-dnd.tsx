@@ -246,6 +246,20 @@ export function DroneHubDndProvider({ children, enabled = true }: { children: Re
     clearActiveDrag();
   }, [clearActiveDrag]);
 
+  React.useEffect(() => {
+    if (!activeDrag) return;
+    window.addEventListener('pointerup', clearActiveDrag);
+    window.addEventListener('dragend', clearActiveDrag);
+    window.addEventListener('drop', clearActiveDrag);
+    window.addEventListener('blur', clearActiveDrag);
+    return () => {
+      window.removeEventListener('pointerup', clearActiveDrag);
+      window.removeEventListener('dragend', clearActiveDrag);
+      window.removeEventListener('drop', clearActiveDrag);
+      window.removeEventListener('blur', clearActiveDrag);
+    };
+  }, [activeDrag, clearActiveDrag]);
+
   return (
     <DndContext
       sensors={sensors}

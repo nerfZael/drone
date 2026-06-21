@@ -16,6 +16,7 @@ import {
 import {
   draggedCanvasChatNodeIdsFromData,
   parseDroneHubDragData,
+  useDroneHubActiveDrag,
 } from '../app/drone-hub-dnd';
 import { isShortcutMatch } from '../app/shortcuts';
 import { resolveCanvasChatDisplay } from '../app/chat-node-helpers';
@@ -452,6 +453,7 @@ export function DroneCanvasDock({
   const copiedSourceNodeIdByDroneIdRef = React.useRef<Record<string, string>>({});
   const suppressNodeClickRef = React.useRef(false);
   const [dragOverCanvas, setDragOverCanvas] = React.useState(false);
+  const activeDroneHubDrag = useDroneHubActiveDrag();
   const [draggingNodeId, setDraggingNodeId] = React.useState<string | null>(null);
   const [panning, setPanning] = React.useState(false);
   const [selectionBox, setSelectionBox] = React.useState<SelectionBox | null>(null);
@@ -1634,6 +1636,10 @@ export function DroneCanvasDock({
     },
     [],
   );
+
+  React.useEffect(() => {
+    if (!activeDroneHubDrag) setDragOverCanvas(false);
+  }, [activeDroneHubDrag]);
 
   const placeSidebarDragOnCanvas = React.useCallback(
     (event: DragEndEvent) => {

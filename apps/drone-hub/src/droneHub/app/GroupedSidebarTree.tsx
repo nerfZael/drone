@@ -754,7 +754,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
   const childDroneIds = (nodeTree.childIdsByParent[node.id] ?? [])
     .map((childNodeId) => nodeTree.nodesById[childNodeId])
     .filter((child): child is SidebarTreeDroneNode => Boolean(child && child.kind === 'drone'));
-  const selected = droneSelectionActive && selectedDroneSet.has(drone.id);
+  const selected = droneSelectionActive && (selectedDroneSet.has(drone.id) || selectedSidebarNodeId === node.id);
   const showOpenDefaultChatIndicator =
     hasOnlyDefaultChat && selectedDrone === drone.id && activeChatName === 'default';
   const reorderPreviewClass =
