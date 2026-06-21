@@ -22,6 +22,7 @@ import {
 
 type UseGroupManagementArgs = {
   autoDelete: boolean;
+  activeRepoPath: string;
   drones: DroneSummary[];
   polledDrones: DroneSummary[];
   optimisticallyDeletedDrones: Record<string, boolean>;
@@ -48,6 +49,7 @@ type DeleteGroupOptions = {
 
 export function useGroupManagement({
   autoDelete,
+  activeRepoPath,
   drones,
   polledDrones,
   optimisticallyDeletedDrones,
@@ -163,13 +165,19 @@ export function useGroupManagement({
       const targetKind = opts?.kind === 'repo' ? 'repo' : 'group';
       const groupLabel = String(opts?.label ?? group).trim() || group;
       const targetRepoPath = targetKind === 'repo' ? String(opts?.repoPath ?? '').trim() : '';
+      const scopedRepoPath =
+        targetKind === 'group'
+          ? String(opts?.repoPath ?? activeRepoPath ?? '').trim()
+          : '';
       if (shouldConfirmDelete()) {
         const n = typeof countHint === 'number' && Number.isFinite(countHint) ? countHint : null;
         const ok = window.confirm(targetKind === 'repo'
           ? targetRepoPath
             ? `Are you sure you want to delete repo group "${groupLabel}"${n != null ? ` (${n} drone${n === 1 ? '' : 's'})` : ''}?\n\nThis will delete ALL drones attached to:\n${targetRepoPath}`
             : `Are you sure you want to delete ungrouped repo drones${n != null ? ` (${n} drone${n === 1 ? '' : 's'})` : ''}?\n\nThis will delete ALL drones not attached to a repo path.`
-          : `Are you sure you want to delete group "${group}"${n != null ? ` (${n} drone${n === 1 ? '' : 's'})` : ''}?\n\nThis will delete ALL drones inside the group (containers + registry entries).`);
+          : scopedRepoPath
+            ? `Are you sure you want to delete group "${group}"${n != null ? ` (${n} drone${n === 1 ? '' : 's'})` : ''} from this repo?\n\nThis will delete ONLY drones inside the group attached to:\n${scopedRepoPath}`
+            : `Are you sure you want to delete group "${group}"${n != null ? ` (${n} drone${n === 1 ? '' : 's'})` : ''}?\n\nThis will delete ALL drones inside the group (containers + registry entries).`);
         if (!ok) return false;
       }
       const wantsUngroupedGroup = targetKind === 'group' && isUngroupedGroupName(group);
@@ -182,6 +190,7 @@ export function useGroupManagement({
                 if (targetRepoPath) return droneRepoPath === targetRepoPath;
                 return !droneRepoPath;
               }
+              if (scopedRepoPath && String(d?.repoPath ?? '').trim() !== scopedRepoPath) return false;
               const droneGroup = String(d?.group ?? '').trim();
               if (wantsUngroupedGroup) return !droneGroup || isUngroupedGroupName(droneGroup);
               return isSameOrDescendantSidebarGroupPath(droneGroup, group);
@@ -242,28 +251,31 @@ export function useGroupManagement({
             );
           }
         } else {
-          await requestJson(`/api/groups/${encodeURIComponent(group)}`, { method: 'DELETE' });
+          const query = scopedRepoPath ? `?repoPath=${encodeURIComponent(scopedRepoPath)}` : '';
+          await requestJson(`/api/groups/${encodeURIComponent(group)}${query}`, { method: 'DELETE' });
         }
-        setCollapsedGroups((prev) => removeCollapsedGroupKeysByPrefix(prev, group));
-        setSidebarGroupOrder((prev) =>
-          prev.filter((token) => !token.startsWith('group:') || !isSameOrDescendantSidebarGroupPath(token.slice('group:'.length), group)),
-        );
-        setHiddenSidebarGroups((prev) =>
-          prev.filter((token) => !token.startsWith('group:') || !isSameOrDescendantSidebarGroupPath(token.slice('group:'.length), group)),
-        );
-        setSidebarDroneOrderByGroup((prev) => {
-          let changed = false;
-          const nextMap: Record<string, string[]> = {};
-          for (const [key, value] of Object.entries(prev)) {
-            if (key.startsWith('group:') && isSameOrDescendantSidebarGroupPath(key.slice('group:'.length), group)) {
-              changed = true;
-              continue;
+        if (!scopedRepoPath) {
+          setCollapsedGroups((prev) => removeCollapsedGroupKeysByPrefix(prev, group));
+          setSidebarGroupOrder((prev) =>
+            prev.filter((token) => !token.startsWith('group:') || !isSameOrDescendantSidebarGroupPath(token.slice('group:'.length), group)),
+          );
+          setHiddenSidebarGroups((prev) =>
+            prev.filter((token) => !token.startsWith('group:') || !isSameOrDescendantSidebarGroupPath(token.slice('group:'.length), group)),
+          );
+          setSidebarDroneOrderByGroup((prev) => {
+            let changed = false;
+            const nextMap: Record<string, string[]> = {};
+            for (const [key, value] of Object.entries(prev)) {
+              if (key.startsWith('group:') && isSameOrDescendantSidebarGroupPath(key.slice('group:'.length), group)) {
+                changed = true;
+                continue;
+              }
+              nextMap[key] = value;
             }
-            nextMap[key] = value;
-          }
-          return changed ? nextMap : prev;
-        });
-        setSidebarNodeOrderByParent((prev) => removeSidebarNodeOrderByParentGroupPrefix(prev, group));
+            return changed ? nextMap : prev;
+          });
+          setSidebarNodeOrderByParent((prev) => removeSidebarNodeOrderByParentGroupPrefix(prev, group));
+        }
         if (selectedGroupMultiChat && isSameOrDescendantSidebarGroupPath(selectedGroupMultiChat, group)) {
           setSelectedGroupMultiChat(null);
         }
@@ -294,6 +306,7 @@ export function useGroupManagement({
     },
     [
       deletingGroups,
+      activeRepoPath,
       optimisticallyDeletedDrones,
       polledDrones,
       selectedGroupMultiChat,

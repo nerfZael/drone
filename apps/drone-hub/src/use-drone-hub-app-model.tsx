@@ -335,6 +335,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     createGroupAndMove,
   } = useGroupManagement({
     autoDelete,
+    activeRepoPath,
     drones,
     polledDrones,
     optimisticallyDeletedDrones,

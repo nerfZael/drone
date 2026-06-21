@@ -1558,13 +1558,17 @@ export function DroneSidebar({
       opts?: { kind?: 'group' | 'repo'; label?: string; repoPath?: string | null },
     ) => {
       const ok = await onDeleteGroup(group, count, opts);
-      if (!ok || opts?.kind === 'repo') return ok;
+      const scopedRepoPath =
+        opts?.kind === 'group' || !opts?.kind
+          ? String(opts?.repoPath ?? activeRepoPath ?? '').trim()
+          : '';
+      if (!ok || opts?.kind === 'repo' || scopedRepoPath) return ok;
       setSidebarRepoScopedGroupByPath((prev) =>
         removeSidebarRepoScopedGroupMapKeysByPrefix(prev, group),
       );
       return ok;
     },
-    [onDeleteGroup, setSidebarRepoScopedGroupByPath],
+    [activeRepoPath, onDeleteGroup, setSidebarRepoScopedGroupByPath],
   );
   const {
     optimisticSidebarGroups,

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { startDroneHubApiServer } from '../src/hub/server';
 import { resetDroneRootDirForTests } from '../src/host/paths';
-import { updateRegistry } from '../src/host/registry';
+import { loadRegistry, updateRegistry } from '../src/host/registry';
 import { getSocketListenSupport } from './socket-listen-support';
 
 const listenSupport = getSocketListenSupport();
@@ -140,6 +140,44 @@ describeSocketSuite('groups api (decoupled from drone count)', () => {
     const after = await apiFetch('/api/groups');
     const persist2 = (after.data?.groups ?? []).find((g: any) => g?.name === 'persist');
     expect(persist2?.totalCount).toBe(0);
+  });
+
+  test('delete group can be scoped to one repo path', async () => {
+    await updateRegistry((reg: any) => {
+      reg.groups = reg.groups ?? {};
+      reg.groups['latest'] = { name: 'latest', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      reg.pending = reg.pending ?? {};
+      reg.pending['repo-a-drone'] = {
+        id: 'repo-a-drone',
+        name: 'repo-a-drone',
+        group: 'latest',
+        repoPath: '/tmp/repo-a',
+        createdAt: new Date().toISOString(),
+      };
+      reg.pending['repo-b-drone'] = {
+        id: 'repo-b-drone',
+        name: 'repo-b-drone',
+        group: 'latest',
+        repoPath: '/tmp/repo-b',
+        createdAt: new Date().toISOString(),
+      };
+    });
+
+    const deleted = await apiFetch(`/api/groups/latest?repoPath=${encodeURIComponent('/tmp/repo-a')}`, { method: 'DELETE' });
+    expect(deleted.r.status).toBe(200);
+    expect(deleted.data?.ok).toBe(true);
+    expect(deleted.data?.repoPath).toBe('/tmp/repo-a');
+    expect(deleted.data?.deletedGroup).toBe(false);
+    expect(deleted.data?.removed?.map((item: any) => item?.id)).toEqual(['repo-a-drone']);
+
+    const listed = await apiFetch('/api/groups');
+    const latest = (listed.data?.groups ?? []).find((g: any) => g?.name === 'latest');
+    expect(latest?.totalCount).toBe(1);
+
+    const registry: any = await loadRegistry();
+    expect(registry?.pending?.['repo-a-drone']).toBeUndefined();
+    expect(registry?.pending?.['repo-b-drone']?.group).toBe('latest');
+    expect(registry?.groups?.latest?.name).toBe('latest');
   });
 
   test('can assign drones to groups and validates group names', async () => {

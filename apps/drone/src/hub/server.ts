@@ -23093,8 +23093,10 @@ export async function startDroneHubApiServer(opts: {
         return;
       }
 
-      // DELETE /api/groups/:group?keepVolume=0|1&forget=0|1
-      // NOTE: Deleting a group path deletes all drones inside that subtree and removes matching group entries.
+      // DELETE /api/groups/:group?keepVolume=0|1&forget=0|1&repoPath=<absolute-path>
+      // NOTE: Without repoPath, deleting a group path deletes all drones inside that subtree
+      // and removes matching group entries. With repoPath, only drones attached to that repo
+      // are deleted and the global group entry is kept for other repos.
       if (method === 'DELETE' && parts.length === 3 && parts[0] === 'api' && parts[1] === 'groups') {
         const groupRaw = decodeURIComponent(parts[2]);
         const group = groupRaw.trim();
@@ -23106,6 +23108,7 @@ export async function startDroneHubApiServer(opts: {
         const keepVolume = parseBoolParam(u.searchParams.get('keepVolume'), false);
         const forget = parseBoolParam(u.searchParams.get('forget'), true);
         const wantsUngrouped = isUngroupedGroupName(group);
+        const scopedRepoPath = String(u.searchParams.get('repoPath') ?? '').trim();
 
         const regAny: any = await loadRegistry();
         const groupExists =
@@ -23113,16 +23116,28 @@ export async function startDroneHubApiServer(opts: {
           Object.keys(regAny?.groups ?? {}).some((name) => isSameOrDescendantGroupPath(name, group));
 
         const realTargets = (Object.entries(regAny.drones ?? {}) as Array<[string, any]>)
-          .map(([id, d]) => ({ id: normalizeDroneIdentity(id), name: String(d?.name ?? '').trim(), group: String(d?.group ?? '').trim() }))
+          .map(([id, d]) => ({
+            id: normalizeDroneIdentity(id),
+            name: String(d?.name ?? '').trim(),
+            group: String(d?.group ?? '').trim(),
+            repoPath: String(d?.repoPath ?? '').trim(),
+          }))
           .filter((t) => Boolean(t.id))
+          .filter((t) => !scopedRepoPath || t.repoPath === scopedRepoPath)
           .filter((t) => {
             if (wantsUngrouped) return !t.group || isUngroupedGroupName(t.group);
             return isSameOrDescendantGroupPath(t.group, group);
           });
 
         const pendingTargets = (Object.entries(regAny.pending ?? {}) as Array<[string, any]>)
-          .map(([id, d]) => ({ id: normalizeDroneIdentity(id), name: String(d?.name ?? '').trim(), group: String(d?.group ?? '').trim() }))
+          .map(([id, d]) => ({
+            id: normalizeDroneIdentity(id),
+            name: String(d?.name ?? '').trim(),
+            group: String(d?.group ?? '').trim(),
+            repoPath: String(d?.repoPath ?? '').trim(),
+          }))
           .filter((t) => Boolean(t.id))
+          .filter((t) => !scopedRepoPath || t.repoPath === scopedRepoPath)
           .filter((t) => {
             if (wantsUngrouped) return !t.group || isUngroupedGroupName(t.group);
             return isSameOrDescendantGroupPath(t.group, group);
@@ -23135,9 +23150,9 @@ export async function startDroneHubApiServer(opts: {
         }
         const targets = Array.from(targetById.values()).sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
 
-        // Allow deleting an explicitly-created empty group.
+        // Allow deleting an explicitly-created empty group only for global group deletion.
         if (targets.length === 0) {
-          if (!groupExists) {
+          if (scopedRepoPath || !groupExists) {
             json(res, 404, { ok: false, error: `unknown group (or empty): ${group}` });
             return;
           }
@@ -23198,7 +23213,7 @@ export async function startDroneHubApiServer(opts: {
             for (const n of pendingDeleted) {
               if (regLatest?.pending?.[n] && !regLatest?.drones?.[n]) delete regLatest.pending[n];
             }
-            if (!wantsUngrouped) {
+            if (!scopedRepoPath && !wantsUngrouped) {
               const removedGroupNames = Object.keys(regLatest?.groups ?? {}).filter((name) =>
                 isSameOrDescendantGroupPath(name, group),
               );
@@ -23219,7 +23234,14 @@ export async function startDroneHubApiServer(opts: {
           // ignore (drones are already deleted)
         }
 
-        json(res, 200, { ok: true, group, removed, total: targets.length, deletedGroup: !wantsUngrouped });
+        json(res, 200, {
+          ok: true,
+          group,
+          removed,
+          total: targets.length,
+          deletedGroup: !scopedRepoPath && !wantsUngrouped,
+          ...(scopedRepoPath ? { repoPath: scopedRepoPath } : {}),
+        });
         return;
       }
 
