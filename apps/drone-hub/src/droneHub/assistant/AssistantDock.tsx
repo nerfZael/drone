@@ -2,7 +2,8 @@ import React from 'react';
 import { useDndMonitor, useDroppable } from '@dnd-kit/core';
 import { requestJson } from '../http';
 import { MarkdownMessage } from '../chat/MarkdownMessage';
-import { parseDroneHubDragData } from '../app/drone-hub-dnd';
+import { parseDroneHubDragData, useDroneHubActiveDrag } from '../app/drone-hub-dnd';
+import { assignedDroneIdsFromData } from '../app/drone-hub-dnd-utils';
 import { IconChatThread, IconEye, IconList, IconPencil, IconPlus, IconSettings, IconSidebarCollapse, IconSidebarExpand, IconSpinner, IconTrash } from '../app/icons';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
@@ -2394,6 +2395,7 @@ export function AssistantDock() {
   const kanbanBoardOpen = useDroneHubUiStore((state) => state.kanbanBoardOpen);
   const playbookRunsOpen = useDroneHubUiStore((state) => state.playbookRunsOpen);
   const selectedGroupMultiChat = useDroneHubUiStore((state) => state.selectedGroupMultiChat);
+  const activeDroneHubDrag = useDroneHubActiveDrag();
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
   const scrollContentRef = React.useRef<HTMLDivElement | null>(null);
   /** When false, new transcript content must not force scroll position (user scrolled up). */
@@ -2417,6 +2419,7 @@ export function AssistantDock() {
     id: 'assistant-drone-scope-drop',
     data: { type: 'assistant-drone-scope-drop' },
   });
+  const scopeDropActive = scopeDropIsOver && assignedDroneIdsFromData(activeDroneHubDrag).length > 0;
 
   const updateAssistantPinned = React.useCallback((node: HTMLDivElement | null) => {
     if (!node) return;
@@ -3700,7 +3703,7 @@ export function AssistantDock() {
       <div
         ref={setScopeDropNodeRef}
         className={`flex-shrink-0 border-b border-[var(--border)] px-2 py-1.5 transition-colors ${
-          scopeDropIsOver ? 'bg-[var(--accent-subtle)]' : 'bg-[rgba(0,0,0,.08)]'
+          scopeDropActive ? 'bg-[var(--accent-subtle)]' : 'bg-[rgba(0,0,0,.08)]'
         }`}
       >
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
