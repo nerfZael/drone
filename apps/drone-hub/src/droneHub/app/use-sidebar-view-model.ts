@@ -8,6 +8,9 @@ import { orderSidebarEntries, orderSidebarGroups, sidebarGroupOrderToken } from 
 import { isSidebarGroupDeleting as matchesDeletingSidebarGroup } from './sidebar-group-delete-visibility';
 import { isSameOrDescendantSidebarGroupPath } from './sidebar-group-paths';
 import { buildRepoSidebarGroups } from './sidebar-repo-groups';
+import { isDroneRecentForSidebar } from './sidebar-recent-filter';
+
+const RECENT_FILTER_REFRESH_MS = 60 * 1000;
 
 export type SidebarGroup = {
   group: string;
@@ -32,6 +35,7 @@ type UseSidebarViewModelArgs = {
   startupSeedByDrone: Record<string, StartupSeedState>;
   optimisticallyDeletedDrones: Record<string, boolean>;
   activeRepoPath: string;
+  showRecentDronesOnly: boolean;
   registryGroupNames: string[];
   registeredRepoPaths: string[];
 };
@@ -50,10 +54,21 @@ export function useSidebarViewModel({
   startupSeedByDrone,
   optimisticallyDeletedDrones,
   activeRepoPath,
+  showRecentDronesOnly,
   registryGroupNames,
   registeredRepoPaths,
 }: UseSidebarViewModelArgs) {
   const selectedDroneSet = React.useMemo(() => new Set(selectedDroneIds), [selectedDroneIds]);
+  const [recentFilterNowMs, setRecentFilterNowMs] = React.useState(() => Date.now());
+
+  React.useEffect(() => {
+    if (!showRecentDronesOnly) return;
+    setRecentFilterNowMs(Date.now());
+    const intervalId = globalThis.setInterval(() => {
+      setRecentFilterNowMs(Date.now());
+    }, RECENT_FILTER_REFRESH_MS);
+    return () => globalThis.clearInterval(intervalId);
+  }, [showRecentDronesOnly]);
 
   const sidebarOptimisticDrones = React.useMemo(() => {
     const known = new Set(drones.map((d) => d.id));
@@ -100,9 +115,16 @@ export function useSidebarViewModel({
     [drones],
   );
 
+  const recentSidebarVisibleBaseDrones = React.useMemo(() => {
+    if (!showRecentDronesOnly) return sidebarVisibleBaseDrones;
+    return sidebarVisibleBaseDrones.filter((drone) =>
+      isDroneRecentForSidebar(drone, recentFilterNowMs),
+    );
+  }, [recentFilterNowMs, showRecentDronesOnly, sidebarVisibleBaseDrones]);
+
   const sidebarDrones = React.useMemo(
-    () => [...sidebarVisibleBaseDrones, ...sidebarOptimisticDrones],
-    [sidebarOptimisticDrones, sidebarVisibleBaseDrones],
+    () => [...recentSidebarVisibleBaseDrones, ...sidebarOptimisticDrones],
+    [recentSidebarVisibleBaseDrones, sidebarOptimisticDrones],
   );
 
   const uiDroneName = React.useCallback((nameRaw: string): string => String(nameRaw ?? '').trim(), []);

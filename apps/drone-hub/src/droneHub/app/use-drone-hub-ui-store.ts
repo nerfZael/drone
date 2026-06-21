@@ -84,6 +84,7 @@ type DroneHubUiState = {
   chatHeaderRepoPath: string;
   sidebarReposCollapsed: boolean;
   sidebarAutoMinimize: boolean;
+  showRecentDronesOnly: boolean;
   sidebarGroupingMode: SidebarGroupingMode;
   sidebarDensityMode: SidebarDensityMode;
   sidebarDockSide: SidebarDockSide;
@@ -153,6 +154,7 @@ type DroneHubUiState = {
   setChatHeaderRepoPath: (next: Updater<string>) => void;
   setSidebarReposCollapsed: (next: Updater<boolean>) => void;
   setSidebarAutoMinimize: (next: Updater<boolean>) => void;
+  setShowRecentDronesOnly: (next: Updater<boolean>) => void;
   setSidebarGroupingMode: (next: Updater<SidebarGroupingMode>) => void;
   setSidebarDensityMode: (next: Updater<SidebarDensityMode>) => void;
   setSidebarDockSide: (next: Updater<SidebarDockSide>) => void;
@@ -317,6 +319,7 @@ type DroneHubUiPersistedState = Pick<
   | 'chatHeaderRepoPath'
   | 'sidebarReposCollapsed'
   | 'sidebarAutoMinimize'
+  | 'showRecentDronesOnly'
   | 'sidebarGroupingMode'
   | 'sidebarDensityMode'
   | 'sidebarDockSide'
@@ -680,6 +683,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       chatHeaderRepoPath: '',
       sidebarReposCollapsed: false,
       sidebarAutoMinimize: false,
+      showRecentDronesOnly: false,
       sidebarGroupingMode: 'repos',
       sidebarDensityMode: 'default',
       sidebarDockSide: 'left',
@@ -760,6 +764,8 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       setChatHeaderRepoPath: (next) => set((s) => ({ chatHeaderRepoPath: resolveNext(s.chatHeaderRepoPath, next) })),
       setSidebarReposCollapsed: (next) => set((s) => ({ sidebarReposCollapsed: resolveNext(s.sidebarReposCollapsed, next) })),
       setSidebarAutoMinimize: (next) => set((s) => ({ sidebarAutoMinimize: resolveNext(s.sidebarAutoMinimize, next) })),
+      setShowRecentDronesOnly: (next) =>
+        set((s) => ({ showRecentDronesOnly: resolveNext(s.showRecentDronesOnly, next) })),
       setSidebarGroupingMode: (next) => set((s) => ({ sidebarGroupingMode: resolveNext(s.sidebarGroupingMode, next) })),
       setSidebarDensityMode: (next) =>
         set((s) => ({ sidebarDensityMode: normalizeSidebarDensityMode(resolveNext(s.sidebarDensityMode, next)) })),
@@ -1037,6 +1043,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         chatHeaderRepoPath: state.chatHeaderRepoPath,
         sidebarReposCollapsed: state.sidebarReposCollapsed,
         sidebarAutoMinimize: state.sidebarAutoMinimize,
+        showRecentDronesOnly: state.showRecentDronesOnly,
         sidebarGroupingMode: state.sidebarGroupingMode,
         sidebarDensityMode: state.sidebarDensityMode,
         sidebarDockSide: state.sidebarDockSide,
@@ -1121,6 +1128,9 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           ),
           appView: normalizeAppView(persisted.appView ?? currentState.appView),
           sidebarAutoMinimize: normalizeBoolean(persisted.sidebarAutoMinimize ?? currentState.sidebarAutoMinimize),
+          showRecentDronesOnly: normalizeBoolean(
+            persisted.showRecentDronesOnly ?? currentState.showRecentDronesOnly,
+          ),
           sidebarGroupingMode: normalizeSidebarGroupingMode(
             persisted.sidebarGroupingMode ?? currentState.sidebarGroupingMode,
           ),
@@ -1212,6 +1222,7 @@ export function useDroneHubAppModelUiState() {
       sidebarGroupingMode: s.sidebarGroupingMode,
       sidebarDensityMode: s.sidebarDensityMode,
       sidebarDockSide: s.sidebarDockSide,
+      showRecentDronesOnly: s.showRecentDronesOnly,
       collapsedGroups: s.collapsedGroups,
       sidebarGroupOrder: s.sidebarGroupOrder,
       sidebarDroneOrderByGroup: s.sidebarDroneOrderByGroup,
@@ -1269,6 +1280,7 @@ export function useDroneHubAppModelUiState() {
       setSidebarGroupingMode: s.setSidebarGroupingMode,
       setSidebarDensityMode: s.setSidebarDensityMode,
       setSidebarDockSide: s.setSidebarDockSide,
+      setShowRecentDronesOnly: s.setShowRecentDronesOnly,
       setCollapsedGroups: s.setCollapsedGroups,
       setSidebarGroupOrder: s.setSidebarGroupOrder,
       setSidebarDroneOrderByGroup: s.setSidebarDroneOrderByGroup,
@@ -1333,6 +1345,7 @@ export function useDroneSidebarUiState() {
       playbookRunsOpen: s.playbookRunsOpen,
       sidebarReposCollapsed: s.sidebarReposCollapsed,
       sidebarAutoMinimize: s.sidebarAutoMinimize,
+      showRecentDronesOnly: s.showRecentDronesOnly,
       sidebarGroupingMode: s.sidebarGroupingMode,
       sidebarDensityMode: s.sidebarDensityMode,
       sidebarDockSide: s.sidebarDockSide,
@@ -1349,6 +1362,7 @@ export function useDroneSidebarUiState() {
       setViewMode: s.setViewMode,
       setSidebarReposCollapsed: s.setSidebarReposCollapsed,
       setSidebarAutoMinimize: s.setSidebarAutoMinimize,
+      setShowRecentDronesOnly: s.setShowRecentDronesOnly,
       setSidebarGroupingMode: s.setSidebarGroupingMode,
       setSidebarDensityMode: s.setSidebarDensityMode,
       setSidebarDockSide: s.setSidebarDockSide,
