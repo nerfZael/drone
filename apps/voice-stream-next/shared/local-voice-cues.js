@@ -55,6 +55,12 @@ const LOCAL_VOICE_CUE_TONES = {
   ],
 };
 
+const LOCAL_VOICE_CUE_GAINS = {
+  stop_button: 0.11,
+  clipboard_transcription_success: 0.13,
+};
+const DEFAULT_LOCAL_VOICE_CUE_GAIN = 0.22;
+
 let lastPlayedCue = '';
 let lastPlayedAt = 0;
 
@@ -76,7 +82,7 @@ function playLocalVoiceCue(cue) {
     }
     let cursor = context.currentTime + 0.01;
     const gain = context.createGain();
-    gain.gain.value = 0.22;
+    gain.gain.value = LOCAL_VOICE_CUE_GAINS[cue] ?? DEFAULT_LOCAL_VOICE_CUE_GAIN;
     gain.connect(context.destination);
 
     for (const tone of LOCAL_VOICE_CUE_TONES[cue]) {
