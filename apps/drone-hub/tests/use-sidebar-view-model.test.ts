@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { buildRepoSidebarGroups } from '../src/droneHub/app/sidebar-repo-groups';
 import { isSidebarGroupDeleting } from '../src/droneHub/app/sidebar-group-delete-visibility';
+import { isDroneRecentForSidebar } from '../src/droneHub/app/sidebar-recent-filter';
 import type { DroneSummary } from '../src/droneHub/types';
 
 function drone(seed: Partial<DroneSummary> & Pick<DroneSummary, 'id' | 'name'>): DroneSummary {
@@ -91,6 +92,64 @@ describe('isSidebarGroupDeleting', () => {
         { group: 'repo:/work/repo-b', kind: 'repo' },
         { 'repo:/work/repo-a': true },
       ),
+    ).toBe(false);
+  });
+});
+
+describe('isDroneRecentForSidebar', () => {
+  const nowMs = Date.parse('2026-06-21T12:00:00.000Z');
+
+  test('includes drones created in the last 24 hours', () => {
+    expect(
+      isDroneRecentForSidebar(
+        { createdAt: '2026-06-20T12:30:00.000Z', lastMessageAt: null },
+        nowMs,
+      ),
+    ).toBe(true);
+  });
+
+  test('includes older drones with a message in the last 24 hours', () => {
+    expect(
+      isDroneRecentForSidebar(
+        {
+          createdAt: '2026-06-01T12:00:00.000Z',
+          lastMessageAt: '2026-06-21T08:00:00.000Z',
+        },
+        nowMs,
+      ),
+    ).toBe(true);
+  });
+
+  test('excludes older drones without a recent message', () => {
+    expect(
+      isDroneRecentForSidebar(
+        {
+          createdAt: '2026-06-01T12:00:00.000Z',
+          lastMessageAt: '2026-06-20T11:59:59.999Z',
+        },
+        nowMs,
+      ),
+    ).toBe(false);
+  });
+
+  test('includes activity exactly at the 24-hour boundary', () => {
+    expect(
+      isDroneRecentForSidebar(
+        { createdAt: '2026-06-20T12:00:00.000Z', lastMessageAt: null },
+        nowMs,
+      ),
+    ).toBe(true);
+  });
+
+  test('does not treat non-message activity as recent chat activity', () => {
+    const droneWithActivity = {
+      createdAt: '2026-06-01T12:00:00.000Z',
+      lastActivityAt: '2026-06-21T08:00:00.000Z',
+      lastMessageAt: null,
+    };
+
+    expect(
+      isDroneRecentForSidebar(droneWithActivity, nowMs),
     ).toBe(false);
   });
 });

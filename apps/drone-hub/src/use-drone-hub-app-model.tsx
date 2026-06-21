@@ -168,6 +168,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     appView,
     viewMode,
     sidebarGroupingMode,
+    showRecentDronesOnly,
     collapsedGroups,
     sidebarGroupOrder,
     sidebarDroneOrderByGroup,
@@ -385,6 +386,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     startupSeedByDrone,
     optimisticallyDeletedDrones,
     activeRepoPath,
+    showRecentDronesOnly,
     registryGroupNames,
     registeredRepoPaths,
   });

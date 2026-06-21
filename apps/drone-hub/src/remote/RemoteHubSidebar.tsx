@@ -29,7 +29,7 @@ const REMOTE_DRONE_SIDEBAR_CAPABILITIES = {
   dragAndDrop: REMOTE_HUB_CAPABILITIES.sidebarDnd,
   headerActions: false,
   repoFooter: false,
-  sidebarOptions: false,
+  sidebarOptions: true,
 } as const;
 
 function remoteSidebarRepos(drones: DroneSummary[]): RepoSummary[] {
@@ -76,6 +76,7 @@ function RemoteHubSidebarComponent({
       setSelectedChat: state.setSelectedChat,
       setSelectedDrone: state.setSelectedDrone,
       setSelectedDroneIds: state.setSelectedDroneIds,
+      showRecentDronesOnly: state.showRecentDronesOnly,
       showHiddenSidebarGroups: state.showHiddenSidebarGroups,
       sidebarDroneOrderByGroup: state.sidebarDroneOrderByGroup,
       sidebarGroupOrder: state.sidebarGroupOrder,
@@ -134,6 +135,7 @@ function RemoteHubSidebarComponent({
     startupSeedByDrone: EMPTY_RECORD,
     optimisticallyDeletedDrones: EMPTY_RECORD,
     activeRepoPath: sidebarState.activeRepoPath,
+    showRecentDronesOnly: sidebarState.showRecentDronesOnly,
     registryGroupNames,
     registeredRepoPaths,
   });

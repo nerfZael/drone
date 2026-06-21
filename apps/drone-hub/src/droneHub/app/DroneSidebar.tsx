@@ -13,6 +13,7 @@ import {
   IconBoard,
   IconChatThread,
   IconChevron,
+  IconClock,
   IconColumns,
   IconDrone,
   IconEye,
@@ -1499,6 +1500,7 @@ export function DroneSidebar({
     playbookRunsOpen,
     sidebarReposCollapsed,
     sidebarAutoMinimize,
+    showRecentDronesOnly,
     autoDelete,
     sidebarDockSide,
     sidebarGroupOrder,
@@ -1524,6 +1526,7 @@ export function DroneSidebar({
     setShowHiddenSidebarGroups,
     setSidebarReposCollapsed,
     setSidebarAutoMinimize,
+    setShowRecentDronesOnly,
     setActiveRepoPath,
     setAutoDelete,
     setSidebarCollapsed,
@@ -2146,14 +2149,30 @@ export function DroneSidebar({
     !sidebarCapabilities.actions &&
     !sidebarCapabilities.createDrones &&
     !sidebarCapabilities.dragAndDrop &&
-    !sidebarCapabilities.headerActions &&
-    !sidebarCapabilities.sidebarOptions;
+    !sidebarCapabilities.headerActions;
   const useReadOnlySidebarBranch = readOnlySidebar && readOnlyMode !== 'grouped-tree';
   const sidebarDockTargetLabel = sidebarDockSide === 'right' ? 'left' : 'right';
   const sidebarDockActionLabel = `Move sidebar to ${sidebarDockTargetLabel}`;
   const sidebarHeaderTitle = `Drag header to dock sidebar left or right.`;
   const sidebarDirectionalIconClass = sidebarDockSide === 'right' ? 'rotate-180' : '';
   const sidebarDockPreviewSide = sidebarDockDragPreviewSide ?? sidebarDockSide;
+  const canChangeSidebarGroupingMode = sidebarCapabilities.actions && !sidebarGroupingModeOverride;
+  const canChangeSidebarViewMode = !viewModeOverride;
+  const hasSidebarLayoutOptions =
+    canChangeSidebarGroupingMode ||
+    canChangeSidebarViewMode ||
+    sidebarCapabilities.collapseControl;
+  const activeRepoDroneCount = activeRepoPath ? (droneCountByRepoPath.get(activeRepoPath) ?? 0) : dronesCount;
+  const selectedRepoHasNoDrones = Boolean(activeRepoPath) && activeRepoDroneCount === 0;
+  const recentFilterHidAllDrones =
+    showRecentDronesOnly && dronesCount > 0 && sidebarDrones.length === 0;
+  const recentFilterHidAllSelectedRepoDrones =
+    recentFilterHidAllDrones && Boolean(activeRepoPath) && activeRepoDroneCount > 0;
+  const recentFilterHidRepoDrones =
+    showRecentDronesOnly &&
+    activeRepoDroneCount > 0 &&
+    sidebarDronesFilteredByRepo.length === 0 &&
+    Boolean(activeRepoPath);
 
   return (
     <>
@@ -2381,9 +2400,30 @@ export function DroneSidebar({
                   className="text-[var(--muted-dim)] text-[11px] tracking-wide uppercase"
                   style={{ fontFamily: 'var(--display)' }}
                 >
-                  No drones registered
+                  {selectedRepoHasNoDrones
+                    ? 'No drones for selected repo'
+                    : recentFilterHidAllSelectedRepoDrones
+                      ? 'No recent drones for selected repo'
+                      : recentFilterHidAllDrones
+                        ? 'No recent drones'
+                        : 'No drones registered'}
                 </div>
-                {sidebarCapabilities.createDrones || sidebarCapabilities.headerActions ? (
+                {activeRepoPath ? (
+                  <div
+                    className="text-[var(--muted-dim)] text-[10px] mt-2 font-mono truncate"
+                    title={activeRepoPath}
+                  >
+                    {activeRepoPath}
+                  </div>
+                ) : null}
+                {recentFilterHidAllDrones && !selectedRepoHasNoDrones ? (
+                  <div className="mt-2 text-[10px] text-[var(--muted-dim)]">
+                    Turn off Recent drones only to show older drones.
+                  </div>
+                ) : null}
+                {!recentFilterHidAllDrones &&
+                !selectedRepoHasNoDrones &&
+                (sidebarCapabilities.createDrones || sidebarCapabilities.headerActions) ? (
                   <div className="mx-auto mt-4 flex max-w-[240px] flex-col gap-2">
                     {sidebarCapabilities.createDrones ? (
                       <>
@@ -2463,7 +2503,7 @@ export function DroneSidebar({
                     ) : null}
                   </div>
                 ) : null}
-                {sidebarCapabilities.createDrones ? (
+                {!recentFilterHidAllDrones && !selectedRepoHasNoDrones && sidebarCapabilities.createDrones ? (
                   <div className="mt-4 text-[10px] text-[var(--muted-dim)]">
                     Or run{' '}
                     <code className="rounded border border-[rgba(167,139,250,.08)] bg-[rgba(167,139,250,.06)] px-1.5 py-0.5 text-[10px] text-[#C4B5FD]">
@@ -2485,8 +2525,13 @@ export function DroneSidebar({
                   className="text-[var(--muted-dim)] text-[11px] tracking-wide uppercase"
                   style={{ fontFamily: 'var(--display)' }}
                 >
-                  No drones for selected repo
+                  {recentFilterHidRepoDrones ? 'No recent drones for selected repo' : 'No drones for selected repo'}
                 </div>
+                {recentFilterHidRepoDrones ? (
+                  <div className="mt-2 text-[10px] text-[var(--muted-dim)]">
+                    Recent drones only is on.
+                  </div>
+                ) : null}
                 <div
                   className="text-[var(--muted-dim)] text-[10px] mt-2 font-mono truncate"
                   title={activeRepoPath}
@@ -2857,99 +2902,127 @@ export function DroneSidebar({
                     role="menu"
                   >
                     <div className="py-1">
+                      {canChangeSidebarGroupingMode ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSidebarGroupingMode((prev) => (prev === 'groups' ? 'repos' : 'groups'))
+                          }
+                          className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
+                          role="menuitem"
+                        >
+                          <span>
+                            {isRepoGroupingMode ? 'Show real groups' : 'Show repos as groups'}
+                          </span>
+                          <IconFolder
+                            className={
+                              !isRepoGroupingMode ? 'opacity-80 text-[var(--accent)]' : 'opacity-65'
+                            }
+                          />
+                        </button>
+                      ) : null}
+                      {canChangeSidebarViewMode ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setViewMode((prev) => (prev === 'grouped' ? 'flat' : 'grouped'))
+                          }
+                          className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
+                          role="menuitem"
+                        >
+                          <span>
+                            {viewMode === 'grouped'
+                              ? 'Switch to flat list'
+                              : 'Switch to grouped folders'}
+                          </span>
+                          {viewMode === 'flat' ? (
+                            <IconList className="opacity-80 text-[var(--accent)]" />
+                          ) : (
+                            <IconTreeView className="opacity-65" />
+                          )}
+                        </button>
+                      ) : null}
+                      {sidebarCapabilities.collapseControl ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFooterOptionsMenuOpen(false);
+                            toggleSidebarDockSide();
+                          }}
+                          className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
+                          role="menuitem"
+                        >
+                          <span>{sidebarDockActionLabel}</span>
+                          <IconSidebarExpand
+                            className={`opacity-65 ${sidebarDockSide === 'right' ? 'rotate-180' : ''}`}
+                          />
+                        </button>
+                      ) : null}
+                      {hasSidebarLayoutOptions ? (
+                        <div className="my-1 border-t border-[var(--border-subtle)]" />
+                      ) : null}
                       <button
                         type="button"
-                        onClick={() =>
-                          setSidebarGroupingMode((prev) => (prev === 'groups' ? 'repos' : 'groups'))
-                        }
+                        onClick={() => setShowRecentDronesOnly((prev) => !prev)}
                         className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
-                        role="menuitem"
+                        role="menuitemcheckbox"
+                        aria-checked={showRecentDronesOnly}
                       >
-                        <span>
-                          {isRepoGroupingMode ? 'Show real groups' : 'Show repos as groups'}
-                        </span>
-                        <IconFolder
+                        <span>Recent drones only</span>
+                        <IconClock
                           className={
-                            !isRepoGroupingMode ? 'opacity-80 text-[var(--accent)]' : 'opacity-65'
+                            showRecentDronesOnly ? 'opacity-80 text-[var(--accent)]' : 'opacity-65'
                           }
                         />
                       </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setViewMode((prev) => (prev === 'grouped' ? 'flat' : 'grouped'))
-                        }
-                        className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
-                        role="menuitem"
-                      >
-                        <span>
-                          {viewMode === 'grouped'
-                            ? 'Switch to flat list'
-                            : 'Switch to grouped folders'}
-                        </span>
-                        {viewMode === 'flat' ? (
-                          <IconList className="opacity-80 text-[var(--accent)]" />
-                        ) : (
-                          <IconTreeView className="opacity-65" />
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setFooterOptionsMenuOpen(false);
-                          toggleSidebarDockSide();
-                        }}
-                        className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
-                        role="menuitem"
-                      >
-                        <span>{sidebarDockActionLabel}</span>
-                        <IconSidebarExpand
-                          className={`opacity-65 ${sidebarDockSide === 'right' ? 'rotate-180' : ''}`}
-                        />
-                      </button>
-                      <div className="my-1 border-t border-[var(--border-subtle)]" />
-                      <button
-                        type="button"
-                        onClick={() => setShowHiddenSidebarGroups((prev) => !prev)}
-                        className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
-                        role="menuitem"
-                      >
-                        <span>
-                          {showHiddenSidebarGroups ? 'Hide hidden groups' : 'Show hidden groups'}
-                          {sidebarHiddenGroupCount > 0 ? ` (${sidebarHiddenGroupCount})` : ''}
-                        </span>
-                        {showHiddenSidebarGroups ? (
-                          <IconEyeOff className="opacity-80 text-[var(--accent)]" />
-                        ) : (
-                          <IconEye className="opacity-65" />
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setAutoDelete((prev) => !prev)}
-                        className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
-                        role="menuitem"
-                      >
-                        <span>{autoDelete ? 'Delete confirm off' : 'Delete confirm on'}</span>
-                        <IconTrash
-                          className={autoDelete ? 'opacity-80 text-[var(--accent)]' : 'opacity-65'}
-                        />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSidebarAutoMinimize((prev) => !prev)}
-                        className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
-                        role="menuitem"
-                      >
-                        <span>
-                          {sidebarAutoMinimize ? 'Disable auto-minimize' : 'Enable auto-minimize'}
-                        </span>
-                        <IconAutoMinimize
-                          className={
-                            sidebarAutoMinimize ? 'opacity-80 text-[var(--accent)]' : 'opacity-65'
-                          }
-                        />
-                      </button>
+                      {sidebarCapabilities.actions ? (
+                        <button
+                          type="button"
+                          onClick={() => setShowHiddenSidebarGroups((prev) => !prev)}
+                          className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
+                          role="menuitem"
+                        >
+                          <span>
+                            {showHiddenSidebarGroups ? 'Hide hidden groups' : 'Show hidden groups'}
+                            {sidebarHiddenGroupCount > 0 ? ` (${sidebarHiddenGroupCount})` : ''}
+                          </span>
+                          {showHiddenSidebarGroups ? (
+                            <IconEyeOff className="opacity-80 text-[var(--accent)]" />
+                          ) : (
+                            <IconEye className="opacity-65" />
+                          )}
+                        </button>
+                      ) : null}
+                      {sidebarCapabilities.actions ? (
+                        <button
+                          type="button"
+                          onClick={() => setAutoDelete((prev) => !prev)}
+                          className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
+                          role="menuitem"
+                        >
+                          <span>{autoDelete ? 'Delete confirm off' : 'Delete confirm on'}</span>
+                          <IconTrash
+                            className={autoDelete ? 'opacity-80 text-[var(--accent)]' : 'opacity-65'}
+                          />
+                        </button>
+                      ) : null}
+                      {sidebarCapabilities.collapseControl ? (
+                        <button
+                          type="button"
+                          onClick={() => setSidebarAutoMinimize((prev) => !prev)}
+                          className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
+                          role="menuitem"
+                        >
+                          <span>
+                            {sidebarAutoMinimize ? 'Disable auto-minimize' : 'Enable auto-minimize'}
+                          </span>
+                          <IconAutoMinimize
+                            className={
+                              sidebarAutoMinimize ? 'opacity-80 text-[var(--accent)]' : 'opacity-65'
+                            }
+                          />
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                 ) : null}

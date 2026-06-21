@@ -113,6 +113,15 @@ export function IconAutoMinimize({ className }: { className?: string }) {
   );
 }
 
+export function IconClock({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="8" cy="8" r="5.75" />
+      <path d="M8 4.75V8l2.25 1.4" />
+    </svg>
+  );
+}
+
 export function IconSidebarCollapse({ className }: { className?: string }) {
   return (
     <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
