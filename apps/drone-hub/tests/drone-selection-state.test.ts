@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { resolveSelectedChatForDrone, shouldKeepPendingSelectedChat } from '../src/droneHub/app/drone-selection-helpers';
+import {
+  resolveDroneCardSelection,
+  resolveSelectedChatForDrone,
+  shouldKeepPendingSelectedChat,
+} from '../src/droneHub/app/drone-selection-helpers';
 import type { DroneSummary } from '../src/droneHub/types';
 
 function makeDrone(id: string, chats: string[]): DroneSummary {
@@ -99,5 +103,106 @@ describe('shouldKeepPendingSelectedChat', () => {
         nowMs: 1_000,
       }),
     ).toBe(false);
+  });
+});
+
+describe('resolveDroneCardSelection', () => {
+  test('plain click selects only the clicked drone', () => {
+    expect(
+      resolveDroneCardSelection({
+        droneId: 'charlie',
+        selectedDrone: 'alpha',
+        selectedDroneIds: ['alpha', 'bravo'],
+        orderedDroneIds: ['alpha', 'bravo', 'charlie'],
+        selectionAnchor: 'alpha',
+      }),
+    ).toEqual({
+      selectedDroneIds: ['charlie'],
+      activeDroneId: 'charlie',
+      selectionAnchor: 'charlie',
+    });
+  });
+
+  test('ctrl click adds and removes individual drones', () => {
+    expect(
+      resolveDroneCardSelection({
+        droneId: 'charlie',
+        selectedDrone: 'bravo',
+        selectedDroneIds: ['alpha', 'bravo'],
+        orderedDroneIds: ['alpha', 'bravo', 'charlie'],
+        selectionAnchor: 'bravo',
+        opts: { toggle: true },
+      }),
+    ).toEqual({
+      selectedDroneIds: ['alpha', 'bravo', 'charlie'],
+      activeDroneId: 'charlie',
+      selectionAnchor: 'charlie',
+    });
+
+    expect(
+      resolveDroneCardSelection({
+        droneId: 'bravo',
+        selectedDrone: 'bravo',
+        selectedDroneIds: ['alpha', 'bravo', 'charlie'],
+        orderedDroneIds: ['alpha', 'bravo', 'charlie'],
+        selectionAnchor: 'bravo',
+        opts: { toggle: true },
+      }),
+    ).toEqual({
+      selectedDroneIds: ['alpha', 'charlie'],
+      activeDroneId: 'charlie',
+      selectionAnchor: 'bravo',
+    });
+  });
+
+  test('ctrl click can clear the last selected drone', () => {
+    expect(
+      resolveDroneCardSelection({
+        droneId: 'alpha',
+        selectedDrone: 'alpha',
+        selectedDroneIds: ['alpha'],
+        orderedDroneIds: ['alpha', 'bravo', 'charlie'],
+        selectionAnchor: 'alpha',
+        opts: { toggle: true },
+      }),
+    ).toEqual({
+      selectedDroneIds: [],
+      activeDroneId: null,
+      selectionAnchor: 'alpha',
+    });
+  });
+
+  test('shift click selects a visible range from the anchor', () => {
+    expect(
+      resolveDroneCardSelection({
+        droneId: 'delta',
+        selectedDrone: 'bravo',
+        selectedDroneIds: ['bravo'],
+        orderedDroneIds: ['alpha', 'bravo', 'charlie', 'delta'],
+        selectionAnchor: 'bravo',
+        opts: { range: true },
+      }),
+    ).toEqual({
+      selectedDroneIds: ['bravo', 'charlie', 'delta'],
+      activeDroneId: 'delta',
+      selectionAnchor: 'bravo',
+    });
+  });
+
+  test('shift range can use the current rendered sidebar order', () => {
+    expect(
+      resolveDroneCardSelection({
+        droneId: 'alpha',
+        selectedDrone: 'delta',
+        selectedDroneIds: ['delta'],
+        orderedDroneIds: ['alpha', 'bravo', 'charlie', 'delta'],
+        selectionAnchor: 'delta',
+        opts: { range: true, orderedDroneIds: ['delta', 'bravo', 'alpha', 'charlie'] },
+      }),
+    ).toEqual({
+      selectedDroneIds: ['delta', 'bravo', 'alpha'],
+      activeDroneId: 'alpha',
+      selectionAnchor: 'delta',
+    });
   });
 });

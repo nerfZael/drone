@@ -10,6 +10,7 @@ import { createSidebarChatDragData, parseDroneHubDragData, useDroneHubActiveDrag
 import { isDroneStartingOrSeeding } from './helpers';
 import { IconChatThread, IconColumns, IconDrone, IconEye, IconEyeOff, IconFolder, IconPencil, IconPlus, IconSpinner, IconTrash } from './icons';
 import { canReparentSidebarDroneSelection, canSetSidebarDroneSelectionParent } from './sidebar-drone-drop';
+import type { DroneSelectionClickOptions } from './drone-selection-helpers';
 import { buildSidebarDroneTree, type SidebarDroneTree } from './sidebar-drone-tree';
 import { buildSidebarNodeTree, type SidebarNodeTreeModel, type SidebarTreeDroneNode, type SidebarTreeFolderNode, type SidebarTreeNode } from './sidebar-node-tree';
 import {
@@ -40,6 +41,8 @@ import type { MoveDronesToGroupResult } from './use-group-management';
 import type { SidebarGroup } from './use-sidebar-view-model';
 
 const GROUPED_FOLDER_SINGLE_CLICK_DELAY_MS = 180;
+const EMPTY_SELECTED_DRONE_IDS: string[] = [];
+const EMPTY_SELECTED_DRONE_SET = new Set<string>();
 
 type FolderEditorState = {
   mode: 'create' | 'rename';
@@ -82,7 +85,7 @@ type GroupedSidebarTreeProps = {
   selectedFolderPath: string | null;
   setSelectedSidebarNodeId: React.Dispatch<React.SetStateAction<string | null>>;
   onSelectFolder: (path: string) => void;
-  onSelectDroneCard: (droneId: string, opts?: { toggle?: boolean; range?: boolean }) => void;
+  onSelectDroneCard: (droneId: string, opts?: DroneSelectionClickOptions) => void;
   onSelectDroneChat: (droneId: string, chatName: string) => void;
   onMoveDronesToGroup: (group: string, droneIds: string[]) => Promise<MoveDronesToGroupResult>;
   onRenameGroup: (group: string, nextName?: string, opts?: { skipNodeOrderUpdate?: boolean }) => Promise<boolean> | boolean;
@@ -158,6 +161,7 @@ type TreeDropPlacement = SidebarGroupDropPlacement | 'into';
 type GroupedSidebarTreeContextValue = GroupedSidebarTreeProps & {
   nodeTree: SidebarNodeTreeModel;
   droneTreeByGroupPath: Record<string, SidebarDroneTree>;
+  visibleDroneOrder: string[];
   dragOverTreeTarget: { nodeId: string; placement: TreeDropPlacement } | null;
   dragOverFolderBodyId: string | null;
   dragOverChat: { key: string; placement: SidebarGroupDropPlacement } | null;
@@ -285,10 +289,14 @@ function groupedDroneDragData(args: {
   uiDroneName: (nameRaw: string) => string;
   selectedDroneIds: string[];
   selectedDroneSet: Set<string>;
+  visibleDroneOrder: string[];
 }): SidebarDroneDragData {
   const selectedDragDroneIds =
     args.selectedDroneSet.has(args.drone.id) && args.selectedDroneIds.length > 0
-      ? args.selectedDroneIds.slice()
+      ? [
+          ...args.visibleDroneOrder.filter((id) => args.selectedDroneSet.has(id)),
+          ...args.selectedDroneIds.filter((id) => !args.visibleDroneOrder.includes(id)),
+        ]
       : [args.drone.id];
   return {
     type: 'sidebar-drone',
@@ -319,6 +327,34 @@ function activeRectMidY(event: DragMoveEvent | DragOverEvent | DragEndEvent): nu
   const activeRect = event.active.rect.current.translated ?? event.active.rect.current.initial;
   if (!activeRect) return null;
   return activeRect.top + activeRect.height / 2;
+}
+
+function groupedFolderPathFromNode(node: SidebarTreeFolderNode | null | undefined): string | null {
+  if (!node) return null;
+  return String(node.groupPath ?? node.path ?? '').trim() || null;
+}
+
+function flattenVisibleDroneOrderFromNodeTree(
+  nodeTree: SidebarNodeTreeModel,
+  collapsedGroups: Record<string, boolean>,
+): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const visit = (nodeId: string) => {
+    const node = nodeTree.nodesById[nodeId];
+    if (!node) return;
+    if (node.kind === 'drone' && !seen.has(node.droneId)) {
+      seen.add(node.droneId);
+      out.push(node.droneId);
+    }
+    if (node.kind === 'folder') {
+      const folderPath = groupedFolderPathFromNode(node);
+      if (folderPath && collapsedGroups[folderPath]) return;
+    }
+    for (const childId of nodeTree.childIdsByParent[node.id] ?? []) visit(childId);
+  };
+  for (const nodeId of nodeTree.rootChildIds) visit(nodeId);
+  return out;
 }
 
 function resolveFolderBodyInsertionTarget(
@@ -355,8 +391,7 @@ function chatReorderDropId(droneIdRaw: string, chatNameRaw: string): string {
 }
 
 function folderGroupPath(node: SidebarTreeFolderNode | null | undefined): string | null {
-  if (!node) return null;
-  return String(node.groupPath ?? node.path ?? '').trim() || null;
+  return groupedFolderPathFromNode(node);
 }
 
 function folderTargetGroupPath(node: SidebarTreeFolderNode | null | undefined): string | null {
@@ -630,6 +665,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
     uiDroneName,
     selectedDroneIds,
     selectedDroneSet,
+    visibleDroneOrder,
     sidebarChatOrderByDrone,
     busyChatNodeIdSet,
     unreadAgentMessageByChatNodeId,
@@ -638,6 +674,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
     settingBaseImages,
     chatEditor,
     selectedSidebarNodeId,
+    selectedFolderPath,
     setSelectedSidebarNodeId,
     onSelectDroneCard,
     selectedDrone,
@@ -663,9 +700,19 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
   if (!drone) return null;
   const isOptimistic = sidebarOptimisticDroneIdSet.has(drone.id);
   const dragDisabled = !sidebarDndEnabled || movingDroneGroups || isOptimistic;
+  const droneSelectionActive = !selectedFolderPath;
+  const effectiveSelectedDroneSet = droneSelectionActive ? selectedDroneSet : EMPTY_SELECTED_DRONE_SET;
+  const effectiveSelectedDroneIds = droneSelectionActive ? selectedDroneIds : EMPTY_SELECTED_DRONE_IDS;
   const dragData = React.useMemo(
-    () => groupedDroneDragData({ drone, uiDroneName, selectedDroneIds, selectedDroneSet }),
-    [drone, selectedDroneIds, selectedDroneSet, uiDroneName],
+    () =>
+      groupedDroneDragData({
+        drone,
+        uiDroneName,
+        selectedDroneIds: effectiveSelectedDroneIds,
+        selectedDroneSet: effectiveSelectedDroneSet,
+        visibleDroneOrder,
+      }),
+    [drone, effectiveSelectedDroneIds, effectiveSelectedDroneSet, uiDroneName, visibleDroneOrder],
   );
   const { attributes, listeners, isDragging, setNodeRef: setDragNodeRef } = useDraggable({
     id: `sidebar-grouped-drone:${drone.id}`,
@@ -707,7 +754,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
   const childDroneIds = (nodeTree.childIdsByParent[node.id] ?? [])
     .map((childNodeId) => nodeTree.nodesById[childNodeId])
     .filter((child): child is SidebarTreeDroneNode => Boolean(child && child.kind === 'drone'));
-  const selected = selectedSidebarNodeId === node.id;
+  const selected = droneSelectionActive && selectedDroneSet.has(drone.id);
   const showOpenDefaultChatIndicator =
     hasOnlyDefaultChat && selectedDrone === drone.id && activeChatName === 'default';
   const reorderPreviewClass =
@@ -756,7 +803,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
             onClick={(rowOpts) => {
               if (shouldSuppressClick()) return;
               setSelectedSidebarNodeId(node.id);
-              onSelectDroneCard(drone.id, rowOpts);
+              onSelectDroneCard(drone.id, { ...rowOpts, orderedDroneIds: visibleDroneOrder });
             }}
             dragNodeRef={dragDisabled ? undefined : setDragNodeRef}
             draggable={!dragDisabled}
@@ -1275,6 +1322,10 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
         sidebarNodeOrderByParent,
       }),
     [repoScopedGroupPathsByRepoGroup, sidebarDroneOrderByGroup, sidebarFolderTree, sidebarGroupOrder, sidebarGroups, sidebarNodeOrderByParent],
+  );
+  const visibleDroneOrder = React.useMemo(
+    () => flattenVisibleDroneOrderFromNodeTree(nodeTree, props.collapsedGroups),
+    [nodeTree, props.collapsedGroups],
   );
 
   const orderedGroupItemsByPath = React.useMemo(() => {
@@ -1966,6 +2017,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       deletingChats,
       handleDeleteChat,
       shouldSuppressClick,
+      visibleDroneOrder,
     }),
     [
       props.activeChatName,
@@ -2044,6 +2096,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       handleDeleteChat,
       nodeTree,
       shouldSuppressClick,
+      visibleDroneOrder,
     ],
   );
 
