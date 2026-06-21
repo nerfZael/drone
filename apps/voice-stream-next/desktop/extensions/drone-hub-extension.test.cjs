@@ -122,6 +122,53 @@ describe('drone hub desktop extension', () => {
     });
   });
 
+  test('returns initial message run state when creating a seeded drone', async () => {
+    const api = createApi();
+    const requests = [];
+    globalThis.fetch = async (url, init) => {
+      requests.push({ url: String(url), init });
+      if (String(url).endsWith('/api/settings/ui-preferences')) {
+        return jsonResponse({ ok: true, uiPreferences: {} });
+      }
+      if (String(url).endsWith('/api/drones')) {
+        return jsonResponse({
+          ok: true,
+          id: 'drone-seeded',
+          name: 'seeded',
+          phase: 'starting',
+          initialMessage: {
+            chat: 'default',
+            promptId: 'seed-prompt-1',
+            pendingState: 'queued',
+            status: 'queued',
+          },
+        }, 202);
+      }
+      return jsonResponse({ ok: false, error: 'not found' }, 404);
+    };
+
+    await extension.activate(api);
+    const result = await api.tools.get('create_drone').execute({
+      name: 'seeded',
+      initialMessage: 'Start this work',
+    });
+
+    const createRequest = requests.find((request) => String(request.url).endsWith('/api/drones'));
+    const body = JSON.parse(createRequest.init.body);
+
+    expect(body.seedPrompt).toBe('Start this work');
+    expect(body.seedSubmittedAt).toEqual(expect.any(String));
+    expect(result.drone.status).toBe('starting');
+    expect(result.inProgress).toBe(true);
+    expect(result.initialMessage).toEqual({
+      chat: 'default',
+      runId: 'seed-prompt-1',
+      promptId: 'seed-prompt-1',
+      pendingState: 'queued',
+      status: 'queued',
+    });
+  });
+
   test('discovers hub api port from profile state when only token is configured', async () => {
     const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-hub-extension-repo-'));
     const dataDir = path.join(repoRoot, 'data', 'profiles', 'default', 'drone');
