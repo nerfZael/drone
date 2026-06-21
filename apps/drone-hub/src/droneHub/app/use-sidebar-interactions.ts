@@ -289,7 +289,7 @@ export function useSidebarInteractions({
     setFolderEditor((prev: FolderEditorState | null) => (prev ? { ...prev, pending: true, error: null } : prev));
     if (draft.mode === 'create') {
       const result = await runOptimisticCreateGroup(nextPath, {
-        placement: draft.parentPath ? 'end' : 'start',
+        placement: 'start',
       });
       if (!result.ok) {
         setFolderEditor((prev: FolderEditorState | null) => (prev ? { ...prev, pending: false, error: result.error || 'Create folder failed.' } : prev));

@@ -174,6 +174,115 @@ describe('drone hub desktop extension', () => {
     expect(result.drones[0]).toMatchObject({ id: 'drone-1', name: 'Alpha', group: 'Review', status: 'ready' });
   });
 
+  test('exposes a drone reorder tool that updates sidebar preferences for a group', async () => {
+    const api = createApi();
+    const requests = [];
+    globalThis.fetch = async (url, init = {}) => {
+      requests.push({ url: String(url), init });
+      if (String(url).endsWith('/api/drones/summary')) {
+        return jsonResponse({
+          ok: true,
+          drones: [
+            { id: 'drone-a', name: 'Alpha', group: 'Review' },
+            { id: 'drone-b', name: 'Beta', group: 'Review' },
+            { id: 'drone-c', name: 'Gamma', group: 'Review' },
+          ],
+        });
+      }
+      if (String(url).endsWith('/api/settings/ui-preferences') && init.method === 'GET') {
+        return jsonResponse({
+          ok: true,
+          uiPreferences: {
+            sidebarGroupOrder: ['group:Review'],
+            sidebarDroneOrderByGroup: { 'group:Review': ['drone-b', 'drone-a', 'hidden-drone'] },
+            sidebarNodeOrderByParent: { 'folder:Review': ['drone:drone-b', 'drone:drone-a', 'drone:hidden-drone'] },
+          },
+        });
+      }
+      if (String(url).endsWith('/api/settings/ui-preferences') && init.method === 'POST') {
+        const body = JSON.parse(init.body);
+        return jsonResponse({ ok: true, uiPreferences: body.uiPreferences, updatedAt: new Date(0).toISOString() });
+      }
+      return jsonResponse({ ok: false, error: 'not found' }, 404);
+    };
+
+    await extension.activate(api);
+    const result = await api.tools.get('reorder_drones').execute({
+      group: 'Review',
+      drones: ['Gamma', 'Alpha'],
+      beforeDrone: 'Beta',
+    });
+
+    const saveRequest = requests.find((request) => request.init.method === 'POST' && request.url.endsWith('/api/settings/ui-preferences'));
+    const saved = JSON.parse(saveRequest.init.body).uiPreferences;
+
+    expect(result.sidebarDroneOrder).toEqual(['drone-c', 'drone-a', 'drone-b', 'hidden-drone']);
+    expect(saved.sidebarDroneOrderByGroup['group:Review']).toEqual(['drone-c', 'drone-a', 'drone-b', 'hidden-drone']);
+    expect(saved.sidebarNodeOrderByParent['folder:Review']).toEqual([
+      'drone:drone-c',
+      'drone:drone-a',
+      'drone:drone-b',
+      'drone:hidden-drone',
+    ]);
+  });
+
+  test('moves a newly created group to the top of its parent when setting drone group', async () => {
+    const api = createApi();
+    const requests = [];
+    globalThis.fetch = async (url, init = {}) => {
+      requests.push({ url: String(url), init });
+      if (String(url).endsWith('/api/groups') && init.method !== 'POST') {
+        return jsonResponse({
+          ok: true,
+          groups: [
+            { name: 'Parent/Alpha' },
+            { name: 'Other' },
+          ],
+        });
+      }
+      if (String(url).endsWith('/api/drones/summary')) {
+        return jsonResponse({
+          ok: true,
+          drones: [{ id: 'drone-a', name: 'Alpha', group: null }],
+        });
+      }
+      if (String(url).endsWith('/api/drones/group-set')) {
+        return jsonResponse({
+          ok: true,
+          group: 'Parent/New',
+          moved: [{ id: 'drone-a', name: 'Alpha', previousGroup: null, group: 'Parent/New' }],
+          rejected: [],
+          total: 1,
+        });
+      }
+      if (String(url).endsWith('/api/settings/ui-preferences') && init.method === 'GET') {
+        return jsonResponse({
+          ok: true,
+          uiPreferences: {
+            sidebarGroupOrder: ['group:Parent/Alpha', 'group:Other'],
+          },
+        });
+      }
+      if (String(url).endsWith('/api/settings/ui-preferences') && init.method === 'POST') {
+        const body = JSON.parse(init.body);
+        return jsonResponse({ ok: true, uiPreferences: body.uiPreferences, updatedAt: new Date(0).toISOString() });
+      }
+      return jsonResponse({ ok: false, error: 'not found' }, 404);
+    };
+
+    await extension.activate(api);
+    const result = await api.tools.get('set_drone_group').execute({
+      drone: 'Alpha',
+      group: 'Parent/New',
+    });
+
+    const saveRequest = requests.find((request) => request.init.method === 'POST' && request.url.endsWith('/api/settings/ui-preferences'));
+    const saved = JSON.parse(saveRequest.init.body).uiPreferences;
+
+    expect(result.groupOrder.updated).toBe(true);
+    expect(saved.sidebarGroupOrder).toEqual(['group:Parent', 'group:Parent/New', 'group:Parent/Alpha', 'group:Other']);
+  });
+
   test('falls back to full drone list when summary endpoint is unavailable', async () => {
     const api = createApi();
     const requests = [];

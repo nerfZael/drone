@@ -330,6 +330,267 @@ function droneSummary(drone) {
   };
 }
 
+function normalizeOrderedStringList(value) {
+  if (!Array.isArray(value)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const item of value) {
+    const text = cleanString(item);
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    out.push(text);
+  }
+  return out;
+}
+
+function normalizeOrderedStringMap(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const out = {};
+  for (const [keyRaw, listRaw] of Object.entries(value)) {
+    const key = cleanString(keyRaw);
+    if (!key) continue;
+    const list = normalizeOrderedStringList(listRaw);
+    if (list.length > 0) out[key] = list;
+  }
+  return out;
+}
+
+function normalizeUiPreferences(value) {
+  const raw = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  return {
+    sidebarGroupingMode: raw.sidebarGroupingMode === 'repos' ? 'repos' : 'groups',
+    sidebarDensityMode:
+      raw.sidebarDensityMode === 'compact' || raw.sidebarDensityMode === 'comfortable'
+        ? raw.sidebarDensityMode
+        : 'default',
+    sidebarGroupOrder: normalizeOrderedStringList(raw.sidebarGroupOrder),
+    sidebarDroneOrderByGroup: normalizeOrderedStringMap(raw.sidebarDroneOrderByGroup),
+    sidebarNodeOrderByParent: normalizeOrderedStringMap(raw.sidebarNodeOrderByParent),
+    sidebarChatOrderByDrone: normalizeOrderedStringMap(raw.sidebarChatOrderByDrone),
+    hiddenSidebarGroups: normalizeOrderedStringList(raw.hiddenSidebarGroups),
+    autoDelete: raw.autoDelete === true,
+    automations: Array.isArray(raw.automations) ? raw.automations : [],
+    spawnAgentKey: cleanString(raw.spawnAgentKey, DEFAULT_CREATE_DRONE_PREFERENCES.spawnAgentKey),
+    spawnModel: cleanString(raw.spawnModel),
+    repoBranchSource: normalizeRepoBranchSource(raw.repoBranchSource, DEFAULT_CREATE_DRONE_PREFERENCES.repoBranchSource),
+    repoCreateRemoteBranch: cleanString(raw.repoCreateRemoteBranch),
+    pullHostBranchBeforeCreate:
+      typeof raw.pullHostBranchBeforeCreate === 'boolean'
+        ? raw.pullHostBranchBeforeCreate
+        : DEFAULT_CREATE_DRONE_PREFERENCES.pullHostBranchBeforeCreate,
+  };
+}
+
+function sidebarGroupOrderToken(group) {
+  return `group:${cleanString(group)}`;
+}
+
+function sidebarGroupParentPath(value) {
+  const group = cleanString(value).replace(/^\/+|\/+$/g, '');
+  if (!group || !group.includes('/')) return null;
+  return group.split('/').slice(0, -1).join('/') || null;
+}
+
+function sidebarDroneNodeId(droneId) {
+  return `drone:${cleanString(droneId)}`;
+}
+
+function sidebarFolderNodeId(group) {
+  return `folder:${cleanString(group)}`;
+}
+
+function normalizeGroupForOrder(value) {
+  const group = cleanString(value);
+  return !group || group.toLowerCase() === 'ungrouped' ? 'Ungrouped' : group;
+}
+
+function insertGroupTokenAtParentTop(order, visibleGroups, group) {
+  const targetGroup = cleanString(group);
+  if (!targetGroup || targetGroup.toLowerCase() === 'ungrouped') return normalizeOrderedStringList(order);
+
+  const nextToken = sidebarGroupOrderToken(targetGroup);
+  const normalizedOrder = normalizeOrderedStringList(order);
+  if (normalizedOrder.includes(nextToken)) return normalizedOrder;
+  const missingAncestorTokens = targetGroup
+    .split('/')
+    .map((_, index, parts) => parts.slice(0, index + 1).join('/'))
+    .slice(0, -1)
+    .map(sidebarGroupOrderToken)
+    .filter((token) => token && !normalizedOrder.includes(token));
+  const tokensToInsert = normalizeOrderedStringList([...missingAncestorTokens, nextToken]);
+
+  const visibleTokens = normalizeOrderedStringList(visibleGroups.map(sidebarGroupOrderToken));
+  const visibleTokenSet = new Set(visibleTokens);
+  const hiddenTokens = normalizedOrder.filter((token) => !visibleTokenSet.has(token));
+  const visibleOrder = normalizeOrderedStringList([
+    ...normalizedOrder.filter((token) => visibleTokenSet.has(token)),
+    ...visibleTokens.filter((token) => !normalizedOrder.includes(token)),
+  ]);
+  const parentPath = sidebarGroupParentPath(targetGroup);
+  const siblingTokenSet = new Set(
+    visibleGroups
+      .filter((entry) => sidebarGroupParentPath(entry) === parentPath)
+      .map(sidebarGroupOrderToken),
+  );
+  const siblingIndex = visibleOrder.findIndex((token) => siblingTokenSet.has(token));
+  if (siblingIndex >= 0) {
+    const nextVisibleOrder = visibleOrder.slice();
+    nextVisibleOrder.splice(siblingIndex, 0, ...tokensToInsert);
+    return normalizeOrderedStringList([...nextVisibleOrder, ...hiddenTokens]);
+  }
+
+  if (parentPath) {
+    const parentIndex = visibleOrder.indexOf(sidebarGroupOrderToken(parentPath));
+    if (parentIndex >= 0) {
+      const nextVisibleOrder = visibleOrder.slice();
+      nextVisibleOrder.splice(parentIndex + 1, 0, ...tokensToInsert);
+      return normalizeOrderedStringList([...nextVisibleOrder, ...hiddenTokens]);
+    }
+  }
+
+  return normalizeOrderedStringList([...tokensToInsert, ...visibleOrder, ...hiddenTokens]);
+}
+
+function reorderVisibleEntries(existingOrder, visibleEntries, movingEntries, beforeEntry, afterEntry) {
+  const visible = normalizeOrderedStringList(visibleEntries);
+  const moving = normalizeOrderedStringList(movingEntries).filter((entry) => visible.includes(entry));
+  if (moving.length === 0) throw new Error('none of the requested drones are in the selected order scope');
+
+  const withoutMoving = visible.filter((entry) => !moving.includes(entry));
+  let insertIndex = 0;
+  const after = cleanString(afterEntry);
+  const before = cleanString(beforeEntry);
+  if (after) {
+    const index = withoutMoving.indexOf(after);
+    if (index < 0) throw new Error(`afterDrone is not in the selected order scope: ${after}`);
+    insertIndex = index + 1;
+  } else if (before) {
+    const index = withoutMoving.indexOf(before);
+    if (index < 0) throw new Error(`beforeDrone is not in the selected order scope: ${before}`);
+    insertIndex = index;
+  }
+
+  const nextVisible = withoutMoving.slice();
+  nextVisible.splice(insertIndex, 0, ...moving);
+  const visibleSet = new Set(visible);
+  const hidden = normalizeOrderedStringList(existingOrder).filter((entry) => !visibleSet.has(entry));
+  return normalizeOrderedStringList([...nextVisible, ...hidden]);
+}
+
+async function listGroupNames(hub) {
+  const response = await requestJson(hub, '/api/groups', { method: 'GET' });
+  return Array.isArray(response?.groups)
+    ? response.groups.map((group) => cleanString(group?.name ?? group)).filter(Boolean)
+    : [];
+}
+
+async function readUiPreferences(hub) {
+  const response = await requestJson(hub, '/api/settings/ui-preferences', { method: 'GET' });
+  return normalizeUiPreferences(response?.uiPreferences);
+}
+
+async function writeUiPreferences(hub, uiPreferences) {
+  const response = await requestJson(
+    hub,
+    '/api/settings/ui-preferences',
+    { method: 'POST', body: JSON.stringify({ uiPreferences: normalizeUiPreferences(uiPreferences) }) },
+  );
+  return normalizeUiPreferences(response?.uiPreferences);
+}
+
+async function insertNewGroupAtParentTop(hub, group, existingGroups) {
+  const targetGroup = cleanString(group);
+  if (!targetGroup || targetGroup.toLowerCase() === 'ungrouped') {
+    return { updated: false, group: null };
+  }
+  const beforeGroups = normalizeOrderedStringList(existingGroups);
+  if (beforeGroups.includes(targetGroup)) return { updated: false, group: targetGroup };
+  const uiPreferences = await readUiPreferences(hub);
+  const nextUiPreferences = {
+    ...uiPreferences,
+    sidebarGroupOrder: insertGroupTokenAtParentTop(uiPreferences.sidebarGroupOrder, beforeGroups, targetGroup),
+  };
+  const saved = await writeUiPreferences(hub, nextUiPreferences);
+  return { updated: true, group: targetGroup, sidebarGroupOrder: saved.sidebarGroupOrder };
+}
+
+async function reorderDronesInUiPreferences(hub, args) {
+  const rawDrones = Array.isArray(args?.drones) ? args.drones : [];
+  const refs = normalizeOrderedStringList(rawDrones);
+  if (refs.length === 0) throw new Error('drones is required');
+  if (cleanString(args?.beforeDrone) && cleanString(args?.afterDrone)) {
+    throw new Error('use either beforeDrone or afterDrone, not both');
+  }
+
+  const response = await requestDroneSummaries(hub);
+  const allDrones = Array.isArray(response?.drones) ? response.drones.map(droneSummary) : [];
+  const refToDrone = new Map();
+  for (const drone of allDrones) {
+    if (drone.id) refToDrone.set(drone.id, drone);
+    if (drone.name) refToDrone.set(drone.name, drone);
+  }
+  const movingDrones = refs.map((ref) => {
+    const drone = refToDrone.get(ref);
+    if (!drone) throw new Error(`unknown drone: ${ref}`);
+    return drone;
+  });
+
+  const targetGroup = normalizeGroupForOrder(args?.group);
+  const scopeDrones = allDrones.filter((drone) => normalizeGroupForOrder(drone.group) === targetGroup);
+  const scopeIds = scopeDrones.map((drone) => drone.id).filter(Boolean);
+  for (const drone of movingDrones) {
+    if (normalizeGroupForOrder(drone.group) !== targetGroup) {
+      throw new Error(`drone is not in group ${targetGroup}: ${drone.name || drone.id}`);
+    }
+  }
+
+  const beforeDrone = cleanString(args?.beforeDrone) ? refToDrone.get(cleanString(args.beforeDrone)) : null;
+  const afterDrone = cleanString(args?.afterDrone) ? refToDrone.get(cleanString(args.afterDrone)) : null;
+  if (cleanString(args?.beforeDrone) && !beforeDrone) throw new Error(`unknown beforeDrone: ${args.beforeDrone}`);
+  if (cleanString(args?.afterDrone) && !afterDrone) throw new Error(`unknown afterDrone: ${args.afterDrone}`);
+
+  const movingIds = movingDrones.map((drone) => drone.id).filter(Boolean);
+  const beforeId = beforeDrone?.id || '';
+  const afterId = afterDrone?.id || '';
+  const groupOrderKey = sidebarGroupOrderToken(targetGroup);
+  const parentId = targetGroup === 'Ungrouped' ? 'root' : sidebarFolderNodeId(targetGroup);
+
+  const uiPreferences = await readUiPreferences(hub);
+  const nextDroneOrder = reorderVisibleEntries(
+    uiPreferences.sidebarDroneOrderByGroup[groupOrderKey] ?? [],
+    scopeIds,
+    movingIds,
+    beforeId,
+    afterId,
+  );
+  const nextNodeOrder = reorderVisibleEntries(
+    uiPreferences.sidebarNodeOrderByParent[parentId] ?? [],
+    scopeIds.map(sidebarDroneNodeId),
+    movingIds.map(sidebarDroneNodeId),
+    beforeId ? sidebarDroneNodeId(beforeId) : '',
+    afterId ? sidebarDroneNodeId(afterId) : '',
+  );
+  const nextUiPreferences = {
+    ...uiPreferences,
+    sidebarDroneOrderByGroup: {
+      ...uiPreferences.sidebarDroneOrderByGroup,
+      [groupOrderKey]: nextDroneOrder,
+    },
+    sidebarNodeOrderByParent: {
+      ...uiPreferences.sidebarNodeOrderByParent,
+      [parentId]: nextNodeOrder,
+    },
+  };
+  const saved = await writeUiPreferences(hub, nextUiPreferences);
+  return {
+    ok: true,
+    group: targetGroup,
+    drones: movingDrones.map((drone) => ({ id: drone.id, name: drone.name })),
+    sidebarDroneOrder: saved.sidebarDroneOrderByGroup[groupOrderKey] ?? [],
+    sidebarNodeOrder: saved.sidebarNodeOrderByParent[parentId] ?? [],
+  };
+}
+
 function compareDronesByRecentActivity(a, b) {
   const aMs = Date.parse(a.lastActivityAt || a.lastMessageAt || a.createdAt || '');
   const bMs = Date.parse(b.lastActivityAt || b.lastMessageAt || b.createdAt || '');
@@ -677,6 +938,40 @@ exports.activate = async function activate(api) {
   });
 
   registerTool(api, {
+    name: 'create_group',
+    label: 'Create drone group',
+    description: 'Create an empty Drone Hub group and place it at the top of its parent in the sidebar order.',
+    approval: 'never',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        group: { type: 'string' },
+        name: { type: 'string' },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+    async execute(args = {}) {
+      const group = cleanString(args.group || args.name);
+      if (!group) throw new Error('group is required');
+      const hub = connection();
+      const beforeGroups = await listGroupNames(hub);
+      const response = await requestJson(
+        hub,
+        '/api/groups',
+        { method: 'POST', body: JSON.stringify({ name: group }) },
+      );
+      const groupOrder = await insertNewGroupAtParentTop(hub, group, beforeGroups);
+      return {
+        ok: true,
+        group: cleanString(response?.name, group),
+        createdAt: cleanIsoTimestamp(response?.createdAt),
+        groupOrder,
+      };
+    },
+  });
+
+  registerTool(api, {
     name: 'get_create_drone_defaults',
     label: 'Get create drone defaults',
     description:
@@ -721,19 +1016,48 @@ exports.activate = async function activate(api) {
       const group = args.clearGroup === true ? null : cleanString(args.group) || null;
       if (group == null && args.clearGroup !== true) throw new Error('group is required unless clearGroup is true');
       const hub = connection();
+      const beforeGroups = group ? await listGroupNames(hub) : [];
       const droneIds = await resolveDroneIdsForGroupSet(hub, drones);
       const response = await requestJson(
         hub,
         '/api/drones/group-set',
         { method: 'POST', body: JSON.stringify({ droneIds, group }) },
       );
+      const moved = Array.isArray(response?.moved) ? response.moved : [];
+      const groupOrder =
+        group && moved.length > 0
+          ? await insertNewGroupAtParentTop(hub, group, beforeGroups)
+          : { updated: false, group: group || null };
       return {
         ok: true,
         group: cleanString(response?.group) || null,
-        moved: Array.isArray(response?.moved) ? response.moved : [],
+        groupOrder,
+        moved,
         rejected: Array.isArray(response?.rejected) ? response.rejected : [],
         total: Number.isFinite(Number(response?.total)) ? Number(response.total) : drones.length,
       };
+    },
+  });
+
+  registerTool(api, {
+    name: 'reorder_drones',
+    label: 'Reorder drones',
+    description:
+      'Reorder Drone Hub drones in the sidebar. Omit group, or pass Ungrouped, for the global/root ungrouped drone order; pass a group path to reorder drones inside that group. The listed drones keep the given order and are moved to the top unless beforeDrone or afterDrone is provided.',
+    approval: 'never',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        drones: { type: 'array', items: { type: 'string' } },
+        group: { type: 'string' },
+        beforeDrone: { type: 'string' },
+        afterDrone: { type: 'string' },
+      },
+      required: ['drones'],
+      additionalProperties: false,
+    },
+    async execute(args) {
+      return reorderDronesInUiPreferences(connection(), args);
     },
   });
 
@@ -762,6 +1086,8 @@ exports.activate = async function activate(api) {
     },
     async execute(args) {
       const hub = connection();
+      const group = cleanString(args.group);
+      const beforeGroups = group ? await listGroupNames(hub) : [];
       const defaults = await createDronePreferences(hub);
       const seedAgent = args.agent == null ? agentFromPreferenceKey(defaults.spawnAgentKey) : normalizeAgent(args.agent);
       const seedModel = args.model == null ? defaults.spawnModel : cleanString(args.model);
@@ -776,7 +1102,7 @@ exports.activate = async function activate(api) {
       const body = {
         name: cleanString(args.name),
         runtime: 'container',
-        ...(cleanString(args.group) ? { group: cleanString(args.group) } : {}),
+        ...(group ? { group } : {}),
         ...(seedAgent ? { seedAgent } : {}),
         ...(seedModel ? { seedModel } : {}),
         ...(cleanString(args.cwd) ? { cwd: cleanString(args.cwd) } : {}),
@@ -793,10 +1119,12 @@ exports.activate = async function activate(api) {
       const response = await requestJson(hub, '/api/drones', { method: 'POST', body: JSON.stringify(body) }, 30_000);
       const drone = droneSummary({ ...body, ...response });
       await rememberCreatedDrone(api, drone, 'create_drone');
+      const groupOrder = group ? await insertNewGroupAtParentTop(hub, group, beforeGroups) : { updated: false, group: null };
       return {
         ok: true,
         drone,
         createdByExtension: true,
+        groupOrder,
         createDefaults: defaults,
         branch: repoPath
           ? {
@@ -830,17 +1158,21 @@ exports.activate = async function activate(api) {
       const name = cleanString(args.name);
       if (!source) throw new Error('source is required');
       if (!name) throw new Error('name is required');
+      const group = cleanString(args.group);
+      const hub = connection();
+      const beforeGroups = group ? await listGroupNames(hub) : [];
       const body = {
         name,
         runtime: 'container',
         cloneFrom: source,
         cloneChats: args.cloneChats !== false,
-        ...(cleanString(args.group) ? { group: cleanString(args.group) } : {}),
+        ...(group ? { group } : {}),
       };
-      const response = await requestJson(connection(), '/api/drones', { method: 'POST', body: JSON.stringify(body) }, 30_000);
+      const response = await requestJson(hub, '/api/drones', { method: 'POST', body: JSON.stringify(body) }, 30_000);
       const drone = droneSummary({ ...body, ...response });
       await rememberCreatedDrone(api, drone, 'clone_drone');
-      return { ok: true, drone, createdByExtension: true };
+      const groupOrder = group ? await insertNewGroupAtParentTop(hub, group, beforeGroups) : { updated: false, group: null };
+      return { ok: true, drone, createdByExtension: true, groupOrder };
     },
   });
 

@@ -264,6 +264,10 @@ export function useSidebarOptimisticGroups({
       if (droneIds.length === 0) return { ok: false, error: 'No drones selected.' } satisfies MoveDronesToGroupResult;
       const createOpId = createOptimisticSidebarOpId();
       const moveOpId = createOptimisticSidebarOpId();
+      const groupOrderSnapshot = sidebarGroupOrder;
+      setSidebarGroupOrder((prev) =>
+        insertSidebarGroupOrderToken(prev, sidebarGroups, { group, kind: 'group' }, 'start'),
+      );
       setPendingSidebarOps((prev) => [
         ...prev,
         { id: createOpId, kind: 'create_group', group },
@@ -272,10 +276,13 @@ export function useSidebarOptimisticGroups({
       const result = await onCreateGroupAndMove(group, droneIds);
       if (!result.ok) {
         setPendingSidebarOps((prev) => prev.filter((op) => op.id !== createOpId && op.id !== moveOpId));
+        if (!result.groupCreated) {
+          setSidebarGroupOrder(groupOrderSnapshot);
+        }
       }
       return result;
     },
-    [createOptimisticSidebarOpId, onCreateGroupAndMove],
+    [createOptimisticSidebarOpId, onCreateGroupAndMove, setSidebarGroupOrder, sidebarGroupOrder, sidebarGroups],
   );
 
   const optimisticSidebarDronesFilteredByRepo = React.useMemo(
