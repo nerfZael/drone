@@ -214,6 +214,7 @@ const MODEL_OPTIONS: AssistantModelOption[] = [
 
 const ARTIFACT_MAX_BYTES = 256 * 1024;
 const MODEL_TOOL_TEST_ENV = 'VOICE_STREAM_NEXT_TEST_MODEL_TOOL_CALLS';
+const REQUIRED_SPEAK_TOOL_ERROR = 'Voice assistant turn ended without using the speak tool. Please retry; voice replies must call speak at least once per turn.';
 const USD_MICROS_PER_DOLLAR = 1_000_000;
 const MICROCREDITS_PER_DOLLAR = 100_000_000;
 const EXA_SEARCH_FALLBACK_COST_DOLLARS = 0.007;
@@ -662,6 +663,7 @@ async function runModelDrivenTurn(
     db.updateRun(userId, run.id, { status: 'waiting_for_approval', error: null });
     return;
   }
+  ensureRequiredSpeakToolUsed(db, userId, threadId, run, thread);
   finishRun(db, userId, threadId, run.id);
 }
 
@@ -677,11 +679,12 @@ type AgentRunContext = {
   approvalPendingModelIds: Set<string>;
   persistedToolResultModelIds: Set<string>;
   loadedSkillToolNames: Set<string>;
+  speakToolUsed: boolean;
   refreshAgentTools?: () => void;
 };
 
 function makeAgentRunContext(
-  input: Omit<AgentRunContext, 'toolCallsByModelId' | 'approvalPendingModelIds' | 'persistedToolResultModelIds' | 'loadedSkillToolNames' | 'refreshAgentTools'>,
+  input: Omit<AgentRunContext, 'toolCallsByModelId' | 'approvalPendingModelIds' | 'persistedToolResultModelIds' | 'loadedSkillToolNames' | 'speakToolUsed' | 'refreshAgentTools'>,
 ): AgentRunContext {
   return {
     ...input,
@@ -689,6 +692,7 @@ function makeAgentRunContext(
     approvalPendingModelIds: new Set(),
     persistedToolResultModelIds: new Set(),
     loadedSkillToolNames: new Set(),
+    speakToolUsed: runUsedSpeakTool(input.db, input.userId, input.threadId, input.run.id),
   };
 }
 
@@ -943,6 +947,7 @@ async function createAgentToolCallRecord(context: AgentRunContext, call: Pick<To
   ensureToolEnabled(context.thread, toolName, context.loadedSkillToolNames);
   ensureCapability(context.thread, toolName);
   ensureHandsFreeToolAvailable(context.db, context.userId, context.thread, toolName);
+  if (toolName === 'speak') context.speakToolUsed = true;
   const args = call.arguments ?? {};
   if (await dynamicToolBlockedByHandsFreeMode(context.db, context.userId, context.thread, toolName, args)) {
     throw Object.assign(new Error(`${toolLabel(toolName, context.db, context.userId)} needs approval for this request and is unavailable while hands-free mode is on`), { statusCode: 403 });
@@ -975,7 +980,9 @@ async function createAgentToolCallRecord(context: AgentRunContext, call: Pick<To
 async function persistAgentEvent(context: AgentRunContext, event: AgentEvent): Promise<void> {
   if (event.type === 'message_update') {
     const messageEvent = event.assistantMessageEvent as any;
-    if (messageEvent.type === 'text_delta' && messageEvent.delta) context.emit({ type: 'delta', delta: String(messageEvent.delta) });
+    if (messageEvent.type === 'text_delta' && messageEvent.delta && !shouldSuppressTextUntilSpeak(context)) {
+      context.emit({ type: 'delta', delta: String(messageEvent.delta) });
+    }
     if (messageEvent.type === 'thinking_delta' && messageEvent.delta) context.emit({ type: 'thinking_delta', delta: String(messageEvent.delta) });
     return;
   }
@@ -1000,12 +1007,16 @@ async function persistAgentEvent(context: AgentRunContext, event: AgentEvent): P
     const text = textFromAgentAssistantMessage(message) ||
       (message.errorMessage ? String(message.errorMessage) : '') ||
       (toolCalls.length > 0 ? `Requested ${toolCalls.map((call) => toolLabel(call.name, context.db, context.userId)).join(', ')}.` : '');
+    if (toolCalls.length === 0 && !message.errorMessage && shouldSuppressTextUntilSpeak(context)) {
+      recordAssistantModelUsage(context, message);
+      return;
+    }
     const dbMessage = context.db.addMessage(context.userId, context.threadId, {
       role: 'assistant',
       content: text,
       contentJson,
       isError: Boolean(message.errorMessage),
-      spokenText: context.thread.voiceEnabled ? text : null,
+      spokenText: modelDrivenSpokenText(context.thread, text),
     });
     recordAssistantModelUsage(context, message);
     context.emit({ type: 'message', message: dbMessage });
@@ -2087,6 +2098,36 @@ function ensureCapability(thread: AssistantThread, toolName: string): void {
   if (toolName === 'assistant_artifacts' && !caps.artifacts) throw Object.assign(new Error('artifact capability is disabled'), { statusCode: 403 });
   if (toolName === 'speak' && !caps.speech) throw Object.assign(new Error('speech capability is disabled'), { statusCode: 403 });
   if ((toolName === 'web_search' || toolName === 'fetch_content') && !caps.externalCalls) throw Object.assign(new Error('external call capability is disabled'), { statusCode: 403 });
+}
+
+function ensureRequiredSpeakToolUsed(
+  db: VoiceStreamNextDb,
+  userId: string,
+  threadId: string,
+  run: AssistantRunRecord,
+  thread: AssistantThread,
+): void {
+  if (!requiresSpeakTool(thread)) return;
+  if (!runUsedSpeakTool(db, userId, threadId, run.id)) throw new Error(REQUIRED_SPEAK_TOOL_ERROR);
+}
+
+function requiresSpeakTool(thread: AssistantThread): boolean {
+  return thread.voiceEnabled && thread.capabilities.speech && thread.enabledTools.includes('speak');
+}
+
+function runUsedSpeakTool(db: VoiceStreamNextDb, userId: string, threadId: string, runId: string): boolean {
+  return db.listToolCalls(userId, threadId).some((toolCall) =>
+    toolCall.runId === runId && toolCall.toolName === 'speak',
+  );
+}
+
+function shouldSuppressTextUntilSpeak(context: AgentRunContext): boolean {
+  return requiresSpeakTool(context.thread) && !context.speakToolUsed;
+}
+
+function modelDrivenSpokenText(thread: AssistantThread, text: string): string | null {
+  if (requiresSpeakTool(thread)) return null;
+  return thread.voiceEnabled ? text : null;
 }
 
 async function approvalRequiredFor(db: VoiceStreamNextDb, userId: string, thread: AssistantThread, toolName: string, args: unknown): Promise<boolean> {
