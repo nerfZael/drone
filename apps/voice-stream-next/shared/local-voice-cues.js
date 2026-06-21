@@ -56,8 +56,8 @@ const LOCAL_VOICE_CUE_TONES = {
 };
 
 const LOCAL_VOICE_CUE_GAINS = {
-  stop_button: 0.11,
-  clipboard_transcription_success: 0.13,
+  stop_button: 0.0715,
+  clipboard_transcription_success: 0.0845,
 };
 const DEFAULT_LOCAL_VOICE_CUE_GAIN = 0.22;
 
