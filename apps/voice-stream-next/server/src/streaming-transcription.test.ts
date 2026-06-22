@@ -238,7 +238,72 @@ describe('StreamingTranscriptionManager', () => {
     expect(segments).toHaveLength(1);
     expect(segments[0]?.text).toBe('Keep this speech segment.');
   });
+
+  test('detects terminal command from a later segment while an earlier segment is still transcribing', async () => {
+    const config = {
+      ...buildStreamingTranscriptionConfigFromEnv({}),
+      concurrency: 2,
+      finalTranscriptionMode: 'segments' as const,
+    };
+    const commands: Array<{ type: string; transcriptText: string }> = [];
+    const startedSequences: number[] = [];
+    const pending: Array<{ resolve: (result: any) => void }> = [];
+    const manager = new StreamingTranscriptionManager(config, (command) => {
+      commands.push({ type: command.type, transcriptText: command.transcriptText });
+    }, undefined, {
+      beforeTranscription: (_pcm, source, context) => {
+        if (source === 'segment' && context.segment) startedSequences.push(context.segment.sequence);
+      },
+      transcribe: (pcm) => new Promise((resolve) => {
+        pending.push({ resolve: (result) => resolve({ audioDurationMs: Math.round(pcm.byteLength / 32), ...result }) });
+      }),
+    });
+
+    appendSpeechSegment(manager);
+    appendSpeechSegment(manager);
+
+    const startedAt = Date.now();
+    while (pending.length < 2 && Date.now() - startedAt < 2_000) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(startedSequences).toEqual([1, 2]);
+    pending[1]?.resolve({
+      provider: 'fallback',
+      credentialSource: null,
+      model: null,
+      text: "second segment, that's it.",
+    });
+
+    const commandStartedAt = Date.now();
+    while (commands.length === 0 && Date.now() - commandStartedAt < 2_000) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    pending[0]?.resolve({
+      provider: 'fallback',
+      credentialSource: null,
+      model: null,
+      text: 'first segment still running',
+    });
+    manager.stop();
+
+    expect(commands).toHaveLength(1);
+    expect(commands[0]?.type).toBe('finish');
+    expect(commands[0]?.transcriptText).toBe('second segment,');
+  });
 });
+
+function appendSpeechSegment(manager: StreamingTranscriptionManager): void {
+  const speechChunk = speechLikeChunk();
+  const silenceChunk = silentChunk();
+  for (let index = 0; index < 8; index += 1) {
+    manager.appendPcm(speechChunk);
+  }
+  for (let index = 0; index < 12; index += 1) {
+    manager.appendPcm(silenceChunk);
+  }
+}
 
 function speechLikeChunk(): Uint8Array {
   const samples = new Int16Array(4096);

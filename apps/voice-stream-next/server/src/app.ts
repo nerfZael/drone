@@ -4144,19 +4144,87 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
             }),
           });
         }, {
+          onSegmentQueued: (segment) => {
+            addLog(device.userId, {
+              deviceId: device.id,
+              source: device.deviceType,
+              level: 'info',
+              message: 'Voice transcription segment queued',
+              detailsJson: JSON.stringify({
+                mode: streamMode,
+                segmentSequence: segment.sequence,
+                segmentReason: segment.reason,
+                audioMs: segment.audioMs,
+                rawAudioMs: segment.rawAudioMs,
+                speechMs: segment.speechMs,
+                trailingSilenceMs: segment.trailingSilenceMs,
+                queuedAt: segment.queuedAt,
+              }),
+            });
+          },
           transcribe: (pcm) => transcribePcm16(pcm, {
             apiKey: groqSpeechCredential?.apiKey,
             credentialSource: groqSpeechCredential?.source,
           }),
-          beforeTranscription: (pcm) => {
+          beforeTranscription: (pcm, source, context) => {
             if (groqSpeechCredential?.source === 'platform_groq_key' && pcm.byteLength >= 1600) {
               db.requirePositiveCreditBalance(device.userId, 'Groq streaming transcription');
             }
+            addLog(device.userId, {
+              deviceId: device.id,
+              source: device.deviceType,
+              level: 'info',
+              message: 'Voice transcription request started',
+              detailsJson: JSON.stringify({
+                mode: streamMode,
+                source,
+                bytes: pcm.byteLength,
+                audioMs: Math.round(pcm.byteLength / 32),
+                segmentSequence: context.segment?.sequence ?? null,
+                segmentReason: context.segment?.reason ?? null,
+                queuedDelayMs: context.queuedDelayMs ?? null,
+              }),
+            });
           },
-          onTranscription: (result, source) => {
+          onTranscription: (result, source, context) => {
             recordGroqTranscriptionUsage(device.userId, result, {
               deviceId: device.id,
               source: `voice_stream_${source}`,
+            });
+            addLog(device.userId, {
+              deviceId: device.id,
+              source: device.deviceType,
+              level: 'info',
+              message: 'Voice transcription request completed',
+              detailsJson: JSON.stringify({
+                mode: streamMode,
+                source,
+                provider: result.provider,
+                model: result.model,
+                audioDurationMs: result.audioDurationMs,
+                transcriptChars: result.text.length,
+                segmentSequence: context.segment?.sequence ?? null,
+                segmentReason: context.segment?.reason ?? null,
+                queuedDelayMs: context.queuedDelayMs ?? null,
+                elapsedMs: context.elapsedMs ?? null,
+              }),
+            });
+          },
+          onTranscriptionError: (error, source, context) => {
+            addLog(device.userId, {
+              deviceId: device.id,
+              source: device.deviceType,
+              level: 'warn',
+              message: 'Voice transcription request failed',
+              detailsJson: JSON.stringify({
+                mode: streamMode,
+                source,
+                error: error instanceof Error ? error.message : String(error),
+                segmentSequence: context.segment?.sequence ?? null,
+                segmentReason: context.segment?.reason ?? null,
+                queuedDelayMs: context.queuedDelayMs ?? null,
+                elapsedMs: context.elapsedMs ?? null,
+              }),
             });
           },
           onSegment: (segment) => {
@@ -4263,6 +4331,14 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           : ignoreCommands
             ? 'disabled: shortcut transcription mode'
             : 'disabled: missing speech transcription runtime',
+        transcriptionConfig: {
+          concurrency: transcriptionConfig.concurrency,
+          silenceMs: transcriptionConfig.silenceMs,
+          silenceThreshold: transcriptionConfig.silenceThreshold,
+          maxSegmentMs: transcriptionConfig.maxSegmentMs,
+          overlapMs: transcriptionConfig.overlapMs,
+          finalTranscriptionMode: smartTranscriptionEnabled ? 'segments' : transcriptionConfig.finalTranscriptionMode,
+        },
       }),
     });
     db.upsertClientStatus(device.userId, device.id, {

@@ -21,6 +21,7 @@ export type TerminalDetection = {
 
 export type StreamingTranscriptionConfig = {
   intervalMs: number;
+  concurrency: number;
   minSpeechMs: number;
   minSubmitMs: number;
   silenceMs: number;
@@ -36,10 +37,29 @@ export type StreamingTranscriptionConfig = {
   maxSessionAudioBytes: number;
 };
 
+export type StreamingSegmentMetadata = {
+  audioMs: number;
+  rawAudioMs: number;
+  speechMs: number;
+  trailingSilenceMs: number;
+  reason: QueuedSegment['reason'];
+  queuedAt: string;
+  sequence: number;
+};
+
+export type StreamingTranscriptionHookContext = {
+  source: 'segment' | 'final';
+  segment?: StreamingSegmentMetadata;
+  queuedDelayMs?: number;
+  elapsedMs?: number;
+};
+
 export type StreamingTranscriptionHooks = {
   transcribe?: (pcm: Uint8Array) => Promise<RuntimeResult>;
-  beforeTranscription?: (pcm: Uint8Array, source: 'segment' | 'final') => void;
-  onTranscription?: (result: RuntimeResult, source: 'segment' | 'final') => void;
+  onSegmentQueued?: (segment: StreamingSegmentMetadata) => void;
+  beforeTranscription?: (pcm: Uint8Array, source: 'segment' | 'final', context: StreamingTranscriptionHookContext) => void;
+  onTranscription?: (result: RuntimeResult, source: 'segment' | 'final', context: StreamingTranscriptionHookContext) => void;
+  onTranscriptionError?: (error: unknown, source: 'segment' | 'final', context: StreamingTranscriptionHookContext) => void;
   onSegment?: (segment: { text: string; audioMs: number; sequence: number; receivedAt: string }) => void;
 };
 
@@ -70,6 +90,7 @@ type SpeechSegmenterConfig = Pick<
 export function buildStreamingTranscriptionConfigFromEnv(env: NodeJS.ProcessEnv = process.env): StreamingTranscriptionConfig {
   return {
     intervalMs: parsePositiveInteger(env.VOICE_STREAM_NEXT_TRANSCRIBE_INTERVAL_MS, 500),
+    concurrency: parsePositiveInteger(env.VOICE_STREAM_NEXT_TRANSCRIBE_CONCURRENCY, 3),
     minSpeechMs: parsePositiveInteger(env.VOICE_STREAM_NEXT_TRANSCRIBE_MIN_SPEECH_MS, 180),
     minSubmitMs: parsePositiveInteger(env.VOICE_STREAM_NEXT_TRANSCRIBE_MIN_SUBMIT_MS, 1_000),
     silenceMs: parsePositiveInteger(env.VOICE_STREAM_NEXT_TRANSCRIBE_SILENCE_MS, 650),
@@ -94,10 +115,12 @@ export class StreamingTranscriptionManager {
   private readonly segmenter: PcmSpeechSegmenter;
   private readonly queue: QueuedSegment[] = [];
   private readonly timer: ReturnType<typeof setInterval>;
-  private inFlight = false;
+  private activeTranscriptions = 0;
   private stopped = false;
   private terminalCommandDetected = false;
   private transcriptContext = '';
+  private completedSegmentTexts = new Map<number, { text: string; audioMs: number }>();
+  private nextTranscriptSequence = 1;
   private sessionChunks: Uint8Array[] = [];
   private sessionBytes = 0;
   private sessionAudioOverflowed = false;
@@ -136,45 +159,55 @@ export class StreamingTranscriptionManager {
   stop(): void {
     this.stopped = true;
     this.queue.length = 0;
-    this.inFlight = false;
     this.segmenter.reset();
+    this.completedSegmentTexts.clear();
     this.clearSessionAudio();
     clearInterval(this.timer);
   }
 
-  private async processQueue(): Promise<void> {
-    if (this.stopped || this.terminalCommandDetected || this.inFlight || this.queue.length === 0) {
+  private processQueue(): void {
+    if (this.stopped || this.terminalCommandDetected) {
       return;
     }
-    const segment = this.queue.shift()!;
-    this.inFlight = true;
+    const concurrency = Math.max(1, this.config.concurrency);
+    while (!this.stopped && !this.terminalCommandDetected && this.activeTranscriptions < concurrency && this.queue.length > 0) {
+      const segment = this.queue.shift()!;
+      this.activeTranscriptions += 1;
+      void this.runSegmentTranscription(segment);
+    }
+  }
+
+  private async runSegmentTranscription(segment: QueuedSegment): Promise<void> {
     try {
       await this.transcribeSegment(segment);
     } finally {
-      this.inFlight = false;
-      if (!this.terminalCommandDetected) {
-        void this.processQueue();
-      }
+      this.activeTranscriptions = Math.max(0, this.activeTranscriptions - 1);
+      this.processQueue();
     }
   }
 
   private async transcribeSegment(segment: QueuedSegment): Promise<void> {
-    this.hooks.beforeTranscription?.(segment.pcm, 'segment');
-    const result = await (this.hooks.transcribe?.(segment.pcm) ?? transcribePcm16(segment.pcm));
-    this.hooks.onTranscription?.(result, 'segment');
+    const startedAtMs = Date.now();
+    const context: StreamingTranscriptionHookContext = {
+      source: 'segment',
+      segment: segmentMetadata(segment),
+      queuedDelayMs: Math.max(0, startedAtMs - Date.parse(segment.queuedAt)),
+    };
+    this.hooks.beforeTranscription?.(segment.pcm, 'segment', context);
+    let result: RuntimeResult;
+    try {
+      result = await (this.hooks.transcribe?.(segment.pcm) ?? transcribePcm16(segment.pcm));
+    } catch (error) {
+      this.hooks.onTranscriptionError?.(error, 'segment', { ...context, elapsedMs: Math.max(0, Date.now() - startedAtMs) });
+      return;
+    }
+    const completedContext = { ...context, elapsedMs: Math.max(0, Date.now() - startedAtMs) };
+    this.hooks.onTranscription?.(result, 'segment', completedContext);
     if (this.stopped || this.terminalCommandDetected) return;
 
     if (!this.config.detectTerminalCommands) {
       const text = normalizeTranscriptWhitespace(result.text);
-      if (hasTranscriptContent(text)) {
-        this.rememberTranscript(text);
-        this.hooks.onSegment?.({
-          text,
-          audioMs: segment.audioMs,
-          sequence: segment.sequence,
-          receivedAt: new Date().toISOString(),
-        });
-      }
+      this.rememberCompletedSegment(segment, text);
       return;
     }
 
@@ -242,26 +275,21 @@ export class StreamingTranscriptionManager {
       return;
     }
 
-    if (hasTranscriptContent(commandResult.text)) {
-      this.rememberTranscript(commandResult.text);
-      this.hooks.onSegment?.({
-        text: commandResult.text,
-        audioMs: segment.audioMs,
-        sequence: segment.sequence,
-        receivedAt: new Date().toISOString(),
-      });
-    }
+    this.rememberCompletedSegment(segment, commandResult.text);
   }
 
   private async transcribeFinalSession(pcm: Uint8Array, fallbackText: string): Promise<string> {
     if (pcm.byteLength === 0) return fallbackText;
     try {
-      this.hooks.beforeTranscription?.(pcm, 'final');
+      const startedAtMs = Date.now();
+      const context: StreamingTranscriptionHookContext = { source: 'final' };
+      this.hooks.beforeTranscription?.(pcm, 'final', context);
       const result = await (this.hooks.transcribe?.(pcm) ?? transcribePcm16(pcm));
-      this.hooks.onTranscription?.(result, 'final');
+      this.hooks.onTranscription?.(result, 'final', { ...context, elapsedMs: Math.max(0, Date.now() - startedAtMs) });
       const cleaned = stripTranscriptCommands(result.text).text;
       return hasTranscriptContent(cleaned) ? cleaned : fallbackText;
-    } catch {
+    } catch (error) {
+      this.hooks.onTranscriptionError?.(error, 'final', { source: 'final' });
       return fallbackText;
     }
   }
@@ -273,6 +301,29 @@ export class StreamingTranscriptionManager {
   private rememberTranscript(text: string): void {
     const next = `${this.transcriptContext} ${text}`.trim();
     this.transcriptContext = next.slice(Math.max(0, next.length - 700));
+  }
+
+  private rememberCompletedSegment(segment: QueuedSegment, text: string): void {
+    this.completedSegmentTexts.set(segment.sequence, { text, audioMs: segment.audioMs });
+    this.flushCompletedSegments();
+  }
+
+  private flushCompletedSegments(): void {
+    while (!this.stopped && !this.terminalCommandDetected) {
+      const next = this.completedSegmentTexts.get(this.nextTranscriptSequence);
+      if (!next) return;
+      this.completedSegmentTexts.delete(this.nextTranscriptSequence);
+      if (hasTranscriptContent(next.text)) {
+        this.rememberTranscript(next.text);
+        this.hooks.onSegment?.({
+          text: next.text,
+          audioMs: next.audioMs,
+          sequence: this.nextTranscriptSequence,
+          receivedAt: new Date().toISOString(),
+        });
+      }
+      this.nextTranscriptSequence += 1;
+    }
   }
 
   private rememberSessionAudio(pcm: Uint8Array): void {
@@ -316,8 +367,21 @@ export class StreamingTranscriptionManager {
   private enqueueSegments(segments: QueuedSegment[]): void {
     for (const segment of segments) {
       this.queue.push(segment);
+      this.hooks.onSegmentQueued?.(segmentMetadata(segment));
     }
   }
+}
+
+function segmentMetadata(segment: QueuedSegment): StreamingSegmentMetadata {
+  return {
+    audioMs: segment.audioMs,
+    rawAudioMs: segment.rawAudioMs,
+    speechMs: segment.speechMs,
+    trailingSilenceMs: segment.trailingSilenceMs,
+    reason: segment.reason,
+    queuedAt: segment.queuedAt,
+    sequence: segment.sequence,
+  };
 }
 
 export function stripTranscriptCommands(text: string): {
