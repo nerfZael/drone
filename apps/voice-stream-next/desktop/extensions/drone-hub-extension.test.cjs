@@ -368,6 +368,71 @@ describe('drone hub desktop extension', () => {
     expect(result.drones[0]).toMatchObject({ id: 'drone-1', name: 'Alpha', group: 'Review', status: 'ready' });
   });
 
+  test('renames multiple drones through resolved ids', async () => {
+    const api = createApi();
+    const requests = [];
+    globalThis.fetch = async (url, init = {}) => {
+      requests.push({ url: String(url), init });
+      if (String(url).endsWith('/api/drones/summary')) {
+        return jsonResponse({
+          ok: true,
+          drones: [
+            { id: 'drone-a', name: 'Alpha', group: 'Review' },
+            { id: 'drone-b', name: 'Beta', group: 'Review' },
+          ],
+        });
+      }
+      if (String(url).endsWith('/api/drones/drone-a/rename')) {
+        const body = JSON.parse(init.body);
+        return jsonResponse({
+          ok: true,
+          id: 'drone-a',
+          oldName: 'Alpha',
+          newName: body.newName,
+          renamed: true,
+        });
+      }
+      if (String(url).endsWith('/api/drones/drone-b/rename')) {
+        const body = JSON.parse(init.body);
+        return jsonResponse({
+          ok: true,
+          id: 'drone-b',
+          oldName: 'Beta',
+          newName: body.newName,
+          renamed: true,
+        });
+      }
+      return jsonResponse({ ok: false, error: 'not found' }, 404);
+    };
+
+    await extension.activate(api);
+    const result = await api.tools.get('rename_drones').execute({
+      renames: [
+        { drone: 'Alpha', newName: 'Auth fix' },
+        { droneId: 'drone-b', newName: 'Billing review' },
+      ],
+    });
+
+    const renameRequests = requests.filter((request) => String(request.url).endsWith('/rename'));
+    expect(renameRequests.map((request) => request.url)).toEqual([
+      'http://hub.local/api/drones/drone-a/rename',
+      'http://hub.local/api/drones/drone-b/rename',
+    ]);
+    expect(renameRequests.map((request) => JSON.parse(request.init.body).newName)).toEqual([
+      'Auth fix',
+      'Billing review',
+    ]);
+    expect(result).toMatchObject({
+      ok: true,
+      total: 2,
+      renamed: [
+        { id: 'drone-a', oldName: 'Alpha', newName: 'Auth fix', renamed: true },
+        { id: 'drone-b', oldName: 'Beta', newName: 'Billing review', renamed: true },
+      ],
+      rejected: [],
+    });
+  });
+
   test('exposes a drone reorder tool that updates sidebar preferences for a group', async () => {
     const api = createApi();
     const requests = [];

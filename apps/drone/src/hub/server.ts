@@ -364,6 +364,7 @@ import {
   type AssistantCreateChatResult,
   type AssistantCreateDroneResult,
   type AssistantDroneSummary,
+  type AssistantRenameDronesResult,
   type AssistantSetDroneGroupResult,
   type AssistantVoiceSource,
 } from './assistant';
@@ -12841,6 +12842,37 @@ export async function startDroneHubApiServer(opts: {
         rejected: Array.isArray(data?.rejected) ? data.rejected : [],
         total: Number.isFinite(Number(data?.total)) ? Number(data.total) : 0,
       };
+    },
+    renameDrones: async ({ renames }): Promise<AssistantRenameDronesResult> => {
+      const renamed: AssistantRenameDronesResult['renamed'] = [];
+      const rejected: AssistantRenameDronesResult['rejected'] = [];
+      for (const request of renames) {
+        const droneId = String(request?.droneId ?? '').trim();
+        const newName = String(request?.newName ?? '').trim();
+        if (!droneId || !newName) {
+          rejected.push({ id: droneId, newName, error: 'missing drone id or new name' });
+          continue;
+        }
+        try {
+          const data = await callLocalHubApi(`/api/drones/${encodeURIComponent(droneId)}/rename`, {
+            newName,
+            source: 'drone-hub-assistant',
+          });
+          renamed.push({
+            id: String(data?.id ?? droneId).trim() || droneId,
+            oldName: String(data?.oldName ?? droneId).trim() || droneId,
+            newName: String(data?.newName ?? newName).trim() || newName,
+            renamed: data?.renamed !== false,
+          });
+        } catch (error: any) {
+          rejected.push({
+            id: droneId,
+            newName,
+            error: String(error?.message ?? error ?? 'rename failed'),
+          });
+        }
+      }
+      return { renamed, rejected, total: renames.length };
     },
     messageDrone: async ({ droneId, chatName, prompt }) => {
       const resolved = await resolveDroneOrPendingForReadRef(droneId);
