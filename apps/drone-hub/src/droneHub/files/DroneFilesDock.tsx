@@ -1,10 +1,25 @@
 import React from 'react';
-import { IconPencil } from '../app/icons';
+import { IconPencil, IconTrash } from '../app/icons';
+import { invalidateFsListCachesForDrone } from '../app/use-files-and-ports-pane-state';
 import { formatBytes } from '../app/selected-drone-workspace-utils';
 import { requestJson } from '../http';
 import { IconChevron, iconForFilePath } from '../icons';
 import type { DroneFsEntry, DroneFsListPayload, DroneFsUploadPayload } from '../types';
+import { runDroneFsAction } from './file-actions-api';
 import type { DroneOpenedFileState } from './opened-file-types';
+import {
+  allVisibleSelected,
+  isPathInsideOrEqual,
+  movedPathForEntry,
+  pruneSelectedPaths,
+  renamedPathForEntry,
+  selectedEntriesFromPaths,
+  setAllVisibleSelected,
+  topLevelSelectedEntries,
+  toggleSelectedPath,
+  type FileClipboardState,
+} from './explorer-state';
+import { DroneFilesToolbar, type DroneFilesActionMode } from './DroneFilesToolbar';
 import { buildFileExplorerTree, type FileExplorerNode } from './tree';
 
 const CHILD_DIRECTORY_CACHE_MAX_AGE_MS = 5 * 60_000;
@@ -30,6 +45,14 @@ function writeChildDirectoryCache(cacheKey: string, entries: DroneFsEntry[]): vo
   if (!cacheKey) return;
   if (childDirectoryCache.size > 500) childDirectoryCache.clear();
   childDirectoryCache.set(cacheKey, { atMs: Date.now(), entries });
+}
+
+function clearChildDirectoryCacheForDrone(droneIdRaw: string): void {
+  const droneId = String(droneIdRaw ?? '').trim();
+  if (!droneId) return;
+  for (const key of Array.from(childDirectoryCache.keys())) {
+    if (key.startsWith(`${droneId}\u0000`)) childDirectoryCache.delete(key);
+  }
 }
 
 function normalizeContainerPathInput(raw: string): string {
@@ -110,6 +133,7 @@ export function DroneFilesDock({
   onOpenFileInPanel,
   onRefresh,
   onRefreshOpenedFile,
+  onCloseOpenedFile,
   openedFile,
 }: {
   droneId: string;
@@ -128,6 +152,7 @@ export function DroneFilesDock({
   onOpenFileInPanel?: (entry: DroneFsEntry) => boolean;
   onRefresh: () => void;
   onRefreshOpenedFile?: () => void;
+  onCloseOpenedFile?: () => void;
   openedFile: DroneOpenedFileState;
 }) {
   const shownName = String(droneLabel ?? droneName).trim() || droneName;
@@ -146,6 +171,13 @@ export function DroneFilesDock({
   const [uploading, setUploading] = React.useState(false);
   const [uploadStatus, setUploadStatus] = React.useState<string | null>(null);
   const [uploadError, setUploadError] = React.useState<string | null>(null);
+  const [selectedPaths, setSelectedPaths] = React.useState<Set<string>>(() => new Set());
+  const [clipboard, setClipboard] = React.useState<FileClipboardState>(null);
+  const [actionMode, setActionMode] = React.useState<DroneFilesActionMode | null>(null);
+  const [actionInput, setActionInput] = React.useState('');
+  const [actionLoading, setActionLoading] = React.useState(false);
+  const [actionStatus, setActionStatus] = React.useState<string | null>(null);
+  const [actionError, setActionError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     setPathInput(normalizedPath);
@@ -165,6 +197,12 @@ export function DroneFilesDock({
     setUploading(false);
     setUploadError(null);
     setUploadStatus(null);
+    setActionMode(null);
+    setActionInput('');
+    setActionLoading(false);
+    setActionError(null);
+    setActionStatus(null);
+    setSelectedPaths(new Set());
   }, [droneId, normalizedPath]);
 
   React.useEffect(
@@ -183,6 +221,20 @@ export function DroneFilesDock({
     [childEntriesByPath, entries],
   );
 
+  const visibleEntries = React.useMemo(() => {
+    const out: DroneFsEntry[] = [];
+    const visit = (nodes: FileExplorerNode[]) => {
+      for (const node of nodes) {
+        out.push(node.entry);
+        if (node.kind === 'directory' && expandedDirs[node.path] === true && node.children) {
+          visit(node.children);
+        }
+      }
+    };
+    visit(explorerTree);
+    return out;
+  }, [expandedDirs, explorerTree]);
+
   const crumbs = React.useMemo(() => {
     if (normalizedPath === '/') return [{ label: '/', path: '/' }];
     const out: Array<{ label: string; path: string }> = [{ label: '/', path: '/' }];
@@ -194,6 +246,13 @@ export function DroneFilesDock({
     }
     return out;
   }, [normalizedPath]);
+
+  const selectedEntries = React.useMemo(() => selectedEntriesFromPaths(visibleEntries, selectedPaths), [selectedPaths, visibleEntries]);
+  const actionEntries = React.useMemo(() => topLevelSelectedEntries(selectedEntries), [selectedEntries]);
+  const selectedCount = selectedEntries.length;
+  const selectedOne = selectedCount === 1 ? selectedEntries[0] ?? null : null;
+  const visibleAllSelected = React.useMemo(() => allVisibleSelected(visibleEntries, selectedPaths), [selectedPaths, visibleEntries]);
+  const busy = uploading || actionLoading;
 
   const submitPath = React.useCallback(() => {
     setPathEntryOpen(false);
@@ -268,6 +327,8 @@ export function DroneFilesDock({
   );
 
   const refreshExplorer = React.useCallback(() => {
+    clearChildDirectoryCacheForDrone(droneId);
+    invalidateFsListCachesForDrone(droneId);
     onRefresh();
     onRefreshOpenedFile?.();
     const visibleExpandedDirs = Object.entries(expandedDirs)
@@ -276,7 +337,201 @@ export function DroneFilesDock({
     for (const dirPath of visibleExpandedDirs) {
       void loadDirectory(dirPath, { force: true });
     }
-  }, [expandedDirs, loadDirectory, onRefresh, onRefreshOpenedFile]);
+  }, [droneId, expandedDirs, loadDirectory, onRefresh, onRefreshOpenedFile]);
+
+  const pathContainsActiveFile = React.useCallback(
+    (entry: DroneFsEntry) => isPathInsideOrEqual(entry.path, activeOpenedFilePath),
+    [activeOpenedFilePath],
+  );
+
+  const clearClipboardForChangedEntries = React.useCallback((changedEntries: DroneFsEntry[]) => {
+    if (changedEntries.length === 0) return;
+    setClipboard((prev) => {
+      if (!prev) return prev;
+      const hasChangedSource = prev.entries.some((clipEntry) =>
+        changedEntries.some((changedEntry) => isPathInsideOrEqual(changedEntry.path, clipEntry.path)),
+      );
+      return hasChangedSource ? null : prev;
+    });
+  }, []);
+
+  const refreshAfterMutation = React.useCallback(
+    (message: string) => {
+      setActionStatus(message);
+      clearChildDirectoryCacheForDrone(droneId);
+      invalidateFsListCachesForDrone(droneId);
+      onRefresh();
+      const visibleExpandedDirs = Object.entries(expandedDirs)
+        .filter(([, open]) => open)
+        .map(([dirPath]) => dirPath);
+      for (const dirPath of visibleExpandedDirs) {
+        void loadDirectory(dirPath, { force: true });
+      }
+    },
+    [droneId, expandedDirs, loadDirectory, onRefresh],
+  );
+
+  const runAction = React.useCallback(
+    async (label: string, task: () => Promise<void>) => {
+      if (actionLoading) return;
+      setActionLoading(true);
+      setActionError(null);
+      setActionStatus(`${label}...`);
+      try {
+        await task();
+      } catch (e: any) {
+        setActionError(String(e?.message ?? e ?? 'filesystem action failed'));
+        setActionStatus(null);
+      } finally {
+        setActionLoading(false);
+      }
+    },
+    [actionLoading],
+  );
+
+  const submitInlineAction = React.useCallback(() => {
+    const value = actionInput.trim();
+    if (!actionMode || !value) return;
+    if (actionMode === 'create-file' || actionMode === 'create-directory') {
+      void runAction(actionMode === 'create-file' ? 'Creating file' : 'Creating folder', async () => {
+        await runDroneFsAction(droneId, {
+          action: actionMode,
+          targetDir: normalizedPath,
+          name: value,
+        });
+        setActionMode(null);
+        setActionInput('');
+        refreshAfterMutation(`${actionMode === 'create-file' ? 'Created file' : 'Created folder'} ${value}.`);
+      });
+      return;
+    }
+    if (actionMode === 'rename' && selectedOne) {
+      const previous = selectedOne;
+      void runAction('Renaming', async () => {
+        await runDroneFsAction(droneId, {
+          action: 'rename',
+          path: previous.path,
+          name: value,
+        });
+        const nextActivePath = renamedPathForEntry(previous, value, activeOpenedFilePath);
+        if (nextActivePath && activeOpenedFilePath) {
+          const nextName = nextActivePath.split(/[\/\\]/).filter(Boolean).pop() || value;
+          onOpenFile({ ...previous, kind: 'file', path: nextActivePath, name: nextName });
+        }
+        clearClipboardForChangedEntries([previous]);
+        setSelectedPaths(new Set());
+        setActionMode(null);
+        setActionInput('');
+        refreshAfterMutation(`Renamed ${previous.name} to ${value}.`);
+      });
+      return;
+    }
+    if (actionMode === 'move' && selectedCount > 0) {
+      const moving = [...actionEntries];
+      void runAction('Moving', async () => {
+        await runDroneFsAction(droneId, {
+          action: 'move',
+          paths: moving.map((entry) => entry.path),
+          targetDir: value,
+        });
+        const activeMove = moving.map((entry) => movedPathForEntry(entry, value, activeOpenedFilePath)).find(Boolean);
+        if (activeMove && activeOpenedFilePath) {
+          const source = moving.find((entry) => pathContainsActiveFile(entry));
+          if (source) onOpenFile({ ...source, kind: 'file', path: activeMove, name: activeMove.split(/[\/\\]/).filter(Boolean).pop() || source.name });
+        }
+        clearClipboardForChangedEntries(moving);
+        setSelectedPaths(new Set());
+        setActionMode(null);
+        setActionInput('');
+        refreshAfterMutation(`Moved ${moving.length} item${moving.length === 1 ? '' : 's'}.`);
+      });
+    }
+  }, [
+    actionInput,
+    actionMode,
+    activeOpenedFilePath,
+    droneId,
+    clearClipboardForChangedEntries,
+    normalizedPath,
+    onOpenFile,
+    pathContainsActiveFile,
+    refreshAfterMutation,
+    runAction,
+    actionEntries,
+    selectedCount,
+    selectedOne,
+  ]);
+
+  const beginCreate = React.useCallback((mode: 'create-file' | 'create-directory') => {
+    setActionMode(mode);
+    setActionInput('');
+    setActionError(null);
+    setActionStatus(null);
+  }, []);
+
+  const beginRename = React.useCallback((entry?: DroneFsEntry) => {
+    const target = entry ?? selectedOne;
+    if (!target) return;
+    setSelectedPaths(new Set([target.path]));
+    setActionMode('rename');
+    setActionInput(target.name);
+    setActionError(null);
+    setActionStatus(null);
+  }, [selectedOne]);
+
+  const beginMove = React.useCallback(() => {
+    if (selectedCount === 0) return;
+    setActionMode('move');
+    setActionInput(normalizedPath);
+    setActionError(null);
+    setActionStatus(null);
+  }, [normalizedPath, selectedCount]);
+
+  const deleteEntries = React.useCallback(
+    (entriesToDelete: DroneFsEntry[]) => {
+      if (entriesToDelete.length === 0) return;
+      const preview = entriesToDelete.slice(0, 4).map((entry) => entry.name).join(', ');
+      const suffix = entriesToDelete.length > 4 ? `, and ${entriesToDelete.length - 4} more` : '';
+      const confirmed = window.confirm(`Delete ${entriesToDelete.length} item${entriesToDelete.length === 1 ? '' : 's'}?\n\n${preview}${suffix}`);
+      if (!confirmed) return;
+      void runAction('Deleting', async () => {
+        await runDroneFsAction(droneId, {
+          action: 'delete',
+          paths: entriesToDelete.map((entry) => entry.path),
+        });
+        if (activeOpenedFilePath && entriesToDelete.some(pathContainsActiveFile)) {
+          onCloseOpenedFile?.();
+        }
+        clearClipboardForChangedEntries(entriesToDelete);
+        setSelectedPaths(new Set());
+        refreshAfterMutation(`Deleted ${entriesToDelete.length} item${entriesToDelete.length === 1 ? '' : 's'}.`);
+      });
+    },
+    [activeOpenedFilePath, clearClipboardForChangedEntries, droneId, onCloseOpenedFile, pathContainsActiveFile, refreshAfterMutation, runAction],
+  );
+
+  const copySelected = React.useCallback(() => {
+    if (actionEntries.length === 0) return;
+    setClipboard({ entries: actionEntries });
+    setActionStatus(`Copied ${actionEntries.length} item${actionEntries.length === 1 ? '' : 's'} for paste.`);
+    setActionError(null);
+  }, [actionEntries]);
+
+  const pasteClipboard = React.useCallback(() => {
+    if (!clipboard || clipboard.entries.length === 0) return;
+    void runAction('Pasting', async () => {
+      await runDroneFsAction(droneId, {
+        action: 'copy',
+        paths: clipboard.entries.map((entry) => entry.path),
+        targetDir: normalizedPath,
+      });
+      refreshAfterMutation(`Pasted ${clipboard.entries.length} item${clipboard.entries.length === 1 ? '' : 's'}.`);
+    });
+  }, [clipboard, droneId, normalizedPath, refreshAfterMutation, runAction]);
+
+  React.useEffect(() => {
+    setSelectedPaths((prev) => pruneSelectedPaths(prev, visibleEntries));
+  }, [visibleEntries]);
 
   const uploadFilesToCurrentPath = React.useCallback(
     async (dropped: FileList | File[] | null | undefined) => {
@@ -401,19 +656,20 @@ export function DroneFilesDock({
       return (
         <button
           type="button"
+          disabled={busy}
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
             downloadEntry(entry);
           }}
-          className={className}
+          className={`${className} disabled:opacity-40 disabled:cursor-not-allowed`}
           title={`Download ${entry.kind === 'directory' ? 'directory' : 'file'}`}
         >
           <IconDownload className="opacity-80" />
         </button>
       );
     },
-    [downloadEntry],
+    [busy, downloadEntry],
   );
 
   const actionButtonClassName =
@@ -433,10 +689,23 @@ export function DroneFilesDock({
           <React.Fragment key={`dir:${node.path}`}>
             <div className="w-full group/dir" style={{ paddingLeft: `${indentPx}px` }}>
               <div className="flex items-center gap-1">
+                <input
+                  type="checkbox"
+                  checked={selectedPaths.has(node.path)}
+                  disabled={busy}
+                  onChange={(event) => {
+                    const checked = event.currentTarget.checked;
+                    setSelectedPaths((prev) => toggleSelectedPath(prev, node.path, checked));
+                  }}
+                  onClick={(event) => event.stopPropagation()}
+                  className="h-3.5 w-3.5 flex-shrink-0 accent-[var(--accent)]"
+                  title={`Select ${node.path}`}
+                />
                 <button
                   type="button"
+                  disabled={busy}
                   onClick={() => toggleDirectory(node.path)}
-                  className={`flex-1 min-w-0 text-left px-1 rounded border transition-all flex items-center gap-0.5 ${
+                  className={`flex-1 min-w-0 text-left px-1 rounded border transition-all flex items-center gap-0.5 disabled:opacity-60 ${
                     open
                       ? 'border-transparent bg-[rgba(255,255,255,.04)]'
                       : 'border-transparent hover:bg-[var(--hover)]'
@@ -468,6 +737,32 @@ export function DroneFilesDock({
                     </span>
                   ) : null}
                   {node.count != null ? <span className="text-[10px] text-[var(--muted-dim)] tabular-nums">{node.count}</span> : null}
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    beginRename(node.entry);
+                  }}
+                  className={`${actionButtonClassName} opacity-0 group-hover/dir:opacity-100 focus:opacity-100 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed`}
+                  title={`Rename ${node.path}`}
+                >
+                  <IconPencil className="w-3 h-3" />
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    deleteEntries([node.entry]);
+                  }}
+                  className={`${actionButtonClassName} opacity-0 group-hover/dir:opacity-100 focus:opacity-100 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed`}
+                  title={`Delete ${node.path}`}
+                >
+                  <IconTrash className="w-3 h-3" />
                 </button>
                 {renderDownloadButton(
                   node.entry,
@@ -507,11 +802,24 @@ export function DroneFilesDock({
       return (
         <div key={`file:${entry.path}`} className="w-full group/file" style={{ paddingLeft: `${indentPx}px` }}>
           <div className="flex items-center gap-1">
+            <input
+              type="checkbox"
+              checked={selectedPaths.has(entry.path)}
+              disabled={busy}
+              onChange={(event) => {
+                const checked = event.currentTarget.checked;
+                setSelectedPaths((prev) => toggleSelectedPath(prev, entry.path, checked));
+              }}
+              onClick={(event) => event.stopPropagation()}
+              className="h-3.5 w-3.5 flex-shrink-0 accent-[var(--accent)]"
+              title={`Select ${entry.path}`}
+            />
             {openable ? (
               <button
                 type="button"
+                disabled={busy}
                 onClick={() => openFileEntry(entry)}
-                className={`flex-1 min-w-0 text-left px-1 rounded border transition-all flex items-center gap-0.5 ${
+                className={`flex-1 min-w-0 text-left px-1 rounded border transition-all flex items-center gap-0.5 disabled:opacity-60 ${
                   active
                     ? 'border-transparent bg-[rgba(255,255,255,.04)]'
                     : 'border-transparent hover:bg-[var(--hover)]'
@@ -544,16 +852,32 @@ export function DroneFilesDock({
                 <span className="text-[10px] text-[var(--muted-dim)] tabular-nums">-</span>
               </div>
             )}
-            {openable ? (
-              <button
-                type="button"
-                onClick={() => openFileEntry(entry)}
-                className={`${actionButtonClassName} opacity-0 group-hover/file:opacity-100 focus:opacity-100 transition-opacity`}
-                title={`Open ${entry.path}`}
-              >
-                <IconPencil className="w-3 h-3" />
-              </button>
-            ) : null}
+            <button
+              type="button"
+              disabled={busy}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                beginRename(entry);
+              }}
+              className={`${actionButtonClassName} opacity-0 group-hover/file:opacity-100 focus:opacity-100 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed`}
+              title={`Rename ${entry.path}`}
+            >
+              <IconPencil className="w-3 h-3" />
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                deleteEntries([entry]);
+              }}
+              className={`${actionButtonClassName} opacity-0 group-hover/file:opacity-100 focus:opacity-100 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed`}
+              title={`Delete ${entry.path}`}
+            >
+              <IconTrash className="w-3 h-3" />
+            </button>
             {renderDownloadButton(
               entry,
               `${actionButtonClassName} opacity-0 group-hover/file:opacity-100 focus:opacity-100 transition-opacity`,
@@ -587,6 +911,7 @@ export function DroneFilesDock({
               <input
                 type="text"
                 value={pathInput}
+                disabled={busy}
                 onChange={(e) => setPathInput(e.currentTarget.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
@@ -599,13 +924,14 @@ export function DroneFilesDock({
                   }
                 }}
                 autoFocus
-                className="flex-1 min-w-0 h-7 rounded-md border border-[var(--border-subtle)] bg-[var(--panel)] px-2 text-[11px] text-[var(--fg-secondary)] focus:outline-none"
+                className="flex-1 min-w-0 h-7 rounded-md border border-[var(--border-subtle)] bg-[var(--panel)] px-2 text-[11px] text-[var(--fg-secondary)] focus:outline-none disabled:opacity-60"
                 title={`Container path for ${shownName}`}
               />
               <button
                 type="button"
+                disabled={busy}
                 onClick={submitPath}
-                className="h-7 px-2.5 rounded-md border border-[var(--border-subtle)] bg-[var(--panel)] text-[10px] font-semibold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+                className="h-7 px-2.5 rounded-md border border-[var(--border-subtle)] bg-[var(--panel)] text-[10px] font-semibold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed"
                 title="Go to path"
               >
                 Go
@@ -618,8 +944,9 @@ export function DroneFilesDock({
                   {idx > 0 && <span className="mx-1 text-[var(--muted-dim)]">/</span>}
                   <button
                     type="button"
+                    disabled={busy}
                     onClick={() => onOpenPath(c.path)}
-                    className={`hover:text-[var(--fg-secondary)] ${idx === crumbs.length - 1 ? 'text-[var(--fg-secondary)]' : ''}`}
+                    className={`hover:text-[var(--fg-secondary)] disabled:opacity-50 disabled:cursor-not-allowed ${idx === crumbs.length - 1 ? 'text-[var(--fg-secondary)]' : ''}`}
                     title={c.path}
                   >
                     {c.label}
@@ -632,11 +959,12 @@ export function DroneFilesDock({
         <div className="flex items-center gap-1 shrink-0">
           <button
             type="button"
+            disabled={busy}
             onClick={() => {
               setPathInput(normalizedPath);
               setPathEntryOpen((prev) => !prev);
             }}
-            className={`h-7 px-2.5 rounded-md border text-[10px] font-semibold transition-colors ${
+            className={`h-7 px-2.5 rounded-md border text-[10px] font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
               pathEntryOpen
                 ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                 : 'border-[var(--border-subtle)] bg-[var(--panel)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
@@ -648,7 +976,8 @@ export function DroneFilesDock({
           <button
             type="button"
             onClick={refreshExplorer}
-            className="h-7 px-2.5 rounded-md border border-[var(--border-subtle)] bg-[var(--panel)] text-[10px] font-semibold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+            disabled={busy}
+            className="h-7 px-2.5 rounded-md border border-[var(--border-subtle)] bg-[var(--panel)] text-[10px] font-semibold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed"
             title="Refresh explorer"
           >
             {loading ? 'Refreshing' : 'Refresh'}
@@ -656,9 +985,43 @@ export function DroneFilesDock({
         </div>
       </div>
 
+      <DroneFilesToolbar
+        busy={busy}
+        visibleAllSelected={visibleAllSelected}
+        visibleCount={visibleEntries.length}
+        selectedCount={selectedCount}
+        clipboardCount={clipboard?.entries.length ?? 0}
+        actionMode={actionMode}
+        actionInput={actionInput}
+        actionLoading={actionLoading}
+        onSelectAllVisible={(selected) => setSelectedPaths((prev) => setAllVisibleSelected(visibleEntries, prev, selected))}
+        onCreate={beginCreate}
+        onRename={() => beginRename()}
+        onDeleteSelected={() => deleteEntries(actionEntries)}
+        onMove={beginMove}
+        onCopy={copySelected}
+        onPaste={pasteClipboard}
+        onActionInputChange={setActionInput}
+        onSubmitAction={submitInlineAction}
+        onCancelAction={() => {
+          setActionMode(null);
+          setActionInput('');
+        }}
+      />
+
       {uploadStatus ? (
         <div className="mx-2.5 mt-2 p-2 rounded-md bg-[rgba(66,153,225,.12)] border border-[rgba(66,153,225,.28)] text-[12px] text-[var(--fg-secondary)]">
           {uploadStatus}
+        </div>
+      ) : null}
+      {actionStatus ? (
+        <div className="mx-2.5 mt-2 p-2 rounded-md bg-[rgba(66,153,225,.12)] border border-[rgba(66,153,225,.28)] text-[12px] text-[var(--fg-secondary)]">
+          {actionStatus}
+        </div>
+      ) : null}
+      {actionError ? (
+        <div className="mx-2.5 mt-2 p-2 rounded-md bg-[var(--red-subtle)] border border-[rgba(248,81,73,.2)] text-[12px] text-[var(--red)]">
+          {actionError}
         </div>
       ) : null}
       {uploadError ? (

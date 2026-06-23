@@ -186,6 +186,87 @@ describeSocketSuite('host runtime routing api', () => {
     const uploadedPath = path.join(droneRoot, 'upload.txt');
     expect(String(uploadResp.data?.path ?? '')).toBe(uploadedPath);
 
+    const createFolderResp = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/fs/action`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'create-directory', targetDir: droneRoot, name: 'nested' }),
+    });
+    expect(createFolderResp.r.status).toBe(200);
+    expect(createFolderResp.data?.ok).toBe(true);
+    const nestedDir = path.join(droneRoot, 'nested');
+    expect(fs.statSync(nestedDir).isDirectory()).toBe(true);
+
+    const createFileResp = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/fs/action`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'create-file', targetDir: nestedDir, name: 'draft.txt' }),
+    });
+    expect(createFileResp.r.status).toBe(200);
+    const draftPath = path.join(nestedDir, 'draft.txt');
+    expect(fs.statSync(draftPath).isFile()).toBe(true);
+
+    const invalidNameResp = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/fs/action`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'create-file', targetDir: nestedDir, name: 'bad/name.txt' }),
+    });
+    expect(invalidNameResp.r.status).toBe(400);
+    expect(invalidNameResp.data?.ok).toBe(false);
+
+    const renameResp = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/fs/action`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'rename', path: draftPath, name: 'renamed.txt' }),
+    });
+    expect(renameResp.r.status).toBe(200);
+    const renamedPath = path.join(nestedDir, 'renamed.txt');
+    expect(fs.existsSync(draftPath)).toBe(false);
+    expect(fs.statSync(renamedPath).isFile()).toBe(true);
+
+    const copyResp = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/fs/action`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'copy', paths: [renamedPath], targetDir: droneRoot }),
+    });
+    expect(copyResp.r.status).toBe(200);
+    const copiedPath = path.join(droneRoot, 'renamed.txt');
+    expect(fs.statSync(copiedPath).isFile()).toBe(true);
+
+    const moveResp = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/fs/action`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'move', paths: [copiedPath], targetDir: nestedDir }),
+    });
+    expect(moveResp.r.status).toBe(409);
+    expect(moveResp.data?.ok).toBe(false);
+
+    const moveSourcePath = path.join(droneRoot, 'move-me.txt');
+    fs.writeFileSync(moveSourcePath, 'move me\n', 'utf8');
+    const moveOkResp = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/fs/action`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'move', paths: [moveSourcePath], targetDir: nestedDir }),
+    });
+    expect(moveOkResp.r.status).toBe(200);
+    expect(fs.existsSync(moveSourcePath)).toBe(false);
+    expect(fs.statSync(path.join(nestedDir, 'move-me.txt')).isFile()).toBe(true);
+
+    const copyIntoSelfResp = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/fs/action`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'copy', paths: [nestedDir], targetDir: nestedDir }),
+    });
+    expect(copyIntoSelfResp.r.status).toBe(400);
+    expect(copyIntoSelfResp.data?.ok).toBe(false);
+
+    const deleteResp = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/fs/action`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'delete', paths: [nestedDir] }),
+    });
+    expect(deleteResp.r.status).toBe(200);
+    expect(fs.existsSync(nestedDir)).toBe(false);
+
     const downloadResp = await fetch(
       `${baseUrl}/api/drones/${encodeURIComponent(droneId)}/fs/download?path=${encodeURIComponent(uploadedPath)}`,
       { headers: { authorization: `Bearer ${token}` } },
