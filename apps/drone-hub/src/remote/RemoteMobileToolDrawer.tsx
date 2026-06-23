@@ -89,7 +89,7 @@ function RemoteMobileToolDrawerComponent({ open, drone, onOpenChange }: RemoteMo
               <UiMenuSelect
                 value={activePanel}
                 onValueChange={(next) => {
-                  if (next === 'changes' || next === 'prs') setActivePanel(next);
+                  if (next === 'files' || next === 'changes' || next === 'prs') setActivePanel(next);
                 }}
                 entries={REMOTE_REPO_PANEL_ENTRIES}
                 variant="toolbar"
@@ -113,7 +113,7 @@ function RemoteMobileToolDrawerComponent({ open, drone, onOpenChange }: RemoteMo
               <React.Suspense
                 fallback={
                   <div className="flex h-full items-center justify-center text-[12px] font-semibold uppercase tracking-wide text-[var(--muted)]">
-                    Loading {activePanel === 'prs' ? 'PRs' : 'changes'}...
+                    Loading {activePanel === 'prs' ? 'PRs' : activePanel}...
                   </div>
                 }
               >

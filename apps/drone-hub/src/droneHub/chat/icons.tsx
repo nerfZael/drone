@@ -49,6 +49,27 @@ export function IconImage({ className }: { className?: string }) {
   );
 }
 
+export function IconOpen({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M5 3.5H3.75A1.75 1.75 0 002 5.25v7A1.75 1.75 0 003.75 14h7A1.75 1.75 0 0012.5 12.25V11"
+        stroke="currentColor"
+        strokeWidth="1.35"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M8.5 2H14v5.5M7.75 8.25L13.5 2.5"
+        stroke="currentColor"
+        strokeWidth="1.35"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function IconSnapshot({ className }: { className?: string }) {
   return (
     <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">

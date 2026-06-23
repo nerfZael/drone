@@ -53,6 +53,10 @@ describe('remote Hub server', () => {
     expect(routeAllowed('POST', '/api/drones/name-from-message')).toBe(true);
   });
 
+  test('allows remote chat voice transcriptions', () => {
+    expect(routeAllowed('POST', '/api/audio/transcriptions')).toBe(true);
+  });
+
   test('marks consumed pairing tokens inactive', () => {
     const previousDataDir = process.env.DRONE_DATA_DIR;
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-remote-auth-test-'));
