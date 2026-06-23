@@ -51,6 +51,7 @@ export function DronePreviewDock({
   const [iframeRefreshNonce, setIframeRefreshNonce] = React.useState(0);
   const [urlInput, setUrlInput] = React.useState(displayedSelectedUrl);
   const [urlError, setUrlError] = React.useState<string | null>(null);
+  const iframeWrapperRef = React.useRef<HTMLDivElement | null>(null);
   const iframeRef = React.useRef<HTMLIFrameElement | null>(null);
   const lastFocusedElementRef = React.useRef<HTMLElement | null>(null);
   const lastPreviewPointerAtRef = React.useRef(NO_PREVIEW_POINTER_TIME);
@@ -99,7 +100,12 @@ export function DronePreviewDock({
       const iframe = iframeRef.current;
       if (!iframe) return;
 
-      const focusWasUserRequested = isPreviewFocusUserRequested(performance.now(), lastPreviewPointerAtRef.current);
+      const previewHovered = Boolean(iframe.matches(':hover') || iframeWrapperRef.current?.matches(':hover'));
+      const focusWasUserRequested = isPreviewFocusUserRequested(
+        performance.now(),
+        lastPreviewPointerAtRef.current,
+        previewHovered,
+      );
       if (focusWasUserRequested) return;
 
       window.requestAnimationFrame(() => {
@@ -308,8 +314,15 @@ export function DronePreviewDock({
           </div>
         ) : (
           <div
+            ref={iframeWrapperRef}
             className="flex-1 min-h-0 w-full border-y border-[var(--border-subtle)] bg-white overflow-hidden"
             onPointerDownCapture={() => {
+              lastPreviewPointerAtRef.current = performance.now();
+            }}
+            onPointerOverCapture={() => {
+              lastPreviewPointerAtRef.current = performance.now();
+            }}
+            onTouchStartCapture={() => {
               lastPreviewPointerAtRef.current = performance.now();
             }}
           >
