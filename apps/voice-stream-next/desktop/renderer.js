@@ -6,7 +6,6 @@ const MAX_PENDING_STREAM_BYTES = pcmBytesForMs(5000);
 const BASE_RECONNECT_DELAY_MS = 500;
 const MAX_RECONNECT_DELAY_MS = 10_000;
 const MAX_RECONNECT_EXPONENT = 4;
-const DEFAULT_VOICE_MAX_DURATION_MS = 15 * 60 * 1000;
 const VOICE_CLOSE_CODE_TOO_LARGE = 4409;
 const VOICE_CLOSE_CODE_TOO_LONG = 4410;
 const SLEEP_PHRASE_STABLE_MS = 650;
@@ -82,7 +81,7 @@ const state = {
   voiceFinalizeTimer: null,
   voicePostStopMode: 'awake',
   voicePostStopStatus: '',
-  voiceStreamMaxDurationMs: DEFAULT_VOICE_MAX_DURATION_MS,
+  voiceStreamMaxDurationMs: null,
   voiceRecordingStartedAt: 0,
   voiceRecordingPausedAt: 0,
   voiceRecordingPausedMs: 0,
@@ -1568,9 +1567,9 @@ function voiceRecordingActiveElapsedMs(now = Date.now()) {
 
 function renderVoiceCountdown() {
   if (!els.voiceCountdown) return;
-  const maxDurationMs = Math.max(0, Number(state.voiceStreamMaxDurationMs || DEFAULT_VOICE_MAX_DURATION_MS));
+  const maxDurationMs = Number(state.voiceStreamMaxDurationMs);
   const visible = Boolean(state.voiceRecordingStartedAt) && (state.mode === 'recording' || state.mode === 'paused');
-  if (!visible || maxDurationMs <= 0) {
+  if (!visible || !Number.isFinite(maxDurationMs) || maxDurationMs <= 0) {
     els.voiceCountdown.hidden = true;
     els.voiceCountdown.textContent = '';
     els.primaryVoiceButton?.classList.remove('has-countdown', 'is-countdown-warning');
@@ -1592,7 +1591,8 @@ function clearVoiceCountdownTimer() {
 
 function beginVoiceCountdown(maxDurationMs = state.voiceStreamMaxDurationMs) {
   clearVoiceCountdownTimer();
-  state.voiceStreamMaxDurationMs = Math.max(1, Number(maxDurationMs || DEFAULT_VOICE_MAX_DURATION_MS));
+  const parsed = Number(maxDurationMs);
+  state.voiceStreamMaxDurationMs = Number.isFinite(parsed) && parsed > 0 ? parsed : null;
   state.voiceRecordingStartedAt = Date.now();
   state.voiceRecordingPausedAt = 0;
   state.voiceRecordingPausedMs = 0;
@@ -1622,6 +1622,7 @@ function resumeVoiceCountdown() {
 
 function resetVoiceCountdown() {
   clearVoiceCountdownTimer();
+  state.voiceStreamMaxDurationMs = null;
   state.voiceRecordingStartedAt = 0;
   state.voiceRecordingPausedAt = 0;
   state.voiceRecordingPausedMs = 0;
