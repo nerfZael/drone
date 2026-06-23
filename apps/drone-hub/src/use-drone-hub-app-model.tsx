@@ -1798,8 +1798,21 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     content: openedEditorFileContent,
     dirty: openedEditorFileDirty,
     mtimeMs: openedEditorFileMtimeMs,
+    recentFiles: openedEditorRecentFiles,
+    quickOpenOpen,
+    quickOpenQuery,
+    quickOpenFiles,
+    quickOpenLoading,
+    quickOpenError,
+    canGoBackLocation,
+    canGoForwardLocation,
     openEditorFile,
     closeEditorFile,
+    openQuickOpen,
+    closeQuickOpen,
+    setQuickOpenQuery,
+    goBackLocation,
+    goForwardLocation,
     setOpenedFileContent,
     refreshOpenedFile,
     saveOpenedFile,
@@ -2198,6 +2211,72 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [currentDrone?.id, focusEditorPane, openEditorFile, setCurrentFsPath],
   );
+
+  const openQuickOpenFromShortcut = React.useCallback(() => {
+    if (!currentDrone?.id) return false;
+    focusEditorPane();
+    openQuickOpen();
+    return true;
+  }, [currentDrone?.id, focusEditorPane, openQuickOpen]);
+
+  const revealEditorLocationParent = React.useCallback(
+    (pathRaw: string) => {
+      const containerPath = String(pathRaw ?? '').trim();
+      if (!containerPath) return;
+      const slash = containerPath.lastIndexOf('/');
+      const parentPath = slash > 0 ? containerPath.slice(0, slash) : '/';
+      setCurrentFsPath(parentPath || '/');
+      focusEditorPane();
+    },
+    [focusEditorPane, setCurrentFsPath],
+  );
+
+  const goBackEditorLocationFromShortcut = React.useCallback(() => {
+    const location = goBackLocation();
+    if (!location) return false;
+    revealEditorLocationParent(location.path);
+    return true;
+  }, [goBackLocation, revealEditorLocationParent]);
+
+  const goForwardEditorLocationFromShortcut = React.useCallback(() => {
+    const location = goForwardLocation();
+    if (!location) return false;
+    revealEditorLocationParent(location.path);
+    return true;
+  }, [goForwardLocation, revealEditorLocationParent]);
+
+  React.useEffect(() => {
+    const isQuickOpenShortcut = (event: KeyboardEvent): boolean =>
+      event.key.toLowerCase() === 'p' &&
+      (event.ctrlKey || event.metaKey) &&
+      !event.altKey &&
+      !event.shiftKey;
+    const isBackShortcut = (event: KeyboardEvent): boolean =>
+      event.key === 'ArrowLeft' && event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
+    const isForwardShortcut = (event: KeyboardEvent): boolean =>
+      event.key === 'ArrowRight' && event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.repeat) return;
+      if (isQuickOpenShortcut(event)) {
+        if (!openQuickOpenFromShortcut()) return;
+        event.preventDefault();
+        return;
+      }
+      if (quickOpenOpen) return;
+      if (isBackShortcut(event)) {
+        if (!goBackEditorLocationFromShortcut()) return;
+        event.preventDefault();
+        return;
+      }
+      if (isForwardShortcut(event)) {
+        if (!goForwardEditorLocationFromShortcut()) return;
+        event.preventDefault();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [goBackEditorLocationFromShortcut, goForwardEditorLocationFromShortcut, openQuickOpenFromShortcut, quickOpenOpen]);
   const [pendingPlaybookArtifact, setPendingPlaybookArtifact] = React.useState<{
     droneId: string;
     path: string;
@@ -2967,6 +3046,30 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             return openFileInPanelFromFilesPane({ path: entry.path, name: entry.name });
           }}
           onOpenFileTargetInEditor={openFileInFilesPane}
+          quickOpen={{
+            open: quickOpenOpen,
+            query: quickOpenQuery,
+            files: quickOpenFiles,
+            recentFiles: openedEditorRecentFiles,
+            loading: quickOpenLoading,
+            error: quickOpenError,
+            canGoBack: canGoBackLocation,
+            canGoForward: canGoForwardLocation,
+            onQueryChange: setQuickOpenQuery,
+            onClose: closeQuickOpen,
+            onOpenFile: (next) => {
+              openFileInFilesPane(next);
+              closeQuickOpen();
+            },
+            onGoBack: () => {
+              const location = goBackLocation();
+              if (location) revealEditorLocationParent(location.path);
+            },
+            onGoForward: () => {
+              const location = goForwardLocation();
+              if (location) revealEditorLocationParent(location.path);
+            },
+          }}
           openedFile={{
             path: openedEditorFile?.path ?? null,
             name: openedEditorFile?.name ?? null,
@@ -3070,6 +3173,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       openChangesFileInEditor,
       openFileInFilesPane,
       openFileInPanelFromFilesPane,
+      openedEditorRecentFiles,
       openedEditorFile,
       openedEditorFileContent,
       openedEditorFileDirty,
@@ -3080,6 +3184,18 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       openedEditorFileMtimeMs,
       openedEditorFileSaving,
       openedEditorFileSize,
+      quickOpenOpen,
+      quickOpenQuery,
+      quickOpenFiles,
+      quickOpenLoading,
+      quickOpenError,
+      canGoBackLocation,
+      canGoForwardLocation,
+      closeQuickOpen,
+      setQuickOpenQuery,
+      goBackLocation,
+      goForwardLocation,
+      revealEditorLocationParent,
       setOpenedFileContent,
       refreshOpenedFile,
       saveOpenedFile,

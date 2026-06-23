@@ -22,6 +22,10 @@ type OpenedDroneFilePanelProps = {
   onSaveFile?: (contentOverride?: string) => Promise<boolean>;
   onCloseFile?: () => void;
   onOpenResolvedFile?: (next: { path: string; name: string; line?: number | null; column?: number | null }) => void;
+  canGoBack?: boolean;
+  canGoForward?: boolean;
+  onGoBack?: () => void;
+  onGoForward?: () => void;
 };
 
 export function OpenedDroneFilePanel({
@@ -31,6 +35,10 @@ export function OpenedDroneFilePanel({
   onSaveFile,
   onCloseFile,
   onOpenResolvedFile,
+  canGoBack = false,
+  canGoForward = false,
+  onGoBack,
+  onGoForward,
 }: OpenedDroneFilePanelProps) {
   const {
     path: filePath,
@@ -173,6 +181,12 @@ export function OpenedDroneFilePanel({
         ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
         : 'border-[var(--border-subtle)] bg-transparent text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
     } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`;
+  const navButtonClassName = (enabled: boolean) =>
+    `h-7 w-7 rounded-md border text-[13px] font-semibold transition-colors ${
+      enabled
+        ? 'border-[var(--border-subtle)] bg-transparent text-[var(--fg-secondary)] hover:text-[var(--fg)] hover:bg-[var(--hover)]'
+        : 'border-[var(--border-subtle)] bg-transparent text-[var(--muted-dim)] opacity-50 cursor-not-allowed'
+    }`;
 
   return (
     <div className="h-full min-h-0 overflow-hidden bg-[var(--panel-alt)]">
@@ -188,6 +202,26 @@ export function OpenedDroneFilePanel({
             </div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={onGoBack}
+              disabled={!canGoBack || !onGoBack}
+              className={navButtonClassName(Boolean(canGoBack && onGoBack))}
+              title="Go back (Alt+Left)"
+              aria-label="Go back"
+            >
+              {'<'}
+            </button>
+            <button
+              type="button"
+              onClick={onGoForward}
+              disabled={!canGoForward || !onGoForward}
+              className={navButtonClassName(Boolean(canGoForward && onGoForward))}
+              title="Go forward (Alt+Right)"
+              aria-label="Go forward"
+            >
+              {'>'}
+            </button>
             {openedFileIsMarkdown ? (
               <div className="inline-flex items-center gap-1">
                 <button

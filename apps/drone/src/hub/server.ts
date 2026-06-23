@@ -2334,6 +2334,7 @@ const VIDEO_FILE_EXTENSIONS = new Set(['mp4', 'webm', 'mov', 'm4v', 'ogv', 'ogg'
 const FS_THUMB_MAX_BYTES = 8 * 1024 * 1024;
 const FS_MEDIA_MAX_BYTES = 96 * 1024 * 1024;
 const FS_EDITOR_MAX_BYTES = 512 * 1024;
+const FS_QUICK_OPEN_MAX_RESULTS = 200;
 const ASSISTANT_BASH_DEFAULT_TIMEOUT_MS = 30_000;
 const ASSISTANT_BASH_MAX_TIMEOUT_MS = 120_000;
 const ASSISTANT_BASH_MAX_OUTPUT_BYTES = 64 * 1024;
@@ -2583,6 +2584,107 @@ async function listHostFsDirectory(targetPathRaw: string): Promise<{ resolvedPat
   }
   sortFsEntries(entries);
   return { resolvedPath, entries };
+}
+
+function parseFsSearchOutput(text: string, fallbackRoot: string): { root: string; entries: ContainerFsEntry[] } {
+  const lines = String(text ?? '')
+    .split('\n')
+    .map((line) => line.replace(/\r$/, ''))
+    .filter(Boolean);
+  let root = normalizeContainerPath(fallbackRoot) || fallbackRoot || '/';
+  const entries: ContainerFsEntry[] = [];
+
+  for (const line of lines) {
+    if (line.startsWith('__ROOT__\t')) {
+      root = line.slice('__ROOT__\t'.length).trim() || root;
+      continue;
+    }
+    const parts = line.split('\t');
+    if (parts.length < 4) continue;
+    const relativePath = String(parts[0] ?? '').trim();
+    const fullPath = String(parts[1] ?? '').trim();
+    if (!relativePath || !fullPath) continue;
+    const sizeNum = Number(parts[2] ?? 0);
+    const mtimeSec = Number(parts[3] ?? 0);
+    const name = path.posix.basename(relativePath.replace(/\\/g, '/')) || path.basename(fullPath) || fullPath;
+    entries.push({
+      name,
+      path: fullPath,
+      relativePath,
+      kind: 'file',
+      size: Number.isFinite(sizeNum) ? Math.max(0, Math.floor(sizeNum)) : null,
+      mtimeMs: Number.isFinite(mtimeSec) ? Math.max(0, Math.floor(mtimeSec * 1000)) : null,
+      ext: extensionLower(name) || null,
+      isImage: isLikelyImagePath(name),
+      isVideo: isLikelyVideoPath(name),
+    });
+  }
+
+  return { root, entries };
+}
+
+function buildFsSearchScript(opts: { root: string; query: string; limit: number; pathFlavor: 'posix' | 'host' }): string {
+  const excludeCase = [
+    '.git/*',
+    'node_modules/*',
+    'dist/*',
+    'build/*',
+    '.next/*',
+    '.turbo/*',
+    'coverage/*',
+    '.cache/*',
+  ].join('|');
+  const rgGlobs = [
+    '--glob "!.git/**"',
+    '--glob "!node_modules/**"',
+    '--glob "!dist/**"',
+    '--glob "!build/**"',
+    '--glob "!.next/**"',
+    '--glob "!.turbo/**"',
+    '--glob "!coverage/**"',
+    '--glob "!.cache/**"',
+  ].join(' ');
+  const joinFullPath =
+    opts.pathFlavor === 'host'
+      ? 'full="$resolved/$rel"'
+      : 'if [ "$resolved" = "/" ]; then full="/$rel"; else full="$resolved/$rel"; fi';
+  return [
+    'set -euo pipefail',
+    `root=${bashQuote(opts.root)}`,
+    `query=${bashQuote(opts.query.toLowerCase())}`,
+    `limit=${String(opts.limit)}`,
+    `if [ "$root" = ${bashQuote(NON_REPO_HOME_CWD)} ]; then mkdir -p ${bashQuote(NON_REPO_HOME_CWD)} 2>/dev/null || true; fi`,
+    'if [ ! -d "$root" ]; then echo "__ERR__\tnot-dir"; exit 3; fi',
+    'cd "$root"',
+    'resolved=$(pwd -P)',
+    'printf "__ROOT__\t%s\n" "$resolved"',
+    'list_files() {',
+    '  if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then',
+    '    git ls-files -co --exclude-standard -- . 2>/dev/null || true',
+    '  elif command -v rg >/dev/null 2>&1; then',
+    `    rg --files --hidden ${rgGlobs} . 2>/dev/null || true`,
+    '  else',
+    '    find . \\( -path "*/.git/*" -o -path "*/node_modules/*" -o -path "*/dist/*" -o -path "*/build/*" -o -path "*/.next/*" -o -path "*/.turbo/*" -o -path "*/coverage/*" -o -path "*/.cache/*" \\) -prune -o -type f -print 2>/dev/null || true',
+    '  fi',
+    '}',
+    'count=0',
+    'while IFS= read -r rel; do',
+    '  rel="${rel#./}"',
+    '  [ -n "$rel" ] || continue',
+    `  case "$rel" in ${excludeCase}) continue ;; esac`,
+    '  if [ -n "$query" ]; then',
+    '    lower=$(printf "%s" "$rel" | tr "[:upper:]" "[:lower:]")',
+    '    case "$lower" in *"$query"*) ;; *) continue ;; esac',
+    '  fi',
+    '  [ -f "$rel" ] || continue',
+    `  ${joinFullPath}`,
+    '  size=$(stat -c %s -- "$rel" 2>/dev/null || stat -f %z -- "$rel" 2>/dev/null || echo 0)',
+    '  mtime=$(stat -c %Y -- "$rel" 2>/dev/null || stat -f %m -- "$rel" 2>/dev/null || echo 0)',
+    '  printf "%s\t%s\t%s\t%s\n" "$rel" "$full" "$size" "$mtime"',
+    '  count=$((count + 1))',
+    '  [ "$count" -lt "$limit" ] || break',
+    'done < <(list_files)',
+  ].join('\n');
 }
 
 async function readHostFileBytes(opts: {
@@ -17942,6 +18044,85 @@ export async function startDroneHubApiServer(opts: {
           const msg = e?.message ?? String(e);
           const code = looksLikeMissingContainerError(msg) ? 404 : 500;
           json(res, code, { ok: false, error: msg, id: droneId, name: droneName, path: targetPath });
+          return;
+        }
+      }
+
+      // GET /api/drones/:id/fs/search?query=...&limit=...
+      // Lists searchable file paths for Quick Open in the current drone workspace.
+      if (method === 'GET' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'drones' && parts[3] === 'fs' && parts[4] === 'search') {
+        const droneRef = decodeURIComponent(parts[2]);
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        const droneId = resolved.id;
+        const drone = resolved.drone;
+        const runtime = droneRuntime(drone);
+        const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
+        const query = String(u.searchParams.get('query') ?? '').trim().toLowerCase();
+        const limitRaw = Number(u.searchParams.get('limit') ?? 80);
+        const limit = Math.min(
+          FS_QUICK_OPEN_MAX_RESULTS,
+          Math.max(1, Number.isFinite(limitRaw) ? Math.floor(limitRaw) : 80),
+        );
+        const root = defaultDroneHomeCwd(drone);
+
+        if (runtime === 'host') {
+          try {
+            const script = buildFsSearchScript({ root, query, limit, pathFlavor: 'host' });
+            const r = await runHostCommand('bash', ['-lc', script], { timeoutMs: 10_000 });
+            const out = `${String(r.stdout ?? '')}\n${String(r.stderr ?? '')}`;
+            if (r.code !== 0) {
+              if (/\bnot-dir\b/i.test(out)) {
+                json(res, 404, { ok: false, error: `path is not a directory: ${root}`, id: droneId, name: droneName, root });
+                return;
+              }
+              json(res, 500, { ok: false, error: (r.stderr || r.stdout || 'failed searching files').trim(), id: droneId, name: droneName, root });
+              return;
+            }
+            const parsed = parseFsSearchOutput(r.stdout || '', root);
+            json(res, 200, {
+              ok: true,
+              id: droneId,
+              name: droneName,
+              root: parsed.root,
+              entries: parsed.entries,
+            });
+            return;
+          } catch (e: any) {
+            const msg = e?.message ?? String(e);
+            const code = hostFsErrorStatus(e);
+            json(res, code, { ok: false, error: msg, id: droneId, name: droneName, root });
+            return;
+          }
+        }
+
+        const script = buildFsSearchScript({ root, query, limit, pathFlavor: 'posix' });
+        try {
+          const r = await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: resolved.drone }, async ({ containerName }) => {
+            return await dvmExec(containerName, 'bash', ['-lc', script]);
+          });
+          const out = `${String(r.stdout ?? '')}\n${String(r.stderr ?? '')}`;
+          if (r.code !== 0) {
+            if (/\bnot-dir\b/i.test(out)) {
+              json(res, 404, { ok: false, error: `path is not a directory: ${root}`, id: droneId, name: droneName, root });
+              return;
+            }
+            json(res, 500, { ok: false, error: (r.stderr || r.stdout || 'failed searching files').trim(), id: droneId, name: droneName, root });
+            return;
+          }
+          const parsed = parseFsSearchOutput(r.stdout || '', root);
+          json(res, 200, {
+            ok: true,
+            id: droneId,
+            name: droneName,
+            root: parsed.root,
+            entries: parsed.entries,
+          });
+          return;
+        } catch (e: any) {
+          const msg = e?.message ?? String(e);
+          const code = looksLikeMissingContainerError(msg) ? 404 : 500;
+          json(res, code, { ok: false, error: msg, id: droneId, name: droneName, root });
           return;
         }
       }

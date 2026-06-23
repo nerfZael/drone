@@ -1,6 +1,22 @@
 import React from 'react';
-import type { DroneFsReadPayload, DroneFsWritePayload, DroneSummary } from '../types';
+import type { DroneFsReadPayload, DroneFsSearchPayload, DroneFsWritePayload, DroneSummary } from '../types';
 import type { requestJson as requestJsonFn } from '../http';
+import {
+  canGoBackInEditorHistory,
+  canGoForwardInEditorHistory,
+  emptyEditorLocationHistory,
+  goBackInEditorHistory,
+  goForwardInEditorHistory,
+  pushEditorLocation,
+  type EditorLocation,
+  type EditorLocationHistory,
+} from '../files/editor-location-history';
+import {
+  quickOpenNameForPath,
+  trackRecentQuickOpenFile,
+  type QuickOpenFile,
+  type QuickOpenRecentFile,
+} from '../files/quick-open-state';
 
 type RequestJson = typeof requestJsonFn;
 
@@ -65,6 +81,19 @@ export function useFileEditorState({
   const [mtimeMs, setMtimeMs] = React.useState<number | null>(null);
   const contentRef = React.useRef('');
   const requestSeqRef = React.useRef(0);
+  const locationHistoryRef = React.useRef<EditorLocationHistory>(emptyEditorLocationHistory);
+  const [locationHistory, setLocationHistory] = React.useState<EditorLocationHistory>(emptyEditorLocationHistory);
+  const [recentFilesByDroneId, setRecentFilesByDroneId] = React.useState<Record<string, QuickOpenRecentFile[]>>({});
+  const [quickOpenOpen, setQuickOpenOpen] = React.useState(false);
+  const [quickOpenQuery, setQuickOpenQuery] = React.useState('');
+  const [quickOpenFiles, setQuickOpenFiles] = React.useState<QuickOpenFile[]>([]);
+  const [quickOpenLoading, setQuickOpenLoading] = React.useState(false);
+  const [quickOpenError, setQuickOpenError] = React.useState<string | null>(null);
+
+  const setEditorLocationHistory = React.useCallback((next: EditorLocationHistory) => {
+    locationHistoryRef.current = next;
+    setLocationHistory(next);
+  }, []);
 
   const closeEditorFile = React.useCallback(() => {
     setOpenedFile(null);
@@ -89,6 +118,27 @@ export function useFileEditorState({
     return i;
   }, []);
 
+  const applyEditorLocation = React.useCallback(
+    (location: EditorLocation) => {
+      setOpenedFile((prev) => ({
+        droneId: location.droneId,
+        path: location.path,
+        name: location.name,
+        targetLine: location.line,
+        targetColumn: location.column,
+        navigationSeq: (prev?.navigationSeq ?? 0) + 1,
+      }));
+      setRecentFilesByDroneId((prev) => ({
+        ...prev,
+        [location.droneId]: trackRecentQuickOpenFile(prev[location.droneId] ?? [], {
+          path: location.path,
+          name: location.name,
+        }),
+      }));
+    },
+    [],
+  );
+
   const openEditorFile = React.useCallback(
     (next: { path: string; name: string; line?: number | null; column?: number | null }) => {
       const droneId = String(currentDrone?.id ?? '').trim();
@@ -98,6 +148,21 @@ export function useFileEditorState({
       const nextName = String(next.name ?? '').trim() || nextPath.split('/').filter(Boolean).pop() || nextPath;
       const targetLine = normalizePositiveInt(next.line);
       const targetColumn = normalizePositiveInt(next.column);
+      const nextLocation: EditorLocation = {
+        droneId,
+        path: nextPath,
+        name: nextName,
+        line: targetLine,
+        column: targetColumn,
+      };
+      setEditorLocationHistory(pushEditorLocation(locationHistoryRef.current, nextLocation));
+      setRecentFilesByDroneId((prev) => ({
+        ...prev,
+        [droneId]: trackRecentQuickOpenFile(prev[droneId] ?? [], {
+          path: nextPath,
+          name: nextName,
+        }),
+      }));
       setOpenedFile((prev) => {
         const nextNavigationSeq = (prev?.navigationSeq ?? 0) + 1;
         if (prev && prev.droneId === droneId && prev.path === nextPath) {
@@ -119,15 +184,97 @@ export function useFileEditorState({
         };
       });
     },
-    [currentDrone?.id, normalizePositiveInt],
+    [currentDrone?.id, normalizePositiveInt, setEditorLocationHistory],
   );
+
+  const openQuickOpen = React.useCallback(() => {
+    if (!currentDrone?.id) return;
+    setQuickOpenQuery('');
+    setQuickOpenOpen(true);
+    setQuickOpenError(null);
+  }, [currentDrone?.id]);
+
+  const closeQuickOpen = React.useCallback(() => {
+    setQuickOpenOpen(false);
+  }, []);
+
+  const goBackLocation = React.useCallback((): EditorLocation | null => {
+    const next = goBackInEditorHistory(locationHistoryRef.current);
+    if (!next.location) return null;
+    setEditorLocationHistory(next.history);
+    applyEditorLocation(next.location);
+    return next.location;
+  }, [applyEditorLocation, setEditorLocationHistory]);
+
+  const goForwardLocation = React.useCallback((): EditorLocation | null => {
+    const next = goForwardInEditorHistory(locationHistoryRef.current);
+    if (!next.location) return null;
+    setEditorLocationHistory(next.history);
+    applyEditorLocation(next.location);
+    return next.location;
+  }, [applyEditorLocation, setEditorLocationHistory]);
 
   React.useEffect(() => {
     if (!openedFile) return;
     if (!currentDrone || String(currentDrone.id) !== String(openedFile.droneId)) {
       closeEditorFile();
+      setEditorLocationHistory(emptyEditorLocationHistory);
     }
-  }, [closeEditorFile, currentDrone?.id, openedFile]);
+  }, [closeEditorFile, currentDrone?.id, openedFile, setEditorLocationHistory]);
+
+  React.useEffect(() => {
+    setQuickOpenOpen(false);
+    setQuickOpenQuery('');
+    setQuickOpenFiles([]);
+    setQuickOpenLoading(false);
+    setQuickOpenError(null);
+    setEditorLocationHistory(emptyEditorLocationHistory);
+  }, [currentDrone?.id, setEditorLocationHistory]);
+
+  React.useEffect(() => {
+    if (!quickOpenOpen) return;
+    const droneId = String(currentDrone?.id ?? '').trim();
+    if (!droneId) return;
+    const query = String(quickOpenQuery ?? '').trim();
+    let cancelled = false;
+    const timeout = window.setTimeout(() => {
+      setQuickOpenLoading(true);
+      setQuickOpenError(null);
+      void requestJson<DroneFsSearchPayload>(
+        `/api/drones/${encodeURIComponent(droneId)}/fs/search?query=${encodeURIComponent(query)}&limit=80`,
+      )
+        .then((data) => {
+          if (cancelled) return;
+          const entries = Array.isArray((data as any).entries) ? ((data as any).entries as QuickOpenFile[]) : [];
+          setQuickOpenFiles(
+            entries.map((entry) => {
+              const path = String(entry.path ?? '').trim();
+              return {
+                path,
+                name: String(entry.name ?? '').trim() || quickOpenNameForPath(path),
+                relativePath: entry.relativePath ?? null,
+                size: Number.isFinite(Number(entry.size)) ? Math.max(0, Math.floor(Number(entry.size))) : null,
+                mtimeMs: Number.isFinite(Number(entry.mtimeMs)) ? Math.max(0, Math.floor(Number(entry.mtimeMs))) : null,
+              };
+            }),
+          );
+          setQuickOpenError(null);
+        })
+        .catch((e: any) => {
+          if (cancelled) return;
+          setQuickOpenError(e?.message ?? String(e));
+          setQuickOpenFiles([]);
+        })
+        .finally(() => {
+          if (cancelled) return;
+          setQuickOpenLoading(false);
+        });
+    }, 120);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [currentDrone?.id, quickOpenOpen, quickOpenQuery, requestJson]);
 
   React.useEffect(() => {
     if (!openedFile) return;
@@ -319,8 +466,21 @@ export function useFileEditorState({
     content,
     dirty,
     mtimeMs,
+    recentFiles: recentFilesByDroneId[String(currentDrone?.id ?? '').trim()] ?? [],
+    quickOpenOpen,
+    quickOpenQuery,
+    quickOpenFiles,
+    quickOpenLoading,
+    quickOpenError,
+    canGoBackLocation: canGoBackInEditorHistory(locationHistory),
+    canGoForwardLocation: canGoForwardInEditorHistory(locationHistory),
     openEditorFile,
     closeEditorFile,
+    openQuickOpen,
+    closeQuickOpen,
+    setQuickOpenQuery,
+    goBackLocation,
+    goForwardLocation,
     setOpenedFileContent,
     refreshOpenedFile,
     saveOpenedFile,
