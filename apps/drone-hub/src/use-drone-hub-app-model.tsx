@@ -1798,8 +1798,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     content: openedEditorFileContent,
     dirty: openedEditorFileDirty,
     mtimeMs: openedEditorFileMtimeMs,
+    openedFileTabs: openedEditorFileTabs,
+    activeOpenedFileTabId,
     openEditorFile,
     closeEditorFile,
+    setActiveOpenedFileTab,
+    reorderOpenedFileTabs,
     setOpenedFileContent,
     refreshOpenedFile,
     saveOpenedFile,
@@ -2983,9 +2987,13 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             targetColumn: openedEditorFile?.targetColumn ?? null,
             navigationSeq: openedEditorFile?.navigationSeq ?? 0,
           }}
+          openedFileTabs={openedEditorFileTabs}
+          activeOpenedFileTabId={activeOpenedFileTabId}
           onOpenedEditorFileContentChange={setOpenedFileContent}
           onSaveOpenedEditorFile={saveOpenedFile}
           onCloseOpenedEditorFile={closeEditorFile}
+          onActivateOpenedEditorFileTab={setActiveOpenedFileTab}
+          onReorderOpenedEditorFileTabs={reorderOpenedFileTabs}
           onRevealChangesFileInFiles={revealChangesFileInFiles}
           onOpenChangesFileInEditor={openChangesFileInEditor}
           onOpenPullRequest={(pane, _pullRequest) => {
@@ -3080,10 +3088,14 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       openedEditorFileMtimeMs,
       openedEditorFileSaving,
       openedEditorFileSize,
+      openedEditorFileTabs,
+      activeOpenedFileTabId,
       setOpenedFileContent,
       refreshOpenedFile,
       saveOpenedFile,
       closeEditorFile,
+      setActiveOpenedFileTab,
+      reorderOpenedFileTabs,
     ],
   );
 

@@ -9,7 +9,7 @@ import type {
   DroneSummary,
   PortReachabilityByHostPort,
 } from '../types';
-import type { DroneOpenedFileState } from '../files/opened-file-types';
+import type { DroneOpenedFileState, DroneOpenedFileTabState } from '../files/opened-file-types';
 import {
   RIGHT_PANEL_TAB_LABELS,
   RIGHT_PANEL_TABS,
@@ -198,9 +198,13 @@ type RightPanelTabContentProps = {
   onOpenFileInPanel: (entry: DroneFsEntry) => boolean;
   onOpenFileTargetInEditor: (next: { path: string; name: string; line?: number | null; column?: number | null }) => void;
   openedFile: DroneOpenedFileState;
+  openedFileTabs: DroneOpenedFileTabState[];
+  activeOpenedFileTabId: string | null;
   onOpenedEditorFileContentChange: (next: string) => void;
   onSaveOpenedEditorFile: (contentOverride?: string) => Promise<boolean>;
-  onCloseOpenedEditorFile: () => void;
+  onCloseOpenedEditorFile: (tabId?: string | null) => void;
+  onActivateOpenedEditorFileTab: (tabId: string) => void;
+  onReorderOpenedEditorFileTabs: (fromTabId: string, toTabId: string) => void;
   onOpenPullRequest: (paneKey: 'top' | 'bottom' | 'single', pullRequest: RepoPullRequestSummary) => void;
   onRevealChangesFileInFiles: (paneKey: 'top' | 'bottom' | 'single', repoRelativePath: string) => void;
   onOpenChangesFileInEditor: (repoRelativePath: string) => void;
@@ -278,9 +282,13 @@ export function RightPanelTabContent({
   onOpenFileInPanel,
   onOpenFileTargetInEditor,
   openedFile,
+  openedFileTabs,
+  activeOpenedFileTabId,
   onOpenedEditorFileContentChange,
   onSaveOpenedEditorFile,
   onCloseOpenedEditorFile,
+  onActivateOpenedEditorFileTab,
+  onReorderOpenedEditorFileTabs,
   onOpenPullRequest,
   onRevealChangesFileInFiles,
   onOpenChangesFileInEditor,
@@ -430,9 +438,13 @@ export function RightPanelTabContent({
               <LazyOpenedDroneFilePanel
                 droneId={drone.id}
                 file={openedFile}
+                fileTabs={openedFileTabs}
+                activeTabId={activeOpenedFileTabId}
                 onFileContentChange={onOpenedEditorFileContentChange}
                 onSaveFile={onSaveOpenedEditorFile}
                 onCloseFile={onCloseOpenedEditorFile}
+                onActivateFileTab={onActivateOpenedEditorFileTab}
+                onReorderFileTabs={onReorderOpenedEditorFileTabs}
                 onOpenResolvedFile={onOpenFileTargetInEditor}
               />
             ) : (
