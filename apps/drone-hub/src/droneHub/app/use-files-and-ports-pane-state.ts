@@ -74,6 +74,14 @@ export function invalidateFsListCacheForPath(droneIdRaw: string, pathRaw: string
   fsListCache.delete(fsListCacheKey(droneId, parentPath || '/'));
 }
 
+export function invalidateFsListCachesForDrone(droneIdRaw: string): void {
+  const droneId = String(droneIdRaw ?? '').trim();
+  if (!droneId) return;
+  for (const key of Array.from(fsListCache.keys())) {
+    if (key.startsWith(`${droneId}\u0000`)) fsListCache.delete(key);
+  }
+}
+
 type UseFilesAndPortsPaneStateArgs = {
   currentDrone: DroneSummary | null;
   requestJson: <T>(url: string, init?: RequestInit) => Promise<T>;

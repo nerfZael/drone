@@ -417,6 +417,7 @@ export function RightPanelTabContent({
             onRefreshOpenedFile={onRefreshOpenedEditorFile}
             onOpenFile={onOpenFileInEditor}
             onOpenFileInPanel={onOpenFileInPanel}
+            onCloseOpenedFile={onCloseOpenedEditorFile}
             openedFile={openedFile}
           />
         </LazyPane>
