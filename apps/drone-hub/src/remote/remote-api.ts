@@ -19,6 +19,51 @@ export function setRemoteCsrf(token: string | null): void {
   setRequestJsonRemoteCsrf(csrfToken);
 }
 
+function sameOriginApiUrl(raw: RequestInfo | URL): boolean {
+  try {
+    const url = raw instanceof Request ? raw.url : raw.toString();
+    const parsed = new URL(url, window.location.href);
+    return parsed.origin === window.location.origin && parsed.pathname.startsWith('/api/');
+  } catch {
+    return false;
+  }
+}
+
+function methodRequiresCsrf(methodRaw: unknown): boolean {
+  const method = String(methodRaw ?? 'GET').toUpperCase();
+  return method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS';
+}
+
+function withRemoteCsrfHeader(headersRaw: HeadersInit | undefined): Headers {
+  const headers = new Headers(headersRaw);
+  if (csrfToken && !headers.has('x-drone-remote-csrf')) {
+    headers.set('x-drone-remote-csrf', csrfToken);
+  }
+  return headers;
+}
+
+export function installRemoteCsrfFetch(): void {
+  if (typeof window === 'undefined') return;
+  const currentFetch = window.fetch.bind(window);
+  if ((window.fetch as any).__droneRemoteCsrfInstalled) return;
+
+  const patchedFetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+    if (!sameOriginApiUrl(input)) return currentFetch(input as any, init);
+
+    const requestMethod = input instanceof Request ? input.method : undefined;
+    const method = init?.method ?? requestMethod ?? 'GET';
+    if (!methodRequiresCsrf(method)) return currentFetch(input as any, init);
+
+    const inputHeaders = input instanceof Request ? input.headers : undefined;
+    return currentFetch(input as any, {
+      ...init,
+      headers: withRemoteCsrfHeader(init?.headers ?? inputHeaders),
+    });
+  }) as typeof window.fetch;
+  (patchedFetch as any).__droneRemoteCsrfInstalled = true;
+  window.fetch = patchedFetch;
+}
+
 export async function remoteRequestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   const method = String(init?.method ?? 'GET').toUpperCase();

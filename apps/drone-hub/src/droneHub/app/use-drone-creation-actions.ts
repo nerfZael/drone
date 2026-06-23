@@ -371,7 +371,7 @@ export function useDroneCreationActions({
     [queueCloneDrone],
   );
 
-  const createDrone = React.useCallback(async () => {
+  const createDrone = React.useCallback(async (initialMessageOverride?: string) => {
     const rowSpecs = createNameRows.map((nameRaw, idx) => ({
       nameRaw: String(nameRaw ?? ''),
       name: String(nameRaw ?? '').trim(),
@@ -381,7 +381,7 @@ export function useDroneCreationActions({
     const names = namedRows.map((row) => row.name);
     const group = createGroup.trim();
     const repoPath = createRepoPath.trim();
-    const seedPrompt = createInitialMessage.trim();
+    const seedPrompt = String(initialMessageOverride ?? createInitialMessage).trim();
     const isClone = createMode === 'clone' && Boolean(cloneSourceId);
     const runtime = createMode === 'clone' ? 'container' : createRuntime;
     const persistVolume = runtime === 'container' ? createPersistVolume : undefined;

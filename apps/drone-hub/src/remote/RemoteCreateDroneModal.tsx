@@ -3,6 +3,7 @@ import type { ChatAgentConfig } from '../domain';
 import { normalizeChatInfoPayload } from '../domain';
 import { BUILTIN_AGENT_OPTIONS } from '../droneHub/app/app-config';
 import { IconChevron, IconPlus, IconSpinner } from '../droneHub/app/icons';
+import { InitialMessageVoiceControls, type InitialMessageVoiceControlsHandle } from '../droneHub/app/InitialMessageVoiceControls';
 import { RepoBranchSourceControls } from '../droneHub/app/RepoBranchSourceControls';
 import { type RepoBranchSourceMode } from '../droneHub/app/drone-create-runtime';
 import { repoPathLabel } from '../droneHub/app/repo-path-label';
@@ -70,9 +71,19 @@ export function RemoteCreateDroneModal({
   const [seedAgent, setSeedAgent] = React.useState<ChatAgentConfig>({ kind: 'builtin', id: 'cursor' });
   const [seedModel, setSeedModel] = React.useState('');
   const [initialMessage, setInitialMessage] = React.useState('');
+  const mountedRef = React.useRef(false);
+  const initialMessageVoiceRef = React.useRef<InitialMessageVoiceControlsHandle | null>(null);
+  const [createSubmitting, setCreateSubmitting] = React.useState(false);
   const [loadingDefaults, setLoadingDefaults] = React.useState(false);
   const [creating, setCreating] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   React.useEffect(() => {
     if (!open) return;
@@ -222,6 +233,7 @@ export function RemoteCreateDroneModal({
   const seedModelDisabled = seedAgent.kind !== 'builtin' || creating || loadingDefaults;
 
   const createDrone = React.useCallback(async () => {
+    if (creating || loadingDefaults || createSubmitting) return;
     const normalizedRepoPath = String(repoPath ?? '').trim();
     const normalizedBranchSource = normalizedRepoPath ? branchSource : 'host';
     const normalizedRemoteBranch = String(remoteBranch ?? '').trim();
@@ -229,10 +241,15 @@ export function RemoteCreateDroneModal({
       setError('Choose a remote branch before creating this drone.');
       return;
     }
-    setCreating(true);
+    setCreateSubmitting(true);
     setError(null);
     try {
-      const trimmedSeedPrompt = String(initialMessage ?? '').trim();
+      const resolvedInitialMessage = initialMessageVoiceRef.current
+        ? await initialMessageVoiceRef.current.stopAndAppendRecording()
+        : initialMessage;
+      if (resolvedInitialMessage == null) return;
+      const trimmedSeedPrompt = String(resolvedInitialMessage ?? initialMessage ?? '').trim();
+      setCreating(true);
       const response = await remoteRequestJson<{ ok: true; id: string; name: string }>('/api/drones', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -283,12 +300,18 @@ export function RemoteCreateDroneModal({
     } catch (err: any) {
       setError(String(err?.message ?? err ?? 'Failed to create drone.'));
     } finally {
-      setCreating(false);
+      if (mountedRef.current) {
+        setCreateSubmitting(false);
+        setCreating(false);
+      }
     }
   }, [
     branchSource,
+    createSubmitting,
+    creating,
     group,
     initialMessage,
+    loadingDefaults,
     name,
     onClose,
     onCreated,
@@ -327,23 +350,29 @@ export function RemoteCreateDroneModal({
             <button
               type="button"
               onClick={createDrone}
-              disabled={creating || loadingDefaults}
+              disabled={creating || loadingDefaults || createSubmitting}
               className={`inline-flex h-8 items-center justify-center gap-2 rounded border px-3 text-[11px] font-semibold uppercase tracking-wide transition-all ${
-                creating || loadingDefaults
+                creating || loadingDefaults || createSubmitting
                   ? 'cursor-wait border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)] opacity-70'
                   : 'border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)] hover:brightness-110'
               }`}
               style={{ fontFamily: 'var(--display)' }}
+              title="Create drone"
             >
               {creating ? <IconSpinner className="h-3.5 w-3.5" /> : null}
-              {creating ? 'Creating...' : 'Create'}
+              {creating ? 'Creating...' : createSubmitting ? 'Transcribing...' : 'Create'}
             </button>
             <button
               type="button"
               onClick={() => {
-                if (!creating) onClose();
+                if (!creating && !createSubmitting) onClose();
               }}
-              className="inline-flex h-8 w-8 items-center justify-center rounded border border-[var(--border-subtle)] text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+              disabled={creating || createSubmitting}
+              className={`inline-flex h-8 w-8 items-center justify-center rounded border border-[var(--border-subtle)] text-[var(--muted)] transition-colors ${
+                creating || createSubmitting
+                  ? 'opacity-40 cursor-not-allowed'
+                  : 'hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+              }`}
               title="Close"
               aria-label="Close"
             >
@@ -474,19 +503,28 @@ export function RemoteCreateDroneModal({
               </label>
             </div>
 
-            <label className="block">
-              <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
-                Initial message
+            <div className="block">
+              <span className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+                  Initial message
+                </span>
+                <InitialMessageVoiceControls
+                  ref={initialMessageVoiceRef}
+                  value={initialMessage}
+                  onChange={setInitialMessage}
+                  disabled={creating}
+                />
               </span>
               <textarea
                 value={initialMessage}
                 onChange={(event) => setInitialMessage(event.target.value)}
-                disabled={creating}
+                disabled={creating || createSubmitting}
                 rows={4}
                 placeholder="Optional"
+                aria-label="Initial message"
                 className="min-h-[96px] w-full resize-y rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] px-3 py-2 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)]"
               />
-            </label>
+            </div>
           </div>
         </div>
       </div>
