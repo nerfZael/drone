@@ -226,6 +226,7 @@ import {
   runGitInDroneOrThrow,
   type RepoPullChangeEntry,
 } from './drone-repo';
+import { resolveLanguageDefinition, resolveLanguageReferences, LanguageServiceError } from './language-service';
 import {
   closeGithubPullRequestForRepoRoot,
   getGithubPullRequestCommitForRepoRoot,
@@ -19070,6 +19071,106 @@ export async function startDroneHubApiServer(opts: {
           json(res, status, {
             ok: false,
             error: repoUnavailable ? 'repository is not ready yet' : msg,
+            ...(repoUnavailable ? { code: 'repo_unavailable' } : {}),
+            id: droneId,
+            name: droneName,
+          });
+          return;
+        }
+      }
+
+      // GET /api/drones/:name/language/definition?path=<path>&line=<1-based>&column=<1-based>
+      // GET /api/drones/:name/language/references?path=<path>&line=<1-based>&column=<1-based>
+      // Limited project-aware language intelligence. TypeScript/JavaScript is supported first.
+      if (
+        method === 'GET' &&
+        parts.length === 5 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'language' &&
+        (parts[4] === 'definition' || parts[4] === 'references')
+      ) {
+        const droneRef = decodeURIComponent(parts[2]);
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        const d = resolved.drone;
+        const droneId = resolved.id;
+        const droneName = String(d?.name ?? droneRef).trim() || droneRef;
+        const runtime = droneRuntime(d);
+        const repoAttached = isRepoAttachedDrone(d);
+        if (!repoAttached) {
+          json(res, 400, {
+            ok: false,
+            error: 'drone has no repo attached',
+            id: droneId,
+            name: droneName,
+          });
+          return;
+        }
+        const filePath = String(u.searchParams.get('path') ?? '').trim();
+        if (!filePath) {
+          json(res, 400, { ok: false, error: 'missing file path', id: droneId, name: droneName });
+          return;
+        }
+        const line = Number(u.searchParams.get('line') ?? 1);
+        const column = Number(u.searchParams.get('column') ?? 1);
+        const limit = Number(u.searchParams.get('limit') ?? 100);
+
+        try {
+          const repoPathRaw = String(d?.repoPath ?? '').trim();
+          if (!repoPathRaw) {
+            json(res, 409, {
+              ok: false,
+              error: 'language intelligence needs a host-visible repo path for this drone',
+              code: 'language_runtime_not_supported',
+              id: droneId,
+              name: droneName,
+            });
+            return;
+          }
+          const repoRoot = await gitTopLevel(repoPathRaw);
+          const runtimeRepoRoot = runtime === 'host' ? repoRoot : droneRepoPathInContainer(d);
+          if (parts[4] === 'definition') {
+            const target = resolveLanguageDefinition({
+              repoRoot,
+              runtimeRepoRoot,
+              path: filePath,
+              line,
+              column,
+            });
+            json(res, 200, { ok: true, id: droneId, name: droneName, repoRoot, target });
+            return;
+          }
+          const normalizedLimit =
+            Number.isFinite(limit) && limit > 0 ? Math.min(500, Math.floor(limit)) : 100;
+          const references = resolveLanguageReferences({
+            repoRoot,
+            runtimeRepoRoot,
+            path: filePath,
+            line,
+            column,
+            limit: normalizedLimit + 1,
+          });
+          json(res, 200, {
+            ok: true,
+            id: droneId,
+            name: droneName,
+            repoRoot,
+            references: references.slice(0, normalizedLimit),
+            truncated: references.length > normalizedLimit,
+          });
+          return;
+        } catch (e: any) {
+          const msg = e?.message ?? String(e);
+          const repoUnavailable = looksLikeRepoUnavailableError(msg);
+          const languageStatus =
+            e instanceof LanguageServiceError && Number.isFinite(e.statusCode)
+              ? Math.max(400, Math.floor(e.statusCode))
+              : 0;
+          json(res, languageStatus || (repoUnavailable ? 409 : 500), {
+            ok: false,
+            error: repoUnavailable ? 'repository is not ready yet' : msg,
+            ...(e instanceof LanguageServiceError ? { code: e.code } : {}),
             ...(repoUnavailable ? { code: 'repo_unavailable' } : {}),
             id: droneId,
             name: droneName,
