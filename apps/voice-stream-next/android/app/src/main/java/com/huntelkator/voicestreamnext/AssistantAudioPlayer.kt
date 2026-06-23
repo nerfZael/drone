@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.SystemClock
 import java.io.File
 import java.util.ArrayDeque
+import java.util.Locale
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -114,7 +115,10 @@ object AssistantAudioPlayer {
     }
 
     private fun playPcmWav(next: PlaybackRequest, attributes: AudioAttributes, playbackGeneration: Int) {
-        val audio = WavPcm.parse(next.wav)
+        val parsedAudio = WavPcm.parse(next.wav)
+        val volumePercent = assistantSpeechPlaybackVolumePercent(next.context)
+        val gainResult = Pcm16Gain.applyGain(parsedAudio.pcm, volumePercent / 100.0)
+        val audio = parsedAudio.copy(pcm = gainResult.pcm)
         val channelMask = if (audio.channels == 1) AudioFormat.CHANNEL_OUT_MONO else AudioFormat.CHANNEL_OUT_STEREO
         val minBuffer = AudioTrack.getMinBufferSize(audio.sampleRateHz, channelMask, AudioFormat.ENCODING_PCM_16BIT)
         require(minBuffer > 0) { "AudioTrack does not support ${audio.sampleRateHz}Hz/${audio.channels}ch PCM16" }
@@ -127,7 +131,7 @@ object AssistantAudioPlayer {
             .build()
         activeTrack = track
         try {
-            ClientLog.i("AssistantAudio", "Playing assistant audio wavBytes=${next.wav.size} pcmBytes=${audio.pcm.size} sampleRate=${audio.sampleRateHz} channels=${audio.channels} durationMs=${audio.durationMs} ${audioRouteSummary(next.context)}")
+            ClientLog.i("AssistantAudio", "Playing assistant audio wavBytes=${next.wav.size} pcmBytes=${audio.pcm.size} sampleRate=${audio.sampleRateHz} channels=${audio.channels} durationMs=${audio.durationMs} volume=$volumePercent% gain=${String.format(Locale.US, "%.2f", gainResult.gain)} peak=${gainResult.peakBefore}->${gainResult.peakAfter} ${audioRouteSummary(next.context)}")
             next.onStatus?.invoke("Playing assistant audio.")
             track.setVolume(AudioTrack.getMaxVolume())
             track.play()
@@ -149,6 +153,12 @@ object AssistantAudioPlayer {
             runCatching { track.release() }
             abandonAudioFocus(next.context, focus)
         }
+    }
+
+    private fun assistantSpeechPlaybackVolumePercent(context: Context): Int {
+        return context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+            .getInt(Constants.PREF_ASSISTANT_SPEECH_PLAYBACK_VOLUME_PERCENT, Constants.ASSISTANT_SPEECH_PLAYBACK_VOLUME_DEFAULT_PERCENT)
+            .coerceIn(Constants.ASSISTANT_SPEECH_PLAYBACK_VOLUME_MIN_PERCENT, Constants.ASSISTANT_SPEECH_PLAYBACK_VOLUME_MAX_PERCENT)
     }
 
     private fun playWithMediaPlayer(next: PlaybackRequest, attributes: AudioAttributes, playbackGeneration: Int) {

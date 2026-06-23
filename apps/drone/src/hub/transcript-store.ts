@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 
 import { hubSqlitePath } from '../host/sqlite-registry-store';
@@ -98,6 +99,7 @@ let cached:
   | null = null;
 
 let unavailableReason: string | null = null;
+const requireForTranscriptStore = createRequire(__filename);
 
 type MemoryChatRow = {
   chatName: string;
@@ -137,8 +139,7 @@ function loadDatabaseConstructor(): DatabaseConstructor | null {
   try {
     // Keep this dynamic so Bun-based tests can import the server even when the
     // native Node binding was compiled for Node's ABI.
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    return require('better-sqlite3') as DatabaseConstructor;
+    return requireForTranscriptStore('better-sqlite3') as DatabaseConstructor;
   } catch (error: any) {
     unavailableReason = error?.message ?? String(error);
     return null;
