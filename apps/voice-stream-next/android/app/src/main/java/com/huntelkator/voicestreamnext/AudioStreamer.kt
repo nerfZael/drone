@@ -67,9 +67,19 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
     @Volatile private var sleeping = false
     @Volatile private var currentMicrophone = "Mic: phone"
     @Volatile private var pendingAssistantProfileId: String? = null
+    @Volatile private var recordingStartedAtMs = 0L
+    @Volatile private var recordingMaxDurationMs = 0L
     @Volatile private var lastUploadedRecognizerText = ""
     @Volatile private var lastRecognizerUploadAtMs = 0L
     @Volatile private var pendingRecognizerText = ""
+    private val recordingCountdownRunnable = object : Runnable {
+        override fun run() {
+            val onStatus = currentOnStatus
+            if (!recording.get() || onStatus == null || recordingMaxDurationMs <= 0L || recordingStartedAtMs <= 0L) return
+            onStatus(recordingStatus(currentTarget))
+            mainHandler.postDelayed(this, 1_000L)
+        }
+    }
 
     var statusListener: ((StreamStatus) -> Unit)? = null
 
@@ -152,6 +162,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
             active.set(false)
             recording.set(false)
             outgoingReady.set(false)
+            stopRecordingCountdown()
             closeSocket("sleep requested", sendEnd = true)
             runCatching { recorder?.stop() }
             onStatus?.invoke("Off")
@@ -201,6 +212,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
         currentOnStatus = null
         pendingRecognizerText = ""
         mainHandler.removeCallbacks(recognizerTextUploadRunnable)
+        stopRecordingCountdown()
         resetApprovalCollection()
         wakeDetector?.release()
         wakeDetector = null
@@ -258,6 +270,9 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
         currentTarget = cleanTarget(target)
         outgoingReady.set(false)
         reconnectAttempt = 0
+        recordingStartedAtMs = SystemClock.elapsedRealtime()
+        recordingMaxDurationMs = 0L
+        mainHandler.removeCallbacks(recordingCountdownRunnable)
         currentSocketUrl = buildSocketUrl(api.loadConfig().serverUrl, api.pairedDeviceId(), api.pairedDeviceToken(), sessionId, currentTarget)
         onStatus(recordingStatus(currentTarget))
         connectSocket(currentSocketUrl, onStatus)
@@ -266,6 +281,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
     private fun endRecording(onStatus: (String) -> Unit, status: String) {
         if (!recording.getAndSet(false)) return
         outgoingReady.set(false)
+        stopRecordingCountdown()
         sendEnd("recording ended")
         pendingStreamBuffer.clear()
         onStatus(status)
@@ -290,8 +306,15 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
                     val message = runCatching { JSONObject(text) }.getOrNull() ?: return
                     when (message.optString("type")) {
                         "server_ping" -> webSocket.send(JSONObject().put("type", "client_ping").put("sentAt", java.time.Instant.now().toString()).toString())
+                        "server_hello" -> {
+                            val maxDurationMs = message.optLong("maxDurationMs", 0L)
+                            if (maxDurationMs > 0L) {
+                                startRecordingCountdown(maxDurationMs, onStatus)
+                            }
+                        }
                         "assistant_result" -> {
                             recording.set(false)
+                            stopRecordingCountdown()
                             onStatus("Assistant replied.")
                         }
                         "assistant_status" -> {
@@ -299,6 +322,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
                         }
                         "transcript_result" -> {
                             recording.set(false)
+                            stopRecordingCountdown()
                             onStatus(message.optString("status", "Transcript received."))
                         }
                         "terminal_detected" -> handleServerTerminalDetected(message, onStatus)
@@ -308,6 +332,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
                         "assistant_error" -> {
                             recording.set(false)
                             outgoingReady.set(false)
+                            stopRecordingCountdown()
                             pendingStreamBuffer.clear()
                             closeSocket("server error", sendEnd = false)
                             onStatus(message.optString("error", "Voice runtime failed."))
@@ -335,6 +360,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
                     outgoingReady.set(false)
                     if (isTerminalCloseCode(code)) {
                         recording.set(false)
+                        stopRecordingCountdown()
                         pendingStreamBuffer.clear()
                         onStatus("Voice stream closed: ${reason.ifBlank { "code $code" }}")
                         return
@@ -364,6 +390,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
     private fun handleServerAbort(onStatus: (String) -> Unit) {
         recording.set(false)
         outgoingReady.set(false)
+        stopRecordingCountdown()
         pendingStreamBuffer.clear()
         closeSocket("server abort", sendEnd = false)
         val status = if (currentTarget == Constants.STREAM_TARGET_CLIPBOARD) {
@@ -377,6 +404,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
     private fun handleServerTerminalDetected(message: JSONObject, onStatus: (String) -> Unit) {
         if (!recording.getAndSet(false)) return
         outgoingReady.set(false)
+        stopRecordingCountdown()
         pendingStreamBuffer.clear()
         val commandType = message.optString("commandType")
         wakeDetector?.reset()
@@ -430,6 +458,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
         }
         recording.set(false)
         outgoingReady.set(false)
+        stopRecordingCountdown()
         pendingStreamBuffer.clear()
         closeSocket("server finish", sendEnd = false)
         val status = if (currentTarget == Constants.STREAM_TARGET_CLIPBOARD) {
@@ -446,6 +475,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
         }
         recording.set(false)
         outgoingReady.set(false)
+        stopRecordingCountdown()
         pendingStreamBuffer.clear()
         closeSocket("server sleep", sendEnd = false)
         val wasSleeping = sleeping
@@ -479,6 +509,22 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
                 connectSocket(socketUrl, onStatus)
             }
         }
+    }
+
+    private fun startRecordingCountdown(maxDurationMs: Long, onStatus: (String) -> Unit) {
+        recordingMaxDurationMs = maxDurationMs
+        if (recordingStartedAtMs <= 0L) {
+            recordingStartedAtMs = SystemClock.elapsedRealtime()
+        }
+        mainHandler.removeCallbacks(recordingCountdownRunnable)
+        onStatus(recordingStatus(currentTarget))
+        mainHandler.postDelayed(recordingCountdownRunnable, 1_000L)
+    }
+
+    private fun stopRecordingCountdown() {
+        mainHandler.removeCallbacks(recordingCountdownRunnable)
+        recordingStartedAtMs = 0L
+        recordingMaxDurationMs = 0L
     }
 
     private fun delayLabel(delayMs: Long): String {
@@ -849,11 +895,27 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
     }
 
     private fun recordingStatus(target: String): String {
-        return when (target) {
+        val base = when (target) {
             Constants.STREAM_TARGET_PATCH -> "Awake: patching into chat"
             Constants.STREAM_TARGET_CLIPBOARD -> "Awake: recording clipboard transcription"
             else -> "Awake: recording"
         }
+        val remainingMs = recordingRemainingMs()
+        return if (remainingMs != null) "$base · ${formatCountdown(remainingMs)} left" else base
+    }
+
+    private fun recordingRemainingMs(): Long? {
+        val maxMs = recordingMaxDurationMs
+        val startedAt = recordingStartedAtMs
+        if (!recording.get() || maxMs <= 0L || startedAt <= 0L) return null
+        return (maxMs - (SystemClock.elapsedRealtime() - startedAt)).coerceAtLeast(0L)
+    }
+
+    private fun formatCountdown(ms: Long): String {
+        val totalSeconds = ((ms + 999L) / 1_000L).coerceAtLeast(0L)
+        val minutes = totalSeconds / 60L
+        val seconds = totalSeconds % 60L
+        return "$minutes:${seconds.toString().padStart(2, '0')}"
     }
 
     private fun sleepingStatus(): String {
