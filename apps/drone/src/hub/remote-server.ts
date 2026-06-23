@@ -8,6 +8,7 @@ import { URL } from 'node:url';
 
 import QRCode from 'qrcode';
 
+import { GROQ_TRANSCRIPTION_MAX_BYTES } from './groq-transcription';
 import { RemoteAuthStore } from './remote-auth';
 import { normalizeRemotePublicUrl } from './remote-state';
 
@@ -171,6 +172,7 @@ async function resolveContainerDrone(opts: StartRemoteHubServerOptions, droneId:
 
 export function routeAllowed(method: string, pathname: string): boolean {
   const parts = splitPathname(pathname);
+  if (method === 'POST' && pathname === '/api/audio/transcriptions') return true;
   if (method === 'GET' && pathname === '/api/drones') return true;
   if (method === 'POST' && pathname === '/api/drones') return true;
   if (method === 'POST' && pathname === '/api/drones/name-from-message') return true;
@@ -218,7 +220,13 @@ async function proxyAllowedRequest(opts: StartRemoteHubServerOptions, req: http.
     return;
   }
 
-  const body = method === 'GET' || method === 'HEAD' ? undefined : await readRawBody(req, 1024 * 1024);
+  const body =
+    method === 'GET' || method === 'HEAD'
+      ? undefined
+      : await readRawBody(
+          req,
+          pathname === '/api/audio/transcriptions' ? GROQ_TRANSCRIPTION_MAX_BYTES : 1024 * 1024,
+        );
   const target = new URL(`${pathname}${new URL(req.url ?? '/', 'http://remote.local').search}`, opts.hubBaseUrl);
   const response = await fetch(target.toString(), {
     method,
