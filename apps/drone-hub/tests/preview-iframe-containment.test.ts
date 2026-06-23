@@ -36,5 +36,6 @@ describe('preview iframe containment', () => {
     expect(isPreviewFocusUserRequested(100, NO_PREVIEW_POINTER_TIME)).toBe(false);
     expect(isPreviewFocusUserRequested(1000, 1000 - PREVIEW_FOCUS_INTENT_MS + 1)).toBe(true);
     expect(isPreviewFocusUserRequested(1000, 1000 - PREVIEW_FOCUS_INTENT_MS)).toBe(false);
+    expect(isPreviewFocusUserRequested(1000, NO_PREVIEW_POINTER_TIME, true)).toBe(true);
   });
 });
