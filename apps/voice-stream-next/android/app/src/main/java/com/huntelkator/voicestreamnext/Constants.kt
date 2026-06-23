@@ -14,8 +14,13 @@ object Constants {
     const val PREF_INSTALLATION_ID = "installation_id"
     const val PREF_ANDROID_ECHO_CANCELLATION = "android_echo_cancellation"
     const val PREF_ASSISTANT_SPEECH_PLAYBACK_ENABLED = "assistant_speech_playback_enabled"
+    const val PREF_ASSISTANT_SPEECH_PLAYBACK_VOLUME_PERCENT = "assistant_speech_playback_volume_percent"
     const val PREF_SUPPRESS_WAKE_DURING_PLAYBACK = "suppress_wake_during_playback"
     const val PREF_MICROPHONE_DEVICE_KEY = "microphone_device_key"
+
+    const val ASSISTANT_SPEECH_PLAYBACK_VOLUME_MIN_PERCENT = 50
+    const val ASSISTANT_SPEECH_PLAYBACK_VOLUME_MAX_PERCENT = 300
+    const val ASSISTANT_SPEECH_PLAYBACK_VOLUME_DEFAULT_PERCENT = 100
 
     const val ACTION_START_VOICE = "com.huntelkator.voicestreamnext.action.START_VOICE"
     const val ACTION_START_AWAKE = "com.huntelkator.voicestreamnext.action.START_AWAKE"

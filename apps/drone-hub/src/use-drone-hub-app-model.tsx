@@ -899,6 +899,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     settingBaseImages,
     deleteDrone: deleteDroneBase,
     renameDrone,
+    renameDrones,
     setDroneBaseImage,
     reparentDronesToParent,
     renameDroneTo,
@@ -1806,6 +1807,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     quickOpenError,
     canGoBackLocation,
     canGoForwardLocation,
+    openedFileTabs: openedEditorFileTabs,
+    activeOpenedFileTabId,
     openEditorFile,
     closeEditorFile,
     openQuickOpen,
@@ -1813,6 +1816,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setQuickOpenQuery,
     goBackLocation,
     goForwardLocation,
+    setActiveOpenedFileTab,
+    reorderOpenedFileTabs,
     setOpenedFileContent,
     refreshOpenedFile,
     saveOpenedFile,
@@ -2277,6 +2282,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [goBackEditorLocationFromShortcut, goForwardEditorLocationFromShortcut, openQuickOpenFromShortcut, quickOpenOpen]);
+
   const [pendingPlaybookArtifact, setPendingPlaybookArtifact] = React.useState<{
     droneId: string;
     path: string;
@@ -3046,6 +3052,22 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             return openFileInPanelFromFilesPane({ path: entry.path, name: entry.name });
           }}
           onOpenFileTargetInEditor={openFileInFilesPane}
+          openedFile={{
+            path: openedEditorFile?.path ?? null,
+            name: openedEditorFile?.name ?? null,
+            loading: openedEditorFileLoading,
+            saving: openedEditorFileSaving,
+            error: openedEditorFileError,
+            kind: openedEditorFileKind,
+            mime: openedEditorFileMime,
+            size: openedEditorFileSize,
+            content: openedEditorFileContent,
+            dirty: openedEditorFileDirty,
+            mtimeMs: openedEditorFileMtimeMs,
+            targetLine: openedEditorFile?.targetLine ?? null,
+            targetColumn: openedEditorFile?.targetColumn ?? null,
+            navigationSeq: openedEditorFile?.navigationSeq ?? 0,
+          }}
           quickOpen={{
             open: quickOpenOpen,
             query: quickOpenQuery,
@@ -3070,25 +3092,13 @@ export function useDroneHubAppModel(): DroneHubAppModel {
               if (location) revealEditorLocationParent(location.path);
             },
           }}
-          openedFile={{
-            path: openedEditorFile?.path ?? null,
-            name: openedEditorFile?.name ?? null,
-            loading: openedEditorFileLoading,
-            saving: openedEditorFileSaving,
-            error: openedEditorFileError,
-            kind: openedEditorFileKind,
-            mime: openedEditorFileMime,
-            size: openedEditorFileSize,
-            content: openedEditorFileContent,
-            dirty: openedEditorFileDirty,
-            mtimeMs: openedEditorFileMtimeMs,
-            targetLine: openedEditorFile?.targetLine ?? null,
-            targetColumn: openedEditorFile?.targetColumn ?? null,
-            navigationSeq: openedEditorFile?.navigationSeq ?? 0,
-          }}
+          openedFileTabs={openedEditorFileTabs}
+          activeOpenedFileTabId={activeOpenedFileTabId}
           onOpenedEditorFileContentChange={setOpenedFileContent}
           onSaveOpenedEditorFile={saveOpenedFile}
           onCloseOpenedEditorFile={closeEditorFile}
+          onActivateOpenedEditorFileTab={setActiveOpenedFileTab}
+          onReorderOpenedEditorFileTabs={reorderOpenedFileTabs}
           onRevealChangesFileInFiles={revealChangesFileInFiles}
           onOpenChangesFileInEditor={openChangesFileInEditor}
           onOpenPullRequest={(pane, _pullRequest) => {
@@ -3184,6 +3194,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       openedEditorFileMtimeMs,
       openedEditorFileSaving,
       openedEditorFileSize,
+      openedEditorFileTabs,
+      activeOpenedFileTabId,
       quickOpenOpen,
       quickOpenQuery,
       quickOpenFiles,
@@ -3200,6 +3212,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       refreshOpenedFile,
       saveOpenedFile,
       closeEditorFile,
+      setActiveOpenedFileTab,
+      reorderOpenedFileTabs,
     ],
   );
 
@@ -3293,6 +3307,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     deleteCanvasChat,
     openCloneModal,
     renameDrone,
+    renameDrones,
     setDroneBaseImage,
     deleteDrone,
     reparentDronesToParent,

@@ -2,6 +2,17 @@ import React from 'react';
 import type { DroneFsReadPayload, DroneFsSearchPayload, DroneFsWritePayload, DroneSummary } from '../types';
 import type { requestJson as requestJsonFn } from '../http';
 import {
+  activateFileTab,
+  closeFileTab,
+  openedFileTabDirty,
+  openFileTab,
+  reorderFileTabs,
+  updateFileTabContent,
+  type OpenedFileKind,
+  type OpenedFileTab,
+  type OpenedFileTabsState,
+} from './opened-file-tabs';
+import {
   canGoBackInEditorHistory,
   canGoForwardInEditorHistory,
   emptyEditorLocationHistory,
@@ -19,17 +30,6 @@ import {
 } from '../files/quick-open-state';
 
 type RequestJson = typeof requestJsonFn;
-
-type OpenEditorFile = {
-  droneId: string;
-  path: string;
-  name: string;
-  targetLine: number | null;
-  targetColumn: number | null;
-  navigationSeq: number;
-};
-
-type OpenedFileKind = 'text' | 'image' | 'video' | 'binary';
 
 type UseFileEditorStateArgs = {
   currentDrone: DroneSummary | null;
@@ -62,25 +62,47 @@ function looksLikeFileNotFound(msgRaw: string): boolean {
   return msg.includes('file not found') || msg.includes('no such file') || msg.includes('not-file');
 }
 
+function readPayloadToTabState(data: Extract<DroneFsReadPayload, { ok: true }>): {
+  kind: OpenedFileKind;
+  mime: string | null;
+  size: number;
+  content: string;
+  savedContent: string;
+  mtimeMs: number | null;
+} {
+  const rawKind =
+    typeof (data as any).kind === 'string'
+      ? String((data as any).kind).trim().toLowerCase()
+      : typeof (data as any).content === 'string'
+        ? 'text'
+        : 'binary';
+  const nextKind: OpenedFileKind =
+    rawKind === 'text' || rawKind === 'image' || rawKind === 'video' ? rawKind : 'binary';
+  const nextMime = typeof (data as any).mime === 'string' ? String((data as any).mime).trim().toLowerCase() : '';
+  const nextSize = Number((data as any).size);
+  const nextContent = nextKind === 'text' && typeof (data as any).content === 'string' ? (data as any).content : '';
+  return {
+    kind: nextKind,
+    mime: nextMime || null,
+    size: Number.isFinite(nextSize) && nextSize >= 0 ? Math.floor(nextSize) : 0,
+    content: nextContent,
+    savedContent: nextContent,
+    mtimeMs: typeof data.mtimeMs === 'number' && Number.isFinite(data.mtimeMs) ? data.mtimeMs : null,
+  };
+}
+
 export function useFileEditorState({
   currentDrone,
   requestJson,
   onRefreshFsList,
 }: UseFileEditorStateArgs) {
-  const [openedFile, setOpenedFile] = React.useState<OpenEditorFile | null>(null);
-  const [refreshNonce, setRefreshNonce] = React.useState(0);
-  const [loading, setLoading] = React.useState(false);
-  const [saving, setSaving] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
+  const [tabState, setTabState] = React.useState<OpenedFileTabsState>({ tabs: [], activeTabId: null });
+  const { tabs, activeTabId } = tabState;
   const [openFailure, setOpenFailure] = React.useState<{ message: string; at: number } | null>(null);
-  const [kind, setKind] = React.useState<OpenedFileKind>('text');
-  const [mime, setMime] = React.useState<string | null>(null);
-  const [size, setSize] = React.useState<number>(0);
-  const [content, setContent] = React.useState('');
-  const [savedContent, setSavedContent] = React.useState('');
-  const [mtimeMs, setMtimeMs] = React.useState<number | null>(null);
   const contentRef = React.useRef('');
+  const activeTabIdRef = React.useRef<string | null>(null);
   const requestSeqRef = React.useRef(0);
+  const navigationSeqRef = React.useRef(0);
   const locationHistoryRef = React.useRef<EditorLocationHistory>(emptyEditorLocationHistory);
   const [locationHistory, setLocationHistory] = React.useState<EditorLocationHistory>(emptyEditorLocationHistory);
   const [recentFilesByDroneId, setRecentFilesByDroneId] = React.useState<Record<string, QuickOpenRecentFile[]>>({});
@@ -95,19 +117,23 @@ export function useFileEditorState({
     setLocationHistory(next);
   }, []);
 
-  const closeEditorFile = React.useCallback(() => {
-    setOpenedFile(null);
-    setLoading(false);
-    setSaving(false);
-    setError(null);
+  const activeTab = React.useMemo(
+    () => tabs.find((tab) => tab.tabId === activeTabId) ?? null,
+    [activeTabId, tabs],
+  );
+
+  React.useEffect(() => {
+    activeTabIdRef.current = activeTab?.tabId ?? null;
+    contentRef.current = activeTab?.content ?? '';
+  }, [activeTab?.content, activeTab?.tabId]);
+
+  const updateTabs = React.useCallback((updater: (tabs: OpenedFileTab[]) => OpenedFileTab[]) => {
+    setTabState((prev) => ({ ...prev, tabs: updater(prev.tabs) }));
+  }, []);
+
+  const closeEditorFile = React.useCallback((tabId?: string | null) => {
     setOpenFailure(null);
-    setKind('text');
-    setMime(null);
-    setSize(0);
-    setContent('');
-    setSavedContent('');
-    contentRef.current = '';
-    setMtimeMs(null);
+    setTabState((prev) => closeFileTab(prev, tabId));
   }, []);
 
   const normalizePositiveInt = React.useCallback((raw: unknown): number | null => {
@@ -118,25 +144,30 @@ export function useFileEditorState({
     return i;
   }, []);
 
-  const applyEditorLocation = React.useCallback(
-    (location: EditorLocation) => {
-      setOpenedFile((prev) => ({
-        droneId: location.droneId,
-        path: location.path,
-        name: location.name,
-        targetLine: location.line,
-        targetColumn: location.column,
-        navigationSeq: (prev?.navigationSeq ?? 0) + 1,
-      }));
-      setRecentFilesByDroneId((prev) => ({
-        ...prev,
-        [location.droneId]: trackRecentQuickOpenFile(prev[location.droneId] ?? [], {
-          path: location.path,
-          name: location.name,
+  const openEditorLocation = React.useCallback(
+    (next: { droneId: string; path: string; name: string; line?: number | null; column?: number | null }) => {
+      const droneId = String(next.droneId ?? '').trim();
+      if (!droneId) return;
+      const nextPath = String(next.path ?? '').trim();
+      if (!nextPath) return;
+      const nextName = String(next.name ?? '').trim() || nextPath.split('/').filter(Boolean).pop() || nextPath;
+      const targetLine = normalizePositiveInt(next.line);
+      const targetColumn = normalizePositiveInt(next.column);
+      navigationSeqRef.current += 1;
+      const navigationSeq = navigationSeqRef.current;
+      setOpenFailure(null);
+      setTabState((prev) =>
+        openFileTab(prev, {
+          droneId,
+          path: nextPath,
+          name: nextName,
+          targetLine,
+          targetColumn,
+          navigationSeq,
         }),
-      }));
+      );
     },
-    [],
+    [normalizePositiveInt],
   );
 
   const openEditorFile = React.useCallback(
@@ -163,28 +194,9 @@ export function useFileEditorState({
           name: nextName,
         }),
       }));
-      setOpenedFile((prev) => {
-        const nextNavigationSeq = (prev?.navigationSeq ?? 0) + 1;
-        if (prev && prev.droneId === droneId && prev.path === nextPath) {
-          return {
-            ...prev,
-            name: nextName,
-            targetLine,
-            targetColumn,
-            navigationSeq: nextNavigationSeq,
-          };
-        }
-        return {
-          droneId,
-          path: nextPath,
-          name: nextName,
-          targetLine,
-          targetColumn,
-          navigationSeq: nextNavigationSeq,
-        };
-      });
+      openEditorLocation(nextLocation);
     },
-    [currentDrone?.id, normalizePositiveInt, setEditorLocationHistory],
+    [currentDrone?.id, normalizePositiveInt, openEditorLocation, setEditorLocationHistory],
   );
 
   const openQuickOpen = React.useCallback(() => {
@@ -200,27 +212,49 @@ export function useFileEditorState({
 
   const goBackLocation = React.useCallback((): EditorLocation | null => {
     const next = goBackInEditorHistory(locationHistoryRef.current);
-    if (!next.location) return null;
+    const location = next.location;
+    if (!location) return null;
     setEditorLocationHistory(next.history);
-    applyEditorLocation(next.location);
-    return next.location;
-  }, [applyEditorLocation, setEditorLocationHistory]);
+    openEditorLocation(location);
+    setRecentFilesByDroneId((prev) => ({
+      ...prev,
+      [location.droneId]: trackRecentQuickOpenFile(prev[location.droneId] ?? [], {
+        path: location.path,
+        name: location.name,
+      }),
+    }));
+    return location;
+  }, [openEditorLocation, setEditorLocationHistory]);
 
   const goForwardLocation = React.useCallback((): EditorLocation | null => {
     const next = goForwardInEditorHistory(locationHistoryRef.current);
-    if (!next.location) return null;
+    const location = next.location;
+    if (!location) return null;
     setEditorLocationHistory(next.history);
-    applyEditorLocation(next.location);
-    return next.location;
-  }, [applyEditorLocation, setEditorLocationHistory]);
+    openEditorLocation(location);
+    setRecentFilesByDroneId((prev) => ({
+      ...prev,
+      [location.droneId]: trackRecentQuickOpenFile(prev[location.droneId] ?? [], {
+        path: location.path,
+        name: location.name,
+      }),
+    }));
+    return location;
+  }, [openEditorLocation, setEditorLocationHistory]);
 
   React.useEffect(() => {
-    if (!openedFile) return;
-    if (!currentDrone || String(currentDrone.id) !== String(openedFile.droneId)) {
-      closeEditorFile();
+    if (tabs.length === 0) return;
+    const droneId = String(currentDrone?.id ?? '').trim();
+    if (!droneId) {
+      setTabState({ tabs: [], activeTabId: null });
       setEditorLocationHistory(emptyEditorLocationHistory);
+      return;
     }
-  }, [closeEditorFile, currentDrone?.id, openedFile, setEditorLocationHistory]);
+    if (tabs.every((tab) => String(tab.droneId) === droneId)) return;
+    setTabState({ tabs: [], activeTabId: null });
+    setOpenFailure(null);
+    setEditorLocationHistory(emptyEditorLocationHistory);
+  }, [currentDrone?.id, setEditorLocationHistory, tabs]);
 
   React.useEffect(() => {
     setQuickOpenOpen(false);
@@ -277,24 +311,36 @@ export function useFileEditorState({
   }, [currentDrone?.id, quickOpenOpen, quickOpenQuery, requestJson]);
 
   React.useEffect(() => {
-    if (!openedFile) return;
-    const droneId = String(openedFile.droneId ?? '').trim();
-    const filePath = String(openedFile.path ?? '').trim();
+    if (!activeTab) return;
+    if (activeTab.loaded || activeTab.loading) return;
+    const activeId = activeTab.tabId;
+    const droneId = String(activeTab.droneId ?? '').trim();
+    const filePath = String(activeTab.path ?? '').trim();
     if (!droneId || !filePath) return;
     const seq = requestSeqRef.current + 1;
     requestSeqRef.current = seq;
 
-    setLoading(true);
-    setSaving(false);
-    setError(null);
+    updateTabs((prevTabs) =>
+      prevTabs.map((tab) =>
+        tab.tabId === activeId
+          ? {
+              ...tab,
+              loading: true,
+              saving: false,
+              loaded: false,
+              error: null,
+              kind: 'text',
+              mime: null,
+              size: 0,
+              content: '',
+              savedContent: '',
+              mtimeMs: null,
+            }
+          : tab,
+      ),
+    );
     setOpenFailure(null);
-    setKind('text');
-    setMime(null);
-    setSize(0);
-    setContent('');
-    setSavedContent('');
     contentRef.current = '';
-    setMtimeMs(null);
 
     let cancelled = false;
     void requestJson<Extract<DroneFsReadPayload, { ok: true }>>(
@@ -302,25 +348,21 @@ export function useFileEditorState({
     )
       .then((data) => {
         if (cancelled || requestSeqRef.current !== seq) return;
-        const rawKind =
-          typeof (data as any).kind === 'string'
-            ? String((data as any).kind).trim().toLowerCase()
-            : typeof (data as any).content === 'string'
-              ? 'text'
-              : 'binary';
-        const nextKind: OpenedFileKind =
-          rawKind === 'text' || rawKind === 'image' || rawKind === 'video' ? rawKind : 'binary';
-        const nextMime = typeof (data as any).mime === 'string' ? String((data as any).mime).trim().toLowerCase() : '';
-        const nextSize = Number((data as any).size);
-        const nextContent = nextKind === 'text' && typeof (data as any).content === 'string' ? (data as any).content : '';
-        setKind(nextKind);
-        setMime(nextMime || null);
-        setSize(Number.isFinite(nextSize) && nextSize >= 0 ? Math.floor(nextSize) : 0);
-        setContent(nextContent);
-        setSavedContent(nextContent);
-        contentRef.current = nextContent;
-        setMtimeMs(typeof data.mtimeMs === 'number' && Number.isFinite(data.mtimeMs) ? data.mtimeMs : null);
-        setError(null);
+        const nextLoadedState = readPayloadToTabState(data);
+        updateTabs((prevTabs) =>
+          prevTabs.map((tab) =>
+            tab.tabId === activeId
+              ? {
+                  ...tab,
+                  ...nextLoadedState,
+                  loading: false,
+                  loaded: true,
+                  error: null,
+                }
+              : tab,
+          ),
+        );
+        if (activeTabIdRef.current === activeId) contentRef.current = nextLoadedState.content;
         setOpenFailure(null);
       })
       .catch((e: any) => {
@@ -330,15 +372,25 @@ export function useFileEditorState({
           Boolean(fallbackPath) && fallbackPath !== filePath && looksLikeFileNotFound(firstMsg);
         if (!shouldRetryFallback) {
           if (cancelled || requestSeqRef.current !== seq) return;
-          setError(firstMsg);
+          updateTabs((prevTabs) =>
+            prevTabs.map((tab) =>
+              tab.tabId === activeId
+                ? {
+                    ...tab,
+                    loading: false,
+                    loaded: true,
+                    error: firstMsg,
+                    kind: 'text',
+                    mime: null,
+                    size: 0,
+                    content: '',
+                    savedContent: '',
+                    mtimeMs: null,
+                  }
+                : tab,
+            ),
+          );
           setOpenFailure({ message: firstMsg, at: Date.now() });
-          setKind('text');
-          setMime(null);
-          setSize(0);
-          setContent('');
-          setSavedContent('');
-          contentRef.current = '';
-          setMtimeMs(null);
           return;
         }
 
@@ -347,112 +399,195 @@ export function useFileEditorState({
         )
           .then((data) => {
             if (cancelled || requestSeqRef.current !== seq) return;
-            const rawKind =
-              typeof (data as any).kind === 'string'
-                ? String((data as any).kind).trim().toLowerCase()
-                : typeof (data as any).content === 'string'
-                  ? 'text'
-                  : 'binary';
-            const nextKind: OpenedFileKind =
-              rawKind === 'text' || rawKind === 'image' || rawKind === 'video' ? rawKind : 'binary';
-            const nextMime = typeof (data as any).mime === 'string' ? String((data as any).mime).trim().toLowerCase() : '';
-            const nextSize = Number((data as any).size);
-            const nextContent = nextKind === 'text' && typeof (data as any).content === 'string' ? (data as any).content : '';
-            setKind(nextKind);
-            setMime(nextMime || null);
-            setSize(Number.isFinite(nextSize) && nextSize >= 0 ? Math.floor(nextSize) : 0);
-            setContent(nextContent);
-            setSavedContent(nextContent);
-            contentRef.current = nextContent;
-            setMtimeMs(typeof data.mtimeMs === 'number' && Number.isFinite(data.mtimeMs) ? data.mtimeMs : null);
-            setError(null);
+            const nextLoadedState = readPayloadToTabState(data);
+            updateTabs((prevTabs) =>
+              prevTabs.map((tab) => {
+                if (tab.tabId !== activeId) return tab;
+                const fallbackName = fallbackPath.split('/').filter(Boolean).pop() || tab.name || fallbackPath;
+                return {
+                  ...tab,
+                  ...nextLoadedState,
+                  path: fallbackPath,
+                  name: fallbackName,
+                  loading: false,
+                  loaded: true,
+                  error: null,
+                };
+              }),
+            );
+            if (activeTabIdRef.current === activeId) contentRef.current = nextLoadedState.content;
             setOpenFailure(null);
-            setOpenedFile((prev) => {
-              if (!prev) return prev;
-              if (prev.droneId !== droneId || prev.path !== filePath) return prev;
-              const fallbackName =
-                fallbackPath.split('/').filter(Boolean).pop() || prev.name || fallbackPath;
-              return { ...prev, path: fallbackPath, name: fallbackName };
-            });
           })
           .catch((fallbackErr: any) => {
             if (cancelled || requestSeqRef.current !== seq) return;
             const msg = fallbackErr?.message ?? firstMsg;
-            setError(msg);
+            updateTabs((prevTabs) =>
+              prevTabs.map((tab) =>
+                tab.tabId === activeId
+                  ? {
+                      ...tab,
+                      loading: false,
+                      loaded: true,
+                      error: msg,
+                      kind: 'text',
+                      mime: null,
+                      size: 0,
+                      content: '',
+                      savedContent: '',
+                      mtimeMs: null,
+                    }
+                  : tab,
+              ),
+            );
             setOpenFailure({ message: msg, at: Date.now() });
-            setKind('text');
-            setMime(null);
-            setSize(0);
-            setContent('');
-            setSavedContent('');
-            contentRef.current = '';
-            setMtimeMs(null);
           });
       })
       .finally(() => {
         if (cancelled || requestSeqRef.current !== seq) return;
-        setLoading(false);
+        updateTabs((prevTabs) => prevTabs.map((tab) => (tab.tabId === activeId ? { ...tab, loading: false } : tab)));
       });
 
     return () => {
       cancelled = true;
+      updateTabs((prevTabs) =>
+        prevTabs.map((tab) =>
+          tab.tabId === activeId && tab.loading && !tab.loaded ? { ...tab, loading: false } : tab,
+        ),
+      );
     };
-  }, [openedFile?.droneId, openedFile?.path, refreshNonce, requestJson]);
+  }, [
+    activeTab?.droneId,
+    activeTab?.loaded,
+    activeTab?.path,
+    activeTab?.refreshNonce,
+    activeTab?.tabId,
+    requestJson,
+    updateTabs,
+  ]);
 
-  const dirty = React.useMemo(() => {
-    if (!openedFile) return false;
-    if (kind !== 'text') return false;
-    return content !== savedContent;
-  }, [content, kind, openedFile, savedContent]);
+  const openedFile = activeTab
+    ? {
+        droneId: activeTab.droneId,
+        path: activeTab.path,
+        name: activeTab.name,
+        targetLine: activeTab.targetLine,
+        targetColumn: activeTab.targetColumn,
+        navigationSeq: activeTab.navigationSeq,
+      }
+    : null;
+  const loading = activeTab?.loading ?? false;
+  const saving = activeTab?.saving ?? false;
+  const error = activeTab?.error ?? null;
+  const kind = activeTab?.kind ?? 'text';
+  const mime = activeTab?.mime ?? null;
+  const size = activeTab?.size ?? 0;
+  const content = activeTab?.content ?? '';
+  const dirty = activeTab ? openedFileTabDirty(activeTab) : false;
+  const mtimeMs = activeTab?.mtimeMs ?? null;
+
+  const openedFileTabs = React.useMemo(
+    () =>
+      tabs.map((tab) => ({
+        tabId: tab.tabId,
+        droneId: tab.droneId,
+        path: tab.path,
+        name: tab.name,
+        loading: tab.loading,
+        saving: tab.saving,
+        error: tab.error,
+        kind: tab.kind,
+        mime: tab.mime,
+        size: tab.size,
+        content: tab.content,
+        dirty: openedFileTabDirty(tab),
+        mtimeMs: tab.mtimeMs,
+        targetLine: tab.targetLine,
+        targetColumn: tab.targetColumn,
+        navigationSeq: tab.navigationSeq,
+      })),
+    [tabs],
+  );
+
+  const setActiveOpenedFileTab = React.useCallback((tabIdRaw: string) => {
+    const tabId = String(tabIdRaw ?? '').trim();
+    if (!tabId) return;
+    setTabState((prev) => activateFileTab(prev, tabId));
+  }, []);
+
+  const reorderOpenedFileTabs = React.useCallback((fromTabId: string, toTabId: string) => {
+    setTabState((prev) => reorderFileTabs(prev, fromTabId, toTabId));
+  }, []);
 
   const saveOpenedFile = React.useCallback(async (contentOverride?: string): Promise<boolean> => {
-    if (!openedFile || loading || saving) return false;
-    if (kind !== 'text') return false;
+    if (!activeTab || activeTab.loading || activeTab.saving) return false;
+    if (activeTab.kind !== 'text') return false;
+    const tabId = activeTab.tabId;
     const textToSave = typeof contentOverride === 'string' ? contentOverride : contentRef.current;
     if (typeof contentOverride === 'string') {
       contentRef.current = contentOverride;
-      setContent(contentOverride);
+      updateTabs((prevTabs) => updateFileTabContent(prevTabs, tabId, contentOverride));
     }
-    setSaving(true);
-    setError(null);
+    updateTabs((prevTabs) => prevTabs.map((tab) => (tab.tabId === tabId ? { ...tab, saving: true, error: null } : tab)));
     try {
       const resp = await requestJson<Extract<DroneFsWritePayload, { ok: true }>>(
-        `/api/drones/${encodeURIComponent(openedFile.droneId)}/fs/file`,
+        `/api/drones/${encodeURIComponent(activeTab.droneId)}/fs/file`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
-            path: openedFile.path,
+            path: activeTab.path,
             content: textToSave,
           }),
         },
       );
-      setSavedContent(textToSave);
-      setContent(textToSave);
-      contentRef.current = textToSave;
-      setMtimeMs(typeof resp.mtimeMs === 'number' && Number.isFinite(resp.mtimeMs) ? resp.mtimeMs : null);
+      updateTabs((prevTabs) =>
+        prevTabs.map((tab) =>
+          tab.tabId === tabId
+            ? {
+                ...tab,
+                saving: false,
+                error: null,
+                content: textToSave,
+                savedContent: textToSave,
+                mtimeMs: typeof resp.mtimeMs === 'number' && Number.isFinite(resp.mtimeMs) ? resp.mtimeMs : null,
+              }
+            : tab,
+        ),
+      );
+      if (activeTabIdRef.current === tabId) contentRef.current = textToSave;
       onRefreshFsList();
       return true;
     } catch (e: any) {
-      setError(e?.message ?? String(e));
+      const msg = e?.message ?? String(e);
+      updateTabs((prevTabs) => prevTabs.map((tab) => (tab.tabId === tabId ? { ...tab, saving: false, error: msg } : tab)));
       return false;
-    } finally {
-      setSaving(false);
     }
-  }, [kind, loading, onRefreshFsList, openedFile, requestJson, saving]);
+  }, [activeTab, onRefreshFsList, requestJson, updateTabs]);
 
   const setOpenedFileContent = React.useCallback((next: string) => {
-    if (kind !== 'text') return;
+    if (!activeTab || activeTab.kind !== 'text') return;
     const nextText = typeof next === 'string' ? next : '';
     contentRef.current = nextText;
-    setContent(nextText);
-  }, [kind]);
+    updateTabs((prevTabs) => updateFileTabContent(prevTabs, activeTab.tabId, nextText));
+  }, [activeTab, updateTabs]);
 
   const refreshOpenedFile = React.useCallback(() => {
-    if (!openedFile || loading || saving) return;
-    if (kind === 'text' && contentRef.current !== savedContent) return;
-    setRefreshNonce((n) => n + 1);
-  }, [kind, loading, openedFile, savedContent, saving]);
+    if (!activeTab || activeTab.loading || activeTab.saving) return;
+    if (activeTab.kind === 'text' && activeTab.content !== activeTab.savedContent) return;
+    updateTabs((prevTabs) =>
+      prevTabs.map((tab) =>
+        tab.tabId === activeTab.tabId
+          ? {
+              ...tab,
+              loaded: false,
+              loading: false,
+              error: null,
+              refreshNonce: tab.refreshNonce + 1,
+            }
+          : tab,
+      ),
+    );
+  }, [activeTab, updateTabs]);
 
   return {
     openedFile,
@@ -474,6 +609,8 @@ export function useFileEditorState({
     quickOpenError,
     canGoBackLocation: canGoBackInEditorHistory(locationHistory),
     canGoForwardLocation: canGoForwardInEditorHistory(locationHistory),
+    openedFileTabs,
+    activeOpenedFileTabId: activeTabId,
     openEditorFile,
     closeEditorFile,
     openQuickOpen,
@@ -481,6 +618,8 @@ export function useFileEditorState({
     setQuickOpenQuery,
     goBackLocation,
     goForwardLocation,
+    setActiveOpenedFileTab,
+    reorderOpenedFileTabs,
     setOpenedFileContent,
     refreshOpenedFile,
     saveOpenedFile,

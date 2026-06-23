@@ -9,7 +9,7 @@ import type {
   DroneSummary,
   PortReachabilityByHostPort,
 } from '../types';
-import type { DroneOpenedFileState } from '../files/opened-file-types';
+import type { DroneOpenedFileState, DroneOpenedFileTabState } from '../files/opened-file-types';
 import { QuickOpenModal } from '../files/QuickOpenModal';
 import type { QuickOpenFile, QuickOpenRecentFile } from '../files/quick-open-state';
 import {
@@ -215,9 +215,13 @@ type RightPanelTabContentProps = {
     onGoBack: () => void;
     onGoForward: () => void;
   };
+  openedFileTabs: DroneOpenedFileTabState[];
+  activeOpenedFileTabId: string | null;
   onOpenedEditorFileContentChange: (next: string) => void;
   onSaveOpenedEditorFile: (contentOverride?: string) => Promise<boolean>;
-  onCloseOpenedEditorFile: () => void;
+  onCloseOpenedEditorFile: (tabId?: string | null) => void;
+  onActivateOpenedEditorFileTab: (tabId: string) => void;
+  onReorderOpenedEditorFileTabs: (fromTabId: string, toTabId: string) => void;
   onOpenPullRequest: (paneKey: 'top' | 'bottom' | 'single', pullRequest: RepoPullRequestSummary) => void;
   onRevealChangesFileInFiles: (paneKey: 'top' | 'bottom' | 'single', repoRelativePath: string) => void;
   onOpenChangesFileInEditor: (repoRelativePath: string) => void;
@@ -296,9 +300,13 @@ export function RightPanelTabContent({
   onOpenFileTargetInEditor,
   openedFile,
   quickOpen,
+  openedFileTabs,
+  activeOpenedFileTabId,
   onOpenedEditorFileContentChange,
   onSaveOpenedEditorFile,
   onCloseOpenedEditorFile,
+  onActivateOpenedEditorFileTab,
+  onReorderOpenedEditorFileTabs,
   onOpenPullRequest,
   onRevealChangesFileInFiles,
   onOpenChangesFileInEditor,
@@ -435,6 +443,7 @@ export function RightPanelTabContent({
             onRefreshOpenedFile={onRefreshOpenedEditorFile}
             onOpenFile={onOpenFileInEditor}
             onOpenFileInPanel={onOpenFileInPanel}
+            onCloseOpenedFile={onCloseOpenedEditorFile}
             openedFile={openedFile}
           />
         </LazyPane>
@@ -459,9 +468,13 @@ export function RightPanelTabContent({
               <LazyOpenedDroneFilePanel
                 droneId={drone.id}
                 file={openedFile}
+                fileTabs={openedFileTabs}
+                activeTabId={activeOpenedFileTabId}
                 onFileContentChange={onOpenedEditorFileContentChange}
                 onSaveFile={onSaveOpenedEditorFile}
                 onCloseFile={onCloseOpenedEditorFile}
+                onActivateFileTab={onActivateOpenedEditorFileTab}
+                onReorderFileTabs={onReorderOpenedEditorFileTabs}
                 onOpenResolvedFile={onOpenFileTargetInEditor}
                 canGoBack={quickOpen.canGoBack}
                 canGoForward={quickOpen.canGoForward}
