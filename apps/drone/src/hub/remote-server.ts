@@ -169,10 +169,11 @@ async function resolveContainerDrone(opts: StartRemoteHubServerOptions, droneId:
   return drone;
 }
 
-function routeAllowed(method: string, pathname: string): boolean {
+export function routeAllowed(method: string, pathname: string): boolean {
   const parts = splitPathname(pathname);
   if (method === 'GET' && pathname === '/api/drones') return true;
   if (method === 'POST' && pathname === '/api/drones') return true;
+  if (method === 'POST' && pathname === '/api/drones/name-from-message') return true;
   if (method === 'GET' && pathname === '/api/drones/chat-events') return true;
   if (method === 'GET' && pathname === '/api/repos') return true;
   if (method === 'GET' && pathname === '/api/repos/branches') return true;
@@ -197,7 +198,13 @@ async function proxyAllowedRequest(opts: StartRemoteHubServerOptions, req: http.
   }
 
   const parts = splitPathname(pathname);
-  if (parts[0] === 'api' && parts[1] === 'drones' && parts[2] && pathname !== '/api/drones/chat-events') {
+  if (
+    parts[0] === 'api' &&
+    parts[1] === 'drones' &&
+    parts[2] &&
+    pathname !== '/api/drones/chat-events' &&
+    pathname !== '/api/drones/name-from-message'
+  ) {
     const drone = await resolveContainerDrone(opts, parts[2]);
     if (!drone) {
       json(res, 404, { ok: false, error: 'unknown container drone' });

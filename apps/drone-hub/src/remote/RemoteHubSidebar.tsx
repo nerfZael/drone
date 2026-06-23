@@ -55,7 +55,7 @@ function remoteRegistryGroupNames(drones: DroneSummary[]): string[] {
   ).sort((a, b) => a.localeCompare(b));
 }
 
-const REMOTE_SIDEBAR_MODE: DroneSidebarReadOnlyMode = 'read-only-chats';
+const REMOTE_SIDEBAR_MODE: DroneSidebarReadOnlyMode = 'static-tree';
 
 function RemoteHubSidebarComponent({
   drones,

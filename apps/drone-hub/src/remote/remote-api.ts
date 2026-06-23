@@ -1,4 +1,5 @@
 import type { DroneSummary, PendingPrompt, TranscriptItem } from '../droneHub/types';
+import { setRequestJsonRemoteCsrf } from '../droneHub/http';
 
 export type RemoteSession = {
   ok: true;
@@ -15,6 +16,7 @@ let csrfToken: string | null = null;
 
 export function setRemoteCsrf(token: string | null): void {
   csrfToken = token && token.trim() ? token.trim() : null;
+  setRequestJsonRemoteCsrf(csrfToken);
 }
 
 export async function remoteRequestJson<T>(url: string, init?: RequestInit): Promise<T> {
