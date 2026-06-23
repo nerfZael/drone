@@ -46,7 +46,7 @@ const fullWindow = {
 };
 const LOCAL_DESKTOP_AUTH_TTL_MS = 2 * 60 * 1000;
 const compactWindow = {
-  width: 268,
+  width: 198,
   height: 72,
   margin: 18,
 };
