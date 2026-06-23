@@ -6,8 +6,20 @@ function buildUnexpectedHtmlError(url: string): string {
   return `Expected JSON from ${path || 'request'}, but received HTML.`;
 }
 
+let remoteCsrfToken: string | null = null;
+
+export function setRequestJsonRemoteCsrf(token: string | null): void {
+  const normalized = String(token ?? '').trim();
+  remoteCsrfToken = normalized || null;
+}
+
 export async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(url, init);
+  const headers = new Headers(init?.headers);
+  const method = String(init?.method ?? 'GET').toUpperCase();
+  if (remoteCsrfToken && method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+    headers.set('x-drone-remote-csrf', remoteCsrfToken);
+  }
+  const r = await fetch(url, { ...init, headers });
   const text = await r.text();
   const contentType = String(r.headers.get('content-type') ?? '').toLowerCase();
   const looksHtml = contentType.includes('text/html') || /^\s*</.test(text);

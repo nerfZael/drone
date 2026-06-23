@@ -1,5 +1,6 @@
 import React from 'react';
 import { FrontendUpdatePrompt } from '../FrontendUpdatePrompt';
+import type { RightPanelTab } from '../droneHub/app/app-config';
 import { DockableDroneWorkspace } from '../droneHub/app/DockableDroneWorkspace';
 import { DroneWorkspaceHeaderFrame } from '../droneHub/app/DroneWorkspaceHeaderFrame';
 import { useDroneHubUiStore } from '../droneHub/app/use-drone-hub-ui-store';
@@ -11,6 +12,7 @@ import { RemoteMobileToolDrawer } from './RemoteMobileToolDrawer';
 import { RemoteCreateDroneModal } from './RemoteCreateDroneModal';
 import { RemoteHeaderActions } from './RemoteHeaderActions';
 import { RemoteHubSidebar } from './RemoteHubSidebar';
+import { RemoteRepoPanels } from './RemoteRepoPanels';
 import { REMOTE_HUB_CAPABILITIES } from './remote-capabilities';
 import { useRemoteHubModel } from './useRemoteHubModel';
 
@@ -101,7 +103,13 @@ export function RemoteDroneHubApp() {
   const sendPrompt = React.useCallback(async (payload: ChatSendPayload) => {
     return Boolean(await model.sendPrompt(payload));
   }, [model]);
-  const renderRemoteToolPane = React.useCallback(() => null, []);
+  const renderRemoteToolPane = React.useCallback(
+    (tab: RightPanelTab) => {
+      if (tab !== 'changes' || !model.selectedDrone) return null;
+      return <RemoteRepoPanels drone={model.selectedDrone} />;
+    },
+    [model.selectedDrone],
+  );
   const openCreateDrone = React.useCallback(() => {
     setCreateDroneOpen(true);
     setRemoteMobileSidebarOpen(false);
@@ -286,8 +294,8 @@ export function RemoteDroneHubApp() {
             activeChatName={model.selectedChat}
             layoutScope="chat"
             paneHeaderMode="compact"
-            toolPaneOpen={REMOTE_HUB_CAPABILITIES.toolPanesEnabled}
-            activeToolTab="files"
+            toolPaneOpen={REMOTE_HUB_CAPABILITIES.toolPanesEnabled && !isMobileViewport}
+            activeToolTab="changes"
             openRequestNonce={0}
             resetLayoutNonce={0}
             chatContent={chatContent}
