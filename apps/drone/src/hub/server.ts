@@ -365,6 +365,7 @@ import {
   type AssistantCreateChatResult,
   type AssistantCreateDroneResult,
   type AssistantDroneSummary,
+  type AssistantRenameDronesResult,
   type AssistantSetDroneGroupResult,
   type AssistantVoiceSource,
 } from './assistant';
@@ -2584,6 +2585,333 @@ async function listHostFsDirectory(targetPathRaw: string): Promise<{ resolvedPat
   }
   sortFsEntries(entries);
   return { resolvedPath, entries };
+}
+
+type FsMutationAction =
+  | 'create-file'
+  | 'create-directory'
+  | 'rename'
+  | 'delete'
+  | 'move'
+  | 'copy';
+
+type FsMutationResult = {
+  action: FsMutationAction;
+  path?: string;
+  targetPath?: string;
+  paths?: string[];
+  targetDir?: string;
+};
+
+function fsMutationError(statusCode: number, message: string): Error & { statusCode?: number } {
+  const err = new Error(message) as Error & { statusCode?: number };
+  err.statusCode = statusCode;
+  return err;
+}
+
+function fsMutationStatus(error: unknown): number {
+  const explicit = Number((error as any)?.statusCode ?? 0);
+  if (explicit > 0) return explicit;
+  const code = String((error as any)?.code ?? '').trim().toUpperCase();
+  if (code === 'ENOENT' || code === 'ENOTDIR') return 404;
+  if (code === 'EEXIST' || code === 'ENOTEMPTY') return 409;
+  if (code === 'EACCES' || code === 'EPERM') return 403;
+  return 500;
+}
+
+function normalizeFsChildName(raw: unknown): string {
+  const name = String(raw ?? '')
+    .replace(/[\0\r\n\t]/g, '')
+    .trim();
+  if (/[\/\\]/.test(name)) return '';
+  return name;
+}
+
+function assertValidFsChildName(name: string): void {
+  if (!name || name === '.' || name === '..') {
+    throw fsMutationError(400, 'invalid name');
+  }
+}
+
+function fsPathBaseNameForRuntime(runtime: 'host' | 'container', rawPath: string): string {
+  const text = String(rawPath ?? '').replace(/[\/\\]+$/g, '');
+  return runtime === 'host' ? path.basename(text) : path.posix.basename(text);
+}
+
+function fsPathParentForRuntime(runtime: 'host' | 'container', rawPath: string): string {
+  return runtime === 'host' ? path.dirname(rawPath) : normalizeContainerPath(path.posix.dirname(rawPath));
+}
+
+function fsJoinChildForRuntime(runtime: 'host' | 'container', parentPath: string, name: string): string {
+  return runtime === 'host'
+    ? path.resolve(path.join(parentPath, name))
+    : normalizeContainerPath(path.posix.join(parentPath, name));
+}
+
+function fsPathStartsWithOrEqualsForRuntime(runtime: 'host' | 'container', parentPath: string, childPath: string): boolean {
+  const parent = runtime === 'host'
+    ? path.resolve(parentPath)
+    : normalizeContainerPath(parentPath).replace(/\/+$/g, '') || '/';
+  const child = runtime === 'host'
+    ? path.resolve(childPath)
+    : normalizeContainerPath(childPath).replace(/\/+$/g, '') || '/';
+  if (parent === child) return true;
+  const sep = runtime === 'host' ? path.sep : '/';
+  return child.startsWith(parent.endsWith(sep) ? parent : `${parent}${sep}`);
+}
+
+function normalizeFsMutationPathsForRuntime(drone: any, rawPaths: unknown): string[] {
+  const values = Array.isArray(rawPaths) ? rawPaths : rawPaths == null ? [] : [rawPaths];
+  return values
+    .map((value) => normalizeFsPathForRuntime(drone, value, { fallbackToHome: false }))
+    .map((value) => String(value ?? '').trim())
+    .filter(Boolean);
+}
+
+async function assertHostDirectory(targetPath: string): Promise<void> {
+  const st = await fs.stat(targetPath);
+  if (!st.isDirectory()) {
+    throw fsMutationError(404, `path is not a directory: ${targetPath}`);
+  }
+}
+
+async function assertHostPathDoesNotExist(targetPath: string): Promise<void> {
+  try {
+    await fs.lstat(targetPath);
+    throw fsMutationError(409, `path already exists: ${targetPath}`);
+  } catch (e: any) {
+    if (String(e?.code ?? '').toUpperCase() === 'ENOENT') return;
+    throw e;
+  }
+}
+
+async function mutateHostFs(action: FsMutationAction, body: any, drone: any): Promise<FsMutationResult> {
+  const runtime = 'host' as const;
+  if (action === 'create-file' || action === 'create-directory') {
+    const targetDir = normalizeFsPathForRuntime(drone, body?.targetDir ?? body?.path ?? '', { fallbackToHome: true });
+    const name = normalizeFsChildName(body?.name);
+    assertValidFsChildName(name);
+    await assertHostDirectory(targetDir);
+    const targetPath = fsJoinChildForRuntime(runtime, targetDir, name);
+    await assertHostPathDoesNotExist(targetPath);
+    if (action === 'create-file') {
+      const fh = await fs.open(targetPath, 'wx');
+      await fh.close();
+    } else {
+      await fs.mkdir(targetPath);
+    }
+    return { action, path: targetPath, targetDir };
+  }
+
+  if (action === 'rename') {
+    const sourcePath = normalizeFsPathForRuntime(drone, body?.path ?? '', { fallbackToHome: false });
+    if (!sourcePath || sourcePath === path.parse(sourcePath).root) throw fsMutationError(400, 'missing path');
+    const name = normalizeFsChildName(body?.name);
+    assertValidFsChildName(name);
+    const targetPath = fsJoinChildForRuntime(runtime, fsPathParentForRuntime(runtime, sourcePath), name);
+    await assertHostPathDoesNotExist(targetPath);
+    await fs.rename(sourcePath, targetPath);
+    return { action, path: sourcePath, targetPath };
+  }
+
+  if (action === 'delete') {
+    const paths = normalizeFsMutationPathsForRuntime(drone, body?.paths ?? body?.path);
+    if (paths.length === 0) throw fsMutationError(400, 'missing paths');
+    for (const sourcePath of paths) {
+      if (!sourcePath || sourcePath === path.parse(sourcePath).root) throw fsMutationError(400, 'cannot delete root');
+      await fs.rm(sourcePath, { recursive: true, force: false });
+    }
+    return { action, paths };
+  }
+
+  if (action === 'move' || action === 'copy') {
+    const paths = normalizeFsMutationPathsForRuntime(drone, body?.paths ?? body?.path);
+    const targetDir = normalizeFsPathForRuntime(drone, body?.targetDir ?? '', { fallbackToHome: false });
+    if (paths.length === 0) throw fsMutationError(400, 'missing paths');
+    if (!targetDir) throw fsMutationError(400, 'missing target directory');
+    await assertHostDirectory(targetDir);
+    for (const sourcePath of paths) {
+      if (!sourcePath || sourcePath === path.parse(sourcePath).root) throw fsMutationError(400, 'invalid source path');
+      const name = fsPathBaseNameForRuntime(runtime, sourcePath);
+      assertValidFsChildName(name);
+      const targetPath = fsJoinChildForRuntime(runtime, targetDir, name);
+      if (fsPathStartsWithOrEqualsForRuntime(runtime, sourcePath, targetPath)) {
+        throw fsMutationError(400, `cannot ${action === 'move' ? 'move' : 'copy'} a directory into itself`);
+      }
+      await assertHostPathDoesNotExist(targetPath);
+      if (action === 'move') {
+        await fs.rename(sourcePath, targetPath);
+      } else {
+        await fs.cp(sourcePath, targetPath, { recursive: true, errorOnExist: true, force: false });
+      }
+    }
+    return { action, paths, targetDir };
+  }
+
+  throw fsMutationError(400, 'unsupported filesystem action');
+}
+
+function containerFsMutationScript(action: FsMutationAction, body: any, drone: any): { script: string; result: FsMutationResult } {
+  const runtime = 'container' as const;
+  const failFn = [
+    'fail() {',
+    '  code="$1"; shift',
+    '  printf "__ERR__\\t%s\\t%s\\n" "$code" "$*"',
+    '  exit "$code"',
+    '}',
+  ];
+
+  const lines = ['set -euo pipefail', ...failFn];
+
+  if (action === 'create-file' || action === 'create-directory') {
+    const targetDir = normalizeFsPathForRuntime(drone, body?.targetDir ?? body?.path ?? '', { fallbackToHome: true });
+    const name = normalizeFsChildName(body?.name);
+    assertValidFsChildName(name);
+    const targetPath = fsJoinChildForRuntime(runtime, targetDir, name);
+    lines.push(
+      `target_dir=${bashQuote(targetDir)}`,
+      `target=${bashQuote(targetPath)}`,
+      '[ -d "$target_dir" ] || fail 4 "path is not a directory: $target_dir"',
+      '[ ! -e "$target" ] && [ ! -L "$target" ] || fail 5 "path already exists: $target"',
+      action === 'create-file' ? ': > "$target"' : 'mkdir -- "$target"',
+      'printf "__OK__\\n"',
+    );
+    return { script: lines.join('\n'), result: { action, path: targetPath, targetDir } };
+  }
+
+  if (action === 'rename') {
+    const sourcePath = normalizeFsPathForRuntime(drone, body?.path ?? '', { fallbackToHome: false });
+    if (!sourcePath || sourcePath === '/') throw fsMutationError(400, 'missing path');
+    const name = normalizeFsChildName(body?.name);
+    assertValidFsChildName(name);
+    const targetPath = fsJoinChildForRuntime(runtime, fsPathParentForRuntime(runtime, sourcePath), name);
+    lines.push(
+      `source=${bashQuote(sourcePath)}`,
+      `target=${bashQuote(targetPath)}`,
+      '[ -e "$source" ] || [ -L "$source" ] || fail 4 "path not found: $source"',
+      '[ ! -e "$target" ] && [ ! -L "$target" ] || fail 5 "path already exists: $target"',
+      'mv -- "$source" "$target"',
+      'printf "__OK__\\n"',
+    );
+    return { script: lines.join('\n'), result: { action, path: sourcePath, targetPath } };
+  }
+
+  if (action === 'delete') {
+    const paths = normalizeFsMutationPathsForRuntime(drone, body?.paths ?? body?.path);
+    if (paths.length === 0) throw fsMutationError(400, 'missing paths');
+    for (const sourcePath of paths) {
+      if (!sourcePath || sourcePath === '/') throw fsMutationError(400, 'cannot delete root');
+      lines.push(
+        `source=${bashQuote(sourcePath)}`,
+        '[ -e "$source" ] || [ -L "$source" ] || fail 4 "path not found: $source"',
+        'rm -rf -- "$source"',
+      );
+    }
+    lines.push('printf "__OK__\\n"');
+    return { script: lines.join('\n'), result: { action, paths } };
+  }
+
+  if (action === 'move' || action === 'copy') {
+    const paths = normalizeFsMutationPathsForRuntime(drone, body?.paths ?? body?.path);
+    const targetDir = normalizeFsPathForRuntime(drone, body?.targetDir ?? '', { fallbackToHome: false });
+    if (paths.length === 0) throw fsMutationError(400, 'missing paths');
+    if (!targetDir) throw fsMutationError(400, 'missing target directory');
+    lines.push(
+      `target_dir=${bashQuote(targetDir)}`,
+      '[ -d "$target_dir" ] || fail 4 "path is not a directory: $target_dir"',
+    );
+    for (const sourcePath of paths) {
+      if (!sourcePath || sourcePath === '/') throw fsMutationError(400, 'invalid source path');
+      const name = fsPathBaseNameForRuntime(runtime, sourcePath);
+      assertValidFsChildName(name);
+      const targetPath = fsJoinChildForRuntime(runtime, targetDir, name);
+      lines.push(
+        `source=${bashQuote(sourcePath)}`,
+        `target=${bashQuote(targetPath)}`,
+        '[ -e "$source" ] || [ -L "$source" ] || fail 4 "path not found: $source"',
+        '[ ! -e "$target" ] && [ ! -L "$target" ] || fail 5 "path already exists: $target"',
+      );
+      if (action === 'move') {
+        lines.push('case "$target" in "$source"|"$source"/*) fail 2 "cannot move a directory into itself" ;; esac');
+        lines.push('mv -- "$source" "$target"');
+      } else {
+        lines.push('case "$target" in "$source"|"$source"/*) fail 2 "cannot copy a directory into itself" ;; esac');
+        lines.push('cp -a -- "$source" "$target"');
+      }
+    }
+    lines.push('printf "__OK__\\n"');
+    return { script: lines.join('\n'), result: { action, paths, targetDir } };
+  }
+
+  throw fsMutationError(400, 'unsupported filesystem action');
+}
+
+async function mutateContainerFs(action: FsMutationAction, body: any, resolved: ResolvedDrone, droneName: string): Promise<FsMutationResult> {
+  const { script, result } = containerFsMutationScript(action, body, resolved.drone);
+  await withLockedDroneContainer(
+    { requestedDroneName: droneName, droneEntry: resolved.drone },
+    async ({ containerName }) => {
+      const out = await dvmExec(containerName, 'bash', ['-lc', script]);
+      if (out.code === 0) return;
+      const text = `${String(out.stdout ?? '')}\n${String(out.stderr ?? '')}`;
+      const errMatch = text.match(/__ERR__\t(\d+)\t([^\n\r]*)/);
+      if (errMatch) {
+        const code = Number(errMatch[1] ?? 0);
+        const status = code === 4 ? 404 : code === 5 ? 409 : code === 2 ? 400 : 500;
+        throw fsMutationError(status, String(errMatch[2] ?? '').trim() || 'filesystem action failed');
+      }
+      throw new Error((out.stderr || out.stdout || 'filesystem action failed').trim());
+    },
+  );
+  return result;
+}
+
+async function handleFsActionRoute(opts: {
+  req: http.IncomingMessage;
+  res: http.ServerResponse;
+  resolved: ResolvedDrone;
+  droneRef: string;
+}): Promise<void> {
+  const { req, res, resolved, droneRef } = opts;
+  const droneId = resolved.id;
+  const drone = resolved.drone;
+  const runtime = droneRuntime(drone);
+  const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
+
+  let body: any = null;
+  try {
+    body = await readJsonBody(req);
+  } catch (e: any) {
+    json(res, 400, { ok: false, error: e?.message ?? String(e) });
+    return;
+  }
+
+  const action = String(body?.action ?? '').trim() as FsMutationAction;
+  const allowedActions: FsMutationAction[] = ['create-file', 'create-directory', 'rename', 'delete', 'move', 'copy'];
+  if (!allowedActions.includes(action)) {
+    json(res, 400, { ok: false, error: 'unsupported filesystem action', id: droneId, name: droneName });
+    return;
+  }
+
+  try {
+    const result = runtime === 'host'
+      ? await mutateHostFs(action, body, drone)
+      : await mutateContainerFs(action, body, resolved, droneName);
+    json(res, 200, {
+      ok: true,
+      id: droneId,
+      name: droneName,
+      ...result,
+    });
+    return;
+  } catch (e: any) {
+    const msg = e?.message ?? String(e);
+    const code = runtime === 'host'
+      ? fsMutationStatus(e)
+      : Number((e as any)?.statusCode ?? 0) || (looksLikeMissingContainerError(msg) ? 404 : 500);
+    json(res, code, { ok: false, error: msg, id: droneId, name: droneName });
+    return;
+  }
 }
 
 async function readHostFileBytes(opts: {
@@ -12843,6 +13171,37 @@ export async function startDroneHubApiServer(opts: {
         total: Number.isFinite(Number(data?.total)) ? Number(data.total) : 0,
       };
     },
+    renameDrones: async ({ renames }): Promise<AssistantRenameDronesResult> => {
+      const renamed: AssistantRenameDronesResult['renamed'] = [];
+      const rejected: AssistantRenameDronesResult['rejected'] = [];
+      for (const request of renames) {
+        const droneId = String(request?.droneId ?? '').trim();
+        const newName = String(request?.newName ?? '').trim();
+        if (!droneId || !newName) {
+          rejected.push({ id: droneId, newName, error: 'missing drone id or new name' });
+          continue;
+        }
+        try {
+          const data = await callLocalHubApi(`/api/drones/${encodeURIComponent(droneId)}/rename`, {
+            newName,
+            source: 'drone-hub-assistant',
+          });
+          renamed.push({
+            id: String(data?.id ?? droneId).trim() || droneId,
+            oldName: String(data?.oldName ?? droneId).trim() || droneId,
+            newName: String(data?.newName ?? newName).trim() || newName,
+            renamed: data?.renamed !== false,
+          });
+        } catch (error: any) {
+          rejected.push({
+            id: droneId,
+            newName,
+            error: String(error?.message ?? error ?? 'rename failed'),
+          });
+        }
+      }
+      return { renamed, rejected, total: renames.length };
+    },
     messageDrone: async ({ droneId, chatName, prompt }) => {
       const resolved = await resolveDroneOrPendingForReadRef(droneId);
       if (!resolved) throw new Error(`unknown drone: ${droneId}`);
@@ -18353,6 +18712,16 @@ export async function startDroneHubApiServer(opts: {
         const resolved = await resolveDroneOrRespond(res, droneRef);
         if (!resolved) return;
         await handleFsUploadRoute({ req, res, u, resolved, droneRef });
+        return;
+      }
+
+      // POST /api/drones/:id/fs/action
+      // Creates, renames, deletes, moves, or copies files/folders.
+      if (method === 'POST' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'drones' && parts[3] === 'fs' && parts[4] === 'action') {
+        const droneRef = decodeURIComponent(parts[2]);
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        await handleFsActionRoute({ req, res, resolved, droneRef });
         return;
       }
 

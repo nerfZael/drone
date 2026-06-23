@@ -19,6 +19,8 @@ import {
   type LanguageLocation,
 } from './language-intelligence-api';
 import { ReferencesResultsPanel, type ReferencesResultsState } from './ReferencesResultsPanel';
+import { OpenedDroneFileTabs } from './OpenedDroneFileTabs';
+import type { DroneOpenedFileTabState } from './opened-file-types';
 
 type MonacoEditorComponent = (typeof import('@monaco-editor/react'))['default'];
 type MonacoEditorProps = React.ComponentProps<MonacoEditorComponent>;
@@ -33,23 +35,26 @@ const MonacoEditor = React.lazy(async (): Promise<{ default: MonacoEditorCompone
 type OpenedDroneFilePanelProps = {
   droneId: string;
   file: DroneOpenedFileState;
+  fileTabs?: DroneOpenedFileTabState[];
+  activeTabId?: string | null;
   onFileContentChange?: (next: string) => void;
   onSaveFile?: (contentOverride?: string) => Promise<boolean>;
-  onCloseFile?: () => void;
-  onOpenResolvedFile?: (next: {
-    path: string;
-    name: string;
-    line?: number | null;
-    column?: number | null;
-  }) => void;
+  onCloseFile?: (tabId?: string | null) => void;
+  onActivateFileTab?: (tabId: string) => void;
+  onReorderFileTabs?: (fromTabId: string, toTabId: string) => void;
+  onOpenResolvedFile?: (next: { path: string; name: string; line?: number | null; column?: number | null }) => void;
 };
 
 export function OpenedDroneFilePanel({
   droneId,
   file,
+  fileTabs = [],
+  activeTabId = null,
   onFileContentChange,
   onSaveFile,
   onCloseFile,
+  onActivateFileTab,
+  onReorderFileTabs,
   onOpenResolvedFile,
 }: OpenedDroneFilePanelProps) {
   const {
@@ -367,6 +372,13 @@ export function OpenedDroneFilePanel({
   return (
     <div className="h-full min-h-0 overflow-hidden bg-[var(--panel-alt)]">
       <div className="min-w-0 h-full min-h-0 bg-[var(--panel-alt)] flex flex-col">
+        <OpenedDroneFileTabs
+          tabs={fileTabs}
+          activeTabId={activeTabId}
+          onActivateTab={(tabId) => onActivateFileTab?.(tabId)}
+          onCloseTab={(tabId) => onCloseFile?.(tabId)}
+          onReorderTabs={(fromTabId, toTabId) => onReorderFileTabs?.(fromTabId, toTabId)}
+        />
         <div className="px-4 py-2.5 border-b border-[var(--border-subtle)] bg-[rgba(255,255,255,.025)] flex items-center justify-between gap-3">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 min-w-0">
@@ -464,14 +476,6 @@ export function OpenedDroneFilePanel({
                 Save
               </button>
             ) : null}
-            <button
-              type="button"
-              onClick={onCloseFile}
-              className="h-7 px-2.5 rounded-md border border-[var(--border-subtle)] bg-transparent text-[10px] font-semibold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] whitespace-nowrap"
-              title="Close file"
-            >
-              Done
-            </button>
           </div>
         </div>
         {fileError ? (

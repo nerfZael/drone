@@ -263,6 +263,7 @@ function RemoteHubSidebarComponent({
       onCreateDroneChat={noopCreateChat}
       onRenameDroneChat={noopRenameChat}
       onRenameDrone={NOOP}
+      onRenameDrones={NOOP}
       onSetDroneBaseImage={NOOP}
       onDeleteDrone={NOOP}
       onOpenDroneErrorModal={openDroneError}

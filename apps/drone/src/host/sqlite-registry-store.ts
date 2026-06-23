@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 
 import { droneRootPath } from './paths';
@@ -20,13 +21,13 @@ let cached:
   | null = null;
 
 let unavailableReason: string | null = null;
+const requireForSqliteRegistry = createRequire(__filename);
 
 function loadDatabaseConstructor(): DatabaseConstructor | null {
   try {
     // Keep this dynamic so Bun can keep using registry.json when the native
     // better-sqlite3 binding was built for Node's ABI.
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    return require('better-sqlite3') as DatabaseConstructor;
+    return requireForSqliteRegistry('better-sqlite3') as DatabaseConstructor;
   } catch (error: any) {
     unavailableReason = error?.message ?? String(error);
     return null;

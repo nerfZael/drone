@@ -227,6 +227,39 @@ export function useDroneMutationActions({
     [deletingDrones, drones, renamingDrones, renameDroneTo, settingBaseImages],
   );
 
+  const renameDrones = React.useCallback(
+    async (droneIdsRaw: string[]): Promise<{ ok: boolean; renamed: string[]; skipped: string[] }> => {
+      const droneIds = Array.from(
+        new Set(droneIdsRaw.map((item) => String(item ?? '').trim()).filter(Boolean)),
+      );
+      const renamed: string[] = [];
+      const skipped: string[] = [];
+      if (droneIds.length === 0) return { ok: false, renamed, skipped };
+
+      for (const droneId of droneIds) {
+        if (deletingDrones[droneId] || renamingDrones[droneId] || settingBaseImages[droneId]) {
+          skipped.push(droneId);
+          continue;
+        }
+        const currentName =
+          String(dronesRef.current.find((d) => d.id === droneId)?.name ?? '').trim() || droneId;
+        const rawNext = window.prompt(`Rename drone "${currentName}" to:`, currentName);
+        if (rawNext == null) break;
+        const nextName = String(rawNext ?? '').trim();
+        if (!nextName || nextName === currentName) {
+          skipped.push(droneId);
+          continue;
+        }
+        const result = await renameDroneTo(droneId, nextName, { showAlert: true });
+        if (result.ok) renamed.push(droneId);
+        else skipped.push(droneId);
+      }
+
+      return { ok: skipped.length === 0, renamed, skipped };
+    },
+    [deletingDrones, renameDroneTo, renamingDrones, settingBaseImages],
+  );
+
   const setDroneBaseImage = React.useCallback(
     async (droneIdRaw: string): Promise<void> => {
       const droneId = String(droneIdRaw ?? '').trim();
@@ -478,6 +511,7 @@ export function useDroneMutationActions({
     settingBaseImages,
     deleteDrone,
     renameDrone,
+    renameDrones,
     setDroneBaseImage,
     reparentDronesToParent,
     renameDroneTo,

@@ -62,6 +62,12 @@ export type AssistantSetDroneGroupResult = {
   total: number;
 };
 
+export type AssistantRenameDronesResult = {
+  renamed: Array<{ id: string; oldName: string; newName: string; renamed: boolean }>;
+  rejected: Array<{ id: string; oldName?: string | null; newName: string; error: string }>;
+  total: number;
+};
+
 type AssistantThread = {
   id: string;
   title: string;
@@ -189,6 +195,7 @@ type AssistantToolCallbacks = {
   createDrone: (opts: any) => Promise<AssistantCreateDroneResult>;
   createChat: (opts: { droneId: string; chatName: string }) => Promise<AssistantCreateChatResult>;
   setDroneGroup: (opts: { droneIds: string[]; group: string | null }) => Promise<AssistantSetDroneGroupResult>;
+  renameDrones: (opts: { renames: Array<{ droneId: string; newName: string }> }) => Promise<AssistantRenameDronesResult>;
   messageDrone: (opts: {
     droneId: string;
     chatName: string;
@@ -598,7 +605,7 @@ const ASSISTANT_SYSTEM_PROMPT_DEFAULT = [
   'Chat timelines contain user messages and agent messages. Queued or pending user messages appear in the same timeline with a non-completed status.',
   ASSISTANT_CHAT_IDLE_PROMPT_LINE,
   'Do not load more chat pages than needed. Start with the latest page.',
-  'Creating or cloning drones and creating chats do not require approval, and assistant-created drones must use the container (Docker) runtime. Changing drone groups, sending a user message to a drone, and running bash in a drone require user approval; explain briefly what you intend to do.',
+  'Creating or cloning drones and creating chats do not require approval, and assistant-created drones must use the container (Docker) runtime. Renaming drones, changing drone groups, sending a user message to a drone, and running bash in a drone require user approval; explain briefly what you intend to do.',
   'File write tools require write access to the target drone and should be used carefully for concrete code or content edits.',
   'If an approval-gated write tool returns successfully, the user already approved that action. Do not ask for the same approval again.',
   'Voice threads can use speak to send short spoken replies back to the voice device that started the request.',
@@ -635,6 +642,7 @@ const ASSISTANT_TOOL_SUMMARIES: AssistantToolSummary[] = [
   { name: 'create_drone', label: 'Create drone', category: 'actions', description: 'Create a new container drone.' },
   { name: 'clone_drone', label: 'Clone drone', category: 'actions', description: 'Clone an existing container drone into a new container drone.' },
   { name: 'create_chat', label: 'Create chat', category: 'actions', description: 'Create a new chat in an existing drone.' },
+  { name: 'rename_drones', label: 'Rename drones', category: 'actions', description: 'Rename one or more drones after user approval.' },
   { name: 'set_drone_group', label: 'Set drone group', category: 'actions', description: 'Move drones to a group after user approval.' },
   { name: 'message_drone', label: 'Send user message to drone', category: 'actions', description: 'Send a user message to a drone chat after approval.' },
 ];
@@ -982,6 +990,33 @@ function cleanOptionalString(raw: unknown): string {
   return String(raw ?? '').trim();
 }
 
+function normalizeAssistantRenameRequests(raw: unknown): Array<{ droneId: string; newName: string }> {
+  const input = raw && typeof raw === 'object' ? raw as any : {};
+  const rawRenames = Array.isArray(input.renames) ? input.renames : [];
+  const fallbackDrone = cleanOptionalString(input.droneId ?? input.drone ?? input.id);
+  const fallbackNewName = cleanOptionalString(input.newName ?? input.nextName ?? input.name);
+  const source = rawRenames.length > 0
+    ? rawRenames
+    : fallbackDrone && fallbackNewName
+      ? [{ droneId: fallbackDrone, newName: fallbackNewName }]
+      : [];
+  const seen = new Set<string>();
+  const result: Array<{ droneId: string; newName: string }> = [];
+  for (const item of source) {
+    const entry = item && typeof item === 'object' ? item as any : {};
+    const explicitDrone = cleanOptionalString(entry.droneId ?? entry.drone ?? entry.id);
+    const explicitNewName = cleanOptionalString(entry.newName ?? entry.nextName);
+    const name = cleanOptionalString(entry.name);
+    const droneId = explicitDrone || (explicitNewName ? name : '');
+    const newName = explicitNewName || (explicitDrone ? name : '');
+    if (!droneId || !newName || seen.has(droneId)) continue;
+    seen.add(droneId);
+    result.push({ droneId, newName });
+  }
+  if (result.length === 0) throw new Error('missing drone rename requests');
+  return result;
+}
+
 function normalizeAssistantDroneFilePath(raw: unknown): string {
   const value = String(raw ?? '').trim();
   if (!value) throw new Error('missing file path');
@@ -1203,6 +1238,10 @@ function sameToolSet(rawNames: Set<string>, names: string[]): boolean {
   return rawNames.size === names.length && names.every((name) => rawNames.has(name));
 }
 
+function sameToolSetWithout(rawNames: Set<string>, names: string[], omittedName: string): boolean {
+  return sameToolSet(rawNames, names.filter((name) => name !== omittedName));
+}
+
 function normalizeStoredAssistantEnabledTools(
   raw: unknown,
   voiceEnabled: boolean,
@@ -1210,11 +1249,15 @@ function normalizeStoredAssistantEnabledTools(
 ): string[] {
   const base = normalizeAssistantEnabledTools(raw);
   const rawNames = new Set(Array.isArray(raw) ? raw.map((name) => String(name ?? '').trim()).filter(Boolean) : []);
+  const rawNamesForDefaultComparison = new Set(rawNames);
+  if (!rawNamesForDefaultComparison.has('rename_drones')) {
+    rawNamesForDefaultComparison.add('rename_drones');
+  }
   const hadLegacyDefaultTools =
     rawNames.size > 0 && (
-      ASSISTANT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES.every((name) => rawNames.has(name))
-      || ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES.every((name) => rawNames.has(name))
-      || ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES.every((name) => rawNames.has(name))
+      ASSISTANT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES.every((name) => rawNamesForDefaultComparison.has(name))
+      || ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES.every((name) => rawNamesForDefaultComparison.has(name))
+      || ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES.every((name) => rawNamesForDefaultComparison.has(name))
     );
   if (hadLegacyDefaultTools) {
     appendUniqueEnabledTool(base, 'create_chat');
@@ -1222,35 +1265,57 @@ function normalizeStoredAssistantEnabledTools(
     appendUniqueEnabledTool(base, 'subscribe_to_all_chats_idle');
   }
   const hadPreWebSearchDefaultTools = migrations.webSearchDefaultTool && (
-    sameToolSet(rawNames, ASSISTANT_PRE_WEB_SEARCH_DEFAULT_ENABLED_TOOL_NAMES)
-    || sameToolSet(rawNames, ASSISTANT_PRE_WEB_SEARCH_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
-    || sameToolSet(rawNames, ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
-    || (voiceEnabled && sameToolSet(rawNames, ASSISTANT_PRE_WEB_SEARCH_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
-    || (voiceEnabled && sameToolSet(rawNames, ASSISTANT_PRE_WEB_SEARCH_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
-    || (voiceEnabled && sameToolSet(rawNames, ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
+    sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_DEFAULT_ENABLED_TOOL_NAMES)
+    || sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
+    || sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
+    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
+    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
+    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
   );
   if (hadPreWebSearchDefaultTools) {
     appendUniqueEnabledTool(base, 'web_search');
   }
   const hadPreFetchContentDefaultTools = migrations.fetchContentDefaultTool && (
-    sameToolSet(rawNames, ASSISTANT_PRE_FETCH_CONTENT_DEFAULT_ENABLED_TOOL_NAMES)
-    || sameToolSet(rawNames, ASSISTANT_PRE_FETCH_CONTENT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
-    || sameToolSet(rawNames, ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
-    || sameToolSet(rawNames, ASSISTANT_PRE_WEB_SEARCH_DEFAULT_ENABLED_TOOL_NAMES)
-    || sameToolSet(rawNames, ASSISTANT_PRE_WEB_SEARCH_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
-    || sameToolSet(rawNames, ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
-    || (voiceEnabled && sameToolSet(rawNames, ASSISTANT_PRE_FETCH_CONTENT_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
-    || (voiceEnabled && sameToolSet(rawNames, ASSISTANT_PRE_FETCH_CONTENT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
-    || (voiceEnabled && sameToolSet(rawNames, ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
-    || (voiceEnabled && sameToolSet(rawNames, ASSISTANT_PRE_WEB_SEARCH_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
-    || (voiceEnabled && sameToolSet(rawNames, ASSISTANT_PRE_WEB_SEARCH_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
-    || (voiceEnabled && sameToolSet(rawNames, ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
+    sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_FETCH_CONTENT_DEFAULT_ENABLED_TOOL_NAMES)
+    || sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_FETCH_CONTENT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
+    || sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
+    || sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_DEFAULT_ENABLED_TOOL_NAMES)
+    || sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
+    || sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
+    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_FETCH_CONTENT_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
+    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_FETCH_CONTENT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
+    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
+    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
+    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
+    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
   );
   if (hadPreFetchContentDefaultTools) {
     appendUniqueEnabledTool(base, 'fetch_content');
   }
+  const hadPreRenameDefaultTools = !rawNames.has('rename_drones') && (
+    sameToolSetWithout(rawNames, ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones')
+    || sameToolSetWithout(rawNames, ASSISTANT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones')
+    || sameToolSetWithout(rawNames, ASSISTANT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones')
+    || sameToolSetWithout(rawNames, ASSISTANT_PRE_FETCH_CONTENT_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones')
+    || sameToolSetWithout(rawNames, ASSISTANT_PRE_FETCH_CONTENT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones')
+    || sameToolSetWithout(rawNames, ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones')
+    || sameToolSetWithout(rawNames, ASSISTANT_PRE_WEB_SEARCH_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones')
+    || sameToolSetWithout(rawNames, ASSISTANT_PRE_WEB_SEARCH_LEGACY_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones')
+    || sameToolSetWithout(rawNames, ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones')
+    || (voiceEnabled && sameToolSetWithout(rawNames, ASSISTANT_VOICE_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones'))
+    || (voiceEnabled && sameToolSetWithout(rawNames, ASSISTANT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones'))
+    || (voiceEnabled && sameToolSetWithout(rawNames, ASSISTANT_PRE_FETCH_CONTENT_VOICE_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones'))
+    || (voiceEnabled && sameToolSetWithout(rawNames, ASSISTANT_PRE_FETCH_CONTENT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones'))
+    || (voiceEnabled && sameToolSetWithout(rawNames, ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones'))
+    || (voiceEnabled && sameToolSetWithout(rawNames, ASSISTANT_PRE_WEB_SEARCH_VOICE_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones'))
+    || (voiceEnabled && sameToolSetWithout(rawNames, ASSISTANT_PRE_WEB_SEARCH_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones'))
+    || (voiceEnabled && sameToolSetWithout(rawNames, ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones'))
+  );
+  if (hadPreRenameDefaultTools) {
+    appendUniqueEnabledTool(base, 'rename_drones');
+  }
   const hadLegacyVoiceDefaultTools =
-    voiceEnabled && rawNames.size > 0 && ASSISTANT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES.every((name) => rawNames.has(name));
+    voiceEnabled && rawNames.size > 0 && ASSISTANT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES.every((name) => rawNamesForDefaultComparison.has(name));
   if (hadLegacyVoiceDefaultTools) {
     appendUniqueEnabledTool(base, 'create_new_thread');
   }
@@ -4193,6 +4258,50 @@ export class HubAssistantService {
         },
       },
       {
+        name: 'rename_drones',
+        label: 'Rename drones',
+        description: 'Rename one or more existing drones. This requires user approval.',
+        parameters: Type.Object({
+          droneId: Type.Optional(Type.String({ description: 'Single drone id or visible name.' })),
+          drone: Type.Optional(Type.String({ description: 'Alias for droneId.' })),
+          id: Type.Optional(Type.String({ description: 'Alias for droneId.' })),
+          name: Type.Optional(Type.String({ description: 'Alias for newName when droneId, drone, or id is set.' })),
+          newName: Type.Optional(Type.String({ description: 'New name for the single drone.' })),
+          nextName: Type.Optional(Type.String({ description: 'Alias for newName.' })),
+          renames: Type.Optional(Type.Array(Type.Object({
+            droneId: Type.Optional(Type.String({ description: 'Drone id or visible name.' })),
+            drone: Type.Optional(Type.String({ description: 'Alias for droneId.' })),
+            id: Type.Optional(Type.String({ description: 'Alias for droneId.' })),
+            name: Type.Optional(Type.String({ description: 'Visible drone name, or the new name when droneId is set.' })),
+            newName: Type.Optional(Type.String({ description: 'New drone name.' })),
+            nextName: Type.Optional(Type.String({ description: 'Alias for newName.' })),
+          }))),
+        }),
+        execute: async (_toolCallId: string, params: any) => {
+          const regAny: any = await loadRegistry();
+          const requests = normalizeAssistantRenameRequests(params ?? {});
+          const renames = requests.map((request) => ({
+            droneId: droneIdByAssistantRef(regAny, request.droneId),
+            newName: request.newName,
+          }));
+          const allowed = this.allowedDroneIdSet('write', threadId);
+          if (allowed) {
+            const denied = renames.map((item) => item.droneId).filter((id) => !allowed.has(id));
+            if (denied.length > 0) throw new Error(`assistant scope does not include drone: ${denied.join(', ')}`);
+          }
+          const result = await this.tools.renameDrones({ renames });
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Approved and renamed ${result.renamed.length} drone${result.renamed.length === 1 ? '' : 's'}${result.rejected.length > 0 ? `; ${result.rejected.length} failed` : ''}.`,
+              },
+            ],
+            details: result,
+          };
+        },
+      },
+      {
         name: 'message_drone',
         label: 'Send user message to drone',
         description: 'Send a user message to a drone chat. This requires user approval before it runs.',
@@ -4231,11 +4340,13 @@ export class HubAssistantService {
     signal?: AbortSignal,
   ): Promise<{ block?: boolean; reason?: string } | undefined> {
     const toolName = String(ctx?.toolCall?.name ?? '').trim();
-    if (toolName !== 'message_drone' && toolName !== 'set_drone_group' && toolName !== 'bash') return undefined;
+    if (toolName !== 'message_drone' && toolName !== 'set_drone_group' && toolName !== 'rename_drones' && toolName !== 'bash') return undefined;
     if (this.getThread(threadId).autoApprove) return undefined;
     const label =
       toolName === 'set_drone_group'
-          ? 'Set drone group'
+        ? 'Set drone group'
+        : toolName === 'rename_drones'
+          ? 'Rename drones'
           : toolName === 'bash'
             ? 'Run bash in drone'
             : 'Send message to drone';
@@ -4281,6 +4392,24 @@ export class HubAssistantService {
               drones: droneIds.map((id) => ({ id, name: droneNameById.get(id) ?? id })),
               group: cleanOptionalString(ctx?.args?.group) || null,
             },
+          };
+        } else if (toolName === 'rename_drones') {
+          const regAny: any = await loadRegistry();
+          const requests = normalizeAssistantRenameRequests(ctx?.args ?? {});
+          const drones = await this.tools.listDrones();
+          const droneNameById = new Map(drones.map((drone) => [drone.id, drone.name]));
+          const renames = requests.map((request) => {
+            const id = droneIdByAssistantRef(regAny, request.droneId);
+            return { id, oldName: droneNameById.get(id) ?? id, newName: request.newName };
+          });
+          const allowed = this.allowedDroneIdSet('write', threadId);
+          if (allowed) {
+            const denied = renames.map((item) => item.id).filter((id) => !allowed.has(id));
+            if (denied.length > 0) throw new Error(`assistant scope does not include drone: ${denied.join(', ')}`);
+          }
+          approvalArgs = {
+            requested: ctx?.args ?? {},
+            resolved: { renames },
           };
         } else if (toolName === 'message_drone') {
           const drones = await this.tools.listDrones();
