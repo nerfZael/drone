@@ -5787,6 +5787,15 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
             } else if (message.type === 'transcript_result') {
               await finishVoiceFromServer(message.status || 'Transcript patched into chat.');
               void onRefresh();
+            } else if (message.type === 'terminal_detected') {
+              refs.current.processor?.disconnect();
+              refs.current.stream?.getTracks().forEach((track) => track.stop());
+              await refs.current.context?.close().catch(() => undefined);
+              refs.current = { socket };
+              resetVoiceFrameBuffer();
+              setStreaming(false);
+              setMode('awake');
+              setStatus(target === 'clipboard' ? 'Awake. Finishing clipboard transcription.' : 'Awake. Finishing voice request.');
             } else if (message.type === 'finish') {
               let nextStatus = 'Awake. Waiting for voice command.';
               if (target === 'clipboard') {

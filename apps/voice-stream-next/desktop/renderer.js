@@ -6,6 +6,9 @@ const MAX_PENDING_STREAM_BYTES = pcmBytesForMs(5000);
 const BASE_RECONNECT_DELAY_MS = 500;
 const MAX_RECONNECT_DELAY_MS = 10_000;
 const MAX_RECONNECT_EXPONENT = 4;
+const DEFAULT_VOICE_MAX_DURATION_MS = 15 * 60 * 1000;
+const VOICE_CLOSE_CODE_TOO_LARGE = 4409;
+const VOICE_CLOSE_CODE_TOO_LONG = 4410;
 const SLEEP_PHRASE_STABLE_MS = 650;
 const SLEEP_PHRASE_MIN_HITS = 2;
 const SLEEP_PHRASE_MAX_GAP_MS = 1500;
@@ -79,6 +82,11 @@ const state = {
   voiceFinalizeTimer: null,
   voicePostStopMode: 'awake',
   voicePostStopStatus: '',
+  voiceStreamMaxDurationMs: DEFAULT_VOICE_MAX_DURATION_MS,
+  voiceRecordingStartedAt: 0,
+  voiceRecordingPausedAt: 0,
+  voiceRecordingPausedMs: 0,
+  voiceCountdownTimer: null,
   desktopAuthPollTimer: null,
   voiceStreamEnding: false,
   voiceStreamStarting: false,
@@ -149,6 +157,7 @@ const els = {
   primaryVoiceButton: document.querySelector('#primaryVoiceButton'),
   primaryVoiceMode: document.querySelector('#primaryVoiceMode'),
   primaryVoiceAction: document.querySelector('#primaryVoiceAction'),
+  voiceCountdown: document.querySelector('#voiceCountdown'),
   offButton: document.querySelector('#offButton'),
   assistantSpeechPlaybackButton: document.querySelector('#assistantSpeechPlaybackButton'),
   micStatus: document.querySelector('#micStatus'),
@@ -1461,6 +1470,7 @@ function updateVoiceButtons() {
   }
   renderSmartTranscriptPanel();
   renderAssistantSpeechPlaybackButton();
+  renderVoiceCountdown();
 }
 
 function assistantSpeechPlaybackEnabled() {
@@ -1541,6 +1551,81 @@ function clearVoiceFinalizeTimer() {
     window.clearTimeout(state.voiceFinalizeTimer);
     state.voiceFinalizeTimer = null;
   }
+}
+
+function formatVoiceCountdown(ms) {
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+function voiceRecordingActiveElapsedMs(now = Date.now()) {
+  if (!state.voiceRecordingStartedAt) return 0;
+  const currentPausedMs = state.voiceRecordingPausedAt ? Math.max(0, now - state.voiceRecordingPausedAt) : 0;
+  return Math.max(0, now - state.voiceRecordingStartedAt - state.voiceRecordingPausedMs - currentPausedMs);
+}
+
+function renderVoiceCountdown() {
+  if (!els.voiceCountdown) return;
+  const maxDurationMs = Math.max(0, Number(state.voiceStreamMaxDurationMs || DEFAULT_VOICE_MAX_DURATION_MS));
+  const visible = Boolean(state.voiceRecordingStartedAt) && (state.mode === 'recording' || state.mode === 'paused');
+  if (!visible || maxDurationMs <= 0) {
+    els.voiceCountdown.hidden = true;
+    els.voiceCountdown.textContent = '';
+    els.primaryVoiceButton?.classList.remove('has-countdown', 'is-countdown-warning');
+    return;
+  }
+  const remainingMs = Math.max(0, maxDurationMs - voiceRecordingActiveElapsedMs());
+  const text = `${formatVoiceCountdown(remainingMs)} left`;
+  els.voiceCountdown.hidden = false;
+  els.voiceCountdown.textContent = state.mode === 'paused' ? `Paused · ${text}` : text;
+  els.primaryVoiceButton?.classList.add('has-countdown');
+  els.primaryVoiceButton?.classList.toggle('is-countdown-warning', remainingMs <= 60_000);
+}
+
+function clearVoiceCountdownTimer() {
+  if (!state.voiceCountdownTimer) return;
+  window.clearInterval(state.voiceCountdownTimer);
+  state.voiceCountdownTimer = null;
+}
+
+function beginVoiceCountdown(maxDurationMs = state.voiceStreamMaxDurationMs) {
+  clearVoiceCountdownTimer();
+  state.voiceStreamMaxDurationMs = Math.max(1, Number(maxDurationMs || DEFAULT_VOICE_MAX_DURATION_MS));
+  state.voiceRecordingStartedAt = Date.now();
+  state.voiceRecordingPausedAt = 0;
+  state.voiceRecordingPausedMs = 0;
+  renderVoiceCountdown();
+  state.voiceCountdownTimer = window.setInterval(renderVoiceCountdown, 1000);
+}
+
+function updateVoiceCountdownLimit(maxDurationMs) {
+  const parsed = Number(maxDurationMs);
+  if (!Number.isFinite(parsed) || parsed <= 0) return;
+  state.voiceStreamMaxDurationMs = parsed;
+  renderVoiceCountdown();
+}
+
+function pauseVoiceCountdown() {
+  if (!state.voiceRecordingStartedAt || state.voiceRecordingPausedAt) return;
+  state.voiceRecordingPausedAt = Date.now();
+  renderVoiceCountdown();
+}
+
+function resumeVoiceCountdown() {
+  if (!state.voiceRecordingStartedAt || !state.voiceRecordingPausedAt) return;
+  state.voiceRecordingPausedMs += Math.max(0, Date.now() - state.voiceRecordingPausedAt);
+  state.voiceRecordingPausedAt = 0;
+  renderVoiceCountdown();
+}
+
+function resetVoiceCountdown() {
+  clearVoiceCountdownTimer();
+  state.voiceRecordingStartedAt = 0;
+  state.voiceRecordingPausedAt = 0;
+  state.voiceRecordingPausedMs = 0;
+  renderVoiceCountdown();
 }
 
 function flushPendingStreamFrames() {
@@ -1631,6 +1716,7 @@ function resetVoiceStreamState() {
   state.voicePostStopStatus = '';
   state.recordingPaused = false;
   pendingStreamBuffer.clear();
+  resetVoiceCountdown();
 }
 
 async function cleanupLocalCapture() {
@@ -2419,6 +2505,7 @@ async function startMic(target = 'assistant', options = {}) {
       sendOrBufferStreamFrame(floatToPcm16(event.inputBuffer.getChannelData(0), event.inputBuffer.sampleRate));
     };
     setMode('recording', recordingStatus(state.voiceTarget));
+    beginVoiceCountdown();
     state.voiceStreamStarting = false;
     await api('/api/logs', {
       method: 'POST',
@@ -2579,6 +2666,7 @@ function openVoiceSocket(target) {
     try {
       const message = JSON.parse(event.data);
       if (message.type === 'server_hello') {
+        updateVoiceCountdownLimit(message.maxDurationMs);
         if (state.recordingPaused || state.mode === 'paused') {
           sendVoiceStreamControl('pause', 'desktop reconnect');
         }
@@ -2663,6 +2751,21 @@ function openVoiceSocket(target) {
   };
   socket.onclose = (event) => {
     state.voiceOutgoingReady = false;
+    if ((event.code === VOICE_CLOSE_CODE_TOO_LONG || event.code === VOICE_CLOSE_CODE_TOO_LARGE) && ['recording', 'paused'].includes(state.mode) && !state.voiceStreamEnding) {
+      const status = event.code === VOICE_CLOSE_CODE_TOO_LONG
+        ? 'Voice recording reached the server duration limit.'
+        : 'Voice recording reached the server size limit.';
+      void logDesktopEvent('warn', 'Voice stream stopped by server limit', {
+        code: event.code,
+        reason: event.reason || '',
+        target,
+      });
+      const returnTarget = voiceResultReturnTarget('awake', status);
+      state.voicePostStopStatus = returnTarget.status || status;
+      state.voicePostStopMode = returnTarget.mode;
+      void finishMicFromServer();
+      return;
+    }
     if (state.voiceStreamEnding && state.voiceSocket === socket) {
       if (target === 'clipboard' && !terminalMessageReceived) {
         void logDesktopEvent('warn', 'Voice stream closed before clipboard result', { code: event.code, reason: event.reason || '' });
@@ -3385,6 +3488,7 @@ function pauseRecording() {
   }
   state.recordingPaused = true;
   pendingStreamBuffer.clear();
+  pauseVoiceCountdown();
   sendVoiceStreamControl('pause');
   els.meterBar.style.width = '0%';
   playLocalVoiceCue('recording_pause');
@@ -3400,6 +3504,7 @@ function resumeRecording() {
   }
   state.recordingPaused = false;
   pendingStreamBuffer.clear();
+  resumeVoiceCountdown();
   sendVoiceStreamControl('resume');
   playLocalVoiceCue('recording_resume');
   setMode('recording', resumeStatus(state.voiceTarget));

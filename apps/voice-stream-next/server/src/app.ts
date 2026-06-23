@@ -4270,9 +4270,31 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       if (finalized || pausedAt !== null) return;
       const remainingMs = Math.max(0, MAX_STREAM_DURATION_MS - activeDurationMs());
       durationLimit = setTimeout(() => {
+        const detectedAt = new Date().toISOString();
         if ((socket as any).readyState === 1) {
-          socket.close(VoiceCloseCode.TooLong, 'stream active duration limit exceeded');
+          socket.send(
+            JSON.stringify({
+              type: 'terminal_detected',
+              commandType: 'finish',
+              phrase: 'duration limit',
+              detectedAt,
+              partialTranscriptChars: 0,
+              mode: streamMode,
+            }),
+          );
         }
+        addLog(device.userId, {
+          deviceId: device.id,
+          source: device.deviceType,
+          level: 'warn',
+          message: 'Voice stream duration limit reached',
+          detailsJson: JSON.stringify({
+            mode: streamMode,
+            maxDurationMs: MAX_STREAM_DURATION_MS,
+            activeDurationMs: activeDurationMs(),
+          }),
+        });
+        void finalizeVoiceStream();
       }, remainingMs);
     }
 
@@ -4384,12 +4406,36 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         }
         return;
       }
-      if (pausedAt !== null) return;
+      if (finalized || pausedAt !== null) return;
       frames += 1;
       const size = binarySize(data);
       bytes += size;
       if (bytes > MAX_STREAM_BYTES) {
-        socket.close(VoiceCloseCode.TooLarge, 'stream byte limit exceeded');
+        const detectedAt = new Date().toISOString();
+        if ((socket as any).readyState === 1) {
+          socket.send(
+            JSON.stringify({
+              type: 'terminal_detected',
+              commandType: 'finish',
+              phrase: 'size limit',
+              detectedAt,
+              partialTranscriptChars: 0,
+              mode: streamMode,
+            }),
+          );
+        }
+        addLog(device.userId, {
+          deviceId: device.id,
+          source: device.deviceType,
+          level: 'warn',
+          message: 'Voice stream byte limit reached',
+          detailsJson: JSON.stringify({
+            mode: streamMode,
+            maxBytes: MAX_STREAM_BYTES,
+            bytes,
+          }),
+        });
+        void finalizeVoiceStream();
         return;
       }
       const chunk = binaryChunk(data);

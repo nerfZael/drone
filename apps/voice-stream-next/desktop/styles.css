@@ -1040,6 +1040,28 @@ h2 {
   z-index: 1;
 }
 
+.voice-countdown {
+  min-height: 14px;
+  padding: 2px 8px;
+  border: 1px solid rgba(255, 255, 255, .10);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, .16);
+  color: rgba(246, 248, 255, .82);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.voice-orb.is-countdown-warning .voice-countdown {
+  border-color: rgba(255, 178, 36, .45);
+  background: rgba(255, 178, 36, .12);
+  color: #ffd28a;
+}
+
+.voice-countdown[hidden] {
+  display: none;
+}
+
 .orb-ring {
   position: absolute;
   inset: 15px;
@@ -1351,7 +1373,7 @@ body.is-compact .voice-orb {
   inset: 0 42px 0 0;
   display: grid;
   grid-template-columns: 32px minmax(0, 1fr);
-  grid-template-rows: 1fr 1fr;
+  grid-template-rows: 1fr auto auto;
   place-items: initial;
   align-items: center;
   gap: 0 9px;
@@ -1371,7 +1393,7 @@ body.is-compact .voice-orb {
 body.is-compact .orb-ring {
   position: relative;
   inset: auto;
-  grid-row: 1 / span 2;
+  grid-row: 1 / span 3;
   grid-column: 1;
   align-self: center;
   justify-self: center;
@@ -1409,10 +1431,22 @@ body.is-compact .voice-orb span {
   white-space: nowrap;
 }
 
-body.is-compact .voice-orb > span:last-child {
+body.is-compact #primaryVoiceAction {
   grid-column: 2;
   grid-row: 2;
   align-self: start;
+}
+
+body.is-compact .voice-countdown {
+  grid-column: 2;
+  grid-row: 3;
+  justify-self: start;
+  max-width: 100%;
+  min-height: 12px;
+  margin-top: 2px;
+  padding: 1px 5px;
+  font-size: 9px;
+  line-height: 1.1;
 }
 
 body.is-compact .voice-orb .orb-ring {

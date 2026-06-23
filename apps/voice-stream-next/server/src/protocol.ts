@@ -1,6 +1,6 @@
 export const VOICE_STREAM_PROTOCOL_VERSION = 1;
-export const MAX_STREAM_BYTES = 24 * 1024 * 1024;
-export const MAX_STREAM_DURATION_MS = 5 * 60 * 1000;
+export const MAX_STREAM_BYTES = 32 * 1024 * 1024;
+export const MAX_STREAM_DURATION_MS = 15 * 60 * 1000;
 export const HEARTBEAT_INTERVAL_MS = 15_000;
 
 export const VoiceCloseCode = {
