@@ -1370,12 +1370,13 @@ body.is-compact .expand-button {
 
 body.is-compact .voice-orb {
   position: absolute;
-  inset: 0 42px 0 0;
+  inset: 0 34px 0 0;
   display: grid;
   grid-template-columns: 30px minmax(0, 1fr);
-  grid-template-rows: 1fr auto auto;
+  grid-template-rows: auto auto auto;
   place-items: initial;
   align-items: center;
+  align-content: center;
   gap: 0 8px;
   width: auto;
   height: auto;
@@ -1383,7 +1384,7 @@ body.is-compact .voice-orb {
   min-height: 0;
   max-width: none;
   max-height: none;
-  padding: 10px 10px 10px 12px;
+  padding: 10px 8px 10px 12px;
   border: 0;
   border-right: 1px solid rgba(255, 255, 255, .075);
   border-radius: 0;
@@ -1397,15 +1398,15 @@ body.is-compact .orb-ring {
   grid-column: 1;
   align-self: center;
   justify-self: center;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   border-color: rgba(255,255,255,.12);
   background: rgba(255, 255, 255, .030);
 }
 
 body.is-compact .mic-icon svg {
-  width: 16px;
-  height: 16px;
+  width: 17px;
+  height: 17px;
 }
 
 body.is-compact .voice-orb strong {
@@ -1454,12 +1455,14 @@ body.is-compact .voice-orb .orb-ring {
 }
 
 body.is-compact .voice-orb .mic-icon {
-  grid-row: 1 / span 2;
+  grid-row: 1 / span 3;
   grid-column: 1;
   align-self: center;
   justify-self: center;
   display: grid;
   place-items: center;
+  width: 30px;
+  height: 30px;
   color: currentColor;
 }
 
@@ -1490,7 +1493,7 @@ body.is-compact .off-button {
   bottom: 0;
   display: grid;
   place-items: center;
-  width: 42px;
+  width: 34px;
   height: 50%;
   min-width: 0;
   min-height: 0;
@@ -1510,7 +1513,7 @@ body.is-compact .expand-button {
   right: 0;
   display: grid;
   place-items: center;
-  width: 42px;
+  width: 34px;
   height: 50%;
   min-width: 0;
   min-height: 0;
