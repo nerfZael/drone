@@ -95,6 +95,26 @@ export function DronePreviewDock({
   }, [selectedUrl]);
 
   React.useEffect(() => {
+    const restoreFocusIfPreviewTookIt = () => {
+      const iframe = iframeRef.current;
+      if (!iframe) return;
+
+      const focusWasUserRequested = isPreviewFocusUserRequested(performance.now(), lastPreviewPointerAtRef.current);
+      if (focusWasUserRequested) return;
+
+      window.requestAnimationFrame(() => {
+        if (!document.hasFocus()) return;
+        if (document.activeElement !== iframe) return;
+
+        const previous = lastFocusedElementRef.current;
+        if (canRestoreFocus(previous)) {
+          previous.focus({ preventScroll: true });
+        } else {
+          iframe.blur();
+        }
+      });
+    };
+
     const onFocusIn = (event: FocusEvent) => {
       const target = event.target;
       const iframe = iframeRef.current;
@@ -105,22 +125,24 @@ export function DronePreviewDock({
         return;
       }
 
-      const focusWasUserRequested = isPreviewFocusUserRequested(performance.now(), lastPreviewPointerAtRef.current);
-      if (focusWasUserRequested) return;
+      restoreFocusIfPreviewTookIt();
+    };
 
-      window.requestAnimationFrame(() => {
-        const previous = lastFocusedElementRef.current;
-        if (canRestoreFocus(previous)) {
-          previous.focus({ preventScroll: true });
-        } else {
-          iframe.blur();
-        }
-      });
+    const onFocusOut = () => {
+      window.setTimeout(restoreFocusIfPreviewTookIt, 0);
+    };
+
+    const onWindowBlur = () => {
+      window.setTimeout(restoreFocusIfPreviewTookIt, 0);
     };
 
     document.addEventListener('focusin', onFocusIn, true);
+    document.addEventListener('focusout', onFocusOut, true);
+    window.addEventListener('blur', onWindowBlur);
     return () => {
       document.removeEventListener('focusin', onFocusIn, true);
+      document.removeEventListener('focusout', onFocusOut, true);
+      window.removeEventListener('blur', onWindowBlur);
     };
   }, []);
 
