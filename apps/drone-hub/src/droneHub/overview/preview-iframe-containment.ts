@@ -7,7 +7,12 @@ export const PREVIEW_FOCUS_INTENT_MS = 1200;
 
 export const NO_PREVIEW_POINTER_TIME = Number.NEGATIVE_INFINITY;
 
-export function isPreviewFocusUserRequested(now: number, lastPreviewPointerAt: number): boolean {
+export function isPreviewFocusUserRequested(
+  now: number,
+  lastPreviewPointerAt: number,
+  previewHovered: boolean = false,
+): boolean {
+  if (previewHovered) return true;
   return now >= lastPreviewPointerAt && now - lastPreviewPointerAt < PREVIEW_FOCUS_INTENT_MS;
 }
 
