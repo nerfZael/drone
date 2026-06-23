@@ -3,6 +3,7 @@ import { FrontendUpdatePrompt } from '../FrontendUpdatePrompt';
 import type { RightPanelTab } from '../droneHub/app/app-config';
 import { DockableDroneWorkspace } from '../droneHub/app/DockableDroneWorkspace';
 import { DroneWorkspaceHeaderFrame } from '../droneHub/app/DroneWorkspaceHeaderFrame';
+import { droneHomePath } from '../droneHub/app/helpers';
 import { useDroneHubUiStore } from '../droneHub/app/use-drone-hub-ui-store';
 import { useMobileViewport } from '../droneHub/app/use-mobile-viewport';
 import { ChatInput, ChatTranscriptFrame, EmptyState, PendingTranscriptTurn, TranscriptTurn, type ChatSendPayload, type DroneHubTask, type DroneHubTaskSpawnMode } from '../droneHub/chat';
@@ -72,6 +73,7 @@ export function RemoteDroneHubApp() {
   const [mobileToolOpen, setMobileToolOpen] = React.useState(false);
   const [createDroneOpen, setCreateDroneOpen] = React.useState(false);
   const model = useRemoteHubModel({ pauseChatPolling: isMobileViewport && (mobileSidebarOpen || mobileToolOpen) });
+  const selectedDroneHomePath = React.useMemo(() => droneHomePath(model.selectedDrone), [model.selectedDrone]);
   const mobileSidebarSwipeStartRef = React.useRef<TouchPoint | null>(null);
   const setRemoteMobileSidebarOpen = React.useCallback(
     (open: boolean) => {
@@ -105,7 +107,7 @@ export function RemoteDroneHubApp() {
   }, [model]);
   const renderRemoteToolPane = React.useCallback(
     (tab: RightPanelTab) => {
-      if (tab !== 'changes' || !model.selectedDrone) return null;
+      if (!model.selectedDrone || (tab !== 'files' && tab !== 'changes' && tab !== 'prs')) return null;
       return <RemoteRepoPanels drone={model.selectedDrone} />;
     },
     [model.selectedDrone],
@@ -203,7 +205,7 @@ export function RemoteDroneHubApp() {
               onHoverAgentMessage={noopHoverAgentMessage}
               onOpenLink={openExternalLink}
               droneId={model.selectedDrone?.id}
-              droneHomePath={undefined}
+              droneHomePath={selectedDroneHomePath}
               showRoleIcons={false}
               actionsEnabled={REMOTE_HUB_CAPABILITIES.transcriptActions}
             />
@@ -215,7 +217,7 @@ export function RemoteDroneHubApp() {
                 item={item}
                 showRoleIcons={false}
                 droneId={model.selectedDrone?.id}
-                droneHomePath={undefined}
+                droneHomePath={selectedDroneHomePath}
                 onOpenLink={openExternalLink}
               />
             ))
