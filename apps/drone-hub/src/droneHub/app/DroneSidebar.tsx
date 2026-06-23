@@ -1386,6 +1386,7 @@ export type DroneSidebarProps = {
     newName: string,
   ) => Promise<{ ok: boolean; chatName?: string; error?: string | null }>;
   onRenameDrone: (droneId: string) => void;
+  onRenameDrones: (droneIds: string[]) => void;
   onSetDroneBaseImage: (droneId: string) => void;
   onDeleteDrone: (droneId: string) => void;
   onOpenDroneErrorModal: (drone: DroneSummary, message: string) => void;
@@ -1459,6 +1460,7 @@ export function DroneSidebar({
   onCreateDroneChat,
   onRenameDroneChat,
   onRenameDrone,
+  onRenameDrones,
   onSetDroneBaseImage,
   onDeleteDrone,
   onOpenDroneErrorModal,
@@ -2173,6 +2175,16 @@ export function DroneSidebar({
     activeRepoDroneCount > 0 &&
     sidebarDronesFilteredByRepo.length === 0 &&
     Boolean(activeRepoPath);
+  const selectedDronesRenaming = selectedDroneIds.some((droneId) => Boolean(renamingDrones[droneId]));
+  const selectedDronesActionBusy = selectedDroneIds.some((droneId) =>
+    Boolean(deletingDrones[droneId]) ||
+    Boolean(renamingDrones[droneId]) ||
+    Boolean(settingBaseImages[droneId]),
+  );
+  const renameSelectedDronesDisabled =
+    !sidebarCapabilities.actions ||
+    selectedDroneIds.length <= 1 ||
+    selectedDronesActionBusy;
 
   return (
     <>
@@ -2232,12 +2244,32 @@ export function DroneSidebar({
                 <IconDrone />
               </div>
               {selectedDroneIds.length > 1 && (
-                <span
-                  className="max-w-full truncate text-[10px] text-[var(--accent)]"
-                  title={`${selectedDroneIds.length} drones selected`}
-                >
-                  {selectedDroneIds.length} selected
-                </span>
+                <div className="flex min-w-0 items-center gap-1">
+                  <span
+                    className="max-w-full truncate text-[10px] text-[var(--accent)]"
+                    title={`${selectedDroneIds.length} drones selected`}
+                  >
+                    {selectedDroneIds.length} selected
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onRenameDrones(selectedDroneIds)}
+                    disabled={renameSelectedDronesDisabled}
+                    className={`inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded border transition-all ${
+                      renameSelectedDronesDisabled
+                        ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] opacity-50 cursor-not-allowed'
+                        : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
+                    }`}
+                    title={
+                      selectedDronesActionBusy
+                        ? 'Selected drones are busy'
+                        : `Rename ${selectedDroneIds.length} selected drones`
+                    }
+                    aria-label={`Rename ${selectedDroneIds.length} selected drones`}
+                  >
+                    {selectedDronesRenaming ? <IconSpinner className="opacity-80" /> : <IconPencil className="opacity-80" />}
+                  </button>
+                </div>
               )}
             </div>
             {headerAccessory ? (

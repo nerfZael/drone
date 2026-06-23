@@ -232,6 +232,51 @@ function normalizeRepoBranchSource(value, fallback = 'host') {
   return fallback === 'remote' ? 'remote' : 'host';
 }
 
+function normalizeCreateDronePreferences(value) {
+  const raw = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const repoBranchSource = normalizeRepoBranchSource(
+    raw.repoBranchSource,
+    DEFAULT_CREATE_DRONE_PREFERENCES.repoBranchSource,
+  );
+  return {
+    spawnAgentKey: normalizeSpawnAgentKey(raw.spawnAgentKey),
+    spawnModel: cleanString(raw.spawnModel),
+    repoBranchSource,
+    repoCreateRemoteBranch: cleanString(raw.repoCreateRemoteBranch),
+    pullHostBranchBeforeCreate:
+      typeof raw.pullHostBranchBeforeCreate === 'boolean'
+        ? raw.pullHostBranchBeforeCreate
+        : DEFAULT_CREATE_DRONE_PREFERENCES.pullHostBranchBeforeCreate,
+  };
+}
+
+function normalizeSpawnContextByRepoKey(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const out = {};
+  for (const [keyRaw, entryRaw] of Object.entries(value)) {
+    const key = cleanString(keyRaw);
+    if (!key) continue;
+    out[key] = normalizeCreateDronePreferences(entryRaw);
+  }
+  return out;
+}
+
+function createDronePreferencesForRepo(prefs, repoPath) {
+  const globalPrefs = {
+    ...DEFAULT_CREATE_DRONE_PREFERENCES,
+    ...normalizeCreateDronePreferences(prefs),
+  };
+  const repoKey = cleanString(repoPath);
+  const byRepoKey = normalizeSpawnContextByRepoKey(prefs?.spawnContextByRepoKey);
+  if (repoKey && byRepoKey[repoKey]) return { ...globalPrefs, ...byRepoKey[repoKey] };
+  if (!repoKey) return globalPrefs;
+  return {
+    ...globalPrefs,
+    repoBranchSource: DEFAULT_CREATE_DRONE_PREFERENCES.repoBranchSource,
+    repoCreateRemoteBranch: DEFAULT_CREATE_DRONE_PREFERENCES.repoCreateRemoteBranch,
+  };
+}
+
 function normalizeSpawnAgentKey(value, fallback = DEFAULT_CREATE_DRONE_PREFERENCES.spawnAgentKey) {
   const key = cleanString(value, fallback);
   const builtin = key.startsWith('builtin:') ? key.slice('builtin:'.length) : key;
@@ -242,24 +287,13 @@ function normalizeSpawnAgentKey(value, fallback = DEFAULT_CREATE_DRONE_PREFERENC
   }
 }
 
-async function createDronePreferences(hub) {
+async function createDronePreferences(hub, repoPath = '') {
   try {
     const response = await requestJson(hub, '/api/settings/ui-preferences', { method: 'GET' });
     const prefs = response?.uiPreferences && typeof response.uiPreferences === 'object' ? response.uiPreferences : {};
-    const repoBranchSource = normalizeRepoBranchSource(
-      prefs.repoBranchSource,
-      DEFAULT_CREATE_DRONE_PREFERENCES.repoBranchSource,
-    );
+    const resolved = createDronePreferencesForRepo(prefs, repoPath);
     return {
-      ...DEFAULT_CREATE_DRONE_PREFERENCES,
-      spawnAgentKey: normalizeSpawnAgentKey(prefs.spawnAgentKey),
-      spawnModel: cleanString(prefs.spawnModel),
-      repoBranchSource,
-      repoCreateRemoteBranch: cleanString(prefs.repoCreateRemoteBranch),
-      pullHostBranchBeforeCreate:
-        typeof prefs.pullHostBranchBeforeCreate === 'boolean'
-          ? prefs.pullHostBranchBeforeCreate
-          : DEFAULT_CREATE_DRONE_PREFERENCES.pullHostBranchBeforeCreate,
+      ...resolved,
       source: response?.updatedAt ? 'drone_hub_ui_preferences' : 'default',
       updatedAt: cleanIsoTimestamp(response?.updatedAt),
     };
@@ -271,6 +305,22 @@ async function createDronePreferences(hub) {
       warning: error?.message || String(error),
     };
   }
+}
+
+async function requireRemoteBranchAvailableForRepo(hub, repoPath, remoteBranch, source) {
+  const normalizedRepoPath = cleanString(repoPath);
+  const normalizedRemoteBranch = cleanString(remoteBranch).replace(/^refs\/remotes\//, '').replace(/^remotes\//, '');
+  if (!normalizedRepoPath || !normalizedRemoteBranch) return normalizedRemoteBranch;
+  const data = await requestJson(
+    hub,
+    `/api/repos/branches?repoPath=${encodeURIComponent(normalizedRepoPath)}`,
+    { method: 'GET' },
+  );
+  const branches = Array.isArray(data?.remoteBranches) ? data.remoteBranches : [];
+  if (branches.some((entry) => cleanString(entry?.name) === normalizedRemoteBranch)) return normalizedRemoteBranch;
+  throw new Error(
+    `${source === 'default' ? 'Saved default remote branch' : 'Remote branch'} "${normalizedRemoteBranch}" is not available for repo ${normalizedRepoPath}. Pass a valid remoteBranch for this repo, or use repoBranchSource=host.`,
+  );
 }
 
 function agentFromPreferenceKey(value) {
@@ -381,6 +431,7 @@ function normalizeUiPreferences(value) {
       typeof raw.pullHostBranchBeforeCreate === 'boolean'
         ? raw.pullHostBranchBeforeCreate
         : DEFAULT_CREATE_DRONE_PREFERENCES.pullHostBranchBeforeCreate,
+    spawnContextByRepoKey: normalizeSpawnContextByRepoKey(raw.spawnContextByRepoKey),
   };
 }
 
@@ -651,6 +702,47 @@ async function resolveDroneIdsForGroupSet(hub, refs) {
   });
 }
 
+async function resolveDroneRefs(hub, refs) {
+  const response = await requestDroneSummaries(hub);
+  const drones = Array.isArray(response?.drones) ? response.drones.map(droneSummary) : [];
+  return refs.map((ref) => {
+    const text = cleanString(ref);
+    const match = drones.find((drone) => drone.id === text || drone.name === text);
+    return {
+      ref: text,
+      id: cleanString(match?.id, text),
+      name: cleanString(match?.name),
+      found: Boolean(match),
+    };
+  });
+}
+
+function normalizeRenameRequests(args = {}) {
+  const rawRenames = Array.isArray(args.renames) ? args.renames : [];
+  const fallbackDrone = cleanString(args.drone || args.droneId || args.id);
+  const fallbackNewName = cleanString(args.newName || args.nextName || args.name);
+  const source = rawRenames.length > 0
+    ? rawRenames
+    : fallbackDrone && fallbackNewName
+      ? [{ drone: fallbackDrone, newName: fallbackNewName }]
+      : [];
+  const seen = new Set();
+  return source.map((item) => {
+    const explicitDrone = cleanString(item?.drone || item?.droneId || item?.id);
+    const explicitNewName = cleanString(item?.newName || item?.nextName);
+    const name = cleanString(item?.name);
+    const drone = explicitDrone || (explicitNewName ? name : '');
+    const newName = explicitNewName || (explicitDrone ? name : '');
+    return { drone, newName };
+  }).filter((item) => {
+    if (!item.drone || !item.newName) return false;
+    const key = item.drone;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 async function createdDroneRecords(api) {
   const records = await api.state.get(CREATED_DRONES_STATE_KEY, []);
   return Array.isArray(records) ? records.filter((record) => record && typeof record === 'object') : [];
@@ -673,6 +765,31 @@ async function rememberCreatedDrone(api, drone, sourceTool) {
     createdAt: now,
   });
   await api.state.set(CREATED_DRONES_STATE_KEY, nextRecords.slice(0, MAX_TRACKED_CREATED_DRONES));
+}
+
+async function rememberRenamedDrone(api, previousAliases, renamedDrone) {
+  const aliases = droneAliases(renamedDrone);
+  if (aliases.length === 0) return;
+  const previous = Array.isArray(previousAliases)
+    ? previousAliases.map((item) => cleanString(item)).filter(Boolean)
+    : [];
+  const now = new Date().toISOString();
+  const records = await createdDroneRecords(api);
+  const nextRecords = records.map((record) => {
+    const recordAliases = Array.isArray(record.aliases) ? record.aliases.map((item) => cleanString(item)).filter(Boolean) : [];
+    const matches =
+      recordAliases.some((alias) => aliases.includes(alias)) ||
+      recordAliases.some((alias) => previous.includes(alias));
+    if (!matches) return record;
+    return {
+      ...record,
+      id: cleanString(renamedDrone?.id, cleanString(record.id) || aliases[0]),
+      name: cleanString(renamedDrone?.name) || null,
+      aliases: [...new Set([...aliases, ...recordAliases, ...previous])],
+      updatedAt: now,
+    };
+  });
+  await api.state.set(CREATED_DRONES_STATE_KEY, nextRecords);
 }
 
 async function wasCreatedByExtension(api, drone) {
@@ -992,17 +1109,20 @@ exports.activate = async function activate(api) {
     name: 'get_create_drone_defaults',
     label: 'Get create drone defaults',
     description:
-      'Read the Drone Hub defaults normally used when manually creating a drone, including agent, model, branch source, remote branch, and whether the host branch is pulled before create.',
+      'Read the Drone Hub defaults normally used when manually creating a drone, including agent, model, branch source, remote branch, and whether the host branch is pulled before create. Pass repoPath to resolve repo-specific branch defaults safely.',
     approval: 'never',
     inputSchema: {
       type: 'object',
-      properties: {},
+      properties: {
+        repoPath: { type: 'string' },
+      },
       required: [],
       additionalProperties: false,
     },
-    async execute() {
-      const defaults = await createDronePreferences(connection());
-      return { ok: true, defaults };
+    async execute(args = {}) {
+      const repoPath = cleanString(args.repoPath);
+      const defaults = await createDronePreferences(connection(), repoPath);
+      return { ok: true, defaults, repoPath: repoPath || null };
     },
   });
 
@@ -1057,6 +1177,102 @@ exports.activate = async function activate(api) {
   });
 
   registerTool(api, {
+    name: 'rename_drones',
+    label: 'Rename drones',
+    description:
+      'Rename one or more Drone Hub drones by id or current name. Use renames for multiple exact mappings.',
+    approval: 'never',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        drone: { type: 'string', description: 'Single drone id or current name.' },
+        droneId: { type: 'string', description: 'Alias for drone.' },
+        id: { type: 'string', description: 'Alias for drone.' },
+        newName: { type: 'string', description: 'New name for the single drone.' },
+        name: { type: 'string', description: 'Alias for newName when renaming a single drone.' },
+        nextName: { type: 'string', description: 'Alias for newName when renaming a single drone.' },
+        renames: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              drone: { type: 'string' },
+              droneId: { type: 'string' },
+              id: { type: 'string' },
+              name: { type: 'string' },
+              newName: { type: 'string' },
+              nextName: { type: 'string' },
+            },
+            required: [],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+    async execute(args = {}) {
+      const renames = normalizeRenameRequests(args);
+      if (renames.length === 0) throw new Error('at least one drone and newName are required');
+
+      const duplicateNewNames = new Set();
+      const seenNewNames = new Set();
+      for (const item of renames) {
+        const key = item.newName.toLowerCase();
+        if (seenNewNames.has(key)) duplicateNewNames.add(item.newName);
+        seenNewNames.add(key);
+      }
+      if (duplicateNewNames.size > 0) {
+        throw new Error(`duplicate target drone name: ${Array.from(duplicateNewNames).join(', ')}`);
+      }
+
+      const hub = connection();
+      const resolved = await resolveDroneRefs(hub, renames.map((item) => item.drone));
+      const renamed = [];
+      const rejected = [];
+
+      for (let index = 0; index < renames.length; index += 1) {
+        const request = renames[index];
+        const target = resolved[index];
+        if (!target?.id) {
+          rejected.push({ drone: request.drone, newName: request.newName, error: 'drone is required' });
+          continue;
+        }
+        try {
+          const response = await requestJson(
+            hub,
+            `/api/drones/${encodeURIComponent(target.id)}/rename`,
+            { method: 'POST', body: JSON.stringify({ newName: request.newName, source: 'voice-stream-next' }) },
+          );
+          const item = {
+            id: cleanString(response?.id, target.id),
+            oldName: cleanString(response?.oldName, target.name || target.ref),
+            newName: cleanString(response?.newName, request.newName),
+            renamed: response?.renamed !== false,
+          };
+          renamed.push(item);
+          await rememberRenamedDrone(api, [target.ref, target.name, target.id], { id: item.id, name: item.newName });
+        } catch (error) {
+          rejected.push({
+            drone: request.drone,
+            id: target.id,
+            oldName: target.name || target.ref || null,
+            newName: request.newName,
+            error: cleanString(error?.message, 'rename failed'),
+          });
+        }
+      }
+
+      return {
+        ok: rejected.length === 0,
+        renamed,
+        rejected,
+        total: renames.length,
+      };
+    },
+  });
+
+  registerTool(api, {
     name: 'reorder_drones',
     label: 'Reorder drones',
     description:
@@ -1105,12 +1321,21 @@ exports.activate = async function activate(api) {
       const hub = connection();
       const group = cleanString(args.group);
       const beforeGroups = group ? await listGroupNames(hub) : [];
-      const defaults = await createDronePreferences(hub);
+      const repoPath = cleanString(args.repoPath);
+      const defaults = await createDronePreferences(hub, repoPath);
       const seedAgent = args.agent == null ? agentFromPreferenceKey(defaults.spawnAgentKey) : normalizeAgent(args.agent);
       const seedModel = args.model == null ? defaults.spawnModel : cleanString(args.model);
-      const repoPath = cleanString(args.repoPath);
       const repoBranchSource = normalizeRepoBranchSource(args.repoBranchSource, defaults.repoBranchSource);
-      const remoteBranch = args.remoteBranch == null ? defaults.repoCreateRemoteBranch : cleanString(args.remoteBranch);
+      const remoteBranchRaw = args.remoteBranch == null ? defaults.repoCreateRemoteBranch : cleanString(args.remoteBranch);
+      const remoteBranch =
+        repoPath && repoBranchSource === 'remote'
+          ? await requireRemoteBranchAvailableForRepo(
+              hub,
+              repoPath,
+              remoteBranchRaw,
+              args.remoteBranch == null ? 'default' : 'explicit',
+            )
+          : remoteBranchRaw;
       const pullHostBranchBeforeCreate =
         typeof args.pullHostBranchBeforeCreate === 'boolean'
           ? args.pullHostBranchBeforeCreate

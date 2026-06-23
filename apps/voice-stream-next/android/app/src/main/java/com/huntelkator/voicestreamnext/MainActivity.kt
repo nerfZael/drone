@@ -32,6 +32,7 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import android.webkit.CookieManager
@@ -63,6 +64,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var deviceNameInput: EditText
     private lateinit var echoCancellationCheckbox: CheckBox
     private lateinit var suppressWakeDuringPlaybackCheckbox: CheckBox
+    private lateinit var assistantSpeechPlaybackVolumeSeekBar: SeekBar
+    private lateinit var assistantSpeechPlaybackVolumeLabel: TextView
     private lateinit var statusText: TextView
     private lateinit var approvalText: TextView
     private lateinit var microphoneText: TextView
@@ -636,6 +639,7 @@ class MainActivity : ComponentActivity() {
                 api.saveSuppressWakeDuringPlaybackEnabled(checked)
             }
         }
+        val assistantSpeechPlaybackVolumeControl = buildAssistantSpeechPlaybackVolumeControl()
 
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -650,6 +654,7 @@ class MainActivity : ComponentActivity() {
                 addView(label("Use this when assistant audio plays on speaker so it cannot trigger wake commands.", 12f, COLOR_MUTED, false).apply {
                     setPadding(0, 0, 0, 8.dp())
                 })
+                addView(assistantSpeechPlaybackVolumeControl)
                 addView(row(
                     button("Save") { saveConfigFromForm() },
                     button("Open web") { openWebDashboard() }
@@ -1037,8 +1042,65 @@ class MainActivity : ComponentActivity() {
         if (::suppressWakeDuringPlaybackCheckbox.isInitialized) {
             suppressWakeDuringPlaybackCheckbox.isChecked = api.suppressWakeDuringPlaybackEnabled()
         }
+        updateAssistantSpeechPlaybackVolumeControl()
         updateAssistantSpeechPlaybackButton()
         updatePairingMessage()
+    }
+
+    private fun buildAssistantSpeechPlaybackVolumeControl(): LinearLayout {
+        assistantSpeechPlaybackVolumeLabel = label("", 12f, COLOR_MUTED, true).apply {
+            gravity = Gravity.END
+        }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(label("Assistant speech volume", 14f, COLOR_TEXT, true), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(assistantSpeechPlaybackVolumeLabel, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+        assistantSpeechPlaybackVolumeSeekBar = SeekBar(this).apply {
+            max = Constants.ASSISTANT_SPEECH_PLAYBACK_VOLUME_MAX_PERCENT - Constants.ASSISTANT_SPEECH_PLAYBACK_VOLUME_MIN_PERCENT
+            progress = api.assistantSpeechPlaybackVolumePercent() - Constants.ASSISTANT_SPEECH_PLAYBACK_VOLUME_MIN_PERCENT
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    val percent = Constants.ASSISTANT_SPEECH_PLAYBACK_VOLUME_MIN_PERCENT + progress
+                    updateAssistantSpeechPlaybackVolumeLabel(percent)
+                    if (fromUser) {
+                        api.saveAssistantSpeechPlaybackVolumePercent(percent)
+                    }
+                }
+
+                override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {
+                    val percent = Constants.ASSISTANT_SPEECH_PLAYBACK_VOLUME_MIN_PERCENT + (seekBar?.progress ?: 0)
+                    api.saveAssistantSpeechPlaybackVolumePercent(percent)
+                }
+            })
+        }
+        updateAssistantSpeechPlaybackVolumeLabel(api.assistantSpeechPlaybackVolumePercent())
+
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 6.dp(), 0, 8.dp())
+            addView(header)
+            addView(assistantSpeechPlaybackVolumeSeekBar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(label("Controls assistant playback only. 100% is unchanged.", 12f, COLOR_MUTED, false))
+        }
+    }
+
+    private fun updateAssistantSpeechPlaybackVolumeControl() {
+        if (!::assistantSpeechPlaybackVolumeSeekBar.isInitialized) return
+        val percent = api.assistantSpeechPlaybackVolumePercent()
+        assistantSpeechPlaybackVolumeSeekBar.progress = percent - Constants.ASSISTANT_SPEECH_PLAYBACK_VOLUME_MIN_PERCENT
+        updateAssistantSpeechPlaybackVolumeLabel(percent)
+    }
+
+    private fun updateAssistantSpeechPlaybackVolumeLabel(percent: Int) {
+        if (!::assistantSpeechPlaybackVolumeLabel.isInitialized) return
+        assistantSpeechPlaybackVolumeLabel.text = "$percent%"
+        if (::assistantSpeechPlaybackVolumeSeekBar.isInitialized) {
+            assistantSpeechPlaybackVolumeSeekBar.contentDescription = "Assistant speech volume $percent percent"
+        }
     }
 
     private fun saveConfigFromForm() {
@@ -1064,6 +1126,11 @@ class MainActivity : ComponentActivity() {
         }
         if (::suppressWakeDuringPlaybackCheckbox.isInitialized) {
             api.saveSuppressWakeDuringPlaybackEnabled(suppressWakeDuringPlaybackCheckbox.isChecked)
+        }
+        if (::assistantSpeechPlaybackVolumeSeekBar.isInitialized) {
+            api.saveAssistantSpeechPlaybackVolumePercent(
+                Constants.ASSISTANT_SPEECH_PLAYBACK_VOLUME_MIN_PERCENT + assistantSpeechPlaybackVolumeSeekBar.progress
+            )
         }
         updateAssistantSpeechPlaybackButton()
         showStatus(
