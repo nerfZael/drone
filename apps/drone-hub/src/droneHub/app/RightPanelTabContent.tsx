@@ -10,6 +10,8 @@ import type {
   PortReachabilityByHostPort,
 } from '../types';
 import type { DroneOpenedFileState, DroneOpenedFileTabState } from '../files/opened-file-types';
+import { QuickOpenModal } from '../files/QuickOpenModal';
+import type { QuickOpenFile, QuickOpenRecentFile } from '../files/quick-open-state';
 import {
   RIGHT_PANEL_TAB_LABELS,
   RIGHT_PANEL_TABS,
@@ -198,6 +200,21 @@ type RightPanelTabContentProps = {
   onOpenFileInPanel: (entry: DroneFsEntry) => boolean;
   onOpenFileTargetInEditor: (next: { path: string; name: string; line?: number | null; column?: number | null }) => void;
   openedFile: DroneOpenedFileState;
+  quickOpen: {
+    open: boolean;
+    query: string;
+    files: QuickOpenFile[];
+    recentFiles: QuickOpenRecentFile[];
+    loading: boolean;
+    error: string | null;
+    canGoBack: boolean;
+    canGoForward: boolean;
+    onQueryChange: (next: string) => void;
+    onClose: () => void;
+    onOpenFile: (next: { path: string; name: string }) => void;
+    onGoBack: () => void;
+    onGoForward: () => void;
+  };
   openedFileTabs: DroneOpenedFileTabState[];
   activeOpenedFileTabId: string | null;
   onOpenedEditorFileContentChange: (next: string) => void;
@@ -282,6 +299,7 @@ export function RightPanelTabContent({
   onOpenFileInPanel,
   onOpenFileTargetInEditor,
   openedFile,
+  quickOpen,
   openedFileTabs,
   activeOpenedFileTabId,
   onOpenedEditorFileContentChange,
@@ -435,6 +453,17 @@ export function RightPanelTabContent({
       return (
         <LazyPane tab={tab}>
           <div className="h-full min-h-0 overflow-hidden bg-[var(--panel-alt)]">
+            <QuickOpenModal
+              open={quickOpen.open}
+              query={quickOpen.query}
+              files={quickOpen.files}
+              recentFiles={quickOpen.recentFiles}
+              loading={quickOpen.loading}
+              error={quickOpen.error}
+              onQueryChange={quickOpen.onQueryChange}
+              onClose={quickOpen.onClose}
+              onOpenFile={quickOpen.onOpenFile}
+            />
             {openedFile.path ? (
               <LazyOpenedDroneFilePanel
                 droneId={drone.id}
@@ -447,6 +476,10 @@ export function RightPanelTabContent({
                 onActivateFileTab={onActivateOpenedEditorFileTab}
                 onReorderFileTabs={onReorderOpenedEditorFileTabs}
                 onOpenResolvedFile={onOpenFileTargetInEditor}
+                canGoBack={quickOpen.canGoBack}
+                canGoForward={quickOpen.canGoForward}
+                onGoBack={quickOpen.onGoBack}
+                onGoForward={quickOpen.onGoForward}
               />
             ) : (
               <div className="h-full flex items-center justify-center px-4 text-center text-[12px] text-[var(--muted)]">
