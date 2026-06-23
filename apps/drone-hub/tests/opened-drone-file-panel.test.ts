@@ -90,4 +90,11 @@ describe('OpenedDroneFilePanel', () => {
     expect(html).toContain('Loading editor...');
     expect(monacoImportCount).toBe(1);
   });
+
+  test('disables language actions for unsaved text files', () => {
+    const html = renderPanel(makeFile({ dirty: true }));
+
+    expect(html).toContain('Save before using go to definition');
+    expect(html).toContain('Save before finding references');
+  });
 });

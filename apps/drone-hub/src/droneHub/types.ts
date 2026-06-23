@@ -104,6 +104,18 @@ export type DroneFsListPayload =
   | { ok: true; id: string; name: string; path: string; entries: DroneFsEntry[] }
   | { ok: false; error: string; id?: string; name?: string; path?: string };
 
+export type DroneFsSearchEntry = {
+  name: string;
+  path: string;
+  relativePath: string | null;
+  size: number | null;
+  mtimeMs: number | null;
+};
+
+export type DroneFsSearchPayload =
+  | { ok: true; id: string; name: string; root: string; entries: DroneFsSearchEntry[] }
+  | { ok: false; error: string; id?: string; name?: string; root?: string };
+
 export type DroneFsReadPayload =
   | {
       ok: true;

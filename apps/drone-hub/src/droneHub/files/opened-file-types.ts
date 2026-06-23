@@ -14,3 +14,8 @@ export type DroneOpenedFileState = {
   targetColumn: number | null;
   navigationSeq: number;
 };
+
+export type DroneOpenedFileTabState = DroneOpenedFileState & {
+  tabId: string;
+  droneId: string;
+};
