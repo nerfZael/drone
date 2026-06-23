@@ -2,9 +2,11 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { DroneHubDndProvider } from './droneHub/app/drone-hub-dnd';
 import { RemoteDroneHubApp } from './remote/RemoteDroneHubApp';
+import { installRemoteCsrfFetch } from './remote/remote-api';
 import { registerPwa } from './register-pwa';
 import './styles.css';
 
+installRemoteCsrfFetch();
 registerPwa();
 
 const container = document.getElementById('root');

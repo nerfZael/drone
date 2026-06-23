@@ -12,6 +12,7 @@ import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 import { RepoBranchSourceControls } from './RepoBranchSourceControls';
 import { repoPathLabel } from './repo-path-label';
 import type { RepoRemoteBranchOption } from '../types';
+import { InitialMessageVoiceControls, type InitialMessageVoiceControlsHandle } from './InitialMessageVoiceControls';
 
 type CreateDronesModalProps = {
   open: boolean;
@@ -67,7 +68,7 @@ type CreateDronesModalProps = {
   onUpdateCreateMessageSuffixRow: (index: number, value: string) => void;
   onRemoveCreateNameRow: (index: number) => void;
   createNameRef: React.Ref<HTMLInputElement>;
-  onSubmitCreate: () => void;
+  onSubmitCreate: (initialMessageOverride?: string) => void;
   onRequestClose: () => void;
 };
 
@@ -130,6 +131,8 @@ export function CreateDronesModal({
 }: CreateDronesModalProps) {
   if (!open) return null;
 
+  const initialMessageVoiceRef = React.useRef<InitialMessageVoiceControlsHandle | null>(null);
+  const [submittingCreate, setSubmittingCreate] = React.useState(false);
   const cloneSourceName =
     createMode === 'clone' && cloneSourceId
       ? String(drones.find((d) => d.id === cloneSourceId)?.name ?? cloneSourceId)
@@ -157,6 +160,18 @@ export function CreateDronesModal({
     spawnAgentConfig.kind !== 'builtin' ||
     spawnModelMenuEntries.length <= 1;
 
+  const submitCreate = React.useCallback(async () => {
+    if (creating || submittingCreate) return;
+    setSubmittingCreate(true);
+    try {
+      const resolvedInitialMessage = await initialMessageVoiceRef.current?.stopAndAppendRecording();
+      if (resolvedInitialMessage == null) return;
+      onSubmitCreate(resolvedInitialMessage);
+    } finally {
+      setSubmittingCreate(false);
+    }
+  }, [creating, onSubmitCreate, submittingCreate]);
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(0,0,0,.55)] backdrop-blur-sm px-4"
@@ -171,8 +186,7 @@ export function CreateDronesModal({
             if (e.ctrlKey || e.metaKey) {
               e.preventDefault();
               e.stopPropagation();
-              if (creating) return;
-              onSubmitCreate();
+              void submitCreate();
               return;
             }
             const t = e.target as unknown;
@@ -183,8 +197,7 @@ export function CreateDronesModal({
           }}
           onSubmit={(e) => {
             e.preventDefault();
-            if (creating) return;
-            onSubmitCreate();
+            void submitCreate();
           }}
         >
           <div className="px-5 py-4 border-b border-[var(--border)] flex items-center justify-between gap-3">
@@ -204,9 +217,9 @@ export function CreateDronesModal({
             <div className="flex items-center gap-2">
               <button
                 type="submit"
-                disabled={creating || createNameEntries.length === 0}
+                disabled={creating || submittingCreate || createNameEntries.length === 0}
                 className={`h-8 px-4 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
-                  creating || createNameEntries.length === 0
+                  creating || submittingCreate || createNameEntries.length === 0
                     ? 'opacity-70 cursor-wait bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
                     : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
                 }`}
@@ -218,6 +231,8 @@ export function CreateDronesModal({
                     <IconSpinner className="w-3.5 h-3.5" />
                     {createMode === 'clone' ? 'Cloning…' : 'Creating…'}
                   </span>
+                ) : submittingCreate ? (
+                  'Transcribing...'
                 ) : (
                   createMode === 'clone' ? 'Clone all' : 'Create all'
                 )}
@@ -511,19 +526,27 @@ export function CreateDronesModal({
             </div>
 
             <div className="mb-4">
-              <div className="mb-1 flex items-center justify-between gap-2">
+              <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
                 <div className="text-[11px] font-semibold text-[var(--muted)]">
                   Initial message (sent to every created drone before any per-drone suffix)
                 </div>
-                <button
-                  type="button"
-                  onClick={onClearCreateInitialMessage}
-                  className="text-[11px] font-semibold text-[var(--accent)] hover:text-[var(--fg)] hover:underline underline-offset-2 transition-colors disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
-                  title="Clear initial message"
-                  disabled={creating}
-                >
-                  Clear
-                </button>
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <InitialMessageVoiceControls
+                    ref={initialMessageVoiceRef}
+                    value={createInitialMessage}
+                    onChange={onCreateInitialMessageChange}
+                    disabled={creating}
+                  />
+                  <button
+                    type="button"
+                    onClick={onClearCreateInitialMessage}
+                    className="text-[11px] font-semibold text-[var(--accent)] hover:text-[var(--fg)] hover:underline underline-offset-2 transition-colors disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
+                    title="Clear initial message"
+                    disabled={creating}
+                  >
+                    Clear
+                  </button>
+                </div>
               </div>
               <textarea
                 value={createInitialMessage}

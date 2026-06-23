@@ -302,8 +302,8 @@ export function useDroneHubOverlaysProps(args: any): DroneHubOverlaysProps {
       onUpdateCreateMessageSuffixRow: updateCreateMessageSuffixRow,
       onRemoveCreateNameRow: removeCreateNameRow,
       createNameRef,
-      onSubmitCreate: () => {
-        void createDrone();
+      onSubmitCreate: (initialMessageOverride?: string) => {
+        void createDrone(initialMessageOverride);
       },
       onRequestClose: () => {
         setCreateOpen(false);
