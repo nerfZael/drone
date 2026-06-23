@@ -651,6 +651,47 @@ async function resolveDroneIdsForGroupSet(hub, refs) {
   });
 }
 
+async function resolveDroneRefs(hub, refs) {
+  const response = await requestDroneSummaries(hub);
+  const drones = Array.isArray(response?.drones) ? response.drones.map(droneSummary) : [];
+  return refs.map((ref) => {
+    const text = cleanString(ref);
+    const match = drones.find((drone) => drone.id === text || drone.name === text);
+    return {
+      ref: text,
+      id: cleanString(match?.id, text),
+      name: cleanString(match?.name),
+      found: Boolean(match),
+    };
+  });
+}
+
+function normalizeRenameRequests(args = {}) {
+  const rawRenames = Array.isArray(args.renames) ? args.renames : [];
+  const fallbackDrone = cleanString(args.drone || args.droneId || args.id);
+  const fallbackNewName = cleanString(args.newName || args.nextName || args.name);
+  const source = rawRenames.length > 0
+    ? rawRenames
+    : fallbackDrone && fallbackNewName
+      ? [{ drone: fallbackDrone, newName: fallbackNewName }]
+      : [];
+  const seen = new Set();
+  return source.map((item) => {
+    const explicitDrone = cleanString(item?.drone || item?.droneId || item?.id);
+    const explicitNewName = cleanString(item?.newName || item?.nextName);
+    const name = cleanString(item?.name);
+    const drone = explicitDrone || (explicitNewName ? name : '');
+    const newName = explicitNewName || (explicitDrone ? name : '');
+    return { drone, newName };
+  }).filter((item) => {
+    if (!item.drone || !item.newName) return false;
+    const key = item.drone;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 async function createdDroneRecords(api) {
   const records = await api.state.get(CREATED_DRONES_STATE_KEY, []);
   return Array.isArray(records) ? records.filter((record) => record && typeof record === 'object') : [];
@@ -673,6 +714,31 @@ async function rememberCreatedDrone(api, drone, sourceTool) {
     createdAt: now,
   });
   await api.state.set(CREATED_DRONES_STATE_KEY, nextRecords.slice(0, MAX_TRACKED_CREATED_DRONES));
+}
+
+async function rememberRenamedDrone(api, previousAliases, renamedDrone) {
+  const aliases = droneAliases(renamedDrone);
+  if (aliases.length === 0) return;
+  const previous = Array.isArray(previousAliases)
+    ? previousAliases.map((item) => cleanString(item)).filter(Boolean)
+    : [];
+  const now = new Date().toISOString();
+  const records = await createdDroneRecords(api);
+  const nextRecords = records.map((record) => {
+    const recordAliases = Array.isArray(record.aliases) ? record.aliases.map((item) => cleanString(item)).filter(Boolean) : [];
+    const matches =
+      recordAliases.some((alias) => aliases.includes(alias)) ||
+      recordAliases.some((alias) => previous.includes(alias));
+    if (!matches) return record;
+    return {
+      ...record,
+      id: cleanString(renamedDrone?.id, cleanString(record.id) || aliases[0]),
+      name: cleanString(renamedDrone?.name) || null,
+      aliases: [...new Set([...aliases, ...recordAliases, ...previous])],
+      updatedAt: now,
+    };
+  });
+  await api.state.set(CREATED_DRONES_STATE_KEY, nextRecords);
 }
 
 async function wasCreatedByExtension(api, drone) {
@@ -1052,6 +1118,102 @@ exports.activate = async function activate(api) {
         moved,
         rejected: Array.isArray(response?.rejected) ? response.rejected : [],
         total: Number.isFinite(Number(response?.total)) ? Number(response.total) : drones.length,
+      };
+    },
+  });
+
+  registerTool(api, {
+    name: 'rename_drones',
+    label: 'Rename drones',
+    description:
+      'Rename one or more Drone Hub drones by id or current name. Use renames for multiple exact mappings.',
+    approval: 'never',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        drone: { type: 'string', description: 'Single drone id or current name.' },
+        droneId: { type: 'string', description: 'Alias for drone.' },
+        id: { type: 'string', description: 'Alias for drone.' },
+        newName: { type: 'string', description: 'New name for the single drone.' },
+        name: { type: 'string', description: 'Alias for newName when renaming a single drone.' },
+        nextName: { type: 'string', description: 'Alias for newName when renaming a single drone.' },
+        renames: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              drone: { type: 'string' },
+              droneId: { type: 'string' },
+              id: { type: 'string' },
+              name: { type: 'string' },
+              newName: { type: 'string' },
+              nextName: { type: 'string' },
+            },
+            required: [],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+    async execute(args = {}) {
+      const renames = normalizeRenameRequests(args);
+      if (renames.length === 0) throw new Error('at least one drone and newName are required');
+
+      const duplicateNewNames = new Set();
+      const seenNewNames = new Set();
+      for (const item of renames) {
+        const key = item.newName.toLowerCase();
+        if (seenNewNames.has(key)) duplicateNewNames.add(item.newName);
+        seenNewNames.add(key);
+      }
+      if (duplicateNewNames.size > 0) {
+        throw new Error(`duplicate target drone name: ${Array.from(duplicateNewNames).join(', ')}`);
+      }
+
+      const hub = connection();
+      const resolved = await resolveDroneRefs(hub, renames.map((item) => item.drone));
+      const renamed = [];
+      const rejected = [];
+
+      for (let index = 0; index < renames.length; index += 1) {
+        const request = renames[index];
+        const target = resolved[index];
+        if (!target?.id) {
+          rejected.push({ drone: request.drone, newName: request.newName, error: 'drone is required' });
+          continue;
+        }
+        try {
+          const response = await requestJson(
+            hub,
+            `/api/drones/${encodeURIComponent(target.id)}/rename`,
+            { method: 'POST', body: JSON.stringify({ newName: request.newName, source: 'voice-stream-next' }) },
+          );
+          const item = {
+            id: cleanString(response?.id, target.id),
+            oldName: cleanString(response?.oldName, target.name || target.ref),
+            newName: cleanString(response?.newName, request.newName),
+            renamed: response?.renamed !== false,
+          };
+          renamed.push(item);
+          await rememberRenamedDrone(api, [target.ref, target.name, target.id], { id: item.id, name: item.newName });
+        } catch (error) {
+          rejected.push({
+            drone: request.drone,
+            id: target.id,
+            oldName: target.name || target.ref || null,
+            newName: request.newName,
+            error: cleanString(error?.message, 'rename failed'),
+          });
+        }
+      }
+
+      return {
+        ok: rejected.length === 0,
+        renamed,
+        rejected,
+        total: renames.length,
       };
     },
   });
