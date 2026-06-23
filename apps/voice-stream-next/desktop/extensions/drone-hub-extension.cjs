@@ -232,6 +232,51 @@ function normalizeRepoBranchSource(value, fallback = 'host') {
   return fallback === 'remote' ? 'remote' : 'host';
 }
 
+function normalizeCreateDronePreferences(value) {
+  const raw = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const repoBranchSource = normalizeRepoBranchSource(
+    raw.repoBranchSource,
+    DEFAULT_CREATE_DRONE_PREFERENCES.repoBranchSource,
+  );
+  return {
+    spawnAgentKey: normalizeSpawnAgentKey(raw.spawnAgentKey),
+    spawnModel: cleanString(raw.spawnModel),
+    repoBranchSource,
+    repoCreateRemoteBranch: cleanString(raw.repoCreateRemoteBranch),
+    pullHostBranchBeforeCreate:
+      typeof raw.pullHostBranchBeforeCreate === 'boolean'
+        ? raw.pullHostBranchBeforeCreate
+        : DEFAULT_CREATE_DRONE_PREFERENCES.pullHostBranchBeforeCreate,
+  };
+}
+
+function normalizeSpawnContextByRepoKey(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const out = {};
+  for (const [keyRaw, entryRaw] of Object.entries(value)) {
+    const key = cleanString(keyRaw);
+    if (!key) continue;
+    out[key] = normalizeCreateDronePreferences(entryRaw);
+  }
+  return out;
+}
+
+function createDronePreferencesForRepo(prefs, repoPath) {
+  const globalPrefs = {
+    ...DEFAULT_CREATE_DRONE_PREFERENCES,
+    ...normalizeCreateDronePreferences(prefs),
+  };
+  const repoKey = cleanString(repoPath);
+  const byRepoKey = normalizeSpawnContextByRepoKey(prefs?.spawnContextByRepoKey);
+  if (repoKey && byRepoKey[repoKey]) return { ...globalPrefs, ...byRepoKey[repoKey] };
+  if (!repoKey) return globalPrefs;
+  return {
+    ...globalPrefs,
+    repoBranchSource: DEFAULT_CREATE_DRONE_PREFERENCES.repoBranchSource,
+    repoCreateRemoteBranch: DEFAULT_CREATE_DRONE_PREFERENCES.repoCreateRemoteBranch,
+  };
+}
+
 function normalizeSpawnAgentKey(value, fallback = DEFAULT_CREATE_DRONE_PREFERENCES.spawnAgentKey) {
   const key = cleanString(value, fallback);
   const builtin = key.startsWith('builtin:') ? key.slice('builtin:'.length) : key;
@@ -242,24 +287,13 @@ function normalizeSpawnAgentKey(value, fallback = DEFAULT_CREATE_DRONE_PREFERENC
   }
 }
 
-async function createDronePreferences(hub) {
+async function createDronePreferences(hub, repoPath = '') {
   try {
     const response = await requestJson(hub, '/api/settings/ui-preferences', { method: 'GET' });
     const prefs = response?.uiPreferences && typeof response.uiPreferences === 'object' ? response.uiPreferences : {};
-    const repoBranchSource = normalizeRepoBranchSource(
-      prefs.repoBranchSource,
-      DEFAULT_CREATE_DRONE_PREFERENCES.repoBranchSource,
-    );
+    const resolved = createDronePreferencesForRepo(prefs, repoPath);
     return {
-      ...DEFAULT_CREATE_DRONE_PREFERENCES,
-      spawnAgentKey: normalizeSpawnAgentKey(prefs.spawnAgentKey),
-      spawnModel: cleanString(prefs.spawnModel),
-      repoBranchSource,
-      repoCreateRemoteBranch: cleanString(prefs.repoCreateRemoteBranch),
-      pullHostBranchBeforeCreate:
-        typeof prefs.pullHostBranchBeforeCreate === 'boolean'
-          ? prefs.pullHostBranchBeforeCreate
-          : DEFAULT_CREATE_DRONE_PREFERENCES.pullHostBranchBeforeCreate,
+      ...resolved,
       source: response?.updatedAt ? 'drone_hub_ui_preferences' : 'default',
       updatedAt: cleanIsoTimestamp(response?.updatedAt),
     };
@@ -271,6 +305,22 @@ async function createDronePreferences(hub) {
       warning: error?.message || String(error),
     };
   }
+}
+
+async function requireRemoteBranchAvailableForRepo(hub, repoPath, remoteBranch, source) {
+  const normalizedRepoPath = cleanString(repoPath);
+  const normalizedRemoteBranch = cleanString(remoteBranch).replace(/^refs\/remotes\//, '').replace(/^remotes\//, '');
+  if (!normalizedRepoPath || !normalizedRemoteBranch) return normalizedRemoteBranch;
+  const data = await requestJson(
+    hub,
+    `/api/repos/branches?repoPath=${encodeURIComponent(normalizedRepoPath)}`,
+    { method: 'GET' },
+  );
+  const branches = Array.isArray(data?.remoteBranches) ? data.remoteBranches : [];
+  if (branches.some((entry) => cleanString(entry?.name) === normalizedRemoteBranch)) return normalizedRemoteBranch;
+  throw new Error(
+    `${source === 'default' ? 'Saved default remote branch' : 'Remote branch'} "${normalizedRemoteBranch}" is not available for repo ${normalizedRepoPath}. Pass a valid remoteBranch for this repo, or use repoBranchSource=host.`,
+  );
 }
 
 function agentFromPreferenceKey(value) {
@@ -381,6 +431,7 @@ function normalizeUiPreferences(value) {
       typeof raw.pullHostBranchBeforeCreate === 'boolean'
         ? raw.pullHostBranchBeforeCreate
         : DEFAULT_CREATE_DRONE_PREFERENCES.pullHostBranchBeforeCreate,
+    spawnContextByRepoKey: normalizeSpawnContextByRepoKey(raw.spawnContextByRepoKey),
   };
 }
 
@@ -992,17 +1043,20 @@ exports.activate = async function activate(api) {
     name: 'get_create_drone_defaults',
     label: 'Get create drone defaults',
     description:
-      'Read the Drone Hub defaults normally used when manually creating a drone, including agent, model, branch source, remote branch, and whether the host branch is pulled before create.',
+      'Read the Drone Hub defaults normally used when manually creating a drone, including agent, model, branch source, remote branch, and whether the host branch is pulled before create. Pass repoPath to resolve repo-specific branch defaults safely.',
     approval: 'never',
     inputSchema: {
       type: 'object',
-      properties: {},
+      properties: {
+        repoPath: { type: 'string' },
+      },
       required: [],
       additionalProperties: false,
     },
-    async execute() {
-      const defaults = await createDronePreferences(connection());
-      return { ok: true, defaults };
+    async execute(args = {}) {
+      const repoPath = cleanString(args.repoPath);
+      const defaults = await createDronePreferences(connection(), repoPath);
+      return { ok: true, defaults, repoPath: repoPath || null };
     },
   });
 
@@ -1105,12 +1159,21 @@ exports.activate = async function activate(api) {
       const hub = connection();
       const group = cleanString(args.group);
       const beforeGroups = group ? await listGroupNames(hub) : [];
-      const defaults = await createDronePreferences(hub);
+      const repoPath = cleanString(args.repoPath);
+      const defaults = await createDronePreferences(hub, repoPath);
       const seedAgent = args.agent == null ? agentFromPreferenceKey(defaults.spawnAgentKey) : normalizeAgent(args.agent);
       const seedModel = args.model == null ? defaults.spawnModel : cleanString(args.model);
-      const repoPath = cleanString(args.repoPath);
       const repoBranchSource = normalizeRepoBranchSource(args.repoBranchSource, defaults.repoBranchSource);
-      const remoteBranch = args.remoteBranch == null ? defaults.repoCreateRemoteBranch : cleanString(args.remoteBranch);
+      const remoteBranchRaw = args.remoteBranch == null ? defaults.repoCreateRemoteBranch : cleanString(args.remoteBranch);
+      const remoteBranch =
+        repoPath && repoBranchSource === 'remote'
+          ? await requireRemoteBranchAvailableForRepo(
+              hub,
+              repoPath,
+              remoteBranchRaw,
+              args.remoteBranch == null ? 'default' : 'explicit',
+            )
+          : remoteBranchRaw;
       const pullHostBranchBeforeCreate =
         typeof args.pullHostBranchBeforeCreate === 'boolean'
           ? args.pullHostBranchBeforeCreate
