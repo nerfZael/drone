@@ -70,11 +70,19 @@ export function RemoteCreateDroneModal({
   const [seedAgent, setSeedAgent] = React.useState<ChatAgentConfig>({ kind: 'builtin', id: 'cursor' });
   const [seedModel, setSeedModel] = React.useState('');
   const [initialMessage, setInitialMessage] = React.useState('');
+  const mountedRef = React.useRef(false);
   const initialMessageVoiceRef = React.useRef<InitialMessageVoiceControlsHandle | null>(null);
   const [createSubmitting, setCreateSubmitting] = React.useState(false);
   const [loadingDefaults, setLoadingDefaults] = React.useState(false);
   const [creating, setCreating] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   React.useEffect(() => {
     if (!open) return;
@@ -235,7 +243,9 @@ export function RemoteCreateDroneModal({
     setCreateSubmitting(true);
     setError(null);
     try {
-      const resolvedInitialMessage = await initialMessageVoiceRef.current?.stopAndAppendRecording();
+      const resolvedInitialMessage = initialMessageVoiceRef.current
+        ? await initialMessageVoiceRef.current.stopAndAppendRecording()
+        : initialMessage;
       if (resolvedInitialMessage == null) return;
       const trimmedSeedPrompt = String(resolvedInitialMessage ?? initialMessage ?? '').trim();
       setCreating(true);
@@ -265,8 +275,10 @@ export function RemoteCreateDroneModal({
     } catch (err: any) {
       setError(String(err?.message ?? err ?? 'Failed to create drone.'));
     } finally {
-      setCreateSubmitting(false);
-      setCreating(false);
+      if (mountedRef.current) {
+        setCreateSubmitting(false);
+        setCreating(false);
+      }
     }
   }, [
     branchSource,
@@ -328,9 +340,14 @@ export function RemoteCreateDroneModal({
             <button
               type="button"
               onClick={() => {
-                if (!creating) onClose();
+                if (!creating && !createSubmitting) onClose();
               }}
-              className="inline-flex h-8 w-8 items-center justify-center rounded border border-[var(--border-subtle)] text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+              disabled={creating || createSubmitting}
+              className={`inline-flex h-8 w-8 items-center justify-center rounded border border-[var(--border-subtle)] text-[var(--muted)] transition-colors ${
+                creating || createSubmitting
+                  ? 'opacity-40 cursor-not-allowed'
+                  : 'hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+              }`}
               title="Close"
               aria-label="Close"
             >
@@ -476,7 +493,7 @@ export function RemoteCreateDroneModal({
               <textarea
                 value={initialMessage}
                 onChange={(event) => setInitialMessage(event.target.value)}
-                disabled={creating}
+                disabled={creating || createSubmitting}
                 rows={4}
                 placeholder="Optional"
                 aria-label="Initial message"
