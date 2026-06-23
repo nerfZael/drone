@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   hasActivePriorPendingPrompt,
+  looksLikeTransientPromptEnqueueError,
   shouldDeferQueuedTranscriptPrompt,
   shouldRetryFailedPendingPrompt,
   stalePendingPromptState,
@@ -163,6 +164,20 @@ describe('shouldRetryFailedPendingPrompt', () => {
         nowMs: Date.parse('2026-06-13T23:45:00.000Z'),
       }),
     ).toBe(false);
+  });
+});
+
+describe('looksLikeTransientPromptEnqueueError', () => {
+  test('matches daemon and timeout delivery interruptions', () => {
+    expect(looksLikeTransientPromptEnqueueError('prompt enqueue failed for drone/default (timed out after 180s)')).toBe(true);
+    expect(looksLikeTransientPromptEnqueueError('request timeout after 5000ms: POST /v1/prompts/enqueue')).toBe(true);
+    expect(looksLikeTransientPromptEnqueueError('drone daemon not ready after 20000ms')).toBe(true);
+    expect(looksLikeTransientPromptEnqueueError('fetch failed: ECONNREFUSED 127.0.0.1')).toBe(true);
+  });
+
+  test('does not retry terminal auth failures', () => {
+    expect(looksLikeTransientPromptEnqueueError('unauthorized')).toBe(false);
+    expect(looksLikeTransientPromptEnqueueError('authentication failed; please log out and sign in again')).toBe(false);
   });
 });
 

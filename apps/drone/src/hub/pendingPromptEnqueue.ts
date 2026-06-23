@@ -28,6 +28,26 @@ function looksLikeTerminalFailedPromptError(raw: unknown): boolean {
   );
 }
 
+export function looksLikeTransientPromptEnqueueError(raw: unknown): boolean {
+  const msg = String(raw ?? '').trim().toLowerCase();
+  if (!msg) return false;
+  if (looksLikeTerminalFailedPromptError(msg)) return false;
+  return (
+    msg.includes('prompt enqueue failed') ||
+    msg.includes('queued prompt enqueue failed') ||
+    msg.includes('timed out after') ||
+    msg.includes('request timeout after') ||
+    msg.includes('drone daemon not ready') ||
+    msg.includes('drone daemon not reachable') ||
+    msg.includes('daemon unavailable') ||
+    msg.includes('fetch failed') ||
+    msg.includes('econnrefused') ||
+    msg.includes('socket hang up') ||
+    msg.includes('connection terminated') ||
+    msg.includes('failed to connect')
+  );
+}
+
 function looksLikeRecoverableTranscriptParseFailure(raw: unknown): boolean {
   const msg = String(raw ?? '').trim().toLowerCase();
   if (!msg) return false;

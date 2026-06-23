@@ -147,6 +147,7 @@ import {
 import { createSyncSetService } from './sync-set-service';
 import {
   hasActivePriorPendingPrompt,
+  looksLikeTransientPromptEnqueueError,
   shouldDeferQueuedTranscriptPrompt,
   shouldRetryFailedPendingPrompt,
   stalePendingPromptState,
@@ -4020,6 +4021,7 @@ const UPGRADE_DAEMON_READY_TIMEOUT_MS = 30_000;
 const DEFAULT_REPO_SEED_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_SEED_BOOTSTRAP_TIMEOUT_MS = 45_000;
 const DEFAULT_PROMPT_ENQUEUE_TIMEOUT_MS = 180_000;
+const DEFAULT_PENDING_PROMPT_ENQUEUE_RETRY_DELAY_MS = 15_000;
 function defaultDaemonReadyTimeoutMs(): number {
   const raw = String(process.env.DRONE_HUB_DAEMON_READY_TIMEOUT_MS ?? '').trim();
   const n = raw ? Number(raw) : NaN;
@@ -4046,6 +4048,13 @@ function defaultPromptEnqueueTimeoutMs(): number {
   const n = raw ? Number(raw) : NaN;
   if (Number.isFinite(n) && n >= 30_000) return Math.max(30_000, Math.min(30 * 60_000, Math.floor(n)));
   return DEFAULT_PROMPT_ENQUEUE_TIMEOUT_MS;
+}
+
+function defaultPendingPromptEnqueueRetryDelayMs(): number {
+  const raw = String(process.env.DRONE_HUB_PENDING_PROMPT_ENQUEUE_RETRY_DELAY_MS ?? '').trim();
+  const n = raw ? Number(raw) : NaN;
+  if (Number.isFinite(n) && n >= 1_000) return Math.max(1_000, Math.min(5 * 60_000, Math.floor(n)));
+  return DEFAULT_PENDING_PROMPT_ENQUEUE_RETRY_DELAY_MS;
 }
 
 function isValidDroneNameDashCase(raw: string): boolean {
@@ -6268,6 +6277,11 @@ function looksLikeContainerAlreadyRunningError(msg: string): boolean {
   return s.includes('already running') || (s.includes('cannot start') && s.includes('running'));
 }
 
+function looksLikeContainerPausedError(msg: string): boolean {
+  const s = String(msg ?? '').toLowerCase();
+  return s.includes('is paused') || s.includes('container stopped/paused') || s.includes('unpause the container');
+}
+
 function looksLikeRepoUnavailableError(msg: string): boolean {
   const s = String(msg ?? '').toLowerCase();
   return (
@@ -6756,7 +6770,12 @@ async function clearDroneHubState(droneIdRaw: string): Promise<void> {
   });
 }
 
-async function runDroneLifecycleAction(opts: { droneId: string; droneEntry: any; action: 'start' | 'stop' | 'restart' }) {
+async function runDroneLifecycleAction(opts: {
+  droneId: string;
+  droneEntry: any;
+  action: 'start' | 'stop' | 'restart';
+  source?: Record<string, unknown>;
+}) {
   const droneId = normalizeDroneIdentity(opts.droneId);
   if (!droneId) throw new Error('missing droneId');
   const droneEntry = opts.droneEntry;
@@ -6768,43 +6787,82 @@ async function runDroneLifecycleAction(opts: { droneId: string; droneEntry: any;
   const droneName = String(droneEntry?.name ?? droneId).trim() || droneId;
   const containerName = String(droneEntry?.containerName ?? droneEntry?.name ?? `drone-${droneId}`).trim() || `drone-${droneId}`;
 
-  if (opts.action === 'stop' || opts.action === 'restart') {
-    await stopAllDroneChatActivity({
-      droneId,
-      droneEntry,
-      reason: opts.action === 'restart' ? 'restart' : 'stop',
-      updateLiveRegistry: true,
-    });
-    try {
-      await dvmStop(containerName);
-    } catch (e: any) {
-      const msg = e?.message ?? String(e);
-      if (!looksLikeContainerNotRunningError(msg)) throw e;
-    }
-  }
-
-  if (opts.action === 'start' || opts.action === 'restart') {
-    try {
-      await dvmStart(containerName);
-    } catch (e: any) {
-      const msg = e?.message ?? String(e);
-      if (!looksLikeContainerAlreadyRunningError(msg)) throw e;
-    }
-    await ensureContainerDroneDaemonSession({
-      containerName,
-      containerPort: Number(droneEntry?.containerPort ?? 7777),
-    });
-  }
-
-  await clearDroneHubState(droneId);
-  return {
-    ok: true as const,
-    id: droneId,
-    name: droneName,
+  const beforeDiagnostics = await collectDroneRuntimeDiagnostics({ droneId, droneEntry }).catch((error) => ({
+    diagnosticError: compactDiagnosticError(error),
+  }));
+  hubLog('info', 'drone lifecycle action requested', {
+    droneId,
+    droneName,
     action: opts.action,
-    runtime: 'container' as const,
     containerName,
-  };
+    ...(opts.source ? { source: opts.source } : {}),
+    before: beforeDiagnostics,
+  });
+
+  try {
+    if (opts.action === 'stop' || opts.action === 'restart') {
+      await stopAllDroneChatActivity({
+        droneId,
+        droneEntry,
+        reason: opts.action === 'restart' ? 'restart' : 'stop',
+        updateLiveRegistry: true,
+      });
+      try {
+        await dvmStop(containerName);
+      } catch (e: any) {
+        const msg = e?.message ?? String(e);
+        if (!looksLikeContainerNotRunningError(msg)) throw e;
+      }
+    }
+
+    if (opts.action === 'start' || opts.action === 'restart') {
+      try {
+        await dvmStart(containerName);
+      } catch (e: any) {
+        const msg = e?.message ?? String(e);
+        if (!looksLikeContainerAlreadyRunningError(msg)) throw e;
+      }
+      await ensureContainerDroneDaemonSession({
+        containerName,
+        containerPort: Number(droneEntry?.containerPort ?? 7777),
+      });
+    }
+
+    await clearDroneHubState(droneId);
+    const afterDiagnostics = await collectDroneRuntimeDiagnostics({ droneId, droneEntry }).catch((error) => ({
+      diagnosticError: compactDiagnosticError(error),
+    }));
+    hubLog('info', 'drone lifecycle action completed', {
+      droneId,
+      droneName,
+      action: opts.action,
+      containerName,
+      ...(opts.source ? { source: opts.source } : {}),
+      after: afterDiagnostics,
+    });
+    return {
+      ok: true as const,
+      id: droneId,
+      name: droneName,
+      action: opts.action,
+      runtime: 'container' as const,
+      containerName,
+    };
+  } catch (error) {
+    const afterDiagnostics = await collectDroneRuntimeDiagnostics({ droneId, droneEntry }).catch((diagnosticError) => ({
+      diagnosticError: compactDiagnosticError(diagnosticError),
+    }));
+    hubLog('warn', 'drone lifecycle action failed', {
+      droneId,
+      droneName,
+      action: opts.action,
+      containerName,
+      ...(opts.source ? { source: opts.source } : {}),
+      error: compactDiagnosticError(error),
+      after: afterDiagnostics,
+    });
+    throw error;
+  }
 }
 
 function listStoppablePromptIdsFromChatEntry(entry: any): string[] {
@@ -8583,6 +8641,7 @@ const PENDING_PROMPT_PUMP_TASKS = new Map<string, Promise<void>>();
 const PENDING_PROMPT_PUMP_QUEUE: Array<{ droneId: string; chatName: string }> = [];
 const PENDING_PROMPT_PUMP_QUEUED = new Set<string>();
 const PENDING_PROMPT_PUMP_RETRY = new Set<string>();
+const PENDING_PROMPT_PUMP_RETRY_TIMERS = new Map<string, ReturnType<typeof setTimeout>>();
 let PENDING_PROMPT_PUMP_ACTIVE = 0;
 let PENDING_PROMPT_PUMP_PUMPING = false;
 
@@ -8591,6 +8650,13 @@ function pendingPromptPumpConcurrencyLimit(): number {
   const n = raw ? Number(raw) : NaN;
   if (Number.isFinite(n) && n >= 1) return Math.max(1, Math.min(16, Math.floor(n)));
   return 6;
+}
+
+function interruptedPromptDeliveryError(raw: unknown): string {
+  const detail = String(raw ?? '').trim().replace(/\s+/g, ' ').slice(0, 240);
+  return detail
+    ? `Prompt delivery was interrupted; retrying when the drone daemon is available. Last error: ${detail}`
+    : 'Prompt delivery was interrupted; retrying when the drone daemon is available.';
 }
 
 async function pumpQueuedPendingPromptsForChat(opts: { droneId: string; chatName: string }): Promise<void> {
@@ -8682,17 +8748,33 @@ async function pumpQueuedPendingPromptsForChat(opts: { droneId: string; chatName
         enqueueReconcile(droneId, chatName);
       }
     } catch (e: any) {
+      const errorText = e?.message ?? String(e);
+      const diagnostics =
+        looksLikeTransientPromptEnqueueError(errorText) || looksLikeContainerPausedError(errorText)
+          ? await collectDroneRuntimeDiagnostics({ droneId, droneEntry: d }).catch((error) => ({ diagnosticError: compactDiagnosticError(error) }))
+          : null;
       hubLog('warn', 'queued pending prompt enqueue failed', {
         droneId,
         chatName,
         promptId: id,
-        error: String(e?.message ?? e ?? 'unknown error'),
+        error: String(errorText ?? 'unknown error'),
+        ...(diagnostics ? { diagnostics } : {}),
       });
+      if (looksLikeTransientPromptEnqueueError(errorText)) {
+        await updatePendingPrompt({
+          droneId,
+          chatName,
+          id,
+          patch: { state: 'queued', error: interruptedPromptDeliveryError(errorText) },
+        });
+        schedulePendingPromptPumpRetry(droneId, chatName);
+        return;
+      }
       await updatePendingPrompt({
         droneId,
         chatName,
         id,
-        patch: { state: 'failed', error: e?.message ?? String(e) },
+        patch: { state: 'failed', error: errorText },
       });
     }
   }
@@ -8748,6 +8830,8 @@ export async function resetPromptAutomationStateForTests(): Promise<void> {
   PENDING_PROMPT_PUMP_QUEUE.length = 0;
   PENDING_PROMPT_PUMP_QUEUED.clear();
   PENDING_PROMPT_PUMP_RETRY.clear();
+  for (const timer of PENDING_PROMPT_PUMP_RETRY_TIMERS.values()) clearTimeout(timer);
+  PENDING_PROMPT_PUMP_RETRY_TIMERS.clear();
   await Promise.allSettled(Array.from(PENDING_PROMPT_PUMP_TASKS.values()).map((task) => task.catch(() => {})));
   PENDING_PROMPT_PUMP_TASKS.clear();
   PENDING_PROMPT_PUMP_ACTIVE = 0;
@@ -8755,11 +8839,19 @@ export async function resetPromptAutomationStateForTests(): Promise<void> {
   resetTranscriptStoreForTests();
 }
 
+function clearPendingPromptPumpRetryByKey(key: string): void {
+  const timer = PENDING_PROMPT_PUMP_RETRY_TIMERS.get(key);
+  if (!timer) return;
+  clearTimeout(timer);
+  PENDING_PROMPT_PUMP_RETRY_TIMERS.delete(key);
+}
+
 function enqueuePendingPromptPump(droneIdRaw: string, chatName: string) {
   const dn = normalizeDroneIdentity(droneIdRaw);
   const cn = String(chatName ?? '').trim() || 'default';
   if (!dn) return;
   const key = `${dn}:${cn}`;
+  clearPendingPromptPumpRetryByKey(key);
   if (PENDING_PROMPT_PUMP_TASKS.has(key)) {
     // Preserve edge-trigger requests that arrive while a pump task is active.
     // Without this, an unblock signal can be lost during the task's teardown window.
@@ -8770,6 +8862,21 @@ function enqueuePendingPromptPump(droneIdRaw: string, chatName: string) {
   PENDING_PROMPT_PUMP_QUEUED.add(key);
   PENDING_PROMPT_PUMP_QUEUE.push({ droneId: dn, chatName: cn });
   pumpPendingPromptQueue();
+}
+
+function schedulePendingPromptPumpRetry(droneIdRaw: string, chatNameRaw: string, delayMs: number = defaultPendingPromptEnqueueRetryDelayMs()) {
+  const droneId = normalizeDroneIdentity(droneIdRaw);
+  if (!droneId) return;
+  const chatName = normalizeChatName(chatNameRaw);
+  const key = `${droneId}:${chatName}`;
+  if (PENDING_PROMPT_PUMP_RETRY_TIMERS.has(key)) return;
+  const ms = Number.isFinite(delayMs) ? Math.max(1_000, Math.floor(delayMs)) : defaultPendingPromptEnqueueRetryDelayMs();
+  const timer = setTimeout(() => {
+    PENDING_PROMPT_PUMP_RETRY_TIMERS.delete(key);
+    enqueuePendingPromptPump(droneId, chatName);
+  }, ms);
+  (timer as any).unref?.();
+  PENDING_PROMPT_PUMP_RETRY_TIMERS.set(key, timer);
 }
 
 function droneChatMapKey(droneIdRaw: string, chatNameRaw: string): string {
@@ -8796,6 +8903,7 @@ function clearInMemoryChatStateForDelete(opts: { droneId: string; chatName: stri
 
   PENDING_PROMPT_PUMP_QUEUED.delete(key);
   PENDING_PROMPT_PUMP_RETRY.delete(key);
+  clearPendingPromptPumpRetryByKey(key);
   for (let i = PENDING_PROMPT_PUMP_QUEUE.length - 1; i >= 0; i -= 1) {
     const item = PENDING_PROMPT_PUMP_QUEUE[i];
     if (droneChatMapKey(String(item?.droneId ?? ''), String(item?.chatName ?? '')) !== key) continue;
@@ -8834,6 +8942,11 @@ function migrateInMemoryChatStateForRename(opts: { droneId: string; fromChatName
   }
 
   if (PENDING_PROMPT_PUMP_QUEUED.delete(fromKey)) PENDING_PROMPT_PUMP_QUEUED.add(toKey);
+  const retryTimer = PENDING_PROMPT_PUMP_RETRY_TIMERS.get(fromKey);
+  if (retryTimer) {
+    clearPendingPromptPumpRetryByKey(fromKey);
+    schedulePendingPromptPumpRetry(opts.droneId, opts.toChatName);
+  }
   for (const item of PENDING_PROMPT_PUMP_QUEUE) {
     if (droneChatMapKey(String(item?.droneId ?? ''), String(item?.chatName ?? '')) !== fromKey) continue;
     item.chatName = normalizeChatName(opts.toChatName);
@@ -9008,15 +9121,33 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
         enqueueTimeoutMs: defaultPromptEnqueueTimeoutMs(),
       });
       if (staleState === 'sending' || staleState === 'sent') {
-        pendingList[i] = {
-          ...p,
-          state: 'failed',
-          error:
-            staleState === 'sending'
-              ? 'prompt enqueue timed out (hub restart or daemon unavailable)'
-              : 'prompt status unavailable for too long (daemon unavailable or restarted)',
-          updatedAt: nowIso(),
-        };
+        const diagnostics = await collectDroneRuntimeDiagnostics({ droneId, droneEntry: d }).catch((error) => ({
+          diagnosticError: compactDiagnosticError(error),
+        }));
+        hubLog('warn', 'pending prompt daemon status unavailable after stale threshold', {
+          droneId,
+          chatName,
+          promptId: id,
+          pendingState: state,
+          staleState,
+          diagnostics,
+        });
+        if (staleState === 'sending') {
+          pendingList[i] = {
+            ...p,
+            state: 'queued',
+            error: interruptedPromptDeliveryError('daemon status unavailable while prompt was being delivered'),
+            updatedAt: nowIso(),
+          };
+          schedulePendingPromptPumpRetry(droneId, chatName);
+        } else {
+          pendingList[i] = {
+            ...p,
+            state: 'failed',
+            error: 'prompt status unavailable for too long (daemon unavailable or restarted)',
+            updatedAt: nowIso(),
+          };
+        }
         changed = true;
       }
       continue;
@@ -9590,12 +9721,35 @@ async function enqueuePrompt(opts: {
     }
     opts.mark?.('persistDelivery');
   } catch (e: any) {
-    await updatePendingPrompt({
+    const errorText = e?.message ?? String(e);
+    const diagnostics =
+      looksLikeTransientPromptEnqueueError(errorText) || looksLikeContainerPausedError(errorText)
+        ? await collectDroneRuntimeDiagnostics({ droneId, droneEntry: d }).catch((error) => ({ diagnosticError: compactDiagnosticError(error) }))
+        : null;
+    hubLog('warn', 'prompt enqueue delivery failed', {
       droneId,
       chatName,
-      id,
-      patch: { state: 'failed', error: e?.message ?? String(e) },
+      promptId: id,
+      deliveryMode: opts.deliveryMode ?? 'immediate',
+      error: errorText,
+      ...(diagnostics ? { diagnostics } : {}),
     });
+    if (looksLikeTransientPromptEnqueueError(errorText)) {
+      await updatePendingPrompt({
+        droneId,
+        chatName,
+        id,
+        patch: { state: 'queued', error: interruptedPromptDeliveryError(errorText) },
+      });
+      schedulePendingPromptPumpRetry(droneId, chatName);
+    } else {
+      await updatePendingPrompt({
+        droneId,
+        chatName,
+        id,
+        patch: { state: 'failed', error: errorText },
+      });
+    }
   }
 
   // Best-effort: if there are any deferred follow-ups, try to enqueue now.
@@ -9992,6 +10146,86 @@ async function dockerInspectOne(ref: string): Promise<any | null> {
   const stdout = await runDockerOrThrow(['inspect', name], { timeoutMs: 30_000 });
   const parsed = JSON.parse(stdout);
   return Array.isArray(parsed) ? parsed[0] ?? null : null;
+}
+
+function compactDiagnosticError(raw: unknown): string {
+  return String((raw as any)?.message ?? raw ?? 'unknown error').trim().replace(/\s+/g, ' ').slice(0, 500);
+}
+
+async function collectDroneRuntimeDiagnostics(opts: {
+  droneId: string;
+  droneEntry: any;
+  hostPort?: number | null;
+  token?: string | null;
+}): Promise<Record<string, unknown>> {
+  const droneId = normalizeDroneIdentity(opts.droneId);
+  const droneEntry = opts.droneEntry;
+  const runtime = droneRuntime(droneEntry);
+  const containerName =
+    String(droneEntry?.containerName ?? droneEntry?.name ?? (droneId ? `drone-${droneId}` : '')).trim() || null;
+  const out: Record<string, unknown> = {
+    inspectedAt: nowIso(),
+    droneId: droneId || String(opts.droneId ?? '').trim() || null,
+    runtime,
+    containerName,
+  };
+  if (runtime === 'host') {
+    const hostPort = Number(opts.hostPort ?? droneEntry?.hostPort ?? NaN);
+    out.hostPort = Number.isFinite(hostPort) && hostPort > 0 ? Math.floor(hostPort) : null;
+    out.tokenPresent = Boolean(String(opts.token ?? droneEntry?.token ?? '').trim());
+    return out;
+  }
+
+  if (!containerName) return out;
+  try {
+    const inspect = await dockerInspectOne(containerName);
+    const state = inspect?.State ?? null;
+    out.containerId = typeof inspect?.Id === 'string' ? String(inspect.Id).slice(0, 12) : null;
+    out.dockerState = typeof state?.Status === 'string' ? state.Status : null;
+    out.running = Boolean(state?.Running);
+    out.paused = Boolean(state?.Paused);
+    out.restarting = Boolean(state?.Restarting);
+    out.dead = Boolean(state?.Dead);
+    out.oomKilled = Boolean(state?.OOMKilled);
+    out.exitCode = Number.isFinite(Number(state?.ExitCode)) ? Number(state.ExitCode) : null;
+    out.pid = Number.isFinite(Number(state?.Pid)) ? Number(state.Pid) : null;
+    out.startedAt = typeof state?.StartedAt === 'string' ? state.StartedAt : null;
+    out.finishedAt = typeof state?.FinishedAt === 'string' ? state.FinishedAt : null;
+    out.restartPolicy = String(inspect?.HostConfig?.RestartPolicy?.Name ?? '').trim() || null;
+  } catch (error) {
+    out.dockerInspectError = compactDiagnosticError(error);
+  }
+
+  let hostPort =
+    typeof opts.hostPort === 'number' && Number.isFinite(opts.hostPort) && opts.hostPort > 0
+      ? Math.floor(opts.hostPort)
+      : typeof droneEntry?.hostPort === 'number' && Number.isFinite(droneEntry.hostPort) && droneEntry.hostPort > 0
+        ? Math.floor(droneEntry.hostPort)
+        : 0;
+  if (!hostPort) {
+    try {
+      const containerPort = Number(droneEntry?.containerPort ?? NaN);
+      if (Number.isFinite(containerPort) && containerPort > 0) {
+        const resolved = await resolveHostPort(containerName, Math.floor(containerPort));
+        hostPort = Number.isFinite(resolved as number) && (resolved as number) > 0 ? Math.floor(resolved as number) : 0;
+      }
+    } catch (error) {
+      out.hostPortResolutionError = compactDiagnosticError(error);
+    }
+  }
+  out.hostPort = hostPort || null;
+  const token = String(opts.token ?? droneEntry?.token ?? '').trim();
+  out.tokenPresent = Boolean(token);
+  if (hostPort && token) {
+    try {
+      await droneStatus(makeClient(hostPort, token));
+      out.daemonStatusOk = true;
+    } catch (error) {
+      out.daemonStatusOk = false;
+      out.daemonStatusError = compactDiagnosticError(error);
+    }
+  }
+  return out;
 }
 
 async function dockerImageSizeBytes(imageRef: string): Promise<number | null> {
@@ -23189,6 +23423,11 @@ export async function startDroneHubApiServer(opts: {
             droneId: resolved.id,
             droneEntry: resolved.drone,
             action,
+            source: {
+              route: '/api/drones/:id/lifecycle/:action',
+              remoteAddress: req.socket.remoteAddress ?? null,
+              userAgent: String(req.headers['user-agent'] ?? '').slice(0, 200) || null,
+            },
           });
           json(res, 200, result);
           return;
