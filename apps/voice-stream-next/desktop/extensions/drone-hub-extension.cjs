@@ -323,6 +323,107 @@ async function requireRemoteBranchAvailableForRepo(hub, repoPath, remoteBranch, 
   );
 }
 
+function repoPathLabel(repoPathRaw) {
+  const repoPath = cleanString(repoPathRaw);
+  if (!repoPath) return '';
+  const parts = repoPath.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] || repoPath;
+}
+
+function repoRefForPath(repoPathRaw) {
+  const repoPath = cleanString(repoPathRaw);
+  if (!repoPath) return '';
+  return `repo:${Buffer.from(repoPath, 'utf8').toString('base64url')}`;
+}
+
+function repoPathExists(repoPathRaw) {
+  const repoPath = cleanString(repoPathRaw);
+  if (!repoPath) return false;
+  try {
+    return fs.statSync(repoPath).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function normalizeRepoSummary(repo) {
+  const repoPath = cleanString(repo?.path || repo?.repoPath);
+  if (!repoPath) return null;
+  return {
+    repoRef: repoRefForPath(repoPath),
+    label: cleanString(repo?.label) || repoPathLabel(repoPath),
+    path: repoPath,
+    addedAt: cleanIsoTimestamp(repo?.addedAt),
+    remoteUrl: cleanString(repo?.remoteUrl) || null,
+    github: repo?.github && typeof repo.github === 'object' ? repo.github : null,
+    exists: repoPathExists(repoPath),
+  };
+}
+
+async function requestRepoSummaries(hub) {
+  const response = await requestJson(hub, '/api/repos', { method: 'GET' });
+  const repos = Array.isArray(response?.repos)
+    ? response.repos.map(normalizeRepoSummary).filter(Boolean)
+    : [];
+  repos.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }) || a.path.localeCompare(b.path));
+  return repos;
+}
+
+function repoChoiceError(label, matches) {
+  const lines = matches.map((repo) => `- ${repo.label} (${repo.path})`);
+  return `${label}\n${lines.join('\n')}`;
+}
+
+async function resolveRegisteredRepo(hub, args = {}) {
+  const repoRef = cleanString(args.repoRef);
+  const repoLabel = cleanString(args.repoLabel);
+  const repoPath = cleanString(args.repoPath);
+  if (!repoRef && !repoLabel && !repoPath) return null;
+
+  const repos = await requestRepoSummaries(hub);
+  if (repos.length === 0) {
+    throw new Error('No repos are registered in Drone Hub. Register the repo first, then use it for repo-attached drone operations.');
+  }
+
+  const resolved = [];
+  if (repoRef) {
+    const match = repos.find((repo) => repo.repoRef === repoRef);
+    if (!match) throw new Error(`Unknown repoRef: ${repoRef}. Use list_repos and pass one of its repoRef values.`);
+    resolved.push(match);
+  }
+  if (repoLabel) {
+    const lowerLabel = repoLabel.toLowerCase();
+    const matches = repos.filter((repo) => repo.label.toLowerCase() === lowerLabel);
+    if (matches.length === 0) throw new Error(`Unknown repoLabel: ${repoLabel}. Use list_repos to see registered repos.`);
+    if (matches.length > 1) {
+      throw new Error(repoChoiceError(`Repo label "${repoLabel}" is ambiguous. Use repoRef or exact repoPath for one of:`, matches));
+    }
+    resolved.push(matches[0]);
+  }
+  if (repoPath) {
+    const normalizedPath = path.resolve(repoPath);
+    const match = repos.find((repo) => path.resolve(repo.path) === normalizedPath);
+    if (!match) {
+      const sameLabel = repos.filter((repo) => repo.label.toLowerCase() === repoPathLabel(repoPath).toLowerCase());
+      const suffix = sameLabel.length > 0
+        ? `\nRegistered repos with the same label:\n${sameLabel.map((repo) => `- ${repo.label} (${repo.path})`).join('\n')}`
+        : '';
+      throw new Error(`Unregistered repoPath: ${repoPath}. Use list_repos and pass a registered repoRef, repoLabel, or exact repoPath.${suffix}`);
+    }
+    resolved.push(match);
+  }
+
+  const first = resolved[0];
+  const conflict = resolved.find((repo) => repo.path !== first.path);
+  if (conflict) {
+    throw new Error(repoChoiceError('Conflicting repo inputs resolve to different repos:', resolved));
+  }
+  if (!first.exists) {
+    throw new Error(`Registered repo path does not exist on this device: ${first.path}`);
+  }
+  return first;
+}
+
 function agentFromPreferenceKey(value) {
   return normalizeAgent(String(value || '').replace(/^builtin:/, ''));
 }
@@ -1055,6 +1156,23 @@ exports.activate = async function activate(api) {
   });
 
   registerTool(api, {
+    name: 'list_repos',
+    label: 'List repos',
+    description: 'List repos registered in Drone Hub.',
+    approval: 'never',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      required: [],
+      additionalProperties: false,
+    },
+    async execute() {
+      const repos = await requestRepoSummaries(connection());
+      return { ok: true, count: repos.length, repos };
+    },
+  });
+
+  registerTool(api, {
     name: 'list_groups',
     label: 'List drone groups',
     description: 'List Drone Hub groups and their drone counts.',
@@ -1109,20 +1227,24 @@ exports.activate = async function activate(api) {
     name: 'get_create_drone_defaults',
     label: 'Get create drone defaults',
     description:
-      'Read the Drone Hub defaults normally used when manually creating a drone, including agent, model, branch source, remote branch, and whether the host branch is pulled before create. Pass repoPath to resolve repo-specific branch defaults safely.',
+      'Read the Drone Hub defaults normally used when manually creating a drone, including agent, model, branch source, remote branch, and whether the host branch is pulled before create. Optional repoRef, repoLabel, or exact registered repoPath selects repo-specific branch defaults.',
     approval: 'never',
     inputSchema: {
       type: 'object',
       properties: {
+        repoRef: { type: 'string' },
+        repoLabel: { type: 'string' },
         repoPath: { type: 'string' },
       },
       required: [],
       additionalProperties: false,
     },
     async execute(args = {}) {
-      const repoPath = cleanString(args.repoPath);
-      const defaults = await createDronePreferences(connection(), repoPath);
-      return { ok: true, defaults, repoPath: repoPath || null };
+      const hub = connection();
+      const resolvedRepo = await resolveRegisteredRepo(hub, args);
+      const repoPath = cleanString(resolvedRepo?.path);
+      const defaults = await createDronePreferences(hub, repoPath);
+      return { ok: true, defaults, repoPath: repoPath || null, repo: resolvedRepo };
     },
   });
 
@@ -1308,6 +1430,8 @@ exports.activate = async function activate(api) {
         agent: { type: 'string', enum: ['cursor', 'codex', 'claude', 'opencode', 'pi'] },
         model: { type: 'string' },
         cwd: { type: 'string' },
+        repoRef: { type: 'string' },
+        repoLabel: { type: 'string' },
         repoPath: { type: 'string' },
         repoBranchSource: { type: 'string', enum: ['host', 'remote'] },
         remoteBranch: { type: 'string' },
@@ -1321,7 +1445,8 @@ exports.activate = async function activate(api) {
       const hub = connection();
       const group = cleanString(args.group);
       const beforeGroups = group ? await listGroupNames(hub) : [];
-      const repoPath = cleanString(args.repoPath);
+      const resolvedRepo = await resolveRegisteredRepo(hub, args);
+      const repoPath = cleanString(resolvedRepo?.path);
       const defaults = await createDronePreferences(hub, repoPath);
       const seedAgent = args.agent == null ? agentFromPreferenceKey(defaults.spawnAgentKey) : normalizeAgent(args.agent);
       const seedModel = args.model == null ? defaults.spawnModel : cleanString(args.model);
@@ -1378,6 +1503,7 @@ exports.activate = async function activate(api) {
         createdByExtension: true,
         groupOrder,
         createDefaults: defaults,
+        repo: resolvedRepo,
         branch: repoPath
           ? {
               repoBranchSource,

@@ -63,6 +63,10 @@ describe('drone hub desktop extension', () => {
 
     expect(defaultsTool).toBeTruthy();
     expect(defaultsTool.inputSchema.properties.repoPath.type).toBe('string');
+    expect(defaultsTool.inputSchema.properties.repoRef.type).toBe('string');
+    expect(defaultsTool.inputSchema.properties.repoLabel.type).toBe('string');
+    expect(createTool.inputSchema.properties.repoRef.type).toBe('string');
+    expect(createTool.inputSchema.properties.repoLabel.type).toBe('string');
     expect(createTool.inputSchema.properties.repoBranchSource.enum).toEqual(['host', 'remote']);
     expect(createTool.inputSchema.properties.remoteBranch.type).toBe('string');
     expect(createTool.inputSchema.properties.pullHostBranchBeforeCreate.type).toBe('boolean');
@@ -71,6 +75,12 @@ describe('drone hub desktop extension', () => {
   test('resolves create drone defaults for a repo without reusing global remote branch defaults', async () => {
     const api = createApi();
     globalThis.fetch = async (url) => {
+      if (String(url).endsWith('/api/repos')) {
+        return jsonResponse({
+          ok: true,
+          repos: [{ path: '/home/zael/dev/me/drone', addedAt: new Date(0).toISOString() }],
+        });
+      }
       if (String(url).endsWith('/api/settings/ui-preferences')) {
         return jsonResponse({
           ok: true,
@@ -93,6 +103,7 @@ describe('drone hub desktop extension', () => {
     });
 
     expect(result.repoPath).toBe('/home/zael/dev/me/drone');
+    expect(result.repo).toMatchObject({ label: 'drone', path: '/home/zael/dev/me/drone', exists: true });
     expect(result.defaults).toMatchObject({
       spawnAgentKey: 'builtin:codex',
       spawnModel: 'gpt-5.5',
@@ -102,11 +113,44 @@ describe('drone hub desktop extension', () => {
     });
   });
 
+  test('rejects unregistered repo paths when reading create defaults', async () => {
+    const api = createApi();
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-hub-extension-repos-'));
+    const repoRoot = path.join(parent, 'StorySpark');
+    fs.mkdirSync(repoRoot);
+    const requests = [];
+    globalThis.fetch = async (url, init = {}) => {
+      requests.push({ url: String(url), init });
+      if (String(url).endsWith('/api/repos')) {
+        return jsonResponse({ ok: true, repos: [{ path: repoRoot, addedAt: new Date(0).toISOString() }] });
+      }
+      if (String(url).endsWith('/api/settings/ui-preferences')) {
+        return jsonResponse({ ok: false, error: 'should not read defaults' }, 500);
+      }
+      return jsonResponse({ ok: false, error: 'not found' }, 404);
+    };
+
+    await extension.activate(api);
+    await expect(api.tools.get('get_create_drone_defaults').execute({
+      repoPath: path.join('/home/zael/dev/me/drone', 'StorySpark'),
+    })).rejects.toThrow('Unregistered repoPath: /home/zael/dev/me/drone/StorySpark');
+
+    expect(requests.some((request) => String(request.url).endsWith('/api/settings/ui-preferences'))).toBe(false);
+    fs.rmSync(parent, { recursive: true, force: true });
+  });
+
   test('uses repo-scoped remembered branch defaults when creating a drone', async () => {
     const api = createApi();
+    const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-hub-extension-repo-'));
     const requests = [];
     globalThis.fetch = async (url, init) => {
       requests.push({ url: String(url), init });
+      if (String(url).endsWith('/api/repos')) {
+        return jsonResponse({
+          ok: true,
+          repos: [{ path: repoPath, addedAt: new Date(0).toISOString(), remoteUrl: 'git@example.com:repo.git' }],
+        });
+      }
       if (String(url).endsWith('/api/settings/ui-preferences')) {
         return jsonResponse({
           ok: true,
@@ -118,7 +162,7 @@ describe('drone hub desktop extension', () => {
             repoCreateRemoteBranch: 'origin/global-default',
             pullHostBranchBeforeCreate: false,
             spawnContextByRepoKey: {
-              '/work/repo': {
+              [repoPath]: {
                 spawnAgentKey: 'builtin:codex',
                 spawnModel: 'gpt-5.5',
                 repoBranchSource: 'remote',
@@ -132,7 +176,7 @@ describe('drone hub desktop extension', () => {
       if (String(url).startsWith('http://hub.local/api/repos/branches')) {
         return jsonResponse({
           ok: true,
-          repoRoot: '/work/repo',
+          repoRoot: repoPath,
           hostBranch: 'main',
           remoteBranches: [{ name: 'origin/voice-default', remote: 'origin', branch: 'voice-default', headSha: null }],
         });
@@ -151,7 +195,7 @@ describe('drone hub desktop extension', () => {
     await extension.activate(api);
     const result = await api.tools.get('create_drone').execute({
       name: 'voice-default',
-      repoPath: '/work/repo',
+      repoPath,
     });
 
     const createRequest = requests.find((request) => String(request.url).endsWith('/api/drones'));
@@ -160,7 +204,7 @@ describe('drone hub desktop extension', () => {
     expect(body).toMatchObject({
       name: 'voice-default',
       runtime: 'container',
-      repoPath: '/work/repo',
+      repoPath,
       repoBranchSource: 'remote',
       remoteBranch: 'origin/voice-default',
       seedAgent: { kind: 'builtin', id: 'codex' },
@@ -172,6 +216,7 @@ describe('drone hub desktop extension', () => {
       remoteBranch: 'origin/voice-default',
       pullHostBranchBeforeCreate: null,
     });
+    fs.rmSync(repoPath, { recursive: true, force: true });
   });
 
   test('does not reuse a stale remote branch default from another repo', async () => {
@@ -179,6 +224,12 @@ describe('drone hub desktop extension', () => {
     const requests = [];
     globalThis.fetch = async (url, init) => {
       requests.push({ url: String(url), init });
+      if (String(url).endsWith('/api/repos')) {
+        return jsonResponse({
+          ok: true,
+          repos: [{ path: '/home/zael/dev/me/drone', addedAt: new Date(0).toISOString() }],
+        });
+      }
       if (String(url).endsWith('/api/settings/ui-preferences')) {
         return jsonResponse({
           ok: true,
@@ -229,16 +280,23 @@ describe('drone hub desktop extension', () => {
 
   test('requires repo-scoped remote branch defaults to exist in the selected repo', async () => {
     const api = createApi();
+    const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-hub-extension-repo-'));
     const requests = [];
     globalThis.fetch = async (url, init) => {
       requests.push({ url: String(url), init });
+      if (String(url).endsWith('/api/repos')) {
+        return jsonResponse({
+          ok: true,
+          repos: [{ path: repoPath, addedAt: new Date(0).toISOString() }],
+        });
+      }
       if (String(url).endsWith('/api/settings/ui-preferences')) {
         return jsonResponse({
           ok: true,
           updatedAt: new Date(0).toISOString(),
           uiPreferences: {
             spawnContextByRepoKey: {
-              '/work/repo': {
+              [repoPath]: {
                 repoBranchSource: 'remote',
                 repoCreateRemoteBranch: 'origin/release/dev',
               },
@@ -249,7 +307,7 @@ describe('drone hub desktop extension', () => {
       if (String(url).startsWith('http://hub.local/api/repos/branches')) {
         return jsonResponse({
           ok: true,
-          repoRoot: '/work/repo',
+          repoRoot: repoPath,
           hostBranch: 'main',
           remoteBranches: [{ name: 'origin/main', remote: 'origin', branch: 'main', headSha: null }],
         });
@@ -263,10 +321,11 @@ describe('drone hub desktop extension', () => {
     await extension.activate(api);
     await expect(api.tools.get('create_drone').execute({
       name: 'voice-default',
-      repoPath: '/work/repo',
-    })).rejects.toThrow('Saved default remote branch "origin/release/dev" is not available for repo /work/repo');
+      repoPath,
+    })).rejects.toThrow(`Saved default remote branch "origin/release/dev" is not available for repo ${repoPath}`);
 
     expect(requests.some((request) => String(request.url).endsWith('/api/drones'))).toBe(false);
+    fs.rmSync(repoPath, { recursive: true, force: true });
   });
 
   test('returns initial message run state when creating a seeded drone', async () => {
@@ -366,6 +425,126 @@ describe('drone hub desktop extension', () => {
     expect(requests).toEqual(['http://hub.local/api/drones/summary']);
     expect(result.count).toBe(1);
     expect(result.drones[0]).toMatchObject({ id: 'drone-1', name: 'Alpha', group: 'Review', status: 'ready' });
+  });
+
+  test('lists registered repos with opaque refs and labels', async () => {
+    const api = createApi();
+    const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'StorySpark-'));
+    globalThis.fetch = async (url) => {
+      if (String(url).endsWith('/api/repos')) {
+        return jsonResponse({
+          ok: true,
+          repos: [{ path: repoRoot, addedAt: new Date(0).toISOString(), remoteUrl: 'git@example.com:StorySpark.git' }],
+        });
+      }
+      return jsonResponse({ ok: false, error: 'not found' }, 404);
+    };
+
+    await extension.activate(api);
+    const result = await api.tools.get('list_repos').execute({});
+
+    expect(result.count).toBe(1);
+    expect(result.repos[0]).toMatchObject({
+      repoRef: `repo:${Buffer.from(repoRoot, 'utf8').toString('base64url')}`,
+      label: path.basename(repoRoot),
+      path: repoRoot,
+      exists: true,
+    });
+    fs.rmSync(repoRoot, { recursive: true, force: true });
+  });
+
+  test('creates a repo-attached drone from a unique repo label', async () => {
+    const api = createApi();
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-hub-extension-repos-'));
+    const repoRoot = path.join(parent, 'StorySpark');
+    fs.mkdirSync(repoRoot);
+    const requests = [];
+    globalThis.fetch = async (url, init = {}) => {
+      requests.push({ url: String(url), init });
+      if (String(url).endsWith('/api/repos')) {
+        return jsonResponse({ ok: true, repos: [{ path: repoRoot, addedAt: new Date(0).toISOString() }] });
+      }
+      if (String(url).endsWith('/api/settings/ui-preferences')) {
+        return jsonResponse({ ok: true, uiPreferences: {} });
+      }
+      if (String(url).endsWith('/api/drones')) {
+        return jsonResponse({ ok: true, id: 'drone-1', name: 'label-create', phase: 'starting' }, 202);
+      }
+      return jsonResponse({ ok: false, error: 'not found' }, 404);
+    };
+
+    await extension.activate(api);
+    const result = await api.tools.get('create_drone').execute({
+      name: 'label-create',
+      repoLabel: 'StorySpark',
+    });
+
+    const createRequest = requests.find((request) => String(request.url).endsWith('/api/drones'));
+    expect(JSON.parse(createRequest.init.body)).toMatchObject({
+      name: 'label-create',
+      repoPath: repoRoot,
+      repoBranchSource: 'host',
+    });
+    expect(result.repo).toMatchObject({ label: 'StorySpark', path: repoRoot, exists: true });
+    fs.rmSync(parent, { recursive: true, force: true });
+  });
+
+  test('rejects unregistered repo paths before creating a drone', async () => {
+    const api = createApi();
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-hub-extension-repos-'));
+    const repoRoot = path.join(parent, 'StorySpark');
+    fs.mkdirSync(repoRoot);
+    const requests = [];
+    globalThis.fetch = async (url, init = {}) => {
+      requests.push({ url: String(url), init });
+      if (String(url).endsWith('/api/repos')) {
+        return jsonResponse({ ok: true, repos: [{ path: repoRoot, addedAt: new Date(0).toISOString() }] });
+      }
+      if (String(url).endsWith('/api/drones')) {
+        return jsonResponse({ ok: false, error: 'should not create' }, 500);
+      }
+      return jsonResponse({ ok: false, error: 'not found' }, 404);
+    };
+
+    await extension.activate(api);
+    await expect(api.tools.get('create_drone').execute({
+      name: 'bad-path',
+      repoPath: path.join('/home/zael/dev/me/drone', 'StorySpark'),
+    })).rejects.toThrow('Unregistered repoPath: /home/zael/dev/me/drone/StorySpark');
+
+    expect(requests.some((request) => String(request.url).endsWith('/api/drones'))).toBe(false);
+    fs.rmSync(parent, { recursive: true, force: true });
+  });
+
+  test('rejects ambiguous repo labels before creating a drone', async () => {
+    const api = createApi();
+    const parentA = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-hub-extension-a-'));
+    const parentB = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-hub-extension-b-'));
+    const repoA = path.join(parentA, 'StorySpark');
+    const repoB = path.join(parentB, 'StorySpark');
+    fs.mkdirSync(repoA);
+    fs.mkdirSync(repoB);
+    const requests = [];
+    globalThis.fetch = async (url, init = {}) => {
+      requests.push({ url: String(url), init });
+      if (String(url).endsWith('/api/repos')) {
+        return jsonResponse({ ok: true, repos: [{ path: repoA }, { path: repoB }] });
+      }
+      if (String(url).endsWith('/api/drones')) {
+        return jsonResponse({ ok: false, error: 'should not create' }, 500);
+      }
+      return jsonResponse({ ok: false, error: 'not found' }, 404);
+    };
+
+    await extension.activate(api);
+    await expect(api.tools.get('create_drone').execute({
+      name: 'ambiguous-label',
+      repoLabel: 'StorySpark',
+    })).rejects.toThrow('Repo label "StorySpark" is ambiguous');
+
+    expect(requests.some((request) => String(request.url).endsWith('/api/drones'))).toBe(false);
+    fs.rmSync(parentA, { recursive: true, force: true });
+    fs.rmSync(parentB, { recursive: true, force: true });
   });
 
   test('renames multiple drones through resolved ids', async () => {
