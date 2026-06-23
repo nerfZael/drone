@@ -10,6 +10,7 @@ import { useDroneHubUiStore } from '../droneHub/app/use-drone-hub-ui-store';
 import type { DroneSummary, RepoRemoteBranchOption, RepoSummary } from '../droneHub/types';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../ui/menuSelect';
 import { remoteRequestJson } from './remote-api';
+import { suggestAndRenameRemoteDroneFromPrompt } from './remote-drone-auto-rename';
 
 type RemoteCreateDroneModalProps = {
   open: boolean;
@@ -253,8 +254,32 @@ export function RemoteCreateDroneModal({
       });
       const droneId = String(response.id ?? '').trim();
       if (!droneId) throw new Error('Drone was created but the response did not include an id.');
+      const shouldAutoRename = !String(name ?? '').trim() && Boolean(trimmedSeedPrompt);
       onCreated(droneId);
       onClose();
+      if (shouldAutoRename) {
+        void suggestAndRenameRemoteDroneFromPrompt({
+          droneId,
+          prompt: trimmedSeedPrompt,
+          currentName: String(response.name ?? '').trim(),
+          requestJson: remoteRequestJson,
+        })
+          .then((renameResult) => {
+            if (renameResult.ok) onCreated(droneId);
+            else {
+              console.warn('[RemoteHub] create auto-rename skipped', {
+                id: droneId,
+                error: renameResult.error,
+              });
+            }
+          })
+          .catch((renameError) => {
+            console.warn('[RemoteHub] create auto-rename skipped', {
+              id: droneId,
+              error: renameError instanceof Error ? renameError.message : String(renameError),
+            });
+          });
+      }
     } catch (err: any) {
       setError(String(err?.message ?? err ?? 'Failed to create drone.'));
     } finally {

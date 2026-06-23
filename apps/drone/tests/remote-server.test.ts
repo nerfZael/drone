@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { resetDroneRootDirCache } from '../src/host/paths';
 import { RemoteAuthStore } from '../src/hub/remote-auth';
-import { sanitizeDroneSummary, shouldServeRemoteHtmlFallback } from '../src/hub/remote-server';
+import { routeAllowed, sanitizeDroneSummary, shouldServeRemoteHtmlFallback } from '../src/hub/remote-server';
 
 describe('remote Hub server', () => {
   test('preserves repo metadata for remote sidebar grouping', () => {
@@ -47,6 +47,10 @@ describe('remote Hub server', () => {
     expect(shouldServeRemoteHtmlFallback('/assets/remote-old.js')).toBe(false);
     expect(shouldServeRemoteHtmlFallback('/assets/styles-old.css')).toBe(false);
     expect(shouldServeRemoteHtmlFallback('/icons/missing.png')).toBe(false);
+  });
+
+  test('allows remote create auto-rename name suggestions', () => {
+    expect(routeAllowed('POST', '/api/drones/name-from-message')).toBe(true);
   });
 
   test('marks consumed pairing tokens inactive', () => {
