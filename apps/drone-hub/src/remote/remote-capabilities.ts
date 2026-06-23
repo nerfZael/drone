@@ -3,5 +3,5 @@ export const REMOTE_HUB_CAPABILITIES = {
   sidebarActions: false,
   sidebarDnd: false,
   transcriptActions: false,
-  toolPanesEnabled: false,
+  toolPanesEnabled: true,
 } as const;

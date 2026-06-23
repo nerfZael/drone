@@ -388,6 +388,7 @@ export function DockableDroneWorkspace({
       if (stored) {
         api.fromJSON(stored, { reuseExistingPanels: true });
         ensureChatPanel(api);
+        if (toolPaneOpen) ensurePanel(api, activeToolTab, 'single');
       } else {
         createDefaultLayout(api, activeToolTab, toolPaneOpen);
       }

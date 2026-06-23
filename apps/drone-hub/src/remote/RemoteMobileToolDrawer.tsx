@@ -1,13 +1,9 @@
 import React from 'react';
 import { IconChevron, IconSidebarExpand } from '../droneHub/app/icons';
-import { repoUnavailableReasonForRuntime } from '../droneHub/app/app-config';
-import { isDroneStartingOrSeeding } from '../droneHub/app/helpers';
 import type { DroneSummary } from '../droneHub/types';
 import { UiMenuSelect } from '../ui/menuSelect';
-
-const LazyDroneChangesDock = React.lazy(async () => ({
-  default: (await import('../droneHub/changes/DroneChangesDock')).DroneChangesDock,
-}));
+import { RemoteRepoPanel } from './RemoteRepoPanels';
+import { REMOTE_REPO_PANEL_ENTRIES, type RemoteRepoPanelKey } from './remote-repo-panel-config';
 
 type RemoteMobileToolDrawerProps = {
   open: boolean;
@@ -35,15 +31,8 @@ function isSwipeRight(start: TouchPoint | null, end: TouchPoint): boolean {
 }
 
 function RemoteMobileToolDrawerComponent({ open, drone, onOpenChange }: RemoteMobileToolDrawerProps) {
+  const [activePanel, setActivePanel] = React.useState<RemoteRepoPanelKey>('changes');
   const drawerSwipeStartRef = React.useRef<TouchPoint | null>(null);
-  const repoPath = String(drone?.repoPath ?? '').trim();
-  const repoAttached = Boolean(drone?.repoAttached ?? Boolean(repoPath));
-  const disabled = isDroneStartingOrSeeding(drone?.hubPhase ?? null);
-  const repoUnavailableReason = drone && !repoAttached
-    ? 'Attach a repo to this drone to view changes.'
-    : drone
-      ? repoUnavailableReasonForRuntime(drone.runtime)
-      : null;
 
   const beginDrawerPointerSwipe = React.useCallback((event: React.PointerEvent) => {
     if (event.pointerType !== 'touch' && event.pointerType !== 'pen') {
@@ -98,9 +87,11 @@ function RemoteMobileToolDrawerComponent({ open, drone, onOpenChange }: RemoteMo
           <header className="flex h-[52px] shrink-0 items-center gap-2 border-b border-[var(--border)] bg-[var(--panel)] px-3">
             <div className="min-w-0 flex-1">
               <UiMenuSelect
-                value="changes"
-                onValueChange={() => {}}
-                entries={[{ value: 'changes', label: 'Changes' }]}
+                value={activePanel}
+                onValueChange={(next) => {
+                  if (next === 'changes' || next === 'prs') setActivePanel(next);
+                }}
+                entries={REMOTE_REPO_PANEL_ENTRIES}
                 variant="toolbar"
                 triggerClassName="h-8 w-full justify-between bg-[rgba(255,255,255,.03)] text-[12px] text-[var(--fg-secondary)]"
                 panelClassName="left-0 right-0"
@@ -122,26 +113,11 @@ function RemoteMobileToolDrawerComponent({ open, drone, onOpenChange }: RemoteMo
               <React.Suspense
                 fallback={
                   <div className="flex h-full items-center justify-center text-[12px] font-semibold uppercase tracking-wide text-[var(--muted)]">
-                    Loading changes...
+                    Loading {activePanel === 'prs' ? 'PRs' : 'changes'}...
                   </div>
                 }
               >
-                <LazyDroneChangesDock
-                  key={`${drone.id}-remote-mobile-changes`}
-                  droneId={drone.id}
-                  repoAttached={repoAttached}
-                  repoPath={repoPath}
-                  repoUnavailableReason={repoUnavailableReason}
-                  fixedContextMode="branch"
-                  initialViewMode="stacked"
-                  initialDiffViewType="unified"
-                  persistViewPreferences={false}
-                  disabled={disabled}
-                  hubPhase={drone.hubPhase}
-                  hubMessage={drone.hubMessage}
-                  onRevealFileInFiles={() => {}}
-                  onOpenFileInEditor={() => {}}
-                />
+                <RemoteRepoPanel drone={drone} panel={activePanel} compactChanges />
               </React.Suspense>
             ) : null}
           </div>
