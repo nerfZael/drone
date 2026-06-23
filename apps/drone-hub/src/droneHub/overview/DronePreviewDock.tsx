@@ -1,6 +1,19 @@
 import React from 'react';
 import type { DronePortMapping, PortReachabilityByHostPort } from '../types';
 import { displayUrlForPreviewInput, normalizePreviewUrl } from './helpers';
+import {
+  isPreviewFocusUserRequested,
+  NO_PREVIEW_POINTER_TIME,
+  previewIframeSandboxForUrl,
+} from './preview-iframe-containment';
+
+function canRestoreFocus(element: HTMLElement | null): element is HTMLElement {
+  if (!element) return false;
+  if (!document.contains(element)) return false;
+  if (element.getClientRects().length === 0) return false;
+  if ('disabled' in element && Boolean(element.disabled)) return false;
+  return true;
+}
 
 export function DronePreviewDock({
   selectedPort,
@@ -38,11 +51,18 @@ export function DronePreviewDock({
   const [iframeRefreshNonce, setIframeRefreshNonce] = React.useState(0);
   const [urlInput, setUrlInput] = React.useState(displayedSelectedUrl);
   const [urlError, setUrlError] = React.useState<string | null>(null);
+  const iframeRef = React.useRef<HTMLIFrameElement | null>(null);
+  const lastFocusedElementRef = React.useRef<HTMLElement | null>(null);
+  const lastPreviewPointerAtRef = React.useRef(NO_PREVIEW_POINTER_TIME);
   const usingCustomUrl = Boolean(previewUrlOverride);
   const shouldShowOfflineState = Boolean(!usingCustomUrl && selectedPort && selectedReachability === 'down');
   const showStartupPlaceholder = Boolean(startup?.waiting) && !usingCustomUrl && !selectedUrl;
   const startupLabel = startup?.hubPhase === 'seeding' ? 'Seeding' : 'Starting';
   const startupDetail = String(startup?.hubMessage ?? '').trim();
+  const previewIframeSandbox = React.useMemo(
+    () => previewIframeSandboxForUrl(selectedUrl, typeof window === 'undefined' ? null : window.location.origin),
+    [selectedUrl],
+  );
 
   React.useEffect(() => {
     setIframeLoadFailed(false);
@@ -73,6 +93,36 @@ export function DronePreviewDock({
     setIframeLoadFailed(false);
     setIframeRefreshNonce((n) => n + 1);
   }, [selectedUrl]);
+
+  React.useEffect(() => {
+    const onFocusIn = (event: FocusEvent) => {
+      const target = event.target;
+      const iframe = iframeRef.current;
+      if (!(target instanceof HTMLElement) || !iframe) return;
+
+      if (target !== iframe) {
+        lastFocusedElementRef.current = target;
+        return;
+      }
+
+      const focusWasUserRequested = isPreviewFocusUserRequested(performance.now(), lastPreviewPointerAtRef.current);
+      if (focusWasUserRequested) return;
+
+      window.requestAnimationFrame(() => {
+        const previous = lastFocusedElementRef.current;
+        if (canRestoreFocus(previous)) {
+          previous.focus({ preventScroll: true });
+        } else {
+          iframe.blur();
+        }
+      });
+    };
+
+    document.addEventListener('focusin', onFocusIn, true);
+    return () => {
+      document.removeEventListener('focusin', onFocusIn, true);
+    };
+  }, []);
 
   return (
     <div className="w-full h-full min-h-0 bg-[var(--panel-alt)] overflow-hidden flex flex-col relative">
@@ -235,12 +285,19 @@ export function DronePreviewDock({
             This service does not allow iframe embedding.
           </div>
         ) : (
-          <div className="flex-1 min-h-0 w-full border-y border-[var(--border-subtle)] bg-white overflow-hidden">
+          <div
+            className="flex-1 min-h-0 w-full border-y border-[var(--border-subtle)] bg-white overflow-hidden"
+            onPointerDownCapture={() => {
+              lastPreviewPointerAtRef.current = performance.now();
+            }}
+          >
             <iframe
+              ref={iframeRef}
               key={`${selectedUrl}::${iframeRefreshNonce}`}
               title={selectedPort ? `Browser container:${selectedPort.containerPort}` : `Browser ${selectedUrl}`}
               src={selectedUrl}
               loading="lazy"
+              sandbox={previewIframeSandbox}
               className="w-full h-full"
               onError={() => setIframeLoadFailed(true)}
             />
