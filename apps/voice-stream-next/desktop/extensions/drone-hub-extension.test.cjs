@@ -62,12 +62,47 @@ describe('drone hub desktop extension', () => {
     const createTool = api.tools.get('create_drone');
 
     expect(defaultsTool).toBeTruthy();
+    expect(defaultsTool.inputSchema.properties.repoPath.type).toBe('string');
     expect(createTool.inputSchema.properties.repoBranchSource.enum).toEqual(['host', 'remote']);
     expect(createTool.inputSchema.properties.remoteBranch.type).toBe('string');
     expect(createTool.inputSchema.properties.pullHostBranchBeforeCreate.type).toBe('boolean');
   });
 
-  test('uses remembered branch defaults when creating a drone', async () => {
+  test('resolves create drone defaults for a repo without reusing global remote branch defaults', async () => {
+    const api = createApi();
+    globalThis.fetch = async (url) => {
+      if (String(url).endsWith('/api/settings/ui-preferences')) {
+        return jsonResponse({
+          ok: true,
+          updatedAt: new Date(0).toISOString(),
+          uiPreferences: {
+            spawnAgentKey: 'builtin:codex',
+            spawnModel: 'gpt-5.5',
+            repoBranchSource: 'remote',
+            repoCreateRemoteBranch: 'origin/release/dev',
+            pullHostBranchBeforeCreate: false,
+          },
+        });
+      }
+      return jsonResponse({ ok: false, error: 'not found' }, 404);
+    };
+
+    await extension.activate(api);
+    const result = await api.tools.get('get_create_drone_defaults').execute({
+      repoPath: '/home/zael/dev/me/drone',
+    });
+
+    expect(result.repoPath).toBe('/home/zael/dev/me/drone');
+    expect(result.defaults).toMatchObject({
+      spawnAgentKey: 'builtin:codex',
+      spawnModel: 'gpt-5.5',
+      repoBranchSource: 'host',
+      repoCreateRemoteBranch: '',
+      pullHostBranchBeforeCreate: false,
+    });
+  });
+
+  test('uses repo-scoped remembered branch defaults when creating a drone', async () => {
     const api = createApi();
     const requests = [];
     globalThis.fetch = async (url, init) => {
@@ -80,9 +115,26 @@ describe('drone hub desktop extension', () => {
             spawnAgentKey: 'builtin:codex',
             spawnModel: 'gpt-5.5',
             repoBranchSource: 'remote',
-            repoCreateRemoteBranch: 'origin/voice-default',
+            repoCreateRemoteBranch: 'origin/global-default',
             pullHostBranchBeforeCreate: false,
+            spawnContextByRepoKey: {
+              '/work/repo': {
+                spawnAgentKey: 'builtin:codex',
+                spawnModel: 'gpt-5.5',
+                repoBranchSource: 'remote',
+                repoCreateRemoteBranch: 'origin/voice-default',
+                pullHostBranchBeforeCreate: false,
+              },
+            },
           },
+        });
+      }
+      if (String(url).startsWith('http://hub.local/api/repos/branches')) {
+        return jsonResponse({
+          ok: true,
+          repoRoot: '/work/repo',
+          hostBranch: 'main',
+          remoteBranches: [{ name: 'origin/voice-default', remote: 'origin', branch: 'voice-default', headSha: null }],
         });
       }
       if (String(url).endsWith('/api/drones')) {
@@ -120,6 +172,101 @@ describe('drone hub desktop extension', () => {
       remoteBranch: 'origin/voice-default',
       pullHostBranchBeforeCreate: null,
     });
+  });
+
+  test('does not reuse a stale remote branch default from another repo', async () => {
+    const api = createApi();
+    const requests = [];
+    globalThis.fetch = async (url, init) => {
+      requests.push({ url: String(url), init });
+      if (String(url).endsWith('/api/settings/ui-preferences')) {
+        return jsonResponse({
+          ok: true,
+          updatedAt: new Date(0).toISOString(),
+          uiPreferences: {
+            spawnAgentKey: 'builtin:codex',
+            spawnModel: 'gpt-5.5',
+            repoBranchSource: 'remote',
+            repoCreateRemoteBranch: 'origin/release/dev',
+            pullHostBranchBeforeCreate: false,
+          },
+        });
+      }
+      if (String(url).endsWith('/api/drones')) {
+        return jsonResponse({
+          ok: true,
+          id: 'drone-1',
+          name: 'drone-repo',
+          phase: 'starting',
+        }, 202);
+      }
+      return jsonResponse({ ok: false, error: 'not found' }, 404);
+    };
+
+    await extension.activate(api);
+    const result = await api.tools.get('create_drone').execute({
+      name: 'drone-repo',
+      repoPath: '/home/zael/dev/me/drone',
+    });
+
+    const createRequest = requests.find((request) => String(request.url).endsWith('/api/drones'));
+    expect(createRequest).toBeTruthy();
+    const body = JSON.parse(createRequest.init.body);
+    expect(body).toMatchObject({
+      name: 'drone-repo',
+      runtime: 'container',
+      repoPath: '/home/zael/dev/me/drone',
+      repoBranchSource: 'host',
+      pullHostBranchBeforeCreate: false,
+    });
+    expect(body.remoteBranch).toBeUndefined();
+    expect(result.branch).toEqual({
+      repoBranchSource: 'host',
+      remoteBranch: null,
+      pullHostBranchBeforeCreate: false,
+    });
+  });
+
+  test('requires repo-scoped remote branch defaults to exist in the selected repo', async () => {
+    const api = createApi();
+    const requests = [];
+    globalThis.fetch = async (url, init) => {
+      requests.push({ url: String(url), init });
+      if (String(url).endsWith('/api/settings/ui-preferences')) {
+        return jsonResponse({
+          ok: true,
+          updatedAt: new Date(0).toISOString(),
+          uiPreferences: {
+            spawnContextByRepoKey: {
+              '/work/repo': {
+                repoBranchSource: 'remote',
+                repoCreateRemoteBranch: 'origin/release/dev',
+              },
+            },
+          },
+        });
+      }
+      if (String(url).startsWith('http://hub.local/api/repos/branches')) {
+        return jsonResponse({
+          ok: true,
+          repoRoot: '/work/repo',
+          hostBranch: 'main',
+          remoteBranches: [{ name: 'origin/main', remote: 'origin', branch: 'main', headSha: null }],
+        });
+      }
+      if (String(url).endsWith('/api/drones')) {
+        return jsonResponse({ ok: false, error: 'should not create' }, 500);
+      }
+      return jsonResponse({ ok: false, error: 'not found' }, 404);
+    };
+
+    await extension.activate(api);
+    await expect(api.tools.get('create_drone').execute({
+      name: 'voice-default',
+      repoPath: '/work/repo',
+    })).rejects.toThrow('Saved default remote branch "origin/release/dev" is not available for repo /work/repo');
+
+    expect(requests.some((request) => String(request.url).endsWith('/api/drones'))).toBe(false);
   });
 
   test('returns initial message run state when creating a seeded drone', async () => {
