@@ -15,6 +15,7 @@ export type QuickOpenItem = QuickOpenFile & {
 };
 
 const MAX_RECENT_FILES = 24;
+export const QUICK_OPEN_SEARCH_MIN_QUERY_LENGTH = 2;
 
 export function quickOpenNameForPath(pathRaw: string): string {
   const path = String(pathRaw ?? '').trim().replace(/\\/g, '/');
@@ -22,7 +23,7 @@ export function quickOpenNameForPath(pathRaw: string): string {
 }
 
 function normalizeFilePath(raw: string): string {
-  return String(raw ?? '').trim().replace(/\\/g, '/').replace(/\/+/g, '/');
+  return String(raw ?? '').trim().replace(/\\/g, '/').replace(/\/+/g, '/').replace(/\/+$/g, '');
 }
 
 function normalizeQuery(raw: string): string {
@@ -102,4 +103,52 @@ export function quickOpenSelectionToOpenTarget(item: QuickOpenItem): { path: str
     path,
     name: String(item.name ?? '').trim() || quickOpenNameForPath(path),
   };
+}
+
+function pathInsideOrEqual(parentRaw: string | null | undefined, childRaw: string | null | undefined): boolean {
+  const parent = normalizeFilePath(String(parentRaw ?? ''));
+  const child = normalizeFilePath(String(childRaw ?? ''));
+  if (!parent || !child) return false;
+  return parent === child || child.startsWith(`${parent}/`);
+}
+
+function remapPath(sourceRaw: string, targetRaw: string, pathRaw: string): string | null {
+  const source = normalizeFilePath(sourceRaw);
+  const target = normalizeFilePath(targetRaw);
+  const current = normalizeFilePath(pathRaw);
+  if (!source || !target || !current || !pathInsideOrEqual(source, current)) return null;
+  if (current === source) return target;
+  const suffix = current.slice(source.length).replace(/^\/+/, '');
+  return suffix ? `${target}/${suffix}` : target;
+}
+
+export function remapRecentQuickOpenFilesForPathChange(
+  recentFiles: QuickOpenRecentFile[],
+  sourcePath: string,
+  targetPath: string,
+): QuickOpenRecentFile[] {
+  const next: QuickOpenRecentFile[] = [];
+  const seen = new Set<string>();
+  for (const file of recentFiles) {
+    const mappedPath = remapPath(sourcePath, targetPath, file.path);
+    const path = mappedPath ?? normalizeFilePath(file.path);
+    if (!path || seen.has(path)) continue;
+    seen.add(path);
+    next.push({
+      ...file,
+      path,
+      name: mappedPath ? quickOpenNameForPath(path) : file.name,
+      relativePath: mappedPath ? null : file.relativePath,
+    });
+  }
+  return next;
+}
+
+export function removeRecentQuickOpenFilesForPaths(
+  recentFiles: QuickOpenRecentFile[],
+  paths: string[],
+): QuickOpenRecentFile[] {
+  const normalizedPaths = paths.map((path) => normalizeFilePath(path)).filter(Boolean);
+  if (normalizedPaths.length === 0) return recentFiles;
+  return recentFiles.filter((file) => !normalizedPaths.some((path) => pathInsideOrEqual(path, file.path)));
 }
