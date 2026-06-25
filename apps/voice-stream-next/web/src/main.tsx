@@ -1323,6 +1323,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const [voiceRecordingsTotal, setVoiceRecordingsTotal] = React.useState(0);
   const [voiceRecordingsLoading, setVoiceRecordingsLoading] = React.useState(false);
   const [voiceRecordingsError, setVoiceRecordingsError] = React.useState<string | null>(null);
+  const [voiceRecordingTranscribingIds, setVoiceRecordingTranscribingIds] = React.useState<Record<string, boolean>>({});
   const voiceRecordingsQueryRef = React.useRef<{ mode: VoiceRecordingsMode; offset: number }>({ mode: 'computer', offset: 0 });
   const [androidSetupInfo, setAndroidSetupInfo] = React.useState<AndroidSetupInfo | null>(null);
   const [androidSetupQr, setAndroidSetupQr] = React.useState('');
@@ -1685,6 +1686,32 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
       setVoiceRecordingsLoading(false);
     }
   }, [client]);
+
+  const retranscribeVoiceRecording = React.useCallback(async (recording: VoiceRecordingRecord) => {
+    if (recording.transcriptText?.trim()) return;
+    setVoiceRecordingsError(null);
+    setVoiceRecordingTranscribingIds((current) => ({ ...current, [recording.id]: true }));
+    try {
+      const data = await client.request<{
+        ok: true;
+        text: string;
+        recording: VoiceRecordingRecord;
+      }>(`/api/voice/recordings/${encodeURIComponent(recording.id)}/transcribe`, {
+        method: 'POST',
+        body: '{}',
+      });
+      setVoiceRecordings((current) => current.map((item) => (item.id === data.recording.id ? data.recording : item)));
+      setNotice(data.text.trim() ? 'Recording retranscribed.' : 'Recording retranscribed with no speech detected.');
+    } catch (err: any) {
+      setVoiceRecordingsError(err?.message ?? String(err));
+    } finally {
+      setVoiceRecordingTranscribingIds((current) => {
+        const next = { ...current };
+        delete next[recording.id];
+        return next;
+      });
+    }
+  }, [client, setNotice]);
 
   React.useEffect(() => {
     voiceRecordingsQueryRef.current = { mode: voiceRecordingsMode, offset: voiceRecordingsOffset };
@@ -5297,7 +5324,10 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                     </div>
                   </div>
                   <div className="grid gap-2">
-                    {voiceRecordings.map((recording) => (
+                    {voiceRecordings.map((recording) => {
+                      const retranscribing = Boolean(voiceRecordingTranscribingIds[recording.id]);
+                      const canRetranscribe = !recording.transcriptText?.trim() && recording.sessionEndedAt != null;
+                      return (
                       <article key={recording.id} className={cn(assistantRowClass, 'grid gap-2 p-2.5')}>
                         <div className="grid gap-1">
                           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
@@ -5328,12 +5358,23 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                               Download transcript
                             </a>
                           ) : null}
+                          {canRetranscribe ? (
+                            <button
+                              type="button"
+                              className={assistantActionButtonClass}
+                              disabled={retranscribing}
+                              onClick={() => void retranscribeVoiceRecording(recording)}
+                            >
+                              {retranscribing ? 'Transcribing...' : 'Retranscribe'}
+                            </button>
+                          ) : null}
                         </div>
                         <div className="max-h-[120px] overflow-y-auto rounded border border-[var(--border-subtle)] bg-black/[.10] p-2 text-xs leading-relaxed text-[var(--fg-secondary)]">
-                          {recording.transcriptText ? recording.transcriptText : <span className="text-[var(--muted)]">{recording.sessionEndedAt == null ? 'Waiting for live transcript.' : 'No paired transcript.'}</span>}
+                          {recording.transcriptText ? recording.transcriptText : <span className="text-[var(--muted)]">{retranscribing ? 'Transcribing recording.' : recording.sessionEndedAt == null ? 'Waiting for live transcript.' : 'No paired transcript.'}</span>}
                         </div>
                       </article>
-                    ))}
+                      );
+                    })}
                     {voiceRecordings.length === 0 ? (
                       <div className={assistantEmptyClass}>
                         {voiceRecordingsLoading ? 'Loading recordings.' : `No ${voiceRecordingsModeLabel.toLowerCase()} recordings yet.`}

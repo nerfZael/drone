@@ -879,6 +879,14 @@ function saveVoiceRecording(opts: {
   return { recording, pruned };
 }
 
+function readVoiceRecordingPcm(recording: VoiceRecordingRecord): { pcm: Uint8Array; sampleRate: number; channels: number } {
+  if (!existsSync(recording.filePath)) {
+    throw Object.assign(new Error('recording audio file not found'), { statusCode: 404 });
+  }
+  const wav = new Uint8Array(readFileSync(recording.filePath));
+  return wavPcm16Data(wav);
+}
+
 function saveVoiceRecordingWav(opts: {
   db: VoiceStreamNextDb;
   userId: string;
@@ -1205,6 +1213,96 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
   const addTranscript = (userId: string, voiceSessionId: string, text: string) => {
     db.addTranscript(userId, voiceSessionId, text);
     emitAppEvent(userId, 'transcript_created', { voiceSessionId });
+  };
+
+  const persistVoiceStreamRecording = (opts: {
+    userId: string;
+    sessionId: string;
+    deviceId: string;
+    assistantThreadId: string;
+    source: string;
+    streamMode: string;
+    recordingMode: 'assistant' | 'clipboard';
+    pcm: Uint8Array;
+    stage: string;
+  }): { recording: VoiceRecordingRecord; pruned: VoiceRecordingRecord[] } | null => {
+    if (opts.pcm.byteLength === 0) {
+      addLog(opts.userId, {
+        deviceId: opts.deviceId,
+        source: opts.source,
+        level: 'warn',
+        message: 'Voice recording save skipped: empty audio',
+        detailsJson: JSON.stringify({ mode: opts.streamMode, stage: opts.stage, voiceSessionId: opts.sessionId }),
+      });
+      return null;
+    }
+    addLog(opts.userId, {
+      deviceId: opts.deviceId,
+      source: opts.source,
+      level: 'info',
+      message: 'Voice recording save started',
+      detailsJson: JSON.stringify({
+        mode: opts.streamMode,
+        recordingMode: opts.recordingMode,
+        stage: opts.stage,
+        voiceSessionId: opts.sessionId,
+        bytes: opts.pcm.byteLength,
+        durationMs: pcmDurationMs(opts.pcm.byteLength),
+      }),
+    });
+    try {
+      const saved = saveVoiceRecording({
+        db,
+        userId: opts.userId,
+        sessionId: opts.sessionId,
+        deviceId: opts.deviceId,
+        assistantThreadId: opts.assistantThreadId,
+        mode: opts.recordingMode,
+        pcm: opts.pcm,
+      });
+      if (saved) {
+        addLog(opts.userId, {
+          deviceId: opts.deviceId,
+          source: opts.source,
+          level: 'info',
+          message: 'Voice recording saved',
+          detailsJson: JSON.stringify({
+            mode: opts.streamMode,
+            recordingMode: opts.recordingMode,
+            stage: opts.stage,
+            recordingId: saved.recording.id,
+            voiceSessionId: opts.sessionId,
+            sizeBytes: saved.recording.sizeBytes,
+            durationMs: saved.recording.durationMs,
+            prunedCount: saved.pruned.length,
+          }),
+        });
+        emitAppEvent(opts.userId, 'voice_recording_changed', {
+          recordingId: saved.recording.id,
+          voiceSessionId: opts.sessionId,
+          deviceId: opts.deviceId,
+          mode: opts.recordingMode,
+          prunedCount: saved.pruned.length,
+        });
+      }
+      return saved;
+    } catch (error: any) {
+      addLog(opts.userId, {
+        deviceId: opts.deviceId,
+        source: opts.source,
+        level: 'error',
+        message: 'Voice recording save failed',
+        detailsJson: JSON.stringify({
+          error: error?.message ?? String(error),
+          mode: opts.streamMode,
+          recordingMode: opts.recordingMode,
+          stage: opts.stage,
+          voiceSessionId: opts.sessionId,
+          bytes: opts.pcm.byteLength,
+        }),
+      });
+      return null;
+    }
   };
 
   const setLiveTranscript = (state: LiveRecordingSession, final: boolean) => {
@@ -2692,6 +2790,133 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         reply.header('content-disposition', `attachment; filename="${fileName}"`);
       }
       return `${transcriptText}\n`;
+    }),
+  );
+
+  app.post('/api/voice/recordings/:recordingId/transcribe', async (req, reply) =>
+    withUser(req, reply, db, clerkEnabled, async (ctx) => {
+      const recordingId = cleanText((req.params as any).recordingId);
+      const recording = db.voiceRecording(ctx.user.id, recordingId);
+      if (!recording) {
+        reply.code(404).send({ ok: false, error: 'recording not found' });
+        return;
+      }
+      if (recording.transcriptText?.trim()) {
+        reply.code(409).send({ ok: false, error: 'recording already has a transcript' });
+        return;
+      }
+      if (recording.sessionEndedAt == null) {
+        reply.code(409).send({ ok: false, error: 'recording is still live' });
+        return;
+      }
+
+      addLog(ctx.user.id, {
+        deviceId: recording.deviceId,
+        source: 'web',
+        level: 'info',
+        message: 'Voice recording retranscription started',
+        detailsJson: JSON.stringify({
+          recordingId: recording.id,
+          voiceSessionId: recording.voiceSessionId,
+          mode: recording.mode,
+          sizeBytes: recording.sizeBytes,
+          durationMs: recording.durationMs,
+        }),
+      });
+
+      const startedAt = Date.now();
+      let pcm: Uint8Array;
+      try {
+        pcm = readVoiceRecordingPcm(recording).pcm;
+      } catch (error: any) {
+        addLog(ctx.user.id, {
+          deviceId: recording.deviceId,
+          source: 'web',
+          level: 'error',
+          message: 'Voice recording retranscription failed before STT',
+          detailsJson: JSON.stringify({
+            recordingId: recording.id,
+            voiceSessionId: recording.voiceSessionId,
+            mode: recording.mode,
+            error: error?.message ?? String(error),
+          }),
+        });
+        throw error;
+      }
+
+      try {
+        const groqCredential = resolveGroqCredential(db, ctx.user.id);
+        if (groqCredential?.source === 'platform_groq_key' && pcm.byteLength >= 1600) {
+          db.requirePositiveCreditBalance(ctx.user.id, 'Groq recording retranscription');
+        }
+        const transcription = await transcribePcm16(pcm, {
+          apiKey: groqCredential?.apiKey,
+          credentialSource: groqCredential?.source,
+        });
+        const text = transcription.text.trim();
+        if (text) {
+          db.setTranscript(ctx.user.id, recording.voiceSessionId, text, true);
+          emitAppEvent(ctx.user.id, 'transcript_created', {
+            voiceSessionId: recording.voiceSessionId,
+            recordingId: recording.id,
+            retranscribed: true,
+          });
+        }
+        recordGroqTranscriptionUsage(ctx.user.id, transcription, {
+          deviceId: recording.deviceId,
+          voiceSessionId: recording.voiceSessionId,
+          assistantThreadId: recording.assistantThreadId,
+          source: 'voice_recording_retranscribe',
+        });
+        const updatedRecording = db.voiceRecording(ctx.user.id, recording.id) ?? recording;
+        emitAppEvent(ctx.user.id, 'voice_recording_changed', {
+          recordingId: recording.id,
+          voiceSessionId: recording.voiceSessionId,
+          deviceId: recording.deviceId,
+          mode: recording.mode,
+          retranscribed: true,
+        });
+        addLog(ctx.user.id, {
+          deviceId: recording.deviceId,
+          source: 'web',
+          level: 'info',
+          message: 'Voice recording retranscription completed',
+          detailsJson: JSON.stringify({
+            recordingId: recording.id,
+            voiceSessionId: recording.voiceSessionId,
+            mode: recording.mode,
+            provider: transcription.provider,
+            model: transcription.model,
+            audioDurationMs: transcription.audioDurationMs,
+            transcriptChars: text.length,
+            elapsedMs: Date.now() - startedAt,
+          }),
+        });
+        return {
+          ok: true,
+          text,
+          provider: transcription.provider,
+          credentialSource: transcription.credentialSource,
+          model: transcription.model,
+          audioDurationMs: transcription.audioDurationMs,
+          recording: updatedRecording,
+        };
+      } catch (error: any) {
+        addLog(ctx.user.id, {
+          deviceId: recording.deviceId,
+          source: 'web',
+          level: 'error',
+          message: 'Voice recording retranscription failed',
+          detailsJson: JSON.stringify({
+            recordingId: recording.id,
+            voiceSessionId: recording.voiceSessionId,
+            mode: recording.mode,
+            error: error?.message ?? String(error),
+            elapsedMs: Date.now() - startedAt,
+          }),
+        });
+        throw error;
+      }
     }),
   );
 
@@ -4470,6 +4695,22 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         db.createVoiceSession(device.userId, device.id, streamMode, { assistantProfileId });
       const recordingMode = voiceRecordingMode(streamMode);
       const recordingPcm = recordingMode ? concatChunks(chunks, storedBytes) : new Uint8Array(0);
+      let savedRecording: { recording: VoiceRecordingRecord; pruned: VoiceRecordingRecord[] } | null = null;
+      let recordingSaveSkippedEmpty = false;
+      if (recordingMode && !discardRecording) {
+        recordingSaveSkippedEmpty = recordingPcm.byteLength === 0;
+        savedRecording = persistVoiceStreamRecording({
+          userId: device.userId,
+          sessionId: session.id,
+          deviceId: device.id,
+          assistantThreadId: session.assistantThreadId,
+          source: device.deviceType,
+          streamMode,
+          recordingMode,
+          pcm: recordingPcm,
+          stage: 'before_final_transcription',
+        });
+      }
       let transcript = '';
       let assistantText = '';
       let runtime = 'fallback';
@@ -4481,15 +4722,65 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         } else if (streamMode === 'smart') {
           transcript = smartTranscriptSegments.join(' ').trim();
         } else {
-          if (groqSpeechCredential?.source === 'platform_groq_key' && recordingPcm.byteLength >= 1600) {
-            db.requirePositiveCreditBalance(device.userId, 'Groq speech transcription');
-          }
-          const transcription = await transcribePcm16(recordingPcm, {
-            apiKey: groqSpeechCredential?.apiKey,
-            credentialSource: groqSpeechCredential?.source,
+          addLog(device.userId, {
+            deviceId: device.id,
+            source: device.deviceType,
+            level: 'info',
+            message: 'Voice final transcription request started',
+            detailsJson: JSON.stringify({
+              mode: streamMode,
+              voiceSessionId: session.id,
+              recordingId: savedRecording?.recording.id ?? null,
+              bytes: recordingPcm.byteLength,
+              audioMs: pcmDurationMs(recordingPcm.byteLength),
+            }),
           });
+          const finalTranscriptionStartedAt = Date.now();
+          let transcription: RuntimeResult;
+          try {
+            if (groqSpeechCredential?.source === 'platform_groq_key' && recordingPcm.byteLength >= 1600) {
+              db.requirePositiveCreditBalance(device.userId, 'Groq speech transcription');
+            }
+            transcription = await transcribePcm16(recordingPcm, {
+              apiKey: groqSpeechCredential?.apiKey,
+              credentialSource: groqSpeechCredential?.source,
+            });
+          } catch (error: any) {
+            addLog(device.userId, {
+              deviceId: device.id,
+              source: device.deviceType,
+              level: 'error',
+              message: 'Voice final transcription request failed',
+              detailsJson: JSON.stringify({
+                mode: streamMode,
+                voiceSessionId: session.id,
+                recordingId: savedRecording?.recording.id ?? null,
+                error: error?.message ?? String(error),
+                elapsedMs: Date.now() - finalTranscriptionStartedAt,
+                bytes: recordingPcm.byteLength,
+                audioMs: pcmDurationMs(recordingPcm.byteLength),
+              }),
+            });
+            throw error;
+          }
           transcript = transcription.text;
           runtime = transcription.provider;
+          addLog(device.userId, {
+            deviceId: device.id,
+            source: device.deviceType,
+            level: 'info',
+            message: 'Voice final transcription request completed',
+            detailsJson: JSON.stringify({
+              mode: streamMode,
+              voiceSessionId: session.id,
+              recordingId: savedRecording?.recording.id ?? null,
+              provider: transcription.provider,
+              model: transcription.model,
+              audioDurationMs: transcription.audioDurationMs,
+              transcriptChars: transcript.length,
+              elapsedMs: Date.now() - finalTranscriptionStartedAt,
+            }),
+          });
           recordGroqTranscriptionUsage(device.userId, transcription, {
             deviceId: device.id,
             voiceSessionId: session.id,
@@ -4499,6 +4790,15 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         }
         if (transcript) {
           addTranscript(device.userId, session.id, transcript);
+          if (savedRecording) {
+            emitAppEvent(device.userId, 'voice_recording_changed', {
+              recordingId: savedRecording.recording.id,
+              voiceSessionId: session.id,
+              deviceId: device.id,
+              mode: recordingMode ?? streamMode,
+              transcriptCreated: true,
+            });
+          }
           const approvalCode = approvalCodeFromText(transcript);
           if (approvalCode) {
             addApprovalCode(device.userId, { voiceSessionId: session.id, code: approvalCode, source: device.deviceType });
@@ -4596,37 +4896,29 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           socket.send(JSON.stringify({ type: 'assistant_error', error: error?.message ?? String(error) }));
         }
       } finally {
-        if (recordingMode && !discardRecording) {
-          try {
-            const saved = saveVoiceRecording({
-              db,
-              userId: device.userId,
-              sessionId: session.id,
-              deviceId: device.id,
-              assistantThreadId: session.assistantThreadId,
-              mode: recordingMode,
-              pcm: recordingPcm,
-            });
-            if (saved) {
-              emitAppEvent(device.userId, 'voice_recording_changed', {
-                recordingId: saved.recording.id,
-                voiceSessionId: session.id,
-                deviceId: device.id,
-                mode: recordingMode,
-                prunedCount: saved.pruned.length,
-              });
-            }
-          } catch (error: any) {
-            addLog(device.userId, {
-              deviceId: device.id,
-              source: device.deviceType,
-              level: 'error',
-              message: 'Voice recording save failed',
-              detailsJson: JSON.stringify({ error: error?.message ?? String(error), mode: streamMode }),
-            });
-          }
+        if (recordingMode && !discardRecording && !savedRecording && !recordingSaveSkippedEmpty) {
+          savedRecording = persistVoiceStreamRecording({
+            userId: device.userId,
+            sessionId: session.id,
+            deviceId: device.id,
+            assistantThreadId: session.assistantThreadId,
+            source: device.deviceType,
+            streamMode,
+            recordingMode,
+            pcm: recordingPcm,
+            stage: 'finalization_fallback',
+          });
         }
         db.endVoiceSession(device.userId, session.id);
+        if (savedRecording) {
+          emitAppEvent(device.userId, 'voice_recording_changed', {
+            recordingId: savedRecording.recording.id,
+            voiceSessionId: session.id,
+            deviceId: device.id,
+            mode: recordingMode ?? streamMode,
+            sessionEnded: true,
+          });
+        }
       }
       db.upsertClientStatus(device.userId, device.id, {
         mode: terminalFinalize?.type === 'sleep' ? 'sleeping' : 'awake',

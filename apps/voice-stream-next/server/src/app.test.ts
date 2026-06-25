@@ -4,11 +4,13 @@ import path from 'node:path';
 
 import { binaryChunk, binarySize, buildApp } from './app.js';
 import type { VoiceRecordingRecord } from './db.js';
+import { pcm16ToWav } from './wav.js';
 
 const originalEnv = {
   PORT: process.env.PORT,
   VOICE_STREAM_NEXT_API_PORT: process.env.VOICE_STREAM_NEXT_API_PORT,
   VOICE_STREAM_NEXT_DATA_DIR: process.env.VOICE_STREAM_NEXT_DATA_DIR,
+  VOICE_STREAM_NEXT_TEST_TRANSCRIPT: process.env.VOICE_STREAM_NEXT_TEST_TRANSCRIPT,
 };
 
 function restoreEnv(): void {
@@ -59,6 +61,7 @@ async function buildAppWithRecording(): Promise<{
     sampleRateHz: 16_000,
     channels: 1,
   });
+  built.db.endVoiceSession(user.id, session.id);
 
   return { built, recording, audio };
 }
@@ -157,6 +160,53 @@ describe('voice recording audio', () => {
       expect(response.headers['content-range']).toBe(`bytes */${audio.byteLength}`);
       expect(response.headers['content-length']).toBe('0');
       expect(response.payload).toBe('');
+    } finally {
+      await closeBuiltApp(built);
+    }
+  });
+
+  test('retranscribes saved recordings that do not have transcripts', async () => {
+    process.env.VOICE_STREAM_NEXT_TEST_TRANSCRIPT = 'Recovered recording transcript';
+    const { built, recording } = await buildAppWithRecording();
+    try {
+      const pcm = new Uint8Array(3200);
+      for (let index = 0; index < pcm.length; index += 2) {
+        pcm[index] = 0x20;
+        pcm[index + 1] = index % 4 === 0 ? 0x03 : 0xfc;
+      }
+      const wav = Buffer.from(pcm16ToWav(pcm));
+      writeFileSync(recording.filePath, wav);
+      const updated = built.db.addVoiceRecording(recording.userId, {
+        voiceSessionId: recording.voiceSessionId,
+        deviceId: recording.deviceId,
+        assistantThreadId: recording.assistantThreadId,
+        mode: recording.mode,
+        filePath: recording.filePath,
+        mimeType: 'audio/wav',
+        sizeBytes: wav.byteLength,
+        durationMs: 100,
+        sampleRateHz: 16_000,
+        channels: 1,
+      });
+
+      const response = await built.app.inject({
+        method: 'POST',
+        url: `/api/voice/recordings/${updated.id}/transcribe`,
+        headers: { ...devAuthHeaders, 'content-type': 'application/json' },
+        payload: '{}',
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json().text).toBe('Recovered recording transcript');
+      expect(built.db.voiceRecording(recording.userId, updated.id)?.transcriptText).toBe('Recovered recording transcript');
+
+      const duplicate = await built.app.inject({
+        method: 'POST',
+        url: `/api/voice/recordings/${updated.id}/transcribe`,
+        headers: { ...devAuthHeaders, 'content-type': 'application/json' },
+        payload: '{}',
+      });
+      expect(duplicate.statusCode).toBe(409);
     } finally {
       await closeBuiltApp(built);
     }
