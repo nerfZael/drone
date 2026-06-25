@@ -5514,6 +5514,11 @@ export class VoiceStreamNextDb {
     return row ? rowVoiceRecording(row) : null;
   }
 
+  voiceRecordingForSession(userId: string, voiceSessionId: string): VoiceRecordingRecord | null {
+    const row = this.voiceRecordingRow(userId, voiceSessionId);
+    return row ? rowVoiceRecording(row) : null;
+  }
+
   pruneVoiceRecordings(userId: string, mode: string, keep = 10): VoiceRecordingRecord[] {
     const rows = this.listVoiceRecordings(userId, 10_000, { mode });
     const stale = rows.slice(Math.max(0, Math.floor(keep)));

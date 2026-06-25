@@ -211,4 +211,37 @@ describe('voice recording audio', () => {
       await closeBuiltApp(built);
     }
   });
+
+  test('rejects retranscribing live recordings', async () => {
+    const { built, recording } = await buildAppWithRecording();
+    try {
+      const liveSession = built.db.createVoiceSession(recording.userId, recording.deviceId, 'clipboard');
+      const liveFilePath = path.join(path.dirname(recording.filePath), `${liveSession.id}.wav`);
+      writeFileSync(liveFilePath, Buffer.from(pcm16ToWav(new Uint8Array(3200))));
+      const liveRecording = built.db.addVoiceRecording(recording.userId, {
+        voiceSessionId: liveSession.id,
+        deviceId: recording.deviceId,
+        assistantThreadId: liveSession.assistantThreadId,
+        mode: 'clipboard',
+        filePath: liveFilePath,
+        mimeType: 'audio/wav',
+        sizeBytes: 3244,
+        durationMs: 100,
+        sampleRateHz: 16_000,
+        channels: 1,
+      });
+
+      const response = await built.app.inject({
+        method: 'POST',
+        url: `/api/voice/recordings/${liveRecording.id}/transcribe`,
+        headers: { ...devAuthHeaders, 'content-type': 'application/json' },
+        payload: '{}',
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json().error).toBe('recording is still live');
+    } finally {
+      await closeBuiltApp(built);
+    }
+  });
 });

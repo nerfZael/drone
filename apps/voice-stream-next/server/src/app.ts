@@ -856,11 +856,22 @@ function saveVoiceRecording(opts: {
   assistantThreadId: string;
   mode: 'assistant' | 'clipboard';
   pcm: Uint8Array;
-}): { recording: VoiceRecordingRecord; pruned: VoiceRecordingRecord[] } | null {
+  appendExisting?: boolean;
+}): { recording: VoiceRecordingRecord; pruned: VoiceRecordingRecord[]; appendedBytes: number; savedPcmBytes: number } | null {
   if (opts.pcm.byteLength === 0) return null;
+  let pcm = opts.pcm;
+  let appendedBytes = 0;
+  if (opts.appendExisting) {
+    const existing = opts.db.voiceRecordingForSession(opts.userId, opts.sessionId);
+    if (existing?.filePath && existsSync(existing.filePath)) {
+      const existingPcm = readVoiceRecordingPcm(existing).pcm;
+      appendedBytes = existingPcm.byteLength;
+      pcm = appendPcm(existingPcm, opts.pcm);
+    }
+  }
   const filePath = voiceRecordingFilePath(opts.db, opts.userId, opts.mode, opts.sessionId);
   mkdirSync(path.dirname(filePath), { recursive: true });
-  const wav = pcm16ToWav(opts.pcm, VOICE_RECORDING_SAMPLE_RATE_HZ, VOICE_RECORDING_CHANNELS);
+  const wav = pcm16ToWav(pcm, VOICE_RECORDING_SAMPLE_RATE_HZ, VOICE_RECORDING_CHANNELS);
   writeFileSync(filePath, wav);
   const recording = opts.db.addVoiceRecording(opts.userId, {
     voiceSessionId: opts.sessionId,
@@ -870,13 +881,13 @@ function saveVoiceRecording(opts: {
     filePath,
     mimeType: 'audio/wav',
     sizeBytes: wav.byteLength,
-    durationMs: pcmDurationMs(opts.pcm.byteLength),
+    durationMs: pcmDurationMs(pcm.byteLength),
     sampleRateHz: VOICE_RECORDING_SAMPLE_RATE_HZ,
     channels: VOICE_RECORDING_CHANNELS,
   });
   const pruned = opts.db.pruneVoiceRecordings(opts.userId, opts.mode, VOICE_RECORDING_RETENTION_PER_MODE);
   for (const recording of pruned) deleteRecordingFile(recording.filePath);
-  return { recording, pruned };
+  return { recording, pruned, appendedBytes, savedPcmBytes: pcm.byteLength };
 }
 
 function readVoiceRecordingPcm(recording: VoiceRecordingRecord): { pcm: Uint8Array; sampleRate: number; channels: number } {
@@ -1225,7 +1236,8 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     recordingMode: 'assistant' | 'clipboard';
     pcm: Uint8Array;
     stage: string;
-  }): { recording: VoiceRecordingRecord; pruned: VoiceRecordingRecord[] } | null => {
+    appendExisting?: boolean;
+  }): { recording: VoiceRecordingRecord; pruned: VoiceRecordingRecord[]; appendedBytes: number; savedPcmBytes: number } | null => {
     if (opts.pcm.byteLength === 0) {
       addLog(opts.userId, {
         deviceId: opts.deviceId,
@@ -1246,8 +1258,9 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         recordingMode: opts.recordingMode,
         stage: opts.stage,
         voiceSessionId: opts.sessionId,
-        bytes: opts.pcm.byteLength,
+        fragmentBytes: opts.pcm.byteLength,
         durationMs: pcmDurationMs(opts.pcm.byteLength),
+        appendExisting: opts.appendExisting === true,
       }),
     });
     try {
@@ -1259,6 +1272,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         assistantThreadId: opts.assistantThreadId,
         mode: opts.recordingMode,
         pcm: opts.pcm,
+        appendExisting: opts.appendExisting,
       });
       if (saved) {
         addLog(opts.userId, {
@@ -1274,6 +1288,9 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
             voiceSessionId: opts.sessionId,
             sizeBytes: saved.recording.sizeBytes,
             durationMs: saved.recording.durationMs,
+            fragmentBytes: opts.pcm.byteLength,
+            appendedBytes: saved.appendedBytes,
+            savedPcmBytes: saved.savedPcmBytes,
             prunedCount: saved.pruned.length,
           }),
         });
@@ -1298,7 +1315,8 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           recordingMode: opts.recordingMode,
           stage: opts.stage,
           voiceSessionId: opts.sessionId,
-          bytes: opts.pcm.byteLength,
+          fragmentBytes: opts.pcm.byteLength,
+          appendExisting: opts.appendExisting === true,
         }),
       });
       return null;
@@ -4267,6 +4285,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     let bytes = 0;
     let storedBytes = 0;
     let finalized = false;
+    let finalizeReason: 'connection_closed' | 'client_end' | 'cancel' | 'terminal' | 'limit' = 'connection_closed';
     let terminalFinalize: TerminalCommand | null = null;
     const chunks: Uint8Array[] = [];
     const smartTranscriptSegments: string[] = [];
@@ -4324,7 +4343,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
               detectedAt: command.detectedAt,
             }),
           });
-          void finalizeVoiceStream();
+          void finalizeVoiceStream('terminal');
         }, (detection) => {
           if (finalized || terminalFinalize) return;
           if (smartTranscriptionEnabled) return;
@@ -4519,7 +4538,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
             activeDurationMs: activeDurationMs(),
           }),
         });
-        void finalizeVoiceStream();
+        void finalizeVoiceStream('limit');
       }, remainingMs);
     }
 
@@ -4617,17 +4636,18 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         }
         if (parsed.type === 'cancel') {
           discardRecording = true;
+          finalizeReason = 'cancel';
           terminalFinalize = {
             type: 'abort',
             phrase: parsed.reason || 'cancelled',
             detectedAt: new Date().toISOString(),
             transcriptText: '',
           };
-          void finalizeVoiceStream();
+          void finalizeVoiceStream('cancel');
           return;
         }
         if (parsed.type === 'end') {
-          void finalizeVoiceStream();
+          void finalizeVoiceStream('client_end');
         }
         return;
       }
@@ -4660,7 +4680,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
             bytes,
           }),
         });
-        void finalizeVoiceStream();
+        void finalizeVoiceStream('limit');
         return;
       }
       const chunk = binaryChunk(data);
@@ -4676,12 +4696,14 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
 
     socket.on('close', () => {
       streamingManager?.flushPending();
-      void finalizeVoiceStream();
+      void finalizeVoiceStream('connection_closed');
     });
 
-    async function finalizeVoiceStream(): Promise<void> {
+    async function finalizeVoiceStream(reason: 'connection_closed' | 'client_end' | 'cancel' | 'terminal' | 'limit' = 'connection_closed'): Promise<void> {
       if (finalized) return;
       finalized = true;
+      finalizeReason = reason;
+      const shouldCompleteSession = reason !== 'connection_closed';
       streamingManager?.stop();
       clearInterval(heartbeat);
       clearDurationLimit();
@@ -4695,7 +4717,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         db.createVoiceSession(device.userId, device.id, streamMode, { assistantProfileId });
       const recordingMode = voiceRecordingMode(streamMode);
       const recordingPcm = recordingMode ? concatChunks(chunks, storedBytes) : new Uint8Array(0);
-      let savedRecording: { recording: VoiceRecordingRecord; pruned: VoiceRecordingRecord[] } | null = null;
+      let savedRecording: { recording: VoiceRecordingRecord; pruned: VoiceRecordingRecord[]; appendedBytes: number; savedPcmBytes: number } | null = null;
       let recordingSaveSkippedEmpty = false;
       if (recordingMode && !discardRecording) {
         recordingSaveSkippedEmpty = recordingPcm.byteLength === 0;
@@ -4709,6 +4731,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           recordingMode,
           pcm: recordingPcm,
           stage: 'before_final_transcription',
+          appendExisting: true,
         });
       }
       let transcript = '';
@@ -4721,7 +4744,42 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           transcript = terminalFinalize.transcriptText.trim();
         } else if (streamMode === 'smart') {
           transcript = smartTranscriptSegments.join(' ').trim();
+        } else if (!shouldCompleteSession) {
+          addLog(device.userId, {
+            deviceId: device.id,
+            source: device.deviceType,
+            level: 'info',
+            message: 'Voice final transcription skipped for reconnectable stream close',
+            detailsJson: JSON.stringify({
+              mode: streamMode,
+              voiceSessionId: session.id,
+              recordingId: savedRecording?.recording.id ?? null,
+              fragmentBytes: recordingPcm.byteLength,
+              savedPcmBytes: savedRecording?.savedPcmBytes ?? null,
+              finalizeReason,
+            }),
+          });
         } else {
+          let transcriptionPcm = recordingPcm;
+          if (savedRecording?.recording) {
+            try {
+              transcriptionPcm = readVoiceRecordingPcm(savedRecording.recording).pcm;
+            } catch (error: any) {
+              addLog(device.userId, {
+                deviceId: device.id,
+                source: device.deviceType,
+                level: 'warn',
+                message: 'Voice final transcription using current stream fragment',
+                detailsJson: JSON.stringify({
+                  mode: streamMode,
+                  voiceSessionId: session.id,
+                  recordingId: savedRecording.recording.id,
+                  error: error?.message ?? String(error),
+                  fragmentBytes: recordingPcm.byteLength,
+                }),
+              });
+            }
+          }
           addLog(device.userId, {
             deviceId: device.id,
             source: device.deviceType,
@@ -4731,17 +4789,19 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
               mode: streamMode,
               voiceSessionId: session.id,
               recordingId: savedRecording?.recording.id ?? null,
-              bytes: recordingPcm.byteLength,
-              audioMs: pcmDurationMs(recordingPcm.byteLength),
+              bytes: transcriptionPcm.byteLength,
+              fragmentBytes: recordingPcm.byteLength,
+              audioMs: pcmDurationMs(transcriptionPcm.byteLength),
+              finalizeReason,
             }),
           });
           const finalTranscriptionStartedAt = Date.now();
           let transcription: RuntimeResult;
           try {
-            if (groqSpeechCredential?.source === 'platform_groq_key' && recordingPcm.byteLength >= 1600) {
+            if (groqSpeechCredential?.source === 'platform_groq_key' && transcriptionPcm.byteLength >= 1600) {
               db.requirePositiveCreditBalance(device.userId, 'Groq speech transcription');
             }
-            transcription = await transcribePcm16(recordingPcm, {
+            transcription = await transcribePcm16(transcriptionPcm, {
               apiKey: groqSpeechCredential?.apiKey,
               credentialSource: groqSpeechCredential?.source,
             });
@@ -4757,8 +4817,10 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
                 recordingId: savedRecording?.recording.id ?? null,
                 error: error?.message ?? String(error),
                 elapsedMs: Date.now() - finalTranscriptionStartedAt,
-                bytes: recordingPcm.byteLength,
-                audioMs: pcmDurationMs(recordingPcm.byteLength),
+                bytes: transcriptionPcm.byteLength,
+                fragmentBytes: recordingPcm.byteLength,
+                audioMs: pcmDurationMs(transcriptionPcm.byteLength),
+                finalizeReason,
               }),
             });
             throw error;
@@ -4779,6 +4841,8 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
               audioDurationMs: transcription.audioDurationMs,
               transcriptChars: transcript.length,
               elapsedMs: Date.now() - finalTranscriptionStartedAt,
+              fragmentBytes: recordingPcm.byteLength,
+              finalizeReason,
             }),
           });
           recordGroqTranscriptionUsage(device.userId, transcription, {
@@ -4907,27 +4971,38 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
             recordingMode,
             pcm: recordingPcm,
             stage: 'finalization_fallback',
+            appendExisting: true,
           });
         }
-        db.endVoiceSession(device.userId, session.id);
-        if (savedRecording) {
+        if (shouldCompleteSession) {
+          db.endVoiceSession(device.userId, session.id);
+          if (savedRecording) {
+            emitAppEvent(device.userId, 'voice_recording_changed', {
+              recordingId: savedRecording.recording.id,
+              voiceSessionId: session.id,
+              deviceId: device.id,
+              mode: recordingMode ?? streamMode,
+              sessionEnded: true,
+            });
+          }
+        } else if (savedRecording) {
           emitAppEvent(device.userId, 'voice_recording_changed', {
             recordingId: savedRecording.recording.id,
             voiceSessionId: session.id,
             deviceId: device.id,
             mode: recordingMode ?? streamMode,
-            sessionEnded: true,
+            sessionFragmentSaved: true,
           });
         }
       }
       db.upsertClientStatus(device.userId, device.id, {
-        mode: terminalFinalize?.type === 'sleep' ? 'sleeping' : 'awake',
-        status: terminalFinalize?.type === 'sleep' ? 'Sleeping.' : 'Voice stream disconnected',
+        mode: terminalFinalize?.type === 'sleep' ? 'sleeping' : shouldCompleteSession ? 'awake' : 'recording',
+        status: terminalFinalize?.type === 'sleep' ? 'Sleeping.' : shouldCompleteSession ? 'Voice stream disconnected' : 'Voice stream disconnected; waiting for reconnect',
         protocolVersion: VOICE_STREAM_PROTOCOL_VERSION,
       });
       emitAppEvent(device.userId, 'client_status_changed', {
         deviceId: device.id,
-        mode: terminalFinalize?.type === 'sleep' ? 'sleeping' : 'awake',
+        mode: terminalFinalize?.type === 'sleep' ? 'sleeping' : shouldCompleteSession ? 'awake' : 'recording',
       });
       emitAppEvent(device.userId, 'device_changed', { deviceId: device.id, reason: 'voice_stream_disconnected' });
       const endedAt = Date.now();
@@ -4948,6 +5023,11 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           assistantChars: assistantText.length,
           runtime,
           mode: streamMode,
+          finalizeReason,
+          sessionCompleted: shouldCompleteSession,
+          recordingId: savedRecording?.recording.id ?? null,
+          fragmentBytes: recordingPcm.byteLength,
+          savedPcmBytes: savedRecording?.savedPcmBytes ?? null,
         }),
       });
       if ((socket as any).readyState === 1) {
