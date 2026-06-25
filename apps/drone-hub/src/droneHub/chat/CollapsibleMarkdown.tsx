@@ -55,6 +55,40 @@ function previewCollapsedMarkdown(rawText: string, collapseAfterLines: number): 
   return text.slice(0, 1200).trimEnd();
 }
 
+const POINTER_TOGGLE_MAX_MOVEMENT_PX = 6;
+const POINTER_TOGGLE_DELAY_MS = 320;
+const COLLAPSE_TOGGLE_IGNORED_TARGETS = [
+  'a',
+  'button',
+  'input',
+  'textarea',
+  'select',
+  'summary',
+  'pre',
+  'code',
+  'img',
+  'video',
+  'audio',
+  '[contenteditable]',
+  '[role="button"]',
+  '[role="link"]',
+  '[data-collapse-toggle-ignore="true"]',
+  '.dh-markdown-table-toolbar',
+  '.dh-markdown-table-wrap',
+  '.dh-markdown-table-dialog',
+].join(',');
+
+function isCollapseToggleIgnoredTarget(target: EventTarget | null): boolean {
+  if (typeof Element === 'undefined' || !(target instanceof Element)) return false;
+  return Boolean(target.closest(COLLAPSE_TOGGLE_IGNORED_TARGETS));
+}
+
+function hasSelectedText(): boolean {
+  if (typeof window === 'undefined' || typeof window.getSelection !== 'function') return false;
+  const selection = window.getSelection();
+  return Boolean(selection && !selection.isCollapsed && selection.toString().trim());
+}
+
 export function CollapsibleMarkdown({
   text,
   className,
@@ -64,6 +98,7 @@ export function CollapsibleMarkdown({
   maxHeightPx = 240,
   collapseAfterLines = 40,
   preserveLeadParagraph = false,
+  toggleOnMessageClick = false,
 }: {
   text: string;
   className?: string;
@@ -73,11 +108,14 @@ export function CollapsibleMarkdown({
   maxHeightPx?: number;
   collapseAfterLines?: number;
   preserveLeadParagraph?: boolean;
+  toggleOnMessageClick?: boolean;
 }) {
   const normalizedText = React.useMemo(() => text.replace(/\r\n/g, '\n'), [text]);
   const totalLines = React.useMemo(() => normalizedText.split('\n').length, [normalizedText]);
   const isLong = totalLines > collapseAfterLines || text.length > 2000;
   const [collapsed, setCollapsed] = React.useState(isLong);
+  const pointerDownRef = React.useRef<{ clientX: number; clientY: number; ignored: boolean; pointerId: number } | null>(null);
+  const pointerToggleTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const leadSplit = React.useMemo(() => {
     if (!preserveLeadParagraph) return null;
     const firstBreak = findLeadParagraphBreak(normalizedText);
@@ -97,13 +135,75 @@ export function CollapsibleMarkdown({
     setCollapsed(isLong);
   }, [isLong, text]);
 
+  const canToggleByPointer = toggleOnMessageClick && isLong;
+  const clearPendingPointerToggle = React.useCallback(() => {
+    if (pointerToggleTimerRef.current == null) return;
+    clearTimeout(pointerToggleTimerRef.current);
+    pointerToggleTimerRef.current = null;
+  }, []);
+  React.useEffect(() => {
+    return () => clearPendingPointerToggle();
+  }, [clearPendingPointerToggle]);
+  React.useEffect(() => {
+    clearPendingPointerToggle();
+  }, [clearPendingPointerToggle, isLong, text]);
+  const handlePointerDown = React.useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      clearPendingPointerToggle();
+      if (!canToggleByPointer) return;
+      if (event.pointerType === 'mouse' && event.button !== 0) {
+        pointerDownRef.current = null;
+        return;
+      }
+
+      pointerDownRef.current = {
+        clientX: event.clientX,
+        clientY: event.clientY,
+        ignored: isCollapseToggleIgnoredTarget(event.target),
+        pointerId: event.pointerId,
+      };
+    },
+    [canToggleByPointer, clearPendingPointerToggle],
+  );
+  const handlePointerUp = React.useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (!canToggleByPointer) return;
+      const down = pointerDownRef.current;
+      pointerDownRef.current = null;
+      if (!down || down.pointerId !== event.pointerId) return;
+      if (event.pointerType === 'mouse' && event.button !== 0) return;
+      if (down.ignored || isCollapseToggleIgnoredTarget(event.target)) return;
+
+      const movedX = Math.abs(event.clientX - down.clientX);
+      const movedY = Math.abs(event.clientY - down.clientY);
+      if (movedX > POINTER_TOGGLE_MAX_MOVEMENT_PX || movedY > POINTER_TOGGLE_MAX_MOVEMENT_PX) return;
+      if (hasSelectedText()) return;
+
+      pointerToggleTimerRef.current = setTimeout(() => {
+        pointerToggleTimerRef.current = null;
+        setCollapsed((v) => !v);
+      }, POINTER_TOGGLE_DELAY_MS);
+    },
+    [canToggleByPointer],
+  );
+  const handlePointerCancel = React.useCallback(() => {
+    pointerDownRef.current = null;
+    clearPendingPointerToggle();
+  }, [clearPendingPointerToggle]);
+
   const style = {
     ['--collapse-max-height' as any]: `${maxHeightPx}px`,
     ['--collapse-fade' as any]: fadeTo,
   } as React.CSSProperties;
 
   return (
-    <div className="relative">
+    <div
+      className={`relative ${canToggleByPointer ? 'dh-collapsible-markdown--click-toggle' : ''}`}
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
+      onDoubleClick={clearPendingPointerToggle}
+    >
       {isLong && leadSplit ? (
         <>
           <MarkdownMessage text={leadSplit.lead} className={className} onOpenFileReference={onOpenFileReference} onOpenLink={onOpenLink} />
@@ -136,6 +236,7 @@ export function CollapsibleMarkdown({
         <button
           type="button"
           onClick={() => setCollapsed((v) => !v)}
+          aria-expanded={!collapsed}
           className="mt-2 flex items-center gap-1 text-[11px] font-medium text-[var(--accent)] hover:text-[var(--fg)] transition-colors"
         >
           <IconChevron down={!collapsed} />
