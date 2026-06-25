@@ -718,7 +718,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       headerOverflowOpen: false,
       outputView: 'screen',
       fsExplorerView: 'list',
-      transcriptInlineImages: false,
+      transcriptInlineImages: true,
       showCanvasLastMessagePreviews: false,
       automations: [],
       transcriptInlineImageOverrides: {},

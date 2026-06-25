@@ -220,6 +220,9 @@ type RightPanelTabContentProps = {
   onOpenedEditorFileContentChange: (next: string) => void;
   onSaveOpenedEditorFile: (contentOverride?: string) => Promise<boolean>;
   onCloseOpenedEditorFile: (tabId?: string | null) => void;
+  onConfirmCloseOpenedEditorFilesForPaths: (paths: string[], actionLabel?: string) => boolean;
+  onCloseOpenedEditorFilesForPaths: (paths: string[]) => void;
+  onRemapOpenedEditorFilesForPathChange: (sourcePath: string, targetPath: string) => void;
   onActivateOpenedEditorFileTab: (tabId: string) => void;
   onReorderOpenedEditorFileTabs: (fromTabId: string, toTabId: string) => void;
   onOpenPullRequest: (paneKey: 'top' | 'bottom' | 'single', pullRequest: RepoPullRequestSummary) => void;
@@ -305,6 +308,9 @@ export function RightPanelTabContent({
   onOpenedEditorFileContentChange,
   onSaveOpenedEditorFile,
   onCloseOpenedEditorFile,
+  onConfirmCloseOpenedEditorFilesForPaths,
+  onCloseOpenedEditorFilesForPaths,
+  onRemapOpenedEditorFilesForPathChange,
   onActivateOpenedEditorFileTab,
   onReorderOpenedEditorFileTabs,
   onOpenPullRequest,
@@ -444,6 +450,9 @@ export function RightPanelTabContent({
             onOpenFile={onOpenFileInEditor}
             onOpenFileInPanel={onOpenFileInPanel}
             onCloseOpenedFile={onCloseOpenedEditorFile}
+            onConfirmCloseOpenedFilesForPaths={onConfirmCloseOpenedEditorFilesForPaths}
+            onCloseOpenedFilesForPaths={onCloseOpenedEditorFilesForPaths}
+            onRemapOpenedFilesForPathChange={onRemapOpenedEditorFilesForPathChange}
             openedFile={openedFile}
           />
         </LazyPane>

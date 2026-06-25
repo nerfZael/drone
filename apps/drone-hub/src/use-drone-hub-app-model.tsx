@@ -1811,6 +1811,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     activeOpenedFileTabId,
     openEditorFile,
     closeEditorFile,
+    confirmCloseOpenedFileTabsForPaths,
+    closeOpenedFileTabsForPaths,
+    remapOpenedFileTabsForPathChange,
     openQuickOpen,
     closeQuickOpen,
     setQuickOpenQuery,
@@ -3097,6 +3100,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           onOpenedEditorFileContentChange={setOpenedFileContent}
           onSaveOpenedEditorFile={saveOpenedFile}
           onCloseOpenedEditorFile={closeEditorFile}
+          onConfirmCloseOpenedEditorFilesForPaths={confirmCloseOpenedFileTabsForPaths}
+          onCloseOpenedEditorFilesForPaths={closeOpenedFileTabsForPaths}
+          onRemapOpenedEditorFilesForPathChange={remapOpenedFileTabsForPathChange}
           onActivateOpenedEditorFileTab={setActiveOpenedFileTab}
           onReorderOpenedEditorFileTabs={reorderOpenedFileTabs}
           onRevealChangesFileInFiles={revealChangesFileInFiles}
@@ -3212,6 +3218,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       refreshOpenedFile,
       saveOpenedFile,
       closeEditorFile,
+      confirmCloseOpenedFileTabsForPaths,
+      closeOpenedFileTabsForPaths,
+      remapOpenedFileTabsForPathChange,
       setActiveOpenedFileTab,
       reorderOpenedFileTabs,
     ],

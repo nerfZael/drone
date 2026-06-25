@@ -345,6 +345,7 @@ export const TranscriptTurn = React.memo(
                   fadeTo={item.ok ? 'var(--accent-subtle)' : 'var(--red-subtle)'}
                   className={`dh-markdown--transcript ${showingTldr ? 'dh-markdown--muted' : item.ok ? 'dh-markdown--agent' : 'dh-markdown--error'}`}
                   preserveLeadParagraph
+                  toggleOnMessageClick
                   onOpenFileReference={onOpenFileReference}
                   onOpenLink={onOpenLink}
                 />

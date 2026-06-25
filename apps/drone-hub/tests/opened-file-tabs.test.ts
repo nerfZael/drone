@@ -2,10 +2,13 @@ import { describe, expect, test } from 'bun:test';
 import {
   activateFileTab,
   closeFileTab,
+  closeFileTabsForPaths,
+  dirtyFileTabsForPaths,
   openedFileTabDirty,
   openedFileTabId,
   openFileTab,
   reorderFileTabs,
+  remapFileTabsForPathChange,
   updateFileTabContent,
   type OpenedFileTabsState,
 } from '../src/droneHub/app/opened-file-tabs';
@@ -102,5 +105,62 @@ describe('opened file tabs', () => {
 
     expect(state.tabs.map((tab) => tab.path)).toEqual(['/work/repo/c.ts', '/work/repo/a.ts', '/work/repo/b.ts']);
     expect(state.activeTabId).toBe(activeBefore);
+  });
+
+  test('remaps open tabs under a renamed or moved path', () => {
+    let state: OpenedFileTabsState = { tabs: [], activeTabId: null };
+    state = openTab(state, '/work/repo/src/main.ts', 1);
+    state = openTab(state, '/work/repo/src/nested/helper.ts', 2);
+    state = openTab(state, '/work/repo/README.md', 3);
+
+    state = remapFileTabsForPathChange(state, '/work/repo/src', '/work/repo/lib');
+
+    expect(state.tabs.map((tab) => tab.path)).toEqual([
+      '/work/repo/lib/main.ts',
+      '/work/repo/lib/nested/helper.ts',
+      '/work/repo/README.md',
+    ]);
+    expect(state.tabs[0]?.tabId).toBe(openedFileTabId('drone-1', '/work/repo/lib/main.ts'));
+    expect(state.activeTabId).toBe(openedFileTabId('drone-1', '/work/repo/README.md'));
+  });
+
+  test('keeps dirty remapped tab content when a destination tab already exists', () => {
+    let state: OpenedFileTabsState = { tabs: [], activeTabId: null };
+    state = openTab(state, '/work/repo/lib/main.ts', 1);
+    state = openTab(state, '/work/repo/src/main.ts', 2);
+    state = {
+      ...state,
+      tabs: state.tabs.map((tab) =>
+        tab.path.endsWith('/src/main.ts') ? { ...tab, loaded: true, content: 'changed', savedContent: 'saved' } : tab,
+      ),
+    };
+
+    state = remapFileTabsForPathChange(state, '/work/repo/src', '/work/repo/lib');
+
+    expect(state.tabs.map((tab) => tab.path)).toEqual(['/work/repo/lib/main.ts']);
+    expect(state.tabs[0]?.content).toBe('changed');
+    expect(state.activeTabId).toBe(openedFileTabId('drone-1', '/work/repo/lib/main.ts'));
+  });
+
+  test('finds dirty tabs and closes tabs under deleted paths', () => {
+    let state: OpenedFileTabsState = { tabs: [], activeTabId: null };
+    state = openTab(state, '/work/repo/src/main.ts', 1);
+    state = openTab(state, '/work/repo/src/helper.ts', 2);
+    state = openTab(state, '/work/repo/README.md', 3);
+    state = {
+      ...state,
+      tabs: state.tabs.map((tab) =>
+        tab.path.endsWith('helper.ts') ? { ...tab, loaded: true, content: 'changed', savedContent: 'saved' } : tab,
+      ),
+    };
+
+    expect(dirtyFileTabsForPaths(state.tabs, ['/work/repo/src']).map((tab) => tab.path)).toEqual([
+      '/work/repo/src/helper.ts',
+    ]);
+
+    state = closeFileTabsForPaths(state, ['/work/repo/src']);
+
+    expect(state.tabs.map((tab) => tab.path)).toEqual(['/work/repo/README.md']);
+    expect(state.activeTabId).toBe(openedFileTabId('drone-1', '/work/repo/README.md'));
   });
 });

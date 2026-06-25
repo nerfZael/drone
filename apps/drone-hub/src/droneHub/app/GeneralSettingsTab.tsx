@@ -1062,7 +1062,7 @@ export function GeneralSettingsTab({
               Transcript
             </div>
             <div className="text-[11px] text-[var(--muted-dim)] leading-relaxed">
-              Show image links inline inside agent messages by default.
+              Show linked image and video previews inline inside agent messages by default.
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <button
@@ -1075,7 +1075,7 @@ export function GeneralSettingsTab({
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
               >
-                Inline on
+                Inline on (default)
               </button>
               <button
                 type="button"
@@ -1087,7 +1087,7 @@ export function GeneralSettingsTab({
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
               >
-                Inline off (default)
+                Inline off
               </button>
             </div>
           </div>
