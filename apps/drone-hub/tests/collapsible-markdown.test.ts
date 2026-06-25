@@ -79,4 +79,33 @@ describe('CollapsibleMarkdown', () => {
     expect(html).toContain('Show more');
     expect(html).not.toContain(hiddenTail);
   });
+
+  test('marks click-toggle markdown as collapsed and expandable when opted in', () => {
+    const text = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join('\n');
+    const html = renderToStaticMarkup(
+      React.createElement(CollapsibleMarkdown, {
+        text,
+        fadeTo: 'var(--accent-subtle)',
+        collapseAfterLines: 3,
+        toggleOnMessageClick: true,
+      }),
+    );
+
+    expect(html).toContain('dh-collapsible-markdown--click-toggle');
+    expect(html).toContain('aria-expanded="false"');
+  });
+
+  test('does not mark collapsed markdown as click-toggle unless opted in', () => {
+    const text = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join('\n');
+    const html = renderToStaticMarkup(
+      React.createElement(CollapsibleMarkdown, {
+        text,
+        fadeTo: 'var(--accent-subtle)',
+        collapseAfterLines: 3,
+      }),
+    );
+
+    expect(html).not.toContain('dh-collapsible-markdown--click-toggle');
+    expect(html).toContain('aria-expanded="false"');
+  });
 });

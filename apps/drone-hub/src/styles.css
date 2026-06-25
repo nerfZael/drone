@@ -515,6 +515,18 @@ code, pre {
   background: linear-gradient(transparent, var(--collapse-fade, var(--panel-alt)));
   pointer-events: none;
 }
+.dh-collapsible-markdown--click-toggle {
+  cursor: pointer;
+}
+.dh-collapsible-markdown--click-toggle :is(a, button, summary, [role='button'], [role='link']) {
+  cursor: pointer;
+}
+.dh-collapsible-markdown--click-toggle :is(input, textarea, select, pre, code, [contenteditable]) {
+  cursor: text;
+}
+.dh-collapsible-markdown--click-toggle :is(img, video, audio, .dh-markdown-table-wrap, .dh-markdown-table-dialog) {
+  cursor: auto;
+}
 
 /* ──────────────────────────────────────────────────────────
    Typography: Display headings (Chakra Petch)
