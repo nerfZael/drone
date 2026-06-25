@@ -36,6 +36,32 @@ export function openedFileTabDirty(tab: OpenedFileTab): boolean {
   return tab.kind === 'text' && tab.content !== tab.savedContent;
 }
 
+function normalizeOpenedFilePath(raw: string | null | undefined): string {
+  return String(raw ?? '').trim().replace(/\\/g, '/').replace(/\/+/g, '/').replace(/\/+$/g, '');
+}
+
+function pathInsideOrEqual(parentRaw: string | null | undefined, childRaw: string | null | undefined): boolean {
+  const parent = normalizeOpenedFilePath(parentRaw);
+  const child = normalizeOpenedFilePath(childRaw);
+  if (!parent || !child) return false;
+  return parent === child || child.startsWith(`${parent}/`);
+}
+
+function remapPath(sourceRaw: string, targetRaw: string, pathRaw: string): string | null {
+  const source = normalizeOpenedFilePath(sourceRaw);
+  const target = normalizeOpenedFilePath(targetRaw);
+  const current = normalizeOpenedFilePath(pathRaw);
+  if (!source || !target || !current || !pathInsideOrEqual(source, current)) return null;
+  if (current === source) return target;
+  const suffix = current.slice(source.length).replace(/^\/+/, '');
+  return suffix ? `${target}/${suffix}` : target;
+}
+
+function nameForPath(pathRaw: string): string {
+  const path = normalizeOpenedFilePath(pathRaw);
+  return path.split('/').filter(Boolean).pop() || path || 'File';
+}
+
 export function createOpenedFileTab(args: {
   droneId: string;
   path: string;
@@ -141,4 +167,61 @@ export function updateFileTabContent(tabs: OpenedFileTab[], tabIdRaw: string | n
   if (!tabId) return tabs;
   const next = typeof nextRaw === 'string' ? nextRaw : '';
   return tabs.map((tab) => (tab.tabId === tabId && tab.kind === 'text' ? { ...tab, content: next } : tab));
+}
+
+export function dirtyFileTabsForPaths(tabs: OpenedFileTab[], paths: string[]): OpenedFileTab[] {
+  const normalizedPaths = paths.map(normalizeOpenedFilePath).filter(Boolean);
+  if (normalizedPaths.length === 0) return [];
+  return tabs.filter((tab) => openedFileTabDirty(tab) && normalizedPaths.some((path) => pathInsideOrEqual(path, tab.path)));
+}
+
+export function remapFileTabsForPathChange(
+  state: OpenedFileTabsState,
+  sourcePath: string,
+  targetPath: string,
+): OpenedFileTabsState {
+  const nextTabs: OpenedFileTab[] = [];
+  const tabIndexById = new Map<string, number>();
+  let activeTabId = state.activeTabId;
+
+  for (const tab of state.tabs) {
+    const nextPath = remapPath(sourcePath, targetPath, tab.path);
+    const nextTab = nextPath
+      ? {
+          ...tab,
+          path: nextPath,
+          name: nameForPath(nextPath),
+          tabId: openedFileTabId(tab.droneId, nextPath),
+          targetLine: tab.targetLine,
+          targetColumn: tab.targetColumn,
+          navigationSeq: tab.navigationSeq + 1,
+        }
+      : tab;
+    if (nextPath && activeTabId === tab.tabId) activeTabId = nextTab.tabId;
+    const existingIndex = tabIndexById.get(nextTab.tabId);
+    if (existingIndex != null) {
+      const existing = nextTabs[existingIndex];
+      if (existing && openedFileTabDirty(nextTab) && !openedFileTabDirty(existing)) {
+        nextTabs[existingIndex] = nextTab;
+      }
+      continue;
+    }
+    tabIndexById.set(nextTab.tabId, nextTabs.length);
+    nextTabs.push(nextTab);
+  }
+
+  return { tabs: nextTabs, activeTabId };
+}
+
+export function closeFileTabsForPaths(state: OpenedFileTabsState, paths: string[]): OpenedFileTabsState {
+  const normalizedPaths = paths.map(normalizeOpenedFilePath).filter(Boolean);
+  if (normalizedPaths.length === 0) return state;
+  const tabs = state.tabs.filter((tab) => !normalizedPaths.some((path) => pathInsideOrEqual(path, tab.path)));
+  if (tabs.length === state.tabs.length) return state;
+  if (state.activeTabId && tabs.some((tab) => tab.tabId === state.activeTabId)) {
+    return { tabs, activeTabId: state.activeTabId };
+  }
+  const activeIndex = state.tabs.findIndex((tab) => tab.tabId === state.activeTabId);
+  const nextActive = tabs[activeIndex] ?? tabs[activeIndex - 1] ?? tabs[tabs.length - 1] ?? null;
+  return { tabs, activeTabId: nextActive?.tabId ?? null };
 }

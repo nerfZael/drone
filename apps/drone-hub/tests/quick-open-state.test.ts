@@ -2,6 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import {
   buildQuickOpenItems,
   quickOpenSelectionToOpenTarget,
+  remapRecentQuickOpenFilesForPathChange,
+  removeRecentQuickOpenFilesForPaths,
   trackRecentQuickOpenFile,
   type QuickOpenFile,
 } from '../src/droneHub/files/quick-open-state';
@@ -43,5 +45,31 @@ describe('quick open state', () => {
       path: '/work/repo/src/main.ts',
       name: 'main.ts',
     });
+  });
+
+  test('remaps recent files under renamed or moved paths', () => {
+    let recent = trackRecentQuickOpenFile([], { path: '/work/repo/src/main.ts', relativePath: 'src/main.ts' }, 100);
+    recent = trackRecentQuickOpenFile(recent, { path: '/work/repo/src/nested/helper.ts' }, 200);
+    recent = trackRecentQuickOpenFile(recent, { path: '/work/repo/README.md' }, 300);
+
+    const remapped = remapRecentQuickOpenFilesForPathChange(recent, '/work/repo/src', '/work/repo/lib');
+
+    expect(remapped.map((file) => file.path)).toEqual([
+      '/work/repo/README.md',
+      '/work/repo/lib/nested/helper.ts',
+      '/work/repo/lib/main.ts',
+    ]);
+    expect(remapped[1]?.name).toBe('helper.ts');
+    expect(remapped[1]?.relativePath).toBeNull();
+  });
+
+  test('removes recent files under deleted paths', () => {
+    let recent = trackRecentQuickOpenFile([], { path: '/work/repo/src/main.ts' }, 100);
+    recent = trackRecentQuickOpenFile(recent, { path: '/work/repo/src/nested/helper.ts' }, 200);
+    recent = trackRecentQuickOpenFile(recent, { path: '/work/repo/README.md' }, 300);
+
+    const filtered = removeRecentQuickOpenFilesForPaths(recent, ['/work/repo/src']);
+
+    expect(filtered.map((file) => file.path)).toEqual(['/work/repo/README.md']);
   });
 });

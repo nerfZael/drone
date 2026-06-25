@@ -3,6 +3,7 @@ import { IconChevron, iconForFilePath } from '../icons';
 import { formatBytes, formatEditorMtime } from '../app/selected-drone-workspace-utils';
 import {
   buildQuickOpenItems,
+  QUICK_OPEN_SEARCH_MIN_QUERY_LENGTH,
   quickOpenSelectionToOpenTarget,
   type QuickOpenFile,
   type QuickOpenItem,
@@ -67,6 +68,15 @@ export function QuickOpenModal({
     if (!item) return;
     onOpenFile(quickOpenSelectionToOpenTarget(item));
   };
+  const trimmedQuery = query.trim();
+  const searchingEnabled = trimmedQuery.length >= QUICK_OPEN_SEARCH_MIN_QUERY_LENGTH;
+  const emptyMessage = (() => {
+    if (error) return error;
+    if (loading) return 'Searching files...';
+    if (!trimmedQuery) return recentFiles.length > 0 ? 'Type to search more files.' : 'No recent files. Type to search files.';
+    if (!searchingEnabled) return `Type ${QUICK_OPEN_SEARCH_MIN_QUERY_LENGTH} or more characters to search files.`;
+    return 'No matching files.';
+  })();
 
   return (
     <div
@@ -140,14 +150,20 @@ export function QuickOpenModal({
               </button>
             );
           })}
-          {!loading && items.length === 0 ? (
-            <div className="px-4 py-8 text-center text-[12px] text-[var(--muted)]">
-              {query.trim() ? 'No matching files.' : 'No files found.'}
+          {items.length === 0 && emptyMessage ? (
+            <div className={`px-4 py-8 text-center text-[12px] ${error ? 'text-[var(--red)]' : 'text-[var(--muted)]'}`}>
+              {emptyMessage}
             </div>
           ) : null}
         </div>
         <div className="flex items-center justify-between gap-3 border-t border-[var(--border-subtle)] px-3 py-2 text-[10px] text-[var(--muted)]">
-          <span>{loading ? 'Searching...' : `${items.length} result${items.length === 1 ? '' : 's'}`}</span>
+          <span>
+            {loading
+              ? 'Searching...'
+              : !searchingEnabled && trimmedQuery
+                ? `Type ${QUICK_OPEN_SEARCH_MIN_QUERY_LENGTH}+ characters`
+                : `${items.length} result${items.length === 1 ? '' : 's'}`}
+          </span>
           <span className="truncate text-[var(--red)]">{error ?? ''}</span>
         </div>
       </div>

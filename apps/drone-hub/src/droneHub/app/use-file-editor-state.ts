@@ -4,9 +4,12 @@ import type { requestJson as requestJsonFn } from '../http';
 import {
   activateFileTab,
   closeFileTab,
+  closeFileTabsForPaths,
+  dirtyFileTabsForPaths,
   openedFileTabDirty,
   openFileTab,
   reorderFileTabs,
+  remapFileTabsForPathChange,
   updateFileTabContent,
   type OpenedFileKind,
   type OpenedFileTab,
@@ -24,6 +27,9 @@ import {
 } from '../files/editor-location-history';
 import {
   quickOpenNameForPath,
+  QUICK_OPEN_SEARCH_MIN_QUERY_LENGTH,
+  removeRecentQuickOpenFilesForPaths,
+  remapRecentQuickOpenFilesForPathChange,
   trackRecentQuickOpenFile,
   type QuickOpenFile,
   type QuickOpenRecentFile,
@@ -60,6 +66,20 @@ function mirrorDroneHomePath(rawPath: string): string {
 function looksLikeFileNotFound(msgRaw: string): boolean {
   const msg = String(msgRaw ?? '').toLowerCase();
   return msg.includes('file not found') || msg.includes('no such file') || msg.includes('not-file');
+}
+
+function confirmDiscardDirtyTabs(tabs: OpenedFileTab[], actionLabel: string): boolean {
+  const dirtyTabs = tabs.filter(openedFileTabDirty);
+  if (dirtyTabs.length === 0) return true;
+  if (typeof window === 'undefined') return true;
+  const preview = dirtyTabs
+    .slice(0, 4)
+    .map((tab) => tab.name || tab.path || 'file')
+    .join(', ');
+  const suffix = dirtyTabs.length > 4 ? `, and ${dirtyTabs.length - 4} more` : '';
+  return window.confirm(
+    `${actionLabel} will discard unsaved changes in ${dirtyTabs.length} file${dirtyTabs.length === 1 ? '' : 's'}.\n\n${preview}${suffix}`,
+  );
 }
 
 function readPayloadToTabState(data: Extract<DroneFsReadPayload, { ok: true }>): {
@@ -132,9 +152,13 @@ export function useFileEditorState({
   }, []);
 
   const closeEditorFile = React.useCallback((tabId?: string | null) => {
+    const requestedTabId = String(tabId ?? activeTabId ?? '').trim();
+    const target = tabs.find((tab) => tab.tabId === requestedTabId);
+    if (!target) return;
+    if (!confirmDiscardDirtyTabs([target], `Close ${target.name || 'this file'}`)) return;
     setOpenFailure(null);
-    setTabState((prev) => closeFileTab(prev, tabId));
-  }, []);
+    setTabState((prev) => closeFileTab(prev, requestedTabId));
+  }, [activeTabId, tabs]);
 
   const normalizePositiveInt = React.useCallback((raw: unknown): number | null => {
     const n = Number(raw);
@@ -243,6 +267,19 @@ export function useFileEditorState({
   }, [openEditorLocation, setEditorLocationHistory]);
 
   React.useEffect(() => {
+    const dirtyTabs = tabs.filter(openedFileTabDirty);
+    if (dirtyTabs.length === 0 || typeof window === 'undefined') return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+    };
+  }, [tabs]);
+
+  React.useEffect(() => {
     if (tabs.length === 0) return;
     const droneId = String(currentDrone?.id ?? '').trim();
     if (!droneId) {
@@ -270,12 +307,26 @@ export function useFileEditorState({
     const droneId = String(currentDrone?.id ?? '').trim();
     if (!droneId) return;
     const query = String(quickOpenQuery ?? '').trim();
+    if (!query) {
+      setQuickOpenFiles([]);
+      setQuickOpenLoading(false);
+      setQuickOpenError(null);
+      return;
+    }
+    if (query.length < QUICK_OPEN_SEARCH_MIN_QUERY_LENGTH) {
+      setQuickOpenFiles([]);
+      setQuickOpenLoading(false);
+      setQuickOpenError(null);
+      return;
+    }
     let cancelled = false;
+    const controller = typeof AbortController === 'undefined' ? null : new AbortController();
     const timeout = window.setTimeout(() => {
       setQuickOpenLoading(true);
       setQuickOpenError(null);
       void requestJson<DroneFsSearchPayload>(
-        `/api/drones/${encodeURIComponent(droneId)}/fs/search?query=${encodeURIComponent(query)}&limit=80`,
+        `/api/drones/${encodeURIComponent(droneId)}/fs/search?query=${encodeURIComponent(query)}&limit=50`,
+        controller ? { signal: controller.signal } : undefined,
       )
         .then((data) => {
           if (cancelled) return;
@@ -296,6 +347,7 @@ export function useFileEditorState({
         })
         .catch((e: any) => {
           if (cancelled) return;
+          if (e?.name === 'AbortError') return;
           setQuickOpenError(e?.message ?? String(e));
           setQuickOpenFiles([]);
         })
@@ -306,6 +358,7 @@ export function useFileEditorState({
     }, 120);
     return () => {
       cancelled = true;
+      controller?.abort();
       window.clearTimeout(timeout);
     };
   }, [currentDrone?.id, quickOpenOpen, quickOpenQuery, requestJson]);
@@ -589,6 +642,33 @@ export function useFileEditorState({
     );
   }, [activeTab, updateTabs]);
 
+  const confirmCloseOpenedFileTabsForPaths = React.useCallback((paths: string[], actionLabel = 'This action'): boolean => {
+    const dirtyTabs = dirtyFileTabsForPaths(tabs, paths);
+    return confirmDiscardDirtyTabs(dirtyTabs, actionLabel);
+  }, [tabs]);
+
+  const closeOpenedFileTabsForPaths = React.useCallback((paths: string[]) => {
+    const droneId = String(currentDrone?.id ?? '').trim();
+    setTabState((prev) => closeFileTabsForPaths(prev, paths));
+    if (droneId) {
+      setRecentFilesByDroneId((prev) => ({
+        ...prev,
+        [droneId]: removeRecentQuickOpenFilesForPaths(prev[droneId] ?? [], paths),
+      }));
+    }
+  }, [currentDrone?.id]);
+
+  const remapOpenedFileTabsForPathChange = React.useCallback((sourcePath: string, targetPath: string) => {
+    const droneId = String(currentDrone?.id ?? '').trim();
+    setTabState((prev) => remapFileTabsForPathChange(prev, sourcePath, targetPath));
+    if (droneId) {
+      setRecentFilesByDroneId((prev) => ({
+        ...prev,
+        [droneId]: remapRecentQuickOpenFilesForPathChange(prev[droneId] ?? [], sourcePath, targetPath),
+      }));
+    }
+  }, [currentDrone?.id]);
+
   return {
     openedFile,
     loading,
@@ -613,6 +693,9 @@ export function useFileEditorState({
     activeOpenedFileTabId: activeTabId,
     openEditorFile,
     closeEditorFile,
+    confirmCloseOpenedFileTabsForPaths,
+    closeOpenedFileTabsForPaths,
+    remapOpenedFileTabsForPathChange,
     openQuickOpen,
     closeQuickOpen,
     setQuickOpenQuery,

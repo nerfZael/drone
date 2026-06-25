@@ -134,6 +134,9 @@ export function DroneFilesDock({
   onRefresh,
   onRefreshOpenedFile,
   onCloseOpenedFile,
+  onConfirmCloseOpenedFilesForPaths,
+  onCloseOpenedFilesForPaths,
+  onRemapOpenedFilesForPathChange,
   openedFile,
 }: {
   droneId: string;
@@ -153,6 +156,9 @@ export function DroneFilesDock({
   onRefresh: () => void;
   onRefreshOpenedFile?: () => void;
   onCloseOpenedFile?: () => void;
+  onConfirmCloseOpenedFilesForPaths?: (paths: string[], actionLabel?: string) => boolean;
+  onCloseOpenedFilesForPaths?: (paths: string[]) => void;
+  onRemapOpenedFilesForPathChange?: (sourcePath: string, targetPath: string) => void;
   openedFile: DroneOpenedFileState;
 }) {
   const shownName = String(droneLabel ?? droneName).trim() || droneName;
@@ -394,13 +400,25 @@ export function DroneFilesDock({
     if (!actionMode || !value) return;
     if (actionMode === 'create-file' || actionMode === 'create-directory') {
       void runAction(actionMode === 'create-file' ? 'Creating file' : 'Creating folder', async () => {
-        await runDroneFsAction(droneId, {
+        const result = await runDroneFsAction(droneId, {
           action: actionMode,
           targetDir: normalizedPath,
           name: value,
         });
         setActionMode(null);
         setActionInput('');
+        if (actionMode === 'create-file' && result.path) {
+          onOpenFile({
+            name: value,
+            path: result.path,
+            kind: 'file',
+            size: 0,
+            mtimeMs: null,
+            ext: value.includes('.') ? value.slice(value.lastIndexOf('.')).toLowerCase() : null,
+            isImage: false,
+            isVideo: false,
+          });
+        }
         refreshAfterMutation(`${actionMode === 'create-file' ? 'Created file' : 'Created folder'} ${value}.`);
       });
       return;
@@ -408,16 +426,13 @@ export function DroneFilesDock({
     if (actionMode === 'rename' && selectedOne) {
       const previous = selectedOne;
       void runAction('Renaming', async () => {
-        await runDroneFsAction(droneId, {
+        const result = await runDroneFsAction(droneId, {
           action: 'rename',
           path: previous.path,
           name: value,
         });
-        const nextActivePath = renamedPathForEntry(previous, value, activeOpenedFilePath);
-        if (nextActivePath && activeOpenedFilePath) {
-          const nextName = nextActivePath.split(/[\/\\]/).filter(Boolean).pop() || value;
-          onOpenFile({ ...previous, kind: 'file', path: nextActivePath, name: nextName });
-        }
+        const nextPath = result.targetPath ?? renamedPathForEntry(previous, value, previous.path);
+        if (nextPath) onRemapOpenedFilesForPathChange?.(previous.path, nextPath);
         clearClipboardForChangedEntries([previous]);
         setSelectedPaths(new Set());
         setActionMode(null);
@@ -429,15 +444,15 @@ export function DroneFilesDock({
     if (actionMode === 'move' && selectedCount > 0) {
       const moving = [...actionEntries];
       void runAction('Moving', async () => {
-        await runDroneFsAction(droneId, {
+        const result = await runDroneFsAction(droneId, {
           action: 'move',
           paths: moving.map((entry) => entry.path),
           targetDir: value,
         });
-        const activeMove = moving.map((entry) => movedPathForEntry(entry, value, activeOpenedFilePath)).find(Boolean);
-        if (activeMove && activeOpenedFilePath) {
-          const source = moving.find((entry) => pathContainsActiveFile(entry));
-          if (source) onOpenFile({ ...source, kind: 'file', path: activeMove, name: activeMove.split(/[\/\\]/).filter(Boolean).pop() || source.name });
+        const targetDir = result.targetDir ?? value;
+        for (const entry of moving) {
+          const nextPath = movedPathForEntry(entry, targetDir, entry.path);
+          if (nextPath) onRemapOpenedFilesForPathChange?.(entry.path, nextPath);
         }
         clearClipboardForChangedEntries(moving);
         setSelectedPaths(new Set());
@@ -449,12 +464,11 @@ export function DroneFilesDock({
   }, [
     actionInput,
     actionMode,
-    activeOpenedFilePath,
     droneId,
     clearClipboardForChangedEntries,
     normalizedPath,
     onOpenFile,
-    pathContainsActiveFile,
+    onRemapOpenedFilesForPathChange,
     refreshAfterMutation,
     runAction,
     actionEntries,
@@ -494,12 +508,16 @@ export function DroneFilesDock({
       const suffix = entriesToDelete.length > 4 ? `, and ${entriesToDelete.length - 4} more` : '';
       const confirmed = window.confirm(`Delete ${entriesToDelete.length} item${entriesToDelete.length === 1 ? '' : 's'}?\n\n${preview}${suffix}`);
       if (!confirmed) return;
+      const paths = entriesToDelete.map((entry) => entry.path);
+      if (onConfirmCloseOpenedFilesForPaths && !onConfirmCloseOpenedFilesForPaths(paths, 'Delete selected item')) return;
       void runAction('Deleting', async () => {
         await runDroneFsAction(droneId, {
           action: 'delete',
-          paths: entriesToDelete.map((entry) => entry.path),
+          paths,
         });
-        if (activeOpenedFilePath && entriesToDelete.some(pathContainsActiveFile)) {
+        if (onCloseOpenedFilesForPaths) {
+          onCloseOpenedFilesForPaths(paths);
+        } else if (activeOpenedFilePath && entriesToDelete.some(pathContainsActiveFile)) {
           onCloseOpenedFile?.();
         }
         clearClipboardForChangedEntries(entriesToDelete);
@@ -507,7 +525,17 @@ export function DroneFilesDock({
         refreshAfterMutation(`Deleted ${entriesToDelete.length} item${entriesToDelete.length === 1 ? '' : 's'}.`);
       });
     },
-    [activeOpenedFilePath, clearClipboardForChangedEntries, droneId, onCloseOpenedFile, pathContainsActiveFile, refreshAfterMutation, runAction],
+    [
+      activeOpenedFilePath,
+      clearClipboardForChangedEntries,
+      droneId,
+      onCloseOpenedFile,
+      onCloseOpenedFilesForPaths,
+      onConfirmCloseOpenedFilesForPaths,
+      pathContainsActiveFile,
+      refreshAfterMutation,
+      runAction,
+    ],
   );
 
   const copySelected = React.useCallback(() => {
