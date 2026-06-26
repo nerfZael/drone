@@ -10375,10 +10375,9 @@ function dockerSnapshotAfterAgentMessageEnabledForChat(droneEntry: any, chatEntr
   if (droneRuntime(droneEntry) === 'host') return false;
   if (droneEntry?.persistVolume !== false) return false;
   const raw = chatEntry?.dockerSnapshotAfterAgentMessageEnabled;
-  if (raw === false) return false;
   const agent = inferChatAgent(chatEntry, droneEntry);
   if (agent.kind !== 'builtin') return false;
-  return raw === true || raw == null;
+  return raw === true;
 }
 
 function chatHasActiveDockerSnapshot(entry: any): boolean {

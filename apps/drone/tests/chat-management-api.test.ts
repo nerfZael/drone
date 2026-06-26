@@ -183,16 +183,32 @@ describeSocketSuite('chat management api', () => {
     expect(settingsReset.r.status).toBe(200);
   });
 
-  test('defaults docker snapshots on for no-volume container chats and preserves explicit off', async () => {
+  test('defaults docker snapshots off for no-volume container chats and preserves explicit choices', async () => {
     const droneId = 'drone-chat-snapshot-default';
     await seedDrone(droneId, { runtime: 'container', persistVolume: false });
 
     const initial = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default`);
     expect(initial.r.status).toBe(200);
-    expect(initial.data?.dockerSnapshotAfterAgentMessageEnabled).toBe(true);
+    expect(initial.data?.dockerSnapshotAfterAgentMessageEnabled).toBe(false);
 
     let regAny: any = await loadRegistry();
     expect(regAny?.drones?.[droneId]?.chats?.default?.dockerSnapshotAfterAgentMessageEnabled).toBeUndefined();
+
+    const enabled = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/config`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ dockerSnapshotAfterAgentMessageEnabled: true }),
+    });
+    expect(enabled.r.status).toBe(200);
+    expect(enabled.data?.dockerSnapshotAfterAgentMessageEnabled).toBe(true);
+
+    const enabledAfter = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default`);
+    expect(enabledAfter.r.status).toBe(200);
+    expect(enabledAfter.data?.dockerSnapshotAfterAgentMessageEnabled).toBe(true);
+
+    regAny = await loadRegistry();
+    expect(regAny?.drones?.[droneId]?.chats?.default?.dockerSnapshotAfterAgentMessageEnabled).toBe(true);
+    expect(typeof regAny?.drones?.[droneId]?.chats?.default?.dockerSnapshotAfterAgentMessageEnabledAt).toBe('string');
 
     const disabled = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/config`, {
       method: 'POST',
