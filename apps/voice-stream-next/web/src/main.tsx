@@ -5326,7 +5326,8 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                   <div className="grid gap-2">
                     {voiceRecordings.map((recording) => {
                       const retranscribing = Boolean(voiceRecordingTranscribingIds[recording.id]);
-                      const canRetranscribe = !recording.transcriptText?.trim() && recording.sessionEndedAt != null;
+                      const canRetranscribe = !recording.transcriptText?.trim();
+                      const retranscribeDisabled = retranscribing || recording.sessionEndedAt == null;
                       return (
                       <article key={recording.id} className={cn(assistantRowClass, 'grid gap-2 p-2.5')}>
                         <div className="grid gap-1">
@@ -5362,8 +5363,9 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                             <button
                               type="button"
                               className={assistantActionButtonClass}
-                              disabled={retranscribing}
+                              disabled={retranscribeDisabled}
                               onClick={() => void retranscribeVoiceRecording(recording)}
+                              title={recording.sessionEndedAt == null ? 'Recording is still live.' : undefined}
                             >
                               {retranscribing ? 'Transcribing...' : 'Retranscribe'}
                             </button>

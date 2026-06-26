@@ -8,7 +8,16 @@ import websocket from '@fastify/websocket';
 import { clerkPlugin } from '@clerk/fastify';
 import { VoiceStreamNextDb, type DeviceRecord, type SpeechPlaybackTarget, type VoiceRecordingRecord } from './db.js';
 import { requireAdmin, resolveRequestUser, type AuthContext } from './auth.js';
-import { hasGroqSpeechRuntime, hasGroqTtsRuntime, synthesizeSpeech, transcribePcm16, type GroqCredentialSource, type RuntimeResult } from './assistant-runtime.js';
+import {
+  AudioUploadTooLargeError,
+  hasGroqSpeechRuntime,
+  hasGroqTtsRuntime,
+  synthesizeSpeech,
+  transcribePcm16,
+  type GroqCredentialSource,
+  type RuntimeResult,
+  type RuntimeTranscriptionSegment,
+} from './assistant-runtime.js';
 import {
   StreamingTranscriptionManager,
   buildStreamingTranscriptionConfigFromEnv,
@@ -90,6 +99,12 @@ const VOICE_RECORDING_CHANNELS = 1;
 const LIVE_RECORDING_TARGET_MS = 20_000;
 const LIVE_RECORDING_OVERLAP_MS = 3_000;
 const LIVE_RECORDING_MIN_FINAL_MS = 1_000;
+const LONG_TRANSCRIPTION_TARGET_MS = 8 * 60_000;
+const LONG_TRANSCRIPTION_OVERLAP_MS = 10_000;
+const GROQ_DIRECT_AUDIO_UPLOAD_MAX_BYTES_RAW = Number(process.env.VOICE_STREAM_NEXT_GROQ_STT_DIRECT_UPLOAD_MAX_BYTES ?? 24_000_000);
+const GROQ_DIRECT_AUDIO_UPLOAD_MAX_BYTES = Number.isFinite(GROQ_DIRECT_AUDIO_UPLOAD_MAX_BYTES_RAW) && GROQ_DIRECT_AUDIO_UPLOAD_MAX_BYTES_RAW > 0
+  ? GROQ_DIRECT_AUDIO_UPLOAD_MAX_BYTES_RAW
+  : 24_000_000;
 const MICROCREDITS_PER_CREDIT = 1_000_000;
 const USD_MICROS_PER_DOLLAR = 1_000_000;
 const MICROCREDITS_PER_DOLLAR = 100 * MICROCREDITS_PER_CREDIT;
@@ -1035,7 +1050,64 @@ function quietCutByteOffset(pcm: Uint8Array, targetBytes: number): number {
   return Math.max(pcmBytesForMs(5_000), bestOffset - (bestOffset % 2));
 }
 
-function mergeTranscriptText(existing: string, next: string): string {
+function normalizeTranscriptWord(word: string): string {
+  return word.toLowerCase().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+}
+
+function tokenEditDistance(left: string[], right: string[]): number {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  const current = new Array<number>(right.length + 1);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    current[0] = leftIndex;
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      const substitutionCost = left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1;
+      current[rightIndex] = Math.min(
+        previous[rightIndex] + 1,
+        current[rightIndex - 1] + 1,
+        previous[rightIndex - 1] + substitutionCost,
+      );
+    }
+    previous.splice(0, previous.length, ...current);
+  }
+  return previous[right.length] ?? 0;
+}
+
+function transcriptOverlapPrefixLength(existingWords: string[], nextWords: string[]): number {
+  const existingNormalized = existingWords.map(normalizeTranscriptWord);
+  const nextNormalized = nextWords.map(normalizeTranscriptWord);
+  const maxOverlap = Math.min(80, existingWords.length, nextWords.length);
+
+  for (let count = maxOverlap; count >= 3; count -= 1) {
+    const left = existingNormalized.slice(existingNormalized.length - count);
+    const right = nextNormalized.slice(0, count);
+    if (left.every(Boolean) && left.join(' ') === right.join(' ')) return count;
+  }
+
+  let bestPrefixLength = 0;
+  let bestScore = 0;
+  let bestOverlapWords = 0;
+  for (let existingCount = maxOverlap; existingCount >= 5; existingCount -= 1) {
+    const left = existingNormalized.slice(existingNormalized.length - existingCount);
+    if (!left.every(Boolean)) continue;
+    const minNextCount = Math.max(3, existingCount - 4);
+    const maxNextCount = Math.min(nextWords.length, existingCount + 4);
+    for (let nextCount = maxNextCount; nextCount >= minNextCount; nextCount -= 1) {
+      const right = nextNormalized.slice(0, nextCount);
+      if (!right.every(Boolean)) continue;
+      const longer = Math.max(left.length, right.length);
+      const score = 1 - tokenEditDistance(left, right) / Math.max(1, longer);
+      const threshold = longer >= 10 ? 0.76 : 0.84;
+      if (score >= threshold && (score > bestScore || (score === bestScore && longer > bestOverlapWords))) {
+        bestPrefixLength = nextCount;
+        bestScore = score;
+        bestOverlapWords = longer;
+      }
+    }
+  }
+  return bestPrefixLength;
+}
+
+export function mergeTranscriptText(existing: string, next: string): string {
   const cleanExisting = existing.trim();
   const cleanNext = next.trim();
   if (!cleanExisting) return cleanNext;
@@ -1043,16 +1115,145 @@ function mergeTranscriptText(existing: string, next: string): string {
 
   const existingWords = cleanExisting.split(/\s+/);
   const nextWords = cleanNext.split(/\s+/);
-  const maxOverlap = Math.min(24, existingWords.length, nextWords.length);
-  const normalize = (word: string) => word.toLowerCase().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
-  for (let count = maxOverlap; count >= 3; count -= 1) {
-    const left = existingWords.slice(existingWords.length - count).map(normalize).join(' ');
-    const right = nextWords.slice(0, count).map(normalize).join(' ');
-    if (left && left === right) {
-      return `${cleanExisting} ${nextWords.slice(count).join(' ')}`.trim();
+  const overlapPrefixLength = transcriptOverlapPrefixLength(existingWords, nextWords);
+  if (overlapPrefixLength > 0) return `${cleanExisting} ${nextWords.slice(overlapPrefixLength).join(' ')}`.trim();
+  return `${cleanExisting} ${cleanNext}`.trim();
+}
+
+function transcriptPromptTail(text: string, maxWords = 90): string | null {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return null;
+  return `Previous transcript context: ${words.slice(-maxWords).join(' ')}`;
+}
+
+function offsetTranscriptionSegments(segments: RuntimeTranscriptionSegment[] | undefined, offsetMs: number): RuntimeTranscriptionSegment[] {
+  return (segments ?? []).map((segment) => ({
+    ...segment,
+    startMs: segment.startMs + offsetMs,
+    endMs: segment.endMs + offsetMs,
+  }));
+}
+
+export function mergeTimestampedTranscriptText(existingText: string, existingSegments: RuntimeTranscriptionSegment[], incomingSegments: RuntimeTranscriptionSegment[]): string {
+  let text = existingText.trim();
+  const sortedIncoming = [...incomingSegments].sort((left, right) => left.startMs - right.startMs || left.endMs - right.endMs);
+  for (const segment of sortedIncoming) {
+    const segmentText = segment.text.trim();
+    if (!segmentText) continue;
+    const lastEndMs = existingSegments.length > 0 ? existingSegments[existingSegments.length - 1].endMs : -1;
+    if (lastEndMs >= 0 && segment.startMs <= lastEndMs && segment.endMs <= lastEndMs + 250) continue;
+    text = mergeTranscriptText(text, segmentText);
+    existingSegments.push(segment);
+  }
+  return text;
+}
+
+function isUploadTooLargeError(error: unknown): boolean {
+  return error instanceof AudioUploadTooLargeError ||
+    (error instanceof Error && /request entity too large|payload too large|413|audio upload too large/i.test(error.message));
+}
+
+async function transcribePcm16Windowed(
+  pcm: Uint8Array,
+  options: {
+    apiKey?: string | null;
+    credentialSource?: GroqCredentialSource;
+    prompt?: string | null;
+    targetMs?: number;
+    overlapMs?: number;
+    maxUploadBytes?: number;
+    onWholeStart?: (attempt: { bytes: number; audioMs: number; maxUploadBytes: number }) => void;
+    onWholeComplete?: (attempt: { result: RuntimeResult; elapsedMs: number }) => void;
+    onWholeSkip?: (attempt: { error: unknown; elapsedMs: number }) => void;
+    onChunkStart?: (chunk: { index: number; startMs: number; endMs: number; bytes: number; windowBytes: number }) => void;
+    onChunkComplete?: (chunk: { index: number; startMs: number; endMs: number; bytes: number; windowBytes: number; result: RuntimeResult; elapsedMs: number }) => void;
+    onChunkError?: (chunk: { index: number; startMs: number; endMs: number; bytes: number; windowBytes: number; error: unknown; elapsedMs: number }) => void;
+  } = {},
+): Promise<RuntimeResult> {
+  const maxUploadBytes = options.maxUploadBytes ?? GROQ_DIRECT_AUDIO_UPLOAD_MAX_BYTES;
+  const transcriptionOptions = {
+    apiKey: options.apiKey,
+    credentialSource: options.credentialSource,
+    prompt: options.prompt,
+  };
+  const targetBytes = pcmBytesForMs(options.targetMs ?? LONG_TRANSCRIPTION_TARGET_MS);
+  const overlapBytes = pcmBytesForMs(options.overlapMs ?? LONG_TRANSCRIPTION_OVERLAP_MS);
+  const wholeStartedAt = Date.now();
+  try {
+    options.onWholeStart?.({ bytes: pcm.byteLength, audioMs: pcmDurationMs(pcm.byteLength), maxUploadBytes });
+    const result = await transcribePcm16(pcm, {
+      ...transcriptionOptions,
+      responseFormat: 'verbose_json',
+      timestampGranularities: ['segment'],
+      preferFlac: pcm.byteLength + 44 > maxUploadBytes,
+      maxUploadBytes,
+    });
+    options.onWholeComplete?.({ result, elapsedMs: Date.now() - wholeStartedAt });
+    return result;
+  } catch (error) {
+    options.onWholeSkip?.({ error, elapsedMs: Date.now() - wholeStartedAt });
+    if (pcm.byteLength <= targetBytes || !isUploadTooLargeError(error)) throw error;
+  }
+
+  let pending: Uint8Array = pcm;
+  let processedBytes = 0;
+  let overlapPcm: Uint8Array = new Uint8Array(0);
+  let text = '';
+  const segments: RuntimeTranscriptionSegment[] = [];
+  let billableAudioDurationMs = 0;
+  let provider: RuntimeResult['provider'] = 'fallback';
+  let credentialSource: RuntimeResult['credentialSource'] = null;
+  let model: string | null = null;
+  let index = 0;
+
+  while (pending.byteLength > 0) {
+    const finalChunk = pending.byteLength <= targetBytes;
+    const cutBytes = finalChunk ? pending.byteLength : quietCutByteOffset(pending, targetBytes);
+    const { head, tail } = splitPcmAt(pending, cutBytes);
+    if (head.byteLength === 0) break;
+
+    const windowPcm = appendPcm(overlapPcm, head);
+    const startMs = Math.max(0, pcmDurationMs(processedBytes) - pcmDurationMs(overlapPcm.byteLength));
+    processedBytes += head.byteLength;
+    const endMs = pcmDurationMs(processedBytes);
+    overlapPcm = tailPcm(head, overlapBytes);
+    pending = tail;
+    index += 1;
+
+    const startedAt = Date.now();
+    const chunk = { index, startMs, endMs, bytes: head.byteLength, windowBytes: windowPcm.byteLength };
+    options.onChunkStart?.(chunk);
+    try {
+      const prompt = transcriptPromptTail(text) ?? options.prompt;
+      const result = await transcribePcm16(windowPcm, {
+        ...transcriptionOptions,
+        prompt,
+        responseFormat: 'verbose_json',
+        timestampGranularities: ['segment'],
+        maxUploadBytes,
+      });
+      provider = result.provider;
+      credentialSource = result.credentialSource;
+      model = result.model;
+      billableAudioDurationMs += result.billableAudioDurationMs ?? result.audioDurationMs;
+      const chunkSegments = offsetTranscriptionSegments(result.segments, startMs);
+      text = chunkSegments.length > 0 ? mergeTimestampedTranscriptText(text, segments, chunkSegments) : mergeTranscriptText(text, result.text);
+      options.onChunkComplete?.({ ...chunk, result, elapsedMs: Date.now() - startedAt });
+    } catch (error) {
+      options.onChunkError?.({ ...chunk, error, elapsedMs: Date.now() - startedAt });
+      throw error;
     }
   }
-  return `${cleanExisting} ${cleanNext}`.trim();
+
+  return {
+    provider,
+    credentialSource,
+    model,
+    audioDurationMs: pcmDurationMs(pcm.byteLength),
+    billableAudioDurationMs,
+    text: text.trim(),
+    segments,
+  };
 }
 
 function liveRecordingPayload(recording: VoiceRecordingRecord): Record<string, unknown> {
@@ -1431,7 +1632,8 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
   ) => {
     if (result.provider !== 'groq') return;
     if (result.credentialSource !== 'platform_groq_key') return;
-    const costDollars = groqSttCostDollars(result.audioDurationMs);
+    const billableAudioDurationMs = result.billableAudioDurationMs ?? result.audioDurationMs;
+    const costDollars = groqSttCostDollars(billableAudioDurationMs);
     db.recordBillableUsage({
       userId,
       threadId: metadata.assistantThreadId ?? null,
@@ -1440,7 +1642,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       credentialSource: result.credentialSource,
       model: result.model,
       operation: 'speech_to_text',
-      unitCount: result.audioDurationMs,
+      unitCount: billableAudioDurationMs,
       vendorCostMicros: dollarsToVendorMicros(costDollars),
       chargedMicrocredits: dollarsToChargedMicrocredits(costDollars),
       status: 'succeeded',
@@ -2784,10 +2986,10 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         reply.code(206);
         reply.header('content-range', `bytes ${range.start}-${range.end}/${stat.size}`);
         reply.header('content-length', String(range.end - range.start + 1));
-        return reply.send(createReadStream(recording.filePath, { start: range.start, end: range.end }));
+        return reply.send(readFileSync(recording.filePath).subarray(range.start, range.end + 1));
       }
       reply.header('content-length', String(stat.size));
-      return reply.send(createReadStream(recording.filePath));
+      return reply.send(readFileSync(recording.filePath));
     }),
   );
 
@@ -2867,9 +3069,119 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         if (groqCredential?.source === 'platform_groq_key' && pcm.byteLength >= 1600) {
           db.requirePositiveCreditBalance(ctx.user.id, 'Groq recording retranscription');
         }
-        const transcription = await transcribePcm16(pcm, {
+        const transcription = await transcribePcm16Windowed(pcm, {
           apiKey: groqCredential?.apiKey,
           credentialSource: groqCredential?.source,
+          onWholeStart: (attempt) => {
+            addLog(ctx.user.id, {
+              deviceId: recording.deviceId,
+              source: 'web',
+              level: 'info',
+              message: 'Voice recording retranscription whole-file started',
+              detailsJson: JSON.stringify({
+                recordingId: recording.id,
+                voiceSessionId: recording.voiceSessionId,
+                mode: recording.mode,
+                ...attempt,
+              }),
+            });
+          },
+          onWholeComplete: (attempt) => {
+            addLog(ctx.user.id, {
+              deviceId: recording.deviceId,
+              source: 'web',
+              level: 'info',
+              message: 'Voice recording retranscription whole-file completed',
+              detailsJson: JSON.stringify({
+                recordingId: recording.id,
+                voiceSessionId: recording.voiceSessionId,
+                mode: recording.mode,
+                provider: attempt.result.provider,
+                model: attempt.result.model,
+                audioFormat: attempt.result.audioFormat ?? null,
+                uploadBytes: attempt.result.uploadBytes ?? null,
+                billableAudioDurationMs: attempt.result.billableAudioDurationMs ?? attempt.result.audioDurationMs,
+                transcriptChars: attempt.result.text.length,
+                segmentCount: attempt.result.segments?.length ?? 0,
+                elapsedMs: attempt.elapsedMs,
+              }),
+            });
+          },
+          onWholeSkip: (attempt) => {
+            addLog(ctx.user.id, {
+              deviceId: recording.deviceId,
+              source: 'web',
+              level: 'info',
+              message: 'Voice recording retranscription whole-file skipped',
+              detailsJson: JSON.stringify({
+                recordingId: recording.id,
+                voiceSessionId: recording.voiceSessionId,
+                mode: recording.mode,
+                error: attempt.error instanceof Error ? attempt.error.message : String(attempt.error),
+                elapsedMs: attempt.elapsedMs,
+              }),
+            });
+          },
+          onChunkStart: (chunk) => {
+            addLog(ctx.user.id, {
+              deviceId: recording.deviceId,
+              source: 'web',
+              level: 'info',
+              message: 'Voice recording retranscription chunk started',
+              detailsJson: JSON.stringify({
+                recordingId: recording.id,
+                voiceSessionId: recording.voiceSessionId,
+                mode: recording.mode,
+                ...chunk,
+              }),
+            });
+          },
+          onChunkComplete: (chunk) => {
+            addLog(ctx.user.id, {
+              deviceId: recording.deviceId,
+              source: 'web',
+              level: 'info',
+              message: 'Voice recording retranscription chunk completed',
+              detailsJson: JSON.stringify({
+                recordingId: recording.id,
+                voiceSessionId: recording.voiceSessionId,
+                mode: recording.mode,
+                index: chunk.index,
+                startMs: chunk.startMs,
+                endMs: chunk.endMs,
+                bytes: chunk.bytes,
+                windowBytes: chunk.windowBytes,
+                provider: chunk.result.provider,
+                model: chunk.result.model,
+                audioFormat: chunk.result.audioFormat ?? null,
+                uploadBytes: chunk.result.uploadBytes ?? null,
+                billableAudioDurationMs: chunk.result.billableAudioDurationMs ?? chunk.result.audioDurationMs,
+                transcriptChars: chunk.result.text.length,
+                segmentCount: chunk.result.segments?.length ?? 0,
+                elapsedMs: chunk.elapsedMs,
+              }),
+            });
+          },
+          onChunkError: (chunk) => {
+            addLog(ctx.user.id, {
+              deviceId: recording.deviceId,
+              source: 'web',
+              level: 'error',
+              message: 'Voice recording retranscription chunk failed',
+              detailsJson: JSON.stringify({
+                recordingId: recording.id,
+                voiceSessionId: recording.voiceSessionId,
+                mode: recording.mode,
+                index: chunk.index,
+                startMs: chunk.startMs,
+                endMs: chunk.endMs,
+                bytes: chunk.bytes,
+                windowBytes: chunk.windowBytes,
+                error: chunk.error instanceof Error ? chunk.error.message : String(chunk.error),
+                elapsedMs: chunk.elapsedMs,
+              }),
+            });
+          },
         });
         const text = transcription.text.trim();
         if (text) {
@@ -2906,6 +3218,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
             provider: transcription.provider,
             model: transcription.model,
             audioDurationMs: transcription.audioDurationMs,
+            billableAudioDurationMs: transcription.billableAudioDurationMs ?? transcription.audioDurationMs,
             transcriptChars: text.length,
             elapsedMs: Date.now() - startedAt,
           }),
@@ -3188,6 +3501,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           bytes: wav.byteLength,
           pcmBytes: pcm.byteLength,
           durationMs: transcription.audioDurationMs,
+          billableAudioDurationMs: transcription.billableAudioDurationMs ?? transcription.audioDurationMs,
           provider: transcription.provider,
           model: transcription.model,
           recordingId: saved.recording.id,
@@ -4801,9 +5115,125 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
             if (groqSpeechCredential?.source === 'platform_groq_key' && transcriptionPcm.byteLength >= 1600) {
               db.requirePositiveCreditBalance(device.userId, 'Groq speech transcription');
             }
-            transcription = await transcribePcm16(transcriptionPcm, {
+            transcription = await transcribePcm16Windowed(transcriptionPcm, {
               apiKey: groqSpeechCredential?.apiKey,
               credentialSource: groqSpeechCredential?.source,
+              onWholeStart: (attempt) => {
+                addLog(device.userId, {
+                  deviceId: device.id,
+                  source: device.deviceType,
+                  level: 'info',
+                  message: 'Voice final transcription whole-file started',
+                  detailsJson: JSON.stringify({
+                    mode: streamMode,
+                    voiceSessionId: session.id,
+                    recordingId: savedRecording?.recording.id ?? null,
+                    finalizeReason,
+                    ...attempt,
+                  }),
+                });
+              },
+              onWholeComplete: (attempt) => {
+                addLog(device.userId, {
+                  deviceId: device.id,
+                  source: device.deviceType,
+                  level: 'info',
+                  message: 'Voice final transcription whole-file completed',
+                  detailsJson: JSON.stringify({
+                    mode: streamMode,
+                    voiceSessionId: session.id,
+                    recordingId: savedRecording?.recording.id ?? null,
+                    finalizeReason,
+                    provider: attempt.result.provider,
+                    model: attempt.result.model,
+                    audioFormat: attempt.result.audioFormat ?? null,
+                    uploadBytes: attempt.result.uploadBytes ?? null,
+                    billableAudioDurationMs: attempt.result.billableAudioDurationMs ?? attempt.result.audioDurationMs,
+                    transcriptChars: attempt.result.text.length,
+                    segmentCount: attempt.result.segments?.length ?? 0,
+                    elapsedMs: attempt.elapsedMs,
+                  }),
+                });
+              },
+              onWholeSkip: (attempt) => {
+                addLog(device.userId, {
+                  deviceId: device.id,
+                  source: device.deviceType,
+                  level: 'info',
+                  message: 'Voice final transcription whole-file skipped',
+                  detailsJson: JSON.stringify({
+                    mode: streamMode,
+                    voiceSessionId: session.id,
+                    recordingId: savedRecording?.recording.id ?? null,
+                    finalizeReason,
+                    error: attempt.error instanceof Error ? attempt.error.message : String(attempt.error),
+                    elapsedMs: attempt.elapsedMs,
+                  }),
+                });
+              },
+              onChunkStart: (chunk) => {
+                addLog(device.userId, {
+                  deviceId: device.id,
+                  source: device.deviceType,
+                  level: 'info',
+                  message: 'Voice final transcription chunk started',
+                  detailsJson: JSON.stringify({
+                    mode: streamMode,
+                    voiceSessionId: session.id,
+                    recordingId: savedRecording?.recording.id ?? null,
+                    finalizeReason,
+                    ...chunk,
+                  }),
+                });
+              },
+              onChunkComplete: (chunk) => {
+                addLog(device.userId, {
+                  deviceId: device.id,
+                  source: device.deviceType,
+                  level: 'info',
+                  message: 'Voice final transcription chunk completed',
+                  detailsJson: JSON.stringify({
+                    mode: streamMode,
+                    voiceSessionId: session.id,
+                    recordingId: savedRecording?.recording.id ?? null,
+                    finalizeReason,
+                    index: chunk.index,
+                    startMs: chunk.startMs,
+                    endMs: chunk.endMs,
+                    bytes: chunk.bytes,
+                    windowBytes: chunk.windowBytes,
+                    provider: chunk.result.provider,
+                    model: chunk.result.model,
+                    audioFormat: chunk.result.audioFormat ?? null,
+                    uploadBytes: chunk.result.uploadBytes ?? null,
+                    billableAudioDurationMs: chunk.result.billableAudioDurationMs ?? chunk.result.audioDurationMs,
+                    transcriptChars: chunk.result.text.length,
+                    segmentCount: chunk.result.segments?.length ?? 0,
+                    elapsedMs: chunk.elapsedMs,
+                  }),
+                });
+              },
+              onChunkError: (chunk) => {
+                addLog(device.userId, {
+                  deviceId: device.id,
+                  source: device.deviceType,
+                  level: 'error',
+                  message: 'Voice final transcription chunk failed',
+                  detailsJson: JSON.stringify({
+                    mode: streamMode,
+                    voiceSessionId: session.id,
+                    recordingId: savedRecording?.recording.id ?? null,
+                    finalizeReason,
+                    index: chunk.index,
+                    startMs: chunk.startMs,
+                    endMs: chunk.endMs,
+                    bytes: chunk.bytes,
+                    windowBytes: chunk.windowBytes,
+                    error: chunk.error instanceof Error ? chunk.error.message : String(chunk.error),
+                    elapsedMs: chunk.elapsedMs,
+                  }),
+                });
+              },
             });
           } catch (error: any) {
             addLog(device.userId, {
@@ -4839,6 +5269,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
               provider: transcription.provider,
               model: transcription.model,
               audioDurationMs: transcription.audioDurationMs,
+              billableAudioDurationMs: transcription.billableAudioDurationMs ?? transcription.audioDurationMs,
               transcriptChars: transcript.length,
               elapsedMs: Date.now() - finalTranscriptionStartedAt,
               fragmentBytes: recordingPcm.byteLength,
