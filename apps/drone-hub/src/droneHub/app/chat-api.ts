@@ -17,6 +17,11 @@ export type FetchDroneChatTranscriptResult = {
   notModified: boolean;
 };
 
+export type FetchDroneChatStateResult = {
+  transcripts: TranscriptItem[];
+  pending: PendingPrompt[];
+};
+
 export type DroneChatEventRef = {
   droneId?: string;
   chatName?: string;
@@ -238,6 +243,31 @@ export async function fetchDroneChatTranscript(
     `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/transcript?${qs.toString()}`,
   );
   return Array.isArray(data?.transcripts) ? data.transcripts : [];
+}
+
+export async function fetchDroneChatState(
+  requestJson: RequestJson,
+  opts: {
+    droneId: string;
+    chatName: string;
+    turn?: 'all' | 'last' | number;
+    tail?: number;
+  },
+): Promise<FetchDroneChatStateResult> {
+  const droneId = String(opts.droneId ?? '').trim();
+  const chatName = String(opts.chatName ?? '').trim() || 'default';
+  const turn = opts.turn ?? 'all';
+  const qs = new URLSearchParams({ turn: String(turn) });
+  if (typeof opts.tail === 'number' && Number.isFinite(opts.tail) && opts.tail > 0) {
+    qs.set('tail', String(Math.floor(opts.tail)));
+  }
+  const data = await requestJson<{ ok: true; transcripts: TranscriptItem[]; pending: PendingPrompt[] }>(
+    `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/state?${qs.toString()}`,
+  );
+  return {
+    transcripts: Array.isArray(data?.transcripts) ? data.transcripts : [],
+    pending: Array.isArray(data?.pending) ? data.pending : [],
+  };
 }
 
 export async function fetchDroneChatTranscriptCached(opts: {

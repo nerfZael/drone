@@ -8,9 +8,10 @@ export type RemoteSession = {
 };
 
 export type DroneListResponse = { ok: true; drones: DroneSummary[] };
-export type ChatListResponse = { ok: true; id: string; name: string; chats: Array<{ chat: string; name?: string }> };
+export type ChatListResponse = { ok: true; id: string; name: string; chats: Array<string | { chat?: string; name?: string }> };
 export type TranscriptResponse = { ok: true; transcripts: TranscriptItem[] };
 export type PendingResponse = { ok: true; pending: PendingPrompt[] };
+export type ChatStateResponse = { ok: true; transcripts: TranscriptItem[]; pending: PendingPrompt[] };
 
 let csrfToken: string | null = null;
 
