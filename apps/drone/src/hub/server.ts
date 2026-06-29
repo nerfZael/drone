@@ -25577,9 +25577,20 @@ export async function startDroneHubApiServer(opts: {
       // GET /api/drones/:id/chats
       if (method === 'GET' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'drones' && parts[3] === 'chats') {
         const droneRef = decodeURIComponent(parts[2]);
-        const resolved = await resolveDroneOrRespond(res, droneRef);
-        if (!resolved) return;
+        const resolved = await resolveDroneOrPendingForReadRef(droneRef);
+        if (!resolved) {
+          json(res, 404, { ok: false, error: `unknown drone: ${droneRef}` });
+          return;
+        }
         const droneId = resolved.id;
+        if (resolved.kind === 'pending') {
+          const droneName = String(resolved.pending?.name ?? droneRef).trim() || droneRef;
+          const startupChats = [
+            ...new Set(normalizePendingStartupPrompts((resolved.pending as any)?.startupQueuedPrompts).map((item) => item.chatName)),
+          ].filter(Boolean);
+          json(res, 200, { ok: true, id: droneId, name: droneName, chats: startupChats.length > 0 ? startupChats : ['default'] });
+          return;
+        }
         const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
         const importedChats = importResolvedDroneChatsToStore(droneId, resolved.drone);
         const storeChats = listChatsFromStore({ droneId });

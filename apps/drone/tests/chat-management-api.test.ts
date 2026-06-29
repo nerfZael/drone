@@ -856,6 +856,11 @@ describeSocketSuite('chat management api', () => {
       };
     });
 
+    const chats = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats`);
+    expect(chats.r.status).toBe(200);
+    expect(chats.data?.ok).toBe(true);
+    expect(chats.data?.chats).toEqual(['default', 'review']);
+
     const state = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=50`);
     expect(state.r.status).toBe(200);
     expect(state.data?.ok).toBe(true);
