@@ -100,7 +100,10 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
 
   const fetchChats = React.useCallback(async (droneId: string) => {
     const data = await remoteRequestJson<ChatListResponse>(`/api/drones/${encodeURIComponent(droneId)}/chats`);
-    return (Array.isArray(data.chats) ? data.chats : []).map((item) => String(item.chat ?? item.name ?? '')).filter(Boolean);
+    return (Array.isArray(data.chats) ? data.chats : [])
+      .map((item) => (typeof item === 'string' ? item : String(item.chat ?? item.name ?? '')))
+      .map((item) => String(item).trim())
+      .filter(Boolean);
   }, []);
 
   const fetchChatState = React.useCallback(async (droneId: string, chatName: string, signal?: AbortSignal): Promise<RemoteChatState> => {
