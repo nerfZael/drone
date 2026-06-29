@@ -622,6 +622,55 @@ describeSocketSuite('chat management api', () => {
     expect(reg?.drones?.[droneId]?.chats?.review).toBeUndefined();
   });
 
+  test('combined state reads do not create missing chats', async () => {
+    const droneId = 'drone-chat-state-read-only';
+    await seedDrone(droneId);
+
+    const missing = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/review/state?turn=all`);
+    expect(missing.r.status).toBe(404);
+
+    const reg: any = await loadRegistry();
+    expect(reg?.drones?.[droneId]?.chats?.review).toBeUndefined();
+  });
+
+  test('combined state route supports a chat named state', async () => {
+    const droneId = 'drone-chat-state-name';
+    await seedDrone(droneId);
+
+    const created = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'state' }),
+    });
+    expect(created.r.status).toBe(201);
+
+    const state = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/state/state?turn=all&tail=50`);
+    expect(state.r.status).toBe(200);
+    expect(state.data?.ok).toBe(true);
+    expect(state.data?.chat).toBe('state');
+    expect(state.data?.transcripts).toEqual([]);
+    expect(state.data?.pending).toEqual([]);
+  });
+
+  test('combined state preserves custom-agent transcript error shape', async () => {
+    const droneId = 'drone-chat-state-custom-agent';
+    await seedDrone(droneId);
+    await updateRegistry((reg: any) => {
+      const entry = reg?.drones?.[droneId]?.chats?.default;
+      if (!entry) throw new Error('missing seeded chat entry');
+      entry.agent = { kind: 'custom', id: 'custom-test', label: 'Custom Test', command: 'custom-agent' };
+    });
+
+    const transcript = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/transcript?turn=all`);
+    expect(transcript.r.status).toBe(410);
+
+    const state = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=50`);
+    expect(state.r.status).toBe(410);
+    expect(state.data?.ok).toBe(false);
+    expect(state.data?.error).toBe(transcript.data?.error);
+    expect(state.data?.agent).toEqual(transcript.data?.agent);
+  });
+
   test('archives chats when delete mode is archive and supports restore/delete-now', async () => {
     const droneId = 'drone-chat-archive';
     await seedDrone(droneId);
