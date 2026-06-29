@@ -680,7 +680,7 @@ function isUniqueConstraintError(error: unknown): boolean {
 }
 
 const ASSISTANT_DEFAULT_PROVIDER = 'openai';
-const ASSISTANT_DEFAULT_MODEL = 'gpt-5.5';
+const ASSISTANT_DEFAULT_MODEL = 'chat-latest';
 const ASSISTANT_DEFAULT_THINKING_LEVEL = 'off';
 const ASSISTANT_DEFAULT_ENABLED_TOOLS = [
   'assistant_artifacts',
@@ -702,6 +702,11 @@ const ASSISTANT_DEFAULT_CAPABILITIES: AssistantThreadCapabilities = {
   externalCalls: true,
   futureIntegrations: false,
 };
+
+function assistantDefaultModelForProvider(provider: string): string {
+  return provider === 'codex' ? 'gpt-5.5' : ASSISTANT_DEFAULT_MODEL;
+}
+
 const ASSISTANT_NORMAL_SYSTEM_PROMPT_DEFAULT = 'You are VoiceStream, a concise standalone assistant. Answer directly and keep useful context in the thread.';
 const ASSISTANT_VOICE_SYSTEM_PROMPT_DEFAULT = 'You are VoiceStream, a concise voice assistant. Keep spoken replies short and practical.';
 const ASSISTANT_DEFAULT_PROFILE_NAME = 'Sebastian';
@@ -3150,6 +3155,9 @@ export class VoiceStreamNextDb {
     input: Partial<Pick<AssistantSettingsRecord, 'normalSystemPrompt' | 'voiceSystemPrompt' | 'defaultProvider' | 'defaultModel' | 'defaultThinkingLevel' | 'defaultEnabledTools'>>,
   ): AssistantSettingsRecord {
     const current = this.ensureAssistantSettings(userId);
+    const defaultProvider = input.defaultProvider ?? current.defaultProvider;
+    const defaultModel = input.defaultModel
+      ?? (input.defaultProvider !== undefined ? assistantDefaultModelForProvider(defaultProvider) : current.defaultModel);
     const at = nowIso();
     this.db
       .query(
@@ -3168,8 +3176,8 @@ export class VoiceStreamNextDb {
       .run({
         $normalSystemPrompt: input.normalSystemPrompt ?? current.normalSystemPrompt,
         $voiceSystemPrompt: input.voiceSystemPrompt ?? current.voiceSystemPrompt,
-        $defaultProvider: input.defaultProvider ?? current.defaultProvider,
-        $defaultModel: input.defaultModel ?? current.defaultModel,
+        $defaultProvider: defaultProvider,
+        $defaultModel: defaultModel,
         $defaultThinkingLevel: input.defaultThinkingLevel ?? current.defaultThinkingLevel,
         $defaultEnabledToolsJson: JSON.stringify(input.defaultEnabledTools ?? current.defaultEnabledTools),
         $updatedAt: at,
@@ -4326,6 +4334,9 @@ export class VoiceStreamNextDb {
     const profile = this.enabledAssistantProfile(userId, input.assistantProfileId);
     if (!profile) throw Object.assign(new Error('unknown or disabled assistant profile'), { statusCode: 404 });
     const enabledTools = input.enabledTools ?? this.resolvedAssistantProfileEnabledTools(userId, profile.id) ?? settings.defaultEnabledTools;
+    const provider = input.provider?.trim() || settings.defaultProvider;
+    const modelFallback = assistantDefaultModelForProvider(provider);
+    const model = input.model?.trim() || (provider === settings.defaultProvider ? settings.defaultModel : '') || modelFallback;
     this.db
       .query(
         `
@@ -4382,8 +4393,8 @@ export class VoiceStreamNextDb {
         $assistantProfileId: profile.id,
         $title: input.title?.trim() || 'New thread',
         $source: input.source?.trim() || 'voice',
-        $provider: input.provider?.trim() || settings.defaultProvider,
-        $model: input.model?.trim() || settings.defaultModel,
+        $provider: provider,
+        $model: model,
         $thinkingLevel: input.thinkingLevel?.trim() || settings.defaultThinkingLevel,
         $voiceEnabled: 1,
         $autoApprove: input.autoApprove ? 1 : 0,

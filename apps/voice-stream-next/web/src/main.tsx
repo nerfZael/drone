@@ -3447,10 +3447,10 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const codexConnection = assistantSnapshotData?.codexConnection ?? { connected: false, accountId: null, expiresAt: null, updatedAt: null };
   const assistantSettings = assistantSnapshotData?.assistantSettings ?? null;
   const activeProvider = activeThread?.provider ?? 'openai';
-  const activeModel = activeThread?.model ?? 'gpt-5.5';
+  const activeModel = activeThread?.model ?? 'chat-latest';
   const activeThinkingLevel = activeThread?.thinkingLevel ?? 'off';
   const defaultProvider = assistantSettings?.defaultProvider ?? 'openai';
-  const defaultModel = assistantSettings?.defaultModel ?? 'gpt-5.5';
+  const defaultModel = assistantSettings?.defaultModel ?? 'chat-latest';
   const defaultThinkingLevel = assistantSettings?.defaultThinkingLevel ?? 'off';
   const modelOptions = assistantSnapshotData?.models ?? [];
   const providerOptions = ASSISTANT_PROVIDERS.map((provider) => ({
