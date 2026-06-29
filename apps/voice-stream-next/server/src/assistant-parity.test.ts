@@ -112,7 +112,7 @@ describe('assistant parity runtime', () => {
 
     expect(thread.provider).toBe('openai');
     expect(thread.model).toBe('chat-latest');
-    expect(snapshot.settings.defaultModel).toBe('chat-latest');
+    expect(snapshot.assistantSettings.defaultModel).toBe('chat-latest');
     expect(snapshot.models).toContainEqual({ provider: 'openai', id: 'chat-latest', name: 'Chat Latest Instant', thinkingLevel: 'off' });
     expect(snapshot.models).toContainEqual({ provider: 'openai', id: 'gpt-5.5', name: 'GPT-5.5 None', thinkingLevel: 'off' });
     expect(db.createThread(user.id, { title: 'Codex default', provider: 'codex' }).model).toBe('gpt-5.5');
