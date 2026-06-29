@@ -201,11 +201,12 @@ const ASSISTANT_TOOLS: AssistantToolSummary[] = [
 ];
 
 const MODEL_OPTIONS: AssistantModelOption[] = [
-  { provider: 'openai', id: 'gpt-5.5', name: 'GPT-5.5 Instant', thinkingLevel: 'off' },
+  { provider: 'openai', id: 'chat-latest', name: 'Chat Latest Instant', thinkingLevel: 'off' },
+  { provider: 'openai', id: 'gpt-5.5', name: 'GPT-5.5 None', thinkingLevel: 'off' },
   { provider: 'openai', id: 'gpt-5.5', name: 'GPT-5.5 Low', thinkingLevel: 'low' },
   { provider: 'openai', id: 'gpt-5.5', name: 'GPT-5.5 Medium', thinkingLevel: 'medium' },
   { provider: 'openai', id: 'gpt-5.5', name: 'GPT-5.5 High', thinkingLevel: 'high' },
-  { provider: 'codex', id: 'gpt-5.5', name: 'GPT-5.5 Instant', thinkingLevel: 'off' },
+  { provider: 'codex', id: 'gpt-5.5', name: 'GPT-5.5 None', thinkingLevel: 'off' },
   { provider: 'codex', id: 'gpt-5.5', name: 'GPT-5.5 Low', thinkingLevel: 'low' },
   { provider: 'codex', id: 'gpt-5.5', name: 'GPT-5.5 Medium', thinkingLevel: 'medium' },
   { provider: 'codex', id: 'gpt-5.5', name: 'GPT-5.5 High', thinkingLevel: 'high' },
@@ -1499,7 +1500,7 @@ function cleanProvider(raw: unknown): string {
 function cleanModel(raw: unknown, provider: string): string {
   const value = String(raw ?? '').trim();
   if (provider === 'codex') return value || 'gpt-5.5';
-  return value || 'gpt-5.5';
+  return value || 'chat-latest';
 }
 
 function cleanThinkingLevel(raw: unknown): string {

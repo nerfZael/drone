@@ -4042,13 +4042,17 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
   app.patch('/api/assistant/threads/:threadId', async (req, reply) =>
     withUser(req, reply, db, clerkEnabled, async (ctx) => {
       const threadId = String((req.params as any).threadId ?? '');
-      if (!db.thread(ctx.user.id, threadId)) throw Object.assign(new Error('unknown thread'), { statusCode: 404 });
+      const existingThread = db.thread(ctx.user.id, threadId);
+      if (!existingThread) throw Object.assign(new Error('unknown thread'), { statusCode: 404 });
       const body = jsonBody(req);
       const patch: Parameters<VoiceStreamNextDb['updateThread']>[2] = {};
       if (body.title !== undefined) patch.title = cleanText(body.title, 'New thread') || 'New thread';
       if (body.assistantProfileId !== undefined) patch.assistantProfileId = cleanText(body.assistantProfileId) || null;
       if (body.provider !== undefined) patch.provider = cleanText(body.provider, 'openai') || 'openai';
-      if (body.model !== undefined) patch.model = cleanText(body.model, 'gpt-5.5') || 'gpt-5.5';
+      if (body.model !== undefined) {
+        const modelFallback = (patch.provider ?? existingThread.provider) === 'codex' ? 'gpt-5.5' : 'chat-latest';
+        patch.model = cleanText(body.model, modelFallback) || modelFallback;
+      }
       if (body.thinkingLevel !== undefined) patch.thinkingLevel = cleanText(body.thinkingLevel, 'off') || 'off';
       if (body.voiceEnabled !== undefined) patch.voiceEnabled = true;
       if (body.autoApprove !== undefined) patch.autoApprove = Boolean(body.autoApprove);
@@ -4348,11 +4352,16 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
   app.patch('/api/assistant/settings', async (req, reply) =>
     withUser(req, reply, db, clerkEnabled, async (ctx) => {
       const body = jsonBody(req);
+      const existingSettings = db.ensureAssistantSettings(ctx.user.id);
+      const defaultProvider = body.defaultProvider === undefined ? undefined : cleanText(body.defaultProvider, 'openai');
+      const modelFallback = (defaultProvider ?? existingSettings.defaultProvider) === 'codex' ? 'gpt-5.5' : 'chat-latest';
       const settings = db.updateAssistantSettings(ctx.user.id, {
         normalSystemPrompt: body.normalSystemPrompt === undefined ? undefined : cleanText(body.normalSystemPrompt),
         voiceSystemPrompt: body.voiceSystemPrompt === undefined ? undefined : cleanText(body.voiceSystemPrompt),
-        defaultProvider: body.defaultProvider === undefined ? undefined : cleanText(body.defaultProvider, 'openai'),
-        defaultModel: body.defaultModel === undefined ? undefined : cleanText(body.defaultModel, 'gpt-5.5'),
+        defaultProvider,
+        defaultModel: body.defaultModel === undefined
+          ? (defaultProvider === undefined ? undefined : modelFallback)
+          : cleanText(body.defaultModel, modelFallback) || modelFallback,
         defaultThinkingLevel: body.defaultThinkingLevel === undefined ? undefined : cleanText(body.defaultThinkingLevel, 'off'),
         defaultEnabledTools: Array.isArray(body.defaultEnabledTools) ? body.defaultEnabledTools.map((tool: unknown) => cleanText(tool)).filter(Boolean) : undefined,
       });

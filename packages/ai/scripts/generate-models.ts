@@ -1167,6 +1167,26 @@ async function generateModels() {
 	}
 
 	// Add missing gpt models
+	if (!allModels.some(m => m.provider === "openai" && m.id === "chat-latest")) {
+		allModels.push({
+			id: "chat-latest",
+			name: "Chat Latest",
+			api: "openai-responses",
+			baseUrl: "https://api.openai.com/v1",
+			provider: "openai",
+			reasoning: false,
+			input: ["text", "image"],
+			cost: {
+				input: 5,
+				output: 30,
+				cacheRead: 0.5,
+				cacheWrite: 0,
+			},
+			contextWindow: 400000,
+			maxTokens: 128000,
+		});
+	}
+
 	if (!allModels.some(m => m.provider === "openai" && m.id === "gpt-5-chat-latest")) {
 		allModels.push({
 			id: "gpt-5-chat-latest",
