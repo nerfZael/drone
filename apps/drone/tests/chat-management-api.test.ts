@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { startDroneHubApiServer } from '../src/hub/server';
 import { resetDroneRootDirForTests } from '../src/host/paths';
 import { loadRegistry, updateRegistry } from '../src/host/registry';
+import { upsertPendingPromptInStore } from '../src/hub/transcript-store';
 import { getSocketListenSupport } from './socket-listen-support';
 
 const listenSupport = getSocketListenSupport();
@@ -522,6 +523,131 @@ describeSocketSuite('chat management api', () => {
     expect(second.data).toBeNull();
   });
 
+  test('combined chat state matches transcript and pending reads', async () => {
+    const droneId = 'drone-chat-combined-state';
+    await seedDrone(droneId);
+
+    const firstAt = new Date(Date.now() - 60_000).toISOString();
+    const secondAt = new Date().toISOString();
+    await updateRegistry((reg: any) => {
+      const entry = reg?.drones?.[droneId]?.chats?.default;
+      if (!entry) throw new Error('missing seeded chat entry');
+      entry.turns = [
+        {
+          id: 'prompt-1',
+          at: firstAt,
+          promptAt: firstAt,
+          completedAt: firstAt,
+          prompt: 'first',
+          ok: true,
+          output: 'first done',
+        },
+        {
+          id: 'prompt-2',
+          at: secondAt,
+          promptAt: secondAt,
+          completedAt: secondAt,
+          prompt: 'second',
+          ok: true,
+          output: 'second done',
+        },
+      ];
+      entry.pendingPrompts = [
+        {
+          id: 'queued-1',
+          at: secondAt,
+          updatedAt: secondAt,
+          prompt: 'queued',
+          state: 'queued',
+        },
+        {
+          id: 'prompt-2',
+          at: secondAt,
+          updatedAt: secondAt,
+          prompt: 'second',
+          state: 'sent',
+        },
+      ];
+    });
+
+    const transcript = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/transcript?turn=all&tail=1`);
+    expect(transcript.r.status).toBe(200);
+    const pending = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    expect(pending.r.status).toBe(200);
+
+    const state = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=1`);
+    expect(state.r.status).toBe(200);
+    expect(state.data?.ok).toBe(true);
+    expect(state.data?.id).toBe(droneId);
+    expect(state.data?.chat).toBe('default');
+    expect(state.data?.selection).toBe('all');
+    expect(state.data?.transcripts).toEqual(transcript.data?.transcripts);
+    expect(state.data?.pending).toEqual(pending.data?.pending);
+    expect(state.data?.agent).toEqual(transcript.data?.agent);
+    expect(state.data?.transcripts?.map((row: any) => row.id)).toEqual(['prompt-2']);
+    expect((state.data?.pending ?? []).map((row: any) => row.id)).toContain('queued-1');
+    expect((state.data?.pending ?? []).map((row: any) => row.id)).toContain('prompt-2');
+
+    const etag = state.r.headers.get('etag');
+    expect(etag).toMatch(/^"sha256-/);
+    const unchanged = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=1`, {
+      headers: { 'if-none-match': etag ?? '' },
+    });
+    expect(unchanged.r.status).toBe(304);
+    expect(unchanged.data).toBeNull();
+
+    await updateRegistry((reg: any) => {
+      const entry = reg?.drones?.[droneId]?.chats?.default;
+      if (!entry) throw new Error('missing seeded chat entry');
+      entry.pendingPrompts = [
+        ...(Array.isArray(entry.pendingPrompts) ? entry.pendingPrompts : []),
+        {
+          id: 'queued-2',
+          at: new Date().toISOString(),
+          prompt: 'queued again',
+          state: 'queued',
+        },
+      ];
+    });
+
+    const pendingChanged = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=1`, {
+      headers: { 'if-none-match': etag ?? '' },
+    });
+    expect(pendingChanged.r.status).toBe(200);
+    expect((pendingChanged.data?.pending ?? []).map((row: any) => row.id)).toContain('queued-2');
+  });
+
+  test('combined chat state includes store-only pending rows', async () => {
+    const droneId = 'drone-chat-state-store-pending';
+    await seedDrone(droneId);
+
+    const now = new Date().toISOString();
+    upsertPendingPromptInStore({
+      droneId,
+      chatName: 'default',
+      pending: {
+        id: 'store-only-queued',
+        at: now,
+        updatedAt: now,
+        prompt: 'queued only in store',
+        state: 'queued',
+      },
+    });
+
+    const state = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=50`);
+    expect(state.r.status).toBe(200);
+    expect(state.data?.ok).toBe(true);
+    expect(state.data?.pending).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'store-only-queued',
+          prompt: 'queued only in store',
+          state: 'queued',
+        }),
+      ]),
+    );
+  });
+
   test('transcript reads do not create missing chats', async () => {
     const droneId = 'drone-chat-transcript-read-only';
     await seedDrone(droneId);
@@ -542,6 +668,55 @@ describeSocketSuite('chat management api', () => {
 
     const reg: any = await loadRegistry();
     expect(reg?.drones?.[droneId]?.chats?.review).toBeUndefined();
+  });
+
+  test('combined state reads do not create missing chats', async () => {
+    const droneId = 'drone-chat-state-read-only';
+    await seedDrone(droneId);
+
+    const missing = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/review/state?turn=all`);
+    expect(missing.r.status).toBe(404);
+
+    const reg: any = await loadRegistry();
+    expect(reg?.drones?.[droneId]?.chats?.review).toBeUndefined();
+  });
+
+  test('combined state route supports a chat named state', async () => {
+    const droneId = 'drone-chat-state-name';
+    await seedDrone(droneId);
+
+    const created = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'state' }),
+    });
+    expect(created.r.status).toBe(201);
+
+    const state = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/state/state?turn=all&tail=50`);
+    expect(state.r.status).toBe(200);
+    expect(state.data?.ok).toBe(true);
+    expect(state.data?.chat).toBe('state');
+    expect(state.data?.transcripts).toEqual([]);
+    expect(state.data?.pending).toEqual([]);
+  });
+
+  test('combined state preserves custom-agent transcript error shape', async () => {
+    const droneId = 'drone-chat-state-custom-agent';
+    await seedDrone(droneId);
+    await updateRegistry((reg: any) => {
+      const entry = reg?.drones?.[droneId]?.chats?.default;
+      if (!entry) throw new Error('missing seeded chat entry');
+      entry.agent = { kind: 'custom', id: 'custom-test', label: 'Custom Test', command: 'custom-agent' };
+    });
+
+    const transcript = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/transcript?turn=all`);
+    expect(transcript.r.status).toBe(410);
+
+    const state = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=50`);
+    expect(state.r.status).toBe(410);
+    expect(state.data?.ok).toBe(false);
+    expect(state.data?.error).toBe(transcript.data?.error);
+    expect(state.data?.agent).toEqual(transcript.data?.agent);
   });
 
   test('archives chats when delete mode is archive and supports restore/delete-now', async () => {
@@ -658,6 +833,68 @@ describeSocketSuite('chat management api', () => {
     expect(output.data?.ok).toBe(true);
     expect(String(output.data?.text ?? '')).toBe('');
     expect(Number(output.data?.offsetBytes ?? 0)).toBe(0);
+  });
+
+  test('combined chat state returns startup pending prompts for pending drones', async () => {
+    const droneId = 'pending-chat-state-read';
+    const now = new Date().toISOString();
+    await updateRegistry((reg: any) => {
+      reg.pending = reg.pending ?? {};
+      reg.pending[droneId] = {
+        id: droneId,
+        name: droneId,
+        runtime: 'host',
+        repoPath: '',
+        containerPort: 7777,
+        build: false,
+        createdAt: now,
+        updatedAt: now,
+        phase: 'starting',
+        message: 'Starting...',
+        startupQueuedPrompts: [
+          {
+            id: 'startup-default',
+            chatName: 'default',
+            at: now,
+            prompt: 'default startup prompt',
+            state: 'queued',
+            updatedAt: now,
+          },
+          {
+            id: 'startup-review',
+            chatName: 'review',
+            at: now,
+            prompt: 'review startup prompt',
+            state: 'queued',
+            updatedAt: now,
+          },
+        ],
+      };
+    });
+
+    const chats = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats`);
+    expect(chats.r.status).toBe(200);
+    expect(chats.data?.ok).toBe(true);
+    expect(chats.data?.chats).toEqual(['default', 'review']);
+
+    const state = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=50`);
+    expect(state.r.status).toBe(200);
+    expect(state.data?.ok).toBe(true);
+    expect(state.data?.transcripts).toEqual([]);
+    expect(state.data?.selection).toBe('all');
+    expect(state.data?.pending).toEqual([
+      {
+        id: 'startup-default',
+        at: now,
+        prompt: 'default startup prompt',
+        state: 'queued',
+        updatedAt: now,
+      },
+    ]);
+
+    const pending = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    expect(pending.r.status).toBe(200);
+    expect(state.data?.pending).toEqual(pending.data?.pending);
   });
 
   test('does not surface completed transcript prompts as pending or fleet work', async () => {

@@ -7,10 +7,9 @@ import {
   remoteRequestJson,
   setRemoteCsrf,
   type ChatListResponse,
+  type ChatStateResponse,
   type DroneListResponse,
-  type PendingResponse,
   type RemoteSession,
-  type TranscriptResponse,
 } from './remote-api';
 
 type RemoteChatState = {
@@ -101,23 +100,20 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
 
   const fetchChats = React.useCallback(async (droneId: string) => {
     const data = await remoteRequestJson<ChatListResponse>(`/api/drones/${encodeURIComponent(droneId)}/chats`);
-    return (Array.isArray(data.chats) ? data.chats : []).map((item) => String(item.chat ?? item.name ?? '')).filter(Boolean);
+    return (Array.isArray(data.chats) ? data.chats : [])
+      .map((item) => (typeof item === 'string' ? item : String(item.chat ?? item.name ?? '')))
+      .map((item) => String(item).trim())
+      .filter(Boolean);
   }, []);
 
   const fetchChatState = React.useCallback(async (droneId: string, chatName: string, signal?: AbortSignal): Promise<RemoteChatState> => {
-    const [transcriptData, pendingData] = await Promise.all([
-      remoteRequestJson<TranscriptResponse>(
-        `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/transcript?turn=all&tail=50`,
-        signal ? { signal } : undefined,
-      ),
-      remoteRequestJson<PendingResponse>(
-        `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/pending`,
-        signal ? { signal } : undefined,
-      ),
-    ]);
+    const data = await remoteRequestJson<ChatStateResponse>(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/state?turn=all&tail=50`,
+      signal ? { signal } : undefined,
+    );
     return {
-      transcripts: Array.isArray(transcriptData.transcripts) ? transcriptData.transcripts : [],
-      pending: Array.isArray(pendingData.pending) ? pendingData.pending : [],
+      transcripts: Array.isArray(data.transcripts) ? data.transcripts : [],
+      pending: Array.isArray(data.pending) ? data.pending : [],
     };
   }, []);
 

@@ -36,7 +36,7 @@ import {
 import { parseIsoDateMs, type GroupMultiChatColumnRuntimeState } from './group-multi-chat-sort';
 import { openDroneTabFromLastPreview, resolveDroneOpenTabUrl } from './quick-actions';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
-import { droneChatEventMatches, fetchDroneChatTranscriptCached, sameTranscriptItems, sendDroneChatPrompt } from './chat-api';
+import { droneChatEventMatches, fetchDroneChatState, fetchDroneChatTranscriptCached, sameTranscriptItems, sendDroneChatPrompt } from './chat-api';
 import { subscribeDroneChatEvents } from './chat-events';
 
 const DirtyDroneApplyModal = React.lazy(async () => {
@@ -78,6 +78,7 @@ export function GroupMultiChatColumn({
 }: GroupMultiChatColumnProps) {
   const shownName = String(droneLabel ?? drone.name).trim() || drone.name;
   const chatName = React.useMemo(() => resolveChatNameForDrone(drone, preferredChat), [drone, preferredChat]);
+  const chatCacheKey = React.useMemo(() => `${drone.id}\u0000${chatName}`, [chatName, drone.id]);
   const droneHome = React.useMemo(() => droneHomePath(drone), [drone]);
   const [transcripts, setTranscripts] = React.useState<TranscriptItem[] | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -88,6 +89,7 @@ export function GroupMultiChatColumn({
   const [stoppingResponse, setStoppingResponse] = React.useState(false);
   const [localWaitingStartedAtMs, setLocalWaitingStartedAtMs] = React.useState<number | null>(null);
   const [optimisticPendingPrompts, setOptimisticPendingPrompts] = React.useState<PendingPrompt[]>([]);
+  const [initialPendingResp, setInitialPendingResp] = React.useState<{ key: string; pending: PendingPrompt[] } | null>(null);
   const [chatEventsConnected, setChatEventsConnected] = React.useState(false);
   const [chatEventsNonce, setChatEventsNonce] = React.useState(0);
   const [quickActionBusy, setQuickActionBusy] = React.useState<null | 'ssh' | 'pull' | 'push'>(null);
@@ -126,6 +128,7 @@ export function GroupMultiChatColumn({
     };
 
     setTranscripts(null);
+    setInitialPendingResp(null);
     transcriptEtagRef.current = null;
     fullTranscriptLoadedRef.current = false;
     setError(null);
@@ -193,7 +196,7 @@ export function GroupMultiChatColumn({
       try {
         const shouldLoadTailFirst = !loadedInitialTail && !fullTranscriptLoadedRef.current;
         if (shouldLoadTailFirst) {
-          const data = await fetchDroneChatTranscriptCached({
+          const data = await fetchDroneChatState(requestJson, {
             droneId: drone.id,
             chatName,
             turn: 'all',
@@ -201,6 +204,7 @@ export function GroupMultiChatColumn({
           });
           if (!mounted) return false;
           loadedInitialTail = true;
+          setInitialPendingResp({ key: chatCacheKey, pending: data.pending });
           setTranscripts((prev) => (sameTranscriptItems(prev, data.transcripts) ? prev : data.transcripts));
           setError(null);
           setLoading(false);
@@ -271,21 +275,26 @@ export function GroupMultiChatColumn({
       clearTimer();
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [chatName, drone.hubPhase, drone.id]);
+  }, [chatCacheKey, chatName, drone.hubPhase, drone.id]);
 
-  const { value: pendingResp } = usePoll<{ ok: true; pending: PendingPrompt[] }>(
+  const pendingPollEnabled = initialPendingResp?.key === chatCacheKey || transcripts !== null || Boolean(error);
+
+  const { value: pendingResp } = usePoll<{ key: string; pending: PendingPrompt[] }>(
     async () => {
-      if (isDroneStartingOrSeeding(drone.hubPhase)) return { ok: true, pending: [] };
-      return await fetchJson<{ ok: true; pending: PendingPrompt[] }>(
+      if (isDroneStartingOrSeeding(drone.hubPhase)) return { key: chatCacheKey, pending: [] };
+      const data = await fetchJson<{ ok: true; pending: PendingPrompt[] }>(
         `/api/drones/${encodeURIComponent(drone.id)}/chats/${encodeURIComponent(chatName)}/pending`,
       );
+      return { key: chatCacheKey, pending: Array.isArray(data?.pending) ? data.pending : [] };
     },
     chatEventsConnected ? 60_000 : 1000,
-    [chatName, drone.hubPhase, drone.id, chatEventsConnected, chatEventsNonce],
+    [chatCacheKey, chatName, drone.hubPhase, drone.id, chatEventsConnected, chatEventsNonce],
+    { enabled: pendingPollEnabled },
   );
 
   const pendingPrompts = React.useMemo(() => {
-    const server = Array.isArray(pendingResp?.pending) ? pendingResp.pending : [];
+    const initial = initialPendingResp?.key === chatCacheKey ? initialPendingResp.pending : [];
+    const server = pendingResp?.key === chatCacheKey && Array.isArray(pendingResp.pending) ? pendingResp.pending : initial;
     const byId = new Map<string, PendingPrompt>();
     for (const p of server) {
       if (p?.id) byId.set(p.id, p);
@@ -294,7 +303,7 @@ export function GroupMultiChatColumn({
       if (p?.id && !byId.has(p.id)) byId.set(p.id, p);
     }
     return Array.from(byId.values()).slice(-60);
-  }, [optimisticPendingPrompts, pendingResp]);
+  }, [chatCacheKey, initialPendingResp, optimisticPendingPrompts, pendingResp]);
 
   const visiblePendingPrompts = React.useMemo(() => {
     const ts = Array.isArray(transcripts) ? transcripts : [];
