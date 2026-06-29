@@ -57,6 +57,10 @@ data class AndroidReleaseInfo(
     val versionName: String?,
     val apkUrl: String?,
 )
+data class WakeConfirmationResult(
+    val confirmed: Boolean,
+    val text: String,
+)
 data class DashboardSummary(val displayName: String, val threadCount: Int, val deviceCount: Int, val logCount: Int, val logs: List<String>)
 data class AssistantExchange(val userMessage: String, val assistantMessage: String)
 data class AssistantThreadSummary(
@@ -551,6 +555,33 @@ class VoiceStreamApi(private val context: Context) {
         )
     }
 
+    fun confirmWakePhrase(pcm: ByteArray, expectedPhrase: String): WakeConfirmationResult {
+        val deviceId = pairedDeviceId()
+        val token = pairedDeviceToken()
+        if (deviceId.isBlank() || token.isBlank()) throw IOException("Pair this device before confirming wake audio.")
+        val config = loadConfig()
+        val url = "${config.serverUrl.trimEnd('/')}/api/voice/wake-confirmation?expectedPhrase=${URLEncoder.encode(expectedPhrase, Charsets.UTF_8.name())}"
+        val builder = Request.Builder()
+            .url(url)
+            .header("content-type", "application/octet-stream")
+            .header("x-voice-device-id", deviceId)
+            .header("x-voice-device-token", token)
+            .header("x-voice-installation-id", installationId())
+            .header("x-voice-client-version", BuildConfig.VERSION_CODE.toString())
+            .post(pcm.toRequestBody(OCTET_STREAM))
+        client.newCall(builder.build()).execute().use { response ->
+            val text = response.body.string()
+            if (!response.isSuccessful) {
+                throw IOException(ApiJsonResponse.errorMessage(text, "HTTP ${response.code}"))
+            }
+            val json = ApiJsonResponse.parseObject(text, "POST", "/api/voice/wake-confirmation")
+            return WakeConfirmationResult(
+                confirmed = json.optBoolean("confirmed", false),
+                text = json.optString("text"),
+            )
+        }
+    }
+
     private fun voiceApprovalSettingsJson(): JSONObject {
         val deviceId = pairedDeviceId()
         val token = pairedDeviceToken()
@@ -834,6 +865,7 @@ class VoiceStreamApi(private val context: Context) {
 
     private companion object {
         val JSON = "application/json; charset=utf-8".toMediaType()
+        val OCTET_STREAM = "application/octet-stream".toMediaType()
     }
 }
 

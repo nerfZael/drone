@@ -22,6 +22,9 @@ const LOCAL_VOICE_CUE_TONES = {
     { frequencyHz: 620, durationMs: 80 },
     { frequencyHz: 880, durationMs: 130 },
   ],
+  wake_pending: [
+    { frequencyHz: 540, durationMs: 45 },
+  ],
   sleep: [
     { frequencyHz: 760, durationMs: 90 },
     { frequencyHz: 420, durationMs: 160 },
@@ -56,6 +59,7 @@ const LOCAL_VOICE_CUE_TONES = {
 };
 
 const LOCAL_VOICE_CUE_GAINS = {
+  wake_pending: 0.035,
   stop_button: 0.0715,
   clipboard_transcription_success: 0.0845,
 };

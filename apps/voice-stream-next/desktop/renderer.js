@@ -3,6 +3,7 @@ const desktop = window.voiceStreamDesktop;
 const VOICE_PCM_SAMPLE_RATE_HZ = 16000;
 const PRE_ROLL_MAX_BYTES = pcmBytesForMs(1500);
 const MAX_PENDING_STREAM_BYTES = pcmBytesForMs(5000);
+const WAKE_CONFIRMATION_MIN_BYTES = pcmBytesForMs(50);
 const BASE_RECONNECT_DELAY_MS = 500;
 const MAX_RECONNECT_DELAY_MS = 10_000;
 const MAX_RECONNECT_EXPONENT = 4;
@@ -111,6 +112,7 @@ const state = {
   wakeProcessor: null,
   wakeUnsubscribe: null,
   wakeStarting: false,
+  wakeConfirmationInFlight: false,
   capturingShortcutKey: null,
   shortcutStatus: null,
   lastTranscriptionShortcutAt: 0,
@@ -1647,6 +1649,56 @@ function sendOrBufferStreamFrame(pcmBuffer) {
   if (state.mode === 'recording' || state.voiceStreamStarting) {
     pendingStreamBuffer.push(pcmBuffer);
   }
+}
+
+function concatPcmBuffers(buffers) {
+  const totalBytes = buffers.reduce((sum, buffer) => sum + (buffer?.byteLength || 0), 0);
+  const output = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const buffer of buffers) {
+    const bytes = new Uint8Array(buffer);
+    output.set(bytes, offset);
+    offset += bytes.byteLength;
+  }
+  return output;
+}
+
+async function confirmWakePhraseAudio(expectedPhrase) {
+  if (state.wakeConfirmationInFlight) return { confirmed: false, error: 'Wake confirmation is already running.' };
+  const phrase = String(expectedPhrase || '').trim();
+  if (!phrase) return { confirmed: false, error: 'Wake phrase is not configured.' };
+  const frames = typeof preRollBuffer.snapshot === 'function' ? preRollBuffer.snapshot() : [];
+  const pcm = concatPcmBuffers(frames);
+  if (pcm.byteLength < WAKE_CONFIRMATION_MIN_BYTES) {
+    return { confirmed: false, error: 'Not enough wake audio to confirm.' };
+  }
+  playLocalVoiceCue('wake_pending');
+  const headers = { 'content-type': 'application/octet-stream' };
+  if (state.config?.deviceId && state.config?.deviceToken) {
+    headers['x-voice-device-id'] = state.config.deviceId;
+    headers['x-voice-device-token'] = state.config.deviceToken;
+    headers['x-voice-installation-id'] = state.config.installationId || '';
+    headers['x-voice-client-version'] = '1';
+  }
+  state.wakeConfirmationInFlight = true;
+  try {
+    const body = pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength);
+    return await api(`/api/voice/wake-confirmation?expectedPhrase=${encodeURIComponent(phrase)}`, {
+      method: 'POST',
+      suppressAuthGuidance: true,
+      headers,
+      body,
+    });
+  } finally {
+    state.wakeConfirmationInFlight = false;
+  }
+}
+
+function wakeConfirmationFailureStatus(error) {
+  const message = String(error || '');
+  if (/not enough wake audio/i.test(message)) return 'Sleeping. Wake confirmation needs microphone audio.';
+  if (/credit/i.test(message)) return `Sleeping. ${message}`;
+  return 'Sleeping. Wake phrase was not confirmed.';
 }
 
 function pushPreRollFrame(pcmBuffer) {
@@ -3665,6 +3717,25 @@ async function processPhraseText(text, finalizeNow = false, finalResult = false)
     const sleepMatch = stableSleepPhraseMatch(text, settings, finalResult);
     if (sleepMatch.status === 'matched') {
       void recordCommandRecognitionLog({ text, final: finalResult, outcome: 'matched', command: sleepMatch.match });
+      if (sleepMatch.match === 'unlock') {
+        if (state.wakeConfirmationInFlight) return;
+        showStatus('Sleeping. Confirming wake phrase.');
+        const confirmation = await confirmWakePhraseAudio(settings?.unlockPhrase || 'wake up now').catch((err) => ({
+          confirmed: false,
+          error: err?.message || String(err),
+        }));
+        if (!confirmation.confirmed || state.mode !== 'sleeping') {
+          showStatus(wakeConfirmationFailureStatus(confirmation.error));
+          void recordCommandRecognitionLog({
+            text: confirmation.text || text,
+            final: true,
+            outcome: 'ignored',
+            command: 'unlock',
+            reason: confirmation.error || 'Groq wake confirmation rejected',
+          });
+          return;
+        }
+      }
       await applySleepPhraseMatch(sleepMatch.match);
       return;
     }
@@ -3874,6 +3945,8 @@ function adoptWakeAudioCaptureForRecording() {
 
 function stopWakeListener() {
   resetSleepPhraseCandidate();
+  state.wakeConfirmationInFlight = false;
+  preRollBuffer.clear();
   stopVoskWakeListener();
   const recognition = state.recognition;
   if (!recognition) return;

@@ -32,6 +32,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
     private val recording = AtomicBoolean(false)
     private val outgoingReady = AtomicBoolean(false)
     private val reconnecting = AtomicBoolean(false)
+    private val wakeConfirmationInFlight = AtomicBoolean(false)
     private val microphoneRouter = MicrophoneRouter(context)
     private val cuePlayer = LocalCuePlayer()
     private val preRollBuffer = PcmFrameBuffer(PRE_ROLL_FRAME_COUNT)
@@ -206,6 +207,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
         recording.set(false)
         outgoingReady.set(false)
         reconnecting.set(false)
+        wakeConfirmationInFlight.set(false)
         awakeMode = false
         sleeping = false
         currentSocketUrl = ""
@@ -579,6 +581,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
             recording.set(false)
             outgoingReady.set(false)
             reconnecting.set(false)
+            wakeConfirmationInFlight.set(false)
             closeSocket("recorder stopped", sendEnd = false)
             wakeDetector?.release()
             wakeDetector = null
@@ -629,12 +632,8 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
         }
         when {
             match.hasUnlock && sleeping -> {
-                sleeping = false
-                applyWakeDetectorSettingsIfReady()
-                refreshApprovalSettings { applyWakeDetectorSettingsIfReady() }
                 wakeDetector?.reset()
-                cuePlayer.play(LocalCue.UNLOCK)
-                onStatus("Awake: waiting for assistant wake phrase")
+                confirmUnlockWakePhrase(onStatus)
             }
             match.hasShutdown -> {
                 wakeDetector?.reset()
@@ -687,6 +686,46 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
                 val repeated = AssistantAudioPlayer.repeatLast(context, onStatus)
                 onStatus(if (repeated) "Awake: repeating assistant audio" else "Awake: no assistant audio to repeat")
             }
+        }
+    }
+
+    private fun confirmUnlockWakePhrase(onStatus: (String) -> Unit) {
+        if (!wakeConfirmationInFlight.compareAndSet(false, true)) return
+        val expectedPhrase = approvalSettings.unlockPhrase.ifBlank { VoicePhraseDefaults.unlockPhrase }
+        val pcm = concatFrames(preRollBuffer.snapshot())
+        if (pcm.size < WAKE_CONFIRMATION_MIN_BYTES) {
+            wakeConfirmationInFlight.set(false)
+            onStatus(wakeConfirmationFailureStatus("not enough wake audio"))
+            return
+        }
+        cuePlayer.play(LocalCue.WAKE_PENDING)
+        onStatus("Sleeping. Confirming wake phrase.")
+        thread(name = "VoiceStreamWakeConfirmation") {
+            val result = runCatching { api.confirmWakePhrase(pcm, expectedPhrase) }
+            mainHandler.post {
+                wakeConfirmationInFlight.set(false)
+                if (!active.get() || !sleeping) return@post
+                if (result.getOrNull()?.confirmed == true) {
+                    sleeping = false
+                    applyWakeDetectorSettingsIfReady()
+                    refreshApprovalSettings { applyWakeDetectorSettingsIfReady() }
+                    wakeDetector?.reset()
+                    cuePlayer.play(LocalCue.UNLOCK)
+                    onStatus("Awake: waiting for assistant wake phrase")
+                } else {
+                    wakeDetector?.reset()
+                    onStatus(wakeConfirmationFailureStatus(result.exceptionOrNull()?.message))
+                }
+            }
+        }
+    }
+
+    private fun wakeConfirmationFailureStatus(message: String?): String {
+        val text = message.orEmpty()
+        return when {
+            text.contains("not enough wake audio", ignoreCase = true) -> "Sleeping. Wake confirmation needs microphone audio."
+            text.contains("credit", ignoreCase = true) -> "Sleeping. $text"
+            else -> "Sleeping. Wake phrase was not confirmed."
         }
     }
 
@@ -930,6 +969,17 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
         return URLEncoder.encode(value, Charsets.UTF_8.name())
     }
 
+    private fun concatFrames(frames: List<ByteArray>): ByteArray {
+        val totalBytes = frames.sumOf { it.size }
+        val output = ByteArray(totalBytes)
+        var offset = 0
+        for (frame in frames) {
+            frame.copyInto(output, offset)
+            offset += frame.size
+        }
+        return output
+    }
+
     private companion object {
         const val SAMPLE_RATE = 16_000
         const val CHUNK_MS = 20
@@ -938,6 +988,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
         const val MAX_PENDING_STREAM_MS = 5_000
         const val PRE_ROLL_FRAME_COUNT = PRE_ROLL_MS / CHUNK_MS
         const val MAX_PENDING_STREAM_FRAME_COUNT = MAX_PENDING_STREAM_MS / CHUNK_MS
+        const val WAKE_CONFIRMATION_MIN_BYTES = SAMPLE_RATE * 2 * 50 / 1000
         const val LOCAL_RECOGNIZER_LOG_DEBOUNCE_MS = 650L
         const val LOCAL_RECOGNIZER_LOG_COOLDOWN_MS = 1_000L
         const val BASE_RECONNECT_DELAY_MS = 500L
