@@ -36,6 +36,16 @@ describe('PcmCaptureBuffer', () => {
     expect(buffer.drain()).toEqual([]);
   });
 
+  test('snapshots without clearing buffered chunks', () => {
+    const buffer = new PcmCaptureBuffer(32);
+    buffer.push(new Uint8Array([1, 2]).buffer);
+    buffer.push(new Uint8Array([3, 4]).buffer);
+    const snapshot = buffer.snapshot();
+    expect(snapshot).toHaveLength(2);
+    expect(buffer.byteLength).toBe(4);
+    expect(buffer.drain()).toHaveLength(2);
+  });
+
   test('computes pcm byte counts from duration', () => {
     expect(pcmBytesForMs(1500)).toBe(48000);
     expect(pcmBytesForMs(5000)).toBe(160000);

@@ -27,6 +27,11 @@ class PcmFrameBuffer(private val maxFrames: Int) {
     }
 
     @Synchronized
+    fun snapshot(): List<ByteArray> {
+        return frames.map { it.copyOf() }
+    }
+
+    @Synchronized
     fun clear() {
         frames.clear()
     }

@@ -27,6 +27,7 @@ import {
 import { approvalCodeFromText } from './approval-code.js';
 import { pcm16ToWav, wavPcm16Data } from './wav.js';
 import { parseVoiceApprovalSettings, voiceApprovalSettingsResponse } from './voice-approval-settings.js';
+import { normalizeWakeConfirmationText, wakeConfirmationMatches } from './wake-confirmation.js';
 import {
   assistantAvailableToolSummaries,
   assistantSnapshot,
@@ -105,6 +106,7 @@ const GROQ_DIRECT_AUDIO_UPLOAD_MAX_BYTES_RAW = Number(process.env.VOICE_STREAM_N
 const GROQ_DIRECT_AUDIO_UPLOAD_MAX_BYTES = Number.isFinite(GROQ_DIRECT_AUDIO_UPLOAD_MAX_BYTES_RAW) && GROQ_DIRECT_AUDIO_UPLOAD_MAX_BYTES_RAW > 0
   ? GROQ_DIRECT_AUDIO_UPLOAD_MAX_BYTES_RAW
   : 24_000_000;
+const WAKE_CONFIRMATION_MAX_PCM_BYTES = 16_000 * 2 * 4;
 const MICROCREDITS_PER_CREDIT = 1_000_000;
 const USD_MICROS_PER_DOLLAR = 1_000_000;
 const MICROCREDITS_PER_DOLLAR = 100 * MICROCREDITS_PER_CREDIT;
@@ -4535,6 +4537,104 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       return { ok: true, deleted, artifacts: db.listArtifacts(ctx.user.id, threadId), snapshot: assistantSnapshot(db, ctx.user.id, threadId) };
     }),
   );
+
+  app.post('/api/voice/wake-confirmation', async (req, reply) => {
+    const query = (req.query ?? {}) as Record<string, unknown>;
+    const deviceId = cleanText(req.headers['x-voice-device-id'] || query.deviceId);
+    const token = cleanText(req.headers['x-voice-device-token'] || query.token);
+    const installationId = cleanText(req.headers['x-voice-installation-id'] || query.installationId) || null;
+    const clientVersion = parseClientVersion(req.headers['x-voice-client-version'], parseClientVersion(query.clientVersion, parseClientVersion(query.protocolVersion, null)));
+    const expectedPhrase = cleanText(query.expectedPhrase || req.headers['x-voice-expected-phrase']);
+    const expectedNormalized = normalizeWakeConfirmationText(expectedPhrase);
+    if (!expectedNormalized) {
+      reply.code(400).send({ ok: false, error: 'expectedPhrase is required' });
+      return;
+    }
+
+    const pcm = pcmBody(req);
+    if (pcm.byteLength < 1600) {
+      reply.code(400).send({ ok: false, error: 'wake confirmation audio is too short' });
+      return;
+    }
+    if (pcm.byteLength > WAKE_CONFIRMATION_MAX_PCM_BYTES) {
+      reply.code(413).send({ ok: false, error: 'wake confirmation audio is too large' });
+      return;
+    }
+
+    const runConfirmation = async (userId: string, source: string, authenticatedDeviceId: string | null) => {
+      const groqCredential = resolveGroqCredential(db, userId);
+      if (groqCredential?.source === 'platform_groq_key') {
+        db.requirePositiveCreditBalance(userId, 'Groq wake confirmation');
+      }
+      const transcription = await transcribePcm16(pcm, {
+        apiKey: groqCredential?.apiKey,
+        credentialSource: groqCredential?.source,
+        prompt: expectedPhrase,
+      });
+      recordGroqTranscriptionUsage(userId, transcription, {
+        deviceId: authenticatedDeviceId,
+        source: 'wake_confirmation',
+      });
+      const text = cleanText(transcription.text);
+      const confirmed = wakeConfirmationMatches(text, expectedPhrase);
+      addLog(userId, {
+        deviceId: authenticatedDeviceId,
+        source,
+        level: confirmed ? 'info' : 'warn',
+        message: confirmed ? 'Wake phrase confirmed by Groq' : 'Wake phrase rejected by Groq',
+        detailsJson: JSON.stringify({
+          expectedPhrase,
+          text,
+          provider: transcription.provider,
+          model: transcription.model,
+          audioDurationMs: transcription.audioDurationMs,
+          billableAudioDurationMs: transcription.billableAudioDurationMs ?? transcription.audioDurationMs,
+        }),
+      });
+      return {
+        ok: true,
+        confirmed,
+        text,
+        provider: transcription.provider,
+        credentialSource: transcription.credentialSource,
+        model: transcription.model,
+        audioDurationMs: transcription.audioDurationMs,
+      };
+    };
+
+    try {
+      if (deviceId || token) {
+        const auth = verifyDeviceAuth(db, deviceId, token, clientVersion);
+        if (!auth.ok) {
+          reply.code(auth.reason === 'client_too_old' ? 426 : 401).send({
+            ok: false,
+            confirmed: false,
+            error: deviceAuthFailureMessage(auth),
+            reason: auth.reason,
+            minClientVersion: auth.reason === 'client_too_old' ? auth.minClientVersion : undefined,
+          });
+          return;
+        }
+        const device = resolveDeviceInstallation(db, auth.device, installationId, token);
+        return await runConfirmation(device.userId, device.deviceType, device.id);
+      }
+
+      return await withUser(req, reply, db, clerkEnabled, async (ctx) => {
+        return await runConfirmation(ctx.user.id, 'web', null);
+      });
+    } catch (error: any) {
+      const message = error?.message ?? String(error);
+      const explicitStatus = Number(error?.statusCode);
+      const status = explicitStatus >= 400 && explicitStatus < 600
+        ? explicitStatus
+        : /credit/i.test(message)
+          ? 402
+          : /audio|pcm|transcription|groq/i.test(message)
+            ? 502
+            : 500;
+      reply.code(status).send({ ok: false, confirmed: false, error: message });
+    }
+  });
 
   app.post('/api/voice/sessions', async (req, reply) => {
     const body = jsonBody(req);

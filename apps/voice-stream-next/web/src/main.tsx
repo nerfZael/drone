@@ -65,6 +65,8 @@ const SLEEP_PHRASE_MAX_GAP_MS = 1_500;
 const MICROCREDITS_PER_CREDIT = 1_000_000;
 const VOICE_PCM_SAMPLE_RATE_HZ = 16_000;
 const VOICE_PENDING_STREAM_MAX_BYTES = pcmBytesForMs(5_000);
+const VOICE_WAKE_CONFIRMATION_MAX_BYTES = pcmBytesForMs(1_500);
+const VOICE_WAKE_CONFIRMATION_MIN_BYTES = pcmBytesForMs(50);
 const COMPOSER_RECORDING_SAMPLE_RATE_HZ = 16_000;
 const COMPOSER_RECORDING_CHANNELS = 1;
 
@@ -126,6 +128,10 @@ class PcmCaptureBuffer {
     this.maxBytes = Math.max(0, maxBytes);
   }
 
+  get byteLength(): number {
+    return this.totalBytes;
+  }
+
   push(chunk: ArrayBuffer): void {
     const bytes = chunk.byteLength;
     if (bytes <= 0 || this.maxBytes <= 0) return;
@@ -145,6 +151,10 @@ class PcmCaptureBuffer {
     return output;
   }
 
+  snapshot(): ArrayBuffer[] {
+    return this.chunks.map((chunk) => chunk.slice(0));
+  }
+
   clear(): void {
     this.chunks = [];
     this.totalBytes = 0;
@@ -153,6 +163,66 @@ class PcmCaptureBuffer {
 
 function pcmBytesForMs(ms: number, sampleRateHz = VOICE_PCM_SAMPLE_RATE_HZ): number {
   return Math.max(0, Math.round(sampleRateHz * 2 * ms / 1000));
+}
+
+function concatPcmBuffers(buffers: ArrayBuffer[]): Uint8Array {
+  const totalBytes = buffers.reduce((sum, buffer) => sum + buffer.byteLength, 0);
+  const output = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const buffer of buffers) {
+    const bytes = new Uint8Array(buffer);
+    output.set(bytes, offset);
+    offset += bytes.byteLength;
+  }
+  return output;
+}
+
+function playLocalVoiceCue(cue: 'wake_pending' | 'unlock'): void {
+  const tones = cue === 'wake_pending'
+    ? [{ frequencyHz: 540, durationMs: 45 }]
+    : [
+      { frequencyHz: 360, durationMs: 70 },
+      { frequencyHz: 560, durationMs: 80 },
+      { frequencyHz: 820, durationMs: 130 },
+    ];
+  const gainValue = cue === 'wake_pending' ? 0.035 : 0.22;
+  const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+  if (!AudioContextClass) return;
+  try {
+    const context = new AudioContextClass();
+    const gain = context.createGain();
+    gain.gain.value = gainValue;
+    gain.connect(context.destination);
+    let cursor = context.currentTime + 0.01;
+    for (const tone of tones) {
+      const durationSec = tone.durationMs / 1000;
+      const oscillator = context.createOscillator();
+      const envelope = context.createGain();
+      const fadeSec = Math.min(durationSec / 3, 0.01);
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(tone.frequencyHz, cursor);
+      envelope.gain.setValueAtTime(0.0001, cursor);
+      envelope.gain.linearRampToValueAtTime(1, cursor + fadeSec);
+      envelope.gain.setValueAtTime(1, Math.max(cursor + fadeSec, cursor + durationSec - fadeSec));
+      envelope.gain.linearRampToValueAtTime(0.0001, cursor + durationSec);
+      oscillator.connect(envelope);
+      envelope.connect(gain);
+      oscillator.start(cursor);
+      oscillator.stop(cursor + durationSec);
+      cursor += durationSec;
+    }
+    void context.resume().catch(() => undefined);
+    window.setTimeout(() => void context.close().catch(() => undefined), Math.ceil((cursor - context.currentTime) * 1000) + 120);
+  } catch {
+    // Local cues are best-effort.
+  }
+}
+
+function wakeConfirmationFailureStatus(error: unknown): string {
+  const message = String(error ?? '');
+  if (/not enough wake audio/i.test(message)) return 'Sleeping. Wake confirmation needs microphone audio.';
+  if (/credit/i.test(message)) return `Sleeping. ${message}`;
+  return 'Sleeping. Wake phrase was not confirmed.';
 }
 
 const assistantIconButtonClass =
@@ -5536,6 +5606,8 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
   const voiceOutgoingReadyRef = React.useRef(false);
   const voiceStreamStartingRef = React.useRef(false);
   const pendingStreamBufferRef = React.useRef(new PcmCaptureBuffer(VOICE_PENDING_STREAM_MAX_BYTES));
+  const wakeConfirmationBufferRef = React.useRef(new PcmCaptureBuffer(VOICE_WAKE_CONFIRMATION_MAX_BYTES));
+  const wakeConfirmationInFlightRef = React.useRef(false);
   const approvalRecognizerRef = React.useRef(new ApprovalCodeRecognizer());
   const approvalFinalizeTimerRef = React.useRef<number | null>(null);
 
@@ -5945,6 +6017,28 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
     startWakeListener();
   }
 
+  async function confirmWakePhraseAudio(expectedPhrase: string): Promise<{ confirmed: boolean; text?: string; error?: string }> {
+    if (wakeConfirmationInFlightRef.current) return { confirmed: false, error: 'Wake confirmation is already running.' };
+    const phrase = expectedPhrase.trim();
+    if (!phrase) return { confirmed: false, error: 'Wake phrase is not configured.' };
+    const pcm = concatPcmBuffers(wakeConfirmationBufferRef.current.snapshot());
+    if (pcm.byteLength < VOICE_WAKE_CONFIRMATION_MIN_BYTES) {
+      return { confirmed: false, error: 'Not enough wake audio to confirm.' };
+    }
+    playLocalVoiceCue('wake_pending');
+    wakeConfirmationInFlightRef.current = true;
+    try {
+      const body = pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength) as ArrayBuffer;
+      return await client.request<{ ok: true; confirmed: boolean; text?: string }>('/api/voice/wake-confirmation?expectedPhrase=' + encodeURIComponent(phrase), {
+        method: 'POST',
+        headers: { 'content-type': 'application/octet-stream' },
+        body,
+      });
+    } finally {
+      wakeConfirmationInFlightRef.current = false;
+    }
+  }
+
   async function enterAwake() {
     resetApprovalCollection();
     setMode('awake');
@@ -6016,6 +6110,19 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
     if (currentMode === 'sleeping') {
       const sleepMatch = stableSleepPhraseMatchForText(text, settings, finalResult);
       if (sleepMatch === 'unlock') {
+        if (wakeConfirmationInFlightRef.current) return;
+        setStatus('Sleeping. Confirming wake phrase.');
+        const confirmation = await confirmWakePhraseAudio(settings?.unlockPhrase ?? 'wake up now').catch((err) => ({
+          confirmed: false,
+          error: err instanceof Error ? err.message : String(err),
+        }));
+        if (!confirmation.confirmed || modeRef.current !== 'sleeping') {
+          const nextStatus = wakeConfirmationFailureStatus(confirmation.error);
+          setStatus(nextStatus);
+          void reportDesktopStatus('sleeping', nextStatus);
+          return;
+        }
+        playLocalVoiceCue('unlock');
         setMode('awake');
         setStatus('Unlocked.');
         void reportDesktopStatus('awake', 'Unlocked.');
@@ -6103,7 +6210,11 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
       });
 
       processor.onaudioprocess = (event) => {
-        desktop.sendVoskFrame?.(floatToPcm16(event.inputBuffer.getChannelData(0), event.inputBuffer.sampleRate));
+        const pcm = floatToPcm16(event.inputBuffer.getChannelData(0), event.inputBuffer.sampleRate);
+        if (modeRef.current !== 'off' && modeRef.current !== 'recording') {
+          wakeConfirmationBufferRef.current.push(pcm);
+        }
+        desktop.sendVoskFrame?.(pcm);
       };
       source.connect(processor);
       processor.connect(context.destination);
@@ -6172,6 +6283,8 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
 
   function stopWakeListener() {
     sleepPhraseCandidateRef.current = null;
+    wakeConfirmationBufferRef.current.clear();
+    wakeConfirmationInFlightRef.current = false;
     stopVoskWakeListener();
     const recognition = refs.current.recognition;
     if (!recognition) return;

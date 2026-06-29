@@ -34,6 +34,10 @@ class PcmCaptureBuffer {
     return output;
   }
 
+  snapshot() {
+    return this.chunks.map((chunk) => chunk.slice(0));
+  }
+
   clear() {
     this.chunks = [];
     this.totalBytes = 0;
