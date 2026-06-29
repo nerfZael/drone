@@ -279,21 +279,22 @@ export function GroupMultiChatColumn({
 
   const pendingPollEnabled = initialPendingResp?.key === chatCacheKey || transcripts !== null || Boolean(error);
 
-  const { value: pendingResp } = usePoll<{ ok: true; pending: PendingPrompt[] }>(
+  const { value: pendingResp } = usePoll<{ key: string; pending: PendingPrompt[] }>(
     async () => {
-      if (isDroneStartingOrSeeding(drone.hubPhase)) return { ok: true, pending: [] };
-      return await fetchJson<{ ok: true; pending: PendingPrompt[] }>(
+      if (isDroneStartingOrSeeding(drone.hubPhase)) return { key: chatCacheKey, pending: [] };
+      const data = await fetchJson<{ ok: true; pending: PendingPrompt[] }>(
         `/api/drones/${encodeURIComponent(drone.id)}/chats/${encodeURIComponent(chatName)}/pending`,
       );
+      return { key: chatCacheKey, pending: Array.isArray(data?.pending) ? data.pending : [] };
     },
     chatEventsConnected ? 60_000 : 1000,
-    [chatName, drone.hubPhase, drone.id, chatEventsConnected, chatEventsNonce],
+    [chatCacheKey, chatName, drone.hubPhase, drone.id, chatEventsConnected, chatEventsNonce],
     { enabled: pendingPollEnabled },
   );
 
   const pendingPrompts = React.useMemo(() => {
     const initial = initialPendingResp?.key === chatCacheKey ? initialPendingResp.pending : [];
-    const server = Array.isArray(pendingResp?.pending) ? pendingResp.pending : initial;
+    const server = pendingResp?.key === chatCacheKey && Array.isArray(pendingResp.pending) ? pendingResp.pending : initial;
     const byId = new Map<string, PendingPrompt>();
     for (const p of server) {
       if (p?.id) byId.set(p.id, p);
