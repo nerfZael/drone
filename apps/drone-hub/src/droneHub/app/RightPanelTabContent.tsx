@@ -12,6 +12,7 @@ import type {
 import type { DroneOpenedFileState, DroneOpenedFileTabState } from '../files/opened-file-types';
 import { QuickOpenModal } from '../files/QuickOpenModal';
 import type { QuickOpenFile, QuickOpenRecentFile } from '../files/quick-open-state';
+import { DronePullRequestsDock } from '../pullRequests/DronePullRequestsDock';
 import {
   RIGHT_PANEL_TAB_LABELS,
   RIGHT_PANEL_TABS,
@@ -46,9 +47,6 @@ const LazyDroneLinksDock = React.lazy(async () => ({
 }));
 const LazyDronePreviewDock = React.lazy(async () => ({
   default: (await import('../overview/DronePreviewDock')).DronePreviewDock,
-}));
-const LazyDronePullRequestsDock = React.lazy(async () => ({
-  default: (await import('../pullRequests/DronePullRequestsDock')).DronePullRequestsDock,
 }));
 const LazyDroneTerminalDock = React.lazy(async () => ({
   default: (await import('../terminal/DroneTerminalDock')).DroneTerminalDock,
@@ -566,22 +564,20 @@ export function RightPanelTabContent({
 
     case 'prs':
       return (
-        <LazyPane tab={tab}>
-          <LazyDronePullRequestsDock
-            key={`${paneKey}-${drone.id}-prs`}
-            droneId={drone.id}
-            droneName={drone.name}
-            repoAttached={repoFeaturesEnabled}
-            repoPath={drone.repoPath}
-            repoUnavailableReason={repoUnavailableReason}
-            disabled={disabled}
-            hubPhase={drone.hubPhase}
-            hubMessage={drone.hubMessage}
-            onOpenPullRequest={(pullRequest) => onOpenPullRequest(paneKey, pullRequest)}
-            onRevealFileInFiles={(repoRelativePath) => onRevealChangesFileInFiles(paneKey, repoRelativePath)}
-            onOpenFileInEditor={onOpenChangesFileInEditor}
-          />
-        </LazyPane>
+        <DronePullRequestsDock
+          key={`${paneKey}-${drone.id}-prs`}
+          droneId={drone.id}
+          droneName={drone.name}
+          repoAttached={repoFeaturesEnabled}
+          repoPath={drone.repoPath}
+          repoUnavailableReason={repoUnavailableReason}
+          disabled={disabled}
+          hubPhase={drone.hubPhase}
+          hubMessage={drone.hubMessage}
+          onOpenPullRequest={(pullRequest) => onOpenPullRequest(paneKey, pullRequest)}
+          onRevealFileInFiles={(repoRelativePath) => onRevealChangesFileInFiles(paneKey, repoRelativePath)}
+          onOpenFileInEditor={onOpenChangesFileInEditor}
+        />
       );
 
     default:
