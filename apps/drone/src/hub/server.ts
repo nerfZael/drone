@@ -11272,6 +11272,176 @@ function importResolvedChatToStore(droneId: string, chatName: string, chatEntry:
   return read.available ? read.chat : chatEntry;
 }
 
+type BuiltChatTranscriptRows =
+  | {
+      ok: true;
+      selection: string;
+      transcripts: any[];
+      agent: ChatAgentConfig;
+      turnCount: number;
+      etag: string;
+    }
+  | {
+      ok: false;
+      statusCode: 410;
+      error: string;
+      agent: ChatAgentConfig;
+    };
+
+function runChatReadMaintenance(opts: {
+  droneId: string;
+  chatName: string;
+  chatEntry: any;
+  includeDockerSnapshotMaintenance?: boolean;
+}): void {
+  if (chatHasReconcilablePendingPrompts(opts.chatEntry)) {
+    ensureDaemonPromptEventSubscription(opts.droneId);
+    enqueueReconcile(opts.droneId, opts.chatName);
+  }
+  if (opts.includeDockerSnapshotMaintenance === true && chatHasActiveDockerSnapshot(opts.chatEntry)) {
+    void failStaleDockerSnapshotsForChat({ droneId: opts.droneId, chatName: opts.chatName }).catch((error: any) => {
+      hubLog('warn', 'failed stale docker snapshot maintenance after transcript read', {
+        droneId: opts.droneId,
+        chatName: opts.chatName,
+        error: String(error?.message ?? error ?? 'unknown error'),
+      });
+    });
+  }
+}
+
+function buildPendingRowsForChat(opts: { droneId: string; chatName: string; chatEntry: any }): PendingPrompt[] {
+  return appendPromptAutomationHistoryRows(
+    pendingPromptsFromChatEntry(opts.chatEntry, { keepRecentlyCompleted: true }).slice(-50),
+    getPromptAutomationLane(opts.droneId, opts.chatName),
+  );
+}
+
+function buildTranscriptRowsForChat(opts: {
+  droneId: string;
+  droneName: string;
+  chatName: string;
+  chatEntry: any;
+  droneEntry: any;
+  selection: string;
+  tailRaw?: string | null;
+}): BuiltChatTranscriptRows {
+  const agent = inferChatAgent(opts.chatEntry as any, opts.droneEntry);
+  if (agent.kind === 'custom') {
+    return {
+      ok: false,
+      statusCode: 410,
+      error: 'transcript is only available for builtin agents (cursor/codex/claude/opencode/pi/blip). Use /output for custom agents.',
+      agent,
+    };
+  }
+
+  const turns = (opts.chatEntry as any).turns as TranscriptTurn[] | undefined;
+  const rawList = Array.isArray(turns) ? turns : [];
+  const sourceHash = transcriptTurnsSourceHash(rawList);
+  const imported = importTranscriptTurnsFromRegistry({
+    droneId: opts.droneId,
+    chatName: opts.chatName,
+    turns: rawList,
+    sourceHash,
+  });
+  // Sort by prompt time (promptAt/at) so "last" means most recent chronologically,
+  // even if reconciliation appends older completions later.
+  const list = rawList
+    .map((t, idx) => ({ t, idx }))
+    .sort((a, b) => {
+      const aIso = String((a.t as any)?.promptAt ?? (a.t as any)?.at ?? '');
+      const bIso = String((b.t as any)?.promptAt ?? (b.t as any)?.at ?? '');
+      const aMs = new Date(aIso).getTime();
+      const bMs = new Date(bIso).getTime();
+      const aa = Number.isFinite(aMs) ? aMs : 0;
+      const bb = Number.isFinite(bMs) ? bMs : 0;
+      if (aa !== bb) return aa - bb;
+      return a.idx - b.idx;
+    })
+    .map((x) => x.t);
+  const storeCount = imported.available
+    ? countTranscriptTurnsFromStore({ droneId: opts.droneId, chatName: opts.chatName })
+    : { available: false as const, count: list.length, transcriptVersion: imported.transcriptVersion, sourceHash };
+  const effectiveTurnCount = storeCount.available ? storeCount.count : list.length;
+  const effectiveSourceHash = storeCount.available ? storeCount.sourceHash : imported.sourceHash || sourceHash;
+  const effectiveTranscriptVersion = storeCount.available ? storeCount.transcriptVersion : imported.transcriptVersion;
+  const idxs = parseTurnSelection(opts.selection, effectiveTurnCount, opts.tailRaw);
+  const etagSeed = stableResponseFingerprint({
+    droneId: opts.droneId,
+    droneName: opts.droneName,
+    chatName: opts.chatName,
+    selection: opts.selection,
+    tail: opts.tailRaw ?? '',
+    sourceHash: effectiveSourceHash,
+    transcriptVersion: effectiveTranscriptVersion,
+    agent,
+  });
+  const etag = `"transcript-${etagSeed}"`;
+
+  const storeRead = imported.available
+    ? readTranscriptTurnsFromStore({ droneId: opts.droneId, chatName: opts.chatName, indexes: idxs })
+    : { available: false as const, turns: [] };
+  const selectedTurns = storeRead.available
+    ? storeRead.turns.map((item) => ({ i: item.index, t: item.turn as any }))
+    : idxs.map((i) => ({ i, t: list[i] as any }));
+
+  const transcripts: any[] = [];
+  for (const item of selectedTurns) {
+    const i = item.i;
+    const t: any = item.t;
+    const at = String(t?.at ?? new Date().toISOString());
+    const promptAt = typeof t?.promptAt === 'string' && t.promptAt.trim() ? String(t.promptAt).trim() : undefined;
+    const completedAt = typeof t?.completedAt === 'string' && t.completedAt.trim() ? String(t.completedAt).trim() : undefined;
+    const id = typeof t?.id === 'string' && t.id.trim() ? String(t.id).trim() : undefined;
+    const prompt = String(t?.prompt ?? '');
+    const attachments = normalizeChatImageAttachmentRefs((t as any)?.attachments);
+    const automation = normalizePromptAutomationMeta((t as any)?.automation);
+    const agentMessageAutoContinue = normalizeAgentMessageAutoContinueTurnState((t as any)?.agentMessageAutoContinue);
+    const agentSuggestion = normalizeAgentSuggestionTurnState((t as any)?.agentSuggestion);
+    const dockerSnapshot = normalizeDockerSnapshot((t as any)?.dockerSnapshot);
+    const ok = Boolean(t?.ok);
+    const output = ok ? String(t?.output ?? '') : '';
+    const error = ok ? undefined : String(t?.error ?? 'failed');
+    transcripts.push({
+      turn: i + 1,
+      at,
+      ...(promptAt ? { promptAt } : {}),
+      ...(completedAt ? { completedAt } : {}),
+      ...(id ? { id } : {}),
+      prompt,
+      ...(attachments.length > 0 ? { attachments } : {}),
+      ...(automation ? { automation } : {}),
+      ...(agentMessageAutoContinue ? { agentMessageAutoContinue } : {}),
+      ...(agentSuggestion ? { agentSuggestion } : {}),
+      ...(dockerSnapshot
+        ? {
+            dockerSnapshot: {
+              id: dockerSnapshot.id,
+              status: dockerSnapshot.status,
+              createdAt: dockerSnapshot.createdAt,
+              ...(dockerSnapshot.readyAt ? { readyAt: dockerSnapshot.readyAt } : {}),
+              ...(dockerSnapshot.restoredAt ? { restoredAt: dockerSnapshot.restoredAt } : {}),
+              ...(dockerSnapshot.error ? { error: dockerSnapshot.error } : {}),
+              ...(typeof dockerSnapshot.sizeBytes === 'number' ? { sizeBytes: dockerSnapshot.sizeBytes } : {}),
+            },
+          }
+        : {}),
+      ...((t as any)?.inheritedFromClone === true ? { inheritedFromClone: true } : {}),
+      ok,
+      ...(ok ? { output } : { output: '', error }),
+    });
+  }
+
+  return {
+    ok: true,
+    selection: opts.selection,
+    transcripts,
+    agent,
+    turnCount: effectiveTurnCount,
+    etag,
+  };
+}
+
 async function setChatAgentConfig(opts: {
   droneId: string;
   chatName: string;
@@ -24408,6 +24578,106 @@ export async function startDroneHubApiServer(opts: {
         }
       }
 
+      // GET /api/drones/:id/chats/:chat/state?tail=50
+      if (
+        method === 'GET' &&
+        parts.length === 6 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'chats' &&
+        parts[5] === 'state'
+      ) {
+        const droneRef = decodeURIComponent(parts[2]);
+        const chatName = normalizeChatName(decodeURIComponent(parts[4]));
+        const timer = createRequestTimer();
+        try {
+          const resolved = await resolveDroneOrPendingForReadRef(droneRef);
+          timer.mark('resolve');
+          if (!resolved) {
+            timer.setHeader(res);
+            logSlowHubRequest('chat state', timer, { droneRef, chatName, status: 404 });
+            json(res, 404, { ok: false, error: `unknown drone: ${droneRef}` });
+            return;
+          }
+          if (resolved.kind === 'pending') {
+            const droneName = String(resolved.pending?.name ?? droneRef).trim() || droneRef;
+            const pendingList = await readPendingStartupPrompts({ droneId: resolved.id, chatName });
+            timer.mark('read');
+            timer.setHeader(res);
+            logSlowHubRequest('chat state', timer, { droneId: resolved.id, chatName, kind: 'pending', status: 200 });
+            jsonWithEtag(req, res, 200, {
+              ok: true,
+              id: resolved.id,
+              name: droneName,
+              chat: chatName,
+              selection: u.searchParams.get('turn') ?? 'all',
+              transcripts: [],
+              pending: pendingList,
+            });
+            return;
+          }
+          const real = resolved;
+          const droneId = real.id;
+          const drone = real.drone;
+          const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
+          const registryEntry = (drone as any)?.chats?.[chatName] ?? null;
+          if (!registryEntry) {
+            timer.setHeader(res);
+            logSlowHubRequest('chat state', timer, { droneId, chatName, status: 404 });
+            json(res, 404, { ok: false, error: `unknown chat: ${chatName}` });
+            return;
+          }
+          const entry = importResolvedChatToStore(droneId, chatName, registryEntry) ?? registryEntry;
+          timer.mark('import');
+          const transcriptResult = buildTranscriptRowsForChat({
+            droneId,
+            droneName,
+            chatName,
+            chatEntry: entry,
+            droneEntry: drone,
+            selection: u.searchParams.get('turn') ?? 'all',
+            tailRaw: u.searchParams.get('tail'),
+          });
+          if (!transcriptResult.ok) {
+            timer.setHeader(res);
+            logSlowHubRequest('chat state', timer, { droneId, chatName, status: transcriptResult.statusCode });
+            json(res, transcriptResult.statusCode, { ok: false, error: transcriptResult.error, agent: transcriptResult.agent });
+            return;
+          }
+          runChatReadMaintenance({ droneId, chatName, chatEntry: entry, includeDockerSnapshotMaintenance: true });
+          timer.mark('transcript');
+          const list = buildPendingRowsForChat({ droneId, chatName, chatEntry: entry });
+          timer.mark('format');
+          timer.setHeader(res);
+          logSlowHubRequest('chat state', timer, {
+            droneId,
+            chatName,
+            selection: transcriptResult.selection,
+            turnCount: transcriptResult.turnCount,
+            pendingCount: list.length,
+            status: 200,
+          });
+          jsonWithEtag(req, res, 200, {
+            ok: true,
+            id: droneId,
+            name: droneName,
+            chat: chatName,
+            selection: transcriptResult.selection,
+            transcripts: transcriptResult.transcripts,
+            pending: list,
+            agent: transcriptResult.agent,
+          });
+          return;
+        } catch (e: any) {
+          const msg = e?.message ?? String(e);
+          const code = /still starting/i.test(msg) ? 409 : /unknown drone/i.test(msg) ? 404 : 500;
+          timer.setHeader(res);
+          logSlowHubRequest('chat state', timer, { droneRef, chatName, status: code, error: msg });
+          json(res, code, { ok: false, error: msg });
+          return;
+        }
+      }
+
       // GET /api/drones/:id/chats/:chat/pending
       if (
         method === 'GET' &&
@@ -24451,14 +24721,8 @@ export async function startDroneHubApiServer(opts: {
           }
           const entry = importResolvedChatToStore(droneId, chatName, registryEntry) ?? registryEntry;
           timer.mark('import');
-          if (chatHasReconcilablePendingPrompts(entry)) {
-            ensureDaemonPromptEventSubscription(droneId);
-            enqueueReconcile(droneId, chatName);
-          }
-          const list = appendPromptAutomationHistoryRows(
-            pendingPromptsFromChatEntry(entry, { keepRecentlyCompleted: true }).slice(-50),
-            getPromptAutomationLane(droneId, chatName),
-          );
+          runChatReadMaintenance({ droneId, chatName, chatEntry: entry });
+          const list = buildPendingRowsForChat({ droneId, chatName, chatEntry: entry });
           timer.mark('format');
           timer.setHeader(res);
           logSlowHubRequest('chat pending', timer, { droneId, chatName, status: 200 });
@@ -25559,134 +25823,52 @@ export async function startDroneHubApiServer(opts: {
             return;
           }
           const c = importResolvedChatToStore(droneId, chatName, cRaw) ?? cRaw;
-          const agent = inferChatAgent(c as any, d);
-          if (agent.kind === 'custom') {
-            timer.setHeader(res);
-            logSlowHubRequest('chat transcript', timer, { droneId, chatName, status: 410 });
-            json(res, 410, {
-              ok: false,
-              error: 'transcript is only available for builtin agents (cursor/codex/claude/opencode/pi/blip). Use /output for custom agents.',
-              agent,
-            });
-            return;
-          }
-          if (chatHasReconcilablePendingPrompts(c)) {
-            ensureDaemonPromptEventSubscription(droneId);
-            enqueueReconcile(droneId, chatName);
-          }
-          if (chatHasActiveDockerSnapshot(c)) {
-            void failStaleDockerSnapshotsForChat({ droneId, chatName }).catch((error: any) => {
-              hubLog('warn', 'failed stale docker snapshot maintenance after transcript read', {
-                droneId,
-                chatName,
-                error: String(error?.message ?? error ?? 'unknown error'),
-              });
-            });
-          }
-
-          const turns = (c as any).turns as TranscriptTurn[] | undefined;
-          const rawList = Array.isArray(turns) ? turns : [];
-          const sourceHash = transcriptTurnsSourceHash(rawList);
-          const imported = importTranscriptTurnsFromRegistry({ droneId, chatName, turns: rawList, sourceHash });
           timer.mark('import');
-          // Sort by prompt time (promptAt/at) so "last" means most recent chronologically,
-          // even if reconciliation appends older completions later.
-          const list = rawList
-            .map((t, idx) => ({ t, idx }))
-            .sort((a, b) => {
-              const aIso = String((a.t as any)?.promptAt ?? (a.t as any)?.at ?? '');
-              const bIso = String((b.t as any)?.promptAt ?? (b.t as any)?.at ?? '');
-              const aMs = new Date(aIso).getTime();
-              const bMs = new Date(bIso).getTime();
-              const aa = Number.isFinite(aMs) ? aMs : 0;
-              const bb = Number.isFinite(bMs) ? bMs : 0;
-              if (aa !== bb) return aa - bb;
-              return a.idx - b.idx;
-            })
-            .map((x) => x.t);
           const sel = u.searchParams.get('turn') ?? 'last';
-          const storeCount = imported.available
-            ? countTranscriptTurnsFromStore({ droneId, chatName })
-            : { available: false as const, count: list.length, transcriptVersion: imported.transcriptVersion, sourceHash };
-          const effectiveTurnCount = storeCount.available ? storeCount.count : list.length;
-          const effectiveSourceHash = storeCount.available ? storeCount.sourceHash : imported.sourceHash || sourceHash;
-          const effectiveTranscriptVersion = storeCount.available ? storeCount.transcriptVersion : imported.transcriptVersion;
-          const idxs = parseTurnSelection(sel, effectiveTurnCount, u.searchParams.get('tail'));
-          const etagSeed = stableResponseFingerprint({
+          const transcriptResult = buildTranscriptRowsForChat({
             droneId,
             droneName,
             chatName,
+            chatEntry: c,
+            droneEntry: d,
             selection: sel,
-            tail: u.searchParams.get('tail') ?? '',
-            sourceHash: effectiveSourceHash,
-            transcriptVersion: effectiveTranscriptVersion,
-            agent,
+            tailRaw: u.searchParams.get('tail'),
           });
-          const etag = `"transcript-${etagSeed}"`;
-          timer.mark('etag');
-
-          const storeRead = imported.available
-            ? readTranscriptTurnsFromStore({ droneId, chatName, indexes: idxs })
-            : { available: false as const, turns: [] };
-          timer.mark('store');
-          const selectedTurns = storeRead.available
-            ? storeRead.turns.map((item) => ({ i: item.index, t: item.turn as any }))
-            : idxs.map((i) => ({ i, t: list[i] as any }));
-
-          const transcripts: any[] = [];
-          for (const item of selectedTurns) {
-            const i = item.i;
-            const t: any = item.t;
-            const at = String(t?.at ?? new Date().toISOString());
-            const promptAt = typeof t?.promptAt === 'string' && t.promptAt.trim() ? String(t.promptAt).trim() : undefined;
-            const completedAt =
-              typeof t?.completedAt === 'string' && t.completedAt.trim() ? String(t.completedAt).trim() : undefined;
-            const id = typeof t?.id === 'string' && t.id.trim() ? String(t.id).trim() : undefined;
-            const prompt = String(t?.prompt ?? '');
-            const attachments = normalizeChatImageAttachmentRefs((t as any)?.attachments);
-            const automation = normalizePromptAutomationMeta((t as any)?.automation);
-            const agentMessageAutoContinue = normalizeAgentMessageAutoContinueTurnState(
-              (t as any)?.agentMessageAutoContinue,
-            );
-            const agentSuggestion = normalizeAgentSuggestionTurnState((t as any)?.agentSuggestion);
-            const dockerSnapshot = normalizeDockerSnapshot((t as any)?.dockerSnapshot);
-            const ok = Boolean(t?.ok);
-            const output = ok ? String(t?.output ?? '') : '';
-            const error = ok ? undefined : String(t?.error ?? 'failed');
-            transcripts.push({
-              turn: i + 1,
-              at,
-              ...(promptAt ? { promptAt } : {}),
-              ...(completedAt ? { completedAt } : {}),
-              ...(id ? { id } : {}),
-              prompt,
-              ...(attachments.length > 0 ? { attachments } : {}),
-              ...(automation ? { automation } : {}),
-              ...(agentMessageAutoContinue ? { agentMessageAutoContinue } : {}),
-              ...(agentSuggestion ? { agentSuggestion } : {}),
-              ...(dockerSnapshot
-                ? {
-                    dockerSnapshot: {
-                      id: dockerSnapshot.id,
-                      status: dockerSnapshot.status,
-                      createdAt: dockerSnapshot.createdAt,
-                      ...(dockerSnapshot.readyAt ? { readyAt: dockerSnapshot.readyAt } : {}),
-                      ...(dockerSnapshot.restoredAt ? { restoredAt: dockerSnapshot.restoredAt } : {}),
-                      ...(dockerSnapshot.error ? { error: dockerSnapshot.error } : {}),
-                      ...(typeof dockerSnapshot.sizeBytes === 'number' ? { sizeBytes: dockerSnapshot.sizeBytes } : {}),
-                    },
-                  }
-                : {}),
-              ...((t as any)?.inheritedFromClone === true ? { inheritedFromClone: true } : {}),
-              ok,
-              ...(ok ? { output } : { output: '', error }),
+          if (!transcriptResult.ok) {
+            timer.setHeader(res);
+            logSlowHubRequest('chat transcript', timer, { droneId, chatName, status: transcriptResult.statusCode });
+            json(res, transcriptResult.statusCode, {
+              ok: false,
+              error: transcriptResult.error,
+              agent: transcriptResult.agent,
             });
+            return;
           }
-
+          runChatReadMaintenance({ droneId, chatName, chatEntry: c, includeDockerSnapshotMaintenance: true });
           timer.mark('format');
           timer.setHeader(res);
-          logSlowHubRequest('chat transcript', timer, { droneId, chatName, selection: sel, turnCount: effectiveTurnCount, status: 200 });
-          jsonWithKnownEtag(req, res, 200, { ok: true, id: droneId, name: droneName, chat: chatName, selection: sel, transcripts, agent }, etag);
+          logSlowHubRequest('chat transcript', timer, {
+            droneId,
+            chatName,
+            selection: transcriptResult.selection,
+            turnCount: transcriptResult.turnCount,
+            status: 200,
+          });
+          jsonWithKnownEtag(
+            req,
+            res,
+            200,
+            {
+              ok: true,
+              id: droneId,
+              name: droneName,
+              chat: chatName,
+              selection: transcriptResult.selection,
+              transcripts: transcriptResult.transcripts,
+              agent: transcriptResult.agent,
+            },
+            transcriptResult.etag,
+          );
           return;
         } catch (e: any) {
           timer.setHeader(res);

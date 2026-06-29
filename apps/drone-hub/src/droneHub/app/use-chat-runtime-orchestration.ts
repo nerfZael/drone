@@ -11,7 +11,7 @@ import {
   normalizePendingPromptState,
   reconcileOptimisticPendingPrompt,
 } from './optimistic-pending-prompts';
-import { droneChatEventMatches, fetchDroneChatTranscriptCached, sameTranscriptItems, sendDroneChatPrompt } from './chat-api';
+import { droneChatEventMatches, fetchDroneChatState, fetchDroneChatTranscriptCached, sameTranscriptItems, sendDroneChatPrompt } from './chat-api';
 import { subscribeDroneChatEvents } from './chat-events';
 import { droneChatQueueKey, isDroneStartingOrSeeding, parseDroneChatQueueKey } from './helpers';
 import { fetchJson, isNotFoundError, resolvePollIntervalMs, usePoll } from './hooks';
@@ -532,6 +532,13 @@ export function useChatRuntimeOrchestration({
     selectedDrone,
   ]);
 
+  const pendingPollEnabled =
+    chatUiMode !== 'transcript' ||
+    pendingRespForChat?.key === selectedChatCacheKey ||
+    Boolean(readFreshChatRuntimeCache(chatPendingCache, selectedChatCacheKey)) ||
+    transcripts !== null ||
+    Boolean(transcriptError);
+
   const { value: pendingResp } = usePoll<PendingPromptResponseForChat>(
     async () => {
       const key = selectedChatCacheKey;
@@ -545,6 +552,7 @@ export function useChatRuntimeOrchestration({
     },
     chatEventsConnected ? 60_000 : 1000,
     [selectedDrone, selectedChat, selectedChatCacheKey, hasSelectedDroneSummary, selectedDroneHubPhase, chatEventsConnected, chatEventsNonce],
+    { enabled: pendingPollEnabled },
   );
 
   React.useEffect(() => {
@@ -760,7 +768,7 @@ export function useChatRuntimeOrchestration({
       if ((initial || shouldLoadTailFirst) && mounted) setLoadingTranscript(true);
       try {
         if (shouldLoadTailFirst) {
-          const data = await fetchDroneChatTranscriptCached({
+          const data = await fetchDroneChatState(requestJson, {
             droneId: selectedDrone,
             chatName: selectedChat,
             turn: 'all',
@@ -769,10 +777,12 @@ export function useChatRuntimeOrchestration({
           if (!mounted) return;
           loadedInitialTail = true;
           writeChatRuntimeCache(chatTranscriptCache, selectedChatCacheKey, {
-            etag: data.etag,
+            etag: null,
             fullLoaded: false,
             transcripts: data.transcripts,
           });
+          writeChatRuntimeCache(chatPendingCache, selectedChatCacheKey, { pending: data.pending });
+          setPendingRespForChat({ key: selectedChatCacheKey, pending: data.pending });
           setTranscripts((prev) => (sameTranscriptItems(prev, data.transcripts) ? prev : data.transcripts));
           setTranscriptError(null);
           setLoadingTranscript(false);
