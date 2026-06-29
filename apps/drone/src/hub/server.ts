@@ -11272,6 +11272,59 @@ function importResolvedChatToStore(droneId: string, chatName: string, chatEntry:
   return read.available ? read.chat : chatEntry;
 }
 
+type ChatStateContext =
+  | {
+      kind: 'pending';
+      droneId: string;
+      droneName: string;
+      chatName: string;
+      pendingEntry: any;
+    }
+  | {
+      kind: 'real';
+      droneId: string;
+      droneName: string;
+      chatName: string;
+      droneEntry: any;
+      projectedChatEntry: any;
+    };
+
+function pendingStartupPromptsFromEntry(pendingEntry: any, chatName: string): PendingPrompt[] {
+  return normalizePendingStartupPrompts((pendingEntry as any)?.startupQueuedPrompts, chatName).map(startupPromptToPendingPrompt);
+}
+
+function buildChatStateContext(opts: {
+  droneRef: string;
+  chatName: string;
+  resolved: ResolvedOrPendingDrone;
+}): ChatStateContext | { kind: 'missing-chat'; droneId: string; chatName: string } {
+  if (opts.resolved.kind === 'pending') {
+    const droneName = String(opts.resolved.pending?.name ?? opts.droneRef).trim() || opts.droneRef;
+    return {
+      kind: 'pending',
+      droneId: opts.resolved.id,
+      droneName,
+      chatName: opts.chatName,
+      pendingEntry: opts.resolved.pending,
+    };
+  }
+
+  const droneId = opts.resolved.id;
+  const droneEntry = opts.resolved.drone;
+  const registryChatEntry = (droneEntry as any)?.chats?.[opts.chatName] ?? null;
+  if (!registryChatEntry) return { kind: 'missing-chat', droneId, chatName: opts.chatName };
+  const droneName = String(droneEntry?.name ?? opts.droneRef).trim() || opts.droneRef;
+  const projectedChatEntry = importResolvedChatToStore(droneId, opts.chatName, registryChatEntry) ?? registryChatEntry;
+  return {
+    kind: 'real',
+    droneId,
+    droneName,
+    chatName: opts.chatName,
+    droneEntry,
+    projectedChatEntry,
+  };
+}
+
 type BuiltChatTranscriptRows =
   | {
       ok: true;
@@ -11309,11 +11362,130 @@ function runChatReadMaintenance(opts: {
   }
 }
 
+const CHAT_STATE_READ_MAINTENANCE_THROTTLE_MS = 5_000;
+const CHAT_STATE_READ_MAINTENANCE_LAST_RUN = new Map<string, number>();
+const CHAT_STATE_READ_MAINTENANCE_TIMERS = new Map<string, ReturnType<typeof setTimeout>>();
+const CHAT_STATE_READ_MAINTENANCE_LATEST = new Map<
+  string,
+  {
+    droneId: string;
+    chatName: string;
+    chatEntry: any;
+    includeDockerSnapshotMaintenance?: boolean;
+  }
+>();
+
+function scheduleChatStateReadMaintenance(opts: {
+  droneId: string;
+  chatName: string;
+  chatEntry: any;
+  includeDockerSnapshotMaintenance?: boolean;
+}): void {
+  const droneId = normalizeDroneIdentity(opts.droneId);
+  const chatName = normalizeChatName(opts.chatName);
+  if (!droneId || !chatName) return;
+  const key = `${droneId}:${chatName}`;
+  CHAT_STATE_READ_MAINTENANCE_LATEST.set(key, { ...opts, droneId, chatName });
+  if (CHAT_STATE_READ_MAINTENANCE_TIMERS.has(key)) return;
+
+  const elapsedMs = Date.now() - (CHAT_STATE_READ_MAINTENANCE_LAST_RUN.get(key) ?? 0);
+  const delayMs = Math.max(0, CHAT_STATE_READ_MAINTENANCE_THROTTLE_MS - elapsedMs);
+  const timer = setTimeout(() => {
+    CHAT_STATE_READ_MAINTENANCE_TIMERS.delete(key);
+    const latest = CHAT_STATE_READ_MAINTENANCE_LATEST.get(key);
+    CHAT_STATE_READ_MAINTENANCE_LATEST.delete(key);
+    CHAT_STATE_READ_MAINTENANCE_LAST_RUN.set(key, Date.now());
+    if (!latest) return;
+    try {
+      runChatReadMaintenance(latest);
+    } catch (error: any) {
+      hubLog('warn', 'failed scheduled chat state read maintenance', {
+        droneId,
+        chatName,
+        error: String(error?.message ?? error ?? 'unknown error'),
+      });
+    }
+  }, delayMs);
+  timer.unref?.();
+  CHAT_STATE_READ_MAINTENANCE_TIMERS.set(key, timer);
+}
+
 function buildPendingRowsForChat(opts: { droneId: string; chatName: string; chatEntry: any }): PendingPrompt[] {
   return appendPromptAutomationHistoryRows(
     pendingPromptsFromChatEntry(opts.chatEntry, { keepRecentlyCompleted: true }).slice(-50),
     getPromptAutomationLane(opts.droneId, opts.chatName),
   );
+}
+
+function formatTranscriptRow(turnIndex: number, turn: any): any {
+  const at = String(turn?.at ?? new Date().toISOString());
+  const promptAt = typeof turn?.promptAt === 'string' && turn.promptAt.trim() ? String(turn.promptAt).trim() : undefined;
+  const completedAt = typeof turn?.completedAt === 'string' && turn.completedAt.trim() ? String(turn.completedAt).trim() : undefined;
+  const id = typeof turn?.id === 'string' && turn.id.trim() ? String(turn.id).trim() : undefined;
+  const prompt = String(turn?.prompt ?? '');
+  const attachments = normalizeChatImageAttachmentRefs((turn as any)?.attachments);
+  const automation = normalizePromptAutomationMeta((turn as any)?.automation);
+  const agentMessageAutoContinue = normalizeAgentMessageAutoContinueTurnState((turn as any)?.agentMessageAutoContinue);
+  const agentSuggestion = normalizeAgentSuggestionTurnState((turn as any)?.agentSuggestion);
+  const dockerSnapshot = normalizeDockerSnapshot((turn as any)?.dockerSnapshot);
+  const ok = Boolean(turn?.ok);
+  const output = ok ? String(turn?.output ?? '') : '';
+  const error = ok ? undefined : String(turn?.error ?? 'failed');
+  return {
+    turn: turnIndex + 1,
+    at,
+    ...(promptAt ? { promptAt } : {}),
+    ...(completedAt ? { completedAt } : {}),
+    ...(id ? { id } : {}),
+    prompt,
+    ...(attachments.length > 0 ? { attachments } : {}),
+    ...(automation ? { automation } : {}),
+    ...(agentMessageAutoContinue ? { agentMessageAutoContinue } : {}),
+    ...(agentSuggestion ? { agentSuggestion } : {}),
+    ...(dockerSnapshot
+      ? {
+          dockerSnapshot: {
+            id: dockerSnapshot.id,
+            status: dockerSnapshot.status,
+            createdAt: dockerSnapshot.createdAt,
+            ...(dockerSnapshot.readyAt ? { readyAt: dockerSnapshot.readyAt } : {}),
+            ...(dockerSnapshot.restoredAt ? { restoredAt: dockerSnapshot.restoredAt } : {}),
+            ...(dockerSnapshot.error ? { error: dockerSnapshot.error } : {}),
+            ...(typeof dockerSnapshot.sizeBytes === 'number' ? { sizeBytes: dockerSnapshot.sizeBytes } : {}),
+          },
+        }
+      : {}),
+    ...((turn as any)?.inheritedFromClone === true ? { inheritedFromClone: true } : {}),
+    ok,
+    ...(ok ? { output } : { output: '', error }),
+  };
+}
+
+function buildTranscriptRowsFromProjectedChat(opts: {
+  droneEntry: any;
+  chatEntry: any;
+  selection: string;
+  tailRaw?: string | null;
+}): BuiltChatTranscriptRows {
+  const agent = inferChatAgent(opts.chatEntry as any, opts.droneEntry);
+  if (agent.kind === 'custom') {
+    return {
+      ok: false,
+      statusCode: 410,
+      error: 'transcript is only available for builtin agents (cursor/codex/claude/opencode/pi/blip). Use /output for custom agents.',
+      agent,
+    };
+  }
+  const turns = Array.isArray((opts.chatEntry as any)?.turns) ? ((opts.chatEntry as any).turns as any[]) : [];
+  const idxs = parseTurnSelection(opts.selection, turns.length, opts.tailRaw);
+  return {
+    ok: true,
+    selection: opts.selection,
+    transcripts: idxs.map((i) => formatTranscriptRow(i, turns[i] as any)),
+    agent,
+    turnCount: turns.length,
+    etag: '',
+  };
 }
 
 function buildTranscriptRowsForChat(opts: {
@@ -11387,49 +11559,7 @@ function buildTranscriptRowsForChat(opts: {
 
   const transcripts: any[] = [];
   for (const item of selectedTurns) {
-    const i = item.i;
-    const t: any = item.t;
-    const at = String(t?.at ?? new Date().toISOString());
-    const promptAt = typeof t?.promptAt === 'string' && t.promptAt.trim() ? String(t.promptAt).trim() : undefined;
-    const completedAt = typeof t?.completedAt === 'string' && t.completedAt.trim() ? String(t.completedAt).trim() : undefined;
-    const id = typeof t?.id === 'string' && t.id.trim() ? String(t.id).trim() : undefined;
-    const prompt = String(t?.prompt ?? '');
-    const attachments = normalizeChatImageAttachmentRefs((t as any)?.attachments);
-    const automation = normalizePromptAutomationMeta((t as any)?.automation);
-    const agentMessageAutoContinue = normalizeAgentMessageAutoContinueTurnState((t as any)?.agentMessageAutoContinue);
-    const agentSuggestion = normalizeAgentSuggestionTurnState((t as any)?.agentSuggestion);
-    const dockerSnapshot = normalizeDockerSnapshot((t as any)?.dockerSnapshot);
-    const ok = Boolean(t?.ok);
-    const output = ok ? String(t?.output ?? '') : '';
-    const error = ok ? undefined : String(t?.error ?? 'failed');
-    transcripts.push({
-      turn: i + 1,
-      at,
-      ...(promptAt ? { promptAt } : {}),
-      ...(completedAt ? { completedAt } : {}),
-      ...(id ? { id } : {}),
-      prompt,
-      ...(attachments.length > 0 ? { attachments } : {}),
-      ...(automation ? { automation } : {}),
-      ...(agentMessageAutoContinue ? { agentMessageAutoContinue } : {}),
-      ...(agentSuggestion ? { agentSuggestion } : {}),
-      ...(dockerSnapshot
-        ? {
-            dockerSnapshot: {
-              id: dockerSnapshot.id,
-              status: dockerSnapshot.status,
-              createdAt: dockerSnapshot.createdAt,
-              ...(dockerSnapshot.readyAt ? { readyAt: dockerSnapshot.readyAt } : {}),
-              ...(dockerSnapshot.restoredAt ? { restoredAt: dockerSnapshot.restoredAt } : {}),
-              ...(dockerSnapshot.error ? { error: dockerSnapshot.error } : {}),
-              ...(typeof dockerSnapshot.sizeBytes === 'number' ? { sizeBytes: dockerSnapshot.sizeBytes } : {}),
-            },
-          }
-        : {}),
-      ...((t as any)?.inheritedFromClone === true ? { inheritedFromClone: true } : {}),
-      ok,
-      ...(ok ? { output } : { output: '', error }),
-    });
+    transcripts.push(formatTranscriptRow(item.i, item.t));
   }
 
   return {
@@ -24599,16 +24729,16 @@ export async function startDroneHubApiServer(opts: {
             json(res, 404, { ok: false, error: `unknown drone: ${droneRef}` });
             return;
           }
-          if (resolved.kind === 'pending') {
-            const droneName = String(resolved.pending?.name ?? droneRef).trim() || droneRef;
-            const pendingList = await readPendingStartupPrompts({ droneId: resolved.id, chatName });
+          const context = buildChatStateContext({ droneRef, chatName, resolved });
+          if (context.kind === 'pending') {
+            const pendingList = pendingStartupPromptsFromEntry(context.pendingEntry, chatName);
             timer.mark('read');
             timer.setHeader(res);
-            logSlowHubRequest('chat state', timer, { droneId: resolved.id, chatName, kind: 'pending', status: 200 });
+            logSlowHubRequest('chat state', timer, { droneId: context.droneId, chatName, kind: 'pending', status: 200 });
             jsonWithEtag(req, res, 200, {
               ok: true,
-              id: resolved.id,
-              name: droneName,
+              id: context.droneId,
+              name: context.droneName,
               chat: chatName,
               selection: u.searchParams.get('turn') ?? 'all',
               transcripts: [],
@@ -24616,25 +24746,18 @@ export async function startDroneHubApiServer(opts: {
             });
             return;
           }
-          const real = resolved;
-          const droneId = real.id;
-          const drone = real.drone;
-          const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
-          const registryEntry = (drone as any)?.chats?.[chatName] ?? null;
-          if (!registryEntry) {
+          if (context.kind === 'missing-chat') {
             timer.setHeader(res);
-            logSlowHubRequest('chat state', timer, { droneId, chatName, status: 404 });
+            logSlowHubRequest('chat state', timer, { droneId: context.droneId, chatName, status: 404 });
             json(res, 404, { ok: false, error: `unknown chat: ${chatName}` });
             return;
           }
-          const entry = importResolvedChatToStore(droneId, chatName, registryEntry) ?? registryEntry;
+          const droneId = context.droneId;
+          const entry = context.projectedChatEntry;
           timer.mark('import');
-          const transcriptResult = buildTranscriptRowsForChat({
-            droneId,
-            droneName,
-            chatName,
+          const transcriptResult = buildTranscriptRowsFromProjectedChat({
             chatEntry: entry,
-            droneEntry: drone,
+            droneEntry: context.droneEntry,
             selection: u.searchParams.get('turn') ?? 'all',
             tailRaw: u.searchParams.get('tail'),
           });
@@ -24644,7 +24767,7 @@ export async function startDroneHubApiServer(opts: {
             json(res, transcriptResult.statusCode, { ok: false, error: transcriptResult.error, agent: transcriptResult.agent });
             return;
           }
-          runChatReadMaintenance({ droneId, chatName, chatEntry: entry, includeDockerSnapshotMaintenance: true });
+          scheduleChatStateReadMaintenance({ droneId, chatName, chatEntry: entry, includeDockerSnapshotMaintenance: true });
           timer.mark('transcript');
           const list = buildPendingRowsForChat({ droneId, chatName, chatEntry: entry });
           timer.mark('format');
@@ -24660,7 +24783,7 @@ export async function startDroneHubApiServer(opts: {
           jsonWithEtag(req, res, 200, {
             ok: true,
             id: droneId,
-            name: droneName,
+            name: context.droneName,
             chat: chatName,
             selection: transcriptResult.selection,
             transcripts: transcriptResult.transcripts,

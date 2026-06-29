@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { startDroneHubApiServer } from '../src/hub/server';
 import { resetDroneRootDirForTests } from '../src/host/paths';
 import { loadRegistry, updateRegistry } from '../src/host/registry';
+import { upsertPendingPromptInStore } from '../src/hub/transcript-store';
 import { getSocketListenSupport } from './socket-listen-support';
 
 const listenSupport = getSocketListenSupport();
@@ -598,6 +599,37 @@ describeSocketSuite('chat management api', () => {
     });
     expect(pendingChanged.r.status).toBe(200);
     expect((pendingChanged.data?.pending ?? []).map((row: any) => row.id)).toContain('queued-2');
+  });
+
+  test('combined chat state includes store-only pending rows', async () => {
+    const droneId = 'drone-chat-state-store-pending';
+    await seedDrone(droneId);
+
+    const now = new Date().toISOString();
+    upsertPendingPromptInStore({
+      droneId,
+      chatName: 'default',
+      pending: {
+        id: 'store-only-queued',
+        at: now,
+        updatedAt: now,
+        prompt: 'queued only in store',
+        state: 'queued',
+      },
+    });
+
+    const state = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=50`);
+    expect(state.r.status).toBe(200);
+    expect(state.data?.ok).toBe(true);
+    expect(state.data?.pending).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'store-only-queued',
+          prompt: 'queued only in store',
+          state: 'queued',
+        }),
+      ]),
+    );
   });
 
   test('transcript reads do not create missing chats', async () => {
