@@ -10396,21 +10396,89 @@ function isStaleDockerExecErrorMessage(raw: unknown): boolean {
 
 const DOCKER_SNAPSHOT_ACTIVE_STALE_MS = 30 * 60_000;
 
+async function inspectDockerSnapshotImage(imageRef: string): Promise<{ imageId: string | null; sizeBytes: number | null } | null> {
+  const ref = String(imageRef ?? '').trim();
+  if (!ref) return null;
+  try {
+    const stdout = await runDockerOrThrow(['image', 'inspect', ref, '--format', '{{json .}}'], {
+      timeoutMs: 30_000,
+    });
+    const inspect = JSON.parse(String(stdout ?? '').trim() || 'null');
+    const imageId = String(inspect?.Id ?? '').trim() || null;
+    const size = Number(inspect?.Size);
+    const sizeBytes = Number.isFinite(size) && size >= 0 ? Math.floor(size) : null;
+    return imageId || sizeBytes != null ? { imageId, sizeBytes } : null;
+  } catch {
+    return null;
+  }
+}
+
 async function failStaleDockerSnapshotsForChat(opts: { droneId: string; chatName: string }): Promise<void> {
   const droneId = normalizeDroneIdentity(opts.droneId);
   const chatName = normalizeChatName(opts.chatName);
   if (!droneId || !chatName) return;
   const cutoffMs = Date.now() - DOCKER_SNAPSHOT_ACTIVE_STALE_MS;
+  const candidates: Array<{
+    promptId: string;
+    snapshotId: string;
+    status: 'creating' | 'restoring';
+    imageRef: string;
+  }> = [];
+
+  const regSnap: any = await loadRegistry();
+  const initialTurns: TranscriptTurn[] = Array.isArray(regSnap?.drones?.[droneId]?.chats?.[chatName]?.turns)
+    ? regSnap.drones[droneId].chats[chatName].turns
+    : [];
+  for (const turn of initialTurns as any[]) {
+    const promptId = String(turn?.id ?? '').trim();
+    const snap = normalizeDockerSnapshot(turn?.dockerSnapshot);
+    if (!promptId || !snap || (snap.status !== 'creating' && snap.status !== 'restoring')) continue;
+    const createdMs = Date.parse(String(snap.createdAt ?? ''));
+    if (!Number.isFinite(createdMs) || createdMs > cutoffMs) continue;
+    candidates.push({
+      promptId,
+      snapshotId: snap.id,
+      status: snap.status,
+      imageRef: String(snap.imageRef ?? '').trim(),
+    });
+  }
+  if (candidates.length === 0) return;
+
+  const recoveredBySnapshotId = new Map<string, { imageId: string | null; sizeBytes: number | null }>();
+  for (const candidate of candidates) {
+    if (candidate.status !== 'creating' || !candidate.imageRef) continue;
+    // eslint-disable-next-line no-await-in-loop
+    const image = await inspectDockerSnapshotImage(candidate.imageRef);
+    if (image) recoveredBySnapshotId.set(candidate.snapshotId, image);
+  }
+
+  let syncedTurns: TranscriptTurn[] | null = null;
   await updateRegistry((reg: any) => {
     const chat = reg?.drones?.[droneId]?.chats?.[chatName];
     const turns: TranscriptTurn[] = Array.isArray(chat?.turns) ? chat.turns : [];
     let changed = false;
     for (let i = 0; i < turns.length; i += 1) {
       const turn: any = turns[i];
+      const promptId = String(turn?.id ?? '').trim();
       const snap = normalizeDockerSnapshot(turn?.dockerSnapshot);
       if (!snap || (snap.status !== 'creating' && snap.status !== 'restoring')) continue;
       const createdMs = Date.parse(String(snap.createdAt ?? ''));
       if (!Number.isFinite(createdMs) || createdMs > cutoffMs) continue;
+      if (!candidates.some((candidate) => candidate.promptId === promptId && candidate.snapshotId === snap.id)) continue;
+      const recovered = recoveredBySnapshotId.get(snap.id);
+      if (snap.status === 'creating' && recovered) {
+        turn.dockerSnapshot = {
+          ...snap,
+          status: 'ready',
+          ...(String(snap.imageRef ?? '').trim() ? { imageRef: String(snap.imageRef).trim() } : {}),
+          ...(recovered.imageId ? { imageId: recovered.imageId } : {}),
+          ...(typeof recovered.sizeBytes === 'number' ? { sizeBytes: recovered.sizeBytes } : {}),
+          readyAt: nowIso(),
+        };
+        turns[i] = turn;
+        changed = true;
+        continue;
+      }
       turn.dockerSnapshot = {
         ...snap,
         status: 'failed',
@@ -10419,8 +10487,19 @@ async function failStaleDockerSnapshotsForChat(opts: { droneId: string; chatName
       turns[i] = turn;
       changed = true;
     }
-    if (changed) chat.turns = turns;
+    if (changed) {
+      chat.turns = turns;
+      syncedTurns = turns;
+    }
   });
+  if (syncedTurns) {
+    importTranscriptTurnsFromRegistry({ droneId, chatName, turns: syncedTurns });
+    for (const candidate of candidates) {
+      const updated = (syncedTurns as TranscriptTurn[]).find((turn: any) => String(turn?.id ?? '').trim() === candidate.promptId);
+      if (!updated) continue;
+      upsertTranscriptTurnInStore({ droneId, chatName, turn: updated });
+    }
+  }
 }
 
 async function dockerSnapshotTotalsForDroneEntry(
