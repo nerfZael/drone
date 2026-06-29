@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { createPortal } from 'react-dom';
 import { cn } from './cn.js';
 import { useDropdownDismiss } from './dropdown.js';
 
@@ -42,6 +43,9 @@ type UiMenuSelectProps = {
   itemRole?: 'menuitem' | 'option';
 };
 
+const DROPDOWN_VIEWPORT_MARGIN = 8;
+const DROPDOWN_TRIGGER_GAP = 6;
+
 function isOptionEntry(entry: UiMenuSelectEntry): entry is UiMenuSelectOptionEntry {
   return entry.kind !== 'separator';
 }
@@ -80,11 +84,69 @@ export function UiMenuSelect({
   const [open, setOpen] = React.useState(false);
   const [searchQuery, setSearchQuery] = React.useState('');
   const menuRef = React.useRef<HTMLDivElement | null>(null);
-  useDropdownDismiss(menuRef, open, setOpen);
+  const triggerRef = React.useRef<HTMLButtonElement | null>(null);
+  const panelRef = React.useRef<HTMLDivElement | null>(null);
+  const [panelStyle, setPanelStyle] = React.useState<React.CSSProperties | null>(null);
+  useDropdownDismiss(menuRef, open, setOpen, panelRef);
 
   React.useEffect(() => {
     if (disabled) setOpen(false);
   }, [disabled]);
+
+  React.useEffect(() => {
+    if (open) return;
+    setSearchQuery('');
+    setPanelStyle(null);
+  }, [open]);
+
+  const updatePanelPosition = React.useCallback(() => {
+    const trigger = triggerRef.current;
+    const panel = panelRef.current;
+    if (!trigger) return;
+
+    const rect = trigger.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const panelWidth = panel?.offsetWidth ?? rect.width;
+    const panelHeight = panel?.offsetHeight ?? 0;
+    const maxWidth = Math.max(0, viewportWidth - DROPDOWN_VIEWPORT_MARGIN * 2);
+    const resolvedWidth = Math.min(panelWidth, maxWidth);
+    const left = Math.min(
+      Math.max(rect.left, DROPDOWN_VIEWPORT_MARGIN),
+      Math.max(DROPDOWN_VIEWPORT_MARGIN, viewportWidth - DROPDOWN_VIEWPORT_MARGIN - resolvedWidth),
+    );
+    const spaceAbove = rect.top - DROPDOWN_TRIGGER_GAP - DROPDOWN_VIEWPORT_MARGIN;
+    const spaceBelow = viewportHeight - rect.bottom - DROPDOWN_TRIGGER_GAP - DROPDOWN_VIEWPORT_MARGIN;
+    const shouldOpenBelow =
+      placement === 'below' ? spaceBelow >= Math.min(panelHeight, 140) || spaceBelow >= spaceAbove : spaceAbove < Math.min(panelHeight, 140) && spaceBelow > spaceAbove;
+    const unclampedTop = shouldOpenBelow ? rect.bottom + DROPDOWN_TRIGGER_GAP : rect.top - DROPDOWN_TRIGGER_GAP - panelHeight;
+    const top = Math.min(
+      Math.max(unclampedTop, DROPDOWN_VIEWPORT_MARGIN),
+      Math.max(DROPDOWN_VIEWPORT_MARGIN, viewportHeight - DROPDOWN_VIEWPORT_MARGIN - panelHeight),
+    );
+
+    setPanelStyle({
+      position: 'fixed',
+      top,
+      left,
+      minWidth: rect.width,
+      maxWidth,
+      zIndex: 1000,
+      transformOrigin: shouldOpenBelow ? 'top left' : 'bottom left',
+      visibility: 'visible',
+    });
+  }, [placement]);
+
+  React.useLayoutEffect(() => {
+    if (!open) return undefined;
+    updatePanelPosition();
+    window.addEventListener('resize', updatePanelPosition);
+    window.addEventListener('scroll', updatePanelPosition, true);
+    return () => {
+      window.removeEventListener('resize', updatePanelPosition);
+      window.removeEventListener('scroll', updatePanelPosition, true);
+    };
+  }, [open, updatePanelPosition]);
 
   const selectedEntry = React.useMemo(
     () => entries.find((entry) => isOptionEntry(entry) && entry.value === value) as UiMenuSelectOptionEntry | undefined,
@@ -103,12 +165,73 @@ export function UiMenuSelect({
   }, [entries, searchQuery, searchable]);
   const hasOptions = filteredEntries.some((entry) => isOptionEntry(entry));
 
+  const panel = open ? (
+    <div
+      ref={panelRef}
+      className={cn(
+        'overflow-hidden rounded-md border border-[var(--border)] bg-[var(--panel)] shadow-[0_14px_42px_rgba(0,0,0,.34)]',
+        panelClassName,
+      )}
+      role={role}
+      style={panelStyle ?? { position: 'fixed', top: 0, left: 0, visibility: 'hidden' }}
+    >
+      {header ? (
+        <div className="border-b border-[var(--border-subtle)] px-2.5 py-2 font-display text-[10px] font-bold uppercase text-[var(--muted-dim)]">
+          {header}
+        </div>
+      ) : null}
+      {searchable ? (
+        <div className="border-b border-[var(--border-subtle)] p-1.5">
+          <input
+            autoFocus
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.currentTarget.value)}
+            placeholder={searchPlaceholder}
+            className="h-7 w-full rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.025)] px-2 text-[11px] text-[var(--fg)] outline-none"
+          />
+        </div>
+      ) : null}
+      <div className={cn('grid max-h-[260px] gap-0.5 overflow-auto p-1.5', menuClassName)}>
+        {filteredEntries.map((entry, index) => {
+          if (!isOptionEntry(entry)) {
+            return <div key={entry.key ?? `separator-${index}`} className={cn('my-1 border-t border-[var(--border-subtle)]', entry.className)} />;
+          }
+          const active = entry.value === value;
+          return (
+            <button
+              key={entry.value}
+              type="button"
+              role={itemRole}
+              aria-selected={itemRole === 'option' ? active : undefined}
+              disabled={entry.disabled}
+              title={entry.title}
+              className={cn(
+                'flex min-h-[30px] w-full items-center justify-between gap-2.5 rounded border-0 bg-transparent px-2 py-1.5 text-left text-[var(--fg-secondary)] transition-colors hover:bg-[rgba(255,255,255,.055)] hover:text-[var(--fg)] disabled:cursor-not-allowed disabled:opacity-40',
+                active && '!bg-[rgba(255,255,255,.055)] !text-[var(--fg)]',
+                entry.className,
+              )}
+              onClick={() => {
+                if (entry.disabled) return;
+                setOpen(false);
+                onValueChange(entry.value);
+              }}
+            >
+              {entry.label}
+            </button>
+          );
+        })}
+        {!hasOptions ? <div className="px-2.5 py-3 text-[10px] font-bold uppercase text-[var(--muted-dim)]">{emptySearchLabel}</div> : null}
+      </div>
+    </div>
+  ) : null;
+
   return (
     <div
       ref={menuRef}
       className={cn('relative min-w-0', variant === 'toolbar' && 'shrink-0 basis-[132px] max-[620px]:basis-auto', open && 'is-open')}
     >
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => {
           if (disabled) return;
@@ -128,65 +251,7 @@ export function UiMenuSelect({
         <DefaultChevron open={open} />
       </button>
 
-      {open ? (
-        <div
-          className={cn(
-            'absolute left-0 z-[42] overflow-hidden rounded-md border border-[var(--border)] bg-[var(--panel)] shadow-[0_14px_42px_rgba(0,0,0,.34)]',
-            placement === 'above' ? 'bottom-[calc(100%+6px)]' : 'top-[calc(100%+6px)]',
-            panelClassName,
-          )}
-          role={role}
-        >
-          {header ? (
-            <div className="border-b border-[var(--border-subtle)] px-2.5 py-2 font-display text-[10px] font-bold uppercase text-[var(--muted-dim)]">
-              {header}
-            </div>
-          ) : null}
-          {searchable ? (
-            <div className="border-b border-[var(--border-subtle)] p-1.5">
-              <input
-                autoFocus
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.currentTarget.value)}
-                placeholder={searchPlaceholder}
-                className="h-7 w-full rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.025)] px-2 text-[11px] text-[var(--fg)] outline-none"
-              />
-            </div>
-          ) : null}
-          <div className={cn('grid max-h-[260px] gap-0.5 overflow-auto p-1.5', menuClassName)}>
-            {filteredEntries.map((entry, index) => {
-              if (!isOptionEntry(entry)) {
-                return <div key={entry.key ?? `separator-${index}`} className={cn('my-1 border-t border-[var(--border-subtle)]', entry.className)} />;
-              }
-              const active = entry.value === value;
-              return (
-                <button
-                  key={entry.value}
-                  type="button"
-                  role={itemRole}
-                  aria-selected={itemRole === 'option' ? active : undefined}
-                  disabled={entry.disabled}
-                  title={entry.title}
-                  className={cn(
-                    'flex min-h-[30px] w-full items-center justify-between gap-2.5 rounded border-0 bg-transparent px-2 py-1.5 text-left text-[var(--fg-secondary)] transition-colors hover:bg-[rgba(255,255,255,.055)] hover:text-[var(--fg)] disabled:cursor-not-allowed disabled:opacity-40',
-                    active && '!bg-[rgba(255,255,255,.055)] !text-[var(--fg)]',
-                    entry.className,
-                  )}
-                  onClick={() => {
-                    if (entry.disabled) return;
-                    setOpen(false);
-                    setSearchQuery('');
-                    onValueChange(entry.value);
-                  }}
-                >
-                  {entry.label}
-                </button>
-              );
-            })}
-            {!hasOptions ? <div className="px-2.5 py-3 text-[10px] font-bold uppercase text-[var(--muted-dim)]">{emptySearchLabel}</div> : null}
-          </div>
-        </div>
-      ) : null}
+      {panel ? createPortal(panel, document.body) : null}
     </div>
   );
 }

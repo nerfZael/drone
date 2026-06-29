@@ -4,14 +4,19 @@ export function useDropdownDismiss(
   menuRef: React.RefObject<HTMLElement | null>,
   open: boolean,
   setOpen: React.Dispatch<React.SetStateAction<boolean>>,
+  ...additionalRefs: Array<React.RefObject<HTMLElement | null>>
 ): void {
+  const additionalRefsRef = React.useRef(additionalRefs);
+  additionalRefsRef.current = additionalRefs;
+
   React.useEffect(() => {
     if (!open) return undefined;
 
     const onDown = (event: MouseEvent) => {
-      const el = menuRef.current;
-      if (!el) return;
-      if (event.target instanceof Node && !el.contains(event.target)) setOpen(false);
+      if (!(event.target instanceof Node)) return;
+      const refs = [menuRef, ...additionalRefsRef.current];
+      if (refs.some((ref) => ref.current?.contains(event.target as Node))) return;
+      setOpen(false);
     };
 
     const onKey = (event: KeyboardEvent) => {

@@ -5,8 +5,8 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-val androidVersionCode = 35
-val androidVersionName = "0.1.34"
+val androidVersionCode = 36
+val androidVersionName = "0.1.35"
 val configuredAndroidServerUrl = System.getenv("VOICE_STREAM_NEXT_ANDROID_SERVER_URL")
     ?.takeIf { it.isNotBlank() }
     ?: System.getenv("VOICE_STREAM_NEXT_SERVER_URL")?.takeIf { it.isNotBlank() }
