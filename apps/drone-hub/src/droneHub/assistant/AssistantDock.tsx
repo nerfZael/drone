@@ -100,6 +100,7 @@ type AssistantThread = {
   accessScope: AssistantAccessScope;
   autoApprove: boolean;
   promptDeliveryMode: AssistantPromptDeliveryMode;
+  messageCount?: number;
   messages: AssistantMessage[];
   queuedPrompts?: AssistantQueuedPrompt[];
   status: AssistantThreadStatus;
@@ -156,6 +157,9 @@ type AssistantSnapshot = {
   runningModels?: Record<string, AssistantRunModel>;
   streamingMessage?: AssistantMessage;
 };
+
+const EMPTY_ASSISTANT_MODEL_OPTIONS: AssistantModelOption[] = [];
+const EMPTY_ASSISTANT_TOOL_SUMMARIES: AssistantToolSummary[] = [];
 
 type AssistantSystemPromptSettings = {
   ok: true;
@@ -1494,7 +1498,7 @@ function AssistantThreadSidebar({
           <div className="space-y-1">
             {threads.map((thread) => {
               const active = thread.id === activeThreadId;
-              const messageCount = thread.messages.length + (thread.queuedPrompts?.length ?? 0);
+              const messageCount = (thread.messageCount ?? thread.messages.length) + (thread.queuedPrompts?.length ?? 0);
               return (
                 <div
                   key={thread.id}
@@ -2512,7 +2516,18 @@ export function AssistantDock() {
       setError(null);
     }
     try {
-      setSnapshot(await requestJson<AssistantSnapshot>('/api/assistant/threads'));
+      const threadId = activeThreadIdRef.current;
+      if (threadId) {
+        setSnapshot(await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(threadId)}`));
+      } else {
+        const listed = await requestJson<AssistantSnapshot>('/api/assistant/threads');
+        const listedThreadId = String(listed.activeThreadId ?? '').trim();
+        setSnapshot(
+          listedThreadId
+            ? await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(listedThreadId)}`)
+            : listed,
+        );
+      }
     } catch (err: any) {
       if (!options.silent) setError(err?.message ?? String(err));
     } finally {
@@ -3191,11 +3206,7 @@ export function AssistantDock() {
   const selectThread = React.useCallback(async (thread: AssistantThread) => {
     updateThreadRequestRef.current += 1;
     try {
-      const next = await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(thread.id)}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({}),
-      });
+      const next = await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(thread.id)}/activate`, { method: 'POST' });
       setSnapshot(next);
       setDraft('');
     } catch (err: any) {
@@ -3307,7 +3318,7 @@ export function AssistantDock() {
     }
   }, [activeThread]);
 
-  const modelOptions = snapshot?.models ?? [];
+  const modelOptions = snapshot?.models ?? EMPTY_ASSISTANT_MODEL_OPTIONS;
   const activeRunningModel = activeThread ? snapshot?.runningModels?.[activeThread.id] ?? null : null;
   const activeProvider = activeThread?.provider ?? modelOptions[0]?.provider ?? 'openai';
   const providerOptions = React.useMemo(
@@ -3354,7 +3365,7 @@ export function AssistantDock() {
   }, [activeThread, modelOptions]);
   const activeProviderMeta = providerOptions.find((provider) => provider.id === activeProvider) ?? ASSISTANT_PROVIDERS[0];
   const activeRunningModelLabel = activeRunningModel ? modelSelectionLabel(activeRunningModel, modelOptions) : '';
-  const availableTools = snapshot?.availableTools ?? [];
+  const availableTools = snapshot?.availableTools ?? EMPTY_ASSISTANT_TOOL_SUMMARIES;
   const snapshotEnabledToolNames = React.useMemo(() => {
     const toolNames = availableTools.map((tool) => tool.name);
     if (!activeThread) return [];
@@ -3366,6 +3377,9 @@ export function AssistantDock() {
   const availableToolNamesKey = React.useMemo(() => availableTools.map((tool) => tool.name).join('\u0000'), [availableTools]);
 
   React.useEffect(() => {
+    const currentKey = enabledToolDraftNamesRef.current.join('\u0000');
+    const nextKey = snapshotEnabledToolNames.join('\u0000');
+    if (currentKey === nextKey) return;
     enabledToolDraftNamesRef.current = snapshotEnabledToolNames;
     setEnabledToolDraftNames(snapshotEnabledToolNames);
   }, [activeThreadId, availableToolNamesKey, snapshotEnabledToolNames]);

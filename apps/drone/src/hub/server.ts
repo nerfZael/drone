@@ -15141,7 +15141,7 @@ export async function startDroneHubApiServer(opts: {
       }
 
       if (pathname === '/api/assistant/threads' && method === 'GET') {
-        json(res, 200, await assistantService.snapshot());
+        json(res, 200, await assistantService.snapshot('compact'));
         return;
       }
 
@@ -15444,13 +15444,11 @@ export async function startDroneHubApiServer(opts: {
           const threadId = decodeURIComponent(assistantParts[3] ?? '');
 
           if (assistantParts.length === 4 && method === 'GET') {
-            const snapshot = await assistantService.snapshot();
-            const thread = snapshot.threads.find((item) => item.id === threadId);
-            if (!thread) {
+            try {
+              json(res, 200, await assistantService.threadSnapshot(threadId));
+            } catch (e: any) {
               json(res, 404, { ok: false, error: `unknown assistant thread: ${threadId}` });
-              return;
             }
-            json(res, 200, snapshot);
             return;
           }
 
@@ -15473,6 +15471,15 @@ export async function startDroneHubApiServer(opts: {
           if (assistantParts.length === 4 && method === 'DELETE') {
             try {
               json(res, 200, await assistantService.deleteThread(threadId));
+            } catch (e: any) {
+              json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, { ok: false, error: e?.message ?? String(e) });
+            }
+            return;
+          }
+
+          if (assistantParts.length === 5 && assistantParts[4] === 'activate' && method === 'POST') {
+            try {
+              json(res, 200, await assistantService.activateThread(threadId));
             } catch (e: any) {
               json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, { ok: false, error: e?.message ?? String(e) });
             }
@@ -15591,16 +15598,22 @@ export async function startDroneHubApiServer(opts: {
             res.setHeader('content-type', 'application/x-ndjson; charset=utf-8');
             res.setHeader('cache-control', 'no-cache, no-transform');
             res.setHeader('connection', 'keep-alive');
+            req.socket.setTimeout(0);
             const writeEvent = (event: any) => {
               if (res.destroyed) return;
               res.write(`${JSON.stringify(event)}\n`);
             };
+            const keepAlive = setInterval(() => {
+              writeEvent({ type: 'heartbeat', at: nowIso() });
+            }, 15_000);
+            (keepAlive as any).unref?.();
             try {
               await assistantService.promptThread(threadId, body ?? {}, writeEvent);
               writeEvent({ type: 'done' });
             } catch (e: any) {
               writeEvent({ type: 'error', error: e?.message ?? String(e) });
             } finally {
+              clearInterval(keepAlive);
               res.end();
             }
             return;

@@ -1,11 +1,11 @@
 import React from 'react';
 import { NoDroneSelectedState } from './NoDroneSelectedState';
 import { SettingsView } from './SettingsView';
-import type { DraftChatWorkspace as DraftChatWorkspaceComponent } from './DraftChatWorkspace';
+import { DraftChatWorkspace, type DraftChatWorkspace as DraftChatWorkspaceComponent } from './DraftChatWorkspace';
 import type { GroupMultiChatWorkspace as GroupMultiChatWorkspaceComponent } from './GroupMultiChatWorkspace';
 import type { KanbanBoardWorkspace as KanbanBoardWorkspaceComponent } from './KanbanBoardWorkspace';
 import type { PlaybookRunsWorkspace as PlaybookRunsWorkspaceComponent } from './PlaybookRunsWorkspace';
-import type { SelectedDroneWorkspace as SelectedDroneWorkspaceComponent } from './SelectedDroneWorkspace';
+import { SelectedDroneWorkspace, type SelectedDroneWorkspace as SelectedDroneWorkspaceComponent } from './SelectedDroneWorkspace';
 import type { SetupWelcomeView as SetupWelcomeViewComponent } from './SetupWelcomeView';
 import type { AppView } from './app-types';
 import { FloatingAssistantDock } from '../assistant/FloatingAssistantDock';
@@ -13,11 +13,6 @@ import { FloatingAssistantDock } from '../assistant/FloatingAssistantDock';
 const SetupWelcomeView = React.lazy(async () => {
   const module = await import('./SetupWelcomeView');
   return { default: module.SetupWelcomeView };
-});
-
-const DraftChatWorkspace = React.lazy(async () => {
-  const module = await import('./DraftChatWorkspace');
-  return { default: module.DraftChatWorkspace };
 });
 
 const KanbanBoardWorkspace = React.lazy(async () => {
@@ -33,11 +28,6 @@ const PlaybookRunsWorkspace = React.lazy(async () => {
 const GroupMultiChatWorkspace = React.lazy(async () => {
   const module = await import('./GroupMultiChatWorkspace');
   return { default: module.GroupMultiChatWorkspace };
-});
-
-const SelectedDroneWorkspace = React.lazy(async () => {
-  const module = await import('./SelectedDroneWorkspace');
-  return { default: module.SelectedDroneWorkspace };
 });
 
 export type DroneHubWorkspaceContentProps = {

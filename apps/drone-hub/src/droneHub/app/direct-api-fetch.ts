@@ -58,8 +58,7 @@ export function installDirectApiFetch(): void {
   if (!base) return;
   const token = directApiToken();
   if (!token) return;
-  const currentFetch = window.fetch.bind(window);
-  if ((window.fetch as any).__droneHubDirectApiInstalled) return;
+  const currentFetch = ((window.fetch as any).__droneHubDirectApiOriginal ?? window.fetch).bind(window) as typeof window.fetch;
 
   const patchedFetch = ((input: RequestInfo | URL, init?: RequestInit) => {
     if (input instanceof Request) {
@@ -86,5 +85,10 @@ export function installDirectApiFetch(): void {
     });
   }) as typeof window.fetch;
   (patchedFetch as any).__droneHubDirectApiInstalled = true;
+  (patchedFetch as any).__droneHubDirectApiOriginal = currentFetch;
   window.fetch = patchedFetch;
+}
+
+if (import.meta.hot) {
+  import.meta.hot.accept(() => installDirectApiFetch());
 }

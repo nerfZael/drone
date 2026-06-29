@@ -166,6 +166,101 @@ describe('assistant thread isolation', () => {
     });
   });
 
+  test('compact assistant snapshots omit archived thread message bodies', async () => {
+    await withTempDroneDataDir('assistant-compact-snapshot-', async () => {
+      const service = makeService();
+      installFakeRuntime(service, {});
+
+      const first = await service.createThread({ title: 'first' });
+      const firstThreadId = first.activeThreadId;
+      const second = await service.createThread({ title: 'second' });
+      const secondThreadId = second.activeThreadId;
+      const largeText = 'x'.repeat(250_000);
+      const threads = (service as any).threads as any[];
+      threads.find((thread) => thread.id === firstThreadId).messages = [{ role: 'assistant', content: [{ type: 'text', text: largeText }] }];
+      threads.find((thread) => thread.id === secondThreadId).messages = [{ role: 'assistant', content: [{ type: 'text', text: largeText }] }];
+      (service as any).chatIdleSubscriptions = [
+        {
+          id: 'sub-fired',
+          threadId: firstThreadId,
+          toolCallId: null,
+          mode: 'all',
+          targets: [{ droneId: 'drone-1', chatName: 'default' }],
+          createdAt: new Date().toISOString(),
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          idleForMs: 0,
+          status: 'fired',
+          idleSince: null,
+          firedAt: new Date().toISOString(),
+          cancelledAt: null,
+          expiredAt: null,
+          lastResult: { ok: true, targets: [{ latest: { text: largeText } }] },
+        },
+      ];
+
+      const compact = await service.snapshot('compact');
+      expect(JSON.stringify(compact)).not.toContain(largeText);
+      expect(compact.threads.every((thread: any) => thread.messages.length === 0)).toBe(true);
+      expect(compact.threads.find((thread: any) => thread.id === firstThreadId)?.messageCount).toBe(1);
+      expect(compact.threads.find((thread: any) => thread.id === secondThreadId)?.messageCount).toBe(1);
+      expect(compact.chatIdleSubscriptions).toEqual([]);
+
+      const detail = await service.threadSnapshot(firstThreadId);
+      const firstDetail = detail.threads.find((thread: any) => thread.id === firstThreadId) as any;
+      const secondSummary = detail.threads.find((thread: any) => thread.id === secondThreadId) as any;
+      expect(detail.activeThreadId).toBe(firstThreadId);
+      expect((await service.snapshot('compact')).activeThreadId).toBe(secondThreadId);
+      expect(JSON.stringify(firstDetail)).toContain(largeText);
+      expect(firstDetail.messageCount).toBe(1);
+      expect(JSON.stringify(secondSummary)).not.toContain(largeText);
+      expect(secondSummary.messageCount).toBe(1);
+      expect(secondSummary.messages).toEqual([]);
+      expect(detail.chatIdleSubscriptions).toEqual([]);
+
+      const activated = await service.activateThread(firstThreadId);
+      expect(activated.activeThreadId).toBe(firstThreadId);
+      expect((await service.snapshot('compact')).activeThreadId).toBe(firstThreadId);
+    });
+  });
+
+  test('approval pending snapshots omit inactive thread message bodies', async () => {
+    await withTempDroneDataDir('assistant-approval-compact-snapshot-', async () => {
+      const service = makeService();
+      installFakeRuntime(service, {});
+
+      const archived = await service.createThread({ title: 'archived' });
+      const archivedThreadId = archived.activeThreadId;
+      const active = await service.createThread({ title: 'approval' });
+      const activeThreadId = active.activeThreadId;
+      const largeText = 'approval-large-payload'.repeat(20_000);
+      const activeText = 'active approval context';
+      const threads = (service as any).threads as any[];
+      threads.find((thread) => thread.id === archivedThreadId).messages = [{ role: 'assistant', content: [{ type: 'text', text: largeText }] }];
+      threads.find((thread) => thread.id === activeThreadId).messages = [{ role: 'assistant', content: [{ type: 'text', text: activeText }] }];
+
+      const events: any[] = [];
+      const preflight = (service as any).beforeToolCall(
+        activeThreadId,
+        { toolCall: { id: 'message-call', name: 'message_drone' }, args: { droneId: 'drone-1', chatName: 'default', prompt: 'hello' } },
+        async (event: any) => {
+          if (event.type !== 'approval_pending') return;
+          events.push(event);
+          await service.approve(event.approval.id, true);
+        },
+      );
+
+      await expect(preflight).resolves.toBeUndefined();
+      expect(events).toHaveLength(1);
+      const eventSnapshot = events[0].snapshot;
+      const archivedSummary = eventSnapshot.threads.find((thread: any) => thread.id === archivedThreadId) as any;
+      const activeDetail = eventSnapshot.threads.find((thread: any) => thread.id === activeThreadId) as any;
+      expect(JSON.stringify(eventSnapshot)).not.toContain(largeText);
+      expect(JSON.stringify(activeDetail)).toContain(activeText);
+      expect(archivedSummary.messages).toEqual([]);
+      expect(archivedSummary.messageCount).toBe(1);
+    });
+  });
+
   test('keeps selected access even when no drones are selected', async () => {
     await withTempDroneDataDir('assistant-empty-selected-scope-', async () => {
       const service = makeService();
