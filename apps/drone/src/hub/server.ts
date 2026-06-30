@@ -14219,7 +14219,13 @@ export async function startDroneHubApiServer(opts: {
   const DRONE_STATUS_SUMMARY_CONCURRENCY = 16;
   const DRONE_STATUS_REFRESH_CONCURRENCY = 4;
   const DRONE_STATUS_REFRESH_INTERVAL_MS = 15_000;
+  const DRONE_SUMMARY_REGISTRY_CACHE_TTL_MS = 1_000;
+  const DRONE_SUMMARY_MAINTENANCE_MIN_INTERVAL_MS = 5_000;
   const droneStatusSummaryCache = new Map<string, CachedDroneStatusSummary>();
+  let droneSummaryRegistryCache: { loadedAtMs: number; registry: any } | null = null;
+  let droneSummaryMaintenanceTimeout: ReturnType<typeof setTimeout> | null = null;
+  let droneSummaryMaintenanceBusy = false;
+  let droneSummaryMaintenanceLastStartedAt = 0;
   let droneStatusRefreshTimer: ReturnType<typeof setInterval> | null = null;
   let droneStatusRefreshTimeout: ReturnType<typeof setTimeout> | null = null;
   let droneStatusRefreshBusy = false;
@@ -14357,6 +14363,19 @@ export async function startDroneHubApiServer(opts: {
     } finally {
       droneStatusRefreshBusy = false;
     }
+  }
+
+  function invalidateDroneSummaryRegistryCache(): void {
+    droneSummaryRegistryCache = null;
+  }
+
+  async function loadDroneRegistryForSummary(): Promise<any> {
+    if (droneSummaryRegistryCache && Date.now() - droneSummaryRegistryCache.loadedAtMs < DRONE_SUMMARY_REGISTRY_CACHE_TTL_MS) {
+      return droneSummaryRegistryCache.registry;
+    }
+    const registry = await loadRegistry();
+    droneSummaryRegistryCache = { loadedAtMs: Date.now(), registry };
+    return registry;
   }
 
   function scheduleDroneStatusRefresh(source: string, delayMs = 0): void {
@@ -14547,13 +14566,36 @@ export async function startDroneHubApiServer(opts: {
     }
   }
 
+  async function runDroneSummaryMaintenance(source: string): Promise<void> {
+    if (droneSummaryMaintenanceBusy) return;
+    droneSummaryMaintenanceBusy = true;
+    droneSummaryMaintenanceLastStartedAt = Date.now();
+    try {
+      const regAny: any = await loadRegistry();
+      enqueueDroneRegistryReconcilers(regAny);
+      await reconcileSeedingPromptCompletion(regAny);
+      await autoClearStaleRepoConflictHubErrors(regAny);
+    } catch (e: any) {
+      hubLog('warn', 'drone summary maintenance failed', { source, error: e?.message ?? String(e) });
+    } finally {
+      droneSummaryMaintenanceBusy = false;
+    }
+  }
+
+  function scheduleDroneSummaryMaintenance(source: string, delayMs = 0): void {
+    if (droneSummaryMaintenanceTimeout) return;
+    const sinceLastStartMs = Date.now() - droneSummaryMaintenanceLastStartedAt;
+    const throttleMs = Math.max(0, DRONE_SUMMARY_MAINTENANCE_MIN_INTERVAL_MS - sinceLastStartMs);
+    droneSummaryMaintenanceTimeout = setTimeout(() => {
+      droneSummaryMaintenanceTimeout = null;
+      void runDroneSummaryMaintenance(source);
+    }, Math.max(0, delayMs, throttleMs));
+    (droneSummaryMaintenanceTimeout as any).unref?.();
+  }
+
   async function loadPreparedDroneRegistryForSummary(source: string): Promise<any> {
-    triggerArchiveCleanup(source);
-    const regAny: any = await loadRegistry();
-    enqueueDroneRegistryReconcilers(regAny);
-    await reconcileSeedingPromptCompletion(regAny);
-    await autoClearStaleRepoConflictHubErrors(regAny);
-    return regAny;
+    scheduleDroneSummaryMaintenance(source, 0);
+    return await loadDroneRegistryForSummary();
   }
 
   function buildPendingDroneSummary(regAny: any, p: any): any {
@@ -15117,6 +15159,8 @@ export async function startDroneHubApiServer(opts: {
   }
 
   notifyDroneRegistryWrite = () => {
+    invalidateDroneSummaryRegistryCache();
+    scheduleDroneSummaryMaintenance('registry-write', 0);
     scheduleDroneStatusRefresh('registry-write', 0);
     scheduleDroneRegistryBroadcasterRefresh();
     scheduleDroneChatEventRefresh();
@@ -27401,6 +27445,7 @@ export async function startDroneHubApiServer(opts: {
 
   await new Promise<void>((resolve) => server.listen(opts.port, host, () => resolve()));
   startDroneStatusRefresher();
+  scheduleDroneSummaryMaintenance('startup', 0);
   const address = server.address();
   const actualPort = typeof address === 'object' && address ? address.port : opts.port;
 
@@ -27487,6 +27532,14 @@ export async function startDroneHubApiServer(opts: {
           // ignore
         }
         droneStatusRefreshTimeout = null;
+      }
+      if (droneSummaryMaintenanceTimeout) {
+        try {
+          clearTimeout(droneSummaryMaintenanceTimeout);
+        } catch {
+          // ignore
+        }
+        droneSummaryMaintenanceTimeout = null;
       }
       droneStatusRefreshBusy = false;
       for (const timer of RECONCILE_RETRY_TIMERS.values()) {
