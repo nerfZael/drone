@@ -2,11 +2,14 @@ export type ChatAgentConfig =
   | { kind: 'builtin'; id: 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi' | 'blip' }
   | { kind: 'custom'; id: string; label: string; command: string };
 
+export type AgentPermissionMode = 'full-access' | 'read-only';
+
 export type ChatInfo = {
   name: string;
   chat: string;
   agent: ChatAgentConfig;
   model: string | null;
+  agentPermissionMode: AgentPermissionMode;
   agentMessageAutoContinueEnabled: boolean;
   agentSuggestionEnabled: boolean;
   dockerSnapshotAfterAgentMessageEnabled: boolean;
@@ -83,6 +86,7 @@ export function normalizeChatInfoPayload(data: any): ChatInfo {
   const model = modelRaw || null;
   const sessionName = String(data?.sessionName ?? '').trim() || `drone-hub-chat-${chat}`;
   const createdAt = String(data?.createdAt ?? '').trim() || new Date().toISOString();
+  const agentPermissionMode: AgentPermissionMode = data?.agentPermissionMode === 'read-only' ? 'read-only' : 'full-access';
   const dockerSnapshotAfterAgentMessageEnabled = data?.dockerSnapshotAfterAgentMessageEnabled === true;
   const blipClonesEnabled = data?.blipClonesEnabled !== false;
 
@@ -107,6 +111,7 @@ export function normalizeChatInfoPayload(data: any): ChatInfo {
       name,
       chat,
       model,
+      agentPermissionMode,
       agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true,
       agentSuggestionEnabled: data?.agentSuggestionEnabled === true,
       dockerSnapshotAfterAgentMessageEnabled,
@@ -125,6 +130,7 @@ export function normalizeChatInfoPayload(data: any): ChatInfo {
         name,
         chat,
         model,
+        agentPermissionMode,
         agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true,
         agentSuggestionEnabled: data?.agentSuggestionEnabled === true,
         dockerSnapshotAfterAgentMessageEnabled,
@@ -141,6 +147,7 @@ export function normalizeChatInfoPayload(data: any): ChatInfo {
       name,
       chat,
       model,
+      agentPermissionMode,
       agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true,
       agentSuggestionEnabled: data?.agentSuggestionEnabled === true,
       dockerSnapshotAfterAgentMessageEnabled,
@@ -155,6 +162,7 @@ export function normalizeChatInfoPayload(data: any): ChatInfo {
       name,
       chat,
       model,
+      agentPermissionMode,
       agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true,
       agentSuggestionEnabled: data?.agentSuggestionEnabled === true,
       dockerSnapshotAfterAgentMessageEnabled,
@@ -165,21 +173,22 @@ export function normalizeChatInfoPayload(data: any): ChatInfo {
     };
   }
   if (String(data?.piSessionId ?? '').trim()) {
-    return { name, chat, model, agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true, agentSuggestionEnabled: data?.agentSuggestionEnabled === true, dockerSnapshotAfterAgentMessageEnabled, blipClonesEnabled, sessionName, createdAt, agent: { kind: 'builtin', id: 'pi' } };
+    return { name, chat, model, agentPermissionMode, agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true, agentSuggestionEnabled: data?.agentSuggestionEnabled === true, dockerSnapshotAfterAgentMessageEnabled, blipClonesEnabled, sessionName, createdAt, agent: { kind: 'builtin', id: 'pi' } };
   }
   if (String(data?.blipSessionId ?? '').trim()) {
-    return { name, chat, model, agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true, agentSuggestionEnabled: data?.agentSuggestionEnabled === true, dockerSnapshotAfterAgentMessageEnabled, blipClonesEnabled, sessionName, createdAt, agent: { kind: 'builtin', id: 'blip' } };
+    return { name, chat, model, agentPermissionMode, agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true, agentSuggestionEnabled: data?.agentSuggestionEnabled === true, dockerSnapshotAfterAgentMessageEnabled, blipClonesEnabled, sessionName, createdAt, agent: { kind: 'builtin', id: 'blip' } };
   }
   if (String(data?.codexThreadId ?? '').trim()) {
-    return { name, chat, model, agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true, agentSuggestionEnabled: data?.agentSuggestionEnabled === true, dockerSnapshotAfterAgentMessageEnabled, blipClonesEnabled, sessionName, createdAt, agent: { kind: 'builtin', id: 'codex' } };
+    return { name, chat, model, agentPermissionMode, agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true, agentSuggestionEnabled: data?.agentSuggestionEnabled === true, dockerSnapshotAfterAgentMessageEnabled, blipClonesEnabled, sessionName, createdAt, agent: { kind: 'builtin', id: 'codex' } };
   }
   if (String(data?.chatId ?? '').trim()) {
-    return { name, chat, model, agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true, agentSuggestionEnabled: data?.agentSuggestionEnabled === true, dockerSnapshotAfterAgentMessageEnabled, blipClonesEnabled, sessionName, createdAt, agent: { kind: 'builtin', id: 'cursor' } };
+    return { name, chat, model, agentPermissionMode, agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true, agentSuggestionEnabled: data?.agentSuggestionEnabled === true, dockerSnapshotAfterAgentMessageEnabled, blipClonesEnabled, sessionName, createdAt, agent: { kind: 'builtin', id: 'cursor' } };
   }
   return {
     name,
     chat,
     model,
+    agentPermissionMode,
     agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true,
     agentSuggestionEnabled: data?.agentSuggestionEnabled === true,
     dockerSnapshotAfterAgentMessageEnabled,

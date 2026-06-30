@@ -1,6 +1,6 @@
 import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import type { ChatAgentConfig } from '../../domain';
+import type { AgentPermissionMode, ChatAgentConfig } from '../../domain';
 import { isValidDroneNameDashCase } from '../../domain';
 import type { DroneSummary } from '../types';
 import { droneNameHasWhitespace } from './name-helpers';
@@ -56,6 +56,9 @@ type CreateDronesModalProps = {
   spawnModel: string;
   onSpawnModelChange: (value: string) => void;
   onClearSpawnModel: () => void;
+  spawnAgentPermissionMode: AgentPermissionMode;
+  onSpawnAgentPermissionModeChange: (value: AgentPermissionMode) => void;
+  spawnAgentReadOnlySupported: boolean;
   spawnAgentConfig: ChatAgentConfig;
   createInitialMessage: string;
   onCreateInitialMessageChange: (value: string) => void;
@@ -114,6 +117,9 @@ export function CreateDronesModal({
   spawnModel,
   onSpawnModelChange,
   onClearSpawnModel,
+  spawnAgentPermissionMode,
+  onSpawnAgentPermissionModeChange,
+  spawnAgentReadOnlySupported,
   spawnAgentConfig,
   createInitialMessage,
   onCreateInitialMessageChange,
@@ -160,6 +166,8 @@ export function CreateDronesModal({
     (createMode === 'clone' && cloneIncludeChats) ||
     spawnAgentConfig.kind !== 'builtin' ||
     spawnModelMenuEntries.length <= 1;
+  const spawnAgentAccessCopiedFromClone = createMode === 'clone' && cloneIncludeChats;
+  const spawnAgentAccessDisabled = creating || spawnAgentAccessCopiedFromClone;
 
   React.useEffect(() => {
     mountedRef.current = true;
@@ -484,6 +492,59 @@ export function CreateDronesModal({
                   : hostCustomAgentsUnsupported
                     ? 'Host runtime currently supports builtin agents only.'
                     : 'Used for the default chat. You can change per-chat later.'}
+              </span>
+            </div>
+
+            <div className="mb-4">
+              <div className="text-[10px] font-semibold text-[var(--muted-dim)] mb-1.5 tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+                Agent access
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onSpawnAgentPermissionModeChange('full-access')}
+                  disabled={spawnAgentAccessDisabled}
+                  className={`h-9 px-3 rounded border text-[11px] font-semibold tracking-wide uppercase transition-all ${
+                    !spawnAgentAccessCopiedFromClone && spawnAgentPermissionMode === 'full-access'
+                      ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
+                      : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                  } ${spawnAgentAccessDisabled ? 'opacity-40 cursor-not-allowed' : ''}`}
+                  style={{ fontFamily: 'var(--display)' }}
+                >
+                  Full access
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!spawnAgentReadOnlySupported) return;
+                    onSpawnAgentPermissionModeChange('read-only');
+                  }}
+                  disabled={spawnAgentAccessDisabled || !spawnAgentReadOnlySupported}
+                  className={`h-9 px-3 rounded border text-[11px] font-semibold tracking-wide uppercase transition-all ${
+                    !spawnAgentAccessCopiedFromClone && spawnAgentPermissionMode === 'read-only'
+                      ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
+                      : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                  } ${spawnAgentAccessDisabled || !spawnAgentReadOnlySupported ? 'opacity-40 cursor-not-allowed' : ''}`}
+                  style={{ fontFamily: 'var(--display)' }}
+                  title={
+                    spawnAgentAccessCopiedFromClone
+                      ? 'Access is copied from the source chats.'
+                      : spawnAgentReadOnlySupported
+                        ? 'Use read-only permissions for the default chat.'
+                        : 'Read-only mode is currently available for Codex and Blip.'
+                  }
+                >
+                  Read only
+                </button>
+              </div>
+              <span className="text-[10px] text-[var(--muted-dim)] block mt-1">
+                {spawnAgentAccessCopiedFromClone
+                  ? 'When cloning chats, access is copied from the source chats.'
+                  : spawnAgentPermissionMode === 'read-only'
+                  ? 'The default chat will run the next prompt without write permissions.'
+                  : spawnAgentReadOnlySupported
+                    ? 'Full access matches the current default behavior.'
+                    : 'Read-only is currently available for Codex and Blip.'}
               </span>
             </div>
 

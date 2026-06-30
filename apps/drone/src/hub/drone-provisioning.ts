@@ -57,6 +57,8 @@ type DroneProvisioningControllerDeps = {
     agent?: any;
     setModel: boolean;
     model?: string | null;
+    setAgentPermissionMode?: boolean;
+    agentPermissionMode?: 'full-access' | 'read-only';
     setAgentSuggestionEnabled?: boolean;
     agentSuggestionEnabled?: boolean;
   }) => Promise<void>;
@@ -117,8 +119,9 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
   function materializeSeedChatConfigOnDroneEntry(droneEntry: any, seedRaw: any) {
     if (!droneEntry || typeof droneEntry !== 'object' || !seedRaw || typeof seedRaw !== 'object') return;
     const seedAgent = deps.parseSeedAgent(seedRaw?.agent);
+    const seedAgentPermissionMode = seedRaw?.agentPermissionMode === 'read-only' ? 'read-only' : null;
     const hasSeedModel = Object.prototype.hasOwnProperty.call(seedRaw, 'model');
-    if (!seedAgent && !hasSeedModel) return;
+    if (!seedAgent && !hasSeedModel && !seedAgentPermissionMode) return;
 
     const chatName = deps.normalizeChatName(seedRaw?.chatName ?? 'default');
     const seedModel = deps.normalizeChatModel(seedRaw?.model);
@@ -129,6 +132,8 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
         : { createdAt: deps.nowIso() };
     if (!(typeof entry.createdAt === 'string' && entry.createdAt.trim())) entry.createdAt = deps.nowIso();
     if (seedAgent) entry.agent = seedAgent;
+    if (seedAgentPermissionMode) entry.agentPermissionMode = seedAgentPermissionMode;
+    else delete entry.agentPermissionMode;
     if (hasSeedModel) {
       if (seedModel) entry.model = seedModel;
       else delete entry.model;
@@ -405,6 +410,7 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
     const seedChatName = deps.normalizeChatName(seed?.chatName ?? 'default');
     const seedAgent = deps.parseSeedAgent(seed?.agent);
     const seedModel = deps.normalizeChatModel(seed?.model);
+    const seedAgentPermissionMode = seed?.agentPermissionMode === 'read-only' ? 'read-only' : null;
     const seedPrompt = String(seed?.prompt ?? '').trim();
     const seedPromptIdRaw = typeof (seed as any)?.promptId === 'string' ? String((seed as any).promptId).trim() : '';
     const seedPromptId =
@@ -498,6 +504,9 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
             if (seedModel) entry.model = seedModel;
             else delete entry.model;
           }
+          if (chatName === seedChatName && seedAgentPermissionMode) {
+            entry.agentPermissionMode = seedAgentPermissionMode;
+          }
           entry.pendingPrompts = Array.isArray(entry.pendingPrompts) ? entry.pendingPrompts : [];
           const row = deps.startupPromptToPendingPrompt(queued);
           const existingIdx = entry.pendingPrompts.findIndex((p: any) => String(p?.id ?? '').trim() === row.id);
@@ -517,7 +526,7 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
       });
     }
 
-    if (seed && (seedAgent || seedModel || seedPrompt)) {
+    if (seed && (seedAgent || seedModel || seedAgentPermissionMode || seedPrompt)) {
       const chatName = seedChatName;
       const prompt = seedPrompt;
 
@@ -530,7 +539,7 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
         },
       });
       try {
-        if (seedAgent || seedModel) {
+        if (seedAgent || seedModel || seedAgentPermissionMode) {
           const agentSuggestionEnabledByDefault = await deps.resolveAgentSuggestionEnabledByDefault();
           await deps.ensureChatEntry({ droneId: pendingDroneId, chatName });
           await deps.setChatAgentConfig({
@@ -539,6 +548,7 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
             ...(seedAgent ? { agent: seedAgent } : {}),
             setModel: true,
             model: seedModel,
+            ...(seedAgentPermissionMode ? { setAgentPermissionMode: true, agentPermissionMode: seedAgentPermissionMode } : {}),
             setAgentSuggestionEnabled: true,
             agentSuggestionEnabled: agentSuggestionEnabledByDefault && seedAgent?.kind !== 'custom',
           });

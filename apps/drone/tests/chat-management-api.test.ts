@@ -365,6 +365,87 @@ describeSocketSuite('chat management api', () => {
     expect(typeof regAny?.drones?.[droneId]?.chats?.default?.agentMessageAutoContinueEnabledAt).toBe('string');
   });
 
+  test('stores and returns per-chat agent permission mode for supported agents', async () => {
+    const droneId = 'drone-chat-agent-permission';
+    await seedDrone(droneId);
+
+    const initial = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default`);
+    expect(initial.r.status).toBe(200);
+    expect(initial.data?.agentPermissionMode).toBe('full-access');
+
+    const updated = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/config`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        agent: { kind: 'builtin', id: 'codex' },
+        agentPermissionMode: 'read-only',
+      }),
+    });
+    expect(updated.r.status).toBe(200);
+    expect(updated.data?.agentPermissionMode).toBe('read-only');
+
+    const chatInfo = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default`);
+    expect(chatInfo.r.status).toBe(200);
+    expect(chatInfo.data?.agentPermissionMode).toBe('read-only');
+
+    let regAny: any = await loadRegistry();
+    expect(regAny?.drones?.[droneId]?.chats?.default?.agentPermissionMode).toBe('read-only');
+
+    const disabled = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/config`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ agentPermissionMode: 'full-access' }),
+    });
+    expect(disabled.r.status).toBe(200);
+    expect(disabled.data?.agentPermissionMode).toBe('full-access');
+
+    regAny = await loadRegistry();
+    expect(regAny?.drones?.[droneId]?.chats?.default?.agentPermissionMode).toBeUndefined();
+  });
+
+  test('clears read-only agent permission mode when switching to an unsupported agent', async () => {
+    const droneId = 'drone-chat-agent-permission-clear';
+    await seedDrone(droneId);
+
+    const readOnly = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/config`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        agent: { kind: 'builtin', id: 'codex' },
+        agentPermissionMode: 'read-only',
+      }),
+    });
+    expect(readOnly.r.status).toBe(200);
+
+    const switched = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/config`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ agent: { kind: 'builtin', id: 'cursor' } }),
+    });
+    expect(switched.r.status).toBe(200);
+
+    const chatInfo = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default`);
+    expect(chatInfo.r.status).toBe(200);
+    expect(chatInfo.data?.agent).toEqual({ kind: 'builtin', id: 'cursor' });
+    expect(chatInfo.data?.agentPermissionMode).toBe('full-access');
+
+    const regAny: any = await loadRegistry();
+    expect(regAny?.drones?.[droneId]?.chats?.default?.agentPermissionMode).toBeUndefined();
+  });
+
+  test('rejects read-only agent permission mode for unsupported agents', async () => {
+    const droneId = 'drone-chat-agent-permission-unsupported';
+    await seedDrone(droneId);
+
+    const updated = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/config`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ agentPermissionMode: 'read-only' }),
+    });
+    expect(updated.r.status).toBe(400);
+    expect(String(updated.data?.error ?? '')).toContain('Codex and Blip');
+  });
+
   test('rejects enabling auto-continue for custom-agent chats', async () => {
     const droneId = 'drone-chat-auto-continue-custom';
     await seedDrone(droneId);
