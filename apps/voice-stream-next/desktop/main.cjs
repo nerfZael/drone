@@ -7,6 +7,7 @@ const { createRequire } = require('node:module');
 const os = require('node:os');
 const path = require('node:path');
 const vm = require('node:vm');
+const { loadMcpServer } = require('./mcp-client-manager.cjs');
 
 const APP_NAME = 'Drone';
 const LINUX_DESKTOP_FILE_NAME = 'drone.desktop';
@@ -156,6 +157,7 @@ const defaultConfig = {
   ],
   extensionBridgeEnabled: true,
   extensions: [],
+  mcpServers: [],
   authSavedAt: '',
 };
 
@@ -210,6 +212,7 @@ function normalizeConfig(nextConfig) {
   config.turnOffShortcut = sanitizeShortcutBinding(config.turnOffShortcut, defaultTurnOffShortcut);
   config.pauseResumeShortcut = sanitizeShortcutBinding(config.pauseResumeShortcut, defaultPauseResumeShortcut);
   config.assistantRecordingShortcuts = sanitizeAssistantRecordingShortcuts(config.assistantRecordingShortcuts);
+  config.mcpServers = Array.isArray(config.mcpServers) ? config.mcpServers : [];
   if (!String(config.installationId || '').trim()) {
     config.installationId = createInstallationId();
   }
@@ -1747,14 +1750,62 @@ function cleanExtensionConfigs(config = readConfig()) {
     .filter(Boolean);
 }
 
-function extensionConfigKey(configs) {
-  return JSON.stringify(configs.map((item) => ({
+function cleanMcpServerConfigs(config = readConfig()) {
+  const entries = Array.isArray(config.mcpServers) ? config.mcpServers : [];
+  return entries
+    .map((entry, index) => {
+      const value = entry && typeof entry === 'object' ? entry : {};
+      const id = safeExtensionToolSegment(value.id || value.name || `mcp_${index + 1}`).replace(/_/g, '-');
+      if (!id) return null;
+      const command = String(value.command || '').trim();
+      const env = value.env && typeof value.env === 'object' && !Array.isArray(value.env) ? value.env : {};
+      const toolApprovals = value.toolApprovals && typeof value.toolApprovals === 'object' && !Array.isArray(value.toolApprovals) ? value.toolApprovals : {};
+      const targetSlot = safeExtensionToolSegment(value.targetSlot || '');
+      return {
+        id,
+        extensionId: `mcp-${id}`,
+        name: String(value.name || titleFromExtensionId(id)).trim() || titleFromExtensionId(id),
+        enabled: value.enabled !== false,
+        transport: String(value.transport || 'stdio').trim().toLowerCase() || 'stdio',
+        command,
+        args: Array.isArray(value.args) ? value.args.map((item) => String(item)).filter(Boolean) : [],
+        cwd: String(value.cwd || '').trim(),
+        env: Object.fromEntries(Object.entries(env).map(([key, item]) => [String(key), String(item)]).filter(([key]) => key)),
+        approval: cleanExtensionApproval(value.approval),
+        toolApprovals: Object.fromEntries(Object.entries(toolApprovals).map(([key, item]) => [String(key), cleanExtensionApproval(item)]).filter(([key]) => key)),
+        supportedTargets: cleanExtensionTargets(value.supportedTargets || value.targets || 'device'),
+        defaultTarget: cleanExtensionTarget(value.defaultTarget, 'device'),
+        targetSlot,
+      };
+    })
+    .filter(Boolean);
+}
+
+function extensionConfigKey(extensionConfigs, mcpServerConfigs) {
+  return JSON.stringify({
+    extensions: extensionConfigs.map((item) => ({
     id: item.id,
     name: item.name,
     path: item.path,
     enabled: item.enabled,
     config: item.config,
-  })));
+    })),
+    mcpServers: mcpServerConfigs.map((item) => ({
+      id: item.id,
+      name: item.name,
+      enabled: item.enabled,
+      transport: item.transport,
+      command: item.command,
+      args: item.args,
+      cwd: item.cwd,
+      env: item.env,
+      approval: item.approval,
+      toolApprovals: item.toolApprovals,
+      supportedTargets: item.supportedTargets,
+      defaultTarget: item.defaultTarget,
+      targetSlot: item.targetSlot,
+    })),
+  });
 }
 
 function extensionStatePath() {
@@ -1808,6 +1859,64 @@ async function postAssistantThreadPromptFromExtension(extensionId, threadId, pro
   }
   if (!response.ok) throw new Error(String(data?.error || text || `assistant prompt failed with ${response.status}`));
   return data;
+}
+
+function mcpNotificationData(notification) {
+  const data = notification?.params?.data;
+  return data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+}
+
+function mcpClientMetaValue(clientMeta, key) {
+  if (!clientMeta || typeof clientMeta !== 'object' || Array.isArray(clientMeta)) return '';
+  return String(clientMeta[key] || '').trim();
+}
+
+function droneHubMcpIdleSubscriptionPrompt(data) {
+  const subscription = data.subscription && typeof data.subscription === 'object' && !Array.isArray(data.subscription)
+    ? data.subscription
+    : {};
+  const subscriptionId = String(subscription.id || data.subscriptionId || '').trim() || 'unknown';
+  const mode = String(subscription.mode || data.mode || '').trim() || 'unknown';
+  return [
+    `Drone Hub idle subscription ${subscriptionId} fired.`,
+    `Mode: ${mode}.`,
+    'The idle status is below. Continue from where you left off. If you need the drone response text, use read_chat on the relevant drone chat.',
+    JSON.stringify({
+      subscription,
+      idleStatus: data.status ?? data.lastStatus ?? null,
+    }, null, 2),
+  ].join('\n\n');
+}
+
+async function handleMcpNotification(mcpServerConfig, notification) {
+  if (mcpServerConfig.id !== 'drone-hub' && mcpServerConfig.extensionId !== 'mcp-drone-hub') return;
+  const data = mcpNotificationData(notification);
+  if (data.kind !== 'drone_hub.chat_idle') return;
+
+  const clientMeta = data.clientMeta && typeof data.clientMeta === 'object' && !Array.isArray(data.clientMeta) ? data.clientMeta : {};
+  const threadId = mcpClientMetaValue(clientMeta, 'voice-stream-next/threadId');
+  if (!threadId) {
+    windowDebugLog('mcp:droneHubIdleIgnored', { serverId: mcpServerConfig.id, reason: 'missing VoiceStream thread id' });
+    return;
+  }
+
+  const extensionId = mcpClientMetaValue(clientMeta, 'voice-stream-next/extensionId') || mcpServerConfig.extensionId;
+  try {
+    await postAssistantThreadPromptFromExtension(extensionId, threadId, droneHubMcpIdleSubscriptionPrompt(data));
+    windowDebugLog('mcp:droneHubIdleResumed', {
+      serverId: mcpServerConfig.id,
+      extensionId,
+      threadId,
+      subscriptionId: String(data.subscription?.id || ''),
+    });
+  } catch (error) {
+    windowDebugLog('mcp:droneHubIdleResumeFailed', {
+      serverId: mcpServerConfig.id,
+      extensionId,
+      threadId,
+      error: error?.message || String(error),
+    });
+  }
 }
 
 function createExtensionApi(extensionConfig, manifest, tools) {
@@ -1973,6 +2082,49 @@ function workspaceExtensionEntry(existing = {}) {
   };
 }
 
+function droneHubMcpServerEntry(existing = {}) {
+  const existingEnv = existing.env && typeof existing.env === 'object' && !Array.isArray(existing.env) ? existing.env : {};
+  const existingToolApprovals = existing.toolApprovals && typeof existing.toolApprovals === 'object' && !Array.isArray(existing.toolApprovals)
+    ? existing.toolApprovals
+    : {};
+  return {
+    id: 'drone-hub',
+    name: 'Drone Hub',
+    transport: 'stdio',
+    command: String(existing.command || 'drone-hub-mcp-server').trim() || 'drone-hub-mcp-server',
+    args: Array.isArray(existing.args) ? existing.args.map((item) => String(item)).filter(Boolean) : [],
+    cwd: String(existing.cwd || '').trim(),
+    env: Object.fromEntries(Object.entries(existingEnv).map(([key, value]) => [String(key), String(value)]).filter(([key]) => key)),
+    enabled: true,
+    approval: cleanExtensionApproval(existing.approval),
+    toolApprovals: {
+      list_drones: 'never',
+      list_repos: 'never',
+      list_groups: 'never',
+      create_group: 'never',
+      set_drone_group: 'never',
+      rename_drones: 'never',
+      reorder_drones: 'never',
+      create_drone: 'never',
+      clone_drone: 'never',
+      list_chats: 'never',
+      create_chat: 'always',
+      send_message: 'always',
+      subscribe_to_any_chat_idle: 'never',
+      subscribe_to_all_chats_idle: 'never',
+      read_chat: 'never',
+      ...Object.fromEntries(
+        Object.entries(existingToolApprovals)
+          .map(([key, value]) => [String(key), cleanExtensionApproval(value)])
+          .filter(([key]) => key),
+      ),
+    },
+    supportedTargets: cleanExtensionTargets(existing.supportedTargets || existing.targets || 'device'),
+    defaultTarget: cleanExtensionTarget(existing.defaultTarget, 'device'),
+    targetSlot: safeExtensionToolSegment(existing.targetSlot || ''),
+  };
+}
+
 function uniqueWorkspaceRoots(values) {
   const rawValues = Array.isArray(values) ? values : [];
   const seen = new Set();
@@ -1999,6 +2151,20 @@ async function enableWorkspaceExtension() {
   if (existingIndex >= 0) extensions[existingIndex] = entry;
   else extensions.unshift(entry);
   const savedConfig = writeConfig({ ...config, extensions });
+  return { entry, ...(await reloadExtensionsAfterConfigSave(savedConfig)) };
+}
+
+async function enableDroneHubMcpServer() {
+  const config = readConfig();
+  const mcpServers = Array.isArray(config.mcpServers) ? [...config.mcpServers] : [];
+  const existingIndex = mcpServers.findIndex((entry) => String(entry?.id || '') === 'drone-hub');
+  const existing = existingIndex >= 0 && mcpServers[existingIndex] && typeof mcpServers[existingIndex] === 'object'
+    ? mcpServers[existingIndex]
+    : {};
+  const entry = droneHubMcpServerEntry(existing);
+  if (existingIndex >= 0) mcpServers[existingIndex] = entry;
+  else mcpServers.unshift(entry);
+  const savedConfig = writeConfig({ ...config, mcpServers });
   return { entry, ...(await reloadExtensionsAfterConfigSave(savedConfig)) };
 }
 
@@ -2083,7 +2249,8 @@ async function deactivateDesktopExtensions() {
 
 async function loadDesktopExtensions(options = {}) {
   const configs = cleanExtensionConfigs();
-  const configKey = extensionConfigKey(configs);
+  const mcpServerConfigs = cleanMcpServerConfigs();
+  const configKey = extensionConfigKey(configs, mcpServerConfigs);
   if (!options.force && extensionHost.loaded && extensionHost.configKey === configKey) return extensionHost;
   if (extensionHost.loading) return extensionHost.loading;
   extensionHost.loading = (async () => {
@@ -2128,6 +2295,51 @@ async function loadDesktopExtensions(options = {}) {
         }
         statuses.push({ id: extensionConfig.id, name: extensionConfig.name, enabled: true, ok: false, error: error?.message || String(error), toolCount: 0, skillCount: 0 });
         windowDebugLog('extension:loadFailed', { extensionId: extensionConfig.id, path: extensionConfig.path, error: error?.message || String(error) });
+      }
+    }
+    for (const mcpServerConfig of mcpServerConfigs) {
+      if (!mcpServerConfig.enabled) {
+        statuses.push({ id: mcpServerConfig.extensionId, name: mcpServerConfig.name, enabled: false, ok: true, toolCount: 0, skillCount: 0, kind: 'mcp' });
+        continue;
+      }
+      const existingToolNames = new Set(tools.keys());
+      let loadedMcpServer = null;
+      try {
+        if (extensionIds.has(mcpServerConfig.extensionId)) throw new Error(`duplicate extension id: ${mcpServerConfig.extensionId}`);
+        extensionIds.add(mcpServerConfig.extensionId);
+        if (mcpServerConfig.defaultTarget && !mcpServerConfig.supportedTargets.includes(mcpServerConfig.defaultTarget)) {
+          mcpServerConfig.defaultTarget = mcpServerConfig.supportedTargets[0] || 'device';
+        }
+        loadedMcpServer = await loadMcpServer(mcpServerConfig, {
+          safeName: safeExtensionToolSegment,
+          log(message, details = {}) {
+            windowDebugLog(message, details);
+          },
+          onNotification(serverConfig, notification) {
+            void handleMcpNotification(serverConfig, notification);
+          },
+        });
+        for (const tool of loadedMcpServer.toolExecutors) {
+          const fullName = extensionToolName(tool.extensionId, tool.name);
+          if (tools.has(fullName)) throw new Error(`duplicate MCP tool: ${fullName}`);
+          tools.set(fullName, { ...tool, fullName });
+        }
+        extensionHost.deactivators.push({ extensionId: mcpServerConfig.extensionId, deactivate: loadedMcpServer.deactivate });
+        manifests.push(loadedMcpServer.manifest);
+        statuses.push({ id: mcpServerConfig.extensionId, name: mcpServerConfig.name, enabled: true, ok: true, toolCount: loadedMcpServer.manifest.tools.length, skillCount: 0, kind: 'mcp' });
+      } catch (error) {
+        if (loadedMcpServer) {
+          try {
+            await loadedMcpServer.deactivate();
+          } catch {
+            // Best effort cleanup after a partially loaded MCP server.
+          }
+        }
+        for (const toolName of tools.keys()) {
+          if (!existingToolNames.has(toolName)) tools.delete(toolName);
+        }
+        statuses.push({ id: mcpServerConfig.extensionId, name: mcpServerConfig.name, enabled: true, ok: false, error: error?.message || String(error), toolCount: 0, skillCount: 0, kind: 'mcp' });
+        windowDebugLog('mcp:loadFailed', { serverId: mcpServerConfig.id, command: mcpServerConfig.command, error: error?.message || String(error) });
       }
     }
     extensionHost.manifests = manifests;
@@ -2523,6 +2735,7 @@ if (!gotSingleInstanceLock) {
   });
   ipcMain.handle('extensions:addFile', async (_event, filePath) => addExtensionFileToConfig(filePath));
   ipcMain.handle('extensions:enableWorkspace', async () => enableWorkspaceExtension());
+  ipcMain.handle('extensions:enableDroneHubMcp', async () => enableDroneHubMcpServer());
   ipcMain.handle('extensions:saveWorkspaceRoots', async (_event, roots) => saveWorkspaceRootsToConfig(roots));
   ipcMain.handle('extensions:addWorkspaceRoot', async (event) => {
     const owner = BrowserWindow.fromWebContents(event.sender) || mainWindow;

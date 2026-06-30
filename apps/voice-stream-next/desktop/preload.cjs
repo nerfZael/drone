@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('voiceStreamDesktop', {
   extensionStatus: () => ipcRenderer.invoke('extensions:status'),
   addExtensionFile: (filePath) => ipcRenderer.invoke('extensions:addFile', filePath),
   enableWorkspaceExtension: () => ipcRenderer.invoke('extensions:enableWorkspace'),
+  enableDroneHubMcp: () => ipcRenderer.invoke('extensions:enableDroneHubMcp'),
   addWorkspaceRoot: () => ipcRenderer.invoke('extensions:addWorkspaceRoot'),
   saveWorkspaceRoots: (roots) => ipcRenderer.invoke('extensions:saveWorkspaceRoots', roots),
   chooseExtensionFile: () => ipcRenderer.invoke('extensions:chooseFile'),

@@ -218,12 +218,16 @@ const els = {
   smartTranscriptCancelButton: document.querySelector('#smartTranscriptCancelButton'),
   smartTranscriptSubmitButton: document.querySelector('#smartTranscriptSubmitButton'),
   extensionsConfigInput: document.querySelector('#extensionsConfigInput'),
+  mcpServersConfigInput: document.querySelector('#mcpServersConfigInput'),
   addExtensionFileButton: document.querySelector('#addExtensionFileButton'),
   extensionDropzone: document.querySelector('#extensionDropzone'),
   saveExtensionsButton: document.querySelector('#saveExtensionsButton'),
+  saveMcpServersButton: document.querySelector('#saveMcpServersButton'),
   reloadExtensionsButton: document.querySelector('#reloadExtensionsButton'),
   enableWorkspaceExtensionButton: document.querySelector('#enableWorkspaceExtensionButton'),
+  enableDroneHubMcpButton: document.querySelector('#enableDroneHubMcpButton'),
   addWorkspaceRootButton: document.querySelector('#addWorkspaceRootButton'),
+  droneHubMcpStatus: document.querySelector('#droneHubMcpStatus'),
   workspaceRootsStatus: document.querySelector('#workspaceRootsStatus'),
   workspaceRootsList: document.querySelector('#workspaceRootsList'),
   extensionsStatus: document.querySelector('#extensionsStatus'),
@@ -516,14 +520,39 @@ function extensionConfigText(config = state.config) {
   return extensions.length > 0 ? JSON.stringify(extensions, null, 2) : '';
 }
 
+function mcpServersConfigText(config = state.config) {
+  const servers = Array.isArray(config?.mcpServers) ? config.mcpServers : [];
+  return servers.length > 0 ? JSON.stringify(servers, null, 2) : '';
+}
+
 function workspaceExtensionConfig(config = state.config) {
   const extensions = Array.isArray(config?.extensions) ? config.extensions : [];
   return extensions.find((entry) => String(entry?.id || '') === 'workspace') || null;
 }
 
+function droneHubMcpConfig(config = state.config) {
+  const servers = Array.isArray(config?.mcpServers) ? config.mcpServers : [];
+  return servers.find((entry) => String(entry?.id || '') === 'drone-hub') || null;
+}
+
 function workspaceRootsFromConfig(config = state.config) {
   const workspace = workspaceExtensionConfig(config);
   return Array.isArray(workspace?.config?.workspaceRoots) ? workspace.config.workspaceRoots.filter(Boolean) : [];
+}
+
+function renderDroneHubMcpConfig(config = state.config) {
+  if (!els.droneHubMcpStatus) return;
+  const server = droneHubMcpConfig(config);
+  if (!server) {
+    els.droneHubMcpStatus.textContent = 'Not added.';
+    if (els.enableDroneHubMcpButton) els.enableDroneHubMcpButton.textContent = 'Add';
+    return;
+  }
+  const command = String(server.command || 'drone-hub-mcp-server').trim() || 'drone-hub-mcp-server';
+  els.droneHubMcpStatus.textContent = server.enabled === false
+    ? 'Added, disabled in JSON.'
+    : `Added. Command: ${command}`;
+  if (els.enableDroneHubMcpButton) els.enableDroneHubMcpButton.textContent = server.enabled === false ? 'Enable' : 'Update';
 }
 
 function renderWorkspaceExtensionConfig(config = state.config) {
@@ -616,12 +645,29 @@ function validateExtensionConfig(extensions) {
   });
 }
 
+function validateMcpServersConfig(servers) {
+  servers.forEach((entry, index) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error(`MCP server ${index + 1} must be an object.`);
+    }
+    if (entry.enabled === false) return;
+    const name = String(entry.name || entry.id || `MCP server ${index + 1}`);
+    const transport = String(entry.transport || 'stdio').trim().toLowerCase();
+    if (transport !== 'stdio') throw new Error(`${name} uses unsupported transport ${transport}.`);
+    if (!String(entry.command || '').trim()) throw new Error(`${name} needs a command.`);
+    if (entry.args != null && !Array.isArray(entry.args)) throw new Error(`${name} args must be an array.`);
+    if (entry.env != null && (!entry.env || typeof entry.env !== 'object' || Array.isArray(entry.env))) {
+      throw new Error(`${name} env must be an object.`);
+    }
+  });
+}
+
 function renderExtensionStatus(result) {
   if (!els.extensionsStatus) return;
   const statuses = Array.isArray(result?.statuses) ? result.statuses : [];
   if (statuses.length === 0) {
     els.extensionsStatus.className = 'extensions-status muted';
-    els.extensionsStatus.textContent = 'No local extensions configured.';
+    els.extensionsStatus.textContent = 'No local extensions or MCP servers configured.';
     return;
   }
   els.extensionsStatus.className = 'extensions-status';
@@ -630,11 +676,12 @@ function renderExtensionStatus(result) {
     const row = document.createElement('div');
     row.className = status.ok ? 'ok' : 'error';
     const name = String(status.name || status.id || 'Extension');
+    const source = status.kind === 'mcp' ? 'MCP' : 'Extension';
     const toolText = `${status.toolCount || 0} tool(s)`;
     const skillText = status.skillCount ? `, ${status.skillCount} skill(s)` : '';
     row.textContent = status.ok
-      ? `${name}: ${status.enabled === false ? 'disabled' : `${toolText}${skillText}`}`
-      : `${name}: ${status.error || 'failed to load'}`;
+      ? `${name} ${source}: ${status.enabled === false ? 'disabled' : `${toolText}${skillText}`}`
+      : `${name} ${source}: ${status.error || 'failed to load'}`;
     els.extensionsStatus.appendChild(row);
   }
 }
@@ -704,7 +751,9 @@ function applyConfig(config) {
   renderAssistantSpeechPlaybackButton();
   if (els.suppressWakeDuringPlaybackCheckbox) els.suppressWakeDuringPlaybackCheckbox.checked = state.config.suppressWakeDuringPlayback === true;
   if (els.extensionsConfigInput) els.extensionsConfigInput.value = extensionConfigText(config);
+  if (els.mcpServersConfigInput) els.mcpServersConfigInput.value = mcpServersConfigText(config);
   renderWorkspaceExtensionConfig(config);
+  renderDroneHubMcpConfig(config);
   renderShortcutSettings();
   renderDevicePicker(els.inputDeviceSelect);
   renderDevicePicker(els.outputDeviceSelect);
@@ -4267,6 +4316,19 @@ if (els.addWorkspaceRootButton) {
     }
   });
 }
+if (els.enableDroneHubMcpButton) {
+  els.enableDroneHubMcpButton.addEventListener('click', async () => {
+    try {
+      if (!desktop.enableDroneHubMcp) throw new Error('Drone Hub MCP setup is not available.');
+      const result = await desktop.enableDroneHubMcp();
+      applyConfig(result.config);
+      renderExtensionStatus(result);
+      showStatus('Added Drone Hub MCP server.');
+    } catch (err) {
+      showStatus(err?.message || 'Could not add Drone Hub MCP server.');
+    }
+  });
+}
 if (els.extensionDropzone) {
   for (const eventName of ['dragenter', 'dragover']) {
     els.extensionDropzone.addEventListener(eventName, (event) => {
@@ -4314,6 +4376,21 @@ if (els.saveExtensionsButton) {
       showStatus('Saved local extensions.');
     } catch (err) {
       showStatus(err?.message || 'Could not save local extensions.');
+    }
+  });
+}
+if (els.saveMcpServersButton) {
+  els.saveMcpServersButton.addEventListener('click', async () => {
+    try {
+      const raw = els.mcpServersConfigInput?.value.trim() || '';
+      const mcpServers = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(mcpServers)) throw new Error('MCP servers config must be a JSON array.');
+      validateMcpServersConfig(mcpServers);
+      applyConfig(await desktop.writeConfig({ ...state.config, mcpServers }));
+      await refreshExtensionStatus();
+      showStatus('Saved MCP servers.');
+    } catch (err) {
+      showStatus(err?.message || 'Could not save MCP servers.');
     }
   });
 }
