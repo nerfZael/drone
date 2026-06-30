@@ -292,6 +292,113 @@ describe('StreamingTranscriptionManager', () => {
     expect(commands[0]?.type).toBe('finish');
     expect(commands[0]?.transcriptText).toBe('second segment,');
   });
+
+  test('detects terminal command from delayed tail window when the live segment misses it', async () => {
+    const config = {
+      ...buildStreamingTranscriptionConfigFromEnv({}),
+      finalTranscriptionMode: 'full-recording' as const,
+      terminalTailDelayMs: 20,
+      terminalTailRetryDelayMs: 20,
+      terminalTailCooldownMs: 1,
+      terminalTailWindowMs: 6_000,
+    };
+    const commands: Array<{ type: string; transcriptText: string }> = [];
+    const detections: Array<{ type: string; source: string; segmentReason: string }> = [];
+    const transcriptionSources: string[] = [];
+    const manager = new StreamingTranscriptionManager(config, (command) => {
+      commands.push({ type: command.type, transcriptText: command.transcriptText });
+    }, (detection) => {
+      detections.push({ type: detection.type, source: detection.source, segmentReason: detection.segmentReason });
+    }, {
+      beforeTranscription: (_pcm, source) => {
+        transcriptionSources.push(source);
+      },
+      transcribe: async () => {
+        const source = transcriptionSources[transcriptionSources.length - 1];
+        const text = source === 'terminal_tail'
+          ? "Hey Sebastian, can you say hello back? That's it."
+          : source === 'final'
+            ? "Hey Sebastian, can you say hello back? That's it."
+            : 'Hey Sebastian. Can you see?';
+        return {
+          provider: 'fallback',
+          credentialSource: null,
+          model: null,
+          audioDurationMs: 1_000,
+          text,
+        };
+      },
+    });
+
+    appendSpeechSegment(manager);
+
+    const startedAt = Date.now();
+    while (commands.length === 0 && Date.now() - startedAt < 2_000) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    manager.stop();
+
+    expect(commands).toHaveLength(1);
+    expect(commands[0]?.type).toBe('finish');
+    expect(commands[0]?.transcriptText).toBe('can you say hello back?');
+    expect(detections).toHaveLength(1);
+    expect(detections[0]).toEqual({ type: 'finish', source: 'terminal_tail', segmentReason: 'terminal_tail' });
+    expect(transcriptionSources).toContain('segment');
+    expect(transcriptionSources).toContain('terminal_tail');
+    expect(transcriptionSources).toContain('final');
+  });
+
+  test('retries terminal tail detection once when the first tail window misses', async () => {
+    const config = {
+      ...buildStreamingTranscriptionConfigFromEnv({}),
+      finalTranscriptionMode: 'full-recording' as const,
+      terminalTailDelayMs: 20,
+      terminalTailRetryDelayMs: 20,
+      terminalTailCooldownMs: 1,
+      terminalTailWindowMs: 6_000,
+    };
+    const commands: Array<{ type: string; transcriptText: string }> = [];
+    const transcriptionSources: string[] = [];
+    let tailAttempts = 0;
+    const manager = new StreamingTranscriptionManager(config, (command) => {
+      commands.push({ type: command.type, transcriptText: command.transcriptText });
+    }, undefined, {
+      beforeTranscription: (_pcm, source) => {
+        transcriptionSources.push(source);
+      },
+      transcribe: async () => {
+        const source = transcriptionSources[transcriptionSources.length - 1];
+        if (source === 'terminal_tail') {
+          tailAttempts += 1;
+        }
+        const text = source === 'terminal_tail' && tailAttempts >= 2
+          ? "Please capture this, that's it."
+          : source === 'final'
+            ? "Please capture this, that's it."
+            : 'Please capture this';
+        return {
+          provider: 'fallback',
+          credentialSource: null,
+          model: null,
+          audioDurationMs: 1_000,
+          text,
+        };
+      },
+    });
+
+    appendSpeechSegment(manager);
+
+    const startedAt = Date.now();
+    while (commands.length === 0 && Date.now() - startedAt < 2_000) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    manager.stop();
+
+    expect(commands).toHaveLength(1);
+    expect(commands[0]?.type).toBe('finish');
+    expect(commands[0]?.transcriptText).toBe('Please capture this,');
+    expect(tailAttempts).toBe(2);
+  });
 });
 
 function appendSpeechSegment(manager: StreamingTranscriptionManager): void {
