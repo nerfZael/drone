@@ -14582,6 +14582,22 @@ export async function startDroneHubApiServer(opts: {
     }
   }
 
+  function registryNeedsDroneSummaryMaintenance(regAny: any): boolean {
+    if (Object.keys(regAny?.pending ?? {}).length > 0) return true;
+    for (const d of Object.values(regAny?.drones ?? {}) as any[]) {
+      if (String(d?.hub?.phase ?? '') === 'seeding') return true;
+      if (String(d?.hub?.phase ?? '').trim().toLowerCase() === 'error') {
+        const lastPullMode = String(d?.repo?.lastPull?.mode ?? '').trim().toLowerCase();
+        const lastPushMode = String(d?.repo?.lastPush?.mode ?? '').trim().toLowerCase();
+        if (lastPushMode === 'drone-conflicts-ready' || lastPullMode === 'host-conflicts-ready') return true;
+      }
+      for (const entry of Object.values(d?.chats ?? {}) as any[]) {
+        if (chatHasReconcilablePendingPrompts(entry)) return true;
+      }
+    }
+    return false;
+  }
+
   function scheduleDroneSummaryMaintenance(source: string, delayMs = 0): void {
     if (droneSummaryMaintenanceTimeout) return;
     const sinceLastStartMs = Date.now() - droneSummaryMaintenanceLastStartedAt;
@@ -14594,8 +14610,11 @@ export async function startDroneHubApiServer(opts: {
   }
 
   async function loadPreparedDroneRegistryForSummary(source: string): Promise<any> {
-    scheduleDroneSummaryMaintenance(source, 0);
-    return await loadDroneRegistryForSummary();
+    const regAny = await loadDroneRegistryForSummary();
+    if (registryNeedsDroneSummaryMaintenance(regAny)) {
+      scheduleDroneSummaryMaintenance(source, 0);
+    }
+    return regAny;
   }
 
   function buildPendingDroneSummary(regAny: any, p: any): any {
