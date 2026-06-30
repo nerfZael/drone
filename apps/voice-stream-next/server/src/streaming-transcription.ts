@@ -14,8 +14,9 @@ export type TerminalDetection = {
   phrase: string;
   detectedAt: string;
   partialTranscriptText: string;
-  segmentSequence: number;
-  segmentReason: QueuedSegment['reason'];
+  source: 'segment' | 'terminal_tail';
+  segmentSequence: number | null;
+  segmentReason: QueuedSegment['reason'] | 'terminal_tail';
   finalTranscriptionMode: StreamingTranscriptionConfig['finalTranscriptionMode'];
 };
 
@@ -35,6 +36,11 @@ export type StreamingTranscriptionConfig = {
   detectTerminalCommands: boolean;
   finalTranscriptionMode: 'full-recording' | 'segments';
   maxSessionAudioBytes: number;
+  terminalTailDetectionEnabled: boolean;
+  terminalTailWindowMs: number;
+  terminalTailDelayMs: number;
+  terminalTailRetryDelayMs: number;
+  terminalTailCooldownMs: number;
 };
 
 export type StreamingSegmentMetadata = {
@@ -48,7 +54,7 @@ export type StreamingSegmentMetadata = {
 };
 
 export type StreamingTranscriptionHookContext = {
-  source: 'segment' | 'final';
+  source: 'segment' | 'final' | 'terminal_tail';
   segment?: StreamingSegmentMetadata;
   queuedDelayMs?: number;
   elapsedMs?: number;
@@ -57,9 +63,9 @@ export type StreamingTranscriptionHookContext = {
 export type StreamingTranscriptionHooks = {
   transcribe?: (pcm: Uint8Array) => Promise<RuntimeResult>;
   onSegmentQueued?: (segment: StreamingSegmentMetadata) => void;
-  beforeTranscription?: (pcm: Uint8Array, source: 'segment' | 'final', context: StreamingTranscriptionHookContext) => void;
-  onTranscription?: (result: RuntimeResult, source: 'segment' | 'final', context: StreamingTranscriptionHookContext) => void;
-  onTranscriptionError?: (error: unknown, source: 'segment' | 'final', context: StreamingTranscriptionHookContext) => void;
+  beforeTranscription?: (pcm: Uint8Array, source: 'segment' | 'final' | 'terminal_tail', context: StreamingTranscriptionHookContext) => void;
+  onTranscription?: (result: RuntimeResult, source: 'segment' | 'final' | 'terminal_tail', context: StreamingTranscriptionHookContext) => void;
+  onTranscriptionError?: (error: unknown, source: 'segment' | 'final' | 'terminal_tail', context: StreamingTranscriptionHookContext) => void;
   onSegment?: (segment: { text: string; audioMs: number; sequence: number; receivedAt: string }) => void;
 };
 
@@ -104,6 +110,11 @@ export function buildStreamingTranscriptionConfigFromEnv(env: NodeJS.ProcessEnv 
     detectTerminalCommands: true,
     finalTranscriptionMode: parseFinalTranscriptionMode(env.VOICE_STREAM_NEXT_FINAL_TRANSCRIPTION_MODE),
     maxSessionAudioBytes: parsePositiveInteger(env.VOICE_STREAM_NEXT_MAX_SESSION_AUDIO_BYTES, 80 * 1024 * 1024),
+    terminalTailDetectionEnabled: env.VOICE_STREAM_NEXT_TERMINAL_TAIL_DETECTION !== '0',
+    terminalTailWindowMs: parsePositiveInteger(env.VOICE_STREAM_NEXT_TERMINAL_TAIL_WINDOW_MS, 7_000),
+    terminalTailDelayMs: parsePositiveInteger(env.VOICE_STREAM_NEXT_TERMINAL_TAIL_DELAY_MS, 2_400),
+    terminalTailRetryDelayMs: parsePositiveInteger(env.VOICE_STREAM_NEXT_TERMINAL_TAIL_RETRY_DELAY_MS, 2_000),
+    terminalTailCooldownMs: parsePositiveInteger(env.VOICE_STREAM_NEXT_TERMINAL_TAIL_COOLDOWN_MS, 1_000),
   };
 }
 
@@ -124,6 +135,12 @@ export class StreamingTranscriptionManager {
   private sessionChunks: Uint8Array[] = [];
   private sessionBytes = 0;
   private sessionAudioOverflowed = false;
+  private terminalTailChunks: Uint8Array[] = [];
+  private terminalTailBytes = 0;
+  private terminalTailTimer: ReturnType<typeof setTimeout> | null = null;
+  private terminalTailInFlight = false;
+  private lastTerminalTailStartedAtMs = 0;
+  private terminalTailAttempt = 0;
 
   constructor(
     private readonly config: StreamingTranscriptionConfig,
@@ -141,6 +158,7 @@ export class StreamingTranscriptionManager {
   appendPcm(pcm: Uint8Array): void {
     if (this.stopped || this.terminalCommandDetected || pcm.byteLength === 0) return;
     this.rememberSessionAudio(pcm);
+    this.rememberTerminalTailAudio(pcm);
     this.enqueueSegments(this.segmenter.append(pcm));
     if (this.queue.length > 0) {
       void this.processQueue();
@@ -162,6 +180,8 @@ export class StreamingTranscriptionManager {
     this.segmenter.reset();
     this.completedSegmentTexts.clear();
     this.clearSessionAudio();
+    this.clearTerminalTailAudio();
+    this.clearTerminalTailTimer();
     clearInterval(this.timer);
   }
 
@@ -213,6 +233,87 @@ export class StreamingTranscriptionManager {
 
     const commandResult = stripTranscriptCommands(result.text);
     if (commandResult.abortDetected) {
+      await this.handleTerminalCommandResult(commandResult, {
+        source: 'segment',
+        segmentSequence: segment.sequence,
+        segmentReason: segment.reason,
+      });
+      return;
+    }
+
+    const terminalType: Extract<TerminalCommandType, 'finish' | 'sleep'> | null = commandResult.sleepDetected
+      ? 'sleep'
+      : commandResult.finishDetected
+        ? 'finish'
+        : null;
+    if (terminalType) {
+      await this.handleTerminalCommandResult(commandResult, {
+        source: 'segment',
+        segmentSequence: segment.sequence,
+        segmentReason: segment.reason,
+      });
+      return;
+    }
+
+    this.rememberCompletedSegment(segment, commandResult.text);
+  }
+
+  private async runTerminalTailDetection(): Promise<void> {
+    if (
+      this.stopped ||
+      this.terminalCommandDetected ||
+      this.terminalTailInFlight ||
+      !this.config.detectTerminalCommands ||
+      !this.config.terminalTailDetectionEnabled
+    ) {
+      return;
+    }
+    const now = Date.now();
+    if (now - this.lastTerminalTailStartedAtMs < this.config.terminalTailCooldownMs) return;
+    const pcm = this.terminalTailAudioSnapshot();
+    if (pcm.byteLength < 1600) return;
+    this.terminalTailInFlight = true;
+    this.lastTerminalTailStartedAtMs = now;
+    const startedAtMs = Date.now();
+    const context: StreamingTranscriptionHookContext = { source: 'terminal_tail' };
+    this.hooks.beforeTranscription?.(pcm, 'terminal_tail', context);
+    try {
+      const result = await (this.hooks.transcribe?.(pcm) ?? transcribePcm16(pcm, {
+        prompt: "Terminal commands may include: that's it, go to sleep, okay stop.",
+      }));
+      const completedContext = { ...context, elapsedMs: Math.max(0, Date.now() - startedAtMs) };
+      this.hooks.onTranscription?.(result, 'terminal_tail', completedContext);
+      if (this.stopped || this.terminalCommandDetected) return;
+      const commandResult = stripTranscriptCommands(result.text);
+      if (commandResult.abortDetected || commandResult.finishDetected || commandResult.sleepDetected) {
+        await this.handleTerminalCommandResult(commandResult, {
+          source: 'terminal_tail',
+          segmentSequence: null,
+          segmentReason: 'terminal_tail',
+        });
+        return;
+      }
+      this.scheduleTerminalTailRetry();
+    } catch (error) {
+      this.hooks.onTranscriptionError?.(error, 'terminal_tail', {
+        ...context,
+        elapsedMs: Math.max(0, Date.now() - startedAtMs),
+      });
+      this.scheduleTerminalTailRetry();
+    } finally {
+      this.terminalTailInFlight = false;
+    }
+  }
+
+  private async handleTerminalCommandResult(
+    commandResult: ReturnType<typeof stripTranscriptCommands>,
+    metadata: {
+      source: 'segment' | 'terminal_tail';
+      segmentSequence: number | null;
+      segmentReason: QueuedSegment['reason'] | 'terminal_tail';
+    },
+  ): Promise<void> {
+    if (commandResult.abortDetected) {
       this.enterTerminalCommandState({ clearContext: true });
       const detectedAt = new Date().toISOString();
       this.onDetection({
@@ -220,8 +321,9 @@ export class StreamingTranscriptionManager {
         phrase: commandResult.abortPhrase ?? 'okay stop',
         detectedAt,
         partialTranscriptText: '',
-        segmentSequence: segment.sequence,
-        segmentReason: segment.reason,
+        source: metadata.source,
+        segmentSequence: metadata.segmentSequence,
+        segmentReason: metadata.segmentReason,
         finalTranscriptionMode: this.config.finalTranscriptionMode,
       });
       this.onCommand({
@@ -238,44 +340,42 @@ export class StreamingTranscriptionManager {
       : commandResult.finishDetected
         ? 'finish'
         : null;
-    if (terminalType) {
-      const fallbackTranscriptText = this.buildFullTranscriptText(commandResult.text);
-      if (terminalType === 'finish' && this.config.ignoreEmptyFinishCommands && !hasTranscriptContent(fallbackTranscriptText)) {
-        return;
-      }
-      const detectedAt = new Date().toISOString();
-      const sessionPcm = this.config.finalTranscriptionMode === 'full-recording' ? this.takeSessionAudio() : new Uint8Array(0);
-      if (this.config.finalTranscriptionMode === 'segments') {
-        this.clearSessionAudio();
-      }
-      this.enterTerminalCommandState({ clearContext: false });
-      const phrase = terminalType === 'sleep'
-        ? commandResult.sleepPhrase ?? 'go to sleep'
-        : commandResult.finishPhrase ?? "that's it";
-      this.onDetection({
-        type: terminalType,
-        phrase,
-        detectedAt,
-        partialTranscriptText: fallbackTranscriptText,
-        segmentSequence: segment.sequence,
-        segmentReason: segment.reason,
-        finalTranscriptionMode: this.config.finalTranscriptionMode,
-      });
-      const transcriptText =
-        this.config.finalTranscriptionMode === 'full-recording'
-          ? await this.transcribeFinalSession(sessionPcm, fallbackTranscriptText)
-          : fallbackTranscriptText;
-      if (this.stopped) return;
-      this.onCommand({
-        type: terminalType,
-        phrase,
-        detectedAt,
-        transcriptText,
-      });
+    if (!terminalType) return;
+
+    const fallbackTranscriptText = this.buildFullTranscriptText(commandResult.text);
+    if (terminalType === 'finish' && this.config.ignoreEmptyFinishCommands && !hasTranscriptContent(fallbackTranscriptText)) {
       return;
     }
-
-    this.rememberCompletedSegment(segment, commandResult.text);
+    const detectedAt = new Date().toISOString();
+    const sessionPcm = this.config.finalTranscriptionMode === 'full-recording' ? this.takeSessionAudio() : new Uint8Array(0);
+    if (this.config.finalTranscriptionMode === 'segments') {
+      this.clearSessionAudio();
+    }
+    this.enterTerminalCommandState({ clearContext: false });
+    const phrase = terminalType === 'sleep'
+      ? commandResult.sleepPhrase ?? 'go to sleep'
+      : commandResult.finishPhrase ?? "that's it";
+    this.onDetection({
+      type: terminalType,
+      phrase,
+      detectedAt,
+      partialTranscriptText: fallbackTranscriptText,
+      source: metadata.source,
+      segmentSequence: metadata.segmentSequence,
+      segmentReason: metadata.segmentReason,
+      finalTranscriptionMode: this.config.finalTranscriptionMode,
+    });
+    const transcriptText =
+      this.config.finalTranscriptionMode === 'full-recording'
+        ? await this.transcribeFinalSession(sessionPcm, fallbackTranscriptText)
+        : fallbackTranscriptText;
+    if (this.stopped) return;
+    this.onCommand({
+      type: terminalType,
+      phrase,
+      detectedAt,
+      transcriptText,
+    });
   }
 
   private async transcribeFinalSession(pcm: Uint8Array, fallbackText: string): Promise<string> {
@@ -357,10 +457,65 @@ export class StreamingTranscriptionManager {
     this.sessionAudioOverflowed = false;
   }
 
+  private rememberTerminalTailAudio(pcm: Uint8Array): void {
+    if (!this.config.detectTerminalCommands || !this.config.terminalTailDetectionEnabled) return;
+    const copy = new Uint8Array(pcm);
+    this.terminalTailChunks.push(copy);
+    this.terminalTailBytes += copy.byteLength;
+    const maxBytes = pcmBytesForMs(this.config.terminalTailWindowMs, this.config.sampleRateHz, this.config.channels);
+    while (this.terminalTailBytes > maxBytes && this.terminalTailChunks.length > 0) {
+      const first = this.terminalTailChunks[0];
+      const overflow = this.terminalTailBytes - maxBytes;
+      if (first.byteLength <= overflow) {
+        this.terminalTailChunks.shift();
+        this.terminalTailBytes -= first.byteLength;
+      } else {
+        const trimmed = first.subarray(overflow);
+        this.terminalTailChunks[0] = new Uint8Array(trimmed);
+        this.terminalTailBytes -= overflow;
+      }
+    }
+  }
+
+  private terminalTailAudioSnapshot(): Uint8Array {
+    if (this.terminalTailBytes === 0) return new Uint8Array(0);
+    return concatUint8Arrays(this.terminalTailChunks, this.terminalTailBytes);
+  }
+
+  private clearTerminalTailAudio(): void {
+    this.terminalTailChunks = [];
+    this.terminalTailBytes = 0;
+  }
+
+  private clearTerminalTailTimer(): void {
+    if (!this.terminalTailTimer) return;
+    clearTimeout(this.terminalTailTimer);
+    this.terminalTailTimer = null;
+  }
+
+  private scheduleTerminalTailDetection(delayMs = this.config.terminalTailDelayMs, resetAttempts = true): void {
+    if (!this.config.detectTerminalCommands || !this.config.terminalTailDetectionEnabled) return;
+    if (resetAttempts) this.terminalTailAttempt = 0;
+    this.clearTerminalTailTimer();
+    this.terminalTailTimer = setTimeout(() => {
+      this.terminalTailTimer = null;
+      void this.runTerminalTailDetection();
+    }, delayMs);
+    this.terminalTailTimer.unref?.();
+  }
+
+  private scheduleTerminalTailRetry(): void {
+    if (this.stopped || this.terminalCommandDetected || this.terminalTailTimer) return;
+    if (this.terminalTailAttempt >= 1) return;
+    this.terminalTailAttempt += 1;
+    this.scheduleTerminalTailDetection(this.config.terminalTailRetryDelayMs, false);
+  }
+
   private enterTerminalCommandState(opts: { clearContext: boolean }): void {
     this.terminalCommandDetected = true;
     this.queue.length = 0;
     this.segmenter.reset();
+    this.clearTerminalTailTimer();
     if (opts.clearContext) this.transcriptContext = '';
   }
 
@@ -368,6 +523,7 @@ export class StreamingTranscriptionManager {
     for (const segment of segments) {
       this.queue.push(segment);
       this.hooks.onSegmentQueued?.(segmentMetadata(segment));
+      this.scheduleTerminalTailDetection();
     }
   }
 }
@@ -558,6 +714,11 @@ function normalizeTranscriptWhitespace(text: string): string {
 function pcmDurationMs(bytes: number, sampleRateHz: number, channels: number): number {
   const bytesPerSample = 2;
   return Math.round((bytes / (sampleRateHz * channels * bytesPerSample)) * 1000);
+}
+
+function pcmBytesForMs(ms: number, sampleRateHz: number, channels: number): number {
+  const bytesPerSample = 2;
+  return evenByteCount(Math.max(0, Math.round((sampleRateHz * channels * bytesPerSample * ms) / 1000)));
 }
 
 function pcm16leRms(pcm: Uint8Array): number {

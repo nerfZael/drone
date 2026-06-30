@@ -19116,17 +19116,40 @@ export async function startDroneHubApiServer(opts: {
       // Registry-only summaries for assistant/extension tooling. This avoids live
       // daemon status probes, Docker size checks, and container recovery work.
       if (method === 'GET' && parts.length === 3 && parts[0] === 'api' && parts[1] === 'drones' && parts[2] === 'summary') {
-        const regAny: any = await loadRegistry();
-        json(res, 200, { ok: true, drones: buildAssistantDroneSummariesFromRegistry(regAny) });
+        const timer = createRequestTimer();
+        try {
+          const regAny: any = await loadRegistry();
+          timer.mark('load');
+          const drones = buildAssistantDroneSummariesFromRegistry(regAny);
+          timer.mark('format');
+          timer.setHeader(res);
+          logSlowHubRequest('drone summary', timer, { status: 200, count: drones.length });
+          json(res, 200, { ok: true, drones });
+        } catch (e: any) {
+          timer.mark('error');
+          timer.setHeader(res);
+          logSlowHubRequest('drone summary', timer, { status: 500, error: e?.message ?? String(e) });
+          json(res, 500, { ok: false, error: e?.message ?? String(e) });
+        }
         return;
       }
 
       // GET /api/drones
       if (method === 'GET' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'drones') {
         scheduleDroneStatusRefresh('api:drones', 0);
-        const { drones } = await buildDroneRegistrySnapshot('api:drones');
-
-        json(res, 200, { ok: true, drones });
+        const timer = createRequestTimer();
+        try {
+          const { drones } = await buildDroneRegistrySnapshot('api:drones');
+          timer.mark('snapshot');
+          timer.setHeader(res);
+          logSlowHubRequest('drone list', timer, { status: 200, count: drones.length });
+          json(res, 200, { ok: true, drones });
+        } catch (e: any) {
+          timer.mark('error');
+          timer.setHeader(res);
+          logSlowHubRequest('drone list', timer, { status: 500, error: e?.message ?? String(e) });
+          json(res, 500, { ok: false, error: e?.message ?? String(e) });
+        }
         return;
       }
 
@@ -26295,16 +26318,23 @@ export async function startDroneHubApiServer(opts: {
         const since = sinceRaw != null ? Number(sinceRaw) : undefined;
         const maxBytes = maxBytesRaw != null ? Number(maxBytesRaw) : undefined;
         const tailLines = tailRaw != null ? Number(tailRaw) : 200;
+        const timer = createRequestTimer();
 
         try {
           const resolved = await resolveDroneOrPendingForReadRef(droneRef);
+          timer.mark('resolve');
           if (!resolved) {
+            timer.setHeader(res);
+            logSlowHubRequest('chat output', timer, { droneRef, chatName: normalizedChat, view, status: 404 });
             json(res, 404, { ok: false, error: `unknown drone: ${droneRef}` });
             return;
           }
           if (resolved.kind === 'pending') {
             const droneName = String(resolved.pending?.name ?? droneRef).trim() || droneRef;
             if (view === 'screen') {
+              timer.mark('format');
+              timer.setHeader(res);
+              logSlowHubRequest('chat output', timer, { droneId: resolved.id, chatName: normalizedChat, kind: 'pending', view, status: 200 });
               json(res, 200, {
                 ok: true,
                 id: resolved.id,
@@ -26317,6 +26347,9 @@ export async function startDroneHubApiServer(opts: {
               });
               return;
             }
+            timer.mark('format');
+            timer.setHeader(res);
+            logSlowHubRequest('chat output', timer, { droneId: resolved.id, chatName: normalizedChat, kind: 'pending', view, status: 200 });
             json(res, 200, {
               ok: true,
               id: resolved.id,
@@ -26336,10 +26369,24 @@ export async function startDroneHubApiServer(opts: {
 
           if (runtime === 'host') {
             const daemon = await resolveDroneDaemonClientForEntry(drone);
+            timer.mark('daemon');
             if (!daemon) throw new Error('drone daemon not reachable (missing hostPort/token)');
             await waitForDroneDaemonReady(daemon.client, defaultDaemonReadyTimeoutMs());
+            timer.mark('ready');
             if (view === 'screen') {
               const r = await droneTerminalPrompt(daemon.client, { session: sessionName });
+              const text = String((r as any)?.text ?? '');
+              timer.mark('read');
+              timer.setHeader(res);
+              logSlowHubRequest('chat output', timer, {
+                droneId,
+                chatName: normalizedChat,
+                runtime,
+                view,
+                tailLines,
+                textBytes: Buffer.byteLength(text),
+                status: 200,
+              });
               json(res, 200, {
                 ok: true,
                 id: droneId,
@@ -26348,7 +26395,7 @@ export async function startDroneHubApiServer(opts: {
                 sessionName,
                 view,
                 tailLines,
-                text: String((r as any)?.text ?? ''),
+                text,
               });
               return;
             }
@@ -26356,6 +26403,18 @@ export async function startDroneHubApiServer(opts: {
               session: sessionName,
               since: typeof since === 'number' && Number.isFinite(since) ? since : 0,
               max: typeof maxBytes === 'number' && Number.isFinite(maxBytes) ? maxBytes : 200000,
+            });
+            const text = String((out as any)?.chunk ?? '');
+            timer.mark('read');
+            timer.setHeader(res);
+            logSlowHubRequest('chat output', timer, {
+              droneId,
+              chatName: normalizedChat,
+              runtime,
+              view,
+              offsetBytes: Number((out as any)?.nextOffset ?? 0),
+              textBytes: Buffer.byteLength(text),
+              status: 200,
             });
             json(res, 200, {
               ok: true,
@@ -26365,16 +26424,20 @@ export async function startDroneHubApiServer(opts: {
               sessionName,
               view,
               offsetBytes: Number((out as any)?.nextOffset ?? 0),
-              text: String((out as any)?.chunk ?? ''),
+              text,
             });
             return;
           }
 
           await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: drone }, async ({ containerName, droneId: lockedId }) => {
+            timer.mark('lock');
             const idForOps = normalizeDroneIdentity(lockedId) || droneId;
             await ensureChatEntry({ droneId: idForOps, chatName: normalizedChat });
+            timer.mark('ensure');
             const tmuxCmd = await resolveChatTmuxCommand({ droneId: idForOps, chatName: normalizedChat });
+            timer.mark('command');
             await ensureHubChatSessionRunning({ containerName, chatName: normalizedChat, command: tmuxCmd });
+            timer.mark('session');
 
             if (view === 'screen') {
               const nRaw = Number.isFinite(tailLines) ? Math.floor(tailLines) : 200;
@@ -26387,6 +26450,17 @@ export async function startDroneHubApiServer(opts: {
               ].join('\n');
               const r = await dvmExec(containerName, 'bash', ['-lc', script]);
               if (r.code !== 0) throw new Error((r.stderr || r.stdout || 'tmux capture-pane failed').trim());
+              timer.mark('read');
+              timer.setHeader(res);
+              logSlowHubRequest('chat output', timer, {
+                droneId: idForOps,
+                chatName: normalizedChat,
+                runtime,
+                view,
+                tailLines: n,
+                textBytes: Buffer.byteLength(r.stdout || ''),
+                status: 200,
+              });
               json(res, 200, { ok: true, id: idForOps, name: droneName, chat: normalizedChat, sessionName, view, tailLines: n, text: r.stdout || '' });
               return;
             }
@@ -26398,12 +26472,25 @@ export async function startDroneHubApiServer(opts: {
               maxBytes: typeof maxBytes === 'number' && Number.isFinite(maxBytes) ? maxBytes : undefined,
               tailLines: typeof since === 'number' && Number.isFinite(since) ? undefined : tailLines,
             });
+            timer.mark('read');
+            timer.setHeader(res);
+            logSlowHubRequest('chat output', timer, {
+              droneId: idForOps,
+              chatName: normalizedChat,
+              runtime,
+              view,
+              textBytes: Buffer.byteLength(String((out as any)?.text ?? (out as any)?.chunk ?? '')),
+              status: 200,
+            });
             json(res, 200, { ok: true, id: idForOps, name: droneName, chat: normalizedChat, sessionName, view, ...out });
           });
           return;
         } catch (e: any) {
           const msg = e?.message ?? String(e);
           if (isStaleDockerExecErrorMessage(msg)) {
+            timer.mark('error');
+            timer.setHeader(res);
+            logSlowHubRequest('chat output', timer, { droneRef, chatName: normalizedChat, view, status: 409, error: msg });
             json(res, 409, {
               ok: false,
               code: 'STALE_TERMINAL_SESSION',
@@ -26415,6 +26502,9 @@ export async function startDroneHubApiServer(opts: {
             });
             return;
           }
+          timer.mark('error');
+          timer.setHeader(res);
+          logSlowHubRequest('chat output', timer, { droneRef, chatName: normalizedChat, view, status: 500, error: msg });
           json(res, 500, { ok: false, error: msg, name: droneRef, chat: normalizedChat, sessionName });
           return;
         }
@@ -26796,60 +26886,117 @@ export async function startDroneHubApiServer(opts: {
       // GET /api/drones/:id/chats
       if (method === 'GET' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'drones' && parts[3] === 'chats') {
         const droneRef = decodeURIComponent(parts[2]);
-        const resolved = await resolveDroneOrPendingForReadRef(droneRef);
-        if (!resolved) {
-          json(res, 404, { ok: false, error: `unknown drone: ${droneRef}` });
+        const timer = createRequestTimer();
+        try {
+          const resolved = await resolveDroneOrPendingForReadRef(droneRef);
+          timer.mark('resolve');
+          if (!resolved) {
+            timer.setHeader(res);
+            logSlowHubRequest('chat list', timer, { droneRef, status: 404 });
+            json(res, 404, { ok: false, error: `unknown drone: ${droneRef}` });
+            return;
+          }
+          const droneId = resolved.id;
+          if (resolved.kind === 'pending') {
+            const droneName = String(resolved.pending?.name ?? droneRef).trim() || droneRef;
+            const startupChats = [
+              ...new Set(normalizePendingStartupPrompts((resolved.pending as any)?.startupQueuedPrompts).map((item) => item.chatName)),
+            ].filter(Boolean);
+            timer.mark('format');
+            timer.setHeader(res);
+            logSlowHubRequest('chat list', timer, { droneId, kind: 'pending', chatCount: startupChats.length || 1, status: 200 });
+            json(res, 200, { ok: true, id: droneId, name: droneName, chats: startupChats.length > 0 ? startupChats : ['default'] });
+            return;
+          }
+          const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+          const importedChats = importResolvedDroneChatsToStore(droneId, resolved.drone);
+          timer.mark('import');
+          const storeChats = listChatsFromStore({ droneId });
+          timer.mark('store');
+          const chats = storeChats.available ? storeChats.chats : importedChats;
+          timer.mark('format');
+          timer.setHeader(res);
+          logSlowHubRequest('chat list', timer, { droneId, chatCount: chats.length, storeAvailable: storeChats.available, status: 200 });
+          json(res, 200, { ok: true, id: droneId, name: droneName, chats });
+          return;
+        } catch (e: any) {
+          timer.setHeader(res);
+          logSlowHubRequest('chat list', timer, { droneRef, status: 500, error: e?.message ?? String(e) });
+          json(res, 500, { ok: false, error: e?.message ?? String(e) });
           return;
         }
-        const droneId = resolved.id;
-        if (resolved.kind === 'pending') {
-          const droneName = String(resolved.pending?.name ?? droneRef).trim() || droneRef;
-          const startupChats = [
-            ...new Set(normalizePendingStartupPrompts((resolved.pending as any)?.startupQueuedPrompts).map((item) => item.chatName)),
-          ].filter(Boolean);
-          json(res, 200, { ok: true, id: droneId, name: droneName, chats: startupChats.length > 0 ? startupChats : ['default'] });
-          return;
-        }
-        const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
-        const importedChats = importResolvedDroneChatsToStore(droneId, resolved.drone);
-        const storeChats = listChatsFromStore({ droneId });
-        const chats = storeChats.available ? storeChats.chats : importedChats;
-        json(res, 200, { ok: true, id: droneId, name: droneName, chats });
-        return;
       }
 
       // GET /api/drones/:id/chats/:chat
       if (method === 'GET' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'drones' && parts[3] === 'chats') {
         const droneRef = decodeURIComponent(parts[2]);
         const chatName = decodeURIComponent(parts[4]);
-        const resolved = await resolveDroneOrRespond(res, droneRef);
-        if (!resolved) return;
-        const droneId = resolved.id;
-        const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
-        const c = (resolved.drone as any)?.chats?.[chatName];
-        if (!c) {
-          json(res, 404, { ok: false, error: `unknown chat: ${chatName}` });
+        const timer = createRequestTimer();
+        try {
+          let rejectStatus = 404;
+          let rejectError = `unknown drone: ${droneRef}`;
+          const resolved = await resolveDroneFromRegistryRef(droneRef, {
+            onStillStarting: () => {
+              rejectStatus = 409;
+              rejectError = `drone "${droneRef}" is still starting`;
+            },
+            onUnknown: () => {
+              rejectStatus = 404;
+              rejectError = `unknown drone: ${droneRef}`;
+            },
+          });
+          timer.mark('resolve');
+          if (!resolved) {
+            timer.setHeader(res);
+            logSlowHubRequest('chat metadata', timer, { droneRef, chatName, status: rejectStatus });
+            json(res, rejectStatus, { ok: false, error: rejectError });
+            return;
+          }
+          const droneId = resolved.id;
+          const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+          const c = (resolved.drone as any)?.chats?.[chatName];
+          if (!c) {
+            timer.setHeader(res);
+            logSlowHubRequest('chat metadata', timer, { droneId, chatName, status: 404 });
+            json(res, 404, { ok: false, error: `unknown chat: ${chatName}` });
+            return;
+          }
+          const chatEntry = importResolvedChatToStore(droneId, chatName, c) ?? c;
+          timer.mark('import');
+          const agent = inferChatAgent(chatEntry as any, resolved.drone);
+          timer.mark('format');
+          timer.setHeader(res);
+          logSlowHubRequest('chat metadata', timer, {
+            droneId,
+            chatName,
+            turnCount: Array.isArray((chatEntry as any).turns) ? (chatEntry as any).turns.length : 0,
+            status: 200,
+          });
+          json(res, 200, {
+            ok: true,
+            id: droneId,
+            name: droneName,
+            chat: chatName,
+            agent,
+            model: (chatEntry as any).model ?? null,
+            agentPermissionMode: normalizeAgentPermissionMode((chatEntry as any).agentPermissionMode),
+            agentMessageAutoContinueEnabled: (chatEntry as any).agentMessageAutoContinueEnabled === true,
+            agentSuggestionEnabled: (chatEntry as any).agentSuggestionEnabled === true,
+            dockerSnapshotAfterAgentMessageEnabled: dockerSnapshotAfterAgentMessageEnabledForChat(resolved.drone, chatEntry),
+            blipClonesEnabled: (chatEntry as any).blipClonesEnabled !== false,
+            turns: (chatEntry as any).turns ?? [],
+            sessionName: hubChatSessionName(chatName || 'default'),
+            createdAt: chatEntry.createdAt,
+          });
+          return;
+        } catch (e: any) {
+          const msg = e?.message ?? String(e);
+          const code = /still starting/i.test(msg) ? 409 : /unknown drone|unknown chat/i.test(msg) ? 404 : 500;
+          timer.setHeader(res);
+          logSlowHubRequest('chat metadata', timer, { droneRef, chatName, status: code, error: msg });
+          json(res, code, { ok: false, error: msg });
           return;
         }
-        const chatEntry = importResolvedChatToStore(droneId, chatName, c) ?? c;
-        const agent = inferChatAgent(chatEntry as any, resolved.drone);
-        json(res, 200, {
-          ok: true,
-          id: droneId,
-          name: droneName,
-          chat: chatName,
-          agent,
-          model: (chatEntry as any).model ?? null,
-          agentPermissionMode: normalizeAgentPermissionMode((chatEntry as any).agentPermissionMode),
-          agentMessageAutoContinueEnabled: (chatEntry as any).agentMessageAutoContinueEnabled === true,
-          agentSuggestionEnabled: (chatEntry as any).agentSuggestionEnabled === true,
-          dockerSnapshotAfterAgentMessageEnabled: dockerSnapshotAfterAgentMessageEnabledForChat(resolved.drone, chatEntry),
-          blipClonesEnabled: (chatEntry as any).blipClonesEnabled !== false,
-          turns: (chatEntry as any).turns ?? [],
-          sessionName: hubChatSessionName(chatName || 'default'),
-          createdAt: chatEntry.createdAt,
-        });
-        return;
       }
 
       // POST /api/drones/:id/chats/:chat/config

@@ -4804,6 +4804,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
               phrase: detection.phrase,
               partialTranscriptChars: detection.partialTranscriptText.length,
               mode: streamMode,
+              source: detection.source,
               segmentSequence: detection.segmentSequence,
               segmentReason: detection.segmentReason,
               finalTranscriptionMode: detection.finalTranscriptionMode,
@@ -4870,6 +4871,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
                 model: result.model,
                 audioDurationMs: result.audioDurationMs,
                 transcriptChars: result.text.length,
+                transcriptText: result.text,
                 segmentSequence: context.segment?.sequence ?? null,
                 segmentReason: context.segment?.reason ?? null,
                 queuedDelayMs: context.queuedDelayMs ?? null,
@@ -5027,6 +5029,14 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           maxSegmentMs: transcriptionConfig.maxSegmentMs,
           overlapMs: transcriptionConfig.overlapMs,
           finalTranscriptionMode: smartTranscriptionEnabled ? 'segments' : transcriptionConfig.finalTranscriptionMode,
+          terminalTailDetection: transcriptionConfig.terminalTailDetectionEnabled
+            ? {
+                windowMs: transcriptionConfig.terminalTailWindowMs,
+                delayMs: transcriptionConfig.terminalTailDelayMs,
+                retryDelayMs: transcriptionConfig.terminalTailRetryDelayMs,
+                cooldownMs: transcriptionConfig.terminalTailCooldownMs,
+              }
+            : 'disabled',
         },
       }),
     });
