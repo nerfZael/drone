@@ -14322,7 +14322,17 @@ export async function startDroneHubApiServer(opts: {
   async function refreshDroneStatusCacheForEntry(d: any): Promise<boolean> {
     const cacheKey = buildDroneStatusSummaryCacheKey(d);
     const previous = droneStatusSummaryCache.get(cacheKey);
-    const next = await probeDroneStatusSummary(d);
+    let next: CachedDroneStatusSummary;
+    try {
+      next = await probeDroneStatusSummary(d);
+    } catch (e: any) {
+      next = {
+        hostPort: typeof d?.hostPort === 'number' && Number.isFinite(d.hostPort) ? d.hostPort : null,
+        statusOk: false,
+        status: null,
+        statusError: e?.message ?? String(e),
+      };
+    }
     droneStatusSummaryCache.set(cacheKey, next);
     pruneDroneStatusSummaryCache();
     return !sameDroneStatusSummaryForCache(previous, next);
