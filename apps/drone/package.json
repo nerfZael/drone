@@ -4,6 +4,7 @@
   "description": "Drone: per-container agent wrapper daemon + host CLI (via dvm)",
   "bin": {
     "drone": "dist/cli.js",
+    "drone-hub-mcp-server": "dist/hub/mcp-server.js",
     "fleet": "dist/fleet.js",
     "tasks": "dist/tasks.js"
   },
@@ -36,6 +37,7 @@
     "@ai-sdk/openai": "^3.0.26",
     "@mariozechner/pi-agent-core": "workspace:*",
     "@mariozechner/pi-ai": "workspace:*",
+    "@modelcontextprotocol/sdk": "1.29.0",
     "ai": "^6.0.77",
     "better-sqlite3": "^12.10.0",
     "commander": "^12.1.0",

@@ -122,7 +122,24 @@
                   <div class="extensions-config-actions">
                     <button id="saveExtensionsButton" class="secondary mini-button" type="button">Save extensions</button>
                   </div>
-                  <div id="extensionsStatus" class="extensions-status muted">No local extensions configured.</div>
+                  <div class="extensions-config-header">
+                    <span class="device-picker-title">MCP servers</span>
+                  </div>
+                  <div class="workspace-extension-row" aria-label="Drone Hub MCP server">
+                    <div>
+                      <span class="workspace-extension-title">Drone Hub MCP</span>
+                      <span id="droneHubMcpStatus" class="workspace-extension-status">Not added.</span>
+                    </div>
+                    <div class="workspace-extension-actions">
+                      <button id="enableDroneHubMcpButton" class="secondary mini-button" type="button">Add</button>
+                    </div>
+                  </div>
+                  <textarea id="mcpServersConfigInput" spellcheck="false" placeholder='[]'></textarea>
+                  <p class="extensions-warning">Stdio MCP servers run local commands. Use servers and commands you trust.</p>
+                  <div class="extensions-config-actions">
+                    <button id="saveMcpServersButton" class="secondary mini-button" type="button">Save MCP servers</button>
+                  </div>
+                  <div id="extensionsStatus" class="extensions-status muted">No local extensions or MCP servers configured.</div>
                 </div>
               </div>
               <div id="shortcutsSettingsPanel" class="settings-tab-panel" role="tabpanel" aria-labelledby="shortcutsSettingsTab" hidden>

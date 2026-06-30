@@ -99,6 +99,7 @@ async function main() {
   await chmodExecutableBestEffort(path.join(root, 'dist', 'blip.js'));
   await chmodExecutableBestEffort(path.join(root, 'dist', 'cli.js'));
   await chmodExecutableBestEffort(path.join(root, 'dist', 'daemon.js'));
+  await chmodExecutableBestEffort(path.join(root, 'dist', 'hub', 'mcp-server.js'));
   await chmodExecutableBestEffort(path.join(root, 'dist', 'fleet.js'));
   await chmodExecutableBestEffort(path.join(root, 'dist', 'tasks.js'));
 }
