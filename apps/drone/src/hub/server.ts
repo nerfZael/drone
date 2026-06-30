@@ -14223,6 +14223,8 @@ export async function startDroneHubApiServer(opts: {
   const DRONE_SUMMARY_MAINTENANCE_MIN_INTERVAL_MS = 5_000;
   const droneStatusSummaryCache = new Map<string, CachedDroneStatusSummary>();
   let droneSummaryRegistryCache: { loadedAtMs: number; registry: any } | null = null;
+  let droneSummaryRegistryCacheLoad: Promise<any> | null = null;
+  let droneSummaryRegistryCacheEpoch = 0;
   let droneSummaryMaintenanceTimeout: ReturnType<typeof setTimeout> | null = null;
   let droneSummaryMaintenanceBusy = false;
   let droneSummaryMaintenanceLastStartedAt = 0;
@@ -14366,16 +14368,32 @@ export async function startDroneHubApiServer(opts: {
   }
 
   function invalidateDroneSummaryRegistryCache(): void {
+    droneSummaryRegistryCacheEpoch += 1;
     droneSummaryRegistryCache = null;
+    droneSummaryRegistryCacheLoad = null;
   }
 
   async function loadDroneRegistryForSummary(): Promise<any> {
     if (droneSummaryRegistryCache && Date.now() - droneSummaryRegistryCache.loadedAtMs < DRONE_SUMMARY_REGISTRY_CACHE_TTL_MS) {
       return droneSummaryRegistryCache.registry;
     }
-    const registry = await loadRegistry();
-    droneSummaryRegistryCache = { loadedAtMs: Date.now(), registry };
-    return registry;
+    if (!droneSummaryRegistryCacheLoad) {
+      const loadEpoch = droneSummaryRegistryCacheEpoch;
+      const loadPromise = loadRegistry()
+        .then((registry) => {
+          if (loadEpoch === droneSummaryRegistryCacheEpoch) {
+            droneSummaryRegistryCache = { loadedAtMs: Date.now(), registry };
+          }
+          return registry;
+        })
+        .finally(() => {
+          if (droneSummaryRegistryCacheLoad === loadPromise) {
+            droneSummaryRegistryCacheLoad = null;
+          }
+        });
+      droneSummaryRegistryCacheLoad = loadPromise;
+    }
+    return await droneSummaryRegistryCacheLoad;
   }
 
   function scheduleDroneStatusRefresh(source: string, delayMs = 0): void {
