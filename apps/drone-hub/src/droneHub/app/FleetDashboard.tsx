@@ -258,6 +258,7 @@ function useFleetDashboardState({
     const attentionDrones = sidebarDrones.filter(
       (drone) =>
         !isDroneStartingOrSeeding(drone.hubPhase) &&
+        !drone.statusChecking &&
         (drone.hubPhase === 'error' || !drone.statusOk || Boolean(String(drone.statusError ?? '').trim())),
     );
     const healthyDrones = Math.max(sidebarDrones.length - startingDrones.length - attentionDrones.length, 0);
@@ -893,14 +894,17 @@ function FleetDroneListCard({
             const lifecycleBusy = lifecycleBusyByDroneId[drone.id] ?? null;
             const runtimeSupportsLifecycle = drone.runtime !== 'host';
             const isStarting = isDroneStartingOrSeeding(drone.hubPhase);
-            const canStart = runtimeSupportsLifecycle && !isStarting && (!drone.statusOk || drone.hubPhase === 'error');
-            const canStop = runtimeSupportsLifecycle && !isStarting && (drone.statusOk || drone.busy || busyChats > 0);
-            const canRestart = runtimeSupportsLifecycle && !isStarting;
+            const statusChecking = drone.statusChecking === true;
+            const canStart = runtimeSupportsLifecycle && !isStarting && !statusChecking && (!drone.statusOk || drone.hubPhase === 'error');
+            const canStop = runtimeSupportsLifecycle && !isStarting && !statusChecking && (drone.statusOk || drone.busy || busyChats > 0);
+            const canRestart = runtimeSupportsLifecycle && !isStarting && !statusChecking;
             const detail =
               drone.hubPhase === 'error'
                 ? String(drone.hubMessage ?? drone.statusError ?? 'Error')
                 : isStarting
                   ? String(drone.hubMessage ?? (drone.hubPhase === 'seeding' ? 'Seeding workspace' : 'Starting drone'))
+                  : statusChecking
+                    ? 'Checking status'
                   : busyChats > 0
                     ? `${busyChats} active chat${busyChats === 1 ? '' : 's'}`
                     : drone.busy
@@ -921,7 +925,13 @@ function FleetDroneListCard({
                       <div className="mt-1 text-[12px] leading-5 text-[var(--muted)]">{detail}</div>
                     </div>
                     <div className="flex flex-col items-end gap-2">
-                      <StatusBadge ok={drone.statusOk} error={drone.statusError} hubPhase={drone.hubPhase} hubMessage={drone.hubMessage} />
+                      <StatusBadge
+                        ok={drone.statusOk}
+                        error={drone.statusError}
+                        checking={drone.statusChecking}
+                        hubPhase={drone.hubPhase}
+                        hubMessage={drone.hubMessage}
+                      />
                       <span className="text-[10px] uppercase tracking-wide text-[var(--muted-dim)]">{timeAgo(drone.createdAt)}</span>
                     </div>
                   </div>

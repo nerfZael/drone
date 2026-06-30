@@ -2135,6 +2135,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       {
         statusOk: boolean;
         statusError: string | null;
+        statusChecking?: boolean;
         hubPhase?: DroneSummary['hubPhase'];
         hubMessage?: DroneSummary['hubMessage'];
         busy: boolean;
@@ -2151,6 +2152,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         out[nodeId] = {
           statusOk: Boolean(drone.statusOk),
           statusError: drone.statusError ?? null,
+          statusChecking: drone.statusChecking,
           hubPhase: drone.hubPhase,
           hubMessage: drone.hubMessage,
           busy: busyChatNodeIdSet.has(nodeId),

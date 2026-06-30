@@ -36,6 +36,7 @@ export type DroneSummary = {
   hostPort: number | null;
   statusOk: boolean;
   statusError: string | null;
+  statusChecking?: boolean;
   chats: string[];
   busyChats?: string[];
   dockerSize?: {

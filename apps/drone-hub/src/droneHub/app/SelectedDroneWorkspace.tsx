@@ -92,6 +92,15 @@ type VoicePatchStatus = {
   chatName: string | null;
 };
 
+type DockerSizeSummary = NonNullable<DroneSummary['dockerSize']>;
+
+type DockerSizePayload = {
+  ok: true;
+  id: string;
+  name?: string;
+  dockerSize: DockerSizeSummary;
+};
+
 function HeaderDropdownPortal({
   open,
   anchorRef,
@@ -515,9 +524,52 @@ export function SelectedDroneWorkspace({
   const dockerSnapshotSupported = !hostRuntime && currentDrone.persistVolume === false;
   const blipClonesSupported = currentAgentKey === 'builtin:blip';
   const readOnlySupported = currentAgentKey === 'builtin:codex' || currentAgentKey === 'builtin:blip';
-  const dockerSize = currentDrone.dockerSize ?? null;
-  const dockerSizeTitle = dockerSize
-    ? `Docker tracked size: ${formatBytes(dockerSize.totalBytes)} current writable + unique snapshot layers. Current container writable layer: ${formatBytes(
+  const [dockerSizeState, setDockerSizeState] = React.useState<{
+    droneId: string;
+    loading: boolean;
+    dockerSize: DockerSizeSummary | null;
+    error: string | null;
+  }>({ droneId: '', loading: false, dockerSize: null, error: null });
+  React.useEffect(() => {
+    const droneId = String(currentDrone.id ?? '').trim();
+    const initialDockerSize = currentDrone.dockerSize ?? null;
+    if (!droneId || hostRuntime) {
+      setDockerSizeState({ droneId, loading: false, dockerSize: null, error: null });
+      return;
+    }
+
+    const controller = new AbortController();
+    setDockerSizeState({ droneId, loading: true, dockerSize: initialDockerSize, error: null });
+    void requestJson<DockerSizePayload>(`/api/drones/${encodeURIComponent(droneId)}/docker-size`, {
+      signal: controller.signal,
+    })
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        setDockerSizeState({
+          droneId,
+          loading: false,
+          dockerSize: data?.dockerSize ?? null,
+          error: null,
+        });
+      })
+      .catch((err: any) => {
+        if (controller.signal.aborted) return;
+        setDockerSizeState({
+          droneId,
+          loading: false,
+          dockerSize: initialDockerSize,
+          error: err?.message ?? String(err),
+        });
+      });
+
+    return () => controller.abort();
+  }, [currentDrone.id, hostRuntime]);
+  const dockerSize = dockerSizeState.droneId === currentDrone.id ? dockerSizeState.dockerSize : (currentDrone.dockerSize ?? null);
+  const dockerSizeLoading = dockerSizeState.droneId === currentDrone.id && dockerSizeState.loading;
+  const dockerSizeError = dockerSizeState.droneId === currentDrone.id ? dockerSizeState.error : null;
+  const dockerSizeTitle = (() => {
+    if (dockerSize) {
+      return `Docker tracked size: ${formatBytes(dockerSize.totalBytes)} current writable + unique snapshot layers. Current container writable layer: ${formatBytes(
         dockerSize.containerWritableBytes,
       )}. Snapshot unique layers: ${formatBytes(dockerSize.snapshotBytes)} across ${
         dockerSize.snapshotCount
@@ -525,8 +577,18 @@ export function SelectedDroneWorkspace({
         dockerSize.snapshotVirtualBytes != null
           ? ` (${formatBytes(dockerSize.snapshotVirtualBytes)} summed virtual image size; virtual sizes include shared base layers repeatedly).`
           : '.'
-      }`
-    : 'Docker size unavailable.';
+      }`;
+    }
+    if (dockerSizeLoading) return 'Docker size loading.';
+    if (dockerSizeError) return `Docker size unavailable: ${dockerSizeError}`;
+    return 'Docker size unavailable.';
+  })();
+  const dockerSizeLabel =
+    dockerSizeLoading && !dockerSize
+      ? 'Docker size loading'
+      : dockerSize
+        ? `Docker used ${formatBytes(dockerSize.totalBytes)}`
+        : 'Docker size unavailable';
   const repoSyncBusyLabel =
     repoOp?.kind === 'pull'
       ? 'Applying...'
@@ -1078,7 +1140,13 @@ export function SelectedDroneWorkspace({
                       <TypingDots color="var(--yellow)" />
                     </span>
                   ) : (
-                    <StatusBadge ok={currentDrone.statusOk} error={currentDrone.statusError} hubPhase={currentDrone.hubPhase} hubMessage={currentDrone.hubMessage} />
+                    <StatusBadge
+                      ok={currentDrone.statusOk}
+                      error={currentDrone.statusError}
+                      checking={currentDrone.statusChecking}
+                      hubPhase={currentDrone.hubPhase}
+                      hubMessage={currentDrone.hubMessage}
+                    />
                   )}
                   {currentDrone.group && <GroupBadge group={currentDrone.group} />}
                   {showFleetBadge ? (
@@ -1353,7 +1421,7 @@ export function SelectedDroneWorkspace({
                   style={{ fontFamily: 'var(--display)' }}
                   title={dockerSizeTitle}
                 >
-                  Docker used {formatBytes(dockerSize?.totalBytes)}
+                  {dockerSizeLabel}
                 </span>
               ) : null}
               {hasChats && chatUiMode === 'transcript' ? (

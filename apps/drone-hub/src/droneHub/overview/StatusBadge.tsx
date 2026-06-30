@@ -5,11 +5,13 @@ import { TypingDots } from './icons';
 export function StatusBadge({
   ok,
   error,
+  checking,
   hubPhase,
   hubMessage,
 }: {
   ok: boolean;
   error?: string | null;
+  checking?: boolean;
   hubPhase?: DroneSummary['hubPhase'];
   hubMessage?: DroneSummary['hubMessage'];
 }) {
@@ -39,6 +41,19 @@ export function StatusBadge({
       >
         <span className="w-1.5 h-1.5 rounded-full bg-[var(--red)]" />
         Error
+      </span>
+    );
+  }
+  if (checking) {
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-semibold tracking-wide uppercase bg-[var(--yellow-subtle)] text-[var(--yellow)] border border-[rgba(255,178,36,.15)]"
+        style={{ fontFamily: 'var(--display)' }}
+        title={error || 'Checking status'}
+        aria-label="Checking"
+      >
+        <TypingDots color="var(--yellow)" />
+        Checking
       </span>
     );
   }

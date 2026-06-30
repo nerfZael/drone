@@ -14213,12 +14213,16 @@ export async function startDroneHubApiServer(opts: {
     statusOk: boolean;
     status: any;
     statusError: string | null;
+    statusChecking?: boolean;
   };
 
-  const DRONE_STATUS_CACHE_OK_TTL_MS = 5_000;
-  const DRONE_STATUS_CACHE_ERROR_TTL_MS = 2_000;
   const DRONE_STATUS_SUMMARY_CONCURRENCY = 16;
-  const droneStatusSummaryCache = new Map<string, { expiresAt: number; value: CachedDroneStatusSummary }>();
+  const DRONE_STATUS_REFRESH_CONCURRENCY = 4;
+  const DRONE_STATUS_REFRESH_INTERVAL_MS = 15_000;
+  const droneStatusSummaryCache = new Map<string, CachedDroneStatusSummary>();
+  let droneStatusRefreshTimer: ReturnType<typeof setInterval> | null = null;
+  let droneStatusRefreshTimeout: ReturnType<typeof setTimeout> | null = null;
+  let droneStatusRefreshBusy = false;
 
   async function mapDroneRegistrySummaryConcurrent<T, R>(
     items: T[],
@@ -14239,10 +14243,12 @@ export async function startDroneHubApiServer(opts: {
     return results;
   }
 
-  function pruneDroneStatusSummaryCache(nowMs: number): void {
+  function pruneDroneStatusSummaryCache(): void {
     if (droneStatusSummaryCache.size <= 500) return;
-    for (const [key, entry] of droneStatusSummaryCache.entries()) {
-      if (entry.expiresAt <= nowMs) droneStatusSummaryCache.delete(key);
+    while (droneStatusSummaryCache.size > 500) {
+      const oldestKey = droneStatusSummaryCache.keys().next().value;
+      if (!oldestKey) break;
+      droneStatusSummaryCache.delete(oldestKey);
     }
   }
 
@@ -14256,7 +14262,34 @@ export async function startDroneHubApiServer(opts: {
     return [droneId, runtime, containerName, hostPort, containerPort, token].join('\0');
   }
 
-  async function resolveDroneStatusSummaryUncached(d: any): Promise<CachedDroneStatusSummary> {
+  function checkingDroneStatusSummaryFromEntry(d: any): CachedDroneStatusSummary {
+    const hostPort = typeof d?.hostPort === 'number' && Number.isFinite(d.hostPort) ? d.hostPort : null;
+    return {
+      hostPort,
+      statusOk: false,
+      status: null,
+      statusError: 'checking status',
+      statusChecking: true,
+    };
+  }
+
+  function cachedDroneStatusSummaryForEntry(d: any): CachedDroneStatusSummary {
+    pruneDroneStatusSummaryCache();
+    const cacheKey = buildDroneStatusSummaryCacheKey(d);
+    return droneStatusSummaryCache.get(cacheKey) ?? checkingDroneStatusSummaryFromEntry(d);
+  }
+
+  function sameDroneStatusSummaryForCache(a: CachedDroneStatusSummary | undefined, b: CachedDroneStatusSummary): boolean {
+    if (!a) return false;
+    return (
+      a.hostPort === b.hostPort &&
+      a.statusOk === b.statusOk &&
+      (a.statusError ?? '') === (b.statusError ?? '') &&
+      Boolean(a.statusChecking) === Boolean(b.statusChecking)
+    );
+  }
+
+  async function probeDroneStatusSummary(d: any): Promise<CachedDroneStatusSummary> {
     const runtime = normalizeDroneRuntime(d?.runtime);
     const containerName = String(d?.containerName ?? d?.name ?? '').trim();
     const hostPort =
@@ -14269,46 +14302,13 @@ export async function startDroneHubApiServer(opts: {
     let statusOk = false;
     let status: any = null;
     let statusError: string | null = null;
-    const droneId = normalizeDroneIdentity(d?.id);
     const token = typeof d.token === 'string' ? d.token : '';
     if (hostPort && token) {
       try {
         status = await droneStatus(makeClient(hostPort, token));
         statusOk = true;
       } catch (e: any) {
-        const firstErr = e?.message ?? String(e);
-        if (runtime !== 'host' && looksLikeUnauthorizedDaemonError(firstErr)) {
-          try {
-            const refreshedToken = droneId ? await refreshRegistryTokenFromContainer({ droneId }) : null;
-            if (refreshedToken && refreshedToken !== token) {
-              status = await droneStatus(makeClient(hostPort, refreshedToken));
-              statusOk = true;
-              statusError = null;
-              hubLog('warn', 'refreshed stale drone token after unauthorized status', {
-                droneName: d.name,
-                hadId: Boolean(droneId),
-              });
-            } else {
-              statusError = firstErr;
-            }
-          } catch (e2: any) {
-            statusError = e2?.message ?? String(e2);
-          }
-        } else if (runtime !== 'host') {
-          try {
-            await ensureContainerDroneDaemonSession({
-              containerName,
-              containerPort: Number(d?.containerPort ?? 7777),
-            });
-            status = await droneStatus(makeClient(hostPort, token));
-            statusOk = true;
-            statusError = null;
-          } catch (recoveryError: any) {
-            statusError = recoveryError?.message ?? firstErr;
-          }
-        } else {
-          statusError = firstErr;
-        }
+        statusError = e?.message ?? String(e);
       }
     } else if (!hostPort) {
       statusError = runtime === 'host' ? 'no host port mapped' : 'no host port mapped (container likely stopped)';
@@ -14319,18 +14319,52 @@ export async function startDroneHubApiServer(opts: {
     return { hostPort: hostPort ?? null, statusOk, status, statusError };
   }
 
-  async function resolveCachedDroneStatusSummary(d: any): Promise<CachedDroneStatusSummary> {
-    const nowMs = Date.now();
-    pruneDroneStatusSummaryCache(nowMs);
+  async function refreshDroneStatusCacheForEntry(d: any): Promise<boolean> {
     const cacheKey = buildDroneStatusSummaryCacheKey(d);
-    const cached = droneStatusSummaryCache.get(cacheKey);
-    if (cached && cached.expiresAt > nowMs) return cached.value;
-    const value = await resolveDroneStatusSummaryUncached(d);
-    droneStatusSummaryCache.set(cacheKey, {
-      expiresAt: nowMs + (value.statusOk ? DRONE_STATUS_CACHE_OK_TTL_MS : DRONE_STATUS_CACHE_ERROR_TTL_MS),
-      value,
-    });
-    return value;
+    const previous = droneStatusSummaryCache.get(cacheKey);
+    const next = await probeDroneStatusSummary(d);
+    droneStatusSummaryCache.set(cacheKey, next);
+    pruneDroneStatusSummaryCache();
+    return !sameDroneStatusSummaryForCache(previous, next);
+  }
+
+  async function refreshDroneStatusCache(source: string): Promise<void> {
+    if (droneStatusRefreshBusy) return;
+    droneStatusRefreshBusy = true;
+    try {
+      const regAny: any = await loadRegistry();
+      const realDrones = Object.values(regAny?.drones ?? {}) as any[];
+      const changed = await mapDroneRegistrySummaryConcurrent(
+        realDrones,
+        DRONE_STATUS_REFRESH_CONCURRENCY,
+        async (d) => refreshDroneStatusCacheForEntry(d),
+      );
+      if (changed.some(Boolean)) {
+        scheduleDroneRegistryBroadcasterRefresh(source === 'startup' ? 0 : 50);
+      }
+    } catch (e: any) {
+      hubLog('warn', 'drone status refresh failed', { source, error: e?.message ?? String(e) });
+    } finally {
+      droneStatusRefreshBusy = false;
+    }
+  }
+
+  function scheduleDroneStatusRefresh(source: string, delayMs = 0): void {
+    if (droneStatusRefreshTimeout) return;
+    droneStatusRefreshTimeout = setTimeout(() => {
+      droneStatusRefreshTimeout = null;
+      void refreshDroneStatusCache(source);
+    }, Math.max(0, delayMs));
+    (droneStatusRefreshTimeout as any).unref?.();
+  }
+
+  function startDroneStatusRefresher(): void {
+    scheduleDroneStatusRefresh('startup', 0);
+    if (droneStatusRefreshTimer) return;
+    droneStatusRefreshTimer = setInterval(() => {
+      scheduleDroneStatusRefresh('interval', 0);
+    }, DRONE_STATUS_REFRESH_INTERVAL_MS);
+    (droneStatusRefreshTimer as any).unref?.();
   }
 
   function enqueueDroneRegistryReconcilers(regAny: any): void {
@@ -14553,18 +14587,33 @@ export async function startDroneHubApiServer(opts: {
       statusOk: false,
       status: null,
       statusError: phase === 'error' ? (err ?? message ?? 'failed') : null,
+      statusChecking: false,
       chats: [],
       busyChats: [],
-      dockerSize: {
-        totalBytes: 0,
-        containerWritableBytes: 0,
-        snapshotBytes: 0,
-        snapshotVirtualBytes: null,
-        snapshotCount: 0,
-      },
       hubPhase,
       hubMessage: phase === 'error' ? (err ?? message ?? null) : message,
       busy: false,
+    };
+  }
+
+  async function buildDroneDockerSizeSummary(d: any): Promise<{
+    totalBytes: number;
+    containerWritableBytes: number | null;
+    snapshotBytes: number;
+    snapshotVirtualBytes: number | null;
+    snapshotCount: number;
+  }> {
+    const runtime = normalizeDroneRuntime(d?.runtime);
+    const containerName = String(d?.containerName ?? d?.name ?? '').trim();
+    const snapshotTotals = await dockerSnapshotTotalsForDroneEntry(d);
+    const containerWritableBytes =
+      runtime === 'container' && containerName ? await dockerContainerSizeBytes(containerName) : null;
+    return {
+      totalBytes: (containerWritableBytes ?? 0) + snapshotTotals.sizeBytes,
+      containerWritableBytes,
+      snapshotBytes: snapshotTotals.sizeBytes,
+      snapshotVirtualBytes: snapshotTotals.virtualSizeBytes,
+      snapshotCount: snapshotTotals.count,
     };
   }
 
@@ -14581,11 +14630,7 @@ export async function startDroneHubApiServer(opts: {
       Boolean(String(d?.repo?.seededAt ?? '').trim());
     const droneId = normalizeDroneIdentity(d?.id);
     const busyChats = droneId ? busyChatNamesForDrone(d, droneId) : [];
-    const { hostPort, statusOk, status, statusError } = await resolveCachedDroneStatusSummary(d);
-    const containerName = String(d?.containerName ?? d?.name ?? '').trim();
-    const snapshotTotals = await dockerSnapshotTotalsForDroneEntry(d);
-    const containerWritableBytes =
-      runtime === 'container' && containerName ? await dockerContainerSizeBytes(containerName) : null;
+    const { hostPort, statusOk, status, statusError, statusChecking } = cachedDroneStatusSummaryForEntry(d);
 
     return {
       id: normalizeDroneIdentity(d?.id) || null,
@@ -14611,15 +14656,9 @@ export async function startDroneHubApiServer(opts: {
       statusOk,
       status,
       statusError,
+      statusChecking: Boolean(statusChecking),
       chats: Object.keys(d.chats ?? {}),
       busyChats,
-      dockerSize: {
-        totalBytes: (containerWritableBytes ?? 0) + snapshotTotals.sizeBytes,
-        containerWritableBytes,
-        snapshotBytes: snapshotTotals.sizeBytes,
-        snapshotVirtualBytes: snapshotTotals.virtualSizeBytes,
-        snapshotCount: snapshotTotals.count,
-      },
       hubPhase,
       hubMessage,
       busy: busyChats.length > 0,
@@ -15068,6 +15107,7 @@ export async function startDroneHubApiServer(opts: {
   }
 
   notifyDroneRegistryWrite = () => {
+    scheduleDroneStatusRefresh('registry-write', 0);
     scheduleDroneRegistryBroadcasterRefresh();
     scheduleDroneChatEventRefresh();
   };
@@ -18992,6 +19032,7 @@ export async function startDroneHubApiServer(opts: {
 
       // GET /api/drones
       if (method === 'GET' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'drones') {
+        scheduleDroneStatusRefresh('api:drones', 0);
         const { drones } = await buildDroneRegistrySnapshot('api:drones');
 
         json(res, 200, { ok: true, drones });
@@ -19028,6 +19069,25 @@ export async function startDroneHubApiServer(opts: {
           reg2.drones[droneId] = dd;
         });
         json(res, 200, { ok: true, id: droneId, name: resolvedName, cleared });
+        return;
+      }
+
+      // GET /api/drones/:id/docker-size
+      if (method === 'GET' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'drones' && parts[3] === 'docker-size') {
+        const droneRef = decodeURIComponent(parts[2]);
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        if (normalizeDroneRuntime(resolved.drone?.runtime) === 'host') {
+          json(res, 409, { ok: false, error: 'Docker size is only available for container drones' });
+          return;
+        }
+        const dockerSize = await buildDroneDockerSizeSummary(resolved.drone);
+        json(res, 200, {
+          ok: true,
+          id: resolved.id,
+          name: String(resolved.drone?.name ?? resolved.id),
+          dockerSize,
+        });
         return;
       }
 
@@ -27330,6 +27390,7 @@ export async function startDroneHubApiServer(opts: {
   });
 
   await new Promise<void>((resolve) => server.listen(opts.port, host, () => resolve()));
+  startDroneStatusRefresher();
   const address = server.address();
   const actualPort = typeof address === 'object' && address ? address.port : opts.port;
 
@@ -27401,6 +27462,23 @@ export async function startDroneHubApiServer(opts: {
         }
         FLEET_RECONCILE_INTERVAL = null;
       }
+      if (droneStatusRefreshTimer) {
+        try {
+          clearInterval(droneStatusRefreshTimer);
+        } catch {
+          // ignore
+        }
+        droneStatusRefreshTimer = null;
+      }
+      if (droneStatusRefreshTimeout) {
+        try {
+          clearTimeout(droneStatusRefreshTimeout);
+        } catch {
+          // ignore
+        }
+        droneStatusRefreshTimeout = null;
+      }
+      droneStatusRefreshBusy = false;
       for (const timer of RECONCILE_RETRY_TIMERS.values()) {
         try {
           clearTimeout(timer);

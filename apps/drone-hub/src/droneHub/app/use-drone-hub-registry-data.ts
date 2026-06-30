@@ -73,6 +73,7 @@ function sameDroneSummary(left: DroneSummary, right: DroneSummary): boolean {
     left.hostPort === right.hostPort &&
     left.statusOk === right.statusOk &&
     sameOptionalText(left.statusError, right.statusError) &&
+    Boolean(left.statusChecking) === Boolean(right.statusChecking) &&
     sameStringArray(left.chats, right.chats) &&
     sameStringArray(left.busyChats, right.busyChats) &&
     sameOptionalText(left.hubPhase, right.hubPhase) &&

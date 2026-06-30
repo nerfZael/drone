@@ -48,6 +48,7 @@ function sameDroneCardDrone(a: DroneSummary, b: DroneSummary): boolean {
     a.createdAt === b.createdAt &&
     a.statusOk === b.statusOk &&
     (a.statusError ?? '') === (b.statusError ?? '') &&
+    Boolean(a.statusChecking) === Boolean(b.statusChecking) &&
     a.hubPhase === b.hubPhase &&
     (a.hubMessage ?? '') === (b.hubMessage ?? '')
   );
@@ -270,7 +271,13 @@ export const DroneCard = React.memo(function DroneCard({
             {showInlineError ? null : showRespondingAsStatus ? (
               <span className="inline-flex items-center" title="Agent responding"><TypingDots color="var(--yellow)" /></span>
             ) : (
-              <StatusBadge ok={drone.statusOk} error={drone.statusError} hubPhase={drone.hubPhase} hubMessage={drone.hubMessage} />
+              <StatusBadge
+                ok={drone.statusOk}
+                error={drone.statusError}
+                checking={drone.statusChecking}
+                hubPhase={drone.hubPhase}
+                hubMessage={drone.hubMessage}
+              />
             )}
           </div>
           {hasActions && (

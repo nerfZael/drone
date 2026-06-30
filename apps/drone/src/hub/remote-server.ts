@@ -92,6 +92,7 @@ export function sanitizeDroneSummary(raw: any): any {
     hostPort: null,
     statusOk: raw?.statusOk === true,
     statusError: raw?.statusOk === true ? null : 'unavailable',
+    statusChecking: raw?.statusChecking === true,
     chats: Array.isArray(raw?.chats) ? raw.chats.map(String) : [],
     busyChats: Array.isArray(raw?.busyChats) ? raw.busyChats.map(String) : [],
     hubPhase: raw?.hubPhase ?? null,
