@@ -54,89 +54,19 @@ afterEach(() => {
 });
 
 describe('drone hub desktop extension', () => {
-  test('exposes create drone branch controls and defaults tool', async () => {
+  test('exposes create drone branch controls without preflight tools', async () => {
     const api = createApi();
     await extension.activate(api);
 
-    const defaultsTool = api.tools.get('get_create_drone_defaults');
     const createTool = api.tools.get('create_drone');
 
-    expect(defaultsTool).toBeTruthy();
-    expect(defaultsTool.inputSchema.properties.repoPath.type).toBe('string');
-    expect(defaultsTool.inputSchema.properties.repoRef.type).toBe('string');
-    expect(defaultsTool.inputSchema.properties.repoLabel.type).toBe('string');
+    expect(api.tools.has('status')).toBe(false);
+    expect(api.tools.has('get_create_drone_defaults')).toBe(false);
     expect(createTool.inputSchema.properties.repoRef.type).toBe('string');
     expect(createTool.inputSchema.properties.repoLabel.type).toBe('string');
     expect(createTool.inputSchema.properties.repoBranchSource.enum).toEqual(['host', 'remote']);
     expect(createTool.inputSchema.properties.remoteBranch.type).toBe('string');
     expect(createTool.inputSchema.properties.pullHostBranchBeforeCreate.type).toBe('boolean');
-  });
-
-  test('resolves create drone defaults for a repo without reusing global remote branch defaults', async () => {
-    const api = createApi();
-    globalThis.fetch = async (url) => {
-      if (String(url).endsWith('/api/repos')) {
-        return jsonResponse({
-          ok: true,
-          repos: [{ path: '/home/zael/dev/me/drone', addedAt: new Date(0).toISOString() }],
-        });
-      }
-      if (String(url).endsWith('/api/settings/ui-preferences')) {
-        return jsonResponse({
-          ok: true,
-          updatedAt: new Date(0).toISOString(),
-          uiPreferences: {
-            spawnAgentKey: 'builtin:codex',
-            spawnModel: 'gpt-5.5',
-            repoBranchSource: 'remote',
-            repoCreateRemoteBranch: 'origin/release/dev',
-            pullHostBranchBeforeCreate: false,
-          },
-        });
-      }
-      return jsonResponse({ ok: false, error: 'not found' }, 404);
-    };
-
-    await extension.activate(api);
-    const result = await api.tools.get('get_create_drone_defaults').execute({
-      repoPath: '/home/zael/dev/me/drone',
-    });
-
-    expect(result.repoPath).toBe('/home/zael/dev/me/drone');
-    expect(result.repo).toMatchObject({ label: 'drone', path: '/home/zael/dev/me/drone', exists: true });
-    expect(result.defaults).toMatchObject({
-      spawnAgentKey: 'builtin:codex',
-      spawnModel: 'gpt-5.5',
-      repoBranchSource: 'host',
-      repoCreateRemoteBranch: '',
-      pullHostBranchBeforeCreate: false,
-    });
-  });
-
-  test('rejects unregistered repo paths when reading create defaults', async () => {
-    const api = createApi();
-    const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-hub-extension-repos-'));
-    const repoRoot = path.join(parent, 'StorySpark');
-    fs.mkdirSync(repoRoot);
-    const requests = [];
-    globalThis.fetch = async (url, init = {}) => {
-      requests.push({ url: String(url), init });
-      if (String(url).endsWith('/api/repos')) {
-        return jsonResponse({ ok: true, repos: [{ path: repoRoot, addedAt: new Date(0).toISOString() }] });
-      }
-      if (String(url).endsWith('/api/settings/ui-preferences')) {
-        return jsonResponse({ ok: false, error: 'should not read defaults' }, 500);
-      }
-      return jsonResponse({ ok: false, error: 'not found' }, 404);
-    };
-
-    await extension.activate(api);
-    await expect(api.tools.get('get_create_drone_defaults').execute({
-      repoPath: path.join('/home/zael/dev/me/drone', 'StorySpark'),
-    })).rejects.toThrow('Unregistered repoPath: /home/zael/dev/me/drone/StorySpark');
-
-    expect(requests.some((request) => String(request.url).endsWith('/api/settings/ui-preferences'))).toBe(false);
-    fs.rmSync(parent, { recursive: true, force: true });
   });
 
   test('uses repo-scoped remembered branch defaults when creating a drone', async () => {
@@ -221,13 +151,14 @@ describe('drone hub desktop extension', () => {
 
   test('does not reuse a stale remote branch default from another repo', async () => {
     const api = createApi();
+    const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-hub-extension-repo-'));
     const requests = [];
     globalThis.fetch = async (url, init) => {
       requests.push({ url: String(url), init });
       if (String(url).endsWith('/api/repos')) {
         return jsonResponse({
           ok: true,
-          repos: [{ path: '/home/zael/dev/me/drone', addedAt: new Date(0).toISOString() }],
+          repos: [{ path: repoPath, addedAt: new Date(0).toISOString() }],
         });
       }
       if (String(url).endsWith('/api/settings/ui-preferences')) {
@@ -257,7 +188,7 @@ describe('drone hub desktop extension', () => {
     await extension.activate(api);
     const result = await api.tools.get('create_drone').execute({
       name: 'drone-repo',
-      repoPath: '/home/zael/dev/me/drone',
+      repoPath,
     });
 
     const createRequest = requests.find((request) => String(request.url).endsWith('/api/drones'));
@@ -266,7 +197,7 @@ describe('drone hub desktop extension', () => {
     expect(body).toMatchObject({
       name: 'drone-repo',
       runtime: 'container',
-      repoPath: '/home/zael/dev/me/drone',
+      repoPath,
       repoBranchSource: 'host',
       pullHostBranchBeforeCreate: false,
     });
@@ -276,6 +207,7 @@ describe('drone hub desktop extension', () => {
       remoteBranch: null,
       pullHostBranchBeforeCreate: false,
     });
+    fs.rmSync(repoPath, { recursive: true, force: true });
   });
 
   test('requires repo-scoped remote branch defaults to exist in the selected repo', async () => {
@@ -397,12 +329,11 @@ describe('drone hub desktop extension', () => {
     };
 
     await extension.activate(api);
-    const result = await api.tools.get('status').execute({});
+    const result = await api.tools.get('list_drones').execute({});
 
-    expect(requests[0].url).toBe('http://127.0.0.1:8787/api/health');
+    expect(requests[0].url).toBe('http://127.0.0.1:8787/api/drones/summary');
     expect(requests[0].init.headers.authorization).toBe('Bearer discovered-token');
-    expect(result.baseUrl).toBe('http://127.0.0.1:8787');
-    expect(result.source).toBe(dataDir);
+    expect(result).toMatchObject({ ok: true, count: 0, drones: [] });
     fs.rmSync(repoRoot, { recursive: true, force: true });
   });
 
@@ -748,8 +679,8 @@ describe('drone hub desktop extension', () => {
     globalThis.fetch = async () => jsonResponse({ ok: false, error: 'boom' }, 503);
 
     await extension.activate(api);
-    await expect(api.tools.get('status').execute({})).rejects.toThrow(
-      'Drone Hub request failed: GET /api/health via http://hub.local (source: config) returned 503: boom',
+    await expect(api.tools.get('list_drones').execute({})).rejects.toThrow(
+      'Drone Hub request failed: GET /api/drones/summary via http://hub.local (source: config) returned 503: boom',
     );
   });
 
@@ -770,8 +701,8 @@ describe('drone hub desktop extension', () => {
     };
 
     await extension.activate(api);
-    await expect(api.tools.get('status').execute({})).rejects.toThrow(
-      'Drone Hub request timed out after 10000ms: GET /api/health via http://hub.local (source: config)',
+    await expect(api.tools.get('list_drones').execute({})).rejects.toThrow(
+      'Drone Hub request timed out after 10000ms: GET /api/drones/summary via http://hub.local (source: config)',
     );
   });
 });

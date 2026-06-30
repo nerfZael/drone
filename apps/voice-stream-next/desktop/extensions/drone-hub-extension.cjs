@@ -1105,29 +1105,6 @@ exports.activate = async function activate(api) {
   }
 
   registerTool(api, {
-    name: 'status',
-    label: 'Drone Hub status',
-    description: 'Check whether the local Drone Hub API is reachable from this desktop.',
-    approval: 'never',
-    inputSchema: {
-      type: 'object',
-      properties: {},
-      required: [],
-      additionalProperties: false,
-    },
-    async execute() {
-      const hub = connection();
-      const response = await requestJson(hub, '/api/health', { method: 'GET' });
-      return {
-        ok: true,
-        baseUrl: hub.baseUrl,
-        source: hub.source,
-        health: response && typeof response === 'object' ? response : { ok: true },
-      };
-    },
-  });
-
-  registerTool(api, {
     name: 'list_drones',
     label: 'List drones',
     description: 'List local Drone Hub drones, optionally filtered by group or names.',
@@ -1220,31 +1197,6 @@ exports.activate = async function activate(api) {
         createdAt: cleanIsoTimestamp(response?.createdAt),
         groupOrder,
       };
-    },
-  });
-
-  registerTool(api, {
-    name: 'get_create_drone_defaults',
-    label: 'Get create drone defaults',
-    description:
-      'Read the Drone Hub defaults normally used when manually creating a drone, including agent, model, branch source, remote branch, and whether the host branch is pulled before create. Optional repoRef, repoLabel, or exact registered repoPath selects repo-specific branch defaults.',
-    approval: 'never',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        repoRef: { type: 'string' },
-        repoLabel: { type: 'string' },
-        repoPath: { type: 'string' },
-      },
-      required: [],
-      additionalProperties: false,
-    },
-    async execute(args = {}) {
-      const hub = connection();
-      const resolvedRepo = await resolveRegisteredRepo(hub, args);
-      const repoPath = cleanString(resolvedRepo?.path);
-      const defaults = await createDronePreferences(hub, repoPath);
-      return { ok: true, defaults, repoPath: repoPath || null, repo: resolvedRepo };
     },
   });
 
