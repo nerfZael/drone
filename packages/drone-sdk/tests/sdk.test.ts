@@ -256,6 +256,73 @@ describe('drone-sdk core', () => {
     ]);
   });
 
+  test('sends agent permission mode through hub transport create requests', async () => {
+    const requests: Array<{ pathname: string; body: any }> = [];
+    const transport = hubTransport({
+      baseUrl: 'http://127.0.0.1:8787',
+      token: 'test-token',
+      fetch: (async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+        requests.push({
+          pathname: new URL(String(input)).pathname,
+          body: init?.body ? JSON.parse(String(init.body)) : null,
+        });
+        const pathname = new URL(String(input)).pathname;
+        if (pathname === '/api/drones/batch') {
+          return new Response(JSON.stringify({
+            ok: true,
+            accepted: [{ id: 'drone-2', name: 'beta', phase: 'starting' }],
+            rejected: [],
+            total: 1,
+          }), { status: 202, headers: { 'content-type': 'application/json' } });
+        }
+        return new Response(JSON.stringify({
+          ok: true,
+          id: 'drone-1',
+          name: 'alpha',
+          status: 'starting',
+        }), { status: 202, headers: { 'content-type': 'application/json' } });
+      }) as typeof fetch,
+    });
+
+    await transport.createDrone({
+      name: 'alpha',
+      agent: 'codex',
+      agentPermissionMode: 'read-only',
+    });
+    await transport.createDrones([
+      {
+        name: 'beta',
+        agent: 'blip',
+        agentPermissionMode: 'read-only',
+      },
+    ]);
+
+    expect(requests).toEqual([
+      {
+        pathname: '/api/drones',
+        body: {
+          name: 'alpha',
+          runtime: 'container',
+          seedAgent: { kind: 'builtin', id: 'codex' },
+          seedAgentPermissionMode: 'read-only',
+        },
+      },
+      {
+        pathname: '/api/drones/batch',
+        body: {
+          drones: [
+            {
+              seedAgent: { kind: 'builtin', id: 'blip' },
+              seedAgentPermissionMode: 'read-only',
+              name: 'beta',
+              runtime: 'container',
+            },
+          ],
+        },
+      },
+    ]);
+  });
+
   test('supports cloning one or many drones', async () => {
     const sdk = createDroneSDK({
       transport: createMockTransport(),

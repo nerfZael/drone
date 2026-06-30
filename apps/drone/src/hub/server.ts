@@ -4074,6 +4074,18 @@ type ChatAgentConfig =
   | { kind: 'builtin'; id: BuiltinAgentId }
   | { kind: 'custom'; id: string; label: string; command: string };
 
+type AgentPermissionMode = 'full-access' | 'read-only';
+
+function normalizeAgentPermissionMode(raw: unknown): AgentPermissionMode {
+  return String(raw ?? '').trim() === 'read-only' ? 'read-only' : 'full-access';
+}
+
+function parseAgentPermissionModeForUpdate(raw: unknown): AgentPermissionMode {
+  const value = String(raw ?? '').trim();
+  if (value === 'full-access' || value === 'read-only') return value;
+  throw new Error('agentPermissionMode must be full-access or read-only');
+}
+
 type PromptAutomationMeta = {
   kind: 'prompt-loop';
   stage?: 'run' | 'final-message';
@@ -5809,6 +5821,8 @@ async function sendPromptToChat(opts: {
     const { d: dWithChat, chat } = await getChatEntry({ droneId, chatName: normalizedChat });
     const agent = inferChatAgent(chat, dWithChat);
     const chatModel = normalizeChatModel((chat as any)?.model);
+    const agentPermissionMode = normalizeAgentPermissionMode((chat as any)?.agentPermissionMode);
+    if (agentPermissionMode === 'read-only') assertReadOnlySupportedForAgent(agent);
     const managedEnv = resolveDroneEnvironmentConfig(regLatest, d).resolvedVars;
     const managedEnvLines = buildEnvExportLines(managedEnv);
 
@@ -5880,6 +5894,7 @@ async function sendPromptToChat(opts: {
 
     if (agent.kind === 'builtin' && agent.id === 'codex') {
       const modelArg = chatModel ? ` --model ${bashQuote(chatModel)}` : '';
+      const sandboxArg = agentPermissionMode === 'read-only' ? 'read-only' : 'danger-full-access';
       const existingThreadId = readBuiltinTranscriptSessionId(chat, 'codex');
       if (!existingThreadId) {
         const script = [
@@ -5888,7 +5903,7 @@ async function sendPromptToChat(opts: {
           ...managedEnvLines,
           `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
           cdCommand,
-          `codex --ask-for-approval never exec${modelArg} --skip-git-repo-check --sandbox danger-full-access --json --color never${codexImageArgs} ${bashQuote(promptWithHistory)}`,
+          `codex --ask-for-approval never exec${modelArg} --skip-git-repo-check --sandbox ${sandboxArg} --json --color never${codexImageArgs} ${bashQuote(promptWithHistory)}`,
         ].join('\n');
         await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'codex', script, prompt: effectivePrompt });
         return { ok: true as const, agent, mode: 'transcript' as const, chat: normalizedChat, codexThreadId: null, turnOk: true as const };
@@ -5900,7 +5915,7 @@ async function sendPromptToChat(opts: {
         ...managedEnvLines,
         `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
         cdCommand,
-        `codex --ask-for-approval never exec${modelArg} --skip-git-repo-check --sandbox danger-full-access --json --color never resume${codexImageArgs} ${bashQuote(existingThreadId)} ${bashQuote(promptWithHistory)}`,
+        `codex --ask-for-approval never exec${modelArg} --skip-git-repo-check --sandbox ${sandboxArg} --json --color never resume${codexImageArgs} ${bashQuote(existingThreadId)} ${bashQuote(promptWithHistory)}`,
       ].join('\n');
       await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'codex', script, prompt: effectivePrompt });
       return {
@@ -5987,6 +6002,10 @@ async function sendPromptToChat(opts: {
     if (agent.kind === 'builtin' && agent.id === 'blip') {
       const modelArg = chatModel ? ` --model ${bashQuote(chatModel)}` : '';
       const agentsArg = (chat as any)?.blipClonesEnabled === false ? ' --no-agents' : ' --agents';
+      const permissionArgs =
+        agentPermissionMode === 'read-only'
+          ? '--permission read-only --profile read-only'
+          : '--permission full-access --profile local-trusted-write';
       const blipSessionId = readBuiltinTranscriptSessionId(chat, 'blip');
       const sessionArg = blipSessionId ? ` --session ${bashQuote(blipSessionId)}` : '';
       const blipCommand = resolveBlipPromptCommand(runtime);
@@ -5996,7 +6015,7 @@ async function sendPromptToChat(opts: {
         ...managedEnvLines,
         `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
         cdCommand,
-        `${blipCommand} --jsonl --permission full-access --profile local-trusted-write${agentsArg}${modelArg}${sessionArg} ${bashQuote(promptWithHistory)}`,
+        `${blipCommand} --jsonl ${permissionArgs}${agentsArg}${modelArg}${sessionArg} ${bashQuote(promptWithHistory)}`,
       ].join('\n');
       await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'blip', script });
       return {
@@ -11785,6 +11804,9 @@ function buildNewChatEntry(opts: {
   const entry: any = {
     createdAt: opts.createdAt,
     agent,
+    ...(opts.sourceChatEntry && normalizeAgentPermissionMode(opts.sourceChatEntry?.agentPermissionMode) === 'read-only'
+      ? { agentPermissionMode: 'read-only' }
+      : {}),
     ...(opts.sourceChatEntry && normalizeChatModel(opts.sourceChatEntry?.model)
       ? { model: normalizeChatModel(opts.sourceChatEntry?.model) }
       : {}),
@@ -11988,6 +12010,14 @@ function inferChatAgent(entry: any, droneEntry?: any): ChatAgentConfig {
     return { kind: 'custom', id: id || 'custom', label, command };
   }
   return defaultChatAgentConfigForDrone(droneEntry);
+}
+
+function assertReadOnlySupportedForAgent(agent: ChatAgentConfig): void {
+  if (agent.kind === 'builtin' && (agent.id === 'codex' || agent.id === 'blip')) return;
+  const label = agent.kind === 'builtin' ? agent.id : agent.label || agent.id || 'custom agent';
+  const error: Error & { statusCode?: number } = new Error(`read-only mode is currently supported for Codex and Blip chats only (selected: ${label})`);
+  error.statusCode = 400;
+  throw error;
 }
 
 async function getChatEntry(opts: { droneId: string; chatName: string }) {
@@ -12321,6 +12351,8 @@ async function setChatAgentConfig(opts: {
   agent?: ChatAgentConfig;
   setModel?: boolean;
   model?: string | null;
+  setAgentPermissionMode?: boolean;
+  agentPermissionMode?: AgentPermissionMode;
   setAgentMessageAutoContinueEnabled?: boolean;
   agentMessageAutoContinueEnabled?: boolean;
   setAgentSuggestionEnabled?: boolean;
@@ -12391,10 +12423,23 @@ async function setChatAgentConfig(opts: {
     if (opts.agent) {
       assertChatAgentSupportedForDrone(d, opts.agent);
       cur.agent = opts.agent as any;
+      if (normalizeAgentPermissionMode(cur.agentPermissionMode) === 'read-only') {
+        try {
+          assertReadOnlySupportedForAgent(opts.agent);
+        } catch {
+          delete cur.agentPermissionMode;
+        }
+      }
     }
     if (opts.setModel) {
       if (opts.model) cur.model = opts.model;
       else delete cur.model;
+    }
+    if (opts.setAgentPermissionMode) {
+      const mode = normalizeAgentPermissionMode(opts.agentPermissionMode);
+      if (mode === 'read-only') assertReadOnlySupportedForAgent(effectiveAgent);
+      if (mode === 'read-only') cur.agentPermissionMode = 'read-only';
+      else delete cur.agentPermissionMode;
     }
     if (opts.setAgentMessageAutoContinueEnabled) {
       if (opts.agentMessageAutoContinueEnabled) {
@@ -18277,6 +18322,17 @@ export async function startDroneHubApiServer(opts: {
         const seedPrompt = String(body?.seedPrompt ?? body?.initialMessage ?? body?.seed?.prompt ?? '').trim();
         const seedChatName = normalizeChatName(body?.seedChat ?? body?.seed?.chatName ?? body?.seed?.chat ?? 'default');
         const seedAgent = parseSeedAgent(body?.seedAgent ?? body?.agent ?? body?.seed?.agent);
+        let seedAgentPermissionMode: AgentPermissionMode = 'full-access';
+        try {
+          const seedPermissionRaw = body?.seedAgentPermissionMode ?? body?.agentPermissionMode ?? body?.seed?.agentPermissionMode;
+          seedAgentPermissionMode =
+            seedPermissionRaw == null || String(seedPermissionRaw).trim() === ''
+              ? 'full-access'
+              : parseAgentPermissionModeForUpdate(seedPermissionRaw);
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          return;
+        }
         const seedSubmittedAt = normalizeSubmittedAtIso(
           body?.seedSubmittedAt ?? body?.submittedAt ?? body?.seed?.submittedAt ?? body?.seed?.clientSubmittedAt,
         );
@@ -18297,6 +18353,15 @@ export async function startDroneHubApiServer(opts: {
         } catch (e: any) {
           json(res, 400, { ok: false, error: e?.message ?? String(e) });
           return;
+        }
+        if (seedAgentPermissionMode === 'read-only') {
+          try {
+            if (!seedAgent) throw new Error('read-only mode requires a Codex or Blip seed agent');
+            assertReadOnlySupportedForAgent(seedAgent);
+          } catch (e: any) {
+            json(res, Number(e?.statusCode ?? 0) || 400, { ok: false, error: e?.message ?? String(e) });
+            return;
+          }
         }
         const seedCwdRaw = typeof body?.seedCwd === 'string' ? body.seedCwd : (typeof body?.seed?.cwd === 'string' ? body.seed.cwd : null);
         const cloneFromRaw = typeof body?.cloneFrom === 'string' ? body.cloneFrom.trim() : '';
@@ -18431,11 +18496,12 @@ export async function startDroneHubApiServer(opts: {
                   }).fleet,
                 }
               : {}),
-            ...(seedPrompt || seedAgent || seedModel
+            ...(seedPrompt || seedAgent || seedModel || seedAgentPermissionMode === 'read-only'
               ? {
                   seed: {
                     chatName: seedChatName,
                     ...(seedModel ? { model: seedModel } : {}),
+                    ...(seedAgentPermissionMode === 'read-only' ? { agentPermissionMode: seedAgentPermissionMode } : {}),
                     ...(seedPromptId ? { promptId: seedPromptId } : {}),
                     ...(seedPrompt ? { prompt: seedPrompt } : {}),
                     ...(seedPrompt ? { submittedAt: seedSubmittedAt } : {}),
@@ -18708,6 +18774,17 @@ export async function startDroneHubApiServer(opts: {
               const seedPrompt = String(raw?.seedPrompt ?? raw?.initialMessage ?? raw?.seed?.prompt ?? '').trim();
               const seedChatName = normalizeChatName(raw?.seedChat ?? raw?.seed?.chatName ?? raw?.seed?.chat ?? 'default');
               const seedAgent = parseSeedAgent(raw?.seedAgent ?? raw?.agent ?? raw?.seed?.agent);
+              let seedAgentPermissionMode: AgentPermissionMode = 'full-access';
+              try {
+                const seedPermissionRaw = raw?.seedAgentPermissionMode ?? raw?.agentPermissionMode ?? raw?.seed?.agentPermissionMode;
+                seedAgentPermissionMode =
+                  seedPermissionRaw == null || String(seedPermissionRaw).trim() === ''
+                    ? 'full-access'
+                    : parseAgentPermissionModeForUpdate(seedPermissionRaw);
+              } catch (e: any) {
+                rejected.push({ name, error: e?.message ?? String(e), status: 400 });
+                continue;
+              }
               const seedSubmittedAt = normalizeSubmittedAtIso(
                 raw?.seedSubmittedAt ?? raw?.submittedAt ?? raw?.seed?.submittedAt ?? raw?.seed?.clientSubmittedAt,
               );
@@ -18717,6 +18794,15 @@ export async function startDroneHubApiServer(opts: {
               } catch (e: any) {
                 rejected.push({ name, error: e?.message ?? String(e), status: 400 });
                 continue;
+              }
+              if (seedAgentPermissionMode === 'read-only') {
+                try {
+                  if (!seedAgent) throw new Error('read-only mode requires a Codex or Blip seed agent');
+                  assertReadOnlySupportedForAgent(seedAgent);
+                } catch (e: any) {
+                  rejected.push({ name, error: e?.message ?? String(e), status: Number(e?.statusCode ?? 0) || 400 });
+                  continue;
+                }
               }
               const seedCwdRaw =
                 typeof raw?.seedCwd === 'string' ? raw.seedCwd : typeof raw?.seed?.cwd === 'string' ? raw.seed.cwd : null;
@@ -18806,11 +18892,12 @@ export async function startDroneHubApiServer(opts: {
                       }).fleet,
                     }
                   : {}),
-                ...(seedPrompt || seedAgent || seedModel
+                ...(seedPrompt || seedAgent || seedModel || seedAgentPermissionMode === 'read-only'
                   ? {
                       seed: {
                         chatName: seedChatName,
                         ...(seedModel ? { model: seedModel } : {}),
+                        ...(seedAgentPermissionMode === 'read-only' ? { agentPermissionMode: seedAgentPermissionMode } : {}),
                         ...(seedPrompt ? { prompt: seedPrompt } : {}),
                         ...(seedPrompt ? { submittedAt: seedSubmittedAt } : {}),
                         ...(seedCwdRaw ? { cwd: String(seedCwdRaw) } : {}),
@@ -26602,6 +26689,7 @@ export async function startDroneHubApiServer(opts: {
           chat: chatName,
           agent,
           model: (chatEntry as any).model ?? null,
+          agentPermissionMode: normalizeAgentPermissionMode((chatEntry as any).agentPermissionMode),
           agentMessageAutoContinueEnabled: (chatEntry as any).agentMessageAutoContinueEnabled === true,
           agentSuggestionEnabled: (chatEntry as any).agentSuggestionEnabled === true,
           dockerSnapshotAfterAgentMessageEnabled: dockerSnapshotAfterAgentMessageEnabledForChat(resolved.drone, chatEntry),
@@ -26643,6 +26731,8 @@ export async function startDroneHubApiServer(opts: {
         const hasModelField =
           Boolean(body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, 'model')) ||
           Boolean(body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, 'chatModel'));
+        const hasAgentPermissionModeField =
+          Boolean(body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, 'agentPermissionMode'));
         const hasAutoContinueField =
           Boolean(body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, 'agentMessageAutoContinueEnabled'));
         const hasAgentSuggestionField =
@@ -26652,6 +26742,7 @@ export async function startDroneHubApiServer(opts: {
         const hasBlipClonesField =
           Boolean(body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, 'blipClonesEnabled'));
         let model: string | null = null;
+        let agentPermissionMode: AgentPermissionMode = 'full-access';
         let agentMessageAutoContinueEnabled = false;
         let agentSuggestionEnabled = false;
         let dockerSnapshotAfterAgentMessageEnabled = false;
@@ -26663,6 +26754,14 @@ export async function startDroneHubApiServer(opts: {
                 ? body.model
                 : body?.chatModel
             );
+          } catch (e: any) {
+            json(res, 400, { ok: false, error: e?.message ?? String(e) });
+            return;
+          }
+        }
+        if (hasAgentPermissionModeField) {
+          try {
+            agentPermissionMode = parseAgentPermissionModeForUpdate(body?.agentPermissionMode);
           } catch (e: any) {
             json(res, 400, { ok: false, error: e?.message ?? String(e) });
             return;
@@ -26707,6 +26806,8 @@ export async function startDroneHubApiServer(opts: {
               agent,
               setModel: hasModelField,
               model,
+              setAgentPermissionMode: hasAgentPermissionModeField,
+              agentPermissionMode,
               setAgentMessageAutoContinueEnabled: hasAutoContinueField,
               agentMessageAutoContinueEnabled,
               setAgentSuggestionEnabled: hasAgentSuggestionField,
@@ -26723,6 +26824,7 @@ export async function startDroneHubApiServer(opts: {
               chat: chatName,
               agent,
               ...(hasModelField ? { model } : {}),
+              ...(hasAgentPermissionModeField ? { agentPermissionMode } : {}),
               ...(hasAutoContinueField ? { agentMessageAutoContinueEnabled } : {}),
               ...(hasAgentSuggestionField ? { agentSuggestionEnabled } : {}),
               ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
@@ -26744,6 +26846,8 @@ export async function startDroneHubApiServer(opts: {
               agent,
               setModel: hasModelField,
               model,
+              setAgentPermissionMode: hasAgentPermissionModeField,
+              agentPermissionMode,
               setAgentMessageAutoContinueEnabled: hasAutoContinueField,
               agentMessageAutoContinueEnabled,
               setAgentSuggestionEnabled: hasAgentSuggestionField,
@@ -26760,6 +26864,7 @@ export async function startDroneHubApiServer(opts: {
               chat: chatName,
               agent,
               ...(hasModelField ? { model } : {}),
+              ...(hasAgentPermissionModeField ? { agentPermissionMode } : {}),
               ...(hasAutoContinueField ? { agentMessageAutoContinueEnabled } : {}),
               ...(hasAgentSuggestionField ? { agentSuggestionEnabled } : {}),
               ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
@@ -26773,6 +26878,8 @@ export async function startDroneHubApiServer(opts: {
               chatName,
               setModel: true,
               model,
+              setAgentPermissionMode: hasAgentPermissionModeField,
+              agentPermissionMode,
               setAgentMessageAutoContinueEnabled: hasAutoContinueField,
               agentMessageAutoContinueEnabled,
               setAgentSuggestionEnabled: hasAgentSuggestionField,
@@ -26788,6 +26895,35 @@ export async function startDroneHubApiServer(opts: {
               name: droneName,
               chat: chatName,
               model,
+              ...(hasAgentPermissionModeField ? { agentPermissionMode } : {}),
+              ...(hasAutoContinueField ? { agentMessageAutoContinueEnabled } : {}),
+              ...(hasAgentSuggestionField ? { agentSuggestionEnabled } : {}),
+              ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
+              ...(hasBlipClonesField ? { blipClonesEnabled } : {}),
+            });
+            return;
+          }
+          if (hasAgentPermissionModeField) {
+            await setChatAgentConfig({
+              droneId,
+              chatName,
+              setAgentPermissionMode: true,
+              agentPermissionMode,
+              setAgentMessageAutoContinueEnabled: hasAutoContinueField,
+              agentMessageAutoContinueEnabled,
+              setAgentSuggestionEnabled: hasAgentSuggestionField,
+              agentSuggestionEnabled,
+              setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
+              dockerSnapshotAfterAgentMessageEnabled,
+              setBlipClonesEnabled: hasBlipClonesField,
+              blipClonesEnabled,
+            });
+            json(res, 200, {
+              ok: true,
+              id: droneId,
+              name: droneName,
+              chat: chatName,
+              agentPermissionMode,
               ...(hasAutoContinueField ? { agentMessageAutoContinueEnabled } : {}),
               ...(hasAgentSuggestionField ? { agentSuggestionEnabled } : {}),
               ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
@@ -26799,6 +26935,8 @@ export async function startDroneHubApiServer(opts: {
             await setChatAgentConfig({
               droneId,
               chatName,
+              setAgentPermissionMode: hasAgentPermissionModeField,
+              agentPermissionMode,
               setAgentMessageAutoContinueEnabled: true,
               agentMessageAutoContinueEnabled,
               setAgentSuggestionEnabled: hasAgentSuggestionField,
@@ -26824,6 +26962,8 @@ export async function startDroneHubApiServer(opts: {
             await setChatAgentConfig({
               droneId,
               chatName,
+              setAgentPermissionMode: hasAgentPermissionModeField,
+              agentPermissionMode,
               setAgentSuggestionEnabled: true,
               agentSuggestionEnabled,
               setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
@@ -26846,6 +26986,8 @@ export async function startDroneHubApiServer(opts: {
             await setChatAgentConfig({
               droneId,
               chatName,
+              setAgentPermissionMode: hasAgentPermissionModeField,
+              agentPermissionMode,
               setDockerSnapshotAfterAgentMessageEnabled: true,
               dockerSnapshotAfterAgentMessageEnabled,
               setBlipClonesEnabled: hasBlipClonesField,
@@ -26865,6 +27007,8 @@ export async function startDroneHubApiServer(opts: {
             await setChatAgentConfig({
               droneId,
               chatName,
+              setAgentPermissionMode: hasAgentPermissionModeField,
+              agentPermissionMode,
               setBlipClonesEnabled: true,
               blipClonesEnabled,
             });
@@ -26879,7 +27023,7 @@ export async function startDroneHubApiServer(opts: {
           }
           json(res, 400, {
             ok: false,
-            error: `invalid request (expected agent cursor|codex|claude|opencode|pi|blip|custom, model, agentMessageAutoContinueEnabled, agentSuggestionEnabled, dockerSnapshotAfterAgentMessageEnabled, or blipClonesEnabled)`,
+            error: `invalid request (expected agent cursor|codex|claude|opencode|pi|blip|custom, model, agentPermissionMode, agentMessageAutoContinueEnabled, agentSuggestionEnabled, dockerSnapshotAfterAgentMessageEnabled, or blipClonesEnabled)`,
           });
           return;
         } catch (e: any) {

@@ -18,6 +18,7 @@ import type { MarkdownFileReference } from '../chat/MarkdownMessage';
 import { GroupBadge, StatusBadge } from '../overview';
 import { TypingDots } from '../overview/icons';
 import { requestJson } from '../http';
+import type { AgentPermissionMode } from '../../domain';
 import type {
   DroneSummary,
   PendingPrompt,
@@ -164,6 +165,8 @@ type SelectedDroneWorkspaceProps = {
   availableChatModels: unknown[];
   currentModel: string | null;
   setChatModel: (model: string | null) => Promise<void>;
+  agentPermissionMode: AgentPermissionMode;
+  setChatAgentPermissionMode: (mode: AgentPermissionMode) => Promise<void>;
   agentMessageAutoContinueEnabled: boolean;
   setAgentMessageAutoContinueEnabled: (enabled: boolean) => Promise<void>;
   agentSuggestionEnabled: boolean;
@@ -294,6 +297,8 @@ export function SelectedDroneWorkspace({
   availableChatModels,
   currentModel,
   setChatModel,
+  agentPermissionMode,
+  setChatAgentPermissionMode,
   agentMessageAutoContinueEnabled,
   setAgentMessageAutoContinueEnabled,
   agentSuggestionEnabled,
@@ -509,6 +514,7 @@ export function SelectedDroneWorkspace({
   const hostRuntime = String(currentDrone.runtime ?? '').trim().toLowerCase() === 'host';
   const dockerSnapshotSupported = !hostRuntime && currentDrone.persistVolume === false;
   const blipClonesSupported = currentAgentKey === 'builtin:blip';
+  const readOnlySupported = currentAgentKey === 'builtin:codex' || currentAgentKey === 'builtin:blip';
   const dockerSize = currentDrone.dockerSize ?? null;
   const dockerSizeTitle = dockerSize
     ? `Docker tracked size: ${formatBytes(dockerSize.totalBytes)} current writable + unique snapshot layers. Current container writable layer: ${formatBytes(
@@ -1293,6 +1299,52 @@ export function SelectedDroneWorkspace({
                       unavailable
                     </span>
                   )}
+                </div>
+              ) : null}
+              {hasChats && chatUiMode === 'transcript' ? (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+                    Access
+                  </span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={agentPermissionMode === 'read-only'}
+                    onClick={() => {
+                      if (!readOnlySupported) return;
+                      const nextMode: AgentPermissionMode = agentPermissionMode === 'read-only' ? 'full-access' : 'read-only';
+                      void setChatAgentPermissionMode(nextMode).catch((err: any) =>
+                        setChatInfoError(err?.message ?? String(err)),
+                      );
+                    }}
+                    disabled={loadingChatInfo || !readOnlySupported}
+                    className={`inline-flex items-center gap-2 h-[28px] px-2 rounded border text-[10px] font-semibold tracking-wide uppercase transition-all ${
+                      loadingChatInfo || !readOnlySupported
+                        ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                        : agentPermissionMode === 'read-only'
+                          ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
+                          : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                    }`}
+                    style={{ fontFamily: 'var(--display)' }}
+                    title={
+                      readOnlySupported
+                        ? 'Run the next prompt with read-only agent permissions.'
+                        : 'Read-only mode is currently available for Codex and Blip chats.'
+                    }
+                  >
+                    <span
+                      className={`relative inline-flex h-3.5 w-6 rounded-full transition-colors ${
+                        agentPermissionMode === 'read-only' ? 'bg-[var(--accent)]' : 'bg-[rgba(148,163,184,.3)]'
+                      }`}
+                    >
+                      <span
+                        className={`absolute top-[1px] h-3 w-3 rounded-full bg-white transition-transform ${
+                          agentPermissionMode === 'read-only' ? 'translate-x-[11px]' : 'translate-x-[1px]'
+                        }`}
+                      />
+                    </span>
+                    {agentPermissionMode === 'read-only' ? 'Read only' : 'Full'}
+                  </button>
                 </div>
               ) : null}
               {!hostRuntime ? (

@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ChatAgentConfig, ChatInfo } from '../../domain';
+import type { AgentPermissionMode, ChatAgentConfig, ChatInfo } from '../../domain';
 import { normalizeChatInfoPayload } from '../../domain';
 import type { DroneSummary } from '../types';
 import type { ChatModelOption } from './app-types';
@@ -204,6 +204,7 @@ export function useChatConfigState({
     async (agent: ChatAgentConfig) => {
       if (!selectedDrone) return;
       const chat = selectedChat || 'default';
+      const readOnlySupported = agent.kind === 'builtin' && (agent.id === 'codex' || agent.id === 'blip');
       await requestJson(
         `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(
           chat,
@@ -219,6 +220,7 @@ export function useChatConfigState({
         chat,
         agent,
         model: prev?.model ?? null,
+        agentPermissionMode: readOnlySupported ? prev?.agentPermissionMode ?? 'full-access' : 'full-access',
         agentMessageAutoContinueEnabled: prev?.agentMessageAutoContinueEnabled === true,
         agentSuggestionEnabled: prev?.agentSuggestionEnabled === true,
         dockerSnapshotAfterAgentMessageEnabled: prev?.dockerSnapshotAfterAgentMessageEnabled === true,
@@ -251,6 +253,7 @@ export function useChatConfigState({
         chat,
         agent: prev?.agent ?? ({ kind: 'builtin', id: 'cursor' } as ChatAgentConfig),
         model: normalized,
+        agentPermissionMode: prev?.agentPermissionMode ?? 'full-access',
         agentMessageAutoContinueEnabled: prev?.agentMessageAutoContinueEnabled === true,
         agentSuggestionEnabled: prev?.agentSuggestionEnabled === true,
         dockerSnapshotAfterAgentMessageEnabled: prev?.dockerSnapshotAfterAgentMessageEnabled === true,
@@ -259,6 +262,38 @@ export function useChatConfigState({
         createdAt: prev?.createdAt ?? new Date().toISOString(),
       }));
       setManualChatModelInput(normalized ?? '');
+      setChatInfoError(null);
+    },
+    [requestJson, selectedChat, selectedDrone],
+  );
+
+  const setChatAgentPermissionMode = React.useCallback(
+    async (agentPermissionMode: AgentPermissionMode) => {
+      if (!selectedDrone) return;
+      const chat = selectedChat || 'default';
+      await requestJson(
+        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(
+          chat,
+        )}/config`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ agentPermissionMode }),
+        },
+      );
+      setChatInfo((prev) => ({
+        name: selectedDrone,
+        chat,
+        agent: prev?.agent ?? ({ kind: 'builtin', id: 'cursor' } as ChatAgentConfig),
+        model: prev?.model ?? null,
+        agentPermissionMode,
+        agentMessageAutoContinueEnabled: prev?.agentMessageAutoContinueEnabled === true,
+        agentSuggestionEnabled: prev?.agentSuggestionEnabled === true,
+        dockerSnapshotAfterAgentMessageEnabled: prev?.dockerSnapshotAfterAgentMessageEnabled === true,
+        blipClonesEnabled: prev?.blipClonesEnabled !== false,
+        sessionName: prev?.sessionName ?? `drone-hub-chat-${chat}`,
+        createdAt: prev?.createdAt ?? new Date().toISOString(),
+      }));
       setChatInfoError(null);
     },
     [requestJson, selectedChat, selectedDrone],
@@ -283,6 +318,7 @@ export function useChatConfigState({
         chat,
         agent: prev?.agent ?? ({ kind: 'builtin', id: 'cursor' } as ChatAgentConfig),
         model: prev?.model ?? null,
+        agentPermissionMode: prev?.agentPermissionMode ?? 'full-access',
         agentMessageAutoContinueEnabled: enabled,
         agentSuggestionEnabled: prev?.agentSuggestionEnabled === true,
         dockerSnapshotAfterAgentMessageEnabled: prev?.dockerSnapshotAfterAgentMessageEnabled === true,
@@ -314,6 +350,7 @@ export function useChatConfigState({
         chat,
         agent: prev?.agent ?? ({ kind: 'builtin', id: 'cursor' } as ChatAgentConfig),
         model: prev?.model ?? null,
+        agentPermissionMode: prev?.agentPermissionMode ?? 'full-access',
         agentMessageAutoContinueEnabled: prev?.agentMessageAutoContinueEnabled === true,
         agentSuggestionEnabled: enabled,
         dockerSnapshotAfterAgentMessageEnabled: prev?.dockerSnapshotAfterAgentMessageEnabled === true,
@@ -345,6 +382,7 @@ export function useChatConfigState({
         chat,
         agent: prev?.agent ?? ({ kind: 'builtin', id: 'cursor' } as ChatAgentConfig),
         model: prev?.model ?? null,
+        agentPermissionMode: prev?.agentPermissionMode ?? 'full-access',
         agentMessageAutoContinueEnabled: prev?.agentMessageAutoContinueEnabled === true,
         agentSuggestionEnabled: prev?.agentSuggestionEnabled === true,
         dockerSnapshotAfterAgentMessageEnabled: enabled,
@@ -376,6 +414,7 @@ export function useChatConfigState({
         chat,
         agent: prev?.agent ?? ({ kind: 'builtin', id: 'blip' } as ChatAgentConfig),
         model: prev?.model ?? null,
+        agentPermissionMode: prev?.agentPermissionMode ?? 'full-access',
         agentMessageAutoContinueEnabled: prev?.agentMessageAutoContinueEnabled === true,
         agentSuggestionEnabled: prev?.agentSuggestionEnabled === true,
         dockerSnapshotAfterAgentMessageEnabled: prev?.dockerSnapshotAfterAgentMessageEnabled === true,
@@ -413,6 +452,7 @@ export function useChatConfigState({
     setManualChatModelInput,
     setChatAgent,
     setChatModel,
+    setChatAgentPermissionMode,
     setAgentMessageAutoContinueEnabled,
     setAgentSuggestionEnabled,
     setDockerSnapshotAfterAgentMessageEnabled,

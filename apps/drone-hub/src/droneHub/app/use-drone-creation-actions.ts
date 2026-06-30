@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ChatAgentConfig } from '../../domain';
+import type { AgentPermissionMode, ChatAgentConfig } from '../../domain';
 import type { DroneSummary } from '../types';
 import type { ChatSendPayload } from '../chat';
 import type { DraftChatState } from './app-types';
@@ -65,6 +65,7 @@ type UseDroneCreationActionsArgs = {
   cloneIncludeChats: boolean;
   spawnAgentKey: string;
   spawnModelForSeed: string | null;
+  spawnAgentPermissionMode: AgentPermissionMode;
   draftChat: DraftChatState | null;
   draftCreateMode: 'with-chat' | 'without-chat';
   draftCreateName: string;
@@ -89,6 +90,7 @@ type UseDroneCreationActionsArgs = {
       runtime?: 'container' | 'host';
       agent: ChatAgentConfig | null;
       model?: string | null;
+      agentPermissionMode?: AgentPermissionMode;
       prompt: string;
       chatName?: string;
       group?: string | null;
@@ -173,6 +175,7 @@ export function useDroneCreationActions({
   cloneIncludeChats,
   spawnAgentKey,
   spawnModelForSeed,
+  spawnAgentPermissionMode,
   draftChat,
   draftCreateMode,
   draftCreateName,
@@ -394,8 +397,16 @@ export function useDroneCreationActions({
     };
     const seedAgent = isClone && cloneIncludeChats ? null : resolveAgentKeyToConfig(spawnAgentKey);
     const seedModel = isClone && cloneIncludeChats ? null : spawnModelForSeed;
+    const seedAgentPermissionMode: AgentPermissionMode = seedAgent ? spawnAgentPermissionMode : 'full-access';
     if (runtime === 'host' && seedAgent?.kind === 'custom') {
       setCreateError('Host runtime currently supports builtin agents only.');
+      return;
+    }
+    if (
+      seedAgentPermissionMode === 'read-only' &&
+      !(seedAgent?.kind === 'builtin' && (seedAgent.id === 'codex' || seedAgent.id === 'blip'))
+    ) {
+      setCreateError('Read-only mode is currently supported for Codex and Blip chats only.');
       return;
     }
     if (names.length === 0) {
@@ -444,6 +455,7 @@ export function useDroneCreationActions({
         runtime,
         agent: seedAgent,
         model: seedModel,
+        agentPermissionMode: seedAgentPermissionMode,
         prompt: seedPrompt,
         chatName: 'default',
         group,
@@ -474,6 +486,7 @@ export function useDroneCreationActions({
             seedChat: 'default',
             ...(seedAgent ? { seedAgent } : {}),
             ...(seedModel ? { seedModel } : {}),
+            ...(seedAgentPermissionMode === 'read-only' ? { seedAgentPermissionMode } : {}),
             ...(combinedSeedPrompt ? { seedPrompt: combinedSeedPrompt } : {}),
             ...(combinedSeedPrompt ? { seedSubmittedAt: new Date().toISOString() } : {}),
           };
@@ -498,6 +511,7 @@ export function useDroneCreationActions({
           runtime,
           agent: seedAgent,
           model: seedModel,
+          agentPermissionMode: seedAgentPermissionMode,
           prompt: seedPrompt,
           chatName: 'default',
           group,
@@ -596,6 +610,7 @@ export function useDroneCreationActions({
     setSelectedDrone,
     setSelectedDroneIds,
     spawnAgentKey,
+    spawnAgentPermissionMode,
     spawnModelForSeed,
     startupSeedMissingGraceMs,
   ]);
@@ -671,8 +686,16 @@ export function useDroneCreationActions({
       }
 
       const seedAgent = createWithoutChat ? null : resolveAgentKeyToConfig(spawnAgentKey);
+      const seedAgentPermissionMode: AgentPermissionMode = seedAgent ? spawnAgentPermissionMode : 'full-access';
       if (!runtimeSupportsCustomAgents(runtime) && seedAgent?.kind === 'custom') {
         setDraftCreateError('Host runtime currently supports builtin agents only.');
+        return false;
+      }
+      if (
+        seedAgentPermissionMode === 'read-only' &&
+        !(seedAgent?.kind === 'builtin' && (seedAgent.id === 'codex' || seedAgent.id === 'blip'))
+      ) {
+        setDraftCreateError('Read-only mode is currently supported for Codex and Blip chats only.');
         return false;
       }
       if (automationPrompt && automationId && seedAgent?.kind !== 'builtin') {
@@ -692,6 +715,7 @@ export function useDroneCreationActions({
             runtime,
             agent: seedAgent,
             model: seedModel,
+            agentPermissionMode: seedAgentPermissionMode,
             prompt: shouldSeedPromptViaCreate ? prompt : '',
             chatName: 'default',
             group,
@@ -714,6 +738,7 @@ export function useDroneCreationActions({
           },
           seedAgent,
           seedModel,
+          seedAgentPermissionMode,
           prompt: shouldSeedPromptViaCreate ? prompt : '',
         });
         const data = await requestJson<{ ok: true; id: string; name: string; phase: 'starting' }>(
@@ -734,6 +759,7 @@ export function useDroneCreationActions({
             runtime,
             agent: seedAgent,
             model: seedModel,
+            agentPermissionMode: seedAgentPermissionMode,
             prompt: shouldSeedPromptViaCreate ? prompt : '',
             chatName: 'default',
             group,
@@ -745,6 +771,7 @@ export function useDroneCreationActions({
             runtime,
             agent: seedAgent,
             model: seedModel,
+            agentPermissionMode: seedAgentPermissionMode,
             prompt,
             chatName: 'default',
             group,
@@ -905,6 +932,7 @@ export function useDroneCreationActions({
       setSelectedDrone,
       setSelectedDroneIds,
       spawnAgentKey,
+      spawnAgentPermissionMode,
       spawnModelForSeed,
       startupSeedMissingGraceMs,
       suggestAndRenameDraftDrone,

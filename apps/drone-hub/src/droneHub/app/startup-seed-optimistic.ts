@@ -1,5 +1,5 @@
 import type React from 'react';
-import type { ChatAgentConfig } from '../../domain';
+import type { AgentPermissionMode, ChatAgentConfig } from '../../domain';
 import type { StartupSeedState } from './app-types';
 import { makeId } from './helpers';
 
@@ -15,6 +15,7 @@ export type StartupSeedMutationOptions = {
   runtime?: 'container' | 'host';
   agent: ChatAgentConfig | null;
   model?: string | null;
+  agentPermissionMode?: AgentPermissionMode;
   prompt: string;
   chatName?: string;
   group?: string | null;
@@ -22,11 +23,13 @@ export type StartupSeedMutationOptions = {
 };
 
 function normalizeStartupSeedOptions(opts: StartupSeedMutationOptions) {
+  const agentPermissionMode: AgentPermissionMode = opts.agentPermissionMode === 'read-only' ? 'read-only' : 'full-access';
   return {
     runtime: (opts.runtime === 'host' ? 'host' : 'container') as 'container' | 'host',
     chatName: String(opts.chatName ?? 'default').trim() || 'default',
     agent: opts.agent ?? null,
     model: String(opts.model ?? '').trim() || null,
+    agentPermissionMode,
     prompt: String(opts.prompt ?? '').trim(),
     group: String(opts.group ?? '').trim() || null,
     repoPath: String(opts.repoPath ?? '').trim() || null,
@@ -56,6 +59,7 @@ export function addOptimisticStartupSeeds(
         chatName: normalized.chatName,
         agent: normalized.agent,
         model: normalized.model,
+        agentPermissionMode: normalized.agentPermissionMode,
         prompt: normalized.prompt,
         group: normalized.group,
         repoPath: normalized.repoPath,
@@ -119,6 +123,7 @@ export function replaceOptimisticStartupSeeds(
         chatName: normalized.chatName,
         agent: normalized.agent,
         model: normalized.model,
+        agentPermissionMode: normalized.agentPermissionMode,
         prompt: normalized.prompt,
         group: normalized.group,
         repoPath: normalized.repoPath,
