@@ -255,12 +255,14 @@ function useFleetDashboardState({
       return Boolean(drone.busy) || busyChats > 0;
     });
     const startingDrones = sidebarDrones.filter((drone) => isDroneStartingOrSeeding(drone.hubPhase));
+    const checkingDrones = sidebarDrones.filter((drone) => !isDroneStartingOrSeeding(drone.hubPhase) && drone.statusChecking === true);
     const attentionDrones = sidebarDrones.filter(
       (drone) =>
         !isDroneStartingOrSeeding(drone.hubPhase) &&
+        !drone.statusChecking &&
         (drone.hubPhase === 'error' || !drone.statusOk || Boolean(String(drone.statusError ?? '').trim())),
     );
-    const healthyDrones = Math.max(sidebarDrones.length - startingDrones.length - attentionDrones.length, 0);
+    const healthyDrones = Math.max(sidebarDrones.length - startingDrones.length - checkingDrones.length - attentionDrones.length, 0);
     const counts = {
       total: mergedQueueItems.length,
       queued: mergedQueueItems.filter((item) => item.derivedState === 'queued').length,
@@ -268,7 +270,7 @@ function useFleetDashboardState({
       failed: mergedQueueItems.filter((item) => item.derivedState === 'failed').length,
       stuck: mergedQueueItems.filter((item) => item.derivedState === 'stuck').length,
     };
-    return { busyDrones, startingDrones, attentionDrones, healthyDrones, counts, unreadItems };
+    return { busyDrones, startingDrones, checkingDrones, attentionDrones, healthyDrones, counts, unreadItems };
   }, [mergedQueueItems, sidebarDrones, unreadItems]);
 
   const visibleQueueItems = React.useMemo(() => {
@@ -477,7 +479,16 @@ export function FleetDashboard({
         </section>
 
         <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-          <SummaryCard label="Fleet size" value={String(sidebarDrones.length)} detail={`${dashboard.healthyDrones} healthy now`} tone="neutral" />
+          <SummaryCard
+            label="Fleet size"
+            value={String(sidebarDrones.length)}
+            detail={
+              dashboard.checkingDrones.length > 0
+                ? `${dashboard.healthyDrones} healthy, ${dashboard.checkingDrones.length} checking`
+                : `${dashboard.healthyDrones} healthy now`
+            }
+            tone="neutral"
+          />
           <SummaryCard label="Busy now" value={String(dashboard.busyDrones.length)} detail={`${dashboard.counts.running} running items`} tone="accent" />
           <SummaryCard label="Unread replies" value={String(dashboard.unreadItems.length)} detail="Chats waiting on you" tone="accent" />
           <SummaryCard label="Queued work" value={String(dashboard.counts.queued)} detail={`${dashboard.counts.failed} failed items`} tone="warning" />
@@ -893,14 +904,17 @@ function FleetDroneListCard({
             const lifecycleBusy = lifecycleBusyByDroneId[drone.id] ?? null;
             const runtimeSupportsLifecycle = drone.runtime !== 'host';
             const isStarting = isDroneStartingOrSeeding(drone.hubPhase);
-            const canStart = runtimeSupportsLifecycle && !isStarting && (!drone.statusOk || drone.hubPhase === 'error');
-            const canStop = runtimeSupportsLifecycle && !isStarting && (drone.statusOk || drone.busy || busyChats > 0);
-            const canRestart = runtimeSupportsLifecycle && !isStarting;
+            const statusChecking = drone.statusChecking === true;
+            const canStart = runtimeSupportsLifecycle && !isStarting && !statusChecking && (!drone.statusOk || drone.hubPhase === 'error');
+            const canStop = runtimeSupportsLifecycle && !isStarting && !statusChecking && (drone.statusOk || drone.busy || busyChats > 0);
+            const canRestart = runtimeSupportsLifecycle && !isStarting && !statusChecking;
             const detail =
               drone.hubPhase === 'error'
                 ? String(drone.hubMessage ?? drone.statusError ?? 'Error')
                 : isStarting
                   ? String(drone.hubMessage ?? (drone.hubPhase === 'seeding' ? 'Seeding workspace' : 'Starting drone'))
+                  : statusChecking
+                    ? 'Checking status'
                   : busyChats > 0
                     ? `${busyChats} active chat${busyChats === 1 ? '' : 's'}`
                     : drone.busy
@@ -921,7 +935,13 @@ function FleetDroneListCard({
                       <div className="mt-1 text-[12px] leading-5 text-[var(--muted)]">{detail}</div>
                     </div>
                     <div className="flex flex-col items-end gap-2">
-                      <StatusBadge ok={drone.statusOk} error={drone.statusError} hubPhase={drone.hubPhase} hubMessage={drone.hubMessage} />
+                      <StatusBadge
+                        ok={drone.statusOk}
+                        error={drone.statusError}
+                        checking={drone.statusChecking}
+                        hubPhase={drone.hubPhase}
+                        hubMessage={drone.hubMessage}
+                      />
                       <span className="text-[10px] uppercase tracking-wide text-[var(--muted-dim)]">{timeAgo(drone.createdAt)}</span>
                     </div>
                   </div>

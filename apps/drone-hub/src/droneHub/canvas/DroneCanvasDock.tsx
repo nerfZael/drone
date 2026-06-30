@@ -103,6 +103,7 @@ type MarqueeDragState = {
 type DroneCanvasIndicatorState = {
   statusOk: boolean;
   statusError: string | null;
+  statusChecking?: boolean;
   hubPhase?: DroneSummary['hubPhase'];
   hubMessage?: DroneSummary['hubMessage'];
   busy: boolean;
@@ -270,6 +271,18 @@ function renderNodeIndicator(state: DroneCanvasIndicatorState | null): React.Rea
     return (
       <span className="inline-flex items-center" title="Active">
         <TypingDots color="var(--yellow)" />
+      </span>
+    );
+  }
+
+  if (state.statusChecking) {
+    return (
+      <span
+        className="inline-flex items-center rounded-[4px] border border-[rgba(255,178,36,.35)] bg-[rgba(18,14,8,.96)] px-1.5 py-[1px] text-[8px] font-semibold uppercase tracking-[0.08em] text-[var(--yellow)] shadow-[0_4px_10px_rgba(0,0,0,.35)]"
+        style={{ fontFamily: 'var(--display)' }}
+        title={String(state.statusError ?? 'Checking status')}
+      >
+        Chk
       </span>
     );
   }

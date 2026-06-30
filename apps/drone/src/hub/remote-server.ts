@@ -174,6 +174,9 @@ async function readRawBody(req: http.IncomingMessage, maxBytes = 1024 * 1024): P
 export function sanitizeDroneSummary(raw: any): any {
   const repoPath = String(raw?.repoPath ?? '').trim();
   const repoAttached = raw?.repoAttached === true || repoPath.length > 0;
+  const statusOk = raw?.statusOk === true;
+  const statusChecking = raw?.statusChecking === true;
+  const rawStatusError = typeof raw?.statusError === 'string' && raw.statusError.trim() ? raw.statusError.trim() : null;
   return {
     id: String(raw?.id ?? ''),
     name: String(raw?.name ?? ''),
@@ -201,8 +204,9 @@ export function sanitizeDroneSummary(raw: any): any {
     cwd: undefined,
     containerPort: Number(raw?.containerPort ?? 7777) || 7777,
     hostPort: null,
-    statusOk: raw?.statusOk === true,
-    statusError: raw?.statusOk === true ? null : 'unavailable',
+    statusOk,
+    statusError: statusOk ? null : rawStatusError ?? (statusChecking ? 'checking status' : 'unavailable'),
+    statusChecking,
     chats: Array.isArray(raw?.chats) ? raw.chats.map(String) : [],
     busyChats: Array.isArray(raw?.busyChats) ? raw.busyChats.map(String) : [],
     hubPhase: raw?.hubPhase ?? null,

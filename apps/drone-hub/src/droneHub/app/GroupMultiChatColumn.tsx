@@ -672,6 +672,7 @@ export function GroupMultiChatColumn({
                 <StatusBadge
                   ok={drone.statusOk}
                   error={drone.statusError}
+                  checking={drone.statusChecking}
                   hubPhase={drone.hubPhase}
                   hubMessage={drone.hubMessage}
                 />
