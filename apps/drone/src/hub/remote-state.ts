@@ -23,6 +23,14 @@ export type RemoteHubDesiredState = {
   updatedAt: string;
 };
 
+export type RemoteNgrokState = {
+  version: 1;
+  pid: number;
+  port: number;
+  startedAt: string;
+  logPath: string;
+};
+
 export function remoteHubStatePath(): string {
   return path.join(droneRootPath(), 'remote-hub.json');
 }
@@ -37,6 +45,10 @@ export function remoteHubLogPath(): string {
 
 export function remoteNgrokLogPath(): string {
   return path.join(droneRootPath(), 'remote-ngrok.log');
+}
+
+export function remoteNgrokStatePath(): string {
+  return path.join(droneRootPath(), 'remote-ngrok.json');
 }
 
 export function normalizeRemotePublicUrl(raw: unknown): string | null {
@@ -122,6 +134,33 @@ export async function readRemoteHubDesiredState(): Promise<RemoteHubDesiredState
   }
 }
 
+export async function readRemoteNgrokState(): Promise<RemoteNgrokState | null> {
+  try {
+    const raw = await fs.readFile(remoteNgrokStatePath(), 'utf8');
+    const parsed = JSON.parse(raw) as Partial<RemoteNgrokState>;
+    if (!parsed || parsed.version !== 1) return null;
+    const pid = Number(parsed.pid);
+    const port = Number(parsed.port);
+    const startedAt =
+      typeof parsed.startedAt === 'string' ? parsed.startedAt : new Date().toISOString();
+    const logPath =
+      typeof parsed.logPath === 'string' && parsed.logPath.trim()
+        ? parsed.logPath.trim()
+        : remoteNgrokLogPath();
+    if (!Number.isFinite(pid) || pid <= 0 || !Number.isFinite(port) || port <= 0)
+      return null;
+    return {
+      version: 1,
+      pid: Math.floor(pid),
+      port: Math.floor(port),
+      startedAt,
+      logPath,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function writeRemoteHubState(state: RemoteHubState): Promise<void> {
   await fs.mkdir(path.dirname(remoteHubStatePath()), { recursive: true });
   await fs.writeFile(remoteHubStatePath(), JSON.stringify(state, null, 2), 'utf8');
@@ -138,8 +177,22 @@ export async function writeRemoteHubDesiredState(state: RemoteHubDesiredState): 
   }
 }
 
+export async function writeRemoteNgrokState(state: RemoteNgrokState): Promise<void> {
+  await fs.mkdir(path.dirname(remoteNgrokStatePath()), { recursive: true });
+  await fs.writeFile(remoteNgrokStatePath(), JSON.stringify(state, null, 2), 'utf8');
+  if (process.platform !== 'win32') {
+    await fs.chmod(remoteNgrokStatePath(), 0o600).catch(() => {});
+  }
+}
+
 export async function removeRemoteHubStateIfOwnedByPid(pid: number): Promise<void> {
   const state = await readRemoteHubState();
   if (!state || state.pid !== pid) return;
   await fs.rm(remoteHubStatePath(), { force: true }).catch(() => {});
+}
+
+export async function removeRemoteNgrokStateIfOwnedByPid(pid: number): Promise<void> {
+  const state = await readRemoteNgrokState();
+  if (!state || state.pid !== pid) return;
+  await fs.rm(remoteNgrokStatePath(), { force: true }).catch(() => {});
 }

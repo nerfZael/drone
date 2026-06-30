@@ -9,11 +9,14 @@ import {
   pidIsRunning,
   readRemoteHubDesiredState,
   readRemoteHubState,
+  readRemoteNgrokState,
   remoteHubLogPath,
   remoteNgrokLogPath,
   removeRemoteHubStateIfOwnedByPid,
+  removeRemoteNgrokStateIfOwnedByPid,
   type RemoteHubState,
   writeRemoteHubDesiredState,
+  writeRemoteNgrokState,
 } from './remote-state';
 
 type StartRemoteHubDetachedOptions = {
@@ -30,6 +33,11 @@ type EnsureRemoteHubDetachedOptions = {
   force?: boolean;
 };
 
+type StopRemoteHubDetachedOptions = {
+  disableDesired?: boolean;
+  stopNgrok?: boolean;
+};
+
 export type RedactedRemoteHubState = Omit<RemoteHubState, 'controlToken'> & {
   url: string;
 };
@@ -40,6 +48,12 @@ type EnsureRemoteHubDetachedResult = {
   alreadyRunning: boolean;
   state: RedactedRemoteHubState | null;
   error?: string;
+};
+
+type StopRemoteNgrokResult = {
+  stopped: boolean;
+  pid?: number;
+  reason?: string;
 };
 
 let ensureDesiredRemoteHubPromise: Promise<EnsureRemoteHubDetachedResult> | null = null;
@@ -179,7 +193,7 @@ export async function startRemoteHubDetached(options: StartRemoteHubDetachedOpti
   const current = await readRemoteHubState();
   if (current && pidIsRunning(current.pid)) {
     if (options.force) {
-      await stopRemoteHubDetached({ disableDesired: false });
+      await stopRemoteHubDetached({ disableDesired: false, stopNgrok: false });
     } else {
       await writeRemoteHubDesiredState({
         version: 1,
@@ -268,16 +282,19 @@ export async function stopRemoteHubDetached(): Promise<{
   stopped: boolean;
   pid?: number;
   reason?: string;
+  ngrok?: StopRemoteNgrokResult;
 }>;
-export async function stopRemoteHubDetached(options: { disableDesired?: boolean }): Promise<{
+export async function stopRemoteHubDetached(options: StopRemoteHubDetachedOptions): Promise<{
   stopped: boolean;
   pid?: number;
   reason?: string;
+  ngrok?: StopRemoteNgrokResult;
 }>;
-export async function stopRemoteHubDetached(options: { disableDesired?: boolean } = {}): Promise<{
+export async function stopRemoteHubDetached(options: StopRemoteHubDetachedOptions = {}): Promise<{
   stopped: boolean;
   pid?: number;
   reason?: string;
+  ngrok?: StopRemoteNgrokResult;
 }> {
   const current = await readRemoteHubState();
   if (options.disableDesired !== false) {
@@ -291,12 +308,16 @@ export async function stopRemoteHubDetached(options: { disableDesired?: boolean 
     });
   }
   const state = await readRemoteHubState();
-  if (!state) return { stopped: false, reason: 'not running' };
+  if (!state) {
+    const ngrok = options.stopNgrok === false ? null : await stopRemoteNgrokTunnel();
+    return { stopped: false, reason: 'not running', ...(ngrok?.stopped ? { ngrok } : {}) };
+  }
   if (pidIsRunning(state.pid)) {
     await stopProcess(state.pid);
   }
   await removeRemoteHubStateIfOwnedByPid(state.pid);
-  return { stopped: true, pid: state.pid };
+  const ngrok = options.stopNgrok === false ? null : await stopRemoteNgrokTunnel({ port: state.port });
+  return { stopped: true, pid: state.pid, ...(ngrok?.stopped ? { ngrok } : {}) };
 }
 
 export async function ensureDesiredRemoteHubDetached(
@@ -372,9 +393,20 @@ export async function ensureDesiredRemoteHubDetached(
 export async function startRemoteNgrokTunnel(portRaw: unknown): Promise<{
   ok: true;
   logPath: string;
+  pid?: number;
+  alreadyRunning?: boolean;
 }> {
   const port = normalizeRemotePort(portRaw);
   if (port <= 0) throw new Error('ngrok requires a fixed local port');
+  const current = await readRemoteNgrokState();
+  if (current && current.port === port && pidIsRunning(current.pid)) {
+    return { ok: true, logPath: current.logPath, pid: current.pid, alreadyRunning: true };
+  }
+  if (current && pidIsRunning(current.pid)) {
+    await stopRemoteNgrokTunnel();
+  } else if (current) {
+    await removeRemoteNgrokStateIfOwnedByPid(current.pid);
+  }
   const logPath = remoteNgrokLogPath();
   await fs.mkdir(path.dirname(logPath), { recursive: true });
   const logHandle = await fs.open(logPath, 'a');
@@ -391,8 +423,35 @@ export async function startRemoteNgrokTunnel(portRaw: unknown): Promise<{
     child.unref();
     await sleep(250);
     if (spawnError) throw spawnError;
-    return { ok: true, logPath };
+    if (!child.pid) throw new Error('ngrok did not report a pid');
+    await writeRemoteNgrokState({
+      version: 1,
+      pid: child.pid,
+      port,
+      startedAt: new Date().toISOString(),
+      logPath,
+    });
+    return { ok: true, logPath, pid: child.pid };
   } finally {
     await logHandle.close().catch(() => {});
   }
+}
+
+export async function stopRemoteNgrokTunnel(options: { port?: number | string } = {}): Promise<StopRemoteNgrokResult> {
+  const state = await readRemoteNgrokState();
+  if (!state) return { stopped: false, reason: 'not running' };
+  const requestedPort =
+    options.port == null || String(options.port).trim() === ''
+      ? null
+      : normalizeRemotePort(options.port);
+  if (requestedPort != null && state.port !== requestedPort) {
+    return { stopped: false, reason: 'different port' };
+  }
+  if (pidIsRunning(state.pid)) {
+    await stopProcess(state.pid);
+    await removeRemoteNgrokStateIfOwnedByPid(state.pid);
+    return { stopped: true, pid: state.pid };
+  }
+  await removeRemoteNgrokStateIfOwnedByPid(state.pid);
+  return { stopped: false, pid: state.pid, reason: 'stale state file' };
 }
