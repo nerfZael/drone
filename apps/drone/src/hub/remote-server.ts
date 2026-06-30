@@ -9,6 +9,7 @@ import { URL } from 'node:url';
 import QRCode from 'qrcode';
 
 import { GROQ_TRANSCRIPTION_MAX_BYTES } from './groq-transcription';
+import { resolveDroneOrPendingForReadRef } from './drone-lifecycle-service';
 import { RemoteAuthStore } from './remote-auth';
 import { normalizeRemotePublicUrl } from './remote-state';
 
@@ -30,6 +31,7 @@ type RemoteHubServer = {
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
 const DRONE_VALIDATION_CACHE_TTL_MS = 5_000;
+const REMOTE_SLOW_REQUEST_MS = 250;
 const HOP_BY_HOP_HEADERS = new Set([
   'connection',
   'keep-alive',
@@ -42,6 +44,115 @@ const HOP_BY_HOP_HEADERS = new Set([
 ]);
 const PROXY_RESPONSE_HEADER_BLOCKLIST = new Set([...HOP_BY_HOP_HEADERS, 'set-cookie']);
 const DRONE_VALIDATION_CACHE = new Map<string, { expiresAt: number; drone: any | null }>();
+const DRONE_VALIDATION_IN_FLIGHT = new Map<string, Promise<any | null>>();
+
+type RemoteRequestTimer = ReturnType<typeof createRemoteRequestTimer>;
+
+function remoteLog(level: 'info' | 'warn' | 'error', message: string, meta?: Record<string, unknown>): void {
+  const at = new Date().toISOString();
+  const payload = meta && Object.keys(meta).length > 0 ? { at, ...meta } : { at };
+  if (level === 'error') {
+    console.error(`[RemoteHub] ${message}`, payload);
+    return;
+  }
+  if (level === 'warn') {
+    console.warn(`[RemoteHub] ${message}`, payload);
+    return;
+  }
+  console.log(`[RemoteHub] ${message}`, payload);
+}
+
+function createRemoteRequestTimer() {
+  const start = process.hrtime.bigint();
+  let last = start;
+  const items: Array<{ name: string; dur: number }> = [];
+  return {
+    mark(name: string) {
+      const now = process.hrtime.bigint();
+      items.push({ name, dur: Number(now - last) / 1_000_000 });
+      last = now;
+    },
+    total(): number {
+      return Number(process.hrtime.bigint() - start) / 1_000_000;
+    },
+    timings(): Record<string, number> {
+      const out: Record<string, number> = {};
+      for (const item of items) out[item.name] = Math.round(item.dur);
+      out.total = Math.round(this.total());
+      return out;
+    },
+    serverTimingValue(): string {
+      const total = this.total();
+      return [
+        ...items.map((item) => `remote-${item.name};dur=${Math.max(0, item.dur).toFixed(1)}`),
+        `remote-total;dur=${Math.max(0, total).toFixed(1)}`,
+      ].join(', ');
+    },
+  };
+}
+
+function appendServerTiming(res: http.ServerResponse, timer: RemoteRequestTimer): void {
+  if (res.headersSent) return;
+  const current = res.getHeader('server-timing');
+  const remoteTiming = timer.serverTimingValue();
+  if (!current) {
+    res.setHeader('server-timing', remoteTiming);
+    return;
+  }
+  const values = Array.isArray(current) ? current.map(String).join(', ') : String(current);
+  res.setHeader('server-timing', `${values}, ${remoteTiming}`);
+}
+
+function remoteRouteLabel(method: string, pathname: string): { label: string; chatLoad: boolean } | null {
+  const parts = splitPathname(pathname);
+  if (method === 'GET' && pathname === '/api/drones') return { label: 'drone list', chatLoad: true };
+  if (parts.length < 4 || parts[0] !== 'api' || parts[1] !== 'drones') return null;
+  if (method === 'GET' && parts.length === 4 && parts[3] === 'chats') return { label: 'chat list', chatLoad: true };
+  if (method === 'GET' && parts.length === 5 && parts[3] === 'chats') return { label: 'chat metadata', chatLoad: true };
+  if (method === 'GET' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'state') return { label: 'chat state', chatLoad: true };
+  if (method === 'GET' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'pending') return { label: 'chat pending', chatLoad: true };
+  if (method === 'GET' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'transcript') return { label: 'chat transcript', chatLoad: true };
+  if (method === 'POST' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'prompt') return { label: 'chat prompt', chatLoad: false };
+  if (method === 'POST' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'stop') return { label: 'chat stop', chatLoad: false };
+  return null;
+}
+
+function logRemoteProxyRequest(opts: {
+  method: string;
+  pathname: string;
+  status: number;
+  timer: RemoteRequestTimer;
+  requestId: string;
+  upstreamStatus?: number | null;
+  upstreamServerTiming?: string | null;
+  bodyBytes?: number | null;
+  error?: string | null;
+}): void {
+  const route = remoteRouteLabel(opts.method, opts.pathname);
+  const durationMs = Math.round(opts.timer.total());
+  if (
+    opts.pathname === '/api/drones/chat-events' &&
+    opts.status < 500 &&
+    opts.error &&
+    /premature close|aborted/i.test(opts.error)
+  ) {
+    return;
+  }
+  const shouldLog = Boolean(route?.chatLoad) || durationMs >= REMOTE_SLOW_REQUEST_MS || opts.status >= 500;
+  if (!shouldLog) return;
+  remoteLog(durationMs >= REMOTE_SLOW_REQUEST_MS || opts.status >= 500 ? 'warn' : 'info', `proxy ${route?.label ?? 'api'} request`, {
+    requestId: opts.requestId,
+    method: opts.method,
+    path: opts.pathname,
+    status: opts.status,
+    upstreamStatus: opts.upstreamStatus ?? null,
+    upstreamServerTiming: opts.upstreamServerTiming ?? null,
+    durationMs,
+    timings: opts.timer.timings(),
+    bodyBytes: opts.bodyBytes ?? null,
+    ...(opts.error ? { error: opts.error } : {}),
+  });
+}
 
 function json(res: http.ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { ...JSON_HEADERS, 'cache-control': 'no-store' });
@@ -159,15 +270,33 @@ async function fetchJsonFromHub<T>(opts: StartRemoteHubServerOptions, pathname: 
   return data as T;
 }
 
-async function resolveContainerDrone(opts: StartRemoteHubServerOptions, droneId: string): Promise<any | null> {
-  const cacheKey = `${opts.hubBaseUrl}\u0000${droneId}`;
+export async function resolveContainerDroneForRemoteRequest(opts: { hubBaseUrl: string }, droneId: string): Promise<any | null> {
+  const normalizedDroneId = String(droneId ?? '').trim();
+  if (!normalizedDroneId) return null;
+  const cacheKey = `${String(opts.hubBaseUrl ?? '').trim()}\u0000${normalizedDroneId}`;
   const cached = DRONE_VALIDATION_CACHE.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.drone;
-  const data = await fetchJsonFromHub<{ ok: true; drones: any[] }>(opts, '/api/drones');
-  const drones = Array.isArray(data?.drones) ? data.drones : [];
-  const drone = drones.find((item) => String(item?.id ?? '') === droneId && isContainerDrone(item)) ?? null;
-  DRONE_VALIDATION_CACHE.set(cacheKey, { expiresAt: Date.now() + DRONE_VALIDATION_CACHE_TTL_MS, drone });
-  return drone;
+  const inFlight = DRONE_VALIDATION_IN_FLIGHT.get(cacheKey);
+  if (inFlight) return await inFlight;
+
+  const promise = (async () => {
+    const resolved = await resolveDroneOrPendingForReadRef(normalizedDroneId);
+    const entry = resolved?.kind === 'real' ? resolved.drone : resolved?.kind === 'pending' ? resolved.pending : null;
+    const stableId = String(entry?.id ?? resolved?.id ?? '').trim();
+    if (!resolved || stableId !== normalizedDroneId) {
+      DRONE_VALIDATION_CACHE.set(cacheKey, { expiresAt: Date.now() + DRONE_VALIDATION_CACHE_TTL_MS, drone: null });
+      return null;
+    }
+    const drone = entry && isContainerDrone(entry) ? entry : null;
+    DRONE_VALIDATION_CACHE.set(cacheKey, { expiresAt: Date.now() + DRONE_VALIDATION_CACHE_TTL_MS, drone });
+    return drone;
+  })();
+  DRONE_VALIDATION_IN_FLIGHT.set(cacheKey, promise);
+  try {
+    return await promise;
+  } finally {
+    DRONE_VALIDATION_IN_FLIGHT.delete(cacheKey);
+  }
 }
 
 export function routeAllowed(method: string, pathname: string): boolean {
@@ -193,12 +322,23 @@ export function routeAllowed(method: string, pathname: string): boolean {
   return false;
 }
 
-async function proxyAllowedRequest(opts: StartRemoteHubServerOptions, req: http.IncomingMessage, res: http.ServerResponse, pathname: string): Promise<void> {
+async function proxyAllowedRequest(
+  opts: StartRemoteHubServerOptions,
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  pathname: string,
+  timer: RemoteRequestTimer,
+  requestId: string,
+): Promise<void> {
   const method = String(req.method ?? 'GET').toUpperCase();
   if (!routeAllowed(method, pathname)) {
+    timer.mark('allow');
+    appendServerTiming(res, timer);
+    logRemoteProxyRequest({ method, pathname, status: 404, timer, requestId, error: 'route not allowed' });
     json(res, 404, { ok: false, error: 'not available in remote Hub' });
     return;
   }
+  timer.mark('allow');
 
   const parts = splitPathname(pathname);
   if (
@@ -208,8 +348,11 @@ async function proxyAllowedRequest(opts: StartRemoteHubServerOptions, req: http.
     pathname !== '/api/drones/chat-events' &&
     pathname !== '/api/drones/name-from-message'
   ) {
-    const drone = await resolveContainerDrone(opts, parts[2]);
+    const drone = await resolveContainerDroneForRemoteRequest(opts, parts[2]);
+    timer.mark('validate-drone');
     if (!drone) {
+      appendServerTiming(res, timer);
+      logRemoteProxyRequest({ method, pathname, status: 404, timer, requestId, error: 'unknown container drone' });
       json(res, 404, { ok: false, error: 'unknown container drone' });
       return;
     }
@@ -217,6 +360,9 @@ async function proxyAllowedRequest(opts: StartRemoteHubServerOptions, req: http.
 
   if (method === 'GET' && pathname === '/api/drones') {
     const data = await fetchJsonFromHub<{ ok: true; drones: any[] }>(opts, '/api/drones');
+    timer.mark('upstream');
+    appendServerTiming(res, timer);
+    logRemoteProxyRequest({ method, pathname, status: 200, upstreamStatus: 200, timer, requestId });
     json(res, 200, { ok: true, drones: (data.drones ?? []).filter(isContainerDrone).map(sanitizeDroneSummary) });
     return;
   }
@@ -228,6 +374,7 @@ async function proxyAllowedRequest(opts: StartRemoteHubServerOptions, req: http.
           req,
           pathname === '/api/audio/transcriptions' ? GROQ_TRANSCRIPTION_MAX_BYTES : 1024 * 1024,
         );
+  if (body) timer.mark('body');
   const target = new URL(`${pathname}${new URL(req.url ?? '/', 'http://remote.local').search}`, opts.hubBaseUrl);
   const response = await fetch(target.toString(), {
     method,
@@ -238,18 +385,55 @@ async function proxyAllowedRequest(opts: StartRemoteHubServerOptions, req: http.
     },
     body: body as any,
   });
+  timer.mark('upstream');
 
   res.statusCode = response.status;
+  const upstreamServerTiming = response.headers.get('server-timing');
   response.headers.forEach((value, key) => {
     if (!PROXY_RESPONSE_HEADER_BLOCKLIST.has(key.toLowerCase())) res.setHeader(key, value);
   });
+  timer.mark('headers');
+  appendServerTiming(res, timer);
   if (!response.body) {
+    logRemoteProxyRequest({
+      method,
+      pathname,
+      status: response.status,
+      upstreamStatus: response.status,
+      upstreamServerTiming,
+      timer,
+      requestId,
+      bodyBytes: body?.byteLength ?? null,
+    });
     res.end();
     return;
   }
   try {
     await pipeline(Readable.fromWeb(response.body as any), res);
+    timer.mark('stream');
+    logRemoteProxyRequest({
+      method,
+      pathname,
+      status: response.status,
+      upstreamStatus: response.status,
+      upstreamServerTiming,
+      timer,
+      requestId,
+      bodyBytes: body?.byteLength ?? null,
+    });
   } catch (error: any) {
+    timer.mark('stream');
+    logRemoteProxyRequest({
+      method,
+      pathname,
+      status: response.status || 500,
+      upstreamStatus: response.status,
+      upstreamServerTiming,
+      timer,
+      requestId,
+      bodyBytes: body?.byteLength ?? null,
+      error: error?.message ?? String(error),
+    });
     if (!res.destroyed) res.destroy(error);
   }
 }
@@ -290,6 +474,9 @@ export async function startRemoteHubServer(opts: StartRemoteHubServerOptions): P
   if (!String(opts.controlToken ?? '').trim()) throw new Error('missing remote control token');
 
   const server = http.createServer(async (req, res) => {
+    const requestId = crypto.randomBytes(4).toString('hex');
+    const timer = createRemoteRequestTimer();
+    res.setHeader('x-request-id', requestId);
     try {
       const method = String(req.method ?? 'GET').toUpperCase();
       const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'remote.local'}`);
@@ -375,21 +562,33 @@ export async function startRemoteHubServer(opts: StartRemoteHubServerOptions): P
       if (pathname.startsWith('/api/')) {
         const session = auth.resolveSession(req);
         if (!session) {
+          timer.mark('auth');
+          appendServerTiming(res, timer);
+          logRemoteProxyRequest({ method, pathname, status: 401, timer, requestId, error: 'pairing required' });
           json(res, 401, { ok: false, error: 'pairing required' });
           return;
         }
         if (!auth.requireCsrf(req, session)) {
+          timer.mark('auth');
+          appendServerTiming(res, timer);
+          logRemoteProxyRequest({ method, pathname, status: 403, timer, requestId, error: 'invalid csrf token' });
           json(res, 403, { ok: false, error: 'invalid csrf token' });
           return;
         }
-        await proxyAllowedRequest({ ...opts, hubBaseUrl }, req, res, pathname);
+        timer.mark('auth');
+        await proxyAllowedRequest({ ...opts, hubBaseUrl }, req, res, pathname, timer, requestId);
         return;
       }
 
       await serveStatic(opts, res, pathname);
     } catch (error: any) {
-      const requestId = crypto.randomBytes(4).toString('hex');
-      console.warn('[RemoteHub] request failed', { requestId, error: error?.message ?? String(error) });
+      timer.mark('error');
+      remoteLog('error', 'request failed', { requestId, durationMs: Math.round(timer.total()), error: error?.message ?? String(error) });
+      if (res.headersSent) {
+        if (!res.destroyed) res.destroy(error);
+        return;
+      }
+      appendServerTiming(res, timer);
       json(res, 500, { ok: false, error: error?.message ?? String(error), requestId });
     }
   });

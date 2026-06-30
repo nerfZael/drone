@@ -4,8 +4,15 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { resetDroneRootDirCache } from '../src/host/paths';
+import { updateRegistry } from '../src/host/registry';
 import { RemoteAuthStore } from '../src/hub/remote-auth';
-import { routeAllowed, sanitizeDroneSummary, shouldServeRemoteHtmlFallback } from '../src/hub/remote-server';
+import {
+  resolveContainerDroneForRemoteRequest,
+  routeAllowed,
+  sanitizeDroneSummary,
+  shouldServeRemoteHtmlFallback,
+} from '../src/hub/remote-server';
+import { withTempDroneDataDir } from './test-helpers';
 
 describe('remote Hub server', () => {
   test('preserves repo metadata for remote sidebar grouping', () => {
@@ -59,6 +66,68 @@ describe('remote Hub server', () => {
 
   test('allows remote chat state reads', () => {
     expect(routeAllowed('GET', '/api/drones/drone-a/chats/default/state')).toBe(true);
+  });
+
+  test('validates remote per-drone access from the registry without requiring the full drone list', async () => {
+    await withTempDroneDataDir('drone-remote-validation-test-', async () => {
+      const now = new Date().toISOString();
+      await updateRegistry((reg: any) => {
+        reg.drones = {
+          container: {
+            id: 'container-id',
+            name: 'container',
+            runtime: 'container',
+            containerName: 'drone-container',
+            containerPort: 7777,
+            token: 'token-container',
+            repoPath: '',
+            createdAt: now,
+            chats: {},
+          },
+          host: {
+            id: 'host-id',
+            name: 'host',
+            runtime: 'host',
+            containerName: 'host-drone',
+            containerPort: 7777,
+            token: 'token-host',
+            repoPath: '',
+            createdAt: now,
+            chats: {},
+          },
+        };
+        reg.pending = {
+          pendingContainer: {
+            id: 'pending-container-id',
+            name: 'pending container',
+            runtime: 'container',
+            repoPath: '',
+            containerPort: 7777,
+            build: false,
+            createdAt: now,
+            phase: 'starting',
+          },
+          pendingHost: {
+            id: 'pending-host-id',
+            name: 'pending host',
+            runtime: 'host',
+            repoPath: '',
+            containerPort: 7777,
+            build: false,
+            createdAt: now,
+            phase: 'starting',
+          },
+        };
+      });
+
+      const opts = { hubBaseUrl: 'http://remote-validation-test.local' };
+      expect(await resolveContainerDroneForRemoteRequest(opts, 'container-id')).toMatchObject({ id: 'container-id' });
+      expect(await resolveContainerDroneForRemoteRequest(opts, 'pending-container-id')).toMatchObject({ id: 'pending-container-id' });
+      expect(await resolveContainerDroneForRemoteRequest(opts, 'container')).toBeNull();
+      expect(await resolveContainerDroneForRemoteRequest(opts, 'host-id')).toBeNull();
+      expect(await resolveContainerDroneForRemoteRequest(opts, 'pending-host-id')).toBeNull();
+      expect(await resolveContainerDroneForRemoteRequest(opts, 'missing-id')).toBeNull();
+    });
   });
 
   test('marks consumed pairing tokens inactive', () => {

@@ -26645,60 +26645,117 @@ export async function startDroneHubApiServer(opts: {
       // GET /api/drones/:id/chats
       if (method === 'GET' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'drones' && parts[3] === 'chats') {
         const droneRef = decodeURIComponent(parts[2]);
-        const resolved = await resolveDroneOrPendingForReadRef(droneRef);
-        if (!resolved) {
-          json(res, 404, { ok: false, error: `unknown drone: ${droneRef}` });
+        const timer = createRequestTimer();
+        try {
+          const resolved = await resolveDroneOrPendingForReadRef(droneRef);
+          timer.mark('resolve');
+          if (!resolved) {
+            timer.setHeader(res);
+            logSlowHubRequest('chat list', timer, { droneRef, status: 404 });
+            json(res, 404, { ok: false, error: `unknown drone: ${droneRef}` });
+            return;
+          }
+          const droneId = resolved.id;
+          if (resolved.kind === 'pending') {
+            const droneName = String(resolved.pending?.name ?? droneRef).trim() || droneRef;
+            const startupChats = [
+              ...new Set(normalizePendingStartupPrompts((resolved.pending as any)?.startupQueuedPrompts).map((item) => item.chatName)),
+            ].filter(Boolean);
+            timer.mark('format');
+            timer.setHeader(res);
+            logSlowHubRequest('chat list', timer, { droneId, kind: 'pending', chatCount: startupChats.length || 1, status: 200 });
+            json(res, 200, { ok: true, id: droneId, name: droneName, chats: startupChats.length > 0 ? startupChats : ['default'] });
+            return;
+          }
+          const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+          const importedChats = importResolvedDroneChatsToStore(droneId, resolved.drone);
+          timer.mark('import');
+          const storeChats = listChatsFromStore({ droneId });
+          timer.mark('store');
+          const chats = storeChats.available ? storeChats.chats : importedChats;
+          timer.mark('format');
+          timer.setHeader(res);
+          logSlowHubRequest('chat list', timer, { droneId, chatCount: chats.length, storeAvailable: storeChats.available, status: 200 });
+          json(res, 200, { ok: true, id: droneId, name: droneName, chats });
+          return;
+        } catch (e: any) {
+          timer.setHeader(res);
+          logSlowHubRequest('chat list', timer, { droneRef, status: 500, error: e?.message ?? String(e) });
+          json(res, 500, { ok: false, error: e?.message ?? String(e) });
           return;
         }
-        const droneId = resolved.id;
-        if (resolved.kind === 'pending') {
-          const droneName = String(resolved.pending?.name ?? droneRef).trim() || droneRef;
-          const startupChats = [
-            ...new Set(normalizePendingStartupPrompts((resolved.pending as any)?.startupQueuedPrompts).map((item) => item.chatName)),
-          ].filter(Boolean);
-          json(res, 200, { ok: true, id: droneId, name: droneName, chats: startupChats.length > 0 ? startupChats : ['default'] });
-          return;
-        }
-        const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
-        const importedChats = importResolvedDroneChatsToStore(droneId, resolved.drone);
-        const storeChats = listChatsFromStore({ droneId });
-        const chats = storeChats.available ? storeChats.chats : importedChats;
-        json(res, 200, { ok: true, id: droneId, name: droneName, chats });
-        return;
       }
 
       // GET /api/drones/:id/chats/:chat
       if (method === 'GET' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'drones' && parts[3] === 'chats') {
         const droneRef = decodeURIComponent(parts[2]);
         const chatName = decodeURIComponent(parts[4]);
-        const resolved = await resolveDroneOrRespond(res, droneRef);
-        if (!resolved) return;
-        const droneId = resolved.id;
-        const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
-        const c = (resolved.drone as any)?.chats?.[chatName];
-        if (!c) {
-          json(res, 404, { ok: false, error: `unknown chat: ${chatName}` });
+        const timer = createRequestTimer();
+        try {
+          let rejectStatus = 404;
+          let rejectError = `unknown drone: ${droneRef}`;
+          const resolved = await resolveDroneFromRegistryRef(droneRef, {
+            onStillStarting: () => {
+              rejectStatus = 409;
+              rejectError = `drone "${droneRef}" is still starting`;
+            },
+            onUnknown: () => {
+              rejectStatus = 404;
+              rejectError = `unknown drone: ${droneRef}`;
+            },
+          });
+          timer.mark('resolve');
+          if (!resolved) {
+            timer.setHeader(res);
+            logSlowHubRequest('chat metadata', timer, { droneRef, chatName, status: rejectStatus });
+            json(res, rejectStatus, { ok: false, error: rejectError });
+            return;
+          }
+          const droneId = resolved.id;
+          const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+          const c = (resolved.drone as any)?.chats?.[chatName];
+          if (!c) {
+            timer.setHeader(res);
+            logSlowHubRequest('chat metadata', timer, { droneId, chatName, status: 404 });
+            json(res, 404, { ok: false, error: `unknown chat: ${chatName}` });
+            return;
+          }
+          const chatEntry = importResolvedChatToStore(droneId, chatName, c) ?? c;
+          timer.mark('import');
+          const agent = inferChatAgent(chatEntry as any, resolved.drone);
+          timer.mark('format');
+          timer.setHeader(res);
+          logSlowHubRequest('chat metadata', timer, {
+            droneId,
+            chatName,
+            turnCount: Array.isArray((chatEntry as any).turns) ? (chatEntry as any).turns.length : 0,
+            status: 200,
+          });
+          json(res, 200, {
+            ok: true,
+            id: droneId,
+            name: droneName,
+            chat: chatName,
+            agent,
+            model: (chatEntry as any).model ?? null,
+            agentPermissionMode: normalizeAgentPermissionMode((chatEntry as any).agentPermissionMode),
+            agentMessageAutoContinueEnabled: (chatEntry as any).agentMessageAutoContinueEnabled === true,
+            agentSuggestionEnabled: (chatEntry as any).agentSuggestionEnabled === true,
+            dockerSnapshotAfterAgentMessageEnabled: dockerSnapshotAfterAgentMessageEnabledForChat(resolved.drone, chatEntry),
+            blipClonesEnabled: (chatEntry as any).blipClonesEnabled !== false,
+            turns: (chatEntry as any).turns ?? [],
+            sessionName: hubChatSessionName(chatName || 'default'),
+            createdAt: chatEntry.createdAt,
+          });
+          return;
+        } catch (e: any) {
+          const msg = e?.message ?? String(e);
+          const code = /still starting/i.test(msg) ? 409 : /unknown drone|unknown chat/i.test(msg) ? 404 : 500;
+          timer.setHeader(res);
+          logSlowHubRequest('chat metadata', timer, { droneRef, chatName, status: code, error: msg });
+          json(res, code, { ok: false, error: msg });
           return;
         }
-        const chatEntry = importResolvedChatToStore(droneId, chatName, c) ?? c;
-        const agent = inferChatAgent(chatEntry as any, resolved.drone);
-        json(res, 200, {
-          ok: true,
-          id: droneId,
-          name: droneName,
-          chat: chatName,
-          agent,
-          model: (chatEntry as any).model ?? null,
-          agentPermissionMode: normalizeAgentPermissionMode((chatEntry as any).agentPermissionMode),
-          agentMessageAutoContinueEnabled: (chatEntry as any).agentMessageAutoContinueEnabled === true,
-          agentSuggestionEnabled: (chatEntry as any).agentSuggestionEnabled === true,
-          dockerSnapshotAfterAgentMessageEnabled: dockerSnapshotAfterAgentMessageEnabledForChat(resolved.drone, chatEntry),
-          blipClonesEnabled: (chatEntry as any).blipClonesEnabled !== false,
-          turns: (chatEntry as any).turns ?? [],
-          sessionName: hubChatSessionName(chatName || 'default'),
-          createdAt: chatEntry.createdAt,
-        });
-        return;
       }
 
       // POST /api/drones/:id/chats/:chat/config
