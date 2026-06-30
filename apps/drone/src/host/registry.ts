@@ -85,6 +85,7 @@ type DroneRegistryChatEntry = {
   chatId?: string;
   model?: string;
   agent?: DroneRegistryChatAgentConfig;
+  agentPermissionMode?: 'full-access' | 'read-only';
   agentMessageAutoContinueEnabled?: boolean;
   agentMessageAutoContinueEnabledAt?: string;
   agentSuggestionEnabled?: boolean;

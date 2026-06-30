@@ -125,6 +125,79 @@ describeSocketSuite('create runtime api', () => {
     });
   });
 
+  test('single create persists supported read-only seed agent permission mode', async () => {
+    const resp = await apiFetch('/api/drones', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'seeded-read-only-agent',
+        runtime: 'container',
+        seedAgent: { kind: 'builtin', id: 'codex' },
+        seedAgentPermissionMode: 'read-only',
+      }),
+    });
+    expect(resp.r.status).toBe(202);
+    expect(resp.data?.ok).toBe(true);
+
+    const droneId = String(resp.data?.id ?? '').trim();
+    const regAny: any = await loadRegistry();
+    expect(regAny?.pending?.[droneId]?.seed).toMatchObject({
+      chatName: 'default',
+      agent: { kind: 'builtin', id: 'codex' },
+      agentPermissionMode: 'read-only',
+    });
+  });
+
+  test('single create rejects read-only seed permission without a supported seed agent', async () => {
+    const resp = await apiFetch('/api/drones', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'seeded-read-only-agent-invalid',
+        runtime: 'container',
+        seedAgentPermissionMode: 'read-only',
+      }),
+    });
+    expect(resp.r.status).toBe(400);
+    expect(String(resp.data?.error ?? '')).toContain('requires a Codex or Blip seed agent');
+  });
+
+  test('batch create persists and rejects read-only seed agent permission mode per item', async () => {
+    const resp = await apiFetch('/api/drones/batch', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        drones: [
+          {
+            name: 'batch-read-only-agent',
+            runtime: 'container',
+            seedAgent: { kind: 'builtin', id: 'blip' },
+            seedAgentPermissionMode: 'read-only',
+          },
+          {
+            name: 'batch-read-only-agent-invalid',
+            runtime: 'container',
+            seedAgent: { kind: 'builtin', id: 'cursor' },
+            seedAgentPermissionMode: 'read-only',
+          },
+        ],
+      }),
+    });
+    expect(resp.r.status).toBe(202);
+    expect(resp.data?.ok).toBe(true);
+    expect(resp.data?.accepted).toHaveLength(1);
+    expect(resp.data?.rejected).toHaveLength(1);
+    expect(String(resp.data?.rejected?.[0]?.error ?? '')).toContain('Codex and Blip');
+
+    const droneId = String(resp.data?.accepted?.[0]?.id ?? '').trim();
+    const regAny: any = await loadRegistry();
+    expect(regAny?.pending?.[droneId]?.seed).toMatchObject({
+      chatName: 'default',
+      agent: { kind: 'builtin', id: 'blip' },
+      agentPermissionMode: 'read-only',
+    });
+  });
+
   test('single create honors and validates supplied seed prompt ids', async () => {
     const resp = await apiFetch('/api/drones', {
       method: 'POST',

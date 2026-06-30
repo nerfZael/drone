@@ -138,12 +138,21 @@ function normalizeCreateSeedAgent(raw: unknown): SeedAgentBody | undefined {
   throw new ValidationError('agent.kind must be "builtin" or "custom"');
 }
 
-function resolveCreateSeedFields(input: CreateDroneBatchItem): { seedAgent?: SeedAgentBody; seedModel?: string } {
+function normalizeCreateAgentPermissionMode(raw: unknown): 'full-access' | 'read-only' | undefined {
+  const value = String(raw ?? '').trim();
+  if (!value) return undefined;
+  if (value === 'full-access' || value === 'read-only') return value;
+  throw new ValidationError('agentPermissionMode must be "full-access" or "read-only"');
+}
+
+function resolveCreateSeedFields(input: CreateDroneBatchItem): { seedAgent?: SeedAgentBody; seedModel?: string; seedAgentPermissionMode?: 'full-access' | 'read-only' } {
   const seedAgent = normalizeCreateSeedAgent(input.agent);
   const seedModel = String(input.model ?? '').trim() || undefined;
+  const seedAgentPermissionMode = normalizeCreateAgentPermissionMode(input.agentPermissionMode);
   return {
     ...(seedAgent ? { seedAgent } : {}),
     ...(seedModel ? { seedModel } : {}),
+    ...(seedAgentPermissionMode ? { seedAgentPermissionMode } : {}),
   };
 }
 
@@ -276,13 +285,14 @@ async function resolveDeleteMode(options: HubTransportOptions, requestOptions?: 
 export function hubTransport(options: HubTransportOptions): DroneTransport {
   return {
     async createDrone(input: CreateDroneBatchItem, requestOptions?: RequestOptions): Promise<DroneRecord> {
-      const { seedAgent, seedModel } = resolveCreateSeedFields(input);
+      const { seedAgent, seedModel, seedAgentPermissionMode } = resolveCreateSeedFields(input);
       const body: JsonObject = {
         name: input.name,
         runtime: input.runtime ?? 'container',
       };
       if (seedAgent) body.seedAgent = seedAgent as unknown as JsonObject;
       if (seedModel) body.seedModel = seedModel;
+      if (seedAgentPermissionMode) body.seedAgentPermissionMode = seedAgentPermissionMode;
       if (input.group) body.group = input.group;
       if (input.cwd) body.cwd = input.cwd;
       if (input.repoPath) body.repoPath = input.repoPath;

@@ -1,4 +1,4 @@
-import type { ChatAgentConfig } from '../../domain';
+import type { AgentPermissionMode, ChatAgentConfig } from '../../domain';
 import type { UiMenuSelectEntry } from '../../ui/menuSelect';
 
 export type CreateRuntime = 'container' | 'host';
@@ -47,6 +47,7 @@ type BuildDraftDroneCreatePayloadArgs = {
   repoBranchSelection: RepoBranchSelectionState;
   seedAgent: ChatAgentConfig | null;
   seedModel?: string | null;
+  seedAgentPermissionMode?: AgentPermissionMode;
   prompt?: string | null;
 };
 
@@ -61,6 +62,7 @@ export function buildDraftDroneCreatePayload({
   repoBranchSelection,
   seedAgent,
   seedModel,
+  seedAgentPermissionMode,
   prompt,
 }: BuildDraftDroneCreatePayloadArgs) {
   const trimmedName = String(name ?? '').trim();
@@ -87,6 +89,7 @@ export function buildDraftDroneCreatePayload({
     ...(hasChatSeed ? { seedChat: 'default' } : {}),
     ...(seedAgent ? { seedAgent } : {}),
     ...(trimmedModel ? { seedModel: trimmedModel } : {}),
+    ...(seedAgentPermissionMode === 'read-only' ? { seedAgentPermissionMode } : {}),
     ...(trimmedPrompt ? { seedPrompt: trimmedPrompt } : {}),
     ...(trimmedPrompt ? { seedSubmittedAt: new Date().toISOString() } : {}),
   };
