@@ -2236,7 +2236,7 @@ async function reloadExtensionsAfterConfigSave(savedConfig) {
   extensionHost.loaded = false;
   extensionHost.configKey = '';
   await loadDesktopExtensions({ force: true });
-  restartExtensionBridge();
+  refreshExtensionBridgeManifests('config-save');
   return { ok: true, config: savedConfig, statuses: extensionHost.statuses, manifests: extensionHost.manifests };
 }
 
@@ -2389,6 +2389,10 @@ function desktopExtensionManifests() {
   return extensionHost.manifests;
 }
 
+function extensionBridgeToolCount(manifests = desktopExtensionManifests()) {
+  return manifests.reduce((total, manifest) => total + (Array.isArray(manifest.tools) ? manifest.tools.length : 0), 0);
+}
+
 async function executeDesktopExtensionTool(toolName, args, context = {}) {
   const loaded = await loadDesktopExtensions();
   const tool = loaded.tools.get(toolName);
@@ -2481,12 +2485,12 @@ async function startExtensionBridge() {
   extensionBridge.socket = socket;
   socket.addEventListener('open', () => {
     extensionBridge.reconnectDelayMs = 1000;
-    socket.send(JSON.stringify({
-      type: 'extension_hello',
-      manifests: desktopExtensionManifests(),
-      sentAt: new Date().toISOString(),
-    }));
-    windowDebugLog('extensionBridge:open', { deviceId: config.deviceId ? `${config.deviceId.slice(0, 12)}...` : '' });
+    sendExtensionBridgeHello(socket, config, 'open');
+    windowDebugLog('extensionBridge:open', {
+      deviceId: config.deviceId ? `${config.deviceId.slice(0, 12)}...` : '',
+      manifestCount: desktopExtensionManifests().length,
+      toolCount: extensionBridgeToolCount(),
+    });
   });
   socket.addEventListener('message', async (event) => {
     let message;
@@ -2552,6 +2556,36 @@ function restartExtensionBridge() {
   stopExtensionBridge();
   extensionBridge.stopped = false;
   void startExtensionBridge();
+}
+
+function sendExtensionBridgeHello(socket, config, reason = 'open') {
+  const manifests = desktopExtensionManifests();
+  socket.send(JSON.stringify({
+    type: 'extension_hello',
+    manifests,
+    sentAt: new Date().toISOString(),
+  }));
+  windowDebugLog('extensionBridge:helloSent', {
+    reason,
+    deviceId: config.deviceId ? `${config.deviceId.slice(0, 12)}...` : '',
+    manifestCount: manifests.length,
+    toolCount: extensionBridgeToolCount(manifests),
+  });
+}
+
+function refreshExtensionBridgeManifests(reason = 'refresh') {
+  const config = readConfig();
+  if (!config.extensionBridgeEnabled || !config.deviceId || !config.deviceToken) return;
+  const socket = extensionBridge.socket;
+  if (socket && socket.readyState === 1) {
+    try {
+      sendExtensionBridgeHello(socket, config, reason);
+      return;
+    } catch (error) {
+      windowDebugLog('extensionBridge:helloFailed', { reason, error: error?.message || String(error) });
+    }
+  }
+  restartExtensionBridge();
 }
 
 function windowFromEvent(event) {
@@ -2756,7 +2790,7 @@ if (!gotSingleInstanceLock) {
     extensionHost.loaded = false;
     extensionHost.configKey = '';
     await loadDesktopExtensions({ force: true });
-    restartExtensionBridge();
+    refreshExtensionBridgeManifests('manual-reload');
     return { ok: true, statuses: extensionHost.statuses, manifests: extensionHost.manifests };
   });
   ipcMain.handle('extensions:status', async () => {
