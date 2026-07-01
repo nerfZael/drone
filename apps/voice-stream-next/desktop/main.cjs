@@ -51,6 +51,8 @@ const compactWindow = {
   height: 72,
   margin: 18,
 };
+const compactAlwaysOnTopLevel = process.platform === 'linux' ? 'screen-saver' : 'floating';
+const linuxCompactRightDockFallbackInset = 72;
 
 const defaultTranscriptionShortcut = {
   key: 'space',
@@ -1359,11 +1361,37 @@ function displayForWindow(win) {
   return screen.getDisplayMatching(win.getBounds());
 }
 
-function compactBoundsForWindow(win) {
-  const { workArea } = displayForWindow(win);
+function clampNumber(value, min, max) {
+  if (max < min) return min;
+  return Math.min(Math.max(value, min), max);
+}
+
+function compactPlacementArea(display) {
+  const bounds = display.bounds || display.workArea;
+  const reportedWorkArea = display.workArea || bounds;
+  const workArea = process.platform === 'linux'
+    ? {
+        x: Math.max(bounds.x, reportedWorkArea.x),
+        y: bounds.y,
+        width: Math.min(bounds.x + bounds.width - linuxCompactRightDockFallbackInset, reportedWorkArea.x + reportedWorkArea.width) - Math.max(bounds.x, reportedWorkArea.x),
+        height: bounds.height,
+      }
+    : reportedWorkArea;
   return {
-    x: workArea.x + workArea.width - compactWindow.width - compactWindow.margin,
-    y: workArea.y + workArea.height - compactWindow.height - compactWindow.margin,
+    x: workArea.x,
+    y: workArea.y,
+    width: Math.max(compactWindow.width, workArea.width),
+    height: Math.max(compactWindow.height, workArea.height),
+  };
+}
+
+function compactBoundsForWindow(win) {
+  const workArea = compactPlacementArea(displayForWindow(win));
+  const maxX = workArea.x + workArea.width - compactWindow.width;
+  const maxY = workArea.y + workArea.height - compactWindow.height;
+  return {
+    x: clampNumber(workArea.x + workArea.width - compactWindow.width - compactWindow.margin, workArea.x, maxX),
+    y: clampNumber(workArea.y + workArea.height - compactWindow.height - compactWindow.margin, workArea.y, maxY),
     width: compactWindow.width,
     height: compactWindow.height,
   };
@@ -1653,10 +1681,11 @@ function applyCompactMode(win, options = {}) {
   compactMode = true;
   win.setMinimumSize(compactWindow.width, compactWindow.height);
   win.setResizable(false);
-  win.setAlwaysOnTop(true, 'floating');
+  win.setAlwaysOnTop(true, compactAlwaysOnTopLevel);
   win.setSkipTaskbar(true);
   win.setBounds(compactBoundsForWindow(win));
   showWindow(win, options);
+  if (typeof win.moveTop === 'function') win.moveTop();
   sendWindowState(win);
   windowDebugLog('applyCompactMode:end', { snapshot: windowSnapshot(win) });
   return windowStatePayload();
@@ -2655,6 +2684,7 @@ function createWindow(options = {}) {
     skipTaskbar: false,
     show: false,
     icon: APP_ICON_PATH,
+    ...(process.platform === 'linux' ? { type: 'notification' } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
