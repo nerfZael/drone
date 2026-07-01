@@ -223,6 +223,7 @@ const els = {
   saveMcpServersButton: document.querySelector('#saveMcpServersButton'),
   reloadExtensionsButton: document.querySelector('#reloadExtensionsButton'),
   enableWorkspaceExtensionButton: document.querySelector('#enableWorkspaceExtensionButton'),
+  enableDroneHubMcpHeaderButton: document.querySelector('#enableDroneHubMcpHeaderButton'),
   enableDroneHubMcpButton: document.querySelector('#enableDroneHubMcpButton'),
   addWorkspaceRootButton: document.querySelector('#addWorkspaceRootButton'),
   droneHubMcpStatus: document.querySelector('#droneHubMcpStatus'),
@@ -544,6 +545,7 @@ function renderDroneHubMcpConfig(config = state.config) {
   if (!server) {
     els.droneHubMcpStatus.textContent = 'Not added.';
     if (els.enableDroneHubMcpButton) els.enableDroneHubMcpButton.textContent = 'Add';
+    if (els.enableDroneHubMcpHeaderButton) els.enableDroneHubMcpHeaderButton.textContent = 'Add Drone Hub MCP';
     return;
   }
   const command = String(server.command || 'drone-hub-mcp-server').trim() || 'drone-hub-mcp-server';
@@ -551,6 +553,7 @@ function renderDroneHubMcpConfig(config = state.config) {
     ? 'Added, disabled in JSON.'
     : `Added. Command: ${command}`;
   if (els.enableDroneHubMcpButton) els.enableDroneHubMcpButton.textContent = server.enabled === false ? 'Enable' : 'Update';
+  if (els.enableDroneHubMcpHeaderButton) els.enableDroneHubMcpHeaderButton.textContent = server.enabled === false ? 'Enable Drone Hub MCP' : 'Update Drone Hub MCP';
 }
 
 function renderWorkspaceExtensionConfig(config = state.config) {
@@ -4243,17 +4246,27 @@ if (els.addWorkspaceRootButton) {
     }
   });
 }
+
+async function enableDroneHubMcpFromSettings() {
+  try {
+    if (!desktop.enableDroneHubMcp) throw new Error('Drone Hub MCP setup is not available.');
+    const result = await desktop.enableDroneHubMcp();
+    applyConfig(result.config);
+    renderExtensionStatus(result);
+    showStatus('Added Drone Hub MCP server.');
+  } catch (err) {
+    showStatus(err?.message || 'Could not add Drone Hub MCP server.');
+  }
+}
+
+if (els.enableDroneHubMcpHeaderButton) {
+  els.enableDroneHubMcpHeaderButton.addEventListener('click', () => {
+    void enableDroneHubMcpFromSettings();
+  });
+}
 if (els.enableDroneHubMcpButton) {
-  els.enableDroneHubMcpButton.addEventListener('click', async () => {
-    try {
-      if (!desktop.enableDroneHubMcp) throw new Error('Drone Hub MCP setup is not available.');
-      const result = await desktop.enableDroneHubMcp();
-      applyConfig(result.config);
-      renderExtensionStatus(result);
-      showStatus('Added Drone Hub MCP server.');
-    } catch (err) {
-      showStatus(err?.message || 'Could not add Drone Hub MCP server.');
-    }
+  els.enableDroneHubMcpButton.addEventListener('click', () => {
+    void enableDroneHubMcpFromSettings();
   });
 }
 if (els.extensionDropzone) {
