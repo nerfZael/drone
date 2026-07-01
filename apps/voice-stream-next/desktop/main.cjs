@@ -1,13 +1,29 @@
+const fs = require('node:fs');
+const path = require('node:path');
+const Module = require('node:module');
+const { createRequire } = Module;
+
+registerPackagedNodeModules();
+
 const { app, BrowserWindow, ipcMain, screen, shell, Menu, Tray, nativeImage, clipboard, dialog, globalShortcut } = require('electron');
 const { fork, spawn } = require('node:child_process');
 const { createHmac, randomBytes, randomUUID, timingSafeEqual } = require('node:crypto');
-const fs = require('node:fs');
 const http = require('node:http');
-const { createRequire } = require('node:module');
 const os = require('node:os');
-const path = require('node:path');
 const vm = require('node:vm');
 const { loadMcpServer } = require('./mcp-client-manager.cjs');
+
+function registerPackagedNodeModules() {
+  const resourcesNodeModules = process.resourcesPath ? path.join(process.resourcesPath, 'node_modules') : '';
+  if (!resourcesNodeModules || !fs.existsSync(resourcesNodeModules)) return;
+  const existing = String(process.env.NODE_PATH || '')
+    .split(path.delimiter)
+    .filter(Boolean);
+  if (!existing.includes(resourcesNodeModules)) {
+    process.env.NODE_PATH = [resourcesNodeModules, ...existing].join(path.delimiter);
+    Module._initPaths();
+  }
+}
 
 const APP_NAME = 'Drone';
 const LINUX_DESKTOP_FILE_NAME = 'drone.desktop';
@@ -2097,6 +2113,65 @@ function bundledWorkspaceExtensionPath() {
   return path.resolve(__dirname, 'extensions', 'workspace-extension.cjs');
 }
 
+function resourceNodeModulesPath() {
+  return process.resourcesPath ? path.join(process.resourcesPath, 'node_modules') : '';
+}
+
+function resolveDroneHubMcpServerScriptPath() {
+  const resourcesNodeModules = resourceNodeModulesPath();
+  const candidates = [
+    resourcesNodeModules ? path.join(resourcesNodeModules, 'drone', 'dist', 'hub', 'mcp-server.js') : '',
+    path.resolve(__dirname, '..', 'node_modules', 'drone', 'dist', 'hub', 'mcp-server.js'),
+    path.resolve(__dirname, '..', '..', 'drone', 'dist', 'hub', 'mcp-server.js'),
+  ].filter(Boolean);
+  try {
+    candidates.push(path.join(path.dirname(require.resolve('drone/package.json')), 'dist', 'hub', 'mcp-server.js'));
+  } catch {
+    // Drone is optional for the desktop shell unless Drone Hub MCP is enabled.
+  }
+  return candidates.find((candidate) => fs.existsSync(candidate)) || '';
+}
+
+function defaultDroneHubMcpServerCommand(existing = {}) {
+  const existingCommand = String(existing.command || '').trim();
+  const existingArgs = Array.isArray(existing.args) ? existing.args.map((item) => String(item)).filter(Boolean) : [];
+  const existingEnv = existing.env && typeof existing.env === 'object' && !Array.isArray(existing.env) ? existing.env : {};
+  if (existingCommand && existingCommand !== 'drone-hub-mcp-server') {
+    return {
+      command: existingCommand,
+      args: existingArgs,
+      cwd: String(existing.cwd || '').trim(),
+      env: Object.fromEntries(Object.entries(existingEnv).map(([key, value]) => [String(key), String(value)]).filter(([key]) => key)),
+    };
+  }
+
+  const scriptPath = resolveDroneHubMcpServerScriptPath();
+  if (!scriptPath) {
+    return {
+      command: existingCommand || 'drone-hub-mcp-server',
+      args: existingArgs,
+      cwd: String(existing.cwd || '').trim(),
+      env: Object.fromEntries(Object.entries(existingEnv).map(([key, value]) => [String(key), String(value)]).filter(([key]) => key)),
+    };
+  }
+
+  const resourcesNodeModules = resourceNodeModulesPath();
+  const nodePathEntries = [
+    resourcesNodeModules && fs.existsSync(resourcesNodeModules) ? resourcesNodeModules : '',
+    String(existingEnv.NODE_PATH || process.env.NODE_PATH || '').trim(),
+  ].filter(Boolean);
+  return {
+    command: process.execPath,
+    args: [scriptPath],
+    cwd: path.dirname(scriptPath),
+    env: {
+      ...Object.fromEntries(Object.entries(existingEnv).map(([key, value]) => [String(key), String(value)]).filter(([key]) => key)),
+      ELECTRON_RUN_AS_NODE: '1',
+      ...(nodePathEntries.length > 0 ? { NODE_PATH: [...new Set(nodePathEntries.join(path.delimiter).split(path.delimiter).filter(Boolean))].join(path.delimiter) } : {}),
+    },
+  };
+}
+
 function workspaceExtensionEntry(existing = {}) {
   const existingConfig = existing.config && typeof existing.config === 'object' && !Array.isArray(existing.config) ? existing.config : {};
   return {
@@ -2112,18 +2187,18 @@ function workspaceExtensionEntry(existing = {}) {
 }
 
 function droneHubMcpServerEntry(existing = {}) {
-  const existingEnv = existing.env && typeof existing.env === 'object' && !Array.isArray(existing.env) ? existing.env : {};
   const existingToolApprovals = existing.toolApprovals && typeof existing.toolApprovals === 'object' && !Array.isArray(existing.toolApprovals)
     ? existing.toolApprovals
     : {};
+  const serverCommand = defaultDroneHubMcpServerCommand(existing);
   return {
     id: 'drone-hub',
     name: 'Drone Hub',
     transport: 'stdio',
-    command: String(existing.command || 'drone-hub-mcp-server').trim() || 'drone-hub-mcp-server',
-    args: Array.isArray(existing.args) ? existing.args.map((item) => String(item)).filter(Boolean) : [],
-    cwd: String(existing.cwd || '').trim(),
-    env: Object.fromEntries(Object.entries(existingEnv).map(([key, value]) => [String(key), String(value)]).filter(([key]) => key)),
+    command: serverCommand.command,
+    args: serverCommand.args,
+    cwd: serverCommand.cwd,
+    env: serverCommand.env,
     enabled: true,
     approval: cleanExtensionApproval(existing.approval),
     toolApprovals: {

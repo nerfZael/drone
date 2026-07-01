@@ -126,6 +126,22 @@ function runPackager() {
   }
 }
 
+function ensureDroneMcpServerBuild() {
+  const mcpServerPath = path.join(repoRoot, 'apps', 'drone', 'dist', 'hub', 'mcp-server.js');
+  if (fs.existsSync(mcpServerPath)) return;
+  const result = spawnSync('bun', ['run', '--filter', 'drone', 'build'], {
+    cwd: repoRoot,
+    env: process.env,
+    shell: process.platform === 'win32',
+    stdio: 'inherit',
+  });
+  if (result.error) console.error(result.error.message);
+  if (result.status !== 0) process.exit(result.status || 1);
+  if (!fs.existsSync(mcpServerPath)) {
+    throw new Error(`Drone Hub MCP server build did not produce ${mcpServerPath}`);
+  }
+}
+
 function writeDesktopBuildConfig() {
   const outputDir = path.join(appDir, 'build');
   const outputFile = path.join(outputDir, 'voice-stream-next-desktop-build-config.json');
@@ -253,6 +269,9 @@ fs.rmSync(vendorDir, { recursive: true, force: true });
 fs.mkdirSync(vendorNodeModules, { recursive: true });
 
 try {
+  ensureDroneMcpServerBuild();
+  copyRuntimePackage('@modelcontextprotocol/sdk');
+  copyRuntimePackage('drone');
   copyRuntimePackage('vosk');
   runPackager();
   writeLinuxDesktopInstaller();
