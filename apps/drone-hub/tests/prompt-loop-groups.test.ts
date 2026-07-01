@@ -38,6 +38,15 @@ function activePendingPrompt(id: string, at: string, updatedAt: string): Pending
   };
 }
 
+function queuedPendingPrompt(id: string, at: string): PendingPrompt {
+  return {
+    id,
+    at,
+    prompt: `prompt:${id}`,
+    state: 'queued',
+  };
+}
+
 describe('buildTranscriptTimelineBlocks', () => {
   test('keeps failed pending prompts in chronological position based on prompt time', () => {
     const transcriptRenderBlocks = buildTranscriptRenderBlocks([
@@ -80,5 +89,20 @@ describe('buildTranscriptTimelineBlocks', () => {
         id: 'waiting-second',
       },
     });
+  });
+
+  test('keeps queued follow-up prompts after the active waiting prompt', () => {
+    const out = buildTranscriptTimelineBlocks({
+      transcriptRenderBlocks: [],
+      pendingPlainPrompts: [
+        activePendingPrompt('waiting-now', '2026-03-29T10:00:00.000Z', '2026-03-29T10:06:00.000Z'),
+        queuedPendingPrompt('queued-follow-up', '2026-03-29T10:05:00.000Z'),
+      ],
+    });
+
+    expect(out.map((item) => (item.kind === 'pending-prompt' ? item.item.id : item.kind))).toEqual([
+      'waiting-now',
+      'queued-follow-up',
+    ]);
   });
 });

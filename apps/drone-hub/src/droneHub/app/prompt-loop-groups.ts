@@ -93,6 +93,22 @@ export function transcriptTimelineSortMs(block: TranscriptTimelineBlock): number
   return parseIsoMs(first?.promptAt ?? first?.at);
 }
 
+function isActivePendingPrompt(item: PendingPrompt): boolean {
+  return item.state === 'sending' || item.state === 'sent';
+}
+
+function comparePendingPromptTimelineBlocks(
+  a: TranscriptTimelineBlock,
+  b: TranscriptTimelineBlock,
+): number {
+  if (a.kind !== 'pending-prompt' || b.kind !== 'pending-prompt') return 0;
+  const aActive = isActivePendingPrompt(a.item);
+  const bActive = isActivePendingPrompt(b.item);
+  if (aActive && b.item.state === 'queued') return -1;
+  if (a.item.state === 'queued' && bActive) return 1;
+  return 0;
+}
+
 export function buildTranscriptTimelineBlocks(opts: {
   transcriptRenderBlocks: TranscriptRenderBlock[];
   pendingPlainPrompts: PendingPrompt[];
@@ -119,6 +135,8 @@ export function buildTranscriptTimelineBlocks(opts: {
   }
 
   items.sort((a, b) => {
+    const pendingOrder = comparePendingPromptTimelineBlocks(a, b);
+    if (pendingOrder !== 0) return pendingOrder;
     if (a.sortMs !== b.sortMs) return a.sortMs - b.sortMs;
     return a.order - b.order;
   });
