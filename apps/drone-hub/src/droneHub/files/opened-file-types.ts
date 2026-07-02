@@ -4,7 +4,7 @@ export type DroneOpenedFileState = {
   loading: boolean;
   saving: boolean;
   error: string | null;
-  kind: 'text' | 'image' | 'video' | 'binary';
+  kind: 'text' | 'large-text' | 'image' | 'video' | 'binary';
   mime: string | null;
   size: number;
   content: string;

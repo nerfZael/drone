@@ -68,6 +68,22 @@ function looksLikeFileNotFound(msgRaw: string): boolean {
   return msg.includes('file not found') || msg.includes('no such file') || msg.includes('not-file');
 }
 
+function parseFileTooLargeMessage(msgRaw: string): { size: number; maxBytes: number } | null {
+  const match = String(msgRaw ?? '').match(/file too large\s*\((\d+)\s+bytes,\s*max\s+(\d+)\)/i);
+  if (!match) return null;
+  const size = Number(match[1]);
+  const maxBytes = Number(match[2]);
+  if (!Number.isFinite(size) || size <= 0 || !Number.isFinite(maxBytes) || maxBytes <= 0) return null;
+  return { size: Math.floor(size), maxBytes: Math.floor(maxBytes) };
+}
+
+function oversizedFileKindForPath(pathRaw: string): OpenedFileKind {
+  const ext = String(pathRaw ?? '').trim().toLowerCase().split(/[?#]/)[0]?.split('.').pop() ?? '';
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico', 'avif', 'tif', 'tiff'].includes(ext)) return 'image';
+  if (['mp4', 'webm', 'mov', 'm4v', 'ogv', 'ogg', 'avi', 'mkv', 'wmv'].includes(ext)) return 'video';
+  return 'large-text';
+}
+
 function confirmDiscardDirtyTabs(tabs: OpenedFileTab[], actionLabel: string): boolean {
   const dirtyTabs = tabs.filter(openedFileTabDirty);
   if (dirtyTabs.length === 0) return true;
@@ -89,6 +105,8 @@ function readPayloadToTabState(data: Extract<DroneFsReadPayload, { ok: true }>):
   content: string;
   savedContent: string;
   mtimeMs: number | null;
+  path: string | null;
+  name: string | null;
 } {
   const rawKind =
     typeof (data as any).kind === 'string'
@@ -101,6 +119,7 @@ function readPayloadToTabState(data: Extract<DroneFsReadPayload, { ok: true }>):
   const nextMime = typeof (data as any).mime === 'string' ? String((data as any).mime).trim().toLowerCase() : '';
   const nextSize = Number((data as any).size);
   const nextContent = nextKind === 'text' && typeof (data as any).content === 'string' ? (data as any).content : '';
+  const nextPath = typeof (data as any).path === 'string' ? String((data as any).path).trim() : '';
   return {
     kind: nextKind,
     mime: nextMime || null,
@@ -108,6 +127,8 @@ function readPayloadToTabState(data: Extract<DroneFsReadPayload, { ok: true }>):
     content: nextContent,
     savedContent: nextContent,
     mtimeMs: typeof data.mtimeMs === 'number' && Number.isFinite(data.mtimeMs) ? data.mtimeMs : null,
+    path: nextPath || null,
+    name: nextPath ? nextPath.split('/').filter(Boolean).pop() || nextPath : null,
   };
 }
 
@@ -408,6 +429,8 @@ export function useFileEditorState({
               ? {
                   ...tab,
                   ...nextLoadedState,
+                  path: nextLoadedState.path ?? tab.path,
+                  name: nextLoadedState.name ?? tab.name,
                   loading: false,
                   loaded: true,
                   error: null,
@@ -425,25 +448,41 @@ export function useFileEditorState({
           Boolean(fallbackPath) && fallbackPath !== filePath && looksLikeFileNotFound(firstMsg);
         if (!shouldRetryFallback) {
           if (cancelled || requestSeqRef.current !== seq) return;
+          const tooLarge = Number(e?.status ?? 0) === 413 ? parseFileTooLargeMessage(firstMsg) : null;
+          const tooLargeKind = tooLarge ? oversizedFileKindForPath(filePath) : null;
           updateTabs((prevTabs) =>
             prevTabs.map((tab) =>
               tab.tabId === activeId
-                ? {
-                    ...tab,
-                    loading: false,
-                    loaded: true,
-                    error: firstMsg,
-                    kind: 'text',
-                    mime: null,
-                    size: 0,
-                    content: '',
-                    savedContent: '',
-                    mtimeMs: null,
-                  }
+                ? tooLarge
+                  ? {
+                      ...tab,
+                      loading: false,
+                      loaded: true,
+                      error: null,
+                      kind: tooLargeKind ?? 'large-text',
+                      mime: tooLargeKind === 'large-text' ? 'text/plain' : null,
+                      size: tooLarge.size,
+                      content: '',
+                      savedContent: '',
+                      mtimeMs: null,
+                    }
+                  : {
+                      ...tab,
+                      loading: false,
+                      loaded: true,
+                      error: firstMsg,
+                      kind: 'text',
+                      mime: null,
+                      size: 0,
+                      content: '',
+                      savedContent: '',
+                      mtimeMs: null,
+                    }
                 : tab,
             ),
           );
-          setOpenFailure({ message: firstMsg, at: Date.now() });
+          if (tooLarge) setOpenFailure(null);
+          else setOpenFailure({ message: firstMsg, at: Date.now() });
           return;
         }
 
@@ -460,8 +499,8 @@ export function useFileEditorState({
                 return {
                   ...tab,
                   ...nextLoadedState,
-                  path: fallbackPath,
-                  name: fallbackName,
+                  path: nextLoadedState.path ?? fallbackPath,
+                  name: nextLoadedState.name ?? fallbackName,
                   loading: false,
                   loaded: true,
                   error: null,
@@ -474,25 +513,41 @@ export function useFileEditorState({
           .catch((fallbackErr: any) => {
             if (cancelled || requestSeqRef.current !== seq) return;
             const msg = fallbackErr?.message ?? firstMsg;
+            const tooLarge = Number(fallbackErr?.status ?? 0) === 413 ? parseFileTooLargeMessage(msg) : null;
+            const tooLargeKind = tooLarge ? oversizedFileKindForPath(fallbackPath) : null;
             updateTabs((prevTabs) =>
               prevTabs.map((tab) =>
                 tab.tabId === activeId
-                  ? {
-                      ...tab,
-                      loading: false,
-                      loaded: true,
-                      error: msg,
-                      kind: 'text',
-                      mime: null,
-                      size: 0,
-                      content: '',
-                      savedContent: '',
-                      mtimeMs: null,
-                    }
+                  ? tooLarge
+                    ? {
+                        ...tab,
+                        loading: false,
+                        loaded: true,
+                        error: null,
+                        kind: tooLargeKind ?? 'large-text',
+                        mime: tooLargeKind === 'large-text' ? 'text/plain' : null,
+                        size: tooLarge.size,
+                        content: '',
+                        savedContent: '',
+                        mtimeMs: null,
+                      }
+                    : {
+                        ...tab,
+                        loading: false,
+                        loaded: true,
+                        error: msg,
+                        kind: 'text',
+                        mime: null,
+                        size: 0,
+                        content: '',
+                        savedContent: '',
+                        mtimeMs: null,
+                      }
                   : tab,
               ),
             );
-            setOpenFailure({ message: msg, at: Date.now() });
+            if (tooLarge) setOpenFailure(null);
+            else setOpenFailure({ message: msg, at: Date.now() });
           });
       })
       .finally(() => {

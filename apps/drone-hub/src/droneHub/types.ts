@@ -141,6 +141,23 @@ export type DroneFsReadPayload =
     }
   | { ok: false; error: string; id?: string; name?: string; path?: string };
 
+export type DroneFsTextChunkPayload =
+  | {
+      ok: true;
+      id: string;
+      name: string;
+      path: string;
+      kind: 'text-chunk';
+      mime: string | null;
+      content: string;
+      size: number;
+      mtimeMs: number | null;
+      offset: number;
+      nextOffset: number;
+      eof: boolean;
+    }
+  | { ok: false; error: string; id?: string; name?: string; path?: string };
+
 export type DroneFsWritePayload =
   | {
       ok: true;

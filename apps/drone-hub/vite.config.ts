@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'node:path';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 
 const apiPort = String(process.env.DRONE_HUB_API_PORT ?? '').trim();
@@ -33,6 +34,16 @@ export default defineConfig({
           fileName: 'version.json',
           source: `${JSON.stringify({ buildId, buildTime })}\n`,
         });
+      },
+      closeBundle() {
+        const swPath = resolve(__dirname, 'dist', 'pwa-sw.js');
+        try {
+          const source = readFileSync(swPath, 'utf8');
+          const replaced = source.replaceAll('"__DRONE_HUB_BUILD_ID__"', JSON.stringify(buildId));
+          if (replaced !== source) writeFileSync(swPath, replaced);
+        } catch {
+          // The service worker is optional in local/test builds.
+        }
       },
     },
   ],

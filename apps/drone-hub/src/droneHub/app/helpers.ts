@@ -264,6 +264,61 @@ export function droneHomePath(
   return repoAttached ? '/work/repo' : '/dvm-data/home';
 }
 
+function trimTrailingSlashes(pathRaw: string): string {
+  const path = String(pathRaw ?? '').trim().replace(/\\/g, '/').replace(/\/+/g, '/');
+  if (path === '/') return path;
+  return path.replace(/\/+$/g, '');
+}
+
+function pathInsideOrEqual(pathRaw: string, rootRaw: string): boolean {
+  const path = trimTrailingSlashes(pathRaw);
+  const root = trimTrailingSlashes(rootRaw);
+  if (!path || !root) return false;
+  return path === root || path.startsWith(`${root}/`);
+}
+
+export function resolveDroneFileOpenPath(
+  drone: Pick<DroneSummary, 'runtime' | 'repoAttached' | 'repoPath' | 'cwd'> | null | undefined,
+  pathRaw: string,
+): string {
+  let path = String(pathRaw ?? '').trim().replace(/\\/g, '/');
+  if (!path) return '';
+  if (path.startsWith('./')) path = path.slice(2);
+  path = path.replace(/\/+/g, '/');
+
+  const homePath = trimTrailingSlashes(droneHomePath(drone)) || '/';
+  const repoPath = trimTrailingSlashes(String(drone?.repoPath ?? ''));
+  const cwd = trimTrailingSlashes(String(drone?.cwd ?? ''));
+  const hostRuntime = isHostRuntimeDrone(drone);
+
+  if (!path.startsWith('/')) {
+    const suffix = path.replace(/^\/+/g, '');
+    return normalizeContainerPathInput(`${homePath === '/' ? '' : homePath}/${suffix}`);
+  }
+
+  if (hostRuntime) {
+    if (repoPath && pathInsideOrEqual(path, '/work/repo')) {
+      const suffix = trimTrailingSlashes(path).slice('/work/repo'.length);
+      return normalizeContainerPathInput(`${repoPath}${suffix}`);
+    }
+    if (cwd && pathInsideOrEqual(path, '/dvm-data/home')) {
+      const suffix = trimTrailingSlashes(path).slice('/dvm-data/home'.length);
+      return normalizeContainerPathInput(`${cwd}${suffix}`);
+    }
+    return normalizeContainerPathInput(path);
+  }
+
+  if (repoPath && pathInsideOrEqual(path, repoPath)) {
+    const suffix = trimTrailingSlashes(path).slice(repoPath.length);
+    return normalizeContainerPathInput(`/work/repo${suffix}`);
+  }
+  if (cwd && pathInsideOrEqual(path, cwd)) {
+    const suffix = trimTrailingSlashes(path).slice(cwd.length);
+    return normalizeContainerPathInput(`${homePath}${suffix}`);
+  }
+  return normalizeContainerPathInput(path);
+}
+
 export function readPortPreviewByDrone(raw: string | null | undefined): PortPreviewByDrone {
   if (!raw) return {};
   try {

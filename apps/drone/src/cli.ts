@@ -52,7 +52,7 @@ import {
 } from './host/runtime';
 import { ensureHubSetupState } from './host/setup-state';
 import { resolveDetachedCliLaunchSpec } from './hub/hub-launch';
-import { parseHubRunnerProcessesFromPsOutput, selectHubRunnerPidsToStop } from './hub/orphan-hub-runners';
+import { parseHubRunnerProcessesFromPsOutput, parseHubUiServerProcessesFromPsOutput, selectHubRunnerPidsToStop } from './hub/orphan-hub-runners';
 import {
   normalizeRemotePublicUrl,
   pidIsRunning as remotePidIsRunning,
@@ -744,6 +744,21 @@ async function findRecoverableHubRunnerPids(preferredUiPort: number): Promise<nu
     const psOutput = await readCommandStdout('ps', ['-eo', 'pid=,args=']);
     const matches = parseHubRunnerProcessesFromPsOutput(psOutput, {
       cliPath: __filename,
+      selfPid: process.pid,
+    });
+    return selectHubRunnerPidsToStop(matches, preferredUiPort);
+  } catch {
+    return [];
+  }
+}
+
+async function findRecoverableHubUiServerPids(preferredUiPort: number): Promise<number[]> {
+  if (process.platform === 'win32') return [];
+  try {
+    const repoRoot = resolveRepoRootFromDroneCliDir();
+    const psOutput = await readCommandStdout('ps', ['-eo', 'pid=,args=']);
+    const matches = parseHubUiServerProcessesFromPsOutput(psOutput, {
+      repoRoot,
       selfPid: process.pid,
     });
     return selectHubRunnerPidsToStop(matches, preferredUiPort);
@@ -2046,7 +2061,16 @@ async function hubRun(options: any) {
     // eslint-disable-next-line no-console
     console.warn(`Voice Stream port ${voiceStreamPort} is already in use; leaving the existing server running.`);
   }
-  const uiPortAvailable = await isTcpPortAvailable('127.0.0.1', uiPort);
+  let uiPortAvailable = await isTcpPortAvailable('127.0.0.1', uiPort);
+  if (!uiPortAvailable) {
+    const recoveredUiPids = await findRecoverableHubUiServerPids(uiPort);
+    if (recoveredUiPids.length > 0) {
+      for (const pid of recoveredUiPids) {
+        await stopHubProcess(pid);
+      }
+      uiPortAvailable = await isTcpPortAvailable('127.0.0.1', uiPort);
+    }
+  }
   const child = uiPortAvailable
     ? spawn('bun', ['run', 'dev', '--', '--port', String(uiPort), '--strictPort'], {
         cwd: hubDir,

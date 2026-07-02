@@ -1,4 +1,7 @@
-const DRONE_HUB_CACHE = 'drone-hub-shell-v2';
+const DRONE_HUB_SW_BUILD_ID = "__DRONE_HUB_BUILD_ID__";
+const DRONE_HUB_CACHE = `drone-hub-shell-${DRONE_HUB_SW_BUILD_ID}`;
+const DRONE_HUB_CACHE_PREFIX = 'drone-hub-';
+const DRONE_HUB_DEV_WORKER = DRONE_HUB_SW_BUILD_ID === '__DRONE_HUB_BUILD_ID__';
 const SHELL_ASSETS = [
   '/',
   '/index.html',
@@ -10,7 +13,21 @@ const SHELL_ASSETS = [
   '/icons/drone-app-icon-512.png',
 ];
 
+async function deleteOldDroneHubCaches() {
+  const keys = await caches.keys();
+  await Promise.all(
+    keys
+      .filter((key) => key.startsWith(DRONE_HUB_CACHE_PREFIX) && key !== DRONE_HUB_CACHE)
+      .map((key) => caches.delete(key)),
+  );
+}
+
 self.addEventListener('install', (event) => {
+  if (DRONE_HUB_DEV_WORKER) {
+    event.waitUntil(self.skipWaiting());
+    return;
+  }
+
   event.waitUntil(
     caches
       .open(DRONE_HUB_CACHE)
@@ -20,15 +37,24 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
+  if (DRONE_HUB_DEV_WORKER) {
+    event.waitUntil(
+      deleteOldDroneHubCaches()
+        .then(() => self.registration.unregister())
+        .then(() => self.clients.claim()),
+    );
+    return;
+  }
+
   event.waitUntil(
-    caches
-      .keys()
-      .then((keys) => Promise.all(keys.filter((key) => key !== DRONE_HUB_CACHE).map((key) => caches.delete(key))))
+    deleteOldDroneHubCaches()
       .then(() => self.clients.claim()),
   );
 });
 
 self.addEventListener('fetch', (event) => {
+  if (DRONE_HUB_DEV_WORKER) return;
+
   const request = event.request;
   if (request.method !== 'GET') return;
 

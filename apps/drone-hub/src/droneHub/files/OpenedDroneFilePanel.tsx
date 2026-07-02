@@ -7,7 +7,9 @@ import {
   type TextFileViewMode,
 } from '../code-languages';
 import { formatBytes, formatEditorMtime } from '../app/selected-drone-workspace-utils';
+import { requestJson } from '../http';
 import { resolveMarkdownPreviewLinkTarget } from './markdown-preview-link-utils';
+import type { DroneFsTextChunkPayload } from '../types';
 import type { DroneOpenedFileState } from './opened-file-types';
 import {
   activeLanguagePositionFromEditor,
@@ -21,16 +23,165 @@ import {
 import { ReferencesResultsPanel, type ReferencesResultsState } from './ReferencesResultsPanel';
 import { OpenedDroneFileTabs } from './OpenedDroneFileTabs';
 import type { DroneOpenedFileTabState } from './opened-file-types';
+import { VideoPreview } from '../media/VideoPreview';
 
 type MonacoEditorComponent = (typeof import('@monaco-editor/react'))['default'];
 type MonacoEditorProps = React.ComponentProps<MonacoEditorComponent>;
 type MonacoEditorMountHandler = NonNullable<MonacoEditorProps['onMount']>;
 type MonacoEditorInstance = Parameters<MonacoEditorMountHandler>[0];
+const LARGE_TEXT_CHUNK_BYTES = 256 * 1024;
 
 const MonacoEditor = React.lazy(async (): Promise<{ default: MonacoEditorComponent }> => {
   const module = await import('@monaco-editor/react');
   return { default: module.default };
 });
+
+function PlainTextEditorFallback({
+  value,
+  saving,
+  onChange,
+  onSave,
+}: {
+  value: string;
+  saving: boolean;
+  onChange?: (next: string) => void;
+  onSave?: (contentOverride?: string) => Promise<boolean>;
+}) {
+  const [localValue, setLocalValue] = React.useState(value);
+
+  React.useEffect(() => {
+    setLocalValue(value);
+  }, [value]);
+
+  return (
+    <textarea
+      value={localValue}
+      onChange={(event) => {
+        const next = event.currentTarget.value;
+        setLocalValue(next);
+        onChange?.(next);
+      }}
+      onKeyDown={(event) => {
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+          event.preventDefault();
+          void onSave?.(localValue);
+        }
+      }}
+      readOnly={saving}
+      spellCheck={false}
+      className="h-full w-full resize-none border-0 bg-[var(--panel-alt)] p-3 font-mono text-[12px] leading-5 text-[var(--fg-secondary)] outline-none"
+      aria-label="Plain text editor"
+    />
+  );
+}
+
+class MonacoEditorErrorBoundary extends React.Component<
+  { fallback: React.ReactNode; children: React.ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  render() {
+    if (this.state.failed) return this.props.fallback;
+    return this.props.children;
+  }
+}
+
+function LargeTextFileViewer({
+  droneId,
+  path,
+  size,
+}: {
+  droneId: string;
+  path: string;
+  size: number;
+}) {
+  const [content, setContent] = React.useState('');
+  const [nextOffset, setNextOffset] = React.useState(0);
+  const [eof, setEof] = React.useState(false);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const requestSeqRef = React.useRef(0);
+
+  React.useEffect(() => {
+    requestSeqRef.current += 1;
+    setContent('');
+    setNextOffset(0);
+    setEof(false);
+    setLoading(false);
+    setError(null);
+  }, [droneId, path]);
+
+  const loadNextChunk = React.useCallback(async () => {
+    if (!path || loading || eof) return;
+    const seq = requestSeqRef.current + 1;
+    requestSeqRef.current = seq;
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await requestJson<DroneFsTextChunkPayload>(
+        `/api/drones/${encodeURIComponent(droneId)}/fs/text-chunk?path=${encodeURIComponent(path)}&offset=${encodeURIComponent(String(nextOffset))}&limit=${encodeURIComponent(String(LARGE_TEXT_CHUNK_BYTES))}`,
+      );
+      if (requestSeqRef.current !== seq) return;
+      if ((data as any)?.ok !== true) {
+        throw new Error(String((data as any)?.error ?? 'file chunk request failed'));
+      }
+      const payload = data as Extract<DroneFsTextChunkPayload, { ok: true }>;
+      setContent((prev) => `${prev}${String(payload.content ?? '')}`);
+      setNextOffset(Number.isFinite(payload.nextOffset) ? Math.max(0, Math.floor(payload.nextOffset)) : nextOffset);
+      setEof(Boolean(payload.eof));
+    } catch (err: any) {
+      if (requestSeqRef.current !== seq) return;
+      setError(String(err?.message ?? err ?? 'file chunk request failed'));
+    } finally {
+      if (requestSeqRef.current === seq) setLoading(false);
+    }
+  }, [droneId, eof, loading, nextOffset, path]);
+
+  React.useEffect(() => {
+    if (!path || content || loading || eof || error) return;
+    void loadNextChunk();
+  }, [content, eof, error, loadNextChunk, loading, path]);
+
+  const loadedLabel = `${formatBytes(nextOffset)} / ${formatBytes(size)}`;
+
+  return (
+    <div className="h-full min-h-0 flex flex-col bg-[var(--panel-alt)]">
+      <div className="flex items-center justify-between gap-3 border-b border-[var(--border-subtle)] px-3 py-2">
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
+            Large file
+          </div>
+          <div className="mt-0.5 text-[11px] text-[var(--muted-dim)]">{loadedLabel}</div>
+        </div>
+        <button
+          type="button"
+          onClick={() => void loadNextChunk()}
+          disabled={loading || eof}
+          className={`h-7 px-2.5 rounded-md border text-[10px] font-semibold transition-colors ${
+            loading || eof
+              ? 'border-[var(--border-subtle)] bg-transparent text-[var(--muted-dim)] opacity-50 cursor-not-allowed'
+              : 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:shadow-[var(--glow-accent)]'
+          }`}
+        >
+          {eof ? 'Loaded' : loading ? 'Loading...' : 'Load more'}
+        </button>
+      </div>
+      {error ? (
+        <div className="m-3 rounded border border-[rgba(255,90,90,.24)] bg-[var(--red-subtle)] px-3 py-2 text-[11px] text-[var(--red)]">
+          {error}
+        </div>
+      ) : null}
+      <pre className="flex-1 min-h-0 overflow-auto whitespace-pre-wrap break-words p-3 text-[12px] leading-5 text-[var(--fg-secondary)] font-mono">
+        {content || (loading ? 'Loading...' : '')}
+      </pre>
+    </div>
+  );
+}
 
 type OpenedDroneFilePanelProps = {
   droneId: string;
@@ -83,6 +234,7 @@ export function OpenedDroneFilePanel({
   } = file;
   const activeFilePath = String(filePath ?? '').trim();
   const openedEditorIsText = (fileKind ?? 'text') === 'text';
+  const openedFileIsLargeText = fileKind === 'large-text';
   const openedFileIsMarkdown = openedEditorIsText && isMarkdownFile(activeFilePath, fileMime);
   const [openedTextMode, setOpenedTextMode] = React.useState<TextFileViewMode>(() =>
     activeFilePath && openedEditorIsText
@@ -167,6 +319,9 @@ export function OpenedDroneFilePanel({
   const openedFileEditorVisible =
     openedEditorIsText && Boolean(activeFilePath) && !openedFileShowsMarkdownPreview;
   const headerStatusText = React.useMemo(() => {
+    if (openedFileIsLargeText) {
+      return `Read-only • ${formatBytes(fileSize)}`;
+    }
     if (openedEditorIsText) {
       if (fileSaving) return 'Saving...';
       if (fileDirty) return 'Unsaved changes';
@@ -177,7 +332,7 @@ export function OpenedDroneFilePanel({
       Boolean,
     );
     return details.length > 0 ? details.join(' • ') : 'Preview';
-  }, [fileDirty, fileMime, fileMtimeMs, fileSaving, fileSize, openedEditorIsText]);
+  }, [fileDirty, fileMime, fileMtimeMs, fileSaving, fileSize, openedEditorIsText, openedFileIsLargeText]);
   const openedFileMediaSrc = React.useMemo(() => {
     if (!activeFilePath) return '';
     if (fileKind !== 'image' && fileKind !== 'video') return '';
@@ -577,12 +732,16 @@ export function OpenedDroneFilePanel({
               </div>
             ) : fileKind === 'video' && openedFileMediaSrc ? (
               <div className="h-full w-full p-3 flex items-center justify-center">
-                <video
+                <VideoPreview
                   src={openedFileMediaSrc}
-                  controls
+                  label={fileName ?? 'video preview'}
+                  mime={fileMime}
                   className="max-w-full max-h-full rounded border border-[var(--border-subtle)] bg-[var(--panel-alt)]"
+                  loadingClassName="min-h-[120px] flex items-center justify-center text-[12px] text-[var(--muted)] px-3 text-center"
                 />
               </div>
+            ) : openedFileIsLargeText && activeFilePath ? (
+              <LargeTextFileViewer droneId={droneId} path={activeFilePath} size={fileSize} />
             ) : fileKind === 'binary' ? (
               <div className="h-full w-full flex items-center justify-center px-6">
                 <div className="max-w-[560px] rounded border border-[var(--border-subtle)] bg-[var(--panel-alt)] px-4 py-3 text-center">
@@ -605,46 +764,60 @@ export function OpenedDroneFilePanel({
                 />
               </div>
             ) : openedFileEditorVisible ? (
-              <React.Suspense
+              <MonacoEditorErrorBoundary
                 fallback={
-                  <div className="h-full w-full flex items-center justify-center text-[12px] text-[var(--muted)]">
-                    Loading editor...
-                  </div>
+                  <PlainTextEditorFallback
+                    value={fileContent ?? ''}
+                    saving={Boolean(fileSaving)}
+                    onChange={onFileContentChange}
+                    onSave={onSaveFile}
+                  />
                 }
               >
-                <MonacoEditor
-                  path={activeFilePath || undefined}
-                  language={editorLanguageForPath(activeFilePath)}
-                  value={fileContent ?? ''}
-                  onChange={(next) => onFileContentChange?.(next ?? '')}
-                  onMount={(editor, monaco) => {
-                    editorRef.current = editor;
-                    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-                      void onSaveFile?.(editor.getValue());
-                    });
-                    editor.addCommand(monaco.KeyCode.F12, () => {
-                      languageActionsRef.current?.goToDefinition();
-                    });
-                    editor.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.F12, () => {
-                      languageActionsRef.current?.findReferences();
-                    });
-                    applyEditorCursorTarget();
-                  }}
-                  theme="vs-dark"
-                  options={{
-                    readOnly: Boolean(fileSaving),
-                    fontSize: 12,
-                    minimap: { enabled: false },
-                    wordWrap: 'on',
-                    scrollBeyondLastLine: false,
-                    automaticLayout: true,
-                    padding: { top: 12, bottom: 12 },
-                    'semanticHighlighting.enabled': true,
-                    bracketPairColorization: { enabled: true },
-                    guides: { bracketPairs: true },
-                  }}
-                />
-              </React.Suspense>
+                <React.Suspense
+                  fallback={
+                    <PlainTextEditorFallback
+                      value={fileContent ?? ''}
+                      saving={Boolean(fileSaving)}
+                      onChange={onFileContentChange}
+                      onSave={onSaveFile}
+                    />
+                  }
+                >
+                  <MonacoEditor
+                    path={activeFilePath || undefined}
+                    language={editorLanguageForPath(activeFilePath)}
+                    value={fileContent ?? ''}
+                    onChange={(next) => onFileContentChange?.(next ?? '')}
+                    onMount={(editor, monaco) => {
+                      editorRef.current = editor;
+                      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+                        void onSaveFile?.(editor.getValue());
+                      });
+                      editor.addCommand(monaco.KeyCode.F12, () => {
+                        languageActionsRef.current?.goToDefinition();
+                      });
+                      editor.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.F12, () => {
+                        languageActionsRef.current?.findReferences();
+                      });
+                      applyEditorCursorTarget();
+                    }}
+                    theme="vs-dark"
+                    options={{
+                      readOnly: Boolean(fileSaving),
+                      fontSize: 12,
+                      minimap: { enabled: false },
+                      wordWrap: 'on',
+                      scrollBeyondLastLine: false,
+                      automaticLayout: true,
+                      padding: { top: 12, bottom: 12 },
+                      'semanticHighlighting.enabled': true,
+                      bracketPairColorization: { enabled: true },
+                      guides: { bracketPairs: true },
+                    }}
+                  />
+                </React.Suspense>
+              </MonacoEditorErrorBoundary>
             ) : (
               <div className="h-full w-full flex items-center justify-center text-[12px] text-[var(--muted)]">
                 No file selected.

@@ -2336,7 +2336,8 @@ const IMAGE_FILE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp
 const VIDEO_FILE_EXTENSIONS = new Set(['mp4', 'webm', 'mov', 'm4v', 'ogv', 'ogg', 'avi', 'mkv', 'wmv']);
 const FS_THUMB_MAX_BYTES = 8 * 1024 * 1024;
 const FS_MEDIA_MAX_BYTES = 96 * 1024 * 1024;
-const FS_EDITOR_MAX_BYTES = 512 * 1024;
+const FS_EDITOR_MAX_BYTES = 2 * 1024 * 1024;
+const FS_TEXT_CHUNK_MAX_BYTES = 512 * 1024;
 const FS_QUICK_OPEN_MAX_RESULTS = 200;
 const ASSISTANT_BASH_DEFAULT_TIMEOUT_MS = 30_000;
 const ASSISTANT_BASH_MAX_TIMEOUT_MS = 120_000;
@@ -19375,6 +19376,144 @@ export async function startDroneHubApiServer(opts: {
 
       // GET /api/drones/:id/fs/thumb?path=/...
       // Returns image bytes for thumbnail rendering.
+      // GET /api/drones/:id/fs/text-chunk?path=/...&offset=0&limit=...
+      // Reads a bounded UTF-8 chunk for large read-only text viewing.
+      if (method === 'GET' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'drones' && parts[3] === 'fs' && parts[4] === 'text-chunk') {
+        const droneRef = decodeURIComponent(parts[2]);
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        const droneId = resolved.id;
+        const drone = resolved.drone;
+        const runtime = droneRuntime(drone);
+        const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
+
+        const targetPath = normalizeFsPathForRuntime(drone, u.searchParams.get('path') ?? '', { fallbackToHome: false });
+        if (!targetPath || targetPath === '/') {
+          json(res, 400, { ok: false, error: 'missing file path' });
+          return;
+        }
+        const rawOffset = Number(u.searchParams.get('offset') ?? 0);
+        const offset = Math.max(0, Number.isFinite(rawOffset) ? Math.floor(rawOffset) : 0);
+        const limit = clampIntParam(u.searchParams.get('limit'), FS_TEXT_CHUNK_MAX_BYTES, 1, FS_TEXT_CHUNK_MAX_BYTES);
+
+        if (runtime === 'host') {
+          try {
+            const resolvedPath = path.resolve(targetPath);
+            const st = await fs.stat(resolvedPath);
+            if (!st.isFile()) {
+              json(res, 404, { ok: false, error: `file not found: ${resolvedPath}`, id: droneId, name: droneName, path: resolvedPath });
+              return;
+            }
+            const size = Number.isFinite(st.size) ? Math.max(0, Math.floor(st.size)) : 0;
+            const start = Math.min(offset, size);
+            const readLength = Math.min(limit, Math.max(0, size - start));
+            const buf = Buffer.alloc(readLength);
+            if (readLength > 0) {
+              const handle = await fs.open(resolvedPath, 'r');
+              try {
+                await handle.read(buf, 0, readLength, start);
+              } finally {
+                await handle.close();
+              }
+            }
+            const mime = await hostMimeType(resolvedPath);
+            json(res, 200, {
+              ok: true,
+              id: droneId,
+              name: droneName,
+              path: resolvedPath,
+              kind: 'text-chunk',
+              mime: mime || 'text/plain',
+              size,
+              mtimeMs: Number.isFinite(st.mtimeMs) ? Math.max(0, Math.floor(st.mtimeMs)) : null,
+              offset: start,
+              nextOffset: start + readLength,
+              eof: start + readLength >= size,
+              content: buf.toString('utf8'),
+            });
+            return;
+          } catch (e: any) {
+            const msg = e?.message ?? String(e);
+            const code = hostFsErrorStatus(e);
+            json(res, code, { ok: false, error: msg, id: droneId, name: droneName, path: path.resolve(targetPath) });
+            return;
+          }
+        }
+
+        const script = [
+          'set -euo pipefail',
+          `target=${bashQuote(targetPath)}`,
+          `offset=${String(offset)}`,
+          `limit=${String(limit)}`,
+          'if [ ! -f "$target" ]; then echo "__ERR__\tnot-file"; exit 3; fi',
+          'size=$(wc -c < "$target" | tr -d "[:space:]")',
+          'if [ -z "$size" ]; then size=0; fi',
+          'mtime=$(stat -c %Y -- "$target" 2>/dev/null || echo 0)',
+          'mime=""',
+          'if command -v file >/dev/null 2>&1; then mime=$(file -Lb --mime-type -- "$target" 2>/dev/null || true); fi',
+          'if [ "$offset" -gt "$size" ]; then offset="$size"; fi',
+          'remaining=$((size - offset))',
+          'count="$limit"',
+          'if [ "$remaining" -lt "$count" ]; then count="$remaining"; fi',
+          'printf "__META__\t%s\t%s\t%s\t%s\t%s\n" "$mime" "$size" "$mtime" "$offset" "$count"',
+          'if [ "$count" -gt 0 ]; then dd if="$target" bs=1 skip="$offset" count="$count" status=none | base64 | tr -d "\\n"; fi',
+        ].join('\n');
+        try {
+          const r = await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: resolved.drone }, async ({ containerName }) => {
+            return await dvmExec(containerName, 'bash', ['-lc', script]);
+          });
+          const out = `${String(r.stdout ?? '')}\n${String(r.stderr ?? '')}`;
+          if (r.code !== 0) {
+            if (/__ERR__\s+not-file\b/i.test(out)) {
+              json(res, 404, { ok: false, error: `file not found: ${targetPath}`, id: droneId, name: droneName, path: targetPath });
+              return;
+            }
+            json(res, 500, { ok: false, error: (r.stderr || r.stdout || 'failed reading file chunk').trim(), id: droneId, name: droneName, path: targetPath });
+            return;
+          }
+          const stdout = String(r.stdout ?? '');
+          const firstNl = stdout.indexOf('\n');
+          if (firstNl < 0) {
+            json(res, 500, { ok: false, error: 'file chunk response malformed', id: droneId, name: droneName, path: targetPath });
+            return;
+          }
+          const meta = stdout.slice(0, firstNl).split('\t');
+          if (meta.length < 6 || meta[0] !== '__META__') {
+            json(res, 500, { ok: false, error: 'file chunk metadata missing', id: droneId, name: droneName, path: targetPath });
+            return;
+          }
+          const mimeRaw = String(meta[1] ?? '').trim().toLowerCase();
+          const sizeNum = Number(meta[2] ?? 0);
+          const mtimeSec = Number(meta[3] ?? 0);
+          const chunkOffset = Number(meta[4] ?? 0);
+          const count = Number(meta[5] ?? 0);
+          const buf = Buffer.from(stdout.slice(firstNl + 1).trim(), 'base64');
+          const safeSize = Number.isFinite(sizeNum) ? Math.max(0, Math.floor(sizeNum)) : 0;
+          const safeOffset = Number.isFinite(chunkOffset) ? Math.max(0, Math.floor(chunkOffset)) : 0;
+          const safeCount = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+          json(res, 200, {
+            ok: true,
+            id: droneId,
+            name: droneName,
+            path: targetPath,
+            kind: 'text-chunk',
+            mime: mimeRaw || 'text/plain',
+            size: safeSize,
+            mtimeMs: Number.isFinite(mtimeSec) ? Math.max(0, Math.floor(mtimeSec * 1000)) : null,
+            offset: safeOffset,
+            nextOffset: safeOffset + safeCount,
+            eof: safeOffset + safeCount >= safeSize,
+            content: buf.toString('utf8'),
+          });
+          return;
+        } catch (e: any) {
+          const msg = e?.message ?? String(e);
+          const code = looksLikeMissingContainerError(msg) ? 404 : 500;
+          json(res, code, { ok: false, error: code === 500 ? 'failed reading file chunk' : msg, id: droneId, name: droneName, path: targetPath });
+          return;
+        }
+      }
+
       // GET /api/drones/:id/fs/file?path=/...
       // Reads file data for editor/preview usage (UTF-8 text content or binary metadata).
       if (method === 'GET' && parts.length === 5 && parts[0] === 'api' && parts[1] === 'drones' && parts[3] === 'fs' && parts[4] === 'file') {

@@ -97,6 +97,7 @@ import {
   isDroneStartingOrSeeding,
   makeId,
   normalizeContainerPathInput,
+  resolveDroneFileOpenPath,
   resolveChatNameForDrone,
   suggestNextDroneChatName,
 } from './droneHub/app/helpers';
@@ -2210,29 +2211,31 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   }, [requestRightPanelTab]);
   const openFileInFilesPane = React.useCallback(
     (next: { path: string; name: string; line?: number | null; column?: number | null }) => {
-      const containerPath = String(next.path ?? '').trim();
-      if (!containerPath) return;
-      const slash = containerPath.lastIndexOf('/');
-      const parentPath = slash > 0 ? containerPath.slice(0, slash) : '/';
+      const resolvedPath = resolveDroneFileOpenPath(currentDrone, next.path);
+      if (!resolvedPath) return;
+      const slash = resolvedPath.lastIndexOf('/');
+      const parentPath = slash > 0 ? resolvedPath.slice(0, slash) : '/';
+      const name = String(next.name ?? '').trim() || resolvedPath.split('/').filter(Boolean).pop() || resolvedPath;
       setCurrentFsPath(parentPath || '/');
-      openEditorFile(next);
+      openEditorFile({ ...next, path: resolvedPath, name });
       focusEditorPane();
     },
-    [focusEditorPane, openEditorFile, setCurrentFsPath],
+    [currentDrone, focusEditorPane, openEditorFile, setCurrentFsPath],
   );
   const openFileInPanelFromFilesPane = React.useCallback(
     (next: { path: string; name: string; line?: number | null; column?: number | null }): boolean => {
       const droneId = String(currentDrone?.id ?? '').trim();
-      const containerPath = String(next.path ?? '').trim();
-      if (!droneId || !containerPath) return false;
-      const slash = containerPath.lastIndexOf('/');
-      const parentPath = slash > 0 ? containerPath.slice(0, slash) : '/';
+      const resolvedPath = resolveDroneFileOpenPath(currentDrone, next.path);
+      if (!droneId || !resolvedPath) return false;
+      const slash = resolvedPath.lastIndexOf('/');
+      const parentPath = slash > 0 ? resolvedPath.slice(0, slash) : '/';
+      const name = String(next.name ?? '').trim() || resolvedPath.split('/').filter(Boolean).pop() || resolvedPath;
       setCurrentFsPath(parentPath || '/');
-      openEditorFile(next);
+      openEditorFile({ ...next, path: resolvedPath, name });
       focusEditorPane();
       return true;
     },
-    [currentDrone?.id, focusEditorPane, openEditorFile, setCurrentFsPath],
+    [currentDrone, focusEditorPane, openEditorFile, setCurrentFsPath],
   );
 
   const openQuickOpenFromShortcut = React.useCallback(() => {
@@ -2244,14 +2247,14 @@ export function useDroneHubAppModel(): DroneHubAppModel {
 
   const revealEditorLocationParent = React.useCallback(
     (pathRaw: string) => {
-      const containerPath = String(pathRaw ?? '').trim();
-      if (!containerPath) return;
-      const slash = containerPath.lastIndexOf('/');
-      const parentPath = slash > 0 ? containerPath.slice(0, slash) : '/';
+      const resolvedPath = resolveDroneFileOpenPath(currentDrone, pathRaw);
+      if (!resolvedPath) return;
+      const slash = resolvedPath.lastIndexOf('/');
+      const parentPath = slash > 0 ? resolvedPath.slice(0, slash) : '/';
       setCurrentFsPath(parentPath || '/');
       focusEditorPane();
     },
-    [focusEditorPane, setCurrentFsPath],
+    [currentDrone, focusEditorPane, setCurrentFsPath],
   );
 
   const goBackEditorLocationFromShortcut = React.useCallback(() => {
@@ -2331,18 +2334,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   );
   const openMarkdownFileReference = React.useCallback(
     (ref: MarkdownFileReference) => {
-      let rawPath = String(ref.path ?? '').trim().replace(/\\/g, '/');
-      if (!rawPath) return;
-      if (rawPath.startsWith('./')) rawPath = rawPath.slice(2);
-      const collapsed = rawPath.replace(/\/+/g, '/');
-      const normalized = collapsed.replace(/^\/+/, '');
-      if (!collapsed || !normalized) return;
-      const basePath = droneHomePath(currentDrone).replace(/\/+$/, '') || '/work/repo';
-      const containerPath = collapsed.startsWith('/')
-        ? collapsed
-        : normalized.startsWith('work/repo/') || normalized.startsWith('dvm-data/home/')
-          ? `/${normalized}`
-          : `${basePath}/${normalized}`;
+      const containerPath = resolveDroneFileOpenPath(currentDrone, ref.path);
+      if (!containerPath) return;
       const name = containerPath.split('/').filter(Boolean).pop() || containerPath;
       openFileInFilesPane({
         path: containerPath,

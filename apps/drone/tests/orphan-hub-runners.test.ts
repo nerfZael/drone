@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { parseHubRunnerProcessesFromPsOutput, selectHubRunnerPidsToStop } from '../src/hub/orphan-hub-runners';
+import { parseHubRunnerProcessesFromPsOutput, parseHubUiServerProcessesFromPsOutput, selectHubRunnerPidsToStop } from '../src/hub/orphan-hub-runners';
 
 describe('orphan hub runner recovery helpers', () => {
   test('parses hub runner processes for the current cli path', () => {
@@ -57,5 +57,31 @@ describe('orphan hub runner recovery helpers', () => {
     );
 
     expect(selected).toEqual([2920616]);
+  });
+
+  test('parses hub-owned vite ui server processes for the current repo', () => {
+    const repoRoot = '/home/zael/dev/me/drone';
+    const parsed = parseHubUiServerProcessesFromPsOutput(
+      [
+        `2920632 node ${repoRoot}/node_modules/.bin/vite --port 5174 --strictPort`,
+        `2920633 node ${repoRoot}/node_modules/vite/bin/vite.js --port 5176 --strictPort`,
+        '12345 node /some/other/drone/node_modules/.bin/vite --port 5174 --strictPort',
+        `67890 node ${repoRoot}/node_modules/.bin/vite --port 5174`,
+      ].join('\n'),
+      { repoRoot }
+    );
+
+    expect(parsed).toEqual([
+      {
+        pid: 2920632,
+        uiPort: 5174,
+        args: `node ${repoRoot}/node_modules/.bin/vite --port 5174 --strictPort`,
+      },
+      {
+        pid: 2920633,
+        uiPort: 5176,
+        args: `node ${repoRoot}/node_modules/vite/bin/vite.js --port 5176 --strictPort`,
+      },
+    ]);
   });
 });

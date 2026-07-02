@@ -87,7 +87,7 @@ describe('OpenedDroneFilePanel', () => {
     const html = renderPanel(makeFile({ path: '/work/repo/src/index.ts', name: 'index.ts' }));
     await Promise.resolve();
 
-    expect(html).toContain('Loading editor...');
+    expect(html).toContain('Plain text editor');
     expect(monacoImportCount).toBe(1);
   });
 
@@ -96,5 +96,13 @@ describe('OpenedDroneFilePanel', () => {
 
     expect(html).toContain('Save before using go to definition');
     expect(html).toContain('Save before finding references');
+  });
+
+  test('renders oversized text files in the large-file viewer', () => {
+    const html = renderPanel(makeFile({ kind: 'large-text', size: 30 * 1024 * 1024, content: '' }));
+
+    expect(html).toContain('Large file');
+    expect(html).toContain('Load more');
+    expect(html).not.toContain('Loading editor...');
   });
 });

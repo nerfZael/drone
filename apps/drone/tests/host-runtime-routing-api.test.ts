@@ -125,8 +125,10 @@ describeSocketSuite('host runtime routing api', () => {
     fs.mkdirSync(droneRoot, { recursive: true });
 
     const notePath = path.join(droneRoot, 'note.txt');
+    const largeNotePath = path.join(droneRoot, 'large-note.txt');
     const imagePath = path.join(droneRoot, 'thumb.png');
     fs.writeFileSync(notePath, 'hello\n', 'utf8');
+    fs.writeFileSync(largeNotePath, `${'x'.repeat(700 * 1024)}\n`, 'utf8');
     fs.writeFileSync(
       imagePath,
       Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7bKJYAAAAASUVORK5CYII=', 'base64'),
@@ -156,6 +158,24 @@ describeSocketSuite('host runtime routing api', () => {
     expect(readResp.data?.ok).toBe(true);
     expect(readResp.data?.kind).toBe('text');
     expect(String(readResp.data?.content ?? '')).toBe('hello\n');
+
+    const largeReadResp = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/fs/file?path=${encodeURIComponent(largeNotePath)}`,
+    );
+    expect(largeReadResp.r.status).toBe(200);
+    expect(largeReadResp.data?.ok).toBe(true);
+    expect(largeReadResp.data?.kind).toBe('text');
+    expect(String(largeReadResp.data?.content ?? '').length).toBe(700 * 1024 + 1);
+
+    const chunkResp = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/fs/text-chunk?path=${encodeURIComponent(largeNotePath)}&offset=10&limit=32`,
+    );
+    expect(chunkResp.r.status).toBe(200);
+    expect(chunkResp.data?.ok).toBe(true);
+    expect(chunkResp.data?.kind).toBe('text-chunk');
+    expect(chunkResp.data?.offset).toBe(10);
+    expect(chunkResp.data?.nextOffset).toBe(42);
+    expect(String(chunkResp.data?.content ?? '')).toBe('x'.repeat(32));
 
     const writeResp = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/fs/file`, {
       method: 'POST',

@@ -14,6 +14,7 @@ import { extractAgentCopilotFromAgentMessage } from './agent-copilot-parser';
 import { extractDroneHubTasksFromAgentMessage } from './drone-hub-task-parser';
 import { collectInlineAgentMedia, type InlineAgentMedia } from './inline-agent-media';
 import { IconAlert, IconBot, IconCheck, IconCopy, IconImage, IconJobs, IconOpen, IconSnapshot, IconSpinner, IconTldr, IconUser } from './icons';
+import { VideoPreview } from '../media/VideoPreview';
 
 type TldrState =
   | { status: 'idle' }
@@ -389,21 +390,17 @@ export const TranscriptTurn = React.memo(
                             Failed to load video.
                           </div>
                         ) : (
-                          <video
-                            controls
-                            playsInline
-                            preload="metadata"
+                          <VideoPreview
+                            src={media.src}
+                            label={media.label}
                             className="block w-full max-h-[340px] bg-[var(--panel)]"
-                            aria-label={media.label}
                             onError={() =>
                               setFailedInlineMediaById((prev) => ({
                                 ...prev,
                                 [media.id]: true,
                               }))
                             }
-                          >
-                            <source src={media.src} />
-                          </video>
+                          />
                         )}
                         {media.kind === 'video' ? (
                           <button

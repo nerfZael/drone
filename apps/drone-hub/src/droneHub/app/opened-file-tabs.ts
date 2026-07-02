@@ -1,4 +1,4 @@
-export type OpenedFileKind = 'text' | 'image' | 'video' | 'binary';
+export type OpenedFileKind = 'text' | 'large-text' | 'image' | 'video' | 'binary';
 
 export type OpenedFileTab = {
   tabId: string;

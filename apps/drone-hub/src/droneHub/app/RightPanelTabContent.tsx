@@ -10,6 +10,7 @@ import type {
   PortReachabilityByHostPort,
 } from '../types';
 import type { DroneOpenedFileState, DroneOpenedFileTabState } from '../files/opened-file-types';
+import { OpenedDroneFilePanel } from '../files/OpenedDroneFilePanel';
 import { QuickOpenModal } from '../files/QuickOpenModal';
 import type { QuickOpenFile, QuickOpenRecentFile } from '../files/quick-open-state';
 import { DronePullRequestsDock } from '../pullRequests/DronePullRequestsDock';
@@ -38,9 +39,6 @@ const LazyDroneFleetDock = React.lazy(async () => ({
 }));
 const LazyDroneFilesDock = React.lazy(async () => ({
   default: (await import('../files/DroneFilesDock')).DroneFilesDock,
-}));
-const LazyOpenedDroneFilePanel = React.lazy(async () => ({
-  default: (await import('../files/OpenedDroneFilePanel')).OpenedDroneFilePanel,
 }));
 const LazyDroneLinksDock = React.lazy(async () => ({
   default: (await import('../overview/DroneLinksDock')).DroneLinksDock,
@@ -472,7 +470,7 @@ export function RightPanelTabContent({
               onOpenFile={quickOpen.onOpenFile}
             />
             {openedFile.path ? (
-              <LazyOpenedDroneFilePanel
+              <OpenedDroneFilePanel
                 droneId={drone.id}
                 file={openedFile}
                 fileTabs={openedFileTabs}
