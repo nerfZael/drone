@@ -149,7 +149,7 @@ class VoskWakeWordDetector(
                 now,
             )?.let { WakePhraseMatch(it) }
         } else {
-            WakePhraseMatcher.match(text, assistantProfiles)
+            WakePhraseMatcher.match(text, assistantProfiles, shutdownPhrase)
         } ?: return null
         val phrase = match.phrase
         val suppress = synchronized(recognizerLock) {

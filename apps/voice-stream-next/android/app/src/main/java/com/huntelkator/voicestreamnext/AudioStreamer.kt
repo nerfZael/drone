@@ -637,9 +637,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
             }
             match.hasShutdown -> {
                 wakeDetector?.reset()
-                cuePlayer.play(LocalCue.SLEEPING_OFF)
-                onStatus("Off")
-                stop()
+                confirmShutdownWakePhrase(onStatus)
             }
             match.hasStart && !sleeping -> {
                 sleeping = false
@@ -720,12 +718,52 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
         }
     }
 
+    private fun confirmShutdownWakePhrase(onStatus: (String) -> Unit) {
+        if (!wakeConfirmationInFlight.compareAndSet(false, true)) return
+        val expectedPhrase = approvalSettings.shutdownPhrase.ifBlank { VoicePhraseDefaults.shutdownPhrase }
+        val detectedWhileSleeping = sleeping
+        val pcm = concatFrames(preRollBuffer.snapshot())
+        if (pcm.size < WAKE_CONFIRMATION_MIN_BYTES) {
+            wakeConfirmationInFlight.set(false)
+            onStatus(shutdownConfirmationFailureStatus("not enough wake audio", detectedWhileSleeping))
+            return
+        }
+        cuePlayer.play(LocalCue.WAKE_PENDING)
+        onStatus(if (detectedWhileSleeping) "Sleeping. Confirming shutdown phrase." else "Awake: confirming shutdown phrase.")
+        thread(name = "VoiceStreamShutdownConfirmation") {
+            val result = runCatching { api.confirmWakePhrase(pcm, expectedPhrase) }
+            mainHandler.post {
+                wakeConfirmationInFlight.set(false)
+                if (!active.get()) return@post
+                if (result.getOrNull()?.confirmed == true) {
+                    wakeDetector?.reset()
+                    cuePlayer.play(LocalCue.SLEEPING_OFF)
+                    onStatus("Off")
+                    stop()
+                } else {
+                    wakeDetector?.reset()
+                    onStatus(shutdownConfirmationFailureStatus(result.exceptionOrNull()?.message, detectedWhileSleeping))
+                }
+            }
+        }
+    }
+
     private fun wakeConfirmationFailureStatus(message: String?): String {
         val text = message.orEmpty()
         return when {
             text.contains("not enough wake audio", ignoreCase = true) -> "Sleeping. Wake confirmation needs microphone audio."
             text.contains("credit", ignoreCase = true) -> "Sleeping. $text"
             else -> "Sleeping. Wake phrase was not confirmed."
+        }
+    }
+
+    private fun shutdownConfirmationFailureStatus(message: String?, detectedWhileSleeping: Boolean): String {
+        val prefix = if (detectedWhileSleeping) "Sleeping." else "Awake:"
+        val text = message.orEmpty()
+        return when {
+            text.contains("not enough wake audio", ignoreCase = true) -> "$prefix Shutdown confirmation needs microphone audio."
+            text.contains("credit", ignoreCase = true) -> "$prefix $text"
+            else -> "$prefix Shutdown phrase was not confirmed."
         }
     }
 

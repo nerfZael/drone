@@ -177,14 +177,24 @@ function concatPcmBuffers(buffers: ArrayBuffer[]): Uint8Array {
   return output;
 }
 
-function playLocalVoiceCue(cue: 'wake_pending' | 'unlock'): void {
-  const tones = cue === 'wake_pending'
-    ? [{ frequencyHz: 540, durationMs: 45 }]
-    : [
+function playLocalVoiceCue(cue: 'wake_pending' | 'unlock' | 'sleeping_off'): void {
+  let tones: Array<{ frequencyHz: number; durationMs: number }>;
+  if (cue === 'wake_pending') {
+    tones = [{ frequencyHz: 540, durationMs: 45 }];
+  } else if (cue === 'sleeping_off') {
+    tones = [
+      { frequencyHz: 460, durationMs: 120 },
+      { frequencyHz: 0, durationMs: 50 },
+      { frequencyHz: 330, durationMs: 150 },
+      { frequencyHz: 220, durationMs: 230 },
+    ];
+  } else {
+    tones = [
       { frequencyHz: 360, durationMs: 70 },
       { frequencyHz: 560, durationMs: 80 },
       { frequencyHz: 820, durationMs: 130 },
     ];
+  }
   const gainValue = cue === 'wake_pending' ? 0.035 : 0.22;
   const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
   if (!AudioContextClass) return;
@@ -196,6 +206,10 @@ function playLocalVoiceCue(cue: 'wake_pending' | 'unlock'): void {
     let cursor = context.currentTime + 0.01;
     for (const tone of tones) {
       const durationSec = tone.durationMs / 1000;
+      if (tone.frequencyHz <= 0) {
+        cursor += durationSec;
+        continue;
+      }
       const oscillator = context.createOscillator();
       const envelope = context.createGain();
       const fadeSec = Math.min(durationSec / 3, 0.01);
@@ -223,6 +237,14 @@ function wakeConfirmationFailureStatus(error: unknown): string {
   if (/not enough wake audio/i.test(message)) return 'Sleeping. Wake confirmation needs microphone audio.';
   if (/credit/i.test(message)) return `Sleeping. ${message}`;
   return 'Sleeping. Wake phrase was not confirmed.';
+}
+
+function shutdownConfirmationFailureStatus(error: unknown, mode: VoiceMode): string {
+  const prefix = mode === 'sleeping' ? 'Sleeping.' : 'Awake.';
+  const message = String(error ?? '');
+  if (/not enough wake audio/i.test(message)) return `${prefix} Shutdown confirmation needs microphone audio.`;
+  if (/credit/i.test(message)) return `${prefix} ${message}`;
+  return `${prefix} Shutdown phrase was not confirmed.`;
 }
 
 const assistantIconButtonClass =
@@ -6060,11 +6082,12 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
     startWakeListener();
   }
 
-  function turnOff() {
+  function turnOff(options: { cue?: 'sleeping_off' } = {}) {
     if (streaming) void stopVoice('off');
     stopSpeechAudioPlayback({ clearQueue: true });
     stopWakeListener();
     resetApprovalCollection();
+    if (options.cue) playLocalVoiceCue(options.cue);
     setMode('off');
     setStatus('Off.');
     void reportDesktopStatus('off', 'Off.');
@@ -6132,14 +6155,38 @@ function DesktopVoicePanel({ client, onRefresh }: { client: ApiClient; onRefresh
         return;
       }
       if (sleepMatch === 'shutdown') {
-        turnOff();
+        if (wakeConfirmationInFlightRef.current) return;
+        setStatus('Sleeping. Confirming shutdown phrase.');
+        const confirmation = await confirmWakePhraseAudio(settings?.shutdownPhrase ?? 'shut down completely').catch((err) => ({
+          confirmed: false,
+          error: err instanceof Error ? err.message : String(err),
+        }));
+        if (!confirmation.confirmed || modeRef.current !== 'sleeping') {
+          const nextStatus = shutdownConfirmationFailureStatus(confirmation.error, 'sleeping');
+          setStatus(nextStatus);
+          void reportDesktopStatus('sleeping', nextStatus);
+          return;
+        }
+        turnOff({ cue: 'sleeping_off' });
         return;
       }
       setStatus('Sleeping. Say your unlock or shutdown phrase.');
       return;
     }
     if (settings && matchesPhrase(text, settings.shutdownPhrase)) {
-      turnOff();
+      if (wakeConfirmationInFlightRef.current) return;
+      setStatus('Awake. Confirming shutdown phrase.');
+      const confirmation = await confirmWakePhraseAudio(settings.shutdownPhrase).catch((err) => ({
+        confirmed: false,
+        error: err instanceof Error ? err.message : String(err),
+      }));
+      if (!confirmation.confirmed || modeRef.current !== currentMode) {
+        const nextStatus = shutdownConfirmationFailureStatus(confirmation.error, currentMode);
+        setStatus(nextStatus);
+        void reportDesktopStatus(currentMode, nextStatus);
+        return;
+      }
+      turnOff({ cue: 'sleeping_off' });
       return;
     }
     const match = wakePhraseMatch(text, settings?.assistantProfiles);

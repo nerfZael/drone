@@ -1753,6 +1753,14 @@ function wakeConfirmationFailureStatus(error) {
   return 'Sleeping. Wake phrase was not confirmed.';
 }
 
+function shutdownConfirmationFailureStatus(error, mode = state.mode) {
+  const prefix = mode === 'sleeping' ? 'Sleeping.' : 'Awake.';
+  const message = String(error || '');
+  if (/not enough wake audio/i.test(message)) return `${prefix} Shutdown confirmation needs microphone audio.`;
+  if (/credit/i.test(message)) return `${prefix} ${message}`;
+  return `${prefix} Shutdown phrase was not confirmed.`;
+}
+
 function pushPreRollFrame(pcmBuffer) {
   if (state.mode === 'recording' || state.mode === 'paused' || state.mode === 'off') return;
   preRollBuffer.push(pcmBuffer);
@@ -3405,8 +3413,7 @@ function scheduleSleepPhraseCompletion(match, text, finalResult) {
     const candidate = state.sleepPhraseCandidate;
     if (!candidate || candidate.match !== match || !candidate.complete || state.mode !== 'sleeping') return;
     resetSleepPhraseCandidate();
-    void recordCommandRecognitionLog({ text, final: finalResult, outcome: 'matched', command: match, reason: 'stable partial' });
-    void applySleepPhraseMatch(match).catch((err) => showStatus(err?.message || 'Could not apply sleep command.'));
+    void processPhraseText(text, false, true).catch((err) => showStatus(err?.message || 'Could not apply sleep command.'));
   }, SLEEP_PHRASE_STABLE_MS);
 }
 
@@ -3788,6 +3795,25 @@ async function processPhraseText(text, finalizeNow = false, finalResult = false)
           return;
         }
       }
+      if (sleepMatch.match === 'shutdown') {
+        if (state.wakeConfirmationInFlight) return;
+        showStatus('Sleeping. Confirming shutdown phrase.');
+        const confirmation = await confirmWakePhraseAudio(settings?.shutdownPhrase || 'shut down completely').catch((err) => ({
+          confirmed: false,
+          error: err?.message || String(err),
+        }));
+        if (!confirmation.confirmed || state.mode !== 'sleeping') {
+          showStatus(shutdownConfirmationFailureStatus(confirmation.error, 'sleeping'));
+          void recordCommandRecognitionLog({
+            text: confirmation.text || text,
+            final: true,
+            outcome: 'ignored',
+            command: 'shutdown',
+            reason: confirmation.error || 'Groq shutdown confirmation rejected',
+          });
+          return;
+        }
+      }
       await applySleepPhraseMatch(sleepMatch.match);
       return;
     }
@@ -3808,6 +3834,24 @@ async function processPhraseText(text, finalizeNow = false, finalResult = false)
   }
   if (settings && globalThis.VoicePhrases?.matchesPhrase(text, settings.shutdownPhrase)) {
     void recordCommandRecognitionLog({ text, final: finalResult, outcome: 'matched', command: 'shutdown' });
+    if (state.wakeConfirmationInFlight) return;
+    const modeBeforeConfirmation = state.mode;
+    showStatus(modeBeforeConfirmation === 'sleeping' ? 'Sleeping. Confirming shutdown phrase.' : 'Awake. Confirming shutdown phrase.');
+    const confirmation = await confirmWakePhraseAudio(settings.shutdownPhrase).catch((err) => ({
+      confirmed: false,
+      error: err?.message || String(err),
+    }));
+    if (!confirmation.confirmed || state.mode !== modeBeforeConfirmation) {
+      showStatus(shutdownConfirmationFailureStatus(confirmation.error, modeBeforeConfirmation));
+      void recordCommandRecognitionLog({
+        text: confirmation.text || text,
+        final: true,
+        outcome: 'ignored',
+        command: 'shutdown',
+        reason: confirmation.error || 'Groq shutdown confirmation rejected',
+      });
+      return;
+    }
     await turnOff({ cue: 'sleeping_off' });
     return;
   }
