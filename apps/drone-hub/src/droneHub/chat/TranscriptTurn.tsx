@@ -172,10 +172,12 @@ export const TranscriptTurn = React.memo(
       [cleanedAgentMessage, droneId, droneHomePath],
     );
     const [failedInlineMediaById, setFailedInlineMediaById] = React.useState<Record<string, true>>({});
+    const inlineMediaVisible =
+      typeof inlineImagesOverride === 'boolean' ? inlineImagesOverride : transcriptInlineImages;
     const showInlineMedia = Boolean(
-      inlineMedia.length > 0 &&
-        (typeof inlineImagesOverride === 'boolean' ? inlineImagesOverride : transcriptInlineImages),
+      inlineMedia.length > 0 && inlineMediaVisible,
     );
+    const inlineMediaToggleLabel = showInlineMedia ? 'Hide inline media' : 'Show inline media';
     const openInlineMediaTarget = React.useCallback(
       (media: InlineAgentMedia) => {
         if (media.fileRef && onOpenFileReference) {
@@ -439,15 +441,15 @@ export const TranscriptTurn = React.memo(
                     onClick={() =>
                       setInlineImagesOverride(
                         messageId,
-                        !(typeof inlineImagesOverride === 'boolean' ? inlineImagesOverride : transcriptInlineImages),
+                        !inlineMediaVisible,
                       )
                     }
                     disabled={false}
                     className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-opacity ${
                       showInlineMedia ? 'text-[var(--accent)] border-[var(--accent-muted)] bg-[rgba(0,0,0,.25)]' : 'text-[var(--muted)] border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)]'
-                    } opacity-0 group-hover:opacity-100 hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[rgba(0,0,0,.25)]`}
-                    title={`${showInlineMedia ? 'Hide' : 'Show'} inline media${transcriptInlineImages ? ' (global default on)' : ''}`}
-                    aria-label="Toggle inline media"
+                    } opacity-100 hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[rgba(0,0,0,.25)]`}
+                    title={`${inlineMediaToggleLabel}${transcriptInlineImages ? ' (global default on)' : ''}`}
+                    aria-label={inlineMediaToggleLabel}
                   >
                     <IconImage className="w-3.5 h-3.5 opacity-90" />
                   </button>
