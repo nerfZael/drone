@@ -670,6 +670,11 @@ function resolveOpenAiRealtimeCredential(db: VoiceStreamNextDb, userId: string):
   return envKey ? { apiKey: envKey, source: 'realtime_env_key' } : null;
 }
 
+export function openAiSafetyIdentifier(userId: string, deviceId: string): string {
+  const digest = crypto.createHash('sha256').update(JSON.stringify([userId, deviceId])).digest('hex');
+  return `vsn_${digest.slice(0, 32)}`;
+}
+
 function openAiRealtimeModel(): string {
   return process.env.VOICE_STREAM_NEXT_OPENAI_REALTIME_MODEL?.trim() || process.env.OPENAI_REALTIME_MODEL?.trim() || 'gpt-realtime-2';
 }
@@ -4846,7 +4851,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     const upstream = new WebSocket(upstreamUrl, {
       headers: {
         Authorization: `Bearer ${credential.apiKey}`,
-        'OpenAI-Safety-Identifier': `${device.userId}:${device.id}`,
+        'OpenAI-Safety-Identifier': openAiSafetyIdentifier(device.userId, device.id),
       },
     });
     const pendingAudio: Uint8Array[] = [];

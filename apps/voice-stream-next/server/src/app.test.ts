@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { binaryChunk, binarySize, buildApp, mergeTimestampedTranscriptText, mergeTranscriptText } from './app.js';
+import { binaryChunk, binarySize, buildApp, mergeTimestampedTranscriptText, mergeTranscriptText, openAiSafetyIdentifier } from './app.js';
 import type { VoiceRecordingRecord } from './db.js';
 import { pcm16ToWav } from './wav.js';
 
@@ -98,6 +98,24 @@ describe('app configuration', () => {
 
     expect(binarySize(fragments)).toBe(6);
     expect(Array.from(binaryChunk(fragments) ?? [])).toEqual([1, 2, 3, 4, 6, 7]);
+  });
+
+  test('keeps OpenAI Realtime safety identifiers below the header limit', () => {
+    const id = openAiSafetyIdentifier(
+      'usr_1234567890abcdefghijklmnopqrstuvwxyz_1234567890abcdefghijklmnopqrstuvwxyz',
+      'dev_1234567890abcdefghijklmnopqrstuvwxyz_1234567890abcdefghijklmnopqrstuvwxyz',
+    );
+
+    expect(id.length).toBeLessThanOrEqual(64);
+    expect(id).toMatch(/^vsn_[a-f0-9]{32}$/);
+    expect(id).toBe(openAiSafetyIdentifier(
+      'usr_1234567890abcdefghijklmnopqrstuvwxyz_1234567890abcdefghijklmnopqrstuvwxyz',
+      'dev_1234567890abcdefghijklmnopqrstuvwxyz_1234567890abcdefghijklmnopqrstuvwxyz',
+    ));
+    expect(id).not.toBe(openAiSafetyIdentifier(
+      'usr_1234567890abcdefghijklmnopqrstuvwxyz_1234567890abcdefghijklmnopqrstuvwxyz',
+      'dev_different',
+    ));
   });
 
   test('merges overlapping transcript text when wording is not identical', () => {
