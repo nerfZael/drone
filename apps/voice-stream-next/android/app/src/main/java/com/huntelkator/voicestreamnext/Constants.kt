@@ -16,6 +16,7 @@ object Constants {
     const val PREF_ASSISTANT_SPEECH_PLAYBACK_ENABLED = "assistant_speech_playback_enabled"
     const val PREF_ASSISTANT_SPEECH_PLAYBACK_VOLUME_PERCENT = "assistant_speech_playback_volume_percent"
     const val PREF_SUPPRESS_WAKE_DURING_PLAYBACK = "suppress_wake_during_playback"
+    const val PREF_HEY_SEBASTIAN_MODE = "hey_sebastian_mode"
     const val PREF_MICROPHONE_DEVICE_KEY = "microphone_device_key"
 
     const val ASSISTANT_SPEECH_PLAYBACK_VOLUME_MIN_PERCENT = 50
@@ -53,6 +54,7 @@ object Constants {
     const val AUTH_DEV = "dev"
     const val AUTH_BEARER = "bearer"
     const val STREAM_TARGET_ASSISTANT = "assistant"
+    const val STREAM_TARGET_REALTIME = "realtime"
     const val STREAM_TARGET_PATCH = "patch"
     const val STREAM_TARGET_CLIPBOARD = "clipboard"
     val DEFAULT_SERVER_URL = BuildConfig.DEFAULT_SERVER_URL

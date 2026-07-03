@@ -308,6 +308,143 @@ export function assistantAvailableToolSummaries(db: VoiceStreamNextDb, userId: s
   return [...ASSISTANT_TOOLS, ...extensionTools];
 }
 
+export type AssistantRealtimeSessionConfig = {
+  instructions: string;
+  tools: unknown[];
+};
+
+export type AssistantRealtimeToolResult = {
+  output: string;
+  result: unknown;
+  toolCallId: string;
+  threadId: string;
+  approvalPending: boolean;
+  toolsChanged: boolean;
+};
+
+export function assistantRealtimeSessionConfig(db: VoiceStreamNextDb, userId: string, threadId: string): AssistantRealtimeSessionConfig {
+  const thread = db.thread(userId, threadId);
+  if (!thread) throw Object.assign(new Error('unknown assistant thread'), { statusCode: 404 });
+  const settings = db.ensureAssistantSettings(userId);
+  const persistedSkillToolNames = threadLoadedSkillToolNames(db, userId, thread);
+  const tools = responseToolDefinitions(db, userId, thread, { loadedSkillToolNames: persistedSkillToolNames })
+    .filter((tool: any) => String(tool?.name ?? '') !== 'speak');
+  const toolInstruction = toolCatalogInstruction(db, userId, tools);
+  const skillInstruction = skillCatalogInstruction(db, userId, thread);
+  const profileSystemPrompt = db.resolvedAssistantProfileSystemPrompt(userId, thread.assistantProfileId);
+  const recentContext = realtimeThreadContextInstruction(db, userId, threadId);
+  const instructions = [
+    modelInstructions({ settings, thread, profileSystemPrompt, toolInstruction, skillInstruction, allowToolCalls: tools.length > 0 }),
+    recentContext,
+    'Realtime mode speaks directly with audio, so do not call or ask for the speak tool. Reply naturally after using tools.',
+  ].filter(Boolean).join('\n\n');
+  return { instructions, tools };
+}
+
+export async function executeAssistantRealtimeTool(
+  db: VoiceStreamNextDb,
+  userId: string,
+  threadId: string,
+  runId: string | null,
+  modelToolCallId: string,
+  rawToolName: string,
+  rawArgs: unknown,
+): Promise<AssistantRealtimeToolResult> {
+  const thread = db.thread(userId, threadId);
+  if (!thread) throw Object.assign(new Error('unknown assistant thread'), { statusCode: 404 });
+  const loadedSkillToolNames = new Set(threadLoadedSkillToolNames(db, userId, thread));
+  const toolName = normalizeModelToolName(rawToolName);
+  if (toolName === 'speak') throw Object.assign(new Error('speak is not available in Realtime mode'), { statusCode: 403 });
+  const args = prepareAgentToolArguments(toolName, rawArgs);
+  ensureToolEnabled(thread, toolName, loadedSkillToolNames);
+  ensureCapability(thread, toolName);
+  ensureHandsFreeToolAvailable(db, userId, thread, toolName);
+  if (await dynamicToolBlockedByHandsFreeMode(db, userId, thread, toolName, args)) {
+    throw Object.assign(new Error(`${toolLabel(toolName, db, userId)} needs approval for this request and is unavailable while hands-free mode is on`), { statusCode: 403 });
+  }
+  const needsApproval = await approvalRequiredFor(db, userId, thread, toolName, args);
+  const toolCall = db.createToolCall(userId, threadId, {
+    runId,
+    toolName,
+    args,
+    approvalRequired: needsApproval,
+  });
+  db.addMessage(userId, threadId, {
+    role: 'assistant',
+    content: `Requested ${toolLabel(toolName, db, userId)}.`,
+    contentJson: JSON.stringify([{ type: 'toolCall', id: toolCall.id, modelCallId: modelToolCallId, name: toolName, arguments: args }]),
+  });
+
+  if (needsApproval) {
+    const approval = db.createApproval(userId, threadId, {
+      runId,
+      toolCallId: toolCall.id,
+      toolName,
+      label: toolLabel(toolName, db, userId),
+      args,
+    });
+    return {
+      output: JSON.stringify({
+        ok: false,
+        approvalPending: true,
+        approvalId: approval.id,
+        message: `${toolLabel(toolName, db, userId)} is waiting for approval.`,
+      }),
+      result: { ok: false, approvalPending: true, approvalId: approval.id },
+      toolCallId: toolCall.id,
+      threadId,
+      approvalPending: true,
+      toolsChanged: false,
+    };
+  }
+
+  try {
+    const latestThread = db.thread(userId, threadId) ?? thread;
+    const result = await executeApprovedTool(db, userId, latestThread, toolName, args, {
+      runId,
+      toolCallId: toolCall.id,
+    });
+    const updatedToolCall = db.updateToolCall(userId, toolCall.id, { status: 'completed', resultJson: JSON.stringify(result) }) ?? toolCall;
+    db.addMessage(userId, threadId, {
+      role: 'toolResult',
+      toolName,
+      toolCallId: updatedToolCall.id,
+      content: toolResultText(toolName, result),
+      contentJson: JSON.stringify(result),
+    });
+    return {
+      output: safeStringify({ ok: true, summary: toolResultText(toolName, result), result }),
+      result,
+      toolCallId: updatedToolCall.id,
+      threadId: String((result as any)?.threadId || threadId),
+      approvalPending: false,
+      toolsChanged: toolName === 'load_skill' || toolName === 'create_new_thread',
+    };
+  } catch (error: any) {
+    const failure = { ok: false, error: error?.message ?? String(error) };
+    db.updateToolCall(userId, toolCall.id, { status: 'failed', resultJson: JSON.stringify(failure) });
+    db.addMessage(userId, threadId, {
+      role: 'toolResult',
+      toolName,
+      toolCallId: toolCall.id,
+      isError: true,
+      content: failure.error,
+      contentJson: JSON.stringify(failure),
+    });
+    throw error;
+  }
+}
+
+export function finishAssistantRealtimeRun(db: VoiceStreamNextDb, userId: string, threadId: string, runId: string): void {
+  db.updateRun(userId, runId, { status: 'idle', completedAt: new Date().toISOString(), error: null });
+  const hasPendingApproval = db.listApprovals(userId, threadId).some((approval) => approval.status === 'pending');
+  db.updateThread(userId, threadId, { status: hasPendingApproval ? 'waiting_for_approval' : 'idle', error: null });
+}
+
+export function failAssistantRealtimeRun(db: VoiceStreamNextDb, userId: string, threadId: string, runId: string, error: string): void {
+  failRun(db, userId, threadId, runId, error);
+}
+
 export function assistantModelOptions(): AssistantModelOption[] {
   return MODEL_OPTIONS;
 }
@@ -1158,6 +1295,19 @@ function skillCatalogInstruction(db: VoiceStreamNextDb, userId: string, thread: 
     }),
     'Use the load_skill tool before following a skill. Do not invent skill content.',
   ].join('\n');
+}
+
+function realtimeThreadContextInstruction(db: VoiceStreamNextDb, userId: string, threadId: string): string {
+  const messages = db.listMessages(userId, threadId)
+    .filter((message) => (message.role === 'user' || message.role === 'assistant') && String(message.content ?? '').trim())
+    .slice(-12);
+  if (messages.length === 0) return '';
+  const lines = messages.map((message) => {
+    const role = message.role === 'assistant' ? 'Assistant' : 'User';
+    const text = String(message.content ?? '').replace(/\s+/g, ' ').trim().slice(0, 1200);
+    return `${role}: ${text}`;
+  });
+  return ['Recent thread context:', ...lines].join('\n');
 }
 
 function responseToolDefinitions(
