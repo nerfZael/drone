@@ -544,6 +544,77 @@ describe('DesktopVoiceService', () => {
     expect(speakEvent?.audioBase64).toBe(Buffer.from('wav-bytes').toString('base64'));
   });
 
+  test('starts realtime assistant capture and forwards transcripts and audio events', async () => {
+    const appended: Buffer[] = [];
+    const submitted: string[] = [];
+    let callbacks: any = null;
+    const service = new DesktopVoiceService({
+      transcribeWav: async () => ({ text: '', model: 'test' }),
+      submitAssistantPrompt: async (prompt) => {
+        submitted.push(prompt);
+      },
+      startRealtimeAssistant: async (cb) => {
+        callbacks = cb;
+        return {
+          appendPcm: (pcm: Buffer) => {
+            appended.push(Buffer.from(pcm));
+          },
+          stop: async () => {},
+          cancel: async () => {},
+        };
+      },
+    });
+    const events: any[] = [];
+    const unsubscribe = service.subscribe((event) => events.push(event));
+    const preRoll = Buffer.alloc(320, 3);
+    const liveAudio = Buffer.alloc(320, 4);
+    (service as any).promptPreRollBuffer.push(preRoll);
+    (service as any).mode = 'awake';
+
+    await (service as any).startPromptRecording('assistant');
+    (service as any).handleAudio(liveAudio);
+    await callbacks.onUserTranscript('check the build');
+    await callbacks.onAssistantAudio({ wav: Buffer.from('assistant-wav'), text: 'On it.' });
+    unsubscribe();
+
+    expect(service.snapshot().mode).toBe('recording');
+    expect(service.snapshot().transcript.target).toBe('assistant');
+    expect(appended).toEqual([preRoll, liveAudio]);
+    expect(submitted).toEqual(['check the build']);
+    expect(events.some((event) => event.type === 'desktop_voice_transcript_segment' && event.text === 'check the build')).toBe(true);
+    const audioEvent = events.find((event) => event.type === 'desktop_voice_speak_audio');
+    expect(audioEvent?.audioBase64).toBe(Buffer.from('assistant-wav').toString('base64'));
+  });
+
+  test('cancels realtime assistant capture without transcribing buffered audio', async () => {
+    let transcribeCalls = 0;
+    let cancelCalls = 0;
+    const service = new DesktopVoiceService({
+      transcribeWav: async () => {
+        transcribeCalls += 1;
+        return { text: 'ignored', model: 'test' };
+      },
+      submitAssistantPrompt: async () => {},
+      startRealtimeAssistant: async () => ({
+        appendPcm: () => {},
+        stop: async () => {},
+        cancel: async () => {
+          cancelCalls += 1;
+        },
+      }),
+    });
+    (service as any).mode = 'awake';
+    await (service as any).startPromptRecording('assistant');
+    (service as any).handleAudio(Buffer.alloc(320, 5));
+
+    await (service as any).abortPromptRecordingFromTranscript();
+
+    expect(cancelCalls).toBe(1);
+    expect(transcribeCalls).toBe(0);
+    expect(service.snapshot().mode).toBe('awake');
+    expect(service.snapshot().message).toBe('Awake: assistant voice prompt cancelled.');
+  });
+
   test('cancels clipboard recording without transcribing buffered audio', () => {
     let transcribeCalls = 0;
     let cancelCalls = 0;

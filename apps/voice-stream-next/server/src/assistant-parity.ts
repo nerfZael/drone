@@ -328,6 +328,7 @@ export function assistantRealtimeSessionConfig(db: VoiceStreamNextDb, userId: st
   const settings = db.ensureAssistantSettings(userId);
   const persistedSkillToolNames = threadLoadedSkillToolNames(db, userId, thread);
   const tools = responseToolDefinitions(db, userId, thread, { loadedSkillToolNames: persistedSkillToolNames })
+    .map(realtimeToolDefinition)
     .filter((tool: any) => String(tool?.name ?? '') !== 'speak');
   const toolInstruction = toolCatalogInstruction(db, userId, tools);
   const skillInstruction = skillCatalogInstruction(db, userId, thread);
@@ -339,6 +340,12 @@ export function assistantRealtimeSessionConfig(db: VoiceStreamNextDb, userId: st
     'Realtime mode speaks directly with audio, so do not call or ask for the speak tool. Reply naturally after using tools.',
   ].filter(Boolean).join('\n\n');
   return { instructions, tools };
+}
+
+function realtimeToolDefinition(tool: unknown): unknown {
+  if (!tool || typeof tool !== 'object' || Array.isArray(tool)) return tool;
+  const { strict: _strict, ...rest } = tool as Record<string, unknown>;
+  return rest;
 }
 
 export async function executeAssistantRealtimeTool(

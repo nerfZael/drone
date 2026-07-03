@@ -178,6 +178,63 @@ export type FilesystemSettingsResponse = {
   };
 };
 
+export type RegistryBackupKind = 'hourly' | 'daily' | 'manual' | 'suspect';
+
+export type RegistryBackupManifest = {
+  backupVersion: 1;
+  source: 'drone-hub';
+  id: string;
+  kind: RegistryBackupKind;
+  createdAt: string;
+  bucket: string;
+  scheduledKind?: 'hourly' | 'daily' | 'manual';
+  scheduledBucket?: string;
+  suspect: boolean;
+  reason: string | null;
+  paths: {
+    sqlite: string | null;
+    registryJson: string;
+    manifest: string;
+  };
+  counts: {
+    drones: number;
+    pending: number;
+    archived: number;
+    total: number;
+  };
+  sha256: {
+    sqlite: string | null;
+    registryJson: string;
+  };
+  validation: {
+    sqliteReadable: boolean;
+    registryJsonReadable: boolean;
+  };
+};
+
+export type RegistryBackupSettingsResponse = {
+  ok: true;
+  backupSettings: {
+    enabled: boolean;
+    hourlyEnabled: boolean;
+    dailyEnabled: boolean;
+    hourlyRetentionHours: number;
+    dailyRetentionDays: number;
+    source: 'settings' | 'default';
+    updatedAt: string | null;
+  };
+  backupDir: string;
+  sqlitePath: string;
+  next: {
+    hourlyDue: boolean;
+    dailyDue: boolean;
+    nextCheckAt: string | null;
+  };
+  last: RegistryBackupManifest | null;
+  recent: RegistryBackupManifest[];
+  createdBackup?: RegistryBackupManifest | null;
+};
+
 export type AgentMessageAutoContinueSettingsResponse = {
   ok: true;
   agentMessageAutoContinue: {

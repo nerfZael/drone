@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import {
   assistantProviderSessionId,
+  assistantRealtimeSessionConfig,
   assistantSnapshot,
   promptAssistantThread,
   resolveAssistantApproval,
@@ -275,6 +276,40 @@ describe('assistant parity runtime', () => {
     expect(result.targetKind).toBe('any_device');
     const toolResult = db.listMessages(user.id, thread.id).find((message) => message.role === 'toolResult' && message.toolName === toolName);
     expect(toolResult?.content).toContain('hello extension');
+  });
+
+  test('omits unsupported strict flag from realtime session tools', () => {
+    const db = tempDb('assistant-realtime-tools');
+    dbs.push(db);
+    const user = testUser(db);
+    const manifest = db.upsertAssistantExtensionManifest(user.id, {
+      id: 'test-extension',
+      name: 'Test Extension',
+      version: '0.1.0',
+      tools: [{
+        name: 'echo',
+        label: 'Echo',
+        description: 'Echo test input through an extension runner.',
+        inputSchema: {
+          type: 'object',
+          properties: { text: { type: 'string' } },
+          required: ['text'],
+          additionalProperties: false,
+        },
+        approval: 'never',
+        supportedTargets: ['any_device'],
+        defaultTarget: 'any_device',
+      }],
+    });
+    const extensionTool = extensionToolName(manifest.extensionId, 'echo');
+    db.upsertAssistantExtensionToolRoute(user.id, { toolName: extensionTool, enabled: true, targetKind: 'any_device' });
+    const thread = db.createThread(user.id, { title: 'Realtime tools', enabledTools: ['load_skill', extensionTool] });
+
+    const config = assistantRealtimeSessionConfig(db, user.id, thread.id);
+
+    expect(config.tools.some((tool: any) => tool.name === 'load_skill')).toBe(true);
+    expect(config.tools.some((tool: any) => tool.name === extensionTool)).toBe(true);
+    expect(config.tools.some((tool: any) => Object.prototype.hasOwnProperty.call(tool, 'strict'))).toBe(false);
   });
 
   test('stores extension-provided skills in the normal skill catalog', () => {

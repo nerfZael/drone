@@ -2,6 +2,7 @@ import React from 'react';
 import { AgentsSettingsSection } from './AgentsSettingsSection';
 import { AutomationSettingsSection } from './AutomationSettingsSection';
 import { ArchiveSettingsTab } from './ArchiveSettingsTab';
+import { BackupsSettingsTab } from './BackupsSettingsTab';
 import { GeneralSettingsTab } from './GeneralSettingsTab';
 import { PlaybookSettingsSection } from './PlaybookSettingsSection';
 import { ProfilesSettingsTab } from './ProfilesSettingsTab';
@@ -24,6 +25,7 @@ import { useGithubSettings } from './use-github-settings';
 import type { UseHubLogsResult } from './use-hub-logs';
 import type { UseLlmSettingsResult } from './use-llm-settings';
 import { useProfileSettings } from './use-profile-settings';
+import { useRegistryBackupSettings } from './use-registry-backup-settings';
 import { useSkillLibrary } from './use-skill-library';
 import { useSyncSets } from './use-sync-sets';
 import { useVoiceApprovalSettings } from './use-voice-approval-settings';
@@ -82,6 +84,7 @@ export function SettingsView({
   const voiceApproval = useVoiceApprovalSettings(requestJson);
   const syncSets = useSyncSets(requestJson);
   const profile = useProfileSettings(requestJson);
+  const backups = useRegistryBackupSettings(requestJson);
 
   const settingsBusy =
     hubLogsState.hubLogsLoading ||
@@ -96,6 +99,7 @@ export function SettingsView({
     voiceApproval.voiceApprovalSettingsLoading ||
     syncSets.syncSetsLoading ||
     profile.profileSettingsLoading ||
+    backups.backupSettingsLoading ||
     deleteAction.archivedDronesLoading ||
     deleteAction.archivedChatsLoading ||
     llm.savingOpenAiSettings ||
@@ -123,6 +127,8 @@ export function SettingsView({
     desktopVoiceModel.removingDesktopVoiceModel ||
     voiceApproval.savingVoiceApprovalSettings ||
     syncSets.creatingSyncSet ||
+    backups.savingBackupSettings ||
+    backups.runningBackup ||
     Boolean(syncSets.savingSyncSetId) ||
     Boolean(syncSets.deletingSyncSetId) ||
     Boolean(syncSets.applyingSyncSetId) ||
@@ -169,11 +175,12 @@ export function SettingsView({
     void deleteAction.loadArchivedDrones();
     void deleteAction.loadArchivedChats();
     void profile.loadProfileSettings();
+    void backups.loadBackupSettings();
     void hubLogsState.loadHubLogs();
     void hubLogsState.loadAndroidLogs();
     void skillLibrary.loadSkills();
     void skillLibrary.loadSkillSources();
-  }, [agentMessageAutoContinue, agentSuggestion, agents, agentsDraftDirty, deleteAction, desktopVoiceModel, filesystem, github, hubLogsState, llm, profile, skillLibrary, syncSets, voiceApproval]);
+  }, [agentMessageAutoContinue, agentSuggestion, agents, agentsDraftDirty, backups.loadBackupSettings, deleteAction, desktopVoiceModel, filesystem, github, hubLogsState, llm, profile, skillLibrary, syncSets, voiceApproval]);
 
   const renderActiveTab = () => {
     if (activeTab === 'general') {
@@ -195,6 +202,7 @@ export function SettingsView({
     if (activeTab === 'remote') return <RemoteAccessSettingsTab requestJson={requestJson} />;
     if (activeTab === 'sync') return <SyncSettingsTab syncSets={syncSets} />;
     if (activeTab === 'voice') return <VoiceApprovalSettingsTab voiceApproval={voiceApproval} />;
+    if (activeTab === 'backups') return <BackupsSettingsTab backups={backups} />;
     if (activeTab === 'profiles') return <ProfilesSettingsTab profile={profile} />;
     if (activeTab === 'trash') return <TrashBehaviorSettingsTab deleteAction={deleteAction} />;
     if (activeTab === 'archive') return <ArchiveSettingsTab deleteAction={deleteAction} />;

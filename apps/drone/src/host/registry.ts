@@ -21,6 +21,7 @@ type DroneRegistryChatAgentConfig =
   | { kind: 'custom'; id: string; label: string; command: string };
 
 const REGISTRY_HOURLY_SNAPSHOT_INTERVAL_MS = 60 * 60 * 1000;
+const REGISTRY_EMPTY_FLEET_GUARD_MIN_PREVIOUS = 10;
 
 type DroneRegistryPlaybookMeta = {
   id: string;
@@ -202,6 +203,14 @@ type DroneRegistryV1 = {
     };
     filesystem?: {
       uploadMaxBytes?: number;
+      updatedAt?: string;
+    };
+    backups?: {
+      enabled?: boolean;
+      hourlyEnabled?: boolean;
+      dailyEnabled?: boolean;
+      hourlyRetentionHours?: number;
+      dailyRetentionDays?: number;
       updatedAt?: string;
     };
     agentMessageAutoContinue?: {
@@ -726,6 +735,20 @@ function hasMeaningfulRegistryData(reg: DroneRegistry): boolean {
   return false;
 }
 
+type RegistryFleetCounts = {
+  drones: number;
+  pending: number;
+  archived: number;
+  total: number;
+};
+
+function registryFleetCounts(reg: Pick<DroneRegistry, 'drones' | 'pending' | 'archived'> | null | undefined): RegistryFleetCounts {
+  const drones = countRecordEntries(reg?.drones);
+  const pending = countRecordEntries(reg?.pending);
+  const archived = countRecordEntries(reg?.archived);
+  return { drones, pending, archived, total: drones + pending + archived };
+}
+
 function normalizeV2Registry(input: DroneRegistry): DroneRegistry {
   input.playbooks = input.playbooks ?? {};
   for (const [key, entryAny] of Object.entries(input.playbooks ?? {})) {
@@ -1069,6 +1092,114 @@ async function saveRegistryAtPath(p: string, reg: DroneRegistry): Promise<void> 
   }
 }
 
+async function readPersistedRegistryForWriteGuard(): Promise<DroneRegistry | null> {
+  const sqliteRaw = readRegistryJsonFromSqlite();
+  if (typeof sqliteRaw === 'string') return parseRegistry(sqliteRaw);
+  return await readRegistryFromPath(registryPath());
+}
+
+function registryWriteAuditPath(): string {
+  return droneRootPath('registry.write-audit.jsonl');
+}
+
+function registryHubLogPath(): string {
+  return droneRootPath('hub.log');
+}
+
+async function appendRegistryWriteAuditBestEffort(event: Record<string, unknown>): Promise<void> {
+  try {
+    const auditPath = registryWriteAuditPath();
+    await fs.mkdir(path.dirname(auditPath), { recursive: true });
+    await fs.appendFile(
+      auditPath,
+      `${JSON.stringify({
+        at: new Date().toISOString(),
+        pid: process.pid,
+        ...event,
+      })}\n`,
+      'utf8',
+    );
+    await setPrivateFileModeBestEffort(auditPath);
+  } catch {
+    // Audit logging must never be the reason a registry write fails.
+  }
+}
+
+async function appendRegistryHubLogBestEffort(level: 'info' | 'warn' | 'error', message: string, meta: Record<string, unknown>): Promise<void> {
+  try {
+    const at = new Date().toISOString();
+    const payload = { at, ...meta };
+    await fs.mkdir(path.dirname(registryHubLogPath()), { recursive: true });
+    await fs.appendFile(registryHubLogPath(), `[DroneHub] ${message} ${JSON.stringify(payload)}\n`, 'utf8');
+  } catch {
+    try {
+      const payload = { at: new Date().toISOString(), ...meta };
+      const line = `[DroneHub] ${message} ${JSON.stringify(payload)}`;
+      if (level === 'error') console.error(line);
+      else if (level === 'warn') console.warn(line);
+      else console.log(line);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+async function saveRegistryGuardSnapshotBestEffort(kind: string, reg: DroneRegistry): Promise<string | null> {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const snapshotPath = path.join(path.dirname(registryPath()), `registry.guard-${kind}-${stamp}.json`);
+  try {
+    await fs.mkdir(path.dirname(snapshotPath), { recursive: true });
+    await fs.writeFile(snapshotPath, JSON.stringify(reg, null, 2), 'utf8');
+    await setPrivateFileModeBestEffort(snapshotPath);
+    return snapshotPath;
+  } catch {
+    return null;
+  }
+}
+
+async function assertRegistryFleetWriteAllowed(next: DroneRegistry): Promise<void> {
+  const previous = await readPersistedRegistryForWriteGuard();
+  if (!previous) return;
+
+  const before = registryFleetCounts(previous);
+  const after = registryFleetCounts(next);
+  if (before.total < REGISTRY_EMPTY_FLEET_GUARD_MIN_PREVIOUS) return;
+
+  const override = String(process.env.DRONE_ALLOW_EMPTY_REGISTRY_WRITE ?? '').trim() === '1';
+  const dropsToEmpty = before.total > 0 && after.total === 0;
+  const severeDrop = after.total > 0 && after.total <= Math.floor(before.total * 0.25);
+  if (!dropsToEmpty && !severeDrop) return;
+
+  const previousSnapshotPath = await saveRegistryGuardSnapshotBestEffort('before', previous);
+  const nextSnapshotPath = await saveRegistryGuardSnapshotBestEffort('after', next);
+  const stack = new Error('registry fleet write guard callsite').stack
+    ?.split('\n')
+    .slice(2, 9)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const audit = {
+    event: dropsToEmpty ? 'empty-fleet-write' : 'severe-fleet-drop',
+    before,
+    after,
+    previousSnapshotPath,
+    nextSnapshotPath,
+    override,
+    stack,
+  };
+
+  if (dropsToEmpty && !override) {
+    await appendRegistryWriteAuditBestEffort({ ...audit, blocked: true });
+    await appendRegistryHubLogBestEffort('error', 'registry fleet write blocked', { ...audit, blocked: true });
+    throw new Error(
+      `refusing to overwrite registry fleet with zero entries (before=${before.total}, after=${after.total}); ` +
+        'set DRONE_ALLOW_EMPTY_REGISTRY_WRITE=1 only for an intentional recovery or reset',
+    );
+  }
+
+  await appendRegistryWriteAuditBestEffort({ ...audit, blocked: false });
+  await appendRegistryHubLogBestEffort('warn', 'registry severe fleet drop allowed', { ...audit, blocked: false });
+}
+
 function registriesEqual(a: DroneRegistry, b: DroneRegistry): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
@@ -1213,6 +1344,7 @@ export async function loadRegistry(): Promise<DroneRegistry> {
 
 export async function saveRegistry(reg: DroneRegistry): Promise<void> {
   const normalized = normalizeRegistryForPersistence(reg);
+  await assertRegistryFleetWriteAllowed(normalized);
   if (writeRegistryToSqlite(normalized, { sourcePath: registryPath() })) {
     await backupAndRemoveRegistryJsonBestEffort(registryPath());
   } else {

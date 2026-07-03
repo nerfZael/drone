@@ -63,6 +63,21 @@ type VoiceClipboardTrace = {
 
 type DesktopVoiceCaptureTarget = 'assistant' | 'patch' | 'clipboard';
 
+export type DesktopVoiceRealtimeSession = {
+  appendPcm: (pcm: Buffer) => void | Promise<void>;
+  stop: () => Promise<void>;
+  cancel: () => Promise<void>;
+};
+
+export type DesktopVoiceRealtimeCallbacks = {
+  onUserTranscript: (text: string) => void | Promise<void>;
+  onAssistantTranscript: (text: string) => void | Promise<void>;
+  onAssistantAudio: (audio: { wav: Buffer; text: string }) => void | Promise<void>;
+  onStatus: (message: string) => void | Promise<void>;
+  onError: (message: string) => void | Promise<void>;
+  onClose: () => void | Promise<void>;
+};
+
 type DesktopVoiceStatus = {
   ok: true;
   mode: DesktopVoiceMode;
@@ -134,6 +149,7 @@ type DesktopVoiceEvent = {
 type DesktopVoiceServiceOptions = {
   transcribeWav: (wav: Buffer) => Promise<{ text: string; model: string }>;
   submitAssistantPrompt: (prompt: string) => Promise<void>;
+  startRealtimeAssistant?: (callbacks: DesktopVoiceRealtimeCallbacks) => Promise<DesktopVoiceRealtimeSession>;
   startChatPatch?: () => Promise<void>;
   submitChatPatch?: (prompt: string) => Promise<void>;
   abortChatPatch?: () => Promise<void>;
@@ -1029,6 +1045,8 @@ export class DesktopVoiceService {
   private promptTranscriptText = '';
   private promptTranscriptError: string | null = null;
   private promptTranscriptUpdatedAt: string | null = null;
+  private realtimeSession: DesktopVoiceRealtimeSession | null = null;
+  private realtimeStarting = false;
   private readonly clipboardRecorder: ClipboardAudioRecorder;
   private clipboardSessionId = 0;
   private clipboardRecordingStartedAtMs = 0;
@@ -1235,6 +1253,7 @@ export class DesktopVoiceService {
   stop(message = 'Desktop voice is off.'): DesktopVoiceStatus {
     desktopVoiceLog('desktop voice stop requested', { message });
     this.desktopStartSessionId += 1;
+    void this.cancelRealtimeSession();
     this.capture.stop();
     this.recognizer.stop();
     this.clearDesktopVoiceSuspension();
@@ -1357,6 +1376,16 @@ export class DesktopVoiceService {
       this.promptPreRollBuffer.push(chunk);
     }
     if (this.mode === 'recording') {
+      if (this.promptCaptureTarget === 'assistant' && (this.realtimeSession || this.realtimeStarting)) {
+        if (this.realtimeSession) {
+          void Promise.resolve(this.realtimeSession.appendPcm(chunk)).catch((error) => {
+            desktopVoiceWarn('realtime assistant audio append failed', { error: error?.message ?? String(error) });
+          });
+        } else {
+          this.promptChunks.push(Buffer.from(chunk));
+        }
+        return;
+      }
       this.promptChunks.push(chunk);
       this.enqueuePromptSegments(this.promptSegmenter.append(chunk));
       if (this.promptSegmenter.hasOpenSpeech) this.emitChange();
@@ -1481,6 +1510,7 @@ export class DesktopVoiceService {
   }
 
   private enterSleepingMode(): void {
+    void this.cancelRealtimeSession();
     this.mode = 'sleeping';
     this.message = this.sleepingMessage();
     this.promptChunks = [];
@@ -1499,6 +1529,10 @@ export class DesktopVoiceService {
   }
 
   private async startPromptRecording(target: DesktopVoiceCaptureTarget): Promise<void> {
+    if (target === 'assistant' && this.opts.startRealtimeAssistant) {
+      await this.startRealtimeAssistantRecording();
+      return;
+    }
     if (target === 'patch') {
       try {
         await this.opts.startChatPatch?.();
@@ -1523,6 +1557,139 @@ export class DesktopVoiceService {
     this.emitLocalCue('wake');
     this.touch();
     this.emitChange();
+  }
+
+  private async startRealtimeAssistantRecording(): Promise<void> {
+    const startRealtimeAssistant = this.opts.startRealtimeAssistant;
+    if (!startRealtimeAssistant || this.realtimeSession || this.realtimeStarting) return;
+    this.mode = 'recording';
+    this.message = 'Awake: starting realtime assistant.';
+    this.promptChunks = [];
+    this.promptChunks.push(...this.promptPreRollBuffer.drain());
+    this.resetPromptTranscription();
+    this.promptCaptureTarget = 'assistant';
+    this.realtimeStarting = true;
+    this.emitLocalCue('wake');
+    this.touch();
+    this.emitChange();
+
+    try {
+      const session = await startRealtimeAssistant({
+        onUserTranscript: async (text) => {
+          await this.handleRealtimeUserTranscript(text);
+        },
+        onAssistantTranscript: async (text) => {
+          this.handleRealtimeAssistantTranscript(text);
+        },
+        onAssistantAudio: async (audio) => {
+          this.handleRealtimeAssistantAudio(audio);
+        },
+        onStatus: async (message) => {
+          this.handleRealtimeStatus(message);
+        },
+        onError: async (message) => {
+          this.handleRealtimeError(message);
+        },
+        onClose: async () => {
+          this.handleRealtimeClosed();
+        },
+      });
+      if (!this.realtimeStarting || this.mode !== 'recording' || this.promptCaptureTarget !== 'assistant') {
+        await session.cancel();
+        return;
+      }
+      this.realtimeSession = session;
+      this.realtimeStarting = false;
+      const buffered = this.promptChunks;
+      this.promptChunks = [];
+      for (const chunk of buffered) {
+        await Promise.resolve(session.appendPcm(chunk));
+      }
+      this.message = 'Awake: realtime assistant is listening.';
+      this.touch();
+      this.emitChange();
+    } catch (error: any) {
+      this.realtimeStarting = false;
+      this.realtimeSession = null;
+      this.promptChunks = [];
+      this.promptCaptureTarget = null;
+      this.mode = 'awake';
+      this.message = `Realtime assistant failed: ${error?.message ?? String(error)}`;
+      this.suppressPromptCommandsBriefly();
+      this.touch();
+      this.emitChange();
+    }
+  }
+
+  private async handleRealtimeUserTranscript(textRaw: string): Promise<void> {
+    const text = normalizeTranscriptWhitespace(textRaw);
+    if (!hasTranscriptContent(text)) return;
+    this.promptTranscriptText = this.promptTranscriptText ? `${this.promptTranscriptText}\n${text}` : text;
+    this.promptTranscriptUpdatedAt = new Date().toISOString();
+    this.emitDesktopVoiceEvent({ type: 'desktop_voice_transcript_segment', text } satisfies DesktopVoiceEvent);
+    this.touch();
+    this.emitChange();
+    try {
+      await this.opts.submitAssistantPrompt(text);
+    } catch (error: any) {
+      desktopVoiceWarn('realtime assistant transcript submit failed', { error: error?.message ?? String(error) });
+      this.message = `Realtime transcript submit failed: ${error?.message ?? String(error)}`;
+      this.touch();
+      this.emitChange();
+    }
+  }
+
+  private handleRealtimeAssistantTranscript(textRaw: string): void {
+    const text = normalizeTranscriptWhitespace(textRaw);
+    if (!hasTranscriptContent(text)) return;
+    this.message = 'Awake: realtime assistant responded.';
+    this.touch();
+    this.emitChange();
+  }
+
+  private handleRealtimeAssistantAudio(audio: { wav: Buffer; text: string }): void {
+    if (!audio.wav || audio.wav.byteLength <= 0) return;
+    this.emitDesktopVoiceEvent({
+      type: 'desktop_voice_speak_audio',
+      text: normalizeTranscriptWhitespace(audio.text),
+      contentType: 'audio/wav',
+      audioBase64: audio.wav.toString('base64'),
+    } satisfies DesktopVoiceEvent);
+  }
+
+  private handleRealtimeStatus(messageRaw: string): void {
+    const message = normalizeTranscriptWhitespace(messageRaw);
+    if (!message || this.mode !== 'recording' || this.promptCaptureTarget !== 'assistant') return;
+    this.message = `Awake: ${message.charAt(0).toLowerCase()}${message.slice(1)}`;
+    this.touch();
+    this.emitChange();
+  }
+
+  private handleRealtimeError(messageRaw: string): void {
+    const message = normalizeTranscriptWhitespace(messageRaw) || 'OpenAI Realtime failed.';
+    this.realtimeSession = null;
+    this.realtimeStarting = false;
+    this.promptChunks = [];
+    this.promptCaptureTarget = null;
+    this.mode = 'awake';
+    this.message = `Realtime assistant failed: ${message}`;
+    this.suppressPromptCommandsBriefly();
+    this.touch();
+    this.emitChange();
+  }
+
+  private handleRealtimeClosed(): void {
+    this.realtimeSession = null;
+    this.realtimeStarting = false;
+    this.promptChunks = [];
+    if (this.mode === 'recording' && this.promptCaptureTarget === 'assistant') {
+      this.mode = 'awake';
+      this.message = 'Awake: realtime assistant ended.';
+      this.promptCaptureTarget = null;
+      this.suppressPromptCommandsBriefly();
+      this.touch();
+      this.emitChange();
+    }
   }
 
   private resetPromptTranscription(): void {
@@ -1627,6 +1794,7 @@ export class DesktopVoiceService {
 
   private async abortPromptRecordingFromTranscript(): Promise<void> {
     const target = this.promptCaptureTarget;
+    const cancelledRealtime = await this.cancelRealtimeSession();
     this.promptChunks = [];
     this.promptSegments = [];
     this.promptSegmenter.reset();
@@ -1641,6 +1809,11 @@ export class DesktopVoiceService {
     this.promptTranscriptText = '';
     this.promptCaptureTarget = null;
     this.suppressPromptCommandsBriefly();
+    if (cancelledRealtime) {
+      this.touch();
+      this.emitChange();
+      return;
+    }
     if (target === 'patch') {
       void this.opts.abortChatPatch?.().catch((error) => {
         desktopVoiceWarn('patch abort callback failed', { error: error?.message ?? String(error) });
@@ -1648,6 +1821,21 @@ export class DesktopVoiceService {
     }
     this.touch();
     this.emitChange();
+  }
+
+  private async cancelRealtimeSession(): Promise<boolean> {
+    const session = this.realtimeSession;
+    const wasRealtime = Boolean(session || this.realtimeStarting);
+    this.realtimeSession = null;
+    this.realtimeStarting = false;
+    if (session) {
+      try {
+        await session.cancel();
+      } catch (error: any) {
+        desktopVoiceWarn('realtime assistant cancel failed', { error: error?.message ?? String(error) });
+      }
+    }
+    return wasRealtime;
   }
 
   private async finishPromptRecordingFromTranscript(): Promise<void> {

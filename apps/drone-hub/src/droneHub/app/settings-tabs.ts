@@ -1,4 +1,4 @@
-export type SettingsTabId = 'general' | 'remote' | 'voice' | 'sync' | 'profiles' | 'trash' | 'archive' | 'shortcuts' | 'automations' | 'playbooks' | 'skills' | 'agents' | 'system';
+export type SettingsTabId = 'general' | 'remote' | 'voice' | 'sync' | 'backups' | 'profiles' | 'trash' | 'archive' | 'shortcuts' | 'automations' | 'playbooks' | 'skills' | 'agents' | 'system';
 
 export const SETTINGS_TABS: Array<{
   id: SettingsTabId;
@@ -29,6 +29,12 @@ export const SETTINGS_TABS: Array<{
     label: 'Sync',
     title: 'Sync sets',
     description: 'Mirror host or Hub-managed file trees into every new drone and bulk-apply them to existing drones.',
+  },
+  {
+    id: 'backups',
+    label: 'Backups',
+    title: 'Registry backups',
+    description: 'Schedule SQLite-safe Hub backups, inspect recent manifests, and run a manual backup.',
   },
   {
     id: 'profiles',

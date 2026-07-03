@@ -25,6 +25,12 @@ import {
 } from '../host/profile-manager';
 import { loadRegistry, updateRegistry as updateHostRegistry } from '../host/registry';
 import {
+  createRegistryBackup,
+  resolveRegistryBackupStatusResponse,
+  startRegistryBackupScheduler,
+  upsertStoredRegistryBackupSettings,
+} from '../host/registry-backups';
+import {
   buildContainerDroneDaemonLaunchScript,
   DRONE_DAEMON_SESSION_NAME,
   installBlipCliScript,
@@ -193,6 +199,7 @@ import { GROQ_TRANSCRIPTION_MAX_BYTES, transcribeAudioWithGroq } from './groq-tr
 import { buildGroqTtsConfig, synthesizeTextWavWithGroq } from './groq-tts';
 import { DesktopVoiceService } from './desktop-voice-service';
 import { desktopVoiceModelStatus, removeDesktopVoiceModel, startDesktopVoiceModelInstall } from './desktop-voice-models';
+import { createOpenAiRealtimeAssistantSession, isOpenAiRealtimeAssistantEnabled } from './openai-realtime-assistant';
 import { assertDroneDaemonRuntimeReady, resolveDroneDaemonRuntimeDir } from './drone-daemon-runtime';
 import {
   createHubShellSessionName,
@@ -13558,6 +13565,7 @@ export async function startDroneHubApiServer(opts: {
     }
   }
   void runFleetReconcilerCycle();
+  startRegistryBackupScheduler();
 
   type TerminalWebSocketContext = {
     droneName: string;
@@ -13914,6 +13922,12 @@ export async function startDroneHubApiServer(opts: {
     if (!await desktopVoiceService.speak(text)) throw new Error('Desktop voice frontend is not connected.');
     return { ok: true, target: 'desktop' };
   };
+  const desktopRealtimeAssistantInstructions = () => [
+    'You are Sebastian, the Drone Hub desktop voice assistant.',
+    'Keep spoken replies short and natural.',
+    'The final user transcript is also sent into the normal Drone Hub voice thread, so avoid claiming you used Drone Hub tools directly from this realtime session.',
+    'If the user asks you to perform an action that needs Drone Hub tools, acknowledge briefly that you are sending it to the hub assistant.',
+  ].join(' ');
   const isAndroidSpeakUnavailable = (error: unknown): boolean => {
     const anyError = error as any;
     const message = String(anyError?.message ?? error ?? '');
@@ -14115,6 +14129,23 @@ export async function startDroneHubApiServer(opts: {
     submitAssistantPrompt: async (prompt) => {
       await assistantService.submitVoicePrompt({ prompt, title: 'Desktop voice thread', source: 'desktop' });
     },
+    ...(isOpenAiRealtimeAssistantEnabled()
+      ? {
+          startRealtimeAssistant: async (callbacks) => {
+            const openaiSettings = await resolveEffectiveProviderApiKeySettings('openai');
+            if (!openaiSettings.apiKey) throw new Error('OpenAI API key is not configured. Add it in Drone Hub settings.');
+            hubLog('info', 'desktop realtime assistant session starting', {
+              model: String(process.env.DRONE_HUB_OPENAI_REALTIME_MODEL ?? process.env.OPENAI_REALTIME_MODEL ?? 'gpt-realtime-2'),
+              credentialSource: openaiSettings.source,
+            });
+            return await createOpenAiRealtimeAssistantSession({
+              apiKey: openaiSettings.apiKey,
+              instructions: desktopRealtimeAssistantInstructions(),
+              callbacks,
+            });
+          },
+        }
+      : {}),
     startChatPatch: async () => {
       desktopVoicePatchSessionId = beginVoicePatchSession('desktop').sessionId;
     },
@@ -14511,6 +14542,44 @@ export async function startDroneHubApiServer(opts: {
       scheduleDroneStatusRefresh('interval', 0);
     }, DRONE_STATUS_REFRESH_INTERVAL_MS);
     (droneStatusRefreshTimer as any).unref?.();
+  }
+
+  async function auditStartupRegistryPresence(): Promise<void> {
+    try {
+      const regAny: any = await loadRegistry();
+      const drones = Object.keys(regAny?.drones ?? {}).length;
+      const pending = Object.keys(regAny?.pending ?? {}).length;
+      const archived = Object.keys(regAny?.archived ?? {}).length;
+      if (drones + pending + archived > 0) return;
+
+      let containerNames: string[] = [];
+      try {
+        containerNames = await dvmLs();
+      } catch (error: any) {
+        hubLog('warn', 'registry startup empty and container audit unavailable', {
+          drones,
+          pending,
+          archived,
+          error: error?.message ?? String(error),
+        });
+        return;
+      }
+
+      const droneContainers = containerNames
+        .map((name) => String(name ?? '').trim())
+        .filter((name) => /^drone-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(name));
+      if (droneContainers.length === 0) return;
+
+      hubLog('error', 'registry startup empty while containers exist', {
+        drones,
+        pending,
+        archived,
+        containerCount: droneContainers.length,
+        sampleContainers: droneContainers.slice(0, 20),
+      });
+    } catch (error: any) {
+      hubLog('warn', 'registry startup audit failed', { error: error?.message ?? String(error) });
+    }
   }
 
   function enqueueDroneRegistryReconcilers(regAny: any): void {
@@ -16492,6 +16561,48 @@ export async function startDroneHubApiServer(opts: {
           }
           await upsertStoredFilesystemSettings({ uploadMaxBytes });
           json(res, 200, await resolveFilesystemSettingsResponse());
+          return;
+        }
+      }
+
+      if (pathname === '/api/settings/backups') {
+        if (method === 'GET') {
+          json(res, 200, await resolveRegistryBackupStatusResponse());
+          return;
+        }
+
+        if (method === 'POST') {
+          let body: any = null;
+          try {
+            body = await readJsonBody(req);
+          } catch (e: any) {
+            json(res, 400, { ok: false, error: e?.message ?? String(e) });
+            return;
+          }
+          try {
+            await upsertStoredRegistryBackupSettings({
+              enabled: body?.enabled,
+              hourlyEnabled: body?.hourlyEnabled,
+              dailyEnabled: body?.dailyEnabled,
+              hourlyRetentionHours: body?.hourlyRetentionHours,
+              dailyRetentionDays: body?.dailyRetentionDays,
+            });
+            json(res, 200, await resolveRegistryBackupStatusResponse());
+          } catch (e: any) {
+            json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          }
+          return;
+        }
+      }
+
+      if (pathname === '/api/settings/backups/run') {
+        if (method === 'POST') {
+          try {
+            const createdBackup = await createRegistryBackup('manual', { force: true });
+            json(res, 200, { ...(await resolveRegistryBackupStatusResponse()), createdBackup });
+          } catch (e: any) {
+            json(res, 500, { ok: false, error: e?.message ?? String(e) });
+          }
           return;
         }
       }
@@ -27789,6 +27900,7 @@ export async function startDroneHubApiServer(opts: {
   });
 
   await new Promise<void>((resolve) => server.listen(opts.port, host, () => resolve()));
+  void auditStartupRegistryPresence();
   startDroneStatusRefresher();
   scheduleDroneSummaryMaintenance('startup', 0);
   const address = server.address();
