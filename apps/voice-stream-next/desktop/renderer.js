@@ -166,6 +166,7 @@ const els = {
   inputDeviceSelect: document.querySelector('#inputDeviceSelect'),
   outputDeviceSelect: document.querySelector('#outputDeviceSelect'),
   suppressWakeDuringPlaybackCheckbox: document.querySelector('#suppressWakeDuringPlaybackCheckbox'),
+  heySebastianRealtimeCheckbox: document.querySelector('#heySebastianRealtimeCheckbox'),
   inputDeviceButton: document.querySelector('#inputDeviceButton'),
   inputDeviceLabel: document.querySelector('#inputDeviceLabel'),
   inputDeviceMenu: document.querySelector('#inputDeviceMenu'),
@@ -320,6 +321,7 @@ function readFormConfig() {
     outputDeviceId: els.outputDeviceSelect?.value ?? state.config?.outputDeviceId ?? '',
     assistantSpeechPlaybackEnabled: state.config?.assistantSpeechPlaybackEnabled !== false,
     suppressWakeDuringPlayback: els.suppressWakeDuringPlaybackCheckbox?.checked === true,
+    heySebastianMode: els.heySebastianRealtimeCheckbox?.checked === true ? 'realtime' : 'classic',
     transcriptionShortcut: sanitizeShortcutBinding(state.config?.transcriptionShortcut, DEFAULT_TRANSCRIPTION_SHORTCUT),
     smartTranscriptionShortcut: sanitizeShortcutBinding(state.config?.smartTranscriptionShortcut, DEFAULT_SMART_TRANSCRIPTION_SHORTCUT),
     awakeSleepToggleShortcut: sanitizeShortcutBinding(state.config?.awakeSleepToggleShortcut, DEFAULT_AWAKE_SLEEP_TOGGLE_SHORTCUT),
@@ -746,6 +748,7 @@ function applyConfig(config) {
     assistantRecordingShortcuts: sanitizeAssistantRecordingShortcuts(config?.assistantRecordingShortcuts),
     assistantSpeechPlaybackEnabled: config?.assistantSpeechPlaybackEnabled !== false,
     suppressWakeDuringPlayback: config?.suppressWakeDuringPlayback === true,
+    heySebastianMode: config?.heySebastianMode === 'realtime' ? 'realtime' : 'classic',
   };
   if (els.serverUrlInput) els.serverUrlInput.value = config.serverUrl;
   if (els.deviceNameInput) els.deviceNameInput.value = config.deviceName;
@@ -753,6 +756,7 @@ function applyConfig(config) {
   if (els.outputDeviceSelect) els.outputDeviceSelect.value = config.outputDeviceId || '';
   renderAssistantSpeechPlaybackButton();
   if (els.suppressWakeDuringPlaybackCheckbox) els.suppressWakeDuringPlaybackCheckbox.checked = state.config.suppressWakeDuringPlayback === true;
+  if (els.heySebastianRealtimeCheckbox) els.heySebastianRealtimeCheckbox.checked = state.config.heySebastianMode === 'realtime';
   if (els.extensionsConfigInput) els.extensionsConfigInput.value = extensionConfigText(config);
   if (els.mcpServersConfigInput) els.mcpServersConfigInput.value = mcpServersConfigText(config);
   renderWorkspaceExtensionConfig(config);
@@ -1531,7 +1535,7 @@ function assistantSpeechPlaybackEnabled() {
 }
 
 function speechPlaybackBlocked() {
-  return state.mode === 'recording' || state.mode === 'transcribing';
+  return (state.mode === 'recording' && state.voiceTarget !== 'realtime') || state.mode === 'transcribing';
 }
 
 function renderAssistantSpeechPlaybackButton() {
@@ -2751,7 +2755,7 @@ async function cancelMic(nextMode = 'off', status = 'Off.', options = {}) {
 
 function openVoiceSocket(target) {
   const config = readFormConfig();
-  const url = new URL('/api/voice/stream', trimSlash(config.serverUrl));
+  const url = new URL(target === 'realtime' ? '/api/voice/realtime' : '/api/voice/stream', trimSlash(config.serverUrl));
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   url.searchParams.set('deviceId', state.config.deviceId);
   url.searchParams.set('token', state.config.deviceToken);
@@ -2787,9 +2791,13 @@ function openVoiceSocket(target) {
       if (message.type === 'server_ping') {
         socket.send(JSON.stringify({ type: 'client_ping', sentAt: new Date().toISOString() }));
       }
+      if (message.type === 'assistant_status') {
+        showStatus(message.status || 'Assistant is working.');
+      }
       if (message.type === 'assistant_result') {
         terminalMessageReceived = true;
         showStatus(`Transcript: ${message.transcript || 'empty'} / Reply: ${message.assistantText || 'empty'}`);
+        if (target === 'realtime') return;
         const returnTarget = voiceResultReturnTarget('awake', els.micStatus.textContent || state.voicePostStopStatus);
         state.voicePostStopStatus = returnTarget.status;
         state.voicePostStopMode = returnTarget.mode;
@@ -2798,6 +2806,7 @@ function openVoiceSocket(target) {
       if (message.type === 'transcript_result') {
         terminalMessageReceived = true;
         showStatus(message.status || 'Transcript patched into chat.');
+        if (target === 'realtime') return;
         const returnTarget = voiceResultReturnTarget('awake', els.micStatus.textContent || state.voicePostStopStatus);
         state.voicePostStopStatus = returnTarget.status;
         state.voicePostStopMode = returnTarget.mode;
@@ -3111,13 +3120,14 @@ function resampleFloat32(input, sourceSampleRate, targetSampleRate) {
 }
 
 function cleanVoiceTarget(target) {
-  return target === 'patch' || target === 'clipboard' || target === 'smart' ? target : 'assistant';
+  return target === 'patch' || target === 'clipboard' || target === 'smart' || target === 'realtime' ? target : 'assistant';
 }
 
 function recordingStatus(target) {
   if (target === 'patch') return 'Patching voice transcript into chat.';
   if (target === 'clipboard') return 'Recording clipboard transcription.';
   if (target === 'smart') return 'Smart transcription is listening.';
+  if (target === 'realtime') return 'Realtime assistant is listening.';
   return 'Streaming microphone frames to the Drone service.';
 }
 
@@ -3125,6 +3135,7 @@ function pausedStatus(target = state.voiceTarget) {
   if (target === 'clipboard') return 'Clipboard transcription paused.';
   if (target === 'smart') return 'Smart transcription paused.';
   if (target === 'patch') return 'Voice patch recording paused.';
+  if (target === 'realtime') return 'Realtime assistant paused.';
   return 'Voice request recording paused.';
 }
 
@@ -3885,7 +3896,12 @@ async function processPhraseText(text, finalizeNow = false, finalResult = false)
     return;
   }
   if (state.mode === 'off') enterAwake();
-  await startMic(match.command === 'patch' || match.command === 'clipboard' ? match.command : 'assistant', { cue: 'wake', assistantProfileId: match.assistantProfileId });
+  const target = match.command === 'patch' || match.command === 'clipboard'
+    ? match.command
+    : state.config?.heySebastianMode === 'realtime'
+      ? 'realtime'
+      : 'assistant';
+  await startMic(target, { cue: 'wake', assistantProfileId: match.assistantProfileId });
 }
 
 async function startWakeAudioCapture() {
@@ -4327,6 +4343,16 @@ if (els.suppressWakeDuringPlaybackCheckbox) {
       showStatus(els.suppressWakeDuringPlaybackCheckbox.checked ? 'Playback command pause enabled.' : 'Playback command pause disabled.');
     } catch (err) {
       showStatus(err?.message || 'Could not save playback command setting.');
+    }
+  });
+}
+if (els.heySebastianRealtimeCheckbox) {
+  els.heySebastianRealtimeCheckbox.addEventListener('change', async () => {
+    try {
+      applyConfig(await desktop.writeConfig(authSessionFields(readFormConfig())));
+      showStatus(els.heySebastianRealtimeCheckbox.checked ? 'Hey Sebastian will use Realtime.' : 'Hey Sebastian will use Classic.');
+    } catch (err) {
+      showStatus(err?.message || 'Could not save Hey Sebastian mode.');
     }
   });
 }
