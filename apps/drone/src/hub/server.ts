@@ -2339,6 +2339,7 @@ const FS_MEDIA_MAX_BYTES = 96 * 1024 * 1024;
 const FS_EDITOR_MAX_BYTES = 2 * 1024 * 1024;
 const FS_TEXT_CHUNK_MAX_BYTES = 512 * 1024;
 const FS_QUICK_OPEN_MAX_RESULTS = 200;
+const FS_LIST_TIMEOUT_MS = 10_000;
 const ASSISTANT_BASH_DEFAULT_TIMEOUT_MS = 30_000;
 const ASSISTANT_BASH_MAX_TIMEOUT_MS = 120_000;
 const ASSISTANT_BASH_MAX_OUTPUT_BYTES = 64 * 1024;
@@ -3272,7 +3273,7 @@ async function assistantListDroneFiles(opts: { droneId: string; path?: string })
     'done',
   ].join('\n');
   const r = await withLockedDroneContainer({ requestedDroneName: target.name, droneEntry: target.drone }, async ({ containerName }) => {
-    return await dvmExec(containerName, 'bash', ['-lc', script]);
+    return await dvmExec(containerName, 'bash', ['-lc', script], { timeoutMs: FS_LIST_TIMEOUT_MS });
   });
   if (r.code !== 0) {
     const out = `${r.stdout || ''}\n${r.stderr || ''}`;
@@ -19266,12 +19267,16 @@ export async function startDroneHubApiServer(opts: {
 
         try {
           const r = await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: resolved.drone }, async ({ containerName }) => {
-            return await dvmExec(containerName, 'bash', ['-lc', script]);
+            return await dvmExec(containerName, 'bash', ['-lc', script], { timeoutMs: FS_LIST_TIMEOUT_MS });
           });
           if (r.code !== 0) {
             const out = `${r.stdout || ''}\n${r.stderr || ''}`;
             if (/\bnot-dir\b/i.test(out)) {
               json(res, 404, { ok: false, error: `path is not a directory: ${targetPath}`, id: droneId, name: droneName, path: targetPath });
+              return;
+            }
+            if (r.code === 124) {
+              json(res, 504, { ok: false, error: (r.stderr || 'timed out listing files').trim(), id: droneId, name: droneName, path: targetPath });
               return;
             }
             json(res, 500, { ok: false, error: (r.stderr || r.stdout || 'failed to list files').trim(), id: droneId, name: droneName, path: targetPath });

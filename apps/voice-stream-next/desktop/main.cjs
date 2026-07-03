@@ -160,6 +160,7 @@ const defaultConfig = {
   outputDeviceId: '',
   assistantSpeechPlaybackEnabled: true,
   suppressWakeDuringPlayback: false,
+  heySebastianMode: 'classic',
   transcriptionShortcut: defaultTranscriptionShortcut,
   smartTranscriptionShortcut: defaultSmartTranscriptionShortcut,
   awakeSleepToggleShortcut: defaultAwakeSleepToggleShortcut,
@@ -224,6 +225,7 @@ function normalizeConfig(nextConfig) {
   const config = { ...defaultConfig, ...nextConfig };
   config.assistantSpeechPlaybackEnabled = config.assistantSpeechPlaybackEnabled !== false;
   config.suppressWakeDuringPlayback = config.suppressWakeDuringPlayback === true;
+  config.heySebastianMode = config.heySebastianMode === 'realtime' ? 'realtime' : 'classic';
   config.transcriptionShortcut = sanitizeShortcutBinding(config.transcriptionShortcut, defaultTranscriptionShortcut);
   config.smartTranscriptionShortcut = sanitizeShortcutBinding(config.smartTranscriptionShortcut, defaultSmartTranscriptionShortcut);
   config.awakeSleepToggleShortcut = sanitizeShortcutBinding(config.awakeSleepToggleShortcut, defaultAwakeSleepToggleShortcut);

@@ -64,6 +64,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var deviceNameInput: EditText
     private lateinit var echoCancellationCheckbox: CheckBox
     private lateinit var suppressWakeDuringPlaybackCheckbox: CheckBox
+    private lateinit var heySebastianRealtimeCheckbox: CheckBox
     private lateinit var assistantSpeechPlaybackVolumeSeekBar: SeekBar
     private lateinit var assistantSpeechPlaybackVolumeLabel: TextView
     private lateinit var statusText: TextView
@@ -639,6 +640,15 @@ class MainActivity : ComponentActivity() {
                 api.saveSuppressWakeDuringPlaybackEnabled(checked)
             }
         }
+        heySebastianRealtimeCheckbox = CheckBox(this).apply {
+            text = "Hey Sebastian uses Realtime"
+            textSize = 14f
+            setTextColor(COLOR_TEXT)
+            setPadding(0, 2.dp(), 0, 2.dp())
+            setOnCheckedChangeListener { _, checked ->
+                api.saveHeySebastianRealtimeEnabled(checked)
+            }
+        }
         val assistantSpeechPlaybackVolumeControl = buildAssistantSpeechPlaybackVolumeControl()
 
         return LinearLayout(this).apply {
@@ -652,6 +662,10 @@ class MainActivity : ComponentActivity() {
                 addView(echoCancellationCheckbox)
                 addView(suppressWakeDuringPlaybackCheckbox)
                 addView(label("Use this when assistant audio plays on speaker so it cannot trigger wake commands.", 12f, COLOR_MUTED, false).apply {
+                    setPadding(0, 0, 0, 8.dp())
+                })
+                addView(heySebastianRealtimeCheckbox)
+                addView(label("Realtime changes only the assistant wake phrase. Patch and transcription commands keep using Classic.", 12f, COLOR_MUTED, false).apply {
                     setPadding(0, 0, 0, 8.dp())
                 })
                 addView(assistantSpeechPlaybackVolumeControl)
@@ -1042,6 +1056,9 @@ class MainActivity : ComponentActivity() {
         if (::suppressWakeDuringPlaybackCheckbox.isInitialized) {
             suppressWakeDuringPlaybackCheckbox.isChecked = api.suppressWakeDuringPlaybackEnabled()
         }
+        if (::heySebastianRealtimeCheckbox.isInitialized) {
+            heySebastianRealtimeCheckbox.isChecked = api.heySebastianRealtimeEnabled()
+        }
         updateAssistantSpeechPlaybackVolumeControl()
         updateAssistantSpeechPlaybackButton()
         updatePairingMessage()
@@ -1126,6 +1143,9 @@ class MainActivity : ComponentActivity() {
         }
         if (::suppressWakeDuringPlaybackCheckbox.isInitialized) {
             api.saveSuppressWakeDuringPlaybackEnabled(suppressWakeDuringPlaybackCheckbox.isChecked)
+        }
+        if (::heySebastianRealtimeCheckbox.isInitialized) {
+            api.saveHeySebastianRealtimeEnabled(heySebastianRealtimeCheckbox.isChecked)
         }
         if (::assistantSpeechPlaybackVolumeSeekBar.isInitialized) {
             api.saveAssistantSpeechPlaybackVolumePercent(

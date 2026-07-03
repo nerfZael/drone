@@ -5,6 +5,7 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import websocket from '@fastify/websocket';
+import WebSocket from 'ws';
 import { clerkPlugin } from '@clerk/fastify';
 import { VoiceStreamNextDb, type DeviceRecord, type SpeechPlaybackTarget, type VoiceRecordingRecord } from './db.js';
 import { requireAdmin, resolveRequestUser, type AuthContext } from './auth.js';
@@ -30,7 +31,11 @@ import { parseVoiceApprovalSettings, voiceApprovalSettingsResponse } from './voi
 import { normalizeWakeConfirmationText, wakeConfirmationMatches } from './wake-confirmation.js';
 import {
   assistantAvailableToolSummaries,
+  assistantRealtimeSessionConfig,
   assistantSnapshot,
+  executeAssistantRealtimeTool,
+  failAssistantRealtimeRun,
+  finishAssistantRealtimeRun,
   promptAssistantThread,
   resolveAssistantApproval,
   sanitizeArtifactPath,
@@ -243,8 +248,8 @@ function cleanCode(raw: unknown, label: string): string {
   return value;
 }
 
-function cleanVoiceStreamMode(raw: string): 'assistant' | 'patch' | 'clipboard' | 'smart' {
-  return raw === 'patch' || raw === 'clipboard' || raw === 'smart' ? raw : 'assistant';
+function cleanVoiceStreamMode(raw: string): 'assistant' | 'patch' | 'clipboard' | 'smart' | 'realtime' {
+  return raw === 'patch' || raw === 'clipboard' || raw === 'smart' || raw === 'realtime' ? raw : 'assistant';
 }
 
 function cleanSpeechPlaybackTarget(raw: unknown): SpeechPlaybackTarget {
@@ -651,6 +656,133 @@ export function binaryChunk(data: unknown): Uint8Array | null {
   if (data instanceof ArrayBuffer) return new Uint8Array(data);
   if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
   return null;
+}
+
+type OpenAiRealtimeCredential = {
+  apiKey: string;
+  source: 'user_openai_key' | 'realtime_env_key';
+};
+
+function resolveOpenAiRealtimeCredential(db: VoiceStreamNextDb, userId: string): OpenAiRealtimeCredential | null {
+  const userKey = db.assistantApiKey(userId, 'openai');
+  if (userKey) return { apiKey: userKey, source: 'user_openai_key' };
+  const envKey = process.env.VOICE_STREAM_NEXT_OPENAI_API_KEY?.trim() || process.env.OPENAI_API_KEY?.trim();
+  return envKey ? { apiKey: envKey, source: 'realtime_env_key' } : null;
+}
+
+function openAiRealtimeModel(): string {
+  return process.env.VOICE_STREAM_NEXT_OPENAI_REALTIME_MODEL?.trim() || process.env.OPENAI_REALTIME_MODEL?.trim() || 'gpt-realtime-2';
+}
+
+function openAiRealtimeVoice(): string {
+  return process.env.VOICE_STREAM_NEXT_OPENAI_REALTIME_VOICE?.trim() || process.env.OPENAI_REALTIME_VOICE?.trim() || 'marin';
+}
+
+function openAiRealtimeInstructions(): string {
+  return process.env.VOICE_STREAM_NEXT_OPENAI_REALTIME_INSTRUCTIONS?.trim() || [
+    'You are Sebastian, a concise spoken assistant inside Voice Stream Next.',
+    'Keep replies short and natural for audio.',
+    'Use the provided Voice Stream assistant tools when they help, including artifacts, skills, prompt tools, and extension tools.',
+    'If a tool result says approval is pending, briefly tell the user you are waiting for approval.',
+  ].join(' ');
+}
+
+function resamplePcm16Mono(pcm: Uint8Array, fromSampleRate: number, toSampleRate: number): Uint8Array {
+  if (fromSampleRate === toSampleRate || pcm.byteLength < 4) return pcm;
+  const inputSamples = Math.floor(pcm.byteLength / 2);
+  const outputSamples = Math.max(1, Math.round((inputSamples * toSampleRate) / fromSampleRate));
+  const input = new DataView(pcm.buffer, pcm.byteOffset, inputSamples * 2);
+  const output = new Uint8Array(outputSamples * 2);
+  const outputView = new DataView(output.buffer);
+  const step = fromSampleRate / toSampleRate;
+  for (let index = 0; index < outputSamples; index += 1) {
+    const source = index * step;
+    const leftIndex = Math.min(inputSamples - 1, Math.floor(source));
+    const rightIndex = Math.min(inputSamples - 1, leftIndex + 1);
+    const fraction = source - leftIndex;
+    const left = input.getInt16(leftIndex * 2, true);
+    const right = input.getInt16(rightIndex * 2, true);
+    const sample = Math.max(-32768, Math.min(32767, Math.round(left + (right - left) * fraction)));
+    outputView.setInt16(index * 2, sample, true);
+  }
+  return output;
+}
+
+function concatUint8Chunks(chunks: Uint8Array[]): Uint8Array {
+  const total = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+  const output = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    output.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return output;
+}
+
+function realtimeClientMessage(payload: unknown): { type?: string; reason?: string } | null {
+  if (typeof payload !== 'string') return null;
+  try {
+    const parsed = JSON.parse(payload);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+type RealtimeFunctionCall = {
+  id: string;
+  callId: string;
+  name: string;
+  argumentsJson: string;
+};
+
+function realtimeFunctionCallFromItem(item: any, index: number): RealtimeFunctionCall[] {
+    if (String(item?.type ?? '') !== 'function_call') return [];
+    const name = cleanText(item?.name);
+    const callId = cleanText(item?.call_id);
+    if (!name || !callId) return [];
+    return [{
+      id: cleanText(item?.id) || callId || `realtime_call_${index}`,
+      callId,
+      name,
+      argumentsJson: typeof item?.arguments === 'string' ? item.arguments : JSON.stringify(item?.arguments ?? {}),
+    }];
+}
+
+function realtimeFunctionCalls(event: any): RealtimeFunctionCall[] {
+  const calls: RealtimeFunctionCall[] = [];
+  if (event?.item) calls.push(...realtimeFunctionCallFromItem(event.item, 0));
+  const output = Array.isArray(event?.response?.output) ? event.response.output : [];
+  calls.push(...output.flatMap((item: any, index: number) => realtimeFunctionCallFromItem(item, index)));
+  return calls;
+}
+
+function uniqueRealtimeFunctionCalls(calls: RealtimeFunctionCall[]): RealtimeFunctionCall[] {
+  const seen = new Set<string>();
+  return calls.filter((call) => {
+    const key = call.callId || call.id;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function parseRealtimeFunctionArguments(raw: string): unknown {
+  if (!raw.trim()) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+function realtimeFunctionOutput(value: unknown): string {
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value ?? '');
+  }
 }
 
 function serverPublicUrl(req: FastifyRequest): string {
@@ -4686,6 +4818,436 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     });
   },
   );
+
+  app.get('/api/voice/realtime', { websocket: true }, (socket, req) => {
+    const query = (req.query ?? {}) as Record<string, unknown>;
+    const deviceId = queryValue(query.deviceId);
+    const token = queryValue(query.token);
+    const installationId = cleanText(query.installationId) || null;
+    const requestedSessionId = queryValue(query.sessionId);
+    const assistantProfileId = queryValue(query.assistantProfileId) || null;
+    const verifiedDevice = verifyDeviceAuth(db, deviceId, token, parseClientVersion(query.clientVersion, parseClientVersion(query.protocolVersion, null)));
+    if (!verifiedDevice.ok) {
+      socket.close(deviceAuthCloseCode(verifiedDevice), deviceAuthFailureMessage(verifiedDevice));
+      return;
+    }
+    const device = resolveDeviceInstallation(db, verifiedDevice.device, installationId, token);
+    const credential = resolveOpenAiRealtimeCredential(db, device.userId);
+    if (!credential) {
+      socket.send(JSON.stringify({ type: 'assistant_error', error: 'OpenAI Realtime is not configured. Add your OpenAI key in assistant settings or set OPENAI_API_KEY / VOICE_STREAM_NEXT_OPENAI_API_KEY on the Voice Stream server.' }));
+      socket.close(1011, 'OpenAI Realtime is not configured');
+      return;
+    }
+
+    const requestedSession = requestedSessionId ? db.voiceSessionForDevice(device.userId, device.id, requestedSessionId) : null;
+    const session = requestedSession ?? db.createVoiceSession(device.userId, device.id, 'realtime', { assistantProfileId });
+    const model = openAiRealtimeModel();
+    const upstreamUrl = `wss://api.openai.com/v1/realtime?model=${encodeURIComponent(model)}`;
+    const upstream = new WebSocket(upstreamUrl, {
+      headers: {
+        Authorization: `Bearer ${credential.apiKey}`,
+        'OpenAI-Safety-Identifier': `${device.userId}:${device.id}`,
+      },
+    });
+    const pendingAudio: Uint8Array[] = [];
+    const responseAudio: Uint8Array[] = [];
+    const pendingFunctionCalls: RealtimeFunctionCall[] = [];
+    let upstreamReady = false;
+    let clientClosed = false;
+    let responseAudioBytes = 0;
+    let receivedBytes = 0;
+    let inputTranscript = '';
+    let outputTranscript = '';
+    let finalResponseRequested = false;
+    let finalResponseSent = false;
+    let activeAssistantThreadId = session.assistantThreadId;
+    let currentRealtimeRunId: string | null = null;
+    let currentRealtimePrompt = '';
+    let currentRealtimeRunHasPendingApproval = false;
+
+    const sendClient = (payload: Record<string, unknown>): void => {
+      if ((socket as any).readyState === 1) socket.send(JSON.stringify(payload));
+    };
+    const sendUpstream = (payload: Record<string, unknown>): void => {
+      if (upstream.readyState === WebSocket.OPEN) upstream.send(JSON.stringify(payload));
+    };
+    const realtimeSessionSettings = (): { instructions: string; tools: unknown[] } => {
+      const config = assistantRealtimeSessionConfig(db, device.userId, activeAssistantThreadId);
+      return {
+        instructions: [config.instructions, openAiRealtimeInstructions()].filter(Boolean).join('\n\n'),
+        tools: config.tools,
+      };
+    };
+    const realtimeSessionToolPatch = (): Record<string, unknown> => {
+      const config = realtimeSessionSettings();
+      return {
+        instructions: config.instructions,
+        tools: config.tools,
+        tool_choice: config.tools.length > 0 ? 'auto' : 'none',
+      };
+    };
+    const refreshRealtimeTools = (): void => {
+      sendUpstream({
+        type: 'session.update',
+        session: realtimeSessionToolPatch(),
+      });
+    };
+    const ensureRealtimeRun = (): string => {
+      if (currentRealtimeRunId) return currentRealtimeRunId;
+      const thread = db.thread(device.userId, activeAssistantThreadId);
+      const run = db.createRun(device.userId, activeAssistantThreadId, {
+        prompt: currentRealtimePrompt || 'Realtime voice turn',
+        provider: 'openai',
+        model,
+        thinkingLevel: thread?.thinkingLevel ?? 'off',
+      });
+      currentRealtimeRunId = run.id;
+      currentRealtimeRunHasPendingApproval = false;
+      emitAssistantChange('voice_thread_prompted', activeAssistantThreadId, device.userId);
+      return run.id;
+    };
+    const finishRealtimeRunIfReady = (): void => {
+      if (!currentRealtimeRunId || currentRealtimeRunHasPendingApproval) return;
+      finishAssistantRealtimeRun(db, device.userId, activeAssistantThreadId, currentRealtimeRunId);
+      currentRealtimeRunId = null;
+      currentRealtimePrompt = '';
+    };
+    const failRealtimeRun = (message: string): void => {
+      if (!currentRealtimeRunId) return;
+      failAssistantRealtimeRun(db, device.userId, activeAssistantThreadId, currentRealtimeRunId, message);
+      currentRealtimeRunId = null;
+      currentRealtimePrompt = '';
+      currentRealtimeRunHasPendingApproval = false;
+    };
+    const handleRealtimeFunctionCalls = async (calls: RealtimeFunctionCall[]): Promise<void> => {
+      for (const call of calls) {
+        try {
+          sendClient({ type: 'assistant_status', phase: 'tool_call', status: `Realtime is using ${call.name}.`, threadId: activeAssistantThreadId });
+          const result = await executeAssistantRealtimeTool(
+            db,
+            device.userId,
+            activeAssistantThreadId,
+            ensureRealtimeRun(),
+            call.id,
+            call.name,
+            parseRealtimeFunctionArguments(call.argumentsJson),
+          );
+          currentRealtimeRunHasPendingApproval = currentRealtimeRunHasPendingApproval || result.approvalPending;
+          if (result.threadId !== activeAssistantThreadId) {
+            finishRealtimeRunIfReady();
+            activeAssistantThreadId = result.threadId;
+            currentRealtimeRunId = null;
+            currentRealtimePrompt = '';
+            currentRealtimeRunHasPendingApproval = false;
+          }
+          sendUpstream({
+            type: 'conversation.item.create',
+            item: {
+              type: 'function_call_output',
+              call_id: call.callId,
+              output: result.output,
+            },
+          });
+          if (result.toolsChanged) refreshRealtimeTools();
+        } catch (error: any) {
+          const message = error?.message ?? String(error);
+          sendUpstream({
+            type: 'conversation.item.create',
+            item: {
+              type: 'function_call_output',
+              call_id: call.callId,
+              output: realtimeFunctionOutput({ ok: false, error: message }),
+            },
+          });
+          sendClient({ type: 'assistant_error', error: message });
+          failRealtimeRun(message);
+        }
+      }
+      sendUpstream({ type: 'response.create' });
+    };
+    const appendAudio = (pcm16khz: Uint8Array): void => {
+      if (pcm16khz.byteLength === 0) return;
+      if (!upstreamReady) {
+        pendingAudio.push(new Uint8Array(pcm16khz));
+        return;
+      }
+      const pcm24khz = resamplePcm16Mono(pcm16khz, 16_000, 24_000);
+      sendUpstream({
+        type: 'input_audio_buffer.append',
+        audio: Buffer.from(pcm24khz).toString('base64'),
+      });
+    };
+    const flushPendingAudio = (): void => {
+      const queued = pendingAudio.splice(0);
+      for (const chunk of queued) appendAudio(chunk);
+    };
+    const finishResponseAudio = (): void => {
+      if (responseAudioBytes <= 0) return;
+      const pcm = concatUint8Chunks(responseAudio.splice(0));
+      responseAudioBytes = 0;
+      const wav = pcm16ToWav(pcm, 24_000, 1);
+      if ((socket as any).readyState === 1) socket.send(Buffer.from(wav));
+    };
+    const closeUpstream = (reason: string): void => {
+      if (upstream.readyState === WebSocket.OPEN || upstream.readyState === WebSocket.CONNECTING) {
+        upstream.close(1000, reason);
+      }
+    };
+    const requestFinalResponse = (): void => {
+      finalResponseRequested = true;
+      if (finalResponseSent || !upstreamReady) return;
+      finalResponseSent = true;
+      sendUpstream({ type: 'input_audio_buffer.commit' });
+      sendUpstream({ type: 'response.create' });
+      sendClient({ type: 'assistant_status', phase: 'thinking', status: 'Realtime assistant is finishing.', threadId: activeAssistantThreadId });
+    };
+    const durationLimit = setTimeout(() => {
+      sendClient({
+        type: 'assistant_error',
+        error: 'Realtime voice reached the server duration limit.',
+      });
+      closeUpstream('duration limit');
+      socket.close(VoiceCloseCode.TooLong, 'duration limit');
+    }, MAX_STREAM_DURATION_MS);
+    durationLimit.unref?.();
+
+    addLog(device.userId, {
+      deviceId: device.id,
+      source: device.deviceType,
+      level: 'info',
+      message: 'Realtime voice stream connected',
+      detailsJson: JSON.stringify({ voiceSessionId: session.id, model, credentialSource: credential.source }),
+    });
+    db.upsertClientStatus(device.userId, device.id, {
+      mode: 'recording',
+      status: 'Realtime voice connected',
+      protocolVersion: VOICE_STREAM_PROTOCOL_VERSION,
+    });
+    sendClient({
+      type: 'server_hello',
+      protocolVersion: VOICE_STREAM_PROTOCOL_VERSION,
+      mode: 'realtime',
+      model,
+      maxBytes: MAX_STREAM_BYTES,
+      maxDurationMs: MAX_STREAM_DURATION_MS,
+    });
+
+    upstream.on('open', () => {
+      upstreamReady = true;
+      const toolPatch = realtimeSessionToolPatch();
+      sendUpstream({
+        type: 'session.update',
+        session: {
+          type: 'realtime',
+          model,
+          instructions: toolPatch.instructions,
+          tools: toolPatch.tools,
+          tool_choice: toolPatch.tool_choice,
+          output_modalities: ['audio'],
+          audio: {
+            input: {
+              format: {
+                type: 'audio/pcm',
+                rate: 24_000,
+              },
+              transcription: {
+                model: process.env.VOICE_STREAM_NEXT_OPENAI_REALTIME_TRANSCRIPTION_MODEL?.trim() || 'gpt-realtime-whisper',
+              },
+              turn_detection: {
+                type: 'server_vad',
+                threshold: 0.5,
+                prefix_padding_ms: 300,
+                silence_duration_ms: 500,
+                create_response: true,
+              },
+            },
+            output: {
+              format: {
+                type: 'audio/pcm',
+              },
+              voice: openAiRealtimeVoice(),
+            },
+          },
+        },
+      });
+      flushPendingAudio();
+      if (finalResponseRequested) {
+        requestFinalResponse();
+      } else {
+        sendClient({ type: 'assistant_status', phase: 'listening', status: 'Realtime voice is listening.', threadId: activeAssistantThreadId });
+      }
+    });
+
+    upstream.on('message', (data) => {
+      let event: any = null;
+      try {
+        event = JSON.parse(String(data));
+      } catch {
+        return;
+      }
+      const type = String(event?.type ?? '');
+      if (type === 'error' || type.endsWith('_error') || event?.error?.message) {
+        const message = cleanText(event?.error?.message ?? event?.message, 'OpenAI Realtime failed');
+        sendClient({ type: 'assistant_error', error: message });
+        failRealtimeRun(message);
+        addLog(device.userId, {
+          deviceId: device.id,
+          source: device.deviceType,
+          level: 'error',
+          message: 'OpenAI Realtime error',
+          detailsJson: JSON.stringify({ voiceSessionId: session.id, error: message }),
+        });
+        return;
+      }
+      if (type === 'conversation.item.input_audio_transcription.delta') {
+        inputTranscript += String(event.delta ?? '');
+        return;
+      }
+      if (type === 'conversation.item.input_audio_transcription.completed' || type === 'conversation.item.input_audio_transcription.done') {
+        const transcript = cleanText(event.transcript ?? inputTranscript);
+        if (transcript) {
+          inputTranscript = '';
+          db.addTranscript(device.userId, session.id, transcript);
+          emitAppEvent(device.userId, 'transcript_created', { voiceSessionId: session.id });
+          const approvalCode = approvalCodeFromText(transcript);
+          if (approvalCode) addApprovalCode(device.userId, { voiceSessionId: session.id, code: approvalCode, source: device.deviceType });
+          db.addMessage(device.userId, activeAssistantThreadId, { role: 'user', content: transcript });
+          currentRealtimePrompt = transcript;
+          ensureRealtimeRun();
+          sendClient({ type: 'transcript_result', mode: 'realtime', transcript, status: 'Realtime transcript received.' });
+        }
+        return;
+      }
+      if (type === 'response.output_audio.delta' || type === 'response.audio.delta') {
+        const delta = String(event.delta ?? '');
+        if (delta) {
+          const chunk = new Uint8Array(Buffer.from(delta, 'base64'));
+          responseAudio.push(chunk);
+          responseAudioBytes += chunk.byteLength;
+        }
+        return;
+      }
+      if (type === 'response.output_audio.done' || type === 'response.audio.done') {
+        finishResponseAudio();
+        return;
+      }
+      if (type === 'response.output_audio_transcript.delta' || type === 'response.audio_transcript.delta') {
+        outputTranscript += String(event.delta ?? '');
+        return;
+      }
+      if (type === 'response.output_audio_transcript.done' || type === 'response.audio_transcript.done') {
+        const assistantText = cleanText(event.transcript ?? outputTranscript);
+        outputTranscript = '';
+        if (assistantText) {
+          db.addMessage(device.userId, activeAssistantThreadId, {
+            role: 'assistant',
+            content: assistantText,
+            spokenText: assistantText,
+          });
+          emitAssistantChange('voice_thread_prompted', activeAssistantThreadId, device.userId);
+          sendClient({ type: 'assistant_result', transcript: '', assistantText, runtime: `openai:${model}` });
+        }
+        return;
+      }
+      if (type === 'response.created') {
+        sendClient({ type: 'assistant_status', phase: 'thinking', status: 'Realtime assistant is responding.', threadId: activeAssistantThreadId });
+        return;
+      }
+      if (type === 'response.output_item.done') {
+        pendingFunctionCalls.push(...realtimeFunctionCalls(event));
+        return;
+      }
+      if (type === 'response.done') {
+        finishResponseAudio();
+        const calls = uniqueRealtimeFunctionCalls([...pendingFunctionCalls.splice(0), ...realtimeFunctionCalls(event)]);
+        if (calls.length > 0) {
+          void handleRealtimeFunctionCalls(calls);
+          return;
+        }
+        if (finalResponseRequested) {
+          sendClient({ type: 'finish', transcriptText: '', status: 'Realtime assistant finished.' });
+          finishRealtimeRunIfReady();
+          closeUpstream('client ended');
+          return;
+        }
+        finishRealtimeRunIfReady();
+        sendClient({ type: 'assistant_status', phase: 'listening', status: 'Realtime voice is listening.', threadId: activeAssistantThreadId });
+      }
+    });
+
+    upstream.on('close', (code, reason) => {
+      upstreamReady = false;
+      if (!clientClosed && (socket as any).readyState === 1) {
+        socket.close(1000, reason.toString() || `OpenAI Realtime closed (${code})`);
+      }
+    });
+    upstream.on('error', (error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      sendClient({ type: 'assistant_error', error: message });
+      addLog(device.userId, {
+        deviceId: device.id,
+        source: device.deviceType,
+        level: 'error',
+        message: 'OpenAI Realtime connection failed',
+        detailsJson: JSON.stringify({ voiceSessionId: session.id, error: message }),
+      });
+    });
+
+    socket.on('message', (data, isBinary) => {
+      if (!isBinary) {
+        const text = typeof data === 'string' ? data : Buffer.isBuffer(data) ? data.toString('utf8') : String(data);
+        const parsed = realtimeClientMessage(text);
+        if (parsed?.type === 'client_ping') {
+          sendClient({ type: 'server_pong', sentAt: new Date().toISOString() });
+          return;
+        }
+        if (parsed?.type === 'cancel') {
+          sendUpstream({ type: 'response.cancel' });
+          closeUpstream(parsed.reason || 'client cancelled');
+          return;
+        }
+        if (parsed?.type === 'end') {
+          requestFinalResponse();
+          return;
+        }
+        return;
+      }
+      const chunk = binaryChunk(data);
+      if (chunk) {
+        receivedBytes += chunk.byteLength;
+        if (receivedBytes > MAX_STREAM_BYTES) {
+          sendClient({
+            type: 'assistant_error',
+            error: 'Realtime voice reached the server size limit.',
+          });
+          closeUpstream('size limit');
+          socket.close(VoiceCloseCode.TooLarge, 'size limit');
+          return;
+        }
+        appendAudio(chunk);
+      }
+    });
+    socket.on('close', () => {
+      clearTimeout(durationLimit);
+      clientClosed = true;
+      closeUpstream('client disconnected');
+      if (currentRealtimeRunId && !currentRealtimeRunHasPendingApproval) failRealtimeRun('Realtime voice disconnected before the assistant finished.');
+      db.endVoiceSession(device.userId, session.id);
+      db.upsertClientStatus(device.userId, device.id, {
+        mode: 'awake',
+        status: 'Realtime voice disconnected',
+        protocolVersion: VOICE_STREAM_PROTOCOL_VERSION,
+      });
+      emitAppEvent(device.userId, 'client_status_changed', { deviceId: device.id, mode: 'awake' });
+      addLog(device.userId, {
+        deviceId: device.id,
+        source: device.deviceType,
+        level: 'info',
+        message: 'Realtime voice stream disconnected',
+        detailsJson: JSON.stringify({ voiceSessionId: session.id, model, bytes: receivedBytes }),
+      });
+    });
+  });
 
   app.get('/api/voice/stream', { websocket: true }, (socket, req) => {
     const query = (req.query ?? {}) as Record<string, unknown>;

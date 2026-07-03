@@ -211,6 +211,17 @@ class VoiceStreamApi(private val context: Context) {
             .apply()
     }
 
+    fun heySebastianRealtimeEnabled(): Boolean {
+        return context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(Constants.PREF_HEY_SEBASTIAN_MODE, "classic") == "realtime"
+    }
+
+    fun saveHeySebastianRealtimeEnabled(enabled: Boolean) {
+        context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE).edit()
+            .putString(Constants.PREF_HEY_SEBASTIAN_MODE, if (enabled) "realtime" else "classic")
+            .apply()
+    }
+
     fun pairedDeviceId(): String {
         return context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
             .getString(Constants.PREF_DEVICE_ID, "").orEmpty()

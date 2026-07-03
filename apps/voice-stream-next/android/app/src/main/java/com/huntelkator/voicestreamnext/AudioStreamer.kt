@@ -315,17 +315,25 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
                             }
                         }
                         "assistant_result" -> {
-                            recording.set(false)
-                            stopRecordingCountdown()
-                            onStatus("Assistant replied.")
+                            if (currentTarget == Constants.STREAM_TARGET_REALTIME) {
+                                onStatus(message.optString("assistantText", "Realtime assistant replied.").ifBlank { "Realtime assistant replied." })
+                            } else {
+                                recording.set(false)
+                                stopRecordingCountdown()
+                                onStatus("Assistant replied.")
+                            }
                         }
                         "assistant_status" -> {
                             onStatus(message.optString("status", "Assistant is thinking."))
                         }
                         "transcript_result" -> {
-                            recording.set(false)
-                            stopRecordingCountdown()
-                            onStatus(message.optString("status", "Transcript received."))
+                            if (currentTarget == Constants.STREAM_TARGET_REALTIME) {
+                                onStatus(message.optString("status", "Realtime transcript received."))
+                            } else {
+                                recording.set(false)
+                                stopRecordingCountdown()
+                                onStatus(message.optString("status", "Transcript received."))
+                            }
                         }
                         "terminal_detected" -> handleServerTerminalDetected(message, onStatus)
                         "finish" -> handleServerFinish(message, onStatus)
@@ -644,7 +652,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
                 pendingAssistantProfileId = match.assistantProfileId
                 wakeDetector?.reset()
                 cuePlayer.play(LocalCue.WAKE)
-                beginRecording(Constants.STREAM_TARGET_ASSISTANT, onStatus)
+                beginRecording(if (api.heySebastianRealtimeEnabled()) Constants.STREAM_TARGET_REALTIME else Constants.STREAM_TARGET_ASSISTANT, onStatus)
             }
             match.hasPatch && !sleeping -> {
                 wakeDetector?.reset()
@@ -956,7 +964,8 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
             trimmed.startsWith("http://") -> "ws://${trimmed.removePrefix("http://")}"
             else -> trimmed
         }
-        return "$base/api/voice/stream?deviceId=${encode(deviceId)}&token=${encode(token)}&installationId=${encode(api.installationId())}&sessionId=${encode(sessionId)}&mode=${encode(target)}&clientVersion=${BuildConfig.VERSION_CODE}&protocolVersion=1"
+        val path = if (target == Constants.STREAM_TARGET_REALTIME) "/api/voice/realtime" else "/api/voice/stream"
+        return "$base$path?deviceId=${encode(deviceId)}&token=${encode(token)}&installationId=${encode(api.installationId())}&sessionId=${encode(sessionId)}&mode=${encode(target)}&clientVersion=${BuildConfig.VERSION_CODE}&protocolVersion=1"
     }
 
     private fun isTerminalCloseCode(code: Int): Boolean {
@@ -965,6 +974,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
 
     private fun cleanTarget(target: String): String {
         return when (target) {
+            Constants.STREAM_TARGET_REALTIME,
             Constants.STREAM_TARGET_PATCH,
             Constants.STREAM_TARGET_CLIPBOARD -> target
             else -> Constants.STREAM_TARGET_ASSISTANT
@@ -973,6 +983,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
 
     private fun recordingStatus(target: String): String {
         val base = when (target) {
+            Constants.STREAM_TARGET_REALTIME -> "Awake: realtime assistant listening"
             Constants.STREAM_TARGET_PATCH -> "Awake: patching into chat"
             Constants.STREAM_TARGET_CLIPBOARD -> "Awake: recording clipboard transcription"
             else -> "Awake: recording"

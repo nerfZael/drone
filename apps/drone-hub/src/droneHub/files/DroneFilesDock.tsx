@@ -2,7 +2,7 @@ import React from 'react';
 import { IconPencil, IconTrash } from '../app/icons';
 import { invalidateFsListCachesForDrone } from '../app/use-files-and-ports-pane-state';
 import { formatBytes } from '../app/selected-drone-workspace-utils';
-import { requestJson } from '../http';
+import { requestJson, requestJsonWithTimeout } from '../http';
 import { IconChevron, iconForFilePath } from '../icons';
 import type { DroneFsEntry, DroneFsListPayload, DroneFsUploadPayload } from '../types';
 import { runDroneFsAction } from './file-actions-api';
@@ -23,6 +23,7 @@ import { DroneFilesToolbar, type DroneFilesActionMode } from './DroneFilesToolba
 import { buildFileExplorerTree, type FileExplorerNode } from './tree';
 
 const CHILD_DIRECTORY_CACHE_MAX_AGE_MS = 5 * 60_000;
+const FS_LIST_REQUEST_TIMEOUT_MS = 12_000;
 
 type ChildDirectoryCacheEntry = {
   atMs: number;
@@ -290,8 +291,10 @@ export function DroneFilesDock({
       setChildErrorByPath((prev) => ({ ...prev, [dirPath]: null }));
 
       try {
-        const data = await requestJson<DroneFsListPayload>(
+        const data = await requestJsonWithTimeout<DroneFsListPayload>(
           `/api/drones/${encodeURIComponent(droneId)}/fs/list?path=${encodeURIComponent(dirPath)}`,
+          undefined,
+          FS_LIST_REQUEST_TIMEOUT_MS,
         );
         if ((data as any)?.ok !== true) {
           throw new Error(String((data as any)?.error ?? 'filesystem request failed'));
