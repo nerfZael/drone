@@ -41,6 +41,7 @@ import {
 const FS_LIST_CACHE_MAX_AGE_MS = 5 * 60_000;
 const FS_LIST_POLL_LOADING_MS = 8_000;
 const FS_LIST_POLL_IDLE_MS = 30_000;
+const FS_LIST_REQUEST_TIMEOUT_MS = 12_000;
 
 type FsListCacheEntry = {
   atMs: number;
@@ -203,9 +204,17 @@ export function useFilesAndPortsPaneState({
       busy = true;
       if (!silent) setFsLoading(true);
       try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), FS_LIST_REQUEST_TIMEOUT_MS);
         const data = await requestJson<DroneFsListPayload>(
           `/api/drones/${encodeURIComponent(droneId)}/fs/list?path=${encodeURIComponent(currentFsPath)}`,
-        );
+          { signal: controller.signal },
+        ).catch((e: any) => {
+          if (e?.name === 'AbortError') {
+            throw new Error(`Files request timed out after ${Math.round(FS_LIST_REQUEST_TIMEOUT_MS / 1000)}s.`);
+          }
+          throw e;
+        }).finally(() => clearTimeout(timer));
         if (!mounted) return;
         if ((data as any)?.ok !== true) {
           throw new Error(String((data as any)?.error ?? 'filesystem request failed'));

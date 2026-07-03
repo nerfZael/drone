@@ -1,7 +1,7 @@
 import React from 'react';
 import { repoUnavailableReasonForRuntime } from '../droneHub/app/app-config';
 import { droneHomePath, isDroneStartingOrSeeding } from '../droneHub/app/helpers';
-import { requestJson } from '../droneHub/http';
+import { requestJsonWithTimeout } from '../droneHub/http';
 import type { DroneFsEntry, DroneFsListPayload, DroneSummary } from '../droneHub/types';
 import type { DroneOpenedFileState } from '../droneHub/files/opened-file-types';
 import type { RemoteRepoPanelKey } from './remote-repo-panel-config';
@@ -25,6 +25,8 @@ type RemoteRepoPanelProps = {
 type RemoteRepoPanelsProps = {
   drone: DroneSummary;
 };
+
+const FS_LIST_REQUEST_TIMEOUT_MS = 12_000;
 
 const EMPTY_OPENED_FILE: DroneOpenedFileState = {
   path: null,
@@ -105,9 +107,10 @@ function RemoteFilesPanel({ drone }: { drone: DroneSummary }) {
     const currentPath = normalizeRemoteFilesPath(path);
     setLoading(true);
     setError(null);
-    void requestJson<DroneFsListPayload>(
+    void requestJsonWithTimeout<DroneFsListPayload>(
       `/api/drones/${encodeURIComponent(drone.id)}/fs/list?path=${encodeURIComponent(currentPath)}`,
       { signal: controller.signal },
+      FS_LIST_REQUEST_TIMEOUT_MS,
     )
       .then((data) => {
         if (data.ok !== true) {

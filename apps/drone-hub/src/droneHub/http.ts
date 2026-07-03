@@ -65,3 +65,32 @@ export async function requestJson<T>(url: string, init?: RequestInit): Promise<T
   }
   return data as T;
 }
+
+export async function requestJsonWithTimeout<T>(url: string, init: RequestInit | undefined, timeoutMs: number): Promise<T> {
+  const ms = Number.isFinite(timeoutMs) ? Math.max(1, Math.floor(timeoutMs)) : 0;
+  if (ms <= 0) return requestJson<T>(url, init);
+
+  let timedOut = false;
+  const controller = new AbortController();
+  const upstreamSignal = init?.signal;
+  const abortFromUpstream = () => controller.abort();
+  if (upstreamSignal?.aborted) controller.abort();
+  upstreamSignal?.addEventListener('abort', abortFromUpstream, { once: true });
+
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, ms);
+
+  try {
+    return await requestJson<T>(url, { ...init, signal: controller.signal });
+  } catch (e: any) {
+    if (timedOut && e?.name === 'AbortError') {
+      throw new Error(`Request to ${url} timed out after ${Math.round(ms / 1000)}s.`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+    upstreamSignal?.removeEventListener('abort', abortFromUpstream);
+  }
+}
