@@ -29,7 +29,11 @@ object PhraseMatcher {
 }
 
 object WakePhraseMatcher {
-    fun match(text: String, assistantProfiles: List<AssistantVoiceProfile> = listOf(AssistantVoiceProfile.defaultSebastian())): WakePhraseMatch? {
+    fun match(
+        text: String,
+        assistantProfiles: List<AssistantVoiceProfile> = listOf(AssistantVoiceProfile.defaultSebastian()),
+        shutdownPhrase: String = VoicePhraseDefaults.shutdownPhrase,
+    ): WakePhraseMatch? {
         val words = PhraseMatcher.words(text)
 
         val startProfile = assistantProfiles
@@ -48,6 +52,7 @@ object WakePhraseMatcher {
         val hasSleep = words.windowed(3).any { triple ->
             triple[0] == "go" && triple[1] == "to" && triple[2] == "sleep"
         }
+        val hasShutdown = PhraseMatcher.matchesPhrase(text, shutdownPhrase)
         val hasStopAudio = words.windowed(2).any { pair ->
             (pair[0] == "ok" || pair[0] == "okay") && pair[1] == "stop"
         }
@@ -66,6 +71,7 @@ object WakePhraseMatcher {
 
         return when {
             hasSleep -> WakePhraseMatch(WakePhrase.SLEEP)
+            hasShutdown -> WakePhraseMatch(WakePhrase.SHUTDOWN)
             hasStopAudio -> WakePhraseMatch(WakePhrase.STOP_AUDIO)
             hasRepeatAudio -> WakePhraseMatch(WakePhrase.REPEAT_AUDIO)
             startProfile != null -> WakePhraseMatch(WakePhrase.START, startProfile.id.takeIf { it.isNotBlank() })

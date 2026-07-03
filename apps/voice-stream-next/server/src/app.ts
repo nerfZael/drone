@@ -4590,7 +4590,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         deviceId: authenticatedDeviceId,
         source,
         level: confirmed ? 'info' : 'warn',
-        message: confirmed ? 'Wake phrase confirmed by Groq' : 'Wake phrase rejected by Groq',
+        message: confirmed ? 'Voice phrase confirmed by Groq' : 'Voice phrase rejected by Groq',
         detailsJson: JSON.stringify({
           expectedPhrase,
           text,

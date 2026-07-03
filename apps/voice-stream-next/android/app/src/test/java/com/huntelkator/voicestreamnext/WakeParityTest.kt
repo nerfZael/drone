@@ -15,6 +15,7 @@ class WakeParityTest {
         assertEquals(WakePhrase.STOP_AUDIO, WakePhraseMatcher.match("ok stop")?.phrase)
         assertEquals(WakePhrase.STOP_AUDIO, WakePhraseMatcher.match("okay stop")?.phrase)
         assertEquals(WakePhrase.REPEAT_AUDIO, WakePhraseMatcher.match("repeat what you said")?.phrase)
+        assertEquals(WakePhrase.SHUTDOWN, WakePhraseMatcher.match("shut down completely")?.phrase)
         assertNull(WakePhraseMatcher.match("hello there"))
         assertNull(WakePhraseMatcher.match("hey"))
         assertNull(WakePhraseMatcher.match("sebastian"))
