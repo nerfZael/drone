@@ -115,6 +115,7 @@ const WAKE_CONFIRMATION_MAX_PCM_BYTES = 16_000 * 2 * 4;
 const MICROCREDITS_PER_CREDIT = 1_000_000;
 const USD_MICROS_PER_DOLLAR = 1_000_000;
 const MICROCREDITS_PER_DOLLAR = 100 * MICROCREDITS_PER_CREDIT;
+const OPENAI_REALTIME_AUDIO_SAMPLE_RATE = 24_000;
 
 type AppEventType =
   | 'assistant_changed'
@@ -672,7 +673,7 @@ function resolveOpenAiRealtimeCredential(db: VoiceStreamNextDb, userId: string):
 
 export function openAiSafetyIdentifier(userId: string, deviceId: string): string {
   const digest = crypto.createHash('sha256').update(JSON.stringify([userId, deviceId])).digest('hex');
-  return `vsn_${digest.slice(0, 32)}`;
+  return `vsn_${digest.slice(0, 32)}`.slice(0, 64);
 }
 
 function openAiRealtimeModel(): string {
@@ -690,6 +691,34 @@ function openAiRealtimeInstructions(): string {
     'Use the provided Voice Stream assistant tools when they help, including artifacts, skills, prompt tools, and extension tools.',
     'If a tool result says approval is pending, briefly tell the user you are waiting for approval.',
   ].join(' ');
+}
+
+export function openAiRealtimeAudioConfig(): Record<string, unknown> {
+  return {
+    input: {
+      format: {
+        type: 'audio/pcm',
+        rate: OPENAI_REALTIME_AUDIO_SAMPLE_RATE,
+      },
+      transcription: {
+        model: process.env.VOICE_STREAM_NEXT_OPENAI_REALTIME_TRANSCRIPTION_MODEL?.trim() || 'gpt-realtime-whisper',
+      },
+      turn_detection: {
+        type: 'server_vad',
+        threshold: 0.5,
+        prefix_padding_ms: 300,
+        silence_duration_ms: 500,
+        create_response: true,
+      },
+    },
+    output: {
+      format: {
+        type: 'audio/pcm',
+        rate: OPENAI_REALTIME_AUDIO_SAMPLE_RATE,
+      },
+      voice: openAiRealtimeVoice(),
+    },
+  };
 }
 
 function resamplePcm16Mono(pcm: Uint8Array, fromSampleRate: number, toSampleRate: number): Uint8Array {
@@ -4976,7 +5005,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         pendingAudio.push(new Uint8Array(pcm16khz));
         return;
       }
-      const pcm24khz = resamplePcm16Mono(pcm16khz, 16_000, 24_000);
+      const pcm24khz = resamplePcm16Mono(pcm16khz, 16_000, OPENAI_REALTIME_AUDIO_SAMPLE_RATE);
       sendUpstream({
         type: 'input_audio_buffer.append',
         audio: Buffer.from(pcm24khz).toString('base64'),
@@ -4990,7 +5019,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       if (responseAudioBytes <= 0) return;
       const pcm = concatUint8Chunks(responseAudio.splice(0));
       responseAudioBytes = 0;
-      const wav = pcm16ToWav(pcm, 24_000, 1);
+      const wav = pcm16ToWav(pcm, OPENAI_REALTIME_AUDIO_SAMPLE_RATE, 1);
       if ((socket as any).readyState === 1) socket.send(Buffer.from(wav));
     };
     const closeUpstream = (reason: string): void => {
@@ -5049,30 +5078,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           tools: toolPatch.tools,
           tool_choice: toolPatch.tool_choice,
           output_modalities: ['audio'],
-          audio: {
-            input: {
-              format: {
-                type: 'audio/pcm',
-                rate: 24_000,
-              },
-              transcription: {
-                model: process.env.VOICE_STREAM_NEXT_OPENAI_REALTIME_TRANSCRIPTION_MODEL?.trim() || 'gpt-realtime-whisper',
-              },
-              turn_detection: {
-                type: 'server_vad',
-                threshold: 0.5,
-                prefix_padding_ms: 300,
-                silence_duration_ms: 500,
-                create_response: true,
-              },
-            },
-            output: {
-              format: {
-                type: 'audio/pcm',
-              },
-              voice: openAiRealtimeVoice(),
-            },
-          },
+          audio: openAiRealtimeAudioConfig(),
         },
       });
       flushPendingAudio();

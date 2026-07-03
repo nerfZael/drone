@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { binaryChunk, binarySize, buildApp, mergeTimestampedTranscriptText, mergeTranscriptText, openAiSafetyIdentifier } from './app.js';
+import { binaryChunk, binarySize, buildApp, mergeTimestampedTranscriptText, mergeTranscriptText, openAiRealtimeAudioConfig, openAiSafetyIdentifier } from './app.js';
 import type { VoiceRecordingRecord } from './db.js';
 import { pcm16ToWav } from './wav.js';
 
@@ -116,6 +116,23 @@ describe('app configuration', () => {
       'usr_1234567890abcdefghijklmnopqrstuvwxyz_1234567890abcdefghijklmnopqrstuvwxyz',
       'dev_different',
     ));
+  });
+
+  test('includes required sample rates in OpenAI Realtime audio config', () => {
+    expect(openAiRealtimeAudioConfig()).toMatchObject({
+      input: {
+        format: {
+          type: 'audio/pcm',
+          rate: 24_000,
+        },
+      },
+      output: {
+        format: {
+          type: 'audio/pcm',
+          rate: 24_000,
+        },
+      },
+    });
   });
 
   test('merges overlapping transcript text when wording is not identical', () => {
