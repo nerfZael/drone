@@ -10,6 +10,7 @@ import {
   type ChatStateResponse,
   type DroneListResponse,
   type RemoteSession,
+  type TranscriptResponse,
 } from './remote-api';
 
 type RemoteChatState = {
@@ -43,6 +44,7 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
   const [chatEventsNonce, setChatEventsNonce] = React.useState(0);
   const activeChatStateKeyRef = React.useRef<string | null>(null);
   const loadedChatStateKeyRef = React.useRef<string | null>(null);
+  const loadedFullTranscriptKeyRef = React.useRef<string | null>(null);
 
   const authenticated = session?.authenticated === true;
   const selectedDrone = drones.find((drone) => drone.id === selectedDroneId) ?? drones[0] ?? null;
@@ -64,6 +66,7 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
     setChatEventsConnected(false);
     activeChatStateKeyRef.current = null;
     loadedChatStateKeyRef.current = null;
+    loadedFullTranscriptKeyRef.current = null;
   }, []);
 
   const errorMessage = React.useCallback((err: any) => {
@@ -108,7 +111,7 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
 
   const fetchChatState = React.useCallback(async (droneId: string, chatName: string, signal?: AbortSignal): Promise<RemoteChatState> => {
     const data = await remoteRequestJson<ChatStateResponse>(
-      `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/state?turn=all&tail=50`,
+      `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/state?turn=all&transcript=tail&tail=50`,
       signal ? { signal } : undefined,
     );
     return {
@@ -117,20 +120,43 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
     };
   }, []);
 
-  const applyChatState = React.useCallback((droneId: string, chatName: string, next: RemoteChatState) => {
+  const fetchFullTranscript = React.useCallback(async (droneId: string, chatName: string, signal?: AbortSignal): Promise<TranscriptItem[]> => {
+    const data = await remoteRequestJson<TranscriptResponse>(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/state?turn=all&transcript=full&pending=none`,
+      signal ? { signal } : undefined,
+    );
+    return Array.isArray(data.transcripts) ? data.transcripts : [];
+  }, []);
+
+  const applyChatState = React.useCallback((droneId: string, chatName: string, next: RemoteChatState, opts?: { preserveTranscripts?: boolean }) => {
     const key = remoteChatStateKey(droneId, chatName);
     if (activeChatStateKeyRef.current !== key) return false;
-    setTranscripts(next.transcripts);
+    if (opts?.preserveTranscripts !== true) setTranscripts(next.transcripts);
     setPending(next.pending);
     loadedChatStateKeyRef.current = key;
     setChatStateLoading(false);
     return true;
   }, []);
 
+  const applyFullTranscript = React.useCallback((droneId: string, chatName: string, next: TranscriptItem[]) => {
+    const key = remoteChatStateKey(droneId, chatName);
+    if (activeChatStateKeyRef.current !== key) return false;
+    setTranscripts(next);
+    loadedFullTranscriptKeyRef.current = key;
+    setChatStateLoading(false);
+    return true;
+  }, []);
+
   const loadChatState = React.useCallback(async (droneId: string, chatName: string) => {
+    const key = remoteChatStateKey(droneId, chatName);
     const next = await fetchChatState(droneId, chatName);
-    applyChatState(droneId, chatName, next);
-  }, [applyChatState, fetchChatState]);
+    const hasFullTranscript = loadedFullTranscriptKeyRef.current === key;
+    applyChatState(droneId, chatName, next, { preserveTranscripts: hasFullTranscript });
+    if (hasFullTranscript) {
+      const fullTranscript = await fetchFullTranscript(droneId, chatName);
+      applyFullTranscript(droneId, chatName, fullTranscript);
+    }
+  }, [applyChatState, applyFullTranscript, fetchChatState, fetchFullTranscript]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -181,6 +207,7 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
     setChatStateLoading(false);
     setChatEventsConnected(false);
     loadedChatStateKeyRef.current = null;
+    loadedFullTranscriptKeyRef.current = null;
   }, [authenticated, effectiveDroneId]);
 
   React.useEffect(() => {
@@ -218,7 +245,12 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
     const tick = async () => {
       try {
         const next = await fetchChatState(droneId, chatName, controller.signal);
-        if (!cancelled && applyChatState(droneId, chatName, next)) setError(null);
+        const hasFullTranscript = loadedFullTranscriptKeyRef.current === key;
+        if (!cancelled && applyChatState(droneId, chatName, next, { preserveTranscripts: hasFullTranscript })) setError(null);
+        if (!cancelled) {
+          const fullTranscript = await fetchFullTranscript(droneId, chatName, controller.signal);
+          if (!cancelled && applyFullTranscript(droneId, chatName, fullTranscript)) setError(null);
+        }
       } catch (err: any) {
         if (err?.name === 'AbortError') return;
         if (!cancelled) setError(errorMessage(err));
@@ -237,12 +269,14 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
     };
   }, [
     applyChatState,
+    applyFullTranscript,
     authenticated,
     chatEventsConnected,
     chatEventsNonce,
     effectiveDroneId,
     errorMessage,
     fetchChatState,
+    fetchFullTranscript,
     pauseChatPolling,
     selectedChat,
   ]);

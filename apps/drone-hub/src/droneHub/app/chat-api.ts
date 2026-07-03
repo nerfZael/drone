@@ -239,8 +239,10 @@ export async function fetchDroneChatTranscript(
   if (typeof opts.tail === 'number' && Number.isFinite(opts.tail) && opts.tail > 0) {
     qs.set('tail', String(Math.floor(opts.tail)));
   }
+  qs.set('transcript', 'selected');
+  qs.set('pending', 'none');
   const data = await requestJson<{ ok: true; transcripts: TranscriptItem[] }>(
-    `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/transcript?${qs.toString()}`,
+    `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/state?${qs.toString()}`,
   );
   return Array.isArray(data?.transcripts) ? data.transcripts : [];
 }
@@ -260,6 +262,7 @@ export async function fetchDroneChatState(
   const qs = new URLSearchParams({ turn: String(turn) });
   if (typeof opts.tail === 'number' && Number.isFinite(opts.tail) && opts.tail > 0) {
     qs.set('tail', String(Math.floor(opts.tail)));
+    qs.set('transcript', 'tail');
   }
   const data = await requestJson<{ ok: true; transcripts: TranscriptItem[]; pending: PendingPrompt[] }>(
     `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/state?${qs.toString()}`,
@@ -284,7 +287,9 @@ export async function fetchDroneChatTranscriptCached(opts: {
   if (typeof opts.tail === 'number' && Number.isFinite(opts.tail) && opts.tail > 0) {
     qs.set('tail', String(Math.floor(opts.tail)));
   }
-  const url = `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/transcript?${qs.toString()}`;
+  qs.set('transcript', 'selected');
+  qs.set('pending', 'none');
+  const url = `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/state?${qs.toString()}`;
   const headers = new Headers();
   const etag = String(opts.etag ?? '').trim();
   if (etag) headers.set('if-none-match', etag);

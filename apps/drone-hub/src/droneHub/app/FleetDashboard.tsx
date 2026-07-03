@@ -218,7 +218,7 @@ function useFleetDashboardState({
         unreadItems.map(async (item) => {
           try {
             const data = await fetchJson<{ ok: true; transcripts: Array<{ prompt?: string; output?: string; at?: string; completedAt?: string }> }>(
-              `/api/drones/${encodeURIComponent(item.droneId)}/chats/${encodeURIComponent(item.chatName)}/transcript?turn=last`,
+              `/api/drones/${encodeURIComponent(item.droneId)}/chats/${encodeURIComponent(item.chatName)}/state?turn=last&transcript=selected&pending=none`,
             );
             const transcript = Array.isArray(data.transcripts) ? data.transcripts[0] ?? null : null;
             if (!transcript) return [item.key, { prompt: '', output: '', at: null, completedAt: null }] as const;

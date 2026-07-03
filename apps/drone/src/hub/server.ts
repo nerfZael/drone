@@ -12064,10 +12064,6 @@ type ChatStateContext =
       projectedChatEntry: any;
     };
 
-function pendingStartupPromptsFromEntry(pendingEntry: any, chatName: string): PendingPrompt[] {
-  return normalizePendingStartupPrompts((pendingEntry as any)?.startupQueuedPrompts, chatName).map(startupPromptToPendingPrompt);
-}
-
 function buildChatStateContext(opts: {
   droneRef: string;
   chatName: string;
@@ -12115,6 +12111,28 @@ type BuiltChatTranscriptRows =
       error: string;
       agent: ChatAgentConfig;
     };
+
+type ChatSnapshotRead =
+  | {
+      ok: true;
+      id: string;
+      name: string;
+      chat: string;
+      selection: string;
+      transcripts: any[];
+      pending: PendingPrompt[];
+      agent?: ChatAgentConfig;
+      turnCount: number;
+      transcriptEtag: string | null;
+    }
+  | {
+      ok: false;
+      statusCode: number;
+      error: string;
+      agent?: ChatAgentConfig;
+    };
+
+type ChatSnapshotMaintenance = 'none' | 'run' | 'schedule';
 
 function runChatReadMaintenance(opts: {
   droneId: string;
@@ -12236,33 +12254,6 @@ function formatTranscriptRow(turnIndex: number, turn: any): any {
   };
 }
 
-function buildTranscriptRowsFromProjectedChat(opts: {
-  droneEntry: any;
-  chatEntry: any;
-  selection: string;
-  tailRaw?: string | null;
-}): BuiltChatTranscriptRows {
-  const agent = inferChatAgent(opts.chatEntry as any, opts.droneEntry);
-  if (agent.kind === 'custom') {
-    return {
-      ok: false,
-      statusCode: 410,
-      error: 'transcript is only available for builtin agents (cursor/codex/claude/opencode/pi/blip). Use /output for custom agents.',
-      agent,
-    };
-  }
-  const turns = Array.isArray((opts.chatEntry as any)?.turns) ? ((opts.chatEntry as any).turns as any[]) : [];
-  const idxs = parseTurnSelection(opts.selection, turns.length, opts.tailRaw);
-  return {
-    ok: true,
-    selection: opts.selection,
-    transcripts: idxs.map((i) => formatTranscriptRow(i, turns[i] as any)),
-    agent,
-    turnCount: turns.length,
-    etag: '',
-  };
-}
-
 function buildTranscriptRowsForChat(opts: {
   droneId: string;
   droneName: string;
@@ -12344,6 +12335,112 @@ function buildTranscriptRowsForChat(opts: {
     agent,
     turnCount: effectiveTurnCount,
     etag,
+  };
+}
+
+async function readChatSnapshot(opts: {
+  droneRef: string;
+  chatName: string;
+  selection: string;
+  tailRaw?: string | null;
+  includeTranscript: boolean;
+  includePending: boolean;
+  maintenance?: ChatSnapshotMaintenance;
+  includeDockerSnapshotMaintenance?: boolean;
+}): Promise<ChatSnapshotRead> {
+  const resolved = await resolveDroneOrPendingForReadRef(opts.droneRef);
+  if (!resolved) {
+    return { ok: false, statusCode: 404, error: `unknown drone: ${opts.droneRef}` };
+  }
+
+  const context = buildChatStateContext({ droneRef: opts.droneRef, chatName: opts.chatName, resolved });
+  if (context.kind === 'pending') {
+    return {
+      ok: true,
+      id: context.droneId,
+      name: context.droneName,
+      chat: opts.chatName,
+      selection: opts.selection,
+      transcripts: [],
+      pending: opts.includePending ? await readPendingStartupPrompts({ droneId: context.droneId, chatName: opts.chatName }) : [],
+      turnCount: 0,
+      transcriptEtag: null,
+    };
+  }
+  if (context.kind === 'missing-chat') {
+    return { ok: false, statusCode: 404, error: `unknown chat: ${opts.chatName}` };
+  }
+
+  const droneId = context.droneId;
+  const entry = context.projectedChatEntry;
+  const transcriptResult = opts.includeTranscript
+    ? buildTranscriptRowsForChat({
+        droneId,
+        droneName: context.droneName,
+        chatName: opts.chatName,
+        chatEntry: entry,
+        droneEntry: context.droneEntry,
+        selection: opts.selection,
+        tailRaw: opts.tailRaw,
+      })
+    : null;
+  if (transcriptResult && !transcriptResult.ok) return transcriptResult;
+
+  if (opts.maintenance === 'run') {
+    runChatReadMaintenance({
+      droneId,
+      chatName: opts.chatName,
+      chatEntry: entry,
+      includeDockerSnapshotMaintenance: opts.includeDockerSnapshotMaintenance,
+    });
+  } else if (opts.maintenance === 'schedule') {
+    scheduleChatStateReadMaintenance({
+      droneId,
+      chatName: opts.chatName,
+      chatEntry: entry,
+      includeDockerSnapshotMaintenance: opts.includeDockerSnapshotMaintenance,
+    });
+  }
+
+  const agent = transcriptResult?.agent ?? inferChatAgent(entry as any, context.droneEntry);
+  const pending = opts.includePending ? buildPendingRowsForChat({ droneId, chatName: opts.chatName, chatEntry: entry }) : [];
+  return {
+    ok: true,
+    id: droneId,
+    name: context.droneName,
+    chat: opts.chatName,
+    selection: transcriptResult?.selection ?? opts.selection,
+    transcripts: transcriptResult?.transcripts ?? [],
+    pending,
+    agent,
+    turnCount: transcriptResult?.turnCount ?? 0,
+    transcriptEtag: transcriptResult?.etag ?? null,
+  };
+}
+
+function chatSnapshotResponseBody(snapshot: Extract<ChatSnapshotRead, { ok: true }>, opts?: { includeTranscriptMeta?: boolean }) {
+  return {
+    ok: true,
+    id: snapshot.id,
+    name: snapshot.name,
+    chat: snapshot.chat,
+    selection: snapshot.selection,
+    transcripts: snapshot.transcripts,
+    pending: snapshot.pending,
+    ...(snapshot.agent ? { agent: snapshot.agent } : {}),
+    ...(opts?.includeTranscriptMeta
+      ? {
+          transcript: {
+            selection: snapshot.selection,
+            total: snapshot.turnCount,
+            etag: snapshot.transcriptEtag,
+            items: snapshot.transcripts,
+          },
+          pendingPrompts: {
+            items: snapshot.pending,
+          },
+        }
+      : {}),
   };
 }
 
@@ -26094,7 +26191,7 @@ export async function startDroneHubApiServer(opts: {
         }
       }
 
-      // GET /api/drones/:id/chats/:chat/state?tail=50
+      // GET /api/drones/:id/chats/:chat/state?transcript=selected|tail|full|none&pending=none
       if (
         method === 'GET' &&
         parts.length === 6 &&
@@ -26107,75 +26204,52 @@ export async function startDroneHubApiServer(opts: {
         const chatName = normalizeChatName(decodeURIComponent(parts[4]));
         const timer = createRequestTimer();
         try {
-          const resolved = await resolveDroneOrPendingForReadRef(droneRef);
-          timer.mark('resolve');
-          if (!resolved) {
-            timer.setHeader(res);
-            logSlowHubRequest('chat state', timer, { droneRef, chatName, status: 404 });
-            json(res, 404, { ok: false, error: `unknown drone: ${droneRef}` });
+          const transcriptMode = String(u.searchParams.get('transcript') ?? 'selected').trim().toLowerCase();
+          if (!['selected', 'tail', 'full', 'none'].includes(transcriptMode)) {
+            json(res, 400, { ok: false, error: 'invalid transcript mode (expected selected, tail, full, or none)' });
             return;
           }
-          const context = buildChatStateContext({ droneRef, chatName, resolved });
-          if (context.kind === 'pending') {
-            const pendingList = pendingStartupPromptsFromEntry(context.pendingEntry, chatName);
-            timer.mark('read');
-            timer.setHeader(res);
-            logSlowHubRequest('chat state', timer, { droneId: context.droneId, chatName, kind: 'pending', status: 200 });
-            jsonWithEtag(req, res, 200, {
-              ok: true,
-              id: context.droneId,
-              name: context.droneName,
-              chat: chatName,
-              selection: u.searchParams.get('turn') ?? 'all',
-              transcripts: [],
-              pending: pendingList,
-            });
+          const pendingMode = String(u.searchParams.get('pending') ?? '').trim().toLowerCase();
+          if (pendingMode && !['all', 'true', '1', 'none', 'false', '0'].includes(pendingMode)) {
+            json(res, 400, { ok: false, error: 'invalid pending mode (expected all, true, 1, none, false, or 0)' });
             return;
           }
-          if (context.kind === 'missing-chat') {
-            timer.setHeader(res);
-            logSlowHubRequest('chat state', timer, { droneId: context.droneId, chatName, status: 404 });
-            json(res, 404, { ok: false, error: `unknown chat: ${chatName}` });
-            return;
-          }
-          const droneId = context.droneId;
-          const entry = context.projectedChatEntry;
-          timer.mark('import');
-          const transcriptResult = buildTranscriptRowsFromProjectedChat({
-            chatEntry: entry,
-            droneEntry: context.droneEntry,
-            selection: u.searchParams.get('turn') ?? 'all',
-            tailRaw: u.searchParams.get('tail'),
+          const includeTranscript = transcriptMode !== 'none';
+          const includePending = !['none', 'false', '0'].includes(pendingMode);
+          const selection = transcriptMode === 'full' ? 'all' : u.searchParams.get('turn') ?? 'all';
+          const tailRaw =
+            transcriptMode === 'full'
+              ? null
+              : transcriptMode === 'tail'
+                ? u.searchParams.get('tail') ?? '50'
+                : u.searchParams.get('tail');
+          const snapshot = await readChatSnapshot({
+            droneRef,
+            chatName,
+            selection,
+            tailRaw,
+            includeTranscript,
+            includePending,
+            maintenance: 'schedule',
+            includeDockerSnapshotMaintenance: true,
           });
-          if (!transcriptResult.ok) {
+          timer.mark('read');
+          if (!snapshot.ok) {
             timer.setHeader(res);
-            logSlowHubRequest('chat state', timer, { droneId, chatName, status: transcriptResult.statusCode });
-            json(res, transcriptResult.statusCode, { ok: false, error: transcriptResult.error, agent: transcriptResult.agent });
+            logSlowHubRequest('chat state', timer, { droneRef, chatName, status: snapshot.statusCode, error: snapshot.error });
+            json(res, snapshot.statusCode, { ok: false, error: snapshot.error, ...(snapshot.agent ? { agent: snapshot.agent } : {}) });
             return;
           }
-          scheduleChatStateReadMaintenance({ droneId, chatName, chatEntry: entry, includeDockerSnapshotMaintenance: true });
-          timer.mark('transcript');
-          const list = buildPendingRowsForChat({ droneId, chatName, chatEntry: entry });
-          timer.mark('format');
           timer.setHeader(res);
           logSlowHubRequest('chat state', timer, {
-            droneId,
+            droneId: snapshot.id,
             chatName,
-            selection: transcriptResult.selection,
-            turnCount: transcriptResult.turnCount,
-            pendingCount: list.length,
+            selection: snapshot.selection,
+            turnCount: snapshot.turnCount,
+            pendingCount: snapshot.pending.length,
             status: 200,
           });
-          jsonWithEtag(req, res, 200, {
-            ok: true,
-            id: droneId,
-            name: context.droneName,
-            chat: chatName,
-            selection: transcriptResult.selection,
-            transcripts: transcriptResult.transcripts,
-            pending: list,
-            agent: transcriptResult.agent,
-          });
+          jsonWithEtag(req, res, 200, chatSnapshotResponseBody(snapshot, { includeTranscriptMeta: true }));
           return;
         } catch (e: any) {
           const msg = e?.message ?? String(e);
@@ -26200,42 +26274,25 @@ export async function startDroneHubApiServer(opts: {
         const chatName = normalizeChatName(decodeURIComponent(parts[4]));
         const timer = createRequestTimer();
         try {
-          const resolved = await resolveDroneOrPendingForReadRef(droneRef);
-          timer.mark('resolve');
-          if (!resolved) {
+          const snapshot = await readChatSnapshot({
+            droneRef,
+            chatName,
+            selection: 'all',
+            tailRaw: null,
+            includeTranscript: false,
+            includePending: true,
+            maintenance: 'run',
+          });
+          timer.mark('read');
+          if (!snapshot.ok) {
             timer.setHeader(res);
-            logSlowHubRequest('chat pending', timer, { droneRef, chatName, status: 404 });
-            json(res, 404, { ok: false, error: `unknown drone: ${droneRef}` });
+            logSlowHubRequest('chat pending', timer, { droneRef, chatName, status: snapshot.statusCode, error: snapshot.error });
+            json(res, snapshot.statusCode, { ok: false, error: snapshot.error });
             return;
           }
-          if (resolved.kind === 'pending') {
-            const droneName = String(resolved.pending?.name ?? droneRef).trim() || droneRef;
-            const pendingList = await readPendingStartupPrompts({ droneId: resolved.id, chatName });
-            timer.mark('read');
-            timer.setHeader(res);
-            logSlowHubRequest('chat pending', timer, { droneId: resolved.id, chatName, kind: 'pending', status: 200 });
-            json(res, 200, { ok: true, id: resolved.id, name: droneName, chat: chatName, pending: pendingList });
-            return;
-          }
-          const real = resolved;
-          const droneId = real.id;
-          const drone = real.drone;
-          const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
-          const registryEntry = (drone as any)?.chats?.[chatName] ?? null;
-          if (!registryEntry) {
-            timer.setHeader(res);
-            logSlowHubRequest('chat pending', timer, { droneId, chatName, status: 404 });
-            json(res, 404, { ok: false, error: `unknown chat: ${chatName}` });
-            return;
-          }
-          const entry = importResolvedChatToStore(droneId, chatName, registryEntry) ?? registryEntry;
-          timer.mark('import');
-          runChatReadMaintenance({ droneId, chatName, chatEntry: entry });
-          const list = buildPendingRowsForChat({ droneId, chatName, chatEntry: entry });
-          timer.mark('format');
           timer.setHeader(res);
-          logSlowHubRequest('chat pending', timer, { droneId, chatName, status: 200 });
-          json(res, 200, { ok: true, id: droneId, name: droneName, chat: chatName, pending: list });
+          logSlowHubRequest('chat pending', timer, { droneId: snapshot.id, chatName, status: 200 });
+          json(res, 200, { ok: true, id: snapshot.id, name: snapshot.name, chat: snapshot.chat, pending: snapshot.pending });
           return;
         } catch (e: any) {
           const msg = e?.message ?? String(e);
@@ -27475,6 +27532,7 @@ export async function startDroneHubApiServer(opts: {
         }
       }
 
+      // Compatibility read wrapper for GET /api/drones/:id/chats/:chat/state?pending=none
       // GET /api/drones/:id/chats/:chat/transcript?turn=last|all|N
       if (
         method === 'GET' &&
@@ -27488,88 +27546,47 @@ export async function startDroneHubApiServer(opts: {
         const chatName = decodeURIComponent(parts[4]) || 'default';
         const timer = createRequestTimer();
         try {
-          const resolved = await resolveDroneOrPendingForReadRef(droneRef);
-          timer.mark('resolve');
-          if (!resolved) {
-            timer.setHeader(res);
-            logSlowHubRequest('chat transcript', timer, { droneRef, chatName, status: 404 });
-            json(res, 404, { ok: false, error: `unknown drone: ${droneRef}` });
-            return;
-          }
-          if (resolved.kind === 'pending') {
-            const droneName = String(resolved.pending?.name ?? droneRef).trim() || droneRef;
-            const sel = u.searchParams.get('turn') ?? 'last';
-            timer.mark('format');
-            timer.setHeader(res);
-            logSlowHubRequest('chat transcript', timer, { droneId: resolved.id, chatName, kind: 'pending', status: 200 });
-            jsonWithEtag(req, res, 200, { ok: true, id: resolved.id, name: droneName, chat: chatName, selection: sel, transcripts: [] });
-            return;
-          }
-          const droneId = resolved.id;
-          const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
-          const reg = await loadRegistry();
-          timer.mark('load');
-          const d = (reg as any).drones?.[droneId] ?? null;
-          if (!d) {
-            timer.setHeader(res);
-            logSlowHubRequest('chat transcript', timer, { droneId, chatName, status: 404 });
-            json(res, 404, { ok: false, error: `unknown drone: ${droneId}` });
-            return;
-          }
-          const cRaw = d.chats?.[chatName];
-          if (!cRaw) {
-            timer.setHeader(res);
-            logSlowHubRequest('chat transcript', timer, { droneId, chatName, status: 404 });
-            json(res, 404, { ok: false, error: `unknown chat: ${chatName}` });
-            return;
-          }
-          const c = importResolvedChatToStore(droneId, chatName, cRaw) ?? cRaw;
-          timer.mark('import');
           const sel = u.searchParams.get('turn') ?? 'last';
-          const transcriptResult = buildTranscriptRowsForChat({
-            droneId,
-            droneName,
+          const snapshot = await readChatSnapshot({
+            droneRef,
             chatName,
-            chatEntry: c,
-            droneEntry: d,
             selection: sel,
             tailRaw: u.searchParams.get('tail'),
+            includeTranscript: true,
+            includePending: false,
+            maintenance: 'run',
+            includeDockerSnapshotMaintenance: true,
           });
-          if (!transcriptResult.ok) {
+          timer.mark('read');
+          if (!snapshot.ok) {
             timer.setHeader(res);
-            logSlowHubRequest('chat transcript', timer, { droneId, chatName, status: transcriptResult.statusCode });
-            json(res, transcriptResult.statusCode, {
+            logSlowHubRequest('chat transcript', timer, { droneRef, chatName, status: snapshot.statusCode, error: snapshot.error });
+            json(res, snapshot.statusCode, {
               ok: false,
-              error: transcriptResult.error,
-              agent: transcriptResult.agent,
+              error: snapshot.error,
+              ...(snapshot.agent ? { agent: snapshot.agent } : {}),
             });
             return;
           }
-          runChatReadMaintenance({ droneId, chatName, chatEntry: c, includeDockerSnapshotMaintenance: true });
-          timer.mark('format');
           timer.setHeader(res);
           logSlowHubRequest('chat transcript', timer, {
-            droneId,
+            droneId: snapshot.id,
             chatName,
-            selection: transcriptResult.selection,
-            turnCount: transcriptResult.turnCount,
+            selection: snapshot.selection,
+            turnCount: snapshot.turnCount,
             status: 200,
           });
-          jsonWithKnownEtag(
-            req,
-            res,
-            200,
-            {
-              ok: true,
-              id: droneId,
-              name: droneName,
-              chat: chatName,
-              selection: transcriptResult.selection,
-              transcripts: transcriptResult.transcripts,
-              agent: transcriptResult.agent,
-            },
-            transcriptResult.etag,
-          );
+          const body = {
+            ok: true,
+            id: snapshot.id,
+            name: snapshot.name,
+            chat: snapshot.chat,
+            selection: snapshot.selection,
+            transcripts: snapshot.transcripts,
+            ...(snapshot.agent ? { agent: snapshot.agent } : {}),
+          };
+          if (snapshot.transcriptEtag) jsonWithKnownEtag(req, res, 200, body, snapshot.transcriptEtag);
+          else jsonWithEtag(req, res, 200, body);
           return;
         } catch (e: any) {
           timer.setHeader(res);

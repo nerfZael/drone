@@ -729,6 +729,122 @@ describeSocketSuite('chat management api', () => {
     );
   });
 
+  test('combined chat state uses the same chronological transcript projection as transcript reads', async () => {
+    const droneId = 'drone-chat-state-transcript-order';
+    await seedDrone(droneId);
+
+    const olderAt = new Date(Date.now() - 120_000).toISOString();
+    const newerAt = new Date(Date.now() - 30_000).toISOString();
+    await updateRegistry((reg: any) => {
+      const entry = reg?.drones?.[droneId]?.chats?.default;
+      if (!entry) throw new Error('missing seeded chat entry');
+      entry.turns = [
+        {
+          id: 'prompt-newer',
+          at: newerAt,
+          promptAt: newerAt,
+          completedAt: newerAt,
+          prompt: 'newer prompt',
+          ok: true,
+          output: 'newer output',
+        },
+        {
+          id: 'prompt-older',
+          at: olderAt,
+          promptAt: olderAt,
+          completedAt: olderAt,
+          prompt: 'older prompt',
+          ok: true,
+          output: 'older output',
+        },
+      ];
+    });
+
+    const transcript = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/transcript?turn=all&tail=1`);
+    expect(transcript.r.status).toBe(200);
+    expect(transcript.data?.transcripts?.map((row: any) => row.id)).toEqual(['prompt-newer']);
+
+    const state = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=1`);
+    expect(state.r.status).toBe(200);
+    expect(state.data?.transcripts).toEqual(transcript.data?.transcripts);
+  });
+
+  test('combined chat state supports transcript and pending read modes', async () => {
+    const droneId = 'drone-chat-state-read-modes';
+    await seedDrone(droneId);
+
+    const firstAt = new Date(Date.now() - 60_000).toISOString();
+    const secondAt = new Date().toISOString();
+    await updateRegistry((reg: any) => {
+      const entry = reg?.drones?.[droneId]?.chats?.default;
+      if (!entry) throw new Error('missing seeded chat entry');
+      entry.turns = [
+        {
+          id: 'prompt-1',
+          at: firstAt,
+          promptAt: firstAt,
+          completedAt: firstAt,
+          prompt: 'first',
+          ok: true,
+          output: 'first done',
+        },
+        {
+          id: 'prompt-2',
+          at: secondAt,
+          promptAt: secondAt,
+          completedAt: secondAt,
+          prompt: 'second',
+          ok: true,
+          output: 'second done',
+        },
+      ];
+      entry.pendingPrompts = [
+        {
+          id: 'queued-1',
+          at: secondAt,
+          updatedAt: secondAt,
+          prompt: 'queued',
+          state: 'queued',
+        },
+      ];
+    });
+
+    const transcriptOnly = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/state?transcript=full&pending=none`,
+    );
+    expect(transcriptOnly.r.status).toBe(200);
+    expect(transcriptOnly.data?.transcripts?.map((row: any) => row.id)).toEqual(['prompt-1', 'prompt-2']);
+    expect(transcriptOnly.data?.pending).toEqual([]);
+    expect(transcriptOnly.data?.transcript?.items).toEqual(transcriptOnly.data?.transcripts);
+    expect(transcriptOnly.data?.transcript?.total).toBe(2);
+
+    const pendingOnly = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/state?transcript=none`,
+    );
+    expect(pendingOnly.r.status).toBe(200);
+    expect(pendingOnly.data?.transcripts).toEqual([]);
+    expect(pendingOnly.data?.pending?.map((row: any) => row.id)).toContain('queued-1');
+    expect(pendingOnly.data?.pendingPrompts?.items).toEqual(pendingOnly.data?.pending);
+  });
+
+  test('combined chat state rejects unknown transcript modes', async () => {
+    const droneId = 'drone-chat-state-invalid-mode';
+    await seedDrone(droneId);
+
+    const state = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/state?transcript=surprise`);
+    expect(state.r.status).toBe(400);
+    expect(String(state.data?.error ?? '')).toContain('invalid transcript mode');
+  });
+
+  test('combined chat state rejects unknown pending modes', async () => {
+    const droneId = 'drone-chat-state-invalid-pending-mode';
+    await seedDrone(droneId);
+
+    const state = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/state?pending=surprise`);
+    expect(state.r.status).toBe(400);
+    expect(String(state.data?.error ?? '')).toContain('invalid pending mode');
+  });
+
   test('transcript reads do not create missing chats', async () => {
     const droneId = 'drone-chat-transcript-read-only';
     await seedDrone(droneId);

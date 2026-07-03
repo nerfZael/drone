@@ -506,35 +506,32 @@ export function hubTransport(options: HubTransportOptions): DroneTransport {
       runId: string,
       requestOptions?: RequestOptions,
     ): Promise<RunRecord> {
-      const [pending, transcript] = await Promise.all([
-        requestJson<any>(
+      const state = await requestJson<any>(
+        options,
+        `/api/drones/${encodeURIComponent(droneIdOrName)}/chats/${encodeURIComponent(chatName)}/state?turn=all`,
+        { method: 'GET' },
+        requestOptions,
+      ).catch((error) => {
+        if (!(error instanceof TransportError) || error.status !== 410) throw error;
+        return requestJson<any>(
           options,
-          `/api/drones/${encodeURIComponent(droneIdOrName)}/chats/${encodeURIComponent(chatName)}/pending`,
+          `/api/drones/${encodeURIComponent(droneIdOrName)}/chats/${encodeURIComponent(chatName)}/state?transcript=none`,
           { method: 'GET' },
           requestOptions,
-        ),
-        requestJson<any>(
-          options,
-          `/api/drones/${encodeURIComponent(droneIdOrName)}/chats/${encodeURIComponent(chatName)}/transcript?turn=all`,
-          { method: 'GET' },
-          requestOptions,
-        ).catch((error) => {
-          if (error instanceof TransportError && error.status === 410) return { transcripts: [] };
-          throw error;
-        }),
-      ]);
+        );
+      });
 
-      const pendingMatch = Array.isArray(pending?.pending)
-        ? pending.pending.find((item: any) => String(item?.id ?? '').trim() === runId)
+      const pendingMatch = Array.isArray(state?.pending)
+        ? state.pending.find((item: any) => String(item?.id ?? '').trim() === runId)
         : null;
-      const transcriptMatch = Array.isArray(transcript?.transcripts)
-        ? transcript.transcripts.find((item: any) => String(item?.id ?? '').trim() === runId)
+      const transcriptMatch = Array.isArray(state?.transcripts)
+        ? state.transcripts.find((item: any) => String(item?.id ?? '').trim() === runId)
         : null;
 
       if (transcriptMatch) {
         return {
           id: runId,
-          droneId: String(transcript?.id ?? droneIdOrName),
+          droneId: String(state?.id ?? droneIdOrName),
           chatName,
           status: transcriptMatch?.ok === false ? 'failed' : 'done',
           startedAt: typeof transcriptMatch?.promptAt === 'string' ? transcriptMatch.promptAt : transcriptMatch?.at,
@@ -551,7 +548,7 @@ export function hubTransport(options: HubTransportOptions): DroneTransport {
       if (pendingMatch) {
         return {
           id: runId,
-          droneId: String(pending?.id ?? droneIdOrName),
+          droneId: String(state?.id ?? droneIdOrName),
           chatName,
           status: normalizeRunStatus(pendingMatch?.state),
           startedAt: typeof pendingMatch?.at === 'string' ? pendingMatch.at : undefined,
@@ -561,7 +558,7 @@ export function hubTransport(options: HubTransportOptions): DroneTransport {
 
       return {
         id: runId,
-        droneId: String(pending?.id ?? droneIdOrName),
+        droneId: String(state?.id ?? droneIdOrName),
         chatName,
         status: 'running',
       };
@@ -595,7 +592,7 @@ export function hubTransport(options: HubTransportOptions): DroneTransport {
       try {
         const transcript = await requestJson<any>(
           options,
-          `/api/drones/${encodeURIComponent(droneIdOrName)}/chats/${encodeURIComponent(chatName)}/transcript?turn=all`,
+          `/api/drones/${encodeURIComponent(droneIdOrName)}/chats/${encodeURIComponent(chatName)}/state?turn=all&transcript=selected&pending=none`,
           { method: 'GET' },
           requestOptions,
         );

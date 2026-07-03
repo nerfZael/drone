@@ -1424,7 +1424,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         void (async () => {
           try {
             const data = await requestJson<{ ok: true; transcripts: Array<{ output?: string }> }>(
-              `/api/drones/${encodeURIComponent(chatRef.droneId)}/chats/${encodeURIComponent(chatRef.chatName)}/transcript?turn=last`,
+              `/api/drones/${encodeURIComponent(chatRef.droneId)}/chats/${encodeURIComponent(chatRef.chatName)}/state?turn=last&transcript=selected&pending=none`,
             );
             const output = String(data?.transcripts?.[0]?.output ?? '').trim();
             if (!output) return;

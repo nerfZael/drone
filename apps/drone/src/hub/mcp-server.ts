@@ -1086,7 +1086,10 @@ function registerTools(server: McpServer) {
     const limit = cleanPositiveInt(args.limit, 10, 20);
     const maxCharsPerField = cleanPositiveInt(args.maxCharsPerField, 4000, 8000);
     try {
-      const response = await requestJson(`/api/drones/${encodeURIComponent(args.drone)}/chats/${encodeURIComponent(chat)}/transcript?turn=all`, { method: 'GET' });
+      const response = await requestJson(
+        `/api/drones/${encodeURIComponent(args.drone)}/chats/${encodeURIComponent(chat)}/state?turn=all&transcript=selected&pending=none`,
+        { method: 'GET' },
+      );
       const turns = Array.isArray(response?.transcripts) ? response.transcripts.slice(-limit).map((turn: any) => boundedTranscriptTurn(turn, maxCharsPerField)) : [];
       return toolResult({ ok: true, drone: args.drone, chat, turns, limit, maxCharsPerField });
     } catch (error: any) {
