@@ -305,6 +305,9 @@ export type AssistantToolSummary = {
   category: string;
   description: string;
   approval: 'never' | 'normal_threads' | 'always' | 'dynamic';
+  sourceKind?: 'built_in' | 'extension' | 'mcp';
+  sourceId?: string;
+  sourceName?: string;
 };
 
 export type AssistantExtensionTargetKind = 'server' | 'device' | 'any_device';
@@ -324,6 +327,7 @@ export type AssistantExtensionManifest = {
   id: string;
   name: string;
   version: string;
+  sourceKind?: 'extension' | 'mcp';
   description?: string;
   tools: AssistantExtensionToolManifest[];
 };

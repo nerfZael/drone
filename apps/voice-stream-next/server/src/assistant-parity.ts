@@ -64,6 +64,9 @@ export type AssistantToolSummary = {
   category: 'artifacts' | 'skills' | 'speech' | 'prompts' | 'settings' | 'web' | 'extensions';
   description: string;
   approval: AssistantExtensionApprovalPolicy;
+  sourceKind?: 'built_in' | 'extension' | 'mcp';
+  sourceId?: string;
+  sourceName?: string;
 };
 
 export type AssistantSnapshot = {

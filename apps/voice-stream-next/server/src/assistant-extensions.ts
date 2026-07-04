@@ -7,6 +7,9 @@ export type AssistantExtensionToolSummary = {
   category: 'extensions';
   description: string;
   approval: AssistantExtensionApprovalPolicy;
+  sourceKind: 'extension' | 'mcp';
+  sourceId: string;
+  sourceName: string;
 };
 
 export type AssistantExtensionToolManifest = {
@@ -34,6 +37,7 @@ export type AssistantExtensionManifest = {
   id: string;
   name: string;
   version: string;
+  sourceKind?: 'extension' | 'mcp';
   description?: string;
   tools: AssistantExtensionToolManifest[];
   skills?: AssistantExtensionSkillManifest[];
@@ -53,12 +57,16 @@ export function extensionToolName(extensionId: string, toolName: string): string
 }
 
 export function extensionToolSummary(manifest: AssistantExtensionManifest, tool: AssistantExtensionToolManifest): AssistantExtensionToolSummary {
+  const sourceKind = manifest.sourceKind ?? (manifest.id.startsWith('mcp-') ? 'mcp' : 'extension');
   return {
     name: extensionToolName(manifest.id, tool.name),
     label: tool.label || `${manifest.name} ${tool.name}`.trim(),
     category: 'extensions',
     description: tool.description,
     approval: tool.approval ?? 'always',
+    sourceKind,
+    sourceId: manifest.id,
+    sourceName: manifest.name,
   };
 }
 
@@ -85,6 +93,7 @@ export function parseAssistantExtensionManifest(raw: unknown): AssistantExtensio
     id,
     name,
     version,
+    sourceKind: value.sourceKind === 'mcp' ? 'mcp' : value.sourceKind === 'extension' ? 'extension' : undefined,
     description: cleanText(value.description) || undefined,
     tools,
     skills,

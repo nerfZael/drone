@@ -77,6 +77,7 @@ async function loadMcpServer(serverConfig, helpers) {
     id: serverConfig.extensionId,
     name: serverConfig.name,
     version: '0.0.0',
+    sourceKind: 'mcp',
     tools: [],
     skills: [],
   };
