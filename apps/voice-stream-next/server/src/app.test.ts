@@ -158,7 +158,7 @@ describe('app configuration', () => {
         input: {
           transcription: {
             model: 'gpt-realtime-whisper',
-            delay: 'minimal',
+            delay: 'high',
           },
           turn_detection: {
             type: 'semantic_vad',

@@ -125,6 +125,7 @@ const OPENAI_REALTIME_AUDIO_SAMPLE_RATE = 24_000;
 
 type AppEventType =
   | 'assistant_changed'
+  | 'assistant_prompt_event'
   | 'assistant_realtime_streaming'
   | 'device_changed'
   | 'device_connected'
@@ -700,7 +701,19 @@ function openAiRealtimeInstructions(): string {
   ].join(' ');
 }
 
+function openAiRealtimeTranscriptionDelay(model: string): string | null {
+  const raw = String(process.env.VOICE_STREAM_NEXT_OPENAI_REALTIME_TRANSCRIPTION_DELAY ?? process.env.OPENAI_REALTIME_TRANSCRIPTION_DELAY ?? '').trim().toLowerCase();
+  if (raw === 'default' || raw === 'auto' || raw === 'off' || raw === 'none') return null;
+  if (raw === 'minimal' || raw === 'low' || raw === 'medium' || raw === 'high' || raw === 'xhigh') return raw;
+  return model === 'gpt-realtime-whisper' ? 'high' : null;
+}
+
 export function openAiRealtimeAudioConfig(): Record<string, unknown> {
+  const transcriptionModel =
+    process.env.VOICE_STREAM_NEXT_OPENAI_REALTIME_TRANSCRIPTION_MODEL?.trim() ||
+    process.env.OPENAI_REALTIME_TRANSCRIPTION_MODEL?.trim() ||
+    'gpt-realtime-whisper';
+  const transcriptionDelay = openAiRealtimeTranscriptionDelay(transcriptionModel);
   return {
     input: {
       format: {
@@ -708,7 +721,8 @@ export function openAiRealtimeAudioConfig(): Record<string, unknown> {
         rate: OPENAI_REALTIME_AUDIO_SAMPLE_RATE,
       },
       transcription: {
-        model: process.env.VOICE_STREAM_NEXT_OPENAI_REALTIME_TRANSCRIPTION_MODEL?.trim() || 'gpt-realtime-whisper',
+        model: transcriptionModel,
+        ...(transcriptionDelay ? { delay: transcriptionDelay } : {}),
       },
       turn_detection: {
         type: 'server_vad',
@@ -1570,6 +1584,10 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     emitAppEvent(userId ?? null, 'assistant_changed', { reason, ...(threadId ? { threadId } : {}) });
   };
 
+  const emitAssistantPromptEvent = (userId: string, threadId: string, event: unknown) => {
+    emitAppEvent(userId, 'assistant_prompt_event', { threadId, event });
+  };
+
   const emitAssistantRealtimeStreaming = (userId: string, threadId: string, role: 'user' | 'assistant', text: string) => {
     emitAppEvent(userId, 'assistant_realtime_streaming', { threadId, role, text });
   };
@@ -2110,6 +2128,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
   });
 
   const handleAssistantPromptEvent = (userId: string, threadId: string, event: any) => {
+    emitAssistantPromptEvent(userId, threadId, event);
     if (['snapshot', 'message', 'queued', 'tool_call', 'tool_result', 'approval_pending', 'done', 'error'].includes(String(event?.type ?? ''))) {
       emitAssistantChange(`assistant_${String(event.type)}`, threadId, userId);
     }

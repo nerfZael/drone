@@ -2384,6 +2384,7 @@ export class HubAssistantService {
   private queuePumpPromises = new Map<string, Promise<void>>();
   private streamingMessages = new Map<string, Map<AssistantRealtimeMessageRole, any>>();
   private runningModels = new Map<string, AssistantRunModel>();
+  private speakToolUseCounts = new Map<string, number>();
   private chatIdleSubscriptions: AssistantChatIdleSubscription[] = [];
   private chatIdleSubscriptionTimer: ReturnType<typeof setInterval> | null = null;
   private chatIdleSubscriptionCheck: Promise<void> | null = null;
@@ -3665,6 +3666,7 @@ export class HubAssistantService {
     const runModel = queuedPrompt.model;
     const runThinkingLevel = queuedPrompt.thinkingLevel;
     const previousMessageKeys = new Set(thread.messages.map(assistantMessageKey));
+    const previousSpeakToolUseCount = this.speakToolUseCounts.get(thread.id) ?? 0;
     let agent: any = null;
 
     try {
@@ -3749,7 +3751,7 @@ export class HubAssistantService {
 
       await agent.prompt(queuedPrompt.prompt);
       thread.messages = agent.state.messages.map(sanitizeMessage).slice(-ASSISTANT_THREAD_MESSAGE_LIMIT);
-      await this.maybeSpeakVoicePromptResult(thread, queuedPrompt, previousMessageKeys);
+      await this.maybeSpeakVoicePromptResult(thread, queuedPrompt, previousMessageKeys, previousSpeakToolUseCount);
       if ((thread.status as AssistantThreadStatus) !== 'error') {
         thread.status = this.activeChatIdleSubscriptions(thread.id).length > 0 ? 'waiting_for_chats_idle' : 'idle';
       }
@@ -3774,11 +3776,18 @@ export class HubAssistantService {
     }
   }
 
-  private async maybeSpeakVoicePromptResult(thread: AssistantThread, queuedPrompt: AssistantQueuedPrompt, previousMessageKeys: Set<string>): Promise<void> {
+  private async maybeSpeakVoicePromptResult(
+    thread: AssistantThread,
+    queuedPrompt: AssistantQueuedPrompt,
+    previousMessageKeys: Set<string>,
+    previousSpeakToolUseCount: number,
+  ): Promise<void> {
     if (!thread.voiceEnabled) return;
     const voiceSource = queuedPrompt.voiceSource ?? null;
     const newMessages = thread.messages.filter((message) => !previousMessageKeys.has(assistantMessageKey(message)));
-    const speakAlreadyUsed = newMessages.some((message) => messageHasToolCall(message, 'speak'));
+    const speakAlreadyUsed =
+      newMessages.some((message) => messageHasToolCall(message, 'speak')) ||
+      (this.speakToolUseCounts.get(thread.id) ?? 0) > previousSpeakToolUseCount;
     const latestTextMessage = [...newMessages]
       .reverse()
       .find((message) => message?.role === 'assistant' && !message?.errorMessage && !messageHasAnyToolCall(message) && textFromMessage(message).trim());
@@ -4729,6 +4738,7 @@ export class HubAssistantService {
             textPreview: text.slice(0, 160),
           });
           const result = await speak({ threadId, text, source: voiceSource });
+          this.speakToolUseCounts.set(threadId, (this.speakToolUseCounts.get(threadId) ?? 0) + 1);
           hubLog('info', 'assistant speak tool emitted', {
             threadId,
             voiceSource,

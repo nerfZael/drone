@@ -49,7 +49,7 @@ describe('openai realtime assistant', () => {
     expect(config.audio.output.format).toBeUndefined();
     expect(config.audio.input.transcription).toEqual({
       model: 'gpt-realtime-whisper',
-      delay: 'minimal',
+      delay: 'high',
     });
     expect(config.audio.input.turn_detection).toEqual({
       type: 'semantic_vad',

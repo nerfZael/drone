@@ -115,6 +115,7 @@ type AppEvent = {
   sequence: number;
   at: string;
   threadId?: string;
+  event?: unknown;
   role?: 'user' | 'assistant';
   text?: string;
   platform?: 'android' | 'desktop';
@@ -1965,6 +1966,46 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     let retryTimer: number | null = null;
 
     const handleAppEvent = (event: AppEvent) => {
+      if (event.type === 'assistant_prompt_event') {
+        const threadId = event.threadId;
+        if (!threadId || streamingRequestThreadIdsRef.current[threadId]) return;
+        const promptEvent = event.event as AssistantPromptEvent | undefined;
+        if (!promptEvent || typeof promptEvent.type !== 'string') return;
+        if (promptEvent.type === 'delta') {
+          appendThreadStreaming(threadId, { reply: String(promptEvent.delta ?? '') });
+          if (threadId === activeThreadIdRef.current) scrollMessagesToBottom();
+          return;
+        }
+        if (promptEvent.type === 'thinking_delta') {
+          appendThreadStreaming(threadId, { thinking: String(promptEvent.delta ?? '') });
+          if (threadId === activeThreadIdRef.current) scrollMessagesToBottom();
+          return;
+        }
+        if (promptEvent.type === 'message' && promptEvent.message) {
+          clearThreadPromptStreaming(threadId);
+          if (threadId === activeThreadIdRef.current) {
+            setMessages((current) => upsertMessage(current, promptEvent.message as AssistantMessage));
+            scrollMessagesToBottom();
+          }
+          return;
+        }
+        if (promptEvent.type === 'tool_call' || promptEvent.type === 'tool_result') {
+          if (threadId === activeThreadIdRef.current) void loadMessages(threadId);
+          return;
+        }
+        if ((promptEvent.type === 'snapshot' || promptEvent.type === 'approval_pending' || promptEvent.type === 'queued' || promptEvent.type === 'done') && promptEvent.snapshot) {
+          const snapshot = promptEvent.snapshot as AssistantSnapshot;
+          setAssistantSnapshotData(snapshot);
+          const visibleThread = snapshot.threads.find((thread) => thread.id === threadId);
+          if (visibleThread && threadId === activeThreadIdRef.current) setMessages(visibleThread.messages);
+          if (promptEvent.type === 'done') clearThreadPromptStreaming(threadId);
+          return;
+        }
+        if (promptEvent.type === 'error') {
+          clearThreadPromptStreaming(threadId);
+          return;
+        }
+      }
       if (event.type === 'assistant_realtime_streaming') {
         if (!event.threadId || (event.role !== 'user' && event.role !== 'assistant')) return;
         setThreadRealtimeStreaming(event.threadId, event.role, String(event.text ?? ''));

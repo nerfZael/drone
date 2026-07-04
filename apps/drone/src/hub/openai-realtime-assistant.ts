@@ -96,7 +96,7 @@ function realtimeTranscriptionDelay(env: NodeJS.ProcessEnv, model: string): stri
   const raw = String(env.DRONE_HUB_OPENAI_REALTIME_TRANSCRIPTION_DELAY ?? env.OPENAI_REALTIME_TRANSCRIPTION_DELAY ?? '').trim().toLowerCase();
   if (raw === 'default' || raw === 'auto' || raw === 'off' || raw === 'none') return null;
   if (raw === 'minimal' || raw === 'low' || raw === 'medium' || raw === 'high' || raw === 'xhigh') return raw;
-  return model === 'gpt-realtime-whisper' ? 'minimal' : null;
+  return model === 'gpt-realtime-whisper' ? 'high' : null;
 }
 
 function safetyIdentifier(): string {
