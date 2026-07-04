@@ -33,6 +33,8 @@ export type AssistantDroneSummary = {
   repoPath: string;
   status: string;
   chats: string[];
+  busy?: boolean;
+  busyChats?: string[];
 };
 
 export type AssistantMessageDroneResult = {

@@ -115,4 +115,59 @@ describeSocketSuite('drone summary api', () => {
       chats: ['default'],
     });
   });
+
+  test('reports just-created drones as busy while first messages are still pending', async () => {
+    const now = new Date(0).toISOString();
+    const makeDrone = (id: string, state: string, turns: any[] = []) => ({
+      id,
+      name: id,
+      runtime: 'container',
+      repoPath: '',
+      createdAt: now,
+      chats: {
+        default: {
+          createdAt: now,
+          turns,
+          pendingPrompts: [
+            {
+              id: 'first-message',
+              at: now,
+              updatedAt: now,
+              prompt: 'first message',
+              state,
+            },
+          ],
+        },
+      },
+    });
+
+    await updateRegistry((reg: any) => {
+      reg.drones = {
+        'drone-first-message-sent': makeDrone('drone-first-message-sent', 'sent'),
+        'drone-first-message-sending': makeDrone('drone-first-message-sending', 'sending'),
+        'drone-first-message-queued': makeDrone('drone-first-message-queued', 'queued'),
+        'drone-first-message-completed': makeDrone('drone-first-message-completed', 'sent', [
+          { id: 'first-message', at: now, prompt: 'first message', ok: true, output: 'done' },
+        ]),
+      };
+      reg.pending = {};
+    });
+
+    const resp = await apiFetch('/api/drones/summary');
+
+    expect(resp.r.status).toBe(200);
+    for (const id of ['drone-first-message-sent', 'drone-first-message-sending', 'drone-first-message-queued']) {
+      expect(resp.data?.drones?.find((item: any) => item.id === id)).toMatchObject({
+        id,
+        status: 'busy',
+        busy: true,
+        busyChats: ['default'],
+      });
+    }
+    expect(resp.data?.drones?.find((item: any) => item.id === 'drone-first-message-completed')).toMatchObject({
+      id: 'drone-first-message-completed',
+      status: 'ready',
+    });
+    expect(resp.data?.drones?.find((item: any) => item.id === 'drone-first-message-completed')).not.toHaveProperty('busy');
+  });
 });

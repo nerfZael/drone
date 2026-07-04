@@ -8,6 +8,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 
 import { defaultProfileDroneRootDir, profileDroneRootDir, readActiveProfileNameSync } from '../host/profiles';
+import { droneSummary } from './mcp-summaries';
 
 const DEFAULT_HUB_BASE_URL = 'http://127.0.0.1:5174';
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -248,36 +249,6 @@ async function requestRepoSummaries() {
   const repos = Array.isArray(response?.repos) ? response.repos.map(normalizeRepoSummary).filter(Boolean) : [];
   repos.sort((a: any, b: any) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }) || a.path.localeCompare(b.path));
   return repos;
-}
-
-function droneStatusSummary(drone: any): string | null {
-  const hubPhase = cleanString(drone?.hubPhase);
-  const hubMessage = cleanString(drone?.hubMessage);
-  if (hubPhase) return hubMessage ? `${hubPhase}: ${hubMessage}` : hubPhase;
-  const statusError = cleanString(drone?.statusError);
-  if (statusError) return `offline: ${statusError}`;
-  if (drone?.busy === true || (Array.isArray(drone?.busyChats) && drone.busyChats.length > 0)) return 'busy';
-  const phase = cleanString(drone?.phase);
-  if (phase) return phase;
-  if (typeof drone?.status === 'string') return cleanString(drone.status) || null;
-  if (typeof drone?.statusOk === 'boolean') return drone.statusOk ? 'ready' : 'offline';
-  return null;
-}
-
-function droneSummary(drone: any) {
-  return {
-    id: cleanString(drone?.id),
-    name: cleanString(drone?.name),
-    group: cleanString(drone?.group) || null,
-    runtime: cleanString(drone?.runtime, 'container'),
-    repoPath: cleanString(drone?.repoPath) || null,
-    cwd: cleanString(drone?.cwd) || null,
-    status: droneStatusSummary(drone),
-    createdAt: cleanIsoTimestamp(drone?.createdAt),
-    lastActivityAt: cleanIsoTimestamp(drone?.lastActivityAt),
-    lastMessageAt: cleanIsoTimestamp(drone?.lastMessageAt),
-    lastActivityChat: cleanString(drone?.lastActivityChat) || null,
-  };
 }
 
 async function requestDroneSummaries() {
